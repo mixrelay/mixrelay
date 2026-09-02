@@ -7,6 +7,11 @@ authors.workspace = true
 repository.workspace = true
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
-serde.workspace = true
+arc-swap.workspace = true
+parking_lot.workspace = true
 thiserror.workspace = true
+tonenari-audio-graph = { path = "../audio-graph" }

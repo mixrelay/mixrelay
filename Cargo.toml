@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "apps/desktop/src-tauri",
+  "crates/audio-graph",
   "crates/audio-engine",
   "crates/control-protocol",
   "crates/control-server",
@@ -15,12 +16,26 @@ authors = ["ToneNari"]
 repository = "https://github.com/tonenari/tonenari"
 
 [workspace.dependencies]
+arc-swap = "1.8.0"
 axum = "0.8.9"
+parking_lot = "0.12.5"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 thiserror = "2.0.20"
 tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal"] }
 tower = "0.5.3"
+
+[workspace.lints.rust]
+rust_2018_idioms = { level = "deny", priority = -1 }
+unreachable_pub = "deny"
+unused = { level = "deny", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+complexity = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+module_name_repetitions = "allow"
 
 [profile.release]
 codegen-units = 1

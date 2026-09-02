@@ -11,8 +11,8 @@ export type DriverState =
 export interface ToneNariStatus {
   protocolVersion: 1;
   driverState: DriverState;
-  sampleRate: 44_100 | 48_000;
-  bufferFrames: number;
+  sampleRate: number | null;
+  bufferFrames: number | null;
   underruns: number;
   overruns: number;
 }

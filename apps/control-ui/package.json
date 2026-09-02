@@ -10,7 +10,7 @@
     "check:boundaries": "node scripts/check-ui-boundaries.mjs",
     "dev": "vite",
     "storybook": "storybook dev -p 6006",
-    "test": "vitest run",
+    "test": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -30,6 +30,7 @@
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "@vitejs/plugin-react": "6.1.1",
+    "@vitest/coverage-v8": "4.1.11",
     "jsdom": "30.0.1",
     "storybook": "10.5.10",
     "typescript": "7.0.2",

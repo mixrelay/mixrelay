@@ -11,7 +11,9 @@ export function StudioScreen() {
     <main className="studio-shell">
       <header className="hero">
         <div className="brand-row">
-          <div className="brand-mark" aria-hidden="true">TN</div>
+          <div className="brand-mark" aria-hidden="true">
+            TN
+          </div>
           <span>{t('common.appName')}</span>
           <StatusBadge>{t('common.beta')}</StatusBadge>
         </div>

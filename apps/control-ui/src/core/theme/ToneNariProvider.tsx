@@ -1,6 +1,6 @@
 import '@mantine/core/styles.css';
 
-import { Badge, Button, MantineProvider, Paper, createTheme } from '@mantine/core';
+import { Badge, Button, createTheme, MantineProvider, Paper } from '@mantine/core';
 import type { PropsWithChildren } from 'react';
 
 export const tonenariTheme = createTheme({

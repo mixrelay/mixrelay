@@ -12,6 +12,23 @@ export default defineConfig({
     strictPort: true,
   },
   test: {
+    coverage: {
+      exclude: [
+        'src/**/*.stories.{ts,tsx}',
+        'src/**/*.test.{ts,tsx}',
+        'src/main.tsx',
+        'src/test-setup.ts',
+      ],
+      include: ['src/**/*.{ts,tsx}'],
+      provider: 'v8',
+      reporter: ['text'],
+      thresholds: {
+        branches: 100,
+        functions: 100,
+        lines: 100,
+        statements: 100,
+      },
+    },
     environment: 'jsdom',
     setupFiles: './src/test-setup.ts',
   },

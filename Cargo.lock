@@ -48,6 +48,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "arc-swap"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "atk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3645,7 +3654,18 @@ checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
 name = "tonenari-audio-engine"
 version = "0.1.0"
 dependencies = [
+ "arc-swap",
+ "parking_lot",
+ "thiserror 2.0.20",
+ "tonenari-audio-graph",
+]
+
+[[package]]
+name = "tonenari-audio-graph"
+version = "0.1.0"
+dependencies = [
  "serde",
+ "serde_json",
  "thiserror 2.0.20",
 ]
 

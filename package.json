@@ -9,11 +9,19 @@
   },
   "scripts": {
     "build": "pnpm --filter @tonenari/control-ui build",
-    "check": "pnpm --filter @tonenari/control-ui check && cargo test --workspace",
+    "check": "pnpm check:ui-quality && pnpm --filter @tonenari/control-ui check && pnpm check:rust",
+    "check:rust": "cargo fmt --all --check && cargo machete && cargo clippy --workspace --all-targets --all-features -- -D warnings && pnpm coverage:rust",
+    "check:ui-quality": "biome check biome.json apps/control-ui",
+    "coverage:rust": "cargo llvm-cov --workspace --lib --show-missing-lines --fail-under-functions 100 --fail-under-lines 100 --fail-under-regions 100 --fail-uncovered-functions 0 --fail-uncovered-lines 0 --fail-uncovered-regions 0",
     "desktop:build": "pnpm --filter @tonenari/desktop tauri build",
     "desktop:dev": "pnpm --filter @tonenari/desktop tauri dev",
+    "format": "pnpm format:ui && pnpm format:rust",
     "format:rust": "cargo fmt --all",
+    "format:ui": "biome check --write biome.json apps/control-ui",
     "storybook": "pnpm --filter @tonenari/control-ui storybook",
     "storybook:build": "pnpm --filter @tonenari/control-ui build-storybook"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.11"
   }
 }

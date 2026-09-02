@@ -1,58 +1,80 @@
-use serde::{Deserialize, Serialize};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
+
+use arc_swap::{ArcSwap, Guard};
+use parking_lot::Mutex;
 use thiserror::Error;
+use tonenari_audio_graph::ExecutionPlan;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LatencyProfile {
-    Stable,
-    LowLatency,
-    Custom,
+pub struct PlanStore {
+    active: ArcSwap<ExecutionPlan>,
+    writer: Mutex<()>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EngineConfig {
-    pub sample_rate: u32,
-    pub buffer_frames: u32,
-    pub latency_profile: LatencyProfile,
-}
-
-impl EngineConfig {
-    pub const fn stable() -> Self {
+impl PlanStore {
+    #[must_use]
+    pub fn new(initial: Arc<ExecutionPlan>) -> Self {
         Self {
-            sample_rate: 48_000,
-            buffer_frames: 128,
-            latency_profile: LatencyProfile::Stable,
+            active: ArcSwap::from(initial),
+            writer: Mutex::new(()),
         }
     }
 
-    pub const fn low_latency() -> Self {
-        Self {
-            sample_rate: 48_000,
-            buffer_frames: 32,
-            latency_profile: LatencyProfile::LowLatency,
-        }
+    #[must_use]
+    pub fn load(&self) -> Guard<Arc<ExecutionPlan>> {
+        self.active.load()
     }
 
-    pub fn validate(self) -> Result<Self, ConfigError> {
-        if !matches!(self.sample_rate, 44_100 | 48_000) {
-            return Err(ConfigError::UnsupportedSampleRate(self.sample_rate));
+    /// Atomically installs a newer immutable execution plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PlanInstallError::StaleRevision`] when the proposed revision
+    /// is not newer than the plan currently in use.
+    pub fn install(&self, proposed: Arc<ExecutionPlan>) -> Result<(), PlanInstallError> {
+        let _writer = self.writer.lock();
+        let active_revision = self.active.load().revision();
+        if proposed.revision() <= active_revision {
+            return Err(PlanInstallError::StaleRevision {
+                active: active_revision,
+                proposed: proposed.revision(),
+            });
         }
-
-        if !(16..=16_384).contains(&self.buffer_frames) || !self.buffer_frames.is_power_of_two() {
-            return Err(ConfigError::InvalidBufferFrames(self.buffer_frames));
-        }
-
-        Ok(self)
+        self.active.store(proposed);
+        Ok(())
     }
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum ConfigError {
-    #[error("unsupported sample rate: {0}")]
-    UnsupportedSampleRate(u32),
-    #[error("buffer frames must be a power of two between 16 and 16384: {0}")]
-    InvalidBufferFrames(u32),
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum PlanInstallError {
+    #[error("plan revision {proposed} is not newer than active revision {active}")]
+    StaleRevision { active: u64, proposed: u64 },
+}
+
+#[derive(Debug, Default)]
+pub struct RuntimeCounters {
+    underruns: AtomicU64,
+    overruns: AtomicU64,
+}
+
+impl RuntimeCounters {
+    pub fn record_underrun(&self) {
+        self.underruns.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_overrun(&self) {
+        self.overruns.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[must_use]
+    pub fn snapshot(&self) -> XrunCounters {
+        XrunCounters {
+            underruns: self.underruns.load(Ordering::Relaxed),
+            overruns: self.overruns.load(Ordering::Relaxed),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -61,24 +83,106 @@ pub struct XrunCounters {
     pub overruns: u64,
 }
 
+pub struct AudioEngine {
+    plans: PlanStore,
+    counters: RuntimeCounters,
+}
+
+impl AudioEngine {
+    #[must_use]
+    pub fn new(initial_plan: Arc<ExecutionPlan>) -> Self {
+        Self {
+            plans: PlanStore::new(initial_plan),
+            counters: RuntimeCounters::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn active_plan(&self) -> Guard<Arc<ExecutionPlan>> {
+        self.plans.load()
+    }
+
+    /// Atomically installs a newer execution plan without mutating the plan
+    /// observed by an in-flight audio render block.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PlanInstallError`] when the proposed plan is stale.
+    pub fn install_plan(&self, plan: Arc<ExecutionPlan>) -> Result<(), PlanInstallError> {
+        self.plans.install(plan)
+    }
+
+    #[must_use]
+    pub const fn counters(&self) -> &RuntimeCounters {
+        &self.counters
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tonenari_audio_graph::{
+        CompileContext, CompileLimits, GraphCompiler, GraphDocument, RenderFormat,
+    };
+
+    fn plan(revision: u64) -> Arc<ExecutionPlan> {
+        Arc::new(
+            GraphCompiler::default()
+                .compile(
+                    &GraphDocument::new(revision, vec![], vec![]),
+                    CompileContext {
+                        format: RenderFormat {
+                            sample_rate: 192_000,
+                            block_frames: 64,
+                        },
+                        limits: CompileLimits::default(),
+                    },
+                )
+                .expect("empty graph should compile"),
+        )
+    }
 
     #[test]
-    fn stable_profile_is_valid() {
+    fn installs_only_newer_immutable_plans() {
+        let engine = AudioEngine::new(plan(3));
+
+        engine
+            .install_plan(plan(4))
+            .expect("newer revision should install");
+        assert_eq!(engine.active_plan().revision(), 4);
+        assert_eq!(engine.active_plan().format().sample_rate, 192_000);
+
         assert_eq!(
-            EngineConfig::stable().validate(),
-            Ok(EngineConfig::stable())
+            engine.install_plan(plan(4)),
+            Err(PlanInstallError::StaleRevision {
+                active: 4,
+                proposed: 4,
+            })
+        );
+        assert_eq!(
+            engine.install_plan(plan(2)),
+            Err(PlanInstallError::StaleRevision {
+                active: 4,
+                proposed: 2,
+            })
         );
     }
 
     #[test]
-    fn rejects_non_power_of_two_buffer() {
-        let config = EngineConfig {
-            buffer_frames: 96,
-            ..EngineConfig::stable()
-        };
-        assert_eq!(config.validate(), Err(ConfigError::InvalidBufferFrames(96)));
+    fn snapshots_lock_free_runtime_counters() {
+        let engine = AudioEngine::new(plan(1));
+        assert_eq!(engine.counters().snapshot(), XrunCounters::default());
+
+        engine.counters().record_underrun();
+        engine.counters().record_overrun();
+        engine.counters().record_overrun();
+
+        assert_eq!(
+            engine.counters().snapshot(),
+            XrunCounters {
+                underruns: 1,
+                overruns: 2,
+            }
+        );
     }
 }

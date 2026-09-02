@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "revision": 7,
+  "nodes": [
+    {
+      "id": "chrome",
+      "label": "Chrome",
+      "type": "application_capture",
+      "config": {
+        "selector": {
+          "match": "bundle_id",
+          "bundle_id": "com.google.Chrome",
+          "include_descendants": true
+        },
+        "outputChannels": 2
+      }
+    },
+    {
+      "id": "microphone",
+      "label": "Default microphone",
+      "type": "audio_device_input",
+      "config": {
+        "selector": { "match": "default_input" },
+        "outputChannels": 2
+      }
+    },
+    {
+      "id": "broadcast-mix",
+      "label": "Broadcast mix",
+      "type": "mixer",
+      "config": {
+        "inputs": ["browser", "voice"],
+        "channels": 2
+      }
+    },
+    {
+      "id": "tonenari-stream",
+      "label": "ToneNari Stream",
+      "type": "virtual_device",
+      "config": {
+        "persistentUid": "io.tonenari.virtual.stream.default",
+        "name": "ToneNari Stream",
+        "channels": 2
+      }
+    },
+    {
+      "id": "monitor",
+      "label": "System output",
+      "type": "audio_device_output",
+      "config": {
+        "selector": { "match": "default_output" },
+        "inputChannels": 2
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "chrome-to-mix",
+      "source": { "nodeId": "chrome", "portId": "audio" },
+      "destination": { "nodeId": "broadcast-mix", "portId": "browser" }
+    },
+    {
+      "id": "microphone-to-mix",
+      "source": { "nodeId": "microphone", "portId": "audio" },
+      "destination": { "nodeId": "broadcast-mix", "portId": "voice" }
+    },
+    {
+      "id": "mix-to-stream",
+      "source": { "nodeId": "broadcast-mix", "portId": "audio" },
+      "destination": { "nodeId": "tonenari-stream", "portId": "audio" }
+    },
+    {
+      "id": "mix-to-monitor",
+      "source": { "nodeId": "broadcast-mix", "portId": "audio" },
+      "destination": { "nodeId": "monitor", "portId": "audio" }
+    }
+  ]
+}

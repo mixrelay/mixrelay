@@ -20,8 +20,8 @@ pub enum DriverState {
 pub struct AppStatus {
     pub protocol_version: u16,
     pub driver_state: DriverState,
-    pub sample_rate: u32,
-    pub buffer_frames: u32,
+    pub sample_rate: Option<u32>,
+    pub buffer_frames: Option<u32>,
     pub underruns: u64,
     pub overruns: u64,
 }
@@ -31,8 +31,8 @@ impl Default for AppStatus {
         Self {
             protocol_version: PROTOCOL_VERSION,
             driver_state: DriverState::NotInstalled,
-            sample_rate: 48_000,
-            buffer_frames: 128,
+            sample_rate: None,
+            buffer_frames: None,
             underruns: 0,
             overruns: 0,
         }
@@ -70,6 +70,7 @@ mod tests {
 
         assert_eq!(json["protocolVersion"], 1);
         assert_eq!(json["driverState"], "not_installed");
-        assert_eq!(json["sampleRate"], 48_000);
+        assert!(json["sampleRate"].is_null());
+        assert!(json["bufferFrames"].is_null());
     }
 }

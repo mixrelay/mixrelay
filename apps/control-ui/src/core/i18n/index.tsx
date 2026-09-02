@@ -8,10 +8,14 @@ import { pseudo } from './locales/pseudo';
 
 export const i18n = i18next.createInstance();
 
+export function resolveLocale(language: string) {
+  return language.startsWith('ko') ? 'ko-KR' : 'en';
+}
+
 void i18n.use(initReactI18next).init({
   fallbackLng: 'en',
   interpolation: { escapeValue: false },
-  lng: navigator.language.startsWith('ko') ? 'ko-KR' : 'en',
+  lng: resolveLocale(navigator.language),
   resources: {
     en: { translation: en },
     'ko-KR': { translation: koKR },

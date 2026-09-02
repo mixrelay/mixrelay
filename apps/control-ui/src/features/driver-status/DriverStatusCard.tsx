@@ -1,9 +1,8 @@
 import { useTranslation } from 'react-i18next';
-
+import type { DriverState } from '../../core/control-port/types';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { Panel } from '../../core/ui/Panel';
 import { StatusBadge, type StatusTone } from '../../core/ui/StatusBadge';
-import type { DriverState } from '../../core/control-port/types';
 
 interface DriverStatusCardProps {
   state: DriverState;
@@ -32,7 +31,11 @@ export function DriverStatusCard({ onAction, state }: DriverStatusCardProps) {
   return (
     <Panel
       title={t('driver.title')}
-      trailing={<StatusBadge tone={presentation.tone}>{t(`driver.states.${presentation.label}`)}</StatusBadge>}
+      trailing={
+        <StatusBadge tone={presentation.tone}>
+          {t(`driver.states.${presentation.label}`)}
+        </StatusBadge>
+      }
     >
       <p className="panel__description">{t('driver.description')}</p>
       <ActionButton disabled={isBusy} loading={isBusy} onClick={onAction}>

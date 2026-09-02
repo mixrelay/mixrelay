@@ -7,13 +7,15 @@ export const pseudo = {
   studio: {
     eyebrow: '[!! Åüdïö coñtröl sürfåcé !!]',
     title: '[!! Röüté söüñd wïthöüt bréåkïñg yöür flöw—expanded !!]',
-    description: '[!! Cåptüré åpplïcåtïöñs, shåpé thé mïx, åñd séñd å ståblé fééd tö OBS—expanded !!]',
+    description:
+      '[!! Cåptüré åpplïcåtïöñs, shåpé thé mïx, åñd séñd å ståblé fééd tö OBS—expanded !!]',
     capture: '[!! Cåptüré !!]',
     captureDescription: '[!! Åüdïö fröm åpplïcåtïöñs åñd thé sÿstém éñtérs héré—expanded !!]',
     stream: '[!! Stréåm !!]',
     streamDescription: '[!! OBS récéïvés thé fïñål mïx fröm thïs dévïcé—expanded !!]',
     remote: '[!! Rémöté coñtröl !!]',
-    remoteDescription: '[!! LÅÑ coñtröl ståÿs öff üñtïl thïs Måc éxplïcïtlÿ éñåblés påïrïñg—expanded !!]',
+    remoteDescription:
+      '[!! LÅÑ coñtröl ståÿs öff üñtïl thïs Måc éxplïcïtlÿ éñåblés påïrïñg—expanded !!]',
   },
   driver: {
     title: '[!! Vïrtüål åüdïö drïvér !!]',

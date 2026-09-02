@@ -8,6 +8,7 @@ Capture-to-Stream path that works naturally with OBS.
 
 - `apps/control-ui`: responsive React control surface shared by desktop and LAN clients
 - `apps/desktop`: Tauri application wrapper and macOS menu-bar lifecycle
+- `crates/audio-graph`: versioned graph contract and deterministic execution-plan compiler
 - `crates/audio-engine`: real-time engine policy and domain state
 - `crates/control-protocol`: stable machine-readable control contract
 - `crates/control-server`: local HTTP control service; loopback-only by default
@@ -19,6 +20,7 @@ Capture-to-Stream path that works naturally with OBS.
 ```sh
 pnpm install
 pnpm check
+pnpm coverage:rust
 pnpm storybook
 pnpm desktop:dev
 ```
@@ -28,6 +30,10 @@ sufficient for the HAL driver, signing, notarization, and final bundle checks.
 
 The UI dependency direction is `Mantine -> Core -> Feature -> Screen`. Direct
 Mantine imports outside `apps/control-ui/src/core` fail the boundary check.
+
+The product capability floor and local code policy are recorded in
+[`ADR 0005`](docs/adr/0005-product-capability-baseline.md) and
+[`ADR 0006`](docs/adr/0006-code-quality-policy.md).
 
 ## Distribution and licensing
 
