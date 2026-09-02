@@ -1,0 +1,35 @@
+export const en = {
+  common: {
+    appName: 'ToneNari',
+    beta: 'Private preview',
+    ready: 'Ready',
+  },
+  studio: {
+    eyebrow: 'Audio control surface',
+    title: 'Route sound without breaking your flow.',
+    description: 'Capture applications, shape the mix, and send a stable feed to OBS.',
+    capture: 'Capture',
+    captureDescription: 'Audio from applications and the system enters here.',
+    stream: 'Stream',
+    streamDescription: 'OBS receives the final mix from this device.',
+    remote: 'Remote control',
+    remoteDescription: 'LAN control stays off until this Mac explicitly enables pairing.',
+  },
+  driver: {
+    title: 'Virtual audio driver',
+    description: 'ToneNari Capture and ToneNari Stream',
+    actionInstall: 'Install driver',
+    actionRestart: 'Restart audio services',
+    actionDiagnose: 'Open diagnostics',
+    states: {
+      notInstalled: 'Not installed',
+      installing: 'Installing',
+      restartRequired: 'Restart required',
+      installedNotLoaded: 'Installed, not loaded',
+      blocked: 'Blocked by macOS',
+      invalidPermissions: 'Invalid permissions',
+      versionMismatch: 'Version mismatch',
+      ready: 'Ready',
+    },
+  },
+} as const;

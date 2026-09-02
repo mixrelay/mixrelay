@@ -1,0 +1,19 @@
+{
+  "name": "tonenari",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=11.0.0"
+  },
+  "scripts": {
+    "build": "pnpm --filter @tonenari/control-ui build",
+    "check": "pnpm --filter @tonenari/control-ui check && cargo test --workspace",
+    "desktop:build": "pnpm --filter @tonenari/desktop tauri build",
+    "desktop:dev": "pnpm --filter @tonenari/desktop tauri dev",
+    "format:rust": "cargo fmt --all",
+    "storybook": "pnpm --filter @tonenari/control-ui storybook",
+    "storybook:build": "pnpm --filter @tonenari/control-ui build-storybook"
+  }
+}

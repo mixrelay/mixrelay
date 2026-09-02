@@ -1,0 +1,35 @@
+export const koKR = {
+  common: {
+    appName: 'ToneNari',
+    beta: '비공개 프리뷰',
+    ready: '준비됨',
+  },
+  studio: {
+    eyebrow: '오디오 컨트롤 서피스',
+    title: '흐름을 끊지 않고 소리를 연결하세요.',
+    description: '앱 소리를 캡처하고 믹스를 다듬어 OBS로 안정적으로 보냅니다.',
+    capture: '캡처',
+    captureDescription: '앱과 시스템의 소리가 이곳으로 들어옵니다.',
+    stream: '스트림',
+    streamDescription: 'OBS는 이 장치에서 최종 믹스를 입력받습니다.',
+    remote: '원격 제어',
+    remoteDescription: '이 Mac에서 페어링을 명시적으로 켜기 전까지 LAN 제어는 꺼져 있습니다.',
+  },
+  driver: {
+    title: '가상 오디오 드라이버',
+    description: 'ToneNari Capture 및 ToneNari Stream',
+    actionInstall: '드라이버 설치',
+    actionRestart: '오디오 서비스 재시작',
+    actionDiagnose: '진단 열기',
+    states: {
+      notInstalled: '설치되지 않음',
+      installing: '설치 중',
+      restartRequired: '재시작 필요',
+      installedNotLoaded: '설치됨, 로드되지 않음',
+      blocked: 'macOS에서 차단됨',
+      invalidPermissions: '권한이 올바르지 않음',
+      versionMismatch: '버전 불일치',
+      ready: '준비됨',
+    },
+  },
+} as const;

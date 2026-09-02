@@ -1,0 +1,35 @@
+export const pseudo = {
+  common: {
+    appName: '[!! TóñéÑåri !!]',
+    beta: '[!! Prïvåté préviéw—expanded !!]',
+    ready: '[!! Réådÿ !!]',
+  },
+  studio: {
+    eyebrow: '[!! Åüdïö coñtröl sürfåcé !!]',
+    title: '[!! Röüté söüñd wïthöüt bréåkïñg yöür flöw—expanded !!]',
+    description: '[!! Cåptüré åpplïcåtïöñs, shåpé thé mïx, åñd séñd å ståblé fééd tö OBS—expanded !!]',
+    capture: '[!! Cåptüré !!]',
+    captureDescription: '[!! Åüdïö fröm åpplïcåtïöñs åñd thé sÿstém éñtérs héré—expanded !!]',
+    stream: '[!! Stréåm !!]',
+    streamDescription: '[!! OBS récéïvés thé fïñål mïx fröm thïs dévïcé—expanded !!]',
+    remote: '[!! Rémöté coñtröl !!]',
+    remoteDescription: '[!! LÅÑ coñtröl ståÿs öff üñtïl thïs Måc éxplïcïtlÿ éñåblés påïrïñg—expanded !!]',
+  },
+  driver: {
+    title: '[!! Vïrtüål åüdïö drïvér !!]',
+    description: '[!! TóñéÑåri Cåptüré åñd TóñéÑåri Stréåm !!]',
+    actionInstall: '[!! Ïñståll drïvér—expanded !!]',
+    actionRestart: '[!! Réstårt åüdïö sérvïcés—expanded !!]',
+    actionDiagnose: '[!! Öpéñ dïågñöstïcs—expanded !!]',
+    states: {
+      notInstalled: '[!! Ñöt ïñstålléd !!]',
+      installing: '[!! Ïñstållïñg… !!]',
+      restartRequired: '[!! Réstårt réqüïréd—expanded !!]',
+      installedNotLoaded: '[!! Ïñstålléd, ñöt löådéd—expanded !!]',
+      blocked: '[!! Blöckéd bÿ måcÖS !!]',
+      invalidPermissions: '[!! Ïñvålïd pérmïssïöñs—expanded !!]',
+      versionMismatch: '[!! Vérsïöñ mïsmåtch—expanded !!]',
+      ready: '[!! Réådÿ !!]',
+    },
+  },
+} as const;

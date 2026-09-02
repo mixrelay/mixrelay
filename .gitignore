@@ -1,0 +1,25 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Agent-only local context
+AGENTS.md
+AGENTS.override.md
+CLAUDE.md
+
+# Rust
+target/
+
+# JavaScript
+node_modules/
+dist/
+storybook-static/
+coverage/
+
+# Tauri
+apps/desktop/src-tauri/gen/
+
+# IDE
+.idea/
+.vscode/
