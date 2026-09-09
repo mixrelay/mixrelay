@@ -1,0 +1,196 @@
+.shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 27px;
+  width: 100%;
+  height: 100vh;
+  min-height: 560px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.sidebar {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  grid-column: 1;
+  grid-row: 1;
+  border-right: 1px solid var(--line);
+  background: #151619;
+}
+
+.sidebarSectionHeader h1 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.graphList {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.graph {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.graph + .graph {
+  margin-top: 2px;
+}
+
+.graph:hover {
+  background: var(--surface);
+}
+
+.graph[aria-current="page"] {
+  border-color: var(--line-strong);
+  background: var(--surface-raised);
+}
+
+.graph:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: -2px;
+}
+
+.graphName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.sidebarFooter {
+  flex: 0 0 auto;
+  padding: 9px 8px;
+  border-top: 1px solid var(--line);
+  background: #131417;
+}
+
+.newGraph {
+  --button-bg: transparent;
+  --button-hover: transparent;
+  --button-bd: 0;
+
+  height: 44px;
+  justify-content: flex-start;
+  padding-inline: 7px 10px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: #c2c7cf;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.newGraph:hover {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text);
+}
+
+.newGraph :global(.mantine-Button-section) {
+  margin-inline-end: 10px;
+}
+
+.newGraphIcon {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  color: var(--signal);
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.statusBar {
+  display: flex;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  padding: 0 10px;
+  border-top: 1px solid var(--line);
+  background: #17181b;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+}
+
+.engineDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #777d86;
+}
+
+.engineDot[data-tone="positive"] {
+  background: var(--positive);
+}
+
+.engineDot[data-tone="warning"] {
+  background: var(--amber);
+}
+
+.engineDot[data-tone="critical"] {
+  background: var(--red);
+}
+
+.workspace {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 720px) {
+  .shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr) 27px;
+  }
+
+  .sidebar {
+    grid-column: 1;
+    grid-row: 1;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .sidebarSectionHeader {
+    display: none;
+  }
+
+  .graphList {
+    padding: 8px;
+  }
+
+  .sidebarFooter {
+    display: none;
+  }
+
+  .workspace {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .statusBar {
+    grid-row: 3;
+  }
+}

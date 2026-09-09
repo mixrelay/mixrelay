@@ -1,0 +1,117 @@
+.root {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.toolbar {
+  gap: 18px;
+}
+
+.titleBlock {
+  min-width: 0;
+}
+
+.graphTitle {
+  display: block;
+  width: min(420px, 52vw);
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graphTitle:hover,
+.graphTitle:focus {
+  border-bottom-color: #454b55;
+}
+
+.graphTitle:focus {
+  border-bottom-color: var(--signal);
+}
+
+.syncState {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.syncState > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+}
+
+.syncState[data-tone="positive"] > span {
+  background: var(--positive);
+}
+
+.syncState[data-tone="critical"] > span {
+  background: var(--red);
+}
+
+.canvas {
+  min-height: 0;
+  flex: 1;
+}
+
+.placeholder {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  place-items: center;
+  color: var(--muted);
+}
+
+.error {
+  margin: 0;
+  padding: 8px 18px;
+  border-bottom: 1px solid #553b3e;
+  background: #261b1d;
+  color: #e59494;
+  font-size: 12px;
+}
+
+.warning {
+  padding: 8px 18px;
+  border-bottom: 1px solid #554a35;
+  background: #252219;
+  color: var(--amber);
+  font-size: 12px;
+}
+
+.scanDiagnostics {
+  max-height: 160px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+
+.scanDiagnostics summary {
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  .toolbar {
+    gap: 10px;
+  }
+
+  .graphTitle {
+    font-size: 13px;
+  }
+}

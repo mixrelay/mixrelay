@@ -23,7 +23,12 @@ async function visit(directory) {
     }
 
     const source = await readFile(entryPath, 'utf8');
-    if (/from\s+['"]@mantine\//u.test(source) || /import\s+['"]@mantine\//u.test(source)) {
+    if (
+      /from\s+['"]@mantine\//u.test(source) ||
+      /import\s+['"]@mantine\//u.test(source) ||
+      /from\s+['"]@xyflow\/react/u.test(source) ||
+      /import\s+['"]@xyflow\/react/u.test(source)
+    ) {
       violations.push(path.relative(sourceRoot, entryPath));
     }
   }
@@ -32,9 +37,9 @@ async function visit(directory) {
 await visit(sourceRoot);
 
 if (violations.length > 0) {
-  console.error('Mantine imports are only allowed under src/core:');
+  console.error('Mantine and React Flow imports are only allowed under src/core:');
   for (const violation of violations) console.error(`- ${violation}`);
   process.exitCode = 1;
 } else {
-  console.log('UI boundary check passed: Mantine is isolated behind Core.');
+  console.log('UI boundary check passed: Mantine and React Flow are isolated behind Core.');
 }

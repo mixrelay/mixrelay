@@ -15,3 +15,10 @@ arc-swap.workspace = true
 parking_lot.workspace = true
 thiserror.workspace = true
 tonenari-audio-graph = { path = "../audio-graph" }
+tonenari-audio-io.workspace = true
+tonenari-audio-recorder = { path = "../audio-recorder" }
+
+[dev-dependencies]
+serde_json.workspace = true
+tonenari-test-support = { path = "../test-support" }
+hound = "3.5.1"

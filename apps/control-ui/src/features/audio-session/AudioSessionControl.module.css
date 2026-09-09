@@ -1,0 +1,31 @@
+.content {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.latency {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.error {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: min(340px, calc(100vw - 24px));
+  padding: 10px;
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--mantine-color-red-4);
+  color: var(--mantine-color-red-4);
+  font-size: 12px;
+  line-height: 1.5;
+  z-index: 10;
+}
+
+.error p {
+  margin: 0;
+}

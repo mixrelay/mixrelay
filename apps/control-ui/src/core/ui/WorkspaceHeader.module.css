@@ -1,0 +1,11 @@
+.root {
+  box-sizing: border-box;
+  display: flex;
+  flex: 0 0 56px;
+  align-items: center;
+  height: 56px;
+  min-height: 56px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}

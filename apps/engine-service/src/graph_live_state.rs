@@ -1,0 +1,204 @@
+//! Graph edits carry explicit knob deltas, never an implicit replacement of a live preset.
+//! The UI's whole provider object may predate native-editor edits or a disk checkpoint.
+
+use std::{
+    collections::BTreeSet,
+    time::{Duration, Instant},
+};
+
+use tonenari_audio_graph::{GraphDocument, NodeId, ProviderNodeConfig};
+use tonenari_control_protocol::GraphProcessorParameterChange;
+use tonenari_processor_host::ProcessorStateError;
+
+use super::{
+    Catalog, EngineGraphController, ErrorCode, NodeConfig, ProtocolError, invalid, unavailable,
+};
+use crate::graph_composition::runtime_node_id;
+
+impl EngineGraphController {
+    /// Caller owns mutation. Captures the selected graph before candidate preparation.
+    pub(crate) fn preserve_live_processor_state(
+        &self,
+        proposed: &mut GraphDocument,
+        changes: &[GraphProcessorParameterChange],
+    ) -> Result<(), ProtocolError> {
+        self.preserve_live_processor_state_with(
+            proposed,
+            changes,
+            |id, timeout| self.processor_controls.snapshot_state(id, timeout),
+            |kind, id| self.processor_catalog.parameter_is_writable(kind, id),
+        )
+    }
+
+    pub(crate) fn preserve_live_processor_state_with(
+        &self,
+        proposed: &mut GraphDocument,
+        changes: &[GraphProcessorParameterChange],
+        mut capture: impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,
+        writable: impl Fn(&str, u32) -> bool,
+    ) -> Result<(), ProtocolError> {
+        let revisions = self.exchange.revisions();
+        if proposed.revision <= revisions.submitted {
+            return Err(ProtocolError {
+                code: ErrorCode::GraphRevisionStale,
+                parameters: serde_json::json!({
+                    "activeRevision": revisions.active,
+                    "submittedRevision": revisions.submitted,
+                    "proposedRevision": proposed.revision,
+                }),
+            });
+        }
+        if revisions.active != revisions.submitted {
+            return Err(ProtocolError {
+                code: ErrorCode::GraphExchangeBusy,
+                parameters: serde_json::json!({"proposedRevision": proposed.revision}),
+            });
+        }
+        let current = self.graph.read().clone();
+        let graph_id = self.view_graph_id();
+        validate_changes(&current, proposed, changes, writable)?;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut candidate = proposed.clone();
+        for node in &mut candidate.nodes {
+            let NodeConfig::Provider(provider) = &mut node.config else {
+                continue;
+            };
+            let Some(previous) = provider_at(&current, node.id.as_str()) else {
+                continue;
+            };
+            if previous.type_id != provider.type_id {
+                continue;
+            }
+            let timeout = deadline.saturating_duration_since(Instant::now());
+            if timeout.is_zero() {
+                return Err(unavailable("processor state snapshot deadline exceeded"));
+            }
+            provider.parameters =
+                capture(&runtime_node_id(&graph_id, &node.id), timeout).map_err(|error| {
+                    unavailable(&format!("processor state snapshot failed: {error}"))
+                })?;
+            for change in changes
+                .iter()
+                .filter(|change| change.node_id == node.id.as_str())
+            {
+                crate::persist_processor_parameter(provider, change.parameter_id, change.value);
+            }
+        }
+        // No partial rewrite is visible if any provider failed to export its state.
+        *proposed = candidate;
+        Ok(())
+    }
+
+    /// Preserves live presets in other running graphs before rebuilding the composition.
+    /// The selected graph already carries its explicitly validated edit deltas.
+    pub(crate) fn preserve_catalog_provider_state(
+        &self,
+        candidate: &mut Catalog,
+    ) -> Result<(), ProtocolError> {
+        self.preserve_catalog_provider_state_with(candidate, |id, timeout| {
+            self.processor_controls.snapshot_state(id, timeout)
+        })
+    }
+
+    pub(crate) fn preserve_catalog_provider_state_with(
+        &self,
+        candidate: &mut Catalog,
+        mut capture: impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,
+    ) -> Result<(), ProtocolError> {
+        let current = self
+            .catalog_candidate(&self.graph.read())
+            .ok_or_else(|| unavailable("graph catalog is unavailable"))?;
+        let selected = current.selected_id();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut staged = candidate.clone();
+        for (graph_id, document) in staged.documents_mut() {
+            if graph_id == selected {
+                continue;
+            }
+            let Some((_, before)) = current.documents().find(|(id, _)| *id == graph_id) else {
+                continue;
+            };
+            self.capture_background_graph((graph_id, document), before, deadline, &mut capture)?;
+        }
+        *candidate = staged;
+        Ok(())
+    }
+
+    fn capture_background_graph(
+        &self,
+        graph: (&str, &mut GraphDocument),
+        before: &GraphDocument,
+        deadline: Instant,
+        capture: &mut impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,
+    ) -> Result<(), ProtocolError> {
+        let (graph_id, document) = graph;
+        for node in &mut document.nodes {
+            let NodeConfig::Provider(provider) = &mut node.config else {
+                continue;
+            };
+            let runtime_id = runtime_node_id(graph_id, &node.id);
+            // Saved documents are not live workers until their composition is acknowledged.
+            let running = self
+                .execution_views
+                .read()
+                .get(&self.exchange.revisions().active)
+                .is_some_and(|view| view.origins.contains_key(&runtime_id));
+            let same_provider = provider_at(before, node.id.as_str())
+                .is_some_and(|old| old.type_id == provider.type_id);
+            if !running || !same_provider {
+                continue;
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(unavailable("processor state snapshot deadline exceeded"));
+            }
+            provider.parameters = capture(&runtime_id, remaining).map_err(|error| {
+                unavailable(&format!("processor state snapshot failed: {error}"))
+            })?;
+        }
+        Ok(())
+    }
+}
+
+fn provider_at<'a>(document: &'a GraphDocument, id: &str) -> Option<&'a ProviderNodeConfig> {
+    document.nodes.iter().find_map(|node| {
+        if node.id.as_str() != id {
+            return None;
+        }
+        match &node.config {
+            NodeConfig::Provider(provider) => Some(provider),
+            _ => None,
+        }
+    })
+}
+
+fn validate_changes(
+    current: &GraphDocument,
+    proposed: &GraphDocument,
+    changes: &[GraphProcessorParameterChange],
+    writable: impl Fn(&str, u32) -> bool,
+) -> Result<(), ProtocolError> {
+    if changes.len() > 4096 {
+        return Err(invalid("too many processor parameter changes"));
+    }
+    let mut unique = BTreeSet::new();
+    for change in changes {
+        if !change.value.is_finite()
+            || !(0.0..=1.0).contains(&change.value)
+            || !unique.insert((&change.node_id, change.parameter_id))
+        {
+            return Err(invalid("invalid or duplicate processor parameter change"));
+        }
+        let before = provider_at(current, &change.node_id);
+        let after = provider_at(proposed, &change.node_id);
+        if !matches!((before, after), (Some(a), Some(b))
+            if a.type_id.as_str() == change.type_id && b.type_id == a.type_id)
+            || !writable(&change.type_id, change.parameter_id)
+        {
+            return Err(invalid(
+                "processor parameter target is unavailable or read-only",
+            ));
+        }
+    }
+    Ok(())
+}

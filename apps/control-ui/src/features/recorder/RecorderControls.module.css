@@ -1,0 +1,28 @@
+.root {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+}
+.actions {
+  display: flex;
+  gap: 4px;
+}
+.transport {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px 9px 7px;
+}
+.time {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.error {
+  color: var(--mantine-color-red-4);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  padding: 4px 11px;
+}

@@ -1,0 +1,78 @@
+name: Native build and unit tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: ${{ matrix.os }} native build (not audio qualification)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+      - name: Toolchain
+        run: |
+          npm install --global pnpm@11.9.0
+          rustup toolchain install 1.96.0 --profile minimal
+          rustup default 1.96.0
+      - run: pnpm install --frozen-lockfile
+      - run: node --test scripts/lab/native-check.test.mjs scripts/lab/vm.test.mjs scripts/lab/guest-scripts.test.mjs scripts/lab/pipewire-cli.test.mjs
+      - run: pnpm lab:test
+      - name: Collect scope and failure evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-${{ matrix.os }}
+          path: .lab/reports/
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  linux:
+    name: ${{ matrix.distro }} on ${{ matrix.runner }} (not audio qualification)
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [debian, ubuntu, kali, arch]
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        exclude:
+          - distro: arch
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - run: docker compose -f infra/lab/compose.yaml build ${{ matrix.distro }}
+      - run: docker compose -f infra/lab/compose.yaml run --name tonenari-ci-check ${{ matrix.distro }} test
+      - name: Collect evidence even when a compile or test fails
+        if: always()
+        run: |
+          mkdir -p .lab/reports
+          if docker container inspect tonenari-ci-check >/dev/null 2>&1; then
+            docker cp tonenari-ci-check:/workspace/.lab/reports/. .lab/reports/
+          fi
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-${{ matrix.distro }}-${{ matrix.runner }}
+          path: .lab/reports/
+          include-hidden-files: true
+          if-no-files-found: warn

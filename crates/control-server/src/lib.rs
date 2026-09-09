@@ -1,62 +1,1492 @@
-use axum::{Json, Router, routing::get};
-use tonenari_control_protocol::AppStatus;
+use std::sync::Arc;
+
+use axum::{
+    Json, Router,
+    extract::{DefaultBodyLimit, Path, State, rejection::JsonRejection},
+    http::{HeaderValue, Method, StatusCode, header::CONTENT_TYPE},
+    response::{IntoResponse, Response},
+    routing::{get, post, put},
+};
+use tonenari_audio_graph::GraphDocument;
+use tonenari_control_protocol::{
+    AppStatus, ErrorCode, ExternalProcessorCatalog, GraphApplyRequest, GraphApplyResponse,
+    GraphCatalogRequest, GraphCatalogResponse, GraphLayoutRequest, GraphLayoutResponse,
+    GraphRuntimeStatus, MeterSnapshot, PROTOCOL_VERSION, ProcessorEditorRequest,
+    ProcessorEditorStatus, ProcessorParameterUpdate, ProcessorParameterUpdateResponse,
+    ProcessorScanRequest, ProtocolError, SessionReconfigureRequest,
+};
+use tower_http::cors::{AllowOrigin, CorsLayer};
+mod recorder;
 
 pub const HEALTH_ROUTE: &str = "/health";
 pub const STATUS_ROUTE: &str = "/api/v1/status";
+pub const AUDIO_SESSION_ROUTE: &str = "/api/v1/audio/session";
+pub const VIRTUAL_ENDPOINT_FORMAT_ROUTE: &str = "/api/v1/audio/virtual-endpoint/format";
+pub const GRAPH_STATUS_ROUTE: &str = "/api/v1/graph/status";
+pub const GRAPH_ROUTE: &str = "/api/v1/graph";
+pub const GRAPH_CATALOG_ROUTE: &str = "/api/v1/graphs";
+pub const GRAPH_CATALOG_DOCUMENT_ROUTE: &str = "/api/v1/graphs/{id}";
+pub const GRAPH_LAYOUT_ROUTE: &str = "/api/v1/graphs/{id}/layout";
+pub const METERS_ROUTE: &str = "/api/v1/meters";
+pub const APPLICATION_CAPTURE_MANIFEST_ROUTE: &str = "/api/v1/application-capture/manifest";
+pub const APPLICATION_CAPTURE_PREVIEW_ROUTE: &str = "/api/v1/application-capture/preview";
+pub const PROCESSORS_ROUTE: &str = "/api/v1/processors";
+pub const PROCESSORS_SCAN_ROUTE: &str = "/api/v1/processors/scan";
+pub const PROCESSOR_PARAMETER_ROUTE: &str =
+    "/api/v1/processors/{node_id}/parameters/{parameter_id}";
+pub const PROCESSOR_EDITOR_ROUTE: &str = "/api/v1/processors/{node_id}/editor";
 
-pub fn router() -> Router {
-    Router::new()
-        .route(HEALTH_ROUTE, get(|| async { "ok" }))
-        .route(STATUS_ROUTE, get(status))
+pub trait ControlBackend: Send + Sync {
+    /// Reads one graph-owned recording without changing the selected graph.
+    /// # Errors
+    /// Reports an unavailable recorder or unknown graph/node identity.
+    fn recorder_status(
+        &self,
+        _graph_id: &str,
+        _node_id: &str,
+    ) -> Result<tonenari_control_protocol::RecorderStatus, ProtocolError> {
+        Err(recorder::unavailable())
+    }
+
+    /// Starts, resumes, pauses, or finalizes a recording on the control thread.
+    /// # Errors
+    /// Reports format, path, state, or file errors without interrupting audio output.
+    fn control_recorder(
+        &self,
+        _graph_id: &str,
+        _node_id: &str,
+        _request: tonenari_control_protocol::RecorderRequest,
+    ) -> Result<tonenari_control_protocol::RecorderStatus, ProtocolError> {
+        Err(recorder::unavailable())
+    }
+    /// Returns the canonical capture owners for the complete running catalog.
+    /// # Errors
+    /// Reports unavailable discovery or invalid capture ownership without fabricating sources.
+    fn application_capture_manifest(
+        &self,
+    ) -> Result<tonenari_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters: serde_json::json!({"resource":"application_capture_manifest"}),
+        })
+    }
+
+    /// Validates the full candidate catalog and describes capture owners without publishing.
+    /// # Errors
+    /// Rejects stale/busy revisions, invalid topology and unsupported source policies.
+    fn preview_application_capture(
+        &self,
+        _request: GraphApplyRequest,
+    ) -> Result<tonenari_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters: serde_json::json!({"resource":"application_capture_preview"}),
+        })
+    }
+    /// Changes the own virtual device's format without targeting other devices.
+    /// # Errors
+    /// Rejects stale revisions, unsupported formats or native failures.
+    fn reconfigure_virtual_endpoint(
+        &self,
+        _request: tonenari_control_protocol::VirtualEndpointFormatRequest,
+    ) -> Result<GraphApplyResponse, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::AudioSessionUnsupported,
+            parameters: serde_json::json!({"resource":"virtual_endpoint_format"}),
+        })
+    }
+    /// Reads presentation metadata independently of the active DSP graph.
+    /// # Errors
+    /// Returns unavailable or unknown-identity errors without synthesizing layout entries.
+    fn graph_layout(&self, _id: &str) -> Result<GraphLayoutResponse, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters: serde_json::json!({"resource":"graph_layout"}),
+        })
+    }
+    /// Atomically saves one graph's presentation without rebuilding its audio resources.
+    /// # Errors
+    /// Rejects unknown identities, invalid values, stale layout revisions and storage failures.
+    fn update_graph_layout(
+        &self,
+        _id: &str,
+        _request: GraphLayoutRequest,
+    ) -> Result<GraphLayoutResponse, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters: serde_json::json!({"resource":"graph_layout"}),
+        })
+    }
+    /// Returns an inactive document for native preflight without changing the active graph.
+    /// # Errors
+    /// Rejects missing identities or unavailable persistence.
+    fn graph_catalog_document(&self, _id: &str) -> Result<GraphDocument, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters: serde_json::json!({}),
+        })
+    }
+    /// Returns the durable graph collection, never an invented UI-only list.
+    /// # Errors
+    /// Returns an unavailable error if catalog persistence could not be loaded.
+    fn graph_catalog(&self) -> Result<GraphCatalogResponse, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters: serde_json::json!({"reason": "graph catalog unavailable"}),
+        })
+    }
+    /// Serializes catalog edits with graph publication.
+    /// # Errors
+    /// Rejects stale writers and invalid or unavailable graphs without switching selection.
+    fn mutate_graph_catalog(
+        &self,
+        _request: GraphCatalogRequest,
+    ) -> Result<GraphCatalogResponse, ProtocolError> {
+        self.graph_catalog().and_then(|_| {
+            Err(ProtocolError {
+                code: ErrorCode::ControlUnavailable,
+                parameters: serde_json::json!({"reason": "graph catalog mutations unavailable"}),
+            })
+        })
+    }
+    /// Reconfigures one engine-wide audio session, independently from endpoint channel maps.
+    /// # Errors
+    /// Returns a protocol error without pretending an unsupported adapter changed formats.
+    fn reconfigure_session(
+        &self,
+        _request: SessionReconfigureRequest,
+    ) -> Result<GraphApplyResponse, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::AudioSessionUnsupported,
+            parameters: serde_json::json!({}),
+        })
+    }
+    fn status(&self) -> AppStatus;
+    fn graph(&self) -> GraphDocument;
+    fn graph_status(&self) -> GraphRuntimeStatus;
+    fn meters(&self) -> MeterSnapshot;
+    fn processors(&self) -> ExternalProcessorCatalog;
+
+    /// Rebuilds the external processor catalog from standard and explicit directories.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] when a path is invalid or discovery cannot be started.
+    fn rescan_processors(
+        &self,
+        request: ProcessorScanRequest,
+    ) -> Result<ExternalProcessorCatalog, ProtocolError>;
+
+    /// Updates one parameter on an active hosted processor.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtocolError`] when the node or parameter is unavailable, or when the
+    /// processor worker cannot accept the value.
+    fn set_processor_parameter(
+        &self,
+        node_id: &str,
+        parameter_id: u32,
+        value: f64,
+    ) -> Result<ProcessorParameterUpdateResponse, ProtocolError>;
+
+    /// Returns the current native editor state for one active processor node.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable protocol failure when the node or worker is unavailable.
+    fn processor_editor_status(
+        &self,
+        node_id: &str,
+    ) -> Result<ProcessorEditorStatus, ProtocolError>;
+
+    /// Requests an idempotent native editor transition for one active processor node.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable protocol failure when the node or worker is unavailable.
+    fn set_processor_editor(
+        &self,
+        node_id: &str,
+        open: bool,
+    ) -> Result<ProcessorEditorStatus, ProtocolError>;
+
+    /// Validates and submits a graph document to the runtime.
+    ///
+    /// # Errors
+    ///
+    /// Returns a stable [`ProtocolError`] when validation, binding, revision,
+    /// authorization, or processor submission fails.
+    fn apply_graph(&self, document: GraphDocument) -> Result<GraphApplyResponse, ProtocolError>;
+
+    /// Applies explicit parameter intent without silently discarding it on older backends.
+    ///
+    /// # Errors
+    /// Rejects explicit edits unless the backend implements the intent-aware boundary.
+    fn apply_graph_request(
+        &self,
+        request: GraphApplyRequest,
+    ) -> Result<GraphApplyResponse, ProtocolError> {
+        if !request.processor_parameter_changes.is_empty() {
+            return Err(ProtocolError {
+                code: ErrorCode::GraphInvalid,
+                parameters: serde_json::json!({"reason": "processor parameter changes are unsupported"}),
+            });
+        }
+        self.apply_graph(request.document)
+    }
 }
 
-async fn status() -> Json<AppStatus> {
-    Json(AppStatus::default())
+#[derive(Clone)]
+struct ControlState {
+    backend: Arc<dyn ControlBackend>,
+}
+
+#[derive(Debug, Default)]
+struct UnavailableBackend;
+
+impl ControlBackend for UnavailableBackend {
+    fn status(&self) -> AppStatus {
+        AppStatus::default()
+    }
+
+    fn graph_status(&self) -> GraphRuntimeStatus {
+        GraphRuntimeStatus {
+            protocol_version: PROTOCOL_VERSION,
+            active_revision: 0,
+            submitted_revision: 0,
+        }
+    }
+
+    fn graph(&self) -> GraphDocument {
+        GraphDocument::new(0, vec![], vec![])
+    }
+
+    fn meters(&self) -> MeterSnapshot {
+        MeterSnapshot {
+            protocol_version: PROTOCOL_VERSION,
+            revision: 0,
+            nodes: Vec::new(),
+        }
+    }
+
+    fn processors(&self) -> ExternalProcessorCatalog {
+        ExternalProcessorCatalog {
+            protocol_version: PROTOCOL_VERSION,
+            processors: Vec::new(),
+            diagnostics: Vec::new(),
+        }
+    }
+
+    fn rescan_processors(
+        &self,
+        _request: ProcessorScanRequest,
+    ) -> Result<ExternalProcessorCatalog, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters: serde_json::json!({}),
+        })
+    }
+
+    fn set_processor_parameter(
+        &self,
+        node_id: &str,
+        parameter_id: u32,
+        _value: f64,
+    ) -> Result<ProcessorParameterUpdateResponse, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ProcessorUnavailable,
+            parameters: serde_json::json!({
+                "nodeId": node_id,
+                "parameterId": parameter_id,
+            }),
+        })
+    }
+
+    fn processor_editor_status(
+        &self,
+        node_id: &str,
+    ) -> Result<ProcessorEditorStatus, ProtocolError> {
+        Err(processor_unavailable(node_id))
+    }
+
+    fn set_processor_editor(
+        &self,
+        node_id: &str,
+        _open: bool,
+    ) -> Result<ProcessorEditorStatus, ProtocolError> {
+        Err(processor_unavailable(node_id))
+    }
+
+    fn apply_graph(&self, _document: GraphDocument) -> Result<GraphApplyResponse, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters: serde_json::json!({}),
+        })
+    }
+}
+
+pub fn router() -> Router {
+    router_with_backend(Arc::new(UnavailableBackend))
+}
+
+pub fn router_with_backend(backend: Arc<dyn ControlBackend>) -> Router {
+    Router::new()
+        .route(
+            "/api/v1/graphs/{id}/recorders/{node_id}",
+            get(recorder::status).put(recorder::control),
+        )
+        .route(HEALTH_ROUTE, get(|| async { "ok" }))
+        .route(STATUS_ROUTE, get(status))
+        .route(AUDIO_SESSION_ROUTE, put(reconfigure_session))
+        .route(
+            VIRTUAL_ENDPOINT_FORMAT_ROUTE,
+            put(reconfigure_virtual_endpoint),
+        )
+        .route(GRAPH_STATUS_ROUTE, get(graph_status))
+        .route(METERS_ROUTE, get(meters))
+        .route(
+            APPLICATION_CAPTURE_MANIFEST_ROUTE,
+            get(application_capture_manifest),
+        )
+        .route(
+            APPLICATION_CAPTURE_PREVIEW_ROUTE,
+            post(preview_application_capture),
+        )
+        .route(PROCESSORS_ROUTE, get(processors))
+        .route(PROCESSORS_SCAN_ROUTE, put(rescan_processors))
+        .route(PROCESSOR_PARAMETER_ROUTE, put(set_processor_parameter))
+        .route(
+            PROCESSOR_EDITOR_ROUTE,
+            get(processor_editor_status).put(set_processor_editor),
+        )
+        .route(GRAPH_ROUTE, get(graph).put(apply_graph))
+        .route(
+            GRAPH_CATALOG_ROUTE,
+            get(graph_catalog).put(mutate_graph_catalog),
+        )
+        .route(GRAPH_CATALOG_DOCUMENT_ROUTE, get(graph_catalog_document))
+        .route(
+            GRAPH_LAYOUT_ROUTE,
+            get(graph_layout).put(update_graph_layout),
+        )
+        .layer(DefaultBodyLimit::max(16 * 1024 * 1024))
+        .layer(control_cors())
+        .with_state(ControlState { backend })
+}
+
+fn control_cors() -> CorsLayer {
+    let origins = [
+        HeaderValue::from_static("http://127.0.0.1:1420"),
+        HeaderValue::from_static("http://localhost:1420"),
+        HeaderValue::from_static("http://tauri.localhost"),
+        HeaderValue::from_static("https://tauri.localhost"),
+        HeaderValue::from_static("tauri://localhost"),
+    ];
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_methods([Method::GET, Method::PUT, Method::POST])
+        .allow_headers([CONTENT_TYPE])
+}
+
+async fn status(State(state): State<ControlState>) -> Response {
+    catalog_task(move || Json(state.backend.status()).into_response()).await
+}
+
+async fn graph_status(State(state): State<ControlState>) -> Json<GraphRuntimeStatus> {
+    Json(state.backend.graph_status())
+}
+
+async fn graph(State(state): State<ControlState>) -> Json<GraphDocument> {
+    Json(state.backend.graph())
+}
+
+async fn application_capture_manifest(State(state): State<ControlState>) -> Response {
+    catalog_task(move || match state.backend.application_capture_manifest() {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => (protocol_error_status(error.code), Json(error)).into_response(),
+    })
+    .await
+}
+
+async fn preview_application_capture(
+    State(state): State<ControlState>,
+    request: Result<Json<GraphApplyRequest>, JsonRejection>,
+) -> Response {
+    let request = match request {
+        Ok(Json(request)) => request,
+        Err(rejection) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ProtocolError {
+                    code: ErrorCode::GraphInvalid,
+                    parameters: serde_json::json!({"reason": rejection.body_text()}),
+                }),
+            )
+                .into_response();
+        }
+    };
+    catalog_task(
+        move || match state.backend.preview_application_capture(request) {
+            Ok(response) => Json(response).into_response(),
+            Err(error) => (protocol_error_status(error.code), Json(error)).into_response(),
+        },
+    )
+    .await
+}
+
+async fn graph_catalog(State(state): State<ControlState>) -> Response {
+    catalog_task(move || match state.backend.graph_catalog() {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => (protocol_error_status(error.code), Json(error)).into_response(),
+    })
+    .await
+}
+
+async fn graph_layout(State(state): State<ControlState>, Path(id): Path<String>) -> Response {
+    catalog_task(move || match state.backend.graph_layout(&id) {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => (protocol_error_status(error.code), Json(error)).into_response(),
+    })
+    .await
+}
+
+async fn update_graph_layout(
+    State(state): State<ControlState>,
+    Path(id): Path<String>,
+    request: Result<Json<GraphLayoutRequest>, JsonRejection>,
+) -> Response {
+    let request = match request {
+        Ok(Json(request)) => request,
+        Err(rejection) => return (StatusCode::UNPROCESSABLE_ENTITY, Json(ProtocolError {
+            code: ErrorCode::GraphInvalid, parameters: serde_json::json!({"resource":"graph_layout","graphId":id,"reason":rejection.body_text()}),
+        })).into_response(),
+    };
+    catalog_task(
+        move || match state.backend.update_graph_layout(&id, request) {
+            Ok(response) => Json(response).into_response(),
+            Err(error) => (protocol_error_status(error.code), Json(error)).into_response(),
+        },
+    )
+    .await
+}
+
+async fn graph_catalog_document(
+    State(state): State<ControlState>,
+    Path(id): Path<String>,
+) -> Response {
+    catalog_task(move || match state.backend.graph_catalog_document(&id) {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => (protocol_error_status(error.code), Json(error)).into_response(),
+    })
+    .await
+}
+
+async fn mutate_graph_catalog(
+    State(state): State<ControlState>,
+    request: Result<Json<GraphCatalogRequest>, JsonRejection>,
+) -> Response {
+    let request = match request {
+        Ok(Json(request)) => request,
+        Err(error) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ProtocolError {
+                    code: ErrorCode::GraphInvalid,
+                    parameters: serde_json::json!({"reason": error.body_text()}),
+                }),
+            )
+                .into_response();
+        }
+    };
+    catalog_task(move || match state.backend.mutate_graph_catalog(request) {
+        Ok(response) => Json(response).into_response(),
+        Err(error) => (protocol_error_status(error.code), Json(error)).into_response(),
+    })
+    .await
+}
+
+// Catalog reads may wait behind a native snapshot and writes perform filesystem I/O.
+// Neither may block a Tokio reactor, even when there is only one asynchronous worker.
+async fn catalog_task(work: impl FnOnce() -> Response + Send + 'static) -> Response {
+    tokio::task::spawn_blocking(work).await.unwrap_or_else(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ProtocolError {
+                code: ErrorCode::ControlUnavailable,
+                parameters: serde_json::json!({"reason": "graph catalog control task failed"}),
+            }),
+        )
+            .into_response()
+    })
+}
+
+async fn meters(State(state): State<ControlState>) -> Json<MeterSnapshot> {
+    Json(state.backend.meters())
+}
+
+async fn reconfigure_session(
+    State(state): State<ControlState>,
+    request: Result<Json<SessionReconfigureRequest>, JsonRejection>,
+) -> Response {
+    let Json(request) = match request {
+        Ok(request) => request,
+        Err(error) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ProtocolError {
+                    code: ErrorCode::AudioSessionUnsupported,
+                    parameters: serde_json::json!({"reason": error.body_text()}),
+                }),
+            )
+                .into_response();
+        }
+    };
+    // Driver negotiation and plug-in preparation can block. Do not occupy a Tokio I/O worker.
+    match tokio::task::spawn_blocking(move || state.backend.reconfigure_session(request)).await {
+        Ok(Ok(response)) => (StatusCode::ACCEPTED, Json(response)).into_response(),
+        Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ProtocolError {
+                code: ErrorCode::AudioSessionReconfigureFailed,
+                parameters: serde_json::json!({"reason": "session control task failed"}),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+async fn processors(State(state): State<ControlState>) -> Json<ExternalProcessorCatalog> {
+    Json(state.backend.processors())
+}
+
+async fn reconfigure_virtual_endpoint(
+    State(state): State<ControlState>,
+    request: Result<Json<tonenari_control_protocol::VirtualEndpointFormatRequest>, JsonRejection>,
+) -> Response {
+    let request = match request {
+        Ok(Json(request)) => request,
+        Err(error) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ProtocolError {
+                    code: ErrorCode::AudioSessionUnsupported,
+                    parameters: serde_json::json!({"reason": error.body_text()}),
+                }),
+            )
+                .into_response();
+        }
+    };
+    match tokio::task::spawn_blocking(move || state.backend.reconfigure_virtual_endpoint(request))
+        .await
+    {
+        Ok(Ok(response)) => (StatusCode::ACCEPTED, Json(response)).into_response(),
+        Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ProtocolError {
+                code: ErrorCode::AudioSessionReconfigureFailed,
+                parameters: serde_json::json!({"reason":"virtual endpoint control task failed"}),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+async fn rescan_processors(
+    State(state): State<ControlState>,
+    request: Result<Json<ProcessorScanRequest>, JsonRejection>,
+) -> Response {
+    let Json(request) = match request {
+        Ok(request) => request,
+        Err(rejection) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ProtocolError {
+                    code: ErrorCode::GraphInvalid,
+                    parameters: serde_json::json!({ "reason": rejection.body_text() }),
+                }),
+            )
+                .into_response();
+        }
+    };
+    match state.backend.rescan_processors(request) {
+        Ok(catalog) => (StatusCode::OK, Json(catalog)).into_response(),
+        Err(error) => (protocol_error_status(error.code), Json(error)).into_response(),
+    }
+}
+
+async fn set_processor_parameter(
+    State(state): State<ControlState>,
+    Path((node_id, parameter_id)): Path<(String, u32)>,
+    update: Result<Json<ProcessorParameterUpdate>, JsonRejection>,
+) -> Response {
+    let Json(update) = match update {
+        Ok(update) => update,
+        Err(rejection) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ProtocolError {
+                    code: ErrorCode::GraphInvalid,
+                    parameters: serde_json::json!({ "reason": rejection.body_text() }),
+                }),
+            )
+                .into_response();
+        }
+    };
+    // Accepted parameter updates also checkpoint durable graph state. Keep filesystem work
+    // off Tokio's I/O workers; the backend still publishes the native value before saving.
+    match tokio::task::spawn_blocking(move || {
+        state.backend.set_processor_parameter(&node_id, parameter_id, update.value)
+    }).await {
+        Ok(Ok(response)) => (StatusCode::OK, Json(response)).into_response(),
+        Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ProtocolError {
+                code: ErrorCode::ControlUnavailable,
+                parameters: serde_json::json!({"reason": "processor parameter control task failed"}),
+            }),
+        ).into_response(),
+    }
+}
+
+async fn processor_editor_status(
+    State(state): State<ControlState>,
+    Path(node_id): Path<String>,
+) -> Response {
+    match state.backend.processor_editor_status(&node_id) {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(error) => (protocol_error_status(error.code), Json(error)).into_response(),
+    }
+}
+
+async fn set_processor_editor(
+    State(state): State<ControlState>,
+    Path(node_id): Path<String>,
+    request: Result<Json<ProcessorEditorRequest>, JsonRejection>,
+) -> Response {
+    let Json(request) = match request {
+        Ok(request) => request,
+        Err(rejection) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ProtocolError {
+                    code: ErrorCode::GraphInvalid,
+                    parameters: serde_json::json!({ "reason": rejection.body_text() }),
+                }),
+            )
+                .into_response();
+        }
+    };
+    // Closing includes a bounded vendor state export and durable filesystem write.
+    // Do not stall meter/status HTTP requests on the asynchronous I/O executor.
+    match tokio::task::spawn_blocking(move || {
+        state.backend.set_processor_editor(&node_id, request.open)
+    })
+    .await
+    {
+        Ok(Ok(response)) => (StatusCode::OK, Json(response)).into_response(),
+        Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ProtocolError {
+                code: ErrorCode::ControlUnavailable,
+                parameters: serde_json::json!({"reason": "processor editor control task failed"}),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+fn processor_unavailable(node_id: &str) -> ProtocolError {
+    ProtocolError {
+        code: ErrorCode::ProcessorUnavailable,
+        parameters: serde_json::json!({ "nodeId": node_id }),
+    }
+}
+
+async fn apply_graph(
+    State(state): State<ControlState>,
+    document: Result<Json<GraphApplyRequest>, JsonRejection>,
+) -> Response {
+    let Json(document) = match document {
+        Ok(document) => document,
+        Err(rejection) => {
+            let error = ProtocolError {
+                code: ErrorCode::GraphInvalid,
+                parameters: serde_json::json!({ "reason": rejection.body_text() }),
+            };
+            return (StatusCode::UNPROCESSABLE_ENTITY, Json(error)).into_response();
+        }
+    };
+    match tokio::task::spawn_blocking(move || state.backend.apply_graph_request(document)).await {
+        Ok(Ok(response)) => (StatusCode::ACCEPTED, Json(response)).into_response(),
+        Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ProtocolError {
+                code: ErrorCode::ControlUnavailable,
+                parameters: serde_json::json!({"reason": "graph control task failed"}),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+fn protocol_error_status(code: ErrorCode) -> StatusCode {
+    match code {
+        ErrorCode::GraphRevisionStale | ErrorCode::GraphExchangeBusy => StatusCode::CONFLICT,
+        ErrorCode::GraphInvalid
+        | ErrorCode::GraphBindingUnsupported
+        | ErrorCode::AudioSessionUnsupported => StatusCode::UNPROCESSABLE_ENTITY,
+        ErrorCode::Unauthorized | ErrorCode::PairingRequired => StatusCode::UNAUTHORIZED,
+        _ => StatusCode::SERVICE_UNAVAILABLE,
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    mod application_capture;
+    mod endpoint_format;
+    mod recorder;
+    use std::sync::Mutex;
+
     use axum::{body::Body, http::Request};
-    use serde_json::Value;
+    use serde_json::{Value, json};
+    use tonenari_control_protocol::GraphApplyState;
     use tower::ServiceExt;
 
     use super::*;
 
-    #[tokio::test]
-    async fn health_endpoint_is_lightweight_and_ready() {
-        let response = router()
-            .oneshot(
-                Request::builder()
-                    .uri(HEALTH_ROUTE)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let body = axum::body::to_bytes(response.into_body(), 16)
-            .await
-            .unwrap();
+    struct TestBackend {
+        last_recorder: Mutex<Option<(String, String, tonenari_control_protocol::RecorderRequest)>>,
+        apply_result: Mutex<Result<GraphApplyResponse, ProtocolError>>,
+        last_apply: Mutex<Option<GraphApplyRequest>>,
+        last_preview: Mutex<Option<GraphApplyRequest>>,
+        last_endpoint_format:
+            Mutex<Option<tonenari_control_protocol::VirtualEndpointFormatRequest>>,
+        editor_gate: Option<Arc<EditorGate>>,
+    }
 
-        assert_eq!(&body[..], b"ok");
+    #[derive(Default)]
+    struct EditorGate {
+        started: std::sync::atomic::AtomicBool,
+        released: std::sync::atomic::AtomicBool,
+        finished: std::sync::atomic::AtomicBool,
+    }
+
+    impl TestBackend {
+        fn with_result(result: Result<GraphApplyResponse, ProtocolError>) -> Arc<Self> {
+            Arc::new(Self {
+                last_recorder: Mutex::new(None),
+                apply_result: Mutex::new(result),
+                last_apply: Mutex::new(None),
+                last_preview: Mutex::new(None),
+                last_endpoint_format: Mutex::new(None),
+                editor_gate: None,
+            })
+        }
+    }
+
+    impl ControlBackend for TestBackend {
+        fn recorder_status(
+            &self,
+            graph_id: &str,
+            node_id: &str,
+        ) -> Result<tonenari_control_protocol::RecorderStatus, ProtocolError> {
+            Ok(tonenari_control_protocol::RecorderStatus {
+                path: Some(format!("{graph_id}/{node_id}")),
+                ..Default::default()
+            })
+        }
+
+        fn control_recorder(
+            &self,
+            graph_id: &str,
+            node_id: &str,
+            request: tonenari_control_protocol::RecorderRequest,
+        ) -> Result<tonenari_control_protocol::RecorderStatus, ProtocolError> {
+            *self.last_recorder.lock().unwrap() =
+                Some((graph_id.to_owned(), node_id.to_owned(), request));
+            self.recorder_status(graph_id, node_id)
+        }
+        fn application_capture_manifest(
+            &self,
+        ) -> Result<tonenari_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+            Ok(tonenari_control_protocol::ApplicationCaptureManifest {
+                protocol_version: PROTOCOL_VERSION,
+                revision: 5,
+                sources: vec![],
+            })
+        }
+
+        fn preview_application_capture(
+            &self,
+            request: GraphApplyRequest,
+        ) -> Result<tonenari_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+            let revision = request.document.revision;
+            *self.last_preview.lock().unwrap() = Some(request);
+            self.apply_result.lock().unwrap().clone()?;
+            Ok(tonenari_control_protocol::ApplicationCaptureManifest {
+                protocol_version: PROTOCOL_VERSION,
+                revision,
+                sources: vec![],
+            })
+        }
+        fn reconfigure_virtual_endpoint(
+            &self,
+            request: tonenari_control_protocol::VirtualEndpointFormatRequest,
+        ) -> Result<GraphApplyResponse, ProtocolError> {
+            *self.last_endpoint_format.lock().unwrap() = Some(request);
+            self.apply_result.lock().unwrap().clone()
+        }
+        fn graph_layout(&self, id: &str) -> Result<GraphLayoutResponse, ProtocolError> {
+            if id != "saved" {
+                return Err(ProtocolError {
+                    code: ErrorCode::GraphInvalid,
+                    parameters: json!({"resource":"graph_layout"}),
+                });
+            }
+            Ok(GraphLayoutResponse {
+                graph_id: id.into(),
+                layout_revision: 4,
+                layout: tonenari_control_protocol::GraphLayout::default(),
+            })
+        }
+
+        fn update_graph_layout(
+            &self,
+            id: &str,
+            request: GraphLayoutRequest,
+        ) -> Result<GraphLayoutResponse, ProtocolError> {
+            let mut response = self.graph_layout(id)?;
+            if request.expected_layout_revision != response.layout_revision {
+                return Err(ProtocolError {
+                    code: ErrorCode::GraphRevisionStale,
+                    parameters: json!({"resource":"graph_layout"}),
+                });
+            }
+            response.layout = request.layout;
+            response.layout_revision += 1;
+            Ok(response)
+        }
+        fn graph_catalog(&self) -> Result<GraphCatalogResponse, ProtocolError> {
+            Ok(GraphCatalogResponse {
+                protocol_version: PROTOCOL_VERSION,
+                catalog_revision: 7,
+                active_id: "saved".into(),
+                graphs: vec![tonenari_control_protocol::GraphCatalogEntry {
+                    id: "saved".into(),
+                    name: "Ableton".into(),
+                }],
+                document: document(),
+                layout_revision: 0,
+                layout: tonenari_control_protocol::GraphLayout::default(),
+                persistence_error: None,
+            })
+        }
+
+        fn graph_catalog_document(&self, id: &str) -> Result<GraphDocument, ProtocolError> {
+            if id == "saved" {
+                return Ok(document());
+            }
+            Err(ProtocolError {
+                code: ErrorCode::GraphInvalid,
+                parameters: json!({}),
+            })
+        }
+
+        fn mutate_graph_catalog(
+            &self,
+            request: GraphCatalogRequest,
+        ) -> Result<GraphCatalogResponse, ProtocolError> {
+            if request.expected_revision != 5 || request.expected_catalog_revision != 7 {
+                return Err(ProtocolError {
+                    code: ErrorCode::GraphRevisionStale,
+                    parameters: json!({}),
+                });
+            }
+            let tonenari_control_protocol::GraphCatalogAction::Rename { id, name } = request.action
+            else {
+                return Err(ProtocolError {
+                    code: ErrorCode::GraphInvalid,
+                    parameters: json!({}),
+                });
+            };
+            let mut response = self.graph_catalog()?;
+            assert_eq!(id, "saved");
+            response.graphs[0].name = name;
+            response.catalog_revision += 1;
+            Ok(response)
+        }
+        fn status(&self) -> AppStatus {
+            AppStatus {
+                driver_state: tonenari_control_protocol::DriverState::Ready,
+                sample_rate: Some(48_000),
+                buffer_frames: Some(128),
+                ..AppStatus::default()
+            }
+        }
+
+        fn graph_status(&self) -> GraphRuntimeStatus {
+            GraphRuntimeStatus {
+                protocol_version: PROTOCOL_VERSION,
+                active_revision: 4,
+                submitted_revision: 5,
+            }
+        }
+
+        fn graph(&self) -> GraphDocument {
+            document()
+        }
+
+        fn meters(&self) -> MeterSnapshot {
+            MeterSnapshot {
+                protocol_version: PROTOCOL_VERSION,
+                revision: 4,
+                nodes: Vec::new(),
+            }
+        }
+
+        fn processors(&self) -> ExternalProcessorCatalog {
+            ExternalProcessorCatalog {
+                protocol_version: PROTOCOL_VERSION,
+                processors: Vec::new(),
+                diagnostics: Vec::new(),
+            }
+        }
+
+        fn rescan_processors(
+            &self,
+            _request: ProcessorScanRequest,
+        ) -> Result<ExternalProcessorCatalog, ProtocolError> {
+            Ok(self.processors())
+        }
+
+        fn set_processor_parameter(
+            &self,
+            node_id: &str,
+            parameter_id: u32,
+            value: f64,
+        ) -> Result<ProcessorParameterUpdateResponse, ProtocolError> {
+            Ok(ProcessorParameterUpdateResponse {
+                protocol_version: PROTOCOL_VERSION,
+                node_id: node_id.to_owned(),
+                parameter_id,
+                value,
+                persistence_error: (node_id == "unsaved-node")
+                    .then(|| "fixture disk unavailable".to_owned()),
+            })
+        }
+
+        fn processor_editor_status(
+            &self,
+            node_id: &str,
+        ) -> Result<ProcessorEditorStatus, ProtocolError> {
+            Ok(test_editor_status(node_id, false))
+        }
+
+        fn set_processor_editor(
+            &self,
+            node_id: &str,
+            open: bool,
+        ) -> Result<ProcessorEditorStatus, ProtocolError> {
+            if let Some(gate) = &self.editor_gate {
+                use std::{
+                    sync::atomic::Ordering,
+                    time::{Duration, Instant},
+                };
+                gate.started.store(true, Ordering::Release);
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while !gate.released.load(Ordering::Acquire) && Instant::now() < deadline {
+                    std::thread::park_timeout(Duration::from_millis(1));
+                }
+                gate.finished.store(true, Ordering::Release);
+            }
+            Ok(test_editor_status(node_id, open))
+        }
+
+        fn apply_graph(
+            &self,
+            _document: GraphDocument,
+        ) -> Result<GraphApplyResponse, ProtocolError> {
+            self.apply_result
+                .lock()
+                .expect("test result should not be poisoned")
+                .clone()
+        }
+
+        fn apply_graph_request(
+            &self,
+            request: GraphApplyRequest,
+        ) -> Result<GraphApplyResponse, ProtocolError> {
+            *self.last_apply.lock().unwrap() = Some(request.clone());
+            self.apply_graph(request.document)
+        }
+    }
+
+    fn document() -> GraphDocument {
+        GraphDocument::new(5, vec![], vec![])
     }
 
     #[tokio::test]
-    async fn status_endpoint_uses_versioned_contract() {
-        let response = router()
-            .oneshot(
+    async fn graph_apply_forwards_explicit_parameter_intent_and_rejects_malformed_entries() {
+        let backend = TestBackend::with_result(Ok(GraphApplyResponse {
+            protocol_version: PROTOCOL_VERSION,
+            revision: 5,
+            state: GraphApplyState::Active,
+            persistence_error: None,
+        }));
+        let mut request = GraphApplyRequest::from(document());
+        request.processor_parameter_changes.push(
+            tonenari_control_protocol::GraphProcessorParameterChange {
+                node_id: "effect".into(),
+                type_id: "vst3:fixture".into(),
+                parameter_id: 7,
+                value: 0.25,
+            },
+        );
+        let router = router_with_backend(backend.clone());
+        let (status, _) = response_json(
+            router.clone(),
+            Request::builder()
+                .method("PUT")
+                .uri(GRAPH_ROUTE)
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(*backend.last_apply.lock().unwrap(), Some(request.clone()));
+        let mut invalid = serde_json::to_value(&request).unwrap();
+        invalid["processorParameterChanges"][0]["value"] = Value::Null;
+        let (status, body) = response_json(
+            router,
+            Request::builder()
+                .method("PUT")
+                .uri(GRAPH_ROUTE)
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&invalid).unwrap()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["code"], "graph_invalid");
+        assert_eq!(*backend.last_apply.lock().unwrap(), Some(request.clone()));
+        assert_eq!(
+            UnavailableBackend
+                .apply_graph_request(request)
+                .unwrap_err()
+                .code,
+            ErrorCode::GraphInvalid,
+            "legacy backends cannot claim success after dropping explicit edits"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn native_editor_checkpoint_does_not_block_status_on_the_io_executor() {
+        use std::{sync::atomic::Ordering, time::Duration};
+        let gate = Arc::new(EditorGate::default());
+        let backend = Arc::new(TestBackend {
+            last_recorder: Mutex::new(None),
+            apply_result: Mutex::new(Err(processor_unavailable("unused"))),
+            last_apply: Mutex::new(None),
+            last_preview: Mutex::new(None),
+            last_endpoint_format: Mutex::new(None),
+            editor_gate: Some(gate.clone()),
+        });
+        let router = router_with_backend(backend);
+        let close_router = router.clone();
+        let close = tokio::spawn(async move {
+            response_json(
+                close_router,
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/v1/processors/effect/editor")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"open":false}"#))
+                    .unwrap(),
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !gate.started.load(Ordering::Acquire) {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let status = tokio::time::timeout(
+            Duration::from_millis(100),
+            router.oneshot(
                 Request::builder()
                     .uri(STATUS_ROUTE)
                     .body(Body::empty())
                     .unwrap(),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let was_waiting = !gate.finished.load(Ordering::Acquire);
+        gate.released.store(true, Ordering::Release);
+        assert_eq!(status.status(), StatusCode::OK);
+        assert!(
+            was_waiting,
+            "status must complete before the native checkpoint is released"
+        );
+        assert_eq!(close.await.unwrap().0, StatusCode::OK);
+    }
+
+    fn test_editor_status(node_id: &str, open: bool) -> ProcessorEditorStatus {
+        ProcessorEditorStatus {
+            protocol_version: PROTOCOL_VERSION,
+            node_id: node_id.to_owned(),
+            state: if open {
+                tonenari_control_protocol::ProcessorEditorState::Open
+            } else {
+                tonenari_control_protocol::ProcessorEditorState::Closed
+            },
+            width: open.then_some(640),
+            height: open.then_some(480),
+            resizable: open,
+            failure: None,
+        }
+    }
+
+    async fn response_json(router: Router, request: Request<Body>) -> (StatusCode, Value) {
+        let response = router.oneshot(request).await.expect("request should run");
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .expect("response should have a body");
+        let value = serde_json::from_slice(&bytes).expect("response should be JSON");
+        (status, value)
+    }
+
+    #[tokio::test]
+    async fn graph_layout_routes_preserve_ui_identities_and_use_independent_revision() {
+        let backend = TestBackend::with_result(Ok(GraphApplyResponse {
+            protocol_version: PROTOCOL_VERSION,
+            revision: 5,
+            state: GraphApplyState::Active,
+            persistence_error: None,
+        }));
+        let route = "/api/v1/graphs/saved/layout";
+        let (status, body) = response_json(
+            router_with_backend(backend.clone()),
+            Request::builder().uri(route).body(Body::empty()).unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["graphId"], "saved");
+        assert_eq!(body["layoutRevision"], 4);
+        let layout = json!({"positions":{"duplex:input":{"x":-50.0,"y":75.0}},"viewport":{"x":-100.0,"y":80.0,"zoom":0.5}});
+        for (revision, expected_status) in [(4, StatusCode::OK), (3, StatusCode::CONFLICT)] {
+            let (status, body) = response_json(
+                router_with_backend(backend.clone()),
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri(route)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({"expectedLayoutRevision":revision,"layout":layout}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await;
+            assert_eq!(status, expected_status);
+            if status == StatusCode::OK {
+                assert_eq!(body["layout"], layout);
+                assert_eq!(body["layoutRevision"], 5);
+            } else {
+                assert_eq!(body["code"], "graph_revision_stale");
+                assert_eq!(body["parameters"]["resource"], "graph_layout");
+            }
+        }
+        let invalid =
+            json!({"expectedLayoutRevision":4,"layout":{"positions":{"node":{"x":null,"y":1}}}});
+        let (status, body) = response_json(
+            router_with_backend(backend),
+            Request::builder()
+                .method(Method::PUT)
+                .uri(route)
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(invalid.to_string()))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body["parameters"]["resource"], "graph_layout");
+        assert_eq!(body["parameters"]["graphId"], "saved");
+    }
+
+    #[tokio::test]
+    async fn catalog_routes_preserve_document_identity_and_both_concurrency_baselines() {
+        let backend = TestBackend::with_result(Ok(GraphApplyResponse {
+            protocol_version: PROTOCOL_VERSION,
+            revision: 5,
+            state: GraphApplyState::Active,
+            persistence_error: None,
+        }));
+        for route in [GRAPH_CATALOG_ROUTE, "/api/v1/graphs/saved"] {
+            let (status, body) = response_json(
+                router_with_backend(backend.clone()),
+                Request::builder().uri(route).body(Body::empty()).unwrap(),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            if route == GRAPH_CATALOG_ROUTE {
+                assert_eq!(body["activeId"], "saved");
+                assert_eq!(body["catalogRevision"], 7);
+                assert_eq!(body["document"]["revision"], 5);
+            } else {
+                assert_eq!(body["revision"], 5);
+            }
+        }
+        for (revision, expected_status) in [(7, StatusCode::OK), (6, StatusCode::CONFLICT)] {
+            let (status, body) = response_json(router_with_backend(backend.clone()), Request::builder().method(Method::PUT).uri(GRAPH_CATALOG_ROUTE).header(CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"action":"rename","id":"saved","name":"SPAT","expectedRevision":5,"expectedCatalogRevision":revision}).to_string())).unwrap()).await;
+            assert_eq!(status, expected_status);
+            if status == StatusCode::OK {
+                assert_eq!(body["graphs"][0]["name"], "SPAT");
+            } else {
+                assert_eq!(body["code"], "graph_revision_stale");
+            }
+        }
+        let (status, _) = response_json(
+            router_with_backend(backend),
+            Request::builder()
+                .method(Method::PUT)
+                .uri(GRAPH_CATALOG_ROUTE)
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn default_routes_are_loopback_safe_and_versioned() {
+        let health = router()
+            .oneshot(
+                Request::builder()
+                    .uri(HEALTH_ROUTE)
+                    .body(Body::empty())
+                    .expect("request should build"),
             )
             .await
-            .unwrap();
-        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .expect("health request should run");
+        let health_body = axum::body::to_bytes(health.into_body(), 16)
             .await
-            .unwrap();
-        let status: Value = serde_json::from_slice(&body).unwrap();
+            .expect("health should have a body");
+        assert_eq!(&health_body[..], b"ok");
 
-        assert_eq!(status["protocolVersion"], 1);
+        let (_, status) = response_json(
+            router(),
+            Request::builder()
+                .uri(STATUS_ROUTE)
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
         assert_eq!(status["driverState"], "not_installed");
+
+        let (_, graph) = response_json(
+            router(),
+            Request::builder()
+                .uri(GRAPH_STATUS_ROUTE)
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(graph["activeRevision"], 0);
+
+        let (_, graph_document) = response_json(
+            router(),
+            Request::builder()
+                .uri(GRAPH_ROUTE)
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(graph_document["revision"], 0);
+
+        let (status, error) = apply_request(router(), &document()).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(error["code"], "control_unavailable");
+    }
+
+    #[tokio::test]
+    async fn backend_status_and_graph_application_are_exposed() {
+        let backend = TestBackend::with_result(Ok(GraphApplyResponse {
+            protocol_version: PROTOCOL_VERSION,
+            revision: 5,
+            state: GraphApplyState::Pending,
+            persistence_error: None,
+        }));
+        let (_, status) = response_json(
+            router_with_backend(backend.clone()),
+            Request::builder()
+                .uri(STATUS_ROUTE)
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status["driverState"], "ready");
+
+        let (_, graph) = response_json(
+            router_with_backend(backend.clone()),
+            Request::builder()
+                .uri(GRAPH_STATUS_ROUTE)
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(graph["activeRevision"], 4);
+        assert_eq!(graph["submittedRevision"], 5);
+
+        let (_, graph_document) = response_json(
+            router_with_backend(backend.clone()),
+            Request::builder()
+                .uri(GRAPH_ROUTE)
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(graph_document["revision"], 5);
+
+        let (status, response) = apply_request(router_with_backend(backend), &document()).await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(response["revision"], 5);
+        assert_eq!(response["state"], "pending");
+    }
+
+    #[tokio::test]
+    async fn processor_parameters_use_a_typed_node_route() {
+        let backend = TestBackend::with_result(Ok(GraphApplyResponse {
+            protocol_version: PROTOCOL_VERSION,
+            revision: 5,
+            state: GraphApplyState::Pending,
+            persistence_error: None,
+        }));
+        let (status, response) = response_json(
+            router_with_backend(backend),
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/v1/processors/vst-node/parameters/42")
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"value":0.75}"#))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response["nodeId"], "vst-node");
+        assert_eq!(response["parameterId"], 42);
+        assert_eq!(response["value"], 0.75);
+    }
+
+    #[tokio::test]
+    async fn accepted_processor_parameter_storage_warning_remains_http_success() {
+        let backend = TestBackend::with_result(Ok(GraphApplyResponse {
+            protocol_version: PROTOCOL_VERSION,
+            revision: 5,
+            state: GraphApplyState::Active,
+            persistence_error: None,
+        }));
+        let (status, response) = response_json(
+            router_with_backend(backend),
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/v1/processors/unsaved-node/parameters/42")
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"value":0.75}"#))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response["value"], 0.75);
+        assert_eq!(response["persistenceError"], "fixture disk unavailable");
+    }
+
+    #[tokio::test]
+    async fn processor_editor_uses_typed_get_and_idempotent_put_routes() {
+        let backend = TestBackend::with_result(Ok(GraphApplyResponse {
+            protocol_version: PROTOCOL_VERSION,
+            revision: 5,
+            state: GraphApplyState::Pending,
+            persistence_error: None,
+        }));
+        let (status, closed) = response_json(
+            router_with_backend(backend.clone()),
+            Request::builder()
+                .uri("/api/v1/processors/processor-node/editor")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(closed["state"], "closed");
+
+        let (status, opened) = response_json(
+            router_with_backend(backend),
+            Request::builder()
+                .method(Method::PUT)
+                .uri("/api/v1/processors/processor-node/editor")
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"open":true}"#))
+                .expect("request should build"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(opened["nodeId"], "processor-node");
+        assert_eq!(opened["state"], "open");
+        assert_eq!(opened["width"], 640);
+        assert_eq!(opened["height"], 480);
+        assert_eq!(opened["resizable"], true);
+    }
+
+    #[tokio::test]
+    async fn typed_graph_failures_map_to_stable_http_statuses() {
+        let cases = [
+            (ErrorCode::GraphRevisionStale, StatusCode::CONFLICT),
+            (ErrorCode::GraphExchangeBusy, StatusCode::CONFLICT),
+            (ErrorCode::GraphInvalid, StatusCode::UNPROCESSABLE_ENTITY),
+            (
+                ErrorCode::GraphBindingUnsupported,
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (ErrorCode::Unauthorized, StatusCode::UNAUTHORIZED),
+            (ErrorCode::PairingRequired, StatusCode::UNAUTHORIZED),
+            (ErrorCode::DriverNotLoaded, StatusCode::SERVICE_UNAVAILABLE),
+        ];
+        for (code, expected_status) in cases {
+            let backend = TestBackend::with_result(Err(ProtocolError {
+                code,
+                parameters: json!({ "revision": 5 }),
+            }));
+            let (status, response) = apply_request(router_with_backend(backend), &document()).await;
+            assert_eq!(status, expected_status);
+            assert_eq!(response["parameters"]["revision"], 5);
+        }
+    }
+
+    async fn apply_request(router: Router, document: &GraphDocument) -> (StatusCode, Value) {
+        response_json(
+            router,
+            Request::builder()
+                .method("PUT")
+                .uri(GRAPH_ROUTE)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(document).expect("document should serialize"),
+                ))
+                .expect("request should build"),
+        )
+        .await
     }
 }

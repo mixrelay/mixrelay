@@ -1,0 +1,65 @@
+[package]
+name = "tonenari-engine-service"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+build = "build.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+tonenari-audio-recorder = { path = "../../crates/audio-recorder" }
+serde.workspace = true
+thiserror.workspace = true
+# Structured control-thread diagnostics; never emit logs from audio callbacks.
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt"] }
+tonenari-processor-host = { path = "../../crates/processor-host" }
+serde_json.workspace = true
+parking_lot.workspace = true
+tokio.workspace = true
+axum.workspace = true
+tonenari-audio-engine = { path = "../../crates/audio-engine" }
+tonenari-audio-graph = { path = "../../crates/audio-graph" }
+tonenari-audio-io.workspace = true
+tonenari-control-protocol = { path = "../../crates/control-protocol" }
+tonenari-control-server = { path = "../../crates/control-server" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2.183"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+tonenari-macos-transport = { path = "../../native/macos/common" }
+libc = "0.2.189"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61.3", features = [
+  "Win32_Foundation",
+  "Win32_Media_Audio",
+  "Win32_Media_Multimedia",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_IO",
+  "Win32_System_Memory",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Threading",
+  "Win32_System_Variant",
+] }
+windows-core = "0.61.2"
+
+[build-dependencies]
+cc = "1.2.57"
+pkg-config = "0.3.32"
+
+[dev-dependencies]
+tonenari-test-support = { path = "../../crates/test-support" }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+tonenari-macos-test-support = { path = "../../crates/macos-test-support" }
+reqwest = { workspace = true, features = ["blocking"] }

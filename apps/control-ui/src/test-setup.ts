@@ -18,3 +18,18 @@ Object.defineProperty(window, 'matchMedia', {
     removeListener: vi.fn(),
   })),
 });
+
+class TestResizeObserver implements ResizeObserver {
+  public disconnect() {}
+  public observe() {}
+  public unobserve() {}
+}
+
+globalThis.ResizeObserver = TestResizeObserver;
+
+// jsdom has no layout/scrolling engine. Combobox calls this browser API when
+// highlighting an option; model only that platform boundary, not selection.
+Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+  configurable: true,
+  value: vi.fn(),
+});

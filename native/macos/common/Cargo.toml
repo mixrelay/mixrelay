@@ -1,0 +1,17 @@
+[package]
+name = "tonenari-macos-transport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+path = "lib.rs"
+crate-type = ["rlib", "staticlib"]
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+# Model-check actual callback publication atomics; never linked into the HAL/engine runtime.
+loom = "0.7.2"

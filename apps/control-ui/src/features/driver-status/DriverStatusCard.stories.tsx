@@ -19,6 +19,7 @@ export const InstalledNotLoaded: Story = { args: { state: 'installed_not_loaded'
 export const PermissionDenied: Story = { args: { state: 'invalid_permissions' } };
 export const VersionMismatch: Story = { args: { state: 'version_mismatch' } };
 export const Blocked: Story = { args: { state: 'blocked' } };
+export const Unavailable: Story = { args: { state: 'unavailable' } };
 export const LongTranslation: Story = {
   args: { state: 'restart_required' },
   globals: { locale: 'pseudo' },

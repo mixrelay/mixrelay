@@ -1,0 +1,10 @@
+@echo off
+setlocal
+if exist C:\ToneNariLab\sysvad-verify-v2.log exit /b 2
+call :verify > C:\ToneNariLab\sysvad-verify-v2.log 2>&1
+set result=%errorlevel%
+>C:\ToneNariLab\sysvad-verify-v2.exit-code echo %result%
+exit /b %result%
+:verify
+powershell.exe -NoProfile -NonInteractive -Command "$ErrorActionPreference='Stop'; if ((Get-CimInstance Win32_ComputerSystemProduct).UUID -ne '712A936E-9D91-4455-A8A9-A1F65EB60719') {throw 'Not the authorized VM'}; $driver=Get-CimInstance Win32_SystemDriver -Filter 'Name=''sysvad_componentizedaudiosample'''; $driver | Format-List Name,State,Started,PathName; if (-not $driver.Started) {throw 'Sample driver not running'}; $actual=(Get-FileHash $driver.PathName).Hash; $expected=(Get-FileHash C:\ToneNariLab\sysvad-package-v2\package\TabletAudioSample.sys).Hash; if ($actual -ne $expected) {throw 'Installed sample hash mismatch'}; Write-Output ('Installed sample SHA256='+$actual); $devices=@(Get-CimInstance Win32_PnPEntity | Where-Object {$_.HardwareID -contains 'Root\sysvad_ComponentizedAudioSample'}); $devices | Format-List Name,PNPDeviceID,ConfigManagerErrorCode; if ($devices.Count -ne 1 -or $devices[0].ConfigManagerErrorCode -ne 0) {throw 'Sample PnP device unhealthy'}; $endpoints=@(Get-PnpDevice -Class AudioEndpoint -PresentOnly | Where-Object {(Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName DEVPKEY_Device_Parent).Data -eq $devices[0].PNPDeviceID}); $endpoints | Format-List Status,FriendlyName,InstanceId; $render=@($endpoints | Where-Object {$_.Status -eq 'OK' -and $_.InstanceId -match '\{0\.0\.0\.'}); $capture=@($endpoints | Where-Object {$_.Status -eq 'OK' -and $_.InstanceId -match '\{0\.0\.1\.'}); if ($render.Count -eq 0 -or $capture.Count -eq 0) {throw 'Sample must expose healthy render AND capture endpoints'}; Write-Output ('PASS: sample endpoints render='+$render.Count+' capture='+$capture.Count+'; actual PCM is a separate test'); Get-CimInstance Win32_SystemDriver -Filter 'Name=''ToneNariAudio''' | Format-List Name,State,Started,PathName"
+exit /b %errorlevel%

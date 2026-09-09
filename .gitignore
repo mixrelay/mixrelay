@@ -23,3 +23,6 @@ apps/desktop/src-tauri/gen/
 # IDE
 .idea/
 .vscode/
+
+# Local cross-OS lab reports and guest artifacts
+.lab/

@@ -1,0 +1,14 @@
+[package]
+name = "tonenari-hal-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+tonenari-macos-transport = { path = "../../common" }
+
+[lints]
+workspace = true

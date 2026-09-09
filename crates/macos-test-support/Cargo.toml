@@ -1,0 +1,16 @@
+[package]
+name = "tonenari-macos-test-support"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+libc = "0.2.189"
+core-foundation = "0.10.1"
+
+[build-dependencies]
+cc = "1.2.57"

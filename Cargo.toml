@@ -1,11 +1,21 @@
 [workspace]
 resolver = "2"
+exclude = ["vendor/truce-rack-vst3", "vendor/truce-rack-clap", "vendor/truce-rack-lv2"]
 members = [
   "apps/desktop/src-tauri",
+  "apps/engine-service",
+  "crates/audio-io",
   "crates/audio-graph",
   "crates/audio-engine",
+  "crates/audio-recorder",
+  "crates/processor-host",
   "crates/control-protocol",
   "crates/control-server",
+  "crates/macos-test-support",
+  "crates/test-support",
+  "native/macos/hal-driver/rust",
+  "native/macos/hal-driver/bundle",
+  "native/macos/common",
 ]
 
 [workspace.package]
@@ -16,14 +26,31 @@ authors = ["ToneNari"]
 repository = "https://github.com/tonenari/tonenari"
 
 [workspace.dependencies]
+rubato = { version = "5.0.0", default-features = false }
+audioadapter-buffers = "5.2.0"
 arc-swap = "1.8.0"
 axum = "0.8.9"
 parking_lot = "0.12.5"
+reqwest = { version = "0.13.4", default-features = false, features = ["json"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 thiserror = "2.0.20"
+base64 = "0.22.1"
+memmap2 = "0.9.9"
+truce-rack-core = "1.1.5"
+truce-rack-clap = "1.1.5"
+truce-rack-au = "1.1.5"
+truce-rack-au3 = "1.1.5"
+truce-rack-lv2 = "1.1.5"
+truce-rack-vst3 = "1.1.5"
+tao = { version = "0.35.3", default-features = false, features = ["rwh_06"] }
+x11-dl = "2.21.0"
 tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal"] }
+tonenari-audio-io = { path = "crates/audio-io" }
+tonenari-audio-graph = { path = "crates/audio-graph" }
+tonenari-audio-recorder = { path = "crates/audio-recorder" }
 tower = "0.5.3"
+tower-http = { version = "0.7.1", features = ["cors"] }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "deny", priority = -1 }
@@ -42,3 +69,25 @@ codegen-units = 1
 lto = "thin"
 panic = "abort"
 strip = "symbols"
+
+# Keep real-time sample conversion within its callback budget in `tauri dev`.
+# The application remains debuggable; only the measured DSP hot path is optimized.
+[profile.dev.package.tonenari-audio-io]
+opt-level = 3
+
+# Recorder-side generic SRC is instantiated here, not solely inside rubato.
+# Keep debug-app recording throughput under the same measured DSP policy.
+[profile.dev.package.tonenari-audio-recorder]
+opt-level = 3
+
+[profile.dev.package.rubato]
+opt-level = 3
+
+[profile.dev.package.audioadapter-buffers]
+opt-level = 3
+
+# Narrow, source-preserving fixes for Linux ARM64 C ABI signedness; see vendor/README.md.
+[patch.crates-io]
+truce-rack-vst3 = { path = "vendor/truce-rack-vst3" }
+truce-rack-clap = { path = "vendor/truce-rack-clap" }
+truce-rack-lv2 = { path = "vendor/truce-rack-lv2" }

@@ -33,6 +33,7 @@ describe('DriverStatusCard', () => {
       'restart_required',
       'installed_not_loaded',
       'blocked',
+      'unavailable',
       'invalid_permissions',
       'version_mismatch',
       'ready',

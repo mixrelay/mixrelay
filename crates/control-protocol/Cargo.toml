@@ -11,5 +11,8 @@ publish = false
 workspace = true
 
 [dependencies]
+tonenari-audio-recorder = { path = "../audio-recorder" }
 serde.workspace = true
 serde_json.workspace = true
+tonenari-audio-io.workspace = true
+tonenari-audio-graph = { path = "../audio-graph" }

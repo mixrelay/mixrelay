@@ -1,6 +1,145 @@
 use serde::{Deserialize, Serialize};
+pub use tonenari_audio_recorder::{RecorderRequest, RecorderStatus};
+
+/// Engine-authored capture ownership, independent of the graph visible in an editor.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplicationCaptureManifest {
+    pub protocol_version: u16,
+    pub revision: u64,
+    pub sources: Vec<ApplicationCaptureSource>,
+}
+
+/// One canonical capture owner and the exact request its native adapter must fulfill.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplicationCaptureSource {
+    pub node_id: String,
+    pub request: tonenari_audio_io::ApplicationCaptureRequest,
+}
+pub use tonenari_audio_io::session::SessionReconfigureRequest;
+
+/// Changes one identified virtual device, not the processing clock of unrelated routes.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VirtualEndpointFormatRequest {
+    pub expected_revision: u64,
+    pub endpoint_id: tonenari_audio_io::VirtualEndpointId,
+    pub sample_rate: u32,
+}
 
 pub const PROTOCOL_VERSION: u16 = 1;
+
+/// Publishes graph topology while retaining surviving providers' native state.
+/// Only explicit, bounded control edits overlay that state during publication.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphApplyRequest {
+    #[serde(flatten)]
+    pub document: tonenari_audio_graph::GraphDocument,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub processor_parameter_changes: Vec<GraphProcessorParameterChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GraphProcessorParameterChange {
+    pub node_id: String,
+    pub type_id: String,
+    pub parameter_id: u32,
+    pub value: f64,
+}
+
+impl From<tonenari_audio_graph::GraphDocument> for GraphApplyRequest {
+    fn from(document: tonenari_audio_graph::GraphDocument) -> Self {
+        Self {
+            document,
+            processor_parameter_changes: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphCatalogEntry {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphCatalogResponse {
+    pub protocol_version: u16,
+    pub catalog_revision: u64,
+    pub active_id: String,
+    pub graphs: Vec<GraphCatalogEntry>,
+    pub document: tonenari_audio_graph::GraphDocument,
+    #[serde(default)]
+    pub layout_revision: u64,
+    #[serde(default)]
+    pub layout: GraphLayout,
+    /// Audio publication succeeded but disk replacement failed; never report a rollback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persistence_error: Option<String>,
+}
+
+/// Presentation coordinates use UI identities, not DSP node identities. A duplex endpoint
+/// may have two independently positioned UI cards backed by one runtime graph node.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GraphLayout {
+    #[serde(default)]
+    pub positions: std::collections::BTreeMap<String, GraphNodePosition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<GraphViewport>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GraphNodePosition {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GraphViewport {
+    pub x: f64,
+    pub y: f64,
+    pub zoom: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GraphLayoutRequest {
+    pub expected_layout_revision: u64,
+    pub layout: GraphLayout,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphLayoutResponse {
+    pub graph_id: String,
+    pub layout_revision: u64,
+    pub layout: GraphLayout,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum GraphCatalogAction {
+    Create { name: String },
+    Select { id: String },
+    Rename { id: String, name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphCatalogRequest {
+    pub expected_revision: u64,
+    pub expected_catalog_revision: u64,
+    #[serde(flatten)]
+    pub action: GraphCatalogAction,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -10,6 +149,8 @@ pub enum DriverState {
     RestartRequired,
     InstalledNotLoaded,
     Blocked,
+    /// Installed transport cannot currently transfer audio; distinct from OS policy blocking.
+    Unavailable,
     InvalidPermissions,
     VersionMismatch,
     Ready,
@@ -18,23 +159,196 @@ pub enum DriverState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppStatus {
+    /// Finalization error from a removed recorder, retained independently of its node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorder_error: Option<String>,
     pub protocol_version: u16,
     pub driver_state: DriverState,
     pub sample_rate: Option<u32>,
     pub buffer_frames: Option<u32>,
     pub underruns: u64,
     pub overruns: u64,
+    /// Absent in older engines. UI must not manufacture capabilities when unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_session: Option<tonenari_audio_io::session::AudioSessionStatus>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GraphApplyState {
+    Pending,
+    Active,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphRuntimeStatus {
+    pub protocol_version: u16,
+    pub active_revision: u64,
+    pub submitted_revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeMeterSnapshot {
+    pub node_id: String,
+    pub port_id: String,
+    pub peaks: Vec<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeterSnapshot {
+    pub protocol_version: u16,
+    pub revision: u64,
+    pub nodes: Vec<NodeMeterSnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalProcessorFormat {
+    Au,
+    Auv3,
+    Clap,
+    Lv2,
+    Vst3,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessorParameterDescriptor {
+    pub id: u32,
+    pub name: String,
+    pub default_value: f64,
+    pub step_count: i32,
+    pub can_automate: bool,
+    pub is_read_only: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalProcessorDescriptor {
+    pub type_id: String,
+    pub display_name: String,
+    pub vendor: String,
+    pub version: String,
+    pub format: ExternalProcessorFormat,
+    pub input_channels: u16,
+    pub output_channels: u16,
+    pub has_editor: bool,
+    pub parameters: Vec<ProcessorParameterDescriptor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalProcessorCatalog {
+    pub protocol_version: u16,
+    pub processors: Vec<ExternalProcessorDescriptor>,
+    /// A partial scan retains previously usable entries and reports which discovery stages failed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<ExternalProcessorDiagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalProcessorDiagnostic {
+    pub format: ExternalProcessorFormat,
+    pub stage: ProcessorDiscoveryStage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_id: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessorDiscoveryStage {
+    Scan,
+    Probe,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessorScanRequest {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessorParameterUpdate {
+    pub value: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessorParameterUpdateResponse {
+    pub protocol_version: u16,
+    pub node_id: String,
+    pub parameter_id: u32,
+    pub value: f64,
+    /// The native parameter was accepted even when durable graph storage failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persistence_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessorEditorState {
+    Unavailable,
+    Closed,
+    Opening,
+    Open,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessorEditorFailure {
+    NoEditor,
+    DisplayUnavailable,
+    HostWindowFailed,
+    PluginRejected,
+    WorkerUnavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessorEditorRequest {
+    pub open: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessorEditorStatus {
+    pub protocol_version: u16,
+    pub node_id: String,
+    pub state: ProcessorEditorState,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub resizable: bool,
+    pub failure: Option<ProcessorEditorFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphApplyResponse {
+    pub protocol_version: u16,
+    pub revision: u64,
+    pub state: GraphApplyState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persistence_error: Option<String>,
 }
 
 impl Default for AppStatus {
     fn default() -> Self {
         Self {
+            recorder_error: None,
             protocol_version: PROTOCOL_VERSION,
             driver_state: DriverState::NotInstalled,
             sample_rate: None,
             buffer_frames: None,
             underruns: 0,
             overruns: 0,
+            audio_session: None,
         }
     }
 }
@@ -49,8 +363,19 @@ pub enum ErrorCode {
     AudioDeviceDisconnected,
     BufferUnderrun,
     BufferOverrun,
+    AudioSourceUnavailable,
     PairingRequired,
     Unauthorized,
+    ControlUnavailable,
+    GraphInvalid,
+    GraphRevisionStale,
+    GraphExchangeBusy,
+    GraphBindingUnsupported,
+    ProcessorUnavailable,
+    RecorderFailed,
+    AudioSessionUnsupported,
+    AudioSessionProcessorStateUnavailable,
+    AudioSessionReconfigureFailed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +387,35 @@ pub struct ProtocolError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn presentation_metadata_is_optional_for_pre_layout_catalog_responses() {
+        let old = serde_json::json!({
+            "protocolVersion":1,"catalogRevision":1,"activeId":"graph-1",
+            "graphs":[{"id":"graph-1","name":"Before layouts"}],
+            "document":{"schemaVersion":2,"revision":1,"nodes":[],"edges":[]}
+        });
+        let response: super::GraphCatalogResponse = serde_json::from_value(old).unwrap();
+        assert_eq!(response.layout_revision, 0);
+        assert_eq!(response.layout, super::GraphLayout::default());
+        let layout = serde_json::json!({"expectedLayoutRevision":3,"layout":{
+            "positions":{"duplex:from_os":{"x":100.0,"y":-20.0}},"viewport":{"x":0.0,"y":0.0,"zoom":1.25}
+        }});
+        let request: super::GraphLayoutRequest = serde_json::from_value(layout.clone()).unwrap();
+        assert_eq!(serde_json::to_value(request).unwrap(), layout);
+    }
+
+    #[test]
+    fn unavailable_driver_is_distinct_from_policy_block_and_round_trips() {
+        let status = super::AppStatus {
+            driver_state: super::DriverState::Unavailable,
+            ..super::AppStatus::default()
+        };
+        let json = serde_json::to_value(&status).unwrap();
+        assert_eq!(json["driverState"], "unavailable");
+        let decoded: super::AppStatus = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded.driver_state, super::DriverState::Unavailable);
+        assert_ne!(decoded.driver_state, super::DriverState::Blocked);
+    }
     use super::*;
 
     #[test]
@@ -72,5 +426,171 @@ mod tests {
         assert_eq!(json["driverState"], "not_installed");
         assert!(json["sampleRate"].is_null());
         assert!(json["bufferFrames"].is_null());
+
+        let runtime = serde_json::to_value(GraphRuntimeStatus {
+            protocol_version: PROTOCOL_VERSION,
+            active_revision: 4,
+            submitted_revision: 5,
+        })
+        .expect("runtime status should serialize");
+        assert_eq!(runtime["activeRevision"], 4);
+        assert_eq!(runtime["submittedRevision"], 5);
+
+        let applied = serde_json::to_value(GraphApplyResponse {
+            protocol_version: PROTOCOL_VERSION,
+            revision: 5,
+            state: GraphApplyState::Pending,
+            persistence_error: None,
+        })
+        .expect("apply response should serialize");
+        assert_eq!(applied["state"], "pending");
+        assert_eq!(
+            serde_json::to_value(GraphApplyState::Active).expect("state should serialize"),
+            "active"
+        );
+
+        let error = serde_json::to_value(ProtocolError {
+            code: ErrorCode::GraphBindingUnsupported,
+            parameters: serde_json::json!({ "nodeId": "virtual" }),
+        })
+        .expect("protocol error should serialize");
+        assert_eq!(error["code"], "graph_binding_unsupported");
+        assert_eq!(error["parameters"]["nodeId"], "virtual");
+
+        let parameter = serde_json::to_value(ProcessorParameterUpdateResponse {
+            protocol_version: PROTOCOL_VERSION,
+            node_id: "vst-1".to_owned(),
+            parameter_id: 42,
+            value: 0.75,
+            persistence_error: None,
+        })
+        .expect("parameter response should serialize");
+        assert_eq!(
+            serde_json::to_value(ExternalProcessorFormat::Au).expect("format should serialize"),
+            "au"
+        );
+        assert_eq!(
+            serde_json::to_value(ExternalProcessorFormat::Auv3).expect("format should serialize"),
+            "auv3"
+        );
+        assert_eq!(
+            serde_json::to_value(ExternalProcessorFormat::Clap).expect("format should serialize"),
+            "clap"
+        );
+        assert_eq!(
+            serde_json::to_value(ExternalProcessorFormat::Lv2).expect("format should serialize"),
+            "lv2"
+        );
+        assert_eq!(parameter["nodeId"], "vst-1");
+        assert_eq!(parameter["parameterId"], 42);
+        assert_eq!(parameter["value"], 0.75);
+
+        let editor = serde_json::to_value(ProcessorEditorStatus {
+            protocol_version: PROTOCOL_VERSION,
+            node_id: "processor-1".to_owned(),
+            state: ProcessorEditorState::Failed,
+            width: Some(640),
+            height: Some(480),
+            resizable: true,
+            failure: Some(ProcessorEditorFailure::DisplayUnavailable),
+        })
+        .expect("editor status should serialize");
+        assert_eq!(editor["nodeId"], "processor-1");
+        assert_eq!(editor["state"], "failed");
+        assert_eq!(editor["failure"], "display_unavailable");
+        assert_eq!(editor["width"], 640);
+    }
+
+    #[test]
+    fn parameter_storage_warning_is_optional_and_preserves_the_accepted_value() {
+        let mut response: ProcessorParameterUpdateResponse = serde_json::from_value(serde_json::json!({
+            "protocolVersion": PROTOCOL_VERSION, "nodeId": "effect", "parameterId": 7, "value": 0.75,
+        })).unwrap();
+        assert!(
+            response.persistence_error.is_none(),
+            "old responses remain readable"
+        );
+        assert!(
+            serde_json::to_value(&response)
+                .unwrap()
+                .get("persistenceError")
+                .is_none()
+        );
+        response.persistence_error = Some("disk unavailable".into());
+        let warned = serde_json::to_value(response).unwrap();
+        assert_eq!(
+            warned["value"], 0.75,
+            "storage warning does not roll back accepted audio"
+        );
+        assert_eq!(warned["persistenceError"], "disk unavailable");
+    }
+
+    #[test]
+    fn catalog_diagnostics_are_additive_and_preserve_format_stage_and_candidate_identity() {
+        let mut catalog: ExternalProcessorCatalog = serde_json::from_value(serde_json::json!({
+            "protocolVersion": PROTOCOL_VERSION, "processors": []
+        }))
+        .unwrap();
+        assert!(catalog.diagnostics.is_empty());
+        assert!(
+            serde_json::to_value(&catalog)
+                .unwrap()
+                .get("diagnostics")
+                .is_none()
+        );
+        catalog.diagnostics.push(ExternalProcessorDiagnostic {
+            format: ExternalProcessorFormat::Clap,
+            stage: ProcessorDiscoveryStage::Probe,
+            plugin_id: Some("clap:fixture".to_owned()),
+            message: "child timed out".to_owned(),
+        });
+        let encoded = serde_json::to_value(&catalog).unwrap();
+        assert_eq!(
+            encoded["diagnostics"][0],
+            serde_json::json!({
+                "format":"clap", "stage":"probe", "pluginId":"clap:fixture", "message":"child timed out"
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<ExternalProcessorCatalog>(encoded).unwrap(),
+            catalog
+        );
+    }
+
+    #[test]
+    fn graph_apply_explicit_control_intent_is_additive_to_legacy_documents() {
+        let document = tonenari_audio_graph::GraphDocument::new(2, vec![], vec![]);
+        let legacy = serde_json::to_value(&document).unwrap();
+        let mut request: GraphApplyRequest = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(request.processor_parameter_changes.is_empty());
+        assert_eq!(serde_json::to_value(&request).unwrap(), legacy);
+        request
+            .processor_parameter_changes
+            .push(GraphProcessorParameterChange {
+                node_id: "effect".into(),
+                type_id: "vst3:fixture".into(),
+                parameter_id: 42,
+                value: 0.25,
+            });
+        let encoded = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            encoded["processorParameterChanges"][0],
+            serde_json::json!({
+                "nodeId":"effect", "typeId":"vst3:fixture", "parameterId":42, "value":0.25
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<GraphApplyRequest>(encoded.clone()).unwrap(),
+            request
+        );
+        assert_eq!(
+            serde_json::from_value::<tonenari_audio_graph::GraphDocument>(encoded.clone()).unwrap(),
+            document,
+            "desktop preflight can inspect the document while forwarding the complete intent unchanged"
+        );
+        let mut malformed = encoded;
+        malformed["processorParameterChanges"][0]["stateBase64"] =
+            "implicit preset replacement".into();
+        assert!(serde_json::from_value::<GraphApplyRequest>(malformed).is_err());
     }
 }

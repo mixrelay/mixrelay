@@ -1,0 +1,37 @@
+[package]
+name = "tonenari-processor-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+base64.workspace = true
+memmap2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tonenari-audio-engine = { path = "../audio-engine" }
+tonenari-audio-graph = { path = "../audio-graph" }
+tonenari-control-protocol = { path = "../control-protocol" }
+truce-rack-clap.workspace = true
+truce-rack-core.workspace = true
+truce-rack-vst3.workspace = true
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+tao.workspace = true
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+truce-rack-au.workspace = true
+truce-rack-au3.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+truce-rack-lv2.workspace = true
+x11-dl.workspace = true
+
+[dev-dependencies]
+tonenari-test-support = { path = "../test-support" }

@@ -1,0 +1,166 @@
+use super::{FREE, PACKETS, Packet, PacketRing, READING, WRITING};
+use crate::transport::{RecorderTap, Transport};
+use std::sync::{Arc, atomic::Ordering};
+
+#[test]
+fn preempted_worker_slot_never_makes_capture_wait_or_touch_its_pcm() {
+    let shared = Transport::new(2);
+    let tap = RecorderTap::new(Arc::clone(&shared));
+    shared.gate.store(1, Ordering::SeqCst);
+    let slot = &shared.packets.slots[0];
+    slot.state.store(READING, Ordering::Release);
+    slot.samples[0].store(0.75_f32.to_bits(), Ordering::Relaxed);
+    // The worker remains preempted throughout the capture call. Waiting for it
+    // would deadlock this fixture; returning an explicit fault is the contract.
+    let allocation = allocation_counter::measure(|| tap.capture(&[0.25; 512], 48_000));
+    assert_eq!((allocation.count_total, allocation.count_current), (0, 0));
+    assert_eq!(slot.state.load(Ordering::Acquire), READING);
+    assert_eq!(slot.samples[0].load(Ordering::Relaxed), 0.75_f32.to_bits());
+    assert_eq!(shared.cutoff(), Some("recorder packet queue overrun"));
+    slot.state.store(FREE, Ordering::Release);
+}
+
+#[test]
+fn consumer_does_not_wait_for_an_unpublished_packet() {
+    let ring = PacketRing::new(1);
+    let mut packet = Packet::new(1);
+    ring.slots[0].state.store(WRITING, Ordering::Release);
+    assert!(!ring.read(&mut packet));
+    assert_eq!(ring.read.load(Ordering::Relaxed), 0);
+    assert_eq!(packet.frames, 0);
+}
+
+#[test]
+fn packet_pcm_and_rate_metadata_remain_fifo_across_concurrent_ring_wraps() {
+    let ring = Arc::new(PacketRing::new(2));
+    let producer_ring = Arc::clone(&ring);
+    let producer = std::thread::spawn(move || {
+        for index in 0..4096_u16 {
+            let rate = if index % 2 == 0 { 44_100 } else { 48_000 };
+            let value = f32::from(index);
+            while !producer_ring.publish(&[value, -value], rate) {
+                std::thread::yield_now();
+            }
+        }
+        producer_ring.finish_pending();
+    });
+    let mut packet = Packet::new(2);
+    for index in 0..4096_u16 {
+        while !ring.read(&mut packet) {
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            (packet.frames, packet.rate),
+            (1, if index % 2 == 0 { 44_100 } else { 48_000 })
+        );
+        assert_eq!(packet.samples[0].to_bits(), f32::from(index).to_bits());
+        assert_eq!(packet.samples[1].to_bits(), (-f32::from(index)).to_bits());
+    }
+    producer.join().unwrap();
+    assert!(!ring.read(&mut packet));
+    assert_eq!(ring.slots.len(), PACKETS);
+}
+
+#[test]
+fn concurrent_tap_clone_and_retirement_do_not_change_packet_ownership() {
+    let shared = Transport::new(1);
+    let tap = RecorderTap::new(Arc::clone(&shared));
+    std::thread::scope(|scope| {
+        for _ in 0..8 {
+            let tap = &tap;
+            scope.spawn(move || {
+                for _ in 0..1024 {
+                    drop(tap.clone());
+                }
+            });
+        }
+    });
+    assert_eq!(shared.taps.load(Ordering::SeqCst), 1);
+    shared.gate.store(1, Ordering::SeqCst);
+    tap.capture(&[0.5], 48_000);
+    assert_eq!(shared.cutoff(), None);
+    let mut packet = Packet::new(1);
+    assert!(shared.read_packet(&mut packet));
+    assert_eq!(packet.samples[0].to_bits(), 0.5_f32.to_bits());
+    drop(tap);
+    assert_eq!(shared.taps.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn small_callbacks_use_the_full_fixed_frame_capacity_without_allocation() {
+    let shared = Transport::new(8);
+    let tap = RecorderTap::new(Arc::clone(&shared));
+    shared.gate.store(1, Ordering::SeqCst);
+    let allocation = allocation_counter::measure(|| {
+        for _ in 0..PACKETS * 8 {
+            tap.capture(&[0.25; 32 * 8], 48_000);
+        }
+    });
+    assert_eq!((allocation.count_total, allocation.count_current), (0, 0));
+    assert_eq!(shared.gate.load(Ordering::SeqCst), 1);
+    tap.capture(&[0.5; 8], 48_000);
+    assert_eq!(shared.cutoff(), Some("recorder packet queue overrun"));
+    let mut packet = Packet::new(8);
+    for _ in 0..PACKETS {
+        assert!(shared.read_packet(&mut packet));
+        assert_eq!((packet.frames, packet.rate), (256, 48_000));
+        assert!(
+            packet
+                .samples
+                .iter()
+                .all(|value| value.to_bits() == 0.25_f32.to_bits())
+        );
+    }
+    assert!(!shared.read_packet(&mut packet));
+}
+
+#[test]
+fn partial_rate_change_and_cutoff_preserve_fifo_and_each_original_rate() {
+    let shared = Transport::new(2);
+    let tap = RecorderTap::new(Arc::clone(&shared));
+    shared.gate.store(1, Ordering::SeqCst);
+    tap.capture(&[0.25; 64], 48_000);
+    let mut packet = Packet::new(2);
+    assert!(!shared.read_packet(&mut packet));
+    tap.capture(&[0.5; 96], 44_100);
+    assert!(shared.read_packet(&mut packet));
+    assert_eq!((packet.frames, packet.rate), (32, 48_000));
+    assert!(
+        packet.samples[..64]
+            .iter()
+            .all(|value| value.to_bits() == 0.25_f32.to_bits())
+    );
+    assert!(!shared.read_packet(&mut packet));
+    assert_eq!(shared.cutoff(), None);
+    assert!(shared.read_packet(&mut packet));
+    assert_eq!((packet.frames, packet.rate), (48, 44_100));
+    assert!(
+        packet.samples[..96]
+            .iter()
+            .all(|value| value.to_bits() == 0.5_f32.to_bits())
+    );
+    assert!(!shared.read_packet(&mut packet));
+}
+
+#[test]
+fn carried_partial_plus_maximum_callback_keeps_all_frames_in_order() {
+    let shared = Transport::new(1);
+    let tap = RecorderTap::new(Arc::clone(&shared));
+    shared.gate.store(1, Ordering::SeqCst);
+    tap.capture(&[0.25], 48_000);
+    let allocation = allocation_counter::measure(|| tap.capture(&[0.5; 4096], 48_000));
+    assert_eq!((allocation.count_total, allocation.count_current), (0, 0));
+    assert_eq!(shared.cutoff(), None);
+    let mut packet = Packet::new(1);
+    let mut frames = 0;
+    while shared.read_packet(&mut packet) {
+        for sample in &packet.samples[..packet.frames] {
+            assert_eq!(
+                sample.to_bits(),
+                if frames == 0 { 0.25_f32 } else { 0.5_f32 }.to_bits()
+            );
+            frames += 1;
+        }
+    }
+    assert_eq!(frames, 4097);
+}

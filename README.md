@@ -1,19 +1,22 @@
 # ToneNari
 
-ToneNari is a macOS audio-routing application for streamers, audio artists,
-and independent broadcasters. The first product goal is a dependable virtual
-Capture-to-Stream path that works naturally with OBS.
+ToneNari is a cross-platform audio-routing application for streamers, audio artists,
+and independent broadcasters. Its portable graph and DSP engine is shared across macOS,
+Linux/PipeWire, and Windows/WASAPI, while native discovery, capture, and virtual-device lifecycles
+remain isolated behind host-audio interfaces.
 
 ## Repository layout
 
 - `apps/control-ui`: responsive React control surface shared by desktop and LAN clients
-- `apps/desktop`: Tauri application wrapper and macOS menu-bar lifecycle
+- `apps/desktop`: Tauri application wrapper and desktop tray lifecycle
 - `crates/audio-graph`: versioned graph contract and deterministic execution-plan compiler
 - `crates/audio-engine`: real-time engine policy and domain state
+- `crates/processor-host`: isolated AU/VST3/CLAP/LV2 discovery, DSP workers, and native editor broker
 - `crates/control-protocol`: stable machine-readable control contract
 - `crates/control-server`: local HTTP control service; loopback-only by default
+- `apps/engine-service`: platform audio backend, graph lifecycle, and control service process
 - `native/macos/hal-driver`: isolated AudioServerPlugIn implementation boundary
-- `packaging/macos`: signed and notarized package work
+- `packaging`: platform-specific service, driver, and installer boundaries
 
 ## Development
 
@@ -27,6 +30,11 @@ pnpm desktop:dev
 
 The complete macOS build requires full Xcode. Command Line Tools alone are not
 sufficient for the HAL driver, signing, notarization, and final bundle checks.
+
+The [cross-OS development lab](infra/lab/README.md) separates local macOS validation,
+Debian/Ubuntu/Kali/Arch Docker builds, and Linux/Windows desktop VM verification.
+`pnpm lab:build` and `pnpm lab:test` run inside the actual target OS and record their scope;
+they do not imply that native drivers or live audio have passed qualification.
 
 The UI dependency direction is `Mantine -> Core -> Feature -> Screen`. Direct
 Mantine imports outside `apps/control-ui/src/core` fail the boundary check.

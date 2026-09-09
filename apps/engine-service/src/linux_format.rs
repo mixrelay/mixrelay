@@ -1,0 +1,217 @@
+//! Native format owners are staged off RT, then revision-fenced with the DSP plan.
+use super::{
+    Arc, AtomicBool, CaptureWatch, DeviceStreams, DeviceWatch, Duration, EndpointUpdate,
+    EngineGraphController, HostAudioBackendError, Instant, LinuxResourceSpec, LinuxResourceUpdate,
+    LinuxVirtualEndpointBackend, Ordering, PipeWireCaptureSet, PipeWireEndpoint, RenderFormat,
+    thread,
+};
+use tonenari_engine_service::PreparedGraphFormat;
+#[cfg(test)]
+#[path = "linux_format_tests.rs"]
+mod tests;
+
+pub(super) use tonenari_audio_io::formats::{
+    BUFFER_SIZES as BLOCKS, MAX_BUFFER_FRAMES as MAX_BLOCK, SAMPLE_RATES as RATES,
+};
+static OBSERVED_ENDPOINT_RATE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+// Internal callback diagnostics only. PipeWire's variable scheduling quantum is
+// not an own-endpoint fixed buffer setting and must never overwrite user intent.
+static OBSERVED_ENDPOINT_QUANTUM: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+pub(super) fn observed_endpoint_rate() -> Option<u32> {
+    let rate = OBSERVED_ENDPOINT_RATE.load(Ordering::Acquire);
+    (rate != 0).then_some(rate)
+}
+
+pub(super) fn observe_endpoint(endpoint: Option<&PipeWireEndpoint>) {
+    let mut agreed = None;
+    let mut quantum = 0;
+    if let Some(endpoint) = endpoint {
+        for stream in endpoint.render.iter().chain(endpoint.capture.iter()) {
+            let observed = stream.callback_quantum();
+            if observed != 0 {
+                quantum = observed;
+            }
+            let rate = (stream.negotiated_format() >> 32) as u32;
+            if rate == 0 || agreed.is_some_and(|previous| previous != rate) {
+                OBSERVED_ENDPOINT_RATE.store(0, Ordering::Release);
+                OBSERVED_ENDPOINT_QUANTUM.store(0, Ordering::Release);
+                return;
+            }
+            agreed = Some(rate);
+        }
+    }
+    // Only ACTIVE ToneNari-owned endpoint PCM formats are observed. Neither the
+    // server graph's rate nor staged future streams represent the user's setting.
+    OBSERVED_ENDPOINT_RATE.store(agreed.unwrap_or(0), Ordering::Release);
+    OBSERVED_ENDPOINT_QUANTUM.store(quantum, Ordering::Release);
+}
+
+pub(super) struct Monitor {
+    stop: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+impl Monitor {
+    pub(super) fn start(controller: &Arc<EngineGraphController>) -> Result<Self, String> {
+        let controller = Arc::downgrade(controller);
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopping = stop.clone();
+        let worker = thread::Builder::new()
+            .name("tonenari-pipewire-format-monitor".into())
+            .spawn(move || {
+                let mut last_error = None;
+                while !stopping.load(Ordering::Acquire) {
+                    let Some(controller) = controller.upgrade() else {
+                        break;
+                    };
+                    let error = controller.reconcile_observed_device_rate().err();
+                    if error != last_error {
+                        if let Some(error) = &error {
+                            eprintln!("ToneNari endpoint format follow failed: {error:?}");
+                        }
+                        last_error = error;
+                    }
+                    drop(controller);
+                    thread::park_timeout(Duration::from_millis(250));
+                }
+            })
+            .map_err(|error| error.to_string())?;
+        Ok(Self {
+            stop,
+            worker: Some(worker),
+        })
+    }
+}
+impl Drop for Monitor {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(worker) = self.worker.take() {
+            worker.thread().unpark();
+            if worker.join().is_err() {
+                eprintln!("ToneNari endpoint format monitor panicked");
+            }
+        }
+    }
+}
+
+pub(super) const fn pack(format: RenderFormat) -> u64 {
+    (format.sample_rate as u64) << 32 | format.block_frames as u64
+}
+pub(super) fn unpack(value: u64) -> RenderFormat {
+    RenderFormat {
+        sample_rate: (value >> 32) as u32,
+        block_frames: u32::try_from(value & u64::from(u32::MAX)).expect("masked low word"),
+    }
+}
+
+struct Reservation(Arc<LinuxVirtualEndpointBackend>);
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        self.0.format_reserved.store(false, Ordering::Release);
+    }
+}
+struct Prepared {
+    reservation: Reservation,
+    resources: Box<LinuxResourceUpdate>,
+    spec: LinuxResourceSpec,
+    format: RenderFormat,
+    application_watch: CaptureWatch,
+    device_watch: DeviceWatch,
+}
+
+impl PreparedGraphFormat for Prepared {
+    fn commit(self: Box<Self>) {
+        let Self {
+            reservation,
+            resources,
+            spec,
+            format,
+            application_watch,
+            device_watch,
+        } = *self;
+        let backend = &reservation.0;
+        // Controller serialization plus reservation excludes another publication.
+        // All owners and the envelope already exist; callback only swaps them.
+        *backend
+            .active_spec
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = spec;
+        *backend
+            .application_watch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(application_watch);
+        *backend
+            .device_watch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(device_watch);
+        backend.active_format.store(pack(format), Ordering::Release);
+        backend
+            .pending
+            .store(Box::into_raw(resources), Ordering::Release);
+    }
+}
+
+pub(super) fn prepare(
+    backend: &LinuxVirtualEndpointBackend,
+    document: &tonenari_audio_graph::GraphDocument,
+    requested: RenderFormat,
+) -> Result<Box<dyn PreparedGraphFormat>, HostAudioBackendError> {
+    let failure = |message: String| HostAudioBackendError::BackendFailure { message };
+    tonenari_audio_io::format_contract::validate_format(
+        requested.sample_rate,
+        requested.block_frames,
+    )
+    .map_err(|error| failure(error.to_string()))?;
+    let owner = backend
+        .self_ref
+        .upgrade()
+        .ok_or_else(|| failure("PipeWire backend stopped".into()))?;
+    backend
+        .format_reserved
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .map_err(|_| failure("PipeWire format already reserved".into()))?;
+    let reservation = Reservation(owner);
+    if !backend.pending.load(Ordering::Acquire).is_null() {
+        return Err(failure("PipeWire graph resources are still pending".into()));
+    }
+    let spec = LinuxResourceSpec::from_document(document)?;
+    let endpoint = spec
+        .endpoint
+        .as_ref()
+        .map(|binding| PipeWireEndpoint::open_format(binding, requested).map(Box::new))
+        .transpose()
+        .map_err(failure)?;
+    let generation = backend
+        .application_generation
+        .fetch_add(1, Ordering::Relaxed)
+        + 1;
+    let (captures, application_watch) =
+        PipeWireCaptureSet::open_format(&spec.captures, generation, requested).map_err(failure)?;
+    let generation = backend.device_generation.fetch_add(1, Ordering::Relaxed) + 1;
+    let devices =
+        DeviceStreams::open_format(&spec.devices, generation, requested).map_err(failure)?;
+    let device_watch = devices.watch(spec.devices.clone());
+    let started = Instant::now();
+    while !endpoint.as_ref().is_none_or(|value| value.ready()) || !captures.formats_ready() {
+        if started.elapsed() > Duration::from_secs(3) {
+            return Err(failure(
+                "PipeWire did not negotiate the requested stream format".into(),
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    Ok(Box::new(Prepared {
+        reservation,
+        spec,
+        format: requested,
+        application_watch,
+        device_watch,
+        resources: Box::new(LinuxResourceUpdate {
+            revision: document.revision,
+            endpoint: EndpointUpdate::Replace(endpoint),
+            captures: Some(Box::new(captures)),
+            devices: Some(Box::new(devices)),
+        }),
+    }))
+}

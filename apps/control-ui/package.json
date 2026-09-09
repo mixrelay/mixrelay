@@ -16,6 +16,8 @@
   "dependencies": {
     "@mantine/core": "9.6.0",
     "@mantine/hooks": "9.6.0",
+    "@tauri-apps/api": "2.11.1",
+    "@xyflow/react": "^12.11.6",
     "i18next": "26.4.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",

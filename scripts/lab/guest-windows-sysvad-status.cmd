@@ -1,0 +1,4 @@
+@echo off
+rem Read-only live status snapshot; completed build evidence is stored separately.
+powershell.exe -NoProfile -NonInteractive -Command "$ErrorActionPreference='Stop'; if ((Get-CimInstance Win32_ComputerSystemProduct).UUID -ne '712A936E-9D91-4455-A8A9-A1F65EB60719') {throw 'Not the authorized VM'}; Get-Process | Where-Object ProcessName -match 'setup|vs_|msiexec|msbuild|powershell|cl$' | Select-Object Id,ProcessName,CPU,StartTime | Format-Table; $logs=Get-ChildItem C:\Windows\Temp\dd_setup*.log -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1; foreach ($log in $logs) {Write-Output $log.FullName; Get-Content $log.FullName -Tail 12}; Get-ChildItem C:\ToneNariLab\BuildTools\MSBuild\Microsoft\VC\v170\Platforms\ARM64\PlatformToolsets | Select-Object Name | Format-Table" > C:\ToneNariLab\sysvad-status.log 2>&1
+exit /b %errorlevel%

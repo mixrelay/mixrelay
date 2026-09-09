@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "revision": 7,
   "nodes": [
     {
@@ -12,7 +12,28 @@
           "bundle_id": "com.google.Chrome",
           "include_descendants": true
         },
-        "outputChannels": 2
+        "stream": {
+          "channels": 2,
+          "channelLayout": "stereo"
+        },
+        "sourcePlayback": "preserve"
+      }
+    },
+    {
+      "id": "spat-ingress",
+      "label": "SPAT Revolution ingress",
+      "type": "virtual_endpoint",
+      "config": {
+        "id": "io.tonenari.virtual.spat",
+        "displayName": "ToneNari SPAT In",
+        "reference": { "render": true, "capture": false },
+        "render": {
+          "channels": 64,
+          "channelLayout": "discrete"
+        },
+        "capture": null,
+        "supportedSampleRates": [48000, 96000],
+        "defaultSampleRate": 48000
       }
     },
     {
@@ -29,18 +50,25 @@
       "label": "Broadcast mix",
       "type": "mixer",
       "config": {
-        "inputs": ["browser", "voice"],
+        "inputs": ["browser", "voice", "spat"],
         "channels": 2
       }
     },
     {
       "id": "tonenari-stream",
       "label": "ToneNari Stream",
-      "type": "virtual_device",
+      "type": "virtual_endpoint",
       "config": {
-        "persistentUid": "io.tonenari.virtual.stream.default",
-        "name": "ToneNari Stream",
-        "channels": 2
+        "id": "io.tonenari.virtual.stream.default",
+        "displayName": "ToneNari OBS Mix",
+        "reference": { "render": false, "capture": true },
+        "render": null,
+        "capture": {
+          "channels": 2,
+          "channelLayout": "stereo"
+        },
+        "supportedSampleRates": [48000, 96000],
+        "defaultSampleRate": 48000
       }
     },
     {
@@ -55,6 +83,18 @@
   ],
   "edges": [
     {
+      "id": "spat-to-mix",
+      "source": { "nodeId": "spat-ingress", "portId": "from_os" },
+      "destination": { "nodeId": "broadcast-mix", "portId": "spat" },
+      "channelMapping": {
+        "mode": "explicit",
+        "routes": [
+          { "sourceChannel": 0, "destinationChannel": 0 },
+          { "sourceChannel": 1, "destinationChannel": 1 }
+        ]
+      }
+    },
+    {
       "id": "chrome-to-mix",
       "source": { "nodeId": "chrome", "portId": "audio" },
       "destination": { "nodeId": "broadcast-mix", "portId": "browser" }
@@ -67,7 +107,7 @@
     {
       "id": "mix-to-stream",
       "source": { "nodeId": "broadcast-mix", "portId": "audio" },
-      "destination": { "nodeId": "tonenari-stream", "portId": "audio" }
+      "destination": { "nodeId": "tonenari-stream", "portId": "to_os" }
     },
     {
       "id": "mix-to-monitor",

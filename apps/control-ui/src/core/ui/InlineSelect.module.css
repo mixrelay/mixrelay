@@ -1,0 +1,19 @@
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.field select {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 1px 3px;
+}
+
+.field select:focus-visible {
+  outline: 1px solid var(--signal);
+}

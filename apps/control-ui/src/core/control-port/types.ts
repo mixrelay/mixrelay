@@ -4,19 +4,382 @@ export type DriverState =
   | 'restart_required'
   | 'installed_not_loaded'
   | 'blocked'
+  | 'unavailable'
   | 'invalid_permissions'
   | 'version_mismatch'
   | 'ready';
 
 export interface ToneNariStatus {
+  recorderError?: string | null;
   protocolVersion: 1;
   driverState: DriverState;
   sampleRate: number | null;
   bufferFrames: number | null;
   underruns: number;
   overruns: number;
+  audioSession?: AudioSessionStatus;
+}
+
+export interface AudioSessionStatus {
+  endpointPreferencesUnavailable?: boolean;
+  virtualEndpointSettings?: VirtualEndpointSettings;
+  processingState?: 'idle' | 'running' | 'stopped';
+  discontinuities?: number;
+  format: { sampleRate: number; blockFrames: number };
+  preferredFormat?: { sampleRate: number; blockFrames: number } | null;
+  clockAuthority: 'engine_timer' | 'device' | 'audio_server' | 'host';
+  observedDeviceSampleRate: number | null;
+  observedDeviceBufferFrames?: number | null;
+  issue:
+    | 'processing_failed'
+    | 'application_unavailable'
+    | 'application_ambiguous'
+    | 'device_unavailable'
+    | 'sample_rate_mismatch'
+    | 'block_size_mismatch'
+    | 'clock_not_synchronized'
+    | 'invalid_format'
+    | 'reconfiguration_failed'
+    | 'preferences_unavailable'
+    | 'stored_format_unavailable'
+    | null;
+  transportLatencyFrames: number | null;
+  capabilities: {
+    backend: 'core_audio' | 'pipe_wire' | 'wasapi' | 'contract_only';
+    supportedSampleRates: number[];
+    supportedBlockFrames: number[];
+    canReconfigureLive: boolean;
+    hardwareInput: boolean;
+    hardwareOutput: boolean;
+    virtualEndpoint: boolean;
+    applicationCapture: boolean;
+    sampleRateConversion: boolean;
+    driftCorrection: boolean;
+  };
+}
+
+export interface VirtualEndpointSettings {
+  canCreate: boolean;
+  canRename: boolean;
+  renderChannels: number[];
+  captureChannels: number[];
+  creationTemplate: Omit<VirtualEndpointSpec, 'id' | 'displayName'> | null;
+  devices: VirtualEndpointDevice[];
+}
+
+export interface VirtualEndpointDevice {
+  nativeDeviceIds: string[];
+  spec: VirtualEndpointSpec;
+  observedSampleRate: number | null;
+  supportedSampleRates: number[];
+  canSetSampleRate: boolean;
+}
+
+export interface RuntimeStreamSpec {
+  channelLayout: 'discrete' | 'mono' | 'stereo';
+  channels: number;
+}
+
+export interface VirtualEndpointSpec {
+  id: string;
+  displayName: string;
+  render?: RuntimeStreamSpec | null;
+  capture?: RuntimeStreamSpec | null;
+  supportedSampleRates: number[];
+  defaultSampleRate: number;
+}
+
+export interface VirtualEndpointRateError {
+  endpointId: string;
+  sampleRate: number;
+  message: string;
+  kind: 'negotiation' | 'persistence';
+}
+
+export interface RuntimeVirtualEndpointConfig extends VirtualEndpointSpec {
+  gainDb?: number;
+  reference: { render: boolean; capture: boolean };
+}
+
+export type RuntimeApplicationSelector =
+  | { bundle_id: string; include_descendants: boolean; match: 'bundle_id' }
+  | { match: 'executable_path'; path: string }
+  | { include_descendants: boolean; match: 'process_id'; process_id: number }
+  | { bundle_ids: string[]; match: 'all_except' };
+
+export interface CapturableApplication {
+  bundleId: string;
+  displayName: string;
+  iconDataUrl: string | null;
+  processId: number;
+  selector?: RuntimeApplicationSelector;
+}
+
+export interface AudioDeviceDescriptor {
+  displayName: string;
+  inputChannels: number;
+  isDefaultInput: boolean;
+  isDefaultOutput: boolean;
+  outputChannels: number;
+  uid: string;
+}
+
+export interface RuntimeGraphNode {
+  config: unknown;
+  id: string;
+  label: string | null;
+  type: string;
+}
+
+export interface RuntimeAudioEndpoint {
+  nodeId: string;
+  portId: string;
+}
+
+export interface RuntimeChannelRoute {
+  destinationChannel: number;
+  sourceChannel: number;
+}
+
+export interface RuntimeGraphEdge {
+  channelMapping: { mode: 'auto' } | { mode: 'explicit'; routes: RuntimeChannelRoute[] };
+  destination: RuntimeAudioEndpoint;
+  id: string;
+  source: RuntimeAudioEndpoint;
+}
+
+export interface RuntimeGraphDocument {
+  edges: RuntimeGraphEdge[];
+  nodes: RuntimeGraphNode[];
+  revision: number;
+  schemaVersion: 2;
+}
+
+export interface GraphRuntimeStatus {
+  activeRevision: number;
+  protocolVersion: 1;
+  submittedRevision: number;
+}
+
+export interface NodeMeterSnapshot {
+  nodeId: string;
+  peaks: number[];
+  portId: string;
+}
+
+export interface MeterSnapshot {
+  nodes: NodeMeterSnapshot[];
+  protocolVersion: 1;
+  revision: number;
+}
+
+export interface ProcessorParameterDescriptor {
+  canAutomate: boolean;
+  defaultValue: number;
+  id: number;
+  isReadOnly: boolean;
+  name: string;
+  stepCount: number;
+}
+
+export interface ExternalProcessorDescriptor {
+  displayName: string;
+  format: 'au' | 'auv3' | 'clap' | 'lv2' | 'vst3';
+  hasEditor: boolean;
+  inputChannels: number;
+  outputChannels: number;
+  parameters: ProcessorParameterDescriptor[];
+  typeId: string;
+  vendor: string;
+  version: string;
+}
+
+export interface ExternalProcessorDiagnostic {
+  format: ExternalProcessorDescriptor['format'];
+  stage: 'scan' | 'probe';
+  pluginId?: string;
+  message: string;
+}
+
+export interface ExternalProcessorCatalog {
+  processors: ExternalProcessorDescriptor[];
+  protocolVersion: 1;
+  /** A partial native scan is not a successful empty catalog. */
+  diagnostics?: ExternalProcessorDiagnostic[];
+}
+
+export interface ProcessorParameterUpdateResponse {
+  nodeId: string;
+  parameterId: number;
+  protocolVersion: 1;
+  value: number;
+  /** Audio accepted the value, but durable graph storage may have failed. */
+  persistenceError?: string;
+}
+
+export type ProcessorEditorState = 'unavailable' | 'closed' | 'opening' | 'open' | 'failed';
+
+export type ProcessorEditorFailure =
+  | 'no_editor'
+  | 'display_unavailable'
+  | 'host_window_failed'
+  | 'plugin_rejected'
+  | 'worker_unavailable';
+
+export interface ProcessorEditorStatus {
+  failure: ProcessorEditorFailure | null;
+  height: number | null;
+  nodeId: string;
+  protocolVersion: 1;
+  resizable: boolean;
+  state: ProcessorEditorState;
+  width: number | null;
+}
+
+export interface GraphApplyResponse {
+  protocolVersion: 1;
+  revision: number;
+  state: 'active' | 'pending';
+  persistenceError?: string;
+}
+
+/** Only controls explicitly edited by this client; never inferred from a stale engine snapshot. */
+export interface ProcessorParameterChange {
+  nodeId: string;
+  typeId: string;
+  parameterId: number;
+  value: number;
+}
+
+export interface GraphApplyRequest extends RuntimeGraphDocument {
+  processorParameterChanges?: ProcessorParameterChange[];
+}
+
+export type ProtocolErrorCode =
+  | 'recorder_failed'
+  | 'audio_session_unsupported'
+  | 'audio_session_processor_state_unavailable'
+  | 'audio_session_reconfigure_failed'
+  | 'audio_device_disconnected'
+  | 'audio_source_unavailable'
+  | 'control_unavailable'
+  | 'control_request_failed'
+  | 'graph_binding_unsupported'
+  | 'graph_exchange_busy'
+  | 'graph_invalid'
+  | 'graph_revision_stale'
+  | 'processor_unavailable';
+
+export interface ProtocolErrorBody {
+  code: ProtocolErrorCode;
+  parameters: unknown;
+}
+
+export class ControlPortError extends Error {
+  public constructor(
+    public readonly status: number,
+    public readonly body: ProtocolErrorBody,
+  ) {
+    super(body.code);
+    this.name = 'ControlPortError';
+  }
+}
+
+export interface VirtualEndpointFormatRequest {
+  endpointId: string;
+  expectedRevision: number;
+  sampleRate: number;
+}
+
+export type RecorderEncoding = 'pcm16' | 'pcm24' | 'float32';
+
+export interface RecorderRequest {
+  action: 'record' | 'pause' | 'stop';
+  path?: string;
+  sampleRate?: number | null;
+  encoding?: RecorderEncoding;
+}
+
+export interface RecorderStatus {
+  state: 'stopped' | 'recording' | 'paused' | 'failed';
+  path: string | null;
+  sampleRate: number | null;
+  encoding: RecorderEncoding | null;
+  frames: number;
+  error: string | null;
 }
 
 export interface ControlPort {
+  recorderStatus(graphId: string, nodeId: string): Promise<RecorderStatus>;
+  controlRecorder(
+    graphId: string,
+    nodeId: string,
+    request: RecorderRequest,
+  ): Promise<RecorderStatus>;
+  selectRecordingPath?(options: { defaultPath?: string; title?: string }): Promise<string | null>;
+  defaultRecordingPath?(): Promise<string>;
+  setVirtualEndpointSampleRate?(request: VirtualEndpointFormatRequest): Promise<GraphApplyResponse>;
+  getGraphLayout?(graphId: string): Promise<GraphLayoutResponse>;
+  setGraphLayout?(graphId: string, request: GraphLayoutRequest): Promise<GraphLayoutResponse>;
+  getGraphCatalog?(): Promise<GraphCatalog>;
+  mutateGraphCatalog?(request: GraphCatalogRequest): Promise<GraphCatalog>;
+  reconfigureSession?(request: {
+    expectedRevision: number;
+    format: AudioSessionStatus['format'];
+  }): Promise<GraphApplyResponse>;
+  applyGraph(document: GraphApplyRequest): Promise<GraphApplyResponse>;
+  getGraph(): Promise<RuntimeGraphDocument>;
+  getGraphStatus(): Promise<GraphRuntimeStatus>;
+  getMeters(): Promise<MeterSnapshot>;
+  getProcessors(): Promise<ExternalProcessorCatalog>;
+  getProcessorEditor(nodeId: string): Promise<ProcessorEditorStatus>;
+  rescanProcessors(paths: string[]): Promise<ExternalProcessorCatalog>;
   getStatus(): Promise<ToneNariStatus>;
+  setProcessorParameter(
+    nodeId: string,
+    parameterId: number,
+    value: number,
+  ): Promise<ProcessorParameterUpdateResponse>;
+  setProcessorEditor(nodeId: string, open: boolean): Promise<ProcessorEditorStatus>;
+  listCapturableApplications?(): Promise<CapturableApplication[]>;
+  listAudioDevices?(): Promise<AudioDeviceDescriptor[]>;
+  selectProcessorDirectory?(): Promise<string | null>;
 }
+
+export interface GraphCatalog {
+  layout?: GraphLayout;
+  layoutRevision?: number;
+  protocolVersion: number;
+  catalogRevision: number;
+  activeId: string;
+  graphs: { id: string; name: string }[];
+  document: RuntimeGraphDocument;
+  persistenceError?: string;
+}
+
+/** Presentation-only metadata. Saving it must never submit or reprepare the audio graph. */
+export interface GraphLayout {
+  positions: Record<string, { x: number; y: number }>;
+  viewport?: { x: number; y: number; zoom: number };
+}
+
+export interface GraphLayoutResponse {
+  graphId: string;
+  layoutRevision: number;
+  layout: GraphLayout;
+}
+
+export interface GraphLayoutRequest {
+  expectedLayoutRevision: number;
+  layout: GraphLayout;
+}
+
+export type GraphCatalogAction =
+  | { action: 'create'; name: string }
+  | { action: 'select'; id: string }
+  | { action: 'rename'; id: string; name: string };
+
+export type GraphCatalogRequest = GraphCatalogAction & {
+  expectedRevision: number;
+  expectedCatalogRevision: number;
+};
