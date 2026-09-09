@@ -2,7 +2,11 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AudioDeviceDescriptor, CapturableApplication } from '../../core/control-port/types';
-import { INVENTORY_POLL_MS, useRoutingInventory } from './useRoutingInventory';
+import {
+  DEVICE_PRESENCE_POLL_MS,
+  INVENTORY_POLL_MS,
+  useRoutingInventory,
+} from './useRoutingInventory';
 
 const application: CapturableApplication = {
   bundleId: 'org.mozilla.firefox',
@@ -36,6 +40,52 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe('routing inventory independent owners', () => {
+  it('publishes device removal and reconnection while application discovery stays pending', async () => {
+    vi.useFakeTimers();
+    const source = port();
+    const applications = Promise.withResolvers<CapturableApplication[]>();
+    source.listCapturableApplications.mockReturnValue(applications.promise);
+    source.listAudioDevices.mockResolvedValue([device]);
+    const { result, unmount } = renderHook(() => useRoutingInventory(source, true));
+    await settle();
+    expect(result.current.audioDevices).toEqual([device]);
+    expect(result.current.devicesObserved).toBe(true);
+    expect(result.current.refreshing).toBe(true);
+    source.listAudioDevices.mockResolvedValue([]);
+    await act(async () => vi.advanceTimersByTimeAsync(DEVICE_PRESENCE_POLL_MS));
+    expect(result.current.audioDevices).toEqual([]);
+    source.listAudioDevices.mockResolvedValue([device]);
+    await act(async () => vi.advanceTimersByTimeAsync(DEVICE_PRESENCE_POLL_MS));
+    expect(result.current.audioDevices).toEqual([device]);
+    expect(source.listAudioDevices).toHaveBeenCalledTimes(3);
+    await act(async () => vi.advanceTimersByTimeAsync(INVENTORY_POLL_MS));
+    expect(source.listCapturableApplications).toHaveBeenCalledTimes(1);
+    expect(result.current.failed).toBe(false);
+    unmount();
+    await act(async () => applications.resolve([application]));
+    expect(result.current.applications).toEqual([]);
+  });
+
+  it('does not clear application errors when independent device polling succeeds', async () => {
+    vi.useFakeTimers();
+    const source = port();
+    source.listCapturableApplications.mockRejectedValue(new Error('Icon search failed'));
+    const { result } = renderHook(() => useRoutingInventory(source, false));
+    await settle();
+    expect(result.current.failed).toBe(true);
+    source.listAudioDevices.mockResolvedValue([device]);
+    await act(async () => vi.advanceTimersByTimeAsync(DEVICE_PRESENCE_POLL_MS));
+    expect(result.current.audioDevices).toEqual([device]);
+    expect(result.current.failed).toBe(true);
+    expect(source.listCapturableApplications).toHaveBeenCalledTimes(1);
+    source.listCapturableApplications.mockResolvedValue([application]);
+    act(() => result.current.refresh());
+    await settle();
+    expect(result.current.failed).toBe(false);
+  });
 });
 
 describe('routing inventory lifecycle', () => {
@@ -85,7 +135,7 @@ describe('routing inventory lifecycle', () => {
     expect(result.current.failed).toBe(false);
   });
 
-  it('does not overlap native requests or poll after the menu closes', async () => {
+  it('serializes requests and keeps only device presence polling after the menu closes', async () => {
     vi.useFakeTimers();
     const controlPort = port();
     const pending = Promise.withResolvers<AudioDeviceDescriptor[]>();
@@ -106,11 +156,13 @@ describe('routing inventory lifecycle', () => {
     expect(controlPort.listAudioDevices).toHaveBeenCalledTimes(1);
     expect(result.current.refreshing).toBe(true);
     await act(async () => pending.resolve([device]));
-    await act(async () => vi.advanceTimersByTimeAsync(INVENTORY_POLL_MS));
+    await act(async () => vi.advanceTimersByTimeAsync(DEVICE_PRESENCE_POLL_MS));
     expect(controlPort.listAudioDevices).toHaveBeenCalledTimes(2);
     rerender({ opened: false });
-    await act(async () => vi.advanceTimersByTimeAsync(INVENTORY_POLL_MS * 3));
-    expect(controlPort.listAudioDevices).toHaveBeenCalledTimes(2);
+    const applicationReads = controlPort.listCapturableApplications.mock.calls.length;
+    await act(async () => vi.advanceTimersByTimeAsync(DEVICE_PRESENCE_POLL_MS * 3));
+    expect(controlPort.listAudioDevices).toHaveBeenCalledTimes(5);
+    expect(controlPort.listCapturableApplications).toHaveBeenCalledTimes(applicationReads);
   });
 });
 
@@ -168,5 +220,27 @@ describe('routing inventory cancellation', () => {
     expect(result.current.audioDevices).toEqual([]);
     expect(result.current.failed).toBe(false);
     expect(result.current.refreshing).toBe(false);
+    expect(result.current.devicesObserved).toBe(false);
+  });
+
+  it('ignores a response received while hidden and resumes presence checks when visible', async () => {
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const source = port();
+    const pending = Promise.withResolvers<AudioDeviceDescriptor[]>();
+    source.listAudioDevices.mockReturnValueOnce(pending.promise);
+    const { result } = renderHook(() => useRoutingInventory(source, false));
+    await settle();
+    visibility.mockReturnValue('hidden');
+    await act(async () => pending.resolve([device]));
+    await act(async () => vi.advanceTimersByTimeAsync(DEVICE_PRESENCE_POLL_MS * 3));
+    expect(source.listAudioDevices).toHaveBeenCalledTimes(1);
+    expect(result.current.devicesObserved).toBe(false);
+    expect(result.current.refreshing).toBe(false);
+    visibility.mockReturnValue('visible');
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    await settle();
+    expect(result.current.devicesObserved).toBe(true);
+    expect(result.current.audioDevices).toEqual([]);
   });
 });

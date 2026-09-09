@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const ENDPOINT_UID: &str = "io.tonenari.audio.endpoint.default";
+const ENDPOINT_UID_ENV: &str = "TONENARI_TEST_ENDPOINT_UID";
 const PREFIX: &str = "io.tonenari.device-recovery-probe.";
 const GLOBAL: u32 = u32::from_be_bytes(*b"glob");
 const BAD_OBJECT: i32 = i32::from_be_bytes(*b"!obj");
@@ -58,9 +58,24 @@ unsafe extern "C" {
     ) -> i32;
 }
 
-fn description(uid: &str) -> CFDictionary<CFString, core_foundation::base::CFType> {
+fn endpoint_uid(value: Result<String, std::env::VarError>) -> Result<String, String> {
+    let uid = value.map_err(|error| {
+        format!("{ENDPOINT_UID_ENV} must explicitly select an installed test device with at least two input and two output channels: {error}")
+    })?;
+    if uid.trim().is_empty() || uid.trim() != uid || uid.chars().any(char::is_control) {
+        return Err(format!(
+            "{ENDPOINT_UID_ENV} must contain an exact, nonempty device UID without surrounding whitespace or control characters"
+        ));
+    }
+    Ok(uid)
+}
+
+fn description(
+    uid: &str,
+    member_uid: &str,
+) -> CFDictionary<CFString, core_foundation::base::CFType> {
     let member =
-        CFDictionary::from_CFType_pairs(&[(CFString::new("uid"), CFString::new(ENDPOINT_UID))]);
+        CFDictionary::from_CFType_pairs(&[(CFString::new("uid"), CFString::new(member_uid))]);
     let members = CFArray::from_CFTypes(&[member]);
     CFDictionary::from_CFType_pairs(&[
         (CFString::new("uid"), CFString::new(uid).as_CFType()),
@@ -153,17 +168,25 @@ fn stream_ready(device: u32, scope: u32) -> bool {
 
 pub(super) struct PrivateDevice {
     uid: String,
+    member_uid: String,
     device: Option<u32>,
 }
 
 impl PrivateDevice {
     pub(super) fn new() -> Result<Self, String> {
+        // Capture the explicit member once: reconnect must not follow later
+        // environment changes or silently substitute another user's device.
+        let member_uid = endpoint_uid(std::env::var(ENDPOINT_UID_ENV))?;
         let uid = format!(
             "{PREFIX}{}-{}",
             std::process::id(),
             NEXT_ID.fetch_add(1, Ordering::Relaxed)
         );
-        let mut owned = Self { uid, device: None };
+        let mut owned = Self {
+            uid,
+            member_uid,
+            device: None,
+        };
         owned.connect()?;
         Ok(owned)
     }
@@ -175,7 +198,7 @@ impl PrivateDevice {
         if self.device.is_some() {
             return Err("private fixture is already connected".into());
         }
-        let description = description(&self.uid);
+        let description = description(&self.uid, &self.member_uid);
         let mut device = 0;
         let status = unsafe {
             AudioHardwareCreateAggregateDevice(
@@ -187,7 +210,8 @@ impl PrivateDevice {
         self.device = (device != 0).then_some(device);
         if status != 0 || device == 0 {
             return Err(format!(
-                "private aggregate creation failed: status={status}, device={device}"
+                "private aggregate creation failed for member {}: status={status}, device={device}",
+                self.member_uid
             ));
         }
         let deadline = Instant::now() + TIMEOUT;
@@ -200,8 +224,8 @@ impl PrivateDevice {
             }
             if Instant::now() >= deadline {
                 return Err(format!(
-                    "private aggregate streams did not become ready: {}",
-                    self.uid
+                    "private aggregate {} did not obtain two input and two output channels from selected member {} ({ENDPOINT_UID_ENV})",
+                    self.uid, self.member_uid
                 ));
             }
             thread::sleep(INTERVAL);
@@ -267,8 +291,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn aggregate_description_is_private_and_contains_only_the_tonenari_endpoint() {
-        let description = description("io.tonenari.device-recovery-probe.contract");
+    fn explicit_member_uid_is_required_without_fallback_or_normalization() {
+        let error = endpoint_uid(Err(std::env::VarError::NotPresent)).unwrap_err();
+        assert!(error.contains(ENDPOINT_UID_ENV));
+        for value in ["", " ", " member", "member ", "member\n", "member\0"] {
+            assert!(endpoint_uid(Ok(value.into())).is_err());
+        }
+        let selected = "io.tonenari.audio.endpoint.12345678-1234-1234-1234-123456789abc";
+        assert_eq!(endpoint_uid(Ok(selected.into())).unwrap(), selected);
+    }
+
+    #[test]
+    fn aggregate_description_is_private_and_contains_only_the_selected_endpoint() {
+        let member_uid = "io.tonenari.audio.endpoint.12345678-1234-1234-1234-123456789abc";
+        let description = description("io.tonenari.device-recovery-probe.contract", member_uid);
         assert_eq!(description.len(), 4);
         let private = description
             .get(CFString::new("private"))
@@ -280,11 +316,18 @@ mod tests {
             .downcast::<CFArray>()
             .unwrap();
         assert_eq!(subs.len(), 1);
+        let expected_member =
+            CFDictionary::from_CFType_pairs(&[(CFString::new("uid"), CFString::new(member_uid))]);
+        let expected_members = CFArray::from_CFTypes(&[expected_member]);
+        // CFType equality compares the complete array/dictionary values without
+        // an unchecked cast of the heterogeneous array's member pointers.
+        assert_eq!(subs.as_CFType(), expected_members.as_CFType());
     }
 
     #[test]
     fn native_private_fixture_is_invisible_to_other_process_and_destroyed_on_unwind() {
         let mut owned = PrivateDevice::new().unwrap();
+        let member_uid = owned.member_uid.clone();
         let id = owned.device.unwrap();
         assert_eq!(device_uid(id).as_deref(), Ok(owned.uid()));
         let inventory = crate::process::run(
@@ -297,6 +340,7 @@ mod tests {
         owned.disconnect().unwrap();
         assert_eq!(device_uid(id), Err(BAD_OBJECT));
         owned.connect().unwrap();
+        assert_eq!(owned.member_uid, member_uid);
         let id = owned.device.unwrap();
         let failure = std::panic::catch_unwind(move || {
             let _owned = owned;

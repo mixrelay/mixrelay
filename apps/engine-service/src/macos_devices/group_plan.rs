@@ -25,12 +25,18 @@ pub(super) struct GroupPlan {
 
 impl GroupPlan {
     pub(super) fn prepare(members: &[String]) -> Result<Option<Self>, String> {
-        Self::inspect(members, |uid| {
-            let mut info = MemberInfo::default();
-            // SAFETY: the native call borrows a NUL-terminated UID and writes
-            // exactly one repr(C) snapshot; it retains neither address.
-            unsafe { tn_aggregate_member_info(uid.as_ptr(), &raw mut info) }.then_some(info)
-        })
+        Self::inspect(members, Self::read_member)
+    }
+
+    pub(super) fn member(uid: &str) -> Option<MemberInfo> {
+        Self::read_member(&CString::new(uid).ok()?)
+    }
+
+    fn read_member(uid: &CString) -> Option<MemberInfo> {
+        let mut info = MemberInfo::default();
+        // SAFETY: the native call borrows a NUL-terminated UID and writes
+        // exactly one repr(C) snapshot; it retains neither address.
+        unsafe { tn_aggregate_member_info(uid.as_ptr(), &raw mut info) }.then_some(info)
     }
 
     fn inspect(

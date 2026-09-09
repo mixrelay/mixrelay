@@ -1,60 +1,42 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type {
-  AudioDeviceDescriptor,
-  CapturableApplication,
-  ControlPort,
-} from '../../core/control-port/types';
+import type { ControlPort } from '../../core/control-port/types';
 
 export const INVENTORY_POLL_MS = 5_000;
+export const DEVICE_PRESENCE_POLL_MS = 2_000;
 
-/** Discovery may include native icon extraction: only poll while a menu is visible. */
+/** Device presence stays current while visible; native app/icon discovery only polls in menus. */
 export function useRoutingInventory(
   controlPort: Pick<ControlPort, 'listCapturableApplications' | 'listAudioDevices'>,
   menuOpened: boolean,
 ) {
-  const [applications, setApplications] = useState<CapturableApplication[]>([]);
-  const [audioDevices, setAudioDevices] = useState<AudioDeviceDescriptor[]>([]);
-  const [failed, setFailed] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const request = useRef<() => void>(() => undefined);
-  const refresh = useCallback(() => request.current(), []);
+  const loadApplications = useCallback(
+    () => controlPort.listCapturableApplications?.() ?? Promise.resolve([]),
+    [controlPort],
+  );
+  const loadDevices = useCallback(
+    () => controlPort.listAudioDevices?.() ?? Promise.resolve([]),
+    [controlPort],
+  );
+  const applications = useInventoryCategory(loadApplications);
+  const devices = useInventoryCategory(loadDevices);
+  const refreshApplications = applications.refresh;
+  const refreshDevices = devices.refresh;
+  const refresh = useCallback(() => {
+    refreshApplications();
+    refreshDevices();
+  }, [refreshApplications, refreshDevices]);
 
   useEffect(() => {
-    let cancelled = false;
-    let running = false;
-    setApplications([]);
-    setAudioDevices([]);
-    setFailed(false);
-    const discover = () => {
-      if (cancelled || running || document.visibilityState === 'hidden') return;
-      running = true;
-      setRefreshing(true);
-      // A failed category must not erase its last successful list or prevent the other
-      // category from updating. Native invoke has no cancellation; ignore late responses.
-      void Promise.allSettled([
-        Promise.resolve().then(() => controlPort.listCapturableApplications?.() ?? []),
-        Promise.resolve().then(() => controlPort.listAudioDevices?.() ?? []),
-      ]).then(([apps, devices]) => {
-        running = false;
-        if (cancelled) return;
-        if (apps.status === 'fulfilled') setApplications(apps.value);
-        if (devices.status === 'fulfilled') setAudioDevices(devices.value);
-        setFailed(apps.status === 'rejected' || devices.status === 'rejected');
-        setRefreshing(false);
-      });
-    };
-    request.current = discover;
-    discover();
-    window.addEventListener('focus', discover);
-    document.addEventListener('visibilitychange', discover);
+    const timer = setInterval(refreshDevices, DEVICE_PRESENCE_POLL_MS);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
     return () => {
-      cancelled = true;
-      request.current = () => undefined;
-      window.removeEventListener('focus', discover);
-      document.removeEventListener('visibilitychange', discover);
+      clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
     };
-  }, [controlPort]);
+  }, [refresh, refreshDevices]);
 
   useEffect(() => {
     if (!menuOpened) return;
@@ -63,5 +45,67 @@ export function useRoutingInventory(
     return () => clearInterval(timer);
   }, [menuOpened, refresh]);
 
-  return { applications, audioDevices, failed, refresh, refreshing };
+  return {
+    applications: applications.items,
+    audioDevices: devices.items,
+    devicesObserved: Boolean(controlPort.listAudioDevices) && devices.observed,
+    failed: applications.failed || devices.failed,
+    refreshing: applications.refreshing || devices.refreshing,
+    refresh,
+  };
+}
+
+interface InventorySnapshot<T> {
+  items: T[];
+  observed: boolean;
+  failed: boolean;
+  refreshing: boolean;
+}
+
+/** Each category owns one request fence: a hung icon lookup cannot block device presence.
+ * Native invokes cannot be cancelled, so cleanup invalidates their publication instead. */
+function useInventoryCategory<T>(load: () => Promise<T[]>) {
+  const [snapshot, setSnapshot] = useState<InventorySnapshot<T>>({
+    items: [],
+    observed: false,
+    failed: false,
+    refreshing: false,
+  });
+  const request = useRef<() => void>(() => undefined);
+  const refresh = useCallback(() => request.current(), []);
+
+  useEffect(() => {
+    let active = true;
+    let running = false;
+    setSnapshot({ items: [], observed: false, failed: false, refreshing: false });
+    const finish = (outcome: { items: T[] } | { failed: true }) => {
+      running = false;
+      if (!active) return;
+      setSnapshot((current) => {
+        if (document.visibilityState === 'hidden') return { ...current, refreshing: false };
+        return 'items' in outcome
+          ? { items: outcome.items, observed: true, failed: false, refreshing: false }
+          : { ...current, failed: true, refreshing: false };
+      });
+    };
+    const discover = () => {
+      if (!active || running || document.visibilityState === 'hidden') return;
+      running = true;
+      setSnapshot((current) => ({ ...current, refreshing: true }));
+      void Promise.resolve()
+        .then(load)
+        .then(
+          (items) => finish({ items }),
+          () => finish({ failed: true }),
+        );
+    };
+    request.current = discover;
+    discover();
+    return () => {
+      active = false;
+      request.current = () => undefined;
+    };
+  }, [load]);
+
+  return { ...snapshot, refresh };
 }

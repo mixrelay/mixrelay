@@ -30,6 +30,7 @@ export interface AudioGraphNodeAppearance {
   parameterControls?: readonly AudioNodeParameterControl[];
   status?: string;
   statusTone?: StatusTone;
+  offline?: boolean;
   title: string;
 }
 

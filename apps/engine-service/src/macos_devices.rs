@@ -13,6 +13,7 @@ mod format;
 mod group_plan;
 mod handoff;
 mod native;
+mod recovery;
 mod retirement;
 mod spec;
 mod worker;
@@ -34,7 +35,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tonenari_audio_graph::{DeviceSelector, GraphDocument, RenderFormat};
+use tonenari_audio_graph::{GraphDocument, RenderFormat};
 use tonenari_audio_io::{HostAudioBackendError, process::TransferOutcome};
 use tonenari_engine_service::{
     GraphResourceBackend, PreparedGraphFormat, RuntimeStatusBackend, session::AdapterRuntimeStatus,
@@ -47,11 +48,11 @@ use {
         sync::atomic::{AtomicU32, AtomicU64},
         thread,
     },
-    tonenari_audio_graph::NodeConfig,
+    tonenari_audio_graph::{DeviceSelector, NodeConfig},
     worker::WorkerContext,
 };
 #[derive(Default)]
-pub(super) struct DeviceSet(BTreeMap<String, Arc<Device>>);
+pub(super) struct DeviceSet(BTreeMap<String, Arc<Device>>, BTreeMap<String, Spec>);
 pub(super) struct HardwareClockProgress {
     pub(super) owner_id: u64,
     pub(super) epoch: u64,
@@ -59,6 +60,14 @@ pub(super) struct HardwareClockProgress {
     pub(super) native_rate: u32,
 }
 impl DeviceSet {
+    pub(super) fn is_offline(&self, id: &str) -> bool {
+        self.1.contains_key(id)
+    }
+    /// Reconnecting owners have no active PCM bridge yet. This does not change
+    /// their selected identity or classify them as absent from native inventory.
+    pub(super) fn is_inactive(&self, id: &str) -> bool {
+        self.is_offline(id) || self.0.get(id).is_some_and(|device| !device.ready())
+    }
     /// Explicit graph pacing identity, never inferred from nominal sample rate.
     pub(super) fn set_clock_master(&self, owner_id: Option<u64>) {
         let master = self.0.values().find(|device| {
@@ -89,26 +98,63 @@ impl DeviceSet {
     /// A pacing candidate is not proof that unrelated clocks are synchronized.
     /// Prefer output demand; capture-only graphs can use a healthy input clock.
     pub(super) fn hardware_clock_progress(&self) -> Option<HardwareClockProgress> {
+        self.clock_master().map(|device| HardwareClockProgress {
+            owner_id: device.identity,
+            epoch: device.epoch.load(Ordering::Acquire),
+            native_frames: unsafe { tn_device_io_native_frames(device.native.pointer.as_ptr()) },
+            native_rate: device.native_rate.load(Ordering::Acquire),
+        })
+    }
+
+    fn clock_master(&self) -> Option<&Device> {
         self.0
             .values()
+            .map(Arc::as_ref)
             .filter(|device| {
                 !device.failed.load(Ordering::Acquire)
                     && device.native_rate.load(Ordering::Acquire) != 0
             })
             .min_by_key(|device| device.input)
-            .map(|device| HardwareClockProgress {
-                owner_id: device.identity,
-                epoch: device.epoch.load(Ordering::Acquire),
-                native_frames: unsafe {
-                    tn_device_io_native_frames(device.native.pointer.as_ptr())
-                },
-                native_rate: device.native_rate.load(Ordering::Acquire),
-            })
+    }
+
+    /// Do not render a device-paced plan using a saved or previous clock rate.
+    /// Independent secondary devices may still need conversion; only the actual
+    /// pacing owner's rate determines the plan. Offline branches do not gate it.
+    pub(super) fn processing_ready(&self, sample_rate: u32) -> bool {
+        self.clock_master().is_none_or(|device| {
+            device.ready()
+                && device.graph_rate.load(Ordering::Acquire) == sample_rate
+                && device.native_rate.load(Ordering::Acquire) == sample_rate
+        })
     }
     pub(super) fn read(&self, id: &str, samples: &mut [f32]) -> Option<TransferOutcome> {
+        if let Some(spec) = self.1.get(id) {
+            samples.fill(0.0);
+            return Some(recovery::offline_transfer(
+                samples.len(),
+                usize::from(spec.channels),
+            ));
+        }
+        if let Some(device) = self.0.get(id)
+            && !device.ready()
+        {
+            samples.fill(0.0);
+            return Some(recovery::offline_transfer(samples.len(), device.channels));
+        }
         self.0.get(id).map(|device| device.read(samples))
     }
     pub(super) fn write(&self, id: &str, samples: &[f32]) -> Option<TransferOutcome> {
+        if let Some(spec) = self.1.get(id) {
+            return Some(recovery::offline_transfer(
+                samples.len(),
+                usize::from(spec.channels),
+            ));
+        }
+        if let Some(device) = self.0.get(id)
+            && !device.ready()
+        {
+            return Some(recovery::offline_transfer(samples.len(), device.channels));
+        }
         self.0.get(id).map(|device| device.write(samples))
     }
 }
@@ -119,6 +165,7 @@ pub(super) struct MacDevices {
     status: Arc<AdapterRuntimeStatus>,
     format: Arc<PublishedFormat>,
     next_group_check: Mutex<Instant>,
+    recovery_requested: AtomicBool,
     prepared_hardware_clock: AtomicBool,
     hardware_clock: AtomicBool,
 }
@@ -133,6 +180,7 @@ impl MacDevices {
             status,
             format: Arc::new(PublishedFormat::new(rate, buffer_frames)),
             next_group_check: Mutex::new(Instant::now()),
+            recovery_requested: AtomicBool::new(false),
             prepared_hardware_clock: AtomicBool::new(false),
             hardware_clock: AtomicBool::new(false),
         }
@@ -148,21 +196,26 @@ impl MacDevices {
         let Ok(mut next) = self.next_group_check.try_lock() else {
             return;
         };
-        if Instant::now() < *next {
+        if !self.handoff.idle()
+            || (Instant::now() < *next && !self.recovery_requested.load(Ordering::Acquire))
+        {
             return;
         }
+        self.recovery_requested.store(false, Ordering::Release);
         *next = Instant::now() + Duration::from_secs(2);
         Aggregate::reclaim_retired();
-        if !self.handoff.idle() {
-            return;
-        }
         let desired = cache
             .iter()
             .map(|(id, (spec, _))| (id.clone(), spec.clone()))
             .collect();
         if let Err(error) = self.prepare_devices(&mut cache, desired, Publication::Recovery) {
-            eprintln!("CoreAudio private-group recovery deferred: {error}");
+            tracing::warn!(%error, "CoreAudio private-group recovery deferred");
         }
+    }
+    /// Bypass the periodic inventory delay after callback topology loss.
+    /// No native property access or resource construction occurs on the caller.
+    pub(super) fn request_recovery(&self) {
+        self.recovery_requested.store(true, Ordering::Release);
     }
     /// Only the serialized graph activation callback may swap these owners.
     pub(super) unsafe fn activate(&self, active: &mut DeviceSet) {
@@ -198,76 +251,6 @@ impl MacDevices {
         unsafe {
             self.handoff.activate(Publication::Recovery, active);
         }
-    }
-    fn prepare_devices(
-        &self,
-        cache: &mut Cache,
-        desired: BTreeMap<String, Spec>,
-        publication: Publication,
-    ) -> Result<(), HostAudioBackendError> {
-        let members = aggregate_members(&desired);
-        let existing_group = cache
-            .values()
-            .filter_map(|(_, weak)| weak.upgrade())
-            .find_map(|device| {
-                device
-                    .native
-                    .group
-                    .clone()
-                    .filter(|group| group.members == members && group.ready())
-            });
-        let group = match existing_group {
-            Some(group) => Some(group),
-            None => Aggregate::create(members).map_err(backend_error)?,
-        };
-        let mut devices = BTreeMap::new();
-        let mut changed = desired.len() != cache.len();
-        for (id, spec) in &desired {
-            let selected_group = if matches!(spec.selector, DeviceSelector::PersistentUid { .. }) {
-                group.clone()
-            } else {
-                None
-            };
-            let existing = cache
-                .get(id)
-                .filter(|(old, _)| old == spec)
-                .and_then(|(_, owner)| owner.upgrade())
-                .filter(|device| match (&device.native.group, &selected_group) {
-                    (Some(old), Some(new)) => Arc::ptr_eq(old, new),
-                    (None, None) => true,
-                    _ => false,
-                });
-            let device = if let Some(device) = existing {
-                device
-            } else {
-                changed = true;
-                Arc::new(
-                    Device::open_with_group(
-                        spec,
-                        self.format.current().sample_rate,
-                        selected_group,
-                        self.format.current().block_frames,
-                    )
-                    .map_err(backend_error)?,
-                )
-            };
-            devices.insert(id.clone(), device);
-        }
-        if !changed {
-            return Ok(());
-        }
-        let next_cache = desired
-            .into_iter()
-            .map(|(id, spec)| {
-                let weak = Arc::downgrade(&devices[&id]);
-                (id, (spec, weak))
-            })
-            .collect();
-        self.handoff
-            .publish(publication, DeviceSet(devices))
-            .map_err(|_| backend_error("CoreAudio resource publication failed"))?;
-        *cache = next_cache;
-        Ok(())
     }
 }
 fn backend_error(message: impl Into<String>) -> HostAudioBackendError {
@@ -386,26 +369,7 @@ impl RuntimeStatusBackend for MacDevices {
     fn status(&self, format: RenderFormat) -> tonenari_control_protocol::AppStatus {
         self.status
             .observe_routing_clock(self.follows_hardware(), self.routing_rate());
-        let mut status = self.status.status(format);
-        let failed = self.cache.lock().map_or(true, |cache| {
-            cache.values().any(|(_, weak)| {
-                weak.upgrade()
-                    .is_some_and(|device| device.failed.load(Ordering::Acquire))
-            })
-        });
-        if failed
-            && let Some(session) = &mut status.audio_session
-            && !matches!(
-                session.issue,
-                Some(
-                    tonenari_audio_io::session::SessionIssue::ProcessingFailed
-                        | tonenari_audio_io::session::SessionIssue::ReconfigurationFailed
-                )
-            )
-        {
-            session.issue = Some(tonenari_audio_io::session::SessionIssue::DeviceUnavailable);
-        }
-        status
+        self.status.status(format)
     }
     fn reconfigure(
         &self,
@@ -430,6 +394,51 @@ impl RuntimeStatusBackend for MacDevices {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn processing_admission_waits_for_native_rate_and_rebuilt_bridge() {
+        let (device, context) = synthetic_output(2, 96_000, 48_000);
+        let devices = DeviceSet(BTreeMap::from([("output".into(), device)]), BTreeMap::new());
+        assert!(
+            !devices.processing_ready(96_000),
+            "saved rate is not native proof"
+        );
+        assert!(
+            !devices.processing_ready(48_000),
+            "plan must match the prepared bridge"
+        );
+        context.graph_rate.store(48_000, Ordering::Release);
+        assert!(
+            !devices.processing_ready(48_000),
+            "old bridge must not activate"
+        );
+        context.ready_rate.store(48_000, Ordering::Release);
+        assert!(devices.processing_ready(48_000));
+        context.native_rate.store(96_000, Ordering::Release);
+        assert!(
+            !devices.processing_ready(48_000),
+            "reconnection must revalidate rate"
+        );
+        context.graph_rate.store(96_000, Ordering::Release);
+        context.ready_rate.store(0, Ordering::Release);
+        assert!(!devices.processing_ready(96_000));
+        context.ready_rate.store(96_000, Ordering::Release);
+        assert!(devices.processing_ready(96_000));
+    }
+
+    #[test]
+    fn admission_keeps_independent_secondary_conversion_and_offline_branches() {
+        let (master, _) = synthetic_output(2, 48_000, 48_000);
+        let (secondary, secondary_context) = synthetic_output(2, 48_000, 44_100);
+        let devices = DeviceSet(
+            BTreeMap::from([("a-output".into(), master), ("b-output".into(), secondary)]),
+            BTreeMap::new(),
+        );
+        assert!(devices.processing_ready(48_000));
+        secondary_context.failed.store(true, Ordering::Release);
+        assert!(devices.processing_ready(48_000));
+        assert!(DeviceSet::default().processing_ready(96_000));
+    }
+
     #[test]
     fn native_owner_allocation_retirement_stress() {
         if !tonenari_macos_test_support::memory_child(
@@ -522,7 +531,7 @@ mod tests {
         );
         assert_eq!(queued, 256);
     }
-    fn synthetic_output(
+    pub(super) fn synthetic_output(
         channels: u16,
         graph_rate: u32,
         native_rate: u32,
@@ -698,11 +707,14 @@ mod tests {
         master.clock_identity.store(41, Ordering::Release);
         peer.clock_identity.store(41, Ordering::Release);
         other.clock_identity.store(42, Ordering::Release);
-        let devices = DeviceSet(BTreeMap::from([
-            ("master".into(), master.clone()),
-            ("peer".into(), peer.clone()),
-            ("other".into(), other),
-        ]));
+        let devices = DeviceSet(
+            BTreeMap::from([
+                ("master".into(), master.clone()),
+                ("peer".into(), peer.clone()),
+                ("other".into(), other),
+            ]),
+            BTreeMap::new(),
+        );
         // Reproduce the previous blanket-independent policy under exactly the
         // same channel/rate/input conditions as the new relationship decision.
         let mut before = DeviceBridge::new(&peer_context, 48_000).unwrap();
@@ -752,7 +764,10 @@ mod tests {
     #[test]
     fn hardware_master_identity_survives_bridge_priming_and_epoch_changes() {
         let (device, context) = synthetic_output(2, 48_000, 48_000);
-        let devices = DeviceSet(BTreeMap::from([("output".into(), device.clone())]));
+        let devices = DeviceSet(
+            BTreeMap::from([("output".into(), device.clone())]),
+            BTreeMap::new(),
+        );
         let owner = devices.hardware_clock_progress().unwrap().owner_id;
         devices.set_clock_master(Some(owner));
         assert!(context.clock_aligned.load(Ordering::Acquire));

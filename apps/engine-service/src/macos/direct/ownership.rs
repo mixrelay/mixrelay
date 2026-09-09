@@ -19,6 +19,7 @@ impl<'state> PreparedRenderer<'state> {
         let descriptor = Box::pin(Descriptor {
             context: state.as_ref().get_ref().get().cast(),
             render,
+            sample_rate: plan.format().sample_rate,
         });
         Self {
             descriptor,

@@ -371,6 +371,7 @@ fn run_audio_worker(
     let mut timeline = MacTimeline::new();
     let mut pacers = NativePacers::default();
     let mut boundary_check = Instant::now();
+    let mut awaiting_format = false;
 
     while !runtime_status.stop_requested() {
         if runtime_status.checkpoint() {
@@ -389,6 +390,26 @@ fn run_audio_worker(
             pacers.hal.reset();
         }
         let format = processor.plan().format();
+        if !active_devices.processing_ready(format.sample_rate) {
+            if !awaiting_format {
+                tracing::info!(
+                    processing_rate = format.sample_rate,
+                    "CoreAudio rendering gated until device format is ready"
+                );
+                awaiting_format = true;
+            }
+            runtime_status.observe_clock_idle();
+            timeline.reset();
+            pacers = NativePacers::default();
+            std::thread::sleep(Duration::from_millis(1));
+            continue;
+        }
+        if std::mem::take(&mut awaiting_format) {
+            tracing::info!(
+                processing_rate = format.sample_rate,
+                "CoreAudio device format ready; rendering admitted"
+            );
+        }
         runtime_status.activate_format(format);
         if let Some(plan) =
             super::macos_devices::direct::DirectPlan::prepare(&active_devices, processor.plan())
@@ -497,6 +518,9 @@ impl RouteClock {
             .chain(processor.plan().sink_bindings())
         {
             let id = binding.node_id().as_str();
+            if devices.is_inactive(id) {
+                continue;
+            }
             if binding.virtual_endpoint_id().is_some() {
                 result.has_hal = true;
             } else {

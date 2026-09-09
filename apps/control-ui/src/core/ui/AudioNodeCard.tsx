@@ -51,6 +51,8 @@ export interface EndpointControl {
 export interface AudioNodeCardProps {
   content?: ReactNode;
   bypassed?: boolean;
+  /** Device presence only; selection and configuration remain available. */
+  offline?: boolean;
   category: string;
   channelCount?: number;
   detail?: string;
@@ -101,6 +103,7 @@ export interface AudioNodeCardProps {
 
 export function AudioNodeCard({
   bypassed = false,
+  offline = false,
   category,
   content,
   channelCount = 0,
@@ -145,6 +148,7 @@ export function AudioNodeCard({
     <Paper
       className={styles.root}
       data-bypassed={bypassed || undefined}
+      data-offline={offline || undefined}
       data-endpoint-options={hasEndpointControl || undefined}
       data-has-options={hasOptions || undefined}
       data-metered={meterChannels > 0 || undefined}
@@ -165,6 +169,7 @@ export function AudioNodeCard({
         inputCount={inputCount}
         meterChannels={meterChannels}
         meterLevels={meterLevels}
+        offline={offline}
         onSelect={onSelect}
         outputCount={outputCount}
         selected={selected}
@@ -234,6 +239,7 @@ function AudioNodeFace(
     | 'meterChannels'
     | 'meterLevels'
     | 'onSelect'
+    | 'offline'
     | 'outputCount'
     | 'selected'
     | 'status'
@@ -252,6 +258,7 @@ function AudioNodeFace(
     meterChannels = 0,
     meterLevels = [],
     onSelect,
+    offline,
     outputCount,
     selected,
     status,
@@ -260,7 +267,7 @@ function AudioNodeFace(
   } = props;
   return (
     <UnstyledButton
-      aria-label={detail ? `${title}, ${category}, ${detail}` : `${title}, ${category}`}
+      aria-label={[title, category, detail, status].filter(Boolean).join(', ')}
       aria-pressed={selected}
       className={styles.button}
       onClick={onSelect}
@@ -275,7 +282,7 @@ function AudioNodeFace(
       <span className={styles.body}>
         {detail ? <small className={styles.detail}>{detail}</small> : null}
         {meterChannels > 0 ? (
-          <NodeMeters channels={meterChannels} levels={meterLevels} title={title} />
+          <NodeMeters channels={meterChannels} levels={offline ? [] : meterLevels} title={title} />
         ) : null}
       </span>
       {!hideSummary ? (

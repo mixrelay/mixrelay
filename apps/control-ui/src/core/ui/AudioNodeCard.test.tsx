@@ -63,3 +63,40 @@ describe('application node icon fallback', () => {
     expect(view.container.querySelector('svg')).not.toBeNull();
   });
 });
+
+it('clears offline meters while keeping selection and options editable, then restores live levels', () => {
+  const onSelect = vi.fn();
+  const props = {
+    category: 'Input',
+    icon: 'MIC',
+    title: 'Microphone',
+    inputCount: 0,
+    outputCount: 2,
+    meterChannels: 2,
+    meterLevels: [60, 40],
+    onSelect,
+    gainControl: { label: 'Gain', valueDb: 0 },
+    onGainChange: vi.fn(),
+  };
+  const view = render(
+    <ToneNariProvider>
+      <AudioNodeCard {...props} offline status="Offline" />
+    </ToneNariProvider>,
+  );
+  const button = view.getByRole('button', { name: 'Microphone, Input, Offline' });
+  expect(button).toBeEnabled();
+  expect(button.closest('[data-offline]')).not.toBeNull();
+  expect(view.container.querySelectorAll('[title$=": 0%"]')).toHaveLength(2);
+  fireEvent.click(button);
+  expect(onSelect).toHaveBeenCalledOnce();
+  fireEvent.click(view.getByRole('button', { name: 'Options' }));
+  expect(view.getByRole('slider', { name: 'Gain' })).toBeEnabled();
+  view.rerender(
+    <ToneNariProvider>
+      <AudioNodeCard {...props} />
+    </ToneNariProvider>,
+  );
+  expect(view.container.querySelector('[data-offline]')).toBeNull();
+  expect(view.container.querySelector('[title$=": 60%"]')).not.toBeNull();
+  expect(view.container.querySelector('[title$=": 40%"]')).not.toBeNull();
+});

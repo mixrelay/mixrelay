@@ -38,6 +38,10 @@
   outline-offset: 3px;
 }
 
+.root[data-offline] .button {
+  opacity: 0.5;
+}
+
 .root[data-inline-controls] .button {
   grid-template-rows: var(--audio-node-header-height, 26px) minmax(0, 1fr);
 }

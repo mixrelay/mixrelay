@@ -1,5 +1,6 @@
 use super::*;
 use tonenari_audio_graph::{AudioDeviceInputConfig, AudioDeviceOutputConfig, NodeSpec};
+use tonenari_audio_io::process::{InputActivity, TransferOutcome};
 use tonenari_macos_test_support::DeviceFixture as Fixture;
 fn wait_until(mut condition: impl FnMut() -> bool) {
     let start = Instant::now();
@@ -35,6 +36,132 @@ fn document(uid: &str, revision: u64, gain: f32) -> GraphDocument {
         ],
         vec![],
     )
+}
+
+fn publish_recovery_now(resources: &MacDevices, active: &mut DeviceSet) {
+    *resources.next_group_check.lock().unwrap() = Instant::now();
+    resources.reclaim();
+    // SAFETY: this fixture is the only graph consumer. No graph processing or
+    // direct renderer runs concurrently with this recovery activation boundary.
+    unsafe {
+        resources.activate_recovered(active);
+    }
+    resources.reclaim();
+}
+
+fn assert_published_offline(active: &DeviceSet, graph: &GraphDocument) {
+    assert!(active.0.is_empty());
+    assert_eq!(active.1, specs(graph));
+    let expected = TransferOutcome {
+        activity: InputActivity::Inactive,
+        ..TransferOutcome::complete(32)
+    };
+    let mut input = [9.0; 64];
+    assert_eq!(active.read("input", &mut input), Some(expected));
+    assert_eq!(input.map(f32::to_bits), [0.0_f32; 64].map(f32::to_bits));
+    assert_eq!(active.write("output", &[0.5; 64]), Some(expected));
+}
+
+fn assert_cached_selection(resources: &MacDevices, graph: &GraphDocument) {
+    let cached = resources
+        .cache
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(id, (spec, _))| (id.clone(), spec.clone()))
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(cached, specs(graph));
+}
+
+fn delete_disconnected_nodes(
+    resources: &MacDevices,
+    active: &mut DeviceSet,
+    fixture: &mut Fixture,
+) {
+    let retired = active.0.values().map(Arc::downgrade).collect::<Vec<_>>();
+    fixture.command("disconnect");
+    wait_until(|| {
+        active
+            .0
+            .values()
+            .all(|device| device.failed.load(Ordering::Acquire))
+    });
+    resources
+        .reconcile(&GraphDocument::new(3, vec![], vec![]))
+        .unwrap();
+    // SAFETY: this test remains the sole serialized graph consumer, with no
+    // concurrent processing borrowing the old DeviceSet during its replacement.
+    unsafe {
+        resources.activate(active);
+    }
+    resources.reclaim();
+    assert!(retired.iter().all(|owner| owner.upgrade().is_none()));
+    fixture.command("connect");
+    publish_recovery_now(resources, active);
+    assert!(active.0.is_empty() && active.1.is_empty());
+    assert!(resources.cache.lock().unwrap().is_empty());
+    assert!(
+        !resources.has_pending(),
+        "device arrival resurrected deleted intent"
+    );
+}
+
+#[test]
+fn native_control_recovery_publishes_offline_intent_and_restores_the_same_uid_without_graph_edits()
+{
+    let (mut fixture, uid) = Fixture::start();
+    let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
+    let resources = MacDevices::new(status, 48_000, 256);
+    let original = document(&uid, 1, 0.0);
+    resources.reconcile(&original).unwrap();
+    let mut active = DeviceSet::default();
+    // SAFETY: no audio graph runs in this fixture; this thread alone activates
+    // graph/recovery publications and retires the previous owners afterward.
+    unsafe {
+        resources.activate(&mut active);
+    }
+    resources.reclaim();
+    assert_eq!(active.0.len(), 2);
+    let retired = active.0.values().map(Arc::downgrade).collect::<Vec<_>>();
+    fixture.command("disconnect");
+    wait_until(|| {
+        active
+            .0
+            .values()
+            .all(|device| device.failed.load(Ordering::Acquire))
+    });
+    publish_recovery_now(&resources, &mut active);
+    assert_published_offline(&active, &original);
+    assert!(retired.iter().all(|owner| owner.upgrade().is_none()));
+
+    let edited = document(&uid, 2, -6.0);
+    resources.reconcile(&edited).unwrap();
+    // SAFETY: the same serialized activation boundary as initial publication.
+    unsafe {
+        resources.activate(&mut active);
+    }
+    resources.reclaim();
+    assert_published_offline(&active, &edited);
+    assert_cached_selection(&resources, &edited);
+    let NodeConfig::AudioDeviceInput(input) = &edited.nodes[0].config else {
+        panic!("input fixture");
+    };
+    assert_eq!(input.gain_db.to_bits(), (-6.0_f32).to_bits());
+
+    fixture.command("connect");
+    // Only control recovery executes here: no reconcile or graph edit is allowed
+    // to create the returning native owners for this assertion.
+    wait_until(|| {
+        publish_recovery_now(&resources, &mut active);
+        active.0.len() == 2 && active.0.values().all(|device| device.ready())
+    });
+    assert!(active.1.is_empty());
+    assert_cached_selection(&resources, &edited);
+    let mut pcm = [0.0; 512];
+    wait_until(|| active.read("input", &mut pcm).unwrap().frames > 0);
+    assert!(pcm.iter().all(|sample| sample.is_finite()));
+    assert!(active.write("output", &[0.0; 512]).unwrap().frames > 0);
+    delete_disconnected_nodes(&resources, &mut active, &mut fixture);
 }
 
 #[test]

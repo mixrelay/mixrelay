@@ -224,13 +224,15 @@ fn actual_inventory_resolves_default_and_uid_to_one_capture_and_mixed_output() {
 }
 
 #[test]
-fn missing_or_ambiguous_physical_identity_never_falls_back_or_invents_channels() {
+fn absent_physical_selection_is_preserved_but_ambiguity_and_wrong_width_are_rejected() {
     let apps = Apps(Cell::new(0));
     let documents = vec![(
         "A".into(),
         physical_graph(DeviceSelector::DefaultInput, 0.0),
     )];
-    assert!(compile(&documents, &[], &apps).is_err());
+    let offline = compile(&documents, &[], &apps).unwrap();
+    assert_eq!(offline.native_sources.len(), 1);
+    assert_eq!(offline.native_outputs.len(), 1);
     let mut devices = inventory();
     devices.push(devices[0].clone());
     assert!(compile(&documents, &devices, &apps).is_err());
@@ -239,6 +241,9 @@ fn missing_or_ambiguous_physical_identity_never_falls_back_or_invents_channels()
     assert!(compile(&documents, &devices, &apps).is_err());
     assert_eq!(apps.0.get(), 0);
 }
+
+#[path = "catalog_offline_tests.rs"]
+mod offline_tests;
 
 #[test]
 fn conflicting_virtual_definitions_are_rejected_but_local_reference_flags_are_independent() {

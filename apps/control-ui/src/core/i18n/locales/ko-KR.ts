@@ -120,6 +120,7 @@ export const koKR = {
   },
   routing: {
     nodeStatus: {
+      offline: '오프라인',
       reselectApplication: '앱을 다시 선택하세요',
       unknown: '오디오 상태 알 수 없음',
       running: '오디오 세션 실행 중',

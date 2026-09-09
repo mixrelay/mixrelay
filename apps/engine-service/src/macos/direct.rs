@@ -17,7 +17,7 @@ use std::{
 };
 use tonenari_audio_engine::{BlockProcessor, ExternalBinding, ExternalIo};
 use tonenari_audio_io::{
-    process::{ClockDomain, ProcessCycle, TransferOutcome},
+    process::{ClockDomain, InputActivity, ProcessCycle, TransferOutcome},
     session::ClockAuthority,
 };
 
@@ -68,16 +68,19 @@ impl<'a> Buffers<'a> {
         Some(buffers)
     }
     fn covers(&self, binding: &Binding) -> bool {
+        let Some(offset) = binding.offset else {
+            return true;
+        };
         let buffers = if binding.input {
             self.input
         } else {
             self.output
         };
-        let end = binding.offset + binding.channels;
+        let end = offset + binding.channels;
         let mut base = 0;
         for buffer in buffers {
             let next = base + buffer.channels as usize;
-            if base < end && next > binding.offset && buffer.data.is_null() {
+            if base < end && next > offset && buffer.data.is_null() {
                 return false;
             }
             base = next;
@@ -110,6 +113,12 @@ impl<T: CaptureTransport + RenderTransport> ExternalIo for CallbackIo<'_, T> {
         else {
             return TransferOutcome::complete(0);
         };
+        if map.offset.is_none() {
+            return TransferOutcome {
+                activity: InputActivity::Inactive,
+                ..TransferOutcome::complete(cycle.frames)
+            };
+        }
         transfer(self.buffers.input, map, self.offset, destination);
         TransferOutcome::complete(cycle.frames)
     }
@@ -142,12 +151,15 @@ pub(super) fn transfer(
     offset: usize,
     destination: &mut [f32],
 ) {
+    let Some(channel_offset) = map.offset else {
+        return;
+    };
     let mut base = 0;
     for buffer in buffers {
         let width = buffer.channels as usize;
         for channel in 0..width {
-            if (map.offset..map.offset + map.channels).contains(&(base + channel)) {
-                let selected = base + channel - map.offset;
+            if (channel_offset..channel_offset + map.channels).contains(&(base + channel)) {
+                let selected = base + channel - channel_offset;
                 for (frame, samples) in destination.chunks_exact_mut(map.channels).enumerate() {
                     // SAFETY: full ABL geometry and all channel maps were checked
                     // before DSP; block offsets remain inside this native callback.
@@ -160,12 +172,15 @@ pub(super) fn transfer(
     }
 }
 pub(super) fn write(buffers: &[AudioBuffer], map: &Binding, offset: usize, source: &[f32]) {
+    let Some(channel_offset) = map.offset else {
+        return;
+    };
     let mut base = 0;
     for buffer in buffers {
         let width = buffer.channels as usize;
         for channel in 0..width {
-            if (map.offset..map.offset + map.channels).contains(&(base + channel)) {
-                let selected = base + channel - map.offset;
+            if (channel_offset..channel_offset + map.channels).contains(&(base + channel)) {
+                let selected = base + channel - channel_offset;
                 for (frame, samples) in source.chunks_exact(map.channels).enumerate() {
                     // SAFETY: same validated geometry, sole IOProc output writer.
                     unsafe {
@@ -295,13 +310,21 @@ impl<F: FnMut()> Drop for CaptureRetirement<F> {
 }
 
 fn log_route(plan: &DirectPlan, rate: u32, buffer: u32) {
-    eprintln!(
-        "CoreAudio callback render: clock={} rate={} buffer={} bindings={}",
-        plan.clock_id,
-        rate,
-        buffer,
-        plan.bindings.len()
+    tracing::info!(
+        clock_id = plan.clock_id,
+        processing_rate = rate,
+        buffer_frames = buffer,
+        bindings = plan.bindings.len(),
+        "CoreAudio direct renderer starting"
     );
+}
+
+#[derive(Default)]
+struct RenderSignals {
+    progress: AtomicU64,
+    failed: AtomicBool,
+    invalid: AtomicBool,
+    reconfigure: AtomicBool,
 }
 
 pub(super) fn run(
@@ -309,14 +332,13 @@ pub(super) fn run(
     processor: &mut BlockProcessor,
     context: AudioContext<'_>,
 ) -> Result<(), String> {
-    let progress = AtomicU64::new(0);
-    let failed = AtomicBool::new(false);
-    let invalid = AtomicBool::new(false);
-    let reconfigure = AtomicBool::new(false);
+    let signals = RenderSignals::default();
     let graph_rate = processor.plan().format().sample_rate;
     let endpoints = EndpointBoundaries::prepare(processor.plan())?;
     let capture_ids = endpoints.capture_ids();
-    reconfigure.store(endpoints.pending(), Ordering::Release);
+    signals
+        .reconfigure
+        .store(endpoints.pending(), Ordering::Release);
     let renderer = Renderer {
         processor,
         bindings: &plan.bindings,
@@ -325,11 +347,11 @@ pub(super) fn run(
         native_clock: Some((plan, plan.discontinuities())),
         status: context.runtime_status,
         frame: 0,
-        progress: &progress,
-        failed: &failed,
-        invalid: &invalid,
+        progress: &signals.progress,
+        failed: &signals.failed,
+        invalid: &signals.invalid,
         endpoints,
-        reconfigure: &reconfigure,
+        reconfigure: &signals.reconfigure,
     };
     log_route(
         plan,
@@ -345,41 +367,99 @@ pub(super) fn run(
         }
     });
     let mut installed = prepared.install(plan);
-    let mut ticks = 0;
-    let mut last = Instant::now();
-    let mut last_boundary_check = Instant::now();
-    while !context.runtime_status.stop_requested()
-        && !context.runtime_status.pause_requested()
-        && !context.exchange.has_pending()
-        && !context.devices.has_pending()
-        && plan.healthy()
-    {
-        if failed.load(Ordering::Acquire) || invalid.load(Ordering::Acquire) {
-            break;
-        }
-        if reconfigure.load(Ordering::Acquire)
-            && last_boundary_check.elapsed() >= Duration::from_millis(100)
-        {
-            last_boundary_check = Instant::now();
-            installed.replace_boundaries()?;
-        }
-        let next = progress.load(Ordering::Acquire);
-        if next != ticks {
-            ticks = next;
-            last = Instant::now();
-        } else if last.elapsed() > Duration::from_secs(2) {
-            break;
-        }
-        // Supervisory responsiveness only. This thread never moves PCM; every
-        // block has already been rendered synchronously inside the IOProc.
-        thread::sleep(Duration::from_millis(1));
-    }
+    let mut last_execution_report = Instant::now();
+    let result = signals.supervise(plan, context, &mut installed, &mut last_execution_report);
     drop(installed);
+    plan.report_execution(last_execution_report.elapsed());
     drop(capture_retirement);
-    if invalid.load(Ordering::Acquire) {
+    finish_render(
+        plan,
+        context,
+        signals.invalid.load(Ordering::Acquire),
+        signals.failed.load(Ordering::Acquire),
+    )?;
+    result
+}
+
+impl RenderSignals {
+    fn supervise(
+        &self,
+        plan: &DirectPlan,
+        context: AudioContext<'_>,
+        installed: &mut ownership::InstalledRenderer<'_, '_>,
+        last_execution_report: &mut Instant,
+    ) -> Result<(), String> {
+        let mut ticks = 0;
+        let mut last = Instant::now();
+        let mut last_boundary_check = Instant::now();
+        while !context.runtime_status.stop_requested()
+            && !context.runtime_status.pause_requested()
+            && !context.exchange.has_pending()
+            && !context.devices.has_pending()
+            && plan.healthy()
+        {
+            if self.failed.load(Ordering::Acquire) || self.invalid.load(Ordering::Acquire) {
+                break;
+            }
+            if last_execution_report.elapsed() >= Duration::from_secs(5) {
+                plan.report_execution(last_execution_report.elapsed());
+                *last_execution_report = Instant::now();
+            }
+            if self.reconfigure.load(Ordering::Acquire)
+                && last_boundary_check.elapsed() >= Duration::from_millis(100)
+            {
+                last_boundary_check = Instant::now();
+                installed.replace_boundaries().inspect_err(|error| {
+                tracing::warn!(clock_id = plan.clock_id, %error, "CoreAudio boundary preparation failed");
+            })?;
+            }
+            let next = self.progress.load(Ordering::Acquire);
+            if next != ticks {
+                ticks = next;
+                last = Instant::now();
+            } else if last.elapsed() > Duration::from_secs(2) {
+                tracing::warn!(
+                    clock_id = plan.clock_id,
+                    "CoreAudio direct callback progress stalled"
+                );
+                break;
+            }
+            // Supervisory responsiveness only. This thread never moves PCM; every
+            // block has already been rendered synchronously inside the IOProc.
+            thread::sleep(Duration::from_millis(1));
+        }
+        Ok(())
+    }
+}
+
+fn finish_render(
+    plan: &DirectPlan,
+    context: AudioContext<'_>,
+    invalid: bool,
+    failed: bool,
+) -> Result<(), String> {
+    tracing::info!(
+        clock_id = plan.clock_id,
+        invalid_layout = invalid,
+        render_failed = failed,
+        stop = context.runtime_status.stop_requested(),
+        pause = context.runtime_status.pause_requested(),
+        graph_pending = context.exchange.has_pending(),
+        devices_pending = context.devices.has_pending(),
+        healthy = plan.healthy(),
+        "CoreAudio direct renderer stopped"
+    );
+    if invalid {
+        tracing::warn!(
+            clock_id = plan.clock_id,
+            "CoreAudio callback rejected native buffer layout"
+        );
         plan.request_reconnect();
     }
-    if failed.load(Ordering::Acquire) {
+    if !plan.healthy() {
+        context.devices.request_recovery();
+    }
+    if failed {
         return Err("CoreAudio direct callback rejected buffer geometry or DSP processing".into());
     }
     Ok(())
@@ -413,13 +493,13 @@ mod tests {
             Binding {
                 id: "input".into(),
                 input: true,
-                offset: 0,
+                offset: Some(0),
                 channels: 2,
             },
             Binding {
                 id: "output".into(),
                 input: false,
-                offset: 0,
+                offset: Some(0),
                 channels: 2,
             },
         ]
@@ -456,6 +536,143 @@ mod tests {
             )
             .unwrap();
         BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()))
+    }
+
+    fn offline_branch_processor() -> BlockProcessor {
+        let document: GraphDocument = serde_json::from_value(serde_json::json!({
+            "schemaVersion":2,"revision":1,"nodes":[
+                {"id":"input","type":"audio_device_input","config":{"selector":{"match":"default_input"},"outputChannels":2,"gainDb":0}},
+                {"id":"missing-input","type":"audio_device_input","config":{"selector":{"match":"default_input"},"outputChannels":2,"gainDb":0}},
+                {"id":"output","type":"audio_device_output","config":{"selector":{"match":"default_output"},"inputChannels":2}},
+                {"id":"missing-output","type":"audio_device_output","config":{"selector":{"match":"default_output"},"inputChannels":2}}
+            ],"edges":[
+                {"id":"live","source":{"nodeId":"input","portId":"audio"},"destination":{"nodeId":"output","portId":"audio"}},
+                {"id":"silent","source":{"nodeId":"missing-input","portId":"audio"},"destination":{"nodeId":"output","portId":"audio"}},
+                {"id":"discard","source":{"nodeId":"input","portId":"audio"},"destination":{"nodeId":"missing-output","portId":"audio"}}
+            ]
+        })).unwrap();
+        let execution = GraphCompiler::default()
+            .compile(
+                &document,
+                CompileContext {
+                    format: RenderFormat {
+                        sample_rate: 48_000,
+                        block_frames: 32,
+                    },
+                    limits: CompileLimits::default(),
+                },
+            )
+            .unwrap();
+        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()))
+    }
+
+    #[test]
+    fn offline_transfers_are_inactive_silence_and_discard_with_complete_frame_counts() {
+        let processor = processor_at(32, 48_000);
+        let mut bindings = stereo_bindings();
+        for binding in &mut bindings {
+            binding.offset = None;
+        }
+        let mut endpoints = EndpointBoundaries::<NativeCapture>::empty();
+        let mut io = CallbackIo {
+            buffers: Buffers {
+                input: &[],
+                output: &[],
+            },
+            bindings: &bindings,
+            offset: 0,
+            endpoints: &mut endpoints,
+        };
+        assert!(bindings.iter().all(|binding| io.buffers.covers(binding)));
+        let cycle = ProcessCycle {
+            clock: ClockDomain {
+                authority: ClockAuthority::Device,
+                id: 7,
+                epoch: 3,
+            },
+            sample_rate: 48_000,
+            frames: 32,
+            first_frame: 0,
+            monotonic_ns: None,
+            discontinuity: true,
+        };
+        let mut pcm = [9.0; 64];
+        let input = io.read_source(&processor.plan().source_bindings()[0], &mut pcm, &cycle);
+        assert_eq!(
+            input,
+            TransferOutcome {
+                activity: InputActivity::Inactive,
+                ..TransferOutcome::complete(32)
+            }
+        );
+        assert_eq!(pcm.map(f32::to_bits), [0.0_f32; 64].map(f32::to_bits));
+        assert_eq!(
+            io.write_sink(&processor.plan().sink_bindings()[0], &[0.5; 64], &cycle),
+            TransferOutcome::complete(32)
+        );
+    }
+
+    #[test]
+    fn missing_device_branches_do_not_interrupt_live_callback_pcm_or_create_xruns() {
+        let mut processor = offline_branch_processor();
+        let mut bindings = Vec::from(stereo_bindings());
+        for (id, input) in [("missing-input", true), ("missing-output", false)] {
+            bindings.push(Binding {
+                id: id.into(),
+                input,
+                offset: None,
+                channels: 2,
+            });
+        }
+        let status = tonenari_engine_service::session::AdapterRuntimeStatus::new(
+            crate::macos::adapter_profile(),
+        );
+        let progress = AtomicU64::new(0);
+        let failed = AtomicBool::new(false);
+        let invalid = AtomicBool::new(false);
+        let mut renderer = Renderer {
+            processor: &mut processor,
+            bindings: &bindings,
+            clock_id: 7,
+            epoch: 3,
+            native_clock: None,
+            status: &status,
+            frame: 0,
+            progress: &progress,
+            failed: &failed,
+            invalid: &invalid,
+            endpoints: EndpointBoundaries::<NativeCapture>::empty(),
+            reconfigure: &invalid,
+        };
+        exercise_live_callback(&mut renderer);
+        assert_eq!(progress.load(Ordering::Acquire), 10);
+        assert!(!invalid.load(Ordering::Acquire));
+        assert!(!failed.load(Ordering::Acquire));
+        let measured = status.status(RenderFormat {
+            sample_rate: 48_000,
+            block_frames: 32,
+        });
+        assert_eq!((measured.underruns, measured.overruns), (0, 0));
+    }
+
+    fn exercise_live_callback(renderer: &mut Renderer<'_>) {
+        let mut input = [0.25; 98];
+        let mut output = [0.0; 98];
+        let input_list = stereo_list(&mut input);
+        let mut output_list = stereo_list(&mut output);
+        for _ in 0..10 {
+            output.fill(0.0);
+            // SAFETY: both ABLs own 49 stereo frames for this synchronous call;
+            // the two offline maps have no native storage to dereference.
+            assert!(unsafe {
+                renderer.render(
+                    (&raw const input_list).cast(),
+                    (&raw mut output_list).cast(),
+                    49,
+                )
+            });
+            assert_eq!(output.map(f32::to_bits), input.map(f32::to_bits));
+        }
     }
 
     #[test]
@@ -545,7 +762,7 @@ mod tests {
         let map = Binding {
             id: "input".into(),
             input: true,
-            offset: 3,
+            offset: Some(3),
             channels: 2,
         };
         let view = Buffers {
@@ -553,14 +770,17 @@ mod tests {
             output: &[],
         };
         assert!(view.covers(&map));
-        assert!(!view.covers(&Binding { offset: 2, ..map }));
+        assert!(!view.covers(&Binding {
+            offset: Some(2),
+            ..map
+        }));
         let mut destination = [0.0; 64];
         transfer(
             buffers,
             &Binding {
                 id: "input".into(),
                 input: true,
-                offset: 3,
+                offset: Some(3),
                 channels: 2,
             },
             0,

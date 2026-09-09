@@ -27,6 +27,7 @@ import { RecorderControls } from '../recorder/RecorderControls';
 import { applicationItemId } from './applicationIdentity';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { graphHistoryGroup } from './graphHistoryGroup';
+import { presentHardwareNodeStatus } from './hardwareNodeStatus';
 import {
   addRoutingNode,
   audioGraphToRuntimeGraph,
@@ -837,13 +838,20 @@ function useProcessorEditorLabels() {
 
 function usePresentedModel(props: WorkspaceViewProps) {
   const { t } = useTranslation();
-  const { model, applications, audioSession, state, deviceRateAction } = props;
+  const { model, applications, audioDevices, inventory, audioSession, state, deviceRateAction } =
+    props;
   return useMemo(
     () =>
       model
         ? presentVirtualNodeStatus(
             presentVirtualEndpointSettings(
-              presentApplicationReselection(presentRoutingApplicationIcons(model, applications), t),
+              presentApplicationReselection(
+                presentRoutingApplicationIcons(
+                  presentHardwareNodeStatus(model, audioDevices, inventory.devicesObserved, t),
+                  applications,
+                ),
+                t,
+              ),
               audioSession?.virtualEndpointSettings,
               t('audioSession.sampleRate'),
               deviceRateAction,
@@ -853,7 +861,16 @@ function usePresentedModel(props: WorkspaceViewProps) {
             t,
           )
         : null,
-    [applications, model, audioSession, state, t, deviceRateAction],
+    [
+      applications,
+      audioDevices,
+      inventory.devicesObserved,
+      model,
+      audioSession,
+      state,
+      t,
+      deviceRateAction,
+    ],
   );
 }
 

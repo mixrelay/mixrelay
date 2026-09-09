@@ -119,6 +119,7 @@ export const pseudo = {
   },
   routing: {
     nodeStatus: {
+      offline: '[Offline]',
       reselectApplication: '[Select the application again]',
       unknown: '[Audio status unknown]',
       running: '[Audio session running]',

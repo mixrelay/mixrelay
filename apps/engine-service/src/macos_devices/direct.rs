@@ -9,6 +9,7 @@ use super::{
     },
 };
 use std::{
+    collections::BTreeMap,
     ffi::c_void,
     sync::{
         Arc,
@@ -17,8 +18,10 @@ use std::{
     thread,
     time::Duration,
 };
-use tonenari_audio_engine::RenderPlan;
+use tonenari_audio_engine::{ExternalBinding, RenderPlan};
 use tonenari_audio_graph::{FROM_OS_PORT_ID, TO_OS_PORT_ID};
+mod metrics;
+use metrics::CallbackMetrics;
 
 pub(crate) fn next_epoch() -> u64 {
     super::bridge::NEXT_DEVICE_EPOCH.fetch_add(1, Ordering::Relaxed)
@@ -28,6 +31,7 @@ pub(crate) fn next_epoch() -> u64 {
 pub(crate) struct Descriptor {
     pub(crate) context: *mut c_void,
     pub(crate) render: unsafe extern "C" fn(*mut c_void, *const c_void, *mut c_void, u32),
+    pub(crate) sample_rate: u32,
 }
 
 #[derive(Default)]
@@ -36,6 +40,7 @@ pub(super) struct RenderSlot {
     descriptor: AtomicPtr<Descriptor>,
     readers: AtomicU32,
     rendering: AtomicBool,
+    metrics: CallbackMetrics,
     pub(super) generation: AtomicU64,
     pub(super) reconnect: AtomicBool,
 }
@@ -70,17 +75,23 @@ pub(super) unsafe extern "C" fn dispatch(
     let descriptor = slot.descriptor.load(Ordering::SeqCst);
     // Never wait on an audio callback, even for an unexpected concurrent vendor
     // invocation. This also enforces the exclusive Rust mutable-renderer contract.
-    if !descriptor.is_null()
-        && slot
+    if !descriptor.is_null() {
+        if slot
             .rendering
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .is_ok()
-    {
-        let descriptor = unsafe { &*descriptor };
-        unsafe {
-            (descriptor.render)(descriptor.context, input, output, frames);
+        {
+            let descriptor = unsafe { &*descriptor };
+            let started = std::time::Instant::now();
+            unsafe {
+                (descriptor.render)(descriptor.context, input, output, frames);
+            }
+            slot.metrics
+                .record(started.elapsed(), frames, descriptor.sample_rate);
+            slot.rendering.store(false, Ordering::Release);
+        } else {
+            slot.metrics.missed();
         }
-        slot.rendering.store(false, Ordering::Release);
     }
     slot.readers.fetch_sub(1, Ordering::SeqCst);
     true
@@ -89,8 +100,53 @@ pub(super) unsafe extern "C" fn dispatch(
 pub(crate) struct Binding {
     pub(crate) id: String,
     pub(crate) input: bool,
-    pub(crate) offset: usize,
+    /// No native ABL storage exists for a device confirmed absent by inventory.
+    pub(crate) offset: Option<usize>,
     pub(crate) channels: usize,
+}
+
+impl Binding {
+    fn prepare(
+        devices: &DeviceSet,
+        binding: &ExternalBinding,
+        input: bool,
+        clock_id: u32,
+        native_rate: u32,
+    ) -> Option<Self> {
+        let id = binding.node_id().as_str();
+        let offset = if devices.is_offline(id) {
+            None
+        } else {
+            let device = devices.0.get(id)?;
+            if !device.ready()
+                || device.input != input
+                || device.clock_identity.load(Ordering::Acquire) != clock_id
+                || device.native_rate.load(Ordering::Acquire) != native_rate
+            {
+                return None;
+            }
+            let (mut resolved, mut offset, mut total) = (0, 0, 0);
+            // SAFETY: immutable control-side selection with an owned native lifetime.
+            if !unsafe {
+                tn_device_io_direct_binding(
+                    device.native.pointer.as_ptr(),
+                    &raw mut resolved,
+                    &raw mut offset,
+                    &raw mut total,
+                )
+            } || resolved != clock_id
+            {
+                return None;
+            }
+            Some(offset as usize)
+        };
+        Some(Self {
+            id: id.to_owned(),
+            input,
+            offset,
+            channels: usize::from(binding.channels()),
+        })
+    }
 }
 
 pub(crate) struct DirectPlan {
@@ -101,8 +157,18 @@ pub(crate) struct DirectPlan {
 }
 
 impl DirectPlan {
-    /// Control only. A shared rate is insufficient: every hardware binding
-    /// must name the same verified native clock and actual graph rate. No HAL
+    /// Control-side logging only; callback counters never take the logging path.
+    pub(crate) fn report_execution(&self, elapsed: Duration) {
+        self.master
+            .native
+            .render
+            .metrics
+            .report(self.clock_id, elapsed);
+    }
+
+    /// Control only. A shared rate is insufficient: every available hardware
+    /// binding must name the same verified native clock and actual graph rate.
+    /// Inventory-confirmed absent bindings have no native storage or owner. No HAL
     /// shared-memory or app-capture timeline is silently relabelled as this `IOProc`.
     pub(crate) fn prepare(devices: &DeviceSet, plan: &RenderPlan) -> Option<Self> {
         let master = devices
@@ -113,10 +179,11 @@ impl DirectPlan {
             .clone();
         let clock_id = master.clock_identity.load(Ordering::Acquire);
         let native_rate = master.native_rate.load(Ordering::Acquire);
-        if clock_id == 0 {
+        if clock_id == 0 || native_rate != plan.format().sample_rate {
             return None;
         }
         let mut bindings = Vec::new();
+        let mut owners = BTreeMap::from([(master.identity, Arc::clone(&master))]);
         for (input, list) in [
             (true, plan.source_bindings()),
             (false, plan.sink_bindings()),
@@ -134,34 +201,12 @@ impl DirectPlan {
                 {
                     continue;
                 }
-                let device = devices.0.get(binding.node_id().as_str())?;
-                if !device.ready()
-                    || device.input != input
-                    || device.clock_identity.load(Ordering::Acquire) != clock_id
-                    || device.native_rate.load(Ordering::Acquire) != native_rate
-                    || native_rate != plan.format().sample_rate
-                {
-                    return None;
+                let map = Binding::prepare(devices, binding, input, clock_id, native_rate)?;
+                if map.offset.is_some() {
+                    let device = devices.0.get(&map.id)?;
+                    owners.insert(device.identity, Arc::clone(device));
                 }
-                let (mut resolved, mut offset, mut total) = (0, 0, 0);
-                // SAFETY: control-only immutable selection resolution, with owned native lifetime.
-                if !unsafe {
-                    tn_device_io_direct_binding(
-                        device.native.pointer.as_ptr(),
-                        &raw mut resolved,
-                        &raw mut offset,
-                        &raw mut total,
-                    )
-                } || resolved != clock_id
-                {
-                    return None;
-                }
-                bindings.push(Binding {
-                    id: binding.node_id().as_str().to_owned(),
-                    input,
-                    offset: offset as usize,
-                    channels: usize::from(binding.channels()),
-                });
+                bindings.push(map);
             }
         }
         if bindings.is_empty() {
@@ -169,7 +214,7 @@ impl DirectPlan {
         }
         Some(Self {
             master,
-            owners: devices.0.values().cloned().collect(),
+            owners: owners.into_values().collect(),
             bindings,
             clock_id,
         })
@@ -263,6 +308,52 @@ impl Drop for Registration<'_> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn confirmed_offline_bindings_need_no_native_mapping_but_unknown_bindings_are_rejected() {
+        use tonenari_audio_graph::{
+            CompileContext, CompileLimits, GraphCompiler, GraphDocument, RenderFormat,
+        };
+        let document: GraphDocument = serde_json::from_value(serde_json::json!({
+            "schemaVersion":2,"revision":1,"nodes":[
+                {"id":"input","type":"audio_device_input","config":{"selector":{"match":"default_input"},"outputChannels":2,"gainDb":0}},
+                {"id":"output","type":"audio_device_output","config":{"selector":{"match":"default_output"},"inputChannels":2}}
+            ],"edges":[{"id":"wire","source":{"nodeId":"input","portId":"audio"},"destination":{"nodeId":"output","portId":"audio"}}]
+        })).unwrap();
+        let execution = GraphCompiler::default()
+            .compile(
+                &document,
+                CompileContext {
+                    format: RenderFormat {
+                        sample_rate: 48_000,
+                        block_frames: 32,
+                    },
+                    limits: CompileLimits::default(),
+                },
+            )
+            .unwrap();
+        let plan = RenderPlan::prepare(&execution).unwrap();
+        let devices = DeviceSet(BTreeMap::new(), super::super::spec::specs(&document));
+        for (input, list) in [
+            (true, plan.source_bindings()),
+            (false, plan.sink_bindings()),
+        ] {
+            for binding in list {
+                let prepared = Binding::prepare(&devices, binding, input, 7, 48_000).unwrap();
+                assert_eq!(
+                    (prepared.input, prepared.offset, prepared.channels),
+                    (input, None, 2)
+                );
+                assert!(
+                    Binding::prepare(&DeviceSet::default(), binding, input, 7, 48_000).is_none()
+                );
+            }
+        }
+        assert!(
+            DirectPlan::prepare(&devices, &plan).is_none(),
+            "offline-only sets cannot invent a callback clock"
+        );
+    }
+
     struct Probe {
         entered: AtomicBool,
         release: AtomicBool,
@@ -294,6 +385,7 @@ mod tests {
         let mut descriptor = Box::new(Descriptor {
             context: (&raw mut *probe).cast(),
             render: held_render,
+            sample_rate: 48_000,
         });
         slot.enabled.store(true, Ordering::Release);
         slot.publish(&raw mut *descriptor);
@@ -321,6 +413,7 @@ mod tests {
             );
         }
         assert_eq!(probe.calls.load(Ordering::Acquire), 1);
+        assert_eq!(slot.metrics.missed_count(), 1);
         slot.publish(std::ptr::null_mut());
         assert!(!slot.drained());
         probe.release.store(true, Ordering::Release);
@@ -339,6 +432,7 @@ mod tests {
             });
         }
         assert!(slot.drained());
+        assert_eq!(slot.metrics.missed_count(), 1);
     }
 
     #[test]

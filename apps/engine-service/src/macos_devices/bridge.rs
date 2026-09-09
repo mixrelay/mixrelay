@@ -97,10 +97,15 @@ impl DeviceBridge {
         })
     }
     pub(super) fn activate(&mut self, context: &WorkerContext) {
-        #[cfg(test)]
-        eprintln!(
-            "hardware bridge activation input={} native_rate={} graph_rate={} aligned={} epoch={}",
-            context.input, self.native_rate, self.graph_rate, self.clock_aligned, self.epoch
+        tracing::info!(
+            owner = context.native.log_id,
+            input = context.input,
+            native_rate = self.native_rate,
+            processing_rate = self.graph_rate,
+            clock_aligned = self.clock_aligned,
+            clock_id = context.clock_identity.load(Ordering::Acquire),
+            epoch = self.epoch,
+            "CoreAudio bridge activated"
         );
         context.bridge_ready.store(false, Ordering::Release);
         let pointer = context.native.pointer.as_ptr();

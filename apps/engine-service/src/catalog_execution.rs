@@ -42,8 +42,9 @@ pub struct CatalogExecutionContext<'a> {
 /// Composes all supplied catalog documents without mutating their authored contents.
 /// Empty catalogs produce an empty plan; no default device or source is synthesized.
 /// # Errors
-/// Rejects conflicting device definitions, unresolved physical/application identities,
-/// incompatible shared-owner policies, invalid references and inter-graph feedback.
+/// Rejects conflicting device definitions, ambiguous physical/application identities,
+/// incompatible shared-owner policies and invalid references. Absent physical selections
+/// remain native bindings so adapters can silence and reconnect them independently.
 pub fn compose_catalog(
     documents: &[(String, GraphDocument)],
     context: CatalogExecutionContext<'_>,
@@ -124,19 +125,46 @@ impl RegistryInputs {
                     identities
                         .sources
                         .insert(node.id.clone(), source.id.clone());
-                    insert_same(&mut self.sources, source.id.clone(), source)?;
+                    self.insert_source(source)?;
                 }
                 NodeConfig::AudioDeviceOutput(config) => {
                     let output = resolve_output(config, context.devices)?;
                     identities
                         .outputs
                         .insert(node.id.clone(), output.id.clone());
-                    insert_same(&mut self.outputs, output.id.clone(), output)?;
+                    self.insert_output(output)?;
                 }
                 _ => {}
             }
         }
         Ok(identities)
+    }
+
+    fn insert_source(&mut self, mut source: SharedSource) -> Result<(), CompositionError> {
+        if let Some(existing) = self.sources.get_mut(&source.id)
+            && let (NodeConfig::AudioDeviceInput(current), NodeConfig::AudioDeviceInput(next)) =
+                (&mut existing.config, &mut source.config)
+            && current.selector == next.selector
+        {
+            // Missing devices have no observed width. Reserve the widest authored
+            // request once, while each graph keeps its own channel projection.
+            current.output_channels = current.output_channels.max(next.output_channels);
+            return Ok(());
+        }
+        insert_same(&mut self.sources, source.id.clone(), source)
+    }
+
+    fn insert_output(&mut self, output: SharedOutput) -> Result<(), CompositionError> {
+        if let Some(existing) = self.outputs.get_mut(&output.id)
+            && existing.config.selector == output.config.selector
+        {
+            existing.config.input_channels = existing
+                .config
+                .input_channels
+                .max(output.config.input_channels);
+            return Ok(());
+        }
+        insert_same(&mut self.outputs, output.id.clone(), output)
     }
 }
 
@@ -146,21 +174,17 @@ fn resolve_source(
 ) -> Result<SharedSource, CompositionError> {
     match &node.config {
         NodeConfig::AudioDeviceInput(config) => {
-            let device = config
-                .selector
-                .resolve(
-                    context.devices,
-                    DeviceDirection::Input,
-                    config.output_channels,
-                )
-                .map_err(|error| invalid(error.to_string()))?;
+            let (id, selector, channels) = resolve_physical(
+                &config.selector,
+                context.devices,
+                DeviceDirection::Input,
+                config.output_channels,
+            )?;
             Ok(SharedSource {
-                id: physical_id(&device.uid),
+                id,
                 config: NodeConfig::AudioDeviceInput(AudioDeviceInputConfig {
-                    selector: DeviceSelector::PersistentUid {
-                        uid: device.uid.clone(),
-                    },
-                    output_channels: supported_width(device.input_channels)?,
+                    selector,
+                    output_channels: channels,
                     gain_db: 0.0,
                 }),
             })
@@ -183,19 +207,84 @@ fn resolve_output(
     config: &AudioDeviceOutputConfig,
     devices: &[AudioDeviceDescriptor],
 ) -> Result<SharedOutput, CompositionError> {
-    let device = config
-        .selector
-        .resolve(devices, DeviceDirection::Output, config.input_channels)
-        .map_err(|error| invalid(error.to_string()))?;
+    let (id, selector, channels) = resolve_physical(
+        &config.selector,
+        devices,
+        DeviceDirection::Output,
+        config.input_channels,
+    )?;
     Ok(SharedOutput {
-        id: physical_id(&device.uid),
+        id,
         config: AudioDeviceOutputConfig {
-            selector: DeviceSelector::PersistentUid {
-                uid: device.uid.clone(),
-            },
-            input_channels: supported_width(device.output_channels)?,
+            selector,
+            input_channels: channels,
         },
     })
+}
+
+fn resolve_physical(
+    selector: &DeviceSelector,
+    devices: &[AudioDeviceDescriptor],
+    direction: DeviceDirection,
+    channels: u16,
+) -> Result<(String, DeviceSelector, u16), CompositionError> {
+    let resolved = selector.resolve(devices, direction, channels);
+    if let Ok(device) = resolved {
+        let width = match direction {
+            DeviceDirection::Input => device.input_channels,
+            DeviceDirection::Output => device.output_channels,
+        };
+        return Ok((
+            physical_id(&device.uid),
+            DeviceSelector::PersistentUid {
+                uid: device.uid.clone(),
+            },
+            supported_width(width)?,
+        ));
+    }
+    // Zero channels in this direction means that IO has disappeared even if the
+    // opposite direction remains online. A nonzero but insufficient width is invalid.
+    if !physical_io_absent(selector, devices, direction) {
+        return Err(invalid(
+            "physical selection is ambiguous or has insufficient channels",
+        ));
+    }
+    let missing_id = match (selector, direction) {
+        (DeviceSelector::PersistentUid { uid }, _) if !uid.is_empty() => Some(physical_id(uid)),
+        (DeviceSelector::DefaultInput, DeviceDirection::Input) => {
+            Some("unresolved-default:input".into())
+        }
+        (DeviceSelector::DefaultOutput, DeviceDirection::Output) => {
+            Some("unresolved-default:output".into())
+        }
+        _ => None,
+    };
+    if (1..=64).contains(&channels)
+        && let Some(id) = missing_id
+    {
+        return Ok((id, selector.clone(), channels));
+    }
+    Err(invalid(
+        "physical selection is ambiguous or has invalid direction/channel width",
+    ))
+}
+
+fn physical_io_absent(
+    selector: &DeviceSelector,
+    devices: &[AudioDeviceDescriptor],
+    direction: DeviceDirection,
+) -> bool {
+    let mut candidates = devices.iter().filter(|device| match selector {
+        DeviceSelector::PersistentUid { uid } => &device.uid == uid,
+        DeviceSelector::DefaultInput => device.is_default_input,
+        DeviceSelector::DefaultOutput => device.is_default_output,
+    });
+    let first = candidates.next();
+    candidates.next().is_none()
+        && first.is_none_or(|device| match direction {
+            DeviceDirection::Input => device.input_channels == 0,
+            DeviceDirection::Output => device.output_channels == 0,
+        })
 }
 
 fn physical_id(uid: &str) -> String {

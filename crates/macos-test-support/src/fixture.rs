@@ -7,9 +7,11 @@ pub struct DeviceFixture {
     device: PrivateDevice,
 }
 impl DeviceFixture {
-    /// Creates a process-private aggregate of the installed `ToneNari` endpoint.
+    /// Creates a process-private aggregate of `TONENARI_TEST_ENDPOINT_UID`.
+    /// The selected installed device must expose at least two input and two output
+    /// channels. The fixture retains this exact member through every reconnect.
     /// # Panics
-    /// Native creation or readiness failure fails the test.
+    /// Missing/invalid selection, native creation or readiness failure fails the test.
     #[must_use]
     pub fn start() -> (Self, String) {
         let device = PrivateDevice::new().unwrap_or_else(|error| panic!("{error}"));

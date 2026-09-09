@@ -93,12 +93,24 @@
   --port-selected-ring: rgba(141, 168, 220, 0.24);
 
   z-index: 3;
-  width: 14px;
-  height: 16px;
+  /* React Flow anchors cables to this box, not the expanded pointer target. */
+  min-width: 0;
+  width: 3px;
+  height: 9px;
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
+}
+
+.handle::before {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 16px;
+  content: "";
+  transform: translate(-50%, -50%);
 }
 
 .handle::after {

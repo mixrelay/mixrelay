@@ -92,6 +92,15 @@ vi.mock('../../core/audio-graph/AudioGraphCanvas', () => ({
         raise parameter
       </button>
       <output data-testid="edge-count">{model.edges.length}</output>
+      <output data-testid="node-statuses">
+        {JSON.stringify(
+          model.nodes.map((node) => ({
+            id: node.id,
+            status: node.appearance.status,
+            tone: node.appearance.statusTone,
+          })),
+        )}
+      </output>
       <output data-testid="node-menu">{JSON.stringify(nodeMenuItems)}</output>
       <output data-testid="layout">
         {JSON.stringify({
@@ -298,6 +307,90 @@ it('adds Recorder from the output menu as a graph node without file settings', a
       ]),
     }),
   );
+});
+
+it('retains routing and editable explicit device selectors while a device disappears and returns', async () => {
+  await i18n.changeLanguage('en');
+  const devices = [
+    {
+      uid: 'microphone',
+      displayName: 'Mic',
+      inputChannels: 1,
+      outputChannels: 0,
+      isDefaultInput: true,
+      isDefaultOutput: false,
+    },
+    {
+      uid: 'headphones',
+      displayName: 'Headphones',
+      inputChannels: 0,
+      outputChannels: 2,
+      isDefaultInput: false,
+      isDefaultOutput: false,
+    },
+  ];
+  const graph: RuntimeGraphDocument = {
+    schemaVersion: 2,
+    revision: 1,
+    nodes: [
+      {
+        id: 'input',
+        type: 'audio_device_input',
+        label: 'Mic',
+        config: {
+          selector: { match: 'persistent_uid', uid: 'microphone' },
+          outputChannels: 1,
+          gainDb: 0,
+        },
+      },
+      {
+        id: 'output',
+        type: 'audio_device_output',
+        label: 'Headphones',
+        config: { selector: { match: 'persistent_uid', uid: 'headphones' }, inputChannels: 2 },
+      },
+    ],
+    edges: [
+      {
+        id: 'route',
+        source: { nodeId: 'input', portId: 'audio' },
+        destination: { nodeId: 'output', portId: 'audio' },
+        channelMapping: { mode: 'auto' },
+      },
+    ],
+  };
+  const discovery = vi.fn().mockResolvedValue(devices);
+  const source = port({ getGraph: vi.fn().mockResolvedValue(graph), listAudioDevices: discovery });
+  renderWorkspace(source);
+  await waitFor(() => expect(discovery).toHaveBeenCalled());
+  await waitFor(() => expect(screen.getByTestId('edge-count')).toHaveTextContent('1'));
+  discovery.mockResolvedValue([devices[0]]);
+  act(() => window.dispatchEvent(new Event('focus')));
+  await waitFor(() =>
+    expect(screen.getByTestId('node-statuses')).toHaveTextContent(
+      '"id":"output","status":"Offline","tone":"neutral"',
+    ),
+  );
+  expect(screen.getByTestId('node-statuses')).toHaveTextContent('{"id":"input"}');
+  expect(screen.getByTestId('edge-count')).toHaveTextContent('1');
+  expect(source.applyGraph).not.toHaveBeenCalled();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'change gain' }));
+  await waitFor(() => expect(source.applyGraph).toHaveBeenCalled());
+  expect(source.applyGraph).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      edges: graph.edges,
+      nodes: expect.arrayContaining([
+        graph.nodes[1],
+        expect.objectContaining({ id: 'input', config: expect.objectContaining({ gainDb: -6 }) }),
+      ]),
+    }),
+  );
+  discovery.mockResolvedValue(devices);
+  act(() => window.dispatchEvent(new Event('focus')));
+  await waitFor(() => expect(screen.getByTestId('node-statuses')).not.toHaveTextContent('Offline'));
+  expect(source.applyGraph).toHaveBeenCalledTimes(1);
+  expect(screen.getByTestId('edge-count')).toHaveTextContent('1');
 });
 
 it('applies recorder channel edits through graph history and restores the width on undo', async () => {

@@ -48,11 +48,32 @@ impl WorkerContext {
         Ok(true)
     }
     pub(super) fn run(self, tx: &std::sync::mpsc::SyncSender<Result<(), String>>) {
+        let span = tracing::info_span!(
+            "coreaudio_device",
+            owner = self.native.log_id,
+            input = self.input,
+            channels = self.channels
+        );
+        let _entered = span.enter();
         tonenari_engine_service::device_worker::supervise(
             &self.stop,
             &self.failed,
             tx,
-            |connected| self.connection(connected),
+            |connected| {
+                tracing::info!(
+                    previous_native_rate = self.native_rate.load(Ordering::Acquire),
+                    processing_rate = self.graph_rate.load(Ordering::Acquire),
+                    "CoreAudio connection starting"
+                );
+                let result = self.connection(connected);
+                match &result {
+                    Err(error) if !self.stop.load(Ordering::Acquire) => {
+                        tracing::warn!(%error, "CoreAudio connection ended; recovery pending");
+                    }
+                    _ => tracing::info!("CoreAudio connection retired"),
+                }
+                result
+            },
         );
     }
     pub(super) fn connection(&self, connected: &mut dyn FnMut()) -> Result<(), String> {

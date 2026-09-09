@@ -24,6 +24,7 @@ use std::{
 // native workers. Never release admission merely because a node was removed.
 static NATIVE_OWNERS: Admission = Admission::new(256);
 pub(super) struct Native {
+    pub(super) log_id: u64,
     pub(super) pointer: NonNull<c_void>,
     pub(super) group: Option<Arc<Aggregate>>,
     _permit: Permit<'static>,
@@ -60,6 +61,7 @@ impl Native {
         })
         .ok_or("invalid CoreAudio channels or native allocation failed")?;
         let native = Self {
+            log_id: super::bridge::NEXT_DEVICE_EPOCH.fetch_add(1, Ordering::Relaxed),
             pointer,
             group,
             _permit: permit,
