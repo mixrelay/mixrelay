@@ -12,19 +12,20 @@ pub(crate) struct TrayMenu {
 
 fn labels(locale: &str) -> (&'static str, &'static str) {
     if locale.starts_with("ko") {
-        ("MixRelay 열기", "MixRelay 앱 종료")
+        ("열기", "종료")
     } else {
-        ("Open MixRelay", "Quit MixRelay App")
+        ("Open", "Quit")
     }
 }
 
 /// Installs the embedded brand icon and native menu, returning native setup errors.
 pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
     let (open_label, quit_label) = labels("en");
+    let title = MenuItem::with_id(app, "tray:title", "MixRelay", false, None::<&str>)?;
     let open = MenuItem::with_id(app, "tray:open", open_label, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "tray:quit", quit_label, true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&open, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&title, &separator, &open, &quit])?;
     TrayIconBuilder::with_id("main")
         .icon(tauri::include_image!("tray-icons/64x64.png"))
         .icon_as_template(cfg!(target_os = "macos"))
@@ -45,10 +46,13 @@ pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+/// Restores the main window and its Dock presence, returning native window errors.
+pub(crate) fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     let window = app
         .get_webview_window("main")
         .ok_or(tauri::Error::WindowNotFound)?;
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Regular)?;
     window.unminimize()?;
     window.show()?;
     window.set_focus()
@@ -76,15 +80,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn korean_menu_distinguishes_app_exit() {
-        assert_eq!(labels("ko-KR"), ("MixRelay 열기", "MixRelay 앱 종료"));
+    fn korean_menu_uses_concise_action_labels() {
+        assert_eq!(labels("ko-KR"), ("열기", "종료"));
         assert_eq!(labels("ko"), labels("ko-KR"));
     }
 
     #[test]
     fn other_locales_use_english_like_the_ui() {
         for locale in ["en", "en-US", "ja", "pseudo", ""] {
-            assert_eq!(labels(locale), ("Open MixRelay", "Quit MixRelay App"));
+            assert_eq!(labels(locale), ("Open", "Quit"));
         }
     }
 

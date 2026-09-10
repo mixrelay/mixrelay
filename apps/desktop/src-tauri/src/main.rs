@@ -78,11 +78,33 @@ fn main() {
     builder
         .setup(setup_desktop)
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
+            if let WindowEvent::CloseRequested { api, .. } = event
+                && window.label() == "main"
+            {
                 api.prevent_close();
-                let _ = window.hide();
+                if let Err(error) = window.hide() {
+                    tracing::error!(%error, "could not hide main window to tray");
+                    return;
+                }
+                #[cfg(target_os = "macos")]
+                if let Err(error) = window
+                    .app_handle()
+                    .set_activation_policy(tauri::ActivationPolicy::Accessory)
+                {
+                    tracing::error!(%error, "could not remove hidden main window from Dock");
+                }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("failed to run MixRelay desktop application");
+        .build(tauri::generate_context!())
+        .expect("failed to build MixRelay desktop application")
+        .run(|app, event| {
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event
+                && let Err(error) = tray_menu::show_main_window(app)
+            {
+                tracing::error!(%error, "could not reopen MixRelay main window");
+            }
+        });
 }
