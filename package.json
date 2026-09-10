@@ -19,6 +19,7 @@
     "check:rust": "cargo fmt --all --check && cargo machete && cargo clippy --workspace --all-targets --all-features -- -D warnings && pnpm coverage:rust",
     "check:ui-quality": "biome check biome.json apps/control-ui",
     "coverage:rust": "cargo llvm-cov --workspace --lib --show-missing-lines --fail-under-functions 100 --fail-under-lines 100 --fail-under-regions 100 --fail-uncovered-functions 0 --fail-uncovered-lines 0 --fail-uncovered-regions 0",
+    "desktop:icons": "pnpm --filter @mixrelay/desktop tauri icon ../../branding/icon.png && pnpm --filter @mixrelay/desktop tauri icon ../../branding/tray-white.svg --output src-tauri/tray-icons --png 512 && pnpm --filter @mixrelay/desktop tauri icon src-tauri/tray-icons/512x512.png --output src-tauri/tray-icons --png 32 --png 64",
     "desktop:build": "pnpm --filter @mixrelay/desktop tauri build",
     "desktop:build:macos-universal": "./scripts/build-macos-universal-app.sh",
     "desktop:dev": "pnpm --filter @mixrelay/desktop tauri dev",

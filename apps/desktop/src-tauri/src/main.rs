@@ -1,12 +1,9 @@
-use tauri::{
-    Manager, WindowEvent,
-    menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
-};
+use tauri::{Manager, WindowEvent};
 
 mod control_proxy;
 mod processor_dialog;
 mod recording_dialog;
+mod tray_menu;
 
 #[cfg(target_os = "macos")]
 use mixrelay_macos_transport as _;
@@ -25,33 +22,13 @@ use macos_audio as platform_audio;
 #[cfg(target_os = "windows")]
 use windows_audio as platform_audio;
 
-fn show_main_window(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
-}
-
 fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if tauri::is_dev()
         && let Some(window) = app.get_webview_window("main")
     {
         window.set_title("MixRelay (Dev)")?;
     }
-    let open = MenuItem::with_id(app, "open", "Open MixRelay", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit MixRelay", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &quit])?;
-
-    TrayIconBuilder::with_id("main")
-        .title("TN")
-        .tooltip("MixRelay")
-        .menu(&menu)
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            "open" => show_main_window(app),
-            "quit" => app.exit(0),
-            _ => {}
-        })
-        .build(app)?;
+    tray_menu::install(app)?;
     Ok(())
 }
 
@@ -64,6 +41,7 @@ fn main() {
             macos_audio::ApplicationCaptureState::default(),
         ));
     let builder = builder.invoke_handler(tauri::generate_handler![
+        tray_menu::set_tray_locale,
         control_proxy::control_get_status,
         control_proxy::control_reconfigure_session,
         control_proxy::control_set_virtual_endpoint_sample_rate,

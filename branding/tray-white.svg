@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="900" height="900" viewBox="177 160 900 900">
+  <title>MixRelay monochrome tray mark</title>
+  <defs>
+    <filter id="white-mark" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 -3 0 0 2"/>
+    </filter>
+  </defs>
+  <image width="1254" height="1254" xlink:href="icon.png" filter="url(#white-mark)"/>
+</svg>
