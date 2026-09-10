@@ -18,18 +18,18 @@ test('Rust integration test verifies engine graph, real PCM, meter and release',
 });
 test('Windows transport stays scoped and owns private copy bounds',()=>{
   const native=read('../../apps/engine-service/src/windows_transport.rs');
-  assert.ok(native.includes('ToneNariSysvadBridge'));
+  assert.ok(native.includes('MixRelaySysvadBridge'));
   assert.doesNotMatch(native,/UnmapViewOfFile|VirtualFree|GetDefaultAudioEndpoint/);
   for(const marker of ['valid_counters','Ordering::Acquire','Ordering::Release',
     'struct Handle','impl Drop for Handle','NonNull<u64>']) assert.ok(native.includes(marker));
   const engine=read('../../apps/engine-service/src/windows.rs');
-  assert.ok(engine.includes('TONENARI_WINDOWS_SYSVAD_LAB'));
+  assert.ok(engine.includes('MIXRELAY_WINDOWS_SYSVAD_LAB'));
   assert.ok(engine.includes('new_with_initial_document'));
   assert.ok(engine.includes('virtual_overruns.load(Ordering::Acquire)'));
 });
 test('Rust bridge task cleanup validates completion, action and owner',()=>{
   const cleanup=read('./cleanup-windows-rust-bridge-task.cmd');
-  for(const marker of ['712A936E-9D91-4455-A8A9-A1F65EB60719','ToneNariLabRustBridge',
+  for(const marker of ['712A936E-9D91-4455-A8A9-A1F65EB60719','MixRelayLabRustBridge',
     'windows-rust-bridge-audio-v11\\exit-code','SecurityIdentifier',
     "State -eq 'Running'",'windows-rust-bridge-check.cmd','Task removal not confirmed'])
     assert.ok(cleanup.includes(marker),marker);

@@ -11,10 +11,10 @@ use std::{
 
 use arrayvec::ArrayVec;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use serde::{Deserialize, Serialize};
-use tonenari_control_protocol::{
+use mixrelay_control_protocol::{
     ExternalProcessorDescriptor, ExternalProcessorFormat, ProcessorParameterDescriptor,
 };
+use serde::{Deserialize, Serialize};
 use truce_rack_core::{
     Plugin, WindowHandle,
     buffer::{AudioBuffer, BusRange},
@@ -28,9 +28,9 @@ use truce_rack_core::{
 #[cfg(test)]
 mod channel_tests;
 
-pub const SCAN_ARGUMENT: &str = "--tonenari-plugin-scan";
-pub const PROBE_ARGUMENT: &str = "--tonenari-plugin-probe";
-pub const WORKER_ARGUMENT: &str = "--tonenari-plugin-worker";
+pub const SCAN_ARGUMENT: &str = "--mixrelay-plugin-scan";
+pub const PROBE_ARGUMENT: &str = "--mixrelay-plugin-probe";
+pub const WORKER_ARGUMENT: &str = "--mixrelay-plugin-worker";
 
 const MAX_CHANNELS: u16 = 64;
 const CHANNEL_SLOTS: usize = MAX_CHANNELS as usize;
@@ -896,13 +896,13 @@ mod tests {
 
     #[test]
     fn locator_round_trips_through_worker_argument() {
-        let directory = tonenari_test_support::FixtureDir::new("rack-locator").unwrap();
+        let directory = mixrelay_test_support::FixtureDir::new("rack-locator").unwrap();
         let locator = RackLocator {
             format: RackFormat::Clap,
-            unique_id: "io.tonenari.fixture".to_owned(),
-            path: directory.join("ToneNari Fixture.clap"),
+            unique_id: "io.mixrelay.fixture".to_owned(),
+            path: directory.join("MixRelay Fixture.clap"),
             name: "Fixture".to_owned(),
-            vendor: "ToneNari".to_owned(),
+            vendor: "MixRelay".to_owned(),
             version: 3,
             category: RackCategory::Effect,
             has_editor: true,

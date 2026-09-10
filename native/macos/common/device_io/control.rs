@@ -9,8 +9,8 @@ use super::{
     native::{self, Properties, System},
 };
 use crate::{
-    aggregate_group::tn_aggregate_group_ready,
-    callback_clock::tn_callback_clock_reset,
+    aggregate_group::mr_aggregate_group_ready,
+    callback_clock::mr_callback_clock_reset,
     device_io::lifecycle::{Backend, Created},
 };
 
@@ -34,7 +34,7 @@ impl Backend for Registration<'_> {
         callback.selection = native::buffer_selection(&self.io.selection, binding);
         callback.prime = true;
         // SAFETY: the preceding registration drained; atomic observers may remain.
-        unsafe { tn_callback_clock_reset(ptr::from_ref(&self.io.clock).cast_mut()) };
+        unsafe { mr_callback_clock_reset(ptr::from_ref(&self.io.clock).cast_mut()) };
         self.io.progress.invalid.store(false, Release);
         Ok(binding.device)
     }
@@ -46,7 +46,7 @@ impl Backend for Registration<'_> {
         let status = unsafe {
             native::create(
                 device,
-                super::tn_device_io_process,
+                super::mr_device_io_process,
                 self.context.as_ptr(),
                 &raw mut procedure,
             )
@@ -127,7 +127,7 @@ pub(super) unsafe fn alive(io: &DeviceIo, properties: &impl Properties) -> bool 
 fn group_ready(io: &DeviceIo) -> bool {
     io.selection.group.is_null() || {
         // SAFETY: enclosing Native retains aggregate Arc throughout this query.
-        unsafe { tn_aggregate_group_ready(io.selection.group.cast()) }
+        unsafe { mr_aggregate_group_ready(io.selection.group.cast()) }
     }
 }
 

@@ -1,10 +1,10 @@
 //! Native workers exclusively own sinc/filter state. Atomic sample FIFOs alone
 //! cross the graph/native thread boundary; control edits never borrow the DSP.
 use super::SpscSampleRing;
-use std::sync::atomic::Ordering;
-use tonenari_audio_io::clock_bridge::{
+use mixrelay_audio_io::clock_bridge::{
     AsyncClockBridge, BridgeConfig, ClockFeedback, ClockRelation, Discontinuity, FeedbackQueue,
 };
+use std::sync::atomic::Ordering;
 
 pub(super) const NATIVE_MAX_FRAMES: usize = 8192;
 pub(super) const GRAPH_FIFO_FRAMES: usize = 4096;

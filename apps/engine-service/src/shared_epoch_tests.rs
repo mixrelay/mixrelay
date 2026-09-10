@@ -1,11 +1,11 @@
 //! Exercise the production shared-memory epoch ABI without starting `CoreAudio`.
 
-use std::ptr::NonNull;
-use tonenari_macos_transport::shared_audio_buffer::{
-    SharedAudioBuffer, tn_shared_audio_buffer_initialize, tn_shared_audio_buffer_read,
-    tn_shared_audio_buffer_required_bytes, tn_shared_audio_buffer_try_begin_epoch,
-    tn_shared_audio_buffer_write,
+use mixrelay_macos_transport::shared_audio_buffer::{
+    SharedAudioBuffer, mr_shared_audio_buffer_initialize, mr_shared_audio_buffer_read,
+    mr_shared_audio_buffer_required_bytes, mr_shared_audio_buffer_try_begin_epoch,
+    mr_shared_audio_buffer_write,
 };
+use std::ptr::NonNull;
 
 struct Buffer {
     // u64 storage supplies the native layout's required eight-byte alignment.
@@ -18,11 +18,11 @@ struct Buffer {
 impl Buffer {
     fn new() -> Self {
         // SAFETY: Pure size query for valid native geometry.
-        let bytes = tn_shared_audio_buffer_required_bytes(64, 1);
+        let bytes = mr_shared_audio_buffer_required_bytes(64, 1);
         let mut storage = vec![0_u64; bytes.div_ceil(8)].into_boxed_slice();
         // SAFETY: Allocation has sufficient size/alignment and is retained until drop.
         let pointer =
-            unsafe { tn_shared_audio_buffer_initialize(storage.as_mut_ptr().cast(), bytes, 64, 1) };
+            unsafe { mr_shared_audio_buffer_initialize(storage.as_mut_ptr().cast(), bytes, 64, 1) };
         Self {
             _storage: storage,
             pointer: NonNull::new(pointer).expect("valid shared buffer"),
@@ -33,7 +33,7 @@ impl Buffer {
     fn write(&mut self, start: u64, samples: &[f32]) {
         // SAFETY: Initialized mono buffer; the slice contains all requested frames.
         assert!(unsafe {
-            tn_shared_audio_buffer_write(
+            mr_shared_audio_buffer_write(
                 self.pointer.as_ptr(),
                 self.writer_epoch,
                 start,
@@ -46,7 +46,7 @@ impl Buffer {
     fn read(&mut self, start: u64, samples: &mut [f32]) -> u32 {
         // SAFETY: Initialized mono buffer and valid destination for the frame count.
         unsafe {
-            tn_shared_audio_buffer_read(
+            mr_shared_audio_buffer_read(
                 self.pointer.as_ptr(),
                 start,
                 samples.as_mut_ptr(),
@@ -57,7 +57,7 @@ impl Buffer {
 
     fn invalidate(&mut self) -> u64 {
         // SAFETY: Owner remains alive throughout the native operation.
-        let epoch = unsafe { tn_shared_audio_buffer_try_begin_epoch(self.pointer.as_ptr()) };
+        let epoch = unsafe { mr_shared_audio_buffer_try_begin_epoch(self.pointer.as_ptr()) };
         if epoch != 0 {
             self.writer_epoch = epoch;
         }
@@ -90,7 +90,7 @@ fn exhausted_transport_requires_new_mapping_without_reusing_remote_generation() 
     // SAFETY: Owner is alive; control must refuse generation reuse even when its
     // local writer drained, because a remote reader may still hold old stamps.
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(buffer.pointer.as_ptr()) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(buffer.pointer.as_ptr()) },
         0
     );
     let mut output = [1.0; 4];
@@ -106,7 +106,7 @@ fn exhausted_transport_requires_new_mapping_without_reusing_remote_generation() 
 fn bounded_invalidation_handles_missing_transport() {
     // SAFETY: The ABI explicitly supports a null/missing transport.
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(std::ptr::null_mut()) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(std::ptr::null_mut()) },
         0
     );
 }

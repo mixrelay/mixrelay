@@ -1,15 +1,15 @@
-#include "ToneNariRatePolicy.h"
+#include "MixRelayRatePolicy.h"
 #include <cassert>
 #include <iostream>
-using tonenari::RatePolicy;
-using tonenari::RateResult;
-using tonenari::RateState;
+using mixrelay::RatePolicy;
+using mixrelay::RateResult;
+using mixrelay::RateState;
 int main() {
-    assert(tonenari::IntersectRate(44100,44100,48000)==44100);
-    assert(tonenari::IntersectRate(96000,96000,48000)==96000);
-    assert(tonenari::IntersectRate(45000,47000,48000)==0);
-    assert(tonenari::IntersectRate(44100,96000,44100)==44100);
-    assert(tonenari::IntersectRate(44100,48000,48000,96000)==0);
+    assert(mixrelay::IntersectRate(44100,44100,48000)==44100);
+    assert(mixrelay::IntersectRate(96000,96000,48000)==96000);
+    assert(mixrelay::IntersectRate(45000,47000,48000)==0);
+    assert(mixrelay::IntersectRate(44100,96000,44100)==44100);
+    assert(mixrelay::IntersectRate(44100,48000,48000,96000)==0);
     for (const auto render : {0u,44100u}) for (const auto capture : {0u,44100u}) {
         RatePolicy p;
         assert(p.begin(44100,0,100,5000,1,false,false)==RateResult::NoListener);

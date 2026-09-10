@@ -5,7 +5,7 @@ struct Owner(*mut AudioRing);
 
 impl Owner {
     fn new(capacity: usize, channels: u32) -> Self {
-        let ring = tn_audio_ring_create(capacity, channels);
+        let ring = mr_audio_ring_create(capacity, channels);
         assert!(!ring.is_null());
         Self(ring)
     }
@@ -14,7 +14,7 @@ impl Owner {
 impl Drop for Owner {
     fn drop(&mut self) {
         // SAFETY: tests retain one exclusive owner, with every native call finished.
-        unsafe { tn_audio_ring_destroy(self.0) };
+        unsafe { mr_audio_ring_destroy(self.0) };
     }
 }
 
@@ -73,14 +73,14 @@ fn planar_wrap_partial_reads_and_pcm_bits_cover_every_channel_width() {
         let mut output = vec![9.0_f32; 5 * width];
         // SAFETY: single producer/consumer calls, sized planes/output disjoint from ring.
         unsafe {
-            assert_eq!(tn_audio_ring_write_planar(owner.0, input.as_ptr(), 3), 3);
+            assert_eq!(mr_audio_ring_write_planar(owner.0, input.as_ptr(), 3), 3);
             assert_eq!(
-                tn_audio_ring_read_interleaved(owner.0, output.as_mut_ptr(), 2),
+                mr_audio_ring_read_interleaved(owner.0, output.as_mut_ptr(), 2),
                 2
             );
-            assert_eq!(tn_audio_ring_write_planar(owner.0, input.as_ptr(), 3), 3);
+            assert_eq!(mr_audio_ring_write_planar(owner.0, input.as_ptr(), 3), 3);
             assert_eq!(
-                tn_audio_ring_read_interleaved(owner.0, output.as_mut_ptr(), 5),
+                mr_audio_ring_read_interleaved(owner.0, output.as_mut_ptr(), 5),
                 4
             );
         }
@@ -110,16 +110,16 @@ fn cursor_and_dropped_rollover_do_not_panic_or_replay_samples() {
     // SAFETY: no concurrent accesses, complete sized input/output blocks.
     unsafe {
         assert_eq!(
-            tn_audio_ring_write_interleaved(owner.0, input.as_ptr(), 4),
+            mr_audio_ring_write_interleaved(owner.0, input.as_ptr(), 4),
             4
         );
         assert_eq!(
-            tn_audio_ring_write_interleaved(owner.0, input.as_ptr(), 1),
+            mr_audio_ring_write_interleaved(owner.0, input.as_ptr(), 1),
             0
         );
-        assert_eq!(tn_audio_ring_dropped_frames(owner.0), 0);
+        assert_eq!(mr_audio_ring_dropped_frames(owner.0), 0);
         assert_eq!(
-            tn_audio_ring_read_interleaved(owner.0, output.as_mut_ptr(), 4),
+            mr_audio_ring_read_interleaved(owner.0, output.as_mut_ptr(), 4),
             4
         );
     }
@@ -137,20 +137,20 @@ fn oversized_and_invalid_inputs_do_not_read_unaccepted_pcm_or_double_count() {
     // accepted input and output contain the one complete stereo frame.
     unsafe {
         assert_eq!(
-            tn_audio_ring_write_interleaved(owner.0, input.as_ptr(), usize::MAX),
+            mr_audio_ring_write_interleaved(owner.0, input.as_ptr(), usize::MAX),
             0
         );
-        assert_eq!(tn_audio_ring_dropped_frames(owner.0), u64::MAX);
-        assert_eq!(tn_audio_ring_write_planar(owner.0, planes.as_ptr(), 1), 0);
-        assert_eq!(tn_audio_ring_dropped_frames(owner.0), 0);
+        assert_eq!(mr_audio_ring_dropped_frames(owner.0), u64::MAX);
+        assert_eq!(mr_audio_ring_write_planar(owner.0, planes.as_ptr(), 1), 0);
+        assert_eq!(mr_audio_ring_dropped_frames(owner.0), 0);
         assert_eq!(
-            tn_audio_ring_write_interleaved(owner.0, input.as_ptr(), 1),
+            mr_audio_ring_write_interleaved(owner.0, input.as_ptr(), 1),
             1
         );
-        assert_eq!(tn_audio_ring_write_planar(owner.0, planes.as_ptr(), 1), 0);
-        assert_eq!(tn_audio_ring_dropped_frames(owner.0), 1);
+        assert_eq!(mr_audio_ring_write_planar(owner.0, planes.as_ptr(), 1), 0);
+        assert_eq!(mr_audio_ring_dropped_frames(owner.0), 1);
         assert_eq!(
-            tn_audio_ring_read_interleaved(owner.0, output.as_mut_ptr(), usize::MAX),
+            mr_audio_ring_read_interleaved(owner.0, output.as_mut_ptr(), usize::MAX),
             1
         );
     }
@@ -166,7 +166,7 @@ fn statistics_bound_a_nontransactional_cursor_observation_without_moving_cursors
     ring.read.store(10, Ordering::Relaxed);
     ring.written.store(18, Ordering::Relaxed);
     // SAFETY: only stats are read; this deliberately non-SPSC state is never used for PCM.
-    assert_eq!(unsafe { tn_audio_ring_available_frames(owner.0) }, 4);
+    assert_eq!(unsafe { mr_audio_ring_available_frames(owner.0) }, 4);
     assert_eq!(ring.read.load(Ordering::Relaxed), 10);
     assert_eq!(ring.written.load(Ordering::Relaxed), 18);
 }
@@ -182,11 +182,11 @@ fn callback_io_is_allocation_free_and_destroy_releases_both_allocations() {
                 // SAFETY: sequential SPSC calls with complete non-overlapping buffers.
                 unsafe {
                     assert_eq!(
-                        tn_audio_ring_write_interleaved(owner.0, input.as_ptr(), 256),
+                        mr_audio_ring_write_interleaved(owner.0, input.as_ptr(), 256),
                         256
                     );
                     assert_eq!(
-                        tn_audio_ring_read_interleaved(owner.0, output.as_mut_ptr(), 256),
+                        mr_audio_ring_read_interleaved(owner.0, output.as_mut_ptr(), 256),
                         256
                     );
                 }

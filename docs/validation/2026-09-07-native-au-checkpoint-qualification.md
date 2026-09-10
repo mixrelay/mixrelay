@@ -1,7 +1,7 @@
 # macOS Apple AU isolated-worker state qualification
 
 The opt-in `apps/engine-service/examples/native_au_checkpoint.rs` harness exercises
-the actual Apple `AUPeakLimiter` through ToneNari's scanner, probe, isolated worker,
+the actual Apple `AUPeakLimiter` through MixRelay's scanner, probe, isolated worker,
 shared state mailbox, engine controller, and durable graph catalog. It loads only
 `aufx:lmtr:appl`; all other formats return empty fixture inventories and any attempt
 to probe/load a different identity is rejected.
@@ -9,12 +9,12 @@ to probe/load a different identity is rejected.
 Run explicitly:
 
 ```sh
-cargo run -p tonenari-engine-service --example native_au_checkpoint -- --run
-cargo clippy -p tonenari-engine-service --example native_au_checkpoint -- -D warnings
-cargo test -p tonenari-processor-host --lib apple_limiter_native_state_restores_a_changed_parameter -- --nocapture
+cargo run -p mixrelay-engine-service --example native_au_checkpoint -- --run
+cargo clippy -p mixrelay-engine-service --example native_au_checkpoint -- -D warnings
+cargo test -p mixrelay-processor-host --lib apple_limiter_native_state_restores_a_changed_parameter -- --nocapture
 ```
 
-The parent creates a new temporary directory and supplies `TONENARI_CONFIG_DIR` only
+The parent creates a new temporary directory and supplies `MIXRELAY_CONFIG_DIR` only
 to its child. There is no HTTP listener, HAL access, real/virtual audio endpoint,
 default-device change, third-party installation, or graphical editor opening. The
 temporary catalog remains available at the path printed by the harness for inspection.

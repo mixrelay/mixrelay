@@ -1,9 +1,9 @@
 //! Control-thread matching and audio-boundary ownership transfer for surviving plug-ins.
 
 use crate::{ProcessorControlRegistry, WORKER_READY};
+use mixrelay_audio_engine::{HostedAudioProcessor, HostedProcessorPrepareRequest};
+use mixrelay_audio_graph::{ProviderNodeConfig, RenderFormat};
 use std::sync::atomic::Ordering;
-use tonenari_audio_engine::{HostedAudioProcessor, HostedProcessorPrepareRequest};
-use tonenari_audio_graph::{ProviderNodeConfig, RenderFormat};
 
 pub(super) struct ReuseSignature {
     config: ProviderNodeConfig,
@@ -74,7 +74,7 @@ impl ProcessorControlRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tonenari_audio_graph::NodeId;
+    use mixrelay_audio_graph::NodeId;
 
     #[test]
     fn reuse_requires_matching_type_format_channels_and_current_native_state() {

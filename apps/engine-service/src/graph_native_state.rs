@@ -6,8 +6,8 @@
 use std::time::{Duration, Instant};
 
 use crate::graph_composition::runtime_node_id;
-use tonenari_audio_graph::NodeId;
-use tonenari_processor_host::ProcessorStateError;
+use mixrelay_audio_graph::NodeId;
+use mixrelay_processor_host::ProcessorStateError;
 
 use super::{EngineGraphController, NodeConfig, ProtocolError, invalid, unavailable};
 
@@ -121,7 +121,7 @@ impl EngineGraphController {
 
 fn capture_document(
     graph_id: &str,
-    document: &mut tonenari_audio_graph::GraphDocument,
+    document: &mut mixrelay_audio_graph::GraphDocument,
     target: Option<(&str, &str)>,
     deadline: Instant,
     capture: &mut impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,

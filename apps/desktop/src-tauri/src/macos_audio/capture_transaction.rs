@@ -5,8 +5,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use tonenari_audio_graph::{ApplicationCaptureRequest, ApplicationSelector, NodeId};
-use tonenari_control_protocol::{ApplicationCaptureManifest, PROTOCOL_VERSION};
+use mixrelay_audio_graph::{ApplicationCaptureRequest, ApplicationSelector, NodeId};
+use mixrelay_control_protocol::{ApplicationCaptureManifest, PROTOCOL_VERSION};
 
 pub(super) struct Entry<S> {
     pub(super) node_id: String,

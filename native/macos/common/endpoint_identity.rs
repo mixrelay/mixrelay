@@ -46,7 +46,7 @@ pub fn format_endpoint_id(id: [u8; 16]) -> String {
 #[must_use]
 pub fn endpoint_uid(id: [u8; 16]) -> String {
     let mut uid = String::with_capacity(59);
-    uid.push_str("io.tonenari.audio.endpoint.");
+    uid.push_str("io.mixrelay.audio.endpoint.");
     for byte in id {
         write!(uid, "{byte:02x}").expect("formatting into an owned String is infallible");
     }
@@ -63,7 +63,7 @@ mod tests {
         assert_eq!(format_endpoint_id(id), text);
         assert_eq!(
             endpoint_uid(id),
-            "io.tonenari.audio.endpoint.17e59d7342c14f11a8b46c2d913357e0"
+            "io.mixrelay.audio.endpoint.17e59d7342c14f11a8b46c2d913357e0"
         );
         for invalid in [
             "default",

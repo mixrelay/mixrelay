@@ -36,7 +36,7 @@ impl RecorderRegistry {
     /// channel changes while a previous tap/take exists, or worker spawn failure.
     pub fn prepare(&self, id: &str, channels: u16) -> Result<RecorderTap, String> {
         if id.trim().is_empty()
-            || !(1..=tonenari_audio_io::formats::MAX_RECORDING_CHANNELS).contains(&channels)
+            || !(1..=mixrelay_audio_io::formats::MAX_RECORDING_CHANNELS).contains(&channels)
         {
             return Err("invalid recorder identity or channel count".into());
         }
@@ -166,7 +166,7 @@ impl Session {
         let (sender, receiver) = mpsc::channel();
         let worker = Worker::new(Arc::clone(&transport), Arc::clone(&status));
         let handle = std::thread::Builder::new()
-            .name("tonenari-wav-writer".into())
+            .name("mixrelay-wav-writer".into())
             .spawn(move || worker.run(&receiver))
             .map_err(|error| format!("cannot start recording writer: {error}"))?;
         Ok((

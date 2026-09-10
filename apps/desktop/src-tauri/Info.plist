@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleDisplayName</key>
-  <string>ToneNari</string>
+  <string>MixRelay</string>
   <key>CFBundleIdentifier</key>
-  <string>io.tonenari.desktop</string>
+  <string>io.mixrelay.desktop</string>
   <key>CFBundleName</key>
-  <string>ToneNari</string>
+  <string>MixRelay</string>
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsLocalNetworking</key>
     <true/>
   </dict>
   <key>NSAudioCaptureUsageDescription</key>
-  <string>ToneNari captures audio from applications you select so you can route it to your own audio devices and broadcasts.</string>
+  <string>MixRelay captures audio from applications you select so you can route it to your own audio devices and broadcasts.</string>
 </dict>
 </plist>

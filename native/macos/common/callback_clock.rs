@@ -115,9 +115,9 @@ impl Publication {
 /// Initializes exclusively owned native storage. Null is a no-op.
 /// # Safety
 /// Non-null `clock` is 64 writable bytes aligned to 8, with no concurrent users.
-/// The embedding TNDeviceIO/TNProcessTap owner initializes before registering IO.
+/// The embedding MRDeviceIO/MRProcessTap owner initializes before registering IO.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_callback_clock_init(clock: *mut CallbackClock) {
+pub unsafe extern "C" fn mr_callback_clock_init(clock: *mut CallbackClock) {
     if !clock.is_null() {
         // SAFETY: exclusive caller-owned sized/aligned storage, without a live borrow.
         unsafe { clock.write(CallbackClock::default()) };
@@ -130,7 +130,7 @@ pub unsafe extern "C" fn tn_callback_clock_init(clock: *mut CallbackClock) {
 /// Only that serialized callback records; reset cannot overlap it. Snapshot/counter
 /// readers may run concurrently while the native owner keeps this storage live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_callback_clock_record_values(
+pub unsafe extern "C" fn mr_callback_clock_record_values(
     clock: *mut CallbackClock,
     sample: f64,
     host: u64,
@@ -152,7 +152,7 @@ pub unsafe extern "C" fn tn_callback_clock_record_values(
 /// Non-null `clock` is initialized and retained. Its owner has drained/unregistered
 /// the `IOProc` before reset; readers may continue, but record/reset cannot overlap.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_callback_clock_reset(clock: *mut CallbackClock) {
+pub unsafe extern "C" fn mr_callback_clock_reset(clock: *mut CallbackClock) {
     // SAFETY: initialized owner-retained storage, with callback mutation drained.
     if let Some(clock) = unsafe { clock.as_ref() } {
         // SAFETY: drained IOProc grants exclusive writer-state, not publication, access.
@@ -165,7 +165,7 @@ pub unsafe extern "C" fn tn_callback_clock_reset(clock: *mut CallbackClock) {
 /// Non-null `clock` is initialized and remains live throughout the read. Non-null
 /// `result` is exclusively writable, aligned snapshot storage disjoint from clock.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_callback_clock_snapshot(
+pub unsafe extern "C" fn mr_callback_clock_snapshot(
     clock: *const CallbackClock,
     result: *mut CallbackClockSnapshot,
 ) -> bool {
@@ -188,7 +188,7 @@ pub unsafe extern "C" fn tn_callback_clock_snapshot(
 /// # Safety
 /// Non-null `clock` is initialized and retained by its native owner for this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_callback_clock_discontinuities(clock: *const CallbackClock) -> u64 {
+pub unsafe extern "C" fn mr_callback_clock_discontinuities(clock: *const CallbackClock) -> u64 {
     // SAFETY: owner retains storage; only one atomic publication field is read.
     unsafe { clock.as_ref() }.map_or(0, |clock| clock.publication.discontinuities.load(SeqCst))
 }

@@ -4,8 +4,8 @@ use super::{
     CallbackEndpoint, EndpointId, EndpointRegistry, EndpointSpec, Mapping, exhausted,
     require_unreserved,
 };
+use mixrelay_macos_transport::control_inventory::MAX_ENTRIES;
 use std::{collections::BTreeMap, io, sync::Arc};
-use tonenari_macos_transport::control_inventory::MAX_ENTRIES;
 
 /// Prepared complete native inventory. Dropping cancels its unpublished changes;
 /// callbacks can pin its mappings before a single audio-boundary publication.

@@ -11,7 +11,7 @@ const installer = fileURLToPath(new URL("../install-linux-dev-audio.sh", import.
 const pipewireCheck = fileURLToPath(new URL("./guest-pipewire-check.sh", import.meta.url));
 const unix = { skip: process.platform === "win32" };
 function fixture(t) {
-  const directory = mkdtempSync(join(tmpdir(), "tonenari-guest-test-"));
+  const directory = mkdtempSync(join(tmpdir(), "mixrelay-guest-test-"));
   t.after(() => rmSync(directory, { recursive: true })); // Only this test's mkdtemp directory.
   return directory;
 }
@@ -20,10 +20,10 @@ test("guest job records completion and preserves command exit status", unix, t =
   for (const code of [0, 7]) {
     const id = `result-${code}`;
     const result = spawnSync("bash", [job, id, "bash", "-c", `echo job-output; exit ${code}`], {
-      env: { ...process.env, TONENARI_LAB_JOB_ROOT: directory }, encoding: "utf8",
+      env: { ...process.env, MIXRELAY_LAB_JOB_ROOT: directory }, encoding: "utf8",
     });
     assert.equal(result.status, code);
-    const path = join(directory, `tonenari-lab-${id}`);
+    const path = join(directory, `mixrelay-lab-${id}`);
     assert.equal(readFileSync(join(path, "exit-code"), "utf8"), `${code}\n`);
     assert.equal(readFileSync(join(path, "output.log"), "utf8"), "job-output\n");
     assert.equal(statSync(path).mode & 0o777, 0o700);
@@ -32,12 +32,12 @@ test("guest job records completion and preserves command exit status", unix, t =
 test("guest job rejects unsafe IDs and never overwrites previous evidence", unix, t => {
   const directory = fixture(t);
   const run = id => spawnSync("bash", [job, id, "true"], {
-    env: { ...process.env, TONENARI_LAB_JOB_ROOT: directory }, encoding: "utf8",
+    env: { ...process.env, MIXRELAY_LAB_JOB_ROOT: directory }, encoding: "utf8",
   });
   for (const id of ["../escape", "a/b", "has space"]) assert.equal(run(id).status, 2);
   assert.equal(run("once").status, 0);
   assert.notEqual(run("once").status, 0);
-  assert.equal(readFileSync(join(directory, "tonenari-lab-once", "exit-code"), "utf8"), "0\n");
+  assert.equal(readFileSync(join(directory, "mixrelay-lab-once", "exit-code"), "utf8"), "0\n");
 });
 test("Linux installer resolves default paths from HOME, not username or working directory", unix, t => {
   const directory = fixture(t);
@@ -52,8 +52,8 @@ test("Linux installer resolves default paths from HOME, not username or working 
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, USER: "wrong-relative-user",
       XDG_CONFIG_HOME: "", XDG_DATA_HOME: "" } });
   assert.equal(result.status, 0, result.stderr);
-  const unit = readFileSync(join(home, ".config/systemd/user/io.tonenari.audio.engine.service"), "utf8");
-  assert.ok(unit.includes(`ExecStart=${home}/.local/share/tonenari/bin/tonenari-engine-service`));
+  const unit = readFileSync(join(home, ".config/systemd/user/io.mixrelay.audio.engine.service"), "utf8");
+  assert.ok(unit.includes(`ExecStart=${home}/.local/share/mixrelay/bin/mixrelay-engine-service`));
 });
 
 for (const scenario of ["occupied", "start-failed", "probe-failed", "success"]) {
@@ -94,7 +94,7 @@ for (const scenario of ["occupied", "start-failed", "probe-failed", "success"]) 
     } else {
       const lifecycle = readFileSync(join(directory, "lifecycle"), "utf8").trim().split("\n");
       assert.deepEqual(lifecycle, scenario === "start-failed" ? ["start"]
-        : Array.from({ length: 3 }, () => ["start", "probe", "--user stop tonenari-lab-engine"]).flat());
+        : Array.from({ length: 3 }, () => ["start", "probe", "--user stop mixrelay-lab-engine"]).flat());
     }
   });
 }

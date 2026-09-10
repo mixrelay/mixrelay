@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     aggregate_group::NativeBinding,
     audio_buffer::AudioBuffer,
-    callback_clock::{CallbackClockSnapshot, tn_callback_clock_snapshot},
+    callback_clock::{CallbackClockSnapshot, mr_callback_clock_snapshot},
     device_io::lifecycle::{Backend, Created},
 };
 use std::{
@@ -51,7 +51,7 @@ fn process(io: &DeviceIo, buffers: &mut Buffers) {
     let native = ptr::from_mut(buffers).cast();
     // SAFETY: tests serialize each role and supply complete metadata/PCM allocations.
     unsafe {
-        tn_device_io_process(
+        mr_device_io_process(
             0,
             ptr::null(),
             if io.selection.input {
@@ -645,7 +645,7 @@ fn callback_uses_direction_timestamp_and_keeps_discontinuities() {
         for pass in 0..2 {
             // SAFETY: complete synchronous fixture lists/timestamps and one callback owner.
             unsafe {
-                tn_device_io_process(
+                mr_device_io_process(
                     123,
                     ptr::null(),
                     ptr::from_ref(&list).cast(),
@@ -657,7 +657,7 @@ fn callback_uses_direction_timestamp_and_keeps_discontinuities() {
             }
             let mut clock = CallbackClockSnapshot::default();
             // SAFETY: atomic clock snapshot and exclusive disjoint local output.
-            assert!(unsafe { tn_callback_clock_snapshot(&raw const io.clock, &raw mut clock) });
+            assert!(unsafe { mr_callback_clock_snapshot(&raw const io.clock, &raw mut clock) });
             assert_eq!(clock.valid, 1);
             assert_eq!(
                 clock.sample_time.to_bits(),
@@ -724,7 +724,7 @@ fn direct_hook_advances_clock_without_consuming_queued_output() {
     let mut list = buffers(&mut hardware, 2, 64, false);
     // SAFETY: no native registration exists, hook context outlives all test callbacks.
     unsafe {
-        tn_device_io_render_hook(
+        mr_device_io_render_hook(
             ptr::from_ref(&io).cast_mut(),
             ptr::from_ref(&calls).cast_mut().cast(),
             Some(render_hook),
@@ -745,30 +745,30 @@ fn direct_hook_advances_clock_without_consuming_queued_output() {
 
 #[test]
 fn absent_native_uid_fails_before_registration_and_releases_owner() {
-    // This is the native read-only boundary probe formerly in TNDeviceIOTests.c,
+    // This is the native read-only boundary probe formerly in MRDeviceIOTests.c,
     // not a substitute for mocked property/registration failure tests above.
-    let uid = c"io.tonenari.test.absent.32cdcbba-f015-4ef5-9d5c-01dc1f1c690e";
+    let uid = c"io.mixrelay.test.absent.32cdcbba-f015-4ef5-9d5c-01dc1f1c690e";
     // SAFETY: valid immutable UID, then sole control ownership. An unresolvable UID
     // fails preparation before IOProc creation/start; no real device is opened.
     unsafe {
-        let io = tn_device_io_create(uid.as_ptr(), true, 2, 48000);
+        let io = mr_device_io_create(uid.as_ptr(), true, 2, 48000);
         assert!(!io.is_null());
-        assert!(!tn_device_io_connect(io));
-        assert_eq!(tn_device_io_connect_status(io, 0), -2);
-        assert_eq!(tn_device_io_ticks(io), 0);
-        assert!(tn_device_io_destroy(io));
+        assert!(!mr_device_io_connect(io));
+        assert_eq!(mr_device_io_connect_status(io, 0), -2);
+        assert_eq!(mr_device_io_ticks(io), 0);
+        assert!(mr_device_io_destroy(io));
     }
 }
 
 #[test]
 fn unavailable_buffer_info_initializes_an_uninitialized_output_slot() {
-    let uid = c"io.tonenari.test.absent.32cdcbba-f015-4ef5-9d5c-01dc1f1c690e";
+    let uid = c"io.mixrelay.test.absent.32cdcbba-f015-4ef5-9d5c-01dc1f1c690e";
     let io = DeviceIo::new(uid, false, 2, 48000).expect("test owner");
     let mut result = std::mem::MaybeUninit::<BufferInfo>::uninit();
     // SAFETY: stable unregistered owner and an aligned, exclusive output-only
     // slot. The absent UID lookup is read-only and cannot start any device.
     let found =
-        unsafe { tn_device_io_buffer_info(ptr::from_ref(&io).cast_mut(), result.as_mut_ptr()) };
+        unsafe { mr_device_io_buffer_info(ptr::from_ref(&io).cast_mut(), result.as_mut_ptr()) };
     assert!(!found);
     // SAFETY: a non-null owner/output call always initialized the full output.
     let result = unsafe { result.assume_init() };

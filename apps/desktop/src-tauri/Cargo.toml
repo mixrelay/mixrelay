@@ -1,5 +1,5 @@
 [package]
-name = "tonenari-desktop"
+name = "mixrelay-desktop"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -21,11 +21,11 @@ serde_json.workspace = true
 tauri = { version = "2.11.5", features = ["tray-icon"] }
 tokio.workspace = true
 tracing = "0.1.41"
-tonenari-audio-io = { path = "../../../crates/audio-io" }
+mixrelay-audio-io = { path = "../../../crates/audio-io" }
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-tonenari-macos-transport = { path = "../../../native/macos/common" }
-tonenari-process-tap = { path = "../../../native/macos/process-tap" }
-tonenari-audio-graph = { path = "../../../crates/audio-graph" }
-tonenari-control-protocol = { path = "../../../crates/control-protocol" }
+mixrelay-macos-transport = { path = "../../../native/macos/common" }
+mixrelay-process-tap = { path = "../../../native/macos/process-tap" }
+mixrelay-audio-graph = { path = "../../../crates/audio-graph" }
+mixrelay-control-protocol = { path = "../../../crates/control-protocol" }

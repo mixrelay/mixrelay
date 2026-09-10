@@ -13,15 +13,15 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use tonenari_audio_engine::{
+use mixrelay_audio_engine::{
     HostedAudioProcessor, HostedProcessorFactory, HostedProcessorPrepareRequest,
 };
-use tonenari_audio_graph::{
+use mixrelay_audio_graph::{
     AUDIO_PORT_ID, BuiltInNodeResolver, CompileContext, CompiledPort, NodeConfig, NodeId,
     NodeResolutionError, NodeResolver, NodeSpec, PortDirection, PortId, ProviderNodeConfig,
     RenderFormat, ResolvedNode,
 };
-use tonenari_control_protocol::{
+use mixrelay_control_protocol::{
     ExternalProcessorCatalog, ExternalProcessorDescriptor, PROTOCOL_VERSION,
     ProcessorEditorFailure, ProcessorEditorState, ProcessorEditorStatus,
 };
@@ -47,10 +47,10 @@ pub use rack_formats::{
 };
 
 #[cfg(not(target_has_atomic = "64"))]
-compile_error!("ToneNari processor shared transport requires native 64-bit atomics");
+compile_error!("MixRelay processor shared transport requires native 64-bit atomics");
 
 const WORKER_START_TIMEOUT: Duration = Duration::from_secs(15);
-const SHARED_MAGIC: u64 = 0x544e_5653_5433_3031;
+const SHARED_MAGIC: u64 = 0x4d52_5653_5433_3031;
 const SHARED_VERSION: u32 = 4;
 const PARAMETER_CAPACITY: usize = 4096;
 const STATE_CAPACITY: usize = 4 * 1024 * 1024;
@@ -186,7 +186,7 @@ pub fn run_plugin_worker(arguments: &[String]) -> Result<(), String> {
     let shutdown_reader = Arc::clone(&shutdown);
     let parent_watch_shared = Arc::clone(&editor_shared);
     let _stdin_guard = thread::Builder::new()
-        .name("tonenari-plugin-parent-watch".to_owned())
+        .name("mixrelay-plugin-parent-watch".to_owned())
         .spawn(move || {
             let mut input = std::io::stdin();
             let mut byte = [0_u8; 1];
@@ -201,7 +201,7 @@ pub fn run_plugin_worker(arguments: &[String]) -> Result<(), String> {
     let dsp_plugin = Arc::clone(&plugin);
     let dsp_shutdown = Arc::clone(&shutdown);
     let dsp_thread = thread::Builder::new()
-        .name("tonenari-plugin-dsp".to_owned())
+        .name("mixrelay-plugin-dsp".to_owned())
         .spawn(move || rack_worker_loop(&mut audio_shared, &dsp_plugin, layout, &dsp_shutdown))
         .map_err(|error| error.to_string())?;
     let editor_header = editor_shared.header();
@@ -1154,7 +1154,7 @@ impl WorkerMonitor {
         let child_slot = Arc::new(Mutex::new(Some(child)));
         let thread_child = Arc::clone(&child_slot);
         let thread = thread::Builder::new()
-            .name("tonenari-processor-monitor".to_owned())
+            .name("mixrelay-processor-monitor".to_owned())
             .spawn(move || {
                 let mut child = thread_child
                     .lock()
@@ -1333,7 +1333,7 @@ mod tests {
     #[test]
     fn measure_shared_audio_transport() {
         const ITERATIONS: u32 = 100_000;
-        if std::env::var_os("TONENARI_PROCESSOR_TRANSPORT_BENCH").is_none() {
+        if std::env::var_os("MIXRELAY_PROCESSOR_TRANSPORT_BENCH").is_none() {
             return;
         }
         for channels in [2, 8, 64] {

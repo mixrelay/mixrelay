@@ -1,8 +1,11 @@
 //! Read-only installed-route measurement. No graph/session/default-device writes.
-//! A real hardware-input -> `ToneNari` capture route with audible input is required;
+//! A real hardware-input -> `MixRelay` capture route with audible input is required;
 //! absence or silence fails explicitly rather than manufacturing continuity proof.
 #![cfg(target_os = "macos")]
 
+use mixrelay_audio_graph::{ChannelMapping, GraphDocument, NodeConfig};
+use mixrelay_audio_io::process::ProcessingState;
+use mixrelay_control_protocol::AppStatus;
 use reqwest::blocking::Client;
 use std::{
     collections::BTreeSet,
@@ -12,9 +15,6 @@ use std::{
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::{Duration, Instant},
 };
-use tonenari_audio_graph::{ChannelMapping, GraphDocument, NodeConfig};
-use tonenari_audio_io::process::ProcessingState;
-use tonenari_control_protocol::AppStatus;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const API: &str = "http://127.0.0.1:19341/api/v1";
@@ -59,7 +59,7 @@ fn capture_channels(graph: &GraphDocument) -> Result<(u16, BTreeSet<u16>)> {
         _ => None,
     });
     let (node, channels) = captures.next().ok_or(
-        "existing hardware input has no route to ToneNari virtual capture; no topology was changed",
+        "existing hardware input has no route to MixRelay virtual capture; no topology was changed",
     )?;
     require(
         captures.next().is_none(),
@@ -205,7 +205,7 @@ impl CaptureEvidence {
     }
 }
 
-// Minimal direct CoreAudio ABI. This reader does not call ToneNari's native
+// Minimal direct CoreAudio ABI. This reader does not call MixRelay's native
 // bridge, SPSC, meters, or counters, and never reconfigures device formats.
 #[repr(C)]
 struct Address {
@@ -438,7 +438,7 @@ impl NativeCapture {
         let uid = unsafe {
             CFStringCreateWithCString(
                 ptr::null(),
-                c"io.tonenari.audio.endpoint.default".as_ptr(),
+                c"io.mixrelay.audio.endpoint.default".as_ptr(),
                 0x0800_0100,
             )
         };
@@ -458,7 +458,7 @@ impl NativeCapture {
         unsafe {
             CFRelease(uid);
         }
-        os_status(status, "resolve ToneNari HAL")?;
+        os_status(status, "resolve MixRelay HAL")?;
         require(size == 4 && device != 0, "installed own HAL is unavailable")?;
         Ok(device)
     }
@@ -582,8 +582,8 @@ impl Drop for NativeCapture {
 #[test]
 fn installed_mixed_route_pcm_continuity_without_changing_graph_or_format() -> Result<()> {
     require(
-        std::env::var("TONENARI_TEST_INSTALLED_ENGINE").as_deref() == Ok("1"),
-        "explicit installed read-only measurement authorization required: TONENARI_TEST_INSTALLED_ENGINE=1; no I/O started",
+        std::env::var("MIXRELAY_TEST_INSTALLED_ENGINE").as_deref() == Ok("1"),
+        "explicit installed read-only measurement authorization required: MIXRELAY_TEST_INSTALLED_ENGINE=1; no I/O started",
     )?;
     let client = Client::builder().timeout(Duration::from_secs(3)).build()?;
     let status = || -> Result<AppStatus> {

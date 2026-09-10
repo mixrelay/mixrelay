@@ -1,6 +1,6 @@
 use super::super::*;
 use super::observed_endpoint_rate;
-use tonenari_control_server::ControlBackend;
+use mixrelay_control_server::ControlBackend;
 
 #[test]
 #[ignore = "requires owned isolated PipeWire daemon; never run against a user session"]
@@ -44,7 +44,7 @@ fn native_pipewire_live_session_format_transaction() {
             &worker_status,
         );
     });
-    let guard = tonenari_engine_service::session::AudioWorker::new(status.clone(), worker);
+    let guard = mixrelay_engine_service::session::AudioWorker::new(status.clone(), worker);
     thread::sleep(Duration::from_millis(100));
     let fixture = attach_fixture(&mut document);
     controller.apply_graph(document.clone()).unwrap();
@@ -55,9 +55,9 @@ fn native_pipewire_live_session_format_transaction() {
     {
         let revision = exchange.revisions().active;
         let response = controller
-            .reconfigure_session(tonenari_control_protocol::SessionReconfigureRequest {
+            .reconfigure_session(mixrelay_control_protocol::SessionReconfigureRequest {
                 expected_revision: revision,
-                format: tonenari_audio_io::session::SessionFormat {
+                format: mixrelay_audio_io::session::SessionFormat {
                     sample_rate,
                     block_frames,
                 },
@@ -92,9 +92,9 @@ fn native_pipewire_live_session_format_transaction() {
     let before = controller.graph();
     assert!(
         controller
-            .reconfigure_session(tonenari_control_protocol::SessionReconfigureRequest {
+            .reconfigure_session(mixrelay_control_protocol::SessionReconfigureRequest {
                 expected_revision: revision,
-                format: tonenari_audio_io::session::SessionFormat {
+                format: mixrelay_audio_io::session::SessionFormat {
                     sample_rate: 12_345,
                     block_frames: 128
                 },
@@ -120,16 +120,16 @@ fn observed_quantums() -> std::collections::BTreeSet<(u64, u64)> {
 }
 
 fn attach_fixture(
-    document: &mut tonenari_audio_graph::GraphDocument,
+    document: &mut mixrelay_audio_graph::GraphDocument,
 ) -> applications::tests::FixtureProcess {
     let fixture = applications::tests::FixtureProcess::start(&std::path::PathBuf::from(
-        std::env::var("TONENARI_LAB_APPLICATION_FIXTURE").unwrap(),
+        std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap(),
     ));
     let deadline = Instant::now() + Duration::from_secs(5);
-    while !tonenari_audio_io::linux::targets()
+    while !mixrelay_audio_io::linux::targets()
         .unwrap()
         .iter()
-        .any(|target| target.application_id.as_deref() == Some("org.tonenari.fixture.application"))
+        .any(|target| target.application_id.as_deref() == Some("org.mixrelay.fixture.application"))
     {
         assert!(
             Instant::now() < deadline,
@@ -138,16 +138,16 @@ fn attach_fixture(
         thread::sleep(Duration::from_millis(5));
     }
     document.revision = 2;
-    document.nodes.push(tonenari_audio_graph::NodeSpec {
+    document.nodes.push(mixrelay_audio_graph::NodeSpec {
         id: "rate-fixture".into(), label: None,
         config: NodeConfig::ApplicationCapture(serde_json::from_value(serde_json::json!({
-            "selector": tonenari_audio_io::ApplicationSelector::BundleId { bundle_id: "org.tonenari.fixture.application".into(), include_descendants: false },
+            "selector": mixrelay_audio_io::ApplicationSelector::BundleId { bundle_id: "org.mixrelay.fixture.application".into(), include_descendants: false },
             "stream": { "channels": 2, "channelLayout": "stereo" }, "sourcePlayback": "preserve"
         })).unwrap()),
     });
     for edge in &mut document.edges {
         edge.source.node_id = "rate-fixture".into();
-        edge.source.port_id = tonenari_audio_graph::AUDIO_PORT_ID.into();
+        edge.source.port_id = mixrelay_audio_graph::AUDIO_PORT_ID.into();
     }
     fixture
 }
@@ -160,7 +160,7 @@ fn wait_for_audio(controller: &EngineGraphController, exchange: &ProcessorExchan
             && meters.revision == revision
             && [
                 "rate-fixture",
-                tonenari_engine_service::DEFAULT_ENDPOINT_NODE_ID,
+                mixrelay_engine_service::DEFAULT_ENDPOINT_NODE_ID,
             ]
             .iter()
             .all(|id| {

@@ -1,9 +1,9 @@
 use super::{DeviceIo, MAX_FRAMES};
+use mixrelay_pcm_ring::{mr_pcm_ring_discard, mr_pcm_ring_read_available, mr_pcm_ring_write};
 use std::{
     ptr,
     sync::atomic::Ordering::{Relaxed, Release},
 };
-use tonenari_pcm_ring::{tn_pcm_ring_discard, tn_pcm_ring_read_available, tn_pcm_ring_write};
 
 // SAFETY: graph rendering is serialized; its output span is complete and disjoint
 // from either ring. The SRC worker owns only the opposite producer cursor.
@@ -17,11 +17,11 @@ pub(super) unsafe fn graph_read(io: &DeviceIo, samples: *mut f32, frames: u32, e
     let previous = unsafe { &mut *io.graph_epoch.get() };
     if *previous != epoch {
         // SAFETY: discard changes only this graph consumer's cursor.
-        unsafe { tn_pcm_ring_discard(ring) };
+        unsafe { mr_pcm_ring_discard(ring) };
         *previous = epoch;
     }
     // SAFETY: retained ring and sole graph consumer, complete caller-owned output.
-    unsafe { tn_pcm_ring_read_available(ring, samples, frames) }
+    unsafe { mr_pcm_ring_read_available(ring, samples, frames) }
 }
 
 // SAFETY: one serialized graph producer; immutable input spans frames*channels floats.
@@ -31,7 +31,7 @@ pub(super) unsafe fn graph_write(io: &DeviceIo, samples: *const f32, frames: u32
     }
     graph_progress(io, frames);
     // SAFETY: graph is this ring's sole producer; native callbacks use the other ring.
-    unsafe { tn_pcm_ring_write(ptr::from_ref(&io.graph_ring).cast_mut(), samples, frames) }
+    unsafe { mr_pcm_ring_write(ptr::from_ref(&io.graph_ring).cast_mut(), samples, frames) }
 }
 
 fn graph_progress(io: &DeviceIo, frames: u32) {
@@ -50,7 +50,7 @@ pub(super) unsafe fn worker_read(io: &DeviceIo, samples: *mut f32, frames: u32) 
     // No prefill: SRC owns priming, not a second native-queue latency policy.
     // SAFETY: the worker's input ring depends only on immutable direction.
     unsafe {
-        tn_pcm_ring_read_available(
+        mr_pcm_ring_read_available(
             ptr::from_ref(io.ring(!io.selection.input)).cast_mut(),
             samples,
             frames,
@@ -65,7 +65,7 @@ pub(super) unsafe fn worker_write(io: &DeviceIo, samples: *const f32, frames: u3
     }
     // SAFETY: worker writes graph input or native output; no other role writes that ring.
     unsafe {
-        tn_pcm_ring_write(
+        mr_pcm_ring_write(
             ptr::from_ref(io.ring(io.selection.input)).cast_mut(),
             samples,
             frames,
@@ -76,5 +76,5 @@ pub(super) unsafe fn worker_write(io: &DeviceIo, samples: *const f32, frames: u3
 // SAFETY: sole worker consumer; the opposite producer may run concurrently.
 pub(super) unsafe fn worker_discard(io: &DeviceIo) {
     // SAFETY: only the worker input ring's consumer cursor is changed.
-    unsafe { tn_pcm_ring_discard(ptr::from_ref(io.ring(!io.selection.input)).cast_mut()) };
+    unsafe { mr_pcm_ring_discard(ptr::from_ref(io.ring(!io.selection.input)).cast_mut()) };
 }

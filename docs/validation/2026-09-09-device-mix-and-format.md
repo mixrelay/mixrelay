@@ -42,7 +42,7 @@
 
 ## Local app verification
 
-The existing launch daemon and the debug ToneNari app were restarted with the new
+The existing launch daemon and the debug MixRelay app were restarted with the new
 engine/UI. No HAL installation or CoreAudio restart was performed.
 
 - The two existing graphs, endpoint ID/name, channel routes, gains, node positions,

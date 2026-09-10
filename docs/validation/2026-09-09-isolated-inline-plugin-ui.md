@@ -21,7 +21,7 @@ editor methods are nonblocking or that all third-party native code is thread-saf
 
 ## Native feasibility evidence
 
-Command: `cargo run -p tonenari-processor-host --example editor_surface_probe`.
+Command: `cargo run -p mixrelay-processor-host --example editor_surface_probe`.
 The Rust parent gives its own disposable child 20 seconds, then kills and reaps
 that exact child on timeout. No user graph, audio endpoint, or installed engine is
 changed. The probe creates a hidden AppKit window and an actual Apple AUBandpass

@@ -8,11 +8,11 @@ case "$ID" in
   debian|ubuntu|kali)
     export DEBIAN_FRONTEND=noninteractive
     apt_options=(-o APT::Update::Error-Mode=any)
-    if [[ "$ID" == kali && "${TONENARI_LAB_CONTAINER:-0}" == 1 ]]; then
+    if [[ "$ID" == kali && "${MIXRELAY_LAB_CONTAINER:-0}" == 1 ]]; then
       # The rotating redirector selected a mirror with an invalid TLS chain.
       # Use Kali's official endpoint in disposable images without weakening TLS
       # or archive signature checks, and without changing a VM's configured repos.
-      apt_options+=(-o Dir::Etc::sourcelist=/opt/tonenari-lab/kali.sources -o Dir::Etc::sourceparts=-
+      apt_options+=(-o Dir::Etc::sourcelist=/opt/mixrelay-lab/kali.sources -o Dir::Etc::sourceparts=-
         -o Acquire::https::CaInfo=/etc/ssl/certs/ca-certificates.crt)
     fi
     apt-get "${apt_options[@]}" update

@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use tonenari_control_protocol::{ErrorCode, ProtocolError, RecorderRequest};
+use mixrelay_control_protocol::{ErrorCode, ProtocolError, RecorderRequest};
 
 use super::{ControlState, catalog_task, protocol_error_status};
 

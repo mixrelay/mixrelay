@@ -2,8 +2,8 @@
 use super::{
     bridge::DeviceBridge,
     ffi::{
-        tn_device_io_alive, tn_device_io_clock_device, tn_device_io_clock_discontinuities,
-        tn_device_io_native_rate, tn_device_io_overflows, tn_device_io_ticks,
+        mr_device_io_alive, mr_device_io_clock_device, mr_device_io_clock_discontinuities,
+        mr_device_io_native_rate, mr_device_io_overflows, mr_device_io_ticks,
     },
     native::{Connection, Native},
 };
@@ -41,7 +41,7 @@ impl WorkerContext {
         }
         // Only lifetime/property supervision remains on this thread. PCM is
         // already rendered in the aggregate callback, not pumped on this timer.
-        if !unsafe { tn_device_io_alive(self.native.pointer.as_ptr()) } {
+        if !unsafe { mr_device_io_alive(self.native.pointer.as_ptr()) } {
             return Err("CoreAudio direct device lost or reconfigured".into());
         }
         thread::park_timeout(Duration::from_millis(50));
@@ -55,7 +55,7 @@ impl WorkerContext {
             channels = self.channels
         );
         let _entered = span.enter();
-        tonenari_engine_service::device_worker::supervise(
+        mixrelay_engine_service::device_worker::supervise(
             &self.stop,
             &self.failed,
             tx,
@@ -85,16 +85,16 @@ impl WorkerContext {
         };
         self.ready_rate.store(0, Ordering::Release);
         self.native.connect(&self.stop)?;
-        let native_rate = unsafe { tn_device_io_native_rate(pointer) };
+        let native_rate = unsafe { mr_device_io_native_rate(pointer) };
         self.native_rate.store(native_rate, Ordering::Release);
         // Only the connection owner queries CoreAudio. The graph uses this
         // atomic proof, not a UID string, nominal Hz or a property call on RT.
         self.clock_identity.store(
-            unsafe { tn_device_io_clock_device(pointer) },
+            unsafe { mr_device_io_clock_device(pointer) },
             Ordering::Release,
         );
         let mut bridge = DeviceBridge::new(self, native_rate)?;
-        let mut ticks = unsafe { tn_device_io_ticks(pointer) };
+        let mut ticks = unsafe { mr_device_io_ticks(pointer) };
         let mut last_progress = Instant::now();
         let mut last_properties = Instant::now();
         let mut activated = false;
@@ -128,9 +128,9 @@ impl WorkerContext {
                 activated = false;
             }
             if bridge.graph_rate != self.graph_rate.load(Ordering::Acquire)
-                || bridge.transport_overflows != unsafe { tn_device_io_overflows(pointer) }
+                || bridge.transport_overflows != unsafe { mr_device_io_overflows(pointer) }
                 || bridge.clock_discontinuities
-                    != unsafe { tn_device_io_clock_discontinuities(pointer) }
+                    != unsafe { mr_device_io_clock_discontinuities(pointer) }
                 || bridge.clock_aligned != self.clock_aligned.load(Ordering::Acquire)
             {
                 self.ready_rate.store(0, Ordering::Release);
@@ -138,12 +138,12 @@ impl WorkerContext {
                 activated = false;
             }
             if last_properties.elapsed() >= Duration::from_millis(50) {
-                if !unsafe { tn_device_io_alive(pointer) } {
+                if !unsafe { mr_device_io_alive(pointer) } {
                     return Err("CoreAudio device lost or reconfigured".into());
                 }
                 last_properties = Instant::now();
             }
-            let next = unsafe { tn_device_io_ticks(pointer) };
+            let next = unsafe { mr_device_io_ticks(pointer) };
             if next != ticks {
                 ticks = next;
                 last_progress = Instant::now();

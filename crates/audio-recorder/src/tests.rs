@@ -1,10 +1,10 @@
 use super::{Encoding, RecorderAction, RecorderRegistry, RecorderRequest, RecorderState};
+use mixrelay_test_support::FixtureDir;
 use std::{
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
 };
-use tonenari_test_support::FixtureDir;
 
 fn request(action: RecorderAction) -> RecorderRequest {
     RecorderRequest {
@@ -18,7 +18,7 @@ fn request(action: RecorderAction) -> RecorderRequest {
 #[test]
 fn preparation_uses_the_shared_one_to_eight_channel_contract() {
     let registry = RecorderRegistry::new();
-    for channels in 1..=tonenari_audio_io::formats::MAX_RECORDING_CHANNELS {
+    for channels in 1..=mixrelay_audio_io::formats::MAX_RECORDING_CHANNELS {
         assert!(
             registry
                 .prepare(&format!("channels-{channels}"), channels)
@@ -27,7 +27,7 @@ fn preparation_uses_the_shared_one_to_eight_channel_contract() {
     }
     for channels in [
         0,
-        tonenari_audio_io::formats::MAX_RECORDING_CHANNELS + 1,
+        mixrelay_audio_io::formats::MAX_RECORDING_CHANNELS + 1,
         64,
         u16::MAX,
     ] {

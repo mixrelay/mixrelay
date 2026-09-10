@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { ToneNariProvider } from '../theme/ToneNariProvider';
+import { MixRelayProvider } from '../theme/MixRelayProvider';
 import { formatPlatformShortcut } from './platformShortcut';
 import { ShortcutTooltip } from './ShortcutTooltip';
 
@@ -19,11 +19,11 @@ it.each([
   vi.useFakeTimers();
   vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
   render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <ShortcutTooltip shortcut="Mod+N">
         <button type="button">New graph</button>
       </ShortcutTooltip>
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   fireEvent.mouseEnter(screen.getByRole('button', { name: 'New graph' }));
   expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();

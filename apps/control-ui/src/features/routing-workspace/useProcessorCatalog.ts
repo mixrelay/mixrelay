@@ -7,7 +7,7 @@ import type {
   ExternalProcessorDiagnostic,
 } from '../../core/control-port/types';
 
-const PATHS_KEY = 'tonenari.processorPaths.v1';
+const PATHS_KEY = 'mixrelay.processorPaths.v1';
 type CatalogAction = 'initial' | 'scan' | 'directory';
 type CatalogPort = Pick<
   ControlPort,

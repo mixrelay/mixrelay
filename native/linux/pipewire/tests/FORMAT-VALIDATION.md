@@ -1,12 +1,12 @@
 # Linux native format contract and isolated tests
 
-The session sample rate is the ToneNari-owned stream's negotiated F32 PCM rate.
+The session sample rate is the MixRelay-owned stream's negotiated F32 PCM rate.
 The PipeWire server graph clock is independent of that setting. Its adapters
 perform sample-rate conversion; `GraphTimeline` / `FrameBudgetMapper` convert
 callback duration to render frame units, not PCM. Adding another PCM converter
 at this boundary would resample audio twice.
 
-The UI processing buffer is the maximum ToneNari DSP block (`CycleBlocks`).
+The UI processing buffer is the maximum MixRelay DSP block (`CycleBlocks`).
 `node.latency` requests a scheduling preference but does not set the server's
 quantum or another application's buffer. No global metadata is changed. Actual
 variable callback quantum is an internal observation, never an
@@ -29,18 +29,18 @@ after startup discard. This is a frequency estimate, not precision measurement.
 Matching PipeWire graph clock IDs does **not** prove independent hardware-clock
 drift correction; the separate RTP fixture qualifies its own network-clock scope.
 
-Run only in a uniquely named `<checkout>/.lab/tonenari-integration-*` source snapshot
+Run only in a uniquely named `<checkout>/.lab/mixrelay-integration-*` source snapshot
 inside the lab guest. The harness creates a private runtime, config, state and
 D-Bus, disables hardware monitors, then reaps only its owned processes. It does
 not alter services, default devices, system configuration, or user graphs.
 
 ```sh
-TONENARI_LAB_GRAPH_RATE=44100 TONENARI_LAB_SOURCE_RATE=48000 \
-  TONENARI_LAB_TEST_NAME=native_pipewire_rate_conversion_and_observed_clock \
+MIXRELAY_LAB_GRAPH_RATE=44100 MIXRELAY_LAB_SOURCE_RATE=48000 \
+  MIXRELAY_LAB_TEST_NAME=native_pipewire_rate_conversion_and_observed_clock \
   bash native/linux/pipewire/tests/run-application-retracking.sh "$snapshot"
-TONENARI_LAB_TEST_NAME=native_pipewire_live_session_format_transaction \
+MIXRELAY_LAB_TEST_NAME=native_pipewire_live_session_format_transaction \
   bash native/linux/pipewire/tests/run-application-retracking.sh "$snapshot"
-TONENARI_LAB_LIFECYCLE_TEST=1 \
+MIXRELAY_LAB_LIFECYCLE_TEST=1 \
   bash native/linux/pipewire/tests/run-application-retracking.sh "$snapshot"
 ```
 

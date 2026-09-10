@@ -4,8 +4,8 @@ use serde::{
     ser::{Error, SerializeSeq},
 };
 
-fn fixture() -> tonenari_test_support::FixtureDir {
-    tonenari_test_support::FixtureDir::new("document-persistence").unwrap()
+fn fixture() -> mixrelay_test_support::FixtureDir {
+    mixrelay_test_support::FixtureDir::new("document-persistence").unwrap()
 }
 
 #[test]

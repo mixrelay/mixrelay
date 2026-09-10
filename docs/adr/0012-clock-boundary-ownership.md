@@ -22,7 +22,7 @@ ability to synchronize; do not infer a configured hardware lock from it alone.
 2. Reuse one device timeline or native synchronization where available.
 3. Apply nominal SRC only at a boundary that still has different delivered rates.
 4. Apply adaptive correction only across an independently paced boundary. An OS
-   converter and a ToneNari converter must not both control that same boundary.
+   converter and a MixRelay converter must not both control that same boundary.
 
 ## Platform direction (not an implementation completion claim)
 

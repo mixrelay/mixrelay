@@ -2,6 +2,12 @@
 use crate::endpoint_registry::{
     CallbackEndpoint, EndpointId, EndpointRegistry, EndpointSpec, OwnedInventory, PreparedInventory,
 };
+use mixrelay_macos_transport::{
+    endpoint_transport::mr_endpoint_transport_requires_replacement,
+    shared_audio_buffer::{
+        mr_shared_audio_buffer_requires_replacement, mr_shared_audio_buffer_try_begin_epoch,
+    },
+};
 use parking_lot::Mutex;
 use std::{
     collections::BTreeMap,
@@ -9,12 +15,6 @@ use std::{
     pin::Pin,
     ptr,
     sync::atomic::{AtomicPtr, AtomicU8, AtomicUsize, Ordering},
-};
-use tonenari_macos_transport::{
-    endpoint_transport::tn_endpoint_transport_requires_replacement,
-    shared_audio_buffer::{
-        tn_shared_audio_buffer_requires_replacement, tn_shared_audio_buffer_try_begin_epoch,
-    },
 };
 
 const IDLE: u8 = 0;
@@ -202,14 +202,14 @@ impl<'a> Runtime<'a> {
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "endpoint absent"))?;
         // SAFETY: this read guard pins the mappings and the caller drained the sole writer.
         let exhausted = unsafe {
-            tn_endpoint_transport_requires_replacement(current.transport())
-                || tn_shared_audio_buffer_requires_replacement(current.capture_buffer())
+            mr_endpoint_transport_requires_replacement(current.transport())
+                || mr_shared_audio_buffer_requires_replacement(current.capture_buffer())
         };
         if exhausted {
             return self.replace(id, current.generation());
         }
         // SAFETY: the same producer-drained mapping is pinned until this guard drops.
-        Ok(unsafe { tn_shared_audio_buffer_try_begin_epoch(current.capture_buffer()) } != 0)
+        Ok(unsafe { mr_shared_audio_buffer_try_begin_epoch(current.capture_buffer()) } != 0)
     }
 }
 pub(super) struct Read<'guard, 'registry> {

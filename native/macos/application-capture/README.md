@@ -1,4 +1,4 @@
-# ToneNari macOS application capture
+# MixRelay macOS application capture
 
 This directory contains the first native macOS implementation slice of
 `ApplicationCaptureBackend`. It uses Core Audio process taps on macOS 14.2 and
@@ -71,5 +71,5 @@ PCM intentionally does not cross the webview bridge; the engine will consume it
 inside the native/Rust audio boundary.
 
 Apple's sample “Capturing system audio with Core Audio taps” is the behavioral
-reference. ToneNari implements the backend independently and keeps Core Audio
+reference. MixRelay implements the backend independently and keeps Core Audio
 types out of the shared Rust contracts.

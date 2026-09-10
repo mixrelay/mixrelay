@@ -6,12 +6,12 @@
 //! Device lifetime follows references
 //! across every running graph, never editor selection. All work runs on the control plane.
 
-use std::collections::{BTreeMap, BTreeSet};
-use tonenari_audio_graph::{
+use mixrelay_audio_graph::{
     AUDIO_PORT_ID, AudioEndpoint, CompileContext, CompileError, EdgeId, EdgeSpec, ExecutionPlan,
     FROM_OS_PORT_ID, GainConfig, GraphCompiler, GraphDocument, MixerConfig, NodeConfig, NodeId,
     NodeSpec, PortId, TO_OS_PORT_ID, VirtualEndpointId, VirtualEndpointSpec,
 };
+use std::collections::{BTreeMap, BTreeSet};
 
 mod authored;
 mod lowering;
@@ -28,7 +28,7 @@ const MAX_IDENTITIES: usize = 256;
 pub struct DeviceRegistry {
     devices: BTreeMap<VirtualEndpointId, VirtualEndpointSpec>,
     sources: BTreeMap<String, NodeConfig>,
-    outputs: BTreeMap<String, tonenari_audio_graph::AudioDeviceOutputConfig>,
+    outputs: BTreeMap<String, mixrelay_audio_graph::AudioDeviceOutputConfig>,
 }
 
 impl DeviceRegistry {
@@ -129,7 +129,7 @@ pub struct SourceReference {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SharedOutput {
     pub id: String,
-    pub config: tonenari_audio_graph::AudioDeviceOutputConfig,
+    pub config: mixrelay_audio_graph::AudioDeviceOutputConfig,
 }
 
 /// Graph-local sink routing and gain; all references sum into one canonical native sink.
@@ -218,8 +218,8 @@ pub fn runtime_node_id(graph_id: &str, node_id: &NodeId) -> NodeId {
 ///
 /// # Example
 /// ```
-/// use tonenari_audio_graph::{CompileContext, CompileLimits, GraphCompiler, RenderFormat};
-/// use tonenari_engine_service::graph_composition::{DeviceRegistry, compose};
+/// use mixrelay_audio_graph::{CompileContext, CompileLimits, GraphCompiler, RenderFormat};
+/// use mixrelay_engine_service::graph_composition::{DeviceRegistry, compose};
 /// let registry = DeviceRegistry::new(Vec::new())?;
 /// let context = CompileContext {
 ///     format: RenderFormat { sample_rate: 48_000, block_frames: 256 },
@@ -227,7 +227,7 @@ pub fn runtime_node_id(graph_id: &str, node_id: &NodeId) -> NodeId {
 /// };
 /// let combined = compose(&registry, &[], 1, context, &GraphCompiler::default())?;
 /// assert!(combined.native_outputs.is_empty());
-/// # Ok::<(), tonenari_engine_service::graph_composition::CompositionError>(())
+/// # Ok::<(), mixrelay_engine_service::graph_composition::CompositionError>(())
 /// ```
 pub fn compose(
     registry: &DeviceRegistry,

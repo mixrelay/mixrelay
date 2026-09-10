@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ToneNariProvider } from '../theme/ToneNariProvider';
+import { MixRelayProvider } from '../theme/MixRelayProvider';
 import { HierarchicalContextMenu, HierarchicalMenuButton } from './HierarchicalMenu';
 import styles from './HierarchicalMenu.module.css';
 
@@ -46,11 +46,11 @@ afterEach(() => vi.restoreAllMocks());
 
 function openAt(x: number, y: number) {
   render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <HierarchicalContextMenu items={[{ id: 'delete', label: 'Delete' }]} onSelect={vi.fn()}>
         <div data-testid="canvas">Canvas</div>
       </HierarchicalContextMenu>
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   fireEvent.contextMenu(screen.getByTestId('canvas'), { clientX: x, clientY: y });
   return screen.findByRole('menu');
@@ -110,7 +110,7 @@ describe.each(['context', 'button'] as const)('%s nested menu', (entry) => {
         },
       ];
       render(
-        <ToneNariProvider>
+        <MixRelayProvider>
           {entry === 'context' ? (
             <HierarchicalContextMenu items={items} onSelect={onSelect}>
               <div data-testid="canvas">Canvas</div>
@@ -123,7 +123,7 @@ describe.each(['context', 'button'] as const)('%s nested menu', (entry) => {
               buttonContent="Add"
             />
           )}
-        </ToneNariProvider>,
+        </MixRelayProvider>,
       );
       if (entry === 'context')
         fireEvent.contextMenu(screen.getByTestId('canvas'), { clientX: 300, clientY: 200 });

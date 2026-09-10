@@ -9,9 +9,9 @@ use std::{
 /// Allocates an app-capture ring for power-of-two capacity 1..=2^20 and 1..=64
 /// channels. Invalid geometry or either allocation failure returns null.
 #[unsafe(no_mangle)]
-pub extern "C" fn tn_audio_ring_create(capacity: usize, channels: u32) -> *mut AudioRing {
+pub extern "C" fn mr_audio_ring_create(capacity: usize, channels: u32) -> *mut AudioRing {
     // SAFETY: std alloc returns fresh aligned storage or null; create initializes
-    // the owner before returning it to TNProcessTap's control-side setup.
+    // the owner before returning it to MRProcessTap's control-side setup.
     unsafe {
         create(capacity, channels, allocate_samples, |layout| {
             NonNull::new(alloc(layout))
@@ -21,10 +21,10 @@ pub extern "C" fn tn_audio_ring_create(capacity: usize, channels: u32) -> *mut A
 
 /// Releases both the PCM slab and native owner. Null is a no-op.
 /// # Safety
-/// `TNProcessTap` owns this create result exactly once. `IOProc` unregistration and
+/// `MRProcessTap` owns this create result exactly once. `IOProc` unregistration and
 /// pump/stat-reader drain must complete before destroy; no other access may remain.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_audio_ring_destroy(ring: *mut AudioRing) {
+pub unsafe extern "C" fn mr_audio_ring_destroy(ring: *mut AudioRing) {
     if !ring.is_null() {
         // SAFETY: create used the global allocator with precisely AudioRing's
         // layout; the native control owner has recovered exclusive ownership.
@@ -35,11 +35,11 @@ pub unsafe extern "C" fn tn_audio_ring_destroy(ring: *mut AudioRing) {
 /// Writes the complete block or rejects it, counting capacity-rejected frames.
 /// Null input/ring and zero frames return zero without changing counters.
 /// # Safety
-/// Ring is a live create result retained by `TNProcessTap`. Its serialized `IOProc`
+/// Ring is a live create result retained by `MRProcessTap`. Its serialized `IOProc`
 /// is the sole producer. For an accepted block, input contains frames*channels
 /// readable floats, disjoint from ring storage, until this call returns.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_audio_ring_write_interleaved(
+pub unsafe extern "C" fn mr_audio_ring_write_interleaved(
     ring: *mut AudioRing,
     input: *const f32,
     frames: usize,
@@ -81,7 +81,7 @@ pub unsafe extern "C" fn tn_audio_ring_write_interleaved(
 /// channels readable pointers; each non-null channel has frames readable floats
 /// for an accepted block. All input storage is disjoint from ring storage.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_audio_ring_write_planar(
+pub unsafe extern "C" fn mr_audio_ring_write_planar(
     ring: *mut AudioRing,
     input: *const *const f32,
     frames: usize,
@@ -155,7 +155,7 @@ unsafe fn interleave_span(
 /// disjoint from ring storage. Refresh drains only after the `IOProc` unregisters
 /// and under the same consumer ownership; a second consumer is not permitted.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_audio_ring_read_interleaved(
+pub unsafe extern "C" fn mr_audio_ring_read_interleaved(
     ring: *mut AudioRing,
     destination: *mut f32,
     maximum: usize,
@@ -194,7 +194,7 @@ pub unsafe extern "C" fn tn_audio_ring_read_interleaved(
 /// # Safety
 /// Non-null ring is initialized and retained by the tap/pump owner during the read.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_audio_ring_capacity_frames(ring: *const AudioRing) -> usize {
+pub unsafe extern "C" fn mr_audio_ring_capacity_frames(ring: *const AudioRing) -> usize {
     // SAFETY: retained initialized owner; immutable geometry never changes.
     unsafe { ring.as_ref() }.map_or(0, |ring| ring.capacity)
 }
@@ -203,7 +203,7 @@ pub unsafe extern "C" fn tn_audio_ring_capacity_frames(ring: *const AudioRing) -
 /// # Safety
 /// Non-null ring is initialized and retained by the tap/pump owner during the read.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_audio_ring_available_frames(ring: *const AudioRing) -> usize {
+pub unsafe extern "C" fn mr_audio_ring_available_frames(ring: *const AudioRing) -> usize {
     // SAFETY: retained owner; statistics read atomics and never access PCM cells.
     unsafe { ring.as_ref() }.map_or(0, |ring| ring.read_window(ring.capacity).1)
 }
@@ -212,7 +212,7 @@ pub unsafe extern "C" fn tn_audio_ring_available_frames(ring: *const AudioRing) 
 /// # Safety
 /// Non-null ring is initialized and retained by the tap/pump owner during the read.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_audio_ring_dropped_frames(ring: *const AudioRing) -> u64 {
+pub unsafe extern "C" fn mr_audio_ring_dropped_frames(ring: *const AudioRing) -> u64 {
     // SAFETY: retained owner; producer updates this counter atomically.
     unsafe { ring.as_ref() }.map_or(0, |ring| ring.dropped.load(Ordering::Relaxed))
 }

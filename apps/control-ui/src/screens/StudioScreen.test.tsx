@@ -8,7 +8,7 @@ import type {
   VirtualEndpointRateError,
 } from '../core/control-port/types';
 import { I18nProvider } from '../core/i18n';
-import { ToneNariProvider } from '../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../core/theme/MixRelayProvider';
 import { virtualPolicy, virtualSpec } from '../features/routing-workspace/virtualEndpointFixtures';
 import { StudioScreen } from './StudioScreen';
 
@@ -69,11 +69,11 @@ function port(revision: number) {
 }
 function view(controlPort: ControlPort) {
   return (
-    <ToneNariProvider>
+    <MixRelayProvider>
       <I18nProvider>
         <StudioScreen controlPort={controlPort} />
       </I18nProvider>
-    </ToneNariProvider>
+    </MixRelayProvider>
   );
 }
 

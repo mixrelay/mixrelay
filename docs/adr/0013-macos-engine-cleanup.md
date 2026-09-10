@@ -188,7 +188,7 @@ after failure. They do not start a second installed engine.
 Removed the unbuilt singleton client-buffer helper/header and its standalone
 test/probe: four tracked C/header files, 333 lines. Their only references were
 one another and an outdated diagnostic recipe. They selected the obsolete
-`io.tonenari.audio.endpoint.default`, not a current canonical device identity.
+`io.mixrelay.audio.endpoint.default`, not a current canonical device identity.
 The historical buffer-semantics finding is retained, but the dead build recipe
 and present-tense singleton instructions are removed. Git retains recovery history;
 no user graph, device, recording or cache was deleted.
@@ -222,32 +222,32 @@ implementation are outside this slice.
 Independent read-only review followed actual engine/desktop build inputs. Native
 code is not yet reduced to indispensable ABI glue:
 
-- `TNProcessTap.m`: process selection, native refresh/unregister/drain/retry and
+- `MRProcessTap.m`: process selection, native refresh/unregister/drain/retry and
   callback/listener lifetime still remain in Objective-C. Format/input validation
   and peaks belong to Rust `process_tap_input`; admission ownership, epoch
   invalidation/commit and one-time retirement now belong to `process_tap_lifecycle`.
 - The device queue now belongs to `native/pcm-ring` (see below), not the Linux
   native directory. The app-capture ring's partial-read/drop-frame semantics stay
   separate from the device queue's epoch/prefill/whole-read contract.
-- `TNDeviceIO.c`: stream-format admission, context allocation and epoch/priming
+- `MRDeviceIO.c`: stream-format admission, context allocation and epoch/priming
   remain in C. Rust `device_io_lifecycle` owns the registration pair and
   create/start/unregister failure transitions. Callback buffer validation,
   projection and clock publication also belong to Rust; C retains native buffer
   clearing and OS callback dispatch.
-- `TNAggregateGroup.c`: CF object ownership and native property collection remain.
+- `MRAggregateGroup.c`: CF object ownership and native property collection remain.
   Rust `aggregate_group` now owns the immutable member geometry, freshness,
   active membership, drift readback and channel binding decisions; the existing
   engine planner remains the sole admission/primary-selection policy.
-- `TNApplicationSourceTransport.c` is now only a 20-line XPC blocks adapter.
+- `MRApplicationSourceTransport.c` is now only a 20-line XPC blocks adapter.
   Mapping/FD ownership and producer lease/epoch/publication live in Rust, sharing
   the registry's `application_source_mapping` owner instead of duplicating it.
-- `ToneNariHALBridge.c`: Rust `control_session` now owns reconnect authority and
+- `MixRelayHALBridge.c`: Rust `control_session` now owns reconnect authority and
   heartbeat cadence. COM, XPC/dispatch handles and Blocks remain in C, including
-  checked queue/timer allocation before callback publication. `TNEngineService.c`
+  checked queue/timer allocation before callback publication. `MREngineService.c`
   is much closer to a narrow dispatch/XPC trampoline; that does not justify the
   other remaining C policy.
 - Other installed/live diagnostics still contain singleton assumptions, including
-  the currently built `TNDeviceIOLive.c`. Removing the four unbuilt buffer files
+  the currently built `MRDeviceIOLive.c`. Removing the four unbuilt buffer files
   does not resolve those fixtures.
 
 The next lifecycle slice's ownership, failure-injection tests, actual uninstalled
@@ -279,7 +279,7 @@ checkpoint the lockfile changed only those three edges and the rerun passed. No
 package version changed.
 LV2 native linking/execution was not performed on macOS.
 
-`TONENARI_TEST_ENDPOINT_UID` is unset. Installed-device reconnect/allocation tests
+`MIXRELAY_TEST_ENDPOINT_UID` is unset. Installed-device reconnect/allocation tests
 requiring an explicitly selected duplex test device were not run; no arbitrary
 user device was selected to make the suite pass. No live app/engine replacement,
 graph edit, commit or push was performed. Native audio continuity, entire C-policy
@@ -295,7 +295,7 @@ and product gaps above are not marked completed by the passing selected tests.
 validity, single-stream continuity and bounded atomic publication. The C header's
 implementation is removed. Its remaining inline shim projects CoreAudio's
 `AudioTimeStamp` into native scalar fields; it does not implement continuity or
-invent synchronization between devices. Both `TNDeviceIO.c` and `TNProcessTap.m`
+invent synchronization between devices. Both `MRDeviceIO.c` and `MRProcessTap.m`
 use this implementation, including counter reads when a snapshot is unavailable.
 
 Storage remains caller-owned: 64 bytes, alignment 8, initialized before IOProc
@@ -323,7 +323,7 @@ The stable-Rust archive itself is not sanitizer-instrumented.
 
 ### Matched callback measurement
 
-The unchanged C harness `native/macos/common/tests/TNCallbackClockBench.c` was
+The unchanged C harness `native/macos/common/tests/MRCallbackClockBench.c` was
 built before replacing the header, then linked to the new implementation. On the
 same arm64 Mac (Apple Clang 21.0.0, Rust 1.96.0), both runs used `clang -O3
 -std=c17 -Wall -Wextra -Werror`, contiguous 128-frame timestamps, 2,000,000 record
@@ -347,11 +347,11 @@ removal change, not a performance optimization.
 Reproduce the new implementation's measurement from the repository root:
 
 ```sh
-cargo build --release -p tonenari-macos-transport
+cargo build --release -p mixrelay-macos-transport
 mkdir -p target/test-artifacts/callback-clock-benchmark
 clang -O3 -std=c17 -Wall -Wextra -Werror \
-  native/macos/common/tests/TNCallbackClockBench.c \
-  target/release/libtonenari_macos_transport.a -liconv \
+  native/macos/common/tests/MRCallbackClockBench.c \
+  target/release/libmixrelay_macos_transport.a -liconv \
   -framework CoreAudio -framework CoreFoundation \
   -o target/test-artifacts/callback-clock-benchmark/after
 target/test-artifacts/callback-clock-benchmark/after
@@ -387,7 +387,7 @@ policy extraction only; the remaining native inventory above is still open.
 
 `capture_ring` now owns the app-capture PCM vector, immutable geometry, producer/
 consumer cursors and drop counter. `capture_ring::ffi` is the narrow native
-entry/copy boundary; the old `TNAudioRing.c` algorithm and test-only allocator ABI
+entry/copy boundary; the old `MRAudioRing.c` algorithm and test-only allocator ABI
 are removed. Desktop, Cargo native fixtures and the standalone smoke link recipe
 all link the current Rust owner. No extra runtime dependency, thread, lock,
 platform abstraction, Windows policy or previous-implementation fallback was added.
@@ -412,7 +412,7 @@ diagnostic contract is tightened: `available_frames` is capacity-bounded even if
 its two cursor loads span concurrent progress. It is not a transactional snapshot
 and is not used to grant PCM ownership.
 
-The device `TNPcmRing` was deliberately not folded into this queue. Its half-
+The device `MRPcmRing` was deliberately not folded into this queue. Its half-
 capacity write limit, drop-*event* counters, requested/published epochs, prefill
 and whole-read-with-silence behavior are different responsibilities. Its C
 implementation remains an open cleanup item, not a shared policy to impose on
@@ -420,7 +420,7 @@ app capture.
 
 ### Capture-ring performance evidence
 
-The same C harness (`TNAudioRingBench.c`) was compiled before deleting the C
+The same C harness (`MRAudioRingBench.c`) was compiled before deleting the C
 implementation and then linked against the Rust replacement. Both used Apple
 Clang 21.0.0 `-O3 -std=c17 -Wall -Wextra -Werror` on the same arm64 Mac; the Rust
 archive used Rust 1.96.0 and the unchanged repository release profile, without
@@ -460,12 +460,12 @@ no-regression guarantee or end-to-end audio latency improvement is claimed.
 Reproduce the current path without opening a device:
 
 ```sh
-cargo build --release -p tonenari-macos-transport
+cargo build --release -p mixrelay-macos-transport
 mkdir -p target/test-artifacts/audio-ring-benchmark
 clang -O3 -std=c17 -Wall -Wextra -Werror \
   -I native/macos/application-capture/include \
-  native/macos/application-capture/tests/TNAudioRingBench.c \
-  target/release/libtonenari_macos_transport.a -liconv \
+  native/macos/application-capture/tests/MRAudioRingBench.c \
+  target/release/libmixrelay_macos_transport.a -liconv \
   -framework CoreAudio -framework CoreFoundation \
   -o target/test-artifacts/audio-ring-benchmark/after
 target/test-artifacts/audio-ring-benchmark/after
@@ -510,7 +510,7 @@ commit or push was performed. The removed C source remains recoverable in Git.
 ## Device PCM ownership and epoch publication (2026-09-10)
 
 The shared device queue is now the dependency-free runtime crate
-`native/pcm-ring`. The 136-line `TNPcmRing.c` implementation is removed. Its header
+`native/pcm-ring`. The 136-line `MRPcmRing.c` implementation is removed. Its header
 and native contract fixture move out of the Linux directory; the header contains
 only opaque storage, diagnostics and eight entry points. Both existing native
 consumers and their build/test recipes use the Rust owner. This corrects a shared
@@ -588,10 +588,10 @@ and epoch-correctness refactor, not an overall speedup. No universal no-regressi
 or end-to-end latency improvement is claimed. Current-path reproduction:
 
 ```sh
-cargo build --release -p tonenari-pcm-ring
+cargo build --release -p mixrelay-pcm-ring
 mkdir -p target/test-artifacts/device-ring-benchmark
 clang -O3 -std=c17 -Wall -Wextra -Werror -I native/pcm-ring/include \
-  native/pcm-ring/tests/TNPcmRingBench.c target/release/libtonenari_pcm_ring.a \
+  native/pcm-ring/tests/MRPcmRingBench.c target/release/libmixrelay_pcm_ring.a \
   -ldl -lm -o target/test-artifacts/device-ring-benchmark/after
 target/test-artifacts/device-ring-benchmark/after
 ```

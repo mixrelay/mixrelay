@@ -4,9 +4,9 @@ use std::{
     sync::Arc,
 };
 
+use mixrelay_audio_io::ApplicationCaptureRequest;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tonenari_audio_io::ApplicationCaptureRequest;
 
 use crate::model::{
     AUDIO_PORT_ID, AudioEndpoint, CURRENT_GRAPH_SCHEMA_VERSION, ChannelMapping, ChannelRoute,
@@ -108,7 +108,7 @@ impl NodeResolver for BuiltInNodeResolver {
                     context
                         .limits
                         .max_channels_per_port
-                        .min(tonenari_audio_io::formats::MAX_RECORDING_CHANNELS),
+                        .min(mixrelay_audio_io::formats::MAX_RECORDING_CHANNELS),
                 )?;
                 Ok(ResolvedNode {
                     inputs: vec![audio_port(PortDirection::Input, *channels)],
@@ -293,7 +293,7 @@ fn resolve_virtual_endpoint(
 }
 
 fn resolve_virtual_transport(
-    spec: &tonenari_audio_io::VirtualEndpointSpec,
+    spec: &mixrelay_audio_io::VirtualEndpointSpec,
     context: &CompileContext,
 ) -> Result<ResolvedNode, NodeResolutionError> {
     let maximum = context.limits.max_channels_per_port;

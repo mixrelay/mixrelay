@@ -12,39 +12,39 @@ use super::macos_pacing::{
     ApplicationClockSnapshot, ApplicationPacer, HardwarePacer, NativeClockSnapshot, NativePacer,
     Pace,
 };
+use mixrelay_audio_io::formats::MAX_BUFFER_FRAMES;
 use std::{
     net::SocketAddr,
     sync::Arc,
     time::{Duration, Instant},
 };
-use tonenari_audio_io::formats::MAX_BUFFER_FRAMES;
 
-use tonenari_audio_engine::{
+use mixrelay_audio_engine::{
     BlockProcessor, ExternalBinding, ExternalIo, PeakMeterBank, ProcessorExchange, RenderPlan,
 };
-use tonenari_audio_graph::{CompileContext, CompileLimits, GraphCompiler, RenderFormat};
-use tonenari_audio_io::process::{ProcessCycle, ProcessReport, TransferOutcome};
-use tonenari_control_server::router_with_backend;
-use tonenari_engine_service::{
+use mixrelay_audio_graph::{CompileContext, CompileLimits, GraphCompiler, RenderFormat};
+use mixrelay_audio_io::process::{ProcessCycle, ProcessReport, TransferOutcome};
+use mixrelay_control_server::router_with_backend;
+use mixrelay_engine_service::{
     EngineGraphController, EngineGraphControllerConfig, default_peak_meter_bank,
     session::AdapterRuntimeStatus,
 };
-use tonenari_processor_host::ProcessorCatalog;
+use mixrelay_processor_host::ProcessorCatalog;
 
 #[cfg(test)]
-pub(super) fn adapter_profile() -> tonenari_engine_service::session::AdapterProfile {
-    format::profile(tonenari_audio_io::formats::SAMPLE_RATES.to_vec())
+pub(super) fn adapter_profile() -> mixrelay_engine_service::session::AdapterProfile {
+    format::profile(mixrelay_audio_io::formats::SAMPLE_RATES.to_vec())
 }
 const CONTROL_SERVER_PORT: u16 = 19_341;
 
 use endpoint_backend::MacVirtualEndpointBackend;
 
-use tonenari_engine_service::endpoint_service::AudioConfig as NativeAudioConfig;
+use mixrelay_engine_service::endpoint_service::AudioConfig as NativeAudioConfig;
 
 unsafe extern "C" {
-    fn tn_engine_service_source_clock(token: u64, snapshot: *mut ApplicationClockSnapshot) -> bool;
-    fn tn_engine_service_set_source_clock_master(token: u64, master: bool) -> bool;
-    fn tn_engine_service_read_source_clocked(
+    fn mr_engine_service_source_clock(token: u64, snapshot: *mut ApplicationClockSnapshot) -> bool;
+    fn mr_engine_service_set_source_clock_master(token: u64, master: bool) -> bool;
+    fn mr_engine_service_read_source_clocked(
         source_token: u64,
         interleaved_samples: *mut f32,
         frame_count: u32,
@@ -58,7 +58,7 @@ struct MacEngineExternalIo<'a> {
     render_samples: &'a [f32],
     render_transfer: TransferOutcome,
     capture_samples: &'a mut [f32],
-    primary: Option<&'a tonenari_audio_io::VirtualEndpointId>,
+    primary: Option<&'a mixrelay_audio_io::VirtualEndpointId>,
     independent: &'a mut endpoint_boundaries::EndpointBoundaries<callback_transport::NativeCapture>,
 }
 
@@ -83,7 +83,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
         }
         // SAFETY: the destination is writable for `frames * binding.channels()` samples.
         let available = unsafe {
-            tn_engine_service_read_source_clocked(
+            mr_engine_service_read_source_clocked(
                 source_token(binding.node_id().as_str()),
                 destination.as_mut_ptr(),
                 frames,
@@ -130,7 +130,7 @@ fn prepare_runtime() -> AdapterRuntimeStatus {
     // The processing domain is independent of each endpoint's native rate.
     // Endpoint format changes are ID-directed through VirtualEndpointBackend.
     AdapterRuntimeStatus::new(format::profile(
-        tonenari_audio_io::formats::SAMPLE_RATES.to_vec(),
+        mixrelay_audio_io::formats::SAMPLE_RATES.to_vec(),
     ))
     .with_graph_format_control()
 }
@@ -144,12 +144,12 @@ pub(super) async fn run() -> Result<(), String> {
     let format = runtime_status.restore_preferences();
     let runtime_status = Arc::new(runtime_status);
     let meters = default_peak_meter_bank();
-    let initial_document = tonenari_audio_graph::GraphDocument::new(1, Vec::new(), Vec::new());
+    let initial_document = mixrelay_audio_graph::GraphDocument::new(1, Vec::new(), Vec::new());
     let processor = create_initial_processor(&initial_document, format, Arc::clone(&meters))?;
     let exchange = Arc::new(ProcessorExchange::new(processor.plan().revision()));
     let initial_bindings = processor.plan().meter_bindings().to_vec();
     let endpoint_backend = Arc::new(MacVirtualEndpointBackend::new(
-        tonenari_audio_io::formats::SAMPLE_RATES.to_vec(),
+        mixrelay_audio_io::formats::SAMPLE_RATES.to_vec(),
     ));
     let devices = Arc::new(super::macos_devices::MacDevices::new(
         runtime_status.clone(),
@@ -181,7 +181,7 @@ pub(super) async fn run() -> Result<(), String> {
     let worker_status = runtime_status.clone();
     let monitor_devices = devices.clone();
     let audio_thread = std::thread::Builder::new()
-        .name("tonenari-audio-worker".into())
+        .name("mixrelay-audio-worker".into())
         .spawn(move || {
             if let Err(error) = run_audio_worker(
                 processor,
@@ -192,12 +192,12 @@ pub(super) async fn run() -> Result<(), String> {
                     devices: &devices,
                 },
             ) {
-                tracing::error!(%error, "ToneNari audio worker failed");
+                tracing::error!(%error, "MixRelay audio worker failed");
             }
         })
         .map_err(|error| format!("could not start audio worker: {error}"))?;
     let _worker =
-        tonenari_engine_service::session::AudioWorker::new(runtime_status.clone(), audio_thread);
+        mixrelay_engine_service::session::AudioWorker::new(runtime_status.clone(), audio_thread);
     let observers =
         maintenance::ControlObservers::start(&runtime_status, &controller, &monitor_devices)?;
     let result = serve_control(listener, controller).await;
@@ -217,7 +217,7 @@ async fn serve_control(
 ) -> Result<(), String> {
     axum::serve(listener, router_with_backend(controller))
         .with_graceful_shutdown(async {
-            let _ = tonenari_engine_service::session::shutdown_signal().await;
+            let _ = mixrelay_engine_service::session::shutdown_signal().await;
         })
         .await
         .map_err(|error| format!("local control server failed: {error}"))
@@ -227,7 +227,7 @@ async fn serve_control(
 mod startup_tests;
 
 fn initialize_native_transport() -> Result<(), String> {
-    let exit_code = tonenari_engine_service::endpoint_service::tn_engine_service_start();
+    let exit_code = mixrelay_engine_service::endpoint_service::mr_engine_service_start();
     if exit_code != 0 {
         return Err(format!(
             "native engine service initialization failed with code {exit_code}"
@@ -237,7 +237,7 @@ fn initialize_native_transport() -> Result<(), String> {
 }
 
 fn create_initial_processor(
-    document: &tonenari_audio_graph::GraphDocument,
+    document: &mixrelay_audio_graph::GraphDocument,
     format: RenderFormat,
     meters: Arc<PeakMeterBank>,
 ) -> Result<Box<BlockProcessor>, String> {
@@ -412,7 +412,7 @@ fn process_worker_block(
         },
     )?;
     timeline.discontinuity_pending = !processed;
-    tonenari_engine_service::endpoint_service::touch_audio();
+    mixrelay_engine_service::endpoint_service::touch_audio();
     timeline.frame += u64::from(frames);
     if !timeline.native {
         wait_for_block(&mut timeline.deadline, period);
@@ -479,14 +479,14 @@ impl NativePacers {
         {
             // SAFETY: bounded registry lookup plus atomic publication only.
             unsafe {
-                tn_engine_service_set_source_clock_master(previous, false);
+                mr_engine_service_set_source_clock_master(previous, false);
             }
         }
         self.selected_application = token;
         if let Some(token) = token {
             // Idempotent reassertion also covers re-created producer slots.
             unsafe {
-                tn_engine_service_set_source_clock_master(token, true);
+                mr_engine_service_set_source_clock_master(token, true);
             }
         }
     }
@@ -500,7 +500,7 @@ impl Drop for NativePacers {
 fn application_clock(id: &str) -> Option<ApplicationClockSnapshot> {
     let mut clock = ApplicationClockSnapshot::default();
     // SAFETY: caller storage is fixed-size; registry reads bounded atomics.
-    unsafe { tn_engine_service_source_clock(source_token(id), &raw mut clock) }.then_some(clock)
+    unsafe { mr_engine_service_source_clock(source_token(id), &raw mut clock) }.then_some(clock)
 }
 
 fn next_native_pace(
@@ -624,7 +624,7 @@ impl MacTimeline {
                     });
                 }
                 status.observe_clock(
-                    tonenari_audio_io::session::ClockAuthority::Device,
+                    mixrelay_audio_io::session::ClockAuthority::Device,
                     route.synchronized,
                 );
                 Some((frames, discontinuity || switched))
@@ -649,7 +649,7 @@ impl MacTimeline {
                     status.observe_clock_idle();
                 } else {
                     status.observe_clock(
-                        tonenari_audio_io::session::ClockAuthority::EngineTimer,
+                        mixrelay_audio_io::session::ClockAuthority::EngineTimer,
                         false,
                     );
                 }
@@ -685,11 +685,11 @@ fn process_native_cycle(
     processor
         .process_external_cycle(
             ProcessCycle {
-                clock: tonenari_audio_io::process::ClockDomain {
+                clock: mixrelay_audio_io::process::ClockDomain {
                     authority: if clock_id != 0 {
-                        tonenari_audio_io::session::ClockAuthority::Device
+                        mixrelay_audio_io::session::ClockAuthority::Device
                     } else {
-                        tonenari_audio_io::session::ClockAuthority::EngineTimer
+                        mixrelay_audio_io::session::ClockAuthority::EngineTimer
                     },
                     id: clock_id,
                     epoch: timeline.epoch,
@@ -708,7 +708,7 @@ fn process_native_cycle(
 fn block_sample_count(channels: u32, frames: u32) -> Result<usize, String> {
     // A one-way endpoint has no storage on its inactive side. Still validate
     // frame bounds; an absent stream must not hide an oversized callback.
-    tonenari_audio_io::format_contract::block_sample_count(
+    mixrelay_audio_io::format_contract::block_sample_count(
         channels.max(1),
         frames,
         u32::from(endpoint_backend::MAX_ENDPOINT_CHANNELS),
@@ -723,7 +723,7 @@ mod storage_tests {
     use super::block_sample_count;
     #[test]
     fn one_way_and_maximum_endpoints_have_bounded_storage() {
-        for &frames in tonenari_audio_io::formats::BUFFER_SIZES {
+        for &frames in mixrelay_audio_io::formats::BUFFER_SIZES {
             assert_eq!(block_sample_count(0, frames), Ok(0));
             assert_eq!(block_sample_count(64, frames), Ok(64 * frames as usize));
         }

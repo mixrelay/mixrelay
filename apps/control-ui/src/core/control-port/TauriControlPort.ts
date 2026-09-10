@@ -15,6 +15,7 @@ import {
   type GraphLayoutResponse,
   type GraphRuntimeStatus,
   type MeterSnapshot,
+  type MixRelayStatus,
   type ProcessorEditorFrame,
   type ProcessorEditorInput,
   type ProcessorEditorStatus,
@@ -23,7 +24,6 @@ import {
   type RecorderRequest,
   type RecorderStatus,
   type RuntimeGraphDocument,
-  type ToneNariStatus,
   type VirtualEndpointFormatRequest,
 } from './types';
 
@@ -143,7 +143,7 @@ export class TauriControlPort implements ControlPort {
     }
   }
 
-  public getStatus(): Promise<ToneNariStatus> {
+  public getStatus(): Promise<MixRelayStatus> {
     return this.call('control_get_status');
   }
 

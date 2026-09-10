@@ -4,11 +4,11 @@ use super::{
     ApplicationSourceTransport, CAPTURE_RING_CAPACITY_FRAMES, ENGINE_BLOCK_FRAMES,
     NativeCaptureReader, NativeClockSnapshot, PUMP_IDLE_INTERVAL,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
-use tonenari_audio_io::clock_bridge::{
+use mixrelay_audio_io::clock_bridge::{
     AsyncClockBridge, BridgeConfig, ClockFeedback, ClockRelation, Discontinuity, FeedbackQueue,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 pub(super) fn native_rate(rate: f64) -> Result<u32, String> {
     if !rate.is_finite() || !(8_000.0..=192_000.0).contains(&rate) || rate.fract().abs() > 0.001 {
@@ -250,7 +250,7 @@ pub(super) fn run_with_handoff(
 fn refresh_capture(capture: &mut NativeCaptureReader) -> Result<bool, String> {
     // SAFETY: sole format-control/ring-read owner. RESOURCE_BUSY retains the
     // native context and requires retry, not destruction or silent raw playback.
-    let error = unsafe { super::tn_process_tap_refresh_format(capture.session().native.as_ptr()) };
+    let error = unsafe { super::mr_process_tap_refresh_format(capture.session().native.as_ptr()) };
     match error.code {
         super::NATIVE_OK => Ok(true),
         super::NATIVE_RESOURCE_BUSY => Ok(false),

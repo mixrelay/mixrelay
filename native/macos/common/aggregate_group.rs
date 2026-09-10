@@ -4,8 +4,8 @@
 
 mod native;
 pub use native::{
-    AggregateGroup, NativeBinding, tn_aggregate_group_binding, tn_aggregate_group_create,
-    tn_aggregate_group_ready, tn_aggregate_group_try_destroy, tn_aggregate_member_info,
+    AggregateGroup, NativeBinding, mr_aggregate_group_binding, mr_aggregate_group_create,
+    mr_aggregate_group_ready, mr_aggregate_group_try_destroy, mr_aggregate_member_info,
 };
 #[cfg(test)]
 mod tests;

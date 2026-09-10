@@ -11,7 +11,7 @@ fn locator(format: RackFormat, id: &str) -> RackLocator {
 
 fn record(locator: &RackLocator) -> rack_formats::RackProbeRecord {
     rack_formats::RackProbeRecord {
-        descriptor: tonenari_control_protocol::ExternalProcessorDescriptor {
+        descriptor: mixrelay_control_protocol::ExternalProcessorDescriptor {
             type_id: format!("{}:{}", locator.format.argument(), locator.unique_id),
             display_name: locator.unique_id.clone(),
             vendor: "fixture".to_owned(),

@@ -1,5 +1,6 @@
 use super::{DiskFiles, FileFactory, FileSeries, part_path};
 use hound::{SampleFormat, WavSpec};
+use mixrelay_test_support::FixtureDir;
 use std::{
     fs::File,
     io::{self, Seek, SeekFrom, Write},
@@ -9,7 +10,6 @@ use std::{
         atomic::{AtomicU8, Ordering},
     },
 };
-use tonenari_test_support::FixtureDir;
 
 struct FaultIo {
     file: File,

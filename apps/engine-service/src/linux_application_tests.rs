@@ -183,7 +183,7 @@ fn restored_pid_requires_reselection_and_never_resolves_or_recaptures() {
     let (mut capture, watch) = CaptureSet::open(&[("restored".into(), request)], 10).unwrap();
     assert!(matches!(
         capture.state(),
-        tonenari_engine_service::session::ApplicationRuntimeState::Waiting
+        mixrelay_engine_service::session::ApplicationRuntimeState::Waiting
     ));
     assert!(watch.recover(&AtomicBool::new(false)).unwrap().is_none());
     assert!(
@@ -281,11 +281,11 @@ fn recover_until(captures: &mut CaptureSet, watch: &mut CaptureWatch, present: b
 #[ignore = "requires opt-in owned non-autoconnecting PipeWire application fixture"]
 fn native_application_stream_relaunch_recovers_pcm_without_graph_reapply() {
     let path = std::path::PathBuf::from(
-        std::env::var("TONENARI_LAB_APPLICATION_FIXTURE").expect("explicit fixture executable"),
+        std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").expect("explicit fixture executable"),
     );
     assert!(path.is_absolute() && path.is_file());
     let selector = ApplicationSelector::BundleId {
-        bundle_id: "org.tonenari.fixture.application".into(),
+        bundle_id: "org.mixrelay.fixture.application".into(),
         include_descendants: false,
     };
     let (mut captures, mut watch) =
@@ -297,7 +297,7 @@ fn native_application_stream_relaunch_recovers_pcm_without_graph_reapply() {
     let first = FixtureProcess::start(&path);
     let first_pid = first.0.id();
     recover_until(&mut captures, &mut watch, true);
-    let apps = tonenari_audio_io::linux::applications().unwrap();
+    let apps = mixrelay_audio_io::linux::applications().unwrap();
     assert_eq!(
         apps.iter()
             .find(|app| app.process_id == first_pid)
@@ -310,7 +310,7 @@ fn native_application_stream_relaunch_recovers_pcm_without_graph_reapply() {
     let second = FixtureProcess::start(&path);
     assert_ne!(first_pid, second.0.id());
     recover_until(&mut captures, &mut watch, true);
-    let apps = tonenari_audio_io::linux::applications().unwrap();
+    let apps = mixrelay_audio_io::linux::applications().unwrap();
     assert_eq!(
         apps.iter()
             .find(|app| app.process_id == second.0.id())
@@ -346,10 +346,10 @@ fn native_pipewire_rate_conversion_and_observed_clock() {
         )
     }
     .unwrap();
-    let path = std::path::PathBuf::from(std::env::var("TONENARI_LAB_APPLICATION_FIXTURE").unwrap());
+    let path = std::path::PathBuf::from(std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap());
     let source = FixtureProcess::start(&path);
     let selector = ApplicationSelector::BundleId {
-        bundle_id: "org.tonenari.fixture.application".into(),
+        bundle_id: "org.mixrelay.fixture.application".into(),
         include_descendants: false,
     };
     let (mut captures, mut watch) =
@@ -381,7 +381,7 @@ fn native_pipewire_rate_conversion_and_observed_clock() {
     let observed = clock.load(Ordering::Acquire);
     let rate = u32::try_from(observed & u64::from(u32::MAX)).unwrap();
     let id = u32::try_from(observed >> 32).unwrap();
-    let expected: u32 = std::env::var("TONENARI_LAB_GRAPH_RATE")
+    let expected: u32 = std::env::var("MIXRELAY_LAB_GRAPH_RATE")
         .unwrap()
         .parse()
         .unwrap();
@@ -392,7 +392,7 @@ fn native_pipewire_rate_conversion_and_observed_clock() {
     );
     println!(
         "graph_rate={rate}; source_rate={}; stream_pcm_rate=48000; measured_tone_hz={frequency}; samples={}; clock_id={id}; shared_driver=true",
-        std::env::var("TONENARI_LAB_SOURCE_RATE").unwrap(),
+        std::env::var("MIXRELAY_LAB_SOURCE_RATE").unwrap(),
         samples.len()
     );
     drop(captures);

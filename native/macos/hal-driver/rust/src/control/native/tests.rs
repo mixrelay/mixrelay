@@ -20,7 +20,7 @@ fn failed_timer_creation_releases_unpublished_queue() {
     // This creates only an anonymous serial queue, never a connection or callback.
     // SAFETY: static label and null serial attributes obey the dispatch ABI.
     let queue =
-        unsafe { dispatch_queue_create(c"io.tonenari.test.control".as_ptr(), ptr::null_mut()) };
+        unsafe { dispatch_queue_create(c"io.mixrelay.test.control".as_ptr(), ptr::null_mut()) };
     let queue = Dispatch(NonNull::new(queue).unwrap());
     let (sender, receiver) = mpsc::channel::<()>();
     // SAFETY: the queue owns the sender until its one finalizer callback. No

@@ -5,13 +5,13 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>ToneNariHAL</string>
+	<string>MixRelayHAL</string>
 	<key>CFBundleIdentifier</key>
-	<string>io.tonenari.audio.driver</string>
+	<string>io.mixrelay.audio.driver</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>ToneNariHAL</string>
+	<string>MixRelayHAL</string>
 	<key>CFBundlePackageType</key>
 	<string>BNDL</string>
 	<key>CFBundleShortVersionString</key>
@@ -20,12 +20,12 @@
 	<string>1</string>
 	<key>AudioServerPlugIn_MachServices</key>
 	<array>
-		<string>io.tonenari.audio.engine</string>
+		<string>io.mixrelay.audio.engine</string>
 	</array>
 	<key>CFPlugInFactories</key>
 	<dict>
 		<key>99A15A8B-DA3C-42C3-BD5D-D035A0C2377A</key>
-		<string>ToneNariHAL_Create</string>
+		<string>MixRelayHAL_Create</string>
 	</dict>
 	<key>CFPlugInTypes</key>
 	<dict>

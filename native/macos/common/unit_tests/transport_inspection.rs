@@ -1,6 +1,6 @@
 use super::*;
 use crate::endpoint_transport::{
-    tn_endpoint_transport_initialize, tn_endpoint_transport_required_bytes,
+    mr_endpoint_transport_initialize, mr_endpoint_transport_required_bytes,
 };
 
 struct Region {
@@ -17,11 +17,11 @@ impl Region {
             render_channels: channels,
             capture_channels: channels,
         };
-        let size = unsafe { tn_endpoint_transport_required_bytes(&raw const config) };
+        let size = unsafe { mr_endpoint_transport_required_bytes(&raw const config) };
         let descriptor = crate::create_shared_memory(size, true).unwrap();
         let mapping = InspectionMapping::open(descriptor.as_raw_fd(), size).unwrap();
         assert!(
-            !unsafe { tn_endpoint_transport_initialize(mapping.memory, size, &raw const config) }
+            !unsafe { mr_endpoint_transport_initialize(mapping.memory, size, &raw const config) }
                 .is_null()
         );
         Self {
@@ -70,7 +70,7 @@ fn inspection_rejects_readonly_and_uninitialized_backing() {
 
 #[test]
 fn inspection_accepts_current_discrete_channels_without_binding_or_clock_publication() {
-    use crate::endpoint_transport::{EndpointClockSnapshot, tn_endpoint_transport_clock_snapshot};
+    use crate::endpoint_transport::{EndpointClockSnapshot, mr_endpoint_transport_clock_snapshot};
     for channels in [1, 2, 7, 64] {
         let region = Region::new(channels);
         assert_eq!(
@@ -79,7 +79,7 @@ fn inspection_accepts_current_discrete_channels_without_binding_or_clock_publica
         );
         let mut clock = EndpointClockSnapshot::default();
         assert!(!unsafe {
-            tn_endpoint_transport_clock_snapshot(region.mapping.memory.cast(), &raw mut clock)
+            mr_endpoint_transport_clock_snapshot(region.mapping.memory.cast(), &raw mut clock)
         });
     }
 }
@@ -88,10 +88,10 @@ fn inspection_accepts_current_discrete_channels_without_binding_or_clock_publica
 fn repeated_valid_and_rejected_inspection_releases_all_descriptors() {
     // Isolate FD numbering from other parallel Rust tests; this executes the
     // same test in a native Cargo child, not a skipped or alternate code path.
-    if std::env::var_os("TN_INSPECTION_FD_TEST_CHILD").is_none() {
+    if std::env::var_os("MR_INSPECTION_FD_TEST_CHILD").is_none() {
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "transport_inspection::tests::repeated_valid_and_rejected_inspection_releases_all_descriptors", "--test-threads=1"])
-            .env("TN_INSPECTION_FD_TEST_CHILD", "1").status().unwrap();
+            .env("MR_INSPECTION_FD_TEST_CHILD", "1").status().unwrap();
         assert!(status.success());
         return;
     }

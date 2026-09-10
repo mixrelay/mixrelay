@@ -1,11 +1,11 @@
-#include "ToneNariPcm.h"
+#include "MixRelayPcm.h"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <random>
 #include <vector>
-using namespace tonenari;
+using namespace mixrelay;
 static uint32_t Bits(float value) { uint32_t bits; std::memcpy(&bits, &value, 4); return bits; }
 static float Float(uint32_t bits) { float value; std::memcpy(&value, &bits, 4); return value; }
 int main() {

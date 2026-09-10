@@ -39,7 +39,7 @@ an older UI that does not understand it. Existing state wire names remain unchan
 | macOS shared engine library | 16 tests and Clippy passed, including observation invalidation |
 | Portable audio-io / graph / DSP / control protocol / server | 53 tests passed; includes `unavailable` serialization round-trip |
 | UI | 65 tests, TypeScript, production build and boundary check passed; shared state labels tested in en, ko-KR and pseudo |
-| macOS desktop | `cargo check --locked -p tonenari-desktop` passed; no host app/driver restart or live audio claim |
+| macOS desktop | `cargo check --locked -p mixrelay-desktop` passed; no host app/driver restart or live audio claim |
 | Lab harness | 38 tests passed; explicit guest/endpoint/process ownership guards preserved |
 
 The fault fixture uses owned memory plus real Windows event handles and the actual
@@ -93,7 +93,7 @@ zero-dropout or CPU improvement is claimed.
 - Final engine SHA-256:
   `B77D7D201AE27A793F1787F294E2C8FDF06DFD89F5BB8F77C4EE3B598E560BD8`.
 - Evidence:
-  `/Volumes/Linear 1/test/tonenari/evidence/windows-transport-recovery-20260907`.
+  `/Volumes/Linear 1/test/mixrelay/evidence/windows-transport-recovery-20260907`.
 - Owned interactive test task removed after completion. Final read-only inspection
   confirms no owned engine/probe/task remains. Driver, source and evidence retained;
   no reboot, driver update, signing/policy change, host audio change or Git commit.

@@ -1,11 +1,11 @@
 //! Exercise all product formats through persistent native-rate settings and
 //! external DAW adoption, without changing the user's device or preferences.
 use super::*;
-use std::sync::Mutex;
-use tonenari_audio_io::{
+use mixrelay_audio_io::{
     formats::{BUFFER_SIZES, SAMPLE_RATES},
     session::AudioBackendKind,
 };
+use std::sync::Mutex;
 
 static LOCK: Mutex<()> = Mutex::new(());
 static RATE: AtomicU32 = AtomicU32::new(48_000);
@@ -33,10 +33,10 @@ fn runtime() -> AdapterRuntimeStatus {
         .with_observed_rate_following(read_rate)
 }
 
-struct Store(tonenari_test_support::FixtureDir);
+struct Store(mixrelay_test_support::FixtureDir);
 impl Store {
     fn new() -> Self {
-        Self(tonenari_test_support::FixtureDir::new("session-catalog").unwrap())
+        Self(mixrelay_test_support::FixtureDir::new("session-catalog").unwrap())
     }
     fn preferences(&self) -> SessionPreferences {
         SessionPreferences::for_test(self.0.join("session.json"), AudioBackendKind::CoreAudio)

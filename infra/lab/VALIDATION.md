@@ -46,7 +46,7 @@ This is **not** cross-OS product certification.
   same-condition observed initial underruns changed 3→2, not zero. Configurable
   product endpoints and normal UI remain disabled. See
   [Rust bridge qualification](../../docs/performance/2026-09-07-windows-rust-bridge.md).
-- The separate SysVAD/ToneNari diagnostic bridge now passes three actual shared-PCM
+- The separate SysVAD/MixRelay diagnostic bridge now passes three actual shared-PCM
   render → channel 1 × 0.5 → capture cycles on Windows ARM64 (48 kHz, 2 → 1 channels).
   Each cycle matches about 140k capture frames, but reports 3–5 capture underruns and
   one discontinuity; no continuity/quality qualification. PCM conversion has 500k
@@ -58,13 +58,13 @@ This is **not** cross-OS product certification.
   pass with advancing clocks and nonzero sample-tone capture. Each capture reports
   one discontinuity: continuity is not qualified. Universal INF validation passes;
   stricter Windows Driver isolation validation fails. This does not repair or qualify
-  the existing ToneNari driver, which still has zero MMDevice endpoints. See the
+  the existing MixRelay driver, which still has zero MMDevice endpoints. See the
   [SysVAD reuse baseline](../../docs/performance/2026-09-07-windows-sysvad-baseline.md).
 - Windows ARM64 WaveRT driver (`windows-driver-v8`, version 0.1.0.2) passed native
   build/link, WDK INF validation and 4,096 shared PCM-copy cases. VM-only test signing
   and installation are complete; the running kernel loads the verified signed image.
   192 native controller attach/reject/cleanup cycles pass. Four live KS interfaces
-  answer pin and physical-connection queries, but **ToneNari MMDevice endpoint creation
+  answer pin and physical-connection queries, but **MixRelay MMDevice endpoint creation
   still fails** (`driver-final-v3`, exit 1). Actual WaveRT PCM remains untested.
   Secure Boot is disabled and the scoped test certificate remains installed only in
   this Windows VM; the pre-change disk/UEFI/TPM recovery copy was verified offline.
@@ -107,7 +107,7 @@ The older failures below are retained as history, not relabeled as passing.
 | Debian guest | Debian 13.6 ARM64, kernel 6.12.107+deb13-arm64; GNOME logged in; optional SSH server and usage survey excluded |
 | Debian guest build/test | Full workspace/UI build; 55 workspace Rust + 5 adapter + 62 UI tests passed; embedded-frontend desktop build also passed |
 | Debian desktop launch | Transient user process launched; journal contains EGL/DRI2 warnings; screen locked before visual inspection, so GUI behavior is not verified |
-| Debian user audio session | PipeWire 1.4.2 and WirePlumber active; transient non-root ToneNari service created virtual source/sink; loopback API responds |
+| Debian user audio session | PipeWire 1.4.2 and WirePlumber active; transient non-root MixRelay service created virtual source/sink; loopback API responds |
 | Debian live stereo continuity | **Failed**: input/output meters respond, but captured active fraction 0.423634; longest internal near-silent run 26,173 frames (545.27 ms at 48 kHz). Not a production-quality audio pass |
 | Ubuntu guest build/test | Ubuntu 24.04.4 ARM64, kernel 7.0.0-31-generic; full workspace/UI build and 122 tests passed; no desktop app interaction qualification |
 | Ubuntu user audio session | PipeWire 1.0.5 and WirePlumber active; transient non-root engine created virtual source/sink and responded over loopback; test engine stopped after measurement |
@@ -141,7 +141,7 @@ them in place. `lsof` confirmed QEMU opened the external disks and media. Debian
 has since completed and its ISO was ejected. This storage check alone is not an audio pass.
 No host audio service or user graph was reset. Guest tests use a separate transient engine.
 
-The stereo probe sends known 440/880 Hz signals exclusively to the named ToneNari virtual sink
+The stereo probe sends known 440/880 Hz signals exclusively to the named MixRelay virtual sink
 and records its virtual source, without changing the default hardware devices. A first narrow
 signal-presence check passed; a follow-up continuity assertion exposed the silence above.
 The checked-in probe now fails on those gaps. This is a correctness baseline, **not** a

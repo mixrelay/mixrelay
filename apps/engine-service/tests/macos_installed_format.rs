@@ -1,6 +1,6 @@
 //! Explicit installed-engine acceptance, not an isolated unit-test substitute.
-//! Requires `TONENARI_TEST_INSTALLED_ENGINE=1` and
-//! `TONENARI_TEST_MUTATE_SESSION=1`; omission fails before any I/O.
+//! Requires `MIXRELAY_TEST_INSTALLED_ENGINE=1` and
+//! `MIXRELAY_TEST_MUTATE_SESSION=1`; omission fails before any I/O.
 //! Only the existing session and own HAL nominal rate are changed. The original
 //! format is restored on failure/panic, unless concurrent topology edits make
 //! restoring unsafe. No graph, driver, device selection or file backup is written.
@@ -15,17 +15,17 @@ use std::{
     time::{Duration, Instant},
 };
 
-use reqwest::{StatusCode, blocking::Client};
-use serde::{Deserialize, de::DeserializeOwned};
-use tonenari_audio_graph::{GraphDocument, NodeConfig};
-use tonenari_audio_io::{
+use mixrelay_audio_graph::{GraphDocument, NodeConfig};
+use mixrelay_audio_io::{
     formats::{BUFFER_SIZES, SAMPLE_RATES},
     process::ProcessingState,
     session::{AudioBackendKind, AudioSessionStatus, SessionFormat, SessionReconfigureRequest},
 };
-use tonenari_control_protocol::{AppStatus, GraphApplyResponse};
-use tonenari_engine_service::endpoint_service::{device_sample_rate, set_device_sample_rate};
-use tonenari_macos_transport::endpoint_identity::parse_endpoint_id;
+use mixrelay_control_protocol::{AppStatus, GraphApplyResponse};
+use mixrelay_engine_service::endpoint_service::{device_sample_rate, set_device_sample_rate};
+use mixrelay_macos_transport::endpoint_identity::parse_endpoint_id;
+use reqwest::{StatusCode, blocking::Client};
+use serde::{Deserialize, de::DeserializeOwned};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const API: &str = "http://127.0.0.1:19341/api/v1";
@@ -111,11 +111,11 @@ fn referenced_native_rates(graph: &GraphDocument) -> Result<Vec<([u8; 16], u32)>
 }
 
 fn preferences_path() -> Result<PathBuf> {
-    let directory = if let Some(path) = std::env::var_os("TONENARI_CONFIG_DIR") {
+    let directory = if let Some(path) = std::env::var_os("MIXRELAY_CONFIG_DIR") {
         PathBuf::from(path)
     } else {
         PathBuf::from(std::env::var_os("HOME").ok_or("HOME is missing")?)
-            .join("Library/Application Support/ToneNari")
+            .join("Library/Application Support/MixRelay")
     };
     require(
         directory.is_absolute(),
@@ -331,14 +331,14 @@ impl InstalledSession {
 #[test]
 fn installed_engine_accepts_every_format_and_follows_external_own_hal_rates() {
     assert_eq!(
-        std::env::var("TONENARI_TEST_MUTATE_SESSION").as_deref(),
+        std::env::var("MIXRELAY_TEST_MUTATE_SESSION").as_deref(),
         Ok("1"),
-        "format mutation needs explicit TONENARI_TEST_MUTATE_SESSION=1"
+        "format mutation needs explicit MIXRELAY_TEST_MUTATE_SESSION=1"
     );
     assert_eq!(
-        std::env::var("TONENARI_TEST_INSTALLED_ENGINE").as_deref(),
+        std::env::var("MIXRELAY_TEST_INSTALLED_ENGINE").as_deref(),
         Ok("1"),
-        "explicit authorization required: TONENARI_TEST_INSTALLED_ENGINE=1; no installed state was touched"
+        "explicit authorization required: MIXRELAY_TEST_INSTALLED_ENGINE=1; no installed state was touched"
     );
     let mut session = InstalledSession::connect().expect("installed engine preflight");
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| session.exercise()));
@@ -419,12 +419,12 @@ fn apply_existing_buffer(
 #[test]
 fn installed_hardware_route_has_no_starvations_at_32_and_256() {
     assert_eq!(
-        std::env::var("TONENARI_TEST_MUTATE_SESSION").as_deref(),
+        std::env::var("MIXRELAY_TEST_MUTATE_SESSION").as_deref(),
         Ok("1"),
-        "buffer mutation needs explicit TONENARI_TEST_MUTATE_SESSION=1"
+        "buffer mutation needs explicit MIXRELAY_TEST_MUTATE_SESSION=1"
     );
     assert_eq!(
-        std::env::var("TONENARI_TEST_INSTALLED_ENGINE").as_deref(),
+        std::env::var("MIXRELAY_TEST_INSTALLED_ENGINE").as_deref(),
         Ok("1")
     );
     let client = Client::builder()
@@ -495,8 +495,8 @@ fn installed_hardware_route_has_no_starvations_at_32_and_256() {
 
 #[test]
 fn installed_format_target_requires_one_actual_uuid_without_default_fallback() {
-    use tonenari_audio_graph::NodeSpec;
-    use tonenari_audio_io::{ChannelLayout, StreamSpec, VirtualEndpointSpec};
+    use mixrelay_audio_graph::NodeSpec;
+    use mixrelay_audio_io::{ChannelLayout, StreamSpec, VirtualEndpointSpec};
 
     let node = |name: &str, identity: &str| NodeSpec {
         id: name.into(),

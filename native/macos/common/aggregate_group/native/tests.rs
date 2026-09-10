@@ -52,7 +52,7 @@ fn creation_failure_returns_the_partial_owner_and_release_consumes_it() {
         // SAFETY: immutable complete arrays and terminated non-null strings remain
         // live; each second UID rejects before any CoreAudio query/device creation.
         let group = unsafe {
-            ffi::tn_aggregate_group_create(names.as_ptr(), members.as_ptr(), 2, 0, &raw mut status)
+            ffi::mr_aggregate_group_create(names.as_ptr(), members.as_ptr(), 2, 0, &raw mut status)
         };
         assert!(!group.is_null());
         assert_eq!(status, expected);
@@ -61,7 +61,7 @@ fn creation_failure_returns_the_partial_owner_and_release_consumes_it() {
             assert!((*group).uids[0].is_some());
             assert!((*group).uids[1].is_none());
             assert_eq!((*group).device, 0);
-            assert!(ffi::tn_aggregate_group_try_destroy(group));
+            assert!(ffi::mr_aggregate_group_try_destroy(group));
         }
     }
 }
@@ -105,7 +105,7 @@ fn invalid_ffi_inputs_do_not_publish_or_modify_binding() {
     // are initialized and exclusive, and no native operation is invoked.
     unsafe {
         assert!(
-            ffi::tn_aggregate_group_create(
+            ffi::mr_aggregate_group_create(
                 std::ptr::null(),
                 std::ptr::null(),
                 2,
@@ -115,15 +115,15 @@ fn invalid_ffi_inputs_do_not_publish_or_modify_binding() {
             .is_null()
         );
         assert_eq!(status, 1);
-        assert!(!ffi::tn_aggregate_group_ready(std::ptr::null()));
-        assert!(!ffi::tn_aggregate_group_binding(
+        assert!(!ffi::mr_aggregate_group_ready(std::ptr::null()));
+        assert!(!ffi::mr_aggregate_group_binding(
             std::ptr::null(),
             c"member".as_ptr(),
             false,
             2,
             &raw mut binding
         ));
-        assert!(ffi::tn_aggregate_group_try_destroy(std::ptr::null_mut()));
+        assert!(ffi::mr_aggregate_group_try_destroy(std::ptr::null_mut()));
     }
     assert_eq!(
         binding,

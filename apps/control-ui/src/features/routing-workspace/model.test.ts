@@ -194,7 +194,7 @@ it('materializes an external processor and persists normalized parameter changes
       },
     ],
     typeId: 'vst3:00112233445566778899AABBCCDDEEFF',
-    vendor: 'ToneNari Test',
+    vendor: 'MixRelay Test',
     version: '1.0',
   };
   const empty: AudioGraphModel = { edges: [], nodes: [], revision: 1 };

@@ -12,7 +12,7 @@ export function buildPlan(os, mode) {
   const commands = [
     ["rustc", "--version", "--verbose"],
     ["pnpm", "--version"],
-    ["pnpm", "--filter", "@tonenari/control-ui", "check:boundaries"],
+    ["pnpm", "--filter", "@mixrelay/control-ui", "check:boundaries"],
     ["pnpm", "build"],
     ["cargo", "build", "--locked", "--workspace"],
   ];
@@ -21,7 +21,7 @@ export function buildPlan(os, mode) {
     // Platform adapters live in the engine binary, not its portable library.
     // Omitting --bins silently skips platform adapter tests.
     commands.push(["cargo", "test", "--locked", "--workspace", "--lib", "--bins"]);
-    commands.push(["pnpm", "--filter", "@tonenari/control-ui", "exec", "vitest", "run"]);
+    commands.push(["pnpm", "--filter", "@mixrelay/control-ui", "exec", "vitest", "run"]);
     if (os === "darwin") commands.push(["pnpm", "check:native"]);
     if (os !== "win32") commands.push(["bash", "scripts/check-pcm-native.sh"]);
   }

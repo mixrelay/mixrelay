@@ -84,7 +84,7 @@ CORS behavior.
 
 The endpoint transport is allocated for the configured render and capture
 channel counts instead of reserving 64 channels for every graph. With the same
-16,384-frame capacity in both directions, `tn_endpoint_transport_required_bytes`
+16,384-frame capacity in both directions, `mr_endpoint_transport_required_bytes`
 reports:
 
 - 1 channel: 393,432 bytes (0.375 MiB, 95.45% below fixed 64-channel storage);
@@ -103,7 +103,7 @@ resident-memory overhead or end-to-end CPU load.
 ## Reproduction
 
 ```sh
-cargo test -p tonenari-audio-engine
+cargo test -p mixrelay-audio-engine
 cargo llvm-cov --workspace --lib --show-missing-lines \
   --fail-under-functions 100 --fail-under-lines 100 --fail-under-regions 100
 pnpm install:macos-dev-audio

@@ -24,8 +24,8 @@ members = [
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.96"
-authors = ["ToneNari"]
-repository = "https://github.com/tonenari/tonenari"
+authors = ["MixRelay"]
+repository = "https://github.com/mixrelay/mixrelay"
 
 [workspace.dependencies]
 rubato = { version = "5.0.0", default-features = false }
@@ -48,9 +48,9 @@ truce-rack-vst3 = "1.1.5"
 tao = { version = "0.35.3", default-features = false, features = ["rwh_06"] }
 x11-dl = "2.21.0"
 tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal"] }
-tonenari-audio-io = { path = "crates/audio-io" }
-tonenari-audio-graph = { path = "crates/audio-graph" }
-tonenari-audio-recorder = { path = "crates/audio-recorder" }
+mixrelay-audio-io = { path = "crates/audio-io" }
+mixrelay-audio-graph = { path = "crates/audio-graph" }
+mixrelay-audio-recorder = { path = "crates/audio-recorder" }
 tower = "0.5.3"
 tower-http = { version = "0.7.1", features = ["cors"] }
 
@@ -74,12 +74,12 @@ strip = "symbols"
 
 # Keep real-time sample conversion within its callback budget in `tauri dev`.
 # The application remains debuggable; only the measured DSP hot path is optimized.
-[profile.dev.package.tonenari-audio-io]
+[profile.dev.package.mixrelay-audio-io]
 opt-level = 3
 
 # Recorder-side generic SRC is instantiated here, not solely inside rubato.
 # Keep debug-app recording throughput under the same measured DSP policy.
-[profile.dev.package.tonenari-audio-recorder]
+[profile.dev.package.mixrelay-audio-recorder]
 opt-level = 3
 
 [profile.dev.package.rubato]

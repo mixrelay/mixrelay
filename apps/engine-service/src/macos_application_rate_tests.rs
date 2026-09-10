@@ -1,33 +1,33 @@
 //! Real controller/capability/format-staging path, with native rate negotiation
 //! replaced by an owned in-memory counter. Never opens a tap or changes HAL rate.
-use std::sync::{Arc, Mutex};
-use tonenari_audio_engine::{BlockProcessor, ProcessorExchange, RenderPlan};
-use tonenari_audio_graph::{
+use mixrelay_audio_engine::{BlockProcessor, ProcessorExchange, RenderPlan};
+use mixrelay_audio_graph::{
     CompileContext, CompileLimits, GraphCompiler, GraphDocument, NodeConfig, NodeSpec, RenderFormat,
 };
-use tonenari_audio_io::{
+use mixrelay_audio_io::{
     HostAudioBackendError, VirtualEndpointBackend, VirtualEndpointCapabilities,
     session::{SessionFormat, SessionReconfigureRequest},
 };
-use tonenari_control_server::ControlBackend;
-use tonenari_engine_service::{
+use mixrelay_control_server::ControlBackend;
+use mixrelay_engine_service::{
     EngineGraphController, EngineGraphControllerConfig, RuntimeStatusBackend,
     default_peak_meter_bank, session::AdapterRuntimeStatus,
 };
-use tonenari_processor_host::ProcessorCatalog;
+use mixrelay_processor_host::ProcessorCatalog;
+use std::sync::{Arc, Mutex};
 
 struct NativeNegotiationFixture {
     profile: Arc<AdapterRuntimeStatus>,
     accepted: Mutex<Vec<u32>>,
 }
 impl RuntimeStatusBackend for NativeNegotiationFixture {
-    fn status(&self, format: RenderFormat) -> tonenari_control_protocol::AppStatus {
+    fn status(&self, format: RenderFormat) -> mixrelay_control_protocol::AppStatus {
         self.profile.status(format)
     }
     fn capabilities_for_format(
         &self,
         format: RenderFormat,
-    ) -> Option<tonenari_audio_io::session::AudioSessionCapabilities> {
+    ) -> Option<mixrelay_audio_io::session::AudioSessionCapabilities> {
         self.profile.capabilities_for_format(format)
     }
     fn reconfigure(
@@ -48,7 +48,7 @@ impl VirtualEndpointBackend for EndpointFixture {
     }
     fn prepare_graph_attachments(
         &self,
-        desired: &[tonenari_audio_io::VirtualEndpointSpec],
+        desired: &[mixrelay_audio_io::VirtualEndpointSpec],
     ) -> Result<(), HostAudioBackendError> {
         assert!(
             desired.is_empty(),
@@ -61,7 +61,7 @@ impl VirtualEndpointBackend for EndpointFixture {
 fn application_document() -> GraphDocument {
     GraphDocument::new(1, vec![NodeSpec { id: "application".into(), label: None,
         config: NodeConfig::ApplicationCapture(serde_json::from_value(serde_json::json!({
-            "selector": {"match":"bundle_id", "bundle_id":"org.tonenari.rate-fixture", "include_descendants":false},
+            "selector": {"match":"bundle_id", "bundle_id":"org.mixrelay.rate-fixture", "include_descendants":false},
             "stream": {"channels":2,"channelLayout":"stereo"}, "sourcePlayback":"preserve"
         })).unwrap()) }], vec![])
 }
@@ -71,11 +71,11 @@ fn macos_product_profile_covers_common_rates_with_clock_checks_intact() {
     let profile = crate::macos::adapter_profile();
     assert_eq!(
         profile.application_capture_rates,
-        tonenari_audio_io::formats::SAMPLE_RATES
+        mixrelay_audio_io::formats::SAMPLE_RATES
     );
     assert_eq!(
         profile.capabilities.supported_sample_rates,
-        tonenari_audio_io::formats::SAMPLE_RATES
+        mixrelay_audio_io::formats::SAMPLE_RATES
     );
     assert!(profile.capabilities.sample_rate_conversion);
     assert!(profile.capabilities.drift_correction);
@@ -90,7 +90,7 @@ fn macos_product_profile_covers_common_rates_with_clock_checks_intact() {
     });
     assert_eq!(
         unclocked.audio_session.unwrap().issue,
-        Some(tonenari_audio_io::session::SessionIssue::ClockNotSynchronized)
+        Some(mixrelay_audio_io::session::SessionIssue::ClockNotSynchronized)
     );
     for rate in [44_100, 48_000, 96_000] {
         let capabilities = status
@@ -106,7 +106,7 @@ fn macos_product_profile_covers_common_rates_with_clock_checks_intact() {
 fn initial_processor(
     document: &GraphDocument,
     format: RenderFormat,
-    meters: Arc<tonenari_audio_engine::PeakMeterBank>,
+    meters: Arc<mixrelay_audio_engine::PeakMeterBank>,
 ) -> Box<BlockProcessor> {
     let execution = GraphCompiler::default()
         .compile(
@@ -185,11 +185,11 @@ fn application_graph_reconfigures_every_product_format_through_actual_controller
     } = application_fixture();
     let mut revision = 1;
     let mut accepted = Vec::new();
-    for (sample_rate, block_frames) in tonenari_audio_io::formats::SAMPLE_RATES
+    for (sample_rate, block_frames) in mixrelay_audio_io::formats::SAMPLE_RATES
         .iter()
         .copied()
         .flat_map(|rate| {
-            tonenari_audio_io::formats::BUFFER_SIZES
+            mixrelay_audio_io::formats::BUFFER_SIZES
                 .iter()
                 .copied()
                 .map(move |frames| (rate, frames))

@@ -1,6 +1,6 @@
 # SysVAD transport integration (diagnostic, not product packaging)
 
-This overlay connects the pinned Microsoft SysVAD framework to ToneNari's v2
+This overlay connects the pinned Microsoft SysVAD framework to MixRelay's v2
 shared PCM transport. It deliberately leaves the original reference checkout and
 installed baseline untouched. Generate a **new** source directory with:
 
@@ -29,13 +29,13 @@ make a build into a qualified live capability. See the
 ## Boundary
 
 - Speakers system-render and MicArray1 system-capture pins use the shared rings.
-  Other sample pins/endpoints are **not** advertised as ToneNari-routed audio.
+  Other sample pins/endpoints are **not** advertised as MixRelay-routed audio.
 - Driver lifecycle, WaveRT buffers, timers, notification and position interfaces
   remain in SysVAD. Stop/removal marks the transport offline before upstream PnP
   cleanup. Stream reservation is released after queued DPCs drain.
 - Pin instance limits report the transport's real capacity (one host stream per
   direction), instead of the original 6-render/4-capture promise. Windows shared
-  mixing and ToneNari graph summation are separate from native pin instance counts.
+  mixing and MixRelay graph summation are separate from native pin instance counts.
 - Stream creation preserves upstream-advertised sample-rate support. Controller
   attachment separately validates its rate against the negotiated native stream;
   the current v2 mapping accepts 44.1/48/96 kHz, not every sample discovery format.
@@ -48,8 +48,8 @@ make a build into a qualified live capability. See the
   instead of splitting a sample between ring calls.
 - Protected streams fail closed: the diagnostic shared mapping is not a protected
   audio path. Sample file recording is disabled for the bridged pins.
-- The diagnostic control path is `\\.\ToneNariSysvadBridge`, restricted to SYSTEM
-  and administrators. It does not replace `\\.\ToneNariAudio` or relax its ACL.
+- The diagnostic control path is `\\.\MixRelaySysvadBridge`, restricted to SYSTEM
+  and administrators. It does not replace `\\.\MixRelayAudio` or relax its ACL.
   Production engine/session authorization and endpoint configuration are unfinished.
 - Owner-exit cleanup requires `/INTEGRITYCHECK` on the driver image. Keep this
   flag and the process-exit callback; do not work around it by disabling cleanup or
@@ -83,7 +83,7 @@ productizing the opt-in Rust adapter, `/w` driver isolation, x64 validation,
 release signing/HLK, failure injection and endurance. Retain failed job evidence.
 
 The [Rust integration run](../../../docs/performance/2026-09-07-windows-rust-bridge.md)
-now exercises the actual engine graph via `TONENARI_WINDOWS_SYSVAD_LAB=1`. The
+now exercises the actual engine graph via `MIXRELAY_WINDOWS_SYSVAD_LAB=1`. The
 native probe's `--external-engine` mode does not act as the shared-ring controller.
 
 References:

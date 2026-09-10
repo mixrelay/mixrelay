@@ -1,5 +1,5 @@
 [package]
-name = "tonenari-hal-core"
+name = "mixrelay-hal-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,7 @@ rust-version.workspace = true
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
-tonenari-macos-transport = { path = "../../common" }
+mixrelay-macos-transport = { path = "../../common" }
 
 [build-dependencies]
 # Compile the SDK Blocks adapter; Rust owns connection and timer lifetime.

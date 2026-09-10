@@ -46,13 +46,13 @@ fn cache_directory_for(
     mut environment: impl FnMut(&str) -> Option<OsString>,
 ) -> io::Result<PathBuf> {
     let (key, suffix) = match os {
-        "macos" => ("HOME", "Library/Caches/ToneNari"),
-        "windows" => ("LOCALAPPDATA", "ToneNari/Cache"),
+        "macos" => ("HOME", "Library/Caches/MixRelay"),
+        "windows" => ("LOCALAPPDATA", "MixRelay/Cache"),
         "linux" => {
             if let Some(path) = environment("XDG_CACHE_HOME").filter(|path| !path.is_empty()) {
-                return absolute(path, "XDG_CACHE_HOME").map(|path| path.join("ToneNari"));
+                return absolute(path, "XDG_CACHE_HOME").map(|path| path.join("MixRelay"));
             }
-            ("HOME", ".cache/ToneNari")
+            ("HOME", ".cache/MixRelay")
         }
         _ => {
             return Err(io::Error::new(
@@ -123,15 +123,15 @@ fn private_directory(directory: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tonenari_test_support::FixtureDir;
+    use mixrelay_test_support::FixtureDir;
 
     #[test]
     fn each_os_uses_its_per_user_cache_without_fallback() {
         let base = FixtureDir::new("processor-cache-layout").unwrap();
         for (os, key, suffix) in [
-            ("macos", "HOME", "Library/Caches/ToneNari"),
-            ("windows", "LOCALAPPDATA", "ToneNari/Cache"),
-            ("linux", "HOME", ".cache/ToneNari"),
+            ("macos", "HOME", "Library/Caches/MixRelay"),
+            ("windows", "LOCALAPPDATA", "MixRelay/Cache"),
+            ("linux", "HOME", ".cache/MixRelay"),
         ] {
             assert_eq!(
                 cache_directory_for(os, |name| (name == key)
@@ -154,7 +154,7 @@ mod tests {
             cache_directory_for("linux", |key| (key == "XDG_CACHE_HOME")
                 .then(|| base.as_os_str().to_owned()))
             .unwrap(),
-            base.join("ToneNari")
+            base.join("MixRelay")
         );
         assert_eq!(
             cache_directory_for("linux", |key| Some(if key == "XDG_CACHE_HOME" {
@@ -163,7 +163,7 @@ mod tests {
                 base.as_os_str().to_owned()
             }))
             .unwrap(),
-            base.join(".cache/ToneNari")
+            base.join(".cache/MixRelay")
         );
         assert!(cache_directory_for("linux", |_| Some(OsString::from("relative"))).is_err());
         assert_eq!(

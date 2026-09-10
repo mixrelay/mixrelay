@@ -10,11 +10,11 @@ for this batch.
 
 - Aggregate device: the Rust transport owns CF references, device creation,
   readiness, member projections and retryable destruction. The replaced
-  `TNAggregateGroup.c` is removed, together with internal geometry C exports.
+  `MRAggregateGroup.c` is removed, together with internal geometry C exports.
 - Physical device I/O: the Rust device owner separates control, callback and
   graph-consumer access. A failed native unregister retains the whole owner;
   callbacks must never borrow the entire owner or PCM ring mutably.
-- Application capture: the dedicated `tonenari-process-tap` crate owns sessions,
+- Application capture: the dedicated `mixrelay-process-tap` crate owns sessions,
   native resources, format refresh and retirement. Its dependency points toward
   the shared transport, so AppKit does not become an engine/HAL dependency.
 - HAL control: the existing Rust HAL package owns registry/connection/timer

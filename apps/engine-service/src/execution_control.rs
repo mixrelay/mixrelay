@@ -3,12 +3,12 @@
 
 use std::collections::BTreeMap;
 
-use tonenari_audio_engine::BlockProcessor;
-use tonenari_audio_graph::{
+use mixrelay_audio_engine::BlockProcessor;
+use mixrelay_audio_graph::{
     CompileContext, GraphDocument, NodeConfig, NodeId, VirtualEndpointSpec,
 };
-use tonenari_audio_io::ApplicationCaptureRequest;
-use tonenari_control_protocol::{
+use mixrelay_audio_io::ApplicationCaptureRequest;
+use mixrelay_control_protocol::{
     ApplicationCaptureManifest, ApplicationCaptureSource, ErrorCode, GraphApplyRequest,
     PROTOCOL_VERSION, ProtocolError,
 };

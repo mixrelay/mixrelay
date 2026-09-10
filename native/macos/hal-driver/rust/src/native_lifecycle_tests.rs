@@ -1,7 +1,7 @@
 //! Native lifecycle parity uses the production Rust runtime and actual shared
 //! mappings, not the removed singleton driver's globals or fixture aliases.
-use tonenari_macos_transport::shared_audio_buffer::{
-    tn_shared_audio_buffer_epoch_pending, tn_shared_audio_buffer_producer_activity,
+use mixrelay_macos_transport::shared_audio_buffer::{
+    mr_shared_audio_buffer_epoch_pending, mr_shared_audio_buffer_producer_activity,
 };
 
 use super::{IoOperation, OK, Transport, native_fixture, start};
@@ -73,7 +73,7 @@ fn new_connection_fences_old_messages_before_first_valid_inventory() {
 
 #[test]
 fn removal_requires_inventory_from_current_connection() {
-    use tonenari_macos_transport::control_inventory::tn_hal_control_create_endpoint_remove;
+    use mixrelay_macos_transport::control_inventory::mr_hal_control_create_endpoint_remove;
 
     let fixture = native_fixture();
     let transport = Transport::new(10, 2, 2);
@@ -81,7 +81,7 @@ fn removal_requires_inventory_from_current_connection() {
     assert!(inventory.apply(&fixture));
     let id = fixture.registry.devices()[0];
     let removal = super::Message(unsafe {
-        tn_hal_control_create_endpoint_remove(transport.endpoint.as_ptr(), 2)
+        mr_hal_control_create_endpoint_remove(transport.endpoint.as_ptr(), 2)
     });
     assert!(!removal.0.is_null());
     super::connect(&fixture, 2);
@@ -130,23 +130,23 @@ fn native_multi_client_activity_and_restart_discard_previous_capture() {
     let fixture = native_fixture();
     let transport = Transport::new(10, 2, 2);
     let id = transport.add(&fixture, "Clients", 48_000);
-    let render = unsafe { super::tn_endpoint_transport_render_buffer(transport.pointer) };
+    let render = unsafe { super::mr_endpoint_transport_render_buffer(transport.pointer) };
     start(&fixture, id);
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_producer_activity(render) },
+        unsafe { mr_shared_audio_buffer_producer_activity(render) },
         2
     );
     assert_eq!(fixture.registry.client(id, 43, true), OK);
     assert_eq!(fixture.registry.start(id, 43, 2), OK);
     pcm(&fixture, id, true, 0.5);
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_producer_activity(render) },
+        unsafe { mr_shared_audio_buffer_producer_activity(render) },
         3
     );
     assert_eq!(fixture.registry.stop(id, 42), OK);
     assert_eq!(
         (transport.clock().running, unsafe {
-            tn_shared_audio_buffer_producer_activity(render)
+            mr_shared_audio_buffer_producer_activity(render)
         }),
         (1, 0)
     );
@@ -155,7 +155,7 @@ fn native_multi_client_activity_and_restart_discard_previous_capture() {
     assert_eq!(fixture.registry.stop(id, 43), OK);
     assert_eq!(transport.clock().running, 0);
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_producer_activity(render) },
+        unsafe { mr_shared_audio_buffer_producer_activity(render) },
         1
     );
     assert_eq!(pcm(&fixture, id, false, 0.9), [0; 64]);
@@ -171,7 +171,7 @@ fn every_native_rate_commit_rearms_capture_before_callbacks_resume() {
     let transport = Transport::new(10, 2, 2);
     let id = transport.add(&fixture, "Rate epochs", 48_000);
     start(&fixture, id);
-    let capture = unsafe { super::tn_endpoint_transport_capture_buffer(transport.pointer) };
+    let capture = unsafe { super::mr_endpoint_transport_capture_buffer(transport.pointer) };
     let mut previous_seed = 0;
     for &rate in crate::formats::SAMPLE_RATES {
         transport.capture(&[0.75; 64], 32);
@@ -182,7 +182,7 @@ fn every_native_rate_commit_rearms_capture_before_callbacks_resume() {
             (transport.clock().sample_rate, transport.clock().running),
             (rate, 1)
         );
-        assert!(unsafe { tn_shared_audio_buffer_epoch_pending(capture) });
+        assert!(unsafe { mr_shared_audio_buffer_epoch_pending(capture) });
         assert_eq!(pcm(&fixture, id, false, 0.9), [0; 64]);
         transport.capture(&[0.25; 64], 32);
         assert_eq!(pcm(&fixture, id, false, 0.0), [0.25_f32.to_bits(); 64]);

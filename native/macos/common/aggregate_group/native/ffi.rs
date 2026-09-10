@@ -18,7 +18,7 @@ enum CreationStatus {
 /// `uid` is a terminated string borrowed for this synchronous control-thread query.
 /// `info` is exclusive aligned storage for one snapshot, disjoint from `uid`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_aggregate_member_info(
+pub unsafe extern "C" fn mr_aggregate_member_info(
     uid: *const c_char,
     info: *mut MemberInfo,
 ) -> bool {
@@ -46,7 +46,7 @@ pub unsafe extern "C" fn tn_aggregate_member_info(
 /// These arrays remain immutable until return, and `status` is exclusive writable
 /// storage. The engine supplies its validated unique-member aggregate plan.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_aggregate_group_create(
+pub unsafe extern "C" fn mr_aggregate_group_create(
     uids: *const *const c_char,
     members: *const MemberInfo,
     count: u32,
@@ -128,7 +128,7 @@ fn initialize(group: &mut AggregateGroup, uids: &[*const c_char]) -> CreationSta
 /// drained and no concurrent readiness/binding query uses the pointer. A pointer
 /// consumed by a successful call must never be used again.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_aggregate_group_try_destroy(group: *mut AggregateGroup) -> bool {
+pub unsafe extern "C" fn mr_aggregate_group_try_destroy(group: *mut AggregateGroup) -> bool {
     // SAFETY: control-thread retirement holds exclusive access after callback drain.
     let Some(owner) = (unsafe { group.as_mut() }) else {
         return true;
@@ -148,7 +148,7 @@ pub unsafe extern "C" fn tn_aggregate_group_try_destroy(group: *mut AggregateGro
 /// `group` is null or an initialized owner retained until this synchronous query
 /// returns. No retirement or creation mutation runs concurrently.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_aggregate_group_ready(group: *const AggregateGroup) -> bool {
+pub unsafe extern "C" fn mr_aggregate_group_ready(group: *const AggregateGroup) -> bool {
     // SAFETY: the engine keeps its control-thread retirement owner live through query.
     unsafe { group.as_ref() }.is_some_and(AggregateGroup::ready)
 }
@@ -161,7 +161,7 @@ pub unsafe extern "C" fn tn_aggregate_group_ready(group: *const AggregateGroup) 
 /// `output` is exclusive aligned storage for one binding, disjoint from the group
 /// and UID. No retirement runs concurrently with this control-thread query.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_aggregate_group_binding(
+pub unsafe extern "C" fn mr_aggregate_group_binding(
     group: *const AggregateGroup,
     uid: *const c_char,
     input: bool,

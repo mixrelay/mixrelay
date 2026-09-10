@@ -86,11 +86,11 @@ acknowledgement recovery, stalled request bounds and disposal/late-activation fe
 Commands used:
 
 ```sh
-cargo test -p tonenari-engine-service --lib graph_catalog_tests
-cargo test -p tonenari-control-server --lib catalog_routes
-cargo clippy -p tonenari-engine-service -p tonenari-control-server -p tonenari-control-protocol --lib --tests -- -D warnings
-pnpm --filter @tonenari/control-ui exec vitest run src/features/graphs/GraphCatalogController.test.ts src/app/App.test.tsx src/core/control-port/HttpControlPort.test.ts src/core/control-port/TauriControlPort.test.ts
-pnpm --filter @tonenari/control-ui typecheck
+cargo test -p mixrelay-engine-service --lib graph_catalog_tests
+cargo test -p mixrelay-control-server --lib catalog_routes
+cargo clippy -p mixrelay-engine-service -p mixrelay-control-server -p mixrelay-control-protocol --lib --tests -- -D warnings
+pnpm --filter @mixrelay/control-ui exec vitest run src/features/graphs/GraphCatalogController.test.ts src/app/App.test.tsx src/core/control-port/HttpControlPort.test.ts src/core/control-port/TauriControlPort.test.ts
+pnpm --filter @mixrelay/control-ui typecheck
 ```
 
 Engine catalog **9 passed**; HTTP route **1 passed**; focused UI **17 passed**; common Rust Clippy and UI TypeScript/

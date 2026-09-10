@@ -4,9 +4,9 @@
 
 The installed launchd service was still running its September 6 binary. The live
 acceptance probe backed up its graph (one duplex 2/2 endpoint and two explicit
-channel edges), restarted only that UID-owned ToneNari service, and submitted a
+channel edges), restarted only that UID-owned MixRelay service, and submitted a
 localized name with 64 render / 16 capture channels. The engine accepted the graph,
-but a separate CoreAudio property reader still observed `ToneNari Virtual I/O`,
+but a separate CoreAudio property reader still observed `MixRelay Virtual I/O`,
 2 render / 2 capture. **This run failed**, and must not be reported as HAL restore
 acceptance. The probe's `finally` restored the original graph/name/widths. No other
 graph resources, system default devices or coreaudiod were changed. With no prior
@@ -37,22 +37,22 @@ Validation:
 
 The corrected installed-HAL acceptance run **passed after administrator approval**.
 `reload-macos-hal-only-root.sh` validates the source/installed bundle identifiers,
-signatures and the exact ToneNari-only driver host's mapped executable, preserves
+signatures and the exact MixRelay-only driver host's mapped executable, preserves
 the old bundle, and signals only that host. It does not change launchd, signing
 policy, or default devices and does not restart coreaudiod. The first SIGTERM did
 not terminate the old host (PID 44822). After verifying its mapped backup bundle,
 the separately approved host restart bounded SIGTERM to three seconds, then sent
-SIGKILL only to that verified process. New ToneNari HAL host PID 68024 started.
+SIGKILL only to that verified process. New MixRelay HAL host PID 68024 started.
 The installer now uses that bounded termination helper instead of interpreting
 successful signal delivery as a successful reload.
 
 Installed/built HAL SHA-256 (identical):
 `2865fccc368b238db95d189e736ca48e6154e925457376a9bd9dbda623597e0b`.
 Previous bundle retained at
-`/Library/Audio/Plug-Ins/HAL/ToneNariHAL.driver.backup-20260907T070538Z-67432`.
+`/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver.backup-20260907T070538Z-67432`.
 
 The v2 acceptance probe restarted the installed engine four times. Independent
-CoreAudio reads confirmed the localized name `ToneNari 복원 64·16`, 64 render and
+CoreAudio reads confirmed the localized name `MixRelay 복원 64·16`, 64 render and
 16 capture channels after application, full-device restoration and recreation.
 Partial/full graph-side deletion and the retained recreation template survived
 restart. The permanently duplex macOS device is not physically deleted when graph
@@ -71,10 +71,10 @@ status read). Those existing status/clock gates are not cleared by a passing PCM
 comparison, and this slice does not claim an underrun-free engine.
 
 Successful evidence:
-`/Volumes/Linear 1/test/tonenari/evidence/macos-endpoint-restart-20260907-v2`
+`/Volumes/Linear 1/test/mixrelay/evidence/macos-endpoint-restart-20260907-v2`
 (`applied.json`, `restored.json`, `readded.json`, `cleanup.json`, `duplex.log`).
 
-Failed evidence: `/Volumes/Linear 1/test/tonenari/evidence/macos-endpoint-restart-20260907-v1`.
+Failed evidence: `/Volumes/Linear 1/test/mixrelay/evidence/macos-endpoint-restart-20260907-v1`.
 Its `cleanup.json` records restored native properties; `restored-graph.json` was
 compared with the original graph and matches except for revision. Neither proves PCM. The
 first failing probe did not yet save the failed native snapshot; failure output

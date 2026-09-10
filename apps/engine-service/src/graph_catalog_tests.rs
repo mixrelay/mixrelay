@@ -1,12 +1,12 @@
 use super::*;
 use crate::controller_test_support::settle;
 use crate::endpoint_settings_tests::controller;
+use mixrelay_control_protocol::{GraphCatalogAction, GraphCatalogRequest};
 use std::{
     fs,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
 };
-use tonenari_control_protocol::{GraphCatalogAction, GraphCatalogRequest};
 
 #[path = "graph_layout_tests.rs"]
 mod layout;
@@ -17,7 +17,7 @@ mod native_state;
 #[path = "graph_live_state_tests.rs"]
 mod live_state;
 
-struct Fixture(tonenari_test_support::FixtureDir);
+struct Fixture(mixrelay_test_support::FixtureDir);
 
 #[test]
 fn durable_catalog_reads_do_not_wait_for_native_preparation() {
@@ -52,7 +52,7 @@ fn durable_catalog_reads_do_not_wait_for_native_preparation() {
 
 impl Fixture {
     fn new() -> Self {
-        Self(tonenari_test_support::FixtureDir::new("catalog").unwrap())
+        Self(mixrelay_test_support::FixtureDir::new("catalog").unwrap())
     }
     fn path(&self) -> PathBuf {
         self.0.join("graphs.json")
@@ -71,13 +71,13 @@ fn request(controller: &EngineGraphController, action: GraphCatalogAction) -> Gr
 struct ParameterFixtureFactory(Arc<AtomicU64>);
 struct ParameterFixtureResolver;
 
-impl tonenari_audio_graph::NodeResolver for ParameterFixtureResolver {
+impl mixrelay_audio_graph::NodeResolver for ParameterFixtureResolver {
     fn resolve(
         &self,
-        node: &tonenari_audio_graph::NodeSpec,
+        node: &mixrelay_audio_graph::NodeSpec,
         context: &CompileContext,
-    ) -> Result<tonenari_audio_graph::ResolvedNode, tonenari_audio_graph::NodeResolutionError> {
-        use tonenari_audio_graph::{
+    ) -> Result<mixrelay_audio_graph::ResolvedNode, mixrelay_audio_graph::NodeResolutionError> {
+        use mixrelay_audio_graph::{
             BuiltInNodeResolver, CompiledPort, PortDirection, PortId, ResolvedNode,
         };
         if matches!(&node.config, NodeConfig::Provider(provider) if provider.type_id.as_str() == "fixture:parameters")
@@ -134,10 +134,10 @@ fn parameter_fixture(document: GraphDocument) -> (EngineGraphController, Arc<Ato
 fn parameter_document() -> GraphDocument {
     GraphDocument::new(
         1,
-        vec![tonenari_audio_graph::NodeSpec {
+        vec![mixrelay_audio_graph::NodeSpec {
             id: NodeId::from("effect"),
             label: None,
-            config: NodeConfig::Provider(tonenari_audio_graph::ProviderNodeConfig {
+            config: NodeConfig::Provider(mixrelay_audio_graph::ProviderNodeConfig {
                 type_id: "fixture:parameters".into(),
                 parameters: serde_json::json!({"stateBase64": "AQ=="}),
             }),

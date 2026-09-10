@@ -1,18 +1,18 @@
 use super::*;
 use crate::endpoint_registry::{EndpointId, EndpointSpec};
+use mixrelay_macos_transport::{
+    endpoint_transport::{
+        mr_endpoint_transport_begin_clock_transition, mr_endpoint_transport_clock_state,
+        mr_endpoint_transport_incarnation,
+    },
+    shared_audio_buffer::{
+        mr_shared_audio_buffer_epoch_pending, mr_shared_audio_buffer_stats,
+        mr_shared_audio_buffer_try_begin_epoch, mr_shared_audio_buffer_write,
+    },
+};
 use std::io;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::{AtomicBool, AtomicU64};
-use tonenari_macos_transport::{
-    endpoint_transport::{
-        tn_endpoint_transport_begin_clock_transition, tn_endpoint_transport_clock_state,
-        tn_endpoint_transport_incarnation,
-    },
-    shared_audio_buffer::{
-        tn_shared_audio_buffer_epoch_pending, tn_shared_audio_buffer_stats,
-        tn_shared_audio_buffer_try_begin_epoch, tn_shared_audio_buffer_write,
-    },
-};
 
 const TEST_ID: EndpointId = [7; 16];
 
@@ -51,12 +51,12 @@ fn ready(runtime: &Runtime<'_>, value: f32) -> EndpointSnapshot {
 fn ready_id(runtime: &Runtime<'_>, id: EndpointId, value: f32) -> EndpointSnapshot {
     let read = runtime.read();
     let endpoint = read.endpoint(id).unwrap();
-    assert!(unsafe { tn_endpoint_transport_begin_clock_transition(endpoint.transport()) });
-    unsafe { tn_endpoint_transport_clock_state(endpoint.transport(), 17, 96_000, true) };
+    assert!(unsafe { mr_endpoint_transport_begin_clock_transition(endpoint.transport()) });
+    unsafe { mr_endpoint_transport_clock_state(endpoint.transport(), 17, 96_000, true) };
     assert!(unsafe {
-        tn_shared_audio_buffer_write(
+        mr_shared_audio_buffer_write(
             endpoint.render_buffer(),
-            tn_shared_audio_buffer_stats(endpoint.render_buffer()).epoch,
+            mr_shared_audio_buffer_stats(endpoint.render_buffer()).epoch,
             0,
             [value; 8].as_ptr(),
             4,
@@ -147,8 +147,8 @@ fn disabled_direction_never_reads_or_writes_its_transport_placeholder() {
         let runtime = initialized(&registry, &[configuration]);
         let read = runtime.read();
         let endpoint = read.endpoint(TEST_ID).unwrap();
-        assert!(unsafe { tn_endpoint_transport_begin_clock_transition(endpoint.transport()) });
-        unsafe { tn_endpoint_transport_clock_state(endpoint.transport(), 17, 96_000, true) };
+        assert!(unsafe { mr_endpoint_transport_begin_clock_transition(endpoint.transport()) });
+        unsafe { mr_endpoint_transport_clock_state(endpoint.transport(), 17, 96_000, true) };
         let expected = audio::snapshot(endpoint).unwrap();
         let mut sentinel = [9.0_f32];
         assert_eq!(
@@ -259,21 +259,21 @@ fn capture_max_recovery_replaces_real_mapping_not_only_status_flag() {
     let endpoint = old.endpoint(TEST_ID).unwrap();
     let mut identity = [0; 16];
     assert!(unsafe {
-        tn_endpoint_transport_incarnation(endpoint.transport(), identity.as_mut_ptr())
+        mr_endpoint_transport_incarnation(endpoint.transport(), identity.as_mut_ptr())
     });
     for _ in 1..u16::MAX {
         assert_ne!(
-            unsafe { tn_shared_audio_buffer_try_begin_epoch(endpoint.capture_buffer()) },
+            unsafe { mr_shared_audio_buffer_try_begin_epoch(endpoint.capture_buffer()) },
             0
         );
     }
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(endpoint.capture_buffer()) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(endpoint.capture_buffer()) },
         0
     );
-    assert!(unsafe { tn_shared_audio_buffer_epoch_pending(endpoint.capture_buffer()) });
+    assert!(unsafe { mr_shared_audio_buffer_epoch_pending(endpoint.capture_buffer()) });
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_stats(endpoint.capture_buffer()) }.epoch,
+        unsafe { mr_shared_audio_buffer_stats(endpoint.capture_buffer()) }.epoch,
         0
     );
     assert!(runtime.recover_capture(TEST_ID).unwrap());
@@ -281,15 +281,15 @@ fn capture_max_recovery_replaces_real_mapping_not_only_status_flag() {
     let new = runtime.read();
     let new = new.endpoint(TEST_ID).unwrap();
     let mut replaced = [0; 16];
-    assert!(unsafe { tn_endpoint_transport_incarnation(new.transport(), replaced.as_mut_ptr()) });
+    assert!(unsafe { mr_endpoint_transport_incarnation(new.transport(), replaced.as_mut_ptr()) });
     assert_ne!(identity, replaced);
     assert_eq!(new.spec(), endpoint.spec());
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_stats(new.capture_buffer()) }.epoch,
+        unsafe { mr_shared_audio_buffer_stats(new.capture_buffer()) }.epoch,
         1
     );
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(endpoint.capture_buffer()) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(endpoint.capture_buffer()) },
         0
     );
 }
@@ -317,7 +317,7 @@ fn snapshot_to_pcm_replacement_rejects_old_identity_with_equal_epoch_and_coordin
     assert!(!audio::write_for(endpoint, &expected, 0, &samples, 2));
     assert!(!audio::begin_for(endpoint, &expected));
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_stats(endpoint.capture_buffer()) }.epoch,
+        unsafe { mr_shared_audio_buffer_stats(endpoint.capture_buffer()) }.epoch,
         current.capture_epoch
     );
     assert_eq!(
@@ -336,13 +336,13 @@ fn same_mapping_remote_render_restart_and_rate_change_reject_stale_pcm() {
     let pin = runtime.read();
     let endpoint = pin.endpoint(TEST_ID).unwrap();
     assert_ne!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(endpoint.render_buffer()) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(endpoint.render_buffer()) },
         0
     );
     assert!(unsafe {
-        tn_shared_audio_buffer_write(
+        mr_shared_audio_buffer_write(
             endpoint.render_buffer(),
-            tn_shared_audio_buffer_stats(endpoint.render_buffer()).epoch,
+            mr_shared_audio_buffer_stats(endpoint.render_buffer()).epoch,
             0,
             [0.75; 8].as_ptr(),
             4,
@@ -354,8 +354,8 @@ fn same_mapping_remote_render_restart_and_rate_change_reject_stale_pcm() {
         0
     );
     assert_eq!(samples.map(f32::to_bits), [0.0_f32; 8].map(f32::to_bits));
-    assert!(unsafe { tn_endpoint_transport_begin_clock_transition(endpoint.transport()) });
-    unsafe { tn_endpoint_transport_clock_state(endpoint.transport(), 17, 48_000, true) };
+    assert!(unsafe { mr_endpoint_transport_begin_clock_transition(endpoint.transport()) });
+    unsafe { mr_endpoint_transport_clock_state(endpoint.transport(), 17, 48_000, true) };
     assert!(!audio::write_for(endpoint, &expected, 0, &samples, 2));
     assert!(!audio::begin_for(endpoint, &expected));
 }
@@ -367,7 +367,7 @@ fn safe_pcm_access_rejects_empty_partial_and_mismatched_channel_extents() {
     let expected = ready(&runtime, 0.25);
     let pin = runtime.read();
     let endpoint = pin.endpoint(TEST_ID).unwrap();
-    let before = unsafe { tn_shared_audio_buffer_stats(endpoint.capture_buffer()) };
+    let before = unsafe { mr_shared_audio_buffer_stats(endpoint.capture_buffer()) };
     let mut storage = [9.0_f32; 8];
     for (count, channels) in [(0, 2), (3, 2), (8, 1), (8, 65)] {
         assert_eq!(
@@ -388,7 +388,7 @@ fn safe_pcm_access_rejects_empty_partial_and_mismatched_channel_extents() {
             channels
         ));
     }
-    let after = unsafe { tn_shared_audio_buffer_stats(endpoint.capture_buffer()) };
+    let after = unsafe { mr_shared_audio_buffer_stats(endpoint.capture_buffer()) };
     assert_eq!(before.epoch, after.epoch);
     assert_eq!(
         before.published_through_frame,

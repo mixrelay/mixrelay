@@ -1,11 +1,11 @@
 use super::*;
 use std::fs;
 
-struct Fixture(tonenari_test_support::FixtureDir);
+struct Fixture(mixrelay_test_support::FixtureDir);
 
 impl Fixture {
     fn new() -> Self {
-        Self(tonenari_test_support::FixtureDir::new("icon").unwrap())
+        Self(mixrelay_test_support::FixtureDir::new("icon").unwrap())
     }
     fn write(&self, path: &str, bytes: &[u8]) -> PathBuf {
         let path = self.0.join(path);
@@ -183,7 +183,7 @@ fn identity_inputs_and_png_reads_have_size_limits() {
 #[test]
 #[ignore = "requires an explicitly chosen installed desktop ID and PNG icon"]
 fn installed_desktop_metadata_read_probe() {
-    let id = env::var("TONENARI_LAB_METADATA_DESKTOP_ID").expect("explicit installed desktop ID");
+    let id = env::var("MIXRELAY_LAB_METADATA_DESKTOP_ID").expect("explicit installed desktop ID");
     assert!(safe_name(&id));
     let metadata = lookup(&key(Some(&id), None, None), &data_roots(), None);
     assert!(

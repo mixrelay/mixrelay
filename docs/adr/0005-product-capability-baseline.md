@@ -16,7 +16,7 @@ Rogue Amoeba splits its audio product into two adjacent models:
   recorders, device output, live streaming, broadcasting, scripting, and Audio
   Unit effects.
 
-ToneNari would be a lower-value substitute if it implemented only the Loopback
+MixRelay would be a lower-value substitute if it implemented only the Loopback
 routing subset. Product parity therefore means the union of both products,
 while the implementation remains independent.
 
@@ -34,7 +34,7 @@ state inventory before it is considered supported.
 - Duplex, render-only, and capture-only endpoint specifications with stable IDs,
   channel layouts, sample rates, and automatic one-to-one mapping presets
 - Application, special/background process, system-audio, physical-device, and
-  other ToneNari virtual-device sources
+  other MixRelay virtual-device sources
 - Multiple monitor devices, including partial channel monitoring
 - Automatic mapping plus arbitrary explicit channel routes
 - At least 64 channels per virtual device; limits come from capabilities rather
@@ -62,7 +62,7 @@ state inventory before it is considered supported.
 
 ### Outputs and operations
 
-- Physical output and ToneNari virtual-device output
+- Physical output and MixRelay virtual-device output
 - Recording with WAV, AIFF, FLAC, ALAC, AAC, and MP3 targets
 - RTMP live stream and Icecast/Shoutcast broadcast targets with metadata
 - Local transcription, where the selected model is available
@@ -70,7 +70,7 @@ state inventory before it is considered supported.
   event automation, and Shortcuts-compatible control
 - Background execution, menu-bar control, launch-at-login, and restart recovery
 
-### ToneNari extensions beyond parity
+### MixRelay extensions beyond parity
 
 - One engine graph with separate virtual-device and processing-session UI
   projections, so each workflow stays predictable
@@ -92,8 +92,8 @@ state inventory before it is considered supported.
 - Device limits, sample rates, buffer sizes, available applications, plug-ins,
   and permissions are resolved at runtime through capability providers.
 - Virtual endpoints and application capture are separate capabilities.
-  Applications may explicitly render into a ToneNari endpoint without granting
-  ToneNari process-capture access; process capture uses an independent backend
+  Applications may explicitly render into a MixRelay endpoint without granting
+  MixRelay process-capture access; process capture uses an independent backend
   and permission path.
 - On macOS 14.2 and later, application capture uses Core Audio process taps and
   a private aggregate device. ScreenCaptureKit is not the primary audio-engine

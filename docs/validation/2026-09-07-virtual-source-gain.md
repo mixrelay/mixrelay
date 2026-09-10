@@ -35,14 +35,14 @@ final source value back to the runtime graph.
 Run from the repository root:
 
 ```sh
-cargo test -p tonenari-audio-graph -p tonenari-audio-engine --lib
-cargo test -p tonenari-engine-service --lib virtual_source_gain
-pnpm --filter @tonenari/control-ui exec vitest run \
+cargo test -p mixrelay-audio-graph -p mixrelay-audio-engine --lib
+cargo test -p mixrelay-engine-service --lib virtual_source_gain
+pnpm --filter @mixrelay/control-ui exec vitest run \
   src/features/routing-workspace/virtualSourceGain.test.tsx \
   src/features/routing-workspace/model.test.ts \
   src/features/routing-workspace/graphHistoryGroup.test.ts
-pnpm --filter @tonenari/control-ui typecheck
-pnpm --filter @tonenari/control-ui check:boundaries
+pnpm --filter @mixrelay/control-ui typecheck
+pnpm --filter @mixrelay/control-ui check:boundaries
 ```
 
 Results on the macOS development host:
@@ -53,7 +53,7 @@ Results on the macOS development host:
   This is controller reconstruction in one test process, not an installed service/process restart.
 - Focused UI: **10 tests passed**, including 3 new virtual-source-gain tests. TypeScript, the Core
   boundary check, and Biome on the two changed owned UI files passed.
-- `cargo clippy -p tonenari-audio-graph -p tonenari-audio-engine -p tonenari-engine-service
+- `cargo clippy -p mixrelay-audio-graph -p mixrelay-audio-engine -p mixrelay-engine-service
   --all-targets -- -D warnings` and `cargo fmt --all --check` passed at the final source freeze.
 - The actual shared `BlockProcessor` scales 2, 8, 16, 32, and 64 channels by 0.5 at -6.0206003 dB.
   Both source and sink meter banks report 0.5 for full-scale test input; the signal is not attenuated

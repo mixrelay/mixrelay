@@ -2055,6 +2055,225 @@ dependencies = [
 ]
 
 [[package]]
+name = "mixrelay-audio-engine"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "hound",
+ "mixrelay-audio-graph",
+ "mixrelay-audio-io",
+ "mixrelay-audio-recorder",
+ "mixrelay-test-support",
+ "parking_lot",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "mixrelay-audio-graph"
+version = "0.1.0"
+dependencies = [
+ "mixrelay-audio-io",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "mixrelay-audio-io"
+version = "0.1.0"
+dependencies = [
+ "allocation-counter",
+ "audioadapter-buffers",
+ "base64 0.22.1",
+ "libc",
+ "mixrelay-test-support",
+ "png 0.17.16",
+ "rubato",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "windows",
+]
+
+[[package]]
+name = "mixrelay-audio-recorder"
+version = "0.1.0"
+dependencies = [
+ "allocation-counter",
+ "audioadapter-buffers",
+ "hound",
+ "mixrelay-audio-io",
+ "mixrelay-test-support",
+ "parking_lot",
+ "rubato",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mixrelay-control-protocol"
+version = "0.1.0"
+dependencies = [
+ "mixrelay-audio-graph",
+ "mixrelay-audio-io",
+ "mixrelay-audio-recorder",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mixrelay-control-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "mixrelay-audio-graph",
+ "mixrelay-control-protocol",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tower-http 0.7.1",
+]
+
+[[package]]
+name = "mixrelay-desktop"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "mixrelay-audio-graph",
+ "mixrelay-audio-io",
+ "mixrelay-control-protocol",
+ "mixrelay-macos-transport",
+ "mixrelay-process-tap",
+ "reqwest",
+ "rfd",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "mixrelay-engine-service"
+version = "0.1.0"
+dependencies = [
+ "allocation-counter",
+ "axum",
+ "cc",
+ "libc",
+ "mixrelay-audio-engine",
+ "mixrelay-audio-graph",
+ "mixrelay-audio-io",
+ "mixrelay-audio-recorder",
+ "mixrelay-control-protocol",
+ "mixrelay-control-server",
+ "mixrelay-macos-test-support",
+ "mixrelay-macos-transport",
+ "mixrelay-pcm-ring",
+ "mixrelay-processor-host",
+ "mixrelay-test-support",
+ "parking_lot",
+ "pkg-config",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "windows",
+ "windows-core 0.61.2",
+]
+
+[[package]]
+name = "mixrelay-hal-bundle"
+version = "0.1.0"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+]
+
+[[package]]
+name = "mixrelay-hal-core"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "mixrelay-macos-transport",
+]
+
+[[package]]
+name = "mixrelay-macos-test-support"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "core-foundation",
+ "libc",
+]
+
+[[package]]
+name = "mixrelay-macos-transport"
+version = "0.1.0"
+dependencies = [
+ "allocation-counter",
+ "cc",
+ "loom",
+ "mixrelay-pcm-ring",
+]
+
+[[package]]
+name = "mixrelay-pcm-ring"
+version = "0.1.0"
+dependencies = [
+ "allocation-counter",
+]
+
+[[package]]
+name = "mixrelay-process-tap"
+version = "0.1.0"
+dependencies = [
+ "allocation-counter",
+ "cc",
+ "mixrelay-macos-transport",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "mixrelay-processor-host"
+version = "0.1.0"
+dependencies = [
+ "allocation-counter",
+ "arrayvec",
+ "base64 0.22.1",
+ "block2",
+ "dispatch2",
+ "memmap2",
+ "mixrelay-audio-engine",
+ "mixrelay-audio-graph",
+ "mixrelay-control-protocol",
+ "mixrelay-test-support",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "serde",
+ "serde_json",
+ "tao",
+ "truce-rack-au",
+ "truce-rack-au3",
+ "truce-rack-clap",
+ "truce-rack-core",
+ "truce-rack-lv2",
+ "truce-rack-vst3",
+ "x11-dl",
+]
+
+[[package]]
+name = "mixrelay-test-support"
+version = "0.1.0"
+
+[[package]]
 name = "muda"
 version = "0.19.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3953,225 +4172,6 @@ name = "toml_writer"
 version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d56353a2a665ad0f41a421187180aab746c8c325620617ad883a99a1cbe66d2"
-
-[[package]]
-name = "tonenari-audio-engine"
-version = "0.1.0"
-dependencies = [
- "arc-swap",
- "hound",
- "parking_lot",
- "serde_json",
- "thiserror 2.0.20",
- "tonenari-audio-graph",
- "tonenari-audio-io",
- "tonenari-audio-recorder",
- "tonenari-test-support",
-]
-
-[[package]]
-name = "tonenari-audio-graph"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tonenari-audio-io",
-]
-
-[[package]]
-name = "tonenari-audio-io"
-version = "0.1.0"
-dependencies = [
- "allocation-counter",
- "audioadapter-buffers",
- "base64 0.22.1",
- "libc",
- "png 0.17.16",
- "rubato",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tonenari-test-support",
- "windows",
-]
-
-[[package]]
-name = "tonenari-audio-recorder"
-version = "0.1.0"
-dependencies = [
- "allocation-counter",
- "audioadapter-buffers",
- "hound",
- "parking_lot",
- "rubato",
- "serde",
- "serde_json",
- "tonenari-audio-io",
- "tonenari-test-support",
-]
-
-[[package]]
-name = "tonenari-control-protocol"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "tonenari-audio-graph",
- "tonenari-audio-io",
- "tonenari-audio-recorder",
-]
-
-[[package]]
-name = "tonenari-control-server"
-version = "0.1.0"
-dependencies = [
- "axum",
- "serde",
- "serde_json",
- "tokio",
- "tonenari-audio-graph",
- "tonenari-control-protocol",
- "tower",
- "tower-http 0.7.1",
-]
-
-[[package]]
-name = "tonenari-desktop"
-version = "0.1.0"
-dependencies = [
- "cc",
- "reqwest",
- "rfd",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tokio",
- "tonenari-audio-graph",
- "tonenari-audio-io",
- "tonenari-control-protocol",
- "tonenari-macos-transport",
- "tonenari-process-tap",
- "tracing",
-]
-
-[[package]]
-name = "tonenari-engine-service"
-version = "0.1.0"
-dependencies = [
- "allocation-counter",
- "axum",
- "cc",
- "libc",
- "parking_lot",
- "pkg-config",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tokio",
- "tonenari-audio-engine",
- "tonenari-audio-graph",
- "tonenari-audio-io",
- "tonenari-audio-recorder",
- "tonenari-control-protocol",
- "tonenari-control-server",
- "tonenari-macos-test-support",
- "tonenari-macos-transport",
- "tonenari-pcm-ring",
- "tonenari-processor-host",
- "tonenari-test-support",
- "tracing",
- "tracing-subscriber",
- "windows",
- "windows-core 0.61.2",
-]
-
-[[package]]
-name = "tonenari-hal-bundle"
-version = "0.1.0"
-dependencies = [
- "core-foundation-sys",
- "libc",
-]
-
-[[package]]
-name = "tonenari-hal-core"
-version = "0.1.0"
-dependencies = [
- "cc",
- "tonenari-macos-transport",
-]
-
-[[package]]
-name = "tonenari-macos-test-support"
-version = "0.1.0"
-dependencies = [
- "cc",
- "core-foundation",
- "libc",
-]
-
-[[package]]
-name = "tonenari-macos-transport"
-version = "0.1.0"
-dependencies = [
- "allocation-counter",
- "cc",
- "loom",
- "tonenari-pcm-ring",
-]
-
-[[package]]
-name = "tonenari-pcm-ring"
-version = "0.1.0"
-dependencies = [
- "allocation-counter",
-]
-
-[[package]]
-name = "tonenari-process-tap"
-version = "0.1.0"
-dependencies = [
- "allocation-counter",
- "cc",
- "thiserror 2.0.20",
- "tonenari-macos-transport",
-]
-
-[[package]]
-name = "tonenari-processor-host"
-version = "0.1.0"
-dependencies = [
- "allocation-counter",
- "arrayvec",
- "base64 0.22.1",
- "block2",
- "dispatch2",
- "memmap2",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "serde",
- "serde_json",
- "tao",
- "tonenari-audio-engine",
- "tonenari-audio-graph",
- "tonenari-control-protocol",
- "tonenari-test-support",
- "truce-rack-au",
- "truce-rack-au3",
- "truce-rack-clap",
- "truce-rack-core",
- "truce-rack-lv2",
- "truce-rack-vst3",
- "x11-dl",
-]
-
-[[package]]
-name = "tonenari-test-support"
-version = "0.1.0"
 
 [[package]]
 name = "tower"

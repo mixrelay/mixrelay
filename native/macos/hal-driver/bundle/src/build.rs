@@ -15,9 +15,9 @@ pub(super) fn bundle(
 ) -> Result<(), Box<dyn Error>> {
     fs::create_dir_all(destination)?;
     let destination = destination.canonicalize()?;
-    let bundle = destination.join("ToneNariHAL.driver");
+    let bundle = destination.join("MixRelayHAL.driver");
     let slices = destination.join("slices");
-    let executable = bundle.join("Contents/MacOS/ToneNariHAL");
+    let executable = bundle.join("Contents/MacOS/MixRelayHAL");
     fs::create_dir_all(bundle.join("Contents/MacOS"))?;
     fs::create_dir_all(bundle.join("Contents/Resources"))?;
     fs::create_dir_all(&slices)?;
@@ -27,7 +27,7 @@ pub(super) fn bundle(
     }
     run(Command::new("xcrun")
         .args(["lipo", "-create"])
-        .args(SLICES.map(|(arch, _)| slices.join(format!("ToneNariHAL-{arch}"))))
+        .args(SLICES.map(|(arch, _)| slices.join(format!("MixRelayHAL-{arch}"))))
         .arg("-output")
         .arg(&executable))?;
     let driver = root.join("native/macos/hal-driver/driver");
@@ -81,7 +81,7 @@ fn build_slice(
             "build",
             "--locked",
             "-p",
-            "tonenari-hal-core",
+            "mixrelay-hal-core",
             "--release",
             "--target",
             target,
@@ -92,7 +92,7 @@ fn build_slice(
     let mut compiler = link_command(root, &target_directory, architecture, target);
     compiler
         .args(["-isysroot", sdk, "-o"])
-        .arg(slices.join(format!("ToneNariHAL-{architecture}")));
+        .arg(slices.join(format!("MixRelayHAL-{architecture}")));
     run(&mut compiler)
 }
 
@@ -122,11 +122,11 @@ fn link_command(root: &Path, target_directory: &Path, architecture: &str, target
         .arg(hal.join("rust/include"))
         // Only Apple's COM/dispatch-block bridge is compiled as C. The static
         // archive owns properties, clocks, transport and all device lifetimes.
-        .arg(hal.join("driver/ToneNariHALBridge.c"))
+        .arg(hal.join("driver/MixRelayHALBridge.c"))
         .arg(
             target_directory
                 .join(target)
-                .join("release/libtonenari_hal_core.a"),
+                .join("release/libmixrelay_hal_core.a"),
         )
         .args([
             "-framework",
@@ -134,7 +134,7 @@ fn link_command(root: &Path, target_directory: &Path, architecture: &str, target
             "-framework",
             "CoreFoundation",
             "-liconv",
-            "-Wl,-exported_symbol,_ToneNariHAL_Create",
+            "-Wl,-exported_symbol,_MixRelayHAL_Create",
         ]);
     compiler
 }
@@ -159,7 +159,7 @@ fn verify_factory(executable: &Path) -> Result<(), Box<dyn Error>> {
             .lines()
             .filter_map(|line| line.split_whitespace().last())
             .collect();
-        if exports != ["_ToneNariHAL_Create"] {
+        if exports != ["_MixRelayHAL_Create"] {
             return Err(format!("unexpected {architecture} plugin exports: {exports:?}").into());
         }
     }
@@ -195,11 +195,11 @@ mod tests {
         assert_eq!(
             c_sources,
             [&PathBuf::from(
-                "/repo/native/macos/hal-driver/driver/ToneNariHALBridge.c"
+                "/repo/native/macos/hal-driver/driver/MixRelayHALBridge.c"
             )]
         );
         assert!(args.contains(&PathBuf::from(
-            "/repo/target/aarch64-apple-darwin/release/libtonenari_hal_core.a"
+            "/repo/target/aarch64-apple-darwin/release/libmixrelay_hal_core.a"
         )));
     }
 }

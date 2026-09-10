@@ -6,9 +6,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tonenari_audio_graph::{GraphDocument, NodeId, ProviderNodeConfig};
-use tonenari_control_protocol::GraphProcessorParameterChange;
-use tonenari_processor_host::ProcessorStateError;
+use mixrelay_audio_graph::{GraphDocument, NodeId, ProviderNodeConfig};
+use mixrelay_control_protocol::GraphProcessorParameterChange;
+use mixrelay_processor_host::ProcessorStateError;
 
 use super::{
     Catalog, EngineGraphController, ErrorCode, NodeConfig, ProtocolError, invalid, unavailable,

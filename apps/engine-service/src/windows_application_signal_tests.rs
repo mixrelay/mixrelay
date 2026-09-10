@@ -1,6 +1,8 @@
 //! Explicit LAB acceptance: a copied test executable renders only to the named
 //! virtual endpoint. The parent captures that owned process, never another app.
 use super::{ProcessLoopbackCapture, application_capture, render};
+use mixrelay_audio_graph::{ApplicationSelector, AudioDeviceOutputConfig, DeviceSelector};
+use mixrelay_audio_io::{process::CycleBlocks, session::SessionFormat};
 use std::{
     io::{Read, Write},
     os::windows::process::CommandExt,
@@ -13,10 +15,8 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tonenari_audio_graph::{ApplicationSelector, AudioDeviceOutputConfig, DeviceSelector};
-use tonenari_audio_io::{process::CycleBlocks, session::SessionFormat};
 
-const LAB_NAME: &str = "ToneNari SysVAD Bridge LAB";
+const LAB_NAME: &str = "MixRelay SysVAD Bridge LAB";
 const CHILD_TEST: &str = "windows::application_signal_tests::owned_virtual_tone_player";
 
 #[derive(Default, Debug)]
@@ -62,7 +62,7 @@ impl CaptureEvidence {
 
 fn dump_pcm(name: &str, samples: &[f32]) {
     let directory =
-        std::env::var("TONENARI_LAB_PCM_DUMP").expect("explicit evidence directory required");
+        std::env::var("MIXRELAY_LAB_PCM_DUMP").expect("explicit evidence directory required");
     let path = PathBuf::from(directory).join(name);
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -81,15 +81,15 @@ fn dump_pcm(name: &str, samples: &[f32]) {
 
 fn authorized() {
     assert_eq!(
-        std::env::var("TONENARI_LAB_APPLICATION_TEST").as_deref(),
+        std::env::var("MIXRELAY_LAB_APPLICATION_TEST").as_deref(),
         Ok("1")
     );
 }
 
 fn endpoint() -> String {
-    let uid = std::env::var("TONENARI_LAB_TONE_ENDPOINT")
+    let uid = std::env::var("MIXRELAY_LAB_TONE_ENDPOINT")
         .expect("an explicitly inspected LAB virtual endpoint UID is required");
-    let devices = tonenari_audio_io::windows::devices().unwrap();
+    let devices = mixrelay_audio_io::windows::devices().unwrap();
     let matches: Vec<_> = devices
         .iter()
         .filter(|device| {
@@ -116,14 +116,14 @@ fn endpoint() -> String {
 #[ignore = "child of explicit Windows virtual-tone acceptance only"]
 fn owned_virtual_tone_player() {
     authorized();
-    let uid = std::env::var("TONENARI_LAB_TONE_ENDPOINT").unwrap();
+    let uid = std::env::var("MIXRELAY_LAB_TONE_ENDPOINT").unwrap();
     assert_eq!(uid, endpoint(), "no default or non-LAB render fallback");
-    let period: u16 = std::env::var("TONENARI_LAB_TONE_PERIOD")
+    let period: u16 = std::env::var("MIXRELAY_LAB_TONE_PERIOD")
         .unwrap()
         .parse()
         .unwrap();
     assert!([32, 48].contains(&period));
-    let graph_rate = std::env::var("TONENARI_LAB_TONE_GRAPH_RATE")
+    let graph_rate = std::env::var("MIXRELAY_LAB_TONE_GRAPH_RATE")
         .map_or(48_000, |value| value.parse().unwrap());
     assert!([44_100, 48_000, 96_000].contains(&graph_rate));
     let counters = Arc::default();
@@ -147,7 +147,7 @@ fn owned_virtual_tone_player() {
         let _ = std::io::stdin().read(&mut [0]);
         stop_reader.store(true, Ordering::Release);
     });
-    let mut demand = tonenari_engine_service::render_demand::RenderDemandCursor::default();
+    let mut demand = mixrelay_engine_service::render_demand::RenderDemandCursor::default();
     let mut pcm = vec![0.0; 8192];
     let mut source_evidence = Vec::with_capacity(graph_rate as usize * 2);
     let start = Instant::now();
@@ -206,15 +206,15 @@ fn tone_sample(position: u64, rate: u32, frequency: f64) -> f32 {
 }
 
 struct Player {
-    _directory: tonenari_test_support::FixtureDir,
+    _directory: mixrelay_test_support::FixtureDir,
     path: PathBuf,
     child: Option<Child>,
 }
 
 impl Player {
     fn new() -> Self {
-        let directory = tonenari_test_support::FixtureDir::new("owned-signal").unwrap();
-        let path = directory.join("ToneNariOwnedSignal.exe");
+        let directory = mixrelay_test_support::FixtureDir::new("owned-signal").unwrap();
+        let path = directory.join("MixRelayOwnedSignal.exe");
         std::fs::copy(std::env::current_exe().unwrap(), &path).unwrap();
         Self {
             _directory: directory,
@@ -238,9 +238,9 @@ impl Player {
                     "--nocapture",
                     "--test-threads=1",
                 ])
-                .env("TONENARI_LAB_TONE_ENDPOINT", uid)
-                .env("TONENARI_LAB_TONE_PERIOD", period.to_string())
-                .env("TONENARI_LAB_TONE_GRAPH_RATE", graph_rate.to_string())
+                .env("MIXRELAY_LAB_TONE_ENDPOINT", uid)
+                .env("MIXRELAY_LAB_TONE_PERIOD", period.to_string())
+                .env("MIXRELAY_LAB_TONE_GRAPH_RATE", graph_rate.to_string())
                 .stdin(Stdio::piped())
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit())
@@ -390,7 +390,7 @@ fn native_owned_pcm_crosses_44100_and_96000_graph_formats() {
 }
 
 #[test]
-#[ignore = "explicit Windows LAB: owned child renders quiet tone only to the ToneNari virtual endpoint"]
+#[ignore = "explicit Windows LAB: owned child renders quiet tone only to the MixRelay virtual endpoint"]
 fn native_owned_application_nonzero_pcm_survives_relaunch() {
     authorized();
     let uid = endpoint();

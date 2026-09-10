@@ -7,9 +7,9 @@ FROM ${DISTRO_IMAGE}
 # Minimal distro images may lack roots before apt downloads ca-certificates.
 # Kali's mirror redirects can already require HTTPS during that bootstrap.
 COPY --from=rust /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY infra/lab/install-linux-deps.sh /opt/tonenari-lab/install-linux-deps.sh
-COPY infra/lab/kali.sources /opt/tonenari-lab/kali.sources
-RUN TONENARI_LAB_CONTAINER=1 bash /opt/tonenari-lab/install-linux-deps.sh
+COPY infra/lab/install-linux-deps.sh /opt/mixrelay-lab/install-linux-deps.sh
+COPY infra/lab/kali.sources /opt/mixrelay-lab/kali.sources
+RUN MIXRELAY_LAB_CONTAINER=1 bash /opt/mixrelay-lab/install-linux-deps.sh
 COPY --from=rust /usr/local/cargo /usr/local/cargo
 COPY --from=rust /usr/local/rustup /usr/local/rustup
 COPY --from=node /usr/local/bin/node /usr/local/bin/node

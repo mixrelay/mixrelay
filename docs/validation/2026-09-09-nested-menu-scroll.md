@@ -4,7 +4,7 @@
 
 The Source list exceeds the menu height limit. Its next-level virtual-device
 dropdown was physically inside that scrolling dropdown. The live app exposed
-`New virtual device` and `ToneNari Stereo` to accessibility/keyboard navigation
+`New virtual device` and `MixRelay Stereo` to accessibility/keyboard navigation
 even when the user screenshot showed no child panel: this was not an empty
 inventory or missing creation action.
 
@@ -25,9 +25,9 @@ The Korean category is now `가상 장치`; actual device names and IDs are unch
 - Desktop debug app build succeeded and was launched locally. Existing Vite
   >500 kB chunk warning remains; this is not a warning-free build claim.
 - Native app: Source → 가상 장치 → 새 가상 장치 clicked through to the creation
-  dialog. The existing ToneNari Stereo reference was also present.
+  dialog. The existing MixRelay Stereo reference was also present.
 - Native app: repeated from Output near the bottom-right window edge; creation
-  dialog opened. Already-connected ToneNari Stereo was disabled as expected.
+  dialog opened. Already-connected MixRelay Stereo was disabled as expected.
 - Native app: Add button → Source → 가상 장치 navigated using arrow keys and
   Return opened the creation dialog. Dialogs were cancelled without creating
   devices. Engine, 32-sample setting, and user graphs were not changed.

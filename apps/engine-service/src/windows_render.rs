@@ -4,6 +4,8 @@
 #[cfg(test)]
 use super::ENGINE_SAMPLE_RATE;
 use super::{ACTIVATION_TIMEOUT, SpscSampleRing, clock_bridge};
+use mixrelay_audio_engine::RuntimeCounters;
+use mixrelay_audio_graph::{AudioDeviceOutputConfig, DeviceSelector};
 use std::{
     collections::BTreeMap,
     mem::size_of,
@@ -13,8 +15,6 @@ use std::{
     },
     thread,
 };
-use tonenari_audio_engine::RuntimeCounters;
-use tonenari_audio_graph::{AudioDeviceOutputConfig, DeviceSelector};
 use windows::{
     Win32::{
         Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT},
@@ -154,7 +154,7 @@ impl DeviceRender {
         let (worker_active, worker_counters) = (active.clone(), counters.clone());
         let worker_demand = demand.clone();
         let worker = thread::Builder::new()
-            .name("tonenari-wasapi-render".into())
+            .name("mixrelay-wasapi-render".into())
             .spawn(move || {
                 let context = RenderWorker {
                     ring: &worker_ring,
@@ -165,7 +165,7 @@ impl DeviceRender {
                     master: &worker_master,
                     graph_rate,
                 };
-                tonenari_engine_service::device_worker::supervise(
+                mixrelay_engine_service::device_worker::supervise(
                     &worker_stop,
                     &worker_failed,
                     &tx,
@@ -227,8 +227,8 @@ impl DeviceRender {
 
     pub(super) fn next_cycle(
         &self,
-        cursor: &mut tonenari_engine_service::render_demand::RenderDemandCursor,
-    ) -> Option<tonenari_audio_io::process::ProcessCycle> {
+        cursor: &mut mixrelay_engine_service::render_demand::RenderDemandCursor,
+    ) -> Option<mixrelay_audio_io::process::ProcessCycle> {
         if self.failed() {
             return None;
         }
@@ -351,7 +351,7 @@ fn run(
         stream.rate,
         ring,
     )?;
-    let mut mapper = tonenari_audio_io::frame_budget::FrameBudgetMapper::new(graph_rate)
+    let mut mapper = mixrelay_audio_io::frame_budget::FrameBudgetMapper::new(graph_rate)
         .map_err(|error| error.to_string())?;
     let mut native_position = 0;
     if stop.load(Ordering::Acquire) {
@@ -377,9 +377,9 @@ fn run(
             // graph clock. The initial silence prime is not graph demand.
             if frames > 0 {
                 let cycle = mapper
-                    .map(tonenari_audio_io::process::ProcessCycle {
-                        clock: tonenari_audio_io::process::ClockDomain {
-                            authority: tonenari_audio_io::session::ClockAuthority::Device,
+                    .map(mixrelay_audio_io::process::ProcessCycle {
+                        clock: mixrelay_audio_io::process::ClockDomain {
+                            authority: mixrelay_audio_io::session::ClockAuthority::Device,
                             id: demand.id.load(Ordering::Acquire),
                             epoch: 0,
                         },
@@ -407,8 +407,8 @@ fn open_stream(config: &AudioDeviceOutputConfig) -> Result<RenderStream, String>
     config
         .selector
         .resolve(
-            &tonenari_audio_io::windows::devices().map_err(|e| e.to_string())?,
-            tonenari_audio_io::DeviceDirection::Output,
+            &mixrelay_audio_io::windows::devices().map_err(|e| e.to_string())?,
+            mixrelay_audio_io::DeviceDirection::Output,
             config.input_channels,
         )
         .map_err(|e| e.to_string())?;
@@ -589,7 +589,7 @@ mod tests {
             master: Arc::default(),
             worker: None,
         };
-        let mut cursor = tonenari_engine_service::render_demand::RenderDemandCursor::default();
+        let mut cursor = mixrelay_engine_service::render_demand::RenderDemandCursor::default();
         output.demand.begin_connection();
         assert!(output.next_cycle(&mut cursor).is_none());
         output.demand.publish(480);
@@ -606,7 +606,7 @@ mod tests {
     #[test]
     #[ignore = "requires authorized interactive Windows VM; writes silence only"]
     fn native_wasapi_output_recovers_with_new_clock_epoch() {
-        assert_eq!(std::env::var("TONENARI_LAB_AUDIO_TEST").as_deref(), Ok("1"));
+        assert_eq!(std::env::var("MIXRELAY_LAB_AUDIO_TEST").as_deref(), Ok("1"));
         let mut cache = RenderCache::new();
         let requests = vec![(
             "probe".into(),
@@ -617,7 +617,7 @@ mod tests {
         )];
         let outputs = prepare_outputs(&requests, &mut cache, &Arc::default()).unwrap();
         let output = &outputs["probe"];
-        let mut cursor = tonenari_engine_service::render_demand::RenderDemandCursor::default();
+        let mut cursor = mixrelay_engine_service::render_demand::RenderDemandCursor::default();
         for cycle in 0..4 {
             let previous = output.demand.id.load(Ordering::Acquire);
             output.demand.restart.store(true, Ordering::Release);
@@ -674,7 +674,7 @@ mod tests {
         let outputs = prepare_outputs(&requests, &mut cache, &Arc::default()).unwrap();
         let output = &outputs["pnp-output"];
         let samples = vec![0.0; output.channels * 256];
-        let mut cursor = tonenari_engine_service::render_demand::RenderDemandCursor::default();
+        let mut cursor = mixrelay_engine_service::render_demand::RenderDemandCursor::default();
         for cycle in 0..4 {
             let before = output.demand.id.load(Ordering::Acquire);
             let mut disabled = DisabledEndpoint::new(&device);

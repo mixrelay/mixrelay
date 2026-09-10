@@ -1,9 +1,9 @@
-use tonenari_audio_graph::NodeConfig;
-use tonenari_audio_io::{
+use mixrelay_audio_graph::NodeConfig;
+use mixrelay_audio_io::{
     ApplicationCaptureRequest, ApplicationSelector, ChannelLayout, HostAudioBackendError,
     StreamSpec,
 };
-use tonenari_engine_service::graph_composition::SharedSource;
+use mixrelay_engine_service::graph_composition::SharedSource;
 
 /// The native process tap mixes an exact bundle into stereo; it does not walk
 /// process descendants. Local channel projection and gain belong to graph DSP.
@@ -51,12 +51,12 @@ fn unsupported(capability: &str) -> HostAudioBackendError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tonenari_audio_io::SourcePlaybackPolicy;
+    use mixrelay_audio_io::SourcePlaybackPolicy;
 
     fn request() -> ApplicationCaptureRequest {
         ApplicationCaptureRequest {
             selector: ApplicationSelector::BundleId {
-                bundle_id: "org.tonenari.capture-fixture".into(),
+                bundle_id: "org.mixrelay.capture-fixture".into(),
                 include_descendants: false,
             },
             stream: StreamSpec {
@@ -96,7 +96,7 @@ mod tests {
         assert_ne!(preserve.config, muted.config);
         let mut other = request();
         other.selector = ApplicationSelector::BundleId {
-            bundle_id: "org.tonenari.other-fixture".into(),
+            bundle_id: "org.mixrelay.other-fixture".into(),
             include_descendants: false,
         };
         assert_ne!(preserve.id, resolve(&other).unwrap().id);
@@ -106,7 +106,7 @@ mod tests {
     fn unsupported_selectors_and_unresolved_intent_are_never_relabelled_as_bundle_capture() {
         for selector in [
             ApplicationSelector::BundleId {
-                bundle_id: "org.tonenari.capture-fixture".into(),
+                bundle_id: "org.mixrelay.capture-fixture".into(),
                 include_descendants: true,
             },
             ApplicationSelector::ExecutablePath {

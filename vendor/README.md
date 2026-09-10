@@ -37,10 +37,10 @@ limited to portable POD properties (1 MiB total, 4096 entries) and a 4 MiB seria
 
 File/path assets, nested URID containers, nonportable properties and a mismatched byte order are
 explicit errors, not silently discarded state. These remain unsupported qualification cases.
-Restoration validates the complete envelope/control layout before native mutation; the ToneNari
+Restoration validates the complete envelope/control layout before native mutation; the MixRelay
 host restores only a prepared worker and discards it on any vendor restore failure.
 
-The new `state.rs`, tests and `fixtures/state.lv2` fixture are ToneNari-authored under the same
+The new `state.rs`, tests and `fixtures/state.lv2` fixture are MixRelay-authored under the same
 MIT OR Apache-2.0 terms. Existing vendor licenses above remain applicable. Sources:
 [LV2 state contract](https://lv2plug.in/ns/ext/state) and
 [Lilv implementation](https://github.com/lv2/lilv/blob/master/src/state.c).

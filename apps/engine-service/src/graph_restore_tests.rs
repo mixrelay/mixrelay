@@ -10,9 +10,9 @@ use std::{
 struct TemporaryNativeFailure(std::sync::atomic::AtomicUsize);
 
 impl crate::GraphResourceBackend for TemporaryNativeFailure {
-    fn reconcile(&self, _: &GraphDocument) -> Result<(), tonenari_audio_io::HostAudioBackendError> {
+    fn reconcile(&self, _: &GraphDocument) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
         if self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
-            return Err(tonenari_audio_io::HostAudioBackendError::BackendFailure {
+            return Err(mixrelay_audio_io::HostAudioBackendError::BackendFailure {
                 message: "injected initialization timeout".into(),
             });
         }
@@ -75,12 +75,12 @@ fn transient_native_startup_failure_retries_without_losing_saved_catalog_or_boot
 
 struct Fixture {
     path: PathBuf,
-    _directory: tonenari_test_support::FixtureDir,
+    _directory: mixrelay_test_support::FixtureDir,
 }
 
 impl Fixture {
     fn new(value: &Value) -> Self {
-        let directory = tonenari_test_support::FixtureDir::new("pid-restore").unwrap();
+        let directory = mixrelay_test_support::FixtureDir::new("pid-restore").unwrap();
         let path = directory.join("catalog.json");
         let file = OpenOptions::new()
             .write(true)
@@ -227,7 +227,7 @@ fn restored_pid_graph_can_be_edited_and_saved_through_controller() {
     assert_eq!(manifest.sources.len(), 2);
     assert!(manifest.sources.iter().all(|source| !matches!(
         source.request.selector,
-        tonenari_audio_io::ApplicationSelector::ProcessId { .. }
+        mixrelay_audio_io::ApplicationSelector::ProcessId { .. }
     )));
     crate::controller_test_support::settle(&engine);
     edited.revision += 1;
@@ -245,16 +245,16 @@ fn restored_pid_graph_can_be_edited_and_saved_through_controller() {
 struct FixtureApplicationIdentities;
 
 impl crate::GraphResourceBackend for FixtureApplicationIdentities {
-    fn reconcile(&self, _: &GraphDocument) -> Result<(), tonenari_audio_io::HostAudioBackendError> {
+    fn reconcile(&self, _: &GraphDocument) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
         Ok(())
     }
 
     fn resolve_application_capture(
         &self,
-        request: &tonenari_audio_io::ApplicationCaptureRequest,
-    ) -> Result<crate::graph_composition::SharedSource, tonenari_audio_io::HostAudioBackendError>
+        request: &mixrelay_audio_io::ApplicationCaptureRequest,
+    ) -> Result<crate::graph_composition::SharedSource, mixrelay_audio_io::HostAudioBackendError>
     {
-        use tonenari_audio_io::ApplicationSelector;
+        use mixrelay_audio_io::ApplicationSelector;
         let id = match &request.selector {
             ApplicationSelector::BundleId { .. } => "fixture-bundle",
             ApplicationSelector::ExecutablePath { .. } => "fixture-path",

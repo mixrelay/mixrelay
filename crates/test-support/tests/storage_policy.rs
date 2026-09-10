@@ -64,5 +64,5 @@ fn guard_rejects_implicit_and_explicit_temporary_storage() {
     assert!(forbidden_storage(&["std::env::temp_", "dir()"].concat()));
     assert!(forbidden_storage(&["$(mktemp", " -d)"].concat()));
     assert!(!forbidden_storage("target/test-artifacts/fixture"));
-    assert!(!forbidden_storage("Library/Caches/ToneNari/processors"));
+    assert!(!forbidden_storage("Library/Caches/MixRelay/processors"));
 }

@@ -1,5 +1,9 @@
 //! Owner-bound v2 shared PCM mapping. Open/close belong to control/reclaimer
 //! threads; one audio worker holds mutable access for a complete graph cycle.
+pub(super) use mixrelay_engine_service::windows_transport_contract::STARTUP_SILENCE_FRAMES;
+use mixrelay_engine_service::windows_transport_contract::{
+    Descriptor, IOCTL_MAP, LAB_LAYOUT, Layout,
+};
 use std::{
     ffi::c_void,
     ptr::NonNull,
@@ -7,10 +11,6 @@ use std::{
         Arc,
         atomic::{AtomicU32, AtomicU64, Ordering},
     },
-};
-pub(super) use tonenari_engine_service::windows_transport_contract::STARTUP_SILENCE_FRAMES;
-use tonenari_engine_service::windows_transport_contract::{
-    Descriptor, IOCTL_MAP, LAB_LAYOUT, Layout,
 };
 use windows::{
     Win32::{
@@ -82,11 +82,11 @@ unsafe impl Send for Transport {}
 impl Transport {
     pub(super) fn open_lab() -> Result<Self, String> {
         // LAB is an explicit opt-in. Never fall back from this identity to a
-        // physical/default endpoint or the old experimental ToneNari driver.
+        // physical/default endpoint or the old experimental MixRelay driver.
         let file = Handle(
             unsafe {
                 CreateFileW(
-                    w!("\\\\.\\ToneNariSysvadBridge"),
+                    w!("\\\\.\\MixRelaySysvadBridge"),
                     GENERIC_READ.0 | GENERIC_WRITE.0,
                     FILE_SHARE_READ | FILE_SHARE_WRITE,
                     None,

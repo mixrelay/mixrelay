@@ -21,7 +21,7 @@ case "$(uname -m)" in
     ;;
   *) echo "Unsupported architecture" >&2; exit 2 ;;
 esac
-toolchain_root="$HOME/.local/share/tonenari-lab"
+toolchain_root="$HOME/.local/share/mixrelay-lab"
 mkdir -p "$toolchain_root"
 download_dir=$(mktemp -d "$toolchain_root/download.XXXXXXXX")
 node_name="node-v24.19.0-linux-$node_arch"

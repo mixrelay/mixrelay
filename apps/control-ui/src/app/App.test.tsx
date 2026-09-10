@@ -2,9 +2,9 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
-import type { ControlPort, RuntimeGraphDocument, ToneNariStatus } from '../core/control-port/types';
+import type { ControlPort, MixRelayStatus, RuntimeGraphDocument } from '../core/control-port/types';
 import { I18nProvider, i18n, resolveLocale } from '../core/i18n';
-import { ToneNariProvider } from '../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../core/theme/MixRelayProvider';
 import { App } from './App';
 
 function controlPortWithStatus(
@@ -31,7 +31,7 @@ function controlPortWithStatus(
 
 describe('App composition', () => {
   const graph: RuntimeGraphDocument = { edges: [], nodes: [], revision: 1, schemaVersion: 2 };
-  const status: ToneNariStatus = {
+  const status: MixRelayStatus = {
     bufferFrames: null,
     driverState: 'not_installed',
     overruns: 0,
@@ -51,11 +51,11 @@ describe('App composition', () => {
   it('renders the Core to Feature to Screen composition', async () => {
     await i18n.changeLanguage('en');
     render(
-      <ToneNariProvider>
+      <MixRelayProvider>
         <I18nProvider>
           <App controlPort={controlPort} />
         </I18nProvider>
-      </ToneNariProvider>,
+      </MixRelayProvider>,
     );
 
     expect(screen.getByRole('heading', { name: 'Graphs' })).toBeInTheDocument();
@@ -99,11 +99,11 @@ describe('App composition', () => {
       vi.fn().mockRejectedValue(new Error('offline')),
     );
     const failedView = render(
-      <ToneNariProvider>
+      <MixRelayProvider>
         <I18nProvider>
           <App controlPort={unavailablePort} />
         </I18nProvider>
-      </ToneNariProvider>,
+      </MixRelayProvider>,
     );
     await act(async () => Promise.resolve());
     expect(screen.getByRole('img', { name: 'Audio status unknown' })).toHaveAttribute(
@@ -113,16 +113,16 @@ describe('App composition', () => {
     expect(screen.queryByText('Not installed')).not.toBeInTheDocument();
     failedView.unmount();
 
-    let finishStatus!: (value: ToneNariStatus) => void;
-    const pendingStatus = new Promise<ToneNariStatus>((resolve) => {
+    let finishStatus!: (value: MixRelayStatus) => void;
+    const pendingStatus = new Promise<MixRelayStatus>((resolve) => {
       finishStatus = resolve;
     });
     const pendingView = render(
-      <ToneNariProvider>
+      <MixRelayProvider>
         <I18nProvider>
           <App controlPort={controlPortWithStatus(controlPort, () => pendingStatus)} />
         </I18nProvider>
-      </ToneNariProvider>,
+      </MixRelayProvider>,
     );
     pendingView.unmount();
     await act(async () => finishStatus({ ...status, driverState: 'ready' }));

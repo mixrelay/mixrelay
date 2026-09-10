@@ -2,12 +2,12 @@
 
 use super::{TapError, TapSession};
 use crate::process_tap_input::TapFormat;
+use mixrelay_macos_transport::audio_buffer::AudioBufferList;
 use std::{
     ffi::{c_char, c_void},
     ptr,
     sync::{Mutex, OnceLock},
 };
-use tonenari_macos_transport::audio_buffer::AudioBufferList;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -100,15 +100,15 @@ unsafe extern "C" {
     ) -> *const c_void;
     fn CFEqual(left: *const c_void, right: *const c_void) -> u8;
     fn CFRelease(object: *const c_void);
-    fn tn_tap_description_supports_bundle_selection() -> bool;
-    fn tn_tap_description_create(
+    fn mr_tap_description_supports_bundle_selection() -> bool;
+    fn mr_tap_description_create(
         bundle: *const c_char,
         processes: *const u32,
         count: usize,
         mute: bool,
     ) -> *mut c_void;
-    fn tn_tap_description_release(description: *mut c_void);
-    fn tn_tap_aggregate_create(description: *mut c_void, device: *mut u32) -> i32;
+    fn mr_tap_description_release(description: *mut c_void);
+    fn mr_tap_aggregate_create(description: *mut c_void, device: *mut u32) -> i32;
     fn dispatch_queue_create(label: *const c_char, attribute: *const c_void) -> *mut c_void;
     fn dispatch_async_f(
         queue: *mut c_void,
@@ -233,14 +233,14 @@ pub(super) struct Description(*mut c_void);
 impl Description {
     pub(super) fn create(config: &super::TapConfig) -> Result<Self, TapError> {
         // SAFETY: helper only checks Objective-C runtime selector availability.
-        let processes = if unsafe { tn_tap_description_supports_bundle_selection() } {
+        let processes = if unsafe { mr_tap_description_supports_bundle_selection() } {
             Vec::new()
         } else {
             processes(config.bundle_id)?
         };
         // SAFETY: create validated UTF-8 input; process slice remains readable for this call.
         let pointer = unsafe {
-            tn_tap_description_create(
+            mr_tap_description_create(
                 config.bundle_id,
                 processes.as_ptr(),
                 processes.len(),
@@ -265,7 +265,7 @@ impl Description {
     pub(super) fn aggregate(&self, session: &TapSession) -> Result<(), TapError> {
         let mut resources = session.resources.get();
         // SAFETY: shim constructs only Objective-C dictionary; Rust retains returned owner on failure.
-        let result = unsafe { tn_tap_aggregate_create(self.0, &raw mut resources.aggregate) };
+        let result = unsafe { mr_tap_aggregate_create(self.0, &raw mut resources.aggregate) };
         session.resources.set(resources);
         TapError::status(result)?;
         for _ in 0..500 {
@@ -281,7 +281,7 @@ impl Description {
 impl Drop for Description {
     fn drop(&mut self) {
         // SAFETY: helper consumes the +1 retained Objective-C description exactly once.
-        unsafe { tn_tap_description_release(self.0) };
+        unsafe { mr_tap_description_release(self.0) };
     }
 }
 
@@ -417,7 +417,7 @@ pub(super) fn prepare_cleanup() -> Result<usize, TapError> {
     }
     // SAFETY: static NUL-terminated label; successful serial queue is process-lived.
     let queue = checked_queue(|| unsafe {
-        dispatch_queue_create(c"io.tonenari.capture.retired".as_ptr(), ptr::null())
+        dispatch_queue_create(c"io.mixrelay.capture.retired".as_ptr(), ptr::null())
     })?;
     QUEUE
         .set(queue)

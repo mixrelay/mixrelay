@@ -1,10 +1,10 @@
 use super::ffi::{
-    TransportError, TransportErrorCode, tn_application_source_transport_attach,
-    tn_application_source_transport_destroy, tn_application_source_transport_write,
+    TransportError, TransportErrorCode, mr_application_source_transport_attach,
+    mr_application_source_transport_destroy, mr_application_source_transport_write,
 };
 use super::*;
 use crate::{
-    application_clock::{tn_application_clock_publish_consumer, tn_application_clock_request_rate},
+    application_clock::{mr_application_clock_publish_consumer, mr_application_clock_request_rate},
     create_shared_memory,
     source_control::SourceAttachment,
 };
@@ -16,7 +16,7 @@ use std::{
 fn fixture() -> (Mapping, SourceTransport) {
     let mapping = Mapping::new(1024, 2).unwrap();
     mapping.clock().producer_lease.store(7, Ordering::Release);
-    let epoch = unsafe { tn_shared_audio_buffer_stats(mapping.buffer.as_ptr()) }.epoch;
+    let epoch = unsafe { mr_shared_audio_buffer_stats(mapping.buffer.as_ptr()) }.epoch;
     let mut attachment = SourceAttachment {
         descriptor: mapping.descriptor.try_clone().unwrap().into_raw_fd(),
         mapped_size: mapping.bytes,
@@ -24,7 +24,7 @@ fn fixture() -> (Mapping, SourceTransport) {
         source_epoch: epoch,
     };
     let pointer = unsafe {
-        tn_application_source_transport_attach(&raw mut attachment, 1024, 2, ptr::null_mut())
+        mr_application_source_transport_attach(&raw mut attachment, 1024, 2, ptr::null_mut())
     };
     assert!(!pointer.is_null());
     assert_eq!(attachment.descriptor, -1);
@@ -35,13 +35,13 @@ fn fixture() -> (Mapping, SourceTransport) {
 #[test]
 fn reset_write_snapshot_and_stale_lease_use_the_actual_mapping() {
     let (mapping, mut producer) = fixture();
-    let format = unsafe { tn_application_clock_request_rate(mapping.clock.as_ptr(), 44_100) };
+    let format = unsafe { mr_application_clock_request_rate(mapping.clock.as_ptr(), 44_100) };
     assert!(!producer.write(&[0.25; 256], 128));
     assert!(producer.reset(format, 48_000));
     assert!(producer.write(&[0.25; 256], 128));
     producer.publish_native(256, true);
     unsafe {
-        tn_application_clock_publish_consumer(
+        mr_application_clock_publish_consumer(
             mapping.clock.as_ptr(),
             producer.owned_epoch,
             64,
@@ -70,10 +70,10 @@ fn reset_exhaustion_keeps_local_cursor_and_releases_producer_claim() {
     let (mapping, mut producer) = fixture();
     for _ in producer.owned_epoch..u64::from(u16::MAX) {
         producer.owned_epoch =
-            unsafe { tn_shared_audio_buffer_try_begin_epoch(mapping.buffer.as_ptr()) };
+            unsafe { mr_shared_audio_buffer_try_begin_epoch(mapping.buffer.as_ptr()) };
     }
     producer.next_frame = 123;
-    let format = unsafe { tn_application_clock_request_rate(mapping.clock.as_ptr(), 48_000) };
+    let format = unsafe { mr_application_clock_request_rate(mapping.clock.as_ptr(), 48_000) };
     mapping
         .clock()
         .acknowledged_format
@@ -103,7 +103,7 @@ fn reset_exhaustion_keeps_local_cursor_and_releases_producer_claim() {
 #[test]
 fn busy_producer_and_racing_consumer_defer_without_mutating_local_state() {
     let (mapping, mut producer) = fixture();
-    let format = unsafe { tn_application_clock_request_rate(mapping.clock.as_ptr(), 48_000) };
+    let format = unsafe { mr_application_clock_request_rate(mapping.clock.as_ptr(), 48_000) };
     let claim = ProducerClaim::acquire(mapping.clock()).unwrap();
     assert!(!producer.reset(format, 48_000));
     assert!(!producer.write(&[0.25; 2], 1));
@@ -129,14 +129,14 @@ fn attachment_rejects_short_storage_and_clears_descriptor_on_failure() {
     let descriptor = create_shared_memory(64, true).unwrap();
     let mut attachment = SourceAttachment {
         descriptor: descriptor.into_raw_fd(),
-        mapped_size: crate::application_clock::tn_application_clock_required_bytes(1024, 2),
+        mapped_size: crate::application_clock::mr_application_clock_required_bytes(1024, 2),
         producer_lease: 7,
         source_epoch: 1,
     };
     let mut error = TransportError::default();
     assert!(
         unsafe {
-            tn_application_source_transport_attach(&raw mut attachment, 1024, 2, &raw mut error)
+            mr_application_source_transport_attach(&raw mut attachment, 1024, 2, &raw mut error)
         }
         .is_null()
     );
@@ -162,7 +162,7 @@ fn attachment_rejects_wrong_geometry_and_stale_grants() {
         let mut error = TransportError::default();
         assert!(
             unsafe {
-                tn_application_source_transport_attach(
+                mr_application_source_transport_attach(
                     &raw mut attachment,
                     1024,
                     channels,
@@ -191,7 +191,7 @@ fn allocation_failure_retires_owner_and_reports_enomem() {
 #[test]
 fn callbacks_allocate_nothing_and_reject_invalid_input_extents() {
     let (mapping, mut producer) = fixture();
-    let format = unsafe { tn_application_clock_request_rate(mapping.clock.as_ptr(), 48_000) };
+    let format = unsafe { mr_application_clock_request_rate(mapping.clock.as_ptr(), 48_000) };
     assert!(producer.reset(format, 48_000));
     let input = [0.25; 64];
     let observed = allocation_counter::measure(|| {
@@ -203,11 +203,11 @@ fn callbacks_allocate_nothing_and_reject_invalid_input_extents() {
     });
     assert_eq!(observed.count_total, 0);
     assert!(!producer.write(&input[..1], 1));
-    assert!(!unsafe { tn_application_source_transport_write(&raw mut producer, ptr::null(), 1) });
+    assert!(!unsafe { mr_application_source_transport_write(&raw mut producer, ptr::null(), 1) });
     assert!(!unsafe {
-        tn_application_source_transport_write(&raw mut producer, input.as_ptr(), 1025)
+        mr_application_source_transport_write(&raw mut producer, input.as_ptr(), 1025)
     });
-    unsafe { tn_application_source_transport_destroy(ptr::null_mut()) };
+    unsafe { mr_application_source_transport_destroy(ptr::null_mut()) };
 }
 
 #[test]
@@ -216,7 +216,7 @@ fn retirement_unmaps_and_closes_storage_in_an_isolated_process() {
         fn mprotect(address: *mut std::ffi::c_void, length: usize, protection: i32) -> i32;
         fn fcntl(descriptor: i32, command: i32, ...) -> i32;
     }
-    const CHILD: &str = "TONENARI_SOURCE_RETIREMENT_CHILD";
+    const CHILD: &str = "MIXRELAY_SOURCE_RETIREMENT_CHILD";
     if std::env::var_os(CHILD).is_none() {
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "application_source_transport::tests::retirement_unmaps_and_closes_storage_in_an_isolated_process", "--test-threads=1"])
@@ -249,7 +249,7 @@ fn retirement_unmaps_and_closes_storage_in_an_isolated_process() {
     };
     assert!(
         unsafe {
-            tn_application_source_transport_attach(&raw mut attachment, 1024, 2, ptr::null_mut())
+            mr_application_source_transport_attach(&raw mut attachment, 1024, 2, ptr::null_mut())
         }
         .is_null()
     );

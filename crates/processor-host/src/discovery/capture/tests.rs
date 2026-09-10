@@ -99,7 +99,7 @@ fn output_limits_and_capture_file_cleanup_are_explicit() {
         "owned capture files are removed on scope exit"
     );
 
-    let missing_directory = tonenari_test_support::FixtureDir::new("missing-scanner").unwrap();
+    let missing_directory = mixrelay_test_support::FixtureDir::new("missing-scanner").unwrap();
     let missing = Command::new(missing_directory.join("no-such-scanner"));
     assert!(
         capture_json_child::<Vec<String>>(missing, Duration::from_millis(50))

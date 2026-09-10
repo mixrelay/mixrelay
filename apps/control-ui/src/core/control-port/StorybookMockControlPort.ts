@@ -11,6 +11,7 @@ import type {
   GraphLayoutResponse,
   GraphRuntimeStatus,
   MeterSnapshot,
+  MixRelayStatus,
   ProcessorEditorFrame,
   ProcessorEditorInput,
   ProcessorEditorStatus,
@@ -18,7 +19,6 @@ import type {
   RecorderRequest,
   RecorderStatus,
   RuntimeGraphDocument,
-  ToneNariStatus,
 } from './types';
 
 export interface StorybookControlState {
@@ -28,7 +28,7 @@ export interface StorybookControlState {
   graphStatus: GraphRuntimeStatus;
   meters?: MeterSnapshot;
   processors?: ExternalProcessorCatalog;
-  status: ToneNariStatus;
+  status: MixRelayStatus;
 }
 
 export class StorybookMockControlPort implements ControlPort {
@@ -192,7 +192,7 @@ export class StorybookMockControlPort implements ControlPort {
     return this.getProcessors();
   }
 
-  public async getStatus(): Promise<ToneNariStatus> {
+  public async getStatus(): Promise<MixRelayStatus> {
     return this.state.status;
   }
 

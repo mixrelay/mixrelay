@@ -1,11 +1,11 @@
 use super::{Catalog, EngineGraphController};
 use crate::endpoint_settings_tests::{controller, endpoint_document};
-use parking_lot::Mutex;
-use std::{collections::BTreeMap, sync::Arc};
-use tonenari_audio_graph::{GraphDocument, NodeConfig, VirtualEndpointId};
-use tonenari_audio_io::{
+use mixrelay_audio_graph::{GraphDocument, NodeConfig, VirtualEndpointId};
+use mixrelay_audio_io::{
     HostAudioBackendError, VirtualEndpointBackend, VirtualEndpointCapabilities,
 };
+use parking_lot::Mutex;
+use std::{collections::BTreeMap, sync::Arc};
 
 struct Observations {
     rates: BTreeMap<VirtualEndpointId, u32>,
@@ -20,7 +20,7 @@ impl VirtualEndpointBackend for Observations {
 
     fn prepare_graph_attachments(
         &self,
-        _: &[tonenari_audio_graph::VirtualEndpointSpec],
+        _: &[mixrelay_audio_graph::VirtualEndpointSpec],
     ) -> Result<(), HostAudioBackendError> {
         panic!("metadata observation must not prepare native resources")
     }

@@ -41,7 +41,7 @@ After transferring that dependency, v2 passed. v3 also transferred the current
 entrypoint and passed again. This was not worked around by disabling a module.
 Native job exit markers were read as `0`, separately from UTM dispatch results.
 
-Evidence: `/Volumes/Linear 1/test/tonenari/evidence/endpoint-settings-20260907`.
+Evidence: `/Volumes/Linear 1/test/mixrelay/evidence/endpoint-settings-20260907`.
 Failed Ubuntu v1 output is retained with the final Windows/Ubuntu logs.
 
 ## Explicit remaining limits

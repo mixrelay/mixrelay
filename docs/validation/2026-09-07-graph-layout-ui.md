@@ -83,7 +83,7 @@ See [backend transactions](2026-09-07-graph-layout.md),
 
 ## Actual local service refresh and limits
 
-Before restarting only the owned ToneNari service, the active catalog was backed
+Before restarting only the owned MixRelay service, the active catalog was backed
 up and independently compared again. The new process (PID 40420, replacing 22276)
 returned HTTP 200 for the new `/api/v1/graphs/graph-1/layout` endpoint. Independent
 post-restart JSON comparison confirmed the exact audio document, revision 2,
@@ -92,7 +92,7 @@ layout, gain, device, default-device, HAL or sample-rate setting was changed as 
 test. Existing `tauri dev` remained running with the updated desktop build.
 
 Evidence:
-`/Volumes/Linear 1/test/tonenari/evidence/native-device-parity-20260907/layout-gain-Kx351j/`
+`/Volumes/Linear 1/test/mixrelay/evidence/native-device-parity-20260907/layout-gain-Kx351j/`
 contains `catalog-before.json`, `catalog-after.json` and `layout-after.json`.
 
 Browser validation was attempted, but the automation tab became stuck on its

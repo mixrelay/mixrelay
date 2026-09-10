@@ -17,7 +17,7 @@ const MEMORY_TIMEOUT: Duration = Duration::from_mins(2);
 
 #[must_use]
 pub fn device_fixture() -> &'static str {
-    env!("TN_NATIVE_FIXTURE")
+    env!("MR_NATIVE_FIXTURE")
 }
 
 /// Runs native callback and HAL assertions with `ASan` and `UBSan` enabled.
@@ -25,11 +25,11 @@ pub fn device_fixture() -> &'static str {
 /// A native assertion, sanitizer diagnostic or launch failure fails the test.
 pub fn assert_native_contracts() {
     for path in [
-        env!("TN_NATIVE_CLOCK"),
-        env!("TN_NATIVE_HAL"),
-        env!("TN_NATIVE_APPLICATION_CLOCK"),
-        env!("TN_NATIVE_AUDIO_RING"),
-        env!("TN_NATIVE_PCM_RING"),
+        env!("MR_NATIVE_CLOCK"),
+        env!("MR_NATIVE_HAL"),
+        env!("MR_NATIVE_APPLICATION_CLOCK"),
+        env!("MR_NATIVE_AUDIO_RING"),
+        env!("MR_NATIVE_PCM_RING"),
     ] {
         // UBSan normally recovers after diagnostics; tests must instead fail on
         // the first violation, just as ASan and native assertions do.
@@ -63,8 +63,8 @@ pub fn memory_child(test_name: &str) -> bool {
         !test_name.is_empty(),
         "allocator test name must not be empty"
     );
-    if std::env::var("TONENARI_MEMORY_TEST_CHILD").as_deref() == Ok(test_name) {
-        println!("TONENARI_MEMORY_TEST_ENTERED {test_name}");
+    if std::env::var("MIXRELAY_MEMORY_TEST_CHILD").as_deref() == Ok(test_name) {
+        println!("MIXRELAY_MEMORY_TEST_ENTERED {test_name}");
         return true;
     }
     let result = process::run(
@@ -72,7 +72,7 @@ pub fn memory_child(test_name: &str) -> bool {
             .args(["--atExit", "--"])
             .arg(std::env::current_exe().expect("test executable"))
             .args(["--exact", test_name, "--nocapture", "--test-threads=1"])
-            .env("TONENARI_MEMORY_TEST_CHILD", test_name),
+            .env("MIXRELAY_MEMORY_TEST_CHILD", test_name),
         MEMORY_TIMEOUT,
     )
     .unwrap_or_else(|error| panic!("{error}"));
@@ -87,7 +87,7 @@ pub fn memory_child(test_name: &str) -> bool {
 }
 
 fn memory_evidence(test_name: &str, stdout: &str, stderr: &str) -> bool {
-    let entered = format!("TONENARI_MEMORY_TEST_ENTERED {test_name}");
+    let entered = format!("MIXRELAY_MEMORY_TEST_ENTERED {test_name}");
     stdout.lines().any(|line| line.ends_with(&entered))
         && stdout.lines().any(|line| {
             line.strip_prefix("test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; ")

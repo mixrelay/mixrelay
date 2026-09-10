@@ -6,6 +6,6 @@ workspace=${1:?Expected existing guest workspace}
 export PATH="$HOME/.cargo/bin:$PATH" CARGO_BUILD_JOBS=2
 cd "$workspace"
 uname -a
-cargo build --locked -p tonenari-engine-service
-cargo test --locked -p tonenari-engine-service --lib --bins
-cargo clippy --locked -p tonenari-engine-service --lib --bins --tests -- -D warnings
+cargo build --locked -p mixrelay-engine-service
+cargo test --locked -p mixrelay-engine-service --lib --bins
+cargo clippy --locked -p mixrelay-engine-service --lib --bins --tests -- -D warnings

@@ -4,12 +4,12 @@ import { setTimeout as delay } from "node:timers/promises";
 import { rawPcmArgs, parsePwDump } from "./pipewire-cli.mjs";
 
 // Explicit guest-only smoke: route a quiet synthetic stereo signal exclusively
-// through ToneNari's virtual devices. Never change the desktop's default sink.
+// through MixRelay's virtual devices. Never change the desktop's default sink.
 assert.equal(process.platform, "linux");
 assert.equal(process.argv[2], "--run", "Pass --run inside a disposable logged-in Linux guest");
 assert.notEqual(process.getuid(), 0);
 const inventory = parsePwDump(execFileSync("pw-dump", { encoding: "utf8" }));
-const prefix = "io.tonenari.default-virtual-io";
+const prefix = "io.mixrelay.default-virtual-io";
 for (const [suffix, mediaClass] of [["render", "Audio/Sink"], ["capture", "Audio/Source"]]) {
   assert.ok(inventory.some(item => item.info?.props?.["node.name"] === `${prefix}.${suffix}`
     && item.info.props["media.class"] === mediaClass), `Missing explicit ${suffix} target`);

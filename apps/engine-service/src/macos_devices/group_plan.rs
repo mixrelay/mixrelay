@@ -1,6 +1,6 @@
 //! Private-group compatibility policy. Native code supplies facts, not fallback
 //! decisions. A rejected plan never allocates a `CoreAudio` aggregate.
-use super::ffi::tn_aggregate_member_info;
+use super::ffi::mr_aggregate_member_info;
 use std::{collections::BTreeSet, ffi::CString};
 
 const MAX_MEMBERS: usize = 32;
@@ -36,7 +36,7 @@ impl GroupPlan {
         let mut info = MemberInfo::default();
         // SAFETY: the native call borrows a NUL-terminated UID and writes
         // exactly one repr(C) snapshot; it retains neither address.
-        unsafe { tn_aggregate_member_info(uid.as_ptr(), &raw mut info) }.then_some(info)
+        unsafe { mr_aggregate_member_info(uid.as_ptr(), &raw mut info) }.then_some(info)
     }
 
     fn inspect(

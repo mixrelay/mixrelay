@@ -1,9 +1,9 @@
+use mixrelay_macos_transport::endpoint_identity::endpoint_uid;
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
-use tonenari_macos_transport::endpoint_identity::endpoint_uid;
 
 use crate::abi::{Geometry, NativeOps, Snapshot};
 

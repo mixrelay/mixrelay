@@ -1,7 +1,7 @@
 use super::*;
 use crate::ProcessorExchange;
+use mixrelay_audio_graph::{CompileContext, CompileLimits, GraphCompiler, GraphDocument};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tonenari_audio_graph::{CompileContext, CompileLimits, GraphCompiler, GraphDocument};
 
 struct Counter {
     identity: u64,

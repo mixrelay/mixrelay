@@ -3,13 +3,13 @@ use std::sync::atomic::AtomicBool;
 
 fn record(clock: &mut CallbackClock, sample: f64, host: u64, flags: bool, frames: u64) {
     // SAFETY: exclusive stack owner, initialized by Default, without concurrent readers.
-    unsafe { tn_callback_clock_record_values(clock, sample, host, flags, frames) };
+    unsafe { mr_callback_clock_record_values(clock, sample, host, flags, frames) };
 }
 
 fn snapshot(clock: &CallbackClock) -> CallbackClockSnapshot {
     let mut result = CallbackClockSnapshot::default();
     // SAFETY: live initialized clock and disjoint exclusive stack output.
-    assert!(unsafe { tn_callback_clock_snapshot(clock, &raw mut result) });
+    assert!(unsafe { mr_callback_clock_snapshot(clock, &raw mut result) });
     result
 }
 
@@ -24,7 +24,7 @@ fn native_storage_and_snapshot_layout_match_both_c_callers() {
     assert_eq!(std::mem::offset_of!(CallbackClockSnapshot, valid), 24);
     let mut clock = std::mem::MaybeUninit::<CallbackClock>::uninit();
     // SAFETY: aligned exclusive full clock storage, not yet initialized or published.
-    unsafe { tn_callback_clock_init(clock.as_mut_ptr()) };
+    unsafe { mr_callback_clock_init(clock.as_mut_ptr()) };
     // SAFETY: init wrote every Rust field and established the clock value.
     let clock = unsafe { clock.assume_init() };
     assert_eq!(snapshot(&clock), CallbackClockSnapshot::default());
@@ -87,7 +87,7 @@ fn reconnect_reset_preserves_publication_and_cumulative_errors() {
     record(&mut clock, 256.0, 200, true, 128);
     let previous = snapshot(&clock);
     // SAFETY: exclusive owner models unregister/drain before reconnect.
-    unsafe { tn_callback_clock_reset(&raw mut clock) };
+    unsafe { mr_callback_clock_reset(&raw mut clock) };
     assert_eq!(snapshot(&clock), previous);
     record(&mut clock, -512.0, 1, true, 256);
     assert_eq!(snapshot(&clock).discontinuities, 1);
@@ -112,23 +112,23 @@ fn stalled_publication_does_not_spin_overwrite_output_or_hide_error_count() {
     // SAFETY: initialized clock with an intentionally in-flight publication;
     // reader only accesses atomics and disjoint writable output.
     unsafe {
-        assert!(!tn_callback_clock_snapshot(
+        assert!(!mr_callback_clock_snapshot(
             &raw const clock,
             &raw mut result
         ));
-        assert_eq!(tn_callback_clock_discontinuities(&raw const clock), 7);
-        assert!(!tn_callback_clock_snapshot(
+        assert_eq!(mr_callback_clock_discontinuities(&raw const clock), 7);
+        assert!(!mr_callback_clock_snapshot(
             &raw const clock,
             std::ptr::null_mut()
         ));
-        assert!(!tn_callback_clock_snapshot(
+        assert!(!mr_callback_clock_snapshot(
             std::ptr::null(),
             &raw mut result
         ));
-        assert_eq!(tn_callback_clock_discontinuities(std::ptr::null()), 0);
-        tn_callback_clock_init(std::ptr::null_mut());
-        tn_callback_clock_reset(std::ptr::null_mut());
-        tn_callback_clock_record_values(std::ptr::null_mut(), 0.0, 0, false, 0);
+        assert_eq!(mr_callback_clock_discontinuities(std::ptr::null()), 0);
+        mr_callback_clock_init(std::ptr::null_mut());
+        mr_callback_clock_reset(std::ptr::null_mut());
+        mr_callback_clock_record_values(std::ptr::null_mut(), 0.0, 0, false, 0);
     }
     assert_eq!(result, unchanged);
 }

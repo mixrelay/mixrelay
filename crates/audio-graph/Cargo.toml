@@ -1,5 +1,5 @@
 [package]
-name = "tonenari-audio-graph"
+name = "mixrelay-audio-graph"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,6 +14,6 @@ workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tonenari-audio-io.workspace = true
+mixrelay-audio-io.workspace = true
 
 [dev-dependencies]

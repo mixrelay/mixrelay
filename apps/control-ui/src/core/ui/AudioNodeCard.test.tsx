@@ -1,12 +1,12 @@
 import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ToneNariProvider } from '../theme/ToneNariProvider';
+import { MixRelayProvider } from '../theme/MixRelayProvider';
 import { AudioNodeCard, type AudioNodeCardProps } from './AudioNodeCard';
 
 function card(iconUrl?: string) {
   return (
-    <ToneNariProvider>
+    <MixRelayProvider>
       <AudioNodeCard
         category="Application"
         icon="APP"
@@ -16,13 +16,13 @@ function card(iconUrl?: string) {
         title="Player"
         onSelect={vi.fn()}
       />
-    </ToneNariProvider>
+    </MixRelayProvider>
   );
 }
 
 it('renders every generic plug-in parameter without an internal scroll viewport', () => {
   const view = render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <AudioNodeCard
         category="Processor"
         icon="AU"
@@ -42,7 +42,7 @@ it('renders every generic plug-in parameter without an internal scroll viewport'
           value: 0.5,
         }))}
       />
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   expect(view.queryByRole('button', { name: 'Options' })).not.toBeInTheDocument();
   expect(view.getAllByRole('slider')).toHaveLength(24);
@@ -53,7 +53,7 @@ it('renders every generic plug-in parameter without an internal scroll viewport'
 
 it('places native plug-in content under a compact unmetered face', () => {
   const view = render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <AudioNodeCard
         category="Processor"
         icon="AU"
@@ -65,7 +65,7 @@ it('places native plug-in content under a compact unmetered face', () => {
         onSelect={vi.fn()}
         content={<div>Native editor</div>}
       />
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   const root = view.getByText('Native editor').closest('[data-face-mode]');
   expect(root).toHaveAttribute('data-face-mode', 'compact');
@@ -83,7 +83,7 @@ it.each(['closed', 'opening', 'open', 'failed', 'unavailable', undefined] as con
       ? { actionLabel: 'Retry editor', state }
       : undefined;
     const view = render(
-      <ToneNariProvider>
+      <MixRelayProvider>
         <AudioNodeCard
           category="Processor"
           icon="FX"
@@ -106,7 +106,7 @@ it.each(['closed', 'opening', 'open', 'failed', 'unavailable', undefined] as con
             },
           ]}
         />
-      </ToneNariProvider>,
+      </MixRelayProvider>,
     );
     const needsParameters = !state || state === 'failed' || state === 'unavailable';
     if (needsParameters) {
@@ -132,7 +132,7 @@ it.each(['closed', 'opening', 'open', 'failed', 'unavailable', undefined] as con
 
 it('renders feature-owned controls without changing the port face boundary', () => {
   const view = render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <AudioNodeCard
         category="Output"
         icon="REC"
@@ -143,7 +143,7 @@ it('renders feature-owned controls without changing the port face boundary', () 
         onSelect={vi.fn()}
         content={<button type="button">Record</button>}
       />
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   const control = view.getByRole('button', { name: 'Record' });
   expect(control.closest('.nodrag.nopan.nowheel')).not.toBeNull();
@@ -189,9 +189,9 @@ it('clears offline meters while keeping selection and options editable, then res
     onGainChange: vi.fn(),
   };
   const view = render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <AudioNodeCard {...props} offline status="Offline" />
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   const button = view.getByRole('button', { name: 'Microphone, Input, Offline' });
   expect(button).toBeEnabled();
@@ -202,9 +202,9 @@ it('clears offline meters while keeping selection and options editable, then res
   fireEvent.click(view.getByRole('button', { name: 'Options' }));
   expect(view.getByRole('slider', { name: 'Gain' })).toBeEnabled();
   view.rerender(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <AudioNodeCard {...props} />
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   expect(view.container.querySelector('[data-offline]')).toBeNull();
   expect(view.container.querySelector('[title$=": 60%"]')).not.toBeNull();

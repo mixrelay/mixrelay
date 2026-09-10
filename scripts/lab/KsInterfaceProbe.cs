@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
 // Read-only inventory: distinguish an INF registry entry from a live KS interface.
-public static class ToneNariKsInterfaceProbe
+public static class MixRelayKsInterfaceProbe
 {
     [StructLayout(LayoutKind.Sequential)] struct InterfaceData
     { public uint Size; public Guid Class; public uint Flags; public UIntPtr Reserved; }

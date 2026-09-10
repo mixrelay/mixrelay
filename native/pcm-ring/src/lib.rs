@@ -18,8 +18,8 @@ mod ffi;
 mod queue;
 mod storage;
 pub use ffi::{
-    tn_pcm_ring_clear, tn_pcm_ring_discard, tn_pcm_ring_init, tn_pcm_ring_read,
-    tn_pcm_ring_read_available, tn_pcm_ring_restart, tn_pcm_ring_stats, tn_pcm_ring_write,
+    mr_pcm_ring_clear, mr_pcm_ring_discard, mr_pcm_ring_init, mr_pcm_ring_read,
+    mr_pcm_ring_read_available, mr_pcm_ring_restart, mr_pcm_ring_stats, mr_pcm_ring_write,
 };
 
 /// Embedded opaque native storage. Zero-initialization owns no resources; init

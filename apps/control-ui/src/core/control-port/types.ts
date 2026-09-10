@@ -9,7 +9,7 @@ export type DriverState =
   | 'version_mismatch'
   | 'ready';
 
-export interface ToneNariStatus {
+export interface MixRelayStatus {
   processorTimings?: ProcessorTiming[];
   recorderError?: string | null;
   protocolVersion: 1;
@@ -343,7 +343,7 @@ export interface ControlPort {
   getProcessors(): Promise<ExternalProcessorCatalog>;
   getProcessorEditor(nodeId: string): Promise<ProcessorEditorStatus>;
   rescanProcessors(paths: string[]): Promise<ExternalProcessorCatalog>;
-  getStatus(): Promise<ToneNariStatus>;
+  getStatus(): Promise<MixRelayStatus>;
   setProcessorParameter(
     nodeId: string,
     parameterId: number,

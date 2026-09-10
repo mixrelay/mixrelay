@@ -91,7 +91,7 @@ export const en = {
     },
   },
   common: {
-    appName: 'ToneNari',
+    appName: 'MixRelay',
     beta: 'Private preview',
     cancel: 'Cancel',
     create: 'Create',
@@ -110,7 +110,7 @@ export const en = {
     audioEngine: 'Audio engine',
     engineShort: 'Engine',
     workspace: 'Routing workspace',
-    signalPathLabel: 'ToneNari signal path',
+    signalPathLabel: 'MixRelay signal path',
     capture: 'Capture',
     captureDescription: 'Audio from applications and the system enters here.',
     stream: 'Stream',
@@ -177,8 +177,8 @@ export const en = {
     },
     title: 'Virtual I/O routing',
     description:
-      'Route audio written to ToneNari by macOS applications back to the device input used by OBS and DAWs.',
-    canvasLabel: 'ToneNari virtual I/O routing graph',
+      'Route audio written to MixRelay by macOS applications back to the device input used by OBS and DAWs.',
+    canvasLabel: 'MixRelay virtual I/O routing graph',
     toggleGain: '−6 dB gain',
     apply: 'Apply',
     nodes: {
@@ -193,7 +193,7 @@ export const en = {
       deviceName: 'Device name',
       virtualOutput: 'Graph → device',
       virtualInput: 'Device → graph',
-      virtualDevice: 'ToneNari Virtual I/O',
+      virtualDevice: 'MixRelay Virtual I/O',
       newVirtualDevice: 'New virtual device',
       virtualAvailable: 'Connect',
       virtualAttached: 'Connected',
@@ -246,7 +246,7 @@ export const en = {
       retry: 'Retry',
     },
     persistenceWarning:
-      'Audio is active, but graph changes could not be saved. They may be lost when ToneNari closes.',
+      'Audio is active, but graph changes could not be saved. They may be lost when MixRelay closes.',
     layout: {
       failed: 'Could not save or load the node layout and view. Your current edits are preserved.',
       retry: 'Save current layout',
@@ -280,7 +280,7 @@ export const en = {
     },
   },
   studioGraph: {
-    editorLabel: 'ToneNari audio graph editor',
+    editorLabel: 'MixRelay audio graph editor',
     canvasLabel: 'Broadcast mix signal graph',
     sessionName: 'Broadcast mix / Main',
     saved: 'Saved just now',
@@ -305,7 +305,7 @@ export const en = {
       twoSources: 'Chrome + microphone',
       streamControl: 'Threshold −12 dB',
       voiceContour: '4 bands · Voice clarity',
-      stereo48k: 'ToneNari Stream · 48 kHz',
+      stereo48k: 'MixRelay Stream · 48 kHz',
       headphones: 'MacBook Pro speakers',
     },
     controls: {
@@ -365,7 +365,7 @@ export const en = {
   },
   driver: {
     title: 'Virtual audio driver',
-    description: 'ToneNari Capture and ToneNari Stream',
+    description: 'MixRelay Capture and MixRelay Stream',
     actionInstall: 'Install driver',
     actionRestart: 'Restart audio services',
     actionDiagnose: 'Open diagnostics',

@@ -10,8 +10,8 @@ use std::{
     time::Duration,
 };
 
-use tonenari_audio_engine::ProcessorExchange;
-use tonenari_engine_service::{
+use mixrelay_audio_engine::ProcessorExchange;
+use mixrelay_engine_service::{
     ControlMaintenance, EngineGraphController, session::AdapterRuntimeStatus,
 };
 
@@ -82,7 +82,7 @@ impl Drop for MaintenanceWorker {
         if let Some(thread) = self.thread.take() {
             thread.thread().unpark();
             if thread.join().is_err() {
-                tracing::error!(worker = self.name, "ToneNari maintenance worker panicked");
+                tracing::error!(worker = self.name, "MixRelay maintenance worker panicked");
             }
         }
     }
@@ -95,7 +95,7 @@ pub(super) fn start_reclaimer(
     exchange: Weak<ProcessorExchange>,
     devices: Weak<MacDevices>,
 ) -> Result<MaintenanceWorker, String> {
-    MaintenanceWorker::start("tonenari-processor-reclaimer", move |stop| {
+    MaintenanceWorker::start("mixrelay-processor-reclaimer", move |stop| {
         while !stop.load(Ordering::Acquire) {
             if !reclaim_once(&exchange, &devices) {
                 break;
@@ -128,7 +128,7 @@ fn start_format_monitor(
     let weak_status = Arc::downgrade(status);
     let weak_controller = Arc::downgrade(controller);
     let weak_devices = Arc::downgrade(devices);
-    MaintenanceWorker::start("tonenari-device-format-monitor", move |stop| {
+    MaintenanceWorker::start("mixrelay-device-format-monitor", move |stop| {
         let mut last_error = None;
         while !stop.load(Ordering::Acquire) {
             let (Some(status), Some(controller)) =
@@ -136,7 +136,7 @@ fn start_format_monitor(
             else {
                 break;
             };
-            if tonenari_engine_service::endpoint_service::driver_connected() {
+            if mixrelay_engine_service::endpoint_service::driver_connected() {
                 status.observe_endpoint(true);
             } else {
                 status.forget_endpoint_observation();
@@ -148,7 +148,7 @@ fn start_format_monitor(
             let error = controller.reconcile_observed_device_rate().err();
             if error != last_error {
                 if let Some(error) = &error {
-                    tracing::error!(?error, "ToneNari external rate reconciliation failed");
+                    tracing::error!(?error, "MixRelay external rate reconciliation failed");
                 }
                 last_error = error;
             }

@@ -97,7 +97,7 @@ fn parse_request(message: Xpc) -> Option<SourceRequest> {
 /// # Safety
 /// Source ID is null or readable through its first NUL, at most 128 bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_engine_control_create_clocked_source_request(
+pub unsafe extern "C" fn mr_engine_control_create_clocked_source_request(
     source: *const c_char,
     capacity_frames: u32,
     channels: u32,
@@ -128,7 +128,7 @@ pub unsafe extern "C" fn tn_engine_control_create_clocked_source_request(
 /// Message is null or live XPC. Output is writable. Malformed requests leave
 /// output unchanged; only clocked transport version 2 is accepted.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_engine_control_parse_source_request(
+pub unsafe extern "C" fn mr_engine_control_parse_source_request(
     message: Xpc,
     request: *mut SourceRequest,
 ) -> bool {
@@ -172,7 +172,7 @@ fn populate_attachment(
 /// Request is null or live XPC. Descriptor is live and borrowed; XPC retains a
 /// duplicate. All required lease metadata is published in the same reply.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_engine_control_create_source_attachment_reply(
+pub unsafe extern "C" fn mr_engine_control_create_source_attachment_reply(
     request: Xpc,
     descriptor: c_int,
     mapped_size: usize,
@@ -206,7 +206,7 @@ pub unsafe extern "C" fn tn_engine_control_create_source_attachment_reply(
 /// Message is null or live XPC. Output is empty/previously closed writable
 /// storage. Success transfers one descriptor; errors leave output unchanged.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_engine_control_parse_source_attachment(
+pub unsafe extern "C" fn mr_engine_control_parse_source_attachment(
     message: Xpc,
     attachment: *mut SourceAttachment,
 ) -> bool {
@@ -246,7 +246,7 @@ pub unsafe extern "C" fn tn_engine_control_parse_source_attachment(
 /// # Safety
 /// Non-null attachment contains a uniquely owned parsed FD or an empty value.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_engine_control_source_attachment_close(
+pub unsafe extern "C" fn mr_engine_control_source_attachment_close(
     attachment: *mut SourceAttachment,
 ) {
     let Some(attachment) = (unsafe { attachment.as_mut() }) else {

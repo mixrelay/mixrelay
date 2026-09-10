@@ -1,4 +1,4 @@
-/* ToneNari-owned LV2 native-state fixture; MIT OR Apache-2.0, same as this adapter.
+/* MixRelay-owned LV2 native-state fixture; MIT OR Apache-2.0, same as this adapter.
  * No installed plugin is modified. Compile inside a temporary fixture bundle. */
 #include <lv2/core/lv2.h>
 #include <lv2/state/state.h>
@@ -15,8 +15,8 @@ static LV2_Handle instantiate(const LV2_Descriptor *d, double rate, const char *
     Fixture *f = calloc(1, sizeof(*f));
     if (!f) return NULL;
     memcpy(f->bytes, (unsigned char[]){1, 0, 255, 13, 0}, 5);
-    f->key = map->map(map->handle, "urn:tonenari:fixture:opaque");
-    f->type = map->map(map->handle, "urn:tonenari:fixture:binary");
+    f->key = map->map(map->handle, "urn:mixrelay:fixture:opaque");
+    f->type = map->map(map->handle, "urn:mixrelay:fixture:binary");
     return f;
 }
 static void connect_port(LV2_Handle h, uint32_t p, void *v) { if (p == 2) ((Fixture *)h)->gain = v; }
@@ -39,5 +39,5 @@ static LV2_State_Status restore(LV2_Handle h, LV2_State_Retrieve_Function retrie
 }
 static const LV2_State_Interface state = {save, restore};
 static const void *extension_data(const char *uri) { return !strcmp(uri, LV2_STATE__interface) ? &state : NULL; }
-static const LV2_Descriptor descriptor = {"urn:tonenari:state-fixture", instantiate, connect_port, activate, run, deactivate, cleanup, extension_data};
+static const LV2_Descriptor descriptor = {"urn:mixrelay:state-fixture", instantiate, connect_port, activate, run, deactivate, cleanup, extension_data};
 LV2_SYMBOL_EXPORT const LV2_Descriptor *lv2_descriptor(uint32_t index) { return index == 0 ? &descriptor : NULL; }

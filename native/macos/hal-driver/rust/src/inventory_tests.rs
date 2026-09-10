@@ -2,8 +2,8 @@ use std::ffi::{c_char, c_void};
 use std::os::fd::AsRawFd;
 use std::sync::atomic::Ordering;
 
-use tonenari_macos_transport::control_inventory::{
-    InventoryEntry, tn_hal_control_create_inventory_snapshot,
+use mixrelay_macos_transport::control_inventory::{
+    InventoryEntry, mr_hal_control_create_inventory_snapshot,
 };
 
 use super::{FAIL_CREATE_ENDPOINT, Fixture, LIVE};
@@ -42,7 +42,7 @@ impl Message {
             })
             .collect();
         let message = unsafe {
-            tn_hal_control_create_inventory_snapshot(entries.as_ptr(), entries.len(), generation)
+            mr_hal_control_create_inventory_snapshot(entries.as_ptr(), entries.len(), generation)
         };
         assert!(!message.is_null());
         Self(message)
@@ -50,11 +50,11 @@ impl Message {
 
     fn apply(&self, fixture: &Fixture) -> bool {
         unsafe {
-            assert!(crate::inventory::tn_hal_core_control_connected(
+            assert!(crate::inventory::mr_hal_core_control_connected(
                 (&raw const *fixture.registry).cast_mut(),
                 1,
             ));
-            crate::inventory::tn_hal_core_control_message(
+            crate::inventory::mr_hal_core_control_message(
                 (&raw const *fixture.registry).cast_mut(),
                 1,
                 self.0,
@@ -85,7 +85,7 @@ fn replacement_requests_require_current_validated_inventory() {
         let mut endpoint = [0; 16];
         let mut generation = 0;
         let accepted = unsafe {
-            crate::inventory::tn_hal_core_replacement_request(
+            crate::inventory::mr_hal_core_replacement_request(
                 (&raw const *fixture.registry).cast_mut(),
                 authority,
                 &raw mut endpoint,
@@ -96,7 +96,7 @@ fn replacement_requests_require_current_validated_inventory() {
     };
     assert_eq!(request(1), (true, [1; 16], 90));
     assert!(unsafe {
-        crate::inventory::tn_hal_core_control_connected(
+        crate::inventory::mr_hal_core_control_connected(
             (&raw const *fixture.registry).cast_mut(),
             2,
         )
@@ -105,7 +105,7 @@ fn replacement_requests_require_current_validated_inventory() {
     assert_eq!(request(2), (false, [0; 16], 0));
     let new = Message::new(&fixture, &[1], 2);
     assert!(unsafe {
-        crate::inventory::tn_hal_core_control_message(
+        crate::inventory::mr_hal_core_control_message(
             (&raw const *fixture.registry).cast_mut(),
             2,
             new.0,

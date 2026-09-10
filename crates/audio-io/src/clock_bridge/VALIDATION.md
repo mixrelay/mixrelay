@@ -37,8 +37,8 @@ OS adapter, physical device, daemon scheduling deadline, or global capability.
 ## Reproduction
 
 ```sh
-cargo test -p tonenari-audio-io clock_bridge --release -- --nocapture
-cargo clippy -p tonenari-audio-io --lib --tests -- -D warnings
+cargo test -p mixrelay-audio-io clock_bridge --release -- --nocapture
+cargo clippy -p mixrelay-audio-io --lib --tests -- -D warnings
 ```
 
 Long simulated clocks are deliberately tested in release mode: unoptimized sinc

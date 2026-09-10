@@ -41,7 +41,7 @@ async function start() {
   const fd = openSync(join(evidence, `engine-${++run}.log`), 'wx', 0o600);
   try {
     child = spawn(engine, [], { stdio: ['ignore', fd, fd], env: { ...process.env,
-      TONENARI_CONFIG_DIR: config, XDG_RUNTIME_DIR: `/run/user/${uid}`,
+      MIXRELAY_CONFIG_DIR: config, XDG_RUNTIME_DIR: `/run/user/${uid}`,
       DBUS_SESSION_BUS_ADDRESS: `unix:path=/run/user/${uid}/bus` } });
   } finally { closeSync(fd); }
   child.on('error', error => { console.error(error); });
@@ -71,7 +71,7 @@ async function apply(nodes) {
 }
 async function checkSides(expected) {
   writeFileSync(join(evidence, `inventory-${run}-${expected}.json`), execFileSync('pw-dump', { encoding: 'utf8', timeout: 5000 }), { flag: 'wx' });
-  await until(() => ownNodes(child.pid).filter(n => n.info.props['node.name'].startsWith('io.tonenari.restart-probe')).length === expected, 'Native device sides not restored');
+  await until(() => ownNodes(child.pid).filter(n => n.info.props['node.name'].startsWith('io.mixrelay.restart-probe')).length === expected, 'Native device sides not restored');
   writeFileSync(join(evidence, `nodes-${run}.json`), JSON.stringify(ownNodes(child.pid), null, 2), { flag: 'wx' });
 }
 

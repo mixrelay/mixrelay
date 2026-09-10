@@ -2,7 +2,7 @@
 
 Status: Accepted
 
-ToneNari begins as freeware distributed from a private source repository. A
+MixRelay begins as freeware distributed from a private source repository. A
 future paid offering is planned. Free distribution of binaries does not imply
 an open-source grant.
 

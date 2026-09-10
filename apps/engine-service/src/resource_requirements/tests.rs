@@ -1,6 +1,6 @@
 use super::*;
-use tonenari_audio_graph::{DeviceSelector, NodeSpec};
-use tonenari_audio_io::{ApplicationSelector, ChannelLayout, SourcePlaybackPolicy, StreamSpec};
+use mixrelay_audio_graph::{DeviceSelector, NodeSpec};
+use mixrelay_audio_io::{ApplicationSelector, ChannelLayout, SourcePlaybackPolicy, StreamSpec};
 
 fn node(id: &str, config: NodeConfig) -> NodeSpec {
     NodeSpec {

@@ -5,7 +5,7 @@ import type { AudioGraphModel } from '../../core/audio-graph/model';
 import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
 import type { AudioSessionStatus, RuntimeGraphDocument } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
-import { ToneNariProvider } from '../../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { AudioNodeCard } from '../../core/ui/AudioNodeCard';
 import { audioGraphToRuntimeGraph, runtimeGraphToAudioGraph } from './model';
 import { RoutingWorkspace } from './RoutingWorkspace';
@@ -33,7 +33,7 @@ const document: RuntimeGraphDocument = {
       config: {
         reference: { render: true, capture: true },
         id: 'virtual',
-        displayName: 'ToneNari',
+        displayName: 'MixRelay',
         defaultSampleRate: 48000,
         supportedSampleRates: [48000],
         render: { channels: 2, channelLayout: 'stereo' },
@@ -164,9 +164,9 @@ describe.each(['en', 'ko-KR', 'pseudo'])('virtual node session status: %s', (loc
     const appearance = presentVirtualNodeStatus(raw, 'active', running, t).nodes[0]?.appearance;
     if (!appearance) throw new Error('missing virtual input');
     const view = render(
-      <ToneNariProvider>
+      <MixRelayProvider>
         <AudioNodeCard {...appearance} inputCount={0} outputCount={2} onSelect={vi.fn()} />
-      </ToneNariProvider>,
+      </MixRelayProvider>,
     );
     const marker = screen.getByRole('img', { name: t('routing.nodeStatus.running') });
     expect(marker).toHaveAttribute('data-tone', 'positive');
@@ -195,11 +195,11 @@ it('updates the workspace after stop/failure/recovery without publishing a graph
   });
   const apply = vi.spyOn(port, 'applyGraph');
   const workspace = (session?: AudioSessionStatus) => (
-    <ToneNariProvider>
+    <MixRelayProvider>
       <I18nextProvider i18n={i18n}>
         <RoutingWorkspace controlPort={port} audioSession={session} />
       </I18nextProvider>
-    </ToneNariProvider>
+    </MixRelayProvider>
   );
   const view = render(workspace());
   const status = await screen.findByTestId('presented-status');

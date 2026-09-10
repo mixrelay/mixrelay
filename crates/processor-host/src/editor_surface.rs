@@ -1,5 +1,6 @@
 //! Bounded control transport. Audio never reads this ring or waits for its publishers.
 use crate::{NodeId, ProcessorControlRegistry, WORKER_READY};
+use mixrelay_control_protocol::{EditorPointerKind, ProcessorEditorFrame, ProcessorEditorInput};
 use std::{
     sync::{
         Arc,
@@ -7,7 +8,6 @@ use std::{
     },
     time::Duration,
 };
-use tonenari_control_protocol::{EditorPointerKind, ProcessorEditorFrame, ProcessorEditorInput};
 
 impl ProcessorControlRegistry {
     /// Releases an in-flight gesture before a close/state checkpoint can wait on the broker.
@@ -205,7 +205,7 @@ mod tests {
         AudioLayout, EDITOR_STATE_OPEN, HostedProcessorControl, ProcessorStateError,
         shared_transport::{self, WorkerControl},
     };
-    use tonenari_test_support::FixtureDir;
+    use mixrelay_test_support::FixtureDir;
 
     #[test]
     fn input_ring_preserves_session_coordinates_and_modifiers() {
@@ -418,14 +418,14 @@ mod tests {
         let fixture = Fixture::new();
         let registry = ProcessorControlRegistry::default();
         let id = NodeId::from("effect");
-        let config = tonenari_audio_graph::ProviderNodeConfig {
+        let config = mixrelay_audio_graph::ProviderNodeConfig {
             type_id: "au:aufx:bpas:appl".into(),
             parameters: serde_json::json!({}),
         };
-        let request = tonenari_audio_engine::HostedProcessorPrepareRequest {
+        let request = mixrelay_audio_engine::HostedProcessorPrepareRequest {
             node_id: &id,
             config: &config,
-            format: tonenari_audio_graph::RenderFormat {
+            format: mixrelay_audio_graph::RenderFormat {
                 sample_rate: 48000,
                 block_frames: 32,
             },

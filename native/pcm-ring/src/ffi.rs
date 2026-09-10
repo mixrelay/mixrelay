@@ -10,7 +10,7 @@ use std::{
 /// Non-null ring is 120 writable bytes aligned to 8. The native stream owns it
 /// exclusively before IO registration; it contains no live mapping to overwrite.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_pcm_ring_init(
+pub unsafe extern "C" fn mr_pcm_ring_init(
     ring: *mut PcmRing,
     channels: u32,
     capacity: u32,
@@ -32,7 +32,7 @@ pub unsafe extern "C" fn tn_pcm_ring_init(
 /// Native stream owns initialized or zeroed storage. Producer, consumer and stat
 /// readers must have stopped; no Rust borrow may survive this control-side clear.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_pcm_ring_clear(ring: *mut PcmRing) {
+pub unsafe extern "C" fn mr_pcm_ring_clear(ring: *mut PcmRing) {
     // SAFETY: native zero initialization is a valid empty value for every field.
     if let Some(ring) = unsafe { ring.as_mut() } {
         *ring = PcmRing::default();
@@ -43,7 +43,7 @@ pub unsafe extern "C" fn tn_pcm_ring_clear(ring: *mut PcmRing) {
 /// # Safety
 /// Ring remains initialized/live under native stream ownership throughout this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_pcm_ring_restart(ring: *mut PcmRing) {
+pub unsafe extern "C" fn mr_pcm_ring_restart(ring: *mut PcmRing) {
     // SAFETY: retained owner; only the atomic control request is mutated.
     if let Some(ring) = unsafe { ring.as_ref() } {
         ring.publication.requested_epoch.fetch_add(1, Release);
@@ -55,7 +55,7 @@ pub unsafe extern "C" fn tn_pcm_ring_restart(ring: *mut PcmRing) {
 /// The native consumer exclusively owns its private reader cell, with the ring
 /// retained. No other consumer/read/discard may overlap; producer may continue.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_pcm_ring_discard(ring: *mut PcmRing) {
+pub unsafe extern "C" fn mr_pcm_ring_discard(ring: *mut PcmRing) {
     // SAFETY: initialized ring retained by the native stream.
     if let Some(ring) = unsafe { ring.as_ref() } {
         ring.publication
@@ -74,7 +74,7 @@ pub unsafe extern "C" fn tn_pcm_ring_discard(ring: *mut PcmRing) {
 /// Retained initialized ring, one serialized producer. Accepted input contains
 /// frames*channels readable floats disjoint from the mapped ring allocation.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_pcm_ring_write(
+pub unsafe extern "C" fn mr_pcm_ring_write(
     ring: *mut PcmRing,
     input: *const f32,
     frames: u32,
@@ -152,7 +152,7 @@ pub(super) unsafe fn read(
 /// Native stream retains ring and grants this call sole consumer ownership. Output
 /// is writable for frames*channels floats, disjoint from PCM storage, even on failure.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_pcm_ring_read(
+pub unsafe extern "C" fn mr_pcm_ring_read(
     ring: *mut PcmRing,
     output: *mut f32,
     frames: u32,
@@ -165,7 +165,7 @@ pub unsafe extern "C" fn tn_pcm_ring_read(
 /// # Safety
 /// Same retained ring, serialized consumer and complete output contract as read.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_pcm_ring_read_available(
+pub unsafe extern "C" fn mr_pcm_ring_read_available(
     ring: *mut PcmRing,
     output: *mut f32,
     frames: u32,
@@ -178,7 +178,7 @@ pub unsafe extern "C" fn tn_pcm_ring_read_available(
 /// # Safety
 /// Native stream retains initialized or zeroed ring storage until this read ends.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_pcm_ring_stats(ring: *const PcmRing) -> RingStats {
+pub unsafe extern "C" fn mr_pcm_ring_stats(ring: *const PcmRing) -> RingStats {
     // SAFETY: only immutable geometry and atomic observations are accessed.
     unsafe { ring.as_ref() }.map_or_else(RingStats::default, PcmRing::stats)
 }

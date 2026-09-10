@@ -3,10 +3,10 @@ fn main() {
         return;
     }
     cc::Build::new()
-        .file("../driver/TNHALControlBlock.c")
+        .file("../driver/MRHALControlBlock.c")
         .flag("-std=c17")
         .flag("-fblocks")
         .warnings_into_errors(true)
-        .compile("tonenari_hal_control_block");
-    println!("cargo:rerun-if-changed=../driver/TNHALControlBlock.c");
+        .compile("mixrelay_hal_control_block");
+    println!("cargo:rerun-if-changed=../driver/MRHALControlBlock.c");
 }

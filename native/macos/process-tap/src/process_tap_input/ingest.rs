@@ -1,9 +1,9 @@
 use super::{MAX_CHANNELS, TapFormat, TapInputResult, TapPeaks};
-use std::{ptr, slice};
-use tonenari_macos_transport::{
+use mixrelay_macos_transport::{
     audio_buffer::{AudioBuffer, AudioBufferList, buffers},
-    capture_ring::{AudioRing, tn_audio_ring_write_interleaved, tn_audio_ring_write_planar},
+    capture_ring::{AudioRing, mr_audio_ring_write_interleaved, mr_audio_ring_write_planar},
 };
+use std::{ptr, slice};
 
 fn frame_count(format: &TapFormat, parts: &[AudioBuffer]) -> Option<usize> {
     let first = parts.first()?;
@@ -50,7 +50,7 @@ unsafe fn record(peaks: &TapPeaks, format: &TapFormat, parts: &[AudioBuffer]) {
 /// Validates one tap block, records its peaks and writes its PCM without allocation.
 /// Null/malformed input returns zero frames without reading PCM or changing meters.
 /// # Safety
-/// `TNProcessTap` retains the native list and its declared readable PCM extents for
+/// `MRProcessTap` retains the native list and its declared readable PCM extents for
 /// the serialized `IOProc`. Format is immutable and matches the live ring's channel
 /// width. Ring has this sole producer; peaks are initialized and owner-retained.
 /// All buffers are disjoint from ring storage. No destruction overlaps this call.
@@ -75,10 +75,10 @@ pub(crate) unsafe fn ingest(
             *plane = part.data.cast_const();
         }
         // SAFETY: bounded table matches the ring's immutable channel width.
-        unsafe { tn_audio_ring_write_planar(ring, planes.as_ptr(), frames) }
+        unsafe { mr_audio_ring_write_planar(ring, planes.as_ptr(), frames) }
     } else {
         // SAFETY: validated interleaved extent is readable for frames*channels.
-        unsafe { tn_audio_ring_write_interleaved(ring, parts[0].data, frames) }
+        unsafe { mr_audio_ring_write_interleaved(ring, parts[0].data, frames) }
     };
     TapInputResult { frames, written }
 }

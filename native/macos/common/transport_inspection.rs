@@ -3,7 +3,7 @@
 //! This module never binds a HAL context or owns a device's active mapping.
 //! The Rust HAL runtime alone prepares, commits and retires those mappings.
 use crate::endpoint_transport::{
-    EndpointTransportConfig, tn_endpoint_transport_attach, tn_endpoint_transport_config,
+    EndpointTransportConfig, mr_endpoint_transport_attach, mr_endpoint_transport_config,
 };
 use std::{
     ffi::{c_int, c_void},
@@ -63,10 +63,10 @@ impl InspectionMapping {
     }
 
     fn config(&self) -> io::Result<EndpointTransportConfig> {
-        let transport = unsafe { tn_endpoint_transport_attach(self.memory, self.size) };
+        let transport = unsafe { mr_endpoint_transport_attach(self.memory, self.size) };
         let mut config = EndpointTransportConfig::default();
         if transport.is_null()
-            || !unsafe { tn_endpoint_transport_config(transport, &raw mut config) }
+            || !unsafe { mr_endpoint_transport_config(transport, &raw mut config) }
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,

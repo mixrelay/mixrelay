@@ -1,17 +1,17 @@
 //! Rust-owned native runtime. Transport layout and callbacks are imported from
 //! the common Rust crate; only operating-system calls cross FFI.
+use mixrelay_macos_transport::endpoint_transport::{
+    EndpointTransport, EndpointTransportConfig as TransportConfig, mr_endpoint_transport_attach,
+    mr_endpoint_transport_config, mr_endpoint_transport_incarnation,
+};
+use mixrelay_macos_transport::hal_io::{
+    HalIoContext as IoContext, mr_hal_io_begin_stream, mr_hal_io_bind, mr_hal_io_clock_state,
+    mr_hal_io_is_lock_free, mr_hal_io_read_capture, mr_hal_io_requires_replacement,
+    mr_hal_io_set_render_activity, mr_hal_io_write_render,
+};
+use mixrelay_macos_transport::transport_inspection::inspect_descriptor;
 use std::cell::UnsafeCell;
 use std::ffi::c_void;
-use tonenari_macos_transport::endpoint_transport::{
-    EndpointTransport, EndpointTransportConfig as TransportConfig, tn_endpoint_transport_attach,
-    tn_endpoint_transport_config, tn_endpoint_transport_incarnation,
-};
-use tonenari_macos_transport::hal_io::{
-    HalIoContext as IoContext, tn_hal_io_begin_stream, tn_hal_io_bind, tn_hal_io_clock_state,
-    tn_hal_io_is_lock_free, tn_hal_io_read_capture, tn_hal_io_requires_replacement,
-    tn_hal_io_set_render_activity, tn_hal_io_write_render,
-};
-use tonenari_macos_transport::transport_inspection::inspect_descriptor;
 
 use crate::abi::{Geometry, HostOps, NativeOps, Timestamp};
 use crate::clock::Clock;
@@ -66,15 +66,15 @@ impl AttachedIo {
             size,
             identity: [0; 16],
         };
-        let transport = unsafe { tn_endpoint_transport_attach(address, size) };
+        let transport = unsafe { mr_endpoint_transport_attach(address, size) };
         let mut config = TransportConfig::default();
         if transport.is_null()
-            || !unsafe { tn_endpoint_transport_config(transport, &raw mut config) }
+            || !unsafe { mr_endpoint_transport_config(transport, &raw mut config) }
             || config.endpoint_id != geometry.endpoint_id
             || config.render_channels != geometry.render_channels
             || config.capture_channels != geometry.capture_channels
             || !unsafe {
-                tn_endpoint_transport_incarnation(transport, mapping.identity.as_mut_ptr())
+                mr_endpoint_transport_incarnation(transport, mapping.identity.as_mut_ptr())
             }
         {
             return None;
@@ -85,14 +85,14 @@ impl AttachedIo {
             transport,
             mapping,
         });
-        if !unsafe { tn_hal_io_is_lock_free(result.context.get()) } {
+        if !unsafe { mr_hal_io_is_lock_free(result.context.get()) } {
             return None;
         }
         Some(result)
     }
 
     fn bind(&self) -> bool {
-        unsafe { tn_hal_io_bind(self.context.get(), self.transport.cast()) }
+        unsafe { mr_hal_io_bind(self.context.get(), self.transport.cast()) }
     }
 }
 
@@ -103,7 +103,7 @@ struct Runtime {
 
 impl Drop for Runtime {
     fn drop(&mut self) {
-        unsafe { tn_hal_io_clock_state(self.io.context.get(), self.clock.rate, false) };
+        unsafe { mr_hal_io_clock_state(self.io.context.get(), self.clock.rate, false) };
     }
 }
 
@@ -140,7 +140,7 @@ unsafe extern "C" fn create(
     if !io.bind() {
         return std::ptr::null_mut();
     }
-    unsafe { tn_hal_io_clock_state(io.context.get(), rate, false) };
+    unsafe { mr_hal_io_clock_state(io.context.get(), rate, false) };
     Box::into_raw(Box::new(Runtime { clock, io })).cast()
 }
 
@@ -169,13 +169,13 @@ unsafe extern "C" fn replace(
     if !candidate.bind() {
         return false;
     }
-    if runtime.clock.running && !unsafe { tn_hal_io_begin_stream(candidate.context.get()) } {
+    if runtime.clock.running && !unsafe { mr_hal_io_begin_stream(candidate.context.get()) } {
         return false;
     }
     runtime.clock = clock;
-    unsafe { tn_hal_io_clock_state(candidate.context.get(), rate, runtime.clock.running) };
+    unsafe { mr_hal_io_clock_state(candidate.context.get(), rate, runtime.clock.running) };
     if candidate.mapping.identity != runtime.io.mapping.identity {
-        unsafe { tn_hal_io_clock_state(runtime.io.context.get(), rate, false) };
+        unsafe { mr_hal_io_clock_state(runtime.io.context.get(), rate, false) };
     }
     runtime.io = candidate;
     true
@@ -184,11 +184,11 @@ unsafe extern "C" fn replace(
 unsafe extern "C" fn start(runtime: *mut c_void, now: u64) -> bool {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     let mut clock = runtime.clock.clone();
-    if !clock.start(now) || !unsafe { tn_hal_io_begin_stream(runtime.io.context.get()) } {
+    if !clock.start(now) || !unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) } {
         return false;
     }
     runtime.clock = clock;
-    unsafe { tn_hal_io_clock_state(runtime.io.context.get(), runtime.clock.rate, true) };
+    unsafe { mr_hal_io_clock_state(runtime.io.context.get(), runtime.clock.rate, true) };
     true
 }
 
@@ -196,14 +196,14 @@ unsafe extern "C" fn stop(runtime: *mut c_void) {
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     runtime.clock.running = false;
     unsafe {
-        tn_hal_io_clock_state(runtime.io.context.get(), runtime.clock.rate, false);
-        tn_hal_io_set_render_activity(runtime.io.context.get(), 1);
+        mr_hal_io_clock_state(runtime.io.context.get(), runtime.clock.rate, false);
+        mr_hal_io_set_render_activity(runtime.io.context.get(), 1);
     }
 }
 
 unsafe extern "C" fn remaining(runtime: *mut c_void) {
     let runtime = unsafe { &*runtime.cast::<Runtime>() };
-    unsafe { tn_hal_io_set_render_activity(runtime.io.context.get(), 0) };
+    unsafe { mr_hal_io_set_render_activity(runtime.io.context.get(), 0) };
 }
 
 unsafe extern "C" fn set_rate(runtime: *mut c_void, rate: u32) -> bool {
@@ -212,11 +212,11 @@ unsafe extern "C" fn set_rate(runtime: *mut c_void, rate: u32) -> bool {
     if !clock.set_rate(rate, unsafe { mach_absolute_time() }) {
         return false;
     }
-    if runtime.clock.running && !unsafe { tn_hal_io_begin_stream(runtime.io.context.get()) } {
+    if runtime.clock.running && !unsafe { mr_hal_io_begin_stream(runtime.io.context.get()) } {
         return false;
     }
     runtime.clock = clock;
-    unsafe { tn_hal_io_clock_state(runtime.io.context.get(), rate, runtime.clock.running) };
+    unsafe { mr_hal_io_clock_state(runtime.io.context.get(), rate, runtime.clock.running) };
     true
 }
 
@@ -235,16 +235,16 @@ unsafe extern "C" fn io(
 ) -> bool {
     let runtime = unsafe { &*runtime.cast::<Runtime>() };
     if render {
-        unsafe { tn_hal_io_write_render(runtime.io.context.get(), frame, samples, count) }
+        unsafe { mr_hal_io_write_render(runtime.io.context.get(), frame, samples, count) }
     } else {
-        unsafe { tn_hal_io_read_capture(runtime.io.context.get(), frame, samples, count) };
+        unsafe { mr_hal_io_read_capture(runtime.io.context.get(), frame, samples, count) };
         true
     }
 }
 
 unsafe extern "C" fn requires_replacement(runtime: *mut c_void) -> bool {
     let runtime = unsafe { &*runtime.cast::<Runtime>() };
-    unsafe { tn_hal_io_requires_replacement(runtime.io.context.get()) }
+    unsafe { mr_hal_io_requires_replacement(runtime.io.context.get()) }
 }
 
 unsafe extern "C" fn same_transport(runtime: *mut c_void, fd: i32, size: usize) -> bool {
@@ -258,14 +258,14 @@ unsafe extern "C" fn same_transport(runtime: *mut c_void, fd: i32, size: usize) 
         size,
         identity: [0; 16],
     };
-    let transport = unsafe { tn_endpoint_transport_attach(address, size) };
+    let transport = unsafe { mr_endpoint_transport_attach(address, size) };
     let valid =
-        unsafe { tn_endpoint_transport_incarnation(transport, candidate.identity.as_mut_ptr()) };
+        unsafe { mr_endpoint_transport_incarnation(transport, candidate.identity.as_mut_ptr()) };
     valid && candidate.identity == runtime.io.mapping.identity
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_create_native(host: *const HostOps) -> *mut Registry {
+pub(crate) unsafe extern "C" fn mr_hal_core_create_native(host: *const HostOps) -> *mut Registry {
     let Some(host) = (unsafe { host.as_ref() }) else {
         return std::ptr::null_mut();
     };
@@ -288,10 +288,10 @@ pub(crate) unsafe extern "C" fn tn_hal_core_create_native(host: *const HostOps) 
 
 /* Used by the C ABI contract test to compare the C11 and Rust atomic layouts. */
 #[unsafe(no_mangle)]
-extern "C" fn tn_hal_core_io_context_size() -> usize {
+extern "C" fn mr_hal_core_io_context_size() -> usize {
     size_of::<IoContext>()
 }
 #[unsafe(no_mangle)]
-extern "C" fn tn_hal_core_io_context_alignment() -> usize {
+extern "C" fn mr_hal_core_io_context_alignment() -> usize {
     align_of::<IoContext>()
 }

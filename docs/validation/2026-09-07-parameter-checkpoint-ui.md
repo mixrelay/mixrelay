@@ -44,4 +44,4 @@ catalog API plus active/submitted revision both returned successfully (revision 
 The existing `tauri dev` process remains running. No user plug-in was inserted for
 this check; it establishes installation/graph preservation, not native plug-in
 checkpoint readback. Backups and the post-restart catalog are retained in
-`/Volumes/Linear 1/test/tonenari/evidence/native-device-parity-20260907/parameter-durability/`.
+`/Volumes/Linear 1/test/mixrelay/evidence/native-device-parity-20260907/parameter-durability/`.

@@ -1,10 +1,10 @@
 //! Processing-domain policy. Individual endpoint clocks/rates are observed and
 //! bridged independently; no single HAL device defines this catalog.
-use tonenari_audio_io::{
+use mixrelay_audio_io::{
     formats::{BUFFER_SIZES, SAMPLE_RATES},
     session::{AudioBackendKind, AudioSessionCapabilities, CURRENT_TIMER_FORMAT, ClockAuthority},
 };
-use tonenari_engine_service::session::AdapterProfile;
+use mixrelay_engine_service::session::AdapterProfile;
 
 pub(super) fn profile(rates: Vec<u32>) -> AdapterProfile {
     AdapterProfile {
@@ -35,8 +35,8 @@ pub(super) fn profile(rates: Vec<u32>) -> AdapterProfile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tonenari_audio_io::session::SessionIssue;
-    use tonenari_engine_service::{RuntimeStatusBackend, session::AdapterRuntimeStatus};
+    use mixrelay_audio_io::session::SessionIssue;
+    use mixrelay_engine_service::{RuntimeStatusBackend, session::AdapterRuntimeStatus};
 
     #[test]
     fn processing_catalog_does_not_depend_on_one_virtual_devices_availability() {
@@ -47,7 +47,7 @@ mod tests {
         assert_eq!(profile.application_capture_rates, SAMPLE_RATES);
         let runtime = AdapterRuntimeStatus::new(profile);
         let session = runtime
-            .status(tonenari_audio_graph::RenderFormat {
+            .status(mixrelay_audio_graph::RenderFormat {
                 sample_rate: CURRENT_TIMER_FORMAT.sample_rate,
                 block_frames: CURRENT_TIMER_FORMAT.block_frames,
             })

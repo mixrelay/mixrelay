@@ -31,8 +31,8 @@ unsafe extern "C" {
     fn dispatch_activate(object: Object);
     fn dispatch_source_cancel(source: Object);
     fn dispatch_release(object: Object);
-    fn tn_engine_dispatch_install_handler(listener: Object);
-    fn tn_engine_dispatch_install_discard_handler(listener: Object);
+    fn mr_engine_dispatch_install_handler(listener: Object);
+    fn mr_engine_dispatch_install_discard_handler(listener: Object);
 }
 
 pub(in super::super) struct Native;
@@ -48,7 +48,7 @@ unsafe impl Send for Listener {}
 unsafe impl Send for Timer {}
 
 extern "C" fn control_tick(_context: Object) {
-    super::super::xpc::tn_engine_service_control_tick();
+    super::super::xpc::mr_engine_service_control_tick();
 }
 
 impl Backend for Native {
@@ -60,7 +60,7 @@ impl Backend for Native {
         // queue and flag 1 creates a listener. A non-null result owns one reference.
         let listener = unsafe {
             xpc_connection_create_mach_service(
-                c"io.tonenari.audio.engine".as_ptr(),
+                c"io.mixrelay.audio.engine".as_ptr(),
                 ptr::null_mut(),
                 1,
             )
@@ -98,7 +98,7 @@ impl Backend for Native {
         // SAFETY: Dispatch invokes this once after both creations succeed. The
         // copied XPC Blocks call static Rust entry points without capturing owners.
         unsafe {
-            tn_engine_dispatch_install_handler(listener.0.as_ptr());
+            mr_engine_dispatch_install_handler(listener.0.as_ptr());
             xpc_connection_activate(listener.0.as_ptr());
             dispatch_activate(timer.0.as_ptr());
         }
@@ -114,7 +114,7 @@ impl Backend for Native {
         // handler is installed before cancellation; activating the cancelled
         // connection permits release without publishing an accepting listener.
         unsafe {
-            tn_engine_dispatch_install_discard_handler(listener.0.as_ptr());
+            mr_engine_dispatch_install_discard_handler(listener.0.as_ptr());
             xpc_connection_cancel(listener.0.as_ptr());
             xpc_connection_activate(listener.0.as_ptr());
             xpc_release(listener.0.as_ptr());

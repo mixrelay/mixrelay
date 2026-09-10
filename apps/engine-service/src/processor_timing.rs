@@ -1,4 +1,4 @@
-use tonenari_control_protocol::ProcessorTiming;
+use mixrelay_control_protocol::ProcessorTiming;
 
 use crate::EngineGraphController;
 

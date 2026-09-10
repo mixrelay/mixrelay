@@ -10,7 +10,7 @@ before the stop instruction; the Ubuntu VM is safe to suspend. No further guest
 job was started after that instruction.
 
 This experiment uses an independently paced synthetic RTP source, the installed
-PipeWire RTP receiver/adaptive resampler, and the production ToneNari native
+PipeWire RTP receiver/adaptive resampler, and the production MixRelay native
 capture stream plus native graph callback. It does not use physical hardware or
 change a system PipeWire service, default audio device, user graph or application.
 
@@ -20,7 +20,7 @@ not offered as evidence that the external sample clock matches that graph clock.
 
 ## Exact implementation boundary
 
-`TNDriftSender.c` sends 240-frame stereo S16BE RTP packets containing identical
+`MRDriftSender.c` sends 240-frame stereo S16BE RTP packets containing identical
 1 kHz, 0.25-amplitude sine samples to **127.0.0.1 only**. Nominal rate is 48 kHz;
 absolute deadlines inject a requested ±2,000 ppm rate error. Packet timestamps
 increment by exactly 240 samples. Each run records actual packet/frame counts,
@@ -40,15 +40,15 @@ through `SPA_IO_RateMatch`. The
 distinguishes this mode from direct timestamp mode, which assumes a synchronized
 driver and does not use that DLL. This experiment uses constant-latency mode.
 
-The recorded experiment linked immutable production `TNPipeWire.c` and the
-then-current C PCM queue. The current reproduction script links `TNPipeWire.c`
+The recorded experiment linked immutable production `MRPipeWire.c` and the
+then-current C PCM queue. The current reproduction script links `MRPipeWire.c`
 with `native/pcm-ring`'s Rust static library; that replacement has not been rerun
 in this Linux lab and does not inherit the experiment's runtime acceptance.
-`TNDriftProbe.c`
+`MRDriftProbe.c`
 it opens a native mode-3 capture against the fixture's exact registry serial and
-reads it from `tn_pw_driver_open` callbacks. It measures PCM, finite/stereo
+reads it from `mr_pw_driver_open` callbacks. It measures PCM, finite/stereo
 integrity, abrupt sample jumps, silent runs, actual native clock/format snapshots,
-and ToneNari ring counters. The Rust engine/controller, desktop UI and a real
+and MixRelay ring counters. The Rust engine/controller, desktop UI and a real
 application are not running in this probe.
 
 The control changes only RTP source `resample.disable` from true to false.
@@ -72,7 +72,7 @@ averaged **+1,752.7 ppm**. This shows the installed adaptive path changing real
 sample consumption; it is not yet a complete steady-state result.
 
 It is **not an end-to-end pass**: sender scheduling lateness reached 107.93 ms
-and 43.32 ms, respectively. The enabled run retained three ToneNari ring
+and 43.32 ms, respectively. The enabled run retained three MixRelay ring
 starvations, 35 abrupt sample jumps and 256 stereo mismatches. The original probe
 grouped those stereo mismatches into its `invalid` count and returned exit 1.
 The matrix stopped and all failed output was preserved. Later instrumentation
@@ -115,7 +115,7 @@ optimization cannot explain this probe's results.
 
 ## Boundary trace on the newer v9 native implementation
 
-The lab-only `TNDriftTrace.c` includes the unmodified v9 `TNPipeWire.c` and wraps
+The lab-only `MRDriftTrace.c` includes the unmodified v9 `MRPipeWire.c` and wraps
 its ring read/write calls. Separate single-writer trace banks are allocated and
 prefaulted before streaming; callbacks perform no trace allocation, locking or
 file IO. Every row records the actual monotonic timestamp, PipeWire clock ID,
@@ -123,7 +123,7 @@ position/time, frame count, returned count and both ring cursors. The later PCM
 trace additionally records per-block stereo mismatches and amplitude. Files are
 written after both native callbacks have stopped.
 
-The first 120-second trace (`tonenari-drift-lab-GsIACc`) measured actual sender
+The first 120-second trace (`mixrelay-drift-lab-GsIACc`) measured actual sender
 +2000.777 ppm, maximum lateness 12.478 ms and RMS lateness 0.300 ms. After warm-up,
 RTP logged no underflow/overflow/sequence/resync fault. Producer callbacks supplied
 3,833,472 frames; the consumer requested 3,834,624. Their **1,152-frame difference
@@ -136,12 +136,12 @@ the two-quantum reserve, rather than equating packet-rate error with an RTP
 underflow. The trace does not establish which host/guest scheduling component
 caused the delayed callbacks; no xrun counter was exposed by this instrumentation.
 
-The PCM-boundary trace (`tonenari-drift-lab-SvIxDh`) reproduced one 128-frame stereo
+The PCM-boundary trace (`mixrelay-drift-lab-SvIxDh`) reproduced one 128-frame stereo
 mismatch. Consumer cursor **3,933,184** maps exactly to producer cursor
 **3,933,184**, which already contained the same 128 mismatched frames and
 0.24999778 maximum channel difference. The producer event repeated its preceding
 graph position, only 0.0645 ms after the preceding callback. Thus this block was
-already inconsistent at PipeWire's delivered input buffer; the ToneNari ring did
+already inconsistent at PipeWire's delivered input buffer; the MixRelay ring did
 not introduce that mismatch. This run had substantially worse scheduling
 (143.738-ms maximum producer interval, 106.242-ms maximum sender lateness), so
 its larger starvation count is not attributed to a code regression.
@@ -229,21 +229,21 @@ it does **not** prove that Ubuntu or the user's normal PipeWire session cannot
 obtain realtime scheduling. System limits, RTKit services and defaults were not
 changed. The five-second PCM result is not a long-duration drift qualification.
 
-Last completed job: `/var/tmp/tonenari-lab-drift-rt-diagnostic-v7`, exit 0 with
+Last completed job: `/var/tmp/mixrelay-lab-drift-rt-diagnostic-v7`, exit 0 with
 `owned_processes_reaped`. Its full guest evidence remains at
-`/var/tmp/tonenari-drift-lab-Rhl56O`; those raw files were deliberately not fetched
+`/var/tmp/mixrelay-drift-lab-Rhl56O`; those raw files were deliberately not fetched
 after the stop instruction. Tool-observed completion and scheduling output are
 preserved on the host as `drift-rt-v7-observed.txt`.
 
 Restart only after the root operator resumes Linux testing with sufficient
 memory and no competing VM measurement. The latest uploaded fixture is
-`/var/tmp/tonenari-integration-drift-fixtures-v7-rt-diagnostic`; the tested native
+`/var/tmp/mixrelay-integration-drift-fixtures-v7-rt-diagnostic`; the tested native
 snapshot remains v9, not the newer lifecycle-epoch implementation. A new run
 must use a fresh unique job ID, never reuse or overwrite the existing job dirs.
 For example, after explicitly choosing an appropriate latest frozen snapshot:
 
 ```sh
-/Applications/UTM.app/Contents/MacOS/utmctl exec 77F2F097-29B8-4836-80F6-358AE38A2316 --cmd /usr/sbin/runuser -u state303 -- /bin/bash /var/tmp/tonenari-integration-20260907-clock-rate-v9/scripts/lab/guest-job.sh drift-resume-UNIQUE /usr/bin/env TONENARI_LAB_TRACE_ENABLED=true TONENARI_LAB_QUANTUM=128 /bin/bash /var/tmp/tonenari-integration-drift-fixtures-v7-rt-diagnostic/run-clock-drift.sh /var/tmp/tonenari-integration-20260907-clock-rate-v9 /var/tmp/tonenari-integration-drift-fixtures-v7-rt-diagnostic 2000 120 false
+/Applications/UTM.app/Contents/MacOS/utmctl exec 77F2F097-29B8-4836-80F6-358AE38A2316 --cmd /usr/sbin/runuser -u state303 -- /bin/bash /var/tmp/mixrelay-integration-20260907-clock-rate-v9/scripts/lab/guest-job.sh drift-resume-UNIQUE /usr/bin/env MIXRELAY_LAB_TRACE_ENABLED=true MIXRELAY_LAB_QUANTUM=128 /bin/bash /var/tmp/mixrelay-integration-drift-fixtures-v7-rt-diagnostic/run-clock-drift.sh /var/tmp/mixrelay-integration-20260907-clock-rate-v9 /var/tmp/mixrelay-integration-drift-fixtures-v7-rt-diagnostic 2000 120 false
 ```
 
 This exact example deliberately reproduces v9. To qualify current production,
@@ -255,7 +255,7 @@ system scheduling changes remain outside this private-only task's authority.
 
 ## Qualification limits
 
-This is an installed PipeWire RTP-module DLL and ToneNari native-stream test.
+This is an installed PipeWire RTP-module DLL and MixRelay native-stream test.
 It is distinct from ordinary fixed-rate stream conversion and from ALSA device
 clock adaptation. PipeWire's
 [clock property contract](https://docs.pipewire.org/devel/page_man_pipewire-props_7.html)
@@ -266,10 +266,10 @@ qualified by these results. They must not alone enable an unconditional global
 `driftCorrection` claim.
 
 Evidence base:
-`/Volumes/Linear 1/test/tonenari/evidence/native-device-parity-20260907/linux-integration`.
+`/Volumes/Linear 1/test/mixrelay/evidence/native-device-parity-20260907/linux-integration`.
 The initial production snapshot is
-`/var/tmp/tonenari-integration-20260907-clock-rate-v5` in Ubuntu ARM64.
-Its `TNPipeWire.c` SHA-256 is
+`/var/tmp/mixrelay-integration-20260907-clock-rate-v5` in Ubuntu ARM64.
+Its `MRPipeWire.c` SHA-256 is
 `640f4e0cae06d55002ac3be98b77f68e9b319959d966e582ade8d7dc8242d349`.
 The initial fixture archive `drift-fixtures-v2.tar.gz` has SHA-256
 `9ba44675604d7c1412714bb965af8278d9388a7854e9725a71d53be2f5b3f379`.

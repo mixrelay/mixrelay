@@ -1,11 +1,11 @@
 use super::*;
 use crate::macos::endpoint_boundaries::{BoundaryConfig, Directions, EndpointBoundary};
-use std::sync::Arc;
-use tonenari_audio_engine::RenderPlan;
-use tonenari_audio_graph::{
+use mixrelay_audio_engine::RenderPlan;
+use mixrelay_audio_graph::{
     CompileContext, CompileLimits, GraphCompiler, GraphDocument, RenderFormat,
 };
-use tonenari_engine_service::RuntimeStatusBackend;
+use mixrelay_engine_service::RuntimeStatusBackend;
+use std::sync::Arc;
 const FIRST_DEVICE: &str = "01010101-0101-0101-0101-010101010101";
 const SECOND_DEVICE: &str = "02020202-0202-0202-0202-020202020202";
 
@@ -25,13 +25,13 @@ fn prepare_processor(second: bool) -> BlockProcessor {
                 "supportedSampleRates":[96000],"defaultSampleRate":96000}}
         ],"edges":[
             {"id":"headphone","source":{"nodeId":"input","portId":"audio"},"destination":{"nodeId":"output","portId":"audio"}},
-            {"id":"hal","source":{"nodeId":"input","portId":"audio"},"destination":{"nodeId":"default-virtual-io","portId":tonenari_audio_graph::TO_OS_PORT_ID}}
+            {"id":"hal","source":{"nodeId":"input","portId":"audio"},"destination":{"nodeId":"default-virtual-io","portId":mixrelay_audio_graph::TO_OS_PORT_ID}}
         ]
     })).unwrap();
     if second {
         let mut node = document.nodes[2].clone();
         node.id = "graph-b::other-vio".into();
-        if let tonenari_audio_graph::NodeConfig::VirtualEndpoint(endpoint) = &mut node.config {
+        if let mixrelay_audio_graph::NodeConfig::VirtualEndpoint(endpoint) = &mut node.config {
             endpoint.id = SECOND_DEVICE.into();
             endpoint.default_sample_rate = 44_100;
             endpoint.supported_sample_rates = vec![44_100];
@@ -44,9 +44,9 @@ fn prepare_processor(second: bool) -> BlockProcessor {
     }
     // This fixture exercises native transport ownership, not authored bus composition.
     for node in &mut document.nodes {
-        if let tonenari_audio_graph::NodeConfig::VirtualEndpoint(endpoint) = &node.config {
+        if let mixrelay_audio_graph::NodeConfig::VirtualEndpoint(endpoint) = &node.config {
             node.config =
-                tonenari_audio_graph::NodeConfig::VirtualEndpointTransport(endpoint.spec.clone());
+                mixrelay_audio_graph::NodeConfig::VirtualEndpointTransport(endpoint.spec.clone());
         }
     }
     let execution = GraphCompiler::default()
@@ -111,7 +111,7 @@ fn assert_passthrough(
 #[test]
 fn hardware_output_remains_synchronous_while_virtual_sink_crosses_clock_boundary() {
     let mut processor = processor();
-    let status = tonenari_engine_service::session::AdapterRuntimeStatus::new(
+    let status = mixrelay_engine_service::session::AdapterRuntimeStatus::new(
         crate::macos::adapter_profile(),
     );
     let progress = AtomicU64::new(0);
@@ -188,7 +188,7 @@ fn hardware_output_remains_synchronous_while_virtual_sink_crosses_clock_boundary
 #[test]
 fn two_virtual_devices_keep_distinct_clock_coordinates_rates_and_recovery() {
     let mut processor = prepare_processor(true);
-    let status = tonenari_engine_service::session::AdapterRuntimeStatus::new(
+    let status = mixrelay_engine_service::session::AdapterRuntimeStatus::new(
         crate::macos::adapter_profile(),
     );
     let progress = AtomicU64::new(0);

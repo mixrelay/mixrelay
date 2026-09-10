@@ -27,8 +27,8 @@ fn stream(channels: u16, channel_layout: ChannelLayout) -> StreamSpec {
 
 fn endpoint() -> VirtualEndpointSpec {
     VirtualEndpointSpec {
-        id: VirtualEndpointId::from("io.tonenari.spat"),
-        display_name: "ToneNari SPAT".into(),
+        id: VirtualEndpointId::from("io.mixrelay.spat"),
+        display_name: "MixRelay SPAT".into(),
         render: Some(stream(64, ChannelLayout::Discrete)),
         capture: Some(stream(2, ChannelLayout::Stereo)),
         supported_sample_rates: vec![48_000, 96_000],
@@ -84,7 +84,7 @@ fn validates_duplex_multichannel_endpoint_contracts() {
         .validate(&endpoint_capabilities())
         .expect("SPAT endpoint should be representable");
 
-    assert_eq!(endpoint.id.as_str(), "io.tonenari.spat");
+    assert_eq!(endpoint.id.as_str(), "io.mixrelay.spat");
     assert!(endpoint_capabilities().supports_dynamic_creation);
 
     let mut capture_only = endpoint;

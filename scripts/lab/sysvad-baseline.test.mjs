@@ -46,7 +46,7 @@ test('baseline installation is scoped and does not claim product isolation quali
   assert.ok(packaging.includes('unmet PRODUCT gate'));
   assert.ok(packaging.includes('infverif.exe /u /v'));
   assert.ok(read('./guest-windows-sysvad-audio.cmd').includes('DEVPKEY_Device_Parent'));
-  assert.ok(read('./SysvadAudioProbe.cpp').includes('NOT ToneNari routed audio'));
+  assert.ok(read('./SysvadAudioProbe.cpp').includes('NOT MixRelay routed audio'));
 });
 
 test('interactive smoke cleanup resolves account identity and preserves running or foreign tasks', () => {

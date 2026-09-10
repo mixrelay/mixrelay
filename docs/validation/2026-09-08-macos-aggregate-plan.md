@@ -32,12 +32,12 @@ would have stopped testing partial native cleanup.
   rate/transport/identity incompatibility, channel bounds and asymmetric I/O.
 - Clippy all targets with warnings denied: passed, no gate/suppression changes.
 - `check-macos-device-io.sh --live`: native ASan/UBSan checks and all four Rust
-  live tests passed. Build: `/tmp/tonenari-device-io-check.zhajQj`.
+  live tests passed. Build: `/tmp/mixrelay-device-io-check.zhajQj`.
   Includes actual 32-sample callbacks after reconnect, four removal/reappearance
   cycles, 20 fresh startup fixtures, and 44.1/96/48 kHz graph phases with zero
   FIFO overflows against unchanged 48 kHz native I/O.
 - Explicit private group using `BuiltInSpeakerDevice` and
-  `io.tonenari.audio.endpoint.default`: three deliberately stale local plans
+  `io.mixrelay.audio.endpoint.default`: three deliberately stale local plans
   (identity, channel count, rate) rejected with partial owners retired; valid
   group delivered both callbacks on one native clock, retaining ownership until
   the final registration retired. Final group admission: **0**.
@@ -70,7 +70,7 @@ The user requested DAW-like buffer choices and higher sample rates after the
 current boundary work, explicitly not a language-only rewrite. Current source
 inspection finds macOS session/endpoint profiles in `main.rs` limited to
 44.1/48 kHz and buffers 32/64/128/256/512; worker allocation and sample-count
-validation also embed 512. `TNEngineService.c` and the HAL driver independently
+validation also embed 512. `MREngineService.c` and the HAL driver independently
 reject rates other than 44.1/48 kHz, although common conversion accepts up to
 384 kHz. Therefore expanding the UI list alone would be false support.
 

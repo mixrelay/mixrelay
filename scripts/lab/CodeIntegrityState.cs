@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 // Read-only runtime verification: BCD describes the next boot, not necessarily
 // the currently running kernel. Keep this separate from boot-policy mutation.
-public static class ToneNariCodeIntegrityState
+public static class MixRelayCodeIntegrityState
 {
     [StructLayout(LayoutKind.Sequential)]
     private struct Information { public uint Length; public uint Options; }

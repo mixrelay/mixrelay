@@ -1,10 +1,10 @@
-#include "ToneNariRing.h"
+#include "MixRelayRing.h"
 #include <cassert>
 #include <cstdio>
 #include <vector>
 
 int main() {
-    using tonenari::Plan;
+    using mixrelay::Plan;
     assert(!Plan(false, 0, 1, 0, 256, 32).valid);
     assert(!Plan(true, 1000, 999, 0, 256, 32).valid);
     assert(!Plan(true, 0, 257, 0, 256, 32).valid);
@@ -30,10 +30,10 @@ int main() {
                     auto ring = reinterpret_cast<unsigned char*>(storage.data() + channels);
                     std::vector<float> input(size_t(frames) * channels);
                     for (size_t i = 0; i < input.size(); ++i) input[i] = float(i % 1024) / 1024;
-                    tonenari::Copy(false, ring, input.data(), write, frames, channels);
+                    mixrelay::Copy(false, ring, input.data(), write, frames, channels);
                     auto read = Plan(true, position, position + write.count(), position, capacity, frames);
                     std::vector<float> output(size_t(frames + 2) * channels, -456.0f);
-                    tonenari::Copy(true, ring, output.data() + channels, read, frames, channels);
+                    mixrelay::Copy(true, ring, output.data() + channels, read, frames, channels);
                     for (size_t i = 0; i < size_t(frames) * channels; ++i)
                         assert(output[channels + i] == (i < size_t(write.count()) * channels ? input[i] : 0.0f));
                     for (uint32_t c = 0; c < channels; ++c) {
@@ -43,10 +43,10 @@ int main() {
                     // Malformed producer counters must zero capture, and never
                     // let a renderer overwrite even a single transport sample.
                     auto invalid = Plan(true, position, UINT64_MAX, 0, capacity, frames);
-                    tonenari::Copy(true, ring, output.data() + channels, invalid, frames, channels);
+                    mixrelay::Copy(true, ring, output.data() + channels, invalid, frames, channels);
                     for (size_t i = channels; i < size_t(frames + 1) * channels; ++i) assert(output[i] == 0);
                     auto before = storage;
-                    tonenari::Copy(false, ring, input.data(), invalid, frames, channels);
+                    mixrelay::Copy(false, ring, input.data(), invalid, frames, channels);
                     assert(storage == before);
                     ++cases;
                 }

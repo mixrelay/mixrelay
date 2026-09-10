@@ -1,5 +1,5 @@
 //! Opt-in macOS Apple AU qualification. No HTTP server, HAL, hardware, or editor window.
-//! Run: `cargo run -p tonenari-engine-service --example native_au_checkpoint -- --run`
+//! Run: `cargo run -p mixrelay-engine-service --example native_au_checkpoint -- --run`
 //! The parent supplies a newly created private configuration directory to one child.
 
 #[cfg(not(target_os = "macos"))]
@@ -19,25 +19,25 @@ fn main() {
 mod qualification {
     use std::{path::PathBuf, process::Command, sync::Arc};
 
-    use tonenari_audio_engine::{BlockProcessor, ProcessorExchange, RenderPlan};
-    use tonenari_audio_graph::{
+    use mixrelay_audio_engine::{BlockProcessor, ProcessorExchange, RenderPlan};
+    use mixrelay_audio_graph::{
         BuiltInNodeResolver, CompileContext, CompileLimits, GraphCompiler, GraphDocument,
         NodeConfig, NodeId, NodeSpec, ProviderNodeConfig, RenderFormat,
     };
-    use tonenari_audio_io::{
+    use mixrelay_audio_io::{
         HostAudioBackendError, VirtualEndpointBackend, VirtualEndpointCapabilities,
         VirtualEndpointSpec,
     };
-    use tonenari_control_protocol::{
+    use mixrelay_control_protocol::{
         DriverState, GraphApplyRequest, GraphCatalogAction, GraphCatalogRequest,
         GraphProcessorParameterChange,
     };
-    use tonenari_control_server::ControlBackend;
-    use tonenari_engine_service::{
+    use mixrelay_control_server::ControlBackend;
+    use mixrelay_engine_service::{
         EngineGraphController, EngineGraphControllerConfig, FixedRuntimeStatus,
         NoopGraphResourceBackend, default_peak_meter_bank,
     };
-    use tonenari_processor_host::{
+    use mixrelay_processor_host::{
         PLUGIN_PROBE_ARGUMENT, PLUGIN_SCAN_ARGUMENT, PLUGIN_WORKER_ARGUMENT, ProcessorCatalog,
         RackFormat, RackLocator,
     };
@@ -53,18 +53,18 @@ mod qualification {
         match args.next().as_deref() {
             Some("--run") => run_parent(),
             Some("--qualify") => qualify(),
-            Some("--enumerate-au") => tonenari_processor_host::run_plugin_scan(RackFormat::Au, &[]),
+            Some("--enumerate-au") => mixrelay_processor_host::run_plugin_scan(RackFormat::Au, &[]),
             Some(PLUGIN_SCAN_ARGUMENT) => scan(args.next().as_deref()),
             Some(PLUGIN_PROBE_ARGUMENT) => {
                 let locator = RackLocator::decode(&args.next().ok_or("missing locator")?)?;
                 require_fixture(&locator)?;
-                tonenari_processor_host::run_plugin_probe(locator)
+                mixrelay_processor_host::run_plugin_probe(locator)
             }
             Some(PLUGIN_WORKER_ARGUMENT) => {
                 let values = args.collect::<Vec<_>>();
                 let locator = RackLocator::decode(values.first().ok_or("missing locator")?)?;
                 require_fixture(&locator)?;
-                tonenari_processor_host::run_plugin_worker(&values)
+                mixrelay_processor_host::run_plugin_worker(&values)
             }
             _ => Err("explicit --run opt-in is required".into()),
         }
@@ -108,10 +108,10 @@ mod qualification {
 
     fn run_parent() -> Result<(), String> {
         let directory =
-            tonenari_test_support::FixtureDir::new("native-au").map_err(|e| e.to_string())?;
+            mixrelay_test_support::FixtureDir::new("native-au").map_err(|e| e.to_string())?;
         let status = Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
             .arg("--qualify")
-            .env("TONENARI_CONFIG_DIR", directory.path())
+            .env("MIXRELAY_CONFIG_DIR", directory.path())
             .status()
             .map_err(|e| e.to_string())?;
         eprintln!(
@@ -232,7 +232,7 @@ mod qualification {
 
     fn qualify() -> Result<(), String> {
         let config =
-            PathBuf::from(std::env::var_os("TONENARI_CONFIG_DIR").ok_or("private config missing")?);
+            PathBuf::from(std::env::var_os("MIXRELAY_CONFIG_DIR").ok_or("private config missing")?);
         if !config.is_absolute() || config.join("graphs.json").exists() {
             return Err("expected a new private catalog directory".into());
         }

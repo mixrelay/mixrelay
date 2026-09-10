@@ -1,11 +1,11 @@
 use super::{Backend, Control, Request};
+use mixrelay_macos_transport::control_inventory::{
+    mr_hal_control_create_inventory_request, mr_hal_control_create_transport_replacement_request,
+};
 use std::{
     cell::Cell,
     ffi::{c_char, c_void},
     ptr::{self, NonNull},
-};
-use tonenari_macos_transport::control_inventory::{
-    tn_hal_control_create_inventory_request, tn_hal_control_create_transport_replacement_request,
 };
 
 type Handle = *mut c_void;
@@ -38,7 +38,7 @@ unsafe extern "C" {
     fn xpc_connection_send_message(connection: Handle, message: Handle);
     fn xpc_get_type(message: Handle) -> *const c_void;
     fn xpc_release(object: Handle);
-    fn tn_hal_control_install_handler(
+    fn mr_hal_control_install_handler(
         connection: Handle,
         owner: *const c_void,
         generation: u64,
@@ -96,7 +96,7 @@ impl Native {
         // SAFETY: a static NUL-terminated label and null serial attributes create
         // a privately owned queue; no callbacks are registered at this stage.
         let queue = NonNull::new(unsafe {
-            dispatch_queue_create(c"io.tonenari.hal.control".as_ptr(), ptr::null_mut())
+            dispatch_queue_create(c"io.mixrelay.hal.control".as_ptr(), ptr::null_mut())
         })
         .map(Dispatch);
         Self::with_queue(queue, |queue| {
@@ -149,14 +149,14 @@ impl Backend for Native {
         // address is process-lifetime stable before the connection can be resumed.
         let connection = NonNull::new(unsafe {
             xpc_connection_create_mach_service(
-                c"io.tonenari.audio.engine".as_ptr(),
+                c"io.mixrelay.audio.engine".as_ptr(),
                 self.queue.0.as_ptr(),
                 0,
             )
         })?;
         // SAFETY: the helper copies the block capturing only owner/generation;
         // no Rust reference or borrowed connection is captured by the block.
-        unsafe { tn_hal_control_install_handler(connection.as_ptr(), owner, generation, event) };
+        unsafe { mr_hal_control_install_handler(connection.as_ptr(), owner, generation, event) };
         Some(Connection {
             handle: connection,
             resumed: Cell::new(false),
@@ -173,14 +173,14 @@ impl Backend for Native {
 
     fn send(&self, connection: &Connection, request: Request) {
         let message = match request {
-            Request::Inventory => tn_hal_control_create_inventory_request(),
+            Request::Inventory => mr_hal_control_create_inventory_request(),
             Request::Replacement {
                 endpoint,
                 generation,
             } => {
                 // SAFETY: endpoint is a live 16-byte local, synchronously copied.
                 unsafe {
-                    tn_hal_control_create_transport_replacement_request(
+                    mr_hal_control_create_transport_replacement_request(
                         endpoint.as_ptr(),
                         generation,
                     )

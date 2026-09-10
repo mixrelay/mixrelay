@@ -10,20 +10,20 @@ export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 if curl --silent --max-time 2 http://127.0.0.1:19341/health >/dev/null; then
   echo "Refusing to replace an existing engine" >&2; exit 2
 fi
-systemd-run --user --unit=tonenari-lab-matrix --collect "$engine"
-trap 'systemctl --user stop tonenari-lab-matrix' EXIT
+systemd-run --user --unit=mixrelay-lab-matrix --collect "$engine"
+trap 'systemctl --user stop mixrelay-lab-matrix' EXIT
 ready=false
 for ((n=0; n<100; n++)); do
   if curl --silent --fail --max-time 1 http://127.0.0.1:19341/health >/dev/null; then ready=true; break; fi
   sleep .1
 done
 [[ "$ready" == true ]] || exit 1
-TONENARI_LAB_OWNED_ENGINE_PID=$(systemctl --user show tonenari-lab-matrix --property=MainPID --value)
-export TONENARI_LAB_OWNED_ENGINE_PID
-[[ "$TONENARI_LAB_OWNED_ENGINE_PID" =~ ^[1-9][0-9]*$ ]] || exit 1
+MIXRELAY_LAB_OWNED_ENGINE_PID=$(systemctl --user show mixrelay-lab-matrix --property=MainPID --value)
+export MIXRELAY_LAB_OWNED_ENGINE_PID
+[[ "$MIXRELAY_LAB_OWNED_ENGINE_PID" =~ ^[1-9][0-9]*$ ]] || exit 1
 sha256sum "$engine" "$probe"
 "$node" "$probe" --run
-systemctl --user stop tonenari-lab-matrix
+systemctl --user stop mixrelay-lab-matrix
 trap - EXIT
 # Query by exact process identity, not names that another application may own.
 "$node" --input-type=module -e '
@@ -31,7 +31,7 @@ trap - EXIT
   import assert from "node:assert/strict";
   import {pathToFileURL} from "node:url";
   const {parsePwDump,nodesOwnedByPid}=await import(new URL("./pipewire-cli.mjs",pathToFileURL(process.argv[1])));
-  const pid=process.env.TONENARI_LAB_OWNED_ENGINE_PID;
+  const pid=process.env.MIXRELAY_LAB_OWNED_ENGINE_PID;
   const objects=parsePwDump(execFileSync("pw-dump", {encoding:"utf8"}));
   assert.equal(nodesOwnedByPid(objects,pid).length,0);
   assert.equal(objects.some(o=>String(o.info?.props?.["application.process.id"])===pid),false);

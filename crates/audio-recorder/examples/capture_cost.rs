@@ -1,7 +1,7 @@
 //! A serial, unchanged capture-cost probe. This is not an audio deadline test.
+use mixrelay_audio_recorder::{Encoding, RecorderAction, RecorderRegistry, RecorderRequest};
+use mixrelay_test_support::FixtureDir;
 use std::time::{Duration, Instant};
-use tonenari_audio_recorder::{Encoding, RecorderAction, RecorderRegistry, RecorderRequest};
-use tonenari_test_support::FixtureDir;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let directory = FixtureDir::new("recorder-capture-cost")?;

@@ -4,14 +4,14 @@ fn main() {
     }
     let root = "../application-capture";
     cc::Build::new()
-        .file(format!("{root}/src/TNProcessTap.m"))
+        .file(format!("{root}/src/MRProcessTap.m"))
         .include(format!("{root}/include"))
         .flag("-fobjc-arc")
         .flag("-fblocks")
         .flag("-mmacosx-version-min=14.2")
         .warnings_into_errors(true)
-        .compile("tonenari_process_tap_objc");
-    println!("cargo:rerun-if-changed={root}/src/TNProcessTap.m");
+        .compile("mixrelay_process_tap_objc");
+    println!("cargo:rerun-if-changed={root}/src/MRProcessTap.m");
     println!("cargo:rerun-if-changed={root}/include");
     for framework in ["CoreAudio", "CoreFoundation", "Foundation", "AppKit"] {
         println!("cargo:rustc-link-lib=framework={framework}");

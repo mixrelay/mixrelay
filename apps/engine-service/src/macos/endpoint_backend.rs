@@ -1,12 +1,12 @@
 //! Canonical graph-referenced endpoint inventory and ID-directed native control.
-use std::sync::atomic::{AtomicBool, Ordering};
-use tonenari_audio_io::{
+use mixrelay_audio_io::{
     HostAudioBackendError, VirtualEndpointBackend, VirtualEndpointCapabilities, VirtualEndpointSpec,
 };
-use tonenari_engine_service::endpoint_service;
-use tonenari_macos_transport::endpoint_identity::{
+use mixrelay_engine_service::endpoint_service;
+use mixrelay_macos_transport::endpoint_identity::{
     endpoint_uid, format_endpoint_id, parse_endpoint_id,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 pub(super) const MAX_ENDPOINT_CHANNELS: u16 = 64;
 pub(super) struct MacVirtualEndpointBackend {
     capabilities: VirtualEndpointCapabilities,
@@ -30,7 +30,7 @@ impl MacVirtualEndpointBackend {
             return Ok(false);
         }
         // Called only inside the processor exchange's configured activation gate.
-        if !tonenari_engine_service::endpoint_service::activate_prepared_endpoints() {
+        if !mixrelay_engine_service::endpoint_service::activate_prepared_endpoints() {
             return Err("native endpoint inventory activation failed".into());
         }
         Ok(self.staged.swap(false, Ordering::AcqRel))
@@ -40,7 +40,7 @@ impl MacVirtualEndpointBackend {
     }
 }
 fn endpoint_identity(
-    id: &tonenari_audio_io::VirtualEndpointId,
+    id: &mixrelay_audio_io::VirtualEndpointId,
 ) -> Result<[u8; 16], HostAudioBackendError> {
     parse_endpoint_id(id.as_str()).ok_or_else(|| HostAudioBackendError::CapabilityUnavailable {
         capability: format!(
@@ -52,13 +52,13 @@ fn endpoint_identity(
 impl VirtualEndpointBackend for MacVirtualEndpointBackend {
     fn cancel_prepared_graph_attachments(&self) {
         if self.staged.swap(false, Ordering::AcqRel) {
-            tonenari_engine_service::endpoint_service::cancel_prepared_endpoints();
+            mixrelay_engine_service::endpoint_service::cancel_prepared_endpoints();
         }
     }
-    fn settings(&self) -> Option<tonenari_audio_io::VirtualEndpointSettings> {
+    fn settings(&self) -> Option<mixrelay_audio_io::VirtualEndpointSettings> {
         let mut settings =
-            tonenari_audio_io::VirtualEndpointSettings::configurable(&self.capabilities);
-        settings.creation_template = Some(tonenari_audio_io::VirtualEndpointCreationTemplate {
+            mixrelay_audio_io::VirtualEndpointSettings::configurable(&self.capabilities);
+        settings.creation_template = Some(mixrelay_audio_io::VirtualEndpointCreationTemplate {
             render: stream(2),
             capture: stream(2),
             supported_sample_rates: self.capabilities.supported_sample_rates.clone(),
@@ -75,9 +75,9 @@ impl VirtualEndpointBackend for MacVirtualEndpointBackend {
     }
     fn sample_rate(
         &self,
-        id: &tonenari_audio_io::VirtualEndpointId,
+        id: &mixrelay_audio_io::VirtualEndpointId,
     ) -> Result<u32, HostAudioBackendError> {
-        tonenari_engine_service::endpoint_service::device_sample_rate(endpoint_identity(id)?)
+        mixrelay_engine_service::endpoint_service::device_sample_rate(endpoint_identity(id)?)
             .ok_or_else(|| HostAudioBackendError::BackendFailure {
                 message: format!(
                     "virtual device {} has no native rate observation",
@@ -87,10 +87,10 @@ impl VirtualEndpointBackend for MacVirtualEndpointBackend {
     }
     fn set_sample_rate(
         &self,
-        id: &tonenari_audio_io::VirtualEndpointId,
+        id: &mixrelay_audio_io::VirtualEndpointId,
         rate: u32,
     ) -> Result<(), HostAudioBackendError> {
-        if tonenari_engine_service::endpoint_service::set_device_sample_rate(
+        if mixrelay_engine_service::endpoint_service::set_device_sample_rate(
             endpoint_identity(id)?,
             rate,
         ) {
@@ -113,7 +113,7 @@ impl VirtualEndpointBackend for MacVirtualEndpointBackend {
         let specs = desired
             .iter()
             .map(|endpoint| {
-                Ok(tonenari_engine_service::endpoint_registry::EndpointSpec {
+                Ok(mixrelay_engine_service::endpoint_registry::EndpointSpec {
                     id: endpoint_identity(&endpoint.id)?,
                     display_name: endpoint.display_name.clone(),
                     sample_rate: endpoint.default_sample_rate,
@@ -127,7 +127,7 @@ impl VirtualEndpointBackend for MacVirtualEndpointBackend {
                 })
             })
             .collect::<Result<Vec<_>, HostAudioBackendError>>()?;
-        tonenari_engine_service::endpoint_service::prepare_endpoints(&specs).map_err(|error| {
+        mixrelay_engine_service::endpoint_service::prepare_endpoints(&specs).map_err(|error| {
             HostAudioBackendError::BackendFailure {
                 message: format!("endpoint inventory preparation failed: {error}"),
             }
@@ -137,8 +137,8 @@ impl VirtualEndpointBackend for MacVirtualEndpointBackend {
     }
 }
 
-fn stream(channels: u16) -> Option<tonenari_audio_io::StreamSpec> {
-    use tonenari_audio_io::{ChannelLayout, StreamSpec};
+fn stream(channels: u16) -> Option<mixrelay_audio_io::StreamSpec> {
+    use mixrelay_audio_io::{ChannelLayout, StreamSpec};
     (channels != 0).then_some(StreamSpec {
         channels,
         channel_layout: match channels {
@@ -149,23 +149,23 @@ fn stream(channels: u16) -> Option<tonenari_audio_io::StreamSpec> {
     })
 }
 fn device_settings(
-    native: &tonenari_engine_service::endpoint_registry::EndpointSpec,
-) -> tonenari_audio_io::VirtualEndpointDeviceSettings {
+    native: &mixrelay_engine_service::endpoint_registry::EndpointSpec,
+) -> mixrelay_audio_io::VirtualEndpointDeviceSettings {
     let observed_sample_rate = endpoint_service::device_sample_rate(native.id);
-    let supported_sample_rates = tonenari_audio_io::format_contract::supported_rates(|rate| {
+    let supported_sample_rates = mixrelay_audio_io::format_contract::supported_rates(|rate| {
         endpoint_service::device_supports_sample_rate(native.id, rate)
     });
     observed_device_settings(native, observed_sample_rate, supported_sample_rates)
 }
 fn observed_device_settings(
-    native: &tonenari_engine_service::endpoint_registry::EndpointSpec,
+    native: &mixrelay_engine_service::endpoint_registry::EndpointSpec,
     observed_sample_rate: Option<u32>,
     supported_sample_rates: Vec<u32>,
-) -> tonenari_audio_io::VirtualEndpointDeviceSettings {
-    tonenari_audio_io::VirtualEndpointDeviceSettings {
+) -> mixrelay_audio_io::VirtualEndpointDeviceSettings {
+    mixrelay_audio_io::VirtualEndpointDeviceSettings {
         native_device_ids: vec![endpoint_uid(native.id)],
         spec: VirtualEndpointSpec {
-            id: tonenari_audio_io::VirtualEndpointId::new(format_endpoint_id(native.id)),
+            id: mixrelay_audio_io::VirtualEndpointId::new(format_endpoint_id(native.id)),
             display_name: native.display_name.clone(),
             render: stream(
                 u16::try_from(native.render_channels)
@@ -187,7 +187,7 @@ fn observed_device_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tonenari_engine_service::endpoint_registry::EndpointSpec;
+    use mixrelay_engine_service::endpoint_registry::EndpointSpec;
 
     #[test]
     fn native_boundary_accepts_only_canonical_uuid_not_names_or_default_aliases() {
@@ -195,7 +195,7 @@ mod tests {
         let id = endpoint_identity(&text.into()).unwrap();
         assert_eq!(format_endpoint_id(id), text);
         for invalid in [
-            "tonenari.virtual-io",
+            "mixrelay.virtual-io",
             "default",
             "17E59D73-42c1-4f11-a8b4-6c2d913357e0",
         ] {
@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn creation_template_has_no_implicitly_existing_native_identity() {
         let backend =
-            MacVirtualEndpointBackend::new(tonenari_audio_io::formats::SAMPLE_RATES.to_vec());
+            MacVirtualEndpointBackend::new(mixrelay_audio_io::formats::SAMPLE_RATES.to_vec());
         let settings = backend.settings().unwrap();
         let template = settings.creation_template.unwrap();
         assert_eq!(template.render.unwrap().channels, 2);

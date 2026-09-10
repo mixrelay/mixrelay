@@ -1,10 +1,10 @@
 use super::*;
 use crate::ControlBackend;
-use tonenari_audio_graph::{
+use mixrelay_audio_graph::{
     AudioEndpoint, ChannelLayout, ChannelMapping, EdgeSpec, NodeSpec, PortId, StreamSpec,
     VirtualEndpointConfig, VirtualEndpointId, VirtualEndpointReference,
 };
-use tonenari_control_protocol::{GraphCatalogAction, GraphCatalogRequest};
+use mixrelay_control_protocol::{GraphCatalogAction, GraphCatalogRequest};
 
 const DEVICE_A: &str = "31ab4e5a-44e0-4bab-89dd-906e07751ea1";
 const DEVICE_B: &str = "31ab4e5a-44e0-4bab-89dd-906e07751ea2";
@@ -136,7 +136,7 @@ fn assert_shared_pcm(processor: &mut BlockProcessor) {
 
 #[test]
 fn controller_runs_both_graphs_and_view_switches_do_not_submit_or_interrupt_shared_pcm() {
-    let directory = tonenari_test_support::FixtureDir::new("composed-controller").unwrap();
+    let directory = mixrelay_test_support::FixtureDir::new("composed-controller").unwrap();
     let engine = crate::endpoint_settings_tests::controller(GraphDocument::new(1, vec![], vec![]))
         .with_graph_catalog_path(directory.join("graphs.json"));
     let mut processor = engine
@@ -171,7 +171,7 @@ fn controller_runs_both_graphs_and_view_switches_do_not_submit_or_interrupt_shar
 
 #[test]
 fn self_device_routing_is_accepted_without_feedback_policy() {
-    let directory = tonenari_test_support::FixtureDir::new("composed-feedback").unwrap();
+    let directory = mixrelay_test_support::FixtureDir::new("composed-feedback").unwrap();
     let engine = crate::endpoint_settings_tests::controller(GraphDocument::new(1, vec![], vec![]))
         .with_graph_catalog_path(directory.join("graphs.json"));
     let mut processor = engine

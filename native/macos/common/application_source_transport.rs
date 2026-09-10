@@ -3,18 +3,18 @@
 
 mod ffi;
 pub use ffi::{
-    TransportError, TransportErrorCode, tn_application_source_transport_attach,
-    tn_application_source_transport_clock, tn_application_source_transport_connect,
-    tn_application_source_transport_destroy, tn_application_source_transport_publish_native,
-    tn_application_source_transport_reset, tn_application_source_transport_write,
+    TransportError, TransportErrorCode, mr_application_source_transport_attach,
+    mr_application_source_transport_clock, mr_application_source_transport_connect,
+    mr_application_source_transport_destroy, mr_application_source_transport_publish_native,
+    mr_application_source_transport_reset, mr_application_source_transport_write,
 };
 
 use crate::{
     application_clock::{ApplicationClock, FRAME_MASK},
     application_source_mapping::Mapping,
     shared_audio_buffer::{
-        tn_shared_audio_buffer_channels, tn_shared_audio_buffer_stats,
-        tn_shared_audio_buffer_try_begin_epoch, tn_shared_audio_buffer_write,
+        mr_shared_audio_buffer_channels, mr_shared_audio_buffer_stats,
+        mr_shared_audio_buffer_try_begin_epoch, mr_shared_audio_buffer_write,
     },
 };
 use std::sync::atomic::Ordering;
@@ -70,7 +70,7 @@ impl SourceTransport {
     fn owns_stream(&self) -> bool {
         // SAFETY: the mapping owns the validated buffer for the entire borrow;
         // statistics touch only shared atomics, never local producer state.
-        unsafe { tn_shared_audio_buffer_stats(self.mapping.buffer.as_ptr()) }.epoch
+        unsafe { mr_shared_audio_buffer_stats(self.mapping.buffer.as_ptr()) }.epoch
             == self.owned_epoch
             && self.mapping.clock().producer_lease.load(Ordering::Acquire) == self.owned_lease
     }
@@ -116,7 +116,7 @@ impl SourceTransport {
         clock.native_running.store(0, Ordering::Release);
         // SAFETY: the claim excludes registry replacement and all other producers.
         // Only this producer rearms; the consumer retains its independent cursor.
-        let epoch = unsafe { tn_shared_audio_buffer_try_begin_epoch(self.mapping.buffer.as_ptr()) };
+        let epoch = unsafe { mr_shared_audio_buffer_try_begin_epoch(self.mapping.buffer.as_ptr()) };
         if epoch == 0 {
             return false;
         }
@@ -144,7 +144,7 @@ impl SourceTransport {
 
     fn write(&mut self, samples: &[f32], frames: u32) -> bool {
         // SAFETY: mapping attachment validated this immutable channel geometry.
-        let channels = unsafe { tn_shared_audio_buffer_channels(self.mapping.buffer.as_ptr()) };
+        let channels = unsafe { mr_shared_audio_buffer_channels(self.mapping.buffer.as_ptr()) };
         if samples.len() != frames as usize * channels as usize {
             return false;
         }
@@ -162,7 +162,7 @@ impl SourceTransport {
         // SAFETY: the FFI facade validated the frame extent. This claim is the
         // sole producer; input is borrowed and disjoint from the owned mapping.
         let written = unsafe {
-            tn_shared_audio_buffer_write(
+            mr_shared_audio_buffer_write(
                 self.mapping.buffer.as_ptr(),
                 self.owned_epoch,
                 self.next_frame,

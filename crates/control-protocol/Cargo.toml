@@ -1,5 +1,5 @@
 [package]
-name = "tonenari-control-protocol"
+name = "mixrelay-control-protocol"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,8 +11,8 @@ publish = false
 workspace = true
 
 [dependencies]
-tonenari-audio-recorder = { path = "../audio-recorder" }
+mixrelay-audio-recorder = { path = "../audio-recorder" }
 serde.workspace = true
 serde_json.workspace = true
-tonenari-audio-io.workspace = true
-tonenari-audio-graph = { path = "../audio-graph" }
+mixrelay-audio-io.workspace = true
+mixrelay-audio-graph = { path = "../audio-graph" }

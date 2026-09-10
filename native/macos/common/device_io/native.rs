@@ -5,7 +5,7 @@ use std::{
 
 use super::Selection;
 use crate::{
-    aggregate_group::{NativeBinding, tn_aggregate_group_binding},
+    aggregate_group::{NativeBinding, mr_aggregate_group_binding},
     device_buffers::BufferSelection,
     device_io::stream_format::{StreamFormat, StreamFormats},
 };
@@ -219,7 +219,7 @@ pub(super) fn resolve(
         // SAFETY: enclosing engine Native owns the aggregate Arc, retained until
         // this device context is destroyed. UID is immutable owned NUL-terminated storage.
         return unsafe {
-            tn_aggregate_group_binding(
+            mr_aggregate_group_binding(
                 selection.group.cast(),
                 selection.uid.as_ptr().cast(),
                 selection.input,

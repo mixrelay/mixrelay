@@ -61,7 +61,7 @@ need further instrumentation before attributing the remaining failure.
 Tauri dev was restarted with `pnpm desktop:dev` (frontend 1420, desktop PID 40824).
 Native accessibility inspection was denied, so a visual inspection is not claimed.
 Current user graph and preferences were backed up at
-`/tmp/tonenari-macos-attach.2b8hUC`; no VM was started.
+`/tmp/mixrelay-macos-attach.2b8hUC`; no VM was started.
 
 ## Completion-watchdog correction and actual PCM recovery
 

@@ -55,7 +55,7 @@ impl<'a> Builder<'a> {
 
     fn device(
         &mut self,
-        device: &tonenari_audio_graph::VirtualEndpointSpec,
+        device: &mixrelay_audio_graph::VirtualEndpointSpec,
     ) -> Result<(), CompositionError> {
         let native = device_node_id(&device.id, "native");
         self.node(NodeSpec {
@@ -109,7 +109,7 @@ impl<'a> Builder<'a> {
     }
 
     pub(super) fn add_graph(&mut self, graph: &GraphFragment<'_>) -> Result<(), CompositionError> {
-        if graph.document.schema_version != tonenari_audio_graph::CURRENT_GRAPH_SCHEMA_VERSION {
+        if graph.document.schema_version != mixrelay_audio_graph::CURRENT_GRAPH_SCHEMA_VERSION {
             return Err(invalid("unsupported authored graph schema"));
         }
         let mut nodes = self.processor_nodes(graph)?;
@@ -302,7 +302,7 @@ impl<'a> Builder<'a> {
         graph: &str,
         reference: &DeviceReference,
     ) -> Result<(), CompositionError> {
-        tonenari_audio_graph::validate_virtual_endpoint_gain(reference.gain_db)
+        mixrelay_audio_graph::validate_virtual_endpoint_gain(reference.gain_db)
             .map_err(|error| invalid(error.to_string()))?;
         if (reference.write_channels.is_none() && reference.read.is_none())
             || !reference.gain_db.is_finite()
@@ -450,7 +450,7 @@ impl<'a> Builder<'a> {
             id: EdgeId::new(format!("internal:{}", self.document.edges.len())),
             source,
             destination,
-            channel_mapping: tonenari_audio_graph::ChannelMapping::default(),
+            channel_mapping: mixrelay_audio_graph::ChannelMapping::default(),
         })
     }
     fn project_channels(
@@ -463,9 +463,9 @@ impl<'a> Builder<'a> {
             id: EdgeId::new(format!("internal:{}", self.document.edges.len())),
             source,
             destination,
-            channel_mapping: tonenari_audio_graph::ChannelMapping::Explicit {
+            channel_mapping: mixrelay_audio_graph::ChannelMapping::Explicit {
                 routes: (0..channels)
-                    .map(|channel| tonenari_audio_graph::ChannelRoute {
+                    .map(|channel| mixrelay_audio_graph::ChannelRoute {
                         source_channel: channel,
                         destination_channel: channel,
                     })

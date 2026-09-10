@@ -13,12 +13,12 @@ pub use inventory::PreparedInventory;
 mod tests;
 
 use mapping::Mapping;
-use parking_lot::Mutex;
-use std::{collections::BTreeMap, ffi::CString, io, os::fd::OwnedFd, sync::Arc};
-use tonenari_macos_transport::control_inventory::{InventoryEntry, InventorySnapshot, NAME_BYTES};
-use tonenari_macos_transport::{
+use mixrelay_macos_transport::control_inventory::{InventoryEntry, InventorySnapshot, NAME_BYTES};
+use mixrelay_macos_transport::{
     endpoint_transport::EndpointTransport, shared_audio_buffer::SharedAudioBuffer,
 };
+use parking_lot::Mutex;
+use std::{collections::BTreeMap, ffi::CString, io, os::fd::OwnedFd, sync::Arc};
 
 pub type EndpointId = [u8; 16];
 
@@ -38,7 +38,7 @@ impl EndpointSpec {
             || self.display_name.is_empty()
             || self.display_name.len() >= NAME_BYTES
             || CString::new(self.display_name.as_str()).is_err()
-            || !tonenari_audio_io::formats::SAMPLE_RATES.contains(&self.sample_rate)
+            || !mixrelay_audio_io::formats::SAMPLE_RATES.contains(&self.sample_rate)
             || self.render_channels > 64
             || self.capture_channels > 64
             || self.render_channels + self.capture_channels == 0

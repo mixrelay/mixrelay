@@ -2,7 +2,7 @@
 use std::sync::{Arc, Weak, atomic::Ordering};
 use std::time::Duration;
 
-use tonenari_control_protocol::{ApplicationCaptureManifest, GraphRuntimeStatus};
+use mixrelay_control_protocol::{ApplicationCaptureManifest, GraphRuntimeStatus};
 
 use super::{
     ControlProxyClient, ControlProxyResponse, Method, RequestDelivery, Value,

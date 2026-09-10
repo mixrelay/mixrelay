@@ -1,5 +1,5 @@
 [package]
-name = "tonenari-processor-host"
+name = "mixrelay-processor-host"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,9 +17,9 @@ base64.workspace = true
 memmap2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tonenari-audio-engine = { path = "../audio-engine" }
-tonenari-audio-graph = { path = "../audio-graph" }
-tonenari-control-protocol = { path = "../control-protocol" }
+mixrelay-audio-engine = { path = "../audio-engine" }
+mixrelay-audio-graph = { path = "../audio-graph" }
+mixrelay-control-protocol = { path = "../control-protocol" }
 truce-rack-clap.workspace = true
 truce-rack-core.workspace = true
 truce-rack-vst3.workspace = true
@@ -38,7 +38,7 @@ x11-dl.workspace = true
 [dev-dependencies]
 # Assert that channel-reference assembly stays allocation-free during processing.
 allocation-counter = "0.8.1"
-tonenari-test-support = { path = "../test-support" }
+mixrelay-test-support = { path = "../test-support" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Main-thread-owned native UI surfaces and timers; no plug-in objects cross processes.

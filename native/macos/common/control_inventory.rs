@@ -291,21 +291,21 @@ fn parse_entry(item: Xpc) -> Option<(InventoryEntry, OwnedFd)> {
 
 /// Creates a compatible v1 inventory request; caller owns the returned XPC object.
 #[unsafe(no_mangle)]
-pub extern "C" fn tn_hal_control_create_inventory_request() -> Xpc {
+pub extern "C" fn mr_hal_control_create_inventory_request() -> Xpc {
     new_message(c"request_inventory").map_or(ptr::null_mut(), Message::into_raw)
 }
 
 /// # Safety
 /// Non-null input must be a live XPC object for this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_hal_control_parse_inventory_request(message: Xpc) -> bool {
+pub unsafe extern "C" fn mr_hal_control_parse_inventory_request(message: Xpc) -> bool {
     operation(message, c"request_inventory")
 }
 
 /// # Safety
 /// Entries must reference count readable ABI records with borrowed live FDs.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_hal_control_create_inventory_snapshot(
+pub unsafe extern "C" fn mr_hal_control_create_inventory_snapshot(
     entries: *const InventoryEntry,
     count: usize,
     generation: u64,
@@ -329,7 +329,7 @@ pub unsafe extern "C" fn tn_hal_control_create_inventory_snapshot(
 /// # Safety
 /// Request must be a live XPC object; entries follow the creator contract above.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_hal_control_create_inventory_snapshot_reply(
+pub unsafe extern "C" fn mr_hal_control_create_inventory_snapshot_reply(
     request: Xpc,
     entries: *const InventoryEntry,
     count: usize,
@@ -358,7 +358,7 @@ pub unsafe extern "C" fn tn_hal_control_create_inventory_snapshot_reply(
 /// Message must be live XPC; output must be writable, empty/previously closed,
 /// and not alias message storage. Output is untouched on every validation error.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_hal_control_parse_inventory_snapshot(
+pub unsafe extern "C" fn mr_hal_control_parse_inventory_snapshot(
     message: Xpc,
     output: *mut InventorySnapshot,
 ) -> bool {
@@ -408,7 +408,7 @@ pub unsafe extern "C" fn tn_hal_control_parse_inventory_snapshot(
 /// A non-null pointer must contain a successful snapshot or a zero-count empty
 /// snapshot, with unique owned FDs. Closing twice is safe after the first reset.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_hal_control_inventory_snapshot_close(snapshot: *mut InventorySnapshot) {
+pub unsafe extern "C" fn mr_hal_control_inventory_snapshot_close(snapshot: *mut InventorySnapshot) {
     let Some(snapshot) = (unsafe { snapshot.as_mut() }) else {
         return;
     };
@@ -427,7 +427,7 @@ pub unsafe extern "C" fn tn_hal_control_inventory_snapshot_close(snapshot: *mut 
 /// # Safety
 /// A non-null ID must point to 16 readable bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_hal_control_create_endpoint_remove(
+pub unsafe extern "C" fn mr_hal_control_create_endpoint_remove(
     id: *const u8,
     generation: u64,
 ) -> Xpc {
@@ -451,7 +451,7 @@ pub unsafe extern "C" fn tn_hal_control_create_endpoint_remove(
 /// # Safety
 /// Message must be live XPC; outputs must be writable, distinct storage.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_hal_control_parse_endpoint_remove(
+pub unsafe extern "C" fn mr_hal_control_parse_endpoint_remove(
     message: Xpc,
     id: *mut u8,
     generation: *mut u64,
@@ -478,7 +478,7 @@ pub unsafe extern "C" fn tn_hal_control_parse_endpoint_remove(
 /// # Safety
 /// A non-null ID must point to 16 readable bytes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_hal_control_create_transport_replacement_request(
+pub unsafe extern "C" fn mr_hal_control_create_transport_replacement_request(
     id: *const u8,
     expected_generation: u64,
 ) -> Xpc {
@@ -507,7 +507,7 @@ pub unsafe extern "C" fn tn_hal_control_create_transport_replacement_request(
 /// Message must be live XPC; outputs must be writable, distinct storage. Invalid
 /// messages leave both outputs unchanged. Generation policy belongs to engine.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_hal_control_parse_transport_replacement_request(
+pub unsafe extern "C" fn mr_hal_control_parse_transport_replacement_request(
     message: Xpc,
     id: *mut u8,
     expected_generation: *mut u64,
@@ -535,7 +535,7 @@ mod tests {
     use std::os::fd::AsRawFd;
 
     fn backing() -> OwnedFd {
-        let descriptor = crate::anonymous_memory::tn_shared_memory_create(4096, true);
+        let descriptor = crate::anonymous_memory::mr_shared_memory_create(4096, true);
         assert!(descriptor >= 0);
         let owned = unsafe { OwnedFd::from_raw_fd(descriptor) };
         let metadata = File::from(owned.try_clone().unwrap()).metadata().unwrap();
@@ -561,7 +561,7 @@ mod tests {
 
     fn message(entries: &[InventoryEntry]) -> Message {
         Message::new(unsafe {
-            tn_hal_control_create_inventory_snapshot(entries.as_ptr(), entries.len(), 7)
+            mr_hal_control_create_inventory_snapshot(entries.as_ptr(), entries.len(), 7)
         })
         .expect("valid inventory")
     }
@@ -569,13 +569,13 @@ mod tests {
     struct Snapshot(InventorySnapshot);
     impl Drop for Snapshot {
         fn drop(&mut self) {
-            unsafe { tn_hal_control_inventory_snapshot_close(&raw mut self.0) };
+            unsafe { mr_hal_control_inventory_snapshot_close(&raw mut self.0) };
         }
     }
 
     fn decode(message: &Message) -> Option<Snapshot> {
         let mut result = Snapshot(InventorySnapshot::default());
-        unsafe { tn_hal_control_parse_inventory_snapshot(message.0, &raw mut result.0) }
+        unsafe { mr_hal_control_parse_inventory_snapshot(message.0, &raw mut result.0) }
             .then_some(result)
     }
 
@@ -616,8 +616,8 @@ mod tests {
         assert_eq!(parsed.0.count, 0);
         assert_eq!(parsed.0.generation, 7);
         unsafe {
-            tn_hal_control_inventory_snapshot_close(&raw mut parsed.0);
-            tn_hal_control_inventory_snapshot_close(&raw mut parsed.0);
+            mr_hal_control_inventory_snapshot_close(&raw mut parsed.0);
+            mr_hal_control_inventory_snapshot_close(&raw mut parsed.0);
         }
         assert_eq!(parsed.0.generation, 0);
         assert!(parsed.0.entries.iter().all(|entry| entry.descriptor == -1));
@@ -632,17 +632,17 @@ mod tests {
         for entries in [&[valid, valid][..], &[invalid][..]] {
             assert!(
                 unsafe {
-                    tn_hal_control_create_inventory_snapshot(entries.as_ptr(), entries.len(), 1)
+                    mr_hal_control_create_inventory_snapshot(entries.as_ptr(), entries.len(), 1)
                 }
                 .is_null()
             );
         }
         assert!(
-            unsafe { tn_hal_control_create_inventory_snapshot(ptr::null(), MAX_ENTRIES + 1, 1) }
+            unsafe { mr_hal_control_create_inventory_snapshot(ptr::null(), MAX_ENTRIES + 1, 1) }
                 .is_null()
         );
         assert!(
-            unsafe { tn_hal_control_create_inventory_snapshot(&raw const valid, 1, 0) }.is_null()
+            unsafe { mr_hal_control_create_inventory_snapshot(&raw const valid, 1, 0) }.is_null()
         );
         assert!(valid_backing(
             &File::from(source.try_clone().unwrap()),
@@ -655,7 +655,7 @@ mod tests {
             generation: 99,
             ..InventorySnapshot::default()
         };
-        assert!(!unsafe { tn_hal_control_parse_inventory_snapshot(message.0, &raw mut output) });
+        assert!(!unsafe { mr_hal_control_parse_inventory_snapshot(message.0, &raw mut output) });
         assert_eq!(output.generation, 99);
         assert_eq!(output.count, 0);
         assert!(output.entries.iter().all(|entry| entry.descriptor == -1));
@@ -680,14 +680,14 @@ mod tests {
     fn malformed_final_entry_releases_previously_decoded_fds() {
         // Descriptor slots are process-global; isolate the leak check from
         // unrelated parallel tests which also open files.
-        if std::env::var_os("TN_INVENTORY_FD_TEST_CHILD").is_none() {
+        if std::env::var_os("MR_INVENTORY_FD_TEST_CHILD").is_none() {
             let status = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",
                     "control_inventory::tests::malformed_final_entry_releases_previously_decoded_fds",
                     "--test-threads=1",
                 ])
-                .env("TN_INVENTORY_FD_TEST_CHILD", "1")
+                .env("MR_INVENTORY_FD_TEST_CHILD", "1")
                 .status()
                 .unwrap();
             assert!(status.success());
@@ -753,17 +753,17 @@ mod tests {
 
     #[test]
     fn requests_and_removes_are_typed_and_preserve_outputs_on_error() {
-        let request = Message::new(tn_hal_control_create_inventory_request()).unwrap();
-        assert!(unsafe { tn_hal_control_parse_inventory_request(request.0) });
+        let request = Message::new(mr_hal_control_create_inventory_request()).unwrap();
+        assert!(unsafe { mr_hal_control_parse_inventory_request(request.0) });
         let id = [3_u8; 16];
         let remove =
-            Message::new(unsafe { tn_hal_control_create_endpoint_remove(id.as_ptr(), 42) })
+            Message::new(unsafe { mr_hal_control_create_endpoint_remove(id.as_ptr(), 42) })
                 .unwrap();
-        assert!(!unsafe { tn_hal_control_parse_inventory_request(remove.0) });
+        assert!(!unsafe { mr_hal_control_parse_inventory_request(remove.0) });
         let mut parsed_id = [0; 16];
         let mut generation = 0;
         assert!(unsafe {
-            tn_hal_control_parse_endpoint_remove(
+            mr_hal_control_parse_endpoint_remove(
                 remove.0,
                 parsed_id.as_mut_ptr(),
                 &raw mut generation,
@@ -773,7 +773,7 @@ mod tests {
         assert_eq!(generation, 42);
         unsafe { xpc_dictionary_set_uint64(remove.0, c"generation".as_ptr(), 0) };
         assert!(!unsafe {
-            tn_hal_control_parse_endpoint_remove(
+            mr_hal_control_parse_endpoint_remove(
                 remove.0,
                 parsed_id.as_mut_ptr(),
                 &raw mut generation,
@@ -781,8 +781,8 @@ mod tests {
         });
         assert_eq!(parsed_id, id);
         assert_eq!(generation, 42);
-        assert!(unsafe { tn_hal_control_create_endpoint_remove([0; 16].as_ptr(), 1) }.is_null());
-        assert!(unsafe { tn_hal_control_create_endpoint_remove(id.as_ptr(), 0) }.is_null());
+        assert!(unsafe { mr_hal_control_create_endpoint_remove([0; 16].as_ptr(), 1) }.is_null());
+        assert!(unsafe { mr_hal_control_create_endpoint_remove(id.as_ptr(), 0) }.is_null());
         assert!(Message::new(ptr::null_mut()).is_none());
     }
 
@@ -790,13 +790,13 @@ mod tests {
     fn replacement_request_round_trips_exact_identity_and_expected_generation() {
         let id = [7; 16];
         let request = Message::new(unsafe {
-            tn_hal_control_create_transport_replacement_request(id.as_ptr(), u64::MAX)
+            mr_hal_control_create_transport_replacement_request(id.as_ptr(), u64::MAX)
         })
         .unwrap();
         let mut output = [0; 16];
         let mut generation = 0;
         assert!(unsafe {
-            tn_hal_control_parse_transport_replacement_request(
+            mr_hal_control_parse_transport_replacement_request(
                 request.0,
                 output.as_mut_ptr(),
                 &raw mut generation,
@@ -804,9 +804,9 @@ mod tests {
         });
         assert_eq!(output, id);
         assert_eq!(generation, u64::MAX);
-        assert!(!unsafe { tn_hal_control_parse_inventory_request(request.0) });
+        assert!(!unsafe { mr_hal_control_parse_inventory_request(request.0) });
         assert!(!unsafe {
-            tn_hal_control_parse_endpoint_remove(
+            mr_hal_control_parse_endpoint_remove(
                 request.0,
                 output.as_mut_ptr(),
                 &raw mut generation,
@@ -819,7 +819,7 @@ mod tests {
         let id = [8; 16];
         for case in 0..7 {
             let request = Message::new(unsafe {
-                tn_hal_control_create_transport_replacement_request(id.as_ptr(), 1)
+                mr_hal_control_create_transport_replacement_request(id.as_ptr(), 1)
             })
             .unwrap();
             unsafe {
@@ -858,7 +858,7 @@ mod tests {
             let mut output = [9; 16];
             let mut generation = 99;
             assert!(!unsafe {
-                tn_hal_control_parse_transport_replacement_request(
+                mr_hal_control_parse_transport_replacement_request(
                     request.0,
                     output.as_mut_ptr(),
                     &raw mut generation,
@@ -868,15 +868,15 @@ mod tests {
             assert_eq!(generation, 99);
         }
         assert!(
-            unsafe { tn_hal_control_create_transport_replacement_request(id.as_ptr(), 0) }
+            unsafe { mr_hal_control_create_transport_replacement_request(id.as_ptr(), 0) }
                 .is_null()
         );
         assert!(
-            unsafe { tn_hal_control_create_transport_replacement_request([0; 16].as_ptr(), 1) }
+            unsafe { mr_hal_control_create_transport_replacement_request([0; 16].as_ptr(), 1) }
                 .is_null()
         );
         assert!(
-            unsafe { tn_hal_control_create_transport_replacement_request(ptr::null(), 1) }
+            unsafe { mr_hal_control_create_transport_replacement_request(ptr::null(), 1) }
                 .is_null()
         );
     }

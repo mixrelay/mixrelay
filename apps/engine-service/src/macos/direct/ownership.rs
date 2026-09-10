@@ -1,8 +1,8 @@
 use super::super::endpoint_boundaries::EndpointBoundaries;
 use super::{Descriptor, DirectPlan, Renderer, render};
 use crate::macos_devices::direct::Registration;
+use mixrelay_audio_engine::RenderPlan;
 use std::{cell::UnsafeCell, pin::Pin, sync::Arc};
-use tonenari_audio_engine::RenderPlan;
 
 /// Owns the only renderer storage and its descriptor. Pinning both allocations
 /// keeps native addresses stable even if this control-side owner moves.
@@ -112,7 +112,7 @@ mod tests {
     fn moving_the_prepared_owner_keeps_native_state_and_descriptor_stable() {
         let mut processor = processor_at(32, 48_000);
         let bindings = stereo_bindings();
-        let status = tonenari_engine_service::session::AdapterRuntimeStatus::new(
+        let status = mixrelay_engine_service::session::AdapterRuntimeStatus::new(
             crate::macos::adapter_profile(),
         );
         let progress = AtomicU64::new(0);

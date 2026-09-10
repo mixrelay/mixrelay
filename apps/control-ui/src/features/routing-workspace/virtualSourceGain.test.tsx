@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { AudioGraphModel } from '../../core/audio-graph/model';
 import type { RuntimeGraphDocument } from '../../core/control-port/types';
 import { useUndoHistory } from '../../core/history/useUndoHistory';
-import { ToneNariProvider } from '../../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { AudioNodeCard } from '../../core/ui/AudioNodeCard';
 import { graphHistoryGroup } from './graphHistoryGroup';
 import {
@@ -26,7 +26,7 @@ const document: RuntimeGraphDocument = {
       config: {
         reference: { render: true, capture: true },
         id: 'virtual',
-        displayName: 'ToneNari Virtual I/O',
+        displayName: 'MixRelay Virtual I/O',
         defaultSampleRate: 48000,
         supportedSampleRates: [48000],
         render: { channelLayout: 'discrete', channels: 64 },
@@ -50,7 +50,7 @@ it('provides virtual source gain alongside endpoint options, without an output g
   const onGain = vi.fn();
   const onEndpoint = vi.fn();
   render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <AudioNodeCard
         {...source.appearance}
         inputCount={0}
@@ -59,7 +59,7 @@ it('provides virtual source gain alongside endpoint options, without an output g
         onGainChange={onGain}
         onEndpointChange={onEndpoint}
       />
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   fireEvent.click(screen.getByRole('button', { name: 'Options' }));
   expect(screen.getByRole('textbox', { name: 'Device name' })).toBeInTheDocument();

@@ -91,7 +91,7 @@ export const koKR = {
     },
   },
   common: {
-    appName: 'ToneNari',
+    appName: 'MixRelay',
     beta: '비공개 프리뷰',
     cancel: '취소',
     create: '생성',
@@ -110,7 +110,7 @@ export const koKR = {
     audioEngine: '오디오 엔진',
     engineShort: 'Engine',
     workspace: '라우팅 작업 영역',
-    signalPathLabel: 'ToneNari 신호 경로',
+    signalPathLabel: 'MixRelay 신호 경로',
     capture: '캡처',
     captureDescription: '앱과 시스템의 소리가 이곳으로 들어옵니다.',
     stream: '스트림',
@@ -177,8 +177,8 @@ export const koKR = {
     },
     title: '가상 I/O 라우팅',
     description:
-      'macOS 앱이 ToneNari로 출력한 소리를 OBS와 DAW가 입력으로 사용하는 가상 장치에 다시 연결합니다.',
-    canvasLabel: 'ToneNari 가상 I/O 라우팅 그래프',
+      'macOS 앱이 MixRelay로 출력한 소리를 OBS와 DAW가 입력으로 사용하는 가상 장치에 다시 연결합니다.',
+    canvasLabel: 'MixRelay 가상 I/O 라우팅 그래프',
     toggleGain: '−6 dB 게인',
     apply: '적용',
     nodes: {
@@ -247,7 +247,7 @@ export const koKR = {
       retry: '다시 시도',
     },
     persistenceWarning:
-      '오디오는 적용됐지만 그래프를 저장하지 못했습니다. ToneNari를 종료하면 변경사항이 사라질 수 있습니다.',
+      '오디오는 적용됐지만 그래프를 저장하지 못했습니다. MixRelay를 종료하면 변경사항이 사라질 수 있습니다.',
     layout: {
       failed: '노드 배치와 보기 상태를 저장하거나 불러오지 못했습니다. 현재 편집은 유지됩니다.',
       retry: '현재 배치 저장',
@@ -281,7 +281,7 @@ export const koKR = {
     },
   },
   studioGraph: {
-    editorLabel: 'ToneNari 오디오 그래프 편집기',
+    editorLabel: 'MixRelay 오디오 그래프 편집기',
     canvasLabel: '방송 믹스 신호 그래프',
     sessionName: '방송 믹스 / 메인',
     saved: '방금 저장됨',
@@ -306,7 +306,7 @@ export const koKR = {
       twoSources: 'Chrome + 마이크',
       streamControl: 'Threshold −12 dB',
       voiceContour: '4 밴드 · 보컬 선명도',
-      stereo48k: 'ToneNari Stream · 48 kHz',
+      stereo48k: 'MixRelay Stream · 48 kHz',
       headphones: 'MacBook Pro 스피커',
     },
     controls: { bypass: '바이패스', output: '출력 게인', mix: '드라이/웻', routing: '채널 라우팅' },
@@ -349,7 +349,7 @@ export const koKR = {
   },
   driver: {
     title: '가상 오디오 드라이버',
-    description: 'ToneNari Capture 및 ToneNari Stream',
+    description: 'MixRelay Capture 및 MixRelay Stream',
     actionInstall: '드라이버 설치',
     actionRestart: '오디오 서비스 재시작',
     actionDiagnose: '진단 열기',

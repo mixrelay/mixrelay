@@ -9,9 +9,9 @@ use std::{
 
 mod ffi;
 pub use ffi::{
-    tn_audio_ring_available_frames, tn_audio_ring_capacity_frames, tn_audio_ring_create,
-    tn_audio_ring_destroy, tn_audio_ring_dropped_frames, tn_audio_ring_read_interleaved,
-    tn_audio_ring_write_interleaved, tn_audio_ring_write_planar,
+    mr_audio_ring_available_frames, mr_audio_ring_capacity_frames, mr_audio_ring_create,
+    mr_audio_ring_destroy, mr_audio_ring_dropped_frames, mr_audio_ring_read_interleaved,
+    mr_audio_ring_write_interleaved, mr_audio_ring_write_planar,
 };
 
 /// Opaque native owner, created before the tap `IOProc` and destroyed after its

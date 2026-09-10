@@ -21,7 +21,7 @@ This is not completion of the private-Aggregate / three-OS migration.
 - Seven hardware-worker tests; four desktop clock-pump tests, including restart
   on a timestamp discontinuity without any format change or ring overflow.
 
-`cargo clippy -p tonenari-engine-service -p tonenari-desktop --all-targets -- -D warnings`
+`cargo clippy -p mixrelay-engine-service -p mixrelay-desktop --all-targets -- -D warnings`
 passed after correcting two new lint findings (test literal notation and field
 naming). The feature matrix generator, check and six self-test assertions pass;
 the release gates remain open. `git diff --check` is clean for tracked changes.
@@ -52,7 +52,7 @@ Aggregates were destroyed. Native input/output remain at 48000 Hz while graph
 overflows were zero in each phase; owners were retained. These fixture Aggregates
 are deliberately not treated as verified same-clock devices by the new policy.
 
-`zsh scripts/check-macos-application-clock.sh /var/tmp/tonenari-clock-boundary-live-20260908 --run`
+`zsh scripts/check-macos-application-clock.sh /var/tmp/mixrelay-clock-boundary-live-20260908 --run`
 passed through a real owned 440 Hz application, actual Process Tap, desktop pump
 and isolated source registry. No installed graph replacement or physical output.
 

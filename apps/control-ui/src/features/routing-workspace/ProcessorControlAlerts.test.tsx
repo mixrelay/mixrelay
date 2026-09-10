@@ -6,7 +6,7 @@ import type { AudioGraphModel } from '../../core/audio-graph/model';
 import { TauriControlPort } from '../../core/control-port/TauriControlPort';
 import type { ProcessorEditorStatus } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
-import { ToneNariProvider } from '../../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { ProcessorCatalogAlert, ProcessorEditorAlerts } from './ProcessorControlAlerts';
 import { useProcessorCatalog } from './useProcessorCatalog';
 import { useProcessorEditors } from './useProcessorEditors';
@@ -46,9 +46,9 @@ describe('processor native scan diagnostics', () => {
       }
       const { container } = render(
         <I18nextProvider i18n={i18n}>
-          <ToneNariProvider>
+          <MixRelayProvider>
             <Panel />
-          </ToneNariProvider>
+          </MixRelayProvider>
         </I18nextProvider>,
       );
       expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -85,9 +85,9 @@ describe('processor control recovery alerts', () => {
       }
       render(
         <I18nextProvider i18n={i18n}>
-          <ToneNariProvider>
+          <MixRelayProvider>
             <Panel />
-          </ToneNariProvider>
+          </MixRelayProvider>
         </I18nextProvider>,
       );
       expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -151,9 +151,9 @@ describe('processor control recovery alerts', () => {
     }
     render(
       <I18nextProvider i18n={i18n}>
-        <ToneNariProvider>
+        <MixRelayProvider>
           <Panel />
-        </ToneNariProvider>
+        </MixRelayProvider>
       </I18nextProvider>,
     );
     expect(await screen.findByRole('alert')).toHaveTextContent('My effect');

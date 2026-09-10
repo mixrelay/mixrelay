@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { ToneNariProvider } from '../theme/ToneNariProvider';
+import { MixRelayProvider } from '../theme/MixRelayProvider';
 import { AudioNodeCard } from './AudioNodeCard';
 import { LevelControl } from './LevelControl';
 import { Meter } from './Meter';
@@ -11,7 +11,7 @@ import { ToggleField } from './ToggleField';
 it('selects a native device rate without changing its observed value optimistically', () => {
   const onChange = vi.fn();
   render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <AudioNodeCard
         category="Device"
         icon="IO"
@@ -32,7 +32,7 @@ it('selects a native device rate without changing its observed value optimistica
           sampleRateOptions: [44100, 48000],
         }}
       />
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   fireEvent.click(screen.getByRole('button', { name: 'Options' }));
   const nameField = screen.getByRole('textbox', { name: 'Device name' });
@@ -64,7 +64,7 @@ describe('Native endpoint controls', () => {
   it('renders fixed native endpoint settings read-only', () => {
     const onChange = vi.fn();
     render(
-      <ToneNariProvider>
+      <MixRelayProvider>
         <AudioNodeCard
           category="Device"
           icon="IO"
@@ -87,7 +87,7 @@ describe('Native endpoint controls', () => {
             allowedCaptureChannels: [1],
           }}
         />
-      </ToneNariProvider>,
+      </MixRelayProvider>,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Options' }));
     expect(screen.getByLabelText('Device name')).toHaveAttribute('readonly');
@@ -107,7 +107,7 @@ describe('Core audio controls', () => {
     const onLevel = vi.fn();
 
     render(
-      <ToneNariProvider>
+      <MixRelayProvider>
         <div>
           <AudioNodeCard
             category="Source"
@@ -137,7 +137,7 @@ describe('Core audio controls', () => {
           <Meter label="Test" level={42} />
           <Panel title="Panel title">Panel content</Panel>
         </div>
-      </ToneNariProvider>,
+      </MixRelayProvider>,
     );
 
     const node = screen.getByRole('button', { name: 'Reusable node, Source, Test source' });
@@ -157,7 +157,7 @@ describe('Core audio controls', () => {
   it('offers retry only for a failed native processor editor', () => {
     const onEditorToggle = vi.fn();
     render(
-      <ToneNariProvider>
+      <MixRelayProvider>
         <AudioNodeCard
           category="Processor"
           icon="FX"
@@ -172,7 +172,7 @@ describe('Core audio controls', () => {
           }}
           title="Compressor"
         />
-      </ToneNariProvider>,
+      </MixRelayProvider>,
     );
 
     expect(screen.queryByRole('button', { name: 'Options' })).not.toBeInTheDocument();

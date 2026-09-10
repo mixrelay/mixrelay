@@ -9,9 +9,9 @@ use std::{
     sync::atomic::{AtomicU32, AtomicU64, Ordering, fence},
 };
 
-const MAGIC: u64 = 0x544e_4550_4f49_4f31;
+const MAGIC: u64 = 0x4d52_4550_4f49_4f31;
 const VERSION: u32 = 3;
-const CLOCK_MAGIC: u64 = 0x544e_434c_4f43_4b32;
+const CLOCK_MAGIC: u64 = 0x4d52_434c_4f43_4b32;
 const FRAME_MASK: u64 = (1 << 48) - 1;
 const MAX_CLOCK_TAG: u64 = (1 << 16) - 1;
 const TERMINAL: u64 = 1 << 63;
@@ -139,7 +139,7 @@ fn storage_layout(config: &EndpointTransportConfig) -> Option<StorageLayout> {
         if channels == 0 {
             continue;
         }
-        let bytes = audio::tn_shared_audio_buffer_required_bytes(config.capacity_frames, channels);
+        let bytes = audio::mr_shared_audio_buffer_required_bytes(config.capacity_frames, channels);
         if bytes == 0 {
             return None;
         }
@@ -189,7 +189,7 @@ impl EndpointTransport {
                 .cast()
         };
         unsafe {
-            audio::tn_shared_audio_buffer_attach(memory, (self.total_bytes - offset) as usize)
+            audio::mr_shared_audio_buffer_attach(memory, (self.total_bytes - offset) as usize)
         }
     }
 }
@@ -197,7 +197,7 @@ impl EndpointTransport {
 /// # Safety
 /// A non-null configuration must be readable for the duration of this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_required_bytes(
+pub unsafe extern "C" fn mr_endpoint_transport_required_bytes(
     config: *const EndpointTransportConfig,
 ) -> usize {
     unsafe { config.as_ref() }
@@ -211,7 +211,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_required_bytes(
 /// `memory` must exclusively own its stated writable extent; configuration must
 /// be readable and disjoint from that storage. No existing attached users exist.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_initialize(
+pub unsafe extern "C" fn mr_endpoint_transport_initialize(
     memory: *mut c_void,
     memory_size: usize,
     config: *const EndpointTransportConfig,
@@ -276,7 +276,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_initialize(
             (layout.capture_offset, config.capture_channels),
         ] {
             if offset != 0 {
-                let initialized = audio::tn_shared_audio_buffer_initialize(
+                let initialized = audio::mr_shared_audio_buffer_initialize(
                     memory.cast::<u8>().add(offset as usize).cast(),
                     (layout.audio_bytes - offset) as usize,
                     config.capacity_frames,
@@ -294,7 +294,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_initialize(
 /// # Safety
 /// The initialized mapping must remain accessible; its geometry must not change.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_attach(
+pub unsafe extern "C" fn mr_endpoint_transport_attach(
     memory: *mut c_void,
     memory_size: usize,
 ) -> *mut EndpointTransport {
@@ -343,7 +343,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_attach(
 /// Transport is attached and live. One control writer owns the transition and
 /// has drained local callbacks before changing their ring epochs.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_begin_clock_transition(
+pub unsafe extern "C" fn mr_endpoint_transport_begin_clock_transition(
     transport: *mut EndpointTransport,
 ) -> bool {
     let Some(transport) = (unsafe { transport.as_ref() }) else {
@@ -365,7 +365,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_begin_clock_transition(
 /// changes. A transition must already be active, local callbacks drained, and
 /// final capture rearm published. A missing transition never publishes state.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_clock_state(
+pub unsafe extern "C" fn mr_endpoint_transport_clock_state(
     transport: *mut EndpointTransport,
     epoch: u64,
     sample_rate: u32,
@@ -401,7 +401,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_clock_state(
 /// Non-null transport must be attached and live. Lifecycle replacement requires
 /// local demand writers to be quiescent; remote snapshots may continue.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_clock_demand(
+pub unsafe extern "C" fn mr_endpoint_transport_clock_demand(
     transport: *mut EndpointTransport,
     render: bool,
     through_frame: u64,
@@ -432,7 +432,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_clock_demand(
 /// Non-null transport must be attached and live; snapshot must be writable and
 /// disjoint from shared storage and other concurrent output users.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_clock_snapshot(
+pub unsafe extern "C" fn mr_endpoint_transport_clock_snapshot(
     transport: *const EndpointTransport,
     snapshot: *mut EndpointClockSnapshot,
 ) -> bool {
@@ -496,7 +496,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_clock_snapshot(
 /// # Safety
 /// Non-null transport must be attached and remain live throughout this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_requires_replacement(
+pub unsafe extern "C" fn mr_endpoint_transport_requires_replacement(
     transport: *const EndpointTransport,
 ) -> bool {
     unsafe { transport.as_ref() }.is_some_and(|transport| {
@@ -510,7 +510,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_requires_replacement(
 /// Non-null transport must be attached and live. `incarnation` must point to 16
 /// writable bytes disjoint from the shared mapping and concurrent destinations.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_incarnation(
+pub unsafe extern "C" fn mr_endpoint_transport_incarnation(
     transport: *const EndpointTransport,
     incarnation: *mut u8,
 ) -> bool {
@@ -533,7 +533,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_incarnation(
 /// # Safety
 /// Transport must be attached and live; config must be writable and disjoint.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_config(
+pub unsafe extern "C" fn mr_endpoint_transport_config(
     transport: *const EndpointTransport,
     config: *mut EndpointTransportConfig,
 ) -> bool {
@@ -552,7 +552,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_config(
 /// # Safety
 /// Non-null transport must be attached; the returned view borrows its mapping.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_render_buffer(
+pub unsafe extern "C" fn mr_endpoint_transport_render_buffer(
     transport: *mut EndpointTransport,
 ) -> *mut SharedAudioBuffer {
     unsafe { transport.as_ref() }.map_or(ptr::null_mut(), |transport| unsafe {
@@ -562,7 +562,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_render_buffer(
 /// # Safety
 /// Non-null transport must be attached; the returned view borrows its mapping.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_capture_buffer(
+pub unsafe extern "C" fn mr_endpoint_transport_capture_buffer(
     transport: *mut EndpointTransport,
 ) -> *mut SharedAudioBuffer {
     unsafe { transport.as_ref() }.map_or(ptr::null_mut(), |transport| unsafe {
@@ -573,7 +573,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_capture_buffer(
 /// # Safety
 /// Non-null transport must be attached and live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_touch_driver(
+pub unsafe extern "C" fn mr_endpoint_transport_touch_driver(
     transport: *mut EndpointTransport,
 ) -> u64 {
     unsafe { transport.as_ref() }.map_or(0, |transport| {
@@ -586,7 +586,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_touch_driver(
 /// # Safety
 /// Non-null transport must be attached and live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_touch_engine(
+pub unsafe extern "C" fn mr_endpoint_transport_touch_engine(
     transport: *mut EndpointTransport,
 ) -> u64 {
     unsafe { transport.as_ref() }.map_or(0, |transport| {
@@ -599,7 +599,7 @@ pub unsafe extern "C" fn tn_endpoint_transport_touch_engine(
 /// # Safety
 /// Non-null transport must be attached and live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_endpoint_transport_stats(
+pub unsafe extern "C" fn mr_endpoint_transport_stats(
     transport: *const EndpointTransport,
 ) -> EndpointTransportStats {
     unsafe { transport.as_ref() }.map_or(EndpointTransportStats::default(), |transport| {

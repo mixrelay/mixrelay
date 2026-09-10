@@ -1,5 +1,5 @@
 use super::*;
-use tonenari_audio_io::{
+use mixrelay_audio_io::{
     VirtualEndpointSettings,
     session::{AudioBackendKind, AudioSessionCapabilities, ClockAuthority, SessionFormat},
 };
@@ -11,7 +11,7 @@ impl Default for ConfigurableBackend {
         Self(VirtualEndpointCapabilities {
             max_render_channels: 64,
             max_capture_channels: 64,
-            supported_sample_rates: tonenari_audio_io::formats::SAMPLE_RATES.to_vec(),
+            supported_sample_rates: mixrelay_audio_io::formats::SAMPLE_RATES.to_vec(),
             supports_duplex: true,
             supports_dynamic_creation: true,
         })

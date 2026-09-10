@@ -244,7 +244,7 @@ export const pseudo = {
       retry: '[Retry]',
     },
     persistenceWarning:
-      '[Audio is active, but graph changes could not be saved. They may be lost when ToneNari closes.]',
+      '[Audio is active, but graph changes could not be saved. They may be lost when MixRelay closes.]',
     layout: {
       failed:
         '[Could not save or load the node layout and view. Your current edits are preserved.]',

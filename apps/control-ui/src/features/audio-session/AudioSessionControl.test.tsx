@@ -2,12 +2,12 @@ import { render, screen } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { expect, it, vi } from 'vitest';
 import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import type { AudioSessionStatus, ToneNariStatus } from '../../core/control-port/types';
+import type { AudioSessionStatus, MixRelayStatus } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
 import { en } from '../../core/i18n/locales/en';
 import { koKR } from '../../core/i18n/locales/ko-KR';
 import { pseudo } from '../../core/i18n/locales/pseudo';
-import { ToneNariProvider } from '../../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { AudioSessionControl } from './AudioSessionControl';
 
 const hiddenDiagnostics = [
@@ -23,7 +23,7 @@ const hiddenDiagnostics = [
 
 it('retains recorder finalization errors even without an audio session or recorder node', async () => {
   await i18n.changeLanguage('en');
-  const status: ToneNariStatus = {
+  const status: MixRelayStatus = {
     protocolVersion: 1,
     driverState: 'ready',
     sampleRate: null,
@@ -38,7 +38,7 @@ it('retains recorder finalization errors even without an audio session or record
     graphStatus: { protocolVersion: 1, activeRevision: 1, submittedRevision: 1 },
   });
   render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <I18nextProvider i18n={i18n}>
         <AudioSessionControl
           status={status}
@@ -47,7 +47,7 @@ it('retains recorder finalization errors even without an audio session or record
           onBusyChange={vi.fn()}
         />
       </I18nextProvider>
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   expect(screen.getByRole('alert')).toHaveTextContent('Recording error: take.wav: Disk full');
 });
@@ -62,7 +62,7 @@ it.each(
   'does not expose separate active/saved settings: $language $preferredFormat',
   async ({ language, preferredFormat }) => {
     await i18n.changeLanguage(language);
-    const status: ToneNariStatus = {
+    const status: MixRelayStatus = {
       protocolVersion: 1,
       driverState: 'ready',
       sampleRate: 48000,
@@ -97,14 +97,14 @@ it.each(
     });
     render(
       <I18nextProvider i18n={i18n}>
-        <ToneNariProvider>
+        <MixRelayProvider>
           <AudioSessionControl
             status={status}
             controlPort={controlPort}
             onApplied={vi.fn()}
             onBusyChange={vi.fn()}
           />
-        </ToneNariProvider>
+        </MixRelayProvider>
       </I18nextProvider>,
     );
     expect(screen.queryByText(i18n.t('audioSession.diagnostics'))).not.toBeInTheDocument();
@@ -178,7 +178,7 @@ it.each(
         driftCorrection: false,
       },
     };
-    const status: ToneNariStatus = {
+    const status: MixRelayStatus = {
       protocolVersion: 1,
       driverState: 'ready',
       sampleRate: 48000,
@@ -195,14 +195,14 @@ it.each(
     });
     render(
       <I18nextProvider i18n={i18n}>
-        <ToneNariProvider>
+        <MixRelayProvider>
           <AudioSessionControl
             status={status}
             controlPort={controlPort}
             onApplied={vi.fn()}
             onBusyChange={vi.fn()}
           />
-        </ToneNariProvider>
+        </MixRelayProvider>
       </I18nextProvider>,
     );
     expect(

@@ -221,7 +221,7 @@ it.each(Array.from({ length: 64 }, (_, index) => index + 1))(
       model,
       'virtual-1::host-source',
       {
-        displayName: 'ToneNari IO',
+        displayName: 'MixRelay IO',
         renderChannels: channels,
         captureChannels: 65 - channels,
       },
@@ -255,7 +255,7 @@ it.each([0, -1, 65, 7.5, Number.NaN, Number.POSITIVE_INFINITY])(
     );
     expect(
       updateVirtualEndpoint(attached, 'virtual-1::host-source', {
-        displayName: 'ToneNari IO',
+        displayName: 'MixRelay IO',
         renderChannels: channels,
         captureChannels: 2,
       }),

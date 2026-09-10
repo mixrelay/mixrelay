@@ -12,7 +12,7 @@ test in the installed Windows ARM64 LAB VM. Unit tests are not substituted for i
   silence/no clock during absence, and joined workers on removal while absent.
 - Added a read-only six-role default-endpoint inventory test. Console, multimedia,
   and communications roles are recorded for both capture and rendering.
-- Tests reject unrelated endpoint UIDs and use exact `ToneNari SysVAD Bridge LAB`
+- Tests reject unrelated endpoint UIDs and use exact `MixRelay SysVAD Bridge LAB`
   identities. The parent fallback additionally pins hardware ID, service, provider,
   and installed driver path. RAII recovery and an independent PowerShell `finally`
   both restore the LAB endpoints. No driver installation, deletion, forced stop,
@@ -45,7 +45,7 @@ required in-process recovery cycles.
 ## Authorized reboot and v7 restoration
 
 Only VM `712A936E-9D91-4455-A8A9-A1F65EB60719` was normally restarted with
-`shutdown /r /t 0` (no force). Before restart no ToneNari process or open app
+`shutdown /r /t 0` (no force). Before restart no MixRelay process or open app
 window was observed. The boot timestamp changed and `DevNodeStatus` changed
 from `0x0180210B` to `0x0180200B`, independently proving the restart bit cleared.
 The existing user account then logged in normally; no authentication, auto-logon,
@@ -73,13 +73,13 @@ post-v7 safety edits were parser-checked; no extra destructive probe was run.
   a separate interactive inventory after the successful WMI restoration:
   - capture: `{0.0.1.00000000}.{f84b45c8-7f8f-40b8-81b3-c34c2619e10b}`;
   - render: `{0.0.0.00000000}.{e4d8a80d-caf2-4a38-aaf7-fc9a9a3ecf1c}`.
-- No remaining `tonenari*` process observed after the test run.
+- No remaining `mixrelay*` process observed after the test run.
 - Owned completed PnP scheduled tasks V1/V2/V3 removed after checking exact action,
   VM identity, and non-running state. Job directories/logs are retained.
 - V7, restore V1, and post-restore inventory V1 owned scheduled tasks were also
   removed after exact action/non-running checks. Final checks exit 0: three
   PowerShell scripts parsed without errors, parent ConfigFlags 0, ProblemCode 0,
-  eight original endpoints OK, and no remaining ToneNari process.
+  eight original endpoints OK, and no remaining MixRelay process.
 
 ## Verification and limits
 
@@ -104,11 +104,11 @@ be cancelled. Normal stop/recovery workers join, but a permanently hung native
 initialization needs an isolation/broker design; this is not a no-leak guarantee.
 
 Evidence is preserved under
-`/Volumes/Linear 1/test/tonenari/evidence/native-device-parity-20260907/windows-pnp/`:
+`/Volumes/Linear 1/test/mixrelay/evidence/native-device-parity-20260907/windows-pnp/`:
 failed v1–v6 logs, role snapshots, final root flags/endpoints, regression logs, and
 owned-task cleanup. Failed attempts are retained rather than overwritten.
 The reboot/v7 and successful restoration evidence is separately retained under
-`/Volumes/Linear 1/test/tonenari/evidence/native-device-parity-20260907/windows-reboot-pnp/`.
+`/Volumes/Linear 1/test/mixrelay/evidence/native-device-parity-20260907/windows-reboot-pnp/`.
 
 Native contract references: [WASAPI invalid-device recovery](https://learn.microsoft.com/en-us/windows/win32/coreaudio/recovering-from-an-invalid-device-error),
 [PnPUtil command syntax](https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/pnputil-command-syntax).

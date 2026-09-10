@@ -8,14 +8,14 @@ fi
 
 repo_root="${0:A:h:h}"
 native_root="$repo_root/native/macos/application-capture"
-cargo build --manifest-path "$repo_root/Cargo.toml" -p tonenari-process-tap --release
-capture_archive="$repo_root/target/release/libtonenari_process_tap.a"
+cargo build --manifest-path "$repo_root/Cargo.toml" -p mixrelay-process-tap --release
+capture_archive="$repo_root/target/release/libmixrelay_process_tap.a"
 mkdir -p "$repo_root/target/native-tests"
 smoke_build_dir="$(mktemp -d "$repo_root/target/native-tests/application-capture.XXXXXX")"
 trap 'rm -rf -- "$smoke_build_dir"' EXIT
-tone_bundle="$smoke_build_dir/TNToneSource.app"
+tone_bundle="$smoke_build_dir/MRToneSource.app"
 mkdir -p "$tone_bundle/Contents/MacOS"
-cp "$native_root/tests/TNToneSource-Info.plist" "$tone_bundle/Contents/Info.plist"
+cp "$native_root/tests/MRToneSource-Info.plist" "$tone_bundle/Contents/Info.plist"
 
 strict_flags=(
   -mmacosx-version-min=14.2
@@ -33,10 +33,10 @@ clang \
   -fmodules \
   -fblocks \
   "${strict_flags[@]}" \
-  "$native_root/tests/TNToneSource.m" \
+  "$native_root/tests/MRToneSource.m" \
   -framework AVFAudio \
   -framework Foundation \
-  -o "$tone_bundle/Contents/MacOS/TNToneSource"
+  -o "$tone_bundle/Contents/MacOS/MRToneSource"
 
 clang \
   -std=c17 \
@@ -44,18 +44,18 @@ clang \
   -fmodules \
   "${strict_flags[@]}" \
   -I "$native_root/include" \
-  "$native_root/tests/TNProcessTapSmoke.m" \
+  "$native_root/tests/MRProcessTapSmoke.m" \
   "$capture_archive" -liconv \
   -framework CoreAudio \
   -framework Foundation \
   -framework AppKit \
-  -o "$smoke_build_dir/TNProcessTapSmoke"
+  -o "$smoke_build_dir/MRProcessTapSmoke"
 
-"$tone_bundle/Contents/MacOS/TNToneSource" &
+"$tone_bundle/Contents/MacOS/MRToneSource" &
 tone_process_id=$!
 sleep 1
 set +e
-"$smoke_build_dir/TNProcessTapSmoke" io.tonenari.test-tone-source
+"$smoke_build_dir/MRProcessTapSmoke" io.mixrelay.test-tone-source
 smoke_status=$?
 set -e
 wait "$tone_process_id"

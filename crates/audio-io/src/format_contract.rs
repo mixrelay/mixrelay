@@ -94,7 +94,7 @@ mod tests {
     #[test]
     fn native_declarations_use_the_exact_rust_catalog() {
         let header = native_format_header::render();
-        assert!(header.contains("TN_AUDIO_SAMPLE_RATE_COUNT = 6"));
+        assert!(header.contains("MR_AUDIO_SAMPLE_RATE_COUNT = 6"));
         let declaration = header
             .lines()
             .find(|line| line.starts_with("static const uint32_t"))
@@ -116,7 +116,7 @@ mod tests {
         let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/format-tests")
             .join(format!(
-                "tonenari-format-header-{}-{}",
+                "mixrelay-format-header-{}-{}",
                 std::process::id(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)

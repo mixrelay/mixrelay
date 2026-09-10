@@ -4,7 +4,7 @@ Status: Accepted
 
 ## Context
 
-ToneNari's render callback cannot load, unload, lock, or destroy third-party plug-ins. A plug-in
+MixRelay's render callback cannot load, unload, lock, or destroy third-party plug-ins. A plug-in
 may also crash, hang during shutdown, allocate in its DSP callback, or expose hundreds of rapidly
 changing parameters. Keeping those objects in the graph service would make one vendor binary part
 of the engine's real-time and lifetime guarantees.
@@ -28,7 +28,7 @@ of the engine's real-time and lifetime guarantees.
 - Discovery scans each format and probes each candidate in disposable processes. A bad scanner
   target cannot terminate the graph service or poison the shared catalog snapshot.
 - The probe distinguishes a vendor-supplied native editor from a host-generated parameter view.
-  In particular, Apple's in-box `AUGenericViewFactory` is represented by ToneNari's existing
+  In particular, Apple's in-box `AUGenericViewFactory` is represented by MixRelay's existing
   parameter controls instead of being mislabeled and opened as a floating plug-in editor.
 - The macOS system Mach service runs the engine and processor workers as the logged-in user. Only
   the HAL endpoint attachment is accepted from `_coreaudiod`; this preserves per-user AU, VST3,

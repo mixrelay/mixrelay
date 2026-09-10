@@ -2,17 +2,17 @@
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  print -u2 "ToneNari installed duplex smoke only runs on macOS"
+  print -u2 "MixRelay installed duplex smoke only runs on macOS"
   exit 1
 fi
 
 repo_root="${0:A:h:h}"
 mkdir -p "$repo_root/target/native-tests"
 smoke_root="$(mktemp -d "$repo_root/target/native-tests/installed-duplex.XXXXXX")"
-smoke_binary="$smoke_root/TNInstalledDuplexSmoke"
-service_target="system/io.tonenari.audio.engine"
-service_stdout="$HOME/Library/Logs/ToneNari/engine.stdout.log"
-service_stderr="$HOME/Library/Logs/ToneNari/engine.stderr.log"
+smoke_binary="$smoke_root/MRInstalledDuplexSmoke"
+service_target="system/io.mixrelay.audio.engine"
+service_stdout="$HOME/Library/Logs/MixRelay/engine.stdout.log"
+service_stderr="$HOME/Library/Logs/MixRelay/engine.stderr.log"
 
 cleanup() {
   rm -rf -- "$smoke_root"
@@ -30,7 +30,7 @@ clang \
   -Wshadow \
   -Werror \
   -I "$repo_root/native/macos/hal-driver/include" \
-  "$repo_root/native/macos/hal-driver/tests/TNInstalledDuplexSmoke.c" \
+  "$repo_root/native/macos/hal-driver/tests/MRInstalledDuplexSmoke.c" \
   -framework CoreAudio \
   -framework CoreFoundation \
   -o "$smoke_binary"
@@ -51,7 +51,7 @@ for attempt in {1..20}; do
   sleep 1
 done
 
-print -u2 "ToneNari installed duplex smoke failed"
+print -u2 "MixRelay installed duplex smoke failed"
 /bin/launchctl print "$service_target" 2>&1 | sed -n '1,160p' >&2 || true
 if [[ -f "$service_stdout" ]]; then
   sed -n '1,160p' "$service_stdout" >&2

@@ -61,13 +61,13 @@ jobs:
         with:
           persist-credentials: false
       - run: docker compose -f infra/lab/compose.yaml build ${{ matrix.distro }}
-      - run: docker compose -f infra/lab/compose.yaml run --name tonenari-ci-check ${{ matrix.distro }} test
+      - run: docker compose -f infra/lab/compose.yaml run --name mixrelay-ci-check ${{ matrix.distro }} test
       - name: Collect evidence even when a compile or test fails
         if: always()
         run: |
           mkdir -p .lab/reports
-          if docker container inspect tonenari-ci-check >/dev/null 2>&1; then
-            docker cp tonenari-ci-check:/workspace/.lab/reports/. .lab/reports/
+          if docker container inspect mixrelay-ci-check >/dev/null 2>&1; then
+            docker cp mixrelay-ci-check:/workspace/.lab/reports/. .lab/reports/
           fi
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

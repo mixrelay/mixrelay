@@ -8,8 +8,8 @@ mod ffi;
 #[cfg(test)]
 mod tests;
 pub use ffi::{
-    tn_aggregate_group_binding, tn_aggregate_group_create, tn_aggregate_group_ready,
-    tn_aggregate_group_try_destroy, tn_aggregate_member_info,
+    mr_aggregate_group_binding, mr_aggregate_group_create, mr_aggregate_group_ready,
+    mr_aggregate_group_try_destroy, mr_aggregate_member_info,
 };
 
 /// Private aggregate owner. The control-thread retirement API consumes this only
@@ -71,7 +71,7 @@ impl AggregateGroup {
         }
         let members = cf::Object::array(&members[..self.geometry.count as usize])?;
         let uid = cf::Object::unique_uid()?;
-        let name = cf::Object::string(c"ToneNari private I/O")?;
+        let name = cf::Object::string(c"MixRelay private I/O")?;
         let private = cf::Object::number(1)?;
         let stacked = cf::Object::number(0)?;
         cf::Object::dictionary([

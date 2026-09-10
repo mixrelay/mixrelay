@@ -63,7 +63,7 @@ nanoseconds per callback plus the opposite queue operation, not end-to-end laten
 Creation/destruction is excluded. Both sides retain the same previously converted
 Rust PCM/capture queues and validate resulting PCM. No actual audio devices open.
 
-Device benchmark: `TNDeviceBuffersBench.c`, capacity 16,384; input means callback
+Device benchmark: `MRDeviceBuffersBench.c`, capacity 16,384; input means callback
 capture plus worker read, output means worker write plus callback playback. C17,
 blocks, strict warnings; both harness builds use identical flags and link CoreAudio
 and CoreFoundation. The XPC adapter's deployment target is not a timed path.
@@ -91,7 +91,7 @@ validated ranges. The final 256-frame packed stereo medians fall about 56%/63%
 their absolute added time ranges from about 10 to 221 ns. This is not a universal
 no-regression claim. The additional metadata validation is retained before transfer.
 
-Tap benchmark: `TNProcessTapInputBench.m`, same capacity/iteration schedule;
+Tap benchmark: `MRProcessTapInputBench.m`, same capacity/iteration schedule;
 Objective-C ARC, blocks, minimum macOS 14.2 and strict warnings on both sides.
 Uses constant finite PCM, null timestamps and queue drain; it does not exercise
 concurrent meter clearing or frequent peak replacement.
@@ -125,7 +125,7 @@ replacement. Its queue/clock algorithms remain the existing shared implementatio
 lease, ownership, failure and no-allocation tests are the alternative evidence.
 No source-transport speedup or real XPC connection latency improvement is claimed.
 
-Reproduction: build `tonenari-macos-transport` and `tonenari-pcm-ring` in release
+Reproduction: build `mixrelay-macos-transport` and `mixrelay-pcm-ring` in release
 mode, compile the two checked-in harnesses against their archives and the native
 frameworks described above, then run one executable at a time. Raw local results
 are ignored artifacts under `target/test-artifacts/{device-buffers,process-tap}-benchmark/`.

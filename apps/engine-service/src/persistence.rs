@@ -64,7 +64,7 @@ impl StagedWrite {
         if let Some(parent) = self.destination.parent()
             && let Err(error) = File::open(parent).and_then(|directory| directory.sync_all())
         {
-            tracing::warn!(%error, "ToneNari document directory sync failed after commit");
+            tracing::warn!(%error, "MixRelay document directory sync failed after commit");
         }
         Ok(())
     }
@@ -75,7 +75,7 @@ impl Drop for StagedWrite {
         if let Err(error) = fs::remove_file(&self.temporary)
             && error.kind() != io::ErrorKind::NotFound
         {
-            tracing::warn!(%error, "ToneNari staged document cleanup failed");
+            tracing::warn!(%error, "MixRelay staged document cleanup failed");
         }
     }
 }
@@ -84,7 +84,7 @@ fn create_temporary(parent: &Path) -> io::Result<(PathBuf, File)> {
     for _ in 0..16 {
         let ticket = NEXT_FILE.fetch_add(1, Ordering::Relaxed);
         let path = parent.join(format!(
-            ".tonenari-write-{}-{ticket}.tmp",
+            ".mixrelay-write-{}-{ticket}.tmp",
             std::process::id()
         ));
         let mut options = OpenOptions::new();
@@ -115,22 +115,22 @@ fn absolute_env(name: &str) -> Option<PathBuf> {
 /// Resolves the application's configuration directory without creating it.
 /// Returns an invalid override or unavailable user-directory error.
 pub(crate) fn config_directory() -> io::Result<PathBuf> {
-    if env::var_os("TONENARI_CONFIG_DIR").is_some() {
-        return absolute_env("TONENARI_CONFIG_DIR").ok_or_else(|| {
+    if env::var_os("MIXRELAY_CONFIG_DIR").is_some() {
+        return absolute_env("MIXRELAY_CONFIG_DIR").ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "TONENARI_CONFIG_DIR must be absolute",
+                "MIXRELAY_CONFIG_DIR must be absolute",
             )
         });
     }
     #[cfg(target_os = "macos")]
-    let base = absolute_env("HOME").map(|home| home.join("Library/Application Support/ToneNari"));
+    let base = absolute_env("HOME").map(|home| home.join("Library/Application Support/MixRelay"));
     #[cfg(target_os = "windows")]
-    let base = absolute_env("LOCALAPPDATA").map(|directory| directory.join("ToneNari"));
+    let base = absolute_env("LOCALAPPDATA").map(|directory| directory.join("MixRelay"));
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let base = absolute_env("XDG_CONFIG_HOME")
         .or_else(|| absolute_env("HOME").map(|home| home.join(".config")))
-        .map(|directory| directory.join("tonenari"));
+        .map(|directory| directory.join("mixrelay"));
     base.ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,

@@ -1,4 +1,4 @@
-name: tonenari-lab
+name: mixrelay-lab
 x-build: &build
   context: ../..
   dockerfile: infra/lab/Dockerfile

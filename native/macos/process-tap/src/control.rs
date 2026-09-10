@@ -1,7 +1,7 @@
 use super::{TapError, TapSession, native::Native};
 use crate::process_tap_input::TapFormat;
+use mixrelay_macos_transport::capture_ring::mr_audio_ring_read_interleaved;
 use std::sync::atomic::Ordering;
-use tonenari_macos_transport::capture_ring::tn_audio_ring_read_interleaved;
 
 impl TapSession {
     pub(super) fn adopt_registration(
@@ -153,7 +153,7 @@ impl TapSession {
         let mut discarded = [0.0; 64 * 64];
         // SAFETY: callback unregistration and active count have drained the only
         // producer; control owns the sole consumer and scratch covers 64 channels.
-        while unsafe { tn_audio_ring_read_interleaved(self.ring(), discarded.as_mut_ptr(), 64) }
+        while unsafe { mr_audio_ring_read_interleaved(self.ring(), discarded.as_mut_ptr(), 64) }
             != 0
         {}
         self.peaks.clear();

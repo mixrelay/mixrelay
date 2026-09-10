@@ -10,18 +10,18 @@ use std::{
     },
 };
 
-use process_tap_input::{TapFormat, TapPeaks};
-use process_tap_lifecycle::TapLifecycle;
-use tonenari_macos_transport::{
+use mixrelay_macos_transport::{
     callback_clock::{
-        CallbackClock, CallbackClockSnapshot, tn_callback_clock_discontinuities,
-        tn_callback_clock_snapshot,
+        CallbackClock, CallbackClockSnapshot, mr_callback_clock_discontinuities,
+        mr_callback_clock_snapshot,
     },
     capture_ring::{
-        AudioRing, tn_audio_ring_available_frames, tn_audio_ring_destroy,
-        tn_audio_ring_dropped_frames,
+        AudioRing, mr_audio_ring_available_frames, mr_audio_ring_destroy,
+        mr_audio_ring_dropped_frames,
     },
 };
+use process_tap_input::{TapFormat, TapPeaks};
+use process_tap_lifecycle::TapLifecycle;
 
 mod process_tap_input;
 mod process_tap_lifecycle;
@@ -35,9 +35,9 @@ mod native;
 mod tests;
 
 pub use ffi::{
-    tn_process_tap_create, tn_process_tap_destroy, tn_process_tap_read,
-    tn_process_tap_refresh_format, tn_process_tap_start, tn_process_tap_stats, tn_process_tap_stop,
-    tn_process_tap_take_peaks,
+    mr_process_tap_create, mr_process_tap_destroy, mr_process_tap_read,
+    mr_process_tap_refresh_format, mr_process_tap_start, mr_process_tap_stats, mr_process_tap_stop,
+    mr_process_tap_take_peaks,
 };
 
 /// Existing application-capture wire error. A nonzero code explains the failed boundary.
@@ -45,7 +45,7 @@ pub use ffi::{
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("application capture error {code} (OSStatus {os_status})")]
 pub struct TapError {
-    /// Stable `TNProcessTapErrorCode` value.
+    /// Stable `MRProcessTapErrorCode` value.
     pub code: u32,
     /// Original `OSStatus`, zero for validation/admission errors.
     pub os_status: i32,
@@ -129,7 +129,7 @@ impl Drop for RingOwner {
     fn drop(&mut self) {
         // SAFETY: Session is reclaimed only after callback/listener removal and drain.
         // The consuming desktop destroy contract has already drained pump/stat readers.
-        unsafe { tn_audio_ring_destroy(self.0) };
+        unsafe { mr_audio_ring_destroy(self.0) };
     }
 }
 
@@ -170,10 +170,10 @@ impl TapSession {
         // publication are atomic. Neither reaches control-only resources.
         let (read, clock_discontinuities, dropped_frames, available_frames) = unsafe {
             (
-                tn_callback_clock_snapshot(&raw const self.clock, &raw mut clock),
-                tn_callback_clock_discontinuities(&raw const self.clock),
-                tn_audio_ring_dropped_frames(self.ring()),
-                tn_audio_ring_available_frames(self.ring()),
+                mr_callback_clock_snapshot(&raw const self.clock, &raw mut clock),
+                mr_callback_clock_discontinuities(&raw const self.clock),
+                mr_audio_ring_dropped_frames(self.ring()),
+                mr_audio_ring_available_frames(self.ring()),
             )
         };
         TapStats {

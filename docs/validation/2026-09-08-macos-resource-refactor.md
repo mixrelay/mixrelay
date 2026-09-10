@@ -49,7 +49,7 @@ introduced by the handoff; retirement remains on the control side.
 - Control UI: TypeScript check and 183 focused tests passed, with no unhandled
   errors. Corrected the new dropdown test's invalid query option. jsdom's missing
   scrolling API is modelled in test setup; actual option selection is still tested.
-- `cargo clippy -p tonenari-engine-service --all-targets -- -D warnings` passed.
+- `cargo clippy -p mixrelay-engine-service --all-targets -- -D warnings` passed.
   No lint thresholds were relaxed and no warning suppression was added.
 - Native ASan/UBSan callback, mixed-channel, epoch, SPSC and teardown checks passed.
   Shared PCM ring immediate-read/epoch tests passed; its default prefill policy
@@ -58,16 +58,16 @@ introduced by the handoff; retirement remains on the control side.
   32-sample callbacks before/after reconnect, and 44.1/96/48 kHz graph phases
   against unchanged 48 kHz native IO, with zero FIFO overflows in each short phase.
 
-One repeated native run (`/tmp/tonenari-device-io-check.HoBclK`) failed at initial
+One repeated native run (`/tmp/mixrelay-device-io-check.HoBclK`) failed at initial
 device preparation in the SRC fixture. Its original boolean error did not locate
 the failing operation. The native connection boundary now returns preflight stage
 or native status for Rust reporting, without retries or accepting failure. The
-subsequent full run (`/tmp/tonenari-device-io-check.jdS2a3`) passed all three tests.
+subsequent full run (`/tmp/mixrelay-device-io-check.jdS2a3`) passed all three tests.
 **The intermittent startup failure is not considered fixed by that rerun**;
 capture its new stage/status on recurrence and keep native startup acceptance open.
 
 After moving Aggregate lifetime and buffer policy to Rust, the full native suite
-also passed in `/tmp/tonenari-device-io-check.fs6tpu`. A new explicit test opened
+also passed in `/tmp/mixrelay-device-io-check.fs6tpu`. A new explicit test opened
 and retired 20 fresh fixtures at alternating 44.1/48/96 kHz graph rates without
 retrying failed graph preparation: all 20 succeeded. This increases regression
 coverage, but does not establish the earlier intermittent failure's root cause.
@@ -76,7 +76,7 @@ to prevent FFI signature drift; hardware execution remains explicitly opt-in.
 
 ### Reproduced discovery race and scoped correction
 
-The next full run (`/tmp/tonenari-device-io-check.nsBcfI`) failed at startup
+The next full run (`/tmp/mixrelay-device-io-check.nsBcfI`) failed at startup
 iteration 6, while the other three Rust live tests and native sanitizer checks
 passed. A diagnostic repeat failed at iteration 15 with **device=0, frames=0**.
 The creator process had resolved the same new UID and both stream layouts before
@@ -98,7 +98,7 @@ and using the same native fixture binary. Before correction, repeated executions
 could fail at index 6 or 15. This is observed reliability evidence, not a claimed
 statistical failure-rate estimate or proof for every CoreAudio startup failure.
 
-Final combined run (`/tmp/tonenari-device-io-check.uQkHXm`): native ASan/UBSan
+Final combined run (`/tmp/mixrelay-device-io-check.uQkHXm`): native ASan/UBSan
 checks and **all four Rust native tests passed**, including another 20 fresh
 startups, 32-sample apply/reconnect, four hotplug cycles and three SRC phases
 with zero FIFO overflows. Final Clippy with warnings denied and diff whitespace
@@ -116,7 +116,7 @@ The memory script additionally covers 128 partial Aggregate creation failures
 and, with two explicit compatible output UIDs, a real private Aggregate held by
 two callback owners. Dropping one owner retains the group; releasing the last
 returns group admission to zero. The explicit local UIDs were
-`BuiltInSpeakerDevice` and `io.tonenari.audio.endpoint.default`; no rate/default
+`BuiltInSpeakerDevice` and `io.mixrelay.audio.endpoint.default`; no rate/default
 changes were made by this lifetime probe.
 
 Observed on the final buffer-policy/discovery build:
@@ -136,9 +136,9 @@ of relying on a release-build-disabled assertion. Such a permanently blocked
 vendor can still delay teardown; it is not claimed to be successfully recovered.
 
 Removed one stale test-only native Aggregate,
-`io.tonenari.device-recovery-probe.73924`, after confirming its owner PID was
+`io.mixrelay.device-recovery-probe.73924`, after confirming its owner PID was
 gone, it was absent from the current graph, and it was neither default input nor
-output. The guarded cleanup verified its sole member was the ToneNari endpoint.
+output. The guarded cleanup verified its sole member was the MixRelay endpoint.
 Readback confirmed removal and unchanged default device IDs 145/150. This was a
 recreatable test resource, not a user device or graph node.
 
@@ -156,7 +156,7 @@ These are queue budgets, not measured end-to-end latency or CPU improvements.
 The user's direction is Rust-first, with only genuinely necessary small native
 modules. Aggregate readiness/retirement scheduling and client buffer validation,
 write acknowledgement and rollback now live in Rust. The Aggregate C file fell
-from 274 to 245 lines; `TNDeviceIO.c` is currently 328 lines. These counts are
+from 274 to 245 lines; `MRDeviceIO.c` is currently 328 lines. These counts are
 scope evidence, not performance evidence. Native CF dictionary construction,
 member/property/geometry checks, PCM/registry/control and callback code still
 exist in C. This does **not** complete the Rust-first migration; keep narrowing

@@ -91,7 +91,7 @@ mod tests {
         let pid = std::process::id();
         let identity = process_identity(pid).expect("own proc identity");
         assert!(same_process(&identity, &process_identity(pid).unwrap()));
-        assert!(verified_executable(pid, Some("definitely-not-tonenari")).is_none());
+        assert!(verified_executable(pid, Some("definitely-not-mixrelay")).is_none());
         let executable = identity.executable_path.unwrap();
         assert_eq!(
             verified_executable(pid, Some(&executable)),

@@ -1,5 +1,5 @@
 [package]
-name = "tonenari-control-server"
+name = "mixrelay-control-server"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,8 +15,8 @@ serde.workspace = true
 axum.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
-tonenari-audio-graph = { path = "../audio-graph" }
-tonenari-control-protocol = { path = "../control-protocol" }
+mixrelay-audio-graph = { path = "../audio-graph" }
+mixrelay-control-protocol = { path = "../control-protocol" }
 tower-http.workspace = true
 
 [dev-dependencies]

@@ -8,6 +8,7 @@ use crate::{
 use base64::Engine as _;
 use block2::RcBlock;
 use dispatch2::MainThreadBound;
+use mixrelay_control_protocol::{EditorPointerKind, ProcessorEditorFrame};
 use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSBitmapImageFileType,
@@ -22,7 +23,6 @@ use std::{
     ptr::NonNull,
     sync::{Arc, atomic::Ordering},
 };
-use tonenari_control_protocol::{EditorPointerKind, ProcessorEditorFrame};
 use truce_rack_core::WindowHandle;
 
 pub(crate) struct NativeEditorHost {

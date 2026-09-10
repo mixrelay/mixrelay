@@ -5,34 +5,34 @@ use std::{
 
 use parking_lot::{Mutex, RwLock};
 mod recorder_control;
-use tonenari_audio_engine::{
+use mixrelay_audio_engine::{
     BlockProcessor, ExternalBinding, MeterBinding, PeakMeterBank, ProcessorConfigurationError,
     ProcessorExchange, ProcessorSubmitError, RenderPlan, RenderPlanError,
 };
-use tonenari_audio_graph::{
+use mixrelay_audio_graph::{
     AUDIO_PORT_ID, AudioEndpoint, ChannelLayout, ChannelMapping, CompileContext, CompileLimits,
     EdgeId, EdgeSpec, ExecutionPlan, FROM_OS_PORT_ID, GainConfig, GraphCompiler, GraphDocument,
     NodeConfig, NodeId, NodeSpec, PortId, RenderFormat, StreamSpec, TO_OS_PORT_ID,
     VirtualEndpointId, VirtualEndpointSpec,
 };
-use tonenari_audio_io::{
+use mixrelay_audio_io::{
     HostAudioBackendError, VirtualEndpointBackend, VirtualEndpointCapabilities,
 };
-use tonenari_control_protocol::{
+use mixrelay_control_protocol::{
     AppStatus, DriverState, ErrorCode, ExternalProcessorCatalog, GraphApplyRequest,
     GraphApplyResponse, GraphApplyState, GraphRuntimeStatus, MeterSnapshot, NodeMeterSnapshot,
     PROTOCOL_VERSION, ProcessorEditorStatus, ProcessorParameterUpdateResponse,
     ProcessorScanRequest, ProtocolError, SessionReconfigureRequest,
 };
-use tonenari_control_server::ControlBackend;
-use tonenari_processor_host::{
+use mixrelay_control_server::ControlBackend;
+use mixrelay_processor_host::{
     CatalogNodeResolver, ExternalProcessorFactory, ProcessorCatalog, ProcessorControlRegistry,
 };
 
 pub const DEFAULT_ENDPOINT_NODE_ID: &str = "default-virtual-io";
 
 #[cfg(target_os = "macos")]
-use tonenari_macos_transport as _;
+use mixrelay_macos_transport as _;
 
 #[cfg(target_os = "macos")]
 #[path = "macos/endpoint_registry.rs"]
@@ -90,7 +90,7 @@ pub trait GraphResourceBackend: Send + Sync {
     /// Rejects adapters without native device enumeration.
     fn device_inventory(
         &self,
-    ) -> Result<Vec<tonenari_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
+    ) -> Result<Vec<mixrelay_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
         Err(HostAudioBackendError::CapabilityUnavailable {
             capability: "native device identity resolution".into(),
         })
@@ -101,7 +101,7 @@ pub trait GraphResourceBackend: Send + Sync {
     /// Rejects selectors or capture policies that the adapter cannot fulfill exactly.
     fn resolve_application_capture(
         &self,
-        _request: &tonenari_audio_io::ApplicationCaptureRequest,
+        _request: &mixrelay_audio_io::ApplicationCaptureRequest,
     ) -> Result<graph_composition::SharedSource, HostAudioBackendError> {
         Err(HostAudioBackendError::CapabilityUnavailable {
             capability: "application capture identity resolution".into(),
@@ -185,7 +185,7 @@ pub trait RuntimeStatusBackend: Send + Sync {
     fn capabilities_for_format(
         &self,
         format: RenderFormat,
-    ) -> Option<tonenari_audio_io::session::AudioSessionCapabilities> {
+    ) -> Option<mixrelay_audio_io::session::AudioSessionCapabilities> {
         self.status(format)
             .audio_session
             .map(|session| session.capabilities)
@@ -301,7 +301,7 @@ trait ProcessorFactory: Send + Sync {
 }
 
 struct BuiltInProcessorFactory {
-    recorders: tonenari_audio_recorder::RecorderRegistry,
+    recorders: mixrelay_audio_recorder::RecorderRegistry,
     catalog: ProcessorCatalog,
     hosted: ExternalProcessorFactory,
     meters: Arc<PeakMeterBank>,
@@ -311,7 +311,7 @@ struct BuiltInProcessorFactory {
 impl Default for BuiltInProcessorFactory {
     fn default() -> Self {
         Self {
-            recorders: tonenari_audio_recorder::RecorderRegistry::default(),
+            recorders: mixrelay_audio_recorder::RecorderRegistry::default(),
             catalog: ProcessorCatalog::default(),
             hosted: ExternalProcessorFactory::new(ProcessorCatalog::default()),
             meters: default_peak_meter_bank(),
@@ -359,7 +359,7 @@ enum PrepareProcessorError {
 
 pub struct EngineGraphController {
     recorder_cleanup_error: Mutex<Option<String>>,
-    recorders: tonenari_audio_recorder::RecorderRegistry,
+    recorders: mixrelay_audio_recorder::RecorderRegistry,
     exchange: Arc<ProcessorExchange>,
     factory: Arc<dyn ProcessorFactory>,
     graph: RwLock<GraphDocument>,
@@ -480,7 +480,7 @@ impl EngineGraphController {
         let mut meter_bindings = BTreeMap::new();
         meter_bindings.insert(active_revision, initial_bindings);
         let processor_controls = ProcessorControlRegistry::default();
-        let recorders = tonenari_audio_recorder::RecorderRegistry::default();
+        let recorders = mixrelay_audio_recorder::RecorderRegistry::default();
         Self {
             recorder_cleanup_error: Mutex::new(None),
             recorders: recorders.clone(),
@@ -621,7 +621,7 @@ impl ControlBackend for EngineGraphController {
         &self,
         graph_id: &str,
         node_id: &str,
-    ) -> Result<tonenari_control_protocol::RecorderStatus, ProtocolError> {
+    ) -> Result<mixrelay_control_protocol::RecorderStatus, ProtocolError> {
         let _mutation = self.mutation.lock();
         let id = self.recorder_session_id(graph_id, node_id)?;
         Ok(self.recorders.status(id.as_str()))
@@ -631,8 +631,8 @@ impl ControlBackend for EngineGraphController {
         &self,
         graph_id: &str,
         node_id: &str,
-        request: tonenari_control_protocol::RecorderRequest,
-    ) -> Result<tonenari_control_protocol::RecorderStatus, ProtocolError> {
+        request: mixrelay_control_protocol::RecorderRequest,
+    ) -> Result<mixrelay_control_protocol::RecorderStatus, ProtocolError> {
         let _mutation = self.mutation.lock();
         let id = self.recorder_session_id(graph_id, node_id)?;
         self.recorders
@@ -641,39 +641,39 @@ impl ControlBackend for EngineGraphController {
     }
     fn application_capture_manifest(
         &self,
-    ) -> Result<tonenari_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+    ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
         self.current_capture_manifest()
     }
 
     fn preview_application_capture(
         &self,
         request: GraphApplyRequest,
-    ) -> Result<tonenari_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+    ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
         self.preview_capture_manifest(request)
     }
     fn reconfigure_virtual_endpoint(
         &self,
-        request: tonenari_control_protocol::VirtualEndpointFormatRequest,
+        request: mixrelay_control_protocol::VirtualEndpointFormatRequest,
     ) -> Result<GraphApplyResponse, ProtocolError> {
         self.change_endpoint_format(&request)
     }
     fn graph_layout(
         &self,
         id: &str,
-    ) -> Result<tonenari_control_protocol::GraphLayoutResponse, ProtocolError> {
+    ) -> Result<mixrelay_control_protocol::GraphLayoutResponse, ProtocolError> {
         self.read_graph_layout(id)
     }
 
     fn update_graph_layout(
         &self,
         id: &str,
-        request: tonenari_control_protocol::GraphLayoutRequest,
-    ) -> Result<tonenari_control_protocol::GraphLayoutResponse, ProtocolError> {
+        request: mixrelay_control_protocol::GraphLayoutRequest,
+    ) -> Result<mixrelay_control_protocol::GraphLayoutResponse, ProtocolError> {
         self.write_graph_layout(id, request)
     }
     fn graph_catalog(
         &self,
-    ) -> Result<tonenari_control_protocol::GraphCatalogResponse, ProtocolError> {
+    ) -> Result<mixrelay_control_protocol::GraphCatalogResponse, ProtocolError> {
         self.read_catalog()
     }
 
@@ -683,8 +683,8 @@ impl ControlBackend for EngineGraphController {
 
     fn mutate_graph_catalog(
         &self,
-        request: tonenari_control_protocol::GraphCatalogRequest,
-    ) -> Result<tonenari_control_protocol::GraphCatalogResponse, ProtocolError> {
+        request: mixrelay_control_protocol::GraphCatalogRequest,
+    ) -> Result<mixrelay_control_protocol::GraphCatalogResponse, ProtocolError> {
         self.mutate_catalog(request)
     }
     fn reconfigure_session(
@@ -848,7 +848,7 @@ impl ControlBackend for EngineGraphController {
     fn processor_editor_frame(
         &self,
         node_id: &str,
-    ) -> Result<tonenari_control_protocol::ProcessorEditorFrame, ProtocolError> {
+    ) -> Result<mixrelay_control_protocol::ProcessorEditorFrame, ProtocolError> {
         let runtime_id = {
             let _mutation = self.mutation.lock();
             self.external_processor_node(node_id)?
@@ -861,7 +861,7 @@ impl ControlBackend for EngineGraphController {
     fn processor_editor_input(
         &self,
         node_id: &str,
-        input: tonenari_control_protocol::ProcessorEditorInput,
+        input: mixrelay_control_protocol::ProcessorEditorInput,
     ) -> Result<(), ProtocolError> {
         let runtime_id = {
             let _mutation = self.mutation.lock();
@@ -897,7 +897,7 @@ impl EngineGraphController {
         parameter_id: u32,
         value: f64,
         publish: impl FnOnce(
-            &tonenari_audio_graph::ProviderNodeConfig,
+            &mixrelay_audio_graph::ProviderNodeConfig,
             &NodeId,
         ) -> Result<(), ProtocolError>,
     ) -> Result<ProcessorParameterUpdateResponse, ProtocolError> {
@@ -1027,7 +1027,7 @@ impl EngineGraphController {
         self.change_session_locked(
             SessionReconfigureRequest {
                 expected_revision: revisions.submitted,
-                format: tonenari_audio_io::session::SessionFormat {
+                format: mixrelay_audio_io::session::SessionFormat {
                     sample_rate: observed.sample_rate,
                     block_frames: observed.block_frames,
                 },
@@ -1153,7 +1153,7 @@ impl EngineGraphController {
     fn require_active_revision(
         &self,
         expected: u64,
-    ) -> Result<tonenari_audio_engine::ProcessorRevisions, ProtocolError> {
+    ) -> Result<mixrelay_audio_engine::ProcessorRevisions, ProtocolError> {
         let revisions = self.exchange.revisions();
         if expected != revisions.submitted || revisions.active != revisions.submitted {
             return Err(ProtocolError {
@@ -1320,7 +1320,7 @@ fn processor_editor_error(node_id: &str, reason: &str) -> ProtocolError {
 }
 
 fn persist_processor_parameter(
-    provider: &mut tonenari_audio_graph::ProviderNodeConfig,
+    provider: &mut mixrelay_audio_graph::ProviderNodeConfig,
     parameter_id: u32,
     value: f64,
 ) {
@@ -1513,11 +1513,11 @@ pub fn default_duplex_document(revision: u64, gain_db: Option<f32>) -> GraphDocu
     let endpoint_id = NodeId::from(DEFAULT_ENDPOINT_NODE_ID);
     let endpoint = NodeSpec {
         id: endpoint_id.clone(),
-        label: Some("ToneNari Virtual I/O".into()),
+        label: Some("MixRelay Virtual I/O".into()),
         config: NodeConfig::VirtualEndpoint(
             VirtualEndpointSpec {
                 id: VirtualEndpointId::from(DEFAULT_ENDPOINT_NODE_ID),
-                display_name: "ToneNari Virtual I/O".into(),
+                display_name: "MixRelay Virtual I/O".into(),
                 render: Some(stereo_stream()),
                 capture: Some(stereo_stream()),
                 supported_sample_rates: vec![48_000],
@@ -1616,7 +1616,7 @@ fn channel_edge(
         source: audio_endpoint(source.node_id, source.port_id),
         destination: audio_endpoint(destination.node_id, destination.port_id),
         channel_mapping: ChannelMapping::Explicit {
-            routes: vec![tonenari_audio_graph::ChannelRoute {
+            routes: vec![mixrelay_audio_graph::ChannelRoute {
                 source_channel: source.channel,
                 destination_channel: destination.channel,
             }],
@@ -1765,7 +1765,7 @@ mod tests {
         let mut failing = controller(Arc::clone(&exchange));
         let catalog = ProcessorCatalog::default();
         failing.factory = Arc::new(BuiltInProcessorFactory {
-            recorders: tonenari_audio_recorder::RecorderRegistry::default(),
+            recorders: mixrelay_audio_recorder::RecorderRegistry::default(),
             catalog: catalog.clone(),
             hosted: ExternalProcessorFactory::new(catalog),
             meters: Arc::new(PeakMeterBank::new(64, 64)),

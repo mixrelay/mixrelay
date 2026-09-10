@@ -9,7 +9,7 @@ format. Buffer/period negotiation is separate and is not represented by this ABI
 ## Actual framework and source boundary
 
 The accepted [SysVAD reuse decision](../adr/0011-windows-sysvad-reuse.md) applies.
-The initial intersection investigation started in the experimental `TnWave.cpp`;
+The initial intersection investigation started in the experimental `MrWave.cpp`;
 that driver is not the product framework and its successful kernel compile is not
 an endpoint-enumeration result. The new event-policy hooks have been removed from
 that experimental miniport. Its independent exact-rate intersection bug fix is
@@ -90,8 +90,8 @@ or CPU numbers. Focused transaction/ABI tests are the current alternative eviden
 
 ## Load gate and rollback requirements
 
-The generated INF retains `Root\tonenari_SysvadBridge` and service
-`tonenari_sysvadbridge`, with control path `\\.\ToneNariSysvadBridge`. It is an
+The generated INF retains `Root\mixrelay_SysvadBridge` and service
+`mixrelay_sysvadbridge`, with control path `\\.\MixRelaySysvadBridge`. It is an
 update to the existing LAB pair, not an additional coexisting policy device. Other
 sample/experimental device identities must remain unchanged. Before any update,
 resolve the exact present device instance and driver-store package, record the

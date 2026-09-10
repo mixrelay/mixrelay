@@ -45,9 +45,9 @@ initial-document constructor: enabling a capability cannot invent a default devi
 node when the adapter actually started an empty processor. Its regression test
 passes on both the macOS host and Windows VM.
 
-Enable only for this installed LAB identity with `TONENARI_WINDOWS_SYSVAD_LAB=1`.
-It accepts one duplex endpoint with node/endpoint ID `tonenari.sysvad.lab`, display
-name `ToneNari SysVAD Bridge LAB`, stereo render, mono capture and 48 kHz. The common
+Enable only for this installed LAB identity with `MIXRELAY_WINDOWS_SYSVAD_LAB=1`.
+It accepts one duplex endpoint with node/endpoint ID `mixrelay.sysvad.lab`, display
+name `MixRelay SysVAD Bridge LAB`, stereo render, mono capture and 48 kHz. The common
 backend contract stays OS-independent. Unsupported names/channels/rates and mixed
 independent native-device clocks are rejected before graph publication. Normal
 Windows startup remains disabled for virtual endpoints; no production UI option,
@@ -94,15 +94,15 @@ handle, checks its exit code and the real gain meter separately. Owned processes
 are terminated in `finally`; successful runs remove the graph first and prove
 mapping release. No process is selected for termination by image name.
 
-Evidence: `/Volumes/Linear 1/test/tonenari/evidence/rust-sysvad-bridge-20260907`, with
-full guest jobs under `C:\ToneNariLab`. Host library tests: 11 pass; Clippy pass.
+Evidence: `/Volumes/Linear 1/test/mixrelay/evidence/rust-sysvad-bridge-20260907`, with
+full guest jobs under `C:\MixRelayLab`. Host library tests: 11 pass; Clippy pass.
 Lab suite: 38 tests including the final cleanup guard. `git diff --check`
 passes. No files were staged or committed.
 
 Final executable SHA-256:
 `22229A1348E2B7759960CB59C2CB8E38040401FE336B7364A33E85BA75ACD33E`.
 Cleanup validated the exact task action, resolved owner SID and completed state,
-then removed only `ToneNariLabRustBridge`. A subsequent read-only check confirmed
+then removed only `MixRelayLabRustBridge`. A subsequent read-only check confirmed
 that this task and the exact owned engine/probe executables were no longer running.
 The installed driver, test sources, recovery copies and logs remain intact.
 

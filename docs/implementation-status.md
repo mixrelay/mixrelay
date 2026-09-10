@@ -58,7 +58,7 @@ session/backend evidence independently; an OS label or a container build is not 
 macOS advertises 44.1/48 kHz and 64/128/256/512-frame blocks, but application capture
 is 48 kHz only and attached hardware nodes currently reject a session-rate change.
 Windows/Linux remain at their fixed engine format. All three explicitly report no
-ToneNari sample-rate conversion or independent-device drift correction.
+MixRelay sample-rate conversion or independent-device drift correction.
 
 ## Current completed slices and remaining qualification
 

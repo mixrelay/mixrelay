@@ -2,11 +2,11 @@
 //! Same PCM, widths, capacity, iterations and pass counts as the removed native harness.
 
 use super::{RingOwner, TapFormat, TapSession, ffi};
-use std::{ptr, time::Instant};
-use tonenari_macos_transport::{
+use mixrelay_macos_transport::{
     audio_buffer::{AudioBuffer, AudioBufferList},
-    capture_ring::{tn_audio_ring_create, tn_audio_ring_read_interleaved},
+    capture_ring::{mr_audio_ring_create, mr_audio_ring_read_interleaved},
 };
+use std::{ptr, time::Instant};
 
 #[repr(C)]
 struct Buffers {
@@ -54,7 +54,7 @@ fn run(channels: u32, frames: u32, planar: bool) {
             bits: 32,
         })
         .expect("unpublished benchmark format");
-    let ring = tn_audio_ring_create(16_384, channels);
+    let ring = mr_audio_ring_create(16_384, channels);
     assert!(!ring.is_null());
     session
         .ring
@@ -80,7 +80,7 @@ fn run(channels: u32, frames: u32, planar: bool) {
                     ptr::from_ref(&session).cast_mut().cast(),
                 );
                 assert_eq!(
-                    tn_audio_ring_read_interleaved(ring, output.as_mut_ptr(), frames as usize),
+                    mr_audio_ring_read_interleaved(ring, output.as_mut_ptr(), frames as usize),
                     frames as usize
                 );
             }

@@ -2,10 +2,10 @@ use super::{SourceClockSnapshot, SourceTransport};
 use crate::{
     application_source_mapping::Mapping,
     control_inventory::{Message, Xpc},
-    shared_audio_buffer::{tn_shared_audio_buffer_capacity, tn_shared_audio_buffer_channels},
+    shared_audio_buffer::{mr_shared_audio_buffer_capacity, mr_shared_audio_buffer_channels},
     source_control::{
-        SourceAttachment, tn_engine_control_create_clocked_source_request,
-        tn_engine_control_parse_source_attachment,
+        SourceAttachment, mr_engine_control_create_clocked_source_request,
+        mr_engine_control_parse_source_attachment,
     },
 };
 use std::{
@@ -45,7 +45,7 @@ pub struct TransportError {
 
 unsafe extern "C" {
     // This single platform glue operation owns the XPC blocks-based connection.
-    fn tn_application_source_request(request: Xpc) -> Xpc;
+    fn mr_application_source_request(request: Xpc) -> Xpc;
 }
 
 // SAFETY: attachment contains one uniquely owned descriptor from the source
@@ -136,7 +136,7 @@ pub(super) unsafe fn publish_owner(
 /// -1). Its backing object has immutable headers and cannot be truncated while
 /// published. Error is null or exclusive writable storage. Both are disjoint.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_application_source_transport_attach(
+pub unsafe extern "C" fn mr_application_source_transport_attach(
     attachment: *mut SourceAttachment,
     capacity: u32,
     channels: u32,
@@ -160,7 +160,7 @@ pub unsafe extern "C" fn tn_application_source_transport_attach(
 /// Source ID is null or readable through its first NUL, at most 128 bytes.
 /// Error is null or exclusive writable storage disjoint from that ID.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_application_source_transport_connect(
+pub unsafe extern "C" fn mr_application_source_transport_connect(
     source: *const c_char,
     capacity: u32,
     channels: u32,
@@ -168,7 +168,7 @@ pub unsafe extern "C" fn tn_application_source_transport_connect(
 ) -> *mut SourceTransport {
     // SAFETY: the source string meets the codec contract. Message owns each XPC ref.
     let request = Message::new(unsafe {
-        tn_engine_control_create_clocked_source_request(source, capacity, channels)
+        mr_engine_control_create_clocked_source_request(source, capacity, channels)
     });
     let result = request
         .ok_or(TransportError {
@@ -177,7 +177,7 @@ pub unsafe extern "C" fn tn_application_source_transport_connect(
         })
         .and_then(|request| {
             // SAFETY: adapter borrows this retained request and returns an owned response.
-            let response = Message::new(unsafe { tn_application_source_request(request.0) })
+            let response = Message::new(unsafe { mr_application_source_request(request.0) })
                 .ok_or(TransportError {
                     code: TransportErrorCode::EngineUnavailable,
                     system_error: 0,
@@ -185,7 +185,7 @@ pub unsafe extern "C" fn tn_application_source_transport_connect(
             let mut attachment = SourceAttachment::default();
             // SAFETY: codec borrows the response and returns a fresh FD into empty storage.
             if !unsafe {
-                tn_engine_control_parse_source_attachment(response.0, &raw mut attachment)
+                mr_engine_control_parse_source_attachment(response.0, &raw mut attachment)
             } {
                 return Err(TransportError {
                     code: TransportErrorCode::InvalidAttachment,
@@ -203,7 +203,7 @@ pub unsafe extern "C" fn tn_application_source_transport_connect(
 /// Handle is null or retained by its sole pump. Snapshot is exclusive writable
 /// storage disjoint from the handle/mapping; destroy cannot overlap this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_application_source_transport_clock(
+pub unsafe extern "C" fn mr_application_source_transport_clock(
     transport: *const SourceTransport,
     snapshot: *mut SourceClockSnapshot,
 ) -> bool {
@@ -224,7 +224,7 @@ pub unsafe extern "C" fn tn_application_source_transport_clock(
 /// Handle is null or exclusively borrowed by the sole pump; no local operation or
 /// destruction overlaps. Remote users access only the mapping's atomic protocol.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_application_source_transport_reset(
+pub unsafe extern "C" fn mr_application_source_transport_reset(
     transport: *mut SourceTransport,
     format: u64,
     native_rate: u32,
@@ -236,7 +236,7 @@ pub unsafe extern "C" fn tn_application_source_transport_reset(
 /// # Safety
 /// Handle is null or retained by its sole pump, without concurrent destruction.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_application_source_transport_publish_native(
+pub unsafe extern "C" fn mr_application_source_transport_publish_native(
     transport: *const SourceTransport,
     frames: u64,
     running: bool,
@@ -252,7 +252,7 @@ pub unsafe extern "C" fn tn_application_source_transport_publish_native(
 /// frames*channels readable floats, disjoint from the handle and mapped storage.
 /// No other local operation or destruction overlaps this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_application_source_transport_write(
+pub unsafe extern "C" fn mr_application_source_transport_write(
     transport: *mut SourceTransport,
     input: *const f32,
     frames: u32,
@@ -262,8 +262,8 @@ pub unsafe extern "C" fn tn_application_source_transport_write(
     };
     // SAFETY: validated immutable geometry belongs to the retained mapping.
     let buffer = transport.mapping.buffer.as_ptr();
-    let capacity = unsafe { tn_shared_audio_buffer_capacity(buffer) };
-    let channels = unsafe { tn_shared_audio_buffer_channels(buffer) };
+    let capacity = unsafe { mr_shared_audio_buffer_capacity(buffer) };
+    let channels = unsafe { mr_shared_audio_buffer_channels(buffer) };
     if input.is_null() || frames > capacity {
         return false;
     }
@@ -277,7 +277,7 @@ pub unsafe extern "C" fn tn_application_source_transport_write(
 /// Handle is null or the unique attach/connect result after the pump has stopped;
 /// no references or pending calls remain. It is destroyed exactly once.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_application_source_transport_destroy(transport: *mut SourceTransport) {
+pub unsafe extern "C" fn mr_application_source_transport_destroy(transport: *mut SourceTransport) {
     if !transport.is_null() {
         // SAFETY: publish_owner allocated this initialized object using Box's layout.
         drop(unsafe { Box::from_raw(transport) });

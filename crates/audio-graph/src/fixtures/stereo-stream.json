@@ -24,8 +24,8 @@
       "label": "SPAT Revolution ingress",
       "type": "virtual_endpoint",
       "config": {
-        "id": "io.tonenari.virtual.spat",
-        "displayName": "ToneNari SPAT In",
+        "id": "io.mixrelay.virtual.spat",
+        "displayName": "MixRelay SPAT In",
         "reference": { "render": true, "capture": false },
         "render": {
           "channels": 64,
@@ -55,12 +55,12 @@
       }
     },
     {
-      "id": "tonenari-stream",
-      "label": "ToneNari Stream",
+      "id": "mixrelay-stream",
+      "label": "MixRelay Stream",
       "type": "virtual_endpoint",
       "config": {
-        "id": "io.tonenari.virtual.stream.default",
-        "displayName": "ToneNari OBS Mix",
+        "id": "io.mixrelay.virtual.stream.default",
+        "displayName": "MixRelay OBS Mix",
         "reference": { "render": false, "capture": true },
         "render": null,
         "capture": {
@@ -107,7 +107,7 @@
     {
       "id": "mix-to-stream",
       "source": { "nodeId": "broadcast-mix", "portId": "audio" },
-      "destination": { "nodeId": "tonenari-stream", "portId": "to_os" }
+      "destination": { "nodeId": "mixrelay-stream", "portId": "to_os" }
     },
     {
       "id": "mix-to-monitor",

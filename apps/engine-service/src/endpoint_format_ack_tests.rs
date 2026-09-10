@@ -1,9 +1,9 @@
 use super::*;
 use crate::controller_test_support::settle;
-use std::collections::VecDeque;
-use tonenari_control_protocol::{
+use mixrelay_control_protocol::{
     GraphCatalogAction, GraphCatalogRequest, GraphLayout, GraphLayoutRequest, GraphNodePosition,
 };
+use std::collections::VecDeque;
 
 struct Plan {
     observations: VecDeque<Option<u32>>,
@@ -245,7 +245,7 @@ fn add_shared_reference(controller: &EngineGraphController) {
 
 #[test]
 fn asynchronous_device_acknowledgement_updates_every_catalog_reference_in_one_publication() {
-    let directory = tonenari_test_support::FixtureDir::new("async-device-rate-catalog").unwrap();
+    let directory = mixrelay_test_support::FixtureDir::new("async-device-rate-catalog").unwrap();
     let path = directory.join("graphs.json");
     let (controller, backend) = asynchronous(
         Plan::completes(&[Some(48_000), None, Some(48_000)]),

@@ -1,6 +1,6 @@
-# ToneNari
+# MixRelay
 
-ToneNari is a cross-platform audio-routing application for streamers, audio artists,
+MixRelay is a cross-platform audio-routing application for streamers, audio artists,
 and independent broadcasters. Its portable graph and DSP engine is shared across macOS,
 Linux/PipeWire, and Windows/WASAPI, while native discovery, capture, and virtual-device lifecycles
 remain isolated behind host-audio interfaces.
@@ -45,7 +45,7 @@ The product capability floor and local code policy are recorded in
 
 ## Distribution and licensing
 
-ToneNari is currently developed in a private repository. No open-source license
+MixRelay is currently developed in a private repository. No open-source license
 is granted at this stage. Freeware availability and future commercial licensing
 are product distribution decisions and do not imply permission to copy,
 redistribute, or create derivative source code.

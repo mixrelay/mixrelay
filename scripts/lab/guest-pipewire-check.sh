@@ -21,8 +21,8 @@ for run in 1 2 3; do
   printf '\nProbe run %s\n' "$run"
   # Each measurement owns fresh FIFOs. Reusing an engine would include queued
   # audio from the previous player in the next recording's continuity window.
-  systemd-run --user --unit=tonenari-lab-engine --collect "$engine"
-  trap 'systemctl --user stop tonenari-lab-engine' EXIT
+  systemd-run --user --unit=mixrelay-lab-engine --collect "$engine"
+  trap 'systemctl --user stop mixrelay-lab-engine' EXIT
   ready=false
   for ((attempt = 0; attempt < 50; attempt++)); do
     if curl --silent --fail --max-time 1 http://127.0.0.1:19341/health >/dev/null; then
@@ -39,7 +39,7 @@ for run in 1 2 3; do
     printf 'Probe exit: %s\n' "$code"
     result=1
   fi
-  systemctl --user stop tonenari-lab-engine
+  systemctl --user stop mixrelay-lab-engine
   trap - EXIT
 done
 exit "$result"

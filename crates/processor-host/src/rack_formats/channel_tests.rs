@@ -124,7 +124,7 @@ fn channel_layout(channels: u32) -> BusLayout {
 fn fixture(layouts: Vec<BusLayout>) -> ChannelFixture {
     let info = PluginInfo {
         name: "Channel fixture".to_owned(),
-        vendor: "ToneNari".to_owned(),
+        vendor: "MixRelay".to_owned(),
         version: 1,
         category: PluginCategory::Effect,
         path: PathBuf::new(),
@@ -236,7 +236,7 @@ fn process_channel_references_allocate_nothing() {
 #[test]
 fn process_channel_reference_measurement() {
     const ITERATIONS: u32 = 20_000;
-    if std::env::var_os("TONENARI_MEASURE_RACK_CHANNELS").is_none() {
+    if std::env::var_os("MIXRELAY_MEASURE_RACK_CHANNELS").is_none() {
         return;
     }
     for channels in [2, 8, 64] {

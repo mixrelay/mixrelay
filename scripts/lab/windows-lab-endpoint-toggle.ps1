@@ -13,12 +13,12 @@ if ($Uid -notmatch '^\{0\.0\.[01]\.00000000\}\.\{[0-9A-Fa-f-]{36}\}$') {
 $instance = 'SWD\MMDEVAPI\' + $Uid
 $device = @(Get-PnpDevice -InstanceId $instance)
 if ($device.Count -ne 1 -or $device[0].Class -ne 'AudioEndpoint' -or
-    $device[0].FriendlyName -notlike '*ToneNari SysVAD Bridge LAB*' -or
+    $device[0].FriendlyName -notlike '*MixRelay SysVAD Bridge LAB*' -or
     $device[0].InstanceId -ine $instance) {
     throw 'Refusing a non-LAB or ambiguous PnP target'
 }
 if ($Scope -eq 'RootLab') {
-    if ($env:TONENARI_LAB_ALLOW_DEFAULT_DRIVER_STOP -ne '1') {
+    if ($env:MIXRELAY_LAB_ALLOW_DEFAULT_DRIVER_STOP -ne '1') {
         throw 'Additional explicit user authorization for LAB root interruption is required'
     }
     # Endpoint-only PnP disable does not invalidate this SysVAD audio client.
@@ -28,11 +28,11 @@ if ($Scope -eq 'RootLab') {
     $hardware = @((Get-PnpDeviceProperty -InstanceId $instance -KeyName DEVPKEY_Device_HardwareIds).Data)
     $service = (Get-PnpDeviceProperty -InstanceId $instance -KeyName DEVPKEY_Device_Service).Data
     $provider = (Get-PnpDeviceProperty -InstanceId $instance -KeyName DEVPKEY_Device_DriverProvider).Data
-    $image = (Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\tonenari_sysvadbridge).ImagePath
+    $image = (Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Services\mixrelay_sysvadbridge).ImagePath
     if ($device.Count -ne 1 -or $device[0].Class -ne 'MEDIA' -or
-        $device[0].FriendlyName -ne 'ToneNari SysVAD Bridge LAB' -or
-        $hardware.Count -ne 1 -or $hardware[0] -ine 'Root\tonenari_SysvadBridge' -or
-        $service -ne 'tonenari_sysvadbridge' -or $provider -ne 'TODO-Set-Provider' -or
+        $device[0].FriendlyName -ne 'MixRelay SysVAD Bridge LAB' -or
+        $hardware.Count -ne 1 -or $hardware[0] -ine 'Root\mixrelay_SysvadBridge' -or
+        $service -ne 'mixrelay_sysvadbridge' -or $provider -ne 'TODO-Set-Provider' -or
         $image -ine '\SystemRoot\System32\DriverStore\FileRepository\componentizedaudiosample.inf_arm64_80a702dce9732521\tabletaudiosample.sys') {
         throw 'LAB root driver identity changed; re-inspect before any PnP operation'
     }

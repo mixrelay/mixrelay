@@ -2,15 +2,15 @@
 //! another rate. Convert callback duration, not samples: doing SRC here again
 //! would resample data that `PipeWire` already converted at the stream boundary.
 use super::{ENGINE_SAMPLE_RATE, native::NativeCycle};
-use tonenari_audio_io::process::{ClockDomain, ProcessCycle};
-use tonenari_audio_io::session::ClockAuthority;
+use mixrelay_audio_io::process::{ClockDomain, ProcessCycle};
+use mixrelay_audio_io::session::ClockAuthority;
 
-pub(super) struct GraphTimeline(tonenari_audio_io::frame_budget::FrameBudgetMapper);
+pub(super) struct GraphTimeline(mixrelay_audio_io::frame_budget::FrameBudgetMapper);
 
 impl Default for GraphTimeline {
     fn default() -> Self {
         Self(
-            tonenari_audio_io::frame_budget::FrameBudgetMapper::new(ENGINE_SAMPLE_RATE)
+            mixrelay_audio_io::frame_budget::FrameBudgetMapper::new(ENGINE_SAMPLE_RATE)
                 .expect("nonzero prepared engine rate"),
         )
     }
@@ -19,7 +19,7 @@ impl Default for GraphTimeline {
 impl GraphTimeline {
     pub(super) fn new(rate: u32) -> Self {
         Self(
-            tonenari_audio_io::frame_budget::FrameBudgetMapper::new(rate)
+            mixrelay_audio_io::frame_budget::FrameBudgetMapper::new(rate)
                 .expect("validated graph rate"),
         )
     }

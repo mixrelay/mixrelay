@@ -2,9 +2,9 @@
 set -euo pipefail
 [[ $(uname -s) == Linux && $(id -u) != 0 ]] || exit 2
 workspace=${1:?Expected isolated source directory}
-graph_rate=${TONENARI_LAB_GRAPH_RATE:-48000}
+graph_rate=${MIXRELAY_LAB_GRAPH_RATE:-48000}
 [[ "$graph_rate" == 44100 || "$graph_rate" == 48000 ]] || exit 2
-[[ "$workspace" == /*/.lab/tonenari-integration-* && -f "$workspace/Cargo.toml" ]] || exit 2
+[[ "$workspace" == /*/.lab/mixrelay-integration-* && -f "$workspace/Cargo.toml" ]] || exit 2
 wireplumber --version | grep -q '0\.4\.' || { echo 'This fixture config requires WirePlumber 0.4'; exit 2; }
 mkdir -p "$workspace/target/native-tests"
 lab=$(mktemp -d "$workspace/target/native-tests/application-lab-XXXXXX")
@@ -14,15 +14,15 @@ chmod 700 "$lab/runtime"
 cp -R /usr/share/wireplumber "$lab/config/wireplumber"
 fixture=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 cp "$fixture/application-lab-wireplumber.conf" "$lab/config/wireplumber/wireplumber.conf"
-cp "$fixture/85-tonenari-lab.lua" "$lab/config/wireplumber/main.lua.d/85-tonenari-lab.lua"
+cp "$fixture/85-mixrelay-lab.lua" "$lab/config/wireplumber/main.lua.d/85-mixrelay-lab.lua"
 cp "$fixture/application-lab-pipewire.conf" "$lab/pipewire.conf"
 sed -i "s/default.clock.rate = 48000/default.clock.rate = $graph_rate/" "$lab/pipewire.conf"
 export XDG_RUNTIME_DIR="$lab/runtime" XDG_CONFIG_HOME="$lab/config" XDG_STATE_HOME="$lab/state" XDG_DATA_HOME="$lab/data"
 export WIREPLUMBER_CONFIG_DIR="$lab/config/wireplumber"
-export PATH="/home/state303/.cargo/bin:$PATH" CARGO_TARGET_DIR=/home/state303/tonenari/target
+export PATH="/home/state303/.cargo/bin:$PATH" CARGO_TARGET_DIR=/home/state303/mixrelay/target
 unset PIPEWIRE_REMOTE PIPEWIRE_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
 cd "$workspace"
-cc -Wall -Wextra -Werror "$fixture/TNApplicationFixture.c" $(pkg-config --cflags --libs libpipewire-0.3) -lm -o "$lab/application-fixture"
+cc -Wall -Wextra -Werror "$fixture/MRApplicationFixture.c" $(pkg-config --cflags --libs libpipewire-0.3) -lm -o "$lab/application-fixture"
 pipewire -c "$lab/pipewire.conf" >"$lab/pipewire.log" 2>&1 &
 pipewire_pid=$!
 policy_pid=''
@@ -47,16 +47,16 @@ wireplumber >"$lab/wireplumber.log" 2>&1 &
 policy_pid=$!
 sleep 1
 pw-dump >"$lab/before.json"
-test_name=${TONENARI_LAB_TEST_NAME:-native_application_stream_relaunch_recovers_pcm_without_graph_reapply}
-if [[ ${TONENARI_LAB_LIFECYCLE_TEST:-0} == 1 ]]; then
-    cargo build --manifest-path "$workspace/Cargo.toml" -p tonenari-pcm-ring --release --target-dir "$workspace/target"
+test_name=${MIXRELAY_LAB_TEST_NAME:-native_application_stream_relaunch_recovers_pcm_without_graph_reapply}
+if [[ ${MIXRELAY_LAB_LIFECYCLE_TEST:-0} == 1 ]]; then
+    cargo build --manifest-path "$workspace/Cargo.toml" -p mixrelay-pcm-ring --release --target-dir "$workspace/target"
     cc -O2 -std=c11 -D_GNU_SOURCE -Wall -Wextra -Werror -pthread \
         $(pkg-config --cflags libpipewire-0.3) -I "$workspace/native/linux/pipewire" -I "$workspace/native/pcm-ring/include" \
-        "$workspace/native/linux/pipewire/tests/TNLifecycleFixture.c" \
-        "$workspace/target/release/libtonenari_pcm_ring.a" -ldl \
+        "$workspace/native/linux/pipewire/tests/MRLifecycleFixture.c" \
+        "$workspace/target/release/libmixrelay_pcm_ring.a" -ldl \
         $(pkg-config --libs libpipewire-0.3) -lm -o "$lab/lifecycle-fixture"
     "$lab/lifecycle-fixture"
 else
-    TONENARI_LAB_APPLICATION_FIXTURE="$lab/application-fixture" cargo test --locked -p tonenari-engine-service --bin tonenari-engine-service "$test_name" -- --ignored --nocapture
+    MIXRELAY_LAB_APPLICATION_FIXTURE="$lab/application-fixture" cargo test --locked -p mixrelay-engine-service --bin mixrelay-engine-service "$test_name" -- --ignored --nocapture
 fi
 pw-dump >"$lab/after.json"

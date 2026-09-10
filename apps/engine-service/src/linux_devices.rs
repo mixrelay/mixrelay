@@ -1,6 +1,14 @@
 //! Physical/source/sink I/O ownership, prepared off the real-time thread.
 //! Graph gains are DSP parameters, never part of native stream identity.
 use super::native::NativeStream;
+#[cfg(test)]
+use mixrelay_audio_graph::{
+    AudioDeviceInputConfig, AudioDeviceOutputConfig, GraphDocument, NodeConfig,
+};
+use mixrelay_audio_io::{
+    DeviceDirection,
+    process::{ProcessReport, TransferOutcome},
+};
 use std::{
     collections::BTreeMap,
     sync::{
@@ -10,23 +18,15 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-#[cfg(test)]
-use tonenari_audio_graph::{
-    AudioDeviceInputConfig, AudioDeviceOutputConfig, GraphDocument, NodeConfig,
-};
-use tonenari_audio_io::{
-    DeviceDirection,
-    process::{ProcessReport, TransferOutcome},
-};
 
-use tonenari_engine_service::resource_requirements::DeviceRequirements;
+use mixrelay_engine_service::resource_requirements::DeviceRequirements;
 
 #[derive(Default)]
 pub(super) struct DeviceStreams {
     pub(super) generation: u64,
     inputs: BTreeMap<String, ObservedStream>,
     outputs: BTreeMap<String, ObservedStream>,
-    format: Option<tonenari_audio_graph::RenderFormat>,
+    format: Option<mixrelay_audio_graph::RenderFormat>,
 }
 
 struct ObservedStream {
@@ -62,7 +62,7 @@ pub(super) struct DeviceWatch {
     spec: DeviceRequirements,
     inputs: BTreeMap<String, Arc<AtomicBool>>,
     outputs: BTreeMap<String, Arc<AtomicBool>>,
-    pub(super) format: tonenari_audio_graph::RenderFormat,
+    pub(super) format: mixrelay_audio_graph::RenderFormat,
 }
 impl DeviceWatch {
     pub(super) fn disconnected(&self) -> DeviceRequirements {
@@ -100,7 +100,7 @@ impl DeviceStreams {
     pub(super) fn open_format(
         spec: &DeviceRequirements,
         generation: u64,
-        format: tonenari_audio_graph::RenderFormat,
+        format: mixrelay_audio_graph::RenderFormat,
     ) -> Result<Self, String> {
         if spec.inputs.is_empty() && spec.outputs.is_empty() {
             return Ok(Self {
@@ -109,7 +109,7 @@ impl DeviceStreams {
                 ..Self::default()
             });
         }
-        let targets = tonenari_audio_io::linux::targets().map_err(|error| error.to_string())?;
+        let targets = mixrelay_audio_io::linux::targets().map_err(|error| error.to_string())?;
         Self::open_inventory(spec, generation, &targets, false, None, format)
     }
 
@@ -117,9 +117,9 @@ impl DeviceStreams {
         spec: &DeviceRequirements,
         generation: u64,
         stopping: &AtomicBool,
-        format: tonenari_audio_graph::RenderFormat,
+        format: mixrelay_audio_graph::RenderFormat,
     ) -> Result<Self, String> {
-        let targets = tonenari_audio_io::linux::targets().map_err(|error| error.to_string())?;
+        let targets = mixrelay_audio_io::linux::targets().map_err(|error| error.to_string())?;
         // Devices can return independently. One absent interface must not delay
         // another interface's recovery. Unresolvable requests remain watched.
         let available = DeviceRequirements {
@@ -128,7 +128,7 @@ impl DeviceStreams {
                 .iter()
                 .take_while(|_| !stopping.load(Ordering::Acquire))
                 .filter(|(_, config)| {
-                    tonenari_audio_io::linux::resolve_device_target(
+                    mixrelay_audio_io::linux::resolve_device_target(
                         &targets,
                         &config.selector,
                         DeviceDirection::Input,
@@ -143,7 +143,7 @@ impl DeviceStreams {
                 .iter()
                 .take_while(|_| !stopping.load(Ordering::Acquire))
                 .filter(|(_, config)| {
-                    tonenari_audio_io::linux::resolve_device_target(
+                    mixrelay_audio_io::linux::resolve_device_target(
                         &targets,
                         &config.selector,
                         DeviceDirection::Output,
@@ -167,10 +167,10 @@ impl DeviceStreams {
     fn open_inventory(
         spec: &DeviceRequirements,
         generation: u64,
-        targets: &[tonenari_audio_io::linux::PipeWireTarget],
+        targets: &[mixrelay_audio_io::linux::PipeWireTarget],
         partial: bool,
         stopping: Option<&AtomicBool>,
-        format: tonenari_audio_graph::RenderFormat,
+        format: mixrelay_audio_graph::RenderFormat,
     ) -> Result<Self, String> {
         let check_cancelled = || {
             if stopping.is_some_and(|flag| flag.load(Ordering::Acquire)) {
@@ -187,7 +187,7 @@ impl DeviceStreams {
             .iter()
             .map(|(id, config)| {
                 check_cancelled()?;
-                tonenari_audio_io::linux::resolve_device_target(
+                mixrelay_audio_io::linux::resolve_device_target(
                     targets,
                     &config.selector,
                     DeviceDirection::Input,
@@ -202,7 +202,7 @@ impl DeviceStreams {
             .iter()
             .map(|(id, config)| {
                 check_cancelled()?;
-                tonenari_audio_io::linux::resolve_device_target(
+                mixrelay_audio_io::linux::resolve_device_target(
                     targets,
                     &config.selector,
                     DeviceDirection::Output,
@@ -424,7 +424,7 @@ mod tests {
             inputs: vec![(
                 "mic".into(),
                 AudioDeviceInputConfig {
-                    selector: tonenari_audio_io::DeviceSelector::DefaultInput,
+                    selector: mixrelay_audio_io::DeviceSelector::DefaultInput,
                     output_channels: 64,
                     gain_db: 0.0,
                 },
@@ -432,7 +432,7 @@ mod tests {
             outputs: vec![(
                 "speaker".into(),
                 AudioDeviceOutputConfig {
-                    selector: tonenari_audio_io::DeviceSelector::DefaultOutput,
+                    selector: mixrelay_audio_io::DeviceSelector::DefaultOutput,
                     input_channels: 16,
                 },
             )],

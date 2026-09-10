@@ -7,7 +7,7 @@ distribution decision that must be resolved before submission.
 
 ## Context
 
-ToneNari is expected to support both Apple silicon and Intel Macs. The desktop
+MixRelay is expected to support both Apple silicon and Intel Macs. The desktop
 application is not the only compiled artifact: the Rust executable, native
 capture code, bundled libraries, helper processes, and Core Audio HAL plug-in
 must all support both architectures.
@@ -28,7 +28,7 @@ There is also a distribution constraint which is separate from architecture:
 It follows that a conventional HAL installer and a fully self-contained Mac App
 Store bundle are incompatible under the current published rules. This is an
 inference from the two Apple requirements, not a claim that Apple has reviewed
-ToneNari.
+MixRelay.
 
 ## Decision
 
@@ -54,7 +54,7 @@ must choose one of these product outcomes:
    Store.
 
 No build may silently label a reduced App Store edition as feature-equivalent to
-the full ToneNari edition.
+the full MixRelay edition.
 
 ## Verification
 

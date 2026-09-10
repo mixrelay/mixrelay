@@ -5,7 +5,7 @@ The later [render-demand validation](2026-09-06-windows-render-demand.md) supers
 this record's graph-timer status and short lifecycle counts; the earlier results
 and failures below are retained as history.
 The guest is Windows 11 Pro ARM64 26200.8037 in UTM 4.7.5 on Apple Silicon.
-Guest source, tools and logs are isolated in `C:\ToneNariLab`.
+Guest source, tools and logs are isolated in `C:\MixRelayLab`.
 
 ## What actually ran
 

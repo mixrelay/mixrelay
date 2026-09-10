@@ -10,13 +10,13 @@ unsafe extern "C" {
 }
 
 fn descriptor() -> OwnedFd {
-    let raw = crate::anonymous_memory::tn_shared_memory_create(4096, true);
+    let raw = crate::anonymous_memory::mr_shared_memory_create(4096, true);
     assert!(raw >= 0);
     unsafe { OwnedFd::from_raw_fd(raw) }
 }
 fn request() -> Message {
     Message::new(unsafe {
-        tn_engine_control_create_clocked_source_request(c"com.example.broadcast".as_ptr(), 128, 2)
+        mr_engine_control_create_clocked_source_request(c"com.example.broadcast".as_ptr(), 128, 2)
     })
     .unwrap()
 }
@@ -33,12 +33,12 @@ fn attachment(source: &OwnedFd) -> Message {
 struct Parsed(SourceAttachment);
 impl Drop for Parsed {
     fn drop(&mut self) {
-        unsafe { tn_engine_control_source_attachment_close(&raw mut self.0) };
+        unsafe { mr_engine_control_source_attachment_close(&raw mut self.0) };
     }
 }
 fn parse(message: &Message) -> Parsed {
     let mut result = Parsed(SourceAttachment::default());
-    assert!(unsafe { tn_engine_control_parse_source_attachment(message.0, &raw mut result.0) });
+    assert!(unsafe { mr_engine_control_parse_source_attachment(message.0, &raw mut result.0) });
     result
 }
 
@@ -46,7 +46,7 @@ fn parse(message: &Message) -> Parsed {
 fn clocked_request_preserves_identity_geometry_and_version() {
     let message = request();
     let mut parsed = SourceRequest::default();
-    assert!(unsafe { tn_engine_control_parse_source_request(message.0, &raw mut parsed) });
+    assert!(unsafe { mr_engine_control_parse_source_request(message.0, &raw mut parsed) });
     assert_eq!(parsed.transport_version, 2);
     assert_eq!(parsed.capacity_frames, 128);
     assert_eq!(parsed.channels, 2);
@@ -68,7 +68,7 @@ fn only_explicit_typed_version_two_requests_are_accepted() {
             xpc_dictionary_set_uint64(message.0, c"source_transport_version".as_ptr(), invalid);
         };
         let mut parsed = SourceRequest::default();
-        assert!(!unsafe { tn_engine_control_parse_source_request(message.0, &raw mut parsed) });
+        assert!(!unsafe { mr_engine_control_parse_source_request(message.0, &raw mut parsed) });
         assert_eq!(parsed, SourceRequest::default());
     }
     let message = request();
@@ -80,7 +80,7 @@ fn only_explicit_typed_version_two_requests_are_accepted() {
         );
     };
     let mut parsed = SourceRequest::default();
-    assert!(!unsafe { tn_engine_control_parse_source_request(message.0, &raw mut parsed) });
+    assert!(!unsafe { mr_engine_control_parse_source_request(message.0, &raw mut parsed) });
     unsafe {
         xpc_dictionary_set_value(
             message.0,
@@ -88,7 +88,7 @@ fn only_explicit_typed_version_two_requests_are_accepted() {
             ptr::null_mut(),
         );
     };
-    assert!(!unsafe { tn_engine_control_parse_source_request(message.0, &raw mut parsed) });
+    assert!(!unsafe { mr_engine_control_parse_source_request(message.0, &raw mut parsed) });
 }
 
 #[test]
@@ -98,33 +98,33 @@ fn malformed_request_geometry_and_identity_never_publish_partial_output() {
             let message = request();
             unsafe { xpc_dictionary_set_uint64(message.0, field.as_ptr(), invalid) };
             let mut parsed = SourceRequest::default();
-            assert!(!unsafe { tn_engine_control_parse_source_request(message.0, &raw mut parsed) });
+            assert!(!unsafe { mr_engine_control_parse_source_request(message.0, &raw mut parsed) });
             assert_eq!(parsed, SourceRequest::default());
         }
     }
     assert!(
-        unsafe { tn_engine_control_create_clocked_source_request(c"".as_ptr(), 128, 2) }.is_null()
+        unsafe { mr_engine_control_create_clocked_source_request(c"".as_ptr(), 128, 2) }.is_null()
     );
     assert!(
-        unsafe { tn_engine_control_create_clocked_source_request(c"source".as_ptr(), 0, 2) }
+        unsafe { mr_engine_control_create_clocked_source_request(c"source".as_ptr(), 0, 2) }
             .is_null()
     );
     assert!(
-        unsafe { tn_engine_control_create_clocked_source_request(ptr::null(), 128, 2) }.is_null()
+        unsafe { mr_engine_control_create_clocked_source_request(ptr::null(), 128, 2) }.is_null()
     );
     let overlong = CString::new(vec![b'x'; NAME_BYTES]).unwrap();
     assert!(
-        unsafe { tn_engine_control_create_clocked_source_request(overlong.as_ptr(), 128, 2) }
+        unsafe { mr_engine_control_create_clocked_source_request(overlong.as_ptr(), 128, 2) }
             .is_null()
     );
     let invalid_utf8 = CString::new([0xff]).unwrap();
     assert!(
-        unsafe { tn_engine_control_create_clocked_source_request(invalid_utf8.as_ptr(), 128, 2) }
+        unsafe { mr_engine_control_create_clocked_source_request(invalid_utf8.as_ptr(), 128, 2) }
             .is_null()
     );
     let maximum = CString::new(vec![b'x'; NAME_BYTES - 1]).unwrap();
     let message = Message::new(unsafe {
-        tn_engine_control_create_clocked_source_request(maximum.as_ptr(), 128, 2)
+        mr_engine_control_create_clocked_source_request(maximum.as_ptr(), 128, 2)
     })
     .unwrap();
     assert_eq!(
@@ -175,7 +175,7 @@ fn attachment_requires_complete_positive_typed_metadata_before_fd_transfer() {
                 source_epoch: 77,
             };
             assert!(!unsafe {
-                tn_engine_control_parse_source_attachment(message.0, &raw mut output)
+                mr_engine_control_parse_source_attachment(message.0, &raw mut output)
             });
             assert_eq!(
                 (
@@ -197,7 +197,7 @@ fn attachment_requires_complete_positive_typed_metadata_before_fd_transfer() {
         );
     };
     assert!(!unsafe {
-        tn_engine_control_parse_source_attachment(message.0, &mut SourceAttachment::default())
+        mr_engine_control_parse_source_attachment(message.0, &mut SourceAttachment::default())
     });
 }
 
@@ -209,13 +209,13 @@ fn malformed_source_fd_and_oversized_region_are_rejected() {
         xpc_dictionary_set_string(message.0, c"transport_fd".as_ptr(), c"not an fd".as_ptr());
     };
     let mut output = SourceAttachment::default();
-    assert!(!unsafe { tn_engine_control_parse_source_attachment(message.0, &raw mut output) });
+    assert!(!unsafe { mr_engine_control_parse_source_attachment(message.0, &raw mut output) });
     assert_eq!(output.descriptor, -1);
     let message = attachment(&source);
     unsafe {
         xpc_dictionary_set_uint64(message.0, c"mapped_size".as_ptr(), u64::from(u32::MAX) + 1);
     };
-    assert!(!unsafe { tn_engine_control_parse_source_attachment(message.0, &raw mut output) });
+    assert!(!unsafe { mr_engine_control_parse_source_attachment(message.0, &raw mut output) });
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn reply_validation_rejects_missing_lease_and_wrong_request_without_taking_fd() 
     for (size, lease, epoch) in [(0, 1, 1), (4096, 0, 1), (4096, 1, 0)] {
         assert!(
             unsafe {
-                tn_engine_control_create_source_attachment_reply(
+                mr_engine_control_create_source_attachment_reply(
                     request.0,
                     source.as_raw_fd(),
                     size,
@@ -239,7 +239,7 @@ fn reply_validation_rejects_missing_lease_and_wrong_request_without_taking_fd() 
     unsafe { xpc_dictionary_set_uint64(request.0, c"source_transport_version".as_ptr(), 0) };
     assert!(
         unsafe {
-            tn_engine_control_create_source_attachment_reply(
+            mr_engine_control_create_source_attachment_reply(
                 request.0,
                 source.as_raw_fd(),
                 4096,
@@ -254,10 +254,10 @@ fn reply_validation_rejects_missing_lease_and_wrong_request_without_taking_fd() 
 
 #[test]
 fn real_xpc_reply_failure_and_repeated_parse_close_release_all_descriptors() {
-    if std::env::var_os("TN_SOURCE_XPC_FD_CHILD").is_none() {
+    if std::env::var_os("MR_SOURCE_XPC_FD_CHILD").is_none() {
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "source_control::tests::real_xpc_reply_failure_and_repeated_parse_close_release_all_descriptors", "--test-threads=1"])
-            .env("TN_SOURCE_XPC_FD_CHILD", "1").status().unwrap();
+            .env("MR_SOURCE_XPC_FD_CHILD", "1").status().unwrap();
         assert!(status.success());
         return;
     }
@@ -273,7 +273,7 @@ fn real_xpc_reply_failure_and_repeated_parse_close_release_all_descriptors() {
         // A real local XPC dictionary has no remote reply right.
         assert!(
             unsafe {
-                tn_engine_control_create_source_attachment_reply(
+                mr_engine_control_create_source_attachment_reply(
                     request.0,
                     source.as_raw_fd(),
                     4096,
@@ -285,14 +285,14 @@ fn real_xpc_reply_failure_and_repeated_parse_close_release_all_descriptors() {
         );
         let mut invalid = SourceAttachment::default();
         assert!(!unsafe {
-            tn_engine_control_parse_source_attachment(malformed.0, &raw mut invalid)
+            mr_engine_control_parse_source_attachment(malformed.0, &raw mut invalid)
         });
         let mut parsed = parse(&valid);
         let owned = parsed.0.descriptor;
         assert!(unsafe { fcntl(owned, 1) } >= 0);
-        unsafe { tn_engine_control_source_attachment_close(&raw mut parsed.0) };
+        unsafe { mr_engine_control_source_attachment_close(&raw mut parsed.0) };
         assert_eq!(unsafe { fcntl(owned, 1) }, -1);
-        unsafe { tn_engine_control_source_attachment_close(&raw mut parsed.0) };
+        unsafe { mr_engine_control_source_attachment_close(&raw mut parsed.0) };
         let probe = source.try_clone().unwrap();
         assert_eq!(
             probe.as_raw_fd(),

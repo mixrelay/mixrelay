@@ -2,8 +2,8 @@
 
 ## Scope and evidence
 
-The production implementation in `native/macos/application-capture/src/TNProcessTap.m`
-is compiled directly into `native/macos/application-capture/tests/TNProcessTapLifetimeTests.m`.
+The production implementation in `native/macos/application-capture/src/MRProcessTap.m`
+is compiled directly into `native/macos/application-capture/tests/MRProcessTapLifetimeTests.m`.
 Only Core Audio object operations are substituted with failure-injection functions.
 The test uses the production Rust audio ring and actual libdispatch cleanup queue/retry.
 It does **not** create a real tap/device, request capture permissions, change the
@@ -29,7 +29,7 @@ the tested capture lifecycle.
 From the repository root:
 
 ```sh
-cargo test -p tonenari-engine-service --bin tonenari-engine-service \
+cargo test -p mixrelay-engine-service --bin mixrelay-engine-service \
   native_callback_and_hal_contracts -- --nocapture
 ```
 
@@ -46,7 +46,7 @@ clang -std=c17 -fobjc-arc -fmodules -fblocks \
   -mmacosx-version-min=14.2 \
   -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Werror \
   -fsyntax-only -I native/macos/application-capture/include \
-  native/macos/application-capture/src/TNProcessTap.m
+  native/macos/application-capture/src/MRProcessTap.m
 ```
 
 ## Contracts exercised

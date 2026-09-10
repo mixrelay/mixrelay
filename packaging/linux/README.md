@@ -1,6 +1,6 @@
 # Linux packaging
 
-ToneNari runs as a per-user PipeWire client. Debian and Kali use the same backend and require
+MixRelay runs as a per-user PipeWire client. Debian and Kali use the same backend and require
 `pipewire-bin`, `wireplumber`, `pkg-config`, and `liblilv-dev`; a PulseAudio-only session is
 intentionally rejected rather than reported as ready. Lilv provides LV2 discovery and hosting,
 while VST3 and CLAP use their standard user/global install paths without a registration service.

@@ -57,7 +57,7 @@ processes shared an application ID.
 Ubuntu source archive SHA-256:
 `404efbc2740b1a5e3d2ad7d9dd033cd9ae0be1f905d3dc9ab1819bc8ab289745`.
 Evidence lives below
-`/Volumes/Linear 1/test/tonenari/evidence/native-device-parity-20260907/`.
+`/Volumes/Linear 1/test/mixrelay/evidence/native-device-parity-20260907/`.
 The `linux-integration/app-metadata-v3-*` files retain output and the explicit
 exit code. Earlier build/style failures are retained, not counted as passes.
 

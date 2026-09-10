@@ -3,7 +3,7 @@ use super::*;
 fn encoded(properties: Vec<Property>) -> Vec<u8> {
     serde_json::to_vec(&Snapshot {
         version: 1,
-        plugin_uri: "urn:tonenari:state-fixture".into(),
+        plugin_uri: "urn:mixrelay:state-fixture".into(),
         byte_order: byte_order().into(),
         native_state: true,
         ports: BTreeMap::new(),
@@ -57,7 +57,7 @@ fn opaque_binary_property_is_owned_and_urid_values_remap_between_instances() {
     for id in 0..10 {
         map_uri(&second, &format!("urn:other:{id}")).unwrap();
     }
-    let (_, restored) = decode(&encoded, "urn:tonenari:state-fixture", &second).unwrap();
+    let (_, restored) = decode(&encoded, "urn:mixrelay:state-fixture", &second).unwrap();
     assert_eq!(restored[0].bytes, [0, 255, 13, 0]);
     assert_ne!(restored[0].key, key);
     assert_eq!(
@@ -124,9 +124,9 @@ fn invalid_nonportable_oversized_and_asset_properties_are_rejected() {
         value_type: format!("{ATOM}Path"),
         value: PropertyValue::Bytes(b"/file\0".to_vec()),
     }]);
-    assert!(decode(&malformed, "urn:tonenari:state-fixture", &map).is_err());
+    assert!(decode(&malformed, "urn:mixrelay:state-fixture", &map).is_err());
     assert!(decode(&encoded(Vec::new()), "urn:different-plugin", &map).is_err());
-    assert!(decode(b"broken", "urn:tonenari:state-fixture", &map).is_err());
+    assert!(decode(b"broken", "urn:mixrelay:state-fixture", &map).is_err());
 }
 
 /// Run only with the repository-owned fixture bundle compiled and `LV2_PATH` pointing to it.
@@ -140,7 +140,7 @@ fn native_state_fixture_restores_opaque_bytes_and_ports_and_propagates_vendor_fa
         .scan()
         .unwrap()
         .into_iter()
-        .find(|info| info.unique_id == "urn:tonenari:state-fixture")
+        .find(|info| info.unique_id == "urn:mixrelay:state-fixture")
         .expect("compile the repository-owned fixture and set isolated LV2_PATH");
     let mut plugin = scanner.load(&info).unwrap();
     plugin

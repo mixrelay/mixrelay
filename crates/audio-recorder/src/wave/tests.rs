@@ -1,7 +1,7 @@
 use super::Take;
 use crate::{Encoding, RecorderAction, RecorderRequest};
+use mixrelay_test_support::FixtureDir;
 use std::path::Path;
-use tonenari_test_support::FixtureDir;
 
 fn take(path: &Path, encoding: Encoding, channels: u16) -> Take {
     Take::new(
@@ -154,8 +154,8 @@ fn record_and_resume_prepare_the_observed_converter_before_pcm_admission() {
 #[test]
 fn one_frame_conversion_tails_have_exact_duration_for_all_supported_rate_pairs() {
     let directory = FixtureDir::new("recorder-rate-pairs").unwrap();
-    for &from in tonenari_audio_io::formats::SAMPLE_RATES {
-        for &to in tonenari_audio_io::formats::SAMPLE_RATES {
+    for &from in mixrelay_audio_io::formats::SAMPLE_RATES {
+        for &to in mixrelay_audio_io::formats::SAMPLE_RATES {
             let path = directory.join(format!("{from}-{to}.wav"));
             let request = RecorderRequest {
                 action: RecorderAction::Record,

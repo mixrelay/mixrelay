@@ -8,9 +8,9 @@ shift
 [[ "$job_id" =~ ^[a-zA-Z0-9_-]+$ ]] || exit 2
 (( $# > 0 )) || exit 2
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
-job_root=${TONENARI_LAB_JOB_ROOT:-$repo_root/.lab/jobs}
+job_root=${MIXRELAY_LAB_JOB_ROOT:-$repo_root/.lab/jobs}
 [[ "$job_root" == /* ]] || exit 2
-job_dir="$job_root/tonenari-lab-$job_id"
+job_dir="$job_root/mixrelay-lab-$job_id"
 umask 077
 mkdir -p "$job_root"
 mkdir "$job_dir" # Exclusive: never overwrite evidence from a previous run.

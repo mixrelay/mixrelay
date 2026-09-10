@@ -10,7 +10,7 @@ use std::{
     sync::atomic::{AtomicBool, AtomicU32, AtomicU64},
 };
 
-use tonenari_pcm_ring::PcmRing;
+use mixrelay_pcm_ring::PcmRing;
 
 use crate::{
     callback_clock::CallbackClock, device_buffers::BufferSelection,
@@ -27,17 +27,17 @@ mod stream_format;
 #[cfg(test)]
 mod tests;
 
-pub use callback::tn_device_io_process;
+pub use callback::mr_device_io_process;
 pub use ffi::{
-    tn_device_buffer_size, tn_device_buffer_write, tn_device_io_alive, tn_device_io_buffer_info,
-    tn_device_io_clock_device, tn_device_io_clock_discontinuities, tn_device_io_connect,
-    tn_device_io_connect_status, tn_device_io_create, tn_device_io_create_group,
-    tn_device_io_destroy, tn_device_io_direct_binding, tn_device_io_disconnect,
-    tn_device_io_graph_frames, tn_device_io_graph_read, tn_device_io_graph_write,
-    tn_device_io_native_frames, tn_device_io_native_rate, tn_device_io_output_epoch,
-    tn_device_io_overflows, tn_device_io_quantum, tn_device_io_queued, tn_device_io_render_hook,
-    tn_device_io_ticks, tn_device_io_worker_discard, tn_device_io_worker_read,
-    tn_device_io_worker_write,
+    mr_device_buffer_size, mr_device_buffer_write, mr_device_io_alive, mr_device_io_buffer_info,
+    mr_device_io_clock_device, mr_device_io_clock_discontinuities, mr_device_io_connect,
+    mr_device_io_connect_status, mr_device_io_create, mr_device_io_create_group,
+    mr_device_io_destroy, mr_device_io_direct_binding, mr_device_io_disconnect,
+    mr_device_io_graph_frames, mr_device_io_graph_read, mr_device_io_graph_write,
+    mr_device_io_native_frames, mr_device_io_native_rate, mr_device_io_output_epoch,
+    mr_device_io_overflows, mr_device_io_quantum, mr_device_io_queued, mr_device_io_render_hook,
+    mr_device_io_ticks, mr_device_io_worker_discard, mr_device_io_worker_read,
+    mr_device_io_worker_write,
 };
 pub use native::BufferInfo;
 

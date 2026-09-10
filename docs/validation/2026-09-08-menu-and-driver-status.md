@@ -8,10 +8,10 @@
 - Regression: the four new nested context/button mouse/keyboard cases failed before
   the fix; all seven menu tests passed afterward. Keyboard unit coverage navigates
   with arrows; leaf activation is clicked in jsdom. Native keyboard Enter is verified below.
-- Actual rebuilt ToneNari app: source menu by mouse and output menu by keyboard
+- Actual rebuilt MixRelay app: source menu by mouse and output menu by keyboard
   both reached New device. Created distinct named input/output test devices and
   confirmed each in `system_profiler SPAudioDataType` as real 2-in/2-out devices.
-  Cmd-Z removed each test creation; the original microphone-to-ToneNari connections
+  Cmd-Z removed each test creation; the original microphone-to-MixRelay connections
   remained. No unrelated device or graph was removed.
 - macOS driver presence now follows authenticated HAL inventory subscriptions in
   the existing off-RT monitor, including when no virtual devices are referenced.

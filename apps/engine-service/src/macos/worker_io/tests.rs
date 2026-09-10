@@ -1,8 +1,8 @@
 use super::*;
 use crate::macos::{MacTimeline, NativePacer, RouteClock, adapter_profile, capture_schedule};
-use tonenari_audio_graph::RenderFormat;
+use mixrelay_audio_graph::RenderFormat;
 const DEVICE_ID: &str = "2f2f2f2f-2f2f-2f2f-2f2f-2f2f2f2f2f2f";
-use tonenari_engine_service::{
+use mixrelay_engine_service::{
     RuntimeStatusBackend,
     endpoint_registry::{CallbackEndpoint, EndpointRegistry, EndpointSpec},
     endpoint_service::AudioConfig,
@@ -87,11 +87,11 @@ fn changing_only_secondary_preserves_primary_epoch_pcm_and_partial_callback_curs
     // owns its producer and the reader slice contains exactly 64 stereo frames.
     unsafe {
         assert_eq!(
-            tn_shared_audio_buffer_stats(io.transport.endpoint.capture_buffer()).epoch,
+            mr_shared_audio_buffer_stats(io.transport.endpoint.capture_buffer()).epoch,
             snapshot.capture_epoch
         );
         assert_eq!(
-            tn_shared_audio_buffer_read(
+            mr_shared_audio_buffer_read(
                 io.transport.endpoint.capture_buffer(),
                 64,
                 pcm.as_mut_ptr(),
@@ -136,16 +136,16 @@ fn primary_direction_or_graph_rate_change_retires_only_its_old_writer() {
 }
 
 fn processor_for_reference(format: RenderFormat, capture: bool) -> Box<BlockProcessor> {
-    use tonenari_audio_graph::{CompileContext, CompileLimits, GraphCompiler};
-    let mut document = tonenari_engine_service::default_session_document(1, format);
+    use mixrelay_audio_graph::{CompileContext, CompileLimits, GraphCompiler};
+    let mut document = mixrelay_engine_service::default_session_document(1, format);
     for node in &mut document.nodes {
-        if let tonenari_audio_graph::NodeConfig::VirtualEndpoint(endpoint) = &mut node.config {
+        if let mixrelay_audio_graph::NodeConfig::VirtualEndpoint(endpoint) = &mut node.config {
             endpoint.id = DEVICE_ID.into();
             let mut spec = endpoint.spec.clone();
             if !capture {
                 spec.capture = None;
             }
-            node.config = tonenari_audio_graph::NodeConfig::VirtualEndpointTransport(spec);
+            node.config = mixrelay_audio_graph::NodeConfig::VirtualEndpointTransport(spec);
         }
     }
     if !capture {
@@ -161,17 +161,17 @@ fn processor_for_reference(format: RenderFormat, capture: bool) -> Box<BlockProc
         )
         .unwrap();
     Box::new(BlockProcessor::new(std::sync::Arc::new(
-        tonenari_audio_engine::RenderPlan::prepare(&plan).unwrap(),
+        mixrelay_audio_engine::RenderPlan::prepare(&plan).unwrap(),
     )))
 }
-use tonenari_macos_transport::{
+use mixrelay_macos_transport::{
     endpoint_transport::{
-        tn_endpoint_transport_begin_clock_transition, tn_endpoint_transport_clock_demand,
-        tn_endpoint_transport_clock_snapshot, tn_endpoint_transport_clock_state,
-        tn_endpoint_transport_incarnation,
+        mr_endpoint_transport_begin_clock_transition, mr_endpoint_transport_clock_demand,
+        mr_endpoint_transport_clock_snapshot, mr_endpoint_transport_clock_state,
+        mr_endpoint_transport_incarnation,
     },
     shared_audio_buffer::{
-        tn_shared_audio_buffer_read, tn_shared_audio_buffer_stats, tn_shared_audio_buffer_write,
+        mr_shared_audio_buffer_read, mr_shared_audio_buffer_stats, mr_shared_audio_buffer_write,
     },
 };
 
@@ -194,7 +194,7 @@ impl Transport for LocalTransport<'_> {
         // SAFETY: the registry pin retains the initialized stereo mapping; the
         // fixture is its sole PCM writer and this slice has exactly frames*2 cells.
         unsafe {
-            tn_shared_audio_buffer_read(
+            mr_shared_audio_buffer_read(
                 self.endpoint.render_buffer(),
                 frame,
                 pcm.as_mut_ptr(),
@@ -209,7 +209,7 @@ impl Transport for LocalTransport<'_> {
         // capture mapping using its observed epoch and a stereo slice of exact size.
         !self.reject_write
             && unsafe {
-                tn_shared_audio_buffer_write(
+                mr_shared_audio_buffer_write(
                     self.endpoint.capture_buffer(),
                     endpoint.capture_epoch,
                     frame,
@@ -238,10 +238,10 @@ fn endpoint(registry: &EndpointRegistry) -> LocalTransport<'_> {
     // SAFETY: the newly created test mapping has no external callbacks and is
     // retained by this pin until after the worker and all PCM accesses finish.
     unsafe {
-        assert!(tn_endpoint_transport_begin_clock_transition(
+        assert!(mr_endpoint_transport_begin_clock_transition(
             endpoint.transport()
         ));
-        tn_endpoint_transport_clock_state(endpoint.transport(), 1, 48_000, true);
+        mr_endpoint_transport_clock_state(endpoint.transport(), 1, 48_000, true);
     }
     LocalTransport {
         endpoint,
@@ -261,22 +261,22 @@ fn demand(transport: &LocalTransport<'_>, through: u64, quantum: u32) -> Endpoin
     // SAFETY: exclusive fixture publication into the live pinned mapping. Both
     // callbacks publish their quantum, independently of the observation gap.
     unsafe {
-        tn_endpoint_transport_clock_demand(endpoint.transport(), true, through, quantum);
-        tn_endpoint_transport_clock_demand(endpoint.transport(), false, through, quantum);
-        assert!(tn_endpoint_transport_clock_snapshot(
+        mr_endpoint_transport_clock_demand(endpoint.transport(), true, through, quantum);
+        mr_endpoint_transport_clock_demand(endpoint.transport(), false, through, quantum);
+        assert!(mr_endpoint_transport_clock_snapshot(
             endpoint.transport(),
             &raw mut snapshot.clock
         ));
-        assert!(tn_endpoint_transport_incarnation(
+        assert!(mr_endpoint_transport_incarnation(
             endpoint.transport(),
             snapshot.incarnation.as_mut_ptr()
         ));
-        snapshot.render_epoch = tn_shared_audio_buffer_stats(endpoint.render_buffer()).epoch;
-        snapshot.capture_epoch = tn_shared_audio_buffer_stats(endpoint.capture_buffer()).epoch;
+        snapshot.render_epoch = mr_shared_audio_buffer_stats(endpoint.render_buffer()).epoch;
+        snapshot.capture_epoch = mr_shared_audio_buffer_stats(endpoint.capture_buffer()).epoch;
         let pcm: Vec<f32> = (through - u64::from(quantum)..through)
             .flat_map(|frame| [f32::from(u16::try_from(frame).unwrap()) / 1024.0, -0.25])
             .collect();
-        assert!(tn_shared_audio_buffer_write(
+        assert!(mr_shared_audio_buffer_write(
             endpoint.render_buffer(),
             snapshot.render_epoch,
             through - u64::from(quantum),
@@ -387,7 +387,7 @@ fn assert_coalesced_pcm(quantum: u32, block_frames: u32, throughs: &[u64]) {
         // SAFETY: sole reader, pinned live stereo mapping and exactly quantum*2 output cells.
         assert_eq!(
             unsafe {
-                tn_shared_audio_buffer_read(
+                mr_shared_audio_buffer_read(
                     io.transport.endpoint.capture_buffer(),
                     through,
                     pcm.as_mut_ptr(),
@@ -439,12 +439,12 @@ fn refused_admission_does_not_consume_pcm_and_failed_publication_is_reported() {
     };
     io.transport.reject_prepare = true;
     status.observe_device_rate(Some(48_000));
-    status.observe_clock(tonenari_audio_io::session::ClockAuthority::Device, true);
+    status.observe_clock(mixrelay_audio_io::session::ClockAuthority::Device, true);
     assert!(!io.process(&mut processor, cycle).unwrap());
     assert_eq!((io.transport.reads, io.transport.writes), (0, 0));
     assert_eq!(
         status.status(format).audio_session.unwrap().issue,
-        Some(tonenari_audio_io::session::SessionIssue::ClockNotSynchronized)
+        Some(mixrelay_audio_io::session::SessionIssue::ClockNotSynchronized)
     );
     io.transport.reject_prepare = false;
     io.transport.reject_write = true;
@@ -455,9 +455,9 @@ fn refused_admission_does_not_consume_pcm_and_failed_publication_is_reported() {
 
 #[test]
 fn rejected_hal_admission_does_not_stall_a_mixed_route_or_claim_sync() {
+    use mixrelay_audio_engine::RenderPlan;
+    use mixrelay_audio_graph::{CompileContext, CompileLimits, GraphCompiler, GraphDocument};
     use std::sync::Arc;
-    use tonenari_audio_engine::RenderPlan;
-    use tonenari_audio_graph::{CompileContext, CompileLimits, GraphCompiler, GraphDocument};
     let registry = EndpointRegistry::new();
     let mut io = WorkerIo::new(endpoint(&registry), Some(primary()));
     let format = RenderFormat {
@@ -474,17 +474,17 @@ fn rejected_hal_admission_does_not_stall_a_mixed_route_or_claim_sync() {
                 "supportedSampleRates":[48000],"defaultSampleRate":48000}},
             {"id":"output","type":"audio_device_output","config":{"selector":{"match":"default_output"},"inputChannels":2}}
         ],"edges":[
-            {"id":"hal","source":{"nodeId":"default-virtual-io","portId":tonenari_audio_graph::FROM_OS_PORT_ID},
-                "destination":{"nodeId":"default-virtual-io","portId":tonenari_audio_graph::TO_OS_PORT_ID}},
-            {"id":"hardware","source":{"nodeId":"default-virtual-io","portId":tonenari_audio_graph::FROM_OS_PORT_ID},
+            {"id":"hal","source":{"nodeId":"default-virtual-io","portId":mixrelay_audio_graph::FROM_OS_PORT_ID},
+                "destination":{"nodeId":"default-virtual-io","portId":mixrelay_audio_graph::TO_OS_PORT_ID}},
+            {"id":"hardware","source":{"nodeId":"default-virtual-io","portId":mixrelay_audio_graph::FROM_OS_PORT_ID},
                 "destination":{"nodeId":"output","portId":"audio"}}
         ]
     })).unwrap();
     // This test exercises raw HAL transport admission, before device-bus composition.
     for node in &mut document.nodes {
-        if let tonenari_audio_graph::NodeConfig::VirtualEndpoint(endpoint) = &node.config {
+        if let mixrelay_audio_graph::NodeConfig::VirtualEndpoint(endpoint) = &node.config {
             node.config =
-                tonenari_audio_graph::NodeConfig::VirtualEndpointTransport(endpoint.spec.clone());
+                mixrelay_audio_graph::NodeConfig::VirtualEndpointTransport(endpoint.spec.clone());
         }
     }
     let plan = GraphCompiler::default()
@@ -500,7 +500,7 @@ fn rejected_hal_admission_does_not_stall_a_mixed_route_or_claim_sync() {
     let devices = crate::macos_devices::DeviceSet::default();
     let status = AdapterRuntimeStatus::new(adapter_profile());
     status.observe_device_rate(Some(48_000));
-    status.observe_clock(tonenari_audio_io::session::ClockAuthority::Device, true);
+    status.observe_clock(mixrelay_audio_io::session::ClockAuthority::Device, true);
     let timeline = MacTimeline::new();
     let snapshot = demand(&io.transport, 32, 32);
     io.transport.reject_prepare = true;
@@ -522,6 +522,6 @@ fn rejected_hal_admission_does_not_stall_a_mixed_route_or_claim_sync() {
     assert_eq!((io.transport.reads, io.transport.writes), (1, 0));
     assert_eq!(
         status.status(format).audio_session.unwrap().issue,
-        Some(tonenari_audio_io::session::SessionIssue::ClockNotSynchronized)
+        Some(mixrelay_audio_io::session::SessionIssue::ClockNotSynchronized)
     );
 }

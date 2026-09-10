@@ -5,9 +5,11 @@ use super::{
     DeviceSet,
     device::Device,
     ffi::{
-        tn_device_io_clock_discontinuities, tn_device_io_direct_binding, tn_device_io_output_epoch,
+        mr_device_io_clock_discontinuities, mr_device_io_direct_binding, mr_device_io_output_epoch,
     },
 };
+use mixrelay_audio_engine::{ExternalBinding, RenderPlan};
+use mixrelay_audio_graph::{FROM_OS_PORT_ID, TO_OS_PORT_ID};
 use std::{
     collections::BTreeMap,
     ffi::c_void,
@@ -18,8 +20,6 @@ use std::{
     thread,
     time::Duration,
 };
-use tonenari_audio_engine::{ExternalBinding, RenderPlan};
-use tonenari_audio_graph::{FROM_OS_PORT_ID, TO_OS_PORT_ID};
 mod metrics;
 use metrics::CallbackMetrics;
 
@@ -128,7 +128,7 @@ impl Binding {
             let (mut resolved, mut offset, mut total) = (0, 0, 0);
             // SAFETY: immutable control-side selection with an owned native lifetime.
             if !unsafe {
-                tn_device_io_direct_binding(
+                mr_device_io_direct_binding(
                     device.native.pointer.as_ptr(),
                     &raw mut resolved,
                     &raw mut offset,
@@ -229,7 +229,7 @@ impl DirectPlan {
 
     pub(crate) fn discontinuities(&self) -> u64 {
         // Atomic observation only; unlike device properties this is callback-safe.
-        unsafe { tn_device_io_clock_discontinuities(self.master.native.pointer.as_ptr()) }
+        unsafe { mr_device_io_clock_discontinuities(self.master.native.pointer.as_ptr()) }
     }
 
     pub(crate) fn request_reconnect(&self) {
@@ -291,7 +291,7 @@ impl Drop for Registration<'_> {
             // Invalidate pre-direct PCM BEFORE exposing the ring consumer again.
             // This is an atomic epoch publication, not a cross-thread cursor reset.
             unsafe {
-                tn_device_io_output_epoch(device.native.pointer.as_ptr(), next_epoch());
+                mr_device_io_output_epoch(device.native.pointer.as_ptr(), next_epoch());
             }
             // Publish the EXIT, not entry: the supervisor may have sampled the
             // old mode just before entry, so an entry generation can be consumed
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn confirmed_offline_bindings_need_no_native_mapping_but_unknown_bindings_are_rejected() {
-        use tonenari_audio_graph::{
+        use mixrelay_audio_graph::{
             CompileContext, CompileLimits, GraphCompiler, GraphDocument, RenderFormat,
         };
         let document: GraphDocument = serde_json::from_value(serde_json::json!({

@@ -1,9 +1,9 @@
 //! Paced 32-frame debug-profile recorder reproduction, not a native clock proof.
-use std::time::{Duration, Instant};
-use tonenari_audio_recorder::{
+use mixrelay_audio_recorder::{
     Encoding, RecorderAction, RecorderRegistry, RecorderRequest, RecorderState, RecorderTap,
 };
-use tonenari_test_support::FixtureDir;
+use mixrelay_test_support::FixtureDir;
+use std::time::{Duration, Instant};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output_rate = std::env::args()

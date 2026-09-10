@@ -1,4 +1,4 @@
-//! `ToneNari` patch: native LV2 State interface plus input control-port values.
+//! `MixRelay` patch: native LV2 State interface plus input control-port values.
 //!
 //! State calls run on the worker control thread with DSP/editor access serialized. Lilv's
 //! convenience save API discards opaque properties after a native error, and its restore API

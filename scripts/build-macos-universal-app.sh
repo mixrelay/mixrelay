@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  print -u2 "ToneNari's Universal app can only be built on macOS"
+  print -u2 "MixRelay's Universal app can only be built on macOS"
   exit 1
 fi
 
@@ -39,11 +39,11 @@ export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="$compiler"
 export CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER="$compiler"
 
 cd "$repo_root"
-pnpm --filter @tonenari/desktop tauri build \
+pnpm --filter @mixrelay/desktop tauri build \
   --bundles app \
   --target universal-apple-darwin
 
-app_bundle="$repo_root/target/universal-apple-darwin/release/bundle/macos/ToneNari.app"
+app_bundle="$repo_root/target/universal-apple-darwin/release/bundle/macos/MixRelay.app"
 if [[ ! -d "$app_bundle" ]]; then
   print -u2 "Expected app bundle was not produced: $app_bundle"
   exit 1
@@ -72,4 +72,4 @@ if (( mach_o_count == 0 )); then
   exit 1
 fi
 
-print "ToneNari Universal app: $app_bundle"
+print "MixRelay Universal app: $app_bundle"

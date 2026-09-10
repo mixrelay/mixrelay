@@ -25,10 +25,10 @@ fn build_pipewire_service() {
         .flag("-std=c17")
         .define("_GNU_SOURCE", None)
         .warnings_into_errors(true)
-        .file(format!("{root}/TNPipeWire.c"))
-        .compile("tonenari_pipewire_native");
+        .file(format!("{root}/MRPipeWire.c"))
+        .compile("mixrelay_pipewire_native");
     println!("cargo:rerun-if-changed={root}");
-    println!("cargo:rerun-if-changed=../../native/pcm-ring/include/TNPcmRing.h");
+    println!("cargo:rerun-if-changed=../../native/pcm-ring/include/MRPcmRing.h");
 }
 
 fn build_macos_service() {
@@ -38,7 +38,7 @@ fn build_macos_service() {
     let hal_root = "../../native/macos/hal-driver";
     let engine_include = format!("{engine_root}/include");
     let hal_include = format!("{hal_root}/include");
-    let sources = [format!("{engine_root}/src/TNEngineService.c")];
+    let sources = [format!("{engine_root}/src/MREngineService.c")];
     let mut build = cc::Build::new();
     build
         .include(&output)
@@ -50,25 +50,25 @@ fn build_macos_service() {
         .flag("-mmacosx-version-min=14.2")
         .warnings_into_errors(true)
         .files(&sources)
-        .compile("tonenari_engine_service_native");
+        .compile("mixrelay_engine_service_native");
 
     for source in sources {
         println!("cargo:rerun-if-changed={source}");
     }
-    println!("cargo:rerun-if-changed={engine_include}/TNEngineControl.h");
-    println!("cargo:rerun-if-changed={engine_include}/TNApplicationClock.h");
-    println!("cargo:rerun-if-changed={engine_include}/TNDeviceIO.h");
-    println!("cargo:rerun-if-changed={engine_include}/TNAggregateGroup.h");
-    println!("cargo:rerun-if-changed=../../native/macos/common/TNCallbackClock.h");
-    println!("cargo:rerun-if-changed=../../native/macos/common/TNAnonymousMemory.h");
-    println!("cargo:rerun-if-changed=../../native/macos/common/TNDeviceBuffers.h");
+    println!("cargo:rerun-if-changed={engine_include}/MREngineControl.h");
+    println!("cargo:rerun-if-changed={engine_include}/MRApplicationClock.h");
+    println!("cargo:rerun-if-changed={engine_include}/MRDeviceIO.h");
+    println!("cargo:rerun-if-changed={engine_include}/MRAggregateGroup.h");
+    println!("cargo:rerun-if-changed=../../native/macos/common/MRCallbackClock.h");
+    println!("cargo:rerun-if-changed=../../native/macos/common/MRAnonymousMemory.h");
+    println!("cargo:rerun-if-changed=../../native/macos/common/MRDeviceBuffers.h");
     println!("cargo:rerun-if-changed=../../crates/audio-io/src/formats.rs");
     println!("cargo:rerun-if-changed=../../crates/audio-io/native_format_header.rs");
-    println!("cargo:rerun-if-changed=../../native/pcm-ring/include/TNPcmRing.h");
-    println!("cargo:rerun-if-changed={engine_include}/TNEndpointPeers.h");
-    println!("cargo:rerun-if-changed={engine_include}/TNEngineSourceRegistry.h");
-    println!("cargo:rerun-if-changed={hal_include}/TNHALControlProtocol.h");
-    println!("cargo:rerun-if-changed={hal_include}/TNEndpointTransport.h");
-    println!("cargo:rerun-if-changed={hal_include}/TNSharedAudioBuffer.h");
+    println!("cargo:rerun-if-changed=../../native/pcm-ring/include/MRPcmRing.h");
+    println!("cargo:rerun-if-changed={engine_include}/MREndpointPeers.h");
+    println!("cargo:rerun-if-changed={engine_include}/MREngineSourceRegistry.h");
+    println!("cargo:rerun-if-changed={hal_include}/MRHALControlProtocol.h");
+    println!("cargo:rerun-if-changed={hal_include}/MREndpointTransport.h");
+    println!("cargo:rerun-if-changed={hal_include}/MRSharedAudioBuffer.h");
     println!("cargo:rustc-link-lib=framework=CoreAudio");
 }

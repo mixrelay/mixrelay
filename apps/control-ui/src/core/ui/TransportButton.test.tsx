@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
-import { ToneNariProvider } from '../theme/ToneNariProvider';
+import { MixRelayProvider } from '../theme/MixRelayProvider';
 import { TransportButton } from './TransportButton';
 
 it.each(['Record', '녹음', '[Record]'])(
@@ -8,9 +8,9 @@ it.each(['Record', '녹음', '[Record]'])(
   async (label) => {
     const click = vi.fn();
     render(
-      <ToneNariProvider>
+      <MixRelayProvider>
         <TransportButton icon="record" label={label} disabled={false} onClick={click} />
-      </ToneNariProvider>,
+      </MixRelayProvider>,
     );
     const button = screen.getByRole('button', { name: label });
     expect(button.textContent).toBe('');
@@ -24,9 +24,9 @@ it.each(['Record', '녹음', '[Record]'])(
 
 it('retains the active recording indicator when the record action is disabled', () => {
   render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <TransportButton icon="record" label="Record" active disabled onClick={vi.fn()} />
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   const button = screen.getByRole('button', { name: 'Record' });
   expect(button).toHaveAttribute('data-active', 'true');
@@ -38,9 +38,9 @@ it.each(['record', 'pause', 'stop', 'resume'] as const)(
   'uses the same button surface and icon size for %s',
   (icon) => {
     render(
-      <ToneNariProvider>
+      <MixRelayProvider>
         <TransportButton icon={icon} label={icon} disabled={false} onClick={vi.fn()} />
-      </ToneNariProvider>,
+      </MixRelayProvider>,
     );
     const button = screen.getByRole('button', { name: icon });
     expect(button).toHaveAttribute('data-transport', icon);

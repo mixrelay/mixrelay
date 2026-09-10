@@ -275,7 +275,7 @@ impl Fixture {
         let mut written = 0;
         assert_eq!(
             unsafe {
-                crate::properties::tn_hal_core_property_get(
+                crate::properties::mr_hal_core_property_get(
                     (&raw const *self.registry).cast_mut(),
                     object,
                     address,
@@ -591,7 +591,7 @@ fn all_product_rates_are_independent_and_transport_identity_is_validated() {
 
 #[test]
 fn property_abi_exposes_per_device_stream_shape_and_partial_lists() {
-    use crate::properties::{Address, tn_hal_core_property_get, tn_hal_core_property_size};
+    use crate::properties::{Address, mr_hal_core_property_get, mr_hal_core_property_size};
     let fixture = Fixture::new();
     let first = fixture.add(1, 48_000);
     let second = fixture.add(2, 96_000);
@@ -603,14 +603,14 @@ fn property_abi_exposes_per_device_stream_shape_and_partial_lists() {
     };
     let mut size = 0;
     assert_eq!(
-        unsafe { tn_hal_core_property_size(registry, 1, &raw const list, &raw mut size) },
+        unsafe { mr_hal_core_property_size(registry, 1, &raw const list, &raw mut size) },
         0
     );
     assert_eq!(size, 8);
     let mut one = 0_u32;
     assert_eq!(
         unsafe {
-            tn_hal_core_property_get(
+            mr_hal_core_property_get(
                 registry,
                 1,
                 &raw const list,
@@ -647,7 +647,7 @@ fn property_abi_exposes_per_device_stream_shape_and_partial_lists() {
         element: 0,
     };
     assert_eq!(
-        unsafe { tn_hal_core_property_size(registry, second, &raw const layout, &raw mut size) },
+        unsafe { mr_hal_core_property_size(registry, second, &raw const layout, &raw mut size) },
         0
     );
     assert_eq!(size, 12 + 33 * 20);
@@ -655,7 +655,7 @@ fn property_abi_exposes_per_device_stream_shape_and_partial_lists() {
 
 #[test]
 fn property_abi_validates_formats_and_cf_string_ownership() {
-    use crate::properties::{Address, tn_hal_core_property_get, tn_hal_core_property_set};
+    use crate::properties::{Address, mr_hal_core_property_get, mr_hal_core_property_set};
     unsafe extern "C" {
         fn CFRelease(value: *const c_void);
     }
@@ -670,7 +670,7 @@ fn property_abi_validates_formats_and_cf_string_ownership() {
     let invalid = 44_100.5_f64;
     assert_ne!(
         unsafe {
-            tn_hal_core_property_set(
+            mr_hal_core_property_set(
                 registry,
                 id,
                 &raw const property,
@@ -684,7 +684,7 @@ fn property_abi_validates_formats_and_cf_string_ownership() {
     let requested = 192_000_f64;
     assert_eq!(
         unsafe {
-            tn_hal_core_property_set(
+            mr_hal_core_property_set(
                 registry,
                 id,
                 &raw const property,
@@ -703,7 +703,7 @@ fn property_abi_validates_formats_and_cf_string_ownership() {
     let mut written = 0;
     assert_eq!(
         unsafe {
-            tn_hal_core_property_get(
+            mr_hal_core_property_get(
                 registry,
                 id,
                 &raw const property,
@@ -723,7 +723,7 @@ fn property_abi_validates_formats_and_cf_string_ownership() {
 
 #[test]
 fn ffi_rejects_foreign_transport_and_closes_consumed_descriptor() {
-    use crate::abi::tn_hal_core_upsert;
+    use crate::abi::mr_hal_core_upsert;
     use std::os::fd::IntoRawFd;
     unsafe extern "C" {
         fn fcntl(fd: i32, command: i32) -> i32;
@@ -733,7 +733,7 @@ fn ffi_rejects_foreign_transport_and_closes_consumed_descriptor() {
     let mut output = 99;
     assert_eq!(
         unsafe {
-            tn_hal_core_upsert(
+            mr_hal_core_upsert(
                 (&raw const *fixture.registry).cast_mut(),
                 &[1; 16],
                 c"Foreign".as_ptr(),
@@ -752,7 +752,7 @@ fn ffi_rejects_foreign_transport_and_closes_consumed_descriptor() {
 
 #[test]
 fn io_device_query_completes_while_metadata_control_is_locked() {
-    use crate::abi::tn_hal_core_device_alive;
+    use crate::abi::mr_hal_core_device_alive;
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -764,7 +764,7 @@ fn io_device_query_completes_while_metadata_control_is_locked() {
     let (send, receive) = mpsc::channel();
     let response = std::thread::scope(|scope| {
         scope.spawn(|| {
-            send.send(unsafe { tn_hal_core_device_alive(registry, id) })
+            send.send(unsafe { mr_hal_core_device_alive(registry, id) })
                 .unwrap();
         });
         let response = receive.recv_timeout(Duration::from_secs(1));
@@ -775,11 +775,11 @@ fn io_device_query_completes_while_metadata_control_is_locked() {
     });
     assert_eq!(response, Ok(true));
     drop(pin);
-    assert!(!unsafe { tn_hal_core_device_alive(registry, id + 1) });
-    assert!(!unsafe { tn_hal_core_device_alive(registry, id + 2) });
-    assert!(!unsafe { tn_hal_core_device_alive(std::ptr::null(), id) });
+    assert!(!unsafe { mr_hal_core_device_alive(registry, id + 1) });
+    assert!(!unsafe { mr_hal_core_device_alive(registry, id + 2) });
+    assert!(!unsafe { mr_hal_core_device_alive(std::ptr::null(), id) });
     assert_eq!(registry.remove([1; 16]), OK);
-    assert!(!unsafe { tn_hal_core_device_alive(registry, id) });
+    assert!(!unsafe { mr_hal_core_device_alive(registry, id) });
 }
 
 #[test]

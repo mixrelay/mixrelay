@@ -35,16 +35,16 @@ pub(super) fn render() -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        r"/* Generated from tonenari-audio-io/src/formats.rs. Do not edit. */
-#ifndef TN_AUDIO_FORMATS_H
-#define TN_AUDIO_FORMATS_H
+        r"/* Generated from mixrelay-audio-io/src/formats.rs. Do not edit. */
+#ifndef MR_AUDIO_FORMATS_H
+#define MR_AUDIO_FORMATS_H
 #include <stdbool.h>
 #include <stdint.h>
-enum {{ TN_AUDIO_SAMPLE_RATE_COUNT = {} }};
-static const uint32_t TN_AUDIO_SAMPLE_RATES[TN_AUDIO_SAMPLE_RATE_COUNT] = {{{rates}}};
-static inline bool tn_audio_sample_rate_supported(double rate) {{
-    for (uint32_t i = 0; i < TN_AUDIO_SAMPLE_RATE_COUNT; ++i)
-        if (rate == (double)TN_AUDIO_SAMPLE_RATES[i]) return true;
+enum {{ MR_AUDIO_SAMPLE_RATE_COUNT = {} }};
+static const uint32_t MR_AUDIO_SAMPLE_RATES[MR_AUDIO_SAMPLE_RATE_COUNT] = {{{rates}}};
+static inline bool mr_audio_sample_rate_supported(double rate) {{
+    for (uint32_t i = 0; i < MR_AUDIO_SAMPLE_RATE_COUNT; ++i)
+        if (rate == (double)MR_AUDIO_SAMPLE_RATES[i]) return true;
     return false;
 }}
 #endif
@@ -56,7 +56,7 @@ static inline bool tn_audio_sample_rate_supported(double rate) {{
 /// Places the generated header in the caller's isolated build output directory.
 pub(super) fn write_header(directory: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
     std::fs::create_dir_all(directory)?;
-    let path = directory.join("TNAudioFormats.h");
+    let path = directory.join("MRAudioFormats.h");
     std::fs::write(&path, render())?;
     Ok(path)
 }

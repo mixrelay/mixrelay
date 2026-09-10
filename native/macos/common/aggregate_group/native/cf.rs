@@ -202,7 +202,7 @@ impl Object {
     }
 
     pub(super) fn unique_uid() -> Option<Self> {
-        let format = Self::string(c"io.tonenari.private-group.%@")?;
+        let format = Self::string(c"io.mixrelay.private-group.%@")?;
         // SAFETY: each create-rule result is guarded before another fallible operation;
         // %@ consumes the live CF string object supplied as the sole variadic argument.
         unsafe {

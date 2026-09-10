@@ -1,5 +1,5 @@
 use super::*;
-use tonenari_processor_host::ProcessorStateError;
+use mixrelay_processor_host::ProcessorStateError;
 
 #[test]
 fn native_editor_checkpoint_replaces_stale_overlays_and_survives_restart_without_audio_prepare() {

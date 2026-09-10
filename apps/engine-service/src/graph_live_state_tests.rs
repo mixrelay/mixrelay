@@ -1,6 +1,6 @@
 use super::*;
-use tonenari_control_protocol::GraphProcessorParameterChange;
-use tonenari_processor_host::ProcessorStateError;
+use mixrelay_control_protocol::GraphProcessorParameterChange;
+use mixrelay_processor_host::ProcessorStateError;
 
 fn change(id: u32, value: f64) -> GraphProcessorParameterChange {
     GraphProcessorParameterChange {

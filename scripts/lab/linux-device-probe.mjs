@@ -34,7 +34,7 @@ async function api(path, body, rejected = false) {
 }
 function launch(path, args, log) {
   const fd = openSync(join(evidence, log), 'wx', 0o600);
-  const child = spawn(path, args, { env: { ...process.env, TONENARI_CONFIG_DIR: join(evidence, 'config') }, stdio: ['ignore', fd, fd] });
+  const child = spawn(path, args, { env: { ...process.env, MIXRELAY_CONFIG_DIR: join(evidence, 'config') }, stdio: ['ignore', fd, fd] });
   closeSync(fd);
   child.on('error', error => { child.launchError = error; });
   return child;
@@ -56,8 +56,8 @@ async function apply(nodes, edges = [], rejected = false) {
 }
 function devices(input, output, gain = 0) {
   return [
-    { id: 'device-input', type: 'audio_device_input', config: { selector: { match: 'persistent_uid', uid: 'io.tonenari.lab-device-source' }, outputChannels: input, gainDb: gain } },
-    { id: 'device-output', type: 'audio_device_output', config: { selector: { match: 'persistent_uid', uid: 'io.tonenari.lab-device-sink' }, inputChannels: output } },
+    { id: 'device-input', type: 'audio_device_input', config: { selector: { match: 'persistent_uid', uid: 'io.mixrelay.lab-device-source' }, outputChannels: input, gainDb: gain } },
+    { id: 'device-output', type: 'audio_device_output', config: { selector: { match: 'persistent_uid', uid: 'io.mixrelay.lab-device-sink' }, inputChannels: output } },
   ];
 }
 function edges(routes) {
@@ -120,11 +120,11 @@ async function recoveryTest() {
   await apply(nodes, edges([[12, 0], [32, 15]]));
   let expectedGraph = await api('graph');
   const events = [];
-  const serial = direction => ownNodes(engine.pid).find(n => n.info.props['node.name'] === `io.tonenari.device-${direction}.device-${direction}`)?.info.props['object.serial'];
+  const serial = direction => ownNodes(engine.pid).find(n => n.info.props['node.name'] === `io.mixrelay.device-${direction}.device-${direction}`)?.info.props['object.serial'];
   const meter = async id => (await api('meters')).nodes.find(n => n.nodeId === id)?.peaks;
   async function toggleSide(source, present) {
     fixture.kill(source ? 'SIGUSR2' : 'SIGHUP');
-    await until(() => ownNodes(fixture.pid).some(n => n.info.props['node.name'] === `io.tonenari.lab-device-${source ? 'source' : 'sink'}`) === present, 'Fixture presence did not change');
+    await until(() => ownNodes(fixture.pid).some(n => n.info.props['node.name'] === `io.mixrelay.lab-device-${source ? 'source' : 'sink'}`) === present, 'Fixture presence did not change');
   }
   async function audible() {
     await until(async () => {

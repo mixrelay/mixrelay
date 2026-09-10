@@ -1,5 +1,5 @@
 use super::*;
-use tonenari_audio_graph::{
+use mixrelay_audio_graph::{
     CompileContext, CompileLimits, GraphCompiler, GraphDocument, RenderFormat,
 };
 
@@ -20,7 +20,7 @@ impl RenderTransport for Disconnected {}
 fn idle_boundary(id: u8, rate: u32) -> EndpointBoundary<Disconnected> {
     EndpointBoundary::new(
         BoundaryConfig {
-            identity: tonenari_audio_graph::VirtualEndpointId::new(format!(
+            identity: mixrelay_audio_graph::VirtualEndpointId::new(format!(
                 "{id:08x}-0000-0000-0000-000000000000"
             )),
             id: [id; 16],
@@ -228,9 +228,9 @@ fn plan() -> RenderPlan {
     .unwrap();
     // Native boundary fixtures exercise transport ownership, not authored bus composition.
     for node in &mut document.nodes {
-        if let tonenari_audio_graph::NodeConfig::VirtualEndpoint(endpoint) = &node.config {
+        if let mixrelay_audio_graph::NodeConfig::VirtualEndpoint(endpoint) = &node.config {
             node.config =
-                tonenari_audio_graph::NodeConfig::VirtualEndpointTransport(endpoint.spec.clone());
+                mixrelay_audio_graph::NodeConfig::VirtualEndpointTransport(endpoint.spec.clone());
         }
     }
     let execution = GraphCompiler::default()

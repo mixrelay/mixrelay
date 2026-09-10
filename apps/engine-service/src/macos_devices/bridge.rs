@@ -1,17 +1,17 @@
 //! Worker-owned clock conversion and bounded queue policy; no device lifetime management.
 use super::{
     ffi::{
-        tn_device_io_clock_discontinuities, tn_device_io_graph_frames, tn_device_io_output_epoch,
-        tn_device_io_overflows, tn_device_io_quantum, tn_device_io_queued,
-        tn_device_io_worker_discard, tn_device_io_worker_read, tn_device_io_worker_write,
+        mr_device_io_clock_discontinuities, mr_device_io_graph_frames, mr_device_io_output_epoch,
+        mr_device_io_overflows, mr_device_io_quantum, mr_device_io_queued,
+        mr_device_io_worker_discard, mr_device_io_worker_read, mr_device_io_worker_write,
     },
     worker::WorkerContext,
 };
-use std::sync::atomic::{AtomicU64, Ordering};
-use tonenari_audio_io::clock_bridge::{
+use mixrelay_audio_io::clock_bridge::{
     AsyncClockBridge, BridgeConfig, ClockFeedback, ClockRelation, Discontinuity, FeedbackQueue,
     TransferState,
 };
+use std::sync::atomic::{AtomicU64, Ordering};
 pub(super) const PUMP_FRAMES: usize = 256;
 pub(super) const QUEUE_CAPACITY: usize = 16_384;
 pub(super) static NEXT_DEVICE_EPOCH: AtomicU64 = AtomicU64::new(1);
@@ -110,11 +110,11 @@ impl DeviceBridge {
         context.bridge_ready.store(false, Ordering::Release);
         let pointer = context.native.pointer.as_ptr();
         unsafe {
-            tn_device_io_worker_discard(pointer);
-            tn_device_io_output_epoch(pointer, self.epoch);
-            self.graph_frames = tn_device_io_graph_frames(pointer);
-            self.transport_overflows = tn_device_io_overflows(pointer);
-            self.clock_discontinuities = tn_device_io_clock_discontinuities(pointer);
+            mr_device_io_worker_discard(pointer);
+            mr_device_io_output_epoch(pointer, self.epoch);
+            self.graph_frames = mr_device_io_graph_frames(pointer);
+            self.transport_overflows = mr_device_io_overflows(pointer);
+            self.clock_discontinuities = mr_device_io_clock_discontinuities(pointer);
         }
     }
 
@@ -124,7 +124,7 @@ impl DeviceBridge {
         native_running: bool,
     ) -> Result<(), String> {
         let pointer = context.native.pointer.as_ptr();
-        let frames = unsafe { tn_device_io_graph_frames(pointer) };
+        let frames = unsafe { mr_device_io_graph_frames(pointer) };
         let elapsed = frames.wrapping_sub(self.graph_frames);
         self.graph_frames = frames;
         if elapsed == 0 {
@@ -139,7 +139,7 @@ impl DeviceBridge {
                     FeedbackQueue::Input
                 },
                 epoch: self.epoch,
-                queued_frames: unsafe { tn_device_io_queued(pointer, true) } as usize
+                queued_frames: unsafe { mr_device_io_queued(pointer, true) } as usize
                     + if context.input {
                         0
                     } else {
@@ -160,8 +160,8 @@ impl DeviceBridge {
     /// hardware callback; it must not silently inherit a fixed 2048-sample FIFO.
     pub(super) fn queue_target(&self, context: &WorkerContext, graph: bool) -> usize {
         let pointer = context.native.pointer.as_ptr();
-        let native_quantum = unsafe { tn_device_io_quantum(pointer, false) }.max(32) as usize;
-        let graph_quantum = unsafe { tn_device_io_quantum(pointer, true) }.max(32) as usize;
+        let native_quantum = unsafe { mr_device_io_quantum(pointer, false) }.max(32) as usize;
+        let graph_quantum = unsafe { mr_device_io_quantum(pointer, true) }.max(32) as usize;
         let burst = if graph {
             graph_quantum.max(
                 (native_quantum * self.graph_rate as usize).div_ceil(self.native_rate as usize),
@@ -182,16 +182,16 @@ impl DeviceBridge {
         // stays in the real clock-crossing FIFO, not a greedily drained private
         // staging queue. Priming zeros are never enqueued as valid PCM.
         for _ in 0..64 {
-            let queued = unsafe { tn_device_io_queued(pointer, destination_graph) } as usize;
+            let queued = unsafe { mr_device_io_queued(pointer, destination_graph) } as usize;
             if queued >= target {
                 break;
             }
             let source_frames =
-                unsafe { tn_device_io_queued(pointer, !destination_graph) } as usize;
+                unsafe { mr_device_io_queued(pointer, !destination_graph) } as usize;
             if self.bridge.queued_input_frames() < PUMP_FRAMES * 2 && source_frames != 0 {
                 let count = source_frames.min(PUMP_FRAMES);
                 let count = unsafe {
-                    tn_device_io_worker_read(
+                    mr_device_io_worker_read(
                         pointer,
                         self.source.as_mut_ptr(),
                         u32::try_from(count).unwrap_or(0),
@@ -215,7 +215,7 @@ impl DeviceBridge {
             }
             let count =
                 u32::try_from(report.transferred_frames).map_err(|error| error.to_string())?;
-            if unsafe { tn_device_io_worker_write(pointer, self.destination.as_ptr(), count) }
+            if unsafe { mr_device_io_worker_write(pointer, self.destination.as_ptr(), count) }
                 != count
             {
                 return Err("CoreAudio SRC destination FIFO overflow".into());

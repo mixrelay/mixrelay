@@ -16,7 +16,7 @@ use std::{
     sync::atomic::{AtomicU32, AtomicU64, Ordering, fence},
 };
 
-const MAGIC: u64 = 0x544e_4155_4449_4f31;
+const MAGIC: u64 = 0x4d52_4155_4449_4f31;
 const VERSION: u32 = 4;
 const MAX_CHANNELS: u32 = 64;
 const MAX_CAPACITY: u32 = 1 << 20;
@@ -158,7 +158,7 @@ impl SharedAudioBuffer {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn tn_shared_audio_buffer_required_bytes(
+pub extern "C" fn mr_shared_audio_buffer_required_bytes(
     capacity_frames: u32,
     channels: u32,
 ) -> usize {
@@ -169,7 +169,7 @@ pub extern "C" fn tn_shared_audio_buffer_required_bytes(
 /// # Safety
 /// `memory` must own `memory_size` writable bytes exclusively for this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_initialize(
+pub unsafe extern "C" fn mr_shared_audio_buffer_initialize(
     memory: *mut c_void,
     memory_size: usize,
     capacity_frames: u32,
@@ -216,7 +216,7 @@ pub unsafe extern "C" fn tn_shared_audio_buffer_initialize(
 /// # Safety
 /// The initialized mapping must remain accessible and its geometry immutable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_attach(
+pub unsafe extern "C" fn mr_shared_audio_buffer_attach(
     memory: *mut c_void,
     memory_size: usize,
 ) -> *mut SharedAudioBuffer {
@@ -245,7 +245,7 @@ pub unsafe extern "C" fn tn_shared_audio_buffer_attach(
 /// # Safety
 /// Non-null pointers must reference an initialized, attached, live mapping.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_is_lock_free(
+pub unsafe extern "C" fn mr_shared_audio_buffer_is_lock_free(
     buffer: *const SharedAudioBuffer,
 ) -> bool {
     // Rust's native AtomicU32/U64 implementations are lock-free on supported
@@ -256,19 +256,19 @@ pub unsafe extern "C" fn tn_shared_audio_buffer_is_lock_free(
 /// # Safety
 /// Non-null pointers must reference an initialized, attached, live mapping.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_capacity(buffer: *const SharedAudioBuffer) -> u32 {
+pub unsafe extern "C" fn mr_shared_audio_buffer_capacity(buffer: *const SharedAudioBuffer) -> u32 {
     unsafe { buffer.as_ref() }.map_or(0, |buffer| buffer.capacity_frames)
 }
 /// # Safety
 /// Non-null pointers must reference an initialized, attached, live mapping.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_channels(buffer: *const SharedAudioBuffer) -> u32 {
+pub unsafe extern "C" fn mr_shared_audio_buffer_channels(buffer: *const SharedAudioBuffer) -> u32 {
     unsafe { buffer.as_ref() }.map_or(0, |buffer| buffer.channels)
 }
 /// # Safety
 /// Non-null pointers must reference an initialized, attached, live mapping.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_set_producer_activity(
+pub unsafe extern "C" fn mr_shared_audio_buffer_set_producer_activity(
     buffer: *mut SharedAudioBuffer,
     activity: u32,
 ) {
@@ -279,7 +279,7 @@ pub unsafe extern "C" fn tn_shared_audio_buffer_set_producer_activity(
 /// # Safety
 /// Non-null pointers must reference an initialized, attached, live mapping.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_producer_activity(
+pub unsafe extern "C" fn mr_shared_audio_buffer_producer_activity(
     buffer: *const SharedAudioBuffer,
 ) -> u32 {
     unsafe { buffer.as_ref() }.map_or(0, |buffer| {
@@ -290,7 +290,7 @@ pub unsafe extern "C" fn tn_shared_audio_buffer_producer_activity(
 /// # Safety
 /// Non-null pointers must reference an initialized, attached, live mapping.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_published_through(
+pub unsafe extern "C" fn mr_shared_audio_buffer_published_through(
     buffer: *const SharedAudioBuffer,
 ) -> u64 {
     unsafe { buffer.as_ref() }.map_or(0, |buffer| buffer.publication().1)
@@ -300,7 +300,7 @@ pub unsafe extern "C" fn tn_shared_audio_buffer_published_through(
 /// # Safety
 /// Non-null pointers must reference an initialized, attached, live mapping.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_request_epoch(
+pub unsafe extern "C" fn mr_shared_audio_buffer_request_epoch(
     buffer: *mut SharedAudioBuffer,
 ) -> u64 {
     unsafe { buffer.as_ref() }.map_or(0, |buffer| {
@@ -310,7 +310,7 @@ pub unsafe extern "C" fn tn_shared_audio_buffer_request_epoch(
 /// # Safety
 /// Non-null pointers must reference an initialized, attached, live mapping.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_epoch_pending(
+pub unsafe extern "C" fn mr_shared_audio_buffer_epoch_pending(
     buffer: *const SharedAudioBuffer,
 ) -> bool {
     unsafe { buffer.as_ref() }
@@ -322,7 +322,7 @@ pub unsafe extern "C" fn tn_shared_audio_buffer_epoch_pending(
 /// # Safety
 /// Non-null pointers must reference an initialized, attached, live mapping.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_requires_replacement(
+pub unsafe extern "C" fn mr_shared_audio_buffer_requires_replacement(
     buffer: *const SharedAudioBuffer,
 ) -> bool {
     unsafe { buffer.as_ref() }.is_some_and(|buffer| {
@@ -340,7 +340,7 @@ pub unsafe extern "C" fn tn_shared_audio_buffer_requires_replacement(
 /// or that the predecessor writer process has exited. This must not be called
 /// against a live remote writer merely because a callback observed contention.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_retire_busy_producer_after_drain(
+pub unsafe extern "C" fn mr_shared_audio_buffer_retire_busy_producer_after_drain(
     buffer: *mut SharedAudioBuffer,
 ) -> bool {
     let Some(buffer) = (unsafe { buffer.as_ref() }) else {
@@ -358,7 +358,7 @@ pub unsafe extern "C" fn tn_shared_audio_buffer_retire_busy_producer_after_drain
 /// Non-null pointers must reference an initialized mapping. One PCM writer owns
 /// publication; epoch invalidation may race readers and control-thread requests.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_try_begin_epoch(
+pub unsafe extern "C" fn mr_shared_audio_buffer_try_begin_epoch(
     buffer: *mut SharedAudioBuffer,
 ) -> u64 {
     let Some(buffer) = (unsafe { buffer.as_ref() }) else {
@@ -402,7 +402,7 @@ pub unsafe extern "C" fn tn_shared_audio_buffer_try_begin_epoch(
 /// this call; the non-null source must contain `frame_count * channels` samples
 /// disjoint from the shared mapping and remain readable throughout the call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_write(
+pub unsafe extern "C" fn mr_shared_audio_buffer_write(
     buffer: *mut SharedAudioBuffer,
     expected_epoch: u64,
     start_frame: u64,
@@ -469,7 +469,7 @@ pub unsafe extern "C" fn tn_shared_audio_buffer_write(
 /// hold `frame_count * channels` writable samples disjoint from the mapping and
 /// from other concurrent output buffers. Invalid pointer/range requests do no I/O.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_read(
+pub unsafe extern "C" fn mr_shared_audio_buffer_read(
     buffer: *mut SharedAudioBuffer,
     start_frame: u64,
     samples: *mut f32,
@@ -535,7 +535,7 @@ pub unsafe extern "C" fn tn_shared_audio_buffer_read(
 /// # Safety
 /// Non-null pointers must reference an initialized, attached, live mapping.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_shared_audio_buffer_stats(
+pub unsafe extern "C" fn mr_shared_audio_buffer_stats(
     buffer: *const SharedAudioBuffer,
 ) -> SharedAudioBufferStats {
     let Some(buffer) = (unsafe { buffer.as_ref() }) else {

@@ -35,7 +35,7 @@ impl VirtualEndpointBackend for RecordingEndpoint {
 #[test]
 fn virtual_gain_survives_disk_restart_and_does_not_change_prepared_device_specs() {
     use std::sync::atomic::Ordering;
-    let fixture = tonenari_test_support::FixtureDir::new("source-gain").unwrap();
+    let fixture = mixrelay_test_support::FixtureDir::new("source-gain").unwrap();
     let path = fixture.join("graphs.json");
     let initial = default_duplex_document(1, None);
     let NodeConfig::VirtualEndpoint(config) = &initial.nodes[0].config else {

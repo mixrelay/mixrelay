@@ -13,7 +13,7 @@ foreach ($line in Get-Content -LiteralPath $Manifest) {
     $expected = $Matches[1]
     $relative = $Matches[2]
     if ($relative.StartsWith('/') -or $relative.Split('/') -contains '..') { throw 'Source path escapes workspace' }
-    $actual = (Get-FileHash -LiteralPath (Join-Path 'C:\ToneNariLab\source' $relative) -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actual = (Get-FileHash -LiteralPath (Join-Path 'C:\MixRelayLab\source' $relative) -Algorithm SHA256).Hash.ToLowerInvariant()
     $result += [PSCustomObject]@{path=$relative; sha256=$actual; matches=($actual -eq $expected)}
 }
 $result | ConvertTo-Json | Set-Content -LiteralPath $Output -Encoding utf8

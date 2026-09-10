@@ -8,9 +8,9 @@ use std::{
     time::Duration,
 };
 
-use tonenari_audio_graph::NodeId;
-use tonenari_control_protocol::ProtocolError;
-use tonenari_processor_host::ProcessorEditorCloseObservation;
+use mixrelay_audio_graph::NodeId;
+use mixrelay_control_protocol::ProtocolError;
+use mixrelay_processor_host::ProcessorEditorCloseObservation;
 
 use crate::graph_composition::runtime_node_id;
 use crate::{EngineGraphController, NodeConfig};
@@ -62,7 +62,7 @@ impl EngineGraphController {
         let (stop, receive) = mpsc::channel();
         let weak = Arc::downgrade(self);
         let thread = thread::Builder::new()
-            .name("tonenari-control-maintenance".into())
+            .name("mixrelay-control-maintenance".into())
             .spawn(move || {
                 let mut ledger = CloseLedger::default();
                 while matches!(
@@ -177,9 +177,9 @@ mod tests {
     #[test]
     fn monitor_joins_and_releases_its_controller_without_a_desktop_client() {
         let controller = Arc::new(EngineGraphController::new(
-            Arc::new(tonenari_audio_engine::ProcessorExchange::new(1)),
+            Arc::new(mixrelay_audio_engine::ProcessorExchange::new(1)),
             "endpoint",
-            tonenari_audio_graph::RenderFormat {
+            mixrelay_audio_graph::RenderFormat {
                 sample_rate: 48_000,
                 block_frames: 128,
             },

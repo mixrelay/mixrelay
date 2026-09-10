@@ -42,15 +42,15 @@ cpSync(join(reference,'LICENSE'), join(destination,'LICENSE'));
 cpSync(join(repo,'scripts/lab/sysvad-build.props'), join(destination,'Directory.Build.props'));
 const base = join(destination,'audio/sysvad');
 cpSync(join(repo,'native/windows/virtual-audio-driver/include'), join(base,'include'), {recursive:true});
-cpSync(join(repo,'native/windows/virtual-audio-driver/src/TnTransport.cpp'), join(base,'TnTransport.cpp'));
-let transportHeader = readFileSync(join(repo,'native/windows/virtual-audio-driver/src/TnTransport.h'),'utf8');
-writeFileSync(join(base,'TnTransport.h'),transportHeader.replaceAll('../include/','include/'));
-for (const file of ['TnBridge.cpp','TnBridge.h','TnBridgeDiagnostics.h']) cpSync(join(repo,'native/windows/sysvad-bridge',file),join(base,file));
-// This relative include differs only because TnTransport.cpp now sits at sysvad/.
-const transport = readFileSync(join(base,'TnTransport.cpp'),'utf8');
-writeFileSync(join(base,'TnTransport.cpp'),transport
-  .replace('"ToneNariRing.h"','"include/ToneNariRing.h"')
-  .replace('"../include/ToneNariRatePolicy.h"','"include/ToneNariRatePolicy.h"'));
+cpSync(join(repo,'native/windows/virtual-audio-driver/src/MrTransport.cpp'), join(base,'MrTransport.cpp'));
+let transportHeader = readFileSync(join(repo,'native/windows/virtual-audio-driver/src/MrTransport.h'),'utf8');
+writeFileSync(join(base,'MrTransport.h'),transportHeader.replaceAll('../include/','include/'));
+for (const file of ['MrBridge.cpp','MrBridge.h','MrBridgeDiagnostics.h']) cpSync(join(repo,'native/windows/sysvad-bridge',file),join(base,file));
+// This relative include differs only because MrTransport.cpp now sits at sysvad/.
+const transport = readFileSync(join(base,'MrTransport.cpp'),'utf8');
+writeFileSync(join(base,'MrTransport.cpp'),transport
+  .replace('"MixRelayRing.h"','"include/MixRelayRing.h"')
+  .replace('"../include/MixRelayRatePolicy.h"','"include/MixRelayRatePolicy.h"'));
 function once(text, from, to) {
   if (text.split(from).length !== 2) throw Error(`Overlay anchor not unique: ${from}`);
   return text.replace(from,to);
@@ -62,75 +62,75 @@ function edit(file, fn, encoding='utf8') {
 edit('adapter.cpp', s=>{
   // Keep PUT_GUIDS_HERE before PortCls headers: moving this include to the top
   // suppresses upstream GUID definitions and breaks native linking.
-  s = once(s,'#include "minipairs.h"','#include "minipairs.h"\n#include "TnBridge.h"');
+  s = once(s,'#include "minipairs.h"','#include "minipairs.h"\n#include "MrBridge.h"');
   s = once(s,'    ReleaseRegistryStringBuffer();\n\n    if (DriverObject == NULL)',
-    '    TnBridgeShutdown();\n    ReleaseRegistryStringBuffer();\n\n    if (DriverObject == NULL)');
+    '    MrBridgeShutdown();\n    ReleaseRegistryStringBuffer();\n\n    if (DriverObject == NULL)');
   s = once(s,'    DriverObject->DriverUnload = DriverUnload;',
-    '    DriverObject->DriverUnload = DriverUnload;\n    ntStatus = TnBridgeInitialize(DriverObject);\n    if (!NT_SUCCESS(ntStatus)) goto Done;');
-  s = once(s,'    return ntStatus;\n} // StartDevice','    if (NT_SUCCESS(ntStatus)) TnTransportSetOnline(true);\n    return ntStatus;\n} // StartDevice');
+    '    DriverObject->DriverUnload = DriverUnload;\n    ntStatus = MrBridgeInitialize(DriverObject);\n    if (!NT_SUCCESS(ntStatus)) goto Done;');
+  s = once(s,'    return ntStatus;\n} // StartDevice','    if (NT_SUCCESS(ntStatus)) MrTransportSetOnline(true);\n    return ntStatus;\n} // StartDevice');
   return s;
 });
 edit('EndpointsCommon/minwavertstream.h',s=>once(s,'protected:\n    PPORTWAVERTSTREAM',
-  'protected:\n    bool m_tnBridge = false;\n    volatile LONG m_tnProtected = 0;\n    tonenari::PcmFormat m_tnFormat{};\n    PPORTWAVERTSTREAM'));
+  'protected:\n    bool m_mrBridge = false;\n    volatile LONG m_mrProtected = 0;\n    mixrelay::PcmFormat m_mrFormat{};\n    PPORTWAVERTSTREAM'));
 // The header needs the format declaration independently of include order.
-edit('EndpointsCommon/minwavertstream.h',s=>'#include "TnBridge.h"\n'+s);
+edit('EndpointsCommon/minwavertstream.h',s=>'#include "MrBridge.h"\n'+s);
 edit('EndpointsCommon/minwavertstream.cpp',s=>{
   s = once(s,'    KeFlushQueuedDpcs();\n\n#ifdef SYSVAD_BTH_BYPASS',
-    '    KeFlushQueuedDpcs();\n    if (m_tnBridge) { TnTransportReleaseStream(m_bCapture); m_tnBridge = false; }\n\n#ifdef SYSVAD_BTH_BYPASS');
+    '    KeFlushQueuedDpcs();\n    if (m_mrBridge) { MrTransportReleaseStream(m_bCapture); m_mrBridge = false; }\n\n#ifdef SYSVAD_BTH_BYPASS');
   s = once(s,'    RtlCopyMemory(m_pWfExt, pWfEx, sizeof(WAVEFORMATEX) + pWfEx->cbSize);',
     `    RtlCopyMemory(m_pWfExt, pWfEx, sizeof(WAVEFORMATEX) + pWfEx->cbSize);
     // Route only the system pins of the named diagnostic pair. Offload, loopback
     // and keyword pins retain their upstream behavior and cannot share this ring.
     if ((m_pMiniport->m_DeviceType == eSpeakerDevice && m_pMiniport->IsSystemRenderPin(Pin_)) ||
         (m_pMiniport->m_DeviceType == eMicArrayDevice1 && m_pMiniport->IsSystemCapturePin(Pin_))) {
-        ntStatus = TnBridgeReserve(m_bCapture, pWfEx, &m_tnFormat);
+        ntStatus = MrBridgeReserve(m_bCapture, pWfEx, &m_mrFormat);
         if (!NT_SUCCESS(ntStatus)) return ntStatus;
-        m_tnBridge = true;
+        m_mrBridge = true;
     }`);
-  s = s.replaceAll('!g_DoNotCreateDataFiles','(!m_tnBridge && !g_DoNotCreateDataFiles)');
+  s = s.replaceAll('!g_DoNotCreateDataFiles','(!m_mrBridge && !g_DoNotCreateDataFiles)');
   s = once(s,'    if (m_bCapture)\n    {\n        ReadRegistrySettings();',
-    '    if (m_bCapture && !m_tnBridge)\n    {\n        ReadRegistrySettings();');
-  s = once(s,'        if ((!m_tnBridge && !g_DoNotCreateDataFiles))\n        {\n            // Read from buffer',
-    '        if (m_tnBridge || !g_DoNotCreateDataFiles)\n        {\n            // Read from buffer');
+    '    if (m_bCapture && !m_mrBridge)\n    {\n        ReadRegistrySettings();');
+  s = once(s,'        if ((!m_mrBridge && !g_DoNotCreateDataFiles))\n        {\n            // Read from buffer',
+    '        if (m_mrBridge || !g_DoNotCreateDataFiles)\n        {\n            // Read from buffer');
   s = once(s,'    // Increment presentation position even after last buffer is rendered.',
     `    // Preserve fractional frame bytes across 44.1 kHz updates; never split a
     // sample/container at this transport boundary.
-    if (m_tnBridge) {
+    if (m_mrBridge) {
         const ULONG remainder = ByteDisplacement % m_pWfExt->Format.nBlockAlign;
         ByteDisplacement -= remainder;
         m_byteDisplacementCarryForward += remainder * 1000;
     }
     // Increment presentation position even after last buffer is rendered.`);
   s = once(s,'            m_ToneGenerator.GenerateSine(m_pDmaBuffer + bufferOffset, runWrite);',
-    `        if (m_tnBridge) TnTransportPcmNative(true, m_pDmaBuffer + bufferOffset,
+    `        if (m_mrBridge) MrTransportPcmNative(true, m_pDmaBuffer + bufferOffset,
             runWrite / m_pWfExt->Format.nBlockAlign, m_pWfExt->Format.nChannels,
-            m_pWfExt->Format.nSamplesPerSec, m_tnFormat);
+            m_pWfExt->Format.nSamplesPerSec, m_mrFormat);
         else m_ToneGenerator.GenerateSine(m_pDmaBuffer + bufferOffset, runWrite);`);
   s = once(s,'        m_SaveData.WriteData(m_pDmaBuffer + bufferOffset, runWrite);',
-    `        if (m_tnBridge && !InterlockedCompareExchange(&m_tnProtected, 0, 0)) TnTransportPcmNative(false, m_pDmaBuffer + bufferOffset,
+    `        if (m_mrBridge && !InterlockedCompareExchange(&m_mrProtected, 0, 0)) MrTransportPcmNative(false, m_pDmaBuffer + bufferOffset,
             runWrite / m_pWfExt->Format.nBlockAlign, m_pWfExt->Format.nChannels,
-            m_pWfExt->Format.nSamplesPerSec, m_tnFormat);
-        else if (!m_tnBridge) m_SaveData.WriteData(m_pDmaBuffer + bufferOffset, runWrite);`);
+            m_pWfExt->Format.nSamplesPerSec, m_mrFormat);
+        else if (!m_mrBridge) m_SaveData.WriteData(m_pDmaBuffer + bufferOffset, runWrite);`);
   s = once(s,'    DPF_ENTER(("[CMiniportWaveRT::SetContentId]"));',
     `    DPF_ENTER(("[CMiniportWaveRT::SetContentId]"));
     // Fail closed: a shared diagnostic map is not a protected audio path.
-    if (m_tnBridge) {
-        InterlockedExchange(&m_tnProtected, drmRights->CopyProtect ? 1 : 0);
+    if (m_mrBridge) {
+        InterlockedExchange(&m_mrProtected, drmRights->CopyProtect ? 1 : 0);
         if (drmRights->CopyProtect) return STATUS_NOT_SUPPORTED;
     }`);
   return s;
 });
 edit('TabletAudioSample/TabletAudioSample.vcxproj',s=>{
   s = once(s,'    <ClCompile Include="..\\adapter.cpp" />',
-    '    <ClCompile Include="..\\adapter.cpp" />\n    <ClCompile Include="..\\TnBridge.cpp" />\n    <ClCompile Include="..\\TnTransport.cpp" />');
+    '    <ClCompile Include="..\\adapter.cpp" />\n    <ClCompile Include="..\\MrBridge.cpp" />\n    <ClCompile Include="..\\MrTransport.cpp" />');
   // The owner-exit callback requires FORCE_INTEGRITY; test signing alone is not
   // sufficient for PsSetCreateProcessNotifyRoutineEx registration.
   return once(s,'</Project>',`  <ItemDefinitionGroup><Link><AdditionalDependencies>wdmsec.lib;%(AdditionalDependencies)</AdditionalDependencies><AdditionalOptions>/INTEGRITYCHECK %(AdditionalOptions)</AdditionalOptions></Link></ItemDefinitionGroup>\n</Project>`);
 });
 edit('TabletAudioSample/ComponentizedAudioSample.inx',s=>s
-  .replaceAll('sysvad_ComponentizedAudioSample','tonenari_SysvadBridge')
-  .replaceAll('sysvad_componentizedaudiosample','tonenari_sysvadbridge')
-  .replaceAll('Virtual Audio Device (WDM) - Tablet Sample','ToneNari SysVAD Bridge LAB'), 'utf16le');
+  .replaceAll('sysvad_ComponentizedAudioSample','mixrelay_SysvadBridge')
+  .replaceAll('sysvad_componentizedaudiosample','mixrelay_sysvadbridge')
+  .replaceAll('Virtual Audio Device (WDM) - Tablet Sample','MixRelay SysVAD Bridge LAB'), 'utf16le');
 // One stream per direction is the v2 transport's real capacity. PortCls must
 // report that capacity too, rather than promising the sample's 6/4 streams.
 edit('EndpointsCommon/speakerwavtable.h',s=>once(s,
@@ -145,25 +145,25 @@ if (profile) {
   edit('TabletAudioSample/minipairs.h', profilePairs);
   // A distinct build artifact; never change or install over the accepted LAB pair
   // merely because a profile compiles. PnP/format/PCM qualification comes next.
-  writeFileSync(join(destination, 'TONENARI-ENDPOINT-PROFILE.json'), JSON.stringify(profile, null, 2) + '\n');
+  writeFileSync(join(destination, 'MIXRELAY-ENDPOINT-PROFILE.json'), JSON.stringify(profile, null, 2) + '\n');
 }
 if (ratePolicy) {
   // Distinct artifact opt-in; the accepted LAB source/install remains unchanged.
-  edit('TnBridge.h', s => '#define TONENARI_SYSVAD_RATE_POLICY 1\n' + s);
+  edit('MrBridge.h', s => '#define MIXRELAY_SYSVAD_RATE_POLICY 1\n' + s);
   edit('EndpointsCommon/minwavert.h', ratePolicyHeader);
   edit('EndpointsCommon/minwavert.cpp', ratePolicyMiniport);
   edit('EndpointsCommon/speakerwavtable.h', ratePolicySpeaker);
   edit('EndpointsCommon/micarraywavtable.h', ratePolicyCapture);
   edit('EndpointsCommon/micarraywavtable.h', ratePolicyCaptureFormats);
-  cpSync(join(repo, 'native/windows/virtual-audio-driver/tests'), join(base, 'ToneNariTests'), { recursive: true });
+  cpSync(join(repo, 'native/windows/virtual-audio-driver/tests'), join(base, 'MixRelayTests'), { recursive: true });
   const probe = readFileSync(join(repo, 'native/windows/sysvad-bridge/rate-policy-probe.cpp'), 'utf8');
   writeFileSync(join(base, 'rate-policy-probe.cpp'), probe.replace('../virtual-audio-driver/include/', 'include/'));
-  writeFileSync(join(destination, 'TONENARI-RATE-POLICY.json'), JSON.stringify({
+  writeFileSync(join(destination, 'MIXRELAY-RATE-POLICY.json'), JSON.stringify({
     version: 1, pcmTransportVersion: 2, rates: [44100, 48000],
     nativeReadbackRequired: true, qualified: false,
   }, null, 2) + '\n');
 }
-writeFileSync(join(destination,'TONENARI-LAB-OVERLAY.md'),
+writeFileSync(join(destination,'MIXRELAY-LAB-OVERLAY.md'),
   'SysVAD diagnostic bridge, NOT a distribution package. Upstream MS-PL retained.\n'+
   (profile ? 'Profile selects only Speakers/system render and MicArray1/system capture; offload, loopback and keyword instances are disabled. Not runtime configuration or a shipping INF.\n' :
   'Only Speakers/system render and MicArray1/system capture are bridged; other endpoints remain sample behavior.\n')+

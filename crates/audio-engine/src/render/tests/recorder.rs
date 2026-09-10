@@ -1,5 +1,5 @@
 use super::*;
-use tonenari_audio_recorder::{Encoding, RecorderAction, RecorderRequest, RecorderState};
+use mixrelay_audio_recorder::{Encoding, RecorderAction, RecorderRequest, RecorderState};
 
 fn record_key() -> String {
     recording_session_key(&NodeId::from("record"), 2)
@@ -17,7 +17,7 @@ fn isolated_recorder(registry: &RecorderRegistry, channels: u16) -> BlockProcess
 
 #[test]
 fn channel_change_can_be_cancelled_then_committed_without_losing_previous_transport() {
-    let directory = tonenari_test_support::FixtureDir::new("recording-channels").unwrap();
+    let directory = mixrelay_test_support::FixtureDir::new("recording-channels").unwrap();
     let registry = RecorderRegistry::default();
     let mut previous = isolated_recorder(&registry, 2);
     let discarded = isolated_recorder(&registry, 8);
@@ -97,7 +97,7 @@ fn recorder_plan() -> Arc<RenderPlan> {
 
 #[test]
 fn mixed_sources_record_without_any_hardware_output() {
-    let directory = tonenari_test_support::FixtureDir::new("record-only-mix").unwrap();
+    let directory = mixrelay_test_support::FixtureDir::new("record-only-mix").unwrap();
     let path = directory.join("mix.wav");
     let execution = compile(
         vec![
@@ -150,7 +150,7 @@ fn mixed_sources_record_without_any_hardware_output() {
 
 #[test]
 fn recorder_captures_final_routing_without_native_sink_or_callback_allocation() {
-    let directory = tonenari_test_support::FixtureDir::new("render-recording").unwrap();
+    let directory = mixrelay_test_support::FixtureDir::new("render-recording").unwrap();
     let path = directory.join("take.wav");
     let registry = RecorderRegistry::default();
     let plan = recorder_plan();
@@ -200,7 +200,7 @@ fn recorder_captures_final_routing_without_native_sink_or_callback_allocation() 
 
 #[test]
 fn rebuild_and_pause_preserve_take_and_final_tap_removal_finalizes_it() {
-    let directory = tonenari_test_support::FixtureDir::new("recording-rebuild").unwrap();
+    let directory = mixrelay_test_support::FixtureDir::new("recording-rebuild").unwrap();
     let path = directory.join("take.wav");
     let registry = RecorderRegistry::default();
     let mut current = BlockProcessor::new(recorder_plan());

@@ -11,8 +11,8 @@ distributions, or Linux x86-64.
 - Ubuntu ARM64 VM `77F2F097-29B8-4836-80F6-358AE38A2316`, kernel
   `7.0.0-31-generic`, Cargo/Rust `1.96.0`, PipeWire development library `1.0.5`.
 - Commands run as existing `state303` UID 1000. Each run uses an exclusive
-  `/var/tmp/tonenari-integration-20260907-*` source directory and the existing
-  `/home/state303/tonenari/target` compilation cache.
+  `/var/tmp/mixrelay-integration-20260907-*` source directory and the existing
+  `/home/state303/mixrelay/target` compilation cache.
 - Existing guest source, user graphs, service configuration, audio defaults,
   devices, and other VMs were not changed. No engine service or audio fixture was
   launched. No packages were installed. Owned source archives and logs remain for
@@ -20,7 +20,7 @@ distributions, or Linux x86-64.
 - `scripts/lab/guest-job.sh` creates an exclusive job directory. Completion is
   determined by its `exit-code` file, not UTM's immediate command status.
 
-The checked commands are `cargo build --locked -p tonenari-engine-service`, then
+The checked commands are `cargo build --locked -p mixrelay-engine-service`, then
 `cargo test --locked` and `cargo clippy --locked` for the seven crates listed below.
 Tests select `--lib --bins`; Clippy selects `--lib --bins --tests -- -D warnings`.
 The exact runner and source archives are retained with the evidence.
@@ -41,13 +41,13 @@ passing integration run. The v2 source archive SHA-256 is
 
 | Crate | Passed tests |
 | --- | ---: |
-| `tonenari-audio-engine` | 19 |
-| `tonenari-audio-graph` | 15 |
-| `tonenari-audio-io` | 22 |
-| `tonenari-control-protocol` | 2 |
-| `tonenari-control-server` | 6 |
-| `tonenari-engine-service` | 37 library + 4 Linux adapter |
-| `tonenari-processor-host` | 12 |
+| `mixrelay-audio-engine` | 19 |
+| `mixrelay-audio-graph` | 15 |
+| `mixrelay-audio-io` | 22 |
+| `mixrelay-control-protocol` | 2 |
+| `mixrelay-control-server` | 6 |
+| `mixrelay-engine-service` | 37 library + 4 Linux adapter |
+| `mixrelay-processor-host` | 12 |
 | **Total** | **117 passed, 0 failed, 0 ignored** |
 
 The final run includes all nine graph catalog regressions, independent graph
@@ -69,7 +69,7 @@ No performance improvement is claimed. Build times use an existing cache, so the
 do not establish a before/after performance comparison.
 
 Evidence directory:
-`/Volumes/Linear 1/test/tonenari/evidence/native-device-parity-20260907/linux-integration`.
+`/Volumes/Linear 1/test/mixrelay/evidence/native-device-parity-20260907/linux-integration`.
 
 ## Follow-up: direct parameter durability
 
@@ -84,13 +84,13 @@ Completion was **2026-09-07 10:30:21 UTC**.
 
 | Crate | Passed tests |
 | --- | ---: |
-| `tonenari-audio-engine` | 19 |
-| `tonenari-audio-graph` | 15 |
-| `tonenari-audio-io` | 22 |
-| `tonenari-control-protocol` | 3 |
-| `tonenari-control-server` | 7 |
-| `tonenari-engine-service` | 41 library + 4 Linux adapter |
-| `tonenari-processor-host` | 12 |
+| `mixrelay-audio-engine` | 19 |
+| `mixrelay-audio-graph` | 15 |
+| `mixrelay-audio-io` | 22 |
+| `mixrelay-control-protocol` | 3 |
+| `mixrelay-control-server` | 7 |
+| `mixrelay-engine-service` | 41 library + 4 Linux adapter |
+| `mixrelay-processor-host` | 12 |
 | **Total** | **123 passed, 0 failed, 0 ignored** |
 
 The 13 catalog tests include accepted parameter edits surviving restart without
@@ -123,13 +123,13 @@ code is **0**. Completion was **2026-09-07 11:46:54 UTC**.
 
 | Crate | Passed tests |
 | --- | ---: |
-| `tonenari-audio-engine` | 21 |
-| `tonenari-audio-graph` | 17 |
-| `tonenari-audio-io` | 22 |
-| `tonenari-control-protocol` | 4 |
-| `tonenari-control-server` | 8 |
-| `tonenari-engine-service` | 48 library + 4 Linux adapter |
-| `tonenari-processor-host` | 12 |
+| `mixrelay-audio-engine` | 21 |
+| `mixrelay-audio-graph` | 17 |
+| `mixrelay-audio-io` | 22 |
+| `mixrelay-control-protocol` | 4 |
+| `mixrelay-control-server` | 8 |
+| `mixrelay-engine-service` | 48 library + 4 Linux adapter |
+| `mixrelay-processor-host` | 12 |
 | **Total** | **136 passed, 0 failed, 0 ignored** |
 
 Layout coverage includes independent layout revisions, inactive graph layout

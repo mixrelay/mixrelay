@@ -1,5 +1,5 @@
 [package]
-name = "tonenari-hal-bundle"
+name = "mixrelay-hal-bundle"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -8,7 +8,7 @@ import type {
   RuntimeGraphDocument,
 } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
-import { ToneNariProvider } from '../../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { AudioSessionSettings } from './AudioSessionSettings';
 
 const session: AudioSessionStatus = {
@@ -77,7 +77,7 @@ function view(
 ) {
   return (
     <I18nextProvider i18n={i18n}>
-      <ToneNariProvider>
+      <MixRelayProvider>
         <AudioSessionSettings
           disabled={disabled}
           controlPort={controlPort}
@@ -85,7 +85,7 @@ function view(
           onApplied={onApplied}
           onBusyChange={onBusyChange}
         />
-      </ToneNariProvider>
+      </MixRelayProvider>
     </I18nextProvider>
   );
 }
@@ -100,7 +100,7 @@ it('stacks native and request errors and allows retry of the same single support
   controlPort.reconfigureSession.mockRejectedValueOnce(new Error('Failed'));
   render(
     <I18nextProvider i18n={i18n}>
-      <ToneNariProvider>
+      <MixRelayProvider>
         <AudioSessionSettings
           controlPort={controlPort}
           session={{ ...session, issue: 'stored_format_unavailable' }}
@@ -108,7 +108,7 @@ it('stacks native and request errors and allows retry of the same single support
           onApplied={vi.fn()}
           onBusyChange={vi.fn()}
         />
-      </ToneNariProvider>
+      </MixRelayProvider>
     </I18nextProvider>,
   );
   chooseBuffer();

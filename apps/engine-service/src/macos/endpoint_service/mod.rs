@@ -16,10 +16,10 @@ pub use api::{
     recover_capture_epoch, set_device_sample_rate, snapshot, touch_audio, write_capture,
 };
 use dispatch::Dispatch;
+pub use mixrelay_macos_transport::source_registry::SourceClock;
 use runtime::Runtime;
 use source::SourceRegistry;
 use std::sync::{OnceLock, atomic::AtomicBool};
-pub use tonenari_macos_transport::source_registry::SourceClock;
 pub use xpc::driver_connected;
 
 static REGISTRY: OnceLock<EndpointRegistry> = OnceLock::new();
@@ -36,7 +36,7 @@ struct Service {
 /// Starts XPC with an empty endpoint inventory. Graph references create devices;
 /// startup performs no Core Audio lookup and never manufactures a default device.
 #[unsafe(no_mangle)]
-pub extern "C" fn tn_engine_service_start() -> i32 {
+pub extern "C" fn mr_engine_service_start() -> i32 {
     let _start = START_LOCK.lock();
     if SERVICE.get().is_none() {
         let registry = REGISTRY.get_or_init(EndpointRegistry::new);
@@ -70,12 +70,12 @@ pub extern "C" fn tn_engine_service_start() -> i32 {
 /// # Safety
 /// Output points to writable source clock storage.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_engine_service_source_clock(
+pub unsafe extern "C" fn mr_engine_service_source_clock(
     token: u64,
     output: *mut SourceClock,
 ) -> bool {
     SERVICE.get().is_some_and(|service| unsafe {
-        source::tn_engine_source_registry_clock(
+        source::mr_engine_source_registry_clock(
             std::ptr::from_ref(&service.sources).cast_mut(),
             token,
             output,
@@ -83,9 +83,9 @@ pub unsafe extern "C" fn tn_engine_service_source_clock(
     })
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn tn_engine_service_set_source_clock_master(token: u64, master: bool) -> bool {
+pub extern "C" fn mr_engine_service_set_source_clock_master(token: u64, master: bool) -> bool {
     SERVICE.get().is_some_and(|service| unsafe {
-        source::tn_engine_source_registry_set_clock_master(
+        source::mr_engine_source_registry_set_clock_master(
             std::ptr::from_ref(&service.sources).cast_mut(),
             token,
             master,
@@ -95,7 +95,7 @@ pub extern "C" fn tn_engine_service_set_source_clock_master(token: u64, master: 
 /// # Safety
 /// Samples has frames*channels writable floats.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_engine_service_read_source_clocked(
+pub unsafe extern "C" fn mr_engine_service_read_source_clocked(
     token: u64,
     samples: *mut f32,
     frames: u32,
@@ -103,7 +103,7 @@ pub unsafe extern "C" fn tn_engine_service_read_source_clocked(
     rate: u32,
 ) -> u32 {
     SERVICE.get().map_or(0, |service| unsafe {
-        source::tn_engine_source_registry_read_clocked(
+        source::mr_engine_source_registry_read_clocked(
             std::ptr::from_ref(&service.sources).cast_mut(),
             token,
             samples,

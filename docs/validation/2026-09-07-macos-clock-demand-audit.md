@@ -18,7 +18,7 @@ tests and platform qualification records for newer behavior.
   128, `running`, `engine_timer`, `clock_not_synchronized`, no overruns. Underruns
   increased **553,645 → 554,774**: +1,129 over a 3.026-second request interval,
   approximately **373/s**. The nominal DSP block rate is **375/s**.
-- Read-only CoreAudio properties for `io.tonenari.audio.endpoint.default`
+- Read-only CoreAudio properties for `io.mixrelay.audio.endpoint.default`
   (AudioDeviceID 651): alive=1, running=0, runningSomewhere=0, bufferFrames=512.
   `AudioDeviceGetCurrentTime` returned `kAudioHardwareNotRunningError` (`'stop'`,
   1937010544). There was no running HAL clock to follow at this observation.
@@ -46,7 +46,7 @@ active-stream deadline misses from these inactive-source invocations.
 
 ## Available clock evidence versus missing demand
 
-The HAL already has a native sample/host-time relationship: `TNDeviceClock`
+The HAL already has a native sample/host-time relationship: `MRDeviceClock`
 anchors to `mach_absolute_time` on the first StartIO, publishes seed-tagged zero
 timestamps while running, and stops on the final StopIO. StartIO also invalidates
 the shared render/capture epochs. `DoIOOperation` receives sample/host timestamps,
@@ -89,8 +89,8 @@ incrementing a counter:
 | Route demand | Clock source and current gap |
 | --- | --- |
 | Active virtual render or capture client | HAL sample/host clock plus both directional watermarks; capture demand is currently missing. |
-| Physical device input/output without active HAL | The owning hardware IOProc clock; `TNDeviceIO.c:71` currently discards native timestamps. HAL inactivity must not suspend this graph. |
-| App capture without active HAL/hardware | Tap/native capture clock; `TNProcessTap.m:393–396` discards timestamps and source transport currently supplies a sequential frame counter, not a host-time mapping. |
+| Physical device input/output without active HAL | The owning hardware IOProc clock; `MRDeviceIO.c:71` currently discards native timestamps. HAL inactivity must not suspend this graph. |
+| App capture without active HAL/hardware | Tap/native capture clock; `MRProcessTap.m:393–396` discards timestamps and source transport currently supplies a sequential frame counter, not a host-time mapping. |
 | No active native demand | Explicit idle while retaining graph/control responsiveness, not a falsely synchronized running clock. |
 
 Multiple independent active clocks still require a declared master plus drift/SRC

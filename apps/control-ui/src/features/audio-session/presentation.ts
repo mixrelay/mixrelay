@@ -1,5 +1,5 @@
 import type { TFunction } from 'i18next';
-import type { AudioSessionStatus, ToneNariStatus } from '../../core/control-port/types';
+import type { AudioSessionStatus, MixRelayStatus } from '../../core/control-port/types';
 import type { StatusTone } from '../../core/ui/StatusBadge';
 import { getDriverPresentation } from '../driver-status/presentation';
 
@@ -33,7 +33,7 @@ export function getAudioSessionPresentation(
   };
 }
 
-export function getEnginePresentation(status: ToneNariStatus | null, t: TFunction) {
+export function getEnginePresentation(status: MixRelayStatus | null, t: TFunction) {
   const session = getAudioSessionPresentation(status?.audioSession, t);
   if (!status || session.tone === 'critical') return session;
   if (status.driverState !== 'ready') {

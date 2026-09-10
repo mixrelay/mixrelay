@@ -1,10 +1,10 @@
 //! Exact own-device Core Audio property access; no default selection or graph clock policy.
 use crate::endpoint_registry::EndpointId;
+use mixrelay_macos_transport::endpoint_identity::endpoint_uid;
 use std::{
     ffi::{CString, c_void},
     ptr,
 };
-use tonenari_macos_transport::endpoint_identity::endpoint_uid;
 
 #[repr(C)]
 struct Address {
@@ -96,13 +96,13 @@ pub(super) fn rate(id: EndpointId) -> Option<u32> {
     if result != 0 || size != 8 || !rate.is_finite() {
         return None;
     }
-    tonenari_audio_io::formats::SAMPLE_RATES
+    mixrelay_audio_io::formats::SAMPLE_RATES
         .iter()
         .copied()
         .find(|value| f64::from(*value).to_bits() == rate.to_bits())
 }
 pub(super) fn supports(id: EndpointId, rate: u32) -> bool {
-    if !tonenari_audio_io::formats::SAMPLE_RATES.contains(&rate) {
+    if !mixrelay_audio_io::formats::SAMPLE_RATES.contains(&rate) {
         return false;
     }
     let Some(object) = device(id) else {

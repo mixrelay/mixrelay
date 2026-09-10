@@ -1,7 +1,7 @@
 //! Native resource identity extracted from a composed graph on the control thread.
 //! This owns descriptions only, never streams. Gain stays in DSP, so changing it
 //! cannot invalidate a native stream cache. Adapters retain format and OS policy.
-use tonenari_audio_graph::{
+use mixrelay_audio_graph::{
     ApplicationCaptureRequest, AudioDeviceInputConfig, AudioDeviceOutputConfig, GraphDocument,
     NodeConfig, VirtualEndpointSpec,
 };

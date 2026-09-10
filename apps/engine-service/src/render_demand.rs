@@ -2,7 +2,7 @@
 //! count is in negotiated stream frames, NOT `IAudioClock`'s opaque tick units.
 //! A wakeup only prompts a recheck: it never authorizes timer-generated audio.
 
-use tonenari_audio_io::{
+use mixrelay_audio_io::{
     process::{ClockDomain, ProcessCycle},
     session::ClockAuthority,
 };
@@ -66,7 +66,7 @@ impl RenderDemandCursor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tonenari_audio_io::{
+    use mixrelay_audio_io::{
         process::{CycleBlocks, CycleTracker},
         session::CURRENT_TIMER_FORMAT,
     };

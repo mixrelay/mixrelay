@@ -105,7 +105,7 @@ int wmain(int argc,wchar_t** argv) {
             Probe(enumerator.Get(),argv[1],eRender);
             Probe(enumerator.Get(),argv[2],eCapture);
         }
-        std::puts("PASS: 3 render/capture lifecycle cycles. Capture is SysVAD's test tone, NOT ToneNari routed audio.");
+        std::puts("PASS: 3 render/capture lifecycle cycles. Capture is SysVAD's test tone, NOT MixRelay routed audio.");
         return 0;
     } catch (HRESULT status) { std::fprintf(stderr,"WASAPI failure 0x%08lX\n",static_cast<unsigned long>(status)); return 1; }
 }

@@ -28,7 +28,7 @@ user graph, installed plug-in, service, or VM setting was changed by these check
 
 ## Focused evidence (macOS)
 
-`cargo test -p tonenari-processor-host --lib`: **13 passed**, including:
+`cargo test -p mixrelay-processor-host --lib`: **13 passed**, including:
 
 - ID 7/9 preservation and same-ID last-wins;
 - 4096-slot capacity rejection without losing accepted values;

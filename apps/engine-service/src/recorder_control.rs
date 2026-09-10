@@ -1,5 +1,5 @@
-use tonenari_audio_graph::NodeConfig;
-use tonenari_control_protocol::{ErrorCode, ProtocolError};
+use mixrelay_audio_graph::NodeConfig;
+use mixrelay_control_protocol::{ErrorCode, ProtocolError};
 
 use super::{EngineGraphController, graph_composition};
 
@@ -33,7 +33,7 @@ impl EngineGraphController {
                 _ => None,
             })
             .ok_or_else(|| recorder_error("recorder node not found".to_owned()))?;
-        Ok(tonenari_audio_engine::recording_session_key(
+        Ok(mixrelay_audio_engine::recording_session_key(
             &graph_composition::runtime_node_id(graph_id, id),
             channels,
         ))
@@ -41,7 +41,7 @@ impl EngineGraphController {
 
     pub(super) fn validate_recorder_channel_change(
         &self,
-        proposed: &tonenari_audio_graph::GraphDocument,
+        proposed: &mixrelay_audio_graph::GraphDocument,
     ) -> Result<(), ProtocolError> {
         let graph_id = self.view_graph_id();
         for previous in &self.graph.read().nodes {
@@ -55,14 +55,14 @@ impl EngineGraphController {
             if !changed {
                 continue;
             }
-            let id = tonenari_audio_engine::recording_session_key(
+            let id = mixrelay_audio_engine::recording_session_key(
                 &graph_composition::runtime_node_id(&graph_id, &previous.id),
                 channels,
             );
             if matches!(
                 self.recorders.status(&id).state,
-                tonenari_audio_recorder::RecorderState::Recording
-                    | tonenari_audio_recorder::RecorderState::Paused
+                mixrelay_audio_recorder::RecorderState::Recording
+                    | mixrelay_audio_recorder::RecorderState::Paused
             ) {
                 return Err(recorder_error(
                     "stop recording before changing channels".into(),
@@ -76,10 +76,10 @@ impl EngineGraphController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tonenari_audio_graph::{GraphDocument, NodeId, NodeSpec};
-    use tonenari_audio_recorder::{RecorderAction, RecorderRequest, RecorderState};
-    use tonenari_control_protocol::{GraphCatalogAction, GraphCatalogRequest};
-    use tonenari_control_server::ControlBackend;
+    use mixrelay_audio_graph::{GraphDocument, NodeId, NodeSpec};
+    use mixrelay_audio_recorder::{RecorderAction, RecorderRequest, RecorderState};
+    use mixrelay_control_protocol::{GraphCatalogAction, GraphCatalogRequest};
+    use mixrelay_control_server::ControlBackend;
 
     fn command(action: RecorderAction, path: Option<String>) -> RecorderRequest {
         RecorderRequest {
@@ -92,7 +92,7 @@ mod tests {
 
     #[test]
     fn channels_can_change_only_after_the_take_is_stopped() {
-        let directory = tonenari_test_support::FixtureDir::new("recorder-channel-control").unwrap();
+        let directory = mixrelay_test_support::FixtureDir::new("recorder-channel-control").unwrap();
         let document = GraphDocument::new(
             1,
             vec![NodeSpec {
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn controls_target_original_graph_even_after_another_graph_is_selected() {
-        let directory = tonenari_test_support::FixtureDir::new("recorder-control").unwrap();
+        let directory = mixrelay_test_support::FixtureDir::new("recorder-control").unwrap();
         let document = GraphDocument::new(
             1,
             vec![NodeSpec {
@@ -154,7 +154,7 @@ mod tests {
         let engine = crate::endpoint_settings_tests::controller(document)
             .with_graph_catalog_path(directory.join("graphs.json"));
         let original = engine.graph_catalog().unwrap();
-        let id = tonenari_audio_engine::recording_session_key(
+        let id = mixrelay_audio_engine::recording_session_key(
             &graph_composition::runtime_node_id(&original.active_id, &NodeId::from("record")),
             2,
         );

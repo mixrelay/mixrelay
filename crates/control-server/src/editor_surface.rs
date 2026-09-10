@@ -5,7 +5,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use tonenari_control_protocol::{ErrorCode, ProcessorEditorInput, ProtocolError};
+use mixrelay_control_protocol::{ErrorCode, ProcessorEditorInput, ProtocolError};
 
 pub(super) async fn frame(
     State(state): State<ControlState>,

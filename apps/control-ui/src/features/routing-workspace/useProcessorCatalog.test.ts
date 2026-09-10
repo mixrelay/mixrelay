@@ -11,7 +11,7 @@ const loaded: ExternalProcessorCatalog = {
     {
       typeId: 'vst3:fixture',
       displayName: 'Fixture',
-      vendor: 'ToneNari',
+      vendor: 'MixRelay',
       format: 'vst3',
       version: '1',
       inputChannels: 2,
@@ -169,18 +169,18 @@ describe('processor catalog lifecycle and stored paths', () => {
     await settle();
     unmount();
     await act(async () => dialog.resolve('/stale'));
-    expect(window.localStorage.getItem('tonenari.processorPaths.v1')).toBeNull();
+    expect(window.localStorage.getItem('mixrelay.processorPaths.v1')).toBeNull();
     expect(second.rescanProcessors).not.toHaveBeenCalled();
   });
 
   it('reports damaged saved paths and recovers only after a valid explicit retry', async () => {
-    window.localStorage.setItem('tonenari.processorPaths.v1', '{broken');
+    window.localStorage.setItem('mixrelay.processorPaths.v1', '{broken');
     const source = port();
     const { result } = renderHook(() => useProcessorCatalog(source));
     await settle();
     expect(result.current.failure).toBe('paths');
     expect(source.getProcessors).not.toHaveBeenCalled();
-    window.localStorage.setItem('tonenari.processorPaths.v1', '[]');
+    window.localStorage.setItem('mixrelay.processorPaths.v1', '[]');
     act(() => result.current.retry());
     await settle();
     expect(result.current.failure).toBeNull();

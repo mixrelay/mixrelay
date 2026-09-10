@@ -1,3 +1,21 @@
+use mixrelay_audio_engine::{
+    BlockProcessor, ExternalBinding, ExternalIo, PeakMeterBank, ProcessorExchange, RenderPlan,
+};
+use mixrelay_audio_graph::{
+    ApplicationCaptureRequest, CompileContext, CompileLimits, FROM_OS_PORT_ID, GraphCompiler,
+    NodeConfig, RenderFormat, TO_OS_PORT_ID,
+};
+use mixrelay_audio_io::process::{CycleBlocks, ProcessCycle, ProcessReport, TransferOutcome};
+use mixrelay_audio_io::session::{AudioBackendKind, CURRENT_TIMER_FORMAT, ClockAuthority};
+use mixrelay_audio_io::{
+    HostAudioBackendError, VirtualEndpointBackend, VirtualEndpointCapabilities, VirtualEndpointSpec,
+};
+use mixrelay_control_server::router_with_backend;
+use mixrelay_engine_service::{
+    EngineGraphController, EngineGraphControllerConfig, GraphResourceBackend,
+    default_duplex_document, default_peak_meter_bank, session::AdapterRuntimeStatus,
+};
+use mixrelay_processor_host::ProcessorCatalog;
 use std::{
     ptr,
     sync::{
@@ -7,24 +25,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tonenari_audio_engine::{
-    BlockProcessor, ExternalBinding, ExternalIo, PeakMeterBank, ProcessorExchange, RenderPlan,
-};
-use tonenari_audio_graph::{
-    ApplicationCaptureRequest, CompileContext, CompileLimits, FROM_OS_PORT_ID, GraphCompiler,
-    NodeConfig, RenderFormat, TO_OS_PORT_ID,
-};
-use tonenari_audio_io::process::{CycleBlocks, ProcessCycle, ProcessReport, TransferOutcome};
-use tonenari_audio_io::session::{AudioBackendKind, CURRENT_TIMER_FORMAT, ClockAuthority};
-use tonenari_audio_io::{
-    HostAudioBackendError, VirtualEndpointBackend, VirtualEndpointCapabilities, VirtualEndpointSpec,
-};
-use tonenari_control_server::router_with_backend;
-use tonenari_engine_service::{
-    EngineGraphController, EngineGraphControllerConfig, GraphResourceBackend,
-    default_duplex_document, default_peak_meter_bank, session::AdapterRuntimeStatus,
-};
-use tonenari_processor_host::ProcessorCatalog;
 #[path = "linux_applications.rs"]
 mod applications;
 #[path = "linux_clock.rs"]
@@ -37,14 +37,14 @@ mod format;
 mod native;
 use applications::{CaptureSet as PipeWireCaptureSet, CaptureWatch};
 use devices::{DeviceStreams, DeviceWatch};
+use mixrelay_audio_io::recovery::{RecoveryConsumer, RecoveryMailbox};
+use mixrelay_engine_service::resource_requirements::{DeviceRequirements, ResourceRequirements};
 use native::{NativeCycle, NativeDriver, NativeStream};
-use tonenari_audio_io::recovery::{RecoveryConsumer, RecoveryMailbox};
-use tonenari_engine_service::resource_requirements::{DeviceRequirements, ResourceRequirements};
 const ENGINE_BLOCK_FRAMES: u32 = CURRENT_TIMER_FORMAT.block_frames;
-fn adapter_profile() -> tonenari_engine_service::session::AdapterProfile {
-    tonenari_engine_service::session::AdapterProfile {
-        initial_format: tonenari_audio_io::session::CURRENT_TIMER_FORMAT,
-        capabilities: tonenari_audio_io::session::AudioSessionCapabilities {
+fn adapter_profile() -> mixrelay_engine_service::session::AdapterProfile {
+    mixrelay_engine_service::session::AdapterProfile {
+        initial_format: mixrelay_audio_io::session::CURRENT_TIMER_FORMAT,
+        capabilities: mixrelay_audio_io::session::AudioSessionCapabilities {
             backend: AudioBackendKind::PipeWire,
             supported_sample_rates: format::RATES.to_vec(),
             supported_block_frames: format::BLOCKS.to_vec(),
@@ -57,7 +57,7 @@ fn adapter_profile() -> tonenari_engine_service::session::AdapterProfile {
             drift_correction: false,
         },
         application_capture_rates: format::RATES.to_vec(),
-        clock_authority: tonenari_audio_io::session::ClockAuthority::AudioServer,
+        clock_authority: mixrelay_audio_io::session::ClockAuthority::AudioServer,
         transport_latency_frames: None,
         requires_observed_device_rate: false,
     }
@@ -71,7 +71,7 @@ pub(super) fn run() -> Result<(), String> {
         .nodes
         .into_iter()
         .find_map(|node| match node.config {
-            tonenari_audio_graph::NodeConfig::VirtualEndpoint(spec) => Some(EndpointBinding {
+            mixrelay_audio_graph::NodeConfig::VirtualEndpoint(spec) => Some(EndpointBinding {
                 node_id: node.id.as_str().to_owned(),
                 spec: spec.spec,
             }),
@@ -114,7 +114,7 @@ pub(super) fn run() -> Result<(), String> {
     let _recovery = spawn_device_recovery(&endpoint_backend)?;
     let worker_status = runtime_status.clone();
     let audio_thread = thread::Builder::new()
-        .name("tonenari-pipewire-audio".to_owned())
+        .name("mixrelay-pipewire-audio".to_owned())
         .spawn(move || {
             run_audio_worker(
                 processor,
@@ -125,7 +125,7 @@ pub(super) fn run() -> Result<(), String> {
             );
         })
         .map_err(|error| format!("could not start PipeWire audio worker: {error}"))?;
-    let _worker = tonenari_engine_service::session::AudioWorker::new(runtime_status, audio_thread);
+    let _worker = mixrelay_engine_service::session::AudioWorker::new(runtime_status, audio_thread);
     let _format_monitor = format::Monitor::start(&controller)?;
     let maintenance = controller.start_control_maintenance()?;
 
@@ -140,7 +140,7 @@ pub(super) fn run() -> Result<(), String> {
             .map_err(|error| format!("could not bind local control server: {error}"))?;
         let result = axum::serve(listener, router_with_backend(controller))
             .with_graceful_shutdown(async {
-                let _ = tonenari_engine_service::session::shutdown_signal().await;
+                let _ = mixrelay_engine_service::session::shutdown_signal().await;
             })
             .await
             .map_err(|error| format!("local control server failed: {error}"));
@@ -155,7 +155,7 @@ fn create_initial_processor(
 ) -> Result<Box<BlockProcessor>, String> {
     let execution = GraphCompiler::default()
         .compile(
-            &tonenari_engine_service::default_session_document(1, format),
+            &mixrelay_engine_service::default_session_document(1, format),
             CompileContext {
                 format,
                 limits: CompileLimits::default(),
@@ -183,7 +183,7 @@ fn spawn_reclaimers(
     let weak_exchange = Arc::downgrade(exchange);
     let weak_endpoints = Arc::downgrade(endpoints);
     thread::Builder::new()
-        .name("tonenari-linux-reclaimer".to_owned())
+        .name("mixrelay-linux-reclaimer".to_owned())
         .spawn(move || {
             loop {
                 let Some(exchange) = weak_exchange.upgrade() else {
@@ -223,7 +223,7 @@ fn spawn_device_recovery(
     let stopping = Arc::new(AtomicBool::new(false));
     let stop = stopping.clone();
     let worker = thread::Builder::new()
-        .name("tonenari-device-recovery".into())
+        .name("mixrelay-device-recovery".into())
         .spawn(move || {
             while !stop.load(Ordering::Acquire) {
                 let Some(backend) = weak.upgrade() else {
@@ -381,7 +381,7 @@ impl LinuxProcessState<'_> {
         }
         let blocks = CycleBlocks::new(
             cycle,
-            tonenari_audio_io::session::SessionFormat {
+            mixrelay_audio_io::session::SessionFormat {
                 sample_rate: format.sample_rate,
                 block_frames: format.block_frames,
             },
@@ -497,7 +497,7 @@ impl ExternalIo for LinuxExternalIo<'_> {
         {
             destination.copy_from_slice(self.render);
             return TransferOutcome::complete(self.render_frames);
-        } else if binding.port_id().as_str() == tonenari_audio_graph::AUDIO_PORT_ID {
+        } else if binding.port_id().as_str() == mixrelay_audio_graph::AUDIO_PORT_ID {
             if !self
                 .application_captures
                 .contains(binding.node_id().as_str())
@@ -523,7 +523,7 @@ impl ExternalIo for LinuxExternalIo<'_> {
             self.capture.copy_from_slice(source);
             return TransferOutcome::complete(cycle.frames);
         }
-        if binding.port_id().as_str() == tonenari_audio_graph::AUDIO_PORT_ID {
+        if binding.port_id().as_str() == mixrelay_audio_graph::AUDIO_PORT_ID {
             return self.devices.write(binding.node_id().as_str(), source);
         }
         TransferOutcome::complete(0)
@@ -686,8 +686,8 @@ impl LinuxVirtualEndpointBackend {
 }
 
 impl VirtualEndpointBackend for LinuxVirtualEndpointBackend {
-    fn settings(&self) -> Option<tonenari_audio_io::VirtualEndpointSettings> {
-        Some(tonenari_audio_io::VirtualEndpointSettings::configurable(
+    fn settings(&self) -> Option<mixrelay_audio_io::VirtualEndpointSettings> {
+        Some(mixrelay_audio_io::VirtualEndpointSettings::configurable(
             &self.capabilities,
         ))
     }
@@ -712,21 +712,21 @@ impl VirtualEndpointBackend for LinuxVirtualEndpointBackend {
 impl GraphResourceBackend for LinuxVirtualEndpointBackend {
     fn device_inventory(
         &self,
-    ) -> Result<Vec<tonenari_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
-        tonenari_audio_io::linux::devices()
+    ) -> Result<Vec<mixrelay_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
+        mixrelay_audio_io::linux::devices()
     }
 
     fn prepare_format_change(
         &self,
-        document: &tonenari_audio_graph::GraphDocument,
+        document: &mixrelay_audio_graph::GraphDocument,
         _current: RenderFormat,
         requested: RenderFormat,
-    ) -> Result<Box<dyn tonenari_engine_service::PreparedGraphFormat>, HostAudioBackendError> {
+    ) -> Result<Box<dyn mixrelay_engine_service::PreparedGraphFormat>, HostAudioBackendError> {
         format::prepare(self, document, requested)
     }
     fn reconcile(
         &self,
-        document: &tonenari_audio_graph::GraphDocument,
+        document: &mixrelay_audio_graph::GraphDocument,
     ) -> Result<(), HostAudioBackendError> {
         let next = LinuxResourceSpec::from_document(document)?;
         let format = format::unpack(self.active_format.load(Ordering::Acquire));
@@ -826,7 +826,7 @@ struct LinuxResourceSpec {
 
 impl LinuxResourceSpec {
     fn from_document(
-        document: &tonenari_audio_graph::GraphDocument,
+        document: &mixrelay_audio_graph::GraphDocument,
     ) -> Result<Self, HostAudioBackendError> {
         let requirements = ResourceRequirements::from_document(document);
         let endpoint = match requirements.endpoints.as_slice() {
@@ -939,5 +939,5 @@ fn sanitize_node_name(value: &str) -> String {
             }
         })
         .collect::<String>();
-    format!("io.tonenari.{value}")
+    format!("io.mixrelay.{value}")
 }

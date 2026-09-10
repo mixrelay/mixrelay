@@ -56,14 +56,14 @@ initialization function for both injected allocation failures.
 Executed successfully on the final source:
 
 ```sh
-cargo clippy -p tonenari-macos-transport -p tonenari-hal-core -p tonenari-macos-test-support -p tonenari-engine-service -p tonenari-desktop --all-targets -- -D warnings
-cargo test -p tonenari-macos-transport -p tonenari-hal-core --quiet
+cargo clippy -p mixrelay-macos-transport -p mixrelay-hal-core -p mixrelay-macos-test-support -p mixrelay-engine-service -p mixrelay-desktop --all-targets -- -D warnings
+cargo test -p mixrelay-macos-transport -p mixrelay-hal-core --quiet
 bash scripts/check-macos-clock-boundaries.sh
-cargo test -p tonenari-engine-service --lib --quiet
-cargo test -p tonenari-pcm-ring --quiet
-cargo build -p tonenari-engine-service -p tonenari-desktop
-cargo run -p tonenari-hal-bundle -- --output target/test-artifacts/lifecycle-hal
-cargo doc -p tonenari-macos-transport -p tonenari-hal-core --no-deps
+cargo test -p mixrelay-engine-service --lib --quiet
+cargo test -p mixrelay-pcm-ring --quiet
+cargo build -p mixrelay-engine-service -p mixrelay-desktop
+cargo run -p mixrelay-hal-bundle -- --output target/test-artifacts/lifecycle-hal
+cargo doc -p mixrelay-macos-transport -p mixrelay-hal-core --no-deps
 cargo fmt --all --check
 git diff --check
 ```
@@ -88,7 +88,7 @@ this batch deliberately does not open or interrupt user audio. Failure-injection
 tests instead check native-call order, retained handles and retry outcomes.
 
 The tap delivery gate changes an actual callback path, so the unchanged
-`TNProcessTapInputBench.m` harness was built before and after replacement.
+`MRProcessTapInputBench.m` harness was built before and after replacement.
 Both use Clang `-O3 -fobjc-arc -fblocks -mmacosx-version-min=14.2`, the Rust release
 static library, no extra `RUSTFLAGS`, capacity 16,384, 20,000 iterations per pass,
 one warmup and seven measured passes with bit-exact PCM assertions. Executables

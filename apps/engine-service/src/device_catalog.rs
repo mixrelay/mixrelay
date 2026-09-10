@@ -2,9 +2,9 @@
 //! device edit updates every reference in the same catalog transaction.
 use std::collections::{BTreeMap, BTreeSet};
 
-use tonenari_audio_graph::{GraphDocument, NodeConfig, VirtualEndpointId, VirtualEndpointSpec};
-use tonenari_audio_io::{VirtualEndpointDeviceSettings, VirtualEndpointSettings};
-use tonenari_control_protocol::ProtocolError;
+use mixrelay_audio_graph::{GraphDocument, NodeConfig, VirtualEndpointId, VirtualEndpointSpec};
+use mixrelay_audio_io::{VirtualEndpointDeviceSettings, VirtualEndpointSettings};
+use mixrelay_control_protocol::ProtocolError;
 
 use super::{Catalog, EngineGraphController, invalid};
 

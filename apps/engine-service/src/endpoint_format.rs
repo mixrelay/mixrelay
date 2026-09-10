@@ -3,12 +3,12 @@
 use super::{
     EngineGraphController, NodeConfig, SessionChangeOrigin, SessionPauseOwner, session_error,
 };
-use std::time::{Duration, Instant};
-use tonenari_audio_io::VirtualEndpointId;
-use tonenari_control_protocol::{
+use mixrelay_audio_io::VirtualEndpointId;
+use mixrelay_control_protocol::{
     ErrorCode, GraphApplyResponse, GraphApplyState, PROTOCOL_VERSION, ProtocolError,
     VirtualEndpointFormatRequest,
 };
+use std::time::{Duration, Instant};
 
 // CoreAudio accepts nominal-rate changes before PerformDeviceConfigurationChange
 // commits them. This budget runs only on the control server's blocking worker;
@@ -149,9 +149,9 @@ impl EngineGraphController {
             && observed != current
         {
             return self.change_session_locked(
-                tonenari_control_protocol::SessionReconfigureRequest {
+                mixrelay_control_protocol::SessionReconfigureRequest {
                     expected_revision: self.exchange.revisions().submitted,
-                    format: tonenari_audio_io::session::SessionFormat {
+                    format: mixrelay_audio_io::session::SessionFormat {
                         sample_rate: observed.sample_rate,
                         block_frames: observed.block_frames,
                     },

@@ -4,11 +4,11 @@ use std::{
     time::Duration,
 };
 
-use tonenari_audio_graph::RenderFormat;
-use tonenari_audio_io::session::{
+use mixrelay_audio_graph::RenderFormat;
+use mixrelay_audio_io::session::{
     AudioSessionCapabilities, AudioSessionStatus, ClockAuthority, SessionFormat, SessionIssue,
 };
-use tonenari_control_protocol::{AppStatus, DriverState, PROTOCOL_VERSION};
+use mixrelay_control_protocol::{AppStatus, DriverState, PROTOCOL_VERSION};
 
 use crate::RuntimeStatusBackend;
 use crate::persistence::StagedWrite;
@@ -252,7 +252,7 @@ impl AdapterRuntimeStatus {
     }
 
     /// Lock-free reporting from the DSP boundary. Zero samples are not failures.
-    pub fn record_process(&self, report: tonenari_audio_io::process::ProcessReport) {
+    pub fn record_process(&self, report: mixrelay_audio_io::process::ProcessReport) {
         self.discontinuities
             .fetch_add(report.discontinuities, Ordering::Relaxed);
         self.input_starvations
@@ -561,10 +561,10 @@ impl AdapterRuntimeStatus {
     pub fn adopt_routing_clock(
         &self,
         requested: RenderFormat,
-    ) -> Result<(), tonenari_audio_io::HostAudioBackendError> {
+    ) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
         if !self.supports_routing_format(requested) {
             return Err(
-                tonenari_audio_io::HostAudioBackendError::CapabilityUnavailable {
+                mixrelay_audio_io::HostAudioBackendError::CapabilityUnavailable {
                     capability: "routing clock format".into(),
                 },
             );
@@ -584,8 +584,8 @@ impl AdapterRuntimeStatus {
     pub fn reconfigure_routing_buffer(
         &self,
         requested: RenderFormat,
-    ) -> Result<(), tonenari_audio_io::HostAudioBackendError> {
-        use tonenari_audio_io::HostAudioBackendError;
+    ) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
+        use mixrelay_audio_io::HostAudioBackendError;
         if !self.supports_routing_format(requested) {
             return Err(HostAudioBackendError::CapabilityUnavailable {
                 capability: "routing buffer format".into(),
@@ -634,13 +634,13 @@ impl AdapterRuntimeStatus {
     /// Requests and waits for callback-boundary suspension on the control thread.
     /// # Errors
     /// Returns an error if the running audio owner does not acknowledge in time.
-    pub fn pause_at_boundary(&self) -> Result<(), tonenari_audio_io::HostAudioBackendError> {
+    pub fn pause_at_boundary(&self) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
         // Fresh tickets prevent a previous suspension acknowledgement from authorizing
         // native changes while the worker has already resumed.
         let ticket = self.processing.request_pause();
         if !self.processing.await_pause(ticket, Duration::from_secs(1)) {
             self.resume();
-            return Err(tonenari_audio_io::HostAudioBackendError::BackendFailure {
+            return Err(mixrelay_audio_io::HostAudioBackendError::BackendFailure {
                 message: "audio worker did not acknowledge suspension".into(),
             });
         }
@@ -759,8 +759,8 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
     fn adopt_external_format(
         &self,
         requested: RenderFormat,
-    ) -> Result<(), tonenari_audio_io::HostAudioBackendError> {
-        use tonenari_audio_io::HostAudioBackendError;
+    ) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
+        use mixrelay_audio_io::HostAudioBackendError;
         if !self.supports_format(requested)
             || (self.external_rate_reader.is_none() && self.external_format_reader.is_none())
         {
@@ -855,13 +855,13 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
                 virtual_endpoint_settings: None,
                 processing_state: match worker_state {
                     WorkerState::Running if !clock.idle => {
-                        tonenari_audio_io::process::ProcessingState::Running
+                        mixrelay_audio_io::process::ProcessingState::Running
                     }
                     WorkerState::Stopped | WorkerState::Failed => {
-                        tonenari_audio_io::process::ProcessingState::Stopped
+                        mixrelay_audio_io::process::ProcessingState::Stopped
                     }
                     WorkerState::NotStarted | WorkerState::Running => {
-                        tonenari_audio_io::process::ProcessingState::Idle
+                        mixrelay_audio_io::process::ProcessingState::Idle
                     }
                 },
                 discontinuities: self.discontinuities.load(Ordering::Relaxed),
@@ -884,8 +884,8 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
         &self,
         current: RenderFormat,
         requested: RenderFormat,
-    ) -> Result<(), tonenari_audio_io::HostAudioBackendError> {
-        use tonenari_audio_io::HostAudioBackendError;
+    ) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
+        use mixrelay_audio_io::HostAudioBackendError;
         if !self.supports_format(requested) || !self.profile.capabilities.can_reconfigure_live {
             return Err(HostAudioBackendError::CapabilityUnavailable {
                 capability: "requested native session format".into(),
@@ -1021,7 +1021,7 @@ mod routing_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tonenari_audio_io::session::AudioBackendKind;
+    use mixrelay_audio_io::session::AudioBackendKind;
 
     pub(super) fn profile(backend: AudioBackendKind) -> AdapterProfile {
         AdapterProfile {
@@ -1119,7 +1119,7 @@ mod tests {
         let status = AdapterRuntimeStatus::new(profile(AudioBackendKind::PipeWire));
         let lease = status.begin_processing().unwrap();
         assert!(status.begin_processing().is_err());
-        status.record_process(tonenari_audio_io::process::ProcessReport {
+        status.record_process(mixrelay_audio_io::process::ProcessReport {
             input_starvations: 3,
             output_overflows: 2,
             discontinuities: 4,
@@ -1133,7 +1133,7 @@ mod tests {
         assert_eq!(running.audio_session.as_ref().unwrap().discontinuities, 4);
         assert_eq!(
             running.audio_session.unwrap().processing_state,
-            tonenari_audio_io::process::ProcessingState::Running
+            mixrelay_audio_io::process::ProcessingState::Running
         );
         drop(lease);
         assert_eq!(
@@ -1180,7 +1180,7 @@ mod tests {
                 .audio_session
                 .unwrap()
                 .processing_state,
-            tonenari_audio_io::process::ProcessingState::Stopped
+            mixrelay_audio_io::process::ProcessingState::Stopped
         );
         assert_eq!(
             status

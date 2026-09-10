@@ -89,7 +89,7 @@ pub struct RecorderStatus {
 }
 
 fn valid_rate(rate: u32) -> bool {
-    tonenari_audio_io::formats::SAMPLE_RATES.contains(&rate)
+    mixrelay_audio_io::formats::SAMPLE_RATES.contains(&rate)
 }
 
 #[cfg(test)]

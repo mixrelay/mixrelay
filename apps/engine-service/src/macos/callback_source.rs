@@ -1,7 +1,7 @@
 //! HAL render producer -> hardware-clock graph. This is the opposite direction
 //! from capture publication, with its own absolute read cursor and SRC history.
 use super::{NativeAudioConfig, NativeClockSnapshot};
-use tonenari_audio_io::{
+use mixrelay_audio_io::{
     clock_bridge::{
         AsyncClockBridge, BridgeConfig, ClockFeedback, ClockRelation, Discontinuity, FeedbackQueue,
     },

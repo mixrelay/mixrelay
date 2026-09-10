@@ -24,37 +24,37 @@ fn main() {
     build(
         &root,
         "fixture",
-        "native/macos/engine-service/tests/TNDeviceIOLive.c",
+        "native/macos/engine-service/tests/MRDeviceIOLive.c",
         &[],
     );
     build(
         &root,
         "clock",
-        "native/macos/common/tests/TNCallbackClockTests.c",
+        "native/macos/common/tests/MRCallbackClockTests.c",
         &[],
     );
     build(
         &root,
         "hal",
-        "native/macos/hal-driver/tests/TNHALBridgeTests.c",
-        &["native/macos/hal-driver/driver/TNHALControlBlock.c"],
+        "native/macos/hal-driver/tests/MRHALBridgeTests.c",
+        &["native/macos/hal-driver/driver/MRHALControlBlock.c"],
     );
     build(
         &root,
         "application_clock",
-        "native/macos/engine-service/tests/TNApplicationClockTests.c",
+        "native/macos/engine-service/tests/MRApplicationClockTests.c",
         &[],
     );
     build(
         &root,
         "audio_ring",
-        "native/macos/application-capture/tests/TNAudioRingTests.c",
+        "native/macos/application-capture/tests/MRAudioRingTests.c",
         &[],
     );
     build(
         &root,
         "pcm_ring",
-        "native/pcm-ring/tests/TNPcmRingTests.c",
+        "native/pcm-ring/tests/MRPcmRingTests.c",
         &[],
     );
 }
@@ -63,28 +63,28 @@ fn build_transport(root: &Path, output: &Path) {
     cc::Build::new()
         .cargo_metadata(false)
         .out_dir(output)
-        .file(root.join("native/macos/application-capture/src/TNApplicationSourceTransport.c"))
+        .file(root.join("native/macos/application-capture/src/MRApplicationSourceTransport.c"))
         .include(root.join("native/macos/hal-driver/include"))
         .flag("-std=c17")
         .flag("-fblocks")
         .flag("-mmacosx-version-min=14.2")
         .warnings_into_errors(true)
-        .compile("tonenari_source_xpc");
+        .compile("mixrelay_source_xpc");
     for (kind, suffix) in [("rlib", "rlib"), ("staticlib", "a")] {
         rust_library(
             root,
             RustSource {
                 path: "native/pcm-ring/src/lib.rs",
-                name: "tonenari_pcm_ring",
+                name: "mixrelay_pcm_ring",
             },
             kind,
-            &output.join(format!("libtonenari_pcm_ring.{suffix}")),
+            &output.join(format!("libmixrelay_pcm_ring.{suffix}")),
             &[],
         );
     }
     let pcm = format!(
-        "tonenari_pcm_ring={}",
-        output.join("libtonenari_pcm_ring.rlib").display()
+        "mixrelay_pcm_ring={}",
+        output.join("libmixrelay_pcm_ring.rlib").display()
     );
     let search = format!("dependency={}", output.display());
     for (kind, suffix) in [("rlib", "rlib"), ("staticlib", "a")] {
@@ -92,25 +92,25 @@ fn build_transport(root: &Path, output: &Path) {
             root,
             RustSource {
                 path: "native/macos/common/lib.rs",
-                name: "tonenari_macos_transport",
+                name: "mixrelay_macos_transport",
             },
             kind,
-            &output.join(format!("libtonenari_macos_transport.{suffix}")),
+            &output.join(format!("libmixrelay_macos_transport.{suffix}")),
             &["--extern", &pcm, "-L", &search],
         );
     }
     let dependency = format!(
-        "tonenari_macos_transport={}",
-        output.join("libtonenari_macos_transport.rlib").display()
+        "mixrelay_macos_transport={}",
+        output.join("libmixrelay_macos_transport.rlib").display()
     );
     rust_library(
         root,
         RustSource {
             path: "native/macos/hal-driver/rust/src/lib.rs",
-            name: "tonenari_hal_core",
+            name: "mixrelay_hal_core",
         },
         "staticlib",
-        &output.join("libtonenari_hal_core.a"),
+        &output.join("libmixrelay_hal_core.a"),
         &["--extern", &dependency, "-L", &search],
     );
 }
@@ -174,12 +174,12 @@ fn build(root: &Path, name: &str, test: &str, sources: &[&str]) {
         .arg(test)
         .args(sources)
         .arg(output_directory.join(if name == "hal" {
-            "libtonenari_hal_core.a"
+            "libmixrelay_hal_core.a"
         } else {
-            "libtonenari_macos_transport.a"
+            "libmixrelay_macos_transport.a"
         }))
-        .arg(output_directory.join("libtonenari_pcm_ring.a"))
-        .arg(output_directory.join("libtonenari_source_xpc.a"))
+        .arg(output_directory.join("libmixrelay_pcm_ring.a"))
+        .arg(output_directory.join("libmixrelay_source_xpc.a"))
         .arg("-liconv")
         .args([
             "-framework",
@@ -197,7 +197,7 @@ fn build(root: &Path, name: &str, test: &str, sources: &[&str]) {
         String::from_utf8_lossy(&result.stderr)
     );
     println!(
-        "cargo:rustc-env=TN_NATIVE_{}={}",
+        "cargo:rustc-env=MR_NATIVE_{}={}",
         name.to_uppercase(),
         output.display()
     );

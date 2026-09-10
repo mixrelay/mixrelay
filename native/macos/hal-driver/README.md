@@ -1,7 +1,7 @@
-# ToneNari macOS HAL
+# MixRelay macOS HAL
 
-The `AudioServerPlugIn` bundle is built from `tonenari-hal-core` (Rust) and
-`driver/ToneNariHALBridge.c` (Apple COM and dispatch-block adapter). Device
+The `AudioServerPlugIn` bundle is built from `mixrelay-hal-core` (Rust) and
+`driver/MixRelayHALBridge.c` (Apple COM and dispatch-block adapter). Device
 registry, properties, format changes, clock arithmetic, mapping ownership and
 PCM processing belong to Rust. The shared transport implementation is in
 `native/macos/common`; it is linked into both the HAL and engine.
@@ -9,9 +9,9 @@ PCM processing belong to Rust. The shared transport implementation is in
 ## Build and verification
 
 ```sh
-cargo run -p tonenari-hal-bundle -- --output target/macos-hal
-cargo test -p tonenari-hal-core -p tonenari-macos-transport
-cargo test -p tonenari-engine-service --bin tonenari-engine-service native_callback_and_hal_contracts -- --exact --nocapture
+cargo run -p mixrelay-hal-bundle -- --output target/macos-hal
+cargo test -p mixrelay-hal-core -p mixrelay-macos-transport
+cargo test -p mixrelay-engine-service --bin mixrelay-engine-service native_callback_and_hal_contracts -- --exact --nocapture
 ```
 
 The Cargo-owned builder compiles arm64 and x86_64 release archives, links only
@@ -32,7 +32,7 @@ Device-free tests do not prove live audio continuity or physical-clock behavior.
 - Each virtual device has its own identity, name, channel geometry and native
   sample rate. The registry and inventory protocol support multiple devices;
   graph-level catalog and resource integration must be verified separately.
-- HAL requests inventory over `io.tonenari.audio.engine`; the engine publishes
+- HAL requests inventory over `io.mixrelay.audio.engine`; the engine publishes
   anonymous descriptor-backed mappings. No filesystem transport path or shared
   singleton device ID is part of that contract.
 - CoreAudio configuration changes use `RequestDeviceConfigurationChange`.

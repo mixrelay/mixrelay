@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
 import type { RecorderRequest, RecorderStatus } from '../../core/control-port/types';
 import { I18nProvider, i18n } from '../../core/i18n';
-import { ToneNariProvider } from '../../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { RecorderControls } from './RecorderControls';
 
 const stopped: RecorderStatus = {
@@ -58,7 +58,7 @@ function recorderView(
   onChannelsChange = vi.fn(),
 ) {
   return (
-    <ToneNariProvider>
+    <MixRelayProvider>
       <I18nProvider>
         <RecorderControls
           controlPort={port}
@@ -69,7 +69,7 @@ function recorderView(
           onChannelsChange={onChannelsChange}
         />
       </I18nProvider>
-    </ToneNariProvider>
+    </MixRelayProvider>
   );
 }
 beforeEach(async () => {

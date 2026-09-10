@@ -6,7 +6,7 @@ test('policy lifetime unregisters the exact callback owner before PortCls releas
   const header = ratePolicyHeader('    PPORTEVENTS                         m_pPortEvents;');
   assert.match(header, /IsSystemRenderPin\(pin\)/);
   assert.match(header, /IsSystemCapturePin\(pin\)/);
-  assert.doesNotMatch(header, /TnTransport(?:Forced|Preferred)Rate/);
+  assert.doesNotMatch(header, /MrTransport(?:Forced|Preferred)Rate/);
   assert.match(header, /KSEVENT_PINCAPS_FORMATCHANGE, TRUE, pin/);
   assert.throws(() => ratePolicyHeader(''));
   assert.throws(() => ratePolicyHeader(header));
@@ -24,8 +24,8 @@ RtlCopyMemory(PropertyRequest->Value, modeInfo->DefaultFormat, modeInfo->Default
 test('actual miniport negotiation selects descriptor entries without editing shared mode tables', () => {
   const result = ratePolicyMiniport(miniport);
   assert.ok(result.indexOf('nullptr, this)') < result.indexOf('m_pPortEvents->Release()'));
-  assert.match(result, /TnBridgeDefaultFormat\(proposedDefault, formats, count\)/);
-  assert.match(result, /TnBridgeIntersect\(ClientDataRange, MyDataRange/);
+  assert.match(result, /MrBridgeDefaultFormat\(proposedDefault, formats, count\)/);
+  assert.match(result, /MrBridgeIntersect\(ClientDataRange, MyDataRange/);
   assert.match(result, /forced && format->WaveFormatEx.nSamplesPerSec != forced/);
   assert.doesNotMatch(result, /modeInfo->DefaultFormat\s*=/);
   assert.throws(() => ratePolicyMiniport(miniport + miniport));

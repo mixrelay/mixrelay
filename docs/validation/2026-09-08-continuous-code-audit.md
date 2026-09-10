@@ -19,16 +19,16 @@ of the entire application's memory safety or real-time correctness.
 
 ## Latest root integration evidence
 
-- `cargo clippy -p tonenari-engine-service -p tonenari-macos-transport --all-targets -- -D warnings`:
+- `cargo clippy -p mixrelay-engine-service -p mixrelay-macos-transport --all-targets -- -D warnings`:
   exit 0 after the final mixed-route rejection test. No lint thresholds or exceptions changed.
-- `cargo test --quiet -p tonenari-macos-transport -p tonenari-hal-core -p tonenari-engine-service --lib --bins -- --test-threads=1`:
+- `cargo test --quiet -p mixrelay-macos-transport -p mixrelay-hal-core -p mixrelay-engine-service --lib --bins -- --test-threads=1`:
   latest follow-up exit 0, engine library 139 + binary 91 + HAL 33 + common 68 = 331 passed,
   zero ignored. A separate final model run passed both tests (5.78 seconds, zero ignored).
   The binary includes the five current native C/Rust fixtures and the real private Aggregate
   lifetime/leaks diagnostic. The aggregate test used explicitly observed 48 kHz display
   outputs `1E6D5077-0000-0000-0821-0104B5462878` and
-  `1E6DF65B-0000-0000-0921-0104B52F3478` via `TONENARI_GROUP_PRIMARY_UID` and
-  `TONENARI_GROUP_SECONDARY_UID`. It did not change the default device or user graph.
+  `1E6DF65B-0000-0000-0921-0104B52F3478` via `MIXRELAY_GROUP_PRIMARY_UID` and
+  `MIXRELAY_GROUP_SECONDARY_UID`. It did not change the default device or user graph.
 - All four `worker_io` tests, including the mixed-route rejection case, passed in
   the final 329-test run. The previous 328-test checkpoint was rerun after expansion.
 - Initial full run failed (not skipped): missing aggregate UID inputs and an old source
@@ -80,7 +80,7 @@ and the full device-clock/group/global-endpoint goal remain open. No VM was star
   feature branch or model dependency in the HAL/engine runtime. The three existing
   native tests remain under `unit_tests/demand.rs`; moving them enables instrumentation,
   not an architectural improvement claim.
-- `cargo test -p tonenari-macos-transport --test demand_model -- --test-threads=1`:
+- `cargo test -p mixrelay-macos-transport --test demand_model -- --test-threads=1`:
   two passed, zero ignored, 5.68 seconds in the first debug run. The finite cases cover
   one publisher/reader and two contending publishers/reader, accepting only complete
   old/new callback pairs or an explicitly unavailable snapshot. Reset occurs before
@@ -111,8 +111,8 @@ and the full device-clock/group/global-endpoint goal remain open. No VM was star
 
 ## Paired runtime verification in progress
 
-- Fresh `cargo build -p tonenari-engine-service --bin tonenari-engine-service` and
-  `cargo run -p tonenari-hal-bundle --` passed. HAL ARM64 and x86_64 release builds,
+- Fresh `cargo build -p mixrelay-engine-service --bin mixrelay-engine-service` and
+  `cargo run -p mixrelay-hal-bundle --` passed. HAL ARM64 and x86_64 release builds,
   universal merge, plist validation, code signature verification and actual factory/COM
   probe all passed. Engine SHA256:
   `71ab3d8d07c88393b1e56694f2a97ab6265f30c6e65d6baff5f857347f748baf`.
@@ -132,10 +132,10 @@ and the full device-clock/group/global-endpoint goal remain open. No VM was star
   not a passed test or a controlled performance improvement claim.
 - Preserved graph-file SHA256 before restart:
   `5593d2c7dacb6a6ac1b4b2385b7fb5893b2de378799a7141b68d10630f5c1991`.
-- Authorized installation copied only ToneNariHAL.driver; installed/new hashes match.
+- Authorized installation copied only MixRelayHAL.driver; installed/new hashes match.
   `launchctl kill` could not signal Apple's protected service, so the initial combined
   command stopped before engine restart. A subsequent authorized restart targets the
-  freshly observed coreaudiod PID directly and the ToneNari launch job. Restart outcome
+  freshly observed coreaudiod PID directly and the MixRelay launch job. Restart outcome
   and post-install PCM acceptance still require verification.
 - The direct PID/job restart succeeded: coreaudiod changed from PID 35794 to 85251;
   engine changed from 57150 to 85261. The installed driver hash remains the fresh hash.
@@ -153,15 +153,15 @@ and the full device-clock/group/global-endpoint goal remain open. No VM was star
   revision changed 97 -> 3, and the persisted graph file hash changed accordingly;
   byte-for-byte persistence was therefore NOT preserved. Restart revision semantics and
   the startup `stored session format is unsupported` warning remain to investigate.
-- The live ToneNari app's accessibility tree confirms both saved graphs, the same three
+- The live MixRelay app's accessibility tree confirms both saved graphs, the same three
   routing nodes/edges, applied state and `96 kHz · 버퍼 사이즈 32`, without an engine
   connection error. This checks the actual installed app, not only Storybook or HTTP.
 - The 32/256 buffer integration test initially failed to link: it still declared two
   device-rate functions in the removed C implementation. It now imports the actual safe
   Rust endpoint-service functions directly; no compatibility symbols were added. A remaining
   unnecessary unsafe block was caught by strict Clippy and removed before the next run.
-- `TONENARI_TEST_INSTALLED_ENGINE=1 TONENARI_TEST_MUTATE_SESSION=1 cargo test
-  -p tonenari-engine-service --test macos_installed_format
+- `MIXRELAY_TEST_INSTALLED_ENGINE=1 MIXRELAY_TEST_MUTATE_SESSION=1 cargo test
+  -p mixrelay-engine-service --test macos_installed_format
   installed_hardware_route_has_no_starvations_at_32_and_256 -- --exact --nocapture --test-threads=1`
   passed: at 96 kHz, 32 samples / 5009 ms and 256 samples / 5003 ms each produced zero
   input starvation, output overflow and discontinuity increments. The native test restored
@@ -302,7 +302,7 @@ and the full device-clock/group/global-endpoint goal remain open. No VM was star
   run 0, invalid/malformed samples 0, timestamp gaps 0 and counter deltas 0/0/0.
   The independent reader's actual quantum is 512 frames in both runs; this is not
   a claim that every endpoint callback uses the engine's 32/256 quantum.
-- Actual ToneNari app inspection after the 256 restart shows both graphs, the same
+- Actual MixRelay app inspection after the 256 restart shows both graphs, the same
   microphone/virtual capture/headphone routes, applied state and 96 kHz / buffer 256,
   with no engine error. Both saved graphs, names, gains, connections, layout positions,
   viewports and catalog state compare equal to before installation after excluding only

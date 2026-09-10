@@ -1,14 +1,14 @@
 use super::*;
 use crate::controller_test_support::settle;
 use crate::endpoint_settings_tests::{controller, endpoint_document, settings};
+use mixrelay_control_protocol::{GraphCatalogAction, GraphCatalogRequest};
 use std::{fs, path::PathBuf};
-use tonenari_control_protocol::{GraphCatalogAction, GraphCatalogRequest};
 
-struct Fixture(tonenari_test_support::FixtureDir);
+struct Fixture(mixrelay_test_support::FixtureDir);
 
 impl Fixture {
     fn new() -> Self {
-        Self(tonenari_test_support::FixtureDir::new("endpoint-catalog").unwrap())
+        Self(mixrelay_test_support::FixtureDir::new("endpoint-catalog").unwrap())
     }
 
     fn path(&self) -> PathBuf {

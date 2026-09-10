@@ -73,7 +73,7 @@ export function useVirtualEndpointCreation({
       creation?.owner === owner ? (
         <NameDialog
           title={t('routing.nodes.newVirtualDevice')}
-          initialName="ToneNari IO"
+          initialName="MixRelay IO"
           nameLabel={t('routing.nodes.deviceName')}
           createLabel={t('common.create')}
           enabled={enabled}

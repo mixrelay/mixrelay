@@ -9,8 +9,8 @@
 #include <cmath>
 #include <cwchar>
 #include <memory>
-#include "ToneNariTransport.h"
-#include "TnBridgeDiagnostics.h"
+#include "MixRelayTransport.h"
+#include "MrBridgeDiagnostics.h"
 
 using Microsoft::WRL::ComPtr;
 static const char* stage = "startup";
@@ -38,25 +38,25 @@ static ULONGLONG Counter(volatile LONG64* value) {
 struct Mapping {
     // Events close first; file CLEANUP then unmaps pages. No pointer escapes this owner.
     Handle file, renderEvent, captureEvent;
-    TONENARI_SHARED_AUDIO_HEADER* header{};
+    MIXRELAY_SHARED_AUDIO_HEADER* header{};
     float *render{}, *capture{};
     static constexpr ULONG Capacity = 4096;
     ULONGLONG read{}, write{}, matchedRender{}, settlingRender{};
     Mapping() {
         stage="open/map transport";
-        file.value=CreateFileW(L"\\\\.\\ToneNariSysvadBridge",GENERIC_READ|GENERIC_WRITE,
+        file.value=CreateFileW(L"\\\\.\\MixRelaySysvadBridge",GENERIC_READ|GENERIC_WRITE,
             FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,0,nullptr);
         if (file.value==INVALID_HANDLE_VALUE) throw HRESULT_FROM_WIN32(GetLastError());
-        TONENARI_TRANSPORT_REQUEST request{2,sizeof(request),2,1,sampleRate,Capacity};
-        TONENARI_TRANSPORT_DESCRIPTOR descriptor{}; DWORD returned{};
-        if (!DeviceIoControl(file.value,IOCTL_TONENARI_GET_TRANSPORT,&request,sizeof(request),
+        MIXRELAY_TRANSPORT_REQUEST request{2,sizeof(request),2,1,sampleRate,Capacity};
+        MIXRELAY_TRANSPORT_DESCRIPTOR descriptor{}; DWORD returned{};
+        if (!DeviceIoControl(file.value,IOCTL_MIXRELAY_GET_TRANSPORT,&request,sizeof(request),
             &descriptor,sizeof(descriptor),&returned,nullptr)) throw HRESULT_FROM_WIN32(GetLastError());
         renderEvent.value=reinterpret_cast<HANDLE>(descriptor.RenderReadyEvent);
         captureEvent.value=reinterpret_cast<HANDLE>(descriptor.CaptureReadyEvent);
         Require(returned==sizeof(descriptor) && descriptor.Version==2 && descriptor.Size==sizeof(descriptor));
         Require(descriptor.UserAddress && descriptor.MappingBytes==53248);
-        header=reinterpret_cast<TONENARI_SHARED_AUDIO_HEADER*>(descriptor.UserAddress);
-        Require(header->Magic==TONENARI_TRANSPORT_MAGIC && header->Version==2 &&
+        header=reinterpret_cast<MIXRELAY_SHARED_AUDIO_HEADER*>(descriptor.UserAddress);
+        Require(header->Magic==MIXRELAY_TRANSPORT_MAGIC && header->Version==2 &&
             header->HeaderSize==sizeof(*header) && header->CapacityFrames==Capacity &&
             header->RenderChannels==2 && header->CaptureChannels==1 && header->SampleRate==sampleRate &&
             header->RenderSamplesOffset==4096 && header->CaptureSamplesOffset==36864 &&
@@ -66,7 +66,7 @@ struct Mapping {
         capture=reinterpret_cast<float*>(reinterpret_cast<BYTE*>(header)+36864);
     }
     void Process() {
-        Require(InterlockedCompareExchange(&header->State,0,0)==TONENARI_TRANSPORT_ONLINE);
+        Require(InterlockedCompareExchange(&header->State,0,0)==MIXRELAY_TRANSPORT_ONLINE);
         const auto produced=Counter(&header->RenderWriteFrame);
         const auto consumed=Counter(&header->CaptureReadFrame);
         Require(produced>=read && produced-read<=Capacity && consumed<=write && write-consumed<=Capacity);
@@ -157,35 +157,35 @@ struct Client {
 };
 struct RateRequest {
     Handle file;
-    TONENARI_RATE_STATUS status{};
+    MIXRELAY_RATE_STATUS status{};
     RateRequest() {
         stage="rate policy begin";
-        file.value=CreateFileW(L"\\\\.\\ToneNariSysvadBridge",GENERIC_READ|GENERIC_WRITE,
+        file.value=CreateFileW(L"\\\\.\\MixRelaySysvadBridge",GENERIC_READ|GENERIC_WRITE,
             FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,0,nullptr);
         if (file.value==INVALID_HANDLE_VALUE) throw HRESULT_FROM_WIN32(GetLastError());
-        Command(TONENARI_RATE_QUERY); Command(TONENARI_RATE_BEGIN);
+        Command(MIXRELAY_RATE_QUERY); Command(MIXRELAY_RATE_BEGIN);
     }
     void Command(ULONG operation) {
-        TONENARI_RATE_REQUEST request{TONENARI_RATE_POLICY_VERSION,sizeof(request),operation,
+        MIXRELAY_RATE_REQUEST request{MIXRELAY_RATE_POLICY_VERSION,sizeof(request),operation,
             sampleRate,status.Generation,10000,0};
         DWORD returned{};
-        if (!DeviceIoControl(file.value,IOCTL_TONENARI_RATE_POLICY,&request,sizeof(request),
+        if (!DeviceIoControl(file.value,IOCTL_MIXRELAY_RATE_POLICY,&request,sizeof(request),
             &status,sizeof(status),&returned,nullptr)) throw HRESULT_FROM_WIN32(GetLastError());
-        Require(returned==sizeof(status) && status.Version==TONENARI_RATE_POLICY_VERSION && status.Size==sizeof(status));
+        Require(returned==sizeof(status) && status.Version==MIXRELAY_RATE_POLICY_VERSION && status.Size==sizeof(status));
         std::printf("rate_policy state=%lu requested=%lu preferred=%lu render=%lu capture=%lu generation=%llu\n",
             status.State,status.RequestedRate,status.PreferredRate,status.RenderRate,status.CaptureRate,status.Generation);
     }
     void Confirm() {
-        Command(TONENARI_RATE_QUERY);
-        Require(status.State==TONENARI_RATE_STABLE && status.PreferredRate==sampleRate &&
+        Command(MIXRELAY_RATE_QUERY);
+        Require(status.State==MIXRELAY_RATE_STABLE && status.PreferredRate==sampleRate &&
             status.RenderRate==sampleRate && status.CaptureRate==sampleRate);
     }
 };
 static void Trace() {
     Handle file;
-    file.value=CreateFileW(L"\\\\.\\ToneNariSysvadBridge",GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,
+    file.value=CreateFileW(L"\\\\.\\MixRelaySysvadBridge",GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,
         nullptr,OPEN_EXISTING,0,nullptr);
-    TnBridgeTrace trace{}; DWORD returned{};
+    MrBridgeTrace trace{}; DWORD returned{};
     if (file.value==INVALID_HANDLE_VALUE || !DeviceIoControl(file.value,IOCTL_TN_BRIDGE_TRACE,
         nullptr,0,&trace,sizeof(trace),&returned,nullptr) || returned!=sizeof(trace) || trace.version!=1) {
         std::printf("native_trace_unavailable error=%lu\n",GetLastError()); return;

@@ -2,7 +2,7 @@
 
 use std::{hint::black_box, io::Write, time::Instant};
 
-use tonenari_audio_io::clock_bridge::{
+use mixrelay_audio_io::clock_bridge::{
     AsyncClockBridge, BridgeConfig, ClockFeedback, ClockRelation, FeedbackQueue,
 };
 

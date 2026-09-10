@@ -10,6 +10,7 @@ import {
   type GraphLayoutResponse,
   type GraphRuntimeStatus,
   type MeterSnapshot,
+  type MixRelayStatus,
   type ProcessorEditorFrame,
   type ProcessorEditorInput,
   type ProcessorEditorStatus,
@@ -18,7 +19,6 @@ import {
   type RecorderRequest,
   type RecorderStatus,
   type RuntimeGraphDocument,
-  type ToneNariStatus,
   type VirtualEndpointFormatRequest,
 } from './types';
 
@@ -146,7 +146,7 @@ export class HttpControlPort implements ControlPort {
     });
   }
 
-  public getStatus(): Promise<ToneNariStatus> {
+  public getStatus(): Promise<MixRelayStatus> {
     return this.json('/api/v1/status');
   }
 

@@ -117,7 +117,7 @@ fn observers_with_lifetime_probe() -> (
     let controller = Arc::new(EngineGraphController::new(
         Arc::new(ProcessorExchange::new(1)),
         "endpoint",
-        tonenari_audio_graph::RenderFormat {
+        mixrelay_audio_graph::RenderFormat {
             sample_rate: 48_000,
             block_frames: 128,
         },

@@ -4,9 +4,9 @@ use std::sync::{
 };
 
 use arc_swap::{ArcSwap, Guard};
+use mixrelay_audio_graph::ExecutionPlan;
 use parking_lot::Mutex;
 use thiserror::Error;
-use tonenari_audio_graph::ExecutionPlan;
 
 mod render;
 
@@ -422,7 +422,7 @@ impl AudioEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tonenari_audio_graph::{
+    use mixrelay_audio_graph::{
         CompileContext, CompileLimits, GraphCompiler, GraphDocument, RenderFormat,
     };
 

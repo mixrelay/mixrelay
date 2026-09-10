@@ -2,15 +2,15 @@
 //! and pre/post epoch checks also reject a restart within the same mapping.
 use super::EndpointSnapshot;
 use crate::endpoint_registry::CallbackEndpoint;
-use tonenari_macos_transport::{
+use mixrelay_macos_transport::{
     endpoint_transport::{
-        EndpointClockSnapshot, tn_endpoint_transport_clock_snapshot,
-        tn_endpoint_transport_incarnation,
+        EndpointClockSnapshot, mr_endpoint_transport_clock_snapshot,
+        mr_endpoint_transport_incarnation,
     },
     shared_audio_buffer::{
-        tn_shared_audio_buffer_producer_activity, tn_shared_audio_buffer_read,
-        tn_shared_audio_buffer_stats, tn_shared_audio_buffer_try_begin_epoch,
-        tn_shared_audio_buffer_write,
+        mr_shared_audio_buffer_producer_activity, mr_shared_audio_buffer_read,
+        mr_shared_audio_buffer_stats, mr_shared_audio_buffer_try_begin_epoch,
+        mr_shared_audio_buffer_write,
     },
 };
 
@@ -21,26 +21,26 @@ pub(super) fn snapshot(endpoint: &CallbackEndpoint<'_>) -> Option<EndpointSnapsh
     };
     // SAFETY: the registry pin owns the complete initialized transport; both output
     // locals have the exact ABI extent and remain disjoint through these calls.
-    if !unsafe { tn_endpoint_transport_clock_snapshot(endpoint.transport(), &raw mut result.clock) }
+    if !unsafe { mr_endpoint_transport_clock_snapshot(endpoint.transport(), &raw mut result.clock) }
         || !unsafe {
-            tn_endpoint_transport_incarnation(endpoint.transport(), result.incarnation.as_mut_ptr())
+            mr_endpoint_transport_incarnation(endpoint.transport(), result.incarnation.as_mut_ptr())
         }
     {
         return None;
     }
     // SAFETY: optional disabled rings are null, which these read-only shared-buffer
     // accessors explicitly accept. Enabled rings remain owned by the endpoint pin.
-    let render = unsafe { tn_shared_audio_buffer_stats(endpoint.render_buffer()) };
+    let render = unsafe { mr_shared_audio_buffer_stats(endpoint.render_buffer()) };
     result.render_epoch = render.epoch;
-    result.capture_epoch = unsafe { tn_shared_audio_buffer_stats(endpoint.capture_buffer()) }.epoch;
+    result.capture_epoch = unsafe { mr_shared_audio_buffer_stats(endpoint.capture_buffer()) }.epoch;
     result.published_through = render.published_through_frame;
     result.render_activity =
-        unsafe { tn_shared_audio_buffer_producer_activity(endpoint.render_buffer()) };
+        unsafe { mr_shared_audio_buffer_producer_activity(endpoint.render_buffer()) };
     result.render_channels = endpoint.spec().render_channels;
     result.capture_channels = endpoint.spec().capture_channels;
     let mut after = EndpointClockSnapshot::default();
     // SAFETY: the same transport remains pinned; after is separate writable ABI storage.
-    if !unsafe { tn_endpoint_transport_clock_snapshot(endpoint.transport(), &raw mut after) }
+    if !unsafe { mr_endpoint_transport_clock_snapshot(endpoint.transport(), &raw mut after) }
         || after.epoch != result.clock.epoch
         || after.sample_rate != result.clock.sample_rate
         || after.running != result.clock.running
@@ -77,15 +77,15 @@ pub(super) fn read_for(
         }
         let buffer = endpoint.render_buffer();
         // SAFETY: the checked channel width selects this live, pin-owned render ring.
-        if unsafe { tn_shared_audio_buffer_stats(buffer) }.epoch != expected.render_epoch {
+        if unsafe { mr_shared_audio_buffer_stats(buffer) }.epoch != expected.render_epoch {
             return 0;
         }
         // SAFETY: the endpoint pin retains the live mapping; channel geometry
         // matches this slice and frame_count validated its exact writable extent.
         let count =
-            unsafe { tn_shared_audio_buffer_read(buffer, frame, samples.as_mut_ptr(), frames) };
+            unsafe { mr_shared_audio_buffer_read(buffer, frame, samples.as_mut_ptr(), frames) };
         // SAFETY: the ring remains pinned across the transfer and this follow-up read.
-        if unsafe { tn_shared_audio_buffer_stats(buffer) }.epoch != expected.render_epoch
+        if unsafe { mr_shared_audio_buffer_stats(buffer) }.epoch != expected.render_epoch
             || !matches(endpoint, expected)
         {
             return 0;
@@ -113,10 +113,10 @@ pub(super) fn write_for(
     // concurrent writers/rearm; immutable samples remain borrowed for this call only.
     endpoint.spec().capture_channels == channels
         && matches(endpoint, expected)
-        && unsafe { tn_shared_audio_buffer_stats(endpoint.capture_buffer()) }.epoch
+        && unsafe { mr_shared_audio_buffer_stats(endpoint.capture_buffer()) }.epoch
             == expected.capture_epoch
         && unsafe {
-            tn_shared_audio_buffer_write(
+            mr_shared_audio_buffer_write(
                 endpoint.capture_buffer(),
                 expected.capture_epoch,
                 frame,
@@ -140,5 +140,5 @@ pub(super) fn begin_for(endpoint: &CallbackEndpoint<'_>, expected: &EndpointSnap
     // SAFETY: the endpoint pin retains the initialized writable capture mapping;
     // the buffer's producer claim arbitrates rearm against active PCM publication.
     matches(endpoint, expected)
-        && unsafe { tn_shared_audio_buffer_try_begin_epoch(endpoint.capture_buffer()) } != 0
+        && unsafe { mr_shared_audio_buffer_try_begin_epoch(endpoint.capture_buffer()) } != 0
 }

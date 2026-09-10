@@ -6,7 +6,7 @@ Both processes use the current shared-buffer ABI and the required XPC
 rejected before an attachment or producer lease is granted. There is no raw-frame
 or previous-protocol mode. `native/macos/common/source_control.rs` owns the codec.
 
-`TNApplicationClock` follows the existing sample buffer, at its required byte
+`MRApplicationClock` follows the existing sample buffer, at its required byte
 length rounded up to a 64-byte boundary. Both sides validate the complete mapped
 length, alignment, magic, exact version/header length and lock-free atomics before
 use. The trailer contains integers and atomics only, never local pointers.
@@ -38,7 +38,7 @@ and filter reset. Rate-only tap changes refresh through native control code;
 unsupported layout changes are explicit errors requiring session recreation.
 
 The consumer rejects unacknowledged rates and stale epochs.
-`tn_engine_source_registry_clock` exposes actual native frame progression
+`mr_engine_source_registry_clock` exposes actual native frame progression
 for the engine pacer; the caller must detect lack of progression/stalls rather
 than treating a stored running flag as proof of an advancing clock.
 

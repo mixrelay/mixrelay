@@ -7,16 +7,16 @@ recipe. The singleton diagnostic implementation and its probe were removed on
 2026-09-10: the current product uses independently identified devices and rejects
 the old `default` identity. No running device or user setting was removed.
 
-**CoreAudio `BufferFrameSize` readback in the ToneNari engine process does not
+**CoreAudio `BufferFrameSize` readback in the MixRelay engine process does not
 prove that another application's native HAL callback quantum was changed.**
 The attempted full sample-rate / buffer-pair registration was removed from the
 macOS runtime after live integration contradicted that assumption.
 
-ToneNari's own virtual endpoint uses direct shared memory, not an
+MixRelay's own virtual endpoint uses direct shared memory, not an
 `AudioDeviceIOProc` in the engine process. Its audio worker consumes real native
 frame credits published by other applications' HAL I/O. Changing the engine
 process's otherwise-unused CoreAudio client I/O buffer does not control those
-applications. The app's buffer setting controls the **maximum ToneNari DSP
+applications. The app's buffer setting controls the **maximum MixRelay DSP
 processing slice**; the worker preserves differently-sized native callback
 remainders. Nominal sample rate remains a genuine device-global setting and
 continues to use request, observed confirmation, and OS-to-app rate following.
@@ -29,7 +29,7 @@ The public property description alone does not establish cross-process sharing:
 ## Observed evidence, including the rejected inference
 
 Before installation, a read-only process resolved exact UID
-`io.tonenari.audio.endpoint.default` to device 651 and read 512 buffer frames,
+`io.mixrelay.audio.endpoint.default` to device 651 and read 512 buffer frames,
 settable, with an inclusive 15–4096 range. The app showed 256 frames. The initial
 claim that these values proved a broken shared-device setting was **incorrect**:
 they described different clients / processing boundaries.
@@ -71,7 +71,7 @@ claimed.
   `macos_devices/buffer_control.rs` and `buffer_transaction.rs`. Their tests cover
   invalid geometry, absent observations, bounded acknowledgement, rejected writes,
   cancellation and preservation of external changes. The native snapshot/setter
-  boundary is `TNDeviceIO.c`; Rust fixtures do not prove every CoreAudio ABI failure.
+  boundary is `MRDeviceIO.c`; Rust fixtures do not prove every CoreAudio ABI failure.
 - The removed singleton helper, header, standalone tests and manual probe were
   absent from current application and Cargo fixture build inputs. Their historical
   coverage figures describe only that removed implementation, not the current engine.

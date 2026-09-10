@@ -35,7 +35,7 @@ it is not fabricated as a successful full block.
 
 ## Focused verification
 
-`cargo test -p tonenari-audio-engine -p tonenari-audio-io`: 39 tests passed
+`cargo test -p mixrelay-audio-engine -p mixrelay-audio-io`: 39 tests passed
 (22 engine, 17 audio-io), including the new 375-cycle regression.
 
 The regression uses the same 48 kHz stereo, four-frame DSP fixture, same 375
@@ -54,7 +54,7 @@ This is a deterministic counter-correctness comparison, not a throughput benchma
 or a live 128-frame/one-second device measurement. Every cycle also checks zeroed
 PCM output and unchanged zero output-overflow count.
 
-`cargo check -p tonenari-engine-service --all-targets` and strict clippy for
+`cargo check -p mixrelay-engine-service --all-targets` and strict clippy for
 audio-engine/engine-service passed on the macOS host.
 
 Native tests cover initial/unknown/invalid states, every activity value across an

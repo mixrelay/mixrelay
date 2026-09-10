@@ -57,7 +57,7 @@ function escaped(value) { return String(value).replaceAll('|', '\\|').replaceAll
 function render(matrix) {
   const gates = openGates(matrix);
   const text = [
-    '# ToneNari 기능 / OS 동등성 매트릭스', '',
+    '# MixRelay 기능 / OS 동등성 매트릭스', '',
     '> Generated from feature-parity-matrix.json. Edit JSON, then run node scripts/check-feature-parity.mjs.', '',
     '기준: ' + matrix.updatedAt + '. 기능 동등성과 플러그인 형식 동일성은 다릅니다. 단위 테스트·빌드는 native acceptance를 대신하지 않습니다.', '',
     '**열린 출시 게이트: ' + gates.length + '개 (P0 ' + gates.filter((f) => f.priority === 'P0').length + ', P1 ' + gates.filter((f) => f.priority === 'P1').length + '). 전 OS 완료 선언 불가.**', '',

@@ -3,7 +3,7 @@ use super::{
     native::{self, BufferInfo, System},
     queues,
 };
-use crate::callback_clock::tn_callback_clock_discontinuities;
+use crate::callback_clock::mr_callback_clock_discontinuities;
 use std::{
     ffi::{CStr, c_char, c_void},
     ptr,
@@ -14,7 +14,7 @@ use std::{
 /// # Safety
 /// IO remains initialized and retained through this atomic observation.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_ticks(io: *mut DeviceIo) -> u64 {
+pub unsafe extern "C" fn mr_device_io_ticks(io: *mut DeviceIo) -> u64 {
     // SAFETY: only independently atomic progress is read from the retained owner.
     unsafe { io.as_ref() }.map_or(0, |io| io.progress.ticks.load(Acquire))
 }
@@ -23,7 +23,7 @@ pub unsafe extern "C" fn tn_device_io_ticks(io: *mut DeviceIo) -> u64 {
 /// # Safety
 /// IO remains initialized and retained through this atomic observation.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_native_frames(io: *mut DeviceIo) -> u64 {
+pub unsafe extern "C" fn mr_device_io_native_frames(io: *mut DeviceIo) -> u64 {
     // SAFETY: only independently atomic progress is read from the retained owner.
     unsafe { io.as_ref() }.map_or(0, |io| io.progress.native_frames.load(Acquire))
 }
@@ -32,7 +32,7 @@ pub unsafe extern "C" fn tn_device_io_native_frames(io: *mut DeviceIo) -> u64 {
 /// # Safety
 /// IO remains initialized and retained through this atomic observation.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_graph_frames(io: *mut DeviceIo) -> u64 {
+pub unsafe extern "C" fn mr_device_io_graph_frames(io: *mut DeviceIo) -> u64 {
     // SAFETY: only independently atomic progress is read from the retained owner.
     unsafe { io.as_ref() }.map_or(0, |io| io.progress.graph_frames.load(Acquire))
 }
@@ -43,7 +43,7 @@ pub unsafe extern "C" fn tn_device_io_graph_frames(io: *mut DeviceIo) -> u64 {
 /// frames*channels readable floats disjoint from queue storage; frames above 4096
 /// are rejected before accessing PCM. The opposite ring cursor may run concurrently.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_graph_write(
+pub unsafe extern "C" fn mr_device_io_graph_write(
     io: *mut DeviceIo,
     samples: *const f32,
     frames: u32,
@@ -58,7 +58,7 @@ pub unsafe extern "C" fn tn_device_io_graph_write(
 /// frames*channels writable floats disjoint from queue storage; frames above 4096
 /// are rejected before accessing PCM. The opposite ring cursor may run concurrently.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_worker_read(
+pub unsafe extern "C" fn mr_device_io_worker_read(
     io: *mut DeviceIo,
     samples: *mut f32,
     frames: u32,
@@ -73,7 +73,7 @@ pub unsafe extern "C" fn tn_device_io_worker_read(
 /// frames*channels readable floats disjoint from queue storage; frames above 4096
 /// are rejected before accessing PCM. The opposite ring cursor may run concurrently.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_worker_write(
+pub unsafe extern "C" fn mr_device_io_worker_write(
     io: *mut DeviceIo,
     samples: *const f32,
     frames: u32,
@@ -87,7 +87,7 @@ pub unsafe extern "C" fn tn_device_io_worker_write(
 /// # Safety
 /// UID is a readable NUL-terminated string for this call; it is copied into the owner.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_create(
+pub unsafe extern "C" fn mr_device_io_create(
     uid: *const c_char,
     input: bool,
     channels: u32,
@@ -106,7 +106,7 @@ pub unsafe extern "C" fn tn_device_io_create(
 /// UID satisfies create's contract. Non-null group is the matching live aggregate
 /// owner and remains retained until this device's acknowledged destruction.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_create_group(
+pub unsafe extern "C" fn mr_device_io_create_group(
     group: *mut c_void,
     uid: *const c_char,
     input: bool,
@@ -114,7 +114,7 @@ pub unsafe extern "C" fn tn_device_io_create_group(
     rate: u32,
 ) -> *mut DeviceIo {
     // SAFETY: delegates the same immutable UID contract to creation.
-    let io = unsafe { tn_device_io_create(uid, input, channels, rate) };
+    let io = unsafe { mr_device_io_create(uid, input, channels, rate) };
     // SAFETY: unpublished new owner has no concurrent accesses or native registration.
     if let Some(owner) = unsafe { io.as_mut() } {
         owner.selection.group = group;
@@ -128,7 +128,7 @@ pub unsafe extern "C" fn tn_device_io_create_group(
 /// IO is retained; the sole engine control worker excludes other control calls.
 /// Prior registration must have drained before prepare touches callback-local state.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_connect_status(io: *mut DeviceIo, expected: u32) -> i32 {
+pub unsafe extern "C" fn mr_device_io_connect_status(io: *mut DeviceIo, expected: u32) -> i32 {
     // SAFETY: stable context retained by its one control owner; only control cell mutates.
     unsafe { io.as_ref() }.map_or(-2, |io| unsafe { control::connect(io, expected) })
 }
@@ -137,16 +137,16 @@ pub unsafe extern "C" fn tn_device_io_connect_status(io: *mut DeviceIo, expected
 /// # Safety
 /// Same retained sole-control-owner contract as `connect_status`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_connect(io: *mut DeviceIo) -> bool {
+pub unsafe extern "C" fn mr_device_io_connect(io: *mut DeviceIo) -> bool {
     // SAFETY: exact forwarding of the control ownership contract.
-    unsafe { tn_device_io_connect_status(io, 0) == 0 }
+    unsafe { mr_device_io_connect_status(io, 0) == 0 }
 }
 
 /// Attempts stop/unregister once. False leaves the entire callback context retained.
 /// # Safety
 /// Sole control owner retains IO and excludes connect/disconnect/destruction calls.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_disconnect(io: *mut DeviceIo) -> bool {
+pub unsafe extern "C" fn mr_device_io_disconnect(io: *mut DeviceIo) -> bool {
     // SAFETY: callbacks touch only disjoint callback cells/queues/atomics.
     unsafe { io.as_ref() }.is_none_or(|io| unsafe { control::disconnect(io) })
 }
@@ -157,7 +157,7 @@ pub unsafe extern "C" fn tn_device_io_disconnect(io: *mut DeviceIo) -> bool {
 /// Caller is the sole allocation owner and has stopped worker/graph readers.
 /// On success no pointer or reference may be used again; callbacks were drained.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_destroy(io: *mut DeviceIo) -> bool {
+pub unsafe extern "C" fn mr_device_io_destroy(io: *mut DeviceIo) -> bool {
     // SAFETY: the outer allocation owner has stopped graph/worker roles.
     unsafe { destroy_with(io, |io| control::disconnect(io)) }
 }
@@ -186,7 +186,7 @@ pub(super) unsafe fn destroy_with(
 /// IO has no registered callback, and control excludes all other mutation. Context
 /// and hook remain valid until IO teardown; hook never retains native buffers.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_render_hook(
+pub unsafe extern "C" fn mr_device_io_render_hook(
     io: *mut DeviceIo,
     context: *mut c_void,
     hook: Option<RenderHook>,
@@ -204,7 +204,7 @@ pub unsafe extern "C" fn tn_device_io_render_hook(
 /// # Safety
 /// IO retained; each output is exclusively writable u32 storage disjoint from IO.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_direct_binding(
+pub unsafe extern "C" fn mr_device_io_direct_binding(
     io: *mut DeviceIo,
     device: *mut u32,
     offset: *mut u32,
@@ -233,7 +233,7 @@ pub unsafe extern "C" fn tn_device_io_direct_binding(
 /// # Safety
 /// The single control owner excludes connection state changes during this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_alive(io: *mut DeviceIo) -> bool {
+pub unsafe extern "C" fn mr_device_io_alive(io: *mut DeviceIo) -> bool {
     // SAFETY: control-only query never touches callback scratch or queue cursors.
     unsafe { io.as_ref() }.is_some_and(|io| unsafe { control::alive(io, &System) })
 }
@@ -242,7 +242,7 @@ pub unsafe extern "C" fn tn_device_io_alive(io: *mut DeviceIo) -> bool {
 /// # Safety
 /// Sole control owner excludes connection writes; IO remains retained.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_native_rate(io: *mut DeviceIo) -> u32 {
+pub unsafe extern "C" fn mr_device_io_native_rate(io: *mut DeviceIo) -> u32 {
     // SAFETY: callback does not access Control, and control calls are serialized.
     unsafe { io.as_ref() }.map_or(0, |io| unsafe { (*io.control.get()).connection.rate })
 }
@@ -251,7 +251,7 @@ pub unsafe extern "C" fn tn_device_io_native_rate(io: *mut DeviceIo) -> u32 {
 /// # Safety
 /// Sole control owner excludes connection writes; aggregate owner remains retained.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_clock_device(io: *mut DeviceIo) -> u32 {
+pub unsafe extern "C" fn mr_device_io_clock_device(io: *mut DeviceIo) -> u32 {
     // SAFETY: serialized control reads only immutable selection and connection cell.
     unsafe { io.as_ref() }.map_or(0, |io| unsafe { control::clock_device(io, &System) })
 }
@@ -260,7 +260,7 @@ pub unsafe extern "C" fn tn_device_io_clock_device(io: *mut DeviceIo) -> u32 {
 /// # Safety
 /// IO retained and info exclusively owns a complete `BufferInfo` disjoint from IO.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_buffer_info(
+pub unsafe extern "C" fn mr_device_io_buffer_info(
     io: *mut DeviceIo,
     info: *mut BufferInfo,
 ) -> bool {
@@ -284,13 +284,13 @@ pub unsafe extern "C" fn tn_device_io_buffer_info(
 
 /// Reads native buffer frames. Missing property returns zero; no state is changed.
 #[unsafe(no_mangle)]
-pub extern "C" fn tn_device_buffer_size(device: u32) -> u32 {
+pub extern "C" fn mr_device_buffer_size(device: u32) -> u32 {
     native::buffer_size(device)
 }
 
 /// Writes one buffer-size property; the engine owns validation and readback policy.
 #[unsafe(no_mangle)]
-pub extern "C" fn tn_device_buffer_write(device: u32, frames: u32) -> bool {
+pub extern "C" fn mr_device_buffer_write(device: u32, frames: u32) -> bool {
     native::buffer_write(device, frames)
 }
 
@@ -298,7 +298,7 @@ pub extern "C" fn tn_device_buffer_write(device: u32, frames: u32) -> bool {
 /// # Safety
 /// IO and both initialized rings remain retained throughout the observation.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_overflows(io: *mut DeviceIo) -> u64 {
+pub unsafe extern "C" fn mr_device_io_overflows(io: *mut DeviceIo) -> u64 {
     // SAFETY: ring stats access immutable geometry and atomics only.
     unsafe { io.as_ref() }.map_or(0, |io| {
         io.native_ring
@@ -312,7 +312,7 @@ pub unsafe extern "C" fn tn_device_io_overflows(io: *mut DeviceIo) -> u64 {
 /// # Safety
 /// The engine retains the complete initialized IO owner until return.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_queued(io: *mut DeviceIo, graph: bool) -> u32 {
+pub unsafe extern "C" fn mr_device_io_queued(io: *mut DeviceIo, graph: bool) -> u32 {
     // SAFETY: immutable ring geometry and atomic diagnostics only.
     unsafe { io.as_ref() }.map_or(0, |io| io.ring(graph).stats().queued)
 }
@@ -321,7 +321,7 @@ pub unsafe extern "C" fn tn_device_io_queued(io: *mut DeviceIo, graph: bool) -> 
 /// # Safety
 /// The engine retains IO through this atomic observation.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_quantum(io: *mut DeviceIo, graph: bool) -> u32 {
+pub unsafe extern "C" fn mr_device_io_quantum(io: *mut DeviceIo, graph: bool) -> u32 {
     // SAFETY: only independently atomic progress is observed.
     unsafe { io.as_ref() }.map_or(0, |io| {
         if graph {
@@ -336,7 +336,7 @@ pub unsafe extern "C" fn tn_device_io_quantum(io: *mut DeviceIo, graph: bool) ->
 /// # Safety
 /// IO remains retained; no callback-owned cell is accessed by the requesting owner.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_output_epoch(io: *mut DeviceIo, epoch: u64) {
+pub unsafe extern "C" fn mr_device_io_output_epoch(io: *mut DeviceIo, epoch: u64) {
     // SAFETY: this control path publishes one atomic request only.
     if let Some(io) = unsafe { io.as_ref() } {
         io.progress.output_epoch.store(epoch, Release);
@@ -347,10 +347,10 @@ pub unsafe extern "C" fn tn_device_io_output_epoch(io: *mut DeviceIo, epoch: u64
 /// # Safety
 /// IO remains initialized and retained until this atomic observation ends.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_clock_discontinuities(io: *mut DeviceIo) -> u64 {
+pub unsafe extern "C" fn mr_device_io_clock_discontinuities(io: *mut DeviceIo) -> u64 {
     // SAFETY: shared retained owner and clock's atomic publication only.
     unsafe { io.as_ref() }.map_or(0, |io| unsafe {
-        tn_callback_clock_discontinuities(&raw const io.clock)
+        mr_callback_clock_discontinuities(&raw const io.clock)
     })
 }
 
@@ -358,7 +358,7 @@ pub unsafe extern "C" fn tn_device_io_clock_discontinuities(io: *mut DeviceIo) -
 /// # Safety
 /// Sole SRC worker executes this call; IO remains retained and no other consumer overlaps.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_worker_discard(io: *mut DeviceIo) {
+pub unsafe extern "C" fn mr_device_io_worker_discard(io: *mut DeviceIo) {
     // SAFETY: immutable owner lookup followed by the worker-exclusive consumer action.
     if let Some(io) = unsafe { io.as_ref() } {
         unsafe { queues::worker_discard(io) };
@@ -370,7 +370,7 @@ pub unsafe extern "C" fn tn_device_io_worker_discard(io: *mut DeviceIo) {
 /// Serialized graph consumer, retained IO, and writable frames*channels output
 /// floats disjoint from queue storage. Frames above 4096 are rejected without access.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_graph_read(
+pub unsafe extern "C" fn mr_device_io_graph_read(
     io: *mut DeviceIo,
     samples: *mut f32,
     frames: u32,

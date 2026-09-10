@@ -1,4 +1,4 @@
-# ToneNari macOS engine service
+# MixRelay macOS engine service
 
 This is the launchd-activated control-plane companion for the macOS HAL plug-in.
 The executable entry point is Rust; the native layer is limited to the named
@@ -7,7 +7,7 @@ by macOS.
 
 The service creates an unlinked temporary backing file, maps and initializes a
 duplex endpoint transport, and responds only to the versioned endpoint request
-defined by `TNHALControlProtocol`. No PCM crosses XPC. The HAL receives a
+defined by `MRHALControlProtocol`. No PCM crosses XPC. The HAL receives a
 duplicated descriptor and performs its own full layout and channel validation.
 
 After initialization, the Rust worker prepares a stereo virtual-I/O

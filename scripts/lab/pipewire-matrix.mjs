@@ -7,10 +7,10 @@ import { rawPcmArgs, parsePwDump } from "./pipewire-cli.mjs";
 // Run only in the owned transient engine harness, never against a user graph.
 assert.equal(process.platform, "linux");
 assert.equal(process.argv[2], "--run");
-const pid = Number(process.env.TONENARI_LAB_OWNED_ENGINE_PID);
+const pid = Number(process.env.MIXRELAY_LAB_OWNED_ENGINE_PID);
 assert.ok(Number.isSafeInteger(pid) && pid > 1, "Use guest-native-matrix-check.sh");
 const base = "http://127.0.0.1:19341/api/v1";
-const prefix = "io.tonenari.lab-native";
+const prefix = "io.mixrelay.lab-native";
 async function api(path, body) {
   const response = await fetch(`${base}/${path}`, { method: body ? "PUT" : "GET",
     headers: body ? { "content-type": "application/json" } : {},
@@ -25,7 +25,7 @@ async function until(check, message) {
 }
 function inventory() { return parsePwDump(execFileSync("pw-dump", { encoding: "utf8", timeout: 5000 })); }
 function ownNodes() { return inventory().filter(o => o.type === "PipeWire:Interface:Node" &&
-  o.info?.props?.["node.name"]?.startsWith("io.tonenari.")); }
+  o.info?.props?.["node.name"]?.startsWith("io.mixrelay.")); }
 const initial = await api("graph");
 assert.equal(initial.revision, 1);
 assert.equal(initial.nodes.length, 1);
@@ -36,13 +36,13 @@ async function apply(nodes, edges = []) {
 }
 async function empty() {
   await apply([]);
-  await until(() => ownNodes().every(o => o.info.props["node.name"] === "io.tonenari.graph"), "Retired endpoint leaked");
+  await until(() => ownNodes().every(o => o.info.props["node.name"] === "io.mixrelay.graph"), "Retired endpoint leaked");
   assert.equal((await api("status")).audioSession.processingState, "running", "Empty graph stopped its native clock");
 }
 function endpoint(input, output) {
   const stream = n => ({ channels: n, channelLayout: n === 2 ? "stereo" : "discrete" });
   return { id: "lab-native", type: "virtual_endpoint", config: {
-    id: "lab-native", displayName: "ToneNari isolated channel test", render: input ? stream(input) : null,
+    id: "lab-native", displayName: "MixRelay isolated channel test", render: input ? stream(input) : null,
     capture: output ? stream(output) : null, supportedSampleRates: [48000], defaultSampleRate: 48000 } };
 }
 function edge(source, destination, index) {

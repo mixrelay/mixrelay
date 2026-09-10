@@ -1,15 +1,15 @@
 use super::DeviceIo;
 use crate::{
     audio_buffer::{self, AudioBufferList},
-    callback_clock::tn_callback_clock_record_values,
-    device_buffers::{tn_device_buffers_frames, tn_device_buffers_transfer},
+    callback_clock::mr_callback_clock_record_values,
+    device_buffers::{mr_device_buffers_frames, mr_device_buffers_transfer},
 };
+use mixrelay_pcm_ring::{mr_pcm_ring_discard, mr_pcm_ring_read_available, mr_pcm_ring_write};
 use std::{
     ffi::c_void,
     ptr,
     sync::atomic::Ordering::{Acquire, Relaxed, Release},
 };
-use tonenari_pcm_ring::{tn_pcm_ring_discard, tn_pcm_ring_read_available, tn_pcm_ring_write};
 
 #[repr(C)]
 #[derive(Default)]
@@ -33,7 +33,7 @@ pub(super) struct Timestamp {
 /// The worker and graph each own only their opposite queue cursors. Timestamp
 /// pointers are null or native `AudioTimeStamp` values retained for the call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_io_process(
+pub unsafe extern "C" fn mr_device_io_process(
     _device: u32,
     _now: *const c_void,
     input: *const c_void,
@@ -64,7 +64,7 @@ pub unsafe extern "C" fn tn_device_io_process(
         return 0;
     }
     // SAFETY: full native metadata extent retained for this callback.
-    let frames = unsafe { tn_device_buffers_frames(buffers, callback.selection) };
+    let frames = unsafe { mr_device_buffers_frames(buffers, callback.selection) };
     if frames == 0 {
         io.progress.invalid.store(true, Release);
         return 0;
@@ -112,17 +112,17 @@ unsafe fn transfer(
         let epoch = io.progress.output_epoch.load(Acquire);
         if callback.prime || callback.epoch != epoch {
             // SAFETY: native output IOProc is this ring's sole consumer.
-            unsafe { tn_pcm_ring_discard(ring) };
+            unsafe { mr_pcm_ring_discard(ring) };
             callback.prime = false;
             callback.epoch = epoch;
         }
         // SAFETY: sole native consumer and callback-owned, full-width scratch.
-        unsafe { tn_pcm_ring_read_available(ring, callback.scratch.as_mut_ptr(), frames) };
+        unsafe { mr_pcm_ring_read_available(ring, callback.scratch.as_mut_ptr(), frames) };
     }
     // SAFETY: scratch is disjoint from native PCM; callback owns the selected output
     // or immutable input. Geometry was admitted for at most MAX_FRAMES*channels.
     if !unsafe {
-        tn_device_buffers_transfer(
+        mr_device_buffers_transfer(
             buffers,
             callback.selection,
             callback.scratch.as_mut_ptr(),
@@ -133,7 +133,7 @@ unsafe fn transfer(
     }
     if io.selection.input {
         // SAFETY: IOProc is native input ring's sole producer; scratch remains live.
-        unsafe { tn_pcm_ring_write(ring, callback.scratch.as_ptr(), frames) };
+        unsafe { mr_pcm_ring_write(ring, callback.scratch.as_ptr(), frames) };
     }
 
     true
@@ -167,7 +167,7 @@ unsafe fn record_clock(io: &DeviceIo, timestamp: *const c_void, frames: u32) {
     });
     // SAFETY: callback serialized by registration; clock writer uses its own UnsafeCell.
     unsafe {
-        tn_callback_clock_record_values(
+        mr_callback_clock_record_values(
             ptr::from_ref(&io.clock).cast_mut(),
             sample,
             host,

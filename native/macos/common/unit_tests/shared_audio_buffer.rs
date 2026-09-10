@@ -28,8 +28,8 @@ struct DuplexMapping {
 impl DuplexMapping {
     fn new() -> Self {
         use crate::endpoint_transport::{
-            EndpointTransportConfig, tn_endpoint_transport_initialize,
-            tn_endpoint_transport_required_bytes,
+            EndpointTransportConfig, mr_endpoint_transport_initialize,
+            mr_endpoint_transport_required_bytes,
         };
         let config = EndpointTransportConfig {
             endpoint_id: [9; 16],
@@ -37,7 +37,7 @@ impl DuplexMapping {
             render_channels: 1,
             capture_channels: 1,
         };
-        let size = unsafe { tn_endpoint_transport_required_bytes(&raw const config) };
+        let size = unsafe { mr_endpoint_transport_required_bytes(&raw const config) };
         // Darwin MAP_ANON|MAP_SHARED; prepare every allocation before fork.
         let memory = unsafe { mmap(ptr::null_mut(), size, 3, 0x1001, -1, 0) };
         assert_ne!(
@@ -51,7 +51,7 @@ impl DuplexMapping {
             size,
         };
         assert!(
-            !unsafe { tn_endpoint_transport_initialize(memory, size, &raw const config) }.is_null()
+            !unsafe { mr_endpoint_transport_initialize(memory, size, &raw const config) }.is_null()
         );
         result
     }
@@ -59,10 +59,10 @@ impl DuplexMapping {
         self.memory.as_ptr().cast()
     }
     fn render(&self) -> *mut SharedAudioBuffer {
-        unsafe { crate::endpoint_transport::tn_endpoint_transport_render_buffer(self.transport()) }
+        unsafe { crate::endpoint_transport::mr_endpoint_transport_render_buffer(self.transport()) }
     }
     fn capture(&self) -> *mut SharedAudioBuffer {
-        unsafe { crate::endpoint_transport::tn_endpoint_transport_capture_buffer(self.transport()) }
+        unsafe { crate::endpoint_transport::mr_endpoint_transport_capture_buffer(self.transport()) }
     }
 }
 impl Drop for DuplexMapping {
@@ -157,13 +157,13 @@ unsafe impl Sync for Buffer {}
 
 impl Buffer {
     fn new(capacity: u32, channels: u32) -> Self {
-        let size = tn_shared_audio_buffer_required_bytes(capacity, channels);
+        let size = mr_shared_audio_buffer_required_bytes(capacity, channels);
         let layout = Layout::from_size_align(size, align_of::<SharedAudioBuffer>()).unwrap();
         let memory = NonNull::new(unsafe { alloc_zeroed(layout) })
             .unwrap_or_else(|| handle_alloc_error(layout));
         // SAFETY: this allocation is exclusive, aligned and exactly large enough.
         let pointer = unsafe {
-            tn_shared_audio_buffer_initialize(memory.as_ptr().cast(), size, capacity, channels)
+            mr_shared_audio_buffer_initialize(memory.as_ptr().cast(), size, capacity, channels)
         };
         assert!(!pointer.is_null());
         Self {
@@ -180,7 +180,7 @@ impl Buffer {
         let channels = self.header().channels as usize;
         assert_eq!(samples.len() % channels, 0);
         unsafe {
-            tn_shared_audio_buffer_write(
+            mr_shared_audio_buffer_write(
                 self.pointer,
                 self.stats().epoch,
                 start,
@@ -193,7 +193,7 @@ impl Buffer {
         let channels = self.header().channels as usize;
         assert_eq!(samples.len() % channels, 0);
         unsafe {
-            tn_shared_audio_buffer_read(
+            mr_shared_audio_buffer_read(
                 self.pointer,
                 start,
                 samples.as_mut_ptr(),
@@ -202,7 +202,7 @@ impl Buffer {
         }
     }
     fn stats(&self) -> SharedAudioBufferStats {
-        unsafe { tn_shared_audio_buffer_stats(self.pointer) }
+        unsafe { mr_shared_audio_buffer_stats(self.pointer) }
     }
 }
 impl Drop for Buffer {
@@ -223,13 +223,13 @@ fn abi_layout_and_geometry_are_bounded() {
         std::mem::offset_of!(SharedAudioBuffer, published_through_frame),
         64
     );
-    assert_eq!(tn_shared_audio_buffer_required_bytes(4, 2), 144);
+    assert_eq!(mr_shared_audio_buffer_required_bytes(4, 2), 144);
     assert_ne!(
-        tn_shared_audio_buffer_required_bytes(MAX_CAPACITY, MAX_CHANNELS),
+        mr_shared_audio_buffer_required_bytes(MAX_CAPACITY, MAX_CHANNELS),
         0
     );
     for (capacity, channels) in [(0, 2), (3, 2), (MAX_CAPACITY * 2, 2), (4, 0), (4, 65)] {
-        assert_eq!(tn_shared_audio_buffer_required_bytes(capacity, channels), 0);
+        assert_eq!(mr_shared_audio_buffer_required_bytes(capacity, channels), 0);
     }
 }
 
@@ -241,26 +241,26 @@ fn initialization_and_attach_reject_invalid_or_old_geometry() {
     // SAFETY: all tested pointers are either null or inside the owned allocation.
     // Corruptions are exclusive and restored before any PCM/atomic user resumes.
     unsafe {
-        assert!(tn_shared_audio_buffer_initialize(ptr::null_mut(), size, 8, 2).is_null());
-        assert!(tn_shared_audio_buffer_initialize(memory, size - 1, 8, 2).is_null());
+        assert!(mr_shared_audio_buffer_initialize(ptr::null_mut(), size, 8, 2).is_null());
+        assert!(mr_shared_audio_buffer_initialize(memory, size - 1, 8, 2).is_null());
         assert!(
-            tn_shared_audio_buffer_initialize(buffer.memory.as_ptr().add(1).cast(), size - 1, 8, 2)
+            mr_shared_audio_buffer_initialize(buffer.memory.as_ptr().add(1).cast(), size - 1, 8, 2)
                 .is_null()
         );
-        assert_eq!(tn_shared_audio_buffer_attach(memory, size), buffer.pointer);
-        assert!(tn_shared_audio_buffer_attach(memory, size - 1).is_null());
-        assert!(tn_shared_audio_buffer_attach(memory, 71).is_null());
-        assert!(tn_shared_audio_buffer_attach(ptr::null_mut(), size).is_null());
+        assert_eq!(mr_shared_audio_buffer_attach(memory, size), buffer.pointer);
+        assert!(mr_shared_audio_buffer_attach(memory, size - 1).is_null());
+        assert!(mr_shared_audio_buffer_attach(memory, 71).is_null());
+        assert!(mr_shared_audio_buffer_attach(ptr::null_mut(), size).is_null());
         (*buffer.pointer).version = 2;
-        assert!(tn_shared_audio_buffer_attach(memory, size).is_null());
+        assert!(mr_shared_audio_buffer_attach(memory, size).is_null());
         (*buffer.pointer).version = VERSION;
         (*buffer.pointer).capacity_mask = 0;
-        assert!(tn_shared_audio_buffer_attach(memory, size).is_null());
+        assert!(mr_shared_audio_buffer_attach(memory, size).is_null());
         (*buffer.pointer).capacity_mask = 7;
         (*buffer.pointer).magic = 0;
-        assert!(tn_shared_audio_buffer_attach(memory, size).is_null());
+        assert!(mr_shared_audio_buffer_attach(memory, size).is_null());
         (*buffer.pointer).magic = MAGIC;
-        assert_eq!(tn_shared_audio_buffer_attach(memory, size), buffer.pointer);
+        assert_eq!(mr_shared_audio_buffer_attach(memory, size), buffer.pointer);
     }
 }
 
@@ -284,20 +284,20 @@ fn pcm_bits_activity_and_counters_roundtrip() {
         }
     );
     unsafe {
-        assert!(tn_shared_audio_buffer_is_lock_free(buffer.pointer));
-        assert_eq!(tn_shared_audio_buffer_capacity(buffer.pointer), 8);
-        assert_eq!(tn_shared_audio_buffer_channels(buffer.pointer), 2);
+        assert!(mr_shared_audio_buffer_is_lock_free(buffer.pointer));
+        assert_eq!(mr_shared_audio_buffer_capacity(buffer.pointer), 8);
+        assert_eq!(mr_shared_audio_buffer_channels(buffer.pointer), 2);
         for activity in 0..=3 {
-            tn_shared_audio_buffer_set_producer_activity(buffer.pointer, activity);
+            mr_shared_audio_buffer_set_producer_activity(buffer.pointer, activity);
             assert_eq!(
-                tn_shared_audio_buffer_producer_activity(buffer.pointer),
+                mr_shared_audio_buffer_producer_activity(buffer.pointer),
                 activity
             );
         }
-        tn_shared_audio_buffer_set_producer_activity(buffer.pointer, 99);
-        assert_eq!(tn_shared_audio_buffer_producer_activity(buffer.pointer), 0);
+        mr_shared_audio_buffer_set_producer_activity(buffer.pointer, 99);
+        assert_eq!(mr_shared_audio_buffer_producer_activity(buffer.pointer), 0);
         assert_eq!(
-            tn_shared_audio_buffer_stats(ptr::null()),
+            mr_shared_audio_buffer_stats(ptr::null()),
             SharedAudioBufferStats::default()
         );
     }
@@ -322,11 +322,11 @@ fn pending_request_is_idempotent_and_blocks_old_pcm_until_writer_rearms() {
     let buffer = Buffer::new(8, 1);
     assert!(buffer.write(100, &[0.5; 4]));
     unsafe {
-        assert_eq!(tn_shared_audio_buffer_request_epoch(buffer.pointer), 1);
-        assert_eq!(tn_shared_audio_buffer_request_epoch(buffer.pointer), 1);
-        assert!(tn_shared_audio_buffer_epoch_pending(buffer.pointer));
-        assert!(!tn_shared_audio_buffer_requires_replacement(buffer.pointer));
-        assert_eq!(tn_shared_audio_buffer_published_through(buffer.pointer), 0);
+        assert_eq!(mr_shared_audio_buffer_request_epoch(buffer.pointer), 1);
+        assert_eq!(mr_shared_audio_buffer_request_epoch(buffer.pointer), 1);
+        assert!(mr_shared_audio_buffer_epoch_pending(buffer.pointer));
+        assert!(!mr_shared_audio_buffer_requires_replacement(buffer.pointer));
+        assert_eq!(mr_shared_audio_buffer_published_through(buffer.pointer), 0);
     }
     assert_eq!(buffer.stats().epoch, 0);
     assert!(!buffer.write(104, &[1.0]));
@@ -334,8 +334,8 @@ fn pending_request_is_idempotent_and_blocks_old_pcm_until_writer_rearms() {
     assert_eq!(buffer.read(100, &mut output), 0);
     assert!(output.iter().all(|sample| sample.to_bits() == 0));
     unsafe {
-        assert_eq!(tn_shared_audio_buffer_try_begin_epoch(buffer.pointer), 2);
-        assert!(!tn_shared_audio_buffer_epoch_pending(buffer.pointer));
+        assert_eq!(mr_shared_audio_buffer_try_begin_epoch(buffer.pointer), 2);
+        assert!(!mr_shared_audio_buffer_epoch_pending(buffer.pointer));
     }
     assert_eq!(buffer.read(100, &mut output), 0);
     assert!(buffer.write(0, &[0.25; 4]));
@@ -353,20 +353,20 @@ fn exhausted_mapping_never_reuses_a_remote_readers_generation() {
     assert!(old.write(0, &[0.75]));
     for expected in 2..=MAX_EPOCH {
         assert_eq!(
-            unsafe { tn_shared_audio_buffer_try_begin_epoch(old.pointer) },
+            unsafe { mr_shared_audio_buffer_try_begin_epoch(old.pointer) },
             expected
         );
     }
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(old.pointer) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(old.pointer) },
         0
     );
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(old.pointer) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(old.pointer) },
         0
     );
-    assert!(unsafe { tn_shared_audio_buffer_epoch_pending(old.pointer) });
-    assert!(unsafe { tn_shared_audio_buffer_requires_replacement(old.pointer) });
+    assert!(unsafe { mr_shared_audio_buffer_epoch_pending(old.pointer) });
+    assert!(unsafe { mr_shared_audio_buffer_requires_replacement(old.pointer) });
     // The generation-one stamp is not cleared or reused in this live mapping.
     assert_eq!(
         unsafe { old.header().stamp_cell(0) }.load(Ordering::Acquire),
@@ -377,15 +377,15 @@ fn exhausted_mapping_never_reuses_a_remote_readers_generation() {
     assert_eq!(fresh.read(0, &mut output), 0);
     assert_eq!(output[0].to_bits(), 0);
     assert_eq!(fresh.stats().epoch, 1);
-    assert!(!unsafe { tn_shared_audio_buffer_requires_replacement(fresh.pointer) });
+    assert!(!unsafe { mr_shared_audio_buffer_requires_replacement(fresh.pointer) });
     assert_eq!(old.read(0, &mut output), 0);
 }
 
 #[test]
 fn replacement_signal_distinguishes_pending_rearm_from_exhaustion() {
     let buffer = Buffer::new(4, 1);
-    assert!(!unsafe { tn_shared_audio_buffer_requires_replacement(ptr::null()) });
-    assert!(!unsafe { tn_shared_audio_buffer_requires_replacement(buffer.pointer) });
+    assert!(!unsafe { mr_shared_audio_buffer_requires_replacement(ptr::null()) });
+    assert!(!unsafe { mr_shared_audio_buffer_requires_replacement(buffer.pointer) });
     // Deterministic boundary setup uses only an atomic store; no PCM writer or
     // reader is active while this test moves the generation near exhaustion.
     buffer
@@ -394,25 +394,25 @@ fn replacement_signal_distinguishes_pending_rearm_from_exhaustion() {
         .store(MAX_EPOCH - 1, Ordering::Release);
     unsafe {
         assert_eq!(
-            tn_shared_audio_buffer_request_epoch(buffer.pointer),
+            mr_shared_audio_buffer_request_epoch(buffer.pointer),
             MAX_EPOCH - 1
         );
-        assert!(tn_shared_audio_buffer_epoch_pending(buffer.pointer));
-        assert!(!tn_shared_audio_buffer_requires_replacement(buffer.pointer));
+        assert!(mr_shared_audio_buffer_epoch_pending(buffer.pointer));
+        assert!(!mr_shared_audio_buffer_requires_replacement(buffer.pointer));
         assert_eq!(
-            tn_shared_audio_buffer_try_begin_epoch(buffer.pointer),
+            mr_shared_audio_buffer_try_begin_epoch(buffer.pointer),
             MAX_EPOCH
         );
-        assert!(!tn_shared_audio_buffer_epoch_pending(buffer.pointer));
-        assert!(!tn_shared_audio_buffer_requires_replacement(buffer.pointer));
+        assert!(!mr_shared_audio_buffer_epoch_pending(buffer.pointer));
+        assert!(!mr_shared_audio_buffer_requires_replacement(buffer.pointer));
         assert_eq!(
-            tn_shared_audio_buffer_request_epoch(buffer.pointer),
+            mr_shared_audio_buffer_request_epoch(buffer.pointer),
             MAX_EPOCH
         );
-        assert!(tn_shared_audio_buffer_requires_replacement(buffer.pointer));
-        assert_eq!(tn_shared_audio_buffer_try_begin_epoch(buffer.pointer), 0);
-        assert_eq!(tn_shared_audio_buffer_try_begin_epoch(buffer.pointer), 0);
-        assert!(tn_shared_audio_buffer_requires_replacement(buffer.pointer));
+        assert!(mr_shared_audio_buffer_requires_replacement(buffer.pointer));
+        assert_eq!(mr_shared_audio_buffer_try_begin_epoch(buffer.pointer), 0);
+        assert_eq!(mr_shared_audio_buffer_try_begin_epoch(buffer.pointer), 0);
+        assert!(mr_shared_audio_buffer_requires_replacement(buffer.pointer));
     }
     assert_eq!(
         buffer.header().epoch.load(Ordering::Acquire),
@@ -425,7 +425,7 @@ fn stale_writer_watermark_cannot_become_a_new_epoch_timeline() {
     let buffer = Buffer::new(4, 1);
     assert!(buffer.write(100, &[1.0]));
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(buffer.pointer) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(buffer.pointer) },
         2
     );
     // Deterministic interleaving: an old writer reaches publication after rearm.
@@ -436,7 +436,7 @@ fn stale_writer_watermark_cannot_become_a_new_epoch_timeline() {
     assert_eq!(buffer.stats().epoch, 2);
     assert_eq!(buffer.stats().published_through_frame, 0);
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_published_through(buffer.pointer) },
+        unsafe { mr_shared_audio_buffer_published_through(buffer.pointer) },
         0
     );
     assert!(buffer.write(0, &[2.0]));
@@ -448,12 +448,12 @@ fn rearm_after_observation_rejects_old_format_pcm_before_publication() {
     let buffer = Buffer::new(4, 1);
     let observed_epoch = buffer.stats().epoch;
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(buffer.pointer) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(buffer.pointer) },
         2
     );
     let old_format_samples = [0.75; 2];
     assert!(!unsafe {
-        tn_shared_audio_buffer_write(
+        mr_shared_audio_buffer_write(
             buffer.pointer,
             observed_epoch,
             0,
@@ -486,7 +486,7 @@ fn active_producer_defers_control_rearm_without_exposing_a_new_epoch() {
     // Control must invalidate, not advance, while that producer is still active.
     let producer = buffer.header().claim_producer().unwrap();
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(buffer.pointer) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(buffer.pointer) },
         0
     );
     assert_eq!(
@@ -495,15 +495,15 @@ fn active_producer_defers_control_rearm_without_exposing_a_new_epoch() {
     );
     assert_eq!(buffer.stats().epoch, 0);
     assert!(!unsafe {
-        tn_shared_audio_buffer_write(buffer.pointer, observed_epoch, 0, [1.0].as_ptr(), 1)
+        mr_shared_audio_buffer_write(buffer.pointer, observed_epoch, 0, [1.0].as_ptr(), 1)
     });
     drop(producer);
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(buffer.pointer) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(buffer.pointer) },
         2
     );
     assert!(!unsafe {
-        tn_shared_audio_buffer_write(buffer.pointer, observed_epoch, 0, [1.0].as_ptr(), 1)
+        mr_shared_audio_buffer_write(buffer.pointer, observed_epoch, 0, [1.0].as_ptr(), 1)
     });
     assert!(buffer.write(0, &[0.5]));
     assert_eq!(buffer.stats().written_frames, 1);
@@ -514,7 +514,7 @@ fn rejected_write_paths_release_the_claim_and_never_accept_inactive_epoch() {
     let buffer = Buffer::new(4, 1);
     for expected_epoch in [0, REQUESTED | 1, MAX_EPOCH + 1, 2] {
         assert!(!unsafe {
-            tn_shared_audio_buffer_write(buffer.pointer, expected_epoch, 0, [1.0].as_ptr(), 1)
+            mr_shared_audio_buffer_write(buffer.pointer, expected_epoch, 0, [1.0].as_ptr(), 1)
         });
         assert_eq!(buffer.header().producer_busy.load(Ordering::Acquire), 0);
     }
@@ -522,7 +522,7 @@ fn rejected_write_paths_release_the_claim_and_never_accept_inactive_epoch() {
     assert!(!buffer.write(0, &[0.75]));
     assert_eq!(buffer.header().producer_busy.load(Ordering::Acquire), 0);
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(buffer.pointer) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(buffer.pointer) },
         2
     );
 }
@@ -530,8 +530,8 @@ fn rejected_write_paths_release_the_claim_and_never_accept_inactive_epoch() {
 #[test]
 fn exited_producer_is_retired_by_drained_hal_start_and_only_new_mapping_recovers() {
     use crate::hal_io::{
-        HalIoContext, tn_hal_io_begin_stream, tn_hal_io_bind, tn_hal_io_requires_replacement,
-        tn_hal_io_unbind, tn_hal_io_write_render,
+        HalIoContext, mr_hal_io_begin_stream, mr_hal_io_bind, mr_hal_io_requires_replacement,
+        mr_hal_io_unbind, mr_hal_io_write_render,
     };
     let old = DuplexMapping::new();
     let render = old.render();
@@ -544,17 +544,17 @@ fn exited_producer_is_retired_by_drained_hal_start_and_only_new_mapping_recovers
     assert_eq!(unsafe { &*render }.producer_busy.load(Ordering::Acquire), 1);
     let mut restarted_hal = HalIoContext::new(1, 1).unwrap();
     unsafe {
-        assert!(tn_hal_io_bind(
+        assert!(mr_hal_io_bind(
             &raw mut restarted_hal,
             old.transport().cast()
         ));
         // Actual native caller authority: the old producer process has exited,
         // and this replacement context has never admitted any IO callbacks.
-        assert!(!tn_hal_io_begin_stream(&raw mut restarted_hal));
-        assert!(tn_hal_io_requires_replacement(&raw mut restarted_hal));
-        assert!(tn_shared_audio_buffer_requires_replacement(render));
-        assert_eq!(tn_shared_audio_buffer_try_begin_epoch(render), 0);
-        assert!(!tn_shared_audio_buffer_write(
+        assert!(!mr_hal_io_begin_stream(&raw mut restarted_hal));
+        assert!(mr_hal_io_requires_replacement(&raw mut restarted_hal));
+        assert!(mr_shared_audio_buffer_requires_replacement(render));
+        assert_eq!(mr_shared_audio_buffer_try_begin_epoch(render), 0);
+        assert!(!mr_shared_audio_buffer_write(
             render,
             1,
             0,
@@ -566,51 +566,51 @@ fn exited_producer_is_retired_by_drained_hal_start_and_only_new_mapping_recovers
             1,
             "retirement must never clear an abandoned claim"
         );
-        tn_hal_io_unbind(&raw mut restarted_hal);
+        mr_hal_io_unbind(&raw mut restarted_hal);
         let fresh = DuplexMapping::new();
-        assert!(tn_hal_io_bind(
+        assert!(mr_hal_io_bind(
             &raw mut restarted_hal,
             fresh.transport().cast()
         ));
-        assert!(tn_hal_io_begin_stream(&raw mut restarted_hal));
-        assert!(!tn_hal_io_requires_replacement(&raw mut restarted_hal));
-        assert!(tn_hal_io_write_render(
+        assert!(mr_hal_io_begin_stream(&raw mut restarted_hal));
+        assert!(!mr_hal_io_requires_replacement(&raw mut restarted_hal));
+        assert!(mr_hal_io_write_render(
             &raw mut restarted_hal,
             0,
             [0.25].as_ptr(),
             1
         ));
-        tn_hal_io_unbind(&raw mut restarted_hal);
+        mr_hal_io_unbind(&raw mut restarted_hal);
     }
 }
 
 #[test]
 fn hal_start_never_retires_the_remote_capture_writer_on_contention() {
     use crate::hal_io::{
-        HalIoContext, tn_hal_io_begin_stream, tn_hal_io_bind, tn_hal_io_requires_replacement,
-        tn_hal_io_unbind,
+        HalIoContext, mr_hal_io_begin_stream, mr_hal_io_bind, mr_hal_io_requires_replacement,
+        mr_hal_io_unbind,
     };
     let mapping = DuplexMapping::new();
     let capture = unsafe { &*mapping.capture() };
     let remote_writer = capture.claim_producer().unwrap();
     let mut hal = HalIoContext::new(1, 1).unwrap();
     unsafe {
-        assert!(tn_hal_io_bind(&raw mut hal, mapping.transport().cast()));
-        assert!(tn_hal_io_begin_stream(&raw mut hal));
-        assert!(!tn_hal_io_requires_replacement(&raw mut hal));
-        assert!(!tn_shared_audio_buffer_requires_replacement(
+        assert!(mr_hal_io_bind(&raw mut hal, mapping.transport().cast()));
+        assert!(mr_hal_io_begin_stream(&raw mut hal));
+        assert!(!mr_hal_io_requires_replacement(&raw mut hal));
+        assert!(!mr_shared_audio_buffer_requires_replacement(
             mapping.capture()
         ));
-        assert!(tn_shared_audio_buffer_epoch_pending(mapping.capture()));
-        tn_hal_io_unbind(&raw mut hal);
+        assert!(mr_shared_audio_buffer_epoch_pending(mapping.capture()));
+        mr_hal_io_unbind(&raw mut hal);
     }
     drop(remote_writer);
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(mapping.capture()) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(mapping.capture()) },
         2
     );
-    assert!(!unsafe { tn_shared_audio_buffer_retire_busy_producer_after_drain(mapping.capture()) });
-    assert!(!unsafe { tn_shared_audio_buffer_retire_busy_producer_after_drain(ptr::null_mut()) });
+    assert!(!unsafe { mr_shared_audio_buffer_retire_busy_producer_after_drain(mapping.capture()) });
+    assert!(!unsafe { mr_shared_audio_buffer_retire_busy_producer_after_drain(ptr::null_mut()) });
 }
 
 #[test]
@@ -628,7 +628,7 @@ fn packed_end_overflow_and_same_epoch_stamp_aba_are_rejected() {
     assert!(!buffer.write(u64::MAX, &[4.0, 5.0]));
     assert_eq!(buffer.read(FRAME_MASK, &mut output[..1]), 0);
     unsafe {
-        assert!(tn_shared_audio_buffer_write(
+        assert!(mr_shared_audio_buffer_write(
             buffer.pointer,
             buffer.stats().epoch,
             u64::MAX,
@@ -636,7 +636,7 @@ fn packed_end_overflow_and_same_epoch_stamp_aba_are_rejected() {
             0
         ));
         assert_eq!(
-            tn_shared_audio_buffer_read(buffer.pointer, u64::MAX, ptr::null_mut(), 0),
+            mr_shared_audio_buffer_read(buffer.pointer, u64::MAX, ptr::null_mut(), 0),
             0
         );
     }
@@ -658,7 +658,7 @@ fn concurrent_ring_replacement_never_returns_torn_multichannel_pcm() {
             }
         });
         for _ in 0..FRAMES {
-            let end = unsafe { tn_shared_audio_buffer_published_through(buffer.pointer) };
+            let end = unsafe { mr_shared_audio_buffer_published_through(buffer.pointer) };
             if end == 0 {
                 continue;
             }

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { ControlPort, ToneNariStatus } from '../../core/control-port/types';
+import type { ControlPort, MixRelayStatus } from '../../core/control-port/types';
 
 /** Completion-based polling prevents overlapping native requests and cancels on unmount. */
 export function useAudioStatus(controlPort: ControlPort, refreshToken = 0) {
   const [status, setStatus] = useState<{
     controlPort: ControlPort;
     refreshToken: number;
-    value: ToneNariStatus;
+    value: MixRelayStatus;
   } | null>(null);
   useEffect(() => {
     let cancelled = false;

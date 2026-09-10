@@ -251,7 +251,7 @@ mod platform {
                 return Err(EditorHostFailure::HostWindow);
             }
             let title = CString::new(title).unwrap_or_else(|_| {
-                CString::new("ToneNari plug-in").expect("static title has no NUL")
+                CString::new("MixRelay plug-in").expect("static title has no NUL")
             });
             let mut protocols = [self.wm_delete_window];
             // SAFETY: the new window is owned by this display. Xlib copies title/protocol data.

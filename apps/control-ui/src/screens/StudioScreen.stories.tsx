@@ -10,7 +10,7 @@ const graph: RuntimeGraphDocument = {
     {
       config: {
         id: 'b22d9d37-d558-4a0c-a77a-d1b79bc5032b',
-        displayName: 'ToneNari IO',
+        displayName: 'MixRelay IO',
         supportedSampleRates: [48_000],
         reference: { render: true, capture: true },
         capture: { channelLayout: 'stereo', channels: 2 },
@@ -18,7 +18,7 @@ const graph: RuntimeGraphDocument = {
         render: { channelLayout: 'stereo', channels: 2 },
       },
       id: 'default-virtual-io',
-      label: 'ToneNari Virtual I/O',
+      label: 'MixRelay Virtual I/O',
       type: 'virtual_endpoint',
     },
   ],
@@ -60,12 +60,12 @@ const controlPort = new StorybookMockControlPort({
       uid: 'BuiltInSpeakerDevice',
     },
     {
-      displayName: 'ToneNari Virtual I/O',
+      displayName: 'MixRelay Virtual I/O',
       inputChannels: 2,
       isDefaultInput: false,
       isDefaultOutput: false,
       outputChannels: 2,
-      uid: 'io.tonenari.virtual-io',
+      uid: 'io.mixrelay.virtual-io',
     },
   ],
   graph,

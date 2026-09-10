@@ -47,7 +47,7 @@ pub(crate) async fn select_recording_path(
     let mut dialog = rfd::AsyncFileDialog::new()
         .set_title(title.as_deref().unwrap_or("Save recording"))
         .add_filter("WAV", &["wav"])
-        .set_file_name("ToneNari.wav");
+        .set_file_name("MixRelay.wav");
     if let Ok(desktop) = app.path().desktop_dir() {
         dialog = dialog.set_directory(desktop);
     }
@@ -74,7 +74,7 @@ mod tests {
     #[test]
     fn uses_resolved_desktop_without_creating_files() {
         let desktop = std::env::current_dir().unwrap().join("바탕 화면");
-        let name = "ToneNari-2026-09-09_12-34-56-789_1.wav";
+        let name = "MixRelay-2026-09-09_12-34-56-789_1.wav";
         assert_eq!(
             desktop_recording_path(&desktop, name).unwrap(),
             desktop.join(name)

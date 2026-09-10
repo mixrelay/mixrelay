@@ -19,7 +19,7 @@ the exact manifest for each synchronized snapshot, not inferred from a host pass
 
 The seven selected packages were `audio-io`, `audio-graph`, `audio-engine`,
 `control-protocol`, `control-server`, `processor-host`, and `engine-service`, each
-with the `tonenari-` prefix. The job runs `cargo build --locked ... --lib --bins`,
+with the `mixrelay-` prefix. The job runs `cargo build --locked ... --lib --bins`,
 `cargo test --locked ... --lib --bins`, then `cargo clippy --locked ... --all-targets
 -- -D warnings`.
 
@@ -60,12 +60,12 @@ These are common implementation tests on Windows, not new native device or
 desktop command-proxy execution evidence.
 
 Read-only VM inspection before and after v5 found the exact LAB root `OK`,
-`ProblemCode=0`, `ConfigFlags=0`, all eight endpoints `OK`, and no ToneNari
+`ProblemCode=0`, `ConfigFlags=0`, all eight endpoints `OK`, and no MixRelay
 process. The previously recorded pending-restart bit remains unchanged. No
 PnP operation, restart, scheduled task, security change, or native acceptance
 run was performed for v5. The source manifest, guest hashes, output log, and
 pre/postflight snapshots are retained as `windows-integration/v5-*` evidence;
-guest job `C:\ToneNariLab\windows-parity-integration-v5` exited zero.
+guest job `C:\MixRelayLab\windows-parity-integration-v5` exited zero.
 
 New shared behavior exercised in v2/v3 includes independent persisted graph
 documents, switching/renaming/restart, graph/catalog concurrency revisions,
@@ -83,10 +83,10 @@ not a native audio or installed plug-in test.
 ## Evidence and remaining gates
 
 Evidence directory:
-`/Volumes/Linear 1/test/tonenari/evidence/native-device-parity-20260907/windows-integration/`.
+`/Volumes/Linear 1/test/mixrelay/evidence/native-device-parity-20260907/windows-integration/`.
 Each run retains a source SHA-256 manifest, independent guest hashes, and the
 complete build/test/Clippy log. Guest unique jobs remain under
-`C:\ToneNariLab\windows-parity-integration-v1`, `-v2`, and `-v3`.
+`C:\MixRelayLab\windows-parity-integration-v1`, `-v2`, and `-v3`.
 
 No native PnP, physical multichannel hardware, installed VST3/CLAP processing or
 editor lifecycle, long-duration drift, desktop UI interaction, or x64 Windows

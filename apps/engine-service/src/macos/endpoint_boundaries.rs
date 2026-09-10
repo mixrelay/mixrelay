@@ -3,12 +3,12 @@ use super::{
     callback_source::{HalRender, RenderTransport},
     callback_transport::{CaptureTransport, HalCapture, NativeCapture, recover_capture_epoch},
 };
-use tonenari_audio_engine::{ExternalBinding, RenderPlan};
-use tonenari_audio_io::{
+use mixrelay_audio_engine::{ExternalBinding, RenderPlan};
+use mixrelay_audio_io::{
     VirtualEndpointId,
     process::{InputActivity, ProcessReport, TransferOutcome},
 };
-use tonenari_macos_transport::endpoint_identity::parse_endpoint_id;
+use mixrelay_macos_transport::endpoint_identity::parse_endpoint_id;
 
 /// Control-prepared ownership for one canonical device. No graph reference owns
 /// a second converter or a second capture writer for the same device.
@@ -293,7 +293,7 @@ impl EndpointBoundaries<NativeCapture> {
             let id = parse_endpoint_id(identity.as_str())
                 .ok_or_else(|| format!("invalid virtual device identity: {}", identity.as_str()))?;
             let audio =
-                tonenari_engine_service::endpoint_service::audio_config(id).ok_or_else(|| {
+                mixrelay_engine_service::endpoint_service::audio_config(id).ok_or_else(|| {
                     format!(
                         "virtual device transport is not prepared: {}",
                         identity.as_str()

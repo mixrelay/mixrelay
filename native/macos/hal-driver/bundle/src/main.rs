@@ -25,7 +25,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         .join("../../../..")
         .canonicalize()?;
     let output = output_directory(&env::args_os().skip(1).collect::<Vec<_>>(), &root)?;
-    let identity = env::var_os("TONENARI_CODESIGN_IDENTITY").unwrap_or_else(|| "-".into());
+    let identity = env::var_os("MIXRELAY_CODESIGN_IDENTITY").unwrap_or_else(|| "-".into());
     build::bundle(&root, &output, &identity)
 }
 
@@ -36,7 +36,7 @@ fn output_directory(
     match arguments {
         [] => Ok(root.join("target/macos-hal")),
         [flag, directory] if flag == "--output" && !directory.is_empty() => Ok(directory.into()),
-        _ => Err("usage: cargo run -p tonenari-hal-bundle -- [--output DIRECTORY]".into()),
+        _ => Err("usage: cargo run -p mixrelay-hal-bundle -- [--output DIRECTORY]".into()),
     }
 }
 

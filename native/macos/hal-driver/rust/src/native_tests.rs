@@ -4,18 +4,18 @@ use std::ffi::c_void;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::sync::atomic::Ordering;
 
-use tonenari_macos_transport::control_inventory::{
-    InventoryEntry, tn_hal_control_create_inventory_snapshot,
+use mixrelay_macos_transport::control_inventory::{
+    InventoryEntry, mr_hal_control_create_inventory_snapshot,
 };
-use tonenari_macos_transport::endpoint_transport::{
+use mixrelay_macos_transport::endpoint_transport::{
     EndpointClockSnapshot, EndpointTransport, EndpointTransportConfig,
-    tn_endpoint_transport_capture_buffer, tn_endpoint_transport_clock_snapshot,
-    tn_endpoint_transport_initialize, tn_endpoint_transport_render_buffer,
-    tn_endpoint_transport_required_bytes,
+    mr_endpoint_transport_capture_buffer, mr_endpoint_transport_clock_snapshot,
+    mr_endpoint_transport_initialize, mr_endpoint_transport_render_buffer,
+    mr_endpoint_transport_required_bytes,
 };
-use tonenari_macos_transport::shared_audio_buffer::{
-    tn_shared_audio_buffer_read, tn_shared_audio_buffer_try_begin_epoch,
-    tn_shared_audio_buffer_write,
+use mixrelay_macos_transport::shared_audio_buffer::{
+    mr_shared_audio_buffer_read, mr_shared_audio_buffer_try_begin_epoch,
+    mr_shared_audio_buffer_write,
 };
 
 use super::{Fixture, changed, request};
@@ -59,7 +59,7 @@ impl Message {
             })
             .collect();
         let message = unsafe {
-            tn_hal_control_create_inventory_snapshot(entries.as_ptr(), entries.len(), generation)
+            mr_hal_control_create_inventory_snapshot(entries.as_ptr(), entries.len(), generation)
         };
         assert!(!message.is_null());
         Self(message)
@@ -72,7 +72,7 @@ impl Message {
 
     fn apply_from(&self, fixture: &Fixture, authority: u64) -> bool {
         unsafe {
-            crate::inventory::tn_hal_core_control_message(
+            crate::inventory::mr_hal_core_control_message(
                 (&raw const *fixture.registry).cast_mut(),
                 authority,
                 self.0,
@@ -83,7 +83,7 @@ impl Message {
 
 fn connect(fixture: &Fixture, authority: u64) {
     assert!(unsafe {
-        crate::inventory::tn_hal_core_control_connected(
+        crate::inventory::mr_hal_core_control_connected(
             (&raw const *fixture.registry).cast_mut(),
             authority,
         )
@@ -110,12 +110,12 @@ impl Transport {
             render_channels: render,
             capture_channels: capture,
         };
-        let size = unsafe { tn_endpoint_transport_required_bytes(&raw const config) };
+        let size = unsafe { mr_endpoint_transport_required_bytes(&raw const config) };
         assert!(size > 0);
-        let fd = tonenari_macos_transport::create_shared_memory(size, true).unwrap();
+        let fd = mixrelay_macos_transport::create_shared_memory(size, true).unwrap();
         let memory = unsafe { mmap(std::ptr::null_mut(), size, 3, 1, fd.as_raw_fd(), 0) };
         assert_ne!(memory as isize, -1);
-        let pointer = unsafe { tn_endpoint_transport_initialize(memory, size, &raw const config) };
+        let pointer = unsafe { mr_endpoint_transport_initialize(memory, size, &raw const config) };
         assert!(!pointer.is_null());
         Self {
             fd,
@@ -140,24 +140,24 @@ impl Transport {
 
     fn clock(&self) -> EndpointClockSnapshot {
         let mut clock = EndpointClockSnapshot::default();
-        assert!(unsafe { tn_endpoint_transport_clock_snapshot(self.pointer, &raw mut clock) });
+        assert!(unsafe { mr_endpoint_transport_clock_snapshot(self.pointer, &raw mut clock) });
         clock
     }
 
     fn capture<const N: usize>(&self, samples: &[f32; N], frames: u32) {
-        let buffer = unsafe { tn_endpoint_transport_capture_buffer(self.pointer) };
-        let epoch = unsafe { tn_shared_audio_buffer_try_begin_epoch(buffer) };
+        let buffer = unsafe { mr_endpoint_transport_capture_buffer(self.pointer) };
+        let epoch = unsafe { mr_shared_audio_buffer_try_begin_epoch(buffer) };
         assert!(epoch > 0);
         assert!(unsafe {
-            tn_shared_audio_buffer_write(buffer, epoch, 0, samples.as_ptr(), frames)
+            mr_shared_audio_buffer_write(buffer, epoch, 0, samples.as_ptr(), frames)
         });
     }
 
     fn render<const N: usize>(&self, frames: u32) -> [f32; N] {
         let mut samples = [0.0; N];
-        let buffer = unsafe { tn_endpoint_transport_render_buffer(self.pointer) };
+        let buffer = unsafe { mr_endpoint_transport_render_buffer(self.pointer) };
         assert_eq!(
-            unsafe { tn_shared_audio_buffer_read(buffer, 0, samples.as_mut_ptr(), frames) },
+            unsafe { mr_shared_audio_buffer_read(buffer, 0, samples.as_mut_ptr(), frames) },
             frames
         );
         samples
@@ -176,7 +176,7 @@ fn native_fixture() -> Fixture {
         changed,
         request_configuration: request,
     };
-    let registry = unsafe { crate::native::tn_hal_core_create_native(&raw const host) };
+    let registry = unsafe { crate::native::mr_hal_core_create_native(&raw const host) };
     assert!(!registry.is_null());
     fixture.registry = unsafe { Box::from_raw(registry) };
     fixture.host.registry.store(registry, Ordering::Release);

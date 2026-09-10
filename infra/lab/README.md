@@ -40,10 +40,10 @@ the resulting private image digest and package inventory with each qualified tes
 rolling updates. To extract a failed or successful build report, retain a named container:
 
 ```sh
-docker compose -f infra/lab/compose.yaml run --name tonenari-debian-check debian test
-docker cp tonenari-debian-check:/workspace/.lab/reports .lab/debian-reports
+docker compose -f infra/lab/compose.yaml run --name mixrelay-debian-check debian test
+docker cp mixrelay-debian-check:/workspace/.lab/reports .lab/debian-reports
 # Remove only this stopped, disposable container after collecting its evidence:
-docker rm tonenari-debian-check
+docker rm mixrelay-debian-check
 ```
 
 Ensure `.lab` exists first. The CLI returns nonzero for failure; do not hide it with `|| true` in CI.
@@ -77,11 +77,11 @@ Create one VM per target in UTM, keeping its disk on a volume with adequate spac
 
 | Guest name | Wizard | Initial resource budget | Installation media |
 | --- | --- | --- | --- |
-| ToneNari Debian | Virtualize / Linux, ARM64 | 4 vCPU, 6 GiB RAM, 64 GiB disk | Official Debian arm64 installer |
-| ToneNari Ubuntu | Virtualize / Linux, ARM64 | 4 vCPU, 6 GiB RAM, 64 GiB disk | Official Ubuntu arm64 installer; install a desktop if using server media |
-| ToneNari Kali | Virtualize / Linux, ARM64 | 4 vCPU, 6 GiB RAM, 64 GiB disk | Official Kali ARM64 installer, not an x64 appliance |
-| ToneNari Arch | Emulate / Linux, x86_64 | 4 vCPU, 6 GiB RAM, 64 GiB disk | Official Arch x86_64 ISO |
-| ToneNari Windows | Virtualize / Windows, ARM64 | 4 vCPU, 8 GiB RAM, 96 GiB disk | Official Windows 11 ARM64 ISO, valid license |
+| MixRelay Debian | Virtualize / Linux, ARM64 | 4 vCPU, 6 GiB RAM, 64 GiB disk | Official Debian arm64 installer |
+| MixRelay Ubuntu | Virtualize / Linux, ARM64 | 4 vCPU, 6 GiB RAM, 64 GiB disk | Official Ubuntu arm64 installer; install a desktop if using server media |
+| MixRelay Kali | Virtualize / Linux, ARM64 | 4 vCPU, 6 GiB RAM, 64 GiB disk | Official Kali ARM64 installer, not an x64 appliance |
+| MixRelay Arch | Emulate / Linux, x86_64 | 4 vCPU, 6 GiB RAM, 64 GiB disk | Official Arch x86_64 ISO |
+| MixRelay Windows | Virtualize / Windows, ARM64 | 4 vCPU, 8 GiB RAM, 96 GiB disk | Official Windows 11 ARM64 ISO, valid license |
 
 These are development budgets, not OS minimums. Sparse disks still grow; do not overcommit the
 current host's free space. Run guests sequentially initially. Follow the official
@@ -106,11 +106,11 @@ Before booting, enable HDA sound and disable clipboard/directory sharing in the 
 The optional `scripts/lab/bootstrap-linux-toolchains.sh` installs pinned toolchains under the
 existing non-root guest account, verifying Node/rustup SHA-256 values before execution. It does
 not create accounts, change passwords, or edit shell profiles. `guest-first-build.sh` expects a
-source-only archive and refuses to replace an existing `~/tonenari` guest checkout.
+source-only archive and refuses to replace an existing `~/mixrelay` guest checkout.
 
 For long UTM guest-agent commands, wrap execution with `scripts/lab/guest-job.sh <unique-id>
 <command> ...`. UTM's immediate command return is **not** a completion signal. Read both
-`<checkout>/.lab/jobs/tonenari-lab-<unique-id>/output.log` and its atomic `exit-code` file; a missing marker
+`<checkout>/.lab/jobs/mixrelay-lab-<unique-id>/output.log` and its atomic `exit-code` file; a missing marker
 means incomplete, and a nonzero marker means failed. Jobs never replace earlier evidence.
 
 `guest-desktop-build.sh` enables `tauri/custom-protocol` to embed the built frontend. A plain
@@ -133,7 +133,7 @@ wpctl status
 
 If the distribution is using PulseAudio instead, explicitly configure its PipeWire desktop
 session following distro instructions; dependency installation alone does not migrate a running
-session. Re-login as needed. Do not run ToneNari as root or start a second server over an existing
+session. Re-login as needed. Do not run MixRelay as root or start a second server over an existing
 PipeWire socket. Use both X11 and Wayland sessions when available for native plugin editors.
 After this preflight, the existing Linux development audio installer is an **explicit** separate
 step (`pnpm install:linux-dev-audio`), because it changes the guest's user service.

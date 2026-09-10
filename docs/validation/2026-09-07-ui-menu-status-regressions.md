@@ -19,7 +19,7 @@ even though the controlled menu state is open. This matches the reported inline 
 specifically than a slow enter animation would.
 
 Only `AudioGraphCanvas.test.tsx` now uses a test-local MantineProvider with `env="test"` and the
-actual ToneNari theme. Mantine's installed test mode disables the nonphysical detached-reference
+actual MixRelay theme. Mantine's installed test mode disables the nonphysical detached-reference
 decision and animation rendering. Real menu components, event callbacks, selections, focus
 behavior and pointer dismissal remain in the test. No production menu code or timeout was changed.
 These tests still do not prove browser geometry, clipping or physical pointer behavior.
@@ -38,7 +38,7 @@ missing session, old engine, no-signal, aggregate-warning and recovery cases rem
 
 ## Final validation
 
-Commands ran in `apps/control-ui` via `pnpm --filter @tonenari/control-ui exec`:
+Commands ran in `apps/control-ui` via `pnpm --filter @mixrelay/control-ui exec`:
 
 - Focused Canvas/status tests: **66 passed across two files** (14 Canvas + 52 status).
 - `vitest run --coverage.enabled=false`: **271 passed across 38 files**, twice consecutively

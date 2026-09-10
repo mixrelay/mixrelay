@@ -86,7 +86,7 @@ impl VirtualEndpointBackend for ObservedEndpoint {
     fn capabilities(&self) -> &VirtualEndpointCapabilities {
         self.base.capabilities()
     }
-    fn settings(&self) -> Option<tonenari_audio_io::VirtualEndpointSettings> {
+    fn settings(&self) -> Option<mixrelay_audio_io::VirtualEndpointSettings> {
         self.base.settings()
     }
     fn sample_rate(&self, _: &VirtualEndpointId) -> Result<u32, HostAudioBackendError> {
@@ -105,8 +105,8 @@ impl VirtualEndpointBackend for ObservedEndpoint {
 }
 #[test]
 fn catalog_selection_preserves_device_rate_independent_of_hardware_clock() {
-    use tonenari_control_protocol::{GraphCatalogAction, GraphCatalogRequest};
-    let directory = tonenari_test_support::FixtureDir::new("catalog-device-clock").unwrap();
+    use mixrelay_control_protocol::{GraphCatalogAction, GraphCatalogRequest};
+    let directory = mixrelay_test_support::FixtureDir::new("catalog-device-clock").unwrap();
     let (controller, runtime) = fixture();
     runtime.endpoint_rate.store(48_000, Ordering::Release);
     controller
@@ -365,7 +365,7 @@ fn resource_buffer_failure_rolls_back_session_without_committing_plan_or_resourc
         controller
             .change_session(SessionReconfigureRequest {
                 expected_revision: before.revision,
-                format: tonenari_audio_io::session::SessionFormat {
+                format: mixrelay_audio_io::session::SessionFormat {
                     sample_rate: requested.sample_rate,
                     block_frames: requested.block_frames,
                 },
@@ -415,7 +415,7 @@ fn preparation_failure_or_unknown_rate_never_negotiates_native_format() {
 #[test]
 fn external_format_adopts_and_warns_when_graph_catalog_staging_fails() {
     let (controller, runtime) = fixture();
-    let fixture = tonenari_test_support::FixtureDir::new("external-rate-catalog").unwrap();
+    let fixture = mixrelay_test_support::FixtureDir::new("external-rate-catalog").unwrap();
     let directory = fixture.join("catalog");
     std::fs::create_dir(&directory).unwrap();
     let path = directory.join("graphs.json");
@@ -443,7 +443,7 @@ fn format_change_never_rebuilds_hosted_state_from_a_stale_document() {
     controller.graph.write().nodes.push(NodeSpec {
         id: NodeId::from("missing-native-instance"),
         label: None,
-        config: NodeConfig::Provider(tonenari_audio_graph::ProviderNodeConfig {
+        config: NodeConfig::Provider(mixrelay_audio_graph::ProviderNodeConfig {
             type_id: "fixture:effect".into(),
             parameters: serde_json::json!({"stateBase64": "stale-client-preset"}),
         }),
@@ -476,7 +476,7 @@ fn external_buffer_only_change_preserves_pending_and_stale_revision_guards() {
     let stale = controller
         .change_session(SessionReconfigureRequest {
             expected_revision: 1,
-            format: tonenari_audio_io::session::SessionFormat {
+            format: mixrelay_audio_io::session::SessionFormat {
                 sample_rate: 48_000,
                 block_frames: 128,
             },

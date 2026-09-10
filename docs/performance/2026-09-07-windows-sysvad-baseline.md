@@ -4,13 +4,13 @@ Date: 2026-09-07. This is a correctness/reuse baseline, not product certificatio
 
 ## Result
 
-In the same Windows 11 ARM64 VM where the experimental ToneNari driver creates
+In the same Windows 11 ARM64 VM where the experimental MixRelay driver creates
 zero MMDevice endpoints, unmodified Microsoft SysVAD audio source creates **four
 render and four capture endpoints**, all PnP healthy. Explicit sample endpoints
 also complete three WASAPI open/start/transfer/stop/release cycles.
 
 This establishes a working reference for the PortCls/WaveRT framework. It does not
-identify the exact defect in the experimental miniport, nor implement the ToneNari
+identify the exact defect in the experimental miniport, nor implement the MixRelay
 transport in SysVAD. The sample capture tone is not routed audio from the engine.
 
 ## Reproducible inputs
@@ -54,7 +54,7 @@ The installed sample is `ROOT\MEDIA\0001`, hardware ID
 `Root\sysvad_ComponentizedAudioSample`, service `sysvad_componentizedaudiosample`.
 Its installed image matches the test-signed package SHA-256:
 `7C2E6495B7C63197850D65BCAE5DE87F8C7729CA568D393CC63B0BCE8E6D7988`.
-The existing ToneNari device `ROOT\MEDIA\0000` was preserved.
+The existing MixRelay device `ROOT\MEDIA\0000` was preserved.
 
 ## Stream smoke scope
 
@@ -78,13 +78,13 @@ clients have scoped cleanup; three cycles are not a memory-leak guarantee.
 
 ## Evidence and next implementation boundary
 
-Guest job directories/logs are preserved under `C:\ToneNariLab`. Host copies live
-under `/Volumes/Linear 1/test/tonenari/evidence/sysvad-baseline-20260907`.
+Guest job directories/logs are preserved under `C:\MixRelayLab`. Host copies live
+under `/Volumes/Linear 1/test/mixrelay/evidence/sysvad-baseline-20260907`.
 Local lab guard tests: **29 passed**. No unrelated source was staged or committed.
 
 Use the accepted framework reuse boundary in ADR 0011: reduce paired endpoint
 tables/INF deliberately, replace generated capture tone and render sink with the
-ToneNari PCM transport, and handle sample format conversion explicitly. Then prove
+MixRelay PCM transport, and handle sample format conversion explicitly. Then prove
 known PCM routing, 1–64 channel mapping, rates, process death and teardown. Requalify
 x64, driver isolation, release signing/HLK and endurance separately.
 
@@ -92,6 +92,6 @@ VM-only test signing and the existing scoped certificate were reused. No additio
 boot/security exception was added. The sample remains installed for comparison.
 The temporary interactive test task is removed after completion; evidence remains.
 
-No latency/CPU improvement is claimed: the old ToneNari implementation has no
+No latency/CPU improvement is claimed: the old MixRelay implementation has no
 working end-to-end device baseline for a same-condition performance comparison.
 The 0-versus-8 endpoint result is a functional comparison, not a benchmark.

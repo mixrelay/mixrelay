@@ -22,16 +22,16 @@ struct Clock {
     synchronized: u32,
 }
 unsafe extern "C" {
-    fn tn_application_clock_fixture_create(
+    fn mr_application_clock_fixture_create(
         transport: *mut *mut NativeApplicationSourceTransport,
     ) -> *mut Registry;
-    fn tn_application_clock_fixture_read(
+    fn mr_application_clock_fixture_read(
         registry: *mut Registry,
         samples: *mut f32,
         rate: u32,
     ) -> u32;
-    fn tn_application_clock_fixture_clock(registry: *mut Registry, clock: *mut Clock) -> bool;
-    fn tn_engine_source_registry_destroy(registry: *mut Registry);
+    fn mr_application_clock_fixture_clock(registry: *mut Registry, clock: *mut Clock) -> bool;
+    fn mr_engine_source_registry_destroy(registry: *mut Registry);
 }
 
 struct RegistryOwner(NonNull<Registry>);
@@ -39,7 +39,7 @@ impl RegistryOwner {
     fn create() -> (Self, ApplicationSourceTransport) {
         let mut transport = std::ptr::null_mut();
         // SAFETY: test helper returns independently owned registry and producer mappings.
-        let pointer = unsafe { tn_application_clock_fixture_create(&raw mut transport) };
+        let pointer = unsafe { mr_application_clock_fixture_create(&raw mut transport) };
         let registry = Self(NonNull::new(pointer).expect("isolated source registry"));
         (
             registry,
@@ -50,30 +50,30 @@ impl RegistryOwner {
     }
     fn read(&self, output: &mut [f32; 256], rate: u32) -> u32 {
         // SAFETY: this test is the registry's single consumer; buffer is128 stereo frames.
-        unsafe { tn_application_clock_fixture_read(self.0.as_ptr(), output.as_mut_ptr(), rate) }
+        unsafe { mr_application_clock_fixture_read(self.0.as_ptr(), output.as_mut_ptr(), rate) }
     }
     fn clock(&self) -> Clock {
         let mut clock = Clock::default();
         // SAFETY: valid owned registry, writable ABI-sized snapshot.
-        assert!(unsafe { tn_application_clock_fixture_clock(self.0.as_ptr(), &raw mut clock) });
+        assert!(unsafe { mr_application_clock_fixture_clock(self.0.as_ptr(), &raw mut clock) });
         clock
     }
 }
 impl Drop for RegistryOwner {
     fn drop(&mut self) {
         // SAFETY: the pump joins before this independently mapped registry is destroyed.
-        unsafe { tn_engine_source_registry_destroy(self.0.as_ptr()) };
+        unsafe { mr_engine_source_registry_destroy(self.0.as_ptr()) };
     }
 }
 
 struct ToneOwner(Child);
 impl ToneOwner {
     fn start() -> Self {
-        let executable = std::env::var("TONENARI_VIRTUAL_TONE_FIXTURE")
+        let executable = std::env::var("MIXRELAY_VIRTUAL_TONE_FIXTURE")
             .expect("explicit owned tone fixture path");
         let mut owned = Self(
             Command::new(executable)
-                .arg("--tonenari-virtual-only")
+                .arg("--mixrelay-virtual-only")
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()
@@ -91,7 +91,7 @@ impl ToneOwner {
             .expect("bounded tone readiness")
             .unwrap();
         reader.join().unwrap();
-        assert_eq!(ready.trim(), "ready io.tonenari.audio.endpoint.default");
+        assert_eq!(ready.trim(), "ready io.mixrelay.audio.endpoint.default");
         owned
     }
 }
@@ -163,7 +163,7 @@ fn live_owned_application_tap_v2_src_rate_changes() {
     let _tone = ToneOwner::start();
     let (registry, transport) = RegistryOwner::create();
     let capture = Arc::new(
-        CaptureProbeSession::start("io.tonenari.test-virtual-clock-source", true)
+        CaptureProbeSession::start("io.mixrelay.test-virtual-clock-source", true)
             .expect("owned process tap; permission denial requires user action, never reset"),
     );
     assert_eq!(capture.stats().channels, 2);

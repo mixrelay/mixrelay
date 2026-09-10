@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use tonenari_control_protocol::{ExternalProcessorDiagnostic, ProcessorDiscoveryStage};
+use mixrelay_control_protocol::{ExternalProcessorDiagnostic, ProcessorDiscoveryStage};
 
 use crate::{
     CatalogEntry, ProcessorCatalog, RackCatalogTarget, RackFormat, RackLocator, rack_formats,

@@ -1,10 +1,10 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { ControlPort, ToneNariStatus } from '../../core/control-port/types';
+import type { ControlPort, MixRelayStatus } from '../../core/control-port/types';
 import { useAudioStatus } from './useAudioStatus';
 
 afterEach(() => vi.useRealTimers());
-const observed: ToneNariStatus = {
+const observed: MixRelayStatus = {
   protocolVersion: 1,
   driverState: 'ready',
   sampleRate: 44100,
@@ -15,7 +15,7 @@ const observed: ToneNariStatus = {
 
 it('ignores a pre-change native response after explicit device refresh and cancels polling on unmount', async () => {
   vi.useFakeTimers();
-  let resolveOld!: (value: ToneNariStatus) => void;
+  let resolveOld!: (value: MixRelayStatus) => void;
   const getStatus = vi
     .fn()
     .mockReturnValueOnce(

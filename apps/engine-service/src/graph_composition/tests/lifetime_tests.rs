@@ -75,7 +75,7 @@ fn virtual_gain_contract_is_identical_for_authored_and_direct_reference_lowering
             &GraphCompiler::default(),
         );
         assert_eq!(direct.is_ok(), accepted, "direct gain {gain}");
-        let mut config: tonenari_audio_graph::VirtualEndpointConfig = device("X").into();
+        let mut config: mixrelay_audio_graph::VirtualEndpointConfig = device("X").into();
         config.gain_db = gain;
         let document = GraphDocument::new(
             1,

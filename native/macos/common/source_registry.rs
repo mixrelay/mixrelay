@@ -4,14 +4,14 @@
 //! control after local readers drain, never on an audio callback.
 use crate::{
     application_clock::{
-        ApplicationClock, VERSION, tn_application_clock_publish_consumer,
-        tn_application_clock_request_rate,
+        ApplicationClock, VERSION, mr_application_clock_publish_consumer,
+        mr_application_clock_request_rate,
     },
     application_source_mapping::Mapping,
     shared_audio_buffer::{
-        SharedAudioBufferStats, tn_shared_audio_buffer_read, tn_shared_audio_buffer_request_epoch,
-        tn_shared_audio_buffer_requires_replacement, tn_shared_audio_buffer_stats,
-        tn_shared_audio_buffer_try_begin_epoch,
+        SharedAudioBufferStats, mr_shared_audio_buffer_read, mr_shared_audio_buffer_request_epoch,
+        mr_shared_audio_buffer_requires_replacement, mr_shared_audio_buffer_stats,
+        mr_shared_audio_buffer_try_begin_epoch,
     },
     source_control::SourceRequest,
 };
@@ -107,7 +107,7 @@ impl Source {
         // Duplicate before any lease/epoch mutation: XPC construction and an
         // immediate subsequent replacement cannot invalidate this owned grant.
         let descriptor = self.mapping.descriptor.try_clone()?;
-        let epoch = unsafe { tn_shared_audio_buffer_try_begin_epoch(self.mapping.buffer.as_ptr()) };
+        let epoch = unsafe { mr_shared_audio_buffer_try_begin_epoch(self.mapping.buffer.as_ptr()) };
         if epoch == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::WouldBlock,
@@ -122,7 +122,7 @@ impl Source {
                     .expect("masked rate fits u32");
             if rate != 0 {
                 unsafe {
-                    tn_application_clock_request_rate(self.mapping.clock.as_ptr(), rate);
+                    mr_application_clock_request_rate(self.mapping.clock.as_ptr(), rate);
                 }
             }
             clock.clock_master.store(
@@ -136,7 +136,7 @@ impl Source {
             // remains pinned. Revoke old PCM as well as the lease before publishing
             // the replacement, including an active (not yet requested) MAX epoch.
             unsafe {
-                tn_shared_audio_buffer_request_epoch(old.mapping.buffer.as_ptr());
+                mr_shared_audio_buffer_request_epoch(old.mapping.buffer.as_ptr());
             }
         }
         clock.acknowledged_format.store(0, Ordering::Release);
@@ -165,8 +165,8 @@ impl Source {
             .map(|_| Producer(clock))
     }
     fn terminal(&self) -> bool {
-        (unsafe { tn_shared_audio_buffer_requires_replacement(self.mapping.buffer.as_ptr()) })
-            || unsafe { tn_shared_audio_buffer_stats(self.mapping.buffer.as_ptr()) }.epoch
+        (unsafe { mr_shared_audio_buffer_requires_replacement(self.mapping.buffer.as_ptr()) })
+            || unsafe { mr_shared_audio_buffer_stats(self.mapping.buffer.as_ptr()) }.epoch
                 == u64::from(u16::MAX)
             || self.mapping.clock().format_word.load(Ordering::Acquire) >> 32 == u64::from(u32::MAX)
     }
@@ -371,7 +371,7 @@ impl SourceRegistry {
         let format = clock.format_word.load(Ordering::Acquire);
         let acknowledged = clock.acknowledged_format.load(Ordering::Acquire);
         let lease = clock.producer_lease.load(Ordering::Acquire);
-        let epoch = unsafe { tn_shared_audio_buffer_stats(source.mapping.buffer.as_ptr()) }.epoch;
+        let epoch = unsafe { mr_shared_audio_buffer_stats(source.mapping.buffer.as_ptr()) }.epoch;
         let frames = clock.native_frames.load(Ordering::Acquire);
         let rate = clock.native_sample_rate.load(Ordering::Acquire);
         let running = clock.native_running.load(Ordering::Acquire);
@@ -386,7 +386,7 @@ impl SourceRegistry {
             || acknowledged != clock.acknowledged_format.load(Ordering::Acquire)
             || lease != clock.producer_lease.load(Ordering::Acquire)
             || epoch
-                != unsafe { tn_shared_audio_buffer_stats(source.mapping.buffer.as_ptr()) }.epoch
+                != unsafe { mr_shared_audio_buffer_stats(source.mapping.buffer.as_ptr()) }.epoch
         {
             return None;
         }
@@ -415,8 +415,8 @@ impl SourceRegistry {
         let timeline = unsafe { &mut *source.timeline.get() };
         let buffer = source.mapping.buffer.as_ptr();
         let clock = source.mapping.clock.as_ptr();
-        let stats = unsafe { tn_shared_audio_buffer_stats(buffer) };
-        let format = unsafe { tn_application_clock_request_rate(clock, rate) };
+        let stats = unsafe { mr_shared_audio_buffer_stats(buffer) };
+        let format = unsafe { mr_application_clock_request_rate(clock, rate) };
         let valid = format != 0
             && stats.epoch != 0
             && source
@@ -428,7 +428,7 @@ impl SourceRegistry {
         if !valid {
             timeline.started = false;
             unsafe {
-                tn_application_clock_publish_consumer(clock, stats.epoch, 0, frames, false);
+                mr_application_clock_publish_consumer(clock, stats.epoch, 0, frames, false);
             }
             return 0;
         }
@@ -436,7 +436,7 @@ impl SourceRegistry {
             // SAFETY: the consumer claim owns this timeline and the read guard
             // retains its mapping through this bounded atomic publication.
             unsafe {
-                tn_application_clock_publish_consumer(
+                mr_application_clock_publish_consumer(
                     clock,
                     stats.epoch,
                     timeline.next,
@@ -447,7 +447,7 @@ impl SourceRegistry {
             return 0;
         }
         let available = unsafe {
-            tn_shared_audio_buffer_read(buffer, timeline.next, samples.as_mut_ptr(), frames)
+            mr_shared_audio_buffer_read(buffer, timeline.next, samples.as_mut_ptr(), frames)
         };
         timeline.next += u64::from(frames);
         let valid = source
@@ -456,9 +456,9 @@ impl SourceRegistry {
             .acknowledged_format
             .load(Ordering::Acquire)
             == format
-            && stats.epoch == unsafe { tn_shared_audio_buffer_stats(buffer) }.epoch;
+            && stats.epoch == unsafe { mr_shared_audio_buffer_stats(buffer) }.epoch;
         unsafe {
-            tn_application_clock_publish_consumer(
+            mr_application_clock_publish_consumer(
                 clock,
                 stats.epoch,
                 timeline.next,
@@ -476,13 +476,13 @@ impl SourceRegistry {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn tn_engine_source_registry_create() -> *mut SourceRegistry {
+pub extern "C" fn mr_engine_source_registry_create() -> *mut SourceRegistry {
     Box::into_raw(Box::new(SourceRegistry::new()))
 }
 /// # Safety
 /// Registry was created by this module; all callers/readers have stopped.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_engine_source_registry_destroy(registry: *mut SourceRegistry) {
+pub unsafe extern "C" fn mr_engine_source_registry_destroy(registry: *mut SourceRegistry) {
     if !registry.is_null() {
         drop(unsafe { Box::from_raw(registry) });
     }
@@ -491,7 +491,7 @@ pub unsafe extern "C" fn tn_engine_source_registry_destroy(registry: *mut Source
 /// Registry/request and all output pointers are live. A successful descriptor
 /// is owned by the caller and must be closed after the attachment is consumed.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_engine_source_registry_attach_clocked(
+pub unsafe extern "C" fn mr_engine_source_registry_attach_clocked(
     registry: *mut SourceRegistry,
     request: *const SourceRequest,
     descriptor: *mut i32,
@@ -522,7 +522,7 @@ pub unsafe extern "C" fn tn_engine_source_registry_attach_clocked(
 /// Source ID is a NUL-terminated string of at most 127 bytes, or a readable
 /// 128-byte unterminated array (which is rejected).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_engine_source_id_token(id: *const c_char) -> u64 {
+pub unsafe extern "C" fn mr_engine_source_id_token(id: *const c_char) -> u64 {
     if id.is_null() {
         return 0;
     }
@@ -543,7 +543,7 @@ pub unsafe extern "C" fn tn_engine_source_id_token(id: *const c_char) -> u64 {
 /// # Safety
 /// Registry is live and output is writable and disjoint from shared memory.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_engine_source_registry_clock(
+pub unsafe extern "C" fn mr_engine_source_registry_clock(
     registry: *mut SourceRegistry,
     token: u64,
     output: *mut SourceClock,
@@ -565,7 +565,7 @@ pub unsafe extern "C" fn tn_engine_source_registry_clock(
 /// # Safety
 /// Registry remains live throughout this control call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_engine_source_registry_set_clock_master(
+pub unsafe extern "C" fn mr_engine_source_registry_set_clock_master(
     registry: *mut SourceRegistry,
     token: u64,
     master: bool,
@@ -588,7 +588,7 @@ pub unsafe extern "C" fn tn_engine_source_registry_set_clock_master(
 /// Registry is live; samples has frames*channels writable floats and does not
 /// alias the transport or another output buffer during this nonblocking call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_engine_source_registry_read_clocked(
+pub unsafe extern "C" fn mr_engine_source_registry_read_clocked(
     registry: *mut SourceRegistry,
     token: u64,
     samples: *mut f32,

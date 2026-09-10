@@ -84,14 +84,14 @@ impl<T: Send> RecoveryMailbox<T> {
 /// exclusive method borrow prevents simultaneous or reentrant activation.
 ///
 /// ```compile_fail
-/// use tonenari_audio_io::recovery::RecoveryMailbox;
+/// use mixrelay_audio_io::recovery::RecoveryMailbox;
 /// let mailbox = RecoveryMailbox::<u64>::default();
 /// let mut consumer = mailbox.try_consumer().unwrap();
 /// consumer.activate(1, |_| consumer.activate(1, |_| {}));
 /// ```
 ///
 /// ```compile_fail
-/// use tonenari_audio_io::recovery::RecoveryMailbox;
+/// use mixrelay_audio_io::recovery::RecoveryMailbox;
 /// let consumer = {
 ///     let mailbox = RecoveryMailbox::<u64>::default();
 ///     mailbox.try_consumer().unwrap()
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn recovery_activation_benchmark() {
-        if std::env::var_os("TONENARI_RECOVERY_BENCH").is_none() {
+        if std::env::var_os("MIXRELAY_RECOVERY_BENCH").is_none() {
             return;
         }
         let mailbox = RecoveryMailbox::default();

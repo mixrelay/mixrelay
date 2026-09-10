@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentType, CSSProperties, PropsWithChildren } from 'react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { tonenariTheme } from '../theme/ToneNariProvider';
+import { mixrelayTheme } from '../theme/MixRelayProvider';
 import { NodeOptionsSection } from '../ui/NodeOptionsSection';
 import { AudioGraphCanvas, type AudioGraphViewport } from './AudioGraphCanvas';
 import type { AudioGraphModel } from './model';
@@ -15,7 +15,7 @@ function CanvasTestProvider({ children }: PropsWithChildren) {
   // hide an open menu once its zero-size geometry settles, racing role queries.
   // Keep real menu events/focus behavior; only geometry and transitions use test mode.
   return (
-    <MantineProvider env="test" forceColorScheme="dark" theme={tonenariTheme}>
+    <MantineProvider env="test" forceColorScheme="dark" theme={mixrelayTheme}>
       {children}
     </MantineProvider>
   );

@@ -54,10 +54,10 @@ fn native_abi_and_all_channel_widths_preserve_pcm_bits_without_allocating() {
                 // SAFETY: complete native list, aligned disjoint source/destination extents.
                 unsafe {
                     assert_eq!(
-                        tn_device_buffers_frames(list, selection),
+                        mr_device_buffers_frames(list, selection),
                         u32::try_from(frames).unwrap()
                     );
-                    assert!(tn_device_buffers_transfer(
+                    assert!(mr_device_buffers_transfer(
                         list,
                         selection,
                         scratch.as_mut_ptr(),
@@ -72,7 +72,7 @@ fn native_abi_and_all_channel_widths_preserve_pcm_bits_without_allocating() {
             native.fill(0.0);
             // SAFETY: same owned spans, now scratch is input and native is exclusive output.
             assert!(unsafe {
-                tn_device_buffers_transfer(list, selection, scratch.as_mut_ptr(), false)
+                mr_device_buffers_transfer(list, selection, scratch.as_mut_ptr(), false)
             });
             for f in 0..frames {
                 for c in 0..channels {
@@ -330,7 +330,7 @@ fn rejected_transfer_preserves_both_caller_buffers() {
     for input in [false, true] {
         // SAFETY: complete metadata/caller storage; malformed bytes reject before PCM access.
         assert!(!unsafe {
-            tn_device_buffers_transfer(
+            mr_device_buffers_transfer(
                 (&raw const fixture).cast(),
                 selection,
                 scratch.as_mut_ptr(),
@@ -342,7 +342,7 @@ fn rejected_transfer_preserves_both_caller_buffers() {
     }
     // SAFETY: missing metadata is explicitly rejected without dereference.
     assert_eq!(
-        unsafe { tn_device_buffers_frames(std::ptr::null(), selection) },
+        unsafe { mr_device_buffers_frames(std::ptr::null(), selection) },
         0
     );
 }

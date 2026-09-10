@@ -8,7 +8,7 @@ remain open. See the [Rust integration results](../performance/2026-09-07-window
 ## Decision
 
 Use Microsoft's SysVAD as the Windows PortCls/WaveRT framework instead of continuing
-to reimplement its generic miniport lifecycle. Preserve the experimental ToneNari
+to reimplement its generic miniport lifecycle. Preserve the experimental MixRelay
 driver and its failing endpoint-enumeration evidence for comparison. Do not replace
 the product backend or advertise a working virtual device until native PCM checks pass.
 
@@ -30,19 +30,19 @@ Exact artifact/package hashes are in `infra/lab/sysvad-baseline.json`.
   stream, reduce the endpoint tables and matching INF to the product's render/capture
   pair; do not remove arbitrary interfaces simply because the code looks larger.
 - Replace the sample capture tone and render-data sink at their PCM boundaries with
-  the ToneNari transport. Preserve sample-buffer format contracts until the transport
+  the MixRelay transport. Preserve sample-buffer format contracts until the transport
   explicitly handles conversion; never reinterpret integer PCM as floats.
 - Keep graph routing, channel mapping, processors and UI in the shared user-mode engine.
   Windows driver reuse does not imply that Core Audio and PipeWire share a driver ABI.
 
-The sample tone is an intentional baseline signal, never evidence of ToneNari routing.
+The sample tone is an intentional baseline signal, never evidence of MixRelay routing.
 Similarly, a successful SYS build or control IOCTL is not an MMDevice/PCM pass.
 
 ## License and provenance
 
 The upstream repository uses MS-PL, not MIT. Retain its LICENSE and copyright notices
 with copied sources and record product changes separately. Do not relabel upstream
-code as independently authored ToneNari code. WIL retains its own license. The initial
+code as independently authored MixRelay code. WIL retains its own license. The initial
 reference source lives in the external lab volume and is not included in application
 packaging. Distribution/licensing review remains necessary when importing product code.
 
@@ -59,7 +59,7 @@ Windows Driver isolation verification (`/w`) fails and remains a product gate.
 1. Build original ARM64 projects with the official WDK MSBuild integration.
 2. Test-sign with the existing VM-local certificate; no new boot-policy exceptions.
 3. Install the baseline under its distinct sample hardware ID, preserving the current
-   ToneNari device. Record installed image hashes and enumerate native MMDevice endpoints.
+   MixRelay device. Record installed image hashes and enumerate native MMDevice endpoints.
 4. Test explicit sample render/capture endpoints in the interactive Windows session.
    Do not select the user's hardware or capture unrelated applications.
 5. Integrate product transport, then test known PCM in both directions, 1–64 channel
@@ -68,7 +68,7 @@ Windows Driver isolation verification (`/w`) fails and remains a product gate.
    do not certify native x64, other OSes, or physical-device clock drift.
 
 This is a correctness/reuse change, not a performance claim. No functioning end-to-end
-ToneNari Windows driver baseline exists yet for a comparable latency/CPU measurement.
+MixRelay Windows driver baseline exists yet for a comparable latency/CPU measurement.
 
 References:
 

@@ -23,7 +23,7 @@ pub struct Layout {
 }
 
 impl Layout {
-    /// Matches `TnTransportMap` bounds, including one-way and non-power-of-two rings.
+    /// Matches `MrTransportMap` bounds, including one-way and non-power-of-two rings.
     /// # Errors
     /// Rejects unsupported ABI dimensions before any size arithmetic or mapping.
     pub fn new(render: u32, capture: u32, rate: u32, capacity: u32) -> Result<Self, &'static str> {
@@ -87,7 +87,7 @@ impl Layout {
     pub fn matches_header(self, prefix: [u32; 7], offsets: [u64; 3]) -> bool {
         prefix
             == [
-                0x4f49_4e54,
+                0x4f49_524d,
                 2,
                 112,
                 self.capacity,
@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(LAB_LAYOUT.capture_offset(), 36864);
         assert_eq!(LAB_LAYOUT.mapping_bytes(), 53248);
         assert!(LAB_LAYOUT.matches_header(
-            [0x4f49_4e54, 2, 112, 4096, 2, 1, 48000],
+            [0x4f49_524d, 2, 112, 4096, 2, 1, 48000],
             [4096, 36864, 53248]
         ));
     }
@@ -214,7 +214,7 @@ mod tests {
         ] {
             assert!(Layout::new(args.0, args.1, args.2, args.3).is_err());
         }
-        let prefix = [0x4f49_4e54, 2, 112, 4096, 2, 1, 48000];
+        let prefix = [0x4f49_524d, 2, 112, 4096, 2, 1, 48000];
         let offsets = [4096, 36864, 53248];
         for field in 0..prefix.len() {
             let mut changed = prefix;

@@ -138,7 +138,7 @@ pub fn create(size: usize, writable: bool) -> io::Result<OwnedFd> {
 /// Transfers one descriptor to the C owner, which must close it after unmapping.
 /// Failure returns -1 and releases every acquired FD/namespace entry.
 #[unsafe(no_mangle)]
-pub(crate) extern "C" fn tn_shared_memory_create(size: usize, writable: bool) -> c_int {
+pub(crate) extern "C" fn mr_shared_memory_create(size: usize, writable: bool) -> c_int {
     create(size, writable).map_or(-1, IntoRawFd::into_raw_fd)
 }
 

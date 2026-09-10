@@ -140,7 +140,7 @@ path. Final macOS live audio and cross-graph device tests remain required.
 ## Production bundle cutover
 
 Root built the actual Universal 2 Rust HAL bundle at
-`target/macos-hal-rust-cutover/ToneNariHAL.driver`: arm64 + x86_64, exported factory,
+`target/macos-hal-rust-cutover/MixRelayHAL.driver`: arm64 + x86_64, exported factory,
 plist validation and strict ad-hoc signature verification passed. No installation
 or CoreAudio restart occurred. The old shell builder was removed and its
 package/install/check consumers now invoke the Cargo-owned builder.

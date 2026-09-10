@@ -4,7 +4,7 @@
 
 The user explicitly rejected feedback detection, prevention, and automatic correction.
 No feedback-specific routing policy, cycle-dependent delay insertion, or protection
-feature is in scope. A ToneNari device mixes app playback and graph writes into one
+feature is in scope. A MixRelay device mixes app playback and graph writes into one
 signal, available to all graph readers and OS capture. Ordinary device I/O buffer
 ownership and bounded callback scheduling are transport mechanics, not feedback control.
 This supersedes feedback-rejection wording in the historical acceptance notes below.
@@ -40,8 +40,8 @@ These are required product behavior, not optional follow-up features. The active
 goal must not be marked complete until both have implementation and runtime proof.
 
 - [ ] **Reuse a virtual device's produced output signal.** Audio routed into a named
-  ToneNari IO must be available as a source reference in the same graph and in other
-  graphs, including the user's microphone -> ToneNari IO -> headphones configuration.
+  MixRelay IO must be available as a source reference in the same graph and in other
+  graphs, including the user's microphone -> MixRelay IO -> headphones configuration.
   The 2026-09-09 clarification supersedes the earlier read-side selector: application
   playback and all graphs writing to the device form one canonical device signal.
   Graph readers and OS capture consume that same mix, projected to their channel widths.
@@ -89,11 +89,11 @@ group owner; moving a global control under a node without changing its scope is 
 
 ## Architecture baseline (2026-09-08)
 
-Current source inspection: `ToneNariHAL.c` has 4,530 lines and combines device properties, singleton device/clock state, transport replacement and XPC reconnection. `TNEngineService.c` has 547 lines and combines endpoint memory ownership and IPC; engine `lib.rs` has 1,651 lines and macOS `mod.rs` 1,087 lines. Line counts are inventory evidence, not standalone quality targets. Strict Clippy additionally identified a boolean-heavy callback state and unchecked frame-count narrowing; those need structural fixes rather than exemptions. These findings support the expanded responsibility/readability gate; they do not establish that uninspected modules are correct.
+Current source inspection: `MixRelayHAL.c` has 4,530 lines and combines device properties, singleton device/clock state, transport replacement and XPC reconnection. `MREngineService.c` has 547 lines and combines endpoint memory ownership and IPC; engine `lib.rs` has 1,651 lines and macOS `mod.rs` 1,087 lines. Line counts are inventory evidence, not standalone quality targets. Strict Clippy additionally identified a boolean-heavy callback state and unchecked frame-count narrowing; those need structural fixes rather than exemptions. These findings support the expanded responsibility/readability gate; they do not establish that uninspected modules are correct.
 
 ## Reproduction baseline
 
-Before repair, the user recreated ToneNari IO. A read-only measurement at graph revision 52 observed:
+Before repair, the user recreated MixRelay IO. A read-only measurement at graph revision 52 observed:
 
 - Input: BuiltInMicrophoneDevice mono, gain 0 dB.
 - Output: own virtual endpoint capture channels 1 and 2; the same microphone channel feeds both.
@@ -119,7 +119,7 @@ The document stayed identical across 5.203 seconds, at 96 kHz / 32 samples:
 - Underruns 2,622,705 → 2,623,333 (**+628**).
 - Overruns 7,552 → 7,573 (**+21**).
 - Discontinuities 4,689 → 4,709 (**+20**).
-- Engine PID 57150, executable path `target/debug/tonenari-engine-service`;
+- Engine PID 57150, executable path `target/debug/mixrelay-engine-service`;
   on-disk SHA-256 `2f79942f54322ce416555953866f9aea2ad2839142aca4bdd324d2fff5dcc9fb`.
 
 This is another pre-install baseline, not an improvement over revision 52:

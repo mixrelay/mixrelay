@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" || "$(id -u)" != "0" ]]; then
-  print -u2 "ToneNari development audio installation requires macOS administrator privileges"
+  print -u2 "MixRelay development audio installation requires macOS administrator privileges"
   exit 1
 fi
 
@@ -14,19 +14,19 @@ fi
 source_bundle="$1"
 service_binary="$2"
 source_plist="$3"
-installed_bundle="/Library/Audio/Plug-Ins/HAL/ToneNariHAL.driver"
-installed_plist="/Library/LaunchDaemons/io.tonenari.audio.engine.plist"
-service_target="system/io.tonenari.audio.engine"
+installed_bundle="/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver"
+installed_plist="/Library/LaunchDaemons/io.mixrelay.audio.engine.plist"
+service_target="system/io.mixrelay.audio.engine"
 
 if [[ ! -d "$source_bundle" || ! -x "$service_binary" || ! -f "$source_plist" ]]; then
-  print -u2 "ToneNari development audio artifacts are incomplete"
+  print -u2 "MixRelay development audio artifacts are incomplete"
   exit 1
 fi
-if [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$source_bundle/Contents/Info.plist")" != "io.tonenari.audio.driver" ]]; then
+if [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$source_bundle/Contents/Info.plist")" != "io.mixrelay.audio.driver" ]]; then
   print -u2 "refusing to install a bundle with an unexpected identifier"
   exit 1
 fi
-if [[ "$(/usr/libexec/PlistBuddy -c 'Print :Label' "$source_plist")" != "io.tonenari.audio.engine" ]]; then
+if [[ "$(/usr/libexec/PlistBuddy -c 'Print :Label' "$source_plist")" != "io.mixrelay.audio.engine" ]]; then
   print -u2 "refusing to install a launch daemon with an unexpected label"
   exit 1
 fi
@@ -65,5 +65,5 @@ fi
 /bin/launchctl kickstart -k "$service_target"
 /usr/bin/killall coreaudiod >/dev/null 2>&1 || true
 
-print "Installed ToneNariHAL at $installed_bundle"
-print "Registered ToneNari engine service at $service_target"
+print "Installed MixRelayHAL at $installed_bundle"
+print "Registered MixRelay engine service at $service_target"

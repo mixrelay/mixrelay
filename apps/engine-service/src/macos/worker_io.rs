@@ -6,9 +6,9 @@ use super::{
     native_transport::{self, EndpointSnapshot},
     process_native_cycle,
 };
-use tonenari_audio_engine::{BlockProcessor, RenderPlan};
-use tonenari_audio_io::VirtualEndpointId;
-use tonenari_audio_io::process::{InputActivity, ProcessReport, TransferOutcome};
+use mixrelay_audio_engine::{BlockProcessor, RenderPlan};
+use mixrelay_audio_io::VirtualEndpointId;
+use mixrelay_audio_io::process::{InputActivity, ProcessReport, TransferOutcome};
 
 /// Synchronous PCM boundary. The worker owns the only mutable transfer handle;
 /// implementations must not retain borrowed buffers after a call returns.
@@ -181,9 +181,9 @@ impl<T: Transport> WorkerIo<T> {
         cycle.status.record_process(self.independent.finish_block());
         if !self.independent.synchronized() {
             let authority = if cycle.timeline.clock_id == 0 {
-                tonenari_audio_io::session::ClockAuthority::EngineTimer
+                mixrelay_audio_io::session::ClockAuthority::EngineTimer
             } else {
-                tonenari_audio_io::session::ClockAuthority::Device
+                mixrelay_audio_io::session::ClockAuthority::Device
             };
             cycle.status.observe_clock(authority, false);
         }
@@ -354,7 +354,7 @@ impl WorkerConfiguration {
         let primary = index
             .map(|index| {
                 let endpoint = independent.endpoints.remove(index);
-                let config = tonenari_engine_service::endpoint_service::audio_config(endpoint.id)
+                let config = mixrelay_engine_service::endpoint_service::audio_config(endpoint.id)
                     .ok_or_else(|| {
                     "primary virtual device disappeared during preparation".to_owned()
                 })?;
@@ -376,7 +376,7 @@ impl WorkerConfiguration {
 fn record_rejection(cycle: &WorkerCycle<'_>) {
     cycle
         .status
-        .observe_clock(tonenari_audio_io::session::ClockAuthority::Device, false);
+        .observe_clock(mixrelay_audio_io::session::ClockAuthority::Device, false);
     cycle.status.record_process(ProcessReport {
         output_overflows: 1,
         discontinuities: 1,

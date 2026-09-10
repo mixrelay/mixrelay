@@ -1,9 +1,9 @@
 @echo off
 setlocal
-if exist C:\ToneNariLab\driver-inventory-v1.log exit /b 2
-call :inspect > C:\ToneNariLab\driver-inventory-v1.log 2>&1
+if exist C:\MixRelayLab\driver-inventory-v1.log exit /b 2
+call :inspect > C:\MixRelayLab\driver-inventory-v1.log 2>&1
 set result=%errorlevel%
->C:\ToneNariLab\driver-inventory-v1.exit-code echo %result%
+>C:\MixRelayLab\driver-inventory-v1.exit-code echo %result%
 exit /b %result%
 :inspect
 sc.exe query AudioEndpointBuilder

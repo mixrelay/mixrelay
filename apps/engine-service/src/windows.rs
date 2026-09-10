@@ -17,27 +17,27 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tonenari_audio_engine::{
+use mixrelay_audio_engine::{
     BlockProcessor, ExternalBinding, ExternalIo, PeakMeterBank, ProcessorExchange, RenderPlan,
 };
 #[cfg(test)]
-use tonenari_audio_graph::ApplicationSelector;
-use tonenari_audio_graph::{
+use mixrelay_audio_graph::ApplicationSelector;
+use mixrelay_audio_graph::{
     AUDIO_PORT_ID, ApplicationCaptureRequest, CompileContext, CompileLimits, GraphCompiler,
     NodeConfig, RenderFormat,
 };
-use tonenari_audio_io::process::{CycleBlocks, ProcessCycle, TransferOutcome};
-use tonenari_audio_io::session::{AudioBackendKind, CURRENT_TIMER_FORMAT};
-use tonenari_audio_io::{
+use mixrelay_audio_io::process::{CycleBlocks, ProcessCycle, TransferOutcome};
+use mixrelay_audio_io::session::{AudioBackendKind, CURRENT_TIMER_FORMAT};
+use mixrelay_audio_io::{
     HostAudioBackendError, VirtualEndpointBackend, VirtualEndpointCapabilities, VirtualEndpointSpec,
 };
-use tonenari_control_server::router_with_backend;
-use tonenari_engine_service::resource_requirements::ResourceRequirements;
-use tonenari_engine_service::{
+use mixrelay_control_server::router_with_backend;
+use mixrelay_engine_service::resource_requirements::ResourceRequirements;
+use mixrelay_engine_service::{
     EngineGraphController, EngineGraphControllerConfig, GraphResourceBackend,
     default_peak_meter_bank, session::AdapterRuntimeStatus,
 };
-use tonenari_processor_host::ProcessorCatalog;
+use mixrelay_processor_host::ProcessorCatalog;
 use windows::{
     Win32::{
         Media::{
@@ -87,14 +87,14 @@ mod render;
 mod transport;
 
 fn lab_bridge_enabled() -> bool {
-    std::env::var("TONENARI_WINDOWS_SYSVAD_LAB").as_deref() == Ok("1")
+    std::env::var("MIXRELAY_WINDOWS_SYSVAD_LAB").as_deref() == Ok("1")
 }
 
 const ENGINE_BLOCK_FRAMES: u32 = CURRENT_TIMER_FORMAT.block_frames;
-fn adapter_profile() -> tonenari_engine_service::session::AdapterProfile {
-    tonenari_engine_service::session::AdapterProfile {
-        initial_format: tonenari_audio_io::session::CURRENT_TIMER_FORMAT,
-        capabilities: tonenari_audio_io::session::AudioSessionCapabilities {
+fn adapter_profile() -> mixrelay_engine_service::session::AdapterProfile {
+    mixrelay_engine_service::session::AdapterProfile {
+        initial_format: mixrelay_audio_io::session::CURRENT_TIMER_FORMAT,
+        capabilities: mixrelay_audio_io::session::AudioSessionCapabilities {
             backend: AudioBackendKind::Wasapi,
             supported_sample_rates: format_control::GRAPH_RATES.to_vec(),
             supported_block_frames: vec![ENGINE_BLOCK_FRAMES],
@@ -107,7 +107,7 @@ fn adapter_profile() -> tonenari_engine_service::session::AdapterProfile {
             drift_correction: false,
         },
         application_capture_rates: format_control::GRAPH_RATES.to_vec(),
-        clock_authority: tonenari_audio_io::session::ClockAuthority::EngineTimer,
+        clock_authority: mixrelay_audio_io::session::ClockAuthority::EngineTimer,
         transport_latency_frames: None,
         requires_observed_device_rate: false,
     }
@@ -147,7 +147,7 @@ pub(super) fn run() -> Result<(), String> {
                 graph_resources: resources.clone(),
                 runtime_status: resources.clone(),
             },
-            tonenari_audio_graph::GraphDocument::new(1, vec![], vec![]),
+            mixrelay_audio_graph::GraphDocument::new(1, vec![], vec![]),
         )
         .with_graph_catalog(),
     );
@@ -155,10 +155,10 @@ pub(super) fn run() -> Result<(), String> {
     spawn_reclaimer(&exchange, &resources)?;
     let worker_status = resources.runtime_status.clone();
     let audio_thread = thread::Builder::new()
-        .name("tonenari-wasapi-audio".to_owned())
+        .name("mixrelay-wasapi-audio".to_owned())
         .spawn(move || run_audio_worker(processor, exchange, resources))
         .map_err(|error| format!("could not start WASAPI audio worker: {error}"))?;
-    let _worker = tonenari_engine_service::session::AudioWorker::new(worker_status, audio_thread);
+    let _worker = mixrelay_engine_service::session::AudioWorker::new(worker_status, audio_thread);
     let maintenance = controller.start_control_maintenance()?;
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -172,7 +172,7 @@ pub(super) fn run() -> Result<(), String> {
             .map_err(|error| format!("could not bind local control server: {error}"))?;
         axum::serve(listener, router_with_backend(controller))
             .with_graceful_shutdown(async {
-                let _ = tonenari_engine_service::session::shutdown_signal().await;
+                let _ = mixrelay_engine_service::session::shutdown_signal().await;
             })
             .await
             .map_err(|error| format!("local control server failed: {error}"))
@@ -192,7 +192,7 @@ fn create_initial_processor_at_format(
     let execution = GraphCompiler::default()
         .compile(
             // No installed virtual driver: start with a valid empty graph, not silent sinks.
-            &tonenari_audio_graph::GraphDocument::new(1, vec![], vec![]),
+            &mixrelay_audio_graph::GraphDocument::new(1, vec![], vec![]),
             CompileContext {
                 format,
                 limits: CompileLimits::default(),
@@ -221,7 +221,7 @@ fn spawn_reclaimer(
     let weak_exchange = Arc::downgrade(exchange);
     let weak_resources = Arc::downgrade(resources);
     thread::Builder::new()
-        .name("tonenari-windows-reclaimer".to_owned())
+        .name("mixrelay-windows-reclaimer".to_owned())
         .spawn(move || {
             loop {
                 let Some(exchange) = weak_exchange.upgrade() else {
@@ -256,8 +256,8 @@ fn run_audio_worker(
     let mut active = Box::<WindowsCaptureSet>::default();
     let mut format = CURRENT_TIMER_FORMAT;
     let mut deadline = Instant::now();
-    let mut timeline = tonenari_audio_io::process::TimerTimeline::default();
-    let mut demand = tonenari_engine_service::render_demand::RenderDemandCursor::default();
+    let mut timeline = mixrelay_audio_io::process::TimerTimeline::default();
+    let mut demand = mixrelay_engine_service::render_demand::RenderDemandCursor::default();
     let mut device_driven = false;
     while !resources.runtime_status.stop_requested() {
         if resources.runtime_status.checkpoint() {
@@ -305,8 +305,8 @@ fn run_audio_worker(
             device_driven = true;
             resources.device_clock_active.store(true, Ordering::Release);
             let mut cycle = timeline.next_cycle(format);
-            cycle.clock.authority = tonenari_audio_io::session::ClockAuthority::Device;
-            cycle.clock.id = 0x544e;
+            cycle.clock.authority = mixrelay_audio_io::session::ClockAuthority::Device;
+            cycle.clock.id = 0x4d52;
             cycle
         } else if let Some(output) = primary {
             device_driven = true;
@@ -338,7 +338,7 @@ fn run_audio_worker(
             cycle,
             format,
         ) {
-            eprintln!("ToneNari WASAPI graph stopped: {error}");
+            eprintln!("MixRelay WASAPI graph stopped: {error}");
             return;
         }
         if device_driven {
@@ -355,14 +355,14 @@ fn run_audio_worker(
 }
 
 fn sync_clock_format(
-    format: &mut tonenari_audio_io::session::SessionFormat,
+    format: &mut mixrelay_audio_io::session::SessionFormat,
     prepared: RenderFormat,
-    timeline: &mut tonenari_audio_io::process::TimerTimeline,
-    demand: &mut tonenari_engine_service::render_demand::RenderDemandCursor,
+    timeline: &mut mixrelay_audio_io::process::TimerTimeline,
+    demand: &mut mixrelay_engine_service::render_demand::RenderDemandCursor,
     deadline: &mut Instant,
 ) -> Duration {
     if prepared.sample_rate != format.sample_rate || prepared.block_frames != format.block_frames {
-        *format = tonenari_audio_io::session::SessionFormat {
+        *format = mixrelay_audio_io::session::SessionFormat {
             sample_rate: prepared.sample_rate,
             block_frames: prepared.block_frames,
         };
@@ -379,7 +379,7 @@ fn process_graph_cycle(
     active: &WindowsCaptureSet,
     mut virtual_io: Option<&mut transport::Transport>,
     cycle: ProcessCycle,
-    format: tonenari_audio_io::session::SessionFormat,
+    format: mixrelay_audio_io::session::SessionFormat,
 ) -> Result<(), String> {
     for block in CycleBlocks::new(cycle, format).map_err(|error| error.to_string())? {
         let report = processor
@@ -409,7 +409,7 @@ impl ExternalIo for WindowsExternalIo<'_> {
         _cycle: &ProcessCycle,
     ) -> TransferOutcome {
         if self.application_captures.endpoint_node.as_deref() == Some(binding.node_id().as_str())
-            && binding.port_id().as_str() == tonenari_audio_graph::FROM_OS_PORT_ID
+            && binding.port_id().as_str() == mixrelay_audio_graph::FROM_OS_PORT_ID
         {
             return TransferOutcome::complete(
                 self.virtual_io
@@ -432,7 +432,7 @@ impl ExternalIo for WindowsExternalIo<'_> {
         _cycle: &ProcessCycle,
     ) -> TransferOutcome {
         if self.application_captures.endpoint_node.as_deref() == Some(binding.node_id().as_str())
-            && binding.port_id().as_str() == tonenari_audio_graph::TO_OS_PORT_ID
+            && binding.port_id().as_str() == mixrelay_audio_graph::TO_OS_PORT_ID
         {
             return TransferOutcome::complete(
                 self.virtual_io.as_mut().map_or(0, |io| io.write(source)),
@@ -468,10 +468,10 @@ impl Default for WindowsVirtualEndpointBackend {
 }
 
 impl VirtualEndpointBackend for WindowsVirtualEndpointBackend {
-    fn settings(&self) -> Option<tonenari_audio_io::VirtualEndpointSettings> {
+    fn settings(&self) -> Option<mixrelay_audio_io::VirtualEndpointSettings> {
         // The diagnostic driver only accepts a fixed duplex LAB graph. Do not
         // expose generic independent-side creation as a supported product path.
-        Some(tonenari_audio_io::VirtualEndpointSettings {
+        Some(mixrelay_audio_io::VirtualEndpointSettings {
             can_create: false,
             can_rename: false,
             render_channels: vec![2],
@@ -494,8 +494,8 @@ impl VirtualEndpointBackend for WindowsVirtualEndpointBackend {
         }
         if lab_bridge_enabled() && desired.len() == 1 {
             let spec = &desired[0];
-            if spec.id.as_str() == "tonenari.sysvad.lab"
-                && spec.display_name == "ToneNari SysVAD Bridge LAB"
+            if spec.id.as_str() == "mixrelay.sysvad.lab"
+                && spec.display_name == "MixRelay SysVAD Bridge LAB"
                 && spec.render.is_some_and(|s| s.channels == 2)
                 && spec.capture.is_some_and(|s| s.channels == 1)
                 && spec.default_sample_rate == 48_000
@@ -521,7 +521,7 @@ struct WindowsGraphResources {
     render_cache: Arc<Mutex<render::RenderCache>>,
     input_cache: Arc<Mutex<input::InputCache>>,
     capture_cache: Arc<Mutex<application_capture::CaptureCache>>,
-    render_counters: Arc<tonenari_audio_engine::RuntimeCounters>,
+    render_counters: Arc<mixrelay_audio_engine::RuntimeCounters>,
     virtual_cache: Mutex<std::sync::Weak<Mutex<transport::Transport>>>,
     virtual_overruns: AtomicU64,
     virtual_underruns: AtomicU64,
@@ -553,9 +553,9 @@ impl Default for WindowsGraphResources {
 #[derive(PartialEq)]
 struct WindowsResourceSpec {
     graph_rate: u32,
-    inputs: Vec<(String, tonenari_audio_graph::AudioDeviceInputConfig)>,
+    inputs: Vec<(String, mixrelay_audio_graph::AudioDeviceInputConfig)>,
     captures: Vec<(String, ApplicationCaptureRequest)>,
-    outputs: Vec<(String, tonenari_audio_graph::AudioDeviceOutputConfig)>,
+    outputs: Vec<(String, mixrelay_audio_graph::AudioDeviceOutputConfig)>,
     endpoint: Option<(String, VirtualEndpointSpec)>,
 }
 
@@ -571,11 +571,11 @@ impl Default for WindowsResourceSpec {
     }
 }
 
-impl tonenari_engine_service::RuntimeStatusBackend for WindowsGraphResources {
+impl mixrelay_engine_service::RuntimeStatusBackend for WindowsGraphResources {
     fn capabilities_for_format(
         &self,
         format: RenderFormat,
-    ) -> Option<tonenari_audio_io::session::AudioSessionCapabilities> {
+    ) -> Option<mixrelay_audio_io::session::AudioSessionCapabilities> {
         self.runtime_status.capabilities_for_format(format)
     }
 
@@ -591,15 +591,15 @@ impl tonenari_engine_service::RuntimeStatusBackend for WindowsGraphResources {
         self.runtime_status.resume();
     }
 
-    fn status(&self, format: RenderFormat) -> tonenari_control_protocol::AppStatus {
+    fn status(&self, format: RenderFormat) -> mixrelay_control_protocol::AppStatus {
         let mut status = self.runtime_status.status(format);
         let processing_failed = status.audio_session.as_ref().is_some_and(|session| {
-            session.issue == Some(tonenari_audio_io::session::SessionIssue::ProcessingFailed)
+            session.issue == Some(mixrelay_audio_io::session::SessionIssue::ProcessingFailed)
         });
         if self.device_clock_active.load(Ordering::Acquire)
             && let Some(session) = &mut status.audio_session
         {
-            session.clock_authority = tonenari_audio_io::session::ClockAuthority::Device;
+            session.clock_authority = mixrelay_audio_io::session::ClockAuthority::Device;
             if self.virtual_clock_active.load(Ordering::Acquire) {
                 session.transport_latency_frames = Some(
                     u32::try_from(transport::STARTUP_SILENCE_FRAMES)
@@ -632,7 +632,7 @@ impl tonenari_engine_service::RuntimeStatusBackend for WindowsGraphResources {
         if (failed || input_failed)
             && let Some(session) = &mut status.audio_session
         {
-            session.issue = Some(tonenari_audio_io::session::SessionIssue::DeviceUnavailable);
+            session.issue = Some(mixrelay_audio_io::session::SessionIssue::DeviceUnavailable);
         }
         if let Some(issue) = self
             .capture_cache
@@ -640,20 +640,20 @@ impl tonenari_engine_service::RuntimeStatusBackend for WindowsGraphResources {
             .ok()
             .and_then(|cache| application_capture::issue(&cache))
             && let Some(session) = &mut status.audio_session
-            && session.issue != Some(tonenari_audio_io::session::SessionIssue::ProcessingFailed)
+            && session.issue != Some(mixrelay_audio_io::session::SessionIssue::ProcessingFailed)
         {
             session.issue = Some(issue);
         }
         if self.virtual_failed.load(Ordering::Acquire) {
-            status.driver_state = tonenari_control_protocol::DriverState::Unavailable;
+            status.driver_state = mixrelay_control_protocol::DriverState::Unavailable;
             if let Some(session) = &mut status.audio_session {
-                session.issue = Some(tonenari_audio_io::session::SessionIssue::DeviceUnavailable);
+                session.issue = Some(mixrelay_audio_io::session::SessionIssue::DeviceUnavailable);
                 session.observed_device_sample_rate = None;
                 session.transport_latency_frames = None;
             }
         }
         if processing_failed && let Some(session) = &mut status.audio_session {
-            session.issue = Some(tonenari_audio_io::session::SessionIssue::ProcessingFailed);
+            session.issue = Some(mixrelay_audio_io::session::SessionIssue::ProcessingFailed);
         }
         status
     }
@@ -677,7 +677,7 @@ impl WindowsGraphResources {
             Err(error) => {
                 if !self.virtual_failed.swap(true, Ordering::AcqRel) {
                     eprintln!(
-                        "ToneNari virtual transport suspended: {error:?}; remove and reattach the endpoint"
+                        "MixRelay virtual transport suspended: {error:?}; remove and reattach the endpoint"
                     );
                 }
                 self.virtual_clock_active.store(false, Ordering::Release);
@@ -795,21 +795,21 @@ impl WindowsGraphResources {
 impl GraphResourceBackend for WindowsGraphResources {
     fn device_inventory(
         &self,
-    ) -> Result<Vec<tonenari_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
-        tonenari_audio_io::windows::devices()
+    ) -> Result<Vec<mixrelay_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
+        mixrelay_audio_io::windows::devices()
     }
 
     fn prepare_format_change(
         &self,
-        document: &tonenari_audio_graph::GraphDocument,
+        document: &mixrelay_audio_graph::GraphDocument,
         current: RenderFormat,
         requested: RenderFormat,
-    ) -> Result<Box<dyn tonenari_engine_service::PreparedGraphFormat>, HostAudioBackendError> {
+    ) -> Result<Box<dyn mixrelay_engine_service::PreparedGraphFormat>, HostAudioBackendError> {
         format_control::prepare(self, document, current, requested)
     }
     fn reconcile(
         &self,
-        document: &tonenari_audio_graph::GraphDocument,
+        document: &mixrelay_audio_graph::GraphDocument,
     ) -> Result<(), HostAudioBackendError> {
         self.reconcile_devices(document, ResourceRequirements::from_document(document))
     }
@@ -818,7 +818,7 @@ impl GraphResourceBackend for WindowsGraphResources {
 impl WindowsGraphResources {
     fn reconcile_devices(
         &self,
-        document: &tonenari_audio_graph::GraphDocument,
+        document: &mixrelay_audio_graph::GraphDocument,
         requirements: ResourceRequirements,
     ) -> Result<(), HostAudioBackendError> {
         validate_virtual_attachments(document, &requirements.endpoints)?;
@@ -905,7 +905,7 @@ impl WindowsGraphResources {
 }
 
 fn validate_virtual_attachments(
-    document: &tonenari_audio_graph::GraphDocument,
+    document: &mixrelay_audio_graph::GraphDocument,
     endpoints: &[(String, VirtualEndpointSpec)],
 ) -> Result<(), HostAudioBackendError> {
     WindowsVirtualEndpointBackend::default().prepare_graph_attachments(
@@ -1044,7 +1044,7 @@ impl ProcessLoopbackCapture {
         let worker_state = Arc::clone(&state);
         let worker_epoch = Arc::clone(&epoch);
         let worker = thread::Builder::new()
-            .name("tonenari-wasapi-application".into())
+            .name("mixrelay-wasapi-application".into())
             .spawn(move || {
                 let config = CaptureWorkerConfig {
                     target,
@@ -1141,7 +1141,7 @@ struct CaptureWorkerConfig {
 
 fn run_process_capture(
     config: &CaptureWorkerConfig,
-    identity: &tonenari_audio_io::windows::process_identity::ProcessIdentity,
+    identity: &mixrelay_audio_io::windows::process_identity::ProcessIdentity,
     connected: &mut dyn FnMut(),
 ) -> Result<(), String> {
     let _apartment = render::ComApartment::new()?;
@@ -1636,7 +1636,7 @@ mod tests {
     #[test]
     #[ignore = "requires an interactive Windows lab audio session"]
     fn native_wasapi_graph_activation_and_removal() {
-        assert_eq!(std::env::var("TONENARI_LAB_AUDIO_TEST").as_deref(), Ok("1"));
+        assert_eq!(std::env::var("MIXRELAY_LAB_AUDIO_TEST").as_deref(), Ok("1"));
         let meters = default_peak_meter_bank();
         let processor = create_initial_processor(Arc::clone(&meters)).unwrap();
         let exchange = Arc::new(ProcessorExchange::new(1));
@@ -1644,7 +1644,7 @@ mod tests {
         let (worker_exchange, worker_resources) = (exchange.clone(), resources.clone());
         let worker =
             thread::spawn(move || run_audio_worker(processor, worker_exchange, worker_resources));
-        let guard = tonenari_engine_service::session::AudioWorker::new(
+        let guard = mixrelay_engine_service::session::AudioWorker::new(
             resources.runtime_status.clone(),
             worker,
         );
@@ -1701,8 +1701,8 @@ mod tests {
     fn native_output_test_document(
         revision: u64,
         attached: bool,
-    ) -> tonenari_audio_graph::GraphDocument {
-        use tonenari_audio_graph::{
+    ) -> mixrelay_audio_graph::GraphDocument {
+        use mixrelay_audio_graph::{
             AudioDeviceOutputConfig, AudioEndpoint, ChannelMapping, DeviceSelector, EdgeSpec,
             GainConfig, GraphDocument, NodeSpec,
         };
@@ -1753,12 +1753,12 @@ mod tests {
     #[test]
     #[ignore = "requires an interactive Windows lab audio session; emits a quiet test tone"]
     fn native_wasapi_self_capture_and_teardown() {
-        use tonenari_audio_graph::{AudioDeviceOutputConfig, DeviceSelector};
+        use mixrelay_audio_graph::{AudioDeviceOutputConfig, DeviceSelector};
         use windows::Win32::System::{
             ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS_EX},
             Threading::{GetCurrentProcess, GetProcessHandleCount},
         };
-        assert_eq!(std::env::var("TONENARI_LAB_AUDIO_TEST").as_deref(), Ok("1"));
+        assert_eq!(std::env::var("MIXRELAY_LAB_AUDIO_TEST").as_deref(), Ok("1"));
         let handles = || {
             let mut count = 0;
             unsafe { GetProcessHandleCount(GetCurrentProcess(), &raw mut count) }.unwrap();
@@ -1776,14 +1776,14 @@ mod tests {
             .unwrap();
             memory.PrivateUsage
         };
-        let iterations = std::env::var("TONENARI_LAB_AUDIO_CYCLES").map_or(13, |value| {
+        let iterations = std::env::var("MIXRELAY_LAB_AUDIO_CYCLES").map_or(13, |value| {
             value.parse::<usize>().expect("integer cycle count")
         });
         assert!(
             (13..=2000).contains(&iterations),
             "bounded lab cycle count required"
         );
-        let counters = Arc::new(tonenari_audio_engine::RuntimeCounters::default());
+        let counters = Arc::new(mixrelay_audio_engine::RuntimeCounters::default());
         // The first complete capture AND render cycle warms process-global COM
         // and audio-service caches. Capture alone does not warm render caches.
         let cold_handles = handles();
@@ -1836,9 +1836,9 @@ mod tests {
         let mut peak = [0.0_f32; 2];
         let mut captured_frames = 0;
         let mut tone = vec![0.0; 4096 * 2];
-        let mut demand = tonenari_engine_service::render_demand::RenderDemandCursor::default();
+        let mut demand = mixrelay_engine_service::render_demand::RenderDemandCursor::default();
         let mut processed_frames = 0;
-        let mut tracker = tonenari_audio_io::process::CycleTracker::default();
+        let mut tracker = mixrelay_audio_io::process::CycleTracker::default();
         let started = Instant::now();
         while processed_frames < 33_600 {
             assert!(

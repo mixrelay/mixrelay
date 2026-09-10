@@ -2,7 +2,7 @@ import type { Preview } from '@storybook/react-vite';
 import { I18nextProvider } from 'react-i18next';
 
 import { i18n } from '../src/core/i18n';
-import { ToneNariProvider } from '../src/core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../src/core/theme/MixRelayProvider';
 import '../src/styles.css';
 
 const preview: Preview = {
@@ -10,13 +10,13 @@ const preview: Preview = {
     (Story, context) => {
       void i18n.changeLanguage(context.globals.locale as string);
       return (
-        <ToneNariProvider>
+        <MixRelayProvider>
           <I18nextProvider i18n={i18n}>
             <div className="storybook-frame">
               <Story />
             </div>
           </I18nextProvider>
-        </ToneNariProvider>
+        </MixRelayProvider>
       );
     },
   ],

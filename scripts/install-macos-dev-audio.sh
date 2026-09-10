@@ -2,32 +2,32 @@
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  print -u2 "ToneNari development audio installation only runs on macOS"
+  print -u2 "MixRelay development audio installation only runs on macOS"
   exit 1
 fi
 
 repo_root="${0:A:h:h}"
 build_root="$repo_root/target/macos-dev-audio"
 driver_root="$build_root/hal"
-driver_bundle="$driver_root/ToneNariHAL.driver"
-service_binary="$repo_root/target/debug/tonenari-engine-service"
-service_plist="$build_root/io.tonenari.audio.engine.plist"
+driver_bundle="$driver_root/MixRelayHAL.driver"
+service_binary="$repo_root/target/debug/mixrelay-engine-service"
+service_plist="$build_root/io.mixrelay.audio.engine.plist"
 root_installer="$repo_root/scripts/install-macos-dev-audio-root.sh"
 service_user="$(id -un)"
 service_group="$(id -gn)"
 service_home="$HOME"
-service_log_root="$service_home/Library/Logs/ToneNari"
+service_log_root="$service_home/Library/Logs/MixRelay"
 service_stdout="$service_log_root/engine.stdout.log"
 service_stderr="$service_log_root/engine.stderr.log"
 
 mkdir -p "$build_root" "$service_log_root"
-cargo run --manifest-path "$repo_root/Cargo.toml" -p tonenari-hal-bundle -- --output "$driver_root"
-cargo build --manifest-path "$repo_root/Cargo.toml" -p tonenari-engine-service
+cargo run --manifest-path "$repo_root/Cargo.toml" -p mixrelay-hal-bundle -- --output "$driver_root"
+cargo build --manifest-path "$repo_root/Cargo.toml" -p mixrelay-engine-service
 
 plutil -create xml1 "$service_plist"
-plutil -insert Label -string "io.tonenari.audio.engine" "$service_plist"
+plutil -insert Label -string "io.mixrelay.audio.engine" "$service_plist"
 plutil -insert ProgramArguments -json "[\"$service_binary\"]" "$service_plist"
-plutil -insert MachServices -json '{"io.tonenari.audio.engine":true}' "$service_plist"
+plutil -insert MachServices -json '{"io.mixrelay.audio.engine":true}' "$service_plist"
 plutil -insert ProcessType -string Interactive "$service_plist"
 plutil -insert UserName -string "$service_user" "$service_plist"
 plutil -insert GroupName -string "$service_group" "$service_plist"
@@ -47,7 +47,7 @@ admin_command="$(printf '%q ' "$root_installer" "$driver_bundle" "$service_binar
   -e 'end run' \
   -- "$admin_command"
 
-print "ToneNari development audio is installed"
+print "MixRelay development audio is installed"
 print "Processor host user: $service_user"
 print "Engine stdout: $service_stdout"
 print "Engine stderr: $service_stderr"

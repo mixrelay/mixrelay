@@ -40,11 +40,11 @@ that abstraction boundary.
 ```sh
 bash scripts/check-macos-device-io.sh
 bash scripts/check-macos-device-io.sh --live
-cargo test -p tonenari-engine-service --bin tonenari-engine-service macos_devices::tests
-cargo clippy -p tonenari-engine-service --all-targets -- -D warnings
+cargo test -p mixrelay-engine-service --bin mixrelay-engine-service macos_devices::tests
+cargo clippy -p mixrelay-engine-service --all-targets -- -D warnings
 ```
 
-The live workflow requires the installed ToneNari virtual endpoint, creates only
+The live workflow requires the installed MixRelay virtual endpoint, creates only
 unique owned temporary aggregates and runs both ignored `native_coreaudio_`
 tests serially. It does not select defaults, change existing device rates, edit a
 saved graph, restart services or capture a real microphone. Native output PCM is
@@ -69,7 +69,7 @@ for a nominal graph block duration is deliberately not used as a clock.
 Both compared runs used the same temporary-aggregate fixture, native 48 kHz,
 256-frame graph slices, 16,384-frame queues, silent PCM, two-second measurement,
 and native frame-credit pacing. The ordinary unoptimized development DSP failed
-at graph 96 kHz. Optimizing only `tonenari-audio-io`, `rubato` and
+at graph 96 kHz. Optimizing only `mixrelay-audio-io`, `rubato` and
 `audioadapter-buffers` at level 3 removed the observed queue losses. These package
 settings are now included in the workspace development profile; the remaining
 development code retains debugging configuration.
@@ -93,8 +93,8 @@ The comparison command was the SRC test below with three additional Cargo
 listed above. The final default-profile rerun used no overrides:
 
 ```sh
-TONENARI_MAC_DEVICE_FIXTURE=/tmp/tonenari-hardware-src.x07O8G/live \
-  cargo test -p tonenari-engine-service --bin tonenari-engine-service \
+MIXRELAY_MAC_DEVICE_FIXTURE=/tmp/mixrelay-hardware-src.x07O8G/live \
+  cargo test -p mixrelay-engine-service --bin mixrelay-engine-service \
   native_coreaudio_src_uses_actual_rate_and_rebuilds_graph_format_only \
   -- --ignored --nocapture --test-threads=1
 ```
@@ -104,7 +104,7 @@ unexpected epoch change. At 96 kHz it observed 95,744 native frames, 190,464 val
 captured frames and 191,488 submitted frames. Native rates remained 48,000 Hz.
 
 Evidence, including unsuccessful runs, is retained at
-`/Volumes/Linear 1/test/tonenari/evidence/native-device-parity-20260907/macos-hardware-src/`.
+`/Volumes/Linear 1/test/mixrelay/evidence/native-device-parity-20260907/macos-hardware-src/`.
 The initial combined live-workflow rerun passed native C recovery but stopped at
 an unrelated new application-rate fixture's missing trait method before Rust
 tests ran; `live-workflow-v1-build-failed.log` records that failure separately.
@@ -123,7 +123,7 @@ Two orphan probe UIDs from earlier failed attempts were found by independent
 inventory, despite their creator processes having exited. Their precise creation
 attempt cannot be reconstructed because early fixtures lacked per-UID logs. Root
 confirmed this was the sole live runner. After exact UID, dead creator, aggregate
-class, sole ToneNari subdevice and non-default checks, normal CoreAudio destruction
+class, sole MixRelay subdevice and non-default checks, normal CoreAudio destruction
 removed only these two probes; `owned-orphan-cleanup.log` records the action.
 Final fixture teardown now logs each created/removed UID and checks its actual
 disappearance, failing instead of trusting destruction acknowledgement alone.
@@ -137,7 +137,7 @@ process-list equality is not claimed.
 
 ## Remaining limits
 
-The live fixture is a CoreAudio aggregate backed by ToneNari's virtual HAL, not
+The live fixture is a CoreAudio aggregate backed by MixRelay's virtual HAL, not
 physical multichannel hardware qualification. It proves actual native callbacks,
 owner retention, selected-rate conversion and recovery, but not hours of drift
 between independent physical clocks or nonzero live acoustic content. Full

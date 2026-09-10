@@ -5,16 +5,16 @@ use super::{
     native::{self, CoreAudio, Native, Timestamp},
 };
 use crate::process_tap_input::ingest;
+use mixrelay_macos_transport::{
+    audio_buffer::AudioBufferList,
+    callback_clock::mr_callback_clock_record_values,
+    capture_ring::{mr_audio_ring_create, mr_audio_ring_read_interleaved},
+};
 use std::{
     alloc::{Layout, alloc},
     ffi::{CStr, c_void},
     ptr,
     sync::atomic::{AtomicU32, Ordering},
-};
-use tonenari_macos_transport::{
-    audio_buffer::AudioBufferList,
-    callback_clock::tn_callback_clock_record_values,
-    capture_ring::{tn_audio_ring_create, tn_audio_ring_read_interleaved},
 };
 
 pub(super) struct Active<'a>(&'a AtomicU32);
@@ -54,7 +54,7 @@ pub(super) unsafe extern "C" fn io_proc(
         let time = unsafe { time.as_ref() };
         // SAFETY: this is the sole serialized clock writer; other observers use atomics.
         unsafe {
-            tn_callback_clock_record_values(
+            mr_callback_clock_record_values(
                 ptr::from_ref(&session.clock).cast_mut(),
                 time.map_or(0.0, |time| time.sample),
                 time.map_or(0, |time| time.host),
@@ -79,7 +79,7 @@ fn initialize(session: &TapSession, config: &TapConfig) -> Result<(), TapError> 
     let rate = format.sample_rate;
     let channels = format.channels;
     session.format.set(format).map_err(|_| TapError::code(1))?;
-    let ring = tn_audio_ring_create(config.ring_capacity_frames, channels);
+    let ring = mr_audio_ring_create(config.ring_capacity_frames, channels);
     if ring.is_null() {
         return Err(TapError::code(6));
     }
@@ -130,7 +130,7 @@ unsafe fn create(config: &TapConfig) -> Result<*mut TapSession, TapError> {
     }
     if let Err(error) = initialize(session, config) {
         // SAFETY: startup transfers its partial resource ownership to async cleanup.
-        unsafe { tn_process_tap_destroy(pointer) };
+        unsafe { mr_process_tap_destroy(pointer) };
         return Err(error);
     }
     Ok(pointer)
@@ -142,7 +142,7 @@ unsafe fn create(config: &TapConfig) -> Result<*mut TapSession, TapError> {
 /// Config and its NUL-terminated UTF-8 bundle string remain readable during this call.
 /// Optional error points to exclusively writable `TapError` storage.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_process_tap_create(
+pub unsafe extern "C" fn mr_process_tap_create(
     config: *const TapConfig,
     error: *mut TapError,
 ) -> *mut TapSession {
@@ -162,7 +162,7 @@ pub unsafe extern "C" fn tn_process_tap_create(
 /// # Safety
 /// Session is owned and control calls are serialized with read/refresh/stop/destroy.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_process_tap_start(session: *mut TapSession) -> TapError {
+pub unsafe extern "C" fn mr_process_tap_start(session: *mut TapSession) -> TapError {
     // SAFETY: control retains allocation; shared borrow does not alias callback writer fields.
     unsafe { session.as_ref() }.map_or(TapError::code(1), |session| {
         session.start(&CoreAudio).err().unwrap_or_default()
@@ -173,7 +173,7 @@ pub unsafe extern "C" fn tn_process_tap_start(session: *mut TapSession) -> TapEr
 /// # Safety
 /// Session is owned and control calls are serialized with read/refresh/start/destroy.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_process_tap_stop(session: *mut TapSession) -> TapError {
+pub unsafe extern "C" fn mr_process_tap_stop(session: *mut TapSession) -> TapError {
     // SAFETY: control retains allocation through this native stop operation.
     unsafe { session.as_ref() }.map_or(TapError::code(1), |session| {
         session.stop(&CoreAudio).err().unwrap_or_default()
@@ -185,7 +185,7 @@ pub unsafe extern "C" fn tn_process_tap_stop(session: *mut TapSession) -> TapErr
 /// Session is owned and control calls are serialized with PCM read/start/stop/destroy.
 /// Atomic stat and peak observers may run concurrently while retaining owner lifetime.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_process_tap_refresh_format(session: *mut TapSession) -> TapError {
+pub unsafe extern "C" fn mr_process_tap_refresh_format(session: *mut TapSession) -> TapError {
     // SAFETY: refresh retains allocation; callbacks access no control resource cells.
     unsafe { session.as_ref() }.map_or(TapError::code(1), |session| {
         session.refresh(&CoreAudio).err().unwrap_or_default()
@@ -197,7 +197,7 @@ pub unsafe extern "C" fn tn_process_tap_refresh_format(session: *mut TapSession)
 /// Pump/control/stat/peak users have drained and surrendered ownership before destroy.
 /// Native callbacks/listeners may remain: cleanup owns their drain. No later pointer use.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_process_tap_destroy(pointer: *mut TapSession) {
+pub unsafe extern "C" fn mr_process_tap_destroy(pointer: *mut TapSession) {
     // SAFETY: destroying owner retains allocation until queue transfer.
     let Some(session) = (unsafe { pointer.as_ref() }) else {
         return;
@@ -213,7 +213,7 @@ pub unsafe extern "C" fn tn_process_tap_destroy(pointer: *mut TapSession) {
 /// Session is retained and this call is serialized with refresh/control and other reads.
 /// Destination owns `maximum_frames * channels` writable floats, disjoint from session.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_process_tap_read(
+pub unsafe extern "C" fn mr_process_tap_read(
     session: *mut TapSession,
     destination: *mut f32,
     maximum_frames: usize,
@@ -226,14 +226,14 @@ pub unsafe extern "C" fn tn_process_tap_read(
         return 0;
     }
     // SAFETY: pump owns exclusive output and the sole consumer cursor.
-    unsafe { tn_audio_ring_read_interleaved(session.ring(), destination, maximum_frames) }
+    unsafe { mr_audio_ring_read_interleaved(session.ring(), destination, maximum_frames) }
 }
 
 /// Drains channel peaks independently of PCM; invalid pointers/capacity return zero.
 /// # Safety
 /// Observer retains session lifetime and exclusively owns `maximum_channels` output floats.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_process_tap_take_peaks(
+pub unsafe extern "C" fn mr_process_tap_take_peaks(
     session: *mut TapSession,
     destination: *mut f32,
     maximum_channels: usize,
@@ -261,7 +261,7 @@ pub unsafe extern "C" fn tn_process_tap_take_peaks(
 /// # Safety
 /// Observer retains the session through this call and never overlaps its final destruction.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_process_tap_stats(session: *const TapSession) -> TapStats {
+pub unsafe extern "C" fn mr_process_tap_stats(session: *const TapSession) -> TapStats {
     // SAFETY: immutable fields and atomics only; no whole-session mutable borrow exists.
     unsafe { session.as_ref() }.map_or_else(TapStats::default, TapSession::stats)
 }

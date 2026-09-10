@@ -1,5 +1,5 @@
 use super::*;
-use tonenari_audio_graph::{AudioDeviceOutputConfig, ChannelMapping, ChannelRoute};
+use mixrelay_audio_graph::{AudioDeviceOutputConfig, ChannelMapping, ChannelRoute};
 
 fn output(id: &str) -> SharedOutput {
     SharedOutput {

@@ -6,7 +6,7 @@ Configurable native adapters now explicitly enable `with_endpoint_preferences()`
 before starting the audio worker. Per-user `virtual-endpoint.json` stores a
 versioned, backend-tagged endpoint template and its attached input/output sides.
 It shares the existing audio-session preference directory and atomic replacement
-implementation (including `TONENARI_CONFIG_DIR` for isolated services/tests).
+implementation (including `MIXRELAY_CONFIG_DIR` for isolated services/tests).
 
 - Restart restores the accepted name, identities, asymmetric channel counts and
   deleted-side state through the normal graph validation/native resource transaction.
@@ -62,7 +62,7 @@ Live testing used a transient systemd PAM user session, with an exclusive test
 configuration directory. No graphical login, lingering setting, permanent unit,
 driver installation, signing change, host audio restart or user configuration
 replacement was performed. Failed and successful evidence is retained under
-`/Volumes/Linear 1/test/tonenari/evidence/endpoint-persistence-20260907`.
+`/Volumes/Linear 1/test/mixrelay/evidence/endpoint-persistence-20260907`.
 The final read-only cleanup check confirmed all three transient session units
 were unloaded/inactive, user 1000 was neither logged in nor lingering, and
 `/run/user/1000/pipewire-0` no longer existed (cleanup job exit code 0).

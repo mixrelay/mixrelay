@@ -9,6 +9,10 @@ pub use compiler::{
     GraphIssueCode, GraphResource, NodeResolutionError, NodeResolver, ResolvedNode,
     validate_virtual_endpoint_gain,
 };
+pub use mixrelay_audio_io::{
+    ApplicationCaptureRequest, ApplicationSelector, ChannelLayout, SourcePlaybackPolicy,
+    StreamSpec, VirtualEndpointId, VirtualEndpointSpec,
+};
 pub use model::{
     AUDIO_PORT_ID, AudioDeviceInputConfig, AudioDeviceOutputConfig, AudioEndpoint,
     CURRENT_GRAPH_SCHEMA_VERSION, ChannelMapping, ChannelRoute, CompiledEdge, CompiledNode,
@@ -16,8 +20,4 @@ pub use model::{
     FROM_OS_PORT_ID, GainConfig, GraphDocument, LimiterConfig, MixerConfig, NodeConfig, NodeId,
     NodeKind, NodeSpec, NodeTypeId, PortDirection, PortId, ProviderNodeConfig, RenderFormat,
     TO_OS_PORT_ID, VirtualEndpointConfig, VirtualEndpointReference,
-};
-pub use tonenari_audio_io::{
-    ApplicationCaptureRequest, ApplicationSelector, ChannelLayout, SourcePlaybackPolicy,
-    StreamSpec, VirtualEndpointId, VirtualEndpointSpec,
 };

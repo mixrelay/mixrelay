@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ToneNari",
+  "productName": "MixRelay",
   "version": "0.1.0",
-  "identifier": "io.tonenari.desktop",
+  "identifier": "io.mixrelay.desktop",
   "build": {
     "beforeDevCommand": "pnpm --dir ../control-ui dev",
     "beforeBuildCommand": "pnpm --dir ../control-ui build",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "ToneNari",
+        "title": "MixRelay",
         "width": 1180,
         "height": 780,
         "minWidth": 390,

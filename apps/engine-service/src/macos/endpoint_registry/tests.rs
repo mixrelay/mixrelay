@@ -1,18 +1,18 @@
 use super::*;
+use mixrelay_macos_transport::{
+    endpoint_transport::{
+        EndpointTransportConfig, mr_endpoint_transport_attach, mr_endpoint_transport_config,
+    },
+    shared_audio_buffer::{
+        mr_shared_audio_buffer_read, mr_shared_audio_buffer_stats,
+        mr_shared_audio_buffer_try_begin_epoch, mr_shared_audio_buffer_write,
+    },
+};
 use std::{
     ffi::c_void,
     fs::File,
     os::fd::{AsRawFd, BorrowedFd},
     ptr,
-};
-use tonenari_macos_transport::{
-    endpoint_transport::{
-        EndpointTransportConfig, tn_endpoint_transport_attach, tn_endpoint_transport_config,
-    },
-    shared_audio_buffer::{
-        tn_shared_audio_buffer_read, tn_shared_audio_buffer_stats,
-        tn_shared_audio_buffer_try_begin_epoch, tn_shared_audio_buffer_write,
-    },
 };
 
 unsafe extern "C" {
@@ -56,12 +56,12 @@ fn add(registry: &EndpointRegistry, id: u8) {
 fn pcm(handle: &CallbackEndpoint<'_>) {
     let input = [0.25; 14];
     let mut output = [0.0; 14];
-    let before = unsafe { tn_shared_audio_buffer_stats(handle.render_buffer()) };
+    let before = unsafe { mr_shared_audio_buffer_stats(handle.render_buffer()) };
     // Reused endpoint mappings retain their monotonic timeline across inventory edits.
     // Append to that timeline; replaying frame zero is correctly rejected by the ring.
     let start = before.published_through_frame;
     assert!(unsafe {
-        tn_shared_audio_buffer_write(
+        mr_shared_audio_buffer_write(
             handle.render_buffer(),
             before.epoch,
             start,
@@ -71,12 +71,12 @@ fn pcm(handle: &CallbackEndpoint<'_>) {
     });
     assert_eq!(
         unsafe {
-            tn_shared_audio_buffer_read(handle.render_buffer(), start, output.as_mut_ptr(), 2)
+            mr_shared_audio_buffer_read(handle.render_buffer(), start, output.as_mut_ptr(), 2)
         },
         2
     );
     assert_eq!(input.map(f32::to_bits), output.map(f32::to_bits));
-    let after = unsafe { tn_shared_audio_buffer_stats(handle.render_buffer()) };
+    let after = unsafe { mr_shared_audio_buffer_stats(handle.render_buffer()) };
     assert_eq!(after.epoch, before.epoch);
     assert_eq!(after.published_through_frame, start + 2);
 }
@@ -93,7 +93,7 @@ fn multiple_identities_have_real_distinct_buffers_and_inventory() {
     pcm(&first);
     let mut silence = [1.0; 14];
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_read(second.render_buffer(), 0, silence.as_mut_ptr(), 2) },
+        unsafe { mr_shared_audio_buffer_read(second.render_buffer(), 0, silence.as_mut_ptr(), 2) },
         0
     );
     assert_eq!(silence.map(f32::to_bits), [0.0_f32; 14].map(f32::to_bits));
@@ -204,7 +204,7 @@ fn snapshot_descriptors_outlive_registry_and_attach_real_transport_geometry() {
     };
     drop(snapshot);
     drop(file);
-    let transport = unsafe { tn_endpoint_transport_attach(remote.pointer, remote.length) };
+    let transport = unsafe { mr_endpoint_transport_attach(remote.pointer, remote.length) };
     assert!(!transport.is_null());
     let mut config = EndpointTransportConfig {
         endpoint_id: [0; 16],
@@ -212,7 +212,7 @@ fn snapshot_descriptors_outlive_registry_and_attach_real_transport_geometry() {
         render_channels: 0,
         capture_channels: 0,
     };
-    assert!(unsafe { tn_endpoint_transport_config(transport, &raw mut config) });
+    assert!(unsafe { mr_endpoint_transport_config(transport, &raw mut config) });
     assert_eq!(config.endpoint_id, [4; 16]);
     assert_eq!(config.render_channels, 7);
     assert_eq!(config.capture_channels, 2);
@@ -227,12 +227,12 @@ fn exhausted_epoch_replaces_mapping_and_preserves_full_endpoint_spec() {
     // Exercise the actual shared buffer boundary, not an artificial registry flag.
     for _ in 1..u16::MAX {
         assert_ne!(
-            unsafe { tn_shared_audio_buffer_try_begin_epoch(old.capture_buffer()) },
+            unsafe { mr_shared_audio_buffer_try_begin_epoch(old.capture_buffer()) },
             0
         );
     }
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(old.capture_buffer()) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(old.capture_buffer()) },
         0
     );
     let replacement = registry
@@ -245,11 +245,11 @@ fn exhausted_epoch_replaces_mapping_and_preserves_full_endpoint_spec() {
     assert!(new.generation() > old.generation());
     // The old remote timeline never wraps back to generation one.
     assert_eq!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(old.capture_buffer()) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(old.capture_buffer()) },
         0
     );
     assert_ne!(
-        unsafe { tn_shared_audio_buffer_try_begin_epoch(new.capture_buffer()) },
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(new.capture_buffer()) },
         0
     );
     assert_eq!(registry.collect(), 0);
@@ -423,11 +423,11 @@ fn batch_changes_are_atomic_and_unchanged_endpoint_retains_mapping_and_rate() {
         untouched.transport()
     );
     pcm(&untouched);
-    let before_removal = unsafe { tn_shared_audio_buffer_stats(untouched.render_buffer()) };
+    let before_removal = unsafe { mr_shared_audio_buffer_stats(untouched.render_buffer()) };
     assert_eq!(before_removal.published_through_frame, 2);
     registry.prepare_inventory(&[]).unwrap().commit().unwrap();
     assert!(registry.snapshot().unwrap().entries().is_empty());
-    let after_removal = unsafe { tn_shared_audio_buffer_stats(untouched.render_buffer()) };
+    let after_removal = unsafe { mr_shared_audio_buffer_stats(untouched.render_buffer()) };
     assert_eq!(after_removal.epoch, before_removal.epoch);
     assert_eq!(after_removal.published_through_frame, 2);
     pcm(&untouched);

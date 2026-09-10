@@ -1,7 +1,7 @@
 //! Hardware owns the graph callback; HAL owns capture coordinates. Each state
 //! distinguishes absence, priming, actual delivery and control-plane recovery.
 use super::{NativeAudioConfig, NativeClockSnapshot};
-use tonenari_audio_io::{
+use mixrelay_audio_io::{
     clock_bridge::{
         AsyncClockBridge, BridgeConfig, ClockFeedback, ClockRelation, Discontinuity, FeedbackQueue,
     },
@@ -21,7 +21,7 @@ pub(super) trait CaptureTransport {
 }
 /// Control only, after the sole writer descriptor has been removed and drained.
 pub(super) fn recover_capture_epoch(id: [u8; 16]) -> bool {
-    tonenari_engine_service::endpoint_service::recover_capture_epoch(id).unwrap_or(false)
+    mixrelay_engine_service::endpoint_service::recover_capture_epoch(id).unwrap_or(false)
 }
 pub(super) struct NativeCapture {
     endpoint_id: [u8; 16],

@@ -1,5 +1,5 @@
 use super::*;
-use tonenari_audio_io::{process::ProcessingState, session::AudioBackendKind};
+use mixrelay_audio_io::{process::ProcessingState, session::AudioBackendKind};
 
 const FORMAT: RenderFormat = RenderFormat {
     sample_rate: 48_000,

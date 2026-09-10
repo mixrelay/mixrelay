@@ -21,11 +21,16 @@ use aggregate::Aggregate;
 #[cfg(test)]
 use bridge::DeviceBridge;
 use device::Device;
-use ffi::tn_device_io_native_frames;
+use ffi::mr_device_io_native_frames;
 #[cfg(test)]
 use ffi::*;
 use format::{PreparedDeviceFormat, PublishedFormat};
 use handoff::{Publication, ResourceConsumer, ResourceHandoff};
+use mixrelay_audio_graph::{GraphDocument, RenderFormat};
+use mixrelay_audio_io::{HostAudioBackendError, process::TransferOutcome};
+use mixrelay_engine_service::{
+    GraphResourceBackend, PreparedGraphFormat, RuntimeStatusBackend, session::AdapterRuntimeStatus,
+};
 use spec::{Spec, aggregate_members, specs};
 use std::{
     collections::BTreeMap,
@@ -35,20 +40,15 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tonenari_audio_graph::{GraphDocument, RenderFormat};
-use tonenari_audio_io::{HostAudioBackendError, process::TransferOutcome};
-use tonenari_engine_service::{
-    GraphResourceBackend, PreparedGraphFormat, RuntimeStatusBackend, session::AdapterRuntimeStatus,
-};
 #[cfg(test)]
 use {
     bridge::NEXT_DEVICE_EPOCH,
+    mixrelay_audio_graph::{DeviceSelector, NodeConfig},
     native::Native,
     std::{
         sync::atomic::{AtomicU32, AtomicU64},
         thread,
     },
-    tonenari_audio_graph::{DeviceSelector, NodeConfig},
     worker::WorkerContext,
 };
 #[derive(Default)]
@@ -101,7 +101,7 @@ impl DeviceSet {
         self.clock_master().map(|device| HardwareClockProgress {
             owner_id: device.identity,
             epoch: device.epoch.load(Ordering::Acquire),
-            native_frames: unsafe { tn_device_io_native_frames(device.native.pointer.as_ptr()) },
+            native_frames: unsafe { mr_device_io_native_frames(device.native.pointer.as_ptr()) },
             native_rate: device.native_rate.load(Ordering::Acquire),
         })
     }
@@ -276,14 +276,14 @@ fn backend_error(message: impl Into<String>) -> HostAudioBackendError {
 impl GraphResourceBackend for MacDevices {
     fn device_inventory(
         &self,
-    ) -> Result<Vec<tonenari_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
-        tonenari_audio_io::macos::devices()
+    ) -> Result<Vec<mixrelay_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
+        mixrelay_audio_io::macos::devices()
     }
 
     fn resolve_application_capture(
         &self,
-        request: &tonenari_audio_io::ApplicationCaptureRequest,
-    ) -> Result<tonenari_engine_service::graph_composition::SharedSource, HostAudioBackendError>
+        request: &mixrelay_audio_io::ApplicationCaptureRequest,
+    ) -> Result<mixrelay_engine_service::graph_composition::SharedSource, HostAudioBackendError>
     {
         application::resolve(request)
     }
@@ -351,7 +351,7 @@ impl RuntimeStatusBackend for MacDevices {
     fn capabilities_for_format(
         &self,
         format: RenderFormat,
-    ) -> Option<tonenari_audio_io::session::AudioSessionCapabilities> {
+    ) -> Option<mixrelay_audio_io::session::AudioSessionCapabilities> {
         self.status
             .observe_routing_clock(self.follows_hardware(), self.routing_rate());
         self.status.capabilities_for_format(format)
@@ -381,7 +381,7 @@ impl RuntimeStatusBackend for MacDevices {
         }
         self.status.adopt_external_format(requested)
     }
-    fn status(&self, format: RenderFormat) -> tonenari_control_protocol::AppStatus {
+    fn status(&self, format: RenderFormat) -> mixrelay_control_protocol::AppStatus {
         self.status
             .observe_routing_clock(self.follows_hardware(), self.routing_rate());
         self.status.status(format)
@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn native_owner_allocation_retirement_stress() {
-        if !tonenari_macos_test_support::memory_child(
+        if !mixrelay_macos_test_support::memory_child(
             "macos_devices::tests::native_owner_allocation_retirement_stress",
         ) {
             return;
@@ -514,7 +514,7 @@ mod tests {
         let (device, context) = synthetic_output(2, 48000, 48000);
         let pcm = [0.0; 64];
         unsafe {
-            tn_device_io_graph_write(device.native.pointer.as_ptr(), pcm.as_ptr(), 32);
+            mr_device_io_graph_write(device.native.pointer.as_ptr(), pcm.as_ptr(), 32);
         }
         let mut bridge = DeviceBridge::new(&context, 48000).unwrap();
         bridge.clock_aligned = true;
@@ -531,7 +531,7 @@ mod tests {
         for _ in 0..16 {
             assert_eq!(
                 unsafe {
-                    tn_device_io_graph_write(device.native.pointer.as_ptr(), source.as_ptr(), 256)
+                    mr_device_io_graph_write(device.native.pointer.as_ptr(), source.as_ptr(), 256)
                 },
                 256
             );
@@ -539,7 +539,7 @@ mod tests {
         for _ in 0..32 {
             bridge.pump(&context).unwrap();
         }
-        let queued = unsafe { tn_device_io_queued(device.native.pointer.as_ptr(), false) };
+        let queued = unsafe { mr_device_io_queued(device.native.pointer.as_ptr(), false) };
         eprintln!(
             "same-clock 48kHz stereo native output queued={queued} frames ({:.3} ms)",
             f64::from(queued) / 48.0
@@ -609,7 +609,7 @@ mod tests {
                 let mut bridge = DeviceBridge::new(&context, native_rate).unwrap();
                 bridge.pump(&context).unwrap();
                 assert_eq!(
-                    unsafe { tn_device_io_queued(device.native.pointer.as_ptr(), false) },
+                    unsafe { mr_device_io_queued(device.native.pointer.as_ptr(), false) },
                     0
                 );
                 let source = vec![0.25; 512 * usize::from(channels)];
@@ -618,11 +618,11 @@ mod tests {
                     bridge.pump(&context).unwrap();
                 }
                 let transferred =
-                    unsafe { tn_device_io_queued(device.native.pointer.as_ptr(), false) };
+                    unsafe { mr_device_io_queued(device.native.pointer.as_ptr(), false) };
                 assert!(transferred > 0);
                 assert!(device.bridge_ready.load(Ordering::Acquire));
                 assert_eq!(
-                    unsafe { tn_device_io_graph_frames(device.native.pointer.as_ptr()) },
+                    unsafe { mr_device_io_graph_frames(device.native.pointer.as_ptr()) },
                     512
                 );
                 counts.push(transferred);
@@ -669,7 +669,7 @@ mod tests {
         );
         assert_eq!(device.graph_rate.load(Ordering::Acquire), 48_000);
         assert_eq!(
-            unsafe { tn_device_io_queued(device.native.pointer.as_ptr(), true) },
+            unsafe { mr_device_io_queued(device.native.pointer.as_ptr(), true) },
             256
         );
         drop(cancelled);
@@ -706,7 +706,7 @@ mod tests {
         let mut prepared = device.pending_bridge.lock().unwrap().take().unwrap();
         prepared.activate(&context);
         assert_eq!(
-            unsafe { tn_device_io_queued(device.native.pointer.as_ptr(), true) },
+            unsafe { mr_device_io_queued(device.native.pointer.as_ptr(), true) },
             0
         );
         assert_eq!(

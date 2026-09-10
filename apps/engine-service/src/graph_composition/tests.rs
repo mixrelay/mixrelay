@@ -1,9 +1,9 @@
 use super::*;
-use std::sync::Arc;
-use tonenari_audio_engine::{BlockProcessor, RenderPlan};
-use tonenari_audio_graph::{
+use mixrelay_audio_engine::{BlockProcessor, RenderPlan};
+use mixrelay_audio_graph::{
     AudioDeviceInputConfig, ChannelLayout, CompileLimits, DeviceSelector, RenderFormat, StreamSpec,
 };
+use std::sync::Arc;
 
 mod authored_tests;
 mod device_mix_tests;
@@ -49,7 +49,7 @@ fn edge(id: &str, source: &str, source_port: &str, sink: &str, sink_port: &str) 
         id: EdgeId::from(id),
         source: endpoint(NodeId::from(source), source_port),
         destination: endpoint(NodeId::from(sink), sink_port),
-        channel_mapping: tonenari_audio_graph::ChannelMapping::default(),
+        channel_mapping: mixrelay_audio_graph::ChannelMapping::default(),
     }
 }
 fn gain(node: &str, gain_db: f32) -> NodeSpec {
@@ -521,8 +521,8 @@ fn one_native_application_capture_owner_has_independent_local_reference_gains() 
         .with_sources(vec![SharedSource {
             id: "application:stable-bundle".into(),
             config: NodeConfig::ApplicationCapture(
-                tonenari_audio_graph::ApplicationCaptureRequest {
-                    selector: tonenari_audio_graph::ApplicationSelector::BundleId {
+                mixrelay_audio_graph::ApplicationCaptureRequest {
+                    selector: mixrelay_audio_graph::ApplicationSelector::BundleId {
                         bundle_id: "org.example.Player".into(),
                         include_descendants: true,
                     },
@@ -530,7 +530,7 @@ fn one_native_application_capture_owner_has_independent_local_reference_gains() 
                         channels: 2,
                         channel_layout: ChannelLayout::Stereo,
                     },
-                    source_playback: tonenari_audio_graph::SourcePlaybackPolicy::Preserve,
+                    source_playback: mixrelay_audio_graph::SourcePlaybackPolicy::Preserve,
                     gain_db: 0.0,
                     requires_reselection: false,
                 },

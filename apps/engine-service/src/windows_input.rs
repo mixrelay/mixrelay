@@ -4,6 +4,8 @@
 use super::{
     ACTIVATION_TIMEOUT, SpscSampleRing, clock_bridge, drain_selected_capture_packets, render,
 };
+use mixrelay_audio_graph::{AudioDeviceInputConfig, DeviceSelector};
+use mixrelay_audio_io::process::TransferOutcome;
 use std::{
     collections::BTreeMap,
     sync::{
@@ -12,8 +14,6 @@ use std::{
     },
     thread,
 };
-use tonenari_audio_graph::{AudioDeviceInputConfig, DeviceSelector};
-use tonenari_audio_io::process::TransferOutcome;
 use windows::{
     Win32::{
         Media::Audio::{
@@ -106,9 +106,9 @@ impl DeviceInput {
         let (worker_ring, worker_stop, worker_failed, worker_epoch) =
             (ring.clone(), stop.clone(), failed.clone(), epoch.clone());
         let worker = thread::Builder::new()
-            .name("tonenari-wasapi-input".into())
+            .name("mixrelay-wasapi-input".into())
             .spawn(move || {
-                tonenari_engine_service::device_worker::supervise(
+                mixrelay_engine_service::device_worker::supervise(
                     &worker_stop,
                     &worker_failed,
                     &tx,
@@ -235,8 +235,8 @@ fn open_stream(config: &AudioDeviceInputConfig) -> Result<InputStream, String> {
     config
         .selector
         .resolve(
-            &tonenari_audio_io::windows::devices().map_err(|e| e.to_string())?,
-            tonenari_audio_io::DeviceDirection::Input,
+            &mixrelay_audio_io::windows::devices().map_err(|e| e.to_string())?,
+            mixrelay_audio_io::DeviceDirection::Input,
             config.output_channels,
         )
         .map_err(|e| e.to_string())?;
@@ -338,14 +338,14 @@ mod tests {
         );
     }
     #[test]
-    #[ignore = "requires authorized interactive Windows VM; uses only ToneNari LAB capture endpoint"]
+    #[ignore = "requires authorized interactive Windows VM; uses only MixRelay LAB capture endpoint"]
     fn native_wasapi_device_input_reopen_and_remove() {
-        assert_eq!(std::env::var("TONENARI_LAB_AUDIO_TEST").as_deref(), Ok("1"));
-        let devices = tonenari_audio_io::windows::devices().unwrap();
+        assert_eq!(std::env::var("MIXRELAY_LAB_AUDIO_TEST").as_deref(), Ok("1"));
+        let devices = mixrelay_audio_io::windows::devices().unwrap();
         let device = devices
             .iter()
-            .find(|d| d.input_channels > 0 && d.display_name.contains("ToneNari"))
-            .expect("installed ToneNari LAB input");
+            .find(|d| d.input_channels > 0 && d.display_name.contains("MixRelay"))
+            .expect("installed MixRelay LAB input");
         let config = AudioDeviceInputConfig {
             selector: DeviceSelector::PersistentUid {
                 uid: device.uid.clone(),

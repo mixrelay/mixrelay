@@ -6,21 +6,21 @@ function once(text, from, to) {
 }
 
 export function ratePolicyHeader(text) {
-  if (text.includes('TnPolicyPin')) throw Error('Rate policy already applied');
-  text = '#include "TnBridge.h"\n' + text;
+  if (text.includes('MrPolicyPin')) throw Error('Rate policy already applied');
+  text = '#include "MrBridge.h"\n' + text;
   return once(text, '    PPORTEVENTS                         m_pPortEvents;', `    PPORTEVENTS                         m_pPortEvents;
 
-    bool TnPolicyPin(ULONG pin) {
+    bool MrPolicyPin(ULONG pin) {
         return pin < m_pMiniportPair->WaveDescriptor->PinCount &&
             ((m_DeviceType == eSpeakerDevice && IsSystemRenderPin(pin)) ||
              (m_DeviceType == eMicArrayDevice1 && IsSystemCapturePin(pin)));
     }
-    static void TnRateChanged(void* context) {
+    static void MrRateChanged(void* context) {
         auto self = static_cast<CMiniportWaveRT*>(context);
         // The policy lock owns callback lifetime. Never query policy from this
         // callback: that would reenter the same lock. PortCls owns event entries.
         for (ULONG pin = 0; pin < self->m_pMiniportPair->WaveDescriptor->PinCount; ++pin)
-            if (self->TnPolicyPin(pin) && self->m_pPortEvents)
+            if (self->MrPolicyPin(pin) && self->m_pPortEvents)
                 self->GenerateEventList(const_cast<GUID*>(&KSEVENTSETID_PinCapsChange),
                     KSEVENT_PINCAPS_FORMATCHANGE, TRUE, pin, FALSE, ULONG(-1));
     }`);
@@ -30,16 +30,16 @@ export function ratePolicyMiniport(text) {
   text = once(text, '    if (m_pPortEvents)\n    {\n        m_pPortEvents->Release();', `    if (m_pPortEvents)
     {
         if (m_DeviceType == eSpeakerDevice || m_DeviceType == eMicArrayDevice1)
-            TnTransportRateListener(m_DeviceType == eMicArrayDevice1, nullptr, this);
+            MrTransportRateListener(m_DeviceType == eMicArrayDevice1, nullptr, this);
         m_pPortEvents->Release();`);
   text = once(text, '    // Format change handler is only required for bluetooth HFP implementation', `    if (m_pPortEvents && (m_DeviceType == eSpeakerDevice || m_DeviceType == eMicArrayDevice1))
-        TnTransportRateListener(m_DeviceType == eMicArrayDevice1, TnRateChanged, this);
+        MrTransportRateListener(m_DeviceType == eMicArrayDevice1, MrRateChanged, this);
 
     // Format change handler is only required for bluetooth HFP implementation`);
-  text = once(text, '    cPinFormats = GetPinSupportedDeviceFormats(_ulPin, &pPinFormats);', `    if (TnPolicyPin(_ulPin)) {
+  text = once(text, '    cPinFormats = GetPinSupportedDeviceFormats(_ulPin, &pPinFormats);', `    if (MrPolicyPin(_ulPin)) {
         if (!_pDataFormat || _pDataFormat->FormatSize < sizeof(KSDATAFORMAT_WAVEFORMATEX))
             return STATUS_INVALID_PARAMETER;
-        const auto forced = TnTransportForcedRate();
+        const auto forced = MrTransportForcedRate();
         const auto format = reinterpret_cast<PKSDATAFORMAT_WAVEFORMATEX>(_pDataFormat);
         if (format->WaveFormatEx.nSamplesPerSec != 44100 && format->WaveFormatEx.nSamplesPerSec != 48000)
             return STATUS_NO_MATCH;
@@ -47,19 +47,19 @@ export function ratePolicyMiniport(text) {
     }
     cPinFormats = GetPinSupportedDeviceFormats(_ulPin, &pPinFormats);`);
   text = once(text, '    cbMinSize = modeInfo->DefaultFormat->FormatSize;', `    auto proposedDefault = modeInfo->DefaultFormat;
-    if (TnPolicyPin(kspPin->PinId)) {
+    if (MrPolicyPin(kspPin->PinId)) {
         PKSDATAFORMAT_WAVEFORMATEXTENSIBLE formats = nullptr;
         const auto count = GetPinSupportedDeviceFormats(kspPin->PinId, &formats);
-        proposedDefault = TnBridgeDefaultFormat(proposedDefault, formats, count);
+        proposedDefault = MrBridgeDefaultFormat(proposedDefault, formats, count);
         if (!proposedDefault) return STATUS_NO_MATCH;
     }
     cbMinSize = proposedDefault->FormatSize;`);
   text = once(text, 'RtlCopyMemory(PropertyRequest->Value, modeInfo->DefaultFormat, modeInfo->DefaultFormat->FormatSize);',
     'RtlCopyMemory(PropertyRequest->Value, proposedDefault, proposedDefault->FormatSize);');
-  text = once(text, '    UNREFERENCED_PARAMETER(PinId);\n    UNREFERENCED_PARAMETER(ResultantFormat);', `    if (TnPolicyPin(PinId)) {
+  text = once(text, '    UNREFERENCED_PARAMETER(PinId);\n    UNREFERENCED_PARAMETER(ResultantFormat);', `    if (MrPolicyPin(PinId)) {
         PKSDATAFORMAT_WAVEFORMATEXTENSIBLE formats = nullptr;
         const auto count = GetPinSupportedDeviceFormats(PinId, &formats);
-        return TnBridgeIntersect(ClientDataRange, MyDataRange, formats, count,
+        return MrBridgeIntersect(ClientDataRange, MyDataRange, formats, count,
             OutputBufferLength, ResultantFormat, ResultantFormatLength);
     }
     UNREFERENCED_PARAMETER(PinId);
@@ -76,8 +76,8 @@ const event = `    {
     },`;
 export function ratePolicySpeaker(text) {
   return once(text, 'DEFINE_PCAUTOMATION_TABLE_PROP(AutomationSpeakerWaveFilter, PropertiesSpeakerWaveFilter);',
-    `${eventDeclaration}static PCEVENT_ITEM EventsToneNariSpeaker[] = {\n${event}\n};
-DEFINE_PCAUTOMATION_TABLE_PROP_EVENT(AutomationSpeakerWaveFilter, PropertiesSpeakerWaveFilter, EventsToneNariSpeaker);`);
+    `${eventDeclaration}static PCEVENT_ITEM EventsMixRelaySpeaker[] = {\n${event}\n};
+DEFINE_PCAUTOMATION_TABLE_PROP_EVENT(AutomationSpeakerWaveFilter, PropertiesSpeakerWaveFilter, EventsMixRelaySpeaker);`);
 }
 export function ratePolicyCapture(text) {
   if (text.includes('KSEVENT_PINCAPS_FORMATCHANGE')) throw Error('Rate policy already applied');

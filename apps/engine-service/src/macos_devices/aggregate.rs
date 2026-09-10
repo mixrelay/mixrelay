@@ -2,7 +2,7 @@
 //! Native calls perform one operation; Rust retains every partially created owner.
 use super::{
     admission::{Admission, Permit},
-    ffi::{tn_aggregate_group_create, tn_aggregate_group_ready, tn_aggregate_group_try_destroy},
+    ffi::{mr_aggregate_group_create, mr_aggregate_group_ready, mr_aggregate_group_try_destroy},
     group_plan::GroupPlan,
     retirement::{Retirable, Retirement},
 };
@@ -21,7 +21,7 @@ unsafe impl Send for GroupOwner {}
 impl Retirable for GroupOwner {
     fn try_release(&mut self) -> bool {
         if let Some(pointer) = self.pointer {
-            if !unsafe { tn_aggregate_group_try_destroy(pointer.as_ptr()) } {
+            if !unsafe { mr_aggregate_group_try_destroy(pointer.as_ptr()) } {
                 return false;
             }
             self.pointer = None;
@@ -49,7 +49,7 @@ impl Drop for Aggregate {
 }
 impl Aggregate {
     pub(super) fn ready(&self) -> bool {
-        unsafe { tn_aggregate_group_ready(self.pointer.as_ptr()) }
+        unsafe { mr_aggregate_group_ready(self.pointer.as_ptr()) }
     }
     pub(super) fn reclaim_retired() {
         RETIRED.reclaim();
@@ -69,7 +69,7 @@ impl Aggregate {
             .collect::<Vec<_>>();
         let mut status = 0;
         let pointer = unsafe {
-            tn_aggregate_group_create(
+            mr_aggregate_group_create(
                 pointers.as_ptr(),
                 plan.facts.as_ptr(),
                 u32::try_from(pointers.len()).map_err(|error| error.to_string())?,
@@ -129,9 +129,9 @@ fn confirm_ready(mut ready: impl FnMut() -> bool, mut wait: impl FnMut()) -> boo
 
 #[cfg(test)]
 mod tests {
-    use super::super::{device::Device, ffi::tn_device_io_native_frames, spec::Spec};
+    use super::super::{device::Device, ffi::mr_device_io_native_frames, spec::Spec};
     use super::*;
-    use tonenari_audio_graph::DeviceSelector;
+    use mixrelay_audio_graph::DeviceSelector;
     #[test]
     fn readiness_is_bounded_and_never_accepts_an_unconfirmed_object() {
         let mut checks = 0;
@@ -157,7 +157,7 @@ mod tests {
     }
     #[test]
     fn partial_native_creation_returns_admission_after_rejected_members() {
-        if !tonenari_macos_test_support::memory_child(
+        if !mixrelay_macos_test_support::memory_child(
             "macos_devices::aggregate::tests::partial_native_creation_returns_admission_after_rejected_members",
         ) {
             return;
@@ -171,7 +171,7 @@ mod tests {
             let permit = GROUPS.acquire().expect("partial owners must retire");
             let mut status = 0;
             let pointer = NonNull::new(unsafe {
-                tn_aggregate_group_create(names.as_ptr(), facts.as_ptr(), 2, 0, &raw mut status)
+                mr_aggregate_group_create(names.as_ptr(), facts.as_ptr(), 2, 0, &raw mut status)
             })
             .expect("partial allocation transferred");
             let owner = GroupOwner {
@@ -185,14 +185,14 @@ mod tests {
 
     #[test]
     fn native_private_group_retains_owner_until_last_callback_retires() {
-        if !tonenari_macos_test_support::memory_child(
+        if !mixrelay_macos_test_support::memory_child(
             "macos_devices::aggregate::tests::native_private_group_retains_owner_until_last_callback_retires",
         ) {
             return;
         }
-        let primary = std::env::var("TONENARI_GROUP_PRIMARY_UID").expect("primary output UID");
+        let primary = std::env::var("MIXRELAY_GROUP_PRIMARY_UID").expect("primary output UID");
         let secondary =
-            std::env::var("TONENARI_GROUP_SECONDARY_UID").expect("secondary output UID");
+            std::env::var("MIXRELAY_GROUP_SECONDARY_UID").expect("secondary output UID");
         let baseline = GROUPS.in_use();
         assert_stale_plans_rejected(&primary, &secondary);
         assert_group_lifetime(primary, secondary, baseline);
@@ -220,7 +220,7 @@ mod tests {
             let permit = GROUPS.acquire().unwrap();
             let mut status = 0;
             let pointer = NonNull::new(unsafe {
-                tn_aggregate_group_create(names.as_ptr(), facts.as_ptr(), 2, 0, &raw mut status)
+                mr_aggregate_group_create(names.as_ptr(), facts.as_ptr(), 2, 0, &raw mut status)
             })
             .expect("stale plan transfers partial owner");
             RETIRED.retire(GroupOwner {
@@ -253,8 +253,8 @@ mod tests {
         let first = open(primary);
         let second = open(secondary);
         assert!(first.ready() && second.ready());
-        assert!(unsafe { tn_device_io_native_frames(first.native.pointer.as_ptr()) } > 0);
-        assert!(unsafe { tn_device_io_native_frames(second.native.pointer.as_ptr()) } > 0);
+        assert!(unsafe { mr_device_io_native_frames(first.native.pointer.as_ptr()) } > 0);
+        assert!(unsafe { mr_device_io_native_frames(second.native.pointer.as_ptr()) } > 0);
         let first_clock = first
             .clock_identity
             .load(std::sync::atomic::Ordering::Acquire);

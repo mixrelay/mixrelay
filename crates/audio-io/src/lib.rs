@@ -81,9 +81,9 @@ impl StreamSpec {
 pub struct VirtualEndpointSpec {
     pub id: VirtualEndpointId,
     pub display_name: String,
-    /// Audio rendered by OS applications enters the `ToneNari` graph through this stream.
+    /// Audio rendered by OS applications enters the `MixRelay` graph through this stream.
     pub render: Option<StreamSpec>,
-    /// Audio sent by the `ToneNari` graph is captured by OS applications through this stream.
+    /// Audio sent by the `MixRelay` graph is captured by OS applications through this stream.
     pub capture: Option<StreamSpec>,
     pub supported_sample_rates: Vec<u32>,
     pub default_sample_rate: u32,
@@ -492,7 +492,7 @@ pub trait ApplicationCaptureSession: Send + Sync {
     /// a second consumer of the same single-consumer audio ring.
     ///
     /// ```compile_fail,E0596
-    /// use tonenari_audio_io::ApplicationCaptureSession;
+    /// use mixrelay_audio_io::ApplicationCaptureSession;
     /// fn read_shared(session: &dyn ApplicationCaptureSession, pcm: &mut [f32]) {
     ///     let _ = session.read_interleaved(pcm);
     /// }

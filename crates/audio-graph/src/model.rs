@@ -1,8 +1,8 @@
 use std::fmt;
 use std::mem::size_of_val;
 
+use mixrelay_audio_io::{ApplicationCaptureRequest, VirtualEndpointSpec};
 use serde::{Deserialize, Serialize};
-use tonenari_audio_io::{ApplicationCaptureRequest, VirtualEndpointSpec};
 
 pub const CURRENT_GRAPH_SCHEMA_VERSION: u32 = 2;
 pub const AUDIO_PORT_ID: &str = "audio";
@@ -142,7 +142,7 @@ pub enum NodeKind {
     Provider,
 }
 
-pub use tonenari_audio_io::DeviceSelector;
+pub use mixrelay_audio_io::DeviceSelector;
 
 /// Graph-side processing for an endpoint. Gain is deliberately not a device property:
 /// changing it must not recreate the native endpoint or modify its advertised format.

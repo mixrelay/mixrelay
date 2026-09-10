@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  print -u2 "ToneNari dynamic graph smoke only runs on macOS"
+  print -u2 "MixRelay dynamic graph smoke only runs on macOS"
   exit 1
 fi
 
@@ -124,4 +124,4 @@ wait_for_revision "$restore_revision"
 gain_active=false
 "$repo_root/scripts/smoke-macos-installed-duplex.sh"
 
-print "ToneNari dynamic graph smoke passed: direct -> -6.0206 dB -> direct"
+print "MixRelay dynamic graph smoke passed: direct -> -6.0206 dB -> direct"

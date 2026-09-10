@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import type { ToneNariStatus } from '../../core/control-port/types';
+import type { MixRelayStatus } from '../../core/control-port/types';
 import styles from './AudioSessionControl.module.css';
 import {
   AudioSessionAlerts,
@@ -10,7 +10,7 @@ import {
 export function AudioSessionControl({
   status,
   ...settings
-}: { status: ToneNariStatus | null } & Omit<AudioSessionSettingsProps, 'session'>) {
+}: { status: MixRelayStatus | null } & Omit<AudioSessionSettingsProps, 'session'>) {
   const { t } = useTranslation();
   const session = status?.audioSession;
   const recorderError = status?.recorderError

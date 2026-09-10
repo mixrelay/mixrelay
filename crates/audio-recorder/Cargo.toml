@@ -1,5 +1,5 @@
 [package]
-name = "tonenari-audio-recorder"
+name = "mixrelay-audio-recorder"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 serde.workspace = true
-tonenari-audio-io.workspace = true
+mixrelay-audio-io.workspace = true
 parking_lot.workspace = true
 # WAV container/encoding only; sample-rate conversion stays on the writer thread.
 hound = "3.5.1"
@@ -20,6 +20,6 @@ rubato.workspace = true
 audioadapter-buffers.workspace = true
 
 [dev-dependencies]
-tonenari-test-support = { path = "../test-support" }
+mixrelay-test-support = { path = "../test-support" }
 serde_json.workspace = true
 allocation-counter = "0.8.1"

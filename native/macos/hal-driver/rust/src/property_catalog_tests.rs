@@ -1,6 +1,6 @@
 use super::Fixture;
 use crate::abi::OK;
-use crate::properties::{Address, tn_hal_core_property_get, tn_hal_core_property_set};
+use crate::properties::{Address, mr_hal_core_property_get, mr_hal_core_property_set};
 
 fn catalog(fixture: &Fixture, object: u32, selector: [u8; 4], stride: usize, channels: u32) {
     let address = Address {
@@ -13,7 +13,7 @@ fn catalog(fixture: &Fixture, object: u32, selector: [u8; 4], stride: usize, cha
         let mut written = u32::MAX;
         assert_eq!(
             unsafe {
-                tn_hal_core_property_get(
+                mr_hal_core_property_get(
                     (&raw const *fixture.registry).cast_mut(),
                     object,
                     &raw const address,
@@ -85,7 +85,7 @@ fn native_property_rate_setter_accepts_exact_catalog_only() {
         let value = f64::from(rate);
         assert_eq!(
             unsafe {
-                tn_hal_core_property_set(
+                mr_hal_core_property_set(
                     (&raw const *fixture.registry).cast_mut(),
                     id,
                     &raw const address,
@@ -101,7 +101,7 @@ fn native_property_rate_setter_accepts_exact_catalog_only() {
     for value in [0.0, 48_000.5, 352_800.0, 384_000.0, f64::NAN, f64::INFINITY] {
         assert_ne!(
             unsafe {
-                tn_hal_core_property_set(
+                mr_hal_core_property_set(
                     (&raw const *fixture.registry).cast_mut(),
                     id,
                     &raw const address,

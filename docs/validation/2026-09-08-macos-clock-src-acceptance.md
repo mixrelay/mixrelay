@@ -25,7 +25,7 @@ phase advanced 95744 native frames; input and output FIFO overflow counts were
 both zero. This hardware adapter's 96 kHz graph test does not widen the installed
 HAL's supported 44.1/48 kHz session range.
 
-`zsh scripts/check-macos-application-clock.sh /var/tmp/tonenari-application-clock-20260908-root --run`
+`zsh scripts/check-macos-application-clock.sh /var/tmp/mixrelay-application-clock-20260908-root --run`
 passed with a real owned process tone, CoreAudio process tap, desktop SRC pump,
 and isolated v2 source registry. The installed graph was not replaced.
 
@@ -48,13 +48,13 @@ separate; these figures are not scheduler or CPU speedup claims.
 
 ## Bidirectional settings and persistence
 
-`node scripts/lab/macos-session-format-probe.mjs /tmp/tonenari-macos-attach.2b8hUC/own-format-probe --run`
+`node scripts/lab/macos-session-format-probe.mjs /tmp/mixrelay-macos-attach.2b8hUC/own-format-probe --run`
 passed app-to-own-device 44.1/48 kHz changes, processing buffers 64/128/256/512,
 and external own-device 44.1/48 kHz changes followed by the app. Every accepted
 format was read back from native state and the saved preferences. Graph revisions
 advanced 2 -> 9 while nodes/edges were preserved. Original 48000/256 was restored;
 the subsequent engine restart restored it again without a session warning.
-The buffer setting remains ToneNari's processing maximum, not a promise to set
+The buffer setting remains MixRelay's processing maximum, not a promise to set
 other applications' client buffer sizes.
 
 ## Capability projection and remaining qualification

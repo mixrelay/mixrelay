@@ -42,7 +42,7 @@ fn owner() -> (Control<Fake>, Rc<Counts>) {
     };
     // SAFETY: create copies the stack callbacks. The empty registry performs no
     // audio-device discovery or mutation; Box adopts the sole returned allocation.
-    let registry = unsafe { tn_hal_core_create_native(&raw const host) };
+    let registry = unsafe { mr_hal_core_create_native(&raw const host) };
     assert!(!registry.is_null());
     let counts = Rc::new(Counts::default());
     // SAFETY: no callbacks or competing owner reference the fresh allocation.
@@ -133,6 +133,6 @@ fn actual_registry_fence_contention_prevents_socket_publication() {
 fn null_host_initialization_does_not_publish_native_work() {
     // SAFETY: null is an explicitly rejected ABI argument, with no host access.
     let mut registry = ptr::null_mut();
-    assert!(!unsafe { tn_hal_control_initialize(ptr::null(), &raw mut registry) });
+    assert!(!unsafe { mr_hal_control_initialize(ptr::null(), &raw mut registry) });
     assert!(registry.is_null());
 }

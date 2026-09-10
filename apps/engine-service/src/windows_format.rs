@@ -4,16 +4,16 @@ use super::{
     WindowsCaptureSet, WindowsGraphResources, WindowsResourceSpec, application_capture, input,
     render,
 };
+use mixrelay_audio_graph::{GraphDocument, RenderFormat};
+use mixrelay_audio_io::HostAudioBackendError;
+use mixrelay_engine_service::PreparedGraphFormat;
+use mixrelay_engine_service::resource_requirements::ResourceRequirements;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicPtr, Ordering},
 };
-use tonenari_audio_graph::{GraphDocument, RenderFormat};
-use tonenari_audio_io::HostAudioBackendError;
-use tonenari_engine_service::PreparedGraphFormat;
-use tonenari_engine_service::resource_requirements::ResourceRequirements;
 
-pub(super) use tonenari_audio_io::formats::SAMPLE_RATES as GRAPH_RATES;
+pub(super) use mixrelay_audio_io::formats::SAMPLE_RATES as GRAPH_RATES;
 
 fn failure(message: &str) -> HostAudioBackendError {
     HostAudioBackendError::BackendFailure {
@@ -126,7 +126,7 @@ pub(super) fn prepare(
     if current == requested {
         return Ok(Box::new(Unchanged));
     }
-    tonenari_audio_io::format_contract::validate_format(
+    mixrelay_audio_io::format_contract::validate_format(
         requested.sample_rate,
         requested.block_frames,
     )

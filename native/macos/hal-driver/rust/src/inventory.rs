@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{CStr, c_void};
 use std::os::fd::{FromRawFd, OwnedFd};
 
-use tonenari_macos_transport::control_inventory::{
-    InventorySnapshot, tn_hal_control_inventory_snapshot_close,
-    tn_hal_control_parse_endpoint_remove, tn_hal_control_parse_inventory_snapshot,
+use mixrelay_macos_transport::control_inventory::{
+    InventorySnapshot, mr_hal_control_inventory_snapshot_close,
+    mr_hal_control_parse_endpoint_remove, mr_hal_control_parse_inventory_snapshot,
 };
 
 use crate::abi::{Geometry, NOT_FOUND, OK};
@@ -35,7 +35,7 @@ pub(crate) struct InventoryState {
 /// `registry` must be the live factory registry. Calls must be serialized with
 /// control-message delivery by the bridge's control queue.
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_control_connected(
+pub(crate) unsafe extern "C" fn mr_hal_core_control_connected(
     registry: *mut Registry,
     authority: u64,
 ) -> bool {
@@ -55,7 +55,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_control_connected(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_replacement_request(
+pub(crate) unsafe extern "C" fn mr_hal_core_replacement_request(
     registry: *mut Registry,
     authority: u64,
     endpoint: *mut [u8; 16],
@@ -92,7 +92,7 @@ impl Drop for SnapshotOwner {
     fn drop(&mut self) {
         // SAFETY: Parsing transfers duplicated descriptors into this owner;
         // consumed entries are set to -1, so close releases each remaining FD once.
-        unsafe { tn_hal_control_inventory_snapshot_close(&raw mut self.0) };
+        unsafe { mr_hal_control_inventory_snapshot_close(&raw mut self.0) };
     }
 }
 
@@ -231,7 +231,7 @@ fn upsert_desired(
 /// `registry` must remain live and `message` must be the retained XPC event for
 /// this call. Delivery and connection announcements use the same serial queue.
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_control_message(
+pub(crate) unsafe extern "C" fn mr_hal_core_control_message(
     registry: *mut Registry,
     authority: u64,
     message: *mut c_void,
@@ -253,7 +253,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_control_message(
     let mut snapshot = SnapshotOwner(InventorySnapshot::default());
     // SAFETY: XPC owns the event for the callback duration. The parser validates
     // its types and fills this exclusively borrowed, aligned output snapshot.
-    if unsafe { tn_hal_control_parse_inventory_snapshot(message, &raw mut snapshot.0) } {
+    if unsafe { mr_hal_control_parse_inventory_snapshot(message, &raw mut snapshot.0) } {
         return apply(registry, authority, &mut snapshot.0);
     }
     let mut endpoint = [0_u8; 16];
@@ -261,7 +261,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_control_message(
     // SAFETY: The same live event is borrowed; both outputs are disjoint locals
     // of the exact sizes the parser requires (16 bytes and one u64).
     if !unsafe {
-        tn_hal_control_parse_endpoint_remove(message, endpoint.as_mut_ptr(), &raw mut generation)
+        mr_hal_control_parse_endpoint_remove(message, endpoint.as_mut_ptr(), &raw mut generation)
     } {
         return false;
     }

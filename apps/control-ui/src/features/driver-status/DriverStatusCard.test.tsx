@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { DriverState } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
-import { ToneNariProvider } from '../../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { DriverStatusCard } from './DriverStatusCard';
 
 describe('DriverStatusCard', () => {
@@ -13,11 +13,11 @@ describe('DriverStatusCard', () => {
     const onAction = vi.fn();
 
     render(
-      <ToneNariProvider>
+      <MixRelayProvider>
         <I18nextProvider i18n={i18n}>
           <DriverStatusCard onAction={onAction} state="restart_required" />
         </I18nextProvider>
-      </ToneNariProvider>,
+      </MixRelayProvider>,
     );
 
     expect(screen.getByText('Restart required')).toBeInTheDocument();
@@ -41,11 +41,11 @@ describe('DriverStatusCard', () => {
 
     for (const state of states) {
       const view = render(
-        <ToneNariProvider>
+        <MixRelayProvider>
           <I18nextProvider i18n={i18n}>
             <DriverStatusCard state={state} />
           </I18nextProvider>
-        </ToneNariProvider>,
+        </MixRelayProvider>,
       );
       const button = screen.getByRole('button');
       expect(button).toHaveProperty('disabled', state === 'installing');

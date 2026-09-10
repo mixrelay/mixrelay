@@ -481,7 +481,7 @@ mod tests {
             json!({
                 "id": pid, "type": "PipeWire:Interface:Node", "info": {"props": {
                     "object.serial": pid.to_string(), "media.class": "Stream/Output/Audio",
-                    "application.process.id": pid, "application.id": "org.tonenari.fixture.missing",
+                    "application.process.id": pid, "application.id": "org.mixrelay.fixture.missing",
                     "application.name": "Fixture App"
                 }}
             })
@@ -490,14 +490,14 @@ mod tests {
         assert_eq!(apps.len(), 2);
         assert!(
             apps.iter()
-                .all(|app| app.bundle_id == "org.tonenari.fixture.missing"
+                .all(|app| app.bundle_id == "org.mixrelay.fixture.missing"
                     && app.display_name == "Fixture App"
                     && app.icon_data_url.is_none())
         );
         assert_eq!(
             apps[0].selector,
             ApplicationSelector::BundleId {
-                bundle_id: "org.tonenari.fixture.missing".into(),
+                bundle_id: "org.mixrelay.fixture.missing".into(),
                 include_descendants: false,
             }
         );

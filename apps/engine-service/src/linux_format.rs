@@ -5,12 +5,12 @@ use super::{
     LinuxVirtualEndpointBackend, Ordering, PipeWireCaptureSet, PipeWireEndpoint, RenderFormat,
     thread,
 };
-use tonenari_engine_service::PreparedGraphFormat;
+use mixrelay_engine_service::PreparedGraphFormat;
 #[cfg(test)]
 #[path = "linux_format_tests.rs"]
 mod tests;
 
-pub(super) use tonenari_audio_io::formats::{
+pub(super) use mixrelay_audio_io::formats::{
     BUFFER_SIZES as BLOCKS, MAX_BUFFER_FRAMES as MAX_BLOCK, SAMPLE_RATES as RATES,
 };
 static OBSERVED_ENDPOINT_RATE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -42,7 +42,7 @@ pub(super) fn observe_endpoint(endpoint: Option<&PipeWireEndpoint>) {
             agreed = Some(rate);
         }
     }
-    // Only ACTIVE ToneNari-owned endpoint PCM formats are observed. Neither the
+    // Only ACTIVE MixRelay-owned endpoint PCM formats are observed. Neither the
     // server graph's rate nor staged future streams represent the user's setting.
     OBSERVED_ENDPOINT_RATE.store(agreed.unwrap_or(0), Ordering::Release);
     OBSERVED_ENDPOINT_QUANTUM.store(quantum, Ordering::Release);
@@ -58,7 +58,7 @@ impl Monitor {
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = stop.clone();
         let worker = thread::Builder::new()
-            .name("tonenari-pipewire-format-monitor".into())
+            .name("mixrelay-pipewire-format-monitor".into())
             .spawn(move || {
                 let mut last_error = None;
                 while !stopping.load(Ordering::Acquire) {
@@ -68,7 +68,7 @@ impl Monitor {
                     let error = controller.reconcile_observed_device_rate().err();
                     if error != last_error {
                         if let Some(error) = &error {
-                            eprintln!("ToneNari endpoint format follow failed: {error:?}");
+                            eprintln!("MixRelay endpoint format follow failed: {error:?}");
                         }
                         last_error = error;
                     }
@@ -89,7 +89,7 @@ impl Drop for Monitor {
         if let Some(worker) = self.worker.take() {
             worker.thread().unpark();
             if worker.join().is_err() {
-                eprintln!("ToneNari endpoint format monitor panicked");
+                eprintln!("MixRelay endpoint format monitor panicked");
             }
         }
     }
@@ -154,11 +154,11 @@ impl PreparedGraphFormat for Prepared {
 
 pub(super) fn prepare(
     backend: &LinuxVirtualEndpointBackend,
-    document: &tonenari_audio_graph::GraphDocument,
+    document: &mixrelay_audio_graph::GraphDocument,
     requested: RenderFormat,
 ) -> Result<Box<dyn PreparedGraphFormat>, HostAudioBackendError> {
     let failure = |message: String| HostAudioBackendError::BackendFailure { message };
-    tonenari_audio_io::format_contract::validate_format(
+    mixrelay_audio_io::format_contract::validate_format(
         requested.sample_rate,
         requested.block_frames,
     )

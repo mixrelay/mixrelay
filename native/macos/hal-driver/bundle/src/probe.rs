@@ -74,7 +74,7 @@ impl Drop for Uuid {
 pub(super) fn factory(executable: &Path) -> Result<(), Box<dyn Error>> {
     let library = Library::open(executable)?;
     // SAFETY: live dlopen handle and literal NUL-terminated exported factory.
-    let symbol = unsafe { libc::dlsym(library.0.as_ptr(), c"ToneNariHAL_Create".as_ptr()) };
+    let symbol = unsafe { libc::dlsym(library.0.as_ptr(), c"MixRelayHAL_Create".as_ptr()) };
     if symbol.is_null() {
         return Err("HAL factory symbol is missing".into());
     }

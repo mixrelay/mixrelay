@@ -9,7 +9,7 @@ use super::fixture::InteractiveFixture;
 use super::{memory_child, memory_evidence, process};
 
 const CHILD_NAME: &str = "tests::owned_child_fixture";
-const CHILD_MODE: &str = "TONENARI_RUNNER_FIXTURE_MODE";
+const CHILD_MODE: &str = "MIXRELAY_RUNNER_FIXTURE_MODE";
 const TIMEOUT: Duration = Duration::from_millis(250);
 
 fn child(mode: &str) -> Command {
@@ -98,7 +98,7 @@ fn runner_limits_diagnostics_without_hanging() {
 #[test]
 fn runner_reports_launch_failures() {
     let error = process::run(
-        &mut Command::new("/nonexistent-tonenari-owned-test-fixture"),
+        &mut Command::new("/nonexistent-mixrelay-owned-test-fixture"),
         TIMEOUT,
     )
     .expect_err("missing binary must fail");
@@ -157,7 +157,7 @@ fn assert_reaped(pid: i32) {
 #[test]
 fn allocator_evidence_requires_one_executed_matching_child() {
     let report = "0 leaks for 0 total leaked bytes";
-    let entered = "test tests::memory ... TONENARI_MEMORY_TEST_ENTERED tests::memory\n";
+    let entered = "test tests::memory ... MIXRELAY_MEMORY_TEST_ENTERED tests::memory\n";
     let passed = "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 53 filtered out; finished in 0.1s\n";
     assert!(memory_evidence(
         "tests::memory",

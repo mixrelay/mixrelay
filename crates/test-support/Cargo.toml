@@ -1,5 +1,5 @@
 [package]
-name = "tonenari-test-support"
+name = "mixrelay-test-support"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

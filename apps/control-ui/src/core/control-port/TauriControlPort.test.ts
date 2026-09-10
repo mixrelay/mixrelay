@@ -30,7 +30,7 @@ describe('TauriControlPort', () => {
     const port = new TauriControlPort(invoke);
     await expect(port.defaultRecordingPath()).resolves.toBe('/Users/test/Desktop/take.wav');
     expect(invoke).toHaveBeenCalledExactlyOnceWith('default_recording_path', {
-      fileName: expect.stringMatching(/^ToneNari-\d{4}-\d{2}-\d{2}_.*\.wav$/),
+      fileName: expect.stringMatching(/^MixRelay-\d{4}-\d{2}-\d{2}_.*\.wav$/),
     });
     invoke.mockRejectedValueOnce('Desktop unavailable');
     await expect(port.defaultRecordingPath()).rejects.toMatchObject({

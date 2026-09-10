@@ -12,7 +12,7 @@ import {
   type RuntimeGraphDocument,
 } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
-import { ToneNariProvider } from '../../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import type { VirtualEndpointUpdate } from './model';
 import { RoutingWorkspace } from './RoutingWorkspace';
 import { duplexReference, virtualPolicy, virtualSpec } from './virtualEndpointFixtures';
@@ -175,7 +175,7 @@ const document: RuntimeGraphDocument = {
         reference: duplexReference,
       },
       id: 'default-virtual-io',
-      label: 'ToneNari Virtual I/O',
+      label: 'MixRelay Virtual I/O',
       type: 'virtual_endpoint',
     },
   ],
@@ -203,14 +203,14 @@ it.each([true, false])(
       })),
     };
     render(
-      <ToneNariProvider>
+      <MixRelayProvider>
         <I18nextProvider i18n={i18n}>
           <RoutingWorkspace
             controlPort={port({ getGraph: vi.fn().mockResolvedValue(graph) })}
             deviceRateAction={{ change, enabled: true, error: null }}
           />
         </I18nextProvider>
-      </ToneNariProvider>,
+      </MixRelayProvider>,
     );
     for (const button of await screen.findAllByRole('button', { name: /^rate graph-node-/ }))
       fireEvent.click(button);
@@ -291,11 +291,11 @@ function workspace(
   graphId?: string,
 ) {
   return (
-    <ToneNariProvider>
+    <MixRelayProvider>
       <I18nextProvider i18n={i18n}>
         <RoutingWorkspace controlPort={controlPort} onBusyChange={onBusyChange} graphId={graphId} />
       </I18nextProvider>
-    </ToneNariProvider>
+    </MixRelayProvider>
   );
 }
 
@@ -466,11 +466,11 @@ describe('RoutingWorkspace processor discovery evidence', () => {
     await i18n.changeLanguage('en');
     const source = port({ applyGraph: vi.fn().mockRejectedValue(new Error('offline')) });
     const view = (sessionDocument: RuntimeGraphDocument) => (
-      <ToneNariProvider>
+      <MixRelayProvider>
         <I18nextProvider i18n={i18n}>
           <RoutingWorkspace controlPort={source} sessionDocument={sessionDocument} />
         </I18nextProvider>
-      </ToneNariProvider>
+      </MixRelayProvider>
     );
     const mounted = render(view(document));
     await waitFor(() => expect(screen.getByTestId('edge-count')).toHaveTextContent('2'));
@@ -527,7 +527,7 @@ const virtualMenuSession: AudioSessionStatus = {
         spec: {
           ...virtualSpec,
           id: 'virtual',
-          displayName: 'ToneNari Virtual I/O',
+          displayName: 'MixRelay Virtual I/O',
           capture: { channels: 32, channelLayout: 'discrete' },
         },
         observedSampleRate: 48000,
@@ -548,7 +548,7 @@ it('adds a capture-only shared device as one 32-channel source through the devic
     getGraph: vi.fn().mockResolvedValue({ ...document, nodes: [], edges: [] }),
   });
   render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <I18nextProvider i18n={i18n}>
         <RoutingWorkspace
           controlPort={source}
@@ -569,7 +569,7 @@ it('adds a capture-only shared device as one 32-channel source through the devic
           }}
         />
       </I18nextProvider>
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   await screen.findByTestId('node-menu');
   expect(screen.getByTestId('node-menu')).toHaveTextContent('32 CH');
@@ -606,7 +606,7 @@ it('excludes every canonical native device UID from both hardware menus, not sim
     ),
   });
   render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <I18nextProvider i18n={i18n}>
         <RoutingWorkspace
           controlPort={source}
@@ -625,7 +625,7 @@ it('excludes every canonical native device UID from both hardware menus, not sim
           }}
         />
       </I18nextProvider>
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   await waitFor(() => expect(screen.getByTestId('node-menu')).toHaveTextContent('physical'));
   const menu = screen.getByTestId('node-menu').textContent;
@@ -705,17 +705,17 @@ describe('RoutingWorkspace virtual device menu rows', () => {
         .filter((item) => item.id.startsWith('virtual/'));
     };
     const view = (audioSession: AudioSessionStatus | undefined) => (
-      <ToneNariProvider>
+      <MixRelayProvider>
         <I18nextProvider i18n={i18n}>
           <RoutingWorkspace controlPort={source} audioSession={audioSession} />
         </I18nextProvider>
-      </ToneNariProvider>
+      </MixRelayProvider>
     );
     const rendered = render(view(session));
     await waitFor(() => expect(menuRows()).toHaveLength(2));
     expect(menuRows().map((row) => row.description)).toEqual(['64 CH', '32 CH']);
     expect(menuRows().every((row) => !row.disabled)).toBe(true);
-    expect(menuRows().every((row) => row.label === 'ToneNari Virtual I/O')).toBe(true);
+    expect(menuRows().every((row) => row.label === 'MixRelay Virtual I/O')).toBe(true);
 
     rendered.rerender(
       view({
@@ -755,11 +755,11 @@ describe('RoutingWorkspace virtual device menu rows', () => {
         }),
       });
       const rendered = render(
-        <ToneNariProvider>
+        <MixRelayProvider>
           <I18nextProvider i18n={i18n}>
             <RoutingWorkspace controlPort={source} audioSession={session} />
           </I18nextProvider>
-        </ToneNariProvider>,
+        </MixRelayProvider>,
       );
       const menu = await screen.findByTestId('node-menu');
       await waitFor(() =>
@@ -861,7 +861,7 @@ describe('RoutingWorkspace layout history', () => {
       nodes: [
         {
           id: 'default-virtual-io',
-          label: 'ToneNari Virtual I/O',
+          label: 'MixRelay Virtual I/O',
           type: 'virtual_endpoint',
           config: {
             reference: duplexReference,
@@ -961,7 +961,7 @@ describe('RoutingWorkspace application', () => {
 
     expect(screen.getAllByText('Loading engine')).toHaveLength(2);
     expect(
-      await screen.findByRole('region', { name: 'ToneNari virtual I/O routing graph' }),
+      await screen.findByRole('region', { name: 'MixRelay virtual I/O routing graph' }),
     ).toBeInTheDocument();
     expect(screen.getByText('Active')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));

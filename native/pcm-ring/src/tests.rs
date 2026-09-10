@@ -9,20 +9,20 @@ fn empty_and_failed_initialization_are_clearable_without_allocations() {
     let mut storage = std::mem::MaybeUninit::<PcmRing>::zeroed();
     // SAFETY: C-style zero initialization is the documented empty native owner.
     unsafe {
-        tn_pcm_ring_clear(storage.as_mut_ptr());
+        mr_pcm_ring_clear(storage.as_mut_ptr());
     }
     for (channels, capacity) in [(0, 4), (65, 4), (1, 3), (1, 65537)] {
         // SAFETY: sized/aligned exclusive cleared storage, no live callbacks.
         unsafe {
-            assert!(!tn_pcm_ring_init(storage.as_mut_ptr(), channels, capacity));
-            tn_pcm_ring_clear(storage.as_mut_ptr());
+            assert!(!mr_pcm_ring_init(storage.as_mut_ptr(), channels, capacity));
+            mr_pcm_ring_clear(storage.as_mut_ptr());
         }
     }
     assert!(storage::Storage::new(usize::MAX).is_err());
     // SAFETY: null calls do not access storage.
     unsafe {
-        tn_pcm_ring_clear(ptr::null_mut());
-        assert!(!tn_pcm_ring_init(ptr::null_mut(), 1, 4));
+        mr_pcm_ring_clear(ptr::null_mut());
+        assert!(!mr_pcm_ring_init(ptr::null_mut(), 1, 4));
     }
 }
 
@@ -37,9 +37,9 @@ fn pcm_bits_wrap_for_non_power_of_two_capacity_and_every_channel_width() {
         for _ in 0..20 {
             // SAFETY: exclusive test owner, complete disjoint input/output spans.
             unsafe {
-                assert_eq!(tn_pcm_ring_write(&raw mut ring, input.as_ptr(), 3), 3);
+                assert_eq!(mr_pcm_ring_write(&raw mut ring, input.as_ptr(), 3), 3);
                 assert_eq!(
-                    tn_pcm_ring_read_available(&raw mut ring, output.as_mut_ptr(), 3),
+                    mr_pcm_ring_read_available(&raw mut ring, output.as_mut_ptr(), 3),
                     3
                 );
             }
@@ -61,12 +61,12 @@ fn zero_frame_write_acknowledges_a_full_stale_epoch_before_capacity_check() {
     // SAFETY: one sequential producer/consumer with complete buffers.
     unsafe {
         for _ in 0..2 {
-            assert_eq!(tn_pcm_ring_write(&raw mut ring, input.as_ptr(), 2), 2);
+            assert_eq!(mr_pcm_ring_write(&raw mut ring, input.as_ptr(), 2), 2);
         }
-        tn_pcm_ring_restart(&raw mut ring);
-        assert_eq!(tn_pcm_ring_write(&raw mut ring, ptr::null(), 0), 0);
+        mr_pcm_ring_restart(&raw mut ring);
+        assert_eq!(mr_pcm_ring_write(&raw mut ring, ptr::null(), 0), 0);
         assert_eq!(
-            tn_pcm_ring_read_available(&raw mut ring, output.as_mut_ptr(), 2),
+            mr_pcm_ring_read_available(&raw mut ring, output.as_mut_ptr(), 2),
             0
         );
     }
@@ -84,7 +84,7 @@ fn partial_epoch_publication_never_advances_the_consumer_or_spins() {
     let mut output = [9.0_f32; 2];
     // SAFETY: single consumer, initialized owner; writer publication intentionally stalled.
     assert_eq!(
-        unsafe { tn_pcm_ring_read_available(&raw mut ring, output.as_mut_ptr(), 2) },
+        unsafe { mr_pcm_ring_read_available(&raw mut ring, output.as_mut_ptr(), 2) },
         0
     );
     assert_eq!(output.map(f32::to_bits), [0; 2]);
@@ -131,7 +131,7 @@ fn actual_read_path_silences_pcm_if_restart_arrives_after_the_copy() {
     // SAFETY: exclusive owner with sized input/output; test requests restart using
     // the same atomic control boundary while the consumer owns its reader cell.
     unsafe {
-        assert_eq!(tn_pcm_ring_write(&raw mut ring, input.as_ptr(), 2), 2);
+        assert_eq!(mr_pcm_ring_write(&raw mut ring, input.as_ptr(), 2), 2);
         assert_eq!(
             ffi::read(&raw mut ring, output.as_mut_ptr(), 2, false, |ring| {
                 ring.publication
@@ -163,7 +163,7 @@ fn retirement_returns_mapped_pages_to_the_os_in_an_isolated_process() {
         fn mprotect(address: *mut std::ffi::c_void, length: usize, protection: i32) -> i32;
     }
     const TEST: &str = "tests::retirement_returns_mapped_pages_to_the_os_in_an_isolated_process";
-    const MARKER: &str = "TONENARI_PCM_RETIREMENT_CHILD";
+    const MARKER: &str = "MIXRELAY_PCM_RETIREMENT_CHILD";
     if std::env::var_os(MARKER).is_none() {
         let status = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", TEST, "--test-threads=1"])
@@ -197,9 +197,9 @@ fn callbacks_allocate_nothing_and_repeated_retirement_clears_the_owner() {
             for _ in 0..100 {
                 // SAFETY: exclusive native test owner and fully sized caller buffers.
                 unsafe {
-                    assert_eq!(tn_pcm_ring_write(&raw mut ring, input.as_ptr(), 32), 32);
+                    assert_eq!(mr_pcm_ring_write(&raw mut ring, input.as_ptr(), 32), 32);
                     assert_eq!(
-                        tn_pcm_ring_read_available(&raw mut ring, output.as_mut_ptr(), 32),
+                        mr_pcm_ring_read_available(&raw mut ring, output.as_mut_ptr(), 32),
                         32
                     );
                 }
@@ -210,8 +210,8 @@ fn callbacks_allocate_nothing_and_repeated_retirement_clears_the_owner() {
         let address = ring.storage.samples;
         // SAFETY: producer/consumer are stopped; native clear must release mapping and be idempotent.
         unsafe {
-            tn_pcm_ring_clear(&raw mut ring);
-            tn_pcm_ring_clear(&raw mut ring);
+            mr_pcm_ring_clear(&raw mut ring);
+            mr_pcm_ring_clear(&raw mut ring);
         }
         assert!(!address.is_null());
         assert!(ring.storage.samples.is_null());

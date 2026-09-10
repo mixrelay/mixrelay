@@ -38,7 +38,7 @@ timeout, oversized output, and draining 2 MiB without truncation or pipe deadloc
 Native ring tests cover 1,000 discard/re-prime cycles under ASan/UBSan, in addition
 to existing channel/quantum/wrap/overflow/concurrency checks.
 
-Ubuntu ARM64 uses the owned `TNDeviceFixture` source/sink. SIGUSR2 and SIGHUP remove
+Ubuntu ARM64 uses the owned `MRDeviceFixture` source/sink. SIGUSR2 and SIGHUP remove
 and recreate the two devices independently under the same names, with fresh native
 serials. No system defaults or existing user engine are changed.
 
@@ -112,7 +112,7 @@ long-duration resource/clock stability, Debian/Kali/Arch native sessions, and na
 feature parity on macOS/Windows. Existing Windows product-driver and processor/
 editor qualification gaps remain unchanged.
 
-Evidence: `/Volumes/Linear 1/test/tonenari/evidence/linux-recovery-20260907`.
+Evidence: `/Volumes/Linear 1/test/mixrelay/evidence/linux-recovery-20260907`.
 `failed-v2.log`, `v3-tests-native.log`, `v3-recovery.json`, `v3-result.json`,
 `v4-result.json`, `windows-regression.log`, `failed-v5-tests-native.log`,
 `before-v5-rss.json`, `after-v6-result.json`, `after-v6-recovery.json` and

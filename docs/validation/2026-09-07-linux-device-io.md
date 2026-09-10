@@ -33,8 +33,8 @@ running; automatic reopening after device arrival is still unfinished.
 
 `scripts/lab/linux-device-probe.mjs` owns a fresh engine, configuration directory
 and two explicitly named fixture devices. It refuses an occupied control port and
-does not change default devices. `TNDeviceFixture.c` produces/measures PCM directly
-in independent PipeWire callbacks, outside ToneNari's transport rings/meters.
+does not change default devices. `MRDeviceFixture.c` produces/measures PCM directly
+in independent PipeWire callbacks, outside MixRelay's transport rings/meters.
 
 Final run: `device-native-v7`, exit **0**.
 
@@ -91,7 +91,7 @@ Arch native sessions, macOS hardware I/O or Windows hardware input. AU/VST/edito
 acceptance and Windows product driver deployment remain separate unfinished gates.
 Feature parity remains the product requirement, not the current completion state.
 
-Evidence: `/Volumes/Linear 1/test/tonenari/evidence/linux-device-20260907-v7`
+Evidence: `/Volumes/Linear 1/test/mixrelay/evidence/linux-device-20260907-v7`
 (`result.json`, `native.log`, `meters-64-16.json`, `linux-tests-clippy.log`,
 `windows-tests-clippy.log`). Earlier run logs remain in Ubuntu `/var/tmp`.
 The final metadata-only follow-up passes the same 60 Linux tests and Clippy

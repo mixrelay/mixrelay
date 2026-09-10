@@ -1,6 +1,6 @@
 # macOS packaging
 
-ToneNari will use a signed and notarized installer package because the HAL
+MixRelay will use a signed and notarized installer package because the HAL
 driver is installed under `/Library/Audio/Plug-Ins/HAL`.
 
 Packaging must validate the driver file, ownership and mode, signature,

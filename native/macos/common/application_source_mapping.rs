@@ -1,13 +1,13 @@
 use crate::{
     application_clock::{
-        ApplicationClock, tn_application_clock_attach, tn_application_clock_initialize,
-        tn_application_clock_required_bytes,
+        ApplicationClock, mr_application_clock_attach, mr_application_clock_initialize,
+        mr_application_clock_required_bytes,
     },
     create_shared_memory,
     shared_audio_buffer::{
-        SharedAudioBuffer, tn_shared_audio_buffer_attach, tn_shared_audio_buffer_capacity,
-        tn_shared_audio_buffer_channels, tn_shared_audio_buffer_initialize,
-        tn_shared_audio_buffer_is_lock_free,
+        SharedAudioBuffer, mr_shared_audio_buffer_attach, mr_shared_audio_buffer_capacity,
+        mr_shared_audio_buffer_channels, mr_shared_audio_buffer_initialize,
+        mr_shared_audio_buffer_is_lock_free,
     },
 };
 use std::{
@@ -49,7 +49,7 @@ unsafe impl Send for Mapping {}
 unsafe impl Sync for Mapping {}
 impl Mapping {
     pub(crate) fn new(capacity: u32, channels: u32) -> io::Result<Self> {
-        let bytes = tn_application_clock_required_bytes(capacity, channels);
+        let bytes = mr_application_clock_required_bytes(capacity, channels);
         if bytes == 0 {
             return Err(io::Error::other("invalid source geometry"));
         }
@@ -57,10 +57,10 @@ impl Mapping {
         let memory = MappedMemory::new(&descriptor, bytes)?;
         let address = memory.memory.as_ptr();
         let buffer = NonNull::new(unsafe {
-            tn_shared_audio_buffer_initialize(address, bytes, capacity, channels)
+            mr_shared_audio_buffer_initialize(address, bytes, capacity, channels)
         });
         let clock = NonNull::new(unsafe {
-            tn_application_clock_initialize(address, bytes, capacity, channels)
+            mr_application_clock_initialize(address, bytes, capacity, channels)
         });
         let (Some(buffer), Some(clock)) = (buffer, clock) else {
             return Err(io::Error::other("source initialization failed"));
@@ -85,7 +85,7 @@ impl Mapping {
         capacity: u32,
         channels: u32,
     ) -> io::Result<Self> {
-        let required = tn_application_clock_required_bytes(capacity, channels);
+        let required = mr_application_clock_required_bytes(capacity, channels);
         if required == 0 || bytes != required {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -106,9 +106,9 @@ impl Mapping {
         let address = memory.memory.as_ptr();
         // SAFETY: the complete extent is mapped; the source protocol freezes
         // headers before descriptor publication and mutates only atomic payloads.
-        let buffer = NonNull::new(unsafe { tn_shared_audio_buffer_attach(address, bytes) });
+        let buffer = NonNull::new(unsafe { mr_shared_audio_buffer_attach(address, bytes) });
         let clock = NonNull::new(unsafe {
-            tn_application_clock_attach(address, bytes, capacity, channels)
+            mr_application_clock_attach(address, bytes, capacity, channels)
         });
         let (Some(buffer), Some(clock)) = (buffer, clock) else {
             return Err(io::Error::new(
@@ -118,9 +118,9 @@ impl Mapping {
         };
         // SAFETY: attach validated immutable header layout within this owned mapping.
         if unsafe {
-            tn_shared_audio_buffer_channels(buffer.as_ptr()) != channels
-                || tn_shared_audio_buffer_capacity(buffer.as_ptr()) != capacity
-                || !tn_shared_audio_buffer_is_lock_free(buffer.as_ptr())
+            mr_shared_audio_buffer_channels(buffer.as_ptr()) != channels
+                || mr_shared_audio_buffer_capacity(buffer.as_ptr()) != capacity
+                || !mr_shared_audio_buffer_is_lock_free(buffer.as_ptr())
         } {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,

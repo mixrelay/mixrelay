@@ -54,7 +54,7 @@ const broadcastMix: AudioGraphModel = {
       outputPorts: [],
       appearance: {
         category: 'Output',
-        detail: 'ToneNari Stream · 48 kHz',
+        detail: 'MixRelay Stream · 48 kHz',
         icon: 'IO',
         status: 'Ready',
         title: 'OBS Stream',
@@ -90,7 +90,7 @@ const meta = {
   title: 'Core/Audio Graph/Canvas',
   component: AudioGraphCanvas,
   args: {
-    ariaLabel: 'ToneNari audio routing playground',
+    ariaLabel: 'MixRelay audio routing playground',
     model: broadcastMix,
     onModelChange: () => undefined,
   },
@@ -108,7 +108,7 @@ function InteractiveGraph() {
   return (
     <div style={{ width: '100vw', height: '100vh', padding: 24 }}>
       <AudioGraphCanvas
-        ariaLabel="ToneNari audio routing playground"
+        ariaLabel="MixRelay audio routing playground"
         model={model}
         onModelChange={setModel}
       />

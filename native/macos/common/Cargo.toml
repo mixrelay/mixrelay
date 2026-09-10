@@ -1,5 +1,5 @@
 [package]
-name = "tonenari-macos-transport"
+name = "mixrelay-macos-transport"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,7 +14,7 @@ workspace = true
 
 [dependencies]
 # Shared native PCM ownership; the device adapter does not reimplement its queue.
-tonenari-pcm-ring = { path = "../../pcm-ring" }
+mixrelay-pcm-ring = { path = "../../pcm-ring" }
 
 [build-dependencies]
 # Compile only the blocks-based XPC adapter; ownership/producer policy is Rust.

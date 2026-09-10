@@ -7,8 +7,8 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post, put},
 };
-use tonenari_audio_graph::GraphDocument;
-use tonenari_control_protocol::{
+use mixrelay_audio_graph::GraphDocument;
+use mixrelay_control_protocol::{
     AppStatus, ErrorCode, ExternalProcessorCatalog, GraphApplyRequest, GraphApplyResponse,
     GraphCatalogRequest, GraphCatalogResponse, GraphLayoutRequest, GraphLayoutResponse,
     GraphRuntimeStatus, MeterSnapshot, PROTOCOL_VERSION, ProcessorEditorFrame,
@@ -46,7 +46,7 @@ pub trait ControlBackend: Send + Sync {
         &self,
         _graph_id: &str,
         _node_id: &str,
-    ) -> Result<tonenari_control_protocol::RecorderStatus, ProtocolError> {
+    ) -> Result<mixrelay_control_protocol::RecorderStatus, ProtocolError> {
         Err(recorder::unavailable())
     }
 
@@ -57,8 +57,8 @@ pub trait ControlBackend: Send + Sync {
         &self,
         _graph_id: &str,
         _node_id: &str,
-        _request: tonenari_control_protocol::RecorderRequest,
-    ) -> Result<tonenari_control_protocol::RecorderStatus, ProtocolError> {
+        _request: mixrelay_control_protocol::RecorderRequest,
+    ) -> Result<mixrelay_control_protocol::RecorderStatus, ProtocolError> {
         Err(recorder::unavailable())
     }
     /// Returns the canonical capture owners for the complete running catalog.
@@ -66,7 +66,7 @@ pub trait ControlBackend: Send + Sync {
     /// Reports unavailable discovery or invalid capture ownership without fabricating sources.
     fn application_capture_manifest(
         &self,
-    ) -> Result<tonenari_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+    ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
         Err(ProtocolError {
             code: ErrorCode::ControlUnavailable,
             parameters: serde_json::json!({"resource":"application_capture_manifest"}),
@@ -79,7 +79,7 @@ pub trait ControlBackend: Send + Sync {
     fn preview_application_capture(
         &self,
         _request: GraphApplyRequest,
-    ) -> Result<tonenari_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+    ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
         Err(ProtocolError {
             code: ErrorCode::ControlUnavailable,
             parameters: serde_json::json!({"resource":"application_capture_preview"}),
@@ -90,7 +90,7 @@ pub trait ControlBackend: Send + Sync {
     /// Rejects stale revisions, unsupported formats or native failures.
     fn reconfigure_virtual_endpoint(
         &self,
-        _request: tonenari_control_protocol::VirtualEndpointFormatRequest,
+        _request: mixrelay_control_protocol::VirtualEndpointFormatRequest,
     ) -> Result<GraphApplyResponse, ProtocolError> {
         Err(ProtocolError {
             code: ErrorCode::AudioSessionUnsupported,
@@ -591,7 +591,7 @@ async fn processors(State(state): State<ControlState>) -> Json<ExternalProcessor
 
 async fn reconfigure_virtual_endpoint(
     State(state): State<ControlState>,
-    request: Result<Json<tonenari_control_protocol::VirtualEndpointFormatRequest>, JsonRejection>,
+    request: Result<Json<mixrelay_control_protocol::VirtualEndpointFormatRequest>, JsonRejection>,
 ) -> Response {
     let request = match request {
         Ok(Json(request)) => request,
@@ -782,19 +782,19 @@ mod tests {
     use std::sync::Mutex;
 
     use axum::{body::Body, http::Request};
+    use mixrelay_control_protocol::GraphApplyState;
     use serde_json::{Value, json};
-    use tonenari_control_protocol::GraphApplyState;
     use tower::ServiceExt;
 
     use super::*;
 
     struct TestBackend {
-        last_recorder: Mutex<Option<(String, String, tonenari_control_protocol::RecorderRequest)>>,
+        last_recorder: Mutex<Option<(String, String, mixrelay_control_protocol::RecorderRequest)>>,
         apply_result: Mutex<Result<GraphApplyResponse, ProtocolError>>,
         last_apply: Mutex<Option<GraphApplyRequest>>,
         last_preview: Mutex<Option<GraphApplyRequest>>,
         last_endpoint_format:
-            Mutex<Option<tonenari_control_protocol::VirtualEndpointFormatRequest>>,
+            Mutex<Option<mixrelay_control_protocol::VirtualEndpointFormatRequest>>,
         editor_gate: Option<Arc<EditorGate>>,
     }
 
@@ -823,8 +823,8 @@ mod tests {
             &self,
             graph_id: &str,
             node_id: &str,
-        ) -> Result<tonenari_control_protocol::RecorderStatus, ProtocolError> {
-            Ok(tonenari_control_protocol::RecorderStatus {
+        ) -> Result<mixrelay_control_protocol::RecorderStatus, ProtocolError> {
+            Ok(mixrelay_control_protocol::RecorderStatus {
                 path: Some(format!("{graph_id}/{node_id}")),
                 ..Default::default()
             })
@@ -834,16 +834,16 @@ mod tests {
             &self,
             graph_id: &str,
             node_id: &str,
-            request: tonenari_control_protocol::RecorderRequest,
-        ) -> Result<tonenari_control_protocol::RecorderStatus, ProtocolError> {
+            request: mixrelay_control_protocol::RecorderRequest,
+        ) -> Result<mixrelay_control_protocol::RecorderStatus, ProtocolError> {
             *self.last_recorder.lock().unwrap() =
                 Some((graph_id.to_owned(), node_id.to_owned(), request));
             self.recorder_status(graph_id, node_id)
         }
         fn application_capture_manifest(
             &self,
-        ) -> Result<tonenari_control_protocol::ApplicationCaptureManifest, ProtocolError> {
-            Ok(tonenari_control_protocol::ApplicationCaptureManifest {
+        ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+            Ok(mixrelay_control_protocol::ApplicationCaptureManifest {
                 protocol_version: PROTOCOL_VERSION,
                 revision: 5,
                 sources: vec![],
@@ -853,11 +853,11 @@ mod tests {
         fn preview_application_capture(
             &self,
             request: GraphApplyRequest,
-        ) -> Result<tonenari_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+        ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
             let revision = request.document.revision;
             *self.last_preview.lock().unwrap() = Some(request);
             self.apply_result.lock().unwrap().clone()?;
-            Ok(tonenari_control_protocol::ApplicationCaptureManifest {
+            Ok(mixrelay_control_protocol::ApplicationCaptureManifest {
                 protocol_version: PROTOCOL_VERSION,
                 revision,
                 sources: vec![],
@@ -865,7 +865,7 @@ mod tests {
         }
         fn reconfigure_virtual_endpoint(
             &self,
-            request: tonenari_control_protocol::VirtualEndpointFormatRequest,
+            request: mixrelay_control_protocol::VirtualEndpointFormatRequest,
         ) -> Result<GraphApplyResponse, ProtocolError> {
             *self.last_endpoint_format.lock().unwrap() = Some(request);
             self.apply_result.lock().unwrap().clone()
@@ -880,7 +880,7 @@ mod tests {
             Ok(GraphLayoutResponse {
                 graph_id: id.into(),
                 layout_revision: 4,
-                layout: tonenari_control_protocol::GraphLayout::default(),
+                layout: mixrelay_control_protocol::GraphLayout::default(),
             })
         }
 
@@ -905,13 +905,13 @@ mod tests {
                 protocol_version: PROTOCOL_VERSION,
                 catalog_revision: 7,
                 active_id: "saved".into(),
-                graphs: vec![tonenari_control_protocol::GraphCatalogEntry {
+                graphs: vec![mixrelay_control_protocol::GraphCatalogEntry {
                     id: "saved".into(),
                     name: "Ableton".into(),
                 }],
                 document: document(),
                 layout_revision: 0,
-                layout: tonenari_control_protocol::GraphLayout::default(),
+                layout: mixrelay_control_protocol::GraphLayout::default(),
                 persistence_error: None,
             })
         }
@@ -936,7 +936,7 @@ mod tests {
                     parameters: json!({}),
                 });
             }
-            let tonenari_control_protocol::GraphCatalogAction::Rename { id, name } = request.action
+            let mixrelay_control_protocol::GraphCatalogAction::Rename { id, name } = request.action
             else {
                 return Err(ProtocolError {
                     code: ErrorCode::GraphInvalid,
@@ -951,7 +951,7 @@ mod tests {
         }
         fn status(&self) -> AppStatus {
             AppStatus {
-                driver_state: tonenari_control_protocol::DriverState::Ready,
+                driver_state: mixrelay_control_protocol::DriverState::Ready,
                 sample_rate: Some(48_000),
                 buffer_frames: Some(128),
                 ..AppStatus::default()
@@ -1069,7 +1069,7 @@ mod tests {
         }));
         let mut request = GraphApplyRequest::from(document());
         request.processor_parameter_changes.push(
-            tonenari_control_protocol::GraphProcessorParameterChange {
+            mixrelay_control_protocol::GraphProcessorParameterChange {
                 node_id: "effect".into(),
                 type_id: "vst3:fixture".into(),
                 parameter_id: 7,
@@ -1174,9 +1174,9 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             node_id: node_id.to_owned(),
             state: if open {
-                tonenari_control_protocol::ProcessorEditorState::Open
+                mixrelay_control_protocol::ProcessorEditorState::Open
             } else {
-                tonenari_control_protocol::ProcessorEditorState::Closed
+                mixrelay_control_protocol::ProcessorEditorState::Closed
             },
             width: open.then_some(640),
             height: open.then_some(480),

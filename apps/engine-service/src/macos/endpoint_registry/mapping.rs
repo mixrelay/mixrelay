@@ -1,20 +1,20 @@
 //! One initialized transport mapping. Geometry never changes in-place; every
 //! replacement gets its own descriptor and shared-memory lifetime.
 use super::EndpointSpec;
+use mixrelay_macos_transport::{
+    control_inventory::InventoryEntry,
+    endpoint_transport::{
+        EndpointTransport, EndpointTransportConfig, mr_endpoint_transport_capture_buffer,
+        mr_endpoint_transport_initialize, mr_endpoint_transport_render_buffer,
+        mr_endpoint_transport_required_bytes,
+    },
+    shared_audio_buffer::SharedAudioBuffer,
+};
 use std::{
     ffi::{c_char, c_int, c_void},
     io,
     os::fd::{AsRawFd, OwnedFd},
     ptr::{self, NonNull},
-};
-use tonenari_macos_transport::{
-    control_inventory::InventoryEntry,
-    endpoint_transport::{
-        EndpointTransport, EndpointTransportConfig, tn_endpoint_transport_capture_buffer,
-        tn_endpoint_transport_initialize, tn_endpoint_transport_render_buffer,
-        tn_endpoint_transport_required_bytes,
-    },
-    shared_audio_buffer::SharedAudioBuffer,
 };
 
 unsafe extern "C" {
@@ -39,7 +39,7 @@ struct Region {
 
 impl Region {
     fn new(length: usize) -> io::Result<Self> {
-        let descriptor = tonenari_macos_transport::create_shared_memory(length, true)?;
+        let descriptor = mixrelay_macos_transport::create_shared_memory(length, true)?;
         let address = unsafe { mmap(ptr::null_mut(), length, 3, 1, descriptor.as_raw_fd(), 0) };
         if address == ptr::without_provenance_mut(usize::MAX) {
             return Err(io::Error::last_os_error());
@@ -90,7 +90,7 @@ impl Mapping {
             render_channels: spec.render_channels,
             capture_channels: spec.capture_channels,
         };
-        let length = unsafe { tn_endpoint_transport_required_bytes(&raw const config) };
+        let length = unsafe { mr_endpoint_transport_required_bytes(&raw const config) };
         if length == 0 || u32::try_from(length).is_err() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -99,11 +99,11 @@ impl Mapping {
         }
         let region = Region::new(length)?;
         let transport = NonNull::new(unsafe {
-            tn_endpoint_transport_initialize(region.address.as_ptr(), length, &raw const config)
+            mr_endpoint_transport_initialize(region.address.as_ptr(), length, &raw const config)
         })
         .ok_or_else(|| io::Error::other("endpoint transport initialization failed"))?;
-        let render = unsafe { tn_endpoint_transport_render_buffer(transport.as_ptr()) };
-        let capture = unsafe { tn_endpoint_transport_capture_buffer(transport.as_ptr()) };
+        let render = unsafe { mr_endpoint_transport_render_buffer(transport.as_ptr()) };
+        let capture = unsafe { mr_endpoint_transport_capture_buffer(transport.as_ptr()) };
         if (spec.render_channels != 0 && render.is_null())
             || (spec.capture_channels != 0 && capture.is_null())
         {

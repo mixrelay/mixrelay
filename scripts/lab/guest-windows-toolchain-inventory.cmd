@@ -1,12 +1,12 @@
 @echo off
 setlocal
-if not exist C:\ToneNariLab mkdir C:\ToneNariLab
+if not exist C:\MixRelayLab mkdir C:\MixRelayLab
 (
   echo === Downloads ===
   dir C:\Users\state303\Downloads
   echo === Lab files ===
-  dir C:\ToneNariLab
-  dir C:\ProgramData\ToneNariLab
+  dir C:\MixRelayLab
+  dir C:\ProgramData\MixRelayLab
   echo === Installer processes ===
   tasklist /fi "imagename eq vs_installer.exe"
   echo === Installed tools ===
@@ -15,5 +15,5 @@ if not exist C:\ToneNariLab mkdir C:\ToneNariLab
   where cl
   where node
   if exist "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -all -format json
-) > C:\ToneNariLab\toolchain-inventory.log 2>&1
->C:\ToneNariLab\toolchain-inventory.exit-code echo 0
+) > C:\MixRelayLab\toolchain-inventory.log 2>&1
+>C:\MixRelayLab\toolchain-inventory.exit-code echo 0

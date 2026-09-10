@@ -4,7 +4,7 @@ use super::*;
 fn topology_loss_bypasses_periodic_delay_but_not_publication_ownership() {
     use std::sync::atomic::Ordering;
     use std::time::{Duration, Instant};
-    let status = Arc::new(tonenari_engine_service::session::AdapterRuntimeStatus::new(
+    let status = Arc::new(mixrelay_engine_service::session::AdapterRuntimeStatus::new(
         crate::macos::adapter_profile(),
     ));
     let resources = MacDevices::new(status, 48_000, 32);

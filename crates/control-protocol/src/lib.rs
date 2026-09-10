@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 mod editor_surface;
 pub use editor_surface::{EditorPointerKind, ProcessorEditorFrame, ProcessorEditorInput};
-pub use tonenari_audio_recorder::{RecorderRequest, RecorderStatus};
+pub use mixrelay_audio_recorder::{RecorderRequest, RecorderStatus};
 
 /// Engine-authored capture ownership, independent of the graph visible in an editor.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -17,16 +17,16 @@ pub struct ApplicationCaptureManifest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApplicationCaptureSource {
     pub node_id: String,
-    pub request: tonenari_audio_io::ApplicationCaptureRequest,
+    pub request: mixrelay_audio_io::ApplicationCaptureRequest,
 }
-pub use tonenari_audio_io::session::SessionReconfigureRequest;
+pub use mixrelay_audio_io::session::SessionReconfigureRequest;
 
 /// Changes one identified virtual device, not the processing clock of unrelated routes.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VirtualEndpointFormatRequest {
     pub expected_revision: u64,
-    pub endpoint_id: tonenari_audio_io::VirtualEndpointId,
+    pub endpoint_id: mixrelay_audio_io::VirtualEndpointId,
     pub sample_rate: u32,
 }
 
@@ -38,7 +38,7 @@ pub const PROTOCOL_VERSION: u16 = 1;
 #[serde(rename_all = "camelCase")]
 pub struct GraphApplyRequest {
     #[serde(flatten)]
-    pub document: tonenari_audio_graph::GraphDocument,
+    pub document: mixrelay_audio_graph::GraphDocument,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub processor_parameter_changes: Vec<GraphProcessorParameterChange>,
 }
@@ -52,8 +52,8 @@ pub struct GraphProcessorParameterChange {
     pub value: f64,
 }
 
-impl From<tonenari_audio_graph::GraphDocument> for GraphApplyRequest {
-    fn from(document: tonenari_audio_graph::GraphDocument) -> Self {
+impl From<mixrelay_audio_graph::GraphDocument> for GraphApplyRequest {
+    fn from(document: mixrelay_audio_graph::GraphDocument) -> Self {
         Self {
             document,
             processor_parameter_changes: Vec::new(),
@@ -75,7 +75,7 @@ pub struct GraphCatalogResponse {
     pub catalog_revision: u64,
     pub active_id: String,
     pub graphs: Vec<GraphCatalogEntry>,
-    pub document: tonenari_audio_graph::GraphDocument,
+    pub document: mixrelay_audio_graph::GraphDocument,
     #[serde(default)]
     pub layout_revision: u64,
     #[serde(default)]
@@ -188,7 +188,7 @@ pub struct AppStatus {
     pub overruns: u64,
     /// Absent in older engines. UI must not manufacture capabilities when unavailable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub audio_session: Option<tonenari_audio_io::session::AudioSessionStatus>,
+    pub audio_session: Option<mixrelay_audio_io::session::AudioSessionStatus>,
 }
 
 /// One sampled block's engine-to-worker round trip, not hardware or plug-in reported latency.
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn graph_apply_explicit_control_intent_is_additive_to_legacy_documents() {
-        let document = tonenari_audio_graph::GraphDocument::new(2, vec![], vec![]);
+        let document = mixrelay_audio_graph::GraphDocument::new(2, vec![], vec![]);
         let legacy = serde_json::to_value(&document).unwrap();
         let mut request: GraphApplyRequest = serde_json::from_value(legacy.clone()).unwrap();
         assert!(request.processor_parameter_changes.is_empty());
@@ -631,7 +631,7 @@ mod tests {
             request
         );
         assert_eq!(
-            serde_json::from_value::<tonenari_audio_graph::GraphDocument>(encoded.clone()).unwrap(),
+            serde_json::from_value::<mixrelay_audio_graph::GraphDocument>(encoded.clone()).unwrap(),
             document,
             "desktop preflight can inspect the document while forwarding the complete intent unchanged"
         );

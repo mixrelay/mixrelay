@@ -1,11 +1,11 @@
 use super::native::Native;
 use super::*;
 mod retirement;
-use std::{cell::Cell, ffi::c_void};
-use tonenari_macos_transport::{
+use mixrelay_macos_transport::{
     audio_buffer::{AudioBuffer, AudioBufferList},
-    capture_ring::{tn_audio_ring_create, tn_audio_ring_read_interleaved},
+    capture_ring::{mr_audio_ring_create, mr_audio_ring_read_interleaved},
 };
+use std::{cell::Cell, ffi::c_void};
 
 fn format() -> TapFormat {
     TapFormat {
@@ -30,7 +30,7 @@ fn fixture() -> TapSession {
         resume: false,
     });
     session.format.set(format()).expect("unpublished format");
-    let ring = tn_audio_ring_create(256, 2);
+    let ring = mr_audio_ring_create(256, 2);
     assert!(!ring.is_null());
     session.ring.set(RingOwner(ring)).expect("unpublished ring");
     session
@@ -192,25 +192,25 @@ fn public_capture_boundary_rejects_null_and_invalid_startup_without_native_objec
     // SAFETY: null and invalid startup are explicit API inputs; no dangling pointer
     // is fabricated. Error/result buffers remain exclusive and correctly sized.
     unsafe {
-        assert!(tn_process_tap_create(ptr::null(), &raw mut error).is_null());
+        assert!(mr_process_tap_create(ptr::null(), &raw mut error).is_null());
         assert_eq!(error.code, 1);
-        assert_eq!(tn_process_tap_start(ptr::null_mut()).code, 1);
-        assert_eq!(tn_process_tap_stop(ptr::null_mut()).code, 1);
-        assert_eq!(tn_process_tap_refresh_format(ptr::null_mut()).code, 1);
-        assert_eq!(tn_process_tap_read(ptr::null_mut(), ptr::null_mut(), 3), 0);
+        assert_eq!(mr_process_tap_start(ptr::null_mut()).code, 1);
+        assert_eq!(mr_process_tap_stop(ptr::null_mut()).code, 1);
+        assert_eq!(mr_process_tap_refresh_format(ptr::null_mut()).code, 1);
+        assert_eq!(mr_process_tap_read(ptr::null_mut(), ptr::null_mut(), 3), 0);
         assert_eq!(
-            tn_process_tap_take_peaks(ptr::null_mut(), ptr::null_mut(), 3),
+            mr_process_tap_take_peaks(ptr::null_mut(), ptr::null_mut(), 3),
             0
         );
-        assert_eq!(tn_process_tap_stats(ptr::null()).channels, 0);
-        tn_process_tap_destroy(ptr::null_mut());
+        assert_eq!(mr_process_tap_stats(ptr::null()).channels, 0);
+        mr_process_tap_destroy(ptr::null_mut());
         for capacity in [0, 255, 257, (1 << 20) + 1] {
             let config = TapConfig {
-                bundle_id: c"io.tonenari.fixture".as_ptr(),
+                bundle_id: c"io.mixrelay.fixture".as_ptr(),
                 mute_while_captured: false,
                 ring_capacity_frames: capacity,
             };
-            assert!(tn_process_tap_create(&raw const config, &raw mut error).is_null());
+            assert!(mr_process_tap_create(&raw const config, &raw mut error).is_null());
             assert_eq!(error.code, 1);
         }
     }
@@ -401,7 +401,7 @@ fn whole_callback_retains_clock_credit_for_overflow_and_allocates_nothing() {
     let mut output = [0.0; 512];
     // SAFETY: sole consumer uses sufficiently sized exclusive output after callback.
     assert_eq!(
-        unsafe { tn_audio_ring_read_interleaved(session.ring(), output.as_mut_ptr(), 256) },
+        unsafe { mr_audio_ring_read_interleaved(session.ring(), output.as_mut_ptr(), 256) },
         256
     );
     assert_eq!(output.map(f32::to_bits), samples.map(f32::to_bits));

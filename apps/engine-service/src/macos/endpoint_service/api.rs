@@ -1,14 +1,14 @@
 //! Safe, identity-directed control and PCM boundaries. No default-device lookup exists.
 use super::{SERVICE, audio, device};
 use crate::endpoint_registry::{EndpointId, EndpointSpec};
-use std::{io, sync::atomic::Ordering};
-use tonenari_macos_transport::{
+use mixrelay_macos_transport::{
     endpoint_transport::{
-        EndpointClockSnapshot, tn_endpoint_transport_requires_replacement,
-        tn_endpoint_transport_touch_engine,
+        EndpointClockSnapshot, mr_endpoint_transport_requires_replacement,
+        mr_endpoint_transport_touch_engine,
     },
-    shared_audio_buffer::tn_shared_audio_buffer_epoch_pending,
+    shared_audio_buffer::mr_shared_audio_buffer_epoch_pending,
 };
+use std::{io, sync::atomic::Ordering};
 
 /// A mapping-coherent observation includes stable identity as well as incarnation/epochs.
 #[repr(C)]
@@ -140,8 +140,8 @@ pub fn capture_pending(expected: &EndpointSnapshot) -> bool {
         // SAFETY: read pins these initialized shared mappings through this synchronous check.
         !audio::matches(endpoint, expected)
             || unsafe {
-                tn_shared_audio_buffer_epoch_pending(endpoint.capture_buffer())
-                    || tn_endpoint_transport_requires_replacement(endpoint.transport())
+                mr_shared_audio_buffer_epoch_pending(endpoint.capture_buffer())
+                    || mr_endpoint_transport_requires_replacement(endpoint.transport())
             }
     })
 }
@@ -164,7 +164,7 @@ pub fn touch_audio() {
         let read = service.runtime.read();
         for endpoint in read.endpoints() {
             // SAFETY: each endpoint mapping is initialized and retained by this read guard.
-            unsafe { tn_endpoint_transport_touch_engine(endpoint.transport()) };
+            unsafe { mr_endpoint_transport_touch_engine(endpoint.transport()) };
         }
     }
 }

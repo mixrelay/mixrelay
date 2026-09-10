@@ -7,9 +7,9 @@ case "$(uname -m)" in
   x86_64) node_arch=x64 ;;
   *) exit 2 ;;
 esac
-export PATH="$HOME/.local/share/tonenari-lab/node-v24.19.0-linux-$node_arch/bin:$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+export PATH="$HOME/.local/share/mixrelay-lab/node-v24.19.0-linux-$node_arch/bin:$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 export CARGO_BUILD_JOBS=2 CI=true
-workspace="$HOME/tonenari"
+workspace="$HOME/mixrelay"
 mkdir "$workspace" # Never replace an existing guest checkout.
 tar -xzf "$archive" -C "$workspace"
 cd "$workspace"

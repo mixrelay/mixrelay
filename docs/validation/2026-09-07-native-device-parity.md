@@ -10,7 +10,7 @@ writing this report did not rerun tests, change a VM, or change the host audio g
 
 | Backend | Actual implementation | Evidence obtained | Not established |
 | --- | --- | --- | --- |
-| macOS | `MacDevices` prepares graph device owners; `TNDeviceIO` opens native CoreAudio IOProcs, copies supported channel layouts and supervises loss/reappearance | ASan/UBSan callback/lifetime suite; four C fixture and four Rust graph-owner removal/reappearance cycles on owned temporary CoreAudio aggregates | Physical microphone PCM fidelity, physical USB unplug, real default switching, physical 64-channel hardware, vendor teardown hangs |
+| macOS | `MacDevices` prepares graph device owners; `MRDeviceIO` opens native CoreAudio IOProcs, copies supported channel layouts and supervises loss/reappearance | ASan/UBSan callback/lifetime suite; four C fixture and four Rust graph-owner removal/reappearance cycles on owned temporary CoreAudio aggregates | Physical microphone PCM fidelity, physical USB unplug, real default switching, physical 64-channel hardware, vendor teardown hangs |
 | Windows | Native `windows_input.rs` and `windows_render.rs` own WASAPI capture/render clients; `device_worker::supervise` retries activated clients without requiring graph edits | Four injected input and four injected output reopen cycles using real WASAPI clients; isolated Windows source regression; read-only actual default-role inventory | Actual endpoint/parent PnP invalidation, physical hardware PCM through an unplug cycle, x64 Windows, permanent COM/driver blocking |
 | Linux | Exact PipeWire target selection, independent input/output recovery, generation-tagged RT handoff and control-thread retirement | Ubuntu ARM64 owned source/sink PCM for 2/8/16/32/64 channels, 64→16 channel 13/33 mapping, gain/meter/recovery and repeated teardown | Physical 64-channel hardware, whole PipeWire restart, each requested distribution, long-duration independent-clock behavior |
 
@@ -23,17 +23,17 @@ Relevant source:
 
 - macOS: `apps/engine-service/src/main.rs`, `macos_devices.rs`,
   `macos_devices_tests.rs`, and
-  `native/macos/engine-service/src/TNDeviceIO.c`.
+  `native/macos/engine-service/src/MRDeviceIO.c`.
 - Windows: `apps/engine-service/src/windows.rs`, `windows_input.rs`,
   `windows_render.rs`, and shared `device_worker.rs`.
 - Linux: `apps/engine-service/src/linux.rs`, `linux_devices.rs`,
-  `linux_native.rs`, `native/linux/pipewire/TNPipeWire.c`, and
+  `linux_native.rs`, `native/linux/pipewire/MRPipeWire.c`, and
   `crates/audio-io/src/recovery.rs`.
 
 ## macOS evidence and ownership limits
 
 The independent review used uniquely owned temporary aggregates built from the
-existing ToneNari virtual endpoint. It did not change system defaults, hardware
+existing MixRelay virtual endpoint. It did not change system defaults, hardware
 rates, microphone permissions, the installed engine or the user's graph.
 
 `bash scripts/check-macos-device-io.sh` completed with exit 0. Its C17 build enables
@@ -61,7 +61,7 @@ not changed against the user's system. The live aggregate is stereo: synthetic
 64-channel layout tests do not qualify physical 64-channel audio.
 
 Retained review evidence:
-`/Volumes/Linear 1/test/tonenari/evidence/native-device-parity-20260907/macos-review/result.md`.
+`/Volumes/Linear 1/test/mixrelay/evidence/native-device-parity-20260907/macos-review/result.md`.
 It records command results, callback counts, isolated native build directories and
 the scoped no-surviving-fixture check.
 
@@ -100,7 +100,7 @@ the current startup path can detach a self-owning worker. Containment/brokering
 for that failure is still a product gate, not a no-leak result.
 
 Evidence:
-`/Volumes/Linear 1/test/tonenari/evidence/native-device-parity-20260907/windows-pnp/`.
+`/Volumes/Linear 1/test/mixrelay/evidence/native-device-parity-20260907/windows-pnp/`.
 The detailed report records failed logs, final roles/flags/endpoints, regressions
 and owned scheduled-task cleanup. Existing Windows virtual transport acceptance
 is separate from these hardware-client tests. The installed virtual driver remains
@@ -130,7 +130,7 @@ macOS or Windows.
    prolonged unplug/replug must be qualified separately on each OS.
 2. macOS supports 44.1/48-kHz session settings but application capture is 48 kHz
    only; hardware-attached session-rate changes are rejected. Windows/Linux remain
-   fixed-format. ToneNari SRC and independent-device drift correction are absent
+   fixed-format. MixRelay SRC and independent-device drift correction are absent
    from all three capability profiles.
 3. Permanent vendor/COM blocking requires a resource isolation strategy beyond
    preserving callback ownership. Sanitizers and bounded normal teardown do not

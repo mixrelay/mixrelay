@@ -1,10 +1,10 @@
 //! Graph device selection and deterministic aggregate membership, without IO.
+use mixrelay_audio_graph::{DeviceSelector, GraphDocument};
+use mixrelay_engine_service::resource_requirements::DeviceRequirements;
 use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::CString,
 };
-use tonenari_audio_graph::{DeviceSelector, GraphDocument};
-use tonenari_engine_service::resource_requirements::DeviceRequirements;
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Spec {
     pub(super) selector: DeviceSelector,
@@ -76,7 +76,7 @@ pub(super) fn aggregate_members(specs: &BTreeMap<String, Spec>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tonenari_audio_graph::{
+    use mixrelay_audio_graph::{
         AudioDeviceInputConfig, AudioDeviceOutputConfig, NodeConfig, NodeSpec,
     };
 

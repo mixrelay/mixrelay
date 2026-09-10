@@ -1,8 +1,8 @@
 //! Device-targeted negotiation must not silently resume a mismatched old graph.
 use super::*;
+use mixrelay_audio_io::VirtualEndpointSettings;
+use mixrelay_control_protocol::VirtualEndpointFormatRequest;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use tonenari_audio_io::VirtualEndpointSettings;
-use tonenari_control_protocol::VirtualEndpointFormatRequest;
 
 #[path = "endpoint_format_ack_tests.rs"]
 mod acknowledgements;
@@ -101,7 +101,7 @@ impl VirtualEndpointBackend for Endpoint {
             .map(|id| {
                 let mut spec = endpoint.spec.clone();
                 spec.id = VirtualEndpointId::from(id);
-                tonenari_audio_io::VirtualEndpointDeviceSettings {
+                mixrelay_audio_io::VirtualEndpointDeviceSettings {
                     native_device_ids: Vec::new(),
                     observed_sample_rate: self.sample_rate(&spec.id).ok(),
                     spec,
@@ -189,7 +189,7 @@ fn partial_native_write_failure_restores_only_the_requested_device() {
 
 #[test]
 fn device_format_is_persisted_in_catalog_without_a_global_session_rate_write() {
-    let directory = tonenari_test_support::FixtureDir::new("device-format-catalog").unwrap();
+    let directory = mixrelay_test_support::FixtureDir::new("device-format-catalog").unwrap();
     let path = directory.join("graphs.json");
     let (controller, _) = fixture();
     let controller = controller.with_graph_catalog_path(path.clone());

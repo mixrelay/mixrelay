@@ -1,6 +1,6 @@
 //! Application producer/consumer clock contract. All mutable fields are atomic;
 //! no Rust references to non-atomic interprocess-writable data are exposed.
-use crate::shared_audio_buffer::tn_shared_audio_buffer_required_bytes;
+use crate::shared_audio_buffer::mr_shared_audio_buffer_required_bytes;
 use std::{
     ffi::c_void,
     mem::size_of,
@@ -8,7 +8,7 @@ use std::{
 };
 
 pub const VERSION: u32 = 2;
-const MAGIC: u64 = 0x544e_4150_5043_4c4b;
+const MAGIC: u64 = 0x4d52_4150_5043_4c4b;
 pub const FRAME_MASK: u64 = 0x0000_ffff_ffff_ffff;
 
 #[repr(C)]
@@ -31,7 +31,7 @@ pub struct ApplicationClock {
 }
 
 fn offset(capacity: u32, channels: u32) -> Option<usize> {
-    let bytes = tn_shared_audio_buffer_required_bytes(capacity, channels);
+    let bytes = mr_shared_audio_buffer_required_bytes(capacity, channels);
     (bytes != 0)
         .then_some(bytes)?
         .checked_add(63)
@@ -39,7 +39,7 @@ fn offset(capacity: u32, channels: u32) -> Option<usize> {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn tn_application_clock_required_bytes(capacity: u32, channels: u32) -> usize {
+pub extern "C" fn mr_application_clock_required_bytes(capacity: u32, channels: u32) -> usize {
     offset(capacity, channels)
         .and_then(|value| value.checked_add(size_of::<ApplicationClock>()))
         .unwrap_or(0)
@@ -48,7 +48,7 @@ pub extern "C" fn tn_application_clock_required_bytes(capacity: u32, channels: u
 /// # Safety
 /// Memory is a live mapping of `size` bytes; its immutable geometry is not mutated.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_application_clock_attach(
+pub unsafe extern "C" fn mr_application_clock_attach(
     memory: *mut c_void,
     size: usize,
     capacity: u32,
@@ -81,13 +81,13 @@ pub unsafe extern "C" fn tn_application_clock_attach(
 /// # Safety
 /// Memory is exclusively owned, writable, and `size` bytes long until publication.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_application_clock_initialize(
+pub unsafe extern "C" fn mr_application_clock_initialize(
     memory: *mut c_void,
     size: usize,
     capacity: u32,
     channels: u32,
 ) -> *mut ApplicationClock {
-    let required = tn_application_clock_required_bytes(capacity, channels);
+    let required = mr_application_clock_required_bytes(capacity, channels);
     let Some(offset) = offset(capacity, channels) else {
         return std::ptr::null_mut();
     };
@@ -130,7 +130,7 @@ pub unsafe extern "C" fn tn_application_clock_initialize(
 /// # Safety
 /// Clock is null or points to a live initialized application clock.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_application_clock_try_producer(clock: *mut ApplicationClock) -> bool {
+pub unsafe extern "C" fn mr_application_clock_try_producer(clock: *mut ApplicationClock) -> bool {
     unsafe { clock.as_ref() }.is_some_and(|clock| {
         clock
             .producer_guard
@@ -142,7 +142,7 @@ pub unsafe extern "C" fn tn_application_clock_try_producer(clock: *mut Applicati
 /// # Safety
 /// Caller owns the producer claim on this live clock.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_application_clock_release_producer(clock: *mut ApplicationClock) {
+pub unsafe extern "C" fn mr_application_clock_release_producer(clock: *mut ApplicationClock) {
     if let Some(clock) = unsafe { clock.as_ref() } {
         clock.producer_guard.store(0, Ordering::Release);
     }
@@ -151,7 +151,7 @@ pub unsafe extern "C" fn tn_application_clock_release_producer(clock: *mut Appli
 /// # Safety
 /// Clock is null or live. The caller is the single claimed consumer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_application_clock_request_rate(
+pub unsafe extern "C" fn mr_application_clock_request_rate(
     clock: *mut ApplicationClock,
     rate: u32,
 ) -> u64 {
@@ -180,7 +180,7 @@ pub unsafe extern "C" fn tn_application_clock_request_rate(
 /// # Safety
 /// Clock is null or live. The caller is the single claimed consumer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_application_clock_publish_consumer(
+pub unsafe extern "C" fn mr_application_clock_publish_consumer(
     clock: *mut ApplicationClock,
     epoch: u64,
     next_frame: u64,

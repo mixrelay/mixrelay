@@ -9,7 +9,7 @@ mod processor_dialog;
 mod recording_dialog;
 
 #[cfg(target_os = "macos")]
-use tonenari_macos_transport as _;
+use mixrelay_macos_transport as _;
 
 #[cfg(target_os = "linux")]
 mod linux_audio;
@@ -36,15 +36,15 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     if tauri::is_dev()
         && let Some(window) = app.get_webview_window("main")
     {
-        window.set_title("ToneNari (Dev)")?;
+        window.set_title("MixRelay (Dev)")?;
     }
-    let open = MenuItem::with_id(app, "open", "Open ToneNari", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit ToneNari", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open MixRelay", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit MixRelay", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &quit])?;
 
     TrayIconBuilder::with_id("main")
         .title("TN")
-        .tooltip("ToneNari")
+        .tooltip("MixRelay")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main_window(app),
@@ -106,5 +106,5 @@ fn main() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("failed to run ToneNari desktop application");
+        .expect("failed to run MixRelay desktop application");
 }

@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
 import type { ControlPort, RuntimeGraphDocument } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
-import { ToneNariProvider } from '../../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { audioGraphToRuntimeGraph, runtimeGraphToAudioGraph } from './model';
 import { useVirtualEndpointCreation } from './useVirtualEndpointCreation';
 import { virtualPolicy, virtualSpec } from './virtualEndpointFixtures';
@@ -64,11 +64,11 @@ function Harness({ port, enabled = true }: { port: ControlPort; enabled?: boolea
 }
 function view(port: ControlPort, enabled = true) {
   return (
-    <ToneNariProvider>
+    <MixRelayProvider>
       <I18nextProvider i18n={i18n}>
         <Harness port={port} enabled={enabled} />
       </I18nextProvider>
-    </ToneNariProvider>
+    </MixRelayProvider>
   );
 }
 

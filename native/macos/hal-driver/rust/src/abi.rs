@@ -4,7 +4,7 @@ use std::os::fd::{FromRawFd, OwnedFd};
 use crate::registry::Registry;
 
 pub(crate) const MAX_DEVICES: usize = 64;
-pub(crate) const CONFIG_ACTION: u64 = 0x544e_6368;
+pub(crate) const CONFIG_ACTION: u64 = 0x4d52_6368;
 pub(crate) const OK: i32 = 0;
 pub(crate) const INVALID: i32 = -1;
 pub(crate) const NOT_FOUND: i32 = -2;
@@ -99,7 +99,7 @@ impl HostOps {
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_create(
+pub(crate) unsafe extern "C" fn mr_hal_core_create(
     native: *const NativeOps,
     host: *const HostOps,
 ) -> *mut Registry {
@@ -112,14 +112,14 @@ pub(crate) unsafe extern "C" fn tn_hal_core_create(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_destroy(registry: *mut Registry) {
+pub(crate) unsafe extern "C" fn mr_hal_core_destroy(registry: *mut Registry) {
     if !registry.is_null() {
         drop(unsafe { Box::from_raw(registry) });
     }
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_upsert(
+pub(crate) unsafe extern "C" fn mr_hal_core_upsert(
     registry: *mut Registry,
     endpoint: *const [u8; 16],
     name: *const c_char,
@@ -155,7 +155,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_upsert(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_remove(
+pub(crate) unsafe extern "C" fn mr_hal_core_remove(
     registry: *mut Registry,
     endpoint: *const [u8; 16],
 ) -> i32 {
@@ -166,14 +166,14 @@ pub(crate) unsafe extern "C" fn tn_hal_core_remove(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_tick(registry: *mut Registry) {
+pub(crate) unsafe extern "C" fn mr_hal_core_tick(registry: *mut Registry) {
     if let Some(registry) = unsafe { registry.as_ref() } {
         registry.tick();
     }
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_devices(
+pub(crate) unsafe extern "C" fn mr_hal_core_devices(
     registry: *mut Registry,
     output: *mut u32,
     capacity: usize,
@@ -190,7 +190,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_devices(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_lookup_uid(
+pub(crate) unsafe extern "C" fn mr_hal_core_lookup_uid(
     registry: *mut Registry,
     uid: *const c_char,
 ) -> u32 {
@@ -207,7 +207,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_lookup_uid(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_device_alive(
+pub(crate) unsafe extern "C" fn mr_hal_core_device_alive(
     registry: *const Registry,
     device: u32,
 ) -> bool {
@@ -215,7 +215,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_device_alive(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_snapshot(
+pub(crate) unsafe extern "C" fn mr_hal_core_snapshot(
     registry: *mut Registry,
     object: u32,
     output: *mut Snapshot,
@@ -234,7 +234,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_snapshot(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_client(
+pub(crate) unsafe extern "C" fn mr_hal_core_client(
     registry: *mut Registry,
     device: u32,
     client: u32,
@@ -244,7 +244,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_client(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_start(
+pub(crate) unsafe extern "C" fn mr_hal_core_start(
     registry: *mut Registry,
     device: u32,
     client: u32,
@@ -254,7 +254,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_start(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_stop(
+pub(crate) unsafe extern "C" fn mr_hal_core_stop(
     registry: *mut Registry,
     device: u32,
     client: u32,
@@ -263,7 +263,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_stop(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_set_rate(
+pub(crate) unsafe extern "C" fn mr_hal_core_set_rate(
     registry: *mut Registry,
     device: u32,
     rate: u32,
@@ -272,7 +272,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_set_rate(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_set_stream_active(
+pub(crate) unsafe extern "C" fn mr_hal_core_set_stream_active(
     registry: *mut Registry,
     stream: u32,
     active: bool,
@@ -283,7 +283,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_set_stream_active(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_perform(
+pub(crate) unsafe extern "C" fn mr_hal_core_perform(
     registry: *mut Registry,
     device: u32,
     action: u64,
@@ -295,7 +295,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_perform(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_abort(
+pub(crate) unsafe extern "C" fn mr_hal_core_abort(
     registry: *mut Registry,
     device: u32,
     action: u64,
@@ -307,7 +307,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_abort(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_timestamp(
+pub(crate) unsafe extern "C" fn mr_hal_core_timestamp(
     registry: *mut Registry,
     device: u32,
     now: u64,
@@ -321,7 +321,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_timestamp(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_io(
+pub(crate) unsafe extern "C" fn mr_hal_core_io(
     registry: *mut Registry,
     device: u32,
     stream: u32,

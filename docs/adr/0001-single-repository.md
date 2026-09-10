@@ -2,7 +2,7 @@
 
 Status: Accepted
 
-ToneNari uses one private Git repository containing the React control surface,
+MixRelay uses one private Git repository containing the React control surface,
 Tauri shell, Rust services, native macOS HAL driver, packaging, and integration
 tests.
 

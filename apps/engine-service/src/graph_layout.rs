@@ -1,7 +1,7 @@
 //! Graph presentation transactions deliberately never prepare audio resources, snapshot
 //! hosted processors or publish DSP revisions. A layout edit may address an inactive graph.
 
-use tonenari_control_protocol::{GraphLayout, GraphLayoutRequest, GraphLayoutResponse};
+use mixrelay_control_protocol::{GraphLayout, GraphLayoutRequest, GraphLayoutResponse};
 
 use super::{EngineGraphController, ErrorCode, ProtocolError};
 

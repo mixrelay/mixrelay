@@ -5,7 +5,7 @@ import type { AudioGraphModel } from '../../core/audio-graph/model';
 import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
 import type { RuntimeGraphDocument } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
-import { ToneNariProvider } from '../../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { AudioNodeCard } from '../../core/ui/AudioNodeCard';
 import {
   addRoutingNode,
@@ -53,9 +53,9 @@ it.each(['en', 'ko-KR', 'pseudo'])(
     const node = presentApplicationReselection(raw, t).nodes[0];
     if (!node) throw new Error('missing application');
     const view = render(
-      <ToneNariProvider>
+      <MixRelayProvider>
         <AudioNodeCard {...node.appearance} inputCount={0} outputCount={2} onSelect={vi.fn()} />
-      </ToneNariProvider>,
+      </MixRelayProvider>,
     );
     const marker = screen.getByRole('img', { name: t('routing.nodeStatus.reselectApplication') });
     expect(marker).toHaveAttribute('data-tone', 'warning');
@@ -114,11 +114,11 @@ it('presents the restored application in the actual workspace without publishing
   });
   const apply = vi.spyOn(port, 'applyGraph');
   const view = render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <I18nextProvider i18n={i18n}>
         <RoutingWorkspace controlPort={port} />
       </I18nextProvider>
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   expect(await screen.findByTestId('status')).toHaveTextContent('Select the application again');
   expect(apply).not.toHaveBeenCalled();

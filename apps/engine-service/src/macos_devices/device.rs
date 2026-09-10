@@ -2,11 +2,12 @@
 use super::{
     aggregate::Aggregate,
     bridge::{DeviceBridge, NEXT_DEVICE_EPOCH},
-    ffi::{tn_device_io_graph_read, tn_device_io_graph_write},
+    ffi::{mr_device_io_graph_read, mr_device_io_graph_write},
     native::Native,
     spec::Spec,
     worker::WorkerContext,
 };
+use mixrelay_audio_io::process::TransferOutcome;
 use std::{
     sync::{
         Arc, Mutex,
@@ -15,7 +16,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tonenari_audio_io::process::TransferOutcome;
 pub(super) struct Device {
     pub(super) identity: u64,
     pub(super) native: Arc<Native>,
@@ -72,7 +72,7 @@ impl Device {
             input: spec.input,
         };
         let worker = thread::Builder::new()
-            .name("tonenari-coreaudio-device".into())
+            .name("mixrelay-coreaudio-device".into())
             .spawn(move || context.run(&tx))
             .map_err(|e| e.to_string())?;
         let mut result = Self {
@@ -114,7 +114,7 @@ impl Device {
         }
         let frames = u32::try_from(samples.len() / self.channels).unwrap_or(0);
         TransferOutcome::complete(unsafe {
-            tn_device_io_graph_read(
+            mr_device_io_graph_read(
                 self.native.pointer.as_ptr(),
                 samples.as_mut_ptr(),
                 frames,
@@ -128,7 +128,7 @@ impl Device {
         }
         let frames = u32::try_from(samples.len() / self.channels).unwrap_or(0);
         TransferOutcome::complete(unsafe {
-            tn_device_io_graph_write(self.native.pointer.as_ptr(), samples.as_ptr(), frames)
+            mr_device_io_graph_write(self.native.pointer.as_ptr(), samples.as_ptr(), frames)
         })
     }
     pub(super) fn ready(&self) -> bool {

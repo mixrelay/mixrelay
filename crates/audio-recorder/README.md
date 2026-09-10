@@ -57,7 +57,7 @@ each packet's rate remains authoritative if the clock changes meanwhile. Fractio
 output-frame carry prevents per-segment duration rounding from accumulating.
 Same-rate float32 bypasses conversion and preserves sample bits. PCM16/24 apply
 TPDF dither once, immediately before final integer quantization. Product sample
-rate choices come from `tonenari_audio_io::formats::SAMPLE_RATES`.
+rate choices come from `mixrelay_audio_io::formats::SAMPLE_RATES`.
 
 ## Automatic WAV splitting
 
@@ -104,13 +104,13 @@ long-duration disk validation remain separate integration evidence.
 
 On 2026-09-09, these focused commands succeeded:
 
-- `cargo test -p tonenari-audio-recorder -- --test-threads=1`: the initial
+- `cargo test -p mixrelay-audio-recorder -- --test-threads=1`: the initial
   21-test checkpoint passed with zero failed/ignored in 0.23 s. The subsequent
   packed-transport checkpoint is reported below. Doc tests: zero.
-- `cargo clippy -p tonenari-audio-recorder --all-targets -- -D warnings
+- `cargo clippy -p mixrelay-audio-recorder --all-targets -- -D warnings
   -D clippy::cognitive_complexity -D clippy::too_many_arguments
   -D clippy::too_many_lines -D clippy::type_complexity`: exit 0.
-- `cargo fmt -p tonenari-audio-recorder -- --check`: exit 0.
+- `cargo fmt -p mixrelay-audio-recorder -- --check`: exit 0.
 
 Regressions cover exact interleaved float PCM, Pause/Resume/Stop, same-identity
 reprepare, discarded preparation, final-tap retirement, more than sixteen retired
@@ -179,7 +179,7 @@ external media inspection was excluded. Timer pacing and host scheduling are not
 a CoreAudio clock or worst-case deadline proof.
 
 Changes were measured in two distinct stages. Stage 1 explicitly changes the dev
-build policy: `tonenari-audio-recorder` now has `opt-level = 3`, like the existing
+build policy: `mixrelay-audio-recorder` now has `opt-level = 3`, like the existing
 audio DSP package overrides. Optimizing the rubato dependency alone left generic
 SRC instantiated in the recorder under the caller's unoptimized dev policy.
 Stage 1 also prepares the first/resumed converter before opening admission. Its

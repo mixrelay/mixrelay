@@ -79,7 +79,7 @@ hardware continuity/latency and long endurance. The Windows virtual driver is
 still a transport header only: WaveRT miniport, INF, safe kernel transport,
 installation/signing and driver qualification have **not** been implemented here.
 
-Evidence is retained under `/Volumes/Linear 1/test/tonenari/evidence/`:
+Evidence is retained under `/Volumes/Linear 1/test/mixrelay/evidence/`:
 `windows-native-v8-20260906.log`, `windows-audio-v5-20260906.log`,
 `windows-audio-v6-20260906.log`, and `windows-final-state-v3-20260906.log`.
 

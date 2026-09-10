@@ -3,21 +3,21 @@ import { createRoot } from 'react-dom/client';
 
 import { App } from './app/App';
 import { I18nProvider } from './core/i18n';
-import { ToneNariProvider } from './core/theme/ToneNariProvider';
+import { MixRelayProvider } from './core/theme/MixRelayProvider';
 import './styles.css';
 
 const root = document.getElementById('root');
 
 if (!root) {
-  throw new Error('ToneNari root element is missing');
+  throw new Error('MixRelay root element is missing');
 }
 
 createRoot(root).render(
   <StrictMode>
-    <ToneNariProvider>
+    <MixRelayProvider>
       <I18nProvider>
         <App />
       </I18nProvider>
-    </ToneNariProvider>
+    </MixRelayProvider>
   </StrictMode>,
 );

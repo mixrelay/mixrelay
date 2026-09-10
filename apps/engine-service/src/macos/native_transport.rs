@@ -1,7 +1,7 @@
 //! Checked transfers preserve the exact endpoint identity, incarnation and channel geometry.
 use super::NativeClockSnapshot;
 pub(super) use endpoint_service::EndpointSnapshot;
-use tonenari_engine_service::{endpoint_registry::EndpointId, endpoint_service};
+use mixrelay_engine_service::{endpoint_registry::EndpointId, endpoint_service};
 
 pub(super) fn snapshot(id: EndpointId) -> Option<EndpointSnapshot> {
     endpoint_service::snapshot(id)

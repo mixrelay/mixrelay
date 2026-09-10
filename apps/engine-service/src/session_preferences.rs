@@ -7,8 +7,8 @@ use std::{
     path::PathBuf,
 };
 
+use mixrelay_audio_io::session::{AudioBackendKind, SessionFormat};
 use serde::{Deserialize, Serialize};
-use tonenari_audio_io::session::{AudioBackendKind, SessionFormat};
 
 use crate::persistence::{StagedWrite, config_directory, stage_json};
 

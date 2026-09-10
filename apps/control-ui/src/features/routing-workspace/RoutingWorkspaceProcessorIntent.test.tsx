@@ -8,7 +8,7 @@ import type {
   ProcessorParameterUpdateResponse,
 } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
-import { ToneNariProvider } from '../../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { StudioScreen } from '../../screens/StudioScreen';
 import { RoutingWorkspace } from './RoutingWorkspace';
 
@@ -107,7 +107,7 @@ function fixture(onBusyChange?: (busy: boolean) => void, studio = false) {
     },
   });
   const view = render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <I18nextProvider i18n={i18n}>
         {studio ? (
           <StudioScreen controlPort={port} />
@@ -115,7 +115,7 @@ function fixture(onBusyChange?: (busy: boolean) => void, studio = false) {
           <RoutingWorkspace controlPort={port} onBusyChange={onBusyChange} />
         )}
       </I18nextProvider>
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
   return { port, view };
 }

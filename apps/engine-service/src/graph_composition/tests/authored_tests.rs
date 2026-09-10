@@ -119,8 +119,8 @@ fn channel_projection_preserves_first_channel_without_inventing_native_width() {
         panic!()
     };
     config.output_channels = 1;
-    doc.edges[0].channel_mapping = tonenari_audio_graph::ChannelMapping::Explicit {
-        routes: vec![tonenari_audio_graph::ChannelRoute {
+    doc.edges[0].channel_mapping = mixrelay_audio_graph::ChannelMapping::Explicit {
+        routes: vec![mixrelay_audio_graph::ChannelRoute {
             source_channel: 0,
             destination_channel: 1,
         }],

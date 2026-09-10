@@ -8,10 +8,10 @@ use crate::{
     ResolvedNode, SourcePlaybackPolicy, StreamSpec, TO_OS_PORT_ID, VirtualEndpointId,
     VirtualEndpointReference, VirtualEndpointSpec, validate_virtual_endpoint_gain,
 };
-use std::collections::BTreeSet;
-use tonenari_audio_io::{
+use mixrelay_audio_io::{
     ApplicationCaptureCapabilities, ApplicationSelectorKind, VirtualEndpointCapabilities,
 };
+use std::collections::BTreeSet;
 
 fn context() -> CompileContext {
     CompileContext {
@@ -51,7 +51,7 @@ fn configured_node(id: &str, config: NodeConfig) -> NodeSpec {
 
 #[test]
 fn recorder_resolves_one_to_eight_input_channels_without_native_output_ports() {
-    for channels in 1..=tonenari_audio_io::formats::MAX_RECORDING_CHANNELS {
+    for channels in 1..=mixrelay_audio_io::formats::MAX_RECORDING_CHANNELS {
         let node = configured_node("recorder", NodeConfig::Recorder { channels });
         let resolved = BuiltInNodeResolver.resolve(&node, &context()).unwrap();
         assert!(resolved.outputs.is_empty());
@@ -114,9 +114,9 @@ fn compiles_fixture_into_a_deterministic_plan() {
             "broadcast-mix",
             "chrome",
             "microphone",
+            "mixrelay-stream",
             "monitor",
-            "spat-ingress",
-            "tonenari-stream"
+            "spat-ingress"
         ]
     );
     let chrome = plan
@@ -138,7 +138,7 @@ fn compiles_fixture_into_a_deterministic_plan() {
     let obs = plan
         .nodes()
         .iter()
-        .find(|node| node.id().as_str() == "tonenari-stream")
+        .find(|node| node.id().as_str() == "mixrelay-stream")
         .expect("OBS endpoint should compile");
     assert_eq!(obs.inputs()[0].id().as_str(), TO_OS_PORT_ID);
     assert_eq!(obs.inputs()[0].channels(), 2);
@@ -393,9 +393,9 @@ fn built_in_resolver_rejects_every_invalid_configuration_class() {
         mixer(vec![PortId::from("one"), PortId::from("one")], 2),
         gain(0, 0.0),
         gain(2, f32::INFINITY),
-        virtual_endpoint("", "ToneNari", None, Some(2)),
+        virtual_endpoint("", "MixRelay", None, Some(2)),
         virtual_endpoint("uid", "", None, Some(2)),
-        virtual_endpoint("uid", "ToneNari", None, Some(65)),
+        virtual_endpoint("uid", "MixRelay", None, Some(65)),
     ];
 
     for (index, config) in invalid.into_iter().enumerate() {
@@ -855,8 +855,8 @@ fn model_helpers_preserve_typed_ids_ports_kinds_and_defaults() {
     assert_eq!(EdgeId::new("edge").to_string(), "edge");
     assert_eq!(PortId::new("port").to_string(), "port");
     assert_eq!(
-        NodeTypeId::new("io.tonenari.compressor").to_string(),
-        "io.tonenari.compressor"
+        NodeTypeId::new("io.mixrelay.compressor").to_string(),
+        "io.mixrelay.compressor"
     );
 
     let selector: ApplicationSelector = serde_json::from_value(serde_json::json!({
@@ -887,7 +887,7 @@ fn model_helpers_preserve_typed_ids_ports_kinds_and_defaults() {
         mixer(vec![PortId::from("input")], 2),
         gain(2, 0.0),
         virtual_endpoint("uid", "name", Some(64), Some(2)),
-        provider("io.tonenari.compressor"),
+        provider("io.mixrelay.compressor"),
     ];
     let actual: Vec<_> = kinds.iter().map(NodeConfig::kind).collect();
     assert_eq!(
@@ -1220,14 +1220,14 @@ impl NodeResolver for TestProviderResolver {
 
 #[test]
 fn provider_nodes_extend_the_graph_without_changing_the_compiler() {
-    let provider_node = configured_node("compressor", provider("io.tonenari.compressor"));
+    let provider_node = configured_node("compressor", provider("io.mixrelay.compressor"));
     let unavailable = BuiltInNodeResolver
         .resolve(&provider_node, &context())
         .expect_err("unregistered provider must be explicit");
     assert!(matches!(
         unavailable,
         NodeResolutionError::CapabilityUnavailable { reason }
-            if reason.contains("io.tonenari.compressor")
+            if reason.contains("io.mixrelay.compressor")
     ));
 
     let encoded = serde_json::to_value(&provider_node).expect("provider node should serialize");

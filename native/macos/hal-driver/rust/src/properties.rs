@@ -20,7 +20,7 @@ pub(crate) struct Notification {
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_notifications(
+pub(crate) unsafe extern "C" fn mr_hal_core_notifications(
     object: u32,
     change: u32,
     output: *mut Notification,
@@ -193,7 +193,7 @@ fn plugin(registry: &Registry, address: &Address, uid: Option<&str>) -> Result<V
         b"bcls" => Ok(code(*b"aobj")),
         b"clas" => Ok(code(*b"aplg")),
         b"stdv" => Ok(number(0)),
-        b"lnam" | b"lmak" => Ok(text(b"ToneNari")),
+        b"lnam" | b"lmak" => Ok(text(b"MixRelay")),
         b"rsrc" => Ok(text(b"")),
         b"ownd" | b"dev#" => Ok(objects(registry.devices())),
         b"box#" | b"clk#" => Ok(objects([])),
@@ -211,7 +211,7 @@ fn common(snapshot: &Snapshot, object: u32, selector: u32) -> Option<Value> {
         b"clas" => Some(code(if device { *b"adev" } else { *b"astr" })),
         b"stdv" => Some(number(if device { 1 } else { snapshot.device_id })),
         b"lnam" => Some(text(&snapshot.name)),
-        b"lmak" => Some(text(b"ToneNari")),
+        b"lmak" => Some(text(b"MixRelay")),
         _ => None,
     }
 }
@@ -240,7 +240,7 @@ fn device(snapshot: &Snapshot, address: &Address) -> Result<Value, i32> {
         b"ownd" | b"stm#" => Ok(objects(stream_ids(snapshot, address.scope))),
         b"ctrl" => Ok(objects([])),
         b"uid " => Ok(text(&snapshot.uid)),
-        b"muid" => Ok(text(b"io.tonenari.audio.endpoint")),
+        b"muid" => Ok(text(b"io.mixrelay.audio.endpoint")),
         b"tran" => Ok(code(*b"virt")),
         b"akin" => Ok(objects([snapshot.device_id])),
         b"clkd" | b"hidn" => Ok(number(0)),
@@ -359,7 +359,7 @@ fn property(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_has_property(
+pub(crate) unsafe extern "C" fn mr_hal_core_has_property(
     registry: *mut Registry,
     object: u32,
     address: *const Address,
@@ -371,7 +371,7 @@ pub(crate) unsafe extern "C" fn tn_hal_core_has_property(
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_property_size(
+pub(crate) unsafe extern "C" fn mr_hal_core_property_size(
     registry: *mut Registry,
     object: u32,
     address: *const Address,
@@ -415,7 +415,7 @@ unsafe fn qualifier_string(size: u32, qualifier: *const c_void) -> Result<Option
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_property_get(
+pub(crate) unsafe extern "C" fn mr_hal_core_property_get(
     registry: *mut Registry,
     object: u32,
     address: *const Address,
@@ -466,7 +466,7 @@ fn settable(registry: &Registry, object: u32, address: &Address) -> Result<bool,
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_property_settable(
+pub(crate) unsafe extern "C" fn mr_hal_core_property_settable(
     registry: *mut Registry,
     object: u32,
     address: *const Address,
@@ -497,7 +497,7 @@ fn parse_rate(bytes: &[u8]) -> Option<u32> {
 }
 
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_core_property_set(
+pub(crate) unsafe extern "C" fn mr_hal_core_property_set(
     registry: *mut Registry,
     object: u32,
     address: *const Address,

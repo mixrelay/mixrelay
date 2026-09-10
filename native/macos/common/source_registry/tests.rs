@@ -1,5 +1,5 @@
 use super::*;
-use crate::shared_audio_buffer::tn_shared_audio_buffer_write;
+use crate::shared_audio_buffer::mr_shared_audio_buffer_write;
 
 fn request(id: &str) -> SourceRequest {
     let mut request = SourceRequest {
@@ -15,14 +15,14 @@ fn request(id: &str) -> SourceRequest {
 }
 fn exhaust(source: &Source) {
     let buffer = source.mapping.buffer.as_ptr();
-    let epoch = unsafe { tn_shared_audio_buffer_stats(buffer) }.epoch;
+    let epoch = unsafe { mr_shared_audio_buffer_stats(buffer) }.epoch;
     for expected in epoch + 1..=u64::from(u16::MAX) {
         assert_eq!(
-            unsafe { tn_shared_audio_buffer_try_begin_epoch(buffer) },
+            unsafe { mr_shared_audio_buffer_try_begin_epoch(buffer) },
             expected
         );
     }
-    assert_eq!(unsafe { tn_shared_audio_buffer_try_begin_epoch(buffer) }, 0);
+    assert_eq!(unsafe { mr_shared_audio_buffer_try_begin_epoch(buffer) }, 0);
     assert!(source.terminal());
 }
 
@@ -37,18 +37,18 @@ fn replacing_an_active_max_epoch_revokes_old_pcm_before_publication() {
     // sole producer. Deliberately stop at active MAX, before a rearm request.
     unsafe {
         for _ in 2..u16::MAX {
-            assert_ne!(tn_shared_audio_buffer_try_begin_epoch(buffer), 0);
+            assert_ne!(mr_shared_audio_buffer_try_begin_epoch(buffer), 0);
         }
         assert_eq!(
-            tn_shared_audio_buffer_stats(buffer).epoch,
+            mr_shared_audio_buffer_stats(buffer).epoch,
             u64::from(u16::MAX)
         );
-        assert!(!tn_shared_audio_buffer_requires_replacement(buffer));
+        assert!(!mr_shared_audio_buffer_requires_replacement(buffer));
     }
     registry.attach(&request).unwrap();
     unsafe {
-        assert!(tn_shared_audio_buffer_requires_replacement(buffer));
-        assert!(!tn_shared_audio_buffer_write(
+        assert!(mr_shared_audio_buffer_requires_replacement(buffer));
+        assert!(!mr_shared_audio_buffer_write(
             buffer,
             u64::from(u16::MAX),
             0,
@@ -66,7 +66,7 @@ fn exhausted_source_replaces_mapping_preserves_settings_and_pins_old_reader() {
     let read = registry.read(token(b"application.one"));
     let old = read.source().unwrap();
     unsafe {
-        tn_application_clock_request_rate(old.mapping.clock.as_ptr(), 96_000);
+        mr_application_clock_request_rate(old.mapping.clock.as_ptr(), 96_000);
     }
     old.mapping.clock().clock_master.store(1, Ordering::Release);
     exhaust(old);
@@ -90,7 +90,7 @@ fn exhausted_source_replaces_mapping_preserves_settings_and_pins_old_reader() {
     );
     assert_eq!(registry.control().owners.len(), 2);
     assert!(!unsafe {
-        tn_shared_audio_buffer_write(
+        mr_shared_audio_buffer_write(
             old.mapping.buffer.as_ptr(),
             first.source_epoch,
             0,
@@ -99,7 +99,7 @@ fn exhausted_source_replaces_mapping_preserves_settings_and_pins_old_reader() {
         )
     });
     assert!(unsafe {
-        tn_shared_audio_buffer_write(
+        mr_shared_audio_buffer_write(
             current.mapping.buffer.as_ptr(),
             second.source_epoch,
             0,
@@ -184,7 +184,7 @@ fn consumer_waits_for_current_format_ack_then_transfers_actual_pcm() {
     clock.native_sample_rate.store(48_000, Ordering::Release);
     clock.native_running.store(1, Ordering::Release);
     assert!(unsafe {
-        tn_shared_audio_buffer_write(
+        mr_shared_audio_buffer_write(
             source.mapping.buffer.as_ptr(),
             attachment.source_epoch,
             0,

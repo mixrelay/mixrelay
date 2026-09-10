@@ -57,13 +57,13 @@ without a `Mod+` token are preserved. Existing keyboard handlers were not broade
 Run from the repository root:
 
 ```sh
-pnpm --filter @tonenari/control-ui exec vitest run \
+pnpm --filter @mixrelay/control-ui exec vitest run \
   src/features/routing-workspace/RoutingWorkspace.test.tsx \
   src/core/ui/ShortcutTooltip.test.tsx \
   src/core/history/useUndoHistory.test.ts \
   src/features/routing-workspace/graphHistoryGroup.test.ts
-pnpm --filter @tonenari/control-ui typecheck
-pnpm --filter @tonenari/control-ui check:boundaries
+pnpm --filter @mixrelay/control-ui typecheck
+pnpm --filter @mixrelay/control-ui check:boundaries
 ```
 
 The focused run at 19:25 KST passed **4 files / 26 tests**: 12 workspace tests, 8 core history

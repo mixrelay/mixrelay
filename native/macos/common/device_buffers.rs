@@ -169,7 +169,7 @@ impl<'a> Layout<'a> {
 /// List owns its complete native trailing metadata array for this call. This
 /// function inspects metadata only; PCM must remain live for later transfer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_buffers_frames(
+pub unsafe extern "C" fn mr_device_buffers_frames(
     list: *const AudioBufferList,
     selection: BufferSelection,
 ) -> u32 {
@@ -187,7 +187,7 @@ pub unsafe extern "C" fn tn_device_buffers_frames(
 /// aligned, initialized and sized for frames*selection.channels floats, disjoint
 /// from native buffers. Capture owns scratch exclusively; render owns native PCM.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn tn_device_buffers_transfer(
+pub unsafe extern "C" fn mr_device_buffers_transfer(
     list: *const AudioBufferList,
     selection: BufferSelection,
     scratch: *mut f32,

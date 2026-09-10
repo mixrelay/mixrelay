@@ -1689,7 +1689,7 @@
             },
             {
               "kind": "test",
-              "path": "native/macos/engine-service/tests/TNDeviceIOLive.c"
+              "path": "native/macos/engine-service/tests/MRDeviceIOLive.c"
             },
             {
               "kind": "test",
@@ -1815,7 +1815,7 @@
             },
             {
               "kind": "test",
-              "path": "native/macos/engine-service/tests/TNDeviceIOLive.c"
+              "path": "native/macos/engine-service/tests/MRDeviceIOLive.c"
             },
             {
               "kind": "test",
@@ -1981,7 +1981,7 @@
             },
             {
               "kind": "source",
-              "path": "native/linux/pipewire/TNPipeWire.c"
+              "path": "native/linux/pipewire/MRPipeWire.c"
             },
             {
               "kind": "validation",
@@ -2219,7 +2219,7 @@
             },
             {
               "kind": "source",
-              "path": "native/macos/common/TNCallbackClock.h"
+              "path": "native/macos/common/MRCallbackClock.h"
             }
           ],
           "note": "macOS own Virtual IO rate-only setter/follower·설정 저장 및 native 44.1/48k 왕복 검증 완료. 처리 버퍼64/128/256/512는 다른 client의 native buffer와 구분. HAL attachment/rebind 실패 수정 후 실제 duplex 재검증 통과. 하드웨어 rate 협상·rollback/DAW arbitration은 ADR0012의 미완 migration이며 Virtual IO 설정 검증과 구분한다."
@@ -2258,7 +2258,7 @@
               "path": "apps/engine-service/src/windows_format.rs"
             }
           ],
-          "note": "Variable graph-rate staging·graph format control·startup restore와 actual own virtual sample-rate policy 통합 진행 중. Shared-mode client rate와 installed own-device rate 수용은 구분. Buffer UI는 ToneNari processing maximum이며 DAW/OS-wide buffer 동기화를 완료 조건으로 요구하지 않음; 실제 소유 native I/O만 별도 accepted format 계약으로 검증."
+          "note": "Variable graph-rate staging·graph format control·startup restore와 actual own virtual sample-rate policy 통합 진행 중. Shared-mode client rate와 installed own-device rate 수용은 구분. Buffer UI는 MixRelay processing maximum이며 DAW/OS-wide buffer 동기화를 완료 조건으로 요구하지 않음; 실제 소유 native I/O만 별도 accepted format 계약으로 검증."
         },
         "Linux": {
           "implementation": "partial",
@@ -2297,7 +2297,7 @@
           "note": "Native PipeWire negotiated PCM·revision-fenced endpoint/app/device staging·live graph rate/block·restore/follow 연결. Isolated app44100→48000→96000→44100 담당 통과 보고, 실제 callback117/118/128/256 등 가변 quantum은 DSP maximum과 다를 수 있음. 모든 frame/remainder 보존·native PCM·distro/DAW acceptance를 검증하며 global buffer equality를 요구하지 않음."
         }
       },
-      "residual": "Shared native-resource 준비·예약·pause/commit·실패 취소, proposed-format capability, opaque preset 보존, 실제 sample-rate 관찰/follow 및 last-accepted 저장 구현. Buffer 설정은 ToneNari processing buffer/DSP 최대 slice이며 DAW/OS 전체 버퍼 동기화가 아니다. CoreAudio client fsiz 차이를 device-global mismatch로 해석한 이전 full-pair 전제는 폐기하고 macOS genuine rate-only runtime 등록 복원. Shared full-format API는 실제 해당 native I/O를 소유하는 backend의 선택적 계약이다. Windows actual own-device rate 정책/설치·macOS private Aggregate 통합/물리 장치 rate 협상·real DAW/distro acceptance는 잔여.",
+      "residual": "Shared native-resource 준비·예약·pause/commit·실패 취소, proposed-format capability, opaque preset 보존, 실제 sample-rate 관찰/follow 및 last-accepted 저장 구현. Buffer 설정은 MixRelay processing buffer/DSP 최대 slice이며 DAW/OS 전체 버퍼 동기화가 아니다. CoreAudio client fsiz 차이를 device-global mismatch로 해석한 이전 full-pair 전제는 폐기하고 macOS genuine rate-only runtime 등록 복원. Shared full-format API는 실제 해당 native I/O를 소유하는 backend의 선택적 계약이다. Windows actual own-device rate 정책/설치·macOS private Aggregate 통합/물리 장치 rate 협상·real DAW/distro acceptance는 잔여.",
       "acceptance": "Ableton/SPAT 왕복 실사용에서 지원 format 표시·live 재설정·실패 rollback·원본 상태보존을 세 OS 검증."
     },
     {
@@ -2365,7 +2365,7 @@
             },
             {
               "kind": "source",
-              "path": "native/macos/common/TNCallbackClock.h"
+              "path": "native/macos/common/MRCallbackClock.h"
             }
           ],
           "note": "공통 sinc/PI·64ch·zero heap 회귀 및 macOS native hardware/app SRC fixture 통과. 2026-09-08 실제 tap buffer timestamp 보존/불연속 epoch reset·동일 native device SRC bypass 연결. 동일2ch/48k에서 SRC delay128→0frames·PCM bit-exact 확인. Private Aggregate grouping/OS-managed 경계 보정 소유권·물리 independent clock endurance는 미완."
@@ -2453,14 +2453,14 @@
             },
             {
               "kind": "source",
-              "path": "native/linux/pipewire/TNPipeWire.c"
+              "path": "native/linux/pipewire/MRPipeWire.c"
             },
             {
               "kind": "validation",
               "path": "docs/validation/2026-09-07-linux-independent-clock-drift.md"
             }
           ],
-          "note": "PipeWire negotiated stream conversion 및 실제 live app rate 전환 담당 보고. 독립 RTP source/native ToneNari probe 초기 +2000ppm에서 buffer growth99.53→12.31frames/s로 감소했으나 starvation3/jumps35/stereo mismatch256로 실패 유지. Follow-up steady-state qualification pending; global driftCorrection은 false 유지."
+          "note": "PipeWire negotiated stream conversion 및 실제 live app rate 전환 담당 보고. 독립 RTP source/native MixRelay probe 초기 +2000ppm에서 buffer growth99.53→12.31frames/s로 감소했으나 starvation3/jumps35/stereo mismatch256로 실패 유지. Follow-up steady-state qualification pending; global driftCorrection은 false 유지."
         }
       },
       "residual": "공통 async sinc SRC·bounded PI drift controller·epoch reset·정량/RT heap 회귀 구현, Mac/Windows native bridge와 Linux PipeWire rate conversion 경로 연결. 따라서 모든 OS에 SRC 자체가 전무하다는 과거 단정은 해소. Native 모든 active boundary의 rate·FIFO·epoch·clock coverage 및 독립 clock steady-state/PCM/overflow 수치 검증은 진행 중. Linux 초기 drift 실험 실패 유지, Windows actual driver/bridge 및 macOS private Aggregate/물리 장치 경계 잔여; 공통 성공만으로 global SRC/drift flag를 true로 올리지 않음.",
@@ -2535,7 +2535,7 @@
             },
             {
               "kind": "source",
-              "path": "native/macos/common/TNCallbackClock.h"
+              "path": "native/macos/common/MRCallbackClock.h"
             }
           ],
           "note": "HAL acknowledged-but-unperformed attachment watchdog/running rebind epoch 복구 후 실제 PCM281600/281600 일치 및 engine 재시작 재검증. Native input/output timestamp/불연속 감지와 same-device pacing 관계 연결, 실제 tap timestamp 유효·11초 fixture discontinuities0. 설치 앱 전체 및 물리 장시간 검증은 별도이며 private Aggregate 통합은 미완."
@@ -2613,7 +2613,7 @@
           "note": "PipeWire actual callback duration/rate/clock epoch를 현재 graph sample frames로 매핑하고 가변 quantum을 DSP maximum으로 분할. 모든 endpoint/app/device가 실제 clock ID/rate를 공유해야 synchronized 표시. 이는 upstream independent sample-clock drift 검증과 다르며 RTP follow-up qualification 진행 중."
         }
       },
-      "residual": "Native quantum→DSP 최대 slice·실제 credit/epoch pacing·truthful activity 구현. Mac hardware/app 독립 bridge evidence, Windows primary pacing와 aggregate sync 구분, Linux 실제 clock 관찰 경로 존재. macOS private Aggregate 통합/물리 clock qualification, Windows actual driver/bridge, Linux 독립 drift·wall-clock latency/endurance 잔여. ToneNari processing buffer와 client-local/native callback quantum을 구분하며 DAW/OS 전체 buffer 동기화를 주장하지 않음.",
+      "residual": "Native quantum→DSP 최대 slice·실제 credit/epoch pacing·truthful activity 구현. Mac hardware/app 독립 bridge evidence, Windows primary pacing와 aggregate sync 구분, Linux 실제 clock 관찰 경로 존재. macOS private Aggregate 통합/물리 clock qualification, Windows actual driver/bridge, Linux 독립 drift·wall-clock latency/endurance 잔여. MixRelay processing buffer와 client-local/native callback quantum을 구분하며 DAW/OS 전체 buffer 동기화를 주장하지 않음.",
       "acceptance": "동일조건 latency/underrun 측정, 독립 clock 정책, idle/empty graph에서도 서비스 유지."
     },
     {
@@ -4263,7 +4263,7 @@
             },
             {
               "kind": "test",
-              "path": "native/macos/engine-service/tests/TNDeviceIOLive.c"
+              "path": "native/macos/engine-service/tests/MRDeviceIOLive.c"
             },
             {
               "kind": "test",
@@ -4306,7 +4306,7 @@
               "path": "docs/validation/2026-09-07-runtime-completion.md"
             }
           ],
-          "note": "이전 구현의 검증 기록: Private aggregate 및 ASan/UBSan fixture 통과. 추가 in-process 실제 TNEngineService ownership 검증: 준비/취소 1,000회, control reader 동시 retirement 1,000회, retired-full 거부 10,000회, 총 3,004 mmap 해제. 2026-09-08 Rust Aggregate 사전검증·admission/retirement·buffer transaction 경계: unit36/native4, stale plan3 거부, 512 native/128 partial/실제 group 회수 각각 leaks0bytes(검사 권한 제한 있음). 실제 installed HAL 재설정/장시간 물리장치 시험 아님. 영구 vendor shutdown 실패 시 같은 worker/context quarantine 잔여. 2026-09-10 현재 DeviceIO는 Rust 전체 소유로 전환했고 기존 C 회귀를 Rust 테스트로 대체했다. 이 Rust 코드는 ASan/UBSan 계측 대상으로 주장하지 않는다. 현재 검증은 owner-conversion 보고서 참조; 실제 장치 검증 수준은 승격하지 않았다."
+          "note": "이전 구현의 검증 기록: Private aggregate 및 ASan/UBSan fixture 통과. 추가 in-process 실제 MREngineService ownership 검증: 준비/취소 1,000회, control reader 동시 retirement 1,000회, retired-full 거부 10,000회, 총 3,004 mmap 해제. 2026-09-08 Rust Aggregate 사전검증·admission/retirement·buffer transaction 경계: unit36/native4, stale plan3 거부, 512 native/128 partial/실제 group 회수 각각 leaks0bytes(검사 권한 제한 있음). 실제 installed HAL 재설정/장시간 물리장치 시험 아님. 영구 vendor shutdown 실패 시 같은 worker/context quarantine 잔여. 2026-09-10 현재 DeviceIO는 Rust 전체 소유로 전환했고 기존 C 회귀를 Rust 테스트로 대체했다. 이 Rust 코드는 ASan/UBSan 계측 대상으로 주장하지 않는다. 현재 검증은 owner-conversion 보고서 참조; 실제 장치 검증 수준은 승격하지 않았다."
         },
         "Windows": {
           "implementation": "partial",

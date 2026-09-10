@@ -2,8 +2,8 @@
 
 use std::time::{Duration, Instant};
 
-use tonenari_audio_io::ApplicationSelector;
-use tonenari_control_protocol::{GraphApplyResponse, ProtocolError};
+use mixrelay_audio_io::ApplicationSelector;
+use mixrelay_control_protocol::{GraphApplyResponse, ProtocolError};
 
 use super::{EngineGraphController, GraphDocument, NodeConfig, invalid, unavailable};
 

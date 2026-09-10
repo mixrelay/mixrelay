@@ -2,9 +2,9 @@
 //! These tests do not install, disable, or mutate a kernel device. Real PCM
 //! qualification remains a separate interactive LAB test.
 use super::*;
-use tonenari_audio_graph::GraphDocument;
-use tonenari_audio_io::{process::ProcessingState, session::SessionIssue};
-use tonenari_engine_service::{RuntimeStatusBackend, windows_transport_contract::LAB_LAYOUT};
+use mixrelay_audio_graph::GraphDocument;
+use mixrelay_audio_io::{process::ProcessingState, session::SessionIssue};
+use mixrelay_engine_service::{RuntimeStatusBackend, windows_transport_contract::LAB_LAYOUT};
 
 #[test]
 fn diagnostic_transport_does_not_advertise_product_device_configuration() {
@@ -27,7 +27,7 @@ fn primary_native_clock_does_not_clear_independent_clock_warning() {
     let session = resources.status(render_format()).audio_session.unwrap();
     assert_eq!(
         session.clock_authority,
-        tonenari_audio_io::session::ClockAuthority::Device
+        mixrelay_audio_io::session::ClockAuthority::Device
     );
     assert_eq!(session.issue, Some(SessionIssue::ClockNotSynchronized));
 }
@@ -83,7 +83,7 @@ struct WorkerFixture {
     resources: Arc<WindowsGraphResources>,
     exchange: Arc<ProcessorExchange>,
     meters: Arc<PeakMeterBank>,
-    _worker: tonenari_engine_service::session::AudioWorker,
+    _worker: mixrelay_engine_service::session::AudioWorker,
 }
 
 impl WorkerFixture {
@@ -95,7 +95,7 @@ impl WorkerFixture {
         let (worker_resources, worker_exchange) = (resources.clone(), exchange.clone());
         let thread =
             thread::spawn(move || run_audio_worker(processor, worker_exchange, worker_resources));
-        let worker = tonenari_engine_service::session::AudioWorker::new(
+        let worker = mixrelay_engine_service::session::AudioWorker::new(
             resources.runtime_status.clone(),
             thread,
         );
@@ -204,7 +204,7 @@ fn offline_and_corrupt_mappings_allow_edits_removal_and_fresh_attachment() {
         let failed = fixture.resources.status(render_format());
         assert_eq!(
             failed.driver_state,
-            tonenari_control_protocol::DriverState::Unavailable
+            mixrelay_control_protocol::DriverState::Unavailable
         );
         let session = failed.audio_session.unwrap();
         assert_eq!(session.processing_state, ProcessingState::Running);

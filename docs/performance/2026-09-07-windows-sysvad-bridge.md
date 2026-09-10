@@ -2,7 +2,7 @@
 
 ## Result and scope
 
-The diagnostic ARM64 SysVAD overlay now transfers **real PCM** through ToneNari's
+The diagnostic ARM64 SysVAD overlay now transfers **real PCM** through MixRelay's
 shared transport in the authorized Windows VM. This is not the Rust engine adapter,
 product endpoint configuration, cross-OS certification, or an audio-quality pass.
 
@@ -42,7 +42,7 @@ build v9 compiled successfully with `/W4 /WX`.
 - The overlay generator validates pinned upstream file hashes and unique anchors,
   writes a new external source copy, and preserves upstream MS-PL/WIL licenses.
   The clean reference checkout and original installed SysVAD remain unchanged.
-- SysVAD owns PortCls, WaveRT buffers, timing and position interfaces. ToneNari owns
+- SysVAD owns PortCls, WaveRT buffers, timing and position interfaces. MixRelay owns
   the private shared-ring layout, controller ownership and PCM conversion boundary.
 - Integer PCM conversion handles 16/20/24/32 valid bits, including left-aligned
   containers, without floating-point arithmetic in the native conversion routine.
@@ -76,17 +76,17 @@ The installed and packaged SYS hashes match:
 ARM64 MSVC `/W4 /WX` native probe build v8 passed. Universal INF `/u`, catalog
 membership and signatures passed; `/w` isolation remains an unmet product gate.
 
-The separately installed `Root\tonenari_SysvadBridge` is `ROOT\MEDIA\0002`.
-The old experimental ToneNari device (`0000`) and unmodified sample (`0001`) remain.
+The separately installed `Root\mixrelay_SysvadBridge` is `ROOT\MEDIA\0002`.
+The old experimental MixRelay device (`0000`) and unmodified sample (`0001`) remain.
 The eight upstream sample endpoints are not eight product-routed endpoints; only
 Speakers/system-render and front MicArray/system-capture are bridged. Probe selection
 checks explicit endpoint IDs and parent identity, never the default device.
 
 Logs, completion markers, failed jobs and installed-image snapshot are retained at
-`/Volumes/Linear 1/test/tonenari/evidence/sysvad-bridge-20260907` and under
-`C:\ToneNariLab` in VM `712A936E-9D91-4455-A8A9-A1F65EB60719`.
+`/Volumes/Linear 1/test/mixrelay/evidence/sysvad-bridge-20260907` and under
+`C:\MixRelayLab` in VM `712A936E-9D91-4455-A8A9-A1F65EB60719`.
 Guest logs are CP949; decode when inspecting localized names.
-The owned demand-only `ToneNariLabSysvadBridgeAudio` scheduled task was removed
+The owned demand-only `MixRelayLabSysvadBridgeAudio` scheduled task was removed
 after v11 completed. Cleanup resolved the owner's SID, checked the exact action
 and non-running state, and confirmed absence (cleanup v1, exit 0). Drivers and
 evidence remain; the checked-in launcher can recreate the diagnostic task.
@@ -99,7 +99,7 @@ Local verification:
 - Lab regression suite: 34 tests, including lifecycle/cleanup safety guards.
 
 These are correctness measurements, not a performance improvement claim. There was
-no functioning ToneNari end-to-end driver baseline for a comparable latency/CPU
+no functioning MixRelay end-to-end driver baseline for a comparable latency/CPU
 benchmark. The unchanged SysVAD capture-tone smoke is not equivalent to this routed
 PCM workload. No zero-leak, zero-dropout, low-latency or physical-clock claim is made.
 

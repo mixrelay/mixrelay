@@ -80,7 +80,7 @@ pub fn lower_document(
                 lowered.document.nodes.push(NodeSpec {
                     id: node.id.clone(),
                     label: node.label.clone(),
-                    config: NodeConfig::Gain(tonenari_audio_graph::GainConfig {
+                    config: NodeConfig::Gain(mixrelay_audio_graph::GainConfig {
                         channels: request.stream.channels,
                         gain_db: 0.0,
                     }),
@@ -116,7 +116,7 @@ pub fn lower_document(
 
 fn lower_output(
     node_id: &NodeId,
-    config: &tonenari_audio_graph::AudioDeviceOutputConfig,
+    config: &mixrelay_audio_graph::AudioDeviceOutputConfig,
     registry: &DeviceRegistry,
     identities: &ResolvedNodeIdentities,
 ) -> Result<OutputReference, CompositionError> {
@@ -143,10 +143,10 @@ fn lower_output(
 
 fn lower_device(
     node_id: &NodeId,
-    config: &tonenari_audio_graph::VirtualEndpointConfig,
+    config: &mixrelay_audio_graph::VirtualEndpointConfig,
     registry: &DeviceRegistry,
 ) -> Result<DeviceReference, CompositionError> {
-    tonenari_audio_graph::validate_virtual_endpoint_gain(config.gain_db)
+    mixrelay_audio_graph::validate_virtual_endpoint_gain(config.gain_db)
         .map_err(|error| invalid(error.to_string()))?;
     let canonical = registry
         .get(&config.id)

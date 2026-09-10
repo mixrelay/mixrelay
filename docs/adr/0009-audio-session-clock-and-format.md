@@ -45,7 +45,7 @@ unconditional SRC/drift qualification is declared here.
 ### Buffer interpretation correction from live cross-process evidence
 
 The engine client's CoreAudio `BufferFrameSize` readback was 256 while a fresh
-probe of the same ToneNari UID read 512. Those are client-local I/O views, **not
+probe of the same MixRelay UID read 512. Those are client-local I/O views, **not
 evidence of a mismatched device-global buffer**. The engine's own virtual endpoint
 uses direct shared memory and owns no corresponding `AudioDeviceIOProc`; changing
 its otherwise-unused CoreAudio client buffer cannot configure a DAW's callback.
@@ -54,7 +54,7 @@ device-global nominal-rate request/confirmation/following; the shared full-forma
 API remains optional for backends that actually own the relevant native I/O.
 See the [buffer-property counterexample and correction](../validation/2026-09-08-macos-buffer-format-sync.md).
 
-The user-facing buffer setting means **ToneNari processing buffer / maximum DSP
+The user-facing buffer setting means **MixRelay processing buffer / maximum DSP
 slice**, not DAW/OS-wide buffer synchronization. Linux callback observations of
 117/118/128/256 frames across rates likewise need not equal that maximum. Variable
 native quantum and remainder preservation are verified separately from changing
@@ -80,11 +80,11 @@ implicitly rebuilt as 48 kHz when the saved DSP format is 44.1 kHz.
 
 The common store uses versioned, backend-tagged JSON, bounded to 4096 bytes. Paths:
 
-- macOS: `~/Library/Application Support/ToneNari/audio-session.json`
-- Windows: `%LOCALAPPDATA%/ToneNari/audio-session.json`
-- Linux: `$XDG_CONFIG_HOME/tonenari/audio-session.json`, or
-  `~/.config/tonenari/audio-session.json` if the XDG path is absent/relative.
-- `TONENARI_CONFIG_DIR` can override the directory and must be absolute.
+- macOS: `~/Library/Application Support/MixRelay/audio-session.json`
+- Windows: `%LOCALAPPDATA%/MixRelay/audio-session.json`
+- Linux: `$XDG_CONFIG_HOME/mixrelay/audio-session.json`, or
+  `~/.config/mixrelay/audio-session.json` if the XDG path is absent/relative.
+- `MIXRELAY_CONFIG_DIR` can override the directory and must be absolute.
 
 The Windows/Linux path and serialization code are cross-compiled, but their fixed
 format adapters do not yet offer live preferences; startup restoration is currently
@@ -220,7 +220,7 @@ therefore its nominal-rate setter previously allowed a configuration the engine
 could not consume correctly. Source shared memory also carried frames without a
 rate/conversion contract. Linux uses FIFO pipe-tunnel modules, not native graph
 process callbacks. Windows has process capture but no hardware render adapter or
-usable signed ToneNari virtual driver. Hardware enumeration on the desktop is
+usable signed MixRelay virtual driver. Hardware enumeration on the desktop is
 not hardware audio I/O implementation.
 
 ## Implemented boundary

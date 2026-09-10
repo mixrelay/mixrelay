@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use tonenari_test_support::FixtureDir;
+use mixrelay_test_support::FixtureDir;
 
 use super::*;
 use crate::{ProcessorStateError, WORKER_READY};

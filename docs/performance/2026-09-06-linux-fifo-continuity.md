@@ -30,7 +30,7 @@ Three baseline trials followed by three corrected trials; not a randomized or
 long-duration benchmark.
 
 The probe writes a four-second 440/880 Hz signal (peak 0.125/0.0625), records the
-explicit ToneNari virtual source, and checks signal continuity between first and
+explicit MixRelay virtual source, and checks signal continuity between first and
 last active samples. Active fraction counts left-channel samples above 0.001;
 even an ideal sine has near-zero samples, so 100% is not the expected baseline.
 No host/default hardware device is changed.

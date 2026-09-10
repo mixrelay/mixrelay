@@ -123,12 +123,12 @@ fn invalid_sizes_are_rejected_without_creating_resources() {
         create(usize::MAX, true).unwrap_err().kind(),
         io::ErrorKind::InvalidInput
     );
-    assert_eq!(tn_shared_memory_create(0, true), -1);
+    assert_eq!(mr_shared_memory_create(0, true), -1);
 }
 
 #[test]
 fn repeated_shared_memory_and_xpc_ownership_returns_to_baseline() {
-    const CHILD: &str = "TONENARI_SHARED_MEMORY_TEST_CHILD";
+    const CHILD: &str = "MIXRELAY_SHARED_MEMORY_TEST_CHILD";
     if std::env::var(CHILD).as_deref() != Ok("1") {
         // Isolate FD accounting from unrelated Cargo test threads. The child
         // runs this actual test, never an ignored or alternate implementation.

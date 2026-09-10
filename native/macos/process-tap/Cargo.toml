@@ -1,5 +1,5 @@
 [package]
-name = "tonenari-process-tap"
+name = "mixrelay-process-tap"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,7 +15,7 @@ workspace = true
 # Typed capture failures retain their native status at the C boundary.
 thiserror.workspace = true
 # Share transport/clock primitives without making HAL/engine depend on AppKit.
-tonenari-macos-transport = { path = "../common" }
+mixrelay-macos-transport = { path = "../common" }
 
 [build-dependencies]
 # Only Objective-C object construction and AppKit adapters require this compiler.

@@ -1,5 +1,5 @@
 [package]
-name = "tonenari-audio-io"
+name = "mixrelay-audio-io"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -43,5 +43,5 @@ windows = { version = "0.61.3", features = [
 
 [dev-dependencies]
 allocation-counter = "0.8.1"
-tonenari-test-support = { path = "../test-support" }
+mixrelay-test-support = { path = "../test-support" }
 serde_json.workspace = true

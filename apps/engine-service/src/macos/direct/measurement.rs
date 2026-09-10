@@ -49,7 +49,7 @@ fn exercise(input: &List, output: &List, map: &Binding, destination: &mut [f32],
 
 #[test]
 fn direct_pcm_measurement() {
-    if std::env::var_os("TONENARI_DIRECT_PCM_BENCH").is_none() {
+    if std::env::var_os("MIXRELAY_DIRECT_PCM_BENCH").is_none() {
         return;
     }
     for channels in [2, 8, 64] {

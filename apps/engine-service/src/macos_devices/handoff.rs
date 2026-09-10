@@ -1,11 +1,11 @@
 //! Resource handoff has two activation boundaries. Geometry changes accompany
 //! a DSP plan; same-spec recovery may activate on any block. Format preparation
 //! reserves both lanes until its token is committed or cancelled.
+use mixrelay_audio_io::recovery::{RecoveryConsumer, RecoveryMailbox};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU8, Ordering},
 };
-use tonenari_audio_io::recovery::{RecoveryConsumer, RecoveryMailbox};
 
 const IDLE: u8 = 0;
 const FORMAT: u8 = 3;

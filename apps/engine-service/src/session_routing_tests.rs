@@ -1,6 +1,6 @@
 //! Routing hardware and the own virtual endpoint are distinct format owners.
 use super::*;
-use tonenari_audio_io::{
+use mixrelay_audio_io::{
     formats::{BUFFER_SIZES, SAMPLE_RATES},
     session::AudioBackendKind,
 };
@@ -76,7 +76,7 @@ fn hardware_adoption_does_not_depend_on_absent_or_legacy_hal_catalog() {
 
 #[test]
 fn hardware_buffer_persists_without_rewriting_virtual_rate_preference() {
-    let directory = tonenari_test_support::FixtureDir::new("routing-preferences").unwrap();
+    let directory = mixrelay_test_support::FixtureDir::new("routing-preferences").unwrap();
     let store =
         SessionPreferences::for_test(directory.join("session.json"), AudioBackendKind::CoreAudio);
     let original = RenderFormat {
@@ -201,7 +201,7 @@ fn saved_buffer_restores_for_hardware_even_when_own_hal_is_absent() {
 
 #[test]
 fn startup_follows_current_daw_rate_and_persists_it_without_a_device_write() {
-    let directory = tonenari_test_support::FixtureDir::new("startup-device-rate").unwrap();
+    let directory = mixrelay_test_support::FixtureDir::new("startup-device-rate").unwrap();
     let store =
         SessionPreferences::for_test(directory.join("session.json"), AudioBackendKind::CoreAudio);
     let saved = RenderFormat {

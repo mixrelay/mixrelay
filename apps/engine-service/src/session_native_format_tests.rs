@@ -1,7 +1,7 @@
 //! A native format is a pair: rollback restores observed hardware state, not old DSP state.
 use super::*;
+use mixrelay_audio_io::session::AudioBackendKind;
 use std::sync::Mutex;
-use tonenari_audio_io::session::AudioBackendKind;
 
 fn format(rate: u32, frames: u32) -> RenderFormat {
     RenderFormat {
@@ -156,7 +156,7 @@ fn unknown_full_native_pair_rejects_before_any_native_write() {
 
 #[test]
 fn preference_commit_failure_restores_observed_pair_and_preserves_destination() {
-    let directory = tonenari_test_support::FixtureDir::new("native-pair-save").unwrap();
+    let directory = mixrelay_test_support::FixtureDir::new("native-pair-save").unwrap();
     let occupied = directory.join("session.json");
     std::fs::create_dir_all(&occupied).unwrap();
     let previous = format(44_100, 512);

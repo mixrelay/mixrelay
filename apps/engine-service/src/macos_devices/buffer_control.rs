@@ -2,7 +2,7 @@
 //! expose snapshots and one setter call; no retry/format policy lives in C.
 use super::{
     buffer_transaction::BufferControl,
-    ffi::{tn_device_buffer_size, tn_device_buffer_write, tn_device_io_buffer_info},
+    ffi::{mr_device_buffer_size, mr_device_buffer_write, mr_device_io_buffer_info},
     native::Native,
 };
 use std::{
@@ -36,7 +36,7 @@ impl BufferInfo {
 
 pub(super) fn prepare(native: &Native, requested: u32) -> Result<(u32, u32), String> {
     let mut info = BufferInfo::default();
-    let available = unsafe { tn_device_io_buffer_info(native.pointer.as_ptr(), &raw mut info) };
+    let available = unsafe { mr_device_io_buffer_info(native.pointer.as_ptr(), &raw mut info) };
     validate_snapshot(&info, available, requested)
 }
 
@@ -50,7 +50,7 @@ pub(super) fn prepare_initial(
         || {
             let mut info = BufferInfo::default();
             let available =
-                unsafe { tn_device_io_buffer_info(native.pointer.as_ptr(), &raw mut info) };
+                unsafe { mr_device_io_buffer_info(native.pointer.as_ptr(), &raw mut info) };
             (info, available)
         },
         || stop.load(Ordering::Acquire),
@@ -104,14 +104,14 @@ fn validate_snapshot(
 pub(super) struct NativeBufferControl;
 impl BufferControl for NativeBufferControl {
     fn current(&mut self, device: u32) -> u32 {
-        unsafe { tn_device_buffer_size(device) }
+        unsafe { mr_device_buffer_size(device) }
     }
     fn change(&mut self, device: u32, expected: u32, requested: u32) -> bool {
         confirmed_write(
             expected,
             requested,
-            || unsafe { tn_device_buffer_size(device) },
-            || unsafe { tn_device_buffer_write(device, requested) },
+            || unsafe { mr_device_buffer_size(device) },
+            || unsafe { mr_device_buffer_write(device, requested) },
             || thread::sleep(Duration::from_millis(2)),
         )
     }

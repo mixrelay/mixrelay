@@ -6,14 +6,14 @@ use crate::graph_composition::{
     ComposedGraph, CompositionError, DeviceRegistry, ResolvedNodeIdentities, SharedOutput,
     SharedSource, compose, lower_document,
 };
-use std::collections::BTreeMap;
-use tonenari_audio_graph::{
+use mixrelay_audio_graph::{
     AudioDeviceInputConfig, AudioDeviceOutputConfig, CompileContext, GraphCompiler, GraphDocument,
     NodeConfig, NodeSpec, VirtualEndpointId, VirtualEndpointSpec,
 };
-use tonenari_audio_io::{
+use mixrelay_audio_io::{
     ApplicationCaptureRequest, AudioDeviceDescriptor, DeviceDirection, DeviceSelector,
 };
+use std::collections::BTreeMap;
 
 /// Adapter-owned application identity resolution. The canonical request must have zero
 /// gain and an actual supported channel width. Different aliases may share an ID only

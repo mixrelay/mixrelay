@@ -6,7 +6,7 @@ The prior macOS worker advanced its sample position by the configured DSP block
 size on each wall-clock timer iteration. A matching nominal sample rate did not
 make this a native clock. The worker now uses the following evidence order:
 
-1. An in-use ToneNari HAL publishes actual WriteMix render credits or ReadInput
+1. An in-use MixRelay HAL publishes actual WriteMix render credits or ReadInput
    capture credits. Active render wins over a later capture phase so the graph
    cannot consume render input before its producer supplies it. Capture-only
    streams remain independently paced by their actual ReadInput requests.
@@ -54,7 +54,7 @@ allocation, logging, waiting, or OS property query was added to the HAL callback
 
 ## Verification
 
-`cargo test -p tonenari-engine-service --bin tonenari-engine-service macos_pacing
+`cargo test -p mixrelay-engine-service --bin mixrelay-engine-service macos_pacing
 -- --nocapture` covers:
 
 - Unknown, explicit idle and native/graph rate mismatch without fabricated frames.

@@ -2,7 +2,7 @@
 
 Windows needs two separately signed artifacts:
 
-1. a WaveRT virtual audio driver that exposes the ToneNari render/capture endpoints;
+1. a WaveRT virtual audio driver that exposes the MixRelay render/capture endpoints;
 2. the per-user Rust engine, which owns WASAPI process-loopback sessions and the portable graph.
 
 The engine must run in the interactive user session, not Session 0. The development installer uses
@@ -12,5 +12,5 @@ production packages require Microsoft-compatible release signing. The app report
 healthy.
 
 The implementation is based on the WaveRT architecture documented by Microsoft's SysVAD sample,
-but ToneNari's transport and endpoint identity must remain product-owned. Do not ship the sample's
+but MixRelay's transport and endpoint identity must remain product-owned. Do not ship the sample's
 Contoso identities or its tone-generating capture path.

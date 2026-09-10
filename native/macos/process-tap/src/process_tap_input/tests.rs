@@ -1,9 +1,9 @@
 use super::*;
-use tonenari_macos_transport::{
+use mixrelay_macos_transport::{
     audio_buffer::{AudioBuffer, AudioBufferList},
     capture_ring::{
-        AudioRing, tn_audio_ring_create, tn_audio_ring_destroy, tn_audio_ring_dropped_frames,
-        tn_audio_ring_read_interleaved,
+        AudioRing, mr_audio_ring_create, mr_audio_ring_destroy, mr_audio_ring_dropped_frames,
+        mr_audio_ring_read_interleaved,
     },
 };
 
@@ -23,7 +23,7 @@ struct RingOwner(*mut AudioRing);
 
 impl RingOwner {
     fn new(channels: u32) -> Self {
-        let ring = tn_audio_ring_create(8, channels);
+        let ring = mr_audio_ring_create(8, channels);
         assert!(!ring.is_null());
         Self(ring)
     }
@@ -32,7 +32,7 @@ impl RingOwner {
 impl Drop for RingOwner {
     fn drop(&mut self) {
         // SAFETY: this test's sequential native calls have all returned.
-        unsafe { tn_audio_ring_destroy(self.0) };
+        unsafe { mr_audio_ring_destroy(self.0) };
     }
 }
 
@@ -167,7 +167,7 @@ fn every_channel_width_preserves_pcm_and_finite_peak_policy_in_both_layouts() {
                     }
                 );
                 assert_eq!(
-                    tn_audio_ring_read_interleaved(ring.0, output.as_mut_ptr(), 4),
+                    mr_audio_ring_read_interleaved(ring.0, output.as_mut_ptr(), 4),
                     4
                 );
                 peaks.take(&mut observed_peaks);
@@ -223,7 +223,7 @@ fn malformed_metadata_never_reads_pcm_or_publishes_partial_input() {
     assert_eq!(output.map(f32::to_bits), [0.0_f32.to_bits(); 2]);
     // SAFETY: live empty ring, readable empty input pointer is explicitly supported.
     unsafe {
-        assert_eq!(tn_audio_ring_dropped_frames(ring.0), 0);
+        assert_eq!(mr_audio_ring_dropped_frames(ring.0), 0);
         assert_eq!(
             ingest(&format, std::ptr::null(), ring.0, &peaks),
             TapInputResult::default()
@@ -259,7 +259,7 @@ fn full_queue_still_observes_input_peaks_and_frames_without_allocating() {
     peaks.take(&mut output);
     assert_eq!(output.map(f32::to_bits), [0.75_f32.to_bits(); 2]);
     // SAFETY: all control/producer accesses have returned, ring is live.
-    assert_eq!(unsafe { tn_audio_ring_dropped_frames(ring.0) }, 8000);
+    assert_eq!(unsafe { mr_audio_ring_dropped_frames(ring.0) }, 8000);
 }
 
 #[test]

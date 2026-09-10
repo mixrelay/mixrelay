@@ -1,19 +1,19 @@
 //! XPC policy is control-plane Rust. C only provides Objective-C block adapters.
 use super::SERVICE;
+use mixrelay_macos_transport::control_inventory::{
+    mr_hal_control_create_inventory_snapshot, mr_hal_control_parse_inventory_request,
+    mr_hal_control_parse_transport_replacement_request,
+};
+use mixrelay_macos_transport::source_control::{
+    SourceRequest, mr_engine_control_create_source_attachment_reply,
+    mr_engine_control_parse_source_request,
+};
 use std::{
     collections::BTreeMap,
     ffi::{c_char, c_void},
     os::fd::AsRawFd,
     os::unix::fs::MetadataExt,
     ptr::{self, NonNull},
-};
-use tonenari_macos_transport::control_inventory::{
-    tn_hal_control_create_inventory_snapshot, tn_hal_control_parse_inventory_request,
-    tn_hal_control_parse_transport_replacement_request,
-};
-use tonenari_macos_transport::source_control::{
-    SourceRequest, tn_engine_control_create_source_attachment_reply,
-    tn_engine_control_parse_source_request,
 };
 type Object = *mut c_void;
 unsafe extern "C" {
@@ -105,7 +105,7 @@ fn authority(peer: Object) -> Option<Authority> {
 /// # Safety
 /// Peer is a borrowed live XPC connection from the listener adapter.
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_engine_service_accept_peer(peer: Object) -> bool {
+pub(crate) unsafe extern "C" fn mr_engine_service_accept_peer(peer: Object) -> bool {
     let Some(service) = SERVICE.get() else {
         return false;
     };
@@ -134,7 +134,7 @@ fn inventory() -> Option<Owned> {
     let snapshot = SERVICE.get()?.runtime.snapshot().ok()?;
     let abi = snapshot.as_abi();
     Owned::new(unsafe {
-        tn_hal_control_create_inventory_snapshot(abi.entries.as_ptr(), abi.count, abi.generation)
+        mr_hal_control_create_inventory_snapshot(abi.entries.as_ptr(), abi.count, abi.generation)
     })
 }
 
@@ -146,14 +146,14 @@ fn source_reply(event: Object) -> Option<Owned> {
         channels: 0,
         transport_version: 0,
     };
-    if !unsafe { tn_engine_control_parse_source_request(event, &raw mut request) } {
+    if !unsafe { mr_engine_control_parse_source_request(event, &raw mut request) } {
         return None;
     }
     let Ok(attachment) = service.sources.attach(&request) else {
         return Owned::new(unsafe { xpc_dictionary_create_reply(event) });
     };
     Owned::new(unsafe {
-        tn_engine_control_create_source_attachment_reply(
+        mr_engine_control_create_source_attachment_reply(
             event,
             attachment.descriptor.as_raw_fd(),
             attachment.mapped_size,
@@ -166,7 +166,7 @@ fn source_reply(event: Object) -> Option<Owned> {
 /// # Safety
 /// Both values are live borrowed XPC objects for this dispatch callback.
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_engine_service_peer_event(peer: Object, event: Object) {
+pub(crate) unsafe extern "C" fn mr_engine_service_peer_event(peer: Object, event: Object) {
     let Some(service) = SERVICE.get() else {
         return;
     };
@@ -194,9 +194,9 @@ pub(crate) unsafe extern "C" fn tn_engine_service_peer_event(peer: Object, event
     };
     let mut id = [0; 16];
     let mut generation = 0;
-    let inventory_request = unsafe { tn_hal_control_parse_inventory_request(event) };
+    let inventory_request = unsafe { mr_hal_control_parse_inventory_request(event) };
     let replacement = unsafe {
-        tn_hal_control_parse_transport_replacement_request(
+        mr_hal_control_parse_transport_replacement_request(
             event,
             id.as_mut_ptr(),
             &raw mut generation,
@@ -242,7 +242,7 @@ pub(crate) unsafe extern "C" fn tn_engine_service_peer_event(peer: Object, event
 }
 
 #[unsafe(no_mangle)]
-pub(crate) extern "C" fn tn_engine_service_control_tick() {
+pub(crate) extern "C" fn mr_engine_service_control_tick() {
     let Some(service) = SERVICE.get() else {
         return;
     };

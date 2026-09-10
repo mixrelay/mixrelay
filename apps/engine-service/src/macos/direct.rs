@@ -7,6 +7,11 @@ use super::callback_source::RenderTransport;
 use super::callback_transport::{CaptureTransport, NativeCapture};
 use super::endpoint_boundaries::EndpointBoundaries;
 use crate::macos_devices::direct::{Binding, Descriptor, DirectPlan};
+use mixrelay_audio_engine::{BlockProcessor, ExternalBinding, ExternalIo};
+use mixrelay_audio_io::{
+    process::{ClockDomain, InputActivity, ProcessCycle, TransferOutcome},
+    session::ClockAuthority,
+};
 use ownership::PreparedRenderer;
 use std::{
     ffi::c_void,
@@ -15,17 +20,12 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tonenari_audio_engine::{BlockProcessor, ExternalBinding, ExternalIo};
-use tonenari_audio_io::{
-    process::{ClockDomain, InputActivity, ProcessCycle, TransferOutcome},
-    session::ClockAuthority,
-};
 
 mod buffers;
 use buffers::Buffers;
 
 #[cfg(test)]
-use tonenari_macos_transport::audio_buffer::AudioBuffer;
+use mixrelay_macos_transport::audio_buffer::AudioBuffer;
 
 #[cfg(test)]
 #[repr(C)]
@@ -96,7 +96,7 @@ struct Renderer<'a, T = NativeCapture> {
     clock_id: u32,
     epoch: u64,
     native_clock: Option<(&'a DirectPlan, u64)>,
-    status: &'a tonenari_engine_service::session::AdapterRuntimeStatus,
+    status: &'a mixrelay_engine_service::session::AdapterRuntimeStatus,
     frame: u64,
     progress: &'a AtomicU64,
     failed: &'a AtomicBool,
@@ -126,7 +126,7 @@ impl<T: CaptureTransport + RenderTransport> Renderer<'_, T> {
             let current = plan.discontinuities();
             if current != *observed {
                 self.status
-                    .record_process(tonenari_audio_io::process::ProcessReport {
+                    .record_process(mixrelay_audio_io::process::ProcessReport {
                         discontinuities: current.wrapping_sub(*observed),
                         ..Default::default()
                     });
@@ -198,7 +198,7 @@ impl<T: CaptureTransport + RenderTransport> Renderer<'_, T> {
         }
         self.status
             .observe_clock(ClockAuthority::Device, io.endpoints.synchronized());
-        tonenari_engine_service::endpoint_service::touch_audio();
+        mixrelay_engine_service::endpoint_service::touch_audio();
         self.progress.fetch_add(1, Ordering::Release);
         true
     }
@@ -383,12 +383,12 @@ fn replace_boundaries(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use tonenari_audio_engine::RenderPlan;
-    use tonenari_audio_graph::{
+    use mixrelay_audio_engine::RenderPlan;
+    use mixrelay_audio_graph::{
         CompileContext, CompileLimits, GraphCompiler, GraphDocument, RenderFormat,
     };
-    use tonenari_engine_service::RuntimeStatusBackend;
+    use mixrelay_engine_service::RuntimeStatusBackend;
+    use std::sync::Arc;
 
     pub(super) fn stereo_bindings() -> [Binding; 2] {
         [
@@ -523,7 +523,7 @@ mod tests {
                 channels: 2,
             });
         }
-        let status = tonenari_engine_service::session::AdapterRuntimeStatus::new(
+        let status = mixrelay_engine_service::session::AdapterRuntimeStatus::new(
             crate::macos::adapter_profile(),
         );
         let progress = AtomicU64::new(0);
@@ -576,9 +576,9 @@ mod tests {
 
     #[test]
     fn synchronous_callback_preserves_every_sample_at_all_product_buffers() {
-        for &block_frames in tonenari_audio_io::formats::BUFFER_SIZES {
+        for &block_frames in mixrelay_audio_io::formats::BUFFER_SIZES {
             let mut processor = processor_at(block_frames, 48000);
-            let status = tonenari_engine_service::session::AdapterRuntimeStatus::new(
+            let status = mixrelay_engine_service::session::AdapterRuntimeStatus::new(
                 crate::macos::adapter_profile(),
             );
             let progress = AtomicU64::new(0);

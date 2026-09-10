@@ -1,7 +1,7 @@
 use super::*;
-use tonenari_audio_graph::{AudioDeviceInputConfig, AudioDeviceOutputConfig, NodeSpec};
-use tonenari_audio_io::process::{InputActivity, TransferOutcome};
-use tonenari_macos_test_support::DeviceFixture as Fixture;
+use mixrelay_audio_graph::{AudioDeviceInputConfig, AudioDeviceOutputConfig, NodeSpec};
+use mixrelay_audio_io::process::{InputActivity, TransferOutcome};
+use mixrelay_macos_test_support::DeviceFixture as Fixture;
 fn wait_until(mut condition: impl FnMut() -> bool) {
     let start = Instant::now();
     while !condition() {
@@ -220,12 +220,12 @@ fn drive_native_graph(active: &DeviceSet, rate: u32) {
     let mut captured = 0;
     let mut submitted = 0;
     let native_start =
-        unsafe { tn_device_io_native_frames(active.0["input"].native.pointer.as_ptr()) };
+        unsafe { mr_device_io_native_frames(active.0["input"].native.pointer.as_ptr()) };
     let overflow_start =
-        unsafe { tn_device_io_overflows(active.0["input"].native.pointer.as_ptr()) };
+        unsafe { mr_device_io_overflows(active.0["input"].native.pointer.as_ptr()) };
     let epoch_start = active.0["input"].epoch.load(Ordering::Acquire);
     let output_overflow_start =
-        unsafe { tn_device_io_overflows(active.0["output"].native.pointer.as_ptr()) };
+        unsafe { mr_device_io_overflows(active.0["output"].native.pointer.as_ptr()) };
     let mut pcm = [0.0; 512];
     let start = Instant::now();
     while start.elapsed() < Duration::from_secs(2) {
@@ -242,12 +242,12 @@ fn drive_native_graph(active: &DeviceSet, rate: u32) {
         thread::sleep(Duration::from_millis(1));
     }
     let native_frames =
-        unsafe { tn_device_io_native_frames(active.0["input"].native.pointer.as_ptr()) }
+        unsafe { mr_device_io_native_frames(active.0["input"].native.pointer.as_ptr()) }
             - native_start;
-    let overflows = unsafe { tn_device_io_overflows(active.0["input"].native.pointer.as_ptr()) }
+    let overflows = unsafe { mr_device_io_overflows(active.0["input"].native.pointer.as_ptr()) }
         - overflow_start;
     let output_overflows =
-        unsafe { tn_device_io_overflows(active.0["output"].native.pointer.as_ptr()) }
+        unsafe { mr_device_io_overflows(active.0["output"].native.pointer.as_ptr()) }
             - output_overflow_start;
     let epoch_changed = active.0["input"].epoch.load(Ordering::Acquire) != epoch_start;
     eprintln!(
@@ -282,7 +282,7 @@ fn native_coreaudio_all_buffer_sizes_are_applied_and_survive_reconnection() {
     resources.activation().unwrap().activate(&mut active);
     resources.reclaim();
     let mut previous = 256;
-    for &frames in tonenari_audio_io::formats::BUFFER_SIZES {
+    for &frames in mixrelay_audio_io::formats::BUFFER_SIZES {
         let mut prepared = resources
             .prepare_format_change(
                 &graph,
@@ -300,7 +300,7 @@ fn native_coreaudio_all_buffer_sizes_are_applied_and_survive_reconnection() {
         prepared.commit();
         let verified = || {
             active.0.values().all(|device| unsafe {
-                tn_device_io_quantum(device.native.pointer.as_ptr(), false) == frames
+                mr_device_io_quantum(device.native.pointer.as_ptr(), false) == frames
             })
         };
         wait_until(verified);
@@ -378,7 +378,7 @@ fn native_coreaudio_src_uses_actual_rate_and_rebuilds_graph_format_only() {
     // The fixture follows the installed endpoint, which the user may run at
     // any supported rate. The invariant above is preserving its actual rates,
     // not imposing an unrelated 48 kHz assumption on the fixture.
-    assert!(tonenari_audio_io::formats::SAMPLE_RATES.contains(&native_input_rate));
+    assert!(mixrelay_audio_io::formats::SAMPLE_RATES.contains(&native_input_rate));
     assert_eq!(native_input_rate, native_output_rate);
     drop(active);
     resources.reclaim();

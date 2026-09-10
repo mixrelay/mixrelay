@@ -178,8 +178,8 @@ PCM ring and processor-host test command passed, including its documentation
 targets. This is not an all-workspace/live-device success claim.
 
 The broader engine binary run passed 136 tests and failed six live-device
-prerequisites: five require `TONENARI_TEST_ENDPOINT_UID`, and the private-group
-test requires `TONENARI_GROUP_PRIMARY_UID` and `TONENARI_GROUP_SECONDARY_UID`.
+prerequisites: five require `MIXRELAY_TEST_ENDPOINT_UID`, and the private-group
+test requires `MIXRELAY_GROUP_PRIMARY_UID` and `MIXRELAY_GROUP_SECONDARY_UID`.
 Those variables were not set. No device was selected implicitly to make these
 tests pass. The failures are retained as unverified live acceptance, not hidden
 by changing tests or reported as passing. Fresh installed-app playback remains

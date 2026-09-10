@@ -65,12 +65,12 @@ speedup is claimed or inferred from build times.
 ## Evidence, failures and cleanup
 
 Evidence directory:
-`/Volumes/Linear 1/test/tonenari/evidence/windows-transport-refactor-20260907`.
+`/Volumes/Linear 1/test/mixrelay/evidence/windows-transport-refactor-20260907`.
 
 - Build v10 compiled and passed tests, but failed Clippy on pointer alignment,
   narrowing casts and a float comparison. Its failure log is retained. Build v11
   passed after correction; v12 additionally uses distinct per-channel test signals.
-- Actual PCM test: `C:\ToneNariLab\windows-rust-bridge-audio-v10`, exit code 0.
+- Actual PCM test: `C:\MixRelayLab\windows-rust-bridge-audio-v10`, exit code 0.
 - Final engine SHA-256:
   `B4036C5326B48431C92D38C9124C7DC76CEB8F6E944D0013ADEF788E7A97FA56`.
 - Owned interactive test task removed after completion. Final read-only inspection

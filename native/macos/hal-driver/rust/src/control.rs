@@ -7,9 +7,9 @@ use crate::{
     abi::HostOps,
     control_session::{ControlSession, TickAction},
     inventory::{
-        tn_hal_core_control_connected, tn_hal_core_control_message, tn_hal_core_replacement_request,
+        mr_hal_core_control_connected, mr_hal_core_control_message, mr_hal_core_replacement_request,
     },
-    native::tn_hal_core_create_native,
+    native::mr_hal_core_create_native,
     registry::Registry,
 };
 
@@ -61,7 +61,7 @@ impl<B: Backend> Control<B> {
         // SAFETY: this owner retains the registry; the only control queue invokes
         // open and event delivery. The state borrow above has already ended.
         let accepted =
-            unsafe { tn_hal_core_control_connected(self.registry_pointer(), generation) };
+            unsafe { mr_hal_core_control_connected(self.registry_pointer(), generation) };
         if !self.session.borrow_mut().authorize(generation, accepted) {
             return;
         }
@@ -107,7 +107,7 @@ impl<B: Backend> Control<B> {
         // SAFETY: the registry is retained, both stack outputs are disjoint,
         // and this query runs only on the serial control queue.
         if unsafe {
-            tn_hal_core_replacement_request(
+            mr_hal_core_replacement_request(
                 self.registry_pointer(),
                 authority,
                 &raw mut endpoint,
@@ -131,7 +131,7 @@ impl<B: Backend> Control<B> {
         // SAFETY: the native event callback retains message for this call and
         // its process-lifetime owner retains registry. No RefCell guard survives.
         accepted
-            && unsafe { tn_hal_core_control_message(self.registry_pointer(), generation, message) }
+            && unsafe { mr_hal_core_control_message(self.registry_pointer(), generation, message) }
     }
 }
 
@@ -145,7 +145,7 @@ impl<B: Backend> Control<B> {
 /// `output` is null or the exclusively writable, process-lifetime COM registry
 /// slot. It must not overlap host operations or any already published owner.
 #[unsafe(no_mangle)]
-pub(crate) unsafe extern "C" fn tn_hal_control_initialize(
+pub(crate) unsafe extern "C" fn mr_hal_control_initialize(
     host: *const HostOps,
     output: *mut *mut Registry,
 ) -> bool {
@@ -160,7 +160,7 @@ pub(crate) unsafe extern "C" fn tn_hal_control_initialize(
         return false;
     };
     // SAFETY: create copies host operations and transfers unique registry ownership.
-    let registry = unsafe { tn_hal_core_create_native(ptr::from_ref(host)) };
+    let registry = unsafe { mr_hal_core_create_native(ptr::from_ref(host)) };
     if registry.is_null() {
         return false;
     }

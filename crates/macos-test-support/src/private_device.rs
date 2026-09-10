@@ -15,8 +15,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-const ENDPOINT_UID_ENV: &str = "TONENARI_TEST_ENDPOINT_UID";
-const PREFIX: &str = "io.tonenari.device-recovery-probe.";
+const ENDPOINT_UID_ENV: &str = "MIXRELAY_TEST_ENDPOINT_UID";
+const PREFIX: &str = "io.mixrelay.device-recovery-probe.";
 const GLOBAL: u32 = u32::from_be_bytes(*b"glob");
 const BAD_OBJECT: i32 = i32::from_be_bytes(*b"!obj");
 const BAD_SIZE: i32 = i32::from_be_bytes(*b"!siz");
@@ -297,14 +297,14 @@ mod tests {
         for value in ["", " ", " member", "member ", "member\n", "member\0"] {
             assert!(endpoint_uid(Ok(value.into())).is_err());
         }
-        let selected = "io.tonenari.audio.endpoint.12345678-1234-1234-1234-123456789abc";
+        let selected = "io.mixrelay.audio.endpoint.12345678-1234-1234-1234-123456789abc";
         assert_eq!(endpoint_uid(Ok(selected.into())).unwrap(), selected);
     }
 
     #[test]
     fn aggregate_description_is_private_and_contains_only_the_selected_endpoint() {
-        let member_uid = "io.tonenari.audio.endpoint.12345678-1234-1234-1234-123456789abc";
-        let description = description("io.tonenari.device-recovery-probe.contract", member_uid);
+        let member_uid = "io.mixrelay.audio.endpoint.12345678-1234-1234-1234-123456789abc";
+        let description = description("io.mixrelay.device-recovery-probe.contract", member_uid);
         assert_eq!(description.len(), 4);
         let private = description
             .get(CFString::new("private"))

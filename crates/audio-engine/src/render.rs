@@ -1,13 +1,13 @@
 use std::{collections::BTreeMap, fmt, sync::Arc};
 
-use thiserror::Error;
-use tonenari_audio_graph::{
+use mixrelay_audio_graph::{
     AUDIO_PORT_ID, AudioEndpoint, CompiledNode, ExecutionPlan, FROM_OS_PORT_ID, NodeConfig, NodeId,
     PortDirection, PortId, ProviderNodeConfig, RenderFormat, TO_OS_PORT_ID,
 };
-use tonenari_audio_io::VirtualEndpointId;
-use tonenari_audio_io::process::{ProcessCycle, ProcessReport, TransferOutcome};
-use tonenari_audio_recorder::{RecorderRegistry, RecorderTap};
+use mixrelay_audio_io::VirtualEndpointId;
+use mixrelay_audio_io::process::{ProcessCycle, ProcessReport, TransferOutcome};
+use mixrelay_audio_recorder::{RecorderRegistry, RecorderTap};
+use thiserror::Error;
 
 /// Stable transport identity for a recorder's channel geometry. An inactive
 /// replacement can coexist with the previous plan until publication or rollback.
@@ -260,7 +260,7 @@ impl RenderPlan {
 
 pub struct BlockProcessor {
     recorders: Box<[RecorderTap]>,
-    cycle_tracker: tonenari_audio_io::process::CycleTracker,
+    cycle_tracker: mixrelay_audio_io::process::CycleTracker,
     plan: Arc<RenderPlan>,
     arena: Box<[f32]>,
     source_buffers: Box<[Box<[f32]>]>,
@@ -322,7 +322,7 @@ impl BlockProcessor {
         let device_bus_state = vec![0.0; plan.device_bus_samples].into_boxed_slice();
         Self {
             recorders: Box::new([]),
-            cycle_tracker: tonenari_audio_io::process::CycleTracker::default(),
+            cycle_tracker: mixrelay_audio_io::process::CycleTracker::default(),
             plan,
             arena,
             source_buffers,
@@ -489,7 +489,7 @@ impl BlockProcessor {
         self.cycle_tracker
             .accept(
                 cycle,
-                tonenari_audio_io::session::SessionFormat {
+                mixrelay_audio_io::session::SessionFormat {
                     sample_rate: self.plan.format.sample_rate,
                     block_frames: self.plan.format.block_frames,
                 },
@@ -514,7 +514,7 @@ impl BlockProcessor {
             destination[sample_count(transfer.frames as usize, binding.channels)..samples]
                 .fill(0.0);
             report.input_starvations += u64::from(
-                transfer.activity == tonenari_audio_io::process::InputActivity::Active
+                transfer.activity == mixrelay_audio_io::process::InputActivity::Active
                     && transfer.frames < frames,
             );
             report.discontinuities += u64::from(transfer.discontinuity);
@@ -674,7 +674,7 @@ pub enum ProcessBlockError {
     #[error("native adapter reported more frames than requested")]
     InvalidTransfer,
     #[error("invalid audio process cycle: {0}")]
-    InvalidCycle(tonenari_audio_io::process::CycleError),
+    InvalidCycle(mixrelay_audio_io::process::CycleError),
     #[error("frame count {found} exceeds prepared maximum {maximum}")]
     FrameCountExceeded { maximum: u32, found: u32 },
     #[error("expected {expected} source buffers, found {found}")]
@@ -1145,7 +1145,7 @@ fn lower_builtin_processor(
 
 fn lower_compressor(
     node: &CompiledNode,
-    config: &tonenari_audio_graph::CompressorConfig,
+    config: &mixrelay_audio_graph::CompressorConfig,
     context: &LoweringContext<'_>,
     state: &mut LoweringState<'_>,
 ) -> Result<LoweredKernels, RenderPlanError> {
@@ -1203,7 +1203,7 @@ fn lower_device_bus(
 
 fn lower_virtual_endpoint(
     node: &CompiledNode,
-    config: &tonenari_audio_graph::VirtualEndpointSpec,
+    config: &mixrelay_audio_graph::VirtualEndpointSpec,
     context: &LoweringContext<'_>,
 ) -> Result<LoweredKernels, RenderPlanError> {
     let mut kernels = LoweredKernels::default();
@@ -1693,7 +1693,7 @@ fn apply_limiter(context: DynamicKernelContext<'_>, parameters: LimiterKernelPar
 mod tests {
     mod recorder;
     use super::*;
-    use tonenari_audio_graph::{
+    use mixrelay_audio_graph::{
         ApplicationCaptureRequest, ApplicationSelector, AudioDeviceInputConfig,
         AudioDeviceOutputConfig, BuiltInNodeResolver, ChannelLayout, ChannelMapping, ChannelRoute,
         CompileContext, CompileLimits, CompiledPort, DeviceSelector, EdgeId, EdgeSpec, GainConfig,
@@ -1750,7 +1750,7 @@ mod tests {
     struct CallbackIo {
         read_frames: u32,
         discontinuity: bool,
-        activity: tonenari_audio_io::process::InputActivity,
+        activity: mixrelay_audio_io::process::InputActivity,
         write_frames: u32,
         value: f32,
         output: [f32; 8],
@@ -1797,7 +1797,7 @@ mod tests {
         let io = CallbackIo {
             read_frames: 4,
             discontinuity: false,
-            activity: tonenari_audio_io::process::InputActivity::Active,
+            activity: mixrelay_audio_io::process::InputActivity::Active,
             write_frames: 4,
             value: 0.0,
             output: [99.0; 8],
@@ -1806,8 +1806,8 @@ mod tests {
             observed: None,
         };
         let cycle = ProcessCycle {
-            clock: tonenari_audio_io::process::ClockDomain {
-                authority: tonenari_audio_io::session::ClockAuthority::Device,
+            clock: mixrelay_audio_io::process::ClockDomain {
+                authority: mixrelay_audio_io::session::ClockAuthority::Device,
                 id: 1,
                 epoch: 1,
             },
@@ -1861,7 +1861,7 @@ mod tests {
 
     #[test]
     fn only_explicit_active_demand_counts_missing_input_over_375_cycles() {
-        use tonenari_audio_io::process::InputActivity;
+        use mixrelay_audio_io::process::InputActivity;
         for (activity, read_frames, expected) in [
             (InputActivity::Unknown, 0, 0),
             (InputActivity::Inactive, 0, 0),
@@ -2016,7 +2016,7 @@ mod tests {
             id,
             NodeConfig::ApplicationCapture(ApplicationCaptureRequest {
                 selector: ApplicationSelector::BundleId {
-                    bundle_id: format!("io.tonenari.{id}"),
+                    bundle_id: format!("io.mixrelay.{id}"),
                     include_descendants: true,
                 },
                 stream: stereo_stream(),
@@ -2317,7 +2317,7 @@ mod tests {
                 node(
                     "provider",
                     NodeConfig::Provider(ProviderNodeConfig {
-                        type_id: tonenari_audio_graph::NodeTypeId::from("test:double"),
+                        type_id: mixrelay_audio_graph::NodeTypeId::from("test:double"),
                         parameters: serde_json::json!({}),
                     }),
                 ),
@@ -2755,7 +2755,7 @@ mod tests {
     #[test]
     fn rejects_unregistered_or_ambiguous_provider_kernels() {
         let provider = NodeConfig::Provider(ProviderNodeConfig {
-            type_id: "io.tonenari.test".into(),
+            type_id: "io.mixrelay.test".into(),
             parameters: serde_json::Value::Null,
         });
         assert_eq!(
@@ -2886,7 +2886,7 @@ mod tests {
                 id,
                 NodeConfig::ApplicationCapture(ApplicationCaptureRequest {
                     selector: ApplicationSelector::BundleId {
-                        bundle_id: format!("io.tonenari.{id}"),
+                        bundle_id: format!("io.mixrelay.{id}"),
                         include_descendants: true,
                     },
                     stream: StreamSpec {

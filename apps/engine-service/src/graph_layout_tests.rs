@@ -3,11 +3,11 @@ use crate::{
     ControlBackend, GraphDocument, GraphResourceBackend, HostAudioBackendError,
     default_duplex_document,
 };
-use std::{fs, sync::Arc};
-use tonenari_control_protocol::{
+use mixrelay_control_protocol::{
     ErrorCode, GraphCatalogAction, GraphLayout, GraphLayoutRequest, GraphNodePosition,
     GraphNodeSize, GraphViewport,
 };
+use std::{fs, sync::Arc};
 
 fn layout(x: f64) -> GraphLayout {
     GraphLayout {

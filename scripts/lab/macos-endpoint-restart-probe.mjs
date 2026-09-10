@@ -11,14 +11,14 @@ const [engine, inspect, evidence, approval] = process.argv.slice(2);
 assert.equal(approval, '--restart-installed-service');
 assert.ok([engine, inspect, evidence].every(isAbsolute));
 const base = 'http://127.0.0.1:19341/api/v1';
-const target = 'system/io.tonenari.audio.engine';
-const preferences = join(process.env.HOME, 'Library/Application Support/ToneNari/virtual-endpoint.json');
+const target = 'system/io.mixrelay.audio.engine';
+const preferences = join(process.env.HOME, 'Library/Application Support/MixRelay/virtual-endpoint.json');
 const savedPreferences = existsSync(preferences) ? readFileSync(preferences) : undefined;
 let restarts = 0;
 function servicePid() {
   const state = execFileSync('/bin/launchctl', ['print', target], { encoding: 'utf8' });
   assert.ok(state.includes(`program = ${engine}\n`), 'Unexpected installed engine executable');
-  assert.doesNotMatch(state, /TONENARI_CONFIG_DIR\s*=>/, 'Nonstandard service config; refusing live test');
+  assert.doesNotMatch(state, /MIXRELAY_CONFIG_DIR\s*=>/, 'Nonstandard service config; refusing live test');
   const pid = Number(state.match(/\n\s*pid = (\d+)/)?.[1]);
   assert.ok(Number.isSafeInteger(pid) && pid > 1);
   const owner = execFileSync('/bin/ps', ['-p', String(pid), '-o', 'uid='], { encoding: 'utf8' }).trim();
@@ -82,8 +82,8 @@ writeFileSync(join(evidence, 'original-graph.json'), JSON.stringify(original, nu
 if (savedPreferences) writeFileSync(join(evidence, 'original-preferences.json'), savedPreferences, { flag: 'wx', mode: 0o600 });
 try {
   await restart(); // Load the newly built binary before exercising its contract.
-  const node = { id: 'default-virtual-io', type: 'virtual_endpoint', label: 'ToneNari 복원 64·16', config: {
-    id: 'default-virtual-io', displayName: 'ToneNari 복원 64·16',
+  const node = { id: 'default-virtual-io', type: 'virtual_endpoint', label: 'MixRelay 복원 64·16', config: {
+    id: 'default-virtual-io', displayName: 'MixRelay 복원 64·16',
     render: { channels: 64, channelLayout: 'discrete' }, capture: { channels: 16, channelLayout: 'discrete' },
     supportedSampleRates: [48000], defaultSampleRate: 48000 } };
   await apply([node]); await checkNative(node.label, 64, 16, 'applied');

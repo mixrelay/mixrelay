@@ -13,17 +13,17 @@ test('bridge overlay preserves upstream inputs and fails closed on changed ancho
 });
 test('bridge hooks preserve nonselected pins, protected audio policy and frame alignment',()=>{
   for (const marker of ['eSpeakerDevice','IsSystemRenderPin(Pin_)','eMicArrayDevice1',
-    'IsSystemCapturePin(Pin_)','remainder * 1000','TnTransportReleaseStream(m_bCapture)',
-    'if (drmRights->CopyProtect) return STATUS_NOT_SUPPORTED','m_tnProtected, 0, 0'])
+    'IsSystemCapturePin(Pin_)','remainder * 1000','MrTransportReleaseStream(m_bCapture)',
+    'if (drmRights->CopyProtect) return STATUS_NOT_SUPPORTED','m_mrProtected, 0, 0'])
     assert.ok(overlay.includes(marker),marker);
   assert.ok(overlay.includes('#define SPEAKER_MAX_INPUT_SYSTEM_STREAMS            1'));
   assert.ok(overlay.includes('#define MICARRAY_MAX_INPUT_STREAMS              1'));
-  const bridge=read('../../native/windows/sysvad-bridge/TnBridge.cpp');
+  const bridge=read('../../native/windows/sysvad-bridge/MrBridge.cpp');
   assert.doesNotMatch(bridge,/wave->nSamplesPerSec != (44100|48000|96000)/);
-  assert.ok(bridge.includes('TnTransportReserveStream(capture, wave->nChannels, wave->nSamplesPerSec)'));
+  assert.ok(bridge.includes('MrTransportReserveStream(capture, wave->nChannels, wave->nSamplesPerSec)'));
 });
 test('native PCM conversion has no floating-point arithmetic or allocation',()=>{
-  const pcm=read('../../native/windows/virtual-audio-driver/include/ToneNariPcm.h')
+  const pcm=read('../../native/windows/virtual-audio-driver/include/MixRelayPcm.h')
     .replace(/\/\/[^\n]*/g,'');
   assert.doesNotMatch(pcm,/\b(float|double|new|malloc|ExAllocatePool2)\b/);
   assert.ok(pcm.includes('exponent == 255 && fraction'));
@@ -31,7 +31,7 @@ test('native PCM conversion has no floating-point arithmetic or allocation',()=>
 });
 test('VM bridge install and audio probe cannot replace baseline or use default hardware',()=>{
   const install=read('./guest-windows-sysvad-bridge-install.cmd');
-  assert.ok(install.includes('Root\\tonenari_SysvadBridge'));
+  assert.ok(install.includes('Root\\mixrelay_SysvadBridge'));
   assert.doesNotMatch(install,/devcon\.exe (update|remove)|bcdedit|Set-MpPreference|ExecutionPolicy/);
   const audio=read('./guest-windows-sysvad-bridge-audio.cmd');
   assert.ok(audio.includes('DEVPKEY_Device_Parent'));
@@ -52,7 +52,7 @@ test('bridge lifecycle test and cleanup remain bounded and identity-scoped',()=>
   assert.ok(probe.includes('std::fabs(left+2*right)<0.001f'));
   const cleanup=read('./cleanup-windows-sysvad-bridge-audio-task.cmd');
   for (const marker of ['712A936E-9D91-4455-A8A9-A1F65EB60719',
-    'ToneNariLabSysvadBridgeAudio','sysvad-bridge-audio-v11\\exit-code',
+    'MixRelayLabSysvadBridgeAudio','sysvad-bridge-audio-v11\\exit-code',
     'SecurityIdentifier',"$t.State -eq 'Running'",'$owner -ne $expected',
     'Task removal not confirmed']) assert.ok(cleanup.includes(marker),marker);
   assert.doesNotMatch(cleanup,/devcon|pnputil|Stop-Process|bcdedit/);

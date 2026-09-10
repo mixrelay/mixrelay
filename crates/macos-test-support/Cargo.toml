@@ -1,5 +1,5 @@
 [package]
-name = "tonenari-macos-test-support"
+name = "mixrelay-macos-test-support"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -3,9 +3,9 @@ use crate::{
     Encoding, RecorderAction, RecorderRequest, RecorderState, RecorderStatus, RecorderTap,
     transport::{PACKET_FRAMES, PACKETS, Transport},
 };
+use mixrelay_test_support::FixtureDir;
 use parking_lot::Mutex;
 use std::sync::Arc;
-use tonenari_test_support::FixtureDir;
 
 #[test]
 fn split_take_keeps_original_path_and_total_frames_across_pause_resume_and_stop() {

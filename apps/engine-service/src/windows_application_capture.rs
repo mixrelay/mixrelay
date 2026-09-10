@@ -3,6 +3,12 @@
 use super::{
     CaptureWorkerConfig, MAX_ENDPOINT_CHANNELS, ProcessLoopbackCapture, run_process_capture,
 };
+use mixrelay_audio_graph::{ApplicationCaptureRequest, ApplicationSelector, SourcePlaybackPolicy};
+use mixrelay_audio_io::process::TransferOutcome;
+use mixrelay_audio_io::{
+    session::SessionIssue,
+    windows::process_identity::{ProcessIdentity, ResolutionError, resolve_executable},
+};
 use std::{
     collections::BTreeMap,
     path::Path,
@@ -13,19 +19,13 @@ use std::{
     thread,
     time::Duration,
 };
-use tonenari_audio_graph::{ApplicationCaptureRequest, ApplicationSelector, SourcePlaybackPolicy};
-use tonenari_audio_io::process::TransferOutcome;
-use tonenari_audio_io::{
-    session::SessionIssue,
-    windows::process_identity::{ProcessIdentity, ResolutionError, resolve_executable},
-};
 
 pub(super) const ACTIVE: u32 = 0;
 pub(super) const UNAVAILABLE: u32 = 1;
 const AMBIGUOUS: u32 = 2;
 pub(super) const fn unknown_transfer() -> TransferOutcome {
     TransferOutcome {
-        activity: tonenari_audio_io::process::InputActivity::Unknown,
+        activity: mixrelay_audio_io::process::InputActivity::Unknown,
         ..TransferOutcome::complete(0)
     }
 }
@@ -222,13 +222,13 @@ mod tests {
 
     struct Fixture {
         path: std::path::PathBuf,
-        _directory: tonenari_test_support::FixtureDir,
+        _directory: mixrelay_test_support::FixtureDir,
         children: Vec<Child>,
     }
     impl Fixture {
         fn new() -> Self {
-            let directory = tonenari_test_support::FixtureDir::new("app-identity").unwrap();
-            let path = directory.join("ToneNariProcessFixture.exe");
+            let directory = mixrelay_test_support::FixtureDir::new("app-identity").unwrap();
+            let path = directory.join("MixRelayProcessFixture.exe");
             std::fs::copy(
                 Path::new(&std::env::var("SystemRoot").unwrap()).join("System32\\cmd.exe"),
                 &path,
@@ -391,7 +391,7 @@ mod tests {
     #[ignore = "explicit Windows process-loopback acceptance; captures only silent test-owned cmd copies"]
     fn native_application_capture_relaunch_and_ambiguity_without_graph_reapply() {
         assert_eq!(
-            std::env::var("TONENARI_LAB_APPLICATION_TEST").as_deref(),
+            std::env::var("MIXRELAY_LAB_APPLICATION_TEST").as_deref(),
             Ok("1")
         );
         let mut fixture = Fixture::new();

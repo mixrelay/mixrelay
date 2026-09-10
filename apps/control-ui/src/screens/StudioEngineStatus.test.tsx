@@ -2,9 +2,9 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { describe, expect, it, vi } from 'vitest';
 import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
-import type { AudioSessionStatus, ToneNariStatus } from '../core/control-port/types';
+import type { AudioSessionStatus, MixRelayStatus } from '../core/control-port/types';
 import { i18n } from '../core/i18n';
-import { ToneNariProvider } from '../core/theme/ToneNariProvider';
+import { MixRelayProvider } from '../core/theme/MixRelayProvider';
 import { StudioScreen } from './StudioScreen';
 
 vi.mock('../features/routing-workspace/RoutingWorkspace', () => ({ RoutingWorkspace: () => null }));
@@ -32,7 +32,7 @@ const session: AudioSessionStatus = {
     driftCorrection: false,
   },
 };
-const healthy: ToneNariStatus = {
+const healthy: MixRelayStatus = {
   protocolVersion: 1,
   driverState: 'ready',
   sampleRate: 48000,
@@ -41,7 +41,7 @@ const healthy: ToneNariStatus = {
   overruns: 0,
   audioSession: session,
 };
-type Case = [string, ToneNariStatus | null, string, string];
+type Case = [string, MixRelayStatus | null, string, string];
 const cases: Case[] = [
   ['healthy', healthy, 'positive', 'routing.nodeStatus.running'],
   [
@@ -129,7 +129,7 @@ const cases: Case[] = [
   ],
 ];
 
-function fixture(status: ToneNariStatus | null) {
+function fixture(status: MixRelayStatus | null) {
   const port = new StorybookMockControlPort({
     graph: { schemaVersion: 2, revision: 1, nodes: [], edges: [] },
     graphStatus: { protocolVersion: 1, activeRevision: 1, submittedRevision: 1 },
@@ -137,11 +137,11 @@ function fixture(status: ToneNariStatus | null) {
   });
   if (!status) vi.spyOn(port, 'getStatus').mockRejectedValue(new Error('offline'));
   return render(
-    <ToneNariProvider>
+    <MixRelayProvider>
       <I18nextProvider i18n={i18n}>
         <StudioScreen controlPort={port} />
       </I18nextProvider>
-    </ToneNariProvider>,
+    </MixRelayProvider>,
   );
 }
 

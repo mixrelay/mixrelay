@@ -8,8 +8,8 @@ timer authority rather than qualified native pacing. This did not establish whic
 native boundary failed, so it was not recorded as a successful clock deployment.
 
 Source inspection then found a reproducible lifecycle defect in
-`ToneNariHAL_PerformDeviceConfigurationChange(kDeviceConfigurationChangeChannels)`:
-it reinitialized `TNHALIOContext`, clearing its clock rate, running state and epoch,
+`MixRelayHAL_PerformDeviceConfigurationChange(kDeviceConfigurationChangeChannels)`:
+it reinitialized `MRHALIOContext`, clearing its clock rate, running state and epoch,
 then bound the new transport. Existing CoreAudio clients could still be counted in
 `gDevice_IOIsRunning`. Their next `StartIO` need not enter the first-client branch,
 so the new mapping's idle clock never accepted native demand credits.
@@ -45,7 +45,7 @@ no installed device is changed.
   and zero demand credit from idle writes.
 - Final full native script: pass, ASan/UBSan, existing isolated-native 100%
   line/function gates and universal arm64 / x86_64 HAL build.
-- `cargo clippy -p tonenari-engine-service --all-targets -- -D warnings`: pass.
+- `cargo clippy -p mixrelay-engine-service --all-targets -- -D warnings`: pass.
 
 The deterministic comparison establishes the lifecycle defect and its correction,
 not live latency, jitter or CPU improvement. A root-coordinated reinstall and

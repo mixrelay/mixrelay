@@ -1,20 +1,20 @@
 //! Application intent survives registry stream replacement. Discovery and native
 //! ownership changes run off RT; callback activation only swaps existing slots.
 use super::{MAX_ENDPOINT_CHANNELS, native::NativeStream, sanitize_node_name};
+use mixrelay_audio_graph::{ApplicationCaptureRequest, ApplicationSelector, SourcePlaybackPolicy};
+use mixrelay_audio_io::{
+    linux::{
+        PipeWireTarget,
+        process_identity::{ProcessIdentity, process_identity, same_process},
+    },
+    process::{InputActivity, ProcessReport, TransferOutcome},
+};
 use std::{
     collections::BTreeMap,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-};
-use tonenari_audio_graph::{ApplicationCaptureRequest, ApplicationSelector, SourcePlaybackPolicy};
-use tonenari_audio_io::{
-    linux::{
-        PipeWireTarget,
-        process_identity::{ProcessIdentity, process_identity, same_process},
-    },
-    process::{InputActivity, ProcessReport, TransferOutcome},
 };
 
 #[derive(Default)]
@@ -36,7 +36,7 @@ struct WatchEntry {
     pinned_process: Option<ProcessIdentity>,
     serials: Vec<String>,
     healthy: Arc<AtomicBool>,
-    format: tonenari_audio_graph::RenderFormat,
+    format: mixrelay_audio_graph::RenderFormat,
 }
 
 #[derive(Clone)]
@@ -66,8 +66,8 @@ impl CaptureSet {
     pub(super) fn contains(&self, node_id: &str) -> bool {
         self.nodes.contains_key(node_id)
     }
-    pub(super) fn state(&self) -> tonenari_engine_service::session::ApplicationRuntimeState {
-        use tonenari_engine_service::session::ApplicationRuntimeState;
+    pub(super) fn state(&self) -> mixrelay_engine_service::session::ApplicationRuntimeState {
+        use mixrelay_engine_service::session::ApplicationRuntimeState;
         if self
             .nodes
             .values()
@@ -89,7 +89,7 @@ impl CaptureSet {
     pub(super) fn open_format(
         requests: &[(String, ApplicationCaptureRequest)],
         generation: u64,
-        format: tonenari_audio_graph::RenderFormat,
+        format: mixrelay_audio_graph::RenderFormat,
     ) -> Result<(Self, CaptureWatch), String> {
         let inventory = if requests
             .iter()
@@ -97,7 +97,7 @@ impl CaptureSet {
         {
             Vec::new()
         } else {
-            tonenari_audio_io::linux::targets().map_err(|error| error.to_string())?
+            mixrelay_audio_io::linux::targets().map_err(|error| error.to_string())?
         };
         Self::open_inventory_format(requests, generation, &inventory, format)
     }
@@ -115,7 +115,7 @@ impl CaptureSet {
         requests: &[(String, ApplicationCaptureRequest)],
         generation: u64,
         inventory: &[PipeWireTarget],
-        format: tonenari_audio_graph::RenderFormat,
+        format: mixrelay_audio_graph::RenderFormat,
     ) -> Result<(Self, CaptureWatch), String> {
         let mut set = Self {
             generation,
@@ -247,7 +247,7 @@ impl CaptureWatch {
         {
             return Ok(None);
         }
-        let inventory = tonenari_audio_io::linux::targets().map_err(|error| error.to_string())?;
+        let inventory = mixrelay_audio_io::linux::targets().map_err(|error| error.to_string())?;
         let mut updates = CaptureSet {
             generation: self.generation,
             ..CaptureSet::default()
@@ -314,7 +314,7 @@ fn prepare(
     request: &ApplicationCaptureRequest,
     targets: &[&PipeWireTarget],
     healthy: Arc<AtomicBool>,
-    format: tonenari_audio_graph::RenderFormat,
+    format: mixrelay_audio_graph::RenderFormat,
 ) -> Result<Capture, String> {
     let taps = targets
         .iter()

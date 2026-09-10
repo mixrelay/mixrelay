@@ -1,6 +1,6 @@
 //! External adoption shares the accepted format, without writing the native rate back.
 use super::*;
-use tonenari_audio_io::session::AudioBackendKind;
+use mixrelay_audio_io::session::AudioBackendKind;
 
 static FIXTURE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 static RATE: AtomicU32 = AtomicU32::new(44_100);
@@ -49,7 +49,7 @@ fn external_adoption_saves_shared_format_without_calling_native_setter() {
     let _fixture = FIXTURE.lock().unwrap();
     RATE.store(44_100, Ordering::Release);
     SETS.store(0, Ordering::Release);
-    let directory = tonenari_test_support::FixtureDir::new("rate-preferences").unwrap();
+    let directory = mixrelay_test_support::FixtureDir::new("rate-preferences").unwrap();
     let path = directory.join("session.json");
     let mut status = status();
     status.preferences = Some(Ok(SessionPreferences::for_test(

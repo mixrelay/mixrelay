@@ -2,12 +2,12 @@
 use super::buffer_control::{self, NativeBufferControl};
 use super::buffer_transaction::{BufferFailure, BufferPlan};
 use super::{backend_error, bridge::DeviceBridge, device::Device};
+use mixrelay_audio_io::HostAudioBackendError;
+use mixrelay_engine_service::PreparedGraphFormat;
 use std::sync::{
     Arc,
     atomic::{AtomicU32, Ordering},
 };
-use tonenari_audio_io::HostAudioBackendError;
-use tonenari_engine_service::PreparedGraphFormat;
 
 /// Last committed client format, shared with resource creation/reconnection.
 /// Writers are serialized by the format reservation, readers by the cache lock.
@@ -22,8 +22,8 @@ impl PublishedFormat {
             buffer_frames: AtomicU32::new(buffer_frames),
         }
     }
-    pub(super) fn current(&self) -> tonenari_audio_graph::RenderFormat {
-        tonenari_audio_graph::RenderFormat {
+    pub(super) fn current(&self) -> mixrelay_audio_graph::RenderFormat {
+        mixrelay_audio_graph::RenderFormat {
             sample_rate: self.rate.load(Ordering::Acquire),
             block_frames: self.buffer_frames.load(Ordering::Acquire),
         }
@@ -89,8 +89,8 @@ impl PreparedDeviceFormat {
     pub(super) fn prepare(
         owners: impl Iterator<Item = Arc<Device>>,
         published: Arc<PublishedFormat>,
-        current: tonenari_audio_graph::RenderFormat,
-        requested: tonenari_audio_graph::RenderFormat,
+        current: mixrelay_audio_graph::RenderFormat,
+        requested: mixrelay_audio_graph::RenderFormat,
         reservation: super::handoff::FormatReservation,
     ) -> Result<Self, HostAudioBackendError> {
         let mut devices = Vec::new();

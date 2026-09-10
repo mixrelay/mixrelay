@@ -28,7 +28,7 @@ Source/test details: `2026-09-07-native-state-checkpoint.md`,
 
 ### Actual Apple AU checkpoint and restoration
 
-Root independently ran `cargo run -p tonenari-engine-service --example native_au_checkpoint
+Root independently ran `cargo run -p mixrelay-engine-service --example native_au_checkpoint
 -- --run` successfully. The opt-in example only permits Apple's in-box AUPeakLimiter and
 uses a newly owned temporary catalog, isolated native workers, and no audio devices, HTTP
 server, or editor windows. The fixture changes real parameter 0 and compares native
@@ -63,7 +63,7 @@ observation: Apple's generic UI is deliberately not exposed as a vendor editor h
 ### Windows ARM64 v12 and final v15
 
 Evidence root:
-`/Volumes/Linear 1/test/tonenari/evidence/native-device-parity-20260907/windows-app-metadata-jF1k98/`.
+`/Volumes/Linear 1/test/mixrelay/evidence/native-device-parity-20260907/windows-app-metadata-jF1k98/`.
 Root inspected `v12-output.log`, `v12-exit-code` (0), and independently rehashed the manifest.
 
 - Seven common/native packages build and strict Clippy pass; 193 tests pass, 8 opt-in tests
@@ -133,7 +133,7 @@ snapshots, and independently verified archive/log SHA-256 under the same lab evi
 The existing launch daemon used the workspace development executable. No HAL installation,
 coreaudiod restart, default audio change, or service configuration change was performed.
 
-- Built `tonenari-engine-service`, backed up its prior binary and exact graph/catalog, then
+- Built `mixrelay-engine-service`, backed up its prior binary and exact graph/catalog, then
   sent TERM only to the verified owned service PID 40420. Its existing launch daemon restarted
   it as PID 76241 with last exit code 0.
 - Deployed binary SHA-256:

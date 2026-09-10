@@ -1,6 +1,6 @@
 use super::Binding;
+use mixrelay_macos_transport::audio_buffer::{self, AudioBuffer, AudioBufferList};
 use std::{ffi::c_void, marker::PhantomData, ops::Range, ptr, slice};
-use tonenari_macos_transport::audio_buffer::{self, AudioBuffer, AudioBufferList};
 
 /// Callback-scoped access to native PCM. Only descriptor references are retained;
 /// each operation borrows one PCM extent and releases it before the next extent.

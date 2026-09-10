@@ -25,7 +25,7 @@ native audio paths are qualified. See the [feature matrix](../feature-parity-mat
 
 The old running service returned HTTP 404 for `/api/v1/graphs`. Before replacement,
 the exact live graph (one duplex 2/2 endpoint and two explicit channel cables) was
-backed up, together with the previous executable. Only the owned ToneNari engine
+backed up, together with the previous executable. Only the owned MixRelay engine
 process was terminated; launchd restarted it with the rebuilt executable. The HAL
 driver, coreaudiod, host default devices, and hardware rates were not changed.
 
@@ -54,6 +54,6 @@ dropouts. Native clock/demand integration remains unimplemented; the interpretat
 does not turn the synchronization gate into a pass.
 
 Evidence and recoverable backups:
-`/Volumes/Linear 1/test/tonenari/evidence/native-device-parity-20260907/macos-integration/`.
+`/Volumes/Linear 1/test/mixrelay/evidence/native-device-parity-20260907/macos-integration/`.
 The graph backup, restore request, post-restart catalog/status, and old executable
 are retained there. No source staging, commit, or branch operation was performed.

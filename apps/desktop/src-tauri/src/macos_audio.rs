@@ -9,16 +9,16 @@ use std::{
     time::Duration,
 };
 
-use tauri::State;
-use tonenari_audio_graph::{ApplicationCaptureRequest, ApplicationSelector, SourcePlaybackPolicy};
-use tonenari_audio_io::{
+use mixrelay_audio_graph::{ApplicationCaptureRequest, ApplicationSelector, SourcePlaybackPolicy};
+use mixrelay_audio_io::{
     ApplicationCaptureBackend, ApplicationCaptureCapabilities, ApplicationCaptureHealth,
     ApplicationCaptureSession, ApplicationSelectorKind, AudioDeviceDescriptor,
     CapturableApplication, ChannelLayout, HostAudioBackendError, ResolvedApplicationCapture,
     StreamSpec,
 };
+use tauri::State;
 // Keep the crate exporting the native capture entry points linked into the desktop.
-use tonenari_process_tap as _;
+use mixrelay_process_tap as _;
 
 #[path = "macos_audio/capture_reader.rs"]
 mod capture_reader;
@@ -26,7 +26,7 @@ mod capture_reader;
 mod capture_transaction;
 #[path = "macos_audio/clock_pump.rs"]
 mod clock_pump;
-#[cfg(all(test, tonenari_application_clock_fixture))]
+#[cfg(all(test, mixrelay_application_clock_fixture))]
 #[path = "macos_audio/live_clock_tests.rs"]
 mod live_clock_tests;
 
@@ -100,52 +100,52 @@ struct NativeStats {
 }
 
 unsafe extern "C" {
-    fn tn_process_tap_visit_applications(
+    fn mr_process_tap_visit_applications(
         visitor: Option<
             unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char, *const c_char, i32),
         >,
         context: *mut c_void,
     ) -> NativeError;
-    fn tn_process_tap_create(
+    fn mr_process_tap_create(
         config: *const NativeConfig,
         error: *mut NativeError,
     ) -> *mut NativeProcessTapSession;
-    fn tn_process_tap_start(session: *mut NativeProcessTapSession) -> NativeError;
-    fn tn_process_tap_refresh_format(session: *mut NativeProcessTapSession) -> NativeError;
-    fn tn_process_tap_destroy(session: *mut NativeProcessTapSession);
-    fn tn_process_tap_read(
+    fn mr_process_tap_start(session: *mut NativeProcessTapSession) -> NativeError;
+    fn mr_process_tap_refresh_format(session: *mut NativeProcessTapSession) -> NativeError;
+    fn mr_process_tap_destroy(session: *mut NativeProcessTapSession);
+    fn mr_process_tap_read(
         session: *mut NativeProcessTapSession,
         destination: *mut f32,
         maximum_frames: usize,
     ) -> usize;
-    fn tn_process_tap_stats(session: *const NativeProcessTapSession) -> NativeStats;
-    fn tn_process_tap_take_peaks(
+    fn mr_process_tap_stats(session: *const NativeProcessTapSession) -> NativeStats;
+    fn mr_process_tap_take_peaks(
         session: *mut NativeProcessTapSession,
         destination: *mut f32,
         maximum_channels: usize,
     ) -> usize;
-    fn tn_application_source_transport_connect(
+    fn mr_application_source_transport_connect(
         source_id: *const c_char,
         capacity_frames: u32,
         channels: u32,
         error: *mut NativeTransportError,
     ) -> *mut NativeApplicationSourceTransport;
-    fn tn_application_source_transport_write(
+    fn mr_application_source_transport_write(
         transport: *mut NativeApplicationSourceTransport,
         interleaved_samples: *const f32,
         frame_count: u32,
     ) -> bool;
-    fn tn_application_source_transport_destroy(transport: *mut NativeApplicationSourceTransport);
-    fn tn_application_source_transport_clock(
+    fn mr_application_source_transport_destroy(transport: *mut NativeApplicationSourceTransport);
+    fn mr_application_source_transport_clock(
         transport: *mut NativeApplicationSourceTransport,
         snapshot: *mut NativeClockSnapshot,
     ) -> bool;
-    fn tn_application_source_transport_reset(
+    fn mr_application_source_transport_reset(
         transport: *mut NativeApplicationSourceTransport,
         format_word: u64,
         native_sample_rate: u32,
     ) -> bool;
-    fn tn_application_source_transport_publish_native(
+    fn mr_application_source_transport_publish_native(
         transport: *mut NativeApplicationSourceTransport,
         native_frames: u64,
         running: bool,
@@ -229,19 +229,19 @@ impl CaptureProbeSession {
         };
         let mut error = NativeError::new(NATIVE_OK);
         // SAFETY: `config` and its C string remain alive for the synchronous creation call.
-        let native = unsafe { tn_process_tap_create(&raw const config, &raw mut error) };
+        let native = unsafe { mr_process_tap_create(&raw const config, &raw mut error) };
         let native = NonNull::new(native).ok_or(CaptureProbeError(error))?;
         // SAFETY: `native` was returned as an owned, initialized session.
-        let start_error = unsafe { tn_process_tap_start(native.as_ptr()) };
+        let start_error = unsafe { mr_process_tap_start(native.as_ptr()) };
         if start_error.code != NATIVE_OK {
             // SAFETY: this path still owns the session and no Rust alias can observe it.
-            unsafe { tn_process_tap_destroy(native.as_ptr()) };
+            unsafe { mr_process_tap_destroy(native.as_ptr()) };
             return Err(CaptureProbeError(start_error));
         }
-        let stats: CaptureProbeStats = unsafe { tn_process_tap_stats(native.as_ptr()) }.into();
+        let stats: CaptureProbeStats = unsafe { mr_process_tap_stats(native.as_ptr()) }.into();
         let Ok(channels) = u16::try_from(stats.channels) else {
             // SAFETY: no Arc/session escaped; destroy consumes the native owner.
-            unsafe { tn_process_tap_destroy(native.as_ptr()) };
+            unsafe { mr_process_tap_destroy(native.as_ptr()) };
             return Err(CaptureProbeError(NativeError::new(NATIVE_INVALID_ARGUMENT)));
         };
         let channel_layout = match channels {
@@ -266,14 +266,14 @@ impl CaptureProbeSession {
 
     fn stats(&self) -> CaptureProbeStats {
         // SAFETY: the session remains owned for the duration of this call.
-        unsafe { tn_process_tap_stats(self.native.as_ptr()) }.into()
+        unsafe { mr_process_tap_stats(self.native.as_ptr()) }.into()
     }
 
     fn take_native_peaks(&self, channel_count: usize) -> Vec<f32> {
         let mut peaks = [0.0_f32; MAXIMUM_METER_CHANNELS];
         // SAFETY: the destination is writable for the declared capacity and the session is alive.
         let count = unsafe {
-            tn_process_tap_take_peaks(
+            mr_process_tap_take_peaks(
                 self.native.as_ptr(),
                 peaks.as_mut_ptr(),
                 channel_count.min(MAXIMUM_METER_CHANNELS),
@@ -329,7 +329,7 @@ impl NativeCaptureReader {
         // SAFETY: the atomic lease admits one reader; &mut prevents overlapping
         // calls through it. Its owner Arc outlives the bounded native read.
         unsafe {
-            tn_process_tap_read(
+            mr_process_tap_read(
                 session.native.as_ptr(),
                 destination.as_mut_ptr(),
                 destination.len() / channels,
@@ -354,7 +354,7 @@ impl ApplicationCaptureSession for CaptureProbeSession {
         // SAFETY: &mut session excludes shared Arc readers (Arc::get_mut fails
         // while a reader owns an Arc). The destination covers maximum_frames.
         Ok(unsafe {
-            tn_process_tap_read(
+            mr_process_tap_read(
                 self.native.as_ptr(),
                 destination.as_mut_ptr(),
                 destination.len() / channels,
@@ -381,7 +381,7 @@ impl ApplicationCaptureSession for CaptureProbeSession {
 impl Drop for CaptureProbeSession {
     fn drop(&mut self) {
         // SAFETY: `CaptureProbeSession` has unique ownership and the C destructor is null-safe.
-        unsafe { tn_process_tap_destroy(self.native.as_ptr()) };
+        unsafe { mr_process_tap_destroy(self.native.as_ptr()) };
     }
 }
 
@@ -448,19 +448,19 @@ impl ApplicationSourceTransport {
     fn publish_native(&mut self, frames: u64, running: bool) {
         // SAFETY: sole pump owner; bounded atomic publication into validated trailer.
         unsafe {
-            tn_application_source_transport_publish_native(self.native.as_ptr(), frames, running);
+            mr_application_source_transport_publish_native(self.native.as_ptr(), frames, running);
         };
     }
     fn clock(&mut self) -> Option<NativeClockSnapshot> {
         let mut snapshot = NativeClockSnapshot::default();
         // SAFETY: sole worker owns the transport; Rust validates the versioned mapping.
-        unsafe { tn_application_source_transport_clock(self.native.as_ptr(), &raw mut snapshot) }
+        unsafe { mr_application_source_transport_clock(self.native.as_ptr(), &raw mut snapshot) }
             .then_some(snapshot)
     }
 
     fn reset(&mut self, format: u64, native_rate: u32) -> bool {
         // SAFETY: only the producer worker can reset this transport's epoch.
-        unsafe { tn_application_source_transport_reset(self.native.as_ptr(), format, native_rate) }
+        unsafe { mr_application_source_transport_reset(self.native.as_ptr(), format, native_rate) }
     }
 
     fn connect(source_id: &str, channels: u16) -> Result<Self, String> {
@@ -472,7 +472,7 @@ impl ApplicationSourceTransport {
         };
         // SAFETY: the source ID remains valid for the synchronous XPC attachment request.
         let native = unsafe {
-            tn_application_source_transport_connect(
+            mr_application_source_transport_connect(
                 source_id.as_ptr(),
                 u32::try_from(CAPTURE_RING_CAPACITY_FRAMES)
                     .map_err(|_| "application source capacity is invalid".to_owned())?,
@@ -495,7 +495,7 @@ impl ApplicationSourceTransport {
         };
         // SAFETY: this pump exclusively owns the transport and samples cover the frame count.
         unsafe {
-            tn_application_source_transport_write(self.native.as_ptr(), samples.as_ptr(), frames)
+            mr_application_source_transport_write(self.native.as_ptr(), samples.as_ptr(), frames)
         }
     }
 }
@@ -503,7 +503,7 @@ impl ApplicationSourceTransport {
 impl Drop for ApplicationSourceTransport {
     fn drop(&mut self) {
         // SAFETY: the pump has unique ownership of this mapped transport.
-        unsafe { tn_application_source_transport_destroy(self.native.as_ptr()) };
+        unsafe { mr_application_source_transport_destroy(self.native.as_ptr()) };
     }
 }
 
@@ -528,7 +528,7 @@ impl AudioPump {
         let handoff = Arc::new(capture_transaction::CaptureHandoff::default());
         let worker_handoff = Arc::clone(&handoff);
         let worker = std::thread::Builder::new()
-            .name(format!("tonenari-source-{source_id}"))
+            .name(format!("mixrelay-source-{source_id}"))
             .spawn(move || {
                 run_audio_pump(
                     capture,
@@ -654,7 +654,7 @@ pub(crate) struct ApplicationCaptureState {
 impl ApplicationCaptureState {
     pub(crate) fn reserve(
         &self,
-        manifest: &tonenari_control_protocol::ApplicationCaptureManifest,
+        manifest: &mixrelay_control_protocol::ApplicationCaptureManifest,
     ) -> Result<(), String> {
         let mut owners = self
             .owners
@@ -695,7 +695,7 @@ impl ApplicationCaptureState {
 
     pub(crate) fn prepare(
         &self,
-        manifest: &tonenari_control_protocol::ApplicationCaptureManifest,
+        manifest: &mixrelay_control_protocol::ApplicationCaptureManifest,
     ) -> Result<PreparedApplicationCaptures, String> {
         let owners = self
             .owners
@@ -789,7 +789,7 @@ mod restored_pid_tests {
 
 fn prepare_application_audio(
     backend: &MacApplicationCaptureBackend,
-    node_id: &tonenari_audio_graph::NodeId,
+    node_id: &mixrelay_audio_graph::NodeId,
     request: &ApplicationCaptureRequest,
     previous: Option<&Arc<ApplicationAudioSession>>,
 ) -> Result<Arc<ApplicationAudioSession>, String> {
@@ -835,7 +835,7 @@ pub(crate) fn list_capturable_applications() -> Result<Vec<CapturableApplication
     let mut applications: Vec<CapturableApplication> = Vec::new();
     // SAFETY: enumeration and callbacks are synchronous and `applications` outlives the call.
     let error = unsafe {
-        tn_process_tap_visit_applications(Some(collect_application), (&raw mut applications).cast())
+        mr_process_tap_visit_applications(Some(collect_application), (&raw mut applications).cast())
     };
     if error.code != NATIVE_OK {
         return Err(CaptureProbeError(error).to_string());
@@ -856,7 +856,7 @@ pub(crate) fn list_capturable_applications() -> Result<Vec<CapturableApplication
 
 #[tauri::command]
 pub(crate) fn list_audio_devices() -> Result<Vec<AudioDeviceDescriptor>, String> {
-    let mut devices = tonenari_audio_io::macos::devices().map_err(|error| error.to_string())?;
+    let mut devices = mixrelay_audio_io::macos::devices().map_err(|error| error.to_string())?;
     devices.sort_unstable_by(|left, right| {
         left.display_name
             .cmp(&right.display_name)

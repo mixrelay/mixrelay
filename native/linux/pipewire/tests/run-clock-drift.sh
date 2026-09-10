@@ -6,14 +6,14 @@ fixture=${2:?Expected owned fixture directory}
 ppm=${3:?Expected deliberate sender ppm}
 seconds=${4:-90}
 disable=${5:-false}
-quantum=${TONENARI_LAB_QUANTUM:-128}
+quantum=${MIXRELAY_LAB_QUANTUM:-128}
 [[ "$quantum" == 128 || "$quantum" == 1024 ]] || exit 2
 rt_module=''
-if [[ ${TONENARI_LAB_RT_ENABLED:-false} == true ]]; then
+if [[ ${MIXRELAY_LAB_RT_ENABLED:-false} == true ]]; then
     rt_module='{ name = libpipewire-module-rt args = { rt.prio = 20 rt.time.soft = 200000 rt.time.hard = 2000000 } flags = [ ifexists nofail ] }'
 fi
-[[ "$workspace" == /*/.lab/tonenari-integration-* && -f "$workspace/Cargo.toml" ]] || exit 2
-[[ "$fixture" == /*/.lab/tonenari-integration-* && -f "$fixture/TNDriftSender.c" ]] || exit 2
+[[ "$workspace" == /*/.lab/mixrelay-integration-* && -f "$workspace/Cargo.toml" ]] || exit 2
+[[ "$fixture" == /*/.lab/mixrelay-integration-* && -f "$fixture/MRDriftSender.c" ]] || exit 2
 [[ "$ppm" =~ ^-?[0-9]+$ && "$seconds" =~ ^[0-9]+$ ]] || exit 2
 (( ppm >= -10000 && ppm <= 10000 && seconds >= 5 && seconds <= 600 )) || exit 2
 [[ "$disable" == true || "$disable" == false ]] || exit 2
@@ -27,23 +27,23 @@ mkdir -p "$lab/runtime" "$lab/config" "$lab/state" "$lab/data"
 chmod 700 "$lab/runtime"
 cp -R /usr/share/wireplumber "$lab/config/wireplumber"
 cp "$workspace/native/linux/pipewire/tests/application-lab-wireplumber.conf" "$lab/config/wireplumber/wireplumber.conf"
-cp "$workspace/native/linux/pipewire/tests/85-tonenari-lab.lua" "$lab/config/wireplumber/main.lua.d/85-tonenari-lab.lua"
+cp "$workspace/native/linux/pipewire/tests/85-mixrelay-lab.lua" "$lab/config/wireplumber/main.lua.d/85-mixrelay-lab.lua"
 sed -e "s/@PORT@/$port/" -e "s/@DISABLE@/$disable/" -e "s/@QUANTUM@/$quantum/g" -e "s/@RT_MODULE@/$rt_module/" "$fixture/drift-lab-pipewire.conf" > "$lab/pipewire.conf"
 export XDG_RUNTIME_DIR="$lab/runtime" XDG_CONFIG_HOME="$lab/config" XDG_STATE_HOME="$lab/state" XDG_DATA_HOME="$lab/data"
 export WIREPLUMBER_CONFIG_DIR="$lab/config/wireplumber"
 unset PIPEWIRE_REMOTE PIPEWIRE_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
-cc -O2 -Wall -Wextra -Werror "$fixture/TNDriftSender.c" -lm -o "$lab/drift-sender"
+cc -O2 -Wall -Wextra -Werror "$fixture/MRDriftSender.c" -lm -o "$lab/drift-sender"
 format_api=()
-if grep -q 'uint32_t sample_rate, uint32_t block_frames' "$workspace/native/linux/pipewire/TNPipeWire.h"; then format_api=(-DTN_DRIFT_FORMAT_API); fi
-native_source="$workspace/native/linux/pipewire/TNPipeWire.c"
-if [[ ${TONENARI_LAB_TRACE_ENABLED:-false} == true ]]; then
+if grep -q 'uint32_t sample_rate, uint32_t block_frames' "$workspace/native/linux/pipewire/MRPipeWire.h"; then format_api=(-DTN_DRIFT_FORMAT_API); fi
+native_source="$workspace/native/linux/pipewire/MRPipeWire.c"
+if [[ ${MIXRELAY_LAB_TRACE_ENABLED:-false} == true ]]; then
     format_api+=(-DTN_DRIFT_TRACE)
-    native_source="$fixture/TNDriftTrace.c"
-    export TONENARI_LAB_DRIFT_TRACE="$lab/native-trace.csv"
+    native_source="$fixture/MRDriftTrace.c"
+    export MIXRELAY_LAB_DRIFT_TRACE="$lab/native-trace.csv"
 fi
-cargo build --manifest-path "$workspace/Cargo.toml" -p tonenari-pcm-ring --release --target-dir "$workspace/target"
+cargo build --manifest-path "$workspace/Cargo.toml" -p mixrelay-pcm-ring --release --target-dir "$workspace/target"
 cc -O2 -Wall -Wextra -Werror -D_GNU_SOURCE "${format_api[@]}" -I"$workspace/native/linux/pipewire" -I"$workspace/native/pcm-ring/include" \
-    "$fixture/TNDriftProbe.c" "$native_source" "$workspace/target/release/libtonenari_pcm_ring.a" -ldl \
+    "$fixture/MRDriftProbe.c" "$native_source" "$workspace/target/release/libmixrelay_pcm_ring.a" -ldl \
     $(pkg-config --cflags --libs libpipewire-0.3) -lm -pthread -o "$lab/drift-probe"
 pipewire_pid='' policy_pid='' bus_pid='' sender_pid='' probe_pid=''
 cleanup() {
@@ -66,7 +66,7 @@ wireplumber >"$lab/wireplumber.log" 2>&1 &
 policy_pid=$!
 sleep 1
 pw-dump >"$lab/before.json"
-serial=$(python3 -c 'import json,sys; a=json.load(sys.stdin); print(next(n["info"]["props"]["object.serial"] for n in a if n.get("type")=="PipeWire:Interface:Node" and n.get("info",{}).get("props",{}).get("node.name")=="io.tonenari.lab-drift-rtp"))' < "$lab/before.json")
+serial=$(python3 -c 'import json,sys; a=json.load(sys.stdin); print(next(n["info"]["props"]["object.serial"] for n in a if n.get("type")=="PipeWire:Interface:Node" and n.get("info",{}).get("props",{}).get("node.name")=="io.mixrelay.lab-drift-rtp"))' < "$lab/before.json")
 warmup=40
 (( seconds <= 25 )) && warmup=1
 "$lab/drift-probe" "$serial" "$seconds" "$warmup" >"$lab/probe.json" 2>"$lab/probe.log" &

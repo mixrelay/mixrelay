@@ -3,13 +3,13 @@ use super::{
     Aggregate, Cache, Device, DeviceSet, MacDevices, Publication, Spec, aggregate_members,
     backend_error,
 };
+use mixrelay_audio_graph::DeviceSelector;
+use mixrelay_audio_io::process::{InputActivity, TransferOutcome};
+use mixrelay_audio_io::{AudioDeviceDescriptor, DeviceDirection, HostAudioBackendError};
 use std::{
     collections::BTreeMap,
     sync::{Arc, Weak},
 };
-use tonenari_audio_graph::DeviceSelector;
-use tonenari_audio_io::process::{InputActivity, TransferOutcome};
-use tonenari_audio_io::{AudioDeviceDescriptor, DeviceDirection, HostAudioBackendError};
 
 pub(super) fn offline_transfer(samples: usize, channels: usize) -> TransferOutcome {
     TransferOutcome {
@@ -156,7 +156,7 @@ fn same_group(left: Option<&Arc<Aggregate>>, right: Option<&Arc<Aggregate>>) -> 
 fn selected_inventory(
     desired: &BTreeMap<String, Spec>,
 ) -> Result<Vec<AudioDeviceDescriptor>, HostAudioBackendError> {
-    let mut inventory = tonenari_audio_io::macos::devices()?;
+    let mut inventory = mixrelay_audio_io::macos::devices()?;
     for spec in desired.values() {
         let DeviceSelector::PersistentUid { uid } = &spec.selector else {
             continue;
