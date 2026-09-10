@@ -1,4 +1,7 @@
 .root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   position: relative;
   min-height: var(--audio-node-face-height, 116px);
   overflow: visible;
@@ -29,6 +32,8 @@
   grid-template-rows: 26px minmax(0, 1fr) 23px;
   width: 100%;
   height: var(--audio-node-face-height, 116px);
+  min-height: var(--audio-node-face-height, 116px);
+  flex: 1 0 auto;
   color: var(--text);
   text-align: left;
 }
@@ -44,6 +49,32 @@
 
 .root[data-inline-controls] .button {
   grid-template-rows: var(--audio-node-header-height, 26px) minmax(0, 1fr);
+}
+
+.root[data-face-mode="compact"] .button {
+  grid-template-rows: 1fr;
+  flex: 0 0 26px;
+}
+
+.content {
+  flex: 0 0 auto;
+}
+
+.controls {
+  flex: 0 0 auto;
+}
+
+.root[data-face-mode="compact"] .controls {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.root[data-face-mode="compact"] .content {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 .topLine {
@@ -125,6 +156,10 @@
   justify-content: center;
   gap: 3px;
   padding: var(--audio-node-body-padding, 7px) 11px;
+}
+
+.root[data-face-mode="compact"] .body {
+  display: none;
 }
 
 .detail {
@@ -254,50 +289,29 @@
 }
 
 .processorEditor {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: 6px 8px;
-}
-
-.processorEditorCopy {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-  color: #b8bdc5;
-  font-size: 8px;
-}
-
-.processorEditorCopy > :last-child {
-  color: #777e88;
-}
-
-.processorEditorCopy > [data-state="open"] {
-  color: var(--positive);
-}
-
-.processorEditorCopy > [data-state="opening"] {
-  color: var(--amber);
-}
-
-.processorEditorCopy > [data-state="failed"] {
-  color: var(--red);
+  gap: 6px;
+  padding: 4px 8px;
 }
 
 .root .processorEditorButton {
-  min-width: 52px;
-  padding-inline: 8px;
   border-radius: 2px;
-  color: #a9bce0;
-  font-size: 8px;
+  color: #8b939f;
 }
 
 .root .processorEditorButton:hover {
   background: #252b35;
+  color: var(--signal);
+}
+
+.root .processorEditorButton[data-state="failed"] {
+  color: var(--red);
 }
 
 .processorEditorFailure {
-  grid-column: 1 / -1;
+  display: block;
+  padding: 6px 10px;
   color: #c77f7f;
   font-size: 7px;
   line-height: 1.35;

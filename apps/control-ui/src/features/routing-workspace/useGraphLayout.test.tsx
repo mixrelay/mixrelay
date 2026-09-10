@@ -32,6 +32,7 @@ const response: GraphLayoutResponse = {
   layoutRevision: 4,
   layout: {
     positions: { 'virtual:input': { x: 100, y: 120 }, 'virtual:output': { x: 900, y: -50 } },
+    sizes: { 'virtual:input': { width: 360, height: 220 } },
     viewport: { x: -200, y: 75, zoom: 0.6 },
   },
 };
@@ -50,6 +51,7 @@ describe('workspace layout restoration', () => {
     act(() => hook.result.current.setGraph(model()));
     await waitFor(() => expect(hook.result.current.graph?.nodes[1]?.position.x).toBe(900));
     expect(hook.result.current.graph?.nodes[0]?.position).toEqual({ x: 100, y: 120 });
+    expect(hook.result.current.graph?.nodes[0]?.size).toEqual({ width: 360, height: 220 });
     expect(hook.result.current.graph?.revision).toBe(1);
     expect(hook.result.current.layout.layout.viewport).toEqual(response.layout.viewport);
     expect(setGraphLayout).not.toHaveBeenCalled();
@@ -69,7 +71,11 @@ describe('workspace layout restoration', () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     act(() => {
-      hook.result.current.updatePositions(model());
+      const resized = model();
+      resized.nodes = resized.nodes.map((node, index) =>
+        index === 0 ? { ...node, size: { width: 400, height: 260 } } : node,
+      );
+      hook.result.current.updateNodes(resized);
       hook.result.current.updateViewport({ x: 30, y: 40, zoom: 1.2 });
     });
     await act(async () => {
@@ -79,6 +85,7 @@ describe('workspace layout restoration', () => {
       expectedLayoutRevision: 4,
       layout: {
         positions: { 'virtual:input': { x: 0, y: 0 }, 'virtual:output': { x: 0, y: 0 } },
+        sizes: { 'virtual:input': { width: 400, height: 260 } },
         viewport: { x: 30, y: 40, zoom: 1.2 },
       },
     });

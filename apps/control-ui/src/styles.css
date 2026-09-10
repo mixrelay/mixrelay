@@ -33,6 +33,22 @@ input {
   font: inherit;
 }
 
+:root .mantine-Slider-trackContainer,
+:root
+  :is(
+    button,
+    select,
+    summary,
+    a,
+    [role="button"],
+    [role="option"],
+    [role="menuitem"],
+    [role="slider"],
+    input[readonly]
+  ) {
+  cursor: default;
+}
+
 .storybook-frame {
   width: 100%;
   padding: 24px;

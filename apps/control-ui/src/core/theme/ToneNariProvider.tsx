@@ -35,7 +35,7 @@ export const tonenariTheme = createTheme({
     Button: Button.extend({ defaultProps: { radius: 0, variant: 'light' } }),
     Paper: Paper.extend({ defaultProps: { radius: 0 } }),
   },
-  cursorType: 'pointer',
+  cursorType: 'default',
   defaultRadius: 0,
   fontFamily: 'Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   headings: {

@@ -359,6 +359,7 @@ pub struct EngineGraphController {
     mutation: Mutex<()>,
     catalog: Mutex<Option<graph_catalog::CatalogStore>>,
     catalog_write_error: Mutex<Option<String>>,
+    catalog_restore: Mutex<Option<graph_catalog::PendingRestore>>,
     required_endpoint_node_id: Option<NodeId>,
     endpoint_backend: Arc<dyn VirtualEndpointBackend>,
     meter_bindings: RwLock<BTreeMap<u64, Vec<MeterBinding>>>,
@@ -510,6 +511,7 @@ impl EngineGraphController {
             mutation: Mutex::new(()),
             catalog: Mutex::new(None),
             catalog_write_error: Mutex::new(None),
+            catalog_restore: Mutex::new(None),
             required_endpoint_node_id,
             endpoint_backend,
             meter_bindings: RwLock::new(meter_bindings),
@@ -813,6 +815,9 @@ impl ControlBackend for EngineGraphController {
         let _mutation = self.mutation.lock();
         let runtime_id = self.external_processor_node(node_id)?;
         if !open {
+            self.processor_controls
+                .cancel_editor_gesture(&runtime_id)
+                .map_err(|reason| processor_editor_error(node_id, &reason))?;
             // Preserve vendor edits while the instance is still available. A failed
             // durable checkpoint must remain retryable, not silently close the editor.
             self.checkpoint_processor_state_locked(Some(node_id))?;
@@ -823,6 +828,33 @@ impl ControlBackend for EngineGraphController {
             .map_err(|reason| processor_editor_error(node_id, &reason))?;
         node_id.clone_into(&mut status.node_id);
         Ok(status)
+    }
+
+    fn processor_editor_frame(
+        &self,
+        node_id: &str,
+    ) -> Result<tonenari_control_protocol::ProcessorEditorFrame, ProtocolError> {
+        let runtime_id = {
+            let _mutation = self.mutation.lock();
+            self.external_processor_node(node_id)?
+        };
+        self.processor_controls
+            .editor_frame(&runtime_id)
+            .map_err(|reason| processor_editor_error(node_id, &reason))
+    }
+
+    fn processor_editor_input(
+        &self,
+        node_id: &str,
+        input: tonenari_control_protocol::ProcessorEditorInput,
+    ) -> Result<(), ProtocolError> {
+        let runtime_id = {
+            let _mutation = self.mutation.lock();
+            self.external_processor_node(node_id)?
+        };
+        self.processor_controls
+            .editor_input(&runtime_id, &input)
+            .map_err(|reason| processor_editor_error(node_id, &reason))
     }
 
     fn apply_graph(&self, document: GraphDocument) -> Result<GraphApplyResponse, ProtocolError> {
@@ -944,6 +976,7 @@ impl EngineGraphController {
         drop(views);
         *self.graph.write() = document;
         self.commit_catalog_memory(catalog);
+        *self.catalog_restore.lock() = None;
         Ok(GraphApplyResponse {
             protocol_version: PROTOCOL_VERSION,
             revision,
@@ -1732,6 +1765,11 @@ mod tests {
         exchange
             .submit(Box::new(processor(&default_duplex_document(2, None))))
             .expect("test pending processor should queue");
+        let before_prepare = failing
+            .prepare_and_validate(&default_duplex_document(3, None), *failing.context.read())
+            .err()
+            .expect("pending activation must block preparation before its failing factory");
+        assert_eq!(before_prepare.code, ErrorCode::GraphExchangeBusy);
         let busy = controller(exchange)
             .apply_graph(default_duplex_document(3, None))
             .expect_err("second pending graph should be busy");

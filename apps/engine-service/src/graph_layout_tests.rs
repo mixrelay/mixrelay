@@ -6,7 +6,7 @@ use crate::{
 use std::{fs, sync::Arc};
 use tonenari_control_protocol::{
     ErrorCode, GraphCatalogAction, GraphLayout, GraphLayoutRequest, GraphNodePosition,
-    GraphViewport,
+    GraphNodeSize, GraphViewport,
 };
 
 fn layout(x: f64) -> GraphLayout {
@@ -25,11 +25,92 @@ fn layout(x: f64) -> GraphLayout {
             ),
         ]
         .into(),
+        sizes: [(
+            "default-virtual-io:input".into(),
+            GraphNodeSize {
+                width: 320.0,
+                height: 220.0,
+            },
+        )]
+        .into(),
         viewport: Some(GraphViewport {
             x: -80.0,
             y: 55.0,
             zoom: 0.75,
         }),
+    }
+}
+
+#[test]
+fn layout_sizes_reject_nonfinite_unbounded_or_invalid_identities() {
+    for (width, height) in [
+        (179.0, 26.0),
+        (180.0, 25.0),
+        (4097.0, 26.0),
+        (180.0, 4097.0),
+        (f64::NAN, 26.0),
+        (180.0, f64::NAN),
+        (f64::INFINITY, 26.0),
+        (180.0, f64::NEG_INFINITY),
+    ] {
+        let mut value = GraphLayout::default();
+        value
+            .sizes
+            .insert("node".into(), GraphNodeSize { width, height });
+        assert_layout_validity(value, false);
+    }
+    for id in [String::new(), " ".into(), "x\n".into(), "x".repeat(257)] {
+        let mut value = GraphLayout::default();
+        value.sizes.insert(
+            id,
+            GraphNodeSize {
+                width: 180.0,
+                height: 26.0,
+            },
+        );
+        assert_layout_validity(value, false);
+    }
+    let mut value = GraphLayout::default();
+    for index in 0..4097 {
+        value.sizes.insert(
+            format!("node-{index}"),
+            GraphNodeSize {
+                width: 180.0,
+                height: 26.0,
+            },
+        );
+    }
+    assert_layout_validity(value, false);
+}
+
+#[test]
+fn layout_size_bounds_are_inclusive() {
+    for (width, height) in [(180.0, 26.0), (4096.0, 4096.0)] {
+        let mut value = GraphLayout::default();
+        value
+            .sizes
+            .insert("node".into(), GraphNodeSize { width, height });
+        assert_layout_validity(value, true);
+    }
+}
+
+fn assert_layout_validity(layout: GraphLayout, valid: bool) {
+    let fixture = Fixture::new();
+    let engine =
+        controller(default_duplex_document(1, None)).with_graph_catalog_path(fixture.path());
+    let before = fs::read(fixture.path()).unwrap();
+    let result = engine.update_graph_layout(
+        "graph-1",
+        GraphLayoutRequest {
+            expected_layout_revision: 0,
+            layout,
+        },
+    );
+    if valid {
+        assert!(result.is_ok());
+    } else {
+        assert_eq!(result.unwrap_err().code, ErrorCode::GraphInvalid);
+        assert_eq!(fs::read(fixture.path()).unwrap(), before);
     }
 }
 

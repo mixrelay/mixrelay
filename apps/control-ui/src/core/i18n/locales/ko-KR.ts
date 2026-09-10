@@ -267,15 +267,9 @@ export const koKR = {
       retry: '다시 시도',
     },
     processorEditor: {
-      close: '닫기',
-      label: '플러그인 편집기',
-      open: '열기',
       states: {
-        closed: '닫힘',
         failed: '열 수 없음',
-        open: '열림',
         opening: '여는 중',
-        unavailable: '편집기 없음',
       },
       failures: {
         displayUnavailable: '현재 Linux 세션에서는 X11/XWayland 편집기를 사용할 수 없습니다.',

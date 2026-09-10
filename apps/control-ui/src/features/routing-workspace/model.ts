@@ -663,11 +663,8 @@ function externalProcessorNode(
     appearance: {
       category: `${presentation.processor} · ${processor.format.toUpperCase()}`,
       channelCount: processor.outputChannels,
-      detail: processor.vendor,
       icon: processor.format.toUpperCase(),
       hasProcessorEditor: processor.hasEditor,
-      meterChannels: processor.outputChannels,
-      meterSource: { nodeId: base.id, portId: AUDIO_PORT_ID },
       optionsLabel: presentation.options,
       parameterControls: externalParameterControls(processor, parameterValues),
       title: processor.displayName,

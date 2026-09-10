@@ -16,6 +16,9 @@ impl Fixture {
         let control = Arc::new(HostedProcessorControl {
             shared,
             writer: Mutex::new(()),
+            input_writer: Mutex::new(()),
+            reuse: Mutex::new(None),
+            active_owner: AtomicBool::new(false),
         });
         shared_header_unchecked(&control.shared)
             .worker_status
@@ -46,6 +49,40 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         drop(self.control.take());
         cleanup_worker_paths(&self.path, &self.config);
+    }
+}
+
+#[test]
+fn failed_open_survives_idle_ticks_until_an_explicit_editor_command() {
+    let fixture = Fixture::new();
+    let control = fixture.control();
+    let header = shared_header_unchecked(&control.shared);
+    let node = NodeId::from("effect");
+    for failure in [EDITOR_FAILURE_PLUGIN_REJECTED, EDITOR_FAILURE_HOST_WINDOW] {
+        publish_editor_failure(header, failure);
+        for _ in 0..20 {
+            fixture.observed(false);
+            assert_eq!(
+                control.editor_status(&node).state,
+                ProcessorEditorState::Failed
+            );
+            assert!(control.editor_status(&node).failure.is_some());
+        }
+        control.set_editor_open(true);
+        fixture.observed(true);
+        assert_eq!(
+            control.editor_status(&node).state,
+            ProcessorEditorState::Open
+        );
+        assert!(control.editor_status(&node).failure.is_none());
+        publish_editor_failure(header, failure);
+        control.set_editor_open(false);
+        fixture.observed(false);
+        assert_eq!(
+            control.editor_status(&node).state,
+            ProcessorEditorState::Closed
+        );
+        assert!(control.editor_status(&node).failure.is_none());
     }
 }
 

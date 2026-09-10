@@ -102,7 +102,7 @@ describe('processor control recovery alerts', () => {
     },
   );
 
-  it('keeps the real open state visible after a rejected close and makes retry explicit', async () => {
+  it('shows a rejected automatic open and keeps retry explicit', async () => {
     await i18n.changeLanguage('en');
     const open: ProcessorEditorStatus = {
       protocolVersion: 1,
@@ -115,7 +115,7 @@ describe('processor control recovery alerts', () => {
     };
     const pending = Promise.withResolvers<ProcessorEditorStatus>();
     const source = {
-      getProcessorEditor: vi.fn().mockResolvedValue(open),
+      getProcessorEditor: vi.fn().mockResolvedValue({ ...open, state: 'closed' }),
       setProcessorEditor: vi
         .fn()
         .mockRejectedValueOnce(new Error('rejected'))
@@ -145,9 +145,6 @@ describe('processor control recovery alerts', () => {
       return (
         <>
           <output data-testid="native-state">{editors.statuses.get('effect')?.state}</output>
-          <button type="button" onClick={() => editors.toggle('effect')}>
-            Close editor
-          </button>
           <ProcessorEditorAlerts editors={editors} />
         </>
       );
@@ -159,18 +156,16 @@ describe('processor control recovery alerts', () => {
         </ToneNariProvider>
       </I18nextProvider>,
     );
-    await waitFor(() => expect(screen.getByTestId('native-state')).toHaveTextContent('open'));
-    fireEvent.click(screen.getByRole('button', { name: 'Close editor' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('My effect');
-    expect(screen.getByTestId('native-state')).toHaveTextContent('open');
+    expect(screen.getByTestId('native-state')).toHaveTextContent('closed');
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled();
-    await act(async () => pending.resolve({ ...open, state: 'closed' }));
+    await act(async () => pending.resolve(open));
     expect(source.setProcessorEditor.mock.calls).toEqual([
-      ['effect', false],
-      ['effect', false],
+      ['effect', true],
+      ['effect', true],
     ]);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.getByTestId('native-state')).toHaveTextContent('closed');
+    expect(screen.getByTestId('native-state')).toHaveTextContent('open');
   });
 });

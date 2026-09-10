@@ -325,6 +325,37 @@ fn percent_encode_path_segment(value: &str) -> String {
     })
 }
 
+#[tauri::command]
+pub(crate) async fn control_get_processor_editor_frame(
+    client: tauri::State<'_, ControlProxyClient>,
+    node_id: String,
+) -> Result<ControlProxyResponse, String> {
+    let node_id = percent_encode_path_segment(&node_id);
+    client
+        .request(
+            Method::GET,
+            &format!("/api/v1/processors/{node_id}/editor/frame"),
+            None,
+        )
+        .await
+}
+
+#[tauri::command]
+pub(crate) async fn control_send_processor_editor_input(
+    client: tauri::State<'_, ControlProxyClient>,
+    node_id: String,
+    input: serde_json::Value,
+) -> Result<ControlProxyResponse, String> {
+    let node_id = percent_encode_path_segment(&node_id);
+    client
+        .request(
+            Method::POST,
+            &format!("/api/v1/processors/{node_id}/editor/input"),
+            Some(input),
+        )
+        .await
+}
+
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
 pub(crate) async fn control_apply_graph(

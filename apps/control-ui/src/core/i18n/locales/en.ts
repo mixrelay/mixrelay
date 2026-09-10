@@ -266,15 +266,9 @@ export const en = {
       retry: 'Retry',
     },
     processorEditor: {
-      close: 'Close',
-      label: 'Plug-in editor',
-      open: 'Open',
       states: {
-        closed: 'Closed',
         failed: 'Unavailable',
-        open: 'Open',
         opening: 'Opening',
-        unavailable: 'No editor',
       },
       failures: {
         displayUnavailable: 'X11 or XWayland is required for native editors in this Linux session.',

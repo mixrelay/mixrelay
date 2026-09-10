@@ -11,11 +11,13 @@ use tonenari_audio_graph::GraphDocument;
 use tonenari_control_protocol::{
     AppStatus, ErrorCode, ExternalProcessorCatalog, GraphApplyRequest, GraphApplyResponse,
     GraphCatalogRequest, GraphCatalogResponse, GraphLayoutRequest, GraphLayoutResponse,
-    GraphRuntimeStatus, MeterSnapshot, PROTOCOL_VERSION, ProcessorEditorRequest,
-    ProcessorEditorStatus, ProcessorParameterUpdate, ProcessorParameterUpdateResponse,
-    ProcessorScanRequest, ProtocolError, SessionReconfigureRequest,
+    GraphRuntimeStatus, MeterSnapshot, PROTOCOL_VERSION, ProcessorEditorFrame,
+    ProcessorEditorInput, ProcessorEditorRequest, ProcessorEditorStatus, ProcessorParameterUpdate,
+    ProcessorParameterUpdateResponse, ProcessorScanRequest, ProtocolError,
+    SessionReconfigureRequest,
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
+mod editor_surface;
 mod recorder;
 
 pub const HEALTH_ROUTE: &str = "/health";
@@ -211,6 +213,24 @@ pub trait ControlBackend: Send + Sync {
         open: bool,
     ) -> Result<ProcessorEditorStatus, ProtocolError>;
 
+    /// Captures a bounded native image without blocking the async HTTP executor.
+    /// # Errors
+    /// Returns a protocol failure for an unavailable or busy editor.
+    fn processor_editor_frame(&self, node_id: &str) -> Result<ProcessorEditorFrame, ProtocolError> {
+        Err(processor_unavailable(node_id))
+    }
+
+    /// Publishes ordered input for one identified native editor session.
+    /// # Errors
+    /// Rejects unavailable sessions and invalid or saturated input.
+    fn processor_editor_input(
+        &self,
+        node_id: &str,
+        _input: ProcessorEditorInput,
+    ) -> Result<(), ProtocolError> {
+        Err(processor_unavailable(node_id))
+    }
+
     /// Validates and submits a graph document to the runtime.
     ///
     /// # Errors
@@ -361,6 +381,14 @@ pub fn router_with_backend(backend: Arc<dyn ControlBackend>) -> Router {
             get(processor_editor_status).put(set_processor_editor),
         )
         .route(GRAPH_ROUTE, get(graph).put(apply_graph))
+        .route(
+            "/api/v1/processors/{node_id}/editor/frame",
+            get(editor_surface::frame),
+        )
+        .route(
+            "/api/v1/processors/{node_id}/editor/input",
+            post(editor_surface::input),
+        )
         .route(
             GRAPH_CATALOG_ROUTE,
             get(graph_catalog).put(mutate_graph_catalog),

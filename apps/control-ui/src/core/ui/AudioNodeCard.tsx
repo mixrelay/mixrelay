@@ -1,5 +1,5 @@
 import {
-  Button,
+  ActionIcon,
   Image,
   Paper,
   ScrollArea,
@@ -9,7 +9,8 @@ import {
   Tooltip,
   UnstyledButton,
 } from '@mantine/core';
-import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
+import { useResizeObserver } from '@mantine/hooks';
+import { type CSSProperties, type ReactNode, type Ref, useEffect, useState } from 'react';
 
 import styles from './AudioNodeCard.module.css';
 import {
@@ -59,6 +60,8 @@ export interface AudioNodeCardProps {
   endpointControl?: EndpointControl;
   faceHeight?: number;
   faceMode?: AudioNodeFaceMode;
+  onFaceHeightChange?: (height: number) => void;
+  onContentHeightChange?: (height: number) => void;
   gainControl?: { label: string; valueDb: number };
   icon: string;
   iconUrl?: string;
@@ -79,9 +82,7 @@ export interface AudioNodeCardProps {
   processorEditor?: {
     actionLabel: string;
     failureLabel?: string;
-    label: string;
     state: 'unavailable' | 'closed' | 'opening' | 'open' | 'failed';
-    stateLabel: string;
   };
   showPorts?: boolean;
   selected?: boolean;
@@ -98,7 +99,7 @@ export interface AudioNodeCardProps {
   }) => void;
   onLayoutChange?: () => void;
   onParameterChange?: (parameterId: string, value: number) => void;
-  onProcessorEditorToggle?: () => void;
+  onProcessorEditorRetry?: () => void;
 }
 
 export function AudioNodeCard({
@@ -111,6 +112,8 @@ export function AudioNodeCard({
   endpointControl,
   faceHeight,
   faceMode = 'standard',
+  onFaceHeightChange,
+  onContentHeightChange,
   gainControl,
   icon,
   iconUrl,
@@ -124,7 +127,7 @@ export function AudioNodeCard({
   onGainChange,
   onLayoutChange,
   onParameterChange,
-  onProcessorEditorToggle,
+  onProcessorEditorRetry,
   parameterControls = [],
   processorEditor,
   selected = false,
@@ -133,13 +136,23 @@ export function AudioNodeCard({
   statusTone = 'neutral',
   title,
 }: AudioNodeCardProps) {
+  const [faceRef, faceBounds] = useResizeObserver<HTMLButtonElement>();
+  const [contentRef, contentBounds] = useResizeObserver<HTMLDivElement>();
+  useEffect(() => {
+    if (faceBounds.height > 0) onFaceHeightChange?.(faceBounds.height);
+  }, [faceBounds.height, onFaceHeightChange]);
+  useEffect(
+    () => onContentHeightChange?.(contentBounds.height),
+    [contentBounds.height, onContentHeightChange],
+  );
   const [optionsOpened, setOptionsOpened] = useState(false);
   const hasGainControl = Boolean(gainControl && onGainChange);
   const hasEndpointControl = Boolean(endpointControl && onEndpointChange);
-  const hasParameterControls = parameterControls.length > 0 && Boolean(onParameterChange);
-  const hasProcessorEditor = Boolean(processorEditor && onProcessorEditorToggle);
-  const hasOptions =
-    hasGainControl || hasEndpointControl || hasParameterControls || hasProcessorEditor;
+  const hasParameterControls =
+    parameterControls.length > 0 &&
+    Boolean(onParameterChange) &&
+    !prefersProcessorEditor(processorEditor);
+  const hasOptions = hasGainControl || hasEndpointControl || hasParameterControls;
   const toggleOptions = () => {
     setOptionsOpened((opened) => !opened);
     requestAnimationFrame(() => onLayoutChange?.());
@@ -160,9 +173,10 @@ export function AudioNodeCard({
       withBorder
     >
       <AudioNodeFace
+        faceRef={faceRef}
         category={category}
         channelCount={channelCount}
-        hideSummary={Boolean(content) || faceMode === 'channel-rows'}
+        hideSummary={Boolean(content) || faceMode !== 'standard'}
         detail={detail}
         icon={icon}
         iconUrl={iconUrl}
@@ -177,21 +191,22 @@ export function AudioNodeCard({
         statusTone={statusTone}
         title={title}
       />
-      {content ? <div className="nodrag nopan nowheel">{content}</div> : null}
-      <NodeOptions
-        endpointControl={endpointControl}
-        gainControl={gainControl}
-        hasOptions={hasOptions}
-        label={optionsLabel}
-        onEndpointChange={onEndpointChange}
-        onGainChange={onGainChange}
-        onParameterChange={onParameterChange}
-        onProcessorEditorToggle={onProcessorEditorToggle}
-        onToggle={toggleOptions}
-        opened={optionsOpened}
-        parameterControls={parameterControls}
-        processorEditor={processorEditor}
-      />
+      <div ref={contentRef} className={styles.controls}>
+        {content ? <div className={`${styles.content} nodrag nopan nowheel`}>{content}</div> : null}
+        <ProcessorEditorOption control={processorEditor} onRetry={onProcessorEditorRetry} />
+        <NodeOptions
+          endpointControl={endpointControl}
+          gainControl={gainControl}
+          hasOptions={hasOptions}
+          label={optionsLabel}
+          onEndpointChange={onEndpointChange}
+          onGainChange={onGainChange}
+          onParameterChange={onParameterChange}
+          onToggle={toggleOptions}
+          opened={optionsOpened}
+          parameterControls={hasParameterControls ? parameterControls : []}
+        />
+      </div>
       <NodePortOverlays inputCount={inputCount} outputCount={outputCount} visible={showPorts} />
     </Paper>
   );
@@ -245,7 +260,7 @@ function AudioNodeFace(
     | 'status'
     | 'statusTone'
     | 'title'
-  > & { hideSummary?: boolean },
+  > & { hideSummary?: boolean; faceRef?: Ref<HTMLButtonElement> },
 ) {
   const {
     category,
@@ -267,6 +282,7 @@ function AudioNodeFace(
   } = props;
   return (
     <UnstyledButton
+      ref={props.faceRef}
       aria-label={[title, category, detail, status].filter(Boolean).join(', ')}
       aria-pressed={selected}
       className={styles.button}
@@ -367,11 +383,9 @@ function NodeOptions({
   onEndpointChange,
   onGainChange,
   onParameterChange,
-  onProcessorEditorToggle,
   onToggle,
   opened,
   parameterControls,
-  processorEditor,
 }: {
   endpointControl?: EndpointControl;
   gainControl?: { label: string; valueDb: number };
@@ -380,11 +394,9 @@ function NodeOptions({
   onEndpointChange?: AudioNodeCardProps['onEndpointChange'];
   onGainChange?: AudioNodeCardProps['onGainChange'];
   onParameterChange?: AudioNodeCardProps['onParameterChange'];
-  onProcessorEditorToggle?: AudioNodeCardProps['onProcessorEditorToggle'];
   onToggle: () => void;
   opened: boolean;
   parameterControls: NonNullable<AudioNodeCardProps['parameterControls']>;
-  processorEditor?: AudioNodeCardProps['processorEditor'];
 }) {
   if (!hasOptions) return null;
   return (
@@ -395,8 +407,7 @@ function NodeOptions({
       {gainControl && onGainChange ? (
         <NodeGainControl control={gainControl} onChange={onGainChange} />
       ) : null}
-      <ProcessorEditorOption control={processorEditor} onToggle={onProcessorEditorToggle} />
-      {onParameterChange ? (
+      {onParameterChange && parameterControls.length > 0 ? (
         <ScrollArea.Autosize
           className={styles.parameterList}
           mah={180}
@@ -420,35 +431,47 @@ function NodeOptions({
   );
 }
 
+function prefersProcessorEditor(control: AudioNodeCardProps['processorEditor']) {
+  return Boolean(control && control.state !== 'failed' && control.state !== 'unavailable');
+}
+
 function ProcessorEditorOption({
   control,
-  onToggle,
+  onRetry,
 }: {
   control?: AudioNodeCardProps['processorEditor'];
-  onToggle?: AudioNodeCardProps['onProcessorEditorToggle'];
+  onRetry?: AudioNodeCardProps['onProcessorEditorRetry'];
 }) {
-  if (!control || !onToggle) return null;
+  if (!control || !onRetry || control.state !== 'failed') return null;
   return (
-    <div className={styles.processorEditor}>
-      <div className={styles.processorEditorCopy}>
-        <span>{control.label}</span>
-        <span data-state={control.state}>{control.stateLabel}</span>
-      </div>
-      <Button
+    <div className={`${styles.processorEditor} nodrag nopan nowheel`}>
+      <ActionIcon
+        aria-label={control.actionLabel}
         className={styles.processorEditorButton}
-        disabled={control.state === 'unavailable'}
-        loading={control.state === 'opening'}
+        data-state={control.state}
         onClick={(event) => {
           event.stopPropagation();
-          onToggle();
+          onRetry();
         }}
-        size="compact-xs"
+        size={24}
         variant="subtle"
       >
-        {control.actionLabel}
-      </Button>
+        <svg
+          aria-hidden="true"
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.25"
+        >
+          <path d="M13 7a5 5 0 1 0-1 4M13 2v5H8" />
+        </svg>
+      </ActionIcon>
       {control.failureLabel ? (
-        <span className={styles.processorEditorFailure}>{control.failureLabel}</span>
+        <span role="status" className={styles.processorEditorFailure}>
+          {control.failureLabel}
+        </span>
       ) : null}
     </div>
   );

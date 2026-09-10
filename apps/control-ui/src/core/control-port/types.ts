@@ -310,6 +310,8 @@ export interface RecorderStatus {
 }
 
 export interface ControlPort {
+  getProcessorEditorFrame(nodeId: string): Promise<ProcessorEditorFrame>;
+  sendProcessorEditorInput(nodeId: string, input: ProcessorEditorInput): Promise<void>;
   recorderStatus(graphId: string, nodeId: string): Promise<RecorderStatus>;
   controlRecorder(
     graphId: string,
@@ -346,6 +348,23 @@ export interface ControlPort {
   selectProcessorDirectory?(): Promise<string | null>;
 }
 
+export interface ProcessorEditorFrame {
+  instanceId: string;
+  session: number;
+  width: number;
+  height: number;
+  pngBase64: string;
+}
+
+export interface ProcessorEditorInput {
+  instanceId: string;
+  session: number;
+  kind: 'down' | 'move' | 'up' | 'cancel';
+  x: number;
+  y: number;
+  modifiers: number;
+}
+
 export interface GraphCatalog {
   layout?: GraphLayout;
   layoutRevision?: number;
@@ -360,6 +379,7 @@ export interface GraphCatalog {
 /** Presentation-only metadata. Saving it must never submit or reprepare the audio graph. */
 export interface GraphLayout {
   positions: Record<string, { x: number; y: number }>;
+  sizes?: Record<string, { width: number; height: number }>;
   viewport?: { x: number; y: number; zoom: number };
 }
 

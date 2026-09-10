@@ -42,7 +42,10 @@ vi.mock('../../core/audio-graph/AudioGraphCanvas', () => ({
     renderNodeContent?: (node: AudioGraphNode) => ReactNode;
   }) => (
     <section aria-label={ariaLabel}>
-      <span>{model.revision}</span>
+      <span data-testid="model-revision">{model.revision}</span>
+      <output data-testid="node-sizes">
+        {JSON.stringify(Object.fromEntries(model.nodes.map((node) => [node.id, node.size])))}
+      </output>
       {model.nodes.map((node) => (
         <div key={`content:${node.id}`}>{renderNodeContent?.(node)}</div>
       ))}
@@ -125,7 +128,6 @@ vi.mock('../../core/audio-graph/AudioGraphCanvas', () => ({
                 ...node,
                 position: { x: node.position.x + 20, y: node.position.y },
               })),
-              revision: model.revision + 1,
             },
             'layout',
           )
@@ -133,6 +135,23 @@ vi.mock('../../core/audio-graph/AudioGraphCanvas', () => ({
         type="button"
       >
         move node
+      </button>
+      <button
+        onClick={() =>
+          onModelChange(
+            {
+              ...model,
+              nodes: model.nodes.map((node) => ({
+                ...node,
+                size: { width: 400, height: 220 },
+              })),
+            },
+            'layout',
+          )
+        }
+        type="button"
+      >
+        resize node
       </button>
     </section>
   ),
@@ -210,6 +229,8 @@ it.each([true, false])(
 
 function port(overrides: Partial<ControlPort> = {}): ControlPort {
   return {
+    getProcessorEditorFrame: vi.fn().mockRejectedValue(new Error('No native frame fixture')),
+    sendProcessorEditorInput: vi.fn().mockResolvedValue(undefined),
     recorderStatus: vi.fn().mockResolvedValue({
       state: 'stopped',
       path: null,
@@ -809,6 +830,25 @@ describe('RoutingWorkspace graph-scoped presentation', () => {
 });
 
 describe('RoutingWorkspace layout history', () => {
+  it('undoes and redoes resizing without advancing the audio revision or submitting DSP', async () => {
+    const control = port();
+    renderWorkspace(control);
+    await screen.findByRole('region');
+    const revision = screen.getByTestId('model-revision').textContent;
+    const originalSizes = screen.getByTestId('node-sizes').textContent;
+    fireEvent.click(screen.getByRole('button', { name: 'resize node' }));
+    const resized = screen.getByTestId('node-sizes').textContent;
+    expect(resized).toContain('"width":400,"height":220');
+    expect(screen.getByTestId('model-revision')).toHaveTextContent(revision ?? '');
+    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    expect(screen.getByTestId('node-sizes').textContent).toBe(originalSizes);
+    expect(screen.getByTestId('model-revision')).toHaveTextContent(revision ?? '');
+    fireEvent.keyDown(window, { key: 'z', metaKey: true, shiftKey: true });
+    expect(screen.getByTestId('node-sizes').textContent).toBe(resized);
+    expect(screen.getByTestId('model-revision')).toHaveTextContent(revision ?? '');
+    expect(control.applyGraph).not.toHaveBeenCalled();
+  });
+
   it('restores split positions, saves drag and Undo without applying the DSP graph', async () => {
     vi.useFakeTimers();
     const positions = {
@@ -857,6 +897,7 @@ describe('RoutingWorkspace layout history', () => {
           'default-virtual-io::host-source': { x: 31, y: 22 },
           'default-virtual-io::host-sink': { x: 820, y: 40 },
         },
+        sizes: {},
         viewport,
       },
     });
@@ -866,7 +907,7 @@ describe('RoutingWorkspace layout history', () => {
     });
     expect(setGraphLayout).toHaveBeenLastCalledWith('saved', {
       expectedLayoutRevision: 4,
-      layout: { positions, viewport },
+      layout: { positions, sizes: {}, viewport },
     });
     expect(control.applyGraph).not.toHaveBeenCalled();
     rendered.unmount();

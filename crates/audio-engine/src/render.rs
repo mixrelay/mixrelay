@@ -22,6 +22,19 @@ pub fn recording_session_key(node: &NodeId, channels: u16) -> String {
 /// `process`. A failed block is bypassed by the graph so one plug-in cannot mute the route.
 pub trait HostedAudioProcessor: Send {
     fn process(&mut self, input: &[f32], output: &mut [f32], frames: usize) -> bool;
+
+    /// Process-unique instance identity, never reused during this engine lifetime.
+    fn reuse_identity(&self) -> Option<u64> {
+        None
+    }
+
+    /// An inactive ownership-transfer request, not a renderable processor.
+    fn requests_reuse(&self) -> bool {
+        false
+    }
+
+    /// Publishes ownership only; must not allocate, lock, or call native code.
+    fn set_active(&mut self, _active: bool) {}
 }
 
 /// Immutable preparation data passed across the engine/provider boundary.
@@ -48,6 +61,10 @@ pub trait HostedProcessorFactory: Send + Sync {
 
 type HostedProcessors = Box<[Box<dyn HostedAudioProcessor>]>;
 type PreparedRenderPlan = (RenderPlan, HostedProcessors);
+
+#[cfg(test)]
+#[path = "hosted_reuse_tests.rs"]
+mod hosted_reuse_tests;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExternalBinding {
@@ -252,6 +269,7 @@ pub struct BlockProcessor {
     dynamics_envelopes: Box<[f32]>,
     device_bus_state: Box<[f32]>,
     hosted_processors: Box<[Box<dyn HostedAudioProcessor>]>,
+    hosted_identities: Box<[(u64, usize)]>,
 }
 
 impl fmt::Debug for BlockProcessor {
@@ -271,6 +289,7 @@ impl fmt::Debug for BlockProcessor {
             .field("dynamics_envelopes", &self.dynamics_envelopes.len())
             .field("device_bus_state", &self.device_bus_state.len())
             .field("hosted_processors", &self.hosted_processors.len())
+            .field("hosted_identities", &self.hosted_identities)
             .finish()
     }
 }
@@ -312,6 +331,7 @@ impl BlockProcessor {
             dynamics_envelopes,
             device_bus_state,
             hosted_processors: Box::new([]),
+            hosted_identities: Box::new([]),
         }
     }
 
@@ -336,7 +356,52 @@ impl BlockProcessor {
         let (plan, hosted_processors) = RenderPlan::prepare_internal(execution, Some(factory))?;
         let mut processor = Self::with_peak_meters(Arc::new(plan), meters);
         processor.hosted_processors = hosted_processors;
+        let mut identities: Vec<_> = processor
+            .hosted_processors
+            .iter()
+            .enumerate()
+            .filter_map(|(index, hosted)| hosted.reuse_identity().map(|id| (id, index)))
+            .collect();
+        identities.sort_unstable();
+        processor.hosted_identities = identities.into_boxed_slice();
         Ok(processor)
+    }
+
+    pub(crate) fn can_adopt_hosted(&self, previous: &Self) -> bool {
+        self.hosted_identities.iter().all(|&(identity, index)| {
+            !self.hosted_processors[index].requests_reuse()
+                || previous
+                    .hosted_identities
+                    .binary_search_by_key(&identity, |&(id, _)| id)
+                    .is_ok_and(|found| {
+                        !previous.hosted_processors[previous.hosted_identities[found].1]
+                            .requests_reuse()
+                    })
+        })
+    }
+
+    pub(crate) fn set_hosted_active(&mut self, active: bool) {
+        for processor in &mut self.hosted_processors {
+            processor.set_active(active);
+        }
+    }
+
+    /// Moves complete processor ownership at activation; no allocation, lock, native call,
+    /// or worker destruction occurs on the audio thread. Retired placeholders drop later.
+    pub(crate) fn adopt_hosted(&mut self, previous: &mut Self) {
+        for &(identity, index) in &self.hosted_identities {
+            if self.hosted_processors[index].requests_reuse() {
+                let found = previous
+                    .hosted_identities
+                    .binary_search_by_key(&identity, |&(id, _)| id)
+                    .expect("reuse ownership was validated before activation");
+                let previous_index = previous.hosted_identities[found].1;
+                std::mem::swap(
+                    &mut self.hosted_processors[index],
+                    &mut previous.hosted_processors[previous_index],
+                );
+            }
+        }
     }
 
     /// Attaches app-owned recording sessions while preparing an inactive processor.

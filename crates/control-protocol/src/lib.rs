@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+mod editor_surface;
+pub use editor_surface::{EditorPointerKind, ProcessorEditorFrame, ProcessorEditorInput};
 pub use tonenari_audio_recorder::{RecorderRequest, RecorderStatus};
 
 /// Engine-authored capture ownership, independent of the graph visible in an editor.
@@ -90,6 +92,9 @@ pub struct GraphCatalogResponse {
 pub struct GraphLayout {
     #[serde(default)]
     pub positions: std::collections::BTreeMap<String, GraphNodePosition>,
+    /// User-resized cards keyed by UI identity; absent entries use their natural size.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub sizes: std::collections::BTreeMap<String, GraphNodeSize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub viewport: Option<GraphViewport>,
 }
@@ -99,6 +104,16 @@ pub struct GraphLayout {
 pub struct GraphNodePosition {
     pub x: f64,
     pub y: f64,
+}
+
+/// Explicit UI card dimensions in graph coordinates, independent of the audio document.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GraphNodeSize {
+    /// Card width in graph pixels.
+    pub width: f64,
+    /// Card height in graph pixels.
+    pub height: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -398,7 +413,9 @@ mod tests {
         assert_eq!(response.layout_revision, 0);
         assert_eq!(response.layout, super::GraphLayout::default());
         let layout = serde_json::json!({"expectedLayoutRevision":3,"layout":{
-            "positions":{"duplex:from_os":{"x":100.0,"y":-20.0}},"viewport":{"x":0.0,"y":0.0,"zoom":1.25}
+            "positions":{"duplex:from_os":{"x":100.0,"y":-20.0}},
+            "sizes":{"duplex:from_os":{"width":320.0,"height":180.0}},
+            "viewport":{"x":0.0,"y":0.0,"zoom":1.25}
         }});
         let request: super::GraphLayoutRequest = serde_json::from_value(layout.clone()).unwrap();
         assert_eq!(serde_json::to_value(request).unwrap(), layout);

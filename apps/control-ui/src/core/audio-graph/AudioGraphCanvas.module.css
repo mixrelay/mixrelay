@@ -29,7 +29,7 @@
   border-radius: 0;
   background: #191b1f;
   color: #bdc2ca;
-  cursor: pointer;
+  cursor: default;
   font: inherit;
   font-size: 11px;
 }
@@ -48,7 +48,18 @@
   line-height: 1;
 }
 
-.root :global(.react-flow__renderer) {
+.root :global(.react-flow__renderer),
+.root :global(.react-flow__pane.draggable),
+.root :global(.react-flow__pane.dragging),
+.root :global(.react-flow__pane.selection),
+.root :global(.react-flow__node.selectable),
+.root :global(.react-flow__node.draggable),
+.root :global(.react-flow__node.draggable.dragging),
+.root :global(.react-flow__nodesselection-rect),
+.root :global(.react-flow__edge.selectable),
+.root :global(.react-flow__edgeupdater),
+.root :global(.react-flow__handle.connectionindicator),
+.root :global(.react-flow__controls-button) {
   cursor: default;
 }
 
@@ -72,16 +83,29 @@
   stroke-width: 2.5;
 }
 
-.root :global(.react-flow__edgeupdater) {
-  cursor: grab;
-}
-
-.root :global(.react-flow__edgeupdater:active) {
-  cursor: grabbing;
-}
-
 .node {
   width: 228px;
+  position: relative;
+  padding-bottom: 12px;
+  box-sizing: border-box;
+  background: #1b1d21;
+}
+
+.node .resizeHandle {
+  right: 1px;
+  bottom: 1px;
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 0;
+  transform: none;
+  background: transparent;
+  color: #6b737e;
+  cursor: nwse-resize;
+}
+
+.node .resizeHandle:hover {
+  color: var(--signal);
 }
 
 .handle {

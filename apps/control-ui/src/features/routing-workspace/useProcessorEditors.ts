@@ -5,7 +5,7 @@ import type { ControlPort, ProcessorEditorStatus } from '../../core/control-port
 
 export const EDITOR_POLL_MS = 250;
 type EditorPort = Pick<ControlPort, 'getProcessorEditor' | 'setProcessorEditor'>;
-type Action = { kind: 'poll' } | { kind: 'toggle'; open: boolean };
+type Action = { kind: 'poll' } | { kind: 'open' };
 export interface ProcessorEditorIssue {
   nodeId: string;
   name: string;
@@ -20,7 +20,6 @@ interface Entry {
   timer?: ReturnType<typeof setTimeout>;
 }
 interface Callbacks {
-  read: (id: string) => ProcessorEditorStatus | undefined;
   status: (status: ProcessorEditorStatus) => void;
   issue: (entry: Entry, busy: boolean | null) => void;
   busy: (entry: Entry) => void;
@@ -64,15 +63,23 @@ class EditorSession {
   private valid(entry: Entry, sequence: number) {
     return !this.cancelled && this.entries.get(entry.id) === entry && sequence === entry.sequence;
   }
-  private receive(entry: Entry, status: ProcessorEditorStatus) {
+  private receive(entry: Entry, status: ProcessorEditorStatus, action: Action) {
     if (status.nodeId !== entry.id) throw new Error('Mismatched editor response');
     this.callbacks.status(status);
-    if (status.state === 'failed' || status.state === 'unavailable') {
-      if (entry.retry.kind === 'poll') entry.retry = { kind: 'toggle', open: true };
+    if (
+      status.state === 'failed' ||
+      status.state === 'unavailable' ||
+      (status.state === 'closed' && action.kind === 'open')
+    ) {
+      entry.retry = { kind: 'open' };
       this.callbacks.issue(entry, false);
       return;
     }
     this.callbacks.issue(entry, null);
+    if (status.state === 'closed') {
+      void this.run(entry, { kind: 'open' });
+      return;
+    }
     if (status.state === 'open' || status.state === 'opening') {
       entry.timer = setTimeout(() => {
         void this.run(entry, { kind: 'poll' });
@@ -83,28 +90,22 @@ class EditorSession {
     if (this.cancelled || entry.command) return;
     if (entry.timer) clearTimeout(entry.timer);
     const sequence = ++entry.sequence;
-    entry.command = action.kind === 'toggle';
-    if (action.kind === 'toggle') entry.retry = action;
+    entry.command = action.kind === 'open';
+    if (action.kind === 'open') entry.retry = action;
     this.callbacks.busy(entry);
     try {
       const status = await (action.kind === 'poll'
         ? this.port.getProcessorEditor(entry.id)
-        : this.port.setProcessorEditor(entry.id, action.open));
+        : this.port.setProcessorEditor(entry.id, true));
       if (!this.valid(entry, sequence)) return;
       entry.command = false;
-      this.receive(entry, status);
+      this.receive(entry, status, action);
     } catch {
       if (!this.valid(entry, sequence)) return;
       entry.command = false;
       entry.retry = action;
       this.callbacks.issue(entry, false); // Keep the last confirmed native state.
     }
-  }
-  toggle(id: string) {
-    const entry = this.entries.get(id);
-    if (!entry) return;
-    const state = this.callbacks.read(id)?.state;
-    void this.run(entry, { kind: 'toggle', open: state !== 'open' && state !== 'opening' });
   }
   retry(id: string) {
     const entry = this.entries.get(id);
@@ -113,16 +114,26 @@ class EditorSession {
   dispose() {
     this.cancelled = true;
     for (const entry of this.entries.values()) if (entry.timer) clearTimeout(entry.timer);
+    // Native editor ownership belongs to the processor runtime. The control API resolves
+    // IDs in the selected graph, so a late close here could close a different graph's node.
   }
 }
 
-export function useProcessorEditors(controlPort: EditorPort, model: AudioGraphModel | null) {
+export function useProcessorEditors(
+  controlPort: EditorPort,
+  model: AudioGraphModel | null,
+  graphId?: string,
+) {
   const [statuses, setStatuses] = useState<Map<string, ProcessorEditorStatus>>(() => new Map());
   const [issues, setIssues] = useState<Map<string, ProcessorEditorIssue>>(() => new Map());
   const statusesRef = useRef(statuses);
   statusesRef.current = statuses;
   const sessionRef = useRef<EditorSession | null>(null);
-  const previous = useRef<{ port: EditorPort; keys: Map<string, string> } | null>(null);
+  const previous = useRef<{
+    port: EditorPort;
+    keys: Map<string, string>;
+    graphId?: string;
+  } | null>(null);
   const key = JSON.stringify(identities(model));
   useEffect(() => {
     const nodes: [string, string, string][] = JSON.parse(key);
@@ -131,14 +142,16 @@ export function useProcessorEditors(controlPort: EditorPort, model: AudioGraphMo
     statusesRef.current = new Map(
       [...statusesRef.current].filter(
         ([id]) =>
-          prior?.port === controlPort && keys.has(id) && prior.keys.get(id) === keys.get(id),
+          prior?.port === controlPort &&
+          prior.graphId === graphId &&
+          keys.has(id) &&
+          prior.keys.get(id) === keys.get(id),
       ),
     );
     setStatuses(statusesRef.current);
-    previous.current = { port: controlPort, keys };
+    previous.current = { port: controlPort, keys, graphId };
     setIssues(new Map());
     const session = new EditorSession(controlPort, nodes, {
-      read: (id) => statusesRef.current.get(id),
       status: (status) => {
         statusesRef.current = new Map(statusesRef.current).set(status.nodeId, status);
         setStatuses(statusesRef.current);
@@ -163,8 +176,7 @@ export function useProcessorEditors(controlPort: EditorPort, model: AudioGraphMo
       session.dispose();
       sessionRef.current = null;
     };
-  }, [controlPort, key]);
-  const toggle = useCallback((id: string) => sessionRef.current?.toggle(id), []);
+  }, [controlPort, key, graphId]);
   const retry = useCallback((id: string) => sessionRef.current?.retry(id), []);
-  return { statuses, issues, toggle, retry };
+  return { statuses, issues, retry };
 }

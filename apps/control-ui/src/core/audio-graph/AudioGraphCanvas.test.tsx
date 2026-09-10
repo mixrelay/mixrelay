@@ -267,6 +267,7 @@ vi.mock('@xyflow/react', () => ({
     />
   ),
   Position: { Left: 'left', Right: 'right' },
+  NodeResizeControl: ({ position }: { position: string }) => <span data-resize-grip={position} />,
   ReactFlow: MockReactFlow,
   useConnection: (selector: (connection: MockItem) => unknown) =>
     selector({ inProgress: false, toHandle: null }),

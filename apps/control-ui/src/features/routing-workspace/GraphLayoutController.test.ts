@@ -34,6 +34,27 @@ function fixture() {
 afterEach(() => vi.useRealTimers());
 
 describe('presentation checkpoint controller', () => {
+  it('flushes the last resize on graph switch after the current write completes', async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    await f.controller.reload();
+    const pending = deferred<GraphLayoutResponse>();
+    f.setGraphLayout.mockReturnValueOnce(pending.promise);
+    f.controller.update(layout(20));
+    await vi.advanceTimersByTimeAsync(400);
+    const resized = { ...layout(30), sizes: { input: { width: 400, height: 220 } } };
+    f.controller.update(resized);
+    f.controller.dispose();
+    pending.resolve(saved(20, 2));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(f.setGraphLayout).toHaveBeenLastCalledWith('a', {
+      expectedLayoutRevision: 2,
+      layout: resized,
+    });
+    expect(f.setGraphLayout).toHaveBeenCalledTimes(2);
+    expect(f.applyGraph).not.toHaveBeenCalled();
+  });
+
   it('restores separate input/output positions and debounces 500 edits into one audio-free save', async () => {
     vi.useFakeTimers();
     const f = fixture();
@@ -135,6 +156,9 @@ describe('presentation checkpoint recovery', () => {
     f.controller.dispose();
     f.controller.update(layout(90));
     await vi.advanceTimersByTimeAsync(400);
-    expect(f.setGraphLayout).not.toHaveBeenCalled();
+    expect(f.setGraphLayout).toHaveBeenCalledExactlyOnceWith('a', {
+      expectedLayoutRevision: 1,
+      layout: layout(80),
+    });
   });
 });

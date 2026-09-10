@@ -19,6 +19,8 @@ function controlPortWithStatus(
     getGraphStatus: controlPort.getGraphStatus.bind(controlPort),
     getMeters: controlPort.getMeters.bind(controlPort),
     getProcessorEditor: controlPort.getProcessorEditor.bind(controlPort),
+    getProcessorEditorFrame: controlPort.getProcessorEditorFrame.bind(controlPort),
+    sendProcessorEditorInput: controlPort.sendProcessorEditorInput.bind(controlPort),
     getProcessors: controlPort.getProcessors.bind(controlPort),
     getStatus,
     rescanProcessors: controlPort.rescanProcessors.bind(controlPort),

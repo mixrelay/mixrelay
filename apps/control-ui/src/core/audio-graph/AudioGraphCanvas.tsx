@@ -12,6 +12,7 @@ import {
   Handle,
   type NodeChange,
   type NodeProps,
+  NodeResizeControl,
   Position,
   ReactFlow,
   type ReactFlowInstance,
@@ -44,7 +45,7 @@ import type { AudioMeterStore } from '../audio-meter/AudioMeterStore';
 import { useAudioMeterLevels } from '../audio-meter/useAudioMeterLevels';
 import type { ProcessorEditorFailure, ProcessorEditorStatus } from '../control-port/types';
 import { AudioNodeCard } from '../ui/AudioNodeCard';
-import { audioNodeFaceGeometry, audioNodePortTop } from '../ui/audioNodeLayout';
+import { audioNodePortTop } from '../ui/audioNodeLayout';
 import {
   HierarchicalContextMenu,
   HierarchicalMenuButton,
@@ -62,6 +63,7 @@ import {
   moveAudioGraphNode,
   reconnectAudioGraph,
   removeAudioGraphItems,
+  resizeAudioGraphNode,
 } from './model';
 import {
   type AudioFlowEdge,
@@ -69,6 +71,7 @@ import {
   reconcileAudioFlowEdges,
   reconcileAudioFlowNodes,
 } from './reactFlowAdapter';
+import { graphNodeFaceGeometry, graphNodeFaceMode, useAudioNodeLayout } from './useAudioNodeLayout';
 import { type GraphContextMenuLabels, useGraphContextMenu } from './useGraphContextMenu';
 
 const nodeTypes = { audio: memo(AudioFlowNodeView) };
@@ -97,15 +100,12 @@ const NodeParameterContext = createContext<
   ((nodeId: string, parameterId: string, value: number) => void) | undefined
 >(undefined);
 export interface ProcessorEditorLabels {
-  close: string;
+  retry: string;
   failure: Record<ProcessorEditorFailure, string>;
-  label: string;
-  open: string;
-  state: Record<ProcessorEditorStatus['state'], string>;
 }
 interface NodeProcessorEditorContextValue {
   labels: ProcessorEditorLabels;
-  onToggle: (nodeId: string) => void;
+  onRetry: (nodeId: string) => void;
   statuses: ReadonlyMap<string, ProcessorEditorStatus>;
 }
 const NodeProcessorEditorContext = createContext<NodeProcessorEditorContextValue | null>(null);
@@ -158,7 +158,7 @@ export interface AudioGraphCanvasProps {
   ) => void;
   onNodeGainChange?: (nodeId: string, gainDb: number) => void;
   onNodeParameterChange?: (nodeId: string, parameterId: string, value: number) => void;
-  onProcessorEditorToggle?: (nodeId: string) => void;
+  onProcessorEditorRetry?: (nodeId: string) => void;
   processorEditorLabels?: ProcessorEditorLabels;
   processorEditorStatuses?: ReadonlyMap<string, ProcessorEditorStatus>;
   /** Initial or externally restored view; user movement remains locally interactive. */
@@ -210,16 +210,16 @@ function AudioGraphProviders({
 }
 
 function processorEditorContext(
-  onToggle: AudioGraphCanvasProps['onProcessorEditorToggle'],
+  onRetry: AudioGraphCanvasProps['onProcessorEditorRetry'],
   labels: ProcessorEditorLabels | undefined,
   statuses: ReadonlyMap<string, ProcessorEditorStatus>,
 ): NodeProcessorEditorContextValue | null {
-  return onToggle && labels ? { labels, onToggle, statuses } : null;
+  return onRetry && labels ? { labels, onRetry, statuses } : null;
 }
 
 function useCanvasViewActions(
   onAddNode: AudioGraphCanvasProps['onAddNode'],
-  onProcessorEditorToggle: AudioGraphCanvasProps['onProcessorEditorToggle'],
+  onProcessorEditorRetry: AudioGraphCanvasProps['onProcessorEditorRetry'],
   processorEditorLabels: ProcessorEditorLabels | undefined,
   processorEditorStatuses: ReadonlyMap<string, ProcessorEditorStatus>,
   nodeMenu: ReturnType<typeof useNodeMenu>,
@@ -236,7 +236,7 @@ function useCanvasViewActions(
   return {
     addNode,
     editorContext: processorEditorContext(
-      onProcessorEditorToggle,
+      onProcessorEditorRetry,
       processorEditorLabels,
       processorEditorStatuses,
     ),
@@ -570,15 +570,6 @@ function selectedNodePorts(
   return ports.filter((port) => selectedIds.has(port.id));
 }
 
-function graphNodeFaceGeometry(node: AudioGraphModel['nodes'][number]) {
-  return audioNodeFaceGeometry({
-    channels: node.appearance.meterChannels,
-    hasDetail: Boolean(node.appearance.detail),
-    portCount: Math.max(node.inputPorts.length, node.outputPorts.length),
-    mode: node.runtime?.type === 'recorder' ? 'channel-rows' : 'standard',
-  });
-}
-
 function portVerticalOffset(
   model: AudioGraphModel,
   nodeId: string,
@@ -897,6 +888,9 @@ function useNodeChangeHandler(
         if (change.type === 'position' && change.position) {
           nextModel = moveAudioGraphNode(nextModel, change.id, change.position);
         }
+        if (change.type === 'dimensions' && change.dimensions && change.setAttributes) {
+          nextModel = resizeAudioGraphNode(nextModel, change.id, change.dimensions);
+        }
       }
       commit(nextModel, 'layout');
     },
@@ -1127,7 +1121,7 @@ export function AudioGraphCanvas({
   onNodeEndpointChange,
   onNodeGainChange,
   onNodeParameterChange,
-  onProcessorEditorToggle,
+  onProcessorEditorRetry,
   processorEditorLabels,
   processorEditorStatuses = emptyProcessorEditorStatuses,
   renderNodeContent,
@@ -1158,7 +1152,7 @@ export function AudioGraphCanvas({
   const onNodesChange = useNodeChangeHandler(model, commit, applyNodeChanges);
   const { addNode, editorContext, onPaneClick } = useCanvasViewActions(
     onAddNode,
-    onProcessorEditorToggle,
+    onProcessorEditorRetry,
     processorEditorLabels,
     processorEditorStatuses,
     nodeMenu,
@@ -1235,24 +1229,31 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
   const processorEditors = useContext(NodeProcessorEditorContext);
   const renderNodeContent = useContext(NodeContentContext);
   const updateNodeInternals = useUpdateNodeInternals();
-  const portSignature = [
-    ...graphNode.inputPorts.map((port) => `in:${port.id}`),
-    ...graphNode.outputPorts.map((port) => `out:${port.id}`),
-  ].join('|');
-  useEffect(() => {
-    void portSignature;
-    updateNodeInternals(graphNode.id);
-  }, [graphNode.id, portSignature, updateNodeInternals]);
+  const editorStatus = processorEditors?.statuses.get(graphNode.id);
+  const editorWidth = editorStatus?.state === 'open' ? editorStatus.width : null;
+  const layout = useAudioNodeLayout(graphNode, {
+    width: editorWidth,
+    height: editorStatus?.height ?? null,
+  });
   const levels = useAudioMeterLevels(
     graphNode.appearance.meterSource?.nodeId,
     graphNode.appearance.meterSource?.portId,
   );
-  const geometry = graphNodeFaceGeometry(graphNode);
   return (
-    <div className={styles.node}>
+    <div
+      ref={layout.ref}
+      className={styles.node}
+      style={{
+        width:
+          graphNode.size?.width ??
+          (editorWidth ? Math.min(1600, Math.max(240, editorWidth)) : undefined),
+        height: graphNode.size?.height,
+        minHeight: layout.minHeight,
+      }}
+    >
       {graphNode.inputPorts.map((port, index) => (
         <AudioPortHandle
-          top={audioNodePortTop(geometry, index, graphNode.inputPorts.length)}
+          top={audioNodePortTop(layout.ports, index, graphNode.inputPorts.length)}
           index={index}
           key={port.id}
           nodeId={graphNode.id}
@@ -1263,8 +1264,10 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
       <AudioNodeCard
         {...graphNode.appearance}
         content={renderNodeContent?.(graphNode)}
-        faceHeight={geometry.height}
-        faceMode={graphNode.runtime?.type === 'recorder' ? 'channel-rows' : 'standard'}
+        faceHeight={layout.face.height}
+        faceMode={graphNodeFaceMode(graphNode)}
+        onFaceHeightChange={layout.onFaceHeightChange}
+        onContentHeightChange={layout.onContentHeightChange}
         inputCount={graphNode.inputPorts.length}
         meterLevels={levels}
         onGainChange={
@@ -1279,9 +1282,9 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
             ? (parameterId, value) => onNodeParameterChange(graphNode.id, parameterId, value)
             : undefined
         }
-        onProcessorEditorToggle={
+        onProcessorEditorRetry={
           graphNode.appearance.hasProcessorEditor && processorEditors
-            ? () => processorEditors.onToggle(graphNode.id)
+            ? () => processorEditors.onRetry(graphNode.id)
             : undefined
         }
         onSelect={() => undefined}
@@ -1296,7 +1299,7 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
       />
       {graphNode.outputPorts.map((port, index) => (
         <AudioPortHandle
-          top={audioNodePortTop(geometry, index, graphNode.outputPorts.length)}
+          top={audioNodePortTop(layout.ports, index, graphNode.outputPorts.length)}
           index={index}
           key={port.id}
           nodeId={graphNode.id}
@@ -1304,7 +1307,26 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
           side="output"
         />
       ))}
+      <NodeResizeGrip minHeight={layout.minHeight} />
     </div>
+  );
+}
+
+function NodeResizeGrip({ minHeight }: { minHeight: number }) {
+  return (
+    <NodeResizeControl
+      className={`${styles.resizeHandle} nodrag nopan`}
+      position="bottom-right"
+      minWidth={180}
+      minHeight={minHeight}
+      maxWidth={4096}
+      maxHeight={4096}
+      autoScale={false}
+    >
+      <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12">
+        <path d="m3 10 7-7M7 10l3-3" fill="none" stroke="currentColor" />
+      </svg>
+    </NodeResizeControl>
   );
 }
 
@@ -1324,11 +1346,9 @@ function processorEditorProps(
     width: null,
   };
   return {
-    actionLabel: status.state === 'open' ? context.labels.close : context.labels.open,
+    actionLabel: context.labels.retry,
     failureLabel: status.failure ? context.labels.failure[status.failure] : undefined,
-    label: context.labels.label,
     state: status.state,
-    stateLabel: context.labels.state[status.state],
   };
 }
 

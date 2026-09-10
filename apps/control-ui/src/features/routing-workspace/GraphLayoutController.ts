@@ -69,8 +69,11 @@ export class GraphLayoutController {
   }
   dispose = () => {
     this.disposed = true;
-    this.generation++;
     this.cancelTimer();
+    if (this.state.loading) this.generation++;
+    // Switching graphs must not discard the final drag/resize debounce. An in-flight
+    // writer finishes before save() submits the latest dirty layout at its new revision.
+    else if (!this.state.error) void this.save();
   };
 
   private validate(response: GraphLayoutResponse) {

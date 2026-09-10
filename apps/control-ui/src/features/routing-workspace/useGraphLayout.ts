@@ -33,7 +33,7 @@ export function useGraphLayout(
     )
       return;
     restored.current = { controller, version: state.restoreVersion };
-    // Layout owns positions only; a concurrent catalog refresh owns current node metadata.
+    // Layout owns presentation geometry; catalog refreshes own current node metadata.
     setModel(
       (current) =>
         current && {
@@ -41,15 +41,19 @@ export function useGraphLayout(
           nodes: current.nodes.map((node) => ({
             ...node,
             position: state.layout.positions[node.id] ?? node.position,
+            size: state.layout.sizes?.[node.id],
           })),
         },
     );
-  }, [controller, model, setModel, state.layout.positions, state.restoreVersion]);
-  const updatePositions = useCallback(
+  }, [controller, model, setModel, state.layout, state.restoreVersion]);
+  const updateNodes = useCallback(
     (next: AudioGraphModel) => {
       controller.update({
         ...controller.snapshot().layout,
         positions: Object.fromEntries(next.nodes.map((node) => [node.id, { ...node.position }])),
+        sizes: Object.fromEntries(
+          next.nodes.flatMap((node) => (node.size ? [[node.id, { ...node.size }]] : [])),
+        ),
       });
     },
     [controller],
@@ -60,5 +64,5 @@ export function useGraphLayout(
     },
     [controller],
   );
-  return { ...state, controller, updatePositions, updateViewport };
+  return { ...state, controller, updateNodes, updateViewport };
 }

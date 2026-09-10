@@ -11,6 +11,8 @@ import type {
   GraphLayoutResponse,
   GraphRuntimeStatus,
   MeterSnapshot,
+  ProcessorEditorFrame,
+  ProcessorEditorInput,
   ProcessorEditorStatus,
   ProcessorParameterUpdateResponse,
   RecorderRequest,
@@ -176,6 +178,15 @@ export class StorybookMockControlPort implements ControlPort {
   public async getProcessorEditor(nodeId: string): Promise<ProcessorEditorStatus> {
     return this.editorStates.get(nodeId) ?? closedEditor(nodeId);
   }
+
+  public async getProcessorEditorFrame(_nodeId: string): Promise<ProcessorEditorFrame> {
+    throw new Error('Native editor images are unavailable in Storybook');
+  }
+
+  public async sendProcessorEditorInput(
+    _nodeId: string,
+    _input: ProcessorEditorInput,
+  ): Promise<void> {}
 
   public async rescanProcessors(_paths: string[]): Promise<ExternalProcessorCatalog> {
     return this.getProcessors();

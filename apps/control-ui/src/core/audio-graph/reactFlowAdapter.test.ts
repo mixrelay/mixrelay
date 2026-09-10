@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { type AudioGraphModel, connectAudioGraph, disconnectAudioGraph } from './model';
+import {
+  type AudioGraphModel,
+  connectAudioGraph,
+  disconnectAudioGraph,
+  resizeAudioGraphNode,
+} from './model';
 import { reconcileAudioFlowEdges, reconcileAudioFlowNodes } from './reactFlowAdapter';
 
 function largeGraph(size: number): AudioGraphModel {
@@ -24,6 +29,20 @@ function largeGraph(size: number): AudioGraphModel {
 }
 
 describe('React Flow incremental adapter', () => {
+  it('restores presentation sizes without changing the audio revision or other nodes', () => {
+    const before = largeGraph(2);
+    const flow = reconcileAudioFlowNodes([], before);
+    const after = resizeAudioGraphNode(before, 'node-0', { width: 420, height: 280 });
+    const resized = reconcileAudioFlowNodes(flow, after);
+    expect(after.revision).toBe(before.revision);
+    expect(resized[0]).toMatchObject({ width: 420, height: 280 });
+    expect(resized[1]).toBe(flow[1]);
+    expect(resizeAudioGraphNode(after, 'node-0', { width: 420, height: 280 })).toBe(after);
+    expect(resizeAudioGraphNode(after, 'node-0', { width: NaN, height: 280 })).toBe(after);
+    const bounded = resizeAudioGraphNode(after, 'node-0', { width: 1, height: 5000 });
+    expect(bounded.nodes[0]?.size).toEqual({ width: 180, height: 4096 });
+  });
+
   it('preserves every unaffected adapter during an edge disconnect', () => {
     const before = largeGraph(1_024);
     const nodes = reconcileAudioFlowNodes([], before);

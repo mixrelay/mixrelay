@@ -55,3 +55,26 @@ it('preserves standard faces and their distributed port positions', () => {
   expect([audioNodePortTop(stereo, 0, 2), audioNodePortTop(stereo, 1, 2)]).toEqual([44, 88]);
   expect(audioNodeFaceGeometry({ channels: 64, portCount: 64 }).height).toBe(780);
 });
+
+it.each([1, 2, 4, 8])('keeps an unmetered plug-in header compact with %i ports', (ports) => {
+  const geometry = audioNodeFaceGeometry({ mode: 'compact', portCount: ports });
+  expect(geometry.height).toBe(26);
+  expect(geometry.height).toBeLessThan(minimumAudioNodeFaceHeight(ports));
+});
+
+it.each([1, 2, 8])(
+  'places %i plug-in ports below the header and above the resize grip',
+  (count) => {
+    const geometry = {
+      ...audioNodeFaceGeometry({ mode: 'compact' }),
+      height: 300,
+      portInsetTop: 26,
+      portInsetBottom: 12,
+    };
+    for (let index = 0; index < count; index++) {
+      const top = audioNodePortTop(geometry, index, count);
+      expect(top).toBeGreaterThan(26);
+      expect(top).toBeLessThan(288);
+    }
+  },
+);

@@ -245,6 +245,7 @@ fn add_shared_reference(controller: &EngineGraphController) {
                     )]
                     .into(),
                     viewport: None,
+                    sizes: std::collections::BTreeMap::default(),
                 },
             },
         )

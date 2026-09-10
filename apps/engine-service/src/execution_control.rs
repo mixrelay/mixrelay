@@ -113,6 +113,18 @@ impl EngineGraphController {
         catalog: Option<&Catalog>,
         context: CompileContext,
     ) -> Result<PreparedExecution, ProtocolError> {
+        // Production callers retain `mutation` through preparation and submission. With
+        // no pending plan, the audio thread cannot retire a reuse owner while we prepare.
+        let revisions = self.exchange.revisions();
+        if revisions.active != revisions.submitted {
+            return Err(ProtocolError {
+                code: ErrorCode::GraphExchangeBusy,
+                parameters: serde_json::json!({
+                    "activeRevision": revisions.active,
+                    "proposedRevision": document.revision,
+                }),
+            });
+        }
         let composed = self.compose_execution(document, catalog, context)?;
         let captures = capture_manifest(&composed.document)?;
         let endpoints =

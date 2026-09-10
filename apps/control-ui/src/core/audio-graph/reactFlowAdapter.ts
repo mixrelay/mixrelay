@@ -20,6 +20,8 @@ function createFlowNode(graphNode: AudioGraphNode, previous?: AudioFlowNode): Au
     deletable: true,
     id: graphNode.id,
     position: graphNode.position,
+    width: graphNode.size?.width,
+    height: graphNode.size?.height,
     type: 'audio',
     zIndex: 1,
   };

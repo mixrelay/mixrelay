@@ -12,6 +12,50 @@ fn change(id: u32, value: f64) -> GraphProcessorParameterChange {
 }
 
 #[test]
+fn pending_startup_preserves_desired_provider_state_without_snapshotting_missing_worker() {
+    let (engine, _) = parameter_fixture(parameter_document());
+    engine.defer_catalog_restore(ProtocolError {
+        code: ErrorCode::AudioDeviceDisconnected,
+        parameters: serde_json::json!({"reason": "injected startup timeout"}),
+    });
+    let mut proposed = engine.graph();
+    proposed.revision += 1;
+    let original = proposed.clone();
+    let NodeConfig::Provider(provider) = &mut proposed.nodes[0].config else {
+        panic!("fixture must contain the saved provider");
+    };
+    provider.parameters = serde_json::json!({"stateBase64":"STALE"});
+    engine
+        .preserve_live_processor_state_with(
+            &mut proposed,
+            &[],
+            |_, _| panic!("an unstarted worker must not be snapshotted"),
+            |_, _| true,
+        )
+        .unwrap();
+    assert_eq!(proposed, original);
+    let NodeConfig::Provider(provider) = &mut proposed.nodes[0].config else {
+        panic!("fixture must contain the saved provider");
+    };
+    provider.parameters = serde_json::json!({"stateBase64":"STALE"});
+    engine
+        .preserve_live_processor_state_with(
+            &mut proposed,
+            &[change(7, 0.25)],
+            |_, _| panic!("an unstarted worker must not be snapshotted"),
+            |_, _| true,
+        )
+        .unwrap();
+    assert_eq!(provider_parameters(&proposed)["parameterValues"]["7"], 0.25);
+    let mut expected = original;
+    let NodeConfig::Provider(provider) = &mut expected.nodes[0].config else {
+        panic!("fixture must contain the saved provider");
+    };
+    crate::persist_processor_parameter(provider, 7, 0.25);
+    assert_eq!(proposed, expected);
+}
+
+#[test]
 fn structural_edits_preserve_native_preset_and_only_explicit_undo_deltas_overlay_it() {
     let (engine, _) = parameter_fixture(parameter_document());
     for changes in [vec![], vec![change(7, 0.25)], vec![change(7, 0.75)]] {

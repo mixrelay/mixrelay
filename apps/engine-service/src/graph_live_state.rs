@@ -56,6 +56,7 @@ impl EngineGraphController {
         }
         let current = self.graph.read().clone();
         let graph_id = self.view_graph_id();
+        let restoring = self.catalog_restore.lock().is_some();
         validate_changes(&current, proposed, changes, writable)?;
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut candidate = proposed.clone();
@@ -69,14 +70,18 @@ impl EngineGraphController {
             if previous.type_id != provider.type_id {
                 continue;
             }
-            let timeout = deadline.saturating_duration_since(Instant::now());
-            if timeout.is_zero() {
-                return Err(unavailable("processor state snapshot deadline exceeded"));
-            }
-            provider.parameters =
-                capture(&runtime_node_id(&graph_id, &node.id), timeout).map_err(|error| {
+            let runtime_id = runtime_node_id(&graph_id, &node.id);
+            if !restoring || self.provider_is_running(&runtime_id) {
+                let timeout = deadline.saturating_duration_since(Instant::now());
+                if timeout.is_zero() {
+                    return Err(unavailable("processor state snapshot deadline exceeded"));
+                }
+                provider.parameters = capture(&runtime_id, timeout).map_err(|error| {
                     unavailable(&format!("processor state snapshot failed: {error}"))
                 })?;
+            } else {
+                provider.parameters.clone_from(&previous.parameters);
+            }
             for change in changes
                 .iter()
                 .filter(|change| change.node_id == node.id.as_str())
@@ -138,11 +143,7 @@ impl EngineGraphController {
             };
             let runtime_id = runtime_node_id(graph_id, &node.id);
             // Saved documents are not live workers until their composition is acknowledged.
-            let running = self
-                .execution_views
-                .read()
-                .get(&self.exchange.revisions().active)
-                .is_some_and(|view| view.origins.contains_key(&runtime_id));
+            let running = self.provider_is_running(&runtime_id);
             let same_provider = provider_at(before, node.id.as_str())
                 .is_some_and(|old| old.type_id == provider.type_id);
             if !running || !same_provider {
@@ -157,6 +158,13 @@ impl EngineGraphController {
             })?;
         }
         Ok(())
+    }
+
+    fn provider_is_running(&self, runtime_id: &NodeId) -> bool {
+        self.execution_views
+            .read()
+            .get(&self.exchange.revisions().active)
+            .is_some_and(|view| view.origins.contains_key(runtime_id))
     }
 }
 

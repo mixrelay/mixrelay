@@ -43,6 +43,7 @@ import {
   updateVirtualEndpoint,
   type VirtualEndpointUpdate,
 } from './model';
+import { NativeProcessorSurface } from './NativeProcessorSurface';
 import { ProcessorCatalogAlert, ProcessorEditorAlerts } from './ProcessorControlAlerts';
 import { ProcessorParameterAlert } from './ProcessorParameterAlert';
 import {
@@ -319,6 +320,7 @@ function useWorkspaceGraph(
         nodes: refreshed.nodes.map((node) => ({
           ...node,
           position: current.nodes.find((old) => old.id === node.id)?.position ?? node.position,
+          size: current.nodes.find((old) => old.id === node.id)?.size,
         })),
       };
     });
@@ -476,7 +478,7 @@ function useGraphApplication(
             current.presentation,
             current.processors,
           );
-          // Reload changes runtime state, not the positions of surviving nodes.
+          // Reload changes runtime state, not the geometry of surviving nodes.
           const model = {
             ...restored,
             nodes: restored.nodes.map((node) => ({
@@ -484,6 +486,7 @@ function useGraphApplication(
               position:
                 currentModel.current?.nodes.find((old) => old.id === node.id)?.position ??
                 node.position,
+              size: currentModel.current?.nodes.find((old) => old.id === node.id)?.size,
             })),
           };
           currentModel.current = model;
@@ -504,6 +507,18 @@ function processorEditIntent(
   kind: AudioGraphChangeKind,
 ) {
   return kind === 'processor_parameter' && before ? changedProcessorParameters(before, after) : [];
+}
+
+function restoreHistoryModel(
+  step: { value: AudioGraphModel; kind: AudioGraphChangeKind },
+  current: AudioGraphModel | null,
+) {
+  const { value, kind } = step;
+  const currentRevision = current?.revision ?? value.revision;
+  return {
+    ...value,
+    revision: kind === 'layout' ? currentRevision : Math.max(currentRevision, value.revision) + 1,
+  };
 }
 
 function useGraphUpdates(
@@ -575,10 +590,7 @@ function useGraphUpdates(
   const restore = useCallback(
     (step: ReturnType<typeof nextUndoStep>) => {
       if (!step) return false;
-      const restoredModel = {
-        ...step.value,
-        revision: Math.max(currentModel.current?.revision ?? 0, step.value.revision) + 1,
-      };
+      const restoredModel = restoreHistoryModel(step, currentModel.current);
       const previousModel = currentModel.current;
       currentModel.current = restoredModel;
       setModel(restoredModel);
@@ -640,6 +652,7 @@ function useSessionGraphRefresh(
       nodes: next.nodes.map((node) => ({
         ...node,
         position: previous?.nodes.find((old) => old.id === node.id)?.position ?? node.position,
+        size: previous?.nodes.find((old) => old.id === node.id)?.size,
       })),
     }));
     clearHistory();
@@ -681,7 +694,7 @@ export function RoutingWorkspace({
   const { errorCode, model, state } = graph;
   const layout = useGraphLayout(controlPort, graphId, model, graph.setModel);
   const { clearHistory, redo, undo, updateModel, application, parameterBusy, parameters } =
-    useGraphUpdates(controlPort, presentation, processors, graph, layout.updatePositions);
+    useGraphUpdates(controlPort, presentation, processors, graph, layout.updateNodes);
   useWorkspaceBusy(onBusyChange, state, parameterBusy, layout);
   useSessionGraphRefresh(
     sessionDocument,
@@ -814,22 +827,13 @@ function useProcessorEditorLabels() {
   const { t } = useTranslation();
   return useMemo<ProcessorEditorLabels>(
     () => ({
-      close: t('routing.processorEditor.close'),
+      retry: t('routing.processorControl.retry'),
       failure: {
         display_unavailable: t('routing.processorEditor.failures.displayUnavailable'),
         host_window_failed: t('routing.processorEditor.failures.hostWindowFailed'),
         no_editor: t('routing.processorEditor.failures.noEditor'),
         plugin_rejected: t('routing.processorEditor.failures.pluginRejected'),
         worker_unavailable: t('routing.processorEditor.failures.workerUnavailable'),
-      },
-      label: t('routing.processorEditor.label'),
-      open: t('routing.processorEditor.open'),
-      state: {
-        closed: t('routing.processorEditor.states.closed'),
-        failed: t('routing.processorEditor.states.failed'),
-        open: t('routing.processorEditor.states.open'),
-        opening: t('routing.processorEditor.states.opening'),
-        unavailable: t('routing.processorEditor.states.unavailable'),
       },
     }),
     [t],
@@ -906,7 +910,7 @@ function WorkspaceView(props: WorkspaceViewProps) {
     updateNodeParameter,
   } = props;
   const meterStore = useRoutingMeters(controlPort);
-  const processorEditors = useProcessorEditors(controlPort, model);
+  const processorEditors = useProcessorEditors(controlPort, model, props.graphId);
   const processorEditorLabels = useProcessorEditorLabels();
   const graphTitle = title ?? t('studio.untitledGraph');
   const menuItems = createNodeMenuItems(
@@ -957,7 +961,17 @@ function WorkspaceView(props: WorkspaceViewProps) {
       {presentedModel && props.layout.loaded ? (
         <div className={styles.canvas} inert={props.layout.loading}>
           <AudioGraphCanvas
-            renderNodeContent={(node) => recorderNodeContent(props, node, presentedModel)}
+            renderNodeContent={(node) =>
+              processorEditors.statuses.get(node.id)?.state === 'open' ? (
+                <NativeProcessorSurface
+                  port={controlPort}
+                  nodeId={node.id}
+                  title={node.appearance.title}
+                />
+              ) : (
+                recorderNodeContent(props, node, presentedModel)
+              )
+            }
             viewport={props.layout.layout.viewport}
             onViewportChange={props.layout.updateViewport}
             contextMenuLabels={routingContextLabels(t)}
@@ -972,7 +986,7 @@ function WorkspaceView(props: WorkspaceViewProps) {
             onNodeEndpointChange={updateEndpoint}
             onNodeGainChange={updateNodeGain}
             onNodeParameterChange={updateNodeParameter}
-            onProcessorEditorToggle={processorEditors.toggle}
+            onProcessorEditorRetry={processorEditors.retry}
             processorEditorLabels={processorEditorLabels}
             processorEditorStatuses={processorEditors.statuses}
           />

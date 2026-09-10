@@ -81,6 +81,72 @@ describe('durable graph catalog coordinator', () => {
   });
 });
 
+describe('catalog read recovery', () => {
+  it('backs off repeated failures and caps polling at five seconds', async () => {
+    vi.useFakeTimers();
+    const { port, controller } = fixture();
+    const read = vi.spyOn(port, 'getGraphCatalog').mockRejectedValue(new Error('offline'));
+    await controller.reload();
+    for (const [index, delay] of [500, 1000, 2000, 4000, 5000, 5000].entries()) {
+      await vi.advanceTimersByTimeAsync(delay - 1);
+      expect(read).toHaveBeenCalledTimes(index + 1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(read).toHaveBeenCalledTimes(index + 2);
+    }
+    controller.dispose();
+  });
+
+  it('recovers the initial catalog automatically after a temporary engine outage', async () => {
+    vi.useFakeTimers();
+    const { port, controller } = fixture();
+    const read = vi
+      .spyOn(port, 'getGraphCatalog')
+      .mockRejectedValueOnce(
+        new ControlPortError(503, { code: 'control_unavailable', parameters: {} }),
+      );
+    await controller.reload();
+    expect(controller.snapshot().catalog).toBeNull();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(controller.snapshot().catalog?.activeId).toBe('graph-1');
+    expect(controller.snapshot().error).toBeNull();
+    controller.dispose();
+  });
+
+  it('does not retry a protected catalog or replay failed mutations', async () => {
+    vi.useFakeTimers();
+    const { port, controller } = fixture();
+    const read = vi.spyOn(port, 'getGraphCatalog').mockRejectedValue(
+      new ControlPortError(503, {
+        code: 'control_unavailable',
+        parameters: { resource: 'graph_catalog', reason: 'invalid file' },
+      }),
+    );
+    await controller.reload();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(read).toHaveBeenCalledTimes(1);
+    controller.dispose();
+  });
+
+  it('cancels scheduled recovery on disposal and never overwrites a loaded workspace', async () => {
+    vi.useFakeTimers();
+    const { port, controller } = fixture();
+    const read = vi.spyOn(port, 'getGraphCatalog').mockRejectedValueOnce(new Error('offline'));
+    await controller.reload();
+    controller.dispose();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(read).toHaveBeenCalledTimes(1);
+    await controller.reload();
+    const document = controller.snapshot().document;
+    read.mockRejectedValue(new Error('offline'));
+    await controller.reload();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(read).toHaveBeenCalledTimes(3);
+    expect(controller.snapshot().document).toBe(document);
+    controller.dispose();
+  });
+});
+
 describe('catalog operation lifetime', () => {
   it('distinguishes saved-graph storage failure from an engine connection failure', async () => {
     const { port, controller } = fixture();

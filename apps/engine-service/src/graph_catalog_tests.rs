@@ -25,11 +25,16 @@ impl Fixture {
         self.0.join("graphs.json")
     }
 }
-fn settle(controller: &EngineGraphController) {
-    let mut processor = controller
-        .prepare_and_validate(&controller.graph(), *controller.context.read())
-        .unwrap()
-        .processor;
+pub(crate) fn settle(controller: &EngineGraphController) {
+    // This stands in for the already-running audio worker; do not prepare another
+    // controller plan while its new publication is waiting to be acknowledged.
+    let plan = GraphCompiler::default()
+        .compile(
+            &GraphDocument::new(1, vec![], vec![]),
+            *controller.context.read(),
+        )
+        .unwrap();
+    let mut processor = BuiltInProcessorFactory::default().prepare(&plan).unwrap();
     assert!(controller.exchange.activate_pending(&mut processor));
     controller.exchange.reclaim_retired();
 }
@@ -371,7 +376,7 @@ fn restart_revision_exceeds_every_saved_graph_and_bootstrap_revision() {
 }
 
 #[test]
-fn exhausted_saved_revision_rejects_startup_without_replacing_saved_bytes() {
+fn exhausted_saved_revision_keeps_saved_document_readable_without_replacing_bytes() {
     let fixture = Fixture::new();
     let first =
         controller(default_duplex_document(u64::MAX, None)).with_graph_catalog_path(fixture.path());
@@ -379,10 +384,10 @@ fn exhausted_saved_revision_rejects_startup_without_replacing_saved_bytes() {
     drop(first);
     let engine =
         controller(default_duplex_document(1, None)).with_graph_catalog_path(fixture.path());
-    assert_eq!(engine.graph().revision, 1);
-    let error = engine.graph_catalog().unwrap_err();
-    assert_eq!(error.code, ErrorCode::ControlUnavailable);
-    assert_eq!(error.parameters["reason"], "revision overflow");
+    assert_eq!(engine.graph().revision, u64::MAX);
+    assert_eq!(engine.graph_catalog().unwrap().document.revision, u64::MAX);
+    assert!(engine.catalog_restore.lock().is_some());
+    assert_eq!(engine.graph_status().submitted_revision, 1);
     assert_eq!(fs::read(fixture.path()).unwrap(), saved);
 }
 
@@ -448,7 +453,7 @@ fn corrupt_catalog_is_preserved_and_fallback_remains_editable() {
 }
 
 #[test]
-fn unavailable_background_native_target_rejects_startup_and_preserves_catalog_bytes() {
+fn unavailable_background_native_target_keeps_catalog_readable_and_preserves_bytes() {
     let fixture = Fixture::new();
     let engine =
         controller(default_duplex_document(1, None)).with_graph_catalog_path(fixture.path());
@@ -464,8 +469,9 @@ fn unavailable_background_native_target_rejects_startup_and_preserves_catalog_by
     drop(engine);
     let bootstrap = default_duplex_document(1, None);
     let engine = controller(bootstrap.clone()).with_graph_catalog_path(fixture.path());
-    assert!(engine.graph_catalog().is_err());
-    assert_eq!(engine.graph(), bootstrap);
+    assert_eq!(engine.graph_catalog().unwrap().graphs.len(), 2);
+    assert_eq!(engine.graph().nodes, bootstrap.nodes);
+    assert!(engine.catalog_restore.lock().is_some());
     assert_eq!(fs::read(fixture.path()).unwrap(), before);
 }
 

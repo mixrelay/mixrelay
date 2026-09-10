@@ -7,6 +7,11 @@ export interface AudioGraphPosition {
   y: number;
 }
 
+export interface AudioGraphNodeSize {
+  width: number;
+  height: number;
+}
+
 export interface AudioGraphPort {
   boundary?: 'sink' | 'source';
   channelIndex?: number;
@@ -50,6 +55,7 @@ export interface AudioGraphNode {
   inputPorts: AudioGraphPort[];
   outputPorts: AudioGraphPort[];
   position: AudioGraphPosition;
+  size?: AudioGraphNodeSize;
   runtime?: {
     /** Unresolved presentation retains the original nullable label, not its fallback title. */
     label?: string | null;
@@ -281,5 +287,27 @@ export function moveAudioGraphNode(
   return {
     ...model,
     nodes: model.nodes.map((node, index) => (index === nodeIndex ? { ...node, position } : node)),
+  };
+}
+
+/** Presentation-only resize; it never advances the audio graph revision. */
+export function resizeAudioGraphNode(
+  model: AudioGraphModel,
+  nodeId: string,
+  size: AudioGraphNodeSize,
+): AudioGraphModel {
+  if (!Number.isFinite(size.width) || !Number.isFinite(size.height)) return model;
+  const bounded = {
+    width: Math.max(180, Math.min(4096, size.width)),
+    height: Math.max(26, Math.min(4096, size.height)),
+  };
+  const node = model.nodes.find((candidate) => candidate.id === nodeId);
+  if (!node || (node.size?.width === bounded.width && node.size.height === bounded.height))
+    return model;
+  return {
+    ...model,
+    nodes: model.nodes.map((candidate) =>
+      candidate === node ? { ...candidate, size: bounded } : candidate,
+    ),
   };
 }

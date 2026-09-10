@@ -35,3 +35,11 @@ x11-dl.workspace = true
 
 [dev-dependencies]
 tonenari-test-support = { path = "../test-support" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Main-thread-owned native UI surfaces and timers; no plug-in objects cross processes.
+block2 = "0.6.2"
+dispatch2 = "0.3.1"
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSBitmapImageRep", "NSImageRep", "NSGraphics", "NSGraphicsContext", "NSResponder", "NSView", "NSWindow", "NSEvent"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData", "NSDate", "NSDictionary", "NSGeometry", "NSRunLoop", "NSString", "NSTimer", "block2"] }

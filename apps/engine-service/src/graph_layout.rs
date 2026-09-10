@@ -19,18 +19,27 @@ fn coordinate(value: f64) -> bool {
     value.is_finite() && value.abs() <= MAX_COORDINATE
 }
 
+fn node_identity(id: &str) -> bool {
+    !id.trim().is_empty() && id.len() <= 256 && !id.chars().any(char::is_control)
+}
+
 pub(super) fn validate(layout: &GraphLayout) -> Result<(), &'static str> {
-    if layout.positions.len() > MAX_POSITIONS {
-        return Err("layout contains too many node positions");
+    if layout.positions.len() > MAX_POSITIONS || layout.sizes.len() > MAX_POSITIONS {
+        return Err("layout contains too many node entries");
     }
     if layout.positions.iter().any(|(id, position)| {
-        id.trim().is_empty()
-            || id.len() > 256
-            || id.chars().any(char::is_control)
-            || !coordinate(position.x)
-            || !coordinate(position.y)
+        !node_identity(id) || !coordinate(position.x) || !coordinate(position.y)
     }) {
         return Err("layout has an invalid UI node identity or position");
+    }
+    if layout.sizes.iter().any(|(id, size)| {
+        !node_identity(id)
+            || !size.width.is_finite()
+            || !size.height.is_finite()
+            || !(180.0..=4096.0).contains(&size.width)
+            || !(26.0..=4096.0).contains(&size.height)
+    }) {
+        return Err("layout has an invalid UI node identity or size");
     }
     if let Some(viewport) = layout.viewport
         && (!coordinate(viewport.x)

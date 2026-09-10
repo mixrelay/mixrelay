@@ -154,7 +154,7 @@ describe('Core audio controls', () => {
     expect(screen.getByTitle('Test: 42%')).toBeInTheDocument();
   });
 
-  it('opens options and forwards the native processor editor action', () => {
+  it('offers retry only for a failed native processor editor', () => {
     const onEditorToggle = vi.fn();
     render(
       <ToneNariProvider>
@@ -162,24 +162,22 @@ describe('Core audio controls', () => {
           category="Processor"
           icon="FX"
           inputCount={2}
-          onProcessorEditorToggle={onEditorToggle}
+          onProcessorEditorRetry={onEditorToggle}
           onSelect={vi.fn()}
           optionsLabel="Options"
           outputCount={2}
           processorEditor={{
-            actionLabel: 'Open',
-            label: 'Plug-in editor',
-            state: 'closed',
-            stateLabel: 'Closed',
+            actionLabel: 'Retry',
+            state: 'failed',
           }}
           title="Compressor"
         />
       </ToneNariProvider>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Options' }));
-    expect(screen.getByText('Plug-in editor')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(screen.queryByRole('button', { name: 'Options' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Plug-in editor')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(onEditorToggle).toHaveBeenCalledOnce();
   });
 });

@@ -30,8 +30,10 @@ use tonenari_control_protocol::{
 
 mod discovery;
 mod editor_observation;
+mod editor_surface;
 mod native_editor;
 mod rack_formats;
+mod reuse;
 mod worker_paths;
 use worker_paths::worker_paths;
 
@@ -98,6 +100,7 @@ struct SharedHeader {
     parameters_pending: AtomicBool,
     parameters: [ParameterSlot; PARAMETER_CAPACITY],
     state_request: AtomicU64,
+    state_kind: AtomicU32,
     state_response: AtomicU64,
     state_length: AtomicU32,
     state_result: AtomicU32,
@@ -113,6 +116,7 @@ struct SharedHeader {
     /// Broker-owned lifecycle, separate from the parent's optimistic Opening status.
     editor_observed_open: AtomicBool,
     editor_close_generation: AtomicU64,
+    editor_input: editor_surface::InputRing,
 }
 
 /// Slots are assigned once per worker lifetime by serialized control publishers. Stable IDs
@@ -234,8 +238,9 @@ pub fn run_plugin_worker(arguments: &[String]) -> Result<(), String> {
     // sample storage.
     let mut audio_shared =
         unsafe { MmapOptions::new().map_mut(&shared_file) }.map_err(|error| error.to_string())?;
-    let editor_shared =
-        unsafe { MmapOptions::new().map_mut(&shared_file) }.map_err(|error| error.to_string())?;
+    let editor_shared = Arc::new(
+        unsafe { MmapOptions::new().map_mut(&shared_file) }.map_err(|error| error.to_string())?,
+    );
     let header = shared_header(&audio_shared)?;
     let layout = AudioLayout {
         inputs: header.input_channels as usize,
@@ -257,12 +262,16 @@ pub fn run_plugin_worker(arguments: &[String]) -> Result<(), String> {
     let plugin = Arc::new(Mutex::new(plugin));
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_reader = Arc::clone(&shutdown);
+    let parent_watch_shared = Arc::clone(&editor_shared);
     let _stdin_guard = thread::Builder::new()
         .name("tonenari-plugin-parent-watch".to_owned())
         .spawn(move || {
             let mut input = std::io::stdin();
             let mut byte = [0_u8; 1];
             while input.read(&mut byte).is_ok_and(|read| read != 0) {}
+            shared_header_unchecked(&parent_watch_shared)
+                .shutdown
+                .store(1, Ordering::Release);
             shutdown_reader.store(true, Ordering::Release);
         })
         .map_err(|error| error.to_string())?;
@@ -347,7 +356,7 @@ fn rack_worker_loop(
 }
 
 fn editor_broker_loop(
-    shared: &MmapMut,
+    shared: &Arc<MmapMut>,
     plugin: &Mutex<rack_formats::RackWorkerPlugin>,
     title: &str,
     parent_closed: &AtomicBool,
@@ -378,6 +387,12 @@ fn apply_pending_state_request(shared: &MmapMut, plugin: &Mutex<rack_formats::Ra
     let header = shared_header_unchecked(shared);
     let request = header.state_request.load(Ordering::Acquire);
     if request == header.state_response.load(Ordering::Relaxed) {
+        return;
+    }
+    if header.state_kind.load(Ordering::Relaxed) == editor_surface::EDITOR_FRAME {
+        if !header.editor_observed_open.load(Ordering::Acquire) {
+            publish_state_response(shared, request, Err(ProcessorStateError::Unavailable));
+        }
         return;
     }
     let Ok(mut plugin) = plugin.try_lock() else {
@@ -419,7 +434,7 @@ fn publish_state_response(
 }
 
 fn apply_pending_editor_command(
-    shared: &MmapMut,
+    shared: &Arc<MmapMut>,
     plugin: &Mutex<rack_formats::RackWorkerPlugin>,
     title: &str,
     host: &mut Option<native_editor::NativeEditorHost>,
@@ -442,29 +457,30 @@ fn apply_pending_editor_command(
         } else {
             rack_formats::EditorSnapshot::default()
         };
-        publish_observed_editor_snapshot(header, snapshot);
         header
             .editor_failure
             .store(EDITOR_FAILURE_NONE, Ordering::Release);
+        publish_observed_editor_snapshot(header, snapshot);
     } else if command == EDITOR_COMMAND_OPEN {
-        open_editor(header, plugin, title, host);
+        open_editor(shared, plugin, title, host);
     }
     header.editor_consumed.store(sequence, Ordering::Release);
 }
 
 fn open_editor(
-    header: &SharedHeader,
+    shared: &Arc<MmapMut>,
     plugin: &Mutex<rack_formats::RackWorkerPlugin>,
     title: &str,
     host: &mut Option<native_editor::NativeEditorHost>,
 ) {
+    let header = shared_header_unchecked(shared);
     let has_editor = plugin.lock().is_ok_and(|plugin| plugin.has_editor());
     if !has_editor {
         publish_editor_failure(header, EDITOR_FAILURE_NO_EDITOR);
         return;
     }
     if host.is_none() {
-        match native_editor::NativeEditorHost::new() {
+        match native_editor::NativeEditorHost::new(Arc::clone(shared)) {
             Ok(created) => *host = Some(created),
             Err(native_editor::EditorHostFailure::DisplayUnavailable) => {
                 publish_editor_failure(header, EDITOR_FAILURE_DISPLAY_UNAVAILABLE);
@@ -486,10 +502,10 @@ fn open_editor(
     );
     match result {
         Ok(snapshot) if snapshot.open => {
-            publish_observed_editor_snapshot(header, snapshot);
             header
                 .editor_failure
                 .store(EDITOR_FAILURE_NONE, Ordering::Relaxed);
+            publish_observed_editor_snapshot(header, snapshot);
         }
         Ok(_) | Err(native_editor::EditorHostFailure::PluginRejected) => {
             publish_editor_failure(header, EDITOR_FAILURE_PLUGIN_REJECTED);
@@ -511,12 +527,13 @@ fn tick_editor(
     let Some(editor_host) = host.as_mut() else {
         return;
     };
+    // The host retains close/resize events until the plug-in can consume them. Native
+    // mouse tracking can run a nested event loop; pumping it under this mutex stalls DSP.
+    editor_host.poll_events();
     let Ok(mut plugin) = plugin.try_lock() else {
         return;
     };
-    // Do not consume a native close/resize event until the plug-in is available to handle it.
-    // DSP contention previously dropped an X-button close permanently after poll_events().
-    let events = editor_host.poll_events();
+    let events = editor_host.take_events();
     if events.close_requested {
         editor_host.close(&mut plugin);
     } else if let Some((width, height)) = events.resized {
@@ -533,6 +550,9 @@ fn publish_observed_editor_snapshot(header: &SharedHeader, snapshot: rack_format
     header.editor_state.store(
         if snapshot.open {
             EDITOR_STATE_OPEN
+        } else if header.editor_failure.load(Ordering::Acquire) != EDITOR_FAILURE_NONE {
+            // Idle native ticks are not retries and cannot clear a failed-open result.
+            EDITOR_STATE_FAILED
         } else {
             EDITOR_STATE_CLOSED
         },
@@ -690,8 +710,16 @@ impl HostedProcessorFactory for ExternalProcessorFactory {
         {
             return Err("compiled plug-in layout does not match the catalog".to_owned());
         }
+        if let Some(processor) = self.controls.reuse_request(&request) {
+            return Ok(processor);
+        }
         let mut processor = HostedExternalProcessor::new(&entry, request.config, request.format)?;
         let control = processor.control();
+        *control
+            .reuse
+            .lock()
+            .map_err(|_| "processor reuse metadata is poisoned")? =
+            Some(reuse::ReuseSignature::new(&request));
         processor.registration = Some(self.controls.register(request.node_id, &control));
         Ok(Box::new(processor) as Box<dyn HostedAudioProcessor>)
     }
@@ -874,10 +902,46 @@ impl Drop for ProcessorControlRegistration {
 struct HostedProcessorControl {
     shared: MmapMut,
     writer: Mutex<()>,
+    input_writer: Mutex<()>,
+    reuse: Mutex<Option<reuse::ReuseSignature>>,
+    active_owner: AtomicBool,
 }
 
 impl HostedProcessorControl {
     fn snapshot_state(&self, timeout: Duration) -> Result<serde_json::Value, ProcessorStateError> {
+        let header = shared_header_unchecked(&self.shared);
+        header
+            .editor_input
+            .cancel(header.editor_sequence.load(Ordering::Acquire));
+        let deadline = Instant::now() + timeout.min(Duration::from_secs(5));
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match self.request_blob(editor_surface::NATIVE_STATE, remaining) {
+                Ok(bytes) => {
+                    let state = serde_json::json!({ "stateBase64": BASE64.encode(bytes) });
+                    if let Some(signature) = self
+                        .reuse
+                        .lock()
+                        .map_err(|_| ProcessorStateError::Unavailable)?
+                        .as_mut()
+                    {
+                        signature.checkpoint(&state);
+                    }
+                    return Ok(state);
+                }
+                Err(ProcessorStateError::Busy | ProcessorStateError::Pending)
+                    if !remaining.is_zero()
+                        && header.state_kind.load(Ordering::Acquire)
+                            == editor_surface::EDITOR_FRAME =>
+                {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    fn request_blob(&self, kind: u32, timeout: Duration) -> Result<Vec<u8>, ProcessorStateError> {
         // Do not queue unbounded callers behind a slow vendor. This mutex is control-only;
         // the worker and all audio paths exclusively use atomics and never acquire it.
         let _writer = self
@@ -895,6 +959,7 @@ impl HostedProcessorControl {
             return Err(ProcessorStateError::Pending);
         }
         let request = previous.wrapping_add(1);
+        header.state_kind.store(kind, Ordering::Relaxed);
         header.state_request.store(request, Ordering::Release);
         let deadline = Instant::now() + timeout.min(Duration::from_secs(5));
         loop {
@@ -926,7 +991,7 @@ impl HostedProcessorControl {
         let bytes = unsafe {
             std::slice::from_raw_parts(self.shared.as_ptr().add(size_of::<SharedHeader>()), length)
         };
-        Ok(serde_json::json!({ "stateBase64": BASE64.encode(bytes) }))
+        Ok(bytes.to_vec())
     }
 
     fn set_parameter(&self, id: u32, value: f64) -> Result<(), String> {
@@ -965,6 +1030,16 @@ impl HostedProcessorControl {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let header = shared_header_unchecked(&self.shared);
+        if open
+            && header.editor_command.load(Ordering::Acquire) == EDITOR_COMMAND_OPEN
+            && matches!(
+                header.editor_state.load(Ordering::Acquire),
+                EDITOR_STATE_OPEN | EDITOR_STATE_OPENING
+            )
+            && header.editor_failure.load(Ordering::Acquire) == EDITOR_FAILURE_NONE
+        {
+            return;
+        }
         let next = header
             .editor_sequence
             .load(Ordering::Relaxed)
@@ -1160,12 +1235,27 @@ fn map_worker_regions(file: &File) -> Result<(MmapMut, Arc<HostedProcessorContro
         Arc::new(HostedProcessorControl {
             shared: control,
             writer: Mutex::new(()),
+            input_writer: Mutex::new(()),
+            reuse: Mutex::new(None),
+            active_owner: AtomicBool::new(false),
         }),
     ))
 }
 
 impl HostedAudioProcessor for HostedExternalProcessor {
+    fn set_active(&mut self, active: bool) {
+        if let Some(control) = &self.control {
+            control.active_owner.store(active, Ordering::Release);
+        }
+    }
+    fn reuse_identity(&self) -> Option<u64> {
+        self.control
+            .as_ref()
+            .map(|control| shared_header_unchecked(&control.shared).instance_id)
+    }
+
     fn process(&mut self, input: &[f32], output: &mut [f32], frames: usize) -> bool {
+        self.set_active(true);
         if frames > self.layout.block_frames
             || input.len() < frames.saturating_mul(self.layout.inputs)
             || output.len() < frames.saturating_mul(self.layout.outputs)
@@ -1369,6 +1459,7 @@ fn create_shared_file(
         parameters_pending: AtomicBool::new(false),
         parameters: std::array::from_fn(|_| ParameterSlot::empty()),
         state_request: AtomicU64::new(0),
+        state_kind: AtomicU32::new(editor_surface::NATIVE_STATE),
         state_response: AtomicU64::new(0),
         state_length: AtomicU32::new(0),
         state_result: AtomicU32::new(STATE_OK),
@@ -1383,6 +1474,7 @@ fn create_shared_file(
         instance_id: NEXT_CONTROL_INSTANCE.fetch_add(1, Ordering::Relaxed),
         editor_observed_open: AtomicBool::new(false),
         editor_close_generation: AtomicU64::new(0),
+        editor_input: editor_surface::InputRing::new(),
     };
     // SAFETY: OS mappings begin on a page boundary, whose alignment exceeds the 64-byte header
     // requirement, and the mapping has at least `SharedHeader` bytes.
@@ -1613,6 +1705,62 @@ mod tests {
     }
 
     #[test]
+    fn stalled_or_failed_worker_does_not_block_an_independent_processor() {
+        let mut unavailable = test_processor();
+        let mut healthy = test_processor();
+        let mut output = [0.0; 8];
+        let input = [0.25; 8];
+        assert!(!unavailable.process(&input, &mut output, 4));
+        assert!(!healthy.process(&input, &mut output, 4));
+        for sequence in 1..=64 {
+            let shared = healthy.shared.as_mut().unwrap();
+            let offset = output_offset(2, 4);
+            for bytes in shared[offset..offset + 8 * size_of::<f32>()].chunks_exact_mut(4) {
+                bytes.copy_from_slice(&0.5_f32.to_ne_bytes());
+            }
+            let header = shared_header_unchecked(shared);
+            header.input_consumed.store(sequence, Ordering::Release);
+            header.output_sequence.store(sequence, Ordering::Release);
+            if sequence == 32 {
+                shared_header_unchecked(unavailable.shared.as_ref().unwrap())
+                    .worker_status
+                    .store(WORKER_FAILED, Ordering::Release);
+            }
+            assert!(!unavailable.process(&input, &mut output, 4));
+            assert!(healthy.process(&input, &mut output, 4));
+            assert!(
+                output
+                    .iter()
+                    .all(|sample| (*sample - 0.5).abs() < f32::EPSILON)
+            );
+        }
+        assert_eq!(
+            unavailable.next_sequence, 2,
+            "a stalled mailbox cannot accumulate requests"
+        );
+        assert_eq!(healthy.next_sequence, 66);
+    }
+
+    fn test_processor() -> HostedExternalProcessor {
+        let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
+        HostedExternalProcessor {
+            child_stdin: None,
+            worker_monitor: None,
+            shared: Some(shared),
+            shared_path,
+            config_path,
+            layout: AudioLayout {
+                inputs: 2,
+                outputs: 2,
+                block_frames: 4,
+            },
+            next_sequence: 1,
+            control: None,
+            registration: None,
+        }
+    }
+
+    #[test]
     fn shared_audio_regions_round_trip_without_growing() {
         let (shared_path, config_path, mut shared) = shared_mapping(2, 2, 4);
         let input = [1.0, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0];
@@ -1655,6 +1803,9 @@ mod tests {
         let control = Arc::new(HostedProcessorControl {
             shared,
             writer: Mutex::new(()),
+            input_writer: Mutex::new(()),
+            reuse: Mutex::new(None),
+            active_owner: AtomicBool::new(false),
         });
         let registry = ProcessorControlRegistry::default();
         let node_id = NodeId::from("vst-node");
@@ -1718,6 +1869,9 @@ mod tests {
         let control = HostedProcessorControl {
             shared,
             writer: Mutex::new(()),
+            input_writer: Mutex::new(()),
+            reuse: Mutex::new(None),
+            active_owner: AtomicBool::new(false),
         };
         for id in 0..u32::try_from(PARAMETER_CAPACITY).unwrap() {
             control.set_parameter(id, f64::from(id) / 4096.0).unwrap();
@@ -1760,6 +1914,9 @@ mod tests {
             let control = Arc::new(HostedProcessorControl {
                 shared,
                 writer: Mutex::new(()),
+                input_writer: Mutex::new(()),
+                reuse: Mutex::new(None),
+                active_owner: AtomicBool::new(false),
             });
             shared_header_unchecked(&control.shared)
                 .worker_status
@@ -1797,6 +1954,9 @@ mod tests {
         let control = Arc::new(HostedProcessorControl {
             shared,
             writer: Mutex::new(()),
+            input_writer: Mutex::new(()),
+            reuse: Mutex::new(None),
+            active_owner: AtomicBool::new(false),
         });
         let finished = Arc::new(AtomicBool::new(false));
         let producer_control = Arc::clone(&control);
@@ -1834,6 +1994,9 @@ mod tests {
         let control = HostedProcessorControl {
             shared,
             writer: Mutex::new(()),
+            input_writer: Mutex::new(()),
+            reuse: Mutex::new(None),
+            active_owner: AtomicBool::new(false),
         };
         let header = shared_header_unchecked(&control.shared);
         header.worker_status.store(WORKER_READY, Ordering::Release);
@@ -1876,6 +2039,9 @@ mod tests {
         let control = Arc::new(HostedProcessorControl {
             shared,
             writer: Mutex::new(()),
+            input_writer: Mutex::new(()),
+            reuse: Mutex::new(None),
+            active_owner: AtomicBool::new(false),
         });
         #[cfg(unix)]
         let mut command = Command::new("/usr/bin/false");

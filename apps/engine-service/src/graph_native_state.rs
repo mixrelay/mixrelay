@@ -29,6 +29,9 @@ impl EngineGraphController {
         &self,
         node_id: Option<&str>,
     ) -> Result<(), ProtocolError> {
+        if node_id.is_none() && self.catalog_restore.lock().is_some() {
+            return Ok(());
+        }
         self.checkpoint_processor_state_with(node_id, |id, remaining| {
             self.processor_controls.snapshot_state(id, remaining)
         })

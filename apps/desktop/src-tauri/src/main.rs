@@ -76,6 +76,8 @@ fn main() {
         control_proxy::control_get_meters,
         control_proxy::control_get_processors,
         control_proxy::control_get_processor_editor,
+        control_proxy::control_get_processor_editor_frame,
+        control_proxy::control_send_processor_editor_input,
         control_proxy::control_rescan_processors,
         control_proxy::control_set_processor_parameter,
         control_proxy::control_set_processor_editor,

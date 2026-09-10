@@ -209,7 +209,7 @@ function GraphSidebar({
         })}
         {catalogError ? (
           <div role="alert">
-            <p>{catalog ? catalogErrorText : t('studio.catalogUnavailable')}</p>
+            <p>{catalogErrorText}</p>
             <ActionButton
               disabled={catalogBusy}
               onClick={() => void reloadCatalog()}

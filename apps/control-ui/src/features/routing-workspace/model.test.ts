@@ -201,6 +201,8 @@ it('materializes an external processor and persists normalized parameter changes
   const added = addRoutingNode(empty, { kind: 'provider', processor }, { x: 40, y: 80 });
   const node = added.nodes[0];
   expect(node?.appearance.title).toBe('Fixture Compressor');
+  expect(node?.appearance.meterChannels).toBeUndefined();
+  expect(node?.appearance.meterSource).toBeUndefined();
   expect(node?.inputPorts).toHaveLength(2);
   expect(node?.outputPorts).toHaveLength(2);
   expect(node?.appearance.parameterControls?.[0]).toMatchObject({
@@ -221,5 +223,6 @@ it('materializes an external processor and persists normalized parameter changes
   });
 
   const restored = runtimeGraphToAudioGraph(serialized, undefined, [processor]);
+  expect(restored.nodes[0]?.appearance.meterSource).toBeUndefined();
   expect(restored.nodes[0]?.appearance.parameterControls?.[0]?.value).toBe(0.73);
 });

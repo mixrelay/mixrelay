@@ -265,15 +265,9 @@ export const pseudo = {
       retry: '[Retry]',
     },
     processorEditor: {
-      close: '[!! Çlösé !!]',
-      label: '[!! Plüg-ïñ édïtör !!]',
-      open: '[!! Öpéñ !!]',
       states: {
-        closed: '[!! Çlöséd !!]',
         failed: '[!! Üñåvåïlåblé !!]',
-        open: '[!! Öpéñ !!]',
         opening: '[!! Öpéñïñg !!]',
-        unavailable: '[!! Ñö édïtör !!]',
       },
       failures: {
         displayUnavailable: '[!! X11/XWåylåñd réqüïréd !!]',

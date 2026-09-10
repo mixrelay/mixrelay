@@ -12,13 +12,28 @@ pub(crate) enum EditorHostFailure {
     PluginRejected,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct EditorHostEvents {
     pub close_requested: bool,
     pub resized: Option<(u32, u32)>,
 }
 
-#[cfg(not(target_os = "linux"))]
+impl EditorHostEvents {
+    fn merge(&mut self, incoming: Self) {
+        self.close_requested |= incoming.close_requested;
+        if self.close_requested {
+            self.resized = None;
+        } else if incoming.resized.is_some() {
+            self.resized = incoming.resized;
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[path = "native_editor/macos.rs"]
+mod platform;
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 mod platform {
     use tao::{
         dpi::{LogicalSize, PhysicalSize},
@@ -39,15 +54,19 @@ mod platform {
     pub(crate) struct NativeEditorHost {
         event_loop: EventLoop<()>,
         window: Option<Window>,
+        pub(super) pending_events: EditorHostEvents,
     }
 
     impl NativeEditorHost {
-        pub(crate) fn new() -> Result<Self, EditorHostFailure> {
+        pub(crate) fn new(
+            _shared: std::sync::Arc<memmap2::MmapMut>,
+        ) -> Result<Self, EditorHostFailure> {
             let event_loop = std::panic::catch_unwind(EventLoop::new)
                 .map_err(|_| EditorHostFailure::DisplayUnavailable)?;
             Ok(Self {
                 event_loop,
                 window: None,
+                pending_events: EditorHostEvents::default(),
             })
         }
 
@@ -84,9 +103,10 @@ mod platform {
         pub(crate) fn close(&mut self, plugin: &mut RackWorkerPlugin) {
             plugin.close_editor();
             self.window.take();
+            self.pending_events = EditorHostEvents::default();
         }
 
-        pub(crate) fn poll_events(&mut self) -> EditorHostEvents {
+        pub(super) fn collect_events(&mut self) -> EditorHostEvents {
             let Some(window) = self.window.as_ref() else {
                 return EditorHostEvents::default();
             };
@@ -120,6 +140,7 @@ mod platform {
         pub(crate) fn refresh(&mut self, snapshot: EditorSnapshot) {
             if !snapshot.open {
                 self.window.take();
+                self.pending_events = EditorHostEvents::default();
             }
         }
     }
@@ -160,10 +181,13 @@ mod platform {
         display: *mut xlib::Display,
         window: Option<xlib::Window>,
         wm_delete_window: xlib::Atom,
+        pub(super) pending_events: EditorHostEvents,
     }
 
     impl NativeEditorHost {
-        pub(crate) fn new() -> Result<Self, EditorHostFailure> {
+        pub(crate) fn new(
+            _shared: std::sync::Arc<memmap2::MmapMut>,
+        ) -> Result<Self, EditorHostFailure> {
             if std::env::var_os("DISPLAY").is_none() {
                 return Err(EditorHostFailure::DisplayUnavailable);
             }
@@ -182,6 +206,7 @@ mod platform {
                 display,
                 window: None,
                 wm_delete_window,
+                pending_events: EditorHostEvents::default(),
             })
         }
 
@@ -260,7 +285,7 @@ mod platform {
             self.destroy_window();
         }
 
-        pub(crate) fn poll_events(&mut self) -> EditorHostEvents {
+        pub(super) fn collect_events(&mut self) -> EditorHostEvents {
             let Some(window) = self.window else {
                 return EditorHostEvents::default();
             };
@@ -304,6 +329,7 @@ mod platform {
         }
 
         fn destroy_window(&mut self) {
+            self.pending_events = EditorHostEvents::default();
             if let Some(window) = self.window.take() {
                 // SAFETY: this XID belongs to the live display and is destroyed at most once.
                 unsafe {
@@ -324,3 +350,63 @@ mod platform {
 }
 
 pub(crate) use platform::NativeEditorHost;
+
+impl NativeEditorHost {
+    /// Native tracking loops may block until mouse-up; never hold the DSP mutex here.
+    pub(crate) fn poll_events(&mut self) {
+        let events = self.collect_events();
+        self.pending_events.merge(events);
+    }
+
+    /// Consume only after the broker has acquired the plug-in for lifecycle operations.
+    pub(crate) fn take_events(&mut self) -> EditorHostEvents {
+        std::mem::take(&mut self.pending_events)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EditorHostEvents;
+
+    #[test]
+    fn close_survives_contention_and_is_consumed_once() {
+        let plugin = std::sync::Mutex::new(());
+        let guard = plugin.lock().unwrap();
+        let mut pending = EditorHostEvents::default();
+        pending.merge(EditorHostEvents {
+            close_requested: true,
+            resized: None,
+        });
+        for _ in 0..20 {
+            pending.merge(EditorHostEvents::default());
+            assert!(plugin.try_lock().is_err());
+            assert!(pending.close_requested);
+        }
+        drop(guard);
+        let _guard = plugin.try_lock().unwrap();
+        assert!(std::mem::take(&mut pending).close_requested);
+        assert_eq!(pending, EditorHostEvents::default());
+    }
+
+    #[test]
+    fn latest_resize_wins_until_close_supersedes_it() {
+        let mut pending = EditorHostEvents::default();
+        for size in [(400, 200), (800, 600)] {
+            pending.merge(EditorHostEvents {
+                close_requested: false,
+                resized: Some(size),
+            });
+        }
+        assert_eq!(pending.resized, Some((800, 600)));
+        pending.merge(EditorHostEvents {
+            close_requested: true,
+            resized: None,
+        });
+        pending.merge(EditorHostEvents {
+            close_requested: false,
+            resized: Some((900, 700)),
+        });
+        assert!(pending.close_requested);
+        assert_eq!(pending.resized, None);
+    }
+}

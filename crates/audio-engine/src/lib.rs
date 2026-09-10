@@ -228,12 +228,19 @@ impl ProcessorExchange {
         }
         // SAFETY: only `submit` creates pending pointers and the exchange gate grants
         // this audio thread unique ownership after removing the pointer from the slot.
-        let next = unsafe { Box::from_raw(pending) };
+        let mut next = unsafe { Box::from_raw(pending) };
+        if !next.can_adopt_hosted(current) {
+            self.pending.store(Box::into_raw(next), Ordering::Release);
+            return Ok(false);
+        }
         let revision = next.plan().revision();
         if let Err(error) = activate(revision) {
             self.pending.store(Box::into_raw(next), Ordering::Release);
             return Err(error);
         }
+        current.set_hosted_active(false);
+        next.adopt_hosted(current);
+        next.set_hosted_active(true);
         let previous = std::mem::replace(current, next);
         debug_assert!(self.retired.load(Ordering::Relaxed).is_null());
         self.retired

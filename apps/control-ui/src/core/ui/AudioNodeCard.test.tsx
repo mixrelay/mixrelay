@@ -2,7 +2,7 @@ import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ToneNariProvider } from '../theme/ToneNariProvider';
-import { AudioNodeCard } from './AudioNodeCard';
+import { AudioNodeCard, type AudioNodeCardProps } from './AudioNodeCard';
 
 function card(iconUrl?: string) {
   return (
@@ -19,6 +19,85 @@ function card(iconUrl?: string) {
     </ToneNariProvider>
   );
 }
+
+it('places native plug-in content under a compact unmetered face', () => {
+  const view = render(
+    <ToneNariProvider>
+      <AudioNodeCard
+        category="Processor"
+        icon="AU"
+        title="Filter"
+        inputCount={2}
+        outputCount={2}
+        faceMode="compact"
+        faceHeight={36}
+        onSelect={vi.fn()}
+        content={<div>Native editor</div>}
+      />
+    </ToneNariProvider>,
+  );
+  const root = view.getByText('Native editor').closest('[data-face-mode]');
+  expect(root).toHaveAttribute('data-face-mode', 'compact');
+  expect(root).toHaveStyle('--audio-node-face-height: 36px');
+  expect(root).not.toHaveAttribute('data-metered');
+  expect(view.queryByText('IN 2')).not.toBeInTheDocument();
+  expect(view.queryByText('OUT 2')).not.toBeInTheDocument();
+});
+
+it.each(['closed', 'opening', 'open', 'failed', 'unavailable', undefined] as const)(
+  'prefers the plug-in editor with parameter access when its state is %s',
+  (state) => {
+    const onToggle = vi.fn();
+    const editor: AudioNodeCardProps['processorEditor'] = state
+      ? { actionLabel: 'Retry editor', state }
+      : undefined;
+    const view = render(
+      <ToneNariProvider>
+        <AudioNodeCard
+          category="Processor"
+          icon="FX"
+          inputCount={2}
+          outputCount={2}
+          title="Filter"
+          onSelect={vi.fn()}
+          processorEditor={editor}
+          onProcessorEditorRetry={onToggle}
+          onParameterChange={vi.fn()}
+          parameterControls={[
+            {
+              id: 'cutoff',
+              label: 'Cutoff',
+              minimum: 0,
+              maximum: 1,
+              step: 0.01,
+              suffix: '',
+              value: 0.5,
+            },
+          ]}
+        />
+      </ToneNariProvider>,
+    );
+    const needsParameters = !state || state === 'failed' || state === 'unavailable';
+    if (needsParameters) {
+      fireEvent.click(view.getByRole('button', { name: 'Options' }));
+      expect(view.getByRole('slider', { name: 'Cutoff' })).toBeEnabled();
+    } else {
+      expect(view.queryByRole('button', { name: 'Options' })).not.toBeInTheDocument();
+      expect(view.queryByRole('slider')).not.toBeInTheDocument();
+    }
+    if (state === 'failed') {
+      const button = view.getByRole('button', { name: 'Retry editor' });
+      expect(button.textContent).toBe('');
+      expect(view.queryByText('Plug-in editor')).not.toBeInTheDocument();
+      expect(view.queryByText(state)).not.toBeInTheDocument();
+      expect(button.closest('.nodrag.nopan.nowheel')).not.toBeNull();
+      fireEvent.click(button);
+      expect(onToggle).toHaveBeenCalledOnce();
+    } else {
+      expect(view.queryByRole('button', { name: 'Retry editor' })).not.toBeInTheDocument();
+    }
+  },
+);
 
 it('renders feature-owned controls without changing the port face boundary', () => {
   const view = render(

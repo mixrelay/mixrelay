@@ -10,6 +10,8 @@ import {
   type GraphLayoutResponse,
   type GraphRuntimeStatus,
   type MeterSnapshot,
+  type ProcessorEditorFrame,
+  type ProcessorEditorInput,
   type ProcessorEditorStatus,
   type ProcessorParameterUpdateResponse,
   type ProtocolErrorBody,
@@ -122,6 +124,18 @@ export class HttpControlPort implements ControlPort {
 
   public getProcessorEditor(nodeId: string): Promise<ProcessorEditorStatus> {
     return this.json(`/api/v1/processors/${encodeURIComponent(nodeId)}/editor`);
+  }
+
+  public getProcessorEditorFrame(nodeId: string): Promise<ProcessorEditorFrame> {
+    return this.json(`/api/v1/processors/${encodeURIComponent(nodeId)}/editor/frame`);
+  }
+
+  public sendProcessorEditorInput(nodeId: string, input: ProcessorEditorInput): Promise<void> {
+    return this.json(`/api/v1/processors/${encodeURIComponent(nodeId)}/editor/input`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
   }
 
   public rescanProcessors(paths: string[]): Promise<ExternalProcessorCatalog> {

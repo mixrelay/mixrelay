@@ -67,52 +67,44 @@ describe('processor editor error and request lifecycle', () => {
     act(() => result.current.retry('effect'));
     await settle();
     expect(source.getProcessorEditor).toHaveBeenCalledTimes(2);
-    expect(source.setProcessorEditor).not.toHaveBeenCalled();
-    expect(result.current.statuses.get('effect')?.state).toBe('closed');
+    expect(source.setProcessorEditor).toHaveBeenCalledWith('effect', true);
+    expect(result.current.statuses.get('effect')?.state).toBe('open');
     expect(result.current.issues.size).toBe(0);
   });
 
-  it('keeps confirmed open state after a failed close and retries close, not open', async () => {
+  it('opens a closed editor automatically and explicitly retries a failed open', async () => {
     const source = port();
-    source.getProcessorEditor.mockResolvedValue(status('open'));
     source.setProcessorEditor
-      .mockRejectedValueOnce(new Error('close denied'))
-      .mockResolvedValue(status('closed'));
+      .mockRejectedValueOnce(new Error('open denied'))
+      .mockResolvedValue(status('open'));
     const { result } = renderHook(() => useProcessorEditors(source, model()));
     await settle();
-    act(() => result.current.toggle('effect'));
-    await settle();
-    expect(result.current.statuses.get('effect')?.state).toBe('open');
+    expect(result.current.statuses.get('effect')?.state).toBe('closed');
     expect(result.current.issues.has('effect')).toBe(true);
     act(() => result.current.retry('effect'));
     await settle();
     expect(source.setProcessorEditor.mock.calls).toEqual([
-      ['effect', false],
-      ['effect', false],
+      ['effect', true],
+      ['effect', true],
     ]);
-    expect(result.current.statuses.get('effect')?.state).toBe('closed');
+    expect(result.current.statuses.get('effect')?.state).toBe('open');
     expect(result.current.issues.size).toBe(0);
   });
 
-  it('does not optimistically open or send duplicate commands and ignores an older status read', async () => {
+  it('does not optimistically open or send duplicate open commands', async () => {
     const source = port();
-    const oldRead = Promise.withResolvers<ProcessorEditorStatus>();
     const command = Promise.withResolvers<ProcessorEditorStatus>();
-    source.getProcessorEditor
-      .mockReturnValueOnce(oldRead.promise)
-      .mockResolvedValue(status('open'));
     source.setProcessorEditor.mockReturnValueOnce(command.promise);
     const { result } = renderHook(() => useProcessorEditors(source, model()));
     await settle();
     act(() => {
-      result.current.toggle('effect');
-      result.current.toggle('effect');
+      result.current.retry('effect');
+      result.current.retry('effect');
     });
     await settle();
     expect(source.setProcessorEditor).toHaveBeenCalledTimes(1);
-    expect(result.current.statuses.has('effect')).toBe(false);
+    expect(result.current.statuses.get('effect')?.state).toBe('closed');
     await act(async () => command.resolve(status('open')));
-    await act(async () => oldRead.resolve(status('closed')));
     expect(result.current.statuses.get('effect')?.state).toBe('open');
   });
 });
@@ -121,12 +113,10 @@ describe('processor editor stale responses and native failures', () => {
   it('does not resurrect a removed or replaced node from late command responses', async () => {
     const source = port();
     const pending = Promise.withResolvers<ProcessorEditorStatus>();
-    source.setProcessorEditor.mockReturnValue(pending.promise);
+    source.setProcessorEditor.mockReturnValueOnce(pending.promise);
     const { result, rerender } = renderHook(({ graph }) => useProcessorEditors(source, graph), {
       initialProps: { graph: model() },
     });
-    await settle();
-    act(() => result.current.toggle('effect'));
     await settle();
     rerender({ graph: { revision: 2, edges: [], nodes: [] } });
     await settle();
@@ -135,7 +125,7 @@ describe('processor editor stale responses and native failures', () => {
     expect(result.current.issues.size).toBe(0);
     rerender({ graph: model('vst3:replacement') });
     await settle();
-    expect(result.current.statuses.get('effect')?.state).toBe('closed');
+    expect(result.current.statuses.get('effect')?.state).toBe('open');
   });
 
   it('ignores old-port failures and stops polling after unmount', async () => {
@@ -153,7 +143,7 @@ describe('processor editor stale responses and native failures', () => {
     await settle();
     await act(async () => pending.reject(new Error('old transport')));
     expect(result.current.issues.size).toBe(0);
-    expect(result.current.statuses.get('effect')?.state).toBe('closed');
+    expect(result.current.statuses.get('effect')?.state).toBe('open');
     unmount();
     await act(async () => vi.advanceTimersByTimeAsync(EDITOR_POLL_MS * 4));
     expect(second.getProcessorEditor).toHaveBeenCalledTimes(1);
@@ -166,8 +156,6 @@ describe('processor editor stale responses and native failures', () => {
       failure: 'plugin_rejected',
     });
     const { result } = renderHook(() => useProcessorEditors(source, model()));
-    await settle();
-    act(() => result.current.toggle('effect'));
     await settle();
     expect(result.current.statuses.get('effect')?.state).toBe('failed');
     expect(result.current.issues.has('effect')).toBe(true);
@@ -196,6 +184,51 @@ describe('processor editor stale responses and native failures', () => {
     act(() => result.current.retry('effect'));
     await settle();
     expect(result.current.issues.size).toBe(0);
-    expect(result.current.statuses.get('effect')?.state).toBe('closed');
+    expect(result.current.statuses.get('effect')?.state).toBe('open');
+  });
+});
+
+describe('processor editor automatic presentation', () => {
+  it('opens another graph with identical local node IDs after a failed editor', async () => {
+    const source = port();
+    source.getProcessorEditor.mockResolvedValueOnce(status('failed'));
+    const { result, rerender } = renderHook(
+      ({ graphId }) => useProcessorEditors(source, model(), graphId),
+      { initialProps: { graphId: 'first' } },
+    );
+    await settle();
+    expect(result.current.issues.has('effect')).toBe(true);
+    rerender({ graphId: 'second' });
+    await settle();
+    expect(result.current.statuses.get('effect')?.state).toBe('open');
+    expect(result.current.issues.size).toBe(0);
+    expect(source.setProcessorEditor.mock.calls).toEqual([['effect', true]]);
+  });
+
+  it('does not retry a native rejected open automatically', async () => {
+    vi.useFakeTimers();
+    const source = port();
+    source.setProcessorEditor.mockResolvedValue(status('closed'));
+    const { result } = renderHook(() => useProcessorEditors(source, model()));
+    await settle();
+    await act(async () => vi.advanceTimersByTimeAsync(EDITOR_POLL_MS * 4));
+    expect(source.setProcessorEditor).toHaveBeenCalledTimes(1);
+    expect(result.current.issues.has('effect')).toBe(true);
+  });
+
+  it('preserves an already open native editor across graph edits', async () => {
+    const source = port();
+    source.getProcessorEditor.mockResolvedValue(status('open'));
+    const { rerender } = renderHook(({ graph }) => useProcessorEditors(source, graph), {
+      initialProps: { graph: model() },
+    });
+    await settle();
+    const edited = model();
+    edited.revision = 2;
+    edited.nodes = edited.nodes.map((node) => ({ ...node, position: { x: 20, y: 10 } }));
+    rerender({ graph: edited });
+    await settle();
+    expect(source.getProcessorEditor).toHaveBeenCalledTimes(1);
+    expect(source.setProcessorEditor).not.toHaveBeenCalled();
   });
 });

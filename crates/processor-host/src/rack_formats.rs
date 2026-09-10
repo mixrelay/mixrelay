@@ -326,7 +326,7 @@ fn describe_loaded_plugin<P: Plugin<f32>>(
     // Some formats (notably Audio Unit and CLAP) can only report native-editor support after
     // loading an instance. The scan locator is therefore a hint; the disposable probe is the
     // authoritative capability source exposed to both the UI catalog and the live worker.
-    locator.has_editor = expose_vendor_editor(&locator, plugin.info().has_editor);
+    locator.has_editor = plugin.info().has_editor;
     let result = (|| {
         let parameters = (0..plugin.parameter_count())
             .filter_map(|index| plugin.parameter_info(index).ok())
@@ -368,19 +368,6 @@ fn checked_channels(channels: u32) -> Result<u16, String> {
     (channels != 0)
         .then_some(channels)
         .ok_or_else(|| "plugin effect layout has no channels".to_owned())
-}
-
-fn expose_vendor_editor(locator: &RackLocator, loaded_has_editor: bool) -> bool {
-    if !loaded_has_editor {
-        return false;
-    }
-    // Apple's in-box AUv2 effects advertise AUGenericViewFactory as Cocoa UI. That is a
-    // host-generated parameter sheet, not a branded plug-in editor. ToneNari already renders the
-    // same parameters consistently in the node Options panel, so opening the generic AppKit view
-    // in a floating bridge window would duplicate controls and misrepresent it as vendor UI.
-    !(locator.format == RackFormat::Au
-        && locator.vendor == "Apple"
-        && locator.path.as_os_str().is_empty())
 }
 
 fn select_effect_layout(layouts: &[BusLayout]) -> Option<(usize, &BusLayout)> {
@@ -901,24 +888,26 @@ mod tests {
         assert_eq!(decoded.vendor, locator.vendor);
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
-    fn system_au_generic_views_are_not_exposed_as_vendor_editors() {
-        let system_au = RackLocator {
-            format: RackFormat::Au,
-            unique_id: "aufx:bpas:appl".to_owned(),
-            path: PathBuf::new(),
-            name: "AUBandpass".to_owned(),
-            vendor: "Apple".to_owned(),
-            version: 1,
-            category: RackCategory::Effect,
-            has_editor: false,
-            accepts_midi: false,
-        };
-        assert!(!expose_vendor_editor(&system_au, true));
-
-        let mut third_party = system_au;
-        third_party.vendor = "Third Party".to_owned();
-        assert!(expose_vendor_editor(&third_party, true));
-        assert!(!expose_vendor_editor(&third_party, false));
+    fn apple_bandpass_editor_capability_reaches_catalog_and_worker() {
+        let info = truce_rack_au::AuScanner::new()
+            .scan()
+            .unwrap()
+            .into_iter()
+            .find(|info| info.name.contains("AUBandpass"))
+            .expect("macOS ships the AUBandpass fixture");
+        let record = probe(RackLocator::from_info(RackFormat::Au, info)).unwrap();
+        assert!(record.descriptor.has_editor);
+        assert!(record.locator.has_editor);
+        let worker = RackWorkerPlugin::load(
+            &record.locator,
+            record.layout_index,
+            48_000.0,
+            128,
+            &serde_json::json!({}),
+        )
+        .unwrap();
+        assert!(worker.has_editor());
     }
 }

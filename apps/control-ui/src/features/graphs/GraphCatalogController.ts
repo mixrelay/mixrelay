@@ -46,6 +46,12 @@ function errorCode(error: unknown): string {
   return error.body.code;
 }
 
+function retryableRead(error: unknown) {
+  if (!(error instanceof ControlPortError)) return true;
+  if (errorCode(error) === 'graph_catalog_unavailable') return false;
+  return [408, 429, 502, 503, 504].includes(error.status);
+}
+
 /** One writer, confirmed audio activation, and generation fencing for late IPC replies. */
 export class GraphCatalogController {
   private state: GraphCatalogState = {
@@ -57,6 +63,8 @@ export class GraphCatalogController {
   };
   private generation = 0;
   private mutationSent = false;
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  private retryDelay = 500;
   private readonly listeners = new Set<() => void>();
 
   constructor(private readonly port: ControlPort) {}
@@ -70,6 +78,7 @@ export class GraphCatalogController {
   };
   dispose = () => {
     this.generation += 1;
+    clearTimeout(this.retryTimer);
     this.patch({ busy: false });
   };
   clearError = () => this.patch({ error: null });
@@ -79,8 +88,9 @@ export class GraphCatalogController {
     for (const listener of this.listeners) listener();
   }
 
-  private async run(work: (generation: number) => Promise<void>) {
+  private async run(work: (generation: number) => Promise<void>, retryRead = false) {
     if (this.state.busy) return;
+    clearTimeout(this.retryTimer);
     const generation = ++this.generation;
     this.mutationSent = false;
     this.patch({ busy: true, error: null });
@@ -93,6 +103,12 @@ export class GraphCatalogController {
         uncertain:
           this.state.uncertain || (this.mutationSent && !(error instanceof ControlPortError)),
       });
+      if (retryRead && !this.state.catalog && retryableRead(error)) {
+        this.retryTimer = setTimeout(() => {
+          if (generation === this.generation) void this.reload();
+        }, this.retryDelay);
+        this.retryDelay = Math.min(5000, this.retryDelay * 2);
+      }
     } finally {
       if (generation === this.generation) this.patch({ busy: false });
     }
@@ -100,6 +116,7 @@ export class GraphCatalogController {
 
   private accept(catalog: GraphCatalog, generation: number, replaceDocument: boolean) {
     if (generation !== this.generation) return;
+    this.retryDelay = 500;
     this.patch({
       catalog,
       error: null,
@@ -113,7 +130,7 @@ export class GraphCatalogController {
     this.run(async (generation) => {
       if (!this.port.getGraphCatalog) throw new Error('catalog unavailable');
       this.accept(await bounded(this.port.getGraphCatalog()), generation, true);
-    });
+    }, Boolean(this.port.getGraphCatalog));
 
   private async waitActive(revision: number, generation: number) {
     const deadline = Date.now() + 10_000;

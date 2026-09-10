@@ -73,7 +73,10 @@ impl EngineGraphController {
                         return Ok(());
                     };
                     controller.reclaim_recorders();
-                    controller.checkpoint_closed_editor(&mut ledger);
+                    controller.retry_catalog_restore();
+                    if controller.catalog_restore.lock().is_none() {
+                        controller.checkpoint_closed_editor(&mut ledger);
+                    }
                 }
                 weak.upgrade().map_or(Ok(()), |controller| {
                     let recording = controller

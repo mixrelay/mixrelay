@@ -103,7 +103,7 @@
 }
 
 .scanDiagnostics summary {
-  cursor: pointer;
+  cursor: default;
 }
 
 @media (max-width: 720px) {

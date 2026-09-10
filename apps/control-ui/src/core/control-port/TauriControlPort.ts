@@ -15,6 +15,8 @@ import {
   type GraphLayoutResponse,
   type GraphRuntimeStatus,
   type MeterSnapshot,
+  type ProcessorEditorFrame,
+  type ProcessorEditorInput,
   type ProcessorEditorStatus,
   type ProcessorParameterUpdateResponse,
   type ProtocolErrorBody,
@@ -119,6 +121,14 @@ export class TauriControlPort implements ControlPort {
 
   public getProcessorEditor(nodeId: string): Promise<ProcessorEditorStatus> {
     return this.call('control_get_processor_editor', { nodeId });
+  }
+
+  public getProcessorEditorFrame(nodeId: string): Promise<ProcessorEditorFrame> {
+    return this.call('control_get_processor_editor_frame', { nodeId });
+  }
+
+  public sendProcessorEditorInput(nodeId: string, input: ProcessorEditorInput): Promise<void> {
+    return this.call('control_send_processor_editor_input', { nodeId, input });
   }
 
   public rescanProcessors(paths: string[]): Promise<ExternalProcessorCatalog> {

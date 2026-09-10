@@ -30,6 +30,7 @@ mod live_state;
 
 #[path = "graph_restore.rs"]
 mod restore;
+pub(super) use restore::PendingRestore;
 
 #[path = "device_catalog.rs"]
 mod devices;
@@ -196,8 +197,8 @@ impl Catalog {
 
 impl EngineGraphController {
     /// Loads the durable catalog before the audio worker starts.
-    /// Startup recall uses the normal native preparation transaction. Invalid/unavailable saved
-    /// graphs leave the fallback running and make catalog mutation unavailable, preserving bytes.
+    /// Startup recall uses the normal native preparation transaction. Native failures retain
+    /// the saved documents for automatic retry; invalid files remain protected from writes.
     #[must_use]
     pub fn with_graph_catalog(self) -> Self {
         match config_directory() {
@@ -226,30 +227,15 @@ impl EngineGraphController {
             }
             Ok(Some(value)) => {
                 let document = value.active().document.clone();
-                let Some(revision) = value.next_audio_revision(self.exchange.revisions().submitted)
-                else {
-                    *self.catalog.lock() = Some(CatalogStore {
-                        path,
-                        value: Err("revision overflow".into()),
-                    });
-                    return self;
-                };
-                let mut document = document;
-                document.revision = revision;
                 *self.catalog.lock() = Some(CatalogStore {
-                    path: path.clone(),
+                    path,
                     value: Ok(value),
                 });
-                // Startup restores the saved preset, not the bootstrap instance. There
-                // are no concurrent users of this consuming builder yet.
-                let restored = self
-                    .observed_catalog_candidate(&mut document)
-                    .and_then(|candidate| self.apply_graph_locked(document, candidate));
-                if let Err(error) = restored {
-                    *self.catalog.lock() = Some(CatalogStore {
-                        path,
-                        value: Err(format!("saved graph restore failed: {error:?}")),
-                    });
+                // The editable document is durable user data, not the bootstrap audio
+                // processor. Failed native startup must never substitute that processor's graph.
+                *self.graph.write() = document;
+                if let Err(error) = self.restore_catalog_locked() {
+                    self.defer_catalog_restore(error);
                 }
             }
             Err(error) => {

@@ -18,12 +18,14 @@ export const channelRowMetrics = {
   borderWidth: 1,
 };
 
-export type AudioNodeFaceMode = 'standard' | 'channel-rows';
+export type AudioNodeFaceMode = 'standard' | 'channel-rows' | 'compact';
 
 export interface AudioNodeFaceGeometry {
   height: number;
   firstChannelCenter: number | null;
   channelPitch: number;
+  portInsetTop?: number;
+  portInsetBottom?: number;
 }
 
 /** Channel-row faces contain only their header and meter rows. The same row
@@ -39,6 +41,12 @@ export function audioNodeFaceGeometry({
   portCount?: number;
   mode?: AudioNodeFaceMode;
 }): AudioNodeFaceGeometry {
+  if (mode === 'compact')
+    return {
+      height: channelRowMetrics.headerHeight,
+      firstChannelCenter: null,
+      channelPitch: 0,
+    };
   if (mode === 'standard')
     return {
       height: Math.max(minimumAudioNodeFaceHeight(channels, hasDetail), (portCount + 1) * 12),
@@ -57,7 +65,9 @@ export function audioNodeFaceGeometry({
 }
 
 export function audioNodePortTop(geometry: AudioNodeFaceGeometry, index: number, count: number) {
+  const top = geometry.portInsetTop ?? 0;
+  const available = geometry.height - top - (geometry.portInsetBottom ?? 0);
   return geometry.firstChannelCenter === null
-    ? ((index + 1) / (count + 1)) * geometry.height
+    ? top + ((index + 1) / (count + 1)) * available
     : geometry.firstChannelCenter + index * geometry.channelPitch;
 }

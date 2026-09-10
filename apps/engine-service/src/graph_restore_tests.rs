@@ -7,6 +7,72 @@ use std::{
     path::PathBuf,
 };
 
+struct TemporaryNativeFailure(std::sync::atomic::AtomicUsize);
+
+impl crate::GraphResourceBackend for TemporaryNativeFailure {
+    fn reconcile(&self, _: &GraphDocument) -> Result<(), tonenari_audio_io::HostAudioBackendError> {
+        if self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
+            return Err(tonenari_audio_io::HostAudioBackendError::BackendFailure {
+                message: "injected initialization timeout".into(),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[test]
+fn transient_native_startup_failure_retries_without_losing_saved_catalog_or_bootstrap_overwrite() {
+    use crate::{ControlBackend, default_duplex_document};
+    use std::{
+        sync::{Arc, atomic::Ordering},
+        time::Instant,
+    };
+
+    let saved = default_duplex_document(9, Some(-6.0));
+    let other = default_duplex_document(12, Some(-12.0));
+    let fixture = Fixture::new(&json!({
+        "version":1,"revision":12,"activeId":"first",
+        "graphs":[
+            {"id":"first","name":"First","document":saved},
+            {"id":"second","name":"Second","document":other}
+        ]
+    }));
+    let before = fs::read(&fixture.path).unwrap();
+    let backend = Arc::new(TemporaryNativeFailure(std::sync::atomic::AtomicUsize::new(
+        0,
+    )));
+    let mut engine = crate::endpoint_settings_tests::controller(default_duplex_document(1, None));
+    engine.graph_resources = backend.clone();
+    let engine = engine.with_graph_catalog_path(fixture.path.clone());
+    assert_eq!(backend.0.load(Ordering::Relaxed), 1);
+    assert_eq!(engine.graph(), saved);
+    assert_eq!(engine.graph_catalog().unwrap().document, saved);
+    assert_eq!(engine.graph_catalog_document("second").unwrap(), other);
+    assert_eq!(fs::read(&fixture.path).unwrap(), before);
+    let _status = engine.status();
+    engine.retry_catalog_restore();
+    assert_eq!(
+        backend.0.load(Ordering::Relaxed),
+        1,
+        "reads and early ticks must not retry"
+    );
+    engine.catalog_restore.lock().as_mut().unwrap().retry_after = Instant::now();
+    engine.retry_catalog_restore();
+    assert_eq!(backend.0.load(Ordering::Relaxed), 2);
+    assert!(engine.catalog_restore.lock().is_none());
+    assert_eq!(engine.graph().nodes, saved.nodes);
+    assert_eq!(engine.graph().edges, saved.edges);
+    assert_eq!(engine.graph().revision, 13);
+    assert_eq!(engine.graph_catalog_document("second").unwrap(), other);
+    assert_eq!(engine.graph_catalog().unwrap().active_id, "first");
+    engine.retry_catalog_restore();
+    assert_eq!(
+        backend.0.load(Ordering::Relaxed),
+        2,
+        "successful recall must not run twice"
+    );
+}
+
 struct Fixture {
     path: PathBuf,
     _directory: tonenari_test_support::FixtureDir,
@@ -163,11 +229,7 @@ fn restored_pid_graph_can_be_edited_and_saved_through_controller() {
         source.request.selector,
         tonenari_audio_io::ApplicationSelector::ProcessId { .. }
     )));
-    let mut processor = engine
-        .prepare_and_validate(&edited, *engine.context.read())
-        .unwrap()
-        .processor;
-    assert!(engine.exchange.activate_pending(&mut processor));
+    crate::graph_catalog_tests::settle(&engine);
     edited.revision += 1;
     let NodeConfig::Gain(gain) = &mut edited.nodes[3].config else {
         panic!("saved gain node");
