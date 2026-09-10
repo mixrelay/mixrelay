@@ -10,6 +10,7 @@ extern "C" {
 #endif
 
 typedef struct TNApplicationSourceTransport TNApplicationSourceTransport;
+typedef struct TNEngineSourceAttachment TNEngineSourceAttachment;
 
 typedef enum TNApplicationSourceTransportErrorCode {
     TN_APPLICATION_SOURCE_TRANSPORT_OK = 0,
@@ -44,6 +45,14 @@ void tn_application_source_transport_publish_native(
 
 TNApplicationSourceTransport *tn_application_source_transport_connect(
     const char *source_id,
+    uint32_t capacity_frames,
+    uint32_t channels,
+    TNApplicationSourceTransportError *error);
+
+/* Takes and clears the attachment, closing its descriptor on every failure.
+ * Successful handles are owned by exactly one pump; destroy only after it stops. */
+TNApplicationSourceTransport *tn_application_source_transport_attach(
+    TNEngineSourceAttachment *attachment,
     uint32_t capacity_frames,
     uint32_t channels,
     TNApplicationSourceTransportError *error);

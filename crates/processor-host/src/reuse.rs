@@ -1,6 +1,6 @@
 //! Control-thread matching and audio-boundary ownership transfer for surviving plug-ins.
 
-use crate::{ProcessorControlRegistry, WORKER_READY, shared_header_unchecked};
+use crate::{ProcessorControlRegistry, WORKER_READY};
 use std::sync::atomic::Ordering;
 use tonenari_audio_engine::{HostedAudioProcessor, HostedProcessorPrepareRequest};
 use tonenari_audio_graph::{ProviderNodeConfig, RenderFormat};
@@ -56,7 +56,7 @@ impl ProcessorControlRegistry {
         request: &HostedProcessorPrepareRequest<'_>,
     ) -> Option<Box<dyn HostedAudioProcessor>> {
         let control = self.live_control(request.node_id).ok()?;
-        let header = shared_header_unchecked(&control.shared);
+        let header = control.shared.header();
         if !control.active_owner.load(Ordering::Acquire)
             || header.worker_status.load(Ordering::Acquire) != WORKER_READY
             || header.shutdown.load(Ordering::Acquire) != 0

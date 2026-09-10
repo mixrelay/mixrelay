@@ -7,18 +7,10 @@ if [[ "$(uname -s)" != Darwin ]]; then
   exit 2
 fi
 task_root="$(cd "$(dirname "$0")/.." && pwd)"
-mkdir -p "$task_root/target/native-tests"
-task_build="$(mktemp -d "$task_root/target/native-tests/clock-boundaries.XXXXXX")"
-trap 'printf "Clock boundary artifacts: %s\n" "$task_build"' EXIT
 cd "$task_root"
 cargo test -p tonenari-engine-service --bin tonenari-engine-service native_callback_and_hal_contracts -- --nocapture
-clang -fobjc-arc -fblocks -fsanitize=address,undefined -g \
-  -mmacosx-version-min=14.2 -Wall -Wextra -Werror \
-  -I native/macos/application-capture/include \
-  native/macos/application-capture/tests/TNProcessTapLifetimeTests.m \
-  native/macos/application-capture/src/TNAudioRing.c \
-  -framework Foundation -framework AppKit -framework CoreAudio \
-  -o "$task_build/tap-lifetime"
-"$task_build/tap-lifetime"
+# Full Rust owners replace the previous private-C device and tap fixtures.
+cargo test -p tonenari-macos-transport --lib device_io:: -- --nocapture
+cargo test -p tonenari-process-tap --lib -- --nocapture
 cargo test -p tonenari-engine-service --bin tonenari-engine-service macos_devices::tests -- --nocapture
 cargo test -p tonenari-desktop macos_audio::clock_pump::tests -- --nocapture

@@ -4,8 +4,12 @@
 //! therefore crash or hang without taking down the graph/control process. DSP instances run in
 //! the same bounded shared-memory worker model for every supported format.
 
-use std::path::{Path, PathBuf};
+use std::{
+    mem::ManuallyDrop,
+    path::{Path, PathBuf},
+};
 
+use arrayvec::ArrayVec;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::{Deserialize, Serialize};
 use tonenari_control_protocol::{
@@ -21,9 +25,15 @@ use truce_rack_core::{
     scanner::PluginScanner,
 };
 
+#[cfg(test)]
+mod channel_tests;
+
 pub const SCAN_ARGUMENT: &str = "--tonenari-plugin-scan";
 pub const PROBE_ARGUMENT: &str = "--tonenari-plugin-probe";
 pub const WORKER_ARGUMENT: &str = "--tonenari-plugin-worker";
+
+const MAX_CHANNELS: u16 = 64;
+const CHANNEL_SLOTS: usize = MAX_CHANNELS as usize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -340,8 +350,7 @@ fn describe_loaded_plugin<P: Plugin<f32>>(
                 is_read_only: parameter.flags.contains(ParameterFlags::READ_ONLY),
             })
             .collect();
-        let input_channels = checked_channels(layout.total_input_channels())?;
-        let output_channels = checked_channels(layout.total_output_channels())?;
+        let (input_channels, output_channels) = layout_channels(&layout)?;
         Ok(RackProbeRecord {
             descriptor: ExternalProcessorDescriptor {
                 type_id: format!("{}:{}", locator.format.argument(), locator.unique_id),
@@ -363,22 +372,27 @@ fn describe_loaded_plugin<P: Plugin<f32>>(
 }
 
 fn checked_channels(channels: u32) -> Result<u16, String> {
-    let channels = u16::try_from(channels)
-        .map_err(|_| "plugin exposes more than 65535 channels".to_owned())?;
-    (channels != 0)
-        .then_some(channels)
-        .ok_or_else(|| "plugin effect layout has no channels".to_owned())
+    u16::try_from(channels)
+        .ok()
+        .filter(|channels| (1..=MAX_CHANNELS).contains(channels))
+        .ok_or_else(|| format!("plugin effect layout requires 1..={MAX_CHANNELS} channels"))
+}
+
+fn layout_channels(layout: &BusLayout) -> Result<(u16, u16), String> {
+    fn total(buses: &[truce_rack_core::bus::Bus]) -> Result<u16, String> {
+        let channels = buses
+            .iter()
+            .try_fold(0_u32, |total, bus| total.checked_add(bus.channels.count()));
+        checked_channels(channels.unwrap_or(u32::MAX))
+    }
+    Ok((total(&layout.inputs)?, total(&layout.outputs)?))
 }
 
 fn select_effect_layout(layouts: &[BusLayout]) -> Option<(usize, &BusLayout)> {
     layouts
         .iter()
         .enumerate()
-        .filter(|(_, layout)| {
-            let inputs = layout.total_input_channels();
-            let outputs = layout.total_output_channels();
-            inputs != 0 && outputs != 0 && inputs <= 64 && outputs <= 64
-        })
+        .filter(|(_, layout)| layout_channels(layout).is_ok())
         .min_by_key(|(_, layout)| {
             let inputs = layout.total_input_channels();
             let outputs = layout.total_output_channels();
@@ -418,6 +432,12 @@ struct ParameterRange {
     maximum: f64,
 }
 
+struct WorkerActivation {
+    editor_allowed: bool,
+    sample_rate: f64,
+    max_block_size: usize,
+}
+
 impl RackWorkerPlugin {
     pub(crate) fn load(
         locator: &RackLocator,
@@ -426,18 +446,34 @@ impl RackWorkerPlugin {
         max_block_size: usize,
         parameters: &serde_json::Value,
     ) -> Result<Self, String> {
-        let mut plugin = load_plugin(locator)?;
+        Self::activate(
+            load_plugin(locator)?,
+            layout_index,
+            &WorkerActivation {
+                editor_allowed: locator.has_editor,
+                sample_rate,
+                max_block_size,
+            },
+            parameters,
+        )
+    }
+
+    fn activate(
+        mut plugin: Box<dyn Plugin<f32>>,
+        layout_index: usize,
+        activation: &WorkerActivation,
+        parameters: &serde_json::Value,
+    ) -> Result<Self, String> {
         let layout = plugin
             .supported_layouts()
             .get(layout_index)
             .cloned()
             .ok_or_else(|| "processor layout is no longer available".to_owned())?;
+        // A saved index identifies a position, not an immutable bus layout. Revalidate the
+        // freshly loaded binary before activation or allocating its planar channels.
+        let (input_channels, output_channels) = layout_channels(&layout)?;
         let input_ranges = bus_ranges(&layout.inputs);
         let output_ranges = bus_ranges(&layout.outputs);
-        let input_channels = usize::try_from(layout.total_input_channels())
-            .map_err(|_| "processor input layout exceeds this platform".to_owned())?;
-        let output_channels = usize::try_from(layout.total_output_channels())
-            .map_err(|_| "processor output layout exceeds this platform".to_owned())?;
         let parameter_ranges = (0..plugin.parameter_count())
             .filter_map(|index| {
                 plugin
@@ -452,20 +488,20 @@ impl RackWorkerPlugin {
             })
             .collect::<Vec<_>>();
         plugin
-            .activate(layout, sample_rate, max_block_size)
+            .activate(layout, activation.sample_rate, activation.max_block_size)
             .map_err(|error| error.to_string())?;
         let mut worker = Self {
             plugin,
-            editor_allowed: locator.has_editor,
-            input_storage: planar_storage(input_channels, max_block_size),
-            output_storage: planar_storage(output_channels, max_block_size),
+            editor_allowed: activation.editor_allowed,
+            input_storage: planar_storage(usize::from(input_channels), activation.max_block_size),
+            output_storage: planar_storage(usize::from(output_channels), activation.max_block_size),
             input_ranges,
             output_ranges,
             parameter_ranges,
             input_events: EventList::new(),
             output_events: EventList::new(),
-            sample_rate,
-            max_block_size,
+            sample_rate: activation.sample_rate,
+            max_block_size: activation.max_block_size,
         };
         worker.apply_initial_state(parameters)?;
         Ok(worker)
@@ -525,36 +561,21 @@ impl RackWorkerPlugin {
     }
 
     pub(crate) fn process(&mut self, frames: usize) -> Result<(), String> {
-        // A graph port is capped at 64 channels. Fixed stack slots avoid allocating the temporary
-        // slice-of-slices required by the format-neutral host API for every audio block.
-        let mut input_slots: [std::mem::MaybeUninit<&[f32]>; 64] =
-            std::array::from_fn(|_| std::mem::MaybeUninit::uninit());
-        for (slot, channel) in input_slots.iter_mut().zip(&self.input_storage) {
-            slot.write(&channel[..frames]);
+        // Activation validates the channel cap. Inline vectors initialize only live channels
+        // without allocating the temporary slice-of-slices required by the host API.
+        let mut input_refs = ArrayVec::<&[f32], CHANNEL_SLOTS>::new();
+        for channel in &self.input_storage {
+            input_refs.push(&channel[..frames]);
         }
-        let input_count = self.input_storage.len();
-        // SAFETY: the first `input_count` slots were initialized above and remain valid through
-        // the synchronous process call.
-        let input_refs = unsafe {
-            std::slice::from_raw_parts(input_slots.as_ptr().cast::<&[f32]>(), input_count)
-        };
-        let output_count = self.output_storage.len();
-        let mut output_slots: [std::mem::MaybeUninit<&mut [f32]>; 64] =
-            std::array::from_fn(|_| std::mem::MaybeUninit::uninit());
-        for (slot, channel) in output_slots.iter_mut().zip(&mut self.output_storage) {
-            slot.write(&mut channel[..frames]);
+        // AudioBuffer ties the outer borrow to its inner mutable references. Suppress the
+        // container's drop check: it owns only borrowed slices, never the channel allocations.
+        let mut output_refs = ManuallyDrop::new(ArrayVec::<&mut [f32], CHANNEL_SLOTS>::new());
+        for channel in &mut self.output_storage {
+            output_refs.push(&mut channel[..frames]);
         }
-        // SAFETY: each initialized mutable slice points at a distinct planar channel and the
-        // references are discarded before this method returns.
-        let output_refs = unsafe {
-            std::slice::from_raw_parts_mut(
-                output_slots.as_mut_ptr().cast::<&mut [f32]>(),
-                output_count,
-            )
-        };
         let mut buffer = AudioBuffer::new(
-            input_refs,
-            output_refs,
+            &input_refs,
+            &mut output_refs,
             frames,
             &self.input_ranges,
             &self.output_ranges,
@@ -790,10 +811,20 @@ mod tests {
             .unwrap();
         let expected = first.plugin.parameter_value(range.index).unwrap();
         let (shared_path, config_path) = crate::worker_paths().expect("private worker paths");
-        let file = crate::create_shared_file(&shared_path, 2, 2, 128).unwrap();
-        let (shared, control) = crate::map_worker_regions(&file).unwrap();
-        drop(file);
-        crate::shared_header_unchecked(&shared)
+        let (audio, control) = crate::shared_transport::create(
+            &shared_path,
+            crate::AudioLayout {
+                inputs: 2,
+                outputs: 2,
+                block_frames: 128,
+            },
+        )
+        .unwrap();
+        drop(audio);
+        let control = crate::HostedProcessorControl::new(control);
+        let (_, shared) = crate::shared_transport::worker(&shared_path).unwrap();
+        shared
+            .header()
             .worker_status
             .store(crate::WORKER_READY, std::sync::atomic::Ordering::Release);
         let client =

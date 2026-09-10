@@ -10,5 +10,9 @@ crate-type = ["rlib", "staticlib"]
 [dependencies]
 tonenari-macos-transport = { path = "../../common" }
 
+[build-dependencies]
+# Compile the SDK Blocks adapter; Rust owns connection and timer lifetime.
+cc = "1.2"
+
 [lints]
 workspace = true

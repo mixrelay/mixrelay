@@ -10,6 +10,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+#[cfg(test)]
 use tonenari_audio_graph::{
     AudioDeviceInputConfig, AudioDeviceOutputConfig, GraphDocument, NodeConfig,
 };
@@ -18,31 +19,7 @@ use tonenari_audio_io::{
     process::{ProcessReport, TransferOutcome},
 };
 
-#[derive(Clone, Default, PartialEq)]
-pub(super) struct DeviceSpec {
-    inputs: Vec<(String, AudioDeviceInputConfig)>,
-    outputs: Vec<(String, AudioDeviceOutputConfig)>,
-}
-
-impl DeviceSpec {
-    pub(super) fn from_document(document: &GraphDocument) -> Self {
-        let mut spec = Self::default();
-        for node in &document.nodes {
-            match &node.config {
-                NodeConfig::AudioDeviceInput(config) => {
-                    let mut config = config.clone();
-                    config.gain_db = 0.0;
-                    spec.inputs.push((node.id.as_str().into(), config));
-                }
-                NodeConfig::AudioDeviceOutput(config) => {
-                    spec.outputs.push((node.id.as_str().into(), config.clone()));
-                }
-                _ => {}
-            }
-        }
-        spec
-    }
-}
+use tonenari_engine_service::resource_requirements::DeviceRequirements;
 
 #[derive(Default)]
 pub(super) struct DeviceStreams {
@@ -82,14 +59,14 @@ impl ObservedStream {
 #[derive(Clone)]
 pub(super) struct DeviceWatch {
     pub(super) generation: u64,
-    spec: DeviceSpec,
+    spec: DeviceRequirements,
     inputs: BTreeMap<String, Arc<AtomicBool>>,
     outputs: BTreeMap<String, Arc<AtomicBool>>,
     pub(super) format: tonenari_audio_graph::RenderFormat,
 }
 impl DeviceWatch {
-    pub(super) fn disconnected(&self) -> DeviceSpec {
-        DeviceSpec {
+    pub(super) fn disconnected(&self) -> DeviceRequirements {
+        DeviceRequirements {
             inputs: self
                 .spec
                 .inputs
@@ -115,19 +92,13 @@ impl DeviceWatch {
         }
     }
 }
-impl DeviceSpec {
-    pub(super) fn is_empty(&self) -> bool {
-        self.inputs.is_empty() && self.outputs.is_empty()
-    }
-}
-
 impl DeviceStreams {
     #[cfg(test)]
-    pub(super) fn open(spec: &DeviceSpec, generation: u64) -> Result<Self, String> {
+    pub(super) fn open(spec: &DeviceRequirements, generation: u64) -> Result<Self, String> {
         Self::open_format(spec, generation, super::render_format())
     }
     pub(super) fn open_format(
-        spec: &DeviceSpec,
+        spec: &DeviceRequirements,
         generation: u64,
         format: tonenari_audio_graph::RenderFormat,
     ) -> Result<Self, String> {
@@ -143,7 +114,7 @@ impl DeviceStreams {
     }
 
     pub(super) fn recover(
-        spec: &DeviceSpec,
+        spec: &DeviceRequirements,
         generation: u64,
         stopping: &AtomicBool,
         format: tonenari_audio_graph::RenderFormat,
@@ -151,7 +122,7 @@ impl DeviceStreams {
         let targets = tonenari_audio_io::linux::targets().map_err(|error| error.to_string())?;
         // Devices can return independently. One absent interface must not delay
         // another interface's recovery. Unresolvable requests remain watched.
-        let available = DeviceSpec {
+        let available = DeviceRequirements {
             inputs: spec
                 .inputs
                 .iter()
@@ -194,7 +165,7 @@ impl DeviceStreams {
     }
 
     fn open_inventory(
-        spec: &DeviceSpec,
+        spec: &DeviceRequirements,
         generation: u64,
         targets: &[tonenari_audio_io::linux::PipeWireTarget],
         partial: bool,
@@ -315,7 +286,7 @@ impl DeviceStreams {
             .all(|value| value.stream.connected() && value.stream.ready())
     }
 
-    pub(super) fn watch(&self, spec: DeviceSpec) -> DeviceWatch {
+    pub(super) fn watch(&self, spec: DeviceRequirements) -> DeviceWatch {
         DeviceWatch {
             format: self.format.unwrap_or_else(super::render_format),
             generation: self.generation,
@@ -410,7 +381,7 @@ mod tests {
         let stopping = AtomicBool::new(true);
         assert!(
             DeviceStreams::open_inventory(
-                &DeviceSpec::default(),
+                &DeviceRequirements::default(),
                 3,
                 &[],
                 true,
@@ -422,7 +393,7 @@ mod tests {
     }
     #[test]
     fn no_device_graph_does_not_need_a_pipewire_server() {
-        let mut streams = DeviceStreams::open(&DeviceSpec::default(), 1).unwrap();
+        let mut streams = DeviceStreams::open(&DeviceRequirements::default(), 1).unwrap();
         let mut input = [1.0; 4];
         assert_eq!(streams.read("missing", &mut input).frames, 0);
         assert_eq!(input.map(f32::to_bits), [0; 4]);
@@ -435,21 +406,21 @@ mod tests {
                 {"id":"input","type":"audio_device_input","config":{"selector":{"match":"default_input"},"outputChannels":64,"gainDb":0.0}}
             ],"edges":[]
         })).unwrap();
-        let before = DeviceSpec::from_document(&doc);
+        let before = DeviceRequirements::from_document(&doc);
         if let NodeConfig::AudioDeviceInput(config) = &mut doc.nodes[0].config {
             config.gain_db = -12.0;
         }
-        assert!(before == DeviceSpec::from_document(&doc));
+        assert!(before == DeviceRequirements::from_document(&doc));
         if let NodeConfig::AudioDeviceInput(config) = &mut doc.nodes[0].config {
             config.output_channels = 16;
         }
-        assert!(before != DeviceSpec::from_document(&doc));
+        assert!(before != DeviceRequirements::from_document(&doc));
     }
     #[test]
     fn health_watch_retries_only_disconnected_registered_streams() {
         let input = Arc::new(AtomicBool::new(true));
         let output = Arc::new(AtomicBool::new(true));
-        let spec = DeviceSpec {
+        let spec = DeviceRequirements {
             inputs: vec![(
                 "mic".into(),
                 AudioDeviceInputConfig {

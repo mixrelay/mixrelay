@@ -49,10 +49,11 @@ sleep 1
 pw-dump >"$lab/before.json"
 test_name=${TONENARI_LAB_TEST_NAME:-native_application_stream_relaunch_recovers_pcm_without_graph_reapply}
 if [[ ${TONENARI_LAB_LIFECYCLE_TEST:-0} == 1 ]]; then
+    cargo build --manifest-path "$workspace/Cargo.toml" -p tonenari-pcm-ring --release --target-dir "$workspace/target"
     cc -O2 -std=c11 -D_GNU_SOURCE -Wall -Wextra -Werror -pthread \
-        $(pkg-config --cflags libpipewire-0.3) -I "$workspace/native/linux/pipewire" \
+        $(pkg-config --cflags libpipewire-0.3) -I "$workspace/native/linux/pipewire" -I "$workspace/native/pcm-ring/include" \
         "$workspace/native/linux/pipewire/tests/TNLifecycleFixture.c" \
-        "$workspace/native/linux/pipewire/TNPcmRing.c" \
+        "$workspace/target/release/libtonenari_pcm_ring.a" -ldl \
         $(pkg-config --libs libpipewire-0.3) -lm -o "$lab/lifecycle-fixture"
     "$lab/lifecycle-fixture"
 else

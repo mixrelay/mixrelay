@@ -40,7 +40,11 @@ through `SPA_IO_RateMatch`. The
 distinguishes this mode from direct timestamp mode, which assumes a synchronized
 driver and does not use that DLL. This experiment uses constant-latency mode.
 
-`TNDriftProbe.c` links the immutable production `TNPipeWire.c` and `TNPcmRing.c`;
+The recorded experiment linked immutable production `TNPipeWire.c` and the
+then-current C PCM queue. The current reproduction script links `TNPipeWire.c`
+with `native/pcm-ring`'s Rust static library; that replacement has not been rerun
+in this Linux lab and does not inherit the experiment's runtime acceptance.
+`TNDriftProbe.c`
 it opens a native mode-3 capture against the fixture's exact registry serial and
 reads it from `tn_pw_driver_open` callbacks. It measures PCM, finite/stereo
 integrity, abrupt sample jumps, silent runs, actual native clock/format snapshots,

@@ -5,6 +5,7 @@
 #include <pipewire/data-loop.h>
 #include <spa/param/audio/format-utils.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -228,9 +229,10 @@ void tn_pw_stream_discard_input(TNPWStream *s) {
     if (s->mode == 0 || s->mode == 2 || s->mode == 3) tn_pcm_ring_discard(&s->ring);
 }
 TNPWTransferCounters tn_pw_stream_counters(TNPWStream *s) {
+    TNPcmRingStats stats = tn_pcm_ring_stats(&s->ring);
     return (TNPWTransferCounters) {
-        .overflows = atomic_load_explicit(&s->ring.overflows, memory_order_relaxed),
-        .starvations = atomic_load_explicit(&s->ring.starvations, memory_order_relaxed),
+        .overflows = stats.overflows,
+        .starvations = stats.starvations,
     };
 }
 uint32_t tn_pw_stream_read(TNPWStream *s, float *samples, uint32_t frames) {

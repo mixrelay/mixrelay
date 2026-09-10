@@ -46,6 +46,10 @@ typedef struct TNProcessTapStats {
     bool clock_valid;
 } TNProcessTapStats;
 
+_Static_assert(sizeof(TNProcessTapConfig) == 24, "tap config ABI");
+_Static_assert(sizeof(TNProcessTapError) == 8, "tap error ABI");
+_Static_assert(sizeof(TNProcessTapStats) == 96, "tap stats ABI");
+
 typedef void (*TNProcessTapApplicationVisitor)(
     void *context,
     const char *bundle_id,

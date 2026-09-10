@@ -8,9 +8,10 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicPtr, Ordering},
 };
-use tonenari_audio_graph::{GraphDocument, NodeConfig, RenderFormat};
+use tonenari_audio_graph::{GraphDocument, RenderFormat};
 use tonenari_audio_io::HostAudioBackendError;
 use tonenari_engine_service::PreparedGraphFormat;
+use tonenari_engine_service::resource_requirements::ResourceRequirements;
 
 pub(super) use tonenari_audio_io::formats::SAMPLE_RATES as GRAPH_RATES;
 
@@ -135,40 +136,22 @@ pub(super) fn prepare(
             capability: "requested Windows graph format".into(),
         });
     }
-    if document
-        .nodes
-        .iter()
-        .any(|node| matches!(node.config, NodeConfig::VirtualEndpointTransport(_)))
-    {
-        // The installed legacy LAB driver cannot confirm another format. Do not
+    let requirements = ResourceRequirements::from_document(document);
+    if !requirements.endpoints.is_empty() {
+        // The installed LAB driver cannot confirm another format. Do not
         // report an engine-only rate change as a successful virtual-device change.
         return Err(HostAudioBackendError::CapabilityUnavailable {
             capability: "installed Windows virtual endpoint format negotiation".into(),
         });
     }
     let reservation = resources.mailbox.reserve()?;
-    let mut spec = WindowsResourceSpec {
+    let spec = WindowsResourceSpec {
         graph_rate: requested.sample_rate,
+        captures: requirements.captures,
+        inputs: requirements.devices.inputs,
+        outputs: requirements.devices.outputs,
         ..Default::default()
     };
-    for node in &document.nodes {
-        match &node.config {
-            NodeConfig::ApplicationCapture(config) => {
-                let mut config = config.clone();
-                config.gain_db = 0.0;
-                spec.captures.push((node.id.as_str().into(), config));
-            }
-            NodeConfig::AudioDeviceInput(config) => {
-                let mut config = config.clone();
-                config.gain_db = 0.0;
-                spec.inputs.push((node.id.as_str().into(), config));
-            }
-            NodeConfig::AudioDeviceOutput(config) => {
-                spec.outputs.push((node.id.as_str().into(), config.clone()));
-            }
-            _ => {}
-        }
-    }
     let mut next_captures = resources
         .capture_cache
         .lock()

@@ -26,10 +26,10 @@ pub fn device_fixture() -> &'static str {
 pub fn assert_native_contracts() {
     for path in [
         env!("TN_NATIVE_CLOCK"),
-        env!("TN_NATIVE_DEVICE"),
         env!("TN_NATIVE_HAL"),
         env!("TN_NATIVE_APPLICATION_CLOCK"),
         env!("TN_NATIVE_AUDIO_RING"),
+        env!("TN_NATIVE_PCM_RING"),
     ] {
         // UBSan normally recovers after diagnostics; tests must instead fail on
         // the first violation, just as ASan and native assertions do.

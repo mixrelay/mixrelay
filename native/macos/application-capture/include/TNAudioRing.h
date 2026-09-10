@@ -5,27 +5,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Rust-owned opaque SPSC ring. One serialized IOProc writes; one pump reads.
+ * Destroy only after callback, consumer and stat-reader access has drained. */
 typedef struct TNAudioRing TNAudioRing;
 
 enum {
     TN_AUDIO_RING_MAX_CAPACITY_FRAMES = 1U << 20U,
 };
 
-typedef void *(*TNAudioRingAllocate)(void *context, size_t count, size_t size);
-typedef void (*TNAudioRingDeallocate)(void *context, void *memory);
-
-typedef struct TNAudioRingAllocator {
-    void *context;
-    TNAudioRingAllocate allocate;
-    TNAudioRingDeallocate deallocate;
-} TNAudioRingAllocator;
-
 TNAudioRing *tn_audio_ring_create(size_t capacity_frames, uint32_t channels);
-TNAudioRing *tn_audio_ring_create_with_allocator(
-    size_t capacity_frames,
-    uint32_t channels,
-    TNAudioRingAllocator allocator
-);
 void tn_audio_ring_destroy(TNAudioRing *ring);
 
 size_t tn_audio_ring_write_interleaved(
@@ -45,6 +33,7 @@ size_t tn_audio_ring_read_interleaved(
 );
 
 size_t tn_audio_ring_capacity_frames(const TNAudioRing *ring);
+/* Bounded diagnostic observation, not an atomic pair of producer/consumer cursors. */
 size_t tn_audio_ring_available_frames(const TNAudioRing *ring);
 uint64_t tn_audio_ring_dropped_frames(const TNAudioRing *ring);
 

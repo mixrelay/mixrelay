@@ -1,7 +1,8 @@
 /* Explicit test-only build: reuse the production producer implementation while
  * injecting an in-process registry attachment instead of an installed XPC service. */
-#include "../src/TNApplicationSourceTransport.c"
+#include "TNApplicationSourceTransport.h"
 #include "TNEngineSourceRegistry.h"
+#include <unistd.h>
 
 TNEngineSourceRegistry *tn_application_clock_fixture_create(TNApplicationSourceTransport **output) {
     if (output == NULL) return NULL;
@@ -13,19 +14,11 @@ TNEngineSourceRegistry *tn_application_clock_fixture_create(TNApplicationSourceT
     size_t bytes = 0U;
     uint64_t lease = 0U, epoch = 0U;
     if (!tn_engine_source_registry_attach_clocked(registry, &request, &descriptor, &bytes, &lease, &epoch)) goto fail;
-    const int owned = descriptor;
+    TNEngineSourceAttachment attachment = { descriptor, bytes, lease, epoch };
     descriptor = -1;
-    void *memory = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, owned, 0);
-    if (memory == MAP_FAILED) { close(owned); goto fail; }
-    TNApplicationSourceTransport *transport = calloc(1U, sizeof(*transport));
-    if (transport == NULL) { munmap(memory, bytes); close(owned); goto fail; }
-    transport->descriptor = owned; transport->memory = memory; transport->mapped_size = bytes;
-    transport->buffer = tn_shared_audio_buffer_attach(memory, bytes);
-    transport->clock = tn_application_clock_attach(memory, bytes, 16384U, 2U);
-    transport->owned_epoch = epoch; transport->owned_lease = lease;
-    if (transport->buffer == NULL || transport->clock == NULL) {
-        munmap(memory, bytes); close(owned); free(transport); goto fail;
-    }
+    TNApplicationSourceTransport *transport = tn_application_source_transport_attach(
+        &attachment, 16384U, 2U, NULL);
+    if (transport == NULL) goto fail;
     *output = transport;
     return registry;
 fail:

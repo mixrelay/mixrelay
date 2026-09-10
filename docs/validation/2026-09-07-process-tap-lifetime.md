@@ -5,7 +5,7 @@
 The production implementation in `native/macos/application-capture/src/TNProcessTap.m`
 is compiled directly into `native/macos/application-capture/tests/TNProcessTapLifetimeTests.m`.
 Only Core Audio object operations are substituted with failure-injection functions.
-The test uses the production audio ring and actual libdispatch cleanup queue/retry.
+The test uses the production Rust audio ring and actual libdispatch cleanup queue/retry.
 It does **not** create a real tap/device, request capture permissions, change the
 default device, or modify the running engine/session.
 
@@ -19,27 +19,25 @@ PASS: 1000 teardown failure/recovery cycles; format/rate invalidation; malformed
 ## Reproduce on macOS
 
 Requires the installed Command Line Tools/macOS SDK with process-tap APIs
-(deployment target macOS 14.2). No additional downloaded headers or dependencies
-are required. The local compiler resolves the SDK through its normal toolchain;
-the only project include directory is shown below. Foundation, CoreAudio, and
-AppKit are required because the production translation unit includes application
-discovery/icon code as well as the tested capture lifecycle.
+(deployment target macOS 14.2) and the repository's Rust toolchain. Cargo's
+`macos-test-support` build owns the native executable and links the current Rust
+callback-clock and capture-ring implementations. The local compiler resolves the SDK through its
+normal toolchain. Foundation, CoreAudio, and AppKit are required because the
+production translation unit includes application discovery/icon code as well as
+the tested capture lifecycle.
 
 From the repository root:
 
 ```sh
-tap_lifetime_build_dir=$(mktemp -d /tmp/tonenari-tap-lifetime.XXXXXX)
-clang -std=c17 -fobjc-arc -fmodules -fblocks \
-  -mmacosx-version-min=14.2 \
-  -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Werror \
-  -fsanitize=address,undefined -g \
-  -I native/macos/application-capture/include \
-  native/macos/application-capture/src/TNAudioRing.c \
-  native/macos/application-capture/tests/TNProcessTapLifetimeTests.m \
-  -framework CoreAudio -framework Foundation -framework AppKit \
-  -o "$tap_lifetime_build_dir/TNProcessTapLifetimeTests"
-"$tap_lifetime_build_dir/TNProcessTapLifetimeTests"
+cargo test -p tonenari-engine-service --bin tonenari-engine-service \
+  native_callback_and_hal_contracts -- --nocapture
 ```
+
+This selection also runs the callback-clock, device, HAL, application-clock and
+audio-ring fixtures. The Objective-C fixture retains AddressSanitizer and
+UndefinedBehaviorSanitizer; the linked stable-Rust archive is not sanitizer
+instrumented. All artifacts remain in Cargo's output directory. The standalone
+C-only link recipe was removed when the callback-clock algorithm moved to Rust.
 
 Compile the production Objective-C translation unit independently:
 

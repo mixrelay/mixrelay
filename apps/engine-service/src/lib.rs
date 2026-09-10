@@ -43,7 +43,12 @@ pub mod endpoint_registry;
 pub mod endpoint_service;
 
 mod control_maintenance;
+#[cfg(test)]
+mod controller_startup_tests;
+#[cfg(test)]
+mod controller_test_support;
 pub mod device_worker;
+mod persistence;
 mod processor_timing;
 pub use control_maintenance::ControlMaintenance;
 pub mod catalog_execution;
@@ -61,6 +66,7 @@ mod graph_catalog_tests;
 pub mod graph_composition;
 
 pub mod render_demand;
+pub mod resource_requirements;
 pub mod session;
 #[cfg(test)]
 mod session_change_tests;
@@ -455,17 +461,11 @@ impl EngineGraphController {
         config: EngineGraphControllerConfig,
         document: GraphDocument,
     ) -> Self {
-        assert_eq!(document.revision, exchange.revisions().active);
-        let mut controller = Self::new_with_configuration(exchange, config);
-        *controller.graph.get_mut() = document;
-        controller
-    }
-
-    #[must_use]
-    pub fn new_with_configuration(
-        exchange: Arc<ProcessorExchange>,
-        config: EngineGraphControllerConfig,
-    ) -> Self {
+        assert_eq!(
+            document.revision,
+            exchange.revisions().active,
+            "initial graph must match the active processor revision"
+        );
         let EngineGraphControllerConfig {
             format,
             meters,
@@ -495,17 +495,7 @@ impl EngineGraphController {
                 meters: Arc::clone(&meters),
                 render_prepare: RenderPlan::prepare,
             }),
-            graph: RwLock::new(
-                if runtime_status
-                    .status(format)
-                    .audio_session
-                    .is_some_and(|session| !session.capabilities.virtual_endpoint)
-                {
-                    GraphDocument::new(active_revision, vec![], vec![])
-                } else {
-                    default_session_document(active_revision, format)
-                },
-            ),
+            graph: RwLock::new(document),
             context: RwLock::new(CompileContext {
                 format,
                 limits: CompileLimits::default(),
@@ -524,6 +514,28 @@ impl EngineGraphController {
             graph_resources,
             runtime_status,
         }
+    }
+
+    /// Constructs a controller with the built-in session document selected from
+    /// the configured capabilities. Native startup with an already prepared graph
+    /// must use `new_with_initial_document` instead.
+    #[must_use]
+    pub fn new_with_configuration(
+        exchange: Arc<ProcessorExchange>,
+        config: EngineGraphControllerConfig,
+    ) -> Self {
+        let revision = exchange.revisions().active;
+        let document = if config
+            .runtime_status
+            .status(config.format)
+            .audio_session
+            .is_some_and(|session| !session.capabilities.virtual_endpoint)
+        {
+            GraphDocument::new(revision, vec![], vec![])
+        } else {
+            default_session_document(revision, config.format)
+        };
+        Self::new_with_initial_document(exchange, config, document)
     }
 
     #[cfg(test)]
@@ -1210,7 +1222,7 @@ impl EngineGraphController {
         &self,
         catalog: Option<&graph_catalog::Catalog>,
         origin: SessionChangeOrigin,
-    ) -> Result<Option<session_preferences::StagedPreferences>, ProtocolError> {
+    ) -> Result<Option<persistence::StagedWrite>, ProtocolError> {
         match self.stage_catalog(catalog) {
             Ok(staged) => Ok(staged),
             Err(error) if origin == SessionChangeOrigin::Observed => {

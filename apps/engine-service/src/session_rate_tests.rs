@@ -32,7 +32,7 @@ fn worker(status: &Arc<AdapterRuntimeStatus>, rate_on_pause: Option<u32>) -> Aud
     let cloned = status.clone();
     let thread = std::thread::spawn(move || {
         while !cloned.stop_requested() {
-            if cloned.pause_requested.load(Ordering::Acquire) != 0 {
+            if cloned.pause_requested() {
                 if let Some(rate) = rate_on_pause {
                     RATE.store(rate, Ordering::Release);
                 }

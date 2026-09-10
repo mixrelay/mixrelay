@@ -59,7 +59,7 @@ mod platform {
 
     impl NativeEditorHost {
         pub(crate) fn new(
-            _shared: std::sync::Arc<memmap2::MmapMut>,
+            _shared: std::sync::Arc<crate::shared_transport::WorkerControl>,
         ) -> Result<Self, EditorHostFailure> {
             let event_loop = std::panic::catch_unwind(EventLoop::new)
                 .map_err(|_| EditorHostFailure::DisplayUnavailable)?;
@@ -186,7 +186,7 @@ mod platform {
 
     impl NativeEditorHost {
         pub(crate) fn new(
-            _shared: std::sync::Arc<memmap2::MmapMut>,
+            _shared: std::sync::Arc<crate::shared_transport::WorkerControl>,
         ) -> Result<Self, EditorHostFailure> {
             if std::env::var_os("DISPLAY").is_none() {
                 return Err(EditorHostFailure::DisplayUnavailable);

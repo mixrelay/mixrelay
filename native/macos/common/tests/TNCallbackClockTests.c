@@ -2,6 +2,8 @@
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <math.h>
+#include <stdatomic.h>
 
 static AudioTimeStamp stamp(double sample, uint64_t host) {
     return (AudioTimeStamp){.mSampleTime = sample, .mHostTime = host,
@@ -20,26 +22,26 @@ static void continuity(void) {
     assert(read.valid && read.sample_time == 0 && read.host_time == 2000 && !read.discontinuities);
     time = stamp(512, 3000); /* a gap, not ordinary callback arrival jitter */
     tn_callback_clock_record(&clock, &time, 64);
-    assert(atomic_load(&clock.discontinuities) == 1);
+    assert(tn_callback_clock_discontinuities(&clock) == 1);
     time = stamp(576, 2999); /* invalid backwards host clock */
     tn_callback_clock_record(&clock, &time, 128);
-    assert(atomic_load(&clock.discontinuities) == 2);
+    assert(tn_callback_clock_discontinuities(&clock) == 2);
     time = stamp(704, 999999); /* host interval alone must not imply drift */
     tn_callback_clock_record(&clock, &time, 128);
-    assert(atomic_load(&clock.discontinuities) == 2);
+    assert(tn_callback_clock_discontinuities(&clock) == 2);
     time.mFlags = kAudioTimeStampSampleTimeValid;
     tn_callback_clock_record(&clock, &time, 128);
-    assert(atomic_load(&clock.discontinuities) == 3);
+    assert(tn_callback_clock_discontinuities(&clock) == 3);
     tn_callback_clock_record(&clock, NULL, 128);
-    assert(atomic_load(&clock.discontinuities) == 3);
+    assert(tn_callback_clock_discontinuities(&clock) == 3);
     time = stamp(NAN, 9999999);
     tn_callback_clock_record(&clock, &time, 128);
     assert(tn_callback_clock_snapshot(&clock, &read) && !read.valid);
     time = stamp(1, 1); /* new timeline after invalidity */
     tn_callback_clock_record(&clock, &time, 128);
     assert(tn_callback_clock_snapshot(&clock, &read) && read.valid && read.discontinuities == 3);
-    atomic_store(&clock.sequence, 1);
-    assert(!tn_callback_clock_snapshot(&clock, &read)); /* no reader spin */
+    tn_callback_clock_reset(&clock);
+    assert(tn_callback_clock_discontinuities(&clock) == 3);
 }
 
 typedef struct Fixture { TNCallbackClock clock; _Atomic bool done; } Fixture;
@@ -56,8 +58,6 @@ static void concurrent_snapshot(void) {
     Fixture fixture;
     tn_callback_clock_init(&fixture.clock);
     atomic_init(&fixture.done, false);
-    assert(atomic_is_lock_free(&fixture.clock.sequence));
-    assert(atomic_is_lock_free(&fixture.clock.valid));
     pthread_t thread;
     assert(pthread_create(&thread, NULL, writer, &fixture) == 0);
     while (!atomic_load(&fixture.done)) {

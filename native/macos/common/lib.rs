@@ -1,12 +1,21 @@
 //! macOS transport ABI and resource ownership shared by the HAL and engine.
 //!
-//! This crate owns mappings/messages, not device policy, graph selection or UI.
+//! Owns native mappings, PCM projection and immutable device readback contracts.
+//! Graph selection, admission planning and UI remain in their engine/app owners.
 //! The static library is also used by native ABI contract tests without invoking
 //! Cargo recursively from a build script.
 #![cfg(target_os = "macos")]
 
+pub mod aggregate_group;
 mod anonymous_memory;
 pub mod application_clock;
+pub(crate) mod application_source_mapping;
+pub mod application_source_transport;
+pub mod audio_buffer;
+pub mod callback_clock;
+pub mod capture_ring;
+pub mod device_buffers;
+pub mod device_io;
 pub mod source_registry;
 pub use anonymous_memory::create as create_shared_memory;
 pub mod control_inventory;

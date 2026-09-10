@@ -63,6 +63,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrayvec"
+version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
+
+[[package]]
 name = "atk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3977,6 +3983,7 @@ dependencies = [
 name = "tonenari-audio-io"
 version = "0.1.0"
 dependencies = [
+ "allocation-counter",
  "audioadapter-buffers",
  "base64 0.22.1",
  "libc",
@@ -4045,6 +4052,7 @@ dependencies = [
  "tonenari-audio-io",
  "tonenari-control-protocol",
  "tonenari-macos-transport",
+ "tonenari-process-tap",
  "tracing",
 ]
 
@@ -4052,6 +4060,7 @@ dependencies = [
 name = "tonenari-engine-service"
 version = "0.1.0"
 dependencies = [
+ "allocation-counter",
  "axum",
  "cc",
  "libc",
@@ -4070,6 +4079,7 @@ dependencies = [
  "tonenari-control-server",
  "tonenari-macos-test-support",
  "tonenari-macos-transport",
+ "tonenari-pcm-ring",
  "tonenari-processor-host",
  "tonenari-test-support",
  "tracing",
@@ -4090,6 +4100,7 @@ dependencies = [
 name = "tonenari-hal-core"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "tonenari-macos-transport",
 ]
 
@@ -4106,13 +4117,35 @@ dependencies = [
 name = "tonenari-macos-transport"
 version = "0.1.0"
 dependencies = [
+ "allocation-counter",
+ "cc",
  "loom",
+ "tonenari-pcm-ring",
+]
+
+[[package]]
+name = "tonenari-pcm-ring"
+version = "0.1.0"
+dependencies = [
+ "allocation-counter",
+]
+
+[[package]]
+name = "tonenari-process-tap"
+version = "0.1.0"
+dependencies = [
+ "allocation-counter",
+ "cc",
+ "thiserror 2.0.20",
+ "tonenari-macos-transport",
 ]
 
 [[package]]
 name = "tonenari-processor-host"
 version = "0.1.0"
 dependencies = [
+ "allocation-counter",
+ "arrayvec",
  "base64 0.22.1",
  "block2",
  "dispatch2",
@@ -4323,7 +4356,6 @@ version = "1.1.5"
 dependencies = [
  "clap-sys",
  "libloading 0.8.9",
- "thiserror 2.0.20",
  "truce-rack-core",
 ]
 
@@ -4351,7 +4383,6 @@ dependencies = [
  "objc2-foundation",
  "serde",
  "serde_json",
- "thiserror 2.0.20",
  "truce-rack-core",
 ]
 
@@ -4362,7 +4393,6 @@ dependencies = [
  "core-foundation",
  "core-foundation-sys",
  "libloading 0.8.9",
- "thiserror 2.0.20",
  "truce-rack-core",
  "vst3",
 ]

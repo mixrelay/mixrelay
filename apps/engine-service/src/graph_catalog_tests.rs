@@ -1,4 +1,5 @@
 use super::*;
+use crate::controller_test_support::settle;
 use crate::endpoint_settings_tests::controller;
 use std::{
     fs,
@@ -56,19 +57,6 @@ impl Fixture {
     fn path(&self) -> PathBuf {
         self.0.join("graphs.json")
     }
-}
-pub(crate) fn settle(controller: &EngineGraphController) {
-    // This stands in for the already-running audio worker; do not prepare another
-    // controller plan while its new publication is waiting to be acknowledged.
-    let plan = GraphCompiler::default()
-        .compile(
-            &GraphDocument::new(1, vec![], vec![]),
-            *controller.context.read(),
-        )
-        .unwrap();
-    let mut processor = BuiltInProcessorFactory::default().prepare(&plan).unwrap();
-    assert!(controller.exchange.activate_pending(&mut processor));
-    controller.exchange.reclaim_retired();
 }
 fn request(controller: &EngineGraphController, action: GraphCatalogAction) -> GraphCatalogRequest {
     GraphCatalogRequest {

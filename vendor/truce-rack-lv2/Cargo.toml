@@ -41,9 +41,6 @@ version = "0.2"
 [dependencies.lv2_raw]
 version = "0.2"
 
-[dependencies.thiserror]
-version = "2.0"
-
 [dependencies.serde]
 version = "1"
 features = ["derive"]

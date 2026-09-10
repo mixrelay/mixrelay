@@ -19,38 +19,22 @@ fn build_macos_application_capture() {
     let hal_include = format!("{hal_root}/include");
 
     let live_fixture = std::env::var("TONENARI_APPLICATION_CLOCK_FIXTURE").as_deref() == Ok("1");
-    let mut ring = cc::Build::new();
     if live_fixture {
         println!("cargo:rustc-cfg=tonenari_application_clock_fixture");
-        ring.file(format!(
-            "{native_root}/tests/TNApplicationClockLiveFixture.c"
-        ));
-    } else {
-        ring.file(format!("{native_root}/src/TNApplicationSourceTransport.c"));
+        cc::Build::new()
+            .file(format!(
+                "{native_root}/tests/TNApplicationClockLiveFixture.c"
+            ))
+            .include(&include)
+            .include(&engine_include)
+            .include(&hal_include)
+            .flag("-std=c17")
+            .flag("-fblocks")
+            .flag("-Wall")
+            .flag("-Wextra")
+            .flag("-Werror")
+            .compile("tonenari_application_source_transport");
     }
-    ring.file(format!("{native_root}/src/TNAudioRing.c"))
-        .include(&include)
-        .include(&engine_include)
-        .include(&hal_include)
-        .flag("-std=c17")
-        .flag("-fblocks")
-        .flag("-Wall")
-        .flag("-Wextra")
-        .flag("-Werror")
-        .compile("tonenari_audio_ring");
-
-    cc::Build::new()
-        .files([
-            format!("{native_root}/src/TNAudioDeviceDiscovery.m"),
-            format!("{native_root}/src/TNProcessTap.m"),
-        ])
-        .include(&include)
-        .flag("-fobjc-arc")
-        .flag("-mmacosx-version-min=14.2")
-        .flag("-Wall")
-        .flag("-Wextra")
-        .flag("-Werror")
-        .compile("tonenari_process_tap");
 
     println!("cargo:rustc-link-lib=framework=CoreAudio");
     println!("cargo:rustc-link-lib=framework=AppKit");
@@ -65,15 +49,11 @@ fn build_macos_application_capture() {
     println!("cargo:rerun-if-changed={}", info_plist.display());
     println!("cargo:rerun-if-changed={native_root}/include/TNAudioRing.h");
     println!("cargo:rerun-if-changed={native_root}/include/TNApplicationSourceTransport.h");
-    println!("cargo:rerun-if-changed={native_root}/include/TNAudioDeviceDiscovery.h");
     println!("cargo:rerun-if-changed={native_root}/include/TNProcessTap.h");
     println!("cargo:rerun-if-changed=../../../native/macos/common/TNCallbackClock.h");
-    println!("cargo:rerun-if-changed={native_root}/src/TNAudioRing.c");
     println!("cargo:rerun-if-changed={native_root}/src/TNApplicationSourceTransport.c");
     println!("cargo:rerun-if-changed={native_root}/tests/TNApplicationClockLiveFixture.c");
     println!("cargo:rerun-if-changed={engine_include}/TNEngineSourceRegistry.h");
-    println!("cargo:rerun-if-changed={native_root}/src/TNAudioDeviceDiscovery.m");
-    println!("cargo:rerun-if-changed={native_root}/src/TNProcessTap.m");
     println!("cargo:rerun-if-changed={engine_include}/TNEngineControl.h");
     println!("cargo:rerun-if-changed={engine_include}/TNApplicationClock.h");
     println!("cargo:rerun-if-changed={hal_include}/TNHALControlProtocol.h");

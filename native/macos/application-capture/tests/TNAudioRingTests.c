@@ -4,22 +4,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-typedef struct FailingAllocatorState {
-    size_t calls;
-    size_t fail_on_call;
-} FailingAllocatorState;
-
-static void *failing_allocate(void *context, size_t count, size_t size) {
-    FailingAllocatorState *const state = context;
-    ++state->calls;
-    return state->calls == state->fail_on_call ? NULL : calloc(count, size);
-}
-
-static void failing_deallocate(void *context, void *memory) {
-    (void)context;
-    free(memory);
-}
+#include <pthread.h>
+#include <sched.h>
 
 static void test_rejects_invalid_configuration(void) {
     assert(tn_audio_ring_create(0, 2) == NULL);
@@ -27,25 +13,8 @@ static void test_rejects_invalid_configuration(void) {
     assert(tn_audio_ring_create(8, 0) == NULL);
     assert(tn_audio_ring_create(8, 65) == NULL);
     assert(tn_audio_ring_create((size_t)TN_AUDIO_RING_MAX_CAPACITY_FRAMES * 2U, 2) == NULL);
-    const TNAudioRingAllocator missing_allocate = {0};
-    assert(tn_audio_ring_create_with_allocator(8, 2, missing_allocate) == NULL);
-    const TNAudioRingAllocator missing_deallocate = {
-        .context = NULL,
-        .allocate = failing_allocate,
-        .deallocate = NULL,
-    };
-    assert(tn_audio_ring_create_with_allocator(8, 2, missing_deallocate) == NULL);
-
-    FailingAllocatorState state = {.calls = 0U, .fail_on_call = 1U};
-    TNAudioRingAllocator allocator = {
-        .context = &state,
-        .allocate = failing_allocate,
-        .deallocate = failing_deallocate,
-    };
-    assert(tn_audio_ring_create_with_allocator(8, 2, allocator) == NULL);
-    state.calls = 0U;
-    state.fail_on_call = 2U;
-    assert(tn_audio_ring_create_with_allocator(8, 2, allocator) == NULL);
+    /* Both allocation failures and partial-owner cleanup are tested at the Rust
+     * constructor boundary, without a test-only native allocator ABI. */
     assert(tn_audio_ring_capacity_frames(NULL) == 0);
     assert(tn_audio_ring_available_frames(NULL) == 0);
     assert(tn_audio_ring_dropped_frames(NULL) == 0);
@@ -104,10 +73,50 @@ static void test_planar_conversion_and_invalid_calls(void) {
     tn_audio_ring_destroy(ring);
 }
 
+typedef struct ConcurrentFixture { TNAudioRing *ring; uint32_t channels; } ConcurrentFixture;
+
+static void *produce(void *context) {
+    ConcurrentFixture *fixture = context;
+    float input[64 * 17];
+    for (unsigned block = 0; block < 10000; ++block) {
+        for (unsigned frame = 0; frame < 17; ++frame)
+            for (uint32_t channel = 0; channel < fixture->channels; ++channel)
+                input[frame * fixture->channels + channel] = (float)((block * 17 + frame) * 64 + channel);
+        while (tn_audio_ring_write_interleaved(fixture->ring, input, 17) == 0) sched_yield();
+    }
+    return NULL;
+}
+
+static void test_concurrent_pcm_is_ordered_and_channel_exact(void) {
+    const uint32_t widths[] = {1, 2, 8, 64};
+    for (size_t width = 0; width < 4; ++width) {
+        ConcurrentFixture fixture = {tn_audio_ring_create(64, widths[width]), widths[width]};
+        assert(fixture.ring);
+        pthread_t writer;
+        assert(pthread_create(&writer, NULL, produce, &fixture) == 0);
+        float output[64 * 13];
+        unsigned consumed = 0;
+        while (consumed < 170000) {
+            size_t frames = tn_audio_ring_read_interleaved(fixture.ring, output, 13);
+            assert(tn_audio_ring_available_frames(fixture.ring) <= 64);
+            for (size_t frame = 0; frame < frames; ++frame)
+                for (uint32_t channel = 0; channel < fixture.channels; ++channel)
+                    assert(output[frame * fixture.channels + channel] ==
+                        (float)((consumed + frame) * 64 + channel));
+            consumed += (unsigned)frames;
+            if (!frames) sched_yield();
+        }
+        assert(pthread_join(writer, NULL) == 0);
+        assert(tn_audio_ring_available_frames(fixture.ring) == 0);
+        tn_audio_ring_destroy(fixture.ring);
+    }
+}
+
 int main(void) {
     test_rejects_invalid_configuration();
     test_interleaved_wraparound_and_bounded_overflow();
     test_planar_conversion_and_invalid_calls();
+    test_concurrent_pcm_is_ordered_and_channel_exact();
     puts("TNAudioRingTests passed");
     return 0;
 }

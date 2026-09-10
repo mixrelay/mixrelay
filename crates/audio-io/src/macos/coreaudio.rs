@@ -50,6 +50,8 @@ unsafe extern "C" {
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
     fn CFRelease(value: *const c_void);
+    fn CFGetTypeID(value: *const c_void) -> usize;
+    fn CFStringGetTypeID() -> usize;
     fn CFStringGetLength(value: *const c_void) -> isize;
     fn CFStringGetMaximumSizeForEncoding(length: isize, encoding: u32) -> isize;
     fn CFStringGetCString(
@@ -147,22 +149,36 @@ fn property_bytes(
             "CoreAudio property size failed ({status}, {size} bytes)"
         )));
     }
-    let mut words = vec![0_u64; (size as usize).div_ceil(8)];
-    let capacity = size;
-    if size != 0 {
-        // SAFETY: the zero-initialized allocation supplies at least `size` bytes
-        // with 8-byte alignment (including AudioBufferList). Only this call can
-        // access it mutably; CoreAudio is given its exact writable byte bound.
-        let status = unsafe {
+    read_property_bytes(size, maximum, |words, size| {
+        // SAFETY: the bounded reader owns aligned initialized words covering
+        // *size bytes. CoreAudio receives exactly that exclusive output extent.
+        unsafe {
             AudioObjectGetPropertyData(
                 object,
                 address,
                 0,
                 std::ptr::null(),
-                &raw mut size,
+                size,
                 words.as_mut_ptr().cast(),
             )
-        };
+        }
+    })
+}
+
+fn read_property_bytes(
+    mut size: u32,
+    maximum: u32,
+    read: impl FnOnce(&mut [u64], &mut u32) -> i32,
+) -> Result<PropertyBytes, HostAudioBackendError> {
+    if size > maximum {
+        return Err(failure(format!(
+            "CoreAudio property exceeds {maximum} bytes"
+        )));
+    }
+    let mut words = vec![0_u64; (size as usize).div_ceil(8)];
+    let capacity = size;
+    if size != 0 {
+        let status = read(&mut words, &mut size);
         if status != 0 || size > capacity {
             return Err(failure(format!(
                 "CoreAudio property read failed ({status}, {size} bytes)"
@@ -219,6 +235,11 @@ impl Drop for OwnedString {
 
 impl OwnedString {
     fn text(&self) -> Option<String> {
+        // SAFETY: this owner retains a live CF object; a mistyped property is
+        // rejected before invoking any string-specific operations on it.
+        if unsafe { CFGetTypeID(self.0.as_ptr()) != CFStringGetTypeID() } {
+            return None;
+        }
         // SAFETY: this owner keeps its immutable CFString retained throughout
         // the length/conversion calls. The returned UTF8 bytes have Rust ownership.
         let maximum =
@@ -251,26 +272,33 @@ impl OwnedString {
 
 fn string(object: u32, selector: [u8; 4]) -> Option<String> {
     let address = Address::new(selector, GLOBAL);
+    // SAFETY: only UID/name selectors enter here. Their non-null outputs are
+    // retained CFString references, and the closure does not retain its outputs.
+    unsafe {
+        read_string(|value, size| {
+            AudioObjectGetPropertyData(
+                object,
+                &raw const address,
+                0,
+                std::ptr::null(),
+                size,
+                std::ptr::from_mut(value).cast(),
+            )
+        })
+    }
+}
+
+// SAFETY: a non-null pointer written by read transfers one owned, immutable
+// CF object reference, including when a read returns malformed size or an error.
+// text() verifies its type before any CFString operation.
+unsafe fn read_string(read: impl FnOnce(&mut *mut c_void, &mut u32) -> i32) -> Option<String> {
     let mut value = std::ptr::null_mut::<c_void>();
     let mut size = u32::try_from(std::mem::size_of_val(&value)).ok()?;
-    // SAFETY: this function is called only for UID/name CFString properties.
-    // CoreAudio writes one retained CFStringRef into pointer-aligned stack
-    // storage, synchronously. OwnedString closes its retain before returning.
-    let status = unsafe {
-        AudioObjectGetPropertyData(
-            object,
-            &raw const address,
-            0,
-            std::ptr::null(),
-            &raw mut size,
-            (&raw mut value).cast(),
-        )
-    };
-    if status != 0 {
-        return None;
-    }
+    let status = read(&mut value, &mut size);
+    // Adopt before checking status/extent so partial property failures cannot
+    // abandon a retained object already transferred into initialized output.
     let value = OwnedString(NonNull::new(value)?);
-    if size as usize != std::mem::size_of::<*mut c_void>() {
+    if status != 0 || size as usize != std::mem::size_of::<*mut c_void>() {
         return None;
     }
     value.text()

@@ -1,20 +1,18 @@
 use std::{
     collections::BTreeMap,
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     io::{Read, Write},
-    mem::size_of,
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
         Arc, Mutex, RwLock, Weak,
-        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicBool, Ordering},
     },
     thread,
     time::{Duration, Instant},
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use memmap2::{MmapMut, MmapOptions};
 use tonenari_audio_engine::{
     HostedAudioProcessor, HostedProcessorFactory, HostedProcessorPrepareRequest,
 };
@@ -34,7 +32,9 @@ mod editor_surface;
 mod native_editor;
 mod rack_formats;
 mod reuse;
+mod shared_transport;
 mod timing;
+use shared_transport::{ControlMailbox, ParentAudio, SharedHeader, WorkerAudio, WorkerControl};
 mod worker_paths;
 use worker_paths::worker_paths;
 
@@ -75,69 +75,6 @@ const EDITOR_FAILURE_DISPLAY_UNAVAILABLE: u32 = 2;
 const EDITOR_FAILURE_HOST_WINDOW: u32 = 3;
 const EDITOR_FAILURE_PLUGIN_REJECTED: u32 = 4;
 const EDITOR_FAILURE_WORKER_UNAVAILABLE: u32 = 5;
-static NEXT_CONTROL_INSTANCE: AtomicU64 = AtomicU64::new(1);
-
-/// Header shared by the engine and one VST worker process.
-///
-/// The sample regions immediately following this header are protected by the sequence
-/// atomics: the producer never overwrites a region until the consumer publishes the matching
-/// consumed sequence. This keeps the engine side lock-free without reading memory while the
-/// worker writes it.
-#[repr(C, align(64))]
-struct SharedHeader {
-    magic: u64,
-    version: u32,
-    input_channels: u32,
-    output_channels: u32,
-    block_frames: u32,
-    worker_status: AtomicU32,
-    shutdown: AtomicU32,
-    input_sequence: AtomicU64,
-    input_consumed: AtomicU64,
-    output_sequence: AtomicU64,
-    output_consumed: AtomicU64,
-    process_failures: AtomicU64,
-    parameter_count: AtomicU32,
-    parameters_pending: AtomicBool,
-    parameters: [ParameterSlot; PARAMETER_CAPACITY],
-    state_request: AtomicU64,
-    state_kind: AtomicU32,
-    state_response: AtomicU64,
-    state_length: AtomicU32,
-    state_result: AtomicU32,
-    editor_command: AtomicU32,
-    editor_sequence: AtomicU64,
-    editor_consumed: AtomicU64,
-    editor_state: AtomicU32,
-    editor_failure: AtomicU32,
-    editor_width: AtomicU32,
-    editor_height: AtomicU32,
-    editor_resizable: AtomicU32,
-    instance_id: u64,
-    /// Broker-owned lifecycle, separate from the parent's optimistic Opening status.
-    editor_observed_open: AtomicBool,
-    editor_close_generation: AtomicU64,
-    editor_input: editor_surface::InputRing,
-}
-
-/// Slots are assigned once per worker lifetime by serialized control publishers. Stable IDs
-/// let the consumer load each atomic value independently, without a torn ID/value pair.
-#[repr(C)]
-struct ParameterSlot {
-    id: AtomicU32,
-    value_bits: AtomicU64,
-    pending: AtomicBool,
-}
-
-impl ParameterSlot {
-    fn empty() -> Self {
-        Self {
-            id: AtomicU32::new(0),
-            value_bits: AtomicU64::new(0),
-            pending: AtomicBool::new(false),
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 struct CatalogEntry {
@@ -229,25 +166,9 @@ pub fn run_plugin_worker(arguments: &[String]) -> Result<(), String> {
     let layout_index = layout_index
         .parse::<usize>()
         .map_err(|error| format!("invalid processor layout index: {error}"))?;
-    let shared_file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(shared_path)
-        .map_err(|error| error.to_string())?;
-    // Separate mappings keep the DSP loop and UI broker from sharing Rust mutable ownership.
-    // Synchronization of the common header is exclusively atomic; only the DSP mapping touches
-    // sample storage.
-    let mut audio_shared =
-        unsafe { MmapOptions::new().map_mut(&shared_file) }.map_err(|error| error.to_string())?;
-    let editor_shared = Arc::new(
-        unsafe { MmapOptions::new().map_mut(&shared_file) }.map_err(|error| error.to_string())?,
-    );
-    let header = shared_header(&audio_shared)?;
-    let layout = AudioLayout {
-        inputs: header.input_channels as usize,
-        outputs: header.output_channels as usize,
-        block_frames: header.block_frames as usize,
-    };
+    let (mut audio_shared, editor_shared) = shared_transport::worker(Path::new(shared_path))?;
+    let editor_shared = Arc::new(editor_shared);
+    let layout = audio_shared.layout();
     let (sample_rate, parameters) = read_worker_configuration(config_path)?;
     let plugin = rack_formats::RackWorkerPlugin::load(
         &locator,
@@ -270,7 +191,8 @@ pub fn run_plugin_worker(arguments: &[String]) -> Result<(), String> {
             let mut input = std::io::stdin();
             let mut byte = [0_u8; 1];
             while input.read(&mut byte).is_ok_and(|read| read != 0) {}
-            shared_header_unchecked(&parent_watch_shared)
+            parent_watch_shared
+                .header()
                 .shutdown
                 .store(1, Ordering::Release);
             shutdown_reader.store(true, Ordering::Release);
@@ -282,7 +204,7 @@ pub fn run_plugin_worker(arguments: &[String]) -> Result<(), String> {
         .name("tonenari-plugin-dsp".to_owned())
         .spawn(move || rack_worker_loop(&mut audio_shared, &dsp_plugin, layout, &dsp_shutdown))
         .map_err(|error| error.to_string())?;
-    let editor_header = shared_header(&editor_shared)?;
+    let editor_header = editor_shared.header();
     editor_header.editor_state.store(
         if has_editor {
             EDITOR_STATE_CLOSED
@@ -306,22 +228,18 @@ pub fn run_plugin_worker(arguments: &[String]) -> Result<(), String> {
 }
 
 fn rack_worker_loop(
-    shared: &mut MmapMut,
+    shared: &mut WorkerAudio,
     plugin: &Mutex<rack_formats::RackWorkerPlugin>,
     layout: AudioLayout,
     parent_closed: &AtomicBool,
 ) {
     loop {
-        let header = shared_header_unchecked(shared);
+        let header = shared.header();
         if parent_closed.load(Ordering::Acquire) || header.shutdown.load(Ordering::Acquire) != 0 {
             return;
         }
-        let sequence = header.input_sequence.load(Ordering::Acquire);
         let parameter_pending = header.parameters_pending.load(Ordering::Acquire);
-        let audio_pending = sequence != 0
-            && sequence != header.input_consumed.load(Ordering::Relaxed)
-            && header.output_sequence.load(Ordering::Acquire)
-                == header.output_consumed.load(Ordering::Acquire);
+        let audio_pending = shared.input_pending();
         if !parameter_pending && !audio_pending {
             thread::sleep(Duration::from_micros(100));
             continue;
@@ -330,34 +248,24 @@ fn rack_worker_loop(
             thread::yield_now();
             continue;
         };
-        apply_pending_rack_parameter(shared, &mut plugin);
-        if sequence == 0
-            || sequence == header.input_consumed.load(Ordering::Relaxed)
-            || header.output_sequence.load(Ordering::Acquire)
-                != header.output_consumed.load(Ordering::Acquire)
-        {
+        apply_pending_rack_parameter(shared.header(), &mut plugin);
+        if !shared.receive(|source| copy_shared_input_to_rack(source, &mut plugin, layout)) {
             continue;
         }
-        copy_shared_input_to_rack(shared, &mut plugin, layout);
-        shared_header_unchecked(shared)
-            .input_consumed
-            .store(sequence, Ordering::Release);
         plugin.clear_outputs();
         if plugin.process(layout.block_frames).is_err() {
-            shared_header_unchecked(shared)
+            shared
+                .header()
                 .process_failures
                 .fetch_add(1, Ordering::Relaxed);
             bypass_rack(&mut plugin, layout);
         }
-        copy_rack_output_to_shared(shared, &plugin, layout);
-        shared_header_unchecked(shared)
-            .output_sequence
-            .store(sequence, Ordering::Release);
+        shared.publish(|destination| copy_rack_output_to_shared(destination, &plugin, layout));
     }
 }
 
 fn editor_broker_loop(
-    shared: &Arc<MmapMut>,
+    shared: &Arc<WorkerControl>,
     plugin: &Mutex<rack_formats::RackWorkerPlugin>,
     title: &str,
     parent_closed: &AtomicBool,
@@ -365,7 +273,7 @@ fn editor_broker_loop(
     let mut host: Option<native_editor::NativeEditorHost> = None;
     let mut last_idle = Instant::now();
     loop {
-        let header = shared_header_unchecked(shared);
+        let header = shared.header();
         if parent_closed.load(Ordering::Acquire) || header.shutdown.load(Ordering::Acquire) != 0 {
             if let (Some(host), Ok(mut plugin)) = (host.as_mut(), plugin.lock()) {
                 host.close(&mut plugin);
@@ -384,15 +292,17 @@ fn editor_broker_loop(
     }
 }
 
-fn apply_pending_state_request(shared: &MmapMut, plugin: &Mutex<rack_formats::RackWorkerPlugin>) {
-    let header = shared_header_unchecked(shared);
-    let request = header.state_request.load(Ordering::Acquire);
-    if request == header.state_response.load(Ordering::Relaxed) {
+fn apply_pending_state_request(
+    shared: &WorkerControl,
+    plugin: &Mutex<rack_formats::RackWorkerPlugin>,
+) {
+    let header = shared.header();
+    let Some((request, kind)) = shared.pending_request() else {
         return;
-    }
-    if header.state_kind.load(Ordering::Relaxed) == editor_surface::EDITOR_FRAME {
+    };
+    if kind == editor_surface::EDITOR_FRAME {
         if !header.editor_observed_open.load(Ordering::Acquire) {
-            publish_state_response(shared, request, Err(ProcessorStateError::Unavailable));
+            shared.publish(request, Err(ProcessorStateError::Unavailable));
         }
         return;
     }
@@ -401,46 +311,17 @@ fn apply_pending_state_request(shared: &MmapMut, plugin: &Mutex<rack_formats::Ra
     };
     // Flush accepted control edits before capturing the same native instance. A concurrent
     // later edit belongs to the next snapshot, not a stale parameter overlay on this state.
-    apply_pending_rack_parameter(shared, &mut plugin);
-    publish_state_response(shared, request, plugin.save_state());
-}
-
-fn publish_state_response(
-    shared: &MmapMut,
-    request: u64,
-    state: Result<Vec<u8>, ProcessorStateError>,
-) {
-    let header = shared_header_unchecked(shared);
-    let (status, bytes) = match state {
-        Ok(bytes) if bytes.len() <= STATE_CAPACITY => (STATE_OK, bytes),
-        Ok(_) => (STATE_TOO_LARGE, Vec::new()),
-        Err(ProcessorStateError::Unsupported) => (STATE_UNSUPPORTED, Vec::new()),
-        Err(_) => (STATE_FAILED, Vec::new()),
-    };
-    // SAFETY: only the worker broker writes the state region. The parent reads it only after
-    // the release response and cannot publish another request until that read has finished.
-    // Timed-out requests retain ownership until acknowledged; they are never overwritten.
-    unsafe {
-        std::ptr::copy_nonoverlapping(
-            bytes.as_ptr(),
-            shared.as_ptr().add(size_of::<SharedHeader>()).cast_mut(),
-            bytes.len(),
-        );
-    }
-    header
-        .state_length
-        .store(u32::try_from(bytes.len()).unwrap(), Ordering::Relaxed);
-    header.state_result.store(status, Ordering::Relaxed);
-    header.state_response.store(request, Ordering::Release);
+    apply_pending_rack_parameter(shared.header(), &mut plugin);
+    shared.publish(request, plugin.save_state());
 }
 
 fn apply_pending_editor_command(
-    shared: &Arc<MmapMut>,
+    shared: &Arc<WorkerControl>,
     plugin: &Mutex<rack_formats::RackWorkerPlugin>,
     title: &str,
     host: &mut Option<native_editor::NativeEditorHost>,
 ) {
-    let header = shared_header_unchecked(shared);
+    let header = shared.header();
     let sequence = header.editor_sequence.load(Ordering::Acquire);
     if sequence == header.editor_consumed.load(Ordering::Relaxed) {
         return;
@@ -469,12 +350,12 @@ fn apply_pending_editor_command(
 }
 
 fn open_editor(
-    shared: &Arc<MmapMut>,
+    shared: &Arc<WorkerControl>,
     plugin: &Mutex<rack_formats::RackWorkerPlugin>,
     title: &str,
     host: &mut Option<native_editor::NativeEditorHost>,
 ) {
-    let header = shared_header_unchecked(shared);
+    let header = shared.header();
     let has_editor = plugin.lock().is_ok_and(|plugin| plugin.has_editor());
     if !has_editor {
         publish_editor_failure(header, EDITOR_FAILURE_NO_EDITOR);
@@ -521,7 +402,7 @@ fn open_editor(
 }
 
 fn tick_editor(
-    shared: &MmapMut,
+    shared: &WorkerControl,
     plugin: &Mutex<rack_formats::RackWorkerPlugin>,
     host: &mut Option<native_editor::NativeEditorHost>,
 ) {
@@ -542,7 +423,7 @@ fn tick_editor(
     }
     let snapshot = plugin.tick_editor();
     editor_host.refresh(snapshot);
-    let header = shared_header_unchecked(shared);
+    let header = shared.header();
     publish_observed_editor_snapshot(header, snapshot);
 }
 
@@ -588,8 +469,10 @@ fn publish_editor_failure(header: &SharedHeader, failure: u32) {
         .store(EDITOR_STATE_FAILED, Ordering::Release);
 }
 
-fn apply_pending_rack_parameter(shared: &MmapMut, plugin: &mut rack_formats::RackWorkerPlugin) {
-    let header = shared_header_unchecked(shared);
+fn apply_pending_rack_parameter(
+    header: &SharedHeader,
+    plugin: &mut rack_formats::RackWorkerPlugin,
+) {
     consume_parameters(header, |id, value| {
         if plugin.set_parameter(id, value).is_err() {
             header.process_failures.fetch_add(1, Ordering::Relaxed);
@@ -613,7 +496,7 @@ fn consume_parameters(header: &SharedHeader, mut apply: impl FnMut(u32, f64)) {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct AudioLayout {
+pub(crate) struct AudioLayout {
     inputs: usize,
     outputs: usize,
     block_frames: usize,
@@ -845,7 +728,9 @@ impl ProcessorControlRegistry {
     pub fn processing_time_ns(&self, node_id: &NodeId) -> Option<u64> {
         let control = self.live_control(node_id).ok()?;
         if !control.active_owner.load(Ordering::Acquire)
-            || shared_header_unchecked(&control.shared)
+            || control
+                .shared
+                .header()
                 .worker_status
                 .load(Ordering::Acquire)
                 != WORKER_READY
@@ -917,8 +802,7 @@ impl Drop for ProcessorControlRegistration {
 }
 
 struct HostedProcessorControl {
-    shared: MmapMut,
-    writer: Mutex<()>,
+    shared: ControlMailbox,
     input_writer: Mutex<()>,
     reuse: Mutex<Option<reuse::ReuseSignature>>,
     active_owner: AtomicBool,
@@ -926,8 +810,18 @@ struct HostedProcessorControl {
 }
 
 impl HostedProcessorControl {
+    fn new(shared: ControlMailbox) -> Self {
+        Self {
+            shared,
+            input_writer: Mutex::new(()),
+            reuse: Mutex::new(None),
+            active_owner: AtomicBool::new(false),
+            timing: timing::TimingMetrics::default(),
+        }
+    }
+
     fn snapshot_state(&self, timeout: Duration) -> Result<serde_json::Value, ProcessorStateError> {
-        let header = shared_header_unchecked(&self.shared);
+        let header = self.shared.header();
         header
             .editor_input
             .cancel(header.editor_sequence.load(Ordering::Acquire));
@@ -949,8 +843,7 @@ impl HostedProcessorControl {
                 }
                 Err(ProcessorStateError::Busy | ProcessorStateError::Pending)
                     if !remaining.is_zero()
-                        && header.state_kind.load(Ordering::Acquire)
-                            == editor_surface::EDITOR_FRAME =>
+                        && self.shared.last_request_kind() == editor_surface::EDITOR_FRAME =>
                 {
                     thread::sleep(Duration::from_millis(1));
                 }
@@ -960,66 +853,14 @@ impl HostedProcessorControl {
     }
 
     fn request_blob(&self, kind: u32, timeout: Duration) -> Result<Vec<u8>, ProcessorStateError> {
-        // Do not queue unbounded callers behind a slow vendor. This mutex is control-only;
-        // the worker and all audio paths exclusively use atomics and never acquire it.
-        let _writer = self
-            .writer
-            .try_lock()
-            .map_err(|_| ProcessorStateError::Busy)?;
-        let header = shared_header_unchecked(&self.shared);
-        if header.worker_status.load(Ordering::Acquire) != WORKER_READY
-            || header.shutdown.load(Ordering::Acquire) != 0
-        {
-            return Err(ProcessorStateError::Unavailable);
-        }
-        let previous = header.state_request.load(Ordering::Relaxed);
-        if previous != header.state_response.load(Ordering::Acquire) {
-            return Err(ProcessorStateError::Pending);
-        }
-        let request = previous.wrapping_add(1);
-        header.state_kind.store(kind, Ordering::Relaxed);
-        header.state_request.store(request, Ordering::Release);
-        let deadline = Instant::now() + timeout.min(Duration::from_secs(5));
-        loop {
-            if header.state_response.load(Ordering::Acquire) == request {
-                break;
-            }
-            if header.worker_status.load(Ordering::Acquire) != WORKER_READY
-                || header.shutdown.load(Ordering::Acquire) != 0
-            {
-                return Err(ProcessorStateError::Unavailable);
-            }
-            if Instant::now() >= deadline {
-                return Err(ProcessorStateError::Timeout);
-            }
-            thread::sleep(Duration::from_millis(1));
-        }
-        match header.state_result.load(Ordering::Relaxed) {
-            STATE_OK => {}
-            STATE_TOO_LARGE => return Err(ProcessorStateError::TooLarge),
-            STATE_UNSUPPORTED => return Err(ProcessorStateError::Unsupported),
-            _ => return Err(ProcessorStateError::NativeFailure),
-        }
-        let length = header.state_length.load(Ordering::Relaxed) as usize;
-        if length > STATE_CAPACITY {
-            return Err(ProcessorStateError::InvalidResponse);
-        }
-        // SAFETY: release/acquire response grants exclusive read ownership of this bounded
-        // region until this control publisher releases the mutex and sends a later request.
-        let bytes = unsafe {
-            std::slice::from_raw_parts(self.shared.as_ptr().add(size_of::<SharedHeader>()), length)
-        };
-        Ok(bytes.to_vec())
+        self.shared.try_lock()?.request_blob(kind, timeout)
     }
 
     fn set_parameter(&self, id: u32, value: f64) -> Result<(), String> {
         // HTTP/Tauri requests may arrive concurrently. Serializing publishers prevents a
         // parameter ID from being paired with another request's value; the worker never locks.
-        let _writer = self
-            .writer
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let header = shared_header_unchecked(&self.shared);
+        let _writer = self.shared.lock();
+        let header = self.shared.header();
         let count = header.parameter_count.load(Ordering::Relaxed) as usize;
         let index = match header.parameters[..count]
             .iter()
@@ -1043,11 +884,8 @@ impl HostedProcessorControl {
     }
 
     fn set_editor_open(&self, open: bool) {
-        let _writer = self
-            .writer
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let header = shared_header_unchecked(&self.shared);
+        let _writer = self.shared.lock();
+        let header = self.shared.header();
         if open
             && header.editor_command.load(Ordering::Acquire) == EDITOR_COMMAND_OPEN
             && matches!(
@@ -1082,7 +920,7 @@ impl HostedProcessorControl {
     }
 
     fn editor_status(&self, node_id: &NodeId) -> ProcessorEditorStatus {
-        let header = shared_header_unchecked(&self.shared);
+        let header = self.shared.header();
         let worker_ready = header.worker_status.load(Ordering::Acquire) == WORKER_READY;
         let state = if worker_ready {
             match header.editor_state.load(Ordering::Acquire) {
@@ -1125,7 +963,7 @@ impl HostedProcessorControl {
 struct HostedExternalProcessor {
     child_stdin: Option<ChildStdin>,
     worker_monitor: Option<WorkerMonitor>,
-    shared: Option<MmapMut>,
+    shared: Option<ParentAudio>,
     shared_path: PathBuf,
     config_path: PathBuf,
     layout: AudioLayout,
@@ -1145,27 +983,21 @@ impl HostedExternalProcessor {
         let output_channels = usize::from(entry.descriptor.output_channels);
         let block_frames = format.block_frames as usize;
         let (shared_path, config_path) = worker_paths().map_err(|error| error.to_string())?;
-        let shared_file =
-            create_shared_file(&shared_path, input_channels, output_channels, block_frames)?;
+        let layout = AudioLayout {
+            inputs: input_channels,
+            outputs: output_channels,
+            block_frames,
+        };
+        let (shared, control) = shared_transport::create(&shared_path, layout)?;
+        let control = Arc::new(HostedProcessorControl::new(control));
         if let Err(error) =
             write_worker_config(&config_path, format.sample_rate, &config.parameters)
         {
-            // Windows cannot unlink an open file, so release the handle before rollback.
-            drop(shared_file);
+            drop(control);
+            drop(shared);
             cleanup_worker_paths(&shared_path, &config_path);
             return Err(error);
         }
-        let (shared, control) = match map_worker_regions(&shared_file) {
-            Ok(regions) => regions,
-            Err(error) => {
-                drop(shared_file);
-                cleanup_worker_paths(&shared_path, &config_path);
-                return Err(error);
-            }
-        };
-        // Both mappings retain their kernel objects; keeping this handle open would only delay
-        // Windows cleanup when the processor is removed.
-        drop(shared_file);
         let mut child = match spawn_processor_worker(entry, &shared_path, &config_path) {
             Ok(child) => child,
             Err(error) => {
@@ -1244,25 +1076,6 @@ fn spawn_processor_worker(
     command.spawn().map_err(|error| error.to_string())
 }
 
-fn map_worker_regions(file: &File) -> Result<(MmapMut, Arc<HostedProcessorControl>), String> {
-    // SAFETY: the private transport file is fixed-size and retained for both mappings' lifetime.
-    let audio = unsafe { MmapOptions::new().map_mut(file) }.map_err(|error| error.to_string())?;
-    // A distinct mapping lets the control plane publish atomics without sharing mutable sample
-    // buffer ownership with the audio thread.
-    let control = unsafe { MmapOptions::new().map_mut(file) }.map_err(|error| error.to_string())?;
-    Ok((
-        audio,
-        Arc::new(HostedProcessorControl {
-            shared: control,
-            writer: Mutex::new(()),
-            input_writer: Mutex::new(()),
-            reuse: Mutex::new(None),
-            active_owner: AtomicBool::new(false),
-            timing: crate::timing::TimingMetrics::default(),
-        }),
-    ))
-}
-
 impl HostedAudioProcessor for HostedExternalProcessor {
     fn set_active(&mut self, active: bool) {
         if let Some(control) = &self.control {
@@ -1272,7 +1085,7 @@ impl HostedAudioProcessor for HostedExternalProcessor {
     fn reuse_identity(&self) -> Option<u64> {
         self.control
             .as_ref()
-            .map(|control| shared_header_unchecked(&control.shared).instance_id)
+            .map(|control| control.shared.header().instance_id)
     }
 
     fn process(&mut self, input: &[f32], output: &mut [f32], frames: usize) -> bool {
@@ -1287,41 +1100,20 @@ impl HostedAudioProcessor for HostedExternalProcessor {
             .shared
             .as_mut()
             .expect("hosted processor retains audio mapping until drop");
-        let published_output = shared_header_unchecked(shared)
-            .output_sequence
-            .load(Ordering::Acquire);
-        // Input may be released before the worker publishes its output. A newer queued input
-        // must not make that still-owned output unconsumable and deadlock both mailboxes.
-        let has_output = published_output != 0
-            && published_output
-                != shared_header_unchecked(shared)
-                    .output_consumed
-                    .load(Ordering::Relaxed);
-        if has_output {
-            copy_shared_output_to_interleaved(shared, output, self.layout, frames);
-            shared_header_unchecked(shared)
-                .output_consumed
-                .store(published_output, Ordering::Release);
-            if let Some(control) = &self.control {
-                self.timing.received(published_output, &control.timing);
-            }
-        }
-        if shared_header_unchecked(shared)
-            .input_sequence
-            .load(Ordering::Acquire)
-            == shared_header_unchecked(shared)
-                .input_consumed
-                .load(Ordering::Acquire)
+        let received = shared.receive(output, frames);
+        if let Some(sequence) = received
+            && let Some(control) = &self.control
         {
-            copy_interleaved_input_to_shared(shared, input, self.layout, frames);
+            self.timing.received(sequence, &control.timing);
+        }
+        if shared.submit(self.next_sequence, input, frames, || {
             if let Some(control) = &self.control {
                 self.timing.submitted(self.next_sequence, &control.timing);
             }
-            shared_header_unchecked(shared)
-                .input_sequence
-                .store(self.next_sequence, Ordering::Release);
+        }) {
             self.next_sequence = self.next_sequence.saturating_add(1);
         }
+        let has_output = received.is_some();
         if !has_output {
             // The worker missed the one-block deadline. Return `false` so the graph performs
             // its deterministic channel-preserving bypass for this block.
@@ -1334,9 +1126,7 @@ impl HostedAudioProcessor for HostedExternalProcessor {
 impl Drop for HostedExternalProcessor {
     fn drop(&mut self) {
         if let Some(shared) = &self.shared {
-            shared_header_unchecked(shared)
-                .shutdown
-                .store(1, Ordering::Release);
+            shared.header().shutdown.store(1, Ordering::Release);
         }
         // Closing stdin also makes an orphaned worker exit if the mapping is no longer polled.
         drop(self.child_stdin.take());
@@ -1381,14 +1171,18 @@ impl WorkerMonitor {
                     match child.try_wait() {
                         Ok(Some(_)) => {
                             if !thread_stop.load(Ordering::Acquire) {
-                                shared_header_unchecked(&control.shared)
+                                control
+                                    .shared
+                                    .header()
                                     .worker_status
                                     .store(WORKER_FAILED, Ordering::Release);
                             }
                             return;
                         }
                         Err(_) => {
-                            shared_header_unchecked(&control.shared)
+                            control
+                                .shared
+                                .header()
                                 .worker_status
                                 .store(WORKER_FAILED, Ordering::Release);
                             return;
@@ -1442,142 +1236,6 @@ fn cleanup_worker_paths(shared_path: &Path, config_path: &Path) {
     let _ = std::fs::remove_file(config_path);
 }
 
-fn create_shared_file(
-    path: &Path,
-    input_channels: usize,
-    output_channels: usize,
-    block_frames: usize,
-) -> Result<File, String> {
-    let input_channels_u32 = u32::try_from(input_channels)
-        .map_err(|_| "VST3 input channel count is too large".to_owned())?;
-    let output_channels_u32 = u32::try_from(output_channels)
-        .map_err(|_| "VST3 output channel count is too large".to_owned())?;
-    let block_frames_u32 =
-        u32::try_from(block_frames).map_err(|_| "VST3 block size is too large".to_owned())?;
-    let length = shared_length(input_channels, output_channels, block_frames)?;
-    let file_length =
-        u64::try_from(length).map_err(|_| "shared processor buffer is too large".to_owned())?;
-    let mut options = OpenOptions::new();
-    options.create_new(true).read(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let file = options.open(path).map_err(|error| error.to_string())?;
-    if let Err(error) = file.set_len(file_length) {
-        drop(file);
-        let _ = std::fs::remove_file(path);
-        return Err(error.to_string());
-    }
-    // SAFETY: the newly created file is exclusively owned and large enough for the header.
-    let mut mapping = match unsafe { MmapOptions::new().map_mut(&file) } {
-        Ok(mapping) => mapping,
-        Err(error) => {
-            drop(file);
-            let _ = std::fs::remove_file(path);
-            return Err(error.to_string());
-        }
-    };
-    let header = SharedHeader {
-        magic: SHARED_MAGIC,
-        version: SHARED_VERSION,
-        input_channels: input_channels_u32,
-        output_channels: output_channels_u32,
-        block_frames: block_frames_u32,
-        worker_status: AtomicU32::new(WORKER_STARTING),
-        shutdown: AtomicU32::new(0),
-        input_sequence: AtomicU64::new(0),
-        input_consumed: AtomicU64::new(0),
-        output_sequence: AtomicU64::new(0),
-        output_consumed: AtomicU64::new(0),
-        process_failures: AtomicU64::new(0),
-        parameter_count: AtomicU32::new(0),
-        parameters_pending: AtomicBool::new(false),
-        parameters: std::array::from_fn(|_| ParameterSlot::empty()),
-        state_request: AtomicU64::new(0),
-        state_kind: AtomicU32::new(editor_surface::NATIVE_STATE),
-        state_response: AtomicU64::new(0),
-        state_length: AtomicU32::new(0),
-        state_result: AtomicU32::new(STATE_OK),
-        editor_command: AtomicU32::new(EDITOR_COMMAND_NONE),
-        editor_sequence: AtomicU64::new(0),
-        editor_consumed: AtomicU64::new(0),
-        editor_state: AtomicU32::new(EDITOR_STATE_UNAVAILABLE),
-        editor_failure: AtomicU32::new(EDITOR_FAILURE_NONE),
-        editor_width: AtomicU32::new(0),
-        editor_height: AtomicU32::new(0),
-        editor_resizable: AtomicU32::new(0),
-        instance_id: NEXT_CONTROL_INSTANCE.fetch_add(1, Ordering::Relaxed),
-        editor_observed_open: AtomicBool::new(false),
-        editor_close_generation: AtomicU64::new(0),
-        editor_input: editor_surface::InputRing::new(),
-    };
-    // SAFETY: OS mappings begin on a page boundary, whose alignment exceeds the 64-byte header
-    // requirement, and the mapping has at least `SharedHeader` bytes.
-    #[allow(clippy::cast_ptr_alignment)]
-    unsafe {
-        mapping.as_mut_ptr().cast::<SharedHeader>().write(header);
-    };
-    if let Err(error) = mapping.flush() {
-        drop(mapping);
-        drop(file);
-        let _ = std::fs::remove_file(path);
-        return Err(error.to_string());
-    }
-    Ok(file)
-}
-
-fn shared_length(inputs: usize, outputs: usize, frames: usize) -> Result<usize, String> {
-    let samples = inputs
-        .checked_add(outputs)
-        .and_then(|channels| channels.checked_mul(frames))
-        .ok_or_else(|| "shared processor sample count overflowed".to_owned())?;
-    input_offset()
-        .checked_add(
-            samples
-                .checked_mul(size_of::<f32>())
-                .ok_or_else(|| "shared processor byte count overflowed".to_owned())?,
-        )
-        .ok_or_else(|| "shared processor mapping size overflowed".to_owned())
-}
-
-fn shared_header(mapping: &MmapMut) -> Result<&SharedHeader, String> {
-    if mapping.len() < size_of::<SharedHeader>() {
-        return Err("shared processor mapping is truncated".to_owned());
-    }
-    let header = shared_header_unchecked(mapping);
-    if header.magic != SHARED_MAGIC || header.version != SHARED_VERSION {
-        return Err("shared processor mapping has an incompatible header".to_owned());
-    }
-    let expected = shared_length(
-        header.input_channels as usize,
-        header.output_channels as usize,
-        header.block_frames as usize,
-    )?;
-    if mapping.len() != expected {
-        return Err("shared processor mapping has an invalid size".to_owned());
-    }
-    Ok(header)
-}
-
-fn shared_header_unchecked(mapping: &MmapMut) -> &SharedHeader {
-    // SAFETY: every caller owns a mapping validated or created by this module. Page-aligned mmap
-    // storage satisfies the header's alignment, and the header lives for the mapping lifetime.
-    #[allow(clippy::cast_ptr_alignment)]
-    unsafe {
-        &*mapping.as_ptr().cast::<SharedHeader>()
-    }
-}
-
-fn input_offset() -> usize {
-    size_of::<SharedHeader>() + STATE_CAPACITY
-}
-
-fn output_offset(inputs: usize, frames: usize) -> usize {
-    input_offset() + inputs * frames * size_of::<f32>()
-}
-
 fn write_worker_config(
     path: &Path,
     sample_rate: u32,
@@ -1615,10 +1273,10 @@ fn read_worker_configuration(path: &str) -> Result<(f64, serde_json::Value), Str
     Ok((sample_rate, parameters))
 }
 
-fn wait_for_worker(child: &mut Child, shared: &MmapMut) -> Result<(), String> {
+fn wait_for_worker(child: &mut Child, shared: &ParentAudio) -> Result<(), String> {
     let deadline = Instant::now() + WORKER_START_TIMEOUT;
     loop {
-        match shared_header(shared)?.worker_status.load(Ordering::Acquire) {
+        match shared.header().worker_status.load(Ordering::Acquire) {
             WORKER_READY => return Ok(()),
             WORKER_FAILED => return Err("VST3 worker initialization failed".to_owned()),
             _ => {}
@@ -1639,39 +1297,11 @@ fn wait_for_worker(child: &mut Child, shared: &MmapMut) -> Result<(), String> {
     }
 }
 
-fn copy_interleaved_input_to_shared(
-    shared: &mut MmapMut,
-    input: &[f32],
-    layout: AudioLayout,
-    frames: usize,
-) {
-    let sample_capacity = layout.inputs * layout.block_frames;
-    // SAFETY: the mapping size was validated from these dimensions and the producer owns the
-    // input region until it publishes `input_sequence`.
-    #[allow(clippy::cast_ptr_alignment)]
-    let destination = unsafe {
-        std::slice::from_raw_parts_mut(
-            shared.as_mut_ptr().add(input_offset()).cast::<f32>(),
-            sample_capacity,
-        )
-    };
-    destination.fill(0.0);
-    destination[..layout.inputs * frames].copy_from_slice(&input[..layout.inputs * frames]);
-}
-
 fn copy_shared_input_to_rack(
-    shared: &MmapMut,
+    source: &[f32],
     plugin: &mut rack_formats::RackWorkerPlugin,
     layout: AudioLayout,
 ) {
-    // SAFETY: the worker owns the published input region until it releases `input_consumed`.
-    #[allow(clippy::cast_ptr_alignment)]
-    let source = unsafe {
-        std::slice::from_raw_parts(
-            shared.as_ptr().add(input_offset()).cast::<f32>(),
-            layout.inputs * layout.block_frames,
-        )
-    };
     for (channel_index, channel) in plugin.inputs_mut().iter_mut().enumerate() {
         for frame in 0..layout.block_frames {
             channel[frame] = source[frame * layout.inputs + channel_index];
@@ -1680,47 +1310,15 @@ fn copy_shared_input_to_rack(
 }
 
 fn copy_rack_output_to_shared(
-    shared: &mut MmapMut,
+    destination: &mut [f32],
     plugin: &rack_formats::RackWorkerPlugin,
     layout: AudioLayout,
 ) {
-    // SAFETY: the worker exclusively owns the output region until `output_sequence` is released.
-    #[allow(clippy::cast_ptr_alignment)]
-    let destination = unsafe {
-        std::slice::from_raw_parts_mut(
-            shared
-                .as_mut_ptr()
-                .add(output_offset(layout.inputs, layout.block_frames))
-                .cast::<f32>(),
-            layout.outputs * layout.block_frames,
-        )
-    };
     for frame in 0..layout.block_frames {
         for (channel_index, channel) in plugin.outputs().iter().enumerate() {
             destination[frame * layout.outputs + channel_index] = channel[frame];
         }
     }
-}
-
-fn copy_shared_output_to_interleaved(
-    shared: &MmapMut,
-    output: &mut [f32],
-    layout: AudioLayout,
-    frames: usize,
-) {
-    // SAFETY: acquire of `output_sequence` happened before this call and prevents the worker from
-    // reusing the output region until `output_consumed` is released.
-    #[allow(clippy::cast_ptr_alignment)]
-    let source = unsafe {
-        std::slice::from_raw_parts(
-            shared
-                .as_ptr()
-                .add(output_offset(layout.inputs, layout.block_frames))
-                .cast::<f32>(),
-            layout.outputs * layout.block_frames,
-        )
-    };
-    output[..layout.outputs * frames].copy_from_slice(&source[..layout.outputs * frames]);
 }
 
 fn bypass_rack(plugin: &mut rack_formats::RackWorkerPlugin, layout: AudioLayout) {
@@ -1731,35 +1329,111 @@ fn bypass_rack(plugin: &mut rack_formats::RackWorkerPlugin, layout: AudioLayout)
 mod tests {
     use super::*;
 
-    fn shared_mapping(inputs: usize, outputs: usize, frames: usize) -> (PathBuf, PathBuf, MmapMut) {
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn measure_shared_audio_transport() {
+        const ITERATIONS: u32 = 100_000;
+        if std::env::var_os("TONENARI_PROCESSOR_TRANSPORT_BENCH").is_none() {
+            return;
+        }
+        for channels in [2, 8, 64] {
+            for frames in [32, 256] {
+                let (shared_path, config_path, shared) = audio_mapping(channels, channels, frames);
+                let mut processor = HostedExternalProcessor {
+                    child_stdin: None,
+                    worker_monitor: None,
+                    shared: Some(shared),
+                    shared_path,
+                    config_path,
+                    layout: AudioLayout {
+                        inputs: channels,
+                        outputs: channels,
+                        block_frames: frames,
+                    },
+                    next_sequence: 1,
+                    control: None,
+                    timing: timing::TimingProbe::default(),
+                    registration: None,
+                };
+                let input = vec![0.25; channels * frames];
+                let mut output = vec![0.0; channels * frames];
+                assert!(!processor.process(&input, &mut output, frames));
+                let mut rounds = [0.0; 7];
+                for elapsed in &mut rounds {
+                    let start = Instant::now();
+                    for _ in 0..ITERATIONS {
+                        let shared = processor.shared.as_ref().expect("live benchmark mapping");
+                        shared.acknowledge_benchmark_block();
+                        assert!(processor.process(
+                            std::hint::black_box(&input),
+                            std::hint::black_box(&mut output),
+                            frames,
+                        ));
+                    }
+                    *elapsed = start.elapsed().as_secs_f64() * 1e9 / f64::from(ITERATIONS);
+                }
+                rounds.sort_by(f64::total_cmp);
+                println!(
+                    "processor_transport channels={channels} frames={frames} median_ns={:.3}",
+                    rounds[3]
+                );
+            }
+        }
+    }
+
+    fn shared_mapping(
+        inputs: usize,
+        outputs: usize,
+        frames: usize,
+    ) -> (PathBuf, PathBuf, ControlMailbox) {
         let (shared_path, config_path) = worker_paths().expect("private worker paths");
-        let file = create_shared_file(&shared_path, inputs, outputs, frames)
-            .expect("shared transport should be created");
-        // SAFETY: `create_shared_file` fixed the mapping size for this test.
-        let mapping =
-            unsafe { MmapOptions::new().map_mut(&file) }.expect("shared transport should map");
-        (shared_path, config_path, mapping)
+        let (audio, control) = shared_transport::create(
+            &shared_path,
+            AudioLayout {
+                inputs,
+                outputs,
+                block_frames: frames,
+            },
+        )
+        .expect("shared transport");
+        drop(audio);
+        (shared_path, config_path, control)
+    }
+
+    fn audio_mapping(
+        inputs: usize,
+        outputs: usize,
+        frames: usize,
+    ) -> (PathBuf, PathBuf, ParentAudio) {
+        let (shared_path, config_path) = worker_paths().expect("private worker paths");
+        let (audio, control) = shared_transport::create(
+            &shared_path,
+            AudioLayout {
+                inputs,
+                outputs,
+                block_frames: frames,
+            },
+        )
+        .expect("shared transport");
+        drop(control);
+        (shared_path, config_path, audio)
     }
 
     #[test]
     fn stalled_or_failed_worker_does_not_block_an_independent_processor() {
         let mut unavailable = test_processor();
         let mut healthy = test_processor();
+        let (mut worker, _) = shared_transport::worker(&healthy.shared_path).unwrap();
         let mut output = [0.0; 8];
         let input = [0.25; 8];
         assert!(!unavailable.process(&input, &mut output, 4));
         assert!(!healthy.process(&input, &mut output, 4));
         for sequence in 1..=64 {
-            let shared = healthy.shared.as_mut().unwrap();
-            let offset = output_offset(2, 4);
-            for bytes in shared[offset..offset + 8 * size_of::<f32>()].chunks_exact_mut(4) {
-                bytes.copy_from_slice(&0.5_f32.to_ne_bytes());
-            }
-            let header = shared_header_unchecked(shared);
-            header.input_consumed.store(sequence, Ordering::Release);
-            header.output_sequence.store(sequence, Ordering::Release);
+            assert!(worker.receive(|_| {}));
+            assert!(worker.publish(|output| output.fill(0.5)));
             if sequence == 32 {
-                shared_header_unchecked(unavailable.shared.as_ref().unwrap())
+                (unavailable.shared.as_ref().unwrap())
+                    .header()
                     .worker_status
                     .store(WORKER_FAILED, Ordering::Release);
             }
@@ -1779,7 +1453,7 @@ mod tests {
     }
 
     fn test_processor() -> HostedExternalProcessor {
-        let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
+        let (shared_path, config_path, shared) = audio_mapping(2, 2, 4);
         HostedExternalProcessor {
             child_stdin: None,
             worker_monitor: None,
@@ -1801,24 +1475,18 @@ mod tests {
     #[test]
     fn consumed_input_before_output_publication_does_not_stall_the_mailbox() {
         let mut processor = test_processor();
+        let (mut worker, _) = shared_transport::worker(&processor.shared_path).unwrap();
         let input = [0.25; 8];
         let mut output = [0.0; 8];
         assert!(!processor.process(&input, &mut output, 4));
         for sequence in 1..=64 {
-            let header = shared_header_unchecked(processor.shared.as_ref().unwrap());
-            header.input_consumed.store(sequence, Ordering::Release);
+            assert!(worker.receive(|_| {}));
             // The next callback queues input while this block is still being processed.
             assert!(!processor.process(&input, &mut output, 4));
             assert_eq!(processor.next_sequence, sequence + 2);
-            let shared = processor.shared.as_mut().unwrap();
-            let offset = output_offset(2, 4);
             let processed = f32::from(u16::try_from(sequence).unwrap());
-            for bytes in shared[offset..offset + 8 * size_of::<f32>()].chunks_exact_mut(4) {
-                bytes.copy_from_slice(&processed.to_ne_bytes());
-            }
-            shared_header_unchecked(shared)
-                .output_sequence
-                .store(sequence, Ordering::Release);
+            assert!(!worker.receive(|_| panic!("pending output retains the sequence")));
+            assert!(worker.publish(|output| output.fill(processed)));
             assert!(processor.process(&input, &mut output, 4));
             assert!(
                 output
@@ -1826,9 +1494,7 @@ mod tests {
                     .all(|sample| sample.to_bits() == processed.to_bits())
             );
             assert_eq!(
-                shared_header_unchecked(processor.shared.as_ref().unwrap())
-                    .output_consumed
-                    .load(Ordering::Acquire),
+                processor.shared.as_ref().unwrap().acknowledged_output(),
                 sequence
             );
             assert!(
@@ -1840,36 +1506,22 @@ mod tests {
 
     #[test]
     fn shared_audio_regions_round_trip_without_growing() {
-        let (shared_path, config_path, mut shared) = shared_mapping(2, 2, 4);
+        let (shared_path, config_path, mut shared) = audio_mapping(2, 2, 4);
+        let (mut worker, _) = shared_transport::worker(&shared_path).unwrap();
+        let original_length = std::fs::metadata(&shared_path).unwrap().len();
         let input = [1.0, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0];
-        let layout = AudioLayout {
-            inputs: 2,
-            outputs: 2,
-            block_frames: 4,
-        };
-        copy_interleaved_input_to_shared(&mut shared, &input, layout, 4);
-        // SAFETY: this test owns the worker-side output region of the private mapping.
-        #[allow(clippy::cast_ptr_alignment)]
-        let worker_output = unsafe {
-            std::slice::from_raw_parts_mut(
-                shared
-                    .as_mut_ptr()
-                    .add(output_offset(layout.inputs, layout.block_frames))
-                    .cast::<f32>(),
-                layout.outputs * layout.block_frames,
-            )
-        };
-        worker_output.copy_from_slice(&[5.0, 50.0, 6.0, 60.0, 7.0, 70.0, 8.0, 80.0]);
+        assert!(shared.submit(1, &input, 4, || {}));
+        assert!(worker.receive(|source| assert_eq!(source, input)));
+        let expected = [5.0, 50.0, 6.0, 60.0, 7.0, 70.0, 8.0, 80.0];
+        assert!(worker.publish(|destination| destination.copy_from_slice(&expected)));
         let mut output = [0.0; 8];
-        copy_shared_output_to_interleaved(&shared, &mut output, layout, 4);
-        for (actual, expected) in output
-            .iter()
-            .zip([5.0, 50.0, 6.0, 60.0, 7.0, 70.0, 8.0, 80.0])
-        {
-            assert!((actual - expected).abs() <= f32::EPSILON);
-        }
-        assert_eq!(shared.len(), shared_length(2, 2, 4).unwrap());
-
+        assert_eq!(shared.receive(&mut output, 4), Some(1));
+        assert_eq!(output.map(f32::to_bits), expected.map(f32::to_bits));
+        assert_eq!(
+            std::fs::metadata(&shared_path).unwrap().len(),
+            original_length
+        );
+        drop(worker);
         drop(shared);
         cleanup_worker_paths(&shared_path, &config_path);
         assert!(!shared_path.exists());
@@ -1880,7 +1532,6 @@ mod tests {
         let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
         let control = Arc::new(HostedProcessorControl {
             shared,
-            writer: Mutex::new(()),
             input_writer: Mutex::new(()),
             reuse: Mutex::new(None),
             active_owner: AtomicBool::new(false),
@@ -1896,7 +1547,7 @@ mod tests {
         probe.received(1, &control.timing);
         assert_eq!(registry.processing_time_ns(&node), None);
         control.active_owner.store(true, Ordering::Release);
-        let header = shared_header_unchecked(&control.shared);
+        let header = control.shared.header();
         header.worker_status.store(WORKER_READY, Ordering::Release);
         assert!(registry.processing_time_ns(&node).is_some());
         header.worker_status.store(WORKER_FAILED, Ordering::Release);
@@ -1912,7 +1563,6 @@ mod tests {
         let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
         let control = Arc::new(HostedProcessorControl {
             shared,
-            writer: Mutex::new(()),
             input_writer: Mutex::new(()),
             reuse: Mutex::new(None),
             active_owner: AtomicBool::new(false),
@@ -1928,7 +1578,7 @@ mod tests {
             .set_parameter(&node_id, 9, 0.75)
             .expect("different parameter must retain the earlier ID");
         registry.set_parameter(&node_id, 7, 0.5).unwrap();
-        let header = shared_header_unchecked(&control.shared);
+        let header = control.shared.header();
         let mut received = Vec::new();
         consume_parameters(header, |id, value| received.push((id, value)));
         assert_eq!(received, vec![(7, 0.5), (9, 0.75)]);
@@ -1979,7 +1629,6 @@ mod tests {
         let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
         let control = HostedProcessorControl {
             shared,
-            writer: Mutex::new(()),
             input_writer: Mutex::new(()),
             reuse: Mutex::new(None),
             active_owner: AtomicBool::new(false),
@@ -1991,7 +1640,7 @@ mod tests {
         assert!(control.set_parameter(u32::MAX, 0.5).is_err());
         control.set_parameter(0, 0.75).unwrap();
         let mut count = 0;
-        consume_parameters(shared_header_unchecked(&control.shared), |id, value| {
+        consume_parameters(control.shared.header(), |id, value| {
             let expected = if id == 0 {
                 0.75
             } else {
@@ -2025,24 +1674,24 @@ mod tests {
             let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
             let control = Arc::new(HostedProcessorControl {
                 shared,
-                writer: Mutex::new(()),
                 input_writer: Mutex::new(()),
                 reuse: Mutex::new(None),
                 active_owner: AtomicBool::new(false),
                 timing: crate::timing::TimingMetrics::default(),
             });
-            shared_header_unchecked(&control.shared)
+            control
+                .shared
+                .header()
                 .worker_status
                 .store(WORKER_READY, Ordering::Release);
-            let worker_control = Arc::clone(&control);
+            let (_, worker_control) = shared_transport::worker(&shared_path).unwrap();
             let worker = thread::spawn(move || {
                 let deadline = Instant::now() + Duration::from_secs(2);
-                let header = shared_header_unchecked(&worker_control.shared);
-                while header.state_request.load(Ordering::Acquire) == 0 {
+                while worker_control.pending_request().is_none() {
                     assert!(Instant::now() < deadline);
                     thread::yield_now();
                 }
-                publish_state_response(&worker_control.shared, 1, state);
+                worker_control.publish(1, state);
             });
             let result = control.snapshot_state(Duration::from_secs(2));
             worker.join().unwrap();
@@ -2066,7 +1715,6 @@ mod tests {
         let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
         let control = Arc::new(HostedProcessorControl {
             shared,
-            writer: Mutex::new(()),
             input_writer: Mutex::new(()),
             reuse: Mutex::new(None),
             active_owner: AtomicBool::new(false),
@@ -2087,7 +1735,7 @@ mod tests {
         });
         let mut seen = [false; 64];
         let mut consume = || {
-            consume_parameters(shared_header_unchecked(&control.shared), |id, value| {
+            consume_parameters(control.shared.header(), |id, value| {
                 assert!((value - f64::from(id) / 64.0).abs() < f64::EPSILON);
                 seen[id as usize] = true;
             });
@@ -2107,13 +1755,13 @@ mod tests {
         let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
         let control = HostedProcessorControl {
             shared,
-            writer: Mutex::new(()),
             input_writer: Mutex::new(()),
             reuse: Mutex::new(None),
             active_owner: AtomicBool::new(false),
             timing: crate::timing::TimingMetrics::default(),
         };
-        let header = shared_header_unchecked(&control.shared);
+        let (_, worker) = shared_transport::worker(&shared_path).unwrap();
+        let header = control.shared.header();
         header.worker_status.store(WORKER_READY, Ordering::Release);
         assert!(
             control
@@ -2127,15 +1775,15 @@ mod tests {
                 .unwrap_err()
                 .eq(&ProcessorStateError::Pending)
         );
-        assert_eq!(header.state_request.load(Ordering::Acquire), 1);
-        publish_state_response(&control.shared, 1, Ok(vec![8]));
+        assert_eq!(worker.pending_request().unwrap().0, 1);
+        worker.publish(1, Ok(vec![8]));
         assert!(
             control
                 .snapshot_state(Duration::ZERO)
                 .unwrap_err()
                 .eq(&ProcessorStateError::Timeout)
         );
-        assert_eq!(header.state_request.load(Ordering::Acquire), 2);
+        assert_eq!(worker.pending_request().unwrap().0, 2);
         header.worker_status.store(WORKER_FAILED, Ordering::Release);
         assert!(
             control
@@ -2143,6 +1791,7 @@ mod tests {
                 .unwrap_err()
                 .eq(&ProcessorStateError::Unavailable)
         );
+        drop(worker);
         drop(control);
         cleanup_worker_paths(&shared_path, &config_path);
     }
@@ -2153,7 +1802,6 @@ mod tests {
         let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
         let control = Arc::new(HostedProcessorControl {
             shared,
-            writer: Mutex::new(()),
             input_writer: Mutex::new(()),
             reuse: Mutex::new(None),
             active_owner: AtomicBool::new(false),
@@ -2173,7 +1821,9 @@ mod tests {
             .map_err(|(error, _)| error)
             .expect("monitor should spawn");
         let deadline = Instant::now() + Duration::from_secs(2);
-        while shared_header_unchecked(&control.shared)
+        while control
+            .shared
+            .header()
             .worker_status
             .load(Ordering::Acquire)
             != WORKER_FAILED
@@ -2182,7 +1832,9 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(
-            shared_header_unchecked(&control.shared)
+            control
+                .shared
+                .header()
                 .worker_status
                 .load(Ordering::Acquire),
             WORKER_FAILED

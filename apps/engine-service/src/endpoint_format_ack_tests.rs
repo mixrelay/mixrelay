@@ -1,4 +1,5 @@
 use super::*;
+use crate::controller_test_support::settle;
 use std::collections::VecDeque;
 use tonenari_control_protocol::{
     GraphCatalogAction, GraphCatalogRequest, GraphLayout, GraphLayoutRequest, GraphNodePosition,
@@ -191,19 +192,8 @@ fn rejected_graph_waits_for_asynchronous_rollback_before_resuming() {
     assert_eq!(controller.graph().revision, 1);
 }
 
-fn settle(controller: &EngineGraphController) {
-    if controller.exchange.revisions().active == controller.exchange.revisions().submitted {
-        return;
-    }
-    let mut processor = controller
-        .prepare_and_validate(&controller.graph(), *controller.context.read())
-        .unwrap()
-        .processor;
-    assert!(controller.exchange.activate_pending(&mut processor));
-    controller.exchange.reclaim_retired();
-}
-
 fn view(controller: &EngineGraphController, action: GraphCatalogAction) {
+    let before = controller.exchange.revisions();
     controller
         .mutate_graph_catalog(GraphCatalogRequest {
             expected_revision: controller.graph().revision,
@@ -211,7 +201,7 @@ fn view(controller: &EngineGraphController, action: GraphCatalogAction) {
             action,
         })
         .unwrap();
-    settle(controller);
+    assert_eq!(controller.exchange.revisions(), before);
 }
 
 fn add_shared_reference(controller: &EngineGraphController) {

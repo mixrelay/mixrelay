@@ -229,7 +229,7 @@ fn restored_pid_graph_can_be_edited_and_saved_through_controller() {
         source.request.selector,
         tonenari_audio_io::ApplicationSelector::ProcessId { .. }
     )));
-    crate::graph_catalog_tests::settle(&engine);
+    crate::controller_test_support::settle(&engine);
     edited.revision += 1;
     let NodeConfig::Gain(gain) = &mut edited.nodes[3].config else {
         panic!("saved gain node");

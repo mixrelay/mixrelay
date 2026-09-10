@@ -14,7 +14,7 @@ fn worker(status: &Arc<AdapterRuntimeStatus>, on_pause: impl Fn() + Send + 'stat
     let cloned = status.clone();
     let thread = std::thread::spawn(move || {
         while !cloned.stop_requested() {
-            if cloned.pause_requested.load(Ordering::Acquire) != 0 {
+            if cloned.pause_requested() {
                 on_pause();
                 let _ = cloned.checkpoint();
             }
@@ -64,7 +64,7 @@ fn partial_native_pair_failure_rolls_back_actual_pair_not_old_dsp_size() {
         unpack_format(status.active_format.load(Ordering::Acquire)),
         old_dsp
     );
-    assert_eq!(status.pause_requested.load(Ordering::Acquire), 0);
+    assert!(!status.pause_requested());
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn failed_pair_rollback_keeps_processing_suspended_and_reports_failure() {
             .is_err()
     );
     status.resume();
-    assert_ne!(status.pause_requested.load(Ordering::Acquire), 0);
+    assert!(status.pause_requested());
     assert_eq!(
         status
             .status(format(44_100, 128))

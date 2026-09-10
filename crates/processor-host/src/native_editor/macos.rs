@@ -1,15 +1,13 @@
 use super::{EditorHostEvents, EditorHostFailure};
+use crate::shared_transport::WorkerControl;
 use crate::{
     BASE64, ProcessorStateError,
     editor_surface::{EDITOR_FRAME, PointerEvent},
-    publish_state_response,
     rack_formats::{EditorSnapshot, RackWorkerPlugin},
-    shared_header_unchecked,
 };
 use base64::Engine as _;
 use block2::RcBlock;
 use dispatch2::MainThreadBound;
-use memmap2::MmapMut;
 use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSBitmapImageFileType,
@@ -28,7 +26,7 @@ use tonenari_control_protocol::{EditorPointerKind, ProcessorEditorFrame};
 use truce_rack_core::WindowHandle;
 
 pub(crate) struct NativeEditorHost {
-    shared: Arc<MmapMut>,
+    shared: Arc<WorkerControl>,
     app: Retained<NSApplication>,
     surface: Option<Surface>,
     target: Option<Retained<NSView>>,
@@ -43,7 +41,7 @@ struct Surface {
 struct SurfaceState {
     window: Retained<NSWindow>,
     view: Retained<NSView>,
-    shared: Arc<MmapMut>,
+    shared: Arc<WorkerControl>,
     session: u64,
     size: Cell<(u32, u32)>,
     pressed: Cell<bool>,
@@ -52,7 +50,7 @@ struct SurfaceState {
 }
 
 impl NativeEditorHost {
-    pub(crate) fn new(shared: Arc<MmapMut>) -> Result<Self, EditorHostFailure> {
+    pub(crate) fn new(shared: Arc<WorkerControl>) -> Result<Self, EditorHostFailure> {
         let main = MainThreadMarker::new().ok_or(EditorHostFailure::DisplayUnavailable)?;
         let app = NSApplication::sharedApplication(main);
         app.setActivationPolicy(NSApplicationActivationPolicy::Prohibited);
@@ -81,7 +79,8 @@ impl NativeEditorHost {
         let main = MainThreadMarker::new().ok_or(EditorHostFailure::DisplayUnavailable)?;
         if let Some(surface) = &self.surface {
             if surface.state.get(main).session
-                == shared_header_unchecked(&self.shared)
+                == (self.shared)
+                    .header()
                     .editor_sequence
                     .load(Ordering::Acquire)
             {
@@ -109,7 +108,8 @@ impl NativeEditorHost {
                     window: window.clone(),
                     view: view.clone(),
                     shared: Arc::clone(&self.shared),
-                    session: shared_header_unchecked(&self.shared)
+                    session: (self.shared)
+                        .header()
                         .editor_sequence
                         .load(Ordering::Acquire),
                     size: Cell::new((width, height)),
@@ -243,7 +243,7 @@ impl Drop for Surface {
 
 impl SurfaceState {
     fn tick(&self, main: MainThreadMarker) {
-        let header = shared_header_unchecked(&self.shared);
+        let header = self.shared.header();
         let closing = header.editor_sequence.load(Ordering::Acquire) != self.session
             || header.shutdown.load(Ordering::Acquire) != 0;
         let cancelled = header.editor_input.take_cancel() == self.session;
@@ -258,12 +258,9 @@ impl SurfaceState {
         if (closing || cancelled) && self.pressed.replace(false) {
             self.post_release(main);
         }
-        let request = header.state_request.load(Ordering::Acquire);
-        if request == header.state_response.load(Ordering::Acquire)
-            || header.state_kind.load(Ordering::Relaxed) != EDITOR_FRAME
-        {
+        let Some((request, EDITOR_FRAME)) = self.shared.pending_request() else {
             return;
-        }
+        };
         if self.capturing.get() {
             return;
         }
@@ -276,7 +273,7 @@ impl SurfaceState {
         }
         let result = self.frame();
         self.capturing.set(false);
-        publish_state_response(&self.shared, request, result);
+        (self.shared).publish(request, result);
     }
 
     fn post(&self, event: PointerEvent, main: MainThreadMarker) {
@@ -351,9 +348,7 @@ impl SurfaceState {
             return Err(ProcessorStateError::TooLarge);
         }
         serde_json::to_vec(&ProcessorEditorFrame {
-            instance_id: shared_header_unchecked(&self.shared)
-                .instance_id
-                .to_string(),
+            instance_id: self.shared.header().instance_id.to_string(),
             session: self.session,
             width: self.size.get().0,
             height: self.size.get().1,
@@ -371,13 +366,9 @@ fn valid_size((width, height): (u32, u32), scale: f64) -> bool {
         && f64::from(width) * f64::from(height) * scale * scale <= 4_000_000.0
 }
 
-fn reject_pending_frame(shared: &MmapMut) {
-    let header = shared_header_unchecked(shared);
-    let request = header.state_request.load(Ordering::Acquire);
-    if request != header.state_response.load(Ordering::Acquire)
-        && header.state_kind.load(Ordering::Relaxed) == EDITOR_FRAME
-    {
-        publish_state_response(shared, request, Err(ProcessorStateError::Unavailable));
+fn reject_pending_frame(shared: &WorkerControl) {
+    if let Some((request, EDITOR_FRAME)) = shared.pending_request() {
+        (shared).publish(request, Err(ProcessorStateError::Unavailable));
     }
 }
 

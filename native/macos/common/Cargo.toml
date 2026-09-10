@@ -12,6 +12,16 @@ crate-type = ["rlib", "staticlib"]
 [lints]
 workspace = true
 
+[dependencies]
+# Shared native PCM ownership; the device adapter does not reimplement its queue.
+tonenari-pcm-ring = { path = "../../pcm-ring" }
+
+[build-dependencies]
+# Compile only the blocks-based XPC adapter; ownership/producer policy is Rust.
+cc = "1.2"
+
 [dev-dependencies]
+# Count allocator traffic at the actual native callback entry; never linked into runtime.
+allocation-counter = "0.8.1"
 # Model-check actual callback publication atomics; never linked into the HAL/engine runtime.
 loom = "0.7.2"

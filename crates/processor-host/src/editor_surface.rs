@@ -1,5 +1,5 @@
 //! Bounded control transport. Audio never reads this ring or waits for its publishers.
-use crate::{NodeId, ProcessorControlRegistry, WORKER_READY, shared_header_unchecked};
+use crate::{NodeId, ProcessorControlRegistry, WORKER_READY};
 use std::{
     sync::{
         Arc,
@@ -15,7 +15,7 @@ impl ProcessorControlRegistry {
     /// Returns an error when the graph no longer owns this worker.
     pub fn cancel_editor_gesture(&self, node_id: &NodeId) -> Result<(), String> {
         let control = self.live_control(node_id)?;
-        let header = shared_header_unchecked(&control.shared);
+        let header = (control.shared).header();
         header.editor_input.cancel_session.store(
             header.editor_sequence.load(Ordering::Acquire),
             Ordering::Release,
@@ -30,7 +30,7 @@ impl ProcessorControlRegistry {
             return Err("inline editor surfaces are unavailable on this backend".to_owned());
         }
         let control = self.live_control(node_id)?;
-        let header = shared_header_unchecked(&control.shared);
+        let header = (control.shared).header();
         let session = header.editor_sequence.load(Ordering::Acquire);
         if !header.editor_observed_open.load(Ordering::Acquire) {
             return Err("editor is not open".to_owned());
@@ -63,7 +63,7 @@ impl ProcessorControlRegistry {
             .input_writer
             .lock()
             .map_err(|_| "editor input lock poisoned")?;
-        let header = shared_header_unchecked(&control.shared);
+        let header = (control.shared).header();
         if header.worker_status.load(Ordering::Acquire) != WORKER_READY
             || !header.editor_observed_open.load(Ordering::Acquire)
             || input.instance_id != header.instance_id.to_string()
@@ -105,6 +105,7 @@ struct InputSlot {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg(any(target_os = "macos", test))]
 pub(super) struct PointerEvent {
     pub session: u64,
     pub kind: EditorPointerKind,
@@ -167,6 +168,7 @@ impl InputRing {
         Ok(())
     }
 
+    #[cfg(any(target_os = "macos", test))]
     pub(super) fn pop(&self) -> Option<PointerEvent> {
         let tail = self.tail.load(Ordering::Relaxed);
         if tail == self.head.load(Ordering::Acquire) {
@@ -190,6 +192,7 @@ impl InputRing {
         Some(event)
     }
 
+    #[cfg(any(target_os = "macos", test))]
     pub(super) fn take_cancel(&self) -> u64 {
         self.cancel_session.swap(0, Ordering::AcqRel)
     }
@@ -199,41 +202,70 @@ impl InputRing {
 mod tests {
     use super::*;
     use crate::{
-        EDITOR_COMMAND_OPEN, EDITOR_STATE_OPEN, HostedProcessorControl, ProcessorStateError,
-        create_shared_file, map_worker_regions, publish_state_response,
+        AudioLayout, EDITOR_STATE_OPEN, HostedProcessorControl, ProcessorStateError,
+        shared_transport::{self, WorkerControl},
     };
     use tonenari_test_support::FixtureDir;
 
+    #[test]
+    fn input_ring_preserves_session_coordinates_and_modifiers() {
+        let ring = InputRing::new();
+        let input = ProcessorEditorInput {
+            instance_id: "fixture".into(),
+            session: 41,
+            kind: EditorPointerKind::Down,
+            x: 12.5,
+            y: 29.75,
+            modifiers: 9,
+        };
+        ring.push(&input).unwrap();
+        let event = ring.pop().expect("published pointer input");
+        assert_eq!(event.session, input.session);
+        assert_eq!(event.kind, input.kind);
+        assert_eq!(event.x.to_bits(), input.x.to_bits());
+        assert_eq!(event.y.to_bits(), input.y.to_bits());
+        assert_eq!(event.modifiers, input.modifiers);
+        assert!(ring.pop().is_none());
+    }
+
     struct Fixture {
         control: Arc<HostedProcessorControl>,
+        worker: Arc<WorkerControl>,
         _directory: FixtureDir,
     }
     impl Fixture {
         fn new() -> Self {
             let directory = FixtureDir::new("editor-surface").unwrap();
-            let file = create_shared_file(&directory.join("audio"), 2, 2, 32).unwrap();
-            let (audio, control) = map_worker_regions(&file).unwrap();
+            let path = directory.join("audio");
+            let (audio, mailbox) = shared_transport::create(
+                &path,
+                AudioLayout {
+                    inputs: 2,
+                    outputs: 2,
+                    block_frames: 32,
+                },
+            )
+            .unwrap();
             drop(audio);
-            let header = shared_header_unchecked(&control.shared);
+            let (audio, worker) = shared_transport::worker(&path).unwrap();
+            drop(audio);
+            let control = Arc::new(HostedProcessorControl::new(mailbox));
+            let header = worker.header();
             header.worker_status.store(WORKER_READY, Ordering::Release);
-            header.editor_sequence.store(1, Ordering::Release);
-            header
-                .editor_command
-                .store(EDITOR_COMMAND_OPEN, Ordering::Release);
+            control.set_editor_open(true);
             header.editor_observed_open.store(true, Ordering::Release);
             header
                 .editor_state
                 .store(EDITOR_STATE_OPEN, Ordering::Release);
             Self {
                 control,
+                worker: Arc::new(worker),
                 _directory: directory,
             }
         }
         fn input(&self, kind: EditorPointerKind) -> ProcessorEditorInput {
             ProcessorEditorInput {
-                instance_id: shared_header_unchecked(&self.control.shared)
-                    .instance_id
-                    .to_string(),
+                instance_id: (self.control.shared).header().instance_id.to_string(),
                 session: 1,
                 kind,
                 x: 12.0,
@@ -246,7 +278,7 @@ mod tests {
     #[test]
     fn full_motion_ring_preserves_release_and_out_of_band_cancel() {
         let fixture = Fixture::new();
-        let ring = &shared_header_unchecked(&fixture.control.shared).editor_input;
+        let ring = &(fixture.control.shared).header().editor_input;
         ring.push(&fixture.input(EditorPointerKind::Down)).unwrap();
         for _ in 0..1000 {
             ring.push(&fixture.input(EditorPointerKind::Move)).unwrap();
@@ -254,10 +286,11 @@ mod tests {
         ring.push(&fixture.input(EditorPointerKind::Up)).unwrap();
         ring.push(&fixture.input(EditorPointerKind::Cancel))
             .unwrap();
-        assert_eq!(ring.take_cancel(), 1);
-        assert_eq!(ring.take_cancel(), 0);
+        let worker_ring = &fixture.worker.header().editor_input;
+        assert_eq!(worker_ring.take_cancel(), 1);
+        assert_eq!(worker_ring.take_cancel(), 0);
         let mut kinds = Vec::new();
-        while let Some(event) = ring.pop() {
+        while let Some(event) = worker_ring.pop() {
             kinds.push(event.kind);
         }
         assert_eq!(kinds.first(), Some(&EditorPointerKind::Down));
@@ -271,16 +304,17 @@ mod tests {
         let registry = ProcessorControlRegistry::default();
         let id = NodeId::from("effect");
         let _registration = registry.register(&id, &fixture.control);
-        let _blob_writer = fixture.control.writer.lock().unwrap();
+        let blob_writer = fixture.control.shared.lock();
         registry
             .editor_input(&id, &fixture.input(EditorPointerKind::Up))
             .unwrap();
-        let header = shared_header_unchecked(&fixture.control.shared);
+        let header = fixture.worker.header();
         assert_eq!(
             header.editor_input.pop().unwrap().kind,
             EditorPointerKind::Up
         );
-        header.editor_sequence.store(2, Ordering::Release);
+        drop(blob_writer);
+        fixture.control.set_editor_open(false);
         assert!(
             registry
                 .editor_input(&id, &fixture.input(EditorPointerKind::Down))
@@ -294,7 +328,8 @@ mod tests {
         let fixture = Fixture::new();
         fixture.control.set_editor_open(true);
         assert_eq!(
-            shared_header_unchecked(&fixture.control.shared)
+            (fixture.control.shared)
+                .header()
                 .editor_sequence
                 .load(Ordering::Acquire),
             1
@@ -309,21 +344,21 @@ mod tests {
             control.request_blob(EDITOR_FRAME, Duration::ZERO),
             Err(ProcessorStateError::Timeout)
         ));
-        let header = shared_header_unchecked(&control.shared);
-        let request = header.state_request.load(Ordering::Acquire);
+        let (request, kind) = fixture.worker.pending_request().unwrap();
+        assert_eq!(kind, EDITOR_FRAME);
         // Same terminal response used by the owning main-thread timer on retirement.
-        publish_state_response(
-            &control.shared,
-            request,
-            Err(ProcessorStateError::Unavailable),
-        );
+        fixture
+            .worker
+            .publish(request, Err(ProcessorStateError::Unavailable));
         assert!(matches!(
             control.snapshot_state(Duration::ZERO),
             Err(ProcessorStateError::Timeout)
         ));
-        assert_eq!(header.state_request.load(Ordering::Acquire), request + 1);
-        assert_eq!(header.state_kind.load(Ordering::Acquire), NATIVE_STATE);
-        assert_eq!(header.editor_input.take_cancel(), 1);
+        assert_eq!(
+            fixture.worker.pending_request(),
+            Some((request + 1, NATIVE_STATE))
+        );
+        assert_eq!(fixture.worker.header().editor_input.take_cancel(), 1);
     }
 
     #[test]
@@ -334,23 +369,26 @@ mod tests {
             control.request_blob(EDITOR_FRAME, Duration::ZERO),
             Err(ProcessorStateError::Timeout)
         ));
-        let worker_control = Arc::clone(control);
+        let worker_control = Arc::clone(&fixture.worker);
         let worker = std::thread::spawn(move || {
-            let header = shared_header_unchecked(&worker_control.shared);
+            let header = worker_control.header();
             let deadline = std::time::Instant::now() + Duration::from_secs(2);
             while header.editor_input.take_cancel() == 0 {
                 assert!(std::time::Instant::now() < deadline);
                 std::thread::yield_now();
             }
-            assert_eq!(header.state_kind.load(Ordering::Acquire), EDITOR_FRAME);
-            let frame_request = header.state_request.load(Ordering::Acquire);
-            publish_state_response(&worker_control.shared, frame_request, Ok(vec![1]));
-            while header.state_request.load(Ordering::Acquire) == frame_request {
+            let (frame_request, kind) = worker_control.pending_request().unwrap();
+            assert_eq!(kind, EDITOR_FRAME);
+            worker_control.publish(frame_request, Ok(vec![1]));
+            while worker_control.pending_request().is_none() {
                 assert!(std::time::Instant::now() < deadline);
                 std::thread::yield_now();
             }
-            assert_eq!(header.state_kind.load(Ordering::Acquire), NATIVE_STATE);
-            publish_state_response(&worker_control.shared, frame_request + 1, Ok(vec![2]));
+            assert_eq!(
+                worker_control.pending_request(),
+                Some((frame_request + 1, NATIVE_STATE))
+            );
+            worker_control.publish(frame_request + 1, Ok(vec![2]));
         });
         let state = control.snapshot_state(Duration::from_secs(2));
         worker.join().unwrap();
@@ -365,15 +403,14 @@ mod tests {
             control.request_blob(EDITOR_FRAME, Duration::ZERO),
             Err(ProcessorStateError::Timeout)
         ));
-        let header = shared_header_unchecked(&control.shared);
-        let request = header.state_request.load(Ordering::Acquire);
+        let request = fixture.worker.pending_request().unwrap();
+        assert_eq!(request.1, EDITOR_FRAME);
         assert!(matches!(
             control.snapshot_state(Duration::from_millis(5)),
             Err(ProcessorStateError::Pending)
         ));
-        assert_eq!(header.state_request.load(Ordering::Acquire), request);
-        assert_eq!(header.state_kind.load(Ordering::Acquire), EDITOR_FRAME);
-        assert_eq!(header.editor_input.take_cancel(), 1);
+        assert_eq!(fixture.worker.pending_request(), Some(request));
+        assert_eq!(fixture.worker.header().editor_input.take_cancel(), 1);
     }
 
     #[test]

@@ -2,6 +2,11 @@
 
 ## Result
 
+This document preserves the 2026-09-08 integration finding, not a current startup
+recipe. The singleton diagnostic implementation and its probe were removed on
+2026-09-10: the current product uses independently identified devices and rejects
+the old `default` identity. No running device or user setting was removed.
+
 **CoreAudio `BufferFrameSize` readback in the ToneNari engine process does not
 prove that another application's native HAL callback quantum was changed.**
 The attempted full sample-rate / buffer-pair registration was removed from the
@@ -54,51 +59,35 @@ claimed.
 
 ## Corrected source and tests
 
-- macOS `main.rs` registers only `with_format_control(set_device_rate)` and
-  `with_observed_rate_following(read_device_rate)`. It does not query, set, or
-  advertise the engine client's unused CoreAudio buffer as a native quantum.
-- `blockFrames` remains the supported 64 / 128 / 256 / 512 DSP maximum. Native
+- Current macOS startup registers `with_graph_format_control()` in
+  `apps/engine-service/src/macos/mod.rs`. Device nominal rates are handled by the
+  ID-directed virtual endpoint backend, not a singleton session setter.
+- `blockFrames` is the DSP maximum selected from the current product format catalog. Native
   callback credits can differ and are sliced without discarding remainder frames.
 - The shared full-format transaction API is retained for adapters which actually
   own the corresponding native I/O. Its fake-boundary tests are not proof of
   macOS cross-process buffer negotiation.
-- `TNOwnDeviceBuffer.c` and its header remain **diagnostic fixture support**, not
-  linked into the engine runtime. They target only the exact ToneNari UID.
-- `TNOwnDeviceBufferTests` substitutes CoreAudio functions and covers exact UID,
-  all four UI sizes, native range / settable / malformed read failures, rejected
-  writes, and acknowledgement without changed readback. Native helper line and
-  function coverage is 100%; ASan/UBSan passed. These tests never established
-  cross-process semantics and are no longer described as doing so.
+- Current client-buffer validation/readback and rollback policy lives in Rust
+  `macos_devices/buffer_control.rs` and `buffer_transaction.rs`. Their tests cover
+  invalid geometry, absent observations, bounded acknowledgement, rejected writes,
+  cancellation and preservation of external changes. The native snapshot/setter
+  boundary is `TNDeviceIO.c`; Rust fixtures do not prove every CoreAudio ABI failure.
+- The removed singleton helper, header, standalone tests and manual probe were
+  absent from current application and Cargo fixture build inputs. Their historical
+  coverage figures describe only that removed implementation, not the current engine.
 
-The full native script also builds the universal arm64 / x86_64 HAL. Existing
-pacing regression processes 1,056 native frames in 64 / 96 / 257 / 511 / 128
+The historical native validation also built the universal arm64 / x86_64 HAL. Its
+pacing regression processed 1,056 native frames in 64 / 96 / 257 / 511 / 128
 quantums with a maximum 128-frame DSP slice and no lost remainder. This is a
 correctness audit, not a CPU, latency or memory performance-improvement claim.
 
-## Reproducible diagnostic probe
-
-`TNOwnDeviceFormatProbe.c` is read-only with no arguments. Its JSON field is
-explicitly named `clientBufferFrames`. An explicit `--set` changes the own
-device's global nominal rate and **the probe process's client buffer only**.
-It checks / confirms the observed values and attempts restoration on failure;
-this does not make the buffer operation global.
-
-```sh
-probe_dir=$(mktemp -d /tmp/tonenari-own-format.XXXXXX)
-clang -std=c17 -mmacosx-version-min=14.2 -Wall -Wextra -Wpedantic -Wconversion \
-  -Wsign-conversion -Wshadow -Werror \
-  -I native/macos/engine-service/include \
-  native/macos/engine-service/src/TNOwnDeviceBuffer.c \
-  native/macos/engine-service/tests/TNOwnDeviceFormatProbe.c \
-  -framework CoreAudio -framework CoreFoundation -o "$probe_dir/probe"
-"$probe_dir/probe"
-```
+## Current validation boundary
 
 For rate roundtrips, preserve graph, revision, accepted/preferred sample rate and
-unrelated device UID/rate/default inventory. App-to-OS uses
-`PUT /api/v1/audio/session` with the current revision and supported format;
-OS-to-app changes only the exact ToneNari UID's nominal rate and checks the
-follower. Restore the original app settings and verify graph/inventory. Buffer
+unrelated device UID/rate/default inventory. App-to-OS rate changes target the
+selected device identity through its graph node; OS-to-app changes only that
+device's nominal rate and checks all graph references. Restore the original app
+settings and verify graph/inventory. Buffer
 checks verify the DSP maximum and variable native frame accounting separately;
 **do not require fresh processes to report the engine's buffer value**. Physical
 devices and default-device selections remain untouched.

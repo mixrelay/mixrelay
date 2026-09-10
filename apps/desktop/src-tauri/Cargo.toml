@@ -26,5 +26,6 @@ rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] 
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tonenari-macos-transport = { path = "../../../native/macos/common" }
+tonenari-process-tap = { path = "../../../native/macos/process-tap" }
 tonenari-audio-graph = { path = "../../../crates/audio-graph" }
 tonenari-control-protocol = { path = "../../../crates/control-protocol" }

@@ -183,7 +183,7 @@
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/editor_checkpoint.rs"
+              "path": "apps/engine-service/src/graph_native_state.rs"
             },
             {
               "kind": "test",
@@ -299,7 +299,7 @@
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/editor_checkpoint.rs"
+              "path": "apps/engine-service/src/graph_native_state.rs"
             },
             {
               "kind": "test",
@@ -407,7 +407,7 @@
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/editor_checkpoint.rs"
+              "path": "apps/engine-service/src/graph_native_state.rs"
             },
             {
               "kind": "test",
@@ -1583,11 +1583,11 @@
           "evidence": [
             {
               "kind": "source",
-              "path": "apps/engine-service/src/endpoint_persistence.rs"
+              "path": "apps/engine-service/src/graph_catalog.rs"
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/endpoint_preferences.rs"
+              "path": "apps/engine-service/src/device_catalog.rs"
             },
             {
               "kind": "test",
@@ -1607,11 +1607,11 @@
           "evidence": [
             {
               "kind": "source",
-              "path": "apps/engine-service/src/endpoint_persistence.rs"
+              "path": "apps/engine-service/src/graph_catalog.rs"
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/endpoint_preferences.rs"
+              "path": "apps/engine-service/src/device_catalog.rs"
             },
             {
               "kind": "test",
@@ -1631,11 +1631,11 @@
           "evidence": [
             {
               "kind": "source",
-              "path": "apps/engine-service/src/endpoint_persistence.rs"
+              "path": "apps/engine-service/src/graph_catalog.rs"
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/endpoint_preferences.rs"
+              "path": "apps/engine-service/src/device_catalog.rs"
             },
             {
               "kind": "test",
@@ -1673,7 +1673,7 @@
             },
             {
               "kind": "source",
-              "path": "native/macos/engine-service/src/TNDeviceIO.c"
+              "path": "native/macos/common/device_io.rs"
             },
             {
               "kind": "test",
@@ -1681,7 +1681,11 @@
             },
             {
               "kind": "test",
-              "path": "native/macos/engine-service/tests/TNDeviceIOTests.c"
+              "path": "native/macos/common/device_io/tests.rs"
+            },
+            {
+              "kind": "validation",
+              "path": "docs/validation/2026-09-10-native-owner-conversion.md"
             },
             {
               "kind": "test",
@@ -1700,7 +1704,7 @@
               "path": "docs/validation/2026-09-07-macos-common-integration.md"
             }
           ],
-          "note": "macOS 리뷰 완료: ASan/UBSan 384 callback/layout/epoch 경우와 teardown/default-selector fault tests 통과. 실제 2채널 private aggregate 제거/재등장 C 4회 및 Rust 동일 graph owner/offline gain 4회 통과. 물리 64채널/실제 default 전환은 미검증."
+          "note": "이전 구현의 검증 기록: macOS 리뷰 완료: ASan/UBSan 384 callback/layout/epoch 경우와 teardown/default-selector fault tests 통과. 실제 2채널 private aggregate 제거/재등장 C 4회 및 Rust 동일 graph owner/offline gain 4회 통과. 물리 64채널/실제 default 전환은 미검증. 2026-09-10 현재 DeviceIO는 Rust 전체 소유로 전환했고 기존 C 회귀를 Rust 테스트로 대체했다. 이 Rust 코드는 ASan/UBSan 계측 대상으로 주장하지 않는다. 현재 검증은 owner-conversion 보고서 참조; 실제 장치 검증 수준은 승격하지 않았다."
         },
         "Windows": {
           "implementation": "implemented",
@@ -1795,7 +1799,7 @@
             },
             {
               "kind": "source",
-              "path": "native/macos/engine-service/src/TNDeviceIO.c"
+              "path": "native/macos/common/device_io.rs"
             },
             {
               "kind": "test",
@@ -1803,7 +1807,11 @@
             },
             {
               "kind": "test",
-              "path": "native/macos/engine-service/tests/TNDeviceIOTests.c"
+              "path": "native/macos/common/device_io/tests.rs"
+            },
+            {
+              "kind": "validation",
+              "path": "docs/validation/2026-09-10-native-owner-conversion.md"
             },
             {
               "kind": "test",
@@ -1822,7 +1830,7 @@
               "path": "docs/validation/2026-09-07-macos-common-integration.md"
             }
           ],
-          "note": "macOS 리뷰 완료: ASan/UBSan 384 callback/layout/epoch 경우와 teardown/default-selector fault tests 통과. 실제 2채널 private aggregate 제거/재등장 C 4회 및 Rust 동일 graph owner/offline gain 4회 통과. 물리 64채널/실제 default 전환은 미검증."
+          "note": "이전 구현의 검증 기록: macOS 리뷰 완료: ASan/UBSan 384 callback/layout/epoch 경우와 teardown/default-selector fault tests 통과. 실제 2채널 private aggregate 제거/재등장 C 4회 및 Rust 동일 graph owner/offline gain 4회 통과. 물리 64채널/실제 default 전환은 미검증. 2026-09-10 현재 DeviceIO는 Rust 전체 소유로 전환했고 기존 C 회귀를 Rust 테스트로 대체했다. 이 Rust 코드는 ASan/UBSan 계측 대상으로 주장하지 않는다. 현재 검증은 owner-conversion 보고서 참조; 실제 장치 검증 수준은 승격하지 않았다."
         },
         "Windows": {
           "implementation": "partial",
@@ -2983,7 +2991,7 @@
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/editor_checkpoint.rs"
+              "path": "apps/engine-service/src/graph_native_state.rs"
             },
             {
               "kind": "test",
@@ -3043,7 +3051,7 @@
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/editor_checkpoint.rs"
+              "path": "apps/engine-service/src/graph_native_state.rs"
             },
             {
               "kind": "test",
@@ -3095,7 +3103,7 @@
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/editor_checkpoint.rs"
+              "path": "apps/engine-service/src/graph_native_state.rs"
             },
             {
               "kind": "test",
@@ -3173,7 +3181,7 @@
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/editor_checkpoint.rs"
+              "path": "apps/engine-service/src/graph_native_state.rs"
             },
             {
               "kind": "test",
@@ -3233,7 +3241,7 @@
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/editor_checkpoint.rs"
+              "path": "apps/engine-service/src/graph_native_state.rs"
             },
             {
               "kind": "test",
@@ -3285,7 +3293,7 @@
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/editor_checkpoint.rs"
+              "path": "apps/engine-service/src/graph_native_state.rs"
             },
             {
               "kind": "test",
@@ -3355,7 +3363,7 @@
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/editor_checkpoint.rs"
+              "path": "apps/engine-service/src/graph_native_state.rs"
             },
             {
               "kind": "test",
@@ -3419,7 +3427,7 @@
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/editor_checkpoint.rs"
+              "path": "apps/engine-service/src/graph_native_state.rs"
             },
             {
               "kind": "test",
@@ -3475,7 +3483,7 @@
             },
             {
               "kind": "source",
-              "path": "apps/engine-service/src/editor_checkpoint.rs"
+              "path": "apps/engine-service/src/graph_native_state.rs"
             },
             {
               "kind": "test",
@@ -4243,11 +4251,15 @@
             },
             {
               "kind": "source",
-              "path": "native/macos/engine-service/src/TNDeviceIO.c"
+              "path": "native/macos/common/device_io.rs"
             },
             {
               "kind": "test",
-              "path": "native/macos/engine-service/tests/TNDeviceIOTests.c"
+              "path": "native/macos/common/device_io/tests.rs"
+            },
+            {
+              "kind": "validation",
+              "path": "docs/validation/2026-09-10-native-owner-conversion.md"
             },
             {
               "kind": "test",
@@ -4294,7 +4306,7 @@
               "path": "docs/validation/2026-09-07-runtime-completion.md"
             }
           ],
-      "note": "Private aggregate 및 ASan/UBSan fixture 통과. 추가 in-process 실제 TNEngineService ownership 검증: 준비/취소 1,000회, control reader 동시 retirement 1,000회, retired-full 거부 10,000회, 총 3,004 mmap 해제. 2026-09-08 Rust Aggregate 사전검증·admission/retirement·buffer transaction 경계: unit36/native4, stale plan3 거부, 512 native/128 partial/실제 group 회수 각각 leaks0bytes(검사 권한 제한 있음). 실제 installed HAL 재설정/장시간 물리장치 시험 아님. 영구 vendor shutdown 실패 시 같은 worker/context quarantine 잔여."
+          "note": "이전 구현의 검증 기록: Private aggregate 및 ASan/UBSan fixture 통과. 추가 in-process 실제 TNEngineService ownership 검증: 준비/취소 1,000회, control reader 동시 retirement 1,000회, retired-full 거부 10,000회, 총 3,004 mmap 해제. 2026-09-08 Rust Aggregate 사전검증·admission/retirement·buffer transaction 경계: unit36/native4, stale plan3 거부, 512 native/128 partial/실제 group 회수 각각 leaks0bytes(검사 권한 제한 있음). 실제 installed HAL 재설정/장시간 물리장치 시험 아님. 영구 vendor shutdown 실패 시 같은 worker/context quarantine 잔여. 2026-09-10 현재 DeviceIO는 Rust 전체 소유로 전환했고 기존 C 회귀를 Rust 테스트로 대체했다. 이 Rust 코드는 ASan/UBSan 계측 대상으로 주장하지 않는다. 현재 검증은 owner-conversion 보고서 참조; 실제 장치 검증 수준은 승격하지 않았다."
         },
         "Windows": {
           "implementation": "partial",
@@ -4343,7 +4355,7 @@
             },
             {
               "kind": "source",
-              "path": "native/linux/pipewire/TNPcmRing.c"
+              "path": "native/pcm-ring/src/queue.rs"
             },
             {
               "kind": "validation",

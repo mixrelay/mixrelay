@@ -30,7 +30,7 @@ pub(super) struct Native {
     _permit: Permit<'static>,
     requested_buffer: AtomicU32,
     // Stable Rust-owned callback slot. Drop runs only after native destroy has
-    // acknowledged all callbacks, so the C context can never outlive this box.
+    // acknowledged all callbacks, so the native device owner cannot outlive this box.
     pub(super) render: Box<super::direct::RenderSlot>,
 }
 impl Native {
@@ -134,7 +134,7 @@ impl Drop for Connection<'_> {
 }
 // SAFETY: the owning native worker exclusively connects/disconnects/queries.
 // Native callback, SRC worker and graph each own distinct SPSC cursors. The
-// mutable SRC never lives behind this Arc. C uses bounded SPSC storage;
+// mutable SRC never lives behind this Arc. The device owner uses bounded SPSC storage;
 // the last Arc is destroyed only after the native worker and callbacks stop.
 unsafe impl Send for Native {}
 unsafe impl Sync for Native {}

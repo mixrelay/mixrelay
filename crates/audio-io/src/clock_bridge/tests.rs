@@ -51,6 +51,54 @@ fn bypass_requires_clock_proof_not_equal_nominal_rates() {
     assert!(AsyncClockBridge::new(c).unwrap().resampler.is_some());
 }
 
+#[test]
+fn bypass_chunk_uses_only_available_frames_up_to_the_chunk_boundary() {
+    for channels in [2, 8, 64] {
+        for frames in [0, 1, CHUNK - 1, CHUNK, CHUNK + 1, CHUNK * 2] {
+            let mut config = config(channels, 48_000, 48_000);
+            config.clock_relation = ClockRelation::ProvenSameClock;
+            let mut bridge = AsyncClockBridge::new(config).unwrap();
+            let samples: Vec<f32> = (0..frames * channels)
+                .map(|sample| f32::from(u16::try_from(sample).unwrap()) / 32_768.0)
+                .collect();
+            bridge.push_interleaved(&samples).unwrap();
+
+            assert_eq!(bridge.convert_chunk().unwrap(), frames > 0);
+
+            let converted = frames.min(CHUNK);
+            assert_eq!(bridge.output_frames, converted);
+            assert_eq!(bridge.output_read, 0);
+            assert_eq!(bridge.started, frames > 0);
+            assert_eq!(bridge.input.frames(), frames - converted);
+            assert_eq!(
+                bridge.output_scratch[..converted * channels],
+                samples[..converted * channels]
+            );
+        }
+    }
+}
+
+#[test]
+fn incomplete_sinc_chunk_keeps_pcm_and_output_cursor_unchanged() {
+    let mut bridge = AsyncClockBridge::new(config(2, 48_000, 44_100)).unwrap();
+    let needed = bridge.resampler.as_ref().unwrap().input_frames_next();
+    bridge
+        .push_interleaved(&vec![0.75; (needed - 1) * 2])
+        .unwrap();
+    bridge.output_scratch.fill(0.25);
+    bridge.output_frames = 7;
+    bridge.output_read = 7;
+    bridge.started = true;
+
+    assert!(!bridge.convert_chunk().unwrap());
+
+    assert_eq!(bridge.input.frames(), needed - 1);
+    assert_eq!(bridge.output_frames, 7);
+    assert_eq!(bridge.output_read, 7);
+    assert!(bridge.started);
+    assert!(bridge.output_scratch.iter().all(|sample| *sample == 0.25));
+}
+
 fn convert_tone(channels: usize, from: u32, to: u32, frequency: f64) -> Vec<f32> {
     let mut bridge = AsyncClockBridge::new(config(channels, from, to)).unwrap();
     let quantums = [1, 17, 128, 257, 63, 511, 79];

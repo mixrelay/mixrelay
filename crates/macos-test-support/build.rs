@@ -15,27 +15,17 @@ fn main() {
     let root =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest directory")).join("../..");
     println!("cargo:rerun-if-changed=../../native/macos");
-    println!("cargo:rerun-if-changed=../../native/linux/pipewire/TNPcmRing.c");
+    println!("cargo:rerun-if-changed=../../native/pcm-ring");
     println!("cargo:rerun-if-changed=../audio-io/src/formats.rs");
     println!("cargo:rerun-if-changed=../audio-io/native_format_header.rs");
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo output directory"));
     build_transport(&root, &output);
     native_format_header::write_header(&output).expect("generate native audio format declarations");
-    let device = [
-        "native/linux/pipewire/TNPcmRing.c",
-        "native/macos/engine-service/src/TNAggregateGroup.c",
-    ];
     build(
         &root,
         "fixture",
         "native/macos/engine-service/tests/TNDeviceIOLive.c",
-        &device,
-    );
-    build(
-        &root,
-        "device",
-        "native/macos/engine-service/tests/TNDeviceIOTests.c",
-        &device,
+        &[],
     );
     build(
         &root,
@@ -47,7 +37,7 @@ fn main() {
         &root,
         "hal",
         "native/macos/hal-driver/tests/TNHALBridgeTests.c",
-        &[],
+        &["native/macos/hal-driver/driver/TNHALControlBlock.c"],
     );
     build(
         &root,
@@ -59,11 +49,44 @@ fn main() {
         &root,
         "audio_ring",
         "native/macos/application-capture/tests/TNAudioRingTests.c",
-        &["native/macos/application-capture/src/TNAudioRing.c"],
+        &[],
+    );
+    build(
+        &root,
+        "pcm_ring",
+        "native/pcm-ring/tests/TNPcmRingTests.c",
+        &[],
     );
 }
 
 fn build_transport(root: &Path, output: &Path) {
+    cc::Build::new()
+        .cargo_metadata(false)
+        .out_dir(output)
+        .file(root.join("native/macos/application-capture/src/TNApplicationSourceTransport.c"))
+        .include(root.join("native/macos/hal-driver/include"))
+        .flag("-std=c17")
+        .flag("-fblocks")
+        .flag("-mmacosx-version-min=14.2")
+        .warnings_into_errors(true)
+        .compile("tonenari_source_xpc");
+    for (kind, suffix) in [("rlib", "rlib"), ("staticlib", "a")] {
+        rust_library(
+            root,
+            RustSource {
+                path: "native/pcm-ring/src/lib.rs",
+                name: "tonenari_pcm_ring",
+            },
+            kind,
+            &output.join(format!("libtonenari_pcm_ring.{suffix}")),
+            &[],
+        );
+    }
+    let pcm = format!(
+        "tonenari_pcm_ring={}",
+        output.join("libtonenari_pcm_ring.rlib").display()
+    );
+    let search = format!("dependency={}", output.display());
     for (kind, suffix) in [("rlib", "rlib"), ("staticlib", "a")] {
         rust_library(
             root,
@@ -73,7 +96,7 @@ fn build_transport(root: &Path, output: &Path) {
             },
             kind,
             &output.join(format!("libtonenari_macos_transport.{suffix}")),
-            &[],
+            &["--extern", &pcm, "-L", &search],
         );
     }
     let dependency = format!(
@@ -88,7 +111,7 @@ fn build_transport(root: &Path, output: &Path) {
         },
         "staticlib",
         &output.join("libtonenari_hal_core.a"),
-        &["--extern", &dependency],
+        &["--extern", &dependency, "-L", &search],
     );
 }
 
@@ -146,7 +169,7 @@ fn build(root: &Path, name: &str, test: &str, sources: &[&str]) {
             "-I",
             "native/macos/application-capture/include",
             "-I",
-            "native/linux/pipewire",
+            "native/pcm-ring/include",
         ])
         .arg(test)
         .args(sources)
@@ -155,6 +178,8 @@ fn build(root: &Path, name: &str, test: &str, sources: &[&str]) {
         } else {
             "libtonenari_macos_transport.a"
         }))
+        .arg(output_directory.join("libtonenari_pcm_ring.a"))
+        .arg(output_directory.join("libtonenari_source_xpc.a"))
         .arg("-liconv")
         .args([
             "-framework",

@@ -1,43 +1,49 @@
 use super::*;
+use crate::shared_transport::WorkerControl;
 use crate::*;
+use tonenari_test_support::FixtureDir;
 
 struct Fixture {
-    path: PathBuf,
-    config: PathBuf,
-    control: Option<Arc<HostedProcessorControl>>,
+    control: Arc<HostedProcessorControl>,
+    worker: Arc<WorkerControl>,
+    _directory: FixtureDir,
 }
 
 impl Fixture {
     fn new() -> Self {
-        let (path, config) = worker_paths().expect("private worker paths");
-        let file = create_shared_file(&path, 2, 2, 4).unwrap();
-        // SAFETY: this fixture owns the fixed-size file initialized by create_shared_file.
-        let shared = unsafe { MmapOptions::new().map_mut(&file) }.unwrap();
-        let control = Arc::new(HostedProcessorControl {
-            shared,
-            writer: Mutex::new(()),
-            input_writer: Mutex::new(()),
-            reuse: Mutex::new(None),
-            active_owner: AtomicBool::new(false),
-            timing: crate::timing::TimingMetrics::default(),
-        });
-        shared_header_unchecked(&control.shared)
+        let directory = FixtureDir::new("editor-observation").unwrap();
+        let path = directory.join("audio");
+        let (audio, mailbox) = shared_transport::create(
+            &path,
+            AudioLayout {
+                inputs: 2,
+                outputs: 2,
+                block_frames: 4,
+            },
+        )
+        .unwrap();
+        drop(audio);
+        let (audio, worker) = shared_transport::worker(&path).unwrap();
+        drop(audio);
+        let control = Arc::new(HostedProcessorControl::new(mailbox));
+        worker
+            .header()
             .worker_status
             .store(WORKER_READY, Ordering::Release);
         Self {
-            path,
-            config,
-            control: Some(control),
+            control,
+            worker: Arc::new(worker),
+            _directory: directory,
         }
     }
 
     fn control(&self) -> &Arc<HostedProcessorControl> {
-        self.control.as_ref().unwrap()
+        &self.control
     }
 
     fn observed(&self, open: bool) {
         publish_observed_editor_snapshot(
-            shared_header_unchecked(&self.control().shared),
+            self.worker.header(),
             rack_formats::EditorSnapshot {
                 open,
                 ..rack_formats::EditorSnapshot::default()
@@ -46,18 +52,11 @@ impl Fixture {
     }
 }
 
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        drop(self.control.take());
-        cleanup_worker_paths(&self.path, &self.config);
-    }
-}
-
 #[test]
 fn failed_open_survives_idle_ticks_until_an_explicit_editor_command() {
     let fixture = Fixture::new();
     let control = fixture.control();
-    let header = shared_header_unchecked(&control.shared);
+    let header = fixture.worker.header();
     let node = NodeId::from("effect");
     for failure in [EDITOR_FAILURE_PLUGIN_REJECTED, EDITOR_FAILURE_HOST_WINDOW] {
         publish_editor_failure(header, failure);
@@ -129,7 +128,9 @@ fn requested_close_is_not_an_observation_and_native_close_is_not_consumed_by_rea
             .close_generation,
         2
     );
-    shared_header_unchecked(&fixture.control().shared)
+    fixture
+        .worker
+        .header()
         .worker_status
         .store(WORKER_FAILED, Ordering::Release);
     assert!(registry.editor_close_observation(&node).is_err());
@@ -170,12 +171,7 @@ fn stale_close_tokens_cannot_snapshot_replaced_workers_or_newer_events() {
         registry.snapshot_state_for_editor_close(&node, latest, Duration::ZERO),
         Err(ProcessorStateError::Unavailable)
     );
-    assert_eq!(
-        shared_header_unchecked(&second.control().shared)
-            .state_request
-            .load(Ordering::Acquire),
-        0
-    );
+    assert!(second.worker.pending_request().is_none());
 }
 
 #[test]
@@ -187,22 +183,21 @@ fn matching_close_token_exports_native_state_and_stays_retryable() {
     fixture.observed(true);
     fixture.observed(false);
     let observation = registry.editor_close_observation(&node).unwrap();
-    let control = Arc::clone(fixture.control());
+    let control = Arc::clone(&fixture.worker);
     let worker = thread::spawn(move || {
-        let header = shared_header_unchecked(&control.shared);
         let deadline = Instant::now() + Duration::from_secs(2);
-        while header.state_request.load(Ordering::Acquire) == 0 {
+        while control.pending_request().is_none() {
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(1));
         }
-        let request = header.state_request.load(Ordering::Acquire);
-        publish_state_response(&control.shared, request, Ok(vec![1, 2, 3]));
+        let (request, kind) = control.pending_request().unwrap();
+        assert_eq!(kind, crate::editor_surface::NATIVE_STATE);
+        control.publish(request, Ok(vec![1, 2, 3]));
     });
-    let state = registry
-        .snapshot_state_for_editor_close(&node, observation, Duration::from_secs(1))
-        .unwrap();
+    let state =
+        registry.snapshot_state_for_editor_close(&node, observation, Duration::from_secs(1));
     worker.join().unwrap();
-    assert_eq!(state, serde_json::json!({"stateBase64":"AQID"}));
+    assert_eq!(state.unwrap(), serde_json::json!({"stateBase64":"AQID"}));
     assert_eq!(
         registry.editor_close_observation(&node).unwrap(),
         observation
@@ -219,21 +214,21 @@ fn replacement_during_export_cannot_publish_state_into_the_new_instance() {
     first.observed(true);
     first.observed(false);
     let observation = registry.editor_close_observation(&node).unwrap();
-    let first_control = Arc::clone(first.control());
+    let first_control = Arc::clone(&first.worker);
     let replacement_control = Arc::clone(replacement.control());
     let worker_registry = registry.clone();
     let worker_node = node.clone();
     let (release_tx, release_rx) = std::sync::mpsc::channel();
     let worker = thread::spawn(move || {
-        let header = shared_header_unchecked(&first_control.shared);
         let deadline = Instant::now() + Duration::from_secs(2);
-        while header.state_request.load(Ordering::Acquire) == 0 {
+        while first_control.pending_request().is_none() {
             assert!(Instant::now() < deadline);
             thread::sleep(Duration::from_millis(1));
         }
         let _new_registration = worker_registry.register(&worker_node, &replacement_control);
-        let request = header.state_request.load(Ordering::Acquire);
-        publish_state_response(&first_control.shared, request, Ok(vec![7]));
+        let (request, kind) = first_control.pending_request().unwrap();
+        assert_eq!(kind, crate::editor_surface::NATIVE_STATE);
+        first_control.publish(request, Ok(vec![7]));
         release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     });
     let result =

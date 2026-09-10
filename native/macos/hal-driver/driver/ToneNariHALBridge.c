@@ -1,26 +1,17 @@
-/* Apple COM vtable and dispatch-block syntax only. All object/property/format,
+/* Apple COM vtable and SDK ABI projections only. All object/property/format,
  * registry, clock, transport ownership and callback routing policy is Rust.
  * This is the production bundle's narrow Apple ABI entry point. */
 #include <CoreAudio/AudioServerPlugIn.h>
 #include <CoreFoundation/CFPlugInCOM.h>
-#include <dispatch/dispatch.h>
 #include <mach/mach_time.h>
 #include <stdatomic.h>
 #include <string.h>
-#include <xpc/xpc.h>
 #include "TNHALCore.h"
-#include "TNHALControlProtocol.h"
+#include "TNHALControl.h"
 #include "TNHALIO.h"
 
 static TNHALCore *gCore;
-static AudioServerPlugInHostRef gHost;
 static _Atomic UInt32 gReferences = 1;
-static xpc_connection_t gConnection;
-static dispatch_source_t gTimer;
-static dispatch_queue_t gControlQueue;
-static bool gReconnect;
-static uint64_t gConnectionGeneration;
-static unsigned gHeartbeat;
 static AudioServerPlugInDriverInterface gInterface;
 static AudioServerPlugInDriverInterface *gInterfacePointer = &gInterface;
 static AudioServerPlugInDriverRef gDriver = &gInterfacePointer;
@@ -40,85 +31,19 @@ static const TNHALCorePropertyAddress *address(const AudioObjectPropertyAddress 
 static bool valid(AudioServerPlugInDriverRef driver) { return driver == gDriver && gCore != NULL; }
 
 static void changed(void *context, uint32_t object, uint32_t change) {
-    (void)context;
+    AudioServerPlugInHostRef host = context;
     TNHALCoreNotification notifications[16];
     const size_t count = tn_hal_core_notifications(object, change, notifications, 16);
     for (size_t index = 0; index < count; ++index) {
         AudioObjectPropertyAddress property;
         memcpy(&property, &notifications[index].address, sizeof(property));
-        (void)gHost->PropertiesChanged(gHost, notifications[index].object_id, 1, &property);
+        (void)host->PropertiesChanged(host, notifications[index].object_id, 1, &property);
     }
 }
 static bool request_configuration(void *context, uint32_t object, uint64_t action, uint64_t generation) {
-    (void)context;
-    return gHost->RequestDeviceConfigurationChange(gHost, object, action, (void *)(uintptr_t)generation) == noErr;
+    AudioServerPlugInHostRef host = context;
+    return host->RequestDeviceConfigurationChange(host, object, action, (void *)(uintptr_t)generation) == noErr;
 }
-static void request_inventory(void) {
-    if (gConnection == NULL) return;
-    xpc_object_t request = tn_hal_control_create_inventory_request();
-    if (request == NULL) return;
-    xpc_connection_send_message(gConnection, request);
-    xpc_release(request);
-}
-static void request_replacement(void) {
-    uint8_t endpoint[16];
-    uint64_t generation;
-    if (gReconnect || gConnection == NULL || !tn_hal_core_replacement_request(gCore, gConnectionGeneration, endpoint, &generation)) return;
-    xpc_object_t request = tn_hal_control_create_transport_replacement_request(endpoint, generation);
-    if (request == NULL) return;
-    xpc_connection_send_message(gConnection, request);
-    xpc_release(request);
-}
-static void open_control_connection(void) {
-    if (gConnectionGeneration == UINT64_MAX) return;
-    if (gConnection != NULL) {
-        xpc_connection_cancel(gConnection);
-        xpc_release(gConnection);
-        gConnection = NULL;
-    }
-    const uint64_t generation = ++gConnectionGeneration;
-    gReconnect = true;
-    if (!tn_hal_core_control_connected(gCore, generation)) return;
-    gConnection = xpc_connection_create_mach_service(TN_HAL_CONTROL_SERVICE_NAME, gControlQueue, 0);
-    if (gConnection != NULL) {
-        gReconnect = false;
-        xpc_connection_set_event_handler(gConnection, ^(xpc_object_t event) {
-            if (gReconnect || generation != gConnectionGeneration) return;
-            if (xpc_get_type(event) == XPC_TYPE_DICTIONARY) {
-                (void)tn_hal_core_control_message(gCore, generation, event);
-            } else if (event == XPC_ERROR_CONNECTION_INTERRUPTED || event == XPC_ERROR_CONNECTION_INVALID) {
-                /* Reject all queued events from this connection immediately.
-                 * A new connection gives Rust a fresh inventory authority. */
-                gReconnect = true;
-            }
-        });
-        xpc_connection_resume(gConnection);
-        request_inventory();
-    } else gReconnect = true;
-}
-static void control_tick(void) {
-    tn_hal_core_tick(gCore);
-    request_replacement();
-    /* Reconnection must also replace the inventory generation namespace. */
-    if (++gHeartbeat == 10) {
-        gHeartbeat = 0;
-        if (gReconnect) open_control_connection();
-        else request_inventory();
-    }
-}
-static void connect_control(void) {
-    gControlQueue = dispatch_queue_create("io.tonenari.hal.control", DISPATCH_QUEUE_SERIAL);
-    open_control_connection();
-    gTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, gControlQueue);
-    if (gTimer != NULL) {
-        dispatch_source_set_timer(gTimer, dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC), 100 * NSEC_PER_MSEC, 10 * NSEC_PER_MSEC);
-        dispatch_source_set_event_handler(gTimer, ^{
-            control_tick();
-        });
-        dispatch_resume(gTimer);
-    }
-}
-
 static HRESULT query(void *driver, REFIID uuid, LPVOID *output) {
     if (driver != gDriver || output == NULL) return E_NOINTERFACE;
     CFUUIDRef requested = CFUUIDCreateFromUUIDBytes(NULL, uuid);
@@ -144,12 +69,10 @@ static ULONG release_ref(void *driver) {
 static OSStatus initialize(AudioServerPlugInDriverRef driver, AudioServerPlugInHostRef host) {
     if (driver != gDriver || host == NULL || gCore != NULL) return kAudioHardwareIllegalOperationError;
     if (tn_hal_core_io_context_size() != sizeof(TNHALIOContext) || tn_hal_core_io_context_alignment() != _Alignof(TNHALIOContext)) return kAudioHardwareIllegalOperationError;
-    gHost = host;
-    const TNHALCoreHostOps callbacks = {NULL, changed, request_configuration};
-    gCore = tn_hal_core_create_native(&callbacks);
-    if (gCore == NULL) return kAudioHardwareIllegalOperationError;
-    connect_control();
-    return noErr;
+    /* HostOps carries an opaque C callback context. It never mutates the SDK's
+     * const host interface; both callbacks restore AudioServerPlugInHostRef. */
+    const TNHALCoreHostOps callbacks = {(void *)host, changed, request_configuration};
+    return tn_hal_control_initialize(&callbacks, &gCore) ? noErr : kAudioHardwareIllegalOperationError;
 }
 static OSStatus create_device(AudioServerPlugInDriverRef driver, CFDictionaryRef description, const AudioServerPlugInClientInfo *client, AudioObjectID *device) {
     (void)driver; (void)description; (void)client; (void)device;

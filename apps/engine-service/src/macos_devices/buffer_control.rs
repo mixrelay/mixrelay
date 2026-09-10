@@ -263,6 +263,48 @@ mod tests {
         ));
     }
     #[test]
+    fn malformed_native_geometry_rejects_changed_buffers() {
+        let valid = || BufferInfo {
+            device: 7,
+            frames: 256,
+            minimum: 32.0,
+            maximum: 512.0,
+            settable: 1,
+        };
+        for info in [
+            BufferInfo {
+                device: 0,
+                ..valid()
+            },
+            BufferInfo {
+                frames: 0,
+                ..valid()
+            },
+            BufferInfo {
+                minimum: f64::NAN,
+                ..valid()
+            },
+            BufferInfo {
+                maximum: f64::INFINITY,
+                ..valid()
+            },
+            BufferInfo {
+                minimum: 512.0,
+                maximum: 32.0,
+                ..valid()
+            },
+            BufferInfo {
+                settable: 2,
+                ..valid()
+            },
+        ] {
+            assert!(!info.accepts(128));
+            assert!(validate_snapshot(&info, true, 128).is_err());
+        }
+        assert!(validate_snapshot(&valid(), false, 128).is_err());
+        assert_eq!(validate_snapshot(&valid(), true, 128).unwrap(), (7, 256));
+    }
+    #[test]
     fn acknowledgement_is_bounded_and_setter_success_alone_is_not_acceptance() {
         let mut reads = 0;
         let mut writes = 0;

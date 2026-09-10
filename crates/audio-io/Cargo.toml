@@ -42,5 +42,6 @@ windows = { version = "0.61.3", features = [
 ] }
 
 [dev-dependencies]
+allocation-counter = "0.8.1"
 tonenari-test-support = { path = "../test-support" }
 serde_json.workspace = true

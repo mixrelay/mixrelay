@@ -61,7 +61,7 @@ impl VirtualEndpointBackend for EndpointFixture {
 fn application_document() -> GraphDocument {
     GraphDocument::new(1, vec![NodeSpec { id: "application".into(), label: None,
         config: NodeConfig::ApplicationCapture(serde_json::from_value(serde_json::json!({
-            "selector": {"match":"bundle_id", "bundle_id":"org.tonenari.rate-fixture", "include_descendants":true},
+            "selector": {"match":"bundle_id", "bundle_id":"org.tonenari.rate-fixture", "include_descendants":false},
             "stream": {"channels":2,"channelLayout":"stereo"}, "sourcePlayback":"preserve"
         })).unwrap()) }], vec![])
 }

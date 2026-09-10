@@ -5,6 +5,7 @@ mod direct;
 mod endpoint_backend;
 mod endpoint_boundaries;
 mod format;
+mod maintenance;
 mod native_transport;
 mod worker_io;
 use super::macos_pacing::{
@@ -135,6 +136,9 @@ fn prepare_runtime() -> AdapterRuntimeStatus {
 }
 
 pub(super) async fn run() -> Result<(), String> {
+    // Reserve the control endpoint before native publication or audio ownership.
+    // A second service must fail without preparing devices beside the running one.
+    let listener = bind_control(SocketAddr::from(([127, 0, 0, 1], CONTROL_SERVER_PORT))).await?;
     initialize_native_transport()?;
     let mut runtime_status = prepare_runtime();
     let format = runtime_status.restore_preferences();
@@ -170,23 +174,10 @@ pub(super) async fn run() -> Result<(), String> {
         )
         .with_graph_catalog(),
     );
-    // A weak reference keeps this detached maintenance thread from extending engine life.
-    // Hosted processors retired at an audio block boundary are therefore destroyed off the
-    // real-time thread, and shutdown releases the thread within one 100 ms polling interval.
-    let reclaim_exchange = Arc::downgrade(&exchange);
-    let reclaim_devices = Arc::downgrade(&devices);
-    std::thread::Builder::new()
-        .name("tonenari-processor-reclaimer".into())
-        .spawn(move || {
-            while let Some(exchange) = reclaim_exchange.upgrade() {
-                exchange.reclaim_retired();
-                if let Some(devices) = reclaim_devices.upgrade() {
-                    devices.reclaim();
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        })
-        .map_err(|error| format!("processor reclaimer failed to start: {error}"))?;
+    // Declared before AudioWorker so reclamation remains available until the
+    // audio owner has stopped and joined, including partial-startup failures.
+    let _reclaimer =
+        maintenance::start_reclaimer(Arc::downgrade(&exchange), Arc::downgrade(&devices))?;
     let worker_status = runtime_status.clone();
     let monitor_devices = devices.clone();
     let audio_thread = std::thread::Builder::new()
@@ -207,19 +198,23 @@ pub(super) async fn run() -> Result<(), String> {
         .map_err(|error| format!("could not start audio worker: {error}"))?;
     let _worker =
         tonenari_engine_service::session::AudioWorker::new(runtime_status.clone(), audio_thread);
-    let format_monitor = start_format_monitor(&runtime_status, &controller, &monitor_devices)?;
-    let maintenance = controller.start_control_maintenance()?;
-    let result = serve_control(controller).await;
-    drop(format_monitor);
-    let saved = maintenance.finish();
+    let observers =
+        maintenance::ControlObservers::start(&runtime_status, &controller, &monitor_devices)?;
+    let result = serve_control(listener, controller).await;
+    let saved = observers.finish();
     result.and(saved)
 }
 
-async fn serve_control(controller: Arc<EngineGraphController>) -> Result<(), String> {
-    let address = SocketAddr::from(([127, 0, 0, 1], CONTROL_SERVER_PORT));
-    let listener = tokio::net::TcpListener::bind(address)
+async fn bind_control(address: SocketAddr) -> Result<tokio::net::TcpListener, String> {
+    tokio::net::TcpListener::bind(address)
         .await
-        .map_err(|error| format!("could not bind local control server: {error}"))?;
+        .map_err(|error| format!("could not bind local control server at {address}: {error}"))
+}
+
+async fn serve_control(
+    listener: tokio::net::TcpListener,
+    controller: Arc<EngineGraphController>,
+) -> Result<(), String> {
     axum::serve(listener, router_with_backend(controller))
         .with_graceful_shutdown(async {
             let _ = tonenari_engine_service::session::shutdown_signal().await;
@@ -228,76 +223,8 @@ async fn serve_control(controller: Arc<EngineGraphController>) -> Result<(), Str
         .map_err(|error| format!("local control server failed: {error}"))
 }
 
-struct FormatMonitor {
-    stop: Arc<std::sync::atomic::AtomicBool>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl Drop for FormatMonitor {
-    fn drop(&mut self) {
-        self.stop.store(true, std::sync::atomic::Ordering::Release);
-        if let Some(thread) = self.thread.take() {
-            thread.thread().unpark();
-            if thread.join().is_err() {
-                tracing::error!("ToneNari device format monitor panicked");
-            }
-        }
-    }
-}
-
-fn start_format_monitor(
-    status: &Arc<AdapterRuntimeStatus>,
-    controller: &Arc<EngineGraphController>,
-    devices: &Arc<super::macos_devices::MacDevices>,
-) -> Result<FormatMonitor, String> {
-    let weak_status = Arc::downgrade(status);
-    let weak_controller = Arc::downgrade(controller);
-    let weak_devices = Arc::downgrade(devices);
-    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let thread_stop = stop.clone();
-    let thread = std::thread::Builder::new()
-        .name("tonenari-device-format-monitor".into())
-        .spawn(move || {
-            let mut last_error = None;
-            while !thread_stop.load(std::sync::atomic::Ordering::Acquire) {
-                let (Some(status), Some(controller)) =
-                    (weak_status.upgrade(), weak_controller.upgrade())
-                else {
-                    break;
-                };
-                if tonenari_engine_service::endpoint_service::driver_connected() {
-                    status.observe_endpoint(true);
-                } else {
-                    status.forget_endpoint_observation();
-                }
-                if let Some(devices) = weak_devices.upgrade() {
-                    status
-                        .observe_routing_clock(devices.follows_hardware(), devices.routing_rate());
-                }
-                // All graph/preset preparation and native property reads stay off RT.
-                // Errors retain the observed mismatch and retry, never write the old rate.
-                let error = controller.reconcile_observed_device_rate().err();
-                if error != last_error {
-                    if let Some(error) = &error {
-                        tracing::error!(?error, "ToneNari external rate reconciliation failed");
-                    }
-                    last_error = error;
-                }
-                drop(status);
-                drop(controller);
-                std::thread::park_timeout(Duration::from_millis(if last_error.is_some() {
-                    1000
-                } else {
-                    250
-                }));
-            }
-        })
-        .map_err(|error| format!("device format monitor failed to start: {error}"))?;
-    Ok(FormatMonitor {
-        stop,
-        thread: Some(thread),
-    })
-}
+#[cfg(test)]
+mod startup_tests;
 
 fn initialize_native_transport() -> Result<(), String> {
     let exit_code = tonenari_engine_service::endpoint_service::tn_engine_service_start();
@@ -342,19 +269,14 @@ impl AudioContext<'_> {
         &self,
         processor: &mut Box<BlockProcessor>,
         active_devices: &mut super::macos_devices::DeviceSet,
+        activation: &mut super::macos_devices::DeviceActivation<'_>,
     ) -> Result<bool, String> {
         let mut activated = MacVirtualEndpointBackend::activate_recovery();
         // Same-spec native recovery must not wait for an unrelated graph edit.
-        // SAFETY: this is the sole audio consumer, before processing the block.
-        unsafe {
-            self.devices.activate_recovered(active_devices);
-        }
+        activation.activate_recovered(active_devices);
         activated |= self.exchange.activate_pending_configured(processor, |_| {
             self.endpoint_backend.activate_pending()?;
-            // SAFETY: this is the sole graph/audio activation consumer.
-            unsafe {
-                self.devices.activate(active_devices);
-            }
+            activation.activate(active_devices);
             Ok::<(), String>(())
         })?;
         Ok(activated)
@@ -366,6 +288,7 @@ fn run_audio_worker(
 ) -> Result<(), String> {
     let runtime_status = context.runtime_status;
     let _lease = runtime_status.begin_processing()?;
+    let mut activation = context.devices.activation()?;
     let mut active_devices = super::macos_devices::DeviceSet::default();
     let mut io = worker_io::WorkerIo::prepare(processor.plan())?;
     let mut timeline = MacTimeline::new();
@@ -380,7 +303,7 @@ fn run_audio_worker(
             continue;
         }
         let previous_format = processor.plan().format();
-        if context.activate(&mut processor, &mut active_devices)?
+        if context.activate(&mut processor, &mut active_devices, &mut activation)?
             && io.reconcile(
                 processor.plan(),
                 processor.plan().format().sample_rate != previous_format.sample_rate,

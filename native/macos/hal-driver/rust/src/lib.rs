@@ -7,6 +7,8 @@
 
 mod abi;
 mod clock;
+mod control;
+mod control_session;
 mod device;
 #[cfg(target_os = "macos")]
 mod inventory;

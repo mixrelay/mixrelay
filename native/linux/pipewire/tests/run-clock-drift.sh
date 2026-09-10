@@ -41,8 +41,9 @@ if [[ ${TONENARI_LAB_TRACE_ENABLED:-false} == true ]]; then
     native_source="$fixture/TNDriftTrace.c"
     export TONENARI_LAB_DRIFT_TRACE="$lab/native-trace.csv"
 fi
-cc -O2 -Wall -Wextra -Werror -D_GNU_SOURCE "${format_api[@]}" -I"$workspace/native/linux/pipewire" \
-    "$fixture/TNDriftProbe.c" "$native_source" "$workspace/native/linux/pipewire/TNPcmRing.c" \
+cargo build --manifest-path "$workspace/Cargo.toml" -p tonenari-pcm-ring --release --target-dir "$workspace/target"
+cc -O2 -Wall -Wextra -Werror -D_GNU_SOURCE "${format_api[@]}" -I"$workspace/native/linux/pipewire" -I"$workspace/native/pcm-ring/include" \
+    "$fixture/TNDriftProbe.c" "$native_source" "$workspace/target/release/libtonenari_pcm_ring.a" -ldl \
     $(pkg-config --cflags --libs libpipewire-0.3) -lm -pthread -o "$lab/drift-probe"
 pipewire_pid='' policy_pid='' bus_pid='' sender_pid='' probe_pid=''
 cleanup() {

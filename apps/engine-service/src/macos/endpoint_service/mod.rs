@@ -2,6 +2,7 @@
 mod api;
 mod audio;
 mod device;
+mod dispatch;
 mod runtime;
 mod source;
 #[cfg(test)]
@@ -14,13 +15,10 @@ pub use api::{
     device_supports_sample_rate, endpoint_specs, prepare_endpoints, read_render, rearm_capture,
     recover_capture_epoch, set_device_sample_rate, snapshot, touch_audio, write_capture,
 };
+use dispatch::Dispatch;
 use runtime::Runtime;
 use source::SourceRegistry;
-use std::{
-    ffi::c_void,
-    ptr::NonNull,
-    sync::{OnceLock, atomic::AtomicBool},
-};
+use std::sync::{OnceLock, atomic::AtomicBool};
 pub use tonenari_macos_transport::source_registry::SourceClock;
 pub use xpc::driver_connected;
 
@@ -33,21 +31,6 @@ struct Service {
     peers: parking_lot::Mutex<xpc::Peers>,
     notify: AtomicBool,
     dispatch: parking_lot::Mutex<Option<Dispatch>>,
-}
-unsafe extern "C" {
-    fn tn_engine_dispatch_start() -> *mut c_void;
-    fn tn_engine_dispatch_destroy(dispatch: *mut c_void);
-}
-struct Dispatch(NonNull<c_void>);
-// SAFETY: the adapter owns thread-safe dispatch/XPC objects; control serializes
-// start/cancellation, and callbacks never borrow this opaque dispatch owner.
-unsafe impl Send for Dispatch {}
-impl Drop for Dispatch {
-    fn drop(&mut self) {
-        // SAFETY: this unique live adapter handle came from dispatch_start and
-        // is destroyed once, on control, after callback drain in the shim.
-        unsafe { tn_engine_dispatch_destroy(self.0.as_ptr()) };
-    }
 }
 
 /// Starts XPC with an empty endpoint inventory. Graph references create devices;
@@ -77,11 +60,10 @@ pub extern "C" fn tn_engine_service_start() -> i32 {
     if dispatch.is_some() {
         return 0;
     }
-    // SAFETY: control serialized startup; the adapter returns one owned dispatch handle.
-    let Some(pointer) = NonNull::new(unsafe { tn_engine_dispatch_start() }) else {
+    let Ok(owner) = Dispatch::start() else {
         return 3;
     };
-    *dispatch = Some(Dispatch(pointer));
+    *dispatch = Some(owner);
     0
 }
 

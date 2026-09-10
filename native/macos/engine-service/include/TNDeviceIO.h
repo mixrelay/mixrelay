@@ -4,8 +4,7 @@
 #include <stdint.h>
 #include "TNAggregateGroup.h"
 typedef struct TNDeviceIO TNDeviceIO;
-/* Set once before connecting. Rust owns all publication, mode and lifetime
- * synchronization; native glue only forwards the borrowed CoreAudio buffers. */
+/* Set once before connecting. Rust owns the complete callback context. */
 typedef bool (*TNRenderHook)(void *, const void *, void *, uint32_t);
 void tn_device_io_render_hook(TNDeviceIO *io, void *context, TNRenderHook hook);
 bool tn_device_io_direct_binding(TNDeviceIO *io, uint32_t *device, uint32_t *offset, uint32_t *total);
@@ -56,8 +55,8 @@ uint32_t tn_device_io_graph_read(TNDeviceIO *io, float *samples, uint32_t frames
 uint32_t tn_device_io_graph_write(TNDeviceIO *io, const float *samples, uint32_t frames);
 uint32_t tn_device_io_worker_read(TNDeviceIO *io, float *samples, uint32_t frames);
 uint32_t tn_device_io_worker_write(TNDeviceIO *io, const float *samples, uint32_t frames);
-/* Native-side compatibility probes only; never use these concurrently with the
- * owning SRC worker. Production graph I/O uses the graph-specific API above. */
-uint32_t tn_device_io_read(TNDeviceIO *io, float *samples, uint32_t frames, uint64_t epoch);
-uint32_t tn_device_io_write(TNDeviceIO *io, const float *samples, uint32_t frames);
+/* Actual registered CoreAudio callback. Native fixtures supply complete native
+ * buffer/timestamp extents and serialize the same role ownership as the OS. */
+int32_t tn_device_io_process(uint32_t device, const void *now, const void *input,
+    const void *input_time, void *output, const void *output_time, void *context);
 #endif

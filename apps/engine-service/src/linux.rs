@@ -36,9 +36,10 @@ mod format;
 #[path = "linux_native.rs"]
 mod native;
 use applications::{CaptureSet as PipeWireCaptureSet, CaptureWatch};
-use devices::{DeviceSpec, DeviceStreams, DeviceWatch};
+use devices::{DeviceStreams, DeviceWatch};
 use native::{NativeCycle, NativeDriver, NativeStream};
-use tonenari_audio_io::recovery::RecoveryMailbox;
+use tonenari_audio_io::recovery::{RecoveryConsumer, RecoveryMailbox};
+use tonenari_engine_service::resource_requirements::{DeviceRequirements, ResourceRequirements};
 const ENGINE_BLOCK_FRAMES: u32 = CURRENT_TIMER_FORMAT.block_frames;
 fn adapter_profile() -> tonenari_engine_service::session::AdapterProfile {
     tonenari_engine_service::session::AdapterProfile {
@@ -266,10 +267,12 @@ fn spawn_device_recovery(
     })
 }
 
-struct LinuxProcessState {
+struct LinuxProcessState<'a> {
     processor: Box<BlockProcessor>,
     exchange: Arc<ProcessorExchange>,
-    endpoint_backend: Arc<LinuxVirtualEndpointBackend>,
+    endpoint_backend: &'a LinuxVirtualEndpointBackend,
+    application_recovery: RecoveryConsumer<'a, PipeWireCaptureSet>,
+    device_recovery: RecoveryConsumer<'a, DeviceStreams>,
     active_endpoint: Option<Box<PipeWireEndpoint>>,
     captures: Box<PipeWireCaptureSet>,
     devices: Box<DeviceStreams>,
@@ -289,11 +292,21 @@ fn run_audio_worker(
     let Ok(_lease) = status.begin_processing() else {
         return;
     };
+    let Some(application_recovery) = endpoint_backend.application_recovery.try_consumer() else {
+        tracing::error!("application recovery already has an audio consumer");
+        return;
+    };
+    let Some(device_recovery) = endpoint_backend.device_recovery.try_consumer() else {
+        tracing::error!("device recovery already has an audio consumer");
+        return;
+    };
     let initial_rate = processor.plan().format().sample_rate;
     let mut context = Box::new(LinuxProcessState {
         processor,
         exchange,
-        endpoint_backend,
+        endpoint_backend: &endpoint_backend,
+        application_recovery,
+        device_recovery,
         active_endpoint: Some(Box::new(endpoint)),
         captures: Box::default(),
         devices: Box::default(),
@@ -328,7 +341,7 @@ fn run_audio_worker(
 unsafe extern "C" fn native_process(data: *mut std::ffi::c_void, native: *const NativeCycle) {
     // SAFETY: installed by run_audio_worker with pinned data and a native cycle
     // valid for this invocation. PipeWire serializes this filter's process calls.
-    let (context, native) = unsafe { (&mut *data.cast::<LinuxProcessState>(), &*native) };
+    let (context, native) = unsafe { (&mut *data.cast::<LinuxProcessState<'_>>(), &*native) };
     if context.status.stop_requested() {
         return;
     }
@@ -340,7 +353,7 @@ unsafe extern "C" fn native_process(data: *mut std::ffi::c_void, native: *const 
     }
 }
 
-impl LinuxProcessState {
+impl LinuxProcessState<'_> {
     fn process(&mut self, native: &NativeCycle) -> Result<(), ()> {
         let previous_format = self.processor.plan().format();
         let activated = self
@@ -399,20 +412,14 @@ impl LinuxProcessState {
     }
 
     fn process_block(&mut self, cycle: ProcessCycle) -> Result<(), ()> {
-        // SAFETY: PipeWire serializes this sole audio consumer. The callback
-        // only swaps preallocated native owners; destruction is deferred.
-        unsafe {
-            self.endpoint_backend
-                .application_recovery
-                .activate(self.captures.generation, |next| {
-                    self.captures.replace(next);
-                });
-            self.endpoint_backend
-                .device_recovery
-                .activate(self.devices.generation, |next| {
-                    self.devices.replace_disconnected(next);
-                });
-        }
+        self.application_recovery
+            .activate(self.captures.generation, |next| {
+                self.captures.replace(next);
+            });
+        self.device_recovery
+            .activate(self.devices.generation, |next| {
+                self.devices.replace_disconnected(next);
+            });
         self.status
             .observe_endpoint(self.active_endpoint.as_ref().is_some_and(|e| e.ready()));
         let frames = cycle.frames as usize;
@@ -555,7 +562,7 @@ impl LinuxVirtualEndpointBackend {
             active_spec: Mutex::new(LinuxResourceSpec {
                 endpoint: Some(initial_spec),
                 captures: Vec::new(),
-                devices: DeviceSpec::default(),
+                devices: DeviceRequirements::default(),
             }),
             pending: AtomicPtr::new(ptr::null_mut()),
             retired: AtomicPtr::new(ptr::null_mut()),
@@ -814,49 +821,30 @@ impl Drop for LinuxVirtualEndpointBackend {
 struct LinuxResourceSpec {
     endpoint: Option<EndpointBinding>,
     captures: Vec<(String, ApplicationCaptureRequest)>,
-    devices: DeviceSpec,
+    devices: DeviceRequirements,
 }
 
 impl LinuxResourceSpec {
     fn from_document(
         document: &tonenari_audio_graph::GraphDocument,
     ) -> Result<Self, HostAudioBackendError> {
-        let desired = document
-            .nodes
-            .iter()
-            .filter_map(|node| match &node.config {
-                NodeConfig::VirtualEndpointTransport(endpoint) => Some(EndpointBinding {
-                    node_id: node.id.as_str().to_owned(),
-                    spec: endpoint.clone(),
-                }),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        let endpoint = match desired.as_slice() {
+        let requirements = ResourceRequirements::from_document(document);
+        let endpoint = match requirements.endpoints.as_slice() {
             [] => None,
-            [endpoint] => Some(endpoint.clone()),
+            [(node_id, spec)] => Some(EndpointBinding {
+                node_id: node_id.clone(),
+                spec: spec.clone(),
+            }),
             _ => {
                 return Err(HostAudioBackendError::CapabilityUnavailable {
                     capability: "the Linux backend supports one duplex virtual endpoint".to_owned(),
                 });
             }
         };
-        let captures = document
-            .nodes
-            .iter()
-            .filter_map(|node| match &node.config {
-                NodeConfig::ApplicationCapture(request) => {
-                    let mut request = request.clone();
-                    request.gain_db = 0.0;
-                    Some((node.id.as_str().to_owned(), request))
-                }
-                _ => None,
-            })
-            .collect();
         Ok(Self {
             endpoint,
-            captures,
-            devices: DeviceSpec::from_document(document),
+            captures: requirements.captures,
+            devices: requirements.devices,
         })
     }
 }

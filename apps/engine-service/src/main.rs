@@ -1,3 +1,6 @@
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use tonenari_pcm_ring as _;
+
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(all(test, target_os = "macos"))]

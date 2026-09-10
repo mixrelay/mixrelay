@@ -96,6 +96,7 @@ pub struct AsyncClockBridge {
     input: FrameFifo,
     input_scratch: Vec<f32>,
     output_scratch: Vec<f32>,
+    output_capacity_frames: usize,
     output_read: usize,
     output_frames: usize,
     controller: DriftController,
@@ -134,6 +135,7 @@ impl AsyncClockBridge {
             input: FrameFifo::new(config.capacity_frames, config.channels),
             input_scratch: vec![0.0; CHUNK * config.channels],
             output_scratch: vec![0.0; output_max * config.channels],
+            output_capacity_frames: output_max,
             output_read: 0,
             output_frames: 0,
             controller: DriftController::new(config.max_correction_ppm),
@@ -274,22 +276,22 @@ impl AsyncClockBridge {
     }
 
     fn convert_chunk(&mut self) -> Result<bool, BridgeError> {
-        let needed = self
-            .resampler
-            .as_ref()
-            .map_or(1, Resampler::input_frames_next);
-        if self.input.frames() < needed {
-            return Ok(false);
-        }
+        let available = self.input.frames();
         if let Some(resampler) = &mut self.resampler {
+            let needed = resampler.input_frames_next();
+            if available < needed {
+                return Ok(false);
+            }
             self.input
                 .peek(&mut self.input_scratch[..needed * self.config.channels]);
             let input = InterleavedSlice::new(&self.input_scratch, self.config.channels, needed)
                 .map_err(|_| BridgeError::Resampler)?;
-            let capacity = self.output_scratch.len() / self.config.channels;
-            let mut output =
-                InterleavedSlice::new_mut(&mut self.output_scratch, self.config.channels, capacity)
-                    .map_err(|_| BridgeError::Resampler)?;
+            let mut output = InterleavedSlice::new_mut(
+                &mut self.output_scratch,
+                self.config.channels,
+                self.output_capacity_frames,
+            )
+            .map_err(|_| BridgeError::Resampler)?;
             let (consumed, produced) = resampler
                 .process_into_buffer(&input, &mut output, None)
                 .map_err(|_| BridgeError::Resampler)?;
@@ -299,7 +301,10 @@ impl AsyncClockBridge {
             self.input.consume(consumed);
             self.output_frames = produced;
         } else {
-            let frames = self.input.frames().min(CHUNK);
+            if available == 0 {
+                return Ok(false);
+            }
+            let frames = available.min(CHUNK);
             self.input
                 .peek(&mut self.output_scratch[..frames * self.config.channels]);
             self.input.consume(frames);

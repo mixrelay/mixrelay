@@ -21,72 +21,17 @@ use tonenari_audio_io::{
     session::ClockAuthority,
 };
 
-#[repr(C)]
-pub(super) struct AudioBuffer {
-    channels: u32,
-    bytes: u32,
-    data: *mut f32,
-}
+mod buffers;
+use buffers::Buffers;
+
+#[cfg(test)]
+use tonenari_macos_transport::audio_buffer::AudioBuffer;
+
+#[cfg(test)]
 #[repr(C)]
 struct AudioBufferList {
     count: u32,
     first: AudioBuffer,
-}
-
-/// Borrowed `CoreAudio` storage, valid only for this synchronous callback. ABL
-/// pointers never escape to queues, a worker, or the next callback.
-pub(super) struct Buffers<'a> {
-    pub(super) input: &'a [AudioBuffer],
-    pub(super) output: &'a [AudioBuffer],
-}
-impl<'a> Buffers<'a> {
-    unsafe fn list(pointer: *const c_void, frames: u32) -> Option<&'a [AudioBuffer]> {
-        if pointer.is_null() {
-            return Some(&[]);
-        }
-        let list = unsafe { &*pointer.cast::<AudioBufferList>() };
-        if list.count > 2048 {
-            return None;
-        }
-        let buffers =
-            unsafe { std::slice::from_raw_parts(&raw const list.first, list.count as usize) };
-        let mut width = 0;
-        for buffer in buffers {
-            if buffer.channels == 0
-                || buffer.channels > 2048
-                || (!buffer.data.is_null()
-                    && u64::from(buffer.bytes)
-                        != u64::from(frames) * u64::from(buffer.channels) * 4)
-            {
-                return None;
-            }
-            width += buffer.channels;
-            if width > 2048 {
-                return None;
-            }
-        }
-        Some(buffers)
-    }
-    fn covers(&self, binding: &Binding) -> bool {
-        let Some(offset) = binding.offset else {
-            return true;
-        };
-        let buffers = if binding.input {
-            self.input
-        } else {
-            self.output
-        };
-        let end = offset + binding.channels;
-        let mut base = 0;
-        for buffer in buffers {
-            let next = base + buffer.channels as usize;
-            if base < end && next > offset && buffer.data.is_null() {
-                return false;
-            }
-            base = next;
-        }
-        end <= base
-    }
 }
 
 struct CallbackIo<'a, T> {
@@ -119,7 +64,7 @@ impl<T: CaptureTransport + RenderTransport> ExternalIo for CallbackIo<'_, T> {
                 ..TransferOutcome::complete(cycle.frames)
             };
         }
-        transfer(self.buffers.input, map, self.offset, destination);
+        self.buffers.transfer(map, self.offset, destination);
         TransferOutcome::complete(cycle.frames)
     }
     fn write_sink(
@@ -140,56 +85,8 @@ impl<T: CaptureTransport + RenderTransport> ExternalIo for CallbackIo<'_, T> {
         };
         // Multiple graph sinks may map to the same physical channels: mix their
         // contributions into the callback's initially zeroed output, not overwrite.
-        write(self.buffers.output, map, self.offset, source);
+        self.buffers.write(map, self.offset, source);
         TransferOutcome::complete(cycle.frames)
-    }
-}
-
-pub(super) fn transfer(
-    buffers: &[AudioBuffer],
-    map: &Binding,
-    offset: usize,
-    destination: &mut [f32],
-) {
-    let Some(channel_offset) = map.offset else {
-        return;
-    };
-    let mut base = 0;
-    for buffer in buffers {
-        let width = buffer.channels as usize;
-        for channel in 0..width {
-            if (channel_offset..channel_offset + map.channels).contains(&(base + channel)) {
-                let selected = base + channel - channel_offset;
-                for (frame, samples) in destination.chunks_exact_mut(map.channels).enumerate() {
-                    // SAFETY: full ABL geometry and all channel maps were checked
-                    // before DSP; block offsets remain inside this native callback.
-                    samples[selected] =
-                        unsafe { *buffer.data.add((offset + frame) * width + channel) };
-                }
-            }
-        }
-        base += width;
-    }
-}
-pub(super) fn write(buffers: &[AudioBuffer], map: &Binding, offset: usize, source: &[f32]) {
-    let Some(channel_offset) = map.offset else {
-        return;
-    };
-    let mut base = 0;
-    for buffer in buffers {
-        let width = buffer.channels as usize;
-        for channel in 0..width {
-            if (channel_offset..channel_offset + map.channels).contains(&(base + channel)) {
-                let selected = base + channel - channel_offset;
-                for (frame, samples) in source.chunks_exact(map.channels).enumerate() {
-                    // SAFETY: same validated geometry, sole IOProc output writer.
-                    unsafe {
-                        *buffer.data.add((offset + frame) * width + channel) += samples[selected];
-                    }
-                }
-            }
-        }
-        base += width;
     }
 }
 
@@ -245,15 +142,20 @@ impl<T: CaptureTransport + RenderTransport> Renderer<'_, T> {
             return false;
         }
         self.observe_hardware();
-        let Some(input) = (unsafe { Buffers::list(input, frames) }) else {
-            self.invalid.store(true, Ordering::Release);
-            return true;
+        // SAFETY: the serialized native callback retains both ABLs and their PCM;
+        // DSP scratch belongs to the independent BlockProcessor allocation. The
+        // closure cannot return a view or retain access past this synchronous call.
+        let result = unsafe {
+            Buffers::with_native(input, output, frames, |buffers| {
+                self.render_buffers(buffers, frames)
+            })
         };
-        let Some(output) = (unsafe { Buffers::list(output, frames) }) else {
+        result.unwrap_or_else(|| {
             self.invalid.store(true, Ordering::Release);
-            return true;
-        };
-        let buffers = Buffers { input, output };
+            true
+        })
+    }
+    fn render_buffers(&mut self, buffers: Buffers<'_>, frames: u32) -> bool {
         if !self.bindings.iter().all(|binding| buffers.covers(binding)) {
             self.invalid.store(true, Ordering::Release);
             return true;
@@ -510,7 +412,7 @@ mod tests {
             count: 1,
             first: AudioBuffer {
                 channels: 2,
-                bytes: u32::try_from(std::mem::size_of_val(pcm)).unwrap(),
+                byte_size: u32::try_from(std::mem::size_of_val(pcm)).unwrap(),
                 data: pcm.as_mut_ptr(),
             },
         }
@@ -575,10 +477,7 @@ mod tests {
         }
         let mut endpoints = EndpointBoundaries::<NativeCapture>::empty();
         let mut io = CallbackIo {
-            buffers: Buffers {
-                input: &[],
-                output: &[],
-            },
+            buffers: Buffers::empty(),
             bindings: &bindings,
             offset: 0,
             endpoints: &mut endpoints,
@@ -710,7 +609,7 @@ mod tests {
             for cycle in 0..100 {
                 for (index, sample) in input.iter_mut().enumerate() {
                     *sample = f32::from(
-                        u16::try_from((cycle * input_list.first.bytes as usize + index) % 8192)
+                        u16::try_from((cycle * input_list.first.byte_size as usize + index) % 8192)
                             .unwrap(),
                     ) / 8192.0;
                 }
@@ -748,49 +647,54 @@ mod tests {
             buffers: [
                 AudioBuffer {
                     channels: 3,
-                    bytes: 0,
+                    byte_size: 0,
                     data: std::ptr::null_mut(),
                 },
                 AudioBuffer {
                     channels: 2,
-                    bytes: 256,
+                    byte_size: 256,
                     data: input.as_mut_ptr(),
                 },
             ],
         };
-        let buffers = unsafe { Buffers::list((&raw const list).cast(), 32) }.unwrap();
         let map = Binding {
             id: "input".into(),
             input: true,
             offset: Some(3),
             channels: 2,
         };
-        let view = Buffers {
-            input: buffers,
-            output: &[],
-        };
-        assert!(view.covers(&map));
-        assert!(!view.covers(&Binding {
-            offset: Some(2),
-            ..map
-        }));
         let mut destination = [0.0; 64];
-        transfer(
-            buffers,
-            &Binding {
-                id: "input".into(),
-                input: true,
-                offset: Some(3),
-                channels: 2,
-            },
-            0,
-            &mut destination,
-        );
+        // SAFETY: sized list and live PCM are retained across this operation;
+        // inactive metadata has no PCM and destination is separate scratch.
+        unsafe {
+            Buffers::with_native((&raw const list).cast(), std::ptr::null_mut(), 32, |view| {
+                assert!(view.covers(&map));
+                assert!(!view.covers(&Binding {
+                    id: "missing".into(),
+                    input: true,
+                    offset: Some(2),
+                    channels: 2,
+                }));
+                view.transfer(&map, 0, &mut destination);
+            })
+        }
+        .unwrap();
         assert_eq!(destination.map(f32::to_bits), input.map(f32::to_bits));
-        assert!(unsafe { Buffers::list((&raw const list).cast(), 64) }.is_none());
+        // SAFETY: metadata is live; the advertised PCM byte count is deliberately
+        // inconsistent with 64 frames and rejected before a PCM reference exists.
+        assert!(
+            unsafe {
+                Buffers::with_native((&raw const list).cast(), std::ptr::null_mut(), 64, |_| ())
+            }
+            .is_none()
+        );
     }
 }
 
 #[cfg(test)]
 #[path = "direct_mixed_tests.rs"]
 mod mixed_tests;
+
+#[cfg(test)]
+#[path = "direct/measurement.rs"]
+mod measurement;

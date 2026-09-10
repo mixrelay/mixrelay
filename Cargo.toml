@@ -16,6 +16,8 @@ members = [
   "native/macos/hal-driver/rust",
   "native/macos/hal-driver/bundle",
   "native/macos/common",
+  "native/macos/process-tap",
+  "native/pcm-ring",
 ]
 
 [workspace.package]

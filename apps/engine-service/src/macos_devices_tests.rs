@@ -41,11 +41,7 @@ fn document(uid: &str, revision: u64, gain: f32) -> GraphDocument {
 fn publish_recovery_now(resources: &MacDevices, active: &mut DeviceSet) {
     *resources.next_group_check.lock().unwrap() = Instant::now();
     resources.reclaim();
-    // SAFETY: this fixture is the only graph consumer. No graph processing or
-    // direct renderer runs concurrently with this recovery activation boundary.
-    unsafe {
-        resources.activate_recovered(active);
-    }
+    resources.activation().unwrap().activate_recovered(active);
     resources.reclaim();
 }
 
@@ -89,11 +85,7 @@ fn delete_disconnected_nodes(
     resources
         .reconcile(&GraphDocument::new(3, vec![], vec![]))
         .unwrap();
-    // SAFETY: this test remains the sole serialized graph consumer, with no
-    // concurrent processing borrowing the old DeviceSet during its replacement.
-    unsafe {
-        resources.activate(active);
-    }
+    resources.activation().unwrap().activate(active);
     resources.reclaim();
     assert!(retired.iter().all(|owner| owner.upgrade().is_none()));
     fixture.command("connect");
@@ -115,11 +107,7 @@ fn native_control_recovery_publishes_offline_intent_and_restores_the_same_uid_wi
     let original = document(&uid, 1, 0.0);
     resources.reconcile(&original).unwrap();
     let mut active = DeviceSet::default();
-    // SAFETY: no audio graph runs in this fixture; this thread alone activates
-    // graph/recovery publications and retires the previous owners afterward.
-    unsafe {
-        resources.activate(&mut active);
-    }
+    resources.activation().unwrap().activate(&mut active);
     resources.reclaim();
     assert_eq!(active.0.len(), 2);
     let retired = active.0.values().map(Arc::downgrade).collect::<Vec<_>>();
@@ -136,10 +124,7 @@ fn native_control_recovery_publishes_offline_intent_and_restores_the_same_uid_wi
 
     let edited = document(&uid, 2, -6.0);
     resources.reconcile(&edited).unwrap();
-    // SAFETY: the same serialized activation boundary as initial publication.
-    unsafe {
-        resources.activate(&mut active);
-    }
+    resources.activation().unwrap().activate(&mut active);
     resources.reclaim();
     assert_published_offline(&active, &edited);
     assert_cached_selection(&resources, &edited);
@@ -171,10 +156,7 @@ fn native_coreaudio_recovery_retains_graph_owners_and_offline_gain_edits() {
     let resources = MacDevices::new(status, 48_000, 256);
     resources.reconcile(&document(&uid, 1, 0.0)).unwrap();
     let mut active = DeviceSet::default();
-    // This test is the single serialized graph consumer, as in production.
-    unsafe {
-        resources.activate(&mut active);
-    }
+    resources.activation().unwrap().activate(&mut active);
     resources.reclaim();
     let input = Arc::as_ptr(&active.0["input"]);
     let output = Arc::as_ptr(&active.0["output"]);
@@ -222,9 +204,7 @@ fn native_coreaudio_recovery_retains_graph_owners_and_offline_gain_edits() {
     resources
         .reconcile(&GraphDocument::new(10, vec![], vec![]))
         .unwrap();
-    unsafe {
-        resources.activate(&mut active);
-    }
+    resources.activation().unwrap().activate(&mut active);
     resources.reclaim();
     assert!(weak_input.upgrade().is_none() && weak_output.upgrade().is_none());
     fixture.command("connect");
@@ -299,9 +279,7 @@ fn native_coreaudio_all_buffer_sizes_are_applied_and_survive_reconnection() {
     let graph = document(&uid, 1, 0.0);
     resources.reconcile(&graph).unwrap();
     let mut active = DeviceSet::default();
-    unsafe {
-        resources.activate(&mut active);
-    }
+    resources.activation().unwrap().activate(&mut active);
     resources.reclaim();
     let mut previous = 256;
     for &frames in tonenari_audio_io::formats::BUFFER_SIZES {
@@ -350,9 +328,7 @@ fn native_coreaudio_src_uses_actual_rate_and_rebuilds_graph_format_only() {
     let graph = document(&uid, 1, 0.0);
     resources.reconcile(&graph).unwrap();
     let mut active = DeviceSet::default();
-    unsafe {
-        resources.activate(&mut active);
-    }
+    resources.activation().unwrap().activate(&mut active);
     resources.reclaim();
     let native_input_rate = active.0["input"].native_rate.load(Ordering::Acquire);
     let native_output_rate = active.0["output"].native_rate.load(Ordering::Acquire);
@@ -420,9 +396,7 @@ fn native_coreaudio_repeated_initial_connections_preserve_failure_diagnostics() 
             panic!("initial connection iteration={iteration} graph_rate={rate}: {error}")
         });
         let mut active = DeviceSet::default();
-        unsafe {
-            resources.activate(&mut active);
-        }
+        resources.activation().unwrap().activate(&mut active);
         assert!(active.0.values().all(|device| device.ready()));
     }
 }

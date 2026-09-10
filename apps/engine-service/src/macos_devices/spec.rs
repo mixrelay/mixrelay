@@ -3,7 +3,8 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::CString,
 };
-use tonenari_audio_graph::{DeviceSelector, GraphDocument, NodeConfig};
+use tonenari_audio_graph::{DeviceSelector, GraphDocument};
+use tonenari_engine_service::resource_requirements::DeviceRequirements;
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Spec {
     pub(super) selector: DeviceSelector,
@@ -21,25 +22,30 @@ impl Spec {
     }
 }
 pub(super) fn specs(document: &GraphDocument) -> BTreeMap<String, Spec> {
-    document
-        .nodes
-        .iter()
-        .filter_map(|node| {
-            let spec = match &node.config {
-                NodeConfig::AudioDeviceInput(config) => Spec {
-                    selector: config.selector.clone(),
+    let requirements = DeviceRequirements::from_document(document);
+    requirements
+        .inputs
+        .into_iter()
+        .map(|(id, config)| {
+            (
+                id,
+                Spec {
+                    selector: config.selector,
                     input: true,
                     channels: config.output_channels,
                 },
-                NodeConfig::AudioDeviceOutput(config) => Spec {
-                    selector: config.selector.clone(),
+            )
+        })
+        .chain(requirements.outputs.into_iter().map(|(id, config)| {
+            (
+                id,
+                Spec {
+                    selector: config.selector,
                     input: false,
                     channels: config.input_channels,
                 },
-                _ => return None,
-            };
-            Some((node.id.as_str().to_owned(), spec))
-        })
+            )
+        }))
         .collect()
 }
 
@@ -65,4 +71,53 @@ pub(super) fn aggregate_members(specs: &BTreeMap<String, Spec>) -> Vec<String> {
     }
     members.extend(uids);
     members
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tonenari_audio_graph::{
+        AudioDeviceInputConfig, AudioDeviceOutputConfig, NodeConfig, NodeSpec,
+    };
+
+    #[test]
+    fn shared_requirements_preserve_native_direction_width_and_output_clock_priority() {
+        let document = GraphDocument::new(
+            1,
+            vec![
+                NodeSpec {
+                    id: "mic".into(),
+                    label: None,
+                    config: NodeConfig::AudioDeviceInput(AudioDeviceInputConfig {
+                        selector: DeviceSelector::PersistentUid {
+                            uid: "a-mic".into(),
+                        },
+                        output_channels: 8,
+                        gain_db: -6.0,
+                    }),
+                },
+                NodeSpec {
+                    id: "speaker".into(),
+                    label: None,
+                    config: NodeConfig::AudioDeviceOutput(AudioDeviceOutputConfig {
+                        selector: DeviceSelector::PersistentUid {
+                            uid: "z-speaker".into(),
+                        },
+                        input_channels: 2,
+                    }),
+                },
+            ],
+            vec![],
+        );
+        let selected = specs(&document);
+        assert!(selected["mic"].input);
+        assert_eq!(selected["mic"].channels, 8);
+        assert!(!selected["speaker"].input);
+        assert_eq!(selected["speaker"].channels, 2);
+        assert_eq!(
+            selected["mic"].native_uid().unwrap().to_str().unwrap(),
+            "a-mic"
+        );
+        assert_eq!(aggregate_members(&selected), ["z-speaker", "a-mic"]);
+    }
 }

@@ -21,13 +21,14 @@ fn build_pipewire_service() {
     cc::Build::new()
         .includes(library.include_paths)
         .include(root)
+        .include("../../native/pcm-ring/include")
         .flag("-std=c17")
         .define("_GNU_SOURCE", None)
         .warnings_into_errors(true)
         .file(format!("{root}/TNPipeWire.c"))
-        .file(format!("{root}/TNPcmRing.c"))
         .compile("tonenari_pipewire_native");
     println!("cargo:rerun-if-changed={root}");
+    println!("cargo:rerun-if-changed=../../native/pcm-ring/include/TNPcmRing.h");
 }
 
 fn build_macos_service() {
@@ -37,19 +38,12 @@ fn build_macos_service() {
     let hal_root = "../../native/macos/hal-driver";
     let engine_include = format!("{engine_root}/include");
     let hal_include = format!("{hal_root}/include");
-    let sources = [
-        format!("{engine_root}/src/TNDeviceIO.c"),
-        format!("{engine_root}/src/TNAggregateGroup.c"),
-        "../../native/linux/pipewire/TNPcmRing.c".into(),
-        format!("{engine_root}/src/TNEngineService.c"),
-    ];
+    let sources = [format!("{engine_root}/src/TNEngineService.c")];
     let mut build = cc::Build::new();
     build
         .include(&output)
         .include(&engine_include)
-        // The ring is POSIX C, independent of PipeWire; share its tested SPSC
-        // implementation instead of maintaining a second native audio queue.
-        .include("../../native/linux/pipewire")
+        .include("../../native/pcm-ring/include")
         .include(&hal_include)
         .flag("-std=c17")
         .flag("-fblocks")
@@ -67,9 +61,10 @@ fn build_macos_service() {
     println!("cargo:rerun-if-changed={engine_include}/TNAggregateGroup.h");
     println!("cargo:rerun-if-changed=../../native/macos/common/TNCallbackClock.h");
     println!("cargo:rerun-if-changed=../../native/macos/common/TNAnonymousMemory.h");
+    println!("cargo:rerun-if-changed=../../native/macos/common/TNDeviceBuffers.h");
     println!("cargo:rerun-if-changed=../../crates/audio-io/src/formats.rs");
     println!("cargo:rerun-if-changed=../../crates/audio-io/native_format_header.rs");
-    println!("cargo:rerun-if-changed=../../native/linux/pipewire/TNPcmRing.h");
+    println!("cargo:rerun-if-changed=../../native/pcm-ring/include/TNPcmRing.h");
     println!("cargo:rerun-if-changed={engine_include}/TNEndpointPeers.h");
     println!("cargo:rerun-if-changed={engine_include}/TNEngineSourceRegistry.h");
     println!("cargo:rerun-if-changed={hal_include}/TNHALControlProtocol.h");

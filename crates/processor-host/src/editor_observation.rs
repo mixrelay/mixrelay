@@ -4,9 +4,7 @@
 
 use std::{sync::atomic::Ordering, time::Duration};
 
-use crate::{
-    NodeId, ProcessorControlRegistry, ProcessorStateError, WORKER_READY, shared_header_unchecked,
-};
+use crate::{NodeId, ProcessorControlRegistry, ProcessorStateError, WORKER_READY};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProcessorEditorCloseObservation {
@@ -25,7 +23,7 @@ impl ProcessorControlRegistry {
         node_id: &NodeId,
     ) -> Result<ProcessorEditorCloseObservation, String> {
         let control = self.live_control(node_id)?;
-        let header = shared_header_unchecked(&control.shared);
+        let header = control.shared.header();
         if header.worker_status.load(Ordering::Acquire) != WORKER_READY
             || header.shutdown.load(Ordering::Acquire) != 0
         {
@@ -52,7 +50,7 @@ impl ProcessorControlRegistry {
         let control = self
             .live_control(node_id)
             .map_err(|_| ProcessorStateError::Unavailable)?;
-        let header = shared_header_unchecked(&control.shared);
+        let header = control.shared.header();
         if observation.close_generation == 0
             || header.instance_id != observation.instance_id
             || header.editor_close_generation.load(Ordering::Acquire)

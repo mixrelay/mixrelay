@@ -14,7 +14,7 @@ use super::{
     ControlBackend, EngineGraphController, ErrorCode, GraphDocument, NodeConfig, PROTOCOL_VERSION,
     ProtocolError,
 };
-use crate::session_preferences::{StagedPreferences, config_directory, stage_json};
+use crate::persistence::{StagedWrite, config_directory, stage_json};
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_GRAPHS: usize = 256;
@@ -219,7 +219,7 @@ impl EngineGraphController {
             Ok(None) => {
                 // Import the already prepared graph once. Never initialize an existing file.
                 let value = Catalog::imported(self.graph());
-                let saved = stage_json(&path, &value).and_then(StagedPreferences::commit);
+                let saved = stage_json(&path, &value).and_then(StagedWrite::commit);
                 *self.catalog.lock() = Some(CatalogStore {
                     path,
                     value: saved.map(|()| value).map_err(|error| error.to_string()),
@@ -263,7 +263,7 @@ impl EngineGraphController {
     pub(super) fn stage_catalog(
         &self,
         candidate: Option<&Catalog>,
-    ) -> Result<Option<StagedPreferences>, ProtocolError> {
+    ) -> Result<Option<StagedWrite>, ProtocolError> {
         let Some(candidate) = candidate else {
             return Ok(None);
         };
@@ -289,7 +289,7 @@ impl EngineGraphController {
         }
     }
 
-    pub(super) fn finish_catalog_write(&self, staged: Option<StagedPreferences>) {
+    pub(super) fn finish_catalog_write(&self, staged: Option<StagedWrite>) {
         if let Some(staged) = staged {
             // Native preparation may already own pending resources. Disk replacement failure
             // must not reject publication and leave those resources without their processor.

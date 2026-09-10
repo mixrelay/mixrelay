@@ -2,12 +2,12 @@
 //! Control publishes immutable slot pointers; callbacks only claim atomics.
 //! Old producer mappings stay isolated after replacement and are reclaimed on
 //! control after local readers drain, never on an audio callback.
-mod mapping;
 use crate::{
     application_clock::{
         ApplicationClock, VERSION, tn_application_clock_publish_consumer,
         tn_application_clock_request_rate,
     },
+    application_source_mapping::Mapping,
     shared_audio_buffer::{
         SharedAudioBufferStats, tn_shared_audio_buffer_read, tn_shared_audio_buffer_request_epoch,
         tn_shared_audio_buffer_requires_replacement, tn_shared_audio_buffer_stats,
@@ -15,7 +15,6 @@ use crate::{
     },
     source_control::SourceRequest,
 };
-use mapping::Mapping;
 use std::{
     cell::UnsafeCell,
     ffi::c_char,

@@ -25,7 +25,7 @@ use ffi::tn_device_io_native_frames;
 #[cfg(test)]
 use ffi::*;
 use format::{PreparedDeviceFormat, PublishedFormat};
-use handoff::{Publication, ResourceHandoff};
+use handoff::{Publication, ResourceConsumer, ResourceHandoff};
 use spec::{Spec, aggregate_members, specs};
 use std::{
     collections::BTreeMap,
@@ -217,15 +217,14 @@ impl MacDevices {
     pub(super) fn request_recovery(&self) {
         self.recovery_requested.store(true, Ordering::Release);
     }
-    /// Only the serialized graph activation callback may swap these owners.
-    pub(super) unsafe fn activate(&self, active: &mut DeviceSet) {
-        unsafe {
-            self.handoff.activate(Publication::Graph, active);
-        }
-        self.hardware_clock.store(
-            self.prepared_hardware_clock.load(Ordering::Acquire),
-            Ordering::Release,
-        );
+    pub(super) fn activation(&self) -> Result<DeviceActivation<'_>, &'static str> {
+        Ok(DeviceActivation {
+            consumer: self
+                .handoff
+                .try_consumer()
+                .ok_or("CoreAudio device activation already has a consumer")?,
+            devices: self,
+        })
     }
 
     pub(super) fn follows_hardware(&self) -> bool {
@@ -246,11 +245,27 @@ impl MacDevices {
             .map(|device| device.native_rate.load(Ordering::Acquire))
             .filter(|rate| *rate != 0)
     }
+}
+
+/// Borrows one backend for a worker's entire activation lifetime. Keeping the
+/// backend with its lane tokens prevents activating a different backend's state.
+pub(super) struct DeviceActivation<'a> {
+    consumer: ResourceConsumer<'a, DeviceSet>,
+    devices: &'a MacDevices,
+}
+
+impl DeviceActivation<'_> {
+    pub(super) fn activate(&mut self, active: &mut DeviceSet) {
+        self.consumer.activate(Publication::Graph, active);
+        self.devices.hardware_clock.store(
+            self.devices.prepared_hardware_clock.load(Ordering::Acquire),
+            Ordering::Release,
+        );
+    }
+
     /// Same-spec recovery is independent of graph revisions, at a block boundary.
-    pub(super) unsafe fn activate_recovered(&self, active: &mut DeviceSet) {
-        unsafe {
-            self.handoff.activate(Publication::Recovery, active);
-        }
+    pub(super) fn activate_recovered(&mut self, active: &mut DeviceSet) {
+        self.consumer.activate(Publication::Recovery, active);
     }
 }
 fn backend_error(message: impl Into<String>) -> HostAudioBackendError {

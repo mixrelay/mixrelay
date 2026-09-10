@@ -1,42 +1,4 @@
 use super::*;
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::cell::Cell;
-
-struct CountingAllocator;
-thread_local! {
-    static COUNTING: Cell<bool> = const { Cell::new(false) };
-    static OPERATIONS: Cell<usize> = const { Cell::new(0) };
-}
-
-fn count() {
-    if COUNTING.try_with(Cell::get).unwrap_or(false) {
-        let _ = OPERATIONS.try_with(|value| value.set(value.get() + 1));
-    }
-}
-
-// SAFETY: all allocations/deallocations are forwarded unchanged to System.
-// Thread-local counters isolate the measured audio path from parallel tests.
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        count();
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        count();
-        unsafe { System.alloc_zeroed(layout) }
-    }
-    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        count();
-        unsafe { System.dealloc(pointer, layout) }
-    }
-    unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
-        count();
-        unsafe { System.realloc(pointer, layout, size) }
-    }
-}
-
-#[global_allocator]
-static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 #[test]
 fn prepared_audio_paths_including_feedback_and_reset_do_not_allocate_or_free() {
@@ -52,21 +14,25 @@ fn prepared_audio_paths_including_feedback_and_reset_do_not_allocate_or_free() {
             elapsed_frames: 128,
             clock_running: true,
         };
-        OPERATIONS.set(0);
-        COUNTING.set(true);
-        for iteration in 0..100 {
-            bridge.push_interleaved(&input).unwrap();
-            bridge.pull_interleaved(&mut output).unwrap();
-            bridge.observe_clock(feedback).unwrap();
-            if iteration % 20 == 0 {
-                bridge.reset(0, Discontinuity::TransportLoss);
+        let measured = allocation_counter::measure(|| {
+            for iteration in 0..100 {
+                bridge.push_interleaved(&input).unwrap();
+                bridge.pull_interleaved(&mut output).unwrap();
+                bridge.observe_clock(feedback).unwrap();
+                if iteration % 20 == 0 {
+                    bridge.reset(0, Discontinuity::TransportLoss);
+                }
             }
-        }
-        COUNTING.set(false);
-        let operations = OPERATIONS.get();
-        assert_eq!(operations, 0, "{channels} channels RT allocator operations");
+        });
+        assert_eq!(
+            measured.count_total, 0,
+            "{channels} channels RT allocations"
+        );
+        // With zero allocations, a negative net count detects freeing storage
+        // prepared before measurement; checking only count_total would miss it.
+        assert_eq!(measured.count_current, 0, "{channels} channels RT frees");
         eprintln!(
-            "RT {channels}ch 44.1->48k: 100 push/pull/feedback cycles +5 resets = {operations} heap operations"
+            "RT {channels}ch 44.1->48k: 100 push/pull/feedback cycles +5 resets = 0 heap operations"
         );
     }
 }

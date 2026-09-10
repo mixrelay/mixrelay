@@ -20,7 +20,7 @@ impl DeviceSelector {
     /// Resolves exactly one device in a current inventory, never falling back
     /// from a missing explicit UID to another device or inventing channel width.
     /// # Errors
-    /// Rejects wrong directions, missing/ambiguous devices and unsupported widths.
+    /// Rejects wrong directions, missing/ambiguous devices, and unsupported widths.
     pub fn resolve<'a>(
         &self,
         devices: &'a [AudioDeviceDescriptor],

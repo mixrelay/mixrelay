@@ -1,7 +1,7 @@
 use std::{
     sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     sync::{Arc, RwLock},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use tonenari_audio_graph::RenderFormat;
@@ -11,7 +11,11 @@ use tonenari_audio_io::session::{
 use tonenari_control_protocol::{AppStatus, DriverState, PROTOCOL_VERSION};
 
 use crate::RuntimeStatusBackend;
-use crate::session_preferences::{SessionPreferences, StagedPreferences};
+use crate::persistence::StagedWrite;
+use crate::session_preferences::SessionPreferences;
+
+pub mod processing;
+use processing::{ProcessingLease, ProcessingLifecycle, WorkerState};
 
 type DeviceRateSetter = fn(u32) -> Result<(), String>;
 type DeviceRateReader = fn() -> Option<u32>;
@@ -41,8 +45,7 @@ pub struct AdapterProfile {
 /// Reports only I/O that the currently linked adapter can actually execute.
 /// This is intentionally not a table of everything the operating system supports.
 pub struct AdapterRuntimeStatus {
-    stop_requested: AtomicBool,
-    worker_state: AtomicU32,
+    processing: ProcessingLifecycle,
     application_state: AtomicU32,
     // Pacing authority, synchronization evidence and explicit inactivity are one
     // publication; readers must never combine fields from different clock owners.
@@ -60,9 +63,6 @@ pub struct AdapterRuntimeStatus {
     // endpoint observation. Bit 63 records selection even while unavailable.
     routing_clock_observation: AtomicU64,
     active_format: AtomicU64,
-    pause_requested: AtomicU64,
-    pause_sequence: AtomicU64,
-    paused: AtomicU64,
     failed: AtomicBool,
     set_device_rate: Option<DeviceRateSetter>,
     set_device_format: Option<DeviceFormatSetter>,
@@ -84,8 +84,7 @@ impl AdapterRuntimeStatus {
             profile.clock_authority != ClockAuthority::EngineTimer,
         );
         Self {
-            stop_requested: AtomicBool::new(false),
-            worker_state: AtomicU32::new(0),
+            processing: ProcessingLifecycle::default(),
             application_state: AtomicU32::new(0),
             clock_observation: AtomicU32::new(initial_clock),
             input_starvations: AtomicU64::new(0),
@@ -100,9 +99,6 @@ impl AdapterRuntimeStatus {
                 sample_rate: initial_format.sample_rate,
                 block_frames: initial_format.block_frames,
             })),
-            pause_requested: AtomicU64::new(0),
-            pause_sequence: AtomicU64::new(0),
-            paused: AtomicU64::new(0),
             failed: AtomicBool::new(false),
             set_device_rate: None,
             set_device_format: None,
@@ -243,19 +239,16 @@ impl AdapterRuntimeStatus {
     /// # Errors
     /// Fails if a worker is already running. Restart uses a fresh session object.
     pub fn begin_processing(&self) -> Result<ProcessingLease<'_>, &'static str> {
-        self.worker_state
-            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
-            .map_err(|_| "session processing already started")?;
-        Ok(ProcessingLease { status: self })
+        self.processing.begin()
     }
 
     pub fn request_stop(&self) {
-        self.stop_requested.store(true, Ordering::Release);
+        self.processing.request_stop();
     }
 
     #[must_use]
     pub fn stop_requested(&self) -> bool {
-        self.stop_requested.load(Ordering::Acquire)
+        self.processing.stop_requested()
     }
 
     /// Lock-free reporting from the DSP boundary. Zero samples are not failures.
@@ -341,7 +334,7 @@ impl AdapterRuntimeStatus {
             Ok(None) => return fallback,
             Err(error) => {
                 self.preferences_error.store(true, Ordering::Release);
-                eprintln!("ToneNari session preferences not restored: {error}");
+                tracing::warn!(%error, "session preferences not restored");
                 return fallback;
             }
         };
@@ -379,12 +372,15 @@ impl AdapterRuntimeStatus {
             } else {
                 self.preferences_error.store(true, Ordering::Release);
             }
-            eprintln!("ToneNari stored session format is unsupported by this adapter");
+            tracing::warn!(
+                ?requested,
+                "stored session format is unsupported by this adapter"
+            );
             return fallback;
         }
         if let Err(error) = self.restore_native_format(requested, fallback) {
             self.restore_failed.store(true, Ordering::Release);
-            eprintln!("ToneNari stored native format could not be restored: {error}");
+            tracing::warn!(%error, ?requested, "stored native format could not be restored");
             return fallback;
         }
         self.activate_format(requested);
@@ -490,10 +486,10 @@ impl AdapterRuntimeStatus {
         &self,
         format: RenderFormat,
         observed: RenderFormat,
-        worker_state: u32,
+        worker_state: WorkerState,
         clock_issue: Option<SessionIssue>,
     ) -> Option<SessionIssue> {
-        if worker_state == 3 {
+        if worker_state == WorkerState::Failed {
             Some(SessionIssue::ProcessingFailed)
         } else if self.failed.load(Ordering::Acquire) {
             Some(SessionIssue::ReconfigurationFailed)
@@ -521,7 +517,7 @@ impl AdapterRuntimeStatus {
         }
     }
 
-    fn stage_preferences(&self, format: RenderFormat) -> Result<Option<StagedPreferences>, String> {
+    fn stage_preferences(&self, format: RenderFormat) -> Result<Option<StagedWrite>, String> {
         self.preferences
             .as_ref()
             .map(|store| {
@@ -540,16 +536,14 @@ impl AdapterRuntimeStatus {
     /// Audio worker only: acknowledge suspension at a block boundary without a lock.
     #[must_use]
     pub fn checkpoint(&self) -> bool {
-        let pause = self.pause_requested.load(Ordering::Acquire);
-        self.paused.store(pause, Ordering::Release);
-        pause != 0
+        self.processing.checkpoint()
     }
 
     /// Inspect without acknowledging: a callback owner must drain its in-flight
     /// render before the supervisor may acknowledge a format transaction.
     #[must_use]
     pub fn pause_requested(&self) -> bool {
-        self.pause_requested.load(Ordering::Acquire) != 0
+        self.processing.pause_requested()
     }
 
     /// The outer graph/native transaction could not restore its original state.
@@ -643,17 +637,12 @@ impl AdapterRuntimeStatus {
     pub fn pause_at_boundary(&self) -> Result<(), tonenari_audio_io::HostAudioBackendError> {
         // Fresh tickets prevent a previous suspension acknowledgement from authorizing
         // native changes while the worker has already resumed.
-        let ticket = self.pause_sequence.fetch_add(1, Ordering::Relaxed) + 1;
-        self.pause_requested.store(ticket, Ordering::Release);
-        let deadline = Instant::now() + Duration::from_secs(1);
-        while self.paused.load(Ordering::Acquire) != ticket {
-            if Instant::now() >= deadline {
-                self.resume();
-                return Err(tonenari_audio_io::HostAudioBackendError::BackendFailure {
-                    message: "audio worker did not acknowledge suspension".into(),
-                });
-            }
-            std::thread::sleep(Duration::from_millis(1));
+        let ticket = self.processing.request_pause();
+        if !self.processing.await_pause(ticket, Duration::from_secs(1)) {
+            self.resume();
+            return Err(tonenari_audio_io::HostAudioBackendError::BackendFailure {
+                message: "audio worker did not acknowledge suspension".into(),
+            });
         }
         Ok(())
     }
@@ -801,7 +790,7 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
         self.preferences_error
             .store(saved.is_err(), Ordering::Release);
         if let Err(error) = saved {
-            eprintln!("ToneNari externally accepted format was not saved: {error}");
+            tracing::warn!(%error, ?requested, "externally accepted format was not saved");
         }
         if self.preferences.is_some() {
             self.preferred_format
@@ -832,7 +821,7 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
                 block_frames: 0,
             },
         );
-        let worker_state = self.worker_state.load(Ordering::Acquire);
+        let worker_state = self.processing.state();
         let clock = ClockObservation::unpack(self.clock_observation.load(Ordering::Acquire));
         let clock_issue =
             (!clock.idle && !clock.synchronized).then_some(SessionIssue::ClockNotSynchronized);
@@ -865,9 +854,15 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
                 endpoint_preferences_unavailable: false,
                 virtual_endpoint_settings: None,
                 processing_state: match worker_state {
-                    1 if !clock.idle => tonenari_audio_io::process::ProcessingState::Running,
-                    2 | 3 => tonenari_audio_io::process::ProcessingState::Stopped,
-                    _ => tonenari_audio_io::process::ProcessingState::Idle,
+                    WorkerState::Running if !clock.idle => {
+                        tonenari_audio_io::process::ProcessingState::Running
+                    }
+                    WorkerState::Stopped | WorkerState::Failed => {
+                        tonenari_audio_io::process::ProcessingState::Stopped
+                    }
+                    WorkerState::NotStarted | WorkerState::Running => {
+                        tonenari_audio_io::process::ProcessingState::Idle
+                    }
                 },
                 discontinuities: self.discontinuities.load(Ordering::Relaxed),
                 format: SessionFormat {
@@ -951,13 +946,9 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
 
     fn resume(&self) {
         if !self.failed.load(Ordering::Acquire) {
-            self.pause_requested.store(0, Ordering::Release);
+            self.processing.resume();
         }
     }
-}
-
-pub struct ProcessingLease<'a> {
-    status: &'a AdapterRuntimeStatus,
 }
 
 /// Control-plane ownership of the audio thread. Bind/startup failures and normal
@@ -1005,19 +996,6 @@ pub async fn shutdown_signal() -> std::io::Result<()> {
     }
     #[cfg(not(unix))]
     tokio::signal::ctrl_c().await
-}
-
-impl Drop for ProcessingLease<'_> {
-    fn drop(&mut self) {
-        // Cancellation is an intentional stop. An early return or unwind without
-        // cancellation is a failed processing owner, not an unplugged device.
-        let state = if self.status.stop_requested() && !std::thread::panicking() {
-            2
-        } else {
-            3
-        };
-        self.status.worker_state.store(state, Ordering::Release);
-    }
 }
 
 #[cfg(test)]

@@ -29,6 +29,10 @@ tonenari-audio-io.workspace = true
 tonenari-control-protocol = { path = "../../crates/control-protocol" }
 tonenari-control-server = { path = "../../crates/control-server" }
 
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+# Native callback queue ownership shared by the existing CoreAudio/PipeWire callers.
+tonenari-pcm-ring = { path = "../../native/pcm-ring" }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2.183"
 
@@ -58,6 +62,7 @@ cc = "1.2.57"
 pkg-config = "0.3.32"
 
 [dev-dependencies]
+allocation-counter = "0.8.1"
 tonenari-test-support = { path = "../../crates/test-support" }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

@@ -32,6 +32,7 @@ use tonenari_audio_io::{
     HostAudioBackendError, VirtualEndpointBackend, VirtualEndpointCapabilities, VirtualEndpointSpec,
 };
 use tonenari_control_server::router_with_backend;
+use tonenari_engine_service::resource_requirements::ResourceRequirements;
 use tonenari_engine_service::{
     EngineGraphController, EngineGraphControllerConfig, GraphResourceBackend,
     default_peak_meter_bank, session::AdapterRuntimeStatus,
@@ -810,57 +811,17 @@ impl GraphResourceBackend for WindowsGraphResources {
         &self,
         document: &tonenari_audio_graph::GraphDocument,
     ) -> Result<(), HostAudioBackendError> {
-        let captures = document
-            .nodes
-            .iter()
-            .filter_map(|node| match &node.config {
-                NodeConfig::ApplicationCapture(request) => {
-                    let mut request = request.clone();
-                    // Gain is a DSP parameter, not a reason to restart a native capture client.
-                    request.gain_db = 0.0;
-                    Some((node.id.as_str().to_owned(), request))
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        let outputs = device_output_requests(document);
-        let endpoints: Vec<_> = document
-            .nodes
-            .iter()
-            .filter_map(|node| match &node.config {
-                NodeConfig::VirtualEndpointTransport(spec) => {
-                    Some((node.id.as_str().to_owned(), spec.clone()))
-                }
-                _ => None,
-            })
-            .collect();
-        self.reconcile_devices(document, captures, outputs, endpoints)
+        self.reconcile_devices(document, ResourceRequirements::from_document(document))
     }
 }
 
-fn device_output_requests(
-    document: &tonenari_audio_graph::GraphDocument,
-) -> Vec<(String, tonenari_audio_graph::AudioDeviceOutputConfig)> {
-    document
-        .nodes
-        .iter()
-        .filter_map(|node| match &node.config {
-            NodeConfig::AudioDeviceOutput(config) => {
-                Some((node.id.as_str().to_owned(), config.clone()))
-            }
-            _ => None,
-        })
-        .collect()
-}
 impl WindowsGraphResources {
     fn reconcile_devices(
         &self,
         document: &tonenari_audio_graph::GraphDocument,
-        captures: Vec<(String, ApplicationCaptureRequest)>,
-        outputs: Vec<(String, tonenari_audio_graph::AudioDeviceOutputConfig)>,
-        endpoints: Vec<(String, VirtualEndpointSpec)>,
+        requirements: ResourceRequirements,
     ) -> Result<(), HostAudioBackendError> {
-        validate_virtual_attachments(document, &endpoints)?;
+        validate_virtual_attachments(document, &requirements.endpoints)?;
         let next = WindowsResourceSpec {
             graph_rate: self
                 .active_spec
@@ -869,21 +830,10 @@ impl WindowsGraphResources {
                     message: "WASAPI format state is poisoned".into(),
                 })?
                 .graph_rate,
-            inputs: document
-                .nodes
-                .iter()
-                .filter_map(|node| match &node.config {
-                    NodeConfig::AudioDeviceInput(config) => {
-                        let mut config = config.clone();
-                        config.gain_db = 0.0;
-                        Some((node.id.as_str().to_owned(), config))
-                    }
-                    _ => None,
-                })
-                .collect(),
-            captures,
-            outputs,
-            endpoint: endpoints.into_iter().next(),
+            inputs: requirements.devices.inputs,
+            captures: requirements.captures,
+            outputs: requirements.devices.outputs,
+            endpoint: requirements.endpoints.into_iter().next(),
         };
         let mut active =
             self.active_spec

@@ -19,13 +19,13 @@ int main(int argc, char **argv) {
     }
     for (unsigned i = 0; i < 100 && !tn_aggregate_group_ready(group); ++i) usleep(20000);
     assert(tn_aggregate_group_ready(group));
-    uint32_t device = 0, offset = 0, total = 0;
-    assert(tn_aggregate_group_binding(group, members[0], false, 2, &device, &offset, &total));
-    assert(offset == 0 && total >= 4);
-    uint32_t primary_device = device;
-    assert(tn_aggregate_group_binding(group, members[1], false, 2, &device, &offset, &total));
-    assert(device == primary_device && offset >= 2);
-    printf("OS readback: private group=%u primary offset=0 secondary offset=%u total=%u; main UID, order, drift policy verified\n", device, offset, total);
+    TNAggregateNativeBinding binding = {0};
+    assert(tn_aggregate_group_binding(group, members[0], false, 2, &binding));
+    assert(binding.offset == 0 && binding.total >= 4);
+    uint32_t device = binding.device;
+    assert(tn_aggregate_group_binding(group, members[1], false, 2, &binding));
+    assert(binding.device == device && binding.offset >= 2);
+    printf("OS readback: private group=%u primary offset=0 secondary offset=%u total=%u; main UID, order, drift policy verified\n", device, binding.offset, binding.total);
     TNDeviceIO *first = tn_device_io_create_group(group, members[0], false, 2, 48000);
     TNDeviceIO *second = tn_device_io_create_group(group, members[1], false, 2, 48000);
     bool connected = first && second && tn_device_io_connect(first) && tn_device_io_connect(second);

@@ -5,7 +5,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU8, Ordering},
 };
-use tonenari_audio_io::recovery::RecoveryMailbox;
+use tonenari_audio_io::recovery::{RecoveryConsumer, RecoveryMailbox};
 
 const IDLE: u8 = 0;
 const FORMAT: u8 = 3;
@@ -42,6 +42,14 @@ impl Drop for FormatReservation {
 }
 
 impl<T: Send> ResourceHandoff<T> {
+    pub(super) fn try_consumer(&self) -> Option<ResourceConsumer<'_, T>> {
+        Some(ResourceConsumer {
+            graph: self.graph.try_consumer()?,
+            recovery: self.recovery.try_consumer()?,
+            completed: &self.completed,
+        })
+    }
+
     pub(super) fn idle(&self) -> bool {
         self.state.load(Ordering::Acquire) == IDLE
     }
@@ -83,29 +91,38 @@ impl<T: Send> ResourceHandoff<T> {
         }
     }
 
-    /// # Safety
-    /// Exactly one serialized audio consumer. Graph lane is called only with
-    /// the matching prepared DSP plan; recovery lane only contains identical specs.
-    pub(super) unsafe fn activate(&self, lane: Publication, active: &mut T) {
-        let mut swapped = false;
-        unsafe {
-            self.mailbox(lane).activate(0, |next| {
-                std::mem::swap(active, next);
-                swapped = true;
-            });
-        }
-        if swapped {
-            // Published only AFTER the mailbox has installed its retired owner.
-            self.completed.store(true, Ordering::Release);
-        }
-    }
-
     /// Control thread, under the cache lock. Never destroy displaced owners on DSP.
     pub(super) fn reclaim(&self) {
         if self.completed.swap(false, Ordering::AcqRel) {
             self.graph.reclaim();
             self.recovery.reclaim();
             self.state.store(IDLE, Ordering::Release);
+        }
+    }
+}
+
+/// One worker owns both lanes; graph activation still waits for its matching plan.
+pub(super) struct ResourceConsumer<'a, T: Send> {
+    graph: RecoveryConsumer<'a, T>,
+    recovery: RecoveryConsumer<'a, T>,
+    completed: &'a AtomicBool,
+}
+
+impl<T: Send> ResourceConsumer<'_, T> {
+    pub(super) fn activate(&mut self, lane: Publication, active: &mut T) {
+        let consumer = match lane {
+            Publication::Graph => &mut self.graph,
+            Publication::Recovery => &mut self.recovery,
+        };
+        let mut swapped = false;
+        consumer.activate(0, |next| {
+            std::mem::swap(active, next);
+            swapped = true;
+        });
+        if swapped {
+            // The infallible swap returned and retirement is published before
+            // control may reclaim either lane and release its reservation.
+            self.completed.store(true, Ordering::Release);
         }
     }
 }
@@ -117,24 +134,19 @@ mod tests {
     #[test]
     fn recovery_activates_without_a_graph_revision_but_graph_changes_wait() {
         let handoff = ResourceHandoff::default();
+        let mut consumer = handoff.try_consumer().unwrap();
         let mut active = 1;
         handoff.publish(Publication::Recovery, 2).unwrap();
-        unsafe {
-            handoff.activate(Publication::Recovery, &mut active);
-        }
+        consumer.activate(Publication::Recovery, &mut active);
         assert_eq!(active, 2);
         assert!(!handoff.idle());
         handoff.reclaim();
         handoff.publish(Publication::Graph, 3).unwrap();
-        unsafe {
-            handoff.activate(Publication::Recovery, &mut active);
-        }
+        consumer.activate(Publication::Recovery, &mut active);
         assert_eq!(active, 2);
         assert!(handoff.reserve_format().is_none());
         assert!(handoff.publish(Publication::Recovery, 4).is_err());
-        unsafe {
-            handoff.activate(Publication::Graph, &mut active);
-        }
+        consumer.activate(Publication::Graph, &mut active);
         assert_eq!(active, 3);
         handoff.reclaim();
         assert!(handoff.idle());
@@ -152,5 +164,19 @@ mod tests {
         drop(token);
         assert!(handoff.idle());
         handoff.publish(Publication::Recovery, 3).unwrap();
+    }
+
+    #[test]
+    fn partial_consumer_claim_rolls_back_without_releasing_the_other_lane() {
+        let handoff = ResourceHandoff::<u64>::default();
+        let recovery = handoff.recovery.try_consumer().unwrap();
+        assert!(handoff.try_consumer().is_none());
+        assert!(handoff.graph.try_consumer().is_some());
+        assert!(handoff.recovery.try_consumer().is_none());
+        drop(recovery);
+        let consumer = handoff.try_consumer().unwrap();
+        assert!(handoff.try_consumer().is_none());
+        drop(consumer);
+        assert!(handoff.try_consumer().is_some());
     }
 }

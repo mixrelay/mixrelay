@@ -1,5 +1,6 @@
 //! Control-plane format transactions must not mix old transports with a new DSP plan.
 use super::*;
+use crate::controller_test_support::settle;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 struct Runtime {
@@ -102,14 +103,6 @@ impl VirtualEndpointBackend for ObservedEndpoint {
         self.base.prepare_graph_attachments(specs)
     }
 }
-fn settle(controller: &EngineGraphController) {
-    let mut processor = controller
-        .prepare_and_validate(&controller.graph(), *controller.context.read())
-        .unwrap()
-        .processor;
-    assert!(controller.exchange.activate_pending(&mut processor));
-}
-
 #[test]
 fn catalog_selection_preserves_device_rate_independent_of_hardware_clock() {
     use tonenari_control_protocol::{GraphCatalogAction, GraphCatalogRequest};

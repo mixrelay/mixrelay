@@ -5,6 +5,11 @@ Their recorded upstream commit is `233f56c7788291b2f24e3f2aba3a767330f72cb7` in
 https://github.com/truce-audio/truce-rack. Root MIT and Apache licenses are preserved here.
 Normalized Cargo manifests and upstream READMEs are retained. Registry caches are not modified.
 
+The patched manifests remove unused direct `thiserror` dependencies. These adapters
+use the error type supplied by `truce-rack-core`; they do not derive their own errors.
+The upstream `.orig` manifests remain provenance, not active build inputs. This
+dependency cleanup does not change plugin loading, DSP, native ABI or format support.
+
 An actual Debian 13/aarch64 workspace build exposed 9 VST3 and 2 CLAP type errors:
 the bindings use target-dependent `c_char`, whereas these adapters hard-coded `i8`.
 Use VST3 `char8`/`TUID`/`FIDString` and CLAP `c_char` without changing byte layout, DSP or ownership.

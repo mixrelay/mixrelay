@@ -2,12 +2,32 @@
  * ToneNari virtual device. All probes are private. The Rust recovery fixture now
  * owns its private aggregate in-process. No default-device/rate changes, microphone access,
  * driver restart or persistent graph edits. All output is silence. */
-#include "../src/TNDeviceIO.c"
+#include "TNDeviceIO.h"
+#include <CoreAudio/CoreAudio.h>
+#include <CoreFoundation/CoreFoundation.h>
+#include <stdlib.h>
+#include <string.h>
 #include <assert.h>
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <unistd.h>
+
+static bool get(AudioObjectID id, AudioObjectPropertySelector selector,
+                AudioObjectPropertyScope scope, UInt32 size, void *output) {
+    AudioObjectPropertyAddress address = {selector, scope, kAudioObjectPropertyElementMain};
+    UInt32 actual = size;
+    return AudioObjectGetPropertyData(id, &address, 0, NULL, &actual, output) == noErr && actual == size;
+}
+
+static AudioDeviceID lookup_device(const char *uid) {
+    TNDeviceIO *io = tn_device_io_create(uid, false, 2, 48000);
+    if (!io) return kAudioObjectUnknown;
+    uint32_t device = 0, offset = 0, total = 0;
+    bool found = tn_device_io_direct_binding(io, &device, &offset, &total);
+    assert(tn_device_io_destroy(io));
+    return found ? device : kAudioObjectUnknown;
+}
 
 static AudioDeviceID aggregate(const char *name) {
     CFStringRef uid = CFStringCreateWithCString(NULL, name, kCFStringEncodingUTF8);
@@ -28,9 +48,8 @@ static AudioDeviceID aggregate(const char *name) {
 }
 static bool destroy_fixture(const char *uid, AudioDeviceID device) {
     if (AudioHardwareDestroyAggregateDevice(device) != noErr) return false;
-    TNDeviceIO lookup = {.uid = (char *)uid};
     for (int i = 0; i < 40; ++i) {
-        if (!resolve(&lookup)) {
+        if (!lookup_device(uid)) {
             fprintf(stderr, "owned aggregate removed uid=%s\n", uid);
             return true;
         }
@@ -81,23 +100,23 @@ static int cleanup_owned(const char *uid) {
     long pid = strtol(uid + strlen(prefix), &end, 10);
     if (!end || *end || pid <= 0 || pid > INT32_MAX ||
         kill((pid_t)pid, 0) == 0 || errno != ESRCH) return 7;
-    TNDeviceIO probe = {.uid = (char *)uid};
-    if (!resolve(&probe)) return 0;
+    AudioDeviceID probe = lookup_device(uid);
+    if (!probe) return 0;
     AudioClassID kind = 0;
     AudioDeviceID input = 0, output = 0;
     CFArrayRef members = NULL;
-    if (!get(probe.device, kAudioObjectPropertyClass, kAudioObjectPropertyScopeGlobal, sizeof(kind), &kind) ||
+    if (!get(probe, kAudioObjectPropertyClass, kAudioObjectPropertyScopeGlobal, sizeof(kind), &kind) ||
         kind != kAudioAggregateDeviceClassID ||
         !get(kAudioObjectSystemObject, kAudioHardwarePropertyDefaultInputDevice, kAudioObjectPropertyScopeGlobal, sizeof(input), &input) ||
         !get(kAudioObjectSystemObject, kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, sizeof(output), &output) ||
-        probe.device == input || probe.device == output ||
-        !get(probe.device, kAudioAggregateDevicePropertyFullSubDeviceList, kAudioObjectPropertyScopeGlobal, sizeof(members), &members) || !members) return 7;
+        probe == input || probe == output ||
+        !get(probe, kAudioAggregateDevicePropertyFullSubDeviceList, kAudioObjectPropertyScopeGlobal, sizeof(members), &members) || !members) return 7;
     bool owned = CFArrayGetCount(members) == 1 &&
         CFEqual(CFArrayGetValueAtIndex(members, 0), CFSTR("io.tonenari.audio.endpoint.default"));
     CFRelease(members);
     if (!owned) return 7;
-    OSStatus result = AudioHardwareDestroyAggregateDevice(probe.device);
-    printf("cleanup exact_uid=%s device=%u status=%d\n", uid, probe.device, result);
+    OSStatus result = AudioHardwareDestroyAggregateDevice(probe);
+    printf("cleanup exact_uid=%s device=%u status=%d\n", uid, probe, result);
     return result == noErr ? 0 : 8;
 }
 int main(int argc, char **argv) {

@@ -59,12 +59,7 @@ fn virtual_gain_survives_disk_restart_and_does_not_change_prepared_device_specs(
                 .persistence_error
                 .is_none()
         );
-        let mut processor = engine
-            .prepare_and_validate(&engine.graph(), *engine.context.read())
-            .unwrap()
-            .processor;
-        assert!(engine.exchange.activate_pending(&mut processor));
-        engine.exchange.reclaim_retired();
+        let mut processor = crate::controller_test_support::settle(&engine);
         let source = [1.0, -1.0, 0.5, -0.5];
         let mut sink = [0.0; 4];
         processor

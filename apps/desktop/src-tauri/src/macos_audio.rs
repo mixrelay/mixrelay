@@ -17,6 +17,8 @@ use tonenari_audio_io::{
     CapturableApplication, ChannelLayout, HostAudioBackendError, ResolvedApplicationCapture,
     StreamSpec,
 };
+// Keep the crate exporting the native capture entry points linked into the desktop.
+use tonenari_process_tap as _;
 
 #[path = "macos_audio/capture_reader.rs"]
 mod capture_reader;
@@ -98,12 +100,6 @@ struct NativeStats {
 }
 
 unsafe extern "C" {
-    fn tn_audio_device_visit(
-        visitor: Option<
-            unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char, u32, u32, bool, bool),
-        >,
-        context: *mut c_void,
-    ) -> NativeError;
     fn tn_process_tap_visit_applications(
         visitor: Option<
             unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char, *const c_char, i32),
@@ -457,7 +453,7 @@ impl ApplicationSourceTransport {
     }
     fn clock(&mut self) -> Option<NativeClockSnapshot> {
         let mut snapshot = NativeClockSnapshot::default();
-        // SAFETY: sole worker owns the transport; C validates the versioned mapping.
+        // SAFETY: sole worker owns the transport; Rust validates the versioned mapping.
         unsafe { tn_application_source_transport_clock(self.native.as_ptr(), &raw mut snapshot) }
             .then_some(snapshot)
     }
@@ -635,38 +631,6 @@ unsafe extern "C" fn collect_application(
                 bundle_id: bundle_id.to_owned(),
                 include_descendants: false,
             },
-        });
-    }
-}
-
-unsafe extern "C" fn collect_audio_device(
-    context: *mut c_void,
-    uid: *const c_char,
-    display_name: *const c_char,
-    input_channels: u32,
-    output_channels: u32,
-    is_default_input: bool,
-    is_default_output: bool,
-) {
-    if context.is_null() || uid.is_null() || display_name.is_null() {
-        return;
-    }
-    // SAFETY: the native enumerator invokes this callback synchronously with a matching vector.
-    let devices = unsafe { &mut *context.cast::<Vec<AudioDeviceDescriptor>>() };
-    // SAFETY: the native enumerator keeps both null-terminated strings alive for the callback.
-    let uid = unsafe { CStr::from_ptr(uid) };
-    let display_name = unsafe { CStr::from_ptr(display_name) };
-    if let (Ok(uid), Ok(display_name)) = (uid.to_str(), display_name.to_str())
-        && !uid.is_empty()
-        && !display_name.is_empty()
-    {
-        devices.push(AudioDeviceDescriptor {
-            uid: uid.to_owned(),
-            display_name: display_name.to_owned(),
-            input_channels,
-            output_channels,
-            is_default_input,
-            is_default_output,
         });
     }
 }
@@ -892,13 +856,7 @@ pub(crate) fn list_capturable_applications() -> Result<Vec<CapturableApplication
 
 #[tauri::command]
 pub(crate) fn list_audio_devices() -> Result<Vec<AudioDeviceDescriptor>, String> {
-    let mut devices: Vec<AudioDeviceDescriptor> = Vec::new();
-    // SAFETY: enumeration and callbacks are synchronous and `devices` outlives the call.
-    let error =
-        unsafe { tn_audio_device_visit(Some(collect_audio_device), (&raw mut devices).cast()) };
-    if error.code != NATIVE_OK {
-        return Err(CaptureProbeError(error).to_string());
-    }
+    let mut devices = tonenari_audio_io::macos::devices().map_err(|error| error.to_string())?;
     devices.sort_unstable_by(|left, right| {
         left.display_name
             .cmp(&right.display_name)

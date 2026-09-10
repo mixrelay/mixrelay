@@ -49,12 +49,11 @@ int tn_drift_trace_start(void) {
 void tn_drift_trace_cycle(const TNPWCycle *cycle) { consumer_cycle = *cycle; }
 
 static TraceEvent begin_event(TNPcmRing *ring, uint32_t frames) {
+    TNPcmRingStats stats = tn_pcm_ring_stats(ring);
     return (TraceEvent) {
         .actual_ns = trace_now(), .frames = frames,
-        .read = atomic_load_explicit(&ring->read, memory_order_acquire),
-        .written = atomic_load_explicit(&ring->written, memory_order_acquire),
-        .overflows = atomic_load_explicit(&ring->overflows, memory_order_relaxed),
-        .starvations = atomic_load_explicit(&ring->starvations, memory_order_relaxed),
+        .read = stats.read, .written = stats.written,
+        .overflows = stats.overflows, .starvations = stats.starvations,
     };
 }
 
@@ -76,7 +75,7 @@ static uint32_t trace_read(TNPcmRing *ring, float *samples, uint32_t frames) {
     value.position = consumer_cycle.position;
     value.clock_ns = consumer_cycle.monotonic_ns;
     value.returned = tn_pcm_ring_read(ring, samples, frames);
-    trace_pcm(&value, samples, ring->channels);
+    trace_pcm(&value, samples, tn_pcm_ring_stats(ring).channels);
     if (consumer.events && consumer.count < TRACE_CAPACITY) consumer.events[consumer.count++] = value;
     return value.returned;
 }
@@ -91,7 +90,7 @@ static uint32_t trace_write(TNPcmRing *ring, const float *samples, uint32_t fram
         value.clock_ns = position->clock.nsec;
     }
     value.returned = tn_pcm_ring_write(ring, samples, frames);
-    trace_pcm(&value, samples, ring->channels);
+    trace_pcm(&value, samples, tn_pcm_ring_stats(ring).channels);
     if (producer.events && producer.count < TRACE_CAPACITY) producer.events[producer.count++] = value;
     return value.returned;
 }

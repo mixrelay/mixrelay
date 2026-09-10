@@ -1,4 +1,5 @@
 use super::*;
+use crate::controller_test_support::settle;
 use crate::endpoint_settings_tests::{controller, endpoint_document, settings};
 use std::{fs, path::PathBuf};
 use tonenari_control_protocol::{GraphCatalogAction, GraphCatalogRequest};
@@ -17,15 +18,6 @@ impl Fixture {
     fn restart(&self) -> EngineGraphController {
         controller(GraphDocument::new(1, vec![], vec![])).with_graph_catalog_path(self.path())
     }
-}
-
-fn settle(controller: &EngineGraphController) {
-    let mut processor = controller
-        .prepare_and_validate(&controller.graph(), *controller.context.read())
-        .unwrap()
-        .processor;
-    assert!(controller.exchange.activate_pending(&mut processor));
-    controller.exchange.reclaim_retired();
 }
 
 fn select_view(controller: &EngineGraphController, action: GraphCatalogAction) {
@@ -212,7 +204,7 @@ fn corrupt_catalog_is_untouched_and_reports_an_observable_error() {
 }
 
 #[test]
-fn failed_native_restore_keeps_saved_catalog_and_reports_failure() {
+fn failed_native_restore_keeps_saved_catalog_and_defers_native_preparation() {
     let fixture = Fixture::new();
     let engine = fixture.restart();
     engine
@@ -222,17 +214,18 @@ fn failed_native_restore_keeps_saved_catalog_and_reports_failure() {
     let mut value: serde_json::Value =
         serde_json::from_slice(&fs::read(fixture.path()).unwrap()).unwrap();
     value["graphs"][0]["document"]["nodes"][0]["config"]["displayName"] = "rejected".into();
+    let saved_document: GraphDocument =
+        serde_json::from_value(value["graphs"][0]["document"].clone()).unwrap();
     let original = serde_json::to_vec(&value).unwrap();
     fs::write(fixture.path(), &original).unwrap();
     let restarted = fixture.restart();
-    assert!(restarted.graph().nodes.is_empty());
-    let error = restarted.graph_catalog().unwrap_err();
-    assert_eq!(error.code, ErrorCode::ControlUnavailable);
-    assert!(
-        error.parameters["reason"]
-            .as_str()
-            .unwrap()
-            .contains("saved graph restore failed")
+    assert_eq!(restarted.graph(), saved_document);
+    assert_eq!(
+        restarted.graph_catalog().unwrap().document,
+        restarted.graph()
     );
+    assert!(restarted.catalog_restore.lock().is_some());
+    assert_eq!(restarted.exchange.revisions().active, 1);
+    assert_eq!(restarted.exchange.revisions().submitted, 1);
     assert_eq!(fs::read(fixture.path()).unwrap(), original);
 }
