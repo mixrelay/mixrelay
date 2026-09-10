@@ -4,6 +4,8 @@ import { StorybookMockControlPort } from '../../core/control-port/StorybookMockC
 import type { RecorderRequest, RecorderStatus } from '../../core/control-port/types';
 import { I18nProvider, i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
+import { AudioNodeCard } from '../../core/ui/AudioNodeCard';
+import { NodePowerToggle } from '../../core/ui/NodeSignalControls';
 import { RecorderControls } from './RecorderControls';
 
 const stopped: RecorderStatus = {
@@ -99,6 +101,57 @@ it('does not resume a paused take while its node is powered off', async () => {
   expect(write).not.toHaveBeenCalled();
 });
 afterEach(() => vi.restoreAllMocks());
+
+it('keeps OFF recorder power in its own Options row while recording remains disabled', async () => {
+  const { port, write } = fixture();
+  const onPower = vi.fn();
+  render(
+    <MixRelayProvider>
+      <I18nProvider>
+        <AudioNodeCard
+          title="Recorder"
+          category="Recorder"
+          icon="REC"
+          inputCount={2}
+          outputCount={0}
+          onSelect={vi.fn()}
+          poweredOff
+          content={
+            <RecorderControls
+              controlPort={port}
+              graphId="graph-a"
+              nodeId="recorder-1"
+              expectedRevision={1}
+              poweredOn={false}
+              enabled={false}
+              channels={2}
+              onChannelsChange={vi.fn()}
+              optionsActions={
+                <NodePowerToggle
+                  enabled={false}
+                  disabled={false}
+                  label="Enable Recorder"
+                  onChange={onPower}
+                />
+              }
+            />
+          }
+        />
+      </I18nProvider>
+    </MixRelayProvider>,
+  );
+  const record = await screen.findByRole('button', { name: 'Record' });
+  expect(record).toBeDisabled();
+  const power = screen.getByRole('switch', { name: 'Enable Recorder' });
+  const options = screen.getByRole('button', { name: 'Options' });
+  expect(options.parentElement).toContainElement(power);
+  expect(power.closest('[inert]')).toBeNull();
+  fireEvent.click(power);
+  fireEvent.click(record);
+  expect(onPower).toHaveBeenCalledOnce();
+  expect(write).not.toHaveBeenCalled();
+  expect(options).toHaveAttribute('aria-expanded', 'false');
+});
 
 it('records to Desktop with Options closed and proposes a fresh path after Stop', async () => {
   const { port, write } = fixture();

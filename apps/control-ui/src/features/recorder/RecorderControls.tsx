@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   ControlPort,
@@ -8,6 +8,7 @@ import type {
 } from '../../core/control-port/types';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { NodeOptionsSection } from '../../core/ui/NodeOptionsSection';
+import { useNodeOptionsState } from '../../core/ui/nodeOptionsState';
 import { SelectField } from '../../core/ui/SelectField';
 import { TextField } from '../../core/ui/TextField';
 import { TransportButton } from '../../core/ui/TransportButton';
@@ -23,6 +24,7 @@ const encodings: { value: RecorderEncoding; label: string }[] = [
 ];
 
 export function RecorderControls(props: {
+  optionsActions?: ReactNode;
   controlPort: ControlPort;
   graphId: string;
   nodeId: string;
@@ -46,7 +48,7 @@ export function RecorderControls(props: {
   const { path, setPath } = picker;
   const [sampleRate, setSampleRate] = useState('auto');
   const [encoding, setEncoding] = useState<RecorderEncoding>('pcm16');
-  const [optionsOpened, setOptionsOpened] = useState(false);
+  const { opened: optionsOpened, toggle: toggleOptions } = useNodeOptionsState();
   const locked = snapshot.status?.state === 'recording' || snapshot.status?.state === 'paused';
   const disabled = snapshot.busy || picker.busy || !snapshot.status || props.poweredOn === false;
   const fieldsLocked = disabled || locked || !props.enabled;
@@ -77,9 +79,11 @@ export function RecorderControls(props: {
       </div>
       <RecorderError error={snapshot.error ?? picker.error} />
       <NodeOptionsSection
+        actions={props.optionsActions}
+        disabled={props.poweredOn === false}
         label={t('routing.nodes.options')}
         opened={optionsOpened}
-        onToggle={() => setOptionsOpened((opened) => !opened)}
+        onToggle={toggleOptions}
       >
         <SelectField
           label={t('recorder.channels')}

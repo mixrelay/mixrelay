@@ -2,9 +2,10 @@ import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentType, CSSProperties, PropsWithChildren } from 'react';
 import { useState } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { assert, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mixrelayTheme } from '../theme/MixRelayProvider';
 import { NodeOptionsSection } from '../ui/NodeOptionsSection';
+import { useNodeOptionsState } from '../ui/nodeOptionsState';
 import { AudioGraphCanvas, type AudioGraphViewport } from './AudioGraphCanvas';
 import type { AudioGraphModel } from './model';
 
@@ -238,6 +239,9 @@ function MockReactFlow({ children, ...props }: PropsWithChildren<Record<string, 
       />
       <MockMoveAction onNodesChange={props.onNodesChange as never} />
       <MockViewportActions props={props} />
+      <button type="button" onClick={props.onPaneClick as () => void}>
+        Graph background
+      </button>
       {children}
     </div>
   );
@@ -344,16 +348,50 @@ it('resets the resize grip translation independently of stylesheet transforms', 
 });
 
 function RecorderDisclosureFixture() {
-  const [opened, setOpened] = useState(false);
+  const { opened, toggle } = useNodeOptionsState();
   return (
     <>
       <span>Transport</span>
-      <NodeOptionsSection label="Options" opened={opened} onToggle={() => setOpened(!opened)}>
+      <NodeOptionsSection label="Options" opened={opened} onToggle={toggle}>
         <div style={{ height: 400 }}>Recording settings</div>
       </NodeOptionsSection>
     </>
   );
 }
+
+it('shares one open Options panel across regular and recorder nodes and closes on the pane', () => {
+  const graph = model();
+  graph.nodes = graph.nodes.map((node) =>
+    node.id === 'source'
+      ? { ...node, appearance: { ...node.appearance, gainControl: { label: 'Level', valueDb: 0 } } }
+      : node,
+  );
+  render(
+    <CanvasTestProvider>
+      <AudioGraphCanvas
+        ariaLabel="Routing graph"
+        model={graph}
+        onModelChange={vi.fn()}
+        onNodeGainChange={vi.fn()}
+        renderNodeContent={(node) => (node.id === 'sink' ? <RecorderDisclosureFixture /> : null)}
+      />
+    </CanvasTestProvider>,
+  );
+  const [gain, recorder] = screen.getAllByRole('button', { name: 'Options' });
+  assert(gain && recorder);
+  fireEvent.click(gain);
+  expect(gain).toHaveAttribute('aria-expanded', 'true');
+  fireEvent.click(recorder);
+  expect(gain).toHaveAttribute('aria-expanded', 'false');
+  expect(recorder).toHaveAttribute('aria-expanded', 'true');
+  fireEvent.click(gain);
+  expect(recorder).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(screen.getByRole('button', { name: 'Graph background' }));
+  expect(gain).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(recorder);
+  fireEvent.click(screen.getByRole('button', { name: 'Graph background' }));
+  expect(recorder).toHaveAttribute('aria-expanded', 'false');
+});
 
 function recorderCanvas(channels: number) {
   const graph: AudioGraphModel = {

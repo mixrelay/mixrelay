@@ -1,14 +1,43 @@
-.root {
+.power {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+.track {
   display: flex;
-  gap: 2px;
   align-items: center;
+  width: 22px;
+  height: 12px;
+  padding: 2px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: #45494d;
+}
+.thumb {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c0c5cc;
+  transition: transform 120ms ease;
+}
+.power[aria-checked="true"] .track {
+  background: #63877d;
+}
+.power[aria-checked="true"] .thumb {
+  background: #f4f6fa;
+  transform: translateX(10px);
 }
 .button {
   display: grid;
   place-items: center;
-  width: 23px;
-  height: 23px;
-  padding: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 3px;
   border: 0;
   border-radius: 3px;
   background: transparent;
@@ -27,17 +56,16 @@
 .button:hover:not(:disabled) {
   background: var(--surface-raised);
 }
-.button:focus-visible {
+.button:focus-visible,
+.power:focus-visible {
   outline: 1px solid var(--signal);
   outline-offset: -1px;
-}
-.button[data-action="power"][aria-pressed="true"] {
-  color: var(--signal);
 }
 .button[data-action="mute"][aria-pressed="true"] {
   color: var(--amber);
   background: color-mix(in srgb, var(--amber) 10%, transparent);
 }
-.button:disabled {
+.button:disabled,
+.power:disabled {
   opacity: 0.4;
 }

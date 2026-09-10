@@ -51,6 +51,7 @@ import {
   HierarchicalMenuButton,
   type HierarchicalMenuItem,
 } from '../ui/HierarchicalMenu';
+import { NodeOptionsContext, type NodeOptionsState } from '../ui/nodeOptionsState';
 import styles from './AudioGraphCanvas.module.css';
 import {
   type AudioGraphConnection,
@@ -112,9 +113,13 @@ const NodeProcessorEditorContext = createContext<NodeProcessorEditorContextValue
 const NodeContentContext = createContext<((node: AudioGraphNode) => ReactNode) | undefined>(
   undefined,
 );
-const NodeHeaderActionsContext = createContext<((node: AudioGraphNode) => ReactNode) | undefined>(
-  undefined,
-);
+export interface AudioNodeControlSlots {
+  power?: ReactNode;
+  mute?: ReactNode;
+}
+const NodeControlsContext = createContext<
+  ((node: AudioGraphNode) => AudioNodeControlSlots | null) | undefined
+>(undefined);
 export type AudioGraphChangeKind = 'layout' | 'level' | 'processor_parameter' | 'runtime';
 export interface AudioGraphViewport {
   x: number;
@@ -140,7 +145,7 @@ interface AudioPortSelectionContextValue {
 const AudioPortSelectionContext = createContext<AudioPortSelectionContextValue | null>(null);
 
 export interface AudioGraphCanvasProps {
-  renderNodeHeaderActions?: (node: AudioGraphNode) => ReactNode;
+  renderNodeControls?: (node: AudioGraphNode) => AudioNodeControlSlots | null;
   renderNodeContent?: (node: AudioGraphNode) => ReactNode;
   contextMenuLabels?: GraphContextMenuLabels;
   addNodeLabel?: string;
@@ -175,6 +180,7 @@ export type AudioGraphNodeMenuItem = HierarchicalMenuItem;
 
 function AudioGraphProviders({
   children,
+  options,
   editor,
   meterStore,
   model,
@@ -183,9 +189,10 @@ function AudioGraphProviders({
   onParameterChange,
   selectedRef,
   renderNodeContent,
-  renderNodeHeaderActions,
+  renderNodeControls,
 }: {
   children: ReactNode;
+  options: NodeOptionsState;
   editor: NodeProcessorEditorContextValue | null;
   meterStore: AudioMeterStore | null;
   model: AudioGraphModel;
@@ -194,7 +201,7 @@ function AudioGraphProviders({
   onParameterChange: AudioGraphCanvasProps['onNodeParameterChange'];
   selectedRef: AudioPortSelectionContextValue['selectedRef'];
   renderNodeContent: AudioGraphCanvasProps['renderNodeContent'];
-  renderNodeHeaderActions: AudioGraphCanvasProps['renderNodeHeaderActions'];
+  renderNodeControls: AudioGraphCanvasProps['renderNodeControls'];
 }) {
   return (
     <AudioMeterProvider store={meterStore}>
@@ -204,9 +211,11 @@ function AudioGraphProviders({
             <NodeGainContext.Provider value={onGainChange}>
               <AudioPortSelectionContext.Provider value={{ model, selectedRef }}>
                 <NodeContentContext.Provider value={renderNodeContent}>
-                  <NodeHeaderActionsContext.Provider value={renderNodeHeaderActions}>
-                    {children}
-                  </NodeHeaderActionsContext.Provider>
+                  <NodeControlsContext.Provider value={renderNodeControls}>
+                    <NodeOptionsContext.Provider value={options}>
+                      {children}
+                    </NodeOptionsContext.Provider>
+                  </NodeControlsContext.Provider>
                 </NodeContentContext.Provider>
               </AudioPortSelectionContext.Provider>
             </NodeGainContext.Provider>
@@ -252,12 +261,14 @@ function useCanvasViewActions(
   };
 }
 
-function useNodeMenu() {
+function useNodeMenu(onOpenedChange?: (opened: boolean) => void) {
   const rootRef = useRef<HTMLElement | null>(null);
   const flowRef = useRef<ReactFlowInstance<AudioFlowNode, AudioFlowEdge> | null>(null);
   const positionRef = useRef<XYPosition>({ x: 0, y: 0 });
   const [buttonOpened, setButtonOpened] = useState(false);
   const [contextOpened, setContextOpened] = useState(false);
+  const opened = buttonOpened || contextOpened;
+  useEffect(() => onOpenedChange?.(opened), [opened, onOpenedChange]);
   const close = useCallback(() => {
     setButtonOpened(false);
     setContextOpened(false);
@@ -1145,14 +1156,13 @@ export function AudioGraphCanvas({
   processorEditorLabels,
   processorEditorStatuses = emptyProcessorEditorStatuses,
   renderNodeContent,
-  renderNodeHeaderActions,
+  renderNodeControls,
   viewport,
   onViewportChange,
 }: AudioGraphCanvasProps) {
-  const nodeMenu = useNodeMenu();
+  const options = useState<string | null>(null);
+  const nodeMenu = useNodeMenu(onNodeMenuOpenedChange);
   const viewportEvents = useCanvasViewport(viewport, onViewportChange, nodeMenu);
-  const menuOpened = nodeMenu.buttonOpened || nodeMenu.contextOpened;
-  useEffect(() => onNodeMenuOpenedChange?.(menuOpened), [menuOpened, onNodeMenuOpenedChange]);
   const { applyEdgeChanges, applyNodeChanges, edges, nodes, setEdges, setNodes } =
     useAudioFlowCollections(model);
   const selectEdges = useEdgeBoxSelection(setEdges);
@@ -1200,6 +1210,7 @@ export function AudioGraphCanvas({
       captureProps={portSelection.captureProps}
     >
       <AudioGraphProviders
+        options={options}
         editor={editorContext}
         meterStore={meterStore ?? null}
         model={model}
@@ -1208,7 +1219,7 @@ export function AudioGraphCanvas({
         onParameterChange={onNodeParameterChange}
         selectedRef={portSelection.selectedRef}
         renderNodeContent={renderNodeContent}
-        renderNodeHeaderActions={renderNodeHeaderActions}
+        renderNodeControls={renderNodeControls}
       >
         <GraphFlowSurface
           {...viewportEvents}
@@ -1222,7 +1233,10 @@ export function AudioGraphCanvas({
           onEdgeDoubleClick={onEdgeDoubleClick}
           onEdgesChange={applyEdgeChanges}
           onNodesChange={onNodesChange}
-          onPaneClick={onPaneClick}
+          onPaneClick={() => {
+            options[1](null);
+            onPaneClick();
+          }}
           onReconnect={onReconnect}
           onReconnectEnd={onReconnectEnd}
         >
@@ -1245,7 +1259,7 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
   const onNodeParameterChange = useContext(NodeParameterContext);
   const processorEditors = useContext(NodeProcessorEditorContext);
   const renderNodeContent = useContext(NodeContentContext);
-  const renderNodeHeaderActions = useContext(NodeHeaderActionsContext);
+  const controls = useContext(NodeControlsContext)?.(graphNode);
   const updateNodeInternals = useUpdateNodeInternals();
   const editorStatus = processorEditors?.statuses.get(graphNode.id);
   const editorWidth = editorStatus?.state === 'open' ? editorStatus.width : null;
@@ -1270,20 +1284,12 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
         minHeight: layout.minHeight,
       }}
     >
-      {graphNode.inputPorts.map((port, index) => (
-        <AudioPortHandle
-          top={audioNodePortTop(layout.ports, index, graphNode.inputPorts.length)}
-          index={index}
-          key={port.id}
-          nodeId={graphNode.id}
-          port={port}
-          side="input"
-        />
-      ))}
+      <NodePortHandles node={graphNode} geometry={layout.ports} side="input" />
       <AudioNodeCard
         {...graphNode.appearance}
         content={renderNodeContent?.(graphNode)}
-        headerActions={renderNodeHeaderActions?.(graphNode)}
+        optionsActions={controls?.power}
+        muteControl={controls?.mute}
         poweredOff={graphNode.runtime?.control?.enabled === false}
         faceHeight={layout.face.height}
         faceMode={graphNodeFaceMode(graphNode)}
@@ -1318,19 +1324,32 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
         selected={selected}
         showPorts={false}
       />
-      {graphNode.outputPorts.map((port, index) => (
-        <AudioPortHandle
-          top={audioNodePortTop(layout.ports, index, graphNode.outputPorts.length)}
-          index={index}
-          key={port.id}
-          nodeId={graphNode.id}
-          port={port}
-          side="output"
-        />
-      ))}
+      <NodePortHandles node={graphNode} geometry={layout.ports} side="output" />
       <NodeResizeGrip minHeight={layout.minHeight} />
     </div>
   );
+}
+
+function NodePortHandles({
+  node,
+  geometry,
+  side,
+}: {
+  node: AudioGraphNode;
+  geometry: Parameters<typeof audioNodePortTop>[0];
+  side: AudioPortSide;
+}) {
+  const ports = side === 'input' ? node.inputPorts : node.outputPorts;
+  return ports.map((port, index) => (
+    <AudioPortHandle
+      top={audioNodePortTop(geometry, index, ports.length)}
+      index={index}
+      key={port.id}
+      nodeId={node.id}
+      port={port}
+      side={side}
+    />
+  ));
 }
 
 function NodeResizeGrip({ minHeight }: { minHeight: number }) {

@@ -16,6 +16,23 @@ existing ownership boundaries.
 | Recorder | Finalize the take and stop capture; ON does not restart recording | Continue recording, writing silence at the input boundary |
 
 Internal device buses and native transport nodes are not exposed as user controls.
+The node Options row contains a 22x12px pill power switch in a 26x24px hit area,
+vertically centered with the disclosure. Closed rows reserve 12px at the right
+edge for the 10px corner resize grip; expanded rows use 6px right padding.
+Mute sits beside the gain slider, or beside the meters when no gain control exists.
+Compact plug-ins place mute in their level-control area. Power and mute remain
+independent of disabled gain/parameter controls. Recorder power uses its own Options
+row. Nodes without settings use a power-only row; generic plug-in parameters stay
+visible without a disclosure. Commands share the current graph writer and capability
+discovery. No hardware plug-in or external settings window is included.
+Power uses a low-saturation green. Base cables use gray-teal at 1.5px and selected
+cables use a lighter 2px stroke. These are base/selection colors only; the current
+UI does not yet expose PCM-conversion classification on cables.
+Each canvas permits one open Options disclosure across regular and recorder nodes.
+Opening another disclosure closes the previous one; a blank-pane click closes it.
+The recorder uses an explicit face/control grid so extra height belongs to the
+meter face, not a blank footer below Options. The toolbar omits application-state
+badges while retaining busy guards, error alerts, and recovery actions.
 OFF preserves authored connections, parameters, and geometry. Shared device/source
 owners are composed from remaining enabled references. MUTE does not reset
 surviving unchanged compressor/limiter envelopes or shared bus snapshot history.
@@ -196,3 +213,39 @@ launchd runs=2 only after explicit app launch). Ready status remained 48 kHz /
 256 frames with zero underruns/overruns. Native UI screenshots confirmed the small
 New Graph row and visible collapsed chevron, and clicking that chevron restored
 the three-item list. The app was left open with the graph list expanded.
+
+### Node power and mute UI verification
+
+- Changed-boundary UI/API tests: 10 files / 101 tests passed. Biome, type checking,
+  UI boundaries, `cargo fmt --all --check`, desktop strict Clippy, and 37 desktop
+  tests passed. Normal debug app bundle built successfully; Vite's large-chunk
+  advisory remains (856.44 kB minified JS).
+- Native app screenshot verified pill power switches centered in Options rows,
+  microphone mute beside its gain slider, and recorder/output mute beside meters.
+  All switches keep clearance from the resize grip.
+- The recorder pill switched OFF to ON and back to OFF, with Record becoming
+  enabled then disabled. Its disclosure stayed folded; no recording was started.
+  The microphone Options panel was left open to show the gain/mute arrangement.
+- Meter mute positioning uses a separate measured face height without changing
+  minimum geometry. Independent source review checked the resize calculation;
+  a live tall-node resize was not exercised in this pass.
+- Before reopening the new bundle, keyboard Quit left no desktop/engine process
+  or port 19341 listener. The new app was left running with the original node
+  power and mute values restored.
+
+### Final UI pass
+
+- Changed-boundary tests: 11 files / 107 tests passed; the final test typing cleanup
+  was followed by another 3-file / 33-test run. Type checking, Biome, UI boundaries,
+  and diff whitespace checks passed. Desktop fmt, strict Clippy, and 37 desktop
+  tests passed; no Rust source changed. The final normal debug app bundle built
+  successfully (856.38 kB minified JS; existing chunk-size advisory remains).
+- Native screenshots confirmed the recorder footer no longer leaves a blank strip
+  below its closed Options row. A WebKit fixture also checked the face/control grid;
+  the earlier flex-layout gap was visible in the installed app, not that fixture.
+- In the final app, opening microphone Options then recorder Options collapsed the
+  microphone panel. Clicking the empty canvas collapsed recorder Options. No gain,
+  power, mute, or recording command was sent during this check. The app remains open
+  with both disclosures closed, recording stopped, and buffer size 32.
+- Normal Quit before reopening left no desktop/engine process or port 19341 listener.
+  Temporary layout-probe source files were removed and are not part of the commit.

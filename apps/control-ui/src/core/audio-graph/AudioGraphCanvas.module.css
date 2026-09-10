@@ -71,8 +71,8 @@
 
 .root :global(.react-flow__edge-path),
 .root :global(.react-flow__connection-path) {
-  stroke: var(--signal);
-  stroke-width: 1.75;
+  stroke: #84969b;
+  stroke-width: 1.5;
 }
 
 .root :global(svg.react-flow__connectionline) {
@@ -80,8 +80,8 @@
 }
 
 .root :global(.react-flow__edge.selected .react-flow__edge-path) {
-  stroke: #d8e3fa;
-  stroke-width: 2.5;
+  stroke: #c2d1d3;
+  stroke-width: 2;
 }
 
 .node {
@@ -101,10 +101,10 @@
   place-items: end;
   top: auto;
   left: auto;
-  right: 3px;
-  bottom: 3px;
-  width: 14px;
-  height: 14px;
+  right: 1px;
+  bottom: 1px;
+  width: 10px;
+  height: 10px;
   border: none;
   border-radius: 0;
   transform: none;
@@ -114,6 +114,8 @@
 
 .resizeHandle > svg {
   display: block;
+  width: 10px;
+  height: 10px;
 }
 
 .node .resizeHandle {
@@ -125,12 +127,12 @@
 }
 
 .handle {
-  --port-accent: #a9c2ed;
-  --port-accent-border: #829cc8;
-  --port-accent-ring: rgba(141, 168, 220, 0.18);
-  --port-selected: #d7e3fa;
-  --port-selected-border: #a8bde2;
-  --port-selected-ring: rgba(141, 168, 220, 0.24);
+  --port-accent: #9fadb0;
+  --port-accent-border: #73878c;
+  --port-accent-ring: rgba(132, 150, 155, 0.18);
+  --port-selected: #d0ddde;
+  --port-selected-border: #a7bcbe;
+  --port-selected-ring: rgba(132, 150, 155, 0.24);
 
   z-index: 3;
   /* React Flow anchors cables to this box, not the expanded pointer target. */

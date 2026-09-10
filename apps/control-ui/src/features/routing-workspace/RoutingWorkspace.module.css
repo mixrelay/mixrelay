@@ -43,17 +43,6 @@
   border-bottom-color: var(--signal);
 }
 
-.syncState {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  color: var(--muted);
-  font-size: 10px;
-  white-space: nowrap;
-}
-
 .headerActions {
   flex-shrink: 0;
   padding-left: 10px;
@@ -72,21 +61,6 @@
 .headerActions button:hover {
   background: var(--surface-raised);
   color: var(--text);
-}
-
-.syncState > span {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--amber);
-}
-
-.syncState[data-tone="positive"] > span {
-  background: var(--positive);
-}
-
-.syncState[data-tone="critical"] > span {
-  background: var(--red);
 }
 
 .canvas {

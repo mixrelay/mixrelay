@@ -289,6 +289,15 @@ function expectActiveWorkspace() {
   expect(screen.queryByText('Active')).not.toBeInTheDocument();
 }
 
+function expectBlockedWorkspace() {
+  expect(screen.getByRole('textbox', { name: 'Graph name' }).closest('section')).toHaveAttribute(
+    'data-state',
+    'blocked',
+  );
+  expect(screen.queryByText('Not applied')).not.toBeInTheDocument();
+  expect(screen.getByRole('alert')).toBeInTheDocument();
+}
+
 function renderWorkspace(controlPort: ControlPort, onBusyChange?: (busy: boolean) => void) {
   return render(workspace(controlPort, onBusyChange));
 }
@@ -483,10 +492,10 @@ describe('RoutingWorkspace processor discovery evidence', () => {
     const mounted = render(view(document));
     await waitFor(() => expect(screen.getByTestId('edge-count')).toHaveTextContent('2'));
     fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
-    await screen.findByText('Not applied');
+    await waitFor(expectBlockedWorkspace);
     mounted.rerender(view({ ...document, revision: 5 }));
     expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
-    expect(screen.getByText('Not applied')).toBeInTheDocument();
+    expectBlockedWorkspace();
     expect(source.applyGraph).toHaveBeenCalledTimes(1);
   });
   it('shows incomplete search in the menu until a real retry finishes cleanly', async () => {
@@ -967,7 +976,7 @@ describe('RoutingWorkspace application', () => {
     const controlPort = port();
     renderWorkspace(controlPort);
 
-    expect(screen.getAllByText('Loading engine')).toHaveLength(2);
+    expect(screen.getByText('Loading engine')).toBeInTheDocument();
     expect(
       await screen.findByRole('region', { name: 'MixRelay virtual I/O routing graph' }),
     ).toBeInTheDocument();
@@ -1006,7 +1015,7 @@ describe('RoutingWorkspace application', () => {
     expect(onBusyChange).toHaveBeenLastCalledWith(false);
     fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
     await act(async () => Promise.resolve());
-    expect(screen.getByText('Applying')).toBeInTheDocument();
+    expect(screen.queryByText('Applying')).not.toBeInTheDocument();
     expect(onBusyChange).toHaveBeenLastCalledWith(true);
     await act(async () => vi.advanceTimersByTimeAsync(200));
     expectActiveWorkspace();
@@ -1040,7 +1049,7 @@ describe('RoutingWorkspace recovery', () => {
     await screen.findByRole('region');
     const originalEdges = screen.getByTestId('edge-count').textContent;
     fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
-    await screen.findByText('Not applied');
+    await waitFor(expectBlockedWorkspace);
     fireEvent.keyDown(window, { key: 'z', metaKey: true });
     expect(screen.getByTestId('edge-count').textContent).toBe(originalEdges);
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true });
@@ -1065,7 +1074,7 @@ describe('RoutingWorkspace recovery', () => {
     await screen.findByRole('region');
     const originalEdges = screen.getByTestId('edge-count').textContent;
     fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
-    await screen.findByText('Not applied');
+    await waitFor(expectBlockedWorkspace);
     fireEvent.click(screen.getByRole('button', { name: 'Discard edits and reload engine' }));
     await waitFor(expectActiveWorkspace);
     expect(screen.getByTestId('edge-count').textContent).toBe(originalEdges);
@@ -1222,7 +1231,7 @@ describe('RoutingWorkspace failures', () => {
     expect(
       await screen.findByText('The engine rejected an invalid audio graph.'),
     ).toBeInTheDocument();
-    expect(screen.getByText('Not applied')).toBeInTheDocument();
+    expectBlockedWorkspace();
     expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
     view.unmount();
 
@@ -1262,7 +1271,7 @@ describe('RoutingWorkspace failure recovery', () => {
   it('shows unavailable state when the initial graph cannot be loaded', async () => {
     await i18n.changeLanguage('en');
     renderWorkspace(port({ getGraph: vi.fn().mockRejectedValue(new Error('offline')) }));
-    expect(await screen.findAllByText('Engine unavailable')).toHaveLength(2);
+    expect(await screen.findByText('Engine unavailable')).toBeInTheDocument();
   });
 
   it('returns a pending polling failure to an editable state', async () => {
@@ -1279,7 +1288,7 @@ describe('RoutingWorkspace failure recovery', () => {
     await screen.findByRole('region');
     fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
     expect(await screen.findByText('The local audio engine is unavailable.')).toBeInTheDocument();
-    expect(screen.getByText('Not applied')).toBeInTheDocument();
+    expect(screen.queryByText('Not applied')).not.toBeInTheDocument();
   });
 
   it('ignores initial responses after unmount and cancels a scheduled activation poll', async () => {

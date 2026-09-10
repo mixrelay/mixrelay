@@ -28,15 +28,6 @@
   opacity: 0.48;
 }
 
-.headerActions {
-  position: absolute;
-  top: 1px;
-  right: 3px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-}
-
 .button {
   display: grid;
   grid-template-rows: 26px minmax(0, 1fr) 23px;
@@ -64,6 +55,15 @@
 .root[data-face-mode="compact"] .button {
   grid-template-rows: 1fr;
   flex: 0 0 26px;
+}
+
+.root[data-face-mode="channel-rows"] {
+  display: grid;
+  grid-template-rows: minmax(var(--audio-node-face-height), 1fr) auto;
+}
+
+.root[data-face-mode="channel-rows"] .button {
+  height: 100%;
 }
 
 .content {
@@ -254,14 +254,34 @@
   cursor: default;
 }
 
+.optionsRow {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  padding-right: 12px;
+}
+
+.optionsRow:has(+ .optionsPanel) {
+  padding-right: 6px;
+}
+
+.optionsActions {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
 .root .optionsToggle {
   display: flex;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   height: 24px;
   align-items: center;
   gap: 5px;
   padding: 0 var(--node-inset);
-  border-top: 1px solid var(--line);
   color: var(--muted);
   font: 500 9px / 1 var(--mantine-font-family);
   text-align: left;
@@ -510,12 +530,29 @@
   box-shadow: 0 0 0 1px #74654c;
 }
 
-.root[data-header-actions="true"] .topLine {
-  padding-right: 52px;
-}
 .root[data-powered-off="true"] .body {
   opacity: 0.45;
 }
 .root[data-powered-off="true"] .icon {
   color: var(--muted);
+}
+
+.gainControl[data-mute-control="true"] {
+  grid-template-columns: 41px minmax(0, 1fr) 20px;
+}
+.meterActions {
+  position: absolute;
+  right: var(--node-inset);
+  top: calc((var(--audio-node-rendered-face-height) + 3px) / 2 - 10px);
+}
+.root[data-face-mode="channel-rows"] .meterActions {
+  top: calc((var(--audio-node-rendered-face-height) + 26px) / 2 - 10px);
+}
+.root[data-meter-actions] .body {
+  padding-right: calc(var(--node-inset) + 28px);
+}
+.levelActions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px var(--node-inset);
 }

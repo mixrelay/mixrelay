@@ -20,7 +20,7 @@ import type {
 } from '../../core/control-port/types';
 import { ControlPortError } from '../../core/control-port/types';
 import { useUndoHistory } from '../../core/history/useUndoHistory';
-import { NodeSignalControls } from '../../core/ui/NodeSignalControls';
+import { NodeMuteButton, NodePowerToggle } from '../../core/ui/NodeSignalControls';
 import { RecoveryActions } from '../../core/ui/RecoveryActions';
 import { RetryAlert } from '../../core/ui/RetryAlert';
 import { WorkspaceHeader } from '../../core/ui/WorkspaceHeader';
@@ -239,11 +239,6 @@ function audioOutputItemId(device: AudioDeviceDescriptor): string {
 
 function supportedChannelCount(channels: number): number {
   return Math.max(1, Math.min(64, Math.trunc(channels)));
-}
-
-function workspaceStatusTone(state: WorkspaceState): 'critical' | 'positive' | 'warning' {
-  if (state === 'active') return 'positive';
-  return state === 'unavailable' ? 'critical' : 'warning';
 }
 
 function useRoutingNodeGain(model: AudioGraphModel | null, updateModel: UpdateModel) {
@@ -942,7 +937,6 @@ function WorkspaceView(props: WorkspaceViewProps) {
     <section className={styles.root} data-state={state}>
       <WorkspaceToolbar
         title={props.title}
-        state={state}
         onTitleChange={props.onTitleChange}
         headerActions={props.headerActions}
       />
@@ -960,18 +954,14 @@ function WorkspaceView(props: WorkspaceViewProps) {
       {presentedModel && props.layout.loaded ? (
         <div className={styles.canvas} inert={props.layout.loading}>
           <AudioGraphCanvas
-            renderNodeHeaderActions={(node) => nodeHeaderControls(props, node, t, nodeControls)}
+            renderNodeControls={(node) =>
+              canvasNodeControls(node, nodeSignalControls(props, node, t, nodeControls))
+            }
             renderNodeContent={(node) =>
-              node.runtime?.control?.enabled !== false &&
-              processorEditors.statuses.get(node.id)?.state === 'open' ? (
-                <NativeProcessorSurface
-                  port={controlPort}
-                  nodeId={node.id}
-                  title={node.appearance.title}
-                />
-              ) : (
-                recorderNodeContent(props, node, presentedModel)
-              )
+              workspaceNodeContent(props, node, presentedModel, {
+                editorOpen: processorEditors.statuses.get(node.id)?.state === 'open',
+                actions: nodeSignalControls(props, node, t, nodeControls)?.power,
+              })
             }
             viewport={props.layout.layout.viewport}
             onViewportChange={props.layout.updateViewport}
@@ -1003,10 +993,9 @@ function WorkspaceView(props: WorkspaceViewProps) {
 
 function WorkspaceToolbar({
   title,
-  state,
   onTitleChange,
   headerActions,
-}: Pick<WorkspaceViewProps, 'title' | 'state' | 'onTitleChange' | 'headerActions'>) {
+}: Pick<WorkspaceViewProps, 'title' | 'onTitleChange' | 'headerActions'>) {
   const { t } = useTranslation();
   return (
     <WorkspaceHeader className={styles.toolbar}>
@@ -1026,25 +1015,38 @@ function WorkspaceToolbar({
           value={title ?? t('studio.untitledGraph')}
         />
       </div>
-      {state !== 'active' ? (
-        <span className={styles.syncState} data-tone={workspaceStatusTone(state)}>
-          <span aria-hidden="true" />
-          {t(`routing.states.${state}`)}
-        </span>
-      ) : null}
       {headerActions ? <div className={styles.headerActions}>{headerActions}</div> : null}
     </WorkspaceHeader>
   );
+}
+
+function workspaceNodeContent(
+  props: WorkspaceViewProps,
+  node: AudioGraphNode,
+  model: AudioGraphModel,
+  presentation: { editorOpen: boolean; actions: ReactNode },
+) {
+  if (node.runtime?.control?.enabled !== false && presentation.editorOpen)
+    return (
+      <NativeProcessorSurface
+        port={props.controlPort}
+        nodeId={node.id}
+        title={node.appearance.title}
+      />
+    );
+  return recorderNodeContent(props, node, model, presentation.actions);
 }
 
 function recorderNodeContent(
   props: WorkspaceViewProps,
   node: AudioGraphNode,
   model: AudioGraphModel,
+  optionsActions: ReactNode,
 ) {
   if (node.runtime?.type !== 'recorder' || !props.graphId) return null;
   return (
     <RecorderControls
+      optionsActions={optionsActions}
       key={`${props.graphId}:${node.id}`}
       controlPort={props.controlPort}
       graphId={props.graphId}
@@ -1085,7 +1087,14 @@ function useWorkspaceNodeControls(props: WorkspaceViewProps) {
   );
 }
 
-function nodeHeaderControls(
+function canvasNodeControls(
+  node: AudioGraphNode,
+  controls: import('../../core/audio-graph/AudioGraphCanvas').AudioNodeControlSlots | null,
+) {
+  return node.runtime?.type === 'recorder' ? { ...controls, power: null } : controls;
+}
+
+function nodeSignalControls(
   props: WorkspaceViewProps,
   node: AudioGraphNode,
   t: TFunction,
@@ -1100,23 +1109,28 @@ function nodeHeaderControls(
     if (!disabled && props.graphId)
       void props.application.setNodeControl(props.graphId, nodeId, value);
   };
-  return (
-    <NodeSignalControls
-      {...control}
-      disabled={disabled}
-      power={entry.capabilities.power}
-      mute={entry.capabilities.mute}
-      powerLabel={t(
-        control.enabled ? 'routing.nodeControl.powerOff' : 'routing.nodeControl.powerOn',
-        { name: node.appearance.title },
-      )}
-      muteLabel={t(control.muted ? 'routing.nodeControl.unmute' : 'routing.nodeControl.mute', {
-        name: node.appearance.title,
-      })}
-      onPower={() => change({ enabled: !control.enabled })}
-      onMute={() => change({ muted: !control.muted })}
-    />
-  );
+  return {
+    power: entry.capabilities.power ? (
+      <NodePowerToggle
+        enabled={control.enabled}
+        disabled={disabled}
+        label={t(control.enabled ? 'routing.nodeControl.powerOff' : 'routing.nodeControl.powerOn', {
+          name: node.appearance.title,
+        })}
+        onChange={() => change({ enabled: !control.enabled })}
+      />
+    ) : null,
+    mute: entry.capabilities.mute ? (
+      <NodeMuteButton
+        muted={control.muted}
+        disabled={disabled}
+        label={t(control.muted ? 'routing.nodeControl.unmute' : 'routing.nodeControl.mute', {
+          name: node.appearance.title,
+        })}
+        onChange={() => change({ muted: !control.muted })}
+      />
+    ) : null,
+  };
 }
 
 function GraphPersistenceWarning({ error }: { error: string | null }) {

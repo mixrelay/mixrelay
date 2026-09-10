@@ -18,7 +18,8 @@ import {
   channelRowMetrics,
 } from './audioNodeLayout';
 import { Meter } from './Meter';
-import { NodeOptionsSection } from './NodeOptionsSection';
+import { NodeOptionsRow, NodeOptionsSection } from './NodeOptionsSection';
+import { useNodeOptionsState } from './nodeOptionsState';
 import { ProcessorTimingLabel } from './ProcessorTimingLabel';
 import type { StatusTone } from './StatusBadge';
 
@@ -50,7 +51,8 @@ export interface EndpointControl {
 }
 
 export interface AudioNodeCardProps {
-  headerActions?: ReactNode;
+  optionsActions?: ReactNode;
+  muteControl?: ReactNode;
   poweredOff?: boolean;
   processingTimeNs?: number;
   content?: ReactNode;
@@ -106,7 +108,8 @@ export interface AudioNodeCardProps {
 }
 
 export function AudioNodeCard({
-  headerActions,
+  optionsActions,
+  muteControl,
   poweredOff = false,
   processingTimeNs,
   bypassed = false,
@@ -151,16 +154,20 @@ export function AudioNodeCard({
     () => onContentHeightChange?.(contentBounds.height),
     [contentBounds.height, onContentHeightChange],
   );
-  const [optionsOpened, setOptionsOpened] = useState(false);
-  const hasGainControl = Boolean(gainControl && onGainChange);
-  const hasEndpointControl = Boolean(endpointControl && onEndpointChange);
-  const hasParameterControls =
-    parameterControls.length > 0 &&
-    Boolean(onParameterChange) &&
-    !prefersProcessorEditor(processorEditor);
+  const { opened: optionsOpened, toggle } = useNodeOptionsState();
+  const { hasGainControl, hasEndpointControl, hasParameterControls } = nodeOptionsAvailability({
+    gainControl,
+    onGainChange,
+    endpointControl,
+    onEndpointChange,
+    parameterControls,
+    onParameterChange,
+    processorEditor,
+  });
+  const levelMute = hasGainControl ? undefined : muteControl;
   const hasOptions = hasGainControl || hasEndpointControl || hasParameterControls;
   const toggleOptions = () => {
-    setOptionsOpened((opened) => !opened);
+    toggle();
     requestAnimationFrame(() => onLayoutChange?.());
   };
   return (
@@ -169,15 +176,15 @@ export function AudioNodeCard({
       data-bypassed={bypassed || undefined}
       data-offline={offline || undefined}
       data-powered-off={poweredOff}
-      data-header-actions={Boolean(headerActions)}
       data-endpoint-options={hasEndpointControl || undefined}
-      data-has-options={hasOptions || undefined}
+      data-has-options={hasOptions || Boolean(optionsActions) || undefined}
       data-metered={meterChannels > 0 || undefined}
+      data-meter-actions={Boolean(levelMute) || undefined}
       data-inline-controls={Boolean(content) || faceMode === 'channel-rows' || undefined}
       data-face-mode={faceMode}
       data-options-opened={optionsOpened || undefined}
       data-selected={selected || undefined}
-      style={audioNodeCardStyle({ faceHeight, faceMode, meterChannels, detail })}
+      style={audioNodeCardStyle({ faceHeight, faceMode, meterChannels, detail }, faceBounds.height)}
       withBorder
     >
       <AudioNodeFace
@@ -200,15 +207,16 @@ export function AudioNodeCard({
         statusTone={statusTone}
         title={title}
       />
-      <NodeHeaderActions>{headerActions}</NodeHeaderActions>
-      <AudioNodeControls
-        content={content}
-        faceMode={faceMode}
-        measureRef={contentRef}
-        disabled={poweredOff}
-      >
-        <ProcessorEditorOption control={processorEditor} onRetry={onProcessorEditorRetry} />
+      <NodeLevelMute control={levelMute} faceMode={faceMode} placement="face" />
+      <AudioNodeControls content={content} faceMode={faceMode} measureRef={contentRef}>
+        <NodeLevelMute control={levelMute} faceMode={faceMode} placement="settings" />
+        <div inert={poweredOff}>
+          <ProcessorEditorOption control={processorEditor} onRetry={onProcessorEditorRetry} />
+        </div>
         <NodeOptions
+          actions={optionsActions}
+          muteControl={hasGainControl ? muteControl : undefined}
+          disabled={poweredOff}
           endpointControl={endpointControl}
           gainControl={gainControl}
           hasOptions={hasOptions}
@@ -226,18 +234,47 @@ export function AudioNodeCard({
   );
 }
 
-function NodeHeaderActions({ children }: { children: ReactNode }) {
-  return children ? <div className={styles.headerActions}>{children}</div> : null;
+function nodeOptionsAvailability(
+  props: Pick<
+    AudioNodeCardProps,
+    | 'gainControl'
+    | 'onGainChange'
+    | 'endpointControl'
+    | 'onEndpointChange'
+    | 'parameterControls'
+    | 'onParameterChange'
+    | 'processorEditor'
+  >,
+) {
+  return {
+    hasGainControl: Boolean(props.gainControl && props.onGainChange),
+    hasEndpointControl: Boolean(props.endpointControl && props.onEndpointChange),
+    hasParameterControls:
+      Boolean(props.parameterControls?.length && props.onParameterChange) &&
+      !prefersProcessorEditor(props.processorEditor),
+  };
+}
+
+function NodeLevelMute({
+  control,
+  faceMode,
+  placement,
+}: {
+  control: ReactNode;
+  faceMode: AudioNodeFaceMode;
+  placement: 'face' | 'settings';
+}) {
+  const compact = faceMode === 'compact';
+  if (!control || compact !== (placement === 'settings')) return null;
+  return <div className={compact ? styles.levelActions : styles.meterActions}>{control}</div>;
 }
 
 function AudioNodeControls({
-  disabled,
   content,
   faceMode,
   measureRef,
   children,
 }: {
-  disabled?: boolean;
   content: ReactNode;
   faceMode: AudioNodeFaceMode;
   measureRef: Ref<HTMLDivElement>;
@@ -246,7 +283,7 @@ function AudioNodeControls({
   // Native surfaces stretch with the node. Only intrinsic settings constrain its minimum height.
   const compact = faceMode === 'compact';
   return (
-    <div ref={compact ? undefined : measureRef} className={styles.controls} inert={disabled}>
+    <div ref={compact ? undefined : measureRef} className={styles.controls}>
       {content ? <div className={`${styles.content} nodrag nopan nowheel`}>{content}</div> : null}
       <div ref={compact ? measureRef : undefined} className={styles.settings}>
         {children}
@@ -255,15 +292,15 @@ function AudioNodeControls({
   );
 }
 
-function audioNodeCardStyle({
-  faceHeight,
-  faceMode,
-  meterChannels,
-  detail,
-}: Pick<
-  AudioNodeCardProps,
-  'faceHeight' | 'faceMode' | 'meterChannels' | 'detail'
->): CSSProperties {
+function audioNodeCardStyle(
+  {
+    faceHeight,
+    faceMode,
+    meterChannels,
+    detail,
+  }: Pick<AudioNodeCardProps, 'faceHeight' | 'faceMode' | 'meterChannels' | 'detail'>,
+  renderedFaceHeight: number,
+): CSSProperties {
   const geometry = audioNodeFaceGeometry({
     channels: meterChannels,
     hasDetail: Boolean(detail),
@@ -273,6 +310,7 @@ function audioNodeCardStyle({
     faceMode === 'channel-rows' ? geometry.height : Math.max(faceHeight ?? 0, geometry.height);
   return {
     '--audio-node-face-height': `${height}px`,
+    '--audio-node-rendered-face-height': `${renderedFaceHeight > 0 ? renderedFaceHeight : height}px`,
     ...(faceMode === 'channel-rows'
       ? {
           '--audio-node-header-height': `${channelRowMetrics.headerHeight}px`,
@@ -422,6 +460,9 @@ function NodeStatus({ status, tone }: { status?: string; tone?: StatusTone }) {
 }
 
 function NodeOptions({
+  actions,
+  muteControl,
+  disabled,
   endpointControl,
   gainControl,
   hasOptions,
@@ -433,6 +474,9 @@ function NodeOptions({
   opened,
   parameterControls,
 }: {
+  actions?: ReactNode;
+  muteControl?: ReactNode;
+  disabled: boolean;
   endpointControl?: EndpointControl;
   gainControl?: { label: string; valueDb: number };
   hasOptions: boolean;
@@ -444,17 +488,24 @@ function NodeOptions({
   opened: boolean;
   parameterControls: NonNullable<AudioNodeCardProps['parameterControls']>;
 }) {
-  if (!hasOptions) return null;
+  if (!hasOptions) return <NodeOptionsRow actions={actions} />;
   const controls = (
     <>
       {endpointControl && onEndpointChange ? (
-        <EndpointOptions control={endpointControl} onChange={onEndpointChange} />
+        <div inert={disabled}>
+          <EndpointOptions control={endpointControl} onChange={onEndpointChange} />
+        </div>
       ) : null}
       {gainControl && onGainChange ? (
-        <NodeGainControl control={gainControl} onChange={onGainChange} />
+        <NodeGainControl
+          control={gainControl}
+          onChange={onGainChange}
+          disabled={disabled}
+          muteControl={muteControl}
+        />
       ) : null}
       {onParameterChange && parameterControls.length > 0 ? (
-        <div className={styles.parameterList}>
+        <div className={styles.parameterList} inert={disabled}>
           {parameterControls.map((control) => (
             <NodeParameterControl
               control={control}
@@ -467,9 +518,12 @@ function NodeOptions({
     </>
   );
   return parameterControls.length > 0 ? (
-    <div className={`${styles.optionsPanel} nodrag nopan nowheel`}>{controls}</div>
+    <>
+      <div className={`${styles.optionsPanel} nodrag nopan nowheel`}>{controls}</div>
+      <NodeOptionsRow actions={actions} />
+    </>
   ) : (
-    <NodeOptionsSection label={label} opened={opened} onToggle={onToggle}>
+    <NodeOptionsSection label={label} opened={opened} onToggle={onToggle} actions={actions}>
       {controls}
     </NodeOptionsSection>
   );
@@ -688,17 +742,25 @@ function endpointValue(
 function NodeGainControl({
   control,
   onChange,
+  disabled,
+  muteControl,
 }: {
   control: { label: string; valueDb: number };
   onChange: (gainDb: number) => void;
+  disabled: boolean;
+  muteControl?: ReactNode;
 }) {
   const [value, setValue] = useState(control.valueDb);
   useEffect(() => setValue(control.valueDb), [control.valueDb]);
   return (
-    <span className={`${styles.gainControl} nodrag nopan nowheel`}>
+    <span
+      className={`${styles.gainControl} nodrag nopan nowheel`}
+      data-mute-control={Boolean(muteControl)}
+    >
       <span className={styles.gainValue}>{value.toFixed(1)} dB</span>
       <Slider
         aria-label={control.label}
+        disabled={disabled}
         className={styles.gainSlider}
         label={null}
         max={12}
@@ -713,6 +775,7 @@ function NodeGainControl({
         thumbLabel={control.label}
         value={value}
       />
+      {muteControl}
     </span>
   );
 }
