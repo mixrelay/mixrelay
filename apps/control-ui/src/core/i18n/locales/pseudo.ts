@@ -22,6 +22,10 @@ export const pseudo = {
     },
   },
   audioSession: {
+    powerOn: '[Turn engine on]',
+    powerOff: '[Turn engine off]',
+    powerChanging: '[Switching engine…]',
+    powerFailed: '[Engine switch failed. Check the current state.]',
     diagnostics: '[Audio details]',
     processingRate: '[Processing sample rate]',
     processingBuffer: '[Buffer size]',
@@ -118,6 +122,12 @@ export const pseudo = {
       '[!! LÅÑ coñtröl ståÿs öff üñtïl thïs Måc éxplïcïtlÿ éñåblés påïrïñg—expanded !!]',
   },
   routing: {
+    nodeControl: {
+      powerOn: '[!! Enable {{name}} !!]',
+      powerOff: '[!! Disable {{name}} !!]',
+      mute: '[!! Mute {{name}} !!]',
+      unmute: '[!! Unmute {{name}} !!]',
+    },
     nodeStatus: {
       offline: '[Offline]',
       reselectApplication: '[Select the application again]',
@@ -225,6 +235,8 @@ export const pseudo = {
         '[!! Åpplïcåtïöñ åüdïö cåptüré ïs üñåvåïlåblé. Chéck thé åpp åñd pérmïssïöñ. !!]',
       control_unavailable: '[!! Thé löcål åüdïö éñgïñé ïs üñåvåïlåblé !!]',
       control_request_failed: '[!! Thé åüdïö çöñtröl réqüést fåïléd !!]',
+      node_not_found: '[!! Node no longer exists !!]',
+      node_disabled: '[!! Node is off !!]',
       graph_binding_unsupported:
         '[This audio format or connection is not supported by the selected device or processor.]',
       graph_exchange_busy: '[!! Thé prévïöüs gråph ïs stïll åctïvåtïñg !!]',

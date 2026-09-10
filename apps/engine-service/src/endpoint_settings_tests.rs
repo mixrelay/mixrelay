@@ -95,6 +95,7 @@ pub(super) fn endpoint_document(revision: u64, name: &str) -> GraphDocument {
     GraphDocument::new(
         revision,
         vec![NodeSpec {
+            control: mixrelay_audio_graph::NodeControl::default(),
             id: NodeId::from("graph-device"),
             label: Some(name.into()),
             config: NodeConfig::VirtualEndpoint(

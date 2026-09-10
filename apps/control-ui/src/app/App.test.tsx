@@ -58,7 +58,8 @@ describe('App composition', () => {
       </MixRelayProvider>,
     );
 
-    expect(screen.getByRole('heading', { name: 'Graphs' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'MixRelay' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Graphs' })).not.toBeInTheDocument();
     expect(await screen.findByRole('button', { name: /Untitled Graph/u })).toHaveAttribute(
       'aria-current',
       'page',
@@ -106,10 +107,7 @@ describe('App composition', () => {
       </MixRelayProvider>,
     );
     await act(async () => Promise.resolve());
-    expect(screen.getByRole('img', { name: 'Audio status unknown' })).toHaveAttribute(
-      'data-tone',
-      'warning',
-    );
+    expect(screen.getByRole('button', { name: 'Audio status unknown' })).toBeDisabled();
     expect(screen.queryByText('Not installed')).not.toBeInTheDocument();
     failedView.unmount();
 
@@ -127,4 +125,56 @@ describe('App composition', () => {
     pendingView.unmount();
     await act(async () => finishStatus({ ...status, driverState: 'ready' }));
   });
+});
+
+it('keeps file actions in the graph header and toggles navigation without changing the graph', async () => {
+  await i18n.changeLanguage('en');
+  const controlPort = new StorybookMockControlPort({
+    graph: { edges: [], nodes: [], revision: 1, schemaVersion: 2 },
+    graphStatus: { activeRevision: 1, protocolVersion: 1, submittedRevision: 1 },
+    status: {
+      bufferFrames: null,
+      driverState: 'not_installed',
+      overruns: 0,
+      protocolVersion: 1,
+      sampleRate: null,
+      underruns: 0,
+    },
+  });
+  const workspaceFile = vi.fn().mockResolvedValue(null);
+  Object.assign(controlPort, { workspaceFile });
+  const applyGraph = vi.spyOn(controlPort, 'applyGraph');
+  render(
+    <MixRelayProvider>
+      <I18nProvider>
+        <App controlPort={controlPort} />
+      </I18nProvider>
+    </MixRelayProvider>,
+  );
+  await waitFor(() => expect(screen.queryByText('Loading engine')).not.toBeInTheDocument());
+  expect(screen.queryByText('Active')).not.toBeInTheDocument();
+  const name = screen.getByRole('textbox', { name: 'Graph name' });
+  const file = screen.getByRole('button', { name: 'File' });
+  expect(file.closest('header')).toBe(name.closest('header'));
+  const sidebar = screen.getByRole('complementary', { name: 'Graphs' });
+  expect(within(sidebar).getByRole('button', { name: 'New graph' })).toBeInTheDocument();
+  const toggle = screen.getByRole('button', { name: 'Graphs' });
+  expect(toggle.closest('header')).toBeNull();
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  const callsBefore = applyGraph.mock.calls.length;
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  expect(sidebar).toHaveAttribute('hidden');
+  expect(screen.getByRole('heading', { name: 'MixRelay' })).toBeVisible();
+  expect(screen.getByRole('textbox', { name: 'Graph name' })).toBe(name);
+  expect(file).toBeInTheDocument();
+  fireEvent.click(toggle);
+  expect(sidebar).not.toHaveAttribute('hidden');
+  expect(applyGraph).toHaveBeenCalledTimes(callsBefore);
+  expect(workspaceFile).not.toHaveBeenCalled();
+  fireEvent.click(file);
+  // jsdom has no anchor geometry, so Floating UI may hide the mounted menu.
+  const menu = await screen.findByRole('menu', { hidden: true });
+  expect(within(menu).getByText('Open…')).toBeInTheDocument();
+  expect(within(menu).getByText('Save')).toBeInTheDocument();
 });

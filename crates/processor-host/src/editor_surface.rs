@@ -419,6 +419,7 @@ mod tests {
         let registry = ProcessorControlRegistry::default();
         let id = NodeId::from("effect");
         let config = mixrelay_audio_graph::ProviderNodeConfig {
+            ports: None,
             type_id: "au:aufx:bpas:appl".into(),
             parameters: serde_json::json!({}),
         };

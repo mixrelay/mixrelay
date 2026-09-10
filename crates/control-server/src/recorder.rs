@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use mixrelay_control_protocol::{ErrorCode, ProtocolError, RecorderRequest};
+use mixrelay_control_protocol::{ErrorCode, ProtocolError, RecorderControlRequest};
 
 use super::{ControlState, catalog_task, protocol_error_status};
 
@@ -31,7 +31,7 @@ pub(super) async fn status(
 pub(super) async fn control(
     State(state): State<ControlState>,
     Path((graph_id, node_id)): Path<(String, String)>,
-    request: Result<Json<RecorderRequest>, JsonRejection>,
+    request: Result<Json<RecorderControlRequest>, JsonRejection>,
 ) -> Response {
     let Json(request) = match request {
         Ok(request) => request,

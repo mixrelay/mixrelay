@@ -6,9 +6,9 @@
   position: relative;
   min-height: var(--audio-node-face-height, 116px);
   overflow: visible;
-  border-color: #363a41;
-  background: #1b1d21;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+  border-color: var(--line-strong);
+  background: var(--surface-node);
+  box-shadow: 0 2px 6px #0003;
   transition:
     border-color 120ms ease,
     box-shadow 120ms ease,
@@ -21,11 +21,20 @@
 
 .root[data-selected] {
   border-color: var(--signal);
-  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.42);
+  box-shadow: 0 2px 6px #0003;
 }
 
 .root[data-bypassed] {
   opacity: 0.48;
+}
+
+.headerActions {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  height: 24px;
+  display: flex;
+  align-items: center;
 }
 
 .button {
@@ -86,7 +95,7 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  border-bottom: 1px solid #2c2f35;
+  border-bottom: 1px solid var(--line);
 }
 
 .icon {
@@ -173,7 +182,7 @@
   flex-direction: column;
   justify-content: center;
   gap: 3px;
-  padding: var(--audio-node-body-padding, 7px) 11px;
+  padding: var(--audio-node-body-padding, 7px) var(--node-inset);
 }
 
 .root[data-face-mode="compact"] .body {
@@ -251,15 +260,15 @@
   height: 24px;
   align-items: center;
   gap: 5px;
-  padding: 0 11px;
-  border-top: 1px solid #2c2f35;
-  color: #9298a1;
-  font: 600 9px / 1 var(--mantine-font-family);
+  padding: 0 var(--node-inset);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font: 500 9px / 1 var(--mantine-font-family);
   text-align: left;
 }
 
 .root .optionsToggle:hover {
-  background: #1f2227;
+  background: var(--surface-raised);
   color: var(--text);
 }
 
@@ -289,15 +298,15 @@
 
 .optionsPanel {
   display: grid;
-  gap: 8px;
-  padding: 9px 11px 11px;
-  border-top: 1px solid #2c2f35;
-  background: #191b1f;
+  gap: var(--control-gap);
+  padding: var(--node-inset);
+  border-top: 1px solid var(--line);
+  background: var(--surface-inset);
 }
 
 .endpointOptions {
   display: grid;
-  gap: 7px;
+  gap: var(--control-gap);
 }
 
 .endpointChannels {
@@ -339,7 +348,7 @@
   margin-bottom: 4px;
   color: #80868f;
   font-size: 8px;
-  font-weight: 650;
+  font-weight: 500;
   letter-spacing: 0.02em;
 }
 
@@ -378,7 +387,7 @@
 
 .parameterList {
   display: grid;
-  gap: 8px;
+  gap: var(--control-gap);
 }
 
 .parameterLabel,
@@ -455,8 +464,8 @@
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 8px;
-  padding: 0 9px;
-  border-top: 1px solid #2c2f35;
+  padding: 0 var(--node-inset);
+  border-top: 1px solid var(--line);
   color: #747a83;
   font:
     600 7px ui-monospace,
@@ -499,4 +508,14 @@
 .inputPorts .port {
   background: var(--amber);
   box-shadow: 0 0 0 1px #74654c;
+}
+
+.root[data-header-actions="true"] .topLine {
+  padding-right: 52px;
+}
+.root[data-powered-off="true"] .body {
+  opacity: 0.45;
+}
+.root[data-powered-off="true"] .icon {
+  color: var(--muted);
 }

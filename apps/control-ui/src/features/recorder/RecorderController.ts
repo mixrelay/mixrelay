@@ -49,7 +49,7 @@ export class RecorderController {
     clearTimeout(this.timer);
   }
 
-  public readonly command = (request: RecorderRequest): void => {
+  public readonly command = (request: RecorderRequest, expectedRevision: number): void => {
     if (!this.active || this.snapshot.busy) return;
     clearTimeout(this.timer);
     this.commandError = null;
@@ -58,7 +58,12 @@ export class RecorderController {
     this.tail = this.tail.then(async () => {
       if (!this.active || generation !== this.generation) return;
       try {
-        const status = await this.port.controlRecorder(this.graphId, this.nodeId, request);
+        const status = await this.port.controlRecorder(
+          this.graphId,
+          this.nodeId,
+          request,
+          expectedRevision,
+        );
         if (generation !== this.generation) return;
         this.publish({ status, busy: false, error: status.error });
       } catch (error) {

@@ -73,22 +73,30 @@ describe('RecorderController requests', () => {
     );
     controller.start();
     await flush();
-    controller.command({
-      action: 'record',
-      path: '/takes/one.wav',
-      sampleRate: null,
-      encoding: 'float32',
-    });
-    controller.command({ action: 'record', path: '/takes/two.wav' });
+    controller.command(
+      {
+        action: 'record',
+        path: '/takes/one.wav',
+        sampleRate: null,
+        encoding: 'float32',
+      },
+      1,
+    );
+    controller.command({ action: 'record', path: '/takes/two.wav' }, 1);
     expect(write).not.toHaveBeenCalled();
     resolve(stopped);
     await flush();
-    expect(write).toHaveBeenCalledExactlyOnceWith('graph-a', 'recorder-1', {
-      action: 'record',
-      path: '/takes/one.wav',
-      sampleRate: null,
-      encoding: 'float32',
-    });
+    expect(write).toHaveBeenCalledExactlyOnceWith(
+      'graph-a',
+      'recorder-1',
+      {
+        action: 'record',
+        path: '/takes/one.wav',
+        sampleRate: null,
+        encoding: 'float32',
+      },
+      1,
+    );
     expect(controller.getSnapshot().status?.state).toBe('recording');
     controller.dispose();
   });
@@ -99,7 +107,7 @@ describe('RecorderController requests', () => {
     controller.start();
     await flush();
     write.mockRejectedValueOnce(new Error('Disk full'));
-    controller.command({ action: 'record', path: '/take.wav' });
+    controller.command({ action: 'record', path: '/take.wav' }, 1);
     await flush();
     expect(controller.getSnapshot()).toMatchObject({
       status: stopped,
@@ -108,7 +116,7 @@ describe('RecorderController requests', () => {
     });
     await vi.advanceTimersByTimeAsync(1000);
     expect(controller.getSnapshot().error).toBe('Disk full');
-    controller.command({ action: 'record', path: '/other/take.wav' });
+    controller.command({ action: 'record', path: '/other/take.wav' }, 1);
     await flush();
     expect(controller.getSnapshot().error).toBeNull();
     controller.dispose();
@@ -175,7 +183,7 @@ it('polls active recording every 100ms without extrapolating frames, then slows 
   const paused: RecorderStatus = { ...recording, state: 'paused' };
   write.mockResolvedValue(paused);
   read.mockResolvedValue(paused);
-  controller.command({ action: 'pause' });
+  controller.command({ action: 'pause' }, 1);
   await flush();
   await vi.advanceTimersByTimeAsync(999);
   expect(read).toHaveBeenCalledTimes(2);

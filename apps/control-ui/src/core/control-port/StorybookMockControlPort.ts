@@ -32,6 +32,49 @@ export interface StorybookControlState {
 }
 
 export class StorybookMockControlPort implements ControlPort {
+  public async getNodeControls(graphId: string): Promise<import('./types').GraphNodeControls> {
+    const document =
+      graphId === this.activeGraphId ? this.state.graph : this.savedGraphs.get(graphId)?.document;
+    if (!document) throw new Error('graph_invalid');
+    return {
+      graphId,
+      revision: document.revision,
+      nodes: document.nodes.map((node) => ({
+        nodeId: node.id,
+        label: node.label,
+        kind: node.type,
+        control: node.control ?? { enabled: true, muted: false },
+        capabilities: { power: true, mute: true, recorder: node.type === 'recorder' },
+      })),
+    };
+  }
+  public async updateNodeControl(
+    graphId: string,
+    nodeId: string,
+    request: import('./types').NodeControlRequest,
+  ): Promise<GraphApplyResponse> {
+    if (
+      graphId !== this.activeGraphId ||
+      request.expectedRevision !== this.state.graph.revision ||
+      !this.state.graph.nodes.some((node) => node.id === nodeId)
+    )
+      throw new Error('graph_revision_stale');
+    return this.applyGraph({
+      ...this.state.graph,
+      revision: request.expectedRevision + 1,
+      nodes: this.state.graph.nodes.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              control: {
+                enabled: request.enabled ?? node.control?.enabled ?? true,
+                muted: request.muted ?? node.control?.muted ?? false,
+              },
+            }
+          : node,
+      ),
+    });
+  }
   public async recorderStatus(_graphId: string, _nodeId: string): Promise<RecorderStatus> {
     return {
       state: 'stopped',

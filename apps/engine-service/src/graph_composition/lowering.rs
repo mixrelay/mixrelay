@@ -60,6 +60,7 @@ impl<'a> Builder<'a> {
         let native = device_node_id(&device.id, "native");
         self.node(NodeSpec {
             id: native.clone(),
+            control: mixrelay_audio_graph::NodeControl::default(),
             label: Some(device.display_name.clone()),
             config: NodeConfig::VirtualEndpointTransport(device.clone()),
         })?;
@@ -74,6 +75,7 @@ impl<'a> Builder<'a> {
         let mix = device_node_id(&device.id, "mix");
         self.node(NodeSpec {
             id: mix.clone(),
+            control: mixrelay_audio_graph::NodeControl::default(),
             label: None,
             config: NodeConfig::Mixer(MixerConfig {
                 inputs: vec![PortId::from(AUDIO_PORT_ID)],
@@ -83,6 +85,7 @@ impl<'a> Builder<'a> {
         let snapshot = device_node_id(&device.id, "snapshot");
         self.node(NodeSpec {
             id: snapshot.clone(),
+            control: mixrelay_audio_graph::NodeControl::default(),
             label: None,
             config: NodeConfig::DeviceBus { channels: width },
         })?;
@@ -230,6 +233,7 @@ impl<'a> Builder<'a> {
         if !self.outputs.contains_key(&reference.output_id) {
             self.node(NodeSpec {
                 id: native.clone(),
+                control: mixrelay_audio_graph::NodeControl::default(),
                 label: None,
                 config: NodeConfig::AudioDeviceOutput(config.clone()),
             })?;
@@ -239,6 +243,7 @@ impl<'a> Builder<'a> {
         let local = runtime_node_id(graph, &reference.node_id);
         self.node(NodeSpec {
             id: local.clone(),
+            control: reference.control,
             label: None,
             config: NodeConfig::Gain(GainConfig {
                 channels: reference.channels,
@@ -274,6 +279,7 @@ impl<'a> Builder<'a> {
         if !self.sources.contains_key(&reference.source_id) {
             self.node(NodeSpec {
                 id: native.clone(),
+                control: mixrelay_audio_graph::NodeControl::default(),
                 label: None,
                 config: config.clone(),
             })?;
@@ -283,6 +289,7 @@ impl<'a> Builder<'a> {
         let local = runtime_node_id(graph, &reference.node_id);
         self.node(NodeSpec {
             id: local.clone(),
+            control: reference.control,
             label: None,
             config: NodeConfig::Gain(GainConfig {
                 channels: reference.channels,
@@ -330,6 +337,7 @@ impl<'a> Builder<'a> {
             let node = reference_node_id(graph, &reference.node_id, "read");
             self.node(NodeSpec {
                 id: node.clone(),
+                control: reference.control,
                 label: None,
                 config: NodeConfig::Gain(GainConfig {
                     channels: read.channels,
@@ -370,6 +378,7 @@ impl<'a> Builder<'a> {
         let node = reference_node_id(graph, &reference.node_id, "write");
         self.node(NodeSpec {
             id: node.clone(),
+            control: reference.control,
             label: None,
             config: NodeConfig::Gain(GainConfig {
                 channels,

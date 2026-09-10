@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { recordingFileName } from './recordingFileName';
 
 import {
@@ -35,6 +36,39 @@ interface ControlProxyResponse {
 }
 
 export class TauriControlPort implements ControlPort {
+  public getNodeControls(graphId: string): Promise<import('./types').GraphNodeControls> {
+    return this.call('control_get_node_controls', { graphId });
+  }
+  public updateNodeControl(
+    graphId: string,
+    nodeId: string,
+    request: import('./types').NodeControlRequest,
+  ): Promise<GraphApplyResponse> {
+    return this.call('control_update_node_control', { graphId, nodeId, request });
+  }
+  public setEnginePower(enabled: boolean): Promise<GraphApplyResponse> {
+    return this.call('control_set_engine_power', { enabled });
+  }
+  public onWorkspaceFile(
+    listener: (action: 'new' | 'open' | 'save' | 'save_as') => void,
+  ): Promise<() => void> {
+    return listen<string>('workspace-file', ({ payload }) => {
+      if (payload === 'new' || payload === 'open' || payload === 'save' || payload === 'save_as')
+        listener(payload);
+    });
+  }
+
+  public async workspaceFile(
+    request: Parameters<NonNullable<ControlPort['workspaceFile']>>[0],
+  ): Promise<GraphCatalog | null> {
+    const response = await this.invokeCommand<ControlProxyResponse | null>('workspace_file', {
+      request,
+    });
+    if (!response) return null;
+    if (response.status < 200 || response.status >= 300)
+      throw new ControlPortError(response.status, response.body as ProtocolErrorBody);
+    return response.body as GraphCatalog;
+  }
   public async defaultRecordingPath(): Promise<string> {
     try {
       return await this.invokeCommand<string>('default_recording_path', {
@@ -53,8 +87,13 @@ export class TauriControlPort implements ControlPort {
     graphId: string,
     nodeId: string,
     request: RecorderRequest,
+    expectedRevision: number,
   ): Promise<RecorderStatus> {
-    return this.call('control_set_recorder', { graphId, nodeId, request });
+    return this.call('control_set_recorder', {
+      graphId,
+      nodeId,
+      request: { expectedRevision, request },
+    });
   }
 
   public async selectRecordingPath(options: {
@@ -151,12 +190,22 @@ export class TauriControlPort implements ControlPort {
     nodeId: string,
     parameterId: number,
     value: number,
+    expectedRevision: number,
   ): Promise<ProcessorParameterUpdateResponse> {
-    return this.call('control_set_processor_parameter', { nodeId, parameterId, value });
+    return this.call('control_set_processor_parameter', {
+      nodeId,
+      parameterId,
+      value,
+      expectedRevision,
+    });
   }
 
-  public setProcessorEditor(nodeId: string, open: boolean): Promise<ProcessorEditorStatus> {
-    return this.call('control_set_processor_editor', { nodeId, open });
+  public setProcessorEditor(
+    nodeId: string,
+    open: boolean,
+    expectedRevision: number,
+  ): Promise<ProcessorEditorStatus> {
+    return this.call('control_set_processor_editor', { nodeId, open, expectedRevision });
   }
 
   public async listCapturableApplications(): Promise<CapturableApplication[]> {

@@ -4,6 +4,8 @@ use std::{
 };
 
 use parking_lot::{Mutex, RwLock};
+mod engine_power;
+mod node_control;
 mod recorder_control;
 use mixrelay_audio_engine::{
     BlockProcessor, ExternalBinding, MeterBinding, PeakMeterBank, ProcessorConfigurationError,
@@ -85,6 +87,10 @@ struct ContractOnlyVirtualEndpointBackend {
 /// platform atomically stage endpoint transports and application-capture sessions together,
 /// without teaching the portable graph or DSP crates about `PipeWire`, `WASAPI`, or Core Audio.
 pub trait GraphResourceBackend: Send + Sync {
+    /// True only after native graph owners, including quarantined teardown, are released.
+    fn execution_released(&self) -> bool {
+        true
+    }
     /// Reads actual native identities for canonical hardware source/sink ownership.
     /// # Errors
     /// Rejects adapters without native device enumeration.
@@ -243,6 +249,7 @@ impl RuntimeStatusBackend for FixedRuntimeStatus {
     fn status(&self, format: RenderFormat) -> AppStatus {
         let ready = self.driver_state == DriverState::Ready;
         AppStatus {
+            engine_power: None,
             processor_timings: Vec::new(),
             recorder_error: None,
             protocol_version: PROTOCOL_VERSION,
@@ -358,7 +365,9 @@ enum PrepareProcessorError {
 }
 
 pub struct EngineGraphController {
+    execution_enabled: std::sync::atomic::AtomicBool,
     recorder_cleanup_error: Mutex<Option<String>>,
+    node_control_warning: Mutex<Option<String>>,
     recorders: mixrelay_audio_recorder::RecorderRegistry,
     exchange: Arc<ProcessorExchange>,
     factory: Arc<dyn ProcessorFactory>,
@@ -483,6 +492,8 @@ impl EngineGraphController {
         let recorders = mixrelay_audio_recorder::RecorderRegistry::default();
         Self {
             recorder_cleanup_error: Mutex::new(None),
+            node_control_warning: Mutex::new(None),
+            execution_enabled: std::sync::atomic::AtomicBool::new(true),
             recorders: recorders.clone(),
             exchange,
             factory: Arc::new(BuiltInProcessorFactory {
@@ -571,6 +582,9 @@ impl EngineGraphController {
     ) -> Result<(), ProtocolError> {
         let session = self.runtime_status.capabilities_for_format(format);
         for node in &document.nodes {
+            if !node.control.enabled {
+                continue;
+            }
             let reason = match &node.config {
                 NodeConfig::ApplicationCapture(_)
                     if session.as_ref().is_some_and(|s| !s.application_capture) =>
@@ -617,6 +631,49 @@ impl EngineGraphController {
 }
 
 impl ControlBackend for EngineGraphController {
+    fn node_controls(
+        &self,
+        graph_id: &str,
+    ) -> Result<mixrelay_control_protocol::GraphNodeControls, ProtocolError> {
+        self.read_node_controls(graph_id)
+    }
+
+    fn update_node_control(
+        &self,
+        graph_id: &str,
+        node_id: &str,
+        request: mixrelay_control_protocol::NodeControlRequest,
+    ) -> Result<GraphApplyResponse, ProtocolError> {
+        self.change_node_control(graph_id, node_id, &request)
+    }
+
+    fn preview_node_control(
+        &self,
+        graph_id: &str,
+        node_id: &str,
+        request: mixrelay_control_protocol::NodeControlRequest,
+    ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+        self.preview_node_switch(graph_id, node_id, &request)
+    }
+    fn preview_workspace_file(
+        &self,
+        request: mixrelay_control_protocol::WorkspaceRequest,
+    ) -> Result<mixrelay_control_protocol::WorkspacePreview, ProtocolError> {
+        self.preview_workspace(request)
+    }
+    fn workspace_file(
+        &self,
+        request: mixrelay_control_protocol::WorkspaceRequest,
+    ) -> Result<mixrelay_control_protocol::GraphCatalogResponse, ProtocolError> {
+        self.workspace_operation(request).map_err(|mut error| {
+            // Every fallible preparation precedes publication. Once accepted, storage
+            // warnings travel in GraphCatalogResponse rather than rejecting the request.
+            if let Some(parameters) = error.parameters.as_object_mut() {
+                parameters.insert("workspaceOutcome".into(), serde_json::json!("not_applied"));
+            }
+            error
+        })
+    }
     fn recorder_status(
         &self,
         graph_id: &str,
@@ -631,10 +688,40 @@ impl ControlBackend for EngineGraphController {
         &self,
         graph_id: &str,
         node_id: &str,
-        request: mixrelay_control_protocol::RecorderRequest,
+        request: mixrelay_control_protocol::RecorderControlRequest,
     ) -> Result<mixrelay_control_protocol::RecorderStatus, ProtocolError> {
         let _mutation = self.mutation.lock();
+        self.validate_control_revision(request.expected_revision)?;
+        let request = request.request;
         let id = self.recorder_session_id(graph_id, node_id)?;
+        if matches!(
+            request.action,
+            mixrelay_audio_recorder::RecorderAction::Stop
+        ) && self.recorders.status(&id).state == mixrelay_audio_recorder::RecorderState::Stopped
+        {
+            return Ok(self.recorders.status(&id));
+        }
+        if matches!(
+            request.action,
+            mixrelay_audio_recorder::RecorderAction::Record
+                | mixrelay_audio_recorder::RecorderAction::Pause
+        ) {
+            let graph = self.catalog_document_locked(graph_id)?;
+            if !self
+                .execution_enabled
+                .load(std::sync::atomic::Ordering::Acquire)
+                || !graph
+                    .nodes
+                    .iter()
+                    .any(|node| node.id.as_str() == node_id && node.control.enabled)
+            {
+                return Err(node_control::node_error(
+                    ErrorCode::NodeDisabled,
+                    graph_id,
+                    node_id,
+                ));
+            }
+        }
         self.recorders
             .command(id.as_str(), request)
             .map_err(recorder_control::recorder_error)
@@ -696,12 +783,19 @@ impl ControlBackend for EngineGraphController {
     fn status(&self) -> AppStatus {
         let format = self.context.read().format;
         let mut status = self.runtime_status.status(format);
+        status.engine_power = Some(self.engine_power_status());
         status.processor_timings = self.processor_timings();
         status
             .recorder_error
             .clone_from(&self.recorder_cleanup_error.lock());
         if let Some(session) = &mut status.audio_session {
             session.virtual_endpoint_settings = self.endpoint_settings();
+            if status
+                .engine_power
+                .is_some_and(|power| !power.enabled && !power.transitioning)
+            {
+                session.processing_state = mixrelay_audio_io::process::ProcessingState::Stopped;
+            }
         }
         status
     }
@@ -784,13 +878,14 @@ impl ControlBackend for EngineGraphController {
         &self,
         node_id: &str,
         parameter_id: u32,
-        value: f64,
+        request: mixrelay_control_protocol::ProcessorParameterUpdate,
     ) -> Result<ProcessorParameterUpdateResponse, ProtocolError> {
         self.apply_processor_parameter_update(
             node_id,
             parameter_id,
-            value,
+            request.value,
             |provider, runtime_id| {
+                self.validate_control_revision(request.expected_revision)?;
                 if !self
                     .processor_catalog
                     .parameter_is_writable(provider.type_id.as_str(), parameter_id)
@@ -802,7 +897,7 @@ impl ControlBackend for EngineGraphController {
                     ));
                 }
                 self.processor_controls
-                    .set_parameter(runtime_id, parameter_id, value)
+                    .set_parameter(runtime_id, parameter_id, request.value)
                     .map_err(|reason| processor_parameter_error(node_id, parameter_id, &reason))
             },
         )
@@ -825,9 +920,11 @@ impl ControlBackend for EngineGraphController {
     fn set_processor_editor(
         &self,
         node_id: &str,
-        open: bool,
+        request: mixrelay_control_protocol::ProcessorEditorRequest,
     ) -> Result<ProcessorEditorStatus, ProtocolError> {
         let _mutation = self.mutation.lock();
+        self.validate_control_revision(request.expected_revision)?;
+        let open = request.open;
         let runtime_id = self.external_processor_node(node_id)?;
         if !open {
             self.processor_controls
@@ -876,6 +973,19 @@ impl ControlBackend for EngineGraphController {
         self.apply_graph_request(document.into())
     }
 
+    fn set_engine_power(
+        &self,
+        request: mixrelay_control_protocol::EnginePowerRequest,
+    ) -> Result<GraphApplyResponse, ProtocolError> {
+        self.change_engine_power(request.enabled, request.expected_revision)
+    }
+
+    fn preview_engine_start(
+        &self,
+    ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+        EngineGraphController::preview_engine_start(self)
+    }
+
     fn apply_graph_request(
         &self,
         request: GraphApplyRequest,
@@ -911,6 +1021,33 @@ impl EngineGraphController {
         }
         let runtime_id =
             graph_composition::runtime_node_id(&self.view_graph_id(), &NodeId::from(node_id));
+        if !self
+            .execution_enabled
+            .load(std::sync::atomic::Ordering::Acquire)
+            || !self
+                .graph
+                .read()
+                .nodes
+                .iter()
+                .any(|node| node.id.as_str() == node_id && node.control.enabled)
+        {
+            let code = if self
+                .graph
+                .read()
+                .nodes
+                .iter()
+                .any(|node| node.id.as_str() == node_id)
+            {
+                ErrorCode::NodeDisabled
+            } else {
+                ErrorCode::NodeNotFound
+            };
+            return Err(node_control::node_error(
+                code,
+                &self.view_graph_id(),
+                node_id,
+            ));
+        }
         let mut graph = self.graph.write();
         let provider = graph
             .nodes
@@ -948,6 +1085,25 @@ impl EngineGraphController {
             self.preserve_catalog_provider_state(candidate)?;
             document = candidate.active_document().clone();
         }
+        self.publish_graph_locked(document, catalog)
+    }
+
+    fn publish_graph_locked(
+        &self,
+        document: GraphDocument,
+        catalog: Option<graph_catalog::Catalog>,
+    ) -> Result<GraphApplyResponse, ProtocolError> {
+        let context = *self.context.read();
+        self.publish_graph_context(document, catalog, context, true)
+    }
+
+    fn publish_graph_context(
+        &self,
+        document: GraphDocument,
+        catalog: Option<graph_catalog::Catalog>,
+        context: CompileContext,
+        persistence_required: bool,
+    ) -> Result<GraphApplyResponse, ProtocolError> {
         let revisions = self.exchange.revisions();
         if document.revision <= revisions.submitted {
             return Err(ProtocolError {
@@ -965,21 +1121,48 @@ impl EngineGraphController {
             endpoints,
             document: runtime_document,
             view,
-        } = self.prepare_execution(&document, catalog.as_ref(), *self.context.read())?;
+        } = self.prepare_execution(&document, catalog.as_ref(), context)?;
+        let current = self.context.read().format;
+        let resources = if current == context.format {
+            None
+        } else {
+            Some(
+                self.graph_resources
+                    .prepare_format_change(&runtime_document, current, context.format)
+                    .map_err(|error| session_error(&error.to_string()))?,
+            )
+        };
         let meter_bindings = processor.plan().meter_bindings().to_vec();
-        let staged_catalog = self.stage_catalog(catalog.as_ref())?;
+        let staged_catalog = match self.stage_catalog(catalog.as_ref()) {
+            Ok(staged) => staged,
+            Err(error) if !persistence_required => {
+                *self.catalog_write_error.lock() =
+                    Some(format!("engine stop persistence: {error:?}"));
+                None
+            }
+            Err(error) => return Err(error),
+        };
         self.exchange
             .submit_configured(processor, || {
                 self.endpoint_backend
                     .prepare_graph_attachments(&endpoints)?;
-                if let Err(error) = self.graph_resources.reconcile(&runtime_document) {
+                let prepared = if let Some(resources) = resources {
+                    self.runtime_status
+                        .adopt_external_format(context.format)
+                        .map(|()| resources.commit())
+                } else {
+                    self.graph_resources.reconcile(&runtime_document)
+                };
+                if let Err(error) = prepared {
                     self.endpoint_backend.cancel_prepared_graph_attachments();
                     return Err(error);
                 }
+                self.stop_inactive_recorders(&document, catalog.as_ref());
                 self.finish_catalog_write(staged_catalog);
                 Ok(())
             })
             .map_err(configuration_error)?;
+        *self.context.write() = context;
         let active_revision = self.exchange.revisions().active;
         let mut bindings = self.meter_bindings.write();
         bindings.retain(|existing, _| *existing == active_revision);
@@ -996,7 +1179,7 @@ impl EngineGraphController {
             protocol_version: PROTOCOL_VERSION,
             revision,
             state: GraphApplyState::Pending,
-            persistence_error: self.catalog_write_error.lock().clone(),
+            persistence_error: self.graph_persistence_warning(),
         })
     }
 }
@@ -1268,17 +1451,38 @@ impl EngineGraphController {
     }
 
     fn external_processor_node(&self, node_id: &str) -> Result<NodeId, ProtocolError> {
+        if !self
+            .execution_enabled
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err(node_control::node_error(
+                ErrorCode::NodeDisabled,
+                &self.view_graph_id(),
+                node_id,
+            ));
+        }
         let node_id = NodeId::from(node_id);
         let runtime_id = graph_composition::runtime_node_id(&self.view_graph_id(), &node_id);
-        self.graph
-            .read()
+        let graph = self.graph.read();
+        let node = graph
             .nodes
             .iter()
-            .any(|node| node.id == node_id && matches!(node.config, NodeConfig::Provider(_)))
-            .then_some(runtime_id)
+            .find(|node| node.id == node_id && matches!(node.config, NodeConfig::Provider(_)))
             .ok_or_else(|| {
-                processor_editor_error(node_id.as_str(), "processor node does not exist")
-            })
+                node_control::node_error(
+                    ErrorCode::NodeNotFound,
+                    &self.view_graph_id(),
+                    node_id.as_str(),
+                )
+            })?;
+        if !node.control.enabled {
+            return Err(node_control::node_error(
+                ErrorCode::NodeDisabled,
+                &self.view_graph_id(),
+                node_id.as_str(),
+            ));
+        }
+        Ok(runtime_id)
     }
 }
 
@@ -1512,6 +1716,7 @@ pub fn default_session_document(revision: u64, format: RenderFormat) -> GraphDoc
 pub fn default_duplex_document(revision: u64, gain_db: Option<f32>) -> GraphDocument {
     let endpoint_id = NodeId::from(DEFAULT_ENDPOINT_NODE_ID);
     let endpoint = NodeSpec {
+        control: mixrelay_audio_graph::NodeControl::default(),
         id: endpoint_id.clone(),
         label: Some("MixRelay Virtual I/O".into()),
         config: NodeConfig::VirtualEndpoint(
@@ -1545,6 +1750,7 @@ pub fn default_duplex_document(revision: u64, gain_db: Option<f32>) -> GraphDocu
             vec![
                 endpoint,
                 NodeSpec {
+                    control: mixrelay_audio_graph::NodeControl::default(),
                     id: NodeId::from("output-gain"),
                     label: Some("Output gain".into()),
                     config: NodeConfig::Gain(GainConfig {
@@ -1722,6 +1928,7 @@ mod tests {
             .apply_graph(GraphDocument::new(
                 4,
                 vec![NodeSpec {
+                    control: mixrelay_audio_graph::NodeControl::default(),
                     id: NodeId::from("invalid-gain"),
                     label: None,
                     config: NodeConfig::Gain(GainConfig {

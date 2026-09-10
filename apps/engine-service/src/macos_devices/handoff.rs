@@ -37,11 +37,27 @@ impl<T: Send> Default for ResourceHandoff<T> {
 pub(super) struct FormatReservation(Arc<AtomicU8>);
 impl Drop for FormatReservation {
     fn drop(&mut self) {
-        self.0.store(IDLE, Ordering::Release);
+        let _ = self
+            .0
+            .compare_exchange(FORMAT, IDLE, Ordering::AcqRel, Ordering::Acquire);
     }
 }
 
 impl<T: Send> ResourceHandoff<T> {
+    pub(super) fn publish_reserved(&self, token: &FormatReservation, value: T) {
+        assert!(
+            Arc::ptr_eq(&self.state, &token.0),
+            "reservation belongs to this handoff"
+        );
+        assert_eq!(self.state.load(Ordering::Acquire), FORMAT);
+        assert!(
+            self.graph.publish(0, value).is_ok(),
+            "reserved graph mailbox is empty"
+        );
+        self.state
+            .store(Publication::Graph as u8, Ordering::Release);
+    }
+
     pub(super) fn try_consumer(&self) -> Option<ResourceConsumer<'_, T>> {
         Some(ResourceConsumer {
             graph: self.graph.try_consumer()?,
@@ -164,6 +180,26 @@ mod tests {
         drop(token);
         assert!(handoff.idle());
         handoff.publish(Publication::Recovery, 3).unwrap();
+    }
+
+    #[test]
+    fn committed_format_keeps_graph_reservation_until_activation_and_reclamation() {
+        let handoff = ResourceHandoff::default();
+        let mut consumer = handoff.try_consumer().unwrap();
+        let token = handoff.reserve_format().unwrap();
+        handoff.publish_reserved(&token, 7);
+        drop(token);
+        assert!(!handoff.idle());
+        assert!(handoff.reserve_format().is_none());
+        assert!(handoff.publish(Publication::Recovery, 8).is_err());
+        let mut active = 1;
+        consumer.activate(Publication::Recovery, &mut active);
+        assert_eq!(active, 1);
+        consumer.activate(Publication::Graph, &mut active);
+        assert_eq!(active, 7);
+        assert!(!handoff.idle());
+        handoff.reclaim();
+        assert!(handoff.idle());
     }
 
     #[test]

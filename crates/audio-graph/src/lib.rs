@@ -17,7 +17,7 @@ pub use model::{
     AUDIO_PORT_ID, AudioDeviceInputConfig, AudioDeviceOutputConfig, AudioEndpoint,
     CURRENT_GRAPH_SCHEMA_VERSION, ChannelMapping, ChannelRoute, CompiledEdge, CompiledNode,
     CompiledPort, CompressorConfig, DeviceSelector, EdgeId, EdgeSpec, ExecutionPlan,
-    FROM_OS_PORT_ID, GainConfig, GraphDocument, LimiterConfig, MixerConfig, NodeConfig, NodeId,
-    NodeKind, NodeSpec, NodeTypeId, PortDirection, PortId, ProviderNodeConfig, RenderFormat,
-    TO_OS_PORT_ID, VirtualEndpointConfig, VirtualEndpointReference,
+    FROM_OS_PORT_ID, GainConfig, GraphDocument, LimiterConfig, MixerConfig, NodeConfig,
+    NodeControl, NodeId, NodeKind, NodeSpec, NodeTypeId, PortDirection, PortId, ProviderNodeConfig,
+    ProviderPorts, RenderFormat, TO_OS_PORT_ID, VirtualEndpointConfig, VirtualEndpointReference,
 };

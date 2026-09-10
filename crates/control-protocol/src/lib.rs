@@ -1,7 +1,14 @@
 use serde::{Deserialize, Serialize};
 mod editor_surface;
+mod node_control;
+mod workspace;
 pub use editor_surface::{EditorPointerKind, ProcessorEditorFrame, ProcessorEditorInput};
 pub use mixrelay_audio_recorder::{RecorderRequest, RecorderStatus};
+pub use node_control::{
+    GraphNodeControls, NodeControlCapabilities, NodeControlDescriptor, NodeControlRequest,
+    RecorderControlRequest,
+};
+pub use workspace::{WorkspaceAction, WorkspacePreview, WorkspaceRequest};
 
 /// Engine-authored capture ownership, independent of the graph visible in an editor.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -174,6 +181,9 @@ pub enum DriverState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppStatus {
+    /// Execution switch state; absent when the backend cannot control execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine_power: Option<EnginePowerStatus>,
     /// Fresh per-processor transport samples; identities remain graph-local.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub processor_timings: Vec<ProcessorTiming>,
@@ -189,6 +199,23 @@ pub struct AppStatus {
     /// Absent in older engines. UI must not manufacture capabilities when unavailable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_session: Option<mixrelay_audio_io::session::AudioSessionStatus>,
+}
+
+/// Requested execution state and whether native owners are still transitioning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnginePowerStatus {
+    pub enabled: bool,
+    pub transitioning: bool,
+}
+
+/// Idempotent execution command; never changes authored graphs or service installation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EnginePowerRequest {
+    pub enabled: bool,
+    /// Optional compare-and-set revision supplied by native capture preflight.
+    pub expected_revision: Option<u64>,
 }
 
 /// One sampled block's engine-to-worker round trip, not hardware or plug-in reported latency.
@@ -300,8 +327,10 @@ pub struct ProcessorScanRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProcessorParameterUpdate {
+    /// Revision observed when the caller chose this target.
+    pub expected_revision: u64,
     pub value: f64,
 }
 
@@ -338,8 +367,10 @@ pub enum ProcessorEditorFailure {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProcessorEditorRequest {
+    /// Revision observed when the caller chose this target.
+    pub expected_revision: u64,
     pub open: bool,
 }
 
@@ -368,6 +399,7 @@ pub struct GraphApplyResponse {
 impl Default for AppStatus {
     fn default() -> Self {
         Self {
+            engine_power: None,
             processor_timings: Vec::new(),
             recorder_error: None,
             protocol_version: PROTOCOL_VERSION,
@@ -399,6 +431,10 @@ pub enum ErrorCode {
     GraphRevisionStale,
     GraphExchangeBusy,
     GraphBindingUnsupported,
+    /// The addressed authored node no longer exists.
+    NodeNotFound,
+    /// Processing is disabled; the command cannot act on runtime resources.
+    NodeDisabled,
     ProcessorUnavailable,
     RecorderFailed,
     AudioSessionUnsupported,

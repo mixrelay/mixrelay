@@ -66,6 +66,31 @@ impl EngineGraphController {
         catalog: Option<&Catalog>,
         context: CompileContext,
     ) -> Result<ComposedGraph, ProtocolError> {
+        if !self
+            .execution_enabled
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return compose_catalog(
+                &[],
+                CatalogExecutionContext {
+                    revision: document.revision,
+                    compile: context,
+                    compiler: &self.factory.compiler(),
+                    devices: &[],
+                    applications: &NativeIdentities(self.graph_resources.as_ref()),
+                },
+            )
+            .map_err(composition_error);
+        }
+        self.compose_enabled_execution(document, catalog, context)
+    }
+
+    pub(super) fn compose_enabled_execution(
+        &self,
+        document: &GraphDocument,
+        catalog: Option<&Catalog>,
+        context: CompileContext,
+    ) -> Result<ComposedGraph, ProtocolError> {
         let documents: Vec<_> = catalog.map_or_else(
             || vec![(self.view_graph_id(), document.clone())],
             |catalog| {
@@ -80,10 +105,11 @@ impl EngineGraphController {
         }
         let needs_devices = documents.iter().any(|(_, graph)| {
             graph.nodes.iter().any(|node| {
-                matches!(
-                    node.config,
-                    NodeConfig::AudioDeviceInput(_) | NodeConfig::AudioDeviceOutput(_)
-                )
+                node.control.enabled
+                    && matches!(
+                        node.config,
+                        NodeConfig::AudioDeviceInput(_) | NodeConfig::AudioDeviceOutput(_)
+                    )
             })
         });
         let devices = if needs_devices {
@@ -191,7 +217,9 @@ impl EngineGraphController {
     }
 }
 
-fn capture_manifest(document: &GraphDocument) -> Result<ApplicationCaptureManifest, ProtocolError> {
+pub(crate) fn capture_manifest(
+    document: &GraphDocument,
+) -> Result<ApplicationCaptureManifest, ProtocolError> {
     let sources = document
         .nodes
         .iter()

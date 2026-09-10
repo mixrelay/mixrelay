@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import { ControlPortError, type GraphCatalog } from '../../core/control-port/types';
+import {
+  type ControlPort,
+  ControlPortError,
+  type GraphCatalog,
+} from '../../core/control-port/types';
 import { GraphCatalogController } from './GraphCatalogController';
 
 function fixture() {
@@ -20,6 +24,53 @@ function fixture() {
 }
 
 afterEach(() => vi.useRealTimers());
+
+describe('workspace files', () => {
+  it('cancel and save preserve document identity and history', async () => {
+    const { port, controller } = fixture();
+    await controller.reload();
+    const before = controller.snapshot();
+    const file = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(before.catalog);
+    (port as ControlPort).workspaceFile = file;
+    await controller.workspaceFile('open', 'ko');
+    await controller.workspaceFile('save', 'ko');
+    expect(controller.snapshot().document).toBe(before.document);
+    expect(controller.snapshot().documentGeneration).toBe(before.documentGeneration);
+    expect(controller.snapshot().uncertain).toBe(false);
+  });
+
+  it('retains the accepted file when subsequent capture synchronization fails', async () => {
+    const { port, controller } = fixture();
+    await controller.reload();
+    const before = controller.snapshot();
+    const loaded = await port.getGraphCatalog();
+    loaded.document = { ...loaded.document, nodes: [], revision: 2 };
+    (port as ControlPort).workspaceFile = vi.fn().mockResolvedValue(loaded);
+    vi.spyOn(port, 'getGraph').mockRejectedValue(new Error('old capture unavailable'));
+    vi.spyOn(port, 'getGraphStatus').mockResolvedValue({
+      protocolVersion: 1,
+      activeRevision: 2,
+      submittedRevision: 2,
+    });
+    vi.spyOn(port, 'getGraphCatalog').mockRejectedValue(new Error('capture permission'));
+    await controller.workspaceFile('open', 'ko');
+    expect(controller.snapshot().document).toBe(loaded.document);
+    expect(controller.snapshot().documentGeneration).toBe(before.documentGeneration + 1);
+    expect(controller.snapshot().uncertain).toBe(true);
+  });
+
+  it('fences ambiguous server failures but not rejected invalid files', async () => {
+    for (const status of [422, 503]) {
+      const { port, controller } = fixture();
+      await controller.reload();
+      (port as ControlPort).workspaceFile = vi
+        .fn()
+        .mockRejectedValue(new ControlPortError(status, { code: 'graph_invalid', parameters: {} }));
+      await controller.workspaceFile('open', 'en');
+      expect(controller.snapshot().uncertain).toBe(status === 503);
+    }
+  });
+});
 
 describe('durable graph catalog coordinator', () => {
   it('creates independent graphs and confirms activation before replacing the workspace', async () => {

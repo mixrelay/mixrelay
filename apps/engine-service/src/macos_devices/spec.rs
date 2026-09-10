@@ -86,6 +86,7 @@ mod tests {
             1,
             vec![
                 NodeSpec {
+                    control: mixrelay_audio_graph::NodeControl::default(),
                     id: "mic".into(),
                     label: None,
                     config: NodeConfig::AudioDeviceInput(AudioDeviceInputConfig {
@@ -97,6 +98,7 @@ mod tests {
                     }),
                 },
                 NodeSpec {
+                    control: mixrelay_audio_graph::NodeControl::default(),
                     id: "speaker".into(),
                     label: None,
                     config: NodeConfig::AudioDeviceOutput(AudioDeviceOutputConfig {

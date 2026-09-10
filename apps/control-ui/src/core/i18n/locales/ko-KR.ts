@@ -17,6 +17,10 @@ export const koKR = {
     states: { stopped: '정지됨', recording: '녹음 중', paused: '일시정지됨', failed: '실패' },
   },
   audioSession: {
+    powerOn: '엔진 켜기',
+    powerOff: '엔진 끄기',
+    powerChanging: '엔진 전환 중…',
+    powerFailed: '엔진 전환 실패. 현재 상태를 확인하세요.',
     diagnostics: '오디오 정보',
     processingRate: '처리 샘플레이트',
     processingBuffer: '버퍼 사이즈',
@@ -119,6 +123,12 @@ export const koKR = {
     remoteDescription: '이 Mac에서 페어링을 명시적으로 켜기 전까지 LAN 제어는 꺼져 있습니다.',
   },
   routing: {
+    nodeControl: {
+      powerOn: '{{name}} 켜기',
+      powerOff: '{{name}} 끄기',
+      mute: '{{name}} 음소거',
+      unmute: '{{name}} 음소거 해제',
+    },
     nodeStatus: {
       offline: '오프라인',
       reselectApplication: '앱을 다시 선택하세요',
@@ -227,6 +237,8 @@ export const koKR = {
         '애플리케이션 오디오를 캡처할 수 없습니다. 실행 상태와 오디오 캡처 권한을 확인하세요.',
       control_unavailable: '로컬 오디오 엔진에 연결할 수 없습니다.',
       control_request_failed: '오디오 제어 요청을 처리하지 못했습니다.',
+      node_not_found: '대상 노드가 삭제되어 제어하지 않았습니다.',
+      node_disabled: '꺼진 노드입니다. 노드를 켠 뒤 제어하세요.',
       graph_binding_unsupported:
         '선택한 장치 또는 프로세서가 이 오디오 포맷이나 연결을 지원하지 않습니다.',
       graph_exchange_busy: '오디오 엔진이 이전 그래프를 아직 전환 중입니다.',

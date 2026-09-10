@@ -34,6 +34,13 @@ mod native;
 #[cfg(test)]
 mod tests;
 
+/// Number of native capture owners, including sessions awaiting safe teardown.
+/// Returns zero only once every admitted session released its native ownership.
+#[must_use]
+pub fn active_capture_owners() -> u32 {
+    process_tap_lifecycle::active_owners()
+}
+
 pub use ffi::{
     mr_process_tap_create, mr_process_tap_destroy, mr_process_tap_read,
     mr_process_tap_refresh_format, mr_process_tap_start, mr_process_tap_stats, mr_process_tap_stop,

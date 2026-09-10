@@ -44,6 +44,7 @@ fn explicit_startup_preserves_prepared_state_without_querying_or_preparing_nativ
     let document = GraphDocument::new(
         7,
         vec![NodeSpec {
+            control: mixrelay_audio_graph::NodeControl::default(),
             id: NodeId::from("gain"),
             label: Some("Prepared gain".into()),
             config: NodeConfig::Gain(GainConfig {

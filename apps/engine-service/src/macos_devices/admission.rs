@@ -13,7 +13,6 @@ impl Admission {
             active: AtomicUsize::new(0),
         }
     }
-    #[cfg(test)]
     pub(super) fn in_use(&self) -> usize {
         self.active.load(Ordering::Acquire)
     }

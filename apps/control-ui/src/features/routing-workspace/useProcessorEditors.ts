@@ -27,7 +27,12 @@ interface Callbacks {
 function identities(model: AudioGraphModel | null) {
   return (
     model?.nodes
-      .filter((node) => node.runtime?.type === 'provider' && node.appearance.hasProcessorEditor)
+      .filter(
+        (node) =>
+          node.runtime?.type === 'provider' &&
+          node.runtime.control?.enabled !== false &&
+          node.appearance.hasProcessorEditor,
+      )
       .map((node) => {
         const config = node.runtime?.config as { typeId?: string } | undefined;
         return [node.id, config?.typeId ?? '', node.appearance.title] as const;
@@ -43,6 +48,7 @@ class EditorSession {
     private port: EditorPort,
     nodes: [string, string, string][],
     private callbacks: Callbacks,
+    private expectedRevision: number,
   ) {
     this.entries = new Map(
       nodes.map(([id, , name]) => [
@@ -96,7 +102,7 @@ class EditorSession {
     try {
       const status = await (action.kind === 'poll'
         ? this.port.getProcessorEditor(entry.id)
-        : this.port.setProcessorEditor(entry.id, true));
+        : this.port.setProcessorEditor(entry.id, true, this.expectedRevision));
       if (!this.valid(entry, sequence)) return;
       entry.command = false;
       this.receive(entry, status, action);
@@ -134,9 +140,9 @@ export function useProcessorEditors(
     keys: Map<string, string>;
     graphId?: string;
   } | null>(null);
-  const key = JSON.stringify(identities(model));
+  const key = JSON.stringify([model?.revision ?? 0, identities(model)]);
   useEffect(() => {
-    const nodes: [string, string, string][] = JSON.parse(key);
+    const [expectedRevision, nodes]: [number, [string, string, string][]] = JSON.parse(key);
     const keys = new Map(nodes.map(([id, type]) => [id, type]));
     const prior = previous.current;
     statusesRef.current = new Map(
@@ -151,25 +157,30 @@ export function useProcessorEditors(
     setStatuses(statusesRef.current);
     previous.current = { port: controlPort, keys, graphId };
     setIssues(new Map());
-    const session = new EditorSession(controlPort, nodes, {
-      status: (status) => {
-        statusesRef.current = new Map(statusesRef.current).set(status.nodeId, status);
-        setStatuses(statusesRef.current);
+    const session = new EditorSession(
+      controlPort,
+      nodes,
+      {
+        status: (status) => {
+          statusesRef.current = new Map(statusesRef.current).set(status.nodeId, status);
+          setStatuses(statusesRef.current);
+        },
+        issue: (entry, busy) =>
+          setIssues((current) => {
+            const next = new Map(current);
+            if (busy === null) next.delete(entry.id);
+            else next.set(entry.id, { nodeId: entry.id, name: entry.name, busy });
+            return next;
+          }),
+        busy: (entry) =>
+          setIssues((current) =>
+            current.has(entry.id)
+              ? new Map(current).set(entry.id, { nodeId: entry.id, name: entry.name, busy: true })
+              : current,
+          ),
       },
-      issue: (entry, busy) =>
-        setIssues((current) => {
-          const next = new Map(current);
-          if (busy === null) next.delete(entry.id);
-          else next.set(entry.id, { nodeId: entry.id, name: entry.name, busy });
-          return next;
-        }),
-      busy: (entry) =>
-        setIssues((current) =>
-          current.has(entry.id)
-            ? new Map(current).set(entry.id, { nodeId: entry.id, name: entry.name, busy: true })
-            : current,
-        ),
-    });
+      expectedRevision,
+    );
     sessionRef.current = session;
     session.start();
     return () => {

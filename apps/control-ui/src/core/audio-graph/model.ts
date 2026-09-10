@@ -58,6 +58,7 @@ export interface AudioGraphNode {
   position: AudioGraphPosition;
   size?: AudioGraphNodeSize;
   runtime?: {
+    control?: import('../control-port/types').NodeControlState;
     /** Unresolved presentation retains the original nullable label, not its fallback title. */
     label?: string | null;
     binding?: { nodeId: string; side: 'source' | 'sink' };

@@ -17,6 +17,7 @@ struct NativeState {
     reject_rollback: AtomicBool,
     reject_after_write: AtomicBool,
     change_during_suspend: AtomicBool,
+    primary_clock: AtomicBool,
 }
 struct Runtime {
     state: Arc<NativeState>,
@@ -27,7 +28,21 @@ impl RuntimeStatusBackend for Runtime {
         self.base.status(format)
     }
     fn external_format(&self, current: RenderFormat) -> Option<RenderFormat> {
-        Some(current)
+        Some(RenderFormat {
+            sample_rate: if self.state.primary_clock.load(Ordering::Acquire) {
+                self.state.rate.load(Ordering::Acquire)
+            } else {
+                current.sample_rate
+            },
+            ..current
+        })
+    }
+    fn adopt_external_format(&self, requested: RenderFormat) -> Result<(), HostAudioBackendError> {
+        assert_eq!(
+            requested.sample_rate,
+            self.state.rate.load(Ordering::Acquire)
+        );
+        Ok(())
     }
     fn suspend(&self) -> Result<(), HostAudioBackendError> {
         if self.state.change_during_suspend.load(Ordering::Acquire) {
@@ -139,6 +154,7 @@ fn fixture() -> (EngineGraphController, Arc<NativeState>) {
         reject_rollback: AtomicBool::new(false),
         reject_after_write: AtomicBool::new(false),
         change_during_suspend: AtomicBool::new(false),
+        primary_clock: AtomicBool::new(false),
     });
     controller.runtime_status = Arc::new(Runtime {
         state: state.clone(),
@@ -156,6 +172,97 @@ fn request() -> VirtualEndpointFormatRequest {
         endpoint_id: VirtualEndpointId::from(DEFAULT_ENDPOINT_NODE_ID),
         sample_rate: 44_100,
     }
+}
+
+fn workspace_request(
+    controller: &EngineGraphController,
+    action: mixrelay_control_protocol::WorkspaceAction,
+) -> mixrelay_control_protocol::WorkspaceRequest {
+    let catalog = controller.read_catalog().unwrap();
+    mixrelay_control_protocol::WorkspaceRequest {
+        file_digest: None,
+        expected_revision: catalog.document.revision,
+        expected_catalog_revision: catalog.catalog_revision,
+        operation: action,
+    }
+}
+
+fn saved_workspace_rate(path: &str, rate: u32) {
+    let mut file: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    for graph in file["catalog"]["graphs"].as_array_mut().unwrap() {
+        let mut document: GraphDocument =
+            serde_json::from_value(graph["document"].clone()).unwrap();
+        for node in &mut document.nodes {
+            if let NodeConfig::VirtualEndpoint(endpoint) = &mut node.config {
+                endpoint.spec.default_sample_rate = rate;
+                endpoint.spec.supported_sample_rates = vec![44_100, 48_000];
+            }
+        }
+        graph["document"] = serde_json::to_value(document).unwrap();
+    }
+    std::fs::write(path, serde_json::to_vec(&file).unwrap()).unwrap();
+}
+
+#[test]
+fn workspace_open_adopts_primary_clock_but_preserves_independent_processing_clock() {
+    use mixrelay_control_protocol::WorkspaceAction;
+    for primary in [false, true] {
+        let dir = mixrelay_test_support::FixtureDir::new("workspace-rate").unwrap();
+        let (controller, state) = fixture();
+        let controller = controller.with_graph_catalog_path(dir.join("graphs.json"));
+        state.primary_clock.store(primary, Ordering::Release);
+        let path = dir.join("session.mix").to_string_lossy().into_owned();
+        controller
+            .workspace_operation(workspace_request(
+                &controller,
+                WorkspaceAction::Save { path: path.clone() },
+            ))
+            .unwrap();
+        saved_workspace_rate(&path, 44_100);
+        controller
+            .workspace_operation(workspace_request(
+                &controller,
+                WorkspaceAction::Open { path },
+            ))
+            .unwrap();
+        assert_eq!(state.rate.load(Ordering::Acquire), 44_100);
+        assert_eq!(
+            controller.context.read().format.sample_rate,
+            if primary { 44_100 } else { 48_000 }
+        );
+        assert_eq!(state.resumed.load(Ordering::Acquire), 1);
+    }
+}
+
+#[test]
+fn workspace_failed_native_preparation_restores_rate_and_authored_catalog() {
+    use mixrelay_control_protocol::WorkspaceAction;
+    let dir = mixrelay_test_support::FixtureDir::new("workspace-rollback").unwrap();
+    let (controller, state) = fixture();
+    let mut controller = controller.with_graph_catalog_path(dir.join("graphs.json"));
+    let before = controller.read_catalog().unwrap();
+    let disk = std::fs::read(dir.join("graphs.json")).unwrap();
+    let path = dir.join("session.mix").to_string_lossy().into_owned();
+    controller
+        .workspace_operation(workspace_request(
+            &controller,
+            WorkspaceAction::Save { path: path.clone() },
+        ))
+        .unwrap();
+    saved_workspace_rate(&path, 44_100);
+    controller.graph_resources = Arc::new(Reject);
+    assert!(
+        controller
+            .workspace_operation(workspace_request(
+                &controller,
+                WorkspaceAction::Open { path }
+            ))
+            .is_err()
+    );
+    assert_eq!(state.rate.load(Ordering::Acquire), 48_000);
+    assert_eq!(before, controller.read_catalog().unwrap());
+    assert_eq!(disk, std::fs::read(dir.join("graphs.json")).unwrap());
 }
 
 #[test]

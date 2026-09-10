@@ -34,7 +34,6 @@ pub(super) struct Native {
     pub(super) render: Box<super::direct::RenderSlot>,
 }
 impl Native {
-    #[cfg(test)]
     pub(super) fn active_owners() -> usize {
         NATIVE_OWNERS.in_use()
     }

@@ -17,6 +17,7 @@ fn document(uid: &str, revision: u64, gain: f32) -> GraphDocument {
         revision,
         vec![
             NodeSpec {
+                control: mixrelay_audio_graph::NodeControl::default(),
                 id: "input".into(),
                 label: None,
                 config: NodeConfig::AudioDeviceInput(AudioDeviceInputConfig {
@@ -26,6 +27,7 @@ fn document(uid: &str, revision: u64, gain: f32) -> GraphDocument {
                 }),
             },
             NodeSpec {
+                control: mixrelay_audio_graph::NodeControl::default(),
                 id: "output".into(),
                 label: None,
                 config: NodeConfig::AudioDeviceOutput(AudioDeviceOutputConfig {

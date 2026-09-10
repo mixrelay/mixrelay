@@ -20,6 +20,8 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt"] }
 mixrelay-processor-host = { path = "../../crates/processor-host" }
 serde_json.workspace = true
+# Bind capture preflight to the exact workspace bytes accepted by Open.
+sha2 = "0.10.9"
 parking_lot.workspace = true
 tokio.workspace = true
 axum.workspace = true

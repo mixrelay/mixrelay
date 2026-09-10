@@ -112,6 +112,9 @@ const NodeProcessorEditorContext = createContext<NodeProcessorEditorContextValue
 const NodeContentContext = createContext<((node: AudioGraphNode) => ReactNode) | undefined>(
   undefined,
 );
+const NodeHeaderActionsContext = createContext<((node: AudioGraphNode) => ReactNode) | undefined>(
+  undefined,
+);
 export type AudioGraphChangeKind = 'layout' | 'level' | 'processor_parameter' | 'runtime';
 export interface AudioGraphViewport {
   x: number;
@@ -137,6 +140,7 @@ interface AudioPortSelectionContextValue {
 const AudioPortSelectionContext = createContext<AudioPortSelectionContextValue | null>(null);
 
 export interface AudioGraphCanvasProps {
+  renderNodeHeaderActions?: (node: AudioGraphNode) => ReactNode;
   renderNodeContent?: (node: AudioGraphNode) => ReactNode;
   contextMenuLabels?: GraphContextMenuLabels;
   addNodeLabel?: string;
@@ -179,6 +183,7 @@ function AudioGraphProviders({
   onParameterChange,
   selectedRef,
   renderNodeContent,
+  renderNodeHeaderActions,
 }: {
   children: ReactNode;
   editor: NodeProcessorEditorContextValue | null;
@@ -189,6 +194,7 @@ function AudioGraphProviders({
   onParameterChange: AudioGraphCanvasProps['onNodeParameterChange'];
   selectedRef: AudioPortSelectionContextValue['selectedRef'];
   renderNodeContent: AudioGraphCanvasProps['renderNodeContent'];
+  renderNodeHeaderActions: AudioGraphCanvasProps['renderNodeHeaderActions'];
 }) {
   return (
     <AudioMeterProvider store={meterStore}>
@@ -198,7 +204,9 @@ function AudioGraphProviders({
             <NodeGainContext.Provider value={onGainChange}>
               <AudioPortSelectionContext.Provider value={{ model, selectedRef }}>
                 <NodeContentContext.Provider value={renderNodeContent}>
-                  {children}
+                  <NodeHeaderActionsContext.Provider value={renderNodeHeaderActions}>
+                    {children}
+                  </NodeHeaderActionsContext.Provider>
                 </NodeContentContext.Provider>
               </AudioPortSelectionContext.Provider>
             </NodeGainContext.Provider>
@@ -935,7 +943,7 @@ function GraphCanvasBackground({
 }: Parameters<typeof AddNodePanel>[0]) {
   return (
     <>
-      <Background color="#24282e" gap={24} size={1} variant={BackgroundVariant.Lines} />
+      <Background color="#1e2228" gap={24} size={1} variant={BackgroundVariant.Lines} />
       <AddNodePanel
         addNode={addNode}
         label={label}
@@ -1108,6 +1116,18 @@ function GraphFlowSurface(props: ReactFlowProps<AudioFlowNode, AudioFlowEdge>) {
   );
 }
 
+function useGraphCommit(
+  model: AudioGraphModel,
+  onModelChange: AudioGraphCanvasProps['onModelChange'],
+) {
+  return useCallback(
+    (nextModel: AudioGraphModel, kind: AudioGraphChangeKind) => {
+      if (nextModel !== model) onModelChange(nextModel, kind);
+    },
+    [model, onModelChange],
+  );
+}
+
 export function AudioGraphCanvas({
   addNodeLabel,
   contextMenuLabels,
@@ -1125,6 +1145,7 @@ export function AudioGraphCanvas({
   processorEditorLabels,
   processorEditorStatuses = emptyProcessorEditorStatuses,
   renderNodeContent,
+  renderNodeHeaderActions,
   viewport,
   onViewportChange,
 }: AudioGraphCanvasProps) {
@@ -1136,12 +1157,7 @@ export function AudioGraphCanvas({
     useAudioFlowCollections(model);
   const selectEdges = useEdgeBoxSelection(setEdges);
   const portSelection = useAudioPortSelection(nodeMenu.rootRef, selectEdges);
-  const commit = useCallback(
-    (nextModel: AudioGraphModel, kind: AudioGraphChangeKind) => {
-      if (nextModel !== model) onModelChange(nextModel, kind);
-    },
-    [model, onModelChange],
-  );
+  const commit = useGraphCommit(model, onModelChange);
   const { isValidConnection, onConnect, onReconnect, onReconnectEnd } = useConnectionHandlers(
     model,
     commit,
@@ -1192,6 +1208,7 @@ export function AudioGraphCanvas({
         onParameterChange={onNodeParameterChange}
         selectedRef={portSelection.selectedRef}
         renderNodeContent={renderNodeContent}
+        renderNodeHeaderActions={renderNodeHeaderActions}
       >
         <GraphFlowSurface
           {...viewportEvents}
@@ -1228,6 +1245,7 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
   const onNodeParameterChange = useContext(NodeParameterContext);
   const processorEditors = useContext(NodeProcessorEditorContext);
   const renderNodeContent = useContext(NodeContentContext);
+  const renderNodeHeaderActions = useContext(NodeHeaderActionsContext);
   const updateNodeInternals = useUpdateNodeInternals();
   const editorStatus = processorEditors?.statuses.get(graphNode.id);
   const editorWidth = editorStatus?.state === 'open' ? editorStatus.width : null;
@@ -1265,6 +1283,8 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
       <AudioNodeCard
         {...graphNode.appearance}
         content={renderNodeContent?.(graphNode)}
+        headerActions={renderNodeHeaderActions?.(graphNode)}
+        poweredOff={graphNode.runtime?.control?.enabled === false}
         faceHeight={layout.face.height}
         faceMode={graphNodeFaceMode(graphNode)}
         onFaceHeightChange={layout.onFaceHeightChange}

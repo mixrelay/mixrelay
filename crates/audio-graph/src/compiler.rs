@@ -455,6 +455,7 @@ impl GraphCompiler {
                     CompiledNode::new(
                         node.id.clone(),
                         node.config.clone(),
+                        node.control,
                         resolved.inputs,
                         resolved.outputs,
                     ),

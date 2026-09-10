@@ -50,9 +50,13 @@ pub fn compose_catalog(
     context: CatalogExecutionContext<'_>,
 ) -> Result<ComposedGraph, CompositionError> {
     validate_size(documents, context.compile)?;
+    let documents = documents
+        .iter()
+        .map(|(id, document)| Ok((id.clone(), enabled_document(document)?)))
+        .collect::<Result<Vec<_>, CompositionError>>()?;
     let mut registry = RegistryInputs::default();
     let mut identities = Vec::with_capacity(documents.len());
-    for (_, document) in documents {
+    for (_, document) in &documents {
         identities.push(registry.resolve(document, &context)?);
     }
     let registry = DeviceRegistry::new(registry.devices.into_values().collect())?
@@ -75,6 +79,40 @@ pub fn compose_catalog(
         context.compile,
         context.compiler,
     )
+}
+
+fn enabled_document(document: &GraphDocument) -> Result<GraphDocument, CompositionError> {
+    let mut ids = std::collections::BTreeSet::new();
+    for node in &document.nodes {
+        if !ids.insert(&node.id) {
+            return Err(invalid("duplicate authored node identity"));
+        }
+        if matches!(
+            node.config,
+            NodeConfig::VirtualEndpointTransport(_) | NodeConfig::DeviceBus { .. }
+        ) {
+            return Err(invalid("internal runtime node cannot be authored"));
+        }
+    }
+    if document
+        .edges
+        .iter()
+        .any(|edge| !ids.contains(&edge.source.node_id) || !ids.contains(&edge.destination.node_id))
+    {
+        return Err(invalid("edge references unknown authored node"));
+    }
+    let disabled: std::collections::BTreeSet<_> = document
+        .nodes
+        .iter()
+        .filter(|node| !node.control.enabled)
+        .map(|node| &node.id)
+        .collect();
+    let mut enabled = document.clone();
+    enabled.nodes.retain(|node| node.control.enabled);
+    enabled.edges.retain(|edge| {
+        !disabled.contains(&edge.source.node_id) && !disabled.contains(&edge.destination.node_id)
+    });
+    Ok(enabled)
 }
 
 fn validate_size(

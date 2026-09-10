@@ -135,9 +135,11 @@ fn parameter_document() -> GraphDocument {
     GraphDocument::new(
         1,
         vec![mixrelay_audio_graph::NodeSpec {
+            control: mixrelay_audio_graph::NodeControl::default(),
             id: NodeId::from("effect"),
             label: None,
             config: NodeConfig::Provider(mixrelay_audio_graph::ProviderNodeConfig {
+                ports: None,
                 type_id: "fixture:parameters".into(),
                 parameters: serde_json::json!({"stateBase64": "AQ=="}),
             }),

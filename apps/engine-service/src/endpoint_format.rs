@@ -88,7 +88,7 @@ impl EngineGraphController {
         Ok(())
     }
 
-    fn write_endpoint_rate(
+    pub(crate) fn write_endpoint_rate(
         &self,
         id: &VirtualEndpointId,
         previous: u32,

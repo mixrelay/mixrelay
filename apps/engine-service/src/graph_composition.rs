@@ -119,6 +119,7 @@ pub struct SharedSource {
 /// Graph-local channel projection and gain of one canonical capture source.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceReference {
+    pub control: mixrelay_audio_graph::NodeControl,
     pub node_id: NodeId,
     pub source_id: String,
     pub channels: u16,
@@ -135,6 +136,7 @@ pub struct SharedOutput {
 /// Graph-local sink routing and gain; all references sum into one canonical native sink.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutputReference {
+    pub control: mixrelay_audio_graph::NodeControl,
     pub node_id: NodeId,
     pub output_id: String,
     pub channels: u16,
@@ -152,6 +154,7 @@ pub struct DeviceReadReference {
 /// via `to_os`. Snapshot publication follows the device I/O cycle, not feedback detection.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeviceReference {
+    pub control: mixrelay_audio_graph::NodeControl,
     pub node_id: NodeId,
     pub device_id: VirtualEndpointId,
     pub read: Option<DeviceReadReference>,

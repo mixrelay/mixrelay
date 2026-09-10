@@ -56,6 +56,32 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it('does not reopen an editor from a late response after the node is powered off', async () => {
+  const source = port();
+  const pending = Promise.withResolvers<ProcessorEditorStatus>();
+  source.getProcessorEditor.mockReturnValueOnce(pending.promise);
+  const initial = model();
+  const view = renderHook(({ graph }) => useProcessorEditors(source, graph), {
+    initialProps: { graph: initial },
+  });
+  const off = {
+    ...initial,
+    revision: 2,
+    nodes: initial.nodes.map((node) => ({
+      ...node,
+      runtime: {
+        type: 'provider',
+        config: { typeId: 'vst3:one' },
+        control: { enabled: false, muted: false },
+      },
+    })),
+  };
+  view.rerender({ graph: off });
+  await act(async () => pending.resolve(status('closed')));
+  expect(source.setProcessorEditor).not.toHaveBeenCalled();
+  expect(view.result.current.statuses.size).toBe(0);
+});
+
 describe('processor editor error and request lifecycle', () => {
   it('reports status request failure and explicitly retries the read', async () => {
     const source = port();
@@ -67,7 +93,7 @@ describe('processor editor error and request lifecycle', () => {
     act(() => result.current.retry('effect'));
     await settle();
     expect(source.getProcessorEditor).toHaveBeenCalledTimes(2);
-    expect(source.setProcessorEditor).toHaveBeenCalledWith('effect', true);
+    expect(source.setProcessorEditor).toHaveBeenCalledWith('effect', true, 1);
     expect(result.current.statuses.get('effect')?.state).toBe('open');
     expect(result.current.issues.size).toBe(0);
   });
@@ -84,8 +110,8 @@ describe('processor editor error and request lifecycle', () => {
     act(() => result.current.retry('effect'));
     await settle();
     expect(source.setProcessorEditor.mock.calls).toEqual([
-      ['effect', true],
-      ['effect', true],
+      ['effect', true, 1],
+      ['effect', true, 1],
     ]);
     expect(result.current.statuses.get('effect')?.state).toBe('open');
     expect(result.current.issues.size).toBe(0);
@@ -162,8 +188,8 @@ describe('processor editor stale responses and native failures', () => {
     act(() => result.current.retry('effect'));
     await settle();
     expect(source.setProcessorEditor.mock.calls).toEqual([
-      ['effect', true],
-      ['effect', true],
+      ['effect', true, 1],
+      ['effect', true, 1],
     ]);
     expect(result.current.issues.size).toBe(0);
   });
@@ -202,7 +228,7 @@ describe('processor editor automatic presentation', () => {
     await settle();
     expect(result.current.statuses.get('effect')?.state).toBe('open');
     expect(result.current.issues.size).toBe(0);
-    expect(source.setProcessorEditor.mock.calls).toEqual([['effect', true]]);
+    expect(source.setProcessorEditor.mock.calls).toEqual([['effect', true, 1]]);
   });
 
   it('does not retry a native rejected open automatically', async () => {
@@ -228,7 +254,7 @@ describe('processor editor automatic presentation', () => {
     edited.nodes = edited.nodes.map((node) => ({ ...node, position: { x: 20, y: 10 } }));
     rerender({ graph: edited });
     await settle();
-    expect(source.getProcessorEditor).toHaveBeenCalledTimes(1);
+    expect(source.getProcessorEditor).toHaveBeenCalledTimes(2);
     expect(source.setProcessorEditor).not.toHaveBeenCalled();
   });
 });

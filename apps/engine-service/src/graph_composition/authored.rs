@@ -78,6 +78,7 @@ pub fn lower_document(
                 // Keep authored ports/edges editable without resolving a stale PID. An
                 // unconnected local gain produces silence and owns no native source.
                 lowered.document.nodes.push(NodeSpec {
+                    control: node.control,
                     id: node.id.clone(),
                     label: node.label.clone(),
                     config: NodeConfig::Gain(mixrelay_audio_graph::GainConfig {
@@ -95,12 +96,12 @@ pub fn lower_document(
             NodeConfig::AudioDeviceOutput(config) => {
                 lowered
                     .output_references
-                    .push(lower_output(&node.id, config, registry, identities)?);
+                    .push(lower_output(node, config, registry, identities)?);
             }
             NodeConfig::VirtualEndpoint(config) => {
                 lowered
                     .device_references
-                    .push(lower_device(&node.id, config, registry)?);
+                    .push(lower_device(node, config, registry)?);
             }
             _ => {
                 lowered.document.nodes.push(node.clone());
@@ -115,11 +116,12 @@ pub fn lower_document(
 }
 
 fn lower_output(
-    node_id: &NodeId,
+    node: &NodeSpec,
     config: &mixrelay_audio_graph::AudioDeviceOutputConfig,
     registry: &DeviceRegistry,
     identities: &ResolvedNodeIdentities,
 ) -> Result<OutputReference, CompositionError> {
+    let node_id = &node.id;
     let output_id = identities
         .outputs
         .get(node_id)
@@ -134,6 +136,7 @@ fn lower_output(
         ));
     }
     Ok(OutputReference {
+        control: node.control,
         node_id: node_id.clone(),
         output_id: output_id.clone(),
         channels: config.input_channels,
@@ -142,10 +145,11 @@ fn lower_output(
 }
 
 fn lower_device(
-    node_id: &NodeId,
+    node: &NodeSpec,
     config: &mixrelay_audio_graph::VirtualEndpointConfig,
     registry: &DeviceRegistry,
 ) -> Result<DeviceReference, CompositionError> {
+    let node_id = &node.id;
     mixrelay_audio_graph::validate_virtual_endpoint_gain(config.gain_db)
         .map_err(|error| invalid(error.to_string()))?;
     let canonical = registry
@@ -192,6 +196,7 @@ fn lower_device(
         None
     };
     Ok(DeviceReference {
+        control: node.control,
         node_id: node_id.clone(),
         device_id: config.id.clone(),
         read,
@@ -235,6 +240,7 @@ fn lower_source(
         return Err(invalid("authored source channels/gain are invalid"));
     }
     Ok(SourceReference {
+        control: node.control,
         node_id: node.id.clone(),
         source_id: source_id.clone(),
         channels,

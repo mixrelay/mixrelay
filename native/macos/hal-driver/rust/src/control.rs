@@ -28,6 +28,7 @@ trait Backend {
     fn connect(&self, owner: *const c_void, generation: u64) -> Option<Self::Connection>;
     fn resume(&self, connection: &Self::Connection);
     fn send(&self, connection: &Self::Connection, request: Request);
+    fn desktop_active(&self) -> bool;
 }
 
 struct Control<B: Backend> {
@@ -52,6 +53,9 @@ impl<B: Backend> Control<B> {
     }
 
     fn open(&self) {
+        if !self.backend.desktop_active() {
+            return;
+        }
         let generation = self.session.borrow_mut().begin();
         if generation == 0 {
             return;
@@ -82,6 +86,12 @@ impl<B: Backend> Control<B> {
 
     fn tick(&self) {
         self.registry.tick();
+        if !self.backend.desktop_active() {
+            let generation = self.session.borrow().authority();
+            self.session.borrow_mut().disconnected(generation);
+            self.connection.borrow_mut().take();
+            return;
+        }
         let action = self.session.borrow_mut().tick();
         self.request_replacement();
         match action {
@@ -92,6 +102,9 @@ impl<B: Backend> Control<B> {
     }
 
     fn send(&self, request: Request) {
+        if !self.backend.desktop_active() {
+            return;
+        }
         if let Some(connection) = self.connection.borrow().as_ref() {
             self.backend.send(connection, request);
         }

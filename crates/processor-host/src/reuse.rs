@@ -51,6 +51,24 @@ impl HostedAudioProcessor for ReuseRequest {
 }
 
 impl ProcessorControlRegistry {
+    /// Prevents a workspace replacement from inheriting a running native editor's state.
+    /// This changes reuse metadata only; active processors continue rendering on failure.
+    pub fn invalidate_reuse(&self) {
+        let controls = self
+            .controls
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for control in controls
+            .values()
+            .flatten()
+            .filter_map(std::sync::Weak::upgrade)
+        {
+            *control
+                .reuse
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        }
+    }
     pub(super) fn reuse_request(
         &self,
         request: &HostedProcessorPrepareRequest<'_>,
@@ -80,6 +98,7 @@ mod tests {
     fn reuse_requires_matching_type_format_channels_and_current_native_state() {
         let id = NodeId::from("graph-a/effect");
         let config = ProviderNodeConfig {
+            ports: None,
             type_id: "au:aufx:bpas:appl".into(),
             parameters: serde_json::json!({"stateBase64": "original"}),
         };

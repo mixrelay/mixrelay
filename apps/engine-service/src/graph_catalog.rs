@@ -35,6 +35,8 @@ pub(super) use restore::PendingRestore;
 #[path = "device_catalog.rs"]
 mod devices;
 
+mod workspace;
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Catalog {
@@ -61,14 +63,14 @@ pub(super) struct CatalogStore {
     pub(super) value: Result<Catalog, String>,
 }
 
-fn invalid(reason: &str) -> ProtocolError {
+pub(super) fn invalid(reason: &str) -> ProtocolError {
     ProtocolError {
         code: ErrorCode::GraphInvalid,
         parameters: serde_json::json!({"reason": reason.to_string()}),
     }
 }
 
-fn unavailable(reason: &str) -> ProtocolError {
+pub(super) fn unavailable(reason: &str) -> ProtocolError {
     ProtocolError {
         code: ErrorCode::ControlUnavailable,
         parameters: serde_json::json!({"reason": reason.to_string(), "resource": "graph_catalog"}),
@@ -128,6 +130,15 @@ impl Catalog {
             return Err("graph catalog exceeds size limit".into());
         }
         let mut value: Self = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+        value.validate()?;
+        for graph in &mut value.graphs {
+            restore::require_pid_reselection(&mut graph.document);
+        }
+        Ok(Some(value))
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        let value = self;
         let mut ids = BTreeSet::new();
         if value.version != 1
             || value.graphs.is_empty()
@@ -143,10 +154,7 @@ impl Catalog {
         {
             return Err("invalid graph catalog identity, name or version".into());
         }
-        for graph in &mut value.graphs {
-            restore::require_pid_reselection(&mut graph.document);
-        }
-        Ok(Some(value))
+        Ok(())
     }
 
     fn active(&self) -> &SavedGraph {
@@ -350,10 +358,15 @@ impl EngineGraphController {
             .as_ref()
             .map(Catalog::response)
             .map_err(|error| unavailable(error))?;
-        response
-            .persistence_error
-            .clone_from(&self.catalog_write_error.lock());
+        response.persistence_error = self.graph_persistence_warning();
         Ok(response)
+    }
+
+    pub(super) fn graph_persistence_warning(&self) -> Option<String> {
+        self.catalog_write_error
+            .lock()
+            .clone()
+            .or_else(|| self.node_control_warning.lock().clone())
     }
 
     pub(super) fn read_catalog_document(&self, id: &str) -> Result<GraphDocument, ProtocolError> {

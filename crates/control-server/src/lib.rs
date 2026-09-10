@@ -18,7 +18,13 @@ use mixrelay_control_protocol::{
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
 mod editor_surface;
+mod engine_power;
+mod ingress;
+mod node_control;
 mod recorder;
+mod transport;
+mod workspace;
+pub use transport::bounded_listener;
 
 pub const HEALTH_ROUTE: &str = "/health";
 pub const STATUS_ROUTE: &str = "/api/v1/status";
@@ -39,6 +45,86 @@ pub const PROCESSOR_PARAMETER_ROUTE: &str =
 pub const PROCESSOR_EDITOR_ROUTE: &str = "/api/v1/processors/{node_id}/editor";
 
 pub trait ControlBackend: Send + Sync {
+    /// Discovers authored node controls in one graph without changing selection.
+    /// # Errors
+    /// Reports an unknown graph or unavailable backend.
+    fn node_controls(
+        &self,
+        _graph_id: &str,
+    ) -> Result<mixrelay_control_protocol::GraphNodeControls, ProtocolError> {
+        Err(node_control::unavailable())
+    }
+
+    /// Preflights a revision-guarded node control patch without publishing it.
+    /// # Errors
+    /// Rejects missing targets, stale revisions and unsupported controls.
+    fn preview_node_control(
+        &self,
+        _graph_id: &str,
+        _node_id: &str,
+        _request: mixrelay_control_protocol::NodeControlRequest,
+    ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+        Err(node_control::unavailable())
+    }
+
+    /// Publishes explicit node power/mute state using the normal graph transaction.
+    /// # Errors
+    /// Rejects missing targets, stale revisions and native preparation failures.
+    fn update_node_control(
+        &self,
+        _graph_id: &str,
+        _node_id: &str,
+        _request: mixrelay_control_protocol::NodeControlRequest,
+    ) -> Result<GraphApplyResponse, ProtocolError> {
+        Err(node_control::unavailable())
+    }
+    /// Preflights the next start without acquiring audio or changing execution.
+    /// # Errors
+    /// Rejects non-stopped engines and invalid graph/native selections.
+    fn preview_engine_start(
+        &self,
+    ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters: serde_json::json!({"resource":"engine_power"}),
+        })
+    }
+    /// Publishes or retires execution without changing authored graph contents.
+    /// # Errors
+    /// Reports unsupported control, publication contention or native preparation errors.
+    fn set_engine_power(
+        &self,
+        _request: mixrelay_control_protocol::EnginePowerRequest,
+    ) -> Result<GraphApplyResponse, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters: serde_json::json!({"resource":"engine_power"}),
+        })
+    }
+    /// Prepares capture metadata without publishing the requested workspace.
+    /// # Errors
+    /// Rejects invalid files, stale revisions and unavailable composition resources.
+    fn preview_workspace_file(
+        &self,
+        _request: mixrelay_control_protocol::WorkspaceRequest,
+    ) -> Result<mixrelay_control_protocol::WorkspacePreview, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters: serde_json::json!({"resource":"workspace_preview"}),
+        })
+    }
+    /// Saves or replaces a complete authored workspace on the control thread.
+    /// # Errors
+    /// Rejects stale revisions, invalid files, active recordings, and preparation failures.
+    fn workspace_file(
+        &self,
+        _request: mixrelay_control_protocol::WorkspaceRequest,
+    ) -> Result<GraphCatalogResponse, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters: serde_json::json!({"resource":"workspace"}),
+        })
+    }
     /// Reads one graph-owned recording without changing the selected graph.
     /// # Errors
     /// Reports an unavailable recorder or unknown graph/node identity.
@@ -57,7 +143,7 @@ pub trait ControlBackend: Send + Sync {
         &self,
         _graph_id: &str,
         _node_id: &str,
-        _request: mixrelay_control_protocol::RecorderRequest,
+        _request: mixrelay_control_protocol::RecorderControlRequest,
     ) -> Result<mixrelay_control_protocol::RecorderStatus, ProtocolError> {
         Err(recorder::unavailable())
     }
@@ -189,7 +275,7 @@ pub trait ControlBackend: Send + Sync {
         &self,
         node_id: &str,
         parameter_id: u32,
-        value: f64,
+        update: ProcessorParameterUpdate,
     ) -> Result<ProcessorParameterUpdateResponse, ProtocolError>;
 
     /// Returns the current native editor state for one active processor node.
@@ -210,7 +296,7 @@ pub trait ControlBackend: Send + Sync {
     fn set_processor_editor(
         &self,
         node_id: &str,
-        open: bool,
+        request: ProcessorEditorRequest,
     ) -> Result<ProcessorEditorStatus, ProtocolError>;
 
     /// Captures a bounded native image without blocking the async HTTP executor.
@@ -312,7 +398,7 @@ impl ControlBackend for UnavailableBackend {
         &self,
         node_id: &str,
         parameter_id: u32,
-        _value: f64,
+        _update: ProcessorParameterUpdate,
     ) -> Result<ProcessorParameterUpdateResponse, ProtocolError> {
         Err(ProtocolError {
             code: ErrorCode::ProcessorUnavailable,
@@ -333,7 +419,7 @@ impl ControlBackend for UnavailableBackend {
     fn set_processor_editor(
         &self,
         node_id: &str,
-        _open: bool,
+        _request: ProcessorEditorRequest,
     ) -> Result<ProcessorEditorStatus, ProtocolError> {
         Err(processor_unavailable(node_id))
     }
@@ -353,12 +439,28 @@ pub fn router() -> Router {
 pub fn router_with_backend(backend: Arc<dyn ControlBackend>) -> Router {
     Router::new()
         .route(
+            "/api/v1/graphs/{id}/nodes/controls",
+            get(node_control::list),
+        )
+        .route(
+            "/api/v1/graphs/{id}/nodes/{node_id}/control",
+            put(node_control::update),
+        )
+        .route(
+            "/api/v1/graphs/{id}/nodes/{node_id}/control/preview",
+            post(node_control::preview),
+        )
+        .route("/api/v1/workspace", post(workspace::operate))
+        .route("/api/v1/workspace/preview", post(workspace::preview))
+        .route(
             "/api/v1/graphs/{id}/recorders/{node_id}",
             get(recorder::status).put(recorder::control),
         )
         .route(HEALTH_ROUTE, get(|| async { "ok" }))
         .route(STATUS_ROUTE, get(status))
         .route(AUDIO_SESSION_ROUTE, put(reconfigure_session))
+        .route("/api/v1/audio/power", put(engine_power::set))
+        .route("/api/v1/audio/power/preview", post(engine_power::preview))
         .route(
             VIRTUAL_ENDPOINT_FORMAT_ROUTE,
             put(reconfigure_virtual_endpoint),
@@ -398,7 +500,9 @@ pub fn router_with_backend(backend: Arc<dyn ControlBackend>) -> Router {
             GRAPH_LAYOUT_ROUTE,
             get(graph_layout).put(update_graph_layout),
         )
-        .layer(DefaultBodyLimit::max(16 * 1024 * 1024))
+        .layer(axum::middleware::from_fn(ingress::read_body))
+        // Ingress already bounds every body; avoid Json's separate 2 MiB default.
+        .layer(DefaultBodyLimit::disable())
         .layer(control_cors())
         .with_state(ControlState { backend })
 }
@@ -666,7 +770,7 @@ async fn set_processor_parameter(
     // Accepted parameter updates also checkpoint durable graph state. Keep filesystem work
     // off Tokio's I/O workers; the backend still publishes the native value before saving.
     match tokio::task::spawn_blocking(move || {
-        state.backend.set_processor_parameter(&node_id, parameter_id, update.value)
+        state.backend.set_processor_parameter(&node_id, parameter_id, update)
     }).await {
         Ok(Ok(response)) => (StatusCode::OK, Json(response)).into_response(),
         Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
@@ -710,10 +814,8 @@ async fn set_processor_editor(
     };
     // Closing includes a bounded vendor state export and durable filesystem write.
     // Do not stall meter/status HTTP requests on the asynchronous I/O executor.
-    match tokio::task::spawn_blocking(move || {
-        state.backend.set_processor_editor(&node_id, request.open)
-    })
-    .await
+    match tokio::task::spawn_blocking(move || state.backend.set_processor_editor(&node_id, request))
+        .await
     {
         Ok(Ok(response)) => (StatusCode::OK, Json(response)).into_response(),
         Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
@@ -765,7 +867,10 @@ async fn apply_graph(
 
 fn protocol_error_status(code: ErrorCode) -> StatusCode {
     match code {
-        ErrorCode::GraphRevisionStale | ErrorCode::GraphExchangeBusy => StatusCode::CONFLICT,
+        ErrorCode::GraphRevisionStale | ErrorCode::GraphExchangeBusy | ErrorCode::NodeDisabled => {
+            StatusCode::CONFLICT
+        }
+        ErrorCode::NodeNotFound => StatusCode::NOT_FOUND,
         ErrorCode::GraphInvalid
         | ErrorCode::GraphBindingUnsupported
         | ErrorCode::AudioSessionUnsupported => StatusCode::UNPROCESSABLE_ENTITY,
@@ -778,6 +883,7 @@ fn protocol_error_status(code: ErrorCode) -> StatusCode {
 mod tests {
     mod application_capture;
     mod endpoint_format;
+    mod node_control;
     mod recorder;
     use std::sync::Mutex;
 
@@ -789,7 +895,14 @@ mod tests {
     use super::*;
 
     struct TestBackend {
-        last_recorder: Mutex<Option<(String, String, mixrelay_control_protocol::RecorderRequest)>>,
+        last_node_control: Mutex<Option<node_control::RecordedControl>>,
+        last_recorder: Mutex<
+            Option<(
+                String,
+                String,
+                mixrelay_control_protocol::RecorderControlRequest,
+            )>,
+        >,
         apply_result: Mutex<Result<GraphApplyResponse, ProtocolError>>,
         last_apply: Mutex<Option<GraphApplyRequest>>,
         last_preview: Mutex<Option<GraphApplyRequest>>,
@@ -808,6 +921,7 @@ mod tests {
     impl TestBackend {
         fn with_result(result: Result<GraphApplyResponse, ProtocolError>) -> Arc<Self> {
             Arc::new(Self {
+                last_node_control: Mutex::new(None),
                 last_recorder: Mutex::new(None),
                 apply_result: Mutex::new(result),
                 last_apply: Mutex::new(None),
@@ -819,6 +933,43 @@ mod tests {
     }
 
     impl ControlBackend for TestBackend {
+        fn node_controls(
+            &self,
+            graph_id: &str,
+        ) -> Result<mixrelay_control_protocol::GraphNodeControls, ProtocolError> {
+            Ok(node_control::discovery(graph_id))
+        }
+
+        fn preview_node_control(
+            &self,
+            graph_id: &str,
+            node_id: &str,
+            request: mixrelay_control_protocol::NodeControlRequest,
+        ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+            self.update_node_control(graph_id, node_id, request)
+                .map(
+                    |response| mixrelay_control_protocol::ApplicationCaptureManifest {
+                        protocol_version: PROTOCOL_VERSION,
+                        revision: response.revision,
+                        sources: Vec::new(),
+                    },
+                )
+        }
+
+        fn update_node_control(
+            &self,
+            graph_id: &str,
+            node_id: &str,
+            request: mixrelay_control_protocol::NodeControlRequest,
+        ) -> Result<GraphApplyResponse, ProtocolError> {
+            *self.last_node_control.lock().expect("test mutex") =
+                Some(node_control::RecordedControl {
+                    graph_id: graph_id.to_owned(),
+                    node_id: node_id.to_owned(),
+                    request,
+                });
+            self.apply_graph(document())
+        }
         fn recorder_status(
             &self,
             graph_id: &str,
@@ -834,7 +985,7 @@ mod tests {
             &self,
             graph_id: &str,
             node_id: &str,
-            request: mixrelay_control_protocol::RecorderRequest,
+            request: mixrelay_control_protocol::RecorderControlRequest,
         ) -> Result<mixrelay_control_protocol::RecorderStatus, ProtocolError> {
             *self.last_recorder.lock().unwrap() =
                 Some((graph_id.to_owned(), node_id.to_owned(), request));
@@ -997,13 +1148,13 @@ mod tests {
             &self,
             node_id: &str,
             parameter_id: u32,
-            value: f64,
+            update: ProcessorParameterUpdate,
         ) -> Result<ProcessorParameterUpdateResponse, ProtocolError> {
             Ok(ProcessorParameterUpdateResponse {
                 protocol_version: PROTOCOL_VERSION,
                 node_id: node_id.to_owned(),
                 parameter_id,
-                value,
+                value: update.value,
                 persistence_error: (node_id == "unsaved-node")
                     .then(|| "fixture disk unavailable".to_owned()),
             })
@@ -1019,7 +1170,7 @@ mod tests {
         fn set_processor_editor(
             &self,
             node_id: &str,
-            open: bool,
+            request: ProcessorEditorRequest,
         ) -> Result<ProcessorEditorStatus, ProtocolError> {
             if let Some(gate) = &self.editor_gate {
                 use std::{
@@ -1033,7 +1184,7 @@ mod tests {
                 }
                 gate.finished.store(true, Ordering::Release);
             }
-            Ok(test_editor_status(node_id, open))
+            Ok(test_editor_status(node_id, request.open))
         }
 
         fn apply_graph(
@@ -1119,6 +1270,7 @@ mod tests {
         use std::{sync::atomic::Ordering, time::Duration};
         let gate = Arc::new(EditorGate::default());
         let backend = Arc::new(TestBackend {
+            last_node_control: Mutex::new(None),
             last_recorder: Mutex::new(None),
             apply_result: Mutex::new(Err(processor_unavailable("unused"))),
             last_apply: Mutex::new(None),
@@ -1135,7 +1287,7 @@ mod tests {
                     .method("PUT")
                     .uri("/api/v1/processors/effect/editor")
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{"open":false}"#))
+                    .body(Body::from(r#"{"expectedRevision":5,"open":false}"#))
                     .unwrap(),
             )
             .await
@@ -1408,7 +1560,7 @@ mod tests {
                 .method(Method::PUT)
                 .uri("/api/v1/processors/vst-node/parameters/42")
                 .header(CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"value":0.75}"#))
+                .body(Body::from(r#"{"expectedRevision":5,"value":0.75}"#))
                 .expect("request should build"),
         )
         .await;
@@ -1432,7 +1584,7 @@ mod tests {
                 .method(Method::PUT)
                 .uri("/api/v1/processors/unsaved-node/parameters/42")
                 .header(CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"value":0.75}"#))
+                .body(Body::from(r#"{"expectedRevision":5,"value":0.75}"#))
                 .unwrap(),
         )
         .await;
@@ -1466,7 +1618,7 @@ mod tests {
                 .method(Method::PUT)
                 .uri("/api/v1/processors/processor-node/editor")
                 .header(CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"open":true}"#))
+                .body(Body::from(r#"{"expectedRevision":5,"open":true}"#))
                 .expect("request should build"),
         )
         .await;

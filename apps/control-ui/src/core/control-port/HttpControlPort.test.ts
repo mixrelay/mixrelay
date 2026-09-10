@@ -43,7 +43,7 @@ describe('HttpControlPort', () => {
     const port = new HttpControlPort('http://control', request);
     await expect(port.recorderStatus('graph/a', 'record/b')).resolves.toEqual(status);
     await expect(
-      port.controlRecorder('graph/a', 'record/b', { action: 'record' }),
+      port.controlRecorder('graph/a', 'record/b', { action: 'record' }, 3),
     ).resolves.toEqual(status);
     expect(request).toHaveBeenNthCalledWith(
       1,
@@ -56,7 +56,7 @@ describe('HttpControlPort', () => {
       {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'record' }),
+        body: JSON.stringify({ expectedRevision: 3, request: { action: 'record' } }),
       },
     );
   });
@@ -136,11 +136,11 @@ describe('HttpControlPort graph operations', () => {
       revision: 3,
     });
     await expect(port.getProcessors()).resolves.toMatchObject({ processors: [] });
-    await expect(port.setProcessorParameter('vst/node', 42, 0.75)).resolves.toMatchObject({
+    await expect(port.setProcessorParameter('vst/node', 42, 0.75, 3)).resolves.toMatchObject({
       value: 0.75,
     });
     await expect(port.getProcessorEditor('vst/node')).resolves.toMatchObject({ state: 'closed' });
-    await expect(port.setProcessorEditor('vst/node', true)).resolves.toMatchObject({
+    await expect(port.setProcessorEditor('vst/node', true, 3)).resolves.toMatchObject({
       state: 'opening',
     });
     expect(request).toHaveBeenNthCalledWith(1, 'http://control/api/v1/status', undefined);
@@ -153,7 +153,7 @@ describe('HttpControlPort graph operations', () => {
       6,
       'http://control/api/v1/processors/vst%2Fnode/parameters/42',
       {
-        body: JSON.stringify({ value: 0.75 }),
+        body: JSON.stringify({ value: 0.75, expectedRevision: 3 }),
         headers: { 'content-type': 'application/json' },
         method: 'PUT',
       },
@@ -167,7 +167,7 @@ describe('HttpControlPort graph operations', () => {
       8,
       'http://control/api/v1/processors/vst%2Fnode/editor',
       {
-        body: JSON.stringify({ open: true }),
+        body: JSON.stringify({ open: true, expectedRevision: 3 }),
         headers: { 'content-type': 'application/json' },
         method: 'PUT',
       },

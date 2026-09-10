@@ -96,7 +96,10 @@ export function runtimeGraphToAudioGraph(
 ): AudioGraphModel {
   const reservedIds = new Set(document.nodes.map((node) => node.id));
   const nodes = document.nodes.flatMap((node, index) =>
-    runtimeNodeToAudioNodes(node, index, presentation, processors, reservedIds),
+    runtimeNodeToAudioNodes(node, index, presentation, processors, reservedIds).map((view) => ({
+      ...view,
+      runtime: view.runtime ? { ...view.runtime, control: node.control } : undefined,
+    })),
   );
   const projected = document.edges.map((edge) => ({
     edge,
@@ -162,6 +165,7 @@ function audioNodeToRuntimeNode(
   if (!node.runtime) return sourceNode ?? null;
   if (node.runtime.type !== 'virtual_endpoint') {
     return {
+      ...(node.runtime.control ? { control: node.runtime.control } : {}),
       config: node.runtime.config,
       id,
       label: node.runtime.label === undefined ? node.appearance.title : node.runtime.label,
@@ -183,6 +187,7 @@ function audioNodeToRuntimeNode(
     capture: endpointNodes.some((candidate) => candidate.runtime?.binding?.side === 'sink'),
   };
   return {
+    ...(node.runtime.control ? { control: node.runtime.control } : {}),
     config,
     id,
     label: sourceNode ? sourceNode.label : node.appearance.title,
@@ -683,6 +688,7 @@ function externalProcessorNode(
       config: {
         parameters: { parameterValues, version: 1 },
         typeId: processor.typeId,
+        ports: { inputs: processor.inputChannels, outputs: processor.outputChannels },
       },
       type: 'provider',
     },
@@ -1070,7 +1076,25 @@ function runtimeExternalProcessorNode(
 ): AudioGraphNode | null {
   const typeId = directString(node.config, 'typeId');
   const descriptor = processors.find((processor) => processor.typeId === typeId);
-  if (!descriptor) return null;
+  if (!descriptor) {
+    const ports = objectValue(objectValue(node.config)?.ports);
+    const inputs = directNumber(ports, 'inputs');
+    const outputs = directNumber(ports, 'outputs');
+    if (!inputs || !outputs || inputs > 64 || outputs > 64) return null;
+    return {
+      ...base,
+      runtime,
+      appearance: {
+        title: node.label ?? typeId ?? node.id,
+        category: presentation.processor,
+        icon: 'FX',
+        offline: true,
+        detail: presentation.unsupported,
+      },
+      inputPorts: channelPorts(AUDIO_PORT_ID, inputs, 'Input'),
+      outputPorts: channelPorts(AUDIO_PORT_ID, outputs, 'Output'),
+    };
+  }
   const parameters = objectValue(node.config)?.parameters;
   const parameterValues = objectValue(objectValue(parameters)?.parameterValues) ?? {};
   const values = Object.fromEntries(

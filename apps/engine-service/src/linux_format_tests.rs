@@ -139,6 +139,7 @@ fn attach_fixture(
     }
     document.revision = 2;
     document.nodes.push(mixrelay_audio_graph::NodeSpec {
+        control: mixrelay_audio_graph::NodeControl::default(),
         id: "rate-fixture".into(), label: None,
         config: NodeConfig::ApplicationCapture(serde_json::from_value(serde_json::json!({
             "selector": mixrelay_audio_io::ApplicationSelector::BundleId { bundle_id: "org.mixrelay.fixture.application".into(), include_descendants: false },

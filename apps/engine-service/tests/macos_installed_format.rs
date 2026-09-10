@@ -499,6 +499,7 @@ fn installed_format_target_requires_one_actual_uuid_without_default_fallback() {
     use mixrelay_audio_io::{ChannelLayout, StreamSpec, VirtualEndpointSpec};
 
     let node = |name: &str, identity: &str| NodeSpec {
+        control: mixrelay_audio_graph::NodeControl::default(),
         id: name.into(),
         label: None,
         config: NodeConfig::VirtualEndpoint(

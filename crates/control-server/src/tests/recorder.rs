@@ -20,8 +20,7 @@ async fn recorder_routes_preserve_graph_identity_and_typed_file_options() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["path"], "graph B/recorder 1");
-    let request =
-        json!({"action":"record","path":"/recording.wav","sampleRate":96_000,"encoding":"pcm24"});
+    let request = json!({"expectedRevision":5,"request":{"action":"record","path":"/recording.wav","sampleRate":96_000,"encoding":"pcm24"}});
     let (status, _) = response_json(
         router_with_backend(backend.clone()),
         Request::put(path)
@@ -40,10 +39,11 @@ async fn recorder_routes_preserve_graph_identity_and_typed_file_options() {
 #[tokio::test]
 async fn malformed_recorder_controls_never_reach_backend() {
     for body in [
-        json!({"action":"overwrite"}),
-        json!({"action":"record","encoding":"mp3"}),
-        json!({"action":"record","sampleRate":-1}),
-        json!({"action":"stop","extra":true}),
+        json!({"expectedRevision":5,"request":{"action":"overwrite"}}),
+        json!({"expectedRevision":5,"request":{"action":"record","encoding":"mp3"}}),
+        json!({"expectedRevision":5,"request":{"action":"record","sampleRate":-1}}),
+        json!({"expectedRevision":5,"request":{"action":"stop","extra":true}}),
+        json!({"request":{"action":"stop"}}),
     ] {
         let backend = backend();
         let (status, _) = response_json(

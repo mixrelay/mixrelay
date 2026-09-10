@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  type ComponentProps,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type {
@@ -7,15 +14,13 @@ import type {
   RuntimeGraphDocument,
 } from '../core/control-port/types';
 import { ActionButton } from '../core/ui/ActionButton';
-import { ShortcutTooltip } from '../core/ui/ShortcutTooltip';
-import { StatusIndicator } from '../core/ui/StatusIndicator';
-import { WorkspaceHeader } from '../core/ui/WorkspaceHeader';
 import { AudioSessionControl } from '../features/audio-session/AudioSessionControl';
-import { getEnginePresentation } from '../features/audio-session/presentation';
+import { EnginePowerControl } from '../features/audio-session/EnginePowerControl';
 import { useAudioStatus } from '../features/audio-session/useAudioStatus';
 import { useVirtualEndpointRate } from '../features/audio-session/useVirtualEndpointRate';
 import { GraphCreateDialog } from '../features/graphs/GraphCreateDialog';
 import { useCatalogTitle, useGraphCatalog } from '../features/graphs/useGraphCatalog';
+import { WorkspaceFileMenu } from '../features/graphs/WorkspaceFileMenu';
 import { RoutingWorkspace } from '../features/routing-workspace/RoutingWorkspace';
 import styles from './StudioScreen.module.css';
 
@@ -57,7 +62,7 @@ function useOwnedSessionDocument(controlPort: ControlPort, catalogDocument?: Run
 function useNewGraphShortcut(enabled: boolean, open: () => void) {
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'n') {
         event.preventDefault();
         if (enabled) open();
       }
@@ -80,14 +85,14 @@ export function StudioScreen({ controlPort }: { controlPort: ControlPort }) {
     controlPort,
     collection.document,
   );
-  const [isCreatingGraph, setIsCreatingGraph] = useState(false);
+  const { isCreatingGraph, setIsCreatingGraph, openNewGraph } = useGraphCreation(catalog?.activeId);
   const busy = catalogBusy || sessionBusy || workspaceBusy || catalogUncertain;
   const title = useCatalogTitle(collection, busy, t('studio.untitledGraph'));
-  const unsavedTitle = title.unsaved;
+  const controlsDisabled = busy || title.unsaved;
   const deviceRate = useVirtualEndpointRate({
     controlPort,
     settings: status?.audioSession?.virtualEndpointSettings,
-    enabled: !busy && !unsavedTitle,
+    enabled: !controlsDisabled,
     onBusyChange: setSessionBusy,
     onApplied: (document) => {
       setSessionDocument(document);
@@ -97,35 +102,33 @@ export function StudioScreen({ controlPort }: { controlPort: ControlPort }) {
   const mutateCatalog = (action: GraphCatalogAction) => {
     if (!busy) return collection.mutate(action);
   };
-  const engine = getEnginePresentation(status, t);
-
-  useEffect(() => {
-    if (catalog?.activeId) setIsCreatingGraph(false);
-  }, [catalog?.activeId]);
-  const openNewGraph = useCallback(() => setIsCreatingGraph(true), []);
-  useNewGraphShortcut(Boolean(catalog), openNewGraph);
 
   return (
-    <main className={styles.shell}>
-      <GraphSidebar
-        collection={collection}
-        disabled={busy || unsavedTitle}
-        onCreate={() => setIsCreatingGraph(true)}
-        onSelect={(id) => void mutateCatalog({ action: 'select', id })}
-      />
-
+    <StudioFrame
+      collection={collection}
+      disabled={controlsDisabled}
+      onCreate={openNewGraph}
+      onSelect={(id) => void mutateCatalog({ action: 'select', id })}
+    >
       <section
         className={styles.workspace}
         aria-label={t('studio.workspace')}
         inert={sessionBusy || catalogBusy || catalogUncertain}
       >
         <RoutingWorkspace
+          headerActions={
+            <WorkspaceFileMenu
+              controlPort={controlPort}
+              disabled={controlsDisabled}
+              run={collection.workspaceFile}
+            />
+          }
           deviceRateAction={{
             change: deviceRate.change,
             error: deviceRate.error,
-            enabled: deviceRate.available && !busy && !unsavedTitle,
+            enabled: deviceRate.available && !controlsDisabled,
           }}
-          key={catalog?.activeId ?? 'engine'}
+          key={`${catalog?.activeId ?? 'engine'}:${collection.documentGeneration}`}
           graphId={catalog?.activeId}
           interactionDisabled={catalogBusy || catalogUncertain || sessionBusy}
           audioSession={status?.audioSession}
@@ -137,28 +140,25 @@ export function StudioScreen({ controlPort }: { controlPort: ControlPort }) {
           }
           controlPort={controlPort}
           onBusyChange={setWorkspaceBusy}
-          onTitleChange={(name) => {
-            title.setDraft(name);
-          }}
+          onTitleChange={title.setDraft}
           title={catalog ? title.draft : undefined}
         />
       </section>
 
-      <footer className={styles.statusBar}>
-        <AudioSessionControl
-          disabled={busy || unsavedTitle}
-          status={status}
-          controlPort={controlPort}
-          onApplied={setSessionDocument}
-          onBusyChange={setSessionBusy}
-        />
-        <span>{t('studio.engineShort')}</span>
-        <StatusIndicator className={styles.engineDot} label={engine.label} tone={engine.tone} />
-      </footer>
+      <StudioStatusBar
+        disabled={controlsDisabled}
+        status={status}
+        controlPort={controlPort}
+        onApplied={(document) => {
+          setSessionDocument(document);
+          setStatusRefresh((value) => value + 1);
+        }}
+        onBusyChange={setSessionBusy}
+      />
 
       {isCreatingGraph ? (
         <GraphCreateDialog
-          busy={busy || unsavedTitle}
+          busy={controlsDisabled}
           creating={catalogBusy}
           error={catalogErrorText}
           onCancel={() => setIsCreatingGraph(false)}
@@ -168,16 +168,68 @@ export function StudioScreen({ controlPort }: { controlPort: ControlPort }) {
           })}
         />
       ) : null}
+    </StudioFrame>
+  );
+}
+
+function useGraphCreation(activeId: string | undefined) {
+  const [isCreatingGraph, setIsCreatingGraph] = useState(false);
+  useEffect(() => {
+    if (activeId) setIsCreatingGraph(false);
+  }, [activeId]);
+  const openNewGraph = useCallback(() => setIsCreatingGraph(true), []);
+  useNewGraphShortcut(Boolean(activeId), openNewGraph);
+  return { isCreatingGraph, setIsCreatingGraph, openNewGraph };
+}
+
+function StudioFrame({
+  children,
+  ...sidebar
+}: Omit<ComponentProps<typeof GraphSidebar>, 'hidden'> & { children: ReactNode }) {
+  const { t } = useTranslation();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  return (
+    <main className={styles.shell} data-sidebar-open={sidebarOpen}>
+      <header className={styles.applicationHeader}>
+        <h1>MixRelay</h1>
+      </header>
+      <GraphSidebar hidden={!sidebarOpen} {...sidebar} />
+      <button
+        className={sidebarOpen ? styles.sidebarBoundary : styles.sidebarReopen}
+        type="button"
+        aria-label={t('studio.graphs')}
+        aria-expanded={sidebarOpen}
+        aria-controls="graph-sidebar"
+        onClick={() => setSidebarOpen((open) => !open)}
+      >
+        {!sidebarOpen ? (
+          <svg aria-hidden="true" viewBox="0 0 16 16">
+            <path d="m6 4 4 4-4 4" />
+          </svg>
+        ) : null}
+      </button>
+      {children}
     </main>
   );
 }
 
+function StudioStatusBar(props: ComponentProps<typeof AudioSessionControl>) {
+  return (
+    <footer className={styles.statusBar}>
+      <AudioSessionControl {...props} />
+      <EnginePowerControl {...props} />
+    </footer>
+  );
+}
+
 function GraphSidebar({
+  hidden,
   collection,
   disabled,
   onCreate,
   onSelect,
 }: {
+  hidden: boolean;
   collection: ReturnType<typeof useGraphCatalog>;
   disabled: boolean;
   onCreate: () => void;
@@ -187,11 +239,12 @@ function GraphSidebar({
   const { catalog, busy: catalogBusy, error: catalogError, reload: reloadCatalog } = collection;
   const catalogErrorText = useCatalogError(catalogError);
   return (
-    <aside className={styles.sidebar} aria-label={t('studio.graphs')}>
-      <WorkspaceHeader className={styles.sidebarSectionHeader}>
-        <h1>{t('studio.graphs')}</h1>
-      </WorkspaceHeader>
-
+    <aside
+      id="graph-sidebar"
+      className={styles.sidebar}
+      aria-label={t('studio.graphs')}
+      hidden={hidden}
+    >
       <nav className={styles.graphList} aria-label={t('studio.graphs')}>
         {catalog?.graphs.map((graph) => {
           const selected = graph.id === catalog?.activeId;
@@ -221,26 +274,21 @@ function GraphSidebar({
           </div>
         ) : null}
         {catalog?.persistenceError ? <p role="alert">{t('studio.graphSaveFailed')}</p> : null}
-      </nav>
-
-      <footer className={styles.sidebarFooter}>
-        <ShortcutTooltip shortcut="Mod+N">
-          <ActionButton
-            className={styles.newGraph}
-            fullWidth
+        <div className={styles.sidebarFooter}>
+          <button
+            type="button"
+            aria-keyshortcuts="Control+Shift+N Meta+Shift+N"
+            className={`${styles.graph} ${styles.newGraph}`}
             disabled={!catalog}
-            leftSection={
-              <span className={styles.newGraphIcon} aria-hidden="true">
-                +
-              </span>
-            }
             onClick={onCreate}
-            variant="transparent"
           >
-            {t('studio.newGraph')}
-          </ActionButton>
-        </ShortcutTooltip>
-      </footer>
+            <span className={styles.newGraphIcon} aria-hidden="true">
+              +
+            </span>
+            <span className={styles.graphName}>{t('studio.newGraph')}</span>
+          </button>
+        </div>
+      </nav>
     </aside>
   );
 }

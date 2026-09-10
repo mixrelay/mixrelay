@@ -66,6 +66,7 @@ fn compile(
 }
 fn node(id: &str, config: NodeConfig) -> NodeSpec {
     NodeSpec {
+        control: mixrelay_audio_graph::NodeControl::default(),
         id: id.into(),
         label: None,
         config,
@@ -188,6 +189,55 @@ fn samples_equal(samples: &[f32], value: f32) {
         samples
             .iter()
             .all(|sample| (*sample - value).abs() < 0.00001)
+    );
+}
+
+#[test]
+fn disabled_references_release_only_the_final_shared_owner_and_mute_stays_local() {
+    let apps = Apps(Cell::new(0));
+    let mut first = physical_graph(DeviceSelector::DefaultInput, 0.0);
+    let second = first.clone();
+    first.nodes[0].control.muted = true;
+    let mut documents = vec![("a".into(), first), ("b".into(), second)];
+    let composed = compile(&documents, &inventory(), &apps).unwrap();
+    assert_eq!(composed.native_sources.len(), 1);
+    assert_eq!(composed.native_outputs.len(), 1);
+    for samples in pcm(&composed).values() {
+        samples_equal(samples, 0.25);
+    }
+    documents[0].1.nodes[0].control.enabled = false;
+    let composed = compile(&documents, &inventory(), &apps).unwrap();
+    assert_eq!(composed.native_sources.len(), 1);
+    for samples in pcm(&composed).values() {
+        samples_equal(samples, 0.25);
+    }
+    documents[1].1.nodes[0].control.enabled = false;
+    let composed = compile(&documents, &inventory(), &apps).unwrap();
+    assert!(composed.native_sources.is_empty());
+    for samples in pcm(&composed).values() {
+        samples_equal(samples, 0.0);
+    }
+    documents[0].1.nodes[1].control.enabled = false;
+    documents[1].1.nodes[1].control.enabled = false;
+    let composed = compile(&documents, &inventory(), &apps).unwrap();
+    assert!(composed.native_outputs.is_empty());
+    assert!(composed.document.nodes.is_empty());
+}
+
+#[test]
+fn disabled_unknown_processor_does_not_block_composition_or_erase_authored_state() {
+    let apps = Apps(Cell::new(0));
+    let document: GraphDocument = serde_json::from_value(serde_json::json!({
+        "schemaVersion": 2, "revision":1, "edges":[],
+        "nodes":[{"id":"missing","type":"provider","control":{"enabled":false,"muted":true},
+            "config":{"typeId":"au:not-installed","parameters":{"saved":42}}}]
+    }))
+    .unwrap();
+    let composed = compile(&[("a".into(), document.clone())], &[], &apps).unwrap();
+    assert!(composed.document.nodes.is_empty());
+    assert_eq!(
+        serde_json::to_value(&document).unwrap()["nodes"][0]["config"]["parameters"]["saved"],
+        42
     );
 }
 

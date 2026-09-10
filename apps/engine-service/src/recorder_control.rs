@@ -11,6 +11,62 @@ pub(super) fn recorder_error(reason: String) -> ProtocolError {
 }
 
 impl EngineGraphController {
+    pub(super) fn stop_inactive_recorders(
+        &self,
+        proposed: &mixrelay_audio_graph::GraphDocument,
+        catalog: Option<&crate::graph_catalog::Catalog>,
+    ) {
+        let current = self.graph.read().clone();
+        let before = self.catalog_candidate(&current);
+        let documents: Vec<_> = before.as_ref().map_or_else(
+            || vec![(self.view_graph_id(), &current)],
+            |value| {
+                value
+                    .documents()
+                    .map(|(id, graph)| (id.to_owned(), graph))
+                    .collect()
+            },
+        );
+        for (graph_id, document) in documents {
+            let next = catalog.map_or(Some(proposed), |value| {
+                value
+                    .documents()
+                    .find(|(id, _)| *id == graph_id)
+                    .map(|(_, graph)| graph)
+            });
+            for node in &document.nodes {
+                let NodeConfig::Recorder { channels } = node.config else {
+                    continue;
+                };
+                if !node.control.enabled || next.is_some_and(|graph| graph.nodes.iter().any(|next| {
+                    next.id == node.id && next.control.enabled
+                        && matches!(next.config, NodeConfig::Recorder { channels: width } if channels == width)
+                })) { continue; }
+                let id = mixrelay_audio_engine::recording_session_key(
+                    &graph_composition::runtime_node_id(&graph_id, &node.id),
+                    channels,
+                );
+                if !matches!(
+                    self.recorders.status(&id).state,
+                    mixrelay_audio_recorder::RecorderState::Recording
+                        | mixrelay_audio_recorder::RecorderState::Paused
+                ) {
+                    continue;
+                }
+                let request = mixrelay_audio_recorder::RecorderRequest {
+                    action: mixrelay_audio_recorder::RecorderAction::Stop,
+                    path: None,
+                    sample_rate: None,
+                    encoding: None,
+                };
+                if let Err(reason) = self.recorders.command(&id, request) {
+                    tracing::error!(%graph_id, node_id = %node.id, %reason, "disabled recorder finalization failed");
+                    *self.recorder_cleanup_error.lock() = Some(reason);
+                }
+            }
+        }
+    }
+
     pub(super) fn reclaim_recorders(&self) {
         self.exchange.reclaim_retired();
         if let Err(reason) = self.recorders.reap_unused() {
@@ -32,7 +88,9 @@ impl EngineGraphController {
                 NodeConfig::Recorder { channels } => Some((&node.id, channels)),
                 _ => None,
             })
-            .ok_or_else(|| recorder_error("recorder node not found".to_owned()))?;
+            .ok_or_else(|| {
+                crate::node_control::node_error(ErrorCode::NodeNotFound, graph_id, node_id)
+            })?;
         Ok(mixrelay_audio_engine::recording_session_key(
             &graph_composition::runtime_node_id(graph_id, id),
             channels,
@@ -78,15 +136,24 @@ mod tests {
     use super::*;
     use mixrelay_audio_graph::{GraphDocument, NodeId, NodeSpec};
     use mixrelay_audio_recorder::{RecorderAction, RecorderRequest, RecorderState};
-    use mixrelay_control_protocol::{GraphCatalogAction, GraphCatalogRequest};
+    use mixrelay_control_protocol::{
+        GraphCatalogAction, GraphCatalogRequest, RecorderControlRequest,
+    };
     use mixrelay_control_server::ControlBackend;
 
-    fn command(action: RecorderAction, path: Option<String>) -> RecorderRequest {
-        RecorderRequest {
-            action,
-            path,
-            sample_rate: None,
-            encoding: None,
+    fn command(
+        revision: u64,
+        action: RecorderAction,
+        path: Option<String>,
+    ) -> RecorderControlRequest {
+        RecorderControlRequest {
+            expected_revision: revision,
+            request: RecorderRequest {
+                action,
+                path,
+                sample_rate: None,
+                encoding: None,
+            },
         }
     }
 
@@ -96,6 +163,7 @@ mod tests {
         let document = GraphDocument::new(
             1,
             vec![NodeSpec {
+                control: mixrelay_audio_graph::NodeControl::default(),
                 id: NodeId::from("record"),
                 label: None,
                 config: NodeConfig::Recorder { channels: 2 },
@@ -114,6 +182,7 @@ mod tests {
                 &graph_id,
                 "record",
                 command(
+                    catalog.document.revision,
                     RecorderAction::Record,
                     Some(directory.join("take.wav").to_string_lossy().into_owned()),
                 ),
@@ -127,14 +196,14 @@ mod tests {
             ErrorCode::RecorderFailed
         );
         engine
-            .control_recorder(&graph_id, "record", command(RecorderAction::Pause, None))
+            .control_recorder(&graph_id, "record", command(1, RecorderAction::Pause, None))
             .unwrap();
         assert_eq!(
             engine.apply_graph(changed.clone()).unwrap_err().code,
             ErrorCode::RecorderFailed
         );
         engine
-            .control_recorder(&graph_id, "record", command(RecorderAction::Stop, None))
+            .control_recorder(&graph_id, "record", command(1, RecorderAction::Stop, None))
             .unwrap();
         assert!(engine.apply_graph(changed).is_ok());
     }
@@ -145,6 +214,7 @@ mod tests {
         let document = GraphDocument::new(
             1,
             vec![NodeSpec {
+                control: mixrelay_audio_graph::NodeControl::default(),
                 id: NodeId::from("record"),
                 label: None,
                 config: NodeConfig::Recorder { channels: 2 },
@@ -165,7 +235,11 @@ mod tests {
             .control_recorder(
                 &original.active_id,
                 "record",
-                command(RecorderAction::Record, Some(path)),
+                command(
+                    original.document.revision,
+                    RecorderAction::Record,
+                    Some(path),
+                ),
             )
             .unwrap();
         let second = engine
@@ -191,7 +265,7 @@ mod tests {
                 .control_recorder(
                     &original.active_id,
                     "missing",
-                    command(RecorderAction::Stop, None)
+                    command(second.document.revision, RecorderAction::Stop, None)
                 )
                 .is_err()
         );
@@ -200,7 +274,7 @@ mod tests {
             .control_recorder(
                 &original.active_id,
                 "record",
-                command(RecorderAction::Stop, None),
+                command(second.document.revision, RecorderAction::Stop, None),
             )
             .unwrap();
         assert_eq!(stopped.state, RecorderState::Stopped);

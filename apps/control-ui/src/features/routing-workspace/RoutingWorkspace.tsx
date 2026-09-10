@@ -1,5 +1,5 @@
 import type { TFunction } from 'i18next';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -20,6 +20,7 @@ import type {
 } from '../../core/control-port/types';
 import { ControlPortError } from '../../core/control-port/types';
 import { useUndoHistory } from '../../core/history/useUndoHistory';
+import { NodeSignalControls } from '../../core/ui/NodeSignalControls';
 import { RecoveryActions } from '../../core/ui/RecoveryActions';
 import { RetryAlert } from '../../core/ui/RetryAlert';
 import { WorkspaceHeader } from '../../core/ui/WorkspaceHeader';
@@ -54,6 +55,7 @@ import {
 import { presentProcessorTimings } from './processorTiming';
 import styles from './RoutingWorkspace.module.css';
 import { useGraphLayout } from './useGraphLayout';
+import { useNodeControls } from './useNodeControls';
 import { useProcessorCatalog } from './useProcessorCatalog';
 import { useProcessorEditors } from './useProcessorEditors';
 import { useProcessorParameterPublisher } from './useProcessorParameterPublisher';
@@ -70,6 +72,7 @@ const ADD_PROCESSOR_DIRECTORY_ITEM_ID = 'add-processor-directory';
 const RESCAN_PROCESSORS_ITEM_ID = 'rescan-processors';
 
 export interface RoutingWorkspaceProps {
+  headerActions?: ReactNode;
   processorTimings?: import('../../core/control-port/types').ProcessorTiming[];
   deviceRateAction?: {
     change: (endpointId: string, sampleRate: number) => void;
@@ -573,7 +576,7 @@ function useGraphUpdates(
       savePositions(nextModel);
       if (kind === 'processor_parameter' && previousModel && applyModel.canPublishParameters) {
         for (const update of changedProcessorParameters(previousModel, nextModel)) {
-          publishProcessorParameter(update);
+          publishProcessorParameter({ ...update, expectedRevision: graph.document?.revision ?? 0 });
         }
       } else if (kind !== 'layout') {
         applyModel.submit(nextModel, processorEditIntent(previousModel, nextModel, kind));
@@ -581,6 +584,7 @@ function useGraphUpdates(
     },
     [
       applyModel,
+      graph.document?.revision,
       flushHistory,
       publishProcessorParameter,
       record,
@@ -599,7 +603,7 @@ function useGraphUpdates(
       savePositions(restoredModel);
       if (step.kind === 'processor_parameter' && previousModel && applyModel.canPublishParameters) {
         for (const update of changedProcessorParameters(previousModel, restoredModel)) {
-          publishProcessorParameter(update);
+          publishProcessorParameter({ ...update, expectedRevision: graph.document?.revision ?? 0 });
         }
       } else if (step.kind !== 'layout') {
         applyModel.submit(
@@ -609,7 +613,7 @@ function useGraphUpdates(
       }
       return true;
     },
-    [applyModel, publishProcessorParameter, setModel, savePositions],
+    [applyModel, publishProcessorParameter, setModel, savePositions, graph.document?.revision],
   );
   const undo = useCallback(() => restore(nextUndoStep()), [nextUndoStep, restore]);
   const redo = useCallback(() => restore(nextRedoStep()), [nextRedoStep, restore]);
@@ -677,7 +681,6 @@ function useSessionGraphRefresh(
 }
 
 export function RoutingWorkspace({
-  processorTimings,
   deviceRateAction,
   graphId,
   interactionDisabled = false,
@@ -685,8 +688,7 @@ export function RoutingWorkspace({
   audioSession,
   controlPort,
   onBusyChange,
-  onTitleChange,
-  title,
+  ...viewOptions
 }: RoutingWorkspaceProps) {
   const [menuOpened, setMenuOpened] = useState(false);
   const { inventory, applications, audioDevices, processorCatalog, processors, refresh } =
@@ -742,7 +744,8 @@ export function RoutingWorkspace({
   );
 
   const viewProps = {
-    processorTimings,
+    ...viewOptions,
+    documentRevision: graph.document?.revision ?? 0,
     graphId,
     interactionDisabled,
     deviceRateAction,
@@ -761,9 +764,7 @@ export function RoutingWorkspace({
     persistenceError: graph.persistenceError,
     model,
     processors,
-    onTitleChange,
     state: state === 'active' && parameters.failures.length > 0 ? ('blocked' as const) : state,
-    title,
     updateModel,
     updateEndpoint,
     updateNodeGain,
@@ -800,6 +801,8 @@ function useWorkspaceInventory(controlPort: ControlPort, menuOpened: boolean) {
 }
 
 interface WorkspaceViewProps {
+  documentRevision: number;
+  headerActions?: ReactNode;
   processorTimings?: RoutingWorkspaceProps['processorTimings'];
   graphId?: string;
   interactionDisabled: boolean;
@@ -912,16 +915,19 @@ function WorkspaceView(props: WorkspaceViewProps) {
     model,
     processors,
     state,
-    title,
     updateModel,
     updateEndpoint,
     updateNodeGain,
     updateNodeParameter,
   } = props;
   const meterStore = useRoutingMeters(controlPort);
-  const processorEditors = useProcessorEditors(controlPort, model, props.graphId);
+  const nodeControls = useWorkspaceNodeControls(props);
+  const editorModel = useMemo(
+    () => (model ? { ...model, revision: props.documentRevision } : null),
+    [model, props.documentRevision],
+  );
+  const processorEditors = useProcessorEditors(controlPort, editorModel, props.graphId);
   const processorEditorLabels = useProcessorEditorLabels();
-  const graphTitle = title ?? t('studio.untitledGraph');
   const menuItems = createNodeMenuItems(
     applications,
     audioDevices,
@@ -933,29 +939,13 @@ function WorkspaceView(props: WorkspaceViewProps) {
   );
   const presentedModel = usePresentedModel(props);
   return (
-    <section className={styles.root}>
-      <WorkspaceHeader className={styles.toolbar}>
-        <div className={styles.titleBlock}>
-          <input
-            aria-label={t('studio.graphName')}
-            className={styles.graphTitle}
-            onBlur={(event) => {
-              const normalized = event.currentTarget.value.trim();
-              props.onTitleChange?.(normalized || t('studio.untitledGraph'));
-            }}
-            onChange={(event) => props.onTitleChange?.(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') event.currentTarget.blur();
-            }}
-            spellCheck={false}
-            value={graphTitle}
-          />
-        </div>
-        <span className={styles.syncState} data-tone={workspaceStatusTone(state)}>
-          <span aria-hidden="true" />
-          {t(`routing.states.${state}`)}
-        </span>
-      </WorkspaceHeader>
+    <section className={styles.root} data-state={state}>
+      <WorkspaceToolbar
+        title={props.title}
+        state={state}
+        onTitleChange={props.onTitleChange}
+        headerActions={props.headerActions}
+      />
       <GraphSyncError errorCode={errorCode} state={state} application={props.application} />
       <ProcessorParameterAlert
         parameters={props.parameters}
@@ -970,7 +960,9 @@ function WorkspaceView(props: WorkspaceViewProps) {
       {presentedModel && props.layout.loaded ? (
         <div className={styles.canvas} inert={props.layout.loading}>
           <AudioGraphCanvas
+            renderNodeHeaderActions={(node) => nodeHeaderControls(props, node, t, nodeControls)}
             renderNodeContent={(node) =>
+              node.runtime?.control?.enabled !== false &&
               processorEditors.statuses.get(node.id)?.state === 'open' ? (
                 <NativeProcessorSurface
                   port={controlPort}
@@ -1009,6 +1001,42 @@ function WorkspaceView(props: WorkspaceViewProps) {
   );
 }
 
+function WorkspaceToolbar({
+  title,
+  state,
+  onTitleChange,
+  headerActions,
+}: Pick<WorkspaceViewProps, 'title' | 'state' | 'onTitleChange' | 'headerActions'>) {
+  const { t } = useTranslation();
+  return (
+    <WorkspaceHeader className={styles.toolbar}>
+      <div className={styles.titleBlock}>
+        <input
+          aria-label={t('studio.graphName')}
+          className={styles.graphTitle}
+          onBlur={(event) => {
+            const normalized = event.currentTarget.value.trim();
+            onTitleChange?.(normalized || t('studio.untitledGraph'));
+          }}
+          onChange={(event) => onTitleChange?.(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur();
+          }}
+          spellCheck={false}
+          value={title ?? t('studio.untitledGraph')}
+        />
+      </div>
+      {state !== 'active' ? (
+        <span className={styles.syncState} data-tone={workspaceStatusTone(state)}>
+          <span aria-hidden="true" />
+          {t(`routing.states.${state}`)}
+        </span>
+      ) : null}
+      {headerActions ? <div className={styles.headerActions}>{headerActions}</div> : null}
+    </WorkspaceHeader>
+  );
+}
+
 function recorderNodeContent(
   props: WorkspaceViewProps,
   node: AudioGraphNode,
@@ -1021,11 +1049,72 @@ function recorderNodeContent(
       controlPort={props.controlPort}
       graphId={props.graphId}
       nodeId={node.id}
-      enabled={props.state === 'active' && !props.interactionDisabled}
+      expectedRevision={props.documentRevision}
+      poweredOn={node.runtime.control?.enabled !== false}
+      enabled={
+        props.state === 'active' &&
+        !props.interactionDisabled &&
+        node.runtime.control?.enabled !== false
+      }
       channels={node.inputPorts.length}
       onChannelsChange={(channels) =>
         props.updateModel(updateRecorderChannels(model, node.id, channels), 'runtime')
       }
+    />
+  );
+}
+
+function nodeControlIdle(props: WorkspaceViewProps) {
+  return (
+    props.state === 'active' &&
+    !props.interactionDisabled &&
+    !props.parameters.busy &&
+    props.parameters.failures.length === 0 &&
+    !props.layout.loading &&
+    !props.layout.saving
+  );
+}
+
+function useWorkspaceNodeControls(props: WorkspaceViewProps) {
+  return useNodeControls(
+    props.controlPort,
+    props.graphId,
+    props.documentRevision,
+    nodeControlIdle(props),
+    props.application,
+  );
+}
+
+function nodeHeaderControls(
+  props: WorkspaceViewProps,
+  node: AudioGraphNode,
+  t: TFunction,
+  snapshot: import('../../core/control-port/types').GraphNodeControls | null,
+) {
+  const nodeId = node.runtime?.binding?.nodeId ?? node.id;
+  const entry = snapshot?.nodes.find((candidate) => candidate.nodeId === nodeId);
+  if (!entry || !props.graphId || !props.controlPort.updateNodeControl) return null;
+  const control = node.runtime?.control ?? { enabled: true, muted: false };
+  const disabled = !nodeControlIdle(props);
+  const change = (value: { enabled?: boolean; muted?: boolean }) => {
+    if (!disabled && props.graphId)
+      void props.application.setNodeControl(props.graphId, nodeId, value);
+  };
+  return (
+    <NodeSignalControls
+      {...control}
+      disabled={disabled}
+      power={entry.capabilities.power}
+      mute={entry.capabilities.mute}
+      powerLabel={t(
+        control.enabled ? 'routing.nodeControl.powerOff' : 'routing.nodeControl.powerOn',
+        { name: node.appearance.title },
+      )}
+      muteLabel={t(control.muted ? 'routing.nodeControl.unmute' : 'routing.nodeControl.mute', {
+        name: node.appearance.title,
+      })}
+      onPower={() => change({ enabled: !control.enabled })}
+      onMute={() => change({ muted: !control.muted })}
     />
   );
 }

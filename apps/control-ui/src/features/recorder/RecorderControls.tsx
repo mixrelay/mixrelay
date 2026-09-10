@@ -26,6 +26,8 @@ export function RecorderControls(props: {
   controlPort: ControlPort;
   graphId: string;
   nodeId: string;
+  expectedRevision: number;
+  poweredOn?: boolean;
   enabled: boolean;
   channels: number;
   onChannelsChange: (channels: number) => void;
@@ -46,7 +48,7 @@ export function RecorderControls(props: {
   const [encoding, setEncoding] = useState<RecorderEncoding>('pcm16');
   const [optionsOpened, setOptionsOpened] = useState(false);
   const locked = snapshot.status?.state === 'recording' || snapshot.status?.state === 'paused';
-  const disabled = snapshot.busy || picker.busy || !snapshot.status;
+  const disabled = snapshot.busy || picker.busy || !snapshot.status || props.poweredOn === false;
   const fieldsLocked = disabled || locked || !props.enabled;
   const displayPath = locked ? (snapshot.status?.path ?? '') : path;
   return (
@@ -65,7 +67,7 @@ export function RecorderControls(props: {
           canStart={props.enabled}
           disabled={disabled}
           status={snapshot.status}
-          command={controller.command}
+          command={(request) => controller.command(request, props.expectedRevision)}
           settings={{
             path,
             sampleRate: sampleRate === 'auto' ? null : Number(sampleRate),

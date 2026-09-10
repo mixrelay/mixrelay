@@ -2,6 +2,7 @@ import type { AudioGraphModel } from '../../core/audio-graph/model';
 import {
   type ControlPort,
   ControlPortError,
+  type NodeControlRequest,
   type ProcessorParameterChange,
   type RuntimeGraphDocument,
 } from '../../core/control-port/types';
@@ -35,6 +36,23 @@ function failure(code: string) {
 function errorCode(error: unknown): string {
   if (error instanceof GraphApplicationError) return error.code;
   return error instanceof ControlPortError ? error.body.code : 'control_request_failed';
+}
+
+function definiteNodeRejection(error: unknown) {
+  if (error instanceof ControlPortError) {
+    const parameters = error.body.parameters;
+    if (
+      typeof parameters === 'object' &&
+      parameters !== null &&
+      'nodeControlOutcome' in parameters &&
+      parameters.nodeControlOutcome === 'not_applied'
+    )
+      return true;
+  }
+  return (
+    (error instanceof ControlPortError || error instanceof GraphApplicationError) &&
+    ['node_not_found', 'node_disabled', 'graph_revision_stale'].includes(errorCode(error))
+  );
 }
 
 function hasSameProcessor(graph: RuntimeGraphDocument, change: ProcessorParameterChange) {
@@ -94,7 +112,10 @@ export class GraphApplicationQueue {
   private document: RuntimeGraphDocument | null = null;
 
   constructor(
-    private readonly port: Pick<ControlPort, 'applyGraph' | 'getGraph' | 'getGraphStatus'>,
+    private readonly port: Pick<
+      ControlPort,
+      'applyGraph' | 'getGraph' | 'getGraphStatus' | 'updateNodeControl'
+    >,
     private readonly callbacks: QueueCallbacks,
   ) {}
 
@@ -127,6 +148,64 @@ export class GraphApplicationQueue {
 
   reload() {
     if (!this.operation) void this.run('reload');
+  }
+
+  /** Shares the graph writer and CAS baseline; never displays an unacknowledged power state. */
+  async setNodeControl(
+    graphId: string,
+    nodeId: string,
+    change: Omit<NodeControlRequest, 'expectedRevision'>,
+  ) {
+    if (!this.canPublishParameters || !this.port.updateNodeControl) return;
+    const source = this.document ?? this.callbacks.getDocument();
+    const operation = new AbortController();
+    const { signal } = operation;
+    this.operation = operation;
+    this.callbacks.state('applying');
+    this.callbacks.error(null);
+    try {
+      if (this.callbacks.beforeApply)
+        await bounded(this.callbacks.beforeApply(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
+      signal.throwIfAborted();
+      if (!source?.nodes.some((node) => node.id === nodeId)) throw failure('graph_revision_stale');
+      const current = this.document ?? this.callbacks.getDocument();
+      if (current?.revision !== source.revision) throw failure('graph_revision_stale');
+      const response = await bounded(
+        this.port.updateNodeControl(graphId, nodeId, {
+          ...change,
+          expectedRevision: source.revision,
+        }),
+        signal,
+        GRAPH_APPLICATION_TIMEOUT_MS,
+      );
+      if (response.state !== 'active') await this.waitForRevision(response.revision, signal);
+      const document = await this.readEngine(signal, true);
+      if (this.pending) throw failure('graph_draft_changed');
+      this.callbacks.restore(document);
+      this.callbacks.persistenceWarning?.(response.persistenceError ?? null);
+      this.callbacks.state('active');
+    } catch (error) {
+      if (!signal.aborted) await this.recoverNodeControl(error, signal);
+    } finally {
+      if (this.operation === operation) this.operation = null;
+    }
+  }
+
+  private async recoverNodeControl(error: unknown, signal: AbortSignal) {
+    if (!this.pending && definiteNodeRejection(error)) {
+      try {
+        const document = await this.readEngine(signal, true);
+        if (!this.pending) {
+          this.callbacks.restore(document);
+          this.callbacks.error(errorCode(error));
+          this.callbacks.state('active');
+          return;
+        }
+      } catch {
+        if (signal.aborted) return;
+      }
+    }
+    await this.recover(error, signal);
   }
 
   private async waitForRevision(revision: number, signal: AbortSignal) {

@@ -56,6 +56,7 @@ function recorderView(
   port: StorybookMockControlPort,
   enabled: boolean,
   onChannelsChange = vi.fn(),
+  poweredOn = true,
 ) {
   return (
     <MixRelayProvider>
@@ -64,6 +65,8 @@ function recorderView(
           controlPort={port}
           graphId="graph-a"
           nodeId="recorder-1"
+          expectedRevision={1}
+          poweredOn={poweredOn}
           enabled={enabled}
           channels={2}
           onChannelsChange={onChannelsChange}
@@ -81,6 +84,20 @@ beforeEach(async () => {
   vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1024);
   vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(768);
 });
+
+it('does not resume a paused take while its node is powered off', async () => {
+  const { port, write } = fixture();
+  vi.spyOn(port, 'recorderStatus').mockResolvedValue({
+    ...stopped,
+    state: 'paused',
+    path: '/take.wav',
+  });
+  render(recorderView(port, true, vi.fn(), false));
+  const resume = await screen.findByRole('button', { name: 'Resume' });
+  expect(resume).toBeDisabled();
+  fireEvent.click(resume);
+  expect(write).not.toHaveBeenCalled();
+});
 afterEach(() => vi.restoreAllMocks());
 
 it('records to Desktop with Options closed and proposes a fresh path after Stop', async () => {
@@ -96,12 +113,17 @@ it('records to Desktop with Options closed and proposes a fresh path after Stop'
   expect(screen.getByRole('button', { name: 'Options' })).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(record);
   await waitFor(() =>
-    expect(write).toHaveBeenCalledWith('graph-a', 'recorder-1', {
-      action: 'record',
-      path: '/Desktop/first.wav',
-      sampleRate: null,
-      encoding: 'pcm16',
-    }),
+    expect(write).toHaveBeenCalledWith(
+      'graph-a',
+      'recorder-1',
+      {
+        action: 'record',
+        path: '/Desktop/first.wav',
+        sampleRate: null,
+        encoding: 'pcm16',
+      },
+      1,
+    ),
   );
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
   await waitFor(() => expect(defaults).toHaveBeenCalledTimes(2));
@@ -112,6 +134,7 @@ it('records to Desktop with Options closed and proposes a fresh path after Stop'
       'graph-a',
       'recorder-1',
       expect.objectContaining({ path: '/Desktop/next.wav' }),
+      1,
     ),
   );
 });
@@ -136,6 +159,7 @@ it('does not replace an edited path with a late Desktop suggestion', async () =>
       'graph-a',
       'recorder-1',
       expect.objectContaining({ path: '/chosen/manual.wav' }),
+      1,
     ),
   );
 });
@@ -178,6 +202,7 @@ it('can start a fresh Desktop take when reopening a failed recorder', async () =
       'graph-a',
       'recorder-1',
       expect.objectContaining({ path: '/Desktop/retry.wav' }),
+      1,
     ),
   );
 });
@@ -237,12 +262,17 @@ it('records WAV options, locks an active take, resumes without changing the file
   fireEvent.click(await screen.findByRole('option', { name: '24-bit PCM' }));
   fireEvent.click(screen.getByRole('button', { name: 'Record' }));
   await waitFor(() =>
-    expect(write).toHaveBeenCalledWith('graph-a', 'recorder-1', {
-      action: 'record',
-      path: '/takes/microphone.wav',
-      sampleRate: 96000,
-      encoding: 'pcm24',
-    }),
+    expect(write).toHaveBeenCalledWith(
+      'graph-a',
+      'recorder-1',
+      {
+        action: 'record',
+        path: '/takes/microphone.wav',
+        sampleRate: 96000,
+        encoding: 'pcm24',
+      },
+      1,
+    ),
   );
   expect(path).toBeDisabled();
   expect(screen.getByLabelText('Recorded time')).toHaveTextContent('00:00:01.000');
@@ -251,11 +281,11 @@ it('records WAV options, locks an active take, resumes without changing the file
   expect(screen.getByRole('combobox', { name: 'Bit depth' })).toBeDisabled();
   fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
   await waitFor(() =>
-    expect(write).toHaveBeenLastCalledWith('graph-a', 'recorder-1', { action: 'record' }),
+    expect(write).toHaveBeenLastCalledWith('graph-a', 'recorder-1', { action: 'record' }, 1),
   );
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
   await waitFor(() => expect(path).toBeEnabled());
-  expect(write).toHaveBeenLastCalledWith('graph-a', 'recorder-1', { action: 'stop' });
+  expect(write).toHaveBeenLastCalledWith('graph-a', 'recorder-1', { action: 'stop' }, 1);
 });
 
 it('keeps rejected take settings editable and retries without graph mutation', async () => {
@@ -273,12 +303,17 @@ it('keeps rejected take settings editable and retries without graph mutation', a
   fireEvent.change(path, { target: { value: '/takes/next.wav' } });
   fireEvent.click(screen.getByRole('button', { name: 'Record' }));
   await waitFor(() =>
-    expect(write).toHaveBeenLastCalledWith('graph-a', 'recorder-1', {
-      action: 'record',
-      path: '/takes/next.wav',
-      sampleRate: null,
-      encoding: 'pcm16',
-    }),
+    expect(write).toHaveBeenLastCalledWith(
+      'graph-a',
+      'recorder-1',
+      {
+        action: 'record',
+        path: '/takes/next.wav',
+        sampleRate: null,
+        encoding: 'pcm16',
+      },
+      1,
+    ),
   );
 });
 
@@ -321,7 +356,7 @@ it('keeps the existing take pausable, resumable and stoppable when graph edits b
   await waitFor(() => expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
   await waitFor(() =>
-    expect(write).toHaveBeenLastCalledWith('graph-a', 'recorder-1', { action: 'stop' }),
+    expect(write).toHaveBeenLastCalledWith('graph-a', 'recorder-1', { action: 'stop' }, 1),
   );
   expect(screen.getByRole('button', { name: 'Record' })).toBeDisabled();
 });

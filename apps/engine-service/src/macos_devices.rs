@@ -160,13 +160,13 @@ impl DeviceSet {
 }
 type Cache = BTreeMap<String, (Spec, Weak<Device>)>;
 pub(super) struct MacDevices {
-    cache: Mutex<Cache>,
-    handoff: ResourceHandoff<DeviceSet>,
+    cache: Arc<Mutex<Cache>>,
+    handoff: Arc<ResourceHandoff<DeviceSet>>,
     status: Arc<AdapterRuntimeStatus>,
     format: Arc<PublishedFormat>,
     next_group_check: Mutex<Instant>,
     recovery_requested: AtomicBool,
-    prepared_hardware_clock: AtomicBool,
+    prepared_hardware_clock: Arc<AtomicBool>,
     hardware_clock: AtomicBool,
 }
 impl MacDevices {
@@ -175,13 +175,13 @@ impl MacDevices {
     }
     pub(super) fn new(status: Arc<AdapterRuntimeStatus>, rate: u32, buffer_frames: u32) -> Self {
         Self {
-            cache: Mutex::default(),
-            handoff: ResourceHandoff::default(),
+            cache: Arc::default(),
+            handoff: Arc::default(),
             status,
             format: Arc::new(PublishedFormat::new(rate, buffer_frames)),
             next_group_check: Mutex::new(Instant::now()),
             recovery_requested: AtomicBool::new(false),
-            prepared_hardware_clock: AtomicBool::new(false),
+            prepared_hardware_clock: Arc::default(),
             hardware_clock: AtomicBool::new(false),
         }
     }
@@ -208,7 +208,7 @@ impl MacDevices {
             .iter()
             .map(|(id, (spec, _))| (id.clone(), spec.clone()))
             .collect();
-        if let Err(error) = self.prepare_devices(&mut cache, desired, Publication::Recovery) {
+        if let Err(error) = self.prepare_devices(&mut cache, &desired, Publication::Recovery) {
             tracing::warn!(%error, "CoreAudio private-group recovery deferred");
         }
     }
@@ -274,6 +274,9 @@ fn backend_error(message: impl Into<String>) -> HostAudioBackendError {
     }
 }
 impl GraphResourceBackend for MacDevices {
+    fn execution_released(&self) -> bool {
+        native::Native::active_owners() == 0 && Aggregate::active_owners() == 0
+    }
     fn device_inventory(
         &self,
     ) -> Result<Vec<mixrelay_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
@@ -290,7 +293,7 @@ impl GraphResourceBackend for MacDevices {
 
     fn prepare_format_change(
         &self,
-        _document: &GraphDocument,
+        document: &GraphDocument,
         current: RenderFormat,
         requested: RenderFormat,
     ) -> Result<Box<dyn PreparedGraphFormat>, HostAudioBackendError> {
@@ -302,14 +305,22 @@ impl GraphResourceBackend for MacDevices {
         let reservation = self.handoff.reserve_format().ok_or_else(|| {
             backend_error("CoreAudio resource or format update is already pending")
         })?;
-        PreparedDeviceFormat::prepare(
-            cache.values().filter_map(|(_, owner)| owner.upgrade()),
+        let (devices, next_cache) = Self::prepare_device_set(&cache, specs(document), requested)?;
+        let format = PreparedDeviceFormat::prepare(
+            devices.0.values().cloned(),
             self.format.clone(),
             current,
             requested,
             reservation,
-        )
-        .map(|prepared| Box::new(prepared) as Box<dyn PreparedGraphFormat>)
+        )?;
+        Ok(Box::new(format::PreparedDeviceReplacement {
+            format,
+            devices,
+            next_cache,
+            cache: self.cache.clone(),
+            handoff: self.handoff.clone(),
+            hardware_clock: self.prepared_hardware_clock.clone(),
+        }))
     }
     fn reconcile(&self, document: &GraphDocument) -> Result<(), HostAudioBackendError> {
         let desired = specs(document);
@@ -335,7 +346,7 @@ impl GraphResourceBackend for MacDevices {
         if !self.handoff.idle() {
             return Err(backend_error("CoreAudio device update is already pending"));
         }
-        self.prepare_devices(&mut cache, desired, Publication::Graph)?;
+        self.prepare_devices(&mut cache, &desired, Publication::Graph)?;
         self.prepared_hardware_clock
             .store(follow_hardware, Ordering::Release);
         Ok(())
@@ -633,6 +644,24 @@ mod tests {
             );
         }
     }
+    fn output_test_graph() -> GraphDocument {
+        GraphDocument::new(
+            1,
+            vec![mixrelay_audio_graph::NodeSpec {
+                control: mixrelay_audio_graph::NodeControl::default(),
+                id: "output".into(),
+                label: None,
+                config: NodeConfig::AudioDeviceOutput(
+                    mixrelay_audio_graph::AudioDeviceOutputConfig {
+                        selector: DeviceSelector::DefaultOutput,
+                        input_channels: 2,
+                    },
+                ),
+            }],
+            vec![],
+        )
+    }
+
     #[test]
     fn format_staging_is_cancel_safe_and_mismatched_graph_rate_is_silent() {
         let (device, context) = synthetic_output(2, 48_000, 44_100);
@@ -649,7 +678,7 @@ mod tests {
                 Arc::downgrade(&device),
             ),
         );
-        let graph = GraphDocument::new(1, vec![], vec![]);
+        let graph = output_test_graph();
         let old = RenderFormat {
             sample_rate: 48_000,
             block_frames: 256,
@@ -683,8 +712,8 @@ mod tests {
             .unwrap()
             .commit();
         assert!(
-            resources.handoff.idle(),
-            "commit releases resource preparation"
+            !resources.handoff.idle(),
+            "commit retains the graph reservation until activation"
         );
         assert_eq!(
             (
@@ -826,7 +855,7 @@ mod tests {
             }
         });
         Box::new(PreparedDeviceFormat {
-            _reservation: ResourceHandoff::<DeviceSet>::default()
+            reservation: ResourceHandoff::<DeviceSet>::default()
                 .reserve_format()
                 .unwrap(),
             devices: vec![(

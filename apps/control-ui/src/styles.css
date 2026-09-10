@@ -7,6 +7,11 @@
   --bg: #111214;
   --surface: #181a1d;
   --surface-raised: #1e2125;
+  --surface-sidebar: #15171a;
+  --surface-node: #1b1d21;
+  --surface-inset: #17191d;
+  --node-inset: 10px;
+  --control-gap: 8px;
   --line: #2b2e33;
   --line-strong: #3a3e45;
   --text: #f0f1f3;
@@ -15,6 +20,7 @@
   --positive: #70ad98;
   --amber: #c8a56c;
   --red: #d97979;
+  --workspace-header-height: 32px;
 }
 
 * {

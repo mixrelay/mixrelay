@@ -7,6 +7,20 @@ import { ControlPortError, type RuntimeGraphDocument } from './types';
 
 const graph: RuntimeGraphDocument = { edges: [], nodes: [], revision: 3, schemaVersion: 2 };
 
+it('forwards graph-scoped node power/mute with a captured revision', async () => {
+  const invoke = vi.fn().mockResolvedValue({ status: 200, body: { revision: 4, state: 'active' } });
+  const port = new TauriControlPort(invoke);
+  await port.getNodeControls('graph-a');
+  const request = { expectedRevision: 3, enabled: false, muted: true };
+  await port.updateNodeControl('graph-a', 'node-a', request);
+  expect(invoke).toHaveBeenNthCalledWith(1, 'control_get_node_controls', { graphId: 'graph-a' });
+  expect(invoke).toHaveBeenNthCalledWith(2, 'control_update_node_control', {
+    graphId: 'graph-a',
+    nodeId: 'node-a',
+    request,
+  });
+});
+
 it.each(['device-a', 'device-b'])(
   'forwards the %s rate change without rewriting the graph document',
   async (endpointId) => {
@@ -47,7 +61,7 @@ describe('TauriControlPort', () => {
       sampleRate: null,
       encoding: 'float32' as const,
     };
-    await port.controlRecorder('graph-a', 'take-b', request);
+    await port.controlRecorder('graph-a', 'take-b', request, 3);
     expect(invoke).toHaveBeenNthCalledWith(1, 'control_get_recorder_status', {
       graphId: 'graph-a',
       nodeId: 'take-b',
@@ -55,7 +69,7 @@ describe('TauriControlPort', () => {
     expect(invoke).toHaveBeenNthCalledWith(2, 'control_set_recorder', {
       graphId: 'graph-a',
       nodeId: 'take-b',
-      request,
+      request: { expectedRevision: 3, request },
     });
     invoke.mockResolvedValueOnce('/chosen.wav');
     await expect(
@@ -127,11 +141,11 @@ describe('TauriControlPort graph operations', () => {
       revision: 4,
     });
     await expect(port.getProcessors()).resolves.toMatchObject({ processors: [] });
-    await expect(port.setProcessorParameter('vst-1', 42, 0.75)).resolves.toMatchObject({
+    await expect(port.setProcessorParameter('vst-1', 42, 0.75, 3)).resolves.toMatchObject({
       value: 0.75,
     });
     await expect(port.getProcessorEditor('vst-1')).resolves.toMatchObject({ state: 'closed' });
-    await expect(port.setProcessorEditor('vst-1', true)).resolves.toMatchObject({
+    await expect(port.setProcessorEditor('vst-1', true, 3)).resolves.toMatchObject({
       state: 'opening',
     });
     expect(invoke).toHaveBeenNthCalledWith(1, 'control_get_status', undefined);
@@ -142,6 +156,7 @@ describe('TauriControlPort graph operations', () => {
       nodeId: 'vst-1',
       parameterId: 42,
       value: 0.75,
+      expectedRevision: 3,
     });
     expect(invoke).toHaveBeenNthCalledWith(7, 'control_get_processor_editor', {
       nodeId: 'vst-1',
@@ -149,6 +164,7 @@ describe('TauriControlPort graph operations', () => {
     expect(invoke).toHaveBeenNthCalledWith(8, 'control_set_processor_editor', {
       nodeId: 'vst-1',
       open: true,
+      expectedRevision: 3,
     });
   });
 

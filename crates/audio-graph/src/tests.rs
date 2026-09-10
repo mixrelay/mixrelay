@@ -23,6 +23,36 @@ fn context() -> CompileContext {
     }
 }
 
+#[test]
+fn node_control_defaults_round_trip_and_survives_compilation() {
+    let mut document: GraphDocument =
+        serde_json::from_str(include_str!("fixtures/stereo-stream.json")).unwrap();
+    assert!(
+        document
+            .nodes
+            .iter()
+            .all(|node| node.control == crate::NodeControl::default())
+    );
+    document.nodes[0].control = crate::NodeControl {
+        enabled: false,
+        muted: true,
+    };
+    let encoded = serde_json::to_string(&document).unwrap();
+    assert_eq!(
+        serde_json::from_str::<GraphDocument>(&encoded).unwrap(),
+        document
+    );
+    let plan = GraphCompiler::new(BuiltInNodeResolver)
+        .compile(&document, context())
+        .unwrap();
+    let compiled = plan
+        .nodes()
+        .iter()
+        .find(|node| node.id() == &document.nodes[0].id)
+        .unwrap();
+    assert_eq!(compiled.control(), document.nodes[0].control);
+}
+
 fn endpoint(node_id: &str) -> AudioEndpoint {
     AudioEndpoint {
         node_id: NodeId::from(node_id),
@@ -34,6 +64,7 @@ fn gain_node(id: &str) -> NodeSpec {
     NodeSpec {
         id: NodeId::from(id),
         label: None,
+        control: crate::NodeControl::default(),
         config: NodeConfig::Gain(GainConfig {
             channels: 2,
             gain_db: 0.0,
@@ -45,6 +76,7 @@ fn configured_node(id: &str, config: NodeConfig) -> NodeSpec {
     NodeSpec {
         id: NodeId::from(id),
         label: None,
+        control: crate::NodeControl::default(),
         config,
     }
 }
@@ -477,6 +509,7 @@ const fn discrete_stream(channels: u16) -> StreamSpec {
 
 fn provider(type_id: &str) -> NodeConfig {
     NodeConfig::Provider(ProviderNodeConfig {
+        ports: None,
         type_id: NodeTypeId::from(type_id),
         parameters: serde_json::json!({ "thresholdDb": -12.0 }),
     })

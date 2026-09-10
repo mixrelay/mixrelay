@@ -50,6 +50,8 @@ export interface EndpointControl {
 }
 
 export interface AudioNodeCardProps {
+  headerActions?: ReactNode;
+  poweredOff?: boolean;
   processingTimeNs?: number;
   content?: ReactNode;
   bypassed?: boolean;
@@ -104,6 +106,8 @@ export interface AudioNodeCardProps {
 }
 
 export function AudioNodeCard({
+  headerActions,
+  poweredOff = false,
   processingTimeNs,
   bypassed = false,
   offline = false,
@@ -164,6 +168,8 @@ export function AudioNodeCard({
       className={styles.root}
       data-bypassed={bypassed || undefined}
       data-offline={offline || undefined}
+      data-powered-off={poweredOff}
+      data-header-actions={Boolean(headerActions)}
       data-endpoint-options={hasEndpointControl || undefined}
       data-has-options={hasOptions || undefined}
       data-metered={meterChannels > 0 || undefined}
@@ -185,7 +191,7 @@ export function AudioNodeCard({
         iconUrl={iconUrl}
         inputCount={inputCount}
         meterChannels={meterChannels}
-        meterLevels={meterLevels}
+        meterLevels={poweredOff ? [] : meterLevels}
         offline={offline}
         onSelect={onSelect}
         outputCount={outputCount}
@@ -194,7 +200,13 @@ export function AudioNodeCard({
         statusTone={statusTone}
         title={title}
       />
-      <AudioNodeControls content={content} faceMode={faceMode} measureRef={contentRef}>
+      <NodeHeaderActions>{headerActions}</NodeHeaderActions>
+      <AudioNodeControls
+        content={content}
+        faceMode={faceMode}
+        measureRef={contentRef}
+        disabled={poweredOff}
+      >
         <ProcessorEditorOption control={processorEditor} onRetry={onProcessorEditorRetry} />
         <NodeOptions
           endpointControl={endpointControl}
@@ -214,12 +226,18 @@ export function AudioNodeCard({
   );
 }
 
+function NodeHeaderActions({ children }: { children: ReactNode }) {
+  return children ? <div className={styles.headerActions}>{children}</div> : null;
+}
+
 function AudioNodeControls({
+  disabled,
   content,
   faceMode,
   measureRef,
   children,
 }: {
+  disabled?: boolean;
   content: ReactNode;
   faceMode: AudioNodeFaceMode;
   measureRef: Ref<HTMLDivElement>;
@@ -228,7 +246,7 @@ function AudioNodeControls({
   // Native surfaces stretch with the node. Only intrinsic settings constrain its minimum height.
   const compact = faceMode === 'compact';
   return (
-    <div ref={compact ? undefined : measureRef} className={styles.controls}>
+    <div ref={compact ? undefined : measureRef} className={styles.controls} inert={disabled}>
       {content ? <div className={`${styles.content} nodrag nopan nowheel`}>{content}</div> : null}
       <div ref={compact ? measureRef : undefined} className={styles.settings}>
         {children}

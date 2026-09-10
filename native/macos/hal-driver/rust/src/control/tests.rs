@@ -8,6 +8,7 @@ struct Counts {
     released: Cell<usize>,
     requests: RefCell<Vec<Request>>,
     fail_connection: Cell<bool>,
+    desktop_absent: Cell<bool>,
 }
 struct Peer(Rc<Counts>);
 impl Drop for Peer {
@@ -18,6 +19,9 @@ impl Drop for Peer {
 struct Fake(Rc<Counts>);
 impl Backend for Fake {
     type Connection = Peer;
+    fn desktop_active(&self) -> bool {
+        !self.0.desktop_absent.get()
+    }
     fn connect(&self, _: *const c_void, _: u64) -> Option<Peer> {
         self.0.connections.set(self.0.connections.get() + 1);
         (!self.0.fail_connection.get()).then(|| Peer(Rc::clone(&self.0)))
@@ -28,6 +32,27 @@ impl Backend for Fake {
     fn send(&self, _: &Peer, request: Request) {
         self.0.requests.borrow_mut().push(request);
     }
+}
+
+#[test]
+fn desktop_exit_cancels_peer_and_fences_every_reconnect_until_next_launch() {
+    let (owner, counts) = owner();
+    owner.open();
+    assert_eq!(counts.connections.get(), 1);
+    counts.desktop_absent.set(true);
+    owner.send(Request::Inventory);
+    assert_eq!(counts.requests.borrow().len(), 1);
+    for _ in 0..100 {
+        heartbeat(&owner);
+    }
+    owner.open();
+    assert_eq!(counts.connections.get(), 1);
+    assert_eq!(counts.released.get(), 1);
+    assert_eq!(owner.session.borrow().authority(), 0);
+    counts.desktop_absent.set(false);
+    heartbeat(&owner);
+    assert_eq!(counts.connections.get(), 2);
+    assert_eq!(counts.requests.borrow().len(), 2);
 }
 
 fn owner() -> (Control<Fake>, Rc<Counts>) {

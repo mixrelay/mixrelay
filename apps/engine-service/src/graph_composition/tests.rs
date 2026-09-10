@@ -37,6 +37,7 @@ fn device(id: &str) -> VirtualEndpointSpec {
 }
 fn reference(node: &str, device: &str, read: bool, write: bool) -> DeviceReference {
     DeviceReference {
+        control: mixrelay_audio_graph::NodeControl::default(),
         node_id: NodeId::from(node),
         device_id: VirtualEndpointId::from(device),
         read: read.then_some(DeviceReadReference { channels: 2 }),
@@ -54,6 +55,7 @@ fn edge(id: &str, source: &str, source_port: &str, sink: &str, sink_port: &str) 
 }
 fn gain(node: &str, gain_db: f32) -> NodeSpec {
     NodeSpec {
+        control: mixrelay_audio_graph::NodeControl::default(),
         id: NodeId::from(node),
         label: None,
         config: NodeConfig::Gain(GainConfig {
@@ -89,6 +91,7 @@ fn mic_registry(devices: Vec<VirtualEndpointSpec>) -> DeviceRegistry {
 }
 fn mic_reference(gain_db: f32) -> SourceReference {
     SourceReference {
+        control: mixrelay_audio_graph::NodeControl::default(),
         node_id: NodeId::from("mic"),
         source_id: "macbook-mic".into(),
         channels: 2,
@@ -543,6 +546,7 @@ fn one_native_application_capture_owner_has_independent_local_reference_gains() 
         vec![edge("app-out", "app", AUDIO_PORT_ID, "out", TO_OS_PORT_ID)],
     );
     let make_source = |gain_db| SourceReference {
+        control: mixrelay_audio_graph::NodeControl::default(),
         node_id: NodeId::from("app"),
         source_id: "application:stable-bundle".into(),
         channels: 2,
@@ -616,6 +620,7 @@ fn source_registry_rejects_unknown_channels_and_embedded_duplicate_capture_owner
     let embedded = GraphDocument::new(
         1,
         vec![NodeSpec {
+            control: mixrelay_audio_graph::NodeControl::default(),
             id: NodeId::from("mic"),
             label: None,
             config: registry.sources["macbook-mic"].clone(),

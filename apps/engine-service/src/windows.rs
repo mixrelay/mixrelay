@@ -1717,6 +1717,7 @@ mod tests {
             revision,
             vec![
                 NodeSpec {
+                    control: mixrelay_audio_graph::NodeControl::default(),
                     id: "silence".into(),
                     label: None,
                     config: NodeConfig::Gain(GainConfig {
@@ -1725,6 +1726,7 @@ mod tests {
                     }),
                 },
                 NodeSpec {
+                    control: mixrelay_audio_graph::NodeControl::default(),
                     id: "probe".into(),
                     label: None,
                     config: NodeConfig::AudioDeviceOutput(AudioDeviceOutputConfig {

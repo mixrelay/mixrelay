@@ -136,6 +136,27 @@ fn prepare_runtime() -> AdapterRuntimeStatus {
 }
 
 pub(super) async fn run() -> Result<(), String> {
+    use mixrelay_macos_transport::app_lifecycle::{APP_LEASE, ENGINE_LEASE, ProcessLease};
+    let Some(engine_lease) = ProcessLease::acquire_for_app(ENGINE_LEASE, APP_LEASE)
+        .map_err(|error| format!("could not claim engine lifecycle: {error}"))?
+    else {
+        tracing::info!("desktop is absent; refusing demand-started audio execution");
+        return Ok(());
+    };
+    engine_lease
+        .record("running")
+        .map_err(|error| format!("engine lifecycle record failed: {error}"))?;
+    let result = run_owned().await;
+    let outcome = result
+        .as_ref()
+        .map_or_else(|error| format!("failed\n{error}"), |()| "stopped".into());
+    engine_lease
+        .record(&outcome)
+        .map_err(|error| format!("engine exit record failed: {error}"))?;
+    result
+}
+
+async fn run_owned() -> Result<(), String> {
     // Reserve the control endpoint before native publication or audio ownership.
     // A second service must fail without preparing devices beside the running one.
     let listener = bind_control(SocketAddr::from(([127, 0, 0, 1], CONTROL_SERVER_PORT))).await?;
@@ -215,12 +236,38 @@ async fn serve_control(
     listener: tokio::net::TcpListener,
     controller: Arc<EngineGraphController>,
 ) -> Result<(), String> {
-    axum::serve(listener, router_with_backend(controller))
-        .with_graceful_shutdown(async {
-            let _ = mixrelay_engine_service::session::shutdown_signal().await;
-        })
-        .await
-        .map_err(|error| format!("local control server failed: {error}"))
+    axum::serve(
+        mixrelay_control_server::bounded_listener(listener),
+        router_with_backend(controller),
+    )
+    .with_graceful_shutdown(async {
+        tokio::select! {
+            result = mixrelay_engine_service::session::shutdown_signal() => {
+                if let Err(error) = result {
+                    tracing::error!(%error, "engine shutdown signal failed");
+                }
+            }
+            () = desktop_released() => {}
+        }
+    })
+    .await
+    .map_err(|error| format!("local control server failed: {error}"))
+}
+
+async fn desktop_released() {
+    use mixrelay_macos_transport::app_lifecycle::{APP_LEASE, is_owned};
+    let mut interval = tokio::time::interval(Duration::from_millis(100));
+    loop {
+        interval.tick().await;
+        match is_owned(APP_LEASE) {
+            Ok(true) => continue,
+            Ok(false) => tracing::info!("desktop released ownership; finalizing audio server"),
+            Err(error) => {
+                tracing::error!(%error, "desktop lease probe failed; stopping audio server");
+            }
+        }
+        break;
+    }
 }
 
 #[cfg(test)]

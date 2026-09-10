@@ -34,8 +34,8 @@ plutil -insert GroupName -string "$service_group" "$service_plist"
 plutil -insert EnvironmentVariables -json \
   "{\"HOME\":\"$service_home\",\"USER\":\"$service_user\",\"LOGNAME\":\"$service_user\"}" \
   "$service_plist"
-plutil -insert RunAtLoad -bool true "$service_plist"
-plutil -insert KeepAlive -bool true "$service_plist"
+plutil -insert RunAtLoad -bool false "$service_plist"
+plutil -insert KeepAlive -bool false "$service_plist"
 plutil -insert StandardOutPath -string "$service_stdout" "$service_plist"
 plutil -insert StandardErrorPath -string "$service_stderr" "$service_plist"
 plutil -lint "$service_plist" >/dev/null

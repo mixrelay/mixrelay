@@ -14,7 +14,7 @@
   min-width: 0;
   align-items: center;
   gap: 6px;
-  padding: 3px 9px 9px;
+  padding: 3px var(--node-inset) var(--node-inset);
 }
 .time {
   display: block;
@@ -29,5 +29,5 @@
   color: var(--mantine-color-red-4);
   font-size: 12px;
   overflow-wrap: anywhere;
-  padding: 4px 11px;
+  padding: 4px var(--node-inset);
 }

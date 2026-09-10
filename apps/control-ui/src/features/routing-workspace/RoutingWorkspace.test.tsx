@@ -281,6 +281,14 @@ function port(overrides: Partial<ControlPort> = {}): ControlPort {
   };
 }
 
+function expectActiveWorkspace() {
+  expect(screen.getByRole('textbox', { name: 'Graph name' }).closest('section')).toHaveAttribute(
+    'data-state',
+    'active',
+  );
+  expect(screen.queryByText('Active')).not.toBeInTheDocument();
+}
+
 function renderWorkspace(controlPort: ControlPort, onBusyChange?: (busy: boolean) => void) {
   return render(workspace(controlPort, onBusyChange));
 }
@@ -963,10 +971,10 @@ describe('RoutingWorkspace application', () => {
     expect(
       await screen.findByRole('region', { name: 'MixRelay virtual I/O routing graph' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('Active')).toBeInTheDocument();
+    expectActiveWorkspace();
     fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
     await waitFor(() => expect(controlPort.applyGraph).toHaveBeenCalledOnce());
-    expect(await screen.findByText('Active')).toBeInTheDocument();
+    await waitFor(expectActiveWorkspace);
   });
 
   it('keeps layout-only movement local to the editor', async () => {
@@ -977,7 +985,7 @@ describe('RoutingWorkspace application', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'move node' }));
     expect(controlPort.applyGraph).not.toHaveBeenCalled();
-    expect(screen.getByText('Active')).toBeInTheDocument();
+    expectActiveWorkspace();
   });
 
   it('polls pending graph activation without blocking the UI', async () => {
@@ -1001,7 +1009,7 @@ describe('RoutingWorkspace application', () => {
     expect(screen.getByText('Applying')).toBeInTheDocument();
     expect(onBusyChange).toHaveBeenLastCalledWith(true);
     await act(async () => vi.advanceTimersByTimeAsync(200));
-    expect(screen.getByText('Active')).toBeInTheDocument();
+    expectActiveWorkspace();
     expect(onBusyChange).toHaveBeenLastCalledWith(false);
   });
 });
@@ -1039,7 +1047,7 @@ describe('RoutingWorkspace recovery', () => {
     expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
     expect(controlPort.applyGraph).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: 'Overwrite engine with these edits' }));
-    await screen.findByText('Active');
+    await waitFor(expectActiveWorkspace);
     expect(controlPort.applyGraph).toHaveBeenLastCalledWith(
       expect.objectContaining({ revision: 10, edges: [] }),
     );
@@ -1059,7 +1067,7 @@ describe('RoutingWorkspace recovery', () => {
     fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
     await screen.findByText('Not applied');
     fireEvent.click(screen.getByRole('button', { name: 'Discard edits and reload engine' }));
-    await screen.findByText('Active');
+    await waitFor(expectActiveWorkspace);
     expect(screen.getByTestId('edge-count').textContent).toBe(originalEdges);
     fireEvent.keyDown(window, { key: 'z', metaKey: true });
     expect(controlPort.applyGraph).toHaveBeenCalledTimes(1);
@@ -1135,11 +1143,11 @@ describe('RoutingWorkspace parameter persistence warnings', () => {
     const warning = await screen.findByText(
       /Audio is active, but graph changes could not be saved/,
     );
-    expect(screen.getByText('Active')).toBeInTheDocument();
-    expect(controlPort.setProcessorParameter).toHaveBeenLastCalledWith('processor-1', 42, 0.2);
+    expectActiveWorkspace();
+    expect(controlPort.setProcessorParameter).toHaveBeenLastCalledWith('processor-1', 42, 0.2, 1);
     fireEvent.click(screen.getByRole('button', { name: 'raise parameter' }));
     await waitFor(() => expect(warning).not.toBeInTheDocument());
-    expect(controlPort.setProcessorParameter).toHaveBeenLastCalledWith('processor-1', 42, 0.8);
+    expect(controlPort.setProcessorParameter).toHaveBeenLastCalledWith('processor-1', 42, 0.8, 1);
     expect(controlPort.applyGraph).not.toHaveBeenCalled();
     expect(controlPort.getGraph).toHaveBeenCalledTimes(1);
   });
@@ -1167,7 +1175,7 @@ describe('RoutingWorkspace persistence warnings', () => {
       /Audio is active, but graph changes could not be saved/,
     );
     expect(warning).toHaveAttribute('role', 'status');
-    expect(screen.getByText('Active')).toBeInTheDocument();
+    expectActiveWorkspace();
     expect(onBusyChange).toHaveBeenLastCalledWith(false);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(controlPort.applyGraph).toHaveBeenCalledTimes(1);

@@ -46,6 +46,16 @@ function errorCode(error: unknown): string {
   return error.body.code;
 }
 
+function workspaceRejected(error: ControlPortError): boolean {
+  const parameters = error.body.parameters;
+  return Boolean(
+    parameters &&
+      typeof parameters === 'object' &&
+      'workspaceOutcome' in parameters &&
+      parameters.workspaceOutcome === 'not_applied',
+  );
+}
+
 function retryableRead(error: unknown) {
   if (!(error instanceof ControlPortError)) return true;
   if (errorCode(error) === 'graph_catalog_unavailable') return false;
@@ -131,6 +141,39 @@ export class GraphCatalogController {
       if (!this.port.getGraphCatalog) throw new Error('catalog unavailable');
       this.accept(await bounded(this.port.getGraphCatalog()), generation, true);
     }, Boolean(this.port.getGraphCatalog));
+
+  workspaceFile = (action: 'new' | 'open' | 'save' | 'save_as', locale: string) =>
+    this.run(async (generation) => {
+      const catalog = this.state.catalog;
+      if (!catalog || this.state.uncertain || !this.port.workspaceFile) return;
+      const status = await bounded(this.port.getGraphStatus());
+      this.mutationSent = true;
+      const next = await this.port
+        .workspaceFile({
+          action,
+          locale,
+          expectedRevision: status.submittedRevision,
+          expectedCatalogRevision: catalog.catalogRevision,
+        })
+        .catch((error: unknown) => {
+          if (
+            !(error instanceof ControlPortError) ||
+            (error.status >= 500 && !workspaceRejected(error))
+          )
+            this.patch({ uncertain: true });
+          throw error;
+        });
+      if (!next) {
+        this.mutationSent = false;
+        return;
+      }
+      this.accept(next, generation, action === 'new' || action === 'open');
+      this.patch({ uncertain: true });
+      await this.waitActive(next.document.revision, generation);
+      // The accepted document remains visible even if capture synchronization fails.
+      const confirmed = this.port.getGraphCatalog ? await this.port.getGraphCatalog() : next;
+      this.accept(confirmed, generation, false);
+    });
 
   private async waitActive(revision: number, generation: number) {
     const deadline = Date.now() + 10_000;

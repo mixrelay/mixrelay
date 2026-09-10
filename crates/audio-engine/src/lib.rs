@@ -240,6 +240,8 @@ impl ProcessorExchange {
         }
         current.set_hosted_active(false);
         next.adopt_hosted(current);
+        next.retain_dynamics_state(current);
+        next.retain_device_bus_state(current);
         next.set_hosted_active(true);
         let previous = std::mem::replace(current, next);
         debug_assert!(self.retired.load(Ordering::Relaxed).is_null());

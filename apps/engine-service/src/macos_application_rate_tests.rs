@@ -59,7 +59,7 @@ impl VirtualEndpointBackend for EndpointFixture {
 }
 
 fn application_document() -> GraphDocument {
-    GraphDocument::new(1, vec![NodeSpec { id: "application".into(), label: None,
+    GraphDocument::new(1, vec![NodeSpec { control: mixrelay_audio_graph::NodeControl::default(), id: "application".into(), label: None,
         config: NodeConfig::ApplicationCapture(serde_json::from_value(serde_json::json!({
             "selector": {"match":"bundle_id", "bundle_id":"org.mixrelay.rate-fixture", "include_descendants":false},
             "stream": {"channels":2,"channelLayout":"stereo"}, "sourcePlayback":"preserve"
@@ -126,6 +126,7 @@ fn initial_processor(
 struct ApplicationFixture {
     controller: EngineGraphController,
     runtime: Arc<NativeNegotiationFixture>,
+    resources: Arc<crate::macos_devices::MacDevices>,
     exchange: Arc<ProcessorExchange>,
     processor: Box<BlockProcessor>,
 }
@@ -162,7 +163,7 @@ fn application_fixture() -> ApplicationFixture {
                 supports_dynamic_creation: false,
             })),
             processor_catalog: ProcessorCatalog::default(),
-            graph_resources: resources,
+            graph_resources: resources.clone(),
             runtime_status: runtime.clone(),
         },
         document,
@@ -170,9 +171,27 @@ fn application_fixture() -> ApplicationFixture {
     ApplicationFixture {
         controller,
         runtime,
+        resources,
         exchange,
         processor,
     }
+}
+
+fn activate_processing_boundary(
+    exchange: &ProcessorExchange,
+    processor: &mut Box<BlockProcessor>,
+    activation: &mut crate::macos_devices::DeviceActivation<'_>,
+    active_devices: &mut crate::macos_devices::DeviceSet,
+) {
+    // Match the worker: resource and DSP publication share the same block boundary.
+    assert!(
+        exchange
+            .activate_pending_configured(processor, |_| {
+                activation.activate(active_devices);
+                Ok::<(), std::convert::Infallible>(())
+            })
+            .unwrap()
+    );
 }
 
 #[test]
@@ -180,9 +199,12 @@ fn application_graph_reconfigures_every_product_format_through_actual_controller
     let ApplicationFixture {
         controller,
         runtime,
+        resources,
         exchange,
         mut processor,
     } = application_fixture();
+    let mut activation = resources.activation().unwrap();
+    let mut active_devices = crate::macos_devices::DeviceSet::default();
     let mut revision = 1;
     let mut accepted = Vec::new();
     for (sample_rate, block_frames) in mixrelay_audio_io::formats::SAMPLE_RATES
@@ -205,7 +227,14 @@ fn application_graph_reconfigures_every_product_format_through_actual_controller
             })
             .unwrap();
         assert_eq!(response.revision, revision + 1);
-        assert!(exchange.activate_pending(&mut processor));
+        assert!(resources.has_pending());
+        activate_processing_boundary(
+            &exchange,
+            &mut processor,
+            &mut activation,
+            &mut active_devices,
+        );
+        assert!(!resources.has_pending());
         assert_eq!(
             processor.plan().format(),
             RenderFormat {

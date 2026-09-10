@@ -137,7 +137,9 @@ pub struct RenderPlan {
     recorder_bindings: Box<[MeterBinding]>,
     arena_samples: usize,
     dynamics_state_count: usize,
+    dynamics_bindings: Box<[DynamicsBinding]>,
     device_bus_samples: usize,
+    device_bus_bindings: Box<[DeviceBusBinding]>,
 }
 
 impl RenderPlan {
@@ -163,19 +165,7 @@ impl RenderPlan {
         let source_bindings = collect_external_bindings(execution, &slots, PortDirection::Output)?;
         let sink_bindings = collect_external_bindings(execution, &slots, PortDirection::Input)?;
         let meter_bindings = collect_meter_bindings(execution, &slots)?;
-        let recorder_bindings = execution
-            .nodes()
-            .iter()
-            .filter(|node| matches!(node.config(), NodeConfig::Recorder { .. }))
-            .map(|node| {
-                meter_binding(
-                    node,
-                    &PortId::from(AUDIO_PORT_ID),
-                    PortDirection::Input,
-                    &slots,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let recorder_bindings = collect_recorder_bindings(execution, &slots)?;
         let mut source_kernels = Vec::new();
         let mut sink_kernels = Vec::new();
         let mut steps = Vec::with_capacity(execution.nodes().len());
@@ -198,7 +188,7 @@ impl RenderPlan {
                 device_bus_samples: &mut device_bus_samples,
                 hosted_processors: &mut hosted_processors,
             };
-            let kernels = lower_kernels(node, &context, &mut state)?;
+            let kernels = lower_controlled_kernels(node, &context, &mut state)?;
             source_kernels.extend(kernels.sources);
             sink_kernels.extend(kernels.sinks);
             steps.push(NodeStep {
@@ -221,7 +211,9 @@ impl RenderPlan {
                 meter_bindings: meter_bindings.into_boxed_slice(),
                 arena_samples,
                 dynamics_state_count,
+                dynamics_bindings: dynamics_bindings(execution),
                 device_bus_samples,
+                device_bus_bindings: device_bus_bindings(execution, &slots)?,
             },
             hosted_processors.into_boxed_slice(),
         ))
@@ -383,6 +375,46 @@ impl BlockProcessor {
     pub(crate) fn set_hosted_active(&mut self, active: bool) {
         for processor in &mut self.hosted_processors {
             processor.set_active(active);
+        }
+    }
+
+    pub(crate) fn retain_dynamics_state(&mut self, previous: &Self) {
+        if self.plan.format != previous.plan.format {
+            return;
+        }
+        for binding in &self.plan.dynamics_bindings {
+            let Ok(index) = previous
+                .plan
+                .dynamics_bindings
+                .binary_search_by(|candidate| candidate.node_id.cmp(&binding.node_id))
+            else {
+                continue;
+            };
+            let source = &previous.plan.dynamics_bindings[index];
+            if source.config == binding.config {
+                self.dynamics_envelopes[binding.state_index] =
+                    previous.dynamics_envelopes[source.state_index];
+            }
+        }
+    }
+
+    pub(crate) fn retain_device_bus_state(&mut self, previous: &Self) {
+        if self.plan.format != previous.plan.format {
+            return;
+        }
+        for binding in &self.plan.device_bus_bindings {
+            let Ok(index) = previous
+                .plan
+                .device_bus_bindings
+                .binary_search_by(|candidate| candidate.node_id.cmp(&binding.node_id))
+            else {
+                continue;
+            };
+            let source = &previous.plan.device_bus_bindings[index];
+            if source.samples.len() == binding.samples.len() {
+                self.device_bus_state[binding.samples.clone()]
+                    .copy_from_slice(&previous.device_bus_state[source.samples.clone()]);
+            }
         }
     }
 
@@ -701,6 +733,73 @@ struct PortSlot {
     channels: u16,
 }
 
+#[derive(Debug)]
+struct DynamicsBinding {
+    node_id: NodeId,
+    config: NodeConfig,
+    state_index: usize,
+}
+
+#[derive(Debug)]
+struct DeviceBusBinding {
+    node_id: NodeId,
+    samples: std::ops::Range<usize>,
+}
+
+fn device_bus_bindings(
+    execution: &ExecutionPlan,
+    slots: &BTreeMap<PortKey, PortSlot>,
+) -> Result<Box<[DeviceBusBinding]>, RenderPlanError> {
+    let mut offset = 0;
+    let mut bindings = Vec::new();
+    for node in execution
+        .nodes()
+        .iter()
+        .filter(|node| node.control().enabled)
+    {
+        let NodeConfig::DeviceBus { .. } = node.config() else {
+            continue;
+        };
+        let input = node_slot(
+            node,
+            &PortId::from(AUDIO_PORT_ID),
+            PortDirection::Input,
+            slots,
+        )?;
+        // Called only after lowering has checked the same capacities for overflow.
+        let end = offset + sample_count(execution.format().block_frames as usize, input.channels);
+        bindings.push(DeviceBusBinding {
+            node_id: node.id().clone(),
+            samples: offset..end,
+        });
+        offset = end;
+    }
+    bindings.sort_unstable_by(|left, right| left.node_id.cmp(&right.node_id));
+    Ok(bindings.into_boxed_slice())
+}
+
+fn dynamics_bindings(execution: &ExecutionPlan) -> Box<[DynamicsBinding]> {
+    let mut bindings: Vec<_> = execution
+        .nodes()
+        .iter()
+        .filter(|node| {
+            node.control().enabled
+                && matches!(
+                    node.config(),
+                    NodeConfig::Compressor(_) | NodeConfig::Limiter(_)
+                )
+        })
+        .enumerate()
+        .map(|(state_index, node)| DynamicsBinding {
+            node_id: node.id().clone(),
+            config: node.config().clone(),
+            state_index,
+        })
+        .collect();
+    bindings.sort_unstable_by(|left, right| left.node_id.cmp(&right.node_id));
+    bindings.into_boxed_slice()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct PortKey {
     endpoint: AudioEndpoint,
@@ -735,6 +834,7 @@ struct RouteOp {
 
 #[derive(Debug)]
 enum Kernel {
+    Silence(PortSlot),
     DeviceBus(DeviceBusKernel),
     Source {
         binding: usize,
@@ -853,7 +953,18 @@ fn allocate_slots(
 
 fn lower_routes(execution: &ExecutionPlan, slots: &BTreeMap<PortKey, PortSlot>) -> LoweredRoutes {
     let mut lowered = LoweredRoutes::default();
+    let disabled: std::collections::BTreeSet<_> = execution
+        .nodes()
+        .iter()
+        .filter(|node| !node.control().enabled)
+        .map(CompiledNode::id)
+        .collect();
     for edge in execution.edges() {
+        if disabled.contains(&edge.source().node_id)
+            || disabled.contains(&edge.destination().node_id)
+        {
+            continue;
+        }
         let source = compiled_edge_slot(slots, edge.source(), PortDirection::Output);
         let destination = compiled_edge_slot(slots, edge.destination(), PortDirection::Input);
         let channels = edge
@@ -903,6 +1014,9 @@ fn collect_external_bindings(
 ) -> Result<Vec<ExternalBinding>, RenderPlanError> {
     let mut bindings = Vec::new();
     for node in execution.nodes() {
+        if !node.control().enabled {
+            continue;
+        }
         if matches!(node.config(), NodeConfig::VirtualEndpoint(_)) {
             return Err(RenderPlanError::UnloweredVirtualEndpoint {
                 node_id: node.id().clone(),
@@ -979,6 +1093,27 @@ fn collect_meter_bindings(
         }
     }
     Ok(bindings)
+}
+
+fn collect_recorder_bindings(
+    execution: &ExecutionPlan,
+    slots: &BTreeMap<PortKey, PortSlot>,
+) -> Result<Vec<MeterBinding>, RenderPlanError> {
+    execution
+        .nodes()
+        .iter()
+        .filter(|node| {
+            node.control().enabled && matches!(node.config(), NodeConfig::Recorder { .. })
+        })
+        .map(|node| {
+            meter_binding(
+                node,
+                &PortId::from(AUDIO_PORT_ID),
+                PortDirection::Input,
+                slots,
+            )
+        })
+        .collect()
 }
 
 fn meter_binding(
@@ -1073,6 +1208,47 @@ fn lower_kernels(
         }),
         NodeConfig::Provider(config) => lower_hosted_processor(node, config, context, state),
     }
+}
+
+fn lower_controlled_kernels(
+    node: &CompiledNode,
+    context: &LoweringContext<'_>,
+    state: &mut LoweringState<'_>,
+) -> Result<LoweredKernels, RenderPlanError> {
+    if !node.control().enabled {
+        // The arena is cleared each cycle. No kernel, binding, hosted instance or
+        // recorder tap is created for an OFF node; its output cannot become bypass.
+        return Ok(LoweredKernels::default());
+    }
+    let mut kernels = lower_kernels(node, context, state)?;
+    if !node.control().muted {
+        return Ok(kernels);
+    }
+    if node.outputs().is_empty() {
+        let silence = node
+            .inputs()
+            .iter()
+            .map(|port| {
+                node_slot(node, port.id(), PortDirection::Input, context.slots).map(Kernel::Silence)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        kernels.sinks.splice(0..0, silence);
+    } else {
+        let boundary = if node.inputs().is_empty() {
+            &mut kernels.sources
+        } else {
+            &mut kernels.processing
+        };
+        for port in node.outputs() {
+            boundary.push(Kernel::Silence(node_slot(
+                node,
+                port.id(),
+                PortDirection::Output,
+                context.slots,
+            )?));
+        }
+    }
+    Ok(kernels)
 }
 
 fn lower_builtin_processor(
@@ -1442,6 +1618,10 @@ struct KernelResources<'a> {
 
 fn apply_kernel(resources: KernelResources<'_>, kernel: &Kernel, frames: usize) {
     match kernel {
+        Kernel::Silence(slot) => {
+            resources.arena[slot.offset..slot.offset + sample_count(frames, slot.channels)]
+                .fill(0.0);
+        }
         Kernel::DeviceBus(bus) => bus.apply(resources.arena, resources.device_bus_state, frames),
         Kernel::Source {
             binding,
@@ -1691,6 +1871,7 @@ fn apply_limiter(context: DynamicKernelContext<'_>, parameters: LimiterKernelPar
 
 #[cfg(test)]
 mod tests {
+    mod controls;
     mod recorder;
     use super::*;
     use mixrelay_audio_graph::{
@@ -1978,6 +2159,7 @@ mod tests {
         NodeSpec {
             id: NodeId::from(id),
             label: None,
+            control: mixrelay_audio_graph::NodeControl::default(),
             config,
         }
     }
@@ -2317,6 +2499,7 @@ mod tests {
                 node(
                     "provider",
                     NodeConfig::Provider(ProviderNodeConfig {
+                        ports: None,
                         type_id: mixrelay_audio_graph::NodeTypeId::from("test:double"),
                         parameters: serde_json::json!({}),
                     }),
@@ -2755,6 +2938,7 @@ mod tests {
     #[test]
     fn rejects_unregistered_or_ambiguous_provider_kernels() {
         let provider = NodeConfig::Provider(ProviderNodeConfig {
+            ports: None,
             type_id: "io.mixrelay.test".into(),
             parameters: serde_json::Value::Null,
         });

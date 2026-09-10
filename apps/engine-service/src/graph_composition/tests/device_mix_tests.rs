@@ -26,6 +26,7 @@ fn asymmetric_registry() -> DeviceRegistry {
 fn asymmetric_composition() -> ComposedGraph {
     let registry = asymmetric_registry();
     let source = [SourceReference {
+        control: mixrelay_audio_graph::NodeControl::default(),
         node_id: "input".into(),
         source_id: "input".into(),
         channels: 4,
@@ -42,6 +43,7 @@ fn asymmetric_composition() -> ComposedGraph {
         vec![edge("read", "x", FROM_OS_PORT_ID, "y", TO_OS_PORT_ID)],
     );
     let write_refs = [DeviceReference {
+        control: mixrelay_audio_graph::NodeControl::default(),
         node_id: "x".into(),
         device_id: "X".into(),
         read: None,
@@ -50,6 +52,7 @@ fn asymmetric_composition() -> ComposedGraph {
     }];
     let read_refs = [
         DeviceReference {
+            control: mixrelay_audio_graph::NodeControl::default(),
             node_id: "x".into(),
             device_id: "X".into(),
             read: Some(DeviceReadReference { channels: 4 }),
@@ -57,6 +60,7 @@ fn asymmetric_composition() -> ComposedGraph {
             gain_db: -6.020_600_3,
         },
         DeviceReference {
+            control: mixrelay_audio_graph::NodeControl::default(),
             node_id: "y".into(),
             device_id: "Y".into(),
             read: None,

@@ -8,7 +8,9 @@ use std::sync::Arc;
 use crate::macos_audio::ApplicationCaptureState;
 #[cfg(target_os = "macos")]
 mod application_capture;
+pub(crate) mod node_control;
 pub(crate) mod recorder;
+pub(crate) mod workspace;
 
 const CONTROL_ORIGIN: &str = "http://127.0.0.1:19341";
 const GRAPH_CATALOG_ROUTE: &str = "/api/v1/graphs";
@@ -132,8 +134,13 @@ impl ControlProxyClient {
 #[tauri::command]
 pub(crate) async fn control_get_status(
     client: tauri::State<'_, ControlProxyClient>,
+    #[cfg(target_os = "macos")] captures: tauri::State<'_, Arc<ApplicationCaptureState>>,
 ) -> Result<ControlProxyResponse, String> {
-    client.request(Method::GET, "/api/v1/status", None).await
+    let response = client.request(Method::GET, "/api/v1/status", None).await?;
+    #[cfg(target_os = "macos")]
+    return application_capture::power_status(&client, captures.inner(), response).await;
+    #[cfg(not(target_os = "macos"))]
+    Ok(response)
 }
 
 #[tauri::command]
@@ -144,6 +151,31 @@ pub(crate) async fn control_reconfigure_session(
     client
         .request(Method::PUT, "/api/v1/audio/session", Some(request))
         .await
+}
+
+#[tauri::command]
+pub(crate) async fn control_set_engine_power(
+    client: tauri::State<'_, ControlProxyClient>,
+    #[cfg(target_os = "macos")] captures: tauri::State<'_, Arc<ApplicationCaptureState>>,
+    enabled: bool,
+) -> Result<ControlProxyResponse, String> {
+    #[cfg(target_os = "macos")]
+    let _guard = client.capture_gate.lock().await;
+    #[cfg(target_os = "macos")]
+    if enabled {
+        return application_capture::enable(&client, captures.inner()).await;
+    }
+    let response = client
+        .request(
+            Method::PUT,
+            "/api/v1/audio/power",
+            Some(serde_json::json!({"enabled":enabled})),
+        )
+        .await?;
+    #[cfg(target_os = "macos")]
+    return application_capture::synchronize_response(&client, captures.inner(), response).await;
+    #[cfg(not(target_os = "macos"))]
+    Ok(response)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -285,6 +317,7 @@ pub(crate) async fn control_set_processor_parameter(
     node_id: String,
     parameter_id: u32,
     value: f64,
+    expected_revision: u64,
 ) -> Result<ControlProxyResponse, String> {
     let node_id = percent_encode_path_segment(&node_id);
     let path = format!("/api/v1/processors/{node_id}/parameters/{parameter_id}");
@@ -292,7 +325,7 @@ pub(crate) async fn control_set_processor_parameter(
         .request(
             Method::PUT,
             &path,
-            Some(serde_json::json!({ "value": value })),
+            Some(serde_json::json!({ "value": value, "expectedRevision": expected_revision })),
         )
         .await
 }
@@ -302,13 +335,14 @@ pub(crate) async fn control_set_processor_editor(
     client: tauri::State<'_, ControlProxyClient>,
     node_id: String,
     open: bool,
+    expected_revision: u64,
 ) -> Result<ControlProxyResponse, String> {
     let node_id = percent_encode_path_segment(&node_id);
     client
         .request(
             Method::PUT,
             &format!("/api/v1/processors/{node_id}/editor"),
-            Some(serde_json::json!({ "open": open })),
+            Some(serde_json::json!({ "open": open, "expectedRevision": expected_revision })),
         )
         .await
 }

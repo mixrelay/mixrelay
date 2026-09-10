@@ -29,6 +29,12 @@ impl EngineGraphController {
         &self,
         node_id: Option<&str>,
     ) -> Result<(), ProtocolError> {
+        if !self
+            .execution_enabled
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Ok(());
+        }
         if node_id.is_none() && self.catalog_restore.lock().is_some() {
             return Ok(());
         }
@@ -99,7 +105,7 @@ impl EngineGraphController {
         let mut found = false;
         let deadline = Instant::now() + Duration::from_secs(5);
         for (graph_id, graph) in candidate.documents_mut() {
-            found |= capture_document(graph_id, graph, target, deadline, capture)?;
+            found |= self.capture_document((graph_id, graph), target, deadline, capture)?;
         }
         if !found {
             return if target.is_some() {
@@ -117,31 +123,45 @@ impl EngineGraphController {
         *self.catalog_write_error.lock() = None;
         Ok(())
     }
-}
-
-fn capture_document(
-    graph_id: &str,
-    document: &mut mixrelay_audio_graph::GraphDocument,
-    target: Option<(&str, &str)>,
-    deadline: Instant,
-    capture: &mut impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,
-) -> Result<bool, ProtocolError> {
-    let mut found = false;
-    for node in &mut document.nodes {
-        if target.is_some_and(|(graph, id)| graph != graph_id || id != node.id.as_str()) {
-            continue;
+    fn capture_document(
+        &self,
+        graph: (&str, &mut mixrelay_audio_graph::GraphDocument),
+        target: Option<(&str, &str)>,
+        deadline: Instant,
+        capture: &mut impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,
+    ) -> Result<bool, ProtocolError> {
+        let (graph_id, document) = graph;
+        let mut found = false;
+        for node in &mut document.nodes {
+            if target.is_some_and(|(graph, id)| graph != graph_id || id != node.id.as_str()) {
+                continue;
+            }
+            let NodeConfig::Provider(provider) = &mut node.config else {
+                continue;
+            };
+            if !node.control.enabled {
+                found = true;
+                continue;
+            }
+            if provider.ports.is_some()
+                && !self
+                    .processor_controls
+                    .has_worker(&runtime_node_id(graph_id, &node.id))
+            {
+                found = true;
+                continue;
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(unavailable("processor state snapshot deadline exceeded"));
+            }
+            // Replace the whole preset: stale parameter overlays must not undo editor edits.
+            provider.parameters = capture(&runtime_node_id(graph_id, &node.id), remaining)
+                .map_err(|error| {
+                    unavailable(&format!("processor state snapshot failed: {error}"))
+                })?;
+            found = true;
         }
-        let NodeConfig::Provider(provider) = &mut node.config else {
-            continue;
-        };
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err(unavailable("processor state snapshot deadline exceeded"));
-        }
-        // Replace the whole preset: stale parameter overlays must not undo editor edits.
-        provider.parameters = capture(&runtime_node_id(graph_id, &node.id), remaining)
-            .map_err(|error| unavailable(&format!("processor state snapshot failed: {error}")))?;
-        found = true;
+        Ok(found)
     }
-    Ok(found)
 }

@@ -15,6 +15,7 @@ fn device(id: &str, node: &str, reference: VirtualEndpointReference) -> NodeSpec
         channel_layout: ChannelLayout::Stereo,
     };
     NodeSpec {
+        control: mixrelay_audio_graph::NodeControl::default(),
         id: NodeId::from(node),
         label: None,
         config: NodeConfig::VirtualEndpoint(VirtualEndpointConfig {

@@ -64,21 +64,46 @@ impl EngineGraphController {
             let NodeConfig::Provider(provider) = &mut node.config else {
                 continue;
             };
-            let Some(previous) = provider_at(&current, node.id.as_str()) else {
+            let Some(previous_node) = current.nodes.iter().find(|before| before.id == node.id)
+            else {
+                continue;
+            };
+            let NodeConfig::Provider(previous) = &previous_node.config else {
                 continue;
             };
             if previous.type_id != provider.type_id {
                 continue;
             }
             let runtime_id = runtime_node_id(&graph_id, &node.id);
-            if !restoring || self.provider_is_running(&runtime_id) {
+            let unavailable_worker =
+                previous.ports.is_some() && !self.processor_controls.has_worker(&runtime_id);
+            if unavailable_worker
+                && self
+                    .execution_enabled
+                    .load(std::sync::atomic::Ordering::Acquire)
+                && changes
+                    .iter()
+                    .any(|change| change.node_id == node.id.as_str())
+            {
+                return Err(ProtocolError {
+                    code: ErrorCode::ProcessorUnavailable,
+                    parameters: serde_json::json!({"nodeId": node.id.as_str(), "reason": "processor worker is unavailable"}),
+                });
+            }
+            if self
+                .execution_enabled
+                .load(std::sync::atomic::Ordering::Acquire)
+                && previous_node.control.enabled
+                && !unavailable_worker
+                && (!restoring || self.provider_is_running(&runtime_id))
+            {
                 let timeout = deadline.saturating_duration_since(Instant::now());
                 if timeout.is_zero() {
                     return Err(unavailable("processor state snapshot deadline exceeded"));
                 }
-                provider.parameters = capture(&runtime_id, timeout).map_err(|error| {
-                    unavailable(&format!("processor state snapshot failed: {error}"))
-                })?;
+                provider.parameters = self
+                    .capture_node_state((&runtime_id, node.control.enabled), timeout, &mut capture)?
+                    .unwrap_or_else(|| previous.parameters.clone());
             } else {
                 provider.parameters.clone_from(&previous.parameters);
             }
@@ -129,7 +154,7 @@ impl EngineGraphController {
         Ok(())
     }
 
-    fn capture_background_graph(
+    pub(super) fn capture_background_graph(
         &self,
         graph: (&str, &mut GraphDocument),
         before: &GraphDocument,
@@ -142,6 +167,9 @@ impl EngineGraphController {
                 continue;
             };
             let runtime_id = runtime_node_id(graph_id, &node.id);
+            if provider.ports.is_some() && !self.processor_controls.has_worker(&runtime_id) {
+                continue;
+            }
             // Saved documents are not live workers until their composition is acknowledged.
             let running = self.provider_is_running(&runtime_id);
             let same_provider = provider_at(before, node.id.as_str())
@@ -153,9 +181,11 @@ impl EngineGraphController {
             if remaining.is_zero() {
                 return Err(unavailable("processor state snapshot deadline exceeded"));
             }
-            provider.parameters = capture(&runtime_id, remaining).map_err(|error| {
-                unavailable(&format!("processor state snapshot failed: {error}"))
-            })?;
+            if let Some(parameters) =
+                self.capture_node_state((&runtime_id, node.control.enabled), remaining, capture)?
+            {
+                provider.parameters = parameters;
+            }
         }
         Ok(())
     }
@@ -165,6 +195,28 @@ impl EngineGraphController {
             .read()
             .get(&self.exchange.revisions().active)
             .is_some_and(|view| view.origins.contains_key(runtime_id))
+    }
+
+    fn capture_node_state(
+        &self,
+        target: (&NodeId, bool),
+        timeout: Duration,
+        capture: &mut impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,
+    ) -> Result<Option<serde_json::Value>, ProtocolError> {
+        match capture(target.0, timeout) {
+            Ok(parameters) => Ok(Some(parameters)),
+            Err(error) if !target.1 => {
+                // Turning off a failed worker must remain possible. Retain the last
+                // durable preset and surface the failed checkpoint independently.
+                let reason = format!("disabled processor retained saved state: {error}");
+                tracing::warn!(node_id = %target.0, %reason);
+                *self.node_control_warning.lock() = Some(reason);
+                Ok(None)
+            }
+            Err(error) => Err(unavailable(&format!(
+                "processor state snapshot failed: {error}"
+            ))),
+        }
     }
 }
 
@@ -191,6 +243,17 @@ fn validate_changes(
     }
     let mut unique = BTreeSet::new();
     for change in changes {
+        if current
+            .nodes
+            .iter()
+            .any(|node| node.id.as_str() == change.node_id && !node.control.enabled)
+        {
+            return Err(crate::node_control::node_error(
+                ErrorCode::NodeDisabled,
+                "",
+                &change.node_id,
+            ));
+        }
         if !change.value.is_finite()
             || !(0.0..=1.0).contains(&change.value)
             || !unique.insert((&change.node_id, change.parameter_id))

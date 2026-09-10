@@ -80,6 +80,7 @@ fn virtual_gain_contract_is_identical_for_authored_and_direct_reference_lowering
         let document = GraphDocument::new(
             1,
             vec![NodeSpec {
+                control: mixrelay_audio_graph::NodeControl::default(),
                 id: NodeId::from("endpoint"),
                 label: None,
                 config: NodeConfig::VirtualEndpoint(config),

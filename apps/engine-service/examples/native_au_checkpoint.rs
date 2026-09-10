@@ -30,7 +30,7 @@ mod qualification {
     };
     use mixrelay_control_protocol::{
         DriverState, GraphApplyRequest, GraphCatalogAction, GraphCatalogRequest,
-        GraphProcessorParameterChange,
+        GraphProcessorParameterChange, ProcessorEditorRequest, ProcessorParameterUpdate,
     };
     use mixrelay_control_server::ControlBackend;
     use mixrelay_engine_service::{
@@ -258,9 +258,11 @@ mod qualification {
             .apply_graph(GraphDocument::new(
                 2,
                 vec![NodeSpec {
+                    control: mixrelay_audio_graph::NodeControl::default(),
                     id: NodeId::from("effect"),
                     label: Some("Owned Apple AU fixture".into()),
                     config: NodeConfig::Provider(ProviderNodeConfig {
+                        ports: None,
                         type_id: descriptor.type_id.as_str().into(),
                         parameters: serde_json::json!({}),
                     }),
@@ -269,14 +271,7 @@ mod qualification {
             ))
             .unwrap();
         engine.activate();
-        engine
-            .controller
-            .set_processor_parameter("effect", parameter, 0.37)
-            .unwrap();
-        engine
-            .controller
-            .set_processor_editor("effect", false)
-            .unwrap();
+        edit_and_close_processor(&engine, parameter);
         let state_a = engine.state();
         assert!(!state_a.is_empty());
         exercise_switch_and_undo(&mut engine, &descriptor.type_id, parameter, &state_a);
@@ -309,6 +304,31 @@ mod qualification {
         Ok(())
     }
 
+    fn edit_and_close_processor(engine: &FixtureEngine, parameter: u32) {
+        let expected_revision = engine.controller.graph().revision;
+        engine
+            .controller
+            .set_processor_parameter(
+                "effect",
+                parameter,
+                ProcessorParameterUpdate {
+                    expected_revision,
+                    value: 0.37,
+                },
+            )
+            .unwrap();
+        engine
+            .controller
+            .set_processor_editor(
+                "effect",
+                ProcessorEditorRequest {
+                    expected_revision,
+                    open: false,
+                },
+            )
+            .unwrap();
+    }
+
     fn exercise_switch_and_undo(
         engine: &mut FixtureEngine,
         type_id: &str,
@@ -329,7 +349,14 @@ mod qualification {
         );
         engine
             .controller
-            .set_processor_parameter("effect", parameter, 0.91)
+            .set_processor_parameter(
+                "effect",
+                parameter,
+                ProcessorParameterUpdate {
+                    expected_revision: engine.controller.graph().revision,
+                    value: 0.91,
+                },
+            )
             .unwrap();
         engine.controller.checkpoint_processor_state(None).unwrap();
         assert_ne!(

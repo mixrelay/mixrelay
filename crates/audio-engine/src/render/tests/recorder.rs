@@ -80,6 +80,44 @@ fn request(action: RecorderAction, path: Option<String>) -> RecorderRequest {
     }
 }
 
+#[test]
+fn muted_recorder_writes_silence_without_stopping_recording() {
+    let directory = mixrelay_test_support::FixtureDir::new("muted-recording").unwrap();
+    let path = directory.join("muted.wav");
+    let registry = RecorderRegistry::default();
+    let mut recorder = node("record", NodeConfig::Recorder { channels: 2 });
+    recorder.control.muted = true;
+    let execution = compile(
+        vec![device_input("in"), recorder],
+        vec![edge("record", "in", AUDIO_PORT_ID, "record", AUDIO_PORT_ID)],
+    );
+    let mut processor = BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()));
+    processor.attach_recorders(&registry).unwrap();
+    processor.process_block(2, &[&[1.0; 4]], &mut []).unwrap();
+    registry
+        .command(
+            &record_key(),
+            RecorderRequest {
+                encoding: Some(Encoding::Float32),
+                ..request(
+                    RecorderAction::Record,
+                    Some(path.to_string_lossy().into_owned()),
+                )
+            },
+        )
+        .unwrap();
+    processor.process_block(2, &[&[1.0; 4]], &mut []).unwrap();
+    registry
+        .command(&record_key(), request(RecorderAction::Stop, None))
+        .unwrap();
+    let mut file = hound::WavReader::open(path).unwrap();
+    assert_eq!(file.duration(), 2);
+    assert!(
+        file.samples::<f32>()
+            .all(|sample| sample.unwrap().to_bits() == 0.0_f32.to_bits())
+    );
+}
+
 fn recorder_plan() -> Arc<RenderPlan> {
     let execution = compile(
         vec![

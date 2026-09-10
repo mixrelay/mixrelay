@@ -30,12 +30,40 @@ impl PublishedFormat {
     }
 }
 pub(super) struct PreparedDeviceFormat {
-    pub(super) _reservation: super::handoff::FormatReservation,
+    pub(super) reservation: super::handoff::FormatReservation,
     pub(super) devices: Vec<(Arc<Device>, DeviceBridge)>,
     pub(super) published: Arc<PublishedFormat>,
     pub(super) requested_rate: u32,
     pub(super) requested_buffer: u32,
     pub(super) previous_buffer: u32,
+}
+
+pub(super) struct PreparedDeviceReplacement {
+    pub(super) format: PreparedDeviceFormat,
+    pub(super) devices: super::DeviceSet,
+    pub(super) next_cache: super::Cache,
+    pub(super) cache: Arc<std::sync::Mutex<super::Cache>>,
+    pub(super) handoff: Arc<super::ResourceHandoff<super::DeviceSet>>,
+    pub(super) hardware_clock: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl PreparedGraphFormat for PreparedDeviceReplacement {
+    fn configure_native(&mut self) -> Result<(), HostAudioBackendError> {
+        self.format.configure_native()
+    }
+
+    fn commit(self: Box<Self>) {
+        let mut cache = self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.hardware_clock
+            .store(!self.next_cache.is_empty(), Ordering::Release);
+        self.handoff
+            .publish_reserved(&self.format.reservation, self.devices);
+        Box::new(self.format).commit();
+        *cache = self.next_cache;
+    }
 }
 impl PreparedGraphFormat for PreparedDeviceFormat {
     fn configure_native(&mut self) -> Result<(), HostAudioBackendError> {
@@ -114,7 +142,7 @@ impl PreparedDeviceFormat {
             devices.push((device, bridge));
         }
         Ok(Self {
-            _reservation: reservation,
+            reservation,
             devices,
             published,
             requested_rate: requested.sample_rate,

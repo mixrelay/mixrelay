@@ -144,6 +144,11 @@ impl Native {
 impl Backend for Native {
     type Connection = Connection;
 
+    fn desktop_active(&self) -> bool {
+        use mixrelay_macos_transport::app_lifecycle::{APP_LEASE, is_owned};
+        is_owned(APP_LEASE).unwrap_or(false)
+    }
+
     fn connect(&self, owner: *const c_void, generation: u64) -> Option<Connection> {
         // SAFETY: the owner's only caller is Control::open on this queue. Its
         // address is process-lifetime stable before the connection can be resumed.

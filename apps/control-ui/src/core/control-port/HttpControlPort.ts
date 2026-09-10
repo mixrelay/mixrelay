@@ -27,6 +27,23 @@ import {
 const LOCAL_CONTROL_ORIGIN = 'http://127.0.0.1:19341';
 
 export class HttpControlPort implements ControlPort {
+  public getNodeControls(graphId: string): Promise<import('./types').GraphNodeControls> {
+    return this.json(`/api/v1/graphs/${encodeURIComponent(graphId)}/nodes/controls`);
+  }
+  public updateNodeControl(
+    graphId: string,
+    nodeId: string,
+    request: import('./types').NodeControlRequest,
+  ): Promise<GraphApplyResponse> {
+    return this.json(
+      `/api/v1/graphs/${encodeURIComponent(graphId)}/nodes/${encodeURIComponent(nodeId)}/control`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(request),
+      },
+    );
+  }
   public recorderStatus(graphId: string, nodeId: string): Promise<RecorderStatus> {
     return this.json(
       `/api/v1/graphs/${encodeURIComponent(graphId)}/recorders/${encodeURIComponent(nodeId)}`,
@@ -37,13 +54,14 @@ export class HttpControlPort implements ControlPort {
     graphId: string,
     nodeId: string,
     request: RecorderRequest,
+    expectedRevision: number,
   ): Promise<RecorderStatus> {
     return this.json(
       `/api/v1/graphs/${encodeURIComponent(graphId)}/recorders/${encodeURIComponent(nodeId)}`,
       {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(request),
+        body: JSON.stringify({ expectedRevision, request }),
       },
     );
   }
@@ -154,17 +172,22 @@ export class HttpControlPort implements ControlPort {
     nodeId: string,
     parameterId: number,
     value: number,
+    expectedRevision: number,
   ): Promise<ProcessorParameterUpdateResponse> {
     return this.json(`/api/v1/processors/${encodeURIComponent(nodeId)}/parameters/${parameterId}`, {
-      body: JSON.stringify({ value }),
+      body: JSON.stringify({ value, expectedRevision }),
       headers: { 'content-type': 'application/json' },
       method: 'PUT',
     });
   }
 
-  public setProcessorEditor(nodeId: string, open: boolean): Promise<ProcessorEditorStatus> {
+  public setProcessorEditor(
+    nodeId: string,
+    open: boolean,
+    expectedRevision: number,
+  ): Promise<ProcessorEditorStatus> {
     return this.json(`/api/v1/processors/${encodeURIComponent(nodeId)}/editor`, {
-      body: JSON.stringify({ open }),
+      body: JSON.stringify({ open, expectedRevision }),
       headers: { 'content-type': 'application/json' },
       method: 'PUT',
     });

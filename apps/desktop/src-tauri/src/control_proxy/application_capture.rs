@@ -13,6 +13,102 @@ use crate::macos_audio::{ApplicationCaptureState, PreparedApplicationCaptures};
 const MANIFEST: &str = "/api/v1/application-capture/manifest";
 const PREVIEW: &str = "/api/v1/application-capture/preview";
 
+#[derive(PartialEq, Eq)]
+enum Submission {
+    Graph,
+    Workspace,
+    Power,
+    NodeControl(String),
+}
+
+pub(super) async fn node_control(
+    client: &ControlProxyClient,
+    captures: &Arc<ApplicationCaptureState>,
+    route: String,
+    request: Value,
+) -> Result<ControlProxyResponse, String> {
+    let preview = client
+        .request(
+            Method::POST,
+            &format!("{route}/preview"),
+            Some(request.clone()),
+        )
+        .await?;
+    if !preview.is_success() {
+        return Ok(preview);
+    }
+    let manifest = decode_manifest(preview.body)?;
+    submit_prepared(
+        client,
+        captures,
+        request,
+        manifest,
+        Submission::NodeControl(route),
+    )
+    .await
+}
+
+pub(super) async fn enable(
+    client: &ControlProxyClient,
+    captures: &Arc<ApplicationCaptureState>,
+) -> Result<ControlProxyResponse, String> {
+    let preview = client
+        .request(Method::POST, "/api/v1/audio/power/preview", None)
+        .await?;
+    if !preview.is_success() {
+        return Ok(preview);
+    }
+    let manifest = decode_manifest(preview.body)?;
+    let expected = manifest
+        .revision
+        .checked_sub(1)
+        .ok_or("invalid engine power preflight revision")?;
+    submit_prepared(
+        client,
+        captures,
+        serde_json::json!({"enabled":true,"expectedRevision":expected}),
+        manifest,
+        Submission::Power,
+    )
+    .await
+}
+
+pub(super) async fn power_status(
+    client: &ControlProxyClient,
+    captures: &Arc<ApplicationCaptureState>,
+    mut response: ControlProxyResponse,
+) -> Result<ControlProxyResponse, String> {
+    if !response.is_success() || response.body["enginePower"]["enabled"] != false {
+        return Ok(response);
+    }
+    // Also repairs a lost stop-command reply. The authoritative empty manifest,
+    // not UI intent, authorizes releasing desktop-owned capture sessions.
+    let _guard = client.capture_gate.lock().await;
+    let graph = client
+        .request(Method::GET, "/api/v1/graph/status", None)
+        .await?;
+    let graph: GraphRuntimeStatus = serde_json::from_value(graph.body)
+        .map_err(|error| format!("invalid engine stop acknowledgement: {error}"))?;
+    if captures.requires_manifest(graph.submitted_revision)? {
+        let manifest = client.request(Method::GET, MANIFEST, None).await?;
+        let manifest = decode_manifest(manifest.body)?;
+        // Power may have changed again since the status response was read.
+        if !manifest.sources.is_empty() {
+            response.body["enginePower"]["transitioning"] = Value::Bool(true);
+            return Ok(response);
+        }
+        stage_owner(captures, prepare(captures, manifest).await?).await?;
+    }
+    let owner = Arc::clone(captures);
+    tauri::async_runtime::spawn_blocking(move || owner.acknowledge(graph.active_revision))
+        .await
+        .map_err(|error| error.to_string())??;
+    if captures.has_pending()? || mixrelay_process_tap::active_capture_owners() != 0 {
+        response.body["enginePower"]["transitioning"] = Value::Bool(true);
+    }
+    Ok(response)
+}
+
 pub(super) async fn synchronize_response(
     client: &ControlProxyClient,
     captures: &Arc<ApplicationCaptureState>,
@@ -46,6 +142,45 @@ pub(super) async fn apply(
         return Ok(preview);
     }
     let manifest = decode_manifest(preview.body)?;
+    submit_prepared(client, captures, document, manifest, Submission::Graph).await
+}
+
+pub(super) async fn workspace(
+    client: &ControlProxyClient,
+    captures: &Arc<ApplicationCaptureState>,
+    mut request: Value,
+) -> Result<ControlProxyResponse, String> {
+    let preview = client
+        .request(
+            Method::POST,
+            "/api/v1/workspace/preview",
+            Some(request.clone()),
+        )
+        .await?;
+    if !preview.is_success() {
+        return Ok(preview);
+    }
+    let preview: mixrelay_control_protocol::WorkspacePreview = serde_json::from_value(preview.body)
+        .map_err(|error| format!("invalid workspace capture preview: {error}"))?;
+    request["fileDigest"] =
+        serde_json::to_value(preview.file_digest).map_err(|error| error.to_string())?;
+    submit_prepared(
+        client,
+        captures,
+        request,
+        preview.manifest,
+        Submission::Workspace,
+    )
+    .await
+}
+
+async fn submit_prepared(
+    client: &ControlProxyClient,
+    captures: &Arc<ApplicationCaptureState>,
+    document: Value,
+    manifest: ApplicationCaptureManifest,
+    submission: Submission,
+) -> Result<ControlProxyResponse, String> {
     let revision = manifest.revision;
     if let Err(error) = reserve(captures, manifest).await {
         return Ok(application_capture_error(&error));
@@ -54,7 +189,20 @@ pub(super) async fn apply(
     // the reservation belongs to managed state before the request starts.
     start_monitor(client, captures);
     let result = client
-        .request(Method::PUT, "/api/v1/graph", Some(document))
+        .request(
+            if submission == Submission::Workspace {
+                Method::POST
+            } else {
+                Method::PUT
+            },
+            match &submission {
+                Submission::Workspace => "/api/v1/workspace",
+                Submission::Graph => "/api/v1/graph",
+                Submission::Power => "/api/v1/audio/power",
+                Submission::NodeControl(route) => route,
+            },
+            Some(document),
+        )
         .await;
     if matches!(&result, Ok(response) if definitively_rejected(response)) {
         reject_reserved(captures).await?;
@@ -64,7 +212,12 @@ pub(super) async fn apply(
         return unresolved_result(result);
     }
     let response = result?;
-    validate_ack(&response.body, revision).map_err(|error| {
+    let acknowledgement = if submission == Submission::Workspace {
+        &response.body["document"]
+    } else {
+        &response.body
+    };
+    validate_ack(acknowledgement, revision).map_err(|error| {
         format!("{error}; application captures retained until engine confirmation")
     })?;
     accept_reserved(captures).await?;
@@ -97,7 +250,10 @@ fn unresolved_result(
 fn definitively_rejected(response: &ControlProxyResponse) -> bool {
     response.delivery == RequestDelivery::NotSent
         || (response.delivery == RequestDelivery::ServerResponse
-            && (400..500).contains(&response.status))
+            && ((400..500).contains(&response.status)
+                || response.body["parameters"]["workspaceOutcome"] == "not_applied"
+                || response.body["parameters"]["powerOutcome"] == "not_applied"
+                || response.body["parameters"]["nodeControlOutcome"] == "not_applied"))
 }
 
 fn decode_manifest(body: Value) -> Result<ApplicationCaptureManifest, String> {
@@ -238,12 +394,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn explicit_workspace_rejection_releases_reservation_but_lost_reply_does_not() {
+        let mut response = ControlProxyResponse {
+            status: 503,
+            delivery: RequestDelivery::ServerResponse,
+            body: serde_json::json!({"code":"control_unavailable", "parameters":{"workspaceOutcome":"not_applied"}}),
+        };
+        assert!(definitively_rejected(&response));
+        response.delivery = RequestDelivery::Uncertain;
+        assert!(!definitively_rejected(&response));
+        response.delivery = RequestDelivery::ServerResponse;
+        response.body = serde_json::json!({"code":"control_unavailable"});
+        assert!(!definitively_rejected(&response));
+    }
+
+    #[test]
     fn acceptance_must_match_prepared_revision_exactly() {
         for revision in [0, 6, 8] {
             assert!(validate_ack(&serde_json::json!({"revision":revision}), 7).is_err());
         }
         assert!(validate_ack(&serde_json::json!({"revision":7}), 7).is_ok());
         assert!(validate_ack(&serde_json::json!({}), 7).is_err());
+    }
+
+    #[test]
+    fn rejected_power_start_releases_reserved_taps_but_uncertain_reply_does_not() {
+        let mut response = ControlProxyResponse {
+            status: 503,
+            delivery: RequestDelivery::ServerResponse,
+            body: serde_json::json!({"code":"audio_session_reconfigure_failed", "parameters":{"powerOutcome":"not_applied"}}),
+        };
+        assert!(definitively_rejected(&response));
+        response.delivery = RequestDelivery::Uncertain;
+        assert!(!definitively_rejected(&response));
+    }
+
+    #[test]
+    fn rejected_node_control_releases_reservation_but_lost_response_does_not() {
+        let mut response = ControlProxyResponse {
+            status: 503,
+            delivery: RequestDelivery::ServerResponse,
+            body: serde_json::json!({"code":"node_disabled", "parameters":{"nodeControlOutcome":"not_applied"}}),
+        };
+        assert!(definitively_rejected(&response));
+        response.delivery = RequestDelivery::Uncertain;
+        assert!(!definitively_rejected(&response));
     }
 
     #[test]

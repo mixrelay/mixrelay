@@ -13,7 +13,7 @@ const response: ProcessorParameterUpdateResponse = {
   protocolVersion: 1,
   value: 0.5,
 };
-const update = { nodeId: 'p', parameterId: 1, value: 0.5 };
+const update = { expectedRevision: 1, nodeId: 'p', parameterId: 1, value: 0.5 };
 
 afterEach(cleanup);
 
@@ -39,13 +39,13 @@ describe('processor parameter durable acknowledgements', () => {
     expect(port.setProcessorParameter).toHaveBeenCalledTimes(1);
     await act(async () => first.resolve({ ...response, persistenceError: 'disk full' }));
     expect(warning).toHaveBeenLastCalledWith('disk full');
-    expect(port.setProcessorParameter).toHaveBeenLastCalledWith('p', 2, 0.3);
+    expect(port.setProcessorParameter).toHaveBeenLastCalledWith('p', 2, 0.3, 1);
     expect(result.current.busy).toBe(true);
     await act(async () => second.resolve({ ...response, parameterId: 2 }));
     expect(port.setProcessorParameter.mock.calls).toEqual([
-      ['p', 1, 0.5],
-      ['p', 2, 0.3],
-      ['p', 1, 0.9],
+      ['p', 1, 0.5, 1],
+      ['p', 2, 0.3, 1],
+      ['p', 1, 0.9, 1],
     ]);
     expect(warning.mock.calls).toEqual([['disk full'], [null], [null]]);
     expect(result.current.busy).toBe(false);
@@ -89,7 +89,7 @@ describe('processor parameter publishing busy state', () => {
     expect(port.setProcessorParameter).toHaveBeenCalledTimes(1);
     await act(async () => first.resolve(response));
     expect(result.current.busy).toBe(true);
-    expect(port.setProcessorParameter).toHaveBeenLastCalledWith('p', 1, 0.7);
+    expect(port.setProcessorParameter).toHaveBeenLastCalledWith('p', 1, 0.7, 1);
     await act(async () => last.resolve(response));
     expect(result.current.busy).toBe(false);
   });
@@ -151,8 +151,8 @@ describe('processor parameter rejected intent ownership', () => {
       first.reject(new ControlPortError(503, { code: 'processor_unavailable', parameters: {} })),
     );
     expect(port.setProcessorParameter.mock.calls).toEqual([
-      ['p', 1, 0.5],
-      ['p', 1, 0.9],
+      ['p', 1, 0.5, 1],
+      ['p', 1, 0.9, 1],
     ]);
     expect(result.current.failures).toMatchObject([{ update, code: 'processor_unavailable' }]);
     expect(result.current.busy).toBe(true);
@@ -178,8 +178,8 @@ describe('processor parameter rejected intent ownership', () => {
     expect(result.current.failures).toMatchObject([{ update, code: 'control_request_failed' }]);
     await act(async () => result.current.retryFailed());
     expect(port.setProcessorParameter.mock.calls).toEqual([
-      ['p', 1, 0.5],
-      ['p', 1, 0.5],
+      ['p', 1, 0.5, 1],
+      ['p', 1, 0.5, 1],
     ]);
     await expect(result.current.whenIdle()).resolves.toBeUndefined();
     expect(result.current.failures).toEqual([]);
@@ -221,8 +221,8 @@ describe('processor parameter retry and session ownership', () => {
     });
     await act(async () => latest.resolve({ ...response, value: 0.8 }));
     expect(port.setProcessorParameter.mock.calls).toEqual([
-      ['p', 1, 0.5],
-      ['p', 1, 0.8],
+      ['p', 1, 0.5, 1],
+      ['p', 1, 0.8, 1],
     ]);
     expect(result.current.failures).toEqual([]);
   });
@@ -242,7 +242,7 @@ describe('processor parameter retry and session ownership', () => {
     expect(result.current.failures).toHaveLength(1);
     expect(result.current.failures[0]?.requestId).toBeGreaterThan(firstId ?? 0);
     await act(async () => result.current.retryFailed());
-    expect(port.setProcessorParameter).toHaveBeenLastCalledWith('p', 1, 0.7);
+    expect(port.setProcessorParameter).toHaveBeenLastCalledWith('p', 1, 0.7, 1);
   });
 
   it('isolates new-port failures from old-port success and old-port retry keys', async () => {

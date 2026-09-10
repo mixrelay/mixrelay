@@ -17,6 +17,7 @@ source_plist="$3"
 installed_bundle="/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver"
 installed_plist="/Library/LaunchDaemons/io.mixrelay.audio.engine.plist"
 service_target="system/io.mixrelay.audio.engine"
+lifecycle_root="/Library/Application Support/MixRelay/lifecycle"
 
 if [[ ! -d "$source_bundle" || ! -x "$service_binary" || ! -f "$source_plist" ]]; then
   print -u2 "MixRelay development audio artifacts are incomplete"
@@ -36,6 +37,37 @@ fi
 # of drivers or launch configuration inside system discovery directories.
 /usr/bin/codesign --verify --strict "$source_bundle"
 /usr/bin/plutil -lint "$source_plist" >/dev/null
+service_user="$(/usr/libexec/PlistBuddy -c 'Print :UserName' "$source_plist")"
+if [[ "$(/usr/libexec/PlistBuddy -c 'Print :KeepAlive' "$source_plist")" != false || \
+      "$(/usr/libexec/PlistBuddy -c 'Print :RunAtLoad' "$source_plist")" != false ]]; then
+  print -u2 "Engine must be app-owned, not an always-running launch daemon"
+  exit 1
+fi
+if ! /usr/bin/id "$service_user" >/dev/null 2>&1; then
+  print -u2 "Engine service user does not exist"
+  exit 1
+fi
+
+# Root owns the containing directories; the selected desktop user can lock but
+# cannot replace these fixed inodes. Other HAL hosts may only probe read locks.
+for directory in "/Library/Application Support/MixRelay" "$lifecycle_root"; do
+  if [[ -L "$directory" || ( -e "$directory" && ! -d "$directory" ) ]]; then
+    print -u2 "Refusing invalid lifecycle directory: $directory"
+    exit 1
+  fi
+done
+/usr/bin/install -d -o root -g wheel -m 0755 "/Library/Application Support/MixRelay" "$lifecycle_root"
+for lease in "$lifecycle_root/app.owner" "$lifecycle_root/engine.owner"; do
+  if [[ -L "$lease" || ( -e "$lease" && ! -f "$lease" ) ]]; then
+    print -u2 "Refusing invalid lifecycle inode: $lease"
+    exit 1
+  fi
+  if [[ ! -e "$lease" ]]; then
+    /usr/bin/install -o "$service_user" -g wheel -m 0644 /dev/null "$lease"
+  fi
+  /usr/sbin/chown "$service_user":wheel "$lease"
+  /bin/chmod 0644 "$lease"
+done
 
 /usr/bin/ditto "$source_bundle" "$installed_bundle"
 /usr/sbin/chown -R root:wheel "$installed_bundle"
@@ -62,8 +94,8 @@ if [[ "$bootstrap_ok" != true ]]; then
   print -u2 "Installed artifacts remain available; no user settings were removed."
   exit 1
 fi
-/bin/launchctl kickstart -k "$service_target"
 /usr/bin/killall coreaudiod >/dev/null 2>&1 || true
 
 print "Installed MixRelayHAL at $installed_bundle"
 print "Registered MixRelay engine service at $service_target"
+print "The engine starts with MixRelay and exits when desktop ownership is released"

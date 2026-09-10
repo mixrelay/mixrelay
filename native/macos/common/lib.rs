@@ -8,6 +8,7 @@
 
 pub mod aggregate_group;
 mod anonymous_memory;
+pub mod app_lifecycle;
 pub mod application_clock;
 pub(crate) mod application_source_mapping;
 pub mod application_source_transport;

@@ -78,29 +78,20 @@ impl MacDevices {
     pub(super) fn prepare_devices(
         &self,
         cache: &mut Cache,
-        desired: BTreeMap<String, Spec>,
+        desired: &BTreeMap<String, Spec>,
         publication: Publication,
     ) -> Result<(), HostAudioBackendError> {
         // Inventory errors abort preparation; an empty successful inventory is
         // different and leaves every desired selection explicitly offline.
-        let inventory = selected_inventory(&desired)?;
-        let presence = Presence::observe(&desired, &inventory)?;
-        let group = prepare_group(cache, &presence.online)?;
-        let devices = self.open_present(cache, &presence.online, group.as_ref())?;
-        if unchanged(cache, &desired, &devices) {
+        let (DeviceSet(devices, offline), next_cache) =
+            Self::prepare_device_set(cache, desired.clone(), self.format.current())?;
+        if unchanged(cache, desired, &devices) {
             return Ok(());
         }
-        let next_cache = desired
-            .into_iter()
-            .map(|(id, spec)| {
-                let owner = devices.get(&id).map_or_else(Weak::new, Arc::downgrade);
-                (id, (spec, owner))
-            })
-            .collect();
         let online_bindings = devices.len();
-        let offline_bindings = presence.offline.len();
+        let offline_bindings = offline.len();
         self.handoff
-            .publish(publication, DeviceSet(devices, presence.offline))
+            .publish(publication, DeviceSet(devices, offline))
             .map_err(|_| backend_error("CoreAudio resource publication failed"))?;
         *cache = next_cache;
         tracing::info!(
@@ -111,11 +102,30 @@ impl MacDevices {
         Ok(())
     }
 
+    pub(super) fn prepare_device_set(
+        cache: &Cache,
+        desired: BTreeMap<String, Spec>,
+        format: mixrelay_audio_graph::RenderFormat,
+    ) -> Result<(DeviceSet, Cache), HostAudioBackendError> {
+        let inventory = selected_inventory(&desired)?;
+        let presence = Presence::observe(&desired, &inventory)?;
+        let group = prepare_group(cache, &presence.online)?;
+        let devices = Self::open_present(cache, &presence.online, group.as_ref(), format)?;
+        let next_cache = desired
+            .into_iter()
+            .map(|(id, spec)| {
+                let owner = devices.get(&id).map_or_else(Weak::new, Arc::downgrade);
+                (id, (spec, owner))
+            })
+            .collect();
+        Ok((DeviceSet(devices, presence.offline), next_cache))
+    }
+
     fn open_present(
-        &self,
         cache: &Cache,
         online: &BTreeMap<String, Spec>,
         group: Option<&Arc<Aggregate>>,
+        format: mixrelay_audio_graph::RenderFormat,
     ) -> Result<BTreeMap<String, Arc<Device>>, HostAudioBackendError> {
         let mut devices = BTreeMap::new();
         for (id, spec) in online {
@@ -132,9 +142,9 @@ impl MacDevices {
                 None => Arc::new(
                     Device::open_with_group(
                         spec,
-                        self.format.current().sample_rate,
+                        format.sample_rate,
                         selected,
-                        self.format.current().block_frames,
+                        format.block_frames,
                     )
                     .map_err(backend_error)?,
                 ),
@@ -156,6 +166,9 @@ fn same_group(left: Option<&Arc<Aggregate>>, right: Option<&Arc<Aggregate>>) -> 
 fn selected_inventory(
     desired: &BTreeMap<String, Spec>,
 ) -> Result<Vec<AudioDeviceDescriptor>, HostAudioBackendError> {
+    if desired.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut inventory = mixrelay_audio_io::macos::devices()?;
     for spec in desired.values() {
         let DeviceSelector::PersistentUid { uid } = &spec.selector else {

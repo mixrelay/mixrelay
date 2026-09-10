@@ -10,6 +10,7 @@ export type DriverState =
   | 'ready';
 
 export interface MixRelayStatus {
+  enginePower?: { enabled: boolean; transitioning: boolean };
   processorTimings?: ProcessorTiming[];
   recorderError?: string | null;
   protocolVersion: 1;
@@ -132,10 +133,34 @@ export interface AudioDeviceDescriptor {
 }
 
 export interface RuntimeGraphNode {
+  control?: NodeControlState;
   config: unknown;
   id: string;
   label: string | null;
   type: string;
+}
+
+export interface NodeControlState {
+  enabled: boolean;
+  muted: boolean;
+}
+
+export interface NodeControlRequest {
+  expectedRevision: number;
+  enabled?: boolean;
+  muted?: boolean;
+}
+
+export interface GraphNodeControls {
+  graphId: string;
+  revision: number;
+  nodes: {
+    nodeId: string;
+    label: string | null;
+    kind: string;
+    control: NodeControlState;
+    capabilities: { power: boolean; mute: boolean; recorder: boolean };
+  }[];
 }
 
 export interface RuntimeAudioEndpoint {
@@ -263,6 +288,8 @@ export interface GraphApplyRequest extends RuntimeGraphDocument {
 }
 
 export type ProtocolErrorCode =
+  | 'node_not_found'
+  | 'node_disabled'
   | 'recorder_failed'
   | 'audio_session_unsupported'
   | 'audio_session_processor_state_unavailable'
@@ -317,6 +344,21 @@ export interface RecorderStatus {
 }
 
 export interface ControlPort {
+  getNodeControls?(graphId: string): Promise<GraphNodeControls>;
+  updateNodeControl?(
+    graphId: string,
+    nodeId: string,
+    request: NodeControlRequest,
+  ): Promise<GraphApplyResponse>;
+  workspaceFile?(request: {
+    action: 'new' | 'open' | 'save' | 'save_as';
+    expectedRevision: number;
+    expectedCatalogRevision: number;
+    locale: string;
+  }): Promise<GraphCatalog | null>;
+  onWorkspaceFile?(
+    listener: (action: 'new' | 'open' | 'save' | 'save_as') => void,
+  ): Promise<() => void>;
   getProcessorEditorFrame(nodeId: string): Promise<ProcessorEditorFrame>;
   sendProcessorEditorInput(nodeId: string, input: ProcessorEditorInput): Promise<void>;
   recorderStatus(graphId: string, nodeId: string): Promise<RecorderStatus>;
@@ -324,6 +366,7 @@ export interface ControlPort {
     graphId: string,
     nodeId: string,
     request: RecorderRequest,
+    expectedRevision: number,
   ): Promise<RecorderStatus>;
   selectRecordingPath?(options: { defaultPath?: string; title?: string }): Promise<string | null>;
   defaultRecordingPath?(): Promise<string>;
@@ -344,12 +387,18 @@ export interface ControlPort {
   getProcessorEditor(nodeId: string): Promise<ProcessorEditorStatus>;
   rescanProcessors(paths: string[]): Promise<ExternalProcessorCatalog>;
   getStatus(): Promise<MixRelayStatus>;
+  setEnginePower?(enabled: boolean): Promise<GraphApplyResponse>;
   setProcessorParameter(
     nodeId: string,
     parameterId: number,
     value: number,
+    expectedRevision: number,
   ): Promise<ProcessorParameterUpdateResponse>;
-  setProcessorEditor(nodeId: string, open: boolean): Promise<ProcessorEditorStatus>;
+  setProcessorEditor(
+    nodeId: string,
+    open: boolean,
+    expectedRevision: number,
+  ): Promise<ProcessorEditorStatus>;
   listCapturableApplications?(): Promise<CapturableApplication[]>;
   listAudioDevices?(): Promise<AudioDeviceDescriptor[]>;
   selectProcessorDirectory?(): Promise<string | null>;

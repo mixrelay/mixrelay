@@ -11,6 +11,7 @@ import { I18nProvider } from '../core/i18n';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';
 import { virtualPolicy, virtualSpec } from '../features/routing-workspace/virtualEndpointFixtures';
 import { StudioScreen } from './StudioScreen';
+import styles from './StudioScreen.module.css';
 
 const callbacks = vi.hoisted(
   () => new Map<ControlPort, (document: RuntimeGraphDocument) => void>(),
@@ -152,6 +153,18 @@ it('keeps the new-graph launcher stable across background saves but guards creat
   render(view(controlPort));
   const launcher = await screen.findByRole('button', { name: 'New graph' });
   await waitFor(() => expect(launcher).toBeEnabled());
+  expect(launcher).toHaveAttribute('aria-keyshortcuts', 'Control+Shift+N Meta+Shift+N');
+  expect(launcher.className).toContain(styles.graph);
+  expect(launcher.className).toContain(styles.newGraph);
+  expect(launcher).not.toHaveClass('mantine-Button-root');
+  vi.useFakeTimers();
+  try {
+    fireEvent.mouseEnter(launcher);
+    await act(async () => vi.advanceTimersByTime(500));
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
   const binding = workspaceBindings.get(controlPort);
   if (!binding) throw new Error('Workspace not mounted');
   let transitions = 0;
@@ -175,6 +188,32 @@ it('keeps the new-graph launcher stable across background saves but guards creat
   expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+it('uses a visible chevron tab to reopen the sidebar without changing the graph or header', async () => {
+  const controlPort = port(1);
+  const mutate = vi.spyOn(controlPort, 'mutateGraphCatalog');
+  render(view(controlPort));
+  await screen.findByRole('button', { name: 'Untitled Graph' });
+  const logo = screen.getByRole('heading', { name: 'MixRelay' });
+  const boundary = screen.getByRole('button', { name: 'Graphs' });
+  expect(boundary.className).toContain(styles.sidebarBoundary);
+  expect(boundary).toHaveAttribute('aria-expanded', 'true');
+  fireEvent.click(boundary);
+  const tab = screen.getByRole('button', { name: 'Graphs' });
+  expect(tab.className).toContain(styles.sidebarReopen);
+  expect(tab.className).not.toContain(styles.sidebarBoundary);
+  expect(tab).toHaveAttribute('aria-expanded', 'false');
+  expect(tab.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument();
+  expect(logo).toBeVisible();
+  expect(logo.parentElement).not.toContainElement(tab);
+  fireEvent.click(tab);
+  expect(screen.getByRole('navigation', { name: 'Graphs' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Graphs' }).className).toContain(
+    styles.sidebarBoundary,
+  );
+  expect(mutate).not.toHaveBeenCalled();
 });
 
 it('blocks device changes during unsaved edits and refreshes actual node rate after a device transaction', async () => {

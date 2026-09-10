@@ -5,6 +5,7 @@ import {
 } from '../../core/control-port/types';
 
 export interface PendingProcessorParameter {
+  expectedRevision: number;
   nodeId: string;
   parameterId: number;
   value: number;
@@ -123,9 +124,14 @@ export class ProcessorParameterQueue {
   }
 
   private async send(key: string, request: Request) {
-    const { nodeId, parameterId, value } = request.update;
+    const { nodeId, parameterId, value, expectedRevision } = request.update;
     try {
-      const response = await this.port.setProcessorParameter(nodeId, parameterId, value);
+      const response = await this.port.setProcessorParameter(
+        nodeId,
+        parameterId,
+        value,
+        expectedRevision,
+      );
       if (this.closed) return;
       const failure = this.rejected.get(key);
       if (failure && failure.requestId <= request.id) this.rejected.delete(key);

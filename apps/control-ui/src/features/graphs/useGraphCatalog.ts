@@ -16,6 +16,7 @@ export function useGraphCatalog(controlPort: ControlPort) {
   return {
     ...state,
     mutate: controller.mutate,
+    workspaceFile: controller.workspaceFile,
     reload: controller.reload,
     clearError: controller.clearError,
   };

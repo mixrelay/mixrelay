@@ -159,7 +159,7 @@ it('awaits direct parameter acknowledgement before a structural rebuild, without
   const apply = vi.spyOn(port, 'applyGraph');
   await waitFor(() => expect(screen.getByRole('button', { name: 'parameter edit' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'parameter edit' }));
-  expect(parameter).toHaveBeenCalledWith('p', 42, 0.2);
+  expect(parameter).toHaveBeenCalledWith('p', 42, 0.2, 1);
   fireEvent.click(screen.getByRole('button', { name: 'structural edit' }));
   await act(async () => Promise.resolve());
   expect(apply).not.toHaveBeenCalled();
@@ -188,7 +188,7 @@ it('shows native parameter rejection, keeps the draft and blocks workspace mutat
   expect(apply).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
   await waitFor(() => expect(busy).toHaveBeenLastCalledWith(false));
-  expect(parameter).toHaveBeenLastCalledWith('p', 42, 0.2);
+  expect(parameter).toHaveBeenLastCalledWith('p', 42, 0.2, 1);
   expect(parameter).toHaveBeenCalledTimes(2);
   expect(screen.queryByText('The audio control request failed.')).not.toBeInTheDocument();
   expect(screen.getByTestId('parameter-value')).toHaveTextContent('0.2');
@@ -265,7 +265,7 @@ it('keeps actual Studio catalog mutation controls fenced while native parameter 
   expect(cancel).toBeEnabled();
   fireEvent.click(cancel);
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  fireEvent.keyDown(window, { key: 'n', ctrlKey: true });
+  fireEvent.keyDown(window, { key: 'n', ctrlKey: true, shiftKey: true });
   expect(screen.getByRole('dialog', { name: 'New graph' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
   expect(mutate).not.toHaveBeenCalled();

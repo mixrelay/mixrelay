@@ -17,6 +17,10 @@ export const en = {
     states: { stopped: 'Stopped', recording: 'Recording', paused: 'Paused', failed: 'Failed' },
   },
   audioSession: {
+    powerOn: 'Turn engine on',
+    powerOff: 'Turn engine off',
+    powerChanging: 'Switching engine…',
+    powerFailed: 'Engine switch failed. Check the current state.',
     diagnostics: 'Audio details',
     processingRate: 'Processing sample rate',
     processingBuffer: 'Buffer size',
@@ -119,6 +123,12 @@ export const en = {
     remoteDescription: 'LAN control stays off until this Mac explicitly enables pairing.',
   },
   routing: {
+    nodeControl: {
+      powerOn: 'Enable {{name}}',
+      powerOff: 'Disable {{name}}',
+      mute: 'Mute {{name}}',
+      unmute: 'Unmute {{name}}',
+    },
     nodeStatus: {
       offline: 'Offline',
       reselectApplication: 'Select the application again',
@@ -229,6 +239,8 @@ export const en = {
       control_request_failed: 'The audio control request failed.',
       graph_binding_unsupported:
         'This audio format or connection is not supported by the selected device or processor.',
+      node_not_found: 'The target node was removed. No command was applied.',
+      node_disabled: 'This node is off. Enable it before using this control.',
       graph_exchange_busy: 'The audio engine is still activating the previous graph.',
       graph_invalid: 'The engine rejected an invalid audio graph.',
       graph_draft_changed: 'Edits changed during reload. Your draft was kept; choose again.',

@@ -73,8 +73,31 @@ impl GraphDocument {
 pub struct NodeSpec {
     pub id: NodeId,
     pub label: Option<String>,
+    /// Execution and signal state, independent of the node's saved configuration.
+    #[serde(default)]
+    pub control: NodeControl,
     #[serde(flatten)]
     pub config: NodeConfig,
+}
+
+/// Authored node controls. Disabling removes processing; muting preserves processing
+/// but silences the node boundary. Neither state changes connections or parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct NodeControl {
+    /// Whether the node participates in execution and acquires runtime resources.
+    pub enabled: bool,
+    /// Whether the executing node emits silence (or records silence for a recorder).
+    pub muted: bool,
+}
+
+impl Default for NodeControl {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            muted: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -257,8 +280,19 @@ pub struct GainConfig {
 #[serde(rename_all = "camelCase")]
 pub struct ProviderNodeConfig {
     pub type_id: NodeTypeId,
+    /// Last known port contract, retained when the plug-in is not installed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ports: Option<ProviderPorts>,
     #[serde(default)]
     pub parameters: serde_json::Value,
+}
+
+/// Authored plug-in I/O geometry; no native handles or machine-specific addresses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderPorts {
+    pub inputs: u16,
+    pub outputs: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -366,6 +400,7 @@ impl ExecutionPlan {
 pub struct CompiledNode {
     id: NodeId,
     config: NodeConfig,
+    control: NodeControl,
     inputs: Box<[CompiledPort]>,
     outputs: Box<[CompiledPort]>,
 }
@@ -374,12 +409,14 @@ impl CompiledNode {
     pub(crate) fn new(
         id: NodeId,
         config: NodeConfig,
+        control: NodeControl,
         inputs: Vec<CompiledPort>,
         outputs: Vec<CompiledPort>,
     ) -> Self {
         Self {
             id,
             config,
+            control,
             inputs: inputs.into_boxed_slice(),
             outputs: outputs.into_boxed_slice(),
         }
@@ -398,6 +435,12 @@ impl CompiledNode {
     #[must_use]
     pub const fn config(&self) -> &NodeConfig {
         &self.config
+    }
+
+    /// Returns the controls captured when this immutable execution plan was compiled.
+    #[must_use]
+    pub const fn control(&self) -> NodeControl {
+        self.control
     }
 
     #[must_use]

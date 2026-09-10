@@ -5,6 +5,7 @@ fn authored(selector: DeviceSelector, gain_db: f32) -> GraphDocument {
         17,
         vec![
             NodeSpec {
+                control: mixrelay_audio_graph::NodeControl::default(),
                 id: NodeId::from("mic"),
                 label: Some("Microphone view".into()),
                 config: NodeConfig::AudioDeviceInput(AudioDeviceInputConfig {
@@ -15,6 +16,7 @@ fn authored(selector: DeviceSelector, gain_db: f32) -> GraphDocument {
             },
             gain("processor", 0.0),
             NodeSpec {
+                control: mixrelay_audio_graph::NodeControl::default(),
                 id: NodeId::from("output"),
                 label: Some("My output".into()),
                 config: NodeConfig::VirtualEndpoint(device("X").into()),
@@ -166,11 +168,13 @@ fn virtual_local_width_is_projected_against_canonical_device_not_metadata_equali
         1,
         vec![
             NodeSpec {
+                control: mixrelay_audio_graph::NodeControl::default(),
                 id: NodeId::from("input"),
                 label: None,
                 config: NodeConfig::VirtualEndpoint(input.into()),
             },
             NodeSpec {
+                control: mixrelay_audio_graph::NodeControl::default(),
                 id: NodeId::from("output"),
                 label: None,
                 config: NodeConfig::VirtualEndpoint(output.into()),
@@ -215,11 +219,13 @@ fn one_source_reference_reads_completed_mix_and_invalid_port_is_rejected() {
         1,
         vec![
             NodeSpec {
+                control: mixrelay_audio_graph::NodeControl::default(),
                 id: NodeId::from("input"),
                 label: None,
                 config: NodeConfig::VirtualEndpoint(device("X").into()),
             },
             NodeSpec {
+                control: mixrelay_audio_graph::NodeControl::default(),
                 id: NodeId::from("output"),
                 label: None,
                 config: NodeConfig::VirtualEndpoint(device("Y").into()),

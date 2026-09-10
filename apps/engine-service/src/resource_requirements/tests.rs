@@ -4,6 +4,7 @@ use mixrelay_audio_io::{ApplicationSelector, ChannelLayout, SourcePlaybackPolicy
 
 fn node(id: &str, config: NodeConfig) -> NodeSpec {
     NodeSpec {
+        control: mixrelay_audio_graph::NodeControl::default(),
         id: id.into(),
         label: None,
         config,

@@ -96,6 +96,15 @@ pub struct ProcessorCatalog {
 }
 
 impl ProcessorCatalog {
+    /// Returns the installed port contract without creating a worker.
+    #[must_use]
+    pub fn ports(&self, type_id: &str) -> Option<mixrelay_audio_graph::ProviderPorts> {
+        self.entry(type_id)
+            .map(|entry| mixrelay_audio_graph::ProviderPorts {
+                inputs: entry.descriptor.input_channels,
+                outputs: entry.descriptor.output_channels,
+            })
+    }
     /// Safely discovers native and cross-platform effects. Each candidate is probed in a
     /// disposable copy of the engine executable so a broken plug-in cannot terminate the graph
     /// service.
@@ -523,13 +532,15 @@ impl NodeResolver for CatalogNodeResolver {
         let NodeConfig::Provider(config) = &node.config else {
             return BuiltInNodeResolver.resolve(node, context);
         };
-        let entry = self.catalog.entry(config.type_id.as_str()).ok_or_else(|| {
-            NodeResolutionError::CapabilityUnavailable {
+        let ports = self
+            .catalog
+            .ports(config.type_id.as_str())
+            .or(config.ports)
+            .ok_or_else(|| NodeResolutionError::CapabilityUnavailable {
                 reason: format!("processor is not installed: {}", config.type_id),
-            }
-        })?;
-        let input_channels = entry.descriptor.input_channels;
-        let output_channels = entry.descriptor.output_channels;
+            })?;
+        let input_channels = ports.inputs;
+        let output_channels = ports.outputs;
         if input_channels == 0
             || output_channels == 0
             || input_channels > context.limits.max_channels_per_port
@@ -562,6 +573,15 @@ pub struct ExternalProcessorFactory {
     controls: ProcessorControlRegistry,
 }
 
+struct UnavailableProcessor;
+
+impl HostedAudioProcessor for UnavailableProcessor {
+    fn process(&mut self, _input: &[f32], output: &mut [f32], _frames: usize) -> bool {
+        output.fill(0.0);
+        true
+    }
+}
+
 impl ExternalProcessorFactory {
     #[must_use]
     pub fn new(catalog: ProcessorCatalog) -> Self {
@@ -585,10 +605,14 @@ impl HostedProcessorFactory for ExternalProcessorFactory {
         &self,
         request: HostedProcessorPrepareRequest<'_>,
     ) -> Result<Box<dyn HostedAudioProcessor>, String> {
-        let entry = self
-            .catalog
-            .entry(request.config.type_id.as_str())
-            .ok_or_else(|| format!("processor is not installed: {}", request.config.type_id))?;
+        let Some(entry) = self.catalog.entry(request.config.type_id.as_str()) else {
+            if !request.config.ports.is_some_and(|ports| {
+                ports.inputs == request.input_channels && ports.outputs == request.output_channels
+            }) {
+                return Err("unavailable processor needs its saved port contract".into());
+            }
+            return Ok(Box::new(UnavailableProcessor));
+        };
         if request.input_channels != entry.descriptor.input_channels
             || request.output_channels != entry.descriptor.output_channels
         {
@@ -755,6 +779,13 @@ impl ProcessorControlRegistry {
         let control = self.live_control(node_id)?;
         control.set_editor_open(open);
         Ok(control.editor_status(node_id))
+    }
+
+    /// Reports whether a node still owns a worker, including a failed worker whose
+    /// state export must report its error rather than silently reuse an old preset.
+    #[must_use]
+    pub fn has_worker(&self, node_id: &NodeId) -> bool {
+        self.live_control(node_id).is_ok()
     }
 
     fn live_control(&self, node_id: &NodeId) -> Result<Arc<HostedProcessorControl>, String> {
@@ -1328,6 +1359,58 @@ fn bypass_rack(plugin: &mut rack_formats::RackWorkerPlugin, layout: AudioLayout)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_plugin_uses_saved_ports_and_silence_instead_of_passthrough() {
+        let config = ProviderNodeConfig {
+            type_id: "vst3:not-installed".into(),
+            parameters: serde_json::json!({}),
+            ports: Some(mixrelay_audio_graph::ProviderPorts {
+                inputs: 8,
+                outputs: 8,
+            }),
+        };
+        let node = NodeSpec {
+            control: mixrelay_audio_graph::NodeControl::default(),
+            id: NodeId::from("missing"),
+            label: None,
+            config: NodeConfig::Provider(config.clone()),
+        };
+        let context = CompileContext {
+            format: RenderFormat {
+                sample_rate: 48_000,
+                block_frames: 32,
+            },
+            limits: mixrelay_audio_graph::CompileLimits::default(),
+        };
+        let resolver = CatalogNodeResolver::new(ProcessorCatalog::default());
+        let ports = resolver.resolve(&node, &context).unwrap();
+        assert_eq!(ports.inputs[0].channels(), 8);
+        let mut processor = ExternalProcessorFactory::new(ProcessorCatalog::default())
+            .prepare(HostedProcessorPrepareRequest {
+                node_id: &node.id,
+                config: &config,
+                format: context.format,
+                input_channels: 8,
+                output_channels: 8,
+            })
+            .unwrap();
+        let mut output = [1.0; 256];
+        assert!(processor.process(&[0.75; 256], &mut output, 32));
+        assert!(
+            output
+                .iter()
+                .all(|sample| sample.to_bits() == 0.0_f32.to_bits())
+        );
+        let mut invalid = node;
+        if let NodeConfig::Provider(config) = &mut invalid.config {
+            config.ports = Some(mixrelay_audio_graph::ProviderPorts {
+                inputs: 0,
+                outputs: 65,
+            });
+        }
+        assert!(resolver.resolve(&invalid, &context).is_err());
+    }
 
     #[cfg(not(debug_assertions))]
     #[test]

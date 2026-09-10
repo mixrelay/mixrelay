@@ -5,6 +5,10 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 const MAX_OWNED_SESSIONS: u32 = 32;
 static OWNED_SESSIONS: AtomicU32 = AtomicU32::new(0);
 
+pub(crate) fn active_owners() -> u32 {
+    OWNED_SESSIONS.load(Ordering::Acquire)
+}
+
 /// Embedded, zero-initialized session gate. Admission is released only after
 /// native callback/listener unregistration, drain and device destruction succeed.
 /// Retired sessions retain their admission while the native cleanup queue retries.

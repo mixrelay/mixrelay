@@ -441,9 +441,11 @@ fn external_format_adopts_and_warns_when_graph_catalog_staging_fails() {
 fn format_change_never_rebuilds_hosted_state_from_a_stale_document() {
     let (controller, runtime) = fixture();
     controller.graph.write().nodes.push(NodeSpec {
+        control: mixrelay_audio_graph::NodeControl::default(),
         id: NodeId::from("missing-native-instance"),
         label: None,
         config: NodeConfig::Provider(mixrelay_audio_graph::ProviderNodeConfig {
+            ports: None,
             type_id: "fixture:effect".into(),
             parameters: serde_json::json!({"stateBase64": "stale-client-preset"}),
         }),

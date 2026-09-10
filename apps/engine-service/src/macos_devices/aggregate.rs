@@ -48,6 +48,9 @@ impl Drop for Aggregate {
     }
 }
 impl Aggregate {
+    pub(super) fn active_owners() -> usize {
+        GROUPS.in_use()
+    }
     pub(super) fn ready(&self) -> bool {
         unsafe { mr_aggregate_group_ready(self.pointer.as_ptr()) }
     }

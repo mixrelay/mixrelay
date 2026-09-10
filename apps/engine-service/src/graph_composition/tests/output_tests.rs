@@ -13,6 +13,7 @@ fn output(id: &str) -> SharedOutput {
 
 fn sink_reference(id: &str, gain_db: f32) -> OutputReference {
     OutputReference {
+        control: mixrelay_audio_graph::NodeControl::default(),
         node_id: NodeId::from("out"),
         output_id: id.into(),
         channels: 2,
@@ -132,11 +133,13 @@ fn physical_output_alias_lowering_requires_resolver_and_preserves_routes() {
         .unwrap();
     let mut document = route();
     document.nodes.push(NodeSpec {
+        control: mixrelay_audio_graph::NodeControl::default(),
         id: NodeId::from("mic"),
         label: None,
         config: registry.sources["macbook-mic"].clone(),
     });
     document.nodes.push(NodeSpec {
+        control: mixrelay_audio_graph::NodeControl::default(),
         id: NodeId::from("out"),
         label: Some("Default output".into()),
         config: NodeConfig::AudioDeviceOutput(AudioDeviceOutputConfig {

@@ -12,6 +12,223 @@ fn change(id: u32, value: f64) -> GraphProcessorParameterChange {
 }
 
 #[test]
+fn recreated_provider_rejects_late_parameter_commands_without_mutating_new_instance() {
+    use mixrelay_control_protocol::ProcessorParameterUpdate;
+    let fixture = Fixture::new();
+    let (engine, _) = parameter_fixture(parameter_document());
+    let engine = engine.with_graph_catalog_path(fixture.path());
+    let old_revision = engine.exchange.revisions().submitted;
+    let mut processor = engine
+        .prepare_and_validate(&engine.graph(), *engine.context.read())
+        .unwrap()
+        .processor;
+    let deleted = GraphDocument::new(old_revision + 1, vec![], vec![]);
+    engine.apply_graph(deleted.clone()).unwrap();
+    assert!(engine.exchange.activate_pending(&mut processor));
+    assert_eq!(
+        engine
+            .set_processor_parameter(
+                "effect",
+                7,
+                ProcessorParameterUpdate {
+                    expected_revision: deleted.revision,
+                    value: 0.1,
+                }
+            )
+            .unwrap_err()
+            .code,
+        ErrorCode::NodeNotFound
+    );
+    assert_eq!(engine.graph(), deleted);
+    let mut replaced = parameter_document();
+    replaced.revision = deleted.revision + 1;
+    if let NodeConfig::Provider(provider) = &mut replaced.nodes[0].config {
+        provider.parameters = serde_json::json!({"stateBase64":"NEW-INSTANCE"});
+    }
+    engine.apply_graph(replaced.clone()).unwrap();
+    assert!(engine.exchange.activate_pending(&mut processor));
+    assert_eq!(
+        engine
+            .set_processor_parameter(
+                "effect",
+                7,
+                ProcessorParameterUpdate {
+                    expected_revision: old_revision,
+                    value: 0.1,
+                }
+            )
+            .unwrap_err()
+            .code,
+        ErrorCode::GraphRevisionStale
+    );
+    assert_eq!(engine.graph(), replaced);
+    let mut disabled = replaced;
+    disabled.revision += 1;
+    disabled.nodes[0].control.enabled = false;
+    let candidate = engine.catalog_candidate(&disabled);
+    engine
+        .publish_graph_locked(disabled.clone(), candidate)
+        .unwrap();
+    assert!(engine.exchange.activate_pending(&mut processor));
+    assert_eq!(
+        engine
+            .set_processor_parameter(
+                "effect",
+                7,
+                ProcessorParameterUpdate {
+                    expected_revision: disabled.revision,
+                    value: 0.1,
+                }
+            )
+            .unwrap_err()
+            .code,
+        ErrorCode::NodeDisabled
+    );
+    assert_eq!(engine.graph(), disabled);
+    assert_eq!(engine.exchange.revisions().submitted, disabled.revision);
+}
+
+#[test]
+fn disabled_node_preserves_saved_preset_without_worker_and_rejects_parameter_commands() {
+    let mut document = parameter_document();
+    document.nodes[0].control.enabled = false;
+    if let NodeConfig::Provider(provider) = &mut document.nodes[0].config {
+        provider.ports = Some(mixrelay_audio_graph::ProviderPorts {
+            inputs: 2,
+            outputs: 2,
+        });
+    }
+    let (engine, _) = parameter_fixture(document);
+    let mut proposed = engine.graph();
+    proposed.revision += 1;
+    let expected = provider_parameters(&proposed).clone();
+    if let NodeConfig::Provider(provider) = &mut proposed.nodes[0].config {
+        provider.parameters = serde_json::json!({"stateBase64":"STALE"});
+    }
+    engine
+        .preserve_live_processor_state_with(
+            &mut proposed,
+            &[],
+            |_, _| panic!("disabled node cannot snapshot a worker"),
+            |_, _| true,
+        )
+        .unwrap();
+    assert_eq!(provider_parameters(&proposed), expected);
+    assert_eq!(
+        engine
+            .preserve_live_processor_state_with(
+                &mut proposed,
+                &[change(7, 0.25)],
+                |_, _| panic!("disabled node cannot snapshot a worker"),
+                |_, _| true
+            )
+            .unwrap_err()
+            .code,
+        ErrorCode::NodeDisabled
+    );
+}
+
+#[test]
+fn disabling_failed_provider_retains_saved_preset_and_reports_warning() {
+    let fixture = Fixture::new();
+    let (engine, _) = parameter_fixture(parameter_document());
+    let engine = engine.with_graph_catalog_path(fixture.path());
+    let mut proposed = engine.graph();
+    proposed.revision += 1;
+    proposed.nodes[0].control.enabled = false;
+    let expected = provider_parameters(&proposed).clone();
+    engine
+        .preserve_live_processor_state_with(
+            &mut proposed,
+            &[],
+            |_, _| Err(ProcessorStateError::Timeout),
+            |_, _| true,
+        )
+        .unwrap();
+    assert_eq!(provider_parameters(&proposed), expected);
+    assert!(engine.node_control_warning.lock().is_some());
+    let candidate = engine.catalog_candidate(&proposed);
+    let published = engine.publish_graph_locked(proposed, candidate).unwrap();
+    assert!(published.persistence_error.is_some());
+    assert!(engine.graph_catalog().unwrap().persistence_error.is_some());
+    assert!(engine.catalog_write_error.lock().is_none());
+    assert_eq!(provider_parameters(&engine.graph()), expected);
+}
+
+#[test]
+fn unavailable_provider_restores_authoritative_preset_and_rejects_explicit_writes() {
+    let mut document = parameter_document();
+    if let NodeConfig::Provider(provider) = &mut document.nodes[0].config {
+        provider.ports = Some(mixrelay_audio_graph::ProviderPorts {
+            inputs: 2,
+            outputs: 2,
+        });
+    }
+    let (engine, _) = parameter_fixture(document);
+    let mut proposed = engine.graph();
+    proposed.revision += 1;
+    let expected = provider_parameters(&proposed);
+    if let NodeConfig::Provider(provider) = &mut proposed.nodes[0].config {
+        provider.parameters = serde_json::json!({"stateBase64":"STALE"});
+    }
+    engine
+        .preserve_live_processor_state_with(
+            &mut proposed,
+            &[],
+            |_, _| panic!("missing worker cannot be snapshotted"),
+            |_, _| true,
+        )
+        .unwrap();
+    assert_eq!(provider_parameters(&proposed), expected);
+    let unchanged = proposed.clone();
+    assert_eq!(
+        engine
+            .preserve_live_processor_state_with(
+                &mut proposed,
+                &[change(7, 0.25)],
+                |_, _| panic!("missing worker cannot be snapshotted"),
+                |_, _| true
+            )
+            .unwrap_err()
+            .code,
+        ErrorCode::ProcessorUnavailable
+    );
+    assert_eq!(proposed, unchanged);
+}
+
+#[test]
+fn powered_off_provider_preserves_preset_and_accepts_explicit_parameter_delta() {
+    let mut document = parameter_document();
+    if let NodeConfig::Provider(provider) = &mut document.nodes[0].config {
+        provider.ports = Some(mixrelay_audio_graph::ProviderPorts {
+            inputs: 2,
+            outputs: 2,
+        });
+    }
+    let (engine, _) = parameter_fixture(document);
+    engine.execution_enabled.store(false, Ordering::Release);
+    let mut proposed = engine.graph();
+    proposed.revision += 1;
+    let expected = provider_parameters(&proposed).clone();
+    if let NodeConfig::Provider(provider) = &mut proposed.nodes[0].config {
+        provider.parameters = serde_json::json!({"stateBase64":"STALE"});
+    }
+    engine
+        .preserve_live_processor_state_with(
+            &mut proposed,
+            &[change(7, 0.25)],
+            |_, _| panic!("off provider must not snapshot a worker"),
+            |_, _| true,
+        )
+        .unwrap();
+    assert_eq!(
+        provider_parameters(&proposed)["stateBase64"],
+        expected["stateBase64"]
+    );
+    assert_eq!(provider_parameters(&proposed)["parameterValues"]["7"], 0.25);
+}
+
+#[test]
 fn pending_startup_preserves_desired_provider_state_without_snapshotting_missing_worker() {
     let (engine, _) = parameter_fixture(parameter_document());
     engine.defer_catalog_restore(ProtocolError {
