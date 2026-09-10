@@ -19,6 +19,7 @@ impl Fixture {
             input_writer: Mutex::new(()),
             reuse: Mutex::new(None),
             active_owner: AtomicBool::new(false),
+            timing: crate::timing::TimingMetrics::default(),
         });
         shared_header_unchecked(&control.shared)
             .worker_status

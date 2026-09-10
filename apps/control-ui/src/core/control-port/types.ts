@@ -10,6 +10,7 @@ export type DriverState =
   | 'ready';
 
 export interface ToneNariStatus {
+  processorTimings?: ProcessorTiming[];
   recorderError?: string | null;
   protocolVersion: 1;
   driverState: DriverState;
@@ -18,6 +19,12 @@ export interface ToneNariStatus {
   underruns: number;
   overruns: number;
   audioSession?: AudioSessionStatus;
+}
+
+export interface ProcessorTiming {
+  graphId: string;
+  nodeId: string;
+  roundTripNs: number;
 }
 
 export interface AudioSessionStatus {

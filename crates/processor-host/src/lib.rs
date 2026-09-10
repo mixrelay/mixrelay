@@ -34,6 +34,7 @@ mod editor_surface;
 mod native_editor;
 mod rack_formats;
 mod reuse;
+mod timing;
 mod worker_paths;
 use worker_paths::worker_paths;
 
@@ -320,7 +321,7 @@ fn rack_worker_loop(
         let audio_pending = sequence != 0
             && sequence != header.input_consumed.load(Ordering::Relaxed)
             && header.output_sequence.load(Ordering::Acquire)
-                == header.output_consumed.load(Ordering::Relaxed);
+                == header.output_consumed.load(Ordering::Acquire);
         if !parameter_pending && !audio_pending {
             thread::sleep(Duration::from_micros(100));
             continue;
@@ -333,7 +334,7 @@ fn rack_worker_loop(
         if sequence == 0
             || sequence == header.input_consumed.load(Ordering::Relaxed)
             || header.output_sequence.load(Ordering::Acquire)
-                != header.output_consumed.load(Ordering::Relaxed)
+                != header.output_consumed.load(Ordering::Acquire)
         {
             continue;
         }
@@ -838,6 +839,22 @@ impl ProcessorControlRegistry {
         Ok(control.editor_status(node_id))
     }
 
+    /// Latest sampled input-publication to output-receipt time, including worker scheduling.
+    /// Returns no value before measurement, after expiry, or for an inactive/failed instance.
+    #[must_use]
+    pub fn processing_time_ns(&self, node_id: &NodeId) -> Option<u64> {
+        let control = self.live_control(node_id).ok()?;
+        if !control.active_owner.load(Ordering::Acquire)
+            || shared_header_unchecked(&control.shared)
+                .worker_status
+                .load(Ordering::Acquire)
+                != WORKER_READY
+        {
+            return None;
+        }
+        control.timing.latest()
+    }
+
     /// Publishes an idempotent open/close request to the plug-in worker and returns immediately.
     /// The UI polls [`Self::editor_status`] so a slow or modal third-party editor can never block
     /// the engine's HTTP control thread.
@@ -905,6 +922,7 @@ struct HostedProcessorControl {
     input_writer: Mutex<()>,
     reuse: Mutex<Option<reuse::ReuseSignature>>,
     active_owner: AtomicBool,
+    timing: timing::TimingMetrics,
 }
 
 impl HostedProcessorControl {
@@ -1112,6 +1130,7 @@ struct HostedExternalProcessor {
     config_path: PathBuf,
     layout: AudioLayout,
     next_sequence: u64,
+    timing: timing::TimingProbe,
     control: Option<Arc<HostedProcessorControl>>,
     registration: Option<ProcessorControlRegistration>,
 }
@@ -1191,6 +1210,7 @@ impl HostedExternalProcessor {
             },
             next_sequence: 1,
             control: Some(control),
+            timing: timing::TimingProbe::default(),
             registration: None,
         })
     }
@@ -1238,6 +1258,7 @@ fn map_worker_regions(file: &File) -> Result<(MmapMut, Arc<HostedProcessorContro
             input_writer: Mutex::new(()),
             reuse: Mutex::new(None),
             active_owner: AtomicBool::new(false),
+            timing: crate::timing::TimingMetrics::default(),
         }),
     ))
 }
@@ -1266,25 +1287,36 @@ impl HostedAudioProcessor for HostedExternalProcessor {
             .shared
             .as_mut()
             .expect("hosted processor retains audio mapping until drop");
-        let expected_output = self.next_sequence.saturating_sub(1);
         let published_output = shared_header_unchecked(shared)
             .output_sequence
             .load(Ordering::Acquire);
-        let has_output = expected_output != 0 && published_output == expected_output;
+        // Input may be released before the worker publishes its output. A newer queued input
+        // must not make that still-owned output unconsumable and deadlock both mailboxes.
+        let has_output = published_output != 0
+            && published_output
+                != shared_header_unchecked(shared)
+                    .output_consumed
+                    .load(Ordering::Relaxed);
         if has_output {
             copy_shared_output_to_interleaved(shared, output, self.layout, frames);
             shared_header_unchecked(shared)
                 .output_consumed
                 .store(published_output, Ordering::Release);
+            if let Some(control) = &self.control {
+                self.timing.received(published_output, &control.timing);
+            }
         }
         if shared_header_unchecked(shared)
             .input_sequence
             .load(Ordering::Acquire)
             == shared_header_unchecked(shared)
                 .input_consumed
-                .load(Ordering::Relaxed)
+                .load(Ordering::Acquire)
         {
             copy_interleaved_input_to_shared(shared, input, self.layout, frames);
+            if let Some(control) = &self.control {
+                self.timing.submitted(self.next_sequence, &control.timing);
+            }
             shared_header_unchecked(shared)
                 .input_sequence
                 .store(self.next_sequence, Ordering::Release);
@@ -1340,7 +1372,12 @@ impl WorkerMonitor {
                     .take()
                     .expect("worker child is transferred exactly once");
                 let mut stop_deadline = None;
+                let mut next_timing_sample = Instant::now();
                 loop {
+                    if Instant::now() >= next_timing_sample {
+                        control.timing.request();
+                        next_timing_sample = Instant::now() + Duration::from_secs(1);
+                    }
                     match child.try_wait() {
                         Ok(Some(_)) => {
                             if !thread_stop.load(Ordering::Acquire) {
@@ -1756,7 +1793,48 @@ mod tests {
             },
             next_sequence: 1,
             control: None,
+            timing: timing::TimingProbe::default(),
             registration: None,
+        }
+    }
+
+    #[test]
+    fn consumed_input_before_output_publication_does_not_stall_the_mailbox() {
+        let mut processor = test_processor();
+        let input = [0.25; 8];
+        let mut output = [0.0; 8];
+        assert!(!processor.process(&input, &mut output, 4));
+        for sequence in 1..=64 {
+            let header = shared_header_unchecked(processor.shared.as_ref().unwrap());
+            header.input_consumed.store(sequence, Ordering::Release);
+            // The next callback queues input while this block is still being processed.
+            assert!(!processor.process(&input, &mut output, 4));
+            assert_eq!(processor.next_sequence, sequence + 2);
+            let shared = processor.shared.as_mut().unwrap();
+            let offset = output_offset(2, 4);
+            let processed = f32::from(u16::try_from(sequence).unwrap());
+            for bytes in shared[offset..offset + 8 * size_of::<f32>()].chunks_exact_mut(4) {
+                bytes.copy_from_slice(&processed.to_ne_bytes());
+            }
+            shared_header_unchecked(shared)
+                .output_sequence
+                .store(sequence, Ordering::Release);
+            assert!(processor.process(&input, &mut output, 4));
+            assert!(
+                output
+                    .iter()
+                    .all(|sample| sample.to_bits() == processed.to_bits())
+            );
+            assert_eq!(
+                shared_header_unchecked(processor.shared.as_ref().unwrap())
+                    .output_consumed
+                    .load(Ordering::Acquire),
+                sequence
+            );
+            assert!(
+                !processor.process(&input, &mut output, 4),
+                "no duplicate output"
+            );
         }
     }
 
@@ -1798,6 +1876,38 @@ mod tests {
     }
 
     #[test]
+    fn timing_status_requires_an_active_healthy_owner() {
+        let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
+        let control = Arc::new(HostedProcessorControl {
+            shared,
+            writer: Mutex::new(()),
+            input_writer: Mutex::new(()),
+            reuse: Mutex::new(None),
+            active_owner: AtomicBool::new(false),
+            timing: timing::TimingMetrics::default(),
+        });
+        let registry = ProcessorControlRegistry::default();
+        let node = NodeId::from("timed-node");
+        let registration = registry.register(&node, &control);
+        let mut probe = timing::TimingProbe::default();
+        control.timing.request();
+        probe.submitted(1, &control.timing);
+        thread::sleep(Duration::from_millis(1));
+        probe.received(1, &control.timing);
+        assert_eq!(registry.processing_time_ns(&node), None);
+        control.active_owner.store(true, Ordering::Release);
+        let header = shared_header_unchecked(&control.shared);
+        header.worker_status.store(WORKER_READY, Ordering::Release);
+        assert!(registry.processing_time_ns(&node).is_some());
+        header.worker_status.store(WORKER_FAILED, Ordering::Release);
+        assert_eq!(registry.processing_time_ns(&node), None);
+        drop(registration);
+        drop(control);
+        assert_eq!(registry.processing_time_ns(&node), None);
+        cleanup_worker_paths(&shared_path, &config_path);
+    }
+
+    #[test]
     fn control_mailboxes_coalesce_and_registration_does_not_extend_lifetime() {
         let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
         let control = Arc::new(HostedProcessorControl {
@@ -1806,6 +1916,7 @@ mod tests {
             input_writer: Mutex::new(()),
             reuse: Mutex::new(None),
             active_owner: AtomicBool::new(false),
+            timing: crate::timing::TimingMetrics::default(),
         });
         let registry = ProcessorControlRegistry::default();
         let node_id = NodeId::from("vst-node");
@@ -1872,6 +1983,7 @@ mod tests {
             input_writer: Mutex::new(()),
             reuse: Mutex::new(None),
             active_owner: AtomicBool::new(false),
+            timing: crate::timing::TimingMetrics::default(),
         };
         for id in 0..u32::try_from(PARAMETER_CAPACITY).unwrap() {
             control.set_parameter(id, f64::from(id) / 4096.0).unwrap();
@@ -1917,6 +2029,7 @@ mod tests {
                 input_writer: Mutex::new(()),
                 reuse: Mutex::new(None),
                 active_owner: AtomicBool::new(false),
+                timing: crate::timing::TimingMetrics::default(),
             });
             shared_header_unchecked(&control.shared)
                 .worker_status
@@ -1957,6 +2070,7 @@ mod tests {
             input_writer: Mutex::new(()),
             reuse: Mutex::new(None),
             active_owner: AtomicBool::new(false),
+            timing: crate::timing::TimingMetrics::default(),
         });
         let finished = Arc::new(AtomicBool::new(false));
         let producer_control = Arc::clone(&control);
@@ -1997,6 +2111,7 @@ mod tests {
             input_writer: Mutex::new(()),
             reuse: Mutex::new(None),
             active_owner: AtomicBool::new(false),
+            timing: crate::timing::TimingMetrics::default(),
         };
         let header = shared_header_unchecked(&control.shared);
         header.worker_status.store(WORKER_READY, Ordering::Release);
@@ -2042,6 +2157,7 @@ mod tests {
             input_writer: Mutex::new(()),
             reuse: Mutex::new(None),
             active_owner: AtomicBool::new(false),
+            timing: crate::timing::TimingMetrics::default(),
         });
         #[cfg(unix)]
         let mut command = Command::new("/usr/bin/false");

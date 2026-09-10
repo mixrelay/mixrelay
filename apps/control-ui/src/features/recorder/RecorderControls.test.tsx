@@ -96,11 +96,12 @@ it('records to Desktop with Options closed and proposes a fresh path after Stop'
   expect(screen.getByRole('button', { name: 'Options' })).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(record);
   await waitFor(() =>
-    expect(write).toHaveBeenCalledWith(
-      'graph-a',
-      'recorder-1',
-      expect.objectContaining({ path: '/Desktop/first.wav' }),
-    ),
+    expect(write).toHaveBeenCalledWith('graph-a', 'recorder-1', {
+      action: 'record',
+      path: '/Desktop/first.wav',
+      sampleRate: null,
+      encoding: 'pcm16',
+    }),
   );
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
   await waitFor(() => expect(defaults).toHaveBeenCalledTimes(2));
@@ -187,6 +188,8 @@ it('shows compact icon-only transport above closed Options and keeps the transpo
   const record = screen.getByRole('button', { name: 'Record' });
   expect(record).toHaveTextContent('');
   expect(record.querySelector('svg')).not.toBeNull();
+  const time = screen.getByLabelText('Recorded time');
+  expect(time.compareDocumentPosition(record) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const options = screen.getByRole('button', { name: 'Options' });
   expect(options).toHaveAttribute('aria-expanded', 'false');
   expect(record.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -274,7 +277,7 @@ it('keeps rejected take settings editable and retries without graph mutation', a
       action: 'record',
       path: '/takes/next.wav',
       sampleRate: null,
-      encoding: 'float32',
+      encoding: 'pcm16',
     }),
   );
 });

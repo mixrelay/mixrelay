@@ -340,7 +340,8 @@ impl EngineGraphController {
     }
 
     pub(super) fn read_catalog(&self) -> Result<GraphCatalogResponse, ProtocolError> {
-        let _mutation = self.mutation.lock();
+        // Read one committed document/layout snapshot; native preparation owns mutation,
+        // but must never prevent the UI from displaying durable user data.
         let catalog = self.catalog.lock();
         let mut response = catalog
             .as_ref()
@@ -352,13 +353,22 @@ impl EngineGraphController {
         response
             .persistence_error
             .clone_from(&self.catalog_write_error.lock());
-        response.document = self.graph.read().clone();
         Ok(response)
     }
 
     pub(super) fn read_catalog_document(&self, id: &str) -> Result<GraphDocument, ProtocolError> {
-        let _mutation = self.mutation.lock();
-        self.catalog_document_locked(id)
+        let catalog = self.catalog.lock();
+        catalog
+            .as_ref()
+            .ok_or_else(|| unavailable("graph catalog not enabled"))?
+            .value
+            .as_ref()
+            .map_err(|error| unavailable(error))?
+            .graphs
+            .iter()
+            .find(|graph| graph.id == id)
+            .map(|graph| graph.document.clone())
+            .ok_or_else(|| invalid("graph does not exist"))
     }
 
     // Caller holds mutation across document validation and its control operation.

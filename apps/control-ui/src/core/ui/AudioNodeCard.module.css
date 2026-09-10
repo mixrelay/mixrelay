@@ -1,6 +1,7 @@
 .root {
   display: flex;
   flex-direction: column;
+  flex: 1 0 auto;
   height: 100%;
   position: relative;
   min-height: var(--audio-node-face-height, 116px);
@@ -61,6 +62,10 @@
 }
 
 .controls {
+  flex: 0 0 auto;
+}
+
+.settings {
   flex: 0 0 auto;
 }
 
@@ -135,6 +140,19 @@
   margin-right: 10px;
   border-radius: 50%;
   background: #777d86;
+}
+
+.processingTime {
+  flex: 0 0 auto;
+  margin-right: 10px;
+  color: var(--muted);
+  font:
+    9px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .statusDot[data-tone="positive"] {
@@ -358,7 +376,7 @@
   cursor: default;
 }
 
-.parameterListInner {
+.parameterList {
   display: grid;
   gap: 8px;
 }

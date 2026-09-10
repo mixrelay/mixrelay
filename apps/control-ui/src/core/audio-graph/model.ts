@@ -21,6 +21,7 @@ export interface AudioGraphPort {
 }
 
 export interface AudioGraphNodeAppearance {
+  processingTimeNs?: number;
   category: string;
   channelCount?: number;
   detail?: string;

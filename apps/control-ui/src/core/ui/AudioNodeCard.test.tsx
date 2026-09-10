@@ -20,6 +20,37 @@ function card(iconUrl?: string) {
   );
 }
 
+it('renders every generic plug-in parameter without an internal scroll viewport', () => {
+  const view = render(
+    <ToneNariProvider>
+      <AudioNodeCard
+        category="Processor"
+        icon="AU"
+        title="Reverb"
+        inputCount={2}
+        outputCount={2}
+        faceMode="compact"
+        onSelect={vi.fn()}
+        onParameterChange={vi.fn()}
+        parameterControls={Array.from({ length: 24 }, (_, index) => ({
+          id: `parameter-${index}`,
+          label: `Parameter ${index + 1}`,
+          minimum: 0,
+          maximum: 1,
+          step: 0.01,
+          suffix: '',
+          value: 0.5,
+        }))}
+      />
+    </ToneNariProvider>,
+  );
+  expect(view.queryByRole('button', { name: 'Options' })).not.toBeInTheDocument();
+  expect(view.getAllByRole('slider')).toHaveLength(24);
+  expect(view.getByRole('slider', { name: 'Parameter 24' })).toBeVisible();
+  expect(view.container.querySelector('[data-radix-scroll-area-viewport]')).toBeNull();
+  expect(view.container.querySelector('.mantine-ScrollArea-root')).toBeNull();
+});
+
 it('places native plug-in content under a compact unmetered face', () => {
   const view = render(
     <ToneNariProvider>
@@ -79,7 +110,7 @@ it.each(['closed', 'opening', 'open', 'failed', 'unavailable', undefined] as con
     );
     const needsParameters = !state || state === 'failed' || state === 'unavailable';
     if (needsParameters) {
-      fireEvent.click(view.getByRole('button', { name: 'Options' }));
+      expect(view.queryByRole('button', { name: 'Options' })).not.toBeInTheDocument();
       expect(view.getByRole('slider', { name: 'Cutoff' })).toBeEnabled();
     } else {
       expect(view.queryByRole('button', { name: 'Options' })).not.toBeInTheDocument();

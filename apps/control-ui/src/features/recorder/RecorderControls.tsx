@@ -43,7 +43,7 @@ export function RecorderControls(props: {
   const picker = useRecordingPath(props.controlPort, snapshot.status);
   const { path, setPath } = picker;
   const [sampleRate, setSampleRate] = useState('auto');
-  const [encoding, setEncoding] = useState<RecorderEncoding>('float32');
+  const [encoding, setEncoding] = useState<RecorderEncoding>('pcm16');
   const [optionsOpened, setOptionsOpened] = useState(false);
   const locked = snapshot.status?.state === 'recording' || snapshot.status?.state === 'paused';
   const disabled = snapshot.busy || picker.busy || !snapshot.status;
@@ -52,6 +52,15 @@ export function RecorderControls(props: {
   return (
     <div className={styles.root}>
       <div className={styles.transport}>
+        <output
+          className={styles.time}
+          aria-label={t('recorder.duration')}
+          title={
+            snapshot.status ? t(`recorder.states.${snapshot.status.state}`) : t('recorder.loading')
+          }
+        >
+          {recordingDuration(snapshot.status)}
+        </output>
         <RecorderButtons
           canStart={props.enabled}
           disabled={disabled}
@@ -63,15 +72,6 @@ export function RecorderControls(props: {
             encoding,
           }}
         />
-        <output
-          className={styles.time}
-          aria-label={t('recorder.duration')}
-          title={
-            snapshot.status ? t(`recorder.states.${snapshot.status.state}`) : t('recorder.loading')
-          }
-        >
-          {recordingDuration(snapshot.status)}
-        </output>
       </div>
       <RecorderError error={snapshot.error ?? picker.error} />
       <NodeOptionsSection

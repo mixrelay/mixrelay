@@ -174,6 +174,9 @@ pub enum DriverState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppStatus {
+    /// Fresh per-processor transport samples; identities remain graph-local.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub processor_timings: Vec<ProcessorTiming>,
     /// Finalization error from a removed recorder, retained independently of its node.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recorder_error: Option<String>,
@@ -186,6 +189,15 @@ pub struct AppStatus {
     /// Absent in older engines. UI must not manufacture capabilities when unavailable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_session: Option<tonenari_audio_io::session::AudioSessionStatus>,
+}
+
+/// One sampled block's engine-to-worker round trip, not hardware or plug-in reported latency.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessorTiming {
+    pub graph_id: String,
+    pub node_id: String,
+    pub round_trip_ns: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -356,6 +368,7 @@ pub struct GraphApplyResponse {
 impl Default for AppStatus {
     fn default() -> Self {
         Self {
+            processor_timings: Vec::new(),
             recorder_error: None,
             protocol_version: PROTOCOL_VERSION,
             driver_state: DriverState::NotInstalled,
@@ -402,6 +415,23 @@ pub struct ProtocolError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn processor_timing_status_preserves_graph_identity_and_omits_unmeasured_values() {
+        let mut status = super::AppStatus::default();
+        let empty = serde_json::to_value(&status).unwrap();
+        assert!(empty.get("processorTimings").is_none());
+        status.processor_timings.push(super::ProcessorTiming {
+            graph_id: "graph-a".to_owned(),
+            node_id: "effect-1".to_owned(),
+            round_trip_ns: 1_333_333,
+        });
+        let value = serde_json::to_value(&status).unwrap();
+        assert_eq!(value["processorTimings"][0]["graphId"], "graph-a");
+        assert_eq!(value["processorTimings"][0]["roundTripNs"], 1_333_333);
+        let decoded: super::AppStatus = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded.processor_timings, status.processor_timings);
+    }
+
     #[test]
     fn presentation_metadata_is_optional_for_pre_layout_catalog_responses() {
         let old = serde_json::json!({

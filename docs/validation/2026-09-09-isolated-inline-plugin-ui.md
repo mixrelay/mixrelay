@@ -185,7 +185,86 @@ Ownership/cursor/drop tests provide correctness evidence, not a numerical realti
 performance or latency claim. Live vendor-crash acceptance, broader input/editor
 compatibility and a complete leak audit remain outstanding as described above.
 
+## Follow-up — 2026-09-10, worker progress and node presentation
+
+- Live AUMatrixReverb stopped at input 101419, input-consumed 101418, output
+  101418, output-consumed 101417, with zero process failures. The parent advanced
+  its expected output when queuing the next input before the previous output was
+  published. Both sides then waited forever; the graph rendered its dry bypass.
+- Output consumption now follows the single slot's publication/consumption ACK,
+  independently of the next input sequence. Slot reuse reads the peer's release
+  ACK with Acquire ordering. A deterministic 64-cycle regression covers delayed
+  output and rejects duplicate consumption. After local replacement, observed
+  output advanced from 76597 to 77349 over approximately one second, failures zero.
+  This demonstrates liveness, not an audio-quality or performance benchmark.
+- Generic plug-in parameters have neither the 180 px internal scroll limit nor
+  an Options disclosure. Intrinsic settings height constrains node size; native
+  editor surfaces remain independently resizable.
+- Existing monitor/status loops request and display one transport timing sample
+  per second. Only a requested input and its matching output read the clock.
+  The value includes worker scheduling, excludes hardware latency, and is not
+  pure DSP execution time. Stale, inactive and failed-worker measurements are
+  hidden. Final live AUReverb2 status reported 1,329,583 ns and the node header
+  displayed about 1.33 ms. No numeric instrumentation-overhead claim is made;
+  the user changed plug-in/graph configuration during the session, preventing a
+  controlled live before/after overhead comparison.
+- A subsequent CoreAudio initialization timeout exposed catalog GETs waiting on
+  the native mutation lock. Catalog/document/layout GETs now use one committed
+  catalog snapshot without that lock. The concurrency regression passed; final
+  live catalog GET returned HTTP 200 in 0.000882 s (healthy runtime, not matched
+  timeout conditions). The stuck engine was terminated after saved documents
+  were confirmed. A replacement restored audio; CoreAudio itself was not restarted.
+- Validation: processor-host 45 tests, control-protocol 7 tests, focused catalog
+  47 tests, and focused UI 178 tests passed. Rust selections had zero ignored.
+  Formatting, strict changed-crate Clippy, UI typecheck/Biome/boundaries and local
+  engine/desktop builds passed. Read-only review found no remaining blocker in
+  these changed boundaries. Existing Vite bundle-size advice remains visible.
+- Still unresolved: a missing plug-in fails catalog resolution/plan preparation;
+  descriptor-free UI nodes lose port presentation, and failed native snapshots
+  can reject structural edits. Authored port/state preservation and unavailable
+  node execution require a separate durability change. Do not mark this complete.
+
+## Follow-up — 2026-09-10, node bottom edge
+
+The shared node wrapper no longer reserves a separate 12 px resize footer.
+Minimum sizes include content and the card's two border pixels; the card fills
+explicitly resized nodes without exposing an extra background strip. Saved sizes
+are not rewritten. The grip is inset 3 px, overriding React Flow's corner anchors
+and independent `translate` property; hover styling remains effective.
+
+Five layout regressions cover intrinsic control expansion/collapse for device,
+recorder and provider nodes, saved sizing, and native editor geometry. The focused
+selection passed 32 tests. Typecheck, Biome, UI boundaries, diff checks and desktop
+packaging passed; the existing bundle-size advisory remains. Independent review
+found no remaining issue in this boundary. Live UI verification covered all four
+visible node types and microphone Options expansion/collapse. The engine was not
+restarted for this UI-only change. This is a layout fix, not a performance claim.
+
+The first packaged footer fix still shifted the grip inward: module CSS lowering
+converted `translate: none` into `transform: translate(0, 0)`, while vendor CSS
+retained the independent `translate: -50% -50%`. Source specificity review alone
+missed this. The reset now travels as an inline style through NodeResizeControl,
+and a grid-aligned block SVG avoids inline baseline offsets. The added regression
+checks all three fixture grips; the focused selection now passes 33 tests.
+Typecheck, Biome, boundaries and desktop packaging passed again. Bundle inspection
+must check the emitted property, not only the source declaration.
+
 ## Commit scope
+
+The recorder transport uses a fixed vertical order: meters, a full-width centered
+time display, centered buttons, then Options. The temporary responsive wrapping
+layout was replaced following the user's design direction. Intrinsic height
+measurement grows the card accordingly. The recorder/layout/canvas selection
+passed 32 tests, including time-before-buttons DOM ordering, and
+Biome, typecheck and desktop packaging passed. Read-only review found no blocker;
+the live narrow recorder was checked with all time digits contained inside the
+card. No recording settings or saved node sizes were changed for verification.
+
+Recorder defaults use the user's confirmed current width, 180 px (manual sizes
+still win), content-driven
+height, source-matched sample rate and 16-bit PCM. The closed-Options start and
+failed-take retry tests assert the exact `sampleRate: null, encoding: pcm16`
+request; active takes continue displaying their actual locked format.
 
 Keep the native transport, protocol, desktop adapter, feasibility example and
 owning tests together. Keep node-layout and startup-recovery changes with their

@@ -84,24 +84,39 @@
 }
 
 .node {
+  display: flex;
+  flex-direction: column;
   width: 228px;
   position: relative;
-  padding-bottom: 12px;
   box-sizing: border-box;
-  background: #1b1d21;
 }
 
-.node .resizeHandle {
-  right: 1px;
-  bottom: 1px;
+.node[data-node-type="recorder"] {
+  width: 180px;
+}
+
+.node .resizeHandle:global(.react-flow__resize-control.handle.bottom.right) {
+  display: grid;
+  place-items: end;
+  top: auto;
+  left: auto;
+  right: 3px;
+  bottom: 3px;
   width: 14px;
   height: 14px;
   border: none;
   border-radius: 0;
   transform: none;
   background: transparent;
-  color: #6b737e;
   cursor: nwse-resize;
+}
+
+.resizeHandle > svg {
+  display: block;
+}
+
+.node .resizeHandle {
+  color: #6b737e;
 }
 
 .node .resizeHandle:hover {

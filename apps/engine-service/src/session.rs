@@ -845,6 +845,7 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
             .capabilities_for_format(format)
             .expect("adapter always supplies capabilities");
         AppStatus {
+            processor_timings: Vec::new(),
             recorder_error: None,
             protocol_version: PROTOCOL_VERSION,
             driver_state: match (

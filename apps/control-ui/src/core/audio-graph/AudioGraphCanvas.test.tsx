@@ -267,7 +267,9 @@ vi.mock('@xyflow/react', () => ({
     />
   ),
   Position: { Left: 'left', Right: 'right' },
-  NodeResizeControl: ({ position }: { position: string }) => <span data-resize-grip={position} />,
+  NodeResizeControl: ({ position, style }: { position: string; style: CSSProperties }) => (
+    <span data-resize-grip={position} style={style} />
+  ),
   ReactFlow: MockReactFlow,
   useConnection: (selector: (connection: MockItem) => unknown) =>
     selector({ inProgress: false, toHandle: null }),
@@ -334,6 +336,13 @@ function resetViewportHarness() {
   viewportHarness.lastMoveEnd = null;
 }
 
+it('resets the resize grip translation independently of stylesheet transforms', () => {
+  const { container } = render(canvas());
+  const grips = container.querySelectorAll('[data-resize-grip="bottom-right"]');
+  expect(grips).toHaveLength(3);
+  for (const grip of grips) expect(grip).toHaveStyle({ translate: 'none' });
+});
+
 function RecorderDisclosureFixture() {
   const [opened, setOpened] = useState(false);
   return (
@@ -387,6 +396,8 @@ it('aligns recorder handles with content-sized meter rows through channel edits 
   const view = render(recorderCanvas(2));
   const face = screen.getByRole('button', { name: 'Recorder, Output' });
   const root = face.closest('[data-face-mode]');
+  expect(root?.parentElement).toHaveAttribute('data-node-type', 'recorder');
+  expect(root?.parentElement?.style.width).toBe('');
   expect(root).toHaveStyle({ '--audio-node-face-height': '65px' });
   expect(screen.getByLabelText('Recorder input, CH 1')).toHaveStyle({ top: '41px' });
   expect(screen.getByLabelText('Recorder input, CH 2')).toHaveStyle({ top: '54px' });

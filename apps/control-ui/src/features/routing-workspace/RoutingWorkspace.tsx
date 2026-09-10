@@ -51,6 +51,7 @@ import {
   processorCatalogPlaceholder,
   processorItemId,
 } from './processorCatalogMenu';
+import { presentProcessorTimings } from './processorTiming';
 import styles from './RoutingWorkspace.module.css';
 import { useGraphLayout } from './useGraphLayout';
 import { useProcessorCatalog } from './useProcessorCatalog';
@@ -69,6 +70,7 @@ const ADD_PROCESSOR_DIRECTORY_ITEM_ID = 'add-processor-directory';
 const RESCAN_PROCESSORS_ITEM_ID = 'rescan-processors';
 
 export interface RoutingWorkspaceProps {
+  processorTimings?: import('../../core/control-port/types').ProcessorTiming[];
   deviceRateAction?: {
     change: (endpointId: string, sampleRate: number) => void;
     enabled: boolean;
@@ -675,6 +677,7 @@ function useSessionGraphRefresh(
 }
 
 export function RoutingWorkspace({
+  processorTimings,
   deviceRateAction,
   graphId,
   interactionDisabled = false,
@@ -739,6 +742,7 @@ export function RoutingWorkspace({
   );
 
   const viewProps = {
+    processorTimings,
     graphId,
     interactionDisabled,
     deviceRateAction,
@@ -796,6 +800,7 @@ function useWorkspaceInventory(controlPort: ControlPort, menuOpened: boolean) {
 }
 
 interface WorkspaceViewProps {
+  processorTimings?: RoutingWorkspaceProps['processorTimings'];
   graphId?: string;
   interactionDisabled: boolean;
   parameters: ReturnType<typeof useProcessorParameterPublisher>;
@@ -844,7 +849,7 @@ function usePresentedModel(props: WorkspaceViewProps) {
   const { t } = useTranslation();
   const { model, applications, audioDevices, inventory, audioSession, state, deviceRateAction } =
     props;
-  return useMemo(
+  const presented = useMemo(
     () =>
       model
         ? presentVirtualNodeStatus(
@@ -875,6 +880,10 @@ function usePresentedModel(props: WorkspaceViewProps) {
       t,
       deviceRateAction,
     ],
+  );
+  return useMemo(
+    () => presentProcessorTimings(presented, props.processorTimings, props.graphId),
+    [presented, props.processorTimings, props.graphId],
   );
 }
 

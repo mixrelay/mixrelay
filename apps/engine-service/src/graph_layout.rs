@@ -54,7 +54,6 @@ pub(super) fn validate(layout: &GraphLayout) -> Result<(), &'static str> {
 
 impl EngineGraphController {
     pub(crate) fn read_graph_layout(&self, id: &str) -> Result<GraphLayoutResponse, ProtocolError> {
-        let _mutation = self.mutation.lock();
         let catalog = self.catalog.lock();
         let value = catalog
             .as_ref()

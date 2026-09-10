@@ -2,7 +2,6 @@ import {
   ActionIcon,
   Image,
   Paper,
-  ScrollArea,
   Select,
   Slider,
   TextInput,
@@ -20,6 +19,7 @@ import {
 } from './audioNodeLayout';
 import { Meter } from './Meter';
 import { NodeOptionsSection } from './NodeOptionsSection';
+import { ProcessorTimingLabel } from './ProcessorTimingLabel';
 import type { StatusTone } from './StatusBadge';
 
 const portIds = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
@@ -50,6 +50,7 @@ export interface EndpointControl {
 }
 
 export interface AudioNodeCardProps {
+  processingTimeNs?: number;
   content?: ReactNode;
   bypassed?: boolean;
   /** Device presence only; selection and configuration remain available. */
@@ -103,6 +104,7 @@ export interface AudioNodeCardProps {
 }
 
 export function AudioNodeCard({
+  processingTimeNs,
   bypassed = false,
   offline = false,
   category,
@@ -173,6 +175,7 @@ export function AudioNodeCard({
       withBorder
     >
       <AudioNodeFace
+        processingTimeNs={processingTimeNs}
         faceRef={faceRef}
         category={category}
         channelCount={channelCount}
@@ -191,8 +194,7 @@ export function AudioNodeCard({
         statusTone={statusTone}
         title={title}
       />
-      <div ref={contentRef} className={styles.controls}>
-        {content ? <div className={`${styles.content} nodrag nopan nowheel`}>{content}</div> : null}
+      <AudioNodeControls content={content} faceMode={faceMode} measureRef={contentRef}>
         <ProcessorEditorOption control={processorEditor} onRetry={onProcessorEditorRetry} />
         <NodeOptions
           endpointControl={endpointControl}
@@ -206,9 +208,32 @@ export function AudioNodeCard({
           opened={optionsOpened}
           parameterControls={hasParameterControls ? parameterControls : []}
         />
-      </div>
+      </AudioNodeControls>
       <NodePortOverlays inputCount={inputCount} outputCount={outputCount} visible={showPorts} />
     </Paper>
+  );
+}
+
+function AudioNodeControls({
+  content,
+  faceMode,
+  measureRef,
+  children,
+}: {
+  content: ReactNode;
+  faceMode: AudioNodeFaceMode;
+  measureRef: Ref<HTMLDivElement>;
+  children: ReactNode;
+}) {
+  // Native surfaces stretch with the node. Only intrinsic settings constrain its minimum height.
+  const compact = faceMode === 'compact';
+  return (
+    <div ref={compact ? undefined : measureRef} className={styles.controls}>
+      {content ? <div className={`${styles.content} nodrag nopan nowheel`}>{content}</div> : null}
+      <div ref={compact ? measureRef : undefined} className={styles.settings}>
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -246,6 +271,7 @@ function AudioNodeFace(
   props: Pick<
     AudioNodeCardProps,
     | 'category'
+    | 'processingTimeNs'
     | 'channelCount'
     | 'detail'
     | 'icon'
@@ -263,6 +289,7 @@ function AudioNodeFace(
   > & { hideSummary?: boolean; faceRef?: Ref<HTMLButtonElement> },
 ) {
   const {
+    processingTimeNs,
     category,
     channelCount = 0,
     hideSummary,
@@ -293,6 +320,7 @@ function AudioNodeFace(
           <NodeIcon icon={icon} iconUrl={iconUrl} />
         </span>
         <span className={styles.category}>{title}</span>
+        <ProcessorTimingLabel nanoseconds={processingTimeNs} />
         <NodeStatus status={status} tone={statusTone} />
       </span>
       <span className={styles.body}>
@@ -399,8 +427,8 @@ function NodeOptions({
   parameterControls: NonNullable<AudioNodeCardProps['parameterControls']>;
 }) {
   if (!hasOptions) return null;
-  return (
-    <NodeOptionsSection label={label} opened={opened} onToggle={onToggle}>
+  const controls = (
+    <>
       {endpointControl && onEndpointChange ? (
         <EndpointOptions control={endpointControl} onChange={onEndpointChange} />
       ) : null}
@@ -408,25 +436,23 @@ function NodeOptions({
         <NodeGainControl control={gainControl} onChange={onGainChange} />
       ) : null}
       {onParameterChange && parameterControls.length > 0 ? (
-        <ScrollArea.Autosize
-          className={styles.parameterList}
-          mah={180}
-          offsetScrollbars
-          onWheel={(event) => event.stopPropagation()}
-          scrollbarSize={5}
-          type="auto"
-        >
-          <div className={styles.parameterListInner}>
-            {parameterControls.map((control) => (
-              <NodeParameterControl
-                control={control}
-                key={control.id}
-                onChange={(value) => onParameterChange(control.id, value)}
-              />
-            ))}
-          </div>
-        </ScrollArea.Autosize>
+        <div className={styles.parameterList}>
+          {parameterControls.map((control) => (
+            <NodeParameterControl
+              control={control}
+              key={control.id}
+              onChange={(value) => onParameterChange(control.id, value)}
+            />
+          ))}
+        </div>
       ) : null}
+    </>
+  );
+  return parameterControls.length > 0 ? (
+    <div className={`${styles.optionsPanel} nodrag nopan nowheel`}>{controls}</div>
+  ) : (
+    <NodeOptionsSection label={label} opened={opened} onToggle={onToggle}>
+      {controls}
     </NodeOptionsSection>
   );
 }

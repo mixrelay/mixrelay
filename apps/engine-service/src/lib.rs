@@ -44,6 +44,7 @@ pub mod endpoint_service;
 
 mod control_maintenance;
 pub mod device_worker;
+mod processor_timing;
 pub use control_maintenance::ControlMaintenance;
 pub mod catalog_execution;
 mod endpoint_format;
@@ -236,6 +237,7 @@ impl RuntimeStatusBackend for FixedRuntimeStatus {
     fn status(&self, format: RenderFormat) -> AppStatus {
         let ready = self.driver_state == DriverState::Ready;
         AppStatus {
+            processor_timings: Vec::new(),
             recorder_error: None,
             protocol_version: PROTOCOL_VERSION,
             driver_state: self.driver_state,
@@ -682,6 +684,7 @@ impl ControlBackend for EngineGraphController {
     fn status(&self) -> AppStatus {
         let format = self.context.read().format;
         let mut status = self.runtime_status.status(format);
+        status.processor_timings = self.processor_timings();
         status
             .recorder_error
             .clone_from(&self.recorder_cleanup_error.lock());

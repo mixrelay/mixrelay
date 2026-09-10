@@ -17,6 +17,38 @@ mod native_state;
 mod live_state;
 
 struct Fixture(tonenari_test_support::FixtureDir);
+
+#[test]
+fn durable_catalog_reads_do_not_wait_for_native_preparation() {
+    let fixture = Fixture::new();
+    let engine =
+        controller(default_duplex_document(9, None)).with_graph_catalog_path(fixture.path());
+    let expected = engine.read_catalog().unwrap();
+    let expected_layout = engine.read_graph_layout(&expected.active_id).unwrap();
+    let response = std::thread::scope(|scope| {
+        let mutation = engine.mutation.lock();
+        let (send, receive) = std::sync::mpsc::channel();
+        let id = &expected.active_id;
+        let engine = &engine;
+        scope.spawn(move || {
+            let snapshots = (
+                engine.read_catalog(),
+                engine.read_catalog_document(id),
+                engine.read_graph_layout(id),
+            );
+            let _ = send.send(snapshots);
+        });
+        let response = receive.recv_timeout(std::time::Duration::from_secs(1));
+        // Release even on regression so the test joins its reader instead of hanging.
+        drop(mutation);
+        response
+    });
+    let (catalog, document, layout) = response.expect("reads must not wait for mutation");
+    assert_eq!(catalog.unwrap(), expected);
+    assert_eq!(document.unwrap(), expected.document);
+    assert_eq!(layout.unwrap(), expected_layout);
+}
+
 impl Fixture {
     fn new() -> Self {
         Self(tonenari_test_support::FixtureDir::new("catalog").unwrap())

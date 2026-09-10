@@ -129,6 +129,7 @@ export function StudioScreen({ controlPort }: { controlPort: ControlPort }) {
           graphId={catalog?.activeId}
           interactionDisabled={catalogBusy || catalogUncertain || sessionBusy}
           audioSession={status?.audioSession}
+          processorTimings={status?.processorTimings}
           sessionDocument={
             sessionDocument && sessionDocument.revision >= (catalog?.document.revision ?? 0)
               ? sessionDocument

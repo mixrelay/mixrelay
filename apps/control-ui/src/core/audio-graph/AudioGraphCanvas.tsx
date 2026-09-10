@@ -1243,6 +1243,7 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
     <div
       ref={layout.ref}
       className={styles.node}
+      data-node-type={graphNode.runtime?.type}
       style={{
         width:
           graphNode.size?.width ??
@@ -1316,6 +1317,8 @@ function NodeResizeGrip({ minHeight }: { minHeight: number }) {
   return (
     <NodeResizeControl
       className={`${styles.resizeHandle} nodrag nopan`}
+      // Keep the independent translate reset out of CSS transform lowering.
+      style={{ translate: 'none' }}
       position="bottom-right"
       minWidth={180}
       minHeight={minHeight}

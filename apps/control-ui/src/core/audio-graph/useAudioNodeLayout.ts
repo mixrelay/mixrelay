@@ -31,13 +31,13 @@ export function useAudioNodeLayout(
   const compact = graphNodeFaceMode(node) === 'compact';
   const portCount = Math.max(node.inputPorts.length, node.outputPorts.length);
   const minHeight = compact
-    ? Math.max(100, 38 + (portCount + 1) * 18)
-    : face.height + contentHeight + 14;
+    ? Math.max(88, 26 + (portCount + 1) * 18, face.height + contentHeight + 2)
+    : face.height + contentHeight + 2;
   const nativeHeight =
     editor.width && editor.height
       ? (editor.height * (node.size?.width ?? Math.min(1600, Math.max(240, editor.width)))) /
           editor.width +
-        38
+        28
       : 0;
   const ports = compact
     ? {
