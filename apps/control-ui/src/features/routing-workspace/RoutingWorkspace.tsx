@@ -20,7 +20,7 @@ import type {
 } from '../../core/control-port/types';
 import { ControlPortError } from '../../core/control-port/types';
 import { useUndoHistory } from '../../core/history/useUndoHistory';
-import { NodeMuteButton, NodePowerToggle } from '../../core/ui/NodeSignalControls';
+import { NodeMuteButton, NodePowerButton } from '../../core/ui/NodeSignalControls';
 import { RecoveryActions } from '../../core/ui/RecoveryActions';
 import { RetryAlert } from '../../core/ui/RetryAlert';
 import { WorkspaceHeader } from '../../core/ui/WorkspaceHeader';
@@ -954,14 +954,14 @@ function WorkspaceView(props: WorkspaceViewProps) {
       {presentedModel && props.layout.loaded ? (
         <div className={styles.canvas} inert={props.layout.loading}>
           <AudioGraphCanvas
-            renderNodeControls={(node) =>
-              canvasNodeControls(node, nodeSignalControls(props, node, t, nodeControls))
-            }
+            renderNodeControls={(node) => nodeSignalControls(props, node, t, nodeControls)}
             renderNodeContent={(node) =>
-              workspaceNodeContent(props, node, presentedModel, {
-                editorOpen: processorEditors.statuses.get(node.id)?.state === 'open',
-                actions: nodeSignalControls(props, node, t, nodeControls)?.power,
-              })
+              workspaceNodeContent(
+                props,
+                node,
+                presentedModel,
+                processorEditors.statuses.get(node.id)?.state === 'open',
+              )
             }
             viewport={props.layout.layout.viewport}
             onViewportChange={props.layout.updateViewport}
@@ -1024,9 +1024,9 @@ function workspaceNodeContent(
   props: WorkspaceViewProps,
   node: AudioGraphNode,
   model: AudioGraphModel,
-  presentation: { editorOpen: boolean; actions: ReactNode },
+  editorOpen: boolean,
 ) {
-  if (node.runtime?.control?.enabled !== false && presentation.editorOpen)
+  if (node.runtime?.control?.enabled !== false && editorOpen)
     return (
       <NativeProcessorSurface
         port={props.controlPort}
@@ -1034,19 +1034,17 @@ function workspaceNodeContent(
         title={node.appearance.title}
       />
     );
-  return recorderNodeContent(props, node, model, presentation.actions);
+  return recorderNodeContent(props, node, model);
 }
 
 function recorderNodeContent(
   props: WorkspaceViewProps,
   node: AudioGraphNode,
   model: AudioGraphModel,
-  optionsActions: ReactNode,
 ) {
   if (node.runtime?.type !== 'recorder' || !props.graphId) return null;
   return (
     <RecorderControls
-      optionsActions={optionsActions}
       key={`${props.graphId}:${node.id}`}
       controlPort={props.controlPort}
       graphId={props.graphId}
@@ -1087,13 +1085,6 @@ function useWorkspaceNodeControls(props: WorkspaceViewProps) {
   );
 }
 
-function canvasNodeControls(
-  node: AudioGraphNode,
-  controls: import('../../core/audio-graph/AudioGraphCanvas').AudioNodeControlSlots | null,
-) {
-  return node.runtime?.type === 'recorder' ? { ...controls, power: null } : controls;
-}
-
 function nodeSignalControls(
   props: WorkspaceViewProps,
   node: AudioGraphNode,
@@ -1111,7 +1102,7 @@ function nodeSignalControls(
   };
   return {
     power: entry.capabilities.power ? (
-      <NodePowerToggle
+      <NodePowerButton
         enabled={control.enabled}
         disabled={disabled}
         label={t(control.enabled ? 'routing.nodeControl.powerOff' : 'routing.nodeControl.powerOn', {

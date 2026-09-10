@@ -5,7 +5,7 @@ import type { RecorderRequest, RecorderStatus } from '../../core/control-port/ty
 import { I18nProvider, i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { AudioNodeCard } from '../../core/ui/AudioNodeCard';
-import { NodePowerToggle } from '../../core/ui/NodeSignalControls';
+import { NodePowerButton } from '../../core/ui/NodeSignalControls';
 import { RecorderControls } from './RecorderControls';
 
 const stopped: RecorderStatus = {
@@ -102,7 +102,7 @@ it('does not resume a paused take while its node is powered off', async () => {
 });
 afterEach(() => vi.restoreAllMocks());
 
-it('keeps OFF recorder power in its own Options row while recording remains disabled', async () => {
+it('keeps OFF recorder header power available while recording remains disabled', async () => {
   const { port, write } = fixture();
   const onPower = vi.fn();
   render(
@@ -116,6 +116,14 @@ it('keeps OFF recorder power in its own Options row while recording remains disa
           outputCount={0}
           onSelect={vi.fn()}
           poweredOff
+          headerActions={
+            <NodePowerButton
+              enabled={false}
+              disabled={false}
+              label="Enable Recorder"
+              onChange={onPower}
+            />
+          }
           content={
             <RecorderControls
               controlPort={port}
@@ -126,14 +134,6 @@ it('keeps OFF recorder power in its own Options row while recording remains disa
               enabled={false}
               channels={2}
               onChannelsChange={vi.fn()}
-              optionsActions={
-                <NodePowerToggle
-                  enabled={false}
-                  disabled={false}
-                  label="Enable Recorder"
-                  onChange={onPower}
-                />
-              }
             />
           }
         />
@@ -142,9 +142,10 @@ it('keeps OFF recorder power in its own Options row while recording remains disa
   );
   const record = await screen.findByRole('button', { name: 'Record' });
   expect(record).toBeDisabled();
-  const power = screen.getByRole('switch', { name: 'Enable Recorder' });
+  const power = screen.getByRole('button', { name: 'Enable Recorder' });
   const options = screen.getByRole('button', { name: 'Options' });
-  expect(options.parentElement).toContainElement(power);
+  expect(options.parentElement).not.toContainElement(power);
+  expect(power.closest('[data-header-actions]')).toBeInTheDocument();
   expect(power.closest('[inert]')).toBeNull();
   fireEvent.click(power);
   fireEvent.click(record);

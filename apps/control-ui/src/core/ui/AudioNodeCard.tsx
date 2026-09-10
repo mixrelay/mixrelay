@@ -18,7 +18,7 @@ import {
   channelRowMetrics,
 } from './audioNodeLayout';
 import { Meter } from './Meter';
-import { NodeOptionsRow, NodeOptionsSection } from './NodeOptionsSection';
+import { NodeOptionsSection } from './NodeOptionsSection';
 import { useNodeOptionsState } from './nodeOptionsState';
 import { ProcessorTimingLabel } from './ProcessorTimingLabel';
 import type { StatusTone } from './StatusBadge';
@@ -51,7 +51,7 @@ export interface EndpointControl {
 }
 
 export interface AudioNodeCardProps {
-  optionsActions?: ReactNode;
+  headerActions?: ReactNode;
   muteControl?: ReactNode;
   poweredOff?: boolean;
   processingTimeNs?: number;
@@ -108,7 +108,7 @@ export interface AudioNodeCardProps {
 }
 
 export function AudioNodeCard({
-  optionsActions,
+  headerActions,
   muteControl,
   poweredOff = false,
   processingTimeNs,
@@ -177,7 +177,8 @@ export function AudioNodeCard({
       data-offline={offline || undefined}
       data-powered-off={poweredOff}
       data-endpoint-options={hasEndpointControl || undefined}
-      data-has-options={hasOptions || Boolean(optionsActions) || undefined}
+      data-has-options={hasOptions || undefined}
+      data-header-actions={Boolean(headerActions)}
       data-metered={meterChannels > 0 || undefined}
       data-meter-actions={Boolean(levelMute) || undefined}
       data-inline-controls={Boolean(content) || faceMode === 'channel-rows' || undefined}
@@ -207,6 +208,7 @@ export function AudioNodeCard({
         statusTone={statusTone}
         title={title}
       />
+      <NodeHeaderActions actions={headerActions} />
       <NodeLevelMute control={levelMute} faceMode={faceMode} placement="face" />
       <AudioNodeControls content={content} faceMode={faceMode} measureRef={contentRef}>
         <NodeLevelMute control={levelMute} faceMode={faceMode} placement="settings" />
@@ -214,7 +216,6 @@ export function AudioNodeCard({
           <ProcessorEditorOption control={processorEditor} onRetry={onProcessorEditorRetry} />
         </div>
         <NodeOptions
-          actions={optionsActions}
           muteControl={hasGainControl ? muteControl : undefined}
           disabled={poweredOff}
           endpointControl={endpointControl}
@@ -232,6 +233,10 @@ export function AudioNodeCard({
       <NodePortOverlays inputCount={inputCount} outputCount={outputCount} visible={showPorts} />
     </Paper>
   );
+}
+
+function NodeHeaderActions({ actions }: { actions?: ReactNode }) {
+  return actions ? <div className={styles.headerActions}>{actions}</div> : null;
 }
 
 function nodeOptionsAvailability(
@@ -460,7 +465,6 @@ function NodeStatus({ status, tone }: { status?: string; tone?: StatusTone }) {
 }
 
 function NodeOptions({
-  actions,
   muteControl,
   disabled,
   endpointControl,
@@ -474,7 +478,6 @@ function NodeOptions({
   opened,
   parameterControls,
 }: {
-  actions?: ReactNode;
   muteControl?: ReactNode;
   disabled: boolean;
   endpointControl?: EndpointControl;
@@ -488,7 +491,7 @@ function NodeOptions({
   opened: boolean;
   parameterControls: NonNullable<AudioNodeCardProps['parameterControls']>;
 }) {
-  if (!hasOptions) return <NodeOptionsRow actions={actions} />;
+  if (!hasOptions) return null;
   const controls = (
     <>
       {endpointControl && onEndpointChange ? (
@@ -518,12 +521,9 @@ function NodeOptions({
     </>
   );
   return parameterControls.length > 0 ? (
-    <>
-      <div className={`${styles.optionsPanel} nodrag nopan nowheel`}>{controls}</div>
-      <NodeOptionsRow actions={actions} />
-    </>
+    <div className={`${styles.optionsPanel} nodrag nopan nowheel`}>{controls}</div>
   ) : (
-    <NodeOptionsSection label={label} opened={opened} onToggle={onToggle} actions={actions}>
+    <NodeOptionsSection label={label} opened={opened} onToggle={onToggle}>
       {controls}
     </NodeOptionsSection>
   );

@@ -1288,7 +1288,7 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
       <AudioNodeCard
         {...graphNode.appearance}
         content={renderNodeContent?.(graphNode)}
-        optionsActions={controls?.power}
+        headerActions={controls?.power}
         muteControl={controls?.mute}
         poweredOff={graphNode.runtime?.control?.enabled === false}
         faceHeight={layout.face.height}

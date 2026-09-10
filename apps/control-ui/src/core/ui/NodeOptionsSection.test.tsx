@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { MixRelayProvider } from '../theme/MixRelayProvider';
 import { AudioNodeCard, type AudioNodeCardProps } from './AudioNodeCard';
-import { NodeMuteButton, NodePowerToggle } from './NodeSignalControls';
+import { NodeMuteButton, NodePowerButton } from './NodeSignalControls';
 
 function node(props: Partial<AudioNodeCardProps> = {}) {
   const onPower = vi.fn();
@@ -17,8 +17,8 @@ function node(props: Partial<AudioNodeCardProps> = {}) {
         outputCount={2}
         onSelect={vi.fn()}
         poweredOff
-        optionsActions={
-          <NodePowerToggle
+        headerActions={
+          <NodePowerButton
             enabled={false}
             disabled={false}
             label="Enable Gain"
@@ -35,23 +35,25 @@ function node(props: Partial<AudioNodeCardProps> = {}) {
   return { onPower, onMute };
 }
 
-it('keeps power beside Options and mute beside the volume slider, both usable while OFF', () => {
+it('keeps header power and volume mute independent of Options and usable while OFF', () => {
   const { onPower, onMute } = node({
     gainControl: { label: 'Level', valueDb: 0 },
     onGainChange: vi.fn(),
   });
   const options = screen.getByRole('button', { name: 'Options' });
-  const power = screen.getByRole('switch', { name: 'Enable Gain' });
+  const power = screen.getByRole('button', { name: 'Enable Gain' });
   expect(screen.queryByRole('button', { name: 'Mute Gain' })).toBeNull();
-  expect(options.parentElement).toContainElement(power);
+  expect(options.parentElement).not.toContainElement(power);
+  expect(power.closest('[data-header-actions]')).toBeInTheDocument();
   expect(power.closest('button')).toBe(power);
+  expect(power.parentElement?.closest('button')).toBeNull();
   expect(power.closest('[inert]')).toBeNull();
   fireEvent.click(power);
   expect(onPower).toHaveBeenCalledOnce();
   expect(options).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(options);
   const mute = screen.getByRole('button', { name: 'Mute Gain' });
-  expect(options.parentElement).not.toContainElement(mute);
+  expect(options).not.toContainElement(mute);
   expect(mute.parentElement).toContainElement(screen.getByRole('slider'));
   expect(screen.getByRole('slider')).toHaveAttribute('data-disabled');
   expect(mute.closest('[inert]')).toBeNull();
@@ -59,13 +61,13 @@ it('keeps power beside Options and mute beside the volume slider, both usable wh
   expect(onMute).toHaveBeenCalledOnce();
   expect(power.closest('[inert]')).toBeNull();
   fireEvent.click(options);
-  expect(screen.getAllByRole('switch', { name: 'Enable Gain' })).toHaveLength(1);
+  expect(screen.getAllByRole('button', { name: 'Enable Gain' })).toHaveLength(1);
 });
 
 it('provides controls without a meaningless disclosure when the node has no settings', () => {
   const { onPower } = node({ faceMode: 'compact' });
   expect(screen.queryByRole('button', { name: 'Options' })).toBeNull();
-  fireEvent.click(screen.getByRole('switch', { name: 'Enable Gain' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Enable Gain' }));
   expect(onPower).toHaveBeenCalledOnce();
 });
 
@@ -79,5 +81,5 @@ it('shows generic plugin parameters directly and leaves power outside their disa
   });
   expect(screen.queryByRole('button', { name: 'Options' })).toBeNull();
   expect(screen.getByRole('slider').closest('[inert]')).not.toBeNull();
-  expect(screen.getByRole('switch', { name: 'Enable Gain' }).closest('[inert]')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Enable Gain' }).closest('[inert]')).toBeNull();
 });

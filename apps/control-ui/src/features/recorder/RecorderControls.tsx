@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   ControlPort,
@@ -24,7 +24,6 @@ const encodings: { value: RecorderEncoding; label: string }[] = [
 ];
 
 export function RecorderControls(props: {
-  optionsActions?: ReactNode;
   controlPort: ControlPort;
   graphId: string;
   nodeId: string;
@@ -79,7 +78,6 @@ export function RecorderControls(props: {
       </div>
       <RecorderError error={snapshot.error ?? picker.error} />
       <NodeOptionsSection
-        actions={props.optionsActions}
         disabled={props.poweredOn === false}
         label={t('routing.nodes.options')}
         opened={optionsOpened}

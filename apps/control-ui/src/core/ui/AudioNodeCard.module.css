@@ -28,6 +28,15 @@
   opacity: 0.48;
 }
 
+.headerActions {
+  position: absolute;
+  top: 1px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  height: 26px;
+}
+
 .button {
   display: grid;
   grid-template-rows: 26px minmax(0, 1fr) 23px;
@@ -96,6 +105,10 @@
   min-width: 0;
   align-items: center;
   border-bottom: 1px solid var(--line);
+}
+
+.root[data-header-actions="true"] .topLine {
+  padding-right: 32px;
 }
 
 .icon {
@@ -254,34 +267,15 @@
   cursor: default;
 }
 
-.optionsRow {
-  display: flex;
-  min-height: 24px;
-  align-items: center;
-  border-top: 1px solid var(--line);
-  padding-right: 12px;
-}
-
-.optionsRow:has(+ .optionsPanel) {
-  padding-right: 6px;
-}
-
-.optionsActions {
-  display: flex;
-  align-items: center;
-  height: 24px;
-  flex: 0 0 auto;
-  margin-left: auto;
-}
-
 .root .optionsToggle {
   display: flex;
-  flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
-  height: 24px;
+  height: 25px;
   align-items: center;
   gap: 5px;
   padding: 0 var(--node-inset);
+  border-top: 1px solid var(--line);
   color: var(--muted);
   font: 500 9px / 1 var(--mantine-font-family);
   text-align: left;

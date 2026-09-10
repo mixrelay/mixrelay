@@ -16,16 +16,16 @@ existing ownership boundaries.
 | Recorder | Finalize the take and stop capture; ON does not restart recording | Continue recording, writing silence at the input boundary |
 
 Internal device buses and native transport nodes are not exposed as user controls.
-The node Options row contains a 22x12px pill power switch in a 26x24px hit area,
-vertically centered with the disclosure. Closed rows reserve 12px at the right
-edge for the 10px corner resize grip; expanded rows use 6px right padding.
+The node title row contains a 14px power icon in a 20x20px button at its right
+edge. It is a sibling of the face button, not an interactive element nested in it;
+the title reserves 32px so long names do not overlap the control.
 Mute sits beside the gain slider, or beside the meters when no gain control exists.
 Compact plug-ins place mute in their level-control area. Power and mute remain
-independent of disabled gain/parameter controls. Recorder power uses its own Options
-row. Nodes without settings use a power-only row; generic plug-in parameters stay
+independent of disabled gain/parameter controls. Recorder power uses the same card
+header. Nodes without settings have no Options footer; generic plug-in parameters stay
 visible without a disclosure. Commands share the current graph writer and capability
 discovery. No hardware plug-in or external settings window is included.
-Power uses a low-saturation green. Base cables use gray-teal at 1.5px and selected
+Enabled power uses the shared positive color. Base cables use gray-teal at 1.5px and selected
 cables use a lighter 2px stroke. These are base/selection colors only; the current
 UI does not yet expose PCM-conversion classification on cables.
 Each canvas permits one open Options disclosure across regular and recorder nodes.
@@ -214,24 +214,19 @@ launchd runs=2 only after explicit app launch). Ready status remained 48 kHz /
 New Graph row and visible collapsed chevron, and clicking that chevron restored
 the three-item list. The app was left open with the graph list expanded.
 
-### Node power and mute UI verification
+### Header power UI verification (2026-09-11)
 
-- Changed-boundary UI/API tests: 10 files / 101 tests passed. Biome, type checking,
-  UI boundaries, `cargo fmt --all --check`, desktop strict Clippy, and 37 desktop
-  tests passed. Normal debug app bundle built successfully; Vite's large-chunk
-  advisory remains (856.44 kB minified JS).
-- Native app screenshot verified pill power switches centered in Options rows,
-  microphone mute beside its gain slider, and recorder/output mute beside meters.
-  All switches keep clearance from the resize grip.
-- The recorder pill switched OFF to ON and back to OFF, with Record becoming
-  enabled then disabled. Its disclosure stayed folded; no recording was started.
-  The microphone Options panel was left open to show the gain/mute arrangement.
-- Meter mute positioning uses a separate measured face height without changing
-  minimum geometry. Independent source review checked the resize calculation;
-  a live tall-node resize was not exercised in this pass.
-- Before reopening the new bundle, keyboard Quit left no desktop/engine process
-  or port 19341 listener. The new app was left running with the original node
-  power and mute values restored.
+- Changed-boundary tests: 5 files / 70 tests passed. Biome, type checking, UI
+  boundaries, and the normal debug app build passed. Existing Vite chunk advisory
+  remains (855.89 kB minified JS). Rust source is unchanged; desktop fmt, Clippy,
+  and native tests were not repeated in this frontend-only pass.
+- The installed app shows power icons at the right of microphone, recorder, and
+  headphone titles. Mute remains beside gain or meters. Nodes without settings
+  have no empty Options footer. Buttons are outside the face button and inert panels.
+- Recorder header power switched ON to OFF and back to ON; Record became disabled
+  then enabled. Options stayed closed, and no recording started. The app remains
+  open with the original power/mute states and buffer size 32.
+- Normal Quit before reopening left no desktop/engine process or port 19341 listener.
 
 ### Final UI pass
 

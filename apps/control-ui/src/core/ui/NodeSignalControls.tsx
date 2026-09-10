@@ -1,6 +1,6 @@
 import styles from './NodeSignalControls.module.css';
 
-export function NodePowerToggle(props: {
+export function NodePowerButton(props: {
   enabled: boolean;
   disabled: boolean;
   label: string;
@@ -9,19 +9,19 @@ export function NodePowerToggle(props: {
   return (
     <button
       type="button"
-      role="switch"
-      className={`${styles.power} nodrag nopan`}
+      className={`${styles.button} nodrag nopan`}
       aria-label={props.label}
-      aria-checked={props.enabled}
+      aria-pressed={props.enabled}
+      data-action="power"
       disabled={props.disabled}
       onClick={(event) => {
         event.stopPropagation();
         props.onChange();
       }}
     >
-      <span className={styles.track} aria-hidden="true">
-        <span className={styles.thumb} />
-      </span>
+      <svg aria-hidden="true" viewBox="0 0 20 20">
+        <path d="M10 2v8M5 4.5a7 7 0 1 0 10 0" />
+      </svg>
     </button>
   );
 }
