@@ -6,7 +6,7 @@ pub use editor_surface::{EditorPointerKind, ProcessorEditorFrame, ProcessorEdito
 pub use mixrelay_audio_recorder::{RecorderRequest, RecorderStatus};
 pub use node_control::{
     GraphNodeControls, NodeControlCapabilities, NodeControlDescriptor, NodeControlRequest,
-    RecorderControlRequest,
+    ObservedRecording, RecorderControlRequest,
 };
 pub use workspace::{WorkspaceAction, WorkspacePreview, WorkspaceRequest};
 
@@ -146,12 +146,25 @@ pub struct GraphLayoutResponse {
     pub layout: GraphLayout,
 }
 
+/// Catalog edits fenced by both the execution and catalog revisions in the request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum GraphCatalogAction {
-    Create { name: String },
-    Select { id: String },
-    Rename { id: String, name: String },
+    Create {
+        name: String,
+    },
+    Select {
+        id: String,
+    },
+    Rename {
+        id: String,
+        name: String,
+    },
+    /// Removes one authored graph and its execution owners. The final removal creates
+    /// a new empty graph with a fresh identity, never reusing the removed target.
+    Delete {
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

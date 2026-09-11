@@ -17,6 +17,7 @@ mod recovery;
 mod retirement;
 mod spec;
 mod worker;
+mod worker_retirement;
 use aggregate::Aggregate;
 #[cfg(test)]
 use bridge::DeviceBridge;
@@ -170,6 +171,15 @@ pub(super) struct MacDevices {
     hardware_clock: AtomicBool,
 }
 impl MacDevices {
+    /// All graph/device owners must be dropped before this final process drain.
+    pub(super) fn finish_retirement() -> Result<(), String> {
+        let result = worker_retirement::WORKERS.finish();
+        while Aggregate::active_owners() != 0 {
+            Aggregate::reclaim_retired();
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        result
+    }
     pub(super) fn has_pending(&self) -> bool {
         self.handoff.has_pending()
     }
@@ -186,24 +196,37 @@ impl MacDevices {
         }
     }
     pub(super) fn reclaim(&self) {
-        let Ok(mut cache) = self.cache.try_lock() else {
+        worker_retirement::WORKERS.reclaim();
+        let Ok(_cache) = self.cache.try_lock() else {
             return;
         };
         self.handoff.reclaim();
+        Aggregate::reclaim_retired();
+    }
+
+    /// New native work belongs to the stoppable observer, never the reclaimer
+    /// that must remain alive while the audio worker is being joined.
+    pub(super) fn recover(&self, stop: &AtomicBool) {
+        if stop.load(Ordering::Acquire) {
+            return;
+        }
+        let Ok(mut cache) = self.cache.try_lock() else {
+            return;
+        };
         // Membership, rate changes and hotplug are reconciled off the DSP
         // thread. Preparation is transactional: old owners remain published
         // until an entire replacement set is ready, and invalid callbacks mute.
         let Ok(mut next) = self.next_group_check.try_lock() else {
             return;
         };
-        if !self.handoff.idle()
+        if stop.load(Ordering::Acquire)
+            || !self.handoff.idle()
             || (Instant::now() < *next && !self.recovery_requested.load(Ordering::Acquire))
         {
             return;
         }
         self.recovery_requested.store(false, Ordering::Release);
         *next = Instant::now() + Duration::from_secs(2);
-        Aggregate::reclaim_retired();
         let desired = cache
             .iter()
             .map(|(id, (spec, _))| (id.clone(), spec.clone()))
@@ -279,8 +302,9 @@ impl GraphResourceBackend for MacDevices {
     }
     fn device_inventory(
         &self,
+        selectors: &[&mixrelay_audio_io::DeviceSelector],
     ) -> Result<Vec<mixrelay_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
-        mixrelay_audio_io::macos::devices()
+        mixrelay_audio_io::macos::selected_devices(selectors.iter().copied())
     }
 
     fn resolve_application_capture(

@@ -28,10 +28,6 @@ impl GroupPlan {
         Self::inspect(members, Self::read_member)
     }
 
-    pub(super) fn member(uid: &str) -> Option<MemberInfo> {
-        Self::read_member(&CString::new(uid).ok()?)
-    }
-
     fn read_member(uid: &CString) -> Option<MemberInfo> {
         let mut info = MemberInfo::default();
         // SAFETY: the native call borrows a NUL-terminated UID and writes

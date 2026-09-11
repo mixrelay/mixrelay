@@ -19,13 +19,21 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2.11.5", features = ["tray-icon"] }
-tokio.workspace = true
+tokio = { workspace = true, features = ["io-util", "sync", "time"] }
 tracing = "0.1.41"
 mixrelay-audio-io = { path = "../../../crates/audio-io" }
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Typed AppKit termination hook; the existing Tauri delegate remains the owner.
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSResponder"] }
 mixrelay-macos-transport = { path = "../../../native/macos/common" }
 mixrelay-process-tap = { path = "../../../native/macos/process-tap" }
 mixrelay-audio-graph = { path = "../../../crates/audio-graph" }
 mixrelay-control-protocol = { path = "../../../crates/control-protocol" }
+
+[dev-dependencies]
+# Virtual time exercises delayed native shutdown without sleeping in tests.
+tokio = { workspace = true, features = ["test-util"] }
+mixrelay-test-support = { path = "../../../crates/test-support" }

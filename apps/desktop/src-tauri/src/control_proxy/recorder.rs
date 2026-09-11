@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use super::{ControlProxyClient, ControlProxyResponse, percent_encode_path_segment};
 
-fn route(graph_id: &str, node_id: &str) -> String {
+pub(super) fn route(graph_id: &str, node_id: &str) -> String {
     format!(
         "/api/v1/graphs/{}/recorders/{}",
         percent_encode_path_segment(graph_id),

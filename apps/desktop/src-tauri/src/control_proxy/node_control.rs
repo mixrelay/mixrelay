@@ -1,6 +1,6 @@
 use super::{ControlProxyClient, ControlProxyResponse, Method, Value};
 
-fn route(graph_id: &str, node_id: Option<&str>) -> Result<String, String> {
+pub(super) fn route(graph_id: &str, node_id: Option<&str>) -> Result<String, String> {
     let mut url = reqwest::Url::parse(super::CONTROL_ORIGIN).map_err(|error| error.to_string())?;
     let mut segments = url
         .path_segments_mut()
@@ -39,14 +39,44 @@ pub(crate) async fn control_update_node_control(
     node_id: String,
     request: Value,
 ) -> Result<ControlProxyResponse, String> {
-    let route = route(&graph_id, Some(&node_id))?;
     #[cfg(target_os = "macos")]
     {
-        let _guard = client.capture_gate.lock().await;
-        super::application_capture::node_control(&client, captures.inner(), route, request).await
+        client
+            .update_node_control(captures.inner(), &graph_id, &node_id, request)
+            .await
     }
     #[cfg(not(target_os = "macos"))]
-    client.request(Method::PUT, &route, Some(request)).await
+    client
+        .request(
+            Method::PUT,
+            &route(&graph_id, Some(&node_id))?,
+            Some(request),
+        )
+        .await
+}
+
+#[cfg(target_os = "macos")]
+impl ControlProxyClient {
+    /// Shared UI/local-controller entry point. Busy commands are rejected, never queued
+    /// for later execution against a graph the caller is no longer observing.
+    pub(super) async fn update_node_control(
+        &self,
+        captures: &std::sync::Arc<crate::macos_audio::ApplicationCaptureState>,
+        graph_id: &str,
+        node_id: &str,
+        request: Value,
+    ) -> Result<ControlProxyResponse, String> {
+        let Ok(_guard) = self.capture_gate.try_lock() else {
+            return Ok(super::rejected("graph_exchange_busy"));
+        };
+        super::application_capture::node_control(
+            self,
+            captures,
+            route(graph_id, Some(node_id))?,
+            request,
+        )
+        .await
+    }
 }
 
 #[cfg(test)]

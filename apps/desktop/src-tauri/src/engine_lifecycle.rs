@@ -3,7 +3,7 @@ use std::{
         Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use mixrelay_macos_transport::app_lifecycle::{
@@ -60,15 +60,11 @@ impl EngineLifecycle {
         if self.quitting.swap(true, Ordering::AcqRel) {
             return;
         }
-        let Ok(mut owner) = self.owner.lock() else {
-            self.quitting.store(false, Ordering::Release);
-            tracing::error!("desktop lifecycle ownership lock failed; exit was not confirmed");
-            return;
-        };
-        owner.take();
+        app.state::<crate::control_proxy::ControlProxyClient>()
+            .close_admission();
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
-            match wait_for_engine_exit().await {
+            match finish_local_controls(&app).await {
                 Ok(warning) => {
                     if let Some(warning) = warning {
                         rfd::AsyncMessageDialog::new()
@@ -97,6 +93,21 @@ impl EngineLifecycle {
     }
 }
 
+async fn finish_local_controls(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    app.state::<crate::control_proxy::local::socket::LocalSocket>()
+        .shutdown()
+        .await?;
+    app.state::<crate::control_proxy::ControlProxyClient>()
+        .drain()
+        .await?;
+    app.state::<EngineLifecycle>()
+        .owner
+        .lock()
+        .map_err(|_| "desktop lifecycle ownership lock failed".to_owned())?
+        .take();
+    wait_for_engine_exit(app).await
+}
+
 fn validate_installation() -> Result<(), String> {
     let output = std::process::Command::new("/usr/bin/plutil")
         .args([
@@ -123,22 +134,50 @@ fn is_app_owned_configuration(config: &serde_json::Value) -> bool {
         && config["MachServices"]["io.mixrelay.audio.engine"] == true
 }
 
-async fn wait_for_engine_exit() -> Result<Option<String>, String> {
-    let deadline = Instant::now() + Duration::from_secs(30);
+enum ExitObservation {
+    Pending,
+    Stopped(String),
+}
+
+async fn observe_engine_exit() -> Result<ExitObservation, String> {
+    let owned = is_owned(ENGINE_LEASE).map_err(|error| error.to_string())?;
+    let connected = tokio::time::timeout(
+        Duration::from_millis(250),
+        tokio::net::TcpStream::connect("127.0.0.1:19341"),
+    )
+    .await
+    .is_ok_and(|result| result.is_ok());
+    if owned || connected {
+        return Ok(ExitObservation::Pending);
+    }
+    engine_exit_record()
+        .map(ExitObservation::Stopped)
+        .map_err(|error| error.to_string())
+}
+
+async fn wait_for_engine_exit(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    await_engine_exit(observe_engine_exit, || {
+        tracing::warn!("waiting for native audio server teardown; exit remains pending");
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.set_title("MixRelay — 오디오 서버 종료 중");
+        }
+    })
+    .await
+}
+
+async fn await_engine_exit(
+    mut observe: impl AsyncFnMut() -> Result<ExitObservation, String>,
+    mut waiting: impl FnMut(),
+) -> Result<Option<String>, String> {
+    let notice_at = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut notified = false;
     loop {
-        let owned = is_owned(ENGINE_LEASE).map_err(|error| error.to_string())?;
-        let connected = tokio::time::timeout(
-            Duration::from_millis(250),
-            tokio::net::TcpStream::connect("127.0.0.1:19341"),
-        )
-        .await
-        .is_ok_and(|result| result.is_ok());
-        if !owned && !connected {
-            let record = engine_exit_record().map_err(|error| error.to_string())?;
+        if let ExitObservation::Stopped(record) = observe().await? {
             return Ok(exit_warning(&record));
         }
-        if Instant::now() >= deadline {
-            return Err("오디오 서버가 아직 종료 중입니다. 녹음 마무리와 장치 해제를 기다리고 있습니다. 완료되기 전에는 앱을 종료하지 않았습니다.".into());
+        if !notified && tokio::time::Instant::now() >= notice_at {
+            notified = true;
+            waiting();
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -157,6 +196,37 @@ fn exit_warning(record: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn slow_native_exit_completes_without_a_second_quit_request() {
+        let start = tokio::time::Instant::now();
+        let mut notices = 0;
+        let warning = await_engine_exit(
+            async || {
+                Ok(if start.elapsed() < Duration::from_secs(65) {
+                    ExitObservation::Pending
+                } else {
+                    ExitObservation::Stopped("stopped".into())
+                })
+            },
+            || notices += 1,
+        )
+        .await
+        .unwrap();
+        assert!(warning.is_none());
+        assert_eq!(notices, 1);
+        assert!(start.elapsed() >= Duration::from_secs(65));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn exit_probe_failure_is_not_reported_as_a_stopped_engine() {
+        let result = await_engine_exit(
+            async || Err("lease inaccessible".into()),
+            || panic!("immediate error needs no delayed notice"),
+        )
+        .await;
+        assert_eq!(result, Err("lease inaccessible".into()));
+    }
 
     #[test]
     fn unfinished_or_failed_record_is_not_reported_as_clean_shutdown() {

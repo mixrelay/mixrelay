@@ -14,7 +14,7 @@ use std::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     },
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 pub(super) struct Device {
     pub(super) identity: u64,
@@ -75,7 +75,7 @@ impl Device {
             .name("mixrelay-coreaudio-device".into())
             .spawn(move || context.run(&tx))
             .map_err(|e| e.to_string())?;
-        let mut result = Self {
+        let result = Self {
             identity: NEXT_DEVICE_EPOCH.fetch_add(1, Ordering::Relaxed),
             native,
             channels: usize::from(spec.channels),
@@ -96,13 +96,8 @@ impl Device {
             Ok(Ok(())) => Ok(result),
             error => {
                 result.stop.store(true, Ordering::Release);
-                // A blocked vendor call is not cancellable. The detached failed
-                // startup retains its own Arc and frees it when the call returns.
-                if error.is_err()
-                    && let Some(worker) = result.worker.take()
-                {
-                    worker.thread().unpark();
-                }
+                // Drop transfers the worker to tracked retirement; a timeout
+                // cannot cancel a native call or release its callback allocation.
                 Err(format!("CoreAudio device initialization failed: {error:?}"))
             }
         }
@@ -140,21 +135,7 @@ impl Drop for Device {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
         if let Some(worker) = self.worker.take() {
-            worker.thread().unpark();
-            let deadline = Instant::now() + Duration::from_secs(2);
-            while !worker.is_finished() && Instant::now() < deadline {
-                thread::sleep(Duration::from_millis(10));
-            }
-            if worker.is_finished() {
-                let _ = worker.join();
-            } else {
-                eprintln!(
-                    "CoreAudio device owner quarantined: native shutdown exceeded 2 seconds; retaining registered callback storage until teardown succeeds"
-                );
-            }
-            // A vendor call or failed unregister cannot safely be cancelled.
-            // The existing worker retains Native until teardown succeeds; no
-            // new worker or graph node is created by this quarantined owner.
+            super::worker_retirement::WORKERS.retire(worker);
         }
     }
 }

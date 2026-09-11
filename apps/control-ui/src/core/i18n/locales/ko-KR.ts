@@ -102,6 +102,9 @@ export const koKR = {
     ready: '준비됨',
   },
   studio: {
+    deleteGraph: '그래프 삭제',
+    deleteGraphNotice:
+      '“{{name}}” 그래프를 삭제할까요? 이 그래프의 오디오 처리와 녹음이 종료됩니다. 되돌릴 수 없으며, 저장해 둔 작업 공간 파일은 삭제하지 않습니다.',
     catalogUnavailable: '저장된 그래프를 불러올 수 없습니다. 기존 그래프는 유지됩니다.',
     reloadGraphs: '그래프 다시 불러오기',
     graphSaveFailed:

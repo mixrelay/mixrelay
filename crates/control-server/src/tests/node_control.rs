@@ -20,6 +20,7 @@ pub(super) fn discovery(graph_id: &str) -> GraphNodeControls {
             label: None,
             kind: "gain".into(),
             control: NodeControl::default(),
+            gain_db: Some(0.0),
             capabilities: NodeControlCapabilities {
                 power: true,
                 mute: true,
@@ -89,7 +90,8 @@ async fn update_and_preview_forward_identical_explicit_targets() {
                 request: NodeControlRequest {
                     expected_revision: 7,
                     enabled: Some(false),
-                    muted: Some(true)
+                    muted: Some(true),
+                    gain_db: None,
                 },
             })
         );

@@ -184,7 +184,10 @@ it('shows native parameter rejection, keeps the draft and blocks workspace mutat
   await screen.findByText('The audio control request failed.');
   expect(screen.getByTestId('parameter-value')).toHaveTextContent('0.2');
   expect(busy).toHaveBeenLastCalledWith(true);
-  expect(screen.getByText('Not applied')).toBeInTheDocument();
+  expect(view.container.querySelector('section[data-state]')).toHaveAttribute(
+    'data-state',
+    'blocked',
+  );
   expect(apply).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
   await waitFor(() => expect(busy).toHaveBeenLastCalledWith(false));
@@ -236,7 +239,10 @@ it('refuses structural graph application while a native parameter failure remain
   await waitFor(() => expect(getGraph).toHaveBeenCalledTimes(1));
   expect(apply).not.toHaveBeenCalled();
   expect(screen.getByTestId('parameter-value')).toHaveTextContent('0.2');
-  expect(screen.getByText('Not applied')).toBeInTheDocument();
+  expect(view.container.querySelector('section[data-state]')).toHaveAttribute(
+    'data-state',
+    'blocked',
+  );
   view.unmount();
 });
 

@@ -26,6 +26,7 @@ import { RetryAlert } from '../../core/ui/RetryAlert';
 import { WorkspaceHeader } from '../../core/ui/WorkspaceHeader';
 import { RecorderControls } from '../recorder/RecorderControls';
 import { applicationItemId } from './applicationIdentity';
+import { controlChanges, rebaseControls } from './controlReconciliation';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { graphHistoryGroup } from './graphHistoryGroup';
 import { presentHardwareNodeStatus } from './hardwareNodeStatus';
@@ -297,6 +298,7 @@ function useWorkspaceGraph(
   presentation: GraphPresentation,
   processors: readonly ExternalProcessorDescriptor[],
   sessionDocument?: RuntimeGraphDocument,
+  graphId?: string,
 ) {
   const [document, setDocument] = useState<RuntimeGraphDocument | null>(null);
   const [model, setModel] = useState<AudioGraphModel | null>(null);
@@ -355,6 +357,7 @@ function useWorkspaceGraph(
     };
   }, [controlPort, sessionDocument]);
   return {
+    graphId,
     document,
     errorCode,
     persistenceError,
@@ -443,18 +446,22 @@ function useGraphApplication(
   presentation: GraphPresentation,
   processors: readonly ExternalProcessorDescriptor[],
   graph: ReturnType<typeof useWorkspaceGraph>,
-  clearHistory: () => void,
+  history: {
+    clear: () => void;
+    rebase: (transform: (model: AudioGraphModel) => AudioGraphModel) => void;
+  },
   currentModel: { current: AudioGraphModel | null },
   parameters: Pick<
     ReturnType<typeof useProcessorParameterPublisher>,
     'whenIdle' | 'discardFailures'
   >,
 ) {
-  const latest = useRef({ presentation, processors, graph, clearHistory });
-  latest.current = { presentation, processors, graph, clearHistory };
+  const latest = useRef({ presentation, processors, graph, history });
+  latest.current = { presentation, processors, graph, history };
   const queue = useMemo(
     () =>
       new GraphApplicationQueue(controlPort, {
+        getGraphId: () => latest.current.graph.graphId,
         beforeApply: parameters.whenIdle,
         beforeReload: async () => {
           try {
@@ -471,6 +478,16 @@ function useGraphApplication(
         error: (code) => latest.current.graph.setErrorCode(code),
         persistenceWarning: (code) => latest.current.graph.setPersistenceError(code),
         state: (state) => latest.current.graph.setState(state),
+        reconcile: (before, document) => {
+          const changes = controlChanges(before, document);
+          const model = currentModel.current;
+          if (!changes || !model) return false;
+          latest.current.history.rebase((entry) => rebaseControls(entry, changes));
+          const next = { ...rebaseControls(model, changes), revision: document.revision };
+          currentModel.current = next;
+          latest.current.graph.setModel(next);
+          return true;
+        },
         restore: (document) => {
           const current = latest.current;
           const restored = runtimeGraphToAudioGraph(
@@ -491,7 +508,7 @@ function useGraphApplication(
           };
           currentModel.current = model;
           current.graph.setModel(model);
-          current.clearHistory();
+          current.history.clear();
           parameters.discardFailures();
         },
       }),
@@ -533,6 +550,7 @@ function useGraphUpdates(
   currentModel.current = model;
   const {
     clear: clearHistory,
+    rebase: rebaseHistory,
     flush: flushHistory,
     record,
     recordDebounced,
@@ -550,7 +568,7 @@ function useGraphUpdates(
     presentation,
     processors,
     graph,
-    clearHistory,
+    { clear: clearHistory, rebase: rebaseHistory },
     currentModel,
     parameters,
   );
@@ -689,7 +707,7 @@ export function RoutingWorkspace({
   const { inventory, applications, audioDevices, processorCatalog, processors, refresh } =
     useWorkspaceInventory(controlPort, menuOpened);
   const presentation = useGraphPresentation();
-  const graph = useWorkspaceGraph(controlPort, presentation, processors, sessionDocument);
+  const graph = useWorkspaceGraph(controlPort, presentation, processors, sessionDocument, graphId);
   useUnavailableGraphRecovery(controlPort, presentation, processors, graph);
   const { errorCode, model, state } = graph;
   const layout = useGraphLayout(controlPort, graphId, model, graph.setModel);

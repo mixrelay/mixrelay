@@ -269,11 +269,13 @@ mod tests {
         drop(group);
         assert!(weak.upgrade().is_some());
         drop(first);
+        super::super::worker_retirement::WORKERS.finish().unwrap();
         assert!(
             weak.upgrade().is_some(),
             "second registration still owns group"
         );
         drop(second);
+        super::super::worker_retirement::WORKERS.finish().unwrap();
         assert!(weak.upgrade().is_none());
         Aggregate::reclaim_retired();
         assert_eq!(GROUPS.in_use(), baseline);

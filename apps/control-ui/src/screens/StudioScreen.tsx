@@ -19,6 +19,7 @@ import { EnginePowerControl } from '../features/audio-session/EnginePowerControl
 import { useAudioStatus } from '../features/audio-session/useAudioStatus';
 import { useVirtualEndpointRate } from '../features/audio-session/useVirtualEndpointRate';
 import { GraphCreateDialog } from '../features/graphs/GraphCreateDialog';
+import { GraphList } from '../features/graphs/GraphList';
 import { useCatalogTitle, useGraphCatalog } from '../features/graphs/useGraphCatalog';
 import { WorkspaceFileMenu } from '../features/graphs/WorkspaceFileMenu';
 import { RoutingWorkspace } from '../features/routing-workspace/RoutingWorkspace';
@@ -246,21 +247,18 @@ function GraphSidebar({
       hidden={hidden}
     >
       <nav className={styles.graphList} aria-label={t('studio.graphs')}>
-        {catalog?.graphs.map((graph) => {
-          const selected = graph.id === catalog?.activeId;
-          return (
-            <button
-              aria-current={selected ? 'page' : undefined}
-              className={styles.graph}
-              key={graph.id}
-              disabled={disabled || selected}
-              onClick={() => onSelect(graph.id)}
-              type="button"
-            >
-              <span className={styles.graphName}>{graph.name}</span>
-            </button>
-          );
-        })}
+        {catalog ? (
+          <GraphList
+            catalog={catalog}
+            disabled={disabled}
+            busy={catalogBusy}
+            error={catalogErrorText}
+            onSelect={onSelect}
+            onDelete={(id) => {
+              if (!disabled) void collection.mutate({ action: 'delete', id });
+            }}
+          />
+        ) : null}
         {catalogError ? (
           <div role="alert">
             <p>{catalogErrorText}</p>

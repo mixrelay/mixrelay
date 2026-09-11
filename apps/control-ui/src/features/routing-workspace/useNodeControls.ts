@@ -22,7 +22,7 @@ export function useNodeControls(
     const receive = (result: GraphNodeControls | undefined) => {
       if (!canRead() || result?.graphId !== graphId) return;
       setSnapshot(result);
-      if (result.revision > latest.current.revision) application.reload();
+      if (result.revision > latest.current.revision) application.refresh();
     };
     const poll = async () => {
       try {

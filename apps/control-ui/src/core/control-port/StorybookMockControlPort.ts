@@ -19,7 +19,17 @@ import type {
   RecorderRequest,
   RecorderStatus,
   RuntimeGraphDocument,
+  RuntimeGraphNode,
 } from './types';
+
+function nodeGain(node: RuntimeGraphNode): number | undefined {
+  if (
+    !['gain', 'virtual_endpoint', 'audio_device_input', 'application_capture'].includes(node.type)
+  )
+    return undefined;
+  const config = node.config as { gainDb?: number } | null;
+  return config?.gainDb ?? 0;
+}
 
 export interface StorybookControlState {
   applications?: CapturableApplication[];
@@ -43,6 +53,7 @@ export class StorybookMockControlPort implements ControlPort {
         nodeId: node.id,
         label: node.label,
         kind: node.type,
+        gainDb: nodeGain(node),
         control: node.control ?? { enabled: true, muted: false },
         capabilities: { power: true, mute: true, recorder: node.type === 'recorder' },
       })),
@@ -53,12 +64,22 @@ export class StorybookMockControlPort implements ControlPort {
     nodeId: string,
     request: import('./types').NodeControlRequest,
   ): Promise<GraphApplyResponse> {
+    const target = this.state.graph.nodes.find((node) => node.id === nodeId);
     if (
       graphId !== this.activeGraphId ||
       request.expectedRevision !== this.state.graph.revision ||
       !this.state.graph.nodes.some((node) => node.id === nodeId)
     )
       throw new Error('graph_revision_stale');
+    if (
+      request.gainDb !== undefined &&
+      (!target ||
+        nodeGain(target) === undefined ||
+        !Number.isFinite(request.gainDb) ||
+        request.gainDb < -60 ||
+        request.gainDb > 12)
+    )
+      throw new Error('graph_invalid');
     return this.applyGraph({
       ...this.state.graph,
       revision: request.expectedRevision + 1,
@@ -66,6 +87,10 @@ export class StorybookMockControlPort implements ControlPort {
         node.id === nodeId
           ? {
               ...node,
+              config:
+                request.gainDb === undefined
+                  ? node.config
+                  : { ...(node.config as object), gainDb: request.gainDb },
               control: {
                 enabled: request.enabled ?? node.control?.enabled ?? true,
                 muted: request.muted ?? node.control?.muted ?? false,
@@ -155,7 +180,9 @@ export class StorybookMockControlPort implements ControlPort {
     ) {
       throw new Error('graph_revision_stale');
     }
-    if (request.action === 'rename') {
+    if (request.action === 'delete') {
+      await this.removeCatalogGraph(request.id);
+    } else if (request.action === 'rename') {
       const graph = this.savedGraphs.get(request.id);
       if (!graph) throw new Error('graph_invalid');
       graph.name = request.name;
@@ -180,6 +207,31 @@ export class StorybookMockControlPort implements ControlPort {
     }
     this.catalogRevision += 1;
     return this.getGraphCatalog();
+  }
+
+  private async removeCatalogGraph(id: string) {
+    const ids = Array.from(this.savedGraphs.keys());
+    const index = ids.indexOf(id);
+    if (index < 0) throw new Error('graph_invalid');
+    this.savedGraphs.delete(id);
+    ids.splice(index, 1);
+    if (!ids.length) {
+      const replacement = `graph-${this.catalogRevision + 1}`;
+      this.savedGraphs.set(replacement, {
+        name: 'Untitled Graph',
+        document: { schemaVersion: 2, revision: 0, nodes: [], edges: [] },
+      });
+      ids.push(replacement);
+    }
+    const nextId = ids[Math.min(index, ids.length - 1)];
+    if (!nextId) throw new Error('graph_invalid');
+    if (this.activeGraphId === id) this.activeGraphId = nextId;
+    const target = this.savedGraphs.get(this.activeGraphId);
+    if (!target) throw new Error('graph_invalid');
+    await this.applyGraph({
+      ...structuredClone(target.document),
+      revision: this.state.graph.revision + 1,
+    });
   }
 
   public async applyGraph(request: GraphApplyRequest): Promise<GraphApplyResponse> {

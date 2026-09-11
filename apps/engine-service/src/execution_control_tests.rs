@@ -192,3 +192,35 @@ fn self_device_routing_is_accepted_without_feedback_policy() {
     assert!(engine.exchange.activate_pending(&mut processor));
     assert_eq!(engine.endpoint_settings().unwrap().devices.len(), 1);
 }
+
+#[test]
+fn catalog_removal_keeps_shared_device_wiring_and_pcm_in_surviving_graph() {
+    let directory = mixrelay_test_support::FixtureDir::new("remove-shared-controller").unwrap();
+    let engine = crate::endpoint_settings_tests::controller(GraphDocument::new(1, vec![], vec![]))
+        .with_graph_catalog_path(directory.join("graphs.json"));
+    engine.apply_graph(graph_a(2)).unwrap();
+    let mut processor = crate::controller_test_support::settle(&engine);
+    select(
+        &engine,
+        GraphCatalogAction::Create {
+            name: "Keep".into(),
+        },
+    );
+    engine.apply_graph(graph_b(3)).unwrap();
+    assert!(engine.exchange.activate_pending(&mut processor));
+    assert_shared_pcm(&mut processor);
+    let before = engine.graph();
+    select(
+        &engine,
+        GraphCatalogAction::Delete {
+            id: "graph-1".into(),
+        },
+    );
+    assert!(engine.exchange.activate_pending(&mut processor));
+    assert_eq!(engine.graph().nodes, before.nodes);
+    assert_eq!(engine.graph().edges, before.edges);
+    assert_eq!(engine.endpoint_settings().unwrap().devices.len(), 2);
+    // Both duplex devices are still referenced by B. Their device-owned loopback
+    // survives deletion of A, as does B's explicit route between the devices.
+    assert_shared_pcm(&mut processor);
+}

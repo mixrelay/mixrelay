@@ -8,6 +8,8 @@ use std::sync::Arc;
 use crate::macos_audio::ApplicationCaptureState;
 #[cfg(target_os = "macos")]
 mod application_capture;
+#[cfg(target_os = "macos")]
+pub(crate) mod local;
 pub(crate) mod node_control;
 pub(crate) mod recorder;
 pub(crate) mod workspace;
@@ -50,12 +52,16 @@ pub(crate) struct ControlProxyClient {
     client: Client,
     #[cfg(target_os = "macos")]
     capture_gate: Arc<tauri::async_runtime::Mutex<()>>,
+    closing: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    requests: std::sync::Arc<tokio::sync::RwLock<()>>,
 }
 
 impl Default for ControlProxyClient {
     fn default() -> Self {
         Self {
             client: Client::new(),
+            closing: std::sync::Arc::default(),
+            requests: std::sync::Arc::default(),
             #[cfg(target_os = "macos")]
             capture_gate: Arc::default(),
         }
@@ -81,15 +87,36 @@ enum RequestDelivery {
 }
 
 impl ControlProxyClient {
+    pub(crate) fn close_admission(&self) {
+        self.closing
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) async fn drain(&self) -> Result<(), String> {
+        tokio::time::timeout(std::time::Duration::from_secs(35), async {
+            // Same order as capture-aware commands: preparation, then HTTP admission.
+            let _capture = self.capture_gate.lock().await;
+            let _requests = self.requests.write().await;
+        })
+        .await
+        .map_err(|_| "Controls are still finishing; audio ownership was retained.".to_owned())
+    }
+
     async fn request(
         &self,
         method: Method,
         path: &str,
         body: Option<Value>,
     ) -> Result<ControlProxyResponse, String> {
+        let _admission = self.requests.read().await;
+        if self.closing.load(std::sync::atomic::Ordering::Acquire) {
+            return Ok(rejected("control_unavailable"));
+        }
         let mut request = self
             .client
-            .request(method, format!("{CONTROL_ORIGIN}{path}"));
+            .request(method, format!("{CONTROL_ORIGIN}{path}"))
+            .timeout(std::time::Duration::from_secs(30));
         if let Some(body) = body {
             request = request.json(&body);
         }
@@ -128,6 +155,15 @@ impl ControlProxyClient {
             #[cfg(target_os = "macos")]
             delivery: RequestDelivery::ServerResponse,
         })
+    }
+}
+
+fn rejected(code: &str) -> ControlProxyResponse {
+    ControlProxyResponse {
+        status: 409,
+        body: serde_json::json!({"code": code, "parameters": {"nodeControlOutcome": "not_applied"}}),
+        #[cfg(target_os = "macos")]
+        delivery: RequestDelivery::NotSent,
     }
 }
 
@@ -435,6 +471,27 @@ fn application_capture_error(reason: &str) -> ControlProxyResponse {
 
 #[cfg(test)]
 mod layout_tests {
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn closing_rejects_requests_and_waits_for_accepted_work() {
+        let client = super::ControlProxyClient::default();
+        let accepted = client.requests.read().await;
+        client.close_admission();
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), client.drain())
+                .await
+                .is_err()
+        );
+        drop(accepted);
+        client.drain().await.expect("drained");
+        let response = client
+            .request(super::Method::PUT, "/not-sent", None)
+            .await
+            .expect("response");
+        assert_eq!(response.delivery, super::RequestDelivery::NotSent);
+        assert_eq!(response.status, 409);
+    }
+
     #[test]
     fn layout_route_encodes_one_graph_segment_without_changing_the_endpoint() {
         assert_eq!(

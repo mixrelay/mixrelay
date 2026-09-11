@@ -8,6 +8,8 @@ mod workspace_menu;
 
 #[cfg(target_os = "macos")]
 mod engine_lifecycle;
+#[cfg(target_os = "macos")]
+mod native_termination;
 
 #[cfg(target_os = "macos")]
 use mixrelay_macos_transport as _;
@@ -31,6 +33,8 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     match engine_lifecycle::EngineLifecycle::start() {
         Ok(lifecycle) => {
             app.manage(lifecycle);
+            app.manage(native_termination::install(app.handle())?);
+            install_local_controls(app)?;
         }
         Err(error) => {
             rfd::MessageDialog::new()
@@ -48,6 +52,30 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         window.set_title("MixRelay (Dev)")?;
     }
     tray_menu::install(app)?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn install_local_controls(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    use std::os::unix::fs::MetadataExt;
+    let directory = app.path().app_data_dir()?;
+    std::fs::create_dir_all(&directory)?;
+    let uid = std::fs::metadata(app.path().home_dir()?)?.uid();
+    let control = control_proxy::local::LocalControl::new(
+        app.state::<control_proxy::ControlProxyClient>()
+            .inner()
+            .clone(),
+        std::sync::Arc::clone(
+            app.state::<std::sync::Arc<macos_audio::ApplicationCaptureState>>()
+                .inner(),
+        ),
+    )?;
+    let socket = tauri::async_runtime::block_on(control_proxy::local::socket::LocalSocket::start(
+        &directory.join("control"),
+        uid,
+        control,
+    ))?;
+    app.manage(socket);
     Ok(())
 }
 
@@ -107,6 +135,8 @@ fn main() {
     let application = match application {
         Ok(application) => application,
         Err(error) => {
+            #[cfg(target_os = "macos")]
+            native_termination::release();
             tracing::error!(%error, "could not initialize MixRelay desktop");
             return;
         }
@@ -119,21 +149,17 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
         && window.label() == "main"
     {
         api.prevent_close();
-        if let Err(error) = window.hide() {
+        if let Err(error) = tray_menu::hide_main_window(window.app_handle()) {
             tracing::error!(%error, "could not hide main window to tray");
-            return;
-        }
-        #[cfg(target_os = "macos")]
-        if let Err(error) = window
-            .app_handle()
-            .set_activation_policy(tauri::ActivationPolicy::Accessory)
-        {
-            tracing::error!(%error, "could not remove hidden main window from Dock");
         }
     }
 }
 
 fn handle_application_event(app: &tauri::AppHandle, event: &tauri::RunEvent) {
+    #[cfg(target_os = "macos")]
+    if matches!(event, tauri::RunEvent::Exit) {
+        native_termination::release();
+    }
     #[cfg(target_os = "macos")]
     if let tauri::RunEvent::ExitRequested { api, .. } = event {
         app.state::<engine_lifecycle::EngineLifecycle>()

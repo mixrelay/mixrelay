@@ -107,7 +107,9 @@ impl MacDevices {
         desired: BTreeMap<String, Spec>,
         format: mixrelay_audio_graph::RenderFormat,
     ) -> Result<(DeviceSet, Cache), HostAudioBackendError> {
-        let inventory = selected_inventory(&desired)?;
+        let inventory = mixrelay_audio_io::macos::selected_devices(
+            desired.values().map(|spec| &spec.selector),
+        )?;
         let presence = Presence::observe(&desired, &inventory)?;
         let group = prepare_group(cache, &presence.online)?;
         let devices = Self::open_present(cache, &presence.online, group.as_ref(), format)?;
@@ -161,39 +163,6 @@ fn same_group(left: Option<&Arc<Aggregate>>, right: Option<&Arc<Aggregate>>) -> 
         (None, None) => true,
         _ => false,
     }
-}
-
-fn selected_inventory(
-    desired: &BTreeMap<String, Spec>,
-) -> Result<Vec<AudioDeviceDescriptor>, HostAudioBackendError> {
-    if desired.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut inventory = mixrelay_audio_io::macos::devices()?;
-    for spec in desired.values() {
-        let DeviceSelector::PersistentUid { uid } = &spec.selector else {
-            continue;
-        };
-        if inventory.iter().any(|device| device.uid == *uid) {
-            continue;
-        }
-        // Explicit process-private selections are intentionally absent from
-        // the public UI inventory. Resolve only that exact UID in this process.
-        if let Some(info) = super::group_plan::GroupPlan::member(uid)
-            && info.device != 0
-            && info.alive == 1
-        {
-            inventory.push(AudioDeviceDescriptor {
-                uid: uid.clone(),
-                display_name: uid.clone(),
-                input_channels: info.input,
-                output_channels: info.output,
-                is_default_input: false,
-                is_default_output: false,
-            });
-        }
-    }
-    Ok(inventory)
 }
 
 fn prepare_group(

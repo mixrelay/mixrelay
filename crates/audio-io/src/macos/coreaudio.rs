@@ -1,4 +1,4 @@
-use std::ffi::{CStr, c_char, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr::NonNull;
 
 use crate::{AudioDeviceDescriptor, HostAudioBackendError};
@@ -49,6 +49,11 @@ unsafe extern "C" {
 
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
+    fn CFStringCreateWithCString(
+        allocator: *const c_void,
+        bytes: *const c_char,
+        encoding: u32,
+    ) -> *mut c_void;
     fn CFRelease(value: *const c_void);
     fn CFGetTypeID(value: *const c_void) -> usize;
     fn CFStringGetTypeID() -> usize;
@@ -65,6 +70,45 @@ unsafe extern "C" {
 pub(super) struct CoreAudioReader;
 
 impl InventoryReader for CoreAudioReader {
+    fn resolve_uid(&self, uid: &str) -> Result<Option<u32>, HostAudioBackendError> {
+        let bytes = CString::new(uid).map_err(|error| failure(error.to_string()))?;
+        if bytes.is_empty() {
+            return Err(failure("empty CoreAudio device UID".into()));
+        }
+        // SAFETY: CF copies a valid NUL-terminated UTF8 string. OwnedString adopts
+        // its create-rule reference and keeps it alive through the synchronous query.
+        let string = OwnedString(
+            NonNull::new(unsafe {
+                CFStringCreateWithCString(std::ptr::null(), bytes.as_ptr(), UTF8)
+            })
+            .ok_or_else(|| failure("CoreAudio UID allocation failed".into()))?,
+        );
+        let pointer = string.0.as_ptr();
+        let qualifier_size = u32::try_from(std::mem::size_of_val(&pointer))
+            .map_err(|error| failure(error.to_string()))?;
+        let address = Address::new(*b"uidd", GLOBAL);
+        let mut device = 0_u32;
+        let mut size = 4;
+        // SAFETY: qualifier is one retained CFStringRef; output is exactly one
+        // aligned AudioDeviceID. Neither address escapes this synchronous call.
+        let status = unsafe {
+            AudioObjectGetPropertyData(
+                SYSTEM,
+                &raw const address,
+                qualifier_size,
+                (&raw const pointer).cast(),
+                &raw mut size,
+                (&raw mut device).cast(),
+            )
+        };
+        if status != 0 || size != 4 {
+            return Err(failure(format!(
+                "CoreAudio UID lookup failed ({status}, {size} bytes)"
+            )));
+        }
+        Ok((device != 0).then_some(device))
+    }
+
     fn device_ids(&self) -> Result<Vec<u32>, HostAudioBackendError> {
         let bytes = property_bytes(SYSTEM, &Address::new(*b"dev#", GLOBAL), MAX_DEVICE_BYTES)?;
         decode_device_ids(bytes.as_bytes())
@@ -79,6 +123,11 @@ impl InventoryReader for CoreAudioReader {
     }
 
     fn device(&self, id: u32) -> Option<DeviceInfo> {
+        // A dead device must not trigger stream geometry RPCs during recovery.
+        let alive = scalar(id, *b"livn").unwrap_or(1) != 0;
+        if !alive {
+            return None;
+        }
         Some(DeviceInfo {
             descriptor: AudioDeviceDescriptor {
                 uid: string(id, *b"uid ")?,
@@ -88,7 +137,7 @@ impl InventoryReader for CoreAudioReader {
                 is_default_input: false,
                 is_default_output: false,
             },
-            alive: scalar(id, *b"livn").unwrap_or(1) != 0,
+            alive,
             hidden: scalar(id, *b"hidn").unwrap_or(0) != 0,
         })
     }

@@ -12,15 +12,30 @@ export const GRAPH_APPLICATION_TIMEOUT_MS = 10_000;
 const POLL_MS = 200;
 
 interface QueueCallbacks {
+  getGraphId?: () => string | undefined;
   beforeApply?: () => Promise<void>;
   beforeReload?: () => Promise<void>;
   getDocument: () => RuntimeGraphDocument | null;
   getModel: () => AudioGraphModel | null;
   document: (document: RuntimeGraphDocument) => void;
   restore: (document: RuntimeGraphDocument) => void;
+  reconcile?: (before: RuntimeGraphDocument, after: RuntimeGraphDocument) => boolean;
   state: (state: 'active' | 'applying' | 'blocked') => void;
   error: (code: string | null) => void;
   persistenceWarning?: (code: string | null) => void;
+}
+
+/** A resolved request is not necessarily an applied edit. Uncertain commands must not be replayed. */
+export type NodeControlResult =
+  | { state: 'applied'; revision: number }
+  | { state: 'rejected'; code: string }
+  | { state: 'uncertain'; code: string };
+
+function failedNodeControl(error: unknown, sent: boolean, accepted: boolean): NodeControlResult {
+  return {
+    state: !sent || (!accepted && definiteNodeRejection(error)) ? 'rejected' : 'uncertain',
+    code: errorCode(error),
+  };
 }
 
 class GraphApplicationError extends Error {
@@ -150,14 +165,23 @@ export class GraphApplicationQueue {
     if (!this.operation) void this.run('reload');
   }
 
+  refresh() {
+    if (this.canPublishParameters) void this.run('refresh');
+  }
+
   /** Shares the graph writer and CAS baseline; never displays an unacknowledged power state. */
   async setNodeControl(
     graphId: string,
     nodeId: string,
     change: Omit<NodeControlRequest, 'expectedRevision'>,
-  ) {
-    if (!this.canPublishParameters || !this.port.updateNodeControl) return;
+    expectedRevision?: number,
+  ): Promise<NodeControlResult> {
+    if (!this.port.updateNodeControl) return { state: 'rejected', code: 'control_unavailable' };
     const source = this.document ?? this.callbacks.getDocument();
+    const rejection = this.nodeControlRejection(graphId, expectedRevision);
+    if (rejection) return { state: 'rejected', code: rejection };
+    let sent = false;
+    let accepted = false;
     const operation = new AbortController();
     const { signal } = operation;
     this.operation = operation;
@@ -167,9 +191,8 @@ export class GraphApplicationQueue {
       if (this.callbacks.beforeApply)
         await bounded(this.callbacks.beforeApply(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
       signal.throwIfAborted();
-      if (!source?.nodes.some((node) => node.id === nodeId)) throw failure('graph_revision_stale');
-      const current = this.document ?? this.callbacks.getDocument();
-      if (current?.revision !== source.revision) throw failure('graph_revision_stale');
+      this.validateNodeControlSource(source, graphId, nodeId);
+      sent = true;
       const response = await bounded(
         this.port.updateNodeControl(graphId, nodeId, {
           ...change,
@@ -178,25 +201,65 @@ export class GraphApplicationQueue {
         signal,
         GRAPH_APPLICATION_TIMEOUT_MS,
       );
+      accepted = true;
+      if (response.revision !== source.revision + 1) throw failure('graph_revision_stale');
       if (response.state !== 'active') await this.waitForRevision(response.revision, signal);
-      const document = await this.readEngine(signal, true);
+      const document = await this.readEngine(signal, true, {
+        graphId,
+        revision: response.revision,
+      });
       if (this.pending) throw failure('graph_draft_changed');
-      this.callbacks.restore(document);
+      this.acceptControls(source, document);
       this.callbacks.persistenceWarning?.(response.persistenceError ?? null);
       this.callbacks.state('active');
+      return { state: 'applied', revision: response.revision };
     } catch (error) {
-      if (!signal.aborted) await this.recoverNodeControl(error, signal);
+      if (!signal.aborted) await this.recoverNodeControl(error, signal, graphId, accepted);
+      return failedNodeControl(error, sent, accepted);
     } finally {
       if (this.operation === operation) this.operation = null;
     }
   }
 
-  private async recoverNodeControl(error: unknown, signal: AbortSignal) {
-    if (!this.pending && definiteNodeRejection(error)) {
+  private nodeControlRejection(graphId: string, expectedRevision?: number) {
+    if (!this.canPublishParameters) return 'graph_exchange_busy';
+    if (this.callbacks.getGraphId?.() !== graphId) return 'graph_revision_stale';
+    const source = this.document ?? this.callbacks.getDocument();
+    if (expectedRevision !== undefined && source?.revision !== expectedRevision)
+      return 'graph_revision_stale';
+    return null;
+  }
+
+  private acceptControls(before: RuntimeGraphDocument, after: RuntimeGraphDocument) {
+    if (this.callbacks.reconcile) {
+      if (!this.callbacks.reconcile(before, after)) throw failure('graph_revision_stale');
+    } else this.callbacks.restore(after);
+  }
+
+  private validateNodeControlSource(
+    source: RuntimeGraphDocument | null,
+    graphId: string,
+    nodeId: string,
+  ): asserts source is RuntimeGraphDocument {
+    if (!source?.nodes.some((node) => node.id === nodeId)) throw failure('node_not_found');
+    const current = this.document ?? this.callbacks.getDocument();
+    if (current?.revision !== source.revision || this.callbacks.getGraphId?.() !== graphId)
+      throw failure('graph_revision_stale');
+  }
+
+  private async recoverNodeControl(
+    error: unknown,
+    signal: AbortSignal,
+    graphId: string,
+    accepted: boolean,
+  ) {
+    if (this.callbacks.getGraphId?.() !== graphId) return;
+    if (!accepted && !this.pending && definiteNodeRejection(error)) {
       try {
-        const document = await this.readEngine(signal, true);
-        if (!this.pending) {
-          this.callbacks.restore(document);
+        const before = this.document ?? this.callbacks.getDocument();
+        const document = await this.readEngine(signal, true, { graphId });
+        if (!this.pending && before) {
+          this.acceptControls(before, document);
           this.callbacks.error(errorCode(error));
           this.callbacks.state('active');
           return;
@@ -205,7 +268,7 @@ export class GraphApplicationQueue {
         if (signal.aborted) return;
       }
     }
-    await this.recover(error, signal);
+    await this.recover(error, signal, graphId);
   }
 
   private async waitForRevision(revision: number, signal: AbortSignal) {
@@ -225,10 +288,20 @@ export class GraphApplicationQueue {
     throw signal.reason;
   }
 
-  private async readEngine(signal: AbortSignal, wait: boolean) {
+  private async readEngine(
+    signal: AbortSignal,
+    wait: boolean,
+    expected?: { graphId: string; revision?: number },
+  ) {
     const document = await bounded(this.port.getGraph(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
     if (wait) await this.waitForRevision(document.revision, signal);
     signal.throwIfAborted();
+    if (
+      expected &&
+      (this.callbacks.getGraphId?.() !== expected.graphId ||
+        (expected.revision !== undefined && document.revision !== expected.revision))
+    )
+      throw failure('graph_revision_stale');
     this.document = document;
     this.callbacks.document(document);
     return document;
@@ -269,16 +342,17 @@ export class GraphApplicationQueue {
     this.callbacks.document(document);
   }
 
-  private async recover(error: unknown, signal: AbortSignal) {
+  private async recover(error: unknown, signal: AbortSignal, graphId?: string) {
     this.blocked = true;
     // Refresh the engine baseline, never overwrite the user's draft/history on a failed edit.
     // A failed read leaves the queue blocked; retry/reload must read it again before writing.
     try {
-      await this.readEngine(signal, false);
+      await this.readEngine(signal, false, graphId ? { graphId } : undefined);
     } catch {
       if (signal.aborted) return;
     }
     if (signal.aborted) return;
+    if (graphId && this.callbacks.getGraphId?.() !== graphId) return;
     this.callbacks.error(errorCode(error));
     this.callbacks.state('blocked');
   }
@@ -298,13 +372,22 @@ export class GraphApplicationQueue {
   }
 
   private async prepareRecovery(
-    mode: 'retry' | 'reload',
+    mode: 'retry' | 'reload' | 'refresh',
     signal: AbortSignal,
     initialModel: AudioGraphModel | null,
   ) {
     if (mode === 'reload' && this.callbacks.beforeReload)
       await bounded(this.callbacks.beforeReload(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
-    const document = await this.readEngine(signal, true);
+    const before = this.document ?? this.callbacks.getDocument();
+    const graphId = this.callbacks.getGraphId?.();
+    const document = await this.readEngine(signal, true, graphId ? { graphId } : undefined);
+    if (mode === 'refresh') {
+      // Layout edits may continue while reading; reconciliation uses the latest model.
+      // An audio edit queued meanwhile requires explicit recovery, never a silent overwrite.
+      if (!before || this.pending) throw failure('graph_draft_changed');
+      this.acceptControls(before, document);
+      return;
+    }
     if (mode === 'reload') {
       if (this.callbacks.getModel() !== initialModel) throw failure('graph_draft_changed');
       this.pending = null;
@@ -316,7 +399,7 @@ export class GraphApplicationQueue {
     this.blocked = false;
   }
 
-  private async run(mode: 'submit' | 'retry' | 'reload') {
+  private async run(mode: 'submit' | 'retry' | 'reload' | 'refresh') {
     const operation = new AbortController();
     const { signal } = operation;
     this.operation = operation;

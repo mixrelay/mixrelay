@@ -8,23 +8,42 @@ fn topology_loss_bypasses_periodic_delay_but_not_publication_ownership() {
         crate::macos::adapter_profile(),
     ));
     let resources = MacDevices::new(status, 48_000, 32);
+    let stop = std::sync::atomic::AtomicBool::new(false);
     let later = Instant::now() + Duration::from_mins(1);
     *resources.next_group_check.lock().unwrap() = later;
-    resources.reclaim();
+    resources.recover(&stop);
     assert_eq!(*resources.next_group_check.lock().unwrap(), later);
     let reserved = resources.handoff.reserve_format().unwrap();
     resources.request_recovery();
-    resources.reclaim();
+    resources.recover(&stop);
     assert!(resources.recovery_requested.load(Ordering::Acquire));
     assert_eq!(*resources.next_group_check.lock().unwrap(), later);
     drop(reserved);
-    resources.reclaim();
+    resources.recover(&stop);
     assert!(!resources.recovery_requested.load(Ordering::Acquire));
     let next = *resources.next_group_check.lock().unwrap();
     assert!(next < later);
     assert!(next <= Instant::now() + Duration::from_secs(2));
-    resources.reclaim();
+    resources.recover(&stop);
     assert_eq!(*resources.next_group_check.lock().unwrap(), next);
+}
+
+#[test]
+fn stopped_observation_and_reclamation_never_start_recovery() {
+    let status = Arc::new(mixrelay_engine_service::session::AdapterRuntimeStatus::new(
+        crate::macos::adapter_profile(),
+    ));
+    let resources = MacDevices::new(status, 48_000, 32);
+    let before = *resources.next_group_check.lock().unwrap();
+    resources.request_recovery();
+    resources.recover(&std::sync::atomic::AtomicBool::new(true));
+    resources.reclaim();
+    assert!(
+        resources
+            .recovery_requested
+            .load(std::sync::atomic::Ordering::Acquire)
+    );
+    assert_eq!(*resources.next_group_check.lock().unwrap(), before);
 }
 
 #[test]

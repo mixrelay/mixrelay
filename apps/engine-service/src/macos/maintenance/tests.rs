@@ -24,6 +24,27 @@ fn dropping_worker_wakes_park_and_releases_its_captured_owner() {
 }
 
 #[test]
+fn stop_request_prevents_another_observation_before_join() {
+    let (entered, observed) = mpsc::channel();
+    let (release, blocked) = mpsc::channel();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = calls.clone();
+    let worker = MaintenanceWorker::start("observer-cancellation-test", move |stop| {
+        while !stop.load(Ordering::Acquire) {
+            count.fetch_add(1, Ordering::Relaxed);
+            entered.send(()).unwrap();
+            blocked.recv().unwrap();
+        }
+    })
+    .unwrap();
+    observed.recv_timeout(Duration::from_secs(2)).unwrap();
+    worker.request_stop();
+    release.send(()).unwrap();
+    drop(worker);
+    assert_eq!(calls.load(Ordering::Acquire), 1);
+}
+
+#[test]
 fn dropping_worker_joins_an_in_flight_operation_before_returning() {
     let (ready_tx, ready_rx) = mpsc::sync_channel(1);
     let (release_tx, release_rx) = mpsc::sync_channel(1);
@@ -139,8 +160,8 @@ fn observers_with_lifetime_probe() -> (
     drop(controller);
     (
         ControlObservers {
-            format_monitor,
-            control,
+            format_monitor: Some(format_monitor),
+            control: Some(control),
         },
         alive_at_monitor_exit,
         weak,

@@ -162,8 +162,8 @@ describe('processor control recovery alerts', () => {
     expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled();
     await act(async () => pending.resolve(open));
     expect(source.setProcessorEditor.mock.calls).toEqual([
-      ['effect', true],
-      ['effect', true],
+      ['effect', true, 1],
+      ['effect', true, 1],
     ]);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByTestId('native-state')).toHaveTextContent('open');

@@ -149,6 +149,7 @@ export interface NodeControlRequest {
   expectedRevision: number;
   enabled?: boolean;
   muted?: boolean;
+  gainDb?: number;
 }
 
 export interface GraphNodeControls {
@@ -160,6 +161,7 @@ export interface GraphNodeControls {
     kind: string;
     control: NodeControlState;
     capabilities: { power: boolean; mute: boolean; recorder: boolean };
+    gainDb?: number;
   }[];
 }
 
@@ -453,6 +455,7 @@ export interface GraphLayoutRequest {
 export type GraphCatalogAction =
   | { action: 'create'; name: string }
   | { action: 'select'; id: string }
+  | { action: 'delete'; id: string }
   | { action: 'rename'; id: string; name: string };
 
 export type GraphCatalogRequest = GraphCatalogAction & {

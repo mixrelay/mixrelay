@@ -91,11 +91,12 @@ pub trait GraphResourceBackend: Send + Sync {
     fn execution_released(&self) -> bool {
         true
     }
-    /// Reads actual native identities for canonical hardware source/sink ownership.
+    /// Resolves requested native identities for canonical hardware ownership.
     /// # Errors
     /// Rejects adapters without native device enumeration.
     fn device_inventory(
         &self,
+        _selectors: &[&mixrelay_audio_io::DeviceSelector],
     ) -> Result<Vec<mixrelay_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
         Err(HostAudioBackendError::CapabilityUnavailable {
             capability: "native device identity resolution".into(),
@@ -679,7 +680,7 @@ impl ControlBackend for EngineGraphController {
         graph_id: &str,
         node_id: &str,
     ) -> Result<mixrelay_control_protocol::RecorderStatus, ProtocolError> {
-        let _mutation = self.mutation.lock();
+        let _mutation = self.try_node_control()?;
         let id = self.recorder_session_id(graph_id, node_id)?;
         Ok(self.recorders.status(id.as_str()))
     }
@@ -690,10 +691,20 @@ impl ControlBackend for EngineGraphController {
         node_id: &str,
         request: mixrelay_control_protocol::RecorderControlRequest,
     ) -> Result<mixrelay_control_protocol::RecorderStatus, ProtocolError> {
-        let _mutation = self.mutation.lock();
+        let _mutation = self.try_node_control()?;
         self.validate_control_revision(request.expected_revision)?;
-        let request = request.request;
         let id = self.recorder_session_id(graph_id, node_id)?;
+        if let Some(expected) = request.expected_recording {
+            let current = self.recorders.status(&id);
+            if expected.state != current.state || expected.path != current.path {
+                return Err(node_control::node_error(
+                    ErrorCode::GraphRevisionStale,
+                    graph_id,
+                    node_id,
+                ));
+            }
+        }
+        let request = request.request;
         if matches!(
             request.action,
             mixrelay_audio_recorder::RecorderAction::Stop

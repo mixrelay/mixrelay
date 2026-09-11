@@ -20,8 +20,8 @@ use crate::macos_devices::MacDevices;
 /// Field order also governs cancellation/unwind: stop native observation before
 /// the final control checkpoint, while the caller still owns its audio worker.
 pub(super) struct ControlObservers {
-    format_monitor: MaintenanceWorker,
-    control: ControlMaintenance,
+    format_monitor: Option<MaintenanceWorker>,
+    control: Option<ControlMaintenance>,
 }
 
 impl ControlObservers {
@@ -34,18 +34,33 @@ impl ControlObservers {
         let control = controller.start_control_maintenance()?;
         let format_monitor = start_format_monitor(status, controller, devices)?;
         Ok(Self {
-            format_monitor,
-            control,
+            format_monitor: Some(format_monitor),
+            control: Some(control),
         })
     }
 
-    pub(super) fn finish(self) -> Result<(), String> {
-        let Self {
-            format_monitor,
-            control,
-        } = self;
-        drop(format_monitor);
-        control.finish()
+    pub(super) fn stop_observing(&self) {
+        if let Some(control) = &self.control {
+            control.stop_observing();
+        }
+        if let Some(monitor) = &self.format_monitor {
+            monitor.request_stop();
+        }
+    }
+
+    pub(super) fn finish(mut self) -> Result<(), String> {
+        self.stop_observing();
+        self.format_monitor.take();
+        self.control
+            .take()
+            .map_or(Ok(()), ControlMaintenance::finish)
+    }
+}
+
+impl Drop for ControlObservers {
+    fn drop(&mut self) {
+        // Cancel all observation before either join, including startup unwind.
+        self.stop_observing();
     }
 }
 
@@ -58,6 +73,13 @@ pub(super) struct MaintenanceWorker {
 }
 
 impl MaintenanceWorker {
+    fn request_stop(&self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(thread) = &self.thread {
+            thread.thread().unpark();
+        }
+    }
+
     fn start(
         name: &'static str,
         work: impl FnOnce(&AtomicBool) + Send + 'static,
@@ -78,7 +100,7 @@ impl MaintenanceWorker {
 
 impl Drop for MaintenanceWorker {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
+        self.request_stop();
         if let Some(thread) = self.thread.take() {
             thread.thread().unpark();
             if thread.join().is_err() {
@@ -142,6 +164,10 @@ fn start_format_monitor(
                 status.forget_endpoint_observation();
             }
             if let Some(devices) = weak_devices.upgrade() {
+                devices.recover(stop);
+                if stop.load(Ordering::Acquire) {
+                    break;
+                }
                 status.observe_routing_clock(devices.follows_hardware(), devices.routing_rate());
             }
             // Errors retain the observed mismatch and retry, never write the old rate.

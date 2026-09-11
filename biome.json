@@ -9,7 +9,12 @@
       "apps/control-ui/index.html",
       "apps/control-ui/package.json",
       "apps/control-ui/tsconfig.json",
-      "apps/control-ui/vite.config.ts"
+      "apps/control-ui/vite.config.ts",
+      "apps/streamdeck-plugin/src/**",
+      "apps/streamdeck-plugin/ui/**",
+      "apps/streamdeck-plugin/build.mjs",
+      "apps/streamdeck-plugin/package.json",
+      "apps/streamdeck-plugin/manifest.json"
     ]
   },
   "formatter": {

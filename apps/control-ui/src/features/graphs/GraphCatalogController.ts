@@ -62,6 +62,18 @@ function retryableRead(error: unknown) {
   return [408, 429, 502, 503, 504].includes(error.status);
 }
 
+function mutationUncertain(error: unknown) {
+  if (!(error instanceof ControlPortError)) return true;
+  if (error.status < 500 || workspaceRejected(error)) return false;
+  const parameters = error.body.parameters;
+  return !(
+    parameters &&
+    typeof parameters === 'object' &&
+    'catalogOutcome' in parameters &&
+    parameters.catalogOutcome === 'not_applied'
+  );
+}
+
 /** One writer, confirmed audio activation, and generation fencing for late IPC replies. */
 export class GraphCatalogController {
   private state: GraphCatalogState = {
@@ -110,8 +122,7 @@ export class GraphCatalogController {
       if (generation !== this.generation) return;
       this.patch({
         error: errorCode(error),
-        uncertain:
-          this.state.uncertain || (this.mutationSent && !(error instanceof ControlPortError)),
+        uncertain: this.state.uncertain || (this.mutationSent && mutationUncertain(error)),
       });
       if (retryRead && !this.state.catalog && retryableRead(error)) {
         this.retryTimer = setTimeout(() => {

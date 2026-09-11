@@ -108,7 +108,16 @@ export function useUndoHistory<Value, Kind>() {
     return { kind: entry.kind, value: entry.after };
   }, [flush]);
 
+  const rebase = useCallback((transform: (value: Value) => Value) => {
+    const entries = [...undoStack.current, ...redoStack.current];
+    if (pendingEntry.current) entries.push(pendingEntry.current);
+    for (const entry of entries) {
+      entry.before = transform(entry.before);
+      entry.after = transform(entry.after);
+    }
+  }, []);
+
   useEffect(() => () => cancelPendingTimer(), [cancelPendingTimer]);
 
-  return { clear, flush, record, recordDebounced, redo, undo };
+  return { clear, flush, record, recordDebounced, redo, undo, rebase };
 }

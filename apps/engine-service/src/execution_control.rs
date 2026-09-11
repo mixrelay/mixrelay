@@ -103,19 +103,22 @@ impl EngineGraphController {
         for (_, graph) in &documents {
             self.validate_session_bindings(graph, context.format)?;
         }
-        let needs_devices = documents.iter().any(|(_, graph)| {
-            graph.nodes.iter().any(|node| {
-                node.control.enabled
-                    && matches!(
-                        node.config,
-                        NodeConfig::AudioDeviceInput(_) | NodeConfig::AudioDeviceOutput(_)
-                    )
+        let selectors: Vec<_> = documents
+            .iter()
+            .flat_map(|(_, graph)| &graph.nodes)
+            .filter(|node| node.control.enabled)
+            .filter_map(|node| match &node.config {
+                NodeConfig::AudioDeviceInput(config) => Some(&config.selector),
+                NodeConfig::AudioDeviceOutput(config) => Some(&config.selector),
+                _ => None,
             })
-        });
-        let devices = if needs_devices {
-            self.graph_resources.device_inventory().map_err(invalid)?
-        } else {
+            .collect();
+        let devices = if selectors.is_empty() {
             Vec::new()
+        } else {
+            self.graph_resources
+                .device_inventory(&selectors)
+                .map_err(invalid)?
         };
         let compiler = self.factory.compiler();
         let composed = compose_catalog(

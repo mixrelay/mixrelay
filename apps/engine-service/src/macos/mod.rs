@@ -147,6 +147,8 @@ pub(super) async fn run() -> Result<(), String> {
         .record("running")
         .map_err(|error| format!("engine lifecycle record failed: {error}"))?;
     let result = run_owned().await;
+    let retired = super::macos_devices::MacDevices::finish_retirement();
+    let result = result.and(retired);
     let outcome = result
         .as_ref()
         .map_or_else(|error| format!("failed\n{error}"), |()| "stopped".into());
@@ -221,7 +223,7 @@ async fn run_owned() -> Result<(), String> {
         mixrelay_engine_service::session::AudioWorker::new(runtime_status.clone(), audio_thread);
     let observers =
         maintenance::ControlObservers::start(&runtime_status, &controller, &monitor_devices)?;
-    let result = serve_control(listener, controller).await;
+    let result = serve_control(listener, controller, &observers).await;
     let saved = observers.finish();
     result.and(saved)
 }
@@ -235,12 +237,20 @@ async fn bind_control(address: SocketAddr) -> Result<tokio::net::TcpListener, St
 async fn serve_control(
     listener: tokio::net::TcpListener,
     controller: Arc<EngineGraphController>,
+    observers: &maintenance::ControlObservers,
 ) -> Result<(), String> {
-    axum::serve(
+    use std::future::IntoFuture;
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let serving = axum::serve(
         mixrelay_control_server::bounded_listener(listener),
         router_with_backend(controller),
     )
-    .with_graceful_shutdown(async {
+    .with_graceful_shutdown(async move {
+        let _ = stopped.await;
+    })
+    .into_future();
+    tokio::pin!(serving);
+    let shutdown = async {
         tokio::select! {
             result = mixrelay_engine_service::session::shutdown_signal() => {
                 if let Err(error) = result {
@@ -249,9 +259,17 @@ async fn serve_control(
             }
             () = desktop_released() => {}
         }
-    })
-    .await
-    .map_err(|error| format!("local control server failed: {error}"))
+    };
+    let result = tokio::select! {
+        result = &mut serving => result,
+        () = shutdown => {
+            // Close maintenance admission before waiting for accepted HTTP work.
+            observers.stop_observing();
+            let _ = stop.send(());
+            serving.await
+        }
+    };
+    result.map_err(|error| format!("local control server failed: {error}"))
 }
 
 async fn desktop_released() {

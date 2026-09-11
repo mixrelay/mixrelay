@@ -712,6 +712,7 @@ impl VirtualEndpointBackend for LinuxVirtualEndpointBackend {
 impl GraphResourceBackend for LinuxVirtualEndpointBackend {
     fn device_inventory(
         &self,
+        _selectors: &[&mixrelay_audio_io::DeviceSelector],
     ) -> Result<Vec<mixrelay_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
         mixrelay_audio_io::linux::devices()
     }

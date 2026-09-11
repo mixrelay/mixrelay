@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// Explicit node state changes guarded by the current engine publication revision.
 /// Omitted fields retain their authored values; an empty patch is invalid.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NodeControlRequest {
     pub expected_revision: u64,
@@ -11,6 +11,9 @@ pub struct NodeControlRequest {
     pub enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub muted: Option<bool>,
+    /// Absolute graph-local gain in decibels; supported only where discovery exposes gain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gain_db: Option<f32>,
 }
 
 /// A recording command fenced to the graph revision observed by its caller.
@@ -20,10 +23,22 @@ pub struct NodeControlRequest {
 pub struct RecorderControlRequest {
     pub expected_revision: u64,
     pub request: mixrelay_audio_recorder::RecorderRequest,
+    /// Optional observed take fence. Remote controllers must supply this so a delayed
+    /// stop/resume cannot operate on a newer recording in the same graph revision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_recording: Option<ObservedRecording>,
+}
+
+/// Stable take identity and transport state, excluding continuously advancing frames.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ObservedRecording {
+    pub state: mixrelay_audio_recorder::RecorderState,
+    pub path: Option<String>,
 }
 
 /// Controls discovered from one current authored graph, never a static action catalog.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GraphNodeControls {
     pub graph_id: String,
@@ -33,7 +48,7 @@ pub struct GraphNodeControls {
 
 /// One stable graph-local target and its persisted control state.
 /// Capabilities describe supported commands, not current native-device availability.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NodeControlDescriptor {
     pub node_id: String,
@@ -41,6 +56,9 @@ pub struct NodeControlDescriptor {
     pub kind: String,
     pub control: NodeControl,
     pub capabilities: NodeControlCapabilities,
+    /// Current gain, or absent when this node has no graph-local gain control.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gain_db: Option<f32>,
 }
 
 /// Existing control surfaces available for the addressed node.
@@ -98,6 +116,7 @@ mod tests {
                     mute: true,
                     recorder: true,
                 },
+                gain_db: None,
             }],
         };
         let value = serde_json::to_value(&controls).expect("serialize controls");

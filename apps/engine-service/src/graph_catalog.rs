@@ -436,8 +436,12 @@ impl EngineGraphController {
             .checked_add(1)
             .ok_or_else(|| invalid("catalog revision overflow"))?;
         value.update_document(self.graph.read().clone());
+        let removes_execution = matches!(request.action, GraphCatalogAction::Delete { .. });
         value.apply_action(request.action, revisions.submitted, next_catalog_revision)?;
         value.revision = next_catalog_revision;
+        if removes_execution {
+            return self.publish_catalog_removal(value, revisions.submitted);
+        }
         let mut document = value.active_document().clone();
         document.revision = revisions.submitted;
         value.update_document(document.clone());
@@ -469,6 +473,27 @@ impl EngineGraphController {
             .persistence_error
             .clone_from(&self.catalog_write_error.lock());
         Ok(response)
+    }
+
+    fn publish_catalog_removal(
+        &self,
+        mut candidate: Catalog,
+        revision: u64,
+    ) -> Result<GraphCatalogResponse, ProtocolError> {
+        let mut document = candidate.active_document().clone();
+        document.revision = revision
+            .checked_add(1)
+            .ok_or_else(|| invalid("graph revision overflow"))?;
+        if candidate.selected_id() == self.view_graph_id() {
+            self.preserve_live_processor_state(&mut document, &[])?;
+        }
+        candidate.update_document(document);
+        self.reconcile_catalog_devices(&mut candidate)?;
+        // The selected identity may have changed. Preserve providers by catalog owner,
+        // not by comparing graph-local node IDs against the previously selected graph.
+        self.preserve_catalog_provider_state(&mut candidate)?;
+        self.publish_graph_locked(candidate.active_document().clone(), Some(candidate))?;
+        self.current_catalog_response()
     }
 }
 
@@ -516,7 +541,37 @@ impl Catalog {
                 graph.name = name.trim().into();
                 switch = false;
             }
+            GraphCatalogAction::Delete { id } => {
+                self.remove_graph(&id, next_revision, next_catalog_revision)?;
+            }
         }
         Ok(switch)
+    }
+
+    fn remove_graph(
+        &mut self,
+        id: &str,
+        revision: u64,
+        catalog_revision: u64,
+    ) -> Result<(), ProtocolError> {
+        let index = self
+            .graphs
+            .iter()
+            .position(|graph| graph.id == id)
+            .ok_or_else(|| invalid("graph does not exist"))?;
+        self.graphs.remove(index);
+        if self.graphs.is_empty() {
+            self.apply_action(
+                GraphCatalogAction::Create {
+                    name: "Untitled Graph".into(),
+                },
+                revision,
+                catalog_revision,
+            )?;
+        } else if self.active_id == id {
+            self.active_id
+                .clone_from(&self.graphs[index.min(self.graphs.len() - 1)].id);
+        }
+        Ok(())
     }
 }

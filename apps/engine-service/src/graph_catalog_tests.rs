@@ -17,6 +17,8 @@ mod native_state;
 #[path = "graph_live_state_tests.rs"]
 mod live_state;
 
+mod removal;
+
 struct Fixture(mixrelay_test_support::FixtureDir);
 
 #[test]

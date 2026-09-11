@@ -1,0 +1,33 @@
+:root {
+  color-scheme: dark;
+  font:
+    12px -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  background: #252525;
+  color: #ddd;
+}
+body {
+  margin: 14px;
+}
+label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+select,
+input {
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: #353535;
+  color: inherit;
+}
+p {
+  color: #aaa;
+  line-height: 1.5;
+}
+[hidden] {
+  display: none;
+}

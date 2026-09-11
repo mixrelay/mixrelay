@@ -45,6 +45,7 @@ function fixture() {
       .mockResolvedValue({ activeRevision: 8, submittedRevision: 8, protocolVersion: 1 }),
   };
   const callbacks = {
+    getGraphId: () => 'graph-a',
     getDocument: () => document,
     getModel: () => runtimeGraphToAudioGraph(document),
     document: vi.fn(),
@@ -69,11 +70,36 @@ it('uses the same writer lock and displayed revision without optimistic UI state
     enabled: true,
   });
   expect(f.callbacks.restore).not.toHaveBeenCalled();
-  await f.queue.setNodeControl('graph-a', 'processor', { muted: false });
+  await expect(f.queue.setNodeControl('graph-a', 'processor', { muted: false })).resolves.toEqual({
+    state: 'rejected',
+    code: 'graph_exchange_busy',
+  });
   expect(f.port.updateNodeControl).toHaveBeenCalledTimes(1);
   f.completion.resolve({ revision: 8, state: 'active', protocolVersion: 1 });
-  await task;
+  await expect(task).resolves.toEqual({ state: 'applied', revision: 8 });
   expect(f.callbacks.restore).toHaveBeenCalledExactlyOnceWith(f.restored);
+  expect(f.callbacks.state).toHaveBeenLastCalledWith('active');
+});
+
+it('reconciles an external control winner after stale rejection without clearing edit history', async () => {
+  const f = fixture();
+  const reconcile = vi.fn().mockReturnValue(true);
+  const queue = new GraphApplicationQueue(f.port, { ...f.callbacks, reconcile });
+  const task = queue.setNodeControl('graph-a', 'processor', { enabled: true });
+  f.completion.reject(new ControlPortError(409, { code: 'graph_revision_stale', parameters: {} }));
+  await expect(task).resolves.toEqual({ state: 'rejected', code: 'graph_revision_stale' });
+  expect(reconcile).toHaveBeenCalledExactlyOnceWith(document, f.restored);
+  expect(f.callbacks.restore).not.toHaveBeenCalled();
+  expect(f.callbacks.state).toHaveBeenLastCalledWith('active');
+});
+
+it('refreshes controls without treating a new layout model as an audio conflict', async () => {
+  const f = fixture();
+  const reconcile = vi.fn().mockReturnValue(true);
+  const queue = new GraphApplicationQueue(f.port, { ...f.callbacks, reconcile });
+  queue.refresh();
+  await vi.waitFor(() => expect(reconcile).toHaveBeenCalledExactlyOnceWith(document, f.restored));
+  expect(f.callbacks.restore).not.toHaveBeenCalled();
   expect(f.callbacks.state).toHaveBeenLastCalledWith('active');
 });
 
@@ -81,13 +107,19 @@ it('keeps a rejected deleted-node command recoverable without rewriting connecti
   const f = fixture();
   const task = f.queue.setNodeControl('graph-a', 'processor', { enabled: true });
   f.completion.reject(new ControlPortError(404, { code: 'node_not_found', parameters: {} }));
-  await task;
+  await expect(task).resolves.toEqual({ state: 'rejected', code: 'node_not_found' });
   expect(f.callbacks.restore).toHaveBeenCalledExactlyOnceWith(f.restored);
   expect(f.callbacks.error).toHaveBeenLastCalledWith('node_not_found');
   expect(f.callbacks.state).toHaveBeenLastCalledWith('active');
   expect(f.port.applyGraph).not.toHaveBeenCalled();
+  f.port.getGraph.mockResolvedValueOnce({ ...document, revision: 9 });
+  f.port.getGraphStatus.mockResolvedValueOnce({
+    activeRevision: 9,
+    submittedRevision: 9,
+    protocolVersion: 1,
+  });
   f.port.updateNodeControl.mockResolvedValueOnce({
-    revision: 8,
+    revision: 9,
     protocolVersion: 1,
     state: 'active',
   });
@@ -99,13 +131,60 @@ it('keeps a rejected deleted-node command recoverable without rewriting connecti
   expect(f.callbacks.state).toHaveBeenLastCalledWith('active');
 });
 
+it('does not restore a foreign graph when selection changes during the acknowledgement read', async () => {
+  const f = fixture();
+  let graphId = 'graph-a';
+  const read = Promise.withResolvers<RuntimeGraphDocument>();
+  f.port.getGraph.mockReturnValueOnce(read.promise);
+  const queue = new GraphApplicationQueue(f.port, { ...f.callbacks, getGraphId: () => graphId });
+  const task = queue.setNodeControl('graph-a', 'processor', { enabled: true }, 7);
+  f.completion.resolve({ revision: 8, state: 'active', protocolVersion: 1 });
+  await vi.waitFor(() => expect(f.port.getGraph).toHaveBeenCalledTimes(1));
+  graphId = 'graph-b';
+  read.resolve(f.restored);
+  await expect(task).resolves.toMatchObject({ state: 'uncertain' });
+  expect(f.callbacks.restore).not.toHaveBeenCalled();
+  expect(f.callbacks.document).not.toHaveBeenCalled();
+});
+
+it('does not report an unrelated acknowledgement revision as applied', async () => {
+  const f = fixture();
+  const task = f.queue.setNodeControl('graph-a', 'processor', { enabled: true }, 7);
+  f.completion.resolve({ revision: 9, state: 'active', protocolVersion: 1 });
+  await expect(task).resolves.toEqual({ state: 'uncertain', code: 'graph_revision_stale' });
+  expect(f.callbacks.restore).not.toHaveBeenCalled();
+});
+
 it('does not apply a late acknowledgement after the workspace is replaced', async () => {
   const f = fixture();
   const task = f.queue.setNodeControl('graph-a', 'processor', { enabled: true });
   f.queue.reset();
   f.completion.resolve({ revision: 8, state: 'active', protocolVersion: 1 });
-  await task;
+  await expect(task).resolves.toMatchObject({ state: 'uncertain' });
   expect(f.callbacks.restore).not.toHaveBeenCalled();
+});
+
+it('rejects foreign graph identity and caller revision before dispatch', async () => {
+  const f = fixture();
+  for (const [graphId, revision] of [
+    ['graph-b', 7],
+    ['graph-a', 6],
+  ] as const) {
+    await expect(
+      f.queue.setNodeControl(graphId, 'processor', { enabled: true }, revision),
+    ).resolves.toEqual({ state: 'rejected', code: 'graph_revision_stale' });
+  }
+  expect(f.port.updateNodeControl).not.toHaveBeenCalled();
+  expect(f.callbacks.restore).not.toHaveBeenCalled();
+});
+
+it('reports lost replies as uncertain and does not replay the command', async () => {
+  const f = fixture();
+  f.port.updateNodeControl.mockRejectedValue(new Error('connection lost'));
+  await expect(
+    f.queue.setNodeControl('graph-a', 'processor', { enabled: true }, 7),
+  ).resolves.toEqual({ state: 'uncertain', code: 'control_request_failed' });
+  expect(f.port.updateNodeControl).toHaveBeenCalledTimes(1);
 });
 
 it('does not retarget queued power intent to a replacement node with the same ID', async () => {

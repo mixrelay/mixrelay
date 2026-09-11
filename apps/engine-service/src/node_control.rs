@@ -13,6 +13,15 @@ use crate::{
 };
 
 impl EngineGraphController {
+    /// A controller must never queue stale hardware intent behind native restoration.
+    pub(super) fn try_node_control(
+        &self,
+    ) -> Result<parking_lot::MutexGuard<'_, ()>, ProtocolError> {
+        self.mutation.try_lock().ok_or_else(|| ProtocolError {
+            code: ErrorCode::GraphExchangeBusy,
+            parameters: serde_json::json!({"reason":"graph mutation in progress"}),
+        })
+    }
     pub(super) fn validate_control_revision(&self, expected: u64) -> Result<(), ProtocolError> {
         let revisions = self.exchange.revisions();
         if expected != revisions.submitted {
@@ -33,7 +42,7 @@ impl EngineGraphController {
         &self,
         graph_id: &str,
     ) -> Result<GraphNodeControls, ProtocolError> {
-        let _mutation = self.mutation.lock();
+        let _mutation = self.try_node_control()?;
         let document = self.catalog_document_locked(graph_id)?;
         let nodes = document
             .nodes
@@ -49,6 +58,7 @@ impl EngineGraphController {
                         .ok_or_else(|| invalid("invalid node kind"))?
                         .to_owned(),
                     control: node.control,
+                    gain_db: node_gain(&node.config),
                     capabilities: NodeControlCapabilities {
                         power: true,
                         mute: true,
@@ -70,7 +80,7 @@ impl EngineGraphController {
         node_id: &str,
         request: &NodeControlRequest,
     ) -> Result<ApplicationCaptureManifest, ProtocolError> {
-        let _mutation = self.mutation.lock();
+        let _mutation = self.try_node_control()?;
         let candidate = self.node_control_candidate(graph_id, node_id, request)?;
         let composed = self.compose_execution(
             candidate.active_document(),
@@ -86,7 +96,7 @@ impl EngineGraphController {
         node_id: &str,
         request: &NodeControlRequest,
     ) -> Result<GraphApplyResponse, ProtocolError> {
-        let _mutation = self.mutation.lock();
+        let _mutation = self.try_node_control()?;
         let mut candidate = self.node_control_candidate(graph_id, node_id, request)?;
         let mut selected = candidate.active_document().clone();
         self.preserve_live_processor_state(&mut selected, &[])?;
@@ -102,7 +112,7 @@ impl EngineGraphController {
     ) -> Result<Catalog, ProtocolError> {
         self.validate_control_revision(request.expected_revision)?;
         let revisions = self.exchange.revisions();
-        if request.enabled.is_none() && request.muted.is_none() {
+        if request.enabled.is_none() && request.muted.is_none() && request.gain_db.is_none() {
             return Err(invalid("node control update is empty"));
         }
         let mut candidate = self
@@ -123,6 +133,9 @@ impl EngineGraphController {
         }
         if let Some(muted) = request.muted {
             node.control.muted = muted;
+        }
+        if let Some(gain) = request.gain_db {
+            set_node_gain(&mut node.config, gain)?;
         }
         let next = revisions
             .submitted
@@ -150,6 +163,31 @@ fn controllable(node: &NodeSpec) -> bool {
     )
 }
 
+fn node_gain(config: &NodeConfig) -> Option<f32> {
+    match config {
+        NodeConfig::Gain(value) => Some(value.gain_db),
+        NodeConfig::VirtualEndpoint(value) => Some(value.gain_db),
+        NodeConfig::AudioDeviceInput(value) => Some(value.gain_db),
+        NodeConfig::ApplicationCapture(value) => Some(value.gain_db),
+        _ => None,
+    }
+}
+
+fn set_node_gain(config: &mut NodeConfig, gain: f32) -> Result<(), ProtocolError> {
+    if !gain.is_finite() || !(-60.0..=12.0).contains(&gain) {
+        return Err(invalid("gain must be between -60 and 12 dB"));
+    }
+    let target = match config {
+        NodeConfig::Gain(value) => &mut value.gain_db,
+        NodeConfig::VirtualEndpoint(value) => &mut value.gain_db,
+        NodeConfig::AudioDeviceInput(value) => &mut value.gain_db,
+        NodeConfig::ApplicationCapture(value) => &mut value.gain_db,
+        _ => return Err(invalid("node does not support gain")),
+    };
+    *target = gain;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,7 +209,100 @@ mod tests {
             expected_revision: revision,
             enabled,
             muted,
+            gain_db: None,
         }
+    }
+
+    #[test]
+    fn native_restoration_rejects_control_admission_without_waiting_for_its_lock() {
+        use mixrelay_audio_recorder::{RecorderAction, RecorderRequest};
+        use mixrelay_control_protocol::RecorderControlRequest;
+        let engine = std::sync::Arc::new(crate::endpoint_settings_tests::controller(graph()));
+        let held = engine.mutation.lock();
+        let (send, receive) = std::sync::mpsc::channel();
+        let worker_engine = engine.clone();
+        let worker = std::thread::spawn(move || {
+            let patch = request(1, Some(false), None);
+            let errors = [
+                worker_engine.read_node_controls("graph").unwrap_err(),
+                worker_engine
+                    .preview_node_switch("graph", "gain", &patch)
+                    .unwrap_err(),
+                worker_engine
+                    .change_node_control("graph", "gain", &patch)
+                    .unwrap_err(),
+                worker_engine
+                    .recorder_status("graph", "record")
+                    .unwrap_err(),
+                worker_engine
+                    .control_recorder(
+                        "graph",
+                        "record",
+                        RecorderControlRequest {
+                            expected_revision: 1,
+                            expected_recording: None,
+                            request: RecorderRequest {
+                                action: RecorderAction::Stop,
+                                path: None,
+                                sample_rate: None,
+                                encoding: None,
+                            },
+                        },
+                    )
+                    .unwrap_err(),
+            ];
+            send.send(errors).unwrap();
+        });
+        let result = receive.recv_timeout(std::time::Duration::from_secs(1));
+        drop(held);
+        worker.join().unwrap();
+        for error in result.expect("control requests must finish while restoration owns mutation") {
+            assert_eq!(error.code, ErrorCode::GraphExchangeBusy);
+        }
+    }
+
+    #[test]
+    fn gain_is_discovered_and_validated_before_publication() {
+        let directory = mixrelay_test_support::FixtureDir::new("node-gain").unwrap();
+        let engine = crate::endpoint_settings_tests::controller(graph())
+            .with_graph_catalog_path(directory.join("graphs.json"));
+        let id = engine.graph_catalog().unwrap().active_id;
+        let mut processor = engine
+            .prepare_and_validate(&engine.graph(), *engine.context.read())
+            .unwrap()
+            .processor;
+        let revision = engine.exchange.revisions().submitted;
+        assert_eq!(
+            engine.read_node_controls(&id).unwrap().nodes[0].gain_db,
+            Some(-3.0)
+        );
+        let original = engine.graph();
+        for (node, gain) in [
+            ("gain", f32::NAN),
+            ("gain", 13.0),
+            ("gain", -61.0),
+            ("record", 0.0),
+        ] {
+            let mut patch = request(revision, None, None);
+            patch.gain_db = Some(gain);
+            assert_eq!(
+                engine
+                    .change_node_control(&id, node, &patch)
+                    .unwrap_err()
+                    .code,
+                ErrorCode::GraphInvalid
+            );
+            assert_eq!(engine.graph(), original);
+        }
+        let mut patch = request(revision, None, None);
+        patch.gain_db = Some(-9.0);
+        engine.change_node_control(&id, "gain", &patch).unwrap();
+        assert!(engine.exchange.activate_pending(&mut processor));
+        assert_eq!(
+            engine.read_node_controls(&id).unwrap().nodes[0].gain_db,
+            Some(-9.0)
+        );
+        assert_eq!(engine.graph().edges, original.edges);
     }
 
     #[test]
@@ -299,6 +430,87 @@ mod tests {
     }
 
     #[test]
+    fn previous_take_stop_cannot_stop_a_new_recording_at_same_graph_revision() {
+        use mixrelay_audio_recorder::{RecorderAction, RecorderRequest, RecorderState};
+        use mixrelay_control_protocol::{ObservedRecording, RecorderControlRequest};
+        let directory = mixrelay_test_support::FixtureDir::new("take-fence").unwrap();
+        let engine = crate::endpoint_settings_tests::controller(graph())
+            .with_graph_catalog_path(directory.join("graphs.json"));
+        let graph_id = engine.graph_catalog().unwrap().active_id;
+        let id = engine.recorder_session_id(&graph_id, "record").unwrap();
+        let tap = engine.recorders.prepare(&id, 2).unwrap();
+        tap.capture(&[0.25; 8], 48_000);
+        let revision = engine.exchange.revisions().submitted;
+        let command = |action, path, expected_recording| RecorderControlRequest {
+            expected_revision: revision,
+            expected_recording,
+            request: RecorderRequest {
+                action,
+                path,
+                sample_rate: None,
+                encoding: None,
+            },
+        };
+        let a = engine
+            .control_recorder(
+                &graph_id,
+                "record",
+                command(
+                    RecorderAction::Record,
+                    Some(directory.join("a.wav").to_string_lossy().into_owned()),
+                    None,
+                ),
+            )
+            .unwrap();
+        let observed = ObservedRecording {
+            state: a.state,
+            path: a.path,
+        };
+        engine
+            .control_recorder(
+                &graph_id,
+                "record",
+                command(RecorderAction::Stop, None, Some(observed.clone())),
+            )
+            .unwrap();
+        let b = engine
+            .control_recorder(
+                &graph_id,
+                "record",
+                command(
+                    RecorderAction::Record,
+                    Some(directory.join("b.wav").to_string_lossy().into_owned()),
+                    None,
+                ),
+            )
+            .unwrap();
+        let error = engine
+            .control_recorder(
+                &graph_id,
+                "record",
+                command(RecorderAction::Stop, None, Some(observed)),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::GraphRevisionStale);
+        assert_eq!(engine.recorders.status(&id).state, RecorderState::Recording);
+        assert_eq!(engine.recorders.status(&id).path, b.path);
+        engine
+            .control_recorder(
+                &graph_id,
+                "record",
+                command(
+                    RecorderAction::Stop,
+                    None,
+                    Some(ObservedRecording {
+                        state: b.state,
+                        path: b.path,
+                    }),
+                ),
+            )
+            .unwrap();
+    }
+
+    #[test]
     fn recorder_off_finalizes_and_on_does_not_restart_recording() {
         use mixrelay_audio_recorder::{RecorderAction, RecorderRequest, RecorderState};
         use mixrelay_control_protocol::RecorderControlRequest;
@@ -324,6 +536,7 @@ mod tests {
                 &graph_id,
                 "record",
                 RecorderControlRequest {
+                    expected_recording: None,
                     expected_revision: engine.exchange.revisions().submitted,
                     request: start.clone(),
                 },
@@ -348,6 +561,7 @@ mod tests {
                     &graph_id,
                     "record",
                     RecorderControlRequest {
+                        expected_recording: None,
                         expected_revision: off.revision,
                         request: start,
                     }
@@ -373,6 +587,7 @@ mod tests {
 
     fn recorder_start(revision: u64) -> mixrelay_control_protocol::RecorderControlRequest {
         mixrelay_control_protocol::RecorderControlRequest {
+            expected_recording: None,
             expected_revision: revision,
             request: mixrelay_audio_recorder::RecorderRequest {
                 action: mixrelay_audio_recorder::RecorderAction::Record,

@@ -46,6 +46,18 @@ pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Hides the main window and Dock presence without stopping the app or audio.
+/// Returns lookup, window or activation-policy errors without requesting exit.
+pub(crate) fn hide_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or(tauri::Error::WindowNotFound)?;
+    window.hide()?;
+    #[cfg(target_os = "macos")]
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory)?;
+    Ok(())
+}
+
 /// Restores the main window and its Dock presence, returning native window errors.
 pub(crate) fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     let window = app

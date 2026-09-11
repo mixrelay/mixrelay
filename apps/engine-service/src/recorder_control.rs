@@ -147,6 +147,7 @@ mod tests {
         path: Option<String>,
     ) -> RecorderControlRequest {
         RecorderControlRequest {
+            expected_recording: None,
             expected_revision: revision,
             request: RecorderRequest {
                 action,

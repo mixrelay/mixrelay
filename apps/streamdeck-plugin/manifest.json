@@ -1,0 +1,27 @@
+{
+  "UUID": "io.mixrelay.streamdeck",
+  "Name": "MixRelay",
+  "Description": "Control MixRelay nodes through a private local connection.",
+  "Author": "MixRelay",
+  "Version": "0.1.0.0",
+  "Icon": "images/app",
+  "Category": "MixRelay",
+  "CategoryIcon": "images/icon",
+  "CodePath": "bin/plugin.js",
+  "SDKVersion": 2,
+  "Software": { "MinimumVersion": "6.6" },
+  "OS": [{ "Platform": "mac", "MinimumVersion": "14.2" }],
+  "Nodejs": { "Version": "20" },
+  "Actions": [
+    {
+      "UUID": "io.mixrelay.streamdeck.node",
+      "Name": "Node control",
+      "Tooltip": "Choose a MixRelay graph, node and supported control.",
+      "Icon": "images/icon",
+      "Controllers": ["Keypad", "Encoder"],
+      "PropertyInspectorPath": "ui/index.html",
+      "States": [{ "Image": "images/icon", "TitleAlignment": "middle", "FontSize": 12 }],
+      "Encoder": { "layout": "$B1", "TriggerDescription": { "Rotate": "Volume", "Push": "Mute" } }
+    }
+  ]
+}

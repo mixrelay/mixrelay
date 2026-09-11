@@ -66,6 +66,24 @@ describe('live control history debouncing', () => {
 });
 
 describe('history boundaries and disposal', () => {
+  it('rebases undo, redo and pending entries without losing their boundaries', () => {
+    const { result } = renderHook(() => useUndoHistory<number, string>());
+    act(() => {
+      result.current.record(0, 1, 'layout');
+      result.current.record(1, 2, 'layout');
+    });
+    expect(result.current.undo()?.value).toBe(1);
+    act(() => result.current.rebase((value) => value + 10));
+    expect(result.current.redo()?.value).toBe(12);
+    expect(result.current.undo()?.value).toBe(11);
+    expect(result.current.undo()?.value).toBe(10);
+    act(() => {
+      result.current.recordDebounced(10, 11, 'gain', 'node');
+      result.current.rebase((value) => value + 20);
+    });
+    expect(result.current.undo()?.value).toBe(30);
+    expect(result.current.redo()?.value).toBe(31);
+  });
   it('places structural edits after a pending control gesture', () => {
     const { result } = renderHook(() => useUndoHistory<number, string>());
     act(() => {

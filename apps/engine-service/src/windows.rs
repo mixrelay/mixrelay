@@ -795,6 +795,7 @@ impl WindowsGraphResources {
 impl GraphResourceBackend for WindowsGraphResources {
     fn device_inventory(
         &self,
+        _selectors: &[&mixrelay_audio_io::DeviceSelector],
     ) -> Result<Vec<mixrelay_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
         mixrelay_audio_io::windows::devices()
     }

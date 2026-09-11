@@ -3,7 +3,11 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Arc, mpsc},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::Duration,
 };
@@ -48,6 +52,7 @@ impl CloseLedger {
 /// can still delay joining. This owner never abandons an in-flight file replacement.
 /// This is never constructed or destroyed on the real-time audio thread.
 pub struct ControlMaintenance {
+    observing: Arc<AtomicBool>,
     stop: Option<mpsc::Sender<()>>,
     thread: Option<thread::JoinHandle<Result<(), ProtocolError>>>,
     // Deliberately retain the controller through the final shutdown checkpoint.
@@ -61,6 +66,8 @@ impl EngineGraphController {
     pub fn start_control_maintenance(self: &Arc<Self>) -> Result<ControlMaintenance, String> {
         let (stop, receive) = mpsc::channel();
         let weak = Arc::downgrade(self);
+        let observing = Arc::new(AtomicBool::new(true));
+        let worker_observing = observing.clone();
         let thread = thread::Builder::new()
             .name("mixrelay-control-maintenance".into())
             .spawn(move || {
@@ -69,6 +76,9 @@ impl EngineGraphController {
                     receive.recv_timeout(Duration::from_millis(500)),
                     Err(mpsc::RecvTimeoutError::Timeout)
                 ) {
+                    if !worker_observing.load(Ordering::Acquire) {
+                        continue;
+                    }
                     let Some(controller) = weak.upgrade() else {
                         return Ok(());
                     };
@@ -89,6 +99,7 @@ impl EngineGraphController {
             })
             .map_err(|error| format!("control maintenance failed to start: {error}"))?;
         Ok(ControlMaintenance {
+            observing,
             stop: Some(stop),
             thread: Some(thread),
             _controller: self.clone(),
@@ -142,6 +153,12 @@ impl EngineGraphController {
 }
 
 impl ControlMaintenance {
+    /// Stops admitting periodic restore/checkpoint work without abandoning an
+    /// in-flight operation. Final persistence begins only when `finish` is called.
+    pub fn stop_observing(&self) {
+        self.observing.store(false, Ordering::Release);
+    }
+
     /// Explicit shutdown reports persistence failure to the service caller.
     /// # Errors
     /// Returns a failed final checkpoint or an observer panic after joining the thread.
@@ -150,6 +167,7 @@ impl ControlMaintenance {
     }
 
     fn join(&mut self) -> Result<(), String> {
+        self.stop_observing();
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }

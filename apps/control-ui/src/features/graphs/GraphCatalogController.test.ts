@@ -73,6 +73,32 @@ describe('workspace files', () => {
 });
 
 describe('durable graph catalog coordinator', () => {
+  it('deletes the last graph with a fresh empty identity and fences late retries', async () => {
+    const { controller } = fixture();
+    await controller.reload();
+    const first = controller.snapshot().catalog?.activeId ?? '';
+    await controller.mutate({ action: 'delete', id: first });
+    const after = controller.snapshot();
+    expect(after.catalog?.activeId).not.toBe(first);
+    expect(after.catalog?.graphs).toHaveLength(1);
+    expect(after.document?.nodes).toEqual([]);
+    await controller.mutate({ action: 'delete', id: first });
+    expect(controller.snapshot().catalog).toBe(after.catalog);
+  });
+
+  it('blocks further destructive edits after an ambiguous server failure', async () => {
+    const { port, controller } = fixture();
+    await controller.reload();
+    const mutate = vi
+      .spyOn(port, 'mutateGraphCatalog')
+      .mockRejectedValue(
+        new ControlPortError(503, { code: 'control_unavailable', parameters: {} }),
+      );
+    await controller.mutate({ action: 'delete', id: 'first' });
+    expect(controller.snapshot().uncertain).toBe(true);
+    await controller.mutate({ action: 'delete', id: 'second' });
+    expect(mutate).toHaveBeenCalledTimes(1);
+  });
   it('creates independent graphs and confirms activation before replacing the workspace', async () => {
     const { port, controller } = fixture();
     await controller.reload();
@@ -205,7 +231,11 @@ describe('catalog operation lifetime', () => {
     vi.spyOn(port, 'mutateGraphCatalog').mockRejectedValue(
       new ControlPortError(503, {
         code: 'control_unavailable',
-        parameters: { resource: 'graph_catalog', reason: 'disk unavailable' },
+        parameters: {
+          resource: 'graph_catalog',
+          reason: 'disk unavailable',
+          catalogOutcome: 'not_applied',
+        },
       }),
     );
     await controller.mutate({ action: 'create', name: 'Unsaved' });

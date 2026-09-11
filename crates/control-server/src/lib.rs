@@ -224,8 +224,11 @@ pub trait ControlBackend: Send + Sync {
         })
     }
     /// Serializes catalog edits with graph publication.
+    /// Accepted execution changes return a response even if durable replacement fails;
+    /// report that failure through `persistence_error`, never through `Err`.
     /// # Errors
-    /// Rejects stale writers and invalid or unavailable graphs without switching selection.
+    /// Rejects stale writers and invalid or unavailable graphs without changing the
+    /// catalog, selected document, or execution. HTTP clients rely on `Err` as not applied.
     fn mutate_graph_catalog(
         &self,
         _request: GraphCatalogRequest,
@@ -633,7 +636,10 @@ async fn mutate_graph_catalog(
     };
     catalog_task(move || match state.backend.mutate_graph_catalog(request) {
         Ok(response) => Json(response).into_response(),
-        Err(error) => (protocol_error_status(error.code), Json(error)).into_response(),
+        Err(mut error) => {
+            error.parameters["catalogOutcome"] = serde_json::json!("not_applied");
+            (protocol_error_status(error.code), Json(error)).into_response()
+        }
     })
     .await
 }
@@ -1435,6 +1441,7 @@ mod tests {
                 assert_eq!(body["graphs"][0]["name"], "SPAT");
             } else {
                 assert_eq!(body["code"], "graph_revision_stale");
+                assert_eq!(body["parameters"]["catalogOutcome"], "not_applied");
             }
         }
         let (status, _) = response_json(

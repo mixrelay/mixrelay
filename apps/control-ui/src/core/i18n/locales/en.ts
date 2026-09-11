@@ -102,6 +102,9 @@ export const en = {
     ready: 'Ready',
   },
   studio: {
+    deleteGraph: 'Delete graph',
+    deleteGraphNotice:
+      'Delete “{{name}}”? Its audio processing and recordings will stop. This cannot be undone. Saved workspace files are not deleted.',
     catalogUnavailable: 'Saved graphs are unavailable. Your existing graph was not replaced.',
     reloadGraphs: 'Reload graphs',
     graphSaveFailed:
