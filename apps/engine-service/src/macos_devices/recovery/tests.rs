@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn reference_order_changes_keep_clock_group_but_real_membership_changes_do_not() {
+    let members = |names: &[&str]| {
+        names
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect::<Vec<_>>()
+    };
+    let current = members(&["headphones", "microphone", "speakers"]);
+    assert!(same_members(&current, &current));
+    assert!(same_members(
+        &current,
+        &members(&["speakers", "headphones", "microphone"])
+    ));
+    assert!(!same_members(
+        &current,
+        &members(&["headphones", "microphone"])
+    ));
+    assert!(!same_members(
+        &current,
+        &members(&["headphones", "microphone", "other"])
+    ));
+    assert!(!same_members(
+        &current,
+        &members(&["headphones", "microphone", "microphone"])
+    ));
+}
+
+#[test]
 fn topology_loss_bypasses_periodic_delay_but_not_publication_ownership() {
     use std::sync::atomic::Ordering;
     use std::time::{Duration, Instant};

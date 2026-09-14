@@ -171,7 +171,8 @@ use mixrelay_macos_transport::{
         mr_endpoint_transport_incarnation,
     },
     shared_audio_buffer::{
-        mr_shared_audio_buffer_read, mr_shared_audio_buffer_stats, mr_shared_audio_buffer_write,
+        mr_shared_audio_buffer_read, mr_shared_audio_buffer_stats,
+        mr_shared_audio_buffer_try_begin_epoch, mr_shared_audio_buffer_write,
     },
 };
 
@@ -181,11 +182,19 @@ struct LocalTransport<'a> {
     endpoint: CallbackEndpoint<'a>,
     reads: usize,
     writes: usize,
+    prepares: usize,
+    invalidations: usize,
     reject_prepare: bool,
     reject_write: bool,
 }
 impl Transport for LocalTransport<'_> {
+    fn invalidate_capture(&mut self, _: &EndpointSnapshot) -> bool {
+        self.invalidations += 1;
+        // SAFETY: this fixture is the sole writer of its pinned capture mapping.
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(self.endpoint.capture_buffer()) != 0 }
+    }
     fn prepare_capture(&mut self, endpoint: &EndpointSnapshot) -> Option<EndpointSnapshot> {
+        self.prepares += 1;
         (!self.reject_prepare).then_some(*endpoint)
     }
     fn read(&mut self, _: &EndpointSnapshot, frame: u64, pcm: &mut [f32], frames: u32) -> u32 {
@@ -247,6 +256,8 @@ fn endpoint(registry: &EndpointRegistry) -> LocalTransport<'_> {
         endpoint,
         reads: 0,
         writes: 0,
+        prepares: 0,
+        invalidations: 0,
         reject_prepare: false,
         reject_write: false,
     }
@@ -294,6 +305,127 @@ fn demand(transport: &LocalTransport<'_>, through: u64, quantum: u32) -> Endpoin
 #[test]
 fn coalesced_native_callbacks_deliver_the_latest_pcm_through_dsp() {
     assert_coalesced_pcm(32, 128, &[32, 96, 192]);
+}
+
+#[test]
+fn primary_off_is_applied_even_when_capture_admission_is_blocked() {
+    use mixrelay_audio_engine::{ProcessorExchange, RuntimeControlUpdate};
+    use mixrelay_audio_graph::NodeControl;
+    let registry = EndpointRegistry::new();
+    let mut io = WorkerIo::new(endpoint(&registry), Some(primary()));
+    let format = RenderFormat {
+        sample_rate: 48_000,
+        block_frames: 32,
+    };
+    let mut processor = processor_for_reference(format, true);
+    let exchange = ProcessorExchange::new(1);
+    let devices = crate::macos_devices::DeviceSet::default();
+    let status = AdapterRuntimeStatus::new(adapter_profile());
+    let mut timeline = MacTimeline::new();
+    for (revision, enabled) in [(2, true), (3, false), (4, true)] {
+        exchange
+            .publish_controls(
+                processor.plan().controls(),
+                revision,
+                &[RuntimeControlUpdate {
+                    node_id: "default-virtual-io".into(),
+                    control: NodeControl {
+                        enabled,
+                        muted: false,
+                    },
+                    gain_db: None,
+                }],
+            )
+            .unwrap();
+        io.transport.reject_prepare = !enabled;
+        let snapshot = demand(&io.transport, (revision - 1) * 32, 32);
+        let before = (
+            io.transport.prepares,
+            io.transport.reads,
+            io.transport.writes,
+        );
+        assert!(
+            io.process(
+                &mut processor,
+                WorkerCycle {
+                    timeline: &timeline,
+                    frames: 32,
+                    discontinuity: false,
+                    write_hal: true,
+                    devices: &devices,
+                    status: &status,
+                    endpoint: Some(snapshot),
+                }
+            )
+            .unwrap()
+        );
+        let count = usize::from(enabled);
+        assert_eq!(io.transport.prepares - before.0, count);
+        assert_eq!(io.transport.reads - before.1, count);
+        assert_eq!(io.transport.writes - before.2, count);
+        assert_eq!(processor.plan().controls().applied_revision(), revision);
+        timeline.frame += 32;
+    }
+    assert_eq!(io.transport.invalidations, 1);
+}
+
+#[test]
+fn closing_capture_client_does_not_reject_continuing_playback() {
+    let registry = EndpointRegistry::new();
+    let mut io = WorkerIo::new(endpoint(&registry), Some(primary()));
+    let format = RenderFormat {
+        sample_rate: 48_000,
+        block_frames: 32,
+    };
+    let mut processor = processor_for_reference(format, true);
+    let devices = crate::macos_devices::DeviceSet::default();
+    let status = AdapterRuntimeStatus::new(adapter_profile());
+    let mut timeline = MacTimeline::new();
+    for callback in 1..=1000 {
+        let mut snapshot = demand(&io.transport, callback * 32, 32);
+        // Capture stops after one callback, while playback keeps supplying PCM.
+        // Its last published stamp stays valid; it is not a new capture request.
+        snapshot.clock.capture_through = 32;
+        assert!(
+            io.process(
+                &mut processor,
+                WorkerCycle {
+                    timeline: &timeline,
+                    frames: 32,
+                    discontinuity: false,
+                    write_hal: true,
+                    devices: &devices,
+                    status: &status,
+                    endpoint: Some(snapshot),
+                }
+            )
+            .unwrap(),
+            "capture backpressure must not stop playback DSP"
+        );
+        timeline.frame += 32;
+    }
+    assert_eq!((io.transport.reads, io.transport.writes), (1000, 1));
+    assert_eq!(status.status(format).overruns, 0);
+    let snapshot = demand(&io.transport, 32_032, 32);
+    assert!(
+        io.process(
+            &mut processor,
+            WorkerCycle {
+                timeline: &timeline,
+                frames: 32,
+                discontinuity: false,
+                write_hal: true,
+                devices: &devices,
+                status: &status,
+                endpoint: Some(snapshot),
+            }
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        io.transport.writes, 2,
+        "new capture demand resumes without reset"
+    );
 }
 
 #[test]

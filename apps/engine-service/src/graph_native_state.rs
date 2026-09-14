@@ -139,7 +139,11 @@ impl EngineGraphController {
             let NodeConfig::Provider(provider) = &mut node.config else {
                 continue;
             };
-            if !node.control.enabled {
+            if !node.control.enabled
+                && !self
+                    .processor_controls
+                    .has_worker(&runtime_node_id(graph_id, &node.id))
+            {
                 found = true;
                 continue;
             }

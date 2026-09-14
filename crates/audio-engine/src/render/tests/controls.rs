@@ -112,23 +112,57 @@ fn processor_off_avoids_factory_and_dsp_while_mute_keeps_processing_without_bypa
 #[test]
 fn restoring_enabled_node_retains_authored_connections_and_parameters() {
     let counts = Arc::new(Counts::default());
-    let mut document = provider_document(NodeControl::default());
+    let document = provider_document(NodeControl::default());
     let saved = document.clone();
-    for enabled in [true, false, true] {
-        document.nodes[1].control.enabled = enabled;
-        let mut processor = prepare_provider(&document, &counts);
+    let mut processor = prepare_provider(&document, &counts);
+    let plan = Arc::clone(processor.plan());
+    let exchange = crate::ProcessorExchange::new(1);
+    for (revision, enabled) in [(2, true), (3, false), (4, true)] {
+        exchange
+            .publish_controls(
+                plan.controls(),
+                revision,
+                &[crate::RuntimeControlUpdate {
+                    node_id: NodeId::from("effect"),
+                    control: NodeControl {
+                        enabled,
+                        muted: false,
+                    },
+                    gain_db: None,
+                }],
+            )
+            .unwrap();
         let mut output = [9.0; 8];
+        HEAP_OPERATIONS.with(|count| count.set(Some(0)));
         processor
             .process_block(4, &[&[1.0; 8]], &mut [&mut output])
             .unwrap();
+        assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
         let expected = if enabled { 2.0_f32 } else { 0.0 };
         assert_eq!(output.map(f32::to_bits), [expected; 8].map(f32::to_bits));
     }
     assert_eq!(document, saved);
+    assert!(Arc::ptr_eq(processor.plan(), &plan));
+    assert_eq!(counts.prepares.load(Ordering::Relaxed), 1);
+    assert_eq!(counts.calls.load(Ordering::Relaxed), 2);
+    assert_eq!(
+        exchange.plan_revisions(),
+        crate::ProcessorRevisions {
+            active: 1,
+            submitted: 1
+        }
+    );
+    assert_eq!(
+        exchange.revisions(),
+        crate::ProcessorRevisions {
+            active: 4,
+            submitted: 4
+        }
+    );
 }
 
 #[test]
-fn disabled_source_has_no_binding_and_does_not_affect_another_active_route() {
+fn disabled_source_retains_binding_but_does_not_affect_another_active_route() {
     let mut disabled = device_input("disabled");
     disabled.control.enabled = false;
     let execution = compile(
@@ -139,12 +173,12 @@ fn disabled_source_has_no_binding_and_does_not_affect_another_active_route() {
         ],
     );
     let plan = RenderPlan::prepare(&execution).unwrap();
-    assert_eq!(plan.source_bindings().len(), 1);
+    assert_eq!(plan.source_bindings().len(), 2);
     assert_eq!(plan.source_bindings()[0].node_id(), &NodeId::from("active"));
     let mut processor = BlockProcessor::new(Arc::new(plan));
     let mut output = [0.0; 8];
     processor
-        .process_block(4, &[&[0.5; 8]], &mut [&mut output])
+        .process_block(4, &[&[0.5; 8], &[9.0; 8]], &mut [&mut output])
         .unwrap();
     assert_eq!(output.map(f32::to_bits), [0.5_f32; 8].map(f32::to_bits));
 }
@@ -171,7 +205,87 @@ fn source_and_sink_mute_preserve_native_bindings_but_silence_the_boundary() {
 }
 
 #[test]
-fn disabled_recorder_has_no_tap_or_sink_routes() {
+fn runtime_gain_and_mute_publish_without_preparation_or_audio_heap_operations() {
+    let execution = compile(
+        vec![device_input("in"), device_output("out")],
+        vec![edge("route", "in", AUDIO_PORT_ID, "out", AUDIO_PORT_ID)],
+    );
+    let plan = Arc::new(RenderPlan::prepare(&execution).unwrap());
+    let mut processor = BlockProcessor::new(Arc::clone(&plan));
+    let exchange = crate::ProcessorExchange::new(1);
+    let mut output = [0.0; 8];
+    for revision in 2..102 {
+        let muted = revision % 2 == 0;
+        let updates = [crate::RuntimeControlUpdate {
+            node_id: NodeId::from("in"),
+            control: NodeControl {
+                enabled: true,
+                muted,
+            },
+            gain_db: Some(-6.020_600_3),
+        }];
+        HEAP_OPERATIONS.with(|count| count.set(Some(0)));
+        exchange
+            .publish_controls(plan.controls(), revision, &updates)
+            .unwrap();
+        processor
+            .process_block(4, &[&[1.0; 8]], &mut [&mut output])
+            .unwrap();
+        let operations = HEAP_OPERATIONS.with(|count| count.replace(None));
+        assert_eq!(operations, Some(0));
+        let expected = if muted { 0.0_f32 } else { 0.5 };
+        assert!(
+            output
+                .iter()
+                .all(|sample| (*sample - expected).abs() < 0.000_001)
+        );
+        assert_eq!(exchange.revisions().active, revision);
+    }
+    assert!(Arc::ptr_eq(processor.plan(), &plan));
+    assert_eq!(exchange.plan_revisions().submitted, 1);
+}
+
+#[test]
+fn invalid_batch_and_initially_off_provider_never_partially_publish() {
+    let counts = Arc::new(Counts::default());
+    let processor = prepare_provider(
+        &provider_document(NodeControl {
+            enabled: false,
+            muted: false,
+        }),
+        &counts,
+    );
+    let bank = processor.plan().controls();
+    let exchange = crate::ProcessorExchange::new(1);
+    let source = crate::RuntimeControlUpdate {
+        node_id: NodeId::from("in"),
+        control: NodeControl {
+            enabled: false,
+            muted: true,
+        },
+        gain_db: Some(-6.0),
+    };
+    let provider = crate::RuntimeControlUpdate {
+        node_id: NodeId::from("effect"),
+        control: NodeControl::default(),
+        gain_db: None,
+    };
+    assert_eq!(
+        exchange.publish_controls(bank, 2, &[source, provider]),
+        Err(crate::RuntimeControlError::NeedsPreparation(NodeId::from(
+            "effect"
+        )))
+    );
+    assert_eq!(
+        bank.snapshot(&NodeId::from("in")),
+        Some((NodeControl::default(), 1.0))
+    );
+    assert_eq!(bank.published_revision(), 1);
+    assert_eq!(counts.prepares.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn disabled_recorder_retains_prepared_tap_and_routes_for_in_place_activation() {
     let mut recorder = node("record", NodeConfig::Recorder { channels: 2 });
     recorder.control.enabled = false;
     let execution = compile(
@@ -179,8 +293,8 @@ fn disabled_recorder_has_no_tap_or_sink_routes() {
         vec![edge("record", "in", AUDIO_PORT_ID, "record", AUDIO_PORT_ID)],
     );
     let plan = RenderPlan::prepare(&execution).unwrap();
-    assert!(plan.recorder_bindings.is_empty());
-    assert!(plan.sink_routes.is_empty());
+    assert_eq!(plan.recorder_bindings.len(), 1);
+    assert_eq!(plan.sink_routes.len(), 1);
 }
 
 fn prepare_dynamics(config: &NodeConfig, muted: bool, revision: u64) -> Box<BlockProcessor> {
@@ -338,4 +452,219 @@ fn unrelated_mute_publication_retains_device_bus_history_without_allocation() {
         current.process_external_cycle(cycle, &mut io).unwrap();
         assert_eq!(io.output.map(f32::to_bits), [0.0_f32; 8].map(f32::to_bits));
     }
+}
+
+#[test]
+fn off_external_node_skips_both_io_calls_and_reenables_in_the_same_plan() {
+    let (mut processor, mut io, mut cycle) = callback_fixture();
+    let plan = Arc::clone(processor.plan());
+    let exchange = crate::ProcessorExchange::new(1);
+    io.value = 0.75;
+    processor.process_external_cycle(cycle, &mut io).unwrap();
+    assert_eq!((io.reads, io.writes), (1, 1));
+    for (revision, enabled) in [(2, false), (3, true)] {
+        exchange
+            .publish_controls(
+                plan.controls(),
+                revision,
+                &[crate::RuntimeControlUpdate {
+                    node_id: NodeId::from("io"),
+                    control: NodeControl {
+                        enabled,
+                        muted: false,
+                    },
+                    gain_db: None,
+                }],
+            )
+            .unwrap();
+        cycle.first_frame += 4;
+        HEAP_OPERATIONS.with(|count| count.set(Some(0)));
+        processor.process_external_cycle(cycle, &mut io).unwrap();
+        assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
+        let calls = if enabled { 2 } else { 1 };
+        assert_eq!((io.reads, io.writes), (calls, calls));
+    }
+    assert!(Arc::ptr_eq(processor.plan(), &plan));
+}
+
+struct ObservedControlIo {
+    inner: CallbackIo,
+    enabled: bool,
+    begin_calls: usize,
+    admission: CycleAdmission,
+}
+
+impl ExternalIo for ObservedControlIo {
+    fn begin_cycle(
+        &mut self,
+        _: &ProcessCycle,
+        controls: ExternalControlState<'_>,
+    ) -> CycleAdmission {
+        self.begin_calls += 1;
+        assert_eq!(controls.source_enabled(0), Some(self.enabled));
+        assert_eq!(controls.sink_enabled(0), Some(self.enabled));
+        assert_eq!(controls.source_enabled(1), None);
+        assert_eq!(controls.sink_enabled(1), None);
+        assert!(controls.sources().all(|(binding, enabled)| {
+            !binding.node_id().as_str().is_empty() && enabled == self.enabled
+        }));
+        assert!(controls.sinks().all(|(binding, enabled)| {
+            !binding.node_id().as_str().is_empty() && enabled == self.enabled
+        }));
+        self.admission
+    }
+
+    fn read_source(
+        &mut self,
+        binding: &ExternalBinding,
+        destination: &mut [f32],
+        cycle: &ProcessCycle,
+    ) -> TransferOutcome {
+        assert!(self.enabled && self.begin_calls > 0);
+        self.inner.read_source(binding, destination, cycle)
+    }
+
+    fn write_sink(
+        &mut self,
+        binding: &ExternalBinding,
+        source: &[f32],
+        cycle: &ProcessCycle,
+    ) -> TransferOutcome {
+        assert!(self.enabled && self.begin_calls > 0);
+        self.inner.write_sink(binding, source, cycle)
+    }
+}
+
+#[test]
+fn external_cycle_observes_the_same_gate_snapshot_before_any_transfer_without_allocation() {
+    let (mut processor, io, mut cycle) = callback_fixture();
+    let bank = Arc::clone(processor.plan().controls());
+    let exchange = crate::ProcessorExchange::new(1);
+    let mut io = ObservedControlIo {
+        inner: io,
+        enabled: true,
+        begin_calls: 0,
+        admission: CycleAdmission::Process,
+    };
+    for (revision, enabled) in [(2, false), (3, true)] {
+        exchange
+            .publish_controls(
+                &bank,
+                revision,
+                &[crate::RuntimeControlUpdate {
+                    node_id: NodeId::from("io"),
+                    control: NodeControl {
+                        enabled,
+                        muted: false,
+                    },
+                    gain_db: None,
+                }],
+            )
+            .unwrap();
+        io.enabled = enabled;
+        HEAP_OPERATIONS.with(|count| count.set(Some(0)));
+        processor.process_external_cycle(cycle, &mut io).unwrap();
+        assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
+        assert_eq!(io.begin_calls, usize::try_from(revision - 1).unwrap());
+        cycle.first_frame += 4;
+    }
+    assert_eq!((io.inner.reads, io.inner.writes), (1, 1));
+}
+
+#[test]
+fn admission_retry_observes_off_without_consuming_pcm_dsp_or_timeline() {
+    let counts = Arc::new(Counts::default());
+    let mut processor = prepare_provider(&provider_document(NodeControl::default()), &counts);
+    let bank = Arc::clone(processor.plan().controls());
+    let exchange = crate::ProcessorExchange::new(1);
+    let (_, inner, mut cycle) = callback_fixture();
+    let mut io = ObservedControlIo {
+        inner,
+        enabled: true,
+        begin_calls: 0,
+        admission: CycleAdmission::Process,
+    };
+    assert!(
+        processor
+            .process_external_cycle(cycle, &mut io)
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(counts.calls.load(Ordering::Relaxed), 1);
+    for (revision, enabled) in [(2, false), (3, true)] {
+        let updates = ["in", "out"].map(|id| crate::RuntimeControlUpdate {
+            node_id: NodeId::from(id),
+            control: NodeControl {
+                enabled,
+                muted: false,
+            },
+            gain_db: None,
+        });
+        exchange
+            .publish_controls(&bank, revision, &updates)
+            .unwrap();
+        // The repeated already-accepted coordinates are invalid. Pending controls must not be
+        // sampled and the adapter must not be entered on a contract failure.
+        assert!(processor.process_external_cycle(cycle, &mut io).is_err());
+        assert_eq!(bank.applied_revision(), revision - 1);
+        io.enabled = enabled;
+        io.admission = CycleAdmission::Retry;
+        HEAP_OPERATIONS.with(|count| count.set(Some(0)));
+        let retry = processor.process_external_cycle(
+            ProcessCycle {
+                first_frame: 4,
+                ..cycle
+            },
+            &mut io,
+        );
+        assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
+        assert_eq!(retry.unwrap(), None);
+        assert_eq!(bank.applied_revision(), revision);
+        assert_eq!(counts.calls.load(Ordering::Relaxed), 1);
+        assert_eq!((io.inner.reads, io.inner.writes), (1, 1));
+    }
+    assert_eq!(io.begin_calls, 3);
+    io.admission = CycleAdmission::Process;
+    cycle.first_frame = 4;
+    assert!(
+        processor
+            .process_external_cycle(cycle, &mut io)
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(counts.calls.load(Ordering::Relaxed), 2);
+    assert_eq!((io.inner.reads, io.inner.writes), (2, 2));
+}
+
+#[test]
+fn device_bus_off_clears_previous_quantum_before_reenable() {
+    let mut processor = prepare_bus(1, false, false);
+    let plan = Arc::clone(processor.plan());
+    let exchange = crate::ProcessorExchange::new(1);
+    let (_, mut io, mut cycle) = callback_fixture();
+    io.value = 0.75;
+    processor.process_external_cycle(cycle, &mut io).unwrap();
+    for (revision, enabled) in [(2, false), (3, true)] {
+        exchange
+            .publish_controls(
+                plan.controls(),
+                revision,
+                &[crate::RuntimeControlUpdate {
+                    node_id: NodeId::from("bus"),
+                    control: NodeControl {
+                        enabled,
+                        muted: false,
+                    },
+                    gain_db: None,
+                }],
+            )
+            .unwrap();
+        cycle.first_frame += 4;
+        io.value = 0.25;
+        processor.process_external_cycle(cycle, &mut io).unwrap();
+        assert_eq!(io.output.map(f32::to_bits), [0.0_f32; 8].map(f32::to_bits));
+    }
+    cycle.first_frame += 4;
+    processor.process_external_cycle(cycle, &mut io).unwrap();
+    assert_eq!(io.output.map(f32::to_bits), [0.25_f32; 8].map(f32::to_bits));
 }

@@ -101,6 +101,12 @@ impl Catalog {
             .map(|graph| (graph.id.as_str(), &graph.document))
     }
 
+    pub(super) fn control_documents(&self) -> impl Iterator<Item = (&str, &str, &GraphDocument)> {
+        self.graphs
+            .iter()
+            .map(|graph| (graph.id.as_str(), graph.name.as_str(), &graph.document))
+    }
+
     fn imported(document: GraphDocument) -> Self {
         Self {
             version: 1,
@@ -253,6 +259,7 @@ impl EngineGraphController {
                 });
             }
         }
+        self.refresh_control_snapshot();
         self
     }
 
@@ -295,6 +302,7 @@ impl EngineGraphController {
         {
             store.value = Ok(candidate);
         }
+        self.refresh_control_snapshot();
     }
 
     pub(super) fn finish_catalog_write(&self, staged: Option<StagedWrite>) {

@@ -24,6 +24,15 @@ pub struct EndpointSnapshot {
     pub render_channels: u32,
     pub capture_channels: u32,
 }
+
+/// Absence permits another clock owner; an unready or contended observation does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SnapshotError {
+    #[error("endpoint is not present")]
+    Missing,
+    #[error("endpoint clock observation is not coherent yet")]
+    Pending,
+}
 /// Actual storage geometry for one endpoint, not a graph-global audio configuration.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AudioConfig {
@@ -82,9 +91,13 @@ pub fn audio_config(id: EndpointId) -> Option<AudioConfig> {
     })
 }
 /// Observes a coherent native clock/mapping for the exact stable endpoint identity.
-#[must_use]
-pub fn snapshot(id: EndpointId) -> Option<EndpointSnapshot> {
-    audio::snapshot(SERVICE.get()?.runtime.read().endpoint(id)?)
+/// # Errors
+/// Missing service/identity, or a pending clock transition/concurrent publication.
+pub fn snapshot(id: EndpointId) -> Result<EndpointSnapshot, SnapshotError> {
+    let service = SERVICE.get().ok_or(SnapshotError::Missing)?;
+    let read = service.runtime.read();
+    let endpoint = read.endpoint(id).ok_or(SnapshotError::Missing)?;
+    audio::snapshot(endpoint).ok_or(SnapshotError::Pending)
 }
 /// Reads PCM only from the snapshot's identity and incarnation, silencing stale/missing data.
 pub fn read_render(

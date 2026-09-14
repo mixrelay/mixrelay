@@ -6,7 +6,9 @@ use std::{
 use parking_lot::{Mutex, RwLock};
 mod engine_power;
 mod node_control;
+mod node_control_snapshot;
 mod recorder_control;
+mod runtime_node_control;
 use mixrelay_audio_engine::{
     BlockProcessor, ExternalBinding, MeterBinding, PeakMeterBank, ProcessorConfigurationError,
     ProcessorExchange, ProcessorSubmitError, RenderPlan, RenderPlanError,
@@ -382,6 +384,7 @@ pub struct EngineGraphController {
     endpoint_backend: Arc<dyn VirtualEndpointBackend>,
     meter_bindings: RwLock<BTreeMap<u64, Vec<MeterBinding>>>,
     execution_views: RwLock<BTreeMap<u64, execution_control::ExecutionView>>,
+    control_snapshot: RwLock<Option<node_control_snapshot::ControlReadView>>,
     meters: Arc<PeakMeterBank>,
     processor_catalog: ProcessorCatalog,
     processor_controls: ProcessorControlRegistry,
@@ -491,7 +494,7 @@ impl EngineGraphController {
         meter_bindings.insert(active_revision, initial_bindings);
         let processor_controls = ProcessorControlRegistry::default();
         let recorders = mixrelay_audio_recorder::RecorderRegistry::default();
-        Self {
+        let controller = Self {
             recorder_cleanup_error: Mutex::new(None),
             node_control_warning: Mutex::new(None),
             execution_enabled: std::sync::atomic::AtomicBool::new(true),
@@ -520,12 +523,15 @@ impl EngineGraphController {
             endpoint_backend,
             meter_bindings: RwLock::new(meter_bindings),
             execution_views: RwLock::new(BTreeMap::new()),
+            control_snapshot: RwLock::new(None),
             meters,
             processor_catalog,
             processor_controls,
             graph_resources,
             runtime_status,
-        }
+        };
+        controller.refresh_control_snapshot();
+        controller
     }
 
     /// Constructs a controller with the built-in session document selected from
@@ -557,7 +563,11 @@ impl EngineGraphController {
         context: CompileContext,
     ) -> Result<execution_control::PreparedExecution, ProtocolError> {
         let catalog = self.catalog_candidate(document);
-        self.prepare_execution(document, catalog.as_ref(), context)
+        let prepared = self.prepare_execution(document, catalog.as_ref(), context)?;
+        self.execution_views
+            .write()
+            .insert(document.revision, prepared.view.clone());
+        Ok(prepared)
     }
 
     fn validate_required_endpoint(&self, document: &GraphDocument) -> Result<(), ProtocolError> {
@@ -632,6 +642,11 @@ impl EngineGraphController {
 }
 
 impl ControlBackend for EngineGraphController {
+    fn controls_snapshot(
+        &self,
+    ) -> Result<mixrelay_control_protocol::EngineControlSnapshot, ProtocolError> {
+        self.snapshot_controls()
+    }
     fn node_controls(
         &self,
         graph_id: &str,
@@ -644,7 +659,7 @@ impl ControlBackend for EngineGraphController {
         graph_id: &str,
         node_id: &str,
         request: mixrelay_control_protocol::NodeControlRequest,
-    ) -> Result<GraphApplyResponse, ProtocolError> {
+    ) -> Result<mixrelay_control_protocol::NodeControlResponse, ProtocolError> {
         self.change_node_control(graph_id, node_id, &request)
     }
 
@@ -653,7 +668,7 @@ impl ControlBackend for EngineGraphController {
         graph_id: &str,
         node_id: &str,
         request: mixrelay_control_protocol::NodeControlRequest,
-    ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+    ) -> Result<mixrelay_control_protocol::NodeControlPreview, ProtocolError> {
         self.preview_node_switch(graph_id, node_id, &request)
     }
     fn preview_workspace_file(
@@ -680,9 +695,7 @@ impl ControlBackend for EngineGraphController {
         graph_id: &str,
         node_id: &str,
     ) -> Result<mixrelay_control_protocol::RecorderStatus, ProtocolError> {
-        let _mutation = self.try_node_control()?;
-        let id = self.recorder_session_id(graph_id, node_id)?;
-        Ok(self.recorders.status(id.as_str()))
+        self.snapshot_recorder_status(graph_id, node_id)
     }
 
     fn control_recorder(
@@ -827,7 +840,7 @@ impl ControlBackend for EngineGraphController {
     fn meters(&self) -> MeterSnapshot {
         let _mutation = self.mutation.lock();
         let graph_id = self.view_graph_id();
-        let revision = self.exchange.revisions().active;
+        let revision = self.exchange.plan_revisions().active;
         let bindings = self.meter_bindings.read();
         let views = self.execution_views.read();
         let view = views.get(&revision);
@@ -854,7 +867,7 @@ impl ControlBackend for EngineGraphController {
             .collect();
         MeterSnapshot {
             protocol_version: PROTOCOL_VERSION,
-            revision,
+            revision: self.exchange.revisions().active,
             nodes,
         }
     }
@@ -1174,7 +1187,7 @@ impl EngineGraphController {
             })
             .map_err(configuration_error)?;
         *self.context.write() = context;
-        let active_revision = self.exchange.revisions().active;
+        let active_revision = self.exchange.plan_revisions().active;
         let mut bindings = self.meter_bindings.write();
         bindings.retain(|existing, _| *existing == active_revision);
         bindings.insert(revision, meter_bindings);
@@ -1692,10 +1705,19 @@ fn prepare_error(error: PrepareProcessorError) -> ProtocolError {
 }
 
 fn exchange_error(error: ProcessorSubmitError) -> ProtocolError {
-    let ProcessorSubmitError::Busy { proposed_revision } = error;
-    ProtocolError {
-        code: ErrorCode::GraphExchangeBusy,
-        parameters: serde_json::json!({ "proposedRevision": proposed_revision }),
+    match error {
+        ProcessorSubmitError::Busy { proposed_revision } => ProtocolError {
+            code: ErrorCode::GraphExchangeBusy,
+            parameters: serde_json::json!({ "proposedRevision": proposed_revision }),
+        },
+        ProcessorSubmitError::WrongExchange { proposed_revision } => ProtocolError {
+            code: ErrorCode::GraphInvalid,
+            parameters: serde_json::json!({ "proposedRevision": proposed_revision, "reason": "runtime controls belong to another processor exchange" }),
+        },
+        ProcessorSubmitError::StaleRevision { current, proposed } => ProtocolError {
+            code: ErrorCode::GraphRevisionStale,
+            parameters: serde_json::json!({ "submittedRevision": current, "proposedRevision": proposed }),
+        },
     }
 }
 
@@ -1703,6 +1725,12 @@ fn configuration_error(error: ProcessorConfigurationError<HostAudioBackendError>
     match error {
         ProcessorConfigurationError::Busy { proposed_revision } => {
             exchange_error(ProcessorSubmitError::Busy { proposed_revision })
+        }
+        ProcessorConfigurationError::WrongExchange { proposed_revision } => {
+            exchange_error(ProcessorSubmitError::WrongExchange { proposed_revision })
+        }
+        ProcessorConfigurationError::StaleRevision { current, proposed } => {
+            exchange_error(ProcessorSubmitError::StaleRevision { current, proposed })
         }
         ProcessorConfigurationError::Configuration(error) => ProtocolError {
             code: ErrorCode::AudioDeviceDisconnected,

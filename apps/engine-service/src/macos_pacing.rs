@@ -218,8 +218,9 @@ impl NativePacer {
         }
         let through = clock.render_through.max(clock.capture_through);
         if through == 0 {
-            self.reset();
-            return Pace::Idle;
+            // Running with no published callback is priming, not a stopped clock.
+            // Keep the selected owner; the first real credit establishes its epoch.
+            return Pace::Wait;
         }
         let identity = (clock.incarnation, clock.epoch);
         let restarted = self.epoch != Some(identity);
@@ -281,7 +282,7 @@ mod tests {
         );
         assert_eq!(
             pacer.next(Some(snapshot(0, 0)), 48_000, 128, 4096),
-            Pace::Idle
+            Pace::Wait
         );
         assert_eq!(
             pacer.next(Some(snapshot(128, 0)), 44_100, 128, 4096),

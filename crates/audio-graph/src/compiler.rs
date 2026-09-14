@@ -448,7 +448,11 @@ impl GraphCompiler {
         nodes: &mut BTreeMap<NodeId, CompiledNode>,
         issues: &mut Vec<GraphIssue>,
     ) {
-        match self.resolver.resolve(node, context) {
+        match self
+            .resolver
+            .resolve(node, context)
+            .or_else(|error| resolve_dormant_provider(node, context, error))
+        {
             Ok(resolved) => {
                 nodes.insert(
                     node.id.clone(),
@@ -467,6 +471,33 @@ impl GraphCompiler {
             }),
         }
     }
+}
+
+fn resolve_dormant_provider(
+    node: &NodeSpec,
+    context: &CompileContext,
+    error: NodeResolutionError,
+) -> Result<ResolvedNode, NodeResolutionError> {
+    if node.control.enabled || !matches!(error, NodeResolutionError::CapabilityUnavailable { .. }) {
+        return Err(error);
+    }
+    let NodeConfig::Provider(config) = &node.config else {
+        return Err(error);
+    };
+    let Some(ports) = config.ports else {
+        // No native provider and no saved geometry: keep the dormant identity, but
+        // never invent connection ports or instantiate an unavailable processor.
+        return Ok(ResolvedNode {
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        });
+    };
+    validate_channels(ports.inputs, context.limits.max_channels_per_port)?;
+    validate_channels(ports.outputs, context.limits.max_channels_per_port)?;
+    Ok(ResolvedNode {
+        inputs: vec![audio_port(PortDirection::Input, ports.inputs)],
+        outputs: vec![audio_port(PortDirection::Output, ports.outputs)],
+    })
 }
 
 fn validate_document(document: &GraphDocument, context: &CompileContext) -> Vec<GraphIssue> {

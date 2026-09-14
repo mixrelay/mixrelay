@@ -1,9 +1,9 @@
 //! Checked transfers preserve the exact endpoint identity, incarnation and channel geometry.
 use super::NativeClockSnapshot;
-pub(super) use endpoint_service::EndpointSnapshot;
+pub(super) use endpoint_service::{EndpointSnapshot, SnapshotError};
 use mixrelay_engine_service::{endpoint_registry::EndpointId, endpoint_service};
 
-pub(super) fn snapshot(id: EndpointId) -> Option<EndpointSnapshot> {
+pub(super) fn snapshot(id: EndpointId) -> Result<EndpointSnapshot, SnapshotError> {
     endpoint_service::snapshot(id)
 }
 pub(super) fn clock(snapshot: &EndpointSnapshot) -> NativeClockSnapshot {
@@ -45,6 +45,16 @@ pub(super) fn write(expected: &EndpointSnapshot, frame: u64, samples: &[f32], fr
 }
 pub(super) fn pending(expected: &EndpointSnapshot) -> bool {
     endpoint_service::capture_pending(expected)
+}
+/// An incoherent observation is not evidence of a removed/exhausted mapping.
+pub(super) fn needs_capture_recovery(
+    observation: Result<&EndpointSnapshot, &SnapshotError>,
+) -> bool {
+    match observation {
+        Ok(snapshot) => pending(snapshot),
+        Err(SnapshotError::Missing) => true,
+        Err(SnapshotError::Pending) => false,
+    }
 }
 pub(super) fn rearm(expected: &EndpointSnapshot) -> Option<EndpointSnapshot> {
     endpoint_service::rearm_capture(expected).filter(|current| {

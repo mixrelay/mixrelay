@@ -546,7 +546,7 @@ impl NodeResolver for CatalogNodeResolver {
             || input_channels > context.limits.max_channels_per_port
             || output_channels > context.limits.max_channels_per_port
         {
-            return Err(NodeResolutionError::CapabilityUnavailable {
+            return Err(NodeResolutionError::InvalidConfiguration {
                 reason: format!(
                     "processor channel layout {input_channels} in / {output_channels} out is unsupported"
                 ),
@@ -601,6 +601,13 @@ impl ExternalProcessorFactory {
 }
 
 impl HostedProcessorFactory for ExternalProcessorFactory {
+    fn prepare_inactive(
+        &self,
+        request: HostedProcessorPrepareRequest<'_>,
+    ) -> Result<Option<Box<dyn HostedAudioProcessor>>, String> {
+        Ok(self.controls.reuse_request(&request))
+    }
+
     fn prepare(
         &self,
         request: HostedProcessorPrepareRequest<'_>,

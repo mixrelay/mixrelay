@@ -26,3 +26,6 @@ apps/desktop/src-tauri/gen/
 
 # Local cross-OS lab reports and guest artifacts
 .lab/
+
+# Local recordings and raw diagnostic captures (summaries live in docs/validation)
+/output/

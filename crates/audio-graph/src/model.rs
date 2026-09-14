@@ -85,7 +85,7 @@ pub struct NodeSpec {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct NodeControl {
-    /// Whether the node participates in execution and acquires runtime resources.
+    /// Whether the node participates in execution. Prepared resources may remain owned while OFF.
     pub enabled: bool,
     /// Whether the executing node emits silence (or records silence for a recorder).
     pub muted: bool,

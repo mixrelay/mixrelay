@@ -19,6 +19,7 @@ use crate::{
 
 mod callback;
 mod control;
+mod diagnostics;
 mod ffi;
 mod lifecycle;
 mod native;
@@ -28,24 +29,30 @@ mod stream_format;
 mod tests;
 
 pub use callback::mr_device_io_process;
+pub use diagnostics::{ClockBreak, mr_device_io_clock_break};
 pub use ffi::{
-    mr_device_buffer_size, mr_device_buffer_write, mr_device_io_alive, mr_device_io_buffer_info,
+    mr_device_buffer_size, mr_device_buffer_write, mr_device_io_alive, mr_device_io_bridge_discard,
+    mr_device_io_bridge_read, mr_device_io_bridge_write, mr_device_io_buffer_info,
     mr_device_io_clock_device, mr_device_io_clock_discontinuities, mr_device_io_connect,
     mr_device_io_connect_status, mr_device_io_create, mr_device_io_create_group,
     mr_device_io_destroy, mr_device_io_direct_binding, mr_device_io_disconnect,
     mr_device_io_graph_frames, mr_device_io_graph_read, mr_device_io_graph_write,
     mr_device_io_native_frames, mr_device_io_native_rate, mr_device_io_output_epoch,
-    mr_device_io_overflows, mr_device_io_quantum, mr_device_io_queued, mr_device_io_render_hook,
-    mr_device_io_ticks, mr_device_io_worker_discard, mr_device_io_worker_read,
-    mr_device_io_worker_write,
+    mr_device_io_overflows, mr_device_io_pcm_hook, mr_device_io_quantum, mr_device_io_queued,
+    mr_device_io_render_hook, mr_device_io_starvations, mr_device_io_ticks,
 };
 pub use native::BufferInfo;
+pub use queues::GraphRead;
 
 const MAX_FRAMES: u32 = 4096;
 
 /// Borrowed engine render hook, installed only before registration. The hook must
 /// not retain native buffers or outlive its enclosing engine render-slot owner.
 pub type RenderHook = unsafe extern "C" fn(*mut c_void, *const c_void, *mut c_void, u32) -> bool;
+
+/// Serialized clock-boundary processor. Returns whether native PCM is admitted.
+/// Runs before native transfer; it may access only its designated queue cursors.
+pub type PcmHook = unsafe extern "C" fn(*mut c_void) -> bool;
 
 struct Selection {
     uid: Vec<u8>,
@@ -74,6 +81,9 @@ struct Callback {
     epoch: u64,
     hook: Option<RenderHook>,
     context: *mut c_void,
+    pcm_hook: Option<PcmHook>,
+    pcm_context: *mut c_void,
+    previous_timestamp: Option<(f64, u64, u32)>,
 }
 
 #[derive(Default)]
@@ -95,8 +105,9 @@ pub struct DeviceIo {
     callback: UnsafeCell<Callback>,
     native_ring: PcmRing,
     graph_ring: PcmRing,
-    graph_epoch: UnsafeCell<u64>,
+    graph_epoch: UnsafeCell<Option<u64>>,
     clock: CallbackClock,
+    clock_evidence: diagnostics::ClockEvidence,
     progress: Progress,
 }
 
@@ -139,11 +150,15 @@ impl DeviceIo {
                 epoch: 0,
                 hook: None,
                 context: ptr::null_mut(),
+                pcm_hook: None,
+                pcm_context: ptr::null_mut(),
+                previous_timestamp: None,
             }),
             native_ring: PcmRing::new(channels, 16384)?,
             graph_ring: PcmRing::new(channels, 16384)?,
-            graph_epoch: UnsafeCell::new(0),
+            graph_epoch: UnsafeCell::new(None),
             clock: CallbackClock::default(),
+            clock_evidence: diagnostics::ClockEvidence::default(),
             progress: Progress::default(),
         })
     }

@@ -188,6 +188,10 @@ pub struct ComposedGraph {
     pub document: GraphDocument,
     pub execution: ExecutionPlan,
     pub node_origins: BTreeMap<NodeId, NodeOrigin>,
+    /// Shared runtime owners and the graph-local masks that require them. An owner is
+    /// enabled when any listed mask is enabled; mute and gain remain graph-local.
+    /// Virtual transport, mixer and snapshot owners share the same reference masks.
+    pub native_control_bindings: BTreeMap<NodeId, Vec<NodeId>>,
     pub native_devices: BTreeMap<VirtualEndpointId, NodeId>,
     pub device_buses: BTreeMap<VirtualEndpointId, NodeId>,
     pub native_sources: BTreeMap<String, NodeId>,

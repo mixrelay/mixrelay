@@ -178,12 +178,28 @@ fn prepare_group(
                 .native
                 .group
                 .clone()
-                .filter(|group| group.members == members && group.ready())
+                .filter(|group| same_members(&group.members, &members) && group.ready())
         })
     {
         return Ok(Some(group));
     }
     Aggregate::create(members).map_err(backend_error)
+}
+
+/// A graph-local ordering preference does not change a native clock group.
+/// Keep its established primary when every physical member is still required.
+fn same_members(current: &[String], requested: &[String]) -> bool {
+    if current == requested {
+        return true;
+    }
+    if current.len() != requested.len() {
+        return false;
+    }
+    let mut current: Vec<_> = current.iter().collect();
+    let mut requested: Vec<_> = requested.iter().collect();
+    current.sort_unstable();
+    requested.sort_unstable();
+    current == requested
 }
 
 fn unchanged(

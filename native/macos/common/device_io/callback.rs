@@ -1,7 +1,7 @@
 use super::DeviceIo;
 use crate::{
     audio_buffer::{self, AudioBufferList},
-    callback_clock::mr_callback_clock_record_values,
+    callback_clock::{mr_callback_clock_discontinuities, mr_callback_clock_record_values},
     device_buffers::{mr_device_buffers_frames, mr_device_buffers_transfer},
 };
 use mixrelay_pcm_ring::{mr_pcm_ring_discard, mr_pcm_ring_read_available, mr_pcm_ring_write};
@@ -73,6 +73,7 @@ pub unsafe extern "C" fn mr_device_io_process(
     unsafe {
         record_clock(
             io,
+            callback,
             if io.selection.input {
                 input_time
             } else {
@@ -87,8 +88,16 @@ pub unsafe extern "C" fn mr_device_io_process(
     let rendered = callback
         .hook
         .is_some_and(|hook| unsafe { hook(callback.context, input, output, frames) });
+    if !rendered && !io.selection.input {
+        // Retire old output before the PCM hook can produce the new epoch's samples.
+        unsafe { prepare_output(io, callback) };
+    }
     // SAFETY: callback owns selected PCM, scratch and the native ring role.
-    if !rendered && !unsafe { transfer(io, callback, buffers, frames) } {
+    let admitted = !rendered
+        && callback
+            .pcm_hook
+            .is_none_or(|hook| unsafe { hook(callback.pcm_context) });
+    if admitted && !unsafe { transfer(io, callback, buffers, frames) } {
         io.progress.invalid.store(true, Release);
         return 0;
     }
@@ -97,6 +106,16 @@ pub unsafe extern "C" fn mr_device_io_process(
         .native_frames
         .fetch_add(u64::from(frames), Release);
     0
+}
+
+// SAFETY: only this serialized native consumer changes the output ring cursor.
+unsafe fn prepare_output(io: &DeviceIo, callback: &mut super::Callback) {
+    let epoch = io.progress.output_epoch.load(Acquire);
+    if callback.prime || callback.epoch != epoch {
+        unsafe { mr_pcm_ring_discard(ptr::from_ref(&io.native_ring).cast_mut()) };
+        callback.prime = false;
+        callback.epoch = epoch;
+    }
 }
 
 // SAFETY: invoked only by the serialized native callback, with full validated
@@ -109,13 +128,6 @@ unsafe fn transfer(
 ) -> bool {
     let ring = ptr::from_ref(&io.native_ring).cast_mut();
     if !io.selection.input {
-        let epoch = io.progress.output_epoch.load(Acquire);
-        if callback.prime || callback.epoch != epoch {
-            // SAFETY: native output IOProc is this ring's sole consumer.
-            unsafe { mr_pcm_ring_discard(ring) };
-            callback.prime = false;
-            callback.epoch = epoch;
-        }
         // SAFETY: sole native consumer and callback-owned, full-width scratch.
         unsafe { mr_pcm_ring_read_available(ring, callback.scratch.as_mut_ptr(), frames) };
     }
@@ -159,12 +171,19 @@ unsafe fn silence(output: *mut AudioBufferList) {
 }
 
 // SAFETY: timestamp is null or retained native ABI storage; this is the sole clock writer.
-unsafe fn record_clock(io: &DeviceIo, timestamp: *const c_void, frames: u32) {
+unsafe fn record_clock(
+    io: &DeviceIo,
+    callback: &mut super::Callback,
+    timestamp: *const c_void,
+    frames: u32,
+) {
     // SAFETY: exact CoreAudio AudioTimeStamp ABI, asserted below.
     let timestamp = unsafe { timestamp.cast::<Timestamp>().as_ref() };
     let (sample, host, valid) = timestamp.map_or((0.0, 0, false), |time| {
         (time.sample, time.host, time.flags & 3 == 3)
     });
+    // SAFETY: the native registration retains this clock and serializes its writer.
+    let before = unsafe { mr_callback_clock_discontinuities(ptr::from_ref(&io.clock)) };
     // SAFETY: callback serialized by registration; clock writer uses its own UnsafeCell.
     unsafe {
         mr_callback_clock_record_values(
@@ -175,6 +194,20 @@ unsafe fn record_clock(io: &DeviceIo, timestamp: *const c_void, frames: u32) {
             u64::from(frames),
         );
     };
+    let after = unsafe { mr_callback_clock_discontinuities(ptr::from_ref(&io.clock)) };
+    if after != before {
+        let (previous_sample, previous_host, previous_frames) =
+            callback.previous_timestamp.unwrap_or((f64::NAN, 0, 0));
+        io.clock_evidence.publish(super::ClockBreak {
+            count: after,
+            expected_sample: previous_sample + f64::from(previous_frames),
+            actual_sample: sample,
+            previous_host,
+            actual_host: host,
+            flags: timestamp.map_or(0, |time| u64::from(time.flags)),
+        });
+    }
+    callback.previous_timestamp = Some((sample, host, frames));
 }
 
 const _: () = assert!(size_of::<Timestamp>() == 64 && std::mem::offset_of!(Timestamp, flags) == 56);

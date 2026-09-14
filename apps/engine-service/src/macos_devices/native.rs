@@ -9,6 +9,7 @@ use super::{
         mr_device_io_disconnect,
     },
     spec::Spec,
+    worker::metrics::PcmMetrics,
 };
 use std::{
     ffi::c_void,
@@ -32,6 +33,8 @@ pub(super) struct Native {
     // Stable Rust-owned callback slot. Drop runs only after native destroy has
     // acknowledged all callbacks, so the native device owner cannot outlive this box.
     pub(super) render: Box<super::direct::RenderSlot>,
+    pub(super) pcm_metrics: PcmMetrics,
+    pub(super) pcm: Box<super::worker::callback::PcmSlot>,
 }
 impl Native {
     pub(super) fn active_owners() -> usize {
@@ -66,8 +69,17 @@ impl Native {
             _permit: permit,
             requested_buffer: AtomicU32::new(buffer_frames),
             render: Box::default(),
+            pcm_metrics: PcmMetrics::default(),
+            pcm: Box::default(),
         };
+        tracing::info!(owner = native.log_id, native_uid = %uid.to_string_lossy(),
+            input = spec.input, channels = spec.channels, "CoreAudio native owner prepared");
         unsafe {
+            super::ffi::mr_device_io_pcm_hook(
+                native.pointer.as_ptr(),
+                std::ptr::from_ref(native.pcm.as_ref()).cast_mut().cast(),
+                super::worker::callback::dispatch,
+            );
             super::ffi::mr_device_io_render_hook(
                 native.pointer.as_ptr(),
                 std::ptr::from_ref(native.render.as_ref()).cast_mut().cast(),
@@ -132,9 +144,10 @@ impl Drop for Connection<'_> {
     }
 }
 // SAFETY: the owning native worker exclusively connects/disconnects/queries.
-// Native callback, SRC worker and graph each own distinct SPSC cursors. The
-// mutable SRC never lives behind this Arc. The device owner uses bounded SPSC storage;
-// the last Arc is destroyed only after the native worker and callbacks stop.
+// Native callback and graph own opposite SPSC cursors. Prepared SRC is pinned in
+// CallbackBridge, not this Arc; PcmSlot announces readers and excludes concurrent
+// mutable access. Control drains publication before replacement or releasing SRC.
+// The last Arc is destroyed only after control and native callbacks stop.
 unsafe impl Send for Native {}
 unsafe impl Sync for Native {}
 impl Drop for Native {

@@ -47,6 +47,80 @@ fn owner(input: bool, channels: u32) -> DeviceIo {
     DeviceIo::new(c"unit", input, channels, 48000).expect("test owner allocation")
 }
 
+#[test]
+fn starvation_snapshot_distinguishes_the_graph_consumer_from_native_input_polling() {
+    let io = owner(true, 1);
+    let pointer = ptr::from_ref(&io).cast_mut();
+    let mut pcm = [0.0; 32];
+    // SAFETY: this unpublished fixture serializes both queue roles; all buffers
+    // own a complete 32-frame mono block throughout each bounded transfer.
+    unsafe {
+        queues::graph_read(&io, pcm.as_mut_ptr(), 32, 1);
+        assert_eq!(queues::bridge_write(&io, [0.25; 32].as_ptr(), 32), 32);
+        assert_eq!(queues::graph_read(&io, pcm.as_mut_ptr(), 32, 1).frames, 32);
+        assert_eq!(queues::graph_read(&io, pcm.as_mut_ptr(), 32, 1).frames, 0);
+        assert_eq!(mr_device_io_starvations(pointer, true), 1);
+        assert_eq!(mr_device_io_starvations(pointer, false), 0);
+        assert_eq!(mr_device_io_starvations(ptr::null_mut(), true), 0);
+    }
+}
+
+#[test]
+fn graph_read_admits_initial_epoch_once_without_hiding_later_shortages() {
+    let io = owner(true, 1);
+    let pointer = ptr::from_ref(&io).cast_mut();
+    let mut pcm = [9.0; 32];
+    // SAFETY: unpublished owner, serialized queue roles, complete disjoint PCM.
+    // Rejected requests never touch PCM, including their oversized geometry.
+    unsafe {
+        assert_eq!(
+            mr_device_io_graph_read(ptr::null_mut(), pcm.as_mut_ptr(), 32, 1),
+            GraphRead::default()
+        );
+        assert_eq!(
+            mr_device_io_graph_read(pointer, pcm.as_mut_ptr(), 0, 1),
+            GraphRead::default()
+        );
+        assert_eq!(
+            mr_device_io_graph_read(pointer, pcm.as_mut_ptr(), MAX_FRAMES + 1, 1),
+            GraphRead::default()
+        );
+        assert_eq!(queues::bridge_write(&io, [0.25; 32].as_ptr(), 32), 32);
+        assert_eq!(
+            mr_device_io_graph_read(pointer, pcm.as_mut_ptr(), 32, 0),
+            GraphRead {
+                frames: 0,
+                initial_epoch: true,
+            }
+        );
+        assert!(pcm.iter().all(|sample| *sample == 0.0));
+        assert_eq!(
+            mr_device_io_graph_read(pointer, pcm.as_mut_ptr(), 32, 0),
+            GraphRead::default()
+        );
+        assert_eq!(queues::bridge_write(&io, [0.75; 32].as_ptr(), 32), 32);
+        assert_eq!(
+            mr_device_io_graph_read(pointer, pcm.as_mut_ptr(), 32, 0),
+            GraphRead {
+                frames: 32,
+                initial_epoch: false,
+            }
+        );
+        assert_eq!(pcm.map(f32::to_bits), [0.75_f32.to_bits(); 32]);
+        assert_eq!(
+            mr_device_io_graph_read(pointer, pcm.as_mut_ptr(), 32, 0),
+            GraphRead::default()
+        );
+        assert_eq!(mr_device_io_starvations(pointer, true), 1);
+        assert_eq!(queues::bridge_write(&io, [0.5; 32].as_ptr(), 32), 32);
+        assert_eq!(
+            mr_device_io_graph_read(pointer, pcm.as_mut_ptr(), 32, 1),
+            GraphRead::default()
+        );
+        assert!(pcm.iter().all(|sample| *sample == 0.0));
+    }
+}
+
 fn process(io: &DeviceIo, buffers: &mut Buffers) {
     let native = ptr::from_mut(buffers).cast();
     // SAFETY: tests serialize each role and supply complete metadata/PCM allocations.
@@ -102,32 +176,32 @@ fn all_channel_widths_preserve_three_owner_queues_and_recovery_epochs() {
         unsafe {
             assert_eq!(input.progress.native_frames.load(Acquire), 64);
             assert_eq!(input.graph_ring.stats().queued, 0);
-            assert_eq!(queues::worker_read(&input, scratch.as_mut_ptr(), 64), 64);
+            assert_eq!(queues::bridge_read(&input, scratch.as_mut_ptr(), 64), 64);
             assert_pcm(&scratch, &source);
-            assert_eq!(queues::worker_read(&input, scratch.as_mut_ptr(), 64), 0);
+            assert_eq!(queues::bridge_read(&input, scratch.as_mut_ptr(), 64), 0);
             assert_eq!(
-                queues::graph_read(&input, destination.as_mut_ptr(), 64, 1),
+                queues::graph_read(&input, destination.as_mut_ptr(), 64, 1).frames,
                 0
             );
             for _ in 0..3 {
-                assert_eq!(queues::worker_write(&input, source.as_ptr(), 64), 64);
+                assert_eq!(queues::bridge_write(&input, source.as_ptr(), 64), 64);
             }
             assert_eq!(
-                queues::graph_read(&input, destination.as_mut_ptr(), 64, 1),
+                queues::graph_read(&input, destination.as_mut_ptr(), 64, 1).frames,
                 64
             );
             assert_pcm(&destination, &source);
             assert_eq!(
-                queues::graph_read(&input, destination.as_mut_ptr(), 64, 2),
+                queues::graph_read(&input, destination.as_mut_ptr(), 64, 2).frames,
                 0
             );
             assert_eq!(input.graph_ring.stats().queued, 0);
             assert_eq!(input.progress.graph_frames.load(Acquire), 192);
             assert_eq!(queues::graph_write(&output, source.as_ptr(), 64), 64);
             assert_eq!(output.native_ring.stats().queued, 0);
-            assert_eq!(queues::worker_read(&output, scratch.as_mut_ptr(), 64), 64);
+            assert_eq!(queues::bridge_read(&output, scratch.as_mut_ptr(), 64), 64);
             assert_pcm(&scratch, &source);
-            assert_eq!(queues::worker_write(&output, scratch.as_ptr(), 64), 64);
+            assert_eq!(queues::bridge_write(&output, scratch.as_ptr(), 64), 64);
         }
         let mut list = buffers(&mut destination, channels, 64, false);
         process(&output, &mut list);
@@ -145,7 +219,7 @@ fn all_channel_widths_preserve_three_owner_queues_and_recovery_epochs() {
         // SAFETY: serialized worker owns the graph output consumer cursor.
         unsafe {
             queues::graph_write(&output, source.as_ptr(), 64);
-            queues::worker_discard(&output);
+            queues::bridge_discard(&output);
         }
         assert_eq!(output.graph_ring.stats().queued, 0);
     }
@@ -170,9 +244,9 @@ fn pcm_case(channels: u32, planar: bool) {
     let mut copy = vec![0.0; source.len()];
     // SAFETY: sole worker consumer/producer; full disjoint test PCM allocations.
     unsafe {
-        assert_eq!(queues::worker_read(&input, copy.as_mut_ptr(), 64), 64);
+        assert_eq!(queues::bridge_read(&input, copy.as_mut_ptr(), 64), 64);
         assert_pcm(&copy, &source);
-        assert_eq!(queues::worker_write(&output, copy.as_ptr(), 64), 64);
+        assert_eq!(queues::bridge_write(&output, copy.as_ptr(), 64), 64);
     }
     process(&output, &mut list);
     for frame in 0..64 {
@@ -242,8 +316,8 @@ fn mixed_stream_subset_preserves_selected_channels_and_silences_neighbors() {
     let mut graph = [0.0; 64 * 4];
     // SAFETY: worker role exclusively consumes/produces complete disjoint spans.
     unsafe {
-        assert_eq!(queues::worker_read(&input, graph.as_mut_ptr(), 64), 64);
-        assert_eq!(queues::worker_write(&output, graph.as_ptr(), 64), 64);
+        assert_eq!(queues::bridge_read(&input, graph.as_mut_ptr(), 64), 64);
+        assert_eq!(queues::bridge_write(&output, graph.as_ptr(), 64), 64);
     }
     assert_pcm(&graph, &samples(4, 64));
     process(&output, &mut list);
@@ -303,7 +377,7 @@ fn aggregate_slice(offset: u32, channels: u32, input: bool) {
     // SAFETY: serialized output worker owns this ring's producer cursor.
     if !input {
         unsafe {
-            assert_eq!(queues::worker_write(&io, selected.as_ptr(), 4), 4);
+            assert_eq!(queues::bridge_write(&io, selected.as_ptr(), 4), 4);
         }
     }
     process(&io, &mut list);
@@ -312,7 +386,7 @@ fn aggregate_slice(offset: u32, channels: u32, input: bool) {
         let mut read = vec![0.0; selected.len()];
         // SAFETY: sole input worker consumer and exact-sized writable output.
         unsafe {
-            assert_eq!(queues::worker_read(&io, read.as_mut_ptr(), 4), 4);
+            assert_eq!(queues::bridge_read(&io, read.as_mut_ptr(), 4), 4);
         }
         assert_pcm(&read, &selected);
     } else {
@@ -436,7 +510,7 @@ fn failed_teardown_and_partial_create_keep_complete_owner_until_acknowledged() {
         // SAFETY: sole graph/worker producers and complete immutable block.
         unsafe {
             assert_eq!(queues::graph_write(io, pcm.as_ptr(), 64), 64);
-            assert_eq!(queues::worker_write(io, pcm.as_ptr(), 64), 64);
+            assert_eq!(queues::bridge_write(io, pcm.as_ptr(), 64), 64);
         }
         assert_eq!(register(io, &mut native), create_status.max(start_status));
         assert!(!retire(pointer, &mut native));
@@ -668,6 +742,17 @@ fn callback_uses_direction_timestamp_and_keeps_discontinuities() {
                 if input { capture.host } else { render.host }
             );
             assert_eq!(clock.discontinuities, pass);
+            let mut event = ClockBreak::default();
+            // SAFETY: the fixture retains IO and exclusively owns disjoint evidence output.
+            let recorded =
+                unsafe { mr_device_io_clock_break(ptr::from_ref(&io), ptr::from_mut(&mut event)) };
+            assert_eq!(recorded, pass != 0);
+            if recorded {
+                assert_eq!(event.count, pass);
+                assert!((event.actual_sample - event.expected_sample - 64.0).abs() < f64::EPSILON);
+                assert_eq!(event.actual_host - event.previous_host, 1000);
+                assert_eq!(event.flags, 3);
+            }
             capture.sample += 128.0;
             render.sample += 128.0;
             capture.host += 1000;
@@ -686,7 +771,7 @@ fn callback_queue_pair_is_allocation_free_and_invalid_construction_is_rejected()
         for _ in 0..1000 {
             // SAFETY: serialized producer and exact-sized source.
             unsafe {
-                assert_eq!(queues::worker_write(&io, source.as_ptr(), 64), 64);
+                assert_eq!(queues::bridge_write(&io, source.as_ptr(), 64), 64);
             }
             process(&io, &mut list);
         }
@@ -729,7 +814,7 @@ fn direct_hook_advances_clock_without_consuming_queued_output() {
             ptr::from_ref(&calls).cast_mut().cast(),
             Some(render_hook),
         );
-        assert_eq!(queues::worker_write(&io, source.as_ptr(), 64), 64);
+        assert_eq!(queues::bridge_write(&io, source.as_ptr(), 64), 64);
     }
     process(&io, &mut list);
     assert_eq!(calls.get(), 1);

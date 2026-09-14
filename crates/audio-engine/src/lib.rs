@@ -9,11 +9,14 @@ use parking_lot::Mutex;
 use thiserror::Error;
 
 mod render;
+mod runtime_control;
+
+pub use runtime_control::{RuntimeControlBank, RuntimeControlError, RuntimeControlUpdate};
 
 pub use render::{
-    BlockProcessor, ExternalBinding, ExternalIo, HostedAudioProcessor, HostedProcessorFactory,
-    HostedProcessorPrepareRequest, MeterBinding, ProcessBlockError, RenderPlan, RenderPlanError,
-    recording_session_key,
+    BlockProcessor, CycleAdmission, ExternalBinding, ExternalControlState, ExternalIo,
+    HostedAudioProcessor, HostedProcessorFactory, HostedProcessorPrepareRequest, MeterBinding,
+    ProcessBlockError, RenderPlan, RenderPlanError, recording_session_key,
 };
 
 #[derive(Debug)]
@@ -109,6 +112,8 @@ pub struct ProcessorExchange {
     retired: AtomicPtr<BlockProcessor>,
     active_revision: AtomicU64,
     submitted_revision: AtomicU64,
+    control_revisions: Arc<runtime_control::ControlRevisionClock>,
+    control_writer: Mutex<()>,
 }
 
 struct ExchangeGateGuard<'a> {
@@ -130,6 +135,8 @@ impl ProcessorExchange {
             retired: AtomicPtr::new(std::ptr::null_mut()),
             active_revision: AtomicU64::new(active_revision),
             submitted_revision: AtomicU64::new(active_revision),
+            control_revisions: Arc::default(),
+            control_writer: Mutex::new(()),
         }
     }
 
@@ -139,11 +146,18 @@ impl ProcessorExchange {
     ///
     /// Returns [`ProcessorSubmitError::Busy`] when another submission or block-boundary
     /// activation owns the non-blocking exchange gate, or a processor is already pending.
+    /// Rejects stale revisions or a control bank already owned by another exchange.
     pub fn submit(&self, processor: Box<BlockProcessor>) -> Result<(), ProcessorSubmitError> {
         self.submit_configured(processor, || Ok::<(), std::convert::Infallible>(()))
             .map_err(|error| match error {
                 ProcessorConfigurationError::Busy { proposed_revision } => {
                     ProcessorSubmitError::Busy { proposed_revision }
+                }
+                ProcessorConfigurationError::WrongExchange { proposed_revision } => {
+                    ProcessorSubmitError::WrongExchange { proposed_revision }
+                }
+                ProcessorConfigurationError::StaleRevision { current, proposed } => {
+                    ProcessorSubmitError::StaleRevision { current, proposed }
                 }
                 ProcessorConfigurationError::Configuration(error) => match error {},
             })
@@ -157,13 +171,22 @@ impl ProcessorExchange {
     ///
     /// Returns [`ProcessorConfigurationError::Busy`] when a processor cannot be queued, or
     /// [`ProcessorConfigurationError::Configuration`] when `configure` rejects the associated
-    /// control-plane state.
+    /// control-plane state. Stale revisions and banks from another exchange are rejected before
+    /// the configuration closure is called.
     pub fn submit_configured<E>(
         &self,
         processor: Box<BlockProcessor>,
         configure: impl FnOnce() -> Result<(), E>,
     ) -> Result<(), ProcessorConfigurationError<E>> {
+        let _control_writer = self.control_writer.lock();
         let proposed_revision = processor.plan().revision();
+        let current = self.revisions().submitted;
+        if proposed_revision <= current {
+            return Err(ProcessorConfigurationError::StaleRevision {
+                current,
+                proposed: proposed_revision,
+            });
+        }
         if self
             .gate
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -176,6 +199,11 @@ impl ProcessorExchange {
         if !self.pending.load(Ordering::Acquire).is_null() {
             return Err(ProcessorConfigurationError::Busy { proposed_revision });
         }
+        processor
+            .plan()
+            .controls()
+            .bind_clock(&self.control_revisions)
+            .map_err(|_| ProcessorConfigurationError::WrongExchange { proposed_revision })?;
         if let Err(error) = configure() {
             return Err(ProcessorConfigurationError::Configuration(error));
         }
@@ -214,6 +242,21 @@ impl ProcessorExchange {
         current: &mut Box<BlockProcessor>,
         activate: impl FnOnce(u64) -> Result<(), E>,
     ) -> Result<bool, E> {
+        self.activate_pending_if_configured(current, |_| true, activate)
+    }
+
+    /// Activates only a prepared topology compatible with the current callback owner.
+    /// Both closures must be bounded and real-time safe. An incompatible topology stays pending
+    /// for the control thread to rebind external resources without stopping compatible edits.
+    ///
+    /// # Errors
+    /// Returns the external activation error and leaves the current processor untouched.
+    pub fn activate_pending_if_configured<E>(
+        &self,
+        current: &mut Box<BlockProcessor>,
+        compatible: impl FnOnce(&RenderPlan) -> bool,
+        activate: impl FnOnce(u64) -> Result<(), E>,
+    ) -> Result<bool, E> {
         if self
             .gate
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -229,7 +272,7 @@ impl ProcessorExchange {
         // SAFETY: only `submit` creates pending pointers and the exchange gate grants
         // this audio thread unique ownership after removing the pointer from the slot.
         let mut next = unsafe { Box::from_raw(pending) };
-        if !next.can_adopt_hosted(current) {
+        if !compatible(next.plan()) || !next.can_adopt_hosted(current) {
             self.pending.store(Box::into_raw(next), Ordering::Release);
             return Ok(false);
         }
@@ -254,10 +297,57 @@ impl ProcessorExchange {
 
     #[must_use]
     pub fn revisions(&self) -> ProcessorRevisions {
+        let plans = self.plan_revisions();
+        let active = plans
+            .active
+            .max(self.control_revisions.applied.load(Ordering::Acquire));
+        ProcessorRevisions {
+            active,
+            submitted: plans
+                .submitted
+                .max(active)
+                .max(self.control_revisions.published.load(Ordering::Acquire)),
+        }
+    }
+
+    /// Revisions of prepared topologies only, for native attachments and meter layouts.
+    #[must_use]
+    pub fn plan_revisions(&self) -> ProcessorRevisions {
         ProcessorRevisions {
             active: self.active_revision.load(Ordering::Acquire),
             submitted: self.submitted_revision.load(Ordering::Acquire),
         }
+    }
+
+    /// Publishes graph-local controls without preparing or exchanging an execution plan.
+    /// The bank must belong to the most recently submitted topology. The audio reader acknowledges
+    /// its complete batch at a block boundary; publication never calls hosted/native processors.
+    ///
+    /// # Errors
+    /// Rejects stale topology handles, invalid targets/values, or non-increasing revisions.
+    pub fn publish_controls(
+        &self,
+        bank: &RuntimeControlBank,
+        revision: u64,
+        updates: &[RuntimeControlUpdate],
+    ) -> Result<(), RuntimeControlError> {
+        let _writer = self.control_writer.lock();
+        let current = self.plan_revisions().submitted;
+        if bank.plan_revision() != current {
+            return Err(RuntimeControlError::StalePlan {
+                current,
+                proposed: bank.plan_revision(),
+            });
+        }
+        let current = self.revisions().submitted;
+        if revision <= current {
+            return Err(RuntimeControlError::StaleRevision {
+                current,
+                proposed: revision,
+            });
+        }
+        bank.bind_clock(&self.control_revisions)?;
+        bank.publish(revision, updates)
     }
 
     /// Reclaims the processor retired by the audio thread.
@@ -293,6 +383,12 @@ pub enum ProcessorSubmitError {
         "processor revision {proposed_revision} could not be queued because the exchange is busy"
     )]
     Busy { proposed_revision: u64 },
+    /// Prepared control storage cannot be shared across independent execution owners.
+    #[error("processor revision {proposed_revision} belongs to another exchange")]
+    WrongExchange { proposed_revision: u64 },
+    /// Topology revisions must follow all accepted topology and control publications.
+    #[error("processor revision {proposed} is not newer than {current}")]
+    StaleRevision { current: u64, proposed: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -301,6 +397,12 @@ pub enum ProcessorConfigurationError<E> {
         "processor revision {proposed_revision} could not be queued because the exchange is busy"
     )]
     Busy { proposed_revision: u64 },
+    /// The proposed bank belongs to another exchange; configuration has not run.
+    #[error("processor revision {proposed_revision} belongs to another exchange")]
+    WrongExchange { proposed_revision: u64 },
+    /// A stale topology cannot run its associated configuration side effects.
+    #[error("processor revision {proposed} is not newer than {current}")]
+    StaleRevision { current: u64, proposed: u64 },
     #[error("processor control-plane configuration failed: {0}")]
     Configuration(E),
 }
@@ -564,5 +666,121 @@ mod tests {
             .expect("processor should queue");
         assert!(retired.activate_pending(&mut current));
         drop(retired);
+    }
+
+    #[test]
+    fn control_revisions_follow_block_ack_without_changing_topology_or_reviving_retired_banks() {
+        let exchange = ProcessorExchange::new(1);
+        let mut current = Box::new(processor(1));
+        let old_bank = Arc::clone(current.plan().controls());
+        exchange.publish_controls(&old_bank, 2, &[]).unwrap();
+        assert_eq!(
+            exchange.revisions(),
+            ProcessorRevisions {
+                active: 1,
+                submitted: 2
+            }
+        );
+        current.process_block(1, &[], &mut []).unwrap();
+        assert_eq!(
+            exchange.revisions(),
+            ProcessorRevisions {
+                active: 2,
+                submitted: 2
+            }
+        );
+        assert_eq!(
+            exchange.plan_revisions(),
+            ProcessorRevisions {
+                active: 1,
+                submitted: 1
+            }
+        );
+        let next = Box::new(processor(3));
+        let next_bank = Arc::clone(next.plan().controls());
+        exchange.submit(next).unwrap();
+        assert_eq!(
+            exchange.publish_controls(&old_bank, 4, &[]),
+            Err(RuntimeControlError::StalePlan {
+                current: 3,
+                proposed: 1
+            })
+        );
+        exchange.publish_controls(&next_bank, 4, &[]).unwrap();
+        current.process_block(1, &[], &mut []).unwrap();
+        assert_eq!(
+            exchange.revisions(),
+            ProcessorRevisions {
+                active: 2,
+                submitted: 4
+            }
+        );
+        assert!(exchange.activate_pending(&mut current));
+        assert_eq!(
+            exchange.revisions(),
+            ProcessorRevisions {
+                active: 3,
+                submitted: 4
+            }
+        );
+        current.process_block(1, &[], &mut []).unwrap();
+        assert_eq!(
+            exchange.revisions(),
+            ProcessorRevisions {
+                active: 4,
+                submitted: 4
+            }
+        );
+        assert_eq!(
+            exchange.plan_revisions(),
+            ProcessorRevisions {
+                active: 3,
+                submitted: 3
+            }
+        );
+    }
+
+    #[test]
+    fn audio_activation_does_not_lock_the_control_plane_writer() {
+        let exchange = ProcessorExchange::new(1);
+        let mut current = Box::new(processor(1));
+        exchange.submit(Box::new(processor(2))).unwrap();
+        let _writer = exchange.control_writer.lock();
+        assert!(exchange.activate_pending(&mut current));
+    }
+
+    #[test]
+    fn rejected_bank_owner_and_stale_topology_never_run_configuration_side_effects() {
+        let first = ProcessorExchange::new(1);
+        let next = processor(2);
+        let shared_plan = Arc::clone(next.plan());
+        first.submit(Box::new(next)).unwrap();
+        let second = ProcessorExchange::new(1);
+        assert_eq!(
+            second.submit_configured(
+                Box::new(BlockProcessor::new(shared_plan)),
+                || -> Result<(), ()> {
+                    panic!("wrong-owner configuration must never run");
+                }
+            ),
+            Err(ProcessorConfigurationError::WrongExchange {
+                proposed_revision: 2
+            })
+        );
+
+        let bank = processor(1);
+        let exchange = ProcessorExchange::new(1);
+        exchange
+            .publish_controls(bank.plan().controls(), 5, &[])
+            .unwrap();
+        assert_eq!(
+            exchange.submit_configured(Box::new(processor(2)), || -> Result<(), ()> {
+                panic!("stale topology configuration must never run");
+            }),
+            Err(ProcessorConfigurationError::StaleRevision {
+                current: 5,
+                proposed: 2
+            })
+        );
     }
 }

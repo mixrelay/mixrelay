@@ -2,12 +2,16 @@
 //! before publication. The supervisor only handles reconfiguration and lifetime;
 //! it never schedules PCM or acknowledges pause while a render remains in flight.
 use super::AudioContext;
+#[cfg(test)]
+mod continuity_tests;
 mod ownership;
+#[cfg(test)]
+mod virtual_activity_tests;
 use super::callback_source::RenderTransport;
 use super::callback_transport::{CaptureTransport, NativeCapture};
 use super::endpoint_boundaries::EndpointBoundaries;
 use crate::macos_devices::direct::{Binding, Descriptor, DirectPlan};
-use mixrelay_audio_engine::{BlockProcessor, ExternalBinding, ExternalIo};
+use mixrelay_audio_engine::{BlockProcessor, ExternalBinding, ExternalIo, RenderPlan};
 use mixrelay_audio_io::{
     process::{ClockDomain, InputActivity, ProcessCycle, TransferOutcome},
     session::ClockAuthority,
@@ -39,8 +43,22 @@ struct CallbackIo<'a, T> {
     bindings: &'a [Binding],
     offset: usize,
     endpoints: &'a mut EndpointBoundaries<T>,
+    bridged: Option<&'a crate::macos_devices::DeviceSet>,
 }
 impl<T: CaptureTransport + RenderTransport> ExternalIo for CallbackIo<'_, T> {
+    fn begin_cycle(
+        &mut self,
+        cycle: &ProcessCycle,
+        controls: mixrelay_audio_engine::ExternalControlState<'_>,
+    ) -> mixrelay_audio_engine::CycleAdmission {
+        if let Some(devices) = self.bridged {
+            for (binding, enabled) in controls.sources().chain(controls.sinks()) {
+                devices.set_active(binding.node_id().as_str(), enabled);
+            }
+        }
+        self.endpoints.prepare_block(cycle.frames, controls);
+        mixrelay_audio_engine::CycleAdmission::Process
+    }
     fn read_source(
         &mut self,
         binding: &ExternalBinding,
@@ -48,6 +66,12 @@ impl<T: CaptureTransport + RenderTransport> ExternalIo for CallbackIo<'_, T> {
         cycle: &ProcessCycle,
     ) -> TransferOutcome {
         destination.fill(0.0);
+        if let Some(result) = self
+            .bridged
+            .and_then(|devices| devices.read(binding.node_id().as_str(), destination))
+        {
+            return result;
+        }
         if let Some(result) = self.endpoints.read(binding, destination) {
             return result;
         }
@@ -73,6 +97,12 @@ impl<T: CaptureTransport + RenderTransport> ExternalIo for CallbackIo<'_, T> {
         source: &[f32],
         cycle: &ProcessCycle,
     ) -> TransferOutcome {
+        if let Some(result) = self
+            .bridged
+            .and_then(|devices| devices.write(binding.node_id().as_str(), source))
+        {
+            return result;
+        }
         if let Some(result) = self.endpoints.write(binding, source) {
             return result;
         }
@@ -91,7 +121,8 @@ impl<T: CaptureTransport + RenderTransport> ExternalIo for CallbackIo<'_, T> {
 }
 
 struct Renderer<'a, T = NativeCapture> {
-    processor: &'a mut BlockProcessor,
+    processor: &'a mut Box<BlockProcessor>,
+    activation: Option<GraphActivation<'a>>,
     bindings: &'a [Binding],
     clock_id: u32,
     epoch: u64,
@@ -103,6 +134,44 @@ struct Renderer<'a, T = NativeCapture> {
     invalid: &'a AtomicBool,
     endpoints: EndpointBoundaries<T>,
     reconfigure: &'a AtomicBool,
+}
+
+/// The installed native geometry is immutable throughout a direct lifetime.
+/// A compatible DSP replacement can use it without withdrawing the callback or
+/// rebuilding independent-clock converters. Other plans remain queued for rebind.
+struct GraphActivation<'a> {
+    installed: &'a RenderPlan,
+    context: AudioContext<'a>,
+    rebind: &'a AtomicBool,
+}
+
+impl GraphActivation<'_> {
+    fn activate(&self, processor: &mut Box<BlockProcessor>) -> bool {
+        if !self.context.exchange.has_pending() {
+            return true;
+        }
+        self.context
+            .exchange
+            .activate_pending_if_configured(
+                processor,
+                |next| {
+                    let compatible = !self.context.devices.has_pending()
+                        && same_external_geometry(self.installed, next);
+                    if !compatible {
+                        self.rebind.store(true, Ordering::Release);
+                    }
+                    compatible
+                },
+                |_| self.context.endpoint_backend.activate_pending().map(|_| ()),
+            )
+            .is_ok()
+    }
+}
+
+fn same_external_geometry(installed: &RenderPlan, next: &RenderPlan) -> bool {
+    installed.format() == next.format()
+        && installed.source_bindings() == next.source_bindings()
+        && installed.sink_bindings() == next.sink_bindings()
 }
 unsafe extern "C" fn render(
     context: *mut c_void,
@@ -141,6 +210,13 @@ impl<T: CaptureTransport + RenderTransport> Renderer<'_, T> {
         if self.failed.load(Ordering::Acquire) || frames == 0 || frames > 4096 {
             return false;
         }
+        if self
+            .activation
+            .as_ref()
+            .is_some_and(|activation| !activation.activate(self.processor))
+        {
+            return false;
+        }
         self.observe_hardware();
         // SAFETY: the serialized native callback retains both ABLs and their PCM;
         // DSP scratch belongs to the independent BlockProcessor allocation. The
@@ -169,6 +245,7 @@ impl<T: CaptureTransport + RenderTransport> Renderer<'_, T> {
             bindings: self.bindings,
             offset: 0,
             endpoints: &mut self.endpoints,
+            bridged: self.native_clock.as_ref().map(|(plan, _)| &plan.bridged),
         };
         // A larger native quantum is split, never truncated or queued for later.
         while io.offset < frames as usize {
@@ -187,8 +264,7 @@ impl<T: CaptureTransport + RenderTransport> Renderer<'_, T> {
                 monotonic_ns: None,
                 discontinuity: self.frame == 0,
             };
-            io.endpoints.prepare_block(count);
-            let Ok(report) = self.processor.process_external_cycle(cycle, &mut io) else {
+            let Ok(Some(report)) = self.processor.process_external_cycle(cycle, &mut io) else {
                 return false;
             };
             self.status.record_process(report);
@@ -227,14 +303,16 @@ struct RenderSignals {
     failed: AtomicBool,
     invalid: AtomicBool,
     reconfigure: AtomicBool,
+    rebind: AtomicBool,
 }
 
 pub(super) fn run(
     plan: &DirectPlan,
-    processor: &mut BlockProcessor,
+    processor: &mut Box<BlockProcessor>,
     context: AudioContext<'_>,
 ) -> Result<(), String> {
     let signals = RenderSignals::default();
+    let installed_plan = std::sync::Arc::clone(processor.plan());
     let graph_rate = processor.plan().format().sample_rate;
     let endpoints = EndpointBoundaries::prepare(processor.plan())?;
     let capture_ids = endpoints.capture_ids();
@@ -243,6 +321,11 @@ pub(super) fn run(
         .store(endpoints.pending(), Ordering::Release);
     let renderer = Renderer {
         processor,
+        activation: Some(GraphActivation {
+            installed: &installed_plan,
+            context,
+            rebind: &signals.rebind,
+        }),
         bindings: &plan.bindings,
         clock_id: plan.clock_id,
         epoch: super::super::macos_devices::direct::next_epoch(),
@@ -296,7 +379,7 @@ impl RenderSignals {
         let mut last_boundary_check = Instant::now();
         while !context.runtime_status.stop_requested()
             && !context.runtime_status.pause_requested()
-            && !context.exchange.has_pending()
+            && !self.rebind.load(Ordering::Acquire)
             && !context.devices.has_pending()
             && plan.healthy()
         {
@@ -383,7 +466,6 @@ fn replace_boundaries(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mixrelay_audio_engine::RenderPlan;
     use mixrelay_audio_graph::{
         CompileContext, CompileLimits, GraphCompiler, GraphDocument, RenderFormat,
     };
@@ -418,7 +500,7 @@ mod tests {
         }
     }
 
-    pub(super) fn processor_at(block_frames: u32, sample_rate: u32) -> BlockProcessor {
+    pub(super) fn processor_at(block_frames: u32, sample_rate: u32) -> Box<BlockProcessor> {
         let document: GraphDocument = serde_json::from_value(serde_json::json!({
             "schemaVersion":2,"revision":1,"nodes":[
                 {"id":"input","type":"audio_device_input","config":{"selector":{"match":"default_input"},"outputChannels":2,"gainDb":0}},
@@ -437,10 +519,12 @@ mod tests {
                 },
             )
             .unwrap();
-        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()))
+        Box::new(BlockProcessor::new(Arc::new(
+            RenderPlan::prepare(&execution).unwrap(),
+        )))
     }
 
-    fn offline_branch_processor() -> BlockProcessor {
+    fn offline_branch_processor() -> Box<BlockProcessor> {
         let document: GraphDocument = serde_json::from_value(serde_json::json!({
             "schemaVersion":2,"revision":1,"nodes":[
                 {"id":"input","type":"audio_device_input","config":{"selector":{"match":"default_input"},"outputChannels":2,"gainDb":0}},
@@ -465,7 +549,9 @@ mod tests {
                 },
             )
             .unwrap();
-        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()))
+        Box::new(BlockProcessor::new(Arc::new(
+            RenderPlan::prepare(&execution).unwrap(),
+        )))
     }
 
     #[test]
@@ -481,6 +567,7 @@ mod tests {
             bindings: &bindings,
             offset: 0,
             endpoints: &mut endpoints,
+            bridged: None,
         };
         assert!(bindings.iter().all(|binding| io.buffers.covers(binding)));
         let cycle = ProcessCycle {
@@ -531,6 +618,7 @@ mod tests {
         let invalid = AtomicBool::new(false);
         let mut renderer = Renderer {
             processor: &mut processor,
+            activation: None,
             bindings: &bindings,
             clock_id: 7,
             epoch: 3,
@@ -587,6 +675,7 @@ mod tests {
             let bindings = stereo_bindings();
             let mut renderer = Renderer {
                 processor: &mut processor,
+                activation: None,
                 bindings: &bindings,
                 clock_id: 7,
                 epoch: 3,

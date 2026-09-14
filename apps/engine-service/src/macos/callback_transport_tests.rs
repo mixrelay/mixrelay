@@ -7,8 +7,12 @@ struct Transport {
     can_invalidate: bool,
     can_write: bool,
     rearm_pending: bool,
+    observation_error: Option<SnapshotError>,
 }
 impl CaptureTransport for Transport {
+    fn capture_observation_pending(&mut self) -> bool {
+        self.observation_error == Some(SnapshotError::Pending)
+    }
     fn capture_rearm_pending(&mut self) -> bool {
         self.rearm_pending
     }
@@ -55,8 +59,74 @@ fn fixture(rate: u32) -> (HalCapture, Transport) {
         can_invalidate: true,
         can_write: true,
         rearm_pending: false,
+        observation_error: None,
     };
     (bridge, transport)
+}
+
+#[test]
+fn pending_capture_observation_retains_pcm_without_rearming_or_publishing() {
+    let (mut sink, mut transport) = fixture(48_000);
+    for _ in 0..100 {
+        transport.clock.capture_through += 16;
+        sink.begin(&mut transport, 32);
+        sink.push(&[0.25; 64], 32);
+        sink.flush(&mut transport);
+    }
+    let epoch = sink.epoch;
+    let cursor = sink.cursor;
+    let invalidations = transport.invalidations;
+    let writes = transport.writes.len();
+    let queued = sink.bridge.queued_input_frames();
+    transport.observation_error = Some(SnapshotError::Pending);
+    sink.begin(&mut transport, 32);
+    assert_eq!(sink.push(&[0.25; 64], 32).frames, 32);
+    assert!(sink.flush(&mut transport));
+    assert_eq!(sink.bridge.queued_input_frames(), queued + 32);
+    assert_eq!((sink.epoch, sink.cursor), (epoch, cursor));
+    assert_eq!(
+        (transport.invalidations, transport.writes.len()),
+        (invalidations, writes)
+    );
+    assert!(!sink.reconfigure());
+    transport.observation_error = None;
+    transport.clock.capture_through += 16;
+    sink.begin(&mut transport, 32);
+    assert!(sink.flush(&mut transport));
+    assert_eq!(sink.epoch, epoch);
+    assert_eq!(transport.invalidations, invalidations);
+    assert!(!sink.reconfigure());
+}
+
+#[test]
+fn suspended_sink_invalidates_published_pcm_and_clears_converter_history() {
+    let (mut sink, mut transport) = fixture(48_000);
+    for _ in 0..100 {
+        transport.clock.capture_through += 16;
+        sink.begin(&mut transport, 32);
+        sink.push(&[0.75; 64], 32);
+        sink.flush(&mut transport);
+    }
+    assert!(!transport.writes.is_empty());
+    let invalidations = transport.invalidations;
+    sink.suspend(&mut transport);
+    assert_eq!(transport.invalidations, invalidations + 1);
+    transport.writes.clear();
+    transport.clock.capture_through += 4096;
+    for _ in 0..100 {
+        transport.clock.capture_through += 16;
+        sink.begin(&mut transport, 32);
+        sink.push(&[0.0; 64], 32);
+        sink.flush(&mut transport);
+    }
+    assert!(!transport.writes.is_empty());
+    assert!(
+        transport
+            .writes
+            .iter()
+            .flat_map(|(_, pcm)| pcm)
+            .all(|sample| sample.abs() < 0.000_001)
+    );
 }
 #[test]
 fn independent_hal_coordinates_preserve_nonzero_pcm_at_96k_32frames() {

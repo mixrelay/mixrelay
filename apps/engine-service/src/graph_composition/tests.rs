@@ -6,6 +6,7 @@ use mixrelay_audio_graph::{
 use std::sync::Arc;
 
 mod authored_tests;
+mod control_tests;
 mod device_mix_tests;
 mod lifetime_tests;
 mod output_tests;

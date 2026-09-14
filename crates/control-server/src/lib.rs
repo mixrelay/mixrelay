@@ -31,6 +31,8 @@ pub const STATUS_ROUTE: &str = "/api/v1/status";
 pub const AUDIO_SESSION_ROUTE: &str = "/api/v1/audio/session";
 pub const VIRTUAL_ENDPOINT_FORMAT_ROUTE: &str = "/api/v1/audio/virtual-endpoint/format";
 pub const GRAPH_STATUS_ROUTE: &str = "/api/v1/graph/status";
+/// Coherent read-side control catalog, independent of graph mutation admission.
+pub const CONTROL_SNAPSHOT_ROUTE: &str = "/api/v1/controls/snapshot";
 pub const GRAPH_ROUTE: &str = "/api/v1/graph";
 pub const GRAPH_CATALOG_ROUTE: &str = "/api/v1/graphs";
 pub const GRAPH_CATALOG_DOCUMENT_ROUTE: &str = "/api/v1/graphs/{id}";
@@ -45,6 +47,15 @@ pub const PROCESSOR_PARAMETER_ROUTE: &str =
 pub const PROCESSOR_EDITOR_ROUTE: &str = "/api/v1/processors/{node_id}/editor";
 
 pub trait ControlBackend: Send + Sync {
+    /// Reads all targets, controls and recorder states from one engine observation.
+    /// # Errors
+    /// Reports unavailable control state; ordinary concurrent mutations do not fail reads.
+    fn controls_snapshot(
+        &self,
+    ) -> Result<mixrelay_control_protocol::EngineControlSnapshot, ProtocolError> {
+        Err(node_control::unavailable())
+    }
+
     /// Discovers authored node controls in one graph without changing selection.
     /// # Errors
     /// Reports an unknown graph or unavailable backend.
@@ -63,11 +74,11 @@ pub trait ControlBackend: Send + Sync {
         _graph_id: &str,
         _node_id: &str,
         _request: mixrelay_control_protocol::NodeControlRequest,
-    ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+    ) -> Result<mixrelay_control_protocol::NodeControlPreview, ProtocolError> {
         Err(node_control::unavailable())
     }
 
-    /// Publishes explicit node power/mute state using the normal graph transaction.
+    /// Publishes explicit node state through the shared control owner.
     /// # Errors
     /// Rejects missing targets, stale revisions and native preparation failures.
     fn update_node_control(
@@ -75,7 +86,7 @@ pub trait ControlBackend: Send + Sync {
         _graph_id: &str,
         _node_id: &str,
         _request: mixrelay_control_protocol::NodeControlRequest,
-    ) -> Result<GraphApplyResponse, ProtocolError> {
+    ) -> Result<mixrelay_control_protocol::NodeControlResponse, ProtocolError> {
         Err(node_control::unavailable())
     }
     /// Preflights the next start without acquiring audio or changing execution.
@@ -469,6 +480,7 @@ pub fn router_with_backend(backend: Arc<dyn ControlBackend>) -> Router {
             put(reconfigure_virtual_endpoint),
         )
         .route(GRAPH_STATUS_ROUTE, get(graph_status))
+        .route(CONTROL_SNAPSHOT_ROUTE, get(node_control::snapshot))
         .route(METERS_ROUTE, get(meters))
         .route(
             APPLICATION_CAPTURE_MANIFEST_ROUTE,
@@ -939,6 +951,12 @@ mod tests {
     }
 
     impl ControlBackend for TestBackend {
+        fn controls_snapshot(
+            &self,
+        ) -> Result<mixrelay_control_protocol::EngineControlSnapshot, ProtocolError> {
+            Ok(node_control::snapshot())
+        }
+
         fn node_controls(
             &self,
             graph_id: &str,
@@ -951,15 +969,15 @@ mod tests {
             graph_id: &str,
             node_id: &str,
             request: mixrelay_control_protocol::NodeControlRequest,
-        ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
+        ) -> Result<mixrelay_control_protocol::NodeControlPreview, ProtocolError> {
             self.update_node_control(graph_id, node_id, request)
-                .map(
-                    |response| mixrelay_control_protocol::ApplicationCaptureManifest {
+                .map(|response| mixrelay_control_protocol::NodeControlPreview {
+                    capture_manifest: Some(mixrelay_control_protocol::ApplicationCaptureManifest {
                         protocol_version: PROTOCOL_VERSION,
-                        revision: response.revision,
+                        revision: response.application.revision,
                         sources: Vec::new(),
-                    },
-                )
+                    }),
+                })
         }
 
         fn update_node_control(
@@ -967,14 +985,19 @@ mod tests {
             graph_id: &str,
             node_id: &str,
             request: mixrelay_control_protocol::NodeControlRequest,
-        ) -> Result<GraphApplyResponse, ProtocolError> {
+        ) -> Result<mixrelay_control_protocol::NodeControlResponse, ProtocolError> {
             *self.last_node_control.lock().expect("test mutex") =
                 Some(node_control::RecordedControl {
                     graph_id: graph_id.to_owned(),
                     node_id: node_id.to_owned(),
                     request,
                 });
-            self.apply_graph(document())
+            self.apply_graph(document()).map(|application| {
+                mixrelay_control_protocol::NodeControlResponse {
+                    application,
+                    requires_graph_reload: false,
+                }
+            })
         }
         fn recorder_status(
             &self,

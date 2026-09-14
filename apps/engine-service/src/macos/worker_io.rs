@@ -14,6 +14,7 @@ use mixrelay_audio_io::process::{InputActivity, ProcessReport, TransferOutcome};
 /// implementations must not retain borrowed buffers after a call returns.
 pub(super) trait Transport {
     fn prepare_capture(&mut self, endpoint: &EndpointSnapshot) -> Option<EndpointSnapshot>;
+    fn invalidate_capture(&mut self, endpoint: &EndpointSnapshot) -> bool;
     fn read(
         &mut self,
         endpoint: &EndpointSnapshot,
@@ -26,6 +27,9 @@ pub(super) trait Transport {
 
 pub(super) struct NativeTransport;
 impl Transport for NativeTransport {
+    fn invalidate_capture(&mut self, endpoint: &EndpointSnapshot) -> bool {
+        native_transport::rearm(endpoint).is_some()
+    }
     fn prepare_capture(&mut self, endpoint: &EndpointSnapshot) -> Option<EndpointSnapshot> {
         if native_transport::pending(endpoint) {
             native_transport::rearm(endpoint)
@@ -47,6 +51,85 @@ impl Transport for NativeTransport {
     }
 }
 
+/// The primary endpoint uses the actual pacing coordinates without an SRC.
+/// Its transfers are prepared only after the processor samples this block's gates.
+pub(super) struct PrimaryIo<'a, T> {
+    transport: &'a mut T,
+    endpoint: Option<&'a EndpointSnapshot>,
+    render: &'a mut [f32],
+    capture: &'a mut [f32],
+    transfer: TransferOutcome,
+    sink_enabled: &'a mut bool,
+    schedule: &'a mut CaptureSchedule,
+    primary: Option<&'a PrimaryEndpoint>,
+    write_hal: bool,
+    hal_only: bool,
+    reservation: &'a mut Option<(EndpointSnapshot, u64)>,
+    rejected: &'a mut bool,
+}
+
+impl<T: Transport> PrimaryIo<'_, T> {
+    pub(super) fn begin(
+        &mut self,
+        cycle: &mixrelay_audio_io::process::ProcessCycle,
+        active: Directions,
+    ) -> bool {
+        if *self.sink_enabled && !active.sink {
+            if let Some(endpoint) = self.endpoint {
+                self.transport.invalidate_capture(endpoint);
+            }
+            self.schedule.reset();
+        }
+        *self.sink_enabled = active.sink;
+        if !self.admit(cycle, active.sink) {
+            return false;
+        }
+        if active.source {
+            self.transfer = read_render(
+                self.transport,
+                self.endpoint,
+                self.render,
+                cycle.first_frame,
+                cycle.frames,
+            );
+        }
+        true
+    }
+
+    fn admit(&mut self, cycle: &mixrelay_audio_io::process::ProcessCycle, sink: bool) -> bool {
+        let Some((endpoint, primary)) = self.endpoint.zip(self.primary) else {
+            return true;
+        };
+        if !sink || !self.write_hal || endpoint.endpoint_id != primary.id {
+            return true;
+        }
+        let prepared = self.transport.prepare_capture(endpoint);
+        // An exhausted reservation is ordinary consumer backpressure. In
+        // particular, closing an OS capture client leaves its last demand stamp
+        // unchanged while playback may keep running. Only failed preparation is
+        // a transport error; never stop healthy source DSP for absent new demand.
+        *self.rejected = prepared.is_none();
+        *self.reservation = prepared.and_then(|snapshot| {
+            self.schedule
+                .reserve(&snapshot, cycle.frames, primary.config.capacity_frames)
+                .map(|frame| (snapshot, frame))
+        });
+        !*self.rejected || !self.hal_only
+    }
+
+    pub(super) fn read(&self, destination: &mut [f32]) -> TransferOutcome {
+        destination.copy_from_slice(self.render);
+        self.transfer
+    }
+
+    pub(super) fn write(&mut self, source: &[f32], frames: u32) -> TransferOutcome {
+        for (destination, sample) in self.capture.iter_mut().zip(source) {
+            *destination += sample;
+        }
+        TransferOutcome::complete(frames)
+    }
+}
+
 /// Scratch PCM and the destination cursor have the same lifetime as their
 /// transfer owner. Allocation occurs before the worker starts processing.
 pub(super) struct WorkerIo<T> {
@@ -56,6 +139,7 @@ pub(super) struct WorkerIo<T> {
     schedule: CaptureSchedule,
     primary: Option<PrimaryEndpoint>,
     independent: EndpointBoundaries<NativeCapture>,
+    primary_sink_enabled: bool,
 }
 pub(super) struct PrimaryEndpoint {
     pub(super) identity: VirtualEndpointId,
@@ -87,11 +171,6 @@ impl PrimaryEndpoint {
         )
     }
 }
-enum Admission {
-    Retry,
-    Process(Option<(EndpointSnapshot, u64)>),
-}
-
 struct WorkerConfiguration {
     primary: Option<PrimaryEndpoint>,
     independent: EndpointBoundaries<NativeCapture>,
@@ -110,24 +189,8 @@ impl<T: Transport> WorkerIo<T> {
             schedule: CaptureSchedule::default(),
             primary,
             independent: EndpointBoundaries::empty(),
+            primary_sink_enabled: true,
         }
-    }
-
-    fn reserve(&mut self, cycle: &WorkerCycle<'_>, rate: u32) -> Option<(EndpointSnapshot, u64)> {
-        let endpoint = cycle.endpoint.as_ref()?;
-        let primary = self.primary.as_ref()?;
-        if !primary.directions.sink
-            || !cycle.write_hal
-            || endpoint.endpoint_id != primary.id
-            || endpoint.clock.sample_rate != rate
-        {
-            return None;
-        }
-        let snapshot = self.transport.prepare_capture(endpoint)?;
-        let frame =
-            self.schedule
-                .reserve(&snapshot, cycle.frames, primary.config.capacity_frames)?;
-        Some((snapshot, frame))
     }
 
     /// Admission precedes PCM consumption. An unavailable HAL-only destination
@@ -138,9 +201,8 @@ impl<T: Transport> WorkerIo<T> {
         cycle: WorkerCycle<'_>,
     ) -> Result<bool, String> {
         let rate = processor.plan().format().sample_rate;
-        let Admission::Process(capture) = self.admit(processor.plan(), &cycle) else {
-            return Ok(false);
-        };
+        let mut capture = None;
+        let mut rejected = false;
         let frames = cycle.frames;
         let (render_channels, capture_channels) = self
             .primary
@@ -152,31 +214,49 @@ impl<T: Transport> WorkerIo<T> {
             .endpoint
             .as_ref()
             .filter(|value| value.clock.sample_rate == rate);
-        let transfer = read_render(
-            &mut self.transport,
-            endpoint,
-            render,
-            cycle.timeline.frame,
-            frames,
-        );
         pcm.fill(0.0);
         if cycle.discontinuity {
             self.independent.discontinuity();
         }
         self.independent.begin(frames);
-        self.independent.prepare_block(frames);
+        let hal_only = processor
+            .plan()
+            .source_bindings()
+            .iter()
+            .chain(processor.plan().sink_bindings())
+            .all(|binding| {
+                binding.virtual_endpoint_id()
+                    == self.primary.as_ref().map(|endpoint| &endpoint.identity)
+            });
         let report = process_native_cycle(
             processor,
             &mut MacEngineExternalIo {
                 devices: cycle.devices,
-                render_samples: render,
-                render_transfer: transfer,
-                capture_samples: pcm,
+                primary_io: PrimaryIo {
+                    transport: &mut self.transport,
+                    endpoint,
+                    render,
+                    capture: pcm,
+                    transfer: TransferOutcome::complete(0),
+                    sink_enabled: &mut self.primary_sink_enabled,
+                    schedule: &mut self.schedule,
+                    primary: self.primary.as_ref(),
+                    write_hal: cycle.write_hal,
+                    hal_only,
+                    reservation: &mut capture,
+                    rejected: &mut rejected,
+                },
                 primary: self.primary.as_ref().map(|endpoint| &endpoint.identity),
                 independent: &mut self.independent,
             },
             cycle,
         )?;
+        if rejected {
+            record_rejection(&cycle);
+        }
+        let Some(report) = report else {
+            return Ok(false);
+        };
         cycle.status.record_process(report);
         cycle.status.record_process(self.independent.finish_block());
         if !self.independent.synchronized() {
@@ -188,6 +268,7 @@ impl<T: Transport> WorkerIo<T> {
             cycle.status.observe_clock(authority, false);
         }
         if let Some((endpoint, frame)) = capture
+            && self.primary_sink_enabled
             && !self.transport.write(&endpoint, frame, pcm, frames)
         {
             self.schedule.reset();
@@ -196,36 +277,12 @@ impl<T: Transport> WorkerIo<T> {
         Ok(true)
     }
 
-    fn admit(&mut self, plan: &RenderPlan, cycle: &WorkerCycle<'_>) -> Admission {
-        let rate = plan.format().sample_rate;
-        let capture = self.reserve(cycle, rate);
-        let demanded = self
+    pub(super) fn snapshot(&self) -> Result<EndpointSnapshot, native_transport::SnapshotError> {
+        let primary = self
             .primary
             .as_ref()
-            .is_some_and(|endpoint| endpoint.directions.sink)
-            && cycle.write_hal
-            && cycle.endpoint.as_ref().is_some_and(|endpoint| {
-                endpoint.clock.sample_rate == rate && endpoint.clock.capture_frames != 0
-            });
-        if demanded && capture.is_none() {
-            record_rejection(cycle);
-            if plan
-                .source_bindings()
-                .iter()
-                .chain(plan.sink_bindings())
-                .all(|binding| {
-                    binding.virtual_endpoint_id()
-                        == self.primary.as_ref().map(|endpoint| &endpoint.identity)
-                })
-            {
-                return Admission::Retry;
-            }
-        }
-        Admission::Process(capture)
-    }
-
-    pub(super) fn snapshot(&self) -> Option<EndpointSnapshot> {
-        native_transport::snapshot(self.primary.as_ref()?.id)
+            .ok_or(native_transport::SnapshotError::Missing)?;
+        native_transport::snapshot(primary.id)
     }
 
     pub(super) fn capacity(&self) -> u32 {
@@ -241,24 +298,24 @@ impl<T: Transport> WorkerIo<T> {
         if self
             .primary
             .as_ref()
-            .is_some_and(|primary| primary.directions.sink)
-            && self
-                .snapshot()
-                .as_ref()
-                .is_none_or(native_transport::pending)
+            .is_some_and(|primary| primary.directions.sink && self.primary_sink_enabled)
+            && native_transport::needs_capture_recovery(self.snapshot().as_ref())
         {
             return true;
         }
         let running = |snapshot: &EndpointSnapshot| {
             snapshot.clock.running != 0 && snapshot.clock.sample_rate == rate
         };
-        if self.snapshot().as_ref().is_some_and(running) {
+        let primary = self.snapshot();
+        if matches!(primary, Err(native_transport::SnapshotError::Pending))
+            || primary.as_ref().is_ok_and(running)
+        {
             return false;
         }
         self.independent.endpoints.iter().any(|endpoint| {
             native_transport::snapshot(endpoint.id)
                 .as_ref()
-                .is_some_and(running)
+                .is_ok_and(running)
         })
     }
 
@@ -288,6 +345,7 @@ impl<T: Transport> WorkerIo<T> {
                 .map_or((0, 0), PrimaryEndpoint::channels);
             self.render = vec![0.0; render as usize * 4096];
             self.capture = vec![0.0; capture as usize * 4096];
+            self.primary_sink_enabled = true;
             self.schedule.reset();
         }
         self.independent
@@ -322,10 +380,7 @@ impl WorkerIo<NativeTransport> {
         // its own unavailable/pending mapping, never another healthy writer.
         if let Some(primary) = &self.primary
             && primary.directions.sink
-            && self
-                .snapshot()
-                .as_ref()
-                .is_none_or(native_transport::pending)
+            && native_transport::needs_capture_recovery(self.snapshot().as_ref())
         {
             super::callback_transport::recover_capture_epoch(primary.id);
         }
@@ -341,7 +396,7 @@ impl WorkerConfiguration {
     fn prepare(plan: &RenderPlan, preferred: Option<[u8; 16]>) -> Result<Self, String> {
         let mut independent = EndpointBoundaries::prepare(plan)?;
         let running = |endpoint: &super::endpoint_boundaries::EndpointBoundary<NativeCapture>| {
-            native_transport::snapshot(endpoint.id).is_some_and(|snapshot| {
+            native_transport::snapshot(endpoint.id).is_ok_and(|snapshot| {
                 snapshot.clock.running != 0
                     && snapshot.clock.sample_rate == plan.format().sample_rate
             })
@@ -349,7 +404,14 @@ impl WorkerConfiguration {
         let index = independent
             .endpoints
             .iter()
-            .position(|endpoint| Some(endpoint.id) == preferred && running(endpoint))
+            .position(|endpoint| {
+                Some(endpoint.id) == preferred
+                    && (running(endpoint)
+                        || matches!(
+                            native_transport::snapshot(endpoint.id),
+                            Err(native_transport::SnapshotError::Pending)
+                        ))
+            })
             .or_else(|| independent.endpoints.iter().position(running));
         let primary = index
             .map(|index| {

@@ -452,6 +452,9 @@ impl LinuxProcessState<'_> {
                 },
             )
             .map_err(|_| ())?;
+        let Some(report) = report else {
+            return Ok(());
+        };
         self.status.record_process(report);
         self.status.record_process(self.devices.take_report());
         if let Some(endpoint) = self.active_endpoint.as_mut()

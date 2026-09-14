@@ -14,6 +14,23 @@ use std::f64::consts::TAU;
 
 mod realtime;
 
+#[test]
+fn processing_quantum_covers_actual_converter_batches_but_not_same_clock_copies() {
+    for (from, to) in [(96_000, 48_000), (48_000, 96_000), (48_000, 48_000)] {
+        let bridge = AsyncClockBridge::new(config(1, from, to)).unwrap();
+        let (input, output) = bridge.processing_quantum();
+        assert_eq!(input, CHUNK);
+        assert!(output >= (input * to as usize).div_ceil(from as usize));
+        assert_eq!(output, bridge.output_capacity_frames);
+    }
+    let mut options = config(1, 48_000, 48_000);
+    options.clock_relation = ClockRelation::ProvenSameClock;
+    assert_eq!(
+        AsyncClockBridge::new(options).unwrap().processing_quantum(),
+        (1, 1)
+    );
+}
+
 fn config(channels: usize, input_rate: u32, output_rate: u32) -> BridgeConfig {
     BridgeConfig {
         channels,

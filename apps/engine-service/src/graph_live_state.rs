@@ -93,7 +93,6 @@ impl EngineGraphController {
             if self
                 .execution_enabled
                 .load(std::sync::atomic::Ordering::Acquire)
-                && previous_node.control.enabled
                 && !unavailable_worker
                 && (!restoring || self.provider_is_running(&runtime_id))
             {
@@ -193,7 +192,7 @@ impl EngineGraphController {
     fn provider_is_running(&self, runtime_id: &NodeId) -> bool {
         self.execution_views
             .read()
-            .get(&self.exchange.revisions().active)
+            .get(&self.exchange.plan_revisions().active)
             .is_some_and(|view| view.origins.contains_key(runtime_id))
     }
 

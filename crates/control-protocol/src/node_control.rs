@@ -1,6 +1,55 @@
 use mixrelay_audio_graph::NodeControl;
 use serde::{Deserialize, Serialize};
 
+/// One engine-owned observation of all control targets and their transport state.
+/// `revision` identifies desired authored state; `active_revision` confirms execution.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EngineControlSnapshot {
+    pub revision: u64,
+    pub active_revision: u64,
+    /// Advances on execution-topology publication, not individual control changes.
+    pub structure_generation: u64,
+    pub engine_power: crate::EnginePowerStatus,
+    pub graphs: Vec<GraphControlSnapshot>,
+}
+
+/// Named graph identity and its controls from the same engine observation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GraphControlSnapshot {
+    pub id: String,
+    pub name: String,
+    pub nodes: Vec<NodeControlSnapshot>,
+}
+
+/// A node descriptor composed with live recorder state, when supported.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeControlSnapshot {
+    #[serde(flatten)]
+    pub descriptor: NodeControlDescriptor,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorder: Option<crate::RecorderStatus>,
+}
+
+/// Validated control intent requiring native capture preparation only when present.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NodeControlPreview {
+    pub capture_manifest: Option<crate::ApplicationCaptureManifest>,
+}
+
+/// A control acknowledgement distinguishes a local patch from native preparation.
+/// Preparation can reconcile other authored metadata, requiring a canonical graph read.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeControlResponse {
+    #[serde(flatten)]
+    pub application: crate::GraphApplyResponse,
+    pub requires_graph_reload: bool,
+}
+
 /// Explicit node state changes guarded by the current engine publication revision.
 /// Omitted fields retain their authored values; an empty patch is invalid.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -49,7 +98,7 @@ pub struct GraphNodeControls {
 /// One stable graph-local target and its persisted control state.
 /// Capabilities describe supported commands, not current native-device availability.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct NodeControlDescriptor {
     pub node_id: String,
     pub label: Option<String>,
@@ -75,6 +124,65 @@ pub struct NodeControlCapabilities {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn control_acknowledgement_requires_explicit_canonical_reload_semantics() {
+        for requires_reload in [false, true] {
+            let value = json!({"protocolVersion":1,"revision":8,"state":"active",
+                "requiresGraphReload":requires_reload});
+            let response: NodeControlResponse = serde_json::from_value(value.clone()).expect("ack");
+            assert_eq!(response.requires_graph_reload, requires_reload);
+            assert_eq!(response.application.revision, 8);
+            assert_eq!(
+                serde_json::to_value(response).expect("serialize ack"),
+                value
+            );
+        }
+        assert!(
+            serde_json::from_value::<NodeControlResponse>(json!({
+                "protocolVersion":1,"revision":8,"state":"active"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn snapshot_composes_descriptors_and_recorders_without_losing_revision_fences() {
+        let value = json!({
+            "revision":8,"activeRevision":7,"structureGeneration":3,
+            "enginePower":{"enabled":true,"transitioning":false},
+            "graphs":[{"id":"g","name":"Stage","nodes":[{
+                "nodeId":"r","label":"Take","kind":"recorder",
+                "control":{"enabled":true,"muted":false},
+                "capabilities":{"power":true,"mute":true,"recorder":true},
+                "recorder":{"state":"stopped","path":null,"sampleRate":null,
+                    "encoding":null,"frames":0,"error":null}
+            }]}]
+        });
+        let snapshot: EngineControlSnapshot =
+            serde_json::from_value(value.clone()).expect("coherent snapshot");
+        assert_eq!(
+            snapshot.graphs[0].nodes[0].recorder,
+            Some(crate::RecorderStatus::default())
+        );
+        assert_eq!(
+            serde_json::to_value(snapshot).expect("serialize snapshot"),
+            value
+        );
+    }
+
+    #[test]
+    fn ordinary_control_preview_does_not_request_native_capture_preparation() {
+        let preview = NodeControlPreview {
+            capture_manifest: None,
+        };
+        let value = serde_json::to_value(&preview).expect("preview");
+        assert_eq!(value, json!({"captureManifest":null}));
+        assert_eq!(
+            serde_json::from_value::<NodeControlPreview>(value).expect("decode"),
+            preview
+        );
+    }
 
     #[test]
     fn patch_retains_omitted_fields_and_requires_revision() {

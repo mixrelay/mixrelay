@@ -4,7 +4,7 @@ use super::EndpointSnapshot;
 use crate::endpoint_registry::CallbackEndpoint;
 use mixrelay_macos_transport::{
     endpoint_transport::{
-        EndpointClockSnapshot, mr_endpoint_transport_clock_snapshot,
+        EndpointClockSnapshot, clock_matches, mr_endpoint_transport_clock_snapshot,
         mr_endpoint_transport_incarnation,
     },
     shared_audio_buffer::{
@@ -51,14 +51,16 @@ pub(super) fn snapshot(endpoint: &CallbackEndpoint<'_>) -> Option<EndpointSnapsh
 }
 
 pub(super) fn matches(endpoint: &CallbackEndpoint<'_>, expected: &EndpointSnapshot) -> bool {
-    let Some(actual) = snapshot(endpoint) else {
-        return false;
-    };
-    actual.endpoint_id == expected.endpoint_id
-        && actual.incarnation == expected.incarnation
-        && actual.clock.epoch == expected.clock.epoch
-        && actual.clock.sample_rate == expected.clock.sample_rate
-        && actual.clock.running == expected.clock.running
+    let mut incarnation = [0; 16];
+    // SAFETY: the endpoint pin fixes mapping lifetime; incarnation has exactly the
+    // writable ABI extent. Lifecycle validation reads atomics only and ignores
+    // ordinary callback deadline contention, never a format/epoch transition.
+    endpoint.spec().id == expected.endpoint_id
+        && unsafe {
+            mr_endpoint_transport_incarnation(endpoint.transport(), incarnation.as_mut_ptr())
+        }
+        && incarnation == expected.incarnation
+        && unsafe { clock_matches(endpoint.transport(), &expected.clock) }
 }
 
 pub(super) fn read_for(

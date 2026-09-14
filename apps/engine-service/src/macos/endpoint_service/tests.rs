@@ -408,7 +408,66 @@ fn safe_service_boundary_rejects_unknown_identity() {
     assert!(!write_capture(&expected, 0, &samples, 2));
     assert!(rearm_capture(&expected).is_none());
     assert!(capture_pending(&expected));
-    assert!(snapshot(expected.endpoint_id).is_none());
+    assert!(matches!(
+        snapshot(expected.endpoint_id),
+        Err(SnapshotError::Missing)
+    ));
+}
+
+#[test]
+fn callback_deadline_publication_does_not_reject_valid_pcm() {
+    use mixrelay_macos_transport::endpoint_transport::mr_endpoint_transport_clock_demand;
+    let registry = EndpointRegistry::new();
+    let runtime = initialized(&registry, &[spec("concurrent deadlines")]);
+    let expected = ready(&runtime, 0.25);
+    let read = runtime.read();
+    let endpoint = read.endpoint(TEST_ID).unwrap();
+    // SAFETY: the registry pin outlives both scoped threads and owns this mapping.
+    let transport = unsafe { &*endpoint.transport() };
+    let start = std::sync::Barrier::new(2);
+    let stop = AtomicBool::new(false);
+    let mut rejected_reads = 0;
+    let mut rejected_writes = 0;
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            start.wait();
+            for frame in 1..1_000_000 {
+                if stop.load(Ordering::Acquire) {
+                    break;
+                }
+                // SAFETY: only bounded atomic demand publication; the shared mapping is pinned.
+                unsafe {
+                    mr_endpoint_transport_clock_demand(
+                        std::ptr::from_ref(transport).cast_mut(),
+                        true,
+                        frame,
+                        32,
+                    );
+                };
+            }
+        });
+        start.wait();
+        for block in 0..10_000 {
+            let mut pcm = [0.0; 8];
+            let transferred = audio::read_for(Some(endpoint), &expected, 0, &mut pcm, 2);
+            rejected_reads += usize::from(transferred != 4);
+            if transferred == 4 {
+                assert_eq!(pcm.map(f32::to_bits), [0.25_f32; 8].map(f32::to_bits));
+            }
+            rejected_writes += usize::from(!audio::write_for(
+                endpoint,
+                &expected,
+                block * 4,
+                &[0.5; 8],
+                2,
+            ));
+        }
+        stop.store(true, Ordering::Release);
+    });
+    eprintln!(
+        "10000 PCM transfers during callback publication: rejected reads={rejected_reads}, rejected writes={rejected_writes}"
+    );
+    assert_eq!((rejected_reads, rejected_writes), (0, 0));
 }
 
 #[test]

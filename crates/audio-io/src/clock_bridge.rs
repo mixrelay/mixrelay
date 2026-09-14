@@ -250,6 +250,16 @@ impl AsyncClockBridge {
         self.output_frames - self.output_read
     }
 
+    /// Largest input/output batch of the prepared converter, in each rate domain.
+    /// Adapters must retain a complete batch across independently scheduled
+    /// producers and consumers. A same-clock copy has no converter batch floor.
+    #[must_use]
+    pub fn processing_quantum(&self) -> (usize, usize) {
+        self.resampler.as_ref().map_or((1, 1), |resampler| {
+            (resampler.input_frames_max(), resampler.output_frames_max())
+        })
+    }
+
     /// Private FIFO backlog in input-rate frames, including converted frames not
     /// yet pulled. Add this to an upstream FIFO observation after greedy moves.
     /// Filter history/algorithmic delay is not queued transport and is excluded.

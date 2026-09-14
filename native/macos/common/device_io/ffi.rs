@@ -52,34 +52,34 @@ pub unsafe extern "C" fn mr_device_io_graph_write(
     unsafe { io.as_ref() }.map_or(0, |io| unsafe { queues::graph_write(io, samples, frames) })
 }
 
-/// Transfers a complete block through the SRC worker consumer's designated ring.
+/// Transfers a complete block through the SRC owner consumer's designated ring.
 /// # Safety
-/// IO is retained and this SRC worker consumer is serialized. Samples owns
+/// IO is retained and this SRC owner consumer is serialized. Samples owns
 /// frames*channels writable floats disjoint from queue storage; frames above 4096
 /// are rejected before accessing PCM. The opposite ring cursor may run concurrently.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mr_device_io_worker_read(
+pub unsafe extern "C" fn mr_device_io_bridge_read(
     io: *mut DeviceIo,
     samples: *mut f32,
     frames: u32,
 ) -> u32 {
     // SAFETY: role-specific queue access never forms an exclusive whole-owner borrow.
-    unsafe { io.as_ref() }.map_or(0, |io| unsafe { queues::worker_read(io, samples, frames) })
+    unsafe { io.as_ref() }.map_or(0, |io| unsafe { queues::bridge_read(io, samples, frames) })
 }
 
-/// Transfers a complete block through the SRC worker producer's designated ring.
+/// Transfers a complete block through the SRC owner producer's designated ring.
 /// # Safety
-/// IO is retained and this SRC worker producer is serialized. Samples owns
+/// IO is retained and this SRC owner producer is serialized. Samples owns
 /// frames*channels readable floats disjoint from queue storage; frames above 4096
 /// are rejected before accessing PCM. The opposite ring cursor may run concurrently.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mr_device_io_worker_write(
+pub unsafe extern "C" fn mr_device_io_bridge_write(
     io: *mut DeviceIo,
     samples: *const f32,
     frames: u32,
 ) -> u32 {
     // SAFETY: role-specific queue access never forms an exclusive whole-owner borrow.
-    unsafe { io.as_ref() }.map_or(0, |io| unsafe { queues::worker_write(io, samples, frames) })
+    unsafe { io.as_ref() }.map_or(0, |io| unsafe { queues::bridge_write(io, samples, frames) })
 }
 
 /// Allocates a complete disconnected device owner. Invalid geometry or allocation
@@ -317,6 +317,17 @@ pub unsafe extern "C" fn mr_device_io_queued(io: *mut DeviceIo, graph: bool) -> 
     unsafe { io.as_ref() }.map_or(0, |io| io.ring(graph).stats().queued)
 }
 
+/// Counts transitions from primed PCM to shortage in the selected ring.
+/// Worker-side empty polls are not device deadline misses; select the graph
+/// ring for input and the native ring for output when diagnosing audible I/O.
+/// # Safety
+/// The engine retains the complete initialized IO owner until return.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_device_io_starvations(io: *mut DeviceIo, graph: bool) -> u64 {
+    // SAFETY: ring stats read immutable geometry and atomic counters only.
+    unsafe { io.as_ref() }.map_or(0, |io| io.ring(graph).stats().starvations)
+}
+
 /// Observes the latest callback or graph quantum, zero before first processing.
 /// # Safety
 /// The engine retains IO through this atomic observation.
@@ -354,18 +365,21 @@ pub unsafe extern "C" fn mr_device_io_clock_discontinuities(io: *mut DeviceIo) -
     })
 }
 
-/// Discards only the worker's input consumer cursor, never the graph/native producer.
+/// Discards only the bridge owner's input consumer cursor, never the graph/native producer.
 /// # Safety
-/// Sole SRC worker executes this call; IO remains retained and no other consumer overlaps.
+/// Sole SRC owner executes this call; IO remains retained and no other consumer overlaps.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mr_device_io_worker_discard(io: *mut DeviceIo) {
-    // SAFETY: immutable owner lookup followed by the worker-exclusive consumer action.
+pub unsafe extern "C" fn mr_device_io_bridge_discard(io: *mut DeviceIo) {
+    // SAFETY: immutable owner lookup followed by the bridge-exclusive consumer action.
     if let Some(io) = unsafe { io.as_ref() } {
-        unsafe { queues::worker_discard(io) };
+        unsafe { queues::bridge_discard(io) };
     }
 }
 
 /// Reads graph input, discarding old PCM when the graph's recovery epoch changes.
+/// Returns actual frames and whether this read admitted the first consumer epoch.
+/// Null IO, wrong direction, zero or oversized requests return the empty default
+/// without admitting an epoch. Recovery after a prior read is never initial admission.
 /// # Safety
 /// Serialized graph consumer, retained IO, and writable frames*channels output
 /// floats disjoint from queue storage. Frames above 4096 are rejected without access.
@@ -375,9 +389,26 @@ pub unsafe extern "C" fn mr_device_io_graph_read(
     samples: *mut f32,
     frames: u32,
     epoch: u64,
-) -> u32 {
+) -> queues::GraphRead {
     // SAFETY: graph owns only this consumer and graph epoch cell.
-    unsafe { io.as_ref() }.map_or(0, |io| unsafe {
+    unsafe { io.as_ref() }.map_or_else(queues::GraphRead::default, |io| unsafe {
         queues::graph_read(io, samples, frames, epoch)
     })
+}
+/// Installs the clock-boundary hook before registration, never on a live callback.
+/// # Safety
+/// The control owner has no registered `IOProc`. Context stays valid through native
+/// unregister; the hook serializes its own mutable state and owns only SRC cursors.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_device_io_pcm_hook(
+    io: *mut DeviceIo,
+    context: *mut c_void,
+    hook: super::PcmHook,
+) {
+    // SAFETY: disconnected owner; no callback can borrow this cell yet.
+    if let Some(io) = unsafe { io.as_ref() } {
+        let callback = unsafe { &mut *io.callback.get() };
+        callback.pcm_hook = Some(hook);
+        callback.pcm_context = context;
+    }
 }

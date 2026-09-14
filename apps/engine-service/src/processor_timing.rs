@@ -4,7 +4,7 @@ use crate::EngineGraphController;
 
 impl EngineGraphController {
     pub(crate) fn processor_timings(&self) -> Vec<ProcessorTiming> {
-        let revision = self.exchange.revisions().active;
+        let revision = self.exchange.plan_revisions().active;
         let views = self.execution_views.read();
         let Some(view) = views.get(&revision) else {
             return Vec::new();

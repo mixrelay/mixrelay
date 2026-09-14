@@ -12,6 +12,7 @@ pub(super) struct Builder<'a> {
     context: CompileContext,
     document: GraphDocument,
     origins: BTreeMap<NodeId, NodeOrigin>,
+    control_bindings: BTreeMap<NodeId, Vec<NodeId>>,
     devices: BTreeMap<VirtualEndpointId, NodeId>,
     buses: BTreeMap<VirtualEndpointId, NodeId>,
     sources: BTreeMap<String, NodeId>,
@@ -30,6 +31,7 @@ impl<'a> Builder<'a> {
             context,
             document: GraphDocument::new(revision, vec![], vec![]),
             origins: BTreeMap::new(),
+            control_bindings: BTreeMap::new(),
             devices: BTreeMap::new(),
             buses: BTreeMap::new(),
             sources: BTreeMap::new(),
@@ -251,6 +253,7 @@ impl<'a> Builder<'a> {
             }),
         })?;
         self.origin(local.clone(), graph, &reference.node_id, None);
+        self.bind_control(native.clone(), local.clone());
         self.project_channels(
             endpoint(local, AUDIO_PORT_ID),
             endpoint(native, AUDIO_PORT_ID),
@@ -297,6 +300,7 @@ impl<'a> Builder<'a> {
             }),
         })?;
         self.origin(local.clone(), graph, &reference.node_id, None);
+        self.bind_control(native.clone(), local.clone());
         self.project_channels(
             endpoint(native, AUDIO_PORT_ID),
             endpoint(local, AUDIO_PORT_ID),
@@ -350,6 +354,7 @@ impl<'a> Builder<'a> {
                 &reference.node_id,
                 Some(FROM_OS_PORT_ID),
             );
+            self.bind_device_controls(&reference.device_id, &node);
             self.project_channels(source, endpoint(node, AUDIO_PORT_ID), read.channels)?;
         }
         if let Some(channels) = reference.write_channels {
@@ -386,6 +391,7 @@ impl<'a> Builder<'a> {
             }),
         })?;
         self.origin(node.clone(), graph, &reference.node_id, Some(TO_OS_PORT_ID));
+        self.bind_device_controls(&reference.device_id, &node);
         self.project_channels(
             endpoint(node, AUDIO_PORT_ID),
             endpoint(device_node_id(&device.id, "mix"), AUDIO_PORT_ID),
@@ -436,6 +442,43 @@ impl<'a> Builder<'a> {
             },
         );
     }
+
+    fn bind_control(&mut self, owner: NodeId, local: NodeId) {
+        self.control_bindings.entry(owner).or_default().push(local);
+    }
+
+    fn bind_device_controls(&mut self, device: &VirtualEndpointId, local: &NodeId) {
+        for side in ["native", "mix", "snapshot"] {
+            self.bind_control(device_node_id(device, side), local.clone());
+        }
+    }
+
+    fn initialize_owner_controls(&mut self) {
+        let controls: BTreeMap<_, _> = self
+            .document
+            .nodes
+            .iter()
+            .map(|node| (&node.id, node.control.enabled))
+            .collect();
+        let enabled_owners: BTreeMap<_, _> = self
+            .control_bindings
+            .iter()
+            .map(|(owner, references)| {
+                let enabled = references
+                    .iter()
+                    .any(|reference| controls.get(reference).copied().unwrap_or_default());
+                (owner, enabled)
+            })
+            .collect();
+        for node in &mut self.document.nodes {
+            if let Some(&enabled) = enabled_owners.get(&node.id) {
+                node.control = mixrelay_audio_graph::NodeControl {
+                    enabled,
+                    muted: false,
+                };
+            }
+        }
+    }
     fn node(&mut self, node: NodeSpec) -> Result<(), CompositionError> {
         if self.document.nodes.len() >= self.context.limits.max_nodes {
             return Err(invalid("composed node budget exceeded"));
@@ -483,9 +526,10 @@ impl<'a> Builder<'a> {
         })
     }
     pub(super) fn finish(
-        self,
+        mut self,
         compiler: &GraphCompiler,
     ) -> Result<ComposedGraph, CompositionError> {
+        self.initialize_owner_controls();
         let execution = compiler
             .compile(&self.document, self.context)
             .map_err(CompositionError::Compile)?;
@@ -493,6 +537,7 @@ impl<'a> Builder<'a> {
             document: self.document,
             execution,
             node_origins: self.origins,
+            native_control_bindings: self.control_bindings,
             native_devices: self.devices,
             device_buses: self.buses,
             native_sources: self.sources,

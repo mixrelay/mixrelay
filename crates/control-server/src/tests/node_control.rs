@@ -30,6 +30,47 @@ pub(super) fn discovery(graph_id: &str) -> GraphNodeControls {
     }
 }
 
+pub(super) fn snapshot() -> mixrelay_control_protocol::EngineControlSnapshot {
+    use mixrelay_control_protocol::{
+        EngineControlSnapshot, EnginePowerStatus, GraphControlSnapshot, NodeControlSnapshot,
+    };
+    EngineControlSnapshot {
+        revision: 8,
+        active_revision: 7,
+        structure_generation: 3,
+        engine_power: EnginePowerStatus {
+            enabled: true,
+            transitioning: false,
+        },
+        graphs: vec![GraphControlSnapshot {
+            id: "graph B".into(),
+            name: "Stage".into(),
+            nodes: discovery("graph B")
+                .nodes
+                .into_iter()
+                .map(|descriptor| NodeControlSnapshot {
+                    descriptor,
+                    recorder: None,
+                })
+                .collect(),
+        }],
+    }
+}
+
+#[tokio::test]
+async fn snapshot_returns_the_engine_observation_even_while_a_revision_is_pending() {
+    let (status, body) = response_json(
+        router_with_backend(backend()),
+        Request::get(CONTROL_SNAPSHOT_ROUTE)
+            .body(Body::empty())
+            .expect("request"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, serde_json::to_value(snapshot()).expect("snapshot"));
+    assert_eq!(body["graphs"][0]["nodes"][0]["nodeId"], "effect");
+}
+
 fn backend() -> Arc<TestBackend> {
     TestBackend::with_result(Ok(GraphApplyResponse {
         protocol_version: PROTOCOL_VERSION,
@@ -81,7 +122,12 @@ async fn update_and_preview_forward_identical_explicit_targets() {
         )
         .await;
         assert_eq!(status, expected_status);
-        assert_eq!(body["revision"], 8);
+        if method == "POST" {
+            assert_eq!(body["captureManifest"]["revision"], 8);
+        } else {
+            assert_eq!(body["revision"], 8);
+            assert_eq!(body["requiresGraphReload"], false);
+        }
         assert_eq!(
             *backend.last_node_control.lock().expect("test mutex"),
             Some(RecordedControl {

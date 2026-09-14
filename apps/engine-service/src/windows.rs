@@ -391,7 +391,9 @@ fn process_graph_cycle(
                 },
             )
             .map_err(|error| error.to_string())?;
-        resources.runtime_status.record_process(report);
+        if let Some(report) = report {
+            resources.runtime_status.record_process(report);
+        }
     }
     Ok(())
 }

@@ -13,6 +13,8 @@ use mixrelay_audio_io::{
 };
 use std::collections::BTreeSet;
 
+mod dormant_provider_tests;
+
 fn context() -> CompileContext {
     CompileContext {
         format: RenderFormat {

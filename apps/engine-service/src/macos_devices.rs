@@ -1,5 +1,6 @@
 //! `CoreAudio` resource coordination. Graph publication, recovery and format
 //! transactions have separate activation contracts; no native work runs on DSP.
+mod activity;
 mod admission;
 mod aggregate;
 mod application;
@@ -16,6 +17,7 @@ mod native;
 mod recovery;
 mod retirement;
 mod spec;
+mod telemetry;
 mod worker;
 mod worker_retirement;
 use aggregate::Aggregate;
@@ -59,15 +61,31 @@ pub(super) struct HardwareClockProgress {
     pub(super) epoch: u64,
     pub(super) native_frames: u64,
     pub(super) native_rate: u32,
+    pub(super) quantum: u32,
 }
 impl DeviceSet {
+    /// Publish the pacing callback's complete burst, not each split DSP block.
+    pub(super) fn set_graph_quantum(&self, frames: u32) {
+        for device in self.0.values() {
+            device.graph_quantum.store(frames, Ordering::Release);
+        }
+    }
+    pub(super) fn set_active(&self, id: &str, enabled: bool) {
+        if let Some(device) = self.0.get(id) {
+            device.set_active(enabled);
+        }
+    }
     pub(super) fn is_offline(&self, id: &str) -> bool {
         self.1.contains_key(id)
     }
-    /// Reconnecting owners have no active PCM bridge yet. This does not change
+    /// Disabled or reconnecting owners have no active PCM bridge. This does not change
     /// their selected identity or classify them as absent from native inventory.
     pub(super) fn is_inactive(&self, id: &str) -> bool {
-        self.is_offline(id) || self.0.get(id).is_some_and(|device| !device.ready())
+        self.is_offline(id)
+            || self
+                .0
+                .get(id)
+                .is_some_and(|device| !device.ready() || !device.activity.enabled())
     }
     /// Explicit graph pacing identity, never inferred from nominal sample rate.
     pub(super) fn set_clock_master(&self, owner_id: Option<u64>) {
@@ -104,6 +122,8 @@ impl DeviceSet {
             epoch: device.epoch.load(Ordering::Acquire),
             native_frames: unsafe { mr_device_io_native_frames(device.native.pointer.as_ptr()) },
             native_rate: device.native_rate.load(Ordering::Acquire),
+            // SAFETY: the device set retains Native; quantum is an atomic snapshot.
+            quantum: unsafe { ffi::mr_device_io_quantum(device.native.pointer.as_ptr(), false) },
         })
     }
 
@@ -445,6 +465,12 @@ impl RuntimeStatusBackend for MacDevices {
 mod tests {
     use super::*;
     #[test]
+    fn virtual_capture_activity_does_not_replace_existing_hardware_pacing() {
+        let (output, _) = synthetic_output(2, 48_000, 48_000);
+        let devices = DeviceSet(BTreeMap::from([("output".into(), output)]), BTreeMap::new());
+        crate::macos::pacing_tests::assert_hardware_keeps_authority(&devices);
+    }
+    #[test]
     fn processing_admission_waits_for_native_rate_and_rebuilt_bridge() {
         let (device, context) = synthetic_output(2, 96_000, 48_000);
         let devices = DeviceSet(BTreeMap::from([("output".into(), device)]), BTreeMap::new());
@@ -545,17 +571,21 @@ mod tests {
         assert_eq!(aggregate_members(&desired), ["out", "mic"]);
     }
     #[test]
-    fn low_latency_queue_keeps_one_burst_for_shared_and_two_for_independent_clocks() {
+    fn queue_retains_complete_converter_bursts_without_padding_same_clock_copy() {
         let (device, context) = synthetic_output(2, 48000, 48000);
         let pcm = [0.0; 64];
         unsafe {
             mr_device_io_graph_write(device.native.pointer.as_ptr(), pcm.as_ptr(), 32);
         }
-        let mut bridge = DeviceBridge::new(&context, 48000).unwrap();
-        bridge.clock_aligned = true;
+        context.clock_aligned.store(true, Ordering::Release);
+        let bridge = DeviceBridge::new(&context, 48000).unwrap();
         assert_eq!(bridge.queue_target(&context, false), 32);
-        bridge.clock_aligned = false;
-        assert_eq!(bridge.queue_target(&context, false), 64);
+        context.clock_aligned.store(false, Ordering::Release);
+        let bridge = DeviceBridge::new(&context, 48000).unwrap();
+        assert_eq!(
+            bridge.queue_target(&context, false),
+            bridge.bridge.processing_quantum().1 * 2
+        );
     }
     #[test]
     fn output_queue_latency_budget() {
@@ -581,10 +611,130 @@ mod tests {
         );
         assert_eq!(queued, 256);
     }
+
+    #[test]
+    fn split_pacing_burst_retains_the_complete_callback_not_one_dsp_block() {
+        for (native_rate, aligned) in [(48_000, true), (96_000, false)] {
+            let mut transferred = Vec::new();
+            for pacing_quantum in [32, 256] {
+                let (device, context) = synthetic_device(1, 48_000, native_rate, true);
+                context.clock_aligned.store(aligned, Ordering::Release);
+                let devices = DeviceSet(
+                    BTreeMap::from([("input".into(), device.clone())]),
+                    BTreeMap::new(),
+                );
+                devices.set_graph_quantum(pacing_quantum);
+                let mut bridge = DeviceBridge::new(&context, native_rate).unwrap();
+                // Establish the graph consumer epoch before queuing this callback.
+                let mut pcm = [0.0; 32];
+                device.read(&mut pcm);
+                for _ in 0..4 {
+                    bridge.bridge.push_interleaved(&[0.25; 256]).unwrap();
+                }
+                // Let sinc startup consume its filter history before checking
+                // the retained steady-state transfer window.
+                for _ in 0..4 {
+                    bridge.pump(&context).unwrap();
+                }
+                let frames: u32 = (0..8).map(|_| device.read(&mut pcm).frames).sum();
+                let expected = if aligned {
+                    pacing_quantum
+                } else {
+                    (pacing_quantum * 2)
+                        .max(u32::try_from(bridge.bridge.processing_quantum().1 * 2).unwrap())
+                }
+                .min(256)
+                    / 32
+                    * 32;
+                assert_eq!(frames, expected);
+                transferred.push(frames);
+            }
+            assert_eq!(transferred[1], 256);
+            eprintln!(
+                "{native_rate}->48000 Hz, retained PCM for 32/256-frame callbacks: {transferred:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn disabled_pcm_does_not_poison_sync_or_replace_the_hardware_clock() {
+        let (device, context) = synthetic_output(2, 48_000, 48_000);
+        let devices = DeviceSet(
+            BTreeMap::from([("output".into(), device.clone())]),
+            BTreeMap::new(),
+        );
+        let owner = devices.hardware_clock_progress().unwrap().owner_id;
+        assert!(!devices.is_inactive("output"));
+        device.set_active(false);
+        let mut bridge = DeviceBridge::new(&context, 48_000).unwrap();
+        assert!(!bridge.synchronize_activity(&context));
+        assert!(devices.is_inactive("output"));
+        assert_eq!(devices.hardware_clock_progress().unwrap().owner_id, owner);
+        device.set_active(true);
+        assert!(!devices.is_inactive("output"));
+        assert_eq!(devices.clock_synchronized("output"), Some(false));
+        assert_eq!(devices.hardware_clock_progress().unwrap().owner_id, owner);
+    }
     pub(super) fn synthetic_output(
         channels: u16,
         graph_rate: u32,
         native_rate: u32,
+    ) -> (Arc<Device>, WorkerContext) {
+        synthetic_device(channels, graph_rate, native_rate, false)
+    }
+
+    #[test]
+    fn first_input_epoch_is_priming_but_later_shortages_remain_active() {
+        use mixrelay_audio_io::process::InputActivity;
+        let (device, context) = synthetic_device(1, 48_000, 48_000, true);
+        let mut pcm = [9.0_f32; 32];
+        // SAFETY: unpublished synthetic owner; the fixture serializes both ring
+        // roles with full disjoint PCM spans and no native callback or worker.
+        unsafe {
+            assert_eq!(
+                ffi::mr_device_io_bridge_write(
+                    device.native.pointer.as_ptr(),
+                    [0.25; 32].as_ptr(),
+                    32,
+                ),
+                32
+            );
+        }
+        let allocation = allocation_counter::measure(|| {
+            let first = device.read(&mut pcm);
+            assert_eq!(first.activity, InputActivity::Priming);
+            assert_eq!(first.frames, 0);
+            assert!(!first.discontinuity);
+            assert!(pcm.iter().all(|sample| *sample == 0.0));
+            let stalled = device.read(&mut pcm);
+            assert_eq!(stalled.activity, InputActivity::Active);
+            assert_eq!(stalled.frames, 0);
+        });
+        assert_eq!(allocation.count_total, 0);
+        // SAFETY: same sole synthetic producer after the reader's freshness reset.
+        unsafe {
+            assert_eq!(
+                ffi::mr_device_io_bridge_write(
+                    device.native.pointer.as_ptr(),
+                    [0.75; 32].as_ptr(),
+                    32,
+                ),
+                32
+            );
+        }
+        assert_eq!(device.read(&mut pcm), TransferOutcome::complete(32));
+        assert_eq!(pcm.map(f32::to_bits), [0.75_f32.to_bits(); 32]);
+        context.epoch.fetch_add(1, Ordering::Release);
+        let restarted = device.read(&mut pcm);
+        assert_eq!(restarted.activity, InputActivity::Active);
+        assert_eq!(restarted.frames, 0);
+    }
+
+    pub(super) fn synthetic_device(
+        channels: u16,
+        graph_rate: u32,
+        native_rate: u32,
+        input: bool,
     ) -> (Arc<Device>, WorkerContext) {
         let native = Arc::new(
             Native::create(
@@ -592,7 +742,7 @@ mod tests {
                     selector: DeviceSelector::PersistentUid {
                         uid: "synthetic-no-device".into(),
                     },
-                    input: false,
+                    input,
                     channels,
                 },
                 native_rate,
@@ -602,11 +752,13 @@ mod tests {
             .unwrap(),
         );
         let context = WorkerContext {
+            activity: Arc::clone(&native.render.activity),
             native: native.clone(),
             stop: Arc::new(AtomicBool::new(false)),
             failed: Arc::new(AtomicBool::new(false)),
             epoch: Arc::new(AtomicU64::new(1)),
             graph_rate: Arc::new(AtomicU32::new(graph_rate)),
+            graph_quantum: Arc::new(AtomicU32::new(32)),
             ready_rate: Arc::new(AtomicU32::new(graph_rate)),
             native_rate: Arc::new(AtomicU32::new(native_rate)),
             clock_identity: Arc::new(AtomicU32::new(0)),
@@ -614,17 +766,19 @@ mod tests {
             pending_bridge: Arc::new(Mutex::new(None)),
             clock_aligned: Arc::new(AtomicBool::new(false)),
             channels: usize::from(channels),
-            input: false,
+            input,
         };
         let device = Arc::new(Device {
+            activity: Arc::clone(&context.activity),
             identity: NEXT_DEVICE_EPOCH.fetch_add(1, Ordering::Relaxed),
             native,
             channels: context.channels,
-            input: false,
+            input,
             stop: context.stop.clone(),
             failed: context.failed.clone(),
             epoch: context.epoch.clone(),
             graph_rate: context.graph_rate.clone(),
+            graph_quantum: context.graph_quantum.clone(),
             ready_rate: context.ready_rate.clone(),
             native_rate: context.native_rate.clone(),
             clock_identity: context.clock_identity.clone(),

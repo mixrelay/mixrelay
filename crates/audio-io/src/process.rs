@@ -22,6 +22,9 @@ pub enum ProcessingState {
 pub enum InputActivity {
     Unknown,
     Inactive,
+    /// A newly admitted stream is filling its bounded startup window. This is
+    /// not valid PCM and must never be used to conceal a previously running stall.
+    Priming,
     Active,
 }
 
@@ -89,7 +92,7 @@ pub enum CycleError {
     TimestampRegressed,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct CycleTracker {
     previous: Option<ProcessCycle>,
 }

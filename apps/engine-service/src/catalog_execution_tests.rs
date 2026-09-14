@@ -193,7 +193,7 @@ fn samples_equal(samples: &[f32], value: f32) {
 }
 
 #[test]
-fn disabled_references_release_only_the_final_shared_owner_and_mute_stays_local() {
+fn disabled_references_stop_only_the_final_shared_owner_and_mute_stays_local() {
     let apps = Apps(Cell::new(0));
     let mut first = physical_graph(DeviceSelector::DefaultInput, 0.0);
     let second = first.clone();
@@ -213,15 +213,31 @@ fn disabled_references_release_only_the_final_shared_owner_and_mute_stays_local(
     }
     documents[1].1.nodes[0].control.enabled = false;
     let composed = compile(&documents, &inventory(), &apps).unwrap();
-    assert!(composed.native_sources.is_empty());
+    assert_eq!(composed.native_sources.len(), 1);
+    let owner = composed.native_sources.values().next().unwrap();
+    assert!(
+        composed
+            .document
+            .nodes
+            .iter()
+            .any(|node| &node.id == owner && !node.control.enabled)
+    );
     for samples in pcm(&composed).values() {
         samples_equal(samples, 0.0);
     }
     documents[0].1.nodes[1].control.enabled = false;
     documents[1].1.nodes[1].control.enabled = false;
     let composed = compile(&documents, &inventory(), &apps).unwrap();
-    assert!(composed.native_outputs.is_empty());
-    assert!(composed.document.nodes.is_empty());
+    assert_eq!(composed.native_outputs.len(), 1);
+    assert_eq!(composed.document.nodes.len(), 6);
+    assert!(
+        composed
+            .document
+            .nodes
+            .iter()
+            .all(|node| !node.control.enabled)
+    );
+    assert_eq!(composed.document.edges.len(), 6);
 }
 
 #[test]
@@ -234,7 +250,9 @@ fn disabled_unknown_processor_does_not_block_composition_or_erase_authored_state
     }))
     .unwrap();
     let composed = compile(&[("a".into(), document.clone())], &[], &apps).unwrap();
-    assert!(composed.document.nodes.is_empty());
+    assert_eq!(composed.document.nodes.len(), 1);
+    assert!(!composed.document.nodes[0].control.enabled);
+    assert_eq!(composed.node_origins.len(), 1);
     assert_eq!(
         serde_json::to_value(&document).unwrap()["nodes"][0]["config"]["parameters"]["saved"],
         42

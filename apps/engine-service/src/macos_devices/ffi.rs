@@ -1,6 +1,13 @@
 //! `CoreAudio` C ABI. Ownership and thread rules live in native.rs.
+pub(super) use mixrelay_macos_transport::device_io::{ClockBreak, GraphRead};
 use std::ffi::{c_char, c_void};
 unsafe extern "C" {
+    pub(super) fn mr_device_io_clock_break(io: *const c_void, event: *mut ClockBreak) -> bool;
+    pub(super) fn mr_device_io_pcm_hook(
+        io: *mut c_void,
+        context: *mut c_void,
+        hook: unsafe extern "C" fn(*mut c_void) -> bool,
+    );
     pub(super) fn mr_device_io_render_hook(
         io: *mut c_void,
         context: *mut c_void,
@@ -51,10 +58,11 @@ unsafe extern "C" {
     pub(super) fn mr_device_io_overflows(io: *mut c_void) -> u64;
     pub(super) fn mr_device_io_quantum(io: *mut c_void, graph: bool) -> u32;
     pub(super) fn mr_device_io_queued(io: *mut c_void, graph: bool) -> u32;
-    pub(super) fn mr_device_io_worker_discard(io: *mut c_void);
+    pub(super) fn mr_device_io_starvations(io: *mut c_void, graph: bool) -> u64;
+    pub(super) fn mr_device_io_bridge_discard(io: *mut c_void);
     pub(super) fn mr_device_io_output_epoch(io: *mut c_void, epoch: u64);
-    pub(super) fn mr_device_io_worker_read(io: *mut c_void, samples: *mut f32, frames: u32) -> u32;
-    pub(super) fn mr_device_io_worker_write(
+    pub(super) fn mr_device_io_bridge_read(io: *mut c_void, samples: *mut f32, frames: u32) -> u32;
+    pub(super) fn mr_device_io_bridge_write(
         io: *mut c_void,
         samples: *const f32,
         frames: u32,
@@ -64,7 +72,7 @@ unsafe extern "C" {
         samples: *mut f32,
         frames: u32,
         epoch: u64,
-    ) -> u32;
+    ) -> GraphRead;
     pub(super) fn mr_device_io_graph_write(
         io: *mut c_void,
         samples: *const f32,

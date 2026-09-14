@@ -452,6 +452,39 @@ fn exhausted_clock_requires_new_mapping_without_reusing_remote_snapshot_tags() {
 }
 
 #[test]
+fn pcm_identity_survives_deadline_contention_but_not_lifecycle_changes() {
+    let mapping = Mapping::new(&duplex());
+    // SAFETY: the fixture exclusively owns the initialized transport and clock;
+    // no native publisher runs while the test simulates its odd sequence.
+    unsafe {
+        assert!(mr_endpoint_transport_begin_clock_transition(
+            mapping.pointer
+        ));
+        mr_endpoint_transport_clock_state(mapping.pointer, 1, 48_000, true);
+        let expected = mapping.snapshot().unwrap();
+        let clock = (*mapping.pointer).clock().unwrap();
+        clock.render.sequence.store(1, Ordering::Release);
+        assert!(mapping.snapshot().is_none());
+        assert!(clock_matches(mapping.pointer, &expected));
+        clock.render.sequence.store(2, Ordering::Release);
+        assert!(mr_endpoint_transport_begin_clock_transition(
+            mapping.pointer
+        ));
+        assert!(!clock_matches(mapping.pointer, &expected));
+        mr_endpoint_transport_clock_state(mapping.pointer, 2, 96_000, true);
+        assert!(!clock_matches(mapping.pointer, &expected));
+        let changed = mapping.snapshot().unwrap();
+        assert!(clock_matches(mapping.pointer, &changed));
+        assert!(mr_endpoint_transport_begin_clock_transition(
+            mapping.pointer
+        ));
+        mr_endpoint_transport_clock_state(mapping.pointer, 3, 96_000, false);
+        assert!(!clock_matches(mapping.pointer, &changed));
+        assert!(!clock_matches(ptr::null(), &changed));
+    }
+}
+
+#[test]
 fn incarnation_identifies_mapping_across_real_fd_duplication_and_replacement() {
     let config = duplex();
     let size = unsafe { mr_endpoint_transport_required_bytes(&raw const config) };

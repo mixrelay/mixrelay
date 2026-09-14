@@ -120,6 +120,7 @@ mod tests {
         let invalid = AtomicBool::new(false);
         let owner = PreparedRenderer::new(Renderer {
             processor: &mut processor,
+            activation: None,
             bindings: &bindings,
             clock_id: 7,
             epoch: 1,

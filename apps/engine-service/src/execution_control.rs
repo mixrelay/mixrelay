@@ -30,9 +30,13 @@ pub(super) struct PreparedExecution {
     pub view: ExecutionView,
 }
 
+#[derive(Clone)]
 pub(super) struct ExecutionView {
     pub origins: BTreeMap<NodeId, NodeOrigin>,
     pub captures: ApplicationCaptureManifest,
+    pub controls: std::sync::Arc<mixrelay_audio_engine::RuntimeControlBank>,
+    pub native_controls: BTreeMap<NodeId, Vec<NodeId>>,
+    pub prepared_native: std::collections::BTreeSet<NodeId>,
 }
 
 struct NativeIdentities<'a>(&'a dyn GraphResourceBackend);
@@ -106,7 +110,6 @@ impl EngineGraphController {
         let selectors: Vec<_> = documents
             .iter()
             .flat_map(|(_, graph)| &graph.nodes)
-            .filter(|node| node.control.enabled)
             .filter_map(|node| match &node.config {
                 NodeConfig::AudioDeviceInput(config) => Some(&config.selector),
                 NodeConfig::AudioDeviceOutput(config) => Some(&config.selector),
@@ -163,6 +166,19 @@ impl EngineGraphController {
             .prepare(&composed.execution)
             .map_err(prepare_error)?;
         validate_endpoint_bindings(processor.plan(), &endpoints)?;
+        let controls = std::sync::Arc::clone(processor.plan().controls());
+        let prepared_native = composed
+            .native_control_bindings
+            .keys()
+            .filter(|id| {
+                composed
+                    .document
+                    .nodes
+                    .iter()
+                    .any(|node| &node.id == *id && node.control.enabled)
+            })
+            .cloned()
+            .collect();
         Ok(PreparedExecution {
             processor,
             document: composed.document,
@@ -170,6 +186,9 @@ impl EngineGraphController {
             view: ExecutionView {
                 origins: composed.node_origins,
                 captures,
+                controls,
+                native_controls: composed.native_control_bindings,
+                prepared_native,
             },
         })
     }
@@ -178,9 +197,16 @@ impl EngineGraphController {
         &self,
     ) -> Result<ApplicationCaptureManifest, ProtocolError> {
         let _mutation = self.mutation.lock();
-        let revision = self.exchange.revisions().submitted;
+        let revision = self.exchange.plan_revisions().submitted;
         if let Some(view) = self.execution_views.read().get(&revision) {
-            return Ok(view.captures.clone());
+            let mut manifest = view.captures.clone();
+            manifest.revision = self.exchange.revisions().submitted;
+            manifest.sources.retain(|source| {
+                view.controls
+                    .snapshot(&NodeId::from(source.node_id.as_str()))
+                    .is_some_and(|(control, _)| control.enabled)
+            });
+            return Ok(manifest);
         }
         let document = self.graph.read().clone();
         let catalog = self.catalog_candidate(&document);
@@ -226,6 +252,7 @@ pub(crate) fn capture_manifest(
     let sources = document
         .nodes
         .iter()
+        .filter(|node| node.control.enabled)
         .filter_map(|node| match &node.config {
             NodeConfig::ApplicationCapture(request) => Some((node, request)),
             _ => None,

@@ -491,6 +491,34 @@ pub unsafe extern "C" fn mr_endpoint_transport_clock_snapshot(
     true
 }
 
+/// Validates only lifecycle identity, not the concurrently advancing callback deadline.
+/// PCM already has absolute coordinates; an ordinary deadline publication must not
+/// invalidate its still-live mapping, epoch, rate or running state.
+///
+/// # Safety
+/// Non-null transport must be attached and its complete mapping must remain pinned
+/// through this call. `expected` must not alias memory concurrently written by others.
+pub unsafe fn clock_matches(
+    transport: *const EndpointTransport,
+    expected: &EndpointClockSnapshot,
+) -> bool {
+    // SAFETY: the caller pins the attached transport and its initialized clock storage.
+    let Some(clock) = (unsafe { transport.as_ref().and_then(|value| value.clock()) }) else {
+        return false;
+    };
+    let generation = clock.generation.load(Ordering::Acquire);
+    if generation == 0
+        || generation & (TERMINAL | UNREADY) != 0
+        || generation >> 1 != expected.epoch
+        || u32::from(generation & 1 != 0) != expected.running
+        || clock.sample_rate.load(Ordering::Relaxed) != expected.sample_rate
+    {
+        return false;
+    }
+    fence(Ordering::Acquire);
+    generation == clock.generation.load(Ordering::Acquire)
+}
+
 /// Signals the control owner to publish a new mapping, retaining old reader
 /// owners until they detach. Never clear or reuse a terminal mapping in place.
 /// # Safety

@@ -1,4 +1,4 @@
-//! A single native callback owns a same-clock hardware graph. The control
+//! A single native callback owns the hardware graph. The control
 //! supervisor prepares channel maps and drains publication before reclaiming
 //! the borrowed Rust renderer. Independent clocks retain their explicit bridge.
 use super::{
@@ -36,6 +36,7 @@ pub(crate) struct Descriptor {
 
 #[derive(Default)]
 pub(super) struct RenderSlot {
+    pub(super) activity: Arc<super::activity::BridgeActivity>,
     enabled: AtomicBool,
     descriptor: AtomicPtr<Descriptor>,
     readers: AtomicU32,
@@ -69,6 +70,7 @@ pub(super) unsafe extern "C" fn dispatch(
     // SAFETY: Native owns this stable box until CoreAudio unregister is acknowledged.
     let slot = unsafe { &*context.cast::<RenderSlot>() };
     if !slot.enabled() {
+        // The clock-boundary hook acknowledges OFF/ON before admitting native PCM.
         return false;
     }
     slot.readers.fetch_add(1, Ordering::SeqCst);
@@ -100,7 +102,7 @@ pub(super) unsafe extern "C" fn dispatch(
 pub(crate) struct Binding {
     pub(crate) id: String,
     pub(crate) input: bool,
-    /// No native ABL storage exists for a device confirmed absent by inventory.
+    /// No native ABL storage exists for an offline or unprepared disabled binding.
     pub(crate) offset: Option<usize>,
     pub(crate) channels: usize,
 }
@@ -109,12 +111,16 @@ impl Binding {
     fn prepare(
         devices: &DeviceSet,
         binding: &ExternalBinding,
-        input: bool,
-        clock_id: u32,
-        native_rate: u32,
+        selection: BindingSelection,
     ) -> Option<Self> {
+        let BindingSelection {
+            input,
+            enabled,
+            clock_id,
+            native_rate,
+        } = selection;
         let id = binding.node_id().as_str();
-        let offset = if devices.is_offline(id) {
+        let offset = if devices.is_offline(id) || (!enabled && !devices.0.contains_key(id)) {
             None
         } else {
             let device = devices.0.get(id)?;
@@ -149,10 +155,19 @@ impl Binding {
     }
 }
 
+#[derive(Clone, Copy)]
+struct BindingSelection {
+    input: bool,
+    enabled: bool,
+    clock_id: u32,
+    native_rate: u32,
+}
+
 pub(crate) struct DirectPlan {
     master: Arc<Device>,
     owners: Vec<Arc<Device>>,
     pub(crate) bindings: Vec<Binding>,
+    pub(crate) bridged: DeviceSet,
     pub(crate) clock_id: u32,
 }
 
@@ -166,8 +181,8 @@ impl DirectPlan {
             .report(self.clock_id, elapsed);
     }
 
-    /// Control only. A shared rate is insufficient: every available hardware
-    /// binding must name the same verified native clock and actual graph rate.
+    /// Control only. The pacing output renders synchronously; independent
+    /// devices keep their own clock-crossing queues, never native ABL aliases.
     /// Inventory-confirmed absent bindings have no native storage or owner. No HAL
     /// shared-memory or app-capture timeline is silently relabelled as this `IOProc`.
     pub(crate) fn prepare(devices: &DeviceSet, plan: &RenderPlan) -> Option<Self> {
@@ -183,6 +198,7 @@ impl DirectPlan {
             return None;
         }
         let mut bindings = Vec::new();
+        let mut bridged = DeviceSet::default();
         let mut owners = BTreeMap::from([(master.identity, Arc::clone(&master))]);
         for (input, list) in [
             (true, plan.source_bindings()),
@@ -201,7 +217,29 @@ impl DirectPlan {
                 {
                     continue;
                 }
-                let map = Binding::prepare(devices, binding, input, clock_id, native_rate)?;
+                let enabled = plan
+                    .controls()
+                    .snapshot(binding.node_id())
+                    .is_none_or(|(control, _)| control.enabled);
+                if let Some(device) = devices.0.get(binding.node_id().as_str())
+                    && (device.clock_identity.load(Ordering::Acquire) != clock_id
+                        || device.native_rate.load(Ordering::Acquire) != native_rate)
+                {
+                    bridged
+                        .0
+                        .insert(binding.node_id().to_string(), Arc::clone(device));
+                    continue;
+                }
+                let map = Binding::prepare(
+                    devices,
+                    binding,
+                    BindingSelection {
+                        input,
+                        enabled,
+                        clock_id,
+                        native_rate,
+                    },
+                )?;
                 if map.offset.is_some() {
                     let device = devices.0.get(&map.id)?;
                     owners.insert(device.identity, Arc::clone(device));
@@ -216,6 +254,7 @@ impl DirectPlan {
             master,
             owners: owners.into_values().collect(),
             bindings,
+            bridged,
             clock_id,
         })
     }
@@ -246,6 +285,11 @@ impl DirectPlan {
     /// Descriptor and its exclusive renderer must remain valid and untouched
     /// until this guard drops. The `IOProc` is its only mutable caller.
     pub(crate) unsafe fn install<'a>(&'a self, descriptor: &'a Descriptor) -> Registration<'a> {
+        // Only direct owners share the callback timeline. Existing independent
+        // converters stay independent across HAL capture open/close activity.
+        for device in self.bridged.0.values() {
+            device.clock_aligned.store(false, Ordering::Release);
+        }
         for device in &self.owners {
             device.native.render.enabled.store(true, Ordering::Release);
         }
@@ -338,14 +382,25 @@ mod tests {
             (false, plan.sink_bindings()),
         ] {
             for binding in list {
-                let prepared = Binding::prepare(&devices, binding, input, 7, 48_000).unwrap();
+                let selection = || BindingSelection {
+                    input,
+                    enabled: true,
+                    clock_id: 7,
+                    native_rate: 48_000,
+                };
+                let prepared = Binding::prepare(&devices, binding, selection()).unwrap();
                 assert_eq!(
                     (prepared.input, prepared.offset, prepared.channels),
                     (input, None, 2)
                 );
-                assert!(
-                    Binding::prepare(&DeviceSet::default(), binding, input, 7, 48_000).is_none()
-                );
+                assert!(Binding::prepare(&DeviceSet::default(), binding, selection()).is_none());
+                let disabled = BindingSelection {
+                    enabled: false,
+                    ..selection()
+                };
+                let inactive = Binding::prepare(&DeviceSet::default(), binding, disabled).unwrap();
+                assert_eq!(inactive.offset, None);
+                assert_eq!(inactive.channels, 2);
             }
         }
         assert!(

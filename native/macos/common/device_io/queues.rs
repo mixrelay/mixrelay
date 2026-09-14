@@ -5,23 +5,46 @@ use std::{
     sync::atomic::Ordering::{Relaxed, Release},
 };
 
+/// Actual graph-input transfer and one-time admission of its consumer timeline.
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct GraphRead {
+    /// Valid PCM frames written to the caller's output, never synthetic priming.
+    pub frames: u32,
+    /// True only for the first nonempty read request of this native owner.
+    /// Subsequent shortages and recovery epochs are not initial admission.
+    pub initial_epoch: bool,
+}
+
+const _: () = assert!(size_of::<GraphRead>() == 8 && align_of::<GraphRead>() == 4);
+
 // SAFETY: graph rendering is serialized; its output span is complete and disjoint
-// from either ring. The SRC worker owns only the opposite producer cursor.
-pub(super) unsafe fn graph_read(io: &DeviceIo, samples: *mut f32, frames: u32, epoch: u64) -> u32 {
-    if !io.selection.input || frames > MAX_FRAMES {
-        return 0;
+// from either ring. The SRC owner owns only the opposite producer cursor.
+pub(super) unsafe fn graph_read(
+    io: &DeviceIo,
+    samples: *mut f32,
+    frames: u32,
+    epoch: u64,
+) -> GraphRead {
+    if !io.selection.input || frames == 0 || frames > MAX_FRAMES {
+        return GraphRead::default();
     }
     graph_progress(io, frames);
     let ring = ptr::from_ref(&io.graph_ring).cast_mut();
     // SAFETY: only the serialized graph consumer accesses this private epoch cell.
     let previous = unsafe { &mut *io.graph_epoch.get() };
-    if *previous != epoch {
+    let initial_epoch = previous.is_none();
+    if *previous != Some(epoch) {
         // SAFETY: discard changes only this graph consumer's cursor.
         unsafe { mr_pcm_ring_discard(ring) };
-        *previous = epoch;
+        *previous = Some(epoch);
     }
     // SAFETY: retained ring and sole graph consumer, complete caller-owned output.
-    unsafe { mr_pcm_ring_read_available(ring, samples, frames) }
+    let frames = unsafe { mr_pcm_ring_read_available(ring, samples, frames) };
+    GraphRead {
+        frames,
+        initial_epoch,
+    }
 }
 
 // SAFETY: one serialized graph producer; immutable input spans frames*channels floats.
@@ -41,14 +64,14 @@ fn graph_progress(io: &DeviceIo, frames: u32) {
         .fetch_add(u64::from(frames), Release);
 }
 
-// SAFETY: the SRC worker is the selected ring's sole consumer, and its output
+// SAFETY: the SRC owner is the selected ring's sole consumer, and its output
 // span owns frames*channels writable floats even when no PCM is available.
-pub(super) unsafe fn worker_read(io: &DeviceIo, samples: *mut f32, frames: u32) -> u32 {
+pub(super) unsafe fn bridge_read(io: &DeviceIo, samples: *mut f32, frames: u32) -> u32 {
     if frames == 0 || frames > MAX_FRAMES {
         return 0;
     }
     // No prefill: SRC owns priming, not a second native-queue latency policy.
-    // SAFETY: the worker's input ring depends only on immutable direction.
+    // SAFETY: the bridge owner's input ring depends only on immutable direction.
     unsafe {
         mr_pcm_ring_read_available(
             ptr::from_ref(io.ring(!io.selection.input)).cast_mut(),
@@ -58,12 +81,12 @@ pub(super) unsafe fn worker_read(io: &DeviceIo, samples: *mut f32, frames: u32) 
     }
 }
 
-// SAFETY: sole SRC worker producer, full immutable PCM disjoint from queue storage.
-pub(super) unsafe fn worker_write(io: &DeviceIo, samples: *const f32, frames: u32) -> u32 {
+// SAFETY: sole SRC owner producer, full immutable PCM disjoint from queue storage.
+pub(super) unsafe fn bridge_write(io: &DeviceIo, samples: *const f32, frames: u32) -> u32 {
     if frames > MAX_FRAMES {
         return 0;
     }
-    // SAFETY: worker writes graph input or native output; no other role writes that ring.
+    // SAFETY: bridge owner writes graph input or native output; no other role writes that ring.
     unsafe {
         mr_pcm_ring_write(
             ptr::from_ref(io.ring(io.selection.input)).cast_mut(),
@@ -73,8 +96,8 @@ pub(super) unsafe fn worker_write(io: &DeviceIo, samples: *const f32, frames: u3
     }
 }
 
-// SAFETY: sole worker consumer; the opposite producer may run concurrently.
-pub(super) unsafe fn worker_discard(io: &DeviceIo) {
-    // SAFETY: only the worker input ring's consumer cursor is changed.
+// SAFETY: sole bridge consumer; the opposite producer may run concurrently.
+pub(super) unsafe fn bridge_discard(io: &DeviceIo) {
+    // SAFETY: only the bridge owner input ring's consumer cursor is changed.
     unsafe { mr_pcm_ring_discard(ptr::from_ref(io.ring(!io.selection.input)).cast_mut()) };
 }

@@ -12,14 +12,16 @@ use std::{
     error::Error,
     ffi::c_void,
     io, ptr,
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 const API: &str = "http://127.0.0.1:19341/api/v1";
-const OBSERVATION: Duration = Duration::from_secs(5);
+const OBSERVATION: Duration = Duration::from_secs(30);
 const MAX_CHANNELS: usize = 64;
+#[path = "macos_installed_continuity/recording.rs"]
+mod recording;
 
 fn require(ok: bool, message: impl Into<String>) -> Result<()> {
     if ok {
@@ -29,7 +31,7 @@ fn require(ok: bool, message: impl Into<String>) -> Result<()> {
     }
 }
 
-fn capture_channels(graph: &GraphDocument) -> Result<(u16, BTreeSet<u16>)> {
+fn capture_channels(graph: &GraphDocument) -> Result<(String, u16, BTreeSet<u16>)> {
     let mut reached: BTreeSet<_> = graph
         .nodes
         .iter()
@@ -85,11 +87,21 @@ fn capture_channels(graph: &GraphDocument) -> Result<(u16, BTreeSet<u16>)> {
         !selected.is_empty() && selected.iter().all(|channel| *channel < channels),
         "route has no valid mapped capture channels",
     )?;
-    Ok((channels, selected))
+    let NodeConfig::VirtualEndpoint(config) = &node.config else {
+        unreachable!()
+    };
+    let id = mixrelay_macos_transport::endpoint_identity::parse_endpoint_id(config.id.as_str())
+        .ok_or("invalid endpoint identity")?;
+    Ok((
+        mixrelay_macos_transport::endpoint_identity::endpoint_uid(id),
+        channels,
+        selected,
+    ))
 }
 
 #[derive(Default)]
 struct ChannelEvidence {
+    pcm: Box<[AtomicU32]>,
     samples: AtomicU64,
     nonzero: AtomicU64,
     invalid: AtomicU64,
@@ -98,12 +110,16 @@ struct ChannelEvidence {
 }
 impl ChannelEvidence {
     fn observe(&self, samples: impl Iterator<Item = f32>) {
+        let base = usize::try_from(self.samples.load(Ordering::Relaxed)).unwrap_or(usize::MAX);
         let mut count = 0;
         let mut nonzero = 0;
         let mut invalid = 0;
         let mut tail = self.zero_tail.load(Ordering::Relaxed);
         let mut longest = tail;
         for sample in samples {
+            if let Some(destination) = self.pcm.get(base.saturating_add(count)) {
+                destination.store(sample.to_bits(), Ordering::Relaxed);
+            }
             count += 1;
             if !sample.is_finite() {
                 invalid += 1;
@@ -116,7 +132,7 @@ impl ChannelEvidence {
                 tail = 0;
             }
         }
-        self.samples.fetch_add(count, Ordering::Relaxed);
+        self.samples.fetch_add(count as u64, Ordering::Relaxed);
         self.nonzero.fetch_add(nonzero, Ordering::Relaxed);
         self.invalid.fetch_add(invalid, Ordering::Relaxed);
         self.zero_tail.store(tail, Ordering::Relaxed);
@@ -125,6 +141,7 @@ impl ChannelEvidence {
 }
 
 struct CaptureEvidence {
+    first_host_time: AtomicU64,
     enabled: AtomicBool,
     selected: BTreeSet<u16>,
     channels: [ChannelEvidence; MAX_CHANNELS],
@@ -136,10 +153,24 @@ struct CaptureEvidence {
 }
 impl CaptureEvidence {
     fn new(selected: BTreeSet<u16>) -> Self {
+        let record = std::env::var_os("MIXRELAY_CAPTURE_OUTPUT").is_some();
+        let channels = std::array::from_fn(|index| ChannelEvidence {
+            pcm: (0..if record
+                && selected.contains(&u16::try_from(index).expect("64-channel bound"))
+            {
+                192_000 * 31
+            } else {
+                0
+            })
+                .map(|_| AtomicU32::new(0))
+                .collect(),
+            ..ChannelEvidence::default()
+        });
         Self {
+            first_host_time: AtomicU64::new(0),
             enabled: AtomicBool::new(false),
             selected,
-            channels: std::array::from_fn(|_| ChannelEvidence::default()),
+            channels,
             callbacks: AtomicU64::new(0),
             frames: AtomicU64::new(0),
             malformed: AtomicU64::new(0),
@@ -329,6 +360,12 @@ unsafe extern "C" fn receive(
         return 0;
     }
     let (list, time) = unsafe { (&*input, &*time) };
+    let _ = state.first_host_time.compare_exchange(
+        0,
+        time.host_time,
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+    );
     if list.count == 0 || list.count > 64 || time.flags & 1 == 0 {
         state.malformed.fetch_add(1, Ordering::Relaxed);
         return 0;
@@ -380,8 +417,8 @@ struct NativeCapture {
     evidence: Box<CaptureEvidence>,
 }
 impl NativeCapture {
-    fn open(rate: u32, channels: u16, selected: BTreeSet<u16>) -> Result<Self> {
-        let device = Self::resolve()?;
+    fn open(uid: &str, rate: u32, channels: u16, selected: BTreeSet<u16>) -> Result<Self> {
+        let device = Self::resolve(uid)?;
         Self::validate_format(device, rate, channels)?;
         let mut capture = Self {
             device,
@@ -434,14 +471,9 @@ impl NativeCapture {
         )?;
         Ok(capture)
     }
-    fn resolve() -> Result<u32> {
-        let uid = unsafe {
-            CFStringCreateWithCString(
-                ptr::null(),
-                c"io.mixrelay.audio.endpoint.default".as_ptr(),
-                0x0800_0100,
-            )
-        };
+    fn resolve(uid: &str) -> Result<u32> {
+        let name = std::ffi::CString::new(uid)?;
+        let uid = unsafe { CFStringCreateWithCString(ptr::null(), name.as_ptr(), 0x0800_0100) };
         require(!uid.is_null(), "cannot create owned HAL UID")?;
         let mut device = 0_u32;
         let mut size = 4;
@@ -579,6 +611,19 @@ impl Drop for NativeCapture {
     }
 }
 
+fn selected_graph_url() -> Result<reqwest::Url> {
+    let mut graph_url = reqwest::Url::parse(&format!("{API}/graph"))?;
+    if let Ok(id) = std::env::var("MIXRELAY_TEST_GRAPH_ID") {
+        graph_url = reqwest::Url::parse(&format!("{API}/graphs/"))?;
+        graph_url
+            .path_segments_mut()
+            .map_err(|()| "invalid graph URL")?
+            .pop_if_empty()
+            .push(&id);
+    }
+    Ok(graph_url)
+}
+
 #[test]
 fn installed_mixed_route_pcm_continuity_without_changing_graph_or_format() -> Result<()> {
     require(
@@ -586,6 +631,7 @@ fn installed_mixed_route_pcm_continuity_without_changing_graph_or_format() -> Re
         "explicit installed read-only measurement authorization required: MIXRELAY_TEST_INSTALLED_ENGINE=1; no I/O started",
     )?;
     let client = Client::builder().timeout(Duration::from_secs(3)).build()?;
+    let graph_url = selected_graph_url()?;
     let status = || -> Result<AppStatus> {
         Ok(client
             .get(format!("{API}/status"))
@@ -595,7 +641,7 @@ fn installed_mixed_route_pcm_continuity_without_changing_graph_or_format() -> Re
     };
     let graph = || -> Result<GraphDocument> {
         Ok(client
-            .get(format!("{API}/graph"))
+            .get(graph_url.clone())
             .send()?
             .error_for_status()?
             .json()?)
@@ -607,7 +653,7 @@ fn installed_mixed_route_pcm_continuity_without_changing_graph_or_format() -> Re
         .as_ref()
         .ok_or("missing installed session")?
         .format;
-    let (channels, selected) = capture_channels(&original_graph)?;
+    let (uid, channels, selected) = capture_channels(&original_graph)?;
     println!(
         "read-only mixed route revision={} format={format:?} capture_channels={channels} selected={selected:?} hardware_output_present={}",
         original_graph.revision,
@@ -616,10 +662,12 @@ fn installed_mixed_route_pcm_continuity_without_changing_graph_or_format() -> Re
             .iter()
             .any(|node| matches!(node.config, NodeConfig::AudioDeviceOutput(_)))
     );
-    let mut capture = NativeCapture::open(format.sample_rate, channels, selected)?;
+    let mut capture = NativeCapture::open(&uid, format.sample_rate, channels, selected)?;
     let native_rate_before = capture.observed_rate()?;
     std::thread::sleep(Duration::from_millis(500));
-    let before = status()?;
+    // Capture startup and shutdown belong to the acceptance window too. PCM
+    // analysis still excludes the initial bounded hardware-reader priming period.
+    let before = initial;
     require(
         graph()? == original_graph,
         "graph/revision changed during reader startup",
@@ -630,6 +678,7 @@ fn installed_mixed_route_pcm_continuity_without_changing_graph_or_format() -> Re
     capture.evidence.enabled.store(false, Ordering::Release);
     let elapsed = started.elapsed();
     capture.close()?;
+    recording::save(&capture.evidence, format.sample_rate)?;
     let after = status()?;
     let after_graph = graph()?;
     let native_rate_after = capture.observed_rate()?;
@@ -712,8 +761,7 @@ fn verify_observations(
         before_session.format,
         after_session.format
     );
-    // Emit machine-readable provenance for the root's durable validation report;
-    // this measurement creates neither a PCM recording nor a temporary artifact.
+    // Emit provenance alongside optional, explicitly requested PCM artifacts.
     println!(
         "continuity_evidence {}",
         serde_json::to_string(&serde_json::json!({

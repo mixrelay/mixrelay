@@ -9,11 +9,11 @@ use std::sync::Arc;
 const FIRST_DEVICE: &str = "01010101-0101-0101-0101-010101010101";
 const SECOND_DEVICE: &str = "02020202-0202-0202-0202-020202020202";
 
-fn processor() -> BlockProcessor {
+fn processor() -> Box<BlockProcessor> {
     prepare_processor(false)
 }
 
-fn prepare_processor(second: bool) -> BlockProcessor {
+fn prepare_processor(second: bool) -> Box<BlockProcessor> {
     let mut document: GraphDocument = serde_json::from_value(serde_json::json!({
         "schemaVersion":2,"revision":1,"nodes":[
             {"id":"input","type":"audio_device_input","config":{"selector":{"match":"default_input"},"outputChannels":2,"gainDb":0}},
@@ -61,7 +61,9 @@ fn prepare_processor(second: bool) -> BlockProcessor {
             },
         )
         .unwrap();
-    BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()))
+    Box::new(BlockProcessor::new(Arc::new(
+        RenderPlan::prepare(&execution).unwrap(),
+    )))
 }
 
 struct Hal {
@@ -146,6 +148,7 @@ fn hardware_output_remains_synchronous_while_virtual_sink_crosses_clock_boundary
     .unwrap();
     let mut renderer = Renderer {
         processor: &mut processor,
+        activation: None,
         bindings: &bindings,
         clock_id: 9,
         epoch: 1,
@@ -160,6 +163,7 @@ fn hardware_output_remains_synchronous_while_virtual_sink_crosses_clock_boundary
         },
         reconfigure: &invalid,
     };
+    renderer.endpoints.bind_controls(renderer.processor.plan());
     let mut input = [0.25; 64];
     let mut output = [0.0; 64];
     for _ in 0..5000 {
@@ -232,6 +236,7 @@ fn two_virtual_devices_keep_distinct_clock_coordinates_rates_and_recovery() {
     .collect();
     let mut renderer = Renderer {
         processor: &mut processor,
+        activation: None,
         bindings: &bindings,
         clock_id: 9,
         epoch: 1,
@@ -244,6 +249,7 @@ fn two_virtual_devices_keep_distinct_clock_coordinates_rates_and_recovery() {
         endpoints: EndpointBoundaries { endpoints },
         reconfigure: &invalid,
     };
+    renderer.endpoints.bind_controls(renderer.processor.plan());
     let mut input = [0.25; 64];
     let mut output = [0.0; 64];
     for callback in 1..=5000_u64 {

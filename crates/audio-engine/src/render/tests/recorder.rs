@@ -285,3 +285,93 @@ fn rebuild_and_pause_preserve_take_and_final_tap_removal_finalizes_it() {
     let reader = hound::WavReader::open(path).unwrap();
     assert_eq!(reader.duration(), 4);
 }
+
+#[test]
+fn control_publications_preserve_recording_and_off_skips_capture_instead_of_writing_silence() {
+    let directory = mixrelay_test_support::FixtureDir::new("live-recording-controls").unwrap();
+    let path = directory.join("take.wav");
+    let registry = RecorderRegistry::default();
+    let plan = recorder_plan();
+    let mut processor = BlockProcessor::new(Arc::clone(&plan));
+    processor.attach_recorders(&registry).unwrap();
+    let input = [0.25; 4];
+    let mut output = [0.0; 4];
+    processor
+        .process_block(2, &[&input], &mut [&mut output])
+        .unwrap();
+    registry
+        .command(
+            &record_key(),
+            RecorderRequest {
+                encoding: Some(Encoding::Float32),
+                ..request(
+                    RecorderAction::Record,
+                    Some(path.to_string_lossy().into_owned()),
+                )
+            },
+        )
+        .unwrap();
+    let exchange = crate::ProcessorExchange::new(1);
+    for revision in 2..102 {
+        exchange
+            .publish_controls(
+                plan.controls(),
+                revision,
+                &[crate::RuntimeControlUpdate {
+                    node_id: NodeId::from("monitor"),
+                    control: mixrelay_audio_graph::NodeControl {
+                        enabled: revision % 2 == 0,
+                        muted: false,
+                    },
+                    gain_db: None,
+                }],
+            )
+            .unwrap();
+        HEAP_OPERATIONS.with(|count| count.set(Some(0)));
+        processor
+            .process_block(2, &[&input], &mut [&mut output])
+            .unwrap();
+        assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
+    }
+    for (revision, enabled, muted) in [(102, false, false), (103, true, true)] {
+        exchange
+            .publish_controls(
+                plan.controls(),
+                revision,
+                &[crate::RuntimeControlUpdate {
+                    node_id: NodeId::from("record"),
+                    control: mixrelay_audio_graph::NodeControl { enabled, muted },
+                    gain_db: None,
+                }],
+            )
+            .unwrap();
+        processor
+            .process_block(2, &[&input], &mut [&mut output])
+            .unwrap();
+    }
+    let stopped = registry
+        .command(&record_key(), request(RecorderAction::Stop, None))
+        .unwrap();
+    assert_eq!(stopped.frames, 202);
+    assert!(Arc::ptr_eq(processor.plan(), &plan));
+    assert_continuous_recording_with_final_muted_block(&path);
+}
+
+fn assert_continuous_recording_with_final_muted_block(path: &std::path::Path) {
+    let mut reader = hound::WavReader::open(path).unwrap();
+    let samples = reader
+        .samples::<f32>()
+        .map(Result::unwrap)
+        .collect::<Vec<_>>();
+    assert_eq!(samples.len(), 404);
+    assert!(
+        samples[..400]
+            .iter()
+            .all(|sample| (*sample - 0.25).abs() < f32::EPSILON)
+    );
+    assert!(
+        samples[400..]
+            .iter()
+            .all(|sample| sample.abs() < f32::EPSILON)
+    );
+}

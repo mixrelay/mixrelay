@@ -7,7 +7,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use mixrelay_audio_engine::ProcessorExchange;
@@ -152,6 +152,7 @@ fn start_format_monitor(
     let weak_devices = Arc::downgrade(devices);
     MaintenanceWorker::start("mixrelay-device-format-monitor", move |stop| {
         let mut last_error = None;
+        let mut last_trace = Instant::now();
         while !stop.load(Ordering::Acquire) {
             let (Some(status), Some(controller)) =
                 (weak_status.upgrade(), weak_controller.upgrade())
@@ -164,6 +165,10 @@ fn start_format_monitor(
                 status.forget_endpoint_observation();
             }
             if let Some(devices) = weak_devices.upgrade() {
+                if last_trace.elapsed() >= Duration::from_secs(1) {
+                    devices.trace_audio();
+                    last_trace = Instant::now();
+                }
                 devices.recover(stop);
                 if stop.load(Ordering::Acquire) {
                     break;

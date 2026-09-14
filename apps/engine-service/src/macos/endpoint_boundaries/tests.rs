@@ -74,6 +74,29 @@ fn reconciliation_keeps_healthy_pcm_owner_and_retires_only_changed_or_removed_de
     assert_eq!(bank.endpoints[1].format.device_rate, 44_100);
 }
 
+#[test]
+fn retained_converter_receives_replacement_binding_indices() {
+    let mut current = idle_boundary(2, 48_000);
+    current.source_indices = vec![0, 1];
+    current.sink_indices = vec![0];
+    let address = current.render_pcm.as_ptr();
+    let mut replacement = idle_boundary(2, 48_000);
+    replacement.source_indices = vec![1, 2];
+    replacement.sink_indices = vec![1];
+    let mut bank = EndpointBoundaries {
+        endpoints: vec![current],
+    };
+    bank.reconcile(
+        EndpointBoundaries {
+            endpoints: vec![idle_boundary(1, 48_000), replacement],
+        },
+        |_| panic!("healthy converter must be retained"),
+    );
+    assert_eq!(bank.endpoints[1].render_pcm.as_ptr(), address);
+    assert_eq!(bank.endpoints[1].source_indices, [1, 2]);
+    assert_eq!(bank.endpoints[1].sink_indices, [1]);
+}
+
 struct DeviceState {
     running: bool,
     active: bool,
@@ -96,9 +119,18 @@ impl CaptureTransport for DeviceState {
     }
 }
 impl RenderTransport for DeviceState {
+    fn read_render(&mut self, frame: u64, samples: &mut [f32], frames: u32) -> u32 {
+        if self.active && frame + u64::from(frames) <= 1024 {
+            samples.fill(0.25);
+            frames
+        } else {
+            0
+        }
+    }
     fn render_snapshot(&mut self) -> Option<super::super::callback_source::RenderSnapshot> {
         Some(super::super::callback_source::RenderSnapshot {
             clock: self.clock().unwrap(),
+            quantum: 512,
             stream_epoch: 1,
             channels: 2,
             through: if self.active { 1024 } else { 0 },
@@ -137,25 +169,65 @@ fn only_referenced_active_directions_participate_in_clock_health() {
         )
         .unwrap();
         endpoint.begin(32);
+        endpoint.prepare_block(32);
         assert!(
             endpoint.synchronized(),
             "a stopped device is not a drifting branch"
         );
         endpoint.transport.running = true;
         endpoint.begin(32);
+        endpoint.prepare_block(32);
         assert!(
             endpoint.synchronized(),
             "another device direction may be running without this client"
         );
         endpoint.transport.active = true;
         endpoint.begin(32);
+        endpoint.prepare_block(32);
         assert!(
-            !endpoint.synchronized(),
-            "a referenced active converter has not primed yet"
+            endpoint.synchronized(),
+            "initial bounded PCM priming does not invalidate a known native clock: source={source}"
         );
+        if source {
+            for _ in 0..64 {
+                endpoint.begin(32);
+                endpoint.prepare_block(32);
+            }
+            assert!(
+                !endpoint.synchronized(),
+                "a producer that never delivers must exhaust priming"
+            );
+        }
         assert_eq!(endpoint.source.is_some(), source);
         assert_eq!(endpoint.sink.is_some(), !source);
     }
+}
+
+#[test]
+fn disabling_one_direction_preserves_other_direction_and_native_quantum() {
+    let mut endpoint = idle_boundary(1, 48_000);
+    endpoint.begin(64);
+    endpoint.set_activity(Directions {
+        source: true,
+        sink: false,
+    });
+    endpoint.prepare_block(32);
+    endpoint.finish_block();
+    endpoint.prepare_block(32);
+    endpoint.finish_block();
+    assert_eq!(endpoint.native_frames, 64);
+    assert_eq!(endpoint.work.source_begin, 1);
+    assert_eq!(endpoint.work.source_read, 2);
+    assert_eq!(endpoint.work.sink_begin, 0);
+    endpoint.set_activity(Directions {
+        source: false,
+        sink: true,
+    });
+    endpoint.prepare_block(32);
+    endpoint.finish_block();
+    assert_eq!(endpoint.work.source_read, 2);
+    assert_eq!(endpoint.work.sink_begin, 1);
+    assert_eq!(endpoint.work.sink_push, 1);
 }
 
 #[test]

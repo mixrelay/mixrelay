@@ -1,9 +1,8 @@
-//! Reconnection supervisor. Owns native registration and converter mutation.
+//! Native control supervisor; prepared PCM executes only on the device callback.
 use super::{
     bridge::DeviceBridge,
     ffi::{
-        mr_device_io_alive, mr_device_io_clock_device, mr_device_io_clock_discontinuities,
-        mr_device_io_native_rate, mr_device_io_overflows, mr_device_io_ticks,
+        mr_device_io_alive, mr_device_io_clock_device, mr_device_io_native_rate, mr_device_io_ticks,
     },
     native::{Connection, Native},
 };
@@ -15,12 +14,16 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+pub(super) mod callback;
+pub(super) mod metrics;
 pub(super) struct WorkerContext {
+    pub(super) activity: Arc<super::activity::BridgeActivity>,
     pub(super) native: Arc<Native>,
     pub(super) stop: Arc<AtomicBool>,
     pub(super) failed: Arc<AtomicBool>,
     pub(super) epoch: Arc<AtomicU64>,
     pub(super) graph_rate: Arc<AtomicU32>,
+    pub(super) graph_quantum: Arc<AtomicU32>,
     pub(super) ready_rate: Arc<AtomicU32>,
     pub(super) native_rate: Arc<AtomicU32>,
     pub(super) clock_identity: Arc<AtomicU32>,
@@ -32,21 +35,6 @@ pub(super) struct WorkerContext {
 }
 
 impl WorkerContext {
-    fn supervise_direct(&self) -> Result<bool, String> {
-        if self.native.render.reconnect.swap(false, Ordering::AcqRel) {
-            return Err("CoreAudio callback requested topology recovery".into());
-        }
-        if !self.native.render.enabled() {
-            return Ok(false);
-        }
-        // Only lifetime/property supervision remains on this thread. PCM is
-        // already rendered in the aggregate callback, not pumped on this timer.
-        if !unsafe { mr_device_io_alive(self.native.pointer.as_ptr()) } {
-            return Err("CoreAudio direct device lost or reconfigured".into());
-        }
-        thread::park_timeout(Duration::from_millis(50));
-        Ok(true)
-    }
     pub(super) fn run(self, tx: &std::sync::mpsc::SyncSender<Result<(), String>>) {
         let span = tracing::info_span!(
             "coreaudio_device",
@@ -93,73 +81,71 @@ impl WorkerContext {
             unsafe { mr_device_io_clock_device(pointer) },
             Ordering::Release,
         );
-        let mut bridge = DeviceBridge::new(self, native_rate)?;
-        let mut ticks = unsafe { mr_device_io_ticks(pointer) };
+        self.serve_callback(native_rate, connected)
+    }
+
+    fn serve_callback(&self, native_rate: u32, connected: &mut dyn FnMut()) -> Result<(), String> {
+        let mut owner = callback::CallbackBridge::new(self, native_rate)?;
+        let mut format = (
+            self.graph_rate.load(Ordering::Acquire),
+            self.clock_aligned.load(Ordering::Acquire),
+        );
+        let mut ticks = unsafe { mr_device_io_ticks(self.native.pointer.as_ptr()) };
         let mut last_progress = Instant::now();
-        let mut last_properties = Instant::now();
         let mut activated = false;
-        let mut render_generation = self.native.render.generation.load(Ordering::Acquire);
         while !self.stop.load(Ordering::Acquire) {
-            if self.supervise_direct()? {
-                continue;
-            }
-            let next_generation = self.native.render.generation.load(Ordering::Acquire);
-            if render_generation != next_generation {
-                bridge = DeviceBridge::new(self, native_rate)?;
-                last_progress = Instant::now();
-                activated = false;
-                render_generation = next_generation;
-            }
-            // This lock is worker/control-only, never graph/native callback.
-            // Control reserved the single slot before pausing native resources.
+            let requested = (
+                self.graph_rate.load(Ordering::Acquire),
+                self.clock_aligned.load(Ordering::Acquire),
+            );
             let pending = self
                 .pending_bridge
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .take();
-            if let Some(mut prepared) = pending {
-                self.ready_rate.store(0, Ordering::Release);
-                if prepared.native_rate == native_rate {
-                    prepared.activate(self);
-                    bridge = prepared;
-                } else {
-                    bridge = DeviceBridge::new(self, native_rate)?;
-                }
-                activated = false;
+            if pending.is_some() || requested != format {
+                let prepared = match pending {
+                    Some(bridge)
+                        if bridge.native_rate == native_rate
+                            && (bridge.graph_rate, bridge.clock_aligned) == requested =>
+                    {
+                        bridge
+                    }
+                    _ => DeviceBridge::prepare(
+                        self.channels,
+                        self.input,
+                        native_rate,
+                        requested.0,
+                        requested.1,
+                    )?,
+                };
+                owner.replace(prepared);
+                format = requested;
             }
-            if bridge.graph_rate != self.graph_rate.load(Ordering::Acquire)
-                || bridge.transport_overflows != unsafe { mr_device_io_overflows(pointer) }
-                || bridge.clock_discontinuities
-                    != unsafe { mr_device_io_clock_discontinuities(pointer) }
-                || bridge.clock_aligned != self.clock_aligned.load(Ordering::Acquire)
-            {
-                self.ready_rate.store(0, Ordering::Release);
-                bridge = DeviceBridge::new(self, native_rate)?;
-                activated = false;
+            if !activated && self.ready_rate.load(Ordering::Acquire) != 0 {
+                connected();
+                activated = true;
             }
-            if last_properties.elapsed() >= Duration::from_millis(50) {
-                if !unsafe { mr_device_io_alive(pointer) } {
-                    return Err("CoreAudio device lost or reconfigured".into());
-                }
-                last_properties = Instant::now();
+            if let Some(error) = self.native.pcm.failure() {
+                return Err(error.into());
             }
-            let next = unsafe { mr_device_io_ticks(pointer) };
+            if self.native.render.reconnect.swap(false, Ordering::AcqRel) {
+                return Err("CoreAudio callback requested topology recovery".into());
+            }
+            // Native property IPC stays on control; it cannot block callback PCM.
+            if !unsafe { mr_device_io_alive(self.native.pointer.as_ptr()) } {
+                return Err("CoreAudio device lost or reconfigured".into());
+            }
+            let next = unsafe { mr_device_io_ticks(self.native.pointer.as_ptr()) };
             if next != ticks {
                 ticks = next;
                 last_progress = Instant::now();
-                if !activated {
-                    self.epoch.store(bridge.epoch, Ordering::Release);
-                    self.ready_rate.store(bridge.graph_rate, Ordering::Release);
-                    connected();
-                    activated = true;
-                }
             } else if last_progress.elapsed() >= Duration::from_secs(2) {
                 return Err("CoreAudio device stopped delivering audio callbacks".into());
             }
-            bridge.observe(self, last_progress.elapsed() < Duration::from_millis(100))?;
-            bridge.pump(self)?;
-            thread::park_timeout(Duration::from_millis(1));
+            thread::park_timeout(Duration::from_millis(if activated { 50 } else { 1 }));
         }
+        // owner drains before the enclosing Connection can unregister/free storage.
         Ok(())
     }
 }

@@ -52,7 +52,7 @@ pub fn compose_catalog(
     validate_size(documents, context.compile)?;
     let documents = documents
         .iter()
-        .map(|(id, document)| Ok((id.clone(), enabled_document(document)?)))
+        .map(|(id, document)| Ok((id.clone(), execution_document(document)?)))
         .collect::<Result<Vec<_>, CompositionError>>()?;
     let mut registry = RegistryInputs::default();
     let mut identities = Vec::with_capacity(documents.len());
@@ -81,7 +81,7 @@ pub fn compose_catalog(
     )
 }
 
-fn enabled_document(document: &GraphDocument) -> Result<GraphDocument, CompositionError> {
+fn execution_document(document: &GraphDocument) -> Result<GraphDocument, CompositionError> {
     let mut ids = std::collections::BTreeSet::new();
     for node in &document.nodes {
         if !ids.insert(&node.id) {
@@ -101,18 +101,17 @@ fn enabled_document(document: &GraphDocument) -> Result<GraphDocument, Compositi
     {
         return Err(invalid("edge references unknown authored node"));
     }
-    let disabled: std::collections::BTreeSet<_> = document
-        .nodes
-        .iter()
-        .filter(|node| !node.control.enabled)
-        .map(|node| &node.id)
-        .collect();
-    let mut enabled = document.clone();
-    enabled.nodes.retain(|node| node.control.enabled);
-    enabled.edges.retain(|edge| {
-        !disabled.contains(&edge.source.node_id) && !disabled.contains(&edge.destination.node_id)
-    });
-    Ok(enabled)
+    let mut prepared = document.clone();
+    for node in &mut prepared.nodes {
+        if !node.control.enabled
+            && let NodeConfig::ApplicationCapture(request) = &mut node.config
+        {
+            // Keep a dormant graph-local slot without resolving an OFF process or
+            // prompting for native capture. First activation explicitly prepares it.
+            request.requires_reselection = true;
+        }
+    }
+    Ok(prepared)
 }
 
 fn validate_size(

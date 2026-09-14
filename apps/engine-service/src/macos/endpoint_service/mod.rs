@@ -10,10 +10,11 @@ mod tests;
 mod xpc;
 use crate::endpoint_registry::EndpointRegistry;
 pub use api::{
-    AudioConfig, EndpointSnapshot, activate_prepared_endpoints, activate_recovered_endpoints,
-    audio_config, cancel_prepared_endpoints, capture_pending, device_sample_rate,
-    device_supports_sample_rate, endpoint_specs, prepare_endpoints, read_render, rearm_capture,
-    recover_capture_epoch, set_device_sample_rate, snapshot, touch_audio, write_capture,
+    AudioConfig, EndpointSnapshot, SnapshotError, activate_prepared_endpoints,
+    activate_recovered_endpoints, audio_config, cancel_prepared_endpoints, capture_pending,
+    device_sample_rate, device_supports_sample_rate, endpoint_specs, prepare_endpoints,
+    read_render, rearm_capture, recover_capture_epoch, set_device_sample_rate, snapshot,
+    touch_audio, write_capture,
 };
 use dispatch::Dispatch;
 pub use mixrelay_macos_transport::source_registry::SourceClock;

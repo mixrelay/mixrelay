@@ -33,10 +33,10 @@ static void measure(uint32_t channels, uint32_t frames, bool planar, bool input)
     for (unsigned pass = 0; pass < 8; ++pass) {
         uint64_t start = nanos();
         for (unsigned i = 0; i < iterations; ++i) {
-            if (!input) assert(mr_device_io_worker_write(io, graph, frames) == frames);
+            if (!input) assert(mr_device_io_bridge_write(io, graph, frames) == frames);
             mr_device_io_process(0, NULL, input ? (AudioBufferList *)&list : NULL, NULL,
                 input ? NULL : (AudioBufferList *)&list, NULL, io);
-            if (input) assert(mr_device_io_worker_read(io, graph, frames) == frames);
+            if (input) assert(mr_device_io_bridge_read(io, graph, frames) == frames);
         }
         uint64_t elapsed = nanos() - start;
         for (uint32_t f = 0; f < frames; ++f) for (uint32_t c = 0; c < channels; ++c)

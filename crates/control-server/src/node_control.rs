@@ -15,6 +15,14 @@ pub(super) fn unavailable() -> ProtocolError {
     }
 }
 
+pub(super) async fn snapshot(State(state): State<ControlState>) -> Response {
+    catalog_task(move || match state.backend.controls_snapshot() {
+        Ok(snapshot) => Json(snapshot).into_response(),
+        Err(error) => failure(error),
+    })
+    .await
+}
+
 pub(super) async fn list(
     State(state): State<ControlState>,
     Path(graph_id): Path<String>,

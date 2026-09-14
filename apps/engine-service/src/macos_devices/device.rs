@@ -1,13 +1,14 @@
 //! Graph-facing queue handle and native worker lifetime.
 use super::{
+    activity::BridgeActivity,
     aggregate::Aggregate,
     bridge::{DeviceBridge, NEXT_DEVICE_EPOCH},
-    ffi::{mr_device_io_graph_read, mr_device_io_graph_write},
+    ffi::{mr_device_io_graph_read, mr_device_io_graph_write, mr_device_io_output_epoch},
     native::Native,
     spec::Spec,
     worker::WorkerContext,
 };
-use mixrelay_audio_io::process::TransferOutcome;
+use mixrelay_audio_io::process::{InputActivity, TransferOutcome};
 use std::{
     sync::{
         Arc, Mutex,
@@ -17,6 +18,7 @@ use std::{
     time::Duration,
 };
 pub(super) struct Device {
+    pub(super) activity: Arc<BridgeActivity>,
     pub(super) identity: u64,
     pub(super) native: Arc<Native>,
     pub(super) channels: usize,
@@ -25,6 +27,7 @@ pub(super) struct Device {
     pub(super) failed: Arc<AtomicBool>,
     pub(super) epoch: Arc<AtomicU64>,
     pub(super) graph_rate: Arc<AtomicU32>,
+    pub(super) graph_quantum: Arc<AtomicU32>,
     pub(super) ready_rate: Arc<AtomicU32>,
     pub(super) native_rate: Arc<AtomicU32>,
     pub(super) clock_identity: Arc<AtomicU32>,
@@ -49,6 +52,7 @@ impl Device {
         let failed = Arc::new(AtomicBool::new(true));
         let epoch = Arc::new(AtomicU64::new(0));
         let graph_rate = Arc::new(AtomicU32::new(rate));
+        let graph_quantum = Arc::new(AtomicU32::new(buffer_frames));
         let ready_rate = Arc::new(AtomicU32::new(0));
         let native_rate = Arc::new(AtomicU32::new(0));
         let clock_identity = Arc::new(AtomicU32::new(0));
@@ -56,12 +60,15 @@ impl Device {
         let pending_bridge = Arc::new(Mutex::new(None));
         let clock_aligned = Arc::new(AtomicBool::new(false));
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let activity = Arc::clone(&native.render.activity);
         let context = WorkerContext {
+            activity: Arc::clone(&activity),
             native: native.clone(),
             stop: stop.clone(),
             failed: failed.clone(),
             epoch: epoch.clone(),
             graph_rate: graph_rate.clone(),
+            graph_quantum: graph_quantum.clone(),
             ready_rate: ready_rate.clone(),
             native_rate: native_rate.clone(),
             clock_identity: clock_identity.clone(),
@@ -76,6 +83,7 @@ impl Device {
             .spawn(move || context.run(&tx))
             .map_err(|e| e.to_string())?;
         let result = Self {
+            activity,
             identity: NEXT_DEVICE_EPOCH.fetch_add(1, Ordering::Relaxed),
             native,
             channels: usize::from(spec.channels),
@@ -84,6 +92,7 @@ impl Device {
             failed,
             epoch,
             graph_rate,
+            graph_quantum,
             ready_rate,
             native_rate,
             clock_identity,
@@ -108,20 +117,39 @@ impl Device {
             return TransferOutcome::complete(0);
         }
         let frames = u32::try_from(samples.len() / self.channels).unwrap_or(0);
-        TransferOutcome::complete(unsafe {
+        if !self.activity.ready() {
+            return super::recovery::offline_transfer(samples.len(), self.channels);
+        }
+        // SAFETY: this serialized graph consumer retains Native and owns the
+        // complete writable PCM span, disjoint from the producer's queue storage.
+        let read = unsafe {
             mr_device_io_graph_read(
                 self.native.pointer.as_ptr(),
                 samples.as_mut_ptr(),
                 frames,
-                self.epoch.load(Ordering::Acquire),
+                self.activity.read_epoch(self.epoch.load(Ordering::Acquire)),
             )
-        })
+        };
+        TransferOutcome {
+            frames: read.frames,
+            discontinuity: false,
+            activity: if read.initial_epoch && read.frames < frames {
+                // The first freshness reset admits a timeline; it is not loss
+                // from an already running input. The next shortage is Active.
+                InputActivity::Priming
+            } else {
+                InputActivity::Active
+            },
+        }
     }
     pub(super) fn write(&self, samples: &[f32]) -> TransferOutcome {
         if self.input || !self.ready() || !samples.len().is_multiple_of(self.channels) {
             return TransferOutcome::complete(0);
         }
         let frames = u32::try_from(samples.len() / self.channels).unwrap_or(0);
+        if !self.activity.ready() {
+            return super::recovery::offline_transfer(samples.len(), self.channels);
+        }
         TransferOutcome::complete(unsafe {
             mr_device_io_graph_write(self.native.pointer.as_ptr(), samples.as_ptr(), frames)
         })
@@ -129,6 +157,19 @@ impl Device {
     pub(super) fn ready(&self) -> bool {
         !self.failed.load(Ordering::Acquire)
             && self.ready_rate.load(Ordering::Acquire) == self.graph_rate.load(Ordering::Acquire)
+    }
+
+    pub(super) fn set_active(&self, enabled: bool) {
+        if self.activity.request(enabled) && !self.input && !enabled {
+            // SAFETY: the retained native owner accepts an atomic epoch request.
+            // Its IOProc remains the only consumer that discards output PCM.
+            unsafe {
+                mr_device_io_output_epoch(
+                    self.native.pointer.as_ptr(),
+                    NEXT_DEVICE_EPOCH.fetch_add(1, Ordering::Relaxed),
+                );
+            }
+        }
     }
 }
 impl Drop for Device {

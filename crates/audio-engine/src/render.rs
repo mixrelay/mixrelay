@@ -9,6 +9,16 @@ use mixrelay_audio_io::process::{ProcessCycle, ProcessReport, TransferOutcome};
 use mixrelay_audio_recorder::{RecorderRegistry, RecorderTap};
 use thiserror::Error;
 
+use crate::runtime_control::{ControlValue, RuntimeControlBank};
+mod buffers;
+mod kernels;
+mod routing;
+mod schedule;
+use buffers::port_pair;
+use kernels::{KernelResources, apply_kernel};
+use routing::{RouteOp, apply_routes};
+use schedule::RenderSchedule;
+
 /// Stable transport identity for a recorder's channel geometry. An inactive
 /// replacement can coexist with the previous plan until publication or rollback.
 #[must_use]
@@ -57,6 +67,18 @@ pub trait HostedProcessorFactory: Send + Sync {
         &self,
         request: HostedProcessorPrepareRequest<'_>,
     ) -> Result<Box<dyn HostedAudioProcessor>, String>;
+
+    /// Retains an already loaded inactive node during an unrelated topology edit.
+    /// Never instantiates a new provider here: `None` keeps an initially OFF node unprepared.
+    ///
+    /// # Errors
+    /// Returns a diagnostic if an existing reusable owner cannot be retained safely.
+    fn prepare_inactive(
+        &self,
+        _request: HostedProcessorPrepareRequest<'_>,
+    ) -> Result<Option<Box<dyn HostedAudioProcessor>>, String> {
+        Ok(None)
+    }
 }
 
 type HostedProcessors = Box<[Box<dyn HostedAudioProcessor>]>;
@@ -127,10 +149,9 @@ impl ExternalBinding {
 pub struct RenderPlan {
     revision: u64,
     format: RenderFormat,
-    source_kernels: Box<[Kernel]>,
     steps: Box<[NodeStep]>,
+    schedule: RenderSchedule,
     sink_routes: Box<[RouteOp]>,
-    sink_kernels: Box<[Kernel]>,
     source_bindings: Box<[ExternalBinding]>,
     sink_bindings: Box<[ExternalBinding]>,
     meter_bindings: Box<[MeterBinding]>,
@@ -140,6 +161,10 @@ pub struct RenderPlan {
     dynamics_bindings: Box<[DynamicsBinding]>,
     device_bus_samples: usize,
     device_bus_bindings: Box<[DeviceBusBinding]>,
+    controls: Arc<RuntimeControlBank>,
+    source_controls: Box<[usize]>,
+    sink_controls: Box<[usize]>,
+    recorder_controls: Box<[usize]>,
 }
 
 impl RenderPlan {
@@ -166,9 +191,8 @@ impl RenderPlan {
         let sink_bindings = collect_external_bindings(execution, &slots, PortDirection::Input)?;
         let meter_bindings = collect_meter_bindings(execution, &slots)?;
         let recorder_bindings = collect_recorder_bindings(execution, &slots)?;
-        let mut source_kernels = Vec::new();
-        let mut sink_kernels = Vec::new();
         let mut steps = Vec::with_capacity(execution.nodes().len());
+        let mut prepared = Vec::with_capacity(execution.nodes().len());
         let mut dynamics_state_count = 0;
         let mut device_bus_samples = 0;
         let mut hosted_processors = Vec::new();
@@ -188,24 +212,28 @@ impl RenderPlan {
                 device_bus_samples: &mut device_bus_samples,
                 hosted_processors: &mut hosted_processors,
             };
-            let kernels = lower_controlled_kernels(node, &context, &mut state)?;
-            source_kernels.extend(kernels.sources);
-            sink_kernels.extend(kernels.sinks);
-            steps.push(NodeStep {
-                incoming_routes: incoming_routes.into_boxed_slice(),
-                kernels: kernels.processing.into_boxed_slice(),
-            });
+            let kernels = lower_kernels(node, &context, &mut state)?;
+            prepared.push(
+                !matches!(node.config(), NodeConfig::Provider(_)) || !kernels.processing.is_empty(),
+            );
+            steps.push(NodeStep::new(node, kernels, incoming_routes, &slots)?);
         }
+
+        let controls = Arc::new(RuntimeControlBank::new(execution, &prepared));
+        let source_controls =
+            binding_controls(&controls, source_bindings.iter().map(|b| &b.node_id));
+        let sink_controls = binding_controls(&controls, sink_bindings.iter().map(|b| &b.node_id));
+        let recorder_controls =
+            binding_controls(&controls, recorder_bindings.iter().map(|b| &b.node_id));
 
         Ok((
             Self {
                 revision: execution.revision(),
                 format: execution.format(),
-                source_kernels: source_kernels.into_boxed_slice(),
+                schedule: RenderSchedule::new(&steps),
                 steps: steps.into_boxed_slice(),
                 sink_routes: routes.sinks.into_boxed_slice(),
                 recorder_bindings: recorder_bindings.into_boxed_slice(),
-                sink_kernels: sink_kernels.into_boxed_slice(),
                 source_bindings: source_bindings.into_boxed_slice(),
                 sink_bindings: sink_bindings.into_boxed_slice(),
                 meter_bindings: meter_bindings.into_boxed_slice(),
@@ -214,6 +242,10 @@ impl RenderPlan {
                 dynamics_bindings: dynamics_bindings(execution),
                 device_bus_samples,
                 device_bus_bindings: device_bus_bindings(execution, &slots)?,
+                controls,
+                source_controls,
+                sink_controls,
+                recorder_controls,
             },
             hosted_processors.into_boxed_slice(),
         ))
@@ -222,6 +254,12 @@ impl RenderPlan {
     #[must_use]
     pub const fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// Stable control handles for this prepared topology, shared with its audio processor.
+    #[must_use]
+    pub const fn controls(&self) -> &Arc<RuntimeControlBank> {
+        &self.controls
     }
 
     #[must_use]
@@ -262,6 +300,9 @@ pub struct BlockProcessor {
     device_bus_state: Box<[f32]>,
     hosted_processors: Box<[Box<dyn HostedAudioProcessor>]>,
     hosted_identities: Box<[(u64, usize)]>,
+    controls: Box<[ControlValue]>,
+    control_scratch: Box<[ControlValue]>,
+    sampled_control_epoch: Option<u64>,
 }
 
 impl fmt::Debug for BlockProcessor {
@@ -282,11 +323,84 @@ impl fmt::Debug for BlockProcessor {
             .field("device_bus_state", &self.device_bus_state.len())
             .field("hosted_processors", &self.hosted_processors.len())
             .field("hosted_identities", &self.hosted_identities)
+            .field("controls", &self.controls)
+            .field("control_scratch", &self.control_scratch)
+            .field("sampled_control_epoch", &self.sampled_control_epoch)
             .finish()
     }
 }
 
+/// Borrowed source/sink gates from exactly the control snapshot used for this audio block.
+/// Adapters may invalidate a stopped transport cursor before reading resumed PCM. No bank lookup,
+/// independent atomic snapshot, allocation, or lock is required at this boundary.
+#[derive(Debug, Clone, Copy)]
+pub struct ExternalControlState<'a> {
+    plan: &'a RenderPlan,
+    controls: &'a [ControlValue],
+}
+
+impl ExternalControlState<'_> {
+    /// Returns the gate for a source-binding index, or `None` outside the prepared layout.
+    #[must_use]
+    pub fn source_enabled(&self, index: usize) -> Option<bool> {
+        self.plan
+            .source_controls
+            .get(index)
+            .map(|&control| self.controls[control].control.enabled)
+    }
+
+    /// Returns the gate for a sink-binding index, or `None` outside the prepared layout.
+    #[must_use]
+    pub fn sink_enabled(&self, index: usize) -> Option<bool> {
+        self.plan
+            .sink_controls
+            .get(index)
+            .map(|&control| self.controls[control].control.enabled)
+    }
+
+    /// Iterates prepared source identities and their block-coherent execution gates.
+    #[must_use]
+    pub fn sources(&self) -> impl ExactSizeIterator<Item = (&ExternalBinding, bool)> {
+        self.plan
+            .source_bindings
+            .iter()
+            .zip(&self.plan.source_controls)
+            .map(|(binding, &index)| (binding, self.controls[index].control.enabled))
+    }
+
+    /// Iterates prepared sink identities and their block-coherent execution gates.
+    #[must_use]
+    pub fn sinks(&self) -> impl ExactSizeIterator<Item = (&ExternalBinding, bool)> {
+        self.plan
+            .sink_bindings
+            .iter()
+            .zip(&self.plan.sink_controls)
+            .map(|(binding, &index)| (binding, self.controls[index].control.enabled))
+    }
+}
+
+/// Whether native transport capacity permits this validated quantum to consume PCM.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CycleAdmission {
+    /// The adapter has installed its gates and reserved the required transport capacity.
+    Process,
+    /// Gates were observed, but transport capacity is unavailable. Retry without advancing time.
+    Retry,
+}
+
 pub trait ExternalIo {
+    /// Observes the same block-boundary gates the processor uses before any external transfer.
+    /// Implementations may reset transport cursors on OFF transitions, but must not allocate,
+    /// block, or query a separately published control snapshot. Return `Retry` only after gate
+    /// changes have been observed, before consuming PCM or running conversion/DSP work.
+    fn begin_cycle(
+        &mut self,
+        _cycle: &ProcessCycle,
+        _controls: ExternalControlState<'_>,
+    ) -> CycleAdmission {
+        CycleAdmission::Process
+    }
+
     /// Native I/O must consume this cycle's timeline, not infer a second clock
     /// from the destination capacity. Never block or allocate at this boundary.
     fn read_source(
@@ -312,6 +426,8 @@ impl BlockProcessor {
         let sink_buffers = allocate_external_buffers(&plan.sink_bindings, plan.format);
         let dynamics_envelopes = vec![0.0; plan.dynamics_state_count].into_boxed_slice();
         let device_bus_state = vec![0.0; plan.device_bus_samples].into_boxed_slice();
+        let controls = plan.controls.values();
+        let control_scratch = controls.clone();
         Self {
             recorders: Box::new([]),
             cycle_tracker: mixrelay_audio_io::process::CycleTracker::default(),
@@ -324,6 +440,9 @@ impl BlockProcessor {
             device_bus_state,
             hosted_processors: Box::new([]),
             hosted_identities: Box::new([]),
+            controls,
+            control_scratch,
+            sampled_control_epoch: None,
         }
     }
 
@@ -477,6 +596,7 @@ impl BlockProcessor {
         sinks: &mut [&mut [f32]],
     ) -> Result<(), ProcessBlockError> {
         let frames = self.validate_buffers(frames, sources, sinks)?;
+        self.sample_controls();
         for (binding, (source, destination)) in self
             .plan
             .source_bindings
@@ -500,6 +620,8 @@ impl BlockProcessor {
     }
 
     /// Reads external sources, processes one block, and writes external sinks without allocating.
+    /// Returns `None` when native admission requests a retry: controls and adapter gates are
+    /// observed, but no PCM, DSP, recording, meters, or cycle-tracker position are advanced.
     ///
     /// # Errors
     ///
@@ -510,33 +632,25 @@ impl BlockProcessor {
         &mut self,
         cycle: ProcessCycle,
         external: &mut impl ExternalIo,
-    ) -> Result<ProcessReport, ProcessBlockError> {
-        let frames = cycle.frames;
-        if frames > self.plan.format.block_frames {
-            return Err(ProcessBlockError::FrameCountExceeded {
-                maximum: self.plan.format.block_frames,
-                found: frames,
-            });
+    ) -> Result<Option<ProcessReport>, ProcessBlockError> {
+        if !self.admit_external_cycle(cycle, external)? {
+            return Ok(None);
         }
-        self.cycle_tracker
-            .accept(
-                cycle,
-                mixrelay_audio_io::session::SessionFormat {
-                    sample_rate: self.plan.format.sample_rate,
-                    block_frames: self.plan.format.block_frames,
-                },
-            )
-            .map_err(ProcessBlockError::InvalidCycle)?;
+        let frames = cycle.frames;
         let frames_usize = frames as usize;
         let mut report = ProcessReport::default();
-        for (binding, destination) in self
+        for ((binding, destination), &control_index) in self
             .plan
             .source_bindings
             .iter()
             .zip(&mut self.source_buffers)
+            .zip(&self.plan.source_controls)
         {
             let samples = sample_count(frames_usize, binding.channels);
             destination[..samples].fill(0.0);
+            if !self.controls[control_index].control.enabled {
+                continue;
+            }
             let transfer = external.read_source(binding, &mut destination[..samples], &cycle);
             if transfer.frames > frames {
                 return Err(ProcessBlockError::InvalidTransfer);
@@ -557,7 +671,16 @@ impl BlockProcessor {
             self.device_bus_state.fill(0.0);
         }
         self.process_loaded_block(frames_usize);
-        for (binding, source) in self.plan.sink_bindings.iter().zip(&self.sink_buffers) {
+        for ((binding, source), &control_index) in self
+            .plan
+            .sink_bindings
+            .iter()
+            .zip(&self.sink_buffers)
+            .zip(&self.plan.sink_controls)
+        {
+            if !self.controls[control_index].control.enabled {
+                continue;
+            }
             let samples = sample_count(frames_usize, binding.channels);
             let transfer = external.write_sink(binding, &source[..samples], &cycle);
             if transfer.frames > frames {
@@ -566,29 +689,109 @@ impl BlockProcessor {
             report.output_overflows += u64::from(transfer.frames < frames);
             report.discontinuities += u64::from(transfer.discontinuity);
         }
-        Ok(report)
+        Ok(Some(report))
+    }
+
+    fn admit_external_cycle(
+        &mut self,
+        cycle: ProcessCycle,
+        external: &mut impl ExternalIo,
+    ) -> Result<bool, ProcessBlockError> {
+        if cycle.frames > self.plan.format.block_frames {
+            return Err(ProcessBlockError::FrameCountExceeded {
+                maximum: self.plan.format.block_frames,
+                found: cycle.frames,
+            });
+        }
+        // Validation is speculative: a capacity retry must accept the same timeline coordinates
+        // next time. The fixed-size candidate contains no heap storage or native resources.
+        let mut candidate = self.cycle_tracker.clone();
+        candidate
+            .accept(
+                cycle,
+                mixrelay_audio_io::session::SessionFormat {
+                    sample_rate: self.plan.format.sample_rate,
+                    block_frames: self.plan.format.block_frames,
+                },
+            )
+            .map_err(ProcessBlockError::InvalidCycle)?;
+        self.sample_controls();
+        match external.begin_cycle(
+            &cycle,
+            ExternalControlState {
+                plan: &self.plan,
+                controls: &self.controls,
+            },
+        ) {
+            CycleAdmission::Retry => Ok(false),
+            CycleAdmission::Process => {
+                self.cycle_tracker = candidate;
+                Ok(true)
+            }
+        }
     }
 
     fn process_loaded_block(&mut self, frames: usize) {
         self.arena.fill(0.0);
-
-        for kernel in &self.plan.source_kernels {
-            apply_kernel(
-                KernelResources {
-                    arena: &mut self.arena,
-                    sources: &self.source_buffers,
-                    sinks: &mut self.sink_buffers,
-                    dynamics_envelopes: &mut self.dynamics_envelopes,
-                    device_bus_state: &mut self.device_bus_state,
-                    hosted_processors: &mut self.hosted_processors,
-                },
-                kernel,
-                frames,
-            );
+        for (sink, &control_index) in self.sink_buffers.iter_mut().zip(&self.plan.sink_controls) {
+            if !self.controls[control_index].control.enabled {
+                sink.fill(0.0);
+            }
         }
-        for step in &self.plan.steps {
-            apply_routes(&mut self.arena, &step.incoming_routes, frames);
-            for kernel in &step.kernels {
+        for phase in [
+            RenderPhase::Sources,
+            RenderPhase::Processing,
+            RenderPhase::Sinks,
+        ] {
+            if matches!(phase, RenderPhase::Sinks) {
+                apply_routes(
+                    &mut self.arena,
+                    &self.plan.sink_routes,
+                    &self.controls,
+                    frames,
+                );
+            }
+            self.process_phase(phase, frames);
+        }
+        self.capture_and_meter(frames);
+    }
+
+    fn sample_controls(&mut self) {
+        if !self.plan.controls.sample(
+            &mut self.controls,
+            &mut self.control_scratch,
+            &mut self.sampled_control_epoch,
+        ) {
+            return;
+        }
+        // Device snapshots are persistent audio, unlike the per-block cleared arena. OFF must
+        // forget its last quantum so re-enabling cannot replay audio from before the pause.
+        for binding in &self.plan.device_bus_bindings {
+            if !self.controls[binding.control_index].control.enabled {
+                self.device_bus_state[binding.samples.clone()].fill(0.0);
+            }
+        }
+    }
+
+    fn process_phase(&mut self, phase: RenderPhase, frames: usize) {
+        for &index in self.plan.schedule.nodes(phase) {
+            let step = &self.plan.steps[index];
+            let control = self.controls[index];
+            if !control.control.enabled {
+                continue;
+            }
+            if matches!(phase, RenderPhase::Processing) {
+                apply_routes(
+                    &mut self.arena,
+                    &step.incoming_routes,
+                    &self.controls,
+                    frames,
+                );
+            }
+            if matches!(phase, RenderPhase::Sinks) && control.control.muted {
+                silence_slots(&mut self.arena, &step.inputs, frames);
+            }
+            for kernel in step.kernels(phase) {
                 apply_kernel(
                     KernelResources {
                         arena: &mut self.arena,
@@ -599,26 +802,27 @@ impl BlockProcessor {
                         hosted_processors: &mut self.hosted_processors,
                     },
                     kernel,
+                    control.linear_gain,
                     frames,
                 );
             }
+            if !matches!(phase, RenderPhase::Sinks) && control.control.muted {
+                silence_slots(&mut self.arena, &step.outputs, frames);
+            }
         }
-        apply_routes(&mut self.arena, &self.plan.sink_routes, frames);
-        for kernel in &self.plan.sink_kernels {
-            apply_kernel(
-                KernelResources {
-                    arena: &mut self.arena,
-                    sources: &self.source_buffers,
-                    sinks: &mut self.sink_buffers,
-                    dynamics_envelopes: &mut self.dynamics_envelopes,
-                    device_bus_state: &mut self.device_bus_state,
-                    hosted_processors: &mut self.hosted_processors,
-                },
-                kernel,
-                frames,
-            );
-        }
-        for (binding, recorder) in self.plan.recorder_bindings.iter().zip(&self.recorders) {
+    }
+
+    fn capture_and_meter(&self, frames: usize) {
+        for ((binding, recorder), &control_index) in self
+            .plan
+            .recorder_bindings
+            .iter()
+            .zip(&self.recorders)
+            .zip(&self.plan.recorder_controls)
+        {
+            if !self.controls[control_index].control.enabled {
+                continue;
+            }
             let samples = sample_count(frames, binding.channels);
             recorder.capture(
                 &self.arena[binding.slot.offset..binding.slot.offset + samples],
@@ -744,6 +948,7 @@ struct DynamicsBinding {
 struct DeviceBusBinding {
     node_id: NodeId,
     samples: std::ops::Range<usize>,
+    control_index: usize,
 }
 
 fn device_bus_bindings(
@@ -752,11 +957,7 @@ fn device_bus_bindings(
 ) -> Result<Box<[DeviceBusBinding]>, RenderPlanError> {
     let mut offset = 0;
     let mut bindings = Vec::new();
-    for node in execution
-        .nodes()
-        .iter()
-        .filter(|node| node.control().enabled)
-    {
+    for (control_index, node) in execution.nodes().iter().enumerate() {
         let NodeConfig::DeviceBus { .. } = node.config() else {
             continue;
         };
@@ -771,6 +972,7 @@ fn device_bus_bindings(
         bindings.push(DeviceBusBinding {
             node_id: node.id().clone(),
             samples: offset..end,
+            control_index,
         });
         offset = end;
     }
@@ -783,11 +985,10 @@ fn dynamics_bindings(execution: &ExecutionPlan) -> Box<[DynamicsBinding]> {
         .nodes()
         .iter()
         .filter(|node| {
-            node.control().enabled
-                && matches!(
-                    node.config(),
-                    NodeConfig::Compressor(_) | NodeConfig::Limiter(_)
-                )
+            matches!(
+                node.config(),
+                NodeConfig::Compressor(_) | NodeConfig::Limiter(_)
+            )
         })
         .enumerate()
         .map(|(state_index, node)| DynamicsBinding {
@@ -809,7 +1010,72 @@ struct PortKey {
 #[derive(Debug)]
 struct NodeStep {
     incoming_routes: Box<[RouteOp]>,
-    kernels: Box<[Kernel]>,
+    sources: Box<[Kernel]>,
+    processing: Box<[Kernel]>,
+    sinks: Box<[Kernel]>,
+    inputs: Box<[PortSlot]>,
+    outputs: Box<[PortSlot]>,
+}
+
+#[derive(Clone, Copy)]
+enum RenderPhase {
+    Sources,
+    Processing,
+    Sinks,
+}
+
+impl NodeStep {
+    fn new(
+        node: &CompiledNode,
+        kernels: LoweredKernels,
+        incoming_routes: Vec<RouteOp>,
+        slots: &BTreeMap<PortKey, PortSlot>,
+    ) -> Result<Self, RenderPlanError> {
+        let ports = |direction| {
+            let ports = match direction {
+                PortDirection::Input => node.inputs(),
+                PortDirection::Output => node.outputs(),
+            };
+            ports
+                .iter()
+                .map(|port| node_slot(node, port.id(), direction, slots))
+                .collect::<Result<Box<[_]>, _>>()
+        };
+        Ok(Self {
+            incoming_routes: incoming_routes.into_boxed_slice(),
+            sources: kernels.sources.into_boxed_slice(),
+            processing: kernels.processing.into_boxed_slice(),
+            sinks: kernels.sinks.into_boxed_slice(),
+            inputs: ports(PortDirection::Input)?,
+            outputs: ports(PortDirection::Output)?,
+        })
+    }
+
+    fn kernels(&self, phase: RenderPhase) -> &[Kernel] {
+        match phase {
+            RenderPhase::Sources => &self.sources,
+            RenderPhase::Processing => &self.processing,
+            RenderPhase::Sinks => &self.sinks,
+        }
+    }
+}
+
+fn binding_controls<'a>(
+    controls: &RuntimeControlBank,
+    ids: impl Iterator<Item = &'a NodeId>,
+) -> Box<[usize]> {
+    ids.map(|id| {
+        controls
+            .index(id)
+            .expect("a lowered binding belongs to a compiled node")
+    })
+    .collect()
+}
+
+fn silence_slots(arena: &mut [f32], slots: &[PortSlot], frames: usize) {
+    for slot in slots {
+        arena[slot.offset..slot.offset + sample_count(frames, slot.channels)].fill(0.0);
+    }
 }
 
 #[derive(Debug, Default)]
@@ -826,20 +1092,11 @@ struct LoweredKernels {
 }
 
 #[derive(Debug)]
-struct RouteOp {
-    source: PortSlot,
-    destination: PortSlot,
-    channels: Box<[(u16, u16)]>,
-}
-
-#[derive(Debug)]
 enum Kernel {
-    Silence(PortSlot),
     DeviceBus(DeviceBusKernel),
     Source {
         binding: usize,
         output: PortSlot,
-        linear_gain: f32,
     },
     Sink {
         binding: usize,
@@ -848,7 +1105,6 @@ enum Kernel {
     Gain {
         input: PortSlot,
         output: PortSlot,
-        linear_gain: f32,
     },
     Compressor {
         input: PortSlot,
@@ -953,43 +1209,36 @@ fn allocate_slots(
 
 fn lower_routes(execution: &ExecutionPlan, slots: &BTreeMap<PortKey, PortSlot>) -> LoweredRoutes {
     let mut lowered = LoweredRoutes::default();
-    let disabled: std::collections::BTreeSet<_> = execution
+    let controls: BTreeMap<_, _> = execution
         .nodes()
         .iter()
-        .filter(|node| !node.control().enabled)
-        .map(CompiledNode::id)
+        .enumerate()
+        .map(|(index, node)| (node.id(), index))
         .collect();
     for edge in execution.edges() {
-        if disabled.contains(&edge.source().node_id)
-            || disabled.contains(&edge.destination().node_id)
-        {
-            continue;
-        }
+        let source_control = controls[&edge.source().node_id];
+        let destination_control = controls[&edge.destination().node_id];
         let source = compiled_edge_slot(slots, edge.source(), PortDirection::Output);
         let destination = compiled_edge_slot(slots, edge.destination(), PortDirection::Input);
         let channels = edge
             .routes()
             .iter()
-            .map(|route| (route.source_channel, route.destination_channel))
-            .collect::<Vec<_>>()
-            .into_boxed_slice();
+            .map(|route| (route.source_channel, route.destination_channel));
+        let route = RouteOp::new(
+            source,
+            destination,
+            [source_control, destination_control],
+            channels,
+        );
         if is_external_sink(execution, edge.destination()) {
-            lowered.sinks.push(RouteOp {
-                source,
-                destination,
-                channels,
-            });
+            lowered.sinks.push(route);
             continue;
         }
         lowered
             .incoming
             .entry(edge.destination().node_id.clone())
             .or_default()
-            .push(RouteOp {
-                source,
-                destination,
-                channels,
-            });
+            .push(route);
     }
     lowered
 }
@@ -1014,9 +1263,6 @@ fn collect_external_bindings(
 ) -> Result<Vec<ExternalBinding>, RenderPlanError> {
     let mut bindings = Vec::new();
     for node in execution.nodes() {
-        if !node.control().enabled {
-            continue;
-        }
         if matches!(node.config(), NodeConfig::VirtualEndpoint(_)) {
             return Err(RenderPlanError::UnloweredVirtualEndpoint {
                 node_id: node.id().clone(),
@@ -1102,9 +1348,7 @@ fn collect_recorder_bindings(
     execution
         .nodes()
         .iter()
-        .filter(|node| {
-            node.control().enabled && matches!(node.config(), NodeConfig::Recorder { .. })
-        })
+        .filter(|node| matches!(node.config(), NodeConfig::Recorder { .. }))
         .map(|node| {
             meter_binding(
                 node,
@@ -1177,11 +1421,8 @@ fn lower_kernels(
     state: &mut LoweringState<'_>,
 ) -> Result<LoweredKernels, RenderPlanError> {
     match node.config() {
-        NodeConfig::ApplicationCapture(config) => {
-            lower_source_node(node, config.gain_db, context.slots, context.source_bindings)
-        }
-        NodeConfig::AudioDeviceInput(config) => {
-            lower_source_node(node, config.gain_db, context.slots, context.source_bindings)
+        NodeConfig::ApplicationCapture(_) | NodeConfig::AudioDeviceInput(_) => {
+            lower_source_node(node, context.slots, context.source_bindings)
         }
         NodeConfig::AudioDeviceOutput(_) => Ok(LoweredKernels {
             sources: vec![],
@@ -1208,47 +1449,6 @@ fn lower_kernels(
         }),
         NodeConfig::Provider(config) => lower_hosted_processor(node, config, context, state),
     }
-}
-
-fn lower_controlled_kernels(
-    node: &CompiledNode,
-    context: &LoweringContext<'_>,
-    state: &mut LoweringState<'_>,
-) -> Result<LoweredKernels, RenderPlanError> {
-    if !node.control().enabled {
-        // The arena is cleared each cycle. No kernel, binding, hosted instance or
-        // recorder tap is created for an OFF node; its output cannot become bypass.
-        return Ok(LoweredKernels::default());
-    }
-    let mut kernels = lower_kernels(node, context, state)?;
-    if !node.control().muted {
-        return Ok(kernels);
-    }
-    if node.outputs().is_empty() {
-        let silence = node
-            .inputs()
-            .iter()
-            .map(|port| {
-                node_slot(node, port.id(), PortDirection::Input, context.slots).map(Kernel::Silence)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        kernels.sinks.splice(0..0, silence);
-    } else {
-        let boundary = if node.inputs().is_empty() {
-            &mut kernels.sources
-        } else {
-            &mut kernels.processing
-        };
-        for port in node.outputs() {
-            boundary.push(Kernel::Silence(node_slot(
-                node,
-                port.id(),
-                PortDirection::Output,
-                context.slots,
-            )?));
-        }
-    }
-    Ok(kernels)
 }
 
 fn lower_builtin_processor(
@@ -1296,7 +1496,7 @@ fn lower_builtin_processor(
                 sinks: vec![],
             })
         }
-        NodeConfig::Gain(config) => Ok(LoweredKernels {
+        NodeConfig::Gain(_) => Ok(LoweredKernels {
             sources: vec![],
             processing: vec![Kernel::Gain {
                 input: node_slot(
@@ -1311,7 +1511,6 @@ fn lower_builtin_processor(
                     PortDirection::Output,
                     context.slots,
                 )?,
-                linear_gain: 10.0_f32.powf(config.gain_db / 20.0),
             }],
             sinks: vec![],
         }),
@@ -1387,7 +1586,6 @@ fn lower_virtual_endpoint(
         kernels.sources.extend(source_kernel(
             node,
             FROM_OS_PORT_ID,
-            0.0,
             context.slots,
             context.source_bindings,
         )?);
@@ -1410,23 +1608,33 @@ fn lower_hosted_processor(
     state: &mut LoweringState<'_>,
 ) -> Result<LoweredKernels, RenderPlanError> {
     let Some(factory) = context.hosted_factory else {
+        if !node.control().enabled {
+            return Ok(LoweredKernels::default());
+        }
         return Err(RenderPlanError::UnsupportedProvider {
             node_id: node.id().clone(),
         });
     };
     let (input, output) = processor_slots(node, context.slots)?;
-    let processor = factory
-        .prepare(HostedProcessorPrepareRequest {
-            node_id: node.id(),
-            config,
-            format: context.format,
-            input_channels: input.channels,
-            output_channels: output.channels,
-        })
-        .map_err(|reason| RenderPlanError::ProviderPreparation {
-            node_id: node.id().clone(),
-            reason,
-        })?;
+    let request = HostedProcessorPrepareRequest {
+        node_id: node.id(),
+        config,
+        format: context.format,
+        input_channels: input.channels,
+        output_channels: output.channels,
+    };
+    let processor = if node.control().enabled {
+        factory.prepare(request).map(Some)
+    } else {
+        factory.prepare_inactive(request)
+    }
+    .map_err(|reason| RenderPlanError::ProviderPreparation {
+        node_id: node.id().clone(),
+        reason,
+    })?;
+    let Some(processor) = processor else {
+        return Ok(LoweredKernels::default());
+    };
     let processor_index = state.hosted_processors.len();
     state.hosted_processors.push(processor);
     Ok(LoweredKernels {
@@ -1463,12 +1671,11 @@ fn smoothing_coefficient(milliseconds: f32, sample_rate: u32) -> f32 {
 
 fn lower_source_node(
     node: &CompiledNode,
-    gain_db: f32,
     slots: &BTreeMap<PortKey, PortSlot>,
     source_bindings: &[ExternalBinding],
 ) -> Result<LoweredKernels, RenderPlanError> {
     Ok(LoweredKernels {
-        sources: source_kernel(node, AUDIO_PORT_ID, gain_db, slots, source_bindings)?
+        sources: source_kernel(node, AUDIO_PORT_ID, slots, source_bindings)?
             .into_iter()
             .collect(),
         processing: vec![],
@@ -1479,7 +1686,6 @@ fn lower_source_node(
 fn source_kernel(
     node: &CompiledNode,
     port_id: &str,
-    gain_db: f32,
     slots: &BTreeMap<PortKey, PortSlot>,
     bindings: &[ExternalBinding],
 ) -> Result<Option<Kernel>, RenderPlanError> {
@@ -1488,11 +1694,7 @@ fn source_kernel(
     let Some(binding) = binding_index(bindings, node.id(), &port_id) else {
         return Ok(None);
     };
-    Ok(Some(Kernel::Source {
-        binding,
-        output,
-        linear_gain: 10.0_f32.powf(gain_db / 20.0),
-    }))
+    Ok(Some(Kernel::Source { binding, output }))
 }
 
 fn sink_kernel(
@@ -1592,287 +1794,11 @@ const fn sample_count(frames: usize, channels: u16) -> usize {
     frames * channels as usize
 }
 
-fn apply_routes(arena: &mut [f32], routes: &[RouteOp], frames: usize) {
-    for route in routes {
-        let source_channels = usize::from(route.source.channels);
-        let destination_channels = usize::from(route.destination.channels);
-        for frame in 0..frames {
-            let source_frame = route.source.offset + frame * source_channels;
-            let destination_frame = route.destination.offset + frame * destination_channels;
-            for &(source_channel, destination_channel) in &route.channels {
-                arena[destination_frame + usize::from(destination_channel)] +=
-                    arena[source_frame + usize::from(source_channel)];
-            }
-        }
-    }
-}
-
-struct KernelResources<'a> {
-    arena: &'a mut [f32],
-    sources: &'a [Box<[f32]>],
-    sinks: &'a mut [Box<[f32]>],
-    dynamics_envelopes: &'a mut [f32],
-    device_bus_state: &'a mut [f32],
-    hosted_processors: &'a mut [Box<dyn HostedAudioProcessor>],
-}
-
-fn apply_kernel(resources: KernelResources<'_>, kernel: &Kernel, frames: usize) {
-    match kernel {
-        Kernel::Silence(slot) => {
-            resources.arena[slot.offset..slot.offset + sample_count(frames, slot.channels)]
-                .fill(0.0);
-        }
-        Kernel::DeviceBus(bus) => bus.apply(resources.arena, resources.device_bus_state, frames),
-        Kernel::Source {
-            binding,
-            output,
-            linear_gain,
-        } => apply_source(resources, *binding, *output, *linear_gain, frames),
-        Kernel::Sink { binding, input } => apply_sink(resources, *binding, *input, frames),
-        Kernel::Gain {
-            input,
-            output,
-            linear_gain,
-        } => apply_gain(resources.arena, *input, *output, *linear_gain, frames),
-        Kernel::Compressor {
-            input,
-            output,
-            state_index,
-            threshold_linear,
-            exponent,
-            attack_coefficient,
-            release_coefficient,
-            makeup_gain,
-        } => apply_compressor(
-            DynamicKernelContext {
-                arena: resources.arena,
-                input: *input,
-                output: *output,
-                frames,
-                envelope: &mut resources.dynamics_envelopes[*state_index],
-            },
-            CompressorKernelParameters {
-                threshold_linear: *threshold_linear,
-                exponent: *exponent,
-                attack_coefficient: *attack_coefficient,
-                release_coefficient: *release_coefficient,
-                makeup_gain: *makeup_gain,
-            },
-        ),
-        Kernel::Limiter {
-            input,
-            output,
-            state_index,
-            ceiling_linear,
-            release_coefficient,
-        } => apply_limiter(
-            DynamicKernelContext {
-                arena: resources.arena,
-                input: *input,
-                output: *output,
-                frames,
-                envelope: &mut resources.dynamics_envelopes[*state_index],
-            },
-            LimiterKernelParameters {
-                ceiling_linear: *ceiling_linear,
-                release_coefficient: *release_coefficient,
-            },
-        ),
-        Kernel::Mixer { inputs, output } => {
-            apply_mixer(resources.arena, inputs, *output, frames);
-        }
-        Kernel::Hosted {
-            input,
-            output,
-            processor,
-        } => apply_hosted_processor(
-            resources.arena,
-            *input,
-            *output,
-            frames,
-            resources.hosted_processors[*processor].as_mut(),
-        ),
-    }
-}
-
-fn apply_source(
-    resources: KernelResources<'_>,
-    binding: usize,
-    output: PortSlot,
-    linear_gain: f32,
-    frames: usize,
-) {
-    let KernelResources { arena, sources, .. } = resources;
-    let samples = frames * usize::from(output.channels);
-    let destination = &mut arena[output.offset..output.offset + samples];
-    if (linear_gain - 1.0).abs() <= f32::EPSILON {
-        destination.copy_from_slice(&sources[binding][..samples]);
-    } else {
-        for (output, input) in destination.iter_mut().zip(&sources[binding][..samples]) {
-            *output = *input * linear_gain;
-        }
-    }
-}
-
-fn apply_sink(resources: KernelResources<'_>, binding: usize, input: PortSlot, frames: usize) {
-    let KernelResources { arena, sinks, .. } = resources;
-    let samples = frames * usize::from(input.channels);
-    sinks[binding][..samples].copy_from_slice(&arena[input.offset..input.offset + samples]);
-}
-
-fn apply_gain(
-    arena: &mut [f32],
-    input: PortSlot,
-    output: PortSlot,
-    linear_gain: f32,
-    frames: usize,
-) {
-    let samples = frames * usize::from(input.channels);
-    for index in 0..samples {
-        arena[output.offset + index] = arena[input.offset + index] * linear_gain;
-    }
-}
-
-fn apply_mixer(arena: &mut [f32], inputs: &[PortSlot], output: PortSlot, frames: usize) {
-    let samples = frames * usize::from(output.channels);
-    for index in 0..samples {
-        arena[output.offset + index] = inputs.iter().map(|input| arena[input.offset + index]).sum();
-    }
-}
-
-fn apply_hosted_processor(
-    arena: &mut [f32],
-    input: PortSlot,
-    output: PortSlot,
-    frames: usize,
-    processor: &mut dyn HostedAudioProcessor,
-) {
-    let input_samples = sample_count(frames, input.channels);
-    let output_samples = sample_count(frames, output.channels);
-    let processed = if input.offset < output.offset {
-        let (before_output, from_output) = arena.split_at_mut(output.offset);
-        processor.process(
-            &before_output[input.offset..input.offset + input_samples],
-            &mut from_output[..output_samples],
-            frames,
-        )
-    } else {
-        let (before_input, from_input) = arena.split_at_mut(input.offset);
-        processor.process(
-            &from_input[..input_samples],
-            &mut before_input[output.offset..output.offset + output_samples],
-            frames,
-        )
-    };
-    if processed {
-        return;
-    }
-    let shared_channels = usize::from(input.channels.min(output.channels));
-    for frame in 0..frames {
-        for channel in 0..usize::from(output.channels) {
-            arena[output.offset + frame * usize::from(output.channels) + channel] =
-                if channel < shared_channels {
-                    arena[input.offset + frame * usize::from(input.channels) + channel]
-                } else {
-                    0.0
-                };
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct CompressorKernelParameters {
-    threshold_linear: f32,
-    exponent: f32,
-    attack_coefficient: f32,
-    release_coefficient: f32,
-    makeup_gain: f32,
-}
-
-struct DynamicKernelContext<'a> {
-    arena: &'a mut [f32],
-    input: PortSlot,
-    output: PortSlot,
-    frames: usize,
-    envelope: &'a mut f32,
-}
-
-fn apply_compressor(context: DynamicKernelContext<'_>, parameters: CompressorKernelParameters) {
-    let DynamicKernelContext {
-        arena,
-        input,
-        output,
-        frames,
-        envelope,
-    } = context;
-    let channels = usize::from(input.channels);
-    for frame in 0..frames {
-        let input_frame = input.offset + frame * channels;
-        let output_frame = output.offset + frame * channels;
-        let peak = arena[input_frame..input_frame + channels]
-            .iter()
-            .fold(0.0_f32, |current, sample| current.max(sample.abs()));
-        let coefficient = if peak > *envelope {
-            parameters.attack_coefficient
-        } else {
-            parameters.release_coefficient
-        };
-        *envelope = coefficient.mul_add(*envelope, (1.0 - coefficient) * peak);
-        let gain = if *envelope > parameters.threshold_linear {
-            (parameters.threshold_linear / *envelope).powf(parameters.exponent)
-                * parameters.makeup_gain
-        } else {
-            parameters.makeup_gain
-        };
-        for channel in 0..channels {
-            arena[output_frame + channel] = arena[input_frame + channel] * gain;
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct LimiterKernelParameters {
-    ceiling_linear: f32,
-    release_coefficient: f32,
-}
-
-fn apply_limiter(context: DynamicKernelContext<'_>, parameters: LimiterKernelParameters) {
-    let DynamicKernelContext {
-        arena,
-        input,
-        output,
-        frames,
-        envelope,
-    } = context;
-    let channels = usize::from(input.channels);
-    for frame in 0..frames {
-        let input_frame = input.offset + frame * channels;
-        let output_frame = output.offset + frame * channels;
-        let peak = arena[input_frame..input_frame + channels]
-            .iter()
-            .fold(0.0_f32, |current, sample| current.max(sample.abs()));
-        *envelope = if peak >= *envelope {
-            peak
-        } else {
-            parameters
-                .release_coefficient
-                .mul_add(*envelope, (1.0 - parameters.release_coefficient) * peak)
-        };
-        let gain = if *envelope > parameters.ceiling_linear {
-            parameters.ceiling_linear / *envelope
-        } else {
-            1.0
-        };
-        for channel in 0..channels {
-            arena[output_frame + channel] = arena[input_frame + channel] * gain;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     mod controls;
     mod recorder;
+    mod scaling;
     use super::*;
     use mixrelay_audio_graph::{
         ApplicationCaptureRequest, ApplicationSelector, AudioDeviceInputConfig,
@@ -2046,6 +1972,7 @@ mod tests {
         for (activity, read_frames, expected) in [
             (InputActivity::Unknown, 0, 0),
             (InputActivity::Inactive, 0, 0),
+            (InputActivity::Priming, 0, 0),
             (InputActivity::Active, 0, 375),
             (InputActivity::Active, 4, 0),
         ] {
@@ -2063,7 +1990,8 @@ mod tests {
                         },
                         &mut io,
                     )
-                    .unwrap();
+                    .unwrap()
+                    .expect("fixture admits every valid cycle");
                 before += u64::from(read_frames < cycle.frames);
                 after += report.input_starvations;
                 assert_eq!(report.output_overflows, 0);
@@ -2082,7 +2010,7 @@ mod tests {
         let (mut processor, mut io, cycle) = callback_fixture();
         assert_eq!(
             processor.process_external_cycle(cycle, &mut io).unwrap(),
-            ProcessReport::default()
+            Some(ProcessReport::default())
         );
         assert_eq!(io.output.map(f32::to_bits), [0.0_f32; 8].map(f32::to_bits));
         io.read_frames = 2;
@@ -2092,7 +2020,10 @@ mod tests {
             first_frame: 4,
             ..cycle
         };
-        let report = processor.process_external_cycle(next, &mut io).unwrap();
+        let report = processor
+            .process_external_cycle(next, &mut io)
+            .unwrap()
+            .expect("fixture admits every valid cycle");
         assert_eq!(report.input_starvations, 1);
         assert_eq!(report.output_overflows, 1);
         assert_eq!(

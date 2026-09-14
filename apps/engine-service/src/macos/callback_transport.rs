@@ -1,5 +1,6 @@
 //! Hardware owns the graph callback; HAL owns capture coordinates. Each state
 //! distinguishes absence, priming, actual delivery and control-plane recovery.
+use super::native_transport::{EndpointSnapshot, SnapshotError};
 use super::{NativeAudioConfig, NativeClockSnapshot};
 use mixrelay_audio_io::{
     clock_bridge::{
@@ -12,6 +13,9 @@ const MAX_CALLBACK: usize = 4096;
 
 pub(super) trait CaptureTransport {
     fn begin_callback(&mut self) {}
+    fn capture_observation_pending(&mut self) -> bool {
+        false
+    }
     fn clock(&mut self) -> Option<NativeClockSnapshot>;
     fn write(&mut self, frame: u64, samples: &[f32], frames: u32) -> bool;
     fn invalidate_capture(&mut self) -> bool;
@@ -25,8 +29,8 @@ pub(super) fn recover_capture_epoch(id: [u8; 16]) -> bool {
 }
 pub(super) struct NativeCapture {
     endpoint_id: [u8; 16],
-    capture: std::cell::OnceCell<Option<super::native_transport::EndpointSnapshot>>,
-    render: std::cell::OnceCell<Option<super::native_transport::EndpointSnapshot>>,
+    capture: std::cell::OnceCell<Result<EndpointSnapshot, SnapshotError>>,
+    render: std::cell::OnceCell<Result<EndpointSnapshot, SnapshotError>>,
 }
 impl NativeCapture {
     /// One endpoint owns both observations; callback preparation clears only
@@ -45,14 +49,18 @@ impl NativeCapture {
     }
 
     fn observed_capture(&self) -> Option<&super::native_transport::EndpointSnapshot> {
+        self.capture_observation().as_ref().ok()
+    }
+    fn capture_observation(&self) -> &Result<EndpointSnapshot, SnapshotError> {
         self.capture
             .get_or_init(|| super::native_transport::snapshot(self.endpoint_id))
-            .as_ref()
     }
-    pub(super) fn observed_render(&self) -> Option<&super::native_transport::EndpointSnapshot> {
+    pub(super) fn render_observation(&self) -> &Result<EndpointSnapshot, SnapshotError> {
         self.render
             .get_or_init(|| super::native_transport::snapshot(self.endpoint_id))
-            .as_ref()
+    }
+    pub(super) fn observed_render(&self) -> Option<&super::native_transport::EndpointSnapshot> {
+        self.render_observation().as_ref().ok()
     }
 }
 impl CaptureTransport for NativeCapture {
@@ -60,8 +68,10 @@ impl CaptureTransport for NativeCapture {
         NativeCapture::begin_callback(self);
     }
     fn capture_rearm_pending(&mut self) -> bool {
-        self.observed_capture()
-            .is_none_or(super::native_transport::pending)
+        super::native_transport::needs_capture_recovery(self.capture_observation().as_ref())
+    }
+    fn capture_observation_pending(&mut self) -> bool {
+        matches!(self.capture_observation(), Err(SnapshotError::Pending))
     }
     fn invalidate_capture(&mut self) -> bool {
         let refreshed = self
@@ -75,7 +85,7 @@ impl CaptureTransport for NativeCapture {
         *self
             .capture
             .get_mut()
-            .expect("capture observation initialized") = Some(refreshed);
+            .expect("capture observation initialized") = Ok(refreshed);
         true
     }
     fn clock(&mut self) -> Option<NativeClockSnapshot> {
@@ -186,9 +196,26 @@ impl HalCapture {
         }
         self.pending_report.discontinuities += 1;
     }
+
+    /// The sole writer invalidates already published capture on the OFF edge.
+    /// No converter is driven while dormant; ON resumes from a fresh cursor.
+    pub(super) fn suspend(&mut self, transport: &mut impl CaptureTransport) {
+        self.reset(self.epoch.unwrap_or(0), self.consumed);
+        self.needs_invalidate = !transport.invalidate_capture();
+        self.state = if self.needs_invalidate {
+            DestinationState::AwaitingEpoch
+        } else {
+            DestinationState::Dormant
+        };
+    }
     /// One observation per hardware callback. Neither sleeps nor split graph
     /// blocks manufacture consumer progress or turn signal amplitude into a clock.
     pub(super) fn begin(&mut self, transport: &mut impl CaptureTransport, native_frames: u32) {
+        if transport.capture_observation_pending() {
+            // Contention publishes no new clock evidence. Retain filter/queued
+            // PCM; this callback may push, but cannot publish using stale demand.
+            return;
+        }
         if transport.capture_rearm_pending() {
             if self.state != DestinationState::AwaitingEpoch {
                 self.reset(self.epoch.unwrap_or(0), self.consumed);
@@ -324,6 +351,9 @@ impl HalCapture {
         TransferOutcome::complete(frames)
     }
     pub(super) fn flush(&mut self, transport: &mut impl CaptureTransport) -> bool {
+        if transport.capture_observation_pending() {
+            return true;
+        }
         if self.needs_invalidate {
             if !transport.invalidate_capture() {
                 self.state = DestinationState::AwaitingEpoch;
@@ -380,7 +410,10 @@ impl HalCapture {
     pub(super) fn synchronized(&self) -> bool {
         matches!(
             self.state,
-            DestinationState::Idle | DestinationState::Dormant | DestinationState::Running
+            DestinationState::Idle
+                | DestinationState::Dormant
+                | DestinationState::Priming
+                | DestinationState::Running
         ) && self.pending_report.discontinuities == 0
     }
     pub(super) fn reconfigure(&self) -> bool {

@@ -7,6 +7,8 @@ mod endpoint_boundaries;
 mod format;
 mod maintenance;
 mod native_transport;
+#[cfg(test)]
+pub(super) mod pacing_tests;
 mod worker_io;
 use super::macos_pacing::{
     ApplicationClockSnapshot, ApplicationPacer, HardwarePacer, NativeClockSnapshot, NativePacer,
@@ -53,16 +55,44 @@ unsafe extern "C" {
     ) -> u32;
 }
 
-struct MacEngineExternalIo<'a> {
+struct MacEngineExternalIo<'a, T> {
     devices: &'a super::macos_devices::DeviceSet,
-    render_samples: &'a [f32],
-    render_transfer: TransferOutcome,
-    capture_samples: &'a mut [f32],
+    primary_io: worker_io::PrimaryIo<'a, T>,
     primary: Option<&'a mixrelay_audio_io::VirtualEndpointId>,
     independent: &'a mut endpoint_boundaries::EndpointBoundaries<callback_transport::NativeCapture>,
 }
 
-impl ExternalIo for MacEngineExternalIo<'_> {
+impl<T: worker_io::Transport> ExternalIo for MacEngineExternalIo<'_, T> {
+    fn begin_cycle(
+        &mut self,
+        cycle: &ProcessCycle,
+        controls: mixrelay_audio_engine::ExternalControlState<'_>,
+    ) -> mixrelay_audio_engine::CycleAdmission {
+        // Composition provides one canonical binding per physical direction.
+        // Shared graph references have already been reduced to this owner's OR.
+        for (binding, enabled) in controls.sources().chain(controls.sinks()) {
+            self.devices.set_active(binding.node_id().as_str(), enabled);
+        }
+        self.independent.set_controls(controls);
+        if let Some(primary) = self.primary {
+            let admitted = self.primary_io.begin(
+                cycle,
+                endpoint_boundaries::Directions {
+                    source: controls.sources().any(|(binding, enabled)| {
+                        enabled && binding.virtual_endpoint_id() == Some(primary)
+                    }),
+                    sink: controls.sinks().any(|(binding, enabled)| {
+                        enabled && binding.virtual_endpoint_id() == Some(primary)
+                    }),
+                },
+            );
+            if !admitted {
+                return mixrelay_audio_engine::CycleAdmission::Retry;
+            }
+        }
+        self.independent.prepare_active_block(cycle.frames);
+        mixrelay_audio_engine::CycleAdmission::Process
+    }
     fn read_source(
         &mut self,
         binding: &ExternalBinding,
@@ -75,8 +105,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
         }
         if binding.virtual_endpoint_id().is_some() && binding.virtual_endpoint_id() == self.primary
         {
-            destination.copy_from_slice(self.render_samples);
-            return self.render_transfer;
+            return self.primary_io.read(destination);
         }
         if let Some(outcome) = self.independent.read(binding, destination) {
             return outcome;
@@ -105,10 +134,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
         }
         if binding.virtual_endpoint_id().is_some() && binding.virtual_endpoint_id() == self.primary
         {
-            for (destination, sample) in self.capture_samples.iter_mut().zip(source) {
-                *destination += sample;
-            }
-            return TransferOutcome::complete(cycle.frames);
+            return self.primary_io.write(source, cycle.frames);
         }
         if let Some(outcome) = self.independent.write(binding, source) {
             return outcome;
@@ -451,8 +477,9 @@ fn process_worker_block(
         block.devices,
         block.processor.plan(),
         io.capacity(),
-        endpoint.as_ref(),
+        endpoint.as_ref().map_err(|error| *error),
     );
+    let endpoint = endpoint.ok();
     let Some((frames, discontinuity)) =
         timeline.accept((pace, clock_id), &route, block.status, endpoint.as_ref())
     else {
@@ -573,20 +600,21 @@ fn next_native_pace(
     devices: &super::macos_devices::DeviceSet,
     plan: &RenderPlan,
     capacity: u32,
-    endpoint: Option<&native_transport::EndpointSnapshot>,
+    observation: Result<&native_transport::EndpointSnapshot, native_transport::SnapshotError>,
 ) -> (Pace, u64) {
-    let format = plan.format();
-    let pace = capture_schedule::pace(
-        &mut pacers.hal,
-        endpoint,
-        format.sample_rate,
-        format.block_frames,
-        capacity,
-    );
-    if matches!(pace, Pace::Idle | Pace::Unknown)
-        && let Some(hardware) = devices.hardware_clock_progress()
-    {
+    // Hardware ownership does not change when an OS client opens a virtual
+    // capture stream. That stream is an independent boundary, not a new master.
+    if let Some(hardware) = devices.hardware_clock_progress() {
+        let format = plan.format();
         devices.set_clock_master(Some(hardware.owner_id));
+        devices.set_graph_quantum(
+            u32::try_from(
+                (u64::from(hardware.quantum) * u64::from(format.sample_rate))
+                    .div_ceil(u64::from(hardware.native_rate)),
+            )
+            .unwrap_or(u32::MAX)
+            .max(format.block_frames),
+        );
         pacers.select_application_master(None);
         return (
             pacers.hardware.next(
@@ -598,7 +626,29 @@ fn next_native_pace(
             2,
         );
     }
+    let endpoint = match observation {
+        Ok(endpoint) => Some(endpoint),
+        Err(native_transport::SnapshotError::Missing) => None,
+        // A bounded seqlock read can fail during an ordinary native callback.
+        // Wait without resetting credit, choosing another owner or touching PCM.
+        Err(native_transport::SnapshotError::Pending) => return (Pace::Wait, 1),
+    };
+    let format = plan.format();
+    let pace = capture_schedule::pace(
+        &mut pacers.hal,
+        endpoint,
+        format.sample_rate,
+        format.block_frames,
+        capacity,
+    );
     devices.set_clock_master(None);
+    devices.set_graph_quantum(endpoint.map_or(format.block_frames, |value| {
+        value
+            .clock
+            .capture_frames
+            .max(value.clock.render_frames)
+            .max(format.block_frames)
+    }));
     if matches!(pace, Pace::Idle | Pace::Unknown) {
         for binding in plan.source_bindings() {
             let id = binding.node_id().as_str();
@@ -734,11 +784,11 @@ fn wait_for_block(deadline: &mut Instant, period: Duration) {
     }
 }
 
-fn process_native_cycle(
+fn process_native_cycle<T: worker_io::Transport>(
     processor: &mut BlockProcessor,
-    io: &mut MacEngineExternalIo<'_>,
+    io: &mut MacEngineExternalIo<'_, T>,
     cycle: WorkerCycle<'_>,
-) -> Result<ProcessReport, String> {
+) -> Result<Option<ProcessReport>, String> {
     let format = processor.plan().format();
     let WorkerCycle {
         timeline,

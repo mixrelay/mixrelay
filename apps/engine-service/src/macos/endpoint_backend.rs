@@ -25,13 +25,13 @@ impl MacVirtualEndpointBackend {
             staged: AtomicBool::new(false),
         }
     }
-    pub(super) fn activate_pending(&self) -> Result<bool, String> {
+    pub(super) fn activate_pending(&self) -> Result<bool, &'static str> {
         if !self.staged.load(Ordering::Acquire) {
             return Ok(false);
         }
         // Called only inside the processor exchange's configured activation gate.
         if !mixrelay_engine_service::endpoint_service::activate_prepared_endpoints() {
-            return Err("native endpoint inventory activation failed".into());
+            return Err("native endpoint inventory activation failed");
         }
         Ok(self.staged.swap(false, Ordering::AcqRel))
     }

@@ -3,7 +3,7 @@ use super::{
     callback_source::{HalRender, RenderTransport},
     callback_transport::{CaptureTransport, HalCapture, NativeCapture, recover_capture_epoch},
 };
-use mixrelay_audio_engine::{ExternalBinding, RenderPlan};
+use mixrelay_audio_engine::{ExternalBinding, ExternalControlState, RenderPlan};
 use mixrelay_audio_io::{
     VirtualEndpointId,
     process::{InputActivity, ProcessReport, TransferOutcome},
@@ -13,6 +13,8 @@ use mixrelay_macos_transport::endpoint_identity::parse_endpoint_id;
 /// Control-prepared ownership for one canonical device. No graph reference owns
 /// a second converter or a second capture writer for the same device.
 pub(super) struct EndpointBoundary<T> {
+    #[cfg(test)]
+    pub(super) work: BoundaryWork,
     pub(super) identity: VirtualEndpointId,
     pub(super) id: [u8; 16],
     pub(super) transport: T,
@@ -24,9 +26,24 @@ pub(super) struct EndpointBoundary<T> {
     capture_pcm: Vec<f32>,
     source_result: TransferOutcome,
     directions: Directions,
+    active: Directions,
+    source_indices: Vec<usize>,
+    sink_indices: Vec<usize>,
+    begun: Directions,
+    native_frames: u32,
     frames: u32,
     observed_running: Option<bool>,
     format: BoundaryFormat,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct BoundaryWork {
+    pub(super) source_begin: u64,
+    pub(super) source_read: u64,
+    pub(super) sink_begin: u64,
+    pub(super) sink_push: u64,
+    pub(super) sink_flush: u64,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -72,12 +89,19 @@ impl<T: CaptureTransport + RenderTransport> EndpointBoundary<T> {
             .then(|| HalCapture::new(graph_rate, device_rate, audio))
             .transpose()?;
         Ok(Self {
+            #[cfg(test)]
+            work: BoundaryWork::default(),
             identity,
             id,
             transport,
             source,
             sink,
             directions,
+            active: directions,
+            source_indices: Vec::new(),
+            sink_indices: Vec::new(),
+            begun: Directions::default(),
+            native_frames: 0,
             render_channels: audio.render_channels as usize,
             capture_channels: audio.capture_channels as usize,
             render_pcm: vec![0.0; audio.render_channels as usize * 4096],
@@ -96,30 +120,83 @@ impl<T: CaptureTransport + RenderTransport> EndpointBoundary<T> {
     fn begin(&mut self, frames: u32) {
         self.transport.begin_callback();
         self.observed_running = self.transport.clock().map(|clock| clock.running != 0);
-        if let Some(source) = &mut self.source {
-            source.begin(&mut self.transport);
+        self.native_frames = frames;
+        self.begun = Directions::default();
+    }
+
+    fn set_activity(&mut self, active: Directions) {
+        if self.active.source && !active.source {
+            if let Some(source) = &mut self.source {
+                source.suspend();
+            }
+            self.begun.source = false;
         }
-        if let Some(sink) = &mut self.sink {
-            sink.begin(&mut self.transport, frames);
+        if self.active.sink && !active.sink {
+            if let Some(sink) = &mut self.sink {
+                sink.suspend(&mut self.transport);
+            }
+            self.begun.sink = false;
+        }
+        self.active = active;
+    }
+
+    fn begin_active(&mut self) {
+        if self.active.source
+            && !self.begun.source
+            && let Some(source) = &mut self.source
+        {
+            #[cfg(test)]
+            {
+                self.work.source_begin += 1;
+            }
+            source.begin(&mut self.transport);
+            self.begun.source = true;
+        }
+        if self.active.sink
+            && !self.begun.sink
+            && let Some(sink) = &mut self.sink
+        {
+            #[cfg(test)]
+            {
+                self.work.sink_begin += 1;
+            }
+            sink.begin(&mut self.transport, self.native_frames);
+            self.begun.sink = true;
         }
     }
 
     fn prepare_block(&mut self, frames: u32) {
+        self.begin_active();
         self.frames = frames;
         let render = &mut self.render_pcm[..frames as usize * self.render_channels];
         render.fill(0.0);
         self.source_result = self
             .source
             .as_mut()
-            .map_or_else(unavailable, |source| source.read(render));
+            .filter(|_| self.active.source)
+            .map_or_else(unavailable, |source| {
+                #[cfg(test)]
+                {
+                    self.work.source_read += 1;
+                }
+                source.read(render)
+            });
         self.capture_pcm[..frames as usize * self.capture_channels].fill(0.0);
     }
 
     fn finish_block(&mut self) -> ProcessReport {
+        if !self.active.sink {
+            return ProcessReport::default();
+        }
         let Some(sink) = &mut self.sink else {
             return ProcessReport::default();
         };
         let pcm = &self.capture_pcm[..self.frames as usize * self.capture_channels];
+        #[cfg(test)]
+        {
+            self.work.sink_push += 1;
+            self.work.sink_flush += 1;
+        }
         let pushed = sink.push(pcm, self.frames);
         let flushed = sink.flush(&mut self.transport);
         let mut report = sink.take_report();
@@ -129,8 +206,8 @@ impl<T: CaptureTransport + RenderTransport> EndpointBoundary<T> {
     }
 
     fn pending(&self) -> bool {
-        (self.directions.source && self.source.as_ref().is_none_or(HalRender::reconfigure))
-            || (self.directions.sink && self.sink.as_ref().is_none_or(HalCapture::reconfigure))
+        (self.active.source && self.source.as_ref().is_none_or(HalRender::reconfigure))
+            || (self.active.sink && self.sink.as_ref().is_none_or(HalCapture::reconfigure))
     }
 
     fn synchronized(&self) -> bool {
@@ -139,8 +216,8 @@ impl<T: CaptureTransport + RenderTransport> EndpointBoundary<T> {
         if self.observed_running == Some(false) {
             return true;
         }
-        (!self.directions.source || self.source.as_ref().is_some_and(HalRender::synchronized))
-            && (!self.directions.sink || self.sink.as_ref().is_some_and(HalCapture::synchronized))
+        (!self.active.source || self.source.as_ref().is_some_and(HalRender::synchronized))
+            && (!self.active.sink || self.sink.as_ref().is_some_and(HalCapture::synchronized))
     }
 
     fn discontinuity(&mut self) {
@@ -172,9 +249,46 @@ impl<T: CaptureTransport + RenderTransport> EndpointBoundaries<T> {
         }
     }
 
-    pub(super) fn prepare_block(&mut self, frames: u32) {
+    pub(super) fn prepare_block(&mut self, frames: u32, controls: ExternalControlState<'_>) {
+        self.set_controls(controls);
+        self.prepare_active_block(frames);
+    }
+
+    pub(super) fn set_controls(&mut self, controls: ExternalControlState<'_>) {
+        for endpoint in &mut self.endpoints {
+            endpoint.set_activity(Directions {
+                source: endpoint
+                    .source_indices
+                    .iter()
+                    .any(|&index| controls.source_enabled(index) == Some(true)),
+                sink: endpoint
+                    .sink_indices
+                    .iter()
+                    .any(|&index| controls.sink_enabled(index) == Some(true)),
+            });
+        }
+    }
+
+    pub(super) fn prepare_active_block(&mut self, frames: u32) {
         for endpoint in &mut self.endpoints {
             endpoint.prepare_block(frames);
+        }
+    }
+
+    /// Compile reference indices on the control owner, never in an audio cycle.
+    pub(super) fn bind_controls(&mut self, plan: &RenderPlan) {
+        for endpoint in &mut self.endpoints {
+            let indices = |bindings: &[ExternalBinding]| {
+                bindings
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, binding)| {
+                        (binding.virtual_endpoint_id() == Some(&endpoint.identity)).then_some(index)
+                    })
+                    .collect()
+            };
+            endpoint.source_indices = indices(plan.source_bindings());
+            endpoint.sink_indices = indices(plan.sink_bindings());
         }
     }
 
@@ -261,6 +375,8 @@ impl<T: CaptureTransport + RenderTransport> EndpointBoundaries<T> {
                     && !current.pending()
             });
             if let Some(candidate) = retained {
+                std::mem::swap(&mut current.source_indices, &mut candidate.source_indices);
+                std::mem::swap(&mut current.sink_indices, &mut candidate.sink_indices);
                 std::mem::swap(candidate, &mut current);
             } else if current.directions.sink {
                 retire(current.id);
@@ -313,7 +429,9 @@ impl EndpointBoundaries<NativeCapture> {
                 NativeCapture::new(id),
             )?);
         }
-        Ok(Self { endpoints })
+        let mut result = Self { endpoints };
+        result.bind_controls(plan);
+        Ok(result)
     }
 
     pub(super) fn retire(&self) {

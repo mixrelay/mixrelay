@@ -6,13 +6,15 @@
 typedef struct MRDeviceIO MRDeviceIO;
 /* Set once before connecting. Rust owns the complete callback context. */
 typedef bool (*MRRenderHook)(void *, const void *, void *, uint32_t);
+typedef bool (*MRPcmHook)(void *);
 void mr_device_io_render_hook(MRDeviceIO *io, void *context, MRRenderHook hook);
+void mr_device_io_pcm_hook(MRDeviceIO *io, void *context, MRPcmHook hook);
 bool mr_device_io_direct_binding(MRDeviceIO *io, uint32_t *device, uint32_t *offset, uint32_t *total);
 MRDeviceIO *mr_device_io_create_group(MRAggregateGroup *group, const char *uid,
     bool input, uint32_t channels, uint32_t rate);
-/* One owning worker creates/connects/disconnects/destroys and runs SRC.
- * CoreAudio <-> native SPSC <-> worker <-> graph SPSC <-> serialized graph.
- * Each side owns only its cursor; no converter or scratch is shared mutably. */
+/* Control creates/connects/disconnects/destroys. The native PCM hook owns SRC
+ * and the opposite graph-ring cursor. Control drains hook publication before
+ * replacing or releasing prepared conversion; callbacks never wait for control. */
 MRDeviceIO *mr_device_io_create(const char *uid, bool input, uint32_t channels, uint32_t rate);
 bool mr_device_io_connect(MRDeviceIO *io);
 /* 0=connected; -1/-2/-3/-5=preflight stage, other values=native OSStatus.
@@ -41,20 +43,36 @@ uint32_t mr_device_io_native_rate(MRDeviceIO *io);
  * may contain unsynchronized subdevices despite having a single object ID. */
 uint32_t mr_device_io_clock_device(MRDeviceIO *io);
 uint64_t mr_device_io_clock_discontinuities(MRDeviceIO *io);
+typedef struct MRDeviceClockBreak {
+    uint64_t count;
+    double expected_sample, actual_sample;
+    uint64_t previous_host, actual_host, flags;
+} MRDeviceClockBreak;
+_Static_assert(sizeof(MRDeviceClockBreak) == 48, "Rust clock-break snapshot ABI");
+/* One bounded atomic read; false leaves output unchanged. Retain io throughout. */
+bool mr_device_io_clock_break(const MRDeviceIO *io, MRDeviceClockBreak *event);
 uint64_t mr_device_io_native_frames(MRDeviceIO *io);
 uint64_t mr_device_io_graph_frames(MRDeviceIO *io);
 uint64_t mr_device_io_overflows(MRDeviceIO *io);
 uint32_t mr_device_io_quantum(MRDeviceIO *io, bool graph);
 void mr_device_io_output_epoch(MRDeviceIO *io, uint64_t epoch);
-/* Native callbacks and graph never share a ring cursor. The worker owns the
+/* Native callbacks and graph never share a ring cursor. The bridge owns the
  * opposite side of each SPSC and its SRC state. Queued values are frames in
  * that ring's clock: graph=true uses graph rate, false uses native rate. */
 uint32_t mr_device_io_queued(MRDeviceIO *io, bool graph);
-void mr_device_io_worker_discard(MRDeviceIO *io);
-uint32_t mr_device_io_graph_read(MRDeviceIO *io, float *samples, uint32_t frames, uint64_t epoch);
+uint64_t mr_device_io_starvations(MRDeviceIO *io, bool graph);
+void mr_device_io_bridge_discard(MRDeviceIO *io);
+typedef struct MRDeviceGraphRead {
+    uint32_t frames;
+    bool initial_epoch;
+} MRDeviceGraphRead;
+_Static_assert(sizeof(MRDeviceGraphRead) == 8, "Rust graph read ABI");
+/* Actual valid frames; initial_epoch is true only for first consumer admission.
+ * Recovery epochs and subsequent shortages are not startup. */
+MRDeviceGraphRead mr_device_io_graph_read(MRDeviceIO *io, float *samples, uint32_t frames, uint64_t epoch);
 uint32_t mr_device_io_graph_write(MRDeviceIO *io, const float *samples, uint32_t frames);
-uint32_t mr_device_io_worker_read(MRDeviceIO *io, float *samples, uint32_t frames);
-uint32_t mr_device_io_worker_write(MRDeviceIO *io, const float *samples, uint32_t frames);
+uint32_t mr_device_io_bridge_read(MRDeviceIO *io, float *samples, uint32_t frames);
+uint32_t mr_device_io_bridge_write(MRDeviceIO *io, const float *samples, uint32_t frames);
 /* Actual registered CoreAudio callback. Native fixtures supply complete native
  * buffer/timestamp extents and serialize the same role ownership as the OS. */
 int32_t mr_device_io_process(uint32_t device, const void *now, const void *input,

@@ -5,8 +5,9 @@ mod workspace;
 pub use editor_surface::{EditorPointerKind, ProcessorEditorFrame, ProcessorEditorInput};
 pub use mixrelay_audio_recorder::{RecorderRequest, RecorderStatus};
 pub use node_control::{
-    GraphNodeControls, NodeControlCapabilities, NodeControlDescriptor, NodeControlRequest,
-    ObservedRecording, RecorderControlRequest,
+    EngineControlSnapshot, GraphControlSnapshot, GraphNodeControls, NodeControlCapabilities,
+    NodeControlDescriptor, NodeControlPreview, NodeControlRequest, NodeControlResponse,
+    NodeControlSnapshot, ObservedRecording, RecorderControlRequest,
 };
 pub use workspace::{WorkspaceAction, WorkspacePreview, WorkspaceRequest};
 
