@@ -1,0 +1,67 @@
+name: Publish update catalog
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing published release (vMAJOR.MINOR.PATCH)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-updates-${{ github.event.release.tag_name || inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+    steps:
+      - name: Find manifests in the published source release
+        id: manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == mixrelay/mixrelay ]]
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          jq -e --arg tag "$RELEASE_TAG" \
+            '.tag_name == $tag and .draft == false and .prerelease == false' <<<"$release" >/dev/null
+          products=()
+          for product in mix-relay mix-relay-driver; do
+            manifest="$product.release.json"
+            if jq -e --arg name "$manifest" 'any(.assets[]; .name == $name)' <<<"$release" >/dev/null; then
+              products+=("$product")
+            fi
+          done
+          if [[ "${#products[@]}" == 0 ]]; then
+            echo '::notice::No product release manifests attached; no update catalog publication requested.'
+          fi
+          echo "products=${products[*]}" >> "$GITHUB_OUTPUT"
+
+      - name: Request central catalog publication
+        if: steps.manifests.outputs.products != ''
+        env:
+          GH_TOKEN: ${{ secrets.APP_SERVER_DISPATCH_TOKEN }}
+          PRODUCTS: ${{ steps.manifests.outputs.products }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo 'Missing secret: APP_SERVER_DISPATCH_TOKEN (contents:write access to echovisionlab/appserver).' >&2
+            exit 1
+          fi
+          read -r -a products <<<"$PRODUCTS"
+          for product in "${products[@]}"; do
+            jq -n --arg product "$product" --arg repository "$GITHUB_REPOSITORY" \
+              --arg tag "$RELEASE_TAG" --arg manifest "$product.release.json" \
+              '{event_type:"product-release-published",client_payload:{product:$product,source_repository:$repository,release_tag:$tag,release_manifest:$manifest}}' |
+              gh api --method POST repos/echovisionlab/appserver/dispatches --input -
+          done
