@@ -190,8 +190,8 @@ Source queue는 182,272→183,296→184,320으로 연속이지만 Driver render�
 21.333ms quantum 예산을 넘었고 콜백 본문은 10.750µs였다. 손실 경계의 지연은 trigger 이후
 dispatch/preemption 구간으로 좁혔지만 순수 kernel wake 지연·VM 결함으로 확정하지 않는다.
 서로 다른 stream의 ticks는 절대 위치로 직접 정렬하지 않는다. `missing_gap_distance_sum`도 총 손실 프레임 수가 아니다.
-최신 release native 실행은 scope 1에서 첫 1,024프레임 누락(183,296→184,320)으로 실패했고 scope 2는 실행하지 않았다.
-세 trace는 로컬 진단 증거로 보존하며 Git에 넣지 않는다.
+Trigger 추적의 release native 실행은 scope 1에서 첫 1,024프레임 누락(183,296→184,320)으로 실패했고 scope 2는 실행하지 않았다.
+Trace는 로컬 진단 자료로 보존하며 Git에 넣지 않는다.
 
 공식 `pw-loopback` 1.4.2 대조도 같은 ordinary clients에서 479,232→480,256의 1,024프레임 손실을 보였다.
 이는 F32P scheduling 대조이지 PCM24 형식 동등성·VM 원인·PipeWire 결함의 증명이 아니다.
@@ -206,11 +206,20 @@ WirePlumber의 Lua parser는 이를 table로 반환한다([공식 pod.lua 검사
 이미 [de0bca5 수정](https://github.com/PipeWire/wireplumber/commit/de0bca59023ef1cd655ebf5f944f8fd5952df10e)(2026-02-06)과
 [Lua `elseif` 정정](https://github.com/PipeWire/wireplumber/commit/48ed27d11bfd2c952bc9a3138a4df6f81aa01038)이 반영됐다.
 0.5.13 태그에는 이전 코드가 남아 있고 [0.5.14](https://github.com/PipeWire/wireplumber/blob/0.5.14/src/scripts/node/state-stream.lua#L348)는
-number/table을 구분해 단일 값을 해제한다. Debian 0.5.8의 backport 또는 runtime 업데이트가 남았으며
-`state.restore-props`를 자동으로 꺼서 우회하지 않는다.
-이 오류와 1,024프레임 누락의 인과관계는 미확인이다. PipeWire 손실은 추가 원인 분리 전까지 확정 upstream 버그로 보고하지 않는다.
+number/table을 구분해 단일 값을 해제한다. `state.restore-props`를 자동으로 꺼서 우회하지 않는다.
 
-**재개 지점:** 다음 수정 대상은 trigger 이후 스케줄링이다. Activation signal/awake와 scheduler trace 또는
+**0.5.14 비교 결과:** 공식 태그 `07e730b`의 daemon·library·scripts를 VM의 프로젝트 경로에서 빌드했다.
+PipeWire 1.4.2·32채널 PCM24·48kHz·release·observer·기존 정책 설정은 그대로 사용했다.
+0.5.8의 Lua number/table 오류 2회는 0.5.14에서 0회였지만 연속성 검사는 여전히 실패했다.
+Scope 1의 첫 누락은 196,608→197,632(1,024프레임)이며 scope 2는 실행하지 않았다.
+`.lab/driver-durability/wp-fixed-handoff.json`에서 해당 표식은 Driver capture queue까지 있고
+ordinary reader dequeue에는 없었다. 기록 14,104개에서 누락·미완성·미추적·미회수 stream은 모두 0이다.
+따라서 0.5.14는 Lua 오류 수정이지 PCM 끊김 해결책이 아니다. 시스템 0.5.8은 교체하지 않았다.
+Debian 13 저장소는 0.5.8, backports는 0.5.12이므로 최신 버전 의존성만 추가하면 설치를 막는다.
+패키지 관리자 경로를 유지하고, 시스템 WirePlumber를 동봉본으로 덮어쓰거나 두 정책 관리자를 함께 실행하지 않는다.
+PipeWire 손실은 추가 원인 분리 전까지 확정 upstream 버그로 보고하지 않는다.
+
+**재개 지점:** 다음 조사 대상은 trigger 이후 스케줄링이다. Activation signal/awake와 scheduler trace 또는
 물리 Linux에서 PipeWire dispatch와 guest/host preemption을 구분한다. 확정한 경계만 수정·재검증하며
 임의 FIFO 확대·Clock 재작성·판정 완화·새 runner·무가설 반복 검사를 하지 않는다.
 최신 콜백/trigger 계측의 포맷·strict Clippy·검사 8개·release 빌드·경고 금지 문서 검사는 통과했지만
