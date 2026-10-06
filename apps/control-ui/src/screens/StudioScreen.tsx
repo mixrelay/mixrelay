@@ -14,10 +14,15 @@ import type {
   RuntimeGraphDocument,
 } from '../core/control-port/types';
 import { ActionButton } from '../core/ui/ActionButton';
+import {
+  hasPlatformModifier,
+  isNativeTextEntryTarget,
+  platformModifier,
+} from '../core/ui/platformShortcut';
 import { AudioSessionControl } from '../features/audio-session/AudioSessionControl';
 import { EnginePowerControl } from '../features/audio-session/EnginePowerControl';
 import { useAudioStatus } from '../features/audio-session/useAudioStatus';
-import { useVirtualEndpointRate } from '../features/audio-session/useVirtualEndpointRate';
+import type { DriverSession } from '../features/driver-status/useDriverSession';
 import { GraphCreateDialog } from '../features/graphs/GraphCreateDialog';
 import { GraphList } from '../features/graphs/GraphList';
 import { useCatalogTitle, useGraphCatalog } from '../features/graphs/useGraphCatalog';
@@ -63,17 +68,53 @@ function useOwnedSessionDocument(controlPort: ControlPort, catalogDocument?: Run
 function useNewGraphShortcut(enabled: boolean, open: () => void) {
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'n') {
-        event.preventDefault();
-        if (enabled) open();
+      if (
+        event.defaultPrevented ||
+        event.altKey ||
+        isNativeTextEntryTarget(event.target) ||
+        !hasPlatformModifier(event) ||
+        !event.shiftKey ||
+        event.key.toLowerCase() !== 'n'
+      ) {
+        return;
       }
+      event.preventDefault();
+      if (enabled) open();
     };
     window.addEventListener('keydown', handle);
     return () => window.removeEventListener('keydown', handle);
   }, [enabled, open]);
 }
 
-export function StudioScreen({ controlPort }: { controlPort: ControlPort }) {
+function workspaceSessionDocument(
+  sessionDocument: RuntimeGraphDocument | undefined,
+  catalogRevision: number | undefined,
+  fallback: RuntimeGraphDocument | undefined,
+) {
+  return sessionDocument && sessionDocument.revision >= (catalogRevision ?? 0)
+    ? sessionDocument
+    : fallback;
+}
+
+function routingWorkspaceRevisionProps(
+  status: ReturnType<typeof useAudioStatus>,
+  catalog: ReturnType<typeof useGraphCatalog>['catalog'],
+) {
+  return {
+    failedProcessors: status?.failedProcessors,
+    catalogRevision: catalog?.catalogRevision,
+  };
+}
+
+export function StudioScreen({
+  controlPort,
+  applicationActions,
+  driverSession,
+}: {
+  controlPort: ControlPort;
+  applicationActions?: ReactNode;
+  driverSession?: DriverSession;
+}) {
   const { t } = useTranslation();
   const [statusRefresh, setStatusRefresh] = useState(0);
   const status = useAudioStatus(controlPort, statusRefresh);
@@ -82,30 +123,28 @@ export function StudioScreen({ controlPort }: { controlPort: ControlPort }) {
   const { catalog, busy: catalogBusy, uncertain: catalogUncertain } = collection;
   const [sessionBusy, setSessionBusy] = useState(false);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
-  const [sessionDocument, setSessionDocument] = useOwnedSessionDocument(
-    controlPort,
-    collection.document,
-  );
+  const ownedSession = useOwnedSessionDocument(controlPort, collection.document);
+  const [sessionDocument, setSessionDocument] = ownedSession;
   const { isCreatingGraph, setIsCreatingGraph, openNewGraph } = useGraphCreation(catalog?.activeId);
   const busy = catalogBusy || sessionBusy || workspaceBusy || catalogUncertain;
   const title = useCatalogTitle(collection, busy, t('studio.untitledGraph'));
   const controlsDisabled = busy || title.unsaved;
-  const deviceRate = useVirtualEndpointRate({
-    controlPort,
-    settings: status?.audioSession?.virtualEndpointSettings,
-    enabled: !controlsDisabled,
-    onBusyChange: setSessionBusy,
-    onApplied: (document) => {
-      setSessionDocument(document);
-      setStatusRefresh((value) => value + 1);
-    },
-  });
+  const onSessionApplied = (document: RuntimeGraphDocument) => {
+    setSessionDocument(document);
+    setStatusRefresh((value) => value + 1);
+  };
   const mutateCatalog = (action: GraphCatalogAction) => {
     if (!busy) return collection.mutate(action);
   };
+  const documentForWorkspace = workspaceSessionDocument(
+    sessionDocument,
+    catalog?.document.revision,
+    collection.document,
+  );
 
   return (
     <StudioFrame
+      applicationActions={applicationActions}
       collection={collection}
       disabled={controlsDisabled}
       onCreate={openNewGraph}
@@ -124,21 +163,26 @@ export function StudioScreen({ controlPort }: { controlPort: ControlPort }) {
               run={collection.workspaceFile}
             />
           }
-          deviceRateAction={{
-            change: deviceRate.change,
-            error: deviceRate.error,
-            enabled: deviceRate.available && !controlsDisabled,
+          deviceDriverAction={{
+            settings: driverSession?.snapshot ? {
+              ...driverSession.snapshot.settings,
+              canCreate: driverSession.allowMultiDevice && driverSession.snapshot.settings.canCreate,
+            } : undefined,
+            enabled: driverSession?.snapshot?.state === 'ready' && !driverSession.busy,
+            error: driverSession?.error ? { endpointId: driverSession.endpointId, message: driverSession.error } : null,
+            change: (endpointId, update) => { void driverSession?.changeDevice(endpointId, update); },
+            create: async (spec) => {
+              const snapshot = await driverSession?.mutate({ action: 'create', spec });
+              return snapshot?.settings.devices.find((device) => device.spec.id === spec.id)?.spec ?? null;
+            },
           }}
           key={`${catalog?.activeId ?? 'engine'}:${collection.documentGeneration}`}
           graphId={catalog?.activeId}
           interactionDisabled={catalogBusy || catalogUncertain || sessionBusy}
           audioSession={status?.audioSession}
           processorTimings={status?.processorTimings}
-          sessionDocument={
-            sessionDocument && sessionDocument.revision >= (catalog?.document.revision ?? 0)
-              ? sessionDocument
-              : collection.document
-          }
+          {...routingWorkspaceRevisionProps(status, catalog)}
+          sessionDocument={documentForWorkspace}
           controlPort={controlPort}
           onBusyChange={setWorkspaceBusy}
           onTitleChange={title.setDraft}
@@ -150,10 +194,7 @@ export function StudioScreen({ controlPort }: { controlPort: ControlPort }) {
         disabled={controlsDisabled}
         status={status}
         controlPort={controlPort}
-        onApplied={(document) => {
-          setSessionDocument(document);
-          setStatusRefresh((value) => value + 1);
-        }}
+        onApplied={onSessionApplied}
         onBusyChange={setSessionBusy}
       />
 
@@ -185,14 +226,19 @@ function useGraphCreation(activeId: string | undefined) {
 
 function StudioFrame({
   children,
+  applicationActions,
   ...sidebar
-}: Omit<ComponentProps<typeof GraphSidebar>, 'hidden'> & { children: ReactNode }) {
+}: Omit<ComponentProps<typeof GraphSidebar>, 'hidden'> & {
+  children: ReactNode;
+  applicationActions?: ReactNode;
+}) {
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   return (
     <main className={styles.shell} data-sidebar-open={sidebarOpen}>
       <header className={styles.applicationHeader}>
         <h1>MixRelay</h1>
+        <span className={styles.applicationActions}>{applicationActions}</span>
       </header>
       <GraphSidebar hidden={!sidebarOpen} {...sidebar} />
       <button
@@ -275,7 +321,7 @@ function GraphSidebar({
         <div className={styles.sidebarFooter}>
           <button
             type="button"
-            aria-keyshortcuts="Control+Shift+N Meta+Shift+N"
+            aria-keyshortcuts={`${platformModifier()}+Shift+N`}
             className={`${styles.graph} ${styles.newGraph}`}
             disabled={!catalog}
             onClick={onCreate}

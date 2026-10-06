@@ -55,6 +55,13 @@ struct AttachedIo {
     mapping: Mapping,
 }
 
+impl Drop for AttachedIo {
+    fn drop(&mut self) {
+        // Registry control has drained callbacks before retiring an attachment.
+        self.context.get_mut().release();
+    }
+}
+
 impl AttachedIo {
     fn open(geometry: Geometry, fd: i32, size: usize) -> Option<Box<Self>> {
         let address = unsafe { mmap(std::ptr::null_mut(), size, 3, 1, fd, 0) };

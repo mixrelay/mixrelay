@@ -141,6 +141,34 @@ fn unchanged_capture_reuses_arc_and_rejected_token_cannot_stop_it() {
 }
 
 #[test]
+fn scoped_playback_renews_only_on_a_new_explicit_manifest() {
+    let dropped = Arc::new(Mutex::new(Vec::new()));
+    let mut first = manifest(1, &[("app", "old")]);
+    first.sources[0].request.source_playback =
+        mixrelay_audio_graph::SourcePlaybackPolicy::MuteWhileCaptured;
+    first.sources[0].request.forwarding_endpoint =
+        Some("17e59d73-42c1-4f11-a8b4-6c2d913357e0".into());
+    let active = prepare(&first, None, &[], |_, _, _| Ok(owner("first", &dropped))).unwrap();
+    let retry = prepare(&first, Some(&active), &[], |_, _, _| panic!("same lease")).unwrap();
+    assert!(Arc::ptr_eq(
+        &active.sources[0].session,
+        &retry.sources[0].session
+    ));
+    let mut next = first.clone();
+    next.revision = 2;
+    let replacement = prepare(&next, Some(&active), &[], |_, _, previous| {
+        assert!(Arc::ptr_eq(previous.unwrap(), &active.sources[0].session));
+        Ok(owner("renewed", &dropped))
+    })
+    .unwrap();
+    assert!(!Arc::ptr_eq(
+        &active.sources[0].session,
+        &replacement.sources[0].session
+    ));
+    assert!(replacement.sources[0].activate);
+}
+
+#[test]
 fn mailbox_retains_old_reader_until_commit_and_worker_handoff() {
     let dropped = Arc::new(Mutex::new(Vec::new()));
     let mailbox = CaptureHandoff::default();

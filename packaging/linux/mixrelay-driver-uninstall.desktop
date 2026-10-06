@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Uninstall MixRelay Driver
+Name[ko]=MixRelay Driver 제거
+Exec=/bin/sh /usr/lib/mixrelay-driver/uninstall.sh
+Terminal=true
+Categories=AudioVideo;Audio;

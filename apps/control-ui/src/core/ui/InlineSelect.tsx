@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { Select } from '@mantine/core';
 import styles from './InlineSelect.module.css';
 
 export function InlineSelect({
@@ -16,23 +16,31 @@ export function InlineSelect({
   title?: string;
   onChange: (value: string) => void;
 }) {
-  const id = useId();
   return (
-    <label className={styles.field} htmlFor={id} title={title}>
+    <div className={styles.field} title={title}>
       <span>{label}</span>
-      <select
-        id={id}
+      <Select
         aria-label={label}
         value={value}
+        data={data}
         disabled={disabled}
-        onChange={(event) => onChange(event.currentTarget.value)}
-      >
-        {data.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
+        className={styles.select}
+        classNames={{ input: styles.input }}
+        size="xs"
+        rightSectionWidth={18}
+        searchable={false}
+        clearable={false}
+        allowDeselect={false}
+        withCheckIcon={false}
+        maxDropdownHeight={192}
+        comboboxProps={{
+          withinPortal: true,
+          position: 'bottom',
+          middlewares: { flip: true, shift: true },
+          width: 'target',
+        }}
+        onOptionSubmit={onChange}
+      />
+    </div>
   );
 }

@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn shutdown_rejects_device_preparation_before_inventory_or_native_creation() {
+    let status = Arc::new(mixrelay_engine_service::session::AdapterRuntimeStatus::new(
+        crate::macos::adapter_profile(),
+    ));
+    let resources = MacDevices::new(status, 48_000, 32);
+    resources.stop_preparing();
+    let desired = BTreeMap::from([("mic".into(), selected("shutdown-test", true))]);
+    let format = mixrelay_audio_graph::RenderFormat {
+        sample_rate: 48_000,
+        block_frames: 32,
+    };
+
+    let error = resources
+        .prepare_device_set(&BTreeMap::new(), desired.clone(), format)
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("cancelled during shutdown"));
+    let error = resources
+        .open_present(&BTreeMap::new(), &desired, None, format)
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("cancelled during shutdown"));
+    assert!(resources.handoff.idle());
+}
+
+#[test]
 fn reference_order_changes_keep_clock_group_but_real_membership_changes_do_not() {
     let members = |names: &[&str]| {
         names
@@ -84,15 +110,15 @@ fn pending_bridge_is_inactive_without_hiding_a_ready_owner_transfer_failure() {
     );
     output.ready_rate.store(0, Ordering::Release);
     assert!(!output.failed.load(Ordering::Acquire));
-    assert!(devices.is_inactive("output"));
+    assert!(devices.is_binding_inactive("output", false));
     assert!(!devices.is_offline("output"));
-    assert!(!devices.is_inactive("unknown"));
+    assert!(!devices.is_binding_inactive("unknown", false));
     let transfer = devices.write("output", &[0.5; 64]).unwrap();
     assert_eq!(transfer.frames, 32);
     assert_eq!(transfer.activity, InputActivity::Inactive);
     output.ready_rate.store(48_000, Ordering::Release);
-    assert!(!devices.is_inactive("output"));
-    assert_eq!(devices.clock_synchronized("output"), Some(false));
+    assert!(!devices.is_binding_inactive("output", false));
+    assert_eq!(devices.clock_synchronized("output", false), Some(false));
     // A live transfer still uses its real native result, including invalid widths.
     assert_eq!(devices.write("output", &[0.5; 3]).unwrap().frames, 0);
     drop((devices, output, context));

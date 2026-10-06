@@ -16,6 +16,8 @@ pub(crate) const FORMAT: u32 = 3;
 pub(crate) const ALIVE: u32 = 4;
 pub(crate) const RUNNING: u32 = 5;
 pub(crate) const STREAM_ACTIVE: u32 = 6;
+pub(crate) const OUTPUT_VOLUME: u32 = 7;
+pub(crate) const OUTPUT_MUTE: u32 = 8;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -57,6 +59,8 @@ pub(crate) struct Snapshot {
     pub output_active: bool,
     pub name: [u8; 128],
     pub uid: [u8; 80],
+    pub capture_format: u32,
+    pub render_format: u32,
 }
 
 #[repr(C)]
@@ -321,13 +325,22 @@ pub(crate) unsafe extern "C" fn mr_hal_core_timestamp(
 }
 
 #[unsafe(no_mangle)]
+/// Processes an exclusively writable `CoreAudio` operation buffer in place.
+///
+/// # Safety
+/// The registry and buffer remain live for this synchronous call. `samples`
+/// contains `frames * stream_channels` exclusively writable samples in the current
+/// native stream format. Float32 buffers must be float-aligned; packed integer
+/// buffers require only byte alignment.
+/// The SDK's `WriteMix` operation supplies this main buffer for in-place use;
+/// engine/shared transport storage must never be supplied as this buffer.
 pub(crate) unsafe extern "C" fn mr_hal_core_io(
     registry: *mut Registry,
     device: u32,
     stream: u32,
     render: bool,
     frame: u64,
-    samples: *mut f32,
+    samples: *mut c_void,
     frames: u32,
 ) -> bool {
     let Some(registry) = (unsafe { registry.as_ref() }) else {

@@ -1,13 +1,15 @@
 use std::fmt;
 use std::mem::size_of_val;
 
+use crate::provider_layout::ProviderPorts;
 use mixrelay_audio_io::{ApplicationCaptureRequest, VirtualEndpointSpec};
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_GRAPH_SCHEMA_VERSION: u32 = 2;
 pub const AUDIO_PORT_ID: &str = "audio";
+/// The Driver capture mix (OS playback plus all graph contributions).
 pub const FROM_OS_PORT_ID: &str = "from_os";
-/// The produced capture mix, distinct from external applications' playback stream.
+/// Graph contributions sent to the Driver render stream, not a capture writer.
 pub const TO_OS_PORT_ID: &str = "to_os";
 
 macro_rules! string_id {
@@ -115,8 +117,8 @@ pub enum NodeConfig {
     Mixer(MixerConfig),
     Gain(GainConfig),
     VirtualEndpoint(VirtualEndpointConfig),
-    /// Runtime-only native transport. Authored sources must first be composed
-    /// with the device's produced bus; this variant cannot enter persisted JSON.
+    /// Runtime-only Driver client transport. Authored sources must first be composed
+    /// with the Driver capture snapshot; this variant cannot enter persisted JSON.
     #[serde(skip)]
     VirtualEndpointTransport(VirtualEndpointSpec),
     /// Device I/O snapshot storage, prepared only by catalog composition.
@@ -185,9 +187,9 @@ pub struct VirtualEndpointConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VirtualEndpointReference {
-    /// Exposes the sum of external playback and all graph-produced capture PCM.
+    /// Exposes Driver capture: OS playback plus all graph contributions.
     pub render: bool,
-    /// Exposes the sink port feeding the native capture stream.
+    /// Exposes the graph contribution sink feeding Driver render.
     pub capture: bool,
 }
 
@@ -200,8 +202,8 @@ fn is_unity_gain(value: &f32) -> bool {
 impl From<VirtualEndpointSpec> for VirtualEndpointConfig {
     fn from(spec: VirtualEndpointSpec) -> Self {
         let reference = VirtualEndpointReference {
-            render: spec.render.is_some() || spec.capture.is_some(),
-            capture: spec.capture.is_some(),
+            render: spec.capture.is_some(),
+            capture: spec.render.is_some(),
         };
         Self {
             spec,
@@ -285,14 +287,6 @@ pub struct ProviderNodeConfig {
     pub ports: Option<ProviderPorts>,
     #[serde(default)]
     pub parameters: serde_json::Value,
-}
-
-/// Authored plug-in I/O geometry; no native handles or machine-specific addresses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ProviderPorts {
-    pub inputs: u16,
-    pub outputs: u16,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

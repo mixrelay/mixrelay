@@ -37,6 +37,7 @@ impl ProcessorControlRegistry {
 
     /// Exports state only for the exact instance and observed close requested by the owner.
     /// The owner must persist the returned state before acknowledging this observation.
+    /// Hold [`Self::reuse_transaction`] until that durable publication succeeds.
     ///
     /// # Errors
     /// Rejects replaced instances or a newer close event, as well as normal state export errors.
@@ -58,7 +59,7 @@ impl ProcessorControlRegistry {
         {
             return Err(ProcessorStateError::Unavailable);
         }
-        let state = control.snapshot_state(timeout)?;
+        let state = self.capture_control_state(&control, timeout)?;
         // Retaining the old Arc permits safe capture but must not permit publishing it into a
         // newer graph instance under the same node ID. Also fence close/reopen/close races.
         if self
@@ -68,6 +69,7 @@ impl ProcessorControlRegistry {
         {
             return Err(ProcessorStateError::Unavailable);
         }
+        crate::state::checkpoint_state(&control, &state)?;
         Ok(state)
     }
 }

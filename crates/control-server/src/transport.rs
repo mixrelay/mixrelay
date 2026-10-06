@@ -3,6 +3,7 @@ use std::{
     io::{self, IoSlice},
     net::SocketAddr,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
@@ -11,32 +12,55 @@ use axum::serve::Listener;
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::{TcpListener, TcpStream},
+    sync::{OwnedSemaphorePermit, Semaphore},
     time::Sleep,
 };
 
 const WRITE_STALL_LIMIT: Duration = Duration::from_secs(2);
+const MAX_ACCEPTED_CONTROL_SOCKETS: usize = 64;
 
-/// Wraps the bound control listener with a two-second socket write-stall limit.
+#[cfg(test)]
+mod tests;
+
+/// Wraps the bound control listener with a 64-socket acceptance limit and a
+/// two-second socket write-stall limit.
 ///
 /// The listener retains ownership of each accepted socket. Only a pending socket write,
 /// flush or shutdown starts a deadline; waiting for a mutation to produce its response
 /// does not. Read/body deadlines remain the HTTP ingress layer's responsibility.
 #[must_use]
 pub fn bounded_listener(listener: TcpListener) -> impl Listener<Addr = SocketAddr> {
-    ControlListener(listener)
+    ControlListener::with_capacity(listener, MAX_ACCEPTED_CONTROL_SOCKETS)
 }
 
-struct ControlListener(TcpListener);
+struct ControlListener {
+    listener: TcpListener,
+    accepted_slots: Arc<Semaphore>,
+}
+
+impl ControlListener {
+    fn with_capacity(listener: TcpListener, capacity: usize) -> Self {
+        Self {
+            listener,
+            accepted_slots: Arc::new(Semaphore::new(capacity)),
+        }
+    }
+}
 
 impl Listener for ControlListener {
     type Io = ControlSocket;
     type Addr = SocketAddr;
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        let (stream, address) = Listener::accept(&mut self.0).await;
+        let permit = Arc::clone(&self.accepted_slots)
+            .acquire_owned()
+            .await
+            .expect("control socket semaphore must remain open for the listener lifetime");
+        let (stream, address) = Listener::accept(&mut self.listener).await;
         (
             ControlSocket {
                 stream,
+                _accepted_slot: permit,
                 stalled: None,
             },
             address,
@@ -44,12 +68,13 @@ impl Listener for ControlListener {
     }
 
     fn local_addr(&self) -> io::Result<Self::Addr> {
-        self.0.local_addr()
+        self.listener.local_addr()
     }
 }
 
 struct ControlSocket {
     stream: TcpStream,
+    _accepted_slot: OwnedSemaphorePermit,
     stalled: Option<Pin<Box<Sleep>>>,
 }
 

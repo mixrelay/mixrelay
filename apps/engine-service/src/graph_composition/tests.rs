@@ -97,6 +97,7 @@ fn mic_reference(gain_db: f32) -> SourceReference {
         source_id: "macbook-mic".into(),
         channels: 2,
         gain_db,
+        forwarding_endpoint: None,
     }
 }
 fn bus_document(destination: &str, gain_db: f32) -> GraphDocument {
@@ -111,8 +112,8 @@ fn bus_document(destination: &str, gain_db: f32) -> GraphDocument {
 }
 
 /// Executes the real composed render plan, not a graph metadata or topology simulation.
-/// Native X playback is [0.8, 0.6]; a shared mic/app capture owner supplies [0.2, 0.4].
-/// X's capture output therefore includes playback even with no graph writer.
+/// Driver X capture is [0.8, 0.6]; a shared mic/app supplies [0.2, 0.4].
+/// The graph contribution sink must never re-send X's existing capture mix.
 fn pcm(composed: &ComposedGraph) -> BTreeMap<NodeId, Vec<f32>> {
     let plan = Arc::new(RenderPlan::prepare(&composed.execution).unwrap());
     let sources: Vec<Vec<f32>> = plan
@@ -163,7 +164,7 @@ fn assert_frame(output: &[f32], frame: [f32; 2]) {
 }
 
 #[test]
-fn real_pcm_sums_os_playback_and_all_graph_writes_before_local_gain() {
+fn graph_contribution_excludes_driver_capture_and_reads_driver_mix_before_local_gain() {
     let registry = mic_registry(vec![device("X"), device("Y"), device("Z")]);
     let a = source_document();
     let b = bus_document("out", -6.020_6);
@@ -214,15 +215,15 @@ fn real_pcm_sums_os_playback_and_all_graph_writes_before_local_gain() {
     let output = pcm(&composed);
     assert_frame(
         &output[&composed.native_devices[&VirtualEndpointId::from("X")]],
-        [1.0, 1.0],
+        [0.2, 0.4],
     );
     assert_frame(
         &output[&composed.native_devices[&VirtualEndpointId::from("Y")]],
-        [0.5, 0.5],
+        [0.4, 0.3],
     );
     assert_frame(
         &output[&composed.native_devices[&VirtualEndpointId::from("Z")]],
-        [1.0, 1.0],
+        [0.8, 0.6],
     );
     assert_ne!(
         runtime_node_id("A", &NodeId::from("gain")),
@@ -273,7 +274,7 @@ fn cross_graph_device_routes_execute_through_normal_io_snapshots() {
     let output = pcm(&composed);
     assert_frame(
         &output[&composed.native_devices[&VirtualEndpointId::from("X")]],
-        [0.8, 0.6],
+        [0.0, 0.0],
     );
     assert_frame(
         &output[&composed.native_devices[&VirtualEndpointId::from("Y")]],
@@ -322,7 +323,7 @@ fn only_referenced_named_devices_keep_independent_rates_and_last_removal_drops_n
             .native_devices
             .contains_key(&VirtualEndpointId::from("stale"))
     );
-    assert_frame(&pcm(&composed)[&composed.native_devices[&x.id]], [0.8, 0.6]);
+    assert_frame(&pcm(&composed)[&composed.native_devices[&x.id]], [0.0, 0.0]);
     assert_eq!(registry.get(&x.id), Some(&x));
     let removed = compose(&registry, &[], 4, context(), &GraphCompiler::default()).unwrap();
     assert!(removed.native_devices.is_empty());
@@ -333,7 +334,7 @@ fn only_referenced_named_devices_keep_independent_rates_and_last_removal_drops_n
 }
 
 #[test]
-fn multiple_graph_writers_sum_once_at_device_bus_before_every_reader() {
+fn multiple_graph_writers_sum_only_contributions_while_reader_uses_driver_capture() {
     let registry = mic_registry(vec![device("X"), device("Y")]);
     let a = source_document();
     let b = source_document();
@@ -375,10 +376,10 @@ fn multiple_graph_writers_sum_once_at_device_bus_before_every_reader() {
     )
     .unwrap();
     let out = pcm(&composed);
-    for id in ["X", "Y"] {
+    for (id, expected) in [("X", [0.4, 0.8]), ("Y", [0.8, 0.6])] {
         assert_frame(
             &out[&composed.native_devices[&VirtualEndpointId::from(id)]],
-            [1.2, 1.4],
+            expected,
         );
     }
 }
@@ -481,7 +482,7 @@ fn one_native_microphone_fans_out_to_independent_graph_gains_and_survives_refere
     let out = pcm(&both);
     assert_frame(
         &out[&both.native_devices[&VirtualEndpointId::from("X")]],
-        [1.0, 1.0],
+        [0.2, 0.4],
     );
     assert_frame(
         &out[&both.native_devices[&VirtualEndpointId::from("Y")]],
@@ -535,6 +536,7 @@ fn one_native_application_capture_owner_has_independent_local_reference_gains() 
                         channel_layout: ChannelLayout::Stereo,
                     },
                     source_playback: mixrelay_audio_graph::SourcePlaybackPolicy::Preserve,
+                    forwarding_endpoint: None,
                     gain_db: 0.0,
                     requires_reselection: false,
                 },
@@ -552,6 +554,7 @@ fn one_native_application_capture_owner_has_independent_local_reference_gains() 
         source_id: "application:stable-bundle".into(),
         channels: 2,
         gain_db,
+        forwarding_endpoint: None,
     };
     let composed = compose(
         &registry,
@@ -588,7 +591,7 @@ fn one_native_application_capture_owner_has_independent_local_reference_gains() 
     let out = pcm(&composed);
     assert_frame(
         &out[&composed.native_devices[&VirtualEndpointId::from("X")]],
-        [1.0, 1.0],
+        [0.2, 0.4],
     );
     assert_frame(
         &out[&composed.native_devices[&VirtualEndpointId::from("Y")]],

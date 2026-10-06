@@ -1,9 +1,19 @@
 # MixRelay
 
-MixRelay is a cross-platform audio-routing application for streamers, audio artists,
-and independent broadcasters. Its portable graph and DSP engine is shared across macOS,
-Linux/PipeWire, and Windows/WASAPI, while native discovery, capture, and virtual-device lifecycles
-remain isolated behind host-audio interfaces.
+MixRelay is an audio-routing application for streamers, audio artists, and independent
+broadcasters. The current release targets macOS and Linux/PipeWire. Its portable graph
+and DSP engine is shared across platforms, while native discovery, capture, and
+virtual-device lifecycles remain isolated behind host-audio interfaces.
+
+The virtual-audio component is named **MixRelay Driver**. One driver installation
+supports multiple independently named virtual devices created through MixRelay;
+channel counts do not require separate driver installations. Virtual devices
+support 1–64 channels per direction on macOS/Linux.
+
+## Project status
+
+- [Product and implementation status](docs/product.md): free driver, free/paid app policy, behavior, implementation boundaries and the single work checklist.
+- [Product website draft](apps/website/README.md): static product page and HTML guide; local preview only, with no checkout or downloads yet.
 
 ## Repository layout
 
@@ -31,21 +41,95 @@ pnpm desktop:dev
 The complete macOS build requires full Xcode. Command Line Tools alone are not
 sufficient for the HAL driver, signing, notarization, and final bundle checks.
 
+macOS release binaries are Universal 2 (Apple Silicon `arm64` and Intel `x86_64`).
+`pnpm desktop:build` selects the checked universal app build on macOS; Linux
+uses its native Tauri build. Development builds remain host-native.
+Build the separate macOS components with:
+
+```sh
+pnpm desktop:build
+pnpm engine:build:macos-universal
+pnpm hal:build:macos-universal
+```
+
+The app and engine are written under `target/universal-apple-darwin/release`;
+the HAL bundle is written under `target/macos-hal`. Each build verifies both
+architecture slices. These commands do not install components or produce a
+notarized installer. Universal cross-build success is not native Intel audio
+qualification.
+
 The [cross-OS development lab](infra/lab/README.md) separates local macOS validation,
-Debian/Ubuntu/Kali/Arch Docker builds, and Linux/Windows desktop VM verification.
+Debian/Ubuntu/Kali/Arch Docker builds, and Linux desktop VM verification.
 `pnpm lab:build` and `pnpm lab:test` run inside the actual target OS and record their scope;
 they do not imply that native drivers or live audio have passed qualification.
+
+For focused Rust checks that include the desktop, use the same code-check entry:
+
+```sh
+node scripts/lab/native-check.mjs cargo test --locked -p mixrelay-desktop --lib
+```
+
+Code checks do not require installer sidecars or signed driver files. Release builds
+use `pnpm desktop:build`, which retains those payload and signature requirements.
+Do not use code-check artifacts as installed-product evidence.
 
 The UI dependency direction is `Mantine -> Core -> Feature -> Screen`. Direct
 Mantine imports outside `apps/control-ui/src/core` fail the boundary check.
 
-The product capability floor and local code policy are recorded in
-[`ADR 0005`](docs/adr/0005-product-capability-baseline.md) and
-[`ADR 0006`](docs/adr/0006-code-quality-policy.md).
+Product decisions and completion status live in [one product document](docs/product.md).
+[Performance measurements](docs/performance/audio-engine-render-baseline.md) retain
+comparison conditions and numbers in one file, not a second backlog.
+
+## Publishing release installers
+
+After qualifying the final installers, collect them in one release directory and
+explicitly select each file. For example, using your actual release metadata and filenames:
+
+```sh
+pnpm release:manifest --directory /absolute/release-directory \
+  --product mix-relay --version 1.2.3 --published-at 2026-10-06T18:20:30+09:00 \
+  --artifact macos:universal:MixRelay-1.2.3.pkg \
+  --artifact linux:arm64:MixRelay-1.2.3-arm64.deb \
+  --artifact linux:arm64:MixRelay-1.2.3-arm64.rpm \
+  --artifact linux:x64:MixRelay-1.2.3-x64.deb
+```
+
+The script writes `mix-relay.release.json` beside the selected files, preserving
+installers and refusing to overwrite an existing manifest. macOS accepts Universal
+PKG; Linux accepts arm64/x64 DEB or RPM, including both formats for one target.
+Select only final installation packages: preparation files and uninstall PKGs
+must not be selected. OS, architecture and product role are supplied by the caller;
+the script does not infer them or qualify the packages. It does not replace PKG
+signing/notarization or DEB/RPM installation checks. An optional `--notes-url`
+must point to public HTTPS release notes; omit it when none exist, rather than
+using this private repository's release page.
+
+Attach the manifest and every selected installer to the matching published
+`vMAJOR.MINOR.PATCH` GitHub release. `publish-updates.yml` then requests central
+catalog publication; retry that workflow manually if assets were attached after
+publication. The central publisher computes SHA-256 and size from the installers.
+`--product mix-relay-driver` writes `mix-relay-driver.release.json` for a qualified
+standalone Driver release. That product remains unfinished: manifest generation
+does not create it, and the current Driver must not be released as a standalone
+product. This command does not build, copy or upload installers.
+
+R2 retains the latest patch installer for each product's major/minor series.
+After a new patch is published and verified, previous patch files leave R2 and
+the download catalog. GitHub Releases, tags and changelogs are preserved.
 
 ## Distribution and licensing
 
-MixRelay is currently developed in a private repository. No open-source license
-is granted at this stage. Freeware availability and future commercial licensing
-are product distribution decisions and do not imply permission to copy,
-redistribute, or create derivative source code.
+MixRelay is developed in a private repository for website distribution. Free
+driver, indefinite limited app trial and paid-app policies are defined only in
+the [product document](docs/product.md#제품-구성). These are product requirements,
+not a claim that the new licensing policy or standalone driver is implemented.
+The store and complete licensing flow are not live yet.
+
+MixRelay Driver is proprietary freeware, not an open-source grant. Ordinary personal or business
+use follows the free/paid product policy. Incorporating MixRelay into another product or service,
+including OEM, bundling, resale or white-label distribution, requires prior written permission
+and a separate paid agreement: `support@mixrelay.com`. Buying the app does not grant redistribution
+rights. Third-party components retain their own licences and notices. See the
+[app terms](LICENSE.txt), [Driver terms](LICENSE-Driver.txt) and
+[usage and integration policy](docs/product.md#이용-허가와-제품-편입). Both terms are drafts
+pending legal review.

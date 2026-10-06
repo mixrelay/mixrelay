@@ -22,7 +22,8 @@ use mixrelay_audio_io::{
     session::{AudioBackendKind, AudioSessionStatus, SessionFormat, SessionReconfigureRequest},
 };
 use mixrelay_control_protocol::{AppStatus, GraphApplyResponse};
-use mixrelay_engine_service::endpoint_service::{device_sample_rate, set_device_sample_rate};
+use mixrelay_driver_control::{DriverClient, DriverCommand};
+use mixrelay_macos_transport::endpoint_identity::format_endpoint_id;
 use mixrelay_macos_transport::endpoint_identity::parse_endpoint_id;
 use reqwest::{StatusCode, blocking::Client};
 use serde::{Deserialize, de::DeserializeOwned};
@@ -46,6 +47,45 @@ struct InstalledSession {
     expected_revision: u64,
     preferences: PathBuf,
     mutated: bool,
+}
+
+fn device_sample_rate(id: [u8; 16]) -> Option<u32> {
+    let snapshot = DriverClient::new().ok()?.snapshot_blocking().ok()?;
+    snapshot
+        .settings
+        .devices
+        .iter()
+        .find(|device| device.spec.id.as_str() == format_endpoint_id(id))?
+        .observed_sample_rate
+}
+
+fn set_device_sample_rate(id: [u8; 16], sample_rate: u32) -> bool {
+    let result = (|| -> Result<()> {
+        let client = DriverClient::new()?;
+        let snapshot = client.snapshot_blocking()?;
+        let mut spec = snapshot
+            .settings
+            .devices
+            .iter()
+            .find(|device| device.spec.id.as_str() == format_endpoint_id(id))
+            .ok_or("Driver device is absent")?
+            .spec
+            .clone();
+        spec.default_sample_rate = sample_rate;
+        let readback = client.mutate_blocking(&DriverCommand::Configure {
+            expected_revision: snapshot.revision,
+            spec,
+        })?;
+        require(
+            readback.settings.devices.iter().any(|device| {
+                device.spec.id.as_str() == format_endpoint_id(id)
+                    && device.observed_sample_rate == Some(sample_rate)
+            }),
+            "Driver nominal-rate readback differs",
+        )?;
+        Ok(())
+    })();
+    result.is_ok()
 }
 
 fn require(condition: bool, message: impl Into<String>) -> Result<()> {

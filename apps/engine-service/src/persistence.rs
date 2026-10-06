@@ -4,7 +4,7 @@
 use std::{
     env,
     fs::{self, File, OpenOptions},
-    io::{self, Write},
+    io::{self, BufWriter, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -17,6 +17,34 @@ static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 /// The returned owner commits explicitly or removes only its staged file on drop.
 /// Returns directory, creation, serialization, write or sync errors.
 pub(crate) fn stage_json(path: &Path, value: &impl Serialize) -> io::Result<StagedWrite> {
+    stage_json_limited(path, value, u64::MAX)
+}
+
+/// Serializes once, enforcing the complete on-disk byte limit, including the newline.
+/// A size or serialization failure cancels only the unpublished staging file.
+pub(crate) fn stage_json_limited(
+    path: &Path,
+    value: &impl Serialize,
+    limit: u64,
+) -> io::Result<StagedWrite> {
+    stage_file(path, |output| {
+        let mut writer = LimitedWriter {
+            inner: output,
+            remaining: limit,
+        };
+        serde_json::to_writer(&mut writer, value).map_err(|error| {
+            io::Error::new(error.io_error_kind().unwrap_or(io::ErrorKind::Other), error)
+        })?;
+        writer.write_all(b"\n")
+    })
+}
+
+/// Streams a document into a private, synced sibling file. The writer never
+/// observes the destination; errors retain the previously committed document.
+pub(crate) fn stage_file(
+    path: &Path,
+    write: impl FnOnce(&mut dyn Write) -> io::Result<()>,
+) -> io::Result<StagedWrite> {
     let parent = path
         .parent()
         .ok_or_else(|| io::Error::other("document needs a directory"))?;
@@ -36,13 +64,38 @@ pub(crate) fn stage_json(path: &Path, value: &impl Serialize) -> io::Result<Stag
     // Establish cleanup before serialization, and close the file before cleanup
     // on failure. Some platforms cannot unlink an open staged file.
     let result = (|| {
-        serde_json::to_writer(&mut file, value).map_err(io::Error::other)?;
-        file.write_all(b"\n")?;
+        let mut writer = BufWriter::with_capacity(64 * 1024, &mut file);
+        write(&mut writer)?;
+        writer.flush()?;
+        drop(writer);
         file.sync_all()
     })();
     drop(file);
     result?;
     Ok(staged)
+}
+
+struct LimitedWriter<W> {
+    inner: W,
+    remaining: u64,
+}
+
+impl<W: Write> Write for LimitedWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.len() as u64 > self.remaining {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "document exceeds size limit",
+            ));
+        }
+        let written = self.inner.write(bytes)?;
+        self.remaining -= written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 /// Sole owner of an unpublished file. Commit consumes the owner; cancellation
@@ -125,9 +178,7 @@ pub(crate) fn config_directory() -> io::Result<PathBuf> {
     }
     #[cfg(target_os = "macos")]
     let base = absolute_env("HOME").map(|home| home.join("Library/Application Support/MixRelay"));
-    #[cfg(target_os = "windows")]
-    let base = absolute_env("LOCALAPPDATA").map(|directory| directory.join("MixRelay"));
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(not(target_os = "macos"))]
     let base = absolute_env("XDG_CONFIG_HOME")
         .or_else(|| absolute_env("HOME").map(|home| home.join(".config")))
         .map(|directory| directory.join("mixrelay"));

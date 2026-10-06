@@ -2,7 +2,7 @@ use super::DeviceIo;
 use crate::{
     audio_buffer::{self, AudioBufferList},
     callback_clock::{mr_callback_clock_discontinuities, mr_callback_clock_record_values},
-    device_buffers::{mr_device_buffers_frames, mr_device_buffers_transfer},
+    device_buffers::{native_frames, native_transfer},
 };
 use mixrelay_pcm_ring::{mr_pcm_ring_discard, mr_pcm_ring_read_available, mr_pcm_ring_write};
 use std::{
@@ -25,7 +25,7 @@ pub(super) struct Timestamp {
 
 /// `CoreAudio`'s registered callback, also exercised by the native PCM benchmark.
 /// Each call contributes silence to every supplied output before validating its
-/// selected layout. Layout failure latches silence until control reconnects.
+/// selected layout. Layout failure or a format notification latches silence until reconnect.
 /// # Safety
 /// `CoreAudio` retains the exact `DeviceIo` context until unregister acknowledges drain.
 /// Calls for this registration are serialized. Native lists contain their complete
@@ -35,7 +35,7 @@ pub(super) struct Timestamp {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mr_device_io_process(
     _device: u32,
-    _now: *const c_void,
+    now: *const c_void,
     input: *const c_void,
     input_time: *const c_void,
     output: *mut c_void,
@@ -53,6 +53,9 @@ pub unsafe extern "C" fn mr_device_io_process(
     }
     // SAFETY: only the serialized IOProc borrows Callback while registered.
     let callback = unsafe { &mut *io.callback.get() };
+    if callback.watch_invalid.load(Acquire) {
+        return 0;
+    }
     let buffers = if io.selection.input {
         input
     } else {
@@ -64,7 +67,7 @@ pub unsafe extern "C" fn mr_device_io_process(
         return 0;
     }
     // SAFETY: full native metadata extent retained for this callback.
-    let frames = unsafe { mr_device_buffers_frames(buffers, callback.selection) };
+    let frames = unsafe { native_frames(buffers, callback.selection, &callback.formats) };
     if frames == 0 {
         io.progress.invalid.store(true, Release);
         return 0;
@@ -80,14 +83,21 @@ pub unsafe extern "C" fn mr_device_io_process(
                 output_time
             },
             frames,
+            now,
         );
     };
     io.progress.native_quantum.store(frames, Relaxed);
+    // A format listener can fire during metadata/clock handling. Recheck immediately before
+    // exposing native storage to the cached-codec hook or the F32 queue conversion.
+    if io.progress.invalid.load(Acquire) || callback.watch_invalid.load(Acquire) {
+        return 0;
+    }
     // SAFETY: hook/context installed before registration and retained by engine owner;
     // borrowed native buffers never escape the synchronous render dispatch.
-    let rendered = callback
-        .hook
-        .is_some_and(|hook| unsafe { hook(callback.context, input, output, frames) });
+    let rendered = callback.formats.all_float()
+        && callback
+            .hook
+            .is_some_and(|hook| unsafe { hook(callback.context, input, output, frames) });
     if !rendered && !io.selection.input {
         // Retire old output before the PCM hook can produce the new epoch's samples.
         unsafe { prepare_output(io, callback) };
@@ -97,6 +107,12 @@ pub unsafe extern "C" fn mr_device_io_process(
         && callback
             .pcm_hook
             .is_none_or(|hook| unsafe { hook(callback.pcm_context) });
+    if io.progress.invalid.load(Acquire) || callback.watch_invalid.load(Acquire) {
+        // A device notification can arrive after the hook has written this block.
+        // SAFETY: the callback still owns the full writable native output extent.
+        unsafe { silence(output.cast()) };
+        return 0;
+    }
     if admitted && !unsafe { transfer(io, callback, buffers, frames) } {
         io.progress.invalid.store(true, Release);
         return 0;
@@ -134,9 +150,10 @@ unsafe fn transfer(
     // SAFETY: scratch is disjoint from native PCM; callback owns the selected output
     // or immutable input. Geometry was admitted for at most MAX_FRAMES*channels.
     if !unsafe {
-        mr_device_buffers_transfer(
+        native_transfer(
             buffers,
             callback.selection,
+            &callback.formats,
             callback.scratch.as_mut_ptr(),
             io.selection.input,
         )
@@ -176,6 +193,7 @@ unsafe fn record_clock(
     callback: &mut super::Callback,
     timestamp: *const c_void,
     frames: u32,
+    now: *const c_void,
 ) {
     // SAFETY: exact CoreAudio AudioTimeStamp ABI, asserted below.
     let timestamp = unsafe { timestamp.cast::<Timestamp>().as_ref() };
@@ -196,6 +214,8 @@ unsafe fn record_clock(
     };
     let after = unsafe { mr_callback_clock_discontinuities(ptr::from_ref(&io.clock)) };
     if after != before {
+        // SAFETY: CoreAudio retains the same complete timestamp ABI as input/output time.
+        let now = unsafe { now.cast::<Timestamp>().as_ref() };
         let (previous_sample, previous_host, previous_frames) =
             callback.previous_timestamp.unwrap_or((f64::NAN, 0, 0));
         io.clock_evidence.publish(super::ClockBreak {
@@ -205,6 +225,8 @@ unsafe fn record_clock(
             previous_host,
             actual_host: host,
             flags: timestamp.map_or(0, |time| u64::from(time.flags)),
+            callback_host: now.map_or(0, |time| time.host),
+            callback_flags: now.map_or(0, |time| u64::from(time.flags)),
         });
     }
     callback.previous_timestamp = Some((sample, host, frames));

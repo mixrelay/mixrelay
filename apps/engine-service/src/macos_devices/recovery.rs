@@ -84,7 +84,8 @@ impl MacDevices {
         // Inventory errors abort preparation; an empty successful inventory is
         // different and leaves every desired selection explicitly offline.
         let (DeviceSet(devices, offline), next_cache) =
-            Self::prepare_device_set(cache, desired.clone(), self.format.current())?;
+            self.prepare_device_set(cache, desired.clone(), self.format.current())?;
+        self.require_preparation()?;
         if unchanged(cache, desired, &devices) {
             return Ok(());
         }
@@ -103,16 +104,22 @@ impl MacDevices {
     }
 
     pub(super) fn prepare_device_set(
+        &self,
         cache: &Cache,
         desired: BTreeMap<String, Spec>,
         format: mixrelay_audio_graph::RenderFormat,
     ) -> Result<(DeviceSet, Cache), HostAudioBackendError> {
+        self.require_preparation()?;
         let inventory = mixrelay_audio_io::macos::selected_devices(
             desired.values().map(|spec| &spec.selector),
         )?;
+        // Selection may wait for CoreAudio IPC; do not open a replacement after Quit.
+        self.require_preparation()?;
         let presence = Presence::observe(&desired, &inventory)?;
+        self.require_preparation()?;
         let group = prepare_group(cache, &presence.online)?;
-        let devices = Self::open_present(cache, &presence.online, group.as_ref(), format)?;
+        self.require_preparation()?;
+        let devices = self.open_present(cache, &presence.online, group.as_ref(), format)?;
         let next_cache = desired
             .into_iter()
             .map(|(id, spec)| {
@@ -124,6 +131,7 @@ impl MacDevices {
     }
 
     fn open_present(
+        &self,
         cache: &Cache,
         online: &BTreeMap<String, Spec>,
         group: Option<&Arc<Aggregate>>,
@@ -131,6 +139,7 @@ impl MacDevices {
     ) -> Result<BTreeMap<String, Arc<Device>>, HostAudioBackendError> {
         let mut devices = BTreeMap::new();
         for (id, spec) in online {
+            self.require_preparation()?;
             let selected = matches!(spec.selector, DeviceSelector::PersistentUid { .. })
                 .then(|| group.cloned())
                 .flatten();

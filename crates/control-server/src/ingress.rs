@@ -1,10 +1,11 @@
 use std::time::Duration;
 
+use crate::{ControlOperations, operations::IngressLease};
 use axum::{
     Json,
-    body::{Body, to_bytes},
-    extract::Request,
-    http::{StatusCode, header::CONNECTION},
+    body::{Body, HttpBody, to_bytes},
+    extract::{Extension, Request},
+    http::{HeaderValue, StatusCode, header::CONNECTION},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -15,8 +16,24 @@ const BODY_DEADLINE: Duration = Duration::from_secs(2);
 
 /// Bound ingress before handing ownership to a mutation. Once dispatched, a native
 /// transaction or recorder finalization must complete even while the server shuts down.
-pub(super) async fn read_body(request: Request, next: Next) -> Response {
-    let (parts, body) = request.into_parts();
+pub(super) async fn read_body(
+    Extension(operations): Extension<ControlOperations>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let (mut parts, body) = request.into_parts();
+    let lease = if body.is_end_stream() {
+        None
+    } else if let Some(lease) = operations.try_acquire_ingress() {
+        Some(lease)
+    } else {
+        let mut response =
+            crate::operations::admission_full_response(&Request::from_parts(parts, body));
+        response
+            .headers_mut()
+            .insert(CONNECTION, HeaderValue::from_static("close"));
+        return response;
+    };
     let bytes = match tokio::time::timeout(BODY_DEADLINE, to_bytes(body, BODY_LIMIT)).await {
         Ok(Ok(bytes)) => bytes,
         Ok(Err(error)) => return rejected(StatusCode::BAD_REQUEST, &error.to_string()),
@@ -27,8 +44,14 @@ pub(super) async fn read_body(request: Request, next: Next) -> Response {
             );
         }
     };
-    next.run(Request::from_parts(parts, Body::from(bytes)))
-        .await
+    if let Some(lease_for_request) = lease.clone() {
+        parts.extensions.insert::<IngressLease>(lease_for_request);
+    }
+    let response = next
+        .run(Request::from_parts(parts, Body::from(bytes)))
+        .await;
+    drop(lease);
+    response
 }
 
 fn rejected(status: StatusCode, reason: &str) -> Response {
@@ -47,7 +70,10 @@ fn rejected(status: StatusCode, reason: &str) -> Response {
 mod tests {
     use std::sync::Arc;
 
-    use axum::{Router, middleware, routing::post};
+    use axum::{
+        Router, middleware,
+        routing::{get, post},
+    };
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::{TcpListener, TcpStream},
@@ -59,15 +85,18 @@ mod tests {
 
     #[tokio::test]
     async fn incomplete_body_cannot_hold_graceful_shutdown_open() {
+        let operations = crate::ControlOperations::new();
         let entered = Arc::new(Notify::new());
         let observed = entered.clone();
-        let router = crate::router().layer(middleware::from_fn(move |request, next: Next| {
-            let observed = observed.clone();
-            async move {
-                observed.notify_one();
-                next.run(request).await
-            }
-        }));
+        let router = crate::router(operations.clone()).layer(middleware::from_fn(
+            move |request, next: Next| {
+                let observed = observed.clone();
+                async move {
+                    observed.notify_one();
+                    next.run(request).await
+                }
+            },
+        ));
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
         let address = listener.local_addr().expect("address");
         let (shutdown, stopped) = oneshot::channel();
@@ -100,6 +129,87 @@ mod tests {
                 .expect("HTTP response")
                 .starts_with("HTTP/1.1 408")
         );
+        let restored: Vec<_> = (0..8)
+            .map(|_| {
+                operations
+                    .try_acquire_ingress()
+                    .expect("timeout releases ingress")
+            })
+            .collect();
+        assert_eq!(restored.len(), 8);
+    }
+
+    #[tokio::test]
+    async fn ninth_body_is_rejected_before_backend_admission() {
+        async fn rejected_backend() -> StatusCode {
+            panic!("rejected body reached backend")
+        }
+        let operations = crate::ControlOperations::new();
+        let held: Vec<_> = (0..8)
+            .map(|_| operations.try_acquire_ingress().expect("budget permit"))
+            .collect();
+        let router = Router::new()
+            .route("/api/v1/graphs", post(rejected_backend))
+            .layer(middleware::from_fn(read_body))
+            .layer(axum::Extension(operations));
+        let response = router
+            .oneshot(
+                Request::post("/api/v1/graphs")
+                    .body(Body::from("{}"))
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[CONNECTION], "close");
+        let bytes = to_bytes(response.into_body(), 4096).await.expect("body");
+        let body: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON");
+        assert_eq!(body["parameters"]["catalogOutcome"], "not_applied");
+        drop(held);
+    }
+
+    #[tokio::test]
+    async fn disconnected_incomplete_body_releases_ingress() {
+        let operations = crate::ControlOperations::new();
+        let held: Vec<_> = (0..7)
+            .map(|_| operations.try_acquire_ingress().expect("budget permit"))
+            .collect();
+        let router = crate::router(operations.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
+        let address = listener.local_addr().expect("address");
+        let server = tokio::spawn(async move {
+            axum::serve(crate::bounded_listener(listener), router)
+                .await
+                .expect("server");
+        });
+        let mut client = TcpStream::connect(address).await.expect("client");
+        client
+            .write_all(
+                b"PUT /api/v1/graphs HTTP/1.1\r\nHost: localhost\r\nContent-Length: 100\r\n\r\n{",
+            )
+            .await
+            .expect("partial body");
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while operations.try_acquire_ingress().is_some() {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("body admitted");
+        drop(client);
+        let released = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if let Some(lease) = operations.try_acquire_ingress() {
+                    break lease;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await;
+        server.abort();
+        let _ = server.await;
+        assert!(released.is_ok(), "disconnected body must release admission");
+        drop(held);
     }
 
     #[tokio::test]
@@ -117,7 +227,8 @@ mod tests {
                     StatusCode::NO_CONTENT
                 }),
             )
-            .layer(middleware::from_fn(read_body));
+            .layer(middleware::from_fn(read_body))
+            .layer(axum::Extension(crate::ControlOperations::new()));
         let task = tokio::spawn(
             router.oneshot(
                 Request::post("/mutation")
@@ -136,10 +247,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn empty_body_bypasses_full_ingress_budget() {
+        let operations = crate::ControlOperations::new();
+        let held: Vec<_> = (0..8)
+            .map(|_| operations.try_acquire_ingress().expect("budget permit"))
+            .collect();
+        let router = Router::new()
+            .route("/health", get(|| async { StatusCode::NO_CONTENT }))
+            .layer(middleware::from_fn(read_body))
+            .layer(axum::Extension(operations));
+        let response = router
+            .oneshot(
+                Request::get("/health")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        drop(held);
+    }
+
+    #[tokio::test]
+    async fn detached_operation_retains_ingress_lease_until_completion() {
+        let operations = crate::ControlOperations::new();
+        let lease = operations.try_acquire_ingress().expect("budget permit");
+        let held: Vec<_> = (0..7)
+            .map(|_| operations.try_acquire_ingress().expect("budget permit"))
+            .collect();
+        let started = Arc::new(Notify::new());
+        let finish = Arc::new(Notify::new());
+        let handler_started = started.clone();
+        let handler_finish = finish.clone();
+        let router = Router::new()
+            .route(
+                "/work",
+                post(move || async move {
+                    handler_started.notify_one();
+                    handler_finish.notified().await;
+                    StatusCode::NO_CONTENT
+                }),
+            )
+            .layer(middleware::from_fn(crate::operations::dispatch))
+            .layer(axum::Extension(operations.clone()));
+        let mut request = Request::post("/work").body(Body::empty()).expect("request");
+        request.extensions_mut().insert(lease);
+        let task = tokio::spawn(router.oneshot(request));
+        started.notified().await;
+        task.abort();
+        assert!(task.await.expect_err("observer aborted").is_cancelled());
+        assert!(
+            operations.try_acquire_ingress().is_none(),
+            "detached work must retain its ingress permit"
+        );
+        finish.notify_one();
+        operations.drain().await;
+        assert!(
+            operations.try_acquire_ingress().is_some(),
+            "completed detached work must release its ingress permit"
+        );
+        drop(held);
+    }
+
+    #[tokio::test]
     async fn non_reading_client_cannot_hold_graceful_shutdown_open() {
         let router = Router::new()
             .route("/large", post(|| async { vec![b'x'; 32 * 1024 * 1024] }))
-            .layer(middleware::from_fn(read_body));
+            .layer(middleware::from_fn(read_body))
+            .layer(axum::Extension(crate::ControlOperations::new()));
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
         let address = listener.local_addr().expect("address");
         let (shutdown, stopped) = oneshot::channel();
@@ -194,7 +369,8 @@ mod tests {
                     StatusCode::NO_CONTENT
                 }),
             )
-            .layer(middleware::from_fn(read_body));
+            .layer(middleware::from_fn(read_body))
+            .layer(axum::Extension(crate::ControlOperations::new()));
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
         let address = listener.local_addr().expect("address");
         let (shutdown, stopped) = oneshot::channel();

@@ -12,11 +12,14 @@ import type {
   GraphRuntimeStatus,
   MeterSnapshot,
   MixRelayStatus,
+  NodeControlResponse,
   ProcessorEditorFrame,
   ProcessorEditorInput,
   ProcessorEditorStatus,
   ProcessorParameterUpdateResponse,
+  ProcessorRetryRequest,
   RecorderRequest,
+  RecorderSettings,
   RecorderStatus,
   RuntimeGraphDocument,
   RuntimeGraphNode,
@@ -42,6 +45,27 @@ export interface StorybookControlState {
 }
 
 export class StorybookMockControlPort implements ControlPort {
+  private readonly recorderSettings = new Map<string, RecorderSettings>();
+
+  public async recordingSettings(graphId: string, nodeId: string): Promise<RecorderSettings> {
+    return {
+      ...(this.recorderSettings.get(JSON.stringify([graphId, nodeId])) ?? {
+        folder: '/Desktop',
+        sampleRate: null,
+        encoding: 'pcm16',
+      }),
+    };
+  }
+
+  public async setRecordingSettings(
+    graphId: string,
+    nodeId: string,
+    settings: RecorderSettings,
+    _expectedRevision: number,
+  ): Promise<RecorderSettings> {
+    this.recorderSettings.set(JSON.stringify([graphId, nodeId]), { ...settings });
+    return { ...settings };
+  }
   public async getNodeControls(graphId: string): Promise<import('./types').GraphNodeControls> {
     const document =
       graphId === this.activeGraphId ? this.state.graph : this.savedGraphs.get(graphId)?.document;
@@ -63,7 +87,7 @@ export class StorybookMockControlPort implements ControlPort {
     graphId: string,
     nodeId: string,
     request: import('./types').NodeControlRequest,
-  ): Promise<GraphApplyResponse> {
+  ): Promise<NodeControlResponse> {
     const target = this.state.graph.nodes.find((node) => node.id === nodeId);
     if (
       graphId !== this.activeGraphId ||
@@ -80,7 +104,7 @@ export class StorybookMockControlPort implements ControlPort {
         request.gainDb > 12)
     )
       throw new Error('graph_invalid');
-    return this.applyGraph({
+    const application = await this.applyGraph({
       ...this.state.graph,
       revision: request.expectedRevision + 1,
       nodes: this.state.graph.nodes.map((node) =>
@@ -99,6 +123,7 @@ export class StorybookMockControlPort implements ControlPort {
           : node,
       ),
     });
+    return { ...application, requiresGraphReload: false };
   }
   public async recorderStatus(_graphId: string, _nodeId: string): Promise<RecorderStatus> {
     return {
@@ -268,6 +293,46 @@ export class StorybookMockControlPort implements ControlPort {
 
   public async getProcessors(): Promise<ExternalProcessorCatalog> {
     return this.state.processors ?? { processors: [], protocolVersion: 1 };
+  }
+
+  public async retryProcessor(request: ProcessorRetryRequest): Promise<GraphApplyResponse> {
+    const failed = this.state.status.failedProcessors ?? [];
+    const target = this.state.graph.nodes.find((node) => node.id === request.nodeId);
+    if (
+      request.graphId !== this.activeGraphId ||
+      request.expectedRevision !== this.state.graph.revision ||
+      request.expectedCatalogRevision !== this.catalogRevision
+    )
+      throw new Error('graph_revision_stale');
+    if (!target) throw new Error('node_not_found');
+    if (target.type !== 'provider' || target.control?.enabled === false)
+      throw new Error('node_disabled');
+    if (
+      !failed.some(
+        (entry) =>
+          entry.graphId === request.graphId &&
+          entry.nodeId === request.nodeId &&
+          entry.instanceId === request.expectedInstanceId,
+      )
+    )
+      throw new Error('processor_instance_stale');
+
+    const revision = this.state.graph.revision + 1;
+    this.state.graph = { ...this.state.graph, revision };
+    const saved = this.savedGraphs.get(this.activeGraphId);
+    if (saved) saved.document = structuredClone(this.state.graph);
+    this.state.graphStatus = {
+      activeRevision: revision,
+      protocolVersion: 1,
+      submittedRevision: revision,
+    };
+    this.state.status.failedProcessors = failed.filter(
+      (entry) =>
+        entry.graphId !== request.graphId ||
+        entry.nodeId !== request.nodeId ||
+        entry.instanceId !== request.expectedInstanceId,
+    );
+    return { protocolVersion: 1, revision, state: 'active' };
   }
 
   public async getProcessorEditor(nodeId: string): Promise<ProcessorEditorStatus> {

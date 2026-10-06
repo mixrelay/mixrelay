@@ -17,7 +17,11 @@ fn main() {
 
 #[cfg(target_os = "macos")]
 mod qualification {
-    use std::{path::PathBuf, process::Command, sync::Arc};
+    use std::{
+        path::{Path, PathBuf},
+        process::Command,
+        sync::Arc,
+    };
 
     use mixrelay_audio_engine::{BlockProcessor, ProcessorExchange, RenderPlan};
     use mixrelay_audio_graph::{
@@ -30,7 +34,7 @@ mod qualification {
     };
     use mixrelay_control_protocol::{
         DriverState, GraphApplyRequest, GraphCatalogAction, GraphCatalogRequest,
-        GraphProcessorParameterChange, ProcessorEditorRequest, ProcessorParameterUpdate,
+        GraphProcessorParameterChange, ProcessorParameterUpdate,
     };
     use mixrelay_control_server::ControlBackend;
     use mixrelay_engine_service::{
@@ -41,6 +45,7 @@ mod qualification {
         PLUGIN_PROBE_ARGUMENT, PLUGIN_SCAN_ARGUMENT, PLUGIN_WORKER_ARGUMENT, ProcessorCatalog,
         RackFormat, RackLocator,
     };
+    use mixrelay_processor_state::{StateRef, StateStore};
 
     const FIXTURE: &str = "aufx:lmtr:appl";
     const FORMAT: RenderFormat = RenderFormat {
@@ -80,7 +85,7 @@ mod qualification {
 
     fn scan(format: Option<&str>) -> Result<(), String> {
         if format != Some("au") {
-            println!("[]");
+            println!("{{\"locators\":[],\"pathFailures\":[]}}");
             return Ok(());
         }
         let output = Command::new(std::env::current_exe().map_err(|e| e.to_string())?)
@@ -90,10 +95,13 @@ mod qualification {
         if !output.status.success() {
             return Err("AU enumeration failed".into());
         }
-        let locators: Vec<serde_json::Value> =
+        let report: serde_json::Value =
             serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
+        let locators = report["locators"]
+            .as_array()
+            .ok_or("AU enumeration did not return scanner locators")?;
         let selected: Vec<_> = locators
-            .into_iter()
+            .iter()
             .filter(|value| value["uniqueId"] == FIXTURE && value["vendor"] == "Apple")
             .collect();
         if selected.len() != 1 {
@@ -101,7 +109,7 @@ mod qualification {
         }
         println!(
             "{}",
-            serde_json::to_string(&selected).map_err(|e| e.to_string())?
+            serde_json::json!({"locators": selected, "pathFailures": []})
         );
         Ok(())
     }
@@ -147,6 +155,17 @@ mod qualification {
         current: Box<BlockProcessor>,
         exchange: Arc<ProcessorExchange>,
     }
+    struct NativeState {
+        reference: StateRef,
+        bytes: Vec<u8>,
+    }
+    struct AppleFixture {
+        catalog: ProcessorCatalog,
+        type_id: String,
+        display_name: String,
+        parameter: u32,
+    }
+
     impl FixtureEngine {
         fn new(catalog: ProcessorCatalog) -> Result<Self, String> {
             let document = GraphDocument::new(1, vec![], vec![]);
@@ -209,7 +228,7 @@ mod qualification {
                 .unwrap();
             self.activate();
         }
-        fn state(&self) -> String {
+        fn state(&self, store: &StateStore) -> NativeState {
             let graph = self.controller.graph();
             let provider = graph
                 .nodes
@@ -223,19 +242,20 @@ mod qualification {
                 provider.parameters.get("parameterValues").is_none(),
                 "native checkpoint must replace stale overlays"
             );
-            provider.parameters["stateBase64"]
-                .as_str()
-                .expect("native ClassInfo state")
-                .to_owned()
+            let reference: StateRef =
+                serde_json::from_value(provider.parameters["stateRef"].clone())
+                    .expect("validated native state reference");
+            let bytes = store.read(&reference).expect("verified native state blob");
+            assert_eq!(
+                u64::try_from(bytes.len()).expect("state length fits u64"),
+                reference.byte_length(),
+                "resolved state length must match its content reference"
+            );
+            NativeState { reference, bytes }
         }
     }
 
-    fn qualify() -> Result<(), String> {
-        let config =
-            PathBuf::from(std::env::var_os("MIXRELAY_CONFIG_DIR").ok_or("private config missing")?);
-        if !config.is_absolute() || config.join("graphs.json").exists() {
-            return Err("expected a new private catalog directory".into());
-        }
+    fn discover_apple_fixture() -> AppleFixture {
         let catalog = ProcessorCatalog::discover();
         let found = catalog.protocol_catalog();
         assert_eq!(found.processors.len(), 1);
@@ -252,59 +272,99 @@ mod qualification {
             .find(|p| !p.is_read_only)
             .expect("writable limiter parameter")
             .id;
-        let mut engine = FixtureEngine::new(catalog.clone())?;
-        engine
-            .controller
-            .apply_graph(GraphDocument::new(
-                2,
-                vec![NodeSpec {
-                    control: mixrelay_audio_graph::NodeControl::default(),
-                    id: NodeId::from("effect"),
-                    label: Some("Owned Apple AU fixture".into()),
-                    config: NodeConfig::Provider(ProviderNodeConfig {
-                        ports: None,
-                        type_id: descriptor.type_id.as_str().into(),
-                        parameters: serde_json::json!({}),
-                    }),
-                }],
-                vec![],
-            ))
-            .unwrap();
-        engine.activate();
-        edit_and_close_processor(&engine, parameter);
-        let state_a = engine.state();
-        assert!(!state_a.is_empty());
-        exercise_switch_and_undo(&mut engine, &descriptor.type_id, parameter, &state_a);
-        engine.controller.start_control_maintenance()?.finish()?;
+        AppleFixture {
+            catalog,
+            type_id: descriptor.type_id.as_str().to_owned(),
+            display_name: descriptor.display_name,
+            parameter,
+        }
+    }
+
+    fn verify_persisted_blob(
+        config: &Path,
+        store: &StateStore,
+        expected: &NativeState,
+    ) -> Result<(), String> {
         let disk: serde_json::Value = serde_json::from_slice(
             &std::fs::read(config.join("graphs.json")).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
+        let disk_reference: StateRef = serde_json::from_value(
+            disk["graphs"][0]["document"]["nodes"][0]["config"]["parameters"]["stateRef"].clone(),
+        )
+        .map_err(|error| format!("invalid catalog state reference: {error}"))?;
+        assert_eq!(disk_reference, expected.reference);
         assert_eq!(
-            disk["graphs"][0]["document"]["nodes"][0]["config"]["parameters"]["stateBase64"],
-            state_a
+            store.read(&disk_reference).map_err(|e| e.to_string())?,
+            expected.bytes
         );
+        Ok(())
+    }
+
+    fn qualify() -> Result<(), String> {
+        let config =
+            PathBuf::from(std::env::var_os("MIXRELAY_CONFIG_DIR").ok_or("private config missing")?);
+        if !config.is_absolute() || config.join("graphs.json").exists() {
+            return Err("expected a new private catalog directory".into());
+        }
+        let store = StateStore::new(config.join("graphs.json").with_extension("states"));
+        let AppleFixture {
+            catalog,
+            type_id,
+            display_name,
+            parameter,
+        } = discover_apple_fixture();
+        let mut engine = FixtureEngine::new(catalog.clone())?;
+        engine
+            .controller
+            .apply_graph_request(
+                GraphDocument::new(
+                    2,
+                    vec![NodeSpec {
+                        control: mixrelay_audio_graph::NodeControl::default(),
+                        id: NodeId::from("effect"),
+                        label: Some("Owned Apple AU fixture".into()),
+                        config: NodeConfig::Provider(ProviderNodeConfig {
+                            ports: None,
+                            type_id: type_id.as_str().into(),
+                            parameters: serde_json::json!({}),
+                        }),
+                    }],
+                    vec![],
+                )
+                .into(),
+            )
+            .unwrap();
+        engine.activate();
+        edit_and_checkpoint_processor(&engine, parameter);
+        let state_a = engine.state(&store);
+        assert!(!state_a.bytes.is_empty());
+        exercise_switch_and_undo(&mut engine, &type_id, parameter, &store, &state_a);
+        engine.controller.start_control_maintenance()?.finish()?;
+        verify_persisted_blob(&config, &store, &state_a)?;
         drop(engine);
         let restarted = FixtureEngine::new(catalog)?;
         restarted
             .controller
             .checkpoint_processor_state(None)
             .unwrap();
+        let restarted_state = restarted.state(&store);
+        assert_eq!(restarted_state.reference, state_a.reference);
         assert_eq!(
-            restarted.state(),
-            state_a,
+            restarted_state.bytes, state_a.bytes,
             "durable catalog restart must restore native state"
         );
         println!(
-            "PASS Apple {} parameter={} native_state_base64_bytes={} close/checkpoint, graph switch, explicit Undo, monitor shutdown, fresh controller+worker restart",
-            descriptor.display_name,
+            "PASS Apple {} parameter={} native_state_bytes={} native_state_sha256={} explicit checkpoint, graph switch, explicit Undo, monitor shutdown, fresh controller+worker restart (state bytes only; no editor or PCM)",
+            display_name,
             parameter,
-            state_a.len()
+            state_a.reference.byte_length(),
+            state_a.reference.sha256()
         );
         Ok(())
     }
 
-    fn edit_and_close_processor(engine: &FixtureEngine, parameter: u32) {
+    fn edit_and_checkpoint_processor(engine: &FixtureEngine, parameter: u32) {
         let expected_revision = engine.controller.graph().revision;
         engine
             .controller
@@ -319,13 +379,7 @@ mod qualification {
             .unwrap();
         engine
             .controller
-            .set_processor_editor(
-                "effect",
-                ProcessorEditorRequest {
-                    expected_revision,
-                    open: false,
-                },
-            )
+            .checkpoint_processor_state(Some("effect"))
             .unwrap();
     }
 
@@ -333,7 +387,8 @@ mod qualification {
         engine: &mut FixtureEngine,
         type_id: &str,
         parameter: u32,
-        state_a: &str,
+        store: &StateStore,
+        state_a: &NativeState,
     ) {
         engine.mutate(GraphCatalogAction::Create {
             name: "Empty isolation fixture".into(),
@@ -342,10 +397,11 @@ mod qualification {
             id: "graph-1".into(),
         });
         engine.controller.checkpoint_processor_state(None).unwrap();
+        let selected = engine.state(store);
+        assert_eq!(selected.reference, state_a.reference);
         assert_eq!(
-            engine.state(),
-            state_a,
-            "new isolated worker must restore ClassInfo exactly"
+            selected.bytes, state_a.bytes,
+            "selected worker must restore native state exactly"
         );
         engine
             .controller
@@ -359,10 +415,11 @@ mod qualification {
             )
             .unwrap();
         engine.controller.checkpoint_processor_state(None).unwrap();
+        let edited = engine.state(store);
+        assert_ne!(edited.reference, state_a.reference);
         assert_ne!(
-            engine.state(),
-            state_a,
-            "actual native parameter edit must change native state bytes"
+            edited.bytes, state_a.bytes,
+            "native parameter edit must change stored state bytes"
         );
         let mut proposed = engine.controller.graph();
         proposed.revision += 1;
@@ -380,9 +437,10 @@ mod qualification {
             .unwrap();
         engine.activate();
         engine.controller.checkpoint_processor_state(None).unwrap();
+        let undo = engine.state(store);
+        assert_eq!(undo.reference, state_a.reference);
         assert_eq!(
-            engine.state(),
-            state_a,
+            undo.bytes, state_a.bytes,
             "explicit Undo delta must restore native parameter"
         );
     }

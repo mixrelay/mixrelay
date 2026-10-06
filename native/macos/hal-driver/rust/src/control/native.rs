@@ -38,6 +38,13 @@ unsafe extern "C" {
     fn xpc_connection_send_message(connection: Handle, message: Handle);
     fn xpc_get_type(message: Handle) -> *const c_void;
     fn xpc_release(object: Handle);
+    fn xpc_dictionary_create(
+        keys: *const *const c_char,
+        values: *const Handle,
+        count: usize,
+    ) -> Handle;
+    fn xpc_dictionary_set_uint64(object: Handle, key: *const c_char, value: u64);
+    fn xpc_dictionary_set_string(object: Handle, key: *const c_char, value: *const c_char);
     fn mr_hal_control_install_handler(
         connection: Handle,
         owner: *const c_void,
@@ -144,17 +151,12 @@ impl Native {
 impl Backend for Native {
     type Connection = Connection;
 
-    fn desktop_active(&self) -> bool {
-        use mixrelay_macos_transport::app_lifecycle::{APP_LEASE, is_owned};
-        is_owned(APP_LEASE).unwrap_or(false)
-    }
-
     fn connect(&self, owner: *const c_void, generation: u64) -> Option<Connection> {
         // SAFETY: the owner's only caller is Control::open on this queue. Its
         // address is process-lifetime stable before the connection can be resumed.
         let connection = NonNull::new(unsafe {
             xpc_connection_create_mach_service(
-                c"io.mixrelay.audio.engine".as_ptr(),
+                c"io.mixrelay.audio.driver".as_ptr(),
                 self.queue.0.as_ptr(),
                 0,
             )
@@ -179,6 +181,22 @@ impl Backend for Native {
     fn send(&self, connection: &Connection, request: Request) {
         let message = match request {
             Request::Inventory => mr_hal_control_create_inventory_request(),
+            Request::Acknowledged { generation } => {
+                // SAFETY: static keys/operation are copied into a new dictionary.
+                unsafe {
+                    let message = xpc_dictionary_create(ptr::null(), ptr::null(), 0);
+                    if !message.is_null() {
+                        xpc_dictionary_set_uint64(message, c"version".as_ptr(), 1);
+                        xpc_dictionary_set_string(
+                            message,
+                            c"operation".as_ptr(),
+                            c"inventory_ack".as_ptr(),
+                        );
+                        xpc_dictionary_set_uint64(message, c"generation".as_ptr(), generation);
+                    }
+                    message
+                }
+            }
             Request::Replacement {
                 endpoint,
                 generation,

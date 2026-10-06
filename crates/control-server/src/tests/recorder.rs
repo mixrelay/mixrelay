@@ -14,7 +14,7 @@ async fn recorder_routes_preserve_graph_identity_and_typed_file_options() {
     let backend = backend();
     let path = "/api/v1/graphs/graph%20B/recorders/recorder%201";
     let (status, body) = response_json(
-        router_with_backend(backend.clone()),
+        router_with_backend(backend.clone(), ControlOperations::new()),
         Request::get(path).body(Body::empty()).unwrap(),
     )
     .await;
@@ -22,7 +22,7 @@ async fn recorder_routes_preserve_graph_identity_and_typed_file_options() {
     assert_eq!(body["path"], "graph B/recorder 1");
     let request = json!({"expectedRevision":5,"request":{"action":"record","path":"/recording.wav","sampleRate":96_000,"encoding":"pcm24"}});
     let (status, _) = response_json(
-        router_with_backend(backend.clone()),
+        router_with_backend(backend.clone(), ControlOperations::new()),
         Request::put(path)
             .header("content-type", "application/json")
             .body(Body::from(request.to_string()))
@@ -47,7 +47,7 @@ async fn malformed_recorder_controls_never_reach_backend() {
     ] {
         let backend = backend();
         let (status, _) = response_json(
-            router_with_backend(backend.clone()),
+            router_with_backend(backend.clone(), ControlOperations::new()),
             Request::put("/api/v1/graphs/a/recorders/b")
                 .header("content-type", "application/json")
                 .body(Body::from(body.to_string()))

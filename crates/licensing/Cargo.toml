@@ -1,0 +1,24 @@
+[package]
+name = "mixrelay-licensing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Public License API only; never embed a merchant API credential in a binary.
+reqwest = { workspace = true, features = ["form", "rustls"] }
+secrecy = { version = "0.10.3", features = ["serde"] }
+# The same native credential entry is used by the desktop and unprivileged removers.
+keyring = { version = "3.6.3", features = ["apple-native", "sync-secret-service", "crypto-rust", "vendored"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "time"] }

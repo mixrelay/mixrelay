@@ -134,3 +134,44 @@ fn admitted_format_query_is_allocation_free() {
     });
     assert_eq!(measured.count_total, 0);
 }
+
+#[test]
+fn native_pcm_formats_are_exact_packed_little_endian_streams() {
+    for (bits, bytes, pcm) in [
+        (16, 2, SampleFormat::Signed16),
+        (24, 3, SampleFormat::Signed24),
+        (32, 4, SampleFormat::Signed32),
+    ] {
+        for planar in [false, true] {
+            let valid = StreamFormat {
+                flags: 0x0c | if planar { 0x20 } else { 0x00 },
+                bits,
+                frame_bytes: bytes * if planar { 1 } else { 2 },
+                ..format(2, 48000.0, planar)
+            };
+            let mut state = StreamFormats::default();
+            assert_eq!(codec(&valid), Some(pcm));
+            assert!(state.accept(&valid, 64));
+            assert!(!state.into_layout().all_float());
+            for flags in [
+                valid.flags | 0x02,
+                valid.flags | 0x10,
+                valid.flags | 0x01,
+                valid.flags & !0x08,
+                valid.flags | 0x80,
+            ] {
+                let mut rejected = StreamFormats::default();
+                assert!(!rejected.accept(&StreamFormat { flags, ..valid }, 64));
+                assert_eq!(rejected.channels, 0);
+            }
+            let mut rejected = StreamFormats::default();
+            assert!(!rejected.accept(
+                &StreamFormat {
+                    frame_bytes: valid.frame_bytes + 1,
+                    ..valid
+                },
+                64
+            ));
+        }
+    }
+}

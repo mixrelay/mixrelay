@@ -1,5 +1,7 @@
 use super::*;
 
+mod native_pcm;
+
 #[repr(C)]
 struct Fixture {
     count: u32,

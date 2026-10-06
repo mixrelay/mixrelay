@@ -3,19 +3,85 @@ import type { ReactNode } from 'react';
 import { I18nextProvider } from 'react-i18next';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { AudioGraphNodeMenuItem } from '../../core/audio-graph/AudioGraphCanvas';
 import type { AudioGraphModel, AudioGraphNode } from '../../core/audio-graph/model';
 import {
   type AudioSessionStatus,
   type ControlPort,
   ControlPortError,
   type ExternalProcessorDescriptor,
+  type ProviderPorts,
   type RuntimeGraphDocument,
 } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import type { VirtualEndpointUpdate } from './model';
 import { RoutingWorkspace } from './RoutingWorkspace';
-import { duplexReference, virtualPolicy, virtualSpec } from './virtualEndpointFixtures';
+import {
+  duplexReference,
+  unknownNativeFormats,
+  virtualPolicy,
+  virtualSpec,
+} from './virtualEndpointFixtures';
+
+const stereoProcessorLayout: ProviderPorts = {
+  layoutId: 'layout-v1:stereo',
+  inputs: [
+    {
+      id: 'audio',
+      name: 'Main Input',
+      kind: 'main',
+      channels: 2,
+      channelFormat: 'stereo',
+    },
+  ],
+  outputs: [
+    {
+      id: 'audio',
+      name: 'Main Output',
+      kind: 'main',
+      channels: 2,
+      channelFormat: 'stereo',
+    },
+  ],
+};
+
+function PanViewportButton({
+  onChange,
+}: {
+  onChange?: (viewport: { x: number; y: number; zoom: number }) => void;
+}) {
+  return (
+    <button type="button" onClick={() => onChange?.({ x: 56, y: -34, zoom: 1.1 })}>
+      pan viewport
+    </button>
+  );
+}
+
+function RateUpdateButtons({
+  model,
+  onChange,
+}: {
+  model: AudioGraphModel;
+  onChange?: (nodeId: string, value: VirtualEndpointUpdate) => void;
+}) {
+  return model.nodes.map((node) => (
+    <button
+      key={node.id}
+      type="button"
+      onClick={() =>
+        onChange?.(node.id, {
+          displayName: node.appearance.title,
+          renderChannels: 2,
+          captureChannels: 2,
+          sampleRate: 44100,
+        })
+      }
+    >
+      rate {node.id}
+    </button>
+  ));
+}
 
 vi.mock('../../core/audio-graph/AudioGraphCanvas', () => ({
   AudioGraphCanvas: ({
@@ -25,6 +91,7 @@ vi.mock('../../core/audio-graph/AudioGraphCanvas', () => ({
     onNodeGainChange,
     onNodeParameterChange,
     onNodeEndpointChange,
+    onViewportChange,
     viewport,
     nodeMenuItems,
     onAddNode,
@@ -36,6 +103,7 @@ vi.mock('../../core/audio-graph/AudioGraphCanvas', () => ({
     onNodeGainChange?: (nodeId: string, gainDb: number) => void;
     onNodeParameterChange?: (nodeId: string, parameterId: string, value: number) => void;
     onNodeEndpointChange?: (nodeId: string, value: VirtualEndpointUpdate) => void;
+    onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void;
     viewport?: { x: number; y: number; zoom: number };
     nodeMenuItems?: readonly unknown[];
     onAddNode?: (itemId: string, position: { x: number; y: number }) => void;
@@ -58,25 +126,11 @@ vi.mock('../../core/audio-graph/AudioGraphCanvas', () => ({
       >
         share fixture source
       </button>
-      {model.nodes.map((node) => (
-        <button
-          key={node.id}
-          type="button"
-          onClick={() =>
-            onNodeEndpointChange?.(node.id, {
-              displayName: node.appearance.title,
-              renderChannels: 2,
-              captureChannels: 2,
-              sampleRate: 44100,
-            })
-          }
-        >
-          rate {node.id}
-        </button>
-      ))}
+      <RateUpdateButtons model={model} onChange={onNodeEndpointChange} />
       <button type="button" onClick={() => onNodeGainChange?.('input', -6)}>
         change gain
       </button>
+      <PanViewportButton onChange={onViewportChange} />
       <button
         type="button"
         disabled={
@@ -229,6 +283,10 @@ it.each([true, false])(
 
 function port(overrides: Partial<ControlPort> = {}): ControlPort {
   return {
+    recordingSettings: vi
+      .fn()
+      .mockResolvedValue({ folder: '/Desktop', sampleRate: null, encoding: 'pcm16' }),
+    setRecordingSettings: vi.fn().mockImplementation(async (_graph, _node, settings) => settings),
     getProcessorEditorFrame: vi.fn().mockRejectedValue(new Error('No native frame fixture')),
     sendProcessorEditorInput: vi.fn().mockResolvedValue(undefined),
     recorderStatus: vi.fn().mockResolvedValue({
@@ -328,6 +386,61 @@ function deferred<T>() {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+it('uses the native editor window without polling a duplicate graph image', async () => {
+  await i18n.changeLanguage('en');
+  const frame = vi.fn();
+  const editor = vi.fn().mockImplementation((nodeId: string) =>
+    Promise.resolve({
+      protocolVersion: 1,
+      nodeId,
+      state: 'open',
+      width: 500,
+      height: 200,
+      resizable: false,
+      failure: null,
+    }),
+  );
+  const controlPort = port({
+    getGraph: vi.fn().mockResolvedValue({
+      ...document,
+      edges: [],
+      nodes: [
+        {
+          id: 'processor-1',
+          label: 'Vendor',
+          type: 'provider',
+          config: { typeId: 'vst3:vendor', parameters: {} },
+        },
+      ],
+    }),
+    getGraphStatus: vi
+      .fn()
+      .mockResolvedValue({ protocolVersion: 1, activeRevision: 1, submittedRevision: 1 }),
+    getProcessors: vi.fn().mockResolvedValue({
+      protocolVersion: 1,
+      processors: [
+        {
+          typeId: 'vst3:vendor',
+          displayName: 'Vendor',
+          format: 'vst3',
+          hasEditor: true,
+          layouts: [stereoProcessorLayout],
+          defaultLayoutId: stereoProcessorLayout.layoutId,
+          vendor: 'Vendor',
+          version: '1',
+          parameters: [],
+        },
+      ],
+    }),
+    getProcessorEditor: editor,
+    getProcessorEditorFrame: frame,
+  });
+  renderWorkspace(controlPort);
+  await waitFor(() => expect(editor).toHaveBeenCalledWith('processor-1'));
+  expect(frame).not.toHaveBeenCalled();
+  expect(screen.queryByRole('application')).not.toBeInTheDocument();
 });
 
 it('adds Recorder from the output menu as a graph node without file settings', async () => {
@@ -479,6 +592,49 @@ it('applies recorder channel edits through graph history and restores the width 
 });
 
 describe('RoutingWorkspace processor discovery evidence', () => {
+  it('places explicit plug-in layouts beside built-in processors and catalog actions', async () => {
+    await i18n.changeLanguage('en');
+    const source = port({
+      getProcessors: vi.fn().mockResolvedValue({
+        protocolVersion: 1,
+        processors: [
+          {
+            typeId: 'vst3:vendor:effect',
+            displayName: 'Effect',
+            vendor: 'Vendor',
+            version: '1',
+            format: 'vst3',
+            hasEditor: false,
+            layouts: [
+              stereoProcessorLayout,
+              { ...stereoProcessorLayout, layoutId: 'layout-v1:alternative' },
+            ],
+            defaultLayoutId: stereoProcessorLayout.layoutId,
+            parameters: [],
+          },
+        ],
+      }),
+    });
+    renderWorkspace(source);
+    const menu = await screen.findByTestId('node-menu');
+    await waitFor(() => expect(menu).toHaveTextContent('Effect · Stereo · 2'));
+    const items = JSON.parse(menu.textContent ?? '[]') as AudioGraphNodeMenuItem[];
+    const processorItems = items.find((item) => item.id === 'processor')?.children ?? [];
+    expect(processorItems.every((item) => item.children === undefined)).toBe(true);
+    expect(processorItems.map((item) => item.id)).toEqual(
+      expect.arrayContaining([
+        'compressor',
+        'limiter',
+        'add-processor-directory',
+        'rescan-processors',
+      ]),
+    );
+    expect(processorItems.filter((item) => item.id.startsWith('processor-layout:'))).toHaveLength(
+      2,
+    );
+    expect(source.applyGraph).not.toHaveBeenCalled();
+  });
+
   it('retains an unapplied draft when a late session document arrives', async () => {
     await i18n.changeLanguage('en');
     const source = port({ applyGraph: vi.fn().mockRejectedValue(new Error('offline')) });
@@ -541,6 +697,7 @@ const virtualMenuSession: AudioSessionStatus = {
     devices: [
       {
         nativeDeviceIds: [],
+        nativeFormats: unknownNativeFormats,
         spec: {
           ...virtualSpec,
           id: 'virtual',
@@ -576,6 +733,7 @@ it('adds a capture-only shared device as one 32-channel source through the devic
               devices: [
                 {
                   nativeDeviceIds: [],
+                  nativeFormats: unknownNativeFormats,
                   spec,
                   observedSampleRate: 44100,
                   supportedSampleRates: [44100],
@@ -633,6 +791,7 @@ it('excludes every canonical native device UID from both hardware menus, not sim
               ...virtualPolicy,
               devices: ['native-a', 'native-b'].map((uid) => ({
                 nativeDeviceIds: [uid],
+                nativeFormats: unknownNativeFormats,
                 spec: { ...virtualSpec, id: uid },
                 observedSampleRate: null,
                 supportedSampleRates: [],
@@ -690,8 +849,8 @@ it('preserves provider routes while discovery is pending and restores their pres
           typeId: 'fixture:effect',
           displayName: 'Effect',
           format: 'vst3',
-          inputChannels: 2,
-          outputChannels: 2,
+          layouts: [stereoProcessorLayout],
+          defaultLayoutId: stereoProcessorLayout.layoutId,
           parameters: [],
           hasEditor: false,
           vendor: 'Test',
@@ -705,6 +864,58 @@ it('preserves provider routes while discovery is pending and restores their pres
 
 describe('RoutingWorkspace virtual device menu rows', () => {
   const session = virtualMenuSession;
+  it.each(['render', 'capture'] as const)(
+    'offers only the graph direction backed by a %s-only OS device',
+    async (direction) => {
+      await i18n.changeLanguage('en');
+      const source = port({
+        getGraph: vi.fn().mockResolvedValue({ ...document, nodes: [], edges: [] }),
+      });
+      const device = virtualPolicy.devices[0]!;
+      const spec = {
+        ...device.spec,
+        render: direction === 'render' ? device.spec.render : null,
+        capture: direction === 'capture' ? device.spec.capture : null,
+      };
+      render(
+        <MixRelayProvider>
+          <I18nextProvider i18n={i18n}>
+            <RoutingWorkspace
+              controlPort={source}
+              audioSession={{
+                ...session,
+                virtualEndpointSettings: {
+                  ...virtualPolicy,
+                  devices: [{ ...device, spec }],
+                },
+              }}
+            />
+          </I18nextProvider>
+        </MixRelayProvider>,
+      );
+      const menu = await screen.findByTestId('node-menu');
+      const rows = () =>
+        JSON.parse(menu.textContent ?? '[]')
+          .flatMap((item: { children?: unknown[] }) => item.children ?? [])
+          .flatMap((item: { children?: unknown[] }) => item.children ?? [])
+          .filter((item: { id: string }) => item.id.startsWith('virtual/'));
+      await waitFor(() =>
+        expect(rows()).toEqual([
+          expect.objectContaining({
+            id: `virtual/input/${spec.id}`,
+            disabled: direction !== 'capture',
+            description: direction === 'capture' ? '16 CH' : '',
+          }),
+          expect.objectContaining({
+            id: `virtual/output/${spec.id}`,
+            disabled: direction !== 'render',
+            description: direction === 'render' ? '64 CH' : '',
+          }),
+        ]),
+      );
+      expect(source.applyGraph).not.toHaveBeenCalled();
+    },
+  );
   it.each(['en', 'ko-KR', 'pseudo'])('uses short channel/status metadata in %s', async (locale) => {
     await i18n.changeLanguage(locale);
     const source = port({
@@ -730,7 +941,7 @@ describe('RoutingWorkspace virtual device menu rows', () => {
     );
     const rendered = render(view(session));
     await waitFor(() => expect(menuRows()).toHaveLength(2));
-    expect(menuRows().map((row) => row.description)).toEqual(['64 CH', '32 CH']);
+    expect(menuRows().map((row) => row.description)).toEqual(['32 CH', '64 CH']);
     expect(menuRows().every((row) => !row.disabled)).toBe(true);
     expect(menuRows().every((row) => row.label === 'MixRelay Virtual I/O')).toBe(true);
 
@@ -846,6 +1057,61 @@ describe('RoutingWorkspace graph-scoped presentation', () => {
   });
 });
 
+it.each(['MacIntel', 'Linux x86_64'])(
+  'uses only the platform history modifier and preserves text editing on %s',
+  async (platform) => {
+    const identity = vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
+    const modifier = platform === 'MacIntel' ? { metaKey: true } : { ctrlKey: true };
+    const wrongModifier = platform === 'MacIntel' ? { ctrlKey: true } : { metaKey: true };
+    const input = globalThis.document.createElement('input');
+    const textarea = globalThis.document.createElement('textarea');
+    const editable = globalThis.document.createElement('div');
+    editable.setAttribute('contenteditable', 'true');
+    const nested = globalThis.document.createElement('span');
+    editable.append(nested);
+    globalThis.document.body.append(input, textarea, editable);
+    try {
+      renderWorkspace(port());
+      await screen.findByRole('region');
+      const original = screen.getByTestId('node-sizes').textContent;
+      fireEvent.click(screen.getByRole('button', { name: 'resize node' }));
+      const resized = screen.getByTestId('node-sizes').textContent;
+      for (const target of [input, textarea, nested]) {
+        for (const shortcut of [
+          { key: 'z', ...modifier },
+          { key: 'z', shiftKey: true, ...modifier },
+          { key: 'y', ctrlKey: true },
+        ]) {
+          const event = new KeyboardEvent('keydown', {
+            bubbles: true,
+            cancelable: true,
+            ...shortcut,
+          });
+          act(() => target.dispatchEvent(event));
+          expect(event.defaultPrevented).toBe(false);
+          expect(screen.getByTestId('node-sizes').textContent).toBe(resized);
+        }
+      }
+      fireEvent.keyDown(window, { key: 'z', ...wrongModifier });
+      expect(screen.getByTestId('node-sizes').textContent).toBe(resized);
+      fireEvent.keyDown(window, { key: 'z', ...modifier });
+      expect(screen.getByTestId('node-sizes').textContent).toBe(original);
+      fireEvent.keyDown(window, { key: 'z', shiftKey: true, ...modifier });
+      expect(screen.getByTestId('node-sizes').textContent).toBe(resized);
+      fireEvent.keyDown(window, { key: 'z', ...modifier });
+      fireEvent.keyDown(window, { key: 'y', ctrlKey: true });
+      expect(screen.getByTestId('node-sizes').textContent).toBe(
+        platform === 'MacIntel' ? original : resized,
+      );
+    } finally {
+      input.remove();
+      textarea.remove();
+      editable.remove();
+      identity.mockRestore();
+    }
+  },
+);
+
 describe('RoutingWorkspace layout history', () => {
   it('undoes and redoes resizing without advancing the audio revision or submitting DSP', async () => {
     const control = port();
@@ -857,10 +1123,10 @@ describe('RoutingWorkspace layout history', () => {
     const resized = screen.getByTestId('node-sizes').textContent;
     expect(resized).toContain('"width":400,"height":220');
     expect(screen.getByTestId('model-revision')).toHaveTextContent(revision ?? '');
-    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
     expect(screen.getByTestId('node-sizes').textContent).toBe(originalSizes);
     expect(screen.getByTestId('model-revision')).toHaveTextContent(revision ?? '');
-    fireEvent.keyDown(window, { key: 'z', metaKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true });
     expect(screen.getByTestId('node-sizes').textContent).toBe(resized);
     expect(screen.getByTestId('model-revision')).toHaveTextContent(revision ?? '');
     expect(control.applyGraph).not.toHaveBeenCalled();
@@ -918,7 +1184,7 @@ describe('RoutingWorkspace layout history', () => {
         viewport,
       },
     });
-    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(400);
     });
@@ -1050,7 +1316,7 @@ describe('RoutingWorkspace recovery', () => {
     const originalEdges = screen.getByTestId('edge-count').textContent;
     fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
     await waitFor(expectBlockedWorkspace);
-    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
     expect(screen.getByTestId('edge-count').textContent).toBe(originalEdges);
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true });
     expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
@@ -1078,11 +1344,129 @@ describe('RoutingWorkspace recovery', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Discard edits and reload engine' }));
     await waitFor(expectActiveWorkspace);
     expect(screen.getByTestId('edge-count').textContent).toBe(originalEdges);
-    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
     expect(controlPort.applyGraph).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('edge-count').textContent).toBe(originalEdges);
   });
 });
+
+it('places new remote nodes from saved layout while keeping local geometry and viewport', async () => {
+  await i18n.changeLanguage('en');
+  const saved = {
+    positions: {
+      'default-virtual-io::host-source': { x: 110, y: 120 },
+      'default-virtual-io::host-sink': { x: 710, y: 120 },
+      'remote-recorder': { x: 851, y: 231 },
+    },
+    sizes: {
+      'default-virtual-io::host-source': { width: 320, height: 210 },
+      'remote-recorder': { width: 270, height: 190 },
+    },
+    viewport: { x: 34, y: -12, zoom: 0.9 },
+  };
+  const remote = {
+    ...document,
+    revision: 2,
+    nodes: [
+      ...document.nodes,
+      {
+        id: 'remote-recorder',
+        type: 'recorder' as const,
+        label: 'Remote',
+        config: { channels: 2 },
+      },
+    ],
+  };
+  const getGraphLayout = vi
+    .fn()
+    .mockResolvedValue({ graphId: 'saved', layoutRevision: 3, layout: saved });
+  const controlPort = port({
+    applyGraph: vi.fn().mockRejectedValue(new Error('offline')),
+    getGraph: vi.fn().mockResolvedValueOnce(document).mockResolvedValue(remote),
+    getGraphLayout,
+    setGraphLayout: vi.fn(),
+    getGraphStatus: vi
+      .fn()
+      .mockResolvedValue({ activeRevision: 2, submittedRevision: 2, protocolVersion: 1 }),
+  });
+  render(workspace(controlPort, undefined, 'saved'));
+  await waitFor(() =>
+    expect(JSON.parse(screen.getByTestId('layout').textContent ?? '{}').positions).toMatchObject({
+      'default-virtual-io::host-source': saved.positions['default-virtual-io::host-source'],
+    }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
+  await waitFor(expectBlockedWorkspace);
+  fireEvent.click(screen.getByRole('button', { name: 'move node' }));
+  fireEvent.click(screen.getByRole('button', { name: 'resize node' }));
+  fireEvent.click(screen.getByRole('button', { name: 'pan viewport' }));
+  const local = JSON.parse(screen.getByTestId('layout').textContent ?? '{}');
+  const localSizes = JSON.parse(screen.getByTestId('node-sizes').textContent ?? '{}');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Discard edits and reload engine' }));
+  await waitFor(() =>
+    expect(JSON.parse(screen.getByTestId('layout').textContent ?? '{}').positions).toHaveProperty(
+      'remote-recorder',
+      saved.positions['remote-recorder'],
+    ),
+  );
+  const restored = JSON.parse(screen.getByTestId('layout').textContent ?? '{}');
+  const sizes = JSON.parse(screen.getByTestId('node-sizes').textContent ?? '{}');
+  expect(restored.positions['default-virtual-io::host-source']).toEqual(
+    local.positions['default-virtual-io::host-source'],
+  );
+  expect(restored.positions['default-virtual-io::host-sink']).toEqual(
+    local.positions['default-virtual-io::host-sink'],
+  );
+  expect(sizes['default-virtual-io::host-source']).toEqual(
+    localSizes['default-virtual-io::host-source'],
+  );
+  expect(sizes['default-virtual-io::host-sink']).toEqual(
+    localSizes['default-virtual-io::host-sink'],
+  );
+  expect(sizes['remote-recorder']).toEqual(saved.sizes['remote-recorder']);
+  expect(restored.viewport).toEqual(local.viewport);
+  expect(getGraphLayout).toHaveBeenCalledTimes(2);
+  expect(controlPort.applyGraph).toHaveBeenCalledTimes(1);
+});
+
+it.each(['read failure', 'identity mismatch'])(
+  'retains the blocked draft when explicit reload layout has a %s',
+  async (failure) => {
+    await i18n.changeLanguage('en');
+    const saved = { positions: { 'default-virtual-io::host-source': { x: 110, y: 120 } } };
+    const getGraphLayout = vi
+      .fn()
+      .mockResolvedValueOnce({ graphId: 'saved', layoutRevision: 3, layout: saved })
+      .mockImplementation(() =>
+        failure === 'read failure'
+          ? Promise.reject(new Error('layout offline'))
+          : Promise.resolve({ graphId: 'other', layoutRevision: 3, layout: saved }),
+      );
+    const controlPort = port({
+      applyGraph: vi.fn().mockRejectedValue(new Error('offline')),
+      getGraph: vi.fn().mockResolvedValue(document),
+      getGraphLayout,
+      setGraphLayout: vi.fn(),
+      getGraphStatus: vi
+        .fn()
+        .mockResolvedValue({ activeRevision: 1, submittedRevision: 1, protocolVersion: 1 }),
+    });
+    render(workspace(controlPort, undefined, 'saved'));
+    await screen.findByRole('region');
+    const originalEdges = screen.getByTestId('edge-count').textContent;
+    fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
+    await waitFor(expectBlockedWorkspace);
+    expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
+    fireEvent.click(screen.getByRole('button', { name: 'Discard edits and reload engine' }));
+    await waitFor(() => expect(getGraphLayout).toHaveBeenCalledTimes(2));
+    await waitFor(expectBlockedWorkspace);
+    expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+    expect(screen.getByTestId('edge-count')).toHaveTextContent(originalEdges ?? '');
+    expect(controlPort.applyGraph).toHaveBeenCalledTimes(1);
+  },
+);
 
 describe('RoutingWorkspace parameter persistence warnings', () => {
   it('shows parameter save failure without rebuilding or rolling back applied audio', async () => {
@@ -1091,8 +1475,8 @@ describe('RoutingWorkspace parameter persistence warnings', () => {
       displayName: 'Fixture',
       format: 'vst3',
       hasEditor: false,
-      inputChannels: 2,
-      outputChannels: 2,
+      layouts: [stereoProcessorLayout],
+      defaultLayoutId: stereoProcessorLayout.layoutId,
       typeId: 'vst3:fixture',
       vendor: 'Test',
       version: '1',
@@ -1185,7 +1569,8 @@ describe('RoutingWorkspace persistence warnings', () => {
     );
     expect(warning).toHaveAttribute('role', 'status');
     expectActiveWorkspace();
-    expect(onBusyChange).toHaveBeenLastCalledWith(false);
+    // The warning is rendered before the passive busy callback from the same settled edit.
+    await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(controlPort.applyGraph).toHaveBeenCalledTimes(1);
     expect(controlPort.getGraph).toHaveBeenCalledTimes(1);

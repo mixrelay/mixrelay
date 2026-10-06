@@ -51,16 +51,20 @@ struct Fixture {
 }
 impl Fixture {
     fn new() -> Self {
-        let endpoint = Storage::new(2, 2);
+        Self::with_channels(2, 2)
+    }
+    fn with_channels(render_channels: u32, capture_channels: u32) -> Self {
+        let endpoint = Storage::new(render_channels, capture_channels);
         let render = unsafe { mr_endpoint_transport_render_buffer(endpoint.transport) };
         let capture = unsafe { mr_endpoint_transport_capture_buffer(endpoint.transport) };
         let mut context = MaybeUninit::uninit();
-        assert!(unsafe { mr_hal_io_initialize(context.as_mut_ptr(), 2, 2) });
+        assert!(unsafe {
+            mr_hal_io_initialize(context.as_mut_ptr(), render_channels, capture_channels)
+        });
         let mut context = unsafe { context.assume_init() };
         assert!(unsafe { mr_hal_io_bind(&raw mut context, endpoint.transport.cast()) });
         unsafe {
             mr_hal_io_clock_state(&raw mut context, 48_000, false);
-            assert_ne!(buffer::mr_shared_audio_buffer_try_begin_epoch(capture), 0);
         }
         Self {
             context,
@@ -117,20 +121,16 @@ fn context_abi_and_integral_sample_domain_are_exact() {
 }
 
 #[test]
-fn duplex_pcm_demand_and_clock_lifecycle_are_separate() {
+fn duplex_pcm_is_looped_back_at_the_exact_render_sample_time() {
     let mut fixture = Fixture::new();
     let previous_epoch = fixture.clock().epoch;
     let pcm = [0.25_f32, -0.25, 0.75, -0.75];
     let mut output = [0.0_f32; 4];
     unsafe {
         mr_hal_io_clock_state(&raw mut fixture.context, 96000, true);
-        assert!(buffer::mr_shared_audio_buffer_epoch_pending(
+        assert!(!buffer::mr_shared_audio_buffer_epoch_pending(
             fixture.capture
         ));
-        assert_ne!(
-            buffer::mr_shared_audio_buffer_try_begin_epoch(fixture.capture),
-            0
-        );
         assert!(mr_hal_io_write_render(
             &raw mut fixture.context,
             4,
@@ -142,15 +142,8 @@ fn duplex_pcm_demand_and_clock_lifecycle_are_separate() {
             2
         );
         assert_eq!(pcm.map(f32::to_bits), output.map(f32::to_bits));
-        assert!(buffer::mr_shared_audio_buffer_write(
-            fixture.capture,
-            buffer::mr_shared_audio_buffer_stats(fixture.capture).epoch,
-            8,
-            pcm.as_ptr(),
-            2
-        ));
         assert_eq!(
-            mr_hal_io_read_capture(&raw mut fixture.context, 8, output.as_mut_ptr(), 2),
+            mr_hal_io_read_capture(&raw mut fixture.context, 4, output.as_mut_ptr(), 2),
             2
         );
     }
@@ -158,7 +151,7 @@ fn duplex_pcm_demand_and_clock_lifecycle_are_separate() {
     assert_ne!(fixture.clock().epoch, previous_epoch);
     assert_eq!(fixture.clock().sample_rate, 96000);
     assert_eq!(fixture.clock().render_through, 6);
-    assert_eq!(fixture.clock().capture_through, 10);
+    assert_eq!(fixture.clock().capture_through, 6);
     assert_eq!(
         unsafe { endpoint::mr_endpoint_transport_stats(fixture.endpoint.transport) }
             .driver_heartbeat,
@@ -167,51 +160,29 @@ fn duplex_pcm_demand_and_clock_lifecycle_are_separate() {
 }
 
 #[test]
-fn capture_restart_requests_writer_rearm_and_reads_silence_until_acknowledged() {
+fn native_restart_rearms_both_rings_and_never_replays_stale_capture() {
     let mut fixture = Fixture::new();
     let pcm = [0.75_f32; 4];
     let mut output = [1.0_f32; 4];
     unsafe {
-        assert!(buffer::mr_shared_audio_buffer_write(
-            fixture.capture,
-            buffer::mr_shared_audio_buffer_stats(fixture.capture).epoch,
+        assert!(mr_hal_io_write_render(
+            &raw mut fixture.context,
             8,
             pcm.as_ptr(),
             2
         ));
-        let previous = buffer::mr_shared_audio_buffer_stats(fixture.render).epoch;
+        let previous = buffer::mr_shared_audio_buffer_stats(fixture.capture).epoch;
         assert!(mr_hal_io_begin_stream(&raw mut fixture.context));
+        mr_hal_io_clock_state(&raw mut fixture.context, 48000, true);
         assert!(!mr_hal_io_requires_replacement(&raw const fixture.context));
-        assert!(buffer::mr_shared_audio_buffer_epoch_pending(
-            fixture.capture
-        ));
-        assert_eq!(
-            buffer::mr_shared_audio_buffer_stats(fixture.render).epoch,
-            previous + 1
-        );
+        assert!(buffer::mr_shared_audio_buffer_stats(fixture.capture).epoch > previous);
         assert_eq!(
             mr_hal_io_read_capture(&raw mut fixture.context, 8, output.as_mut_ptr(), 2),
             0
         );
-        assert!(output.iter().all(|sample| sample.abs() < f32::EPSILON));
-        assert!(!buffer::mr_shared_audio_buffer_write(
-            fixture.capture,
-            buffer::mr_shared_audio_buffer_stats(fixture.capture).epoch,
-            8,
-            pcm.as_ptr(),
-            2
-        ));
-        assert_ne!(
-            buffer::mr_shared_audio_buffer_try_begin_epoch(fixture.capture),
-            0
-        );
-        assert_eq!(
-            mr_hal_io_read_capture(&raw mut fixture.context, 8, output.as_mut_ptr(), 2),
-            0
-        );
-        assert!(buffer::mr_shared_audio_buffer_write(
-            fixture.capture,
-            buffer::mr_shared_audio_buffer_stats(fixture.capture).epoch,
+        assert_eq!(output.map(f32::to_bits), [0.0_f32; 4].map(f32::to_bits));
+        assert!(mr_hal_io_write_render(
+            &raw mut fixture.context,
             8,
             pcm.as_ptr(),
             2
@@ -225,10 +196,78 @@ fn capture_restart_requests_writer_rearm_and_reads_silence_until_acknowledged() 
 }
 
 #[test]
+fn loopback_projects_minimum_channels_and_zeros_capture_extras_without_callback_allocation() {
+    for (render, capture) in [(2, 4), (4, 2)] {
+        let mut fixture = Fixture::with_channels(render, capture);
+        let pcm = [0.25_f32, -0.5, 0.75, 1.0, -0.25, 0.5, -0.75, -1.0];
+        let mut output = [9.0_f32; 8];
+        let allocations = allocation_counter::measure(|| unsafe {
+            assert!(mr_hal_io_write_render(
+                &raw mut fixture.context,
+                0,
+                pcm.as_ptr(),
+                2
+            ));
+            assert_eq!(
+                mr_hal_io_read_capture(&raw mut fixture.context, 0, output.as_mut_ptr(), 2),
+                2
+            );
+        });
+        assert_eq!(allocations.count_total, 0);
+        for frame in 0..2 {
+            for channel in 0..capture as usize {
+                let expected = if channel < render.min(capture) as usize {
+                    pcm[frame * render as usize + channel]
+                } else {
+                    0.0
+                };
+                assert_eq!(
+                    output[frame * capture as usize + channel].to_bits(),
+                    expected.to_bits()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn equal_width_loopback_preserves_float_bits_and_bounds_callback_frames() {
+    let mut fixture = Fixture::new();
+    let pcm = [f32::from_bits(0x7fc0_1234), -0.0];
+    let mut output = [0.0; 2];
+    unsafe {
+        assert!(mr_hal_io_write_render(
+            &raw mut fixture.context,
+            0,
+            pcm.as_ptr(),
+            1
+        ));
+        assert_eq!(
+            mr_hal_io_read_capture(&raw mut fixture.context, 0, output.as_mut_ptr(), 1),
+            1
+        );
+        assert!(!mr_hal_io_write_render(
+            &raw mut fixture.context,
+            0,
+            pcm.as_ptr(),
+            MAX_LOOPBACK_FRAMES + 1
+        ));
+        assert!(mr_hal_io_write_render(
+            &raw mut fixture.context,
+            0,
+            ptr::null(),
+            0
+        ));
+    }
+    assert_eq!(pcm.map(f32::to_bits), output.map(f32::to_bits));
+}
+
+#[test]
 fn exhausted_render_generation_refuses_start_and_preserves_pending_mapping() {
     let mut fixture = Fixture::new();
     unsafe {
-        for _ in 1..u16::MAX {
+        let initial = buffer::mr_shared_audio_buffer_stats(fixture.render).epoch;
+        for _ in initial..u64::from(u16::MAX) {
             assert_ne!(
                 buffer::mr_shared_audio_buffer_try_begin_epoch(fixture.render),
                 0
@@ -396,77 +435,69 @@ fn replacement_identity_preserves_native_lifecycle_without_replaying_old_pcm() {
 }
 
 #[test]
-fn committed_clock_rearms_capture_after_any_early_engine_acknowledgment() {
+fn committed_clock_invalidates_transitional_pcm_in_both_hal_owned_rings() {
     let mut fixture = Fixture::new();
     let mut output = [1.0_f32; 2];
     unsafe {
-        mr_hal_io_clock_state(&raw mut fixture.context, 48_000, true);
+        mr_hal_io_clock_state(&raw mut fixture.context, 48000, true);
         let previous = fixture.clock();
-        let mut observed = previous;
         assert!(mr_hal_io_begin_stream(&raw mut fixture.context));
+        let mut observed = previous;
         assert!(!endpoint::mr_endpoint_transport_clock_snapshot(
             fixture.endpoint.transport,
             &raw mut observed
         ));
-        assert_eq!(
-            observed, previous,
-            "unready snapshots leave output untouched"
-        );
-        // Deliberately emulate an already-in-flight producer acknowledging an
-        // early request. New checked service operations cannot enter: the real
-        // transport snapshot remains unavailable throughout this interval.
-        assert_ne!(
-            buffer::mr_shared_audio_buffer_try_begin_epoch(fixture.capture),
-            0
-        );
-        assert!(buffer::mr_shared_audio_buffer_write(
-            fixture.capture,
-            buffer::mr_shared_audio_buffer_stats(fixture.capture).epoch,
+        assert_eq!(observed, previous);
+        assert!(mr_hal_io_write_render(
+            &raw mut fixture.context,
             4,
             [0.75_f32; 2].as_ptr(),
             1
         ));
-        assert!(!endpoint::mr_endpoint_transport_clock_snapshot(
-            fixture.endpoint.transport,
-            &raw mut observed
-        ));
-        let transitional_epoch = buffer::mr_shared_audio_buffer_stats(fixture.capture).epoch;
+        let transitional_epochs = [fixture.render, fixture.capture]
+            .map(|ring| buffer::mr_shared_audio_buffer_stats(ring).epoch);
         mr_hal_io_clock_state(&raw mut fixture.context, 96000, true);
-        let committed = fixture.clock();
-        assert_eq!((committed.sample_rate, committed.running), (96_000, 1));
-        assert!(committed.epoch > previous.epoch);
-        assert!(buffer::mr_shared_audio_buffer_epoch_pending(
-            fixture.capture
-        ));
+        assert!(fixture.clock().epoch > previous.epoch);
+        assert_eq!(
+            (fixture.clock().sample_rate, fixture.clock().render_through),
+            (96_000, 0)
+        );
         assert_eq!(
             mr_hal_io_read_capture(&raw mut fixture.context, 4, output.as_mut_ptr(), 1),
             0
         );
-        assert!(output.iter().all(|sample| sample.abs() < f32::EPSILON));
-        assert_ne!(
-            buffer::mr_shared_audio_buffer_try_begin_epoch(fixture.capture),
-            0
-        );
-        assert!(!buffer::mr_shared_audio_buffer_write(
-            fixture.capture,
-            transitional_epoch,
-            4,
-            [0.75_f32; 2].as_ptr(),
-            1
-        ));
-        assert_eq!(
-            mr_hal_io_read_capture(&raw mut fixture.context, 4, output.as_mut_ptr(), 1),
-            0
-        );
-        assert!(buffer::mr_shared_audio_buffer_write(
-            fixture.capture,
-            buffer::mr_shared_audio_buffer_stats(fixture.capture).epoch,
+        assert_eq!(output.map(f32::to_bits), [0.0_f32; 2].map(f32::to_bits));
+        for (ring, epoch) in [fixture.render, fixture.capture]
+            .into_iter()
+            .zip(transitional_epochs)
+        {
+            assert!(buffer::mr_shared_audio_buffer_stats(ring).epoch > epoch);
+            assert_eq!(
+                buffer::mr_shared_audio_buffer_read(ring, 4, output.as_mut_ptr(), 1),
+                0
+            );
+            assert_eq!(output.map(f32::to_bits), [0.0_f32; 2].map(f32::to_bits));
+            assert!(!buffer::mr_shared_audio_buffer_write(
+                ring,
+                epoch,
+                4,
+                [0.75_f32; 2].as_ptr(),
+                1
+            ));
+        }
+        assert!(mr_hal_io_write_render(
+            &raw mut fixture.context,
             4,
             [0.25_f32; 2].as_ptr(),
             1
         ));
         assert_eq!(
             mr_hal_io_read_capture(&raw mut fixture.context, 4, output.as_mut_ptr(), 1),
+            1
+        );
+        assert_eq!(output.map(f32::to_bits), [0.25_f32; 2].map(f32::to_bits));
+        assert_eq!(
+            buffer::mr_shared_audio_buffer_read(fixture.render, 4, output.as_mut_ptr(), 1),
             1
         );
         assert_eq!(output.map(f32::to_bits), [0.25_f32; 2].map(f32::to_bits));
@@ -491,7 +522,7 @@ fn remote_snapshot_thread_cannot_observe_old_clock_with_reset_pcm_epochs() {
                     endpoint::mr_endpoint_transport_clock_snapshot(transport, &raw mut snapshot)
                 });
                 assert_eq!(snapshot, previous);
-                assert!(unsafe { buffer::mr_shared_audio_buffer_epoch_pending(capture) });
+                assert!(!unsafe { buffer::mr_shared_audio_buffer_epoch_pending(capture) });
             }
             ready.send(()).unwrap();
         });

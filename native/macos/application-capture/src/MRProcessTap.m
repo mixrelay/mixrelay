@@ -98,21 +98,48 @@ bool mr_tap_description_supports_bundle_selection(void) {
     return [CATapDescription instancesRespondToSelector:NSSelectorFromString(@"setBundleIDs:")];
 }
 
+bool mr_tap_description_supports_device_stream_selection(void) {
+    return [CATapDescription instancesRespondToSelector:
+        @selector(initWithProcesses:andDeviceUID:withStream:)];
+}
+
 void *mr_tap_description_create(const char *bundle, const AudioObjectID *processes,
-    size_t count, bool mute) {
+    size_t count, const char *target_device_uid) {
     @autoreleasepool {
         NSMutableArray<NSNumber *> *ids = [NSMutableArray arrayWithCapacity:count];
         for (size_t index = 0; index < count; ++index) [ids addObject:@(processes[index])];
-        CATapDescription *description = [[CATapDescription alloc] initStereoMixdownOfProcesses:ids];
-        if (mr_tap_description_supports_bundle_selection()) {
-            [description setValue:@[[NSString stringWithUTF8String:bundle]] forKey:@"bundleIDs"];
+        CATapDescription *description;
+        if (target_device_uid != NULL) {
+            if (count == 0 || !mr_tap_description_supports_device_stream_selection()) {
+                return NULL;
+            }
+            NSString *uid = [NSString stringWithUTF8String:target_device_uid];
+            if (uid == nil) {
+                return NULL;
+            }
+            description = [[CATapDescription alloc] initWithProcesses:ids
+                andDeviceUID:uid withStream:0];
+            // The graph consumes stereo PCM. The stream-scoped tap must still
+            // report stereo format before Rust admits it for capture.
+            description.mixdown = YES;
+            description.mono = NO;
+        } else {
+            description = [[CATapDescription alloc] initStereoMixdownOfProcesses:ids];
+            if (mr_tap_description_supports_bundle_selection()) {
+                [description setValue:@[[NSString stringWithUTF8String:bundle]] forKey:@"bundleIDs"];
+            }
+            if ([CATapDescription instancesRespondToSelector:NSSelectorFromString(@"setProcessRestoreEnabled:")]) {
+                [description setValue:@YES forKey:@"processRestoreEnabled"];
+            }
         }
-        if ([CATapDescription instancesRespondToSelector:NSSelectorFromString(@"setProcessRestoreEnabled:")]) {
-            [description setValue:@YES forKey:@"processRestoreEnabled"];
+        if (description == nil) {
+            return NULL;
         }
         description.name = @"MixRelay Application Capture";
         description.private = YES;
-        description.muteBehavior = mute ? CATapMuted : CATapUnmuted;
+        // Preparation does not suppress output. Only a committed owner reading
+        // this exact device/process tap suppresses its original playback.
+        description.muteBehavior = target_device_uid != NULL ? CATapMutedWhenTapped : CATapUnmuted;
         return (__bridge_retained void *)description;
     }
 }

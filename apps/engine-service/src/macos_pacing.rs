@@ -10,15 +10,6 @@ pub(super) struct NativeClockSnapshot {
     pub sample_rate: u32,
     pub running: u32,
 }
-impl NativeClockSnapshot {
-    pub(super) fn prefer_render(mut self, render_active: bool) -> Self {
-        // Capture may request a later phase before WriteMix has supplied it.
-        if render_active && self.render_through != 0 {
-            self.capture_through = 0;
-        }
-        self
-    }
-}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -172,26 +163,6 @@ impl NativePacer {
                 maximum: maximum_frames,
                 capacity,
                 retained: maximum_frames,
-            },
-        )
-    }
-
-    /// Native callbacks retain their entire latest quantum, even when DSP must
-    /// split it into smaller blocks. Older callback windows are no longer due.
-    pub(super) fn next_callback(
-        &mut self,
-        observation: Option<NativeClockSnapshot>,
-        rate: u32,
-        maximum_frames: u32,
-        quantum: u32,
-    ) -> Pace {
-        self.advance(
-            observation,
-            rate,
-            CreditWindow {
-                maximum: maximum_frames,
-                capacity: quantum,
-                retained: quantum,
             },
         )
     }
@@ -472,31 +443,5 @@ mod tests {
         assert_eq!(pacer.next((12, clock), format), Pace::Unknown);
         clock.running = 0;
         assert_eq!(pacer.next((12, clock), format), Pace::Idle);
-    }
-
-    #[test]
-    fn capture_request_does_not_consume_an_active_render_producers_future_input() {
-        let mut pacer = NativePacer::default();
-        let clock = snapshot(128, 256).prefer_render(true);
-        assert!(matches!(
-            pacer.next(Some(clock), 48_000, 128, 4096),
-            Pace::Block { frames: 128, .. }
-        ));
-        assert_eq!(pacer.next(Some(clock), 48_000, 128, 4096), Pace::Wait);
-        assert!(matches!(
-            pacer.next(
-                Some(snapshot(256, 256).prefer_render(true)),
-                48_000,
-                128,
-                4096
-            ),
-            Pace::Block {
-                first_frame: 128,
-                frames: 128,
-                ..
-            }
-        ));
-        assert_eq!(snapshot(0, 256).prefer_render(true).capture_through, 256);
-        assert_eq!(snapshot(128, 256).prefer_render(false).capture_through, 256);
     }
 }

@@ -3,6 +3,32 @@ use std::sync::mpsc;
 use std::time::Instant;
 
 #[test]
+fn stopping_observers_cancels_resource_preparation_before_joining() {
+    use mixrelay_engine_service::GraphResourceBackend;
+
+    let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
+    let devices = Arc::new(MacDevices::new(status, 48_000, 32));
+    let observers = ControlObservers {
+        format_monitor: None,
+        control: None,
+        devices: Arc::downgrade(&devices),
+    };
+    observers.stop_observing();
+
+    let error = devices
+        .reconcile(
+            &mixrelay_audio_graph::GraphDocument::new(1, vec![], vec![]),
+            mixrelay_engine_service::PlaybackBindings::Preserve,
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("cancelled during shutdown"));
+    let error = devices.device_inventory(&[]).unwrap_err();
+    assert!(error.to_string().contains("cancelled during shutdown"));
+    observers.finish().unwrap();
+    assert_eq!(Arc::strong_count(&devices), 1);
+}
+
+#[test]
 fn dropping_worker_wakes_park_and_releases_its_captured_owner() {
     let owner = Arc::new(());
     let weak = Arc::downgrade(&owner);
@@ -162,6 +188,7 @@ fn observers_with_lifetime_probe() -> (
         ControlObservers {
             format_monitor: Some(format_monitor),
             control: Some(control),
+            devices: Weak::new(),
         },
         alive_at_monitor_exit,
         weak,
@@ -175,6 +202,42 @@ fn explicit_shutdown_joins_monitor_before_final_control_owner_release() {
     observers.finish().unwrap();
 
     assert!(observed.load(Ordering::Acquire));
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn failed_monitor_reports_its_reason_and_still_finalizes_control() {
+    let (mut observers, _, weak) = observers_with_lifetime_probe();
+    // Retire the normal monitor before injecting a deterministic failure.
+    observers.format_monitor.take().unwrap().finish().unwrap();
+    observers.format_monitor = Some(
+        MaintenanceWorker::start("failed-format-monitor", |_| {
+            panic!("injected format observation failure");
+        })
+        .unwrap(),
+    );
+
+    assert_eq!(
+        observers.finish(),
+        Err("failed-format-monitor panicked: injected format observation failure".into())
+    );
+    assert!(weak.upgrade().is_none());
+}
+
+#[test]
+fn explicit_reclaimer_finish_reports_a_panicked_worker_after_owner_release() {
+    let owner = Arc::new(());
+    let weak = Arc::downgrade(&owner);
+    let worker = MaintenanceWorker::start("failed-reclaimer", move |_| {
+        drop(owner);
+        panic!("injected reclaim failure");
+    })
+    .unwrap();
+
+    assert_eq!(
+        worker.finish(),
+        Err("failed-reclaimer panicked: injected reclaim failure".into())
+    );
     assert!(weak.upgrade().is_none());
 }
 

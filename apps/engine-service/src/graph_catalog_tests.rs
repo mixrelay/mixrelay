@@ -17,6 +17,7 @@ mod native_state;
 #[path = "graph_live_state_tests.rs"]
 mod live_state;
 
+mod publication;
 mod removal;
 
 struct Fixture(mixrelay_test_support::FixtureDir);
@@ -143,7 +144,7 @@ fn parameter_document() -> GraphDocument {
             config: NodeConfig::Provider(mixrelay_audio_graph::ProviderNodeConfig {
                 ports: None,
                 type_id: "fixture:parameters".into(),
-                parameters: serde_json::json!({"stateBase64": "AQ=="}),
+                parameters: serde_json::json!({"nativeToken": "AQ=="}),
             }),
         }],
         vec![],
@@ -191,7 +192,7 @@ fn accepted_processor_parameters_are_durable_without_repreparing_and_restore_on_
         expected["parameterValues"],
         serde_json::json!({"7": 0.75, "9": 0.75})
     );
-    assert_eq!(expected["stateBase64"], "AQ==");
+    assert_eq!(expected["nativeToken"], "AQ==");
     drop(engine);
     let (restarted, prepares) = parameter_fixture(GraphDocument::new(1, vec![], vec![]));
     let restarted = restarted.with_graph_catalog_path(fixture.path());
@@ -330,7 +331,7 @@ fn independent_documents_survive_switch_gain_edits_rename_and_restart() {
         })
         .unwrap();
     gain.gain_db = -12.0;
-    first.apply_graph(edited.clone()).unwrap();
+    first.apply_graph_request(edited.clone().into()).unwrap();
     settle(&first);
     first
         .mutate_graph_catalog(request(
@@ -389,7 +390,10 @@ fn restart_revision_exceeds_every_saved_graph_and_bootstrap_revision() {
         assert_eq!(engine.graph().edges, document.edges);
         settle(&engine);
         assert_eq!(
-            engine.apply_graph(document).unwrap_err().code,
+            engine
+                .apply_graph_request(document.into())
+                .unwrap_err()
+                .code,
             ErrorCode::GraphRevisionStale
         );
         let persisted: serde_json::Value =
@@ -441,7 +445,7 @@ fn stale_writer_and_pending_publication_do_not_switch_or_change_saved_bytes() {
     let stale = request(&engine, GraphCatalogAction::Create { name: "old".into() });
     let mut document = engine.graph();
     document.revision += 1;
-    engine.apply_graph(document).unwrap();
+    engine.apply_graph_request(document.into()).unwrap();
     let saved = fs::read(fixture.path()).unwrap();
     assert_eq!(
         engine.mutate_graph_catalog(stale).unwrap_err().code,
@@ -472,7 +476,7 @@ fn corrupt_catalog_is_preserved_and_fallback_remains_editable() {
     assert!(engine.graph_catalog().is_err());
     let mut document = engine.graph();
     document.revision += 1;
-    engine.apply_graph(document).unwrap();
+    engine.apply_graph_request(document.into()).unwrap();
     assert_eq!(fs::read(fixture.path()).unwrap(), b"not valid JSON");
 }
 
@@ -526,7 +530,11 @@ fn failed_stage_leaves_engine_and_catalog_unmodified() {
 fn rename_failure_after_native_prepare_publishes_audio_and_warns_without_orphaning_resources() {
     struct CountPrepared(AtomicU64);
     impl GraphResourceBackend for CountPrepared {
-        fn reconcile(&self, _: &GraphDocument) -> Result<(), HostAudioBackendError> {
+        fn reconcile(
+            &self,
+            _: &GraphDocument,
+            _: crate::PlaybackBindings<'_>,
+        ) -> Result<(), HostAudioBackendError> {
             self.0.fetch_add(1, Ordering::Relaxed);
             Ok(())
         }
@@ -550,7 +558,7 @@ fn rename_failure_after_native_prepare_publishes_audio_and_warns_without_orphani
     fs::create_dir(&destination).unwrap();
     engine.catalog.lock().as_mut().unwrap().path = destination;
     let document = default_duplex_document(engine.graph().revision + 1, Some(-6.0));
-    let applied = engine.apply_graph(document.clone()).unwrap();
+    let applied = engine.apply_graph_request(document.clone().into()).unwrap();
     assert_eq!(resources.0.load(Ordering::Relaxed), 1);
     assert!(applied.persistence_error.is_some());
     assert_eq!(engine.graph(), document);
@@ -569,7 +577,7 @@ fn rename_failure_after_native_prepare_publishes_audio_and_warns_without_orphani
     engine.catalog.lock().as_mut().unwrap().path = fixture.path();
     let mut document = engine.graph();
     document.revision += 1;
-    engine.apply_graph(document).unwrap();
+    engine.apply_graph_request(document.into()).unwrap();
     settle(&engine);
     assert!(engine.graph_catalog().unwrap().persistence_error.is_none());
     assert_eq!(resources.0.load(Ordering::Relaxed), 2);
@@ -633,7 +641,11 @@ fn native_resource_failure_cancels_only_this_transactions_prepared_endpoint() {
     }
     struct FailResources;
     impl GraphResourceBackend for FailResources {
-        fn reconcile(&self, _: &GraphDocument) -> Result<(), HostAudioBackendError> {
+        fn reconcile(
+            &self,
+            _: &GraphDocument,
+            _: crate::PlaybackBindings<'_>,
+        ) -> Result<(), HostAudioBackendError> {
             Err(HostAudioBackendError::BackendFailure {
                 message: "missing native device".into(),
             })
@@ -656,19 +668,22 @@ fn native_resource_failure_cancels_only_this_transactions_prepared_endpoint() {
     let before = fs::read(fixture.path()).unwrap();
     let selected = engine.graph();
     let change = default_duplex_document(selected.revision + 1, Some(-6.0));
-    assert!(engine.apply_graph(change.clone()).is_err());
+    assert!(engine.apply_graph_request(change.clone().into()).is_err());
     assert_eq!(endpoint.cancellations.load(Ordering::Relaxed), 1);
     assert!(!endpoint.pending.load(Ordering::Relaxed));
     assert_eq!(engine.graph(), selected);
     assert_eq!(fs::read(fixture.path()).unwrap(), before);
     engine.graph_resources = Arc::new(NoopGraphResourceBackend);
-    engine.apply_graph(change).unwrap();
+    engine.apply_graph_request(change.into()).unwrap();
     assert!(endpoint.pending.load(Ordering::Relaxed));
     // A different edit while the successful processor is still pending must not cancel it.
     let mut document = engine.graph();
     document.revision += 1;
     assert_eq!(
-        engine.apply_graph(document).unwrap_err().code,
+        engine
+            .apply_graph_request(document.into())
+            .unwrap_err()
+            .code,
         ErrorCode::GraphExchangeBusy
     );
     assert_eq!(endpoint.cancellations.load(Ordering::Relaxed), 1);

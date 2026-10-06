@@ -61,8 +61,41 @@ fn reset_write_snapshot_and_stale_lease_use_the_actual_mapping() {
     assert!(!producer.write(&[0.5; 256], 128));
     drop(producer);
     // A retired producer's destructor must not stop the replacement's native clock.
+    assert_eq!(mapping.clock().producer_lease.load(Ordering::Acquire), 8);
     assert_eq!(mapping.clock().native_running.load(Ordering::Acquire), 1);
     assert_eq!(mapping.clock().native_frames.load(Ordering::Acquire), 256);
+}
+
+#[test]
+fn drop_closes_current_lease_even_while_a_remote_grant_holds_the_guard() {
+    let (mapping, producer) = fixture();
+    producer.publish_native(128, true);
+    let claim = ProducerClaim::acquire(mapping.clock()).unwrap();
+    drop(producer);
+    assert_eq!(mapping.clock().producer_lease.load(Ordering::Acquire), 0);
+    // Without the guard, Drop leaves optional metadata untouched. Readers reject
+    // the closed lease regardless, and a successful grant may replace this tuple.
+    assert_eq!(mapping.clock().native_running.load(Ordering::Acquire), 1);
+    drop(claim);
+}
+
+#[test]
+fn drop_closes_current_lease_after_epoch_invalidation() {
+    let (mapping, producer) = fixture();
+    unsafe {
+        crate::shared_audio_buffer::mr_shared_audio_buffer_request_epoch(mapping.buffer.as_ptr());
+    }
+    assert_eq!(
+        unsafe { mr_shared_audio_buffer_stats(mapping.buffer.as_ptr()) }.epoch,
+        0
+    );
+    assert!(!producer.owns_stream());
+    drop(producer);
+    assert_eq!(mapping.clock().producer_lease.load(Ordering::Acquire), 0);
+    assert_eq!(
+        mapping.clock().acknowledged_format.load(Ordering::Acquire),
+        0
+    );
 }
 
 #[test]
@@ -186,6 +219,7 @@ fn allocation_failure_retires_owner_and_reports_enomem() {
     assert_eq!(error.code, TransportErrorCode::MappingFailed);
     assert_eq!(error.system_error, 12);
     assert_eq!(mapping.clock().native_running.load(Ordering::Acquire), 0);
+    assert_eq!(mapping.clock().producer_lease.load(Ordering::Acquire), 0);
 }
 
 #[test]

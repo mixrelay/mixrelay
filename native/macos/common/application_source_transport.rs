@@ -179,8 +179,23 @@ impl SourceTransport {
 
 impl Drop for SourceTransport {
     fn drop(&mut self) {
-        self.publish_native(0, false);
-        // Mapping drops after this publication: unmap first, then close its FD.
+        let clock = self.mapping.clock();
+        let claim = ProducerClaim::acquire(clock);
+        // The sole pump drains its writes/resets before Drop. Leases are unique
+        // and never reused, so this CAS publishes closure only for our grant.
+        // It works even if a remote grant holds the guard and then fails without
+        // changing the lease. Epoch invalidation must not prevent lease closure.
+        if clock
+            .producer_lease
+            .compare_exchange(self.owned_lease, 0, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+            && claim.is_some()
+        {
+            clock.acknowledged_format.store(0, Ordering::Release);
+            clock.native_frames.store(0, Ordering::Release);
+            clock.native_running.store(0, Ordering::Release);
+        }
+        // Mapping drops after the lease closes: unmap first, then close its FD.
     }
 }
 

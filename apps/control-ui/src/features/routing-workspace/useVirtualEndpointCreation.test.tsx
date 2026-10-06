@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { I18nextProvider } from 'react-i18next';
 import { afterEach, expect, it, vi } from 'vitest';
 import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import type { ControlPort, RuntimeGraphDocument } from '../../core/control-port/types';
+import type { ControlPort, RuntimeGraphDocument, VirtualEndpointSpec } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { audioGraphToRuntimeGraph, runtimeGraphToAudioGraph } from './model';
@@ -27,13 +27,18 @@ function owner() {
     },
   });
 }
-function Harness({ port, enabled = true }: { port: ControlPort; enabled?: boolean }) {
+function Harness({ port, enabled = true, createDevice = async (spec) => spec }: {
+  port: ControlPort;
+  enabled?: boolean;
+  createDevice?: (spec: VirtualEndpointSpec) => Promise<VirtualEndpointSpec | null>;
+}) {
   const [model, setModel] = useState(() => runtimeGraphToAudioGraph(graph));
   const action = useVirtualEndpointCreation({
     owner: port,
     enabled,
     model,
     settings: virtualPolicy,
+    createDevice,
     updateModel: setModel,
   });
   return (
@@ -62,11 +67,11 @@ function Harness({ port, enabled = true }: { port: ControlPort; enabled?: boolea
     </>
   );
 }
-function view(port: ControlPort, enabled = true) {
+function view(port: ControlPort, enabled = true, createDevice?: (spec: VirtualEndpointSpec) => Promise<VirtualEndpointSpec | null>) {
   return (
     <MixRelayProvider>
       <I18nextProvider i18n={i18n}>
-        <Harness port={port} enabled={enabled} />
+        <Harness port={port} enabled={enabled} createDevice={createDevice} />
       </I18nextProvider>
     </MixRelayProvider>
   );
@@ -84,11 +89,28 @@ it('allocates one identity only on named confirmation and retains the device tem
   fireEvent.change(name, { target: { value: '  Monitor return  ' } });
   fireEvent.click(screen.getByRole('button', { name: 'Create' }));
   expect(uuid).toHaveBeenCalledTimes(1);
-  expect(screen.getByTestId('saved')).toHaveTextContent('Monitor return');
+  await waitFor(() => expect(screen.getByTestId('saved')).toHaveTextContent('Monitor return'));
   expect(screen.getByTestId('saved')).toHaveTextContent('"defaultSampleRate":44100');
   expect(screen.getByTestId('saved')).toHaveTextContent(
     '"reference":{"render":true,"capture":false}',
   );
+});
+
+it('waits for owner creation readback and ignores a late result after cancellation', async () => {
+  await i18n.changeLanguage('en');
+  let resolve!: (spec: VirtualEndpointSpec) => void;
+  const createDevice = vi.fn((spec: VirtualEndpointSpec) => new Promise<VirtualEndpointSpec>((done) => { resolve = done; }));
+  render(view(owner(), true, createDevice));
+  fireEvent.click(screen.getByRole('button', { name: 'New' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Create' }));
+  expect(createDevice).toHaveBeenCalledOnce();
+  expect(screen.getByTestId('saved')).toHaveTextContent('"nodes":[]');
+  fireEvent.keyDown(screen.getByRole('textbox', { name: 'Device name' }), {
+    key: 'Escape', code: 'Escape',
+  });
+  await act(async () => resolve({ ...createDevice.mock.calls[0]![0], displayName: 'Actual readback' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(screen.getByTestId('saved')).toHaveTextContent('"nodes":[]');
 });
 
 it('shares a canonical identity on both sides without allocating or renaming a device', () => {

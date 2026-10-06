@@ -60,7 +60,7 @@ pub(super) fn snapshot() -> mixrelay_control_protocol::EngineControlSnapshot {
 #[tokio::test]
 async fn snapshot_returns_the_engine_observation_even_while_a_revision_is_pending() {
     let (status, body) = response_json(
-        router_with_backend(backend()),
+        router_with_backend(backend(), ControlOperations::new()),
         Request::get(CONTROL_SNAPSHOT_ROUTE)
             .body(Body::empty())
             .expect("request"),
@@ -94,7 +94,7 @@ fn request(method: &str, suffix: &str, body: &Value) -> Request<Body> {
 #[tokio::test]
 async fn discovery_is_graph_scoped_and_does_not_invent_recorder_actions() {
     let (status, body) = response_json(
-        router_with_backend(backend()),
+        router_with_backend(backend(), ControlOperations::new()),
         Request::get("/api/v1/graphs/graph%20B/nodes/controls")
             .body(Body::empty())
             .expect("request"),
@@ -113,7 +113,7 @@ async fn update_and_preview_forward_identical_explicit_targets() {
     ] {
         let backend = backend();
         let (status, body) = response_json(
-            router_with_backend(backend.clone()),
+            router_with_backend(backend.clone(), ControlOperations::new()),
             request(
                 method,
                 suffix,
@@ -160,7 +160,7 @@ async fn stale_missing_disabled_and_failed_controls_are_definitive_typed_errors(
             parameters: json!({"nodeId":"effect 1"}),
         }));
         let (status, body) = response_json(
-            router_with_backend(backend),
+            router_with_backend(backend, ControlOperations::new()),
             request("PUT", "", &json!({"expectedRevision":7,"enabled":true})),
         )
         .await;
@@ -182,7 +182,7 @@ async fn malformed_controls_never_reach_backend() {
     ] {
         let backend = backend();
         let (status, body) = response_json(
-            router_with_backend(backend.clone()),
+            router_with_backend(backend.clone(), ControlOperations::new()),
             request("PUT", "", &body),
         )
         .await;
@@ -208,7 +208,7 @@ async fn parameter_and_editor_writes_without_revision_are_rejected() {
         ("/api/v1/processors/effect/editor", json!({"open":true})),
     ] {
         let (status, body) = response_json(
-            router_with_backend(backend()),
+            router_with_backend(backend(), ControlOperations::new()),
             Request::put(path)
                 .header("content-type", "application/json")
                 .body(Body::from(body.to_string()))

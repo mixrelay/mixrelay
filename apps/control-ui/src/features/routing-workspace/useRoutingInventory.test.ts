@@ -13,6 +13,7 @@ const application: CapturableApplication = {
   displayName: 'Firefox',
   iconDataUrl: null,
   processId: 123,
+  selector: { match: 'bundle_id', bundle_id: 'org.mozilla.firefox', include_descendants: false },
 };
 const device: AudioDeviceDescriptor = {
   displayName: 'Interface',

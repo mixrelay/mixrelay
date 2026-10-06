@@ -31,28 +31,30 @@ pub(crate) async fn control_get_node_controls(
 #[tauri::command]
 pub(crate) async fn control_update_node_control(
     client: tauri::State<'_, ControlProxyClient>,
-    #[cfg(target_os = "macos")] captures: tauri::State<
-        '_,
-        std::sync::Arc<crate::macos_audio::ApplicationCaptureState>,
-    >,
+    app: tauri::AppHandle,
     graph_id: String,
     node_id: String,
     request: Value,
 ) -> Result<ControlProxyResponse, String> {
     #[cfg(target_os = "macos")]
     {
+        use tauri::Manager as _;
+        let captures = app.state::<std::sync::Arc<crate::macos_audio::ApplicationCaptureState>>();
         client
             .update_node_control(captures.inner(), &graph_id, &node_id, request)
             .await
     }
-    #[cfg(not(target_os = "macos"))]
-    client
-        .request(
-            Method::PUT,
-            &route(&graph_id, Some(&node_id))?,
-            Some(request),
-        )
-        .await
+    #[cfg(target_os = "linux")]
+    {
+        let _ = app;
+        client
+            .request(
+                Method::PUT,
+                &route(&graph_id, Some(&node_id))?,
+                Some(request),
+            )
+            .await
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -66,6 +68,15 @@ impl ControlProxyClient {
         node_id: &str,
         request: Value,
     ) -> Result<ControlProxyResponse, String> {
+        let control: mixrelay_control_protocol::NodeControlRequest =
+            serde_json::from_value(request.clone())
+                .map_err(|error| format!("invalid node control request: {error}"))?;
+        if control.enabled.is_none() {
+            // Gain/mute cannot change tap ownership; avoid the capture transaction gate.
+            return self
+                .request(Method::PUT, &route(graph_id, Some(node_id))?, Some(request))
+                .await;
+        }
         let Ok(_guard) = self.capture_gate.try_lock() else {
             return Ok(super::rejected("graph_exchange_busy"));
         };

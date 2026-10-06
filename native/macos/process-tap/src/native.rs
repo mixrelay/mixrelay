@@ -4,13 +4,13 @@ use super::{TapError, TapSession};
 use crate::process_tap_input::TapFormat;
 use mixrelay_macos_transport::audio_buffer::AudioBufferList;
 use std::{
-    ffi::{c_char, c_void},
+    ffi::{CStr, CString, c_char, c_void},
     ptr,
     sync::{Mutex, OnceLock},
 };
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct Address {
     selector: u32,
     scope: u32,
@@ -22,6 +22,14 @@ impl Address {
         Self {
             selector: u32::from_be_bytes(selector),
             scope: u32::from_be_bytes(*b"glob"),
+            element: 0,
+        }
+    }
+
+    const fn output(selector: [u8; 4]) -> Self {
+        Self {
+            selector: u32::from_be_bytes(selector),
+            scope: u32::from_be_bytes(*b"outp"),
             element: 0,
         }
     }
@@ -101,11 +109,12 @@ unsafe extern "C" {
     fn CFEqual(left: *const c_void, right: *const c_void) -> u8;
     fn CFRelease(object: *const c_void);
     fn mr_tap_description_supports_bundle_selection() -> bool;
+    fn mr_tap_description_supports_device_stream_selection() -> bool;
     fn mr_tap_description_create(
         bundle: *const c_char,
         processes: *const u32,
         count: usize,
-        mute: bool,
+        target_device_uid: *const c_char,
     ) -> *mut c_void;
     fn mr_tap_description_release(description: *mut c_void);
     fn mr_tap_aggregate_create(description: *mut c_void, device: *mut u32) -> i32;
@@ -125,6 +134,13 @@ unsafe extern "C" {
 }
 
 pub(super) trait Native {
+    fn device(&self, uid: &CStr) -> Result<DeviceLease, TapError>;
+    fn processes(
+        &self,
+        bundle: &CStr,
+        target_device: Option<u32>,
+    ) -> Result<Vec<ProcessIdentity>, TapError>;
+    fn rebuild(&self, session: &TapSession, selection: &Selection) -> Result<(), TapError>;
     fn format(&self, tap: u32) -> Result<TapFormat, TapError>;
     fn start(&self, device: u32, proc: *mut c_void) -> Result<(), TapError>;
     fn stop(&self, device: u32, proc: *mut c_void) -> Result<(), TapError>;
@@ -132,6 +148,7 @@ pub(super) trait Native {
     fn register(&self, session: &TapSession) -> Result<(), TapError>;
     fn unregister(&self, device: u32, proc: *mut c_void) -> Result<(), TapError>;
     fn remove_listener(&self, tap: u32, session: &TapSession) -> Result<(), TapError>;
+    fn remove_inventory_listener(&self, session: &TapSession) -> Result<(), TapError>;
     fn destroy_aggregate(&self, device: u32) -> Result<(), TapError>;
     fn destroy_tap(&self, tap: u32) -> Result<(), TapError>;
 }
@@ -163,6 +180,23 @@ fn property<T: Default>(object: u32, selector: [u8; 4]) -> Result<T, TapError> {
 }
 
 impl Native for CoreAudio {
+    fn device(&self, uid: &CStr) -> Result<DeviceLease, TapError> {
+        device(uid)
+    }
+    fn processes(
+        &self,
+        bundle: &CStr,
+        target_device: Option<u32>,
+    ) -> Result<Vec<ProcessIdentity>, TapError> {
+        processes(bundle, target_device)
+    }
+    fn rebuild(&self, session: &TapSession, selection: &Selection) -> Result<(), TapError> {
+        let description = Description::create(selection)?;
+        description.tap(session)?;
+        add_listener(session)?;
+        description.aggregate(session)?;
+        Ok(())
+    }
     fn format(&self, tap: u32) -> Result<TapFormat, TapError> {
         // TapFormat's trailing alignment padding corresponds to ASBD.mReserved.
         property(tap, *b"tfmt")
@@ -204,6 +238,18 @@ impl Native for CoreAudio {
             )
         })
     }
+    fn remove_inventory_listener(&self, session: &TapSession) -> Result<(), TapError> {
+        // SAFETY: the listener/context pair is identical to registration and the
+        // session stays owned until removal and active-listener drain complete.
+        TapError::status(unsafe {
+            AudioObjectRemovePropertyListener(
+                1,
+                &Address::global(*b"prs#"),
+                inventory_changed,
+                context(session),
+            )
+        })
+    }
     fn destroy_aggregate(&self, device: u32) -> Result<(), TapError> {
         // SAFETY: control owner removed IOProc before destroying its aggregate.
         TapError::status(unsafe { AudioHardwareDestroyAggregateDevice(device) })
@@ -230,21 +276,75 @@ unsafe extern "C" fn format_changed(
 
 pub(super) struct Description(*mut c_void);
 
-impl Description {
-    pub(super) fn create(config: &super::TapConfig) -> Result<Self, TapError> {
-        // SAFETY: helper only checks Objective-C runtime selector availability.
-        let processes = if unsafe { mr_tap_description_supports_bundle_selection() } {
-            Vec::new()
+/// A process object alone is not a stable application identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct ProcessIdentity {
+    pub object: u32,
+    pub pid: i32,
+}
+
+/// One output device and its sole output stream at the time of tap admission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct DeviceLease {
+    pub object: u32,
+    pub stream: u32,
+}
+
+#[derive(Debug)]
+pub(super) struct Selection {
+    pub bundle: CString,
+    pub fallback: bool,
+    pub selected: Vec<ProcessIdentity>,
+    pub target_device_uid: Option<CString>,
+    pub target_device: Option<DeviceLease>,
+}
+
+impl Selection {
+    pub(super) fn new(config: &super::TapConfig, native: &impl Native) -> Result<Self, TapError> {
+        // SAFETY: the public create boundary validated and retains this C string.
+        let bundle = unsafe { CStr::from_ptr(config.bundle_id) }.to_owned();
+        let target_device_uid = if config.target_device_uid.is_null() {
+            None
         } else {
-            processes(config.bundle_id)?
+            // SAFETY: create validated the NUL-terminated owned UID.
+            Some(unsafe { CStr::from_ptr(config.target_device_uid) }.to_owned())
         };
+        let target_device = target_device_uid
+            .as_deref()
+            .map(|uid| native.device(uid))
+            .transpose()?;
+        // A mutable bundle selector can acquire other output routes. Muted taps
+        // must bind exact process objects and revalidate their device lease.
+        let fallback =
+            target_device.is_some() || !unsafe { mr_tap_description_supports_bundle_selection() };
+        if target_device.is_some()
+            && !unsafe { mr_tap_description_supports_device_stream_selection() }
+        {
+            return Err(TapError::code(2));
+        }
+        Ok(Self {
+            bundle,
+            fallback,
+            selected: Vec::new(),
+            target_device_uid,
+            target_device,
+        })
+    }
+}
+
+impl Description {
+    pub(super) fn create(selection: &Selection) -> Result<Self, TapError> {
+        let processes: Vec<u32> = selection.selected.iter().map(|id| id.object).collect();
         // SAFETY: create validated UTF-8 input; process slice remains readable for this call.
         let pointer = unsafe {
             mr_tap_description_create(
-                config.bundle_id,
+                selection.bundle.as_ptr(),
                 processes.as_ptr(),
                 processes.len(),
-                config.mute_while_captured,
+                selection
+                    .target_device_uid
+                    .as_ref()
+                    .map_or(ptr::null(), |uid| uid.as_ptr()),
             )
         };
         if pointer.is_null() {
@@ -285,24 +385,39 @@ impl Drop for Description {
     }
 }
 
-fn processes(bundle: *const c_char) -> Result<Vec<u32>, TapError> {
-    let address = Address::global(*b"prs#");
+pub(super) fn owned_endpoint_uid(uid: &CStr) -> bool {
+    let bytes = uid.to_bytes();
+    let Some(suffix) = bytes.strip_prefix(b"io.mixrelay.audio.endpoint.") else {
+        return false;
+    };
+    suffix.len() == 32
+        && suffix
+            .iter()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        && suffix.iter().any(|byte| *byte != b'0')
+}
+
+fn object_ids(object: u32, address: Address) -> Result<Vec<u32>, TapError> {
     let mut size = 0;
-    // SAFETY: initialized address and exclusive native-size output.
+    // SAFETY: initialized property address and writable byte count remain live.
     TapError::status(unsafe {
-        AudioObjectGetPropertyDataSize(1, &raw const address, 0, ptr::null(), &raw mut size)
+        AudioObjectGetPropertyDataSize(object, &raw const address, 0, ptr::null(), &raw mut size)
     })?;
-    if size == 0 || !size.is_multiple_of(4) || size > 4096 * 4 {
-        return Err(TapError::code(3));
+    if !size.is_multiple_of(4) || size > 4096 * 4 {
+        return Err(TapError::code(5));
     }
     let mut ids = Vec::new();
     ids.try_reserve_exact(size as usize / 4)
         .map_err(|_| TapError::code(6))?;
     ids.resize(size as usize / 4, 0_u32);
-    // SAFETY: allocation covers queried byte extent; OS may shrink returned size.
+    if ids.is_empty() {
+        return Ok(ids);
+    }
+    // SAFETY: the vector owns at least the queried byte extent; a growth race
+    // is rejected using the returned size before any element is inspected.
     TapError::status(unsafe {
         AudioObjectGetPropertyData(
-            1,
+            object,
             &raw const address,
             0,
             ptr::null(),
@@ -311,22 +426,115 @@ fn processes(bundle: *const c_char) -> Result<Vec<u32>, TapError> {
         )
     })?;
     if !size.is_multiple_of(4) || size as usize > ids.len() * 4 {
-        return Err(TapError::code(4));
+        return Err(TapError::code(9));
     }
     ids.truncate(size as usize / 4);
-    // SAFETY: startup validated a readable UTF-8 C string; CF copies it synchronously.
-    let expected = unsafe { CFStringCreateWithCString(ptr::null(), bundle, 0x0800_0100) };
+    Ok(ids)
+}
+
+fn device(uid: &CStr) -> Result<DeviceLease, TapError> {
+    // SAFETY: CF copies the owned UTF-8 UID and returns one local reference.
+    let expected = unsafe { CFStringCreateWithCString(ptr::null(), uid.as_ptr(), 0x0800_0100) };
     if expected.is_null() {
         return Err(TapError::code(6));
     }
-    ids.retain(|id| process_matches(*id, expected));
+    let mut object = 0_u32;
+    let mut size = u32::try_from(size_of::<u32>()).expect("device ID fits native extent");
+    // SAFETY: the qualifier contains one live CFString pointer and result owns one UInt32.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            1,
+            &Address::global(*b"uidd"),
+            u32::try_from(size_of::<*const c_void>()).expect("pointer extent fits UInt32"),
+            ptr::from_ref(&expected).cast(),
+            &raw mut size,
+            ptr::from_mut(&mut object).cast(),
+        )
+    };
+    let stream = (status == 0 && size as usize == size_of::<u32>() && object != 0)
+        .then(|| object_ids(object, Address::output(*b"stm#")))
+        .and_then(Result::ok)
+        .filter(|streams| streams.len() == 1 && streams[0] != 0)
+        .map(|streams| streams[0]);
+    let valid = status == 0
+        && size as usize == size_of::<u32>()
+        && object != 0
+        && cfstring_property_matches(object, Address::global(*b"uid "), expected)
+        && stream.is_some();
+    // SAFETY: translation and validation are complete; no native reference escapes.
+    unsafe { CFRelease(expected) };
+    stream
+        .filter(|_| valid)
+        .map(|stream| DeviceLease { object, stream })
+        .ok_or(TapError::code(9))
+}
+
+fn process_uses_output_device(process: u32, target: u32) -> bool {
+    object_ids(process, Address::output(*b"pdv#")).is_ok_and(|devices| devices.contains(&target))
+}
+
+fn processes(bundle: &CStr, target_device: Option<u32>) -> Result<Vec<ProcessIdentity>, TapError> {
+    let ids = object_ids(1, Address::global(*b"prs#"))?;
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    // SAFETY: owned UTF-8 C string remains live; CF copies it synchronously.
+    let expected = unsafe { CFStringCreateWithCString(ptr::null(), bundle.as_ptr(), 0x0800_0100) };
+    if expected.is_null() {
+        return Err(TapError::code(6));
+    }
+    let mut selected = Vec::new();
+    for object in ids {
+        // Recheck both properties around the same object ID so a disappearing
+        // process cannot be paired with the PID of an unrelated replacement.
+        if process_matches(object, expected)
+            && let Ok(pid) = property::<i32>(object, *b"ppid")
+            && pid > 0
+            && target_device.is_none_or(|device| process_uses_output_device(object, device))
+            && process_matches(object, expected)
+            && property::<i32>(object, *b"ppid").is_ok_and(|again| again == pid)
+        {
+            selected.push(ProcessIdentity { object, pid });
+        }
+    }
     // SAFETY: owned expected CFString no longer used after filtering.
     unsafe { CFRelease(expected) };
-    if ids.is_empty() {
-        Err(TapError::code(3))
-    } else {
-        Ok(ids)
-    }
+    selected.sort_unstable();
+    selected.dedup();
+    Ok(selected)
+}
+
+/// Atomically invalidates delivery before the off-RT control owner rescans.
+unsafe extern "C" fn inventory_changed(
+    _: u32,
+    _: u32,
+    _: *const Address,
+    context: *mut c_void,
+) -> i32 {
+    // SAFETY: registration retains the pinned session through removal and drain.
+    let session = unsafe { &*context.cast::<TapSession>() };
+    let _active = super::ffi::Active::enter(&session.active_listeners);
+    session
+        .inventory_epoch
+        .fetch_add(1, std::sync::atomic::Ordering::Release);
+    session.lifecycle.changed();
+    0
+}
+
+pub(super) fn add_inventory_listener(session: &TapSession) -> Result<(), TapError> {
+    // SAFETY: pinned session is initialized before the listener is published.
+    TapError::status(unsafe {
+        AudioObjectAddPropertyListener(
+            1,
+            &Address::global(*b"prs#"),
+            inventory_changed,
+            context(session),
+        )
+    })?;
+    let mut resources = session.resources.get();
+    resources.inventory_listener = true;
+    session.resources.set(resources);
+    Ok(())
 }
 
 pub(super) fn add_listener(session: &TapSession) -> Result<(), TapError> {
@@ -346,6 +554,10 @@ pub(super) fn add_listener(session: &TapSession) -> Result<(), TapError> {
 }
 
 fn process_matches(process: u32, expected: *const c_void) -> bool {
+    cfstring_property_matches(process, Address::global(*b"pbid"), expected)
+}
+
+fn cfstring_property_matches(object: u32, address: Address, expected: *const c_void) -> bool {
     let mut actual: *const c_void = ptr::null();
     let mut size =
         u32::try_from(size_of::<*const c_void>()).expect("pointer size fits native extent");
@@ -353,8 +565,8 @@ fn process_matches(process: u32, expected: *const c_void) -> bool {
     // adopted before interpreting either status or returned property extent.
     let status = unsafe {
         AudioObjectGetPropertyData(
-            process,
-            &Address::global(*b"pbid"),
+            object,
+            &raw const address,
             0,
             ptr::null(),
             &raw mut size,

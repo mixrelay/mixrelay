@@ -4,26 +4,66 @@ use tauri::{
     tray::TrayIconBuilder,
 };
 
+use crate::workspace_menu::WorkspaceMenu;
+
 /// Native items retained for updates from the UI's resolved language.
 pub(crate) struct TrayMenu {
     open: MenuItem<tauri::Wry>,
     quit: MenuItem<tauri::Wry>,
 }
 
-fn labels(locale: &str) -> (&'static str, &'static str) {
+pub(crate) struct NativeMenuLabels {
+    pub(crate) tray_open: &'static str,
+    pub(crate) tray_quit: &'static str,
+    pub(crate) workspace_file: &'static str,
+    pub(crate) workspace_new: &'static str,
+    pub(crate) workspace_open: &'static str,
+    pub(crate) workspace_save: &'static str,
+    pub(crate) workspace_save_as: &'static str,
+}
+
+pub(crate) fn labels(locale: &str) -> NativeMenuLabels {
     if locale.starts_with("ko") {
-        ("열기", "종료")
+        NativeMenuLabels {
+            tray_open: "열기",
+            tray_quit: "종료",
+            workspace_file: "파일",
+            workspace_new: "새 작업 공간",
+            workspace_open: "열기…",
+            workspace_save: "저장",
+            workspace_save_as: "다른 이름으로 저장…",
+        }
     } else {
-        ("Open", "Quit")
+        NativeMenuLabels {
+            tray_open: "Open",
+            tray_quit: "Quit",
+            workspace_file: "File",
+            workspace_new: "New Workspace",
+            workspace_open: "Open…",
+            workspace_save: "Save",
+            workspace_save_as: "Save As…",
+        }
     }
 }
 
 /// Installs the embedded brand icon and native menu, returning native setup errors.
 pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
-    let (open_label, quit_label) = labels("en");
+    let initial_labels = labels("en");
     let title = MenuItem::with_id(app, "tray:title", "MixRelay", false, None::<&str>)?;
-    let open = MenuItem::with_id(app, "tray:open", open_label, true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "tray:quit", quit_label, true, None::<&str>)?;
+    let open = MenuItem::with_id(
+        app,
+        "tray:open",
+        initial_labels.tray_open,
+        true,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(
+        app,
+        "tray:quit",
+        initial_labels.tray_quit,
+        true,
+        None::<&str>,
+    )?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&title, &separator, &open, &quit])?;
     TrayIconBuilder::with_id("main")
@@ -70,21 +110,30 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     window.set_focus()
 }
 
-/// Applies the UI's resolved locale; returns a native error if either update fails.
+/// Applies the UI's resolved locale to both native menus.
+///
+/// Returns a native error when an item label cannot be updated.
 #[tauri::command]
 #[allow(
     clippy::needless_pass_by_value,
     reason = "Tauri injects State by value; a borrowed State is not a command argument"
 )]
-pub(crate) fn set_tray_locale(
-    locale: &str,
-    menu: tauri::State<'_, TrayMenu>,
-) -> Result<(), String> {
-    let (open, quit) = labels(locale);
-    menu.open
-        .set_text(open)
+pub(crate) fn set_native_menu_locale(locale: &str, app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(menu) = app.try_state::<crate::driver_manager::DriverMenu>() {
+        return menu.set_labels(locale).map_err(|error| error.to_string());
+    }
+    let tray = app.state::<TrayMenu>();
+    let workspace = app.state::<WorkspaceMenu>();
+    let labels = labels(locale);
+    tray.open
+        .set_text(labels.tray_open)
         .map_err(|error| error.to_string())?;
-    menu.quit.set_text(quit).map_err(|error| error.to_string())
+    tray.quit
+        .set_text(labels.tray_quit)
+        .map_err(|error| error.to_string())?;
+    workspace
+        .set_labels(&labels)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -93,14 +142,29 @@ mod tests {
 
     #[test]
     fn korean_menu_uses_concise_action_labels() {
-        assert_eq!(labels("ko-KR"), ("열기", "종료"));
-        assert_eq!(labels("ko"), labels("ko-KR"));
+        let korean = labels("ko-KR");
+        assert_eq!(korean.tray_open, "열기");
+        assert_eq!(korean.tray_quit, "종료");
+        assert_eq!(korean.workspace_file, "파일");
+        assert_eq!(korean.workspace_new, "새 작업 공간");
+        assert_eq!(korean.workspace_open, "열기…");
+        assert_eq!(korean.workspace_save, "저장");
+        assert_eq!(korean.workspace_save_as, "다른 이름으로 저장…");
+
+        assert_eq!(labels("ko").workspace_file, korean.workspace_file);
     }
 
     #[test]
     fn other_locales_use_english_like_the_ui() {
         for locale in ["en", "en-US", "ja", "pseudo", ""] {
-            assert_eq!(labels(locale), ("Open", "Quit"));
+            let english = labels(locale);
+            assert_eq!(english.tray_open, "Open");
+            assert_eq!(english.tray_quit, "Quit");
+            assert_eq!(english.workspace_file, "File");
+            assert_eq!(english.workspace_new, "New Workspace");
+            assert_eq!(english.workspace_open, "Open…");
+            assert_eq!(english.workspace_save, "Save");
+            assert_eq!(english.workspace_save_as, "Save As…");
         }
     }
 

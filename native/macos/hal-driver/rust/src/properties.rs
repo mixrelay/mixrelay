@@ -1,6 +1,7 @@
 //! `CoreAudio` properties are data/policy and therefore belong in Rust, not the
 //! C vtable shim. `FourCC` values here are the stable Apple SDK ABI, not a second
 //! product format catalog. Native ABI tests compare payloads with SDK structs.
+use mixrelay_pcm_ring::SampleFormat;
 use std::ffi::{c_char, c_void};
 
 use crate::abi::Snapshot;
@@ -19,6 +20,12 @@ pub(crate) struct Notification {
     address: Address,
 }
 
+/// Writes the property addresses changed by one control-plane event, in host order.
+/// Returns the count fitting `capacity`; a null output only queries that count.
+///
+/// # Safety
+/// A non-null output must point to `capacity` aligned writable notifications and
+/// remain exclusively borrowed for this call. No output storage is retained.
 #[unsafe(no_mangle)]
 pub(crate) unsafe extern "C" fn mr_hal_core_notifications(
     object: u32,
@@ -26,17 +33,29 @@ pub(crate) unsafe extern "C" fn mr_hal_core_notifications(
     output: *mut Notification,
     capacity: usize,
 ) -> usize {
-    use crate::abi::{ALIVE, FORMAT, LIST, NAME, RUNNING, STREAM_ACTIVE};
-    let mut values = Vec::new();
+    use crate::abi::{
+        ALIVE, FORMAT, LIST, NAME, OUTPUT_MUTE, OUTPUT_VOLUME, RUNNING, STREAM_ACTIVE,
+    };
+    let mut count = 0;
     let mut push = |object, selector, scope| {
-        values.push(Notification {
-            object,
-            address: Address {
-                selector: u32::from_be_bytes(selector),
-                scope,
-                element: 0,
-            },
-        });
+        if count == capacity {
+            return;
+        }
+        if !output.is_null() {
+            // SAFETY: count is below the caller's writable capacity; each index
+            // is initialized once and no reference to the ABI output is retained.
+            unsafe {
+                output.add(count).write(Notification {
+                    object,
+                    address: Address {
+                        selector: u32::from_be_bytes(selector),
+                        scope,
+                        element: 0,
+                    },
+                });
+            }
+        }
+        count += 1;
     };
     match change {
         LIST => {
@@ -51,6 +70,8 @@ pub(crate) unsafe extern "C" fn mr_hal_core_notifications(
         FORMAT => {
             push(object, *b"nsrt", GLOBAL);
             push(object, *b"ownd", GLOBAL);
+            push(object, *b"ctrl", GLOBAL);
+            push(object, *b"ctrl", OUTPUT);
             for scope in [INPUT, OUTPUT] {
                 push(object, *b"stm#", scope);
                 push(object, *b"srnd", scope);
@@ -64,13 +85,12 @@ pub(crate) unsafe extern "C" fn mr_hal_core_notifications(
         ALIVE => push(object, *b"livn", GLOBAL),
         RUNNING => push(object, *b"goin", GLOBAL),
         STREAM_ACTIVE => push(object, *b"sact", GLOBAL),
-        _ => {}
-    }
-    let count = values.len().min(capacity);
-    if !output.is_null() {
-        for (index, value) in values.into_iter().take(count).enumerate() {
-            unsafe { output.add(index).write(value) };
+        OUTPUT_VOLUME => {
+            push(object + 3, *b"lcsv", GLOBAL);
+            push(object + 3, *b"lcdv", GLOBAL);
         }
+        OUTPUT_MUTE => push(object + 4, *b"bcvl", GLOBAL),
+        _ => {}
     }
     count
 }
@@ -174,6 +194,10 @@ fn rate(value: u32) -> Value {
     Value::Scalar(f64::from(value).to_ne_bytes().to_vec())
 }
 
+fn scalar(value: f32) -> Value {
+    Value::Scalar(value.to_ne_bytes().to_vec())
+}
+
 fn stream_ids(snapshot: &Snapshot, scope: u32) -> Vec<u32> {
     let mut result = Vec::with_capacity(2);
     if scope != OUTPUT && snapshot.capture_channels > 0 {
@@ -183,6 +207,14 @@ fn stream_ids(snapshot: &Snapshot, scope: u32) -> Vec<u32> {
         result.push(snapshot.output_stream_id);
     }
     result
+}
+
+fn control_ids(snapshot: &Snapshot, scope: u32) -> Vec<u32> {
+    if scope != INPUT && snapshot.render_channels != 0 {
+        vec![snapshot.device_id + 3, snapshot.device_id + 4]
+    } else {
+        Vec::new()
+    }
 }
 
 fn plugin(registry: &Registry, address: &Address, uid: Option<&str>) -> Result<Value, i32> {
@@ -237,8 +269,13 @@ fn device(snapshot: &Snapshot, address: &Address) -> Result<Value, i32> {
         snapshot.render_channels
     };
     match &address.selector.to_be_bytes() {
-        b"ownd" | b"stm#" => Ok(objects(stream_ids(snapshot, address.scope))),
-        b"ctrl" => Ok(objects([])),
+        b"ownd" => Ok(objects(
+            stream_ids(snapshot, address.scope)
+                .into_iter()
+                .chain(control_ids(snapshot, address.scope)),
+        )),
+        b"stm#" => Ok(objects(stream_ids(snapshot, address.scope))),
+        b"ctrl" => Ok(objects(control_ids(snapshot, address.scope))),
         b"uid " => Ok(text(&snapshot.uid)),
         b"muid" => Ok(text(b"io.mixrelay.audio.endpoint")),
         b"tran" => Ok(code(*b"virt")),
@@ -275,16 +312,30 @@ fn channel_layout(channels: u32) -> Value {
     Value::Scalar(bytes)
 }
 
-fn format(rate: u32, channels: u32) -> Vec<u8> {
+pub(crate) const NATIVE_FORMATS: [SampleFormat; 4] = [
+    SampleFormat::Float32,
+    SampleFormat::Signed16,
+    SampleFormat::Signed24,
+    SampleFormat::Signed32,
+];
+
+/// Builds the exact SDK ASBD for one interleaved little-endian native stream.
+pub(crate) fn format(rate: u32, channels: u32, encoding: SampleFormat) -> Vec<u8> {
+    let sample_bytes =
+        u32::try_from(encoding.bytes_per_sample()).expect("native sample size fits u32");
     let mut bytes = f64::from(rate).to_ne_bytes().to_vec();
     for field in [
         u32::from_be_bytes(*b"lpcm"),
-        9,
-        channels * 4,
+        if encoding == SampleFormat::Float32 {
+            9
+        } else {
+            12
+        },
+        channels * sample_bytes,
         1,
-        channels * 4,
+        channels * sample_bytes,
         channels,
-        32,
+        sample_bytes * 8,
         0,
     ] {
         bytes.extend_from_slice(&field.to_ne_bytes());
@@ -316,16 +367,75 @@ fn stream(snapshot: &Snapshot, object: u32, address: &Address) -> Result<Value, 
         b"term" => Ok(code(*b"line")),
         b"schn" => Ok(number(1)),
         b"ltnc" => Ok(number(0)),
-        b"sfmt" | b"pft " => Ok(Value::Scalar(format(snapshot.sample_rate, channels))),
+        b"sfmt" | b"pft " => {
+            let code = if input {
+                snapshot.capture_format
+            } else {
+                snapshot.render_format
+            };
+            let encoding = NATIVE_FORMATS
+                .into_iter()
+                .find(|encoding| *encoding as u32 == code)
+                .expect("snapshot format is published from SampleFormat");
+            Ok(Value::Scalar(format(
+                snapshot.sample_rate,
+                channels,
+                encoding,
+            )))
+        }
         b"sfma" | b"pfta" => {
             let mut bytes = Vec::new();
             for &rate in crate::formats::SAMPLE_RATES {
-                bytes.extend(format(rate, channels));
-                bytes.extend(f64::from(rate).to_ne_bytes());
-                bytes.extend(f64::from(rate).to_ne_bytes());
+                for encoding in NATIVE_FORMATS {
+                    bytes.extend(format(rate, channels, encoding));
+                    bytes.extend(f64::from(rate).to_ne_bytes());
+                    bytes.extend(f64::from(rate).to_ne_bytes());
+                }
             }
             Ok(Value::Array(bytes, 56))
         }
+        _ => Err(UNKNOWN),
+    }
+}
+
+fn output_control(
+    registry: &Registry,
+    snapshot: &Snapshot,
+    object: u32,
+    address: &Address,
+) -> Result<Value, i32> {
+    if snapshot.render_channels == 0 {
+        return Err(BAD_OBJECT);
+    }
+    if address.scope != GLOBAL {
+        return Err(UNKNOWN);
+    }
+    let volume = object == snapshot.device_id + 3;
+    let (gain, muted) = registry.output_control(object).ok_or(BAD_OBJECT)?;
+    match &address.selector.to_be_bytes() {
+        b"bcls" => Ok(code(if volume { *b"levl" } else { *b"togl" })),
+        b"clas" => Ok(code(if volume { *b"vlme" } else { *b"mute" })),
+        b"stdv" => Ok(number(snapshot.device_id)),
+        b"lnam" => Ok(text(if volume {
+            b"Output volume"
+        } else {
+            b"Output mute"
+        })),
+        b"ownd" => Ok(objects([])),
+        b"cscp" => Ok(number(OUTPUT)),
+        b"celm" => Ok(number(0)),
+        b"lcsv" if volume => Ok(scalar(gain)),
+        b"lcdv" if volume => Ok(scalar(
+            crate::output_control::scalar_to_decibels(gain).ok_or(ILLEGAL)?,
+        )),
+        b"lcdr" if volume => Ok(Value::Scalar(
+            [f64::from(crate::output_control::MIN_DECIBELS), 0.0]
+                .into_iter()
+                .flat_map(f64::to_ne_bytes)
+                .collect(),
+        )),
+        b"lcsd" | b"lcds" if volume => Ok(scalar(0.0)),
+        b"bcvl" if !volume => Ok(number(u32::from(muted))),
         _ => Err(UNKNOWN),
     }
 }
@@ -347,6 +457,9 @@ fn property(
         || (object == snapshot.output_stream_id && snapshot.render_channels == 0)
     {
         return Err(BAD_OBJECT);
+    }
+    if object == snapshot.device_id + 3 || object == snapshot.device_id + 4 {
+        return output_control(registry, &snapshot, object, address);
     }
     if let Some(value) = common(&snapshot, object, address.selector) {
         return Ok(value);
@@ -444,6 +557,7 @@ pub(crate) unsafe extern "C" fn mr_hal_core_property_get(
         None
     };
     match property(registry, object, address, uid.as_deref())
+        .and_then(|value| unsafe { convert_level(value, address, capacity, output) })
         .and_then(|value| unsafe { value.write(capacity as usize, output) })
     {
         Ok(size) => match u32::try_from(size) {
@@ -457,11 +571,31 @@ pub(crate) unsafe extern "C" fn mr_hal_core_property_get(
     }
 }
 
+unsafe fn convert_level(
+    value: Value,
+    address: &Address,
+    capacity: u32,
+    output: *mut c_void,
+) -> Result<Value, i32> {
+    let convert = match &address.selector.to_be_bytes() {
+        b"lcsd" => crate::output_control::scalar_to_decibels,
+        b"lcds" => crate::output_control::decibels_to_scalar,
+        _ => return Ok(value),
+    };
+    if capacity < 4 || output.is_null() {
+        return Err(BAD_SIZE);
+    }
+    // SAFETY: CoreAudio defines these Get properties as an in/out Float32.
+    // The caller supplies at least four readable/writable bytes for this call.
+    let input = unsafe { output.cast::<f32>().read_unaligned() };
+    convert(input).map(scalar).ok_or(ILLEGAL)
+}
+
 fn settable(registry: &Registry, object: u32, address: &Address) -> Result<bool, i32> {
     property(registry, object, address, None)?;
     Ok(matches!(
         &address.selector.to_be_bytes(),
-        b"nsrt" | b"sact" | b"sfmt" | b"pft "
+        b"nsrt" | b"sact" | b"sfmt" | b"pft " | b"lcsv" | b"lcdv" | b"bcvl"
     ))
 }
 
@@ -496,6 +630,25 @@ fn parse_rate(bytes: &[u8]) -> Option<u32> {
         .find(|rate| f64::from(*rate).to_bits() == value.to_bits())
 }
 
+fn set_output_control(registry: &Registry, object: u32, selector: u32, bytes: &[u8]) -> i32 {
+    let Ok(bytes) = <[u8; 4]>::try_from(bytes) else {
+        return BAD_SIZE;
+    };
+    if selector == u32::from_be_bytes(*b"bcvl") {
+        return registry.set_output_mute(object, u32::from_ne_bytes(bytes) != 0);
+    }
+    let value = f32::from_ne_bytes(bytes);
+    let gain = if selector == u32::from_be_bytes(*b"lcdv") {
+        let Some(gain) = crate::output_control::decibels_to_scalar(value) else {
+            return ILLEGAL;
+        };
+        gain
+    } else {
+        value
+    };
+    registry.set_output_volume(object, gain)
+}
+
 #[unsafe(no_mangle)]
 pub(crate) unsafe extern "C" fn mr_hal_core_property_set(
     registry: *mut Registry,
@@ -522,6 +675,9 @@ pub(crate) unsafe extern "C" fn mr_hal_core_property_set(
         return BAD_OBJECT;
     };
     let status = match &address.selector.to_be_bytes() {
+        b"lcsv" | b"lcdv" | b"bcvl" => {
+            set_output_control(registry, object, address.selector, bytes)
+        }
         b"sact" => {
             let Ok(bytes) = bytes.try_into() else {
                 return BAD_SIZE;
@@ -549,12 +705,135 @@ pub(crate) unsafe extern "C" fn mr_hal_core_property_set(
             } else {
                 snapshot.render_channels
             };
-            if bytes != format(rate, channels) {
+            let Some(encoding) = NATIVE_FORMATS
+                .into_iter()
+                .find(|encoding| bytes == format(rate, channels, *encoding))
+            else {
                 return UNSUPPORTED_FORMAT;
-            }
-            registry.set_rate(snapshot.device_id, rate)
+            };
+            registry.set_format(object, rate, encoding)
         }
         _ => return UNKNOWN,
     };
     if status == 0 { 0 } else { ILLEGAL }
+}
+
+#[cfg(test)]
+mod notification_tests {
+    use super::*;
+    use crate::abi::{FORMAT, LIST, NAME};
+
+    const OBJECT: u32 = 20;
+    const SENTINEL: (u32, u32, u32, u32) = (u32::MAX, u32::MAX, u32::MAX, u32::MAX);
+    type NotificationPayload = (usize, [(u32, u32, u32, u32); 16]);
+
+    fn payload(change: u32, capacity: usize) -> NotificationPayload {
+        let mut output: [Notification; 16] = std::array::from_fn(|_| Notification {
+            object: SENTINEL.0,
+            address: Address {
+                selector: SENTINEL.1,
+                scope: SENTINEL.2,
+                element: SENTINEL.3,
+            },
+        });
+        assert!(capacity <= output.len());
+        // SAFETY: this initialized ABI array is aligned, exclusive and large enough.
+        let count =
+            unsafe { mr_hal_core_notifications(OBJECT, change, output.as_mut_ptr(), capacity) };
+        (
+            count,
+            output.map(|value| {
+                (
+                    value.object,
+                    value.address.selector,
+                    value.address.scope,
+                    value.address.element,
+                )
+            }),
+        )
+    }
+
+    #[test]
+    fn format_notifications_preserve_host_order_and_partial_output_bounds() {
+        let expected = [
+            (OBJECT, *b"nsrt", GLOBAL),
+            (OBJECT, *b"ownd", GLOBAL),
+            (OBJECT, *b"ctrl", GLOBAL),
+            (OBJECT, *b"ctrl", OUTPUT),
+            (OBJECT, *b"stm#", INPUT),
+            (OBJECT, *b"srnd", INPUT),
+            (OBJECT, *b"stm#", OUTPUT),
+            (OBJECT, *b"srnd", OUTPUT),
+            (OBJECT + 1, *b"sfmt", GLOBAL),
+            (OBJECT + 1, *b"pft ", GLOBAL),
+            (OBJECT + 1, *b"sfma", GLOBAL),
+            (OBJECT + 1, *b"pfta", GLOBAL),
+            (OBJECT + 2, *b"sfmt", GLOBAL),
+            (OBJECT + 2, *b"pft ", GLOBAL),
+            (OBJECT + 2, *b"sfma", GLOBAL),
+            (OBJECT + 2, *b"pfta", GLOBAL),
+        ]
+        .map(|(object, selector, scope)| (object, u32::from_be_bytes(selector), scope, 0));
+        for capacity in [0, 5, 16] {
+            let (count, output) = payload(FORMAT, capacity);
+            assert_eq!(count, capacity.min(expected.len()));
+            assert_eq!(output[..count], expected[..count]);
+            assert!(output[count..].iter().all(|value| *value == SENTINEL));
+            // SAFETY: null output queries the fitting count and is never dereferenced.
+            assert_eq!(
+                unsafe {
+                    mr_hal_core_notifications(OBJECT, FORMAT, std::ptr::null_mut(), capacity)
+                },
+                count
+            );
+        }
+    }
+
+    #[test]
+    fn inventory_and_rename_notifications_target_owned_objects() {
+        let (count, inventory) = payload(LIST, 16);
+        assert_eq!(count, 2);
+        assert_eq!(
+            inventory[..count],
+            [
+                (1, u32::from_be_bytes(*b"dev#"), GLOBAL, 0),
+                (1, u32::from_be_bytes(*b"ownd"), GLOBAL, 0),
+            ]
+        );
+        let (count, rename) = payload(NAME, 16);
+        assert_eq!(count, 3);
+        assert_eq!(
+            rename[..count],
+            [OBJECT, OBJECT + 1, OBJECT + 2].map(|object| (
+                object,
+                u32::from_be_bytes(*b"lnam"),
+                GLOBAL,
+                0
+            ))
+        );
+        let (count, unsupported) = payload(u32::MAX, 16);
+        assert_eq!(count, 0);
+        assert_eq!(unsupported, [SENTINEL; 16]);
+    }
+
+    #[test]
+    fn native_output_notifications_target_level_and_mute_control_objects() {
+        let (count, volume) = payload(crate::abi::OUTPUT_VOLUME, 16);
+        assert_eq!(count, 2);
+        assert_eq!(
+            volume[..count],
+            [*b"lcsv", *b"lcdv"].map(|selector| (
+                OBJECT + 3,
+                u32::from_be_bytes(selector),
+                GLOBAL,
+                0
+            ))
+        );
+        let (count, mute) = payload(crate::abi::OUTPUT_MUTE, 16);
+        assert_eq!(count, 1);
+        assert_eq!(
+            mute[0],
+            (OBJECT + 4, u32::from_be_bytes(*b"bcvl"), GLOBAL, 0)
+        );
+    }
 }

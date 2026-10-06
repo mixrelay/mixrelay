@@ -1,6 +1,0 @@
-<Project>
-  <!-- Lab-only toolchain pin. Upstream audio source and project files stay intact. -->
-  <Import Project="C:\MixRelayLab\wdk-arm64-26100\build\native\Microsoft.Windows.WDK.arm64.props" />
-  <Import Project="C:\MixRelayLab\sdk-arm64-26100\build\native\Microsoft.Windows.SDK.cpp.arm64.props" />
-  <Import Project="C:\MixRelayLab\sdk-cpp-26100\build\native\Microsoft.Windows.SDK.cpp.props" />
-</Project>

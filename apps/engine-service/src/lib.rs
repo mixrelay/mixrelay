@@ -26,7 +26,7 @@ use mixrelay_control_protocol::{
     AppStatus, DriverState, ErrorCode, ExternalProcessorCatalog, GraphApplyRequest,
     GraphApplyResponse, GraphApplyState, GraphRuntimeStatus, MeterSnapshot, NodeMeterSnapshot,
     PROTOCOL_VERSION, ProcessorEditorStatus, ProcessorParameterUpdateResponse,
-    ProcessorScanRequest, ProtocolError, SessionReconfigureRequest,
+    ProcessorRetryRequest, ProcessorScanRequest, ProtocolError, SessionReconfigureRequest,
 };
 use mixrelay_control_server::ControlBackend;
 use mixrelay_processor_host::{
@@ -39,20 +39,19 @@ pub const DEFAULT_ENDPOINT_NODE_ID: &str = "default-virtual-io";
 use mixrelay_macos_transport as _;
 
 #[cfg(target_os = "macos")]
-#[path = "macos/endpoint_registry.rs"]
-pub mod endpoint_registry;
-
-#[cfg(target_os = "macos")]
 #[path = "macos/endpoint_service/mod.rs"]
 pub mod endpoint_service;
 
 mod control_maintenance;
+pub mod control_service;
 #[cfg(test)]
 mod controller_startup_tests;
 #[cfg(test)]
 mod controller_test_support;
 pub mod device_worker;
 mod persistence;
+mod processor_latency;
+mod processor_recovery;
 mod processor_timing;
 pub use control_maintenance::ControlMaintenance;
 pub mod catalog_execution;
@@ -69,7 +68,10 @@ mod graph_catalog;
 mod graph_catalog_tests;
 pub mod graph_composition;
 
+#[cfg(test)]
+mod pcm_fifo_bench;
 pub mod render_demand;
+pub mod resource_reclaimer;
 pub mod resource_requirements;
 pub mod session;
 #[cfg(test)]
@@ -77,17 +79,45 @@ mod session_change_tests;
 mod session_preferences;
 #[cfg(test)]
 mod virtual_source_gain_tests;
-pub mod windows_transport_contract;
+mod worker_join;
 
 struct ContractOnlyVirtualEndpointBackend {
     capabilities: VirtualEndpointCapabilities,
+}
+
+/// One prepared plan's graph-local playback intents and exact runtime controls.
+/// Preserve has no playback lease or bank. Forward always refers to the prepared
+/// processor's actual control bank; adapters must reject unsupported forwarding.
+pub enum PlaybackBindings<'a> {
+    /// No graph requests playback suppression.
+    Preserve,
+    /// Suppression intents and the control bank of the same prepared execution.
+    Forward {
+        /// Graph-local intents independent of canonical capture identity.
+        intents: &'a [graph_composition::ApplicationPlaybackIntent],
+        /// Live controls of this exact plan; missing or disabled masks grant no lease.
+        controls: &'a Arc<mixrelay_audio_engine::RuntimeControlBank>,
+    },
+}
+
+impl<'a> PlaybackBindings<'a> {
+    fn from_plan(
+        intents: &'a [graph_composition::ApplicationPlaybackIntent],
+        controls: &'a Arc<mixrelay_audio_engine::RuntimeControlBank>,
+    ) -> Self {
+        if intents.is_empty() {
+            Self::Preserve
+        } else {
+            Self::Forward { intents, controls }
+        }
+    }
 }
 
 /// Prepares operating-system resources that are coupled to one complete graph document.
 ///
 /// Endpoint-only validation remains in [`VirtualEndpointBackend`]. This second boundary lets a
 /// platform atomically stage endpoint transports and application-capture sessions together,
-/// without teaching the portable graph or DSP crates about `PipeWire`, `WASAPI`, or Core Audio.
+/// without teaching the portable graph or DSP crates about `PipeWire` or Core Audio.
 pub trait GraphResourceBackend: Send + Sync {
     /// True only after native graph owners, including quarantined teardown, are released.
     fn execution_released(&self) -> bool {
@@ -121,7 +151,11 @@ pub trait GraphResourceBackend: Send + Sync {
     /// # Errors
     ///
     /// Returns a host error before the prepared processor is published to the audio thread.
-    fn reconcile(&self, document: &GraphDocument) -> Result<(), HostAudioBackendError>;
+    fn reconcile(
+        &self,
+        document: &GraphDocument,
+        playback: PlaybackBindings<'_>,
+    ) -> Result<(), HostAudioBackendError>;
 
     /// Prepares format-dependent native transports off RT before native negotiation.
     /// Dropping the result must cancel only this staging, leaving active owners intact.
@@ -131,9 +165,15 @@ pub trait GraphResourceBackend: Send + Sync {
     fn prepare_format_change(
         &self,
         document: &GraphDocument,
+        playback: PlaybackBindings<'_>,
         current: RenderFormat,
         requested: RenderFormat,
     ) -> Result<Box<dyn PreparedGraphFormat>, HostAudioBackendError> {
+        if matches!(playback, PlaybackBindings::Forward { .. }) {
+            return Err(HostAudioBackendError::CapabilityUnavailable {
+                capability: "format-changing application playback control".into(),
+            });
+        }
         if current != requested
             && document.nodes.iter().any(|node| {
                 matches!(
@@ -154,8 +194,10 @@ pub trait GraphResourceBackend: Send + Sync {
 
 /// Reserved native format handoff. Created and dropped only on the control plane.
 /// `commit` is called while DSP is suspended, immediately before its new plan publishes.
-/// It must be infallible: all allocation, validation and mailbox reservation happens in
-/// `prepare_format_change`. The native consumer must activate at the matching graph revision.
+/// It must be infallible: Rust DSP/FIFO allocation, validation and mailbox reservation happen
+/// in `prepare_format_change`. Fallible native mapping/thread startup and bounded ownership
+/// bookkeeping run after suspension in `configure_native`, which verifies restoration of prior
+/// native ownership on failure. The native consumer must activate at the matching graph revision.
 pub trait PreparedGraphFormat: Send {
     /// Apply checked native client settings after DSP suspension. An error must
     /// roll back changes owned by this token before returning to the controller.
@@ -254,6 +296,8 @@ impl RuntimeStatusBackend for FixedRuntimeStatus {
         AppStatus {
             engine_power: None,
             processor_timings: Vec::new(),
+            processor_latencies: Vec::new(),
+            failed_processors: Vec::new(),
             recorder_error: None,
             protocol_version: PROTOCOL_VERSION,
             driver_state: self.driver_state,
@@ -270,7 +314,16 @@ impl RuntimeStatusBackend for FixedRuntimeStatus {
 pub struct NoopGraphResourceBackend;
 
 impl GraphResourceBackend for NoopGraphResourceBackend {
-    fn reconcile(&self, _document: &GraphDocument) -> Result<(), HostAudioBackendError> {
+    fn reconcile(
+        &self,
+        _document: &GraphDocument,
+        playback: PlaybackBindings<'_>,
+    ) -> Result<(), HostAudioBackendError> {
+        if matches!(playback, PlaybackBindings::Forward { .. }) {
+            return Err(HostAudioBackendError::CapabilityUnavailable {
+                capability: "application playback control".into(),
+            });
+        }
         Ok(())
     }
 }
@@ -378,6 +431,8 @@ pub struct EngineGraphController {
     context: RwLock<CompileContext>,
     mutation: Mutex<()>,
     catalog: Mutex<Option<graph_catalog::CatalogStore>>,
+    verified_catalog_state_refs:
+        Mutex<std::collections::BTreeSet<mixrelay_processor_state::StateRef>>,
     catalog_write_error: Mutex<Option<String>>,
     catalog_restore: Mutex<Option<graph_catalog::PendingRestore>>,
     required_endpoint_node_id: Option<NodeId>,
@@ -517,6 +572,7 @@ impl EngineGraphController {
             }),
             mutation: Mutex::new(()),
             catalog: Mutex::new(None),
+            verified_catalog_state_refs: Mutex::new(std::collections::BTreeSet::new()),
             catalog_write_error: Mutex::new(None),
             catalog_restore: Mutex::new(None),
             required_endpoint_node_id,
@@ -809,6 +865,8 @@ impl ControlBackend for EngineGraphController {
         let mut status = self.runtime_status.status(format);
         status.engine_power = Some(self.engine_power_status());
         status.processor_timings = self.processor_timings();
+        status.processor_latencies = self.processor_latencies();
+        status.failed_processors = self.failed_processor_status();
         status
             .recorder_error
             .clone_from(&self.recorder_cleanup_error.lock());
@@ -838,12 +896,19 @@ impl ControlBackend for EngineGraphController {
     }
 
     fn meters(&self) -> MeterSnapshot {
-        let _mutation = self.mutation.lock();
-        let graph_id = self.view_graph_id();
-        let revision = self.exchange.plan_revisions().active;
+        let catalog = self.catalog.lock();
+        let graph_id = catalog
+            .as_ref()
+            .and_then(|store| store.value.as_ref().ok())
+            .map_or("session", |catalog| catalog.selected_id());
         let bindings = self.meter_bindings.read();
         let views = self.execution_views.read();
+        // Read guards retain the active layout while native mutations prepare another plan.
+        let revision = self.exchange.plan_revisions().active;
         let view = views.get(&revision);
+        let snapshot_revision = view.map_or(revision, |view| {
+            revision.max(view.controls.applied_revision())
+        });
         let nodes = bindings
             .get(&revision)
             .into_iter()
@@ -867,7 +932,7 @@ impl ControlBackend for EngineGraphController {
             .collect();
         MeterSnapshot {
             protocol_version: PROTOCOL_VERSION,
-            revision: self.exchange.revisions().active,
+            revision: snapshot_revision,
             nodes,
         }
     }
@@ -941,6 +1006,13 @@ impl ControlBackend for EngineGraphController {
         Ok(status)
     }
 
+    fn retry_failed_processor(
+        &self,
+        request: ProcessorRetryRequest,
+    ) -> Result<GraphApplyResponse, ProtocolError> {
+        EngineGraphController::retry_failed_processor(self, &request)
+    }
+
     fn set_processor_editor(
         &self,
         node_id: &str,
@@ -993,10 +1065,6 @@ impl ControlBackend for EngineGraphController {
             .map_err(|reason| processor_editor_error(node_id, &reason))
     }
 
-    fn apply_graph(&self, document: GraphDocument) -> Result<GraphApplyResponse, ProtocolError> {
-        self.apply_graph_request(document.into())
-    }
-
     fn set_engine_power(
         &self,
         request: mixrelay_control_protocol::EnginePowerRequest,
@@ -1015,10 +1083,13 @@ impl ControlBackend for EngineGraphController {
         request: GraphApplyRequest,
     ) -> Result<GraphApplyResponse, ProtocolError> {
         let _mutation = self.mutation.lock();
+        let reuse = self.processor_controls.reuse_transaction();
         let mut document = request.document;
         self.preserve_live_processor_state(&mut document, &request.processor_parameter_changes)?;
         let catalog = self.catalog_candidate(&document);
-        self.apply_graph_locked(document, catalog)
+        let result = self.apply_graph_locked(document, catalog)?;
+        reuse.commit();
+        Ok(result)
     }
 }
 
@@ -1103,13 +1174,16 @@ impl EngineGraphController {
         mut document: GraphDocument,
         mut catalog: Option<graph_catalog::Catalog>,
     ) -> Result<GraphApplyResponse, ProtocolError> {
+        let reuse = self.processor_controls.reuse_transaction();
         self.validate_recorder_channel_change(&document)?;
         if let Some(candidate) = &mut catalog {
             self.reconcile_catalog_devices(candidate)?;
             self.preserve_catalog_provider_state(candidate)?;
             document = candidate.active_document().clone();
         }
-        self.publish_graph_locked(document, catalog)
+        let result = self.publish_graph_locked(document, catalog)?;
+        reuse.commit();
+        Ok(result)
     }
 
     fn publish_graph_locked(
@@ -1140,23 +1214,8 @@ impl EngineGraphController {
             });
         }
         let revision = document.revision;
-        let execution_control::PreparedExecution {
-            processor,
-            endpoints,
-            document: runtime_document,
-            view,
-        } = self.prepare_execution(&document, catalog.as_ref(), context)?;
-        let current = self.context.read().format;
-        let resources = if current == context.format {
-            None
-        } else {
-            Some(
-                self.graph_resources
-                    .prepare_format_change(&runtime_document, current, context.format)
-                    .map_err(|error| session_error(&error.to_string()))?,
-            )
-        };
-        let meter_bindings = processor.plan().meter_bindings().to_vec();
+        // Reject known durability failures before preparing native workers or streams.
+        // The temporary document is still unpublished and drops on any later failure.
         let staged_catalog = match self.stage_catalog(catalog.as_ref()) {
             Ok(staged) => staged,
             Err(error) if !persistence_required => {
@@ -1166,6 +1225,29 @@ impl EngineGraphController {
             }
             Err(error) => return Err(error),
         };
+        let execution_control::PreparedExecution {
+            processor,
+            endpoints,
+            document: runtime_document,
+            view,
+            playback_intents,
+        } = self.prepare_execution(&document, catalog.as_ref(), context)?;
+        let current = self.context.read().format;
+        let resources = if current == context.format {
+            None
+        } else {
+            Some(
+                self.graph_resources
+                    .prepare_format_change(
+                        &runtime_document,
+                        PlaybackBindings::from_plan(&playback_intents, &view.controls),
+                        current,
+                        context.format,
+                    )
+                    .map_err(|error| session_error(&error.to_string()))?,
+            )
+        };
+        let meter_bindings = processor.plan().meter_bindings().to_vec();
         self.exchange
             .submit_configured(processor, || {
                 self.endpoint_backend
@@ -1175,7 +1257,10 @@ impl EngineGraphController {
                         .adopt_external_format(context.format)
                         .map(|()| resources.commit())
                 } else {
-                    self.graph_resources.reconcile(&runtime_document)
+                    self.graph_resources.reconcile(
+                        &runtime_document,
+                        PlaybackBindings::from_plan(&playback_intents, &view.controls),
+                    )
                 };
                 if let Err(error) = prepared {
                     self.endpoint_backend.cancel_prepared_graph_attachments();
@@ -1183,21 +1268,14 @@ impl EngineGraphController {
                 }
                 self.stop_inactive_recorders(&document, catalog.as_ref());
                 self.finish_catalog_write(staged_catalog);
+                self.publish_execution_metadata(revision, meter_bindings, view);
+                *self.context.write() = context;
+                *self.graph.write() = document;
+                self.replace_catalog_memory(catalog);
                 Ok(())
             })
             .map_err(configuration_error)?;
-        *self.context.write() = context;
-        let active_revision = self.exchange.plan_revisions().active;
-        let mut bindings = self.meter_bindings.write();
-        bindings.retain(|existing, _| *existing == active_revision);
-        bindings.insert(revision, meter_bindings);
-        drop(bindings);
-        let mut views = self.execution_views.write();
-        views.retain(|existing, _| *existing == active_revision);
-        views.insert(revision, view);
-        drop(views);
-        *self.graph.write() = document;
-        self.commit_catalog_memory(catalog);
+        self.refresh_control_snapshot();
         *self.catalog_restore.lock() = None;
         Ok(GraphApplyResponse {
             protocol_version: PROTOCOL_VERSION,
@@ -1209,6 +1287,22 @@ impl EngineGraphController {
 }
 
 impl EngineGraphController {
+    /// Publishes read-side metadata after native preparation, before the exchange exposes a plan.
+    fn publish_execution_metadata(
+        &self,
+        revision: u64,
+        bindings: Vec<MeterBinding>,
+        view: execution_control::ExecutionView,
+    ) {
+        let active = self.exchange.plan_revisions().active;
+        let mut meters = self.meter_bindings.write();
+        let mut views = self.execution_views.write();
+        meters.retain(|existing, _| *existing == active);
+        meters.insert(revision, bindings);
+        views.retain(|existing, _| *existing == active);
+        views.insert(revision, view);
+    }
+
     /// Reconciles an external OS/DAW rate change on a non-real-time control thread.
     /// No native setter is invoked in this path. A pending graph or
     /// another mutation defers reconciliation until the monitor's next observation.
@@ -1258,6 +1352,7 @@ impl EngineGraphController {
     }
 
     fn reconcile_endpoint_clock_locked(&self) -> Result<Option<GraphApplyResponse>, ProtocolError> {
+        let reuse = self.processor_controls.reuse_transaction();
         let mut document = self.graph.read().clone();
         let mut catalog = self.catalog_candidate(&document);
         if !self.observe_endpoint_catalog(&mut document, &mut catalog)? {
@@ -1271,7 +1366,9 @@ impl EngineGraphController {
         if let Some(candidate) = &mut catalog {
             candidate.update_document(document.clone());
         }
-        self.apply_graph_locked(document, catalog).map(Some)
+        let result = self.apply_graph_locked(document, catalog)?;
+        reuse.commit();
+        Ok(Some(result))
     }
 
     fn change_session_locked(
@@ -1280,6 +1377,7 @@ impl EngineGraphController {
         origin: SessionChangeOrigin,
         pause_owner: SessionPauseOwner,
     ) -> Result<GraphApplyResponse, ProtocolError> {
+        let reuse = self.processor_controls.reuse_transaction();
         let current = *self.context.read();
         let revisions = self.require_active_revision(request.expected_revision)?;
         self.validate_session_request(request, current.format, origin)?;
@@ -1310,43 +1408,44 @@ impl EngineGraphController {
         if let Some(candidate) = &mut catalog {
             self.preserve_catalog_provider_state(candidate)?;
         }
+        let staged_catalog = self.stage_session_catalog(catalog.as_ref(), origin)?;
         let execution_control::PreparedExecution {
             processor,
             document: runtime_document,
             view,
+            playback_intents,
             ..
         } = self.prepare_execution(&document, catalog.as_ref(), next)?;
         let mut resources = self
             .graph_resources
-            .prepare_format_change(&runtime_document, current.format, next.format)
+            .prepare_format_change(
+                &runtime_document,
+                PlaybackBindings::from_plan(&playback_intents, &view.controls),
+                current.format,
+                next.format,
+            )
             .map_err(|error| session_error(&error.to_string()))?;
         let bindings = processor.plan().meter_bindings().to_vec();
-        let staged_catalog = self.stage_session_catalog(catalog.as_ref(), origin)?;
+        let revision = document.revision;
         let result = self.exchange.submit_configured(processor, || {
             self.configure_session_native(current.format, next.format, origin, resources.as_mut())?;
             resources.commit();
             self.finish_catalog_write(staged_catalog);
+            self.publish_execution_metadata(revision, bindings, view);
+            *self.context.write() = next;
+            *self.graph.write() = document;
+            self.replace_catalog_memory(catalog);
             Ok::<(), HostAudioBackendError>(())
         });
         if let Err(error) = result {
             self.resume_session(pause_owner);
             return Err(session_error(&error.to_string()));
         }
-        *self.context.write() = next;
-        let mut meters = self.meter_bindings.write();
-        meters.retain(|revision, _| *revision == revisions.active);
-        meters.insert(document.revision, bindings);
-        drop(meters);
-        let mut views = self.execution_views.write();
-        views.retain(|revision, _| *revision == revisions.active);
-        views.insert(document.revision, view);
-        drop(views);
-        let revision = document.revision;
-        *self.graph.write() = document;
-        self.commit_catalog_memory(catalog);
+        self.refresh_control_snapshot();
         // Resume only after the prepared plan is published; the worker activates it before
         // processing another block. Active format reporting belongs to that worker.
         self.resume_session(pause_owner);
+        reuse.commit();
         Ok(GraphApplyResponse {
             protocol_version: PROTOCOL_VERSION,
             revision,
@@ -1622,7 +1721,7 @@ fn validate_endpoint_bindings(
 ) -> Result<(), ProtocolError> {
     let mut missing = Vec::new();
     for (node_id, endpoint) in endpoints {
-        if let Some(stream) = endpoint.render
+        if let Some(stream) = endpoint.capture
             && !binding_exists(
                 plan.source_bindings(),
                 node_id,
@@ -1637,7 +1736,7 @@ fn validate_endpoint_bindings(
                 "channels": stream.channels,
             }));
         }
-        if let Some(stream) = endpoint.capture
+        if let Some(stream) = endpoint.render
             && !binding_exists(
                 plan.sink_bindings(),
                 node_id,
@@ -1940,7 +2039,7 @@ mod tests {
         assert_eq!(controller.graph_status().active_revision, 1);
 
         let response = controller
-            .apply_graph(default_duplex_document(2, Some(-6.020_600_3)))
+            .apply_graph_request(default_duplex_document(2, Some(-6.020_600_3)).into())
             .expect("gain graph should submit");
         assert_eq!(response.revision, 2);
         assert_eq!(response.state, GraphApplyState::Pending);
@@ -1958,31 +2057,34 @@ mod tests {
         let exchange = Arc::new(ProcessorExchange::new(3));
         let controller = controller(exchange);
         let stale = controller
-            .apply_graph(default_duplex_document(3, None))
+            .apply_graph_request(default_duplex_document(3, None).into())
             .expect_err("same revision should be stale");
         assert_eq!(stale.code, ErrorCode::GraphRevisionStale);
         assert_eq!(stale.parameters["proposedRevision"], 3);
 
         let invalid = controller
-            .apply_graph(GraphDocument::new(
-                4,
-                vec![NodeSpec {
-                    control: mixrelay_audio_graph::NodeControl::default(),
-                    id: NodeId::from("invalid-gain"),
-                    label: None,
-                    config: NodeConfig::Gain(GainConfig {
-                        channels: 0,
-                        gain_db: 0.0,
-                    }),
-                }],
-                vec![],
-            ))
+            .apply_graph_request(
+                GraphDocument::new(
+                    4,
+                    vec![NodeSpec {
+                        control: mixrelay_audio_graph::NodeControl::default(),
+                        id: NodeId::from("invalid-gain"),
+                        label: None,
+                        config: NodeConfig::Gain(GainConfig {
+                            channels: 0,
+                            gain_db: 0.0,
+                        }),
+                    }],
+                    vec![],
+                )
+                .into(),
+            )
             .expect_err("invalid graph should fail");
         assert_eq!(invalid.code, ErrorCode::GraphInvalid);
         assert!(invalid.parameters["issues"].is_array());
 
         let unsupported = controller
-            .apply_graph(GraphDocument::new(5, vec![], vec![]))
+            .apply_graph_request(GraphDocument::new(5, vec![], vec![]).into())
             .expect_err("graph without the HAL endpoint should fail");
         assert_eq!(unsupported.code, ErrorCode::GraphBindingUnsupported);
         assert_eq!(
@@ -1996,7 +2098,7 @@ mod tests {
             "another-endpoint",
             FORMAT,
         )
-        .apply_graph(default_duplex_document(2, None))
+        .apply_graph_request(default_duplex_document(2, None).into())
         .expect_err("a different endpoint binding should fail");
         assert_eq!(mismatched.code, ErrorCode::GraphBindingUnsupported);
         assert_eq!(
@@ -2018,7 +2120,7 @@ mod tests {
             render_prepare: fail_render,
         });
         let render = failing
-            .apply_graph(default_duplex_document(2, None))
+            .apply_graph_request(default_duplex_document(2, None).into())
             .expect_err("render preparation should fail");
         assert_eq!(render.code, ErrorCode::GraphInvalid);
         assert!(render.parameters["renderError"].is_string());
@@ -2032,7 +2134,7 @@ mod tests {
             .expect("pending activation must block preparation before its failing factory");
         assert_eq!(before_prepare.code, ErrorCode::GraphExchangeBusy);
         let busy = controller(exchange)
-            .apply_graph(default_duplex_document(3, None))
+            .apply_graph_request(default_duplex_document(3, None).into())
             .expect_err("second pending graph should be busy");
         assert_eq!(busy.code, ErrorCode::GraphExchangeBusy);
         assert_eq!(busy.parameters["proposedRevision"], 3);

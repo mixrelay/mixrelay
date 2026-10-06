@@ -14,9 +14,7 @@ function referenceChannels(
   side: VirtualNodeSide,
   spec: Pick<VirtualEndpointSpec, 'render' | 'capture'>,
 ) {
-  return side === 'input'
-    ? Math.max(spec.render?.channels ?? 0, spec.capture?.channels ?? 0)
-    : (spec.capture?.channels ?? 0);
+  return side === 'input' ? (spec.capture?.channels ?? 0) : (spec.render?.channels ?? 0);
 }
 
 export function virtualEndpointItemId(side: VirtualNodeSide, endpointId: string) {

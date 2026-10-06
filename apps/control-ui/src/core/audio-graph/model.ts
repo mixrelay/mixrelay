@@ -30,14 +30,21 @@ export interface AudioGraphNodeAppearance {
   hasProcessorEditor?: boolean;
   icon: string;
   iconUrl?: string;
-  meterChannels?: number;
-  meterSource?: { nodeId: string; portId: string };
+  meterBanks?: readonly AudioGraphMeterBank[];
   optionsLabel?: string;
   parameterControls?: readonly AudioNodeParameterControl[];
   status?: string;
   statusTone?: StatusTone;
   offline?: boolean;
   title: string;
+}
+
+/** Meter channels stay attached to the exact native node output port. */
+export interface AudioGraphMeterBank {
+  channels: number;
+  label?: string;
+  nodeId: string;
+  portId: string;
 }
 
 export interface AudioNodeParameterControl {

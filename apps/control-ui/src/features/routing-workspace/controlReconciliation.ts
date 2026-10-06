@@ -13,6 +13,30 @@ const gainTypes = new Set([
   'application_capture',
 ]);
 
+/** Reflect an acknowledged absolute control command without rereading or resubmitting the graph. */
+export function acknowledgedNodeControl(
+  document: RuntimeGraphDocument,
+  nodeId: string,
+  change: Omit<NodeControlRequest, 'expectedRevision'>,
+  revision: number,
+): RuntimeGraphDocument {
+  const { gainDb, ...control } = change;
+  return {
+    ...document,
+    revision,
+    nodes: document.nodes.map((node) =>
+      node.id !== nodeId
+        ? node
+        : {
+            ...node,
+            control: { enabled: true, muted: false, ...node.control, ...control },
+            config:
+              gainDb === undefined ? node.config : { ...config(node), gainDb: Math.fround(gainDb) },
+          },
+    ),
+  };
+}
+
 function ordered(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(ordered);
   if (value && typeof value === 'object')

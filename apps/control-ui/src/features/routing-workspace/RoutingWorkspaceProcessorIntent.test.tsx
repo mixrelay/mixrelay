@@ -66,7 +66,10 @@ function fixture(onBusyChange?: (busy: boolean) => void, studio = false) {
           type: 'provider',
           config: {
             typeId: 'vst3:test',
-            parameters: { stateBase64: 'stale', parameterValues: { '42': 0.5 } },
+            parameters: {
+              stateRef: { sha256: 'a'.repeat(64), byteLength: 8 },
+              parameterValues: { '42': 0.5 },
+            },
           },
         },
       ],
@@ -88,8 +91,30 @@ function fixture(onBusyChange?: (busy: boolean) => void, studio = false) {
           displayName: 'Test',
           format: 'vst3',
           hasEditor: false,
-          inputChannels: 2,
-          outputChannels: 2,
+          layouts: [
+            {
+              layoutId: 'layout-v1:stereo',
+              inputs: [
+                {
+                  id: 'audio',
+                  name: 'Main Input',
+                  kind: 'main',
+                  channels: 2,
+                  channelFormat: 'stereo',
+                },
+              ],
+              outputs: [
+                {
+                  id: 'audio',
+                  name: 'Main Output',
+                  kind: 'main',
+                  channels: 2,
+                  channelFormat: 'stereo',
+                },
+              ],
+            },
+          ],
+          defaultLayoutId: 'layout-v1:stereo',
           vendor: 'Test',
           version: '1',
           parameters: [

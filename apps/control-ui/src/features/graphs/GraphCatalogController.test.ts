@@ -26,6 +26,66 @@ function fixture() {
 afterEach(() => vi.useRealTimers());
 
 describe('workspace files', () => {
+  it('does not send a file mutation after its owner is disposed during revision lookup', async () => {
+    const { port, controller } = fixture();
+    await controller.reload();
+    const status = Promise.withResolvers<Awaited<ReturnType<ControlPort['getGraphStatus']>>>();
+    vi.spyOn(port, 'getGraphStatus').mockReturnValueOnce(status.promise);
+    const file = vi.fn().mockResolvedValue(null);
+    (port as ControlPort).workspaceFile = file;
+    const pending = controller.workspaceFile('new', 'en');
+    controller.dispose();
+    await controller.reload();
+    const current = controller.snapshot();
+    status.resolve({ protocolVersion: 1, submittedRevision: 1, activeRevision: 1 });
+    await pending;
+    expect(file).not.toHaveBeenCalled();
+    expect(controller.snapshot()).toBe(current);
+  });
+
+  it.each(['accept', 'reject'] as const)(
+    'ignores a late file %s after a replacement catalog load',
+    async (outcome) => {
+      const { port, controller } = fixture();
+      await controller.reload();
+      const result = Promise.withResolvers<GraphCatalog | null>();
+      const file = vi.fn().mockReturnValue(result.promise);
+      (port as ControlPort).workspaceFile = file;
+      const pending = controller.workspaceFile('open', 'en');
+      await vi.waitFor(() => expect(file).toHaveBeenCalledTimes(1));
+      controller.dispose();
+      await controller.reload();
+      const current = controller.snapshot();
+      const read = vi.spyOn(port, 'getGraphCatalog');
+      if (outcome === 'accept') result.resolve(current.catalog);
+      else result.reject(new Error('old file operation failed'));
+      await pending;
+      expect(controller.snapshot()).toBe(current);
+      expect(read).not.toHaveBeenCalled();
+    },
+  );
+
+  it('stops a file continuation when its accepted-catalog subscriber replaces the owner', async () => {
+    const { port, controller } = fixture();
+    await controller.reload();
+    const loaded = await port.getGraphCatalog();
+    (port as ControlPort).workspaceFile = vi.fn().mockResolvedValue(loaded);
+    const replacement = Promise.withResolvers<void>();
+    const replacementStates: boolean[] = [];
+    const unsubscribe = controller.subscribe(() => {
+      if (controller.snapshot().catalog !== loaded) return;
+      unsubscribe();
+      controller.subscribe(() => replacementStates.push(controller.snapshot().uncertain));
+      controller.dispose();
+      void controller.reload().then(replacement.resolve);
+    });
+    await controller.workspaceFile('open', 'en');
+    await replacement.promise;
+    // Include intermediate notifications, not just the final read response.
+    expect(replacementStates).not.toContain(true);
+    expect(controller.snapshot().uncertain).toBe(false);
+  });
+
   it('cancel and save preserve document identity and history', async () => {
     const { port, controller } = fixture();
     await controller.reload();
@@ -173,22 +233,27 @@ describe('catalog read recovery', () => {
     controller.dispose();
   });
 
-  it('recovers the initial catalog automatically after a temporary engine outage', async () => {
-    vi.useFakeTimers();
-    const { port, controller } = fixture();
-    const read = vi
-      .spyOn(port, 'getGraphCatalog')
-      .mockRejectedValueOnce(
-        new ControlPortError(503, { code: 'control_unavailable', parameters: {} }),
+  it.each([
+    {},
+    { resource: 'application_capture_manifest', reason: 'graph_mutation_in_progress' },
+    { resource: 'application_capture_manifest', reason: 'execution_snapshot_not_published' },
+  ])(
+    'recovers the initial catalog automatically after temporary unavailability: %j',
+    async (parameters) => {
+      vi.useFakeTimers();
+      const { port, controller } = fixture();
+      const read = vi.spyOn(port, 'getGraphCatalog').mockRejectedValueOnce(
+        new ControlPortError(503, { code: 'control_unavailable', parameters }),
       );
-    await controller.reload();
-    expect(controller.snapshot().catalog).toBeNull();
-    await vi.advanceTimersByTimeAsync(500);
-    expect(read).toHaveBeenCalledTimes(2);
-    expect(controller.snapshot().catalog?.activeId).toBe('graph-1');
-    expect(controller.snapshot().error).toBeNull();
-    controller.dispose();
-  });
+      await controller.reload();
+      expect(controller.snapshot().catalog).toBeNull();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(controller.snapshot().catalog?.activeId).toBe('graph-1');
+      expect(controller.snapshot().error).toBeNull();
+      controller.dispose();
+    },
+  );
 
   it('does not retry a protected catalog or replay failed mutations', async () => {
     vi.useFakeTimers();

@@ -16,7 +16,11 @@ struct Apps {
 }
 
 impl GraphResourceBackend for Apps {
-    fn reconcile(&self, _: &GraphDocument) -> Result<(), HostAudioBackendError> {
+    fn reconcile(
+        &self,
+        _: &GraphDocument,
+        _: crate::PlaybackBindings<'_>,
+    ) -> Result<(), HostAudioBackendError> {
         self.reconciles.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
@@ -60,6 +64,7 @@ fn graph(enabled: bool) -> GraphDocument {
                     channel_layout: ChannelLayout::Stereo,
                 },
                 source_playback: SourcePlaybackPolicy::Preserve,
+                forwarding_endpoint: None,
                 gain_db: -6.0,
                 requires_reselection: false,
             }),

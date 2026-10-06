@@ -9,7 +9,6 @@ use super::{
     },
 };
 use mixrelay_audio_engine::{ExternalBinding, RenderPlan};
-use mixrelay_audio_graph::{FROM_OS_PORT_ID, TO_OS_PORT_ID};
 use std::{
     collections::BTreeMap,
     ffi::c_void,
@@ -119,7 +118,8 @@ impl Binding {
             clock_id,
             native_rate,
         } = selection;
-        let id = binding.node_id().as_str();
+        let binding_id = binding.node_id().as_str();
+        let id = devices.binding_key(binding_id, input).unwrap_or(binding_id);
         let offset = if devices.is_offline(id) || (!enabled && !devices.0.contains_key(id)) {
             None
         } else {
@@ -147,7 +147,7 @@ impl Binding {
             Some(offset as usize)
         };
         Some(Self {
-            id: id.to_owned(),
+            id: binding_id.to_owned(),
             input,
             offset,
             channels: usize::from(binding.channels()),
@@ -205,15 +205,12 @@ impl DirectPlan {
             (false, plan.sink_bindings()),
         ] {
             for binding in list {
+                let binding_id = binding.node_id().as_str();
+                let id = devices.binding_key(binding_id, input).unwrap_or(binding_id);
                 if input
-                    && binding.virtual_endpoint_id().is_some()
-                    && binding.port_id().as_str() == FROM_OS_PORT_ID
-                {
-                    continue;
-                }
-                if !input
-                    && binding.virtual_endpoint_id().is_some()
-                    && binding.port_id().as_str() == TO_OS_PORT_ID
+                    && binding.virtual_endpoint_id().is_none()
+                    && !devices.0.contains_key(id)
+                    && !devices.1.contains_key(id)
                 {
                     continue;
                 }
@@ -221,13 +218,11 @@ impl DirectPlan {
                     .controls()
                     .snapshot(binding.node_id())
                     .is_none_or(|(control, _)| control.enabled);
-                if let Some(device) = devices.0.get(binding.node_id().as_str())
+                if let Some(device) = devices.0.get(id)
                     && (device.clock_identity.load(Ordering::Acquire) != clock_id
                         || device.native_rate.load(Ordering::Acquire) != native_rate)
                 {
-                    bridged
-                        .0
-                        .insert(binding.node_id().to_string(), Arc::clone(device));
+                    bridged.0.insert(id.to_owned(), Arc::clone(device));
                     continue;
                 }
                 let map = Binding::prepare(
@@ -241,7 +236,7 @@ impl DirectPlan {
                     },
                 )?;
                 if map.offset.is_some() {
-                    let device = devices.0.get(&map.id)?;
+                    let device = devices.0.get(id)?;
                     owners.insert(device.identity, Arc::clone(device));
                 }
                 bindings.push(map);
@@ -305,31 +300,19 @@ pub(crate) struct Registration<'a> {
     plan: &'a DirectPlan,
 }
 impl Registration<'_> {
-    /// Control-side boundary-only replacement. The native registration stays
-    /// enabled, so hardware owners do not revert to polling/SRC workers. The
-    /// descriptor's borrowed state may be changed only after this reader drain.
-    pub(crate) fn suspend(&self) {
+    /// Remove publication before releasing the callback-borrowed renderer storage.
+    fn drain(&self) {
         self.plan.master.native.render.publish(std::ptr::null_mut());
         while !self.plan.master.native.render.drained() {
             thread::sleep(Duration::from_micros(100));
         }
-    }
-    /// # Safety
-    /// The original live descriptor and renderer must remain valid through this
-    /// registration's drain. No callback may own that renderer while suspended.
-    pub(crate) unsafe fn resume(&self, descriptor: &Descriptor) {
-        self.plan
-            .master
-            .native
-            .render
-            .publish(std::ptr::from_ref(descriptor).cast_mut());
     }
 }
 impl Drop for Registration<'_> {
     fn drop(&mut self) {
         // Remove publication first; a timeout is NOT permission to free a
         // renderer still reachable by CoreAudio. Waiting occurs on control only.
-        self.suspend();
+        self.drain();
         for device in &self.plan.owners {
             device.ready_rate.store(0, Ordering::Release);
             // Invalidate pre-direct PCM BEFORE exposing the ring consumer again.

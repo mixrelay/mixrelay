@@ -11,7 +11,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>MixRelayHAL</string>
+	<string>MixRelay Driver</string>
 	<key>CFBundlePackageType</key>
 	<string>BNDL</string>
 	<key>CFBundleShortVersionString</key>
@@ -20,7 +20,7 @@
 	<string>1</string>
 	<key>AudioServerPlugIn_MachServices</key>
 	<array>
-		<string>io.mixrelay.audio.engine</string>
+		<string>io.mixrelay.audio.driver</string>
 	</array>
 	<key>CFPlugInFactories</key>
 	<dict>

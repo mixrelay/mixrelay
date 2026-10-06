@@ -1,103 +1,86 @@
-use std::path::{Path, PathBuf};
-use tauri::Manager;
+use tauri::Manager as _;
 
-/// Resolves the desktop in the interactive user's OS session, not the service's
-/// working directory. Naming does not create or reserve a recording file.
-#[tauri::command]
-pub(crate) async fn default_recording_path(
-    app: tauri::AppHandle,
-    file_name: String,
-) -> Result<String, String> {
-    // Desktop lookup may read the user's XDG configuration on Linux.
-    tauri::async_runtime::spawn_blocking(move || {
-        let desktop = app
-            .path()
-            .desktop_dir()
-            .map_err(|error| format!("cannot locate Desktop: {error}"))?;
-        desktop_recording_path(&desktop, &file_name)?
-            .into_os_string()
-            .into_string()
-            .map_err(|_| "Desktop path is not valid Unicode".into())
+/// Resolves an existing user folder without requiring Linux XDG Desktop setup.
+/// Preserves the Desktop default where present; no directory is created here.
+/// Returns an error if neither the desktop nor home is an existing directory.
+pub(crate) fn default_recording_folder<R: tauri::Runtime>(
+    app: &impl tauri::Manager<R>,
+) -> Result<std::path::PathBuf, String> {
+    choose_default_folder(app.path().desktop_dir().ok(), || {
+        app.path().home_dir().map_err(|error| error.to_string())
     })
-    .await
-    .map_err(|error| format!("Desktop lookup failed: {error}"))?
 }
 
-fn desktop_recording_path(desktop: &Path, file_name: &str) -> Result<PathBuf, String> {
-    if !desktop.is_absolute()
-        || file_name.is_empty()
-        || file_name.contains(['/', '\\', ':'])
-        || !Path::new(file_name)
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("wav"))
-    {
-        return Err("recording filename must be a WAV filename without directories".into());
+fn choose_default_folder(
+    desktop: Option<std::path::PathBuf>,
+    home: impl FnOnce() -> Result<std::path::PathBuf, String>,
+) -> Result<std::path::PathBuf, String> {
+    if let Some(folder) = desktop.filter(|path| path.is_absolute() && path.is_dir()) {
+        return Ok(folder);
     }
-    Ok(desktop.join(file_name))
+    let folder = home()?;
+    if !folder.is_absolute() || !folder.is_dir() {
+        return Err("No existing user folder is available for recording".into());
+    }
+    Ok(folder)
 }
 
-/// Selects a WAV destination in the desktop user's session. The engine opens it
-/// exclusively on Record, so accepting this dialog never overwrites an existing file.
+/// The native chooser selects only a folder; creating a take remains the recorder's job.
 #[tauri::command]
-pub(crate) async fn select_recording_path(
+pub(crate) async fn select_recording_folder(
     app: tauri::AppHandle,
     default_path: Option<String>,
     title: Option<String>,
-) -> Option<String> {
+) -> Result<Option<String>, String> {
+    let directory = default_path.map_or_else(
+        || default_recording_folder(&app),
+        |path| Ok(std::path::PathBuf::from(path)),
+    )?;
     let mut dialog = rfd::AsyncFileDialog::new()
-        .set_title(title.as_deref().unwrap_or("Save recording"))
-        .add_filter("WAV", &["wav"])
-        .set_file_name("MixRelay.wav");
-    if let Ok(desktop) = app.path().desktop_dir() {
-        dialog = dialog.set_directory(desktop);
-    }
-    if let Some(path) = default_path {
-        let path = std::path::Path::new(&path);
-        if let Some(parent) = path.parent() {
-            dialog = dialog.set_directory(parent);
-        }
-        if let Some(name) = path.file_name() {
-            dialog = dialog.set_file_name(name.to_string_lossy());
-        }
+        .set_title(title.as_deref().unwrap_or("Choose recording folder"))
+        .set_directory(directory);
+    if let Some(window) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&window);
     }
     dialog
-        .save_file()
+        .pick_folder()
         .await
-        .map(|file| file.path().to_string_lossy().into_owned())
+        .map(|folder| {
+            folder
+                .path()
+                .to_path_buf()
+                .into_os_string()
+                .into_string()
+                .map_err(|_| "recording folder must be valid Unicode".into())
+        })
+        .transpose()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::desktop_recording_path;
-    use std::path::Path;
+    use super::choose_default_folder;
 
     #[test]
-    fn uses_resolved_desktop_without_creating_files() {
-        let desktop = std::env::current_dir().unwrap().join("바탕 화면");
-        let name = "MixRelay-2026-09-09_12-34-56-789_1.wav";
-        assert_eq!(
-            desktop_recording_path(&desktop, name).unwrap(),
-            desktop.join(name)
-        );
-        assert_eq!(
-            desktop_recording_path(&desktop, "Take.WAV").unwrap(),
-            desktop.join("Take.WAV")
-        );
+    fn available_desktop_is_preserved_without_resolving_home() {
+        let directory = tempfile::tempdir().unwrap();
+        let selected = choose_default_folder(Some(directory.path().to_path_buf()), || {
+            panic!("home must not be needed when desktop exists")
+        })
+        .unwrap();
+        assert_eq!(selected, directory.path());
     }
 
     #[test]
-    fn rejects_directory_components_and_invalid_names_on_all_platforms() {
-        let desktop = std::env::current_dir().unwrap();
-        for name in [
-            "",
-            "../take.wav",
-            "/take.wav",
-            "..\\take.wav",
-            "C:take.wav",
-            "take.mp3",
-        ] {
-            assert!(desktop_recording_path(&desktop, name).is_err());
+    fn missing_desktop_uses_existing_home_and_rejects_unusable_home() {
+        let directory = tempfile::tempdir().unwrap();
+        for desktop in [None, Some(directory.path().join("absent"))] {
+            assert_eq!(
+                choose_default_folder(desktop, || Ok(directory.path().to_path_buf())).unwrap(),
+                directory.path()
+            );
         }
-        assert!(desktop_recording_path(Path::new("relative"), "take.wav").is_err());
+        assert!(choose_default_folder(None, || Err("home unavailable".into())).is_err());
+        assert!(choose_default_folder(None, || Ok(directory.path().join("absent"))).is_err());
+        assert!(choose_default_folder(None, || Ok("relative".into())).is_err());
     }
 }

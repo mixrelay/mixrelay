@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, windows-2025, windows-11-arm]
+        os: [macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:

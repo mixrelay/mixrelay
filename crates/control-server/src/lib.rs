@@ -13,7 +13,7 @@ use mixrelay_control_protocol::{
     GraphCatalogRequest, GraphCatalogResponse, GraphLayoutRequest, GraphLayoutResponse,
     GraphRuntimeStatus, MeterSnapshot, PROTOCOL_VERSION, ProcessorEditorFrame,
     ProcessorEditorInput, ProcessorEditorRequest, ProcessorEditorStatus, ProcessorParameterUpdate,
-    ProcessorParameterUpdateResponse, ProcessorScanRequest, ProtocolError,
+    ProcessorParameterUpdateResponse, ProcessorRetryRequest, ProcessorScanRequest, ProtocolError,
     SessionReconfigureRequest,
 };
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -21,9 +21,11 @@ mod editor_surface;
 mod engine_power;
 mod ingress;
 mod node_control;
+mod operations;
 mod recorder;
 mod transport;
 mod workspace;
+pub use operations::ControlOperations;
 pub use transport::bounded_listener;
 
 pub const HEALTH_ROUTE: &str = "/health";
@@ -45,6 +47,7 @@ pub const PROCESSORS_SCAN_ROUTE: &str = "/api/v1/processors/scan";
 pub const PROCESSOR_PARAMETER_ROUTE: &str =
     "/api/v1/processors/{node_id}/parameters/{parameter_id}";
 pub const PROCESSOR_EDITOR_ROUTE: &str = "/api/v1/processors/{node_id}/editor";
+pub const PROCESSOR_RETRY_ROUTE: &str = "/api/v1/processors/retry";
 
 pub trait ControlBackend: Send + Sync {
     /// Reads all targets, controls and recorder states from one engine observation.
@@ -313,6 +316,19 @@ pub trait ControlBackend: Send + Sync {
         request: ProcessorEditorRequest,
     ) -> Result<ProcessorEditorStatus, ProtocolError>;
 
+    /// Reprepares one exact active failed provider from its committed saved state.
+    /// # Errors
+    /// Rejects stale graph/catalog revisions, disabled or removed nodes, and stale worker IDs.
+    fn retry_failed_processor(
+        &self,
+        _request: ProcessorRetryRequest,
+    ) -> Result<GraphApplyResponse, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ProcessorUnavailable,
+            parameters: serde_json::json!({"reason":"processor retry is unsupported"}),
+        })
+    }
+
     /// Captures a bounded native image without blocking the async HTTP executor.
     /// # Errors
     /// Returns a protocol failure for an unavailable or busy editor.
@@ -331,30 +347,16 @@ pub trait ControlBackend: Send + Sync {
         Err(processor_unavailable(node_id))
     }
 
-    /// Validates and submits a graph document to the runtime.
+    /// Validates and submits a graph document and its explicit parameter intent to the runtime.
     ///
     /// # Errors
     ///
     /// Returns a stable [`ProtocolError`] when validation, binding, revision,
     /// authorization, or processor submission fails.
-    fn apply_graph(&self, document: GraphDocument) -> Result<GraphApplyResponse, ProtocolError>;
-
-    /// Applies explicit parameter intent without silently discarding it on older backends.
-    ///
-    /// # Errors
-    /// Rejects explicit edits unless the backend implements the intent-aware boundary.
     fn apply_graph_request(
         &self,
         request: GraphApplyRequest,
-    ) -> Result<GraphApplyResponse, ProtocolError> {
-        if !request.processor_parameter_changes.is_empty() {
-            return Err(ProtocolError {
-                code: ErrorCode::GraphInvalid,
-                parameters: serde_json::json!({"reason": "processor parameter changes are unsupported"}),
-            });
-        }
-        self.apply_graph(request.document)
-    }
+    ) -> Result<GraphApplyResponse, ProtocolError>;
 }
 
 #[derive(Clone)]
@@ -438,7 +440,20 @@ impl ControlBackend for UnavailableBackend {
         Err(processor_unavailable(node_id))
     }
 
-    fn apply_graph(&self, _document: GraphDocument) -> Result<GraphApplyResponse, ProtocolError> {
+    fn retry_failed_processor(
+        &self,
+        _request: ProcessorRetryRequest,
+    ) -> Result<GraphApplyResponse, ProtocolError> {
+        Err(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters: serde_json::json!({"resource":"processor_retry"}),
+        })
+    }
+
+    fn apply_graph_request(
+        &self,
+        _request: GraphApplyRequest,
+    ) -> Result<GraphApplyResponse, ProtocolError> {
         Err(ProtocolError {
             code: ErrorCode::ControlUnavailable,
             parameters: serde_json::json!({}),
@@ -446,12 +461,19 @@ impl ControlBackend for UnavailableBackend {
     }
 }
 
-pub fn router() -> Router {
-    router_with_backend(Arc::new(UnavailableBackend))
+pub fn router(operations: ControlOperations) -> Router {
+    router_with_backend(Arc::new(UnavailableBackend), operations)
 }
 
-pub fn router_with_backend(backend: Arc<dyn ControlBackend>) -> Router {
+pub fn router_with_backend(
+    backend: Arc<dyn ControlBackend>,
+    operations: ControlOperations,
+) -> Router {
     Router::new()
+        .route(
+            "/api/v1/operations/{id}",
+            get(operations::get).delete(operations::delete),
+        )
         .route(
             "/api/v1/graphs/{id}/nodes/controls",
             get(node_control::list),
@@ -493,6 +515,7 @@ pub fn router_with_backend(backend: Arc<dyn ControlBackend>) -> Router {
         .route(PROCESSORS_ROUTE, get(processors))
         .route(PROCESSORS_SCAN_ROUTE, put(rescan_processors))
         .route(PROCESSOR_PARAMETER_ROUTE, put(set_processor_parameter))
+        .route(PROCESSOR_RETRY_ROUTE, put(retry_failed_processor))
         .route(
             PROCESSOR_EDITOR_ROUTE,
             get(processor_editor_status).put(set_processor_editor),
@@ -515,10 +538,14 @@ pub fn router_with_backend(backend: Arc<dyn ControlBackend>) -> Router {
             GRAPH_LAYOUT_ROUTE,
             get(graph_layout).put(update_graph_layout),
         )
+        // The last layer is outermost in axum. Keep body admission outside the operation
+        // dispatcher so malformed/incomplete bodies never consume an operation receipt.
+        .layer(axum::middleware::from_fn(operations::dispatch))
         .layer(axum::middleware::from_fn(ingress::read_body))
         // Ingress already bounds every body; avoid Json's separate 2 MiB default.
         .layer(DefaultBodyLimit::disable())
         .layer(control_cors())
+        .layer(axum::Extension(operations))
         .with_state(ControlState { backend })
 }
 
@@ -532,8 +559,12 @@ fn control_cors() -> CorsLayer {
     ];
     CorsLayer::new()
         .allow_origin(AllowOrigin::list(origins))
-        .allow_methods([Method::GET, Method::PUT, Method::POST])
+        .allow_methods([Method::GET, Method::PUT, Method::POST, Method::DELETE])
         .allow_headers([CONTENT_TYPE])
+        .expose_headers([
+            axum::http::header::HeaderName::from_static("x-mixrelay-operation"),
+            axum::http::header::HeaderName::from_static("x-mixrelay-operation-result"),
+        ])
 }
 
 async fn status(State(state): State<ControlState>) -> Response {
@@ -660,14 +691,10 @@ async fn mutate_graph_catalog(
 // Neither may block a Tokio reactor, even when there is only one asynchronous worker.
 async fn catalog_task(work: impl FnOnce() -> Response + Send + 'static) -> Response {
     tokio::task::spawn_blocking(work).await.unwrap_or_else(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ProtocolError {
-                code: ErrorCode::ControlUnavailable,
-                parameters: serde_json::json!({"reason": "graph catalog control task failed"}),
-            }),
+        operations::task_failure(
+            ErrorCode::ControlUnavailable,
+            "graph catalog control task failed",
         )
-            .into_response()
     })
 }
 
@@ -696,14 +723,10 @@ async fn reconfigure_session(
     match tokio::task::spawn_blocking(move || state.backend.reconfigure_session(request)).await {
         Ok(Ok(response)) => (StatusCode::ACCEPTED, Json(response)).into_response(),
         Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ProtocolError {
-                code: ErrorCode::AudioSessionReconfigureFailed,
-                parameters: serde_json::json!({"reason": "session control task failed"}),
-            }),
-        )
-            .into_response(),
+        Err(_) => operations::task_failure(
+            ErrorCode::AudioSessionReconfigureFailed,
+            "session control task failed",
+        ),
     }
 }
 
@@ -733,14 +756,10 @@ async fn reconfigure_virtual_endpoint(
     {
         Ok(Ok(response)) => (StatusCode::ACCEPTED, Json(response)).into_response(),
         Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ProtocolError {
-                code: ErrorCode::AudioSessionReconfigureFailed,
-                parameters: serde_json::json!({"reason":"virtual endpoint control task failed"}),
-            }),
-        )
-            .into_response(),
+        Err(_) => operations::task_failure(
+            ErrorCode::AudioSessionReconfigureFailed,
+            "virtual endpoint control task failed",
+        ),
     }
 }
 
@@ -788,17 +807,18 @@ async fn set_processor_parameter(
     // Accepted parameter updates also checkpoint durable graph state. Keep filesystem work
     // off Tokio's I/O workers; the backend still publishes the native value before saving.
     match tokio::task::spawn_blocking(move || {
-        state.backend.set_processor_parameter(&node_id, parameter_id, update)
-    }).await {
+        state
+            .backend
+            .set_processor_parameter(&node_id, parameter_id, update)
+    })
+    .await
+    {
         Ok(Ok(response)) => (StatusCode::OK, Json(response)).into_response(),
         Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ProtocolError {
-                code: ErrorCode::ControlUnavailable,
-                parameters: serde_json::json!({"reason": "processor parameter control task failed"}),
-            }),
-        ).into_response(),
+        Err(_) => operations::task_failure(
+            ErrorCode::ControlUnavailable,
+            "processor parameter control task failed",
+        ),
     }
 }
 
@@ -837,14 +857,36 @@ async fn set_processor_editor(
     {
         Ok(Ok(response)) => (StatusCode::OK, Json(response)).into_response(),
         Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ProtocolError {
-                code: ErrorCode::ControlUnavailable,
-                parameters: serde_json::json!({"reason": "processor editor control task failed"}),
-            }),
-        )
-            .into_response(),
+        Err(_) => operations::task_failure(
+            ErrorCode::ControlUnavailable,
+            "processor editor control task failed",
+        ),
+    }
+}
+
+async fn retry_failed_processor(
+    State(state): State<ControlState>,
+    request: Result<Json<ProcessorRetryRequest>, JsonRejection>,
+) -> Response {
+    let Json(request) = match request {
+        Ok(request) => request,
+        Err(rejection) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(ProtocolError {
+                    code: ErrorCode::GraphInvalid,
+                    parameters: serde_json::json!({ "reason": rejection.body_text() }),
+                }),
+            )
+                .into_response();
+        }
+    };
+    match tokio::task::spawn_blocking(move || state.backend.retry_failed_processor(request)).await {
+        Ok(Ok(response)) => (StatusCode::OK, Json(response)).into_response(),
+        Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
+        Err(_) => {
+            operations::task_failure(ErrorCode::ControlUnavailable, "processor retry task failed")
+        }
     }
 }
 
@@ -872,14 +914,9 @@ async fn apply_graph(
     match tokio::task::spawn_blocking(move || state.backend.apply_graph_request(document)).await {
         Ok(Ok(response)) => (StatusCode::ACCEPTED, Json(response)).into_response(),
         Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ProtocolError {
-                code: ErrorCode::ControlUnavailable,
-                parameters: serde_json::json!({"reason": "graph control task failed"}),
-            }),
-        )
-            .into_response(),
+        Err(_) => {
+            operations::task_failure(ErrorCode::ControlUnavailable, "graph control task failed")
+        }
     }
 }
 
@@ -926,6 +963,7 @@ mod tests {
         last_preview: Mutex<Option<GraphApplyRequest>>,
         last_endpoint_format:
             Mutex<Option<mixrelay_control_protocol::VirtualEndpointFormatRequest>>,
+        last_retry: Mutex<Option<ProcessorRetryRequest>>,
         editor_gate: Option<Arc<EditorGate>>,
     }
 
@@ -945,6 +983,7 @@ mod tests {
                 last_apply: Mutex::new(None),
                 last_preview: Mutex::new(None),
                 last_endpoint_format: Mutex::new(None),
+                last_retry: Mutex::new(None),
                 editor_gate: None,
             })
         }
@@ -992,12 +1031,13 @@ mod tests {
                     node_id: node_id.to_owned(),
                     request,
                 });
-            self.apply_graph(document()).map(|application| {
-                mixrelay_control_protocol::NodeControlResponse {
-                    application,
-                    requires_graph_reload: false,
-                }
-            })
+            self.apply_graph_request(document().into())
+                .map(
+                    |application| mixrelay_control_protocol::NodeControlResponse {
+                        application,
+                        requires_graph_reload: false,
+                    },
+                )
         }
         fn recorder_status(
             &self,
@@ -1134,6 +1174,17 @@ mod tests {
                 driver_state: mixrelay_control_protocol::DriverState::Ready,
                 sample_rate: Some(48_000),
                 buffer_frames: Some(128),
+                processor_latencies: vec![mixrelay_control_protocol::ProcessorLatency {
+                    graph_id: "graph-a".to_owned(),
+                    node_id: "effect".to_owned(),
+                    transport_frames: 128,
+                    intrinsic_frames: None,
+                }],
+                failed_processors: vec![mixrelay_control_protocol::FailedProcessor {
+                    graph_id: "graph-a".to_owned(),
+                    node_id: "effect".to_owned(),
+                    instance_id: "18446744073709551615".to_owned(),
+                }],
                 ..AppStatus::default()
             }
         }
@@ -1216,22 +1267,23 @@ mod tests {
             Ok(test_editor_status(node_id, request.open))
         }
 
-        fn apply_graph(
+        fn retry_failed_processor(
             &self,
-            _document: GraphDocument,
+            request: ProcessorRetryRequest,
         ) -> Result<GraphApplyResponse, ProtocolError> {
-            self.apply_result
-                .lock()
-                .expect("test result should not be poisoned")
-                .clone()
+            *self.last_retry.lock().unwrap() = Some(request);
+            self.apply_result.lock().unwrap().clone()
         }
 
         fn apply_graph_request(
             &self,
             request: GraphApplyRequest,
         ) -> Result<GraphApplyResponse, ProtocolError> {
-            *self.last_apply.lock().unwrap() = Some(request.clone());
-            self.apply_graph(request.document)
+            *self.last_apply.lock().unwrap() = Some(request);
+            self.apply_result
+                .lock()
+                .expect("test result should not be poisoned")
+                .clone()
         }
     }
 
@@ -1256,7 +1308,7 @@ mod tests {
                 value: 0.25,
             },
         );
-        let router = router_with_backend(backend.clone());
+        let router = router_with_backend(backend.clone(), ControlOperations::new());
         let (status, _) = response_json(
             router.clone(),
             Request::builder()
@@ -1289,8 +1341,8 @@ mod tests {
                 .apply_graph_request(request)
                 .unwrap_err()
                 .code,
-            ErrorCode::GraphInvalid,
-            "legacy backends cannot claim success after dropping explicit edits"
+            ErrorCode::ControlUnavailable,
+            "an unavailable backend rejects the complete request"
         );
     }
 
@@ -1305,9 +1357,10 @@ mod tests {
             last_apply: Mutex::new(None),
             last_preview: Mutex::new(None),
             last_endpoint_format: Mutex::new(None),
+            last_retry: Mutex::new(None),
             editor_gate: Some(gate.clone()),
         });
-        let router = router_with_backend(backend);
+        let router = router_with_backend(backend, ControlOperations::new());
         let close_router = router.clone();
         let close = tokio::spawn(async move {
             response_json(
@@ -1386,7 +1439,7 @@ mod tests {
         }));
         let route = "/api/v1/graphs/saved/layout";
         let (status, body) = response_json(
-            router_with_backend(backend.clone()),
+            router_with_backend(backend.clone(), ControlOperations::new()),
             Request::builder().uri(route).body(Body::empty()).unwrap(),
         )
         .await;
@@ -1396,7 +1449,7 @@ mod tests {
         let layout = json!({"positions":{"duplex:input":{"x":-50.0,"y":75.0}},"viewport":{"x":-100.0,"y":80.0,"zoom":0.5}});
         for (revision, expected_status) in [(4, StatusCode::OK), (3, StatusCode::CONFLICT)] {
             let (status, body) = response_json(
-                router_with_backend(backend.clone()),
+                router_with_backend(backend.clone(), ControlOperations::new()),
                 Request::builder()
                     .method(Method::PUT)
                     .uri(route)
@@ -1419,7 +1472,7 @@ mod tests {
         let invalid =
             json!({"expectedLayoutRevision":4,"layout":{"positions":{"node":{"x":null,"y":1}}}});
         let (status, body) = response_json(
-            router_with_backend(backend),
+            router_with_backend(backend, ControlOperations::new()),
             Request::builder()
                 .method(Method::PUT)
                 .uri(route)
@@ -1443,7 +1496,7 @@ mod tests {
         }));
         for route in [GRAPH_CATALOG_ROUTE, "/api/v1/graphs/saved"] {
             let (status, body) = response_json(
-                router_with_backend(backend.clone()),
+                router_with_backend(backend.clone(), ControlOperations::new()),
                 Request::builder().uri(route).body(Body::empty()).unwrap(),
             )
             .await;
@@ -1457,7 +1510,7 @@ mod tests {
             }
         }
         for (revision, expected_status) in [(7, StatusCode::OK), (6, StatusCode::CONFLICT)] {
-            let (status, body) = response_json(router_with_backend(backend.clone()), Request::builder().method(Method::PUT).uri(GRAPH_CATALOG_ROUTE).header(CONTENT_TYPE, "application/json")
+            let (status, body) = response_json(router_with_backend(backend.clone(), ControlOperations::new()), Request::builder().method(Method::PUT).uri(GRAPH_CATALOG_ROUTE).header(CONTENT_TYPE, "application/json")
                 .body(Body::from(json!({"action":"rename","id":"saved","name":"SPAT","expectedRevision":5,"expectedCatalogRevision":revision}).to_string())).unwrap()).await;
             assert_eq!(status, expected_status);
             if status == StatusCode::OK {
@@ -1468,7 +1521,7 @@ mod tests {
             }
         }
         let (status, _) = response_json(
-            router_with_backend(backend),
+            router_with_backend(backend, ControlOperations::new()),
             Request::builder()
                 .method(Method::PUT)
                 .uri(GRAPH_CATALOG_ROUTE)
@@ -1482,7 +1535,7 @@ mod tests {
 
     #[tokio::test]
     async fn default_routes_are_loopback_safe_and_versioned() {
-        let health = router()
+        let health = router(ControlOperations::new())
             .oneshot(
                 Request::builder()
                     .uri(HEALTH_ROUTE)
@@ -1497,7 +1550,7 @@ mod tests {
         assert_eq!(&health_body[..], b"ok");
 
         let (_, status) = response_json(
-            router(),
+            router(ControlOperations::new()),
             Request::builder()
                 .uri(STATUS_ROUTE)
                 .body(Body::empty())
@@ -1507,7 +1560,7 @@ mod tests {
         assert_eq!(status["driverState"], "not_installed");
 
         let (_, graph) = response_json(
-            router(),
+            router(ControlOperations::new()),
             Request::builder()
                 .uri(GRAPH_STATUS_ROUTE)
                 .body(Body::empty())
@@ -1517,7 +1570,7 @@ mod tests {
         assert_eq!(graph["activeRevision"], 0);
 
         let (_, graph_document) = response_json(
-            router(),
+            router(ControlOperations::new()),
             Request::builder()
                 .uri(GRAPH_ROUTE)
                 .body(Body::empty())
@@ -1526,7 +1579,7 @@ mod tests {
         .await;
         assert_eq!(graph_document["revision"], 0);
 
-        let (status, error) = apply_request(router(), &document()).await;
+        let (status, error) = apply_request(router(ControlOperations::new()), &document()).await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(error["code"], "control_unavailable");
     }
@@ -1540,7 +1593,7 @@ mod tests {
             persistence_error: None,
         }));
         let (_, status) = response_json(
-            router_with_backend(backend.clone()),
+            router_with_backend(backend.clone(), ControlOperations::new()),
             Request::builder()
                 .uri(STATUS_ROUTE)
                 .body(Body::empty())
@@ -1548,9 +1601,18 @@ mod tests {
         )
         .await;
         assert_eq!(status["driverState"], "ready");
+        assert_eq!(status["processorLatencies"][0]["graphId"], "graph-a");
+        assert_eq!(status["processorLatencies"][0]["nodeId"], "effect");
+        assert_eq!(status["processorLatencies"][0]["transportFrames"], 128);
+        assert!(status["processorLatencies"][0]["intrinsicFrames"].is_null());
+        assert_eq!(
+            status["failedProcessors"][0]["instanceId"],
+            "18446744073709551615"
+        );
+        assert!(status.get("processorTimings").is_none());
 
         let (_, graph) = response_json(
-            router_with_backend(backend.clone()),
+            router_with_backend(backend.clone(), ControlOperations::new()),
             Request::builder()
                 .uri(GRAPH_STATUS_ROUTE)
                 .body(Body::empty())
@@ -1561,7 +1623,7 @@ mod tests {
         assert_eq!(graph["submittedRevision"], 5);
 
         let (_, graph_document) = response_json(
-            router_with_backend(backend.clone()),
+            router_with_backend(backend.clone(), ControlOperations::new()),
             Request::builder()
                 .uri(GRAPH_ROUTE)
                 .body(Body::empty())
@@ -1570,7 +1632,11 @@ mod tests {
         .await;
         assert_eq!(graph_document["revision"], 5);
 
-        let (status, response) = apply_request(router_with_backend(backend), &document()).await;
+        let (status, response) = apply_request(
+            router_with_backend(backend, ControlOperations::new()),
+            &document(),
+        )
+        .await;
         assert_eq!(status, StatusCode::ACCEPTED);
         assert_eq!(response["revision"], 5);
         assert_eq!(response["state"], "pending");
@@ -1585,7 +1651,7 @@ mod tests {
             persistence_error: None,
         }));
         let (status, response) = response_json(
-            router_with_backend(backend),
+            router_with_backend(backend, ControlOperations::new()),
             Request::builder()
                 .method(Method::PUT)
                 .uri("/api/v1/processors/vst-node/parameters/42")
@@ -1601,6 +1667,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn failed_processor_retry_uses_a_typed_revision_and_instance_guarded_route() {
+        let backend = TestBackend::with_result(Ok(GraphApplyResponse {
+            protocol_version: PROTOCOL_VERSION,
+            revision: 6,
+            state: GraphApplyState::Pending,
+            persistence_error: None,
+        }));
+        let (status, response) = response_json(
+            router_with_backend(backend.clone(), ControlOperations::new()),
+            Request::builder()
+                .method(Method::PUT)
+                .uri(PROCESSOR_RETRY_ROUTE)
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"graphId":"graph-a","nodeId":"effect","expectedRevision":5,"expectedCatalogRevision":7,"expectedInstanceId":"18446744073709551615"}"#,
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response["revision"], 6);
+        assert_eq!(
+            *backend.last_retry.lock().unwrap(),
+            Some(ProcessorRetryRequest {
+                graph_id: "graph-a".into(),
+                node_id: "effect".into(),
+                expected_revision: 5,
+                expected_catalog_revision: 7,
+                expected_instance_id: "18446744073709551615".into(),
+            })
+        );
+    }
+
+    #[tokio::test]
     async fn accepted_processor_parameter_storage_warning_remains_http_success() {
         let backend = TestBackend::with_result(Ok(GraphApplyResponse {
             protocol_version: PROTOCOL_VERSION,
@@ -1609,7 +1709,7 @@ mod tests {
             persistence_error: None,
         }));
         let (status, response) = response_json(
-            router_with_backend(backend),
+            router_with_backend(backend, ControlOperations::new()),
             Request::builder()
                 .method(Method::PUT)
                 .uri("/api/v1/processors/unsaved-node/parameters/42")
@@ -1632,7 +1732,7 @@ mod tests {
             persistence_error: None,
         }));
         let (status, closed) = response_json(
-            router_with_backend(backend.clone()),
+            router_with_backend(backend.clone(), ControlOperations::new()),
             Request::builder()
                 .uri("/api/v1/processors/processor-node/editor")
                 .body(Body::empty())
@@ -1643,7 +1743,7 @@ mod tests {
         assert_eq!(closed["state"], "closed");
 
         let (status, opened) = response_json(
-            router_with_backend(backend),
+            router_with_backend(backend, ControlOperations::new()),
             Request::builder()
                 .method(Method::PUT)
                 .uri("/api/v1/processors/processor-node/editor")
@@ -1679,7 +1779,11 @@ mod tests {
                 code,
                 parameters: json!({ "revision": 5 }),
             }));
-            let (status, response) = apply_request(router_with_backend(backend), &document()).await;
+            let (status, response) = apply_request(
+                router_with_backend(backend, ControlOperations::new()),
+                &document(),
+            )
+            .await;
             assert_eq!(status, expected_status);
             assert_eq!(response["parameters"]["revision"], 5);
         }

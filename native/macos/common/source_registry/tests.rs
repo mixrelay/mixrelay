@@ -1,5 +1,39 @@
 use super::*;
-use crate::shared_audio_buffer::mr_shared_audio_buffer_write;
+use crate::{
+    application_source_transport::{
+        SourceTransport, mr_application_source_transport_attach,
+        mr_application_source_transport_publish_native, mr_application_source_transport_reset,
+        mr_application_source_transport_write,
+    },
+    shared_audio_buffer::mr_shared_audio_buffer_write,
+    source_control::SourceAttachment,
+};
+
+fn producer(registry: &SourceRegistry, request: &SourceRequest) -> SourceTransport {
+    let attached = registry.attach(request).unwrap();
+    let mut attachment = SourceAttachment {
+        descriptor: attached.descriptor.into_raw_fd(),
+        mapped_size: attached.mapped_size,
+        producer_lease: attached.producer_lease,
+        source_epoch: attached.source_epoch,
+    };
+    let owner = unsafe {
+        mr_application_source_transport_attach(
+            &raw mut attachment,
+            request.capacity_frames,
+            request.channels,
+            ptr::null_mut(),
+        )
+    };
+    assert!(!owner.is_null());
+    // Move the unique facade owner out of its allocation; its real destructor
+    // still closes the lease and mapping when this test-owned value drops.
+    *unsafe { Box::from_raw(owner) }
+}
+
+fn collect(registry: &SourceRegistry) {
+    registry.collect(&mut registry.control());
+}
 
 fn request(id: &str) -> SourceRequest {
     let mut request = SourceRequest {
@@ -213,4 +247,305 @@ fn consumer_waits_for_current_format_ack_then_transfers_actual_pcm() {
         0
     );
     assert!(registry.clock(source.token).is_none());
+}
+
+#[test]
+fn sequential_producer_drop_reuses_slots_beyond_the_active_source_limit() {
+    let registry = SourceRegistry::new();
+    for index in 0..MAX_SOURCES * 2 {
+        let owner = producer(&registry, &request(&format!("application.{index}")));
+        assert_eq!(registry.control().owners.len(), 1);
+        drop(owner);
+    }
+    // Each subsequent real attach collects its predecessor; the final closed
+    // source is reclaimed at the next control collection, not from its Drop.
+    collect(&registry);
+    assert!(registry.control().owners.is_empty());
+    assert!(
+        registry
+            .slots
+            .iter()
+            .all(|slot| slot.load(Ordering::SeqCst).is_null())
+    );
+}
+
+#[test]
+fn paused_producers_retain_all_64_active_slots() {
+    let registry = SourceRegistry::new();
+    let owners: Vec<_> = (0..MAX_SOURCES)
+        .map(|index| producer(&registry, &request(&format!("paused.{index}"))))
+        .collect();
+    for owner in &owners {
+        unsafe {
+            mr_application_source_transport_publish_native(&raw const *owner, 128, true);
+            mr_application_source_transport_publish_native(&raw const *owner, 0, false);
+        }
+    }
+    collect(&registry);
+    assert_eq!(registry.control().owners.len(), MAX_SOURCES);
+    assert_eq!(
+        registry
+            .attach(&request("overflow"))
+            .err()
+            .unwrap()
+            .to_string(),
+        "source inventory full"
+    );
+    drop(owners);
+    collect(&registry);
+    assert!(registry.control().owners.is_empty());
+    drop(producer(&registry, &request("overflow")));
+}
+
+#[test]
+fn closed_source_is_silent_before_collection_and_same_id_gets_a_new_lease() {
+    let registry = SourceRegistry::new();
+    let request = request("one");
+    let mut owner = producer(&registry, &request);
+    let read = registry.read(token(b"one"));
+    let source = read.source().unwrap();
+    let clock = source.mapping.clock();
+    let old_lease = clock.producer_lease.load(Ordering::Acquire);
+    let mut output = [9.0; 256];
+    assert_eq!(
+        registry.read_audio(source.token, &mut output, 128, 48_000),
+        0
+    );
+    let format = clock.format_word.load(Ordering::Acquire);
+    unsafe {
+        assert!(mr_application_source_transport_reset(
+            &raw mut owner,
+            format,
+            48_000
+        ));
+        assert!(mr_application_source_transport_write(
+            &raw mut owner,
+            [0.25; 1536].as_ptr(),
+            768
+        ));
+        mr_application_source_transport_publish_native(&raw const owner, 768, true);
+    }
+    assert_eq!(
+        registry.read_audio(source.token, &mut output, 128, 48_000),
+        128
+    );
+    let epoch = unsafe { mr_shared_audio_buffer_stats(source.mapping.buffer.as_ptr()) }.epoch;
+    assert!(source.read_is_current(old_lease, format, epoch));
+    let grant_claim = source.claim_producer().unwrap();
+    drop(owner);
+    // PCM is already copied. Even when guard contention leaves its old format
+    // and epoch intact, the exact post-read predicate must reject the closed lease.
+    assert_eq!(clock.acknowledged_format.load(Ordering::Acquire), format);
+    assert_eq!(
+        unsafe { mr_shared_audio_buffer_stats(source.mapping.buffer.as_ptr()) }.epoch,
+        epoch
+    );
+    assert!(!source.read_is_current(old_lease, format, epoch));
+    drop(grant_claim);
+    let observed = allocation_counter::measure(|| {
+        assert_eq!(
+            registry.read_audio(source.token, &mut output, 128, 48_000),
+            0
+        );
+    });
+    assert_eq!(observed.count_total, 0);
+    assert!(output.iter().all(|sample| *sample == 0.0));
+    assert!(registry.clock(source.token).is_none());
+    collect(&registry);
+    assert!(registry.read(source.token).source().is_none());
+    assert_eq!(registry.control().owners.len(), 1);
+    let replacement = producer(&registry, &request);
+    let current = registry.read(source.token);
+    let current_source = current.source().unwrap();
+    assert_ne!(source.mapping.buffer, current_source.mapping.buffer);
+    assert!(
+        current_source
+            .mapping
+            .clock()
+            .producer_lease
+            .load(Ordering::Acquire)
+            > old_lease
+    );
+    assert_eq!(
+        unsafe { mr_shared_audio_buffer_stats(current_source.mapping.buffer.as_ptr()) }.epoch,
+        2
+    );
+    assert_eq!(registry.control().owners.len(), 2);
+    drop(current);
+    drop(read);
+    collect(&registry);
+    assert_eq!(registry.control().owners.len(), 1);
+    drop(replacement);
+    collect(&registry);
+    assert!(registry.control().owners.is_empty());
+}
+
+#[test]
+fn stale_producer_drop_cannot_close_a_replacement_grant() {
+    let registry = SourceRegistry::new();
+    let request = request("one");
+    let old = producer(&registry, &request);
+    let current = producer(&registry, &request);
+    let read = registry.read(token(b"one"));
+    let source = read.source().unwrap();
+    let lease = source
+        .mapping
+        .clock()
+        .producer_lease
+        .load(Ordering::Acquire);
+    drop(old);
+    assert_eq!(
+        source
+            .mapping
+            .clock()
+            .producer_lease
+            .load(Ordering::Acquire),
+        lease
+    );
+    collect(&registry);
+    assert_eq!(registry.control().owners.len(), 1);
+    drop(current);
+    collect(&registry);
+    assert_eq!(registry.control().owners.len(), 1);
+    drop(read);
+    collect(&registry);
+    assert!(registry.control().owners.is_empty());
+}
+
+#[test]
+fn invalidated_epoch_does_not_keep_a_closed_source_slot() {
+    let registry = SourceRegistry::new();
+    let owner = producer(&registry, &request("invalidated"));
+    {
+        let read = registry.read(token(b"invalidated"));
+        let source = read.source().unwrap();
+        unsafe { mr_shared_audio_buffer_request_epoch(source.mapping.buffer.as_ptr()) };
+        assert_eq!(
+            unsafe { mr_shared_audio_buffer_stats(source.mapping.buffer.as_ptr()) }.epoch,
+            0
+        );
+        drop(owner);
+        assert_eq!(
+            source
+                .mapping
+                .clock()
+                .producer_lease
+                .load(Ordering::Acquire),
+            0
+        );
+    }
+    collect(&registry);
+    assert!(registry.control().owners.is_empty());
+    assert!(registry.read(token(b"invalidated")).source().is_none());
+}
+
+#[test]
+fn closed_source_retirement_pressure_stays_bounded_until_readers_drain() {
+    let registry = SourceRegistry::new();
+    let request = request("pinned");
+    let mut readers = Vec::new();
+    for _ in 0..MAX_RETAINED {
+        let owner = producer(&registry, &request);
+        readers.push(registry.read(token(b"pinned")));
+        drop(owner);
+        collect(&registry);
+    }
+    assert_eq!(registry.control().owners.len(), MAX_RETAINED);
+    assert_eq!(
+        registry.attach(&request).err().unwrap().kind(),
+        io::ErrorKind::WouldBlock
+    );
+    drop(readers);
+    collect(&registry);
+    assert!(registry.control().owners.is_empty());
+    drop(producer(&registry, &request));
+}
+
+#[derive(Clone, Copy, Default)]
+#[repr(C)]
+struct DescriptorLimit {
+    current: u64,
+    maximum: u64,
+}
+
+unsafe extern "C" {
+    fn getrlimit(resource: i32, limit: *mut DescriptorLimit) -> i32;
+    fn setrlimit(resource: i32, limit: *const DescriptorLimit) -> i32;
+    fn mprotect(address: *mut std::ffi::c_void, length: usize, protection: i32) -> i32;
+    fn fcntl(descriptor: i32, command: i32, ...) -> i32;
+}
+
+#[test]
+fn grant_descriptor_failure_and_registry_reclamation_in_an_isolated_process() {
+    const CHILD: &str = "MIXRELAY_SOURCE_REGISTRY_RETIREMENT_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "source_registry::tests::grant_descriptor_failure_and_registry_reclamation_in_an_isolated_process", "--test-threads=1"])
+            .env(CHILD, "1")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        return;
+    }
+    exercise_failed_grant_and_reclamation();
+}
+
+fn exercise_failed_grant_and_reclamation() {
+    use std::os::fd::AsRawFd;
+
+    let registry = SourceRegistry::new();
+    let owner = producer(&registry, &request("closing"));
+    let read = registry.read(token(b"closing"));
+    let source = read.source().unwrap();
+    let address = source.mapping.buffer.as_ptr().cast();
+    let descriptor = source.mapping.descriptor.as_raw_fd();
+    let clock = source.mapping.clock();
+    let lease = clock.producer_lease.load(Ordering::Acquire);
+    let epoch = unsafe { mr_shared_audio_buffer_stats(source.mapping.buffer.as_ptr()) }.epoch;
+    let grant_claim = source.claim_producer().unwrap();
+    // Match attach's grant-before-publication interval. Drop must signal closure
+    // even while that remote control operation holds the producer guard.
+    drop(owner);
+    assert_eq!(clock.producer_lease.load(Ordering::Acquire), 0);
+    let mut limit = DescriptorLimit::default();
+    assert_eq!(unsafe { getrlimit(8, &raw mut limit) }, 0);
+    let exhausted = DescriptorLimit {
+        current: limit.current.min(64),
+        ..limit
+    };
+    let mut filled = Vec::with_capacity(64);
+    assert_eq!(unsafe { setrlimit(8, &raw const exhausted) }, 0);
+    // F_DUPFD_CLOEXEC needs a valid descriptor minimum below the limit. Fill
+    // that small range with owned duplicates; never close inherited descriptors.
+    let fill_error = (0..64).find_map(|_| match source.mapping.descriptor.try_clone() {
+        Ok(descriptor) => {
+            filled.push(descriptor);
+            None
+        }
+        Err(error) => Some(error),
+    });
+    let failed = source.grant(lease + 1, None);
+    // Restore before any assertions or further descriptor allocations. The real
+    // try_clone failed without changing the stream, not a mocked grant result.
+    assert_eq!(unsafe { setrlimit(8, &raw const limit) }, 0);
+    drop(filled);
+    assert_eq!(fill_error.unwrap().raw_os_error(), Some(24));
+    assert_eq!(failed.err().unwrap().raw_os_error(), Some(24));
+    assert_eq!(
+        unsafe { mr_shared_audio_buffer_stats(source.mapping.buffer.as_ptr()) }.epoch,
+        epoch
+    );
+    assert_eq!(clock.producer_lease.load(Ordering::Acquire), 0);
+    drop(grant_claim);
+    collect(&registry);
+    assert_eq!(registry.control().owners.len(), 1);
+    assert_eq!(unsafe { mprotect(address, 1, 3) }, 0);
+    assert_ne!(unsafe { fcntl(descriptor, 1) }, -1);
+    drop(read);
+    collect(&registry);
+    assert!(registry.control().owners.is_empty());
+    assert_eq!(unsafe { mprotect(address, 1, 3) }, -1);
+    assert_eq!(io::Error::last_os_error().raw_os_error(), Some(12));
+    assert_eq!(unsafe { fcntl(descriptor, 1) }, -1);
+    assert_eq!(io::Error::last_os_error().raw_os_error(), Some(9));
 }

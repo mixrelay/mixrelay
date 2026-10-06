@@ -12,6 +12,14 @@ quantum or another application's buffer. No global metadata is changed. Actual
 variable callback quantum is an internal observation, never an
 `observedDeviceBufferFrames` value or a reason to overwrite the selected buffer.
 
+The private daemon follows PipeWire's VM policy: a 1,024-frame native minimum
+inside a VM, with 128-frame MixRelay DSP blocks. The normal Debian 13 / PipeWire
+1.4.2 forward-and-mute test retained 480,000 frames with no missing, repeated or
+invalid samples, output read shortage or clock discontinuity during measurement.
+Forcing native 128-frame scheduling had lost source frames before engine ingress.
+This is a lab configuration correction, not a production performance comparison
+or proof of lossless 128-frame scheduling on physical Linux hardware.
+
 Actual Ubuntu ARM64 / PipeWire 1.0.5 isolated-daemon measurements (clock-rate-v10):
 
 | Selected PCM rate | Processing block maximum | Native graph quantum | Observed stream PCM callback |

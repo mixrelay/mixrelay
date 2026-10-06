@@ -528,88 +528,129 @@ fn rejected_write_paths_release_the_claim_and_never_accept_inactive_epoch() {
 }
 
 #[test]
-fn exited_producer_is_retired_by_drained_hal_start_and_only_new_mapping_recovers() {
+fn exited_hal_writer_is_retired_in_both_rings_and_only_new_mapping_recovers() {
     use crate::hal_io::{
         HalIoContext, mr_hal_io_begin_stream, mr_hal_io_bind, mr_hal_io_requires_replacement,
         mr_hal_io_unbind, mr_hal_io_write_render,
     };
-    let old = DuplexMapping::new();
-    let render = old.render();
-    let mut child = ClaimChild::spawn(render);
-    assert_eq!(
-        child.wait(),
-        0,
-        "child must exit after acquiring its real claim"
-    );
-    assert_eq!(unsafe { &*render }.producer_busy.load(Ordering::Acquire), 1);
-    let mut restarted_hal = HalIoContext::new(1, 1).unwrap();
-    unsafe {
-        assert!(mr_hal_io_bind(
-            &raw mut restarted_hal,
-            old.transport().cast()
-        ));
-        // Actual native caller authority: the old producer process has exited,
-        // and this replacement context has never admitted any IO callbacks.
-        assert!(!mr_hal_io_begin_stream(&raw mut restarted_hal));
-        assert!(mr_hal_io_requires_replacement(&raw mut restarted_hal));
-        assert!(mr_shared_audio_buffer_requires_replacement(render));
-        assert_eq!(mr_shared_audio_buffer_try_begin_epoch(render), 0);
-        assert!(!mr_shared_audio_buffer_write(
-            render,
-            1,
-            0,
-            [1.0].as_ptr(),
-            1
-        ));
+    for capture in [false, true] {
+        let old = DuplexMapping::new();
+        let ring = if capture { old.capture() } else { old.render() };
+        let mut child = ClaimChild::spawn(ring);
         assert_eq!(
-            (&*render).producer_busy.load(Ordering::Acquire),
-            1,
-            "retirement must never clear an abandoned claim"
-        );
-        mr_hal_io_unbind(&raw mut restarted_hal);
-        let fresh = DuplexMapping::new();
-        assert!(mr_hal_io_bind(
-            &raw mut restarted_hal,
-            fresh.transport().cast()
-        ));
-        assert!(mr_hal_io_begin_stream(&raw mut restarted_hal));
-        assert!(!mr_hal_io_requires_replacement(&raw mut restarted_hal));
-        assert!(mr_hal_io_write_render(
-            &raw mut restarted_hal,
+            child.wait(),
             0,
-            [0.25].as_ptr(),
-            1
-        ));
-        mr_hal_io_unbind(&raw mut restarted_hal);
+            "child must exit after acquiring its real claim"
+        );
+        assert_eq!(unsafe { &*ring }.producer_busy.load(Ordering::Acquire), 1);
+        let mut restarted_hal = HalIoContext::new(1, 1).unwrap();
+        unsafe {
+            assert!(mr_hal_io_bind(
+                &raw mut restarted_hal,
+                old.transport().cast()
+            ));
+            // Actual native caller authority: the old producer process has exited,
+            // and this replacement context has never admitted any IO callbacks.
+            assert!(!mr_hal_io_begin_stream(&raw mut restarted_hal));
+            assert!(mr_hal_io_requires_replacement(&raw mut restarted_hal));
+            assert!(mr_shared_audio_buffer_requires_replacement(ring));
+            assert_eq!(mr_shared_audio_buffer_try_begin_epoch(ring), 0);
+            assert!(!mr_shared_audio_buffer_write(ring, 1, 0, [1.0].as_ptr(), 1));
+            assert_eq!(
+                (&*ring).producer_busy.load(Ordering::Acquire),
+                1,
+                "retirement must never clear an abandoned claim"
+            );
+            mr_hal_io_unbind(&raw mut restarted_hal);
+            let fresh = DuplexMapping::new();
+            assert!(mr_hal_io_bind(
+                &raw mut restarted_hal,
+                fresh.transport().cast()
+            ));
+            assert!(mr_hal_io_begin_stream(&raw mut restarted_hal));
+            assert!(!mr_hal_io_requires_replacement(&raw mut restarted_hal));
+            assert!(mr_hal_io_write_render(
+                &raw mut restarted_hal,
+                0,
+                [0.25].as_ptr(),
+                1
+            ));
+            mr_hal_io_unbind(&raw mut restarted_hal);
+        }
     }
 }
 
 #[test]
-fn hal_start_never_retires_the_remote_capture_writer_on_contention() {
+fn capture_rearm_never_retires_a_live_hal_writer_and_recovers_after_claim_release() {
     use crate::hal_io::{
-        HalIoContext, mr_hal_io_begin_stream, mr_hal_io_bind, mr_hal_io_requires_replacement,
-        mr_hal_io_unbind,
+        HalIoContext, mr_hal_io_begin_stream, mr_hal_io_bind, mr_hal_io_clock_state,
+        mr_hal_io_read_capture, mr_hal_io_requires_replacement, mr_hal_io_unbind,
+        mr_hal_io_write_render,
     };
     let mapping = DuplexMapping::new();
-    let capture = unsafe { &*mapping.capture() };
-    let remote_writer = capture.claim_producer().unwrap();
+    let capture_pointer = mapping.capture();
+    let capture = unsafe { &*capture_pointer };
     let mut hal = HalIoContext::new(1, 1).unwrap();
     unsafe {
         assert!(mr_hal_io_bind(&raw mut hal, mapping.transport().cast()));
         assert!(mr_hal_io_begin_stream(&raw mut hal));
+        mr_hal_io_clock_state(&raw mut hal, 48_000, true);
+        assert!(mr_hal_io_write_render(
+            &raw mut hal,
+            0,
+            [0.25_f32].as_ptr(),
+            1
+        ));
+    }
+    let epoch = unsafe { mr_shared_audio_buffer_stats(capture_pointer) }.epoch;
+    // Model the sole HAL capture publication still owning its claim. Reader-side rearm may
+    // request silence concurrently, but drained-only begin_stream has no authority here.
+    let hal_writer = capture.claim_producer().unwrap();
+    let mut output = [1.0_f32];
+    let pcm = [0.5_f32];
+    unsafe {
+        assert_eq!(mr_shared_audio_buffer_try_begin_epoch(capture_pointer), 0);
         assert!(!mr_hal_io_requires_replacement(&raw mut hal));
         assert!(!mr_shared_audio_buffer_requires_replacement(
-            mapping.capture()
+            capture_pointer
         ));
-        assert!(mr_shared_audio_buffer_epoch_pending(mapping.capture()));
+        assert!(mr_shared_audio_buffer_epoch_pending(capture_pointer));
+        assert_eq!(capture.producer_busy.load(Ordering::Acquire), 1);
+        assert!(!mr_shared_audio_buffer_write(
+            capture_pointer,
+            epoch,
+            1,
+            pcm.as_ptr(),
+            1
+        ));
+        assert_eq!(
+            mr_hal_io_read_capture(&raw mut hal, 0, output.as_mut_ptr(), 1),
+            0
+        );
+        assert_eq!(output.map(f32::to_bits), [0.0_f32.to_bits()]);
+    }
+    drop(hal_writer);
+    assert_eq!(
+        unsafe { mr_shared_audio_buffer_try_begin_epoch(capture_pointer) },
+        epoch + 1
+    );
+    unsafe {
+        assert!(!mr_shared_audio_buffer_write(
+            capture_pointer,
+            epoch,
+            1,
+            pcm.as_ptr(),
+            1
+        ));
+        assert!(mr_hal_io_write_render(&raw mut hal, 1, pcm.as_ptr(), 1));
+        assert_eq!(
+            mr_hal_io_read_capture(&raw mut hal, 1, output.as_mut_ptr(), 1),
+            1
+        );
+        assert_eq!(output.map(f32::to_bits), [0.5_f32.to_bits()]);
         mr_hal_io_unbind(&raw mut hal);
     }
-    drop(remote_writer);
-    assert_eq!(
-        unsafe { mr_shared_audio_buffer_try_begin_epoch(mapping.capture()) },
-        2
-    );
-    assert!(!unsafe { mr_shared_audio_buffer_retire_busy_producer_after_drain(mapping.capture()) });
+    assert!(!unsafe { mr_shared_audio_buffer_retire_busy_producer_after_drain(capture_pointer) });
     assert!(!unsafe { mr_shared_audio_buffer_retire_busy_producer_after_drain(ptr::null_mut()) });
 }
 

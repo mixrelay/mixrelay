@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import type { RuntimeGraphDocument } from '../../core/control-port/types';
-import { controlChanges, rebaseControls } from './controlReconciliation';
+import { acknowledgedNodeControl, controlChanges, rebaseControls } from './controlReconciliation';
 import { runtimeGraphToAudioGraph } from './model';
 
 const before: RuntimeGraphDocument = {
@@ -9,6 +9,18 @@ const before: RuntimeGraphDocument = {
   edges: [],
   nodes: [{ id: 'gain', type: 'gain', label: 'Gain', config: { channels: 2, gainDb: 0 } }],
 };
+
+it('acknowledged controls only patch the addressed node and preserve topology/configuration', () => {
+  const after = acknowledgedNodeControl(before, 'gain', { muted: true, gainDb: -0.12345 }, 4);
+  expect(after.revision).toBe(4);
+  expect(after.edges).toBe(before.edges);
+  expect(after.nodes[0]?.config).toEqual({ channels: 2, gainDb: Math.fround(-0.12345) });
+  expect(after.nodes[0]?.control).toEqual({ enabled: true, muted: true });
+  expect(before.nodes[0]?.config).toEqual({ channels: 2, gainDb: 0 });
+  expect(acknowledgedNodeControl(before, 'deleted', { enabled: false }, 4).nodes[0]).toBe(
+    before.nodes[0],
+  );
+});
 
 function first<T>(items: T[]): T {
   const item = items[0];

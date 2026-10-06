@@ -568,7 +568,7 @@ fn deleted_and_readded_identity_rejects_delayed_node_and_recorder_commands() {
     deleted.revision += 1;
     deleted.nodes.retain(|node| node.id.as_str() != "record");
     deleted.edges.clear();
-    engine.apply_graph(deleted.clone()).unwrap();
+    engine.apply_graph_request(deleted.clone().into()).unwrap();
     assert!(engine.exchange.activate_pending(&mut processor));
     assert_eq!(
         engine
@@ -588,7 +588,7 @@ fn deleted_and_readded_identity_rejects_delayed_node_and_recorder_commands() {
     let mut replaced = graph();
     replaced.revision = deleted.revision + 1;
     replaced.nodes[1].label = Some("New recorder instance".into());
-    engine.apply_graph(replaced.clone()).unwrap();
+    engine.apply_graph_request(replaced.clone().into()).unwrap();
     assert!(engine.exchange.activate_pending(&mut processor));
     assert_eq!(
         engine

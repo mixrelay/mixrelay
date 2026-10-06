@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import { isAbsolute, join } from 'node:path';
+import { volumeStep } from './action-settings.mjs';
 import { operations } from './capabilities.mjs';
 
 export function targetNode(snapshot, settings) {
@@ -20,6 +19,8 @@ export function commandFor(snapshot, settings, operation = settings.operation, t
   if (
     !snapshot?.session ||
     !Number.isSafeInteger(snapshot.revision) ||
+    !Number.isSafeInteger(snapshot.activeRevision) ||
+    snapshot.activeRevision < snapshot.revision ||
     !operations(node).includes(operation)
   )
     throw new Error('Target unavailable');
@@ -36,14 +37,17 @@ export function commandFor(snapshot, settings, operation = settings.operation, t
       if (!Number.isFinite(ticks)) throw new Error('Invalid dial value');
       request.gainDb = Math.max(
         -60,
-        Math.min(12, node.gainDb + ticks * (operation === 'gain_up' ? 0.5 : -0.5)),
+        Math.min(
+          12,
+          node.gainDb + ticks * volumeStep(settings) * (operation === 'gain_up' ? 1 : -1),
+        ),
       );
-    } else return recorderCommand(base, request, node, settings, operation);
+    } else return recorderCommand(base, request, node, operation);
   }
   return { type: 'node', ...base, request };
 }
 
-function recorderCommand(base, request, node, settings, action) {
+function recorderCommand(base, request, node, action) {
   const recording = node.recorder;
   if (!recording) throw new Error('Recorder unavailable');
   if (
@@ -52,22 +56,12 @@ function recorderCommand(base, request, node, settings, action) {
     (action === 'stop' && !['recording', 'paused'].includes(recording.state))
   )
     throw new Error('Recording state changed');
-  const transport = { action };
-  if (action === 'record' && recording.state !== 'paused') {
-    if (typeof settings.recordingFolder !== 'string' || !isAbsolute(settings.recordingFolder))
-      throw new Error('Choose an absolute recording folder');
-    transport.path = join(
-      settings.recordingFolder,
-      `MixRelay-${new Date().toISOString().replaceAll(':', '-')}-${randomUUID()}.wav`,
-    );
-    // Follow input sample rate; use the same PCM24 default as the app.
-  }
   return {
     type: 'recorder',
     ...base,
     request: {
       ...request,
-      request: transport,
+      request: { action },
       expectedRecording: { state: recording.state, path: recording.path ?? null },
     },
   };
@@ -79,6 +73,7 @@ export function presentation(snapshot, settings) {
   if (!node || !operations(node).includes(settings.operation))
     return { title: 'MixRelay', value: 'Unavailable' };
   const title = node.label || node.nodeId;
+  if (snapshot.activeRevision < snapshot.revision) return { title, value: 'Pending' };
   if (!node.control.enabled) return { title, value: 'OFF' };
   if (snapshot.enginePower && (!snapshot.enginePower.enabled || snapshot.enginePower.transitioning))
     return { title, value: 'Engine OFF' };

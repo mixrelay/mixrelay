@@ -119,6 +119,39 @@ describe('routing meter freshness', () => {
 });
 
 describe('routing meter invalidation subscriptions', () => {
+  it('clears a deleted node from the next snapshot without disturbing surviving meters', async () => {
+    const source = port();
+    const survivingKey = audioMeterKey('processor', 'bus:1');
+    const survivingNode = { nodeId: 'processor', portId: 'bus:1', peaks: [1, 0.001] };
+    source.getMeters.mockResolvedValue({
+      ...frame(),
+      nodes: [...frame().nodes, survivingNode],
+    });
+    const { result } = renderHook(() => useRoutingMeters(source));
+    await advance();
+    const store = result.current;
+    expect(store.levels(key)).toEqual([100]);
+    expect(store.levels(survivingKey)).toEqual([100, 0]);
+    const deletedListener = vi.fn(() => store.levels(key));
+    const survivingListener = vi.fn(() => store.levels(survivingKey));
+    const unsubscribeDeleted = store.subscribe(key, deletedListener);
+    const unsubscribeSurviving = store.subscribe(survivingKey, survivingListener);
+
+    source.getMeters.mockResolvedValue({ ...frame(), revision: 8, nodes: [survivingNode] });
+    await advance(50);
+    expect(store.levels(key)).toEqual([]);
+    expect(deletedListener).toHaveBeenCalledTimes(1);
+    expect(deletedListener).toHaveReturnedWith([]);
+    expect(store.levels(survivingKey)).toEqual([100, 0]);
+    expect(survivingListener).not.toHaveBeenCalled();
+    await advance(50);
+    expect(store.levels(key)).toEqual([]);
+    expect(deletedListener).toHaveBeenCalledTimes(1);
+    expect(store.levels(survivingKey)).toEqual([100, 0]);
+    unsubscribeDeleted();
+    unsubscribeSurviving();
+  });
+
   it.each(['failure', 'stale', 'hidden', 'unmount'] as const)(
     'notifies meter subscribers when invalidated by %s',
     async (reason) => {

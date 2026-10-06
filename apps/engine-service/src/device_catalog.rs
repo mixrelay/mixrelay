@@ -1,9 +1,8 @@
-//! Catalog-owned device identity. Graphs carry editable snapshots; accepting one
-//! device edit updates every reference in the same catalog transaction.
+//! Driver-owned device identity. Graphs carry reference snapshots, not device intent.
 use std::collections::{BTreeMap, BTreeSet};
 
 use mixrelay_audio_graph::{GraphDocument, NodeConfig, VirtualEndpointId, VirtualEndpointSpec};
-use mixrelay_audio_io::{VirtualEndpointDeviceSettings, VirtualEndpointSettings};
+use mixrelay_audio_io::VirtualEndpointSettings;
 use mixrelay_control_protocol::ProtocolError;
 
 use super::{Catalog, EngineGraphController, invalid};
@@ -17,11 +16,12 @@ fn specs(
 ) -> Result<BTreeMap<VirtualEndpointId, VirtualEndpointSpec>, ProtocolError> {
     let mut devices = BTreeMap::new();
     for node in &document.nodes {
-        if let NodeConfig::VirtualEndpoint(config) = &node.config
-            && let Some(previous) = devices.insert(config.id.clone(), config.spec.clone())
-            && previous != config.spec
-        {
-            return Err(invalid("conflicting device definitions in one graph"));
+        if let NodeConfig::VirtualEndpoint(config) = &node.config {
+            config
+                .spec
+                .validate_contract(64, 64)
+                .map_err(|error| invalid(&error.to_string()))?;
+            devices.insert(config.id.clone(), config.spec.clone());
         }
     }
     Ok(devices)
@@ -34,49 +34,54 @@ impl Catalog {
     ) -> Result<BTreeMap<VirtualEndpointId, VirtualEndpointSpec>, ProtocolError> {
         let mut devices = BTreeMap::new();
         for (_, document) in self.documents() {
-            for (id, spec) in specs(document)? {
-                if let Some(previous) = devices.insert(id, spec.clone())
-                    && previous != spec
-                {
-                    return Err(invalid("device definitions disagree across graphs"));
-                }
-            }
+            devices.extend(specs(document)?);
         }
         Ok(devices)
-    }
-
-    pub(super) fn reconcile_device_edits(&mut self, previous: &Self) -> Result<(), ProtocolError> {
-        let registered = previous.device_specs()?;
-        let before = specs(&previous.active().document)?;
-        let edited = specs(&self.active().document)?;
-        for (id, spec) in &edited {
-            if let Some(canonical) = registered.get(id)
-                && canonical != spec
-                && !before.contains_key(id)
-            {
-                return Err(invalid(
-                    "new reference disagrees with existing device settings",
-                ));
-            }
-        }
-        // Device-level settings propagate; reference gain, visible sides, cables
-        // and layout stay graph-local. The final reference controls native lifetime.
-        for graph in &mut self.graphs {
-            for node in &mut graph.document.nodes {
-                if let NodeConfig::VirtualEndpoint(config) = &mut node.config
-                    && let Some(spec) = edited.get(&config.id)
-                {
-                    config.spec.clone_from(spec);
-                    node.label = Some(spec.display_name.clone());
-                }
-            }
-        }
-        self.device_specs()?;
-        Ok(())
     }
 }
 
 impl EngineGraphController {
+    /// Replaces copied graph device metadata only in the unpublished execution input.
+    /// Driver mutations are explicit API operations, never inferred from graph edits.
+    /// # Errors
+    /// Rejects missing Driver identities or unavailable authoritative settings.
+    pub(crate) fn resolve_execution_devices(
+        &self,
+        documents: &mut [(String, GraphDocument)],
+    ) -> Result<(), ProtocolError> {
+        let desired: BTreeMap<_, _> = documents
+            .iter()
+            .flat_map(|(_, graph)| &graph.nodes)
+            .filter_map(|node| match &node.config {
+                NodeConfig::VirtualEndpoint(config) => {
+                    Some((config.id.clone(), config.spec.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        if desired.is_empty() {
+            return Ok(());
+        }
+        let actual: BTreeMap<_, _> = self
+            .endpoint_backend
+            .resolve_graph_devices(&desired.into_values().collect::<Vec<_>>())
+            .map_err(|error| invalid(&error.to_string()))?
+            .into_iter()
+            .map(|spec| (spec.id.clone(), spec))
+            .collect();
+        for (_, graph) in documents {
+            for node in &mut graph.nodes {
+                if let NodeConfig::VirtualEndpoint(config) = &mut node.config {
+                    config.spec.clone_from(
+                        actual
+                            .get(&config.id)
+                            .ok_or_else(|| invalid("Driver device is missing"))?,
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
     /// Builds a single observed-rate snapshot for session publication or startup recall.
     pub(crate) fn observed_catalog_candidate(
         &self,
@@ -135,47 +140,31 @@ impl EngineGraphController {
     }
 
     pub(crate) fn endpoint_settings(&self) -> Option<VirtualEndpointSettings> {
-        let mut settings = self.endpoint_backend.settings()?;
-        let native: BTreeMap<_, _> = settings
-            .devices
-            .drain(..)
-            .map(|device| (device.spec.id.clone(), device))
-            .collect();
-        let catalog = self.catalog.lock();
-        let devices = match catalog.as_ref().and_then(|store| store.value.as_ref().ok()) {
-            Some(value) => value.device_specs().ok()?,
-            None => specs(&self.graph.read()).ok()?,
-        };
-        settings.devices = devices
-            .into_values()
-            .map(|spec| {
-                let observed_sample_rate = self.endpoint_backend.sample_rate(&spec.id).ok();
-                let capability = native.get(&spec.id);
-                VirtualEndpointDeviceSettings {
-                    native_device_ids: capability
-                        .map_or_else(Vec::new, |device| device.native_device_ids.clone()),
-                    supported_sample_rates: capability.map_or_else(
-                        || spec.supported_sample_rates.clone(),
-                        |device| device.supported_sample_rates.clone(),
-                    ),
-                    can_set_sample_rate: capability
-                        .is_some_and(|device| device.can_set_sample_rate),
-                    spec,
-                    observed_sample_rate,
-                }
-            })
-            .collect();
-        Some(settings)
+        self.endpoint_backend.settings()
     }
 
+    /// Refreshes all catalog references from the Driver before publication.
+    /// # Errors
+    /// Rejects missing devices and invalid observed specifications without Driver mutation.
     pub(crate) fn reconcile_catalog_devices(
         &self,
         candidate: &mut Catalog,
     ) -> Result<(), ProtocolError> {
-        let catalog = self.catalog.lock();
-        if let Some(previous) = catalog.as_ref().and_then(|store| store.value.as_ref().ok()) {
-            candidate.reconcile_device_edits(previous)?;
+        let mut documents: Vec<_> = candidate
+            .documents()
+            .map(|(id, graph)| (id.to_owned(), graph.clone()))
+            .collect();
+        self.resolve_execution_devices(&mut documents)?;
+        for ((_, graph), (_, resolved)) in candidate.documents_mut().zip(documents) {
+            for (node, actual) in graph.nodes.iter_mut().zip(resolved.nodes) {
+                if let (NodeConfig::VirtualEndpoint(config), NodeConfig::VirtualEndpoint(actual)) =
+                    (&mut node.config, actual.config)
+                {
+                    config.spec = actual.spec;
+                }
+            }
         }
+        candidate.device_specs()?;
         Ok(())
     }
 }

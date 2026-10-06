@@ -3,11 +3,11 @@
 //! publishing the captured preset to the in-memory document. A failed close can then retry
 //! against the same live instance instead of pretending that an unsaved preset was stored.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::graph_composition::runtime_node_id;
 use mixrelay_audio_graph::NodeId;
-use mixrelay_processor_host::ProcessorStateError;
+use mixrelay_processor_host::{PROCESSOR_STATE_TIMEOUT, ProcessorStateError};
 
 use super::{EngineGraphController, NodeConfig, ProtocolError, invalid, unavailable};
 
@@ -17,7 +17,8 @@ impl EngineGraphController {
     /// stopping the service. This must never run on the real-time audio thread.
     ///
     /// # Errors
-    /// Rejects pending audio publication, unavailable/unsupported native state, and any
+    /// Rejects pending audio publication when native providers need a checkpoint,
+    /// unavailable/unsupported native state, and any
     /// storage failure. Existing graph/catalog documents remain unchanged on failure.
     pub fn checkpoint_processor_state(&self, node_id: Option<&str>) -> Result<(), ProtocolError> {
         let _mutation = self.mutation.lock();
@@ -70,12 +71,15 @@ impl EngineGraphController {
         target: Option<(&str, &str)>,
         mut capture: impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,
     ) -> Result<(), ProtocolError> {
+        let reuse = self.processor_controls.reuse_transaction();
         let result = self.checkpoint_processor_state_transaction(target, &mut capture);
         if let Err(error) = &result {
             *self.catalog_write_error.lock() =
                 Some(format!("native state checkpoint failed: {error:?}"));
         }
-        result
+        result?;
+        reuse.commit();
+        Ok(())
     }
 
     fn checkpoint_processor_state_transaction(
@@ -83,12 +87,6 @@ impl EngineGraphController {
         target: Option<(&str, &str)>,
         capture: &mut impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,
     ) -> Result<(), ProtocolError> {
-        let revisions = self.exchange.revisions();
-        if revisions.active != revisions.submitted {
-            return Err(unavailable(
-                "native state checkpoint requires an active graph",
-            ));
-        }
         let document = self.graph.read().clone();
         let Some(mut candidate) = self.catalog_candidate(&document) else {
             return if target.is_none()
@@ -102,10 +100,29 @@ impl EngineGraphController {
                 Err(unavailable("graph catalog is unavailable"))
             };
         };
+        // Shutdown can race the first restored audio revision. With no native
+        // provider in any graph there is nothing to export or rewrite; keep the
+        // already durable catalog untouched. Real provider snapshots still need
+        // the exact active publication before inspecting any worker instance.
+        if target.is_none()
+            && !candidate.documents().any(|(_, graph)| {
+                graph
+                    .nodes
+                    .iter()
+                    .any(|node| matches!(node.config, NodeConfig::Provider(_)))
+            })
+        {
+            return Ok(());
+        }
+        let revisions = self.exchange.revisions();
+        if revisions.active != revisions.submitted {
+            return Err(unavailable(
+                "native state checkpoint requires an active graph",
+            ));
+        }
         let mut found = false;
-        let deadline = Instant::now() + Duration::from_secs(5);
         for (graph_id, graph) in candidate.documents_mut() {
-            found |= self.capture_document((graph_id, graph), target, deadline, capture)?;
+            found |= self.capture_document((graph_id, graph), target, capture)?;
         }
         if !found {
             return if target.is_some() {
@@ -127,7 +144,6 @@ impl EngineGraphController {
         &self,
         graph: (&str, &mut mixrelay_audio_graph::GraphDocument),
         target: Option<(&str, &str)>,
-        deadline: Instant,
         capture: &mut impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,
     ) -> Result<bool, ProtocolError> {
         let (graph_id, document) = graph;
@@ -155,15 +171,12 @@ impl EngineGraphController {
                 found = true;
                 continue;
             }
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return Err(unavailable("processor state snapshot deadline exceeded"));
-            }
             // Replace the whole preset: stale parameter overlays must not undo editor edits.
-            provider.parameters = capture(&runtime_node_id(graph_id, &node.id), remaining)
-                .map_err(|error| {
-                    unavailable(&format!("processor state snapshot failed: {error}"))
-                })?;
+            provider.parameters = capture(
+                &runtime_node_id(graph_id, &node.id),
+                PROCESSOR_STATE_TIMEOUT,
+            )
+            .map_err(|error| unavailable(&format!("processor state snapshot failed: {error}")))?;
             found = true;
         }
         Ok(found)

@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "io.mixrelay.desktop",
   "build": {
-    "beforeDevCommand": "pnpm --dir ../.. desktop:icons && pnpm --dir ../control-ui dev",
-    "beforeBuildCommand": "pnpm --dir ../.. desktop:icons && pnpm --dir ../control-ui build",
+    "beforeDevCommand": "pnpm --dir ../.. desktop:prepare-engine --profile dev && pnpm --dir ../.. desktop:icons && pnpm --dir ../control-ui dev",
+    "beforeBuildCommand": "pnpm --dir ../.. desktop:prepare-engine --profile release && pnpm --dir ../.. desktop:icons && pnpm --dir ../control-ui build",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../../control-ui/dist"
   },
@@ -28,14 +28,23 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "licenseFile": "../../../LICENSE.txt",
+    "resources": {
+      "../../../LICENSE.txt": "LICENSE.txt",
+      "../../../LICENSE-Driver.txt": "LICENSE-Driver.txt",
+      "../../../CHANGELOG.md": "CHANGELOG.md",
+      "../../../vendor/LICENSE-MIT": "third-party/truce-rack/LICENSE-MIT",
+      "../../../vendor/LICENSE-APACHE": "third-party/truce-rack/LICENSE-APACHE"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
+      "icons/icon.icns"
     ],
     "category": "Music",
+    "shortDescription": "Audio routing and processing",
+    "longDescription": "Route audio between devices and applications, apply audio processors, and record signals using node-based graphs.",
     "macOS": {
       "minimumSystemVersion": "14.2"
     }

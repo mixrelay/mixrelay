@@ -2,7 +2,12 @@
 use super::*;
 use mixrelay_audio_io::VirtualEndpointSettings;
 use mixrelay_control_protocol::VirtualEndpointFormatRequest;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::{
+    path::Path,
+    sync::atomic::{AtomicBool, AtomicU32, Ordering},
+};
+
+use mixrelay_processor_state::{StateStore, read_bundle, write_bundle};
 
 #[path = "endpoint_format_ack_tests.rs"]
 mod acknowledgements;
@@ -122,6 +127,7 @@ impl VirtualEndpointBackend for Endpoint {
                     spec,
                     supported_sample_rates: vec![44_100, 48_000],
                     can_set_sample_rate: true,
+                    native_formats: mixrelay_audio_io::NativeDeviceFormats::default(),
                 }
             })
             .collect();
@@ -136,7 +142,11 @@ impl VirtualEndpointBackend for Endpoint {
 }
 struct Reject;
 impl GraphResourceBackend for Reject {
-    fn reconcile(&self, _: &GraphDocument) -> Result<(), HostAudioBackendError> {
+    fn reconcile(
+        &self,
+        _: &GraphDocument,
+        _: crate::PlaybackBindings<'_>,
+    ) -> Result<(), HostAudioBackendError> {
         Err(HostAudioBackendError::BackendFailure {
             message: "fixture graph preparation failed".into(),
         })
@@ -188,8 +198,9 @@ fn workspace_request(
 }
 
 fn saved_workspace_rate(path: &str, rate: u32) {
-    let mut file: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let (manifest, references) = read_bundle(std::fs::File::open(path).unwrap(), None).unwrap();
+    assert!(references.is_empty());
+    let mut file: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
     for graph in file["catalog"]["graphs"].as_array_mut().unwrap() {
         let mut document: GraphDocument =
             serde_json::from_value(graph["document"].clone()).unwrap();
@@ -201,7 +212,11 @@ fn saved_workspace_rate(path: &str, rate: u32) {
         }
         graph["document"] = serde_json::to_value(document).unwrap();
     }
-    std::fs::write(path, serde_json::to_vec(&file).unwrap()).unwrap();
+    let manifest = serde_json::to_vec(&file).unwrap();
+    let store = StateStore::new(Path::new(path).with_extension("states"));
+    let mut bundle = Vec::new();
+    write_bundle(&mut bundle, &manifest, &references, &store).unwrap();
+    std::fs::write(path, bundle).unwrap();
 }
 
 #[test]
@@ -292,6 +307,42 @@ fn partial_native_write_failure_restores_only_the_requested_device() {
     assert_eq!(state.calls.load(Ordering::Acquire), 2);
     assert_eq!(state.resumed.load(Ordering::Acquire), 1);
     assert_eq!(controller.graph().revision, 1);
+}
+
+#[test]
+fn supported_native_pair_round_trip_preserves_processing_clock_and_peer_rate() {
+    let (controller, state) = fixture();
+    let original = controller.context.read().format;
+    let changed = controller.change_endpoint_format(&request()).unwrap();
+    let _active = crate::controller_test_support::settle(&controller);
+    controller
+        .change_endpoint_format(&VirtualEndpointFormatRequest {
+            expected_revision: changed.revision,
+            sample_rate: 48_000,
+            ..request()
+        })
+        .unwrap();
+    assert_eq!(state.rate.load(Ordering::Acquire), 48_000);
+    assert_eq!(state.peer_rate.load(Ordering::Acquire), 48_000);
+    assert_eq!(controller.context.read().format, original);
+    assert_eq!(state.resumed.load(Ordering::Acquire), 2);
+}
+
+#[test]
+fn device_setter_never_receives_rates_outside_the_native_pair() {
+    let (controller, state) = fixture();
+    for sample_rate in [32_000, 88_200, 96_000, 192_000] {
+        assert!(
+            controller
+                .change_endpoint_format(&VirtualEndpointFormatRequest {
+                    sample_rate,
+                    ..request()
+                })
+                .is_err()
+        );
+    }
+    assert_eq!(state.calls.load(Ordering::Acquire), 0);
+    assert_eq!(state.resumed.load(Ordering::Acquire), 0);
 }
 
 #[test]

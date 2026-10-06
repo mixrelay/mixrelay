@@ -201,6 +201,12 @@ pub struct AppStatus {
     /// Fresh per-processor transport samples; identities remain graph-local.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub processor_timings: Vec<ProcessorTiming>,
+    /// Prepared transport delay and cached native latency, independent of wall-clock timing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub processor_latencies: Vec<ProcessorLatency>,
+    /// Failed hosted processors that still belong to the active execution snapshot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed_processors: Vec<FailedProcessor>,
     /// Finalization error from a removed recorder, retained independently of its node.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recorder_error: Option<String>,
@@ -239,6 +245,43 @@ pub struct ProcessorTiming {
     pub graph_id: String,
     pub node_id: String,
     pub round_trip_ns: u64,
+}
+
+/// A live prepared processor's latency snapshot in its processing-rate sample frames.
+///
+/// This is observation only: it does not imply that graph paths are delay-compensated.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessorLatency {
+    /// Authored graph identity, independent of the graph currently viewed in the editor.
+    pub graph_id: String,
+    /// Authored node identity within `graph_id`.
+    pub node_id: String,
+    /// Fixed engine-to-worker audio delay; excludes scheduling time and native latency.
+    pub transport_frames: u32,
+    /// Cached native latency; `None` is unknown, while `Some(0)` is a reported zero.
+    pub intrinsic_frames: Option<u32>,
+}
+
+/// A failed active provider that can be explicitly retried against this exact worker instance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FailedProcessor {
+    pub graph_id: String,
+    pub node_id: String,
+    /// Decimal `u64` token serialized as text to preserve exact identity in JavaScript clients.
+    pub instance_id: String,
+}
+
+/// Explicit retry of one failed active provider, guarded by graph, catalog and worker identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProcessorRetryRequest {
+    pub graph_id: String,
+    pub node_id: String,
+    pub expected_revision: u64,
+    pub expected_catalog_revision: u64,
+    pub expected_instance_id: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -301,8 +344,10 @@ pub struct ExternalProcessorDescriptor {
     pub vendor: String,
     pub version: String,
     pub format: ExternalProcessorFormat,
-    pub input_channels: u16,
-    pub output_channels: u16,
+    /// Exact native bus configurations validated by the disposable probe.
+    pub layouts: Vec<mixrelay_audio_graph::ProviderPorts>,
+    /// Preferred member of `layouts` for insertion without a manual selection.
+    pub default_layout_id: String,
     pub has_editor: bool,
     pub parameters: Vec<ProcessorParameterDescriptor>,
 }
@@ -415,6 +460,8 @@ impl Default for AppStatus {
         Self {
             engine_power: None,
             processor_timings: Vec::new(),
+            processor_latencies: Vec::new(),
+            failed_processors: Vec::new(),
             recorder_error: None,
             protocol_version: PROTOCOL_VERSION,
             driver_state: DriverState::NotInstalled,
@@ -466,6 +513,41 @@ pub struct ProtocolError {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn latency_status_distinguishes_unknown_from_zero_and_transport_timing() {
+        let mut status = super::AppStatus::default();
+        assert!(
+            serde_json::to_value(&status)
+                .unwrap()
+                .get("processorLatencies")
+                .is_none()
+        );
+        for (graph, latency) in [
+            ("graph-a", None),
+            ("graph-b", Some(0)),
+            ("graph-c", Some(u32::MAX)),
+        ] {
+            status.processor_latencies.push(super::ProcessorLatency {
+                graph_id: graph.to_owned(),
+                node_id: "effect".to_owned(),
+                transport_frames: 128,
+                intrinsic_frames: latency,
+            });
+        }
+        let value = serde_json::to_value(&status).unwrap();
+        assert!(value.get("processorTimings").is_none());
+        let entries = &value["processorLatencies"];
+        assert_eq!(entries[0]["graphId"], "graph-a");
+        assert_eq!(entries[1]["graphId"], "graph-b");
+        assert_eq!(entries[0]["nodeId"], "effect");
+        assert_eq!(entries[0]["transportFrames"], 128);
+        assert!(entries[0]["intrinsicFrames"].is_null());
+        assert_eq!(entries[1]["intrinsicFrames"], 0);
+        assert_eq!(entries[2]["intrinsicFrames"], u32::MAX);
+        let decoded: super::AppStatus = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded.processor_latencies, status.processor_latencies);
+    }
+
+    #[test]
     fn processor_timing_status_preserves_graph_identity_and_omits_unmeasured_values() {
         let mut status = super::AppStatus::default();
         let empty = serde_json::to_value(&status).unwrap();
@@ -480,6 +562,43 @@ mod tests {
         assert_eq!(value["processorTimings"][0]["roundTripNs"], 1_333_333);
         let decoded: super::AppStatus = serde_json::from_value(value).unwrap();
         assert_eq!(decoded.processor_timings, status.processor_timings);
+    }
+
+    #[test]
+    fn failed_processor_status_and_retry_identity_are_exact_and_optional() {
+        let mut status = super::AppStatus::default();
+        assert!(
+            serde_json::to_value(&status)
+                .unwrap()
+                .get("failedProcessors")
+                .is_none()
+        );
+        status.failed_processors.push(super::FailedProcessor {
+            graph_id: "graph-a".into(),
+            node_id: "effect".into(),
+            instance_id: "18446744073709551615".into(),
+        });
+        let value = serde_json::to_value(&status).unwrap();
+        assert_eq!(
+            value["failedProcessors"][0]["instanceId"],
+            "18446744073709551615"
+        );
+        let decoded: super::AppStatus = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded.failed_processors, status.failed_processors);
+
+        let request = super::ProcessorRetryRequest {
+            graph_id: "graph-a".into(),
+            node_id: "effect".into(),
+            expected_revision: 12,
+            expected_catalog_revision: 7,
+            expected_instance_id: "18446744073709551615".into(),
+        };
+        let value = serde_json::to_value(&request).unwrap();
+        assert_eq!(value["expectedInstanceId"], "18446744073709551615");
+        assert_eq!(
+            serde_json::from_value::<super::ProcessorRetryRequest>(value).unwrap(),
+            request
+        );
     }
 
     #[test]

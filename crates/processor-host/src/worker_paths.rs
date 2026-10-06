@@ -47,7 +47,6 @@ fn cache_directory_for(
 ) -> io::Result<PathBuf> {
     let (key, suffix) = match os {
         "macos" => ("HOME", "Library/Caches/MixRelay"),
-        "windows" => ("LOCALAPPDATA", "MixRelay/Cache"),
         "linux" => {
             if let Some(path) = environment("XDG_CACHE_HOME").filter(|path| !path.is_empty()) {
                 return absolute(path, "XDG_CACHE_HOME").map(|path| path.join("MixRelay"));
@@ -115,8 +114,6 @@ fn private_directory(directory: &Path) -> io::Result<()> {
             fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
         }
     }
-    // Windows inherits the current user's LOCALAPPDATA profile ACL. Individual
-    // files use create_new, and open mappings are dropped before unlinking.
     Ok(())
 }
 
@@ -130,7 +127,6 @@ mod tests {
         let base = FixtureDir::new("processor-cache-layout").unwrap();
         for (os, key, suffix) in [
             ("macos", "HOME", "Library/Caches/MixRelay"),
-            ("windows", "LOCALAPPDATA", "MixRelay/Cache"),
             ("linux", "HOME", ".cache/MixRelay"),
         ] {
             assert_eq!(

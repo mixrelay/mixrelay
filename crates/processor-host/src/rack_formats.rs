@@ -5,12 +5,14 @@
 //! the same bounded shared-memory worker model for every supported format.
 
 use std::{
+    collections::HashSet,
     mem::ManuallyDrop,
     path::{Path, PathBuf},
 };
 
 use arrayvec::ArrayVec;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use mixrelay_audio_graph::ProviderPorts;
 use mixrelay_control_protocol::{
     ExternalProcessorDescriptor, ExternalProcessorFormat, ProcessorParameterDescriptor,
 };
@@ -21,12 +23,13 @@ use truce_rack_core::{
     bus::BusLayout,
     events::EventList,
     info::{ParameterFlags, PluginCategory, PluginInfo},
-    plugin::{ProcessContext, ProcessStatus},
+    plugin::{MainThreadUpdate, ProcessContext, ProcessStatus},
     scanner::PluginScanner,
 };
 
 #[cfg(test)]
 mod channel_tests;
+pub(crate) mod layouts;
 
 pub const SCAN_ARGUMENT: &str = "--mixrelay-plugin-scan";
 pub const PROBE_ARGUMENT: &str = "--mixrelay-plugin-probe";
@@ -206,7 +209,19 @@ impl RackLocator {
 pub(crate) struct RackProbeRecord {
     pub descriptor: ExternalProcessorDescriptor,
     pub locator: RackLocator,
-    pub layout_index: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RackScanReport {
+    pub locators: Vec<RackLocator>,
+    pub path_failures: Vec<ScanPathFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ScanPathFailure {
+    pub path: PathBuf,
+    pub message: String,
 }
 
 /// Formats available in the current target build.
@@ -232,21 +247,46 @@ pub(crate) fn supported_formats() -> Vec<RackFormat> {
 ///
 /// Returns an error when discovery fails or its result cannot be serialized.
 pub fn run_scan(format: RackFormat, custom_paths: &[PathBuf]) -> Result<(), String> {
-    let infos = match format {
-        RackFormat::Clap => scan_with_paths(&truce_rack_clap::ClapScanner::new(), custom_paths)?,
-        RackFormat::Vst3 => scan_with_paths(&truce_rack_vst3::Vst3Scanner::new(), custom_paths)?,
+    let (infos, path_failures) = match format {
+        RackFormat::Clap => {
+            let scanner = truce_rack_clap::ClapScanner::new();
+            scan_with_paths(
+                format,
+                custom_paths,
+                || scanner.scan().map_err(|error| error.to_string()),
+                |path| scanner.scan_path(path).map_err(|error| error.to_string()),
+            )?
+        }
+        RackFormat::Vst3 => {
+            let scanner = truce_rack_vst3::Vst3Scanner::new();
+            scan_with_paths(
+                format,
+                custom_paths,
+                || scanner.scan().map_err(|error| error.to_string()),
+                |path| scanner.scan_path(path).map_err(|error| error.to_string()),
+            )?
+        }
         #[cfg(target_vendor = "apple")]
-        RackFormat::Au => truce_rack_au::AuScanner::new()
-            .scan()
-            .map_err(|error| error.to_string())?,
+        RackFormat::Au => (
+            truce_rack_au::AuScanner::new()
+                .scan()
+                .map_err(|error| error.to_string())?,
+            Vec::new(),
+        ),
         #[cfg(target_vendor = "apple")]
-        RackFormat::Auv3 => truce_rack_au3::Au3Scanner::new()
-            .scan()
-            .map_err(|error| error.to_string())?,
+        RackFormat::Auv3 => (
+            truce_rack_au3::Au3Scanner::new()
+                .scan()
+                .map_err(|error| error.to_string())?,
+            Vec::new(),
+        ),
         #[cfg(target_os = "linux")]
-        RackFormat::Lv2 => truce_rack_lv2::Lv2Scanner::new()
-            .scan()
-            .map_err(|error| error.to_string())?,
+        RackFormat::Lv2 => (
+            truce_rack_lv2::Lv2Scanner::new()
+                .scan()
+                .map_err(|error| error.to_string())?,
+            Vec::new(),
+        ),
         #[allow(unreachable_patterns)]
         _ => {
             return Err(format!(
@@ -255,27 +295,46 @@ pub fn run_scan(format: RackFormat, custom_paths: &[PathBuf]) -> Result<(), Stri
             ));
         }
     };
-    let records = infos
+    let locators = infos
         .into_iter()
         .map(|info| RackLocator::from_info(format, info))
         .filter(RackLocator::is_audio_processor)
         .collect::<Vec<_>>();
     println!(
         "{}",
-        serde_json::to_string(&records).map_err(|error| error.to_string())?
+        serde_json::to_string(&RackScanReport {
+            locators,
+            path_failures,
+        })
+        .map_err(|error| error.to_string())?
     );
     Ok(())
 }
 
-fn scan_with_paths<S: PluginScanner>(
-    scanner: &S,
+fn scan_with_paths(
+    format: RackFormat,
     custom_paths: &[PathBuf],
-) -> Result<Vec<PluginInfo>, String> {
-    let mut infos = scanner.scan().map_err(|error| error.to_string())?;
+    default_scan: impl FnOnce() -> Result<Vec<PluginInfo>, String>,
+    mut scan_path: impl FnMut(&Path) -> Result<Vec<PluginInfo>, String>,
+) -> Result<(Vec<PluginInfo>, Vec<ScanPathFailure>), String> {
+    let mut infos = default_scan()?;
+    let mut path_failures = Vec::new();
     for path in custom_paths {
-        infos.extend(scanner.scan_path(path).map_err(|error| error.to_string())?);
+        let extension = path.extension().and_then(std::ffi::OsStr::to_str);
+        if matches!(extension, Some("clap" | "vst3" | "lv2"))
+            && extension != Some(format.argument())
+        {
+            continue;
+        }
+        match scan_path(path) {
+            Ok(found) => infos.extend(found),
+            Err(error) => path_failures.push(ScanPathFailure {
+                path: path.clone(),
+                message: error,
+            }),
+        }
     }
-    Ok(infos)
+    Ok((infos, path_failures))
 }
 
 /// Loads a single candidate in an isolated process and emits its usable effect layout.
@@ -325,9 +384,25 @@ fn describe_loaded_plugin<P: Plugin<f32>>(
     mut locator: RackLocator,
     plugin: &mut P,
 ) -> Result<RackProbeRecord, String> {
-    let (layout_index, layout) = select_effect_layout(plugin.supported_layouts())
+    let verified = layouts::verified_layouts(plugin)?;
+    let usable_ids: HashSet<&str> = verified
+        .iter()
+        .map(|ports| ports.layout_id.as_str())
+        .collect();
+    let usable: Vec<_> = plugin
+        .supported_layouts()
+        .iter()
+        .filter(|layout| {
+            layouts::describe(layout)
+                .is_ok_and(|ports| usable_ids.contains(ports.layout_id.as_str()))
+        })
+        .cloned()
+        .collect();
+    let (_, layout) = select_effect_layout(&usable)
         .ok_or_else(|| "plugin exposes no supported audio effect layout".to_owned())?;
     let layout = layout.clone();
+    let default_ports = layouts::describe(&layout)?;
+    let default_layout_id = default_ports.layout_id.clone();
     // A successful scan only proves that the binary can be opened. Activate the selected layout
     // in the disposable probe process so an incompatible plugin never reaches the live catalog.
     plugin
@@ -338,6 +413,7 @@ fn describe_loaded_plugin<P: Plugin<f32>>(
     // authoritative capability source exposed to both the UI catalog and the live worker.
     locator.has_editor = plugin.info().has_editor;
     let result = (|| {
+        layouts::verify_active(plugin, &default_ports)?;
         let parameters = (0..plugin.parameter_count())
             .filter_map(|index| plugin.parameter_info(index).ok())
             .filter(|parameter| !parameter.flags.contains(ParameterFlags::HIDDEN))
@@ -350,7 +426,6 @@ fn describe_loaded_plugin<P: Plugin<f32>>(
                 is_read_only: parameter.flags.contains(ParameterFlags::READ_ONLY),
             })
             .collect();
-        let (input_channels, output_channels) = layout_channels(&layout)?;
         Ok(RackProbeRecord {
             descriptor: ExternalProcessorDescriptor {
                 type_id: format!("{}:{}", locator.format.argument(), locator.unique_id),
@@ -358,16 +433,18 @@ fn describe_loaded_plugin<P: Plugin<f32>>(
                 vendor: locator.vendor.clone(),
                 version: locator.version.to_string(),
                 format: locator.format.protocol(),
-                input_channels,
-                output_channels,
+                layouts: verified,
+                default_layout_id,
                 has_editor: locator.has_editor,
                 parameters,
             },
             locator,
-            layout_index,
         })
     })();
     plugin.deactivate();
+    if plugin.is_active() {
+        return Err("processor default layout did not deactivate".into());
+    }
     result
 }
 
@@ -417,11 +494,13 @@ pub(crate) struct RackWorkerPlugin {
     output_storage: Vec<Vec<f32>>,
     input_ranges: Vec<BusRange>,
     output_ranges: Vec<BusRange>,
+    dry_mapping: Vec<Option<usize>>,
     parameter_ranges: Vec<ParameterRange>,
     input_events: EventList,
     output_events: EventList,
     sample_rate: f64,
     max_block_size: usize,
+    latency_gate: super::latency::PublicationGate,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -441,54 +520,44 @@ struct WorkerActivation {
 impl RackWorkerPlugin {
     pub(crate) fn load(
         locator: &RackLocator,
-        layout_index: usize,
+        selected: &ProviderPorts,
         sample_rate: f64,
         max_block_size: usize,
-        parameters: &serde_json::Value,
+        initial: &super::state::InitialState,
     ) -> Result<Self, String> {
         Self::activate(
-            load_plugin(locator)?,
-            layout_index,
+            load_plugin(locator, selected)?,
+            selected,
             &WorkerActivation {
                 editor_allowed: locator.has_editor,
                 sample_rate,
                 max_block_size,
             },
-            parameters,
+            initial,
         )
     }
 
     fn activate(
         mut plugin: Box<dyn Plugin<f32>>,
-        layout_index: usize,
+        selected: &ProviderPorts,
         activation: &WorkerActivation,
-        parameters: &serde_json::Value,
+        initial: &super::state::InitialState,
     ) -> Result<Self, String> {
-        let layout = plugin
-            .supported_layouts()
-            .get(layout_index)
-            .cloned()
-            .ok_or_else(|| "processor layout is no longer available".to_owned())?;
-        // A saved index identifies a position, not an immutable bus layout. Revalidate the
-        // freshly loaded binary before activation or allocating its planar channels.
+        let layout = layouts::native_layout(plugin.supported_layouts(), selected)?;
+        // Resolve the exact native identity and ordered topology before allocating worker
+        // buffers. Enumeration positions and equal channel totals do not identify a layout.
         let (input_channels, output_channels) = layout_channels(&layout)?;
         let input_ranges = bus_ranges(&layout.inputs);
         let output_ranges = bus_ranges(&layout.outputs);
-        let parameter_ranges = (0..plugin.parameter_count())
-            .filter_map(|index| {
-                plugin
-                    .parameter_info(index)
-                    .ok()
-                    .map(|parameter| ParameterRange {
-                        id: parameter.id,
-                        index,
-                        minimum: parameter.min,
-                        maximum: parameter.max,
-                    })
-            })
-            .collect::<Vec<_>>();
+        let dry_mapping =
+            super::dry_delay::dry_channel_mapping(selected).map_err(|error| error.to_string())?;
         plugin
-            .activate(layout, activation.sample_rate, activation.max_block_size)
+            .activate_with_state(
+                layout,
+                activation.sample_rate,
+                activation.max_block_size,
+                initial.native.as_deref(),
+            )
             .map_err(|error| error.to_string())?;
         let mut worker = Self {
             plugin,
@@ -497,13 +566,16 @@ impl RackWorkerPlugin {
             output_storage: planar_storage(usize::from(output_channels), activation.max_block_size),
             input_ranges,
             output_ranges,
-            parameter_ranges,
+            dry_mapping,
+            parameter_ranges: Vec::new(),
             input_events: EventList::new(),
             output_events: EventList::new(),
             sample_rate: activation.sample_rate,
             max_block_size: activation.max_block_size,
+            latency_gate: super::latency::PublicationGate::default(),
         };
-        worker.apply_initial_state(parameters)?;
+        layouts::verify_active(worker.plugin.as_ref(), selected)?;
+        worker.apply_initial_parameters(initial)?;
         Ok(worker)
     }
 
@@ -513,6 +585,58 @@ impl RackWorkerPlugin {
 
     pub(crate) fn output_channels(&self) -> usize {
         self.output_storage.len()
+    }
+
+    pub(crate) fn intrinsic_latency_frames(&self) -> Option<u32> {
+        self.latency_gate.cached(self.plugin.latency_frames())
+    }
+
+    /// Services format-owned requests on the instance's fixed main thread, with exclusive
+    /// access against DSP. A failed restart or metadata refresh must stop this worker.
+    pub(crate) fn service_main_thread(&mut self) -> Result<(), String> {
+        let result = self
+            .plugin
+            .service_main_thread()
+            .map_err(|error| error.to_string());
+        match result {
+            Ok(MainThreadUpdate::Unchanged) => Ok(()),
+            Ok(MainThreadUpdate::ParametersChanged) => {
+                self.latency_gate.invalidate();
+                self.refresh_parameter_ranges()
+            }
+            Err(error) => {
+                self.latency_gate.invalidate();
+                Err(error)
+            }
+        }
+    }
+
+    fn refresh_parameter_ranges(&mut self) -> Result<(), String> {
+        // Third-party metadata controls this count. Bound the snapshot before allocation;
+        // rejecting an oversized instance is explicit, never a truncated parameter list.
+        const SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
+        let count = self.plugin.parameter_count();
+        if count > SNAPSHOT_BYTES / std::mem::size_of::<ParameterRange>() {
+            return Err("processor parameter snapshot exceeds 16 MiB".to_owned());
+        }
+        let mut ranges = Vec::new();
+        ranges
+            .try_reserve_exact(count)
+            .map_err(|error| format!("cannot allocate processor parameter snapshot: {error}"))?;
+        for index in 0..count {
+            let parameter = self
+                .plugin
+                .parameter_info(index)
+                .map_err(|error| format!("cannot read processor parameter {index}: {error}"))?;
+            ranges.push(ParameterRange {
+                id: parameter.id,
+                index,
+                minimum: parameter.min,
+                maximum: parameter.max,
+            });
+        }
+        self.parameter_ranges = ranges;
+        Ok(())
     }
 
     pub(crate) fn inputs_mut(&mut self) -> &mut [Vec<f32>] {
@@ -531,7 +655,9 @@ impl RackWorkerPlugin {
 
     pub(crate) fn bypass(&mut self, frames: usize) {
         for (channel_index, output) in self.output_storage.iter_mut().enumerate() {
-            if let Some(input) = self.input_storage.get(channel_index) {
+            if let Some(input) =
+                self.dry_mapping[channel_index].and_then(|index| self.input_storage.get(index))
+            {
                 output[..frames].copy_from_slice(&input[..frames]);
             } else {
                 output[..frames].fill(0.0);
@@ -540,6 +666,7 @@ impl RackWorkerPlugin {
     }
 
     pub(crate) fn set_parameter(&mut self, id: u32, normalized: f64) -> Result<(), String> {
+        self.latency_gate.invalidate();
         let range = self
             .parameter_ranges
             .iter()
@@ -555,6 +682,9 @@ impl RackWorkerPlugin {
     /// Control/editor broker only. The native instance is serialized against DSP and editor
     /// mutation by the caller. Formats with unsupported state APIs deliberately return errors.
     pub(crate) fn save_state(&self) -> Result<Vec<u8>, super::ProcessorStateError> {
+        if self.plugin.has_pending_parameter_changes() {
+            return Err(super::ProcessorStateError::Pending);
+        }
         self.plugin
             .save_state()
             .map_err(|_| super::ProcessorStateError::NativeFailure)
@@ -587,13 +717,26 @@ impl RackWorkerPlugin {
             transport: None,
             output_events: &mut self.output_events,
         };
-        let status = self
+        let status = match self
             .plugin
             .process(&mut buffer, &self.input_events, &mut context)
-            .map_err(|error| error.to_string())?;
+        {
+            Ok(status) => status,
+            Err(error) => {
+                self.latency_gate.process_failed();
+                return Err(error.to_string());
+            }
+        };
         match status {
-            ProcessStatus::Error => Err("processor reported a fatal process error".to_owned()),
-            ProcessStatus::Continue | ProcessStatus::Sleep | ProcessStatus::Tail { .. } => Ok(()),
+            ProcessStatus::Error => {
+                self.latency_gate.process_failed();
+                Err("processor reported a fatal process error".to_owned())
+            }
+            ProcessStatus::Continue | ProcessStatus::Sleep | ProcessStatus::Tail { .. } => {
+                self.latency_gate
+                    .process_succeeded(self.plugin.latency_frames());
+                Ok(())
+            }
         }
     }
 
@@ -606,6 +749,7 @@ impl RackWorkerPlugin {
         parent: WindowHandle,
         scale: f64,
     ) -> Result<EditorSnapshot, String> {
+        self.latency_gate.invalidate();
         let editor = self
             .plugin
             .editor()
@@ -622,6 +766,7 @@ impl RackWorkerPlugin {
     }
 
     pub(crate) fn close_editor(&mut self) {
+        self.latency_gate.invalidate();
         if let Some(editor) = self.plugin.editor() {
             editor.hide();
             editor.close();
@@ -629,6 +774,7 @@ impl RackWorkerPlugin {
     }
 
     pub(crate) fn tick_editor(&mut self) -> EditorSnapshot {
+        self.latency_gate.invalidate();
         let Some(editor) = self.plugin.editor() else {
             return EditorSnapshot::default();
         };
@@ -641,28 +787,21 @@ impl RackWorkerPlugin {
     }
 
     pub(crate) fn resize_editor(&mut self, width: u32, height: u32) -> Option<(u32, u32)> {
+        self.latency_gate.invalidate();
         self.plugin.editor()?.set_size(width, height)
     }
 
-    fn apply_initial_state(&mut self, parameters: &serde_json::Value) -> Result<(), String> {
-        let Some(object) = parameters.as_object() else {
+    fn apply_initial_parameters(
+        &mut self,
+        initial: &super::state::InitialState,
+    ) -> Result<(), String> {
+        self.service_main_thread()?;
+        // Activation and native state restoration may both change indexed metadata. Resolve
+        // persisted stable IDs only after these lifecycle calls have completed.
+        self.refresh_parameter_ranges()?;
+        let Some(object) = initial.parameters.as_object() else {
             return Ok(());
         };
-        if let Some(encoded) = object
-            .get("stateBase64")
-            .and_then(serde_json::Value::as_str)
-        {
-            if encoded.len() > super::STATE_CAPACITY.div_ceil(3) * 4 {
-                return Err("processor state exceeds 4 MiB".to_owned());
-            }
-            let state = BASE64.decode(encoded).map_err(|error| error.to_string())?;
-            if state.len() > super::STATE_CAPACITY {
-                return Err("processor state exceeds 4 MiB".to_owned());
-            }
-            self.plugin
-                .load_state(&state)
-                .map_err(|error| error.to_string())?;
-        }
         if let Some(values) = object
             .get("parameterValues")
             .and_then(serde_json::Value::as_object)
@@ -690,11 +829,18 @@ pub(crate) struct EditorSnapshot {
 
 impl Drop for RackWorkerPlugin {
     fn drop(&mut self) {
-        self.plugin.deactivate();
+        if self.plugin.is_active() {
+            self.plugin.deactivate();
+        }
     }
 }
 
-fn load_plugin(locator: &RackLocator) -> Result<Box<dyn Plugin<f32>>, String> {
+fn load_plugin(
+    locator: &RackLocator,
+    selected: &ProviderPorts,
+) -> Result<Box<dyn Plugin<f32>>, String> {
+    #[cfg(not(target_vendor = "apple"))]
+    let _ = selected;
     let info = locator.info();
     match locator.format {
         RackFormat::Vst3 => truce_rack_vst3::Vst3Scanner::new()
@@ -706,13 +852,8 @@ fn load_plugin(locator: &RackLocator) -> Result<Box<dyn Plugin<f32>>, String> {
             .map(|plugin| Box::new(plugin) as Box<dyn Plugin<f32>>)
             .map_err(|error| error.to_string()),
         #[cfg(target_vendor = "apple")]
-        RackFormat::Au => truce_rack_au::AuScanner::new()
-            .load(&info)
-            .map(|plugin| Box::new(plugin) as Box<dyn Plugin<f32>>)
-            .map_err(|error| error.to_string()),
-        #[cfg(target_vendor = "apple")]
-        RackFormat::Auv3 => truce_rack_au3::Au3Scanner::new()
-            .load(&info)
+        RackFormat::Au | RackFormat::Auv3 => truce_rack_au::AuScanner::new()
+            .load_with_layout(&info, &layouts::selected_au_layout(selected)?)
             .map(|plugin| Box::new(plugin) as Box<dyn Plugin<f32>>)
             .map_err(|error| error.to_string()),
         #[cfg(target_os = "linux")]
@@ -775,18 +916,101 @@ fn _assert_path_is_send(_: &Path) {}
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "macos")]
+    fn scan_fixture_info(id: &str) -> PluginInfo {
+        PluginInfo {
+            name: id.to_owned(),
+            vendor: "fixture".to_owned(),
+            version: 1,
+            category: PluginCategory::Effect,
+            path: PathBuf::from(format!("/fixture/{id}")),
+            unique_id: id.to_owned(),
+            format: "clap",
+            has_editor: false,
+            accepts_midi: false,
+        }
+    }
+
     #[test]
-    fn apple_limiter_native_state_restores_a_changed_parameter() {
-        // The built-in AU fixture requires neither hardware nor a vendor authorization. This
-        // checks native ClassInfo bytes, not a mock JSON parameter round trip.
+    fn custom_path_failure_keeps_default_and_other_successful_scan_results() {
+        let good = PathBuf::from("/good");
+        let bad = PathBuf::from("/bad");
+        let default = scan_fixture_info("default");
+        let custom = scan_fixture_info("custom");
+        let (infos, failures) = scan_with_paths(
+            RackFormat::Clap,
+            std::slice::from_ref(&bad),
+            || Ok(vec![default.clone()]),
+            |_| Err("permission denied".into()),
+        )
+        .unwrap();
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].unique_id, "default");
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].path, bad);
+        assert_eq!(failures[0].message, "permission denied");
+
+        let (infos, failures) = scan_with_paths(
+            RackFormat::Clap,
+            &[good.clone(), bad.clone()],
+            || Ok(vec![default]),
+            |path| {
+                if path == good.as_path() {
+                    Ok(vec![custom.clone()])
+                } else {
+                    Err("path unavailable".into())
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            infos
+                .iter()
+                .map(|info| info.unique_id.as_str())
+                .collect::<Vec<_>>(),
+            ["default", "custom"]
+        );
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].path, bad);
+        assert_eq!(failures[0].message, "path unavailable");
+
+        let error = scan_with_paths(
+            RackFormat::Clap,
+            &[good, bad],
+            || Err("default scan failed".into()),
+            |_| panic!("custom paths must not run after whole-format failure"),
+        )
+        .unwrap_err();
+        assert_eq!(error, "default scan failed");
+
+        let foreign_bundle = PathBuf::from("/fixture/Other.vst3");
+        let (infos, failures) = scan_with_paths(
+            RackFormat::Clap,
+            &[foreign_bundle],
+            || Ok(vec![scan_fixture_info("default")]),
+            |_| panic!("another format's exact bundle is not a CLAP scan path"),
+        )
+        .unwrap();
+        assert_eq!(infos.len(), 1);
+        assert!(failures.is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    fn apple_limiter_locator() -> RackLocator {
         let info = truce_rack_au::AuScanner::new()
             .scan()
             .unwrap()
             .into_iter()
             .find(|info| info.name.contains("AUPeakLimiter"))
             .expect("macOS ships the AUPeakLimiter fixture");
-        let locator = RackLocator::from_info(RackFormat::Au, info);
+        RackLocator::from_info(RackFormat::Au, info)
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn apple_limiter_native_state_restores_a_changed_parameter() {
+        // The built-in AU fixture requires neither hardware nor a vendor authorization. This
+        // checks native ClassInfo bytes, not a mock JSON parameter round trip.
+        let locator = apple_limiter_locator();
         let record = probe(locator.clone()).unwrap();
         let parameter = record
             .descriptor
@@ -794,12 +1018,18 @@ mod tests {
             .iter()
             .find(|parameter| !parameter.is_read_only)
             .expect("limiter exposes a writable parameter");
+        let layout = record
+            .descriptor
+            .layouts
+            .iter()
+            .find(|layout| layout.layout_id == record.descriptor.default_layout_id)
+            .unwrap();
         let mut first = RackWorkerPlugin::load(
             &locator,
-            record.layout_index,
+            layout,
             48_000.0,
             128,
-            &serde_json::json!({}),
+            &crate::state::InitialState::resolve(serde_json::json!({}), None).unwrap(),
         )
         .unwrap();
         first.set_parameter(parameter.id, 0.37).unwrap();
@@ -810,6 +1040,34 @@ mod tests {
             .copied()
             .unwrap();
         let expected = first.plugin.parameter_value(range.index).unwrap();
+        let first = std::sync::Mutex::new(first);
+        let state = snapshot_native_fixture_state(&first);
+        assert!(!state.is_empty());
+        first
+            .lock()
+            .unwrap()
+            .set_parameter(parameter.id, 0.91)
+            .unwrap();
+        let restored = RackWorkerPlugin::load(
+            &locator,
+            layout,
+            48_000.0,
+            128,
+            &crate::state::InitialState {
+                parameters: serde_json::json!({}),
+                native: Some(state),
+            },
+        )
+        .unwrap();
+        let actual = restored.plugin.parameter_value(range.index).unwrap();
+        assert!(
+            (actual - expected).abs() < 0.001,
+            "native state failed to restore {expected}: {actual}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    fn snapshot_native_fixture_state(plugin: &std::sync::Mutex<RackWorkerPlugin>) -> Vec<u8> {
         let (shared_path, config_path) = crate::worker_paths().expect("private worker paths");
         let (audio, control) = crate::shared_transport::create(
             &shared_path,
@@ -829,30 +1087,17 @@ mod tests {
             .store(crate::WORKER_READY, std::sync::atomic::Ordering::Release);
         let client =
             std::thread::spawn(move || control.snapshot_state(std::time::Duration::from_secs(2)));
-        let first = std::sync::Mutex::new(first);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         while !client.is_finished() {
             assert!(std::time::Instant::now() < deadline);
-            crate::apply_pending_state_request(&shared, &first);
+            crate::apply_pending_state_request(&shared, plugin);
             std::thread::yield_now();
         }
         let state = client.join().unwrap().unwrap();
-        assert!(!state["stateBase64"].as_str().unwrap().is_empty());
-        first
-            .lock()
-            .unwrap()
-            .set_parameter(parameter.id, 0.91)
-            .unwrap();
-        let restored =
-            RackWorkerPlugin::load(&locator, record.layout_index, 48_000.0, 128, &state).unwrap();
-        let actual = restored.plugin.parameter_value(range.index).unwrap();
-        assert!(
-            (actual - expected).abs() < 0.001,
-            "native state failed to restore {expected}: {actual}"
-        );
         drop(shared);
         crate::cleanup_worker_paths(&shared_path, &config_path);
         assert!(!shared_path.exists());
+        state
     }
 
     #[test]
@@ -933,10 +1178,15 @@ mod tests {
         assert!(record.locator.has_editor);
         let worker = RackWorkerPlugin::load(
             &record.locator,
-            record.layout_index,
+            record
+                .descriptor
+                .layouts
+                .iter()
+                .find(|layout| layout.layout_id == record.descriptor.default_layout_id)
+                .unwrap(),
             48_000.0,
             128,
-            &serde_json::json!({}),
+            &crate::state::InitialState::resolve(serde_json::json!({}), None).unwrap(),
         )
         .unwrap();
         assert!(worker.has_editor());

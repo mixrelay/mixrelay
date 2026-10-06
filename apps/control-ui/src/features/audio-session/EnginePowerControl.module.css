@@ -31,8 +31,16 @@
   stroke-linecap: round;
 }
 
-.button[aria-pressed="true"] svg {
+.button[data-tone="positive"] svg {
   color: var(--positive);
+}
+
+.button[data-tone="warning"] svg {
+  color: var(--amber);
+}
+
+.button[data-tone="critical"] svg {
+  color: var(--red);
 }
 
 .button:hover:not(:disabled) {

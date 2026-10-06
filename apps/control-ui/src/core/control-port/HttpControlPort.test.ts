@@ -5,6 +5,27 @@ import { ControlPortError, type RuntimeGraphDocument } from './types';
 
 const graph: RuntimeGraphDocument = { edges: [], nodes: [], revision: 2, schemaVersion: 2 };
 
+it('does not fabricate a remote API for desktop-owned recorder preferences', async () => {
+  const request = vi.fn<typeof fetch>();
+  const port = new HttpControlPort('http://control', request);
+  await expect(port.recordingSettings('graph-a', 'recorder-1')).rejects.toMatchObject({
+    status: 501,
+  });
+  await expect(
+    port.setRecordingSettings(
+      'graph-a',
+      'recorder-1',
+      {
+        folder: '/Desktop',
+        sampleRate: null,
+        encoding: 'pcm16',
+      },
+      2,
+    ),
+  ).rejects.toMatchObject({ status: 501 });
+  expect(request).not.toHaveBeenCalled();
+});
+
 it.each(['device-a', 'device-b'])(
   'sets the rate of %s through its identity-targeted route',
   async (endpointId) => {
@@ -26,10 +47,52 @@ it.each(['device-a', 'device-b'])(
 );
 
 function response(body: unknown, ok = true, status = 200): Response {
-  return { json: async () => body, ok, status } as Response;
+  return { json: async () => body, ok, status, headers: new Headers() } as Response;
+}
+
+function operationResponse(
+  body: unknown,
+  ok: boolean,
+  status: number,
+  operationId?: string,
+  resultId?: string,
+): Response {
+  const headers = new Headers();
+  if (operationId !== undefined) headers.set('X-MixRelay-Operation', operationId);
+  if (resultId !== undefined) headers.set('X-MixRelay-Operation-Result', resultId);
+  return { json: async () => body, ok, status, headers } as Response;
+}
+
+async function advanceOperationPoll(): Promise<void> {
+  await Promise.resolve();
+  await vi.advanceTimersByTimeAsync(100);
 }
 
 describe('HttpControlPort', () => {
+  it('sends one exact-instance processor retry through the dedicated HTTP route', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(
+      response({
+        protocolVersion: 1,
+        revision: 4,
+        state: 'pending',
+      }),
+    );
+    const port = new HttpControlPort('http://control', request);
+    const retry = {
+      expectedCatalogRevision: 6,
+      expectedInstanceId: '18446744073709551615',
+      expectedRevision: 3,
+      graphId: 'graph-a',
+      nodeId: 'provider-a',
+    };
+    await expect(port.retryProcessor(retry)).resolves.toMatchObject({ revision: 4 });
+    expect(request).toHaveBeenCalledExactlyOnceWith('http://control/api/v1/processors/retry', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(retry),
+    });
+  });
+
   it('targets recorder commands by encoded graph and node identity', async () => {
     const status = {
       state: 'paused',
@@ -182,5 +245,177 @@ describe('HttpControlPort graph operations', () => {
     );
 
     await expect(port.getGraph()).rejects.toEqual(new ControlPortError(422, body));
+  });
+});
+
+describe('HttpControlPort pending operations', () => {
+  it('polls a pending operation without replaying the mutation and acknowledges its terminal 202', async () => {
+    vi.useFakeTimers();
+    try {
+      const operationId = 'session/a?c';
+      const terminal = { protocolVersion: 1, revision: 4, state: 'pending' };
+      const responses = [
+        operationResponse({ operationId }, true, 202, operationId),
+        operationResponse({ operationId }, true, 202, operationId),
+        operationResponse(terminal, true, 202, undefined, operationId),
+        operationResponse(null, true, 204),
+      ];
+      const request = vi.fn(function (this: unknown, ..._args: Parameters<typeof fetch>) {
+        expect(this).toBeUndefined();
+        return Promise.resolve(responses.shift() as Response);
+      });
+      const port = new HttpControlPort('http://control', request);
+      const result = port.applyGraph({ ...graph, revision: 3 });
+
+      await advanceOperationPoll();
+      await advanceOperationPoll();
+      await expect(result).resolves.toEqual(terminal);
+      expect(request).toHaveBeenCalledTimes(4);
+      expect(request).toHaveBeenNthCalledWith(1, 'http://control/api/v1/graph', {
+        body: JSON.stringify({ ...graph, revision: 3 }),
+        headers: { 'content-type': 'application/json' },
+        method: 'PUT',
+      });
+      expect(request.mock.calls[1]?.[0]).toBe('http://control/api/v1/operations/session%2Fa%3Fc');
+      expect(request.mock.calls[1]?.[1]).toMatchObject({ method: 'GET' });
+      expect(request.mock.calls[1]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+      expect(request.mock.calls[3]?.[0]).toBe('http://control/api/v1/operations/session%2Fa%3Fc');
+      expect(request.mock.calls[3]?.[1]).toMatchObject({ method: 'DELETE' });
+      expect(request.mock.calls[3]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('returns a terminal operation error after a matching result receipt', async () => {
+    vi.useFakeTimers();
+    try {
+      const body = { code: 'graph_exchange_busy' as const, parameters: {} };
+      const request = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          operationResponse({ operationId: 'session-1' }, true, 202, 'session-1'),
+        )
+        .mockResolvedValueOnce(operationResponse(body, false, 409, undefined, 'session-1'))
+        .mockResolvedValueOnce(operationResponse(null, true, 204));
+      const port = new HttpControlPort('http://control', request);
+      const result = port.applyGraph({ ...graph, revision: 3 });
+      const outcome = expect(result).rejects.toEqual(new ControlPortError(409, body));
+
+      await advanceOperationPoll();
+      await outcome;
+      expect(request).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('HttpControlPort polling failures', () => {
+  it('propagates a poll failure without replaying the initial mutation', async () => {
+    vi.useFakeTimers();
+    try {
+      const error = new Error('poll disconnected');
+      const request = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          operationResponse({ operationId: 'session-1' }, true, 202, 'session-1'),
+        )
+        .mockRejectedValueOnce(error);
+      const port = new HttpControlPort('http://control', request);
+      const result = port.applyGraph({ ...graph, revision: 3 });
+      const outcome = expect(result).rejects.toBe(error);
+
+      await advanceOperationPoll();
+      await outcome;
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(request.mock.calls[0]?.[1]).toMatchObject({ method: 'PUT' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects malformed and changed operation receipts without resubmitting', async () => {
+    const malformed = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(operationResponse({ operationId: 'different' }, true, 202, 'session-1'));
+    await expect(
+      new HttpControlPort('http://control', malformed).applyGraph({ ...graph, revision: 3 }),
+    ).rejects.toThrow('identity changed or was invalid');
+    expect(malformed).toHaveBeenCalledOnce();
+
+    vi.useFakeTimers();
+    try {
+      const changed = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          operationResponse({ operationId: 'session-1' }, true, 202, 'session-1'),
+        )
+        .mockResolvedValueOnce(
+          operationResponse({ operationId: 'session-2' }, true, 202, 'session-2'),
+        );
+      const result = new HttpControlPort('http://control', changed).applyGraph({
+        ...graph,
+        revision: 3,
+      });
+      const outcome = expect(result).rejects.toThrow('identity changed or was invalid');
+      await advanceOperationPoll();
+      await outcome;
+      expect(changed).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('HttpControlPort terminal receipts', () => {
+  it.each([
+    ['missing', undefined],
+    ['wrong', 'other-session'],
+  ])(
+    'rejects a terminal operation without a matching result receipt (%s)',
+    async (_name, resultId) => {
+      vi.useFakeTimers();
+      try {
+        const request = vi
+          .fn<typeof fetch>()
+          .mockResolvedValueOnce(
+            operationResponse({ operationId: 'session-1' }, true, 202, 'session-1'),
+          )
+          .mockResolvedValueOnce(operationResponse({ revision: 4 }, true, 202, undefined, resultId))
+          .mockResolvedValueOnce(operationResponse(null, true, 204));
+        const port = new HttpControlPort('http://control', request);
+        const result = port.applyGraph({ ...graph, revision: 3 });
+        const outcome = expect(result).rejects.toThrow('operation result could not be confirmed');
+
+        await advanceOperationPoll();
+        await outcome;
+        expect(request).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('preserves the terminal result when acknowledgement fails', async () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = { protocolVersion: 1, revision: 4, state: 'pending' };
+      const request = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          operationResponse({ operationId: 'session-1' }, true, 202, 'session-1'),
+        )
+        .mockResolvedValueOnce(operationResponse(terminal, true, 202, undefined, 'session-1'))
+        .mockRejectedValueOnce(new Error('ack disconnected'));
+      const port = new HttpControlPort('http://control', request);
+      const result = port.applyGraph({ ...graph, revision: 3 });
+
+      await advanceOperationPoll();
+      await expect(result).resolves.toEqual(terminal);
+      expect(request).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

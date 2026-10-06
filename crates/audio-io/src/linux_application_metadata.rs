@@ -1,25 +1,27 @@
 //! Bounded, passive desktop metadata lookup. Never execute a desktop entry's
 //! `Exec`/`TryExec`, invoke a shell, or expose a filesystem URL to the webview.
-//! PNG lookup covers the shared hicolor/Adwaita themes and pixmaps; unsupported
-//! formats/themes honestly return no icon so the UI can retain its fallback.
+//! XDG theme lookup rasterizes bounded SVG icons to PNG for the webview. Missing
+//! themes and unsupported images leave the UI's existing fallback intact.
 
 use std::{
     env,
     fs::OpenOptions,
     io::{Cursor, Read},
     os::unix::fs::OpenOptionsExt,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
 use base64::{Engine, engine::general_purpose::STANDARD};
+use gdk_pixbuf::{PixbufLoader, prelude::PixbufLoaderExt};
 
 use super::PipeWireTarget;
 
 const MAX_FILE_BYTES: usize = 64 * 1024;
 const MAX_CACHE_ENTRIES: usize = 64;
 const CACHE_LIFETIME: Duration = Duration::from_secs(30);
+const ICON_SIZE: i32 = 32;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct Metadata {
@@ -32,6 +34,7 @@ struct Key {
     application_id: Option<String>,
     executable: Option<String>,
     icon_name: Option<String>,
+    theme_name: Option<String>,
 }
 
 struct Entry {
@@ -49,6 +52,7 @@ pub(super) fn resolve(target: &PipeWireTarget) -> Metadata {
         application_id: bounded(target.application_id.as_deref()),
         executable: bounded(target.executable.as_deref()),
         icon_name: bounded(target.icon_name.as_deref()),
+        theme_name: selected_theme(),
     };
     let cache = CACHE.get_or_init(|| Mutex::new(Vec::new()));
     if let Ok(entries) = cache.lock()
@@ -110,6 +114,28 @@ fn locale() -> Option<String> {
         .and_then(|value| bounded(value.split('.').next()))
 }
 
+fn selected_theme() -> Option<String> {
+    let config = env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+    let bytes = read_regular(&config.join("gtk-3.0/settings.ini"))?;
+    let text = std::str::from_utf8(&bytes).ok()?;
+    theme_from_settings(text)
+}
+
+fn theme_from_settings(text: &str) -> Option<String> {
+    let mut in_settings = false;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_settings = line == "[Settings]";
+        } else if in_settings && let Some(("gtk-icon-theme-name", value)) = line.split_once('=') {
+            return safe_name(value.trim()).then(|| value.trim().to_owned());
+        }
+    }
+    None
+}
+
 fn safe_name(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 255
@@ -152,7 +178,9 @@ fn lookup(key: &Key, roots: &[PathBuf], locale: Option<&str>) -> Metadata {
         .chain(desktop.as_ref().and_then(|entry| entry.1.as_ref()))
         .chain(names.iter());
     Metadata {
-        icon_data_url: icon_names.into_iter().find_map(|name| icon(name, roots)),
+        icon_data_url: icon_names
+            .into_iter()
+            .find_map(|name| icon(name, roots, key.theme_name.as_deref())),
         display_name: desktop.and_then(|entry| entry.0),
     }
 }
@@ -243,33 +271,158 @@ fn png(path: &Path) -> Option<String> {
     Some(format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
 }
 
-fn icon(name: &str, roots: &[PathBuf]) -> Option<String> {
+fn svg(path: &Path) -> Option<String> {
+    // Feed bytes without a base URI. Librsvg cannot resolve file/network
+    // references from an icon supplied by another application.
+    let bytes = read_regular(path)?;
+    let loader = PixbufLoader::with_type("svg").ok()?;
+    loader.set_size(ICON_SIZE, ICON_SIZE);
+    let written = loader.write(&bytes);
+    let closed = loader.close();
+    written.ok()?;
+    closed.ok()?;
+    let pixbuf = loader.pixbuf()?;
+    if !(1..=ICON_SIZE).contains(&pixbuf.width()) || !(1..=ICON_SIZE).contains(&pixbuf.height()) {
+        return None;
+    }
+    let png = pixbuf.save_to_bufferv("png", &[]).ok()?;
+    (png.len() <= MAX_FILE_BYTES).then(|| format!("data:image/png;base64,{}", STANDARD.encode(png)))
+}
+
+fn icon_file(path: &Path) -> Option<String> {
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some("svg") => svg(path),
+        // Preserve absolute PNG Icon paths without an extension.
+        _ => png(path),
+    }
+}
+
+fn theme_index(theme: &str, roots: &[PathBuf]) -> Option<(Vec<String>, Vec<String>)> {
+    let path = roots
+        .iter()
+        .map(|root| root.join("icons").join(theme).join("index.theme"))
+        .find(|path| path.is_file())?;
+    let bytes = read_regular(&path)?;
+    let text = std::str::from_utf8(&bytes).ok()?;
+    let mut in_theme = false;
+    let mut exact = Vec::new();
+    let mut scalable = Vec::new();
+    let mut other = Vec::new();
+    let mut parents = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_theme = line == "[Icon Theme]";
+            continue;
+        }
+        if !in_theme {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "Directories" | "ScaledDirectories" => {
+                for dir in value.split(',').map(str::trim).filter(|dir| {
+                    !dir.is_empty()
+                        && dir.len() <= 255
+                        && Path::new(dir)
+                            .components()
+                            .all(|component| matches!(component, Component::Normal(_)))
+                }) {
+                    let prefix = dir.split('/').next().unwrap_or_default();
+                    let category = if prefix.starts_with("32x32") {
+                        &mut exact
+                    } else if prefix == "scalable" {
+                        &mut scalable
+                    } else {
+                        &mut other
+                    };
+                    if category.len() < 128 {
+                        category.push(dir.to_owned());
+                    }
+                }
+            }
+            "Inherits" => {
+                let remaining = 16usize.saturating_sub(parents.len());
+                parents.extend(
+                    value
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|parent| safe_name(parent))
+                        .take(remaining)
+                        .map(str::to_owned),
+                );
+            }
+            _ => {}
+        }
+    }
+    // Real hicolor indexes list many sizes before scalable. Keep the lookup
+    // bounded without dropping the preferred SVG directory near the end.
+    exact.extend(scalable);
+    exact.extend(other);
+    exact.truncate(128);
+    Some((exact, parents))
+}
+
+fn icon_in_theme(
+    theme: &str,
+    name: &str,
+    roots: &[PathBuf],
+    visited: &mut Vec<String>,
+) -> Option<String> {
+    if !safe_name(theme) || visited.len() == 16 || visited.iter().any(|seen| seen == theme) {
+        return None;
+    }
+    visited.push(theme.to_owned());
+    let (directories, parents) = theme_index(theme, roots)?;
+    // A 32 px image is preferred; scalable SVG is next. A selected theme's
+    // other sizes still win over inherited themes, as the XDG contract requires.
+    for dir in directories {
+        for root in roots {
+            for extension in ["png", "svg"] {
+                let path = root
+                    .join("icons")
+                    .join(theme)
+                    .join(&dir)
+                    .join(format!("{name}.{extension}"));
+                if let Some(image) = icon_file(&path) {
+                    return Some(image);
+                }
+            }
+        }
+    }
+    parents
+        .into_iter()
+        .find_map(|parent| icon_in_theme(&parent, name, roots, visited))
+}
+
+fn icon(name: &str, roots: &[PathBuf], selected_theme: Option<&str>) -> Option<String> {
     let path = Path::new(name);
     if path.is_absolute() {
-        return png(path);
+        return icon_file(path);
     }
     if !safe_name(name) {
         return None;
     }
-    let name = name.strip_suffix(".png").unwrap_or(name);
-    roots.iter().find_map(|root| {
-        for theme in ["hicolor", "Adwaita"] {
-            for size in [
-                "48x48", "32x32", "64x64", "128x128", "256x256", "512x512", "24x24", "16x16",
-            ] {
-                if let Some(icon) = png(&root
-                    .join("icons")
-                    .join(theme)
-                    .join(size)
-                    .join("apps")
-                    .join(format!("{name}.png")))
-                {
-                    return Some(icon);
-                }
-            }
-        }
-        png(&root.join("pixmaps").join(format!("{name}.png")))
-    })
+    let name = name
+        .strip_suffix(".png")
+        .or_else(|| name.strip_suffix(".svg"))
+        .unwrap_or(name);
+    selected_theme
+        .and_then(|theme| icon_in_theme(theme, name, roots, &mut Vec::new()))
+        .or_else(|| icon_in_theme("Adwaita", name, roots, &mut Vec::new()))
+        .or_else(|| icon_in_theme("hicolor", name, roots, &mut Vec::new()))
+        .or_else(|| {
+            roots.iter().find_map(|root| {
+                [root.join("pixmaps"), root.join("icons")]
+                    .into_iter()
+                    .find_map(|dir| {
+                        ["png", "svg"].into_iter().find_map(|extension| {
+                            icon_file(&dir.join(format!("{name}.{extension}")))
+                        })
+                    })
+            })
+        })
 }
 
 #[cfg(test)]

@@ -10,11 +10,39 @@ struct RecordingEndpoint {
     current: parking_lot::Mutex<Vec<VirtualEndpointSpec>>,
     prepares: std::sync::atomic::AtomicUsize,
     changed_specs: std::sync::atomic::AtomicUsize,
+    rate_changes: std::sync::atomic::AtomicUsize,
 }
 
 impl VirtualEndpointBackend for RecordingEndpoint {
     fn capabilities(&self) -> &VirtualEndpointCapabilities {
         self.contract.capabilities()
+    }
+
+    fn resolve_graph_devices(
+        &self,
+        desired: &[VirtualEndpointSpec],
+    ) -> Result<Vec<VirtualEndpointSpec>, HostAudioBackendError> {
+        let current = self.current.lock();
+        desired
+            .iter()
+            .map(|reference| {
+                current
+                    .iter()
+                    .find(|spec| spec.id == reference.id)
+                    .cloned()
+                    .ok_or_else(|| HostAudioBackendError::BackendFailure {
+                        message: "Driver device is missing".into(),
+                    })
+            })
+            .collect()
+    }
+
+    fn set_sample_rate(&self, _: &VirtualEndpointId, _: u32) -> Result<(), HostAudioBackendError> {
+        self.rate_changes
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Err(HostAudioBackendError::BackendFailure {
+            message: "graph cannot retune Driver".into(),
+        })
     }
 
     fn prepare_graph_attachments(
@@ -23,12 +51,38 @@ impl VirtualEndpointBackend for RecordingEndpoint {
     ) -> Result<(), HostAudioBackendError> {
         use std::sync::atomic::Ordering;
         self.prepares.fetch_add(1, Ordering::Relaxed);
-        let mut current = self.current.lock();
+        let current = self.current.lock();
         if *current != desired {
-            *current = desired.to_vec();
             self.changed_specs.fetch_add(1, Ordering::Relaxed);
+            return Err(HostAudioBackendError::BackendFailure {
+                message: "graph cannot change Driver geometry or rate".into(),
+            });
         }
         Ok(())
+    }
+}
+
+fn assert_graph_contribution(processor: &mut BlockProcessor, gain_db: f32) {
+    let frames = processor.plan().format().block_frames;
+    let driver_capture: Vec<f32> = [1.0, -1.0, 0.5, -0.5]
+        .into_iter()
+        .cycle()
+        .take(frames as usize * 2)
+        .collect();
+    let mut graph_contribution = vec![0.0; driver_capture.len()];
+    // Prime the finite DeviceBus snapshot; Driver already owns OS playback mixing.
+    processor
+        .process_block(frames, &[&driver_capture], &mut [&mut graph_contribution])
+        .unwrap();
+    for _ in 0..2 {
+        processor
+            .process_block(frames, &[&driver_capture], &mut [&mut graph_contribution])
+            .unwrap();
+        let gain = 10.0_f32.powf(gain_db / 20.0);
+        for (mixed_capture, contribution) in driver_capture.iter().zip(&graph_contribution) {
+            assert!((contribution - mixed_capture * gain).abs() < 0.000_001);
+        }
+        assert!(graph_contribution.iter().any(|sample| *sample != 0.0));
     }
 }
 
@@ -54,37 +108,31 @@ fn virtual_gain_survives_disk_restart_and_does_not_change_prepared_device_specs(
         endpoint.gain_db = gain_db;
         assert!(
             engine
-                .apply_graph(document)
+                .apply_graph_request(document.into())
                 .unwrap()
                 .persistence_error
                 .is_none()
         );
         let mut processor = crate::controller_test_support::settle(&engine);
-        let source = [1.0, -1.0, 0.5, -0.5];
-        let mut sink = [0.0; 4];
-        processor
-            .process_block(2, &[&source], &mut [&mut sink])
-            .unwrap();
-        assert_eq!(sink.map(f32::to_bits), source.map(f32::to_bits));
-        // The fixture explicitly routes this device back into itself. App audio
-        // enters the bus unchanged; only the graph-local return is attenuated.
-        processor
-            .process_block(2, &[&source], &mut [&mut sink])
-            .unwrap();
-        for (input, output) in source.into_iter().zip(sink) {
-            let expected = input + input * 10.0_f32.powf(gain_db / 20.0);
-            assert!((output - expected).abs() < 0.000_001);
-        }
+        assert_graph_contribution(&mut processor, gain_db);
     }
     assert_eq!(backend.prepares.load(Ordering::Relaxed), 2);
     assert_eq!(backend.changed_specs.load(Ordering::Relaxed), 0);
+    assert_eq!(backend.rate_changes.load(Ordering::Relaxed), 0);
     assert!(fs::read_to_string(&path).unwrap().contains("gainDb"));
     drop(engine);
-    let restarted = controller(GraphDocument::new(1, vec![], vec![])).with_graph_catalog_path(path);
+    let mut restarted = controller(GraphDocument::new(1, vec![], vec![]));
+    restarted.endpoint_backend = backend.clone();
+    let restarted = restarted.with_graph_catalog_path(path);
     let restored = restarted.graph();
     let NodeConfig::VirtualEndpoint(endpoint) = &restored.nodes[0].config else {
         unreachable!()
     };
     assert_eq!(endpoint.gain_db.to_bits(), (-12.0_f32).to_bits());
     assert_eq!(endpoint.spec, backend.current.lock()[0]);
+    let mut processor = crate::controller_test_support::settle(&restarted);
+    assert_graph_contribution(&mut processor, -12.0);
+    assert_eq!(backend.prepares.load(Ordering::Relaxed), 3);
+    assert_eq!(backend.changed_specs.load(Ordering::Relaxed), 0);
+    assert_eq!(backend.rate_changes.load(Ordering::Relaxed), 0);
 }

@@ -4,6 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
 import type { ControlPort, MixRelayStatus, RuntimeGraphDocument } from '../core/control-port/types';
 import { I18nProvider, i18n, resolveLocale } from '../core/i18n';
+import type { LicensingPort } from '../core/licensing/LicensingPort';
+import type { DriverPort } from '../core/driver/DriverPort';
+import type { UpdatesPort } from '../core/updates/UpdatesPort';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';
 import { App } from './App';
 
@@ -12,6 +15,8 @@ function controlPortWithStatus(
   getStatus: ControlPort['getStatus'],
 ): ControlPort {
   return {
+    recordingSettings: controlPort.recordingSettings.bind(controlPort),
+    setRecordingSettings: controlPort.setRecordingSettings.bind(controlPort),
     recorderStatus: controlPort.recorderStatus.bind(controlPort),
     controlRecorder: controlPort.controlRecorder.bind(controlPort),
     applyGraph: controlPort.applyGraph.bind(controlPort),
@@ -94,6 +99,48 @@ describe('App composition', () => {
     });
   });
 
+  it('keeps Driver startup headless without graph, license, update, or Driver requests', async () => {
+    const getStatus = vi.spyOn(controlPort, 'getStatus');
+    const getGraph = vi.spyOn(controlPort, 'getGraph');
+    const driver: DriverPort = {
+      getSnapshot: vi.fn(),
+      mutate: vi.fn(),
+    };
+    const license: LicensingPort = {
+      getStatus: vi.fn(),
+      activate: vi.fn(),
+      validate: vi.fn(),
+      deactivate: vi.fn(),
+      openCheckout: vi.fn(),
+    };
+    const updates: UpdatesPort = { check: vi.fn(), openDownload: vi.fn() };
+    const { container } = render(
+      <MixRelayProvider>
+        <I18nProvider>
+          <App
+            mode="driver"
+            controlPort={controlPort}
+            driverPort={driver}
+            licensingPort={license}
+            updatesPort={updates}
+          />
+        </I18nProvider>
+      </MixRelayProvider>,
+    );
+    await act(async () => Promise.resolve());
+    expect(container.querySelector('main')).toBeNull();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(driver.getSnapshot).not.toHaveBeenCalled();
+    expect(driver.mutate).not.toHaveBeenCalled();
+    expect(getStatus).not.toHaveBeenCalled();
+    expect(getGraph).not.toHaveBeenCalled();
+    expect(license.getStatus).not.toHaveBeenCalled();
+    expect(updates.check).not.toHaveBeenCalled();
+  });
+
   it('shows unknown health rather than inventing installation state when status is unavailable', async () => {
     const unavailablePort = controlPortWithStatus(
       controlPort,
@@ -125,6 +172,53 @@ describe('App composition', () => {
     pendingView.unmount();
     await act(async () => finishStatus({ ...status, driverState: 'ready' }));
   });
+});
+
+it('accepts an injected licensing port before rendering live controls', async () => {
+  await i18n.changeLanguage('en');
+  const stopEngine = vi.fn().mockResolvedValue({ revision: 1, state: 'active' });
+  const controlPort = Object.assign(
+    new StorybookMockControlPort({
+      graph: { edges: [], nodes: [], revision: 1, schemaVersion: 2 },
+      graphStatus: { activeRevision: 1, protocolVersion: 1, submittedRevision: 1 },
+      status: {
+        bufferFrames: null,
+        driverState: 'ready',
+        overruns: 0,
+        protocolVersion: 1,
+        sampleRate: null,
+        underruns: 0,
+      },
+    }),
+    { setEnginePower: stopEngine },
+  );
+  const licensingPort: LicensingPort = {
+    getStatus: vi.fn().mockResolvedValue({
+      status: 'expired',
+      expiresAtUnix: null,
+      remainingDays: 0,
+      configured: false,
+    }),
+    activate: vi.fn(),
+    validate: vi.fn(),
+    deactivate: vi.fn(),
+    openCheckout: vi.fn(),
+  };
+  render(
+    <MixRelayProvider>
+      <I18nProvider>
+        <App controlPort={controlPort} licensingPort={licensingPort} />
+      </I18nProvider>
+    </MixRelayProvider>,
+  );
+  expect(await screen.findByText(/Your access has ended/u)).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'MixRelay' })).not.toBeInTheDocument();
+  expect(licensingPort.getStatus).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Stop audio' }));
+  await waitFor(() => expect(stopEngine).toHaveBeenCalledWith(false));
+  expect(stopEngine).toHaveBeenCalledTimes(1);
+  expect(await screen.findByText('Stop request sent.')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Stop audio' })).toBeDisabled();
 });
 
 it('keeps file actions in the graph header and toggles navigation without changing the graph', async () => {

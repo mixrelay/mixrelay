@@ -65,13 +65,28 @@ impl RuntimePatch {
         true
     }
 
-    fn capture_manifest(&self, view: &ExecutionView, revision: u64) -> ApplicationCaptureManifest {
+    fn capture_manifest(
+        &self,
+        view: &ExecutionView,
+        revision: u64,
+    ) -> Result<ApplicationCaptureManifest, ProtocolError> {
         let mut manifest = view.captures.clone();
         manifest.revision = revision;
+        crate::execution_control::apply_playback_intents(
+            &mut manifest,
+            &view.playback_intents,
+            |id| {
+                self.updates
+                    .iter()
+                    .find(|update| &update.node_id == id)
+                    .map(|update| update.control)
+                    .or_else(|| self.bank.snapshot(id).map(|(control, _)| control))
+            },
+        )?;
         manifest
             .sources
             .retain(|source| self.enabled(&NodeId::from(source.node_id.as_str())));
-        manifest
+        Ok(manifest)
     }
 }
 
@@ -137,9 +152,18 @@ impl EngineGraphController {
         if !patch.include_native_owners(view) {
             return Ok(None);
         }
-        if request.enabled.is_some() && matches!(node.config, NodeConfig::ApplicationCapture(_)) {
+        if (request.enabled.is_some()
+            || (request.muted.is_some()
+                && view.playback_intents.iter().any(|intent| {
+                    patch
+                        .updates
+                        .iter()
+                        .any(|update| update.node_id == intent.mask_node_id)
+                })))
+            && matches!(node.config, NodeConfig::ApplicationCapture(_))
+        {
             patch.capture_manifest =
-                Some(patch.capture_manifest(view, candidate.active_document().revision));
+                Some(patch.capture_manifest(view, candidate.active_document().revision)?);
         }
         match patch
             .bank

@@ -221,7 +221,7 @@ fn add_shared_reference(controller: &EngineGraphController) {
     };
     config.reference.capture = false;
     config.gain_db = -9.0;
-    controller.apply_graph(second).unwrap();
+    controller.apply_graph_request(second.into()).unwrap();
     settle(controller);
     controller
         .update_graph_layout(

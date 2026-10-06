@@ -1,10 +1,10 @@
 use super::{
-    AUDIO_PORT_ID, AudioEndpoint, BTreeMap, BTreeSet, CompileContext, ComposedGraph,
-    CompositionError, DeviceReference, DeviceRegistry, EdgeId, EdgeSpec, FROM_OS_PORT_ID,
-    GainConfig, GraphCompiler, GraphDocument, GraphFragment, MixerConfig, NodeConfig, NodeId,
-    NodeOrigin, NodeSpec, OutputReference, PortId, SourceReference, TO_OS_PORT_ID,
-    VirtualEndpointId, device_node_id, endpoint, invalid, output_node_id, reference_node_id,
-    runtime_node_id, source_node_id, source_shape, validate_id,
+    AUDIO_PORT_ID, ApplicationPlaybackIntent, AudioEndpoint, BTreeMap, BTreeSet, CompileContext,
+    ComposedGraph, CompositionError, DeviceReference, DeviceRegistry, EdgeId, EdgeSpec,
+    FROM_OS_PORT_ID, GainConfig, GraphCompiler, GraphDocument, GraphFragment, MixerConfig,
+    NodeConfig, NodeId, NodeOrigin, NodeSpec, OutputReference, PortId, SourceReference,
+    TO_OS_PORT_ID, VirtualEndpointId, device_node_id, endpoint, invalid, output_node_id,
+    reference_node_id, runtime_node_id, source_node_id, source_shape, validate_id,
 };
 
 pub(super) struct Builder<'a> {
@@ -17,6 +17,7 @@ pub(super) struct Builder<'a> {
     buses: BTreeMap<VirtualEndpointId, NodeId>,
     sources: BTreeMap<String, NodeId>,
     outputs: BTreeMap<String, NodeId>,
+    playback_intents: Vec<ApplicationPlaybackIntent>,
 }
 
 impl<'a> Builder<'a> {
@@ -36,8 +37,9 @@ impl<'a> Builder<'a> {
             buses: BTreeMap::new(),
             sources: BTreeMap::new(),
             outputs: BTreeMap::new(),
+            playback_intents: Vec::new(),
         };
-        let referenced: BTreeSet<_> = graphs
+        let mut referenced: BTreeSet<_> = graphs
             .iter()
             .flat_map(|graph| {
                 graph
@@ -46,6 +48,11 @@ impl<'a> Builder<'a> {
                     .map(|reference| &reference.device_id)
             })
             .collect();
+        for reference in graphs.iter().flat_map(|graph| graph.source_references) {
+            if let Some(id) = &reference.forwarding_endpoint {
+                referenced.insert(id);
+            }
+        }
         for id in referenced {
             let device = registry
                 .get(id)
@@ -67,48 +74,38 @@ impl<'a> Builder<'a> {
             config: NodeConfig::VirtualEndpointTransport(device.clone()),
         })?;
         self.devices.insert(device.id.clone(), native.clone());
-        let width = device
-            .render
-            .iter()
-            .chain(device.capture.iter())
-            .map(|stream| stream.channels)
-            .max()
-            .ok_or_else(|| invalid("virtual device has no stream"))?;
-        let mix = device_node_id(&device.id, "mix");
-        self.node(NodeSpec {
-            id: mix.clone(),
-            control: mixrelay_audio_graph::NodeControl::default(),
-            label: None,
-            config: NodeConfig::Mixer(MixerConfig {
-                inputs: vec![PortId::from(AUDIO_PORT_ID)],
-                channels: width,
-            }),
-        })?;
-        let snapshot = device_node_id(&device.id, "snapshot");
-        self.node(NodeSpec {
-            id: snapshot.clone(),
-            control: mixrelay_audio_graph::NodeControl::default(),
-            label: None,
-            config: NodeConfig::DeviceBus { channels: width },
-        })?;
-        self.link(
-            endpoint(mix.clone(), AUDIO_PORT_ID),
-            endpoint(snapshot.clone(), AUDIO_PORT_ID),
-        )?;
-        self.buses.insert(device.id.clone(), snapshot);
         if let Some(render) = device.render {
+            let mix = device_node_id(&device.id, "mix");
+            self.node(NodeSpec {
+                id: mix.clone(),
+                control: mixrelay_audio_graph::NodeControl::default(),
+                label: None,
+                config: NodeConfig::Mixer(MixerConfig {
+                    inputs: vec![PortId::from(AUDIO_PORT_ID)],
+                    channels: render.channels,
+                }),
+            })?;
             self.project_channels(
-                endpoint(native.clone(), FROM_OS_PORT_ID),
-                endpoint(mix.clone(), AUDIO_PORT_ID),
+                endpoint(mix, AUDIO_PORT_ID),
+                endpoint(native.clone(), TO_OS_PORT_ID),
                 render.channels,
             )?;
         }
         if let Some(capture) = device.capture {
-            self.project_channels(
-                endpoint(mix, AUDIO_PORT_ID),
-                endpoint(native, TO_OS_PORT_ID),
-                capture.channels,
+            let snapshot = device_node_id(&device.id, "snapshot");
+            self.node(NodeSpec {
+                id: snapshot.clone(),
+                control: mixrelay_audio_graph::NodeControl::default(),
+                label: None,
+                config: NodeConfig::DeviceBus {
+                    channels: capture.channels,
+                },
+            })?;
+            self.link(
+                endpoint(native, FROM_OS_PORT_ID),
+                endpoint(snapshot.clone(), AUDIO_PORT_ID),
             )?;
+            self.buses.insert(device.id.clone(), snapshot);
         }
         Ok(())
     }
@@ -301,6 +298,17 @@ impl<'a> Builder<'a> {
         })?;
         self.origin(local.clone(), graph, &reference.node_id, None);
         self.bind_control(native.clone(), local.clone());
+        if let Some(id) = &reference.forwarding_endpoint {
+            self.bind_device_controls(id, &local);
+            if reference.control.enabled {
+                self.playback_intents.push(ApplicationPlaybackIntent {
+                    source_id: reference.source_id.clone(),
+                    capture_node_id: native.clone(),
+                    mask_node_id: local.clone(),
+                    forwarding_endpoint: id.clone(),
+                });
+            }
+        }
         self.project_channels(
             endpoint(native, AUDIO_PORT_ID),
             endpoint(local, AUDIO_PORT_ID),
@@ -327,13 +335,7 @@ impl<'a> Builder<'a> {
             .get(&reference.device_id)
             .ok_or_else(|| invalid("unknown shared device"))?;
         if let Some(read) = reference.read {
-            let width = device
-                .render
-                .iter()
-                .chain(device.capture.iter())
-                .map(|stream| stream.channels)
-                .max()
-                .unwrap_or_default();
+            let width = device.capture.map_or(0, |stream| stream.channels);
             let source = endpoint(device_node_id(&device.id, "snapshot"), AUDIO_PORT_ID);
             if read.channels == 0 || read.channels > width {
                 return Err(invalid("virtual read width exceeds canonical stream"));
@@ -374,8 +376,8 @@ impl<'a> Builder<'a> {
             .get(&reference.device_id)
             .ok_or_else(|| invalid("unknown shared device"))?;
         let available = device
-            .capture
-            .ok_or_else(|| invalid("shared device has no capture stream"))?
+            .render
+            .ok_or_else(|| invalid("shared device has no render stream"))?
             .channels;
         if channels == 0 || channels > available {
             return Err(invalid("virtual write width exceeds canonical stream"));
@@ -449,7 +451,10 @@ impl<'a> Builder<'a> {
 
     fn bind_device_controls(&mut self, device: &VirtualEndpointId, local: &NodeId) {
         for side in ["native", "mix", "snapshot"] {
-            self.bind_control(device_node_id(device, side), local.clone());
+            let owner = device_node_id(device, side);
+            if self.document.nodes.iter().any(|node| node.id == owner) {
+                self.bind_control(owner, local.clone());
+            }
         }
     }
 
@@ -542,6 +547,7 @@ impl<'a> Builder<'a> {
             device_buses: self.buses,
             native_sources: self.sources,
             native_outputs: self.outputs,
+            playback_intents: self.playback_intents,
         })
     }
 }

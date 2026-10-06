@@ -214,7 +214,7 @@ it('reloads the actual engine document without submitting a write', async () => 
   const f = fixture();
   f.queue.reload();
   await flush();
-  expect(f.callbacks.restore).toHaveBeenCalledWith(empty);
+  expect(f.callbacks.restore).toHaveBeenCalledExactlyOnceWith(empty, undefined);
   expect(f.port.applyGraph).not.toHaveBeenCalled();
 });
 
@@ -228,7 +228,7 @@ it('waits for parameter settlement before reading a replacement engine document'
   settlement.resolve();
   await flush();
   expect(f.port.getGraph).toHaveBeenCalledTimes(1);
-  expect(f.callbacks.restore).toHaveBeenCalledWith(empty);
+  expect(f.callbacks.restore).toHaveBeenCalledExactlyOnceWith(empty, undefined);
   expect(f.port.applyGraph).not.toHaveBeenCalled();
 });
 

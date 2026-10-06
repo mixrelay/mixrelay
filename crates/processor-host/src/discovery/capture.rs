@@ -2,7 +2,7 @@
 //! inheriting stdout, so joining a pipe reader after killing the scanner is not a deadline.
 //! Private files avoid waiting for inherited pipe EOF; direct children are killed and reaped on
 //! every unsuccessful exit. This is not an OS process-tree sandbox: vendor descendants are not
-//! owned here, and Windows may defer unlinking a file still open in such a descendant.
+//! owned here.
 
 use std::{
     fs::{File, OpenOptions},

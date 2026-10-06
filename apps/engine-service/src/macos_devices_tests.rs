@@ -2,6 +2,8 @@ use super::*;
 use mixrelay_audio_graph::{AudioDeviceInputConfig, AudioDeviceOutputConfig, NodeSpec};
 use mixrelay_audio_io::process::{InputActivity, TransferOutcome};
 use mixrelay_macos_test_support::DeviceFixture as Fixture;
+#[path = "macos_devices/live_tests/installed_driver.rs"]
+mod installed_driver;
 fn wait_until(mut condition: impl FnMut() -> bool) {
     let start = Instant::now();
     while !condition() {
@@ -85,7 +87,10 @@ fn delete_disconnected_nodes(
             .all(|device| device.failed.load(Ordering::Acquire))
     });
     resources
-        .reconcile(&GraphDocument::new(3, vec![], vec![]))
+        .reconcile(
+            &GraphDocument::new(3, vec![], vec![]),
+            mixrelay_engine_service::PlaybackBindings::Preserve,
+        )
         .unwrap();
     resources.activation().unwrap().activate(active);
     resources.reclaim();
@@ -107,7 +112,12 @@ fn native_control_recovery_publishes_offline_intent_and_restores_the_same_uid_wi
     let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
     let resources = MacDevices::new(status, 48_000, 256);
     let original = document(&uid, 1, 0.0);
-    resources.reconcile(&original).unwrap();
+    resources
+        .reconcile(
+            &original,
+            mixrelay_engine_service::PlaybackBindings::Preserve,
+        )
+        .unwrap();
     let mut active = DeviceSet::default();
     resources.activation().unwrap().activate(&mut active);
     resources.reclaim();
@@ -125,7 +135,9 @@ fn native_control_recovery_publishes_offline_intent_and_restores_the_same_uid_wi
     assert!(retired.iter().all(|owner| owner.upgrade().is_none()));
 
     let edited = document(&uid, 2, -6.0);
-    resources.reconcile(&edited).unwrap();
+    resources
+        .reconcile(&edited, mixrelay_engine_service::PlaybackBindings::Preserve)
+        .unwrap();
     resources.activation().unwrap().activate(&mut active);
     resources.reclaim();
     assert_published_offline(&active, &edited);
@@ -156,7 +168,12 @@ fn native_coreaudio_recovery_retains_graph_owners_and_offline_gain_edits() {
     let (mut fixture, uid) = Fixture::start();
     let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
     let resources = MacDevices::new(status, 48_000, 256);
-    resources.reconcile(&document(&uid, 1, 0.0)).unwrap();
+    resources
+        .reconcile(
+            &document(&uid, 1, 0.0),
+            mixrelay_engine_service::PlaybackBindings::Preserve,
+        )
+        .unwrap();
     let mut active = DeviceSet::default();
     resources.activation().unwrap().activate(&mut active);
     resources.reclaim();
@@ -174,7 +191,10 @@ fn native_coreaudio_recovery_retains_graph_owners_and_offline_gain_edits() {
         // Changing gain while the physical device is absent must not try to
         // prepare a new native stream or block an otherwise valid graph edit.
         resources
-            .reconcile(&document(&uid, cycle + 2, -6.0))
+            .reconcile(
+                &document(&uid, cycle + 2, -6.0),
+                mixrelay_engine_service::PlaybackBindings::Preserve,
+            )
             .unwrap();
         assert_eq!(Arc::as_ptr(&active.0["input"]), input);
         assert_eq!(Arc::as_ptr(&active.0["output"]), output);
@@ -204,7 +224,10 @@ fn native_coreaudio_recovery_retains_graph_owners_and_offline_gain_edits() {
     let weak_input = Arc::downgrade(&active.0["input"]);
     let weak_output = Arc::downgrade(&active.0["output"]);
     resources
-        .reconcile(&GraphDocument::new(10, vec![], vec![]))
+        .reconcile(
+            &GraphDocument::new(10, vec![], vec![]),
+            mixrelay_engine_service::PlaybackBindings::Preserve,
+        )
         .unwrap();
     resources.activation().unwrap().activate(&mut active);
     resources.reclaim();
@@ -254,8 +277,8 @@ fn drive_native_graph(active: &DeviceSet, rate: u32) {
     let epoch_changed = active.0["input"].epoch.load(Ordering::Acquire) != epoch_start;
     eprintln!(
         "hardware SRC graph={rate} native_frames={native_frames} input_overflows={overflows} output_overflows={output_overflows} epoch_changed={epoch_changed} captured_frames={captured} submitted_frames={submitted} input_ready={:?} output_ready={:?}",
-        active.clock_synchronized("input"),
-        active.clock_synchronized("output")
+        active.clock_synchronized("input", true),
+        active.clock_synchronized("output", false)
     );
     assert!(
         captured > 0 && submitted > 0,
@@ -269,8 +292,8 @@ fn drive_native_graph(active: &DeviceSet, rate: u32) {
         output_overflows, 0,
         "native-paced graph must not drop output packets"
     );
-    assert_eq!(active.clock_synchronized("input"), Some(true));
-    assert_eq!(active.clock_synchronized("output"), Some(true));
+    assert_eq!(active.clock_synchronized("input", true), Some(true));
+    assert_eq!(active.clock_synchronized("output", false), Some(true));
 }
 
 #[test]
@@ -279,7 +302,9 @@ fn native_coreaudio_all_buffer_sizes_are_applied_and_survive_reconnection() {
     let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
     let resources = MacDevices::new(status, 48_000, 256);
     let graph = document(&uid, 1, 0.0);
-    resources.reconcile(&graph).unwrap();
+    resources
+        .reconcile(&graph, mixrelay_engine_service::PlaybackBindings::Preserve)
+        .unwrap();
     let mut active = DeviceSet::default();
     resources.activation().unwrap().activate(&mut active);
     resources.reclaim();
@@ -288,6 +313,7 @@ fn native_coreaudio_all_buffer_sizes_are_applied_and_survive_reconnection() {
         let mut prepared = resources
             .prepare_format_change(
                 &graph,
+                mixrelay_engine_service::PlaybackBindings::Preserve,
                 RenderFormat {
                     sample_rate: 48_000,
                     block_frames: previous,
@@ -328,7 +354,9 @@ fn native_coreaudio_src_uses_actual_rate_and_rebuilds_graph_format_only() {
     let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
     let resources = MacDevices::new(status, 44_100, 256);
     let graph = document(&uid, 1, 0.0);
-    resources.reconcile(&graph).unwrap();
+    resources
+        .reconcile(&graph, mixrelay_engine_service::PlaybackBindings::Preserve)
+        .unwrap();
     let mut active = DeviceSet::default();
     resources.activation().unwrap().activate(&mut active);
     resources.reclaim();
@@ -348,7 +376,12 @@ fn native_coreaudio_src_uses_actual_rate_and_rebuilds_graph_format_only() {
         // pause boundary. This test never invokes a native device-rate setter.
         if next != old {
             resources
-                .prepare_format_change(&graph, old, next)
+                .prepare_format_change(
+                    &graph,
+                    mixrelay_engine_service::PlaybackBindings::Preserve,
+                    old,
+                    next,
+                )
                 .unwrap()
                 .commit();
         }
@@ -394,9 +427,11 @@ fn native_coreaudio_repeated_initial_connections_preserve_failure_diagnostics() 
         let rate = [44_100, 48_000, 96_000][iteration % 3];
         let resources = MacDevices::new(status, rate, 256);
         let graph = document(&uid, 1, 0.0);
-        resources.reconcile(&graph).unwrap_or_else(|error| {
-            panic!("initial connection iteration={iteration} graph_rate={rate}: {error}")
-        });
+        resources
+            .reconcile(&graph, mixrelay_engine_service::PlaybackBindings::Preserve)
+            .unwrap_or_else(|error| {
+                panic!("initial connection iteration={iteration} graph_rate={rate}: {error}")
+            });
         let mut active = DeviceSet::default();
         resources.activation().unwrap().activate(&mut active);
         assert!(active.0.values().all(|device| device.ready()));

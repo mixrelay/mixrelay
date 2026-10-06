@@ -6,7 +6,10 @@ pub(super) async fn preview(State(state): State<ControlState>) -> Response {
         Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
         Err(error) => {
             tracing::error!(%error, "engine power preflight failed");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            crate::operations::task_failure(
+                ErrorCode::ControlUnavailable,
+                "engine power preflight failed",
+            )
         }
     }
 }
@@ -16,7 +19,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use mixrelay_control_protocol::EnginePowerRequest;
+use mixrelay_control_protocol::{EnginePowerRequest, ErrorCode};
 
 pub(super) async fn set(
     State(state): State<ControlState>,
@@ -30,7 +33,10 @@ pub(super) async fn set(
         }
         Err(error) => {
             tracing::error!(%error, "engine power control task failed");
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            crate::operations::task_failure(
+                ErrorCode::ControlUnavailable,
+                "engine power control task failed",
+            )
         }
     }
 }

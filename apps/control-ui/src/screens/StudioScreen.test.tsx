@@ -5,13 +5,17 @@ import type {
   AudioSessionStatus,
   ControlPort,
   RuntimeGraphDocument,
-  VirtualEndpointRateError,
 } from '../core/control-port/types';
 import { I18nProvider } from '../core/i18n';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';
-import { virtualPolicy, virtualSpec } from '../features/routing-workspace/virtualEndpointFixtures';
+import {
+  unknownNativeFormats,
+  virtualPolicy,
+  virtualSpec,
+} from '../features/routing-workspace/virtualEndpointFixtures';
 import { StudioScreen } from './StudioScreen';
 import styles from './StudioScreen.module.css';
+import type { DriverSession } from '../features/driver-status/useDriverSession';
 
 const callbacks = vi.hoisted(
   () => new Map<ControlPort, (document: RuntimeGraphDocument) => void>(),
@@ -23,10 +27,10 @@ interface WorkspaceBinding {
   audioSession?: AudioSessionStatus;
   onBusyChange: (busy: boolean) => void;
   onTitleChange: (title: string) => void;
-  deviceRateAction: {
-    change: (endpointId: string, rate: number) => Promise<void> | undefined;
+  deviceDriverAction: {
+    change: (endpointId: string, update: import('../core/ui/AudioNodeCard').EndpointUpdate) => void;
     enabled: boolean;
-    error: VirtualEndpointRateError | null;
+    error: { endpointId: string | null; message: string } | null;
   };
 }
 const workspaceBindings = vi.hoisted(() => new Map<ControlPort, WorkspaceBinding>());
@@ -68,14 +72,29 @@ function port(revision: number) {
     },
   });
 }
-function view(controlPort: ControlPort) {
+function view(controlPort: ControlPort, driverSession?: DriverSession) {
   return (
     <MixRelayProvider>
       <I18nProvider>
-        <StudioScreen controlPort={controlPort} />
+        <StudioScreen controlPort={controlPort} driverSession={driverSession} />
       </I18nProvider>
     </MixRelayProvider>
   );
+}
+
+function newGraphShortcut(
+  target: EventTarget,
+  modifiers: { ctrlKey?: boolean; metaKey?: boolean } = {},
+) {
+  const event = new KeyboardEvent('keydown', {
+    bubbles: true,
+    cancelable: true,
+    key: 'N',
+    shiftKey: true,
+    ...modifiers,
+  });
+  act(() => target.dispatchEvent(event));
+  return event;
 }
 
 function devicePort() {
@@ -105,6 +124,7 @@ function devicePort() {
       devices: [
         {
           nativeDeviceIds: [],
+          nativeFormats: unknownNativeFormats,
           spec: { ...virtualSpec, id: 'device-a' },
           canSetSampleRate: true,
           observedSampleRate: 48000,
@@ -153,7 +173,7 @@ it('keeps the new-graph launcher stable across background saves but guards creat
   render(view(controlPort));
   const launcher = await screen.findByRole('button', { name: 'New graph' });
   await waitFor(() => expect(launcher).toBeEnabled());
-  expect(launcher).toHaveAttribute('aria-keyshortcuts', 'Control+Shift+N Meta+Shift+N');
+  expect(launcher).toHaveAttribute('aria-keyshortcuts', 'Control+Shift+N');
   expect(launcher.className).toContain(styles.graph);
   expect(launcher.className).toContain(styles.newGraph);
   expect(launcher).not.toHaveClass('mantine-Button-root');
@@ -190,6 +210,61 @@ it('keeps the new-graph launcher stable across background saves but guards creat
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 
+it.each([
+  ['MacIntel', { metaKey: true }],
+  ['Linux x86_64', { ctrlKey: true }],
+] as const)(
+  'preserves text editing and uses the platform new-graph modifier on %s',
+  async (platform, modifier) => {
+    const identity = vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
+    render(view(port(1)));
+    const launcher = await screen.findByRole('button', { name: 'New graph' });
+    expect(launcher).toHaveAttribute(
+      'aria-keyshortcuts',
+      `${platform === 'MacIntel' ? 'Meta' : 'Control'}+Shift+N`,
+    );
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    const textarea = document.createElement('textarea');
+    const editable = document.createElement('div');
+    editable.setAttribute('contenteditable', 'true');
+    const nested = document.createElement('span');
+    editable.append(nested);
+    document.body.append(input, textarea, editable);
+    try {
+      for (const target of [input, textarea, nested]) {
+        const event = newGraphShortcut(target, modifier);
+        expect(event.defaultPrevented, `shortcut intercepted from ${target.tagName}`).toBe(false);
+        expect(screen.queryByRole('dialog', { name: 'New graph' })).not.toBeInTheDocument();
+      }
+
+      const claimed = new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        ...modifier,
+        key: 'n',
+        shiftKey: true,
+      });
+      claimed.preventDefault();
+      act(() => document.body.dispatchEvent(claimed));
+      expect(screen.queryByRole('dialog', { name: 'New graph' })).not.toBeInTheDocument();
+
+      const wrongModifier = platform === 'MacIntel' ? { ctrlKey: true } : { metaKey: true };
+      expect(newGraphShortcut(document.body, wrongModifier).defaultPrevented).toBe(false);
+      expect(screen.queryByRole('dialog', { name: 'New graph' })).not.toBeInTheDocument();
+      const canvasEvent = newGraphShortcut(document.body, modifier);
+      expect(canvasEvent.defaultPrevented).toBe(true);
+      expect(screen.getByRole('dialog', { name: 'New graph' })).toBeInTheDocument();
+    } finally {
+      input.remove();
+      textarea.remove();
+      editable.remove();
+      identity.mockRestore();
+    }
+  },
+);
+
 it('uses a visible chevron tab to reopen the sidebar without changing the graph or header', async () => {
   const controlPort = port(1);
   const mutate = vi.spyOn(controlPort, 'mutateGraphCatalog');
@@ -216,46 +291,33 @@ it('uses a visible chevron tab to reopen the sidebar without changing the graph 
   expect(mutate).not.toHaveBeenCalled();
 });
 
-it('blocks device changes during unsaved edits and refreshes actual node rate after a device transaction', async () => {
+it('sends device edits through the independent Driver owner during graph title edits', async () => {
   const controlPort = devicePort();
   const binding = () => {
     const current = workspaceBindings.get(controlPort);
     if (!current) throw new Error('Workspace not mounted');
     return current;
   };
-  render(view(controlPort));
-  await waitFor(() => expect(binding().deviceRateAction.enabled).toBe(true));
-  act(() => binding().onBusyChange(true));
-  expect(binding().deviceRateAction.enabled).toBe(false);
-  expect(sessionDisabled.get(controlPort)).toBe(true);
-  await act(async () => {
-    await binding().deviceRateAction.change('device-a', 44100);
-  });
-  expect(controlPort.setVirtualEndpointSampleRate).not.toHaveBeenCalled();
-  act(() => binding().onBusyChange(false));
+  const changeDevice = vi.fn().mockResolvedValue(null);
+  const driverSession: DriverSession = {
+    port: null,
+    snapshot: { protocolVersion: 1, revision: 4, state: 'ready', installedVersion: '0.1.0', settings: virtualPolicy },
+    busy: false, error: null, endpointId: null,
+    allowMultiDevice: false,
+    refresh: vi.fn().mockResolvedValue(undefined), mutate: vi.fn().mockResolvedValue(null), changeDevice,
+  };
+  render(view(controlPort, driverSession));
+  await waitFor(() => expect(binding().deviceDriverAction.enabled).toBe(true));
   act(() => binding().onTitleChange('Unsaved title'));
-  expect(binding().deviceRateAction.enabled).toBe(false);
+  expect(binding().deviceDriverAction.enabled).toBe(true);
   expect(sessionDisabled.get(controlPort)).toBe(true);
+  const update = { displayName: 'Monitor', renderChannels: 2, captureChannels: 2,
+    nativeFormat: { direction: 'render' as const, format: { sampleRate: 44100, channels: 2, sampleFormat: 'signed24' as const } } };
   await act(async () => {
-    await binding().deviceRateAction.change('device-a', 44100);
+    binding().deviceDriverAction.change('device-a', update);
   });
+  expect(changeDevice).toHaveBeenCalledExactlyOnceWith('device-a', update);
   expect(controlPort.setVirtualEndpointSampleRate).not.toHaveBeenCalled();
-  act(() => binding().onTitleChange('Untitled Graph'));
-  await act(async () => {
-    await binding().deviceRateAction.change('device-a', 44100);
-  });
-  expect(controlPort.setVirtualEndpointSampleRate).toHaveBeenCalledExactlyOnceWith({
-    endpointId: 'device-a',
-    expectedRevision: 1,
-    sampleRate: 44100,
-  });
-  await waitFor(() =>
-    expect(binding().audioSession?.virtualEndpointSettings?.devices[0]?.observedSampleRate).toBe(
-      44100,
-    ),
-  );
-  expect(binding().audioSession?.format).toEqual({ sampleRate: 96000, blockFrames: 32 });
-  expect(binding().sessionDocument?.revision).toBe(2);
 });
 
 describe('Studio session document ownership', () => {

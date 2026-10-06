@@ -71,9 +71,14 @@ impl ToneOwner {
     fn start() -> Self {
         let executable = std::env::var("MIXRELAY_VIRTUAL_TONE_FIXTURE")
             .expect("explicit owned tone fixture path");
+        let endpoint_id = std::env::var("MIXRELAY_VIRTUAL_TONE_ENDPOINT_ID")
+            .expect("explicit owned canonical endpoint UUID");
+        let endpoint = parse_endpoint_id(&endpoint_id).expect("canonical nonzero endpoint UUID");
+        let uid = endpoint_uid(endpoint);
         let mut owned = Self(
             Command::new(executable)
                 .arg("--mixrelay-virtual-only")
+                .arg(&uid)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .spawn()
@@ -91,7 +96,7 @@ impl ToneOwner {
             .expect("bounded tone readiness")
             .unwrap();
         reader.join().unwrap();
-        assert_eq!(ready.trim(), "ready io.mixrelay.audio.endpoint.default");
+        assert_eq!(ready.trim(), format!("ready {uid}"));
         owned
     }
 }
@@ -163,7 +168,7 @@ fn live_owned_application_tap_v2_src_rate_changes() {
     let _tone = ToneOwner::start();
     let (registry, transport) = RegistryOwner::create();
     let capture = Arc::new(
-        CaptureProbeSession::start("io.mixrelay.test-virtual-clock-source", true)
+        CaptureProbeSession::start("io.mixrelay.test-virtual-clock-source", None)
             .expect("owned process tap; permission denial requires user action, never reset"),
     );
     assert_eq!(capture.stats().channels, 2);
@@ -174,13 +179,18 @@ fn live_owned_application_tap_v2_src_rate_changes() {
     let worker_failure = failure.clone();
     let handoff = Arc::new(capture_transaction::CaptureHandoff::default());
     let worker_handoff = Arc::clone(&handoff);
+    let playback = Arc::new(capture_transaction::CaptureHandoff::default());
+    let worker_playback = Arc::clone(&playback);
     let worker = std::thread::spawn(move || {
         if let Err(error) = clock_pump::run_with_handoff(
             worker_capture,
             transport,
             2,
-            &worker_stop,
-            &worker_handoff,
+            PumpControl {
+                stop: &worker_stop,
+                capture: &worker_handoff,
+                playback: &worker_playback,
+            },
         ) {
             *worker_failure.lock().unwrap() = Some(error);
         }
@@ -189,6 +199,7 @@ fn live_owned_application_tap_v2_src_rate_changes() {
         stop,
         worker: Some(worker),
         handoff,
+        playback,
     };
     let first = measure_phase(&registry, 44_100);
     let second = measure_phase(&registry, 48_000);

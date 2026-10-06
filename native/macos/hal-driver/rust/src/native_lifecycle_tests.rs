@@ -48,8 +48,8 @@ fn new_engine_inventory_replaces_mapping_with_lower_or_equal_generation() {
             ),
             (0, 1, 96_000)
         );
-        new.capture(&[0.75; 64], 32);
-        assert_eq!(pcm(&fixture, id, false, 0.0), [0.75_f32.to_bits(); 64]);
+        pcm(&fixture, id, true, 0, 0.75);
+        assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.75_f32.to_bits(); 64]);
         assert!(!first.apply_from(&fixture, 1));
         assert_eq!(fixture.registry.snapshot(id).unwrap().sample_rate, 96_000);
     }
@@ -101,24 +101,24 @@ fn same_mapping_on_new_connection_does_not_reset_running_stream() {
     assert!(message.apply(&fixture));
     let id = fixture.registry.devices()[0];
     start(&fixture, id);
-    transport.capture(&[0.25; 64], 32);
+    pcm(&fixture, id, true, 0, 0.25);
     let epoch = transport.clock().epoch;
     super::connect(&fixture, 2);
     assert!(message.apply_from(&fixture, 2));
     assert_eq!(transport.clock().epoch, epoch);
     assert!(crate::device::lock(&fixture.host.requests).is_empty());
-    assert_eq!(pcm(&fixture, id, false, 0.0), [0.25_f32.to_bits(); 64]);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.25_f32.to_bits(); 64]);
 }
 
-fn pcm(fixture: &super::Fixture, device: u32, render: bool, value: f32) -> [u32; 64] {
+fn pcm(fixture: &super::Fixture, device: u32, render: bool, frame: u64, value: f32) -> [u32; 64] {
     let mut samples = [value; 64];
     assert!(unsafe {
         fixture.registry.io(IoOperation {
             device,
             stream: device + if render { 2 } else { 1 },
             render,
-            frame: 0,
-            samples: samples.as_mut_ptr(),
+            frame,
+            samples: samples.as_mut_ptr().cast(),
             frames: 32,
         })
     });
@@ -138,7 +138,7 @@ fn native_multi_client_activity_and_restart_discard_previous_capture() {
     );
     assert_eq!(fixture.registry.client(id, 43, true), OK);
     assert_eq!(fixture.registry.start(id, 43, 2), OK);
-    pcm(&fixture, id, true, 0.5);
+    pcm(&fixture, id, true, 0, 0.5);
     assert_eq!(
         unsafe { mr_shared_audio_buffer_producer_activity(render) },
         3
@@ -150,19 +150,19 @@ fn native_multi_client_activity_and_restart_discard_previous_capture() {
         }),
         (1, 0)
     );
-    transport.capture(&[0.75; 64], 32);
-    assert_eq!(pcm(&fixture, id, false, 0.0), [0.75_f32.to_bits(); 64]);
+    pcm(&fixture, id, true, 32, 0.75);
+    assert_eq!(pcm(&fixture, id, false, 32, 0.0), [0.75_f32.to_bits(); 64]);
     assert_eq!(fixture.registry.stop(id, 43), OK);
     assert_eq!(transport.clock().running, 0);
     assert_eq!(
         unsafe { mr_shared_audio_buffer_producer_activity(render) },
         1
     );
-    assert_eq!(pcm(&fixture, id, false, 0.9), [0; 64]);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.9), [0; 64]);
     assert_eq!(fixture.registry.start(id, 42, 3), OK);
-    assert_eq!(pcm(&fixture, id, false, 0.9), [0; 64]);
-    transport.capture(&[0.25; 64], 32);
-    assert_eq!(pcm(&fixture, id, false, 0.0), [0.25_f32.to_bits(); 64]);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.9), [0; 64]);
+    pcm(&fixture, id, true, 0, 0.25);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.25_f32.to_bits(); 64]);
 }
 
 #[test]
@@ -174,18 +174,18 @@ fn every_native_rate_commit_rearms_capture_before_callbacks_resume() {
     let capture = unsafe { super::mr_endpoint_transport_capture_buffer(transport.pointer) };
     let mut previous_seed = 0;
     for &rate in crate::formats::SAMPLE_RATES {
-        transport.capture(&[0.75; 64], 32);
-        assert_eq!(pcm(&fixture, id, false, 0.0), [0.75_f32.to_bits(); 64]);
+        pcm(&fixture, id, true, 32, 0.75);
+        assert_eq!(pcm(&fixture, id, false, 32, 0.0), [0.75_f32.to_bits(); 64]);
         assert_eq!(fixture.registry.set_rate(id, rate), OK);
         assert_eq!(fixture.perform(), OK);
         assert_eq!(
             (transport.clock().sample_rate, transport.clock().running),
             (rate, 1)
         );
-        assert!(unsafe { mr_shared_audio_buffer_epoch_pending(capture) });
-        assert_eq!(pcm(&fixture, id, false, 0.9), [0; 64]);
-        transport.capture(&[0.25; 64], 32);
-        assert_eq!(pcm(&fixture, id, false, 0.0), [0.25_f32.to_bits(); 64]);
+        assert!(!unsafe { mr_shared_audio_buffer_epoch_pending(capture) });
+        assert_eq!(pcm(&fixture, id, false, 0, 0.9), [0; 64]);
+        pcm(&fixture, id, true, 0, 0.25);
+        assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.25_f32.to_bits(); 64]);
         let mut timestamp = Timestamp::default();
         assert!(fixture.registry.timestamp(id, 0, &mut timestamp));
         assert!(timestamp.seed > previous_seed);
@@ -199,7 +199,7 @@ fn idle_replacement_keeps_native_rate_and_does_not_emit_stale_pcm() {
     let old = Transport::new(10, 2, 2);
     let id = old.add(&fixture, "Before", 96_000);
     start(&fixture, id);
-    old.capture(&[0.75; 64], 32);
+    pcm(&fixture, id, true, 0, 0.75);
     assert_eq!(fixture.registry.stop(id, 42), OK);
     let replacement = Transport::new(10, 2, 2);
     assert_eq!(replacement.add(&fixture, "After", 48_000), id);
@@ -209,11 +209,11 @@ fn idle_replacement_keeps_native_rate_and_does_not_emit_stale_pcm() {
         (96_000, 0)
     );
     assert_eq!(old.clock().running, 0);
-    assert_eq!(pcm(&fixture, id, false, 0.9), [0; 64]);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.9), [0; 64]);
     assert_eq!(fixture.registry.start(id, 42, 4), OK);
-    assert_eq!(pcm(&fixture, id, false, 0.9), [0; 64]);
-    replacement.capture(&[0.25; 64], 32);
-    assert_eq!(pcm(&fixture, id, false, 0.0), [0.25_f32.to_bits(); 64]);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.9), [0; 64]);
+    pcm(&fixture, id, true, 0, 0.25);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.25_f32.to_bits(); 64]);
 }
 
 #[test]
@@ -222,7 +222,7 @@ fn failed_native_attachment_preserves_running_mapping_clock_and_pcm() {
     let old = Transport::new(10, 2, 2);
     let id = old.add(&fixture, "Still active", 96_000);
     start(&fixture, id);
-    old.capture(&[0.75; 64], 32);
+    pcm(&fixture, id, true, 0, 0.75);
     let before = old.clock();
     let candidate = Transport::new(10, 7, 3);
     assert_eq!(
@@ -240,24 +240,26 @@ fn failed_native_attachment_preserves_running_mapping_clock_and_pcm() {
         (before.epoch, 96_000, 1)
     );
     assert_eq!(fixture.registry.snapshot(id).unwrap().render_channels, 2);
-    assert_eq!(pcm(&fixture, id, false, 0.0), [0.75_f32.to_bits(); 64]);
-    pcm(&fixture, id, true, 0.25);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.75_f32.to_bits(); 64]);
+    pcm(&fixture, id, true, 32, 0.25);
+    assert_eq!(pcm(&fixture, id, false, 32, 0.0), [0.25_f32.to_bits(); 64]);
     assert_eq!(
         old.render::<64>(32).map(f32::to_bits),
-        [0.25_f32.to_bits(); 64]
+        [0.75_f32.to_bits(); 64]
     );
 }
 
 #[test]
-fn native_runtime_mapping_outlives_caller_descriptor_and_producer_view() {
+fn native_runtime_mapping_outlives_caller_descriptor_and_mapping_view() {
     let fixture = native_fixture();
     let transport = Transport::new(10, 2, 2);
     let id = transport.add(&fixture, "Owned mapping", 96_000);
     start(&fixture, id);
-    transport.capture(&[0.25; 64], 32);
+    pcm(&fixture, id, true, 0, 0.25);
     drop(transport);
-    assert_eq!(pcm(&fixture, id, false, 0.0), [0.25_f32.to_bits(); 64]);
-    pcm(&fixture, id, true, 0.5);
+    assert_eq!(pcm(&fixture, id, false, 0, 0.0), [0.25_f32.to_bits(); 64]);
+    pcm(&fixture, id, true, 32, 0.5);
+    assert_eq!(pcm(&fixture, id, false, 32, 0.0), [0.5_f32.to_bits(); 64]);
     let mut timestamp = Timestamp::default();
     assert!(fixture.registry.timestamp(id, 100, &mut timestamp));
     assert_eq!(fixture.registry.snapshot(id).unwrap().sample_rate, 96_000);
@@ -265,4 +267,42 @@ fn native_runtime_mapping_outlives_caller_descriptor_and_producer_view() {
     assert_eq!(fixture.registry.client(id, 42, false), OK);
     assert_eq!(fixture.registry.remove([10; 16]), OK);
     assert!(fixture.registry.snapshot(id).is_none());
+}
+
+#[test]
+fn native_removal_releases_running_mapping_while_host_client_retains_device() {
+    let fixture = native_fixture();
+    let transport = Transport::new(10, 2, 2);
+    let id = transport.add(&fixture, "Removed while open", 48_000);
+    start(&fixture, id);
+    pcm(&fixture, id, true, 0, 0.75);
+    assert_eq!(transport.clock().running, 1);
+    assert_eq!(fixture.registry.remove([10; 16]), OK);
+    assert_eq!(transport.clock().running, 0);
+    let device = fixture.registry.pin(id).unwrap();
+    assert!(
+        device
+            .runtime
+            .load(std::sync::atomic::Ordering::Acquire)
+            .is_null()
+    );
+    drop(device);
+    let retired = fixture.registry.snapshot(id).unwrap();
+    assert!(!retired.alive);
+    assert!(!retired.running);
+    assert_eq!(retired.client_count, 1);
+    assert_eq!(pcm(&fixture, id, false, 0, 1.0), [0; 64]);
+    let mut timestamp = Timestamp::default();
+    assert!(!fixture.registry.timestamp(id, 100, &mut timestamp));
+    assert_eq!(fixture.registry.stop(id, 42), OK);
+    assert_eq!(fixture.registry.client(id, 42, false), OK);
+    assert!(fixture.registry.snapshot(id).is_none());
+    let replacement = transport.add(&fixture, "Fresh device", 48_000);
+    assert_ne!(replacement, id);
+    start(&fixture, replacement);
+    pcm(&fixture, replacement, true, 0, 0.25);
+    assert_eq!(
+        pcm(&fixture, replacement, false, 0, 0.0),
+        [0.25_f32.to_bits(); 64]
+    );
 }

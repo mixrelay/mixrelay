@@ -163,7 +163,9 @@ impl ControlMaintenance {
     /// # Errors
     /// Returns a failed final checkpoint or an observer panic after joining the thread.
     pub fn finish(mut self) -> Result<(), String> {
-        self.join()
+        self.join().inspect_err(|error| {
+            tracing::error!(error, "control maintenance shutdown failed");
+        })
     }
 
     fn join(&mut self) -> Result<(), String> {
@@ -172,9 +174,7 @@ impl ControlMaintenance {
             let _ = stop.send(());
         }
         self.thread.take().map_or(Ok(()), |thread| {
-            thread
-                .join()
-                .map_err(|_| "control maintenance panicked".to_owned())?
+            crate::worker_join::join(thread)?
                 .map_err(|error| format!("control shutdown finalization failed: {error:?}"))
         })
     }
@@ -191,6 +191,36 @@ impl Drop for ControlMaintenance {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finalization_preserves_control_worker_panic_reason_and_releases_owner() {
+        let controller = Arc::new(EngineGraphController::new(
+            Arc::new(mixrelay_audio_engine::ProcessorExchange::new(1)),
+            "endpoint",
+            mixrelay_audio_graph::RenderFormat {
+                sample_rate: 48_000,
+                block_frames: 128,
+            },
+        ));
+        let weak = Arc::downgrade(&controller);
+        let monitor = ControlMaintenance {
+            observing: Arc::new(AtomicBool::new(false)),
+            stop: None,
+            thread: Some(
+                thread::Builder::new()
+                    .name("failed-control-worker".into())
+                    .spawn(|| panic!("injected checkpoint failure"))
+                    .unwrap(),
+            ),
+            _controller: controller,
+        };
+
+        assert_eq!(
+            monitor.finish(),
+            Err("failed-control-worker panicked: injected checkpoint failure".into())
+        );
+        assert!(weak.upgrade().is_none());
+    }
 
     #[test]
     fn monitor_joins_and_releases_its_controller_without_a_desktop_client() {

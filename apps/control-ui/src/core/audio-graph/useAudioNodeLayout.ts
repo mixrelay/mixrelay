@@ -1,6 +1,5 @@
-import { useResizeObserver } from '@mantine/hooks';
 import { useUpdateNodeInternals } from '@xyflow/react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { audioNodeFaceGeometry } from '../ui/audioNodeLayout';
 import type { AudioGraphNode } from './model';
@@ -12,47 +11,74 @@ export function graphNodeFaceMode(node: AudioGraphNode) {
 
 export function graphNodeFaceGeometry(node: AudioGraphNode) {
   return audioNodeFaceGeometry({
-    channels: node.appearance.meterChannels,
+    meterBanks: node.appearance.meterBanks,
     hasDetail: Boolean(node.appearance.detail),
     portCount: Math.max(node.inputPorts.length, node.outputPorts.length),
     mode: graphNodeFaceMode(node),
   });
 }
 
+function nativeEditorHeight(
+  node: AudioGraphNode,
+  editor: { width: number | null; height: number | null },
+) {
+  if (!editor.width || !editor.height) return 0;
+  return (
+    (editor.height * (node.size?.width ?? Math.min(1600, Math.max(240, editor.width)))) /
+      editor.width +
+    28
+  );
+}
+
+function channelCenter(first: number | null, height: number, minimum: number) {
+  return first === null ? null : first + Math.max(0, height - minimum) / 2;
+}
+
 export function useAudioNodeLayout(
   node: AudioGraphNode,
   editor: { width: number | null; height: number | null },
 ) {
-  const [ref, bounds] = useResizeObserver<HTMLDivElement>();
   const [faceHeight, onFaceHeightChange] = useState(0);
-  const [contentHeight, onContentHeightChange] = useState(0);
+  const [controls, setControls] = useState({ total: 0, disclosure: 0 });
+  const onContentHeightChange = useCallback(
+    (total: number, disclosure = 0) =>
+      setControls((previous) =>
+        previous.total === total && previous.disclosure === disclosure
+          ? previous
+          : { total, disclosure },
+      ),
+    [],
+  );
   const updateNodeInternals = useUpdateNodeInternals();
   const face = graphNodeFaceGeometry(node);
   const compact = graphNodeFaceMode(node) === 'compact';
   const portCount = Math.max(node.inputPorts.length, node.outputPorts.length);
+  const compactPortHeight = Math.max(88, 26 + (portCount + 1) * 18);
+  const collapsedHeight = controls.total - controls.disclosure;
+  const baseFaceHeight =
+    !compact && node.size
+      ? Math.max(face.height, node.size.height - collapsedHeight - 2)
+      : face.height;
   const minHeight = compact
-    ? Math.max(88, 26 + (portCount + 1) * 18, face.height + contentHeight + 2)
-    : face.height + contentHeight + 2;
-  const nativeHeight =
-    editor.width && editor.height
-      ? (editor.height * (node.size?.width ?? Math.min(1600, Math.max(240, editor.width)))) /
-          editor.width +
-        28
-      : 0;
+    ? Math.max(compactPortHeight, face.height + controls.total + 2)
+    : face.height + controls.total + 2;
+  const nativeHeight = nativeEditorHeight(node, editor);
   const ports = compact
     ? {
         ...face,
-        height: Math.max(minHeight, node.size?.height ?? nativeHeight, bounds.height),
+        // Disclosure content may grow the card, but only an editor or explicit resize moves ports.
+        height: Math.max(compactPortHeight, node.size?.height ?? nativeHeight),
         portInsetTop: 26,
         portInsetBottom: 12,
       }
     : {
         ...face,
-        height: faceHeight || face.height,
-        firstChannelCenter:
-          face.firstChannelCenter === null
-            ? null
-            : face.firstChannelCenter + Math.max(0, faceHeight - face.height) / 2,
+        height: node.size ? baseFaceHeight : faceHeight || face.height,
+        firstChannelCenter: channelCenter(
+          face.firstChannelCenter,
+          node.size ? baseFaceHeight : faceHeight,
+          face.height,
+        ),
       };
   const signature = [...node.inputPorts, ...node.outputPorts].map((port) => port.id).join('|');
   useEffect(() => {
@@ -60,6 +86,7 @@ export function useAudioNodeLayout(
     void editor.width;
     void ports.height;
     void ports.firstChannelCenter;
+    void minHeight;
     updateNodeInternals(node.id);
   }, [
     node.id,
@@ -67,7 +94,17 @@ export function useAudioNodeLayout(
     editor.width,
     ports.height,
     ports.firstChannelCenter,
+    minHeight,
     updateNodeInternals,
   ]);
-  return { ref, face, ports, minHeight, onFaceHeightChange, onContentHeightChange };
+  return {
+    face,
+    faceHeight: baseFaceHeight,
+    ports,
+    minHeight,
+    height: node.size ? node.size.height + controls.disclosure : undefined,
+    disclosureHeight: controls.disclosure,
+    onFaceHeightChange,
+    onContentHeightChange,
+  };
 }

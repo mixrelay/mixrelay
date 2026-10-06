@@ -161,6 +161,142 @@ fn restoring_enabled_node_retains_authored_connections_and_parameters() {
     );
 }
 
+#[derive(Default)]
+struct BufferedHistoryCounts {
+    prepares: AtomicUsize,
+    calls: AtomicUsize,
+    suspensions: AtomicUsize,
+}
+
+struct BufferedHistoryProcessor {
+    counts: Arc<BufferedHistoryCounts>,
+    history: [f32; 8],
+}
+
+impl HostedAudioProcessor for BufferedHistoryProcessor {
+    fn process(&mut self, input: &[f32], output: &mut [f32], frames: usize) -> bool {
+        self.counts.calls.fetch_add(1, Ordering::Relaxed);
+        let samples = frames * 2;
+        output[..samples].copy_from_slice(&self.history[..samples]);
+        self.history[..samples].copy_from_slice(&input[..samples]);
+        true
+    }
+
+    fn suspend_processing(&mut self) {
+        self.counts.suspensions.fetch_add(1, Ordering::Relaxed);
+        self.history.fill(0.0);
+    }
+}
+
+struct BufferedHistoryFactory(Arc<BufferedHistoryCounts>);
+
+impl HostedProcessorFactory for BufferedHistoryFactory {
+    fn prepare(
+        &self,
+        _: HostedProcessorPrepareRequest<'_>,
+    ) -> Result<Box<dyn HostedAudioProcessor>, String> {
+        self.0.prepares.fetch_add(1, Ordering::Relaxed);
+        Ok(Box::new(BufferedHistoryProcessor {
+            counts: Arc::clone(&self.0),
+            history: [0.0; 8],
+        }))
+    }
+}
+
+fn process_without_heap(processor: &mut BlockProcessor, input: &[f32; 8], output: &mut [f32; 8]) {
+    HEAP_OPERATIONS.with(|count| count.set(Some(0)));
+    processor.process_block(4, &[input], &mut [output]).unwrap();
+    assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
+}
+
+fn process_with_expected_output(processor: &mut BlockProcessor, input: &[f32; 8], expected: f32) {
+    let mut output = [f32::NAN; 8];
+    process_without_heap(processor, input, &mut output);
+    assert_eq!(output.map(f32::to_bits), [expected; 8].map(f32::to_bits));
+}
+
+fn publish_provider_control(
+    exchange: &crate::ProcessorExchange,
+    plan: &RenderPlan,
+    revision: u64,
+    control: NodeControl,
+) {
+    exchange
+        .publish_controls(
+            plan.controls(),
+            revision,
+            &[crate::RuntimeControlUpdate {
+                node_id: NodeId::from("effect"),
+                control,
+                gain_db: None,
+            }],
+        )
+        .unwrap();
+}
+
+#[test]
+fn processor_off_suspends_buffered_history_but_mute_keeps_processing() {
+    let counts = Arc::new(BufferedHistoryCounts::default());
+    let document = provider_document(NodeControl::default());
+    let execution = GraphCompiler::new(TestProviderResolver)
+        .compile(
+            &document,
+            CompileContext {
+                format: FORMAT,
+                limits: CompileLimits::default(),
+            },
+        )
+        .unwrap();
+    let mut processor = BlockProcessor::prepare_with_hosted_processors(
+        &execution,
+        Arc::new(crate::PeakMeterBank::new(8, 8)),
+        &BufferedHistoryFactory(Arc::clone(&counts)),
+    )
+    .unwrap();
+    let plan = Arc::clone(processor.plan());
+    let exchange = crate::ProcessorExchange::new(1);
+    process_with_expected_output(&mut processor, &[1.0; 8], 0.0);
+    process_with_expected_output(&mut processor, &[2.0; 8], 1.0);
+
+    for revision in [2, 3] {
+        publish_provider_control(
+            &exchange,
+            &plan,
+            revision,
+            NodeControl {
+                enabled: false,
+                muted: false,
+            },
+        );
+        process_with_expected_output(&mut processor, &[3.0; 8], 0.0);
+    }
+    assert_eq!(counts.calls.load(Ordering::Relaxed), 2);
+    assert_eq!(counts.suspensions.load(Ordering::Relaxed), 2);
+
+    publish_provider_control(&exchange, &plan, 4, NodeControl::default());
+    process_with_expected_output(&mut processor, &[4.0; 8], 0.0);
+
+    publish_provider_control(
+        &exchange,
+        &plan,
+        5,
+        NodeControl {
+            enabled: true,
+            muted: true,
+        },
+    );
+    process_with_expected_output(&mut processor, &[5.0; 8], 0.0);
+    assert_eq!(counts.suspensions.load(Ordering::Relaxed), 2);
+
+    publish_provider_control(&exchange, &plan, 6, NodeControl::default());
+    process_with_expected_output(&mut processor, &[6.0; 8], 5.0);
+
+    assert!(Arc::ptr_eq(processor.plan(), &plan));
+    assert_eq!(counts.prepares.load(Ordering::Relaxed), 1);
+    assert_eq!(counts.calls.load(Ordering::Relaxed), 5);
+    assert_eq!(counts.suspensions.load(Ordering::Relaxed), 2);
+}
+
 #[test]
 fn disabled_source_retains_binding_but_does_not_affect_another_active_route() {
     let mut disabled = device_input("disabled");
@@ -243,6 +379,81 @@ fn runtime_gain_and_mute_publish_without_preparation_or_audio_heap_operations() 
     }
     assert!(Arc::ptr_eq(processor.plan(), &plan));
     assert_eq!(exchange.plan_revisions().submitted, 1);
+}
+
+#[test]
+fn source_gain_retains_float_headroom_and_meter_peaks_across_unity_boost_and_mute() {
+    let execution = compile(
+        vec![device_input("in"), device_output("out")],
+        vec![edge("route", "in", AUDIO_PORT_ID, "out", AUDIO_PORT_ID)],
+    );
+    let plan = Arc::new(RenderPlan::prepare(&execution).unwrap());
+    let meters = Arc::new(crate::PeakMeterBank::new(plan.meter_bindings().len(), 2));
+    let mut processor = BlockProcessor::with_peak_meters(Arc::clone(&plan), Arc::clone(&meters));
+    let exchange = crate::ProcessorExchange::new(1);
+    let input = [0.5, 1.0, -0.5, -1.0, 0.25, -0.75, -0.25, 0.75];
+    assert_eq!(plan.meter_bindings().len(), 2);
+
+    for (revision, gain_db, muted, scale) in [
+        (2, 0.0, false, 1.0),
+        (3, 6.020_600_3, false, 2.0),
+        (4, 6.020_600_3, true, 0.0),
+        (5, 0.0, false, 1.0),
+    ] {
+        exchange
+            .publish_controls(
+                plan.controls(),
+                revision,
+                &[crate::RuntimeControlUpdate {
+                    node_id: NodeId::from("in"),
+                    control: NodeControl {
+                        enabled: true,
+                        muted,
+                    },
+                    gain_db: Some(gain_db),
+                }],
+            )
+            .unwrap();
+        let mut output = [f32::NAN; 8];
+        process_without_heap(&mut processor, &input, &mut output);
+        for (actual, source) in output.into_iter().zip(input) {
+            assert!((actual - source * scale).abs() <= 0.000_001);
+        }
+        if revision == 3 {
+            assert!((output[0] - 1.0).abs() <= 0.000_001);
+            assert!((output[1] - 2.0).abs() <= 0.000_001);
+            assert!((output[3] + 2.0).abs() <= 0.000_001);
+        }
+        for index in 0..plan.meter_bindings().len() {
+            let peaks = meters.take_peaks(plan.revision(), index, 2);
+            assert_eq!(peaks.len(), 2);
+            for (actual, expected) in peaks.into_iter().zip([0.5 * scale, scale]) {
+                assert!((actual - expected).abs() <= 0.000_001);
+            }
+        }
+    }
+    assert!(Arc::ptr_eq(processor.plan(), &plan));
+    assert_eq!(exchange.plan_revisions().submitted, 1);
+}
+
+#[test]
+fn peak_meter_take_resets_consumed_peaks_before_following_silence() {
+    let meters = crate::PeakMeterBank::new(2, 2);
+    meters.record_interleaved(7, 0, 2, &[0.25, -0.75, -0.5, 0.125]);
+    meters.record_interleaved(7, 1, 2, &[1.25, -2.0, -0.25, 0.5]);
+    assert_eq!(meters.take_peaks(7, 0, 2), [0.5, 0.75]);
+    assert_eq!(meters.take_peaks(7, 0, 2), [0.0, 0.0]);
+    assert_eq!(meters.take_peaks(7, 1, 2), [1.25, 2.0]);
+
+    for binding in 0..2 {
+        meters.record_interleaved(7, binding, 2, &[0.0; 8]);
+        assert_eq!(meters.take_peaks(7, binding, 2), [0.0, 0.0]);
+        assert_eq!(meters.take_peaks(7, binding, 2), [0.0, 0.0]);
+    }
+    meters.record_interleaved(7, 0, 2, &[0.5, -1.0]);
+    meters.record_interleaved(8, 0, 2, &[0.0; 4]);
+    assert_eq!(meters.take_peaks(7, 0, 2), [0.0, 0.0]);
+    assert_eq!(meters.take_peaks(8, 0, 2), [0.0, 0.0]);
 }
 
 #[test]

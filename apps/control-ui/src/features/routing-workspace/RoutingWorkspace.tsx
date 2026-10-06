@@ -15,17 +15,21 @@ import type {
   CapturableApplication,
   ControlPort,
   ExternalProcessorDescriptor,
+  FailedProcessorInstance,
   RuntimeGraphDocument,
   VirtualEndpointRateError,
+  VirtualEndpointSettings,
+  VirtualEndpointSpec,
 } from '../../core/control-port/types';
 import { ControlPortError } from '../../core/control-port/types';
-import { useUndoHistory } from '../../core/history/useUndoHistory';
+import { type HistoryStep, useUndoHistory } from '../../core/history/useUndoHistory';
 import { NodeMuteButton, NodePowerButton } from '../../core/ui/NodeSignalControls';
+import { hasPlatformModifier, isNativeTextEntryTarget } from '../../core/ui/platformShortcut';
 import { RecoveryActions } from '../../core/ui/RecoveryActions';
 import { RetryAlert } from '../../core/ui/RetryAlert';
 import { WorkspaceHeader } from '../../core/ui/WorkspaceHeader';
 import { RecorderControls } from '../recorder/RecorderControls';
-import { applicationItemId } from './applicationIdentity';
+import { applicationInventorySelection } from './applicationIdentity';
 import { controlChanges, rebaseControls } from './controlReconciliation';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { graphHistoryGroup } from './graphHistoryGroup';
@@ -45,13 +49,13 @@ import {
   updateVirtualEndpoint,
   type VirtualEndpointUpdate,
 } from './model';
-import { NativeProcessorSurface } from './NativeProcessorSurface';
 import { ProcessorCatalogAlert, ProcessorEditorAlerts } from './ProcessorControlAlerts';
 import { ProcessorParameterAlert } from './ProcessorParameterAlert';
+import { ProcessorRecoveryControl } from './ProcessorRecoveryControl';
 import {
   createProcessorMenuItems,
   processorCatalogPlaceholder,
-  processorItemId,
+  processorSelectionForMenuItem,
 } from './processorCatalogMenu';
 import { presentProcessorTimings } from './processorTiming';
 import styles from './RoutingWorkspace.module.css';
@@ -73,7 +77,16 @@ const ADD_PROCESSOR_DIRECTORY_ITEM_ID = 'add-processor-directory';
 const RESCAN_PROCESSORS_ITEM_ID = 'rescan-processors';
 
 export interface RoutingWorkspaceProps {
+  deviceDriverAction?: {
+    settings?: VirtualEndpointSettings;
+    enabled: boolean;
+    error: { endpointId: string | null; message: string } | null;
+    change: (endpointId: string, update: VirtualEndpointUpdate) => void;
+    create: (spec: VirtualEndpointSpec) => Promise<VirtualEndpointSpec | null>;
+  };
   headerActions?: ReactNode;
+  failedProcessors?: FailedProcessorInstance[];
+  catalogRevision?: number;
   processorTimings?: import('../../core/control-port/types').ProcessorTiming[];
   deviceRateAction?: {
     change: (endpointId: string, sampleRate: number) => void;
@@ -111,6 +124,12 @@ function useGraphPresentation(): GraphPresentation {
       options: t('routing.nodes.options'),
       outputGain: t('routing.nodes.outputGain'),
       processor: t('routing.nodes.processor'),
+      processorLayoutUnavailable: t('routing.nodes.processorLayoutUnavailable'),
+      providerBusKinds: {
+        main: t('routing.processorLayouts.main'),
+        sidechain: t('routing.processorLayouts.sidechain'),
+        auxiliary: t('routing.processorLayouts.auxiliary'),
+      },
       ratio: t('routing.nodes.ratio'),
       renderChannels: t('routing.nodes.renderChannels'),
       release: t('routing.nodes.release'),
@@ -195,12 +214,13 @@ function routingNodeRequest(
   audioDevices: readonly AudioDeviceDescriptor[],
   processors: readonly ExternalProcessorDescriptor[],
 ): RoutingNodeRequest | null {
-  const application = applications.find((candidate) => applicationItemId(candidate) === itemId);
-  if (application) {
+  for (const application of applications) {
+    const selection = applicationInventorySelection(application);
+    if (selection?.id !== itemId) continue;
     return {
       bundleId: application.bundleId,
       kind: 'application',
-      selector: application.selector,
+      selector: selection.selector,
       title: application.displayName,
     };
   }
@@ -225,8 +245,8 @@ function routingNodeRequest(
   if (itemId === 'compressor') return { kind: 'compressor' };
   if (itemId === 'recorder') return { kind: 'recorder' };
   if (itemId === 'limiter') return { kind: 'limiter' };
-  const processor = processors.find((candidate) => processorItemId(candidate) === itemId);
-  if (processor) return { kind: 'provider', processor };
+  const processor = processorSelectionForMenuItem(itemId, processors);
+  if (processor) return { kind: 'provider', ...processor };
   return null;
 }
 
@@ -271,9 +291,17 @@ function useVirtualEndpointUpdate(
   updateModel: UpdateModel,
   settings?: AudioSessionStatus['virtualEndpointSettings'],
   rateAction?: RoutingWorkspaceProps['deviceRateAction'],
+  driverAction?: RoutingWorkspaceProps['deviceDriverAction'],
 ) {
   return useCallback(
     (nodeId: string, update: VirtualEndpointUpdate) => {
+      if (driverAction) {
+        const node = model?.nodes.find((candidate) => candidate.id === nodeId);
+        const config = node?.runtime?.type === 'virtual_endpoint' ? node.runtime.config : null;
+        const endpointId = config && typeof config === 'object' && 'id' in config ? config.id : null;
+        if (driverAction.enabled && typeof endpointId === 'string') driverAction.change(endpointId, update);
+        return;
+      }
       if (update.sampleRate !== undefined) {
         const node = model?.nodes.find((candidate) => candidate.id === nodeId);
         const config = node?.runtime?.type === 'virtual_endpoint' ? node.runtime.config : null;
@@ -289,7 +317,7 @@ function useVirtualEndpointUpdate(
           'runtime',
         );
     },
-    [model, presentation, updateModel, settings, rateAction],
+    [model, presentation, updateModel, settings, rateAction, driverAction],
   );
 }
 
@@ -409,13 +437,6 @@ function useUnavailableGraphRecovery(
   }, [controlPort, presentation, processors, setDocument, setErrorCode, setModel, setState, state]);
 }
 
-function isNativeUndoTarget(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable || target instanceof HTMLTextAreaElement) return true;
-  if (!(target instanceof HTMLInputElement)) return false;
-  return ['email', 'number', 'password', 'search', 'tel', 'text', 'url'].includes(target.type);
-}
-
 function runGraphHistoryShortcut(event: KeyboardEvent, undo: () => boolean, redo: () => boolean) {
   const key = event.key.toLowerCase();
   if (key === 'z') return event.shiftKey ? redo() : undo();
@@ -429,8 +450,8 @@ function useGraphHistoryShortcuts(undo: () => boolean, redo: () => boolean, enab
       if (
         event.defaultPrevented ||
         event.altKey ||
-        (!event.metaKey && !event.ctrlKey) ||
-        isNativeUndoTarget(event.target)
+        !hasPlatformModifier(event) ||
+        isNativeTextEntryTarget(event.target)
       ) {
         return;
       }
@@ -440,6 +461,11 @@ function useGraphHistoryShortcuts(undo: () => boolean, redo: () => boolean, enab
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [redo, undo, enabled]);
 }
+
+type ProcessorParameters = Pick<
+  ReturnType<typeof useProcessorParameterPublisher>,
+  'whenIdle' | 'discardFailures'
+>;
 
 function useGraphApplication(
   controlPort: ControlPort,
@@ -451,17 +477,31 @@ function useGraphApplication(
     rebase: (transform: (model: AudioGraphModel) => AudioGraphModel) => void;
   },
   currentModel: { current: AudioGraphModel | null },
-  parameters: Pick<
-    ReturnType<typeof useProcessorParameterPublisher>,
-    'whenIdle' | 'discardFailures'
-  >,
+  parameters: ProcessorParameters,
+  catalogRevision?: number,
+  failedProcessors?: FailedProcessorInstance[],
 ) {
-  const latest = useRef({ presentation, processors, graph, history });
-  latest.current = { presentation, processors, graph, history };
+  const latest = useRef({
+    presentation,
+    processors,
+    graph,
+    history,
+    catalogRevision,
+    failedProcessors,
+  });
+  latest.current = { presentation, processors, graph, history, catalogRevision, failedProcessors };
   const queue = useMemo(
     () =>
       new GraphApplicationQueue(controlPort, {
         getGraphId: () => latest.current.graph.graphId,
+        getCatalogRevision: () => latest.current.catalogRevision,
+        hasFailedProcessor: (graphId, nodeId, instanceId) =>
+          latest.current.failedProcessors?.some(
+            (failed) =>
+              failed.graphId === graphId &&
+              failed.nodeId === nodeId &&
+              failed.instanceId === instanceId,
+          ) ?? false,
         beforeApply: parameters.whenIdle,
         beforeReload: async () => {
           try {
@@ -472,6 +512,7 @@ function useGraphApplication(
             if (!(error instanceof ControlPortError)) throw error;
           }
         },
+        getReloadLayout: controlPort.getGraphLayout?.bind(controlPort),
         getDocument: () => latest.current.graph.document,
         getModel: () => currentModel.current,
         document: (document) => latest.current.graph.setDocument(document),
@@ -488,23 +529,24 @@ function useGraphApplication(
           latest.current.graph.setModel(next);
           return true;
         },
-        restore: (document) => {
+        restore: (document, savedLayout) => {
           const current = latest.current;
           const restored = runtimeGraphToAudioGraph(
             document,
             current.presentation,
             current.processors,
           );
-          // Reload changes runtime state, not the geometry of surviving nodes.
+          // Reload preserves displayed geometry and uses saved layout for new nodes.
           const model = {
             ...restored,
-            nodes: restored.nodes.map((node) => ({
-              ...node,
-              position:
-                currentModel.current?.nodes.find((old) => old.id === node.id)?.position ??
-                node.position,
-              size: currentModel.current?.nodes.find((old) => old.id === node.id)?.size,
-            })),
+            nodes: restored.nodes.map((node) => {
+              const old = currentModel.current?.nodes.find((entry) => entry.id === node.id);
+              return {
+                ...node,
+                position: old?.position ?? savedLayout?.positions[node.id] ?? node.position,
+                size: old ? old.size : savedLayout?.sizes?.[node.id],
+              };
+            }),
           };
           currentModel.current = model;
           current.graph.setModel(model);
@@ -538,12 +580,63 @@ function restoreHistoryModel(
   };
 }
 
+type GraphHistoryStep = HistoryStep<AudioGraphModel, AudioGraphChangeKind>;
+
+function useGraphHistoryNavigation(options: {
+  applyModel: GraphApplicationQueue;
+  currentModel: { current: AudioGraphModel | null };
+  graphRevision?: number;
+  nextRedoStep: () => GraphHistoryStep | null;
+  nextUndoStep: () => GraphHistoryStep | null;
+  publishProcessorParameter: ReturnType<typeof useProcessorParameterPublisher>['publish'];
+  savePositions: (model: AudioGraphModel) => void;
+  setModel: (model: AudioGraphModel) => void;
+}) {
+  const {
+    applyModel,
+    currentModel,
+    graphRevision,
+    nextRedoStep,
+    nextUndoStep,
+    publishProcessorParameter,
+    savePositions,
+    setModel,
+  } = options;
+  const restore = useCallback(
+    (step: GraphHistoryStep | null) => {
+      if (!step) return false;
+      const restoredModel = restoreHistoryModel(step, currentModel.current);
+      const previousModel = currentModel.current;
+      currentModel.current = restoredModel;
+      setModel(restoredModel);
+      savePositions(restoredModel);
+      if (step.kind === 'processor_parameter' && previousModel && applyModel.canPublishParameters) {
+        for (const update of changedProcessorParameters(previousModel, restoredModel)) {
+          publishProcessorParameter({ ...update, expectedRevision: graphRevision ?? 0 });
+        }
+      } else if (step.kind !== 'layout') {
+        applyModel.submit(
+          restoredModel,
+          processorEditIntent(previousModel, restoredModel, step.kind),
+        );
+      }
+      return true;
+    },
+    [applyModel, currentModel, graphRevision, publishProcessorParameter, savePositions, setModel],
+  );
+  const undo = useCallback(() => restore(nextUndoStep()), [nextUndoStep, restore]);
+  const redo = useCallback(() => restore(nextRedoStep()), [nextRedoStep, restore]);
+  return { redo, undo };
+}
+
 function useGraphUpdates(
   controlPort: ControlPort,
   presentation: GraphPresentation,
   processors: readonly ExternalProcessorDescriptor[],
   graph: ReturnType<typeof useWorkspaceGraph>,
   savePositions: (model: AudioGraphModel) => void,
+  catalogRevision?: number,
+  failedProcessors?: FailedProcessorInstance[],
 ) {
   const { model, setModel } = graph;
   const currentModel = useRef(model);
@@ -571,6 +664,8 @@ function useGraphUpdates(
     { clear: clearHistory, rebase: rebaseHistory },
     currentModel,
     parameters,
+    catalogRevision,
+    failedProcessors,
   );
   const updateModel = useCallback(
     (nextModel: AudioGraphModel, kind: AudioGraphChangeKind) => {
@@ -606,30 +701,16 @@ function useGraphUpdates(
       savePositions,
     ],
   );
-  const restore = useCallback(
-    (step: ReturnType<typeof nextUndoStep>) => {
-      if (!step) return false;
-      const restoredModel = restoreHistoryModel(step, currentModel.current);
-      const previousModel = currentModel.current;
-      currentModel.current = restoredModel;
-      setModel(restoredModel);
-      savePositions(restoredModel);
-      if (step.kind === 'processor_parameter' && previousModel && applyModel.canPublishParameters) {
-        for (const update of changedProcessorParameters(previousModel, restoredModel)) {
-          publishProcessorParameter({ ...update, expectedRevision: graph.document?.revision ?? 0 });
-        }
-      } else if (step.kind !== 'layout') {
-        applyModel.submit(
-          restoredModel,
-          processorEditIntent(previousModel, restoredModel, step.kind),
-        );
-      }
-      return true;
-    },
-    [applyModel, publishProcessorParameter, setModel, savePositions, graph.document?.revision],
-  );
-  const undo = useCallback(() => restore(nextUndoStep()), [nextUndoStep, restore]);
-  const redo = useCallback(() => restore(nextRedoStep()), [nextRedoStep, restore]);
+  const { redo, undo } = useGraphHistoryNavigation({
+    applyModel,
+    currentModel,
+    graphRevision: graph.document?.revision,
+    nextRedoStep,
+    nextUndoStep,
+    publishProcessorParameter,
+    savePositions,
+    setModel,
+  });
   return {
     clearHistory,
     redo,
@@ -694,7 +775,10 @@ function useSessionGraphRefresh(
 }
 
 export function RoutingWorkspace({
+  failedProcessors,
+  catalogRevision,
   deviceRateAction,
+  deviceDriverAction,
   graphId,
   interactionDisabled = false,
   sessionDocument,
@@ -703,6 +787,8 @@ export function RoutingWorkspace({
   onBusyChange,
   ...viewOptions
 }: RoutingWorkspaceProps) {
+  if (deviceDriverAction && audioSession)
+    audioSession = { ...audioSession, virtualEndpointSettings: deviceDriverAction.settings };
   const [menuOpened, setMenuOpened] = useState(false);
   const { inventory, applications, audioDevices, processorCatalog, processors, refresh } =
     useWorkspaceInventory(controlPort, menuOpened);
@@ -712,7 +798,15 @@ export function RoutingWorkspace({
   const { errorCode, model, state } = graph;
   const layout = useGraphLayout(controlPort, graphId, model, graph.setModel);
   const { clearHistory, redo, undo, updateModel, application, parameterBusy, parameters } =
-    useGraphUpdates(controlPort, presentation, processors, graph, layout.updateNodes);
+    useGraphUpdates(
+      controlPort,
+      presentation,
+      processors,
+      graph,
+      layout.updateNodes,
+      catalogRevision,
+      failedProcessors,
+    );
   useWorkspaceBusy(onBusyChange, state, parameterBusy, layout);
   useSessionGraphRefresh(
     sessionDocument,
@@ -724,44 +818,32 @@ export function RoutingWorkspace({
     parameterBusy,
   );
   useGraphHistoryShortcuts(undo, redo, layout.loaded && !layout.loading && !interactionDisabled);
-  const virtualCreation = useVirtualEndpointCreation({
-    owner: controlPort,
-    model,
-    settings: audioSession?.virtualEndpointSettings,
-    presentation,
-    enabled:
-      state === 'active' &&
-      !interactionDisabled &&
-      audioSession?.capabilities.virtualEndpoint === true,
-    updateModel: (next) => updateModel(next, 'runtime'),
-  });
-  const addNode = useRoutingNodeCreation({
-    tryVirtualAdd: virtualCreation.tryAdd,
-    audioSession,
-    applications,
-    audioDevices,
-    model,
-    presentation,
-    processors,
-    refreshProcessors: refresh,
-    updateModel,
-  });
-  const updateNodeGain = useRoutingNodeGain(model, updateModel);
-  const updateNodeParameter = useRoutingNodeParameter(model, updateModel);
-  const updateEndpoint = useVirtualEndpointUpdate(
-    model,
-    presentation,
-    updateModel,
-    audioSession?.virtualEndpointSettings,
-    deviceRateAction,
-  );
+  const { addNode, updateEndpoint, updateNodeGain, updateNodeParameter, virtualCreation } =
+    useWorkspaceNodeActions({
+      audioDevices,
+      audioSession,
+      applications,
+      controlPort,
+      deviceRateAction,
+      deviceDriverAction,
+      interactionDisabled,
+      model,
+      presentation,
+      processors,
+      refreshProcessors: refresh,
+      state,
+      updateModel,
+    });
 
   const viewProps = {
     ...viewOptions,
+    failedProcessors,
+    catalogRevision,
     documentRevision: graph.document?.revision ?? 0,
     graphId,
     interactionDisabled,
     deviceRateAction,
+    deviceDriverAction,
     processorCatalog,
     layout,
     application,
@@ -791,6 +873,57 @@ export function RoutingWorkspace({
   );
 }
 
+function useWorkspaceNodeActions(options: {
+  audioDevices: readonly AudioDeviceDescriptor[];
+  audioSession?: AudioSessionStatus;
+  applications: readonly CapturableApplication[];
+  controlPort: ControlPort;
+  deviceRateAction?: RoutingWorkspaceProps['deviceRateAction'];
+  deviceDriverAction?: RoutingWorkspaceProps['deviceDriverAction'];
+  interactionDisabled: boolean;
+  model: AudioGraphModel | null;
+  presentation: GraphPresentation;
+  processors: readonly ExternalProcessorDescriptor[];
+  refreshProcessors: ReturnType<typeof useWorkspaceInventory>['refresh'];
+  state: WorkspaceState;
+  updateModel: UpdateModel;
+}) {
+  const virtualCreation = useVirtualEndpointCreation({
+    owner: options.controlPort,
+    model: options.model,
+    settings: options.deviceDriverAction ? options.deviceDriverAction.settings : options.audioSession?.virtualEndpointSettings,
+    createDevice: options.deviceDriverAction?.create,
+    presentation: options.presentation,
+    enabled:
+      options.state === 'active' &&
+      !options.interactionDisabled &&
+      (options.deviceDriverAction ? options.deviceDriverAction.enabled : options.audioSession?.capabilities.virtualEndpoint === true),
+    updateModel: (next) => options.updateModel(next, 'runtime'),
+  });
+  const addNode = useRoutingNodeCreation({
+    tryVirtualAdd: virtualCreation.tryAdd,
+    audioSession: options.audioSession,
+    applications: options.applications,
+    audioDevices: options.audioDevices,
+    model: options.model,
+    presentation: options.presentation,
+    processors: options.processors,
+    refreshProcessors: options.refreshProcessors,
+    updateModel: options.updateModel,
+  });
+  const updateNodeGain = useRoutingNodeGain(options.model, options.updateModel);
+  const updateNodeParameter = useRoutingNodeParameter(options.model, options.updateModel);
+  const updateEndpoint = useVirtualEndpointUpdate(
+    options.model,
+    options.presentation,
+    options.updateModel,
+    options.audioSession?.virtualEndpointSettings,
+    options.deviceRateAction,
+    options.deviceDriverAction,
+  );
+  return { addNode, updateEndpoint, updateNodeGain, updateNodeParameter, virtualCreation };
+}
+
 function useWorkspaceBusy(
   onBusyChange: RoutingWorkspaceProps['onBusyChange'],
   state: WorkspaceState,
@@ -816,11 +949,14 @@ function useWorkspaceInventory(controlPort: ControlPort, menuOpened: boolean) {
 interface WorkspaceViewProps {
   documentRevision: number;
   headerActions?: ReactNode;
+  failedProcessors?: FailedProcessorInstance[];
+  catalogRevision?: number;
   processorTimings?: RoutingWorkspaceProps['processorTimings'];
   graphId?: string;
   interactionDisabled: boolean;
   parameters: ReturnType<typeof useProcessorParameterPublisher>;
   deviceRateAction?: RoutingWorkspaceProps['deviceRateAction'];
+  deviceDriverAction?: RoutingWorkspaceProps['deviceDriverAction'];
   processorCatalog: ReturnType<typeof useProcessorCatalog>;
   layout: ReturnType<typeof useGraphLayout>;
   persistenceError: string | null;
@@ -848,6 +984,7 @@ function useProcessorEditorLabels() {
   const { t } = useTranslation();
   return useMemo<ProcessorEditorLabels>(
     () => ({
+      open: t('routing.processorEditor.open'),
       retry: t('routing.processorControl.retry'),
       failure: {
         display_unavailable: t('routing.processorEditor.failures.displayUnavailable'),
@@ -863,12 +1000,13 @@ function useProcessorEditorLabels() {
 
 function usePresentedModel(props: WorkspaceViewProps) {
   const { t } = useTranslation();
-  const { model, applications, audioDevices, inventory, audioSession, state, deviceRateAction } =
+  const { model, applications, audioDevices, inventory, audioSession, state, deviceRateAction, deviceDriverAction } =
     props;
   const presented = useMemo(
     () =>
       model
         ? presentVirtualNodeStatus(
+            presentDriverEndpointControls(
             presentVirtualEndpointSettings(
               presentApplicationReselection(
                 presentRoutingApplicationIcons(
@@ -880,6 +1018,9 @@ function usePresentedModel(props: WorkspaceViewProps) {
               audioSession?.virtualEndpointSettings,
               t('audioSession.sampleRate'),
               deviceRateAction,
+            ),
+            deviceDriverAction,
+            t,
             ),
             state,
             audioSession,
@@ -895,12 +1036,47 @@ function usePresentedModel(props: WorkspaceViewProps) {
       state,
       t,
       deviceRateAction,
+      deviceDriverAction,
     ],
   );
   return useMemo(
     () => presentProcessorTimings(presented, props.processorTimings, props.graphId),
     [presented, props.processorTimings, props.graphId],
   );
+}
+
+function presentDriverEndpointControls(
+  model: AudioGraphModel,
+  action: RoutingWorkspaceProps['deviceDriverAction'],
+  t: TFunction,
+): AudioGraphModel {
+  if (!action) return model;
+  return { ...model, nodes: model.nodes.map((node) => {
+    const control = node.appearance.endpointControl;
+    if (!control) return node;
+    const config = node.runtime?.config;
+    const id = config && typeof config === 'object' && 'id' in config ? config.id : null;
+    const device = action.settings?.devices.find((candidate) => candidate.spec.id === id);
+    const endpointError = action.error && action.error.endpointId === id ? action.error.message : null;
+    return { ...node, appearance: { ...node.appearance,
+      title: device?.spec.displayName ?? node.appearance.title,
+      endpointControl: { ...control,
+        displayName: device?.spec.displayName ?? control.displayName,
+        renderChannels: device?.spec.render?.channels ?? control.renderChannels,
+        captureChannels: device?.spec.capture?.channels ?? control.captureChannels,
+        canRename: Boolean(device && action.enabled && action.settings?.canRename),
+        allowedRenderChannels: device && action.enabled ? action.settings?.renderChannels : [],
+        allowedCaptureChannels: device && action.enabled ? action.settings?.captureChannels : [],
+        observedRate: device ? { label: t('audioSession.sampleRate'), value: device.spec.defaultSampleRate } : undefined,
+        sampleRateOptions: device && action.enabled ? device.spec.supportedSampleRates : undefined,
+        rateError: endpointError,
+        nativeFormats: device?.nativeFormats,
+        nativeFormatLabels: { render: t('driverManagement.renderFormat'), capture: t('driverManagement.captureFormat'), unknown: t('driverManagement.unknown') },
+        formatsDisabled: !action.enabled,
+        formatError: endpointError,
+      },
+    } };
+  }) };
 }
 
 function routingContextLabels(t: TFunction) {
@@ -973,14 +1149,7 @@ function WorkspaceView(props: WorkspaceViewProps) {
         <div className={styles.canvas} inert={props.layout.loading}>
           <AudioGraphCanvas
             renderNodeControls={(node) => nodeSignalControls(props, node, t, nodeControls)}
-            renderNodeContent={(node) =>
-              workspaceNodeContent(
-                props,
-                node,
-                presentedModel,
-                processorEditors.statuses.get(node.id)?.state === 'open',
-              )
-            }
+            renderNodeContent={(node) => recorderNodeContent(props, node, presentedModel)}
             viewport={props.layout.layout.viewport}
             onViewportChange={props.layout.updateViewport}
             contextMenuLabels={routingContextLabels(t)}
@@ -1036,23 +1205,6 @@ function WorkspaceToolbar({
       {headerActions ? <div className={styles.headerActions}>{headerActions}</div> : null}
     </WorkspaceHeader>
   );
-}
-
-function workspaceNodeContent(
-  props: WorkspaceViewProps,
-  node: AudioGraphNode,
-  model: AudioGraphModel,
-  editorOpen: boolean,
-) {
-  if (node.runtime?.control?.enabled !== false && editorOpen)
-    return (
-      <NativeProcessorSurface
-        port={props.controlPort}
-        nodeId={node.id}
-        title={node.appearance.title}
-      />
-    );
-  return recorderNodeContent(props, node, model);
 }
 
 function recorderNodeContent(
@@ -1111,25 +1263,55 @@ function nodeSignalControls(
 ) {
   const nodeId = node.runtime?.binding?.nodeId ?? node.id;
   const entry = snapshot?.nodes.find((candidate) => candidate.nodeId === nodeId);
-  if (!entry || !props.graphId || !props.controlPort.updateNodeControl) return null;
+  const failed =
+    node.runtime?.type === 'provider'
+      ? props.failedProcessors?.find(
+          (candidate) => candidate.graphId === props.graphId && candidate.nodeId === node.id,
+        )
+      : undefined;
+  const retryAvailable =
+    failed !== undefined &&
+    props.catalogRevision !== undefined &&
+    props.controlPort.retryProcessor !== undefined;
   const control = node.runtime?.control ?? { enabled: true, muted: false };
   const disabled = !nodeControlIdle(props);
+  const retry = retryAvailable ? (
+    <ProcessorRecoveryControl
+      busy={disabled || props.layout.dirty}
+      catalogRevision={props.catalogRevision}
+      enabled={control.enabled}
+      failedProcessors={props.failedProcessors}
+      graphId={props.graphId}
+      isProcessor={node.runtime?.type === 'provider'}
+      nodeId={node.id}
+      nodeName={node.appearance.title}
+      onRetry={(target) => props.application.retryFailedProcessor(target)}
+      supported
+    />
+  ) : null;
+  if (!props.graphId || (!entry && !retryAvailable)) return null;
   const change = (value: { enabled?: boolean; muted?: boolean }) => {
-    if (!disabled && props.graphId)
+    if (!disabled && props.graphId && props.controlPort.updateNodeControl)
       void props.application.setNodeControl(props.graphId, nodeId, value);
   };
   return {
-    power: entry.capabilities.power ? (
-      <NodePowerButton
-        enabled={control.enabled}
-        disabled={disabled}
-        label={t(control.enabled ? 'routing.nodeControl.powerOff' : 'routing.nodeControl.powerOn', {
-          name: node.appearance.title,
-        })}
-        onChange={() => change({ enabled: !control.enabled })}
-      />
-    ) : null,
-    mute: entry.capabilities.mute ? (
+    power: (
+      <>
+        {retry}
+        {entry?.capabilities.power ? (
+          <NodePowerButton
+            enabled={control.enabled}
+            disabled={disabled}
+            label={t(
+              control.enabled ? 'routing.nodeControl.powerOff' : 'routing.nodeControl.powerOn',
+              { name: node.appearance.title },
+            )}
+            onChange={() => change({ enabled: !control.enabled })}
+          />
+        ) : null}
+      </>
+    ),
+    mute: entry?.capabilities.mute ? (
       <NodeMuteButton
         muted={control.muted}
         disabled={disabled}
@@ -1221,14 +1403,26 @@ function createApplicationMenuItems(
   t: TFunction,
   supported = true,
 ): AudioGraphNodeMenuItem[] {
-  return applications.length
-    ? applications.map((application) => ({
-        disabled: !supported,
-        description: supported ? undefined : t('audioSession.captureRateLocked'),
-        iconUrl: application.iconDataUrl ?? undefined,
-        id: applicationItemId(application),
-        label: application.displayName,
-      }))
+  const items = new Map<string, AudioGraphNodeMenuItem>();
+  for (const application of applications) {
+    const selection = applicationInventorySelection(application);
+    if (!selection) continue;
+    const iconUrl = application.iconDataUrl || undefined;
+    const previous = items.get(selection.id);
+    if (previous) {
+      if (!previous.iconUrl && iconUrl) previous.iconUrl = iconUrl;
+      continue;
+    }
+    items.set(selection.id, {
+      disabled: !supported,
+      description: supported ? undefined : t('audioSession.captureRateLocked'),
+      iconUrl,
+      id: selection.id,
+      label: application.displayName,
+    });
+  }
+  return items.size
+    ? [...items.values()]
     : [{ disabled: true, id: 'no-applications', label: t('routing.noApplications') }];
 }
 

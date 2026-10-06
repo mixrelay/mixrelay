@@ -19,22 +19,42 @@ use std::{
 
 #[derive(Default)]
 pub(super) struct CaptureSet {
+    // Format epoch fences wholesale format replacement. Per-source leases fence
+    // removed/re-added nodes without invalidating other sources' pending recovery.
     pub generation: u64,
     nodes: BTreeMap<String, Capture>,
+    retained: BTreeMap<String, CaptureLease>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CaptureLease(u64);
+
 struct Capture {
+    lease: CaptureLease,
     taps: Vec<NativeStream>,
+    first_pcm: Vec<Arc<AtomicBool>>,
     scratch: Box<[f32]>,
     healthy: Arc<AtomicBool>,
 }
 
+#[derive(Debug, thiserror::Error)]
+enum CapturePreparationError {
+    #[error("application capture preparation cancelled")]
+    Cancelled,
+    #[error("PipeWire did not negotiate application capture format")]
+    FormatTimeout,
+    #[error("could not prepare application capture: {0}")]
+    Native(String),
+}
+
 #[derive(Clone)]
 struct WatchEntry {
+    lease: CaptureLease,
     node_id: String,
     request: ApplicationCaptureRequest,
     pinned_process: Option<ProcessIdentity>,
     serials: Vec<String>,
+    first_pcm: Vec<(String, Arc<AtomicBool>)>,
     healthy: Arc<AtomicBool>,
     format: mixrelay_audio_graph::RenderFormat,
 }
@@ -42,10 +62,30 @@ struct WatchEntry {
 #[derive(Clone)]
 pub(super) struct CaptureWatch {
     pub generation: u64,
+    format: mixrelay_audio_graph::RenderFormat,
     entries: Vec<WatchEntry>,
 }
 
+/// Current native stream whose exact capture tap has delivered pre-mute PCM.
+pub(super) struct VerifiedPlaybackTarget {
+    pub object_id: u32,
+    pub serial: String,
+    pub process: ProcessIdentity,
+    pub healthy: Arc<AtomicBool>,
+}
+
 impl CaptureSet {
+    pub(super) fn bind_inputs(
+        &mut self,
+        inputs: &mixrelay_pipewire::GraphInputs,
+    ) -> Result<(), String> {
+        for capture in self.nodes.values_mut() {
+            for tap in &mut capture.taps {
+                tap.bind_inputs(inputs)?;
+            }
+        }
+        Ok(())
+    }
     pub(super) fn discard_inputs(&mut self) {
         for capture in self.nodes.values_mut() {
             for tap in &mut capture.taps {
@@ -83,23 +123,24 @@ impl CaptureSet {
         requests: &[(String, ApplicationCaptureRequest)],
         generation: u64,
     ) -> Result<(Self, CaptureWatch), String> {
-        Self::open_format(requests, generation, super::render_format())
+        Self::open_format(requests, generation, super::render_format(), None)
     }
 
     pub(super) fn open_format(
         requests: &[(String, ApplicationCaptureRequest)],
         generation: u64,
         format: mixrelay_audio_graph::RenderFormat,
+        previous: Option<&CaptureWatch>,
     ) -> Result<(Self, CaptureWatch), String> {
-        let inventory = if requests
-            .iter()
-            .all(|(_, request)| request.requires_reselection)
-        {
+        let preparation = reconciliation::Preparation::new(generation, format, previous);
+        let inventory = if requests.iter().all(|(id, request)| {
+            request.requires_reselection || preparation.retained(id, request).is_some()
+        }) {
             Vec::new()
         } else {
             mixrelay_audio_io::linux::targets().map_err(|error| error.to_string())?
         };
-        Self::open_inventory_format(requests, generation, &inventory, format)
+        Self::open_inventory_format(requests, &inventory, &preparation)
     }
 
     #[cfg(test)]
@@ -108,22 +149,26 @@ impl CaptureSet {
         generation: u64,
         inventory: &[PipeWireTarget],
     ) -> Result<(Self, CaptureWatch), String> {
-        Self::open_inventory_format(requests, generation, inventory, super::render_format())
+        Self::open_inventory_format(
+            requests,
+            inventory,
+            &reconciliation::Preparation::new(generation, super::render_format(), None),
+        )
     }
 
     fn open_inventory_format(
         requests: &[(String, ApplicationCaptureRequest)],
-        generation: u64,
         inventory: &[PipeWireTarget],
-        format: mixrelay_audio_graph::RenderFormat,
+        preparation: &reconciliation::Preparation<'_>,
     ) -> Result<(Self, CaptureWatch), String> {
         let mut set = Self {
-            generation,
+            generation: preparation.epoch,
             ..Self::default()
         };
         let mut watch = CaptureWatch {
-            generation,
-            entries: Vec::new(),
+            generation: preparation.epoch,
+            format: preparation.format,
+            entries: Vec::with_capacity(requests.len()),
         };
         for (node_id, request) in requests {
             request
@@ -131,6 +176,13 @@ impl CaptureSet {
                 .map_err(|error| error.to_string())?;
             if request.source_playback == SourcePlaybackPolicy::MuteWhileCaptured {
                 return Err("PipeWire source muting is not implemented".into());
+            }
+            if let Some(entry) = preparation.retained(node_id, request) {
+                set.nodes
+                    .insert(node_id.clone(), Capture::placeholder(entry));
+                set.retained.insert(node_id.clone(), entry.lease);
+                watch.entries.push(entry.clone());
+                continue;
             }
             let pin = match request.selector {
                 _ if request.requires_reselection => None,
@@ -147,15 +199,19 @@ impl CaptureSet {
                 matching_targets(inventory, &request.selector, pin.as_ref(), process_identity)
             };
             let healthy = Arc::new(AtomicBool::new(true));
-            let capture = prepare(node_id, request, &targets, healthy.clone(), format)?;
-            watch.entries.push(WatchEntry {
+            let entry = WatchEntry {
+                lease: preparation.lease,
                 node_id: node_id.clone(),
                 request: request.clone(),
                 pinned_process: pin,
                 serials: serials(&targets),
+                first_pcm: observed_streams(&targets),
                 healthy,
-                format,
-            });
+                format: preparation.format,
+            };
+            let capture = prepare(&entry, &targets, &AtomicBool::new(false))
+                .map_err(|error| error.to_string())?;
+            watch.entries.push(entry);
             set.nodes.insert(node_id.clone(), capture);
         }
         Ok((set, watch))
@@ -163,7 +219,9 @@ impl CaptureSet {
 
     pub(super) fn replace(&mut self, next: &mut Self) {
         for (node, capture) in &mut next.nodes {
-            if let Some(current) = self.nodes.get_mut(node) {
+            if let Some(current) = self.nodes.get_mut(node)
+                && current.lease == capture.lease
+            {
                 for tap in &mut capture.taps {
                     tap.discard_input();
                 }
@@ -172,12 +230,21 @@ impl CaptureSet {
         }
     }
 
+    /// Reads no more than the prepared PCM quantum. An oversized request is cleared and
+    /// rejected without consuming native PCM or resizing callback storage.
     pub(super) fn read(&mut self, node: &str, destination: &mut [f32]) -> TransferOutcome {
         destination.fill(0.0);
         let Some(capture) = self.nodes.get_mut(node) else {
             return TransferOutcome {
                 activity: InputActivity::Unknown,
                 ..TransferOutcome::complete(0)
+            };
+        };
+        let Some(scratch) = capture.scratch.get_mut(..destination.len()) else {
+            return TransferOutcome {
+                frames: 0,
+                activity: InputActivity::Unknown,
+                discontinuity: true,
             };
         };
         capture.healthy.store(
@@ -191,8 +258,7 @@ impl CaptureSet {
             } else {
                 InputActivity::Inactive
             };
-        let scratch = &mut capture.scratch[..destination.len()];
-        for tap in &mut capture.taps {
+        for (index, tap) in capture.taps.iter_mut().enumerate() {
             scratch.fill(0.0);
             let activity = tap.input_activity();
             if activity != InputActivity::Active {
@@ -207,6 +273,11 @@ impl CaptureSet {
             }
             transfer.activity = InputActivity::Active;
             let frames = tap.read(scratch);
+            if frames > 0
+                && let Some(first_pcm) = capture.first_pcm.get(index)
+            {
+                first_pcm.store(true, Ordering::Release);
+            }
             transfer.frames = transfer.frames.max(frames);
             transfer.discontinuity |= frames == 0;
             for (mixed, sample) in destination.iter_mut().zip(scratch.iter()) {
@@ -234,7 +305,63 @@ impl CaptureSet {
     }
 }
 
+#[cfg(test)]
+impl CaptureSet {
+    /// Observes current canonical capture owners without changing their report cursors.
+    pub(super) fn transfer_snapshot(&self) -> super::native::TransferSnapshot {
+        let mut snapshot = super::native::TransferSnapshot::default();
+        for stream in self.nodes.values().flat_map(|capture| &capture.taps) {
+            snapshot.include(stream);
+        }
+        snapshot
+    }
+}
+
 impl CaptureWatch {
+    /// Rechecks this acquired tap's current stream serial and kernel process birth.
+    /// A selector match alone never grants an endpoint playback lease.
+    pub(super) fn verified_playback_targets(
+        &self,
+        node_id: &str,
+        inventory: &[PipeWireTarget],
+    ) -> Vec<VerifiedPlaybackTarget> {
+        let Some(entry) = self.entries.iter().find(|entry| entry.node_id == node_id) else {
+            return Vec::new();
+        };
+        if entry.request.requires_reselection || !entry.healthy.load(Ordering::Acquire) {
+            return Vec::new();
+        }
+        let targets = matching_targets(
+            inventory,
+            &entry.request.selector,
+            entry.pinned_process.as_ref(),
+            process_identity,
+        );
+        if targets.is_empty() || serials(&targets) != entry.serials {
+            return Vec::new();
+        }
+        targets
+            .into_iter()
+            .map(|target| {
+                let observed = entry
+                    .first_pcm
+                    .iter()
+                    .find(|(serial, _)| serial == &target.serial)?;
+                if !observed.1.load(Ordering::Acquire) {
+                    return None;
+                }
+                let process = process_identity(target.process_id?)?;
+                Some(VerifiedPlaybackTarget {
+                    object_id: target.object_id,
+                    serial: target.serial.clone(),
+                    process,
+                    healthy: Arc::clone(&entry.healthy),
+                })
+            })
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default()
+    }
+
     pub(super) fn recover(
         &self,
         stopping: &AtomicBool,
@@ -261,18 +388,15 @@ impl CaptureWatch {
                 continue;
             };
             let next_serials = serials(&targets);
+            let mut next_entry = entry.clone();
+            next_entry.first_pcm = observed_streams(&targets);
             // Removing the final stream is also an update: empty capture remains
             // watched, produces silence, and reconnects when the app resumes.
-            let Ok(capture) = prepare(
-                &entry.node_id,
-                &entry.request,
-                &targets,
-                entry.healthy.clone(),
-                entry.format,
-            ) else {
+            let Ok(capture) = prepare(&next_entry, &targets, stopping) else {
                 continue;
             };
             entry.serials = next_serials;
+            entry.first_pcm = next_entry.first_pcm;
             updates.nodes.insert(entry.node_id.clone(), capture);
         }
         Ok((!updates.nodes.is_empty()).then_some((updates, next_watch)))
@@ -309,32 +433,90 @@ fn serials(targets: &[&PipeWireTarget]) -> Vec<String> {
     serials
 }
 
+fn observed_streams(targets: &[&PipeWireTarget]) -> Vec<(String, Arc<AtomicBool>)> {
+    targets
+        .iter()
+        .map(|target| (target.serial.clone(), Arc::new(AtomicBool::new(false))))
+        .collect()
+}
+
 fn prepare(
-    node: &str,
-    request: &ApplicationCaptureRequest,
+    entry: &WatchEntry,
     targets: &[&PipeWireTarget],
-    healthy: Arc<AtomicBool>,
-    format: mixrelay_audio_graph::RenderFormat,
-) -> Result<Capture, String> {
+    stopping: &AtomicBool,
+) -> Result<Capture, CapturePreparationError> {
+    if stopping.load(Ordering::Acquire) {
+        return Err(CapturePreparationError::Cancelled);
+    }
     let taps = targets
         .iter()
         .map(|target| {
+            if stopping.load(Ordering::Acquire) {
+                return Err(CapturePreparationError::Cancelled);
+            }
             NativeStream::open_format(
-                &format!("{}.capture.{}", sanitize_node_name(node), target.serial),
+                &format!(
+                    "{}.capture.{}",
+                    sanitize_node_name(&entry.node_id),
+                    target.serial
+                ),
                 &target.display_name,
-                Some(&target.serial),
-                2,
-                request.stream.channels,
-                format,
+                super::native::StreamRole::ApplicationCapture(&target.serial),
+                entry.request.stream.channels,
+                super::native_format(entry.format),
             )
+            .map_err(CapturePreparationError::Native)
         })
         .collect::<Result<Vec<_>, _>>()?;
+    wait_for_capture_format(&taps, stopping)?;
     Ok(Capture {
+        lease: entry.lease,
         taps,
-        healthy,
-        scratch: vec![0.0; usize::from(request.stream.channels) * format.block_frames as usize]
-            .into_boxed_slice(),
+        first_pcm: targets
+            .iter()
+            .map(|target| {
+                entry
+                    .first_pcm
+                    .iter()
+                    .find(|(serial, _)| serial == &target.serial)
+                    .expect("prepared target has an observed PCM cell")
+                    .1
+                    .clone()
+            })
+            .collect(),
+        healthy: entry.healthy.clone(),
+        scratch: vec![
+            0.0;
+            usize::from(entry.request.stream.channels)
+                * entry.format.block_frames as usize
+        ]
+        .into_boxed_slice(),
     })
+}
+
+#[path = "linux_capture_reconciliation.rs"]
+mod reconciliation;
+
+/// Native negotiation must finish before RT health checks can treat a stream as
+/// failed. Otherwise a fast recovery loop repeatedly replaces its own pending tap.
+/// Dropping a failed/cancelled preparation drains only these unpublished owners.
+fn wait_for_capture_format(
+    taps: &[NativeStream],
+    stopping: &AtomicBool,
+) -> Result<(), CapturePreparationError> {
+    let started = std::time::Instant::now();
+    loop {
+        if stopping.load(Ordering::Acquire) {
+            return Err(CapturePreparationError::Cancelled);
+        }
+        if taps.iter().all(NativeStream::ready) {
+            return Ok(());
+        }
+        if started.elapsed() >= std::time::Duration::from_secs(3) {
+            return Err(CapturePreparationError::FormatTimeout);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }
 
 fn matching_targets<'a>(

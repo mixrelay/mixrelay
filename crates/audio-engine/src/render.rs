@@ -1,8 +1,10 @@
 use std::{collections::BTreeMap, fmt, sync::Arc};
 
 use mixrelay_audio_graph::{
-    AUDIO_PORT_ID, AudioEndpoint, CompiledNode, ExecutionPlan, FROM_OS_PORT_ID, NodeConfig, NodeId,
-    PortDirection, PortId, ProviderNodeConfig, RenderFormat, TO_OS_PORT_ID,
+    AUDIO_PORT_ID, AudioEndpoint, CompiledNode, ExecutionPlan, FROM_OS_PORT_ID,
+    MAX_PROVIDER_BUSES_PER_DIRECTION, MAX_PROVIDER_CHANNELS_PER_DIRECTION, NodeConfig, NodeId,
+    PortDirection, PortId, ProviderBus, ProviderBusKind, ProviderNodeConfig, ProviderPorts,
+    RenderFormat, TO_OS_PORT_ID,
 };
 use mixrelay_audio_io::VirtualEndpointId;
 use mixrelay_audio_io::process::{ProcessCycle, ProcessReport, TransferOutcome};
@@ -11,10 +13,15 @@ use thiserror::Error;
 
 use crate::runtime_control::{ControlValue, RuntimeControlBank};
 mod buffers;
+mod compensation;
 mod kernels;
+mod route_delay;
 mod routing;
 mod schedule;
+mod source_history;
 use buffers::port_pair;
+pub(crate) use compensation::DelayBank;
+pub use compensation::{CompensationState, HostedLatencySource};
 use kernels::{KernelResources, apply_kernel};
 use routing::{RouteOp, apply_routes};
 use schedule::RenderSchedule;
@@ -29,9 +36,22 @@ pub fn recording_session_key(node: &NodeId, channels: u16) -> String {
 /// A fully prepared third-party processor owned by the audio worker.
 ///
 /// Implementations must reuse storage and must not wait on the UI or control plane from
-/// `process`. A failed block is bypassed by the graph so one plug-in cannot mute the route.
+/// `process`. A processor without a usable output requests the graph's channel-preserving
+/// fallback. Buffered processors must supply their own latency-aligned fallback instead.
 pub trait HostedAudioProcessor: Send {
+    /// Renders `frames` of interleaved input into the corresponding interleaved output.
+    /// Returns `true` when output is complete, including intentional silence or an aligned
+    /// dry fallback; `false` requests the graph's immediate dry fallback. A complete output
+    /// does not mean the native plug-in is healthy; health is observed separately.
     fn process(&mut self, input: &[f32], output: &mut [f32], frames: usize) -> bool;
+
+    /// Discards buffered audio history while this node is OFF.
+    ///
+    /// Called from the audio thread and may be called on every disabled callback. Implementations
+    /// must not allocate, lock, block, or call native plug-in code. This suspends transport history
+    /// only; it does not transfer ownership or change graph state. The default is appropriate for
+    /// processors without buffered transport.
+    fn suspend_processing(&mut self) {}
 
     /// Process-unique instance identity, never reused during this engine lifetime.
     fn reuse_identity(&self) -> Option<u64> {
@@ -45,6 +65,13 @@ pub trait HostedAudioProcessor: Send {
 
     /// Publishes ownership only; must not allocate, lock, or call native code.
     fn set_active(&mut self, _active: bool) {}
+
+    /// Returns a retained cached-latency reader for this exact prepared worker.
+    /// Called only during control-thread preparation, never while rendering.
+    /// Missing readers mean unknown latency, not a reported zero.
+    fn latency_source(&self) -> Option<Arc<dyn HostedLatencySource>> {
+        None
+    }
 }
 
 /// Immutable preparation data passed across the engine/provider boundary.
@@ -161,10 +188,14 @@ pub struct RenderPlan {
     dynamics_bindings: Box<[DynamicsBinding]>,
     device_bus_samples: usize,
     device_bus_bindings: Box<[DeviceBusBinding]>,
+    source_history: Box<[source_history::Targets]>,
+    hosted_input_scratch_samples: usize,
+    hosted_scratch_samples: usize,
     controls: Arc<RuntimeControlBank>,
     source_controls: Box<[usize]>,
     sink_controls: Box<[usize]>,
     recorder_controls: Box<[usize]>,
+    compensation: compensation::CompensationTopology,
 }
 
 impl RenderPlan {
@@ -195,6 +226,8 @@ impl RenderPlan {
         let mut prepared = Vec::with_capacity(execution.nodes().len());
         let mut dynamics_state_count = 0;
         let mut device_bus_samples = 0;
+        let mut hosted_input_scratch_samples = 0;
+        let mut hosted_output_scratch_samples = 0;
         let mut hosted_processors = Vec::new();
 
         let context = LoweringContext {
@@ -210,6 +243,8 @@ impl RenderPlan {
             let mut state = LoweringState {
                 dynamics_state_count: &mut dynamics_state_count,
                 device_bus_samples: &mut device_bus_samples,
+                hosted_input_scratch_samples: &mut hosted_input_scratch_samples,
+                hosted_output_scratch_samples: &mut hosted_output_scratch_samples,
                 hosted_processors: &mut hosted_processors,
             };
             let kernels = lower_kernels(node, &context, &mut state)?;
@@ -225,12 +260,23 @@ impl RenderPlan {
         let sink_controls = binding_controls(&controls, sink_bindings.iter().map(|b| &b.node_id));
         let recorder_controls =
             binding_controls(&controls, recorder_bindings.iter().map(|b| &b.node_id));
+        let device_bus_bindings = device_bus_bindings(execution, &slots)?;
+        let source_history =
+            source_history::prepare(execution, &source_bindings, &device_bus_bindings);
+        let hosted_scratch_samples = hosted_input_scratch_samples
+            .checked_add(hosted_output_scratch_samples)
+            .ok_or(RenderPlanError::BufferSizeOverflow)?;
 
         Ok((
             Self {
                 revision: execution.revision(),
                 format: execution.format(),
                 schedule: RenderSchedule::new(&steps),
+                compensation: compensation::CompensationTopology::new(
+                    execution,
+                    &steps,
+                    &hosted_processors,
+                ),
                 steps: steps.into_boxed_slice(),
                 sink_routes: routes.sinks.into_boxed_slice(),
                 recorder_bindings: recorder_bindings.into_boxed_slice(),
@@ -241,7 +287,10 @@ impl RenderPlan {
                 dynamics_state_count,
                 dynamics_bindings: dynamics_bindings(execution),
                 device_bus_samples,
-                device_bus_bindings: device_bus_bindings(execution, &slots)?,
+                device_bus_bindings,
+                source_history,
+                hosted_input_scratch_samples,
+                hosted_scratch_samples,
                 controls,
                 source_controls,
                 sink_controls,
@@ -286,6 +335,16 @@ impl RenderPlan {
     pub const fn arena_samples(&self) -> usize {
         self.arena_samples
     }
+
+    /// Samples cached worker delays on the control thread, retaining prepared owner order.
+    pub(crate) fn latency_observations(&self) -> Vec<Option<u32>> {
+        self.compensation.observations()
+    }
+
+    /// Compares cached worker delays without allocating or querying native plug-ins.
+    pub(crate) fn latency_matches(&self, expected: &[Option<u32>]) -> bool {
+        self.compensation.matches(expected)
+    }
 }
 
 pub struct BlockProcessor {
@@ -298,11 +357,15 @@ pub struct BlockProcessor {
     meters: Option<Arc<crate::PeakMeterBank>>,
     dynamics_envelopes: Box<[f32]>,
     device_bus_state: Box<[f32]>,
+    device_bus_cursor: usize,
+    hosted_scratch: Box<[f32]>,
+    hosted_input_scratch_samples: usize,
     hosted_processors: Box<[Box<dyn HostedAudioProcessor>]>,
     hosted_identities: Box<[(u64, usize)]>,
     controls: Box<[ControlValue]>,
     control_scratch: Box<[ControlValue]>,
     sampled_control_epoch: Option<u64>,
+    delay_bank: Option<Box<DelayBank>>,
 }
 
 impl fmt::Debug for BlockProcessor {
@@ -321,11 +384,21 @@ impl fmt::Debug for BlockProcessor {
             .field("has_meters", &self.meters.is_some())
             .field("dynamics_envelopes", &self.dynamics_envelopes.len())
             .field("device_bus_state", &self.device_bus_state.len())
+            .field("device_bus_cursor", &self.device_bus_cursor)
+            .field("hosted_scratch", &self.hosted_scratch.len())
+            .field(
+                "hosted_input_scratch_samples",
+                &self.hosted_input_scratch_samples,
+            )
             .field("hosted_processors", &self.hosted_processors.len())
             .field("hosted_identities", &self.hosted_identities)
             .field("controls", &self.controls)
             .field("control_scratch", &self.control_scratch)
             .field("sampled_control_epoch", &self.sampled_control_epoch)
+            .field(
+                "delay_bank",
+                &self.delay_bank.as_ref().map(|bank| bank.state()),
+            )
             .finish()
     }
 }
@@ -384,6 +457,10 @@ impl ExternalControlState<'_> {
 pub enum CycleAdmission {
     /// The adapter has installed its gates and reserved the required transport capacity.
     Process,
+    /// Only the pacing owner changed: native PCM queues remained continuous.
+    /// Validate the new clock coordinates but retain bus/delay history. Source-local
+    /// transfer discontinuities still invalidate their affected histories normally.
+    ClockHandoff,
     /// Gates were observed, but transport capacity is unavailable. Retry without advancing time.
     Retry,
 }
@@ -421,6 +498,8 @@ pub trait ExternalIo {
 impl BlockProcessor {
     #[must_use]
     pub fn new(plan: Arc<RenderPlan>) -> Self {
+        let hosted_input_scratch_samples = plan.hosted_input_scratch_samples;
+        let hosted_scratch_samples = plan.hosted_scratch_samples;
         let arena = vec![0.0; plan.arena_samples].into_boxed_slice();
         let source_buffers = allocate_external_buffers(&plan.source_bindings, plan.format);
         let sink_buffers = allocate_external_buffers(&plan.sink_bindings, plan.format);
@@ -438,11 +517,15 @@ impl BlockProcessor {
             meters: None,
             dynamics_envelopes,
             device_bus_state,
+            device_bus_cursor: 0,
+            hosted_scratch: vec![0.0; hosted_scratch_samples].into_boxed_slice(),
+            hosted_input_scratch_samples,
             hosted_processors: Box::new([]),
             hosted_identities: Box::new([]),
             controls,
             control_scratch,
             sampled_control_epoch: None,
+            delay_bank: None,
         }
     }
 
@@ -475,7 +558,37 @@ impl BlockProcessor {
             .collect();
         identities.sort_unstable();
         processor.hosted_identities = identities.into_boxed_slice();
+        processor.delay_bank = Some(Box::new(
+            DelayBank::prepare(
+                Arc::clone(processor.plan()),
+                processor.plan().latency_observations(),
+            )
+            .map_err(RenderPlanError::CompensationPreparation)?,
+        ));
         Ok(processor)
+    }
+
+    /// Transfers only route history; the caller retires the returned owner off the audio thread.
+    pub(crate) fn replace_delay_bank(&mut self, bank: Box<DelayBank>) -> Option<Box<DelayBank>> {
+        // The observer's first publication may repeat the bank prepared with this topology.
+        // Retire that duplicate, not the warmed-up active history: otherwise startup causes
+        // a second silence window after the first successful audio blocks.
+        if self
+            .delay_bank
+            .as_ref()
+            .is_some_and(|active| active.equivalent(&bank))
+        {
+            return Some(bank);
+        }
+        self.delay_bank.replace(bank)
+    }
+
+    /// Status of the derived alignment; unknown latency is never represented as known zero.
+    #[must_use]
+    pub fn compensation_state(&self) -> CompensationState {
+        self.delay_bank
+            .as_ref()
+            .map_or(CompensationState::Unprepared, |bank| bank.state())
     }
 
     pub(crate) fn can_adopt_hosted(&self, previous: &Self) -> bool {
@@ -521,6 +634,7 @@ impl BlockProcessor {
         if self.plan.format != previous.plan.format {
             return;
         }
+        self.device_bus_cursor = previous.device_bus_cursor;
         for binding in &self.plan.device_bus_bindings {
             let Ok(index) = previous
                 .plan
@@ -633,18 +747,19 @@ impl BlockProcessor {
         cycle: ProcessCycle,
         external: &mut impl ExternalIo,
     ) -> Result<Option<ProcessReport>, ProcessBlockError> {
-        if !self.admit_external_cycle(cycle, external)? {
+        let Some(reset_history) = self.admit_external_cycle(cycle, external)? else {
             return Ok(None);
-        }
+        };
         let frames = cycle.frames;
         let frames_usize = frames as usize;
         let mut report = ProcessReport::default();
-        for ((binding, destination), &control_index) in self
+        for (source_index, ((binding, destination), &control_index)) in self
             .plan
             .source_bindings
             .iter()
             .zip(&mut self.source_buffers)
             .zip(&self.plan.source_controls)
+            .enumerate()
         {
             let samples = sample_count(frames_usize, binding.channels);
             destination[..samples].fill(0.0);
@@ -664,11 +779,24 @@ impl BlockProcessor {
                     && transfer.frames < frames,
             );
             report.discontinuities += u64::from(transfer.discontinuity);
+            if transfer.discontinuity {
+                let targets = &self.plan.source_history[source_index];
+                for range in &targets.device_buses {
+                    self.device_bus_state[range.clone()].fill(0.0);
+                }
+                if let Some(bank) = &mut self.delay_bank {
+                    bank.reset_routes(&targets.delay_routes);
+                }
+            }
         }
-        // Snapshots belong to the accepted input timeline. A restart must not
-        // replay a completed quantum from the previous device/clock generation.
-        if cycle.discontinuity || report.discontinuities != 0 {
+        // An individual input invalidates only its downstream histories above.
+        // A global clock loss invalidates the complete processing timeline.
+        if reset_history {
             self.device_bus_state.fill(0.0);
+            self.device_bus_cursor = 0;
+            if let Some(bank) = &mut self.delay_bank {
+                bank.reset();
+            }
         }
         self.process_loaded_block(frames_usize);
         for ((binding, source), &control_index) in self
@@ -696,7 +824,7 @@ impl BlockProcessor {
         &mut self,
         cycle: ProcessCycle,
         external: &mut impl ExternalIo,
-    ) -> Result<bool, ProcessBlockError> {
+    ) -> Result<Option<bool>, ProcessBlockError> {
         if cycle.frames > self.plan.format.block_frames {
             return Err(ProcessBlockError::FrameCountExceeded {
                 maximum: self.plan.format.block_frames,
@@ -723,15 +851,22 @@ impl BlockProcessor {
                 controls: &self.controls,
             },
         ) {
-            CycleAdmission::Retry => Ok(false),
+            CycleAdmission::Retry => Ok(None),
             CycleAdmission::Process => {
                 self.cycle_tracker = candidate;
-                Ok(true)
+                Ok(Some(cycle.discontinuity))
+            }
+            CycleAdmission::ClockHandoff => {
+                self.cycle_tracker = candidate;
+                Ok(Some(false))
             }
         }
     }
 
     fn process_loaded_block(&mut self, frames: usize) {
+        if let Some(bank) = &mut self.delay_bank {
+            bank.validate();
+        }
         self.arena.fill(0.0);
         for (sink, &control_index) in self.sink_buffers.iter_mut().zip(&self.plan.sink_controls) {
             if !self.controls[control_index].control.enabled {
@@ -749,9 +884,16 @@ impl BlockProcessor {
                     &self.plan.sink_routes,
                     &self.controls,
                     frames,
+                    self.delay_bank.as_deref_mut(),
                 );
             }
             self.process_phase(phase, frames);
+        }
+        if !self.device_bus_state.is_empty() {
+            // All buses read before publishing at the same prepared-quantum
+            // delay, independent of how the native callback partitions frames.
+            self.device_bus_cursor =
+                (self.device_bus_cursor + frames) % self.plan.format.block_frames as usize;
         }
         self.capture_and_meter(frames);
     }
@@ -766,6 +908,9 @@ impl BlockProcessor {
         }
         // Device snapshots are persistent audio, unlike the per-block cleared arena. OFF must
         // forget its last quantum so re-enabling cannot replay audio from before the pause.
+        if let Some(bank) = &mut self.delay_bank {
+            bank.observe_controls(&self.controls);
+        }
         for binding in &self.plan.device_bus_bindings {
             if !self.controls[binding.control_index].control.enabled {
                 self.device_bus_state[binding.samples.clone()].fill(0.0);
@@ -778,6 +923,11 @@ impl BlockProcessor {
             let step = &self.plan.steps[index];
             let control = self.controls[index];
             if !control.control.enabled {
+                for kernel in step.kernels(phase) {
+                    if let Kernel::Hosted { processor, .. } = kernel {
+                        self.hosted_processors[*processor].suspend_processing();
+                    }
+                }
                 continue;
             }
             if matches!(phase, RenderPhase::Processing) {
@@ -786,6 +936,7 @@ impl BlockProcessor {
                     &step.incoming_routes,
                     &self.controls,
                     frames,
+                    self.delay_bank.as_deref_mut(),
                 );
             }
             if matches!(phase, RenderPhase::Sinks) && control.control.muted {
@@ -799,6 +950,9 @@ impl BlockProcessor {
                         sinks: &mut self.sink_buffers,
                         dynamics_envelopes: &mut self.dynamics_envelopes,
                         device_bus_state: &mut self.device_bus_state,
+                        device_bus_cursor: self.device_bus_cursor,
+                        hosted_scratch: &mut self.hosted_scratch,
+                        hosted_input_scratch_samples: self.hosted_input_scratch_samples,
                         hosted_processors: &mut self.hosted_processors,
                     },
                     kernel,
@@ -889,6 +1043,9 @@ fn allocate_external_buffers(
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RenderPlanError {
+    /// Derived route alignment could not be prepared before publication.
+    #[error("route delay preparation failed: {0}")]
+    CompensationPreparation(String),
     #[error("render buffer size overflowed")]
     BufferSizeOverflow,
     #[error(
@@ -901,6 +1058,62 @@ pub enum RenderPlanError {
     DuplicatePort { node_id: NodeId, port_id: PortId },
     #[error("provider node {node_id} requires a registered render kernel")]
     UnsupportedProvider { node_id: NodeId },
+    /// A hosted provider direction has zero or too many buses.
+    #[error("provider node {node_id} has {found} {direction} buses; expected 1..={maximum}")]
+    InvalidProviderBusCount {
+        /// Provider whose layout failed validation.
+        node_id: NodeId,
+        /// Input or output direction.
+        direction: &'static str,
+        /// Maximum accepted bus count.
+        maximum: usize,
+        /// Actual bus count.
+        found: usize,
+    },
+    /// A hosted provider bus has zero or too many channels.
+    #[error("provider node {node_id} has invalid {direction} bus channel count {channels}")]
+    InvalidProviderBusChannels {
+        /// Provider whose layout failed validation.
+        node_id: NodeId,
+        /// Input or output direction.
+        direction: &'static str,
+        /// Invalid bus channel count.
+        channels: u16,
+    },
+    /// A hosted provider direction exceeds the aggregate channel bound.
+    #[error(
+        "provider node {node_id} has {channels} total {direction} channels; maximum is {maximum}"
+    )]
+    InvalidProviderTotalChannels {
+        /// Provider whose layout failed validation.
+        node_id: NodeId,
+        /// Input or output direction.
+        direction: &'static str,
+        /// Maximum accepted aggregate channels.
+        maximum: u16,
+        /// Actual aggregate channel count.
+        channels: u16,
+    },
+    /// A multibus provider lacks a selected layout contract.
+    #[error("provider node {node_id} has no selected multibus layout")]
+    MissingProviderLayout {
+        /// Provider whose layout is missing.
+        node_id: NodeId,
+    },
+    /// The selected provider layout does not match the compiled port order.
+    #[error("provider node {node_id} layout does not match its compiled ports")]
+    ProviderLayoutMismatch {
+        /// Provider whose compiled geometry differs from its saved layout.
+        node_id: NodeId,
+    },
+    /// The saved multibus provider layout failed graph contract validation.
+    #[error("provider node {node_id} has invalid selected layout: {reason}")]
+    InvalidProviderLayout {
+        /// Provider whose saved layout was invalid.
+        node_id: NodeId,
+        /// Typed layout diagnostic.
+        reason: String,
+    },
     #[error("provider node {node_id} could not be prepared: {reason}")]
     ProviderPreparation { node_id: NodeId, reason: String },
 }
@@ -934,6 +1147,13 @@ pub enum ProcessBlockError {
 #[derive(Debug, Clone, Copy)]
 struct PortSlot {
     offset: usize,
+    channels: u16,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DryBusMap {
+    source_channel_offset: usize,
+    destination_channel_offset: usize,
     channels: u16,
 }
 
@@ -1128,10 +1348,30 @@ enum Kernel {
         output: PortSlot,
     },
     Hosted {
-        input: PortSlot,
-        output: PortSlot,
+        io: HostedIo,
         processor: usize,
     },
+}
+
+#[derive(Debug)]
+enum HostedIo {
+    Single {
+        input: PortSlot,
+        output: PortSlot,
+    },
+    Multiple {
+        inputs: Box<[PortSlot]>,
+        outputs: Box<[PortSlot]>,
+        input_channels: u16,
+        output_channels: u16,
+        dry_maps: Box<[DryBusMap]>,
+    },
+}
+
+struct HostedProcessorIo {
+    io: HostedIo,
+    input_channels: u16,
+    output_channels: u16,
 }
 
 #[derive(Debug)]
@@ -1139,6 +1379,7 @@ enum DeviceBusKernel {
     Read {
         snapshot: PortSlot,
         output: PortSlot,
+        capacity: usize,
     },
     Publish {
         snapshot: PortSlot,
@@ -1148,12 +1389,20 @@ enum DeviceBusKernel {
 }
 
 impl DeviceBusKernel {
-    fn apply(&self, arena: &mut [f32], state: &mut [f32], frames: usize) {
+    fn apply(&self, arena: &mut [f32], state: &mut [f32], frames: usize, cursor: usize) {
         match self {
-            Self::Read { snapshot, output } => {
+            Self::Read {
+                snapshot,
+                output,
+                capacity,
+            } => {
                 let samples = sample_count(frames, output.channels);
-                arena[output.offset..output.offset + samples]
-                    .copy_from_slice(&state[snapshot.offset..snapshot.offset + samples]);
+                let offset = sample_count(cursor, output.channels);
+                let head = samples.min(capacity - offset);
+                let source = &state[snapshot.offset..snapshot.offset + capacity];
+                let destination = &mut arena[output.offset..output.offset + samples];
+                destination[..head].copy_from_slice(&source[offset..offset + head]);
+                destination[head..].copy_from_slice(&source[..samples - head]);
             }
             Self::Publish {
                 snapshot,
@@ -1161,11 +1410,14 @@ impl DeviceBusKernel {
                 capacity,
             } => {
                 let samples = sample_count(frames, input.channels);
+                let offset = sample_count(cursor, input.channels);
+                let head = samples.min(capacity - offset);
                 let destination = &mut state[snapshot.offset..snapshot.offset + capacity];
-                // Short I/O quanta cannot expose the previous longer quantum's tail.
-                destination.fill(0.0);
-                destination[..samples]
-                    .copy_from_slice(&arena[input.offset..input.offset + samples]);
+                let source = &arena[input.offset..input.offset + samples];
+                // Only replace the frames consumed in the source phase. A short
+                // quantum leaves the unread tail owned by the following cycle.
+                destination[offset..offset + head].copy_from_slice(&source[..head]);
+                destination[..samples - head].copy_from_slice(&source[head..]);
             }
         }
     }
@@ -1215,7 +1467,7 @@ fn lower_routes(execution: &ExecutionPlan, slots: &BTreeMap<PortKey, PortSlot>) 
         .enumerate()
         .map(|(index, node)| (node.id(), index))
         .collect();
-    for edge in execution.edges() {
+    for (route_index, edge) in execution.edges().iter().enumerate() {
         let source_control = controls[&edge.source().node_id];
         let destination_control = controls[&edge.destination().node_id];
         let source = compiled_edge_slot(slots, edge.source(), PortDirection::Output);
@@ -1229,6 +1481,7 @@ fn lower_routes(execution: &ExecutionPlan, slots: &BTreeMap<PortKey, PortSlot>) 
             destination,
             [source_control, destination_control],
             channels,
+            route_index,
         );
         if is_external_sink(execution, edge.destination()) {
             lowered.sinks.push(route);
@@ -1275,12 +1528,12 @@ fn collect_external_bindings(
             )
             | (NodeConfig::AudioDeviceOutput(_), PortDirection::Input) => Some(AUDIO_PORT_ID),
             (NodeConfig::VirtualEndpointTransport(config), PortDirection::Output)
-                if config.render.is_some() =>
+                if config.capture.is_some() =>
             {
                 Some(FROM_OS_PORT_ID)
             }
             (NodeConfig::VirtualEndpointTransport(config), PortDirection::Input)
-                if config.capture.is_some() =>
+                if config.render.is_some() =>
             {
                 Some(TO_OS_PORT_ID)
             }
@@ -1412,6 +1665,8 @@ struct LoweringContext<'a> {
 struct LoweringState<'a> {
     dynamics_state_count: &'a mut usize,
     device_bus_samples: &'a mut usize,
+    hosted_input_scratch_samples: &'a mut usize,
+    hosted_output_scratch_samples: &'a mut usize,
     hosted_processors: &'a mut Vec<Box<dyn HostedAudioProcessor>>,
 }
 
@@ -1546,7 +1801,7 @@ fn lower_compressor(
     })
 }
 
-/// Device snapshots cross the ordinary I/O cycle boundary, regardless of topology.
+/// Device buses retain one prepared quantum of PCM, regardless of callback partition or topology.
 fn lower_device_bus(
     node: &CompiledNode,
     context: &LoweringContext<'_>,
@@ -1566,6 +1821,7 @@ fn lower_device_bus(
         sources: vec![Kernel::DeviceBus(DeviceBusKernel::Read {
             snapshot,
             output,
+            capacity,
         })],
         processing: vec![],
         sinks: vec![Kernel::DeviceBus(DeviceBusKernel::Publish {
@@ -1582,7 +1838,7 @@ fn lower_virtual_endpoint(
     context: &LoweringContext<'_>,
 ) -> Result<LoweredKernels, RenderPlanError> {
     let mut kernels = LoweredKernels::default();
-    if config.render.is_some() {
+    if config.capture.is_some() {
         kernels.sources.extend(source_kernel(
             node,
             FROM_OS_PORT_ID,
@@ -1590,7 +1846,7 @@ fn lower_virtual_endpoint(
             context.source_bindings,
         )?);
     }
-    if config.capture.is_some() {
+    if config.render.is_some() {
         kernels.sinks.extend(sink_kernel(
             node,
             TO_OS_PORT_ID,
@@ -1615,13 +1871,13 @@ fn lower_hosted_processor(
             node_id: node.id().clone(),
         });
     };
-    let (input, output) = processor_slots(node, context.slots)?;
+    let prepared_io = prepare_hosted_processor_io(node, config, context, state)?;
     let request = HostedProcessorPrepareRequest {
         node_id: node.id(),
         config,
         format: context.format,
-        input_channels: input.channels,
-        output_channels: output.channels,
+        input_channels: prepared_io.input_channels,
+        output_channels: prepared_io.output_channels,
     };
     let processor = if node.control().enabled {
         factory.prepare(request).map(Some)
@@ -1640,12 +1896,186 @@ fn lower_hosted_processor(
     Ok(LoweredKernels {
         sources: vec![],
         processing: vec![Kernel::Hosted {
-            input,
-            output,
+            io: prepared_io.io,
             processor: processor_index,
         }],
         sinks: vec![],
     })
+}
+
+fn prepare_hosted_processor_io(
+    node: &CompiledNode,
+    config: &ProviderNodeConfig,
+    context: &LoweringContext<'_>,
+    state: &mut LoweringState<'_>,
+) -> Result<HostedProcessorIo, RenderPlanError> {
+    let inputs = provider_port_slots(node, PortDirection::Input, context.slots)?;
+    let outputs = provider_port_slots(node, PortDirection::Output, context.slots)?;
+    let input_channels = provider_total_channels(node, "input", &inputs)?;
+    let output_channels = provider_total_channels(node, "output", &outputs)?;
+    let saved_layout = provider_selected_layout(node, config)?;
+    let single_main_bus = inputs.len() == 1
+        && outputs.len() == 1
+        && saved_layout.is_none_or(|layout| {
+            layout.inputs[0].kind == ProviderBusKind::Main
+                && layout.outputs[0].kind == ProviderBusKind::Main
+        });
+    let io = if single_main_bus {
+        HostedIo::Single {
+            input: inputs[0],
+            output: outputs[0],
+        }
+    } else {
+        let layout = saved_layout.ok_or_else(|| RenderPlanError::MissingProviderLayout {
+            node_id: node.id().clone(),
+        })?;
+        let block_frames = context.format.block_frames as usize;
+        let input_samples = block_frames
+            .checked_mul(usize::from(input_channels))
+            .ok_or(RenderPlanError::BufferSizeOverflow)?;
+        let output_samples = block_frames
+            .checked_mul(usize::from(output_channels))
+            .ok_or(RenderPlanError::BufferSizeOverflow)?;
+        *state.hosted_input_scratch_samples =
+            (*state.hosted_input_scratch_samples).max(input_samples);
+        *state.hosted_output_scratch_samples =
+            (*state.hosted_output_scratch_samples).max(output_samples);
+        HostedIo::Multiple {
+            inputs: inputs.into_boxed_slice(),
+            outputs: outputs.into_boxed_slice(),
+            input_channels,
+            output_channels,
+            dry_maps: make_dry_bus_maps(layout),
+        }
+    };
+    Ok(HostedProcessorIo {
+        io,
+        input_channels,
+        output_channels,
+    })
+}
+
+fn provider_selected_layout<'a>(
+    node: &CompiledNode,
+    config: &'a ProviderNodeConfig,
+) -> Result<Option<&'a ProviderPorts>, RenderPlanError> {
+    let Some(layout) = config.ports.as_ref() else {
+        return Ok(None);
+    };
+    layout
+        .validate()
+        .map_err(|error| RenderPlanError::InvalidProviderLayout {
+            node_id: node.id().clone(),
+            reason: error.to_string(),
+        })?;
+    if !provider_bus_list_matches(&layout.inputs, node.inputs())
+        || !provider_bus_list_matches(&layout.outputs, node.outputs())
+    {
+        return Err(RenderPlanError::ProviderLayoutMismatch {
+            node_id: node.id().clone(),
+        });
+    }
+    Ok(Some(layout))
+}
+
+fn provider_bus_list_matches(
+    buses: &[ProviderBus],
+    ports: &[mixrelay_audio_graph::CompiledPort],
+) -> bool {
+    buses.len() == ports.len()
+        && buses
+            .iter()
+            .zip(ports)
+            .all(|(bus, port)| bus.id == *port.id() && bus.channels == port.channels())
+}
+
+fn make_dry_bus_maps(layout: &ProviderPorts) -> Box<[DryBusMap]> {
+    let mut main_inputs = Vec::new();
+    let mut input_offset = 0;
+    for bus in &layout.inputs {
+        if bus.kind == ProviderBusKind::Main {
+            main_inputs.push((input_offset, bus.channels));
+        }
+        input_offset += usize::from(bus.channels);
+    }
+    let mut mappings = Vec::new();
+    let mut main_ordinal = 0;
+    let mut output_offset = 0;
+    for bus in &layout.outputs {
+        if bus.kind == ProviderBusKind::Main {
+            if let Some(&(source_channel_offset, input_channels)) = main_inputs.get(main_ordinal) {
+                let channels = input_channels.min(bus.channels);
+                if channels > 0 {
+                    mappings.push(DryBusMap {
+                        source_channel_offset,
+                        destination_channel_offset: output_offset,
+                        channels,
+                    });
+                }
+            }
+            main_ordinal += 1;
+        }
+        output_offset += usize::from(bus.channels);
+    }
+    mappings.into_boxed_slice()
+}
+
+fn provider_port_slots(
+    node: &CompiledNode,
+    direction: PortDirection,
+    slots: &BTreeMap<PortKey, PortSlot>,
+) -> Result<Vec<PortSlot>, RenderPlanError> {
+    node_ports(node, direction)
+        .iter()
+        .map(|port| node_slot(node, port.id(), direction, slots))
+        .collect()
+}
+
+fn node_ports(
+    node: &CompiledNode,
+    direction: PortDirection,
+) -> &[mixrelay_audio_graph::CompiledPort] {
+    match direction {
+        PortDirection::Input => node.inputs(),
+        PortDirection::Output => node.outputs(),
+    }
+}
+
+fn provider_total_channels(
+    node: &CompiledNode,
+    direction: &'static str,
+    ports: &[PortSlot],
+) -> Result<u16, RenderPlanError> {
+    if ports.is_empty() || ports.len() > MAX_PROVIDER_BUSES_PER_DIRECTION {
+        return Err(RenderPlanError::InvalidProviderBusCount {
+            node_id: node.id().clone(),
+            direction,
+            maximum: MAX_PROVIDER_BUSES_PER_DIRECTION,
+            found: ports.len(),
+        });
+    }
+    let mut total = 0_u16;
+    for port in ports {
+        if !(1..=MAX_PROVIDER_CHANNELS_PER_DIRECTION).contains(&port.channels) {
+            return Err(RenderPlanError::InvalidProviderBusChannels {
+                node_id: node.id().clone(),
+                direction,
+                channels: port.channels,
+            });
+        }
+        total = total
+            .checked_add(port.channels)
+            .ok_or(RenderPlanError::BufferSizeOverflow)?;
+        if total > MAX_PROVIDER_CHANNELS_PER_DIRECTION {
+            return Err(RenderPlanError::InvalidProviderTotalChannels {
+                node_id: node.id().clone(),
+                direction,
+                maximum: MAX_PROVIDER_CHANNELS_PER_DIRECTION,
+                channels: total,
+            });
+        }
+    }
+    Ok(total)
 }
 
 fn processor_slots(
@@ -1796,7 +2226,9 @@ const fn sample_count(frames: usize, channels: u16) -> usize {
 
 #[cfg(test)]
 mod tests {
+    mod compensation;
     mod controls;
+    mod provider_buses;
     mod recorder;
     mod scaling;
     use super::*;
@@ -2134,6 +2566,7 @@ mod tests {
                 },
                 stream: stereo_stream(),
                 source_playback: SourcePlaybackPolicy::Preserve,
+                forwarding_endpoint: None,
                 gain_db: 0.0,
                 requires_reselection: false,
             }),
@@ -2204,8 +2637,8 @@ mod tests {
             });
         }
         let plan = RenderPlan::prepare(&compile(vec![endpoint], vec![])).unwrap();
-        assert_eq!(plan.source_bindings()[0].channels(), 2);
-        assert_eq!(plan.sink_bindings()[0].channels(), 16);
+        assert_eq!(plan.source_bindings()[0].channels(), 16);
+        assert_eq!(plan.sink_bindings()[0].channels(), 2);
     }
 
     #[test]
@@ -2220,7 +2653,361 @@ mod tests {
     }
 
     #[test]
-    fn device_snapshot_has_one_io_quantum_latency_without_delaying_direct_hardware() {
+    fn device_bus_preserves_pcm_across_unequal_callback_lengths() {
+        for channels in [1, 2, 8, 32, 64] {
+            let mut processor = device_bus_processor(channels);
+            let channels = usize::from(channels);
+            let mut input = vec![0.0; 4 * channels];
+            let mut output = vec![0.0; input.len()];
+            let mut position = 0;
+            let tag = |sample| f32::from(u16::try_from(sample % 16_384 + 1).unwrap());
+            for frames in [1, 2, 4, 1, 3, 2, 2, 1, 4].into_iter().cycle().take(128) {
+                for (sample, value) in input.iter_mut().enumerate() {
+                    *value = tag(position * channels + sample);
+                }
+                HEAP_OPERATIONS.with(|count| count.set(Some(0)));
+                processor
+                    .process_block(frames, &[&input], &mut [&mut output])
+                    .unwrap();
+                assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
+                for (sample, actual) in output.iter().enumerate().take(frames as usize * channels) {
+                    let absolute = position * channels + sample;
+                    let expected = absolute.checked_sub(4 * channels).map_or(0.0, tag);
+                    assert_eq!(
+                        actual.to_bits(),
+                        expected.to_bits(),
+                        "channels={channels}, position={position}, sample={sample}"
+                    );
+                }
+                position += frames as usize;
+            }
+        }
+    }
+
+    fn device_bus_processor(channels: u16) -> BlockProcessor {
+        let execution = compile(
+            vec![
+                node(
+                    "in",
+                    NodeConfig::AudioDeviceInput(AudioDeviceInputConfig {
+                        selector: DeviceSelector::DefaultInput,
+                        output_channels: channels,
+                        gain_db: 0.0,
+                    }),
+                ),
+                node("bus", NodeConfig::DeviceBus { channels }),
+                node(
+                    "out",
+                    NodeConfig::AudioDeviceOutput(AudioDeviceOutputConfig {
+                        selector: DeviceSelector::DefaultOutput,
+                        input_channels: channels,
+                    }),
+                ),
+            ],
+            vec![
+                edge("publish", "in", AUDIO_PORT_ID, "bus", AUDIO_PORT_ID),
+                edge("read", "bus", AUDIO_PORT_ID, "out", AUDIO_PORT_ID),
+            ],
+        );
+        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()))
+    }
+
+    #[test]
+    fn device_bus_replacement_retains_unread_tail_and_ring_position() {
+        let mut previous = device_bus_processor(1);
+        let mut output = [0.0; 4];
+        previous
+            .process_block(4, &[&[1.0, 2.0, 3.0, 4.0]], &mut [&mut output])
+            .unwrap();
+        previous
+            .process_block(1, &[&[5.0]], &mut [&mut output])
+            .unwrap();
+        assert_eq!(output[0].to_bits(), 1.0_f32.to_bits());
+        let mut next = device_bus_processor(1);
+        HEAP_OPERATIONS.with(|count| count.set(Some(0)));
+        next.retain_device_bus_state(&previous);
+        next.process_block(4, &[&[6.0, 7.0, 8.0, 9.0]], &mut [&mut output])
+            .unwrap();
+        assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
+        assert_eq!(
+            output.map(f32::to_bits),
+            [2.0_f32, 3.0, 4.0, 5.0].map(f32::to_bits)
+        );
+    }
+
+    struct IndependentBusIo {
+        source_a: [f32; 8],
+        source_b: [f32; 8],
+        output_a: [f32; 8],
+        output_b: [f32; 8],
+        source_a_discontinuity: bool,
+        admission: CycleAdmission,
+    }
+
+    impl ExternalIo for IndependentBusIo {
+        fn begin_cycle(
+            &mut self,
+            _cycle: &ProcessCycle,
+            _controls: ExternalControlState<'_>,
+        ) -> CycleAdmission {
+            self.admission
+        }
+
+        fn read_source(
+            &mut self,
+            binding: &ExternalBinding,
+            destination: &mut [f32],
+            cycle: &ProcessCycle,
+        ) -> TransferOutcome {
+            let (source, discontinuity) = match binding.node_id().as_str() {
+                "source-a" => (&self.source_a, self.source_a_discontinuity),
+                "source-b" => (&self.source_b, false),
+                other => panic!("unexpected test source binding {other}"),
+            };
+            destination.copy_from_slice(&source[..destination.len()]);
+            TransferOutcome {
+                discontinuity,
+                ..TransferOutcome::complete(cycle.frames)
+            }
+        }
+
+        fn write_sink(
+            &mut self,
+            binding: &ExternalBinding,
+            source: &[f32],
+            _cycle: &ProcessCycle,
+        ) -> TransferOutcome {
+            let destination = match binding.node_id().as_str() {
+                "sink-a" => &mut self.output_a,
+                "sink-b" => &mut self.output_b,
+                other => panic!("unexpected test sink binding {other}"),
+            };
+            destination[..source.len()].copy_from_slice(source);
+            TransferOutcome::complete(u32::try_from(source.len() / 2).unwrap())
+        }
+    }
+
+    fn independent_bus_fixture() -> (BlockProcessor, IndependentBusIo, ProcessCycle) {
+        let execution = compile(
+            vec![
+                device_input("source-a"),
+                node("bus-a", NodeConfig::DeviceBus { channels: 2 }),
+                device_output("sink-a"),
+                device_input("source-b"),
+                node("bus-b", NodeConfig::DeviceBus { channels: 2 }),
+                device_output("sink-b"),
+            ],
+            vec![
+                edge(
+                    "publish-a",
+                    "source-a",
+                    AUDIO_PORT_ID,
+                    "bus-a",
+                    AUDIO_PORT_ID,
+                ),
+                edge("read-a", "bus-a", AUDIO_PORT_ID, "sink-a", AUDIO_PORT_ID),
+                edge(
+                    "publish-b",
+                    "source-b",
+                    AUDIO_PORT_ID,
+                    "bus-b",
+                    AUDIO_PORT_ID,
+                ),
+                edge("read-b", "bus-b", AUDIO_PORT_ID, "sink-b", AUDIO_PORT_ID),
+            ],
+        );
+        (
+            BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())),
+            IndependentBusIo {
+                source_a: [1.0; 8],
+                source_b: [2.0; 8],
+                output_a: [0.0; 8],
+                output_b: [0.0; 8],
+                source_a_discontinuity: false,
+                admission: CycleAdmission::Process,
+            },
+            ProcessCycle {
+                clock: mixrelay_audio_io::process::ClockDomain {
+                    authority: mixrelay_audio_io::session::ClockAuthority::Device,
+                    id: 1,
+                    epoch: 0,
+                },
+                sample_rate: FORMAT.sample_rate,
+                frames: FORMAT.block_frames,
+                first_frame: 0,
+                monotonic_ns: None,
+                discontinuity: false,
+            },
+        )
+    }
+
+    #[test]
+    fn one_source_discontinuity_does_not_clear_unrelated_device_bus_history() {
+        let (mut processor, mut io, mut cycle) = independent_bus_fixture();
+        processor.process_external_cycle(cycle, &mut io).unwrap();
+        cycle.first_frame += u64::from(cycle.frames);
+        processor.process_external_cycle(cycle, &mut io).unwrap();
+        assert_eq!(io.output_a.map(f32::to_bits), [1.0_f32.to_bits(); 8]);
+        assert_eq!(io.output_b.map(f32::to_bits), [2.0_f32.to_bits(); 8]);
+
+        cycle.first_frame += u64::from(cycle.frames);
+        io.source_a_discontinuity = true;
+        HEAP_OPERATIONS.with(|count| count.set(Some(0)));
+        let report = processor
+            .process_external_cycle(cycle, &mut io)
+            .unwrap()
+            .unwrap();
+        assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
+        assert_eq!(report.discontinuities, 1);
+        assert_eq!(io.output_a.map(f32::to_bits), [0.0_f32.to_bits(); 8]);
+        assert_eq!(io.output_b.map(f32::to_bits), [2.0_f32.to_bits(); 8]);
+    }
+
+    #[test]
+    fn lossless_clock_handoff_preserves_unrelated_bus_history_without_allocation() {
+        for source_a_discontinuity in [false, true] {
+            let (mut processor, mut io, mut cycle) = independent_bus_fixture();
+            processor.process_external_cycle(cycle, &mut io).unwrap();
+            cycle.first_frame += u64::from(cycle.frames);
+            processor.process_external_cycle(cycle, &mut io).unwrap();
+
+            io.source_a_discontinuity = source_a_discontinuity;
+            io.admission = CycleAdmission::ClockHandoff;
+            cycle.clock.id = 2;
+            cycle.first_frame = 960;
+            cycle.discontinuity = true;
+            HEAP_OPERATIONS.with(|count| count.set(Some(0)));
+            processor.process_external_cycle(cycle, &mut io).unwrap();
+            assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
+            assert_eq!(io.output_b.map(f32::to_bits), [2.0_f32.to_bits(); 8]);
+            let expected_a = if source_a_discontinuity {
+                0.0_f32
+            } else {
+                1.0_f32
+            };
+            assert_eq!(io.output_a.map(f32::to_bits), [expected_a.to_bits(); 8]);
+
+            // Retaining PCM history must still commit the new clock coordinates.
+            io.admission = CycleAdmission::Process;
+            io.source_a_discontinuity = false;
+            cycle.first_frame += u64::from(cycle.frames);
+            cycle.discontinuity = false;
+            processor.process_external_cycle(cycle, &mut io).unwrap();
+            assert_eq!(io.output_b.map(f32::to_bits), [2.0_f32.to_bits(); 8]);
+        }
+    }
+
+    #[test]
+    fn global_clock_discontinuity_clears_both_independent_bus_snapshots() {
+        let (mut processor, mut io, mut cycle) = independent_bus_fixture();
+        processor.process_external_cycle(cycle, &mut io).unwrap();
+        cycle.first_frame += u64::from(cycle.frames);
+        processor.process_external_cycle(cycle, &mut io).unwrap();
+        assert_eq!(io.output_a.map(f32::to_bits), [1.0_f32.to_bits(); 8]);
+        assert_eq!(io.output_b.map(f32::to_bits), [2.0_f32.to_bits(); 8]);
+
+        cycle.first_frame += u64::from(cycle.frames);
+        cycle.clock.epoch += 1;
+        cycle.discontinuity = true;
+        processor.process_external_cycle(cycle, &mut io).unwrap();
+        assert_eq!(io.output_a.map(f32::to_bits), [0.0_f32.to_bits(); 8]);
+        assert_eq!(io.output_b.map(f32::to_bits), [0.0_f32.to_bits(); 8]);
+    }
+
+    #[test]
+    fn local_source_restart_retains_other_bus_partial_quantum_position() {
+        let (mut processor, mut io, mut cycle) = independent_bus_fixture();
+        io.source_b = [2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 5.0, 5.0];
+        processor.process_external_cycle(cycle, &mut io).unwrap();
+        cycle.first_frame += 4;
+        cycle.frames = 2;
+        processor.process_external_cycle(cycle, &mut io).unwrap();
+        assert_eq!(
+            io.output_b.map(f32::to_bits)[..4],
+            [2.0_f32, 2.0, 3.0, 3.0].map(f32::to_bits)
+        );
+
+        cycle.first_frame += 2;
+        io.source_a_discontinuity = true;
+        HEAP_OPERATIONS.with(|count| count.set(Some(0)));
+        processor.process_external_cycle(cycle, &mut io).unwrap();
+        assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
+        assert_eq!(
+            io.output_b.map(f32::to_bits)[..4],
+            [4.0_f32, 4.0, 5.0, 5.0].map(f32::to_bits)
+        );
+    }
+
+    #[test]
+    fn source_history_scope_follows_causal_cycles_without_reaching_other_branches() {
+        let execution = compile(
+            vec![
+                device_input("source-a"),
+                device_input("source-b"),
+                node("bus-a", NodeConfig::DeviceBus { channels: 2 }),
+                node("cycle-a", NodeConfig::DeviceBus { channels: 2 }),
+                node("bus-b", NodeConfig::DeviceBus { channels: 2 }),
+            ],
+            vec![
+                edge("a", "source-a", AUDIO_PORT_ID, "bus-a", AUDIO_PORT_ID),
+                edge("forward", "bus-a", AUDIO_PORT_ID, "cycle-a", AUDIO_PORT_ID),
+                edge("feedback", "cycle-a", AUDIO_PORT_ID, "bus-a", AUDIO_PORT_ID),
+                edge("b", "source-b", AUDIO_PORT_ID, "bus-b", AUDIO_PORT_ID),
+            ],
+        );
+        let plan = RenderPlan::prepare(&execution).unwrap();
+        for (binding, targets) in plan.source_bindings.iter().zip(&plan.source_history) {
+            let expected = match binding.node_id().as_str() {
+                "source-a" => (2, 3),
+                "source-b" => (1, 1),
+                other => panic!("unexpected source {other}"),
+            };
+            assert_eq!(targets.device_buses.len(), expected.0);
+            assert_eq!(targets.delay_routes.len(), expected.1);
+        }
+    }
+
+    #[test]
+    fn source_history_does_not_cross_independent_duplex_transport_directions() {
+        let execution = compile(
+            vec![
+                device_input("source-a"),
+                virtual_endpoint("duplex-b"),
+                node("bus-b", NodeConfig::DeviceBus { channels: 2 }),
+                device_output("sink-b"),
+            ],
+            vec![
+                edge(
+                    "a-sink",
+                    "source-a",
+                    AUDIO_PORT_ID,
+                    "duplex-b",
+                    TO_OS_PORT_ID,
+                ),
+                edge(
+                    "b-source",
+                    "duplex-b",
+                    FROM_OS_PORT_ID,
+                    "bus-b",
+                    AUDIO_PORT_ID,
+                ),
+                edge("b-sink", "bus-b", AUDIO_PORT_ID, "sink-b", AUDIO_PORT_ID),
+            ],
+        );
+        let plan = RenderPlan::prepare(&execution).unwrap();
+        for (binding, targets) in plan.source_bindings.iter().zip(&plan.source_history) {
+            let expected = match binding.node_id().as_str() {
+                "source-a" => (0, 1),
+                "duplex-b" => (1, 2),
+                other => panic!("unexpected source {other}"),
+            };
+            assert_eq!(targets.device_buses.len(), expected.0);
+            assert_eq!(targets.delay_routes.len(), expected.1);
+        }
+    }
+
+    #[test]
+    fn device_bus_has_one_prepared_quantum_latency_without_delaying_direct_hardware() {
         let nodes = vec![
             device_input("mic"),
             device_output("out"),
@@ -2241,12 +3028,12 @@ mod tests {
         ];
         let plan = Arc::new(RenderPlan::prepare(&compile(nodes, edges)).unwrap());
         let mut processor = BlockProcessor::new(plan);
-        let first = [0.2, 0.4, 0.6, 0.8];
-        let second = [1.0, 1.0, 1.0, 1.0];
-        let mut output = [0.0; 4];
+        let first = [0.2, 0.4, 0.6, 0.8, 0.1, 0.3, 0.5, 0.7];
+        let second = [1.0; 8];
+        let mut output = [0.0; 8];
         HEAP_OPERATIONS.with(|count| count.set(Some(0)));
         processor
-            .process_block(2, &[&first], &mut [&mut output])
+            .process_block(4, &[&first], &mut [&mut output])
             .unwrap();
         assert_eq!(output.map(f32::to_bits), first.map(f32::to_bits));
         processor
@@ -2255,12 +3042,11 @@ mod tests {
         assert!((output[0] - 1.1).abs() < 0.000_001);
         assert!((output[1] - 1.2).abs() < 0.000_001);
         processor
-            .process_block(2, &[&second], &mut [&mut output])
+            .process_block(3, &[&second], &mut [&mut output])
             .unwrap();
-        assert_eq!(
-            output.map(f32::to_bits),
-            [1.5_f32, 1.5, 1.0, 1.0].map(f32::to_bits)
-        );
+        for (actual, expected) in output.iter().zip([1.3, 1.4, 1.05, 1.15, 1.25, 1.35]) {
+            assert!((actual - expected).abs() < 0.000_001);
+        }
         assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
     }
 
@@ -2854,8 +3640,8 @@ mod tests {
         let capture_only = NodeConfig::VirtualEndpointTransport(VirtualEndpointSpec {
             id: VirtualEndpointId::from("custom"),
             display_name: "custom".into(),
-            render: None,
-            capture: Some(stereo_stream()),
+            render: Some(stereo_stream()),
+            capture: None,
             supported_sample_rates: vec![48_000],
             default_sample_rate: 48_000,
         });
@@ -2943,12 +3729,12 @@ mod tests {
     }
 
     #[test]
-    fn supports_capture_only_virtual_endpoints() {
+    fn supports_render_only_contribution_sink_with_no_capture_source() {
         let capture_only = NodeConfig::VirtualEndpointTransport(VirtualEndpointSpec {
             id: VirtualEndpointId::from("capture-only"),
             display_name: "Capture only".into(),
-            render: None,
-            capture: Some(stereo_stream()),
+            render: Some(stereo_stream()),
+            capture: None,
             supported_sample_rates: vec![48_000],
             default_sample_rate: 48_000,
         });
@@ -3009,6 +3795,7 @@ mod tests {
                         channel_layout: ChannelLayout::Mono,
                     },
                     source_playback: SourcePlaybackPolicy::Preserve,
+                    forwarding_endpoint: None,
                     gain_db: 0.0,
                     requires_reselection: false,
                 }),

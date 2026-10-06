@@ -5,7 +5,7 @@ use std::{
 };
 
 use super::{Backend, Listener, Native, Object};
-use crate::endpoint_service::dispatch::{Dispatch, StartError};
+use crate::endpoint_service::dispatch::Dispatch;
 
 unsafe extern "C" {
     fn xpc_connection_create(name: *const std::ffi::c_char, queue: Object) -> Object;
@@ -19,11 +19,10 @@ extern "C" fn finalized(_context: Object) {
     FINALIZED.fetch_add(1, Ordering::Release);
 }
 
-struct TimerFailure;
+struct Fixture;
 
-impl Backend for TimerFailure {
+impl Backend for Fixture {
     type Listener = Listener;
-    type Timer = ();
 
     fn listener(&self) -> Option<Listener> {
         // SAFETY: null name creates an anonymous listener with no Mach service
@@ -42,43 +41,24 @@ impl Backend for TimerFailure {
         Some(Listener(pointer))
     }
 
-    fn timer(&self) -> Option<()> {
-        None
+    fn activate(&self, listener: &Listener) {
+        Native.activate(listener);
     }
 
-    fn discard_listener(&self, listener: &Listener) {
-        Native.discard_listener(listener);
+    fn cancel_listener(&self, listener: &Listener) {
+        Native.cancel_listener(listener);
     }
 
-    fn activate(&self, _listener: &Listener, (): &()) {
-        unreachable!("injected timer failure cannot produce a complete owner");
-    }
-
-    fn cancel_listener(&self, _listener: &Listener) {
-        unreachable!("injected timer failure uses inactive discard, not active Drop");
-    }
-
-    fn cancel_timer(&self, (): &()) {
-        unreachable!("the fixture never creates a timer");
-    }
-
-    fn release_listener(&self, _listener: &Listener) {
-        unreachable!("an inactive listener must not be directly released");
-    }
-
-    fn release_timer(&self, (): &()) {
-        unreachable!("the fixture never creates a timer");
+    fn release_listener(&self, listener: &Listener) {
+        Native.release_listener(listener);
     }
 }
 
 #[test]
-fn failed_timer_creation_retires_real_anonymous_xpc_connections() {
+fn graph_source_listener_release_retires_real_anonymous_xpc_connections() {
     let initial = FINALIZED.load(Ordering::Acquire);
     for _ in 0..32 {
-        assert!(matches!(
-            Dispatch::with_backend(TimerFailure),
-            Err(StartError::Timer)
-        ));
+        drop(Dispatch::with_backend(Fixture).unwrap());
     }
     let deadline = Instant::now() + Duration::from_secs(2);
     while FINALIZED.load(Ordering::Acquire) - initial < 32 && Instant::now() < deadline {

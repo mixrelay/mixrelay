@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=MixRelay Driver
+Exec=/bin/sh /usr/lib/mixrelay-driver/session-start.sh
+Terminal=false
+NoDisplay=true

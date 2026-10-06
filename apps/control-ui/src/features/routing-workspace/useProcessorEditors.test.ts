@@ -210,11 +210,44 @@ describe('processor editor stale responses and native failures', () => {
     act(() => result.current.retry('effect'));
     await settle();
     expect(result.current.issues.size).toBe(0);
+    expect(result.current.statuses.get('effect')?.state).toBe('closed');
+    expect(source.setProcessorEditor).not.toHaveBeenCalled();
+    act(() => result.current.retry('effect'));
+    await settle();
+    expect(source.setProcessorEditor).toHaveBeenCalledWith('effect', true, 1);
     expect(result.current.statuses.get('effect')?.state).toBe('open');
   });
 });
 
 describe('processor editor automatic presentation', () => {
+  it('keeps a native-window close closed until an explicit reopen, including graph edits', async () => {
+    vi.useFakeTimers();
+    const source = port();
+    source.getProcessorEditor.mockResolvedValue(status('closed'));
+    const { result, rerender } = renderHook(({ graph }) => useProcessorEditors(source, graph), {
+      initialProps: { graph: model() },
+    });
+    await settle();
+    expect(source.setProcessorEditor).toHaveBeenCalledTimes(1);
+    expect(result.current.statuses.get('effect')?.state).toBe('open');
+
+    await act(async () => vi.advanceTimersByTimeAsync(EDITOR_POLL_MS));
+    expect(result.current.statuses.get('effect')?.state).toBe('closed');
+    expect(source.setProcessorEditor).toHaveBeenCalledTimes(1);
+
+    const edited = model();
+    edited.revision = 2;
+    rerender({ graph: edited });
+    await settle();
+    expect(source.setProcessorEditor).toHaveBeenCalledTimes(1);
+    expect(result.current.statuses.get('effect')?.state).toBe('closed');
+
+    act(() => result.current.retry('effect'));
+    await settle();
+    expect(source.setProcessorEditor).toHaveBeenCalledTimes(2);
+    expect(result.current.statuses.get('effect')?.state).toBe('open');
+  });
+
   it('opens another graph with identical local node IDs after a failed editor', async () => {
     const source = port();
     source.getProcessorEditor.mockResolvedValueOnce(status('failed'));

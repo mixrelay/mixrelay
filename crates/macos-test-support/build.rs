@@ -19,131 +19,79 @@ fn main() {
     println!("cargo:rerun-if-changed=../audio-io/src/formats.rs");
     println!("cargo:rerun-if-changed=../audio-io/native_format_header.rs");
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo output directory"));
-    build_transport(&root, &output);
+    let libraries = FixtureLibraries {
+        transport: library_receipt("MIXRELAY_NATIVE_TRANSPORT_STATICLIB"),
+        hal: library_receipt("MIXRELAY_NATIVE_HAL_STATICLIB"),
+    };
     native_format_header::write_header(&output).expect("generate native audio format declarations");
     build(
         &root,
         "fixture",
         "native/macos/engine-service/tests/MRDeviceIOLive.c",
-        &[],
+        &libraries,
     );
     build(
         &root,
         "clock",
         "native/macos/common/tests/MRCallbackClockTests.c",
-        &[],
+        &libraries,
     );
     build(
         &root,
         "hal",
         "native/macos/hal-driver/tests/MRHALBridgeTests.c",
-        &["native/macos/hal-driver/driver/MRHALControlBlock.c"],
+        &libraries,
     );
     build(
         &root,
         "application_clock",
         "native/macos/engine-service/tests/MRApplicationClockTests.c",
-        &[],
+        &libraries,
     );
     build(
         &root,
         "audio_ring",
         "native/macos/application-capture/tests/MRAudioRingTests.c",
-        &[],
+        &libraries,
     );
     build(
         &root,
         "pcm_ring",
         "native/pcm-ring/tests/MRPcmRingTests.c",
-        &[],
+        &libraries,
     );
 }
 
-fn build_transport(root: &Path, output: &Path) {
-    cc::Build::new()
-        .cargo_metadata(false)
-        .out_dir(output)
-        .file(root.join("native/macos/application-capture/src/MRApplicationSourceTransport.c"))
-        .include(root.join("native/macos/hal-driver/include"))
-        .flag("-std=c17")
-        .flag("-fblocks")
-        .flag("-mmacosx-version-min=14.2")
-        .warnings_into_errors(true)
-        .compile("mixrelay_source_xpc");
-    for (kind, suffix) in [("rlib", "rlib"), ("staticlib", "a")] {
-        rust_library(
-            root,
-            RustSource {
-                path: "native/pcm-ring/src/lib.rs",
-                name: "mixrelay_pcm_ring",
-            },
-            kind,
-            &output.join(format!("libmixrelay_pcm_ring.{suffix}")),
-            &[],
-        );
-    }
-    let pcm = format!(
-        "mixrelay_pcm_ring={}",
-        output.join("libmixrelay_pcm_ring.rlib").display()
-    );
-    let search = format!("dependency={}", output.display());
-    for (kind, suffix) in [("rlib", "rlib"), ("staticlib", "a")] {
-        rust_library(
-            root,
-            RustSource {
-                path: "native/macos/common/lib.rs",
-                name: "mixrelay_macos_transport",
-            },
-            kind,
-            &output.join(format!("libmixrelay_macos_transport.{suffix}")),
-            &["--extern", &pcm, "-L", &search],
-        );
-    }
-    let dependency = format!(
-        "mixrelay_macos_transport={}",
-        output.join("libmixrelay_macos_transport.rlib").display()
-    );
-    rust_library(
-        root,
-        RustSource {
-            path: "native/macos/hal-driver/rust/src/lib.rs",
-            name: "mixrelay_hal_core",
-        },
-        "staticlib",
-        &output.join("libmixrelay_hal_core.a"),
-        &["--extern", &dependency, "-L", &search],
-    );
+struct FixtureLibraries {
+    transport: PathBuf,
+    hal: PathBuf,
 }
 
-#[derive(Clone, Copy)]
-struct RustSource<'a> {
-    path: &'a str,
-    name: &'a str,
-}
-
-fn rust_library(root: &Path, source: RustSource<'_>, kind: &str, output: &Path, extra: &[&str]) {
-    let name = source.name;
-    let result = std::process::Command::new(env::var_os("RUSTC").expect("Cargo rustc"))
-        .args(["--edition=2024", "--crate-type", kind, "--crate-name", name])
-        .arg(root.join(source.path))
-        .arg("--target")
-        .arg(env::var_os("TARGET").expect("Cargo target"))
-        .args(extra)
-        .arg("-o")
-        .arg(output)
-        .output()
-        .expect("compile Rust transport ABI for native fixtures");
+fn library_receipt(name: &str) -> PathBuf {
+    println!("cargo:rerun-if-env-changed={name}");
+    let path = env::var_os(name).map_or_else(
+        || panic!("Missing {name}; use node scripts/lab/native-check.mjs cargo <command> to prepare HOST Cargo fixture libraries"),
+        PathBuf::from,
+    );
+    let metadata = path.metadata().expect("read HOST Cargo staticlib receipt");
     assert!(
-        result.status.success(),
-        "Rust native fixture dependency {name} failed:\n{}",
-        String::from_utf8_lossy(&result.stderr)
+        path.is_absolute()
+            && path.extension().is_some_and(|extension| extension == "a")
+            && metadata.is_file()
+            && metadata.len() > 0,
+        "Invalid {name}; use the canonical native-check entry for HOST Cargo fixture libraries"
     );
+    println!("cargo:rerun-if-changed={}", path.display());
+    path
 }
 
-fn build(root: &Path, name: &str, test: &str, sources: &[&str]) {
+fn build(root: &Path, name: &str, test: &str, libraries: &FixtureLibraries) {
     let output_directory = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo output directory"));
     let output = output_directory.join(name);
-    let compiler = cc::Build::new().cargo_metadata(false).get_compiler();
+    let compiler = cc::Build::new()
+        .target(&env::var("HOST").expect("Cargo host"))
+        .cargo_metadata(false)
+        .get_compiler();
     let result = compiler
         .to_command()
         .current_dir(root)
@@ -172,15 +120,15 @@ fn build(root: &Path, name: &str, test: &str, sources: &[&str]) {
             "native/pcm-ring/include",
         ])
         .arg(test)
-        .args(sources)
-        .arg(output_directory.join(if name == "hal" {
-            "libmixrelay_hal_core.a"
+        // Each genuine Cargo staticlib already includes its Rust/native dependencies.
+        // In particular HAL includes transport, PCM and the native XPC glue: link one archive.
+        .arg(if name == "hal" {
+            &libraries.hal
         } else {
-            "libmixrelay_macos_transport.a"
-        }))
-        .arg(output_directory.join("libmixrelay_pcm_ring.a"))
-        .arg(output_directory.join("libmixrelay_source_xpc.a"))
+            &libraries.transport
+        })
         .arg("-liconv")
+        .arg("-lobjc")
         .args([
             "-framework",
             "CoreAudio",

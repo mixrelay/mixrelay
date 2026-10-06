@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
-import { rawPcmArgs, parsePwDump } from "./pipewire-cli.mjs";
+import { rawPcmArgs, parsePwDump, nodesOwnedByPid } from "./pipewire-cli.mjs";
 
 // Run only in the owned transient engine harness, never against a user graph.
 assert.equal(process.platform, "linux");
@@ -24,8 +24,7 @@ async function until(check, message) {
   assert.fail(message);
 }
 function inventory() { return parsePwDump(execFileSync("pw-dump", { encoding: "utf8", timeout: 5000 })); }
-function ownNodes() { return inventory().filter(o => o.type === "PipeWire:Interface:Node" &&
-  o.info?.props?.["node.name"]?.startsWith("io.mixrelay.")); }
+function ownNodes() { return nodesOwnedByPid(inventory(), pid); }
 const initial = await api("graph");
 assert.equal(initial.revision, 1);
 assert.equal(initial.nodes.length, 1);
@@ -85,7 +84,7 @@ async function signalTest(input, output, routes, application = false) {
       signal.writeFloatLE((c + 1) / 1024 * Math.sin(2 * Math.PI * 1000 * f / 48000), (f * input + c) * 4);
     player.child.stdin.end(signal);
     if (application) {
-      await until(() => inventory().some(o => Number(o.info?.props?.["application.process.id"]) === player.child.pid &&
+      await until(() => nodesOwnedByPid(inventory(), player.child.pid).some(o =>
         o.info.props["media.class"] === "Stream/Output/Audio"), "Synthetic application stream not registered");
       const app = { id: "lab-app", type: "application_capture", config: {
         selector: { match: "process_id", process_id: player.child.pid, include_descendants: false },

@@ -1,17 +1,16 @@
 use std::{
     fs::File,
-    mem::size_of,
     sync::{Arc, Mutex, MutexGuard, atomic::Ordering},
     thread,
     time::{Duration, Instant},
 };
 
 use crate::{
-    ProcessorStateError, STATE_CAPACITY, STATE_FAILED, STATE_OK, STATE_TOO_LARGE,
-    STATE_UNSUPPORTED, SharedHeader, WORKER_READY,
+    PROCESSOR_STATE_TIMEOUT, ProcessorStateError, STATE_CAPACITY, STATE_FAILED, STATE_OK,
+    STATE_TOO_LARGE, STATE_UNSUPPORTED, SharedHeader, WORKER_READY,
 };
 
-use super::Mapping;
+use super::{CHUNK_CAPACITY, Mapping};
 
 /// Control-only mapping; neither state mutex is reachable from an audio endpoint.
 pub(crate) struct ControlMailbox {
@@ -86,6 +85,11 @@ impl WorkerControl {
             .then(|| (request, header.state_kind.load(Ordering::Relaxed)))
     }
 
+    /// Whether the parent abandoned this exact request generation.
+    pub(crate) fn request_cancelled(&self, request: u64) -> bool {
+        self.header().state_cancel.load(Ordering::Acquire) == request
+    }
+
     /// Native capture runs before this call. Reentrant/late editor results must not overwrite
     /// an acknowledged response while the parent copies it or owns the next request.
     pub(crate) fn publish(&self, request: u64, state: Result<Vec<u8>, ProcessorStateError>) {
@@ -93,32 +97,73 @@ impl WorkerControl {
             return;
         };
         let header = self.header();
-        if header.state_request.load(Ordering::Acquire) != request
-            || header.state_response.load(Ordering::Acquire) == request
-        {
+        if !request_fence(header, request) {
             return;
         }
-        let (status, bytes) = match state {
-            Ok(bytes) if bytes.len() <= STATE_CAPACITY => (STATE_OK, bytes),
-            Ok(_) => (STATE_TOO_LARGE, Vec::new()),
-            Err(ProcessorStateError::Unsupported) => (STATE_UNSUPPORTED, Vec::new()),
-            Err(_) => (STATE_FAILED, Vec::new()),
+        let (status, length) = if can_publish(header, request) {
+            match state {
+                Ok(bytes) if bytes.len() <= STATE_CAPACITY => {
+                    let length = u32::try_from(bytes.len()).expect("state capacity fits u32");
+                    if self.publish_chunks(header, request, &bytes) {
+                        (STATE_OK, length)
+                    } else {
+                        (STATE_FAILED, 0)
+                    }
+                }
+                Ok(_) => (STATE_TOO_LARGE, 0),
+                Err(ProcessorStateError::Unsupported) => (STATE_UNSUPPORTED, 0),
+                Err(_) => (STATE_FAILED, 0),
+            }
+        } else {
+            (STATE_FAILED, 0)
         };
-        // SAFETY: this serialized publisher owns the requested state region until its response
-        // release. The parent cannot issue another request while copying the previous response.
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                bytes.as_ptr(),
-                self.mapping.raw.as_mut_ptr().add(size_of::<SharedHeader>()),
-                bytes.len(),
-            );
+        if !request_fence(header, request) {
+            return;
         }
-        header.state_length.store(
-            u32::try_from(bytes.len()).expect("state capacity fits u32"),
-            Ordering::Relaxed,
-        );
+        header.state_length.store(length, Ordering::Relaxed);
         header.state_result.store(status, Ordering::Relaxed);
         header.state_response.store(request, Ordering::Release);
+    }
+
+    fn publish_chunks(&self, header: &SharedHeader, request: u64, bytes: &[u8]) -> bool {
+        let deadline = Instant::now() + PROCESSOR_STATE_TIMEOUT;
+        let mut offset = 0;
+        while offset < bytes.len() {
+            if !Self::wait_for_chunk(header, request, deadline) {
+                return false;
+            }
+            let end = offset + bytes.len().saturating_sub(offset).min(CHUNK_CAPACITY);
+            if !can_publish(header, request) {
+                return false;
+            }
+            self.mapping.write_state_chunk(&bytes[offset..end]);
+            header.state_written.store(
+                u32::try_from(end).expect("state capacity fits u32"),
+                Ordering::Release,
+            );
+            offset = end;
+        }
+        can_publish(header, request)
+    }
+
+    fn wait_for_chunk(header: &SharedHeader, request: u64, deadline: Instant) -> bool {
+        loop {
+            if !can_publish(header, request) {
+                return false;
+            }
+            let written = header.state_written.load(Ordering::Acquire);
+            let consumed = header.state_consumed.load(Ordering::Acquire);
+            if consumed > written {
+                return false;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            if written == consumed {
+                return true;
+            }
+            thread::sleep(Duration::from_micros(100));
+        }
     }
 }
 
@@ -138,43 +183,100 @@ impl ControlGuard<'_> {
         if previous != header.state_response.load(Ordering::Acquire) {
             return Err(ProcessorStateError::Pending);
         }
-        let request = previous.wrapping_add(1);
+        let request = next_request(previous);
+        header.state_written.store(0, Ordering::Relaxed);
+        header.state_consumed.store(0, Ordering::Relaxed);
+        header.state_cancel.store(0, Ordering::Relaxed);
         header.state_kind.store(kind, Ordering::Relaxed);
         header.state_request.store(request, Ordering::Release);
-        let deadline = Instant::now() + timeout.min(Duration::from_secs(5));
-        while header.state_response.load(Ordering::Acquire) != request {
+        let deadline = Instant::now() + timeout.min(PROCESSOR_STATE_TIMEOUT);
+        let mut bytes = Vec::new();
+        let mut consumed = 0_u32;
+        loop {
+            let terminal = header.state_response.load(Ordering::Acquire) == request;
+            if Instant::now() >= deadline {
+                header.state_cancel.store(request, Ordering::Release);
+                return Err(ProcessorStateError::Timeout);
+            }
+            self.drain_chunk(header, request, &mut bytes, &mut consumed)?;
+            if terminal {
+                break;
+            }
             if header.worker_status.load(Ordering::Acquire) != WORKER_READY
                 || header.shutdown.load(Ordering::Acquire) != 0
             {
+                header.state_cancel.store(request, Ordering::Release);
                 return Err(ProcessorStateError::Unavailable);
             }
-            if Instant::now() >= deadline {
-                return Err(ProcessorStateError::Timeout);
-            }
-            thread::sleep(Duration::from_millis(1));
+            thread::sleep(Duration::from_micros(100));
         }
-        match header.state_result.load(Ordering::Relaxed) {
-            STATE_OK => {}
-            STATE_TOO_LARGE => return Err(ProcessorStateError::TooLarge),
-            STATE_UNSUPPORTED => return Err(ProcessorStateError::Unsupported),
-            _ => return Err(ProcessorStateError::NativeFailure),
+        if Instant::now() >= deadline {
+            header.state_cancel.store(request, Ordering::Release);
+            return Err(ProcessorStateError::Timeout);
         }
         let length = header.state_length.load(Ordering::Relaxed) as usize;
-        if length > STATE_CAPACITY {
+        match header.state_result.load(Ordering::Relaxed) {
+            STATE_OK => {
+                if length > STATE_CAPACITY || length != bytes.len() {
+                    return Err(ProcessorStateError::InvalidResponse);
+                }
+                Ok(bytes)
+            }
+            STATE_TOO_LARGE => Err(ProcessorStateError::TooLarge),
+            STATE_UNSUPPORTED => Err(ProcessorStateError::Unsupported),
+            _ => Err(ProcessorStateError::NativeFailure),
+        }
+    }
+
+    fn drain_chunk(
+        &self,
+        header: &SharedHeader,
+        request: u64,
+        bytes: &mut Vec<u8>,
+        consumed: &mut u32,
+    ) -> Result<(), ProcessorStateError> {
+        let written = header.state_written.load(Ordering::Acquire);
+        if written < *consumed {
+            header.state_cancel.store(request, Ordering::Release);
             return Err(ProcessorStateError::InvalidResponse);
         }
-        // SAFETY: acquire of this exact response grants read ownership. This guard prevents all
-        // other parent requests until the copy ends; stale/duplicate worker publications reject.
-        let bytes = unsafe {
-            std::slice::from_raw_parts(
-                self.mailbox
-                    .mapping
-                    .raw
-                    .as_ptr()
-                    .add(size_of::<SharedHeader>()),
-                length,
-            )
-        };
-        Ok(bytes.to_vec())
+        let delta = written - *consumed;
+        let chunk_limit = u32::try_from(CHUNK_CAPACITY).expect("chunk capacity fits u32");
+        if delta > chunk_limit {
+            header.state_cancel.store(request, Ordering::Release);
+            return Err(ProcessorStateError::InvalidResponse);
+        }
+        let total = written as usize;
+        if total > STATE_CAPACITY {
+            header.state_cancel.store(request, Ordering::Release);
+            return Err(ProcessorStateError::InvalidResponse);
+        }
+        if delta != 0 {
+            let delta = delta as usize;
+            if bytes.try_reserve(delta).is_err() {
+                header.state_cancel.store(request, Ordering::Release);
+                return Err(ProcessorStateError::NativeFailure);
+            }
+            self.mailbox.mapping.append_state_chunk(bytes, delta);
+            *consumed = written;
+            header.state_consumed.store(written, Ordering::Release);
+        }
+        Ok(())
     }
+}
+
+fn request_fence(header: &SharedHeader, request: u64) -> bool {
+    header.state_request.load(Ordering::Acquire) == request
+        && header.state_response.load(Ordering::Acquire) != request
+}
+
+fn can_publish(header: &SharedHeader, request: u64) -> bool {
+    request_fence(header, request)
+        && header.state_cancel.load(Ordering::Acquire) != request
+        && header.shutdown.load(Ordering::Acquire) == 0
+}
+
+fn next_request(previous: u64) -> u64 {
+    let next = previous.wrapping_add(1);
+    if next == 0 { 1 } else { next }
 }

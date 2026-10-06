@@ -1,12 +1,19 @@
 /** Face geometry shared by the card and cable anchors. Options never take part
  * in this calculation. Keep these metrics in sync with AudioNodeCard.module.css. */
-export function minimumAudioNodeFaceHeight(channels = 0, hasDetail = false) {
-  if (channels <= 0) return 116;
-  const count = Math.min(64, Math.max(1, Math.trunc(channels)));
-  const rows = Math.ceil(count / (count > 32 ? 16 : 8));
-  const meters = count <= 8 ? count * 10 + (count - 1) * 3 : rows * 35 + (rows - 1) * 4;
-  // Header + footer + body padding + meter top margin + optional detail row.
-  return Math.max(132, 26 + 23 + 14 + 2 + meters + (hasDetail ? 15 : 0));
+export function minimumAudioNodeFaceHeight(
+  meterBanks: readonly { channels: number; label?: string }[] = [],
+  hasDetail = false,
+) {
+  const banks = meterBanks.filter((bank) => bank.channels > 0);
+  if (banks.length === 0) return 116;
+  const meters = banks.reduce((total, bank) => {
+    const count = Math.min(64, Math.max(1, Math.trunc(bank.channels)));
+    const rows = Math.ceil(count / (count > 32 ? 16 : 8));
+    const content = (count <= 8 ? count * 10 + (count - 1) * 3 : rows * 35 + (rows - 1) * 4) + 2;
+    return total + content + (banks.length > 1 && bank.label ? 13 : 0);
+  }, 0);
+  // Header + footer + body padding + inter-bank gap + optional detail row.
+  return Math.max(132, 26 + 23 + 14 + meters + (banks.length - 1) * 3 + (hasDetail ? 15 : 0));
 }
 
 export const channelRowMetrics = {
@@ -31,12 +38,12 @@ export interface AudioNodeFaceGeometry {
 /** Channel-row faces contain only their header and meter rows. The same row
  * metrics drive CSS and cable centers; disclosure content is outside this face. */
 export function audioNodeFaceGeometry({
-  channels = 0,
+  meterBanks = [],
   hasDetail = false,
   portCount = 0,
   mode = 'standard',
 }: {
-  channels?: number;
+  meterBanks?: readonly { channels: number; label?: string }[];
   hasDetail?: boolean;
   portCount?: number;
   mode?: AudioNodeFaceMode;
@@ -49,13 +56,13 @@ export function audioNodeFaceGeometry({
     };
   if (mode === 'standard')
     return {
-      height: Math.max(minimumAudioNodeFaceHeight(channels, hasDetail), (portCount + 1) * 12),
+      height: Math.max(minimumAudioNodeFaceHeight(meterBanks, hasDetail), (portCount + 1) * 12),
       firstChannelCenter: null,
       channelPitch: 0,
     };
   const { headerHeight, bodyPadding, meterMargin, rowHeight, rowGap, borderWidth } =
     channelRowMetrics;
-  const count = Math.max(1, Math.trunc(channels));
+  const count = Math.max(1, Math.trunc(meterBanks[0]?.channels ?? 1));
   const meterStart = headerHeight + bodyPadding + meterMargin;
   return {
     height: meterStart + count * rowHeight + (count - 1) * rowGap + bodyPadding,

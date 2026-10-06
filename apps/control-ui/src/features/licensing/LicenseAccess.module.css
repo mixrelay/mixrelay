@@ -1,0 +1,89 @@
+.entry {
+  position: fixed;
+  right: 12px;
+  bottom: 35px;
+  z-index: 30;
+}
+
+.entryError {
+  max-width: 300px;
+  margin: 6px 0 0;
+  padding: 8px;
+  border: 1px solid var(--line, #555);
+  background: var(--surface, #24262b);
+  color: var(--text, #f5f5f5);
+  font-size: 0.75rem;
+}
+
+.blocked {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--bg, #17191d);
+  color: var(--text, #f5f5f5);
+}
+
+.card {
+  width: min(100%, 430px);
+  padding: 24px;
+  border: 1px solid var(--line, #555);
+  background: var(--surface, #24262b);
+}
+
+.card h1 {
+  margin: 0 0 16px;
+  font-size: 1.25rem;
+}
+
+.details p,
+.terms p {
+  margin: 8px 0;
+}
+
+.state {
+  font-weight: 600;
+}
+
+.form {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.terms {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line, #555);
+}
+
+.terms summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.termsText {
+  max-height: 320px;
+  margin: 12px 0 0;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.stopAudio {
+  margin-top: 20px;
+}
+
+.stopAudio p {
+  margin: 8px 0 0;
+}

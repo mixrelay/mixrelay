@@ -7,33 +7,12 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
         build_macos_service();
     }
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
-        build_pipewire_service();
-    }
-}
-
-fn build_pipewire_service() {
-    let library = pkg_config::Config::new()
-        .atleast_version("0.3.65")
-        .probe("libpipewire-0.3")
-        .expect("install the PipeWire development package (libpipewire-0.3-dev / pipewire)");
-    let root = "../../native/linux/pipewire";
-    cc::Build::new()
-        .includes(library.include_paths)
-        .include(root)
-        .include("../../native/pcm-ring/include")
-        .flag("-std=c17")
-        .define("_GNU_SOURCE", None)
-        .warnings_into_errors(true)
-        .file(format!("{root}/MRPipeWire.c"))
-        .compile("mixrelay_pipewire_native");
-    println!("cargo:rerun-if-changed={root}");
-    println!("cargo:rerun-if-changed=../../native/pcm-ring/include/MRPcmRing.h");
 }
 
 fn build_macos_service() {
     let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo OUT_DIR"));
     native_format_header::write_header(&output).expect("generate native audio format declarations");
+    embed_service_info_plist();
     let engine_root = "../../native/macos/engine-service";
     let hal_root = "../../native/macos/hal-driver";
     let engine_include = format!("{engine_root}/include");
@@ -71,4 +50,39 @@ fn build_macos_service() {
     println!("cargo:rerun-if-changed={hal_include}/MREndpointTransport.h");
     println!("cargo:rerun-if-changed={hal_include}/MRSharedAudioBuffer.h");
     println!("cargo:rustc-link-lib=framework=CoreAudio");
+}
+
+fn embed_service_info_plist() {
+    let manifest_dir = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("Cargo manifest directory"),
+    );
+    let info_plist = manifest_dir
+        .join("../../native/macos/engine-service/Info.plist")
+        .canonicalize()
+        .expect("resolve the engine privacy Info.plist");
+    let info_plist_argument = service_info_plist_link_argument(&info_plist);
+    println!("cargo:rerun-if-changed={}", info_plist.display());
+    println!("{info_plist_argument}");
+}
+
+fn service_info_plist_link_argument(info_plist: &std::path::Path) -> String {
+    format!(
+        "cargo:rustc-link-arg-bin=mixrelay-engine-service=-Wl,-sectcreate,__TEXT,__info_plist,{}",
+        info_plist.display()
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::service_info_plist_link_argument;
+    use std::path::Path;
+
+    #[test]
+    fn privacy_plist_link_arg_targets_only_the_engine_service_binary() {
+        let argument = service_info_plist_link_argument(Path::new("/repo/native/Info.plist"));
+        assert!(argument.starts_with(
+            "cargo:rustc-link-arg-bin=mixrelay-engine-service=-Wl,-sectcreate,__TEXT,__info_plist,"
+        ));
+        assert!(argument.ends_with("/repo/native/Info.plist"));
+    }
 }

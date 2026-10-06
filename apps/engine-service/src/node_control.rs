@@ -70,8 +70,8 @@ impl EngineGraphController {
             *self.context.read(),
         )?;
         Ok(NodeControlPreview {
-            capture_manifest: Some(crate::execution_control::capture_manifest(
-                &composed.document,
+            capture_manifest: Some(crate::execution_control::composed_capture_manifest(
+                &composed,
             )?),
         })
     }
@@ -103,14 +103,16 @@ impl EngineGraphController {
                     requires_graph_reload: false,
                 });
         }
+        let reuse = self.processor_controls.reuse_transaction();
         let mut selected = candidate.active_document().clone();
         self.preserve_live_processor_state(&mut selected, &[])?;
         candidate.update_document(selected.clone());
-        self.apply_graph_locked(selected, Some(candidate))
-            .map(|application| NodeControlResponse {
-                application,
-                requires_graph_reload: true,
-            })
+        let application = self.apply_graph_locked(selected, Some(candidate))?;
+        reuse.commit();
+        Ok(NodeControlResponse {
+            application,
+            requires_graph_reload: true,
+        })
     }
 
     fn node_control_candidate(

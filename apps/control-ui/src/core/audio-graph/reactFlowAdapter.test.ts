@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 
 import {
   type AudioGraphModel,
@@ -32,10 +32,16 @@ describe('React Flow incremental adapter', () => {
   it('restores presentation sizes without changing the audio revision or other nodes', () => {
     const before = largeGraph(2);
     const flow = reconcileAudioFlowNodes([], before);
+    const first = flow[0];
+    const second = flow[1];
+    assert(first && second);
     const after = resizeAudioGraphNode(before, 'node-0', { width: 420, height: 280 });
-    const resized = reconcileAudioFlowNodes(flow, after);
+    const measured = { ...first, height: 444, measured: { width: 420, height: 444 } };
+    const resized = reconcileAudioFlowNodes([measured, second], after);
     expect(after.revision).toBe(before.revision);
-    expect(resized[0]).toMatchObject({ width: 420, height: 280 });
+    expect(resized[0]).toMatchObject({ width: 420, measured: { height: 444 } });
+    expect(resized[0]?.height).toBeUndefined();
+    expect(resized[0]?.data.graphNode.size).toEqual({ width: 420, height: 280 });
     expect(resized[1]).toBe(flow[1]);
     expect(resizeAudioGraphNode(after, 'node-0', { width: 420, height: 280 })).toBe(after);
     expect(resizeAudioGraphNode(after, 'node-0', { width: NaN, height: 280 })).toBe(after);

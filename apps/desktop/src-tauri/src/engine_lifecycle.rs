@@ -122,7 +122,7 @@ fn validate_installation() -> Result<(), String> {
     let config: serde_json::Value = serde_json::from_slice(&output.stdout)
         .map_err(|_| "MixRelay audio service installation is missing or invalid.".to_owned())?;
     if !is_app_owned_configuration(&config) {
-        return Err("MixRelay audio service needs the app-owned lifecycle installation before opening. Run scripts/install-macos-dev-audio.sh once with administrator approval.".into());
+        return Err("The MixRelay audio service is missing or incompatible. Reinstall MixRelay using its installer.".into());
     }
     Ok(())
 }
@@ -188,7 +188,7 @@ fn exit_warning(record: &str) -> Option<String> {
         return None;
     }
     Some(format!(
-        "오디오 서버는 종료되었지만 녹음·설정 마무리 성공을 확인하지 못했습니다.\n{}",
+        "오디오 서버 종료 중 오류가 발생했습니다.\n{}",
         record.strip_prefix("failed\n").unwrap_or(record)
     ))
 }
@@ -237,6 +237,17 @@ mod tests {
             exit_warning("failed\ndisk full")
                 .expect("warning")
                 .contains("disk full")
+        );
+    }
+
+    #[test]
+    fn failed_shutdown_warning_reports_the_record_without_claiming_data_loss() {
+        assert_eq!(
+            exit_warning("failed\nCoreAudio worker panicked during retirement"),
+            Some(
+                "오디오 서버 종료 중 오류가 발생했습니다.\nCoreAudio worker panicked during retirement"
+                    .into()
+            )
         );
     }
 

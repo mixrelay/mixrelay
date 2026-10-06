@@ -55,7 +55,18 @@ fn drain(pipe: &mut impl Read, bytes: &mut Vec<u8>, limit: usize) -> io::Result<
     Ok(false)
 }
 
-fn bounded_output(program: &str, args: &[&str], timeout: Duration) -> io::Result<Output> {
+pub(super) fn bounded_output(
+    program: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> io::Result<Output> {
+    let started = Instant::now();
+    if timeout.is_zero() {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "native discovery timed out",
+        ));
+    }
     let mut child = OwnedChild(
         Command::new(program)
             .args(args)
@@ -76,7 +87,6 @@ fn bounded_output(program: &str, args: &[&str], timeout: Duration) -> io::Result
         .ok_or_else(|| io::Error::other("missing stderr"))?;
     nonblocking(&stdout)?;
     nonblocking(&stderr)?;
-    let started = Instant::now();
     let mut out = Vec::new();
     let mut err = Vec::new();
     loop {

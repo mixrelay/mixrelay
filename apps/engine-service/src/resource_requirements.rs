@@ -51,11 +51,13 @@ impl DeviceRequirements {
 /// Platform-neutral descriptions, not a claim that every adapter supports them.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResourceRequirements {
-    /// Canonical capture IDs and playback/selection policy, with gain left to DSP.
+    /// Canonical pre-mute capture IDs and selection, with gain left to DSP.
+    /// Graph-local playback intents travel separately with the prepared control bank.
     pub captures: Vec<(String, ApplicationCaptureRequest)>,
     /// Physical device descriptions; no native handles or stream owners.
     pub devices: DeviceRequirements,
-    /// All composed native transports, without imposing an adapter's endpoint limit.
+    /// Driver-owned device references requiring native graph clients, never device creation.
+    /// Adapters read capture and send only graph contributions to render.
     pub endpoints: Vec<(String, VirtualEndpointSpec)>,
 }
 

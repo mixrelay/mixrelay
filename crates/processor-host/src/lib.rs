@@ -1,25 +1,24 @@
 use std::{
     collections::BTreeMap,
-    fs::OpenOptions,
-    io::{Read, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
-        Arc, Mutex, RwLock, Weak,
+        Arc, Mutex, OnceLock, RwLock, Weak,
         atomic::{AtomicBool, Ordering},
     },
     thread,
     time::{Duration, Instant},
 };
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+#[cfg(target_os = "macos")]
+use base64::engine::general_purpose::STANDARD as BASE64;
 use mixrelay_audio_engine::{
-    HostedAudioProcessor, HostedProcessorFactory, HostedProcessorPrepareRequest,
+    HostedAudioProcessor, HostedLatencySource, HostedProcessorFactory,
+    HostedProcessorPrepareRequest,
 };
 use mixrelay_audio_graph::{
-    AUDIO_PORT_ID, BuiltInNodeResolver, CompileContext, CompiledPort, NodeConfig, NodeId,
-    NodeResolutionError, NodeResolver, NodeSpec, PortDirection, PortId, ProviderNodeConfig,
-    RenderFormat, ResolvedNode,
+    BuiltInNodeResolver, CompileContext, CompiledPort, NodeConfig, NodeId, NodeResolutionError,
+    NodeResolver, NodeSpec, PortDirection, ProviderNodeConfig, RenderFormat, ResolvedNode,
 };
 use mixrelay_control_protocol::{
     ExternalProcessorCatalog, ExternalProcessorDescriptor, PROTOCOL_VERSION,
@@ -27,18 +26,24 @@ use mixrelay_control_protocol::{
 };
 
 mod discovery;
+mod dry_delay;
+mod dsp_lifecycle;
 mod editor_observation;
 mod editor_surface;
+mod latency;
 mod native_editor;
 mod rack_formats;
 mod reuse;
 mod shared_transport;
+mod state;
 mod timing;
 use shared_transport::{ControlMailbox, ParentAudio, SharedHeader, WorkerAudio, WorkerControl};
 mod worker_paths;
 use worker_paths::worker_paths;
 
 pub use editor_observation::ProcessorEditorCloseObservation;
+pub use latency::ProcessorLatencySnapshot;
+pub use reuse::ProcessorReuseTransaction;
 
 pub use rack_formats::{
     PROBE_ARGUMENT as PLUGIN_PROBE_ARGUMENT, RackFormat, RackLocator,
@@ -50,10 +55,13 @@ pub use rack_formats::{
 compile_error!("MixRelay processor shared transport requires native 64-bit atomics");
 
 const WORKER_START_TIMEOUT: Duration = Duration::from_secs(15);
+/// Maximum wait for one processor state response, not an entire graph's providers.
+/// Each independently hosted processor receives its own bounded capture opportunity.
+pub const PROCESSOR_STATE_TIMEOUT: Duration = Duration::from_secs(5);
 const SHARED_MAGIC: u64 = 0x4d52_5653_5433_3031;
-const SHARED_VERSION: u32 = 4;
+const SHARED_VERSION: u32 = 8;
 const PARAMETER_CAPACITY: usize = 4096;
-const STATE_CAPACITY: usize = 4 * 1024 * 1024;
+const STATE_CAPACITY: usize = mixrelay_processor_state::MAX_STATE_BYTES;
 const STATE_OK: u32 = 0;
 const STATE_FAILED: u32 = 1;
 const STATE_TOO_LARGE: u32 = 2;
@@ -85,7 +93,31 @@ struct CatalogEntry {
 #[derive(Debug, Clone)]
 struct RackCatalogTarget {
     locator: RackLocator,
-    layout_index: usize,
+}
+
+fn selected_ports(
+    descriptor: &ExternalProcessorDescriptor,
+    config: &ProviderNodeConfig,
+) -> Result<mixrelay_audio_graph::ProviderPorts, String> {
+    let selected_id = config
+        .ports
+        .as_ref()
+        .map_or(descriptor.default_layout_id.as_str(), |ports| {
+            ports.layout_id.as_str()
+        });
+    let actual = descriptor
+        .layouts
+        .iter()
+        .find(|ports| ports.layout_id == selected_id)
+        .ok_or("selected processor layout is not installed")?;
+    actual.validate().map_err(|error| error.to_string())?;
+    if let Some(authored) = &config.ports {
+        authored.validate().map_err(|error| error.to_string())?;
+        if !rack_formats::layouts::same_topology(actual, authored) {
+            return Err("saved processor topology differs from the native catalog".into());
+        }
+    }
+    Ok(actual.clone())
 }
 
 #[derive(Debug, Clone, Default)]
@@ -99,11 +131,13 @@ impl ProcessorCatalog {
     /// Returns the installed port contract without creating a worker.
     #[must_use]
     pub fn ports(&self, type_id: &str) -> Option<mixrelay_audio_graph::ProviderPorts> {
-        self.entry(type_id)
-            .map(|entry| mixrelay_audio_graph::ProviderPorts {
-                inputs: entry.descriptor.input_channels,
-                outputs: entry.descriptor.output_channels,
-            })
+        let entry = self.entry(type_id)?;
+        entry
+            .descriptor
+            .layouts
+            .iter()
+            .find(|ports| ports.layout_id == entry.descriptor.default_layout_id)
+            .cloned()
     }
     /// Safely discovers native and cross-platform effects. Each candidate is probed in a
     /// disposable copy of the engine executable so a broken plug-in cannot terminate the graph
@@ -166,53 +200,41 @@ impl ProcessorCatalog {
 ///
 /// Returns a diagnostic when the target identity, shared transport, or plug-in cannot initialize.
 pub fn run_plugin_worker(arguments: &[String]) -> Result<(), String> {
-    let [encoded_locator, layout_index, shared_path, config_path] = arguments else {
+    let [encoded_locator, shared_path, config_path] = arguments else {
         return Err(
-            "processor worker requires locator, layout, shared-memory, and config paths".to_owned(),
+            "processor worker requires locator, shared-memory, and config paths".to_owned(),
         );
     };
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let _stdin_guard =
+        dsp_lifecycle::watch_parent(Arc::clone(&shutdown)).map_err(|error| error.to_string())?;
     let locator = RackLocator::decode(encoded_locator)?;
-    let layout_index = layout_index
-        .parse::<usize>()
-        .map_err(|error| format!("invalid processor layout index: {error}"))?;
     let (mut audio_shared, editor_shared) = shared_transport::worker(Path::new(shared_path))?;
     let editor_shared = Arc::new(editor_shared);
     let layout = audio_shared.layout();
-    let (sample_rate, parameters) = read_worker_configuration(config_path)?;
+    let prepared = state::read_worker_configuration(config_path)?;
     let plugin = rack_formats::RackWorkerPlugin::load(
         &locator,
-        layout_index,
-        sample_rate,
+        &prepared.ports,
+        prepared.sample_rate,
         layout.block_frames,
-        &parameters,
+        &prepared.initial,
     )?;
     if plugin.input_channels() != layout.inputs || plugin.output_channels() != layout.outputs {
         return Err("loaded processor layout does not match the catalog".to_owned());
     }
     let has_editor = plugin.has_editor();
+    latency::publish_intrinsic_frames(editor_shared.header(), plugin.intrinsic_latency_frames());
     let plugin = Arc::new(Mutex::new(plugin));
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let shutdown_reader = Arc::clone(&shutdown);
-    let parent_watch_shared = Arc::clone(&editor_shared);
-    let _stdin_guard = thread::Builder::new()
-        .name("mixrelay-plugin-parent-watch".to_owned())
-        .spawn(move || {
-            let mut input = std::io::stdin();
-            let mut byte = [0_u8; 1];
-            while input.read(&mut byte).is_ok_and(|read| read != 0) {}
-            parent_watch_shared
-                .header()
-                .shutdown
-                .store(1, Ordering::Release);
-            shutdown_reader.store(true, Ordering::Release);
-        })
-        .map_err(|error| error.to_string())?;
     let dsp_plugin = Arc::clone(&plugin);
     let dsp_shutdown = Arc::clone(&shutdown);
     let dsp_thread = thread::Builder::new()
         .name("mixrelay-plugin-dsp".to_owned())
         .spawn(move || rack_worker_loop(&mut audio_shared, &dsp_plugin, layout, &dsp_shutdown))
         .map_err(|error| error.to_string())?;
+    // Retain the creator's instance owner until DSP has joined, including broker unwinding.
+    let dsp_owner =
+        dsp_lifecycle::DspThreadOwner::new(dsp_thread, Arc::clone(&shutdown), Arc::clone(&plugin));
     let editor_header = editor_shared.header();
     editor_header.editor_state.store(
         if has_editor {
@@ -230,10 +252,8 @@ pub fn run_plugin_worker(arguments: &[String]) -> Result<(), String> {
     editor_header
         .worker_status
         .store(WORKER_READY, Ordering::Release);
-    editor_broker_loop(&editor_shared, &plugin, locator.display_name(), &shutdown);
-    shutdown.store(true, Ordering::Release);
-    let _ = dsp_thread.join();
-    Ok(())
+    let result = editor_broker_loop(&editor_shared, &plugin, locator.display_name(), &shutdown);
+    dsp_owner.finish(result)
 }
 
 fn rack_worker_loop(
@@ -247,28 +267,44 @@ fn rack_worker_loop(
         if parent_closed.load(Ordering::Acquire) || header.shutdown.load(Ordering::Acquire) != 0 {
             return;
         }
-        let parameter_pending = header.parameters_pending.load(Ordering::Acquire);
         let audio_pending = shared.input_pending();
-        if !parameter_pending && !audio_pending {
+        if !audio_pending {
             thread::sleep(Duration::from_micros(100));
             continue;
         }
-        let Ok(mut plugin) = plugin.try_lock() else {
-            thread::yield_now();
+        let mut plugin = match plugin.try_lock() {
+            Ok(plugin) => plugin,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                thread::yield_now();
+                continue;
+            }
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                mark_plugin_worker_failed(shared.header());
+                return;
+            }
+        };
+        // A main-thread restart may fail while DSP waits for exclusive instance access.
+        // Recheck under that same lock before touching a now-deactivated native instance.
+        if parent_closed.load(Ordering::Acquire)
+            || shared.header().shutdown.load(Ordering::Acquire) != 0
+            || shared.header().worker_status.load(Ordering::Acquire) == WORKER_FAILED
+        {
+            return;
+        }
+        let Some(frames) =
+            shared.receive(|source| copy_shared_input_to_rack(source, &mut plugin, layout))
+        else {
             continue;
         };
-        apply_pending_rack_parameter(shared.header(), &mut plugin);
-        if !shared.receive(|source| copy_shared_input_to_rack(source, &mut plugin, layout)) {
-            continue;
-        }
         plugin.clear_outputs();
-        if plugin.process(layout.block_frames).is_err() {
+        if plugin.process(frames).is_err() {
             shared
                 .header()
                 .process_failures
                 .fetch_add(1, Ordering::Relaxed);
-            bypass_rack(&mut plugin, layout);
+            bypass_rack(&mut plugin, frames);
         }
+        latency::publish_intrinsic_frames(shared.header(), plugin.intrinsic_latency_frames());
         shared.publish(|destination| copy_rack_output_to_shared(destination, &plugin, layout));
     }
 }
@@ -278,16 +314,23 @@ fn editor_broker_loop(
     plugin: &Mutex<rack_formats::RackWorkerPlugin>,
     title: &str,
     parent_closed: &AtomicBool,
-) {
+) -> Result<(), String> {
     let mut host: Option<native_editor::NativeEditorHost> = None;
     let mut last_idle = Instant::now();
+    let mut result = Ok(());
     loop {
         let header = shared.header();
         if parent_closed.load(Ordering::Acquire) || header.shutdown.load(Ordering::Acquire) != 0 {
             if let (Some(host), Ok(mut plugin)) = (host.as_mut(), plugin.lock()) {
+                // Service failure stops DSP, but the initialized native object still owns its
+                // GUI. Close it on its main thread before removing the parent window or instance.
                 host.close(&mut plugin);
             }
-            return;
+            return result;
+        }
+        if let Err(error) = service_plugin_control(shared, plugin) {
+            result = Err(error);
+            continue;
         }
         apply_pending_editor_command(shared, plugin, title, &mut host);
         // Native state APIs may allocate, block, or require the UI thread. They run only on
@@ -301,6 +344,33 @@ fn editor_broker_loop(
     }
 }
 
+fn service_plugin_control(
+    shared: &WorkerControl,
+    plugin: &Mutex<rack_formats::RackWorkerPlugin>,
+) -> Result<(), String> {
+    let header = shared.header();
+    let mut plugin = match plugin.try_lock() {
+        Ok(plugin) => plugin,
+        Err(std::sync::TryLockError::WouldBlock) => return Ok(()),
+        Err(std::sync::TryLockError::Poisoned(_)) => {
+            mark_plugin_worker_failed(header);
+            header.shutdown.store(1, Ordering::Release);
+            return Err("processor instance lock was poisoned".to_owned());
+        }
+    };
+    if let Err(error) = plugin.service_main_thread() {
+        // Publish failure before releasing the lock so no DSP call can race a failed restart.
+        mark_plugin_worker_failed(header);
+        header.shutdown.store(1, Ordering::Release);
+        return Err(format!("processor main-thread service failed: {error}"));
+    }
+    // Native parameter controllers belong to the instance's creator thread. DSP only
+    // consumes the prepared format event queues on its next real audio block. Servicing
+    // the mailbox here also applies edits while no PCM or editor window is present.
+    apply_pending_rack_parameter(header, &mut plugin);
+    Ok(())
+}
+
 fn apply_pending_state_request(
     shared: &WorkerControl,
     plugin: &Mutex<rack_formats::RackWorkerPlugin>,
@@ -309,19 +379,38 @@ fn apply_pending_state_request(
     let Some((request, kind)) = shared.pending_request() else {
         return;
     };
+    if shared.request_cancelled(request) {
+        // A deferred native edit must not leave a timed-out reader's request unacknowledged.
+        shared.publish(request, Err(ProcessorStateError::Unavailable));
+        return;
+    }
     if kind == editor_surface::EDITOR_FRAME {
         if !header.editor_observed_open.load(Ordering::Acquire) {
             shared.publish(request, Err(ProcessorStateError::Unavailable));
         }
         return;
     }
-    let Ok(mut plugin) = plugin.try_lock() else {
-        return;
+    let mut plugin = match plugin.try_lock() {
+        Ok(plugin) => plugin,
+        Err(std::sync::TryLockError::WouldBlock) => return,
+        Err(std::sync::TryLockError::Poisoned(_)) => {
+            mark_plugin_worker_failed(header);
+            return;
+        }
     };
-    // Flush accepted control edits before capturing the same native instance. A concurrent
-    // later edit belongs to the next snapshot, not a stale parameter overlay on this state.
+    // Deliver accepted controls to the adapter before capture. Some formats queue native
+    // events until the next real audio block; release the lock and retry after DSP in that
+    // case, within the reader's existing timeout, without manufacturing an OFF-node block.
     apply_pending_rack_parameter(shared.header(), &mut plugin);
-    shared.publish(request, plugin.save_state());
+    let state = plugin.save_state();
+    if matches!(state, Err(ProcessorStateError::Pending)) {
+        return;
+    }
+    latency::publish_intrinsic_frames(header, plugin.intrinsic_latency_frames());
+    // Native capture needs the instance lock; transporting the completed bytes does not.
+    // Release it before waiting for the control reader so DSP can resume immediately.
+    drop(plugin);
+    shared.publish(request, state);
 }
 
 fn apply_pending_editor_command(
@@ -339,10 +428,13 @@ fn apply_pending_editor_command(
     if command == EDITOR_COMMAND_CLOSE {
         let snapshot = if let Some(host) = host.as_mut() {
             let Ok(mut plugin) = plugin.lock() else {
+                mark_plugin_worker_failed(header);
+                publish_editor_failure(header, EDITOR_FAILURE_WORKER_UNAVAILABLE);
                 return;
             };
             host.close(&mut plugin);
             let snapshot = plugin.tick_editor();
+            latency::publish_intrinsic_frames(header, plugin.intrinsic_latency_frames());
             host.refresh(snapshot);
             snapshot
         } else {
@@ -365,7 +457,13 @@ fn open_editor(
     host: &mut Option<native_editor::NativeEditorHost>,
 ) {
     let header = shared.header();
-    let has_editor = plugin.lock().is_ok_and(|plugin| plugin.has_editor());
+    let has_editor = if let Ok(plugin) = plugin.lock() {
+        plugin.has_editor()
+    } else {
+        mark_plugin_worker_failed(header);
+        publish_editor_failure(header, EDITOR_FAILURE_WORKER_UNAVAILABLE);
+        return;
+    };
     if !has_editor {
         publish_editor_failure(header, EDITOR_FAILURE_NO_EDITOR);
         return;
@@ -383,14 +481,17 @@ fn open_editor(
             }
         }
     }
-    let result = plugin.lock().map_or_else(
-        |_| Err(native_editor::EditorHostFailure::PluginRejected),
-        |mut plugin| {
-            host.as_mut()
-                .expect("editor host was initialized")
-                .open(&mut plugin, title)
-        },
-    );
+    let result = if let Ok(mut plugin) = plugin.lock() {
+        let result = host
+            .as_mut()
+            .expect("editor host was initialized")
+            .open(&mut plugin, title);
+        latency::publish_intrinsic_frames(header, plugin.intrinsic_latency_frames());
+        result
+    } else {
+        mark_plugin_worker_failed(header);
+        Err(native_editor::EditorHostFailure::PluginRejected)
+    };
     match result {
         Ok(snapshot) if snapshot.open => {
             header
@@ -418,11 +519,17 @@ fn tick_editor(
     let Some(editor_host) = host.as_mut() else {
         return;
     };
+    let header = shared.header();
     // The host retains close/resize events until the plug-in can consume them. Native
     // mouse tracking can run a nested event loop; pumping it under this mutex stalls DSP.
     editor_host.poll_events();
-    let Ok(mut plugin) = plugin.try_lock() else {
-        return;
+    let mut plugin = match plugin.try_lock() {
+        Ok(plugin) => plugin,
+        Err(std::sync::TryLockError::WouldBlock) => return,
+        Err(std::sync::TryLockError::Poisoned(_)) => {
+            mark_plugin_worker_failed(header);
+            return;
+        }
     };
     let events = editor_host.take_events();
     if events.close_requested {
@@ -431,8 +538,8 @@ fn tick_editor(
         let _ = plugin.resize_editor(width, height);
     }
     let snapshot = plugin.tick_editor();
+    latency::publish_intrinsic_frames(header, plugin.intrinsic_latency_frames());
     editor_host.refresh(snapshot);
-    let header = shared.header();
     publish_observed_editor_snapshot(header, snapshot);
 }
 
@@ -487,6 +594,12 @@ fn apply_pending_rack_parameter(
             header.process_failures.fetch_add(1, Ordering::Relaxed);
         }
     });
+    latency::publish_intrinsic_frames(header, plugin.intrinsic_latency_frames());
+}
+
+fn mark_plugin_worker_failed(header: &SharedHeader) {
+    latency::publish_intrinsic_frames(header, None);
+    header.worker_status.store(WORKER_FAILED, Ordering::Release);
 }
 
 fn consume_parameters(header: &SharedHeader, mut apply: impl FnMut(u32, f64)) {
@@ -532,37 +645,42 @@ impl NodeResolver for CatalogNodeResolver {
         let NodeConfig::Provider(config) = &node.config else {
             return BuiltInNodeResolver.resolve(node, context);
         };
-        let ports = self
-            .catalog
-            .ports(config.type_id.as_str())
-            .or(config.ports)
-            .ok_or_else(|| NodeResolutionError::CapabilityUnavailable {
-                reason: format!("processor is not installed: {}", config.type_id),
+        let ports =
+            match self.catalog.entry(config.type_id.as_str()) {
+                Some(entry) => selected_ports(&entry.descriptor, config)
+                    .map_err(|reason| NodeResolutionError::InvalidConfiguration { reason })?,
+                None => config.ports.clone().ok_or_else(|| {
+                    NodeResolutionError::CapabilityUnavailable {
+                        reason: format!("processor is not installed: {}", config.type_id),
+                    }
+                })?,
+            };
+        ports
+            .validate()
+            .map_err(|error| NodeResolutionError::InvalidConfiguration {
+                reason: error.to_string(),
             })?;
-        let input_channels = ports.inputs;
-        let output_channels = ports.outputs;
-        if input_channels == 0
-            || output_channels == 0
-            || input_channels > context.limits.max_channels_per_port
-            || output_channels > context.limits.max_channels_per_port
+        if ports
+            .inputs
+            .iter()
+            .chain(&ports.outputs)
+            .any(|bus| bus.channels > context.limits.max_channels_per_port)
         {
             return Err(NodeResolutionError::InvalidConfiguration {
-                reason: format!(
-                    "processor channel layout {input_channels} in / {output_channels} out is unsupported"
-                ),
+                reason: "processor bus width exceeds graph limits".to_owned(),
             });
         }
         Ok(ResolvedNode {
-            inputs: vec![CompiledPort::new(
-                PortId::from(AUDIO_PORT_ID),
-                PortDirection::Input,
-                input_channels,
-            )],
-            outputs: vec![CompiledPort::new(
-                PortId::from(AUDIO_PORT_ID),
-                PortDirection::Output,
-                output_channels,
-            )],
+            inputs: ports
+                .inputs
+                .iter()
+                .map(|bus| CompiledPort::new(bus.id.clone(), PortDirection::Input, bus.channels))
+                .collect(),
+            outputs: ports
+                .outputs
+                .iter()
+                .map(|bus| CompiledPort::new(bus.id.clone(), PortDirection::Output, bus.channels))
+                .collect(),
         })
     }
 }
@@ -605,30 +723,62 @@ impl HostedProcessorFactory for ExternalProcessorFactory {
         &self,
         request: HostedProcessorPrepareRequest<'_>,
     ) -> Result<Option<Box<dyn HostedAudioProcessor>>, String> {
-        Ok(self.controls.reuse_request(&request))
+        self.controls.verify_state(&request.config.parameters)?;
+        let mut config = request.config.clone();
+        if let Some(entry) = self.catalog.entry(config.type_id.as_str()) {
+            config.ports = Some(selected_ports(&entry.descriptor, &config)?);
+        }
+        let normalized = HostedProcessorPrepareRequest {
+            config: &config,
+            ..request
+        };
+        Ok(self.controls.reuse_request(&normalized))
     }
 
     fn prepare(
         &self,
         request: HostedProcessorPrepareRequest<'_>,
     ) -> Result<Box<dyn HostedAudioProcessor>, String> {
+        self.controls.verify_state(&request.config.parameters)?;
         let Some(entry) = self.catalog.entry(request.config.type_id.as_str()) else {
-            if !request.config.ports.is_some_and(|ports| {
-                ports.inputs == request.input_channels && ports.outputs == request.output_channels
+            if !request.config.ports.as_ref().is_some_and(|ports| {
+                ports.total_input_channels() == Ok(request.input_channels)
+                    && ports.total_output_channels() == Ok(request.output_channels)
             }) {
                 return Err("unavailable processor needs its saved port contract".into());
             }
             return Ok(Box::new(UnavailableProcessor));
         };
-        if request.input_channels != entry.descriptor.input_channels
-            || request.output_channels != entry.descriptor.output_channels
+        let selected = selected_ports(&entry.descriptor, request.config)?;
+        if selected
+            .total_input_channels()
+            .map_err(|error| error.to_string())?
+            != request.input_channels
+            || selected
+                .total_output_channels()
+                .map_err(|error| error.to_string())?
+                != request.output_channels
         {
             return Err("compiled plug-in layout does not match the catalog".to_owned());
         }
+        // Reuse is tied to the resolved topology even when the authored node asks for
+        // the current default. A catalog change must never inherit a same-width worker
+        // whose sidechain ordering or native configuration identity has changed.
+        let mut config = request.config.clone();
+        config.ports = Some(selected);
+        let request = HostedProcessorPrepareRequest {
+            config: &config,
+            ..request
+        };
         if let Some(processor) = self.controls.reuse_request(&request) {
             return Ok(processor);
         }
-        let mut processor = HostedExternalProcessor::new(&entry, request.config, request.format)?;
+        let mut processor = HostedExternalProcessor::new(
+            &entry,
+            request.config,
+            request.format,
+            self.controls.optional_state_store().as_ref(),
+        )?;
         let control = processor.control();
         *control
             .reuse
@@ -648,6 +798,7 @@ type SharedProcessorControls = RwLock<WeakProcessorControls>;
 #[derive(Clone, Default)]
 pub struct ProcessorControlRegistry {
     controls: Arc<SharedProcessorControls>,
+    state_store: Arc<RwLock<Option<mixrelay_processor_state::StateStore>>>,
 }
 
 /// Stable control-plane failures; unsupported formats must not be saved as empty success.
@@ -661,6 +812,7 @@ pub enum ProcessorStateError {
     NativeFailure,
     TooLarge,
     InvalidResponse,
+    Storage,
 }
 
 impl std::fmt::Display for ProcessorStateError {
@@ -672,8 +824,9 @@ impl std::fmt::Display for ProcessorStateError {
             Self::Timeout => "processor state export timed out",
             Self::Unsupported => "processor native state export is unsupported",
             Self::NativeFailure => "processor native state export failed",
-            Self::TooLarge => "processor state exceeds 4 MiB",
+            Self::TooLarge => "processor state exceeds 64 MiB",
             Self::InvalidResponse => "processor state response is invalid",
+            Self::Storage => "processor state could not be stored durably",
         })
     }
 }
@@ -684,18 +837,21 @@ impl ProcessorControlRegistry {
     /// Captures native state on the worker's editor/control thread. Call only from a control
     /// thread, before saving or replacing a graph. Native state is authoritative: replace the
     /// provider's parameter object with this snapshot, rather than overlaying stale values.
+    /// Hold a [`Self::reuse_transaction`] through capture and the owning publication. The
+    /// captured reference temporarily authorizes reuse; failed publication must roll it back.
     ///
     /// # Errors
     /// Returns an error for inactive/crashed workers, concurrent or timed-out requests,
-    /// unsupported native state APIs, or exports exceeding the 4 MiB transport limit.
+    /// unsupported native state APIs, storage failure, or exports exceeding 64 MiB.
     pub fn snapshot_state(
         &self,
         node_id: &NodeId,
         timeout: Duration,
     ) -> Result<serde_json::Value, ProcessorStateError> {
-        self.live_control(node_id)
-            .map_err(|_| ProcessorStateError::Unavailable)?
-            .snapshot_state(timeout)
+        let control = self
+            .live_control(node_id)
+            .map_err(|_| ProcessorStateError::Unavailable)?;
+        self.snapshot_control_state(&control, timeout)
     }
 
     fn register(
@@ -795,6 +951,66 @@ impl ProcessorControlRegistry {
         self.live_control(node_id).is_ok()
     }
 
+    /// Returns the exact active owner only when its worker has failed.
+    #[must_use]
+    pub fn failed_worker_instance(&self, node_id: &NodeId) -> Option<u64> {
+        let control = self.active_control(node_id)?;
+        let header = control.shared.header();
+        (header.worker_status.load(Ordering::Acquire) == WORKER_FAILED
+            || header.shutdown.load(Ordering::Acquire) != 0)
+            .then_some(header.instance_id)
+    }
+
+    /// Reserves one explicit retry for the exact failed active worker instance.
+    /// The cooldown lives with that worker owner, so retired identities are never retained.
+    /// # Errors
+    /// Rejects absent/healthy/stale workers and retries inside the per-instance cooldown.
+    pub fn begin_failed_worker_retry(
+        &self,
+        node_id: &NodeId,
+        expected_instance_id: u64,
+        cooldown: Duration,
+    ) -> Result<(), &'static str> {
+        let control = self
+            .active_control(node_id)
+            .ok_or("processor is not active")?;
+        let header = control.shared.header();
+        if header.instance_id != expected_instance_id {
+            return Err("processor instance changed");
+        }
+        if header.worker_status.load(Ordering::Acquire) != WORKER_FAILED
+            && header.shutdown.load(Ordering::Acquire) == 0
+        {
+            return Err("processor worker has not failed");
+        }
+        let mut last_retry = control
+            .last_retry
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = Instant::now();
+        if last_retry.is_some_and(|previous| now.saturating_duration_since(previous) < cooldown) {
+            return Err("processor retry is cooling down");
+        }
+        *last_retry = Some(now);
+        Ok(())
+    }
+
+    fn active_control(&self, node_id: &NodeId) -> Option<Arc<HostedProcessorControl>> {
+        let mut controls = self
+            .controls
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entries = controls.get_mut(node_id)?;
+        entries.retain(|entry| entry.strong_count() != 0);
+        entries.iter().rev().find_map(|entry| {
+            let control = entry.upgrade()?;
+            control
+                .active_owner
+                .load(Ordering::Acquire)
+                .then_some(control)
+        })
+    }
+
     fn live_control(&self, node_id: &NodeId) -> Result<Arc<HostedProcessorControl>, String> {
         let mut controls = self
             .controls
@@ -841,9 +1057,12 @@ impl Drop for ProcessorControlRegistration {
 
 struct HostedProcessorControl {
     shared: ControlMailbox,
+    // Keep this after `shared`: its Drop unlinks only after the mailbox mapping closes.
+    transport_file_cleanup: SharedTransportFileCleanup,
     input_writer: Mutex<()>,
     reuse: Mutex<Option<reuse::ReuseSignature>>,
     active_owner: AtomicBool,
+    last_retry: Mutex<Option<Instant>>,
     timing: timing::TimingMetrics,
 }
 
@@ -851,34 +1070,29 @@ impl HostedProcessorControl {
     fn new(shared: ControlMailbox) -> Self {
         Self {
             shared,
+            transport_file_cleanup: SharedTransportFileCleanup::default(),
             input_writer: Mutex::new(()),
             reuse: Mutex::new(None),
             active_owner: AtomicBool::new(false),
+            last_retry: Mutex::new(None),
             timing: timing::TimingMetrics::default(),
         }
     }
 
-    fn snapshot_state(&self, timeout: Duration) -> Result<serde_json::Value, ProcessorStateError> {
+    fn own_transport_file(&self, path: PathBuf) {
+        self.transport_file_cleanup.0.get_or_init(|| path);
+    }
+
+    fn snapshot_state(&self, timeout: Duration) -> Result<Vec<u8>, ProcessorStateError> {
         let header = self.shared.header();
         header
             .editor_input
             .cancel(header.editor_sequence.load(Ordering::Acquire));
-        let deadline = Instant::now() + timeout.min(Duration::from_secs(5));
+        let deadline = Instant::now() + timeout.min(PROCESSOR_STATE_TIMEOUT);
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             match self.request_blob(editor_surface::NATIVE_STATE, remaining) {
-                Ok(bytes) => {
-                    let state = serde_json::json!({ "stateBase64": BASE64.encode(bytes) });
-                    if let Some(signature) = self
-                        .reuse
-                        .lock()
-                        .map_err(|_| ProcessorStateError::Unavailable)?
-                        .as_mut()
-                    {
-                        signature.checkpoint(&state);
-                    }
-                    return Ok(state);
-                }
+                Ok(bytes) => return Ok(bytes),
                 Err(ProcessorStateError::Busy | ProcessorStateError::Pending)
                     if !remaining.is_zero()
                         && self.shared.last_request_kind() == editor_surface::EDITOR_FRAME =>
@@ -998,13 +1212,39 @@ impl HostedProcessorControl {
     }
 }
 
+#[derive(Default)]
+struct SharedTransportFileCleanup(OnceLock<PathBuf>);
+
+impl Drop for SharedTransportFileCleanup {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.get() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+impl HostedLatencySource for HostedProcessorControl {
+    fn frames(&self) -> Option<u32> {
+        let header = self.shared.header();
+        if header.worker_status.load(Ordering::Acquire) != WORKER_READY
+            || header.shutdown.load(Ordering::Acquire) != 0
+        {
+            return None;
+        }
+        let intrinsic = latency::decode_intrinsic_frames(
+            header.intrinsic_latency_frames.load(Ordering::Acquire),
+        )?;
+        header.prepared_block_frames().checked_add(intrinsic)
+    }
+}
+
 struct HostedExternalProcessor {
     child_stdin: Option<ChildStdin>,
     worker_monitor: Option<WorkerMonitor>,
     shared: Option<ParentAudio>,
-    shared_path: PathBuf,
     config_path: PathBuf,
     layout: AudioLayout,
+    dry_delay: dry_delay::DryDelay,
     next_sequence: u64,
     timing: timing::TimingProbe,
     control: Option<Arc<HostedProcessorControl>>,
@@ -1016,10 +1256,22 @@ impl HostedExternalProcessor {
         entry: &CatalogEntry,
         config: &ProviderNodeConfig,
         format: RenderFormat,
+        state_store: Option<&mixrelay_processor_state::StateStore>,
     ) -> Result<Self, String> {
-        let input_channels = usize::from(entry.descriptor.input_channels);
-        let output_channels = usize::from(entry.descriptor.output_channels);
+        let selected = selected_ports(&entry.descriptor, config)?;
+        let input_channels = usize::from(
+            selected
+                .total_input_channels()
+                .map_err(|error| error.to_string())?,
+        );
+        let output_channels = usize::from(
+            selected
+                .total_output_channels()
+                .map_err(|error| error.to_string())?,
+        );
         let block_frames = format.block_frames as usize;
+        let dry_delay = dry_delay::DryDelay::for_ports(&selected, block_frames)
+            .map_err(|error| error.to_string())?;
         let (shared_path, config_path) = worker_paths().map_err(|error| error.to_string())?;
         let layout = AudioLayout {
             inputs: input_channels,
@@ -1028,9 +1280,13 @@ impl HostedExternalProcessor {
         };
         let (shared, control) = shared_transport::create(&shared_path, layout)?;
         let control = Arc::new(HostedProcessorControl::new(control));
-        if let Err(error) =
-            write_worker_config(&config_path, format.sample_rate, &config.parameters)
-        {
+        if let Err(error) = state::write_worker_config(
+            &config_path,
+            format.sample_rate,
+            &config.parameters,
+            state_store,
+            &selected,
+        ) {
             drop(control);
             drop(shared);
             cleanup_worker_paths(&shared_path, &config_path);
@@ -1067,18 +1323,15 @@ impl HostedExternalProcessor {
                 return Err(error);
             }
         };
+        control.own_transport_file(shared_path.clone());
         Ok(Self {
             child_stdin,
             worker_monitor: Some(worker_monitor),
             shared: Some(shared),
-            shared_path,
             config_path,
-            layout: AudioLayout {
-                inputs: input_channels,
-                outputs: output_channels,
-                block_frames,
-            },
+            layout,
             next_sequence: 1,
+            dry_delay,
             control: Some(control),
             timing: timing::TimingProbe::default(),
             registration: None,
@@ -1103,8 +1356,7 @@ fn spawn_processor_worker(
     let mut command = Command::new(executable);
     command
         .arg(PLUGIN_WORKER_ARGUMENT)
-        .arg(entry.rack.locator.encode()?)
-        .arg(entry.rack.layout_index.to_string());
+        .arg(entry.rack.locator.encode()?);
     command
         .arg(shared_path)
         .arg(config_path)
@@ -1115,6 +1367,13 @@ fn spawn_processor_worker(
 }
 
 impl HostedAudioProcessor for HostedExternalProcessor {
+    fn suspend_processing(&mut self) {
+        if let Some(shared) = &mut self.shared {
+            shared.discard_history();
+        }
+        self.dry_delay.reset();
+    }
+
     fn set_active(&mut self, active: bool) {
         if let Some(control) = &self.control {
             control.active_owner.store(active, Ordering::Release);
@@ -1126,11 +1385,27 @@ impl HostedAudioProcessor for HostedExternalProcessor {
             .map(|control| control.shared.header().instance_id)
     }
 
+    fn latency_source(&self) -> Option<Arc<dyn HostedLatencySource>> {
+        self.control.as_ref().map(|control| {
+            // Retain this prepared worker's mapping across plan adoption and retirement.
+            let source: Arc<dyn HostedLatencySource> =
+                Arc::<HostedProcessorControl>::clone(control);
+            source
+        })
+    }
+
     fn process(&mut self, input: &[f32], output: &mut [f32], frames: usize) -> bool {
         self.set_active(true);
-        if frames > self.layout.block_frames
-            || input.len() < frames.saturating_mul(self.layout.inputs)
-            || output.len() < frames.saturating_mul(self.layout.outputs)
+        let Some(input_samples) = self.layout.inputs.checked_mul(frames) else {
+            return false;
+        };
+        let Some(output_samples) = self.layout.outputs.checked_mul(frames) else {
+            return false;
+        };
+        if frames == 0
+            || frames > self.layout.block_frames
+            || input.len() < input_samples
+            || output.len() < output_samples
         {
             return false;
         }
@@ -1138,12 +1413,11 @@ impl HostedAudioProcessor for HostedExternalProcessor {
             .shared
             .as_mut()
             .expect("hosted processor retains audio mapping until drop");
-        let received = shared.receive(output, frames);
-        if let Some(sequence) = received
-            && let Some(control) = &self.control
-        {
-            self.timing.received(sequence, &control.timing);
-        }
+        let received = shared.receive(output, frames, |sequence| {
+            if let Some(control) = &self.control {
+                self.timing.received(sequence, &control.timing);
+            }
+        });
         if shared.submit(self.next_sequence, input, frames, || {
             if let Some(control) = &self.control {
                 self.timing.submitted(self.next_sequence, &control.timing);
@@ -1151,13 +1425,11 @@ impl HostedAudioProcessor for HostedExternalProcessor {
         }) {
             self.next_sequence = self.next_sequence.saturating_add(1);
         }
-        let has_output = received.is_some();
-        if !has_output {
-            // The worker missed the one-block deadline. Return `false` so the graph performs
-            // its deterministic channel-preserving bypass for this block.
-            return false;
-        }
-        true
+        // A missed deadline must not jump ahead to current input. Keep the dry path
+        // aligned to the prepared IPC delay even while healthy output is available.
+        // Intrinsic plug-in latency is a separate compensation boundary.
+        self.dry_delay
+            .advance(input, (!received).then_some(output), frames)
     }
 }
 
@@ -1171,12 +1443,13 @@ impl Drop for HostedExternalProcessor {
         if let Some(mut monitor) = self.worker_monitor.take() {
             monitor.stop_and_join();
         }
-        // Windows refuses to unlink mapped files. Drop every mapping and weak registration
-        // before removing the transport paths; Unix follows the same order for consistency.
+        // A retained latency reader keeps the control mapping and its transport-file cleanup
+        // guard alive. Release the parent mapping before this processor's control Arc; the final
+        // control handle unlinks the path only after its mailbox mapping has closed.
         drop(self.registration.take());
-        drop(self.control.take());
         drop(self.shared.take());
-        cleanup_worker_paths(&self.shared_path, &self.config_path);
+        drop(self.control.take());
+        cleanup_worker_config_path(&self.config_path);
     }
 }
 
@@ -1207,8 +1480,9 @@ impl WorkerMonitor {
                         next_timing_sample = Instant::now() + Duration::from_secs(1);
                     }
                     match child.try_wait() {
-                        Ok(Some(_)) => {
+                        Ok(Some(status)) => {
                             if !thread_stop.load(Ordering::Acquire) {
+                                tracing::warn!(pid = child.id(), %status, "processor worker exited unexpectedly");
                                 control
                                     .shared
                                     .header()
@@ -1218,6 +1492,8 @@ impl WorkerMonitor {
                             return;
                         }
                         Err(_) => {
+                            let _ = child.kill();
+                            let _ = child.wait();
                             control
                                 .shared
                                 .header()
@@ -1271,44 +1547,11 @@ impl Drop for WorkerMonitor {
 
 fn cleanup_worker_paths(shared_path: &Path, config_path: &Path) {
     let _ = std::fs::remove_file(shared_path);
+    cleanup_worker_config_path(config_path);
+}
+
+fn cleanup_worker_config_path(config_path: &Path) {
     let _ = std::fs::remove_file(config_path);
-}
-
-fn write_worker_config(
-    path: &Path,
-    sample_rate: u32,
-    parameters: &serde_json::Value,
-) -> Result<(), String> {
-    let body = serde_json::json!({
-        "sampleRate": sample_rate,
-        "parameters": parameters,
-    });
-    let mut options = OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path).map_err(|error| error.to_string())?;
-    file.write_all(body.to_string().as_bytes())
-        .map_err(|error| error.to_string())
-}
-
-fn read_worker_configuration(path: &str) -> Result<(f64, serde_json::Value), String> {
-    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
-    let config: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
-    let sample_rate = config
-        .get("sampleRate")
-        .and_then(serde_json::Value::as_f64)
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .ok_or_else(|| "VST3 worker config has an invalid sample rate".to_owned())?;
-    let parameters = config
-        .get("parameters")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
-    Ok((sample_rate, parameters))
 }
 
 fn wait_for_worker(child: &mut Child, shared: &ParentAudio) -> Result<(), String> {
@@ -1316,7 +1559,7 @@ fn wait_for_worker(child: &mut Child, shared: &ParentAudio) -> Result<(), String
     loop {
         match shared.header().worker_status.load(Ordering::Acquire) {
             WORKER_READY => return Ok(()),
-            WORKER_FAILED => return Err("VST3 worker initialization failed".to_owned()),
+            WORKER_FAILED => return Err("processor worker initialization failed".to_owned()),
             _ => {}
         }
         if child
@@ -1324,12 +1567,12 @@ fn wait_for_worker(child: &mut Child, shared: &ParentAudio) -> Result<(), String
             .map_err(|error| error.to_string())?
             .is_some()
         {
-            return Err("VST3 worker exited during initialization".to_owned());
+            return Err("processor worker exited during initialization".to_owned());
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            return Err("VST3 worker initialization timed out".to_owned());
+            return Err("processor worker initialization timed out".to_owned());
         }
         thread::sleep(Duration::from_millis(20));
     }
@@ -1340,8 +1583,9 @@ fn copy_shared_input_to_rack(
     plugin: &mut rack_formats::RackWorkerPlugin,
     layout: AudioLayout,
 ) {
+    let frames = source.len().checked_div(layout.inputs).unwrap_or(0);
     for (channel_index, channel) in plugin.inputs_mut().iter_mut().enumerate() {
-        for frame in 0..layout.block_frames {
+        for frame in 0..frames {
             channel[frame] = source[frame * layout.inputs + channel_index];
         }
     }
@@ -1352,15 +1596,16 @@ fn copy_rack_output_to_shared(
     plugin: &rack_formats::RackWorkerPlugin,
     layout: AudioLayout,
 ) {
-    for frame in 0..layout.block_frames {
+    let frames = destination.len().checked_div(layout.outputs).unwrap_or(0);
+    for frame in 0..frames {
         for (channel_index, channel) in plugin.outputs().iter().enumerate() {
             destination[frame * layout.outputs + channel_index] = channel[frame];
         }
     }
 }
 
-fn bypass_rack(plugin: &mut rack_formats::RackWorkerPlugin, layout: AudioLayout) {
-    plugin.bypass(layout.block_frames);
+fn bypass_rack(plugin: &mut rack_formats::RackWorkerPlugin, frames: usize) {
+    plugin.bypass(frames);
 }
 
 #[cfg(test)]
@@ -1368,14 +1613,62 @@ mod tests {
     use super::*;
 
     #[test]
+    fn saved_selection_is_not_retargeted_by_equal_totals_or_catalog_order() {
+        let stereo = mixrelay_audio_graph::ProviderPorts::canonical_stereo("stereo");
+        let mut sidechain = stereo.clone();
+        sidechain.layout_id = "stereo-sidechain".into();
+        let mut key_bus = stereo.inputs[0].clone();
+        key_bus.id = mixrelay_audio_graph::PortId::from("key");
+        key_bus.kind = mixrelay_audio_graph::ProviderBusKind::Sidechain;
+        sidechain.inputs.push(key_bus);
+        let mut descriptor = ExternalProcessorDescriptor {
+            type_id: "clap:fixture".into(),
+            display_name: "Fixture".into(),
+            vendor: String::new(),
+            version: String::new(),
+            format: mixrelay_control_protocol::ExternalProcessorFormat::Clap,
+            layouts: vec![stereo.clone(), sidechain.clone()],
+            default_layout_id: stereo.layout_id.clone(),
+            has_editor: false,
+            parameters: Vec::new(),
+        };
+        let mut config = ProviderNodeConfig {
+            type_id: descriptor.type_id.as_str().into(),
+            ports: Some(sidechain.clone()),
+            parameters: serde_json::json!({}),
+        };
+        descriptor.layouts.reverse();
+        assert_eq!(selected_ports(&descriptor, &config).unwrap(), sidechain);
+        let mut renamed = sidechain.clone();
+        renamed.inputs[1].name = "Translated key".into();
+        config.ports = Some(renamed);
+        assert_eq!(selected_ports(&descriptor, &config).unwrap(), sidechain);
+        let mut wrong = sidechain.clone();
+        wrong.inputs[1].kind = mixrelay_audio_graph::ProviderBusKind::Main;
+        config.ports = Some(wrong);
+        assert!(selected_ports(&descriptor, &config).is_err());
+        config.ports = Some(sidechain);
+        descriptor.layouts = vec![stereo.clone()];
+        assert!(selected_ports(&descriptor, &config).is_err());
+        config.ports = None;
+        assert_eq!(selected_ports(&descriptor, &config).unwrap(), stereo);
+    }
+
+    fn saved_ports(inputs: u16, outputs: u16) -> mixrelay_audio_graph::ProviderPorts {
+        let mut ports = mixrelay_audio_graph::ProviderPorts::canonical_stereo("fixture-layout");
+        ports.inputs[0].channels = inputs;
+        ports.inputs[0].channel_format = mixrelay_audio_graph::ProviderChannelFormat::Discrete;
+        ports.outputs[0].channels = outputs;
+        ports.outputs[0].channel_format = mixrelay_audio_graph::ProviderChannelFormat::Discrete;
+        ports
+    }
+
+    #[test]
     fn missing_plugin_uses_saved_ports_and_silence_instead_of_passthrough() {
         let config = ProviderNodeConfig {
             type_id: "vst3:not-installed".into(),
             parameters: serde_json::json!({}),
-            ports: Some(mixrelay_audio_graph::ProviderPorts {
-                inputs: 8,
-                outputs: 8,
-            }),
+            ports: Some(saved_ports(8, 8)),
         };
         let node = NodeSpec {
             control: mixrelay_audio_graph::NodeControl::default(),
@@ -1411,10 +1704,7 @@ mod tests {
         );
         let mut invalid = node;
         if let NodeConfig::Provider(config) = &mut invalid.config {
-            config.ports = Some(mixrelay_audio_graph::ProviderPorts {
-                inputs: 0,
-                outputs: 65,
-            });
+            config.ports = Some(saved_ports(0, 65));
         }
         assert!(resolver.resolve(&invalid, &context).is_err());
     }
@@ -1428,12 +1718,14 @@ mod tests {
         }
         for channels in [2, 8, 64] {
             for frames in [32, 256] {
-                let (shared_path, config_path, shared) = audio_mapping(channels, channels, frames);
+                let (shared_path, config_path, shared, mailbox) =
+                    audio_mapping(channels, channels, frames);
+                let control = Arc::new(HostedProcessorControl::new(mailbox));
+                control.own_transport_file(shared_path.clone());
                 let mut processor = HostedExternalProcessor {
                     child_stdin: None,
                     worker_monitor: None,
                     shared: Some(shared),
-                    shared_path,
                     config_path,
                     layout: AudioLayout {
                         inputs: channels,
@@ -1441,13 +1733,14 @@ mod tests {
                         block_frames: frames,
                     },
                     next_sequence: 1,
-                    control: None,
+                    dry_delay: dry_delay::DryDelay::new(channels, channels, frames).unwrap(),
+                    control: Some(control),
                     timing: timing::TimingProbe::default(),
                     registration: None,
                 };
                 let input = vec![0.25; channels * frames];
                 let mut output = vec![0.0; channels * frames];
-                assert!(!processor.process(&input, &mut output, frames));
+                assert!(processor.process(&input, &mut output, frames));
                 let mut rounds = [0.0; 7];
                 for elapsed in &mut rounds {
                     let start = Instant::now();
@@ -1490,11 +1783,30 @@ mod tests {
         (shared_path, config_path, control)
     }
 
+    #[test]
+    fn worker_setup_cleanup_removes_the_owned_transport() {
+        let (shared_path, config_path) = worker_paths().expect("private worker paths");
+        let (audio, control) = shared_transport::create(
+            &shared_path,
+            AudioLayout {
+                inputs: 2,
+                outputs: 2,
+                block_frames: 128,
+            },
+        )
+        .expect("shared transport");
+        drop(control);
+        drop(audio);
+        assert!(shared_path.exists());
+        cleanup_worker_paths(&shared_path, &config_path);
+        assert!(!shared_path.exists());
+    }
+
     fn audio_mapping(
         inputs: usize,
         outputs: usize,
         frames: usize,
-    ) -> (PathBuf, PathBuf, ParentAudio) {
+    ) -> (PathBuf, PathBuf, ParentAudio, ControlMailbox) {
         let (shared_path, config_path) = worker_paths().expect("private worker paths");
         let (audio, control) = shared_transport::create(
             &shared_path,
@@ -1505,21 +1817,25 @@ mod tests {
             },
         )
         .expect("shared transport");
-        drop(control);
-        (shared_path, config_path, audio)
+        (shared_path, config_path, audio, control)
     }
 
     #[test]
     fn stalled_or_failed_worker_does_not_block_an_independent_processor() {
-        let mut unavailable = test_processor();
-        let mut healthy = test_processor();
-        let (mut worker, _) = shared_transport::worker(&healthy.shared_path).unwrap();
+        let (mut unavailable, _) = test_processor();
+        let (mut healthy, healthy_path) = test_processor();
+        let (mut worker, _) = shared_transport::worker(&healthy_path).unwrap();
         let mut output = [0.0; 8];
         let input = [0.25; 8];
-        assert!(!unavailable.process(&input, &mut output, 4));
-        assert!(!healthy.process(&input, &mut output, 4));
+        assert!(unavailable.process(&input, &mut output, 4));
+        assert!(healthy.process(&input, &mut output, 4));
+        assert!(
+            output
+                .iter()
+                .all(|sample| sample.to_bits() == 0.0_f32.to_bits())
+        );
         for sequence in 1..=64 {
-            assert!(worker.receive(|_| {}));
+            assert_eq!(worker.receive(|_| {}), Some(4));
             assert!(worker.publish(|output| output.fill(0.5)));
             if sequence == 32 {
                 (unavailable.shared.as_ref().unwrap())
@@ -1527,7 +1843,8 @@ mod tests {
                     .worker_status
                     .store(WORKER_FAILED, Ordering::Release);
             }
-            assert!(!unavailable.process(&input, &mut output, 4));
+            assert!(unavailable.process(&input, &mut output, 4));
+            assert_eq!(output.map(f32::to_bits), input.map(f32::to_bits));
             assert!(healthy.process(&input, &mut output, 4));
             assert!(
                 output
@@ -1542,13 +1859,14 @@ mod tests {
         assert_eq!(healthy.next_sequence, 66);
     }
 
-    fn test_processor() -> HostedExternalProcessor {
-        let (shared_path, config_path, shared) = audio_mapping(2, 2, 4);
-        HostedExternalProcessor {
+    fn test_processor() -> (HostedExternalProcessor, PathBuf) {
+        let (shared_path, config_path, shared, mailbox) = audio_mapping(2, 2, 4);
+        let control = Arc::new(HostedProcessorControl::new(mailbox));
+        control.own_transport_file(shared_path.clone());
+        let processor = HostedExternalProcessor {
             child_stdin: None,
             worker_monitor: None,
             shared: Some(shared),
-            shared_path,
             config_path,
             layout: AudioLayout {
                 inputs: 2,
@@ -1556,28 +1874,112 @@ mod tests {
                 block_frames: 4,
             },
             next_sequence: 1,
-            control: None,
+            dry_delay: dry_delay::DryDelay::new(2, 2, 4).unwrap(),
+            control: Some(control),
             timing: timing::TimingProbe::default(),
             registration: None,
-        }
+        };
+        (processor, shared_path)
+    }
+
+    #[test]
+    fn startup_padding_does_not_trigger_immediate_graph_bypass_or_repeat_audio() {
+        let (mut processor, shared_path) = test_processor();
+        let (mut worker, _) = shared_transport::worker(&shared_path).unwrap();
+        let first = [1.0, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0];
+        let mut output = [f32::NAN; 8];
+        assert!(
+            processor.process(&first, &mut output, 4),
+            "startup silence is a valid delayed output, not a request for immediate graph bypass"
+        );
+        assert_eq!(output.map(f32::to_bits), [0.0_f32; 8].map(f32::to_bits));
+        assert_eq!(worker.receive(|source| assert_eq!(source, first)), Some(4));
+        assert!(worker.publish(|destination| destination.copy_from_slice(&first)));
+        let second = [5.0, 50.0, 6.0, 60.0, 7.0, 70.0, 8.0, 80.0];
+        assert!(processor.process(&second, &mut output, 4));
+        assert_eq!(output.map(f32::to_bits), first.map(f32::to_bits));
+        assert_eq!(worker.receive(|source| assert_eq!(source, second)), Some(4));
+        assert!(worker.publish(|destination| destination.copy_from_slice(&second)));
+        assert!(processor.process(&[0.0; 8], &mut output, 4));
+        assert_eq!(output.map(f32::to_bits), second.map(f32::to_bits));
+    }
+
+    #[test]
+    fn missed_response_preserves_dry_delay_across_uneven_callbacks_and_suspend() {
+        let (mut processor, _) = test_processor();
+        let mut output = [f32::NAN; 8];
+        assert!(processor.process(&[1.0; 6], &mut output[..6], 3));
+        assert_eq!(output[..6], [0.0; 6]);
+        // The callback straddles startup padding, but there is no worker response.
+        assert!(processor.process(&[2.0; 4], &mut output[..4], 2));
+        assert_eq!(output[..4], [0.0, 0.0, 1.0, 1.0]);
+        assert!(processor.process(&[3.0; 8], &mut output, 4));
+        assert_eq!(
+            output.map(f32::to_bits),
+            [1.0_f32, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0].map(f32::to_bits)
+        );
+        let allocations = allocation_counter::measure(|| {
+            for _ in 0..100 {
+                processor.suspend_processing();
+            }
+            assert!(processor.process(&[4.0; 8], &mut output, 4));
+            assert_eq!(output.map(f32::to_bits), [0.0_f32; 8].map(f32::to_bits));
+            assert!(processor.process(&[5.0; 8], &mut output, 4));
+            assert_eq!(output.map(f32::to_bits), [4.0_f32; 8].map(f32::to_bits));
+        });
+        assert_eq!(allocations.count_total, 0);
+    }
+
+    #[test]
+    fn suspended_processor_rejects_late_worker_audio_and_resumes_fresh_packets() {
+        let (mut processor, shared_path) = test_processor();
+        let (mut worker, _) = shared_transport::worker(&shared_path).unwrap();
+        let mut output = [f32::NAN; 8];
+        assert!(processor.process(&[7.0; 8], &mut output, 4));
+        assert_eq!(worker.receive(|_| {}), Some(4));
+        processor.suspend_processing();
+        assert!(worker.publish(|pcm| pcm.fill(7.0)));
+        assert!(processor.process(&[2.0; 8], &mut output, 4));
+        assert_eq!(output.map(f32::to_bits), [0.0_f32; 8].map(f32::to_bits));
+        assert_eq!(worker.receive(|pcm| assert_eq!(pcm, [2.0; 8])), Some(4));
+        assert!(worker.publish(|pcm| pcm.fill(3.0)));
+        assert!(processor.process(&[4.0; 8], &mut output, 4));
+        assert_eq!(output.map(f32::to_bits), [3.0_f32; 8].map(f32::to_bits));
     }
 
     #[test]
     fn consumed_input_before_output_publication_does_not_stall_the_mailbox() {
-        let mut processor = test_processor();
-        let (mut worker, _) = shared_transport::worker(&processor.shared_path).unwrap();
+        let (mut processor, shared_path) = test_processor();
+        let (mut worker, _) = shared_transport::worker(&shared_path).unwrap();
         let input = [0.25; 8];
         let mut output = [0.0; 8];
-        assert!(!processor.process(&input, &mut output, 4));
-        for sequence in 1..=64 {
-            assert!(worker.receive(|_| {}));
-            // The next callback queues input while this block is still being processed.
-            assert!(!processor.process(&input, &mut output, 4));
-            assert_eq!(processor.next_sequence, sequence + 2);
+        assert!(processor.process(&input, &mut output, 4));
+        assert_eq!(worker.receive(|_| {}), Some(4));
+        assert!(processor.process(&input, &mut output, 4));
+        assert_eq!(output.map(f32::to_bits), input.map(f32::to_bits));
+        assert_eq!(
+            processor.next_sequence, 3,
+            "consumed input releases the slot before output"
+        );
+        assert!(worker.publish(|output| output.fill(1.0)));
+        assert!(
+            processor.process(&input, &mut output, 4),
+            "late output must not prevent aligned dry audio"
+        );
+        assert_eq!(output.map(f32::to_bits), input.map(f32::to_bits));
+        assert_eq!(worker.receive(|_| {}), Some(4));
+        assert!(worker.publish(|output| output.fill(2.0)));
+        assert!(
+            processor.process(&input, &mut output, 4),
+            "the busy interval uses aligned dry audio"
+        );
+        assert_eq!(output.map(f32::to_bits), input.map(f32::to_bits));
+        for sequence in 3..=66 {
+            assert_eq!(worker.receive(|_| {}), Some(4));
             let processed = f32::from(u16::try_from(sequence).unwrap());
-            assert!(!worker.receive(|_| panic!("pending output retains the sequence")));
             assert!(worker.publish(|output| output.fill(processed)));
             assert!(processor.process(&input, &mut output, 4));
+            assert_eq!(processor.next_sequence, sequence + 2);
             assert!(
                 output
                     .iter()
@@ -1587,25 +1989,21 @@ mod tests {
                 processor.shared.as_ref().unwrap().acknowledged_output(),
                 sequence
             );
-            assert!(
-                !processor.process(&input, &mut output, 4),
-                "no duplicate output"
-            );
         }
     }
 
     #[test]
     fn shared_audio_regions_round_trip_without_growing() {
-        let (shared_path, config_path, mut shared) = audio_mapping(2, 2, 4);
+        let (shared_path, config_path, mut shared, control) = audio_mapping(2, 2, 4);
         let (mut worker, _) = shared_transport::worker(&shared_path).unwrap();
         let original_length = std::fs::metadata(&shared_path).unwrap().len();
         let input = [1.0, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0];
         assert!(shared.submit(1, &input, 4, || {}));
-        assert!(worker.receive(|source| assert_eq!(source, input)));
+        assert_eq!(worker.receive(|source| assert_eq!(source, input)), Some(4));
         let expected = [5.0, 50.0, 6.0, 60.0, 7.0, 70.0, 8.0, 80.0];
         assert!(worker.publish(|destination| destination.copy_from_slice(&expected)));
         let mut output = [0.0; 8];
-        assert_eq!(shared.receive(&mut output, 4), Some(1));
+        assert!(shared.receive(&mut output, 4, |_| {}));
         assert_eq!(output.map(f32::to_bits), expected.map(f32::to_bits));
         assert_eq!(
             std::fs::metadata(&shared_path).unwrap().len(),
@@ -1613,6 +2011,7 @@ mod tests {
         );
         drop(worker);
         drop(shared);
+        drop(control);
         cleanup_worker_paths(&shared_path, &config_path);
         assert!(!shared_path.exists());
     }
@@ -1620,13 +2019,7 @@ mod tests {
     #[test]
     fn timing_status_requires_an_active_healthy_owner() {
         let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
-        let control = Arc::new(HostedProcessorControl {
-            shared,
-            input_writer: Mutex::new(()),
-            reuse: Mutex::new(None),
-            active_owner: AtomicBool::new(false),
-            timing: timing::TimingMetrics::default(),
-        });
+        let control = Arc::new(HostedProcessorControl::new(shared));
         let registry = ProcessorControlRegistry::default();
         let node = NodeId::from("timed-node");
         let registration = registry.register(&node, &control);
@@ -1649,15 +2042,69 @@ mod tests {
     }
 
     #[test]
+    fn retry_identity_tracks_only_the_active_failed_owner_and_is_rate_limited_per_instance() {
+        let (failed_path, failed_config, failed_mailbox) = shared_mapping(2, 2, 4);
+        let failed = Arc::new(HostedProcessorControl::new(failed_mailbox));
+        failed.active_owner.store(true, Ordering::Release);
+        failed
+            .shared
+            .header()
+            .worker_status
+            .store(WORKER_FAILED, Ordering::Release);
+        let failed_id = failed.shared.header().instance_id;
+        let registry = ProcessorControlRegistry::default();
+        let node = NodeId::from("retry-node");
+        let failed_registration = registry.register(&node, &failed);
+
+        assert_eq!(registry.failed_worker_instance(&node), Some(failed_id));
+        registry
+            .begin_failed_worker_retry(&node, failed_id, Duration::from_mins(1))
+            .expect("first explicit retry should be admitted");
+        assert_eq!(
+            registry.begin_failed_worker_retry(&node, failed_id, Duration::from_mins(1)),
+            Err("processor retry is cooling down")
+        );
+
+        failed.active_owner.store(false, Ordering::Release);
+        let (healthy_path, healthy_config, healthy_mailbox) = shared_mapping(2, 2, 4);
+        let healthy = Arc::new(HostedProcessorControl::new(healthy_mailbox));
+        healthy.active_owner.store(true, Ordering::Release);
+        healthy
+            .shared
+            .header()
+            .worker_status
+            .store(WORKER_READY, Ordering::Release);
+        let healthy_id = healthy.shared.header().instance_id;
+        let healthy_registration = registry.register(&node, &healthy);
+        assert_ne!(healthy_id, failed_id);
+        assert_eq!(registry.failed_worker_instance(&node), None);
+        assert_eq!(
+            registry.begin_failed_worker_retry(&node, failed_id, Duration::ZERO),
+            Err("processor instance changed")
+        );
+
+        healthy
+            .shared
+            .header()
+            .worker_status
+            .store(WORKER_FAILED, Ordering::Release);
+        assert_eq!(registry.failed_worker_instance(&node), Some(healthy_id));
+        registry
+            .begin_failed_worker_retry(&node, healthy_id, Duration::ZERO)
+            .expect("a replacement crash gets its own retry budget");
+
+        drop(healthy_registration);
+        drop(failed_registration);
+        drop(healthy);
+        drop(failed);
+        cleanup_worker_paths(&healthy_path, &healthy_config);
+        cleanup_worker_paths(&failed_path, &failed_config);
+    }
+
+    #[test]
     fn control_mailboxes_coalesce_and_registration_does_not_extend_lifetime() {
         let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
-        let control = Arc::new(HostedProcessorControl {
-            shared,
-            input_writer: Mutex::new(()),
-            reuse: Mutex::new(None),
-            active_owner: AtomicBool::new(false),
-            timing: crate::timing::TimingMetrics::default(),
-        });
+        let control = Arc::new(HostedProcessorControl::new(shared));
         let registry = ProcessorControlRegistry::default();
         let node_id = NodeId::from("vst-node");
         let registration = registry.register(&node_id, &control);
@@ -1717,13 +2164,7 @@ mod tests {
     #[test]
     fn parameter_mailbox_rejects_capacity_without_losing_other_ids() {
         let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
-        let control = HostedProcessorControl {
-            shared,
-            input_writer: Mutex::new(()),
-            reuse: Mutex::new(None),
-            active_owner: AtomicBool::new(false),
-            timing: crate::timing::TimingMetrics::default(),
-        };
+        let control = HostedProcessorControl::new(shared);
         for id in 0..u32::try_from(PARAMETER_CAPACITY).unwrap() {
             control.set_parameter(id, f64::from(id) / 4096.0).unwrap();
         }
@@ -1762,13 +2203,7 @@ mod tests {
             ),
         ] {
             let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
-            let control = Arc::new(HostedProcessorControl {
-                shared,
-                input_writer: Mutex::new(()),
-                reuse: Mutex::new(None),
-                active_owner: AtomicBool::new(false),
-                timing: crate::timing::TimingMetrics::default(),
-            });
+            let control = Arc::new(HostedProcessorControl::new(shared));
             control
                 .shared
                 .header()
@@ -1789,11 +2224,7 @@ mod tests {
                 assert_eq!(result.unwrap_err(), message);
             } else {
                 let saved = result.unwrap();
-                let bytes = BASE64
-                    .decode(saved["stateBase64"].as_str().unwrap())
-                    .unwrap();
-                assert_eq!(bytes, vec![0, 1, 255, 13, 0]);
-                assert!(saved.get("parameterValues").is_none());
+                assert_eq!(saved, vec![0, 1, 255, 13, 0]);
             }
             drop(control);
             cleanup_worker_paths(&shared_path, &config_path);
@@ -1803,13 +2234,7 @@ mod tests {
     #[test]
     fn concurrent_parameter_edits_never_pair_a_value_with_another_id() {
         let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
-        let control = Arc::new(HostedProcessorControl {
-            shared,
-            input_writer: Mutex::new(()),
-            reuse: Mutex::new(None),
-            active_owner: AtomicBool::new(false),
-            timing: crate::timing::TimingMetrics::default(),
-        });
+        let control = Arc::new(HostedProcessorControl::new(shared));
         let finished = Arc::new(AtomicBool::new(false));
         let producer_control = Arc::clone(&control);
         let producer_finished = Arc::clone(&finished);
@@ -1843,13 +2268,7 @@ mod tests {
     #[test]
     fn timed_out_state_request_is_not_reused_until_worker_acknowledges() {
         let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
-        let control = HostedProcessorControl {
-            shared,
-            input_writer: Mutex::new(()),
-            reuse: Mutex::new(None),
-            active_owner: AtomicBool::new(false),
-            timing: crate::timing::TimingMetrics::default(),
-        };
+        let control = HostedProcessorControl::new(shared);
         let (_, worker) = shared_transport::worker(&shared_path).unwrap();
         let header = control.shared.header();
         header.worker_status.store(WORKER_READY, Ordering::Release);
@@ -1886,26 +2305,12 @@ mod tests {
         cleanup_worker_paths(&shared_path, &config_path);
     }
 
-    #[cfg(any(unix, windows))]
+    #[cfg(unix)]
     #[test]
     fn monitor_reaps_a_crashed_worker_and_marks_transport_failed() {
         let (shared_path, config_path, shared) = shared_mapping(2, 2, 4);
-        let control = Arc::new(HostedProcessorControl {
-            shared,
-            input_writer: Mutex::new(()),
-            reuse: Mutex::new(None),
-            active_owner: AtomicBool::new(false),
-            timing: crate::timing::TimingMetrics::default(),
-        });
-        #[cfg(unix)]
+        let control = Arc::new(HostedProcessorControl::new(shared));
         let mut command = Command::new("/usr/bin/false");
-        #[cfg(windows)]
-        let mut command = {
-            let mut command = Command::new("cmd.exe");
-            // Disable AutoRun so the fixture exits without executing user shell setup.
-            command.args(["/d", "/c", "exit", "1"]);
-            command
-        };
         let child = command.spawn().expect("fixture process should spawn");
         let mut monitor = WorkerMonitor::spawn(child, Arc::clone(&control))
             .map_err(|(error, _)| error)

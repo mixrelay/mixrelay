@@ -33,6 +33,13 @@ int main(int argc, char **argv) {
     if (fd < 0) return 1;
     struct sockaddr_in address = { .sin_family = AF_INET, .sin_port = htons(port) };
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    /* PipeWire 1.4's unicast RTP listener filters for this source port. */
+    int reuse = 1;
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0 ||
+        bind(fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        close(fd);
+        return 1;
+    }
     uint8_t packet[12 + 240 * 4] = { 0x80, 96 };
     put32(packet + 8, 0x4d524452);
     double rate = 48000.0 * (1.0 + ppm / 1000000.0);

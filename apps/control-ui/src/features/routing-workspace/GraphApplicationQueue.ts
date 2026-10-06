@@ -2,10 +2,15 @@ import type { AudioGraphModel } from '../../core/audio-graph/model';
 import {
   type ControlPort,
   ControlPortError,
+  type GraphLayout,
+  type GraphLayoutResponse,
   type NodeControlRequest,
+  type NodeControlResponse,
   type ProcessorParameterChange,
+  type ProcessorRetryRequest,
   type RuntimeGraphDocument,
 } from '../../core/control-port/types';
+import { acknowledgedNodeControl } from './controlReconciliation';
 import { audioGraphToRuntimeGraph } from './model';
 
 export const GRAPH_APPLICATION_TIMEOUT_MS = 10_000;
@@ -13,17 +18,25 @@ const POLL_MS = 200;
 
 interface QueueCallbacks {
   getGraphId?: () => string | undefined;
+  getCatalogRevision?: () => number | undefined;
+  hasFailedProcessor?: (graphId: string, nodeId: string, instanceId: string) => boolean;
   beforeApply?: () => Promise<void>;
   beforeReload?: () => Promise<void>;
+  getReloadLayout?: (graphId: string) => Promise<GraphLayoutResponse>;
   getDocument: () => RuntimeGraphDocument | null;
   getModel: () => AudioGraphModel | null;
   document: (document: RuntimeGraphDocument) => void;
-  restore: (document: RuntimeGraphDocument) => void;
+  restore: (document: RuntimeGraphDocument, savedLayout?: GraphLayout) => void;
   reconcile?: (before: RuntimeGraphDocument, after: RuntimeGraphDocument) => boolean;
   state: (state: 'active' | 'applying' | 'blocked') => void;
   error: (code: string | null) => void;
   persistenceWarning?: (code: string | null) => void;
 }
+
+type ProcessorRetryTarget = Pick<
+  ProcessorRetryRequest,
+  'expectedCatalogRevision' | 'expectedInstanceId' | 'graphId' | 'nodeId'
+>;
 
 /** A resolved request is not necessarily an applied edit. Uncertain commands must not be replayed. */
 export type NodeControlResult =
@@ -66,7 +79,15 @@ function definiteNodeRejection(error: unknown) {
   }
   return (
     (error instanceof ControlPortError || error instanceof GraphApplicationError) &&
-    ['node_not_found', 'node_disabled', 'graph_revision_stale'].includes(errorCode(error))
+    [
+      'graph_catalog_revision_stale',
+      'graph_revision_stale',
+      'node_disabled',
+      'node_not_found',
+      'processor_instance_stale',
+      'processor_not_failed',
+      'processor_unavailable',
+    ].includes(errorCode(error))
   );
 }
 
@@ -129,7 +150,7 @@ export class GraphApplicationQueue {
   constructor(
     private readonly port: Pick<
       ControlPort,
-      'applyGraph' | 'getGraph' | 'getGraphStatus' | 'updateNodeControl'
+      'applyGraph' | 'getGraph' | 'getGraphStatus' | 'retryProcessor' | 'updateNodeControl'
     >,
     private readonly callbacks: QueueCallbacks,
   ) {}
@@ -202,14 +223,7 @@ export class GraphApplicationQueue {
         GRAPH_APPLICATION_TIMEOUT_MS,
       );
       accepted = true;
-      if (response.revision !== source.revision + 1) throw failure('graph_revision_stale');
-      if (response.state !== 'active') await this.waitForRevision(response.revision, signal);
-      const document = await this.readEngine(signal, true, {
-        graphId,
-        revision: response.revision,
-      });
-      if (this.pending) throw failure('graph_draft_changed');
-      this.acceptControls(source, document);
+      await this.acceptNodeControl(source, { graphId, nodeId, change }, response, signal);
       this.callbacks.persistenceWarning?.(response.persistenceError ?? null);
       this.callbacks.state('active');
       return { state: 'applied', revision: response.revision };
@@ -219,6 +233,182 @@ export class GraphApplicationQueue {
     } finally {
       if (this.operation === operation) this.operation = null;
     }
+  }
+
+  /** Retries one failed processor through the graph writer without replacing its draft. */
+  async retryFailedProcessor(target: ProcessorRetryTarget): Promise<NodeControlResult> {
+    if (!this.port.retryProcessor) return { state: 'rejected', code: 'control_unavailable' };
+    const source = this.document ?? this.callbacks.getDocument();
+    if (!source) return { state: 'rejected', code: 'node_not_found' };
+    const rejection = this.processorRetryRejection(source, target);
+    if (rejection) return { state: 'rejected', code: rejection };
+
+    const operation = new AbortController();
+    const { signal } = operation;
+    this.operation = operation;
+    this.callbacks.state('applying');
+    this.callbacks.error(null);
+    const attempt = { accepted: false, sent: false };
+    try {
+      return await this.runProcessorRetry(source, target, signal, attempt);
+    } catch (error) {
+      return this.handleProcessorRetryError(error, signal, target.graphId, attempt);
+    } finally {
+      if (this.operation === operation) this.operation = null;
+    }
+  }
+
+  private async runProcessorRetry(
+    source: RuntimeGraphDocument,
+    target: ProcessorRetryTarget,
+    signal: AbortSignal,
+    attempt: { accepted: boolean; sent: boolean },
+  ): Promise<NodeControlResult> {
+    if (this.callbacks.beforeApply)
+      await bounded(this.callbacks.beforeApply(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
+    signal.throwIfAborted();
+    this.validateProcessorRetrySource(source, target);
+    attempt.sent = true;
+    const request: ProcessorRetryRequest = {
+      ...target,
+      expectedRevision: source.revision,
+    };
+    const retryProcessor = this.port.retryProcessor;
+    if (!retryProcessor) throw failure('control_unavailable');
+    const response = await bounded(
+      retryProcessor.call(this.port, request),
+      signal,
+      GRAPH_APPLICATION_TIMEOUT_MS,
+    );
+    attempt.accepted = true;
+    if (response.revision !== source.revision + 1) throw failure('graph_revision_stale');
+    if (response.state !== 'active') await this.waitForRevision(response.revision, signal);
+    signal.throwIfAborted();
+    this.validateProcessorRetryAcknowledgement(source, target, response.revision);
+    if (this.pending) throw failure('graph_draft_changed');
+
+    // A retry updates only the acknowledged revision; the editor model stays authoritative.
+    const acknowledged = { ...source, revision: response.revision };
+    this.document = acknowledged;
+    this.callbacks.document(acknowledged);
+    this.callbacks.persistenceWarning?.(response.persistenceError ?? null);
+    this.callbacks.state('active');
+    return { state: 'applied', revision: response.revision };
+  }
+
+  private async handleProcessorRetryError(
+    error: unknown,
+    signal: AbortSignal,
+    graphId: string,
+    attempt: { accepted: boolean; sent: boolean },
+  ): Promise<NodeControlResult> {
+    if (!signal.aborted && this.callbacks.getGraphId?.() === graphId) {
+      const code = errorCode(error);
+      if (attempt.sent && (attempt.accepted || !definiteNodeRejection(error)))
+        await this.recover(error, signal, graphId);
+      else {
+        this.callbacks.error(code);
+        this.callbacks.state('active');
+      }
+    }
+    return failedNodeControl(error, attempt.sent, attempt.accepted);
+  }
+
+  private processorRetryRejection(
+    source: RuntimeGraphDocument | null,
+    target: ProcessorRetryTarget,
+  ) {
+    if (!this.canPublishParameters) return 'graph_exchange_busy';
+    if (this.callbacks.getGraphId?.() !== target.graphId) return 'graph_revision_stale';
+    if (
+      this.callbacks.getCatalogRevision &&
+      this.callbacks.getCatalogRevision() !== target.expectedCatalogRevision
+    )
+      return 'graph_revision_stale';
+    try {
+      this.validateProcessorRetrySource(source, target);
+    } catch (error) {
+      return errorCode(error);
+    }
+    return null;
+  }
+
+  private validateProcessorRetrySource(
+    source: RuntimeGraphDocument | null,
+    target: ProcessorRetryTarget,
+  ): asserts source is RuntimeGraphDocument {
+    if (!source) throw failure('node_not_found');
+    const node = source.nodes.find((candidate) => candidate.id === target.nodeId);
+    if (node?.type !== 'provider') throw failure('node_not_found');
+    if (node.control?.enabled === false) throw failure('node_disabled');
+    const current = this.document ?? this.callbacks.getDocument();
+    if (
+      current?.revision !== source.revision ||
+      this.callbacks.getGraphId?.() !== target.graphId ||
+      (this.callbacks.getCatalogRevision !== undefined &&
+        this.callbacks.getCatalogRevision() !== target.expectedCatalogRevision)
+    )
+      throw failure('graph_revision_stale');
+    if (
+      this.callbacks.hasFailedProcessor !== undefined &&
+      !this.callbacks.hasFailedProcessor(target.graphId, target.nodeId, target.expectedInstanceId)
+    )
+      throw failure('processor_instance_stale');
+  }
+
+  private validateProcessorRetryAcknowledgement(
+    source: RuntimeGraphDocument,
+    target: ProcessorRetryTarget,
+    responseRevision: number,
+  ) {
+    const currentDocuments = [this.document, this.callbacks.getDocument()].filter(
+      (document): document is RuntimeGraphDocument => document !== null,
+    );
+    const acceptedRevision = source.revision + 1;
+    if (
+      this.callbacks.getGraphId?.() !== target.graphId ||
+      responseRevision !== acceptedRevision ||
+      currentDocuments.some(
+        (document) =>
+          document.revision !== source.revision && document.revision !== acceptedRevision,
+      )
+    )
+      throw failure('graph_revision_stale');
+    const currentCatalogRevision = this.callbacks.getCatalogRevision?.();
+    if (
+      currentCatalogRevision !== undefined &&
+      currentCatalogRevision !== target.expectedCatalogRevision &&
+      currentCatalogRevision !== target.expectedCatalogRevision + 1
+    )
+      throw failure('graph_revision_stale');
+  }
+
+  private async acceptNodeControl(
+    source: RuntimeGraphDocument,
+    command: {
+      graphId: string;
+      nodeId: string;
+      change: Omit<NodeControlRequest, 'expectedRevision'>;
+    },
+    response: NodeControlResponse,
+    signal: AbortSignal,
+  ) {
+    const { graphId, nodeId, change } = command;
+    if (typeof response.requiresGraphReload !== 'boolean') throw failure('control_request_failed');
+    if (response.revision !== source.revision && response.revision !== source.revision + 1)
+      throw failure('graph_revision_stale');
+    if (response.state !== 'active') await this.waitForRevision(response.revision, signal);
+    signal.throwIfAborted();
+    this.validateNodeControlSource(source, graphId, nodeId);
+    if (this.pending) throw failure('graph_draft_changed');
+    const document = response.requiresGraphReload
+      ? await this.readEngine(signal, true, { graphId, revision: response.revision })
+      : acknowledgedNodeControl(source, nodeId, change, response.revision);
+    if (this.pending) throw failure('graph_draft_changed');
+    if (response.requiresGraphReload) this.callbacks.restore(document);
+    else this.acceptControls(source, document);
+    this.document = document;
+    this.callbacks.document(document);
   }
 
   private nodeControlRejection(graphId: string, expectedRevision?: number) {
@@ -371,6 +561,19 @@ export class GraphApplicationQueue {
     }
   }
 
+  private async readReloadLayout(graphId: string | undefined, signal: AbortSignal) {
+    if (!graphId || !this.callbacks.getReloadLayout) return undefined;
+    const response = await bounded(
+      this.callbacks.getReloadLayout(graphId),
+      signal,
+      GRAPH_APPLICATION_TIMEOUT_MS,
+    );
+    signal.throwIfAborted();
+    if (response.graphId !== graphId) throw failure('graph_layout_identity_mismatch');
+    if (this.callbacks.getGraphId?.() !== graphId) throw failure('graph_revision_stale');
+    return response.layout;
+  }
+
   private async prepareRecovery(
     mode: 'retry' | 'reload' | 'refresh',
     signal: AbortSignal,
@@ -389,10 +592,11 @@ export class GraphApplicationQueue {
       return;
     }
     if (mode === 'reload') {
+      const savedLayout = await this.readReloadLayout(graphId, signal);
       if (this.callbacks.getModel() !== initialModel) throw failure('graph_draft_changed');
       this.pending = null;
       this.pendingParameters.clear();
-      this.callbacks.restore(document);
+      this.callbacks.restore(document, savedLayout);
     } else {
       this.pending = this.callbacks.getModel();
     }

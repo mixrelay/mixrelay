@@ -1,125 +1,62 @@
-use std::{cell::RefCell, rc::Rc};
-
 use super::{Backend, Dispatch, StartError};
+use std::{cell::RefCell, rc::Rc};
 
 #[derive(Debug, PartialEq, Eq)]
 enum Event {
-    CreateListener,
-    CreateTimer,
+    Create,
     Activate,
-    DiscardInactiveListener,
-    CancelListener,
-    CancelTimer,
-    ReleaseListener,
-    ReleaseTimer,
+    Cancel,
+    Release,
 }
-
 struct Fixture {
-    fail: Option<StartError>,
+    fail: bool,
     events: Rc<RefCell<Vec<Event>>>,
 }
-
 impl Backend for Fixture {
     type Listener = ();
-    type Timer = ();
-
     fn listener(&self) -> Option<()> {
-        self.events.borrow_mut().push(Event::CreateListener);
-        (self.fail != Some(StartError::Listener)).then_some(())
+        self.events.borrow_mut().push(Event::Create);
+        (!self.fail).then_some(())
     }
-
-    fn timer(&self) -> Option<()> {
-        self.events.borrow_mut().push(Event::CreateTimer);
-        (self.fail != Some(StartError::Timer)).then_some(())
-    }
-
-    fn activate(&self, (): &(), (): &()) {
+    fn activate(&self, (): &()) {
         self.events.borrow_mut().push(Event::Activate);
     }
-
     fn cancel_listener(&self, (): &()) {
-        self.events.borrow_mut().push(Event::CancelListener);
+        self.events.borrow_mut().push(Event::Cancel);
     }
-
-    fn discard_listener(&self, (): &()) {
-        self.events
-            .borrow_mut()
-            .push(Event::DiscardInactiveListener);
-    }
-
-    fn cancel_timer(&self, (): &()) {
-        self.events.borrow_mut().push(Event::CancelTimer);
-    }
-
     fn release_listener(&self, (): &()) {
-        self.events.borrow_mut().push(Event::ReleaseListener);
-    }
-
-    fn release_timer(&self, (): &()) {
-        self.events.borrow_mut().push(Event::ReleaseTimer);
+        self.events.borrow_mut().push(Event::Release);
     }
 }
 
 #[test]
-fn listener_failure_does_not_create_an_unused_timer() {
+fn failed_source_listener_never_publishes_partial_ownership() {
     let events = Rc::new(RefCell::new(Vec::new()));
     let owner = Dispatch::with_backend(Fixture {
-        fail: Some(StartError::Listener),
-        events: events.clone(),
+        fail: true,
+        events: Rc::clone(&events),
     });
     assert!(matches!(owner, Err(StartError::Listener)));
-    assert_eq!(*events.borrow(), [Event::CreateListener]);
+    assert_eq!(*events.borrow(), [Event::Create]);
 }
 
 #[test]
-fn timer_failure_discards_inactive_listener_before_release() {
+fn graph_source_listener_activates_once_and_cancels_before_release() {
     let events = Rc::new(RefCell::new(Vec::new()));
     let owner = Dispatch::with_backend(Fixture {
-        fail: Some(StartError::Timer),
-        events: events.clone(),
-    });
-    assert!(matches!(owner, Err(StartError::Timer)));
-    assert_eq!(
-        *events.borrow(),
-        [
-            Event::CreateListener,
-            Event::CreateTimer,
-            Event::DiscardInactiveListener
-        ]
-    );
-}
-
-#[test]
-fn complete_owner_activates_once_and_cancels_before_release() {
-    let events = Rc::new(RefCell::new(Vec::new()));
-    let owner = Dispatch::with_backend(Fixture {
-        fail: None,
-        events: events.clone(),
+        fail: false,
+        events: Rc::clone(&events),
     })
     .unwrap();
-    assert_eq!(
-        *events.borrow(),
-        [Event::CreateListener, Event::CreateTimer, Event::Activate]
-    );
+    assert_eq!(*events.borrow(), [Event::Create, Event::Activate]);
     drop(owner);
     assert_eq!(
         *events.borrow(),
         [
-            Event::CreateListener,
-            Event::CreateTimer,
+            Event::Create,
             Event::Activate,
-            Event::CancelListener,
-            Event::CancelTimer,
-            Event::ReleaseListener,
-            Event::ReleaseTimer
+            Event::Cancel,
+            Event::Release
         ]
     );
-}
-
-#[test]
-fn repeated_failed_starts_and_recovery_leave_no_partial_owner() {
-    for _ in 0..1_000 {
-        timer_failure_discards_inactive_listener_before_release();
-        complete_owner_activates_once_and_cancels_before_release();
-    }
 }

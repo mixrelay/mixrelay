@@ -8,7 +8,7 @@ export function NativeMenuLocale() {
 
   useEffect(() => {
     if (!isTauri()) return;
-    void invoke('set_tray_locale', { locale }).catch((error: unknown) => {
+    void invoke('set_native_menu_locale', { locale }).catch((error: unknown) => {
       console.error('Could not update native menu language', error);
     });
   }, [locale]);

@@ -21,19 +21,38 @@ fn native_callback_and_hal_contracts() {
 #[cfg(target_os = "linux")]
 mod linux;
 
-#[cfg(target_os = "windows")]
-mod windows;
+mod latency_maintenance;
 
 fn main() {
     tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::builder()
+                .with_default_directive(tracing_subscriber::filter::LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
         .with_writer(std::io::stderr)
         .init();
     let mut arguments = std::env::args().skip(1);
     if let Some(mode) = arguments.next() {
+        if mode == mixrelay_engine_process::DESKTOP_ARGUMENT {
+            if arguments.next().is_some() || cfg!(target_os = "macos") {
+                tracing::error!("invalid desktop-owned engine launch");
+                std::process::exit(2);
+            }
+            let owner = match mixrelay_engine_process::EngineOwner::from_stdin() {
+                Ok(owner) => owner,
+                Err(error) => {
+                    tracing::error!(%error, "could not observe desktop ownership");
+                    std::process::exit(1);
+                }
+            };
+            run_engine_service(Some(owner));
+            return;
+        }
         run_child_mode(&mode, arguments);
         return;
     }
-    run_engine_service();
+    run_engine_service(None);
 }
 
 fn run_child_mode(mode: &str, mut arguments: impl Iterator<Item = String>) {
@@ -87,9 +106,11 @@ fn run_child_mode(mode: &str, mut arguments: impl Iterator<Item = String>) {
     }
 }
 
-fn run_engine_service() {
+fn run_engine_service(owner: Option<mixrelay_engine_process::EngineOwner>) {
     #[cfg(target_os = "macos")]
     {
+        debug_assert!(owner.is_none());
+        drop(owner);
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -101,19 +122,12 @@ fn run_engine_service() {
     }
     #[cfg(target_os = "linux")]
     {
-        if let Err(error) = linux::run() {
+        if let Err(error) = linux::run(owner) {
             eprintln!("MixRelay Linux engine service failed: {error}");
             std::process::exit(1);
         }
     }
-    #[cfg(target_os = "windows")]
-    {
-        if let Err(error) = windows::run() {
-            eprintln!("MixRelay Windows engine service failed: {error}");
-            std::process::exit(1);
-        }
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         eprintln!("MixRelay engine service is unsupported on this platform");
         std::process::exit(1);

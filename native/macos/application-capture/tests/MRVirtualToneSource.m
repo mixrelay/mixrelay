@@ -4,26 +4,41 @@
 #import <CoreAudio/CoreAudio.h>
 #import <AudioUnit/AudioUnit.h>
 #include <math.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static AudioDeviceID MRVirtualDevice(void) {
-    CFStringRef uid = CFSTR("io.mixrelay.audio.endpoint.default");
+static AudioDeviceID MRVirtualDevice(const char *device_uid) {
+    static const char prefix[] = "io.mixrelay.audio.endpoint.";
+    const size_t prefix_size = sizeof(prefix) - 1;
+    if (strlen(device_uid) != prefix_size + 32 ||
+        strncmp(device_uid, prefix, prefix_size) != 0) return kAudioObjectUnknown;
+    bool nonzero = false;
+    for (size_t index = prefix_size; index < prefix_size + 32; ++index) {
+        const char digit = device_uid[index];
+        if (!((digit >= '0' && digit <= '9') || (digit >= 'a' && digit <= 'f')))
+            return kAudioObjectUnknown;
+        nonzero |= digit != '0';
+    }
+    if (!nonzero) return kAudioObjectUnknown;
+    CFStringRef uid = CFStringCreateWithCString(NULL, device_uid, kCFStringEncodingUTF8);
+    if (uid == NULL) return kAudioObjectUnknown;
     AudioDeviceID device = kAudioObjectUnknown;
     AudioObjectPropertyAddress address = { kAudioHardwarePropertyTranslateUIDToDevice,
         kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
     UInt32 size = sizeof(device);
-    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &address, sizeof(uid), &uid, &size, &device) != noErr || size != sizeof(device))
-        return kAudioObjectUnknown;
-    return device;
+    const OSStatus status = AudioObjectGetPropertyData(kAudioObjectSystemObject,
+        &address, sizeof(uid), &uid, &size, &device);
+    CFRelease(uid);
+    return status == noErr && size == sizeof(device) ? device : kAudioObjectUnknown;
 }
 
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
-        if (argc != 2 || strcmp(argv[1], "--mixrelay-virtual-only") != 0) return EXIT_FAILURE;
+        if (argc != 3 || strcmp(argv[1], "--mixrelay-virtual-only") != 0) return EXIT_FAILURE;
         fprintf(stderr, "owned tone: resolving exact MixRelay UID\n");
-        const AudioDeviceID device = MRVirtualDevice();
+        const AudioDeviceID device = MRVirtualDevice(argv[2]);
         if (device == kAudioObjectUnknown) {
             fprintf(stderr, "exact MixRelay virtual device absent; refusing default-output fallback\n");
             return EXIT_FAILURE;
@@ -60,11 +75,33 @@ int main(int argc, const char *argv[]) {
             fprintf(stderr, "owned virtual tone start failed: %s\n", error.localizedDescription.UTF8String);
             return EXIT_FAILURE;
         }
-        printf("ready io.mixrelay.audio.endpoint.default\n");
+        printf("ready %s\n", argv[2]);
         fflush(stdout);
-        /* EOF/quit from the owning fixture is the lifetime boundary. */
-        char command[32];
-        (void)fgets(command, sizeof(command), stdin);
+        /* Only the owning fixture can move this source between exact owned UIDs. */
+        char command[128];
+        while (fgets(command, sizeof(command), stdin) != NULL) {
+            command[strcspn(command, "\r\n")] = '\0';
+            if (strcmp(command, "quit") == 0) break;
+            if (strncmp(command, "route ", 6) != 0) {
+                [engine stop];
+                return EXIT_FAILURE;
+            }
+            const AudioDeviceID next = MRVirtualDevice(command + 6);
+            if (next == kAudioObjectUnknown) {
+                [engine stop];
+                return EXIT_FAILURE;
+            }
+            [engine stop];
+            if (AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
+                    kAudioUnitScope_Global, 0, &next, sizeof(next)) != noErr) return EXIT_FAILURE;
+            actual = kAudioObjectUnknown;
+            bytes = sizeof(actual);
+            if (AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice,
+                    kAudioUnitScope_Global, 0, &actual, &bytes) != noErr || actual != next ||
+                ![engine startAndReturnError:&error]) return EXIT_FAILURE;
+            printf("ready %s\n", command + 6);
+            fflush(stdout);
+        }
         [engine stop];
     }
     return EXIT_SUCCESS;

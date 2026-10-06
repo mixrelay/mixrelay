@@ -2,17 +2,6 @@
   "checkedAt": "2026-09-06",
   "images": [
     {
-      "target": "windows",
-      "architecture": "arm64",
-      "release": "Windows 11 25H2",
-      "language": "ko-KR",
-      "filename": "Win11_25H2_Korean_Arm64_v2.iso",
-      "url": "https://www.microsoft.com/en-us/software-download/windows11arm64",
-      "sha256": "723fdcb737b39a5ec1f4b0eadacf288f1a2c4c4c8c845eb1f6a433cc264bd426",
-      "checksumSource": "https://www.microsoft.com/en-us/software-download/windows11arm64",
-      "downloadNote": "Select Arm64 and Korean on the official page; generated download URLs expire after 24 hours."
-    },
-    {
       "target": "debian",
       "architecture": "arm64",
       "url": "https://cdimage.debian.org/debian-cd/13.6.0/arm64/iso-cd/debian-13.6.0-arm64-netinst.iso",

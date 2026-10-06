@@ -8,15 +8,18 @@ use mixrelay_audio_graph::ExecutionPlan;
 use parking_lot::Mutex;
 use thiserror::Error;
 
+mod latency_exchange;
+mod latency_plan;
 mod render;
 mod runtime_control;
 
 pub use runtime_control::{RuntimeControlBank, RuntimeControlError, RuntimeControlUpdate};
 
 pub use render::{
-    BlockProcessor, CycleAdmission, ExternalBinding, ExternalControlState, ExternalIo,
-    HostedAudioProcessor, HostedProcessorFactory, HostedProcessorPrepareRequest, MeterBinding,
-    ProcessBlockError, RenderPlan, RenderPlanError, recording_session_key,
+    BlockProcessor, CompensationState, CycleAdmission, ExternalBinding, ExternalControlState,
+    ExternalIo, HostedAudioProcessor, HostedLatencySource, HostedProcessorFactory,
+    HostedProcessorPrepareRequest, MeterBinding, ProcessBlockError, RenderPlan, RenderPlanError,
+    recording_session_key,
 };
 
 #[derive(Debug)]
@@ -114,6 +117,7 @@ pub struct ProcessorExchange {
     submitted_revision: AtomicU64,
     control_revisions: Arc<runtime_control::ControlRevisionClock>,
     control_writer: Mutex<()>,
+    latency: latency_exchange::LatencyExchange,
 }
 
 struct ExchangeGateGuard<'a> {
@@ -137,6 +141,7 @@ impl ProcessorExchange {
             submitted_revision: AtomicU64::new(active_revision),
             control_revisions: Arc::default(),
             control_writer: Mutex::new(()),
+            latency: latency_exchange::LatencyExchange::default(),
         }
     }
 
@@ -207,6 +212,7 @@ impl ProcessorExchange {
         if let Err(error) = configure() {
             return Err(ProcessorConfigurationError::Configuration(error));
         }
+        self.latency.set_plan(Arc::clone(processor.plan()));
         self.pending
             .store(Box::into_raw(processor), Ordering::Release);
         self.submitted_revision
@@ -227,6 +233,26 @@ impl ProcessorExchange {
     #[must_use]
     pub fn has_pending(&self) -> bool {
         !self.pending.load(Ordering::Acquire).is_null()
+    }
+
+    /// Includes only derived route-history publication, not a native topology change.
+    #[must_use]
+    pub fn has_pending_latency(&self) -> bool {
+        self.latency.has_pending()
+    }
+
+    /// Registers the initial prepared plan before the sole audio owner starts.
+    /// Later plans are registered atomically with successful topology submission.
+    pub fn observe_plan(&self, plan: Arc<RenderPlan>) {
+        self.latency.set_plan(plan);
+    }
+
+    /// Refreshes cached worker delay observations on a control/background thread.
+    /// No native processor preparation or graph/control revision change occurs.
+    /// # Errors
+    /// Returns a preparation diagnostic when bounded route storage cannot be allocated.
+    pub fn refresh_latency(&self) -> Result<bool, String> {
+        self.latency.refresh()
     }
 
     /// Activates a pending processor and its pre-staged external configuration at one block
@@ -257,6 +283,14 @@ impl ProcessorExchange {
         compatible: impl FnOnce(&RenderPlan) -> bool,
         activate: impl FnOnce(u64) -> Result<(), E>,
     ) -> Result<bool, E> {
+        // Idle callbacks must not reserve the publication gate and spuriously
+        // reject a control writer. A concurrent publication missed by this
+        // acquire is simply observed at the next block; the gated swap below
+        // remains the sole owner transfer and rechecks the pending slot.
+        if !self.has_pending() {
+            self.latency.activate(current);
+            return Ok(false);
+        }
         if self
             .gate
             .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
@@ -291,6 +325,7 @@ impl ProcessorExchange {
         self.retired
             .store(Box::into_raw(previous), Ordering::Release);
         self.active_revision.store(revision, Ordering::Release);
+        self.latency.activate(current);
         drop(gate_guard);
         Ok(true)
     }
@@ -356,6 +391,7 @@ impl ProcessorExchange {
     /// a child process and release native plug-in resources. Calling it periodically prevents a
     /// removed plug-in from remaining alive until the next graph edit.
     pub fn reclaim_retired(&self) {
+        self.latency.reclaim();
         let retired = self.retired.swap(std::ptr::null_mut(), Ordering::AcqRel);
         if !retired.is_null() {
             // SAFETY: the exchange gate prevents the audio thread from accessing this
@@ -649,6 +685,50 @@ mod tests {
         );
         assert!(!exchange.activate_pending(&mut current));
         exchange.gate.store(false, Ordering::Release);
+    }
+
+    #[test]
+    fn idle_audio_polling_does_not_reject_a_first_publication() {
+        use std::sync::mpsc::sync_channel;
+
+        // A fresh exchange per trial excludes real pending/activation conflicts.
+        // Both processors are prepared before racing the native-style idle poll
+        // against the one permitted control writer. Never retry a rejected plan.
+        let (work_tx, work_rx) =
+            sync_channel::<(Arc<ProcessorExchange>, Box<BlockProcessor>, Arc<AtomicBool>)>(0);
+        let (ready_tx, ready_rx) = sync_channel(0);
+        let (drained_tx, drained_rx) = sync_channel(0);
+        let audio = std::thread::spawn(move || {
+            for (exchange, mut current, stop) in work_rx {
+                ready_tx.send(()).unwrap();
+                while !stop.load(Ordering::Acquire) {
+                    exchange.activate_pending(&mut current);
+                }
+                drained_tx.send(()).unwrap();
+            }
+        });
+        let mut rejected = 0;
+        for _ in 0..4096 {
+            let exchange = Arc::new(ProcessorExchange::new(1));
+            let stop = Arc::new(AtomicBool::new(false));
+            let current = Box::new(processor(1));
+            let next = Box::new(processor(2));
+            work_tx
+                .send((exchange.clone(), current, stop.clone()))
+                .unwrap();
+            ready_rx.recv().unwrap();
+            let result = exchange.submit(next);
+            stop.store(true, Ordering::Release);
+            drained_rx.recv().unwrap();
+            match result {
+                Ok(()) => {}
+                Err(ProcessorSubmitError::Busy { .. }) => rejected += 1,
+                Err(error) => panic!("unexpected first-publication error: {error}"),
+            }
+        }
+        drop(work_tx);
+        audio.join().unwrap();
+        assert_eq!(rejected, 0, "idle polling rejected {rejected}/4096 plans");
     }
 
     #[test]

@@ -1,25 +1,19 @@
 //! Native workers keep their callback owners until `CoreAudio` acknowledges release.
 //! Timeout transfers the join handle here; it never detaches an untracked owner.
-use std::{
-    sync::{
-        Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
-    thread::JoinHandle,
-};
+use std::{sync::Mutex, thread::JoinHandle};
 
 pub(super) static WORKERS: RetiredWorkers = RetiredWorkers::new();
 
 pub(super) struct RetiredWorkers {
     pending: Mutex<Vec<JoinHandle<()>>>,
-    failed: AtomicBool,
+    failure: Mutex<Option<String>>,
 }
 
 impl RetiredWorkers {
     const fn new() -> Self {
         Self {
             pending: Mutex::new(Vec::new()),
-            failed: AtomicBool::new(false),
+            failure: Mutex::new(None),
         }
     }
 
@@ -32,16 +26,18 @@ impl RetiredWorkers {
     }
 
     pub(super) fn reclaim(&self) {
-        self.pending
+        let workers: Vec<_> = self
+            .pending
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .extract_if(.., |worker| worker.is_finished())
-            .for_each(|worker| {
-                if worker.join().is_err() {
-                    self.failed.store(true, Ordering::Release);
-                    tracing::error!("retired CoreAudio worker panicked");
-                }
-            });
+            .collect();
+        // Joining and panic-payload destruction must not hold the owner registry lock.
+        for worker in workers {
+            if let Err(error) = mixrelay_engine_service::session::join_worker(worker) {
+                self.record_failure(error);
+            }
+        }
     }
 
     /// Called after all graph/device producers have dropped, before recording
@@ -53,16 +49,23 @@ impl RetiredWorkers {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         );
-        let mut failed = self.failed.load(Ordering::Acquire);
         for worker in workers {
-            failed |= worker.join().is_err();
+            if let Err(error) = mixrelay_engine_service::session::join_worker(worker) {
+                self.record_failure(error);
+            }
         }
-        if failed {
-            self.failed.store(true, Ordering::Release);
-            Err("CoreAudio worker panicked during retirement".into())
-        } else {
-            Ok(())
-        }
+        self.failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .map_or(Ok(()), Err)
+    }
+
+    fn record_failure(&self, error: String) {
+        self.failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_or_insert(error);
     }
 }
 
@@ -111,7 +114,9 @@ mod tests {
         workers.retire(std::thread::spawn(|| {
             panic!("injected native worker failure")
         }));
-        assert!(workers.finish().is_err());
+        let error = workers.finish().unwrap_err();
+        assert!(error.contains("injected native worker failure"));
+        assert_eq!(workers.finish(), Err(error));
     }
 
     #[test]
@@ -124,6 +129,8 @@ mod tests {
         workers.retire(worker);
         workers.reclaim();
         assert!(workers.pending.lock().unwrap().is_empty());
-        assert!(workers.finish().is_err());
+        let error = workers.finish().unwrap_err();
+        assert!(error.contains("injected retired worker failure"));
+        assert_eq!(workers.finish(), Err(error));
     }
 }

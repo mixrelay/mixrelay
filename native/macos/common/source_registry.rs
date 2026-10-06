@@ -170,6 +170,15 @@ impl Source {
                 == u64::from(u16::MAX)
             || self.mapping.clock().format_word.load(Ordering::Acquire) >> 32 == u64::from(u32::MAX)
     }
+
+    /// Recheck the nonzero lease/format/epoch observed before copying PCM. The
+    /// read pin retains this mapping even when control unpublishes its slot.
+    fn read_is_current(&self, lease: u64, format: u64, epoch: u64) -> bool {
+        let clock = self.mapping.clock();
+        clock.acknowledged_format.load(Ordering::Acquire) == format
+            && lease == clock.producer_lease.load(Ordering::Acquire)
+            && epoch == unsafe { mr_shared_audio_buffer_stats(self.mapping.buffer.as_ptr()) }.epoch
+    }
 }
 struct Control {
     owners: Vec<Pin<Box<Source>>>,
@@ -224,6 +233,24 @@ impl SourceRegistry {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
     fn collect(&self, control: &mut Control) {
+        // Attach and collection share the control mutex. A zero lease means its
+        // unique producer closed, not that an active producer is merely paused.
+        // Unpublish first; existing readers still pin the retired owner below.
+        for slot in &self.slots {
+            let source = slot.load(Ordering::SeqCst);
+            // SAFETY: all published pointers remain control-owned until this
+            // collector observes no readers after removing their slot pointers.
+            if unsafe { source.as_ref() }.is_some_and(|source| {
+                source
+                    .mapping
+                    .clock()
+                    .producer_lease
+                    .load(Ordering::Acquire)
+                    == 0
+            }) {
+                slot.store(ptr::null_mut(), Ordering::SeqCst);
+            }
+        }
         if self.readers.load(Ordering::SeqCst) == 0 {
             control.owners.retain(|owner| {
                 self.slots
@@ -414,21 +441,19 @@ impl SourceRegistry {
         // timeline; no control method modifies it, including replacement.
         let timeline = unsafe { &mut *source.timeline.get() };
         let buffer = source.mapping.buffer.as_ptr();
-        let clock = source.mapping.clock.as_ptr();
+        let clock_pointer = source.mapping.clock.as_ptr();
+        let clock = source.mapping.clock();
         let stats = unsafe { mr_shared_audio_buffer_stats(buffer) };
-        let format = unsafe { mr_application_clock_request_rate(clock, rate) };
-        let valid = format != 0
+        let format = unsafe { mr_application_clock_request_rate(clock_pointer, rate) };
+        let lease = clock.producer_lease.load(Ordering::Acquire);
+        let valid = lease != 0
+            && format != 0
             && stats.epoch != 0
-            && source
-                .mapping
-                .clock()
-                .acknowledged_format
-                .load(Ordering::Acquire)
-                == format;
+            && clock.acknowledged_format.load(Ordering::Acquire) == format;
         if !valid {
             timeline.started = false;
             unsafe {
-                mr_application_clock_publish_consumer(clock, stats.epoch, 0, frames, false);
+                mr_application_clock_publish_consumer(clock_pointer, stats.epoch, 0, frames, false);
             }
             return 0;
         }
@@ -437,7 +462,7 @@ impl SourceRegistry {
             // retains its mapping through this bounded atomic publication.
             unsafe {
                 mr_application_clock_publish_consumer(
-                    clock,
+                    clock_pointer,
                     stats.epoch,
                     timeline.next,
                     frames,
@@ -450,16 +475,10 @@ impl SourceRegistry {
             mr_shared_audio_buffer_read(buffer, timeline.next, samples.as_mut_ptr(), frames)
         };
         timeline.next += u64::from(frames);
-        let valid = source
-            .mapping
-            .clock()
-            .acknowledged_format
-            .load(Ordering::Acquire)
-            == format
-            && stats.epoch == unsafe { mr_shared_audio_buffer_stats(buffer) }.epoch;
+        let valid = source.read_is_current(lease, format, stats.epoch);
         unsafe {
             mr_application_clock_publish_consumer(
-                clock,
+                clock_pointer,
                 stats.epoch,
                 timeline.next,
                 frames,

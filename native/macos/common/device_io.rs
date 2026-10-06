@@ -1,19 +1,23 @@
 //! One retained device owner with disjoint control, callback and graph state.
 //! The engine owns the stable allocation and releases it only after unregister
-//! acknowledges callback drain; failed destruction leaves the entire owner intact.
+//! acknowledges callback drain and listener removal; failed destruction retains the owner.
 
 use std::{
     alloc::{Layout, alloc},
     cell::UnsafeCell,
     ffi::{CStr, c_void},
     ptr,
-    sync::atomic::{AtomicBool, AtomicU32, AtomicU64},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU32, AtomicU64},
+    },
 };
 
 use mixrelay_pcm_ring::PcmRing;
 
 use crate::{
-    callback_clock::CallbackClock, device_buffers::BufferSelection,
+    callback_clock::CallbackClock,
+    device_buffers::{BufferSelection, NativeFormats},
     device_io::lifecycle::DeviceIoLifecycle,
 };
 
@@ -22,14 +26,19 @@ mod control;
 mod diagnostics;
 mod ffi;
 mod lifecycle;
+mod listeners;
 mod native;
 mod queues;
 mod stream_format;
+#[cfg(any(test, feature = "test-observation"))]
+pub mod test_observation;
 #[cfg(test)]
 mod tests;
 
 pub use callback::mr_device_io_process;
-pub use diagnostics::{ClockBreak, mr_device_io_clock_break};
+pub use diagnostics::{
+    CLOCK_BREAK_CAPACITY, ClockBreak, ClockBreakRecord, mr_device_io_next_clock_break,
+};
 pub use ffi::{
     mr_device_buffer_size, mr_device_buffer_write, mr_device_io_alive, mr_device_io_bridge_discard,
     mr_device_io_bridge_read, mr_device_io_bridge_write, mr_device_io_buffer_info,
@@ -66,16 +75,22 @@ struct Selection {
 struct Connection {
     binding: crate::aggregate_group::NativeBinding,
     rate: u32,
+    formats: NativeFormats,
+    // Shared only with this registration's listener block and callback.
+    watch_invalid: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
 struct Control {
     lifecycle: DeviceIoLifecycle,
     connection: Connection,
+    listeners: listeners::Listeners,
 }
 
 struct Callback {
     selection: BufferSelection,
+    formats: NativeFormats,
+    watch_invalid: Arc<AtomicBool>,
     scratch: Vec<f32>,
     prime: bool,
     epoch: u64,
@@ -145,6 +160,8 @@ impl DeviceIo {
                     total: 0,
                     limit: 64,
                 },
+                formats: NativeFormats::default(),
+                watch_invalid: Arc::default(),
                 scratch,
                 prime: false,
                 epoch: 0,

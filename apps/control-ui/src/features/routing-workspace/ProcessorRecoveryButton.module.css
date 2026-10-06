@@ -1,0 +1,40 @@
+.button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 3px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--red);
+  cursor: pointer;
+}
+
+.button[data-tone="warning"] {
+  color: var(--amber);
+}
+
+.button svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--surface-raised);
+}
+
+.button:focus-visible {
+  outline: 1px solid var(--signal);
+  outline-offset: -1px;
+}
+
+.button:disabled {
+  cursor: default;
+  opacity: 0.4;
+}

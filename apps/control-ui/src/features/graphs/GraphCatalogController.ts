@@ -158,6 +158,7 @@ export class GraphCatalogController {
       const catalog = this.state.catalog;
       if (!catalog || this.state.uncertain || !this.port.workspaceFile) return;
       const status = await bounded(this.port.getGraphStatus());
+      if (generation !== this.generation) return;
       this.mutationSent = true;
       const next = await this.port
         .workspaceFile({
@@ -168,19 +169,25 @@ export class GraphCatalogController {
         })
         .catch((error: unknown) => {
           if (
-            !(error instanceof ControlPortError) ||
-            (error.status >= 500 && !workspaceRejected(error))
+            generation === this.generation &&
+            (!(error instanceof ControlPortError) ||
+              (error.status >= 500 && !workspaceRejected(error)))
           )
             this.patch({ uncertain: true });
           throw error;
         });
+      // A native file dialog can outlive this editor owner. Its reply must not
+      // mutate the replacement view or begin another catalog synchronization.
+      if (generation !== this.generation) return;
       if (!next) {
         this.mutationSent = false;
         return;
       }
       this.accept(next, generation, action === 'new' || action === 'open');
+      if (generation !== this.generation) return;
       this.patch({ uncertain: true });
       await this.waitActive(next.document.revision, generation);
+      if (generation !== this.generation) return;
       // The accepted document remains visible even if capture synchronization fails.
       const confirmed = this.port.getGraphCatalog ? await this.port.getGraphCatalog() : next;
       this.accept(confirmed, generation, false);

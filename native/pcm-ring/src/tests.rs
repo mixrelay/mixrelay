@@ -5,6 +5,240 @@ use std::{
 };
 
 #[test]
+fn byte_pcm_roundtrips_exact_samples_and_preserves_float_payloads() {
+    let samples = [-1.0_f32, -0.5, 0.0, 0.5];
+    for format in [
+        SampleFormat::Float32,
+        SampleFormat::Signed16,
+        SampleFormat::Signed24,
+        SampleFormat::Signed32,
+    ] {
+        let mut bytes = [0_u8; 16];
+        let mut decoded = [0.0_f32; 4];
+        let bytes = &mut bytes[..samples.len() * format.bytes_per_sample()];
+        assert!(format.encode(&samples, bytes));
+        assert!(format.decode(bytes, &mut decoded));
+        assert_eq!(decoded.map(f32::to_bits), samples.map(f32::to_bits));
+    }
+    let payloads = [f32::from_bits(0x7fc1_2345), f32::from_bits(0x8000_0000)];
+    let mut bytes = [0_u8; 8];
+    let mut decoded = [0.0_f32; 2];
+    assert!(SampleFormat::Float32.encode(&payloads, &mut bytes));
+    assert!(SampleFormat::Float32.decode(&bytes, &mut decoded));
+    assert_eq!(decoded.map(f32::to_bits), payloads.map(f32::to_bits));
+}
+
+#[test]
+fn signed_pcm_clips_silences_nan_and_truncates_toward_zero() {
+    let values = [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 2.0, -2.0];
+    for (format, maximum, minimum) in [
+        (SampleFormat::Signed16, 32767_i32, -32768_i32),
+        (SampleFormat::Signed24, 8_388_607, -8_388_608),
+        (SampleFormat::Signed32, i32::MAX, i32::MIN),
+    ] {
+        let mut bytes = [0_u8; 20];
+        let width = format.bytes_per_sample();
+        assert!(format.encode(&values, &mut bytes[..5 * width]));
+        for (actual, expected) in bytes[..5 * width]
+            .chunks_exact(width)
+            .zip([0_i32, maximum, minimum, maximum, minimum])
+        {
+            assert_eq!(actual, &expected.to_le_bytes()[..width]);
+        }
+    }
+    let mut bytes = [0_u8; 4];
+    assert!(SampleFormat::Signed16.encode(&[1.75 / 32768.0, -1.75 / 32768.0], &mut bytes));
+    assert_eq!(bytes, [1, 0, 255, 255]);
+}
+
+#[test]
+fn packed24_sign_extension_and_invalid_lengths_are_exact() {
+    let bytes = [0, 0, 128, 255, 255, 127, 1, 0, 0, 255, 255, 255];
+    let mut samples = [0.0_f32; 4];
+    assert!(SampleFormat::Signed24.decode(&bytes, &mut samples));
+    assert_eq!(
+        samples.map(f32::to_bits),
+        [
+            -1.0_f32,
+            1.0 - 1.0 / 8_388_608.0,
+            1.0 / 8_388_608.0,
+            -1.0 / 8_388_608.0
+        ]
+        .map(f32::to_bits)
+    );
+    let mut output = [17_u8; 13];
+    assert!(!SampleFormat::Signed24.encode(&samples, &mut output));
+    assert_eq!(output, [17; 13]);
+    samples.fill(9.0);
+    assert!(!SampleFormat::Signed24.decode(&bytes[..11], &mut samples));
+    assert_eq!(samples.map(f32::to_bits), [9.0_f32.to_bits(); 4]);
+}
+
+#[test]
+fn byte_ring_transfers_wrap_without_allocations_and_preserve_prefill() {
+    for format in [
+        SampleFormat::Float32,
+        SampleFormat::Signed16,
+        SampleFormat::Signed24,
+        SampleFormat::Signed32,
+    ] {
+        let mut ring = PcmRing::new(2, 7).unwrap();
+        let mut input = [0_u8; 16];
+        let mut output = [9_u8; 16];
+        let count = 4 * format.bytes_per_sample();
+        assert!(format.encode(&[-1.0, -0.5, 0.0, 0.5], &mut input[..count]));
+        let measured = allocation_counter::measure(|| {
+            // SAFETY: one sequential producer/consumer, exact complete byte buffers,
+            // disjoint from the retained ring mapping. Each block is two stereo frames.
+            unsafe {
+                assert_eq!(
+                    mr_pcm_ring_read_pcm(
+                        &raw mut ring,
+                        output.as_mut_ptr().cast(),
+                        2,
+                        format as u32
+                    ),
+                    0
+                );
+                assert!(output[..count].iter().all(|&byte| byte == 0));
+                assert_eq!(
+                    mr_pcm_ring_write_pcm(&raw mut ring, input.as_ptr().cast(), 2, format as u32),
+                    2
+                );
+                assert_eq!(
+                    mr_pcm_ring_read_pcm(
+                        &raw mut ring,
+                        output.as_mut_ptr().cast(),
+                        2,
+                        format as u32
+                    ),
+                    0
+                );
+                assert_eq!(
+                    mr_pcm_ring_write_pcm(&raw mut ring, input.as_ptr().cast(), 2, format as u32),
+                    2
+                );
+                for _ in 0..100 {
+                    assert_eq!(
+                        mr_pcm_ring_read_pcm(
+                            &raw mut ring,
+                            output.as_mut_ptr().cast(),
+                            2,
+                            format as u32
+                        ),
+                        2
+                    );
+                    assert_eq!(output[..count], input[..count]);
+                    assert_eq!(
+                        mr_pcm_ring_write_pcm(
+                            &raw mut ring,
+                            input.as_ptr().cast(),
+                            2,
+                            format as u32
+                        ),
+                        2
+                    );
+                }
+            }
+        });
+        assert_eq!(measured.count_total, 0);
+        assert_eq!(ring.stats().overflows, 0);
+    }
+}
+
+#[test]
+fn byte_ring_unaligned_float_payloads_and_whole_block_overflow_are_preserved() {
+    let mut ring = PcmRing::new(1, 4).unwrap();
+    // Use the offset that is certainly unaligned, independent of stack placement.
+    let mut input = [0_u8; 12];
+    let input_offset = usize::from(input.as_ptr().addr().is_multiple_of(4));
+    let payloads = [f32::from_bits(0x7fc1_2345), -0.0];
+    assert!(SampleFormat::Float32.encode(&payloads, &mut input[input_offset..input_offset + 8]));
+    let mut output = [17_u8; 12];
+    let output_offset = usize::from(output.as_ptr().addr().is_multiple_of(4));
+    // SAFETY: sequential SPSC test owner, complete disjoint byte buffers; the
+    // chosen offsets deliberately exercise byte spans without float alignment.
+    unsafe {
+        for _ in 0..2 {
+            assert_eq!(
+                mr_pcm_ring_write_pcm(&raw mut ring, input.as_ptr().add(input_offset).cast(), 2, 1),
+                2
+            );
+        }
+        let overflowing = [0_u8; 4];
+        assert_eq!(
+            mr_pcm_ring_write_pcm(&raw mut ring, overflowing.as_ptr().cast(), 2, 2),
+            0
+        );
+        assert_eq!(
+            mr_pcm_ring_read_pcm(&raw mut ring, output.as_mut_ptr().cast(), 2, 99),
+            0
+        );
+        assert_eq!(output, [17; 12]);
+        assert_eq!(
+            mr_pcm_ring_read_pcm(
+                &raw mut ring,
+                output.as_mut_ptr().add(output_offset).cast(),
+                2,
+                1
+            ),
+            2
+        );
+    }
+    assert_eq!(
+        output[output_offset..output_offset + 8],
+        input[input_offset..input_offset + 8]
+    );
+    assert_eq!(ring.stats().overflows, 1);
+    assert_eq!(ring.stats().queued, 2);
+}
+
+#[test]
+fn byte_ring_zero_write_ack_and_invalid_format_do_not_publish_pcm() {
+    for format in [
+        SampleFormat::Signed16,
+        SampleFormat::Signed24,
+        SampleFormat::Signed32,
+    ] {
+        let mut ring = PcmRing::new(1, 4).unwrap();
+        let input = [0_u8; 8];
+        let mut output = [9_u8; 8];
+        let count = 2 * format.bytes_per_sample();
+        // SAFETY: sequential SPSC owner with two integer samples in complete
+        // byte buffers. Null zero-frame input must ACK without reading input.
+        unsafe {
+            for _ in 0..2 {
+                assert_eq!(
+                    mr_pcm_ring_write_pcm(&raw mut ring, input.as_ptr().cast(), 2, format as u32),
+                    2
+                );
+            }
+            assert_eq!(
+                mr_pcm_ring_write_pcm(&raw mut ring, input.as_ptr().cast(), 2, 99),
+                0
+            );
+            mr_pcm_ring_restart(&raw mut ring);
+            let epoch = ring.publication.requested_epoch.load(Relaxed);
+            let written = ring.stats().written;
+            assert_eq!(
+                mr_pcm_ring_write_pcm(&raw mut ring, ptr::null(), 0, format as u32),
+                0
+            );
+            assert_eq!(ring.publication.published_epoch.load(Relaxed), epoch);
+            assert_eq!(ring.stats().written, written);
+            assert_eq!(
+                mr_pcm_ring_read_pcm(&raw mut ring, output.as_mut_ptr().cast(), 2, format as u32),
+                0
+            );
+        }
+        assert!(output[..count].iter().all(|&byte| byte == 0));
+        assert!(output[count..].iter().all(|&byte| byte == 9));
+        assert_eq!(ring.stats().read, ring.stats().written);
+        assert_eq!(ring.stats().overflows, 0);
+    }
+}
+
+#[test]
 fn empty_and_failed_initialization_are_clearable_without_allocations() {
     let mut storage = std::mem::MaybeUninit::<PcmRing>::zeroed();
     // SAFETY: C-style zero initialization is the documented empty native owner.

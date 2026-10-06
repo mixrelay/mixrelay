@@ -15,5 +15,28 @@ umask 077
 mkdir -p "$job_root"
 mkdir "$job_dir" # Exclusive: never overwrite evidence from a previous run.
 exec >"$job_dir/output.log" 2>&1
+result=0
 trap 'result=$?; printf "%s\n" "$result" >"$job_dir/exit-code.tmp"; mv "$job_dir/exit-code.tmp" "$job_dir/exit-code"' EXIT
-"$@"
+child_pid=
+stop_child() {
+  local status=$1 pid _
+  trap '' INT TERM
+  while read -r pid; do
+    if [[ "$pid" == "$child_pid" ]]; then
+      kill -TERM "$child_pid" 2>/dev/null || true
+      for _ in {1..20}; do
+        [[ $(jobs -pr) == "$child_pid" ]] || break
+        sleep 0.1
+      done
+      [[ $(jobs -pr) != "$child_pid" ]] || kill -KILL "$child_pid" 2>/dev/null || true
+      wait "$child_pid" 2>/dev/null || true
+      break
+    fi
+  done < <(jobs -pr)
+  exit "$status"
+}
+trap 'stop_child 130' INT
+trap 'stop_child 143' TERM
+"$@" <&0 &
+child_pid=$!
+wait "$child_pid"

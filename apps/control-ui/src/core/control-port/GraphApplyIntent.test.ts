@@ -15,7 +15,7 @@ const graph: RuntimeGraphDocument = {
       label: null,
       config: {
         typeId: 'vst3:test',
-        parameters: { stateBase64: 'native', parameterValues: { '1': 0.7, '2': 0.8 } },
+        parameters: { stateRef: { sha256: 'b'.repeat(64), byteLength: 9 }, parameterValues: { '1': 0.7, '2': 0.8 } },
       },
     },
   ],
@@ -23,12 +23,10 @@ const graph: RuntimeGraphDocument = {
 const intent = [{ nodeId: 'p', typeId: 'vst3:test', parameterId: 1, value: 0.3 }];
 const request: GraphApplyRequest = { ...graph, revision: 2, processorParameterChanges: intent };
 
-it('HTTP forwards optional explicit intent without wrapping or changing legacy document fields', async () => {
-  const fetcher = vi.fn<typeof fetch>().mockResolvedValue({
-    ok: true,
-    status: 200,
-    json: async () => ({ protocolVersion: 1, revision: 2, state: 'active' }),
-  } as Response);
+it('HTTP forwards explicit intent and state references without changing document fields', async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+    protocolVersion: 1, revision: 2, state: 'active',
+  }));
   await new HttpControlPort('http://control', fetcher).applyGraph(request);
   expect(fetcher).toHaveBeenCalledWith('http://control/api/v1/graph', {
     method: 'PUT',
@@ -69,7 +67,7 @@ const stale: RuntimeGraphDocument = {
       label: null,
       config: {
         typeId: 'vst3:test',
-        parameters: { stateBase64: 'stale', parameterValues: { '1': 0.1, '2': 0.2 } },
+        parameters: { stateRef: { sha256: 'a'.repeat(64), byteLength: 8 }, parameterValues: { '1': 0.1, '2': 0.2 } },
       },
     },
   ],
@@ -87,7 +85,7 @@ describe('storybook preserves the live-state intent contract without pretending 
     expect((await port.getGraph()).nodes[0]?.config).toEqual({
       typeId: 'vst3:test',
       parameters: {
-        stateBase64: 'native',
+        stateRef: { sha256: 'b'.repeat(64), byteLength: 9 },
         parameterValues: { '1': 0.3, '2': 0.8 },
       },
     });

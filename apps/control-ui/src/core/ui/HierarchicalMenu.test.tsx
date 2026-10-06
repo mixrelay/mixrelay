@@ -151,11 +151,46 @@ describe.each(['context', 'button'] as const)('%s nested menu', (entry) => {
         if (index > 0) expect(menus[index - 1]).toContainElement(menu);
       }
       expect(onSelect).not.toHaveBeenCalled();
-      fireEvent.mouseDown(leaf);
-      fireEvent.mouseUp(leaf);
-      fireEvent.click(leaf);
+      if (input === 'mouse') {
+        fireEvent.mouseDown(leaf);
+        fireEvent.mouseUp(leaf);
+        fireEvent.click(leaf);
+      } else {
+        leaf.focus();
+        fireEvent.keyDown(leaf, { key: 'Enter' });
+        // jsdom does not synthesize a native button click from keyboard activation.
+        fireEvent.click(leaf, { detail: 0 });
+      }
       expect(onSelect).toHaveBeenCalledExactlyOnceWith('create');
       await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
     },
   );
+});
+
+it('shows the reason a disabled menu leaf cannot be selected', async () => {
+  const onSelect = vi.fn();
+  render(
+    <MixRelayProvider>
+      <HierarchicalMenuButton
+        items={[
+          {
+            id: 'unavailable',
+            label: 'Unavailable input',
+            description: 'Device is in use',
+            disabled: true,
+          },
+        ]}
+        onSelect={onSelect}
+        label="Add"
+        buttonContent="Add"
+      />
+    </MixRelayProvider>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+  const item = await screen.findByRole('menuitem', { name: /Unavailable input/ });
+  expect(item).toBeDisabled();
+  expect(item).toHaveAttribute('data-disabled', 'true');
+  expect(screen.getByText('Device is in use')).toBeInTheDocument();
+  fireEvent.click(item);
+  expect(onSelect).not.toHaveBeenCalled();
 });

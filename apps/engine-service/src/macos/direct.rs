@@ -5,11 +5,6 @@ use super::AudioContext;
 #[cfg(test)]
 mod continuity_tests;
 mod ownership;
-#[cfg(test)]
-mod virtual_activity_tests;
-use super::callback_source::RenderTransport;
-use super::callback_transport::{CaptureTransport, NativeCapture};
-use super::endpoint_boundaries::EndpointBoundaries;
 use crate::macos_devices::direct::{Binding, Descriptor, DirectPlan};
 use mixrelay_audio_engine::{BlockProcessor, ExternalBinding, ExternalIo, RenderPlan};
 use mixrelay_audio_io::{
@@ -38,25 +33,26 @@ struct AudioBufferList {
     first: AudioBuffer,
 }
 
-struct CallbackIo<'a, T> {
+struct CallbackIo<'a> {
     buffers: Buffers<'a>,
     bindings: &'a [Binding],
     offset: usize,
-    endpoints: &'a mut EndpointBoundaries<T>,
     bridged: Option<&'a crate::macos_devices::DeviceSet>,
 }
-impl<T: CaptureTransport + RenderTransport> ExternalIo for CallbackIo<'_, T> {
+impl ExternalIo for CallbackIo<'_> {
     fn begin_cycle(
         &mut self,
-        cycle: &ProcessCycle,
+        _cycle: &ProcessCycle,
         controls: mixrelay_audio_engine::ExternalControlState<'_>,
     ) -> mixrelay_audio_engine::CycleAdmission {
         if let Some(devices) = self.bridged {
-            for (binding, enabled) in controls.sources().chain(controls.sinks()) {
-                devices.set_active(binding.node_id().as_str(), enabled);
+            for (binding, enabled) in controls.sources() {
+                devices.set_binding_active(binding.node_id().as_str(), true, enabled);
+            }
+            for (binding, enabled) in controls.sinks() {
+                devices.set_binding_active(binding.node_id().as_str(), false, enabled);
             }
         }
-        self.endpoints.prepare_block(cycle.frames, controls);
         mixrelay_audio_engine::CycleAdmission::Process
     }
     fn read_source(
@@ -72,15 +68,12 @@ impl<T: CaptureTransport + RenderTransport> ExternalIo for CallbackIo<'_, T> {
         {
             return result;
         }
-        if let Some(result) = self.endpoints.read(binding, destination) {
-            return result;
-        }
         let Some(map) = self
             .bindings
             .iter()
             .find(|map| map.input && map.id == binding.node_id().as_str())
         else {
-            return TransferOutcome::complete(0);
+            return super::read_application(binding, destination, cycle);
         };
         if map.offset.is_none() {
             return TransferOutcome {
@@ -103,9 +96,6 @@ impl<T: CaptureTransport + RenderTransport> ExternalIo for CallbackIo<'_, T> {
         {
             return result;
         }
-        if let Some(result) = self.endpoints.write(binding, source) {
-            return result;
-        }
         let Some(map) = self
             .bindings
             .iter()
@@ -120,7 +110,7 @@ impl<T: CaptureTransport + RenderTransport> ExternalIo for CallbackIo<'_, T> {
     }
 }
 
-struct Renderer<'a, T = NativeCapture> {
+struct Renderer<'a> {
     processor: &'a mut Box<BlockProcessor>,
     activation: Option<GraphActivation<'a>>,
     bindings: &'a [Binding],
@@ -132,8 +122,6 @@ struct Renderer<'a, T = NativeCapture> {
     progress: &'a AtomicU64,
     failed: &'a AtomicBool,
     invalid: &'a AtomicBool,
-    endpoints: EndpointBoundaries<T>,
-    reconfigure: &'a AtomicBool,
 }
 
 /// The installed native geometry is immutable throughout a direct lifetime.
@@ -147,7 +135,7 @@ struct GraphActivation<'a> {
 
 impl GraphActivation<'_> {
     fn activate(&self, processor: &mut Box<BlockProcessor>) -> bool {
-        if !self.context.exchange.has_pending() {
+        if !self.context.exchange.has_pending() && !self.context.exchange.has_pending_latency() {
             return true;
         }
         self.context
@@ -162,7 +150,7 @@ impl GraphActivation<'_> {
                     }
                     compatible
                 },
-                |_| self.context.endpoint_backend.activate_pending().map(|_| ()),
+                |_| Ok::<(), String>(()),
             )
             .is_ok()
     }
@@ -189,7 +177,7 @@ unsafe extern "C" fn render(
         renderer.failed.store(true, Ordering::Release);
     }
 }
-impl<T: CaptureTransport + RenderTransport> Renderer<'_, T> {
+impl Renderer<'_> {
     fn observe_hardware(&mut self) {
         if let Some((plan, observed)) = &mut self.native_clock {
             let current = plan.discontinuities();
@@ -201,7 +189,6 @@ impl<T: CaptureTransport + RenderTransport> Renderer<'_, T> {
                     });
                 self.epoch = crate::macos_devices::direct::next_epoch();
                 self.frame = 0;
-                self.endpoints.discontinuity();
                 *observed = current;
             }
         }
@@ -237,14 +224,10 @@ impl<T: CaptureTransport + RenderTransport> Renderer<'_, T> {
             return true;
         }
         let format = self.processor.plan().format();
-        self.endpoints.begin(frames);
-        self.reconfigure
-            .store(self.endpoints.pending(), Ordering::Release);
         let mut io = CallbackIo {
             buffers,
             bindings: self.bindings,
             offset: 0,
-            endpoints: &mut self.endpoints,
             bridged: self.native_clock.as_ref().map(|(plan, _)| &plan.bridged),
         };
         // A larger native quantum is split, never truncated or queued for later.
@@ -268,22 +251,27 @@ impl<T: CaptureTransport + RenderTransport> Renderer<'_, T> {
                 return false;
             };
             self.status.record_process(report);
-            self.status.record_process(io.endpoints.finish_block());
             self.frame += u64::from(count);
             io.offset += count as usize;
         }
+        let synchronized = self.native_clock.as_ref().is_none_or(|(plan, _)| {
+            [
+                (true, self.processor.plan().source_bindings()),
+                (false, self.processor.plan().sink_bindings()),
+            ]
+            .into_iter()
+            .all(|(input, bindings)| {
+                bindings.iter().all(|binding| {
+                    plan.bridged
+                        .clock_synchronized(binding.node_id().as_str(), input)
+                        .unwrap_or(true)
+                })
+            })
+        });
         self.status
-            .observe_clock(ClockAuthority::Device, io.endpoints.synchronized());
-        mixrelay_engine_service::endpoint_service::touch_audio();
+            .observe_clock(ClockAuthority::Device, synchronized);
         self.progress.fetch_add(1, Ordering::Release);
         true
-    }
-}
-
-struct CaptureRetirement<F: FnMut()>(F);
-impl<F: FnMut()> Drop for CaptureRetirement<F> {
-    fn drop(&mut self) {
-        (self.0)();
     }
 }
 
@@ -302,7 +290,6 @@ struct RenderSignals {
     progress: AtomicU64,
     failed: AtomicBool,
     invalid: AtomicBool,
-    reconfigure: AtomicBool,
     rebind: AtomicBool,
 }
 
@@ -314,11 +301,6 @@ pub(super) fn run(
     let signals = RenderSignals::default();
     let installed_plan = std::sync::Arc::clone(processor.plan());
     let graph_rate = processor.plan().format().sample_rate;
-    let endpoints = EndpointBoundaries::prepare(processor.plan())?;
-    let capture_ids = endpoints.capture_ids();
-    signals
-        .reconfigure
-        .store(endpoints.pending(), Ordering::Release);
     let renderer = Renderer {
         processor,
         activation: Some(GraphActivation {
@@ -335,8 +317,6 @@ pub(super) fn run(
         progress: &signals.progress,
         failed: &signals.failed,
         invalid: &signals.invalid,
-        endpoints,
-        reconfigure: &signals.reconfigure,
     };
     log_route(
         plan,
@@ -344,26 +324,17 @@ pub(super) fn run(
         renderer.processor.plan().format().block_frames,
     );
     let mut prepared = PreparedRenderer::new(renderer);
-    // Declare before registration: all exits, including preparation errors,
-    // first drain the sole writer and only then invalidate its old capture tail.
-    let capture_retirement = CaptureRetirement(|| {
-        for &id in &capture_ids {
-            super::callback_transport::recover_capture_epoch(id);
-        }
-    });
-    let mut installed = prepared.install(plan);
+    let installed = prepared.install(plan);
     let mut last_execution_report = Instant::now();
-    let result = signals.supervise(plan, context, &mut installed, &mut last_execution_report);
+    signals.supervise(plan, context, &mut last_execution_report);
     drop(installed);
     plan.report_execution(last_execution_report.elapsed());
-    drop(capture_retirement);
     finish_render(
         plan,
         context,
         signals.invalid.load(Ordering::Acquire),
         signals.failed.load(Ordering::Acquire),
-    )?;
-    result
+    )
 }
 
 impl RenderSignals {
@@ -371,12 +342,10 @@ impl RenderSignals {
         &self,
         plan: &DirectPlan,
         context: AudioContext<'_>,
-        installed: &mut ownership::InstalledRenderer<'_, '_>,
         last_execution_report: &mut Instant,
-    ) -> Result<(), String> {
+    ) {
         let mut ticks = 0;
         let mut last = Instant::now();
-        let mut last_boundary_check = Instant::now();
         while !context.runtime_status.stop_requested()
             && !context.runtime_status.pause_requested()
             && !self.rebind.load(Ordering::Acquire)
@@ -389,14 +358,6 @@ impl RenderSignals {
             if last_execution_report.elapsed() >= Duration::from_secs(5) {
                 plan.report_execution(last_execution_report.elapsed());
                 *last_execution_report = Instant::now();
-            }
-            if self.reconfigure.load(Ordering::Acquire)
-                && last_boundary_check.elapsed() >= Duration::from_millis(100)
-            {
-                last_boundary_check = Instant::now();
-                installed.replace_boundaries().inspect_err(|error| {
-                tracing::warn!(clock_id = plan.clock_id, %error, "CoreAudio boundary preparation failed");
-            })?;
             }
             let next = self.progress.load(Ordering::Acquire);
             if next != ticks {
@@ -413,7 +374,6 @@ impl RenderSignals {
             // block has already been rendered synchronously inside the IOProc.
             thread::sleep(Duration::from_millis(1));
         }
-        Ok(())
     }
 }
 
@@ -448,19 +408,6 @@ fn finish_render(
         return Err("CoreAudio direct callback rejected buffer geometry or DSP processing".into());
     }
     Ok(())
-}
-
-fn replace_boundaries(
-    renderer: &mut Renderer<'_>,
-    replacement: EndpointBoundaries<NativeCapture>,
-) -> EndpointBoundaries<NativeCapture> {
-    renderer.endpoints.recover_pending();
-    super::endpoint_backend::MacVirtualEndpointBackend::activate_recovery();
-    let retired = renderer.endpoints.replace_pending(replacement);
-    renderer
-        .reconfigure
-        .store(renderer.endpoints.pending(), Ordering::Release);
-    retired
 }
 
 #[cfg(test)]
@@ -561,12 +508,10 @@ mod tests {
         for binding in &mut bindings {
             binding.offset = None;
         }
-        let mut endpoints = EndpointBoundaries::<NativeCapture>::empty();
         let mut io = CallbackIo {
             buffers: Buffers::empty(),
             bindings: &bindings,
             offset: 0,
-            endpoints: &mut endpoints,
             bridged: None,
         };
         assert!(bindings.iter().all(|binding| io.buffers.covers(binding)));
@@ -628,8 +573,6 @@ mod tests {
             progress: &progress,
             failed: &failed,
             invalid: &invalid,
-            endpoints: EndpointBoundaries::<NativeCapture>::empty(),
-            reconfigure: &invalid,
         };
         exercise_live_callback(&mut renderer);
         assert_eq!(progress.load(Ordering::Acquire), 10);
@@ -685,8 +628,6 @@ mod tests {
                 progress: &progress,
                 failed: &failed,
                 invalid: &invalid,
-                endpoints: EndpointBoundaries::<NativeCapture>::empty(),
-                reconfigure: &invalid,
             };
             // Native callback larger than the DSP quantum proves split offsets,
             // including non-divisible final blocks. No queued next-call output.

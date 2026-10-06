@@ -2,6 +2,8 @@ use super::*;
 use mixrelay_macos_transport::{audio_buffer::AudioBuffer, device_io::mr_device_io_process};
 use std::ptr;
 
+mod queue_targets;
+
 #[test]
 fn transport_restart_reuses_storage_and_invalidates_old_pcm() {
     let (_device, context) = crate::macos_devices::tests::synthetic_device(2, 48_000, 96_000, true);

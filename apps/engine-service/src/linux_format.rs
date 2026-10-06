@@ -1,18 +1,16 @@
 //! Native format owners are staged off RT, then revision-fenced with the DSP plan.
 use super::{
-    Arc, AtomicBool, CaptureWatch, DeviceStreams, DeviceWatch, Duration, EndpointUpdate,
-    EngineGraphController, HostAudioBackendError, Instant, LinuxResourceSpec, LinuxResourceUpdate,
-    LinuxVirtualEndpointBackend, Ordering, PipeWireCaptureSet, PipeWireEndpoint, RenderFormat,
-    thread,
+    Arc, AtomicBool, CaptureWatch, DeviceStreams, DeviceWatch, Duration, EndpointControls,
+    EndpointSet, EndpointSpecs, EngineGraphController, HostAudioBackendError, Instant,
+    LinuxResourceSpec, LinuxResourceUpdate, LinuxVirtualEndpointBackend, Ordering,
+    PipeWireCaptureSet, RenderFormat, thread,
 };
 use mixrelay_engine_service::PreparedGraphFormat;
 #[cfg(test)]
 #[path = "linux_format_tests.rs"]
 mod tests;
 
-pub(super) use mixrelay_audio_io::formats::{
-    BUFFER_SIZES as BLOCKS, MAX_BUFFER_FRAMES as MAX_BLOCK, SAMPLE_RATES as RATES,
-};
+pub(super) use mixrelay_audio_io::formats::{BUFFER_SIZES as BLOCKS, SAMPLE_RATES as RATES};
 static OBSERVED_ENDPOINT_RATE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 // Internal callback diagnostics only. PipeWire's variable scheduling quantum is
 // not an own-endpoint fixed buffer setting and must never overwrite user intent.
@@ -24,23 +22,21 @@ pub(super) fn observed_endpoint_rate() -> Option<u32> {
     (rate != 0).then_some(rate)
 }
 
-pub(super) fn observe_endpoint(endpoint: Option<&PipeWireEndpoint>) {
+pub(super) fn observe_endpoints(endpoints: &EndpointSet) {
     let mut agreed = None;
     let mut quantum = 0;
-    if let Some(endpoint) = endpoint {
-        for stream in endpoint.render.iter().chain(endpoint.capture.iter()) {
-            let observed = stream.callback_quantum();
-            if observed != 0 {
-                quantum = observed;
-            }
-            let rate = (stream.negotiated_format() >> 32) as u32;
-            if rate == 0 || agreed.is_some_and(|previous| previous != rate) {
-                OBSERVED_ENDPOINT_RATE.store(0, Ordering::Release);
-                OBSERVED_ENDPOINT_QUANTUM.store(0, Ordering::Release);
-                return;
-            }
-            agreed = Some(rate);
+    for stream in endpoints.streams() {
+        let observed = stream.callback_quantum();
+        if observed != 0 {
+            quantum = observed;
         }
+        let rate = (stream.negotiated_format() >> 32) as u32;
+        if rate == 0 || agreed.is_some_and(|previous| previous != rate) {
+            OBSERVED_ENDPOINT_RATE.store(0, Ordering::Release);
+            OBSERVED_ENDPOINT_QUANTUM.store(0, Ordering::Release);
+            return;
+        }
+        agreed = Some(rate);
     }
     // Only ACTIVE MixRelay-owned endpoint PCM formats are observed. Neither the
     // server graph's rate nor staged future streams represent the user's setting.
@@ -53,6 +49,12 @@ pub(super) struct Monitor {
     worker: Option<thread::JoinHandle<()>>,
 }
 impl Monitor {
+    pub(super) fn stop_observing(&self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(worker) = &self.worker {
+            worker.thread().unpark();
+        }
+    }
     pub(super) fn start(controller: &Arc<EngineGraphController>) -> Result<Self, String> {
         let controller = Arc::downgrade(controller);
         let stop = Arc::new(AtomicBool::new(false));
@@ -85,12 +87,11 @@ impl Monitor {
 }
 impl Drop for Monitor {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
-        if let Some(worker) = self.worker.take() {
-            worker.thread().unpark();
-            if worker.join().is_err() {
-                eprintln!("MixRelay endpoint format monitor panicked");
-            }
+        self.stop_observing();
+        if let Some(worker) = self.worker.take()
+            && worker.join().is_err()
+        {
+            tracing::error!("MixRelay endpoint format monitor panicked");
         }
     }
 }
@@ -118,6 +119,8 @@ struct Prepared {
     format: RenderFormat,
     application_watch: CaptureWatch,
     device_watch: DeviceWatch,
+    endpoint_controls: EndpointControls,
+    playback: super::source_mute::OwnedPlan,
 }
 
 impl PreparedGraphFormat for Prepared {
@@ -129,14 +132,17 @@ impl PreparedGraphFormat for Prepared {
             format,
             application_watch,
             device_watch,
+            endpoint_controls,
+            playback,
         } = *self;
         let backend = &reservation.0;
         // Controller serialization plus reservation excludes another publication.
         // All owners and the envelope already exist; callback only swaps them.
-        *backend
+        let mut active = backend
             .active_spec
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = spec;
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *active = spec;
         *backend
             .application_watch
             .lock()
@@ -145,10 +151,16 @@ impl PreparedGraphFormat for Prepared {
             .device_watch
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(device_watch);
+        *backend
+            .endpoint_controls
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = endpoint_controls;
         backend.active_format.store(pack(format), Ordering::Release);
+        backend.playback.stage(resources.revision, playback);
         backend
             .pending
             .store(Box::into_raw(resources), Ordering::Release);
+        drop(active);
     }
 }
 
@@ -156,6 +168,7 @@ pub(super) fn prepare(
     backend: &LinuxVirtualEndpointBackend,
     document: &mixrelay_audio_graph::GraphDocument,
     requested: RenderFormat,
+    playback: super::source_mute::OwnedPlan,
 ) -> Result<Box<dyn PreparedGraphFormat>, HostAudioBackendError> {
     let failure = |message: String| HostAudioBackendError::BackendFailure { message };
     mixrelay_audio_io::format_contract::validate_format(
@@ -176,24 +189,25 @@ pub(super) fn prepare(
         return Err(failure("PipeWire graph resources are still pending".into()));
     }
     let spec = LinuxResourceSpec::from_document(document)?;
-    let endpoint = spec
-        .endpoint
-        .as_ref()
-        .map(|binding| PipeWireEndpoint::open_format(binding, requested).map(Box::new))
-        .transpose()
+    let endpoints =
+        EndpointSet::prepare(&spec.endpoints, &EndpointSpecs::new(), requested, requested)
+            .map_err(failure)?;
+    let endpoint_controls = endpoints
+        .controls(&EndpointControls::default())
         .map_err(failure)?;
     let generation = backend
         .application_generation
         .fetch_add(1, Ordering::Relaxed)
         + 1;
     let (captures, application_watch) =
-        PipeWireCaptureSet::open_format(&spec.captures, generation, requested).map_err(failure)?;
+        PipeWireCaptureSet::open_format(&spec.captures, generation, requested, None)
+            .map_err(failure)?;
     let generation = backend.device_generation.fetch_add(1, Ordering::Relaxed) + 1;
     let devices =
-        DeviceStreams::open_format(&spec.devices, generation, requested).map_err(failure)?;
+        DeviceStreams::open_format(&spec.devices, generation, requested, None).map_err(failure)?;
     let device_watch = devices.watch(spec.devices.clone());
     let started = Instant::now();
-    while !endpoint.as_ref().is_none_or(|value| value.ready()) || !captures.formats_ready() {
+    while !endpoints.ready() || !captures.formats_ready() {
         if started.elapsed() > Duration::from_secs(3) {
             return Err(failure(
                 "PipeWire did not negotiate the requested stream format".into(),
@@ -201,17 +215,23 @@ pub(super) fn prepare(
         }
         thread::sleep(Duration::from_millis(10));
     }
+    let mut resources = Box::new(LinuxResourceUpdate {
+        revision: document.revision,
+        endpoints: Some(Box::new(endpoints)),
+        captures: Some(Box::new(captures)),
+        devices: Some(Box::new(devices)),
+    });
+    backend
+        .bind_format_inputs(&mut resources)
+        .map_err(failure)?;
     Ok(Box::new(Prepared {
         reservation,
         spec,
         format: requested,
         application_watch,
         device_watch,
-        resources: Box::new(LinuxResourceUpdate {
-            revision: document.revision,
-            endpoint: EndpointUpdate::Replace(endpoint),
-            captures: Some(Box::new(captures)),
-            devices: Some(Box::new(devices)),
-        }),
+        endpoint_controls,
+        playback,
+        resources,
     }))
 }

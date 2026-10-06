@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, io, process::Output, time::Duration};
 #[path = "linux_application_metadata.rs"]
 mod application_metadata;
 #[path = "linux_command.rs"]
@@ -12,6 +12,30 @@ use crate::{
     ApplicationSelector, AudioDeviceDescriptor, CapturableApplication, DeviceDirection,
     DeviceSelector, HostAudioBackendError,
 };
+
+/// Runs `pw-dump`, `pw-metadata`, or `pw-cli` from an off-RT control thread.
+///
+/// Passes `args` directly as process arguments without a shell. The nonzero `timeout` starts
+/// before child creation and pipe setup; a kernel-blocked spawn itself cannot be interrupted.
+/// Returns `Output` with the child's exit status, stdout (at most 16 MiB), and stderr (at most
+/// 256 KiB). The owned child is killed and reaped on ordinary timeout or output-limit failure.
+///
+/// # Errors
+///
+/// Rejects other commands or a spent deadline, and forwards timeout, output-limit, and child errors.
+pub fn bounded_pipewire_output(
+    program: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> io::Result<Output> {
+    if !matches!(program, "pw-dump" | "pw-metadata" | "pw-cli") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "unsupported PipeWire CLI",
+        ));
+    }
+    command::bounded_output(program, args, timeout)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PipeWireTarget {
@@ -361,6 +385,20 @@ fn backend_failure(message: String) -> HostAudioBackendError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bounded_pipewire_cli_rejects_spent_deadline_and_unlisted_program_before_spawn() {
+        let expired =
+            super::bounded_pipewire_output("pw-dump", &[], std::time::Duration::ZERO).unwrap_err();
+        assert_eq!(expired.kind(), std::io::ErrorKind::TimedOut);
+        let unrelated = super::bounded_pipewire_output(
+            "/bin/sleep",
+            &["5"],
+            std::time::Duration::from_millis(1),
+        )
+        .unwrap_err();
+        assert_eq!(unrelated.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
     #[test]
     fn native_numeric_properties_and_client_identity_are_not_lost() {
         let targets = super::parse_targets(&[

@@ -12,7 +12,6 @@ afterEach(() => {
 
 it.each([
   ['MacIntel', '⌘N'],
-  ['Win32', 'Ctrl+N'],
   ['Linux x86_64', 'Ctrl+N'],
   ['Linux aarch64', 'Ctrl+N'],
 ])('renders the new graph tooltip for %s after the hover delay', async (platform, label) => {
@@ -35,6 +34,6 @@ it.each([
 
 it('does not rewrite explicit non-Mod keys or unknown shortcuts', () => {
   expect(formatPlatformShortcut('Ctrl+Shift+Z', 'MacIntel')).toBe('Ctrl+Shift+Z');
-  expect(formatPlatformShortcut('Space', 'Win32')).toBe('Space');
+  expect(formatPlatformShortcut('Space', 'Linux x86_64')).toBe('Space');
   expect(formatPlatformShortcut('Mod+Z', '')).toBe('Ctrl+Z');
 });

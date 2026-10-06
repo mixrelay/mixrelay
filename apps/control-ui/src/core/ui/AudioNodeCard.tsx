@@ -9,8 +9,18 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import { useResizeObserver } from '@mantine/hooks';
-import { type CSSProperties, type ReactNode, type Ref, useEffect, useState } from 'react';
+import {
+  type CSSProperties,
+  type ReactNode,
+  type Ref,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
+import { useAudioMeterLevels } from '../audio-meter/useAudioMeterLevels';
 import styles from './AudioNodeCard.module.css';
 import {
   type AudioNodeFaceMode,
@@ -18,10 +28,13 @@ import {
   channelRowMetrics,
 } from './audioNodeLayout';
 import { Meter } from './Meter';
-import { NodeOptionsSection } from './NodeOptionsSection';
+import { NodeDisclosureMeasureContext, NodeOptionsSection } from './NodeOptionsSection';
 import { useNodeOptionsState } from './nodeOptionsState';
 import { ProcessorTimingLabel } from './ProcessorTimingLabel';
 import type { StatusTone } from './StatusBadge';
+import type { NativeStreamFormat, NativeDeviceFormats } from '../control-port/types';
+import type { NativeDirection } from '../driver/DriverPort';
+import { nativeFormatKey, nativeFormatLabel } from '../driver/nativeFormatLabel';
 
 const portIds = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
 const channelOptions = (
@@ -36,6 +49,10 @@ const channelOptions = (
     }));
 
 export interface EndpointControl {
+  nativeFormats?: NativeDeviceFormats;
+  nativeFormatLabels?: { render: string; capture: string; unknown: string };
+  formatError?: string | null;
+  formatsDisabled?: boolean;
   observedRate?: { label: string; value: number };
   sampleRateOptions?: number[];
   rateError?: string | null;
@@ -48,6 +65,14 @@ export interface EndpointControl {
   nameLabel: string;
   renderChannels: number;
   renderChannelsLabel: string;
+}
+
+export interface EndpointUpdate {
+  sampleRate?: number;
+  nativeFormat?: { direction: NativeDirection; format: NativeStreamFormat };
+  captureChannels: number;
+  displayName: string;
+  renderChannels: number;
 }
 
 export interface AudioNodeCardProps {
@@ -66,13 +91,12 @@ export interface AudioNodeCardProps {
   faceHeight?: number;
   faceMode?: AudioNodeFaceMode;
   onFaceHeightChange?: (height: number) => void;
-  onContentHeightChange?: (height: number) => void;
+  onContentHeightChange?: (height: number, disclosureHeight: number) => void;
   gainControl?: { label: string; valueDb: number };
   icon: string;
   iconUrl?: string;
   inputCount: number;
-  meterChannels?: number;
-  meterLevels?: readonly number[];
+  meterBanks?: readonly AudioNodeMeterBank[];
   outputCount: number;
   optionsLabel?: string;
   parameterControls?: readonly {
@@ -96,15 +120,83 @@ export interface AudioNodeCardProps {
   title: string;
   onSelect: () => void;
   onGainChange?: (gainDb: number) => void;
-  onEndpointChange?: (value: {
-    sampleRate?: number;
-    captureChannels: number;
-    displayName: string;
-    renderChannels: number;
-  }) => void;
+  onEndpointChange?: (value: EndpointUpdate) => void;
   onLayoutChange?: () => void;
   onParameterChange?: (parameterId: string, value: number) => void;
   onProcessorEditorRetry?: () => void;
+}
+
+export interface AudioNodeMeterBank {
+  channels: number;
+  label?: string;
+  nodeId: string;
+  portId: string;
+}
+
+function meterBanksForCompactFace(
+  faceMode: AudioNodeFaceMode,
+  meterBanks: readonly AudioNodeMeterBank[],
+) {
+  return faceMode === 'compact' ? meterBanks : [];
+}
+
+function toggleNodeOptions(toggle: () => void, onLayoutChange?: () => void) {
+  toggle();
+  requestAnimationFrame(() => onLayoutChange?.());
+}
+
+function cssHeight(value: string) {
+  const pixels = Number.parseFloat(value);
+  return Number.isFinite(pixels) ? pixels : null;
+}
+
+function borderBoxHeight(element: HTMLElement) {
+  const style = getComputedStyle(element);
+  const height = cssHeight(style.height);
+  if (height === null) return null;
+  if (style.boxSizing === 'border-box') return height;
+  return (
+    height +
+    (cssHeight(style.paddingTop) ?? 0) +
+    (cssHeight(style.paddingBottom) ?? 0) +
+    (cssHeight(style.borderTopWidth) ?? 0) +
+    (cssHeight(style.borderBottomWidth) ?? 0)
+  );
+}
+
+function useCardMeasurements({
+  onFaceHeightChange,
+  onContentHeightChange,
+}: Pick<AudioNodeCardProps, 'onFaceHeightChange' | 'onContentHeightChange'>) {
+  const [faceRef, faceBounds] = useResizeObserver<HTMLButtonElement>();
+  const [contentRef, contentBounds] = useResizeObserver<HTMLDivElement>();
+  const controlsNode = useRef<HTMLDivElement | null>(null);
+  const measureRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      controlsNode.current = element;
+      contentRef(element);
+    },
+    [contentRef],
+  );
+  const measureControls = useCallback(() => {
+    const controls = controlsNode.current;
+    if (!controls) return;
+    const total = borderBoxHeight(controls);
+    const panel = controls.querySelector<HTMLElement>('[data-node-disclosure]');
+    const disclosure = panel ? borderBoxHeight(panel) : 0;
+    if (total === null || disclosure === null || disclosure > total) return;
+    onContentHeightChange?.(total, disclosure);
+  }, [onContentHeightChange]);
+  useEffect(() => {
+    if (faceBounds.height > 0) onFaceHeightChange?.(faceBounds.height);
+  }, [faceBounds.height, onFaceHeightChange]);
+  useLayoutEffect(() => {
+    // ResizeObserver values trigger a coherent DOM read; they are not mixed as measurements.
+    void contentBounds.height;
+    void contentBounds.width;
+    measureControls();
+  }, [contentBounds.height, contentBounds.width, measureControls]);
+  return { faceRef, faceBounds, contentRef: measureRef, measureControls };
 }
 
 export function AudioNodeCard({
@@ -127,8 +219,7 @@ export function AudioNodeCard({
   icon,
   iconUrl,
   inputCount,
-  meterChannels = 0,
-  meterLevels = [],
+  meterBanks = [],
   outputCount,
   optionsLabel = 'Options',
   onSelect,
@@ -145,15 +236,10 @@ export function AudioNodeCard({
   statusTone = 'neutral',
   title,
 }: AudioNodeCardProps) {
-  const [faceRef, faceBounds] = useResizeObserver<HTMLButtonElement>();
-  const [contentRef, contentBounds] = useResizeObserver<HTMLDivElement>();
-  useEffect(() => {
-    if (faceBounds.height > 0) onFaceHeightChange?.(faceBounds.height);
-  }, [faceBounds.height, onFaceHeightChange]);
-  useEffect(
-    () => onContentHeightChange?.(contentBounds.height),
-    [contentBounds.height, onContentHeightChange],
-  );
+  const { faceRef, faceBounds, contentRef, measureControls } = useCardMeasurements({
+    onFaceHeightChange,
+    onContentHeightChange,
+  });
   const { opened: optionsOpened, toggle } = useNodeOptionsState();
   const { hasGainControl, hasEndpointControl, hasParameterControls } = nodeOptionsAvailability({
     gainControl,
@@ -166,10 +252,6 @@ export function AudioNodeCard({
   });
   const levelMute = hasGainControl ? undefined : muteControl;
   const hasOptions = hasGainControl || hasEndpointControl || hasParameterControls;
-  const toggleOptions = () => {
-    toggle();
-    requestAnimationFrame(() => onLayoutChange?.());
-  };
   return (
     <Paper
       className={styles.root}
@@ -179,58 +261,67 @@ export function AudioNodeCard({
       data-endpoint-options={hasEndpointControl || undefined}
       data-has-options={hasOptions || undefined}
       data-header-actions={Boolean(headerActions)}
-      data-metered={meterChannels > 0 || undefined}
+      data-metered={meterBanks.length > 0 || undefined}
       data-meter-actions={Boolean(levelMute) || undefined}
       data-inline-controls={Boolean(content) || faceMode === 'channel-rows' || undefined}
       data-face-mode={faceMode}
       data-options-opened={optionsOpened || undefined}
       data-selected={selected || undefined}
-      style={audioNodeCardStyle({ faceHeight, faceMode, meterChannels, detail }, faceBounds.height)}
+      style={audioNodeCardStyle({ faceHeight, faceMode, meterBanks, detail }, faceBounds.height)}
       withBorder
     >
-      <AudioNodeFace
-        processingTimeNs={processingTimeNs}
-        faceRef={faceRef}
-        category={category}
-        channelCount={channelCount}
-        hideSummary={Boolean(content) || faceMode !== 'standard'}
-        detail={detail}
-        icon={icon}
-        iconUrl={iconUrl}
-        inputCount={inputCount}
-        meterChannels={meterChannels}
-        meterLevels={poweredOff ? [] : meterLevels}
-        offline={offline}
-        onSelect={onSelect}
-        outputCount={outputCount}
-        selected={selected}
-        status={status}
-        statusTone={statusTone}
-        title={title}
-      />
-      <NodeHeaderActions actions={headerActions} />
-      <NodeLevelMute control={levelMute} faceMode={faceMode} placement="face" />
-      <AudioNodeControls content={content} faceMode={faceMode} measureRef={contentRef}>
-        <NodeLevelMute control={levelMute} faceMode={faceMode} placement="settings" />
-        <div inert={poweredOff}>
-          <ProcessorEditorOption control={processorEditor} onRetry={onProcessorEditorRetry} />
-        </div>
-        <NodeOptions
-          muteControl={hasGainControl ? muteControl : undefined}
-          disabled={poweredOff}
-          endpointControl={endpointControl}
-          gainControl={gainControl}
-          hasOptions={hasOptions}
-          label={optionsLabel}
-          onEndpointChange={onEndpointChange}
-          onGainChange={onGainChange}
-          onParameterChange={onParameterChange}
-          onToggle={toggleOptions}
-          opened={optionsOpened}
-          parameterControls={hasParameterControls ? parameterControls : []}
+      <NodeDisclosureMeasureContext.Provider value={measureControls}>
+        <AudioNodeFace
+          processingTimeNs={processingTimeNs}
+          faceRef={faceRef}
+          category={category}
+          channelCount={channelCount}
+          hideSummary={Boolean(content) || faceMode !== 'standard'}
+          detail={detail}
+          icon={icon}
+          iconUrl={iconUrl}
+          inputCount={inputCount}
+          meterBanks={meterBanks}
+          faceMode={faceMode}
+          offline={offline}
+          onSelect={onSelect}
+          outputCount={outputCount}
+          selected={selected}
+          status={status}
+          statusTone={statusTone}
+          title={title}
         />
-      </AudioNodeControls>
-      <NodePortOverlays inputCount={inputCount} outputCount={outputCount} visible={showPorts} />
+        <NodeHeaderActions actions={headerActions} />
+        <NodeLevelMute control={levelMute} faceMode={faceMode} placement="face" />
+        <AudioNodeControls
+          content={content}
+          compactMeterBanks={meterBanksForCompactFace(faceMode, meterBanks)}
+          faceMode={faceMode}
+          measureRef={contentRef}
+          offline={offline || poweredOff}
+          title={title}
+        >
+          <NodeLevelMute control={levelMute} faceMode={faceMode} placement="settings" />
+          <div inert={poweredOff}>
+            <ProcessorEditorOption control={processorEditor} onRetry={onProcessorEditorRetry} />
+          </div>
+          <NodeOptions
+            muteControl={hasGainControl ? muteControl : undefined}
+            disabled={poweredOff}
+            endpointControl={endpointControl}
+            gainControl={gainControl}
+            hasOptions={hasOptions}
+            label={optionsLabel}
+            onEndpointChange={onEndpointChange}
+            onGainChange={onGainChange}
+            onParameterChange={onParameterChange}
+            onToggle={() => toggleNodeOptions(toggle, onLayoutChange)}
+            opened={optionsOpened}
+            parameterControls={hasParameterControls ? parameterControls : []}
+          />
+        </AudioNodeControls>
+        <NodePortOverlays inputCount={inputCount} outputCount={outputCount} visible={showPorts} />
+      </NodeDisclosureMeasureContext.Provider>
     </Paper>
   );
 }
@@ -276,17 +367,34 @@ function NodeLevelMute({
 
 function AudioNodeControls({
   content,
+  compactMeterBanks,
   faceMode,
   measureRef,
+  offline,
+  title,
   children,
 }: {
   content: ReactNode;
+  compactMeterBanks: readonly AudioNodeMeterBank[];
   faceMode: AudioNodeFaceMode;
   measureRef: Ref<HTMLDivElement>;
+  offline: boolean;
+  title: string;
   children: ReactNode;
 }) {
   // Native surfaces stretch with the node. Only intrinsic settings constrain its minimum height.
   const compact = faceMode === 'compact';
+  if (compact && compactMeterBanks.length > 0) {
+    return (
+      <div className={styles.controls}>
+        <div ref={measureRef} className={styles.settings}>
+          <NodeMeterBanks banks={compactMeterBanks} offline={offline} title={title} />
+          {children}
+        </div>
+        {content ? <div className={`${styles.content} nodrag nopan nowheel`}>{content}</div> : null}
+      </div>
+    );
+  }
   return (
     <div ref={compact ? undefined : measureRef} className={styles.controls}>
       {content ? <div className={`${styles.content} nodrag nopan nowheel`}>{content}</div> : null}
@@ -301,18 +409,17 @@ function audioNodeCardStyle(
   {
     faceHeight,
     faceMode,
-    meterChannels,
+    meterBanks,
     detail,
-  }: Pick<AudioNodeCardProps, 'faceHeight' | 'faceMode' | 'meterChannels' | 'detail'>,
+  }: Pick<AudioNodeCardProps, 'faceHeight' | 'faceMode' | 'meterBanks' | 'detail'>,
   renderedFaceHeight: number,
 ): CSSProperties {
   const geometry = audioNodeFaceGeometry({
-    channels: meterChannels,
+    meterBanks,
     hasDetail: Boolean(detail),
     mode: faceMode,
   });
-  const height =
-    faceMode === 'channel-rows' ? geometry.height : Math.max(faceHeight ?? 0, geometry.height);
+  const height = Math.max(faceHeight ?? 0, geometry.height);
   return {
     '--audio-node-face-height': `${height}px`,
     '--audio-node-rendered-face-height': `${renderedFaceHeight > 0 ? renderedFaceHeight : height}px`,
@@ -335,11 +442,11 @@ function AudioNodeFace(
     | 'processingTimeNs'
     | 'channelCount'
     | 'detail'
+    | 'faceMode'
     | 'icon'
     | 'iconUrl'
     | 'inputCount'
-    | 'meterChannels'
-    | 'meterLevels'
+    | 'meterBanks'
     | 'onSelect'
     | 'offline'
     | 'outputCount'
@@ -358,8 +465,8 @@ function AudioNodeFace(
     icon,
     iconUrl,
     inputCount,
-    meterChannels = 0,
-    meterLevels = [],
+    meterBanks = [],
+    faceMode = 'standard',
     onSelect,
     offline,
     outputCount,
@@ -386,8 +493,8 @@ function AudioNodeFace(
       </span>
       <span className={styles.body}>
         {detail ? <small className={styles.detail}>{detail}</small> : null}
-        {meterChannels > 0 ? (
-          <NodeMeters channels={meterChannels} levels={offline ? [] : meterLevels} title={title} />
+        {faceMode !== 'compact' && meterBanks.length > 0 ? (
+          <NodeMeterBanks banks={meterBanks} offline={Boolean(offline)} title={title} />
         ) : null}
       </span>
       {!hideSummary ? (
@@ -495,7 +602,7 @@ function NodeOptions({
   const controls = (
     <>
       {endpointControl && onEndpointChange ? (
-        <div inert={disabled}>
+        <div inert={disabled && !endpointControl.nativeFormats}>
           <EndpointOptions control={endpointControl} onChange={onEndpointChange} />
         </div>
       ) : null}
@@ -540,7 +647,8 @@ function ProcessorEditorOption({
   control?: AudioNodeCardProps['processorEditor'];
   onRetry?: AudioNodeCardProps['onProcessorEditorRetry'];
 }) {
-  if (!control || !onRetry || control.state !== 'failed') return null;
+  if (!control || !onRetry || (control.state !== 'failed' && control.state !== 'closed'))
+    return null;
   return (
     <div className={`${styles.processorEditor} nodrag nopan nowheel`}>
       <ActionIcon
@@ -563,7 +671,11 @@ function ProcessorEditorOption({
           stroke="currentColor"
           strokeWidth="1.25"
         >
-          <path d="M13 7a5 5 0 1 0-1 4M13 2v5H8" />
+          {control.state === 'closed' ? (
+            <path d="M6 3H3v10h10v-3M9 3h4v4M13 3 7 9" />
+          ) : (
+            <path d="M13 7a5 5 0 1 0-1 4M13 2v5H8" />
+          )}
         </svg>
       </ActionIcon>
       {control.failureLabel ? (
@@ -629,12 +741,7 @@ function NodePortOverlays({
 
 interface EndpointOptionsProps {
   control: EndpointControl;
-  onChange: (value: {
-    sampleRate?: number;
-    captureChannels: number;
-    displayName: string;
-    renderChannels: number;
-  }) => void;
+  onChange: (value: EndpointUpdate) => void;
 }
 
 function EndpointOptions({ control, onChange }: EndpointOptionsProps) {
@@ -724,8 +831,36 @@ function EndpointOptions({ control, onChange }: EndpointOptionsProps) {
           value={`${control.observedRate.value / 1000} kHz`}
         />
       ) : null}
+      {control.nativeFormats && control.nativeFormatLabels ? (
+        <NativeEndpointFormats control={control} onChange={onChange} />
+      ) : null}
     </div>
   );
+}
+
+function NativeEndpointFormats({ control, onChange }: EndpointOptionsProps) {
+  return <>
+    {(['render', 'capture'] as const).map((direction) => {
+      const formats = control.nativeFormats?.[direction];
+      if (!formats) return null;
+      if (!formats.current) return <TextInput key={direction} readOnly size="xs"
+        label={control.nativeFormatLabels?.[direction]} value={control.nativeFormatLabels?.unknown} />;
+      const data = [...formats.supported];
+      if (!data.some((format) => nativeFormatKey(format) === nativeFormatKey(formats.current!))) data.push(formats.current);
+      return <Select key={direction} allowDeselect={false} size="xs"
+        className={styles.optionField} label={control.nativeFormatLabels?.[direction]}
+        error={control.formatError}
+        disabled={control.formatsDisabled || formats.supported.length === 0}
+        value={nativeFormatKey(formats.current)}
+        data={data.map((format) => ({ value: nativeFormatKey(format),
+          label: nativeFormatLabel(format) }))}
+        onChange={(value) => {
+          const format = formats.supported.find((candidate) => nativeFormatKey(candidate) === value);
+          if (format) onChange({ ...endpointValue(control, {}), nativeFormat: { direction, format } });
+        }} />;
+    })}
+    {control.formatError ? <p role="alert">{control.formatError}</p> : null}
+  </>;
 }
 
 function endpointValue(
@@ -780,24 +915,78 @@ function NodeGainControl({
   );
 }
 
+function NodeMeterBanks({
+  banks,
+  offline,
+  title,
+}: {
+  banks: readonly AudioNodeMeterBank[];
+  offline: boolean;
+  title: string;
+}) {
+  const visibleBanks = banks.filter((bank) => bank.channels > 0);
+  if (visibleBanks.length === 0) return null;
+  return (
+    <span className={styles.meterGroups}>
+      {visibleBanks.map((bank) => (
+        <MeterBank
+          bank={bank}
+          key={JSON.stringify([bank.nodeId, bank.portId])}
+          offline={offline}
+          showLabel={visibleBanks.length > 1}
+          title={title}
+        />
+      ))}
+    </span>
+  );
+}
+
+function MeterBank({
+  bank,
+  offline,
+  showLabel,
+  title,
+}: {
+  bank: AudioNodeMeterBank;
+  offline: boolean;
+  showLabel: boolean;
+  title: string;
+}) {
+  const levels = useAudioMeterLevels(bank.nodeId, bank.portId);
+  return (
+    <span className={styles.meterGroup} data-meter-port={bank.portId}>
+      {showLabel && bank.label ? <span className={styles.meterBankLabel}>{bank.label}</span> : null}
+      <NodeMeters
+        channels={bank.channels}
+        levels={offline ? [] : levels}
+        meterLabel={bank.label ? `${title} ${bank.label}` : title}
+      />
+    </span>
+  );
+}
+
 function NodeMeters({
   channels,
   levels,
-  title,
+  meterLabel,
 }: {
   channels: number;
   levels: readonly number[];
-  title: string;
+  meterLabel: string;
 }) {
   const visibleChannels = Math.min(64, Math.max(1, Math.trunc(channels)));
   const channelNumbers = Array.from({ length: visibleChannels }, (_, index) => index + 1);
   if (visibleChannels > 8) {
     return (
-      <span className={styles.meterBank} data-density={visibleChannels > 32 ? 'dense' : 'compact'}>
+      <span
+        className={styles.meterBank}
+        data-channels={visibleChannels}
+        data-density={visibleChannels > 32 ? 'dense' : 'compact'}
+      >
         {channelNumbers.map((channel) => (
           <span className={styles.meterCell} key={`channel-${channel}`}>
             <Meter
-              label={`${title} channel ${channel}`}
+              label={`${meterLabel} channel ${channel}`}
               level={levels[channel - 1] ?? 0}
               orientation="vertical"
             />
@@ -810,12 +999,12 @@ function NodeMeters({
     );
   }
   return (
-    <span className={styles.meters}>
+    <span className={styles.meters} data-channels={visibleChannels}>
       {channelNumbers.map((channel) => (
         <span className={styles.meterRow} key={`channel-${channel}`}>
           <span aria-hidden="true">{meterChannelLabel(channel, visibleChannels)}</span>
           <Meter
-            label={`${title} channel ${channel}`}
+            label={`${meterLabel} channel ${channel}`}
             level={levels[channel - 1] ?? 0}
             orientation="horizontal"
           />

@@ -462,6 +462,7 @@ fn app_with_channels(selector: ApplicationSelector, channels: u16) -> NodeConfig
             },
         },
         source_playback: SourcePlaybackPolicy::Preserve,
+        forwarding_endpoint: None,
         gain_db: 0.0,
         requires_reselection: false,
     })
@@ -965,6 +966,7 @@ fn host_audio_contracts_remain_valid_when_consumed_by_the_graph_crate() {
             channel_layout: ChannelLayout::Mono,
         },
         source_playback: SourcePlaybackPolicy::MuteWhileCaptured,
+        forwarding_endpoint: Some(VirtualEndpointId::from("io.mixrelay.capture")),
         gain_db: 0.0,
         requires_reselection: false,
     };
@@ -1031,12 +1033,11 @@ fn virtual_references_require_visibility_and_reject_obsolete_signal_selection() 
 }
 
 #[test]
-fn virtual_source_uses_maximum_native_width_and_one_public_port() {
+fn virtual_source_uses_driver_capture_width_and_one_public_port() {
     for (render, capture, channels) in [
-        (Some(64), Some(16), 64),
+        (Some(64), Some(16), 16),
         (Some(2), Some(16), 16),
         (None, Some(32), 32),
-        (Some(8), None, 8),
     ] {
         let resolved = resolve_virtual_reference(
             render,
@@ -1076,8 +1077,8 @@ fn runtime_transport_cannot_be_serialized_or_deserialized_as_authored_graph() {
     let resolved = BuiltInNodeResolver
         .resolve(&configured_node("native", transport), &context())
         .unwrap();
-    assert_eq!(resolved.outputs[0].channels(), 2);
-    assert_eq!(resolved.inputs[0].channels(), 16);
+    assert_eq!(resolved.outputs[0].channels(), 16);
+    assert_eq!(resolved.inputs[0].channels(), 2);
 }
 
 #[test]
@@ -1120,7 +1121,7 @@ fn virtual_sink_reference_does_not_expose_unselected_native_playback() {
         vec![CompiledPort::new(
             PortId::from(TO_OS_PORT_ID),
             PortDirection::Input,
-            16,
+            64,
         )]
     );
 }
@@ -1132,18 +1133,11 @@ fn capture_only_device_can_expose_its_produced_mix_without_native_render() {
         Some(32),
         VirtualEndpointReference {
             render: true,
-            capture: true,
+            capture: false,
         },
     )
     .unwrap();
-    assert_eq!(
-        resolved.inputs,
-        vec![CompiledPort::new(
-            PortId::from(TO_OS_PORT_ID),
-            PortDirection::Input,
-            32,
-        )]
-    );
+    assert!(resolved.inputs.is_empty());
     assert_eq!(
         resolved.outputs,
         vec![CompiledPort::new(
@@ -1158,7 +1152,8 @@ fn capture_only_device_can_expose_its_produced_mix_without_native_render() {
 fn virtual_reference_rejects_no_direction_or_missing_native_sink() {
     for (render, capture, native_render, native_capture) in [
         (false, false, Some(2), Some(2)),
-        (false, true, Some(2), None),
+        (false, true, None, Some(2)),
+        (true, false, Some(2), None),
         (true, false, None, None),
     ] {
         assert!(
@@ -1182,8 +1177,8 @@ fn native_spec_conversion_selects_only_available_directions() {
         assert_eq!(
             config.reference,
             VirtualEndpointReference {
-                render: render.is_some() || capture.is_some(),
-                capture: capture.is_some(),
+                render: capture.is_some(),
+                capture: render.is_some(),
             }
         );
     }

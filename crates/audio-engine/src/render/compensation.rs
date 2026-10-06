@@ -1,0 +1,393 @@
+//! Prepared route history follows cached worker latency, never native plug-in queries.
+
+use std::{fmt, sync::Arc};
+
+use mixrelay_audio_graph::{ExecutionPlan, NodeConfig};
+
+use super::{HostedAudioProcessor, Kernel, NodeStep, RenderPlan, route_delay::RouteDelayLine};
+use crate::latency_plan::{LatencyNode, LatencyPlanError, LatencyRoute, route_delays};
+use crate::runtime_control::ControlValue;
+
+const MAX_HISTORY_BYTES: usize = 16 * 1024 * 1024;
+
+/// Retained reader tied to one prepared worker, including before activation.
+/// Implementations must only read cached atomics: no allocation, lock, blocking or native calls.
+pub trait HostedLatencySource: Send + Sync {
+    /// Total transport and intrinsic delay in this worker's prepared sample frames.
+    /// `None` means unknown, unhealthy or unrepresentable; `Some(0)` is a known zero.
+    fn frames(&self) -> Option<u32>;
+}
+
+/// Whether the active graph's derived route alignment is authoritative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompensationState {
+    /// No derived history bank has been installed for this processor yet.
+    Unprepared,
+    /// Every observed route delay is known and the prepared bank is current.
+    Current,
+    /// At least one source/processor arrival is unknown; affected merges stay unaligned.
+    Unknown,
+    /// A changed cached latency invalidated the active bank until its replacement arrives.
+    Pending,
+    /// The complete bank exceeds its aggregate memory budget; no route delay is applied.
+    CapacityExceeded,
+}
+
+/// Immutable route geometry and retained cached readers, prepared off the audio thread.
+pub(super) struct CompensationTopology {
+    nodes: Vec<LatencyNode>,
+    routes: Vec<LatencyRoute>,
+    channels: Vec<usize>,
+    readers: Vec<(usize, Arc<dyn HostedLatencySource>)>,
+}
+
+impl fmt::Debug for CompensationTopology {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CompensationTopology")
+            .field("nodes", &self.nodes.len())
+            .field("routes", &self.routes.len())
+            .field("channels", &self.channels)
+            .field("readers", &self.readers.len())
+            .finish()
+    }
+}
+
+impl CompensationTopology {
+    /// Binds compiled route order to exact prepared hosted owners, not registry node lookups.
+    pub(super) fn new(
+        execution: &ExecutionPlan,
+        steps: &[NodeStep],
+        hosted: &[Box<dyn HostedAudioProcessor>],
+    ) -> Self {
+        let indices: std::collections::BTreeMap<_, _> = execution
+            .nodes()
+            .iter()
+            .enumerate()
+            .map(|(i, node)| (node.id(), i))
+            .collect();
+        let nodes = execution
+            .nodes()
+            .iter()
+            .map(|node| match node.config() {
+                NodeConfig::AudioDeviceInput(_) | NodeConfig::ApplicationCapture(_) => {
+                    LatencyNode::Source(Some(0))
+                }
+                // Shared/native and graph-produced device signals have independent causal
+                // history. Do not invent a zero arrival across that boundary.
+                NodeConfig::VirtualEndpoint(_)
+                | NodeConfig::VirtualEndpointTransport(_)
+                | NodeConfig::DeviceBus { .. } => LatencyNode::Source(None),
+                NodeConfig::AudioDeviceOutput(_) | NodeConfig::Recorder { .. } => LatencyNode::Sink,
+                NodeConfig::Provider(_) => LatencyNode::Processing(None),
+                NodeConfig::Compressor(_)
+                | NodeConfig::Limiter(_)
+                | NodeConfig::Mixer(_)
+                | NodeConfig::Gain(_) => LatencyNode::Processing(Some(0)),
+            })
+            .collect();
+        let routes = execution
+            .edges()
+            .iter()
+            .map(|edge| LatencyRoute {
+                source: indices[&edge.source().node_id],
+                destination: indices[&edge.destination().node_id],
+            })
+            .collect();
+        let channels = execution
+            .edges()
+            .iter()
+            .map(|edge| {
+                execution.nodes()[indices[&edge.source().node_id]]
+                    .outputs()
+                    .iter()
+                    .find(|port| port.id() == &edge.source().port_id)
+                    .map_or(0, |port| usize::from(port.channels()))
+            })
+            .collect();
+        let readers = steps
+            .iter()
+            .enumerate()
+            .flat_map(|(index, step)| {
+                step.processing
+                    .iter()
+                    .filter_map(move |kernel| match kernel {
+                        Kernel::Hosted { processor, .. } => hosted[*processor]
+                            .latency_source()
+                            .map(|reader| (index, reader)),
+                        _ => None,
+                    })
+            })
+            .collect();
+        Self {
+            nodes,
+            routes,
+            channels,
+            readers,
+        }
+    }
+
+    /// Collects one control-side observation per retained hosted owner.
+    pub(super) fn observations(&self) -> Vec<Option<u32>> {
+        self.readers
+            .iter()
+            .map(|(_, reader)| reader.frames())
+            .collect()
+    }
+
+    /// Checks cached atoms only; safe for the audio thread with no retries or allocation.
+    pub(super) fn matches(&self, expected: &[Option<u32>]) -> bool {
+        expected.len() == self.readers.len()
+            && self
+                .readers
+                .iter()
+                .zip(expected)
+                .all(|((_, reader), value)| reader.frames() == *value)
+    }
+
+    fn delays(&self, observed: &[Option<u32>]) -> Result<(Vec<u32>, CompensationState), String> {
+        if observed.len() != self.readers.len() {
+            return Err("latency observation does not match its prepared owners".into());
+        }
+        let mut nodes = self.nodes.clone();
+        for ((index, _), value) in self.readers.iter().zip(observed) {
+            nodes[*index] = LatencyNode::Processing(*value);
+        }
+        let unknown = nodes.iter().any(|node| {
+            matches!(
+                node,
+                LatencyNode::Source(None) | LatencyNode::Processing(None)
+            )
+        });
+        match route_delays(&nodes, &self.routes) {
+            Ok(delays) => Ok((
+                delays,
+                if unknown {
+                    CompensationState::Unknown
+                } else {
+                    CompensationState::Current
+                },
+            )),
+            // Large reported delays must not make the entire plug-in graph unusable.
+            Err(LatencyPlanError::LatencyOverflow { .. }) => Ok((
+                vec![0; self.routes.len()],
+                CompensationState::CapacityExceeded,
+            )),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+}
+
+/// Mutable history belongs exclusively to the audio owner after block-boundary publication.
+pub(crate) struct DelayBank {
+    pub(crate) plan: Arc<RenderPlan>,
+    observed: Vec<Option<u32>>,
+    histories: Vec<Option<RouteDelayLine>>,
+    scratch: Vec<f32>,
+    control_gates: Vec<[bool; 2]>,
+    state: CompensationState,
+    valid: bool,
+}
+
+impl DelayBank {
+    /// Preallocates the complete history bank on the control thread.
+    /// Returns a diagnostic for invalid geometry or allocation failure; excessive memory
+    /// demand disables compensation as a whole without refusing the plug-in graph.
+    pub(crate) fn prepare(
+        plan: Arc<RenderPlan>,
+        observed: Vec<Option<u32>>,
+    ) -> Result<Self, String> {
+        let topology = &plan.compensation;
+        let (delays, state) = topology.delays(&observed)?;
+        let storage = DelayStorage::prepare(&delays, &topology.channels, plan.format.block_frames)?;
+        let control_gates = plan
+            .controls
+            .values()
+            .iter()
+            .map(|value| [value.control.enabled, value.control.muted])
+            .collect();
+        Ok(Self {
+            plan,
+            observed,
+            histories: storage.histories,
+            scratch: storage.scratch,
+            control_gates,
+            state: if storage.over_budget {
+                CompensationState::CapacityExceeded
+            } else {
+                state
+            },
+            valid: true,
+        })
+    }
+
+    /// Distinguishes a stale bank from a prepared unknown/over-budget one.
+    pub(crate) fn state(&self) -> CompensationState {
+        if self.valid {
+            self.state
+        } else {
+            CompensationState::Pending
+        }
+    }
+
+    /// Equal derived observations on the same immutable topology need no history replacement.
+    pub(super) fn equivalent(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.plan, &other.plan) && self.observed == other.observed
+    }
+
+    /// Invalidates history before rendering when cached worker latency no longer matches.
+    pub(crate) fn validate(&mut self) {
+        let valid = self.plan.compensation.matches(&self.observed);
+        if !valid && self.valid {
+            self.reset();
+        }
+        self.valid = valid;
+    }
+
+    /// Invalidates every ring cursor without touching its backing PCM allocation.
+    pub(crate) fn reset(&mut self) {
+        for history in self.histories.iter_mut().flatten() {
+            history.reset();
+        }
+    }
+
+    /// Invalidates only route indices prepared from this bank's immutable topology.
+    pub(super) fn reset_routes(&mut self, routes: &[usize]) {
+        for &index in routes {
+            if let Some(history) = &mut self.histories[index] {
+                history.reset();
+            }
+        }
+    }
+
+    /// Gate transitions cannot replay pre-OFF/pre-mute history; gain changes retain it.
+    pub(crate) fn observe_controls(&mut self, controls: &[ControlValue]) {
+        for (route, history) in self
+            .plan
+            .compensation
+            .routes
+            .iter()
+            .zip(&mut self.histories)
+        {
+            let changed = [route.source, route.destination].iter().any(|&i| {
+                self.control_gates[i] != [controls[i].control.enabled, controls[i].control.muted]
+            });
+            if changed && let Some(history) = history {
+                history.reset();
+            }
+        }
+        for (gate, value) in self.control_gates.iter_mut().zip(controls) {
+            *gate = [value.control.enabled, value.control.muted];
+        }
+    }
+
+    /// Borrows a delayed full-width source until the next route; absent histories stay direct.
+    pub(super) fn delayed<'a>(
+        &'a mut self,
+        index: usize,
+        source: &[f32],
+        frames: usize,
+    ) -> Option<&'a [f32]> {
+        if !self.valid {
+            return None;
+        }
+        let history = self.histories.get_mut(index)?.as_mut()?;
+        let output = self.scratch.get_mut(..source.len())?;
+        history.advance(source, output, frames).then_some(output)
+    }
+}
+
+struct DelayStorage {
+    histories: Vec<Option<RouteDelayLine>>,
+    scratch: Vec<f32>,
+    over_budget: bool,
+}
+
+impl DelayStorage {
+    fn prepare(delays: &[u32], channels: &[usize], block_frames: u32) -> Result<Self, String> {
+        let scratch_samples = channels
+            .iter()
+            .zip(delays)
+            .filter_map(|(&channels, &delay)| (delay != 0).then_some(channels))
+            .max()
+            .unwrap_or(0)
+            .checked_mul(block_frames as usize)
+            .ok_or("delay scratch overflow")?;
+        let samples =
+            delays
+                .iter()
+                .zip(channels)
+                .try_fold(scratch_samples, |total, (&delay, &channels)| {
+                    (delay as usize)
+                        .checked_mul(channels)
+                        .and_then(|n| total.checked_add(n))
+                });
+        let over_budget = samples.is_none_or(|n| n > MAX_HISTORY_BYTES / size_of::<f32>());
+        let mut histories = Vec::with_capacity(delays.len());
+        for (&delay, &channels) in delays.iter().zip(channels) {
+            histories.push(if delay == 0 || over_budget {
+                None
+            } else {
+                Some(RouteDelayLine::new(channels, delay as usize).map_err(|e| e.to_string())?)
+            });
+        }
+        let mut scratch = Vec::new();
+        let scratch_samples = if over_budget || delays.iter().all(|&n| n == 0) {
+            0
+        } else {
+            scratch_samples
+        };
+        scratch
+            .try_reserve_exact(scratch_samples)
+            .map_err(|e| e.to_string())?;
+        scratch.resize(scratch_samples, 0.0);
+        let allocated = histories
+            .iter()
+            .flatten()
+            .try_fold(scratch.capacity(), |n, history| {
+                n.checked_add(history.history_samples())
+            });
+        if allocated.is_none_or(|samples| samples > MAX_HISTORY_BYTES / size_of::<f32>()) {
+            return Err("allocator exceeded the route history budget".into());
+        }
+        Ok(Self {
+            histories,
+            scratch,
+            over_budget,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn complete_history_and_scratch_share_one_budget() {
+        let exact = DelayStorage::prepare(&[65_535], &[64], 1).unwrap();
+        assert!(!exact.over_budget);
+        assert_eq!(
+            exact.histories[0].as_ref().unwrap().history_samples() + exact.scratch.capacity(),
+            MAX_HISTORY_BYTES / 4
+        );
+        let excess = DelayStorage::prepare(&[65_536], &[64], 1).unwrap();
+        assert!(excess.over_budget);
+        assert!(excess.histories.iter().all(Option::is_none));
+        assert!(excess.scratch.is_empty());
+    }
+
+    #[test]
+    fn enormous_delay_does_not_allocate_or_disable_hosted_processing() {
+        let storage = DelayStorage::prepare(&[u32::MAX], &[64], 4096).unwrap();
+        assert!(storage.over_budget);
+        assert!(storage.histories[0].is_none());
+        assert_eq!(storage.scratch.capacity(), 0);
+    }
+
+    #[test]
+    fn direct_routes_need_no_history_or_scratch() {
+        let storage = DelayStorage::prepare(&[0, 0], &[32, 64], 4096).unwrap();
+        assert!(!storage.over_budget);
+        assert!(storage.histories.iter().all(Option::is_none));
+        assert_eq!(storage.scratch.capacity(), 0);
+    }
+}

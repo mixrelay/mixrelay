@@ -1,5 +1,5 @@
 //! Callback SPSC device PCM, independent of `CoreAudio` and `PipeWire` policy.
-//! Supports x86-64/AArch64 macOS/Linux native consumers; no Windows adapter.
+//! Supports x86-64/AArch64 macOS/Linux native consumers.
 #![cfg(any(target_os = "macos", target_os = "linux"))]
 
 // The embedded C layout and anonymous-mapping ABI are defined for these targets.
@@ -16,11 +16,14 @@ use std::{
 };
 mod ffi;
 mod queue;
+mod sample_format;
 mod storage;
 pub use ffi::{
     mr_pcm_ring_clear, mr_pcm_ring_discard, mr_pcm_ring_init, mr_pcm_ring_read,
-    mr_pcm_ring_read_available, mr_pcm_ring_restart, mr_pcm_ring_stats, mr_pcm_ring_write,
+    mr_pcm_ring_read_available, mr_pcm_ring_read_pcm, mr_pcm_ring_restart, mr_pcm_ring_stats,
+    mr_pcm_ring_write, mr_pcm_ring_write_pcm,
 };
+pub use sample_format::SampleFormat;
 
 /// Embedded opaque native storage. Zero-initialization owns no resources; init
 /// must finish before callbacks start. Never copy, clear or reinitialize it live.

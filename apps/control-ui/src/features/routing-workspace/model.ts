@@ -8,6 +8,11 @@ import type {
   CapturableApplication,
   ExternalProcessorDescriptor,
   ProcessorParameterChange,
+  ProviderBus,
+  ProviderBusKind,
+  ProviderChannelFormat,
+  ProviderNodeConfig,
+  ProviderPorts,
   RuntimeChannelRoute,
   RuntimeGraphDocument,
   RuntimeGraphEdge,
@@ -17,7 +22,7 @@ import type {
   VirtualEndpointSettings,
   VirtualEndpointSpec,
 } from '../../core/control-port/types';
-import { applicationInventoryKey, applicationSelectorKey } from './applicationIdentity';
+import { applicationInventorySelection, applicationSelectorKey } from './applicationIdentity';
 import { serializeGraphEdges } from './graphEdgeProjection';
 
 const AUDIO_PORT_ID = 'audio';
@@ -45,6 +50,8 @@ export interface GraphPresentation {
   options: string;
   outputGain: string;
   processor: string;
+  processorLayoutUnavailable: string;
+  providerBusKinds: Record<ProviderBusKind, string>;
   renderChannels: string;
   ratio: string;
   release: string;
@@ -76,6 +83,8 @@ const defaultPresentation: GraphPresentation = {
   options: 'Options',
   outputGain: 'Output gain',
   processor: 'Processor',
+  processorLayoutUnavailable: 'Processor layout unavailable',
+  providerBusKinds: { main: 'Main', sidechain: 'Sidechain', auxiliary: 'Auxiliary' },
   renderChannels: 'Inputs',
   ratio: 'Ratio',
   release: 'Release',
@@ -117,16 +126,20 @@ export function presentRoutingApplicationIcons(
   model: AudioGraphModel,
   applications: readonly CapturableApplication[],
 ): AudioGraphModel {
-  const iconsBySelection = new Map(
-    applications.map((application) => [
-      applicationInventoryKey(application),
-      application.iconDataUrl ?? undefined,
-    ]),
-  );
+  const iconsBySelection = new Map<string, string | undefined>();
+  for (const application of applications) {
+    const selection = applicationInventorySelection(application);
+    if (!selection) continue;
+    const iconUrl = application.iconDataUrl || undefined;
+    if (!iconsBySelection.has(selection.key) || (!iconsBySelection.get(selection.key) && iconUrl))
+      iconsBySelection.set(selection.key, iconUrl);
+  }
   let changed = false;
   const nodes = model.nodes.map((node) => {
     if (node.runtime?.type !== 'application_capture') return node;
-    const selection = applicationSelectorKey(objectValue(node.runtime.config)?.selector);
+    const config = objectValue(node.runtime.config);
+    const selection =
+      config?.requiresReselection === true ? undefined : applicationSelectorKey(config?.selector);
     const iconUrl = selection ? iconsBySelection.get(selection) : undefined;
     if (node.appearance.iconUrl === iconUrl) return node;
     changed = true;
@@ -207,7 +220,7 @@ export type RoutingNodeRequest =
   | { channels: number; kind: 'audio_output'; title: string; uid: string }
   | { kind: 'compressor' }
   | { kind: 'limiter' }
-  | { kind: 'provider'; processor: ExternalProcessorDescriptor }
+  | { kind: 'provider'; ports: ProviderPorts; processor: ExternalProcessorDescriptor }
   | { kind: 'virtual_input'; spec: VirtualEndpointSpec }
   | { kind: 'virtual_output'; spec: VirtualEndpointSpec };
 
@@ -405,6 +418,7 @@ export function updateRoutingNodeParameter(
 }
 
 export interface VirtualEndpointUpdate {
+  nativeFormat?: import('../../core/ui/AudioNodeCard').EndpointUpdate['nativeFormat'];
   /** Dedicated native-device transaction; never serialized by updateVirtualEndpoint. */
   sampleRate?: number;
   captureChannels: number;
@@ -477,7 +491,11 @@ export function updateRecorderChannels(
     node === selected
       ? {
           ...node,
-          appearance: { ...node.appearance, channelCount: channels, meterChannels: channels },
+          appearance: {
+            ...node.appearance,
+            channelCount: channels,
+            meterBanks: [{ channels, nodeId: runtimeNodeId(node), portId: AUDIO_PORT_ID }],
+          },
           inputPorts: channelPorts(AUDIO_PORT_ID, channels, node.appearance.title),
           runtime: { ...selected.runtime, type: 'recorder', config: { channels } },
         }
@@ -568,13 +586,11 @@ function updatedVirtualEndpointNode(
   presentation: GraphPresentation,
 ): AudioGraphNode {
   const config = objectValue(node.runtime?.config) ?? {};
-  const isRenderNode = node.runtime?.binding?.side === 'source';
-  const channelCount = isRenderNode
-    ? Math.max(update.renderChannels, update.captureChannels)
-    : update.captureChannels;
-  const runtimePortId = isRenderNode ? FROM_OS_PORT_ID : TO_OS_PORT_ID;
-  const label = isRenderNode ? presentation.virtualSourcePort : presentation.virtualSinkPort;
-  const boundary = isRenderNode ? 'source' : 'sink';
+  const isSourceNode = node.runtime?.binding?.side === 'source';
+  const channelCount = isSourceNode ? update.captureChannels : update.renderChannels;
+  const runtimePortId = isSourceNode ? FROM_OS_PORT_ID : TO_OS_PORT_ID;
+  const label = isSourceNode ? presentation.virtualSourcePort : presentation.virtualSinkPort;
+  const boundary = isSourceNode ? 'source' : 'sink';
   const ports = channelPorts(runtimePortId, channelCount, label, boundary);
   return {
     ...node,
@@ -587,12 +603,11 @@ function updatedVirtualEndpointNode(
         update.captureChannels,
         presentation,
       ),
-      meterChannels: channelCount,
-      meterSource: { nodeId: runtimeNodeId(node), portId: runtimePortId },
+      meterBanks: [{ channels: channelCount, nodeId: runtimeNodeId(node), portId: runtimePortId }],
       title: update.displayName,
     },
-    inputPorts: isRenderNode ? [] : ports,
-    outputPorts: isRenderNode ? ports : [],
+    inputPorts: isSourceNode ? [] : ports,
+    outputPorts: isSourceNode ? ports : [],
     runtime: {
       ...node.runtime,
       config: updatedVirtualDeviceConfig(config, update),
@@ -612,7 +627,7 @@ function createRoutingNode(
   if (request.kind === 'recorder') return recorderNode(base, 2, presentation);
   if (request.kind === 'compressor') return compressorNode(base, presentation);
   if (request.kind === 'limiter') return limiterNode(base, presentation);
-  return externalProcessorNode(base, request.processor, presentation);
+  return externalProcessorNode(base, request.processor, request.ports, presentation);
 }
 
 function compressorNode(
@@ -658,6 +673,7 @@ function limiterNode(
 function externalProcessorNode(
   base: { id: string; position: AudioGraphPosition },
   processor: ExternalProcessorDescriptor,
+  ports: ProviderPorts,
   presentation: GraphPresentation,
 ): AudioGraphNode {
   const parameterValues = Object.fromEntries(
@@ -667,32 +683,148 @@ function externalProcessorNode(
     ...base,
     appearance: {
       category: `${presentation.processor} · ${processor.format.toUpperCase()}`,
-      channelCount: processor.outputChannels,
+      channelCount: totalBusChannels(ports.outputs),
       icon: processor.format.toUpperCase(),
       hasProcessorEditor: processor.hasEditor,
+      meterBanks: ports.outputs.map((bus) => ({
+        channels: bus.channels,
+        label: providerBusLabel(bus, presentation),
+        nodeId: base.id,
+        portId: bus.id,
+      })),
       optionsLabel: presentation.options,
       parameterControls: externalParameterControls(processor, parameterValues),
       title: processor.displayName,
     },
-    inputPorts: channelPorts(
-      AUDIO_PORT_ID,
-      processor.inputChannels,
-      `${processor.displayName} input`,
-    ),
-    outputPorts: channelPorts(
-      AUDIO_PORT_ID,
-      processor.outputChannels,
-      `${processor.displayName} output`,
-    ),
+    inputPorts: providerChannelPorts(ports.inputs, presentation),
+    outputPorts: providerChannelPorts(ports.outputs, presentation),
     runtime: {
       config: {
         parameters: { parameterValues, version: 1 },
+        ports,
         typeId: processor.typeId,
-        ports: { inputs: processor.inputChannels, outputs: processor.outputChannels },
-      },
+      } satisfies ProviderNodeConfig,
       type: 'provider',
     },
   };
+}
+
+function providerChannelPorts(buses: readonly ProviderBus[], presentation: GraphPresentation) {
+  return buses.flatMap((bus) =>
+    channelPorts(bus.id, bus.channels, providerBusLabel(bus, presentation)),
+  );
+}
+
+function providerBusLabel(bus: ProviderBus, presentation: GraphPresentation) {
+  const kind = presentation.providerBusKinds[bus.kind];
+  return bus.name ? `${kind} · ${bus.name}` : kind;
+}
+
+export function providerPortsFrom(value: unknown): ProviderPorts | null {
+  const config = objectValue(value);
+  if (
+    !config ||
+    !hasOnlyKeys(config, ['layoutId', 'inputs', 'outputs']) ||
+    typeof config.layoutId !== 'string' ||
+    !validProviderIdentity(config.layoutId, 256) ||
+    !Array.isArray(config.inputs) ||
+    !Array.isArray(config.outputs) ||
+    config.inputs.length === 0 ||
+    config.outputs.length === 0 ||
+    config.inputs.length > 64 ||
+    config.outputs.length > 64
+  )
+    return null;
+  const inputs = config.inputs.map(providerBusFrom);
+  const outputs = config.outputs.map(providerBusFrom);
+  if (inputs.some((bus) => bus === null) || outputs.some((bus) => bus === null)) return null;
+  const validInputs = inputs as ProviderBus[];
+  const validOutputs = outputs as ProviderBus[];
+  if (
+    totalBusChannels(validInputs) > 64 ||
+    totalBusChannels(validOutputs) > 64 ||
+    !uniqueBusIds(validInputs) ||
+    !uniqueBusIds(validOutputs)
+  )
+    return null;
+  return { inputs: validInputs, layoutId: config.layoutId, outputs: validOutputs };
+}
+
+function providerBusFrom(value: unknown): ProviderBus | null {
+  const bus = objectValue(value);
+  if (
+    !bus ||
+    !hasOnlyKeys(bus, ['id', 'name', 'kind', 'channels', 'channelFormat']) ||
+    typeof bus.id !== 'string' ||
+    typeof bus.name !== 'string' ||
+    !validProviderIdentity(bus.id, 128) ||
+    byteLength(bus.name) > 1_024 ||
+    bus.name.includes('\0') ||
+    !['main', 'sidechain', 'auxiliary'].includes(String(bus.kind)) ||
+    !['mono', 'stereo', 'surround5_1', 'surround7_1', 'discrete'].includes(
+      String(bus.channelFormat),
+    ) ||
+    typeof bus.channels !== 'number' ||
+    !Number.isInteger(bus.channels) ||
+    bus.channels < 1 ||
+    bus.channels > 64
+  )
+    return null;
+  const expectedChannels = {
+    mono: 1,
+    stereo: 2,
+    surround5_1: 6,
+    surround7_1: 8,
+  }[String(bus.channelFormat) as 'mono' | 'stereo' | 'surround5_1' | 'surround7_1'];
+  if (expectedChannels !== undefined && bus.channels !== expectedChannels) return null;
+  return {
+    channelFormat: bus.channelFormat as ProviderChannelFormat,
+    channels: bus.channels,
+    id: bus.id,
+    kind: bus.kind as ProviderBusKind,
+    name: bus.name,
+  };
+}
+
+function uniqueBusIds(buses: readonly ProviderBus[]) {
+  const ids = buses.map((bus) => bus.id);
+  return ids.every((id) => id.length > 0) && new Set(ids).size === ids.length;
+}
+
+function validProviderIdentity(value: string, maximumBytes: number) {
+  return value.length > 0 && byteLength(value) <= maximumBytes && !/\p{Cc}/u.test(value);
+}
+
+function byteLength(value: string) {
+  return new TextEncoder().encode(value).length;
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]) {
+  return Object.keys(value).every((key) => keys.includes(key));
+}
+
+function providerPortsMatch(left: ProviderPorts, right: ProviderPorts) {
+  const sameBuses = (a: readonly ProviderBus[], b: readonly ProviderBus[]) =>
+    a.length === b.length &&
+    a.every((bus, index) => {
+      const other = b[index];
+      return (
+        other !== undefined &&
+        bus.id === other.id &&
+        bus.kind === other.kind &&
+        bus.channels === other.channels &&
+        bus.channelFormat === other.channelFormat
+      );
+    });
+  return (
+    left.layoutId === right.layoutId &&
+    sameBuses(left.inputs, right.inputs) &&
+    sameBuses(left.outputs, right.outputs)
+  );
+}
+
+function totalBusChannels(buses: readonly ProviderBus[]) {
+  return buses.reduce((total, bus) => total + bus.channels, 0);
 }
 
 function externalParameterControls(
@@ -729,8 +861,7 @@ function processorNode(
       channelCount: channels,
       detail: processorDetail(type, config),
       icon,
-      meterChannels: channels,
-      meterSource: { nodeId: base.id, portId: AUDIO_PORT_ID },
+      meterBanks: [{ channels, nodeId: base.id, portId: AUDIO_PORT_ID }],
       optionsLabel: presentation.options,
       parameterControls,
       title,
@@ -809,8 +940,7 @@ function applicationNode(
       channelCount: 2,
       gainControl: { label: presentation.sourceGain, valueDb: 0 },
       icon: 'APP',
-      meterChannels: 2,
-      meterSource: { nodeId: base.id, portId: AUDIO_PORT_ID },
+      meterBanks: [{ channels: 2, nodeId: base.id, portId: AUDIO_PORT_ID }],
       optionsLabel: presentation.options,
       title: request.title,
     },
@@ -844,8 +974,7 @@ function audioInputNode(
       channelCount: request.channels,
       gainControl: { label: presentation.sourceGain, valueDb: 0 },
       icon: 'ADC',
-      meterChannels: request.channels,
-      meterSource: { nodeId: base.id, portId: AUDIO_PORT_ID },
+      meterBanks: [{ channels: request.channels, nodeId: base.id, portId: AUDIO_PORT_ID }],
       optionsLabel: presentation.options,
       title: request.title,
     },
@@ -873,8 +1002,7 @@ function audioOutputNode(
       category: presentation.audioOutput,
       channelCount: request.channels,
       icon: 'DAC',
-      meterChannels: request.channels,
-      meterSource: { nodeId: base.id, portId: AUDIO_PORT_ID },
+      meterBanks: [{ channels: request.channels, nodeId: base.id, portId: AUDIO_PORT_ID }],
       title: request.title,
     },
     inputPorts: channelPorts(AUDIO_PORT_ID, request.channels, 'Device output'),
@@ -901,8 +1029,7 @@ function recorderNode(
       title: presentation.recorder,
       icon: 'REC',
       channelCount: channels,
-      meterChannels: channels,
-      meterSource: { nodeId: base.id, portId: AUDIO_PORT_ID },
+      meterBanks: [{ channels, nodeId: base.id, portId: AUDIO_PORT_ID }],
     },
     inputPorts: channelPorts(AUDIO_PORT_ID, channels, presentation.recorder),
     outputPorts: [],
@@ -961,7 +1088,7 @@ function runtimeSourceNode(
       presentation,
     );
     parsed.appearance.channelCount = channels;
-    parsed.appearance.meterChannels = channels;
+    parsed.appearance.meterBanks = [{ channels, nodeId: node.id, portId: AUDIO_PORT_ID }];
     parsed.outputPorts = channelPorts(AUDIO_PORT_ID, channels, 'Application audio');
     parsed.appearance.gainControl = {
       label: presentation.sourceGain,
@@ -1026,8 +1153,13 @@ function runtimeProcessorNode(
         detail: `${gainDb.toFixed(1)} dB`,
         gainControl: { label: presentation.gain, valueDb: gainDb },
         icon: 'GAIN',
-        meterChannels: directNumber(node.config, 'channels') ?? 2,
-        meterSource: { nodeId: node.id, portId: AUDIO_PORT_ID },
+        meterBanks: [
+          {
+            channels: directNumber(node.config, 'channels') ?? 2,
+            nodeId: node.id,
+            portId: AUDIO_PORT_ID,
+          },
+        ],
         optionsLabel: presentation.options,
         title: node.label ?? node.id,
       },
@@ -1053,8 +1185,13 @@ function runtimeProcessorNode(
         category: presentation.routing,
         channelCount: channels,
         icon: 'MIX',
-        meterChannels: directNumber(node.config, 'channels') ?? 2,
-        meterSource: { nodeId: node.id, portId: AUDIO_PORT_ID },
+        meterBanks: [
+          {
+            channels: directNumber(node.config, 'channels') ?? 2,
+            nodeId: node.id,
+            portId: AUDIO_PORT_ID,
+          },
+        ],
         title: node.label ?? presentation.mixer,
       },
       inputPorts: inputs.flatMap((id, inputIndex) =>
@@ -1076,37 +1213,96 @@ function runtimeExternalProcessorNode(
 ): AudioGraphNode | null {
   const typeId = directString(node.config, 'typeId');
   const descriptor = processors.find((processor) => processor.typeId === typeId);
+  const config = objectValue(node.config) ?? {};
+  const hasAuthoredPorts = config.ports !== null && config.ports !== undefined;
+  const authoredPorts = providerPortsFrom(config.ports);
   if (!descriptor) {
-    const ports = objectValue(objectValue(node.config)?.ports);
-    const inputs = directNumber(ports, 'inputs');
-    const outputs = directNumber(ports, 'outputs');
-    if (!inputs || !outputs || inputs > 64 || outputs > 64) return null;
     return {
       ...base,
-      runtime,
+      runtime: { ...runtime, label: node.label },
       appearance: {
         title: node.label ?? typeId ?? node.id,
         category: presentation.processor,
         icon: 'FX',
+        meterBanks: (authoredPorts?.outputs ?? []).map((bus) => ({
+          channels: bus.channels,
+          label: providerBusLabel(bus, presentation),
+          nodeId: base.id,
+          portId: bus.id,
+        })),
         offline: true,
         detail: presentation.unsupported,
       },
-      inputPorts: channelPorts(AUDIO_PORT_ID, inputs, 'Input'),
-      outputPorts: channelPorts(AUDIO_PORT_ID, outputs, 'Output'),
+      inputPorts: authoredPorts ? providerChannelPorts(authoredPorts.inputs, presentation) : [],
+      outputPorts: authoredPorts ? providerChannelPorts(authoredPorts.outputs, presentation) : [],
     };
   }
-  const parameters = objectValue(node.config)?.parameters;
+  const layout = resolveProcessorLayout(descriptor, authoredPorts, hasAuthoredPorts);
+  const parameters = config.parameters;
   const parameterValues = objectValue(objectValue(parameters)?.parameterValues) ?? {};
   const values = Object.fromEntries(
     Object.entries(parameterValues).filter(
       (entry): entry is [string, number] => typeof entry[1] === 'number',
     ),
   );
-  const parsed = externalProcessorNode(base, descriptor, presentation);
+  const parsed = layout.selectedPorts
+    ? externalProcessorNode(base, descriptor, layout.selectedPorts, presentation)
+    : unavailableProcessorNode(node, base, descriptor, runtime, presentation);
   parsed.appearance.title = node.label ?? descriptor.displayName;
   parsed.appearance.parameterControls = externalParameterControls(descriptor, values);
-  parsed.runtime = runtime;
+  if (layout.unavailable) {
+    parsed.appearance.offline = true;
+    parsed.appearance.detail = presentation.processorLayoutUnavailable;
+  }
+  parsed.runtime = layout.materializeSelectedPorts
+    ? { ...runtime, config: { ...config, ports: layout.selectedPorts } }
+    : runtime;
   return parsed;
+}
+
+function resolveProcessorLayout(
+  descriptor: ExternalProcessorDescriptor,
+  authoredPorts: ProviderPorts | null,
+  hasAuthoredPorts: boolean,
+) {
+  const defaultLayout = providerPortsFrom(
+    descriptor.layouts.find((layout) => layout.layoutId === descriptor.defaultLayoutId),
+  );
+  const selectedPorts = hasAuthoredPorts ? authoredPorts : defaultLayout;
+  const catalogLayout = selectedPorts
+    ? providerPortsFrom(
+        descriptor.layouts.find((layout) => layout.layoutId === selectedPorts.layoutId),
+      )
+    : null;
+  return {
+    materializeSelectedPorts: !hasAuthoredPorts && selectedPorts !== null,
+    selectedPorts,
+    unavailable:
+      !selectedPorts || !catalogLayout || !providerPortsMatch(selectedPorts, catalogLayout),
+  };
+}
+
+function unavailableProcessorNode(
+  node: RuntimeGraphNode,
+  base: { id: string; position: AudioGraphPosition },
+  descriptor: ExternalProcessorDescriptor,
+  runtime: NonNullable<AudioGraphNode['runtime']>,
+  presentation: GraphPresentation,
+): AudioGraphNode {
+  return {
+    ...base,
+    appearance: {
+      category: `${presentation.processor} · ${descriptor.format.toUpperCase()}`,
+      detail: presentation.processorLayoutUnavailable,
+      hasProcessorEditor: descriptor.hasEditor,
+      icon: descriptor.format.toUpperCase(),
+      offline: true,
+      title: node.label ?? descriptor.displayName,
+    },
+    inputPorts: [],
+    outputPorts: [],
+    runtime,
+  };
 }
 
 function runtimeDynamicsNode(
@@ -1201,11 +1397,10 @@ function virtualEndpointNodes(
   const captureChannels = nestedNumber(node.config, 'capture', 'channels') ?? 0;
   const reference = objectValue(objectValue(node.config)?.reference);
   if (!reference) return [];
-  const readChannels = Math.max(renderChannels, captureChannels);
   const control = endpointControl(title, renderChannels, captureChannels, presentation);
   const runtime = { config: node.config, type: node.type };
   const nodes: AudioGraphNode[] = [];
-  if (reference.render === true && readChannels > 0) {
+  if (reference.render === true && captureChannels > 0) {
     nodes.push({
       appearance: {
         category: presentation.virtualInput,
@@ -1213,11 +1408,10 @@ function virtualEndpointNodes(
           label: presentation.sourceGain,
           valueDb: directNumber(node.config, 'gainDb') ?? 0,
         },
-        channelCount: readChannels,
+        channelCount: captureChannels,
         endpointControl: control,
         icon: 'IN',
-        meterChannels: readChannels,
-        meterSource: { nodeId: node.id, portId: FROM_OS_PORT_ID },
+        meterBanks: [{ channels: captureChannels, nodeId: node.id, portId: FROM_OS_PORT_ID }],
         optionsLabel: presentation.options,
         title,
       },
@@ -1225,7 +1419,7 @@ function virtualEndpointNodes(
       inputPorts: [],
       outputPorts: channelPorts(
         FROM_OS_PORT_ID,
-        readChannels,
+        captureChannels,
         presentation.virtualSourcePort,
         'source',
       ),
@@ -1233,25 +1427,19 @@ function virtualEndpointNodes(
       runtime: { ...runtime, binding: { nodeId: node.id, side: 'source' } },
     });
   }
-  if (reference.capture === true && captureChannels > 0) {
+  if (reference.capture === true && renderChannels > 0) {
     nodes.push({
       appearance: {
         category: presentation.virtualOutput,
-        channelCount: captureChannels,
+        channelCount: renderChannels,
         endpointControl: control,
         icon: 'OUT',
-        meterChannels: captureChannels,
-        meterSource: { nodeId: node.id, portId: TO_OS_PORT_ID },
+        meterBanks: [{ channels: renderChannels, nodeId: node.id, portId: TO_OS_PORT_ID }],
         optionsLabel: presentation.options,
         title,
       },
       id: virtualViewId(node.id, 'sink', reservedIds),
-      inputPorts: channelPorts(
-        TO_OS_PORT_ID,
-        captureChannels,
-        presentation.virtualSinkPort,
-        'sink',
-      ),
+      inputPorts: channelPorts(TO_OS_PORT_ID, renderChannels, presentation.virtualSinkPort, 'sink'),
       outputPorts: [],
       position: { x: 728, y: 96 },
       runtime: { ...runtime, binding: { nodeId: node.id, side: 'sink' } },

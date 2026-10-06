@@ -9,6 +9,74 @@ fn fixture() -> mixrelay_test_support::FixtureDir {
 }
 
 #[test]
+fn state_document_staging_allocation_measurement() {
+    let directory = fixture();
+    let path = directory.join("states.json");
+    let value = serde_json::json!({"nativeToken": "a".repeat(4 * 1024 * 1024)});
+    let start = std::time::Instant::now();
+    let allocation = allocation_counter::measure(|| {
+        drop(stage_json_limited(&path, &value, 16 * 1024 * 1024).unwrap());
+    });
+    eprintln!(
+        "state staging elapsed_us={} allocation={allocation:?}",
+        start.elapsed().as_micros()
+    );
+    assert!(!path.exists());
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+    assert!(allocation.bytes_max < 128 * 1024);
+}
+
+#[test]
+fn complete_file_limit_includes_newline_and_preserves_previous_document() {
+    let directory = fixture();
+    let path = directory.join("bounded.json");
+    // JSON string uses four bytes, then one newline: exactly five bytes on disk.
+    stage_json_limited(&path, &"ab", 5)
+        .unwrap()
+        .commit()
+        .unwrap();
+    let accepted = fs::read(&path).unwrap();
+    assert_eq!(accepted, b"\"ab\"\n");
+    for limit in [0, 3, 4] {
+        let error = stage_json_limited(&path, &"ab", limit).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(fs::read(&path).unwrap(), accepted);
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+}
+
+#[test]
+fn limited_writer_accounts_for_partial_writes_without_exceeding_budget() {
+    let mut bytes = [0; 2];
+    let mut writer = LimitedWriter {
+        inner: bytes.as_mut_slice(),
+        remaining: 3,
+    };
+    assert_eq!(writer.write(b"abc").unwrap(), 2);
+    assert_eq!(writer.remaining, 1);
+    assert_eq!(
+        writer.write(b"de").unwrap_err().kind(),
+        io::ErrorKind::InvalidData
+    );
+    assert_eq!(writer.remaining, 1);
+}
+
+#[test]
+fn bounded_staging_serializes_only_once() {
+    struct Counted(std::cell::Cell<u32>);
+    impl Serialize for Counted {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            self.0.set(self.0.get() + 1);
+            serializer.serialize_str("preset")
+        }
+    }
+    let directory = fixture();
+    let counted = Counted(std::cell::Cell::new(0));
+    drop(stage_json_limited(&directory.join("one.json"), &counted, 64).unwrap());
+    assert_eq!(counted.0.get(), 1);
+}
+
+#[test]
 fn commit_replaces_only_after_explicit_acceptance_and_leaves_no_staged_file() {
     let directory = fixture();
     let path = directory.join("graphs.json");
@@ -54,10 +122,28 @@ fn partial_serialization_failure_cleans_staging_without_touching_accepted_bytes(
     let path = directory.join("graphs.json");
     fs::write(&path, b"accepted").unwrap();
 
-    assert!(stage_json(&path, &PartialSerializationFailure).is_err());
+    assert_eq!(
+        stage_json(&path, &PartialSerializationFailure)
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::Other
+    );
 
     assert_eq!(fs::read(&path).unwrap(), b"accepted");
     assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn failed_staging_preserves_new_parent_directory_but_removes_its_private_file() {
+    let directory = fixture();
+    let parent = directory.join("new-settings");
+    let path = parent.join("graphs.json");
+    assert!(stage_json(&path, &PartialSerializationFailure).is_err());
+    // Directory creation is not part of file replacement. Another writer may have
+    // adopted this directory; cancellation owns only its create_new staging file.
+    assert!(parent.is_dir());
+    assert_eq!(fs::read_dir(&parent).unwrap().count(), 0);
+    assert!(!path.exists());
 }
 
 #[test]

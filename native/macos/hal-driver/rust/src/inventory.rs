@@ -96,6 +96,20 @@ impl Drop for SnapshotOwner {
     }
 }
 
+pub(crate) fn acknowledged(registry: &Registry, authority: u64) -> Option<u64> {
+    let state = registry.inventory.try_lock().ok()?;
+    (authority != 0
+        && state.connection == authority
+        && state.authority == authority
+        && state.generation != 0
+        && state.generation == state.latest_validated
+        && state
+            .entries
+            .keys()
+            .all(|id| registry.attachment_applied(*id)))
+    .then_some(state.generation)
+}
+
 fn preflight(registry: &Registry, snapshot: &InventorySnapshot) -> bool {
     snapshot.entries[..snapshot.count].iter().all(|entry| {
         let mut geometry = Geometry::default();
@@ -189,7 +203,7 @@ fn upsert_desired(
         if state
             .entries
             .get(&entry.endpoint_id)
-            .is_some_and(|generation| generation.is_some_and(|value| value >= entry.generation))
+            .is_some_and(|generation| generation.is_some_and(|value| value == entry.generation))
             && !registry.attachment_failed(entry.endpoint_id)
         {
             continue;

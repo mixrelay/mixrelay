@@ -1,11 +1,12 @@
 //! User-owned Unix socket transport. No network listener, detached command queue, or audio work.
+use std::future::Future;
 use std::io;
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -15,10 +16,12 @@ use super::{LocalControl, Request};
 const FRAME_LIMIT: u64 = 16 * 1024;
 const RESPONSE_LIMIT: usize = 4 * 1024 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 
 pub(crate) struct LocalSocket {
     stop: watch::Sender<bool>,
     done: watch::Receiver<bool>,
+    operation_liveness: Arc<tokio::sync::Notify>,
 }
 
 struct SocketPath {
@@ -44,6 +47,7 @@ impl LocalSocket {
         control: LocalControl,
     ) -> io::Result<Self> {
         let (listener, path) = bind(directory, owner_uid).await?;
+        let operation_liveness = Arc::clone(&control.client.operation_liveness);
         let (stop, stopped) = watch::channel(false);
         let (finished, done) = watch::channel(false);
         tokio::spawn(async move {
@@ -51,23 +55,27 @@ impl LocalSocket {
             drop(path);
             let _ = finished.send(true);
         });
-        Ok(Self { stop, done })
+        Ok(Self {
+            stop,
+            done,
+            operation_liveness,
+        })
     }
 
     /// Stop admission, cancel idle readers and join accepted commands before releasing engine ownership.
     pub(crate) async fn shutdown(&self) -> Result<(), String> {
         let _ = self.stop.send(true);
         let mut done = self.done.clone();
-        tokio::time::timeout(Duration::from_secs(35), async {
-            while !*done.borrow() {
-                done.changed().await.map_err(|error| error.to_string())?;
-            }
-            Ok::<(), String>(())
-        })
-        .await
-        .map_err(|_| {
-            "Local controls are still finishing; audio ownership was retained.".to_owned()
-        })?
+        super::super::wait_for_controls(
+            async {
+                while !*done.borrow() {
+                    done.changed().await.map_err(|error| error.to_string())?;
+                }
+                Ok::<(), String>(())
+            },
+            &self.operation_liveness,
+        )
+        .await?
     }
 }
 
@@ -161,27 +169,76 @@ async fn connection(
         return Ok(());
     }
     let request: Request = serde_json::from_slice(&frame).map_err(io::Error::other)?;
-    let response = if request.is_read() {
+    let request_id = request.id;
+    if !request.is_read() {
+        dispatch_mutation(
+            request_id,
+            &mut write,
+            control.dispatch(request),
+            HEARTBEAT_INTERVAL,
+        )
+        .await?;
+        return Ok(());
+    }
+    let response = {
         tokio::select! {
             biased;
             _ = stop.changed() => return Ok(()),
             response = control.dispatch(request) => response,
         }
-    } else {
-        control.dispatch(request).await
     };
-    let mut bytes = serde_json::to_vec(&response).map_err(io::Error::other)?;
+    write_frame(&mut write, &response).await
+}
+
+async fn dispatch_mutation<W, F>(
+    request_id: u64,
+    write: &mut W,
+    dispatch: F,
+    heartbeat_interval: Duration,
+) -> io::Result<()>
+where
+    W: AsyncWrite + Unpin,
+    F: Future<Output = serde_json::Value>,
+{
+    let mut dispatch = Box::pin(dispatch);
+    let first_heartbeat = tokio::time::Instant::now() + heartbeat_interval;
+    let mut heartbeat = tokio::time::interval_at(first_heartbeat, heartbeat_interval);
+    loop {
+        tokio::select! {
+            response = &mut dispatch => return write_frame(write, &response).await,
+            _ = heartbeat.tick() => {
+                let pending = serde_json::json!({"id": request_id, "status": 102, "body": {}});
+                if write_frame(write, &pending).await.is_err() {
+                    // The mutation was accepted before the peer failed. Keep it owned by this
+                    // connection task and wait for completion, but never write to the peer again.
+                    let _ = dispatch.await;
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
+async fn write_frame<W>(write: &mut W, response: &serde_json::Value) -> io::Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
+    let mut bytes = serde_json::to_vec(response).map_err(io::Error::other)?;
     if bytes.len() > RESPONSE_LIMIT {
         return Err(io::Error::other("local control response exceeds limit"));
     }
     bytes.push(b'\n');
-    tokio::time::timeout(IO_TIMEOUT, write.write_all(&bytes)).await??;
+    tokio::time::timeout(IO_TIMEOUT, write.write_all(&bytes))
+        .await
+        .map_err(|error| io::Error::new(io::ErrorKind::TimedOut, error))??;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
+    use tokio::sync::oneshot;
 
     #[tokio::test]
     async fn owned_socket_refuses_live_replacement_and_cleans_up() {
@@ -268,5 +325,54 @@ mod tests {
             .expect("shutdown");
         assert!(!directory.join("control.sock").exists());
         service.shutdown().await.expect("idempotent shutdown");
+    }
+
+    #[tokio::test]
+    async fn mutation_emits_pending_then_terminal_frame() {
+        let (mut peer, mut writer) = tokio::io::duplex(4096);
+        let dispatch = async {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            serde_json::json!({"id": 7, "status": 200, "body": {"accepted": true}})
+        };
+        dispatch_mutation(7, &mut writer, dispatch, Duration::from_millis(5))
+            .await
+            .expect("frames");
+        drop(writer);
+
+        let mut output = Vec::new();
+        peer.read_to_end(&mut output).await.expect("read frames");
+        let frames = output
+            .split(|byte| *byte == b'\n')
+            .filter(|frame| !frame.is_empty())
+            .map(|frame| serde_json::from_slice::<Value>(frame).expect("json frame"))
+            .collect::<Vec<_>>();
+        assert!(frames.iter().any(|frame| frame["status"] == 102));
+        assert_eq!(
+            frames.last(),
+            Some(&serde_json::json!({
+                "id": 7,
+                "status": 200,
+                "body": {"accepted": true}
+            }))
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_heartbeat_does_not_cancel_accepted_mutation() {
+        let (peer, mut writer) = tokio::io::duplex(64);
+        drop(peer);
+        let (completed, received) = oneshot::channel();
+        let dispatch = async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            let _ = completed.send(());
+            serde_json::json!({"id": 8, "status": 200, "body": {}})
+        };
+        dispatch_mutation(8, &mut writer, dispatch, Duration::from_millis(5))
+            .await
+            .expect("broken peer is contained");
+        tokio::time::timeout(Duration::from_millis(100), received)
+            .await
+            .expect("mutation completion")
+            .expect("completion signal");
     }
 }

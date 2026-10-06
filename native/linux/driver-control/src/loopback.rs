@@ -1,0 +1,114 @@
+use mixrelay_audio_io::{
+    frame_budget::FrameBudgetMapper,
+    process::{ClockDomain, ProcessCycle},
+    session::ClockAuthority,
+};
+use mixrelay_pipewire::{DriverCycle, DriverError, DriverProcess, GraphInputs, NativeStream};
+
+// Equal to the existing native ring's maximum whole-block acceptance, not a new queue.
+pub(super) const MAX_FRAMES: usize = 32_768;
+
+pub(super) struct Loopback {
+    pub(super) render: Option<NativeStream>,
+    pub(super) capture: Option<NativeStream>,
+    pub(super) input: Box<[f32]>,
+    pub(super) output: Box<[f32]>,
+    pub(super) render_channels: usize,
+    pub(super) capture_channels: usize,
+    pub(super) mapper: FrameBudgetMapper,
+}
+
+#[cfg(test)]
+impl Drop for Loopback {
+    fn drop(&mut self) {
+        // GraphDriver destroys the native filter and drains processing before this drop.
+        for (role, stream) in [
+            ("driver-render", &self.render),
+            ("driver-capture", &self.capture),
+        ] {
+            if let Some(stream) = stream {
+                let mut snapshot = mixrelay_pipewire::TransferSnapshot::default();
+                snapshot.include(stream);
+                eprintln!("native_driver_pcm owner={role} snapshot={snapshot:?}");
+            }
+        }
+    }
+}
+
+/// Straight channel projection used by the existing canonical device bus:
+/// corresponding lanes pass unchanged, excess capture lanes are silent.
+pub(super) fn project(input: &[f32], output: &mut [f32], render: usize, capture: usize) {
+    output.fill(0.0);
+    if render == 0 || capture == 0 {
+        return;
+    }
+    for (source, destination) in input
+        .chunks_exact(render)
+        .zip(output.chunks_exact_mut(capture))
+    {
+        let width = render.min(capture);
+        destination[..width].copy_from_slice(&source[..width]);
+    }
+}
+
+/// Borrows matching-width PCM directly, otherwise projects into prepared capture storage.
+pub(super) fn capture_samples<'a>(
+    input: &'a [f32],
+    output: &'a mut [f32],
+    render: usize,
+    capture: usize,
+) -> &'a [f32] {
+    if render == capture {
+        return input;
+    }
+    project(input, output, render, capture);
+    output
+}
+
+impl DriverProcess for Loopback {
+    fn prepare_inputs(&mut self, inputs: &GraphInputs) -> Result<(), DriverError> {
+        if let Some(render) = &mut self.render {
+            render.bind_inputs(inputs).map_err(DriverError::Input)?;
+        }
+        Ok(())
+    }
+
+    fn process(&mut self, cycle: &DriverCycle) {
+        let Ok(mapped) = self.mapper.map(ProcessCycle {
+            clock: ClockDomain {
+                authority: ClockAuthority::AudioServer,
+                id: u64::from(cycle.clock_id),
+                epoch: 0,
+            },
+            sample_rate: cycle.rate,
+            frames: cycle.frames,
+            first_frame: cycle.position,
+            monotonic_ns: Some(cycle.monotonic_ns),
+            discontinuity: false,
+        }) else {
+            return;
+        };
+        // Only complete native-clock frame budgets enter the same existing RAW FIFO.
+        let Ok(frames) = usize::try_from(mapped.frames) else {
+            return;
+        };
+        if frames == 0 || frames > MAX_FRAMES {
+            return;
+        }
+        let input = &mut self.input[..frames * self.render_channels];
+        if let Some(render) = &mut self.render {
+            render.read(input);
+        }
+        let output_count = if self.render_channels == self.capture_channels {
+            0
+        } else {
+            frames * self.capture_channels
+        };
+        let output = &mut self.output[..output_count];
+        let output = capture_samples(input, output, self.render_channels, self.capture_channels);
+        if let Some(capture) = &mut self.capture {
+            capture.write(output);
+            capture.trigger_output();
+        }
+    }
+}

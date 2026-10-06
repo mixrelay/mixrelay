@@ -1,0 +1,887 @@
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, MutexGuard},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+
+use axum::{
+    Extension, Json,
+    body::{Body, Bytes, to_bytes},
+    extract::{Path, Request},
+    http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header::CONTENT_TYPE},
+    middleware::Next,
+    response::{IntoResponse, Response},
+};
+use mixrelay_control_protocol::{ErrorCode, ProtocolError};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
+
+pub(super) const MAX_RECEIPTS: usize = 8;
+pub(super) const RESPONSE_LIMIT: usize = 16 * 1024 * 1024;
+const INGRESS_PERMITS: usize = 8;
+const OPERATION_WAIT: Duration = Duration::from_millis(100);
+const COMPLETED_TTL: Duration = Duration::from_mins(1);
+const OPERATION_HEADER: &str = "x-mixrelay-operation";
+const RESULT_HEADER: &str = "x-mixrelay-operation-result";
+
+#[derive(Clone, Copy)]
+struct UncertainTask;
+
+/// Marks a lost blocking task as uncertain so polling cannot confirm its mutation outcome.
+pub(super) fn task_failure(code: ErrorCode, reason: &'static str) -> Response {
+    let mut response = (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ProtocolError {
+            code,
+            parameters: serde_json::json!({"operationOutcome": "uncertain", "reason": reason}),
+        }),
+    )
+        .into_response();
+    response.extensions_mut().insert(UncertainTask);
+    response
+}
+
+/// Owns bounded long-running control operations for one server lifetime.
+#[derive(Clone)]
+pub struct ControlOperations {
+    inner: Arc<Inner>,
+}
+
+struct Inner {
+    state: Mutex<State>,
+    ingress: Arc<Semaphore>,
+    owner_nonce: u128,
+    next_id: std::sync::atomic::AtomicU64,
+    wake: Notify,
+}
+
+struct State {
+    admission_open: bool,
+    pending: usize,
+    records: HashMap<String, Record>,
+}
+
+struct Record {
+    notify: Arc<Notify>,
+    outcome: Outcome,
+}
+
+enum Outcome {
+    Pending,
+    Complete {
+        response: StoredResponse,
+        completed_at: Instant,
+    },
+}
+
+#[derive(Clone)]
+struct StoredResponse {
+    status: StatusCode,
+    headers: HeaderMap,
+    body: Bytes,
+    original: bool,
+}
+
+enum Snapshot {
+    Pending,
+    Complete(StoredResponse),
+    Missing,
+}
+
+enum Ack {
+    Completed,
+    Pending,
+    Missing,
+}
+
+#[derive(serde::Serialize)]
+struct PendingResponse<'a> {
+    #[serde(rename = "operationId")]
+    operation_id: &'a str,
+}
+
+impl ControlOperations {
+    /// Creates an open operation owner with a fresh session identifier namespace.
+    pub fn new() -> Self {
+        static OWNER_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let sequence = OWNER_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self {
+            inner: Arc::new(Inner {
+                state: Mutex::new(State {
+                    admission_open: true,
+                    pending: 0,
+                    records: HashMap::new(),
+                }),
+                ingress: Arc::new(Semaphore::new(INGRESS_PERMITS)),
+                owner_nonce: now ^ (u128::from(sequence) << 64),
+                next_id: std::sync::atomic::AtomicU64::new(1),
+                wake: Notify::new(),
+            }),
+        }
+    }
+
+    /// Stops accepting new work while allowing all admitted handlers to finish.
+    pub fn close_admission(&self) {
+        let mut state = self.lock_state();
+        state.admission_open = false;
+    }
+
+    /// Waits until every admitted handler has published a terminal receipt.
+    pub async fn drain(&self) {
+        loop {
+            let notified = self.inner.wake.notified();
+            if self.lock_state().pending == 0 {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    pub(crate) fn try_acquire_ingress(&self) -> Option<IngressLease> {
+        self.inner
+            .ingress
+            .clone()
+            .try_acquire_owned()
+            .ok()
+            .map(|permit| IngressLease {
+                _permit: Arc::new(permit),
+            })
+    }
+
+    fn admit(&self) -> Result<Admission, ()> {
+        let mut state = self.lock_state();
+        let now = Instant::now();
+        state.records.retain(|_, record| {
+            !matches!(&record.outcome, Outcome::Complete { completed_at, .. }
+                if now.saturating_duration_since(*completed_at) >= COMPLETED_TTL)
+        });
+        if !state.admission_open || state.records.len() >= MAX_RECEIPTS {
+            return Err(());
+        }
+        let sequence = self
+            .inner
+            .next_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let id = format!("op-{:032x}-{:016x}", self.inner.owner_nonce, sequence);
+        let notify = Arc::new(Notify::new());
+        state.records.insert(
+            id.clone(),
+            Record {
+                notify: notify.clone(),
+                outcome: Outcome::Pending,
+            },
+        );
+        state.pending += 1;
+        Ok(Admission { id, notify })
+    }
+
+    fn complete(&self, id: &str, response: StoredResponse) {
+        let notify = {
+            let mut state = self.lock_state();
+            let notify = {
+                let Some(record) = state.records.get_mut(id) else {
+                    return;
+                };
+                if !matches!(&record.outcome, Outcome::Pending) {
+                    return;
+                }
+                let notify = record.notify.clone();
+                record.outcome = Outcome::Complete {
+                    response,
+                    completed_at: Instant::now(),
+                };
+                notify
+            };
+            state.pending = state.pending.saturating_sub(1);
+            notify
+        };
+        notify.notify_waiters();
+        self.inner.wake.notify_waiters();
+    }
+
+    fn snapshot(&self, id: &str) -> Snapshot {
+        let mut state = self.lock_state();
+        purge_expired(&mut state);
+        match state.records.get(id) {
+            Some(Record {
+                outcome: Outcome::Pending,
+                ..
+            }) => Snapshot::Pending,
+            Some(Record {
+                outcome: Outcome::Complete { response, .. },
+                ..
+            }) => Snapshot::Complete(response.clone()),
+            None => Snapshot::Missing,
+        }
+    }
+
+    fn acknowledge(&self, id: &str) -> Ack {
+        let mut state = self.lock_state();
+        purge_expired(&mut state);
+        let Some(record) = state.records.get(id) else {
+            return Ack::Missing;
+        };
+        if matches!(&record.outcome, Outcome::Pending) {
+            return Ack::Pending;
+        }
+        state.records.remove(id);
+        Ack::Completed
+    }
+
+    fn take_completed(&self, id: &str) -> Option<StoredResponse> {
+        let mut state = self.lock_state();
+        if !matches!(
+            state.records.get(id).map(|record| &record.outcome),
+            Some(Outcome::Complete { .. })
+        ) {
+            return None;
+        }
+        match state.records.remove(id)?.outcome {
+            Outcome::Complete { response, .. } => Some(response),
+            Outcome::Pending => None,
+        }
+    }
+
+    fn lock_state(&self) -> MutexGuard<'_, State> {
+        self.inner
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+impl Default for ControlOperations {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+struct Admission {
+    id: String,
+    notify: Arc<Notify>,
+}
+
+#[derive(Clone)]
+pub(crate) struct IngressLease {
+    _permit: Arc<OwnedSemaphorePermit>,
+}
+
+pub(super) async fn dispatch(
+    Extension(operations): Extension<ControlOperations>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    if !needs_operation(&request) {
+        let lease = request.extensions_mut().remove::<IngressLease>();
+        let response = next.run(request).await;
+        drop(lease);
+        return response;
+    }
+    let lease = request.extensions_mut().remove::<IngressLease>();
+    let Ok(admission) = operations.admit() else {
+        drop(lease);
+        return admission_full_response(&request);
+    };
+    let operation_id = admission.id.clone();
+    let task_operations = operations.clone();
+    tokio::spawn(async move {
+        let _lease = lease;
+        let response = match tokio::spawn(next.run(request)).await {
+            Ok(response) => collect_response(response).await,
+            Err(error) => uncertain_response(&format!("operation task failed: {error}")),
+        };
+        task_operations.complete(&operation_id, response);
+    });
+
+    if completion_after_wait(&operations, &admission.id, admission.notify).await
+        && let Some(response) = operations.take_completed(&admission.id)
+    {
+        return response.into_response(None);
+    }
+    pending_response(&admission.id)
+}
+
+async fn completion_after_wait(
+    operations: &ControlOperations,
+    id: &str,
+    notify: Arc<Notify>,
+) -> bool {
+    let notified = notify.notified();
+    if matches!(operations.snapshot(id), Snapshot::Complete(_)) {
+        return true;
+    }
+    let _ = tokio::time::timeout(OPERATION_WAIT, notified).await;
+    matches!(operations.snapshot(id), Snapshot::Complete(_))
+}
+
+pub(super) async fn get(
+    Extension(operations): Extension<ControlOperations>,
+    Path(id): Path<String>,
+) -> Response {
+    match operations.snapshot(&id) {
+        Snapshot::Pending => pending_response(&id),
+        Snapshot::Complete(response) => response.into_response(Some(&id)),
+        Snapshot::Missing => missing_response(),
+    }
+}
+
+pub(super) async fn delete(
+    Extension(operations): Extension<ControlOperations>,
+    Path(id): Path<String>,
+) -> Response {
+    match operations.acknowledge(&id) {
+        Ack::Completed => StatusCode::NO_CONTENT.into_response(),
+        Ack::Pending => {
+            let mut response = (
+                StatusCode::CONFLICT,
+                Json(ProtocolError {
+                    code: ErrorCode::ControlUnavailable,
+                    parameters: serde_json::json!({"operationOutcome": "pending"}),
+                }),
+            )
+                .into_response();
+            add_operation_header(response.headers_mut(), &id);
+            response
+        }
+        Ack::Missing => missing_response(),
+    }
+}
+
+fn purge_expired(state: &mut State) {
+    let now = Instant::now();
+    state.records.retain(|_, record| {
+        !matches!(&record.outcome, Outcome::Complete { completed_at, .. }
+            if now.saturating_duration_since(*completed_at) >= COMPLETED_TTL)
+    });
+}
+
+async fn collect_response(response: Response) -> StoredResponse {
+    let (parts, body) = response.into_parts();
+    let mut headers = parts.headers;
+    headers.remove(HeaderName::from_static(OPERATION_HEADER));
+    headers.remove(HeaderName::from_static(RESULT_HEADER));
+    match to_bytes(body, RESPONSE_LIMIT.saturating_add(1)).await {
+        Ok(body) if body.len() <= RESPONSE_LIMIT => StoredResponse {
+            status: parts.status,
+            headers,
+            body,
+            original: parts.extensions.get::<UncertainTask>().is_none(),
+        },
+        Ok(_) => uncertain_response("operation response exceeded bounded storage"),
+        Err(error) => uncertain_response(&format!("operation response failed: {error}")),
+    }
+}
+
+fn uncertain_response(reason: &str) -> StoredResponse {
+    let error = ProtocolError {
+        code: ErrorCode::ControlUnavailable,
+        parameters: serde_json::json!({
+            "operationOutcome": "uncertain",
+            "reason": reason,
+        }),
+    };
+    let body = serde_json::to_vec(&error)
+        .unwrap_or_else(|_| b"{\"code\":\"control_unavailable\"}".to_vec());
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    StoredResponse {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        headers,
+        body: Bytes::from(body),
+        original: false,
+    }
+}
+
+fn pending_response(id: &str) -> Response {
+    let mut response = Json(PendingResponse { operation_id: id }).into_response();
+    *response.status_mut() = StatusCode::ACCEPTED;
+    add_operation_header(response.headers_mut(), id);
+    response
+}
+
+pub(crate) fn admission_full_response(request: &Request) -> Response {
+    let mut parameters = serde_json::json!({});
+    if request.method() != Method::GET {
+        let outcome = match request.uri().path() {
+            crate::GRAPH_CATALOG_ROUTE => "catalogOutcome",
+            "/api/v1/workspace" | "/api/v1/workspace/preview" => "workspaceOutcome",
+            "/api/v1/audio/power" | "/api/v1/audio/power/preview" => "powerOutcome",
+            path if path.starts_with("/api/v1/graphs/") && path.contains("/nodes/") => {
+                "nodeControlOutcome"
+            }
+            _ => "operationOutcome",
+        };
+        parameters[outcome] = serde_json::json!("not_applied");
+    }
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters,
+        }),
+    )
+        .into_response()
+}
+
+fn missing_response() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ProtocolError {
+            code: ErrorCode::ControlUnavailable,
+            parameters: serde_json::json!({"operationOutcome": "uncertain"}),
+        }),
+    )
+        .into_response()
+}
+
+fn add_operation_header(headers: &mut HeaderMap, id: &str) {
+    if let Ok(value) = HeaderValue::try_from(id) {
+        headers.insert(HeaderName::from_static(OPERATION_HEADER), value);
+    }
+}
+
+impl StoredResponse {
+    fn into_response(self, receipt_id: Option<&str>) -> Response {
+        let mut response = Response::new(Body::from(self.body));
+        *response.status_mut() = self.status;
+        *response.headers_mut() = self.headers;
+        if let Some(receipt_id) = receipt_id.filter(|_| self.original)
+            && let Ok(value) = HeaderValue::try_from(receipt_id)
+        {
+            response
+                .headers_mut()
+                .insert(HeaderName::from_static(RESULT_HEADER), value);
+        }
+        response
+    }
+}
+
+fn needs_operation(request: &Request) -> bool {
+    let path = request.uri().path();
+    if path.starts_with("/api/v1/operations/") || path == "/api/v1/operations" {
+        return false;
+    }
+    if path == crate::HEALTH_ROUTE
+        || path == crate::STATUS_ROUTE
+        || path == crate::GRAPH_STATUS_ROUTE
+        || path == crate::CONTROL_SNAPSHOT_ROUTE
+        || path == crate::METERS_ROUTE
+        || path.ends_with("/editor/frame")
+        || path.ends_with("/editor/input")
+    {
+        return false;
+    }
+    if request.method() == Method::GET {
+        return path == crate::GRAPH_ROUTE
+            || path == crate::GRAPH_CATALOG_ROUTE
+            || path.starts_with("/api/v1/graphs/")
+            || path == crate::PROCESSORS_ROUTE
+            || path == crate::APPLICATION_CAPTURE_MANIFEST_ROUTE;
+    }
+    request.method() == Method::POST || request.method() == Method::PUT
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        Extension, Json, Router,
+        body::{Body, to_bytes},
+        http::Request,
+        middleware,
+        routing::{MethodRouter, get as route_get, post},
+    };
+    use serde_json::{Value, json};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tower::ServiceExt;
+
+    fn test_router(operations: ControlOperations, work: MethodRouter) -> Router {
+        Router::new()
+            .route("/work", work)
+            .route(
+                "/api/v1/operations/{id}",
+                route_get(super::get).delete(super::delete),
+            )
+            .layer(middleware::from_fn(super::dispatch))
+            .layer(Extension(operations))
+    }
+
+    async fn pending_id(response: axum::response::Response) -> String {
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let header = response
+            .headers()
+            .get(OPERATION_HEADER)
+            .expect("pending operation header")
+            .to_str()
+            .expect("operation id header")
+            .to_owned();
+        let body = to_bytes(response.into_body(), 4096)
+            .await
+            .expect("pending response body");
+        let body: Value = serde_json::from_slice(&body).expect("pending JSON");
+        assert_eq!(body["operationId"], header);
+        header
+    }
+
+    async fn terminal_response(
+        operations: &ControlOperations,
+        id: &str,
+    ) -> axum::response::Response {
+        for _ in 0..200 {
+            if matches!(operations.snapshot(id), Snapshot::Complete(_)) {
+                return super::get(Extension(operations.clone()), Path(id.to_owned())).await;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("operation did not complete");
+    }
+
+    fn stored(status: StatusCode, body: &'static [u8], original: bool) -> StoredResponse {
+        StoredResponse {
+            status,
+            headers: HeaderMap::new(),
+            body: Bytes::from_static(body),
+            original,
+        }
+    }
+
+    fn panic_status() -> StatusCode {
+        panic!("handler panic");
+    }
+
+    #[test]
+    fn ids_change_between_owners_and_requests() {
+        let first = ControlOperations::new();
+        let second = ControlOperations::new();
+        let first_id = first.admit().expect("first admission").id;
+        let second_id = second.admit().expect("second admission").id;
+        assert_ne!(first_id, second_id);
+    }
+
+    #[test]
+    fn admission_is_bounded_without_eviction_of_pending_work() {
+        let operations = ControlOperations::new();
+        for _ in 0..MAX_RECEIPTS {
+            operations.admit().expect("bounded admission");
+        }
+        assert!(operations.admit().is_err());
+    }
+
+    #[tokio::test]
+    async fn slow_success_is_polled_once_and_acknowledged() {
+        let operations = ControlOperations::new();
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let handler_started = started.clone();
+        let handler_release = release.clone();
+        let router = test_router(
+            operations.clone(),
+            post(move || async move {
+                handler_started.notify_one();
+                handler_release.notified().await;
+                Json(json!({"ok": true}))
+            }),
+        );
+        let request = tokio::spawn(
+            router.oneshot(Request::post("/work").body(Body::empty()).expect("request")),
+        );
+        started.notified().await;
+        let id = pending_id(request.await.expect("request task").expect("response")).await;
+        release.notify_one();
+        let response = terminal_response(&operations, &id).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers().get(RESULT_HEADER).unwrap(), id.as_str());
+        let acknowledged = super::delete(Extension(operations.clone()), Path(id.clone())).await;
+        assert_eq!(acknowledged.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            super::get(Extension(operations), Path(id)).await.status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+
+    #[tokio::test]
+    async fn slow_original_error_keeps_result_identity() {
+        let operations = ControlOperations::new();
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let handler_started = started.clone();
+        let handler_release = release.clone();
+        let router = test_router(
+            operations.clone(),
+            post(move || async move {
+                handler_started.notify_one();
+                handler_release.notified().await;
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(json!({"code": "graph_invalid"})),
+                )
+            }),
+        );
+        let request = tokio::spawn(
+            router.oneshot(Request::post("/work").body(Body::empty()).expect("request")),
+        );
+        started.notified().await;
+        let id = pending_id(request.await.expect("request task").expect("response")).await;
+        release.notify_one();
+        let response = terminal_response(&operations, &id).await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(response.headers().get(RESULT_HEADER).unwrap(), id.as_str());
+    }
+
+    #[tokio::test]
+    async fn original_accepted_response_has_no_operation_header() {
+        let operations = ControlOperations::new();
+        let router = test_router(
+            operations,
+            post(|| async { (StatusCode::ACCEPTED, Json(json!({"accepted": true}))) }),
+        );
+        let response = router
+            .oneshot(Request::post("/work").body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        assert!(response.headers().get(OPERATION_HEADER).is_none());
+        assert!(response.headers().get(RESULT_HEADER).is_none());
+    }
+
+    #[tokio::test]
+    async fn disconnected_waiter_does_not_replay_work() {
+        let operations = ControlOperations::new();
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let handler_started = started.clone();
+        let handler_release = release.clone();
+        let handler_calls = calls.clone();
+        let router = test_router(
+            operations.clone(),
+            post(move || async move {
+                handler_calls.fetch_add(1, Ordering::SeqCst);
+                handler_started.notify_one();
+                handler_release.notified().await;
+                StatusCode::NO_CONTENT
+            }),
+        );
+        let request = tokio::spawn(
+            router.oneshot(Request::post("/work").body(Body::empty()).expect("request")),
+        );
+        started.notified().await;
+        request.abort();
+        release.notify_one();
+        for _ in 0..100 {
+            if operations.lock_state().pending == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(operations.lock_state().pending, 0);
+    }
+
+    #[tokio::test]
+    async fn quick_responses_reclaim_receipts() {
+        let operations = ControlOperations::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let handler_calls = calls.clone();
+        let router = test_router(
+            operations,
+            post(move || {
+                handler_calls.fetch_add(1, Ordering::SeqCst);
+                async { StatusCode::NO_CONTENT }
+            }),
+        );
+        for _ in 0..(MAX_RECEIPTS * 2) {
+            let response = router
+                .clone()
+                .oneshot(Request::post("/work").body(Body::empty()).expect("request"))
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), MAX_RECEIPTS * 2);
+    }
+
+    #[tokio::test]
+    async fn middleware_rejects_the_ninth_pending_request_before_handler() {
+        let operations = ControlOperations::new();
+        let started = Arc::new(AtomicUsize::new(0));
+        let release = Arc::new(Notify::new());
+        let handler_started = started.clone();
+        let handler_release = release.clone();
+        let router = test_router(
+            operations,
+            post(move || {
+                handler_started.fetch_add(1, Ordering::SeqCst);
+                let handler_release = handler_release.clone();
+                async move {
+                    handler_release.notified().await;
+                    StatusCode::NO_CONTENT
+                }
+            }),
+        );
+        let requests: Vec<_> = (0..MAX_RECEIPTS)
+            .map(|_| {
+                let router = router.clone();
+                tokio::spawn(async move {
+                    router
+                        .oneshot(Request::post("/work").body(Body::empty()).expect("request"))
+                        .await
+                        .expect("response")
+                })
+            })
+            .collect();
+        for _ in 0..200 {
+            if started.load(Ordering::SeqCst) == MAX_RECEIPTS {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(started.load(Ordering::SeqCst), MAX_RECEIPTS);
+        let response = router
+            .oneshot(Request::post("/work").body(Body::empty()).expect("request"))
+            .await
+            .expect("capacity response");
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), 4096).await.expect("body");
+        let body: Value = serde_json::from_slice(&body).expect("JSON");
+        assert_eq!(body["parameters"]["operationOutcome"], "not_applied");
+        for request in requests {
+            assert_eq!(
+                request.await.expect("request task").status(),
+                StatusCode::ACCEPTED
+            );
+        }
+        release.notify_waiters();
+    }
+
+    #[test]
+    fn acknowledgement_and_expiry_remove_completed_receipts_only() {
+        let operations = ControlOperations::new();
+        let pending = operations.admit().expect("pending admission");
+        assert!(matches!(operations.acknowledge(&pending.id), Ack::Pending));
+        operations.complete(&pending.id, stored(StatusCode::OK, b"ok", true));
+        assert!(matches!(
+            operations.acknowledge(&pending.id),
+            Ack::Completed
+        ));
+        assert!(matches!(
+            operations.snapshot(&pending.id),
+            Snapshot::Missing
+        ));
+
+        let expired = operations.admit().expect("expiry admission");
+        operations.complete(&expired.id, stored(StatusCode::OK, b"ok", true));
+        if let Some(Record {
+            outcome: Outcome::Complete { completed_at, .. },
+            ..
+        }) = operations.lock_state().records.get_mut(&expired.id)
+        {
+            *completed_at = Instant::now()
+                .checked_sub(COMPLETED_TTL + Duration::from_secs(1))
+                .expect("fixture clock supports a previous completed receipt");
+        }
+        assert!(matches!(
+            operations.snapshot(&expired.id),
+            Snapshot::Missing
+        ));
+    }
+
+    #[tokio::test]
+    async fn blocking_task_panic_is_uncertain_without_result_header() {
+        let operations = ControlOperations::new();
+        let router = test_router(
+            operations.clone(),
+            post(|| async {
+                tokio::time::sleep(Duration::from_millis(120)).await;
+                crate::catalog_task(|| panic!("fixture blocking task panic")).await
+            }),
+        );
+        let response = router
+            .oneshot(Request::post("/work").body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        let id = pending_id(response).await;
+        let response = terminal_response(&operations, &id).await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(response.headers().get(RESULT_HEADER).is_none());
+        let body = to_bytes(response.into_body(), 4096).await.expect("body");
+        let body: Value = serde_json::from_slice(&body).expect("JSON");
+        assert_eq!(body["parameters"]["operationOutcome"], "uncertain");
+    }
+
+    #[tokio::test]
+    async fn read_admission_failure_has_no_mutation_outcome() {
+        let response = admission_full_response(
+            &Request::get(crate::GRAPH_CATALOG_ROUTE)
+                .body(Body::empty())
+                .expect("read request"),
+        );
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), 4096).await.expect("body");
+        let body: Value = serde_json::from_slice(&body).expect("JSON");
+        assert_eq!(body["parameters"], json!({}));
+    }
+
+    #[tokio::test]
+    async fn admission_failure_uses_the_target_transaction_outcome() {
+        for (path, outcome) in [
+            (crate::GRAPH_CATALOG_ROUTE, "catalogOutcome"),
+            ("/api/v1/workspace", "workspaceOutcome"),
+            ("/api/v1/audio/power", "powerOutcome"),
+            ("/api/v1/graphs/a/nodes/b/control", "nodeControlOutcome"),
+            (crate::GRAPH_ROUTE, "operationOutcome"),
+        ] {
+            let request = Request::put(path).body(Body::empty()).expect("request");
+            let response = admission_full_response(&request);
+            let body = to_bytes(response.into_body(), 4096).await.expect("body");
+            let body: Value = serde_json::from_slice(&body).expect("JSON");
+            assert_eq!(
+                body["parameters"],
+                json!({outcome: "not_applied"}),
+                "{path}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn panic_and_oversize_are_uncertain_without_result_header() {
+        let operations = ControlOperations::new();
+        let router = test_router(
+            operations.clone(),
+            post(|| async {
+                tokio::time::sleep(Duration::from_millis(120)).await;
+                panic_status()
+            }),
+        );
+        let response = router
+            .oneshot(Request::post("/work").body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        let id = pending_id(response).await;
+        let response = terminal_response(&operations, &id).await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(response.headers().get(RESULT_HEADER).is_none());
+        let body = to_bytes(response.into_body(), 4096).await.expect("body");
+        let body: Value = serde_json::from_slice(&body).expect("JSON");
+        assert_eq!(body["parameters"]["operationOutcome"], "uncertain");
+
+        let operations = ControlOperations::new();
+        let router = test_router(
+            operations.clone(),
+            post(|| async {
+                tokio::time::sleep(Duration::from_millis(120)).await;
+                Body::from(vec![b'x'; RESPONSE_LIMIT + 1])
+            }),
+        );
+        let response = router
+            .oneshot(Request::post("/work").body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        let id = pending_id(response).await;
+        let response = terminal_response(&operations, &id).await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(response.headers().get(RESULT_HEADER).is_none());
+    }
+}

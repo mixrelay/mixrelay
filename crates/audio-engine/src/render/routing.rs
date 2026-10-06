@@ -1,5 +1,5 @@
 //! Prepared channel operations; common full-width routes use contiguous PCM spans.
-use super::{PortSlot, buffers::port_pair};
+use super::{DelayBank, PortSlot, buffers::port_pair};
 use crate::runtime_control::ControlValue;
 
 #[derive(Debug)]
@@ -14,6 +14,7 @@ pub(super) struct RouteOp {
     destination: PortSlot,
     channels: ChannelTransfer,
     controls: [usize; 2],
+    delay_index: usize,
 }
 
 impl RouteOp {
@@ -22,6 +23,7 @@ impl RouteOp {
         destination: PortSlot,
         controls: [usize; 2],
         routes: impl ExactSizeIterator<Item = (u16, u16)> + Clone,
+        delay_index: usize,
     ) -> Self {
         let contiguous = source.channels == destination.channels
             && routes.len() == usize::from(source.channels)
@@ -33,6 +35,7 @@ impl RouteOp {
             source,
             destination,
             controls,
+            delay_index,
             channels: if contiguous {
                 ChannelTransfer::Contiguous
             } else {
@@ -41,8 +44,11 @@ impl RouteOp {
         }
     }
 
-    fn apply(&self, arena: &mut [f32], frames: usize) {
+    fn apply(&self, arena: &mut [f32], frames: usize, bank: Option<&mut DelayBank>) {
         let (source, destination) = port_pair(arena, self.source, self.destination, frames);
+        let source = bank
+            .and_then(|bank| bank.delayed(self.delay_index, source, frames))
+            .unwrap_or(source);
         match &self.channels {
             ChannelTransfer::Contiguous => {
                 for (destination, source) in destination.iter_mut().zip(source) {
@@ -68,6 +74,7 @@ pub(super) fn apply_routes(
     routes: &[RouteOp],
     controls: &[ControlValue],
     frames: usize,
+    mut bank: Option<&mut DelayBank>,
 ) {
     for route in routes {
         if route
@@ -75,7 +82,7 @@ pub(super) fn apply_routes(
             .iter()
             .all(|&index| controls[index].control.enabled)
         {
-            route.apply(arena, frames);
+            route.apply(arena, frames, bank.as_deref_mut());
         }
     }
 }
@@ -100,7 +107,7 @@ mod tests {
                     let pairs: Vec<_> = (0..channels)
                         .map(|from| (from, if mapped { 0 } else { from }))
                         .collect();
-                    let route = RouteOp::new(source, destination, [0, 1], pairs.iter().copied());
+                    let route = RouteOp::new(source, destination, [0, 1], pairs.iter().copied(), 0);
                     assert_eq!(matches!(route.channels, ChannelTransfer::Mapped(_)), mapped);
                     let mut arena = vec![0.0_f32; samples * 2];
                     for (i, value) in arena[source.offset..source.offset + samples]
@@ -117,7 +124,7 @@ mod tests {
                                 input[frame * usize::from(channels) + usize::from(from)];
                         }
                     }
-                    route.apply(&mut arena, 3);
+                    route.apply(&mut arena, 3, None);
                     assert!(
                         arena[destination.offset..destination.offset + samples]
                             .iter()

@@ -264,8 +264,8 @@ fn resolve_virtual_endpoint(
     if reference.capture {
         let stream = config
             .spec
-            .capture
-            .ok_or_else(|| invalid("virtual endpoint sink requires a native capture stream"))?;
+            .render
+            .ok_or_else(|| invalid("virtual endpoint sink requires a native render stream"))?;
         inputs.push(CompiledPort::new(
             PortId::from(TO_OS_PORT_ID),
             PortDirection::Input,
@@ -275,14 +275,9 @@ fn resolve_virtual_endpoint(
     if reference.render {
         let channels = config
             .spec
-            .render
-            .iter()
-            .chain(config.spec.capture.iter())
-            .map(|stream| stream.channels)
-            .max()
-            .ok_or_else(|| {
-                invalid("virtual endpoint source requires at least one native stream")
-            })?;
+            .capture
+            .ok_or_else(|| invalid("virtual endpoint source requires a native capture stream"))?
+            .channels;
         outputs.push(CompiledPort::new(
             PortId::from(FROM_OS_PORT_ID),
             PortDirection::Output,
@@ -301,7 +296,7 @@ fn resolve_virtual_transport(
         .map_err(|error| invalid(error.to_string()))?;
     Ok(ResolvedNode {
         inputs: spec
-            .capture
+            .render
             .iter()
             .map(|stream| {
                 CompiledPort::new(
@@ -312,7 +307,7 @@ fn resolve_virtual_transport(
             })
             .collect(),
         outputs: spec
-            .render
+            .capture
             .iter()
             .map(|stream| {
                 CompiledPort::new(
@@ -484,7 +479,7 @@ fn resolve_dormant_provider(
     let NodeConfig::Provider(config) = &node.config else {
         return Err(error);
     };
-    let Some(ports) = config.ports else {
+    let Some(ports) = &config.ports else {
         // No native provider and no saved geometry: keep the dormant identity, but
         // never invent connection ports or instantiate an unavailable processor.
         return Ok(ResolvedNode {
@@ -492,12 +487,28 @@ fn resolve_dormant_provider(
             outputs: Vec::new(),
         });
     };
-    validate_channels(ports.inputs, context.limits.max_channels_per_port)?;
-    validate_channels(ports.outputs, context.limits.max_channels_per_port)?;
-    Ok(ResolvedNode {
-        inputs: vec![audio_port(PortDirection::Input, ports.inputs)],
-        outputs: vec![audio_port(PortDirection::Output, ports.outputs)],
-    })
+    ports
+        .validate()
+        .map_err(|error| invalid(error.to_string()))?;
+    let mut inputs = Vec::with_capacity(ports.inputs.len());
+    for bus in &ports.inputs {
+        validate_channels(bus.channels, context.limits.max_channels_per_port)?;
+        inputs.push(CompiledPort::new(
+            bus.id.clone(),
+            PortDirection::Input,
+            bus.channels,
+        ));
+    }
+    let mut outputs = Vec::with_capacity(ports.outputs.len());
+    for bus in &ports.outputs {
+        validate_channels(bus.channels, context.limits.max_channels_per_port)?;
+        outputs.push(CompiledPort::new(
+            bus.id.clone(),
+            PortDirection::Output,
+            bus.channels,
+        ));
+    }
+    Ok(ResolvedNode { inputs, outputs })
 }
 
 fn validate_document(document: &GraphDocument, context: &CompileContext) -> Vec<GraphIssue> {

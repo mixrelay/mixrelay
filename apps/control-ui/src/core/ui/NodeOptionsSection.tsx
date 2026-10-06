@@ -1,6 +1,9 @@
 import { UnstyledButton } from '@mantine/core';
-import type { ReactNode } from 'react';
+import { useResizeObserver } from '@mantine/hooks';
+import { createContext, type ReactNode, useContext, useLayoutEffect } from 'react';
 import styles from './AudioNodeCard.module.css';
+
+export const NodeDisclosureMeasureContext = createContext<(() => void) | null>(null);
 
 /** Shared node disclosure; expanding settings never changes the cable anchor face. */
 export function NodeOptionsSection({
@@ -16,6 +19,15 @@ export function NodeOptionsSection({
   children: ReactNode;
   disabled?: boolean;
 }) {
+  const measureDisclosure = useContext(NodeDisclosureMeasureContext);
+  const [panelRef, panelBounds] = useResizeObserver<HTMLDivElement>();
+  useLayoutEffect(() => {
+    // The panel's observer and open state only signal when to read both live boxes.
+    void opened;
+    void panelBounds.height;
+    void panelBounds.width;
+    measureDisclosure?.();
+  }, [opened, panelBounds.height, panelBounds.width, measureDisclosure]);
   return (
     <>
       <UnstyledButton
@@ -36,7 +48,12 @@ export function NodeOptionsSection({
         <span>{label}</span>
       </UnstyledButton>
       {opened ? (
-        <div className={`${styles.optionsPanel} nodrag nopan nowheel`} inert={disabled}>
+        <div
+          ref={panelRef}
+          data-node-disclosure=""
+          className={`${styles.optionsPanel} nodrag nopan nowheel`}
+          inert={disabled}
+        >
           {children}
         </div>
       ) : null}

@@ -6,10 +6,13 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const [inspect, evidence, approval] = process.argv.slice(2);
+const [inspect, endpointId, evidence, approval] = process.argv.slice(2);
 assert.equal(process.platform, 'darwin');
 assert.equal(approval, '--verify-installed-channels');
 assert.ok(isAbsolute(inspect) && isAbsolute(evidence));
+assert.match(endpointId, /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
+assert.notEqual(endpointId, '00000000-0000-0000-0000-000000000000');
+const uid = `io.mixrelay.audio.endpoint.${endpointId.replaceAll('-', '')}`;
 const base = 'http://127.0.0.1:19341/api/v1';
 async function api(path, body) {
   const response = await fetch(`${base}/${path}`, {
@@ -22,7 +25,7 @@ async function api(path, body) {
 }
 function native() {
   return JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', '-'], {
-    input: execFileSync(inspect, { timeout: 3000 }), encoding: 'utf8',
+    input: execFileSync(inspect, [uid], { timeout: 3000 }), encoding: 'utf8',
   }));
 }
 async function until(check) {
@@ -33,8 +36,11 @@ async function until(check) {
   assert.fail('HAL channel publication timeout');
 }
 const original = await api('graph');
+const settings = (await api('status')).audioSession.virtualEndpointSettings;
+const device = settings.devices.find(device => device.spec.id === endpointId);
+assert.ok(device?.nativeDeviceIds.includes(uid), 'Endpoint is not published by the current engine');
 const before = native();
-const target = original.nodes.find(node => node.type === 'virtual_endpoint' && node.config.id === 'default-virtual-io');
+const target = original.nodes.find(node => node.type === 'virtual_endpoint' && node.config.id === endpointId);
 assert.ok(target?.config.render && target.config.capture);
 // Refuse a geometry change that could invalidate even one existing cable.
 for (const edge of original.edges) {

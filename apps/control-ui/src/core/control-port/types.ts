@@ -11,7 +11,9 @@ export type DriverState =
 
 export interface MixRelayStatus {
   enginePower?: { enabled: boolean; transitioning: boolean };
+  failedProcessors?: FailedProcessorInstance[];
   processorTimings?: ProcessorTiming[];
+  processorLatencies?: ProcessorLatency[];
   recorderError?: string | null;
   protocolVersion: 1;
   driverState: DriverState;
@@ -22,10 +24,26 @@ export interface MixRelayStatus {
   audioSession?: AudioSessionStatus;
 }
 
+/** Opaque native instance identity for a processor whose DSP instance has failed. */
+export interface FailedProcessorInstance {
+  graphId: string;
+  instanceId: string;
+  nodeId: string;
+}
+
 export interface ProcessorTiming {
   graphId: string;
   nodeId: string;
   roundTripNs: number;
+}
+
+/** Cached frame-domain latency, not a wall-clock measurement or PDC guarantee. */
+export interface ProcessorLatency {
+  graphId: string;
+  nodeId: string;
+  transportFrames: number;
+  /** null means unknown; zero is a reported zero-latency value. */
+  intrinsicFrames: number | null;
 }
 
 export interface AudioSessionStatus {
@@ -53,7 +71,7 @@ export interface AudioSessionStatus {
     | null;
   transportLatencyFrames: number | null;
   capabilities: {
-    backend: 'core_audio' | 'pipe_wire' | 'wasapi' | 'contract_only';
+    backend: 'core_audio' | 'pipe_wire' | 'contract_only';
     supportedSampleRates: number[];
     supportedBlockFrames: number[];
     canReconfigureLive: boolean;
@@ -75,8 +93,27 @@ export interface VirtualEndpointSettings {
   devices: VirtualEndpointDevice[];
 }
 
+export type NativeSampleFormat = 'float32' | 'signed16' | 'signed24' | 'signed32';
+
+export interface NativeStreamFormat {
+  sampleRate: number;
+  channels: number;
+  sampleFormat: NativeSampleFormat;
+}
+
+export interface NativeStreamFormats {
+  current: NativeStreamFormat | null;
+  supported: NativeStreamFormat[];
+}
+
+export interface NativeDeviceFormats {
+  render: NativeStreamFormats;
+  capture: NativeStreamFormats;
+}
+
 export interface VirtualEndpointDevice {
   nativeDeviceIds: string[];
+  nativeFormats: NativeDeviceFormats;
   spec: VirtualEndpointSpec;
   observedSampleRate: number | null;
   supportedSampleRates: number[];
@@ -120,7 +157,7 @@ export interface CapturableApplication {
   displayName: string;
   iconDataUrl: string | null;
   processId: number;
-  selector?: RuntimeApplicationSelector;
+  selector: RuntimeApplicationSelector;
 }
 
 export interface AudioDeviceDescriptor {
@@ -150,6 +187,11 @@ export interface NodeControlRequest {
   enabled?: boolean;
   muted?: boolean;
   gainDb?: number;
+}
+
+export interface NodeControlResponse extends GraphApplyResponse {
+  /** Native preparation may reconcile authored metadata outside the requested fields. */
+  requiresGraphReload: boolean;
 }
 
 export interface GraphNodeControls {
@@ -216,12 +258,37 @@ export interface ProcessorParameterDescriptor {
   stepCount: number;
 }
 
+export type ProviderBusKind = 'main' | 'sidechain' | 'auxiliary';
+
+export type ProviderChannelFormat = 'mono' | 'stereo' | 'surround5_1' | 'surround7_1' | 'discrete';
+
+export interface ProviderBus {
+  channelFormat: ProviderChannelFormat;
+  channels: number;
+  id: string;
+  kind: ProviderBusKind;
+  name: string;
+}
+
+export interface ProviderPorts {
+  inputs: ProviderBus[];
+  layoutId: string;
+  outputs: ProviderBus[];
+}
+
+export interface ProviderNodeConfig {
+  parameters?: Record<string, unknown>;
+  ports?: ProviderPorts;
+  /** The plug-in identity; layoutId is stored only inside ports. */
+  typeId: string;
+}
+
 export interface ExternalProcessorDescriptor {
   displayName: string;
   format: 'au' | 'auv3' | 'clap' | 'lv2' | 'vst3';
   hasEditor: boolean;
-  inputChannels: number;
-  outputChannels: number;
+  layouts: ProviderPorts[];
+  defaultLayoutId: string;
   parameters: ProcessorParameterDescriptor[];
   typeId: string;
   vendor: string;
@@ -277,6 +344,14 @@ export interface GraphApplyResponse {
   persistenceError?: string;
 }
 
+export interface ProcessorRetryRequest {
+  expectedCatalogRevision: number;
+  expectedInstanceId: string;
+  expectedRevision: number;
+  graphId: string;
+  nodeId: string;
+}
+
 /** Only controls explicitly edited by this client; never inferred from a stale engine snapshot. */
 export interface ProcessorParameterChange {
   nodeId: string;
@@ -304,6 +379,8 @@ export type ProtocolErrorCode =
   | 'graph_exchange_busy'
   | 'graph_invalid'
   | 'graph_revision_stale'
+  | 'processor_instance_stale'
+  | 'processor_not_failed'
   | 'processor_unavailable';
 
 export interface ProtocolErrorBody {
@@ -331,9 +408,12 @@ export type RecorderEncoding = 'pcm16' | 'pcm24' | 'float32';
 
 export interface RecorderRequest {
   action: 'record' | 'pause' | 'stop';
-  path?: string;
-  sampleRate?: number | null;
-  encoding?: RecorderEncoding;
+}
+
+export interface RecorderSettings {
+  folder: string;
+  sampleRate: number | null;
+  encoding: RecorderEncoding;
 }
 
 export interface RecorderStatus {
@@ -351,7 +431,7 @@ export interface ControlPort {
     graphId: string,
     nodeId: string,
     request: NodeControlRequest,
-  ): Promise<GraphApplyResponse>;
+  ): Promise<NodeControlResponse>;
   workspaceFile?(request: {
     action: 'new' | 'open' | 'save' | 'save_as';
     expectedRevision: number;
@@ -370,8 +450,14 @@ export interface ControlPort {
     request: RecorderRequest,
     expectedRevision: number,
   ): Promise<RecorderStatus>;
-  selectRecordingPath?(options: { defaultPath?: string; title?: string }): Promise<string | null>;
-  defaultRecordingPath?(): Promise<string>;
+  recordingSettings(graphId: string, nodeId: string): Promise<RecorderSettings>;
+  setRecordingSettings(
+    graphId: string,
+    nodeId: string,
+    settings: RecorderSettings,
+    expectedRevision: number,
+  ): Promise<RecorderSettings>;
+  selectRecordingFolder?(options: { defaultPath?: string; title?: string }): Promise<string | null>;
   setVirtualEndpointSampleRate?(request: VirtualEndpointFormatRequest): Promise<GraphApplyResponse>;
   getGraphLayout?(graphId: string): Promise<GraphLayoutResponse>;
   setGraphLayout?(graphId: string, request: GraphLayoutRequest): Promise<GraphLayoutResponse>;
@@ -396,6 +482,8 @@ export interface ControlPort {
     value: number,
     expectedRevision: number,
   ): Promise<ProcessorParameterUpdateResponse>;
+  /** Explicitly retries one failed processor instance; adapters must not retry this request. */
+  retryProcessor?(request: ProcessorRetryRequest): Promise<GraphApplyResponse>;
   setProcessorEditor(
     nodeId: string,
     open: boolean,

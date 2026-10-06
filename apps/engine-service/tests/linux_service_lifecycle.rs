@@ -1,0 +1,254 @@
+//! Production executable checks confined to the owned private `PipeWire` harness.
+#![cfg(target_os = "linux")]
+
+use mixrelay_audio_io::process::ProcessingState;
+use mixrelay_control_protocol::AppStatus;
+use serde_json::Value;
+use std::{
+    fs::{self, File},
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
+    path::{Path, PathBuf},
+    process::{Child, Command, ExitStatus, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
+
+const ADDRESS: &str = "127.0.0.1:19341";
+
+#[test]
+#[ignore = "requires owned isolated PipeWire daemon and private config namespace"]
+fn native_linux_service_desktop_owned_shutdown() {
+    let fixture = PathBuf::from(std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap());
+    let lab = fixture.parent().unwrap();
+    assert!(
+        lab.to_string_lossy()
+            .contains("/.lab/mixrelay-integration-")
+    );
+    assert_eq!(
+        PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap()),
+        lab.join("config")
+    );
+    drop(TcpListener::bind(ADDRESS).expect("private control port must be unused"));
+    let executable = Path::new(env!("CARGO_BIN_EXE_mixrelay-engine-service"));
+    let mut engine = mixrelay_engine_process::DesktopEngine::start(executable).unwrap();
+    let pid = engine.id();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !processing_is_running() {
+        assert!(engine.try_wait().unwrap().is_none());
+        assert!(
+            Instant::now() < deadline,
+            "owned engine never processed a native cycle"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        owned_registry_objects(pid) > 0,
+        "native owner was not published"
+    );
+    // A second launch must fail its own handshake, not adopt or stop this listener.
+    assert!(mixrelay_engine_process::DesktopEngine::start(executable).is_err());
+    assert!(engine.try_wait().unwrap().is_none());
+    assert!(processing_is_running());
+    engine.request_shutdown();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = engine.try_wait().unwrap() {
+            assert!(
+                status.success(),
+                "owned engine finalization failed: {status}"
+            );
+            break;
+        }
+        assert!(Instant::now() < deadline, "owner EOF did not stop engine");
+        thread::sleep(Duration::from_millis(10));
+    }
+    drop(TcpListener::bind(ADDRESS).expect("owned engine left control listener"));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while owned_registry_objects(pid) != 0 {
+        assert!(
+            Instant::now() < deadline,
+            "owned engine left native objects"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+struct Engine {
+    child: Child,
+    log: PathBuf,
+}
+
+impl Engine {
+    fn start(lab: &Path, label: &str) -> Self {
+        let log = lab.join(format!("{label}.log"));
+        let child = Command::new(env!("CARGO_BIN_EXE_mixrelay-engine-service"))
+            .env("MIXRELAY_CONFIG_DIR", lab.join("engine-config"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(File::create_new(&log).unwrap())
+            .spawn()
+            .unwrap();
+        Self { child, log }
+    }
+
+    fn wait(&mut self) -> ExitStatus {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                return status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "engine did not exit; log={}",
+                self.log.display()
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn terminate(&mut self) {
+        assert!(self.child.try_wait().unwrap().is_none());
+        // The still-owned, unreaped child cannot have its PID reused. Signal only
+        // this engine, not its process group, the daemon, or another installed app.
+        assert!(
+            Command::new("kill")
+                .args(["-TERM", &self.child.id().to_string()])
+                .status()
+                .unwrap()
+                .success()
+        );
+        assert!(self.wait().success(), "graceful engine exit failed");
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+fn get_json(path: &str) -> Option<Value> {
+    let timeout = Duration::from_millis(200);
+    let mut stream = TcpStream::connect_timeout(&ADDRESS.parse().ok()?, timeout).ok()?;
+    stream.set_read_timeout(Some(timeout)).ok()?;
+    stream.set_write_timeout(Some(timeout)).ok()?;
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: {ADDRESS}\r\nConnection: close\r\n\r\n"
+    )
+    .ok()?;
+    let mut response = String::new();
+    stream.take(65_537).read_to_string(&mut response).ok()?;
+    if !response.starts_with("HTTP/1.1 200 ") || response.len() > 65_536 {
+        return None;
+    }
+    serde_json::from_str(response.split_once("\r\n\r\n")?.1).ok()
+}
+
+fn wait_running(engine: &mut Engine) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        assert!(
+            engine.child.try_wait().unwrap().is_none(),
+            "engine exited: {}",
+            fs::read_to_string(&engine.log).unwrap()
+        );
+        if processing_is_running() {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "engine never processed a native cycle"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn processing_is_running() -> bool {
+    get_json("/api/v1/status")
+        .and_then(|value| serde_json::from_value::<AppStatus>(value).ok())
+        .and_then(|status| status.audio_session)
+        .is_some_and(|session| session.processing_state == ProcessingState::Running)
+}
+
+fn owned_registry_objects(pid: u32) -> usize {
+    let output = Command::new("pw-dump").output().unwrap();
+    assert!(output.status.success());
+    let inventory: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    inventory
+        .iter()
+        .filter(|object| {
+            let value = &object["info"]["props"]["application.process.id"];
+            value.as_u64().or_else(|| value.as_str()?.parse().ok()) == Some(u64::from(pid))
+        })
+        .count()
+}
+
+#[test]
+#[ignore = "requires owned isolated PipeWire daemon and private network/config namespaces"]
+fn native_linux_service_startup_shutdown() {
+    let fixture = PathBuf::from(std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap());
+    let lab = fixture.parent().unwrap();
+    assert!(fixture.is_file() && fixture.is_absolute());
+    assert!(
+        lab.to_string_lossy()
+            .contains("/.lab/mixrelay-integration-")
+    );
+    assert_eq!(
+        PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").unwrap()),
+        lab.join("runtime")
+    );
+    drop(TcpListener::bind(ADDRESS).expect("private control port must be unused"));
+    let mut engine = Engine::start(lab, "engine");
+    wait_running(&mut engine);
+    let graph: mixrelay_audio_graph::GraphDocument =
+        serde_json::from_value(get_json("/api/v1/graph").unwrap()).unwrap();
+    assert!(graph.nodes.is_empty() && graph.edges.is_empty());
+    assert!(
+        owned_registry_objects(engine.child.id()) > 0,
+        "native graph driver was not published"
+    );
+    let mut rejected = Engine::start(lab, "occupied-port");
+    assert!(!rejected.wait().success());
+    assert!(
+        fs::read_to_string(&rejected.log)
+            .unwrap()
+            .contains("local control")
+    );
+    assert_eq!(owned_registry_objects(rejected.child.id()), 0);
+    wait_running(&mut engine);
+    let pid = engine.child.id();
+    engine.terminate();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while owned_registry_objects(pid) != 0 {
+        assert!(
+            Instant::now() < deadline,
+            "native owners survived engine shutdown"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    drop(TcpListener::bind(ADDRESS).expect("control listener survived engine shutdown"));
+    let mut restarted = Engine::start(lab, "restarted-engine");
+    wait_running(&mut restarted);
+    let restored: mixrelay_audio_graph::GraphDocument =
+        serde_json::from_value(get_json("/api/v1/graph").unwrap()).unwrap();
+    assert!(
+        restored.revision > graph.revision,
+        "catalog restore must use a fresh runtime revision"
+    );
+    assert_eq!(
+        restored,
+        mixrelay_audio_graph::GraphDocument {
+            revision: restored.revision,
+            ..graph
+        }
+    );
+    restarted.terminate();
+    println!(
+        "ordinary_startup=running; implicit_nodes=0; occupied_port=native_owners_0; graceful_exit=0; native_owners_after_exit=0; restart=persisted_empty_graph"
+    );
+}

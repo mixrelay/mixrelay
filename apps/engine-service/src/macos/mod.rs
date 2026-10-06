@@ -1,22 +1,9 @@
-mod callback_source;
-mod callback_transport;
-mod capture_schedule;
 mod direct;
 mod endpoint_backend;
-mod endpoint_boundaries;
 mod format;
 mod maintenance;
-mod native_transport;
-#[cfg(test)]
-pub(super) mod pacing_tests;
-mod worker_io;
-use super::macos_pacing::{
-    ApplicationClockSnapshot, ApplicationPacer, HardwarePacer, NativeClockSnapshot, NativePacer,
-    Pace,
-};
-use mixrelay_audio_io::formats::MAX_BUFFER_FRAMES;
+use super::macos_pacing::{ApplicationClockSnapshot, ApplicationPacer, HardwarePacer, Pace};
 use std::{
-    net::SocketAddr,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -26,10 +13,9 @@ use mixrelay_audio_engine::{
 };
 use mixrelay_audio_graph::{CompileContext, CompileLimits, GraphCompiler, RenderFormat};
 use mixrelay_audio_io::process::{ProcessCycle, ProcessReport, TransferOutcome};
-use mixrelay_control_server::router_with_backend;
 use mixrelay_engine_service::{
-    EngineGraphController, EngineGraphControllerConfig, default_peak_meter_bank,
-    session::AdapterRuntimeStatus,
+    EngineGraphController, EngineGraphControllerConfig, control_service::ControlService,
+    default_peak_meter_bank, session::AdapterRuntimeStatus,
 };
 use mixrelay_processor_host::ProcessorCatalog;
 
@@ -37,11 +23,8 @@ use mixrelay_processor_host::ProcessorCatalog;
 pub(super) fn adapter_profile() -> mixrelay_engine_service::session::AdapterProfile {
     format::profile(mixrelay_audio_io::formats::SAMPLE_RATES.to_vec())
 }
-const CONTROL_SERVER_PORT: u16 = 19_341;
 
 use endpoint_backend::MacVirtualEndpointBackend;
-
-use mixrelay_engine_service::endpoint_service::AudioConfig as NativeAudioConfig;
 
 unsafe extern "C" {
     fn mr_engine_service_source_clock(token: u64, snapshot: *mut ApplicationClockSnapshot) -> bool;
@@ -55,92 +38,67 @@ unsafe extern "C" {
     ) -> u32;
 }
 
-struct MacEngineExternalIo<'a, T> {
+struct MacEngineExternalIo<'a> {
     devices: &'a super::macos_devices::DeviceSet,
-    primary_io: worker_io::PrimaryIo<'a, T>,
-    primary: Option<&'a mixrelay_audio_io::VirtualEndpointId>,
-    independent: &'a mut endpoint_boundaries::EndpointBoundaries<callback_transport::NativeCapture>,
 }
 
-impl<T: worker_io::Transport> ExternalIo for MacEngineExternalIo<'_, T> {
+impl ExternalIo for MacEngineExternalIo<'_> {
     fn begin_cycle(
         &mut self,
-        cycle: &ProcessCycle,
+        _cycle: &ProcessCycle,
         controls: mixrelay_audio_engine::ExternalControlState<'_>,
     ) -> mixrelay_audio_engine::CycleAdmission {
-        // Composition provides one canonical binding per physical direction.
-        // Shared graph references have already been reduced to this owner's OR.
-        for (binding, enabled) in controls.sources().chain(controls.sinks()) {
-            self.devices.set_active(binding.node_id().as_str(), enabled);
+        for (binding, enabled) in controls.sources() {
+            self.devices
+                .set_binding_active(binding.node_id().as_str(), true, enabled);
         }
-        self.independent.set_controls(controls);
-        if let Some(primary) = self.primary {
-            let admitted = self.primary_io.begin(
-                cycle,
-                endpoint_boundaries::Directions {
-                    source: controls.sources().any(|(binding, enabled)| {
-                        enabled && binding.virtual_endpoint_id() == Some(primary)
-                    }),
-                    sink: controls.sinks().any(|(binding, enabled)| {
-                        enabled && binding.virtual_endpoint_id() == Some(primary)
-                    }),
-                },
-            );
-            if !admitted {
-                return mixrelay_audio_engine::CycleAdmission::Retry;
-            }
+        for (binding, enabled) in controls.sinks() {
+            self.devices
+                .set_binding_active(binding.node_id().as_str(), false, enabled);
         }
-        self.independent.prepare_active_block(cycle.frames);
         mixrelay_audio_engine::CycleAdmission::Process
     }
+
     fn read_source(
         &mut self,
         binding: &ExternalBinding,
         destination: &mut [f32],
         cycle: &ProcessCycle,
     ) -> TransferOutcome {
-        let frames = cycle.frames;
         if let Some(outcome) = self.devices.read(binding.node_id().as_str(), destination) {
             return outcome;
         }
-        if binding.virtual_endpoint_id().is_some() && binding.virtual_endpoint_id() == self.primary
-        {
-            return self.primary_io.read(destination);
-        }
-        if let Some(outcome) = self.independent.read(binding, destination) {
-            return outcome;
-        }
-        // SAFETY: the destination is writable for `frames * binding.channels()` samples.
-        let available = unsafe {
-            mr_engine_service_read_source_clocked(
-                source_token(binding.node_id().as_str()),
-                destination.as_mut_ptr(),
-                frames,
-                u32::from(binding.channels()),
-                cycle.sample_rate,
-            )
-        };
-        TransferOutcome::complete(available)
+        read_application(binding, destination, cycle)
     }
 
     fn write_sink(
         &mut self,
         binding: &ExternalBinding,
         source: &[f32],
-        cycle: &ProcessCycle,
+        _cycle: &ProcessCycle,
     ) -> TransferOutcome {
-        if let Some(outcome) = self.devices.write(binding.node_id().as_str(), source) {
-            return outcome;
-        }
-        if binding.virtual_endpoint_id().is_some() && binding.virtual_endpoint_id() == self.primary
-        {
-            return self.primary_io.write(source, cycle.frames);
-        }
-        if let Some(outcome) = self.independent.write(binding, source) {
-            return outcome;
-        }
-        TransferOutcome::complete(0)
+        self.devices
+            .write(binding.node_id().as_str(), source)
+            .unwrap_or_else(|| TransferOutcome::complete(0))
     }
+}
+
+fn read_application(
+    binding: &ExternalBinding,
+    destination: &mut [f32],
+    cycle: &ProcessCycle,
+) -> TransferOutcome {
+    // SAFETY: DSP owns the destination for frames * the compiled binding width.
+    let available = unsafe {
+        mr_engine_service_read_source_clocked(
+            source_token(binding.node_id().as_str()),
+            destination.as_mut_ptr(),
+            cycle.frames,
+            u32::from(binding.channels()),
+            cycle.sample_rate,
+        )
+    };
+    TransferOutcome::complete(available)
 }
 
 fn source_token(source_id: &str) -> u64 {
@@ -187,7 +145,9 @@ pub(super) async fn run() -> Result<(), String> {
 async fn run_owned() -> Result<(), String> {
     // Reserve the control endpoint before native publication or audio ownership.
     // A second service must fail without preparing devices beside the running one.
-    let listener = bind_control(SocketAddr::from(([127, 0, 0, 1], CONTROL_SERVER_PORT))).await?;
+    let service = ControlService::bind()
+        .await
+        .map_err(|error| error.to_string())?;
     initialize_native_transport()?;
     let mut runtime_status = prepare_runtime();
     let format = runtime_status.restore_preferences();
@@ -196,6 +156,7 @@ async fn run_owned() -> Result<(), String> {
     let initial_document = mixrelay_audio_graph::GraphDocument::new(1, Vec::new(), Vec::new());
     let processor = create_initial_processor(&initial_document, format, Arc::clone(&meters))?;
     let exchange = Arc::new(ProcessorExchange::new(processor.plan().revision()));
+    let _latency = crate::latency_maintenance::Observer::start(&exchange, processor.plan())?;
     let initial_bindings = processor.plan().meter_bindings().to_vec();
     let endpoint_backend = Arc::new(MacVirtualEndpointBackend::new(
         mixrelay_audio_io::formats::SAMPLE_RATES.to_vec(),
@@ -206,26 +167,30 @@ async fn run_owned() -> Result<(), String> {
         format.block_frames,
     ));
     let processor_catalog = ProcessorCatalog::discover();
+    let controller = EngineGraphController::new_with_initial_document(
+        Arc::clone(&exchange),
+        EngineGraphControllerConfig {
+            format,
+            meters,
+            initial_bindings,
+            endpoint_backend: endpoint_backend.clone(),
+            required_endpoint_node_id: None,
+            processor_catalog,
+            graph_resources: devices.clone(),
+            runtime_status: devices.clone(),
+        },
+        initial_document,
+    );
+    // Saved device references are resolved through Driver's blocking control API.
+    // Recall must finish before audio starts, but outside the Tokio IO executor.
     let controller = Arc::new(
-        EngineGraphController::new_with_initial_document(
-            Arc::clone(&exchange),
-            EngineGraphControllerConfig {
-                format,
-                meters,
-                initial_bindings,
-                endpoint_backend: endpoint_backend.clone(),
-                required_endpoint_node_id: None,
-                processor_catalog,
-                graph_resources: devices.clone(),
-                runtime_status: devices.clone(),
-            },
-            initial_document,
-        )
-        .with_graph_catalog(),
+        tokio::task::spawn_blocking(move || controller.with_graph_catalog())
+            .await
+            .map_err(|error| format!("could not restore graph catalog: {error}"))?,
     );
     // Declared before AudioWorker so reclamation remains available until the
     // audio owner has stopped and joined, including partial-startup failures.
-    let _reclaimer =
+    let reclaimer =
         maintenance::start_reclaimer(Arc::downgrade(&exchange), Arc::downgrade(&devices))?;
     let worker_status = runtime_status.clone();
     let monitor_devices = devices.clone();
@@ -236,7 +201,6 @@ async fn run_owned() -> Result<(), String> {
                 processor,
                 AudioContext {
                     exchange: &exchange,
-                    endpoint_backend: &endpoint_backend,
                     runtime_status: &worker_status,
                     devices: &devices,
                 },
@@ -245,57 +209,24 @@ async fn run_owned() -> Result<(), String> {
             }
         })
         .map_err(|error| format!("could not start audio worker: {error}"))?;
-    let _worker =
+    let worker =
         mixrelay_engine_service::session::AudioWorker::new(runtime_status.clone(), audio_thread);
     let observers =
         maintenance::ControlObservers::start(&runtime_status, &controller, &monitor_devices)?;
-    let result = serve_control(listener, controller, &observers).await;
-    let saved = observers.finish();
-    result.and(saved)
-}
-
-async fn bind_control(address: SocketAddr) -> Result<tokio::net::TcpListener, String> {
-    tokio::net::TcpListener::bind(address)
-        .await
-        .map_err(|error| format!("could not bind local control server at {address}: {error}"))
-}
-
-async fn serve_control(
-    listener: tokio::net::TcpListener,
-    controller: Arc<EngineGraphController>,
-    observers: &maintenance::ControlObservers,
-) -> Result<(), String> {
-    use std::future::IntoFuture;
-    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let serving = axum::serve(
-        mixrelay_control_server::bounded_listener(listener),
-        router_with_backend(controller),
-    )
-    .with_graceful_shutdown(async move {
-        let _ = stopped.await;
-    })
-    .into_future();
-    tokio::pin!(serving);
     let shutdown = async {
         tokio::select! {
-            result = mixrelay_engine_service::session::shutdown_signal() => {
-                if let Err(error) = result {
-                    tracing::error!(%error, "engine shutdown signal failed");
-                }
-            }
-            () = desktop_released() => {}
+            result = mixrelay_engine_service::session::shutdown_signal() => result,
+            () = desktop_released() => Ok(()),
         }
     };
-    let result = tokio::select! {
-        result = &mut serving => result,
-        () = shutdown => {
-            // Close maintenance admission before waiting for accepted HTTP work.
-            observers.stop_observing();
-            let _ = stop.send(());
-            serving.await
-        }
-    };
-    result.map_err(|error| format!("local control server failed: {error}"))
+    let result = service
+        .serve(controller, shutdown, || observers.stop_observing())
+        .await
+        .map_err(|error| error.to_string());
+    let saved = observers.finish();
+    let stopped = worker.finish();
+    let released = reclaimer.finish();
+    result.and(saved).and(stopped).and(released)
 }
 
 async fn desktop_released() {
@@ -313,9 +244,6 @@ async fn desktop_released() {
         break;
     }
 }
-
-#[cfg(test)]
-mod startup_tests;
 
 fn initialize_native_transport() -> Result<(), String> {
     let exit_code = mixrelay_engine_service::endpoint_service::mr_engine_service_start();
@@ -351,7 +279,6 @@ fn create_initial_processor(
 #[derive(Clone, Copy)]
 struct AudioContext<'a> {
     exchange: &'a ProcessorExchange,
-    endpoint_backend: &'a MacVirtualEndpointBackend,
     runtime_status: &'a AdapterRuntimeStatus,
     devices: &'a super::macos_devices::MacDevices,
 }
@@ -362,15 +289,12 @@ impl AudioContext<'_> {
         active_devices: &mut super::macos_devices::DeviceSet,
         activation: &mut super::macos_devices::DeviceActivation<'_>,
     ) -> Result<bool, String> {
-        let mut activated = MacVirtualEndpointBackend::activate_recovery();
         // Same-spec native recovery must not wait for an unrelated graph edit.
         activation.activate_recovered(active_devices);
-        activated |= self.exchange.activate_pending_configured(processor, |_| {
-            self.endpoint_backend.activate_pending()?;
+        self.exchange.activate_pending_configured(processor, |_| {
             activation.activate(active_devices);
             Ok::<(), String>(())
-        })?;
-        Ok(activated)
+        })
     }
 }
 fn run_audio_worker(
@@ -381,10 +305,8 @@ fn run_audio_worker(
     let _lease = runtime_status.begin_processing()?;
     let mut activation = context.devices.activation()?;
     let mut active_devices = super::macos_devices::DeviceSet::default();
-    let mut io = worker_io::WorkerIo::prepare(processor.plan())?;
     let mut timeline = MacTimeline::new();
     let mut pacers = NativePacers::default();
-    let mut boundary_check = Instant::now();
     let mut awaiting_format = false;
 
     while !runtime_status.stop_requested() {
@@ -393,15 +315,9 @@ fn run_audio_worker(
             timeline.deadline = Instant::now();
             continue;
         }
-        let previous_format = processor.plan().format();
-        if context.activate(&mut processor, &mut active_devices, &mut activation)?
-            && io.reconcile(
-                processor.plan(),
-                processor.plan().format().sample_rate != previous_format.sample_rate,
-            )?
-        {
+        if context.activate(&mut processor, &mut active_devices, &mut activation)? {
             timeline.reset();
-            pacers.hal.reset();
+            pacers = NativePacers::default();
         }
         let format = processor.plan().format();
         if !active_devices.processing_ready(format.sample_rate) {
@@ -428,23 +344,12 @@ fn run_audio_worker(
         if let Some(plan) =
             super::macos_devices::direct::DirectPlan::prepare(&active_devices, processor.plan())
         {
-            io.retire();
             direct::run(&plan, &mut processor, context)?;
-            io = worker_io::WorkerIo::prepare(processor.plan())?;
             timeline.reset();
             pacers = NativePacers::default();
             continue;
         }
-        if boundary_check.elapsed() >= Duration::from_millis(100) && io.pending(format.sample_rate)
-        {
-            if io.reconcile(processor.plan(), false)? {
-                timeline.reset();
-                pacers.hal.reset();
-            }
-            boundary_check = Instant::now();
-        }
         process_worker_block(
-            &mut io,
             &mut timeline,
             &mut pacers,
             &mut WorkerBlock {
@@ -454,7 +359,6 @@ fn run_audio_worker(
             },
         )?;
     }
-    io.retire();
     Ok(())
 }
 
@@ -465,23 +369,13 @@ struct WorkerBlock<'a> {
 }
 
 fn process_worker_block(
-    io: &mut worker_io::WorkerIo<worker_io::NativeTransport>,
     timeline: &mut MacTimeline,
     pacers: &mut NativePacers,
     block: &mut WorkerBlock<'_>,
 ) -> Result<(), String> {
     let route = RouteClock::observe(block.processor, block.devices);
-    let endpoint = io.snapshot();
-    let (pace, clock_id) = next_native_pace(
-        pacers,
-        block.devices,
-        block.processor.plan(),
-        io.capacity(),
-        endpoint.as_ref().map_err(|error| *error),
-    );
-    let endpoint = endpoint.ok();
-    let Some((frames, discontinuity)) =
-        timeline.accept((pace, clock_id), &route, block.status, endpoint.as_ref())
+    let (pace, clock_id) = next_native_pace(pacers, block.devices, block.processor.plan(), 16_384);
+    let Some((frames, discontinuity)) = timeline.accept((pace, clock_id), &route, block.status)
     else {
         // Waking this thread creates no credit; only the selected native clock
         // advances the processor's device-owned frame coordinates.
@@ -491,20 +385,21 @@ fn process_worker_block(
     let period = Duration::from_secs_f64(
         f64::from(frames) / f64::from(block.processor.plan().format().sample_rate),
     );
-    let processed = io.process(
+    let report = process_native_cycle(
         block.processor,
+        &mut MacEngineExternalIo {
+            devices: block.devices,
+        },
         WorkerCycle {
             timeline,
             frames,
             discontinuity: discontinuity || timeline.discontinuity_pending,
-            write_hal: timeline.native && clock_id == 1 || pace == Pace::Unknown && route.has_hal,
-            devices: block.devices,
-            status: block.status,
-            endpoint,
         },
     )?;
-    timeline.discontinuity_pending = !processed;
-    mixrelay_engine_service::endpoint_service::touch_audio();
+    timeline.discontinuity_pending = report.is_none();
+    if let Some(report) = report {
+        block.status.record_process(report);
+    }
     timeline.frame += u64::from(frames);
     if !timeline.native {
         wait_for_block(&mut timeline.deadline, period);
@@ -514,7 +409,6 @@ fn process_worker_block(
 
 struct RouteClock {
     maximum_frames: u32,
-    has_hal: bool,
     synchronized: bool,
     independent_idle: bool,
 }
@@ -522,35 +416,30 @@ impl RouteClock {
     fn observe(processor: &BlockProcessor, devices: &super::macos_devices::DeviceSet) -> Self {
         let mut result = Self {
             maximum_frames: processor.plan().format().block_frames,
-            has_hal: false,
             synchronized: true,
             independent_idle: true,
         };
-        for binding in processor
-            .plan()
-            .source_bindings()
-            .iter()
-            .chain(processor.plan().sink_bindings())
+        for (input, binding) in [
+            (true, processor.plan().source_bindings()),
+            (false, processor.plan().sink_bindings()),
+        ]
+        .into_iter()
+        .flat_map(|(input, bindings)| bindings.iter().map(move |binding| (input, binding)))
         {
             let id = binding.node_id().as_str();
-            if devices.is_inactive(id) {
+            if devices.is_binding_inactive(id, input) {
                 continue;
             }
-            if binding.virtual_endpoint_id().is_some() {
-                result.has_hal = true;
+            if let Some(ready) = devices.clock_synchronized(id, input) {
+                result.synchronized &= ready;
+                result.independent_idle = false;
+            } else if let Some(clock) = application_clock(id) {
+                result.synchronized &= clock.synchronized != 0
+                    && clock.graph_rate == processor.plan().format().sample_rate;
+                result.independent_idle &= clock.running == 0;
             } else {
-                // Missing bridge evidence must not be upgraded to synchronized.
-                if let Some(ready) = devices.clock_synchronized(id) {
-                    result.synchronized &= ready;
-                    result.independent_idle = false;
-                } else if let Some(clock) = application_clock(id) {
-                    result.synchronized &= clock.synchronized != 0
-                        && clock.graph_rate == processor.plan().format().sample_rate;
-                    result.independent_idle &= clock.running == 0;
-                } else {
-                    result.synchronized = false;
-                    result.independent_idle = false;
-                }
+                result.synchronized = false;
+                result.independent_idle = false;
             }
         }
         result
@@ -559,7 +448,6 @@ impl RouteClock {
 
 #[derive(Default)]
 struct NativePacers {
-    hal: NativePacer,
     hardware: HardwarePacer,
     application: ApplicationPacer,
     selected_application: Option<u64>,
@@ -600,10 +488,8 @@ fn next_native_pace(
     devices: &super::macos_devices::DeviceSet,
     plan: &RenderPlan,
     capacity: u32,
-    observation: Result<&native_transport::EndpointSnapshot, native_transport::SnapshotError>,
 ) -> (Pace, u64) {
-    // Hardware ownership does not change when an OS client opens a virtual
-    // capture stream. That stream is an independent boundary, not a new master.
+    // Device-owned frame credit remains authoritative across Driver and physical IOProcs.
     if let Some(hardware) = devices.hardware_clock_progress() {
         let format = plan.format();
         devices.set_clock_master(Some(hardware.owner_id));
@@ -626,49 +512,27 @@ fn next_native_pace(
             2,
         );
     }
-    let endpoint = match observation {
-        Ok(endpoint) => Some(endpoint),
-        Err(native_transport::SnapshotError::Missing) => None,
-        // A bounded seqlock read can fail during an ordinary native callback.
-        // Wait without resetting credit, choosing another owner or touching PCM.
-        Err(native_transport::SnapshotError::Pending) => return (Pace::Wait, 1),
-    };
     let format = plan.format();
-    let pace = capture_schedule::pace(
-        &mut pacers.hal,
-        endpoint,
-        format.sample_rate,
-        format.block_frames,
-        capacity,
-    );
     devices.set_clock_master(None);
-    devices.set_graph_quantum(endpoint.map_or(format.block_frames, |value| {
-        value
-            .clock
-            .capture_frames
-            .max(value.clock.render_frames)
-            .max(format.block_frames)
-    }));
-    if matches!(pace, Pace::Idle | Pace::Unknown) {
-        for binding in plan.source_bindings() {
-            let id = binding.node_id().as_str();
-            if binding.virtual_endpoint_id().is_none()
-                && let Some(clock) = application_clock(id)
-                && clock.running != 0
-            {
-                pacers.select_application_master(Some(source_token(id)));
-                return (
-                    pacers.application.next(
-                        (source_token(id), clock),
-                        (format.sample_rate, format.block_frames, capacity),
-                    ),
-                    3,
-                );
-            }
+    devices.set_graph_quantum(format.block_frames);
+    for binding in plan.source_bindings() {
+        let id = binding.node_id().as_str();
+        if binding.virtual_endpoint_id().is_none()
+            && let Some(clock) = application_clock(id)
+            && clock.running != 0
+        {
+            pacers.select_application_master(Some(source_token(id)));
+            return (
+                pacers.application.next(
+                    (source_token(id), clock),
+                    (format.sample_rate, format.block_frames, capacity),
+                ),
+                3,
+            );
         }
     }
     pacers.select_application_master(None);
-    (pace, 1)
+    (Pace::Unknown, 0)
 }
 
 #[derive(Clone, Copy)]
@@ -676,10 +540,6 @@ struct WorkerCycle<'a> {
     timeline: &'a MacTimeline,
     frames: u32,
     discontinuity: bool,
-    write_hal: bool,
-    devices: &'a super::macos_devices::DeviceSet,
-    status: &'a AdapterRuntimeStatus,
-    endpoint: Option<native_transport::EndpointSnapshot>,
 }
 
 struct MacTimeline {
@@ -688,7 +548,6 @@ struct MacTimeline {
     deadline: Instant,
     native: bool,
     clock_id: u64,
-    worker_stream_identity: Option<([u8; 16], u64)>,
     discontinuity_pending: bool,
 }
 
@@ -700,7 +559,6 @@ impl MacTimeline {
             deadline: Instant::now(),
             native: false,
             clock_id: 0,
-            worker_stream_identity: None,
             discontinuity_pending: false,
         }
     }
@@ -715,7 +573,6 @@ impl MacTimeline {
         pacing: (Pace, u64),
         route: &RouteClock,
         status: &AdapterRuntimeStatus,
-        endpoint: Option<&native_transport::EndpointSnapshot>,
     ) -> Option<(u32, bool)> {
         let (pace, clock_id) = pacing;
         match pace {
@@ -752,15 +609,7 @@ impl MacTimeline {
                 }
                 self.native = false;
                 self.clock_id = 0;
-                if pace == Pace::Unknown && route.has_hal {
-                    let epoch =
-                        endpoint.map(|snapshot| (snapshot.incarnation, snapshot.render_epoch));
-                    if epoch != self.worker_stream_identity {
-                        self.worker_stream_identity = epoch;
-                        self.reset();
-                    }
-                }
-                if route.independent_idle && (pace == Pace::Idle || !route.has_hal) {
+                if route.independent_idle {
                     status.observe_clock_idle();
                 } else {
                     status.observe_clock(
@@ -784,9 +633,9 @@ fn wait_for_block(deadline: &mut Instant, period: Duration) {
     }
 }
 
-fn process_native_cycle<T: worker_io::Transport>(
+fn process_native_cycle(
     processor: &mut BlockProcessor,
-    io: &mut MacEngineExternalIo<'_, T>,
+    io: &mut MacEngineExternalIo<'_>,
     cycle: WorkerCycle<'_>,
 ) -> Result<Option<ProcessReport>, String> {
     let format = processor.plan().format();
@@ -818,33 +667,4 @@ fn process_native_cycle<T: worker_io::Transport>(
             io,
         )
         .map_err(|error| error.to_string())
-}
-
-fn block_sample_count(channels: u32, frames: u32) -> Result<usize, String> {
-    // A one-way endpoint has no storage on its inactive side. Still validate
-    // frame bounds; an absent stream must not hide an oversized callback.
-    mixrelay_audio_io::format_contract::block_sample_count(
-        channels.max(1),
-        frames,
-        u32::from(endpoint_backend::MAX_ENDPOINT_CHANNELS),
-        u32::try_from(MAX_BUFFER_FRAMES).expect("product buffer limit fits u32"),
-    )
-    .map(|samples| if channels == 0 { 0 } else { samples })
-    .map_err(|error| error.to_string())
-}
-
-#[cfg(test)]
-mod storage_tests {
-    use super::block_sample_count;
-    #[test]
-    fn one_way_and_maximum_endpoints_have_bounded_storage() {
-        for &frames in mixrelay_audio_io::formats::BUFFER_SIZES {
-            assert_eq!(block_sample_count(0, frames), Ok(0));
-            assert_eq!(block_sample_count(64, frames), Ok(64 * frames as usize));
-        }
-        assert!(block_sample_count(0, 2049).is_err());
-        assert!(block_sample_count(1, 2049).is_err());
-        assert!(block_sample_count(65, 32).is_err());
-        assert!(block_sample_count(1, 0).is_err());
-    }
 }

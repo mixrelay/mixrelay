@@ -4,8 +4,8 @@
 central block), selected on 2026-09-10. Keep its shape, color, and white background.
 
 `tray-white.svg` derives the white mark directly from `icon.png` for menu bars and
-system trays. macOS treats it as a template and adapts its color to the menu bar;
-Windows displays the white artwork. It replaces the former `MR` tray title.
+system trays. macOS treats it as a template and adapts its color to the menu bar.
+It replaces the former `MR` tray title.
 The SVG removes the neutral white background through a color-to-alpha mask and
 crops the outer margins; it does not redraw the approved contours. Render it with
 the Tauri CLI so its relative image reference resolves against this directory.

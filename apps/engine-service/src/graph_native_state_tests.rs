@@ -2,6 +2,53 @@ use super::*;
 use mixrelay_processor_host::ProcessorStateError;
 
 #[test]
+fn thirty_two_provider_checkpoint_preserves_each_state_with_independent_budgets() {
+    let fixture = Fixture::new();
+    let mut document = parameter_document();
+    let template = document.nodes[0].clone();
+    document.nodes = (0..32)
+        .map(|index| {
+            let mut node = template.clone();
+            node.id = NodeId::new(format!("effect-{index}"));
+            node
+        })
+        .collect();
+    let (engine, prepares) = parameter_fixture(document);
+    let engine = engine.with_graph_catalog_path(fixture.path());
+    let mut captures = 0;
+    engine
+        .checkpoint_processor_state_with(None, |id, timeout| {
+            // Exact full budgets catch accidental graph-wide deadline sharing without sleeps.
+            assert_eq!(timeout, mixrelay_processor_host::PROCESSOR_STATE_TIMEOUT);
+            captures += 1;
+            Ok(serde_json::json!({"nativeToken": id.as_str()}))
+        })
+        .unwrap();
+    assert_eq!(captures, 32);
+    assert_eq!(prepares.load(Ordering::Relaxed), 0);
+    let saved = engine.graph();
+    for node in &saved.nodes {
+        let NodeConfig::Provider(provider) = &node.config else {
+            panic!("provider fixture")
+        };
+        assert_eq!(
+            provider.parameters["nativeToken"],
+            crate::graph_composition::runtime_node_id("graph-1", &node.id).as_str()
+        );
+    }
+    drop(engine);
+    let (restarted, _) = parameter_fixture(GraphDocument::new(1, vec![], vec![]));
+    let restarted = restarted.with_graph_catalog_path(fixture.path());
+    let restored = restarted.graph();
+    assert!(restored.revision > saved.revision);
+    assert_eq!(restored.nodes.len(), saved.nodes.len());
+    for (actual, expected) in restored.nodes.iter().zip(&saved.nodes) {
+        assert_eq!(actual, expected);
+    }
+    assert_eq!(restored.edges, saved.edges);
+}
+
+#[test]
 fn native_editor_checkpoint_replaces_stale_overlays_and_survives_restart_without_audio_prepare() {
     let fixture = Fixture::new();
     let (engine, prepares) = parameter_fixture(parameter_document());
@@ -10,7 +57,7 @@ fn native_editor_checkpoint_replaces_stale_overlays_and_survives_restart_without
         .apply_processor_parameter_update("effect", 7, 0.25, |_, _| Ok(()))
         .unwrap();
     let before = engine.graph_catalog().unwrap();
-    let native = serde_json::json!({"stateBase64": "AgM="});
+    let native = serde_json::json!({"nativeToken": "AgM="});
     let mutation = engine.mutation.lock();
     engine
         .checkpoint_processor_state_with(Some("effect"), |id, timeout| {
@@ -57,7 +104,7 @@ fn native_editor_snapshot_failure_preserves_every_provider_and_existing_disk() {
                 if *id
                     == crate::graph_composition::runtime_node_id("graph-1", &NodeId::from("effect"))
                 {
-                    Ok(serde_json::json!({"stateBase64": "Ag=="}))
+                    Ok(serde_json::json!({"nativeToken": "Ag=="}))
                 } else {
                     Err(failure)
                 }
@@ -91,6 +138,27 @@ fn two_graph_providers() -> (Fixture, EngineGraphController, Arc<AtomicU64>) {
     (fixture, engine, prepares)
 }
 
+fn three_graph_providers() -> (Fixture, EngineGraphController) {
+    let fixture = Fixture::new();
+    let document = parameter_document();
+    fs::write(
+        fixture.path(),
+        serde_json::to_vec(&serde_json::json!({
+            "version":1, "revision":1, "activeId":"alpha", "graphs":[
+                {"id":"alpha", "name":"Alpha", "document":document},
+                {"id":"beta", "name":"Beta", "document":document},
+                {"id":"gamma", "name":"Gamma", "document":document},
+            ]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let (engine, _) = parameter_fixture(GraphDocument::new(1, vec![], vec![]));
+    let engine = engine.with_graph_catalog_path(fixture.path());
+    settle(&engine);
+    (fixture, engine)
+}
+
 #[test]
 fn all_graph_checkpoint_uses_distinct_runtime_ids_and_keeps_authored_identity_without_prepare() {
     let (_fixture, engine, prepares) = two_graph_providers();
@@ -99,9 +167,10 @@ fn all_graph_checkpoint_uses_distinct_runtime_ids_and_keeps_authored_identity_wi
     let mut captured = Vec::new();
     let mutation = engine.mutation.lock();
     engine
-        .checkpoint_processor_state_with(None, |id, _| {
+        .checkpoint_processor_state_with(None, |id, timeout| {
+            assert_eq!(timeout, mixrelay_processor_host::PROCESSOR_STATE_TIMEOUT);
             captured.push(id.clone());
-            Ok(serde_json::json!({"stateBase64":id.as_str()}))
+            Ok(serde_json::json!({"nativeToken":id.as_str()}))
         })
         .unwrap();
     drop(mutation);
@@ -111,7 +180,7 @@ fn all_graph_checkpoint_uses_distinct_runtime_ids_and_keeps_authored_identity_wi
         assert!(captured.contains(&expected));
         assert_eq!(document.nodes[0].id.as_str(), "effect");
         assert_eq!(
-            provider_parameters(document)["stateBase64"],
+            provider_parameters(document)["nativeToken"],
             expected.as_str()
         );
     }
@@ -131,20 +200,20 @@ fn background_editor_checkpoint_targets_its_owner_and_failed_all_graph_export_is
                 *id,
                 crate::graph_composition::runtime_node_id("beta", &NodeId::from("effect"))
             );
-            Ok(serde_json::json!({"stateBase64":"background"}))
+            Ok(serde_json::json!({"nativeToken":"background"}))
         })
         .unwrap();
     drop(mutation);
     assert_eq!(engine.graph(), selected);
     assert_eq!(
-        provider_parameters(&engine.read_catalog_document("beta").unwrap())["stateBase64"],
+        provider_parameters(&engine.read_catalog_document("beta").unwrap())["nativeToken"],
         "background"
     );
     let disk = fs::read(fixture.path()).unwrap();
     let mutation = engine.mutation.lock();
     let result = engine.checkpoint_processor_state_with(None, |id, _| {
         if *id == crate::graph_composition::runtime_node_id("alpha", &NodeId::from("effect")) {
-            Ok(serde_json::json!({"stateBase64":"must-not-persist"}))
+            Ok(serde_json::json!({"nativeToken":"must-not-persist"}))
         } else {
             Err(ProcessorStateError::NativeFailure)
         }
@@ -164,26 +233,84 @@ fn composition_rebuild_preserves_background_state_without_replacing_selected_edi
         panic!("fixture")
     };
     provider.parameters =
-        serde_json::json!({"stateBase64":"selected", "parameterValues":{"7":0.4}});
+        serde_json::json!({"nativeToken":"selected", "parameterValues":{"7":0.4}});
     let mut candidate = engine.catalog_candidate(&selected).unwrap();
     let mutation = engine.mutation.lock();
     engine
-        .preserve_catalog_provider_state_with(&mut candidate, |id, _| {
-            assert_eq!(
-                *id,
-                crate::graph_composition::runtime_node_id("beta", &NodeId::from("effect"))
-            );
-            Ok(serde_json::json!({"stateBase64":"background-live"}))
-        })
+        .preserve_catalog_provider_state_with_exclusion(
+            &mut candidate,
+            |id, _| {
+                assert_eq!(
+                    *id,
+                    crate::graph_composition::runtime_node_id("beta", &NodeId::from("effect"))
+                );
+                Ok(serde_json::json!({"nativeToken":"background-live"}))
+            },
+            None,
+        )
         .unwrap();
     drop(mutation);
     assert_eq!(*candidate.active_document(), selected);
     let (_, background) = candidate.documents().find(|(id, _)| *id == "beta").unwrap();
     assert_eq!(
-        provider_parameters(background)["stateBase64"],
+        provider_parameters(background)["nativeToken"],
         "background-live"
     );
     assert_eq!(prepares.load(Ordering::Relaxed), before_prepares);
+}
+
+#[test]
+fn retry_state_capture_skips_only_the_failed_instance_and_keeps_its_saved_preset() {
+    let (_fixture, engine) = three_graph_providers();
+    let initial_failed_state = provider_parameters(&engine.read_catalog_document("beta").unwrap());
+    let failed_id = crate::graph_composition::runtime_node_id("beta", &NodeId::from("effect"));
+    let mut candidate = engine.catalog_candidate(&engine.graph()).unwrap();
+    let mut selected = engine.graph();
+    selected.revision = engine.exchange.revisions().submitted + 1;
+    let mut captured = Vec::new();
+    let mutation = engine.mutation.lock();
+    engine
+        .preserve_live_processor_state_for(
+            &mut selected,
+            crate::graph_catalog::live_state::LiveStateIntent::Retry(&failed_id),
+            |id, _| {
+                captured.push(id.clone());
+                Ok(serde_json::json!({"nativeToken":"selected-live"}))
+            },
+            |_, _| true,
+        )
+        .unwrap();
+    candidate.update_document(selected.clone());
+    engine
+        .preserve_catalog_provider_state_with_exclusion(
+            &mut candidate,
+            |id, _| {
+                captured.push(id.clone());
+                Ok(serde_json::json!({"nativeToken":"healthy-live"}))
+            },
+            Some(&failed_id),
+        )
+        .unwrap();
+    drop(mutation);
+
+    assert_eq!(
+        captured,
+        vec![
+            crate::graph_composition::runtime_node_id("alpha", &NodeId::from("effect")),
+            crate::graph_composition::runtime_node_id("gamma", &NodeId::from("effect")),
+        ]
+    );
+    assert_eq!(
+        provider_parameters(&selected)["nativeToken"],
+        "selected-live"
+    );
+    let (_, failed) = candidate.documents().find(|(id, _)| *id == "beta").unwrap();
+    assert_eq!(provider_parameters(failed), initial_failed_state);
+    let (_, healthy) = candidate
+        .documents()
+        .find(|(id, _)| *id == "gamma")
+        .unwrap();
+    assert_eq!(provider_parameters(healthy)["nativeToken"], "healthy-live");
 }
 
 #[test]
@@ -203,7 +330,7 @@ fn native_editor_checkpoint_storage_failure_rolls_back_and_same_revision_retry_s
             blocked.join("graphs.json")
         };
         engine.catalog.lock().as_mut().unwrap().path = destination;
-        let native = serde_json::json!({"stateBase64": "BA=="});
+        let native = serde_json::json!({"nativeToken": "BA=="});
         let mutation = engine.mutation.lock();
         assert!(
             engine
@@ -254,4 +381,35 @@ fn native_editor_checkpoint_rejects_missing_nodes_and_pending_graph_before_snaps
     drop(mutation);
     assert_eq!(engine.graph(), document);
     assert_eq!(fs::read(fixture.path()).unwrap(), disk);
+}
+
+#[test]
+fn providerless_pending_graph_needs_no_snapshot_or_shutdown_checkpoint() {
+    let fixture = Fixture::new();
+    let (engine, _) = parameter_fixture(GraphDocument::new(1, vec![], vec![]));
+    let engine = engine.with_graph_catalog_path(fixture.path());
+    let mut document = engine.graph();
+    document.revision += 1;
+    engine
+        .apply_graph_locked(document.clone(), engine.catalog_candidate(&document))
+        .unwrap();
+    let revisions = engine.exchange.revisions();
+    assert_ne!(revisions.active, revisions.submitted);
+    let disk = fs::read(fixture.path()).unwrap();
+    {
+        let _mutation = engine.mutation.lock();
+        engine
+            .checkpoint_processor_state_with(None, |_, _| panic!("no native provider exists"))
+            .unwrap();
+    }
+    let engine = Arc::new(engine);
+    engine
+        .start_control_maintenance()
+        .unwrap()
+        .finish()
+        .unwrap();
+    assert_eq!(engine.exchange.revisions(), revisions);
+    assert_eq!(engine.graph(), document);
+    assert_eq!(fs::read(fixture.path()).unwrap(), disk);
+    assert!(engine.graph_catalog().unwrap().persistence_error.is_none());
 }

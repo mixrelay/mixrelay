@@ -193,20 +193,26 @@ mod tests {
         changed.revision += 1;
         changed.nodes[0].config = NodeConfig::Recorder { channels: 8 };
         assert_eq!(
-            engine.apply_graph(changed.clone()).unwrap_err().code,
+            engine
+                .apply_graph_request(changed.clone().into())
+                .unwrap_err()
+                .code,
             ErrorCode::RecorderFailed
         );
         engine
             .control_recorder(&graph_id, "record", command(1, RecorderAction::Pause, None))
             .unwrap();
         assert_eq!(
-            engine.apply_graph(changed.clone()).unwrap_err().code,
+            engine
+                .apply_graph_request(changed.clone().into())
+                .unwrap_err()
+                .code,
             ErrorCode::RecorderFailed
         );
         engine
             .control_recorder(&graph_id, "record", command(1, RecorderAction::Stop, None))
             .unwrap();
-        assert!(engine.apply_graph(changed).is_ok());
+        assert!(engine.apply_graph_request(changed.into()).is_ok());
     }
 
     #[test]

@@ -5,11 +5,11 @@
 //!
 //! # Lifecycle
 //!
-//! Each `.vst3` bundle exports `GetPluginFactory` (and on macOS
-//! `bundleEntry` / `bundleExit`). Loading walks:
+//! Each `.vst3` bundle exports `GetPluginFactory` plus its platform
+//! module entry and exit points. Loading walks:
 //!
 //! 1. `dlopen` the binary inside the bundle.
-//! 2. `bundleEntry()` on macOS (no-op elsewhere).
+//! 2. The platform entry point (`bundleEntry`, `ModuleEntry`, or optional `InitDll`).
 //! 3. `GetPluginFactory()` → `IPluginFactory`.
 //! 4. `createInstance(cid, IComponent::IID)` → `IComponent`.
 //! 5. `IPluginBase::initialize(host_context)` on the component.
@@ -28,13 +28,16 @@ use truce_rack_core::bus::BusLayout;
 use truce_rack_core::error::{Error, Result};
 use truce_rack_core::events::EventList;
 use truce_rack_core::info::{ParameterInfo, PluginCategory, PluginInfo, PresetInfo};
-use truce_rack_core::plugin::{Plugin, PluginCore, ProcessContext, ProcessStatus};
+use truce_rack_core::plugin::{
+    MainThreadUpdate, Plugin, PluginCore, ProcessContext, ProcessStatus,
+};
 use truce_rack_core::scanner::PluginScanner;
 use truce_rack_core::transport::TransportInfo;
 use truce_rack_core::wrapper::run_audio_block_with;
 
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::{ffi::OsStr, fs::ReadDir};
 
 use vst3::Steinberg::Vst::{
     Event, Event_::EventTypes_, Event__type0, IAudioProcessor, IAudioProcessorTrait, IComponent,
@@ -45,14 +48,20 @@ use vst3::Steinberg::Vst::{
     ProcessData, ProcessModes_, ProcessSetup, SymbolicSampleSizes_, ViewType,
 };
 use vst3::Steinberg::{
-    IBStream, IBStreamTrait, IPlugView, IPlugViewTrait, IPluginBaseTrait, IPluginFactory,
-    IPluginFactoryTrait, PClassInfo, PClassInfo_, TUID, ViewRect, kPlatformTypeHWND,
-    kPlatformTypeNSView, kPlatformTypeX11EmbedWindowID, kResultOk, kResultTrue,
+    IPlugView, IPlugViewTrait, IPluginBase, IPluginBaseTrait, IPluginFactory, IPluginFactoryTrait,
+    PClassInfo, PClassInfo_, TUID, ViewRect, kPlatformTypeHWND, kPlatformTypeNSView,
+    kPlatformTypeX11EmbedWindowID, kResultOk, kResultTrue,
 };
 use vst3::{Class, ComPtr, ComWrapper};
 
+mod activation;
 mod bus_layout;
+mod editor_frame;
+mod host_context;
+mod lifecycle;
 mod parameter_delivery;
+mod plugin_state;
+mod state_stream;
 
 /// Format identifier used on returned [`PluginInfo`].
 pub const FORMAT: &str = "vst3";
@@ -60,8 +69,63 @@ pub const FORMAT: &str = "vst3";
 /// Bundle directory suffix every VST3 plugin uses.
 pub const VST3_EXTENSION: &str = ".vst3";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LatencyServiceAction {
+    Restart,
+    Refresh,
+}
+
+fn latency_service_action(latency_changed: bool) -> LatencyServiceAction {
+    if latency_changed {
+        LatencyServiceAction::Restart
+    } else {
+        LatencyServiceAction::Refresh
+    }
+}
+
+fn latency_refresh_allowed(
+    activation_ready: bool,
+    editor_open: bool,
+    pending_changes: bool,
+) -> bool {
+    activation_ready && !editor_open && !pending_changes
+}
+
+fn refresh_latency_cache(
+    snapshot: &mut Option<u32>,
+    revision: u64,
+    query: impl FnOnce() -> u32,
+    publish: impl FnOnce(u64) -> bool,
+) -> bool {
+    let frames = query();
+    if !publish(revision) {
+        *snapshot = None;
+        return false;
+    }
+    *snapshot = Some(frames);
+    true
+}
+
+fn latency_revision_is_current(
+    captured_revision: u64,
+    current_revision: u64,
+    pending: bool,
+) -> bool {
+    captured_revision == current_revision && !pending
+}
+
 /// Symbol name `GetPluginFactory` plugins export. Same on every OS.
 const GET_FACTORY_SYMBOL: &[u8] = b"GetPluginFactory\0";
+
+#[cfg(target_os = "linux")]
+const MODULE_ENTRY_SYMBOL: &[u8] = b"ModuleEntry\0";
+#[cfg(target_os = "linux")]
+const MODULE_EXIT_SYMBOL: &[u8] = b"ModuleExit\0";
+
+#[cfg(target_os = "windows")]
+const DLL_ENTRY_SYMBOL: &[u8] = b"InitDll\0";
+#[cfg(target_os = "windows")]
+const DLL_EXIT_SYMBOL: &[u8] = b"ExitDll\0";
 
 /// macOS-only bundle entry point.
 #[cfg(target_os = "macos")]
@@ -89,17 +153,17 @@ impl PluginScanner for Vst3Scanner {
     fn scan(&self) -> Result<Vec<PluginInfo>> {
         let mut out = Vec::new();
         for dir in default_vst3_paths() {
-            if dir.exists() {
-                scan_dir_into(&dir, &mut out);
-            }
+            scan_optional_default_dir(&dir, &mut out)?;
         }
         Ok(out)
     }
 
     fn scan_path(&self, path: &Path) -> Result<Vec<PluginInfo>> {
         let mut out = Vec::new();
-        if path.exists() {
-            scan_dir_into(path, &mut out);
+        if path.extension() == Some(OsStr::new("vst3")) {
+            scan_bundle(path, &mut out)?;
+        } else {
+            scan_dir_into(path, &mut out)?;
         }
         Ok(out)
     }
@@ -138,33 +202,72 @@ pub fn default_vst3_paths() -> Vec<PathBuf> {
     out
 }
 
-fn scan_dir_into(dir: &Path, out: &mut Vec<PluginInfo>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
+fn scan_optional_default_dir(dir: &Path, out: &mut Vec<PluginInfo>) -> Result<()> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(scan_directory_error(dir, &error)),
     };
-    for entry in entries.flatten() {
+    scan_entries(dir, entries, out)
+}
+
+fn scan_dir_into(dir: &Path, out: &mut Vec<PluginInfo>) -> Result<()> {
+    let entries = std::fs::read_dir(dir).map_err(|error| scan_directory_error(dir, &error))?;
+    scan_entries(dir, entries, out)
+}
+
+fn scan_entries(dir: &Path, entries: ReadDir, out: &mut Vec<PluginInfo>) -> Result<()> {
+    for entry in entries {
+        let entry = entry.map_err(|error| scan_directory_error(dir, &error))?;
         let path = entry.path();
-        let name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
-        if !name.ends_with(VST3_EXTENSION) {
+        if path.extension() != Some(OsStr::new("vst3")) {
             continue;
         }
-        if let Err(err) = scan_bundle_into(&path, out) {
-            eprintln!("[truce-rack-vst3] skipping {}: {err}", path.display());
-        }
+        scan_bundle(&path, out)?;
     }
+    Ok(())
+}
+
+fn scan_bundle(bundle: &Path, out: &mut Vec<PluginInfo>) -> Result<()> {
+    let mut bundle_plugins = Vec::new();
+    scan_bundle_into(bundle, &mut bundle_plugins)
+        .map_err(|error| scan_bundle_error(bundle, &error))?;
+    out.extend(bundle_plugins);
+    Ok(())
+}
+
+fn scan_directory_error(dir: &Path, error: &std::io::Error) -> Error {
+    Error::Other(format!(
+        "failed to read VST3 scan directory {}: {error}",
+        dir.display()
+    ))
+}
+
+fn scan_bundle_error(bundle: &Path, error: &Error) -> Error {
+    Error::Other(format!(
+        "failed to scan VST3 bundle {}: {error}",
+        bundle.display()
+    ))
 }
 
 fn scan_bundle_into(bundle: &Path, out: &mut Vec<PluginInfo>) -> Result<()> {
     let module = unsafe { LoadedModule::open(bundle) }?;
     let factory = module.factory()?;
     let count = unsafe { factory.countClasses() };
+    if count < 0 {
+        return Err(Error::Other(format!(
+            "IPluginFactory::countClasses returned invalid count {count}"
+        )));
+    }
     let mut info = empty_pclass_info();
     for idx in 0..count {
-        if unsafe { factory.getClassInfo(idx, &raw mut info) } != kResultOk {
-            continue;
+        let status = unsafe { factory.getClassInfo(idx, &raw mut info) };
+        if status != kResultOk {
+            return Err(Error::Format {
+                format: FORMAT,
+                code: i64::from(status),
+                message: format!("IPluginFactory::getClassInfo({idx}) failed"),
+            });
         }
         let category = char8_array_to_string(&info.category);
         if category != "Audio Module Class" {
@@ -195,36 +298,34 @@ fn empty_pclass_info() -> PClassInfo {
     }
 }
 
-#[allow(clippy::cast_sign_loss)]
 fn char8_array_to_string(array: &[vst3::Steinberg::char8]) -> String {
-    // Follow the binding's C ABI: c_char is unsigned on Linux ARM64, but signed
-    // on macOS ARM64 and x86_64. Preserve the original UTF-8 byte pattern.
+    // `char8` is signed on some targets and unsigned on others. Its native
+    // representation is one byte, so this preserves the original UTF-8 bytes.
     let bytes: Vec<u8> = array
         .iter()
         .take_while(|&&b| b != 0)
-        .map(|&b| b as u8)
+        .map(|&byte| byte.to_ne_bytes()[0])
         .collect();
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
-#[allow(clippy::cast_sign_loss)]
 fn tuid_to_hex(cid: &TUID) -> String {
     use std::fmt::Write;
     let mut s = String::with_capacity(32);
-    for &b in cid {
-        let _ = write!(s, "{:02x}", b as u8);
+    for &byte in cid {
+        let _ = write!(s, "{:02x}", byte.to_ne_bytes()[0]);
     }
     s
 }
 
-#[allow(clippy::cast_possible_wrap)]
 fn hex_to_tuid(hex: &str) -> Option<TUID> {
-    if hex.len() != 32 {
+    if hex.len() != 32 || !hex.is_ascii() {
         return None;
     }
     let mut out: TUID = [0; 16];
     for i in 0..16 {
-        out[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()? as std::ffi::c_char;
+        let byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
+        out[i] = std::ffi::c_char::from_ne_bytes([byte]);
     }
     Some(out)
 }
@@ -358,7 +459,7 @@ mod mac {
 
 /// Per-platform VST3 bundle layout. Linux uses
 /// `Contents/<arch>-linux/<stem>.so`; Windows uses
-/// `Contents/<arch>-win/<stem>.vst3`. macOS goes through CFBundle
+/// `Contents/<arch>-win/<stem>.vst3`. macOS goes through `CFBundle`
 /// instead (see [`mac::MacBundle`]) so its binary lookup lives
 /// there.
 #[cfg(not(target_os = "macos"))]
@@ -379,7 +480,7 @@ fn bundle_binary_path(bundle: &Path) -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         if bundle.is_dir() {
-            let arch_dir = format!("{}-win", std::env::consts::ARCH);
+            let arch_dir = windows_arch_dir(std::env::consts::ARCH);
             let mut binary = stem.clone();
             binary.push(".vst3");
             return bundle.join("Contents").join(arch_dir).join(binary);
@@ -389,16 +490,23 @@ fn bundle_binary_path(bundle: &Path) -> PathBuf {
     bundle.to_path_buf()
 }
 
+#[cfg(any(target_os = "windows", test))]
+fn windows_arch_dir(arch: &str) -> String {
+    let arch = if arch == "aarch64" { "arm64" } else { arch };
+    format!("{arch}-win")
+}
+
 /// RAII wrapper around the loaded module. On macOS this is a real
-/// `CFBundle` so the plugin's `bundleEntry` sees the CFPlugin /
-/// CFBundleGetIdentifier context it expects (raw dlopen crashes
-/// some bundles — Surge XT Effects calls into CFPlugin's
+/// `CFBundle` so the plugin's `bundleEntry` sees the `CFPlugin` /
+/// `CFBundleGetIdentifier` context it expects (raw dlopen crashes
+/// some bundles — Surge XT Effects calls into `CFPlugin`'s
 /// `AddInstanceForFactory` during init). On Linux / Windows the
-/// underlying file is a plain dynamic library; `libloading` is
-/// enough.
+/// underlying file is a plain dynamic library; `libloading` owns its
+/// handle while platform exit runs before unload.
 #[cfg(not(target_os = "macos"))]
 struct LoadedModule {
     library: libloading::Library,
+    exit: Option<unsafe extern "system" fn() -> bool>,
 }
 
 #[cfg(target_os = "macos")]
@@ -416,15 +524,91 @@ impl LoadedModule {
                 path: bundle.to_path_buf(),
                 reason: format!("dlopen: {e}"),
             })?;
-        Ok(Self { library })
+        #[cfg(target_os = "linux")]
+        let (library, raw_handle) = linux_library_handle(library);
+        let mut module = Self {
+            library,
+            exit: None,
+        };
+        #[cfg(target_os = "linux")]
+        module.enter_linux(bundle, raw_handle)?;
+        #[cfg(target_os = "windows")]
+        module.enter_windows(bundle)?;
+        Ok(module)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn enter_linux(&mut self, bundle: &Path, raw_handle: *mut std::ffi::c_void) -> Result<()> {
+        let entry = unsafe { self.library.get::<LinuxEntry>(MODULE_ENTRY_SYMBOL) }
+            .ok()
+            .map(|symbol| *symbol);
+        let exit = unsafe {
+            self.library
+                .get::<unsafe extern "system" fn() -> bool>(MODULE_EXIT_SYMBOL)
+        }
+        .ok()
+        .map(|symbol| *symbol);
+        self.enter_linux_exports(bundle, raw_handle, entry, exit)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn enter_linux_exports(
+        &mut self,
+        bundle: &Path,
+        raw_handle: *mut std::ffi::c_void,
+        entry: Option<LinuxEntry>,
+        exit: Option<unsafe extern "system" fn() -> bool>,
+    ) -> Result<()> {
+        let entry = entry.ok_or_else(|| Error::LoadFailed {
+            path: bundle.to_path_buf(),
+            reason: "missing mandatory ModuleEntry".into(),
+        })?;
+        let exit = exit.ok_or_else(|| Error::LoadFailed {
+            path: bundle.to_path_buf(),
+            reason: "missing mandatory ModuleExit".into(),
+        })?;
+        // Keep the exit callback armed even if entry rejects after partial setup.
+        self.exit = Some(exit);
+        if !unsafe { entry(raw_handle) } {
+            return Err(Error::LoadFailed {
+                path: bundle.to_path_buf(),
+                reason: "ModuleEntry rejected the module".into(),
+            });
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "windows")]
+    fn enter_windows(&mut self, bundle: &Path) -> Result<()> {
+        let entry = unsafe {
+            self.library
+                .get::<unsafe extern "system" fn() -> bool>(DLL_ENTRY_SYMBOL)
+        }
+        .ok()
+        .map(|symbol| *symbol);
+        self.exit = unsafe {
+            self.library
+                .get::<unsafe extern "system" fn() -> bool>(DLL_EXIT_SYMBOL)
+        }
+        .ok()
+        .map(|symbol| *symbol);
+        if entry.is_some_and(|entry| !unsafe { entry() }) {
+            return Err(Error::LoadFailed {
+                path: bundle.to_path_buf(),
+                reason: "InitDll rejected the module".into(),
+            });
+        }
+        Ok(())
     }
 
     fn factory(&self) -> Result<ComPtr<IPluginFactory>> {
-        let get_factory: libloading::Symbol<'_, unsafe extern "C" fn() -> *mut IPluginFactory> =
-            unsafe { self.library.get(GET_FACTORY_SYMBOL) }.map_err(|e| Error::LoadFailed {
-                path: PathBuf::new(),
-                reason: format!("missing GetPluginFactory: {e}"),
-            })?;
+        let get_factory: libloading::Symbol<
+            '_,
+            unsafe extern "system" fn() -> *mut IPluginFactory,
+        > = unsafe { self.library.get(GET_FACTORY_SYMBOL) }.map_err(|e| Error::LoadFailed {
+            path: PathBuf::new(),
+            reason: format!("missing GetPluginFactory: {e}"),
+        })?;
         let ptr = unsafe { get_factory() };
         let factory = unsafe { ComPtr::<IPluginFactory>::from_raw(ptr) }.ok_or_else(|| {
             Error::LoadFailed {
@@ -433,6 +617,32 @@ impl LoadedModule {
             }
         })?;
         Ok(factory)
+    }
+}
+
+#[cfg(target_os = "linux")]
+type LinuxEntry = unsafe extern "system" fn(*mut std::ffi::c_void) -> bool;
+
+#[cfg(target_os = "linux")]
+fn linux_library_handle(
+    library: libloading::Library,
+) -> (libloading::Library, *mut std::ffi::c_void) {
+    let native: libloading::os::unix::Library = library.into();
+    let raw_handle = native.into_raw();
+    // SAFETY: `raw_handle` came from this exact owned Library; immediately
+    // reconstructing it transfers the single dlclose responsibility back.
+    let library = unsafe { libloading::os::unix::Library::from_raw(raw_handle) };
+    (library.into(), raw_handle)
+}
+
+#[cfg(not(target_os = "macos"))]
+impl Drop for LoadedModule {
+    fn drop(&mut self) {
+        if let Some(exit) = self.exit {
+            // SAFETY: the callback came from `self.library`, which remains loaded
+            // until this Drop body returns and its field is dropped afterward.
+            unsafe { exit() };
+        }
     }
 }
 
@@ -514,26 +724,34 @@ impl Drop for LoadedModule {
 pub struct Vst3Plugin {
     info: PluginInfo,
     layouts: Vec<BusLayout>,
-    active_layout: Option<BusLayout>,
+    native_layouts: Vec<bus_layout::NativeLayout>,
+    active_layout: Option<bus_layout::NativeLayout>,
+    /// Cached `IAudioProcessor::getLatencySamples` value from setup/activation.
+    latency_frames: Option<u32>,
+    activation_setup: Option<ProcessSetup>,
 
-    component: ComPtr<IComponent>,
-    processor: ComPtr<IAudioProcessor>,
+    // Rust releases fields in declaration order. Release child interfaces before
+    // their owning controller/component; some vendors track them independently.
+    controller_cp: Option<ComPtr<IConnectionPoint>>,
     controller: ComPtr<IEditController>,
+    processor: ComPtr<IAudioProcessor>,
+    component_cp: Option<ComPtr<IConnectionPoint>>,
+    component: ComPtr<IComponent>,
     /// `true` when controller and component are *different* COM
     /// objects (separate-controller architecture) and we've wired
     /// their connection points.
     separate_controller: bool,
-    component_cp: Option<ComPtr<IConnectionPoint>>,
-    controller_cp: Option<ComPtr<IConnectionPoint>>,
 
     param_count: usize,
     input_parameters: parameter_delivery::InputParameters,
     processing: bool,
 
-    /// Cached `IPlugView` for the plugin's editor. Created on
-    /// `open()`, released on `close()` / Drop.
-    view: Option<ComPtr<IPlugView>>,
+    /// `IPlugView` and host frame retained from attach through close.
+    editor: Option<editor_frame::EditorBinding>,
     editor_open: bool,
+
+    // Drop only after every plug-in COM interface so terminate/release can still call back.
+    host_services: host_context::HostServices,
 
     // Rust drops fields in declaration order after our Drop implementation.
     // Keep this LAST: every COM Release must run while its vtable's module is
@@ -545,87 +763,58 @@ impl Vst3Plugin {
     fn load_from(info: &PluginInfo) -> Result<Self> {
         let module = unsafe { LoadedModule::open(&info.path) }?;
         let factory = module.factory()?;
-
+        let host_services = host_context::HostServices::new();
         let cid = hex_to_tuid(&info.unique_id).ok_or_else(|| Error::LoadFailed {
             path: info.path.clone(),
             reason: format!("could not parse VST3 unique_id {:?}", info.unique_id),
         })?;
-
-        // Create IComponent.
-        let component =
-            unsafe { create_instance::<IComponent>(&factory, &cid) }.ok_or_else(|| {
-                Error::LoadFailed {
-                    path: info.path.clone(),
-                    reason: "factory.createInstance(IComponent) returned NULL".into(),
-                }
-            })?;
-        // Initialize the component. Many plugins accept a NULL
-        // context (hosts only need to supply IHostApplication for
-        // plugins that look it up via queryInterface).
-        if unsafe { component.initialize(ptr::null_mut()) } != kResultOk {
-            return Err(Error::LoadFailed {
-                path: info.path.clone(),
-                reason: "IComponent::initialize returned non-OK".into(),
-            });
-        }
-
-        // Cast to IAudioProcessor.
-        let processor = component
-            .as_com_ref()
-            .cast::<IAudioProcessor>()
-            .ok_or_else(|| Error::LoadFailed {
-                path: info.path.clone(),
-                reason: "component does not implement IAudioProcessor".into(),
-            })?;
-
-        // Look up the separate-controller class id; if present we
-        // create a separate controller and connect to it. Otherwise
-        // the component is itself the controller.
+        let context = LoadContext {
+            info,
+            factory: &factory,
+            host_services: &host_services,
+        };
+        let ComponentParts {
+            component,
+            processor,
+            lifecycle: mut component_lifecycle,
+        } = load_component(&context, &cid)?;
         let mut controller_cid: TUID = [0; 16];
         let cls_id_status = unsafe { component.getControllerClassId(&raw mut controller_cid) };
-        let (controller, separate_controller) = if cls_id_status == kResultTrue {
-            let ctrl_ptr = unsafe { create_instance::<IEditController>(&factory, &controller_cid) }
-                .ok_or_else(|| Error::LoadFailed {
-                    path: info.path.clone(),
-                    reason: "factory.createInstance(IEditController) returned NULL".into(),
-                })?;
-            if unsafe { ctrl_ptr.initialize(ptr::null_mut()) } != kResultOk {
-                return Err(Error::LoadFailed {
-                    path: info.path.clone(),
-                    reason: "IEditController::initialize returned non-OK".into(),
-                });
-            }
-            (ctrl_ptr, true)
-        } else {
-            // Single-component plugin — controller and component
-            // share an object. Cast through queryInterface so the
-            // refcount is correct.
-            let ctrl = component
-                .as_com_ref()
-                .cast::<IEditController>()
-                .ok_or_else(|| Error::LoadFailed {
-                    path: info.path.clone(),
-                    reason:
-                        "component is not its own controller and didn't report a controller cid"
-                            .into(),
-                })?;
-            (ctrl, false)
-        };
+        let ControllerParts {
+            controller,
+            separate,
+            lifecycle: mut controller_lifecycle,
+        } = load_controller(&context, &component, &controller_cid, cls_id_status)?;
 
-        // Optional: connect the two connection points so the
-        // plugin's component and controller can talk to each
-        // other (param/audio synchronisation). Best-effort —
-        // some plugins skip these even when the controller is
-        // separate.
-        let (component_cp, controller_cp) =
-            connect_peers(&component, &controller, separate_controller);
+        if !separate {
+            host_services
+                .attach_handler(&controller)
+                .map_err(|error| Error::LoadFailed {
+                    path: info.path.clone(),
+                    reason: error.to_string(),
+                })?;
+        }
+
+        // Optional VST3 peer interfaces are used only as a complete connected pair. The guard
+        // disconnects them if any later load step fails.
+        let peer_connections =
+            connect_peers(&component, &controller, separate).map_err(|error| {
+                Error::LoadFailed {
+                    path: info.path.clone(),
+                    reason: error.to_string(),
+                }
+            })?;
 
         let param_count_raw = unsafe { controller.getParameterCount() }.max(0);
         #[allow(clippy::cast_sign_loss)]
         let param_count = param_count_raw as usize;
         let input_parameters =
             parameter_delivery::InputParameters::from_controller(&controller, param_count)?;
-        let layout = bus_layout::discover(&component, &processor)?;
+        let native_layouts = bus_layout::discover(&component, &processor)?;
+        let layouts = native_layouts
+            .iter()
+            .map(|layout| layout.layout.clone())
+            .collect();
 
         let mut info = info.clone();
         // The editor exists if `createView("editor")` returns a
@@ -634,23 +823,249 @@ impl Vst3Plugin {
         // a heavier-weight host would defer this to first open.)
         info.has_editor = unsafe { create_editor_view(&controller) }.is_some();
 
+        let (component_cp, controller_cp) = peer_connections.into_parts();
+        component_lifecycle.disarm();
+        if let Some(guard) = controller_lifecycle.as_mut() {
+            guard.disarm();
+        }
         Ok(Self {
             info,
-            layouts: vec![layout],
+            layouts,
+            native_layouts,
             active_layout: None,
+            latency_frames: None,
+            activation_setup: None,
             _module: module,
             component,
             processor,
             controller,
-            separate_controller,
+            separate_controller: separate,
             component_cp,
             controller_cp,
+            host_services,
             param_count,
             input_parameters,
             processing: false,
-            view: None,
+            editor: None,
             editor_open: false,
         })
+    }
+
+    fn restart_for_latency_change(&mut self) -> Result<()> {
+        self.latency_frames = None;
+        let Some(layout) = self.active_layout.clone() else {
+            return Ok(());
+        };
+        let mut setup = self
+            .activation_setup
+            .ok_or_else(|| Error::Other("VST3 active instance lost its processing setup".into()))?;
+        let revision = self.host_services.latency_revision();
+        let mut state = activation::RestartState {
+            setup: &mut setup,
+            processing: &mut self.processing,
+            latency_frames: &mut self.latency_frames,
+        };
+        let result = activation::restart(&self.component, &self.processor, &layout, &mut state);
+        result?;
+        self.active_layout = Some(layout);
+        self.activation_setup = Some(setup);
+        self.publish_latency_revision_if_current(revision);
+        Ok(())
+    }
+
+    fn publish_latency_revision_if_current(&mut self, revision: u64) -> bool {
+        if !latency_revision_is_current(
+            revision,
+            self.host_services.latency_revision(),
+            self.has_pending_parameter_changes(),
+        ) {
+            self.latency_frames = None;
+            return false;
+        }
+        self.host_services.publish_latency_revision(revision);
+        if !latency_revision_is_current(
+            revision,
+            self.host_services.latency_revision(),
+            self.has_pending_parameter_changes(),
+        ) {
+            self.latency_frames = None;
+            return false;
+        }
+        true
+    }
+
+    fn refresh_latency_snapshot(&mut self) {
+        if self.host_services.latency_snapshot_valid() {
+            return;
+        }
+        self.latency_frames = None;
+        if !latency_refresh_allowed(
+            self.active_layout.is_some() && self.processing && self.activation_setup.is_some(),
+            self.editor_open,
+            self.has_pending_parameter_changes(),
+        ) {
+            return;
+        }
+
+        let revision = self.host_services.latency_revision();
+        let processor = &self.processor;
+        let host_services = &self.host_services;
+        let input_parameters = &self.input_parameters;
+        let mut snapshot = None;
+        let published = refresh_latency_cache(
+            &mut snapshot,
+            revision,
+            || {
+                // SAFETY: this cache refresh runs only on the fixed creator thread after
+                // setupProcessing and while the worker serializes access to the VST3 object.
+                // Native latency getters are never called from process().
+                unsafe { processor.getLatencySamples() }
+            },
+            |captured_revision| {
+                let pending =
+                    input_parameters.has_pending_changes() || host_services.has_pending_edits();
+                if !latency_revision_is_current(
+                    captured_revision,
+                    host_services.latency_revision(),
+                    pending,
+                ) {
+                    return false;
+                }
+                host_services.publish_latency_revision(captured_revision);
+                let pending =
+                    input_parameters.has_pending_changes() || host_services.has_pending_edits();
+                latency_revision_is_current(
+                    captured_revision,
+                    host_services.latency_revision(),
+                    pending,
+                )
+            },
+        );
+        if published {
+            self.latency_frames = snapshot;
+        }
+    }
+
+    fn service_requests(&mut self, flags: u32) -> Result<MainThreadUpdate> {
+        let requests = host_context::parse_restart_flags(flags)?;
+        let services = &self.host_services;
+        let parameters = &mut self.input_parameters;
+        parameters.service_output(&self.controller)?;
+        services.service_edits(|id, value| parameters.queue_id_value(id, value).is_ok())?;
+
+        let mut update = MainThreadUpdate::Unchanged;
+        if requests.parameter_titles {
+            self.input_parameters.refresh_metadata(&self.controller)?;
+            update = MainThreadUpdate::ParametersChanged;
+        }
+        // kParamValuesChanged invalidates host caches; it is not an outbound edit.
+        // parameter_value() reads the controller directly, so there is no value cache
+        // to refresh. Re-queuing restored values would block state capture until DSP runs.
+        match latency_service_action(requests.latency) {
+            LatencyServiceAction::Restart => self.restart_for_latency_change()?,
+            LatencyServiceAction::Refresh => self.refresh_latency_snapshot(),
+        }
+        Ok(update)
+    }
+}
+
+struct LoadContext<'a> {
+    info: &'a PluginInfo,
+    factory: &'a ComPtr<IPluginFactory>,
+    host_services: &'a host_context::HostServices,
+}
+
+struct ComponentParts {
+    component: ComPtr<IComponent>,
+    processor: ComPtr<IAudioProcessor>,
+    lifecycle: lifecycle::InitializedPlugin,
+}
+
+struct ControllerParts {
+    controller: ComPtr<IEditController>,
+    separate: bool,
+    lifecycle: Option<lifecycle::InitializedPlugin>,
+}
+
+fn load_component(context: &LoadContext<'_>, cid: &TUID) -> Result<ComponentParts> {
+    let component =
+        unsafe { create_instance::<IComponent>(context.factory, cid) }.ok_or_else(|| {
+            Error::LoadFailed {
+                path: context.info.path.clone(),
+                reason: "factory.createInstance(IComponent) returned NULL".into(),
+            }
+        })?;
+    let base = component
+        .as_com_ref()
+        .cast::<IPluginBase>()
+        .expect("IComponent inherits IPluginBase");
+    let lifecycle =
+        lifecycle::InitializedPlugin::initialize(&base, context.host_services.context_ptr())
+            .map_err(|error| load_error(context.info, &error))?;
+    let processor = component
+        .as_com_ref()
+        .cast::<IAudioProcessor>()
+        .ok_or_else(|| Error::LoadFailed {
+            path: context.info.path.clone(),
+            reason: "component does not implement IAudioProcessor".into(),
+        })?;
+    Ok(ComponentParts {
+        component,
+        processor,
+        lifecycle,
+    })
+}
+
+fn load_controller(
+    context: &LoadContext<'_>,
+    component: &ComPtr<IComponent>,
+    cid: &TUID,
+    status: i32,
+) -> Result<ControllerParts> {
+    if status == kResultTrue {
+        let controller = unsafe { create_instance::<IEditController>(context.factory, cid) }
+            .ok_or_else(|| Error::LoadFailed {
+                path: context.info.path.clone(),
+                reason: "factory.createInstance(IEditController) returned NULL".into(),
+            })?;
+        let base = controller
+            .as_com_ref()
+            .cast::<IPluginBase>()
+            .expect("IEditController inherits IPluginBase");
+        let lifecycle = context
+            .host_services
+            .initialize_separate_controller(&base, &controller)
+            .map_err(|error| load_error(context.info, &error))?;
+        return Ok(ControllerParts {
+            controller,
+            separate: true,
+            lifecycle: Some(lifecycle),
+        });
+    }
+    if status != vst3::Steinberg::kResultFalse {
+        return Err(Error::LoadFailed {
+            path: context.info.path.clone(),
+            reason: "IComponent::getControllerClassId failed".into(),
+        });
+    }
+    let controller = component
+        .as_com_ref()
+        .cast::<IEditController>()
+        .ok_or_else(|| Error::LoadFailed {
+            path: context.info.path.clone(),
+            reason: "component reported no separate controller but lacks IEditController".into(),
+        })?;
+    Ok(ControllerParts {
+        controller,
+        separate: false,
+        lifecycle: None,
+    })
+}
+
+fn load_error(info: &PluginInfo, error: &Error) -> Error {
+    Error::LoadFailed {
+        path: info.path.clone(),
+        reason: error.to_string(),
     }
 }
 
@@ -658,22 +1073,81 @@ fn connect_peers(
     component: &ComPtr<IComponent>,
     controller: &ComPtr<IEditController>,
     separate: bool,
-) -> (
-    Option<ComPtr<IConnectionPoint>>,
-    Option<ComPtr<IConnectionPoint>>,
-) {
+) -> Result<PeerConnections> {
     if !separate {
-        return (None, None);
+        return Ok(PeerConnections::empty());
     }
     let component_peer = component.as_com_ref().cast::<IConnectionPoint>();
     let controller_peer = controller.as_com_ref().cast::<IConnectionPoint>();
     if let (Some(component), Some(controller)) = (&component_peer, &controller_peer) {
-        unsafe {
-            component.connect(controller.as_ptr().cast());
-            controller.connect(component.as_ptr().cast());
+        return connect_pair(component.clone(), controller.clone());
+    }
+    Ok(PeerConnections::empty())
+}
+
+fn connect_pair(
+    component: ComPtr<IConnectionPoint>,
+    controller: ComPtr<IConnectionPoint>,
+) -> Result<PeerConnections> {
+    // SAFETY: both retained interfaces remain alive through each synchronous call; this pair is
+    // connected and owned on the serialized plugin lifecycle thread.
+    if unsafe { component.connect(controller.as_ptr()) } != kResultOk {
+        return Err(Error::Other(
+            "VST3 component IConnectionPoint::connect failed".into(),
+        ));
+    }
+    // SAFETY: same retained pair and lifecycle thread. Roll back the first successful connection
+    // if the reverse connection is rejected; never transfer a half-connected pair to the owner.
+    if unsafe { controller.connect(component.as_ptr()) } != kResultOk {
+        unsafe { component.disconnect(controller.as_ptr()) };
+        return Err(Error::Other(
+            "VST3 controller IConnectionPoint::connect failed".into(),
+        ));
+    }
+    Ok(PeerConnections {
+        component: Some(component),
+        controller: Some(controller),
+        connected: true,
+    })
+}
+
+struct PeerConnections {
+    component: Option<ComPtr<IConnectionPoint>>,
+    controller: Option<ComPtr<IConnectionPoint>>,
+    connected: bool,
+}
+
+impl PeerConnections {
+    fn empty() -> Self {
+        Self {
+            component: None,
+            controller: None,
+            connected: false,
         }
     }
-    (component_peer, controller_peer)
+
+    fn into_parts(
+        mut self,
+    ) -> (
+        Option<ComPtr<IConnectionPoint>>,
+        Option<ComPtr<IConnectionPoint>>,
+    ) {
+        self.connected = false;
+        (self.component.take(), self.controller.take())
+    }
+}
+
+impl Drop for PeerConnections {
+    fn drop(&mut self) {
+        if self.connected
+            && let (Some(component), Some(controller)) = (&self.component, &self.controller)
+        {
+            // SAFETY: this guard retains both connected interfaces until it disconnects them.
+            unsafe { component.disconnect(controller.as_ptr()) };
+            // SAFETY: same retained pair; disconnect the reverse peer before releasing either.
+            unsafe { controller.disconnect(component.as_ptr()) };
+        }
+    }
 }
 
 /// Call `IEditController::createView("editor")` and wrap the raw
@@ -719,16 +1193,27 @@ where
     unsafe { ComPtr::<I>::from_raw(obj.cast()) }
 }
 
+fn deactivate_before_terminate(
+    component: &ComPtr<IComponent>,
+    processor: &ComPtr<IAudioProcessor>,
+    layout: Option<&bus_layout::NativeLayout>,
+    processing: &mut bool,
+) {
+    if let Some(layout) = layout {
+        let _ = activation::deactivate(component, processor, layout, processing);
+    }
+}
+
 impl Drop for Vst3Plugin {
     fn drop(&mut self) {
         // Detach and release the editor before terminating its controller.
         truce_rack_core::PluginEditor::close(self);
-        if self.processing {
-            unsafe { self.processor.setProcessing(0) };
-        }
-        if self.active_layout.is_some() {
-            unsafe { self.component.setActive(0) };
-        }
+        deactivate_before_terminate(
+            &self.component,
+            &self.processor,
+            self.active_layout.as_ref(),
+            &mut self.processing,
+        );
         if let (Some(a), Some(b)) = (&self.component_cp, &self.controller_cp) {
             unsafe {
                 a.disconnect(b.as_com_ref().as_ptr().cast());
@@ -747,7 +1232,13 @@ impl PluginCore for Vst3Plugin {
         &self.info
     }
     fn active_layout(&self) -> Option<&BusLayout> {
-        self.active_layout.as_ref()
+        self.active_layout.as_ref().map(|layout| &layout.layout)
+    }
+    fn latency_frames(&self) -> Option<u32> {
+        self.host_services
+            .latency_snapshot_valid()
+            .then_some(self.latency_frames)
+            .flatten()
     }
     fn supported_layouts(&self) -> &[BusLayout] {
         &self.layouts
@@ -758,26 +1249,18 @@ impl PluginCore for Vst3Plugin {
     }
 
     fn parameter_info(&self, index: usize) -> Result<ParameterInfo> {
-        if index >= self.param_count {
-            return Err(Error::InvalidParameter(index));
-        }
-        let mut info = empty_parameter_info();
-        let i32_index = i32::try_from(index).map_err(|_| Error::InvalidParameter(index))?;
-        if unsafe { self.controller.getParameterInfo(i32_index, &raw mut info) } != kResultOk {
-            return Err(Error::InvalidParameter(index));
-        }
-        Ok(vst3_param_info_to_rack(&info))
+        let info = self
+            .input_parameters
+            .metadata(index)
+            .ok_or(Error::InvalidParameter(index))?;
+        Ok(vst3_param_info_to_rack(info))
     }
 
     fn parameter_value(&self, index: usize) -> Result<f64> {
-        if index >= self.param_count {
-            return Err(Error::InvalidParameter(index));
-        }
-        let mut info = empty_parameter_info();
-        let i32_index = i32::try_from(index).map_err(|_| Error::InvalidParameter(index))?;
-        if unsafe { self.controller.getParameterInfo(i32_index, &raw mut info) } != kResultOk {
-            return Err(Error::InvalidParameter(index));
-        }
+        let info = self
+            .input_parameters
+            .metadata(index)
+            .ok_or(Error::InvalidParameter(index))?;
         Ok(unsafe { self.controller.getParamNormalized(info.id) })
     }
 
@@ -791,7 +1274,15 @@ impl PluginCore for Vst3Plugin {
     }
 
     fn set_parameter(&mut self, index: usize, value: f64) -> Result<()> {
-        self.input_parameters.set(&self.controller, index, value)
+        self.host_services.ensure_creator_thread()?;
+        self.input_parameters.service_output(&self.controller)?;
+        self.input_parameters.set(&self.controller, index, value)?;
+        self.host_services.invalidate_latency();
+        Ok(())
+    }
+
+    fn has_pending_parameter_changes(&self) -> bool {
+        self.input_parameters.has_pending_changes() || self.host_services.has_pending_edits()
     }
 
     fn preset_count(&self) -> usize {
@@ -807,33 +1298,45 @@ impl PluginCore for Vst3Plugin {
     }
 
     fn save_state(&self) -> Result<Vec<u8>> {
-        let stream = ComWrapper::new(MemoryStream::default());
-        let stream_ptr = stream
-            .to_com_ptr::<IBStream>()
-            .ok_or_else(|| Error::Other("MemoryStream missing IBStream IID".into()))?;
-        let status = unsafe { self.component.getState(stream_ptr.as_ptr()) };
-        if status != kResultOk {
-            return Err(Error::Other(format!(
-                "IComponent::getState returned {status}"
-            )));
-        }
-        Ok(stream.data.borrow().clone())
+        self.host_services.ensure_creator_thread()?;
+        plugin_state::PluginState::capture(
+            |stream| {
+                // SAFETY: state capture runs on the fixed VST3 creator thread while the
+                // component and its controller are alive; the stream is a live host COM object.
+                unsafe { self.component.getState(stream) }
+            },
+            |stream| {
+                // SAFETY: the controller is retained for the plugin lifetime and state capture
+                // is serialized on its required host thread.
+                unsafe { self.controller.getState(stream) }
+            },
+        )
+        .map_err(|error| Error::Other(error.to_string()))
     }
 
     fn load_state(&mut self, bytes: &[u8]) -> Result<()> {
-        let stream = ComWrapper::new(MemoryStream {
-            data: std::cell::RefCell::new(bytes.to_vec()),
-            position: std::cell::Cell::new(0),
-        });
-        let stream_ptr = stream
-            .to_com_ptr::<IBStream>()
-            .ok_or_else(|| Error::Other("MemoryStream missing IBStream IID".into()))?;
-        let status = unsafe { self.component.setState(stream_ptr.as_ptr()) };
-        if status != kResultOk {
-            return Err(Error::Other(format!(
-                "IComponent::setState returned {status}"
-            )));
-        }
+        self.host_services.ensure_creator_thread()?;
+        plugin_state::PluginState::restore(
+            bytes,
+            || self.host_services.invalidate_latency(),
+            |stream| {
+                // SAFETY: restore validates the full container before this callback; the
+                // component is retained and this method runs on its VST3 host thread.
+                unsafe { self.component.setState(stream) }
+            },
+            |stream| {
+                // SAFETY: this receives the same validated component section after component
+                // restore, as required by the VST3 persistence call order.
+                unsafe { self.controller.setComponentState(stream) }
+            },
+            |stream| {
+                // SAFETY: this receives a validated controller section and runs on the fixed
+                // creator thread while the controller remains retained.
+                unsafe { self.controller.setState(stream) }
+            },
+        )
+        .map_err(|error| Error::Other(error.to_string()))?;
+        self.input_parameters.discard_output();
         Ok(())
     }
 
@@ -843,60 +1346,75 @@ impl PluginCore for Vst3Plugin {
         sample_rate: f64,
         max_block_size: usize,
     ) -> Result<()> {
+        self.host_services.ensure_creator_thread()?;
         if self.is_active() {
             return Err(Error::Other(
                 "VST3 must be deactivated before changing layout".into(),
             ));
         }
-        bus_layout::negotiate(&self.component, &self.processor, &layout)?;
-
+        let native_layout = bus_layout::select_layout(&self.native_layouts, &layout)?;
+        let prepared_output = self.input_parameters.output_replacement(max_block_size)?;
+        let maximum_block = i32::try_from(max_block_size)
+            .map_err(|_| Error::Other("invalid VST3 maximum block size".into()))?;
+        self.latency_frames = None;
+        let latency_revision = self.host_services.latency_revision();
         let mut setup = ProcessSetup {
-            #[allow(clippy::cast_possible_wrap)]
-            processMode: ProcessModes_::kRealtime as i32,
-            #[allow(clippy::cast_possible_wrap)]
-            symbolicSampleSize: SymbolicSampleSizes_::kSample32 as i32,
-            maxSamplesPerBlock: i32::try_from(max_block_size).unwrap_or(i32::MAX),
+            processMode: i32::from_ne_bytes(ProcessModes_::kRealtime.to_ne_bytes()),
+            symbolicSampleSize: i32::from_ne_bytes(SymbolicSampleSizes_::kSample32.to_ne_bytes()),
+            maxSamplesPerBlock: maximum_block,
             sampleRate: sample_rate,
         };
-        if unsafe { self.processor.setupProcessing(&raw mut setup) } != kResultOk {
-            return Err(Error::Other(
-                "IAudioProcessor::setupProcessing failed".into(),
-            ));
-        }
-        bus_layout::activate_buses(&self.component, &layout, true)?;
-        if unsafe { self.component.setActive(1) } != kResultOk {
-            unsafe { self.component.setActive(0) };
-            let _ = bus_layout::activate_buses(&self.component, &layout, false);
-            return Err(Error::Other("IComponent::setActive(true) failed".into()));
-        }
-        if unsafe { self.processor.setProcessing(1) } != kResultOk {
-            unsafe {
-                self.processor.setProcessing(0);
-                self.component.setActive(0);
-            }
-            let _ = bus_layout::activate_buses(&self.component, &layout, false);
-            return Err(Error::Other(
-                "IAudioProcessor::setProcessing(true) failed".into(),
-            ));
-        }
+        activation::activate(
+            &self.component,
+            &self.processor,
+            &native_layout,
+            &mut setup,
+            &mut self.latency_frames,
+        )?;
+        self.input_parameters.install_output(prepared_output);
         self.processing = true;
-        self.active_layout = Some(layout);
+        self.active_layout = Some(native_layout);
+        self.activation_setup = Some(setup);
+        self.publish_latency_revision_if_current(latency_revision);
         Ok(())
     }
 
     fn deactivate(&mut self) {
-        if self.processing {
-            unsafe { self.processor.setProcessing(0) };
-            self.processing = false;
+        if let Some(layout) = self.active_layout.clone()
+            && activation::deactivate(
+                &self.component,
+                &self.processor,
+                &layout,
+                &mut self.processing,
+            )
+            .is_ok()
+        {
+            self.active_layout = None;
+            self.activation_setup = None;
         }
-        if let Some(layout) = &self.active_layout {
-            unsafe { self.component.setActive(0) };
-            let _ = bus_layout::activate_buses(&self.component, layout, false);
-        }
-        self.active_layout = None;
+        self.host_services.invalidate_latency();
     }
     fn is_active(&self) -> bool {
         self.active_layout.is_some()
+    }
+
+    fn service_main_thread(&mut self) -> Result<MainThreadUpdate> {
+        if let Err(error) = self.host_services.ensure_creator_thread() {
+            self.latency_frames = None;
+            self.host_services.fail_closed();
+            return Err(error);
+        }
+        let flags = self.host_services.take_restart_flags();
+        if self.host_services.callbacks_failed() {
+            self.latency_frames = None;
+            return Err(Error::Other("VST3 host callback previously failed".into()));
+        }
+        let result = self.service_requests(flags);
+        if result.is_err() {
+            self.latency_frames = None;
+            self.host_services.fail_closed();
+        }
+        result
     }
 
     fn editor(&mut self) -> Option<&mut dyn truce_rack_core::editor::PluginEditor> {
@@ -916,6 +1434,10 @@ impl truce_rack_core::editor::PluginEditor for Vst3Plugin {
         if self.editor_open {
             return Ok(());
         }
+        // View creation/attachment may expose mutable native UI state, including on partial
+        // failure; do not retain a pre-editor latency snapshot.
+        self.latency_frames = None;
+        self.host_services.invalidate_latency();
         let view = unsafe { create_editor_view(&self.controller) }
             .ok_or_else(|| Error::Other("IEditController::createView returned NULL".into()))?;
         let (type_str, parent_ptr) = platform_type_for_handle(parent);
@@ -924,19 +1446,20 @@ impl truce_rack_core::editor::PluginEditor for Vst3Plugin {
                 "IPlugView::isPlatformTypeSupported returned false".into(),
             ));
         }
-        if unsafe { view.attached(parent_ptr, type_str) } != kResultOk {
-            return Err(Error::Other("IPlugView::attached returned non-OK".into()));
-        }
-        self.view = Some(view);
+        self.editor = Some(
+            editor_frame::EditorBinding::attach(view, parent_ptr, type_str)
+                .map_err(|message| Error::Other(message.into()))?,
+        );
         self.editor_open = true;
         Ok(())
     }
 
     fn close(&mut self) {
-        if let Some(view) = self.view.take() {
-            unsafe { view.removed() };
-        }
+        self.editor.take();
         self.editor_open = false;
+        // The editor may have mutated latency through native UI state.
+        self.latency_frames = None;
+        self.host_services.invalidate_latency();
     }
 
     fn is_open(&self) -> bool {
@@ -944,7 +1467,7 @@ impl truce_rack_core::editor::PluginEditor for Vst3Plugin {
     }
 
     fn size(&self) -> Option<(u32, u32)> {
-        let view = self.view.as_ref()?;
+        let view = self.editor.as_ref()?.view();
         let mut rect = ViewRect {
             left: 0,
             top: 0,
@@ -960,14 +1483,14 @@ impl truce_rack_core::editor::PluginEditor for Vst3Plugin {
     }
 
     fn is_resizable(&self) -> bool {
-        let Some(view) = self.view.as_ref() else {
+        let Some(view) = self.editor.as_ref().map(editor_frame::EditorBinding::view) else {
             return false;
         };
         unsafe { view.canResize() == kResultOk }
     }
 
     fn set_size(&mut self, width: u32, height: u32) -> Option<(u32, u32)> {
-        let view = self.view.as_ref()?;
+        let view = self.editor.as_ref()?.view();
         let mut rect = ViewRect {
             left: 0,
             top: 0,
@@ -991,6 +1514,13 @@ impl truce_rack_core::editor::PluginEditor for Vst3Plugin {
 
     fn hide(&mut self) {
         // Same as show — VST3 has no distinct hide.
+    }
+
+    fn on_idle(&mut self) {
+        #[cfg(target_os = "linux")]
+        if let Some(editor) = &self.editor {
+            editor.on_idle();
+        }
     }
 }
 
@@ -1132,10 +1662,10 @@ impl Plugin<f32> for Vst3Plugin {
 
         let status = bus_layout::with_buffers(buffer, layout, |inputs, outputs| {
             let mut data = ProcessData {
-                #[allow(clippy::cast_possible_wrap)]
-                processMode: ProcessModes_::kRealtime as i32,
-                #[allow(clippy::cast_possible_wrap)]
-                symbolicSampleSize: SymbolicSampleSizes_::kSample32 as i32,
+                processMode: i32::from_ne_bytes(ProcessModes_::kRealtime.to_ne_bytes()),
+                symbolicSampleSize: i32::from_ne_bytes(
+                    SymbolicSampleSizes_::kSample32.to_ne_bytes(),
+                ),
                 numSamples: i32::try_from(frames).unwrap_or(i32::MAX),
                 numInputs: i32::try_from(inputs.len()).expect("bounded bus count"),
                 numOutputs: i32::try_from(outputs.len()).expect("bounded bus count"),
@@ -1302,121 +1832,99 @@ impl IEventListTrait for EventList3 {
     }
 }
 
-// ---------------------------------------------------------------------------
-// MemoryStream — in-memory IBStream impl for state save/load.
-// ---------------------------------------------------------------------------
-
-/// Backing storage for the `IBStream` we hand to
-/// `IComponent::setState` / `getState`. The plugin reads and
-/// writes through `read`/`write`; the host inspects
-/// `data` / `position` after the call.
-#[derive(Default)]
-struct MemoryStream {
-    data: std::cell::RefCell<Vec<u8>>,
-    position: std::cell::Cell<usize>,
-}
-
-impl Class for MemoryStream {
-    type Interfaces = (IBStream,);
-}
-
-impl IBStreamTrait for MemoryStream {
-    unsafe fn read(
-        &self,
-        buffer: *mut std::ffi::c_void,
-        num_bytes: i32,
-        num_bytes_read: *mut i32,
-    ) -> i32 {
-        if buffer.is_null() || num_bytes < 0 {
-            return -1;
-        }
-        let pos = self.position.get();
-        #[allow(clippy::cast_sign_loss)]
-        let want = num_bytes as usize;
-        let data = self.data.borrow();
-        let available = data.len().saturating_sub(pos);
-        let take = want.min(available);
-        if take > 0 {
-            unsafe {
-                std::ptr::copy_nonoverlapping(data.as_ptr().add(pos), buffer.cast::<u8>(), take);
-            }
-        }
-        self.position.set(pos + take);
-        if !num_bytes_read.is_null() {
-            unsafe {
-                *num_bytes_read = i32::try_from(take).unwrap_or(i32::MAX);
-            }
-        }
-        kResultOk
-    }
-
-    unsafe fn write(
-        &self,
-        buffer: *mut std::ffi::c_void,
-        num_bytes: i32,
-        num_bytes_written: *mut i32,
-    ) -> i32 {
-        if buffer.is_null() || num_bytes < 0 {
-            return -1;
-        }
-        let pos = self.position.get();
-        #[allow(clippy::cast_sign_loss)]
-        let want = num_bytes as usize;
-        let mut data = self.data.borrow_mut();
-        if data.len() < pos + want {
-            data.resize(pos + want, 0);
-        }
-        unsafe {
-            std::ptr::copy_nonoverlapping(buffer.cast::<u8>(), data.as_mut_ptr().add(pos), want);
-        }
-        self.position.set(pos + want);
-        if !num_bytes_written.is_null() {
-            unsafe {
-                *num_bytes_written = i32::try_from(want).unwrap_or(i32::MAX);
-            }
-        }
-        kResultOk
-    }
-
-    #[allow(clippy::cast_possible_wrap)]
-    unsafe fn seek(&self, pos: i64, mode: i32, result: *mut i64) -> i32 {
-        // VST3 SDK SeekMode: 0 = `SeekSet`, 1 = `SeekCur`, 2 = `SeekEnd`.
-        let data_len = self.data.borrow().len() as i64;
-        let current = self.position.get() as i64;
-        let new_pos = match mode {
-            0 => pos,
-            1 => current + pos,
-            2 => data_len + pos,
-            _ => return -1,
-        };
-        if new_pos < 0 {
-            return -1;
-        }
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-        self.position.set(new_pos as usize);
-        if !result.is_null() {
-            unsafe {
-                *result = new_pos;
-            }
-        }
-        kResultOk
-    }
-
-    #[allow(clippy::cast_possible_wrap)]
-    unsafe fn tell(&self, pos: *mut i64) -> i32 {
-        if pos.is_null() {
-            return -1;
-        }
-        unsafe {
-            *pos = self.position.get() as i64;
-        }
-        kResultOk
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct ScannerFixture {
+        root: PathBuf,
+    }
+
+    impl ScannerFixture {
+        fn new() -> Self {
+            let stamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock follows Unix epoch")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "truce-rack-vst3-scan-{}-{stamp}",
+                std::process::id()
+            ));
+            std::fs::create_dir(&root).expect("create isolated scanner fixture");
+            Self { root }
+        }
+
+        fn child(&self, name: &str) -> PathBuf {
+            self.root.join(name)
+        }
+    }
+
+    impl Drop for ScannerFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    struct ConnectionProbe {
+        connect_result: i32,
+        connect_event: &'static str,
+        disconnect_event: &'static str,
+        events: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl Class for ConnectionProbe {
+        type Interfaces = (IConnectionPoint,);
+    }
+
+    impl IConnectionPointTrait for ConnectionProbe {
+        unsafe fn connect(&self, _other: *mut IConnectionPoint) -> i32 {
+            self.events
+                .lock()
+                .expect("connection events")
+                .push(self.connect_event);
+            self.connect_result
+        }
+
+        unsafe fn disconnect(&self, _other: *mut IConnectionPoint) -> i32 {
+            self.events
+                .lock()
+                .expect("connection events")
+                .push(self.disconnect_event);
+            kResultOk
+        }
+
+        unsafe fn notify(&self, _message: *mut vst3::Steinberg::Vst::IMessage) -> i32 {
+            kResultOk
+        }
+    }
+
+    fn connection_pair(
+        component_result: i32,
+        controller_result: i32,
+        events: Arc<Mutex<Vec<&'static str>>>,
+    ) -> (ComPtr<IConnectionPoint>, ComPtr<IConnectionPoint>) {
+        let component = ComWrapper::new(ConnectionProbe {
+            connect_result: component_result,
+            connect_event: "component.connect",
+            disconnect_event: "component.disconnect",
+            events: Arc::clone(&events),
+        });
+        let controller = ComWrapper::new(ConnectionProbe {
+            connect_result: controller_result,
+            connect_event: "controller.connect",
+            disconnect_event: "controller.disconnect",
+            events,
+        });
+        let component_ptr = component
+            .to_com_ptr::<IConnectionPoint>()
+            .expect("component connection point");
+        let controller_ptr = controller
+            .to_com_ptr::<IConnectionPoint>()
+            .expect("controller connection point");
+        (component_ptr, controller_ptr)
+    }
 
     #[test]
     fn tuid_hex_roundtrip() {
@@ -1427,6 +1935,28 @@ mod tests {
         let hex = tuid_to_hex(&cid);
         let parsed = hex_to_tuid(&hex).expect("parse");
         assert_eq!(parsed, cid);
+    }
+
+    #[test]
+    fn tuid_hex_keeps_two_digits_for_high_bytes() {
+        let cid: TUID = [
+            0x00u8, 0x01, 0x0f, 0x10, 0x7f, 0x80, 0x81, 0xfe, 0xff, 0x02, 0x03, 0x04, 0x05, 0x06,
+            0x07, 0x08,
+        ]
+        .map(|byte| std::ffi::c_char::from_ne_bytes([byte]));
+
+        let hex = tuid_to_hex(&cid);
+
+        assert_eq!(hex, "00010f107f8081feff02030405060708");
+        assert_eq!(hex.len(), 32);
+        assert_eq!(hex_to_tuid(&hex), Some(cid));
+    }
+
+    #[test]
+    fn tuid_hex_rejects_non_ascii_without_slicing_utf8() {
+        let malformed = format!("aé{}", "0".repeat(29));
+        assert_eq!(malformed.len(), 32);
+        assert_eq!(hex_to_tuid(&malformed), None);
     }
 
     #[test]
@@ -1446,5 +1976,297 @@ mod tests {
             .map(|&byte| vst3::Steinberg::char8::from_ne_bytes([byte]))
             .collect();
         assert_eq!(char8_array_to_string(&bytes), "마이크");
+    }
+
+    #[test]
+    fn connection_guard_rolls_back_failures_and_transfers_complete_pair() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let (component_ptr, controller_ptr) = connection_pair(
+            vst3::Steinberg::kInvalidArgument,
+            kResultOk,
+            Arc::clone(&events),
+        );
+        assert!(connect_pair(component_ptr, controller_ptr).is_err());
+        assert_eq!(
+            *events.lock().expect("connection events"),
+            ["component.connect"]
+        );
+
+        events.lock().expect("connection events").clear();
+        let (component_ptr, controller_ptr) = connection_pair(
+            kResultOk,
+            vst3::Steinberg::kInvalidArgument,
+            Arc::clone(&events),
+        );
+        assert!(connect_pair(component_ptr, controller_ptr).is_err());
+        assert_eq!(
+            *events.lock().expect("connection events"),
+            [
+                "component.connect",
+                "controller.connect",
+                "component.disconnect"
+            ]
+        );
+
+        events.lock().expect("connection events").clear();
+        let (component_ptr, controller_ptr) =
+            connection_pair(kResultOk, kResultOk, Arc::clone(&events));
+        let guard = connect_pair(component_ptr, controller_ptr).expect("complete pair");
+        drop(guard);
+        assert_eq!(
+            *events.lock().expect("connection events"),
+            [
+                "component.connect",
+                "controller.connect",
+                "component.disconnect",
+                "controller.disconnect"
+            ]
+        );
+
+        events.lock().expect("connection events").clear();
+        let (component_ptr, controller_ptr) =
+            connection_pair(kResultOk, kResultOk, Arc::clone(&events));
+        let guard = connect_pair(component_ptr, controller_ptr).expect("complete pair");
+        let (component, controller) = guard.into_parts();
+        assert!(component.is_some() && controller.is_some());
+        drop(component);
+        drop(controller);
+        assert_eq!(
+            *events.lock().expect("connection events"),
+            ["component.connect", "controller.connect"]
+        );
+    }
+
+    #[test]
+    fn vst3_scanner_distinguishes_optional_default_dirs_from_explicit_paths() {
+        let fixture = ScannerFixture::new();
+        let optional_missing = fixture.child("optional-default");
+        let mut plugins = Vec::new();
+        scan_optional_default_dir(&optional_missing, &mut plugins)
+            .expect("a missing conventional directory is optional");
+        assert!(plugins.is_empty());
+
+        let explicit_missing = fixture.child("explicit-missing");
+        let error = Vst3Scanner::new()
+            .scan_path(&explicit_missing)
+            .expect_err("an explicit missing directory is an error");
+        assert!(
+            error
+                .to_string()
+                .contains(&explicit_missing.display().to_string())
+        );
+
+        let not_directory = fixture.child("not-a-directory");
+        std::fs::write(&not_directory, b"file").expect("create non-directory scan target");
+        let error = Vst3Scanner::new()
+            .scan_path(&not_directory)
+            .expect_err("an unreadable explicit scan target is an error");
+        assert!(
+            error
+                .to_string()
+                .contains(&not_directory.display().to_string())
+        );
+
+        let empty = fixture.child("empty");
+        std::fs::create_dir(&empty).expect("create empty directory");
+        assert!(
+            Vst3Scanner::new()
+                .scan_path(&empty)
+                .expect("an existing empty directory scans successfully")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn vst3_scanner_supports_exact_bundle_paths_and_propagates_corruption() {
+        let fixture = ScannerFixture::new();
+        let corrupt_bundle = fixture.child("corrupt.vst3");
+        std::fs::create_dir(&corrupt_bundle).expect("create empty corrupt bundle");
+        let exact_error = Vst3Scanner::new()
+            .scan_path(&corrupt_bundle)
+            .expect_err("an exact bundle path is opened as a bundle and errors");
+        assert!(
+            exact_error
+                .to_string()
+                .contains(&corrupt_bundle.display().to_string())
+        );
+
+        let directory = fixture.child("plugins");
+        std::fs::create_dir(&directory).expect("create plugin directory");
+        let nested_corrupt = directory.join("broken.vst3");
+        std::fs::create_dir(&nested_corrupt).expect("create corrupt candidate");
+        let directory_error = Vst3Scanner::new()
+            .scan_path(&directory)
+            .expect_err("a corrupt candidate fails the directory scan");
+        assert!(
+            directory_error
+                .to_string()
+                .contains(&nested_corrupt.display().to_string())
+        );
+    }
+
+    #[test]
+    fn windows_arm64_bundle_directory_matches_the_sdk() {
+        assert_eq!(windows_arch_dir("aarch64"), "arm64-win");
+        assert_eq!(windows_arch_dir("x86_64"), "x86_64-win");
+        assert_eq!(windows_arch_dir("x86"), "x86-win");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_module_requires_both_hooks_and_exits_after_entry() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static ENTRY_CALLS: AtomicUsize = AtomicUsize::new(0);
+        static EXIT_CALLS: AtomicUsize = AtomicUsize::new(0);
+        static LAST_HANDLE: AtomicUsize = AtomicUsize::new(0);
+
+        unsafe extern "system" fn accepted(handle: *mut std::ffi::c_void) -> bool {
+            LAST_HANDLE.store(handle as usize, Ordering::SeqCst);
+            ENTRY_CALLS.fetch_add(1, Ordering::SeqCst);
+            true
+        }
+        unsafe extern "system" fn rejected(handle: *mut std::ffi::c_void) -> bool {
+            LAST_HANDLE.store(handle as usize, Ordering::SeqCst);
+            ENTRY_CALLS.fetch_add(1, Ordering::SeqCst);
+            false
+        }
+        unsafe extern "system" fn exit() -> bool {
+            EXIT_CALLS.fetch_add(1, Ordering::SeqCst);
+            true
+        }
+        fn module() -> LoadedModule {
+            LoadedModule {
+                library: libloading::os::unix::Library::this().into(),
+                exit: None,
+            }
+        }
+
+        ENTRY_CALLS.store(0, Ordering::SeqCst);
+        EXIT_CALLS.store(0, Ordering::SeqCst);
+        let bundle = Path::new("test.vst3");
+        let handle = 0x1234usize as *mut std::ffi::c_void;
+        let mut missing = module();
+        assert!(
+            missing
+                .enter_linux_exports(bundle, handle, None, Some(exit))
+                .expect_err("ModuleEntry is mandatory")
+                .to_string()
+                .contains("ModuleEntry")
+        );
+        assert!(
+            missing
+                .enter_linux_exports(bundle, handle, Some(accepted), None)
+                .expect_err("ModuleExit is mandatory")
+                .to_string()
+                .contains("ModuleExit")
+        );
+        drop(missing);
+        assert_eq!(ENTRY_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(EXIT_CALLS.load(Ordering::SeqCst), 0);
+
+        let mut denied = module();
+        assert!(
+            denied
+                .enter_linux_exports(bundle, handle, Some(rejected), Some(exit))
+                .expect_err("rejected entry fails loading")
+                .to_string()
+                .contains("ModuleEntry rejected")
+        );
+        drop(denied);
+        assert_eq!(ENTRY_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(EXIT_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(LAST_HANDLE.load(Ordering::SeqCst), handle as usize);
+
+        let mut loaded = module();
+        loaded
+            .enter_linux_exports(bundle, handle, Some(accepted), Some(exit))
+            .expect("accepted entry loads");
+        drop(loaded);
+        assert_eq!(ENTRY_CALLS.load(Ordering::SeqCst), 2);
+        assert_eq!(EXIT_CALLS.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn ordinary_parameter_invalidation_refreshes_without_restart() {
+        let mut snapshot = Some(64);
+        let calls = std::cell::Cell::new(0);
+        let published_revision = std::cell::Cell::new(None);
+        assert_eq!(latency_service_action(false), LatencyServiceAction::Refresh);
+
+        let published = refresh_latency_cache(
+            &mut snapshot,
+            2,
+            || {
+                calls.set(calls.get() + 1);
+                96
+            },
+            |revision| {
+                published_revision.set(Some(revision));
+                true
+            },
+        );
+
+        assert!(published);
+        assert_eq!(snapshot, Some(96));
+        assert_eq!(published_revision.get(), Some(2));
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[test]
+    fn native_state_invalidation_refreshes_without_restart() {
+        let mut snapshot = None;
+        let published_revision = std::cell::Cell::new(None);
+
+        let published = refresh_latency_cache(
+            &mut snapshot,
+            7,
+            || 128,
+            |revision| {
+                published_revision.set(Some(revision));
+                true
+            },
+        );
+
+        assert!(published);
+        assert_eq!(snapshot, Some(128));
+        assert_eq!(published_revision.get(), Some(7));
+    }
+
+    #[test]
+    fn notification_during_latency_query_keeps_snapshot_unknown() {
+        let mut snapshot = Some(32);
+        let revision = std::cell::Cell::new(10);
+        let publish_called = std::cell::Cell::new(false);
+
+        let published = refresh_latency_cache(
+            &mut snapshot,
+            revision.get(),
+            || {
+                revision.set(11);
+                64
+            },
+            |captured| {
+                let current = revision.get();
+                if !latency_revision_is_current(captured, current, false) {
+                    return false;
+                }
+                publish_called.set(true);
+                true
+            },
+        );
+
+        assert!(!published);
+        assert_eq!(snapshot, None);
+        assert!(!publish_called.get());
+    }
+
+    #[test]
+    fn pending_parameter_delivery_blocks_refresh_and_latency_flags_restart() {
+        assert!(!latency_refresh_allowed(true, false, true));
+        assert!(latency_refresh_allowed(true, false, false));
+        assert!(!latency_refresh_allowed(false, false, false));
+        assert!(!latency_refresh_allowed(true, true, false));
+        assert_eq!(latency_service_action(true), LatencyServiceAction::Restart);
     }
 }

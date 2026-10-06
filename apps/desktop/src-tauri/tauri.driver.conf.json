@@ -1,0 +1,21 @@
+{
+  "productName": "MixRelayDriver",
+  "identifier": "io.mixrelay.driver.desktop",
+  "app": {
+    "windows": [{
+      "label": "main", "title": "MixRelay Driver", "url": "index.html?mode=driver",
+      "width": 400, "height": 180, "minWidth": 400, "minHeight": 180,
+      "resizable": false, "visible": false
+    }]
+  },
+  "build": {
+    "beforeDevCommand": "pnpm --dir ../.. desktop:prepare-driver --profile dev && pnpm --dir ../.. desktop:icons && pnpm --dir ../control-ui dev",
+    "beforeBuildCommand": "pnpm --dir ../.. desktop:prepare-driver --profile release && pnpm --dir ../.. desktop:icons && pnpm --dir ../control-ui build"
+  },
+  "bundle": {
+    "macOS": { "infoPlist": "Info.driver.plist" },
+    "licenseFile": "../../../LICENSE-Driver.txt",
+    "shortDescription": "Virtual audio device tray controls",
+    "longDescription": "Control the free MixRelay Driver virtual audio devices and their native formats from the tray."
+  }
+}

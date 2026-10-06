@@ -25,6 +25,9 @@ static LIVE: AtomicUsize = AtomicUsize::new(0);
 static REPLACEMENTS: AtomicUsize = AtomicUsize::new(0);
 static FAIL_REPLACE: AtomicBool = AtomicBool::new(false);
 static FAIL_CREATE_ENDPOINT: AtomicU8 = AtomicU8::new(0);
+static PAUSE_IO: AtomicBool = AtomicBool::new(false);
+static IO_ENTERED: AtomicBool = AtomicBool::new(false);
+static RELEASE_IO: AtomicBool = AtomicBool::new(false);
 
 struct Runtime {
     geometry: Geometry,
@@ -130,6 +133,12 @@ unsafe extern "C" fn io(
     samples: *mut f32,
     frames: u32,
 ) -> bool {
+    if PAUSE_IO.load(Ordering::Acquire) {
+        IO_ENTERED.store(true, Ordering::Release);
+        while !RELEASE_IO.load(Ordering::Acquire) {
+            std::thread::yield_now();
+        }
+    }
     let runtime = unsafe { &mut *runtime.cast::<Runtime>() };
     if render {
         runtime.value = unsafe { *samples };
@@ -184,6 +193,9 @@ impl Fixture {
         FAIL_REPLACE.store(false, Ordering::SeqCst);
         FAIL_CREATE_ENDPOINT.store(0, Ordering::SeqCst);
         REPLACEMENTS.store(0, Ordering::SeqCst);
+        PAUSE_IO.store(false, Ordering::SeqCst);
+        IO_ENTERED.store(false, Ordering::SeqCst);
+        RELEASE_IO.store(false, Ordering::SeqCst);
         let host = Box::new(Host {
             requests: Mutex::new(Vec::new()),
             changes: Mutex::new(Vec::new()),
@@ -308,15 +320,15 @@ fn independent_devices_enumerate_and_route_without_cross_talk() {
         assert_eq!(fixture.registry.client(id, 3, true), OK);
         assert_eq!(fixture.registry.start(id, 3, 100), OK);
     }
-    let mut first = [0.25; 64];
-    let mut second = [0.75; 64];
+    let mut first = [0.25_f32; 64];
+    let mut second = [0.75_f32; 64];
     unsafe {
         assert!(fixture.registry.io(IoOperation {
             device: a,
             stream: a + 2,
             render: true,
             frame: 0,
-            samples: first.as_mut_ptr(),
+            samples: first.as_mut_ptr().cast(),
             frames: 32
         }));
         assert!(fixture.registry.io(IoOperation {
@@ -324,7 +336,7 @@ fn independent_devices_enumerate_and_route_without_cross_talk() {
             stream: b + 2,
             render: true,
             frame: 0,
-            samples: second.as_mut_ptr(),
+            samples: second.as_mut_ptr().cast(),
             frames: 32
         }));
         assert!(fixture.registry.io(IoOperation {
@@ -332,7 +344,7 @@ fn independent_devices_enumerate_and_route_without_cross_talk() {
             stream: a + 1,
             render: false,
             frame: 0,
-            samples: second.as_mut_ptr(),
+            samples: second.as_mut_ptr().cast(),
             frames: 32
         }));
         assert!(fixture.registry.io(IoOperation {
@@ -340,7 +352,7 @@ fn independent_devices_enumerate_and_route_without_cross_talk() {
             stream: b + 1,
             render: false,
             frame: 0,
-            samples: first.as_mut_ptr(),
+            samples: first.as_mut_ptr().cast(),
             frames: 32
         }));
     }
@@ -501,11 +513,15 @@ fn remove_keeps_client_lifetime_but_never_reuses_stale_object_id() {
     assert_eq!(fixture.registry.start(id, 4, 100), OK);
     assert_eq!(fixture.registry.remove([1; 16]), OK);
     assert!(fixture.registry.devices().is_empty());
-    assert_eq!(LIVE.load(Ordering::SeqCst), 1);
+    assert_eq!(LIVE.load(Ordering::SeqCst), 0);
+    let retired = fixture.registry.snapshot(id).unwrap();
+    assert!(!retired.alive);
+    assert!(!retired.running);
+    assert_eq!(retired.client_count, 1);
     assert_eq!(fixture.registry.start(id, 5, 200), NOT_FOUND);
     assert_eq!(fixture.registry.stop(id, 4), OK);
     assert_eq!(fixture.registry.client(id, 4, false), OK);
-    fixture.registry.tick();
+    assert!(fixture.registry.snapshot(id).is_none());
     assert_eq!(LIVE.load(Ordering::SeqCst), 0);
     let replacement = fixture.add(1, 96_000);
     assert_ne!(replacement, id);
@@ -534,9 +550,118 @@ fn crashed_client_removal_releases_retired_runtime_without_stop_notification() {
     assert_eq!(fixture.registry.client(id, 1, true), OK);
     assert_eq!(fixture.registry.start(id, 1, 100), OK);
     assert_eq!(fixture.registry.remove([1; 16]), OK);
-    assert_eq!(fixture.registry.client(id, 1, false), OK);
-    fixture.registry.tick();
     assert_eq!(LIVE.load(Ordering::SeqCst), 0);
+    assert_eq!(fixture.registry.client(id, 1, false), OK);
+    assert!(fixture.registry.snapshot(id).is_none());
+    assert_eq!(LIVE.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn repeated_active_removal_releases_runtime_pending_fd_and_stale_configuration() {
+    use std::os::fd::AsRawFd;
+    unsafe extern "C" {
+        fn fcntl(fd: i32, command: i32) -> i32;
+    }
+    let fixture = Fixture::new();
+    for _ in 0..100 {
+        let id = fixture.add(1, 48_000);
+        assert_eq!(fixture.registry.client(id, 1, true), OK);
+        assert_eq!(fixture.registry.start(id, 1, 100), OK);
+        assert_eq!(
+            fixture
+                .registry
+                .set_format(id + 1, 48_000, mixrelay_pcm_ring::SampleFormat::Signed24),
+            OK
+        );
+        assert_eq!(fixture.perform(), OK);
+        let pending = fixture.fd(1, 8, 2);
+        let fd = pending.as_raw_fd();
+        fixture
+            .registry
+            .upsert([1; 16], "Pending", 96_000, (pending, 24))
+            .unwrap();
+        let (_, generation) = fixture.pending();
+        assert_eq!(fixture.registry.remove([1; 16]), OK);
+        assert_eq!(LIVE.load(Ordering::SeqCst), 0);
+        assert_eq!(unsafe { fcntl(fd, 1) }, -1);
+        assert_eq!(fixture.registry.set_rate(id, 96_000), NOT_FOUND);
+        assert_eq!(
+            fixture.registry.perform(id, CONFIG_ACTION, generation),
+            NOT_FOUND
+        );
+        assert!(
+            lock(&fixture.registry.pin(id).unwrap().control)
+                .pending
+                .is_none()
+        );
+        let mut capture = [0xff_u8; 64 * 3];
+        // SAFETY: this retained dead stereo object still advertises packed PCM24.
+        assert!(unsafe {
+            fixture.registry.io(IoOperation {
+                device: id,
+                stream: id + 1,
+                render: false,
+                frame: 0,
+                samples: capture.as_mut_ptr().cast(),
+                frames: 32,
+            })
+        });
+        assert_eq!(capture, [0; 64 * 3]);
+        assert_eq!(fixture.registry.stop(id, 1), OK);
+        assert_eq!(fixture.registry.client(id, 1, false), OK);
+        assert!(fixture.registry.snapshot(id).is_none());
+    }
+}
+
+#[test]
+fn active_callback_drains_before_removal_releases_its_runtime() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    assert_eq!(fixture.registry.client(id, 1, true), OK);
+    assert_eq!(fixture.registry.start(id, 1, 100), OK);
+    PAUSE_IO.store(true, Ordering::Release);
+    let registry = fixture.registry.as_ref();
+    let device = registry.pin(id).unwrap();
+    let removed = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let callback = scope.spawn(|| {
+            let mut samples = [0.5_f32; 64];
+            // SAFETY: this callback exclusively owns its aligned 32-frame stereo buffer.
+            assert!(unsafe {
+                registry.io(IoOperation {
+                    device: id,
+                    stream: id + 2,
+                    render: true,
+                    frame: 0,
+                    samples: samples.as_mut_ptr().cast(),
+                    frames: 32,
+                })
+            });
+        });
+        while !IO_ENTERED.load(Ordering::Acquire) {
+            std::thread::yield_now();
+        }
+        let removal = scope.spawn(|| {
+            assert_eq!(registry.remove([1; 16]), OK);
+            removed.store(true, Ordering::Release);
+        });
+        while device.io_pin().is_some() {
+            std::thread::yield_now();
+        }
+        let premature_removal = removed.load(Ordering::Acquire);
+        let live = LIVE.load(Ordering::SeqCst);
+        RELEASE_IO.store(true, Ordering::Release);
+        callback.join().unwrap();
+        removal.join().unwrap();
+        assert!(!premature_removal);
+        assert_eq!(live, 1);
+    });
+    assert!(removed.load(Ordering::Acquire));
+    assert_eq!(LIVE.load(Ordering::SeqCst), 0);
+    drop(device);
+    assert_eq!(registry.stop(id, 1), OK);
+    assert_eq!(registry.client(id, 1, false), OK);
+    assert!(registry.snapshot(id).is_none());
 }
 
 #[test]
@@ -798,6 +923,8 @@ fn callback_readers_drain_before_retired_runtime_is_freed() {
             }
         });
         for _ in 0..100 {
+            assert_eq!(registry.set_output_volume(id + 3, 0.5), OK);
+            assert_eq!(registry.set_output_mute(id + 4, true), OK);
             registry.set_rate(id, 96_000);
             fixture.perform();
         }
@@ -810,4 +937,6 @@ fn callback_readers_drain_before_retired_runtime_is_freed() {
     });
     assert_eq!(LIVE.load(Ordering::SeqCst), 0);
     assert!(registry.snapshot(id).is_none());
+    assert!(registry.output_control(id + 3).is_none());
+    assert_eq!(registry.set_output_mute(id + 4, false), NOT_FOUND);
 }

@@ -24,6 +24,7 @@ typedef struct MRHALCoreSnapshot {
     bool alive, running, input_active, output_active;
     char name[128];
     char uid[80];
+    uint32_t capture_format, render_format;
 } MRHALCoreSnapshot;
 typedef struct MRHALCoreNativeOps {
     bool (*inspect)(int, size_t, MRHALCoreGeometry *);
@@ -52,6 +53,8 @@ enum {
     MR_HAL_CORE_CHANGE_ALIVE = 4,
     MR_HAL_CORE_CHANGE_RUNNING = 5,
     MR_HAL_CORE_CHANGE_STREAM_ACTIVE = 6,
+    MR_HAL_CORE_CHANGE_OUTPUT_VOLUME = 7,
+    MR_HAL_CORE_CHANGE_OUTPUT_MUTE = 8,
     MR_HAL_CORE_MAX_DEVICES = 64,
 };
 #define MR_HAL_CORE_CONFIG_ACTION UINT64_C(0x4d526368)
@@ -91,8 +94,11 @@ int32_t mr_hal_core_abort(MRHALCore *, uint32_t device_id, uint64_t action, uint
 /* These two entry points do not lock, allocate, wait, or free. A removed device
  * is silenced; a stale object ID never resolves to a replacement device. */
 bool mr_hal_core_timestamp(MRHALCore *, uint32_t device_id, uint64_t now, MRHALCoreTimestamp *);
+/* Exclusive writable operation main buffer in the current native stream format,
+ * including WriteMix. Never pass shared transport storage. Float32 is aligned;
+ * signed16/24/32 are little-endian packed bytes. Internal transport stays Float32. */
 bool mr_hal_core_io(MRHALCore *, uint32_t device_id, uint32_t stream_id,
-                   bool render, uint64_t frame, float *, uint32_t frame_count);
+                   bool render, uint64_t frame, void *, uint32_t frame_count);
 typedef struct MRHALCorePropertyAddress { uint32_t selector, scope, element; } MRHALCorePropertyAddress;
 typedef struct MRHALCoreNotification { uint32_t object_id; MRHALCorePropertyAddress address; } MRHALCoreNotification;
 bool mr_hal_core_has_property(MRHALCore *, uint32_t, const MRHALCorePropertyAddress *);

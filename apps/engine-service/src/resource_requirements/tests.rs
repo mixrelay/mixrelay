@@ -44,6 +44,7 @@ fn document() -> GraphDocument {
                         channel_layout: ChannelLayout::Stereo,
                     },
                     source_playback: SourcePlaybackPolicy::Preserve,
+                    forwarding_endpoint: None,
                     gain_db: -6.0,
                     requires_reselection: false,
                 }),

@@ -16,7 +16,7 @@ use std::{
     ptr::NonNull,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     },
     thread,
     time::Duration,
@@ -26,10 +26,14 @@ use std::{
 static NATIVE_OWNERS: Admission = Admission::new(256);
 pub(super) struct Native {
     pub(super) log_id: u64,
+    // The format monitor owns this reader cursor; native event publication never waits for it.
+    pub(super) clock_trace_cursor: AtomicU64,
     pub(super) pointer: NonNull<c_void>,
     pub(super) group: Option<Arc<Aggregate>>,
     _permit: Permit<'static>,
     requested_buffer: AtomicU32,
+    /// Driver native quantum belongs to OS; only physical client buffers are engine-owned.
+    pub(super) owns_device_buffer: bool,
     // Stable Rust-owned callback slot. Drop runs only after native destroy has
     // acknowledged all callbacks, so the native device owner cannot outlive this box.
     pub(super) render: Box<super::direct::RenderSlot>,
@@ -50,6 +54,17 @@ impl Native {
             .acquire()
             .ok_or("CoreAudio native owner limit reached; waiting for retired device callbacks")?;
         let uid = spec.native_uid()?;
+        // Driver callbacks own their native quantum independently of the DSP slice.
+        let owns_device_buffer = !uid
+            .to_bytes()
+            .strip_prefix(b"io.mixrelay.audio.endpoint.")
+            .is_some_and(|id| {
+                id.len() == 32
+                    && id
+                        .iter()
+                        .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+                    && id.iter().any(|byte| *byte != b'0')
+            });
         let pointer = NonNull::new(unsafe {
             mr_device_io_create_group(
                 group
@@ -64,10 +79,12 @@ impl Native {
         .ok_or("invalid CoreAudio channels or native allocation failed")?;
         let native = Self {
             log_id: super::bridge::NEXT_DEVICE_EPOCH.fetch_add(1, Ordering::Relaxed),
+            clock_trace_cursor: AtomicU64::new(0),
             pointer,
             group,
             _permit: permit,
-            requested_buffer: AtomicU32::new(buffer_frames),
+            requested_buffer: AtomicU32::new(if owns_device_buffer { buffer_frames } else { 0 }),
+            owns_device_buffer,
             render: Box::default(),
             pcm_metrics: PcmMetrics::default(),
             pcm: Box::default(),
@@ -89,7 +106,9 @@ impl Native {
         Ok(native)
     }
     pub(super) fn request_buffer(&self, frames: u32) {
-        self.requested_buffer.store(frames, Ordering::Release);
+        if self.owns_device_buffer {
+            self.requested_buffer.store(frames, Ordering::Release);
+        }
     }
     pub(super) fn connect(&self, stop: &AtomicBool) -> Result<(), String> {
         let requested = self.requested_buffer.load(Ordering::Acquire);

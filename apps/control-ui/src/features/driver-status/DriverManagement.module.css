@@ -1,0 +1,14 @@
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.device { padding: 12px 0; border-top: 1px solid var(--line); }
+.device h3 { margin: 0 0 8px; font-size: 13px; }
+.fields { display: grid; gap: 8px; }
+.channels { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.notice { font-size: 12px; color: var(--muted); }
+.entry { width: 26px; min-width: 26px; height: 26px; padding: 0; }
+.entry svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; }

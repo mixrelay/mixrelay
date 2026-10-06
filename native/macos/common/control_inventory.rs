@@ -184,10 +184,9 @@ fn valid_backing(file: &File, size: usize) -> bool {
         && u32::try_from(size).is_ok()
         && file.metadata().is_ok_and(|metadata| {
             // Darwin pshm_stat reports only shm_open permission bits, not
-            // S_IFREG (XNU bsd/kern/posix_shm.c). Keep positive size bounds
-            // for that kernel representation and legacy regular backing.
-            (metadata.is_file() || metadata.mode() & 0o170_000 == 0)
-                && metadata.len() >= size as u64
+            // S_IFREG (XNU bsd/kern/posix_shm.c). The transport allocator
+            // exclusively creates anonymous POSIX shared-memory objects.
+            metadata.mode() & 0o170_000 == 0 && metadata.len() >= size as u64
         })
 }
 fn input_valid(entries: &[InventoryEntry], generation: u64) -> bool {
@@ -648,6 +647,39 @@ mod tests {
             &File::from(source.try_clone().unwrap()),
             4096
         ));
+    }
+
+    #[test]
+    fn regular_file_backing_is_rejected_by_creator_and_parser() {
+        let fixture = mixrelay_test_support::FixtureDir::new("inventory-regular-backing")
+            .expect("owned fixture directory");
+        let file = File::create(fixture.join("backing")).expect("regular backing fixture");
+        file.set_len(4096).expect("size regular backing fixture");
+        let regular: OwnedFd = file.into();
+        let invalid = entry(&regular, 1, "Regular file");
+        // SAFETY: the entry borrows the live fixture FD for this synchronous call.
+        assert!(
+            unsafe { mr_hal_control_create_inventory_snapshot(&raw const invalid, 1, 1) }.is_null()
+        );
+
+        let source = backing();
+        let message = message(&[entry(&source, 1, "Anonymous memory")]);
+        // SAFETY: the message owns the dictionary; XPC duplicates the live fixture FD.
+        unsafe {
+            xpc_dictionary_set_fd(
+                item(&message, 0),
+                c"transport_fd".as_ptr(),
+                regular.as_raw_fd(),
+            );
+        }
+        unchanged_on_error(&message);
+        assert_eq!(
+            File::from(regular.try_clone().expect("caller still owns regular FD"))
+                .metadata()
+                .expect("fixture metadata")
+                .len(),
+            4096
+        );
     }
 
     fn unchanged_on_error(message: &Message) {

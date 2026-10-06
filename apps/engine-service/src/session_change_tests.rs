@@ -9,6 +9,7 @@ struct Runtime {
     frames: AtomicU32,
     endpoint_rate: AtomicU32,
     changes: AtomicU32,
+    endpoint_changes: AtomicU32,
     adoptions: AtomicU32,
     fail: AtomicBool,
     negotiated: Mutex<Vec<(RenderFormat, RenderFormat)>>,
@@ -59,13 +60,17 @@ fn failure() -> HostAudioBackendError {
     }
 }
 fn fixture() -> (EngineGraphController, Arc<Runtime>) {
-    let mut controller = endpoint_settings_tests::controller(GraphDocument::new(1, vec![], vec![]));
+    let mut controller = endpoint_settings_tests::controller_with_inventory(
+        GraphDocument::new(1, vec![], vec![]),
+        &default_duplex_document(1, None),
+    );
     let runtime = Arc::new(Runtime {
         base: controller.runtime_status.clone(),
         rate: AtomicU32::new(44_100),
         frames: AtomicU32::new(0),
         endpoint_rate: AtomicU32::new(0),
         changes: AtomicU32::new(0),
+        endpoint_changes: AtomicU32::new(0),
         adoptions: AtomicU32::new(0),
         fail: AtomicBool::new(false),
         negotiated: Mutex::new(Vec::new()),
@@ -96,6 +101,28 @@ impl VirtualEndpointBackend for ObservedEndpoint {
         }
         Ok(rate)
     }
+    fn set_sample_rate(&self, _: &VirtualEndpointId, _: u32) -> Result<(), HostAudioBackendError> {
+        self.runtime
+            .endpoint_changes
+            .fetch_add(1, Ordering::Relaxed);
+        Err(failure())
+    }
+    fn resolve_graph_devices(
+        &self,
+        desired: &[VirtualEndpointSpec],
+    ) -> Result<Vec<VirtualEndpointSpec>, HostAudioBackendError> {
+        let mut actual = self.base.resolve_graph_devices(desired)?;
+        let rate = self.runtime.endpoint_rate.load(Ordering::Acquire);
+        if rate != 0 {
+            for spec in &mut actual {
+                spec.default_sample_rate = rate;
+                if !spec.supported_sample_rates.contains(&rate) {
+                    spec.supported_sample_rates.push(rate);
+                }
+            }
+        }
+        Ok(actual)
+    }
     fn prepare_graph_attachments(
         &self,
         specs: &[VirtualEndpointSpec],
@@ -110,7 +137,7 @@ fn catalog_selection_preserves_device_rate_independent_of_hardware_clock() {
     let (controller, runtime) = fixture();
     runtime.endpoint_rate.store(48_000, Ordering::Release);
     controller
-        .apply_graph(default_duplex_document(2, None))
+        .apply_graph_request(default_duplex_document(2, None).into())
         .unwrap();
     settle(&controller);
     controller
@@ -151,7 +178,7 @@ fn hardware_clock_adoption_preserves_independent_virtual_device_rate() {
     let (controller, runtime) = fixture();
     runtime.endpoint_rate.store(48_000, Ordering::Release);
     controller
-        .apply_graph(default_duplex_document(2, None))
+        .apply_graph_request(default_duplex_document(2, None).into())
         .unwrap();
     settle(&controller);
     controller
@@ -166,6 +193,9 @@ fn hardware_clock_adoption_preserves_independent_virtual_device_rate() {
     };
     assert_eq!(endpoint.default_sample_rate, 48_000);
     assert_eq!(runtime.changes.load(Ordering::Acquire), 0);
+    assert_eq!(runtime.endpoint_changes.load(Ordering::Acquire), 0);
+    assert!(runtime.negotiated.lock().is_empty());
+    assert_eq!(runtime.endpoint_rate.load(Ordering::Acquire), 48_000);
     let settings = endpoint_settings_tests::settings(&controller);
     assert_eq!(settings.devices[0].spec.default_sample_rate, 48_000);
 }
@@ -176,7 +206,7 @@ fn independent_endpoint_change_updates_graph_without_retuning_processing_clock()
     runtime.rate.store(48_000, Ordering::Release);
     runtime.endpoint_rate.store(48_000, Ordering::Release);
     controller
-        .apply_graph(default_duplex_document(2, None))
+        .apply_graph_request(default_duplex_document(2, None).into())
         .unwrap();
     settle(&controller);
     runtime.endpoint_rate.store(44_100, Ordering::Release);
@@ -271,12 +301,17 @@ impl Drop for Prepared {
     }
 }
 impl GraphResourceBackend for Resources {
-    fn reconcile(&self, _: &GraphDocument) -> Result<(), HostAudioBackendError> {
+    fn reconcile(
+        &self,
+        _: &GraphDocument,
+        _: crate::PlaybackBindings<'_>,
+    ) -> Result<(), HostAudioBackendError> {
         Ok(())
     }
     fn prepare_format_change(
         &self,
         _: &GraphDocument,
+        _: crate::PlaybackBindings<'_>,
         _: RenderFormat,
         _: RenderFormat,
     ) -> Result<Box<dyn PreparedGraphFormat>, HostAudioBackendError> {
@@ -294,6 +329,8 @@ impl GraphResourceBackend for Resources {
 #[test]
 fn native_rejection_cancels_staged_resources_without_publishing_graph() {
     let (mut controller, runtime) = fixture();
+    let directory = mixrelay_test_support::FixtureDir::new("format-catalog-rollback").unwrap();
+    let path = directory.join("graphs.json");
     let committed = Arc::new(AtomicU32::new(0));
     let cancelled = Arc::new(AtomicU32::new(0));
     controller.graph_resources = Arc::new(Resources {
@@ -301,12 +338,16 @@ fn native_rejection_cancels_staged_resources_without_publishing_graph() {
         cancelled: cancelled.clone(),
         fail: false,
     });
+    let controller = controller.with_graph_catalog_path(path.clone());
+    let saved = std::fs::read(&path).unwrap();
     runtime.fail.store(true, Ordering::Release);
     assert!(controller.reconcile_observed_device_rate().is_err());
     assert_eq!(controller.graph().revision, 1);
     assert_eq!(controller.context.read().format.sample_rate, 48_000);
     assert_eq!(cancelled.load(Ordering::Acquire), 1);
     assert_eq!(committed.load(Ordering::Acquire), 0);
+    assert_eq!(std::fs::read(&path).unwrap(), saved);
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
     runtime.fail.store(false, Ordering::Release);
     assert!(
         controller
@@ -315,6 +356,8 @@ fn native_rejection_cancels_staged_resources_without_publishing_graph() {
             .is_some()
     );
     assert_eq!(committed.load(Ordering::Acquire), 1);
+    assert_ne!(std::fs::read(path).unwrap(), saved);
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
 }
 
 struct RejectNative(Resources);
@@ -328,12 +371,17 @@ impl PreparedGraphFormat for RejectPrepared {
     }
 }
 impl GraphResourceBackend for RejectNative {
-    fn reconcile(&self, _: &GraphDocument) -> Result<(), HostAudioBackendError> {
+    fn reconcile(
+        &self,
+        _: &GraphDocument,
+        _: crate::PlaybackBindings<'_>,
+    ) -> Result<(), HostAudioBackendError> {
         Ok(())
     }
     fn prepare_format_change(
         &self,
         _: &GraphDocument,
+        _: crate::PlaybackBindings<'_>,
         _: RenderFormat,
         _: RenderFormat,
     ) -> Result<Box<dyn PreparedGraphFormat>, HostAudioBackendError> {
@@ -413,6 +461,46 @@ fn preparation_failure_or_unknown_rate_never_negotiates_native_format() {
 }
 
 #[test]
+fn user_format_change_with_unwritable_catalog_does_not_prepare_native_resources() {
+    let (mut controller, runtime) = fixture();
+    let fixture = mixrelay_test_support::FixtureDir::new("user-rate-catalog").unwrap();
+    let committed = Arc::new(AtomicU32::new(0));
+    let cancelled = Arc::new(AtomicU32::new(0));
+    controller.graph_resources = Arc::new(Resources {
+        committed: Arc::clone(&committed),
+        cancelled: Arc::clone(&cancelled),
+        fail: false,
+    });
+    let path = fixture.join("graphs.json");
+    let controller = controller.with_graph_catalog_path(path.clone());
+    let saved = std::fs::read(&path).unwrap();
+    let before = controller.graph();
+    let current = controller.context.read().format;
+    let occupied = fixture.join("occupied");
+    std::fs::write(&occupied, b"not a directory").unwrap();
+    controller.catalog.lock().as_mut().unwrap().path = occupied.join("graphs.json");
+
+    assert!(
+        controller
+            .change_session(SessionReconfigureRequest {
+                expected_revision: before.revision,
+                format: mixrelay_audio_io::session::SessionFormat {
+                    sample_rate: 44_100,
+                    block_frames: 64,
+                },
+            })
+            .is_err()
+    );
+
+    assert_eq!(cancelled.load(Ordering::Acquire), 0);
+    assert_eq!(committed.load(Ordering::Acquire), 0);
+    assert_eq!(runtime.changes.load(Ordering::Acquire), 0);
+    assert_eq!(controller.graph(), before);
+    assert_eq!(controller.context.read().format, current);
+    assert_eq!(std::fs::read(path).unwrap(), saved);
+}
+
+#[test]
 fn external_format_adopts_and_warns_when_graph_catalog_staging_fails() {
     let (controller, runtime) = fixture();
     let fixture = mixrelay_test_support::FixtureDir::new("external-rate-catalog").unwrap();
@@ -447,7 +535,7 @@ fn format_change_never_rebuilds_hosted_state_from_a_stale_document() {
         config: NodeConfig::Provider(mixrelay_audio_graph::ProviderNodeConfig {
             ports: None,
             type_id: "fixture:effect".into(),
-            parameters: serde_json::json!({"stateBase64": "stale-client-preset"}),
+            parameters: serde_json::json!({"nativeToken": "stale-client-preset"}),
         }),
     });
     let before = controller.graph();

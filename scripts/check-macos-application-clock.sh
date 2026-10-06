@@ -5,6 +5,7 @@ set -euo pipefail
 # installed graph mutation, permission reset, or user-application capture.
 repo_root="${0:A:h:h}"
 fixture_root="${1:?provide a dedicated output directory}"
+endpoint_id="${2:?provide an existing test-owned canonical endpoint UUID}"
 mkdir -p "$fixture_root/MRVirtualToneSource.app/Contents/MacOS"
 native_root="$repo_root/native/macos/application-capture"
 cp "$native_root/tests/MRVirtualToneSource-Info.plist" "$fixture_root/MRVirtualToneSource.app/Contents/Info.plist"
@@ -14,11 +15,12 @@ clang -fobjc-arc -fmodules -fblocks -mmacosx-version-min=14.2 \
   -framework AVFAudio -framework Foundation -framework CoreAudio -framework AudioUnit \
   -o "$fixture_root/MRVirtualToneSource.app/Contents/MacOS/MRVirtualToneSource"
 cd "$repo_root"
-MIXRELAY_APPLICATION_CLOCK_FIXTURE=1 cargo test -p mixrelay-desktop \
+MIXRELAY_APPLICATION_CLOCK_FIXTURE=1 node scripts/lab/native-check.mjs cargo test --release -p mixrelay-desktop \
   live_owned_application_tap_v2_src_rate_changes --no-run
-if [[ "${2:-}" == "--run" ]]; then
+if [[ "${3:-}" == "--run" ]]; then
   MIXRELAY_APPLICATION_CLOCK_FIXTURE=1 \
   MIXRELAY_VIRTUAL_TONE_FIXTURE="$fixture_root/MRVirtualToneSource.app/Contents/MacOS/MRVirtualToneSource" \
-    cargo test -p mixrelay-desktop live_owned_application_tap_v2_src_rate_changes -- --ignored --nocapture
+  MIXRELAY_VIRTUAL_TONE_ENDPOINT_ID="$endpoint_id" \
+    node scripts/lab/native-check.mjs cargo test --release -p mixrelay-desktop live_owned_application_tap_v2_src_rate_changes -- --ignored --nocapture
 fi
 print "Fixture artifacts retained: $fixture_root"

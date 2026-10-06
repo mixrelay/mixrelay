@@ -21,7 +21,9 @@ function createFlowNode(graphNode: AudioGraphNode, previous?: AudioFlowNode): Au
     id: graphNode.id,
     position: graphNode.position,
     width: graphNode.size?.width,
-    height: graphNode.size?.height,
+    // The card owns its collapsed size and temporary disclosure height. Let
+    // React Flow measure that rendered height instead of fixing the outer box.
+    height: undefined,
     type: 'audio',
     zIndex: 1,
   };

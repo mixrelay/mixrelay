@@ -199,7 +199,7 @@ fn proposed_format_capabilities_do_not_read_old_active_format() {
 
 #[test]
 fn graph_only_control_does_not_invent_a_native_rate_change() {
-    let mut profile = tests::profile(AudioBackendKind::Wasapi);
+    let mut profile = tests::profile(AudioBackendKind::PipeWire);
     profile.capabilities.can_reconfigure_live = true;
     let status = Arc::new(AdapterRuntimeStatus::new(profile).with_graph_format_control());
     status.observe_device_rate(Some(48_000));

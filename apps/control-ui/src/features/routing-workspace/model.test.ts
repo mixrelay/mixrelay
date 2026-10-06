@@ -3,16 +3,40 @@ import { expect, it } from 'vitest';
 import type { AudioGraphModel } from '../../core/audio-graph/model';
 import type {
   ExternalProcessorDescriptor,
+  ProviderPorts,
   RuntimeGraphDocument,
   RuntimeGraphNode,
 } from '../../core/control-port/types';
 import {
   addRoutingNode,
   audioGraphToRuntimeGraph,
+  providerPortsFrom,
   runtimeGraphToAudioGraph,
   updateRoutingNodeParameter,
 } from './model';
 import { duplexReference, virtualSpec } from './virtualEndpointFixtures';
+
+const stereoPorts: ProviderPorts = {
+  layoutId: 'layout-v1:stereo',
+  inputs: [
+    {
+      id: 'audio',
+      name: 'Main Input',
+      kind: 'main',
+      channels: 2,
+      channelFormat: 'stereo',
+    },
+  ],
+  outputs: [
+    {
+      id: 'audio',
+      name: 'Main Output',
+      kind: 'main',
+      channels: 2,
+      channelFormat: 'stereo',
+    },
+  ],
+};
 
 const DEFAULT_ENDPOINT_NODE_ID = 'test-boundary';
 const spec = {
@@ -130,6 +154,12 @@ it('maps the duplex OS boundary and gain node without inventing runtime configur
   expect(model.nodes[2]?.appearance.detail).toBe('-6.0 dB');
   expect(model.nodes[0]?.outputPorts).toHaveLength(2);
   expect(model.nodes[1]?.inputPorts).toHaveLength(2);
+  expect(model.nodes[0]?.appearance.meterBanks).toEqual([
+    { channels: 2, nodeId: DEFAULT_ENDPOINT_NODE_ID, portId: 'from_os' },
+  ]);
+  expect(model.nodes[1]?.appearance.meterBanks).toEqual([
+    { channels: 2, nodeId: DEFAULT_ENDPOINT_NODE_ID, portId: 'to_os' },
+  ]);
   expect(model.edges).toHaveLength(4);
 
   const restored = audioGraphToRuntimeGraph(model, gainDocument);
@@ -181,8 +211,8 @@ it('materializes an external processor and persists normalized parameter changes
     displayName: 'Fixture Compressor',
     format: 'vst3',
     hasEditor: true,
-    inputChannels: 2,
-    outputChannels: 2,
+    layouts: [stereoPorts],
+    defaultLayoutId: stereoPorts.layoutId,
     parameters: [
       {
         canAutomate: true,
@@ -198,11 +228,21 @@ it('materializes an external processor and persists normalized parameter changes
     version: '1.0',
   };
   const empty: AudioGraphModel = { edges: [], nodes: [], revision: 1 };
-  const added = addRoutingNode(empty, { kind: 'provider', processor }, { x: 40, y: 80 });
+  const added = addRoutingNode(
+    empty,
+    { kind: 'provider', processor, ports: stereoPorts },
+    { x: 40, y: 80 },
+  );
   const node = added.nodes[0];
   expect(node?.appearance.title).toBe('Fixture Compressor');
-  expect(node?.appearance.meterChannels).toBeUndefined();
-  expect(node?.appearance.meterSource).toBeUndefined();
+  expect(node?.appearance.meterBanks).toEqual([
+    {
+      channels: 2,
+      label: 'Main · Main Output',
+      nodeId: 'provider-1',
+      portId: 'audio',
+    },
+  ]);
   expect(node?.inputPorts).toHaveLength(2);
   expect(node?.outputPorts).toHaveLength(2);
   expect(node?.appearance.parameterControls?.[0]).toMatchObject({
@@ -223,6 +263,246 @@ it('materializes an external processor and persists normalized parameter changes
   });
 
   const restored = runtimeGraphToAudioGraph(serialized, undefined, [processor]);
-  expect(restored.nodes[0]?.appearance.meterSource).toBeUndefined();
+  expect(restored.nodes[0]?.appearance.meterBanks).toEqual(node?.appearance.meterBanks);
   expect(restored.nodes[0]?.appearance.parameterControls?.[0]?.value).toBe(0.73);
+  expect(restored.nodes[0]?.runtime?.config).toMatchObject({
+    typeId: processor.typeId,
+    ports: stereoPorts,
+    parameters: { parameterValues: { '42': 0.73 }, version: 1 },
+  });
+});
+
+it('persists and rehydrates the exact selected multibus geometry, independent of catalog default', () => {
+  const selectedPorts: ProviderPorts = {
+    layoutId: 'layout-v1:surround-sidechain',
+    inputs: [
+      {
+        id: 'audio',
+        name: 'Main',
+        kind: 'main',
+        channels: 8,
+        channelFormat: 'surround7_1',
+      },
+      {
+        id: 'bus:1',
+        name: 'Detector',
+        kind: 'sidechain',
+        channels: 2,
+        channelFormat: 'stereo',
+      },
+    ],
+    outputs: [
+      {
+        id: 'audio',
+        name: 'Main',
+        kind: 'main',
+        channels: 6,
+        channelFormat: 'surround5_1',
+      },
+      {
+        id: 'bus:1',
+        name: 'Auxiliary',
+        kind: 'auxiliary',
+        channels: 3,
+        channelFormat: 'discrete',
+      },
+    ],
+  };
+  const processor: ExternalProcessorDescriptor = {
+    displayName: 'Multibus Effect',
+    format: 'clap',
+    hasEditor: false,
+    layouts: [stereoPorts, selectedPorts],
+    defaultLayoutId: stereoPorts.layoutId,
+    parameters: [],
+    typeId: 'clap:multibus',
+    vendor: 'MixRelay Test',
+    version: '1',
+  };
+  const empty: RuntimeGraphDocument = {
+    edges: [],
+    nodes: [],
+    revision: 1,
+    schemaVersion: 2,
+  };
+  const added = addRoutingNode(
+    runtimeGraphToAudioGraph(empty),
+    { kind: 'provider', processor, ports: selectedPorts },
+    { x: 50, y: 90 },
+  );
+  const selectedNode = added.nodes[0];
+  expect(selectedNode?.inputPorts.map((port) => port.runtimePortId)).toEqual([
+    ...Array(8).fill('audio'),
+    ...Array(2).fill('bus:1'),
+  ]);
+  expect(selectedNode?.outputPorts.map((port) => port.runtimePortId)).toEqual([
+    ...Array(6).fill('audio'),
+    ...Array(3).fill('bus:1'),
+  ]);
+  expect(selectedNode?.inputPorts[8]?.label).toBe('Sidechain · Detector 1');
+  expect(selectedNode?.outputPorts[6]?.label).toBe('Auxiliary · Auxiliary 1');
+  expect(selectedNode?.appearance.channelCount).toBe(9);
+
+  const saved = audioGraphToRuntimeGraph(added, empty);
+  expect(saved.nodes[0]?.config).toMatchObject({ typeId: processor.typeId, ports: selectedPorts });
+  const rehydrated = runtimeGraphToAudioGraph(saved, undefined, [processor]);
+  expect(rehydrated.nodes[0]?.inputPorts).toEqual(selectedNode?.inputPorts);
+  expect(rehydrated.nodes[0]?.outputPorts).toEqual(selectedNode?.outputPorts);
+  expect(rehydrated.nodes[0]?.appearance.offline).toBeUndefined();
+
+  const offline = runtimeGraphToAudioGraph(saved);
+  expect(offline.nodes[0]?.inputPorts).toEqual(selectedNode?.inputPorts);
+  expect(offline.nodes[0]?.outputPorts).toEqual(selectedNode?.outputPorts);
+  expect(offline.nodes[0]?.runtime?.config).toEqual(saved.nodes[0]?.config);
+});
+
+it('keeps authored layout geometry and marks it unavailable when the installed layout changes', () => {
+  const authoredPorts: ProviderPorts = {
+    layoutId: 'layout-v1:selected',
+    inputs: [
+      {
+        id: 'audio',
+        name: 'Main',
+        kind: 'main',
+        channels: 8,
+        channelFormat: 'surround7_1',
+      },
+    ],
+    outputs: [
+      {
+        id: 'audio',
+        name: 'Main',
+        kind: 'main',
+        channels: 8,
+        channelFormat: 'surround7_1',
+      },
+    ],
+  };
+  const mainInput = authoredPorts.inputs[0];
+  if (!mainInput) throw new Error('fixture input bus is missing');
+  const changedPorts: ProviderPorts = {
+    ...authoredPorts,
+    inputs: [{ ...mainInput, channels: 6, channelFormat: 'surround5_1' }],
+  };
+  const processor: ExternalProcessorDescriptor = {
+    displayName: 'Effect',
+    format: 'vst3',
+    hasEditor: false,
+    layouts: [changedPorts, stereoPorts],
+    defaultLayoutId: stereoPorts.layoutId,
+    parameters: [],
+    typeId: 'vst3:effect',
+    vendor: 'Test',
+    version: '1',
+  };
+  const saved: RuntimeGraphDocument = {
+    edges: [],
+    nodes: [
+      {
+        config: { ports: authoredPorts, typeId: processor.typeId },
+        id: 'effect',
+        label: 'Effect',
+        type: 'provider',
+      },
+    ],
+    revision: 3,
+    schemaVersion: 2,
+  };
+  const restored = runtimeGraphToAudioGraph(saved, undefined, [processor]);
+  const node = restored.nodes[0];
+  expect(node?.appearance.offline).toBe(true);
+  expect(node?.appearance.detail).toBe('Processor layout unavailable');
+  expect(node?.inputPorts).toHaveLength(8);
+  expect(node?.outputPorts).toHaveLength(8);
+  expect(node?.runtime?.config).toEqual(saved.nodes[0]?.config);
+  expect(audioGraphToRuntimeGraph(restored, saved).nodes[0]?.config).toEqual(
+    saved.nodes[0]?.config,
+  );
+
+  const renamedPorts: ProviderPorts = {
+    ...authoredPorts,
+    inputs: authoredPorts.inputs.map((bus) => ({ ...bus, name: `Localized ${bus.name}` })),
+    outputs: authoredPorts.outputs.map((bus) => ({ ...bus, name: `Localized ${bus.name}` })),
+  };
+  const renamedDescriptor = { ...processor, layouts: [renamedPorts, stereoPorts] };
+  const renamed = runtimeGraphToAudioGraph(saved, undefined, [renamedDescriptor]);
+  expect(renamed.nodes[0]?.appearance.offline).toBeUndefined();
+  expect(renamed.nodes[0]?.inputPorts[0]?.label).toBe('Main · Main 1');
+  expect(renamed.nodes[0]?.runtime?.config).toEqual(saved.nodes[0]?.config);
+});
+
+it('treats null provider ports as absent and selects the catalog default without changing parameters', () => {
+  const processor: ExternalProcessorDescriptor = {
+    displayName: 'Effect',
+    format: 'vst3',
+    hasEditor: false,
+    layouts: [stereoPorts],
+    defaultLayoutId: stereoPorts.layoutId,
+    parameters: [],
+    typeId: 'vst3:null-ports',
+    vendor: 'Test',
+    version: '1',
+  };
+  const saved: RuntimeGraphDocument = {
+    edges: [],
+    nodes: [
+      {
+        config: {
+          parameters: { stateRef: { sha256: 'a'.repeat(64), byteLength: 8 } },
+          ports: null,
+          typeId: processor.typeId,
+        },
+        id: 'effect',
+        label: 'Effect',
+        type: 'provider',
+      },
+    ],
+    revision: 1,
+    schemaVersion: 2,
+  };
+  const model = runtimeGraphToAudioGraph(saved, undefined, [processor]);
+  expect(model.nodes[0]?.appearance.offline).toBeUndefined();
+  expect(model.nodes[0]?.inputPorts).toHaveLength(2);
+  expect(model.nodes[0]?.runtime?.config).toMatchObject({
+    typeId: processor.typeId,
+    ports: stereoPorts,
+    parameters: { stateRef: { sha256: 'a'.repeat(64), byteLength: 8 } },
+  });
+});
+
+it('rejects provider bus geometry outside the native 64-channel direction bound', () => {
+  expect(
+    providerPortsFrom({
+      layoutId: 'layout-v1:too-wide',
+      inputs: [
+        { id: 'audio', name: 'Main', kind: 'main', channels: 64, channelFormat: 'discrete' },
+        { id: 'bus:1', name: 'Aux', kind: 'auxiliary', channels: 1, channelFormat: 'mono' },
+      ],
+      outputs: [{ id: 'audio', name: 'Main', kind: 'main', channels: 2, channelFormat: 'stereo' }],
+    }),
+  ).toBeNull();
+  expect(
+    providerPortsFrom({
+      layoutId: 'layout-v1:bad-stereo',
+      inputs: [{ id: 'audio', name: 'Main', kind: 'main', channels: 1, channelFormat: 'stereo' }],
+      outputs: [{ id: 'output', name: 'Main', kind: 'main', channels: 2, channelFormat: 'stereo' }],
+    }),
+  ).toBeNull();
+  expect(
+    providerPortsFrom({
+      layoutId: 'layout-v1:empty-name',
+      inputs: [
+        { id: 'custom-input', name: '', kind: 'main', channels: 2, channelFormat: 'stereo' },
+      ],
+      outputs: [
+        { id: 'custom-output', name: '', kind: 'main', channels: 2, channelFormat: 'stereo' },
+      ],
+    }),
+  ).toEqual({
+    layoutId: 'layout-v1:empty-name',
+    inputs: [{ id: 'custom-input', name: '', kind: 'main', channels: 2, channelFormat: 'stereo' }],
+    outputs: [
+      { id: 'custom-output', name: '', kind: 'main', channels: 2, channelFormat: 'stereo' },
+    ],
+  });
 });

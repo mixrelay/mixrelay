@@ -23,7 +23,7 @@ fn recreated_provider_rejects_late_parameter_commands_without_mutating_new_insta
         .unwrap()
         .processor;
     let deleted = GraphDocument::new(old_revision + 1, vec![], vec![]);
-    engine.apply_graph(deleted.clone()).unwrap();
+    engine.apply_graph_request(deleted.clone().into()).unwrap();
     assert!(engine.exchange.activate_pending(&mut processor));
     assert_eq!(
         engine
@@ -43,9 +43,9 @@ fn recreated_provider_rejects_late_parameter_commands_without_mutating_new_insta
     let mut replaced = parameter_document();
     replaced.revision = deleted.revision + 1;
     if let NodeConfig::Provider(provider) = &mut replaced.nodes[0].config {
-        provider.parameters = serde_json::json!({"stateBase64":"NEW-INSTANCE"});
+        provider.parameters = serde_json::json!({"nativeToken":"NEW-INSTANCE"});
     }
-    engine.apply_graph(replaced.clone()).unwrap();
+    engine.apply_graph_request(replaced.clone().into()).unwrap();
     assert!(engine.exchange.activate_pending(&mut processor));
     assert_eq!(
         engine
@@ -93,17 +93,16 @@ fn disabled_node_preserves_saved_preset_without_worker_and_rejects_parameter_com
     let mut document = parameter_document();
     document.nodes[0].control.enabled = false;
     if let NodeConfig::Provider(provider) = &mut document.nodes[0].config {
-        provider.ports = Some(mixrelay_audio_graph::ProviderPorts {
-            inputs: 2,
-            outputs: 2,
-        });
+        provider.ports = Some(mixrelay_audio_graph::ProviderPorts::canonical_stereo(
+            "fixture-stereo",
+        ));
     }
     let (engine, _) = parameter_fixture(document);
     let mut proposed = engine.graph();
     proposed.revision += 1;
     let expected = provider_parameters(&proposed).clone();
     if let NodeConfig::Provider(provider) = &mut proposed.nodes[0].config {
-        provider.parameters = serde_json::json!({"stateBase64":"STALE"});
+        provider.parameters = serde_json::json!({"nativeToken":"STALE"});
     }
     engine
         .preserve_live_processor_state_with(
@@ -159,17 +158,16 @@ fn disabling_failed_provider_retains_saved_preset_and_reports_warning() {
 fn unavailable_provider_restores_authoritative_preset_and_rejects_explicit_writes() {
     let mut document = parameter_document();
     if let NodeConfig::Provider(provider) = &mut document.nodes[0].config {
-        provider.ports = Some(mixrelay_audio_graph::ProviderPorts {
-            inputs: 2,
-            outputs: 2,
-        });
+        provider.ports = Some(mixrelay_audio_graph::ProviderPorts::canonical_stereo(
+            "fixture-stereo",
+        ));
     }
     let (engine, _) = parameter_fixture(document);
     let mut proposed = engine.graph();
     proposed.revision += 1;
     let expected = provider_parameters(&proposed);
     if let NodeConfig::Provider(provider) = &mut proposed.nodes[0].config {
-        provider.parameters = serde_json::json!({"stateBase64":"STALE"});
+        provider.parameters = serde_json::json!({"nativeToken":"STALE"});
     }
     engine
         .preserve_live_processor_state_with(
@@ -200,10 +198,9 @@ fn unavailable_provider_restores_authoritative_preset_and_rejects_explicit_write
 fn powered_off_provider_preserves_preset_and_accepts_explicit_parameter_delta() {
     let mut document = parameter_document();
     if let NodeConfig::Provider(provider) = &mut document.nodes[0].config {
-        provider.ports = Some(mixrelay_audio_graph::ProviderPorts {
-            inputs: 2,
-            outputs: 2,
-        });
+        provider.ports = Some(mixrelay_audio_graph::ProviderPorts::canonical_stereo(
+            "fixture-stereo",
+        ));
     }
     let (engine, _) = parameter_fixture(document);
     engine.execution_enabled.store(false, Ordering::Release);
@@ -211,7 +208,7 @@ fn powered_off_provider_preserves_preset_and_accepts_explicit_parameter_delta() 
     proposed.revision += 1;
     let expected = provider_parameters(&proposed).clone();
     if let NodeConfig::Provider(provider) = &mut proposed.nodes[0].config {
-        provider.parameters = serde_json::json!({"stateBase64":"STALE"});
+        provider.parameters = serde_json::json!({"nativeToken":"STALE"});
     }
     engine
         .preserve_live_processor_state_with(
@@ -222,8 +219,8 @@ fn powered_off_provider_preserves_preset_and_accepts_explicit_parameter_delta() 
         )
         .unwrap();
     assert_eq!(
-        provider_parameters(&proposed)["stateBase64"],
-        expected["stateBase64"]
+        provider_parameters(&proposed)["nativeToken"],
+        expected["nativeToken"]
     );
     assert_eq!(provider_parameters(&proposed)["parameterValues"]["7"], 0.25);
 }
@@ -241,7 +238,7 @@ fn pending_startup_preserves_desired_provider_state_without_snapshotting_missing
     let NodeConfig::Provider(provider) = &mut proposed.nodes[0].config else {
         panic!("fixture must contain the saved provider");
     };
-    provider.parameters = serde_json::json!({"stateBase64":"STALE"});
+    provider.parameters = serde_json::json!({"nativeToken":"STALE"});
     engine
         .preserve_live_processor_state_with(
             &mut proposed,
@@ -254,7 +251,7 @@ fn pending_startup_preserves_desired_provider_state_without_snapshotting_missing
     let NodeConfig::Provider(provider) = &mut proposed.nodes[0].config else {
         panic!("fixture must contain the saved provider");
     };
-    provider.parameters = serde_json::json!({"stateBase64":"STALE"});
+    provider.parameters = serde_json::json!({"nativeToken":"STALE"});
     engine
         .preserve_live_processor_state_with(
             &mut proposed,
@@ -280,7 +277,7 @@ fn structural_edits_preserve_native_preset_and_only_explicit_undo_deltas_overlay
         proposed.revision += 1;
         if let NodeConfig::Provider(provider) = &mut proposed.nodes[0].config {
             provider.parameters = serde_json::json!({
-                "stateBase64":"STALE", "parameterValues":{"7":0.1,"9":0.3}
+                "nativeToken":"STALE", "parameterValues":{"7":0.1,"9":0.3}
             });
         }
         let mutation = engine.mutation.lock();
@@ -288,13 +285,13 @@ fn structural_edits_preserve_native_preset_and_only_explicit_undo_deltas_overlay
             .preserve_live_processor_state_with(
                 &mut proposed,
                 &changes,
-                |_, _| Ok(serde_json::json!({"stateBase64":"Ag=="})),
+                |_, _| Ok(serde_json::json!({"nativeToken":"Ag=="})),
                 |_, _| true,
             )
             .unwrap();
         drop(mutation);
         let parameters = provider_parameters(&proposed);
-        assert_eq!(parameters["stateBase64"], "Ag==");
+        assert_eq!(parameters["nativeToken"], "Ag==");
         assert!(parameters["parameterValues"].get("9").is_none());
         if let Some(edit) = changes.first() {
             assert_eq!(parameters["parameterValues"]["7"], edit.value);
@@ -357,7 +354,7 @@ fn failed_second_snapshot_does_not_partially_rewrite_proposed_graph() {
                             &NodeId::from("effect"),
                         )
                     {
-                        Ok(serde_json::json!({"stateBase64":"Ag=="}))
+                        Ok(serde_json::json!({"nativeToken":"Ag=="}))
                     } else {
                         Err(ProcessorStateError::Timeout)
                     }

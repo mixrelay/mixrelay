@@ -3,17 +3,16 @@ use mixrelay_audio_engine::{
 };
 use mixrelay_audio_graph::{
     ApplicationCaptureRequest, CompileContext, CompileLimits, FROM_OS_PORT_ID, GraphCompiler,
-    NodeConfig, RenderFormat, TO_OS_PORT_ID,
+    GraphDocument, RenderFormat, TO_OS_PORT_ID,
 };
 use mixrelay_audio_io::process::{CycleBlocks, ProcessCycle, ProcessReport, TransferOutcome};
 use mixrelay_audio_io::session::{AudioBackendKind, CURRENT_TIMER_FORMAT, ClockAuthority};
 use mixrelay_audio_io::{
     HostAudioBackendError, VirtualEndpointBackend, VirtualEndpointCapabilities, VirtualEndpointSpec,
 };
-use mixrelay_control_server::router_with_backend;
 use mixrelay_engine_service::{
     EngineGraphController, EngineGraphControllerConfig, GraphResourceBackend,
-    default_duplex_document, default_peak_meter_bank, session::AdapterRuntimeStatus,
+    control_service::ControlService, default_peak_meter_bank, session::AdapterRuntimeStatus,
 };
 use mixrelay_processor_host::ProcessorCatalog;
 use std::{
@@ -25,21 +24,31 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+#[path = "linux_application_identity.rs"]
+mod application_identity;
 #[path = "linux_applications.rs"]
 mod applications;
 #[path = "linux_clock.rs"]
 mod clock;
 #[path = "linux_devices.rs"]
 mod devices;
+#[path = "linux_endpoints.rs"]
+mod endpoints;
 #[path = "linux_format.rs"]
 mod format;
-#[path = "linux_native.rs"]
-mod native;
+use mixrelay_pipewire as native;
+#[cfg(test)]
+#[path = "linux_resource_tests.rs"]
+mod resource_tests;
+#[path = "linux_source_mute.rs"]
+mod source_mute;
 use applications::{CaptureSet as PipeWireCaptureSet, CaptureWatch};
 use devices::{DeviceStreams, DeviceWatch};
+use endpoints::{EndpointControls, EndpointEdit, EndpointSet, EndpointSpecs};
 use mixrelay_audio_io::recovery::{RecoveryConsumer, RecoveryMailbox};
 use mixrelay_engine_service::resource_requirements::{DeviceRequirements, ResourceRequirements};
-use native::{NativeCycle, NativeDriver, NativeStream};
+use mixrelay_pipewire::{DriverCycle, DriverFormat, DriverProcess, GraphDriver};
+use native::NativeStream;
 const ENGINE_BLOCK_FRAMES: u32 = CURRENT_TIMER_FORMAT.block_frames;
 fn adapter_profile() -> mixrelay_engine_service::session::AdapterProfile {
     mixrelay_engine_service::session::AdapterProfile {
@@ -64,37 +73,40 @@ fn adapter_profile() -> mixrelay_engine_service::session::AdapterProfile {
 }
 const ENGINE_SAMPLE_RATE: u32 = CURRENT_TIMER_FORMAT.sample_rate;
 const MAX_ENDPOINT_CHANNELS: u16 = 64;
-const CONTROL_SERVER_PORT: u16 = 19_341;
 
-pub(super) fn run() -> Result<(), String> {
-    let mut initial_spec = default_duplex_document(1, None)
-        .nodes
-        .into_iter()
-        .find_map(|node| match node.config {
-            mixrelay_audio_graph::NodeConfig::VirtualEndpoint(spec) => Some(EndpointBinding {
-                node_id: node.id.as_str().to_owned(),
-                spec: spec.spec,
-            }),
-            _ => None,
-        })
-        .ok_or_else(|| "default graph has no virtual endpoint".to_owned())?;
+const fn native_format(format: RenderFormat) -> native::StreamFormat {
+    native::StreamFormat {
+        sample_rate: format.sample_rate,
+        block_frames: format.block_frames,
+    }
+}
+
+pub(super) fn run(owner: Option<mixrelay_engine_process::EngineOwner>) -> Result<(), String> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| format!("could not initialize Linux async runtime: {error}"))?;
+    // Admission precedes publishing PipeWire endpoints or starting audio owners.
+    let service = runtime
+        .block_on(ControlService::bind())
+        .map_err(|error| error.to_string())?;
     let mut runtime_status = AdapterRuntimeStatus::new(adapter_profile())
         .with_graph_format_control()
         .with_observed_rate_following(format::observed_endpoint_rate);
     let initial_format = runtime_status.restore_preferences();
-    initial_spec.spec.default_sample_rate = initial_format.sample_rate;
-    initial_spec.spec.supported_sample_rates = vec![initial_format.sample_rate];
-    let endpoint = PipeWireEndpoint::open_format(&initial_spec, initial_format)?;
-    let endpoint_backend = LinuxVirtualEndpointBackend::new(initial_spec);
+    let endpoint_backend = LinuxVirtualEndpointBackend::new();
     endpoint_backend
         .active_format
         .store(format::pack(initial_format), Ordering::Release);
     let runtime_status = Arc::new(runtime_status);
     let meters = default_peak_meter_bank();
-    let processor = create_initial_processor(Arc::clone(&meters), initial_format)?;
+    let initial_document = GraphDocument::new(1, Vec::new(), Vec::new());
+    let processor =
+        create_initial_processor(&initial_document, Arc::clone(&meters), initial_format)?;
     let exchange = Arc::new(ProcessorExchange::new(processor.plan().revision()));
+    let _latency = crate::latency_maintenance::Observer::start(&exchange, processor.plan())?;
     let controller = Arc::new(
-        EngineGraphController::new_with_configuration(
+        EngineGraphController::new_with_initial_document(
             Arc::clone(&exchange),
             EngineGraphControllerConfig {
                 format: initial_format,
@@ -106,56 +118,49 @@ pub(super) fn run() -> Result<(), String> {
                 graph_resources: endpoint_backend.clone(),
                 runtime_status: runtime_status.clone(),
             },
+            initial_document,
         )
         .with_graph_catalog(),
     );
 
-    spawn_reclaimers(&exchange, &endpoint_backend)?;
-    let _recovery = spawn_device_recovery(&endpoint_backend)?;
+    let _reclaimer = spawn_reclaimers(&exchange, &endpoint_backend)?;
+    let _recovery = spawn_device_recovery(&endpoint_backend, &exchange)?;
     let worker_status = runtime_status.clone();
     let audio_thread = thread::Builder::new()
         .name("mixrelay-pipewire-audio".to_owned())
         .spawn(move || {
-            run_audio_worker(
-                processor,
-                exchange,
-                endpoint_backend,
-                endpoint,
-                &worker_status,
-            );
+            run_audio_worker(processor, exchange, &endpoint_backend, &worker_status);
         })
         .map_err(|error| format!("could not start PipeWire audio worker: {error}"))?;
     let _worker = mixrelay_engine_service::session::AudioWorker::new(runtime_status, audio_thread);
-    let _format_monitor = format::Monitor::start(&controller)?;
+    let format_monitor = format::Monitor::start(&controller)?;
     let maintenance = controller.start_control_maintenance()?;
 
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| format!("could not initialize Linux async runtime: {error}"))?;
-    runtime.block_on(async move {
-        let address = std::net::SocketAddr::from(([127, 0, 0, 1], CONTROL_SERVER_PORT));
-        let listener = tokio::net::TcpListener::bind(address)
-            .await
-            .map_err(|error| format!("could not bind local control server: {error}"))?;
-        let result = axum::serve(listener, router_with_backend(controller))
-            .with_graceful_shutdown(async {
-                let _ = mixrelay_engine_service::session::shutdown_signal().await;
-            })
-            .await
-            .map_err(|error| format!("local control server failed: {error}"));
-        let saved = maintenance.finish();
-        result.and(saved)
-    })
+    let result = runtime
+        .block_on(service.serve(
+            controller,
+            mixrelay_engine_process::shutdown(
+                owner,
+                mixrelay_engine_service::session::shutdown_signal(),
+            ),
+            || {
+                format_monitor.stop_observing();
+                maintenance.stop_observing();
+            },
+        ))
+        .map_err(|error| error.to_string());
+    drop(format_monitor);
+    result.and(maintenance.finish())
 }
 
 fn create_initial_processor(
+    document: &GraphDocument,
     meters: Arc<PeakMeterBank>,
     format: RenderFormat,
 ) -> Result<Box<BlockProcessor>, String> {
     let execution = GraphCompiler::default()
         .compile(
-            &mixrelay_engine_service::default_session_document(1, format),
+            document,
             CompileContext {
                 format,
                 limits: CompileLimits::default(),
@@ -179,28 +184,25 @@ const fn render_format() -> RenderFormat {
 fn spawn_reclaimers(
     exchange: &Arc<ProcessorExchange>,
     endpoints: &Arc<LinuxVirtualEndpointBackend>,
-) -> Result<(), String> {
+) -> Result<mixrelay_engine_service::resource_reclaimer::ResourceReclaimer, String> {
     let weak_exchange = Arc::downgrade(exchange);
     let weak_endpoints = Arc::downgrade(endpoints);
-    thread::Builder::new()
-        .name("mixrelay-linux-reclaimer".to_owned())
-        .spawn(move || {
-            loop {
-                let Some(exchange) = weak_exchange.upgrade() else {
-                    break;
-                };
-                exchange.reclaim_retired();
-                drop(exchange);
-                let Some(endpoints) = weak_endpoints.upgrade() else {
-                    break;
-                };
-                endpoints.reclaim_retired();
-                drop(endpoints);
-                thread::sleep(Duration::from_millis(100));
-            }
-        })
-        .map(|_| ())
-        .map_err(|error| format!("could not start Linux resource reclaimer: {error}"))
+    mixrelay_engine_service::resource_reclaimer::ResourceReclaimer::start(
+        "mixrelay-linux-reclaimer",
+        move || {
+            let Some(exchange) = weak_exchange.upgrade() else {
+                return false;
+            };
+            exchange.reclaim_retired();
+            drop(exchange);
+            let Some(endpoints) = weak_endpoints.upgrade() else {
+                return false;
+            };
+            endpoints.reclaim_retired();
+            true
+        },
+    )
+    .map_err(|error| format!("could not start Linux resource reclaimer: {error}"))
 }
 
 struct DeviceRecoveryWorker {
@@ -218,8 +220,10 @@ impl Drop for DeviceRecoveryWorker {
 
 fn spawn_device_recovery(
     backend: &Arc<LinuxVirtualEndpointBackend>,
+    exchange: &Arc<ProcessorExchange>,
 ) -> Result<DeviceRecoveryWorker, String> {
     let weak = Arc::downgrade(backend);
+    let weak_exchange = Arc::downgrade(exchange);
     let stopping = Arc::new(AtomicBool::new(false));
     let stop = stopping.clone();
     let worker = thread::Builder::new()
@@ -231,6 +235,9 @@ fn spawn_device_recovery(
                 };
                 backend.device_recovery.reclaim();
                 backend.recover_applications(&stop);
+                if let Some(exchange) = weak_exchange.upgrade() {
+                    backend.poll_source_mute(&exchange);
+                }
                 if backend.device_recovery.idle() {
                     // Do not hold the configuration mutex across discovery/open.
                     let watch = backend
@@ -238,22 +245,16 @@ fn spawn_device_recovery(
                         .lock()
                         .ok()
                         .and_then(|watch| watch.clone());
-                    if let Some(watch) = watch {
-                        let failed = watch.disconnected();
-                        if !failed.is_empty()
-                            && let Ok(prepared) = DeviceStreams::recover(
-                                &failed,
-                                watch.generation,
-                                &stop,
-                                watch.format,
-                            )
-                            && !prepared.is_empty()
-                            && !stop.load(Ordering::Acquire)
-                        {
-                            // A concurrent edit may have replaced/deleted these nodes.
-                            // The audio generation check rejects this result in that case.
-                            let _ = backend.device_recovery.publish(watch.generation, prepared);
-                        }
+                    if let Some(watch) = watch
+                        && watch.needs_observation()
+                        && let Ok(mut prepared) = DeviceStreams::recover(&watch, &stop)
+                        && !prepared.is_empty()
+                        && !stop.load(Ordering::Acquire)
+                        && backend.bind_device_inputs(&mut prepared).is_ok()
+                    {
+                        // A concurrent edit may have replaced/deleted these nodes.
+                        // The audio epoch and per-stream lease checks reject stale results.
+                        let _ = backend.device_recovery.publish(watch.generation, prepared);
                     }
                 }
                 drop(backend);
@@ -273,20 +274,18 @@ struct LinuxProcessState<'a> {
     endpoint_backend: &'a LinuxVirtualEndpointBackend,
     application_recovery: RecoveryConsumer<'a, PipeWireCaptureSet>,
     device_recovery: RecoveryConsumer<'a, DeviceStreams>,
-    active_endpoint: Option<Box<PipeWireEndpoint>>,
+    endpoints: Box<EndpointSet>,
     captures: Box<PipeWireCaptureSet>,
     devices: Box<DeviceStreams>,
-    render: Box<[f32]>,
-    capture: Box<[f32]>,
     status: Arc<AdapterRuntimeStatus>,
     timeline: clock::GraphTimeline,
+    clock_diagnostics: Arc<clock::DiscontinuityMailbox>,
 }
 
 fn run_audio_worker(
     processor: Box<BlockProcessor>,
     exchange: Arc<ProcessorExchange>,
-    endpoint_backend: Arc<LinuxVirtualEndpointBackend>,
-    endpoint: PipeWireEndpoint,
+    endpoint_backend: &LinuxVirtualEndpointBackend,
     status: &Arc<AdapterRuntimeStatus>,
 ) {
     let Ok(_lease) = status.begin_processing() else {
@@ -300,31 +299,38 @@ fn run_audio_worker(
         tracing::error!("device recovery already has an audio consumer");
         return;
     };
-    let initial_rate = processor.plan().format().sample_rate;
-    let mut context = Box::new(LinuxProcessState {
+    let initial_format = processor.plan().format();
+    let driver_format =
+        match DriverFormat::new(initial_format.sample_rate, initial_format.block_frames) {
+            Ok(format) => format,
+            Err(error) => {
+                tracing::error!(%error, "could not prepare PipeWire graph driver format");
+                return;
+            }
+        };
+    let clock_diagnostics = Arc::new(clock::DiscontinuityMailbox::default());
+    let context = LinuxProcessState {
         processor,
         exchange,
-        endpoint_backend: &endpoint_backend,
+        endpoint_backend,
         application_recovery,
         device_recovery,
-        active_endpoint: Some(Box::new(endpoint)),
+        endpoints: Box::default(),
         captures: Box::default(),
         devices: Box::default(),
-        render: vec![0.0; usize::from(MAX_ENDPOINT_CHANNELS) * format::MAX_BLOCK]
-            .into_boxed_slice(),
-        capture: vec![0.0; usize::from(MAX_ENDPOINT_CHANNELS) * format::MAX_BLOCK]
-            .into_boxed_slice(),
         status: status.clone(),
-        timeline: clock::GraphTimeline::new(initial_rate),
-    });
-    // SAFETY: Box pins context; only the serial native RT callback accesses it
-    // until Driver Drop disconnects/drains. No timer below ever processes audio.
-    let driver =
-        unsafe { NativeDriver::open(native_process, ptr::from_mut(context.as_mut()).cast()) };
-    let Ok(driver) = driver else {
-        return;
+        timeline: clock::GraphTimeline::new(initial_format.sample_rate),
+        clock_diagnostics: Arc::clone(&clock_diagnostics),
+    };
+    let driver = match GraphDriver::open(context, driver_format) {
+        Ok(driver) => driver,
+        Err(error) => {
+            tracing::error!(%error, "could not start PipeWire graph driver");
+            return;
+        }
     };
     let started = Instant::now();
+    let mut last_clock_event = 0;
     while !driver.ready() && !status.stop_requested() {
         if started.elapsed() > Duration::from_secs(5) {
             return;
@@ -333,35 +339,109 @@ fn run_audio_worker(
     }
     while !status.stop_requested() && driver.ready() {
         // Control-plane health/shutdown wait, NOT an audio scheduling clock.
+        report_clock_discontinuity(&clock_diagnostics, &mut last_clock_event);
         thread::sleep(Duration::from_millis(20));
     }
-    drop(driver); // Drain before context (and its active resources) can be dropped.
+    drop(driver); // The driver owns and drains context before releasing its resources.
+    report_clock_discontinuity(&clock_diagnostics, &mut last_clock_event);
 }
 
-unsafe extern "C" fn native_process(data: *mut std::ffi::c_void, native: *const NativeCycle) {
-    // SAFETY: installed by run_audio_worker with pinned data and a native cycle
-    // valid for this invocation. PipeWire serializes this filter's process calls.
-    let (context, native) = unsafe { (&mut *data.cast::<LinuxProcessState<'_>>(), &*native) };
-    if context.status.stop_requested() {
+fn report_clock_discontinuity(mailbox: &clock::DiscontinuityMailbox, last_event: &mut u64) {
+    let Some(read) = mailbox.read_since(*last_event) else {
         return;
+    };
+    *last_event = read.event_number;
+    let previous = read.event.previous;
+    let current = read.event.current;
+    tracing::warn!(
+        event_number = read.event_number,
+        overwritten = read.overwritten,
+        previous_clock_id = previous.clock_id,
+        previous_rate = previous.rate,
+        previous_position = previous.position,
+        previous_frames = previous.frames,
+        previous_monotonic_ns = previous.monotonic_ns,
+        current_clock_id = current.clock_id,
+        current_rate = current.rate,
+        current_position = current.position,
+        current_frames = current.frames,
+        current_monotonic_ns = current.monotonic_ns,
+        mapped_epoch = read.event.mapped_epoch,
+        render_position = read.event.render_position,
+        "PipeWire native timeline discontinuity"
+    );
+}
+
+#[cfg(test)]
+mod clock_diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn control_poll_reports_each_mailbox_event_once() {
+        let mailbox = clock::DiscontinuityMailbox::default();
+        let previous = DriverCycle {
+            position: 0,
+            monotonic_ns: 1,
+            clock_id: 2,
+            rate: 48_000,
+            frames: 128,
+        };
+        let event = clock::NativeDiscontinuity {
+            previous,
+            current: DriverCycle {
+                position: 256,
+                monotonic_ns: 2,
+                ..previous
+            },
+            mapped_epoch: 2,
+            render_position: 128,
+        };
+        let mut last_event = 0;
+        report_clock_discontinuity(&mailbox, &mut last_event);
+        assert_eq!(last_event, 0);
+        mailbox.publish(event);
+        report_clock_discontinuity(&mailbox, &mut last_event);
+        assert_eq!(last_event, 1);
+        report_clock_discontinuity(&mailbox, &mut last_event);
+        assert_eq!(last_event, 1);
     }
-    if context.status.checkpoint() {
-        return;
+}
+
+impl DriverProcess for LinuxProcessState<'_> {
+    fn prepare_inputs(
+        &mut self,
+        inputs: &mixrelay_pipewire::GraphInputs,
+    ) -> Result<(), mixrelay_pipewire::DriverError> {
+        self.endpoints
+            .bind_inputs(inputs)
+            .map_err(mixrelay_pipewire::DriverError::Input)?;
+        self.captures
+            .bind_inputs(inputs)
+            .map_err(mixrelay_pipewire::DriverError::Input)?;
+        self.devices
+            .bind_inputs(inputs)
+            .map_err(mixrelay_pipewire::DriverError::Input)?;
+        self.endpoint_backend.register_inputs(inputs)
     }
-    if context.process(native).is_err() {
-        context.status.request_stop();
+    fn process(&mut self, native: &DriverCycle) {
+        if self.status.stop_requested() || self.status.checkpoint() {
+            return;
+        }
+        if self.process_cycle(native).is_err() {
+            self.status.request_stop();
+        }
     }
 }
 
 impl LinuxProcessState<'_> {
-    fn process(&mut self, native: &NativeCycle) -> Result<(), ()> {
+    fn process_cycle(&mut self, native: &DriverCycle) -> Result<(), ()> {
         let previous_format = self.processor.plan().format();
         let activated = self
             .exchange
             .activate_pending_configured(&mut self.processor, |revision| {
                 self.endpoint_backend.activate_pending(
                     revision,
-                    &mut self.active_endpoint,
+                    &mut self.endpoints,
                     &mut self.captures,
                     &mut self.devices,
                 )
@@ -372,11 +452,17 @@ impl LinuxProcessState<'_> {
             self.timeline = clock::GraphTimeline::new(format.sample_rate);
             self.status.activate_format(format);
         }
-        format::observe_endpoint(self.active_endpoint.as_deref());
+        format::observe_endpoints(&self.endpoints);
         let cycle = self.timeline.map(native)?;
+        if let Some(event) = self.timeline.take_discontinuity() {
+            self.clock_diagnostics.publish(event);
+        }
         self.status
             .observe_clock(ClockAuthority::AudioServer, false);
         if cycle.frames == 0 {
+            // A valid native iteration still owes the manual output dependency,
+            // even when duration mapping has not accumulated one PCM frame yet.
+            process_blocks_and_release(self, None, Self::process_block, Self::trigger_outputs)?;
             return Ok(());
         }
         let blocks = CycleBlocks::new(
@@ -393,25 +479,30 @@ impl LinuxProcessState<'_> {
                 ..ProcessReport::default()
             });
         }
-        for block in blocks {
-            self.process_block(block)?;
-        }
+        process_blocks_and_release(
+            self,
+            Some(blocks),
+            Self::process_block,
+            Self::trigger_outputs,
+        )?;
         // A node.group preference is not proof of a shared driver. Report only
         // actual native callback IDs after every currently active owner agrees.
-        let synchronized = self.active_endpoint.as_ref().is_none_or(|endpoint| {
-            endpoint
-                .render
-                .iter()
-                .chain(endpoint.capture.iter())
-                .all(|stream| stream.shares_clock(native.clock_id, native.rate))
-        }) && self.captures.shares_clock(native.clock_id, native.rate)
+        let synchronized = self.endpoints.shares_clock(native.clock_id, native.rate)
+            && self.captures.shares_clock(native.clock_id, native.rate)
             && self.devices.shares_clock(native.clock_id, native.rate);
         self.status
             .observe_clock(ClockAuthority::AudioServer, synchronized);
         Ok(())
     }
 
+    fn trigger_outputs(&mut self) {
+        self.endpoints.trigger_outputs();
+        self.devices.trigger_outputs();
+    }
+
     fn process_block(&mut self, cycle: ProcessCycle) -> Result<(), ()> {
+        self.devices
+            .observe_controls(self.processor.plan().controls());
         self.application_recovery
             .activate(self.captures.generation, |next| {
                 self.captures.replace(next);
@@ -421,69 +512,122 @@ impl LinuxProcessState<'_> {
                 self.devices.replace_disconnected(next);
             });
         self.status
-            .observe_endpoint(self.active_endpoint.as_ref().is_some_and(|e| e.ready()));
-        let frames = cycle.frames as usize;
-        let render_samples = self
-            .active_endpoint
-            .as_ref()
-            .map_or(0, |e| e.render_channels * frames);
-        let capture_samples = self
-            .active_endpoint
-            .as_ref()
-            .map_or(0, |e| e.capture_channels * frames);
-        let render = &mut self.render[..render_samples];
-        let capture = &mut self.capture[..capture_samples];
-        let render_frames = self
-            .active_endpoint
-            .as_mut()
-            .map_or(0, |e| e.read_render(render));
-        capture.fill(0.0);
+            .observe_endpoint(!self.endpoints.is_empty() && self.endpoints.ready());
         let report = self
             .processor
             .process_external_cycle(
                 cycle,
                 &mut LinuxExternalIo {
-                    endpoint_id: self.active_endpoint.as_ref().map(|e| e.id.as_str()),
-                    render,
-                    render_frames,
-                    capture,
+                    endpoints: &mut self.endpoints,
                     application_captures: &mut self.captures,
                     devices: &mut self.devices,
                 },
             )
             .map_err(|_| ())?;
+        self.status
+            .record_process(self.endpoints.finish_block(cycle.frames)?);
         let Some(report) = report else {
             return Ok(());
         };
         self.status.record_process(report);
         self.status.record_process(self.devices.take_report());
-        if let Some(endpoint) = self.active_endpoint.as_mut()
-            && !endpoint.write_capture(capture)
-        {
-            self.status.record_process(ProcessReport {
-                output_overflows: 1,
-                ..ProcessReport::default()
-            });
-        }
-        if let Some(endpoint) = &mut self.active_endpoint {
-            for stream in endpoint
-                .render
-                .iter_mut()
-                .chain(endpoint.capture.iter_mut())
-            {
-                self.status.record_process(stream.take_report());
-            }
-        }
+        self.status.record_process(self.endpoints.take_report());
         self.status.record_process(self.captures.take_report());
         self.status.observe_application_state(self.captures.state());
         Ok(())
     }
 }
+
+// Static callbacks keep the native-cycle sequencing testable without allocating
+// or introducing a second dispatch/ownership path in the real-time process.
+fn process_blocks_and_release<Owner>(
+    owner: &mut Owner,
+    blocks: Option<CycleBlocks>,
+    mut process_block: impl FnMut(&mut Owner, ProcessCycle) -> Result<(), ()>,
+    release_outputs: impl FnOnce(&mut Owner),
+) -> Result<(), ()> {
+    for block in blocks.into_iter().flatten() {
+        process_block(owner, block)?;
+    }
+    release_outputs(owner);
+    Ok(())
+}
+
+#[cfg(test)]
+mod native_output_release_tests {
+    use super::*;
+
+    fn blocks() -> CycleBlocks {
+        CycleBlocks::new(
+            ProcessCycle {
+                clock: mixrelay_audio_io::process::ClockDomain {
+                    authority: ClockAuthority::AudioServer,
+                    id: 26,
+                    epoch: 1,
+                },
+                sample_rate: 48_000,
+                frames: 512,
+                first_frame: 0,
+                monotonic_ns: Some(0),
+                discontinuity: false,
+            },
+            mixrelay_audio_io::session::SessionFormat {
+                sample_rate: 48_000,
+                block_frames: 128,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn output_release_follows_all_four_slices_once() {
+        let mut counts = (0, 0);
+        process_blocks_and_release(
+            &mut counts,
+            Some(blocks()),
+            |counts, block| {
+                assert_eq!(block.frames, 128);
+                counts.0 += 1;
+                assert_eq!(counts.1, 0);
+                Ok(())
+            },
+            |counts| {
+                assert_eq!(counts.0, 4);
+                counts.1 += 1;
+            },
+        )
+        .unwrap();
+        assert_eq!(counts, (4, 1));
+        counts = (0, 0);
+        process_blocks_and_release(
+            &mut counts,
+            None,
+            |_, _| panic!("zero render budget has no DSP slice"),
+            |counts| counts.1 += 1,
+        )
+        .unwrap();
+        assert_eq!(counts, (0, 1));
+    }
+
+    #[test]
+    fn failed_slice_does_not_release_partial_cycle() {
+        let mut counts = (0, 0);
+        let result = process_blocks_and_release(
+            &mut counts,
+            Some(blocks()),
+            |counts, _| {
+                counts.0 += 1;
+                if counts.0 == 2 { Err(()) } else { Ok(()) }
+            },
+            |counts| counts.1 += 1,
+        );
+        assert_eq!(result, Err(()));
+        assert_eq!(counts, (2, 0));
+    }
+}
+
 struct LinuxExternalIo<'a> {
-    endpoint_id: Option<&'a str>,
-    render: &'a [f32],
-    render_frames: u32,
-    capture: &'a mut [f32],
+    endpoints: &'a mut EndpointSet,
     application_captures: &'a mut PipeWireCaptureSet,
     devices: &'a mut DeviceStreams,
 }
@@ -495,11 +639,8 @@ impl ExternalIo for LinuxExternalIo<'_> {
         destination: &mut [f32],
         _cycle: &ProcessCycle,
     ) -> TransferOutcome {
-        if Some(binding.node_id().as_str()) == self.endpoint_id
-            && binding.port_id().as_str() == FROM_OS_PORT_ID
-        {
-            destination.copy_from_slice(self.render);
-            return TransferOutcome::complete(self.render_frames);
+        if binding.port_id().as_str() == FROM_OS_PORT_ID {
+            return self.endpoints.read(binding.node_id().as_str(), destination);
         } else if binding.port_id().as_str() == mixrelay_audio_graph::AUDIO_PORT_ID {
             if !self
                 .application_captures
@@ -518,13 +659,10 @@ impl ExternalIo for LinuxExternalIo<'_> {
         &mut self,
         binding: &ExternalBinding,
         source: &[f32],
-        cycle: &ProcessCycle,
+        _cycle: &ProcessCycle,
     ) -> TransferOutcome {
-        if Some(binding.node_id().as_str()) == self.endpoint_id
-            && binding.port_id().as_str() == TO_OS_PORT_ID
-        {
-            self.capture.copy_from_slice(source);
-            return TransferOutcome::complete(cycle.frames);
+        if binding.port_id().as_str() == TO_OS_PORT_ID {
+            return self.endpoints.write(binding.node_id().as_str(), source);
         }
         if binding.port_id().as_str() == mixrelay_audio_graph::AUDIO_PORT_ID {
             return self.devices.write(binding.node_id().as_str(), source);
@@ -534,11 +672,13 @@ impl ExternalIo for LinuxExternalIo<'_> {
 }
 
 struct LinuxVirtualEndpointBackend {
+    driver_client: Result<mixrelay_driver_control::DriverClient, String>,
     self_ref: Weak<Self>,
     active_format: AtomicU64,
     format_reserved: AtomicBool,
     capabilities: VirtualEndpointCapabilities,
     active_spec: Mutex<LinuxResourceSpec>,
+    endpoint_controls: Mutex<EndpointControls>,
     pending: AtomicPtr<LinuxResourceUpdate>,
     retired: AtomicPtr<LinuxResourceUpdate>,
     device_generation: AtomicU64,
@@ -547,11 +687,31 @@ struct LinuxVirtualEndpointBackend {
     application_generation: AtomicU64,
     application_watch: Mutex<Option<CaptureWatch>>,
     application_recovery: RecoveryMailbox<PipeWireCaptureSet>,
+    // Weak, control-only access. None is initial setup, never shutdown fallback.
+    graph_inputs: Mutex<Option<mixrelay_pipewire::GraphInputs>>,
+    playback: source_mute::PlaybackController,
+    #[cfg(test)]
+    automatic_device_outputs: bool,
 }
 
 impl LinuxVirtualEndpointBackend {
-    fn new(initial_spec: EndpointBinding) -> Arc<Self> {
-        Arc::new_cyclic(|self_ref| Self {
+    fn new() -> Arc<Self> {
+        Arc::new_cyclic(Self::prepare)
+    }
+
+    #[cfg(test)]
+    fn new_standalone_device_publishers() -> Arc<Self> {
+        Arc::new_cyclic(|self_ref| {
+            let mut backend = Self::prepare(self_ref);
+            backend.automatic_device_outputs = true;
+            backend
+        })
+    }
+
+    fn prepare(self_ref: &std::sync::Weak<Self>) -> Self {
+        Self {
+            driver_client: mixrelay_driver_control::DriverClient::new()
+                .map_err(|error| error.to_string()),
             self_ref: self_ref.clone(),
             active_format: AtomicU64::new(format::pack(render_format())),
             format_reserved: AtomicBool::new(false),
@@ -560,13 +720,14 @@ impl LinuxVirtualEndpointBackend {
                 max_capture_channels: MAX_ENDPOINT_CHANNELS,
                 supported_sample_rates: format::RATES.to_vec(),
                 supports_duplex: true,
-                supports_dynamic_creation: false,
+                supports_dynamic_creation: true,
             },
             active_spec: Mutex::new(LinuxResourceSpec {
-                endpoint: Some(initial_spec),
+                endpoints: EndpointSpecs::new(),
                 captures: Vec::new(),
                 devices: DeviceRequirements::default(),
             }),
+            endpoint_controls: Mutex::default(),
             pending: AtomicPtr::new(ptr::null_mut()),
             retired: AtomicPtr::new(ptr::null_mut()),
             device_generation: AtomicU64::new(0),
@@ -575,7 +736,11 @@ impl LinuxVirtualEndpointBackend {
             application_generation: AtomicU64::new(0),
             application_watch: Mutex::new(None),
             application_recovery: RecoveryMailbox::default(),
-        })
+            graph_inputs: Mutex::new(None),
+            playback: source_mute::PlaybackController::default(),
+            #[cfg(test)]
+            automatic_device_outputs: false,
+        }
     }
 
     fn recover_applications(&self, stopping: &AtomicBool) {
@@ -591,10 +756,13 @@ impl LinuxVirtualEndpointBackend {
         let Some(watch) = watch else {
             return;
         };
-        let Ok(Some((prepared, next_watch))) = watch.recover(stopping) else {
+        let Ok(Some((mut prepared, next_watch))) = watch.recover(stopping) else {
             return;
         };
         if stopping.load(Ordering::Acquire) {
+            return;
+        }
+        if self.bind_application_inputs(&mut prepared).is_err() {
             return;
         }
         if let Ok(mut registered) = self.application_watch.lock()
@@ -605,15 +773,87 @@ impl LinuxVirtualEndpointBackend {
                 .application_recovery
                 .publish(watch.generation, prepared)
                 .is_ok()
+            && let Some(current) = registered.as_mut()
         {
-            *registered = Some(next_watch);
+            current.refresh_leases(&next_watch);
         }
+    }
+
+    fn poll_source_mute(&self, exchange: &ProcessorExchange) {
+        let watch = self
+            .application_watch
+            .lock()
+            .ok()
+            .and_then(|value| value.clone());
+        let spec = self.active_spec.lock().ok().map(|value| value.clone());
+        if let Some(spec) = spec {
+            let driver = if watch.is_some() && !spec.endpoints.is_empty() {
+                self.driver_snapshot().ok()
+            } else {
+                None
+            };
+            self.playback.poll(
+                exchange,
+                &source_mute::PlaybackResources {
+                    watch: watch.as_ref(),
+                    endpoints: &spec.endpoints,
+                    driver: driver.as_ref(),
+                },
+            );
+        }
+    }
+
+    fn prepare_capture_edit(
+        &self,
+        requests: &[(String, ApplicationCaptureRequest)],
+        format: RenderFormat,
+    ) -> Result<(Box<PipeWireCaptureSet>, CaptureWatch), HostAudioBackendError> {
+        let generation = self.application_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let previous = self
+            .application_watch
+            .lock()
+            .map_err(|_| HostAudioBackendError::BackendFailure {
+                message: "application recovery state is poisoned".into(),
+            })?
+            .clone();
+        PipeWireCaptureSet::open_format(requests, generation, format, previous.as_ref())
+            .map(|(captures, watch)| (Box::new(captures), watch))
+            .map_err(|message| HostAudioBackendError::BackendFailure { message })
+    }
+
+    fn prepare_device_edit(
+        &self,
+        spec: &DeviceRequirements,
+        format: RenderFormat,
+    ) -> Result<Box<DeviceStreams>, HostAudioBackendError> {
+        let generation = self.device_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let previous = self
+            .device_watch
+            .lock()
+            .map_err(|_| HostAudioBackendError::BackendFailure {
+                message: "device recovery state is poisoned".into(),
+            })?
+            .clone();
+        #[cfg(test)]
+        if self.automatic_device_outputs {
+            return DeviceStreams::open_standalone_format(
+                spec,
+                generation,
+                format,
+                previous.as_ref(),
+            )
+            .map(Box::new)
+            .map_err(|message| HostAudioBackendError::BackendFailure { message });
+        }
+        DeviceStreams::open_format(spec, generation, format, previous.as_ref())
+            .map(Box::new)
+            .map_err(|message| HostAudioBackendError::BackendFailure { message })
     }
 
     fn activate_pending(
         &self,
         revision: u64,
-        active: &mut Option<Box<PipeWireEndpoint>>,
+        endpoints: &mut Box<EndpointSet>,
         captures: &mut Box<PipeWireCaptureSet>,
         devices: &mut Box<DeviceStreams>,
     ) -> Result<(), &'static str> {
@@ -631,21 +871,41 @@ impl LinuxVirtualEndpointBackend {
             self.pending.store(Box::into_raw(update), Ordering::Release);
             return Err("PipeWire resources do not match pending graph revision");
         }
-        if let EndpointUpdate::Replace(next) = &mut update.endpoint {
-            std::mem::swap(active, next);
-            if let Some(endpoint) = active
-                && let Some(stream) = &mut endpoint.render
-            {
-                stream.discard_input();
-            }
+        if update
+            .captures
+            .as_ref()
+            .is_some_and(|next| !next.can_retain_from(captures))
+        {
+            self.pending.store(Box::into_raw(update), Ordering::Release);
+            return Err("PipeWire retained captures no longer match the active source leases");
+        }
+        if update
+            .devices
+            .as_ref()
+            .is_some_and(|next| !next.can_retain_from(devices))
+        {
+            self.pending.store(Box::into_raw(update), Ordering::Release);
+            return Err("PipeWire retained devices no longer match the active source leases");
+        }
+        if update
+            .endpoints
+            .as_ref()
+            .is_some_and(|next| !next.can_retain_from(endpoints))
+        {
+            self.pending.store(Box::into_raw(update), Ordering::Release);
+            return Err("PipeWire retained virtual devices no longer match active owners");
+        }
+        if let Some(next) = &mut update.endpoints {
+            next.retain_from(endpoints);
+            std::mem::swap(endpoints, next);
         }
         if let Some(next) = &mut update.captures {
+            next.retain_from(captures);
             std::mem::swap(captures, next);
-            captures.discard_inputs();
         }
         if let Some(next) = &mut update.devices {
+            next.retain_from(devices);
             std::mem::swap(devices, next);
-            devices.discard_inputs();
         }
         // Reuse the prepared envelope to retire old resources. No Box allocation or
         // deallocation, process wait, or FIFO teardown occurs on this audio boundary.
@@ -661,7 +921,67 @@ impl LinuxVirtualEndpointBackend {
         }
     }
 
-    fn publish(&self, update: LinuxResourceUpdate) -> Result<(), HostAudioBackendError> {
+    fn register_inputs(
+        &self,
+        inputs: &mixrelay_pipewire::GraphInputs,
+    ) -> Result<(), mixrelay_pipewire::DriverError> {
+        let mut registered = self.graph_inputs.lock().map_err(|_| {
+            mixrelay_pipewire::DriverError::Input("driver registration poisoned".into())
+        })?;
+        let pending = self.pending.load(Ordering::Acquire);
+        if !pending.is_null() {
+            // SAFETY: only the initial unpublished driver calls this hook. Its RT
+            // DSP consumer has not started; graph_inputs excludes control publication.
+            // The unique pending envelope remains owned by the existing mailbox.
+            unsafe { &mut *pending }
+                .bind_inputs(inputs)
+                .map_err(mixrelay_pipewire::DriverError::Input)?;
+        }
+        *registered = Some(inputs.clone());
+        Ok(())
+    }
+
+    fn bind_application_inputs(&self, captures: &mut PipeWireCaptureSet) -> Result<(), String> {
+        let registered = self
+            .graph_inputs
+            .lock()
+            .map_err(|_| "driver registration poisoned")?;
+        let inputs = registered.as_ref().ok_or("driver has not registered")?;
+        inputs.ensure_live().map_err(|error| error.to_string())?;
+        captures.bind_inputs(inputs)
+    }
+
+    fn bind_device_inputs(&self, devices: &mut DeviceStreams) -> Result<(), String> {
+        let registered = self
+            .graph_inputs
+            .lock()
+            .map_err(|_| "driver registration poisoned")?;
+        let inputs = registered.as_ref().ok_or("driver has not registered")?;
+        inputs.ensure_live().map_err(|error| error.to_string())?;
+        devices.bind_inputs(inputs)
+    }
+
+    fn bind_format_inputs(&self, update: &mut LinuxResourceUpdate) -> Result<(), String> {
+        let registered = self
+            .graph_inputs
+            .lock()
+            .map_err(|_| "driver registration poisoned")?;
+        let inputs = registered.as_ref().ok_or("driver has not registered")?;
+        update.bind_inputs(inputs)
+    }
+
+    fn publish(&self, mut update: LinuxResourceUpdate) -> Result<(), HostAudioBackendError> {
+        let registered =
+            self.graph_inputs
+                .lock()
+                .map_err(|_| HostAudioBackendError::BackendFailure {
+                    message: "driver registration poisoned".into(),
+                })?;
+        if let Some(inputs) = registered.as_ref() {
+            update
+                .bind_inputs(inputs)
+                .map_err(|message| HostAudioBackendError::BackendFailure { message })?;
+        }
         if self.format_reserved.load(Ordering::Acquire) {
             return Err(HostAudioBackendError::BackendFailure {
                 message: "PipeWire format update reserved".into(),
@@ -686,13 +1006,120 @@ impl LinuxVirtualEndpointBackend {
         }
         Ok(())
     }
+
+    fn prepare_endpoint_edit(
+        &self,
+        next: &EndpointSpecs,
+        previous: &EndpointSpecs,
+        format: RenderFormat,
+    ) -> Result<Option<EndpointEdit>, HostAudioBackendError> {
+        if next == previous {
+            return Ok(None);
+        }
+        let controls =
+            self.endpoint_controls
+                .lock()
+                .map_err(|_| HostAudioBackendError::BackendFailure {
+                    message: "PipeWire endpoint control state is poisoned".into(),
+                })?;
+        EndpointEdit::prepare(next, previous, &controls, format).map(Some)
+    }
+
+    fn publish_edit(
+        &self,
+        mut update: LinuxResourceUpdate,
+        endpoints: Option<EndpointEdit>,
+    ) -> Result<(), HostAudioBackendError> {
+        let Some(endpoints) = endpoints else {
+            return self.publish(update);
+        };
+        let mut controls =
+            self.endpoint_controls
+                .lock()
+                .map_err(|_| HostAudioBackendError::BackendFailure {
+                    message: "PipeWire endpoint control state is poisoned".into(),
+                })?;
+        *controls = endpoints.publish(|endpoints| {
+            update.endpoints = Some(endpoints);
+            self.publish(update)
+        })?;
+        Ok(())
+    }
 }
 
 impl VirtualEndpointBackend for LinuxVirtualEndpointBackend {
     fn settings(&self) -> Option<mixrelay_audio_io::VirtualEndpointSettings> {
-        Some(mixrelay_audio_io::VirtualEndpointSettings::configurable(
-            &self.capabilities,
-        ))
+        self.driver_snapshot()
+            .ok()
+            .map(|snapshot| snapshot.settings)
+    }
+
+    fn sample_rate(
+        &self,
+        id: &mixrelay_audio_io::VirtualEndpointId,
+    ) -> Result<u32, HostAudioBackendError> {
+        self.driver_snapshot()?
+            .settings
+            .devices
+            .into_iter()
+            .find(|device| &device.spec.id == id)
+            .and_then(|device| device.observed_sample_rate)
+            .ok_or_else(|| driver_failure("Driver device rate unavailable"))
+    }
+
+    fn set_sample_rate(
+        &self,
+        id: &mixrelay_audio_io::VirtualEndpointId,
+        rate: u32,
+    ) -> Result<(), HostAudioBackendError> {
+        let snapshot = self.driver_snapshot()?;
+        let device = snapshot
+            .settings
+            .devices
+            .iter()
+            .find(|device| &device.spec.id == id)
+            .ok_or_else(|| driver_failure("Driver device is missing"))?;
+        let client = self.driver_client.as_ref().map_err(driver_failure)?;
+        let mut selection = None;
+        for (direction, formats) in [
+            (
+                mixrelay_driver_control::NativeDirection::Render,
+                &device.native_formats.render,
+            ),
+            (
+                mixrelay_driver_control::NativeDirection::Capture,
+                &device.native_formats.capture,
+            ),
+        ] {
+            let Some(current) = formats.current else {
+                continue;
+            };
+            let desired = mixrelay_audio_io::NativeStreamFormat {
+                sample_rate: rate,
+                ..current
+            };
+            if !formats.supported.contains(&desired) {
+                return Err(driver_failure(
+                    "Driver does not support the requested native format",
+                ));
+            }
+            if selection.is_none() {
+                selection = Some((direction, desired));
+            }
+        }
+        let (direction, format) =
+            selection.ok_or_else(|| driver_failure("Driver format unavailable"))?;
+        // The Driver's clock is shared by both native directions. One revision-checked
+        // mutation updates their rate together, preserving each PCM representation.
+        client
+            .mutate_blocking(&mixrelay_driver_control::DriverCommand::SetFormat {
+                expected_revision: snapshot.revision,
+                endpoint_id: id.clone(),
+                direction,
+                format,
+            })
+            .map_err(driver_failure)?;
+        Ok(())
     }
 
     fn capabilities(&self) -> &VirtualEndpointCapabilities {
@@ -703,16 +1130,73 @@ impl VirtualEndpointBackend for LinuxVirtualEndpointBackend {
         &self,
         desired: &[VirtualEndpointSpec],
     ) -> Result<(), HostAudioBackendError> {
-        if desired.len() > 1 {
-            return Err(HostAudioBackendError::CapabilityUnavailable {
-                capability: "the Linux backend supports one duplex virtual endpoint".to_owned(),
-            });
+        self.resolve_graph_devices(desired).map(|_| ())
+    }
+
+    fn resolve_graph_devices(
+        &self,
+        desired: &[VirtualEndpointSpec],
+    ) -> Result<Vec<VirtualEndpointSpec>, HostAudioBackendError> {
+        if desired.is_empty() {
+            return Ok(Vec::new());
         }
-        Ok(())
+        let snapshot = self.driver_snapshot()?;
+        desired
+            .iter()
+            .map(|reference| {
+                snapshot
+                    .settings
+                    .devices
+                    .iter()
+                    .find(|device| device.spec.id == reference.id)
+                    .map(|device| device.spec.clone())
+                    .ok_or_else(|| {
+                        driver_failure(format!(
+                            "Driver device is missing: {}",
+                            reference.id.as_str()
+                        ))
+                    })
+            })
+            .collect()
+    }
+}
+
+fn driver_failure(error: impl std::fmt::Display) -> HostAudioBackendError {
+    HostAudioBackendError::BackendFailure {
+        message: error.to_string(),
+    }
+}
+
+impl LinuxVirtualEndpointBackend {
+    fn driver_snapshot(
+        &self,
+    ) -> Result<mixrelay_driver_control::DriverSnapshot, HostAudioBackendError> {
+        let snapshot = self
+            .driver_client
+            .as_ref()
+            .map_err(driver_failure)?
+            .snapshot_blocking()
+            .map_err(driver_failure)?;
+        if snapshot.state != mixrelay_driver_control::DriverState::Ready {
+            return Err(driver_failure("Driver service is not ready"));
+        }
+        Ok(snapshot)
     }
 }
 
 impl GraphResourceBackend for LinuxVirtualEndpointBackend {
+    fn execution_released(&self) -> bool {
+        native::NativeStream::active_owners() == 0
+    }
+
+    fn resolve_application_capture(
+        &self,
+        request: &ApplicationCaptureRequest,
+    ) -> Result<mixrelay_engine_service::graph_composition::SharedSource, HostAudioBackendError>
+    {
+        application_identity::resolve(request)
+    }
+
     fn device_inventory(
         &self,
         _selectors: &[&mixrelay_audio_io::DeviceSelector],
@@ -723,15 +1207,21 @@ impl GraphResourceBackend for LinuxVirtualEndpointBackend {
     fn prepare_format_change(
         &self,
         document: &mixrelay_audio_graph::GraphDocument,
+        playback: mixrelay_engine_service::PlaybackBindings<'_>,
         _current: RenderFormat,
         requested: RenderFormat,
     ) -> Result<Box<dyn mixrelay_engine_service::PreparedGraphFormat>, HostAudioBackendError> {
-        format::prepare(self, document, requested)
+        let playback = source_mute::OwnedPlan::prepare(&playback)
+            .map_err(|capability| HostAudioBackendError::CapabilityUnavailable { capability })?;
+        format::prepare(self, document, requested, playback)
     }
     fn reconcile(
         &self,
         document: &mixrelay_audio_graph::GraphDocument,
+        playback: mixrelay_engine_service::PlaybackBindings<'_>,
     ) -> Result<(), HostAudioBackendError> {
+        let playback = source_mute::OwnedPlan::prepare(&playback)
+            .map_err(|capability| HostAudioBackendError::CapabilityUnavailable { capability })?;
         let next = LinuxResourceSpec::from_document(document)?;
         let format = format::unpack(self.active_format.load(Ordering::Acquire));
         let mut active =
@@ -741,40 +1231,25 @@ impl GraphResourceBackend for LinuxVirtualEndpointBackend {
                     message: "PipeWire endpoint state is poisoned".to_owned(),
                 })?;
         if *active == next {
+            self.playback.stage(document.revision, playback);
             return Ok(());
         }
-        let endpoint = if active.endpoint == next.endpoint {
-            EndpointUpdate::Retain
-        } else {
-            EndpointUpdate::Replace(match &next.endpoint {
-                Some(spec) => Some(Box::new(
-                    PipeWireEndpoint::open_format(spec, format)
-                        .map_err(|message| HostAudioBackendError::BackendFailure { message })?,
-                )),
-                None => None,
-            })
-        };
-        let (captures, application_watch) = if active.captures == next.captures {
+        let endpoints = self.prepare_endpoint_edit(&next.endpoints, &active.endpoints, format)?;
+        let (captures, mut application_watch) = if active.captures == next.captures {
             (None, None)
         } else {
-            let generation = self.application_generation.fetch_add(1, Ordering::Relaxed) + 1;
-            let (captures, watch) =
-                PipeWireCaptureSet::open_format(&next.captures, generation, format)
-                    .map_err(|message| HostAudioBackendError::BackendFailure { message })?;
-            (Some(Box::new(captures)), Some(watch))
+            let (captures, watch) = self.prepare_capture_edit(&next.captures, format)?;
+            (Some(captures), Some(watch))
         };
         let devices = if active.devices == next.devices {
             None
         } else {
-            let generation = self.device_generation.fetch_add(1, Ordering::Relaxed) + 1;
-            Some(Box::new(
-                DeviceStreams::open_format(&next.devices, generation, format)
-                    .map_err(|message| HostAudioBackendError::BackendFailure { message })?,
-            ))
+            Some(self.prepare_device_edit(&next.devices, format)?)
         };
-        let watch = devices
-            .as_ref()
-            .map(|streams| streams.watch(next.devices.clone()));
+        let watch = devices.as_ref().map(|streams| {
+            streams.initialize_controls(document);
+            streams.watch(next.devices.clone())
+        });
         // Lock before publication so poisoning cannot leave a staged edit with
         // an unregistered watcher. Recovery never holds this lock during I/O.
         let mut registered =
@@ -789,12 +1264,20 @@ impl GraphResourceBackend for LinuxVirtualEndpointBackend {
                 .map_err(|_| HostAudioBackendError::BackendFailure {
                     message: "application recovery state is poisoned".into(),
                 })?;
-        self.publish(LinuxResourceUpdate {
-            revision: document.revision,
-            endpoint,
-            captures,
-            devices,
-        })?;
+        if let (Some(prepared), Some(current)) =
+            (application_watch.as_mut(), registered_applications.as_ref())
+        {
+            prepared.refresh_leases(current);
+        }
+        self.publish_edit(
+            LinuxResourceUpdate {
+                revision: document.revision,
+                endpoints: None,
+                captures,
+                devices,
+            },
+            endpoints,
+        )?;
         if let Some(watch) = watch {
             *registered = Some(watch);
         }
@@ -802,12 +1285,14 @@ impl GraphResourceBackend for LinuxVirtualEndpointBackend {
             *registered_applications = Some(watch);
         }
         *active = next;
+        self.playback.stage(document.revision, playback);
         Ok(())
     }
 }
 
 impl Drop for LinuxVirtualEndpointBackend {
     fn drop(&mut self) {
+        self.playback.clear_all();
         let pending = *self.pending.get_mut();
         if !pending.is_null() {
             // SAFETY: dropping the backend is exclusive; no shared owner can reach the update.
@@ -823,7 +1308,7 @@ impl Drop for LinuxVirtualEndpointBackend {
 
 #[derive(Clone, PartialEq)]
 struct LinuxResourceSpec {
-    endpoint: Option<EndpointBinding>,
+    endpoints: EndpointSpecs,
     captures: Vec<(String, ApplicationCaptureRequest)>,
     devices: DeviceRequirements,
 }
@@ -833,105 +1318,37 @@ impl LinuxResourceSpec {
         document: &mixrelay_audio_graph::GraphDocument,
     ) -> Result<Self, HostAudioBackendError> {
         let requirements = ResourceRequirements::from_document(document);
-        let endpoint = match requirements.endpoints.as_slice() {
-            [] => None,
-            [(node_id, spec)] => Some(EndpointBinding {
-                node_id: node_id.clone(),
-                spec: spec.clone(),
-            }),
-            _ => {
-                return Err(HostAudioBackendError::CapabilityUnavailable {
-                    capability: "the Linux backend supports one duplex virtual endpoint".to_owned(),
-                });
-            }
-        };
         Ok(Self {
-            endpoint,
+            endpoints: endpoints::specs(requirements.endpoints)?,
             captures: requirements.captures,
             devices: requirements.devices,
         })
     }
 }
 
-// Keep graph binding identity explicit instead of deriving it from a native
-// device name. The control protocol currently requires these IDs to match.
-#[derive(Clone, PartialEq)]
-struct EndpointBinding {
-    node_id: String,
-    spec: VirtualEndpointSpec,
-}
-
 struct LinuxResourceUpdate {
     revision: u64,
-    endpoint: EndpointUpdate,
+    endpoints: Option<Box<EndpointSet>>,
     captures: Option<Box<PipeWireCaptureSet>>,
     devices: Option<Box<DeviceStreams>>,
 }
 
-enum EndpointUpdate {
-    Retain,
-    // None removes the endpoint; the same slot retires the previous owner after swapping.
-    Replace(Option<Box<PipeWireEndpoint>>),
+impl LinuxResourceUpdate {
+    fn bind_inputs(&mut self, inputs: &mixrelay_pipewire::GraphInputs) -> Result<(), String> {
+        inputs.ensure_live().map_err(|error| error.to_string())?;
+        if let Some(endpoints) = &mut self.endpoints {
+            endpoints.bind_inputs(inputs)?;
+        }
+        if let Some(captures) = &mut self.captures {
+            captures.bind_inputs(inputs)?;
+        }
+        if let Some(devices) = &mut self.devices {
+            devices.bind_inputs(inputs)?;
+        }
+        Ok(())
+    }
 }
 
-struct PipeWireEndpoint {
-    id: String,
-    render_channels: usize,
-    capture_channels: usize,
-    render: Option<NativeStream>,
-    capture: Option<NativeStream>,
-}
-impl PipeWireEndpoint {
-    fn open_format(binding: &EndpointBinding, format: RenderFormat) -> Result<Self, String> {
-        let spec = &binding.spec;
-        let name = sanitize_node_name(spec.id.as_str());
-        let render = spec
-            .render
-            .map(|stream| {
-                NativeStream::open_format(
-                    &format!("{name}.render"),
-                    &spec.display_name,
-                    None,
-                    0,
-                    stream.channels,
-                    format,
-                )
-            })
-            .transpose()?;
-        let capture = spec
-            .capture
-            .map(|stream| {
-                NativeStream::open_format(
-                    &format!("{name}.capture"),
-                    &spec.display_name,
-                    None,
-                    1,
-                    stream.channels,
-                    format,
-                )
-            })
-            .transpose()?;
-        Ok(Self {
-            id: binding.node_id.clone(),
-            render_channels: usize::from(spec.render.map_or(0, |s| s.channels)),
-            capture_channels: usize::from(spec.capture.map_or(0, |s| s.channels)),
-            render,
-            capture,
-        })
-    }
-    fn ready(&self) -> bool {
-        self.render.as_ref().is_none_or(NativeStream::ready)
-            && self.capture.as_ref().is_none_or(NativeStream::ready)
-    }
-    fn read_render(&mut self, destination: &mut [f32]) -> u32 {
-        self.render.as_mut().map_or(0, |s| s.read(destination))
-    }
-    fn write_capture(&mut self, source: &[f32]) -> bool {
-        self.capture
-            .as_mut()
-            .is_none_or(|s| s.write(source) as usize == source.len() / self.capture_channels)
-    }
-}
 fn sanitize_node_name(value: &str) -> String {
     let value = value
         .chars()

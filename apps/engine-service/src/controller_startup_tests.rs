@@ -20,7 +20,11 @@ impl RuntimeStatusBackend for NativeCalls {
 }
 
 impl GraphResourceBackend for NativeCalls {
-    fn reconcile(&self, _document: &GraphDocument) -> Result<(), HostAudioBackendError> {
+    fn reconcile(
+        &self,
+        _document: &GraphDocument,
+        _: crate::PlaybackBindings<'_>,
+    ) -> Result<(), HostAudioBackendError> {
         self.preparation.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }

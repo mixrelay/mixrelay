@@ -9,7 +9,7 @@
 //!
 //! # Status
 //!
-//! - **Scan** via `lilv_world_load_all`.
+//! - **Scan** via `lilv_world_load_all`, or one exact bundle via `lilv_world_load_bundle`.
 //! - **Load** instantiates the plugin into a `LilvInstance` with
 //!   the LV2 `urid#map` feature. Each plugin owns its own world
 //!   (instance pointers reference world-owned data).
@@ -42,7 +42,7 @@
 )]
 
 use truce_rack_core::buffer::AudioBuffer;
-use truce_rack_core::bus::{BusLayout, ChannelConfig};
+use truce_rack_core::bus::BusLayout;
 use truce_rack_core::editor::{PluginEditor, WindowHandle};
 use truce_rack_core::error::{Error, Result};
 use truce_rack_core::events::{Event, EventBody, EventList, MidiData};
@@ -64,15 +64,26 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+mod options;
+mod parameters;
+mod pending_controls;
+mod port_groups;
 mod state;
 
 /// Format identifier used on returned [`PluginInfo`].
 pub const FORMAT: &str = "lv2";
 
 const LV2_URID_MAP_URI: &[u8] = b"http://lv2plug.in/ns/ext/urid#map\0";
+const LV2_BOUNDED_BLOCK_URI: &[u8] = b"http://lv2plug.in/ns/ext/buf-size#boundedBlockLength\0";
+const LV2_CORE_DESIGNATION_URI: &[u8] = b"http://lv2plug.in/ns/lv2core#designation\0";
+const LV2_CORE_LATENCY_URI: &[u8] = b"http://lv2plug.in/ns/lv2core#latency\0";
+const LV2_CORE_REPORTS_LATENCY_URI: &[u8] = b"http://lv2plug.in/ns/lv2core#reportsLatency\0";
 const LV2_ATOM_SEQUENCE_URI: &[u8] = b"http://lv2plug.in/ns/ext/atom#Sequence\0";
 const LV2_UI_PARENT_URI: &[u8] = b"http://lv2plug.in/ns/extensions/ui#parent\0";
 const LV2_UI_RESIZE_URI: &[u8] = b"http://lv2plug.in/ns/extensions/ui#resize\0";
+// Keep activation-time MIDI scratch storage under the processor host's existing 16 MiB bound.
+const MAX_LV2_EVENT_BUFFER_BYTES: usize = 16 * 1024 * 1024;
+const MAX_LV2_AUDIO_CHANNELS: usize = 64;
 const LV2_UI_IDLE_INTERFACE_URI: &[u8] = b"http://lv2plug.in/ns/extensions/ui#idleInterface\0";
 const LV2_UI_RESIZE_INTERFACE_URI: &[u8] = LV2_UI_RESIZE_URI;
 
@@ -105,15 +116,22 @@ impl PluginScanner for Lv2Scanner {
         Ok(unsafe { world.collect_plugin_infos() })
     }
 
-    fn scan_path(&self, _path: &Path) -> Result<Vec<PluginInfo>> {
-        // LV2's discovery model is URI-based, not path-based — the
-        // host calls `lilv_world_load_all` and lilv consults
-        // LV2_PATH / standard locations. A path-bounded scan would
-        // need `lilv_world_load_bundle` against each subdirectory;
-        // tracked as a follow-on.
-        Err(Error::Other(
-            "truce-rack-lv2 path-bounded scan not yet implemented".into(),
-        ))
+    /// Discovers URI-identified plugins in exactly one `.lv2` bundle.
+    ///
+    /// Returns an error for an inaccessible bundle, missing manifest, or native world failure.
+    fn scan_path(&self, path: &Path) -> Result<Vec<PluginInfo>> {
+        let path = exact_bundle_path(path)?;
+        // SAFETY: this new world is used only by this synchronous scan and retained until all
+        // borrowed metadata has been copied into owned PluginInfo values.
+        let world = unsafe { World::new() }
+            .ok_or_else(|| Error::Other("lilv_world_new returned NULL".into()))?;
+        world.load_bundle(&path)?;
+        // SAFETY: the live world owns all metadata read during this call.
+        let mut infos = unsafe { world.collect_plugin_infos() };
+        for info in &mut infos {
+            info.path.clone_from(&path);
+        }
+        Ok(infos)
     }
 
     fn load(&self, info: &PluginInfo) -> Result<Self::Plugin> {
@@ -140,6 +158,64 @@ impl World {
         } else {
             Some(Self { ptr })
         }
+    }
+
+    fn load_bundle(&self, path: &Path) -> Result<()> {
+        let path = path_to_cstring_with_trailing_sep(path)?;
+        // SAFETY: self retains the live world; path remains NUL-terminated through URI creation.
+        // The temporary URI is freed after loading, before querying the world's owned metadata.
+        unsafe {
+            let uri = lilv_sys::lilv_new_file_uri(self.ptr, std::ptr::null(), path.as_ptr());
+            if uri.is_null() {
+                return Err(Error::Other("LV2 bundle URI creation failed".into()));
+            }
+            lilv_sys::lilv_world_load_bundle(self.ptr, uri);
+            lilv_sys::lilv_node_free(uri);
+            lilv_sys::lilv_world_load_specifications(self.ptr);
+            lilv_sys::lilv_world_load_plugin_classes(self.ptr);
+        }
+        Ok(())
+    }
+
+    /// Resolve one requested plugin while retaining the world that owns its native pointer.
+    fn load_plugin(info: &PluginInfo) -> Result<(Box<Self>, *const lilv_sys::LilvPlugin)> {
+        // SAFETY: the new native world is immediately boxed and retained with its selected
+        // plugin pointer until the owning Lv2Plugin has freed its native instance.
+        let world = Box::new(unsafe { Self::new() }.ok_or_else(|| Error::LoadFailed {
+            path: info.path.clone(),
+            reason: "lilv_world_new returned NULL".into(),
+        })?);
+        if info.path.as_os_str().is_empty() {
+            // SAFETY: the returned box retains this world for every borrowed native object.
+            unsafe { lilv_sys::lilv_world_load_all(world.ptr) };
+        } else {
+            world.load_bundle(&exact_bundle_path(&info.path)?)?;
+        }
+
+        let uri = CString::new(info.unique_id.clone()).map_err(|_| Error::LoadFailed {
+            path: info.path.clone(),
+            reason: format!("lv2 unique_id contains NUL: {:?}", info.unique_id),
+        })?;
+        // SAFETY: the world and NUL-terminated URI remain live through lookup; this node is freed.
+        let uri_node = unsafe { lilv_sys::lilv_new_uri(world.ptr, uri.as_ptr()) };
+        if uri_node.is_null() {
+            return Err(Error::LoadFailed {
+                path: info.path.clone(),
+                reason: format!("lilv_new_uri failed for {:?}", info.unique_id),
+            });
+        }
+        // SAFETY: Lilv returns world-owned plugin metadata. The returned plugin pointer is
+        // retained only alongside the boxed world and its temporary URI node is freed below.
+        let plugins = unsafe { lilv_sys::lilv_world_get_all_plugins(world.ptr) };
+        let plugin = unsafe { lilv_sys::lilv_plugins_get_by_uri(plugins, uri_node) };
+        unsafe { lilv_sys::lilv_node_free(uri_node) };
+        if plugin.is_null() {
+            return Err(Error::LoadFailed {
+                path: info.path.clone(),
+                reason: format!("no LV2 plugin matching URI {:?}", info.unique_id),
+            });
+        }
+        Ok((world, plugin))
     }
 
     unsafe fn collect_plugin_infos(&self) -> Vec<PluginInfo> {
@@ -382,6 +458,7 @@ extern "C" fn map_callback(handle: LV2UridMapHandle, uri: *const c_char) -> LV2U
 /// lifetime even if `Lv2Plugin` is moved.
 struct Features {
     urid_map: UridMap,
+    options: Box<options::HostOptions>,
     // `LV2UridMap.handle` points at `urid_map` — the box's pinned
     // address. `LV2UridMap.map` is the static callback. Held inline
     // so its address can be taken for `feature.data`.
@@ -398,14 +475,17 @@ impl Features {
     fn new() -> Box<Self> {
         // Build in two passes so the `Box`'s heap address is stable
         // before we record interior pointers.
+        let urid_map = UridMap::new();
+        let options = options::HostOptions::new(&urid_map);
         let mut boxed = Box::new(Features {
-            urid_map: UridMap::new(),
+            urid_map,
+            options,
             map_struct: LV2UridMap {
                 handle: std::ptr::null_mut(),
                 map: map_callback,
             },
-            feature_storage: Vec::with_capacity(1),
-            feature_ptrs: Vec::with_capacity(2),
+            feature_storage: Vec::with_capacity(3),
+            feature_ptrs: Vec::with_capacity(4),
         });
         let urid_map_handle: *mut UridMap = &mut boxed.urid_map as *mut UridMap;
         boxed.map_struct.handle = urid_map_handle.cast::<c_void>();
@@ -413,7 +493,17 @@ impl Features {
             uri: LV2_URID_MAP_URI.as_ptr().cast::<c_char>(),
             data: (&boxed.map_struct) as *const LV2UridMap as *mut c_void,
         });
-        boxed.feature_ptrs.push(&boxed.feature_storage[0]);
+        boxed.feature_storage.push(LV2Feature {
+            uri: options::FEATURE_URI.as_ptr().cast(),
+            data: boxed.options.data(),
+        });
+        boxed.feature_storage.push(LV2Feature {
+            uri: LV2_BOUNDED_BLOCK_URI.as_ptr().cast(),
+            data: std::ptr::null_mut(),
+        });
+        for feature in &boxed.feature_storage {
+            boxed.feature_ptrs.push(feature);
+        }
         boxed.feature_ptrs.push(std::ptr::null());
         boxed
     }
@@ -431,6 +521,46 @@ struct UiBundle {
     ui_uri: CString,
     bundle_path: PathBuf,
     binary_path: PathBuf,
+}
+
+/// Keep the UI library handle with the selected descriptor until editor cleanup.
+fn open_ui_library(bundle: &UiBundle) -> Result<(libloading::Library, *const LV2UIDescriptorRaw)> {
+    type DescFn = unsafe extern "C" fn(u32) -> *const LV2UIDescriptorRaw;
+    // SAFETY: this handle stays owned by EditorState until the descriptor's cleanup returns.
+    let library = unsafe { libloading::Library::new(&bundle.binary_path) }.map_err(|error| {
+        Error::Other(format!(
+            "lv2 ui dlopen {}: {}",
+            bundle.binary_path.display(),
+            error
+        ))
+    })?;
+    // SAFETY: the symbol and every returned descriptor/URI are only inspected while their
+    // library is open; the matching raw pointer is returned with that same library handle.
+    let descriptor = unsafe {
+        let symbol: libloading::Symbol<DescFn> = library
+            .get(b"lv2ui_descriptor")
+            .map_err(|error| Error::Other(format!("lv2 ui_descriptor symbol: {error}")))?;
+        let mut chosen = std::ptr::null();
+        for index in 0u32..64 {
+            let candidate = symbol(index);
+            if candidate.is_null() {
+                break;
+            }
+            let uri = (*candidate).uri;
+            if !uri.is_null() && CStr::from_ptr(uri) == bundle.ui_uri.as_c_str() {
+                chosen = candidate;
+                break;
+            }
+        }
+        chosen
+    };
+    if descriptor.is_null() {
+        return Err(Error::Other(format!(
+            "no lv2ui_descriptor matching {:?}",
+            bundle.ui_uri
+        )));
+    }
+    Ok((library, descriptor))
 }
 
 /// Live editor state. Created on `PluginEditor::open`; torn down on
@@ -522,25 +652,24 @@ extern "C" fn host_resize_callback(handle: *mut c_void, width: i32, height: i32)
     0
 }
 
-/// Heap-allocated controller passed back to the UI as the opaque
-/// `controller` argument of `instantiate` and `write_function`. The
-/// UI hands the same pointer back unchanged; we cast it to
-/// `&Controller` to route the write into our `control_values` vec.
-// Field names share the `control_` prefix because they all describe
-// the control-port shuttle — the prefix is meaningful, not noise.
-#[allow(clippy::struct_field_names)]
+/// Heap-stable callback context. The UI may publish while DSP reads control slots;
+/// only serialized plugin access transfers mailbox values to those slots.
 struct Controller {
-    /// Pointer to the head of `Lv2Plugin::control_values`. Stable
-    /// for the lifetime of the plugin (we never reallocate after
-    /// `load_from`). The audio thread reads through the same
-    /// pointer via `lilv_instance_connect_port` — a benign data
-    /// race on aligned f32 stores, accepted by every LV2 host in
-    /// the wild.
-    control_values_base: *mut f32,
-    control_values_len: usize,
-    /// Map from LV2 port index to the `control_values` offset, or
-    /// `usize::MAX` if the port isn't a control port.
-    control_value_offset: Vec<usize>,
+    pending: pending_controls::PendingControls,
+}
+
+impl Controller {
+    /// Fix the input-port map and mailbox size before any UI callback can be registered.
+    fn for_ports(ports: &[PortInfo], offsets: &[usize], control_count: usize) -> Self {
+        let input_offsets = ports
+            .iter()
+            .zip(offsets)
+            .map(|(port, &offset)| if port.is_input { offset } else { usize::MAX })
+            .collect();
+        Self {
+            pending: pending_controls::PendingControls::new(input_offsets, control_count),
+        }
+    }
 }
 
 extern "C" fn ui_write_callback(
@@ -559,21 +688,54 @@ extern "C" fn ui_write_callback(
     if port_protocol != 0 || buffer_size != 4 {
         return;
     }
-    // SAFETY: `controller` is the boxed `Controller` we set on
-    // `instantiate`. lilv passes it back unchanged. Const-cast is
-    // safe because we hold the only writer.
+    // SAFETY: `controller` is the boxed Controller retained until UI cleanup returns;
+    // the UI returns that opaque pointer unchanged and its only mutable fields are atomic.
     let ctrl = unsafe { &*(controller as *const Controller) };
-    let Some(&off) = ctrl.control_value_offset.get(port_index as usize) else {
-        return;
-    };
-    if off == usize::MAX || off >= ctrl.control_values_len {
-        return;
-    }
-    let value = unsafe { *(buffer as *const f32) };
-    // SAFETY: writing to a u32-sized aligned slot inside the
-    // control_values Vec. See doc comment on `control_values_base`.
-    unsafe {
-        *ctrl.control_values_base.add(off) = value;
+    // SAFETY: implicit floatProtocol requires a readable buffer_size == sizeof(float)
+    // payload. `read_unaligned` also accepts a UI-provided buffer without f32 alignment.
+    let value = unsafe { (buffer as *const f32).read_unaligned() };
+    ctrl.pending.publish(port_index as usize, value);
+}
+
+#[cfg(test)]
+mod ui_write_tests {
+    use super::*;
+
+    #[test]
+    fn float_callback_accepts_only_finite_input_control_writes() {
+        let ports = [
+            PortInfo {
+                index: 0,
+                kind: PortKind::Control { default: 0.0 },
+                is_input: true,
+                audio_plane: None,
+            },
+            PortInfo {
+                index: 1,
+                kind: PortKind::Control { default: 0.0 },
+                is_input: false,
+                audio_plane: None,
+            },
+        ];
+        let controller = Box::new(Controller::for_ports(&ports, &[0, 0], 1));
+        let opaque = (controller.as_ref() as *const Controller)
+            .cast_mut()
+            .cast::<c_void>();
+        let value = 0.625_f32;
+        ui_write_callback(opaque, 1, 4, 0, (&raw const value).cast());
+        ui_write_callback(opaque, 0, 4, 1, (&raw const value).cast());
+        ui_write_callback(opaque, 0, 3, 0, (&raw const value).cast());
+        assert_eq!(controller.pending.peek(0), None);
+
+        ui_write_callback(opaque, 0, 4, 0, (&raw const value).cast());
+        assert_eq!(controller.pending.take(0), Some(value));
+        let mut unaligned = [0_u8; 5];
+        unaligned[1..].copy_from_slice(&0.75_f32.to_ne_bytes());
+        ui_write_callback(opaque, 0, 4, 0, unaligned[1..].as_ptr().cast());
+        assert_eq!(controller.pending.take(0), Some(0.75));
+        let invalid = f32::INFINITY;
+        ui_write_callback(opaque, 0, 4, 0, (&raw const invalid).cast());
+        assert_eq!(controller.pending.peek(0), None);
     }
 }
 
@@ -693,6 +855,88 @@ struct PortInfo {
     index: u32,
     kind: PortKind,
     is_input: bool,
+    /// Flattened bus/channel slot for native audio ports, computed at load.
+    audio_plane: Option<usize>,
+}
+
+/// Stack-only view of every active bus plane in flattened host order.
+struct AudioPlanes {
+    inputs: [*mut f32; MAX_LV2_AUDIO_CHANNELS],
+    outputs: [*mut f32; MAX_LV2_AUDIO_CHANNELS],
+    input_count: usize,
+    output_count: usize,
+}
+
+impl AudioPlanes {
+    fn collect(
+        buffer: &mut AudioBuffer<'_, f32>,
+        layout: &BusLayout,
+        max_block_size: usize,
+    ) -> Result<Self> {
+        let frames = buffer.num_frames();
+        if buffer.num_input_buses() != layout.inputs.len()
+            || buffer.num_output_buses() != layout.outputs.len()
+            || buffer.total_input_channels() != layout.total_input_channels() as usize
+            || buffer.total_output_channels() != layout.total_output_channels() as usize
+            || frames > max_block_size
+            || u32::try_from(frames).is_err()
+        {
+            return Err(Error::Other(
+                "LV2 process buffer topology does not match active layout".into(),
+            ));
+        }
+        let mut planes = Self {
+            inputs: [std::ptr::null_mut(); MAX_LV2_AUDIO_CHANNELS],
+            outputs: [std::ptr::null_mut(); MAX_LV2_AUDIO_CHANNELS],
+            input_count: 0,
+            output_count: 0,
+        };
+        for (bus_index, bus) in layout.inputs.iter().enumerate() {
+            let channels = buffer.bus_inputs(bus_index);
+            if channels.len() != bus.channels.count() as usize {
+                return Err(Error::Other("LV2 input bus channel count changed".into()));
+            }
+            for channel in channels {
+                if channel.len() < frames || planes.input_count >= planes.inputs.len() {
+                    return Err(Error::Other("LV2 input plane is invalid".into()));
+                }
+                planes.inputs[planes.input_count] = channel.as_ptr().cast_mut();
+                planes.input_count += 1;
+            }
+        }
+        for (bus_index, bus) in layout.outputs.iter().enumerate() {
+            let channels = buffer.bus_outputs(bus_index);
+            if channels.len() != bus.channels.count() as usize {
+                return Err(Error::Other("LV2 output bus channel count changed".into()));
+            }
+            for channel in channels {
+                if channel.len() < frames || planes.output_count >= planes.outputs.len() {
+                    return Err(Error::Other("LV2 output plane is invalid".into()));
+                }
+                planes.outputs[planes.output_count] = channel.as_mut_ptr();
+                planes.output_count += 1;
+            }
+        }
+        Ok(planes)
+    }
+
+    fn validate_ports(&self, ports: &[PortInfo]) -> Result<()> {
+        for port in ports {
+            if matches!(port.kind, PortKind::Audio) {
+                let Some(plane) = port.audio_plane else {
+                    return Err(Error::Other("LV2 native audio port lacks a plane".into()));
+                };
+                if (port.is_input && plane >= self.input_count)
+                    || (!port.is_input && plane >= self.output_count)
+                {
+                    return Err(Error::Other(
+                        "LV2 native audio plane is out of range".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -701,6 +945,24 @@ enum PortKind {
     Control { default: f32 },
     AtomSequence,
     Other,
+}
+
+/// Metadata source for the plugin-reported LV2 latency scalar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LatencyPort {
+    /// No latency port is reported by the plugin; LV2 defines this as zero latency.
+    NotReported,
+    /// Connected output control-port offset, read after `lilv_instance_run`.
+    OutputControl { offset: usize },
+    /// Metadata is malformed, ambiguous, or could not be inspected reliably.
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LatencyCandidate {
+    NotReported,
+    Reported(usize),
+    Malformed,
 }
 
 /// URIDs needed to build a `time:Position` object atom, mapped once
@@ -722,6 +984,28 @@ struct TimeUrids {
     atom_object: LV2Urid,
 }
 
+impl TimeUrids {
+    /// Map transport-property URIs once, before the realtime path can use them.
+    fn new(map: &UridMap) -> Self {
+        // SAFETY: only process-lifetime NUL-terminated LV2 URI constants are passed below.
+        let map_uri = |uri: &[u8]| map.map_uri(unsafe { CStr::from_ptr(uri.as_ptr().cast()) });
+        Self {
+            position: map_uri(lv2_raw::time::LV2_TIME__POSITION),
+            frame: map_uri(lv2_raw::time::LV2_TIME__FRAME),
+            speed: map_uri(lv2_raw::time::LV2_TIME__SPEED),
+            bar: map_uri(lv2_raw::time::LV2_TIME__BAR),
+            bar_beat: map_uri(lv2_raw::time::LV2_TIME__BARBEAT),
+            beats_per_bar: map_uri(lv2_raw::time::LV2_TIME__BEATSPERBAR),
+            beat_unit: map_uri(lv2_raw::time::LV2_TIME__BEATUNIT),
+            bpm: map_uri(lv2_raw::time::LV2_TIME__BEATSPERMINUTE),
+            atom_long: map_uri(lv2_raw::atom::LV2_ATOM__LONG),
+            atom_float: map_uri(lv2_raw::atom::LV2_ATOM__FLOAT),
+            atom_int: map_uri(lv2_raw::atom::LV2_ATOM__INT),
+            atom_object: map_uri(lv2_raw::atom::LV2_ATOM__OBJECT),
+        }
+    }
+}
+
 /// One loaded LV2 plugin.
 ///
 /// Owns its `World` (lilv data is referenced by pointer from the
@@ -731,6 +1015,9 @@ pub struct Lv2Plugin {
     info: PluginInfo,
     layouts: Vec<BusLayout>,
     active_layout: Option<BusLayout>,
+    latency_port: LatencyPort,
+    /// Cached scalar value; native output is copied after run, never queried on callback read.
+    latency_frames: Option<u32>,
 
     /// Held for ownership: the `LilvPlugin` pointer and the instance
     /// both reference world-owned data, so the world must outlive
@@ -749,6 +1036,8 @@ pub struct Lv2Plugin {
     control_values: Vec<f32>,
     /// Map from `ports` index to the offset in `control_values`.
     control_value_offset: Vec<usize>,
+    /// Load-time metadata indexes the same scalar storage used by DSP, state, and the editor.
+    parameters: parameters::Parameters,
 
     /// Backing storage for the (single) MIDI input atom-sequence
     /// port, if the plugin has one. Rebuilt each block from the
@@ -760,6 +1049,10 @@ pub struct Lv2Plugin {
     midi_out_buf: Vec<u8>,
 
     features: Box<Features>,
+    /// Lazily created private namespace retained across saves for state:makePath results.
+    asset_dir: Mutex<Option<tempfile::TempDir>>,
+    /// Files materialized from a checkpoint stay alive until native instance teardown.
+    restored_assets: Option<tempfile::TempDir>,
     midi_event_urid: LV2Urid,
     atom_sequence_urid: LV2Urid,
     time_urids: TimeUrids,
@@ -770,10 +1063,8 @@ pub struct Lv2Plugin {
     ui_bundle: Option<UiBundle>,
     /// Live editor — `Some` between `open` and `close`.
     editor: Option<EditorState>,
-    /// Heap-stable controller passed to the LV2 UI as the opaque
-    /// callback context. Built lazily on first `open`. Boxed so its
-    /// address survives moves of `Lv2Plugin`.
-    controller: Option<Box<Controller>>,
+    /// Heap-stable, load-time bounded UI callback context. The UI is cleaned up before drop.
+    controller: Box<Controller>,
 }
 
 // SAFETY: We hand the plugin between the audio and main threads
@@ -782,37 +1073,23 @@ unsafe impl Send for Lv2Plugin {}
 
 impl Lv2Plugin {
     fn load_from(info: &PluginInfo) -> Result<Self> {
-        let world = Box::new(unsafe { World::new() }.ok_or_else(|| Error::LoadFailed {
-            path: info.path.clone(),
-            reason: "lilv_world_new returned NULL".into(),
-        })?);
-        unsafe { lilv_sys::lilv_world_load_all(world.ptr) };
-
-        let uri = CString::new(info.unique_id.clone()).map_err(|_| Error::LoadFailed {
-            path: info.path.clone(),
-            reason: format!("lv2 unique_id contains NUL: {:?}", info.unique_id),
-        })?;
-        let uri_node = unsafe { lilv_sys::lilv_new_uri(world.ptr, uri.as_ptr()) };
-        if uri_node.is_null() {
-            return Err(Error::LoadFailed {
-                path: info.path.clone(),
-                reason: format!("lilv_new_uri failed for {:?}", info.unique_id),
-            });
-        }
-        let plugins = unsafe { lilv_sys::lilv_world_get_all_plugins(world.ptr) };
-        let plugin = unsafe { lilv_sys::lilv_plugins_get_by_uri(plugins, uri_node) };
-        unsafe { lilv_sys::lilv_node_free(uri_node) };
-        if plugin.is_null() {
-            return Err(Error::LoadFailed {
-                path: info.path.clone(),
-                reason: format!("no LV2 plugin matching URI {:?}", info.unique_id),
-            });
-        }
+        let (world, plugin) = World::load_plugin(info)?;
 
         // Walk the ports once, classify each, and stash
         // direction + control defaults.
-        let (ports, audio_in_count, audio_out_count, control_value_offset, control_values) =
-            unsafe { classify_ports(world.ptr, plugin) };
+        let ClassifiedPorts {
+            mut ports,
+            audio_in_count,
+            audio_out_count,
+            control_value_offset,
+            control_values,
+            latency_port,
+        } = unsafe { classify_ports(world.ptr, plugin) };
+        // SAFETY: both native pointers are owned by the retained world; port/offset metadata
+        // was classified from this exact plugin immediately above. Collection is load-time only.
+        let parameters = unsafe {
+            parameters::Parameters::collect(world.ptr, plugin, &ports, &control_value_offset)
+        }?;
 
         // Pre-map the URIs we'll need at process time.
         let features = Features::new();
@@ -823,39 +1100,40 @@ impl Lv2Plugin {
             .urid_map
             .map_uri(unsafe { CStr::from_ptr(LV2_ATOM_SEQUENCE_URI.as_ptr().cast()) });
 
-        // URIDs for the host transport (`time:Position`) atom we
-        // inject each block. Mapped once here so process() stays
-        // allocation-free.
-        let map_uri = |uri: &[u8]| {
-            features
-                .urid_map
-                .map_uri(unsafe { CStr::from_ptr(uri.as_ptr().cast()) })
-        };
-        let time_urids = TimeUrids {
-            position: map_uri(lv2_raw::time::LV2_TIME__POSITION),
-            frame: map_uri(lv2_raw::time::LV2_TIME__FRAME),
-            speed: map_uri(lv2_raw::time::LV2_TIME__SPEED),
-            bar: map_uri(lv2_raw::time::LV2_TIME__BAR),
-            bar_beat: map_uri(lv2_raw::time::LV2_TIME__BARBEAT),
-            beats_per_bar: map_uri(lv2_raw::time::LV2_TIME__BEATSPERBAR),
-            beat_unit: map_uri(lv2_raw::time::LV2_TIME__BEATUNIT),
-            bpm: map_uri(lv2_raw::time::LV2_TIME__BEATSPERMINUTE),
-            atom_long: map_uri(lv2_raw::atom::LV2_ATOM__LONG),
-            atom_float: map_uri(lv2_raw::atom::LV2_ATOM__FLOAT),
-            atom_int: map_uri(lv2_raw::atom::LV2_ATOM__INT),
-            atom_object: map_uri(lv2_raw::atom::LV2_ATOM__OBJECT),
-        };
+        let time_urids = TimeUrids::new(&features.urid_map);
 
-        let layout = audio_layout(audio_in_count, audio_out_count);
+        // LV2 port-group declarations, when present, are the native bus contract.
+        // Resolve every raw port to a flattened host plane before instantiation.
+        let layout =
+            unsafe { port_groups::classify(world.ptr, plugin, &mut ports) }.map_err(|reason| {
+                Error::LoadFailed {
+                    path: info.path.clone(),
+                    reason,
+                }
+            })?;
+        debug_assert_eq!(layout.total_input_channels() as usize, audio_in_count);
+        debug_assert_eq!(layout.total_output_channels() as usize, audio_out_count);
 
         let ui_bundle = unsafe { discover_ui(world.ptr, plugin) };
         let mut info = info.clone();
         info.has_editor = ui_bundle.is_some();
 
+        // The box fixes the callback context address before registering it with any native UI.
+        let controller = Box::new(Controller::for_ports(
+            &ports,
+            &control_value_offset,
+            control_values.len(),
+        ));
+
         Ok(Self {
             info,
             layouts: vec![layout],
             active_layout: None,
+            latency_port,
+            latency_frames: match latency_port {
+                LatencyPort::NotReported => Some(0),
+                LatencyPort::OutputControl { .. } | LatencyPort::Unknown => None,
+            },
             world,
             plugin,
             instance: std::ptr::null_mut(),
@@ -863,32 +1141,40 @@ impl Lv2Plugin {
             ports,
             control_values,
             control_value_offset,
+            parameters,
             midi_in_buf: Vec::new(),
             midi_out_buf: Vec::new(),
             features,
+            asset_dir: Mutex::new(None),
+            restored_assets: None,
             midi_event_urid,
             atom_sequence_urid,
             time_urids,
             ui_bundle,
             editor: None,
-            controller: None,
+            controller,
         })
     }
 
-    /// Build (or rebuild) the heap-stable Controller that the UI
-    /// uses as its callback context. Must be called only when
-    /// `control_values` is no longer going to be reallocated —
-    /// after `load_from` completes that's true for the plugin's
-    /// lifetime.
-    fn ensure_controller(&mut self) {
-        if self.controller.is_some() {
-            return;
+    fn drain_pending_controls(&mut self) {
+        for (offset, value) in self.control_values.iter_mut().enumerate() {
+            if let Some(pending) = self.controller.pending.take(offset) {
+                *value = pending;
+            }
         }
-        self.controller = Some(Box::new(Controller {
-            control_values_base: self.control_values.as_mut_ptr(),
-            control_values_len: self.control_values.len(),
-            control_value_offset: self.control_value_offset.clone(),
-        }));
+    }
+
+    fn effective_control_value(&self, offset: usize) -> f32 {
+        self.controller
+            .pending
+            .peek(offset)
+            .unwrap_or(self.control_values[offset])
+    }
+
+    fn restore_state(&mut self, bytes: &[u8]) -> Result<()> {
+        // A prior UI edit precedes this restore. A publish during restore remains pending.
+        self.drain_pending_controls();
+        state::restore(self, bytes)
     }
 
     fn build_midi_sequence(&mut self, events: &EventList, transport: Option<TransportInfo>) {
@@ -1060,51 +1346,7 @@ unsafe fn write_time_position(
         let bpm = tempo as f32;
         off = unsafe { write_property(buf, off, urids.bpm, urids.atom_float, &bpm.to_ne_bytes()) };
     }
-    if let Some((num, den)) = t.time_signature {
-        let beats_per_bar = num as f32;
-        off = unsafe {
-            write_property(
-                buf,
-                off,
-                urids.beats_per_bar,
-                urids.atom_float,
-                &beats_per_bar.to_ne_bytes(),
-            )
-        };
-        let beat_unit = den as i32;
-        off = unsafe {
-            write_property(
-                buf,
-                off,
-                urids.beat_unit,
-                urids.atom_int,
-                &beat_unit.to_ne_bytes(),
-            )
-        };
-
-        // Bar / barBeat need the musical position too.
-        let beats_per_bar_qn = f64::from(num) * 4.0 / f64::from(den.max(1));
-        if let Some(bar_start) = t.bar_start_beats {
-            let bar = (bar_start / beats_per_bar_qn.max(f64::EPSILON)).round() as i64;
-            off =
-                unsafe { write_property(buf, off, urids.bar, urids.atom_long, &bar.to_ne_bytes()) };
-
-            if let Some(beats) = t.song_position_beats {
-                // Quarter notes since the bar, expressed in this
-                // signature's beats (beatUnit per whole note).
-                let bar_beat = ((beats - bar_start) * f64::from(den) / 4.0) as f32;
-                off = unsafe {
-                    write_property(
-                        buf,
-                        off,
-                        urids.bar_beat,
-                        urids.atom_float,
-                        &bar_beat.to_ne_bytes(),
-                    )
-                };
-            }
-        }
-    }
+    off = unsafe { write_time_signature(urids, buf, off, t) };
 
     // Back-patch the event header now that the object size is known.
     let object_body_size = off - obj_body_off;
@@ -1119,48 +1361,157 @@ unsafe fn write_time_position(
     (off + 7) & !7
 }
 
-fn audio_layout(in_count: usize, out_count: usize) -> BusLayout {
-    let mut layout = BusLayout::new();
-    if in_count > 0 {
-        layout.inputs.push(truce_rack_core::bus::Bus::main(
-            "Input",
-            channel_config(in_count),
-        ));
+/// Append the meter and bar-position properties to a bounded time:Position atom.
+///
+/// # Safety
+/// `buf` must retain the writable capacity preflighted by `write_time_position`.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss
+)]
+unsafe fn write_time_signature(
+    urids: &TimeUrids,
+    buf: *mut u8,
+    mut off: usize,
+    t: &TransportInfo,
+) -> usize {
+    let Some((num, den)) = t.time_signature else {
+        return off;
+    };
+    let beats_per_bar = num as f32;
+    off = unsafe {
+        write_property(
+            buf,
+            off,
+            urids.beats_per_bar,
+            urids.atom_float,
+            &beats_per_bar.to_ne_bytes(),
+        )
+    };
+    let beat_unit = den as i32;
+    off = unsafe {
+        write_property(
+            buf,
+            off,
+            urids.beat_unit,
+            urids.atom_int,
+            &beat_unit.to_ne_bytes(),
+        )
+    };
+
+    // Bar / barBeat need the musical position too.
+    let beats_per_bar_qn = f64::from(num) * 4.0 / f64::from(den.max(1));
+    if let Some(bar_start) = t.bar_start_beats {
+        let bar = (bar_start / beats_per_bar_qn.max(f64::EPSILON)).round() as i64;
+        off = unsafe { write_property(buf, off, urids.bar, urids.atom_long, &bar.to_ne_bytes()) };
+
+        if let Some(beats) = t.song_position_beats {
+            // Quarter notes since the bar, expressed in this signature's beats.
+            let bar_beat = ((beats - bar_start) * f64::from(den) / 4.0) as f32;
+            off = unsafe {
+                write_property(
+                    buf,
+                    off,
+                    urids.bar_beat,
+                    urids.atom_float,
+                    &bar_beat.to_ne_bytes(),
+                )
+            };
+        }
     }
-    if out_count > 0 {
-        layout.outputs.push(truce_rack_core::bus::Bus::main(
-            "Output",
-            channel_config(out_count),
-        ));
-    }
-    layout
+    off
 }
 
-fn channel_config(n: usize) -> ChannelConfig {
-    match n {
-        1 => ChannelConfig::Mono,
-        2 => ChannelConfig::Stereo,
-        6 => ChannelConfig::Surround5_1,
-        8 => ChannelConfig::Surround7_1,
-        n => ChannelConfig::Discrete(u32::try_from(n).unwrap_or(0)),
+/// One load-time classification result; port metadata and connected scalar offsets travel
+/// together so activation cannot accidentally pair different plugin layouts.
+struct ClassifiedPorts {
+    ports: Vec<PortInfo>,
+    audio_in_count: usize,
+    audio_out_count: usize,
+    control_value_offset: Vec<usize>,
+    control_values: Vec<f32>,
+    latency_port: LatencyPort,
+}
+
+/// Temporary Lilv class nodes used only while classifying one plugin's ports.
+struct PortClassUris {
+    audio: *mut lilv_sys::LilvNode,
+    control: *mut lilv_sys::LilvNode,
+    atom: *mut lilv_sys::LilvNode,
+    input: *mut lilv_sys::LilvNode,
+    output: *mut lilv_sys::LilvNode,
+}
+
+impl PortClassUris {
+    /// # Safety
+    /// `world` must remain live until this owner is dropped, which `classify_ports` ensures.
+    unsafe fn new(world: *mut lilv_sys::LilvWorld) -> Self {
+        Self {
+            audio: unsafe {
+                lilv_sys::lilv_new_uri(world, lilv_sys::LILV_URI_AUDIO_PORT.as_ptr().cast())
+            },
+            control: unsafe {
+                lilv_sys::lilv_new_uri(world, lilv_sys::LILV_URI_CONTROL_PORT.as_ptr().cast())
+            },
+            atom: unsafe {
+                lilv_sys::lilv_new_uri(world, lilv_sys::LILV_URI_ATOM_PORT.as_ptr().cast())
+            },
+            input: unsafe {
+                lilv_sys::lilv_new_uri(world, lilv_sys::LILV_URI_INPUT_PORT.as_ptr().cast())
+            },
+            output: unsafe {
+                lilv_sys::lilv_new_uri(world, lilv_sys::LILV_URI_OUTPUT_PORT.as_ptr().cast())
+            },
+        }
+    }
+
+    /// Classify one native port with the same class nodes used for the whole plugin.
+    ///
+    /// # Safety
+    /// `plugin`, `port`, and every class node must remain owned by the live Lilv world.
+    unsafe fn kind(
+        &self,
+        plugin: *const lilv_sys::LilvPlugin,
+        port: *const lilv_sys::LilvPort,
+        default: f32,
+    ) -> PortKind {
+        if unsafe { lilv_sys::lilv_port_is_a(plugin, port, self.audio) } {
+            PortKind::Audio
+        } else if unsafe { lilv_sys::lilv_port_is_a(plugin, port, self.control) } {
+            PortKind::Control {
+                default: if default.is_finite() { default } else { 0.0 },
+            }
+        } else if unsafe { lilv_sys::lilv_port_is_a(plugin, port, self.atom) } {
+            // `atom:supports` is not inspected; unexpected MIDI atoms are ignored by the plugin.
+            PortKind::AtomSequence
+        } else {
+            PortKind::Other
+        }
+    }
+}
+
+impl Drop for PortClassUris {
+    fn drop(&mut self) {
+        // SAFETY: each node was created once by Lilv in `new` and is owned only here.
+        unsafe {
+            lilv_sys::lilv_node_free(self.audio);
+            lilv_sys::lilv_node_free(self.control);
+            lilv_sys::lilv_node_free(self.atom);
+            lilv_sys::lilv_node_free(self.input);
+            lilv_sys::lilv_node_free(self.output);
+        }
     }
 }
 
 unsafe fn classify_ports(
     world: *mut lilv_sys::LilvWorld,
     plugin: *const lilv_sys::LilvPlugin,
-) -> (Vec<PortInfo>, usize, usize, Vec<usize>, Vec<f32>) {
+) -> ClassifiedPorts {
     let count = unsafe { lilv_sys::lilv_plugin_get_num_ports(plugin) };
-    let audio_uri =
-        unsafe { lilv_sys::lilv_new_uri(world, lilv_sys::LILV_URI_AUDIO_PORT.as_ptr().cast()) };
-    let control_uri =
-        unsafe { lilv_sys::lilv_new_uri(world, lilv_sys::LILV_URI_CONTROL_PORT.as_ptr().cast()) };
-    let atom_uri =
-        unsafe { lilv_sys::lilv_new_uri(world, lilv_sys::LILV_URI_ATOM_PORT.as_ptr().cast()) };
-    let input_uri =
-        unsafe { lilv_sys::lilv_new_uri(world, lilv_sys::LILV_URI_INPUT_PORT.as_ptr().cast()) };
-    let output_uri =
-        unsafe { lilv_sys::lilv_new_uri(world, lilv_sys::LILV_URI_OUTPUT_PORT.as_ptr().cast()) };
+    // SAFETY: both pointers refer to the retained world and its selected plugin; the temporary
+    // class nodes are released before this function returns.
+    let uris = unsafe { PortClassUris::new(world) };
 
     let mut ports = Vec::with_capacity(count as usize);
     let mut audio_in_count: usize = 0;
@@ -1187,36 +1538,21 @@ unsafe fn classify_ports(
                 index: idx,
                 kind: PortKind::Other,
                 is_input: false,
+                audio_plane: None,
             });
             control_value_offset.push(usize::MAX);
             continue;
         }
-        let is_input = unsafe { lilv_sys::lilv_port_is_a(plugin, port, input_uri) };
-        let is_output = unsafe { lilv_sys::lilv_port_is_a(plugin, port, output_uri) };
-        let kind = if unsafe { lilv_sys::lilv_port_is_a(plugin, port, audio_uri) } {
+        let is_input = unsafe { lilv_sys::lilv_port_is_a(plugin, port, uris.input) };
+        let is_output = unsafe { lilv_sys::lilv_port_is_a(plugin, port, uris.output) };
+        let kind = unsafe { uris.kind(plugin, port, defaults[idx as usize]) };
+        if matches!(kind, PortKind::Audio) {
             if is_input {
                 audio_in_count += 1;
             } else if is_output {
                 audio_out_count += 1;
             }
-            PortKind::Audio
-        } else if unsafe { lilv_sys::lilv_port_is_a(plugin, port, control_uri) } {
-            let default = if defaults[idx as usize].is_finite() {
-                defaults[idx as usize]
-            } else {
-                0.0
-            };
-            PortKind::Control { default }
-        } else if unsafe { lilv_sys::lilv_port_is_a(plugin, port, atom_uri) } {
-            // We don't currently introspect the port's
-            // `atom:supports` triples; assume any atom-port can
-            // carry MIDI. Plugins with non-MIDI atom expectations
-            // will see an unrecognised event type and ignore it,
-            // which is the LV2 spec's required behaviour.
-            PortKind::AtomSequence
-        } else {
-            PortKind::Other
-        };
+        }
         if let PortKind::Control { default } = kind {
             control_value_offset.push(control_values.len());
             control_values.push(default);
@@ -1227,24 +1563,199 @@ unsafe fn classify_ports(
             index: idx,
             kind,
             is_input,
+            audio_plane: None,
         });
     }
 
-    unsafe {
-        lilv_sys::lilv_node_free(audio_uri);
-        lilv_sys::lilv_node_free(control_uri);
-        lilv_sys::lilv_node_free(atom_uri);
-        lilv_sys::lilv_node_free(input_uri);
-        lilv_sys::lilv_node_free(output_uri);
-    }
+    // SAFETY: `world` and `plugin` were created together above, and the classified slices are
+    // derived from this plugin's live port metadata.
+    let latency_port =
+        unsafe { classify_latency_port(world, plugin, &ports, &control_value_offset) };
 
-    (
+    ClassifiedPorts {
         ports,
         audio_in_count,
         audio_out_count,
         control_value_offset,
         control_values,
-    )
+        latency_port,
+    }
+}
+
+struct LatencyMetadataUris {
+    designation: *mut lilv_sys::LilvNode,
+    latency: *mut lilv_sys::LilvNode,
+    reports_latency: *mut lilv_sys::LilvNode,
+    control_port: *mut lilv_sys::LilvNode,
+    output_port: *mut lilv_sys::LilvNode,
+}
+
+impl LatencyMetadataUris {
+    /// Create cached nodes for the LV2 latency metadata terms.
+    ///
+    /// # Safety
+    /// `world` must be a live Lilv world that remains alive until the returned guard is dropped.
+    unsafe fn new(world: *mut lilv_sys::LilvWorld) -> Self {
+        // SAFETY: `world` is the live world that owns the plugin being classified, and every URI
+        // byte string is NUL-terminated as required by `lilv_new_uri`.
+        unsafe {
+            Self {
+                designation: lilv_sys::lilv_new_uri(
+                    world,
+                    LV2_CORE_DESIGNATION_URI.as_ptr().cast(),
+                ),
+                latency: lilv_sys::lilv_new_uri(world, LV2_CORE_LATENCY_URI.as_ptr().cast()),
+                reports_latency: lilv_sys::lilv_new_uri(
+                    world,
+                    LV2_CORE_REPORTS_LATENCY_URI.as_ptr().cast(),
+                ),
+                control_port: lilv_sys::lilv_new_uri(
+                    world,
+                    lilv_sys::LILV_URI_CONTROL_PORT.as_ptr().cast(),
+                ),
+                output_port: lilv_sys::lilv_new_uri(
+                    world,
+                    lilv_sys::LILV_URI_OUTPUT_PORT.as_ptr().cast(),
+                ),
+            }
+        }
+    }
+
+    fn is_complete(&self) -> bool {
+        !self.designation.is_null()
+            && !self.latency.is_null()
+            && !self.reports_latency.is_null()
+            && !self.control_port.is_null()
+            && !self.output_port.is_null()
+    }
+}
+
+impl Drop for LatencyMetadataUris {
+    fn drop(&mut self) {
+        for uri in [
+            self.designation,
+            self.latency,
+            self.reports_latency,
+            self.control_port,
+            self.output_port,
+        ] {
+            if !uri.is_null() {
+                // SAFETY: each non-null node is owned by this guard and was returned by
+                // `lilv_new_uri`; no node is freed more than once.
+                unsafe { lilv_sys::lilv_node_free(uri) };
+            }
+        }
+    }
+}
+
+/// Resolve modern `lv2:designation lv2:latency` and deprecated `lv2:reportsLatency` metadata.
+///
+/// The deprecated property remains in use by third-party plugins, so it is recognized as the
+/// same output-port contract. Multiple distinct or malformed reports are unknown rather than
+/// silently becoming zero latency.
+///
+/// # Safety
+/// `world` and `plugin` must be live Lilv objects from the same world, and `ports` must be the
+/// metadata previously classified from that plugin.
+unsafe fn classify_latency_port(
+    world: *mut lilv_sys::LilvWorld,
+    plugin: *const lilv_sys::LilvPlugin,
+    ports: &[PortInfo],
+    control_value_offset: &[usize],
+) -> LatencyPort {
+    // SAFETY: the caller guarantees this is the live world for `plugin`.
+    let uris = unsafe { LatencyMetadataUris::new(world) };
+    if !uris.is_complete() {
+        return LatencyPort::Unknown;
+    }
+
+    let mut candidate_offset = None;
+    let mut malformed = false;
+    for info in ports {
+        // SAFETY: plugin, port metadata, and URI nodes remain live for this classification call.
+        match unsafe { latency_port_candidate(plugin, info, control_value_offset, &uris) } {
+            LatencyCandidate::Reported(offset)
+                if candidate_offset.is_some_and(|old| old != offset) =>
+            {
+                malformed = true;
+            }
+            LatencyCandidate::Reported(offset) => candidate_offset = Some(offset),
+            LatencyCandidate::NotReported => {}
+            LatencyCandidate::Malformed => malformed = true,
+        }
+    }
+    if malformed {
+        LatencyPort::Unknown
+    } else if let Some(offset) = candidate_offset {
+        LatencyPort::OutputControl { offset }
+    } else {
+        LatencyPort::NotReported
+    }
+}
+
+/// Return the connected control offset if this port reports latency, or `Malformed` if invalid.
+///
+/// # Safety
+/// `plugin`, its indexed port, and all nodes in `uris` must remain live for this call.
+unsafe fn latency_port_candidate(
+    plugin: *const lilv_sys::LilvPlugin,
+    info: &PortInfo,
+    control_value_offset: &[usize],
+    uris: &LatencyMetadataUris,
+) -> LatencyCandidate {
+    // SAFETY: `info.index` belongs to the live plugin described by the caller.
+    let port = unsafe { lilv_sys::lilv_plugin_get_port_by_index(plugin, info.index) };
+    if port.is_null() {
+        return LatencyCandidate::Malformed;
+    }
+    // SAFETY: `port` and the predicate/value nodes are valid objects in the same Lilv world.
+    let designation = unsafe { lilv_sys::lilv_port_get(plugin, port, uris.designation) };
+    let modern_report =
+        !designation.is_null() && unsafe { lilv_sys::lilv_node_equals(designation, uris.latency) };
+    if !designation.is_null() {
+        // SAFETY: `lilv_port_get` returns an owned node that this function frees once.
+        unsafe { lilv_sys::lilv_node_free(designation) };
+    }
+    // SAFETY: `port` and the property node are valid objects in the same Lilv world.
+    let legacy_report =
+        unsafe { lilv_sys::lilv_port_has_property(plugin, port, uris.reports_latency) };
+    if !modern_report && !legacy_report {
+        return LatencyCandidate::NotReported;
+    }
+    // SAFETY: the port and class nodes are valid objects in the same Lilv world.
+    let valid_output = !info.is_input
+        && matches!(info.kind, PortKind::Control { .. })
+        && unsafe { lilv_sys::lilv_port_is_a(plugin, port, uris.control_port) }
+        && unsafe { lilv_sys::lilv_port_is_a(plugin, port, uris.output_port) };
+    if !valid_output {
+        return LatencyCandidate::Malformed;
+    }
+    let Some(offset) = control_value_offset
+        .get(info.index as usize)
+        .copied()
+        .filter(|offset| *offset != usize::MAX)
+    else {
+        return LatencyCandidate::Malformed;
+    };
+    LatencyCandidate::Reported(offset)
+}
+
+fn latency_frames_from_lv2_value(value: f32) -> Option<u32> {
+    let frames = f64::from(value);
+    if !frames.is_finite() || frames < 0.0 || frames.fract() != 0.0 || frames > f64::from(u32::MAX)
+    {
+        return None;
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    Some(frames as u32)
+}
+
+fn latency_snapshot(port: LatencyPort, value: Option<f32>) -> Option<u32> {
+    match port {
+        LatencyPort::NotReported => Some(0),
+        LatencyPort::OutputControl { .. } => value.and_then(latency_frames_from_lv2_value),
+        LatencyPort::Unknown => None,
+    }
 }
 
 /// Encode one truce-rack MIDI event into the (status, d1, d2, len)
@@ -1304,13 +1815,7 @@ impl Drop for Lv2Plugin {
         // while the audio instance is still alive (some UIs talk
         // to the instance via the `instance-access` extension).
         self.close_editor();
-        if !self.instance.is_null() {
-            unsafe {
-                lilv_sys::lilv_instance_deactivate(self.instance);
-                lilv_sys::lilv_instance_free(self.instance);
-            }
-            self.instance = std::ptr::null_mut();
-        }
+        self.free_instance();
         // `world` and `features` drop in struct order after this.
     }
 }
@@ -1326,6 +1831,108 @@ impl Lv2Plugin {
             // Library drops here, which closes the dlopen handle.
             drop(state);
         }
+        self.drain_pending_controls();
+    }
+
+    /// Discard the current native instance, deactivating it only when the host still considers
+    /// it active. This is also used after failed state restore because native restore may mutate
+    /// before returning an error, so that instance cannot be safely reused.
+    fn free_instance(&mut self) {
+        if !self.instance.is_null() {
+            // SAFETY: `instance` is owned from the matching Lilv instantiate call. Its world and
+            // features remain owned by `self`; deactivate is called only for an active instance.
+            unsafe {
+                if self.active_layout.is_some() {
+                    lilv_sys::lilv_instance_deactivate(self.instance);
+                }
+                lilv_sys::lilv_instance_free(self.instance);
+            }
+            self.instance = std::ptr::null_mut();
+        }
+        self.sample_rate = 0.0;
+        self.active_layout = None;
+    }
+
+    /// Retain the instance when its rate and declared buffer bound are unchanged. Otherwise
+    /// replace it before activation and preserve native state rather than discarding a preset.
+    fn prepare_instance(&mut self, sample_rate: f64, maximum_block: usize) -> Result<()> {
+        let needs_reinstantiate = configuration_requires_new_instance(
+            !self.instance.is_null(),
+            self.sample_rate,
+            sample_rate,
+            self.features.options.maximum_block(),
+            maximum_block,
+        );
+        if !needs_reinstantiate {
+            return Ok(());
+        }
+        self.drain_pending_controls();
+        let retained_state = if self.instance.is_null() {
+            None
+        } else {
+            Some(state::save(self)?)
+        };
+        self.close_editor();
+        self.free_instance();
+        self.features
+            .options
+            .configure(sample_rate, maximum_block)?;
+        // SAFETY: the plugin belongs to the retained Lilv world and all feature pointers remain
+        // valid in `self`; the returned instance is owned until `free_instance`.
+        let instance = unsafe {
+            lilv_sys::lilv_plugin_instantiate(
+                self.plugin,
+                sample_rate,
+                self.features.feature_ptrs.as_ptr(),
+            )
+        };
+        if instance.is_null() {
+            return Err(Error::Other("lilv_plugin_instantiate returned NULL".into()));
+        }
+        if let Err(error) = self.parameters.set_sample_rate(sample_rate) {
+            // SAFETY: the new instance has not been activated or published, and this is the
+            // matching owning free before returning a failed activation to the host.
+            unsafe { lilv_sys::lilv_instance_free(instance) };
+            return Err(error);
+        }
+        self.instance = instance;
+        self.sample_rate = sample_rate;
+        if let Some(bytes) = retained_state
+            && let Err(error) = self.restore_state(&bytes)
+        {
+            self.free_instance();
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn prepare_midi_buffers(&mut self, capacity: usize) -> Result<()> {
+        resize_zeroed_buffer(&mut self.midi_in_buf, capacity)?;
+        resize_zeroed_buffer(&mut self.midi_out_buf, capacity)
+    }
+
+    /// Run the part of activation that is shared by ordinary and stateful activation.
+    fn activate_prepared(&mut self, layout: BusLayout) {
+        // SAFETY: prepare_instance established a non-null inactive instance at the requested
+        // rate, and activation runs on the same serialized lifecycle thread.
+        unsafe { lilv_sys::lilv_instance_activate(self.instance) };
+        self.active_layout = Some(layout);
+        self.invalidate_latency_after_state_change();
+    }
+
+    fn update_latency_snapshot(&mut self) {
+        let value = match self.latency_port {
+            LatencyPort::NotReported | LatencyPort::Unknown => None,
+            LatencyPort::OutputControl { offset } => self.control_values.get(offset).copied(),
+        };
+        self.latency_frames = latency_snapshot(self.latency_port, value);
+    }
+
+    fn invalidate_latency_after_state_change(&mut self) {
+        self.latency_frames = match self.latency_port {
+            LatencyPort::NotReported => Some(0),
+            LatencyPort::OutputControl { .. } | LatencyPort::Unknown => None,
+        };
     }
 }
 
@@ -1336,27 +1943,33 @@ impl PluginCore for Lv2Plugin {
     fn active_layout(&self) -> Option<&BusLayout> {
         self.active_layout.as_ref()
     }
+    fn latency_frames(&self) -> Option<u32> {
+        self.latency_frames
+    }
     fn supported_layouts(&self) -> &[BusLayout] {
         &self.layouts
     }
     fn parameter_count(&self) -> usize {
-        // Control ports are LV2's parameter analogue, but exposing
-        // them through the param API requires names + ranges, which
-        // we don't yet read. Hosts can still read /set the value via
-        // the trait once we add ParameterInfo enumeration.
-        0
+        self.parameters.len()
     }
     fn parameter_info(&self, index: usize) -> Result<ParameterInfo> {
-        Err(Error::InvalidParameter(index))
+        self.parameters.info(index)
     }
     fn parameter_value(&self, index: usize) -> Result<f64> {
-        Err(Error::InvalidParameter(index))
+        let stored = self.parameters.value(index, &self.control_values)?;
+        let offset = self.parameters.offset(index)?;
+        Ok(self
+            .controller
+            .pending
+            .peek(offset)
+            .map_or(stored, f64::from))
     }
-    fn parameter_value_string(&self, index: usize, _value: f64) -> Result<String> {
-        Err(Error::InvalidParameter(index))
+    fn parameter_value_string(&self, index: usize, value: f64) -> Result<String> {
+        self.parameters.formatted(index, value)
     }
-    fn set_parameter(&mut self, index: usize, _value: f64) -> Result<()> {
-        Err(Error::InvalidParameter(index))
+    fn set_parameter(&mut self, index: usize, value: f64) -> Result<()> {
+        self.drain_pending_controls();
+        self.parameters.set(index, value, &mut self.control_values)
     }
     fn preset_count(&self) -> usize {
         0
@@ -1371,7 +1984,9 @@ impl PluginCore for Lv2Plugin {
         state::save(self)
     }
     fn load_state(&mut self, bytes: &[u8]) -> Result<()> {
-        state::restore(self, bytes)
+        self.restore_state(bytes)?;
+        self.invalidate_latency_after_state_change();
+        Ok(())
     }
 
     fn activate(
@@ -1380,51 +1995,42 @@ impl PluginCore for Lv2Plugin {
         sample_rate: f64,
         max_block_size: usize,
     ) -> Result<()> {
-        // (Re)instantiate if this is the first activate or the
-        // sample rate has changed — LV2 bakes the rate into the
-        // instance at `lilv_plugin_instantiate` time.
-        let needs_reinstantiate =
-            self.instance.is_null() || (self.sample_rate - sample_rate).abs() > f64::EPSILON;
-        if needs_reinstantiate {
-            if !self.instance.is_null() {
-                unsafe {
-                    lilv_sys::lilv_instance_deactivate(self.instance);
-                    lilv_sys::lilv_instance_free(self.instance);
-                }
-                self.instance = std::ptr::null_mut();
-            }
-            let inst = unsafe {
-                lilv_sys::lilv_plugin_instantiate(
-                    self.plugin,
-                    sample_rate,
-                    self.features.feature_ptrs.as_ptr(),
-                )
-            };
-            if inst.is_null() {
-                return Err(Error::Other("lilv_plugin_instantiate returned NULL".into()));
-            }
-            self.instance = inst;
-            self.sample_rate = sample_rate;
-        }
-
-        // Rough sizing: room for a sequence header plus one max-len
-        // MIDI event per frame. Plenty for any sane block.
-        let event_slot = std::mem::size_of::<LV2AtomEvent>() + 8;
-        let cap = std::mem::size_of::<LV2AtomSequence>()
-            + TIME_POSITION_MAX_BYTES
-            + max_block_size * event_slot;
-        self.midi_in_buf.resize(cap.max(64), 0);
-        self.midi_out_buf.resize(cap.max(64), 0);
-
-        unsafe { lilv_sys::lilv_instance_activate(self.instance) };
-        self.active_layout = Some(layout);
-        Ok(())
+        self.activate_with_state(layout, sample_rate, max_block_size, None)
     }
+
+    fn activate_with_state(
+        &mut self,
+        layout: BusLayout,
+        sample_rate: f64,
+        max_block_size: usize,
+        state: Option<&[u8]>,
+    ) -> Result<()> {
+        let midi_buffer_capacity = validate_activation_request(
+            self.is_active(),
+            &self.layouts,
+            &layout,
+            sample_rate,
+            max_block_size,
+        )?;
+        self.latency_frames = None;
+        let mut activation = Lv2Activation {
+            plugin: self,
+            layout: Some(layout),
+            sample_rate,
+            maximum_block: max_block_size,
+            midi_buffer_capacity,
+        };
+        restore_then_activate(&mut activation, state)
+    }
+
     fn deactivate(&mut self) {
-        if !self.instance.is_null() {
+        if !self.instance.is_null() && self.active_layout.is_some() {
+            // SAFETY: this is the retained instance created by Lilv and active_layout proves
+            // activation succeeded; this call is serialized with processing and state access.
             unsafe { lilv_sys::lilv_instance_deactivate(self.instance) };
         }
         self.active_layout = None;
+        self.latency_frames = None;
     }
     fn is_active(&self) -> bool {
         self.active_layout.is_some()
@@ -1439,11 +2045,125 @@ impl PluginCore for Lv2Plugin {
     }
 }
 
+trait ActivationActions {
+    fn prepare_instance(&mut self) -> Result<()>;
+    fn restore(&mut self, state: &[u8]) -> Result<()>;
+    fn activate(&mut self) -> Result<()>;
+    fn discard_after_restore_failure(&mut self);
+}
+
+struct Lv2Activation<'a> {
+    plugin: &'a mut Lv2Plugin,
+    layout: Option<BusLayout>,
+    sample_rate: f64,
+    maximum_block: usize,
+    midi_buffer_capacity: usize,
+}
+
+impl ActivationActions for Lv2Activation<'_> {
+    fn prepare_instance(&mut self) -> Result<()> {
+        self.plugin
+            .prepare_midi_buffers(self.midi_buffer_capacity)?;
+        self.plugin
+            .prepare_instance(self.sample_rate, self.maximum_block)
+    }
+
+    fn restore(&mut self, state: &[u8]) -> Result<()> {
+        self.plugin.restore_state(state)?;
+        self.plugin.invalidate_latency_after_state_change();
+        Ok(())
+    }
+
+    fn activate(&mut self) -> Result<()> {
+        let layout = self
+            .layout
+            .take()
+            .ok_or_else(|| Error::Other("LV2 activation layout was already consumed".into()))?;
+        self.plugin.activate_prepared(layout);
+        Ok(())
+    }
+
+    fn discard_after_restore_failure(&mut self) {
+        self.plugin.close_editor();
+        self.plugin.free_instance();
+        self.plugin.invalidate_latency_after_state_change();
+    }
+}
+
+fn restore_then_activate(actions: &mut impl ActivationActions, state: Option<&[u8]>) -> Result<()> {
+    actions.prepare_instance()?;
+    if let Some(state) = state
+        && let Err(failure) = actions.restore(state)
+    {
+        actions.discard_after_restore_failure();
+        return Err(failure);
+    }
+    actions.activate()
+}
+
+fn configuration_requires_new_instance(
+    instance_exists: bool,
+    current_sample_rate: f64,
+    requested_sample_rate: f64,
+    current_maximum_block: usize,
+    requested_maximum_block: usize,
+) -> bool {
+    !instance_exists
+        || (current_sample_rate - requested_sample_rate).abs() > f64::EPSILON
+        || current_maximum_block != requested_maximum_block
+}
+
+fn validate_activation_request(
+    active: bool,
+    supported_layouts: &[BusLayout],
+    layout: &BusLayout,
+    sample_rate: f64,
+    max_block_size: usize,
+) -> Result<usize> {
+    if active {
+        return Err(Error::Other(
+            "stateful activation requires an inactive instance".into(),
+        ));
+    }
+    if !supported_layouts.contains(layout) {
+        return Err(Error::Other(
+            "requested LV2 bus layout is not a supported native topology".into(),
+        ));
+    }
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        return Err(Error::Other("invalid LV2 sample rate".into()));
+    }
+    midi_buffer_capacity(max_block_size)
+}
+
+fn midi_buffer_capacity(max_block_size: usize) -> Result<usize> {
+    if max_block_size == 0 || u32::try_from(max_block_size).is_err() {
+        return Err(Error::Other("invalid LV2 maximum block size".into()));
+    }
+    let event_slot = std::mem::size_of::<LV2AtomEvent>()
+        .checked_add(8)
+        .ok_or_else(|| Error::Other("LV2 MIDI buffer size overflow".into()))?;
+    let capacity = std::mem::size_of::<LV2AtomSequence>()
+        .checked_add(TIME_POSITION_MAX_BYTES)
+        .and_then(|base| max_block_size.checked_mul(event_slot)?.checked_add(base))
+        .map(|capacity| capacity.max(64))
+        .filter(|capacity| *capacity <= MAX_LV2_EVENT_BUFFER_BYTES)
+        .ok_or_else(|| Error::Other("LV2 MIDI buffer exceeds the 16 MiB limit".into()))?;
+    Ok(capacity)
+}
+
+fn resize_zeroed_buffer(buffer: &mut Vec<u8>, length: usize) -> Result<()> {
+    if buffer.capacity() < length {
+        let additional = length - buffer.len();
+        buffer.try_reserve_exact(additional).map_err(|failure| {
+            Error::Other(format!("LV2 MIDI buffer allocation failed: {failure}"))
+        })?;
+    }
+    buffer.resize(length, 0);
+    Ok(())
+}
+
 impl PluginEditor for Lv2Plugin {
-    // `type DescFn = …` lives in the function body next to its single
-    // call site so the LV2 UI signature is one read away — hoisting it
-    // would orphan the comment from the use.
-    #[allow(clippy::items_after_statements)]
     fn open(&mut self, parent: WindowHandle, _scale: f64) -> Result<()> {
         let bundle = self
             .ui_bundle
@@ -1463,43 +2183,7 @@ impl PluginEditor for Lv2Plugin {
             WindowHandle::X11(xid) => xid as usize as *mut c_void,
         };
 
-        // dlopen the UI binary. libloading retains an OS handle
-        // we keep in EditorState for the lifetime of the editor.
-        let lib = unsafe { libloading::Library::new(&bundle.binary_path) }.map_err(|e| {
-            Error::Other(format!(
-                "lv2 ui dlopen {}: {}",
-                bundle.binary_path.display(),
-                e
-            ))
-        })?;
-        type DescFn = unsafe extern "C" fn(u32) -> *const LV2UIDescriptorRaw;
-        let descriptor = unsafe {
-            let sym: libloading::Symbol<DescFn> = lib
-                .get(b"lv2ui_descriptor")
-                .map_err(|e| Error::Other(format!("lv2 ui_descriptor symbol: {e}")))?;
-            // Walk indices until we find the descriptor whose URI
-            // matches our chosen UI's URI, or the function returns
-            // NULL.
-            let mut chosen: *const LV2UIDescriptorRaw = std::ptr::null();
-            for idx in 0u32..64 {
-                let d = sym(idx);
-                if d.is_null() {
-                    break;
-                }
-                let uri = (*d).uri;
-                if !uri.is_null() && CStr::from_ptr(uri) == bundle.ui_uri.as_c_str() {
-                    chosen = d;
-                    break;
-                }
-            }
-            chosen
-        };
-        if descriptor.is_null() {
-            return Err(Error::Other(format!(
-                "no lv2ui_descriptor matching {:?}",
-                bundle.ui_uri
-            )));
-        }
+        let (lib, descriptor) = open_ui_library(&bundle)?;
 
         // Build the UI feature list. URID map shares the same
         // backing UridMap as the audio side so URIs interned by
@@ -1507,14 +2191,8 @@ impl PluginEditor for Lv2Plugin {
         let map_handle: *mut UridMap = (&mut self.features.urid_map) as *mut UridMap;
         let ui_features = UiFeatureStorage::new(map_handle, parent_ptr);
 
-        // Heap-stable controller for write_function callbacks. Built
-        // lazily because `control_values` only stops moving after
-        // load completes.
-        self.ensure_controller();
-        let controller_ptr: *const Controller = self
-            .controller
-            .as_deref()
-            .map_or(std::ptr::null(), |c| c as *const Controller);
+        // The callback context is heap-stable from load until UI cleanup returns.
+        let controller_ptr: *const Controller = self.controller.as_ref();
 
         let plugin_uri = CString::new(self.info.unique_id.clone())
             .map_err(|_| Error::Other("lv2 plugin uri contains NUL".into()))?;
@@ -1628,6 +2306,7 @@ impl PluginEditor for Lv2Plugin {
     }
 
     fn on_idle(&mut self) {
+        self.drain_pending_controls();
         let Some(state) = self.editor.as_mut() else {
             return;
         };
@@ -1644,6 +2323,7 @@ impl PluginEditor for Lv2Plugin {
                 return;
             }
         }
+        self.drain_pending_controls();
 
         // 2. Push host-side parameter changes to the UI via
         //    `port_event`. Compare current control_values against
@@ -1704,11 +2384,27 @@ impl PluginEditor for Lv2Plugin {
 }
 
 fn path_to_cstring_with_trailing_sep(p: &Path) -> Result<CString> {
-    let mut s = p.to_string_lossy().into_owned();
+    let mut s = p
+        .to_str()
+        .ok_or_else(|| Error::Other("LV2 bundle path is not UTF-8".into()))?
+        .to_owned();
     if !s.ends_with(std::path::MAIN_SEPARATOR) {
         s.push(std::path::MAIN_SEPARATOR);
     }
-    CString::new(s).map_err(|_| Error::Other("lv2 ui bundle path contains NUL".into()))
+    CString::new(s).map_err(|_| Error::Other("LV2 bundle path contains NUL".into()))
+}
+
+fn exact_bundle_path(path: &Path) -> Result<PathBuf> {
+    let path = path.canonicalize()?;
+    if !path.is_dir()
+        || path.extension().and_then(|extension| extension.to_str()) != Some("lv2")
+        || !path.join("manifest.ttl").is_file()
+    {
+        return Err(Error::Other(
+            "LV2 path must be one .lv2 bundle containing manifest.ttl".into(),
+        ));
+    }
+    Ok(path)
 }
 
 #[cfg(target_os = "macos")]
@@ -1750,52 +2446,38 @@ impl Plugin<f32> for Lv2Plugin {
         if !self.is_active() {
             return Err(Error::NotActivated);
         }
+        self.drain_pending_controls();
         let frames = buffer.num_frames();
+        if frames == 0 {
+            return Ok(ProcessStatus::Continue);
+        }
+
+        // Validate the exact bus topology and mapping before touching any native port.
+        let layout = self.active_layout.as_ref().ok_or(Error::NotActivated)?;
+        let maximum_block = context
+            .max_block_size
+            .min(self.features.options.maximum_block());
+        let planes = AudioPlanes::collect(buffer, layout, maximum_block)?;
+        planes.validate_ports(&self.ports)?;
 
         // Build the input atom sequence (host transport + MIDI) and
         // reset the output.
         self.build_midi_sequence(events, context.transport);
         self.prep_midi_out();
 
-        // Take raw pointers for every audio plane up front so the
-        // immutable + mutable borrows on `buffer` don't overlap
-        // when we iterate ports below.
-        let in_ptrs: Vec<*mut f32> = buffer
-            .main_inputs()
-            .iter()
-            .map(|s| s.as_ptr().cast_mut())
-            .collect();
-        let out_ptrs: Vec<*mut f32> = buffer
-            .main_outputs()
-            .iter_mut()
-            .map(|s| s.as_mut_ptr())
-            .collect();
         let control_base = self.control_values.as_mut_ptr();
         let midi_in_ptr = self.midi_in_buf.as_mut_ptr().cast::<c_void>();
         let midi_out_ptr = self.midi_out_buf.as_mut_ptr().cast::<c_void>();
 
-        // Connect each port. Audio + atom port directions are already
-        // classified at load; we just count audio ports as we go to
-        // pick the right channel of the host buffer.
-        let mut next_audio_in = 0usize;
-        let mut next_audio_out = 0usize;
+        // Connect each native port using its load-time raw-port → flattened-plane mapping.
         for port in &self.ports {
             let data: *mut c_void = match port.kind {
                 PortKind::Audio => {
+                    let plane = port.audio_plane.expect("audio mapping preflighted above");
                     if port.is_input {
-                        let plane = in_ptrs
-                            .get(next_audio_in)
-                            .copied()
-                            .unwrap_or(std::ptr::null_mut());
-                        next_audio_in += 1;
-                        plane.cast::<c_void>()
+                        planes.inputs[plane].cast::<c_void>()
                     } else {
-                        let plane = out_ptrs
-                            .get(next_audio_out)
-                            .copied()
-                            .unwrap_or(std::ptr::null_mut());
-                        next_audio_out += 1;
-                        plane.cast::<c_void>()
+                        planes.outputs[plane].cast::<c_void>()
                     }
                 }
                 PortKind::Control { .. } => {
@@ -1824,8 +2506,11 @@ impl Plugin<f32> for Lv2Plugin {
         }
 
         unsafe {
-            lilv_sys::lilv_instance_run(self.instance, u32::try_from(frames).unwrap_or(u32::MAX));
+            lilv_sys::lilv_instance_run(self.instance, frames as u32);
         }
+        // LV2 exposes changing latency as a connected output control-port scalar, not a getter.
+        // Copy that already-written value after run; this performs no FFI query, allocation, or lock.
+        self.update_latency_snapshot();
 
         // Drain MIDI from the output atom-sequence port (if the
         // plugin connected one) into context.output_events.
@@ -1946,4 +2631,224 @@ fn decode_midi_atom(bytes: &[u8]) -> Option<EventBody> {
         _ => return None,
     };
     Some(EventBody::Midi(body))
+}
+
+#[cfg(test)]
+mod bundle_scan_tests {
+    use super::*;
+
+    fn fixture() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/multibus.lv2")
+    }
+
+    #[test]
+    fn exact_bundle_scan_retains_uri_identity_and_requested_path() {
+        let path = fixture().canonicalize().unwrap();
+        let infos = Lv2Scanner::new().scan_path(&path).unwrap();
+        assert_eq!(infos.len(), 5);
+        assert!(infos.iter().all(|info| info.path == path));
+        assert!(infos.iter().all(|info| {
+            info.format == FORMAT && info.unique_id.starts_with("urn:mixrelay:multibus-")
+        }));
+    }
+
+    #[test]
+    fn unrelated_paths_are_rejected_before_native_discovery() {
+        let bundle = fixture();
+        for path in [
+            bundle.join("missing.lv2"),
+            bundle.join("manifest.ttl"),
+            bundle.parent().unwrap().to_owned(),
+        ] {
+            assert!(Lv2Scanner::new().scan_path(&path).is_err());
+        }
+    }
+
+    #[test]
+    fn exact_bundle_load_rejects_an_unlisted_uri_before_instantiation() {
+        let mut info = Lv2Scanner::new().scan_path(&fixture()).unwrap().remove(0);
+        info.unique_id = "urn:mixrelay:not-in-selected-bundle".to_owned();
+        assert!(matches!(
+            Lv2Plugin::load_from(&info),
+            Err(Error::LoadFailed { reason, .. }) if reason.contains("no LV2 plugin matching URI")
+        ));
+    }
+
+    #[test]
+    fn native_bundle_path_has_a_trailing_separator_without_lossy_aliases() {
+        let path = Path::new("/private/selected % bundle.lv2");
+        let encoded = path_to_cstring_with_trailing_sep(path).unwrap();
+        assert_eq!(
+            encoded.to_str().unwrap(),
+            format!("{}{}", path.display(), std::path::MAIN_SEPARATOR)
+        );
+        assert!(path_to_cstring_with_trailing_sep(Path::new("/invalid\0.lv2")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod latency_tests {
+    use super::*;
+
+    #[test]
+    fn absent_report_is_zero_but_malformed_metadata_is_unknown() {
+        assert_eq!(latency_snapshot(LatencyPort::NotReported, None), Some(0));
+        assert_eq!(latency_snapshot(LatencyPort::Unknown, Some(0.0)), None);
+    }
+
+    #[test]
+    fn latency_port_scalar_requires_a_finite_nonnegative_integer_frame_count() {
+        assert_eq!(latency_frames_from_lv2_value(0.0), Some(0));
+        assert_eq!(latency_frames_from_lv2_value(128.0), Some(128));
+        assert_eq!(latency_frames_from_lv2_value(f32::NAN), None);
+        assert_eq!(latency_frames_from_lv2_value(f32::INFINITY), None);
+        assert_eq!(latency_frames_from_lv2_value(-1.0), None);
+        assert_eq!(latency_frames_from_lv2_value(1.5), None);
+        assert_eq!(
+            latency_frames_from_lv2_value(4_294_967_040.0),
+            Some(4_294_967_040)
+        );
+        assert_eq!(latency_frames_from_lv2_value(4_294_967_296.0), None);
+    }
+
+    #[test]
+    fn connected_latency_port_snapshot_can_change_between_runs() {
+        let port = LatencyPort::OutputControl { offset: 2 };
+        assert_eq!(latency_snapshot(port, Some(24.0)), Some(24));
+        assert_eq!(latency_snapshot(port, Some(72.0)), Some(72));
+        assert_eq!(latency_snapshot(port, None), None);
+    }
+}
+
+#[cfg(test)]
+mod activation_tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct FakeActivation {
+        calls: Vec<&'static str>,
+        restore_failure: bool,
+        activation_failure: bool,
+    }
+
+    impl ActivationActions for FakeActivation {
+        fn prepare_instance(&mut self) -> Result<()> {
+            self.calls.push("prepare");
+            Ok(())
+        }
+
+        fn restore(&mut self, state: &[u8]) -> Result<()> {
+            assert_eq!(state, b"fixture-state");
+            self.calls.push("restore");
+            if self.restore_failure {
+                return Err(Error::Other("fake restore failure".into()));
+            }
+            Ok(())
+        }
+
+        fn activate(&mut self) -> Result<()> {
+            self.calls.push("activate");
+            if self.activation_failure {
+                return Err(Error::Other("fake activation failure".into()));
+            }
+            Ok(())
+        }
+
+        fn discard_after_restore_failure(&mut self) {
+            self.calls.push("discard");
+        }
+    }
+
+    #[test]
+    fn state_is_restored_before_native_activation() {
+        let mut lifecycle = FakeActivation::default();
+        restore_then_activate(&mut lifecycle, Some(b"fixture-state")).unwrap();
+        assert_eq!(lifecycle.calls, ["prepare", "restore", "activate"]);
+    }
+
+    #[test]
+    fn no_state_uses_the_shared_activation_path_without_restore() {
+        let mut lifecycle = FakeActivation::default();
+        restore_then_activate(&mut lifecycle, None).unwrap();
+        assert_eq!(lifecycle.calls, ["prepare", "activate"]);
+    }
+
+    #[test]
+    fn failed_restore_discards_instance_and_never_activates() {
+        let mut lifecycle = FakeActivation {
+            restore_failure: true,
+            ..FakeActivation::default()
+        };
+        let error = restore_then_activate(&mut lifecycle, Some(b"fixture-state")).unwrap_err();
+        assert_eq!(error.to_string(), "fake restore failure");
+        assert_eq!(lifecycle.calls, ["prepare", "restore", "discard"]);
+    }
+
+    #[test]
+    fn activation_failure_is_propagated_after_restore() {
+        let mut lifecycle = FakeActivation {
+            activation_failure: true,
+            ..FakeActivation::default()
+        };
+        let error = restore_then_activate(&mut lifecycle, Some(b"fixture-state")).unwrap_err();
+        assert_eq!(error.to_string(), "fake activation failure");
+        assert_eq!(lifecycle.calls, ["prepare", "restore", "activate"]);
+    }
+
+    #[test]
+    fn same_rate_keeps_the_deactivated_native_instance() {
+        assert!(!configuration_requires_new_instance(
+            true, 48_000.0, 48_000.0, 128, 128
+        ));
+        assert!(configuration_requires_new_instance(
+            true, 48_000.0, 44_100.0, 128, 128
+        ));
+        assert!(configuration_requires_new_instance(
+            false, 48_000.0, 48_000.0, 128, 128
+        ));
+        assert!(configuration_requires_new_instance(
+            true, 48_000.0, 48_000.0, 128, 256
+        ));
+    }
+
+    #[test]
+    fn activation_validation_rejects_unsupported_layouts_and_invalid_rates() {
+        let supported = [BusLayout::stereo()];
+        assert!(
+            validate_activation_request(false, &supported, &BusLayout::mono(), 48_000.0, 128,)
+                .is_err()
+        );
+        for sample_rate in [0.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                validate_activation_request(false, &supported, &supported[0], sample_rate, 128,)
+                    .is_err()
+            );
+        }
+        assert!(
+            validate_activation_request(true, &supported, &supported[0], 48_000.0, 128,).is_err()
+        );
+    }
+
+    #[test]
+    fn activation_validation_rejects_unbounded_or_zero_block_sizes() {
+        let supported = [BusLayout::stereo()];
+        for max_block_size in [0, usize::MAX] {
+            assert!(
+                validate_activation_request(
+                    false,
+                    &supported,
+                    &supported[0],
+                    48_000.0,
+                    max_block_size,
+                )
+                .is_err()
+            );
+        }
+        assert!(midi_buffer_capacity(4_096).is_ok());
+        let overhead = std::mem::size_of::<LV2AtomSequence>() + TIME_POSITION_MAX_BYTES;
+        let event_slot = std::mem::size_of::<LV2AtomEvent>() + 8;
+        let maximum_frames = (MAX_LV2_EVENT_BUFFER_BYTES - overhead) / event_slot;
+        assert!(midi_buffer_capacity(maximum_frames).is_ok());
+        assert!(midi_buffer_capacity(maximum_frames + 1).is_err());
+    }
 }

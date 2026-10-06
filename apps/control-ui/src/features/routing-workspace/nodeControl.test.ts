@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { ControlPortError, type RuntimeGraphDocument } from '../../core/control-port/types';
+import { acknowledgedNodeControl } from './controlReconciliation';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { audioGraphToRuntimeGraph, runtimeGraphToAudioGraph } from './model';
 
@@ -35,6 +36,7 @@ function fixture() {
     protocolVersion: 1;
     revision: number;
     state: 'active';
+    requiresGraphReload: boolean;
   }>();
   const port = {
     updateNodeControl: vi.fn().mockReturnValue(completion.promise),
@@ -75,9 +77,19 @@ it('uses the same writer lock and displayed revision without optimistic UI state
     code: 'graph_exchange_busy',
   });
   expect(f.port.updateNodeControl).toHaveBeenCalledTimes(1);
-  f.completion.resolve({ revision: 8, state: 'active', protocolVersion: 1 });
+  f.completion.resolve({
+    revision: 8,
+    state: 'active',
+    protocolVersion: 1,
+    requiresGraphReload: false,
+  });
   await expect(task).resolves.toEqual({ state: 'applied', revision: 8 });
-  expect(f.callbacks.restore).toHaveBeenCalledExactlyOnceWith(f.restored);
+  expect(f.callbacks.restore).toHaveBeenCalledExactlyOnceWith(
+    acknowledgedNodeControl(document, 'processor', { enabled: true }, 8),
+  );
+  expect(f.port.getGraph).not.toHaveBeenCalled();
+  expect(f.port.getGraphStatus).not.toHaveBeenCalled();
+  expect(f.port.applyGraph).not.toHaveBeenCalled();
   expect(f.callbacks.state).toHaveBeenLastCalledWith('active');
 });
 
@@ -122,6 +134,7 @@ it('keeps a rejected deleted-node command recoverable without rewriting connecti
     revision: 9,
     protocolVersion: 1,
     state: 'active',
+    requiresGraphReload: false,
   });
   await f.queue.setNodeControl('graph-a', 'missing', { muted: true });
   expect(f.port.updateNodeControl).toHaveBeenLastCalledWith('graph-a', 'missing', {
@@ -131,26 +144,73 @@ it('keeps a rejected deleted-node command recoverable without rewriting connecti
   expect(f.callbacks.state).toHaveBeenLastCalledWith('active');
 });
 
-it('does not restore a foreign graph when selection changes during the acknowledgement read', async () => {
+it('does not restore a foreign graph when selection changes before acknowledgement', async () => {
   const f = fixture();
   let graphId = 'graph-a';
-  const read = Promise.withResolvers<RuntimeGraphDocument>();
-  f.port.getGraph.mockReturnValueOnce(read.promise);
   const queue = new GraphApplicationQueue(f.port, { ...f.callbacks, getGraphId: () => graphId });
   const task = queue.setNodeControl('graph-a', 'processor', { enabled: true }, 7);
-  f.completion.resolve({ revision: 8, state: 'active', protocolVersion: 1 });
-  await vi.waitFor(() => expect(f.port.getGraph).toHaveBeenCalledTimes(1));
   graphId = 'graph-b';
-  read.resolve(f.restored);
+  f.completion.resolve({
+    revision: 8,
+    state: 'active',
+    protocolVersion: 1,
+    requiresGraphReload: false,
+  });
   await expect(task).resolves.toMatchObject({ state: 'uncertain' });
   expect(f.callbacks.restore).not.toHaveBeenCalled();
   expect(f.callbacks.document).not.toHaveBeenCalled();
 });
 
+it('accepts an acknowledged no-op without rereading or incrementing the revision', async () => {
+  const f = fixture();
+  const task = f.queue.setNodeControl('graph-a', 'processor', { enabled: false });
+  f.completion.resolve({
+    revision: 7,
+    state: 'active',
+    protocolVersion: 1,
+    requiresGraphReload: false,
+  });
+  await expect(task).resolves.toEqual({ state: 'applied', revision: 7 });
+  expect(f.port.getGraph).not.toHaveBeenCalled();
+  expect(f.port.applyGraph).not.toHaveBeenCalled();
+});
+
+it('rereads canonical state after native preparation instead of losing other reconciled metadata', async () => {
+  const f = fixture();
+  const reconcile = vi.fn().mockReturnValue(false);
+  const queue = new GraphApplicationQueue(f.port, { ...f.callbacks, reconcile });
+  const canonical = {
+    ...f.restored,
+    nodes: f.restored.nodes.map((node) => ({
+      ...node,
+      config: { ...(node.config as object), nativeMetadata: 'updated by preparation' },
+    })),
+  };
+  f.port.getGraph.mockResolvedValueOnce(canonical);
+  const task = queue.setNodeControl('graph-a', 'processor', { enabled: true });
+  f.completion.resolve({
+    revision: 8,
+    state: 'active',
+    protocolVersion: 1,
+    requiresGraphReload: true,
+  });
+  await expect(task).resolves.toEqual({ state: 'applied', revision: 8 });
+  expect(f.port.getGraph).toHaveBeenCalledTimes(1);
+  expect(f.callbacks.restore).toHaveBeenCalledExactlyOnceWith(canonical);
+  expect(f.callbacks.document).toHaveBeenLastCalledWith(canonical);
+  expect(reconcile).not.toHaveBeenCalled();
+  expect(f.port.applyGraph).not.toHaveBeenCalled();
+});
+
 it('does not report an unrelated acknowledgement revision as applied', async () => {
   const f = fixture();
   const task = f.queue.setNodeControl('graph-a', 'processor', { enabled: true }, 7);
-  f.completion.resolve({ revision: 9, state: 'active', protocolVersion: 1 });
+  f.completion.resolve({
+    revision: 9,
+    state: 'active',
+    protocolVersion: 1,
+    requiresGraphReload: false,
+  });
   await expect(task).resolves.toEqual({ state: 'uncertain', code: 'graph_revision_stale' });
   expect(f.callbacks.restore).not.toHaveBeenCalled();
 });
@@ -159,7 +219,12 @@ it('does not apply a late acknowledgement after the workspace is replaced', asyn
   const f = fixture();
   const task = f.queue.setNodeControl('graph-a', 'processor', { enabled: true });
   f.queue.reset();
-  f.completion.resolve({ revision: 8, state: 'active', protocolVersion: 1 });
+  f.completion.resolve({
+    revision: 8,
+    state: 'active',
+    protocolVersion: 1,
+    requiresGraphReload: false,
+  });
   await expect(task).resolves.toMatchObject({ state: 'uncertain' });
   expect(f.callbacks.restore).not.toHaveBeenCalled();
 });
@@ -234,6 +299,7 @@ it.each([true, false])(
       revision: 8,
       protocolVersion: 1,
       state: 'active',
+      requiresGraphReload: false,
     });
     await f.queue.setNodeControl('graph-a', 'missing', { muted: true });
     expect(f.port.updateNodeControl).toHaveBeenCalledTimes(definite ? 2 : 1);

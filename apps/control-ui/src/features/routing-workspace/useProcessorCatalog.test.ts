@@ -14,8 +14,30 @@ const loaded: ExternalProcessorCatalog = {
       vendor: 'MixRelay',
       format: 'vst3',
       version: '1',
-      inputChannels: 2,
-      outputChannels: 2,
+      layouts: [
+        {
+          layoutId: 'layout-v1:stereo',
+          inputs: [
+            {
+              id: 'audio',
+              name: 'Main Input',
+              kind: 'main',
+              channels: 2,
+              channelFormat: 'stereo',
+            },
+          ],
+          outputs: [
+            {
+              id: 'audio',
+              name: 'Main Output',
+              kind: 'main',
+              channels: 2,
+              channelFormat: 'stereo',
+            },
+          ],
+        },
+      ],
+      defaultLayoutId: 'layout-v1:stereo',
       parameters: [],
       hasEditor: true,
     },

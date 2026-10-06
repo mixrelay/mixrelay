@@ -8,13 +8,31 @@ use std::sync::Arc;
 use crate::macos_audio::ApplicationCaptureState;
 #[cfg(target_os = "macos")]
 mod application_capture;
+mod exchange;
 #[cfg(target_os = "macos")]
 pub(crate) mod local;
 pub(crate) mod node_control;
 pub(crate) mod recorder;
+pub(crate) mod recording_settings;
 pub(crate) mod workspace;
 
 const CONTROL_ORIGIN: &str = "http://127.0.0.1:19341";
+const PROCESSOR_RETRY_ROUTE: &str = "/api/v1/processors/retry";
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ProcessorRetryRequest {
+    expected_catalog_revision: u64,
+    expected_instance_id: String,
+    expected_revision: u64,
+    graph_id: String,
+    node_id: String,
+}
+
+fn processor_retry_body(request: &ProcessorRetryRequest) -> Result<Value, String> {
+    serde_json::to_value(request)
+        .map_err(|error| format!("processor retry request could not be encoded: {error}"))
+}
 const GRAPH_CATALOG_ROUTE: &str = "/api/v1/graphs";
 
 fn graph_layout_route(graph_id: &str) -> Result<String, String> {
@@ -53,7 +71,14 @@ pub(crate) struct ControlProxyClient {
     #[cfg(target_os = "macos")]
     capture_gate: Arc<tauri::async_runtime::Mutex<()>>,
     closing: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    unavailable: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    licensed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    license_state:
+        std::sync::Arc<std::sync::OnceLock<std::sync::Arc<crate::licensing::LicensingState>>>,
     requests: std::sync::Arc<tokio::sync::RwLock<()>>,
+    operation_liveness: std::sync::Arc<tokio::sync::Notify>,
+    recordings: std::sync::Arc<std::sync::RwLock<recording_settings::RecordingStore>>,
+    recording_gate: std::sync::Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Default for ControlProxyClient {
@@ -61,7 +86,13 @@ impl Default for ControlProxyClient {
         Self {
             client: Client::new(),
             closing: std::sync::Arc::default(),
+            unavailable: std::sync::Arc::default(),
+            licensed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            license_state: std::sync::Arc::default(),
             requests: std::sync::Arc::default(),
+            operation_liveness: std::sync::Arc::default(),
+            recordings: std::sync::Arc::default(),
+            recording_gate: std::sync::Arc::default(),
             #[cfg(target_os = "macos")]
             capture_gate: Arc::default(),
         }
@@ -87,20 +118,62 @@ enum RequestDelivery {
 }
 
 impl ControlProxyClient {
+    pub(crate) fn attach_license_state(
+        &self,
+        state: std::sync::Arc<crate::licensing::LicensingState>,
+    ) {
+        let _ = self.license_state.set(state);
+    }
+
+    fn license_allows_mutation(&self) -> bool {
+        self.licensed.load(std::sync::atomic::Ordering::Acquire)
+            && self.license_state.get().is_none_or(|state| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .is_ok_and(|time| state.allows_mutation(time.as_secs()))
+            })
+    }
+    pub(crate) fn set_license_admission(&self, allowed: bool) {
+        self.licensed
+            .store(allowed, std::sync::atomic::Ordering::Release);
+    }
+
+    #[cfg(any(test, target_os = "linux"))]
+    pub(crate) fn suspend_admission(&self) {
+        self.unavailable
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    // Only the lifecycle owner calls this after draining old exchanges and obtaining
+    // the replacement child's private readiness acknowledgement. Quit is irreversible.
+    #[cfg(any(test, target_os = "linux"))]
+    pub(crate) async fn resume_admission(&self) -> bool {
+        let _requests = self.requests.write().await;
+        if self.closing.load(std::sync::atomic::Ordering::Acquire) {
+            return false;
+        }
+        self.unavailable
+            .store(false, std::sync::atomic::Ordering::Release);
+        true
+    }
+
     pub(crate) fn close_admission(&self) {
         self.closing
             .store(true, std::sync::atomic::Ordering::Release);
     }
 
-    #[cfg(target_os = "macos")]
     pub(crate) async fn drain(&self) -> Result<(), String> {
-        tokio::time::timeout(std::time::Duration::from_secs(35), async {
-            // Same order as capture-aware commands: preparation, then HTTP admission.
-            let _capture = self.capture_gate.lock().await;
-            let _requests = self.requests.write().await;
-        })
+        wait_for_controls(
+            async {
+                // Same order as capture-aware commands: preparation, then HTTP admission.
+                #[cfg(target_os = "macos")]
+                let _capture = self.capture_gate.lock().await;
+                let _recordings = self.recording_gate.lock().await;
+                let _requests = self.requests.write().await;
+            },
+            &self.operation_liveness,
+        )
         .await
-        .map_err(|_| "Controls are still finishing; audio ownership was retained.".to_owned())
     }
 
     async fn request(
@@ -110,51 +183,51 @@ impl ControlProxyClient {
         body: Option<Value>,
     ) -> Result<ControlProxyResponse, String> {
         let _admission = self.requests.read().await;
-        if self.closing.load(std::sync::atomic::Ordering::Acquire) {
+        if !license_safe_request(&method, path, body.as_ref()) && !self.license_allows_mutation() {
+            return Ok(rejected("license_required"));
+        }
+        if self.closing.load(std::sync::atomic::Ordering::Acquire)
+            || self.unavailable.load(std::sync::atomic::Ordering::Acquire)
+        {
             return Ok(rejected("control_unavailable"));
         }
-        let mut request = self
-            .client
-            .request(method, format!("{CONTROL_ORIGIN}{path}"))
-            .timeout(std::time::Duration::from_secs(30));
-        if let Some(body) = body {
-            request = request.json(&body);
-        }
-        let response = match request.send().await {
-            Ok(response) => response,
-            Err(error) => {
-                tracing::warn!(path, ?error, "control request failed");
-                let code = if error.is_connect() || error.is_timeout() {
-                    "control_unavailable"
-                } else {
-                    "control_request_failed"
-                };
-                return Ok(ControlProxyResponse {
-                    status: 503,
-                    #[cfg(target_os = "macos")]
-                    delivery: if error.is_connect() {
-                        RequestDelivery::NotSent
-                    } else {
-                        RequestDelivery::Uncertain
-                    },
-                    body: serde_json::json!({
-                        "code": code,
-                        "parameters": { "path": path, "reason": error.to_string() },
-                    }),
-                });
+        exchange::request(self, CONTROL_ORIGIN, method, path, body).await
+    }
+}
+
+// Expiry blocks new work, not observation or explicit shutdown of current audio/recording.
+fn license_safe_request(method: &Method, path: &str, body: Option<&Value>) -> bool {
+    if *method == Method::GET {
+        return true;
+    }
+    let Some(body) = body else {
+        return false;
+    };
+    *method == Method::PUT
+        && ((path == "/api/v1/audio/power" && body.get("enabled") == Some(&Value::Bool(false)))
+            || (path.starts_with("/api/v1/graphs/")
+                && path.contains("/recorders/")
+                && body.pointer("/request/action").and_then(Value::as_str) == Some("stop")))
+}
+
+// A receipt proves that the server still owns the accepted operation, not that
+// native work has completed. Keep shutdown ownership while that observation is
+// live; individual exchanges and native providers retain their own deadlines.
+async fn wait_for_controls<T>(
+    completion: impl std::future::Future<Output = T>,
+    liveness: &tokio::sync::Notify,
+) -> Result<T, String> {
+    tokio::pin!(completion);
+    loop {
+        let pulse = liveness.notified();
+        tokio::select! {
+            biased;
+            result = &mut completion => return Ok(result),
+            () = pulse => {},
+            () = tokio::time::sleep(std::time::Duration::from_secs(35)) => {
+                return Err("Controls are still finishing; audio ownership was retained.".to_owned());
             }
-        };
-        let status = response.status().as_u16();
-        let body = response.json().await.map_err(|error| {
-            tracing::warn!(path, status, ?error, "invalid control response");
-            format!("local control response was invalid: {error}")
-        })?;
-        Ok(ControlProxyResponse {
-            status,
-            body,
-            #[cfg(target_os = "macos")]
-            delivery: RequestDelivery::ServerResponse,
-        })
+        }
     }
 }
 
@@ -170,13 +243,20 @@ fn rejected(code: &str) -> ControlProxyResponse {
 #[tauri::command]
 pub(crate) async fn control_get_status(
     client: tauri::State<'_, ControlProxyClient>,
-    #[cfg(target_os = "macos")] captures: tauri::State<'_, Arc<ApplicationCaptureState>>,
+    app: tauri::AppHandle,
 ) -> Result<ControlProxyResponse, String> {
     let response = client.request(Method::GET, "/api/v1/status", None).await?;
     #[cfg(target_os = "macos")]
-    return application_capture::power_status(&client, captures.inner(), response).await;
-    #[cfg(not(target_os = "macos"))]
-    Ok(response)
+    {
+        use tauri::Manager as _;
+        let captures = app.state::<Arc<ApplicationCaptureState>>();
+        return application_capture::power_status(&client, captures.inner(), response).await;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = app;
+        Ok(response)
+    }
 }
 
 #[tauri::command]
@@ -192,9 +272,15 @@ pub(crate) async fn control_reconfigure_session(
 #[tauri::command]
 pub(crate) async fn control_set_engine_power(
     client: tauri::State<'_, ControlProxyClient>,
-    #[cfg(target_os = "macos")] captures: tauri::State<'_, Arc<ApplicationCaptureState>>,
+    app: tauri::AppHandle,
     enabled: bool,
 ) -> Result<ControlProxyResponse, String> {
+    #[cfg(target_os = "macos")]
+    use tauri::Manager as _;
+    #[cfg(target_os = "macos")]
+    let captures = app.state::<Arc<ApplicationCaptureState>>();
+    #[cfg(target_os = "linux")]
+    let _ = app;
     #[cfg(target_os = "macos")]
     let _guard = client.capture_gate.lock().await;
     #[cfg(target_os = "macos")]
@@ -210,11 +296,11 @@ pub(crate) async fn control_set_engine_power(
         .await?;
     #[cfg(target_os = "macos")]
     return application_capture::synchronize_response(&client, captures.inner(), response).await;
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     Ok(response)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
 #[tauri::command]
 pub(crate) async fn control_get_graph(
     client: tauri::State<'_, ControlProxyClient>,
@@ -256,7 +342,7 @@ pub(crate) async fn control_get_graph_status(
         .await
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
 #[tauri::command]
 pub(crate) async fn control_get_graph_catalog(
     client: tauri::State<'_, ControlProxyClient>,
@@ -277,7 +363,7 @@ pub(crate) async fn control_get_graph_catalog(
     application_capture::synchronize_response(&client, captures.inner(), response).await
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
 #[tauri::command]
 pub(crate) async fn control_mutate_graph_catalog(
     client: tauri::State<'_, ControlProxyClient>,
@@ -315,6 +401,20 @@ pub(crate) async fn control_get_processors(
 ) -> Result<ControlProxyResponse, String> {
     client
         .request(Method::GET, "/api/v1/processors", None)
+        .await
+}
+
+#[tauri::command]
+pub(crate) async fn control_retry_processor(
+    client: tauri::State<'_, ControlProxyClient>,
+    request: ProcessorRetryRequest,
+) -> Result<ControlProxyResponse, String> {
+    client
+        .request(
+            Method::PUT,
+            PROCESSOR_RETRY_ROUTE,
+            Some(processor_retry_body(&request)?),
+        )
         .await
 }
 
@@ -426,7 +526,7 @@ pub(crate) async fn control_send_processor_editor_input(
         .await
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
 #[tauri::command]
 pub(crate) async fn control_apply_graph(
     client: tauri::State<'_, ControlProxyClient>,
@@ -448,9 +548,6 @@ pub(crate) async fn control_apply_graph(
     application_capture::apply(&client, captures.inner(), document).await
 }
 
-// Only the macOS process-tap lifecycle needs to branch on the proxied status.
-// Keep this helper behind the same boundary as its callers on other targets.
-#[cfg(target_os = "macos")]
 impl ControlProxyResponse {
     fn is_success(&self) -> bool {
         (200..300).contains(&self.status)
@@ -471,6 +568,163 @@ fn application_capture_error(reason: &str) -> ControlProxyResponse {
 
 #[cfg(test)]
 mod layout_tests {
+    #[test]
+    fn expiry_allows_observation_and_safe_stop_not_new_audio_work() {
+        use reqwest::Method;
+        use serde_json::json;
+        assert!(super::license_safe_request(
+            &Method::GET,
+            "/api/v1/graph",
+            None
+        ));
+        assert!(super::license_safe_request(
+            &Method::PUT,
+            "/api/v1/audio/power",
+            Some(&json!({"enabled": false}))
+        ));
+        assert!(!super::license_safe_request(
+            &Method::PUT,
+            "/api/v1/audio/power",
+            Some(&json!({"enabled": true}))
+        ));
+        let path = "/api/v1/graphs/a/recorders/b";
+        assert!(super::license_safe_request(
+            &Method::PUT,
+            path,
+            Some(&json!({"request": {"action": "stop"}}))
+        ));
+        assert!(!super::license_safe_request(
+            &Method::PUT,
+            path,
+            Some(&json!({"request": {"action": "record"}}))
+        ));
+        assert!(!super::license_safe_request(
+            &Method::PUT,
+            "/api/v1/graph",
+            Some(&json!({}))
+        ));
+    }
+
+    #[tokio::test]
+    async fn expired_mutation_is_rejected_before_local_transport() {
+        let client = super::ControlProxyClient::default();
+        client.set_license_admission(false);
+        let response = client
+            .request(
+                reqwest::Method::PUT,
+                "/api/v1/graph",
+                Some(serde_json::json!({})),
+            )
+            .await
+            .expect("local rejection");
+        assert_eq!(response.body["code"], "license_required");
+        client.set_license_admission(true);
+        assert!(client.licensed.load(std::sync::atomic::Ordering::Acquire));
+    }
+    #[tokio::test]
+    async fn recovery_does_not_reopen_shutdown_admission() {
+        let client = super::ControlProxyClient::default();
+        client.suspend_admission();
+        let rejected = client
+            .request(reqwest::Method::GET, "/api/v1/status", None)
+            .await
+            .expect("unavailable requests are rejected locally");
+        assert_eq!(rejected.status, 409);
+        assert!(client.resume_admission().await);
+        assert!(
+            !client
+                .unavailable
+                .load(std::sync::atomic::Ordering::Acquire)
+        );
+        client.suspend_admission();
+        client.close_admission();
+        assert!(!client.resume_admission().await);
+        let rejected = client
+            .request(reqwest::Method::GET, "/api/v1/status", None)
+            .await
+            .expect("shutdown remains closed");
+        assert_eq!(rejected.status, 409);
+    }
+
+    #[tokio::test]
+    async fn recovery_waits_for_admitted_requests_and_shutdown_wins() {
+        let client = super::ControlProxyClient::default();
+        let admitted = client.requests.read().await;
+        client.suspend_admission();
+        let recovery = tokio::spawn({
+            let client = client.clone();
+            async move { client.resume_admission().await }
+        });
+        tokio::task::yield_now().await;
+        assert!(!recovery.is_finished());
+        client.close_admission();
+        drop(admitted);
+        assert!(!recovery.await.expect("recovery task"));
+    }
+
+    #[test]
+    fn processor_retry_proxy_preserves_opaque_identity_and_revision_contract() {
+        let request = super::ProcessorRetryRequest {
+            expected_catalog_revision: 6,
+            expected_instance_id: "18446744073709551615".to_owned(),
+            expected_revision: 3,
+            graph_id: "graph-a".to_owned(),
+            node_id: "provider-a".to_owned(),
+        };
+        let body = super::processor_retry_body(&request).expect("request serializes");
+
+        assert_eq!(super::PROCESSOR_RETRY_ROUTE, "/api/v1/processors/retry");
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "expectedCatalogRevision": 6,
+                "expectedInstanceId": "18446744073709551615",
+                "expectedRevision": 3,
+                "graphId": "graph-a",
+                "nodeId": "provider-a",
+            })
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn live_receipts_extend_drain_without_releasing_accepted_ownership() {
+        let client = super::ControlProxyClient::default();
+        let accepted = client.requests.read().await;
+        client.close_admission();
+        let draining = tokio::spawn({
+            let client = client.clone();
+            async move { client.drain().await }
+        });
+        tokio::task::yield_now().await;
+        for _ in 0..3 {
+            tokio::time::advance(std::time::Duration::from_secs(30)).await;
+            assert!(!draining.is_finished());
+            client.operation_liveness.notify_waiters();
+            tokio::task::yield_now().await;
+        }
+        drop(accepted);
+        draining
+            .await
+            .expect("drain task")
+            .expect("live request drained");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn missing_liveness_reports_retained_ownership_without_cancelling_request() {
+        let client = super::ControlProxyClient::default();
+        let accepted = client.requests.read().await;
+        let draining = tokio::spawn({
+            let client = client.clone();
+            async move { client.drain().await }
+        });
+        tokio::task::yield_now().await;
+        tokio::time::advance(std::time::Duration::from_secs(36)).await;
+        assert!(draining.await.expect("drain task").is_err());
+        assert!(client.requests.try_write().is_err());
+        drop(accepted);
+        client.drain().await.expect("later completion can drain");
+    }
+
     #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn closing_rejects_requests_and_waits_for_accepted_work() {

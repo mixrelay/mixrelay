@@ -1,4 +1,4 @@
-//! Cross-platform outer windows for third-party processor editors.
+//! Native parent surfaces for third-party processor editors.
 //!
 //! The plug-in remains in its isolated DSP worker. The desktop/control plane only brokers
 //! idempotent open and close requests, while this module owns the native parent window in the
@@ -29,139 +29,31 @@ impl EditorHostEvents {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn changed_editor_size(current: (u32, u32), requested: Option<(u32, u32)>) -> Option<(u32, u32)> {
+    requested.filter(|&(width, height)| width > 0 && height > 0 && current != (width, height))
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn editor_resize_request(
+    observed: (u32, u32),
+    requested: Option<(u32, u32)>,
+    pending: &mut Option<(u32, u32)>,
+) -> Option<(u32, u32)> {
+    if requested == Some(observed) {
+        *pending = None;
+    }
+    let size = changed_editor_size(observed, requested)?;
+    if *pending == Some(size) {
+        return None;
+    }
+    *pending = Some(size);
+    Some(size)
+}
+
 #[cfg(target_os = "macos")]
 #[path = "native_editor/macos.rs"]
 mod platform;
-
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-mod platform {
-    use tao::{
-        dpi::{LogicalSize, PhysicalSize},
-        event::{Event, WindowEvent},
-        event_loop::{ControlFlow, EventLoop},
-        platform::run_return::EventLoopExtRunReturn,
-        rwh_06::{HasWindowHandle, RawWindowHandle},
-        window::{Window, WindowBuilder},
-    };
-    use truce_rack_core::WindowHandle;
-
-    use super::{EditorHostEvents, EditorHostFailure};
-    use crate::rack_formats::{EditorSnapshot, RackWorkerPlugin};
-
-    const DEFAULT_WIDTH: u32 = 720;
-    const DEFAULT_HEIGHT: u32 = 480;
-
-    pub(crate) struct NativeEditorHost {
-        event_loop: EventLoop<()>,
-        window: Option<Window>,
-        pub(super) pending_events: EditorHostEvents,
-    }
-
-    impl NativeEditorHost {
-        pub(crate) fn new(
-            _shared: std::sync::Arc<crate::shared_transport::WorkerControl>,
-        ) -> Result<Self, EditorHostFailure> {
-            let event_loop = std::panic::catch_unwind(EventLoop::new)
-                .map_err(|_| EditorHostFailure::DisplayUnavailable)?;
-            Ok(Self {
-                event_loop,
-                window: None,
-                pending_events: EditorHostEvents::default(),
-            })
-        }
-
-        pub(crate) fn open(
-            &mut self,
-            plugin: &mut RackWorkerPlugin,
-            title: &str,
-        ) -> Result<EditorSnapshot, EditorHostFailure> {
-            if let Some(window) = &self.window {
-                window.set_visible(true);
-                window.set_focus();
-                return Ok(plugin.tick_editor());
-            }
-            let window = WindowBuilder::new()
-                .with_title(title)
-                .with_inner_size(LogicalSize::new(DEFAULT_WIDTH, DEFAULT_HEIGHT))
-                .with_visible(false)
-                .build(&self.event_loop)
-                .map_err(|_| EditorHostFailure::HostWindow)?;
-            let parent = window_handle(&window).map_err(|()| EditorHostFailure::HostWindow)?;
-            let snapshot = plugin
-                .open_editor(parent, window.scale_factor())
-                .map_err(|_| EditorHostFailure::PluginRejected)?;
-            if let Some((width, height)) = snapshot.size {
-                window.set_inner_size(LogicalSize::new(width.max(1), height.max(1)));
-            }
-            window.set_resizable(snapshot.resizable);
-            window.set_visible(true);
-            window.set_focus();
-            self.window = Some(window);
-            Ok(snapshot)
-        }
-
-        pub(crate) fn close(&mut self, plugin: &mut RackWorkerPlugin) {
-            plugin.close_editor();
-            self.window.take();
-            self.pending_events = EditorHostEvents::default();
-        }
-
-        pub(super) fn collect_events(&mut self) -> EditorHostEvents {
-            let Some(window) = self.window.as_ref() else {
-                return EditorHostEvents::default();
-            };
-            let window_id = window.id();
-            let mut close_requested = false;
-            let mut resized = None;
-            let _ = self.event_loop.run_return(|event, _, control_flow| {
-                *control_flow = ControlFlow::Poll;
-                match event {
-                    Event::WindowEvent {
-                        event: WindowEvent::CloseRequested,
-                        window_id: event_window,
-                        ..
-                    } if event_window == window_id => close_requested = true,
-                    Event::WindowEvent {
-                        event: WindowEvent::Resized(size),
-                        window_id: event_window,
-                        ..
-                    } if event_window == window_id => resized = Some(size),
-                    Event::MainEventsCleared => *control_flow = ControlFlow::Exit,
-                    _ => {}
-                }
-            });
-            EditorHostEvents {
-                close_requested,
-                resized: resized
-                    .map(|PhysicalSize { width, height }| (width.max(1), height.max(1))),
-            }
-        }
-
-        pub(crate) fn refresh(&mut self, snapshot: EditorSnapshot) {
-            if !snapshot.open {
-                self.window.take();
-                self.pending_events = EditorHostEvents::default();
-            }
-        }
-    }
-
-    impl Drop for NativeEditorHost {
-        fn drop(&mut self) {
-            self.window.take();
-        }
-    }
-
-    fn window_handle(window: &Window) -> Result<WindowHandle, ()> {
-        let handle = window.window_handle().map_err(|_| ())?;
-        match handle.as_raw() {
-            RawWindowHandle::AppKit(handle) => Ok(WindowHandle::NSView(handle.ns_view.as_ptr())),
-            RawWindowHandle::Win32(handle) => Ok(WindowHandle::HWND(
-                handle.hwnd.get().cast_unsigned() as *mut _,
-            )),
-            _ => Err(()),
-        }
-    }
-}
 
 #[cfg(target_os = "linux")]
 mod platform {
@@ -180,6 +72,8 @@ mod platform {
         xlib: xlib::Xlib,
         display: *mut xlib::Display,
         window: Option<xlib::Window>,
+        size: (u32, u32),
+        pending_size: Option<(u32, u32)>,
         wm_delete_window: xlib::Atom,
         pub(super) pending_events: EditorHostEvents,
     }
@@ -205,6 +99,8 @@ mod platform {
                 xlib,
                 display,
                 window: None,
+                size: (DEFAULT_WIDTH, DEFAULT_HEIGHT),
+                pending_size: None,
                 wm_delete_window,
                 pending_events: EditorHostEvents::default(),
             })
@@ -250,6 +146,7 @@ mod platform {
             if window == 0 {
                 return Err(EditorHostFailure::HostWindow);
             }
+            self.size = (DEFAULT_WIDTH, DEFAULT_HEIGHT);
             let title = CString::new(title).unwrap_or_else(|_| {
                 CString::new("MixRelay plug-in").expect("static title has no NUL")
             });
@@ -259,17 +156,25 @@ mod platform {
                 (self.xlib.XStoreName)(self.display, window, title.as_ptr());
                 (self.xlib.XSelectInput)(self.display, window, xlib::StructureNotifyMask);
                 (self.xlib.XSetWMProtocols)(self.display, window, protocols.as_mut_ptr(), 1);
+                // Vendors may embed through a separate X connection. Confirm that the
+                // server created our parent before handing its XID to that connection.
+                (self.xlib.XSync)(self.display, xlib::False);
             }
-            let Ok(snapshot) = plugin.open_editor(WindowHandle::X11(window), 1.0) else {
-                // SAFETY: the window was created above and has not been destroyed.
-                unsafe { (self.xlib.XDestroyWindow)(self.display, window) };
-                return Err(EditorHostFailure::PluginRejected);
+            let snapshot = match plugin.open_editor(WindowHandle::X11(window), 1.0) {
+                Ok(snapshot) => snapshot,
+                Err(error) => {
+                    tracing::warn!(%error, "X11 plug-in editor rejected its parent window");
+                    // SAFETY: the window was created above and has not been destroyed.
+                    unsafe { (self.xlib.XDestroyWindow)(self.display, window) };
+                    return Err(EditorHostFailure::PluginRejected);
+                }
             };
             if let Some((width, height)) = snapshot.size {
                 // SAFETY: the XID belongs to this display.
                 unsafe {
                     (self.xlib.XResizeWindow)(self.display, window, width.max(1), height.max(1))
                 };
+                self.pending_size = Some((width.max(1), height.max(1)));
             }
             // SAFETY: the XID belongs to this display and XFlush does not retain pointers.
             unsafe {
@@ -309,10 +214,16 @@ mod platform {
                         xlib::ConfigureNotify => {
                             let configure = xlib::XConfigureEvent::from(event);
                             if configure.window == window {
-                                result.resized = Some((
+                                let observed = (
                                     u32::try_from(configure.width).unwrap_or(1).max(1),
                                     u32::try_from(configure.height).unwrap_or(1).max(1),
-                                ));
+                                );
+                                if let Some(size) =
+                                    super::changed_editor_size(self.size, Some(observed))
+                                {
+                                    result.resized = Some(size);
+                                    self.size = size;
+                                }
                             }
                         }
                         _ => {}
@@ -325,10 +236,23 @@ mod platform {
         pub(crate) fn refresh(&mut self, snapshot: EditorSnapshot) {
             if !snapshot.open {
                 self.destroy_window();
+                return;
+            }
+            if let Some(window) = self.window
+                && let Some((width, height)) =
+                    super::editor_resize_request(self.size, snapshot.size, &mut self.pending_size)
+            {
+                // SAFETY: this host owns the live display and XID on the main thread.
+                // Dimensions are positive; XResizeWindow and XFlush retain no pointers.
+                unsafe {
+                    (self.xlib.XResizeWindow)(self.display, window, width, height);
+                    (self.xlib.XFlush)(self.display);
+                }
             }
         }
 
         fn destroy_window(&mut self) {
+            self.pending_size = None;
             self.pending_events = EditorHostEvents::default();
             if let Some(window) = self.window.take() {
                 // SAFETY: this XID belongs to the live display and is destroyed at most once.
@@ -366,7 +290,50 @@ impl NativeEditorHost {
 
 #[cfg(test)]
 mod tests {
-    use super::EditorHostEvents;
+    use super::{EditorHostEvents, changed_editor_size, editor_resize_request};
+
+    #[test]
+    fn constrained_window_does_not_repeat_an_unfulfilled_resize() {
+        let requested = Some((800, 600));
+        let constrained = (900, 700);
+        let mut pending = None;
+        assert_eq!(
+            editor_resize_request(constrained, requested, &mut pending),
+            requested
+        );
+        for _ in 0..20 {
+            assert_eq!(
+                editor_resize_request(constrained, requested, &mut pending),
+                None
+            );
+        }
+        // An accepted size clears the request so a later user drag can be corrected.
+        assert_eq!(
+            editor_resize_request((800, 600), requested, &mut pending),
+            None
+        );
+        assert_eq!(pending, None);
+        assert_eq!(
+            editor_resize_request(constrained, requested, &mut pending),
+            requested
+        );
+        // A different plugin size is a new request even after an OS constraint.
+        let next = Some((1000, 800));
+        assert_eq!(editor_resize_request(constrained, next, &mut pending), next);
+    }
+
+    #[test]
+    fn editor_size_tracks_accepted_pixels_without_repeating_unchanged_requests() {
+        let dragged = (900, 700);
+        let accepted = (800, 600);
+        assert_eq!(changed_editor_size(dragged, Some(accepted)), Some(accepted));
+        assert_eq!(changed_editor_size(accepted, Some(accepted)), None);
+        assert_eq!(changed_editor_size(accepted, Some(dragged)), Some(dragged));
+        assert_eq!(changed_editor_size(accepted, None), None);
+        for invalid in [(0, 0), (0, 600), (800, 0)] {
+            assert_eq!(changed_editor_size(accepted, Some(invalid)), None);
+        }
+    }
 
     #[test]
     fn close_survives_contention_and_is_consumed_once() {

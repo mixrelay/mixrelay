@@ -1,7 +1,7 @@
 use mixrelay_audio_graph::NodeConfig;
 use mixrelay_audio_io::{
     ApplicationCaptureRequest, ApplicationSelector, ChannelLayout, HostAudioBackendError,
-    StreamSpec,
+    SourcePlaybackPolicy, StreamSpec,
 };
 use mixrelay_engine_service::graph_composition::SharedSource;
 
@@ -27,19 +27,64 @@ pub(super) fn resolve(
             "application capture requires explicit reselection",
         ));
     }
+    if request.source_playback == SourcePlaybackPolicy::MuteWhileCaptured
+        && request
+            .forwarding_endpoint
+            .as_ref()
+            .and_then(|id| {
+                mixrelay_macos_transport::endpoint_identity::parse_endpoint_id(id.as_str())
+            })
+            .is_none()
+    {
+        return Err(unsupported(
+            "forwarding requires an exact MixRelay endpoint identity",
+        ));
+    }
     let mut canonical = request.clone();
     canonical.gain_db = 0.0;
     canonical.stream = StreamSpec {
         channels: 2,
         channel_layout: ChannelLayout::Stereo,
     };
-    // Playback policy remains configuration, not a second identity. Conflicting
-    // policies for one bundle must fail catalog composition instead of opening
-    // two taps that could mute each other's shared application.
     Ok(SharedSource {
         id: bundle_id.clone(),
         config: NodeConfig::ApplicationCapture(canonical),
     })
+}
+
+pub(super) fn validate_playback(
+    playback: &mixrelay_engine_service::PlaybackBindings<'_>,
+) -> Result<(), HostAudioBackendError> {
+    let mixrelay_engine_service::PlaybackBindings::Forward { intents, controls } = playback else {
+        return Ok(());
+    };
+    let mut endpoints = std::collections::BTreeMap::new();
+    for intent in *intents {
+        if !controls
+            .snapshot(&intent.mask_node_id)
+            .is_some_and(|(control, _)| control.enabled && !control.muted)
+        {
+            continue;
+        }
+        if mixrelay_macos_transport::endpoint_identity::parse_endpoint_id(
+            intent.forwarding_endpoint.as_str(),
+        )
+        .is_none()
+        {
+            return Err(unsupported(
+                "forwarding requires an exact MixRelay endpoint identity",
+            ));
+        }
+        if endpoints
+            .insert(&intent.source_id, &intent.forwarding_endpoint)
+            .is_some_and(|previous| previous != &intent.forwarding_endpoint)
+        {
+            return Err(unsupported(
+                "one application source cannot suppress different forwarding endpoints",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn unsupported(capability: &str) -> HostAudioBackendError {
@@ -51,7 +96,6 @@ fn unsupported(capability: &str) -> HostAudioBackendError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mixrelay_audio_io::SourcePlaybackPolicy;
 
     fn request() -> ApplicationCaptureRequest {
         ApplicationCaptureRequest {
@@ -64,6 +108,7 @@ mod tests {
                 channel_layout: ChannelLayout::Stereo,
             },
             source_playback: SourcePlaybackPolicy::Preserve,
+            forwarding_endpoint: None,
             gain_db: 0.0,
             requires_reselection: false,
         }
@@ -87,13 +132,32 @@ mod tests {
     }
 
     #[test]
-    fn conflicting_playback_is_one_identity_with_different_configuration() {
+    fn source_mute_requires_an_exact_owned_endpoint_without_changing_capture_identity() {
         let preserve = resolve(&request()).unwrap();
         let mut muted = request();
         muted.source_playback = SourcePlaybackPolicy::MuteWhileCaptured;
-        let muted = resolve(&muted).unwrap();
-        assert_eq!(preserve.id, muted.id);
-        assert_ne!(preserve.config, muted.config);
+        let unowned = muted.clone();
+        assert!(matches!(
+            resolve(&muted),
+            Err(HostAudioBackendError::CapabilityUnavailable { .. })
+        ));
+        assert_eq!(unowned, muted);
+        muted.forwarding_endpoint = Some(mixrelay_audio_io::VirtualEndpointId::from(
+            "17e59d73-42c1-4f11-a8b4-6c2d913357e0",
+        ));
+        let owned = muted.clone();
+        let resolved = resolve(&muted).unwrap();
+        assert_eq!(resolved.id, preserve.id);
+        let NodeConfig::ApplicationCapture(resolved) = resolved.config else {
+            panic!("application capture")
+        };
+        assert_eq!(
+            resolved.source_playback,
+            SourcePlaybackPolicy::MuteWhileCaptured
+        );
+        assert_eq!(resolved.forwarding_endpoint, muted.forwarding_endpoint);
+        assert_eq!(owned, muted);
+        assert_eq!(preserve, resolve(&request()).unwrap());
         let mut other = request();
         other.selector = ApplicationSelector::BundleId {
             bundle_id: "org.mixrelay.other-fixture".into(),

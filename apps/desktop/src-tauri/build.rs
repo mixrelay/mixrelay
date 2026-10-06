@@ -2,9 +2,31 @@ fn main() {
     println!("cargo:rustc-check-cfg=cfg(mixrelay_application_clock_fixture)");
     println!("cargo:rerun-if-env-changed=MIXRELAY_APPLICATION_CLOCK_FIXTURE");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
-        build_macos_application_capture();
+        if is_driver_manager_build() {
+            embed_driver_identity();
+        } else {
+            build_macos_application_capture();
+        }
     }
     tauri_build::build();
+}
+
+fn is_driver_manager_build() -> bool {
+    std::env::var("TAURI_CONFIG")
+        .ok()
+        .and_then(|config| serde_json::from_str::<serde_json::Value>(&config).ok())
+        .is_some_and(|config| config["identifier"] == "io.mixrelay.driver.desktop")
+}
+
+fn embed_driver_identity() {
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .expect("Cargo provides CARGO_MANIFEST_DIR to build scripts");
+    let info_plist = std::path::Path::new(&manifest_dir).join("Info.driver.plist");
+    println!(
+        "cargo:rustc-link-arg=-Wl,-sectcreate,__TEXT,__info_plist,{}",
+        info_plist.display()
+    );
+    println!("cargo:rerun-if-changed={}", info_plist.display());
 }
 
 fn build_macos_application_capture() {

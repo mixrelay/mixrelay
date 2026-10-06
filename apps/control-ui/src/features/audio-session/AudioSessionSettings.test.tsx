@@ -9,6 +9,7 @@ import type {
 } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
+import * as inlineSelectModule from '../../core/ui/InlineSelect';
 import { AudioSessionSettings } from './AudioSessionSettings';
 
 const session: AudioSessionStatus = {
@@ -90,8 +91,16 @@ function view(
   );
 }
 
-function chooseBuffer(value = '128') {
-  fireEvent.change(screen.getByRole('combobox'), { target: { value } });
+async function chooseBuffer(value = '128', allowHiddenOption = false) {
+  const input = screen.getByRole('combobox', { name: 'Buffer size' });
+  if (input.hasAttribute('disabled')) return;
+  fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+  fireEvent.click(input);
+  fireEvent.click(
+    allowHiddenOption
+      ? screen.getByRole('option', { name: value, hidden: true })
+      : await screen.findByRole('option', { name: value }),
+  );
 }
 
 it('stacks native and request errors and allows retry of the same single supported buffer', async () => {
@@ -111,7 +120,7 @@ it('stacks native and request errors and allows retry of the same single support
       </MixRelayProvider>
     </I18nextProvider>,
   );
-  chooseBuffer();
+  await chooseBuffer();
   await waitFor(() =>
     expect(screen.getByRole('alert')).toHaveTextContent(i18n.t('audioSession.changeFailed')),
   );
@@ -126,17 +135,24 @@ it('stacks native and request errors and allows retry of the same single support
   });
 });
 
-it('blocks buffer writes, including dispatched change events, while graph edits are uncommitted', async () => {
+it('blocks buffer writes, including a delivered selector callback, while graph edits are uncommitted', async () => {
   const controlPort = port();
   const onApplied = vi.fn();
   const onBusyChange = vi.fn();
-  render(view(controlPort, onApplied, onBusyChange, session, true));
-  expect(screen.getByRole('combobox')).toBeDisabled();
-  chooseBuffer();
-  await act(async () => {});
-  expect(controlPort.reconfigureSession).not.toHaveBeenCalled();
-  expect(onApplied).not.toHaveBeenCalled();
-  expect(onBusyChange).not.toHaveBeenCalled();
+  const selectorSpy = vi.spyOn(inlineSelectModule, 'InlineSelect');
+  try {
+    render(view(controlPort, onApplied, onBusyChange, session, true));
+    expect(screen.getByRole('combobox')).toBeDisabled();
+    const selectorProps = selectorSpy.mock.calls.at(-1)?.[0];
+    expect(selectorProps?.disabled).toBe(true);
+    if (!selectorProps) throw new Error('InlineSelect was not rendered');
+    await act(async () => selectorProps.onChange('128'));
+    expect(controlPort.reconfigureSession).not.toHaveBeenCalled();
+    expect(onApplied).not.toHaveBeenCalled();
+    expect(onBusyChange).not.toHaveBeenCalled();
+  } finally {
+    selectorSpy.mockRestore();
+  }
 });
 
 it('submits advertised processing buffer 32 without changing the clock-owned rate', async () => {
@@ -148,7 +164,7 @@ it('submits advertised processing buffer 32 without changing the clock-owned rat
   };
   render(view(controlPort, vi.fn(), vi.fn(), editable));
   fireEvent.click(screen.getByRole('combobox', { name: 'Buffer size' }));
-  chooseBuffer('32');
+  await chooseBuffer('32');
   expect(screen.getByRole('combobox', { name: 'Buffer size' })).toHaveValue('32');
   await waitFor(() =>
     expect(controlPort.reconfigureSession).toHaveBeenCalledWith({
@@ -178,7 +194,7 @@ it('exposes all advertised buffers without offering an independent graph sample 
   fireEvent.click(screen.getByRole('combobox', { name: 'Buffer size' }));
   for (const buffer of buffers)
     expect(screen.getByRole('option', { name: String(buffer) })).toBeInTheDocument();
-  chooseBuffer('2048');
+  await chooseBuffer('2048');
   await waitFor(() =>
     expect(controlPort.reconfigureSession).toHaveBeenCalledWith({
       expectedRevision: graph.revision,
@@ -196,11 +212,11 @@ it('does not submit stale choices while native format discovery is unavailable',
   };
   const { rerender } = render(view(controlPort, vi.fn(), vi.fn(), unavailable));
   expect(screen.getByRole('combobox')).toBeDisabled();
-  chooseBuffer();
+  await chooseBuffer();
   expect(controlPort.reconfigureSession).not.toHaveBeenCalled();
   rerender(view(controlPort));
   expect(screen.getByRole('combobox')).toBeEnabled();
-  chooseBuffer();
+  await chooseBuffer();
   await waitFor(() => expect(controlPort.reconfigureSession).toHaveBeenCalledOnce());
 });
 
@@ -215,10 +231,13 @@ it('does not deliver an old port final document or clear the new owner busy stat
   const onApplied = vi.fn();
   const onBusyChange = vi.fn();
   const rendered = render(view(oldPort, onApplied, onBusyChange));
-  chooseBuffer();
+  await chooseBuffer();
   await waitFor(() => expect(oldPort.getGraph).toHaveBeenCalledTimes(2));
   rendered.rerender(view(nextPort, onApplied, onBusyChange));
-  chooseBuffer();
+  // jsdom has no layout bounds after a disabled-to-enabled rerender, so Floating UI
+  // hides the portal even though the Combobox is expanded. Exercise this port race
+  // through the same option submission without weakening its ownership assertions.
+  await chooseBuffer('128', true);
   await waitFor(() => expect(nextPort.getGraph).toHaveBeenCalledTimes(1));
   const busyCalls = onBusyChange.mock.calls.length;
   await act(async () => oldRead.resolve({ ...graph, revision: 100 }));
@@ -238,7 +257,7 @@ it('does not issue a native reconfiguration after unmounting during the initial 
   const onApplied = vi.fn();
   const onBusyChange = vi.fn();
   const rendered = render(view(controlPort, onApplied, onBusyChange));
-  chooseBuffer();
+  await chooseBuffer();
   rendered.unmount();
   const busyCalls = onBusyChange.mock.calls.length;
   await act(async () => read.resolve(graph));
@@ -254,7 +273,7 @@ it('ignores a rejected old request after replacing the port', async () => {
   vi.spyOn(oldPort, 'getGraph').mockReturnValue(read.promise);
   const onBusyChange = vi.fn();
   const rendered = render(view(oldPort, vi.fn(), onBusyChange));
-  chooseBuffer();
+  await chooseBuffer();
   rendered.rerender(view(port(), vi.fn(), onBusyChange));
   const busyCalls = onBusyChange.mock.calls.length;
   await act(async () => read.reject(new Error('old connection failed')));
@@ -283,7 +302,7 @@ it.each(['reconfiguration', 'activation'] as const)(
     const onApplied = vi.fn();
     const onBusyChange = vi.fn();
     const rendered = render(view(controlPort, onApplied, onBusyChange));
-    chooseBuffer();
+    await chooseBuffer();
     await waitFor(() =>
       expect(stage === 'activation' ? status : controlPort.reconfigureSession).toHaveBeenCalled(),
     );
@@ -313,8 +332,8 @@ it('still publishes a current owner session exactly once', async () => {
   const onApplied = vi.fn();
   const onBusyChange = vi.fn();
   render(view(controlPort, onApplied, onBusyChange));
-  chooseBuffer();
-  chooseBuffer();
+  await chooseBuffer();
+  await chooseBuffer();
   await waitFor(() => expect(onApplied).toHaveBeenCalledWith(next));
   expect(onApplied).toHaveBeenCalledTimes(1);
   expect(controlPort.reconfigureSession).toHaveBeenCalledTimes(1);
@@ -352,7 +371,7 @@ it('uses the current clock rate for a selection after an external format change'
   };
   const rendered = render(view(controlPort));
   rendered.rerender(view(controlPort, vi.fn(), vi.fn(), changed));
-  chooseBuffer('256');
+  await chooseBuffer('256');
   await waitFor(() =>
     expect(controlPort.reconfigureSession).toHaveBeenCalledExactlyOnceWith({
       expectedRevision: graph.revision,
@@ -382,7 +401,7 @@ it('defers external field updates during apply and adopts them when the request 
   const applied = vi.fn();
   const busy = vi.fn();
   const rendered = render(view(controlPort, applied, busy, editable));
-  chooseBuffer();
+  await chooseBuffer();
   await waitFor(() => expect(controlPort.reconfigureSession).toHaveBeenCalledTimes(1));
   rendered.rerender(
     view(controlPort, applied, busy, {

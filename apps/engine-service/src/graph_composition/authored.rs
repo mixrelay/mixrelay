@@ -175,12 +175,9 @@ fn lower_device(
     }
     let read = if config.reference.render {
         let channels = config
-            .render
-            .iter()
-            .chain(config.capture.iter())
-            .map(|stream| stream.channels)
-            .max()
-            .ok_or_else(|| invalid("authored virtual source has no native stream"))?;
+            .capture
+            .ok_or_else(|| invalid("authored virtual source has no capture stream"))?
+            .channels;
         Some(DeviceReadReference { channels })
     } else {
         None
@@ -188,8 +185,8 @@ fn lower_device(
     let write_channels = if config.reference.capture {
         Some(
             config
-                .capture
-                .ok_or_else(|| invalid("authored virtual write has no capture stream"))?
+                .render
+                .ok_or_else(|| invalid("authored virtual write has no render stream"))?
                 .channels,
         )
     } else {
@@ -220,12 +217,23 @@ fn lower_source(
     match (&node.config, canonical) {
         (NodeConfig::AudioDeviceInput(_), NodeConfig::AudioDeviceInput(_)) => {}
         (NodeConfig::ApplicationCapture(local), NodeConfig::ApplicationCapture(owner)) => {
-            if local.source_playback != owner.source_playback
-                || local.requires_reselection != owner.requires_reselection
-            {
+            local
+                .validate_contract(64)
+                .map_err(|error| invalid(error.to_string()))?;
+            if local.requires_reselection != owner.requires_reselection {
                 return Err(invalid(
                     "references require explicit application policy resolution",
                 ));
+            }
+            if let Some(id) = &local.forwarding_endpoint {
+                let endpoint = registry
+                    .get(id)
+                    .ok_or_else(|| invalid("unknown application forwarding endpoint"))?;
+                if endpoint.render.is_none() {
+                    return Err(invalid(
+                        "application forwarding endpoint has no render stream",
+                    ));
+                }
             }
         }
         _ => {
@@ -245,5 +253,9 @@ fn lower_source(
         source_id: source_id.clone(),
         channels,
         gain_db,
+        forwarding_endpoint: match &node.config {
+            NodeConfig::ApplicationCapture(request) => request.forwarding_endpoint.clone(),
+            _ => None,
+        },
     })
 }

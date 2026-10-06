@@ -40,10 +40,13 @@ export function EnginePowerControl({
   }>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
-  const power = (confirmed?.base === status ? confirmed.value : status)?.enginePower;
+  const effectiveStatus = confirmed?.base === status ? confirmed.value : status;
+  const power = effectiveStatus?.enginePower;
   const pending = busy || power?.transitioning;
+  const health = getEnginePresentation(effectiveStatus, t);
+  const tone = pending ? 'warning' : power?.enabled === false ? 'neutral' : health.tone;
   const label = !power
-    ? getEnginePresentation(status, t).label
+    ? health.label
     : pending
       ? t('audioSession.powerChanging')
       : power?.enabled
@@ -80,7 +83,9 @@ export function EnginePowerControl({
         type="button"
         className={styles.button}
         aria-label={label}
-        title={label}
+        aria-description={health.label}
+        title={label === health.label ? label : `${label} · ${health.label}`}
+        data-tone={tone}
         aria-pressed={Boolean(power?.enabled)}
         aria-busy={Boolean(pending)}
         disabled={disabled || pending || !power || !controlPort.setEnginePower}

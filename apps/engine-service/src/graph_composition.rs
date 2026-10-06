@@ -1,10 +1,10 @@
-//! Composes every running graph into one real DSP plan, with app-owned virtual devices.
+//! Composes every running graph into one DSP plan referencing Driver-owned devices.
 //!
-//! Each device sums external playback and all graph writes into one canonical mix.
-//! Sources read its last completed I/O snapshot; native capture receives the current mix.
+//! Each render client sends only the sum of graph contributions. The Driver sums
+//! OS playback natively. Sources read the last completed Driver capture snapshot.
 //! This fixed one-quantum device boundary is independent of routing topology.
-//! Device lifetime follows references
-//! across every running graph, never editor selection. All work runs on the control plane.
+//! Graph client lifetime follows references; Driver lifetime is independent of graphs.
+//! All preparation runs on the control plane.
 
 use mixrelay_audio_graph::{
     AUDIO_PORT_ID, AudioEndpoint, CompileContext, CompileError, EdgeId, EdgeSpec, ExecutionPlan,
@@ -22,8 +22,8 @@ mod tests;
 const MAX_IDENTITIES: usize = 256;
 
 /// Validated canonical specifications shared by every graph. The compiler emits native
-/// devices only while at least one supplied graph references them. The caller reconciles
-/// that inventory with native lifetime; stale registry entries cannot keep a device alive.
+/// clients only while at least one supplied graph references them. The Driver remains
+/// authoritative, including devices with no current graph references.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeviceRegistry {
     devices: BTreeMap<VirtualEndpointId, VirtualEndpointSpec>,
@@ -67,6 +67,21 @@ impl DeviceRegistry {
         }
         for source in sources {
             validate_id(&source.id)?;
+            if let NodeConfig::ApplicationCapture(request) = &source.config {
+                request
+                    .validate_contract(64)
+                    .map_err(|error| invalid(error.to_string()))?;
+                if let Some(id) = &request.forwarding_endpoint {
+                    let device = self
+                        .get(id)
+                        .ok_or_else(|| invalid("unknown application forwarding endpoint"))?;
+                    if device.render.is_none() {
+                        return Err(invalid(
+                            "application forwarding endpoint has no render stream",
+                        ));
+                    }
+                }
+            }
             let (channels, gain) = source_shape(&source.config)?;
             if channels == 0 || channels > 64 || gain != 0.0 {
                 return Err(invalid("invalid canonical source channels/gain"));
@@ -124,6 +139,21 @@ pub struct SourceReference {
     pub source_id: String,
     pub channels: u16,
     pub gain_db: f32,
+    /// Graph-local render endpoint to suppress while this source's mask is enabled.
+    pub forwarding_endpoint: Option<VirtualEndpointId>,
+}
+
+/// One authored, enabled application's playback intent; capture ownership stays canonical.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplicationPlaybackIntent {
+    /// Adapter-resolved canonical capture identity.
+    pub source_id: String,
+    /// Actual native node bound to that capture identity in the prepared graph.
+    pub capture_node_id: NodeId,
+    /// Namespaced graph-local runtime control mask.
+    pub mask_node_id: NodeId,
+    /// Explicit app-owned render endpoint, never a system default.
+    pub forwarding_endpoint: VirtualEndpointId,
 }
 
 /// Canonical physical sink whose stable identity was resolved by its native adapter.
@@ -149,8 +179,8 @@ pub struct DeviceReadReference {
     pub channels: u16,
 }
 
-/// A graph-local view of an app-owned device. No copied name/channel/rate definition.
-/// The combined source snapshot uses `from_os`; graph writes enter the same device mix
+/// A graph-local view of a Driver-owned device. No copied name/channel/rate definition.
+/// The mixed capture snapshot uses `from_os`; graph writes enter Driver render
 /// via `to_os`. Snapshot publication follows the device I/O cycle, not feedback detection.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeviceReference {
@@ -196,6 +226,8 @@ pub struct ComposedGraph {
     pub device_buses: BTreeMap<VirtualEndpointId, NodeId>,
     pub native_sources: BTreeMap<String, NodeId>,
     pub native_outputs: BTreeMap<String, NodeId>,
+    /// Graph-local mute intents evaluated against the same plan control bank.
+    pub playback_intents: Vec<ApplicationPlaybackIntent>,
 }
 
 /// Failure to validate references or compile their combined topology.

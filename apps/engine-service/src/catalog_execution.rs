@@ -17,7 +17,8 @@ use std::collections::BTreeMap;
 
 /// Adapter-owned application identity resolution. The canonical request must have zero
 /// gain and an actual supported channel width. Different aliases may share an ID only
-/// after native resolution establishes that they capture the same signal and policy.
+/// after native resolution establishes that they capture the same signal. Playback
+/// policy remains a graph-local control intent, never a second capture owner.
 pub trait ApplicationIdentityResolver {
     /// Resolves one authored request without opening another capture owner.
     /// # Errors
@@ -109,6 +110,8 @@ fn execution_document(document: &GraphDocument) -> Result<GraphDocument, Composi
             // Keep a dormant graph-local slot without resolving an OFF process or
             // prompting for native capture. First activation explicitly prepares it.
             request.requires_reselection = true;
+            request.source_playback = mixrelay_audio_io::SourcePlaybackPolicy::Preserve;
+            request.forwarding_endpoint = None;
         }
     }
     Ok(prepared)
@@ -188,6 +191,19 @@ impl RegistryInputs {
             current.output_channels = current.output_channels.max(next.output_channels);
             return Ok(());
         }
+        if let Some(existing) = self.sources.get_mut(&source.id)
+            && let (NodeConfig::ApplicationCapture(current), NodeConfig::ApplicationCapture(next)) =
+                (&mut existing.config, &source.config)
+        {
+            let mut projected = current.clone();
+            projected.stream = next.stream;
+            if projected == *next {
+                if current.stream.channels < next.stream.channels {
+                    current.stream = next.stream;
+                }
+                return Ok(());
+            }
+        }
         insert_same(&mut self.sources, source.id.clone(), source)
     }
 
@@ -228,11 +244,15 @@ fn resolve_source(
         }
         NodeConfig::ApplicationCapture(request) => {
             let mut resolved = context.applications.resolve(request)?;
-            if !matches!(resolved.config, NodeConfig::ApplicationCapture(_)) {
+            let NodeConfig::ApplicationCapture(canonical) = &mut resolved.config else {
                 return Err(invalid(
                     "application resolver returned a non-application source",
                 ));
-            }
+            };
+            // The adapter validated the original authored policy. The shared native tap
+            // always captures pre-mute PCM; playback intent is retained on each reference.
+            canonical.source_playback = mixrelay_audio_io::SourcePlaybackPolicy::Preserve;
+            canonical.forwarding_endpoint = None;
             resolved.id = format!("application:{}:{}", resolved.id.len(), resolved.id);
             Ok(resolved)
         }

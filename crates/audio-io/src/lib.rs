@@ -3,14 +3,20 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod buffer_policy;
 pub mod clock_bridge;
 mod device;
 pub mod format_contract;
 pub mod formats;
 pub mod frame_budget;
+mod native_format;
+pub mod pcm_fifo;
 pub mod process;
 pub mod recovery;
 pub use device::{DeviceDirection, DeviceSelector};
+pub use native_format::{
+    NativeDeviceFormats, NativeSampleFormat, NativeStreamFormat, NativeStreamFormats,
+};
 pub mod session;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -80,6 +86,7 @@ impl StreamSpec {
 #[serde(rename_all = "camelCase")]
 pub struct VirtualEndpointSpec {
     pub id: VirtualEndpointId,
+    /// Nonempty native device name without an interior NUL byte.
     pub display_name: String,
     /// Audio rendered by OS applications enters the `MixRelay` graph through this stream.
     pub render: Option<StreamSpec>,
@@ -109,7 +116,8 @@ impl VirtualEndpointSpec {
     ///
     /// # Errors
     ///
-    /// Returns [`HostAudioContractError`] when the identity, streams, or sample rates are invalid.
+    /// Returns [`HostAudioContractError`] when the identity, display name, streams, or sample rates
+    /// are invalid.
     pub fn validate_contract(
         &self,
         max_render_channels: u16,
@@ -223,6 +231,9 @@ pub struct ApplicationCaptureRequest {
     pub selector: ApplicationSelector,
     pub stream: StreamSpec,
     pub source_playback: SourcePlaybackPolicy,
+    /// User-selected endpoint intent; the native adapter must verify ownership and route binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forwarding_endpoint: Option<VirtualEndpointId>,
     #[serde(default)]
     pub gain_db: f32,
     /// A restored PID has no durable process identity. Keep its graph node silent
@@ -242,12 +253,29 @@ impl ApplicationCaptureRequest {
     ///
     /// # Errors
     ///
-    /// Returns [`HostAudioContractError`] when the selector or stream is invalid.
+    /// Returns [`HostAudioContractError`] when the selector, stream, or forwarding intent is invalid.
     pub fn validate_contract(&self, max_channels: u16) -> Result<(), HostAudioContractError> {
         validate_selector(&self.selector)?;
         self.stream.validate(max_channels)?;
         if !self.gain_db.is_finite() {
             return Err(HostAudioContractError::InvalidGain);
+        }
+        match (self.source_playback, &self.forwarding_endpoint) {
+            (SourcePlaybackPolicy::Preserve, None) => {}
+            (SourcePlaybackPolicy::Preserve, Some(_)) => {
+                return Err(HostAudioContractError::UnexpectedForwardingEndpoint);
+            }
+            (SourcePlaybackPolicy::MuteWhileCaptured, None) => {
+                return Err(HostAudioContractError::ForwardingEndpointRequired);
+            }
+            (SourcePlaybackPolicy::MuteWhileCaptured, Some(endpoint)) => {
+                validate_name("forwarding endpoint ID", endpoint.as_str())?;
+                if self.requires_reselection
+                    || matches!(&self.selector, ApplicationSelector::AllExcept { .. })
+                {
+                    return Err(HostAudioContractError::ForwardingRequiresExactSelection);
+                }
+            }
         }
         Ok(())
     }
@@ -388,6 +416,8 @@ pub struct VirtualEndpointDeviceSettings {
     pub observed_sample_rate: Option<u32>,
     pub supported_sample_rates: Vec<u32>,
     pub can_set_sample_rate: bool,
+    /// Native directional format tuples, excluding client-side OS conversion.
+    pub native_formats: NativeDeviceFormats,
 }
 
 impl VirtualEndpointSettings {
@@ -449,7 +479,7 @@ pub trait VirtualEndpointBackend: Send + Sync {
 
     /// Validates/stages graph attachments to OS endpoints on the control thread.
     /// This is NOT driver installation or OS-device deletion. An installed HAL
-    /// device may outlive a graph; a session-owned `PipeWire` node may not. Native
+    /// device outlives every graph; graph clients never create or delete it. Native
     /// resource activation/retirement belongs to the graph-resource transaction.
     ///
     /// # Errors
@@ -459,6 +489,18 @@ pub trait VirtualEndpointBackend: Send + Sync {
         &self,
         desired: &[VirtualEndpointSpec],
     ) -> Result<(), HostAudioBackendError>;
+
+    /// Resolves graph references to authoritative Driver specifications on control.
+    /// Production adapters return current Driver settings and reject absent devices;
+    /// copied graph metadata is never a device creation/configuration request.
+    /// # Errors
+    /// Returns an attachment error when an identity is missing or unavailable.
+    fn resolve_graph_devices(
+        &self,
+        desired: &[VirtualEndpointSpec],
+    ) -> Result<Vec<VirtualEndpointSpec>, HostAudioBackendError> {
+        Ok(desired.to_vec())
+    }
 
     /// Discards this transaction's unpublished attachments when subsequent native
     /// resource preparation fails. Called on the serialized control thread only,
@@ -562,6 +604,9 @@ impl<V, A> HostAudioServices<V, A> {
 pub enum HostAudioContractError {
     #[error("{field} cannot be empty")]
     EmptyValue { field: &'static str },
+    /// Rejects native-bound text before C-string conversion or OS mutation.
+    #[error("{field} cannot contain a NUL byte")]
+    InteriorNul { field: &'static str },
     #[error("a virtual endpoint requires at least one render or capture stream")]
     EndpointHasNoStreams,
     #[error("the platform backend does not support duplex virtual endpoints")]
@@ -582,6 +627,12 @@ pub enum HostAudioContractError {
     UnsupportedSampleRate,
     #[error("the platform backend does not support this application selector")]
     ApplicationSelectorUnsupported,
+    #[error("preserved application playback cannot name a forwarding endpoint")]
+    UnexpectedForwardingEndpoint,
+    #[error("muted application playback requires a MixRelay forwarding endpoint")]
+    ForwardingEndpointRequired,
+    #[error("application forwarding requires an explicitly selected exact source")]
+    ForwardingRequiresExactSelection,
     #[error("the platform backend cannot mute an application while capturing")]
     MuteWhileCapturedUnsupported,
 }
@@ -599,6 +650,9 @@ pub enum HostAudioBackendError {
 fn validate_name(field: &'static str, value: &str) -> Result<(), HostAudioContractError> {
     if value.trim().is_empty() {
         return Err(HostAudioContractError::EmptyValue { field });
+    }
+    if value.contains('\0') {
+        return Err(HostAudioContractError::InteriorNul { field });
     }
     Ok(())
 }
@@ -630,9 +684,6 @@ pub mod linux;
 
 #[cfg(target_os = "macos")]
 pub mod macos;
-
-#[cfg(target_os = "windows")]
-pub mod windows;
 
 #[cfg(test)]
 mod tests;

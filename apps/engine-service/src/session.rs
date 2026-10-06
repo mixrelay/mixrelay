@@ -836,6 +836,8 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
         AppStatus {
             engine_power: None,
             processor_timings: Vec::new(),
+            processor_latencies: Vec::new(),
+            failed_processors: Vec::new(),
             recorder_error: None,
             protocol_version: PROTOCOL_VERSION,
             driver_state: match (
@@ -961,7 +963,10 @@ pub struct AudioWorker {
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
+pub use crate::worker_join::join as join_worker;
+
 impl AudioWorker {
+    /// Takes ownership of `thread` and its cancellation status until joined off-RT.
     #[must_use]
     pub fn new(status: Arc<AdapterRuntimeStatus>, thread: std::thread::JoinHandle<()>) -> Self {
         Self {
@@ -969,14 +974,26 @@ impl AudioWorker {
             thread: Some(thread),
         }
     }
+
+    /// Requests cancellation and waits for the audio worker to release its owners.
+    /// Must be called off the audio thread.
+    ///
+    /// # Errors
+    /// Returns the worker identity and panic reason if the audio thread panics.
+    pub fn finish(mut self) -> Result<(), String> {
+        self.join()
+    }
+
+    fn join(&mut self) -> Result<(), String> {
+        self.status.request_stop();
+        self.thread.take().map_or(Ok(()), join_worker)
+    }
 }
 
 impl Drop for AudioWorker {
     fn drop(&mut self) {
-        self.status.request_stop();
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
+        // Cancellation/startup unwind must still join; finish propagates errors.
+        let _ = self.join();
     }
 }
 
@@ -1024,6 +1041,42 @@ mod tests {
     use super::*;
     use mixrelay_audio_io::session::AudioBackendKind;
 
+    #[test]
+    fn audio_worker_finish_cancels_and_joins_before_releasing_the_owner() {
+        let status = Arc::new(AdapterRuntimeStatus::new(profile(
+            AudioBackendKind::CoreAudio,
+        )));
+        let weak = Arc::downgrade(&status);
+        let observed = status.clone();
+        let worker = std::thread::spawn(move || {
+            while !observed.stop_requested() {
+                std::thread::yield_now();
+            }
+        });
+        let owner = AudioWorker::new(status, worker);
+
+        assert_eq!(owner.finish(), Ok(()));
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[test]
+    fn audio_worker_finish_preserves_a_panicked_worker_reason() {
+        let status = Arc::new(AdapterRuntimeStatus::new(profile(
+            AudioBackendKind::CoreAudio,
+        )));
+        let weak = Arc::downgrade(&status);
+        let worker = std::thread::Builder::new()
+            .name("failed-audio-worker".into())
+            .spawn(|| panic!("injected audio failure"))
+            .unwrap();
+
+        assert_eq!(
+            AudioWorker::new(status, worker).finish(),
+            Err("failed-audio-worker panicked: injected audio failure".into())
+        );
+        assert!(weak.upgrade().is_none());
+    }
+
     pub(super) fn profile(backend: AudioBackendKind) -> AdapterProfile {
         AdapterProfile {
             initial_format: SessionFormat {
@@ -1051,11 +1104,7 @@ mod tests {
 
     #[test]
     fn os_label_does_not_invent_device_health_or_supported_io() {
-        for backend in [
-            AudioBackendKind::CoreAudio,
-            AudioBackendKind::PipeWire,
-            AudioBackendKind::Wasapi,
-        ] {
+        for backend in [AudioBackendKind::CoreAudio, AudioBackendKind::PipeWire] {
             let status = AdapterRuntimeStatus::new(profile(backend));
             let format = RenderFormat {
                 sample_rate: 44_100,

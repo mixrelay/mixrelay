@@ -5,15 +5,22 @@
   white-space: nowrap;
 }
 
-.field select {
+.select {
+  width: 68px;
+}
+
+.input {
+  min-height: 24px;
+  height: 24px;
   font: inherit;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 2px;
-  padding: 1px 3px;
+  padding-inline-start: 4px;
+  padding-inline-end: 18px;
 }
 
-.field select:focus-visible {
+.input:focus-visible {
   outline: 1px solid var(--signal);
 }

@@ -1,20 +1,20 @@
-//! Versioned user files share authored catalog data, never native runtime handles.
+//! Portable workspace bundles contain authored catalog data and immutable processor state.
 use std::{
     fs::File,
-    io::Read,
+    io::{self, Read},
     path::Path,
-    time::{Duration, Instant},
 };
 
 use mixrelay_control_protocol::{GraphCatalogResponse, WorkspaceAction, WorkspaceRequest};
+use mixrelay_processor_state::{StateError, StateRef, read_bundle, write_bundle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
     Catalog, EngineGraphController, GraphDocument, MAX_BYTES, NodeConfig, ProtocolError, invalid,
-    restore, unavailable,
+    restore, state_assets, unavailable,
 };
-use crate::persistence::stage_json;
+
 mod preview;
 mod rates;
 
@@ -40,28 +40,109 @@ fn file_path(path: &str) -> Result<&Path, ProtocolError> {
 
 #[cfg(test)]
 fn load(path: &Path) -> Result<Catalog, ProtocolError> {
-    load_fingerprinted(path).map(|(catalog, _)| catalog)
+    load_fingerprinted(path).map(|(catalog, _, _)| catalog)
 }
 
-fn load_fingerprinted(path: &Path) -> Result<(Catalog, String), ProtocolError> {
-    let mut bytes = Vec::new();
-    File::open(path)
-        .and_then(|file| file.take(MAX_BYTES + 1).read_to_end(&mut bytes))
-        .map_err(|error| unavailable(&error.to_string()))?;
-    if bytes.len() as u64 > MAX_BYTES {
-        return Err(invalid("workspace exceeds size limit"));
+fn load_fingerprinted(path: &Path) -> Result<(Catalog, String, Vec<StateRef>), ProtocolError> {
+    let file = File::open(path).map_err(|error| unavailable(&error.to_string()))?;
+    let mut reader = FingerprintedReader::new(file);
+    let (manifest, bundled_refs) =
+        read_bundle(&mut reader, None).map_err(|error| bundle_read_error(&error))?;
+    reader
+        .require_eof()
+        .map_err(|error| invalid(&format!("invalid MixRelay workspace bundle: {error}")))?;
+    let digest = reader.digest();
+    let (catalog, references) = parse_manifest(&manifest, &bundled_refs)?;
+    Ok((catalog, digest, references))
+}
+
+fn parse_manifest(
+    manifest: &[u8],
+    bundled_refs: &[StateRef],
+) -> Result<(Catalog, Vec<StateRef>), ProtocolError> {
+    if manifest.len() as u64 > MAX_BYTES {
+        return Err(invalid("workspace manifest exceeds size limit"));
     }
-    let mut file: WorkspaceFile =
-        serde_json::from_slice(&bytes).map_err(|_| invalid("invalid MixRelay workspace file"))?;
+    let mut file: WorkspaceFile = serde_json::from_slice(manifest)
+        .map_err(|_| invalid("invalid MixRelay workspace manifest"))?;
     if file.format != "MixRelay" || file.version != 1 {
         return Err(invalid("unsupported MixRelay workspace format or version"));
     }
     file.catalog.validate().map_err(|error| invalid(&error))?;
     file.catalog.device_specs()?;
+    let references = state_assets::referenced(&file.catalog)?;
+    state_assets::require_exact(&references, bundled_refs)?;
     for (_, document) in file.catalog.documents_mut() {
         restore::require_pid_reselection(document);
     }
-    Ok((file.catalog, format!("{:x}", Sha256::digest(&bytes))))
+    Ok((file.catalog, references))
+}
+
+fn import_bundle(
+    path: &Path,
+    expected_digest: &str,
+    expected_refs: &[StateRef],
+    store: &mixrelay_processor_state::StateStore,
+) -> Result<(), ProtocolError> {
+    let file = File::open(path).map_err(|error| unavailable(&error.to_string()))?;
+    let mut reader = FingerprintedReader::new(file);
+    let (manifest, bundled_refs) =
+        read_bundle(&mut reader, Some(store)).map_err(|error| bundle_read_error(&error))?;
+    reader
+        .require_eof()
+        .map_err(|error| invalid(&format!("invalid MixRelay workspace bundle: {error}")))?;
+    let digest = reader.digest();
+    if digest != expected_digest {
+        return Err(invalid("workspace file changed during state import"));
+    }
+    let (_, references) = parse_manifest(&manifest, &bundled_refs)?;
+    state_assets::require_exact(expected_refs, &references)?;
+    Ok(())
+}
+
+fn bundle_read_error(error: &StateError) -> ProtocolError {
+    if matches!(&error, StateError::Io(_)) {
+        unavailable(&error.to_string())
+    } else {
+        invalid(&format!("invalid MixRelay workspace bundle: {error}"))
+    }
+}
+
+struct FingerprintedReader<R> {
+    inner: R,
+    digest: Sha256,
+}
+
+impl<R: Read> FingerprintedReader<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            digest: Sha256::new(),
+        }
+    }
+
+    fn digest(&self) -> String {
+        format!("{:x}", self.digest.clone().finalize())
+    }
+
+    fn require_eof(&mut self) -> io::Result<()> {
+        let mut trailing = [0_u8; 1];
+        if self.read(&mut trailing)? != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "workspace bundle contains trailing bytes",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl<R: Read> Read for FingerprintedReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let read = self.inner.read(buffer)?;
+        self.digest.update(&buffer[..read]);
+        Ok(read)
+    }
 }
 
 impl EngineGraphController {
@@ -91,13 +172,20 @@ impl EngineGraphController {
         match request.operation {
             WorkspaceAction::Save { path } => self.save_workspace(file_path(&path)?, current)?,
             WorkspaceAction::Open { path } => {
-                let (candidate, digest) = load_fingerprinted(file_path(&path)?)?;
+                let path = file_path(&path)?;
+                let (candidate, digest, references) = load_fingerprinted(path)?;
                 if request
                     .file_digest
-                    .is_some_and(|expected| expected != digest)
+                    .as_ref()
+                    .is_some_and(|expected| expected != &digest)
                 {
                     return Err(invalid("workspace file changed after capture preparation"));
                 }
+                let store = self
+                    .processor_controls
+                    .state_store()
+                    .map_err(|error| unavailable(&error))?;
+                import_bundle(path, &digest, &references, &store)?;
                 self.replace_workspace(candidate, &current)?;
             }
             WorkspaceAction::New => self.replace_workspace(
@@ -109,39 +197,42 @@ impl EngineGraphController {
     }
 
     fn save_workspace(&self, path: &Path, mut candidate: Catalog) -> Result<(), ProtocolError> {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        // Export does not publish the running catalog, even when the file write succeeds.
+        let _reuse = self.processor_controls.reuse_transaction();
         for (id, document) in candidate.documents_mut() {
             let previous = document.clone();
-            self.capture_background_graph(
-                (id, document),
-                &previous,
-                deadline,
-                &mut |node, timeout| self.processor_controls.snapshot_state(node, timeout),
-            )?;
+            self.capture_background_graph((id, document), &previous, &mut |node, timeout| {
+                self.processor_controls.snapshot_state(node, timeout)
+            })?;
             for node in &mut document.nodes {
-                if let NodeConfig::Provider(provider) = &mut node.config {
-                    provider.ports = self
-                        .processor_catalog
-                        .ports(provider.type_id.as_str())
-                        .or(provider.ports);
+                if let NodeConfig::Provider(provider) = &mut node.config
+                    && provider.ports.is_none()
+                {
+                    provider.ports = self.processor_catalog.ports(provider.type_id.as_str());
                 }
             }
         }
+        let references = state_assets::referenced(&candidate)?;
+        let store = self
+            .processor_controls
+            .state_store()
+            .map_err(|error| unavailable(&error))?;
         let file = WorkspaceFile {
             format: "MixRelay".into(),
             version: 1,
             catalog: candidate,
         };
-        if serde_json::to_vec(&file)
-            .map_err(|error| unavailable(&error.to_string()))?
-            .len() as u64
-            > MAX_BYTES
-        {
-            return Err(invalid("workspace exceeds size limit"));
+        let manifest =
+            serde_json::to_vec(&file).map_err(|error| unavailable(&error.to_string()))?;
+        if manifest.len() as u64 > MAX_BYTES {
+            return Err(invalid("workspace manifest exceeds size limit"));
         }
-        stage_json(path, &file)
-            .and_then(crate::persistence::StagedWrite::commit)
-            .map_err(|error| unavailable(&error.to_string()))
+        crate::persistence::stage_file(path, |writer| {
+            write_bundle(writer, &manifest, &references, &store)
+                .map_err(|error| io::Error::other(error.to_string()))
+        })
+        .and_then(crate::persistence::StagedWrite::commit)
+        .map_err(|error| super::document_write_error(&error))
     }
 
     fn replace_workspace(
@@ -149,6 +240,7 @@ impl EngineGraphController {
         mut candidate: Catalog,
         current: &Catalog,
     ) -> Result<(), ProtocolError> {
+        let reuse = self.processor_controls.reuse_transaction();
         self.require_stopped_recorders(current)?;
         let revision = candidate
             .next_audio_revision(self.exchange.revisions().submitted)
@@ -174,6 +266,7 @@ impl EngineGraphController {
         // A file replaces authored state. Never merge old device definitions or live presets.
         self.processor_controls.invalidate_reuse();
         self.publish_workspace_rates(candidate)?;
+        reuse.commit();
         Ok(())
     }
 

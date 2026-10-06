@@ -26,7 +26,7 @@ impl EngineGraphController {
         let catalog = self.catalog_candidate(&document);
         let composed =
             self.compose_enabled_execution(&document, catalog.as_ref(), *self.context.read())?;
-        crate::execution_control::capture_manifest(&composed.document)
+        crate::execution_control::composed_capture_manifest(&composed)
     }
     pub(super) fn engine_power_status(&self) -> EnginePowerStatus {
         let enabled = self.execution_enabled.load(Ordering::Acquire);
@@ -148,7 +148,7 @@ mod tests {
             let mut edited = engine.graph();
             edited.revision += 1;
             edited.nodes[0].label = Some("Saved while off".into());
-            engine.apply_graph(edited).unwrap();
+            engine.apply_graph_request(edited.into()).unwrap();
             assert!(engine.exchange.activate_pending(&mut processor));
             let composed = engine
                 .compose_execution(&engine.graph(), None, *engine.context.read())

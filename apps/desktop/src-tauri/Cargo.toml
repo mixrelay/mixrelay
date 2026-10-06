@@ -12,15 +12,29 @@ workspace = true
 
 [build-dependencies]
 cc = "1.2.57"
+serde_json.workspace = true
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
-reqwest.workspace = true
+mixrelay-driver-control = { path = "../../../crates/driver-control" }
+mixrelay-engine-process = { path = "../../../crates/engine-process" }
+mixrelay-licensing = { path = "../../../crates/licensing" }
+# Native credential stores; no plaintext license-file fallback.
+keyring = { version = "3.6.3", features = ["apple-native", "sync-secret-service", "crypto-rust", "vendored"] }
+open = "5.4.4"
+secrecy = { version = "0.10.3", features = ["serde"] }
+sha2 = "0.10.9"
+reqwest = { workspace = true, features = ["query", "rustls"] }
+# Numeric ordering of canonical stable release versions.
+semver = "1.0.28"
+thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2.11.5", features = ["tray-icon"] }
 tokio = { workspace = true, features = ["io-util", "sync", "time"] }
 tracing = "0.1.41"
+# Same-directory atomic replacement and cleanup for desktop recording preferences.
+tempfile = "3.27.0"
 mixrelay-audio-io = { path = "../../../crates/audio-io" }
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
 

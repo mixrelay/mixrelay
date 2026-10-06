@@ -225,6 +225,25 @@ impl AsyncClockBridge {
         Ok(self.correction_ppm())
     }
 
+    /// Restarts clock feedback without interrupting the current PCM timeline.
+    ///
+    /// Use when clock authority changes but the native stream remains connected.
+    /// The correction ramps back to the configured nominal ratio; queued samples,
+    /// filter history, priming and the transport epoch remain intact. This performs
+    /// no allocation. Actual transport loss still requires [`Self::reset`].
+    ///
+    /// # Errors
+    /// Returns [`BridgeError::Resampler`] if the converter rejects its nominal ratio.
+    pub fn reset_clock_feedback(&mut self) -> Result<(), BridgeError> {
+        if let Some(resampler) = &mut self.resampler {
+            resampler
+                .set_resample_ratio_relative(1.0, true)
+                .map_err(|_| BridgeError::Resampler)?;
+        }
+        self.controller.reset();
+        Ok(())
+    }
+
     /// Clears queued PCM, filter tail and feedback integral on an explicit epoch
     /// boundary. Caller also flushes its external FIFO, otherwise old PCM remains.
     pub fn reset(&mut self, epoch: u64, _reason: Discontinuity) {

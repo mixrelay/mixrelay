@@ -75,7 +75,7 @@ async fn submit(
         let captures = app.state::<std::sync::Arc<crate::macos_audio::ApplicationCaptureState>>();
         return super::application_capture::workspace(client, captures.inner(), payload).await;
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     let _ = (app, action);
     client
         .request(Method::POST, "/api/v1/workspace", Some(payload))

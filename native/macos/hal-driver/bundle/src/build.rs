@@ -3,6 +3,7 @@ use std::{error::Error, ffi::OsStr, fs, path::Path, process::Command};
 use super::command::{output, run};
 
 const DEPLOYMENT_TARGET: &str = "14.2";
+const HAL_BUNDLE_IDENTIFIER: &str = "io.mixrelay.audio.driver";
 const SLICES: [(&str, &str); 2] = [
     ("arm64", "aarch64-apple-darwin"),
     ("x86_64", "x86_64-apple-darwin"),
@@ -13,6 +14,7 @@ pub(super) fn bundle(
     destination: &Path,
     identity: &OsStr,
 ) -> Result<(), Box<dyn Error>> {
+    let signing_class = signing_class(identity)?;
     fs::create_dir_all(destination)?;
     let destination = destination.canonicalize()?;
     let bundle = destination.join("MixRelayHAL.driver");
@@ -49,10 +51,7 @@ pub(super) fn bundle(
     run(Command::new("plutil")
         .arg("-lint")
         .arg(bundle.join("Contents/Info.plist")))?;
-    run(Command::new("codesign")
-        .args(["--force", "--sign"])
-        .arg(identity)
-        .arg(&bundle))?;
+    run(&mut signing_command(signing_class, identity, &bundle))?;
     run(Command::new("codesign")
         .args(["--verify", "--strict"])
         .arg(&bundle))?;
@@ -63,6 +62,60 @@ pub(super) fn bundle(
         bundle.display()
     );
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SigningClass {
+    AdHoc,
+    DeveloperIdApplication,
+}
+
+fn signing_class(identity: &OsStr) -> Result<SigningClass, Box<dyn Error>> {
+    let identity = identity
+        .to_str()
+        .ok_or("codesign identity must be valid UTF-8")?;
+    if identity == "-" {
+        return Ok(SigningClass::AdHoc);
+    }
+    if !is_developer_id_application_identity(identity) {
+        return Err("release signing identity must be a Developer ID Application identity with a 10-character Team ID".into());
+    }
+    Ok(SigningClass::DeveloperIdApplication)
+}
+
+fn is_developer_id_application_identity(identity: &str) -> bool {
+    let Some(subject) = identity.strip_prefix("Developer ID Application: ") else {
+        return false;
+    };
+    let Some((name, team_suffix)) = subject.rsplit_once(" (") else {
+        return false;
+    };
+    let Some(team_id) = team_suffix.strip_suffix(')') else {
+        return false;
+    };
+    !name.is_empty()
+        && name.trim() == name
+        && !name.chars().any(char::is_control)
+        && team_id.len() == 10
+        && team_id
+            .bytes()
+            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+}
+
+fn signing_command(signing_class: SigningClass, identity: &OsStr, bundle: &Path) -> Command {
+    let mut command = Command::new("codesign");
+    command.args(["--force", "--sign"]).arg(identity);
+    if signing_class == SigningClass::DeveloperIdApplication {
+        command.args([
+            "--options",
+            "runtime",
+            "--timestamp",
+            "--identifier",
+            HAL_BUNDLE_IDENTIFIER,
+        ]);
+    }
+    command.arg(bundle);
+    command
 }
 
 fn build_slice(
@@ -201,5 +254,65 @@ mod tests {
         assert!(args.contains(&PathBuf::from(
             "/repo/target/aarch64-apple-darwin/release/libmixrelay_hal_core.a"
         )));
+    }
+
+    #[test]
+    fn ad_hoc_signing_preserves_the_development_command() {
+        let command = signing_command(
+            SigningClass::AdHoc,
+            OsStr::new("-"),
+            Path::new("/repo/MixRelayHAL.driver"),
+        );
+        let args: Vec<PathBuf> = command.get_args().map(PathBuf::from).collect();
+        assert_eq!(
+            args,
+            ["--force", "--sign", "-", "/repo/MixRelayHAL.driver"].map(PathBuf::from)
+        );
+    }
+
+    #[test]
+    fn developer_id_signing_uses_runtime_timestamp_and_bundle_identifier_without_entitlements() {
+        let identity = OsStr::new("Developer ID Application: MixRelay, Inc. (ABCDEF1234)");
+        assert_eq!(
+            signing_class(identity).unwrap(),
+            SigningClass::DeveloperIdApplication
+        );
+        let command = signing_command(
+            SigningClass::DeveloperIdApplication,
+            identity,
+            Path::new("/repo/MixRelayHAL.driver"),
+        );
+        let args: Vec<PathBuf> = command.get_args().map(PathBuf::from).collect();
+        assert_eq!(
+            args,
+            [
+                "--force",
+                "--sign",
+                "Developer ID Application: MixRelay, Inc. (ABCDEF1234)",
+                "--options",
+                "runtime",
+                "--timestamp",
+                "--identifier",
+                HAL_BUNDLE_IDENTIFIER,
+                "/repo/MixRelayHAL.driver",
+            ]
+            .map(PathBuf::from)
+        );
+    }
+
+    #[test]
+    fn malformed_non_developer_id_signing_identities_are_rejected() {
+        for identity in [
+            "",
+            "Apple Development: MixRelay (ABCDEF1234)",
+            "Developer ID Application: MixRelay",
+            "Developer ID Application:  MixRelay (ABCDEF1234)",
+            "Developer ID Application: MixRelay  (ABCDEF1234)",
+            "Developer ID Application: MixRelay\t(ABCDEF1234)",
+            "Developer ID Application: MixRelay (abcdef1234)",
+            "Developer ID Installer: MixRelay (ABCDEF1234)",
+        ] {
+            assert!(signing_class(OsStr::new(identity)).is_err(), "{identity}");
+        }
     }
 }

@@ -15,5 +15,7 @@
   </dict>
   <key>NSAudioCaptureUsageDescription</key>
   <string>MixRelay captures audio from applications you select so you can route it to your own audio devices and broadcasts.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>MixRelay accesses selected microphones and other audio input devices when you route or record them.</string>
 </dict>
 </plist>

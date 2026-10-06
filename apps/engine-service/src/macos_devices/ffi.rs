@@ -1,8 +1,12 @@
 //! `CoreAudio` C ABI. Ownership and thread rules live in native.rs.
-pub(super) use mixrelay_macos_transport::device_io::{ClockBreak, GraphRead};
+pub(super) use mixrelay_macos_transport::device_io::{ClockBreakRecord, GraphRead};
 use std::ffi::{c_char, c_void};
 unsafe extern "C" {
-    pub(super) fn mr_device_io_clock_break(io: *const c_void, event: *mut ClockBreak) -> bool;
+    pub(super) fn mr_device_io_next_clock_break(
+        io: *const c_void,
+        cursor: u64,
+        record: *mut ClockBreakRecord,
+    ) -> bool;
     pub(super) fn mr_device_io_pcm_hook(
         io: *mut c_void,
         context: *mut c_void,

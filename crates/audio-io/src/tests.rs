@@ -53,6 +53,7 @@ fn capture(selector: ApplicationSelector) -> ApplicationCaptureRequest {
         selector,
         stream: stream(2, ChannelLayout::Stereo),
         source_playback: SourcePlaybackPolicy::Preserve,
+        forwarding_endpoint: None,
         gain_db: 0.0,
         requires_reselection: false,
     }
@@ -66,6 +67,7 @@ fn capture_reselection_defaults_false_and_roundtrips_without_rewriting_selector(
     });
     let legacy = serde_json::to_value(&original).unwrap();
     assert!(legacy.get("requiresReselection").is_none());
+    assert!(legacy.get("forwardingEndpoint").is_none());
     let mut restored: ApplicationCaptureRequest = serde_json::from_value(legacy).unwrap();
     assert!(!restored.requires_reselection);
     restored.requires_reselection = true;
@@ -75,6 +77,56 @@ fn capture_reselection_defaults_false_and_roundtrips_without_rewriting_selector(
     assert_eq!(reloaded.selector, original.selector);
     assert!(reloaded.requires_reselection);
     reloaded.validate_contract(64).unwrap();
+}
+
+#[test]
+fn owned_forwarding_requires_an_exact_selected_source_and_endpoint() {
+    let mut request = capture(ApplicationSelector::BundleId {
+        bundle_id: "org.mixrelay.player".into(),
+        include_descendants: false,
+    });
+    request.source_playback = SourcePlaybackPolicy::MuteWhileCaptured;
+    assert_eq!(
+        request.validate_contract(8),
+        Err(HostAudioContractError::ForwardingEndpointRequired)
+    );
+
+    request.forwarding_endpoint = Some(VirtualEndpointId::from("io.mixrelay.player"));
+    request.validate_contract(8).unwrap();
+    let encoded = serde_json::to_value(&request).unwrap();
+    assert_eq!(encoded["forwardingEndpoint"], "io.mixrelay.player");
+    let decoded: ApplicationCaptureRequest = serde_json::from_value(encoded).unwrap();
+    assert_eq!(decoded, request);
+
+    request.forwarding_endpoint = Some(VirtualEndpointId::from("  "));
+    assert_eq!(
+        request.validate_contract(8),
+        Err(HostAudioContractError::EmptyValue {
+            field: "forwarding endpoint ID"
+        })
+    );
+    request.forwarding_endpoint = Some(VirtualEndpointId::from("io.mixrelay.player"));
+    request.selector = ApplicationSelector::AllExcept { bundle_ids: vec![] };
+    assert_eq!(
+        request.validate_contract(8),
+        Err(HostAudioContractError::ForwardingRequiresExactSelection)
+    );
+    request.selector = ApplicationSelector::ProcessId {
+        process_id: 42,
+        include_descendants: false,
+    };
+    request.requires_reselection = true;
+    assert_eq!(
+        request.validate_contract(8),
+        Err(HostAudioContractError::ForwardingRequiresExactSelection)
+    );
+
+    request.requires_reselection = false;
+    request.source_playback = SourcePlaybackPolicy::Preserve;
+    assert_eq!(
+        request.validate_contract(8),
+        Err(HostAudioContractError::UnexpectedForwardingEndpoint)
+    );
 }
 
 #[test]
@@ -98,6 +150,21 @@ fn validates_duplex_multichannel_endpoint_contracts() {
     render_only
         .validate(&endpoint_capabilities())
         .expect("render-only endpoint should be representable");
+}
+
+#[test]
+fn endpoint_display_name_rejects_nul_and_accepts_korean() {
+    let mut spec = endpoint();
+    spec.display_name = "QA invalid\0name".into();
+    assert_eq!(
+        spec.validate_contract(64, 64),
+        Err(HostAudioContractError::InteriorNul {
+            field: "virtual endpoint display name"
+        })
+    );
+
+    spec.display_name = "테스트 장치".into();
+    spec.validate_contract(64, 64).unwrap();
 }
 
 #[test]
@@ -213,11 +280,14 @@ fn rejects_invalid_or_unsupported_application_capture_requests() {
         Err(HostAudioContractError::ApplicationSelectorUnsupported)
     );
 
-    let mut request = capture(ApplicationSelector::AllExcept { bundle_ids: vec![] });
+    let mut request = capture(ApplicationSelector::ExecutablePath {
+        path: "/verified/player".into(),
+    });
     request.source_playback = SourcePlaybackPolicy::MuteWhileCaptured;
+    request.forwarding_endpoint = Some(VirtualEndpointId::from("io.mixrelay.player"));
     capabilities
         .supported_selectors
-        .insert(ApplicationSelectorKind::AllExcept);
+        .insert(ApplicationSelectorKind::ExecutablePath);
     capabilities.supports_mute_while_captured = false;
     assert_eq!(
         request.validate(&capabilities),

@@ -30,7 +30,6 @@ pub struct SessionReconfigureRequest {
 pub enum AudioBackendKind {
     CoreAudio,
     PipeWire,
-    Wasapi,
     ContractOnly,
 }
 

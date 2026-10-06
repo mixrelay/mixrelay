@@ -1,5 +1,8 @@
-//! Disposable test artifacts stay in the checkout's Cargo target directory.
+//! Test-only PCM measurements and checkout-local disposable artifacts.
 //! This crate is a dev-dependency only; production storage policy is separate.
+pub mod frame_sequence;
+pub mod tone_continuity;
+
 use std::{
     fs, io,
     ops::Deref,

@@ -34,14 +34,22 @@ pub(super) fn prepare<S>(
         let mut candidates = active
             .into_iter()
             .chain(retained.iter().copied())
-            .flat_map(|set| &set.sources)
-            .filter(|entry| entry.node_id == node_id.as_str());
+            .flat_map(|set| set.sources.iter().map(move |entry| (set.revision, entry)))
+            .filter(|(_, entry)| entry.node_id == node_id.as_str());
         // A lost-response reservation can already own the exact successor. Find
         // that owner before considering replacement of an older active session.
         let reusable = candidates
             .clone()
-            .find(|entry| super::same_capture_session(&entry.request, request));
-        let previous = reusable.or_else(|| candidates.next());
+            .find(|(revision, entry)| {
+                super::same_capture_session(&entry.request, request)
+                    && (request.source_playback
+                        == mixrelay_audio_graph::SourcePlaybackPolicy::Preserve
+                        || *revision == manifest.revision)
+            })
+            .map(|(_, entry)| entry);
+        // Scoped mute admission is renewed only by a new explicit manifest.
+        // A retry of that same revision retains its already prepared lease.
+        let previous = reusable.or_else(|| candidates.next().map(|(_, entry)| entry));
         let session = if let Some(entry) = reusable {
             Arc::clone(&entry.session)
         } else {
@@ -51,7 +59,12 @@ pub(super) fn prepare<S>(
             node_id: node_id.as_str().to_owned(),
             request: request.clone(),
             session,
-            activate: reusable.map_or(previous.is_some(), |entry| entry.activate),
+            activate: reusable.map_or(
+                previous.is_some()
+                    || request.source_playback
+                        == mixrelay_audio_graph::SourcePlaybackPolicy::MuteWhileCaptured,
+                |entry| entry.activate,
+            ),
         });
     }
     Ok(CaptureSet {

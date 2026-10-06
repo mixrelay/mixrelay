@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::BTreeSet,
     ffi::{CStr, CString, c_char, c_void},
-    fmt,
+    fmt::{self, Write},
     ptr::NonNull,
     sync::{Arc, Mutex},
     thread::JoinHandle,
@@ -16,6 +16,7 @@ use mixrelay_audio_io::{
     CapturableApplication, ChannelLayout, HostAudioBackendError, ResolvedApplicationCapture,
     StreamSpec,
 };
+use mixrelay_macos_transport::endpoint_identity::{endpoint_uid, parse_endpoint_id};
 use tauri::State;
 // Keep the crate exporting the native capture entry points linked into the desktop.
 use mixrelay_process_tap as _;
@@ -61,6 +62,7 @@ struct NativeConfig {
     bundle_id: *const c_char,
     mute_while_captured: bool,
     ring_capacity_frames: usize,
+    target_device_uid: *const c_char,
 }
 
 #[repr(C)]
@@ -111,6 +113,7 @@ unsafe extern "C" {
         error: *mut NativeError,
     ) -> *mut NativeProcessTapSession;
     fn mr_process_tap_start(session: *mut NativeProcessTapSession) -> NativeError;
+    fn mr_process_tap_stop(session: *mut NativeProcessTapSession) -> NativeError;
     fn mr_process_tap_refresh_format(session: *mut NativeProcessTapSession) -> NativeError;
     fn mr_process_tap_destroy(session: *mut NativeProcessTapSession);
     fn mr_process_tap_read(
@@ -219,25 +222,34 @@ unsafe impl Send for CaptureProbeSession {}
 unsafe impl Sync for CaptureProbeSession {}
 
 impl CaptureProbeSession {
-    fn start(bundle_id: &str, mute_while_captured: bool) -> Result<Self, CaptureProbeError> {
+    fn start(bundle_id: &str, target_device_uid: Option<&str>) -> Result<Self, CaptureProbeError> {
+        let session = Self::prepare(bundle_id, target_device_uid)?;
+        session.start_native()?;
+        Ok(session)
+    }
+
+    fn prepare(
+        bundle_id: &str,
+        target_device_uid: Option<&str>,
+    ) -> Result<Self, CaptureProbeError> {
         let bundle_id = CString::new(bundle_id)
+            .map_err(|_| CaptureProbeError(NativeError::new(NATIVE_INVALID_ARGUMENT)))?;
+        let target_device_uid = target_device_uid
+            .map(CString::new)
+            .transpose()
             .map_err(|_| CaptureProbeError(NativeError::new(NATIVE_INVALID_ARGUMENT)))?;
         let config = NativeConfig {
             bundle_id: bundle_id.as_ptr(),
-            mute_while_captured,
+            mute_while_captured: target_device_uid.is_some(),
             ring_capacity_frames: CAPTURE_RING_CAPACITY_FRAMES,
+            target_device_uid: target_device_uid
+                .as_ref()
+                .map_or(std::ptr::null(), |uid| uid.as_ptr()),
         };
         let mut error = NativeError::new(NATIVE_OK);
         // SAFETY: `config` and its C string remain alive for the synchronous creation call.
         let native = unsafe { mr_process_tap_create(&raw const config, &raw mut error) };
         let native = NonNull::new(native).ok_or(CaptureProbeError(error))?;
-        // SAFETY: `native` was returned as an owned, initialized session.
-        let start_error = unsafe { mr_process_tap_start(native.as_ptr()) };
-        if start_error.code != NATIVE_OK {
-            // SAFETY: this path still owns the session and no Rust alias can observe it.
-            unsafe { mr_process_tap_destroy(native.as_ptr()) };
-            return Err(CaptureProbeError(start_error));
-        }
         let stats: CaptureProbeStats = unsafe { mr_process_tap_stats(native.as_ptr()) }.into();
         let Ok(channels) = u16::try_from(stats.channels) else {
             // SAFETY: no Arc/session escaped; destroy consumes the native owner.
@@ -262,6 +274,16 @@ impl CaptureProbeSession {
             #[cfg(debug_assertions)]
             debug_meter_reported: AtomicBool::new(false),
         })
+    }
+
+    fn start_native(&self) -> Result<(), CaptureProbeError> {
+        // SAFETY: caller exclusively owns native control, before any pump handoff.
+        let error = unsafe { mr_process_tap_start(self.native.as_ptr()) };
+        if error.code == NATIVE_OK {
+            Ok(())
+        } else {
+            Err(CaptureProbeError(error))
+        }
     }
 
     fn stats(&self) -> CaptureProbeStats {
@@ -395,7 +417,7 @@ impl Default for MacApplicationCaptureBackend {
             capabilities: ApplicationCaptureCapabilities {
                 max_channels: 2,
                 supported_selectors: BTreeSet::from([ApplicationSelectorKind::BundleId]),
-                supports_mute_while_captured: true,
+                supports_mute_while_captured: false,
             },
         }
     }
@@ -427,12 +449,24 @@ impl ApplicationCaptureBackend for MacApplicationCaptureBackend {
                     .to_owned(),
             });
         };
-        CaptureProbeSession::start(
-            bundle_id,
-            request.source_playback == SourcePlaybackPolicy::MuteWhileCaptured,
-        )
-        .map_err(|error| HostAudioBackendError::BackendFailure {
-            message: error.to_string(),
+        let target_device_uid = match request.source_playback {
+            SourcePlaybackPolicy::Preserve => None,
+            SourcePlaybackPolicy::MuteWhileCaptured => {
+                let id = request
+                    .forwarding_endpoint
+                    .as_ref()
+                    .and_then(|endpoint| parse_endpoint_id(endpoint.as_str()))
+                    .ok_or_else(|| HostAudioBackendError::CapabilityUnavailable {
+                        capability: "forwarding requires an exact MixRelay endpoint identity"
+                            .to_owned(),
+                    })?;
+                Some(endpoint_uid(id))
+            }
+        };
+        CaptureProbeSession::start(bundle_id, target_device_uid.as_deref()).map_err(|error| {
+            HostAudioBackendError::BackendFailure {
+                message: error.to_string(),
+            }
         })
     }
 }
@@ -511,12 +545,90 @@ struct ApplicationAudioSession {
     capture: Arc<CaptureProbeSession>,
     pump: Arc<AudioPump>,
     prepared_reader: Mutex<Option<NativeCaptureReader>>,
+    playback: Option<Arc<ScopedPlayback>>,
+}
+
+/// A separate, exact-device tap suppresses playback without narrowing shared capture.
+struct ScopedPlayback(Mutex<Option<CaptureProbeSession>>);
+
+impl ScopedPlayback {
+    fn start(&self) -> Result<bool, String> {
+        self.refresh()?;
+        let owner = self
+            .0
+            .lock()
+            .map_err(|_| "scoped playback owner is poisoned")?;
+        let capture = owner.as_ref().ok_or("scoped playback lease was revoked")?;
+        if capture.stats().running {
+            return Ok(false);
+        }
+        capture.start_native().map_err(|error| error.to_string())?;
+        Ok(true)
+    }
+
+    fn stop(&self) -> Result<(), String> {
+        let owner = self
+            .0
+            .lock()
+            .map_err(|_| "scoped playback owner is poisoned")?;
+        let Some(capture) = owner.as_ref() else {
+            return Ok(());
+        };
+        if !capture.stats().running {
+            return Ok(());
+        }
+        // SAFETY: this mutex is the sole control owner; no ring reader uses this tap.
+        let error = unsafe { mr_process_tap_stop(capture.native.as_ptr()) };
+        if error.code == NATIVE_OK {
+            Ok(())
+        } else {
+            Err(CaptureProbeError(error).to_string())
+        }
+    }
+
+    fn refresh(&self) -> Result<(), String> {
+        let mut owner = self
+            .0
+            .lock()
+            .map_err(|_| "scoped playback owner is poisoned")?;
+        let capture = owner.as_ref().ok_or("scoped playback lease was revoked")?;
+        // SAFETY: only this serialized owner refreshes the scoped tap.
+        let error = unsafe { mr_process_tap_refresh_format(capture.native.as_ptr()) };
+        if error.code == NATIVE_OK {
+            Ok(())
+        } else {
+            // Destroy transfers this exact tap to native retirement; retaining
+            // the empty owner prevents later ACK retries from restoring its lease.
+            drop(owner.take());
+            Err(CaptureProbeError(error).to_string())
+        }
+    }
+}
+
+struct ActivePlayback(Option<Arc<ScopedPlayback>>);
+
+impl Drop for ActivePlayback {
+    fn drop(&mut self) {
+        if let Some(playback) = &self.0
+            && let Err(error) = playback.stop()
+        {
+            tracing::error!(%error, "scoped playback restoration failed; native owner retained for teardown");
+        }
+    }
 }
 
 struct AudioPump {
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
     handoff: Arc<capture_transaction::CaptureHandoff<NativeCaptureReader>>,
+    playback: Arc<capture_transaction::CaptureHandoff<Option<Arc<ScopedPlayback>>>>,
+}
+
+#[derive(Clone, Copy)]
+struct PumpControl<'a> {
+    stop: &'a AtomicBool,
+    capture: &'a capture_transaction::CaptureHandoff<NativeCaptureReader>,
+    playback: &'a capture_transaction::CaptureHandoff<Option<Arc<ScopedPlayback>>>,
 }
 
 impl AudioPump {
@@ -527,6 +639,8 @@ impl AudioPump {
         let channel_count = usize::from(channels);
         let handoff = Arc::new(capture_transaction::CaptureHandoff::default());
         let worker_handoff = Arc::clone(&handoff);
+        let playback = Arc::new(capture_transaction::CaptureHandoff::default());
+        let worker_playback = Arc::clone(&playback);
         let worker = std::thread::Builder::new()
             .name(format!("mixrelay-source-{source_id}"))
             .spawn(move || {
@@ -534,8 +648,11 @@ impl AudioPump {
                     capture,
                     transport,
                     channel_count,
-                    &worker_stop,
-                    &worker_handoff,
+                    PumpControl {
+                        stop: &worker_stop,
+                        capture: &worker_handoff,
+                        playback: &worker_playback,
+                    },
                 );
             })
             .map_err(|error| format!("could not start application source pump: {error}"))?;
@@ -543,6 +660,7 @@ impl AudioPump {
             stop,
             worker: Some(worker),
             handoff,
+            playback,
         })
     }
 }
@@ -560,11 +678,10 @@ fn run_audio_pump(
     capture: NativeCaptureReader,
     transport: ApplicationSourceTransport,
     channels: usize,
-    stop: &AtomicBool,
-    handoff: &capture_transaction::CaptureHandoff<NativeCaptureReader>,
+    control: PumpControl<'_>,
 ) {
-    if let Err(error) = clock_pump::run_with_handoff(capture, transport, channels, stop, handoff) {
-        eprintln!("application source clock bridge stopped: {error}");
+    if let Err(error) = clock_pump::run_with_handoff(capture, transport, channels, control) {
+        tracing::error!(%error, "application source clock bridge stopped");
     }
 }
 
@@ -727,6 +844,33 @@ impl ApplicationCaptureState {
             .owners
             .lock()
             .map_err(|_| "application capture state is poisoned".to_owned())?;
+        // Native starts may fail. Do not publish a replacement or retire the
+        // prior policy until every new scoped owner has started successfully.
+        let mut started: Vec<Arc<ScopedPlayback>> = Vec::new();
+        if let Some(pending) = owners
+            .pending
+            .as_ref()
+            .filter(|set| set.revision <= revision)
+        {
+            for entry in &pending.sources {
+                if let Some(playback) = &entry.session.playback {
+                    match playback.start() {
+                        Ok(true) => started.push(Arc::clone(playback)),
+                        Ok(false) => {}
+                        Err(error) => {
+                            let mut failure = error;
+                            for owner in started {
+                                if let Err(restore) = owner.stop() {
+                                    write!(&mut failure, "; rollback failed: {restore}")
+                                        .expect("writing to a String cannot fail");
+                                }
+                            }
+                            return Err(failure);
+                        }
+                    }
+                }
+            }
+        }
         let retired = owners.acknowledge(revision, |session| {
             let reader = session
                 .prepared_reader
@@ -736,6 +880,7 @@ impl ApplicationCaptureState {
             if let Some(reader) = reader {
                 session.pump.handoff.publish(reader);
             }
+            session.pump.playback.publish(session.playback.clone());
         });
         drop(owners);
         // Destruction joins native pump workers only on this blocking control thread.
@@ -766,11 +911,47 @@ fn same_capture_session(
         && current.requires_reselection == requested.requires_reselection
         && current.stream == requested.stream
         && current.source_playback == requested.source_playback
+        && current.forwarding_endpoint == requested.forwarding_endpoint
 }
 
 #[cfg(test)]
 mod restored_pid_tests {
     use super::*;
+
+    #[test]
+    fn source_mute_without_owned_forwarding_is_rejected_before_native_capture() {
+        let request = serde_json::from_value(serde_json::json!({
+            "selector":{"match":"bundle_id","bundle_id":"io.mixrelay.unowned-fixture","include_descendants":false},
+            "stream":{"channels":2,"channelLayout":"stereo"},
+            "sourcePlayback":"mute_while_captured"
+        }))
+        .unwrap();
+        let backend = MacApplicationCaptureBackend::default();
+        assert!(!backend.capabilities().supports_mute_while_captured);
+        assert!(matches!(
+            backend.open(&request),
+            Err(HostAudioBackendError::CapabilityUnavailable { .. })
+        ));
+    }
+
+    #[test]
+    fn capture_session_reuse_changes_with_forwarding_endpoint() {
+        let preserve: ApplicationCaptureRequest = serde_json::from_value(serde_json::json!({
+            "selector":{"match":"bundle_id","bundle_id":"io.mixrelay.fixture","include_descendants":false},
+            "stream":{"channels":2,"channelLayout":"stereo"},
+            "sourcePlayback":"preserve"
+        }))
+        .expect("preserved source request");
+        let mut first = preserve.clone();
+        first.source_playback = SourcePlaybackPolicy::MuteWhileCaptured;
+        first.forwarding_endpoint = Some("17e59d73-42c1-4f11-a8b4-6c2d913357e0".into());
+        let mut second = first.clone();
+        second.forwarding_endpoint = Some("27e59d73-42c1-4f11-a8b4-6c2d913357e0".into());
+        assert!(same_capture_session(&first, &first));
+        assert!(!same_capture_session(&first, &second));
+        assert!(!same_capture_session(&preserve, &first));
+    }
+
     #[test]
     fn restored_pid_manifest_is_rejected_without_attempting_a_native_tap() {
         let manifest = serde_json::from_value(serde_json::json!({
@@ -798,7 +979,44 @@ fn prepare_application_audio(
     {
         return Err("live application transport channel replacement is unsupported".to_owned());
     }
-    let session = backend.open(request).map_err(|error| error.to_string())?;
+    let playback = if request.source_playback == SourcePlaybackPolicy::MuteWhileCaptured {
+        let ApplicationSelector::BundleId {
+            bundle_id,
+            include_descendants: false,
+        } = &request.selector
+        else {
+            return Err("scoped playback requires an exact bundle selector".into());
+        };
+        let id = request
+            .forwarding_endpoint
+            .as_ref()
+            .and_then(|id| parse_endpoint_id(id.as_str()))
+            .ok_or("forwarding requires an exact MixRelay endpoint identity")?;
+        Some(Arc::new(ScopedPlayback(Mutex::new(Some(
+            CaptureProbeSession::prepare(bundle_id, Some(&endpoint_uid(id)))
+                .map_err(|error| error.to_string())?,
+        )))))
+    } else {
+        None
+    };
+    if let Some(previous) = previous.filter(|previous| {
+        matches!(&request.selector,
+        ApplicationSelector::BundleId { bundle_id, include_descendants: false }
+            if *bundle_id == previous.capture.resolved.source_id)
+    }) {
+        return Ok(Arc::new(ApplicationAudioSession {
+            capture: Arc::clone(&previous.capture),
+            pump: Arc::clone(&previous.pump),
+            prepared_reader: Mutex::new(None),
+            playback,
+        }));
+    }
+    let mut preserved = request.clone();
+    preserved.source_playback = SourcePlaybackPolicy::Preserve;
+    preserved.forwarding_endpoint = None;
+    let session = backend
+        .open(&preserved)
+        .map_err(|error| error.to_string())?;
     let stats = session.stats();
     if stats.channels != u32::from(request.stream.channels) {
         return Err("application capture channel count does not match the graph".to_owned());
@@ -827,6 +1045,7 @@ fn prepare_application_audio(
         capture,
         pump,
         prepared_reader: Mutex::new(prepared_reader),
+        playback,
     }))
 }
 
@@ -875,6 +1094,12 @@ pub(crate) fn start_capture_probe(
     mute_while_captured: bool,
     state: State<'_, CaptureProbeState>,
 ) -> Result<CaptureProbeStats, String> {
+    if mute_while_captured {
+        return Err(
+            "application source mute requires a verified MixRelay-owned forwarding endpoint"
+                .to_owned(),
+        );
+    }
     let mut session = state
         .session
         .lock()
@@ -882,8 +1107,8 @@ pub(crate) fn start_capture_probe(
     if session.is_some() {
         return Err("an application capture probe is already running".to_owned());
     }
-    let capture = CaptureProbeSession::start(&bundle_id, mute_while_captured)
-        .map_err(|error| error.to_string())?;
+    let capture =
+        CaptureProbeSession::start(&bundle_id, None).map_err(|error| error.to_string())?;
     let snapshot = capture.stats();
     *session = Some(capture);
     Ok(snapshot)

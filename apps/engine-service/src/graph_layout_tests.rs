@@ -176,7 +176,11 @@ fn inactive_graph_layout_survives_selection_rename_and_restart() {
 fn layout_edit_never_prepares_native_resources_or_advances_audio_or_catalog_revision() {
     struct MustNotPrepare;
     impl GraphResourceBackend for MustNotPrepare {
-        fn reconcile(&self, _: &GraphDocument) -> Result<(), HostAudioBackendError> {
+        fn reconcile(
+            &self,
+            _: &GraphDocument,
+            _: crate::PlaybackBindings<'_>,
+        ) -> Result<(), HostAudioBackendError> {
             panic!("presentation changes must not prepare native resources");
         }
     }
@@ -244,7 +248,7 @@ fn layout_revision_conflicts_are_independent_from_graph_edits_and_names() {
         .unwrap();
     let mut document = engine.graph();
     document.revision += 1;
-    engine.apply_graph(document.clone()).unwrap();
+    engine.apply_graph_request(document.clone().into()).unwrap();
     engine
         .update_graph_layout(
             "graph-1",

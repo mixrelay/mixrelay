@@ -6,7 +6,7 @@ use std::{
 use super::Selection;
 use crate::{
     aggregate_group::{NativeBinding, mr_aggregate_group_binding},
-    device_buffers::BufferSelection,
+    device_buffers::{BufferSelection, NativeFormats},
     device_io::stream_format::{StreamFormat, StreamFormats},
 };
 
@@ -15,7 +15,7 @@ const STREAMS: u32 = u32::from_be_bytes(*b"stm#");
 const BUFFER_SIZE: u32 = u32::from_be_bytes(*b"fsiz");
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Address {
     pub(super) selector: u32,
     scope: u32,
@@ -23,7 +23,7 @@ pub(super) struct Address {
 }
 
 impl Address {
-    fn new(selector: u32, scope: u32) -> Self {
+    pub(super) fn new(selector: u32, scope: u32) -> Self {
         Self {
             selector,
             scope,
@@ -266,11 +266,27 @@ fn resolve_uid(selection: &Selection) -> Option<u32> {
     (status == 0 && size == 4).then_some(device)
 }
 
+#[cfg(test)]
 pub(super) fn format(
     selection: &Selection,
     binding: NativeBinding,
     properties: &impl Properties,
 ) -> Option<u32> {
+    admitted_format(selection, binding, properties).map(|format| format.rate)
+}
+
+pub(super) struct AdmittedFormat {
+    pub(super) rate: u32,
+    pub(super) layout: NativeFormats,
+}
+
+/// Queries and validates the complete native PCM layout before `IOProc` registration.
+/// Missing properties or invalid packet/stream/selection geometry return `None`.
+pub(super) fn admitted_format(
+    selection: &Selection,
+    binding: NativeBinding,
+    properties: &impl Properties,
+) -> Option<AdmittedFormat> {
     let slice = buffer_selection(selection, binding);
     let scope = u32::from_be_bytes(if selection.input { *b"inpt" } else { *b"outp" });
     let streams = properties.streams(binding.device, scope, slice.limit)?;
@@ -278,6 +294,9 @@ pub(super) fn format(
     for &stream in &streams.values[..streams.count] {
         let format: Description =
             properties.read(stream, Address::new(u32::from_be_bytes(*b"sfmt"), GLOBAL))?;
+        if format.packet_frames != 1 || format.packet_bytes != format.frame_bytes {
+            return None;
+        }
         if !formats.accept(
             &StreamFormat {
                 rate: format.rate,
@@ -292,7 +311,11 @@ pub(super) fn format(
             return None;
         }
     }
-    formats.selected_rate(slice).map(admitted_rate)
+    let rate = admitted_rate(formats.selected_rate(slice)?);
+    Some(AdmittedFormat {
+        rate,
+        layout: formats.into_layout(),
+    })
 }
 
 // Called only with StreamFormats' admitted finite integral 8000..384000 Hz value.

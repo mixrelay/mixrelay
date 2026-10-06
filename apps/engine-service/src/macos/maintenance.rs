@@ -22,6 +22,7 @@ use crate::macos_devices::MacDevices;
 pub(super) struct ControlObservers {
     format_monitor: Option<MaintenanceWorker>,
     control: Option<ControlMaintenance>,
+    devices: Weak<MacDevices>,
 }
 
 impl ControlObservers {
@@ -31,15 +32,19 @@ impl ControlObservers {
         devices: &Arc<MacDevices>,
     ) -> Result<Self, String> {
         // If monitor startup fails, control maintenance still finalizes and joins.
-        let control = controller.start_control_maintenance()?;
-        let format_monitor = start_format_monitor(status, controller, devices)?;
-        Ok(Self {
-            format_monitor: Some(format_monitor),
-            control: Some(control),
-        })
+        let mut observers = Self {
+            format_monitor: None,
+            control: Some(controller.start_control_maintenance()?),
+            devices: Arc::downgrade(devices),
+        };
+        observers.format_monitor = Some(start_format_monitor(status, controller, devices)?);
+        Ok(observers)
     }
 
     pub(super) fn stop_observing(&self) {
+        if let Some(devices) = self.devices.upgrade() {
+            devices.stop_preparing();
+        }
         if let Some(control) = &self.control {
             control.stop_observing();
         }
@@ -50,10 +55,16 @@ impl ControlObservers {
 
     pub(super) fn finish(mut self) -> Result<(), String> {
         self.stop_observing();
-        self.format_monitor.take();
-        self.control
+        let observed = self
+            .format_monitor
             .take()
-            .map_or(Ok(()), ControlMaintenance::finish)
+            .map_or(Ok(()), MaintenanceWorker::finish);
+        // Persistence must still finish if the native observer panicked.
+        let saved = self
+            .control
+            .take()
+            .map_or(Ok(()), ControlMaintenance::finish);
+        observed.and(saved)
     }
 }
 
@@ -69,10 +80,21 @@ impl Drop for ControlObservers {
 pub(super) struct MaintenanceWorker {
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
-    name: &'static str,
 }
 
 impl MaintenanceWorker {
+    /// Cancels and joins the observer, retaining any panic as a shutdown error.
+    pub(super) fn finish(mut self) -> Result<(), String> {
+        self.join()
+    }
+
+    fn join(&mut self) -> Result<(), String> {
+        self.request_stop();
+        self.thread
+            .take()
+            .map_or(Ok(()), mixrelay_engine_service::session::join_worker)
+    }
+
     fn request_stop(&self) {
         self.stop.store(true, Ordering::Release);
         if let Some(thread) = &self.thread {
@@ -93,20 +115,14 @@ impl MaintenanceWorker {
         Ok(Self {
             stop,
             thread: Some(thread),
-            name,
         })
     }
 }
 
 impl Drop for MaintenanceWorker {
     fn drop(&mut self) {
-        self.request_stop();
-        if let Some(thread) = self.thread.take() {
-            thread.thread().unpark();
-            if thread.join().is_err() {
-                tracing::error!(worker = self.name, "MixRelay maintenance worker panicked");
-            }
-        }
+        // Cancellation/unwind still joins; explicit finish also propagates failure.
+        let _ = self.join();
     }
 }
 
@@ -159,7 +175,9 @@ fn start_format_monitor(
             else {
                 break;
             };
-            if mixrelay_engine_service::endpoint_service::driver_connected() {
+            if super::endpoint_backend::MacVirtualEndpointBackend::snapshot()
+                .is_ok_and(|snapshot| snapshot.state == mixrelay_driver_control::DriverState::Ready)
+            {
                 status.observe_endpoint(true);
             } else {
                 status.forget_endpoint_observation();

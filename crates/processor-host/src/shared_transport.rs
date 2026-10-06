@@ -7,7 +7,7 @@ use std::{
 
 use memmap2::MmapRaw;
 
-use crate::{AudioLayout, SHARED_MAGIC, SHARED_VERSION, STATE_CAPACITY};
+use crate::{AudioLayout, SHARED_MAGIC, SHARED_VERSION};
 
 mod audio;
 mod control;
@@ -16,9 +16,21 @@ mod header;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod variable_pcm_tests;
+
+#[cfg(test)]
+mod response_measurement;
+
+#[cfg(test)]
+mod chunk_tests;
+
 pub(super) use audio::{ParentAudio, WorkerAudio};
 pub(super) use control::{ControlMailbox, WorkerControl};
 pub(super) use header::SharedHeader;
+
+/// One bounded state response chunk shared by the parent and worker mappings.
+pub(super) const CHUNK_CAPACITY: usize = 256 * 1024;
 
 /// Called once by the parent factory, after initializing a newly-created private transport.
 pub(super) fn create(
@@ -27,7 +39,9 @@ pub(super) fn create(
 ) -> Result<(ParentAudio, ControlMailbox), String> {
     let length = shared_length(layout)?;
     for count in [layout.inputs, layout.outputs, layout.block_frames] {
-        u32::try_from(count).map_err(|_| "processor transport dimensions exceed u32".to_owned())?;
+        if u32::try_from(count).is_err() {
+            return Err("processor transport dimensions exceed u32".to_owned());
+        }
     }
     let mut options = OpenOptions::new();
     options.create_new(true).read(true).write(true);
@@ -68,7 +82,7 @@ pub(super) fn worker(path: &Path) -> Result<(WorkerAudio, WorkerControl), String
 }
 
 /// Owns one address-space view without ever borrowing the entire shared mapping.
-/// Header atomics, state bytes and the two PCM regions have independent ownership protocols.
+/// Header atomics, the control chunk and the two PCM regions have independent ownership protocols.
 struct Mapping {
     raw: MmapRaw,
     layout: AudioLayout,
@@ -85,7 +99,7 @@ impl Mapping {
             return Err("shared processor mapping is truncated or misaligned".to_owned());
         }
         // SAFETY: the private, fixed-size transport is initialized before either peer opens it.
-        // Only this header is borrowed; its live mutable fields are atomics. PCM/state remain raw.
+        // Only this header is borrowed; its live mutable fields are atomics. PCM remains raw.
         #[expect(
             clippy::cast_ptr_alignment,
             reason = "The preceding admission check validates SharedHeader alignment."
@@ -125,12 +139,50 @@ impl Mapping {
         self.layout.inputs * self.layout.block_frames
     }
 
+    fn input_sample_count(&self, frames: usize) -> Option<usize> {
+        (frames <= self.layout.block_frames)
+            .then_some(())
+            .and_then(|()| self.layout.inputs.checked_mul(frames))
+    }
+
     fn output_samples(&self) -> usize {
         self.layout.outputs * self.layout.block_frames
     }
 
+    fn output_sample_count(&self, frames: usize) -> Option<usize> {
+        (frames <= self.layout.block_frames)
+            .then_some(())
+            .and_then(|()| self.layout.outputs.checked_mul(frames))
+    }
+
     fn output_offset(&self) -> usize {
         input_offset() + self.input_samples() * size_of::<f32>()
+    }
+
+    fn write_state_chunk(&self, bytes: &[u8]) {
+        debug_assert!(bytes.len() <= CHUNK_CAPACITY);
+        // SAFETY: Mapping admission proves that the state chunk lies fully within this mapping.
+        // The worker calls this only while state_written == state_consumed, so the parent has
+        // finished reading the previous chunk. The release publication follows the copy.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                bytes.as_ptr(),
+                self.raw.as_mut_ptr().add(size_of::<SharedHeader>()),
+                bytes.len(),
+            );
+        }
+    }
+
+    fn append_state_chunk(&self, bytes: &mut Vec<u8>, length: usize) {
+        debug_assert!(length <= CHUNK_CAPACITY);
+        // SAFETY: Mapping admission proves that the state chunk lies fully within this mapping.
+        // The parent calls this only after acquiring state_written and before acknowledging the
+        // same cumulative count through state_consumed, so the worker cannot overwrite it.
+        let source = unsafe {
+            std::slice::from_raw_parts(self.raw.as_ptr().add(size_of::<SharedHeader>()), length)
+        };
+        // The caller fallibly reserved this space before borrowing the published chunk.
+        bytes.extend_from_slice(source);
     }
 }
 
@@ -170,5 +222,5 @@ fn shared_length(layout: AudioLayout) -> Result<usize, String> {
 }
 
 const fn input_offset() -> usize {
-    size_of::<SharedHeader>() + STATE_CAPACITY
+    size_of::<SharedHeader>() + CHUNK_CAPACITY
 }

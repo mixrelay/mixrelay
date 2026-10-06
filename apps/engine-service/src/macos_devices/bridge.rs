@@ -10,6 +10,7 @@ use super::{
     },
     worker::WorkerContext,
 };
+use mixrelay_audio_io::buffer_policy::{QueueBounds, QueueTargetPolicy};
 use mixrelay_audio_io::clock_bridge::{
     AsyncClockBridge, BridgeConfig, BridgeError, ClockFeedback, ClockRelation, Discontinuity,
     FeedbackQueue, TransferState,
@@ -28,6 +29,8 @@ pub(super) struct DeviceBridge {
     pub(super) graph_rate: u32,
     pub(super) native_rate: u32,
     pub(super) clock_aligned: bool,
+    graph_queue_target: QueueTargetPolicy,
+    native_queue_target: QueueTargetPolicy,
     pub(super) epoch: u64,
     feedback_frames: u64,
     pub(super) streaming: bool,
@@ -81,6 +84,13 @@ impl DeviceBridge {
         } else {
             (graph_rate, native_rate)
         };
+        // Alignment is supplied by the active device set: the pacing owner or
+        // a verified second IOProc of that same device. Nominal Hz is not proof.
+        let clock_relation = if clock_aligned {
+            ClockRelation::ProvenSameClock
+        } else {
+            ClockRelation::Independent
+        };
         let mut bridge = AsyncClockBridge::new(BridgeConfig {
             channels,
             input_rate,
@@ -89,20 +99,23 @@ impl DeviceBridge {
             max_output_frames: PUMP_FRAMES,
             capacity_frames: QUEUE_CAPACITY,
             priming_frames: 32,
-            // Alignment is supplied by the active device set: the selected
-            // pacing owner, or a verified second IOProc of that same device.
-            // Matching nominal Hz alone is never enough.
-            clock_relation: if clock_aligned {
-                ClockRelation::ProvenSameClock
-            } else {
-                ClockRelation::Independent
-            },
+            clock_relation,
             feedback_queue: FeedbackQueue::Input,
             max_correction_ppm: 1_000.0,
         })
         .map_err(|error| error.to_string())?;
         let epoch = NEXT_DEVICE_EPOCH.fetch_add(1, Ordering::Relaxed);
         bridge.reset(epoch, Discontinuity::StreamRestart);
+        let bounds = QueueBounds {
+            minimum_frames: 32,
+            capacity_frames: QUEUE_CAPACITY,
+        };
+        let graph_queue_target =
+            QueueTargetPolicy::new(graph_rate, native_rate, clock_relation, bounds)
+                .map_err(|error| error.to_string())?;
+        let native_queue_target =
+            QueueTargetPolicy::new(native_rate, graph_rate, clock_relation, bounds)
+                .map_err(|error| error.to_string())?;
         Ok(Self {
             bridge,
             source: vec![0.0; PUMP_FRAMES * channels],
@@ -110,6 +123,8 @@ impl DeviceBridge {
             graph_rate,
             native_rate,
             clock_aligned,
+            graph_queue_target,
+            native_queue_target,
             epoch,
             feedback_frames: 0,
             streaming: false,
@@ -200,18 +215,11 @@ impl DeviceBridge {
     /// hardware callback; it must not silently inherit a fixed 2048-sample FIFO.
     pub(super) fn queue_target(&self, context: &WorkerContext, graph: bool) -> usize {
         let pointer = context.native.pointer.as_ptr();
-        let native_quantum = unsafe { mr_device_io_quantum(pointer, false) }.max(32) as usize;
+        // SAFETY: this PCM owner retains Native; only atomic progress is read.
+        let native_quantum = unsafe { mr_device_io_quantum(pointer, false) };
+        // SAFETY: the same retained native queue publishes its graph quantum atomically.
         let graph_quantum = unsafe { mr_device_io_quantum(pointer, true) }
-            .max(context.graph_quantum.load(Ordering::Acquire))
-            .max(32) as usize;
-        let burst = if graph {
-            graph_quantum.max(
-                (native_quantum * self.graph_rate as usize).div_ceil(self.native_rate as usize),
-            )
-        } else {
-            native_quantum
-                .max((graph_quantum * self.native_rate as usize).div_ceil(self.graph_rate as usize))
-        };
+            .max(context.graph_quantum.load(Ordering::Acquire));
         // A sinc converter produces a complete chunk, not one DSP/native
         // callback. A smaller destination target strands the rest behind this
         // next conversion invocation while the realtime consumer has already run dry.
@@ -221,9 +229,13 @@ impl DeviceBridge {
         } else {
             source_chunk
         };
-        let burst = burst.max(converter_burst);
-        // Independent clocks retain one extra complete production burst.
-        (burst * if self.clock_aligned { 1 } else { 2 }).clamp(32, QUEUE_CAPACITY / 2)
+        if graph {
+            self.graph_queue_target
+                .target_frames(graph_quantum, native_quantum, converter_burst)
+        } else {
+            self.native_queue_target
+                .target_frames(native_quantum, graph_quantum, converter_burst)
+        }
     }
 
     pub(super) fn pump(&mut self, context: &WorkerContext) -> Result<(), BridgeError> {

@@ -1,7 +1,32 @@
 use tauri::{
-    Emitter,
+    Emitter, Manager,
     menu::{Menu, MenuItem, Submenu},
 };
+
+use crate::tray_menu::NativeMenuLabels;
+
+pub(crate) struct WorkspaceMenu {
+    file: Submenu<tauri::Wry>,
+    new: MenuItem<tauri::Wry>,
+    open: MenuItem<tauri::Wry>,
+    save: MenuItem<tauri::Wry>,
+    save_as: MenuItem<tauri::Wry>,
+    #[cfg(target_os = "linux")]
+    quit: MenuItem<tauri::Wry>,
+}
+
+impl WorkspaceMenu {
+    pub(crate) fn set_labels(&self, labels: &NativeMenuLabels) -> tauri::Result<()> {
+        self.file.set_text(labels.workspace_file)?;
+        self.new.set_text(labels.workspace_new)?;
+        self.open.set_text(labels.workspace_open)?;
+        self.save.set_text(labels.workspace_save)?;
+        self.save_as.set_text(labels.workspace_save_as)?;
+        #[cfg(target_os = "linux")]
+        self.quit.set_text(labels.tray_quit)?;
+        Ok(())
+    }
+}
 
 pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
     let menu = Menu::default(app.handle())?;
@@ -19,27 +44,56 @@ pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
         menu.prepend(&file)?;
         file
     };
-    for (index, (action, label, shortcut)) in [
-        ("new", "New Workspace", "CmdOrCtrl+N"),
-        ("open", "Open…", "CmdOrCtrl+O"),
-        ("save", "Save", "CmdOrCtrl+S"),
-        ("save_as", "Save As…", "CmdOrCtrl+Shift+S"),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        file.insert(
-            &MenuItem::with_id(
-                app,
-                format!("workspace:{action}"),
-                label,
-                true,
-                Some(shortcut),
-            )?,
-            index,
-        )?;
-    }
+    let labels = crate::tray_menu::labels("en");
+    let new = MenuItem::with_id(
+        app,
+        "workspace:new",
+        labels.workspace_new,
+        true,
+        Some("CmdOrCtrl+N"),
+    )?;
+    let open = MenuItem::with_id(
+        app,
+        "workspace:open",
+        labels.workspace_open,
+        true,
+        Some("CmdOrCtrl+O"),
+    )?;
+    let save = MenuItem::with_id(
+        app,
+        "workspace:save",
+        labels.workspace_save,
+        true,
+        Some("CmdOrCtrl+S"),
+    )?;
+    let save_as = MenuItem::with_id(
+        app,
+        "workspace:save_as",
+        labels.workspace_save_as,
+        true,
+        Some("CmdOrCtrl+Shift+S"),
+    )?;
+    file.insert(&new, 0)?;
+    file.insert(&open, 1)?;
+    file.insert(&save, 2)?;
+    file.insert(&save_as, 3)?;
+    #[cfg(target_os = "linux")]
+    let quit = {
+        let quit = MenuItem::with_id(app, "app:quit", labels.tray_quit, true, Some("Ctrl+Q"))?;
+        file.append(&tauri::menu::PredefinedMenuItem::separator(app)?)?;
+        file.append(&quit)?;
+        quit
+    };
     app.set_menu(menu)?;
+    app.manage(WorkspaceMenu {
+        file,
+        new,
+        open,
+        save,
+        save_as,
+        #[cfg(target_os = "linux")]
+        quit,
+    });
     app.on_menu_event(|app, event| {
         if event.id().as_ref() == "app:quit" {
             app.exit(0);
@@ -77,7 +131,7 @@ fn install_app_menu(app: &tauri::App, menu: &Menu<tauri::Wry>) -> tauri::Result<
             &PredefinedMenuItem::hide(app, None)?,
             &PredefinedMenuItem::hide_others(app, None)?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "app:quit", "Quit MixRelay", true, Some("CmdOrCtrl+Q"))?,
+            &MenuItem::with_id(app, "app:quit", "Quit MixRelay", true, Some("Cmd+Q"))?,
         ],
     )?;
     // Menu::default on macOS starts with its application submenu.

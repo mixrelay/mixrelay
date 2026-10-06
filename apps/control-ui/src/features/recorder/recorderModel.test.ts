@@ -83,7 +83,7 @@ it.each([false, true])(
     expect(changed.revision).toBe(model.revision + 1);
     const node = changed.nodes.find((item) => item.id === 'take');
     expect(node?.inputPorts).toHaveLength(1);
-    expect(node?.appearance.meterChannels).toBe(1);
+    expect(node?.appearance.meterBanks).toEqual([{ channels: 1, nodeId: 'take', portId: 'audio' }]);
     const saved = audioGraphToRuntimeGraph(changed, document);
     expect(saved.nodes.find((item) => item.id === 'take')?.config).toEqual({ channels: 1 });
     const routes = saved.edges.filter((edge) => edge.destination.nodeId === 'take');

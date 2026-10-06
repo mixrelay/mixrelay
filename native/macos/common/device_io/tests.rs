@@ -12,6 +12,8 @@ use std::{
     sync::atomic::Ordering::Acquire,
 };
 
+mod native_pcm;
+
 #[repr(C)]
 struct Buffers {
     count: u32,
@@ -44,7 +46,12 @@ fn buffers(samples: &mut [f32], channels: u32, frames: u32, planar: bool) -> Buf
 }
 
 fn owner(input: bool, channels: u32) -> DeviceIo {
-    DeviceIo::new(c"unit", input, channels, 48000).expect("test owner allocation")
+    let io = DeviceIo::new(c"unit", input, channels, 48000).expect("test owner allocation");
+    // SAFETY: unpublished fixture exclusively owns callback state before exercising IOProc.
+    assert!(unsafe {
+        super::test_observation::admit_float_callback(ptr::from_ref(&io).cast_mut())
+    });
+    io
 }
 
 #[test]
@@ -122,6 +129,25 @@ fn graph_read_admits_initial_epoch_once_without_hiding_later_shortages() {
 }
 
 fn process(io: &DeviceIo, buffers: &mut Buffers) {
+    // Fixtures supply the same control-admitted metadata that real prepare queries from ASBD.
+    if io.progress.ticks.load(Acquire) == 0 && !io.progress.invalid.load(Acquire) {
+        let mut formats = crate::device_buffers::NativeFormats::default();
+        for buffer in &buffers.buffers[..buffers.count as usize] {
+            assert!(formats.append(
+                buffer.channels,
+                false,
+                mixrelay_pcm_ring::SampleFormat::Float32
+            ));
+        }
+        // SAFETY: unit fixture has no registered callback or concurrent control owner.
+        unsafe {
+            (*io.callback.get()).formats = formats;
+        }
+    }
+    dispatch_callback(io, buffers);
+}
+
+fn dispatch_callback(io: &DeviceIo, buffers: &mut Buffers) {
     let native = ptr::from_mut(buffers).cast();
     // SAFETY: tests serialize each role and supply complete metadata/PCM allocations.
     unsafe {
@@ -542,6 +568,7 @@ struct PropertiesStub {
     transport: Option<u32>,
     stream_size: u32,
     default_queries: Cell<u32>,
+    pcm: mixrelay_pcm_ring::SampleFormat,
 }
 
 impl Default for PropertiesStub {
@@ -552,6 +579,7 @@ impl Default for PropertiesStub {
             transport: Some(u32::from_be_bytes(*b"usb ")),
             stream_size: 4,
             default_queries: Cell::new(0),
+            pcm: mixrelay_pcm_ring::SampleFormat::Float32,
         }
     }
 }
@@ -584,10 +612,16 @@ impl native::Properties for PropertiesStub {
             [b's', b'f', b'm', b't'] => scalar_copy(native::Description {
                 rate: self.rate,
                 format: u32::from_be_bytes(*b"lpcm"),
-                flags: 1,
-                bits: 32,
+                flags: if self.pcm == mixrelay_pcm_ring::SampleFormat::Float32 {
+                    1
+                } else {
+                    12
+                },
+                bits: u32::try_from(self.pcm.bytes_per_sample() * 8).unwrap(),
                 channels: 2,
-                frame_bytes: 8,
+                frame_bytes: u32::try_from(self.pcm.bytes_per_sample() * 2).unwrap(),
+                packet_bytes: u32::try_from(self.pcm.bytes_per_sample() * 2).unwrap(),
+                packet_frames: 1,
                 ..native::Description::default()
             }),
             _ => None,
@@ -700,8 +734,18 @@ fn default_endpoint_changes_and_unproven_transport_identity_are_rejected() {
 
 #[test]
 fn callback_uses_direction_timestamp_and_keeps_discontinuities() {
-    for input in [false, true] {
+    for (input, flags) in [
+        (false, Some(2)),
+        (true, Some(2)),
+        (true, None),
+        (false, Some(0)),
+    ] {
         let io = owner(input, 2);
+        let now = flags.map(|flags| callback::Timestamp {
+            host: 9000,
+            flags,
+            ..callback::Timestamp::default()
+        });
         let mut samples = [0.0; 128];
         let mut list = buffers(&mut samples, 2, 64, false);
         let mut capture = callback::Timestamp {
@@ -721,7 +765,8 @@ fn callback_uses_direction_timestamp_and_keeps_discontinuities() {
             unsafe {
                 mr_device_io_process(
                     123,
-                    ptr::null(),
+                    now.as_ref()
+                        .map_or(ptr::null(), |time| ptr::from_ref(time).cast()),
                     ptr::from_ref(&list).cast(),
                     ptr::from_ref(&capture).cast(),
                     ptr::from_mut(&mut list).cast(),
@@ -742,16 +787,20 @@ fn callback_uses_direction_timestamp_and_keeps_discontinuities() {
                 if input { capture.host } else { render.host }
             );
             assert_eq!(clock.discontinuities, pass);
-            let mut event = ClockBreak::default();
+            let mut record = ClockBreakRecord::default();
             // SAFETY: the fixture retains IO and exclusively owns disjoint evidence output.
             let recorded =
-                unsafe { mr_device_io_clock_break(ptr::from_ref(&io), ptr::from_mut(&mut event)) };
+                unsafe { mr_device_io_next_clock_break(ptr::from_ref(&io), 0, &raw mut record) };
             assert_eq!(recorded, pass != 0);
             if recorded {
+                let event = record.event;
+                assert_eq!((record.next_cursor, record.missed_before), (1, 0));
                 assert_eq!(event.count, pass);
                 assert!((event.actual_sample - event.expected_sample - 64.0).abs() < f64::EPSILON);
                 assert_eq!(event.actual_host - event.previous_host, 1000);
                 assert_eq!(event.flags, 3);
+                assert_eq!(event.callback_host, if now.is_some() { 9000 } else { 0 });
+                assert_eq!(event.callback_flags, u64::from(flags.unwrap_or(0)));
             }
             capture.sample += 128.0;
             render.sample += 128.0;

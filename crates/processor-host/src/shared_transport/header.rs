@@ -6,10 +6,9 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 static NEXT_CONTROL_INSTANCE: AtomicU64 = AtomicU64::new(1);
 /// Header shared by the engine and one VST worker process.
 ///
-/// The PCM regions following the state payload are protected by the sequence
-/// atomics: the producer never overwrites a region until the consumer publishes the matching
-/// consumed sequence. This keeps the engine side lock-free without reading memory while the
-/// worker writes it.
+/// The PCM regions following the bounded state chunk are protected by the sequence atomics: the
+/// producer never overwrites a region until the consumer publishes the matching consumed
+/// sequence. State responses use cumulative chunk progress and a final generation acknowledgement.
 #[repr(C, align(64))]
 pub(crate) struct SharedHeader {
     pub(super) magic: u64,
@@ -17,12 +16,17 @@ pub(crate) struct SharedHeader {
     pub(super) input_channels: u32,
     pub(super) output_channels: u32,
     pub(super) block_frames: u32,
+    pub(crate) intrinsic_latency_frames: AtomicU64,
     pub(crate) worker_status: AtomicU32,
     pub(crate) shutdown: AtomicU32,
     pub(super) input_sequence: AtomicU64,
     pub(super) input_consumed: AtomicU64,
+    pub(super) input_first_frame: AtomicU64,
+    pub(super) input_frames: AtomicU32,
     pub(super) output_sequence: AtomicU64,
     pub(super) output_consumed: AtomicU64,
+    pub(super) output_first_frame: AtomicU64,
+    pub(super) output_frames: AtomicU32,
     pub(crate) process_failures: AtomicU64,
     pub(crate) parameter_count: AtomicU32,
     pub(crate) parameters_pending: AtomicBool,
@@ -30,6 +34,9 @@ pub(crate) struct SharedHeader {
     pub(super) state_request: AtomicU64,
     pub(super) state_kind: AtomicU32,
     pub(super) state_response: AtomicU64,
+    pub(super) state_written: AtomicU32,
+    pub(super) state_consumed: AtomicU32,
+    pub(super) state_cancel: AtomicU64,
     pub(super) state_length: AtomicU32,
     pub(super) state_result: AtomicU32,
     pub(crate) editor_command: AtomicU32,
@@ -74,12 +81,17 @@ impl SharedHeader {
             input_channels: u32::try_from(layout.inputs).expect("creation validated channels"),
             output_channels: u32::try_from(layout.outputs).expect("creation validated channels"),
             block_frames: u32::try_from(layout.block_frames).expect("creation validated frames"),
+            intrinsic_latency_frames: AtomicU64::new(0),
             worker_status: AtomicU32::new(WORKER_STARTING),
             shutdown: AtomicU32::new(0),
             input_sequence: AtomicU64::new(0),
             input_consumed: AtomicU64::new(0),
+            input_first_frame: AtomicU64::new(0),
+            input_frames: AtomicU32::new(0),
             output_sequence: AtomicU64::new(0),
             output_consumed: AtomicU64::new(0),
+            output_first_frame: AtomicU64::new(0),
+            output_frames: AtomicU32::new(0),
             process_failures: AtomicU64::new(0),
             parameter_count: AtomicU32::new(0),
             parameters_pending: AtomicBool::new(false),
@@ -87,6 +99,9 @@ impl SharedHeader {
             state_request: AtomicU64::new(0),
             state_kind: AtomicU32::new(editor_surface::NATIVE_STATE),
             state_response: AtomicU64::new(0),
+            state_written: AtomicU32::new(0),
+            state_consumed: AtomicU32::new(0),
+            state_cancel: AtomicU64::new(0),
             state_length: AtomicU32::new(0),
             state_result: AtomicU32::new(STATE_OK),
             editor_command: AtomicU32::new(EDITOR_COMMAND_NONE),
@@ -102,5 +117,9 @@ impl SharedHeader {
             editor_close_generation: AtomicU64::new(0),
             editor_input: editor_surface::InputRing::new(),
         }
+    }
+
+    pub(crate) const fn prepared_block_frames(&self) -> u32 {
+        self.block_frames
     }
 }

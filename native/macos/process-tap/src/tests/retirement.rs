@@ -17,6 +17,19 @@ struct Shared {
 struct AsyncNative(Arc<Shared>);
 
 impl Native for AsyncNative {
+    fn device(&self, _: &std::ffi::CStr) -> Result<native::DeviceLease, TapError> {
+        panic!("retirement never resolves a device")
+    }
+    fn processes(
+        &self,
+        _: &std::ffi::CStr,
+        _: Option<u32>,
+    ) -> Result<Vec<native::ProcessIdentity>, TapError> {
+        panic!("retirement never discovers processes")
+    }
+    fn rebuild(&self, _: &TapSession, _: &native::Selection) -> Result<(), TapError> {
+        panic!("retirement never rebuilds a tap")
+    }
     fn format(&self, _: u32) -> Result<TapFormat, TapError> {
         Ok(format())
     }
@@ -44,6 +57,9 @@ impl Native for AsyncNative {
     }
     fn remove_listener(&self, _: u32, _: &TapSession) -> Result<(), TapError> {
         Ok(())
+    }
+    fn remove_inventory_listener(&self, _: &TapSession) -> Result<(), TapError> {
+        panic!("retirement fixture has no inventory listener")
     }
     fn destroy_aggregate(&self, _: u32) -> Result<(), TapError> {
         Ok(())

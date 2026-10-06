@@ -1,297 +1,109 @@
 use super::*;
-use crate::macos::endpoint_boundaries::{BoundaryConfig, Directions, EndpointBoundary};
-use mixrelay_audio_engine::RenderPlan;
-use mixrelay_audio_graph::{
-    CompileContext, CompileLimits, GraphCompiler, GraphDocument, RenderFormat,
-};
-use mixrelay_engine_service::RuntimeStatusBackend;
+use mixrelay_audio_engine::{ProcessorExchange, RuntimeControlUpdate};
+use mixrelay_audio_graph::{GraphDocument, NodeConfig, NodeControl};
 use std::sync::Arc;
-const FIRST_DEVICE: &str = "01010101-0101-0101-0101-010101010101";
-const SECOND_DEVICE: &str = "02020202-0202-0202-0202-020202020202";
 
 fn processor() -> Box<BlockProcessor> {
-    prepare_processor(false)
-}
-
-fn prepare_processor(second: bool) -> Box<BlockProcessor> {
     let mut document: GraphDocument = serde_json::from_value(serde_json::json!({
-        "schemaVersion":2,"revision":1,"nodes":[
-            {"id":"input","type":"audio_device_input","config":{"selector":{"match":"default_input"},"outputChannels":2,"gainDb":0}},
-            {"id":"output","type":"audio_device_output","config":{"selector":{"match":"default_output"},"inputChannels":2}},
-            {"id":"default-virtual-io","type":"virtual_endpoint","config":{
-                "id":FIRST_DEVICE,"displayName":"Test","render":null,
-                "reference":{"render":false,"capture":true},
+        "schemaVersion": 2, "revision": 1, "nodes": [{
+            "id": "virtual", "type": "virtual_endpoint",
+            "config": {"id":"01010101-0101-0101-0101-010101010101","displayName":"Fixture",
+                "reference":{"render":true,"capture":true},
+                "render":{"channels":2,"channelLayout":"stereo"},
                 "capture":{"channels":2,"channelLayout":"stereo"},
-                "supportedSampleRates":[96000],"defaultSampleRate":96000}}
-        ],"edges":[
-            {"id":"headphone","source":{"nodeId":"input","portId":"audio"},"destination":{"nodeId":"output","portId":"audio"}},
-            {"id":"hal","source":{"nodeId":"input","portId":"audio"},"destination":{"nodeId":"default-virtual-io","portId":mixrelay_audio_graph::TO_OS_PORT_ID}}
-        ]
-    })).unwrap();
-    if second {
-        let mut node = document.nodes[2].clone();
-        node.id = "graph-b::other-vio".into();
-        if let mixrelay_audio_graph::NodeConfig::VirtualEndpoint(endpoint) = &mut node.config {
-            endpoint.id = SECOND_DEVICE.into();
-            endpoint.default_sample_rate = 44_100;
-            endpoint.supported_sample_rates = vec![44_100];
-        }
-        document.nodes.push(node);
-        let mut edge = document.edges[1].clone();
-        edge.id = "second-route".into();
-        edge.destination.node_id = "graph-b::other-vio".into();
-        document.edges.push(edge);
+                "supportedSampleRates":[48000],"defaultSampleRate":48000}
+        }], "edges": [{
+            "id":"feedback","source":{"nodeId":"virtual","portId":"from_os"},
+            "destination":{"nodeId":"virtual","portId":"to_os"}
+        }]
+    }))
+    .unwrap();
+    if let NodeConfig::VirtualEndpoint(endpoint) = &document.nodes[0].config {
+        document.nodes[0].config = NodeConfig::VirtualEndpointTransport(endpoint.spec.clone());
     }
-    // This fixture exercises native transport ownership, not authored bus composition.
-    for node in &mut document.nodes {
-        if let mixrelay_audio_graph::NodeConfig::VirtualEndpoint(endpoint) = &node.config {
-            node.config =
-                mixrelay_audio_graph::NodeConfig::VirtualEndpointTransport(endpoint.spec.clone());
-        }
-    }
-    let execution = GraphCompiler::default()
+    let compiled = mixrelay_audio_graph::GraphCompiler::default()
         .compile(
             &document,
-            CompileContext {
-                format: RenderFormat {
-                    sample_rate: 96_000,
+            mixrelay_audio_graph::CompileContext {
+                format: mixrelay_audio_graph::RenderFormat {
+                    sample_rate: 48_000,
                     block_frames: 32,
                 },
-                limits: CompileLimits::default(),
+                limits: mixrelay_audio_graph::CompileLimits::default(),
             },
         )
         .unwrap();
     Box::new(BlockProcessor::new(Arc::new(
-        RenderPlan::prepare(&execution).unwrap(),
+        RenderPlan::prepare(&compiled).unwrap(),
     )))
 }
 
-struct Hal {
-    frame: u64,
-    written: usize,
-    energy: f32,
-    running: bool,
-    rate: u32,
-    generation: u64,
-}
-impl CaptureTransport for Hal {
-    fn invalidate_capture(&mut self) -> bool {
-        true
-    }
-    fn clock(&mut self) -> Option<super::super::NativeClockSnapshot> {
-        Some(super::super::NativeClockSnapshot {
-            epoch: self.generation,
-            capture_through: self.frame,
-            sample_rate: self.rate,
-            running: u32::from(self.running),
-            ..Default::default()
-        })
-    }
-    fn write(&mut self, frame: u64, pcm: &[f32], frames: u32) -> bool {
-        assert!(frame > 5_000_000, "never hardware's zero-based frame index");
-        self.written += frames as usize;
-        self.energy += pcm.iter().map(|v| v.abs()).sum::<f32>();
-        true
-    }
-}
-impl RenderTransport for Hal {}
-
-fn assert_passthrough(
-    renderer: &mut Renderer<'_, Hal>,
-    input: &mut [f32; 64],
-    output: &mut [f32; 64],
-) {
-    output.fill(0.0);
-    let source = super::tests::stereo_list(input);
-    let mut sink = super::tests::stereo_list(output);
-    // SAFETY: these stereo ABLs borrow 32 initialized frames for this synchronous
-    // call; no callback retains their pointers after rendering returns.
-    assert!(unsafe { renderer.render((&raw const source).cast(), (&raw mut sink).cast(), 32,) });
-    assert_eq!(input.map(f32::to_bits), output.map(f32::to_bits));
-}
-
 #[test]
-fn hardware_output_remains_synchronous_while_virtual_sink_crosses_clock_boundary() {
+fn driver_duplex_client_reads_capture_and_writes_render_at_native_callback_boundary() {
     let mut processor = processor();
+    let bindings = [
+        Binding {
+            id: "virtual".into(),
+            input: true,
+            offset: Some(0),
+            channels: 2,
+        },
+        Binding {
+            id: "virtual".into(),
+            input: false,
+            offset: Some(0),
+            channels: 2,
+        },
+    ];
     let status = mixrelay_engine_service::session::AdapterRuntimeStatus::new(
         crate::macos::adapter_profile(),
     );
-    let progress = AtomicU64::new(0);
-    let failed = AtomicBool::new(false);
-    let invalid = AtomicBool::new(false);
-    let bindings = super::tests::stereo_bindings();
-    let endpoint = EndpointBoundary::new(
-        BoundaryConfig {
-            identity: FIRST_DEVICE.into(),
-            id: [1; 16],
-            graph_rate: 96_000,
-            device_rate: 96_000,
-            directions: Directions {
-                source: false,
-                sink: true,
-            },
-            audio: super::super::NativeAudioConfig {
-                capacity_frames: 16_384,
-                render_channels: 2,
-                capture_channels: 2,
-            },
-        },
-        Hal {
-            frame: 5_000_000,
-            written: 0,
-            energy: 0.0,
-            running: true,
-            rate: 96_000,
-            generation: 4,
-        },
-    )
-    .unwrap();
+    let signals = RenderSignals::default();
     let mut renderer = Renderer {
         processor: &mut processor,
         activation: None,
         bindings: &bindings,
-        clock_id: 9,
+        clock_id: 7,
         epoch: 1,
         native_clock: None,
         status: &status,
         frame: 0,
-        progress: &progress,
-        failed: &failed,
-        invalid: &invalid,
-        endpoints: EndpointBoundaries {
-            endpoints: vec![endpoint],
-        },
-        reconfigure: &invalid,
+        progress: &signals.progress,
+        failed: &signals.failed,
+        invalid: &signals.invalid,
     };
-    renderer.endpoints.bind_controls(renderer.processor.plan());
-    let mut input = [0.25; 64];
-    let mut output = [0.0; 64];
-    for _ in 0..5000 {
-        renderer.endpoints.endpoints[0].transport.frame += 32;
-        assert_passthrough(&mut renderer, &mut input, &mut output);
+    let exchange = ProcessorExchange::new(1);
+    for (revision, enabled, muted) in [
+        (2, true, false),
+        (3, false, false),
+        (4, true, true),
+        (5, true, false),
+    ] {
+        exchange
+            .publish_controls(
+                renderer.processor.plan().controls(),
+                revision,
+                &[RuntimeControlUpdate {
+                    node_id: "virtual".into(),
+                    control: NodeControl { enabled, muted },
+                    gain_db: None,
+                }],
+            )
+            .unwrap();
+        let mut input = [0.25; 64];
+        // DeviceIo silences native output before invoking this Float32 render
+        // hook. The renderer then adds every graph sink into that empty mix.
+        let mut output = [0.0; 64];
+        let source = tests::stereo_list(&mut input);
+        let mut sink = tests::stereo_list(&mut output);
+        // SAFETY: this unpublished fixture retains two disjoint stereo ABLs for
+        // exactly 32 frames during the one synchronous renderer invocation.
+        assert!(unsafe { renderer.render((&raw const source).cast(), (&raw mut sink).cast(), 32) });
+        let expected: f32 = if enabled && !muted { 0.25 } else { 0.0 };
+        assert_eq!(output.map(f32::to_bits), [expected.to_bits(); 64]);
     }
-    let transport = &mut renderer.endpoints.endpoints[0].transport;
-    assert!(transport.written > 159_000);
-    assert!(transport.energy > 10_000.0);
-    let measured = status.status(RenderFormat {
-        sample_rate: 96_000,
-        block_frames: 32,
-    });
-    assert_eq!(measured.underruns, 0);
-    assert_eq!(measured.overruns, 0);
-    assert_eq!(progress.load(Ordering::Acquire), 5000);
-    transport.running = false;
-    let written = transport.written;
-    for _ in 0..100 {
-        assert_passthrough(&mut renderer, &mut input, &mut output);
-        assert!(renderer.endpoints.synchronized());
-    }
-    assert_eq!(renderer.endpoints.endpoints[0].transport.written, written);
-}
-
-#[test]
-fn two_virtual_devices_keep_distinct_clock_coordinates_rates_and_recovery() {
-    let mut processor = prepare_processor(true);
-    let status = mixrelay_engine_service::session::AdapterRuntimeStatus::new(
-        crate::macos::adapter_profile(),
-    );
-    let progress = AtomicU64::new(0);
-    let failed = AtomicBool::new(false);
-    let invalid = AtomicBool::new(false);
-    let bindings = super::tests::stereo_bindings();
-    let endpoints = [
-        (FIRST_DEVICE, 96_000, 6_000_000),
-        (SECOND_DEVICE, 44_100, 12_000_000),
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(index, (identity, rate, frame))| {
-        EndpointBoundary::new(
-            BoundaryConfig {
-                identity: identity.into(),
-                id: [u8::try_from(index + 1).unwrap(); 16],
-                audio: super::super::NativeAudioConfig {
-                    capacity_frames: 16_384,
-                    render_channels: 0,
-                    capture_channels: 2,
-                },
-                graph_rate: 96_000,
-                device_rate: rate,
-                directions: Directions {
-                    source: false,
-                    sink: true,
-                },
-            },
-            Hal {
-                frame,
-                written: 0,
-                energy: 0.0,
-                running: true,
-                rate,
-                generation: 4,
-            },
-        )
-        .unwrap()
-    })
-    .collect();
-    let mut renderer = Renderer {
-        processor: &mut processor,
-        activation: None,
-        bindings: &bindings,
-        clock_id: 9,
-        epoch: 1,
-        native_clock: None,
-        status: &status,
-        frame: 0,
-        progress: &progress,
-        failed: &failed,
-        invalid: &invalid,
-        endpoints: EndpointBoundaries { endpoints },
-        reconfigure: &invalid,
-    };
-    renderer.endpoints.bind_controls(renderer.processor.plan());
-    let mut input = [0.25; 64];
-    let mut output = [0.0; 64];
-    for callback in 1..=5000_u64 {
-        renderer.endpoints.endpoints[0].transport.frame = 6_000_000 + callback * 32;
-        renderer.endpoints.endpoints[1].transport.frame =
-            12_000_000 + callback * 32 * 44_100 / 96_000;
-        if callback == 2500 {
-            renderer.endpoints.endpoints[1].transport.generation += 1;
-        }
-        assert_passthrough(&mut renderer, &mut input, &mut output);
-    }
-    let first = &renderer.endpoints.endpoints[0].transport;
-    let second = &renderer.endpoints.endpoints[1].transport;
-    assert!(first.written > 159_000);
-    assert!(second.written > 70_000 && second.written < 75_000);
-    assert!(first.energy > 10_000.0 && second.energy > 5000.0);
-    assert_eq!(first.generation, 4);
-    assert_eq!(second.generation, 5);
-    assert_eq!(progress.load(Ordering::Acquire), 5000);
-}
-
-#[test]
-fn capture_retirement_follows_descriptor_drain_even_on_early_error() {
-    use std::cell::RefCell;
-    let order = RefCell::new(Vec::new());
-    let queued_pcm = RefCell::new(vec![0.75_f32; 64]);
-    let fail = || -> Result<(), ()> {
-        let _capture_retirement = CaptureRetirement(|| {
-            order.borrow_mut().push("invalidate");
-            queued_pcm.borrow_mut().fill(0.0);
-        });
-        let _descriptor = CaptureRetirement(|| {
-            order.borrow_mut().push("drain");
-        });
-        Err(())
-    };
-    assert!(fail().is_err());
-    assert_eq!(*order.borrow(), vec!["drain", "invalidate"]);
-    assert!(
-        queued_pcm
-            .borrow()
-            .iter()
-            .all(|sample| sample.abs() < f32::EPSILON)
-    );
+    assert_eq!(signals.progress.load(Ordering::Acquire), 4);
+    assert_eq!((renderer.frame, renderer.epoch), (128, 1));
+    assert!(!signals.invalid.load(Ordering::Acquire));
+    assert!(!signals.failed.load(Ordering::Acquire));
 }

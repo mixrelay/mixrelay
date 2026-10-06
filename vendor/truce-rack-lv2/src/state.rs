@@ -3,17 +3,22 @@
 //! State calls run on the worker control thread with DSP/editor access serialized. Lilv's
 //! convenience save API discards opaque properties after a native error, and its restore API
 //! returns void; call the standard LV2 interface directly so failures cannot become successful
-//! parameter-only snapshots. See <https://lv2plug.in/ns/ext/state>. File/path assets and nested
-//! URID containers are explicitly rejected until portable asset/container packaging is available.
+//! parameter-only snapshots. See <https://lv2plug.in/ns/ext/state>. Host-private regular-file
+//! assets referenced through `atom:Path` are packaged with the snapshot; nested URID containers
+//! and paths outside host-owned state directories remain unsupported.
 
 use super::{Error, LV2Feature, Lv2Plugin, PortKind, Result, UridMap};
+use assets::{FreePath, MakePath, MapPath};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::{CStr, c_void},
 };
 
-const LIMIT: usize = 4 * 1024 * 1024;
+mod assets;
+
+// Matches the host StateStore's single-blob bound, without a vendor -> host dependency.
+const LIMIT: usize = 64 * 1024 * 1024;
 const PROPERTY_LIMIT: usize = 1024 * 1024;
 const COUNT_LIMIT: usize = 4096;
 const PORTABLE_POD: u32 = 3;
@@ -49,6 +54,16 @@ struct Snapshot {
     native_state: bool,
     ports: BTreeMap<String, f32>,
     properties: Vec<Property>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    assets: Vec<Asset>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Asset {
+    path: String,
+    sha256: String,
+    data: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -64,6 +79,7 @@ struct Property {
 enum PropertyValue {
     Bytes(Vec<u8>),
     Urid(String),
+    Path(String),
 }
 
 fn error(message: impl Into<String>) -> Error {
@@ -97,8 +113,7 @@ fn validate_type(value: &str) -> Result<()> {
     if matches!(
         value.strip_prefix(ATOM),
         Some(
-            "Path"
-                | "Object"
+            "Object"
                 | "Blank"
                 | "Resource"
                 | "Literal"
@@ -182,7 +197,13 @@ unsafe extern "C" fn store(
         // SAFETY: the LV2 save contract guarantees a readable size-byte property until return;
         // the bound above limits every allocation and we copy before the callback returns.
         let bytes = unsafe { std::slice::from_raw_parts(value.cast::<u8>(), size) };
-        let value = if value_type == format!("{ATOM}URID") {
+        let value = if value_type == format!("{ATOM}Path") {
+            let path = CStr::from_bytes_with_nul(bytes)
+                .map_err(|_| error("LV2 atom:Path is not NUL-terminated"))?
+                .to_str()
+                .map_err(|_| error("LV2 atom:Path is not UTF-8"))?;
+            PropertyValue::Path(path.to_owned())
+        } else if value_type == format!("{ATOM}URID") {
             let raw: [u8; 4] = bytes
                 .try_into()
                 .map_err(|_| error("LV2 atom:URID has invalid size"))?;
@@ -242,6 +263,108 @@ fn input_ports(plugin: &Lv2Plugin) -> Result<BTreeMap<String, usize>> {
     Ok(result)
 }
 
+fn capture_native_assets(
+    plugin: &Lv2Plugin,
+    interface: &StateInterface,
+    context: &mut StoreContext<'_>,
+) -> Result<Vec<Asset>> {
+    if interface.restore.is_none() {
+        return Err(error("LV2 native state restore is unavailable"));
+    }
+    let mut asset_guard = plugin
+        .asset_dir
+        .lock()
+        .map_err(|_| error("LV2 asset directory lock is poisoned"))?;
+    if asset_guard.is_none() {
+        *asset_guard = Some(
+            tempfile::Builder::new()
+                .prefix("mixrelay-lv2-assets-")
+                .tempdir()
+                .map_err(|e| error(e.to_string()))?,
+        );
+    }
+    let root = asset_guard.as_ref().expect("created above").path();
+    let mut paths = assets::SavePaths::new(
+        root,
+        plugin.restored_assets.as_ref().map(tempfile::TempDir::path),
+    );
+    invoke_native_save(plugin, interface, context, &mut paths)?;
+    paths.package()
+}
+
+fn invoke_native_save(
+    plugin: &Lv2Plugin,
+    interface: &StateInterface,
+    context: &mut StoreContext<'_>,
+    paths: &mut assets::SavePaths,
+) -> Result<()> {
+    let save = interface
+        .save
+        .ok_or_else(|| error("LV2 native state save is unavailable"))?;
+    let handle = (paths as *mut assets::SavePaths).cast();
+    let map_path = MapPath {
+        handle,
+        abstract_path: assets::save_abstract,
+        absolute_path: assets::save_absolute,
+    };
+    let make_path = MakePath {
+        handle,
+        path: assets::save_make,
+    };
+    let free_path = FreePath {
+        handle: std::ptr::null_mut(),
+        free_path: assets::free_path,
+    };
+    let path_features = [
+        LV2Feature {
+            uri: assets::MAP_PATH_URI.as_ptr().cast(),
+            data: (&map_path as *const MapPath).cast_mut().cast(),
+        },
+        LV2Feature {
+            uri: assets::MAKE_PATH_URI.as_ptr().cast(),
+            data: (&make_path as *const MakePath).cast_mut().cast(),
+        },
+        LV2Feature {
+            uri: assets::FREE_PATH_URI.as_ptr().cast(),
+            data: (&free_path as *const FreePath).cast_mut().cast(),
+        },
+    ];
+    let mut features =
+        plugin.features.feature_ptrs[..plugin.features.feature_ptrs.len() - 1].to_vec();
+    features.extend(path_features.iter().map(std::ptr::from_ref));
+    features.push(std::ptr::null());
+    // SAFETY: caller serializes DSP/editor mutation; stack features and callback contexts remain
+    // alive through this synchronous LV2 call, and returned strings are malloc-owned.
+    let status = unsafe {
+        save(
+            (*plugin.instance).lv2_handle,
+            store,
+            (context as *mut StoreContext<'_>).cast(),
+            PORTABLE_POD,
+            features.as_ptr(),
+        )
+    };
+    if let Some(failure) = paths.failure.take() {
+        return Err(error(failure));
+    }
+    if let Some(failure) = context.failure.take() {
+        return Err(error(failure));
+    }
+    if status != 0 {
+        return Err(error(format!(
+            "LV2 native state save failed with status {status}"
+        )));
+    }
+    if context
+        .properties
+        .iter()
+        .any(|property| matches!(&property.value, PropertyValue::Path(path) if !paths.has_abstract_path(path)))
+    {
+        return Err(error("LV2 atom:Path was not mapped by state:mapPath"));
+    }
+    Ok(())
+}
+
 pub(super) fn save(plugin: &Lv2Plugin) -> Result<Vec<u8>> {
     let interface = interface(plugin)?;
     let mut context = StoreContext {
@@ -250,36 +373,13 @@ pub(super) fn save(plugin: &Lv2Plugin) -> Result<Vec<u8>> {
         bytes: 0,
         failure: None,
     };
-    if let Some(interface) = interface {
-        let save = interface
-            .save
-            .ok_or_else(|| error("LV2 native state save is unavailable"))?;
-        if interface.restore.is_none() {
-            return Err(error("LV2 native state restore is unavailable"));
-        }
-        // SAFETY: the caller serializes plugin DSP/editor mutation; all borrowed features and
-        // the stack store context outlive this synchronous standard LV2 interface call.
-        let status = unsafe {
-            save(
-                (*plugin.instance).lv2_handle,
-                store,
-                (&mut context as *mut StoreContext<'_>).cast(),
-                PORTABLE_POD,
-                plugin.features.feature_ptrs.as_ptr(),
-            )
-        };
-        if let Some(failure) = context.failure {
-            return Err(error(failure));
-        }
-        if status != 0 {
-            return Err(error(format!(
-                "LV2 native state save failed with status {status}"
-            )));
-        }
-    }
+    let packaged_assets = match interface {
+        Some(interface) => capture_native_assets(plugin, interface, &mut context)?,
+        None => Vec::new(),
+    };
     let ports: BTreeMap<_, _> = input_ports(plugin)?
         .into_iter()
-        .map(|(symbol, offset)| (symbol, plugin.control_values[offset]))
+        .map(|(symbol, offset)| (symbol, plugin.effective_control_value(offset)))
         .collect();
     if ports.len() > COUNT_LIMIT || ports.values().any(|value| !value.is_finite()) {
         return Err(error(
@@ -293,10 +393,11 @@ pub(super) fn save(plugin: &Lv2Plugin) -> Result<Vec<u8>> {
         native_state: interface.is_some(),
         ports,
         properties: context.properties,
+        assets: packaged_assets,
     };
     let bytes = serde_json::to_vec(&snapshot).map_err(|failure| error(failure.to_string()))?;
     if bytes.len() > LIMIT {
-        return Err(error("LV2 state exceeds 4 MiB"));
+        return Err(error("LV2 state exceeds 64 MiB"));
     }
     Ok(bytes)
 }
@@ -338,7 +439,7 @@ fn decode(
     map: &UridMap,
 ) -> Result<(Snapshot, Vec<RestoreProperty>)> {
     if bytes.len() > LIMIT {
-        return Err(error("LV2 state exceeds 4 MiB"));
+        return Err(error("LV2 state exceeds 64 MiB"));
     }
     let snapshot: Snapshot = serde_json::from_slice(bytes)
         .map_err(|failure| error(format!("invalid LV2 state: {failure}")))?;
@@ -346,8 +447,10 @@ fn decode(
         || snapshot.plugin_uri != plugin_uri
         || snapshot.byte_order != byte_order()
         || snapshot.properties.len() > COUNT_LIMIT
+        || snapshot.assets.len() > assets::MAX_ASSETS
         || snapshot.ports.len() > COUNT_LIMIT
-        || (!snapshot.native_state && !snapshot.properties.is_empty())
+        || (!snapshot.native_state
+            && (!snapshot.properties.is_empty() || !snapshot.assets.is_empty()))
     {
         return Err(error(
             "incompatible LV2 state identity, version, byte order, or property count",
@@ -365,7 +468,18 @@ fn decode(
             PropertyValue::Urid(uri) if property.value_type == format!("{ATOM}URID") => {
                 map_uri(map, uri)?.to_ne_bytes().to_vec()
             }
-            PropertyValue::Bytes(bytes) if property.value_type != format!("{ATOM}URID") => {
+            PropertyValue::Path(path) if property.value_type == format!("{ATOM}Path") => {
+                if !snapshot.assets.iter().any(|asset| &asset.path == path) {
+                    return Err(error("LV2 state references a missing asset"));
+                }
+                std::ffi::CString::new(path.as_str())
+                    .map_err(|_| error("LV2 asset path contains NUL"))?
+                    .into_bytes_with_nul()
+            }
+            PropertyValue::Bytes(bytes)
+                if property.value_type != format!("{ATOM}URID")
+                    && property.value_type != format!("{ATOM}Path") =>
+            {
                 bytes.clone()
             }
             _ => return Err(error("LV2 state value does not match its type")),
@@ -396,6 +510,11 @@ pub(super) fn restore(plugin: &mut Lv2Plugin, bytes: &[u8]) -> Result<()> {
     if snapshot.native_state != interface.is_some() {
         return Err(error("LV2 native state capability changed"));
     }
+    let restored_assets = if snapshot.assets.is_empty() {
+        None
+    } else {
+        Some(assets::materialize(&snapshot.assets)?)
+    };
     // All payload and control symbols are validated before invoking the native restore method.
     // Native restore can mutate before returning failure: the caller restores only a newly
     // prepared worker and discards that worker on failure, never commits it into a live graph.
@@ -403,6 +522,37 @@ pub(super) fn restore(plugin: &mut Lv2Plugin, bytes: &[u8]) -> Result<()> {
         let restore = interface
             .restore
             .ok_or_else(|| error("LV2 native state restore is unavailable"))?;
+        let mut paths = assets::RestorePaths::new(
+            restored_assets
+                .as_ref()
+                .map_or_else(|| std::path::Path::new(""), tempfile::TempDir::path),
+            &snapshot.assets,
+        );
+        let handle = (&mut paths as *mut assets::RestorePaths).cast();
+        let map_path = MapPath {
+            handle,
+            abstract_path: assets::restore_abstract,
+            absolute_path: assets::restore_absolute,
+        };
+        let free_path = FreePath {
+            handle: std::ptr::null_mut(),
+            free_path: assets::free_path,
+        };
+        let path_features = [
+            LV2Feature {
+                uri: assets::MAP_PATH_URI.as_ptr().cast(),
+                data: (&map_path as *const MapPath).cast_mut().cast(),
+            },
+            LV2Feature {
+                uri: assets::FREE_PATH_URI.as_ptr().cast(),
+                data: (&free_path as *const FreePath).cast_mut().cast(),
+            },
+        ];
+        let mut features =
+            plugin.features.feature_ptrs[..plugin.features.feature_ptrs.len() - 1].to_vec();
+        features.extend(path_features.iter().map(std::ptr::from_ref));
+        features.push(std::ptr::null());
+        // SAFETY: all asset files, features and properties outlive the synchronous native call.
         let status = unsafe {
             restore(
                 (*plugin.instance).lv2_handle,
@@ -411,15 +561,19 @@ pub(super) fn restore(plugin: &mut Lv2Plugin, bytes: &[u8]) -> Result<()> {
                     .cast_mut()
                     .cast(),
                 PORTABLE_POD,
-                plugin.features.feature_ptrs.as_ptr(),
+                features.as_ptr(),
             )
         };
+        if let Some(failure) = paths.failure {
+            return Err(error(failure));
+        }
         if status != 0 {
             return Err(error(format!(
                 "LV2 native state restore failed with status {status}"
             )));
         }
     }
+    plugin.restored_assets = restored_assets;
     for (symbol, offset) in ports {
         plugin.control_values[offset] = snapshot.ports[&symbol];
     }

@@ -1,25 +1,34 @@
 use super::super::*;
 use super::observed_endpoint_rate;
+use mixrelay_audio_graph::NodeConfig;
 use mixrelay_control_server::ControlBackend;
+use mixrelay_engine_service::default_duplex_document;
+
+#[test]
+fn initial_graph_and_native_inventory_are_empty_until_catalog_apply() {
+    let document = GraphDocument::new(1, Vec::new(), Vec::new());
+    let processor =
+        create_initial_processor(&document, default_peak_meter_bank(), render_format()).unwrap();
+    assert_eq!(processor.plan().revision(), document.revision);
+    assert!(processor.plan().meter_bindings().is_empty());
+    let backend = LinuxVirtualEndpointBackend::new();
+    let active = backend.active_spec.lock().unwrap();
+    assert!(active.endpoints.is_empty());
+    assert!(active.captures.is_empty());
+    assert!(*active == LinuxResourceSpec::from_document(&document).unwrap());
+}
 
 #[test]
 #[ignore = "requires owned isolated PipeWire daemon; never run against a user session"]
 fn native_pipewire_live_session_format_transaction() {
-    let mut document = default_duplex_document(1, None);
-    let NodeConfig::VirtualEndpoint(endpoint) = &document.nodes[0].config else {
-        panic!()
-    };
-    let binding = EndpointBinding {
-        node_id: document.nodes[0].id.as_str().into(),
-        spec: endpoint.spec.clone(),
-    };
-    let endpoint = PipeWireEndpoint::open_format(&binding, render_format()).unwrap();
-    let backend = LinuxVirtualEndpointBackend::new(binding);
+    let initial_document = GraphDocument::new(1, Vec::new(), Vec::new());
+    let backend = LinuxVirtualEndpointBackend::new();
     let status = Arc::new(AdapterRuntimeStatus::new(adapter_profile()).with_graph_format_control());
     let meters = default_peak_meter_bank();
-    let processor = create_initial_processor(meters.clone(), render_format()).unwrap();
+    let processor =
+        create_initial_processor(&initial_document, meters.clone(), render_format()).unwrap();
     let exchange = Arc::new(ProcessorExchange::new(1));
-    let controller = EngineGraphController::new_with_configuration(
+    let controller = EngineGraphController::new_with_initial_document(
         exchange.clone(),
         EngineGraphControllerConfig {
             format: render_format(),
@@ -31,63 +40,56 @@ fn native_pipewire_live_session_format_transaction() {
             graph_resources: backend.clone(),
             runtime_status: status.clone(),
         },
+        initial_document,
     );
     let worker_status = status.clone();
     let worker_exchange = exchange.clone();
     let worker_backend = backend.clone();
     let worker = thread::spawn(move || {
-        run_audio_worker(
-            processor,
-            worker_exchange,
-            worker_backend,
-            endpoint,
-            &worker_status,
-        );
+        run_audio_worker(processor, worker_exchange, &worker_backend, &worker_status);
     });
     let guard = mixrelay_engine_service::session::AudioWorker::new(status.clone(), worker);
     thread::sleep(Duration::from_millis(100));
+    let mut document = default_duplex_document(1, None);
     let fixture = attach_fixture(&mut document);
-    controller.apply_graph(document.clone()).unwrap();
+    controller
+        .apply_graph_request(document.clone().into())
+        .unwrap();
     wait_for_audio(&controller, &exchange, 2);
     exchange.reclaim_retired();
     backend.reclaim_retired();
     for (sample_rate, block_frames) in [(44_100, 256), (48_000, 1024), (96_000, 128), (44_100, 64)]
     {
-        let revision = exchange.revisions().active;
-        let response = controller
-            .reconfigure_session(mixrelay_control_protocol::SessionReconfigureRequest {
-                expected_revision: revision,
-                format: mixrelay_audio_io::session::SessionFormat {
-                    sample_rate,
-                    block_frames,
-                },
-            })
-            .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while exchange.revisions().active != response.revision
-            || observed_endpoint_rate() != Some(sample_rate)
-        {
-            assert!(
-                Instant::now() < deadline,
-                "format activation timed out: {:?}",
-                controller.status()
-            );
-            thread::sleep(Duration::from_millis(5));
-        }
+        let revision = activate_format(
+            &controller,
+            &exchange,
+            mixrelay_audio_io::session::SessionFormat {
+                sample_rate,
+                block_frames,
+            },
+        );
         let observed = controller.status();
         assert_eq!(observed.sample_rate, Some(sample_rate));
         assert_eq!(observed.buffer_frames, Some(block_frames));
-        wait_for_audio(&controller, &exchange, response.revision);
+        wait_for_audio(&controller, &exchange, revision);
         assert!(!status.stop_requested());
         assert_eq!(controller.graph().edges, document.edges);
         exchange.reclaim_retired();
         backend.reclaim_retired();
         let quantums = observed_quantums();
         println!(
-            "activated_revision={}; native_endpoint_rate={sample_rate}; dsp_rate={sample_rate}; prepared_block={block_frames}; callback_quantums_graph_pcm={quantums:?}; native_worker_alive=true",
-            response.revision
+            "activated_revision={revision}; native_endpoint_rate={sample_rate}; dsp_rate={sample_rate}; prepared_block={block_frames}; callback_quantums_graph_pcm={quantums:?}; native_worker_alive=true"
         );
     }
+    assert_invalid_format_keeps_graph(&controller, &exchange);
+    drop(guard);
+    drop(fixture);
+}
+
+fn assert_invalid_format_keeps_graph(
+    controller: &EngineGraphController,
+    exchange: &ProcessorExchange,
+) {
     let revision = exchange.revisions().active;
     let before = controller.graph();
     assert!(
@@ -103,8 +105,31 @@ fn native_pipewire_live_session_format_transaction() {
     );
     assert_eq!(controller.graph(), before);
     assert_eq!(exchange.revisions().active, revision);
-    drop(guard);
-    drop(fixture);
+}
+
+fn activate_format(
+    controller: &EngineGraphController,
+    exchange: &ProcessorExchange,
+    format: mixrelay_audio_io::session::SessionFormat,
+) -> u64 {
+    let response = controller
+        .reconfigure_session(mixrelay_control_protocol::SessionReconfigureRequest {
+            expected_revision: exchange.revisions().active,
+            format,
+        })
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while exchange.revisions().active != response.revision
+        || observed_endpoint_rate() != Some(format.sample_rate)
+    {
+        assert!(
+            Instant::now() < deadline,
+            "format activation timed out: {:?}",
+            controller.status()
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    response.revision
 }
 
 fn observed_quantums() -> std::collections::BTreeSet<(u64, u64)> {
@@ -122,9 +147,10 @@ fn observed_quantums() -> std::collections::BTreeSet<(u64, u64)> {
 fn attach_fixture(
     document: &mut mixrelay_audio_graph::GraphDocument,
 ) -> applications::tests::FixtureProcess {
-    let fixture = applications::tests::FixtureProcess::start(&std::path::PathBuf::from(
-        std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap(),
-    ));
+    let fixture = applications::tests::FixtureProcess::start(
+        &std::path::PathBuf::from(std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap()),
+        &[],
+    );
     let deadline = Instant::now() + Duration::from_secs(5);
     while !mixrelay_audio_io::linux::targets()
         .unwrap()

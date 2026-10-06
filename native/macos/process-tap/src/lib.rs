@@ -2,7 +2,7 @@
 #![cfg(target_os = "macos")]
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     ptr,
     sync::{
         OnceLock,
@@ -80,10 +80,12 @@ impl TapError {
 pub struct TapConfig {
     /// NUL-terminated UTF-8 application bundle identifier.
     pub bundle_id: *const std::ffi::c_char,
-    /// Whether the OS mutes the original application stream while captured.
+    /// Whether the selected process and owned device stream are muted while captured.
     pub mute_while_captured: bool,
     /// Power-of-two PCM capacity, from 256 through 1,048,576 frames.
     pub ring_capacity_frames: usize,
+    /// Exact NUL-terminated owned device UID for mute; null for preserved playback.
+    pub target_device_uid: *const std::ffi::c_char,
 }
 
 /// Independently sampled diagnostic values; PCM ownership is never transferred.
@@ -116,7 +118,7 @@ pub struct TapStats {
     pub clock_valid: bool,
 }
 
-const _: () = assert!(size_of::<TapConfig>() == 24 && align_of::<TapConfig>() == 8);
+const _: () = assert!(size_of::<TapConfig>() == 32 && align_of::<TapConfig>() == 8);
 const _: () = assert!(size_of::<TapError>() == 8 && align_of::<TapError>() == 4);
 const _: () = assert!(size_of::<TapStats>() == 96 && align_of::<TapStats>() == 8);
 
@@ -126,6 +128,7 @@ struct Resources {
     aggregate: u32,
     proc: *mut std::ffi::c_void,
     listener: bool,
+    inventory_listener: bool,
     resume: bool,
 }
 
@@ -147,6 +150,8 @@ impl Drop for RingOwner {
 pub struct TapSession {
     retirement_queue: usize,
     resources: Cell<Resources>,
+    selection: RefCell<Option<native::Selection>>,
+    inventory_epoch: AtomicU64,
     format: OnceLock<TapFormat>,
     ring: OnceLock<RingOwner>,
     lifecycle: TapLifecycle,

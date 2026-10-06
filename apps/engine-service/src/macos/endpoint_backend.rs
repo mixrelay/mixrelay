@@ -1,18 +1,19 @@
-//! Canonical graph-referenced endpoint inventory and ID-directed native control.
+//! Driver control reads actual devices; graph attachments own only `CoreAudio` clients.
 use mixrelay_audio_io::{
-    HostAudioBackendError, VirtualEndpointBackend, VirtualEndpointCapabilities, VirtualEndpointSpec,
+    HostAudioBackendError, VirtualEndpointBackend, VirtualEndpointCapabilities,
+    VirtualEndpointDeviceSettings, VirtualEndpointId, VirtualEndpointSpec,
 };
-use mixrelay_engine_service::endpoint_service;
-use mixrelay_macos_transport::endpoint_identity::{
-    endpoint_uid, format_endpoint_id, parse_endpoint_id,
-};
-use std::sync::atomic::{AtomicBool, Ordering};
+use mixrelay_driver_control::{DriverClient, DriverCommand, DriverSnapshot};
+use mixrelay_macos_transport::endpoint_identity::parse_endpoint_id;
+
 pub(super) const MAX_ENDPOINT_CHANNELS: u16 = 64;
+
 pub(super) struct MacVirtualEndpointBackend {
     capabilities: VirtualEndpointCapabilities,
-    staged: AtomicBool,
 }
+
 impl MacVirtualEndpointBackend {
+    /// Declares product channel/rate limits without starting Driver or graph IO.
     pub(super) fn new(rates: Vec<u32>) -> Self {
         Self {
             capabilities: VirtualEndpointCapabilities {
@@ -22,226 +23,196 @@ impl MacVirtualEndpointBackend {
                 supports_duplex: true,
                 supports_dynamic_creation: true,
             },
-            staged: AtomicBool::new(false),
         }
     }
-    pub(super) fn activate_pending(&self) -> Result<bool, &'static str> {
-        if !self.staged.load(Ordering::Acquire) {
-            return Ok(false);
-        }
-        // Called only inside the processor exchange's configured activation gate.
-        if !mixrelay_engine_service::endpoint_service::activate_prepared_endpoints() {
-            return Err("native endpoint inventory activation failed");
-        }
-        Ok(self.staged.swap(false, Ordering::AcqRel))
-    }
-    pub(super) fn activate_recovery() -> bool {
-        endpoint_service::activate_recovered_endpoints()
+
+    /// Reads actual Driver settings on a non-async control worker.
+    /// # Errors
+    /// Returns service transport or native discovery failures; never call on DSP.
+    pub(super) fn snapshot() -> Result<DriverSnapshot, HostAudioBackendError> {
+        DriverClient::new()
+            .and_then(|client| client.snapshot_blocking())
+            .map_err(backend_error)
     }
 }
-fn endpoint_identity(
-    id: &mixrelay_audio_io::VirtualEndpointId,
-) -> Result<[u8; 16], HostAudioBackendError> {
-    parse_endpoint_id(id.as_str()).ok_or_else(|| HostAudioBackendError::CapabilityUnavailable {
-        capability: format!(
-            "virtual endpoint identity must be a canonical lowercase UUID: {}",
-            id.as_str()
-        ),
-    })
-}
-impl VirtualEndpointBackend for MacVirtualEndpointBackend {
-    fn cancel_prepared_graph_attachments(&self) {
-        if self.staged.swap(false, Ordering::AcqRel) {
-            mixrelay_engine_service::endpoint_service::cancel_prepared_endpoints();
-        }
+
+fn backend_error(error: impl std::fmt::Display) -> HostAudioBackendError {
+    HostAudioBackendError::BackendFailure {
+        message: error.to_string(),
     }
-    fn settings(&self) -> Option<mixrelay_audio_io::VirtualEndpointSettings> {
-        let mut settings =
-            mixrelay_audio_io::VirtualEndpointSettings::configurable(&self.capabilities);
-        settings.creation_template = Some(mixrelay_audio_io::VirtualEndpointCreationTemplate {
-            render: stream(2),
-            capture: stream(2),
-            supported_sample_rates: self.capabilities.supported_sample_rates.clone(),
-            default_sample_rate: 48_000,
+}
+
+fn device<'a>(
+    snapshot: &'a DriverSnapshot,
+    id: &VirtualEndpointId,
+) -> Result<&'a VirtualEndpointDeviceSettings, HostAudioBackendError> {
+    if parse_endpoint_id(id.as_str()).is_none() {
+        return Err(HostAudioBackendError::CapabilityUnavailable {
+            capability: format!(
+                "virtual endpoint identity must be a canonical lowercase UUID: {}",
+                id.as_str()
+            ),
         });
-        settings.devices = endpoint_service::endpoint_specs()
-            .iter()
-            .map(device_settings)
-            .collect();
-        Some(settings)
     }
+    snapshot
+        .settings
+        .devices
+        .iter()
+        .find(|device| device.spec.id == *id)
+        .ok_or_else(|| backend_error(format!("Driver device {} is absent", id.as_str())))
+}
+
+fn resolve(
+    snapshot: &DriverSnapshot,
+    desired: &[VirtualEndpointSpec],
+) -> Result<Vec<VirtualEndpointSpec>, HostAudioBackendError> {
+    desired
+        .iter()
+        .map(|reference| {
+            let actual = device(snapshot, &reference.id)?;
+            if (reference.render.is_some() && actual.spec.render.is_none())
+                || (reference.capture.is_some() && actual.spec.capture.is_none())
+            {
+                return Err(backend_error(format!(
+                    "Driver device {} lacks a referenced direction",
+                    reference.id.as_str()
+                )));
+            }
+            let mut spec = actual.spec.clone();
+            // Only referenced directions open graph clients; geometry belongs to Driver.
+            if reference.render.is_none() {
+                spec.render = None;
+            }
+            if reference.capture.is_none() {
+                spec.capture = None;
+            }
+            Ok(spec)
+        })
+        .collect()
+}
+
+impl VirtualEndpointBackend for MacVirtualEndpointBackend {
+    fn settings(&self) -> Option<mixrelay_audio_io::VirtualEndpointSettings> {
+        Self::snapshot().ok().map(|snapshot| snapshot.settings)
+    }
+
     fn capabilities(&self) -> &VirtualEndpointCapabilities {
         &self.capabilities
     }
-    fn sample_rate(
-        &self,
-        id: &mixrelay_audio_io::VirtualEndpointId,
-    ) -> Result<u32, HostAudioBackendError> {
-        mixrelay_engine_service::endpoint_service::device_sample_rate(endpoint_identity(id)?)
-            .ok_or_else(|| HostAudioBackendError::BackendFailure {
-                message: format!(
-                    "virtual device {} has no native rate observation",
+
+    fn sample_rate(&self, id: &VirtualEndpointId) -> Result<u32, HostAudioBackendError> {
+        device(&Self::snapshot()?, id)?
+            .observed_sample_rate
+            .ok_or_else(|| {
+                backend_error(format!(
+                    "Driver device {} has no native rate observation",
                     id.as_str()
-                ),
+                ))
             })
     }
+
     fn set_sample_rate(
         &self,
-        id: &mixrelay_audio_io::VirtualEndpointId,
+        id: &VirtualEndpointId,
         rate: u32,
     ) -> Result<(), HostAudioBackendError> {
-        if mixrelay_engine_service::endpoint_service::set_device_sample_rate(
-            endpoint_identity(id)?,
-            rate,
-        ) {
-            Ok(())
-        } else {
-            Err(HostAudioBackendError::BackendFailure {
-                message: format!("virtual device {} rejected sample rate {rate}", id.as_str()),
-            })
+        let client = DriverClient::new().map_err(backend_error)?;
+        let snapshot = client.snapshot_blocking().map_err(backend_error)?;
+        let actual = device(&snapshot, id)?;
+        if !actual.can_set_sample_rate || !actual.supported_sample_rates.contains(&rate) {
+            return Err(backend_error(format!(
+                "Driver device {} does not support rate {rate}",
+                id.as_str()
+            )));
         }
+        let mut spec = actual.spec.clone();
+        spec.default_sample_rate = rate;
+        let result = client
+            .mutate_blocking(&DriverCommand::Configure {
+                expected_revision: snapshot.revision,
+                spec,
+            })
+            .map_err(backend_error)?;
+        if device(&result, id)?.observed_sample_rate != Some(rate) {
+            return Err(backend_error(
+                "Driver rate readback differs from requested rate",
+            ));
+        }
+        Ok(())
     }
+
+    fn resolve_graph_devices(
+        &self,
+        desired: &[VirtualEndpointSpec],
+    ) -> Result<Vec<VirtualEndpointSpec>, HostAudioBackendError> {
+        if desired.is_empty() {
+            return Ok(Vec::new());
+        }
+        resolve(&Self::snapshot()?, desired)
+    }
+
     fn prepare_graph_attachments(
         &self,
         desired: &[VirtualEndpointSpec],
     ) -> Result<(), HostAudioBackendError> {
-        if self.staged.load(Ordering::Acquire) {
-            return Err(HostAudioBackendError::BackendFailure {
-                message: "an endpoint inventory is already staged".into(),
-            });
-        }
-        let specs = desired
-            .iter()
-            .map(|endpoint| {
-                Ok(mixrelay_engine_service::endpoint_registry::EndpointSpec {
-                    id: endpoint_identity(&endpoint.id)?,
-                    display_name: endpoint.display_name.clone(),
-                    sample_rate: endpoint.default_sample_rate,
-                    capacity_frames: 16_384,
-                    render_channels: endpoint
-                        .render
-                        .map_or(0, |stream| u32::from(stream.channels)),
-                    capture_channels: endpoint
-                        .capture
-                        .map_or(0, |stream| u32::from(stream.channels)),
-                })
-            })
-            .collect::<Result<Vec<_>, HostAudioBackendError>>()?;
-        mixrelay_engine_service::endpoint_service::prepare_endpoints(&specs).map_err(|error| {
-            HostAudioBackendError::BackendFailure {
-                message: format!("endpoint inventory preparation failed: {error}"),
-            }
-        })?;
-        self.staged.store(true, Ordering::Release);
-        Ok(())
-    }
-}
-
-fn stream(channels: u16) -> Option<mixrelay_audio_io::StreamSpec> {
-    use mixrelay_audio_io::{ChannelLayout, StreamSpec};
-    (channels != 0).then_some(StreamSpec {
-        channels,
-        channel_layout: match channels {
-            1 => ChannelLayout::Mono,
-            2 => ChannelLayout::Stereo,
-            _ => ChannelLayout::Discrete,
-        },
-    })
-}
-fn device_settings(
-    native: &mixrelay_engine_service::endpoint_registry::EndpointSpec,
-) -> mixrelay_audio_io::VirtualEndpointDeviceSettings {
-    let observed_sample_rate = endpoint_service::device_sample_rate(native.id);
-    let supported_sample_rates = mixrelay_audio_io::format_contract::supported_rates(|rate| {
-        endpoint_service::device_supports_sample_rate(native.id, rate)
-    });
-    observed_device_settings(native, observed_sample_rate, supported_sample_rates)
-}
-fn observed_device_settings(
-    native: &mixrelay_engine_service::endpoint_registry::EndpointSpec,
-    observed_sample_rate: Option<u32>,
-    supported_sample_rates: Vec<u32>,
-) -> mixrelay_audio_io::VirtualEndpointDeviceSettings {
-    mixrelay_audio_io::VirtualEndpointDeviceSettings {
-        native_device_ids: vec![endpoint_uid(native.id)],
-        spec: VirtualEndpointSpec {
-            id: mixrelay_audio_io::VirtualEndpointId::new(format_endpoint_id(native.id)),
-            display_name: native.display_name.clone(),
-            render: stream(
-                u16::try_from(native.render_channels)
-                    .expect("registry validates at most 64 channels"),
-            ),
-            capture: stream(
-                u16::try_from(native.capture_channels)
-                    .expect("registry validates at most 64 channels"),
-            ),
-            default_sample_rate: native.sample_rate,
-            supported_sample_rates: supported_sample_rates.clone(),
-        },
-        can_set_sample_rate: observed_sample_rate.is_some() && !supported_sample_rates.is_empty(),
-        observed_sample_rate,
-        supported_sample_rates,
+        self.resolve_graph_devices(desired).map(|_| ())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mixrelay_engine_service::endpoint_registry::EndpointSpec;
+    use mixrelay_driver_control::DriverState;
 
     #[test]
-    fn native_boundary_accepts_only_canonical_uuid_not_names_or_default_aliases() {
-        let text = "17e59d73-42c1-4f11-a8b4-6c2d913357e0";
-        let id = endpoint_identity(&text.into()).unwrap();
-        assert_eq!(format_endpoint_id(id), text);
-        for invalid in [
-            "mixrelay.virtual-io",
-            "default",
-            "17E59D73-42c1-4f11-a8b4-6c2d913357e0",
-        ] {
-            assert!(matches!(
-                endpoint_identity(&invalid.into()),
-                Err(HostAudioBackendError::CapabilityUnavailable { .. })
-            ));
-        }
-    }
-
-    #[test]
-    fn per_device_settings_preserve_native_identity_name_geometry_and_actual_rate() {
-        let native = EndpointSpec {
-            id: [7; 16],
-            display_name: "Shared studio".into(),
-            sample_rate: 48_000,
-            capacity_frames: 64,
-            render_channels: 7,
-            capture_channels: 0,
+    fn driver_resolution_uses_actual_geometry_without_retargeting_identity() {
+        let capabilities = MacVirtualEndpointBackend::new(vec![48_000]).capabilities;
+        let mut settings = mixrelay_audio_io::VirtualEndpointSettings::configurable(&capabilities);
+        let actual = VirtualEndpointSpec {
+            id: "01010101-0101-0101-0101-010101010101".into(),
+            display_name: "Driver-owned device".into(),
+            render: Some(mixrelay_audio_io::StreamSpec {
+                channels: 7,
+                channel_layout: mixrelay_audio_io::ChannelLayout::Discrete,
+            }),
+            capture: Some(mixrelay_audio_io::StreamSpec {
+                channels: 3,
+                channel_layout: mixrelay_audio_io::ChannelLayout::Discrete,
+            }),
+            supported_sample_rates: vec![48_000],
+            default_sample_rate: 48_000,
         };
-        let settings = observed_device_settings(&native, Some(44_100), vec![44_100, 48_000]);
-        assert_eq!(endpoint_identity(&settings.spec.id).unwrap(), native.id);
-        assert_eq!(settings.spec.display_name, native.display_name);
-        assert_eq!(settings.spec.render.unwrap().channels, 7);
-        assert_eq!(settings.spec.capture, None);
-        assert_eq!(settings.spec.default_sample_rate, 48_000);
-        assert_eq!(settings.observed_sample_rate, Some(44_100));
-        assert!(settings.can_set_sample_rate);
-        let unavailable = observed_device_settings(&native, None, Vec::new());
-        assert!(!unavailable.can_set_sample_rate);
-        assert_eq!(unavailable.observed_sample_rate, None);
-        assert_eq!(unavailable.spec.id, settings.spec.id);
-        assert_eq!(settings.native_device_ids, vec![endpoint_uid(native.id)]);
-        assert_eq!(unavailable.native_device_ids, settings.native_device_ids);
-    }
-
-    #[test]
-    fn creation_template_has_no_implicitly_existing_native_identity() {
-        let backend =
-            MacVirtualEndpointBackend::new(mixrelay_audio_io::formats::SAMPLE_RATES.to_vec());
-        let settings = backend.settings().unwrap();
-        let template = settings.creation_template.unwrap();
-        assert_eq!(template.render.unwrap().channels, 2);
-        assert_eq!(template.capture.unwrap().channels, 2);
-        assert_eq!(template.default_sample_rate, 48_000);
-        assert_eq!(settings.render_channels.last(), Some(&64));
-        assert_eq!(settings.capture_channels.last(), Some(&64));
+        settings.devices.push(VirtualEndpointDeviceSettings {
+            spec: actual.clone(),
+            native_device_ids: vec![],
+            observed_sample_rate: Some(48_000),
+            can_set_sample_rate: true,
+            supported_sample_rates: vec![48_000],
+            native_formats: mixrelay_audio_io::NativeDeviceFormats::default(),
+        });
+        let snapshot = DriverSnapshot {
+            protocol_version: 1,
+            revision: 3,
+            state: DriverState::Ready,
+            installed_version: None,
+            owner_process_id: None,
+            settings,
+            persistence_error: None,
+        };
+        let mut requested = actual.clone();
+        requested.render.as_mut().unwrap().channels = 2;
+        requested.capture.as_mut().unwrap().channels = 2;
+        assert_eq!(
+            resolve(&snapshot, &[requested.clone()]).unwrap(),
+            vec![actual.clone()]
+        );
+        requested.render = None;
+        let resolved = resolve(&snapshot, &[requested.clone()]).unwrap();
+        assert_eq!(resolved[0].render, None);
+        assert_eq!(resolved[0].capture, actual.capture);
+        requested.id = "02020202-0202-0202-0202-020202020202".into();
+        assert!(resolve(&snapshot, &[requested]).is_err());
+        assert!(resolve(&snapshot, &[]).unwrap().is_empty());
+        assert_eq!(snapshot.settings.devices[0].spec, actual);
     }
 }

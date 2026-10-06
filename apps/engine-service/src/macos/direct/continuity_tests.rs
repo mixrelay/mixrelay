@@ -10,7 +10,6 @@ use std::sync::Arc;
 struct ControlFixture {
     status: Arc<AdapterRuntimeStatus>,
     devices: crate::macos_devices::MacDevices,
-    endpoints: super::super::endpoint_backend::MacVirtualEndpointBackend,
     exchange: ProcessorExchange,
 }
 
@@ -20,7 +19,6 @@ impl ControlFixture {
         Self {
             devices: crate::macos_devices::MacDevices::new(Arc::clone(&status), 48_000, 32),
             status,
-            endpoints: super::super::endpoint_backend::MacVirtualEndpointBackend::new(vec![48_000]),
             exchange: ProcessorExchange::new(1),
         }
     }
@@ -28,7 +26,6 @@ impl ControlFixture {
     fn context(&self) -> AudioContext<'_> {
         AudioContext {
             exchange: &self.exchange,
-            endpoint_backend: &self.endpoints,
             runtime_status: &self.status,
             devices: &self.devices,
         }
@@ -114,8 +111,6 @@ fn internal_add_remove_keeps_callback_pcm_and_frame_epoch_continuous() {
         progress: &signals.progress,
         failed: &signals.failed,
         invalid: &signals.invalid,
-        endpoints: EndpointBoundaries::empty(),
-        reconfigure: &signals.reconfigure,
     };
     let address = std::ptr::from_ref(&renderer);
     render_passthrough(&mut renderer);
@@ -133,6 +128,29 @@ fn internal_add_remove_keeps_callback_pcm_and_frame_epoch_continuous() {
     assert_eq!(signals.progress.load(Ordering::Acquire), 101);
     let status = control.status.status(installed.format());
     assert_eq!((status.underruns, status.overruns), (0, 0));
+}
+
+#[test]
+fn latency_only_publication_passes_the_direct_callback_guard_without_rebind() {
+    let control = ControlFixture::new();
+    let mut processor = processor_with_internal_node(1, false);
+    let installed = Arc::clone(processor.plan());
+    let rebind = AtomicBool::new(false);
+    let activation = GraphActivation {
+        installed: &installed,
+        context: control.context(),
+        rebind: &rebind,
+    };
+    control.exchange.observe_plan(Arc::clone(&installed));
+    assert!(control.exchange.refresh_latency().unwrap());
+    assert!(!control.exchange.has_pending());
+    assert!(control.exchange.has_pending_latency());
+    let before = control.exchange.revisions();
+    assert!(activation.activate(&mut processor));
+    assert!(!control.exchange.has_pending_latency());
+    assert!(!rebind.load(Ordering::Acquire));
+    assert_eq!(control.exchange.revisions(), before);
+    assert!(Arc::ptr_eq(processor.plan(), &installed));
 }
 
 #[test]

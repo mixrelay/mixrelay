@@ -1,5 +1,6 @@
 mod compiler;
 mod model;
+mod provider_layout;
 
 #[cfg(test)]
 mod tests;
@@ -19,5 +20,10 @@ pub use model::{
     CompiledPort, CompressorConfig, DeviceSelector, EdgeId, EdgeSpec, ExecutionPlan,
     FROM_OS_PORT_ID, GainConfig, GraphDocument, LimiterConfig, MixerConfig, NodeConfig,
     NodeControl, NodeId, NodeKind, NodeSpec, NodeTypeId, PortDirection, PortId, ProviderNodeConfig,
-    ProviderPorts, RenderFormat, TO_OS_PORT_ID, VirtualEndpointConfig, VirtualEndpointReference,
+    RenderFormat, TO_OS_PORT_ID, VirtualEndpointConfig, VirtualEndpointReference,
+};
+pub use provider_layout::{
+    MAX_PROVIDER_BUS_ID_BYTES, MAX_PROVIDER_BUS_NAME_BYTES, MAX_PROVIDER_BUSES_PER_DIRECTION,
+    MAX_PROVIDER_CHANNELS_PER_DIRECTION, MAX_PROVIDER_LAYOUT_ID_BYTES, ProviderBus,
+    ProviderBusKind, ProviderChannelFormat, ProviderPorts, ProviderPortsError,
 };

@@ -16,6 +16,8 @@ interface Entry {
   name: string;
   sequence: number;
   command: boolean;
+  /** Present a new node once; a user-closed native window stays closed across graph edits. */
+  autoOpen: boolean;
   retry: Action;
   timer?: ReturnType<typeof setTimeout>;
 }
@@ -49,6 +51,7 @@ class EditorSession {
     nodes: [string, string, string][],
     private callbacks: Callbacks,
     private expectedRevision: number,
+    previousStatuses: ReadonlyMap<string, ProcessorEditorStatus>,
   ) {
     this.entries = new Map(
       nodes.map(([id, , name]) => [
@@ -58,6 +61,7 @@ class EditorSession {
           name,
           sequence: 0,
           command: false,
+          autoOpen: !previousStatuses.has(id),
           retry: { kind: 'poll' },
         },
       ]),
@@ -83,10 +87,15 @@ class EditorSession {
     }
     this.callbacks.issue(entry, null);
     if (status.state === 'closed') {
-      void this.run(entry, { kind: 'open' });
+      entry.retry = { kind: 'open' };
+      if (entry.autoOpen) {
+        entry.autoOpen = false;
+        void this.run(entry, { kind: 'open' });
+      }
       return;
     }
     if (status.state === 'open' || status.state === 'opening') {
+      entry.autoOpen = false;
       entry.timer = setTimeout(() => {
         void this.run(entry, { kind: 'poll' });
       }, EDITOR_POLL_MS);
@@ -180,6 +189,7 @@ export function useProcessorEditors(
           ),
       },
       expectedRevision,
+      statusesRef.current,
     );
     sessionRef.current = session;
     session.start();

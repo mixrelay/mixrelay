@@ -15,6 +15,68 @@ use std::f64::consts::TAU;
 mod realtime;
 
 #[test]
+fn authority_feedback_reset_preserves_queued_pcm_and_filter_history_without_allocation() {
+    for relation in [ClockRelation::Independent, ClockRelation::ProvenSameClock] {
+        let mut options = config(1, 48_000, 48_000);
+        options.clock_relation = relation;
+        let mut bridge = AsyncClockBridge::new(options).unwrap();
+        let mut reference = AsyncClockBridge::new(options).unwrap();
+        let input: Vec<f32> = (0..1_024)
+            .map(|frame| (TAU * 997.0 * f64::from(frame) / 48_000.0).sin() as f32 * 0.25)
+            .collect();
+        for converter in [&mut bridge, &mut reference] {
+            converter.push_interleaved(&input).unwrap();
+            converter.pull_interleaved(&mut [0.0; 321]).unwrap();
+        }
+        let queued = (bridge.queued_input_frames(), bridge.queued_output_frames());
+        let allocated = allocation_counter::measure(|| bridge.reset_clock_feedback().unwrap());
+        assert_eq!(allocated.count_total, 0);
+        assert_eq!(
+            queued,
+            (bridge.queued_input_frames(), bridge.queued_output_frames())
+        );
+        assert!(bridge.primed && bridge.started);
+        assert_eq!(bridge.epoch, 0);
+        let (mut actual, mut expected) = ([0.0; 512], [0.0; 512]);
+        let actual_frames = bridge
+            .pull_interleaved(&mut actual)
+            .unwrap()
+            .transferred_frames;
+        let expected_frames = reference
+            .pull_interleaved(&mut expected)
+            .unwrap()
+            .transferred_frames;
+        assert_eq!(actual_frames, expected_frames);
+        assert_eq!(
+            actual, expected,
+            "nominal authority changes preserve the exact tail"
+        );
+    }
+}
+
+#[test]
+fn authority_feedback_reset_clears_drift_but_retains_the_transport_epoch() {
+    let mut bridge = AsyncClockBridge::new(config(1, 48_000, 48_000)).unwrap();
+    bridge.reset(7, Discontinuity::StreamRestart);
+    bridge
+        .observe_clock(ClockFeedback {
+            queue: FeedbackQueue::Output,
+            epoch: 7,
+            queued_frames: 0,
+            target_frames: 1_024,
+            elapsed_frames: 48_000,
+            clock_running: true,
+        })
+        .unwrap();
+    assert!(bridge.correction_ppm() > 0.0);
+    bridge.push_interleaved(&[0.25; 512]).unwrap();
+    bridge.reset_clock_feedback().unwrap();
+    assert_eq!(bridge.correction_ppm(), 0.0);
+    assert_eq!(bridge.epoch, 7);
+    assert_eq!(bridge.queued_input_frames(), 512);
+}
+
+#[test]
 fn processing_quantum_covers_actual_converter_batches_but_not_same_clock_copies() {
     for (from, to) in [(96_000, 48_000), (48_000, 96_000), (48_000, 48_000)] {
         let bridge = AsyncClockBridge::new(config(1, from, to)).unwrap();

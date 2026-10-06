@@ -1,7 +1,7 @@
-//! HAL callback routing, with separate writer authority for each direction.
+//! HAL-owned playback-to-capture callback routing.
 //!
 //! Control binds/unbinds only after callback readers drain. HAL is the render
-//! writer, but only requests capture invalidation: the engine owns that writer.
+//! writer for both rings. Capture contains the OS-mixed playback exactly once.
 //! Exhausted generations stay pending until control replaces the mapping.
 use crate::endpoint_transport::{
     EndpointTransport, EndpointTransportConfig as EndpointConfig,
@@ -12,6 +12,7 @@ use crate::endpoint_transport::{
 };
 use crate::shared_audio_buffer::{self as buffer, SharedAudioBuffer};
 use std::{
+    cell::UnsafeCell,
     ffi::c_void,
     ptr,
     sync::atomic::{AtomicPtr, AtomicU32, Ordering},
@@ -19,6 +20,14 @@ use std::{
 
 const MAX_FRAME: u64 = (1 << 48) - 1;
 const MAX_EXACT_FRAME: f64 = 281_474_976_710_655.0;
+const MAX_LOOPBACK_FRAMES: u32 = 4096;
+
+struct Loopback {
+    buffer: *mut SharedAudioBuffer,
+    // Only the serialized render callback accesses scratch. Capture callbacks
+    // access buffer alone; control frees this allocation after callbacks drain.
+    scratch: UnsafeCell<Box<[f32]>>,
+}
 
 #[repr(C)]
 pub struct HalIoContext {
@@ -28,7 +37,7 @@ pub struct HalIoContext {
     clock_running: bool,
     transport: AtomicPtr<EndpointTransport>,
     render_buffer: AtomicPtr<SharedAudioBuffer>,
-    capture_buffer: AtomicPtr<SharedAudioBuffer>,
+    capture_buffer: AtomicPtr<Loopback>,
     pub render_channels: u32,
     pub capture_channels: u32,
 }
@@ -65,6 +74,24 @@ impl HalIoContext {
             previous.render_activity.load(Ordering::Acquire),
             Ordering::Relaxed,
         );
+    }
+
+    fn capture(&self) -> *mut SharedAudioBuffer {
+        let loopback = self.capture_buffer.load(Ordering::Acquire);
+        // SAFETY: control drains callbacks before releasing the attached state.
+        unsafe { loopback.as_ref() }.map_or(ptr::null_mut(), |state| state.buffer)
+    }
+
+    /// Releases local callback storage after readers drain, without changing
+    /// shared lifecycle state (a replacement may reuse the same mapping).
+    pub fn release(&mut self) {
+        let state = self.capture_buffer.swap(ptr::null_mut(), Ordering::AcqRel);
+        if !state.is_null() {
+            // SAFETY: bind allocated this state and all callbacks have drained.
+            drop(unsafe { Box::from_raw(state) });
+        }
+        self.transport.store(ptr::null_mut(), Ordering::Release);
+        self.render_buffer.store(ptr::null_mut(), Ordering::Relaxed);
     }
 }
 
@@ -135,7 +162,29 @@ pub unsafe extern "C" fn mr_hal_io_bind(
         return false;
     }
     context.render_buffer.store(render, Ordering::Relaxed);
-    context.capture_buffer.store(capture, Ordering::Relaxed);
+    let loopback = if capture.is_null() {
+        ptr::null_mut()
+    } else {
+        Box::into_raw(Box::new(Loopback {
+            buffer: capture,
+            scratch: UnsafeCell::new(
+                vec![
+                    0.0;
+                    if context.render_channels == context.capture_channels {
+                        0
+                    } else {
+                        MAX_LOOPBACK_FRAMES as usize * context.capture_channels as usize
+                    }
+                ]
+                .into_boxed_slice(),
+            ),
+        }))
+    };
+    let previous = context.capture_buffer.swap(loopback, Ordering::AcqRel);
+    if !previous.is_null() {
+        // SAFETY: bind is control-only and preceding callbacks have drained.
+        drop(unsafe { Box::from_raw(previous) });
+    }
     context.transport.store(transport, Ordering::Release);
     unsafe {
         // Binding is preparation, not a ready lifecycle publication. Inherited
@@ -154,14 +203,12 @@ pub unsafe extern "C" fn mr_hal_io_bind(
 /// may retire the transport only after this call returns.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mr_hal_io_unbind(context: *mut HalIoContext) {
-    let Some(context) = (unsafe { context.as_ref() }) else {
+    let Some(context) = (unsafe { context.as_mut() }) else {
         return;
     };
     unsafe {
         mr_endpoint_transport_begin_clock_transition(context.transport.load(Ordering::Acquire));
-        buffer::mr_shared_audio_buffer_request_epoch(
-            context.capture_buffer.load(Ordering::Acquire),
-        );
+        buffer::mr_shared_audio_buffer_request_epoch(context.capture());
         mr_endpoint_transport_clock_state(
             context.transport.load(Ordering::Acquire),
             context.clock_epoch,
@@ -173,13 +220,7 @@ pub unsafe extern "C" fn mr_hal_io_unbind(context: *mut HalIoContext) {
             0,
         );
     }
-    context.transport.store(ptr::null_mut(), Ordering::Release);
-    context
-        .render_buffer
-        .store(ptr::null_mut(), Ordering::Relaxed);
-    context
-        .capture_buffer
-        .store(ptr::null_mut(), Ordering::Relaxed);
+    context.release();
 }
 
 /// # Safety
@@ -202,9 +243,7 @@ pub unsafe extern "C" fn mr_hal_io_requires_replacement(context: *const HalIoCon
             || buffer::mr_shared_audio_buffer_requires_replacement(
                 context.render_buffer.load(Ordering::Acquire),
             )
-            || buffer::mr_shared_audio_buffer_requires_replacement(
-                context.capture_buffer.load(Ordering::Acquire),
-            )
+            || buffer::mr_shared_audio_buffer_requires_replacement(context.capture())
     }
 }
 
@@ -248,23 +287,29 @@ pub unsafe extern "C" fn mr_hal_io_clock_state(
         // begin_stream hid the clock before resetting any PCM epoch. In-flight
         // old writers retain their expected epoch and fail after this rearm;
         // writer claims prevent consuming rearm until the preceding writer drains.
-        buffer::mr_shared_audio_buffer_request_epoch(
-            context.capture_buffer.load(Ordering::Acquire),
-        );
+        // HAL owns both writers, so transitional render PCM must not survive a rate commit
+        // either. Otherwise its old watermark rejects the first block in the new timeline.
+        for ring in [
+            context.render_buffer.load(Ordering::Relaxed),
+            context.capture(),
+        ] {
+            buffer::mr_shared_audio_buffer_request_epoch(ring);
+            buffer::mr_shared_audio_buffer_try_begin_epoch(ring);
+        }
         mr_endpoint_transport_clock_state(transport, context.clock_epoch, sample_rate, running);
     };
 }
 
 /// # Safety
 /// Control has serialized lifecycle transitions and drained this HAL writer.
-/// Remote engine writers/readers need not be drained: no shared storage clears.
+/// Remote readers need not be drained: no shared storage clears.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mr_hal_io_begin_stream(context: *mut HalIoContext) -> bool {
     let Some(context) = (unsafe { context.as_ref() }) else {
         return false;
     };
     let transport = context.transport.load(Ordering::Acquire);
-    let capture = context.capture_buffer.load(Ordering::Relaxed);
+    let capture = context.capture();
     let render = context.render_buffer.load(Ordering::Relaxed);
     // A client start is lifecycle evidence even if the mapping has not arrived.
     // Retain it in the context so a later bind publishes AwaitingRender instead
@@ -281,22 +326,16 @@ pub unsafe extern "C" fn mr_hal_io_begin_stream(context: *mut HalIoContext) -> b
         return false;
     }
     unsafe {
-        // Capture is reader-owned here: mark pending, never consume its epoch.
-        if !capture.is_null() {
-            buffer::mr_shared_audio_buffer_request_epoch(capture);
+        for ring in [render, capture] {
+            if ring.is_null() {
+                continue;
+            }
+            if buffer::mr_shared_audio_buffer_try_begin_epoch(ring) == 0 {
+                buffer::mr_shared_audio_buffer_retire_busy_producer_after_drain(ring);
+                return false;
+            }
         }
-        // Render is HAL-owned. Exhaustion marks pending and fails the start;
-        // engine control must replace this endpoint, including failed-start cases.
-        if render.is_null() || buffer::mr_shared_audio_buffer_try_begin_epoch(render) != 0 {
-            return true;
-        }
-        // The native registry holds control + Device::freeze around every
-        // start/replace/rate lifecycle, so this sole HAL writer has drained.
-        // A remaining render claim may belong to a crashed predecessor HAL;
-        // retire that mapping rather than clearing busy or retrying forever.
-        // Capture is deliberately excluded: its remote engine writer may live.
-        buffer::mr_shared_audio_buffer_retire_busy_producer_after_drain(render);
-        false
+        true
     }
 }
 
@@ -340,10 +379,14 @@ pub unsafe extern "C" fn mr_hal_io_write_render(
         return false;
     };
     if context.render_channels == 0
+        || count > MAX_LOOPBACK_FRAMES
         || (count != 0 && samples.is_null())
         || !valid_range(start, count)
     {
         return false;
+    }
+    if count == 0 {
+        return true;
     }
     let transport = context.transport.load(Ordering::Acquire);
     let render = context.render_buffer.load(Ordering::Relaxed);
@@ -359,12 +402,39 @@ pub unsafe extern "C" fn mr_hal_io_write_render(
     {
         return false;
     }
-    unsafe {
-        if count != 0 {
-            context.render_activity.store(3, Ordering::Release);
-            buffer::mr_shared_audio_buffer_set_producer_activity(render, 3);
-            mr_endpoint_transport_clock_demand(transport, true, start + u64::from(count), count);
+    let state = context.capture_buffer.load(Ordering::Acquire);
+    if let Some(state) = unsafe { state.as_ref() } {
+        let input = unsafe {
+            std::slice::from_raw_parts(samples, count as usize * context.render_channels as usize)
+        };
+        let output = if context.render_channels == context.capture_channels {
+            input
+        } else {
+            // SAFETY: this is the sole serialized render writer; storage was
+            // allocated at bind and count is bounded above.
+            let scratch = unsafe { &mut *state.scratch.get() };
+            let output = &mut scratch[..count as usize * context.capture_channels as usize];
+            output.fill(0.0);
+            let common = context.render_channels.min(context.capture_channels) as usize;
+            for (source, target) in input
+                .chunks_exact(context.render_channels as usize)
+                .zip(output.chunks_exact_mut(context.capture_channels as usize))
+            {
+                target[..common].copy_from_slice(&source[..common]);
+            }
+            output
+        };
+        let epoch = unsafe { buffer::mr_shared_audio_buffer_stats(state.buffer) }.epoch;
+        if !unsafe {
+            buffer::mr_shared_audio_buffer_write(state.buffer, epoch, start, output.as_ptr(), count)
+        } {
+            return false;
         }
+    }
+    unsafe {
+        context.render_activity.store(3, Ordering::Release);
+        buffer::mr_shared_audio_buffer_set_producer_activity(render, 3);
+        mr_endpoint_transport_clock_demand(transport, true, start + u64::from(count), count);
         mr_endpoint_transport_touch_driver(transport);
     }
     true
@@ -387,7 +457,7 @@ pub unsafe extern "C" fn mr_hal_io_read_capture(
         return 0;
     }
     let transport = context.transport.load(Ordering::Acquire);
-    let capture = context.capture_buffer.load(Ordering::Relaxed);
+    let capture = context.capture();
     if !valid_range(start, count) || transport.is_null() || capture.is_null() {
         unsafe { silence(samples, count, context.capture_channels) };
         return 0;

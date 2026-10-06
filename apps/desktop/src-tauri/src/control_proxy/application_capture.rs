@@ -2,7 +2,9 @@
 use std::sync::{Arc, Weak, atomic::Ordering};
 use std::time::Duration;
 
-use mixrelay_control_protocol::{ApplicationCaptureManifest, GraphRuntimeStatus};
+use mixrelay_control_protocol::{
+    ApplicationCaptureManifest, GraphRuntimeStatus, NodeControlPreview,
+};
 
 use super::{
     ControlProxyClient, ControlProxyResponse, Method, RequestDelivery, Value,
@@ -37,7 +39,11 @@ pub(super) async fn node_control(
     if !preview.is_success() {
         return Ok(preview);
     }
-    let manifest = decode_manifest(preview.body)?;
+    let preview: NodeControlPreview = serde_json::from_value(preview.body)
+        .map_err(|error| format!("invalid node control preview: {error}"))?;
+    let Some(manifest) = preview.capture_manifest else {
+        return client.request(Method::PUT, &route, Some(request)).await;
+    };
     submit_prepared(
         client,
         captures,
@@ -87,10 +93,16 @@ pub(super) async fn power_status(
     let graph = client
         .request(Method::GET, "/api/v1/graph/status", None)
         .await?;
+    if !graph.is_success() {
+        return Ok(graph);
+    }
     let graph: GraphRuntimeStatus = serde_json::from_value(graph.body)
         .map_err(|error| format!("invalid engine stop acknowledgement: {error}"))?;
     if captures.requires_manifest(graph.submitted_revision)? {
         let manifest = client.request(Method::GET, MANIFEST, None).await?;
+        if !manifest.is_success() {
+            return Ok(manifest);
+        }
         let manifest = decode_manifest(manifest.body)?;
         // Power may have changed again since the status response was read.
         if !manifest.sources.is_empty() {
@@ -212,10 +224,10 @@ async fn submit_prepared(
         return unresolved_result(result);
     }
     let response = result?;
-    let acknowledgement = if submission == Submission::Workspace {
-        &response.body["document"]
-    } else {
-        &response.body
+    let acknowledgement = match submission {
+        Submission::Workspace => &response.body["document"],
+        Submission::NodeControl(_) => &response.body["application"],
+        Submission::Graph | Submission::Power => &response.body,
     };
     validate_ack(acknowledgement, revision).map_err(|error| {
         format!("{error}; application captures retained until engine confirmation")
@@ -392,6 +404,24 @@ async fn observe_ack(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn stop_status_preserves_rejected_acknowledgement_without_decoding_or_staging() {
+        let client = ControlProxyClient::default();
+        client.close_admission();
+        let captures = Arc::new(ApplicationCaptureState::default());
+        let response = ControlProxyResponse {
+            status: 200,
+            delivery: RequestDelivery::ServerResponse,
+            body: serde_json::json!({"enginePower":{"enabled":false,"transitioning":false}}),
+        };
+
+        let rejected = power_status(&client, &captures, response).await.unwrap();
+        assert_eq!(rejected.status, 409);
+        assert_eq!(rejected.body["code"], "control_unavailable");
+        assert_eq!(rejected.delivery, RequestDelivery::NotSent);
+        assert!(!captures.has_pending().unwrap());
+    }
 
     #[test]
     fn explicit_workspace_rejection_releases_reservation_but_lost_reply_does_not() {

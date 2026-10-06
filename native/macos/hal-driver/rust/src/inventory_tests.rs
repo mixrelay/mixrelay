@@ -6,7 +6,7 @@ use mixrelay_macos_transport::control_inventory::{
     InventoryEntry, mr_hal_control_create_inventory_snapshot,
 };
 
-use super::{FAIL_CREATE_ENDPOINT, Fixture, LIVE};
+use super::{FAIL_CREATE_ENDPOINT, Fixture, LIVE, native_tests::Transport};
 
 unsafe extern "C" {
     fn xpc_release(message: *mut c_void);
@@ -14,21 +14,25 @@ unsafe extern "C" {
 
 struct Message(*mut c_void);
 impl Message {
-    fn new(fixture: &Fixture, endpoints: &[u8], generation: u64) -> Self {
-        let descriptors: Vec<_> = endpoints
+    fn new(endpoints: &[u8], generation: u64) -> Self {
+        Self::with_entry_generation(endpoints, generation, generation)
+    }
+
+    fn with_entry_generation(endpoints: &[u8], generation: u64, entry_generation: u64) -> Self {
+        let transports: Vec<_> = endpoints
             .iter()
-            .map(|endpoint| fixture.fd(*endpoint, 2, 2))
+            .map(|endpoint| Transport::new(*endpoint, 2, 2))
             .collect();
         let entries: Vec<_> = endpoints
             .iter()
-            .zip(&descriptors)
-            .map(|(endpoint, descriptor)| {
+            .zip(&transports)
+            .map(|(endpoint, transport)| {
                 let mut entry = InventoryEntry {
                     endpoint_id: [*endpoint; 16],
                     sample_rate: 48_000,
-                    descriptor: descriptor.as_raw_fd(),
-                    mapped_size: 24,
-                    generation,
+                    descriptor: transport.fd.as_raw_fd(),
+                    mapped_size: transport.size,
+                    generation: entry_generation,
                     ..InventoryEntry::default()
                 };
                 for (slot, byte) in entry
@@ -72,14 +76,65 @@ fn descriptor_count() -> usize {
     std::fs::read_dir("/dev/fd").unwrap().count()
 }
 
+fn inventory_fixture() -> Fixture {
+    unsafe extern "C" fn inspect(fd: i32, size: usize, output: *mut crate::abi::Geometry) -> bool {
+        let Ok(config) =
+            mixrelay_macos_transport::transport_inspection::inspect_descriptor(fd, size)
+        else {
+            return false;
+        };
+        // SAFETY: the registry supplies one writable aligned geometry output;
+        // descriptor inspection borrows the live anonymous transport backing.
+        unsafe {
+            output.write(crate::abi::Geometry {
+                endpoint_id: config.endpoint_id,
+                render_channels: config.render_channels,
+                capture_channels: config.capture_channels,
+            });
+        };
+        true
+    }
+    let mut fixture = Fixture::new();
+    fixture.registry.native.inspect = inspect;
+    fixture
+}
+
+#[test]
+fn inventory_ack_waits_for_perform_and_newer_publication_can_restore_older_mapping() {
+    let fixture = inventory_fixture();
+    let initial = Message::new(&[1], 90);
+    assert!(initial.apply(&fixture));
+    assert_eq!(
+        crate::inventory::acknowledged(&fixture.registry, 1),
+        Some(90)
+    );
+    assert_eq!(crate::inventory::acknowledged(&fixture.registry, 2), None);
+    let candidate = Message::new(&[1], 91);
+    assert!(candidate.apply(&fixture));
+    assert_eq!(crate::inventory::acknowledged(&fixture.registry, 1), None);
+    assert_eq!(fixture.perform(), crate::abi::OK);
+    assert_eq!(
+        crate::inventory::acknowledged(&fixture.registry, 1),
+        Some(91)
+    );
+    let rollback = Message::with_entry_generation(&[1], 92, 90);
+    assert!(rollback.apply(&fixture));
+    assert_eq!(crate::inventory::acknowledged(&fixture.registry, 1), None);
+    assert_eq!(fixture.perform(), crate::abi::OK);
+    assert_eq!(
+        crate::inventory::acknowledged(&fixture.registry, 1),
+        Some(92)
+    );
+}
+
 #[test]
 fn replacement_requests_require_current_validated_inventory() {
     unsafe extern "C" fn requires_replacement(_: *mut c_void) -> bool {
         true
     }
-    let mut fixture = Fixture::new();
+    let mut fixture = inventory_fixture();
     fixture.registry.native.requires_replacement = requires_replacement;
-    let inventory = Message::new(&fixture, &[1], 90);
+    let inventory = Message::new(&[1], 90);
     assert!(inventory.apply(&fixture));
     let request = |authority| {
         let mut endpoint = [0; 16];
@@ -103,7 +158,7 @@ fn replacement_requests_require_current_validated_inventory() {
     });
     assert_eq!(request(1), (false, [0; 16], 0));
     assert_eq!(request(2), (false, [0; 16], 0));
-    let new = Message::new(&fixture, &[1], 2);
+    let new = Message::new(&[1], 2);
     assert!(unsafe {
         crate::inventory::mr_hal_core_control_message(
             (&raw const *fixture.registry).cast_mut(),
@@ -117,18 +172,18 @@ fn replacement_requests_require_current_validated_inventory() {
 
 #[test]
 fn partial_publication_is_removed_by_next_empty_inventory_without_leaks() {
-    let fixture = Fixture::new();
+    let fixture = inventory_fixture();
     let before = descriptor_count();
     FAIL_CREATE_ENDPOINT.store(2, Ordering::SeqCst);
-    let partial = Message::new(&fixture, &[1, 2], 2);
+    let partial = Message::new(&[1, 2], 2);
     assert!(!partial.apply(&fixture));
     assert_eq!(fixture.registry.devices().len(), 1);
     assert_eq!(LIVE.load(Ordering::SeqCst), 1);
     // An older complete inventory must not erase partially applied newer intent.
-    let stale = Message::new(&fixture, &[], 1);
+    let stale = Message::new(&[], 1);
     assert!(stale.apply(&fixture));
     assert_eq!(fixture.registry.devices().len(), 1);
-    let empty = Message::new(&fixture, &[], 3);
+    let empty = Message::new(&[], 3);
     assert!(empty.apply(&fixture));
     assert!(fixture.registry.devices().is_empty());
     assert_eq!(LIVE.load(Ordering::SeqCst), 0);
@@ -138,9 +193,9 @@ fn partial_publication_is_removed_by_next_empty_inventory_without_leaks() {
 
 #[test]
 fn same_generation_retry_completes_after_native_allocation_recovers() {
-    let fixture = Fixture::new();
+    let fixture = inventory_fixture();
     FAIL_CREATE_ENDPOINT.store(2, Ordering::SeqCst);
-    let inventory = Message::new(&fixture, &[1, 2], 1);
+    let inventory = Message::new(&[1, 2], 1);
     assert!(!inventory.apply(&fixture));
     let first = fixture.registry.devices()[0];
     FAIL_CREATE_ENDPOINT.store(0, Ordering::SeqCst);
@@ -151,18 +206,18 @@ fn same_generation_retry_completes_after_native_allocation_recovers() {
 
 #[test]
 fn full_registry_can_replace_one_absent_idle_device() {
-    let fixture = Fixture::new();
-    let initial = Message::new(&fixture, &(1..=64).collect::<Vec<_>>(), 1);
+    let fixture = inventory_fixture();
+    let initial = Message::new(&(1..=64).collect::<Vec<_>>(), 1);
     assert!(initial.apply(&fixture));
     let original = fixture.registry.devices();
     assert_eq!(original.len(), 64);
-    let replacement = Message::new(&fixture, &(2..=65).collect::<Vec<_>>(), 2);
+    let replacement = Message::new(&(2..=65).collect::<Vec<_>>(), 2);
     assert!(replacement.apply(&fixture));
     let current = fixture.registry.devices();
     assert_eq!(current.len(), 64);
     assert!(!current.contains(&original[0]));
     assert_eq!(LIVE.load(Ordering::SeqCst), 64);
-    let empty = Message::new(&fixture, &[], 3);
+    let empty = Message::new(&[], 3);
     assert!(empty.apply(&fixture));
     assert_eq!(LIVE.load(Ordering::SeqCst), 0);
 }

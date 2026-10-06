@@ -5,7 +5,10 @@ use mixrelay_macos_transport::{
     audio_buffer::{AudioBuffer, AudioBufferList},
     capture_ring::{mr_audio_ring_create, mr_audio_ring_read_interleaved},
 };
-use std::{cell::Cell, ffi::c_void};
+use std::{
+    cell::{Cell, RefCell},
+    ffi::c_void,
+};
 
 fn format() -> TapFormat {
     TapFormat {
@@ -27,6 +30,7 @@ fn fixture() -> TapSession {
         aggregate: 2,
         proc: std::ptr::dangling_mut(),
         listener: true,
+        inventory_listener: false,
         resume: false,
     });
     session.format.set(format()).expect("unpublished format");
@@ -38,6 +42,36 @@ fn fixture() -> TapSession {
         .store(48_000_f64.to_bits(), Ordering::Release);
     session.generation.store(1, Ordering::Release);
     session.running.store(true, Ordering::Release);
+    session
+}
+
+fn fallback_fixture() -> TapSession {
+    let session = fixture();
+    let _previous = session.selection.replace(Some(native::Selection {
+        bundle: c"io.mixrelay.target".to_owned(),
+        fallback: true,
+        selected: vec![native::ProcessIdentity { object: 7, pid: 71 }],
+        target_device_uid: None,
+        target_device: None,
+    }));
+    let mut resources = session.resources.get();
+    resources.inventory_listener = true;
+    session.resources.set(resources);
+    session
+}
+
+fn muted_fixture() -> TapSession {
+    let session = fallback_fixture();
+    {
+        let mut selection = session.selection.borrow_mut();
+        let selected = selection.as_mut().expect("selected fixture");
+        selected.target_device_uid =
+            Some(c"io.mixrelay.audio.endpoint.17e59d7342c14f11a8b46c2d913357e0".to_owned());
+        selected.target_device = Some(native::DeviceLease {
+            object: 7,
+            stream: 70,
+        });
+    }
     session
 }
 
@@ -58,7 +92,13 @@ struct Fake<'a> {
     fail: Cell<Failure>,
     format: Cell<TapFormat>,
     change_during_query: Cell<Option<&'a TapSession>>,
+    change_during_processes: Cell<Option<&'a TapSession>>,
     unregister_calls: Cell<u32>,
+    selected: RefCell<Vec<native::ProcessIdentity>>,
+    rebuild_calls: Cell<u32>,
+    stop_calls: Cell<u32>,
+    device: Cell<native::DeviceLease>,
+    requested_device: Cell<Option<u32>>,
 }
 
 impl Default for Fake<'_> {
@@ -67,7 +107,16 @@ impl Default for Fake<'_> {
             fail: Cell::new(Failure::None),
             format: Cell::new(format()),
             change_during_query: Cell::new(None),
+            change_during_processes: Cell::new(None),
             unregister_calls: Cell::new(0),
+            selected: RefCell::new(Vec::new()),
+            rebuild_calls: Cell::new(0),
+            stop_calls: Cell::new(0),
+            device: Cell::new(native::DeviceLease {
+                object: 7,
+                stream: 70,
+            }),
+            requested_device: Cell::new(None),
         }
     }
 }
@@ -83,6 +132,30 @@ impl Fake<'_> {
 }
 
 impl Native for Fake<'_> {
+    fn device(&self, _: &std::ffi::CStr) -> Result<native::DeviceLease, TapError> {
+        Ok(self.device.get())
+    }
+    fn processes(
+        &self,
+        _: &std::ffi::CStr,
+        target_device: Option<u32>,
+    ) -> Result<Vec<native::ProcessIdentity>, TapError> {
+        self.requested_device.set(target_device);
+        if let Some(session) = self.change_during_processes.take() {
+            session.inventory_epoch.fetch_add(1, Ordering::Release);
+            session.lifecycle.changed();
+        }
+        Ok(self.selected.borrow().clone())
+    }
+    fn rebuild(&self, session: &TapSession, _: &native::Selection) -> Result<(), TapError> {
+        self.rebuild_calls.set(self.rebuild_calls.get() + 1);
+        let mut resources = session.resources.get();
+        resources.tap = 1;
+        resources.aggregate = 2;
+        resources.listener = true;
+        session.resources.set(resources);
+        Ok(())
+    }
     fn format(&self, _: u32) -> Result<TapFormat, TapError> {
         if let Some(session) = self.change_during_query.take() {
             // SAFETY: fixture session is borrowed through the complete query.
@@ -95,6 +168,7 @@ impl Native for Fake<'_> {
         self.result(Failure::Start)
     }
     fn stop(&self, _: u32, _: *mut c_void) -> Result<(), TapError> {
+        self.stop_calls.set(self.stop_calls.get() + 1);
         self.result(Failure::Stop)
     }
     fn register(&self, session: &TapSession) -> Result<(), TapError> {
@@ -113,6 +187,9 @@ impl Native for Fake<'_> {
     }
     fn remove_listener(&self, _: u32, _: &TapSession) -> Result<(), TapError> {
         self.result(Failure::Listener)
+    }
+    fn remove_inventory_listener(&self, _: &TapSession) -> Result<(), TapError> {
+        Ok(())
     }
     fn destroy_aggregate(&self, _: u32) -> Result<(), TapError> {
         self.result(Failure::Aggregate)
@@ -209,10 +286,88 @@ fn public_capture_boundary_rejects_null_and_invalid_startup_without_native_objec
                 bundle_id: c"io.mixrelay.fixture".as_ptr(),
                 mute_while_captured: false,
                 ring_capacity_frames: capacity,
+                target_device_uid: ptr::null(),
             };
             assert!(mr_process_tap_create(&raw const config, &raw mut error).is_null());
             assert_eq!(error.code, 1);
         }
+    }
+}
+
+#[test]
+fn mute_requires_one_exact_owned_endpoint_uid_before_native_admission() {
+    assert!(native::owned_endpoint_uid(
+        c"io.mixrelay.audio.endpoint.17e59d7342c14f11a8b46c2d913357e0"
+    ));
+    for uid in [
+        c"io.mixrelay.audio.endpoint.default",
+        c"io.mixrelay.audio.endpoint.17E59D7342C14F11A8B46C2D913357E0",
+        c"io.mixrelay.audio.endpoint.00000000000000000000000000000000",
+        c"com.other.audio.endpoint.17e59d7342c14f11a8b46c2d913357e0",
+    ] {
+        assert!(!native::owned_endpoint_uid(uid));
+    }
+    let mut error = TapError::default();
+    let config = TapConfig {
+        bundle_id: c"io.mixrelay.fixture".as_ptr(),
+        mute_while_captured: true,
+        ring_capacity_frames: 256,
+        target_device_uid: ptr::null(),
+    };
+    // SAFETY: invalid config and exclusive error output remain live for the call.
+    assert!(unsafe { mr_process_tap_create(&raw const config, &raw mut error) }.is_null());
+    assert_eq!(error.code, 1);
+}
+
+#[test]
+fn changed_owned_device_lease_invalidates_muted_capture_before_retrack() {
+    let session = muted_fixture();
+    let native = Fake::default();
+    native.device.set(native::DeviceLease {
+        object: 8,
+        stream: 80,
+    });
+    assert_eq!(session.refresh(&native), Err(TapError::code(9)));
+    assert!(!session.allowed());
+    assert_eq!(native.requested_device.get(), None);
+}
+
+#[test]
+fn changed_owned_stream_lease_invalidates_muted_capture() {
+    let session = muted_fixture();
+    let native = Fake::default();
+    native.device.set(native::DeviceLease {
+        object: 7,
+        stream: 71,
+    });
+    assert_eq!(session.refresh(&native), Err(TapError::code(9)));
+    assert!(!session.allowed());
+}
+
+#[test]
+fn matching_owned_device_and_process_snapshot_keep_capture_admitted() {
+    let session = muted_fixture();
+    let native = Fake::default();
+    native
+        .selected
+        .replace(vec![native::ProcessIdentity { object: 7, pid: 71 }]);
+    assert_eq!(session.refresh(&native), Ok(()));
+    assert!(session.allowed());
+    assert_eq!(native.requested_device.get(), Some(7));
+}
+
+#[test]
+fn scoped_mute_process_change_revokes_lease_instead_of_retracking() {
+    for candidate in [vec![], vec![native::ProcessIdentity { object: 8, pid: 72 }]] {
+        let session = muted_fixture();
+        let native = Fake::default();
+        native.selected.replace(candidate);
+        assert_eq!(session.refresh(&native), Err(TapError::code(9)));
+        assert!(!session.allowed());
+        assert_eq!(
+            session.selection.borrow().as_ref().unwrap().selected,
+            vec![native::ProcessIdentity { object: 7, pid: 71 }]
+        );
     }
 }
 
@@ -312,6 +467,117 @@ fn rate_refresh_preserves_storage_and_counters_but_drains_stale_pcm() {
     assert_eq!(stats.sample_rate.to_bits(), 44_100_f64.to_bits());
     assert_eq!(stats.format_generation, 2);
     assert!(stats.running);
+    assert!(session.reclaim(&native));
+}
+
+#[test]
+fn unrelated_inventory_change_keeps_exact_selected_owner_without_hardware_restart() {
+    let session = fallback_fixture();
+    let native = Fake::default();
+    native
+        .selected
+        .replace(vec![native::ProcessIdentity { object: 7, pid: 71 }]);
+    let original = session.resources.get();
+    session.inventory_epoch.fetch_add(1, Ordering::Release);
+    session.lifecycle.changed();
+    assert!(!session.allowed());
+    assert!(session.refresh(&native).is_ok());
+    assert!(session.allowed());
+    assert_eq!(session.resources.get().tap, original.tap);
+    assert_eq!(session.resources.get().aggregate, original.aggregate);
+    assert_eq!(session.resources.get().proc, original.proc);
+    assert_eq!(native.stop_calls.get(), 0);
+    assert_eq!(native.unregister_calls.get(), 0);
+    assert_eq!(native.rebuild_calls.get(), 0);
+    assert_eq!(session.stats().format_generation, 1);
+    assert!(session.reclaim(&native));
+}
+
+#[test]
+fn inventory_change_during_discovery_cannot_certify_stale_selection() {
+    let session = fallback_fixture();
+    let native = Fake::default();
+    native
+        .selected
+        .replace(vec![native::ProcessIdentity { object: 7, pid: 71 }]);
+    native.change_during_processes.set(Some(&session));
+    assert_eq!(
+        session.refresh(&native).expect_err("racing inventory").code,
+        9
+    );
+    assert!(!session.allowed());
+    assert_eq!(native.rebuild_calls.get(), 0);
+    assert_eq!(native.stop_calls.get(), 0);
+    assert!(session.refresh(&native).is_ok());
+    assert!(session.allowed());
+    assert_eq!(native.rebuild_calls.get(), 0);
+    assert!(session.reclaim(&native));
+}
+
+#[test]
+fn absent_bundle_stays_silent_then_new_process_epoch_rebuilds_exact_selection() {
+    let session = fallback_fixture();
+    let native = Fake::default();
+    let mut samples = [0.25, -0.25];
+    callback(&session, &mut samples, None);
+    assert_eq!(session.stats().available_frames, 1);
+    session.inventory_epoch.fetch_add(1, Ordering::Release);
+    session.lifecycle.changed();
+    assert_eq!(session.refresh(&native).expect_err("absent bundle").code, 9);
+    assert!(!session.allowed());
+    assert_eq!(session.resources.get().tap, 0);
+    assert_eq!(session.stats().available_frames, 0);
+    assert!(!session.stats().running);
+    callback(&session, &mut samples, None);
+    assert_eq!(session.stats().available_frames, 0);
+    assert_eq!(native.rebuild_calls.get(), 0);
+
+    native.selected.replace(vec![native::ProcessIdentity {
+        object: 19,
+        pid: 82,
+    }]);
+    session.inventory_epoch.fetch_add(1, Ordering::Release);
+    session.lifecycle.changed();
+    assert!(session.refresh(&native).is_ok());
+    assert!(session.allowed() && session.stats().running);
+    assert_eq!(native.rebuild_calls.get(), 1);
+    assert_eq!(session.stats().format_generation, 2);
+    assert_eq!(
+        session
+            .selection
+            .borrow()
+            .as_ref()
+            .expect("selection")
+            .selected,
+        vec![native::ProcessIdentity {
+            object: 19,
+            pid: 82
+        }]
+    );
+    assert!(session.reclaim(&native));
+}
+
+#[test]
+fn reused_process_object_with_new_pid_is_not_certified_as_the_old_owner() {
+    let session = fallback_fixture();
+    let native = Fake::default();
+    native
+        .selected
+        .replace(vec![native::ProcessIdentity { object: 7, pid: 72 }]);
+    session.inventory_epoch.fetch_add(1, Ordering::Release);
+    session.lifecycle.changed();
+    assert!(session.refresh(&native).is_ok());
+    assert_eq!(native.rebuild_calls.get(), 1);
+    assert_eq!(native.unregister_calls.get(), 1);
+    assert_eq!(
+        session
+            .selection
+            .borrow()
+            .as_ref()
+            .expect("selection")
+            .selected,
+        vec![native::ProcessIdentity { object: 7, pid: 72 }]
+    );
     assert!(session.reclaim(&native));
 }
 

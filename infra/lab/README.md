@@ -1,182 +1,92 @@
 # Cross-OS development lab
 
-macOS is tested on the existing Apple Silicon host. There is **no macOS VM requirement**.
-Linux distributions are separate compatibility targets, not aliases for one Ubuntu result.
-See [the actual validation snapshot](VALIDATION.md) for passed, blocked, and unrun checks.
+제품 동작과 현재 결과·다음 실행은 [제품 문서](../../docs/product.md)에서 관리한다.
+이 문서는 검증 환경 사용법이며 별도 출시 체크리스트가 아니다.
+검증 대상은 macOS·Linux다.
 
-| Target | Build environment on this Mac | Desktop/audio environment | Not proved here |
-| --- | --- | --- | --- |
-| macOS arm64 | Local Xcode + Rust | Local logged-in session | Other Macs, release signing |
-| Debian 13 | Debian Docker image, arm64 | Debian arm64 UTM desktop VM | Physical device timing |
-| Ubuntu 24.04 LTS | Ubuntu Docker image, arm64 | Ubuntu arm64 UTM desktop VM | Physical device timing |
-| Kali rolling | Kali Docker image, arm64 | Kali arm64 UTM desktop VM | Every future rolling update |
-| Arch rolling | Official Arch Docker image, **amd64 emulated** | Official Arch x64 UTM **emulation**, then x64 host/VM | Native timing on this Mac |
-| Windows 11 ARM | Native toolchain inside Windows ARM UTM VM | Same interactive Windows guest | x64 kernel drivers |
-| Windows x64 | x64 Windows host/VM or native CI runner | x64 Windows host/VM | Physical device timing in CI |
+## 환경과 범위
 
-Arch Linux ARM is a different distribution and must not be labelled an official Arch x64 test.
-UTM uses Mac virtualization for matching architectures; x64 guests on this ARM Mac need emulation.
-Docker Desktop's Linux guest is useful for builds but is not a substitute for a distribution's
-desktop login, PipeWire/WirePlumber session, kernel, or Windows driver stack.
+| 대상 | 사용 경로 | 한계 |
+| --- | --- | --- |
+| macOS | 현재 Mac의 정상 로그인 세션 | Universal 빌드가 Intel 실제 실행을 증명하지 않는다. |
+| Linux | 기존 Debian/Ubuntu VM의 정상 사용자 PipeWire 세션 | 배포판 결과를 복제하지 않는다. VM timing은 물리 timing이 아니다. |
 
-## Linux build containers
+Kali/Arch는 선택 환경이다. 이 문서 때문에 새 VM·백엔드·물리 64채널 장비·
+플러그인 전수 조합을 출시 조건으로 추가하지 않는다. 기존 실제 PCM·채널 폭·
+클록·자원 수명·설치 조건은 매트릭스에서 유지한다.
 
-From the repository root:
+Docker는 컴파일용이며 desktop 로그인·native audio·editor 검증을 대체하지 않는다.
+macOS VM은 필요 없다. 기존 VM을 재사용하고 무거운 빌드/오디오 계측은 한 번에 하나씩
+실행한다. 경량 확인과 독립 코드 수정까지 이 제한으로 직렬화하지 않는다.
+자원과 여유 공간을 확인하고 host audio interface를 임의로 guest에 넘기지 않는다.
 
-```sh
-docker compose -f infra/lab/compose.yaml build debian
-docker compose -f infra/lab/compose.yaml run --rm debian build
-# Repeat with ubuntu, kali, arch. Use test instead of build to also run unit tests.
-```
-
-Build one image at a time on a memory/disk-constrained host. Source is copied into the image:
-rebuild after source changes. Host node_modules/target, credentials, .git, and local agent context
-are excluded. Images contain private product source: do not push them to a public registry.
-Containers run without root/capabilities, host device/socket mounts, or exposed ports.
-
-Rust 1.96.0, Node 24.19.0, pnpm 11.9.0 and base image digests are pinned. Apt/pacman repositories
-still move: image digests alone do **not** make installed distro packages reproducible. Archive
-the resulting private image digest and package inventory with each qualified test run; requalify
-rolling updates. To extract a failed or successful build report, retain a named container:
+## 실행과 결과 수집
 
 ```sh
-docker compose -f infra/lab/compose.yaml run --name mixrelay-debian-check debian test
-docker cp mixrelay-debian-check:/workspace/.lab/reports .lab/debian-reports
-# Remove only this stopped, disposable container after collecting its evidence:
-docker rm mixrelay-debian-check
-```
-
-Ensure `.lab` exists first. The CLI returns nonzero for failure; do not hide it with `|| true` in CI.
-No container result counts as a live audio or plugin-window pass.
-
-On this Apple Silicon host, official Arch's pacman download sandbox currently fails under
-Docker's amd64 emulation (`error restricting syscalls via seccomp: 22`). Do not disable
-container isolation/signature checking to label it successful. Use the native x64 CI lane
-or a real x64 Linux Docker host; the full-system Arch VM remains a separate check.
-
-The workflow `.github/workflows/native-lab.yml` covers native macOS, Windows x64/ARM64,
-and Debian/Ubuntu/Kali x64/ARM64 plus Arch x64. Workflow presence is not a completed CI run.
-
-## Desktop VMs on this Mac
-
-Use [UTM](https://docs.getutm.app/) for the foreign desktop guests. Installation:
-
-```sh
-brew install --cask utm
 pnpm lab:vm list
 pnpm lab:vm start <UUID>
 pnpm lab:vm status <UUID>
 pnpm lab:vm shutdown <UUID>
 ```
 
-`shutdown` requests a clean guest shutdown; it never force-kills the VM. macOS may ask the user
-to allow automation of UTM. OS installation/account setup is deliberately interactive: the lab
-does not accept licenses, bypass Windows requirements, embed passwords, or enable test signing.
+정확한 VM UUID·사용자·실행 경로를 확인한다. 로그인은 승인된 기존 계정의 정상 절차로
+수행한다. 암호를 저장하거나 계정·UAC·서명 정책·키링을 우회하지 않는다.
+`shutdown`은 정상 종료 요청이며 VM을 강제 kill하지 않는다.
 
-Create one VM per target in UTM, keeping its disk on a volume with adequate space:
+UTM 명령 반환은 guest 작업 완료가 아니다. Linux의 긴 작업은 기존
+`scripts/lab/guest-job.sh <unique-id> <command> ...`를 사용한다.
+해당 job의 `output.log`와 실제 `exit-code`를 함께 읽는다. marker가 없으면 미완료,
+nonzero면 실패다.
+수집 실패로 생긴 빈 파일이나 wrapper exit0을 성공 증거로 쓰지 않는다.
 
-| Guest name | Wizard | Initial resource budget | Installation media |
-| --- | --- | --- | --- |
-| MixRelay Debian | Virtualize / Linux, ARM64 | 4 vCPU, 6 GiB RAM, 64 GiB disk | Official Debian arm64 installer |
-| MixRelay Ubuntu | Virtualize / Linux, ARM64 | 4 vCPU, 6 GiB RAM, 64 GiB disk | Official Ubuntu arm64 installer; install a desktop if using server media |
-| MixRelay Kali | Virtualize / Linux, ARM64 | 4 vCPU, 6 GiB RAM, 64 GiB disk | Official Kali ARM64 installer, not an x64 appliance |
-| MixRelay Arch | Emulate / Linux, x86_64 | 4 vCPU, 6 GiB RAM, 64 GiB disk | Official Arch x86_64 ISO |
-| MixRelay Windows | Virtualize / Windows, ARM64 | 4 vCPU, 8 GiB RAM, 96 GiB disk | Official Windows 11 ARM64 ISO, valid license |
+실행 전 source/profile/artifact·설정·기본 장치를 확인하고, 실행 후 기존 상태와
+소유 PID·task·socket·native 객체의 정리를 확인한다. 실패 로그는 덮어쓰지 않는다.
+기존 성공 결과는 영향받은 조건이 바뀌지 않으면 재사용한다.
 
-These are development budgets, not OS minimums. Sparse disks still grow; do not overcommit the
-current host's free space. Run guests sequentially initially. Follow the official
-[Windows wizard/guest-tools guide](https://docs.getutm.app/guides/windows/), including UEFI/TPM
-requirements. Use NAT networking, no public RDP/SSH forwarding, and no shared host home directory.
-Never attach the host's active audio interface to a guest without explicitly releasing it first.
+## 빌드
 
-Record the installer version and verified SHA-256, UTM version, guest architecture, allocated
-resources and guest OS build in the evidence report. Use official installer checksum/signature
-instructions. A VM merely starting does not qualify its audio backend.
-
-`images.json` records the Linux media URLs and SHA-256 values checked for this lab.
-`scripts/lab/create-linux-vm.applescript` creates/exports an **unbooted staging** VM using UTM's
-API; it does not install an OS. Validate the exported disks, then remove only that newly created
-internal staging copy and open the external bundle in place. Do **not** use UTM's scripting
-`import` for this step: it copies the bundle back into internal Documents. Attach the verified
-installer ISO again after registration; removable-media bookmarks are not part of config.plist.
-Before booting, enable HDA sound and disable clipboard/directory sharing in the final VM settings.
-
-### Linux guest bootstrap
-
-The optional `scripts/lab/bootstrap-linux-toolchains.sh` installs pinned toolchains under the
-existing non-root guest account, verifying Node/rustup SHA-256 values before execution. It does
-not create accounts, change passwords, or edit shell profiles. `guest-first-build.sh` expects a
-source-only archive and refuses to replace an existing `~/mixrelay` guest checkout.
-
-For long UTM guest-agent commands, wrap execution with `scripts/lab/guest-job.sh <unique-id>
-<command> ...`. UTM's immediate command return is **not** a completion signal. Read both
-`<checkout>/.lab/jobs/mixrelay-lab-<unique-id>/output.log` and its atomic `exit-code` file; a missing marker
-means incomplete, and a nonzero marker means failed. Jobs never replace earlier evidence.
-
-`guest-desktop-build.sh` enables `tauri/custom-protocol` to embed the built frontend. A plain
-Cargo debug build otherwise expects the development URL. After starting an isolated guest
-engine, `node scripts/lab/pipewire-smoke.mjs --run` checks the default virtual endpoint's
-stereo signal, meters, and internal silent gaps. It requires explicit existing virtual targets,
-never changes default devices, and does not certify latency, hardware or endurance.
-
-Install a desktop and log into it. Clone the repository onto the **guest's disk** (do not reuse
-macOS node_modules/target). Install the repository's Rust/Node/pnpm versions. Then:
+guest 자신의 디스크에서 고정 Rust/Node/pnpm과 lockfile을 사용한다. macOS의
+`target`·`node_modules`를 guest 빌드에 재사용하지 않는다. source archive/container에
+credentials·사용자 graph·local agent context를 포함하지 않으며 private 이미지를 공개하지 않는다.
 
 ```sh
-sudo bash infra/lab/install-linux-deps.sh
-pnpm install --frozen-lockfile
-pnpm lab:test
-systemctl --user status pipewire wireplumber
-pw-cli info 0
-wpctl status
+docker compose -f infra/lab/compose.yaml build debian
+docker compose -f infra/lab/compose.yaml run --rm debian build
 ```
 
-If the distribution is using PulseAudio instead, explicitly configure its PipeWire desktop
-session following distro instructions; dependency installation alone does not migrate a running
-session. Re-login as needed. Do not run MixRelay as root or start a second server over an existing
-PipeWire socket. Use both X11 and Wayland sessions when available for native plugin editors.
-After this preflight, the existing Linux development audio installer is an **explicit** separate
-step (`pnpm install:linux-dev-audio`), because it changes the guest's user service.
+`test`는 코드 검사를 추가한다. image/package inventory와 실제 종료코드를 보존한다.
+compose/CI에 target이 있다고 실제 오디오 검증이 끝난 것은 아니다.
+emulated Arch의 package sandbox 실패를 보안 설정 해제로 우회하지 않는다.
 
-### Windows guest bootstrap
+desktop 코드 검사는 공통 경로를 사용한다:
 
-Install Git, Node 24, pnpm 11.9.0, Rust 1.96.0 (MSVC), Visual Studio C++ Build Tools with the
-matching ARM64 or x64 tools, Windows SDK and WebView2. Use a Developer PowerShell with the target
-toolchain enabled. Clone onto the guest's NTFS disk, then run:
-
-```powershell
-pnpm install --frozen-lockfile
-rustc --version --verbose
-pnpm lab:test
-pnpm desktop:dev
+```sh
+node scripts/lab/native-check.mjs cargo test --locked -p mixrelay-desktop --lib
 ```
 
-The Rust host triple must match the claimed target. WDK and a separately signed driver package
-are needed for virtual endpoints. **The repository currently lacks a complete WaveRT miniport
-and INF; the installer script is not a driver implementation.** Do not fabricate a successful
-driver result or use an x64 kernel driver in an ARM64 VM.
+제품 빌드는 `pnpm desktop:build`이며 실제 driver/sidecar·서명 검사를 유지한다.
+검사용 dummy payload나 VM별 Tauri 설정 우회를 만들지 않는다.
 
-## Acceptance evidence
+## OS 준비
 
-`lab:build` compiles UI and the complete Rust workspace; `lab:test` adds UI/Rust unit tests and
-the existing C sanitizer checks on macOS. Each writes `.lab/reports/*.json` including OS, CPU,
-kernel, commands, timings, failures, and an explicit list of things it did not verify.
+- Linux: `infra/lab/install-linux-deps.sh`와 고정 toolchain을 준비하고, 정상 사용자
+  세션에서 `systemctl --user status pipewire wireplumber`, `wpctl status`를 확인한다.
+  다른 PipeWire server를 같은 socket 위에 시작하거나 root로 MixRelay를 실행하지 않는다.
+  bootstrap은 기존 non-root 계정만 사용한다. editor는 실제 XWayland DISPLAY를 확인한다.
+- macOS: full Xcode와 기존 signed 앱/엔진/HAL을 사용한다. 정상 OS 권한·Keychain
+  승인 절차를 사용하며 권한 DB·ACL·시스템 오디오를 임의로 초기화하지 않는다.
 
-For **each guest**, separately record actual results for:
+## 검증 선택
 
-- Empty graph startup/reconnect, device discovery, hotplug and per-application capture.
-- Virtual endpoint creation/removal; 2/8/16/32/64 channels and channel 13/33 routing.
-- 44.1/48/96 kHz transitions, mixed-rate devices, clock drift and underruns.
-- Audible output and measured per-channel input/processor/output meters, not just HTTP success.
-- VST3/CLAP editors opening, resizing, closing/reopening; LV2 on Linux; AU on local macOS.
-- Plugin crash isolation, repeated graph/stream/editor teardown and memory endurance.
-- Native driver install/uninstall/signing and recovery after sleep/reboot.
+변경한 실제 실행 경계를 먼저 검사한다. 가벼운 unit/parse 검사로 테스트 도구의
+입력·출력·종료코드부터 확인한 후 native 검증한다. 테스트 도구 오류와 제품 결함은
+분리해 기록한다. 새로운 가설 없이 같은 실행을 반복하거나 작은 변경마다
+전체 workspace·driver 설치를 다시 하지 않는다.
 
-Record `not-run`, `blocked`, `failed`, or `passed` with evidence. VM latency is diagnostic data,
-not a product hardware latency claim. Physical Windows/Linux audio hardware remains a release
-gate. Current Linux FIFO/timer transport must still be replaced/qualified against the native
-PipeWire callback boundary; this lab does not claim that engine work is already implemented.
+plugin은 실제 검색→PCM→설정/editor 변경→저장→재시작/복원→제거 한 실행에서
+확인한 조건을 함께 기록한다. clock은 실제 frame/timestamp·누락/반복·지연을 측정한다.
+수동 block 처리나 sleep pacing을 실시간 증거로 쓰지 않는다. 기준·warmup·무음 허용을
+결과에 맞춰 바꾸지 않으며 실패 원시도 보존한다.
 
-References: [Docker Desktop VM boundary](https://docs.docker.com/desktop/features/vmm/),
-[UTM automation](https://docs.getutm.app/scripting/scripting/),
-[Tauri native prerequisites](https://v2.tauri.app/start/prerequisites/).
+빌드·합성 fixture·실제 앱/장치·최종 패키지의 결과는 구분한다.
+매트릭스보다 넓은 필수 환경이나 시나리오를 이 문서에서 만들지 않는다.

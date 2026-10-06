@@ -3,13 +3,12 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mixrelay_control_protocol::{
-    AppStatus, GraphCatalogResponse, GraphNodeControls, GraphRuntimeStatus, NodeControlRequest,
-    RecorderControlRequest,
+    EngineControlSnapshot, NodeControlRequest, RecorderControlRequest,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use super::{ControlProxyClient, ControlProxyResponse, Method, node_control, recorder, rejected};
+use super::{ControlProxyClient, ControlProxyResponse, Method, rejected};
 use crate::macos_audio::ApplicationCaptureState;
 
 pub(crate) mod socket;
@@ -113,75 +112,96 @@ impl LocalControl {
                     return Ok(rejected("graph_revision_stale"));
                 }
                 self.client
-                    .request(
-                        Method::PUT,
-                        &recorder::route(&target.graph_id, &target.node_id),
-                        Some(serde_json::to_value(request).map_err(|error| error.to_string())?),
+                    .submit_recorder(
+                        &target.graph_id,
+                        &target.node_id,
+                        serde_json::to_value(request).map_err(|error| error.to_string())?,
                     )
                     .await
             }
         }
     }
 
-    async fn read<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, String> {
-        let response = self.client.request(Method::GET, path, None).await?;
-        if !response.is_success() {
-            return Err(format!("snapshot unavailable: {}", response.status));
-        }
-        serde_json::from_value(response.body).map_err(|error| error.to_string())
-    }
-
     async fn snapshot(&self) -> Result<ControlProxyResponse, String> {
-        let before: GraphRuntimeStatus = self.read("/api/v1/graph/status").await?;
-        let catalog: GraphCatalogResponse = self.read(super::GRAPH_CATALOG_ROUTE).await?;
-        if before.active_revision != before.submitted_revision {
-            return Ok(rejected("graph_exchange_busy"));
-        }
-        let mut graphs = Vec::with_capacity(catalog.graphs.len());
-        for graph in &catalog.graphs {
-            let controls: GraphNodeControls =
-                self.read(&node_control::route(&graph.id, None)?).await?;
-            if controls.revision != before.submitted_revision {
-                return Ok(rejected("graph_revision_stale"));
-            }
-            let mut nodes = Vec::with_capacity(controls.nodes.len());
-            for node in controls.nodes {
-                let recording = if node.capabilities.recorder {
-                    Some(
-                        self.read::<mixrelay_control_protocol::RecorderStatus>(&recorder::route(
-                            &graph.id,
-                            &node.node_id,
-                        ))
-                        .await?,
-                    )
-                } else {
-                    None
-                };
-                let mut value = serde_json::to_value(node).map_err(|error| error.to_string())?;
-                if let Some(recording) = recording {
-                    value["recorder"] = json!(recording);
+        let response = self
+            .client
+            .request(Method::GET, "/api/v1/controls/snapshot", None)
+            .await?;
+        let mut response = stamp_snapshot(response, &self.session)?;
+        if response.is_success()
+            && let Some(graphs) = response.body["graphs"].as_array_mut()
+        {
+            for graph in graphs {
+                let graph_id = graph["id"].as_str().unwrap_or_default().to_owned();
+                if let Some(nodes) = graph["nodes"].as_array_mut() {
+                    for node in nodes.iter_mut().filter(|node| !node["recorder"].is_null()) {
+                        let node_id = node["nodeId"].as_str().unwrap_or_default();
+                        node["recordingSettings"] = serde_json::to_value(
+                            self.client.recording_preferences(&graph_id, node_id)?,
+                        )
+                        .map_err(|error| error.to_string())?;
+                    }
                 }
-                nodes.push(value);
             }
-            graphs.push(json!({"id":graph.id,"name":graph.name,"nodes":nodes}));
         }
-        let after: GraphRuntimeStatus = self.read("/api/v1/graph/status").await?;
-        let current: GraphCatalogResponse = self.read(super::GRAPH_CATALOG_ROUTE).await?;
-        if before != after || catalog.catalog_revision != current.catalog_revision {
-            return Ok(rejected("graph_revision_stale"));
-        }
-        let status: AppStatus = self.read("/api/v1/status").await?;
-        Ok(ControlProxyResponse {
-            status: 200,
-            delivery: super::RequestDelivery::ServerResponse,
-            body: json!({"protocolVersion":1,"session":self.session,"revision":after.active_revision,"enginePower":status.engine_power,"graphs":graphs}),
-        })
+        Ok(response)
     }
+}
+
+/// The engine owns consistency; the desktop adds only its connection-lifetime fence.
+fn stamp_snapshot(
+    mut response: ControlProxyResponse,
+    session: &str,
+) -> Result<ControlProxyResponse, String> {
+    if !response.is_success() {
+        return Ok(response);
+    }
+    let snapshot: EngineControlSnapshot = serde_json::from_value(response.body)
+        .map_err(|error| format!("invalid control snapshot: {error}"))?;
+    response.body = serde_json::to_value(snapshot).map_err(|error| error.to_string())?;
+    response.body["protocolVersion"] = json!(1);
+    response.body["session"] = json!(session);
+    Ok(response)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_adds_only_desktop_session_and_keeps_pending_execution_visible() {
+        let mut body = json!({"revision":8,"activeRevision":7,"structureGeneration":3,
+            "enginePower":{"enabled":true,"transitioning":false},"graphs":[]});
+        let result = stamp_snapshot(
+            ControlProxyResponse {
+                status: 200,
+                body: body.clone(),
+                delivery: super::super::RequestDelivery::ServerResponse,
+            },
+            "session",
+        )
+        .expect("snapshot");
+        body["session"] = json!("session");
+        body["protocolVersion"] = json!(1);
+        assert_eq!(result.status, 200);
+        assert_eq!(result.body, body);
+    }
+
+    #[test]
+    fn snapshot_failure_preserves_the_engine_error_without_turning_it_into_disconnect() {
+        let body = json!({"code":"control_unavailable", "parameters":{"reason":"device fault"}});
+        let result = stamp_snapshot(
+            ControlProxyResponse {
+                status: 503,
+                body: body.clone(),
+                delivery: super::super::RequestDelivery::ServerResponse,
+            },
+            "session",
+        )
+        .expect("engine response");
+        assert_eq!(result.status, 503);
+        assert_eq!(result.body, body);
+    }
 
     #[test]
     fn only_explicit_bounded_commands_deserialize() {

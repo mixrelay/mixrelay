@@ -12,6 +12,7 @@ const node = {
 const snapshot = (target = node) => ({
   session: 'session-a',
   revision: 8,
+  activeRevision: 8,
   graphs: [{ id: 'g', nodes: [target] }],
 });
 const settings = { graphId: 'g', nodeId: 'n', operation: 'power' };
@@ -24,6 +25,11 @@ test('power and mute use observed absolute state and graph revision', () => {
     request: { expectedRevision: 8, enabled: false },
   });
   assert.equal(commandFor(snapshot(), settings, 'mute').request.muted, true);
+});
+test('a desired state is not displayed as active or used for another command before acknowledgement', () => {
+  const pending = { ...snapshot(), activeRevision: 7 };
+  assert.equal(presentation(pending, settings).value, 'Pending');
+  assert.throws(() => commandFor(pending, settings), /Target unavailable/);
 });
 test('off node permits power only; missing and disconnected targets reject', () => {
   const off = snapshot({ ...node, control: { enabled: false, muted: false } });
@@ -48,24 +54,19 @@ test('recording commands carry observed take identity and state', () => {
   const recorder = {
     ...node,
     capabilities: { ...node.capabilities, recorder: true },
-    recorder: { state: 'recording', path: '/tmp/take-a.wav' },
+    recorder: { state: 'recording', path: '/fixture/take-a.wav' },
   };
   assert.deepEqual(commandFor(snapshot(recorder), settings, 'stop').request.expectedRecording, {
     state: 'recording',
-    path: '/tmp/take-a.wav',
+    path: '/fixture/take-a.wav',
   });
   assert.throws(() => commandFor(snapshot(recorder), settings, 'record'));
-  recorder.recorder = { state: 'paused', path: '/tmp/take-a.wav' };
+  recorder.recorder = { state: 'paused', path: '/fixture/take-a.wav' };
   assert.deepEqual(commandFor(snapshot(recorder), settings, 'record').request.request, {
     action: 'record',
   });
   recorder.recorder = { state: 'stopped', path: null };
-  assert.throws(() => commandFor(snapshot(recorder), settings, 'record'));
-  const take = commandFor(
-    snapshot(recorder),
-    { ...settings, recordingFolder: '/tmp/recordings' },
-    'record',
-  ).request.request;
-  assert.match(take.path, /^\/tmp\/recordings\/MixRelay-.*\.wav$/);
-  assert.equal(take.sampleRate, undefined);
+  const take = commandFor(snapshot(recorder), settings, 'record').request;
+  assert.deepEqual(take.request, { action: 'record' });
+  assert.deepEqual(take.expectedRecording, { state: 'stopped', path: null });
 });

@@ -1,7 +1,11 @@
 //! One process-lifetime owner for the HAL registry and its serial control resources.
 //! No control-state borrow crosses a registry call that can notify the HAL host.
 
-use std::{cell::RefCell, ffi::c_void, ptr};
+use std::{
+    cell::{Cell, RefCell},
+    ffi::c_void,
+    ptr,
+};
 
 use crate::{
     abi::HostOps,
@@ -18,6 +22,7 @@ mod native;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Request {
     Inventory,
+    Acknowledged { generation: u64 },
     Replacement { endpoint: [u8; 16], generation: u64 },
 }
 
@@ -28,7 +33,6 @@ trait Backend {
     fn connect(&self, owner: *const c_void, generation: u64) -> Option<Self::Connection>;
     fn resume(&self, connection: &Self::Connection);
     fn send(&self, connection: &Self::Connection, request: Request);
-    fn desktop_active(&self) -> bool;
 }
 
 struct Control<B: Backend> {
@@ -36,6 +40,7 @@ struct Control<B: Backend> {
     session: RefCell<ControlSession>,
     connection: RefCell<Option<B::Connection>>,
     backend: B,
+    acknowledged: Cell<(u64, u64)>,
 }
 
 impl<B: Backend> Control<B> {
@@ -45,6 +50,7 @@ impl<B: Backend> Control<B> {
             session: RefCell::new(ControlSession::default()),
             connection: RefCell::new(None),
             backend,
+            acknowledged: Cell::new((0, 0)),
         }
     }
 
@@ -53,9 +59,6 @@ impl<B: Backend> Control<B> {
     }
 
     fn open(&self) {
-        if !self.backend.desktop_active() {
-            return;
-        }
         let generation = self.session.borrow_mut().begin();
         if generation == 0 {
             return;
@@ -86,14 +89,15 @@ impl<B: Backend> Control<B> {
 
     fn tick(&self) {
         self.registry.tick();
-        if !self.backend.desktop_active() {
-            let generation = self.session.borrow().authority();
-            self.session.borrow_mut().disconnected(generation);
-            self.connection.borrow_mut().take();
-            return;
-        }
         let action = self.session.borrow_mut().tick();
         self.request_replacement();
+        let authority = self.session.borrow().authority();
+        if let Some(generation) = crate::inventory::acknowledged(&self.registry, authority)
+            && self.acknowledged.get() != (authority, generation)
+        {
+            self.send(Request::Acknowledged { generation });
+            self.acknowledged.set((authority, generation));
+        }
         match action {
             TickAction::Maintain => {}
             TickAction::Reconnect => self.open(),
@@ -102,9 +106,6 @@ impl<B: Backend> Control<B> {
     }
 
     fn send(&self, request: Request) {
-        if !self.backend.desktop_active() {
-            return;
-        }
         if let Some(connection) = self.connection.borrow().as_ref() {
             self.backend.send(connection, request);
         }

@@ -338,7 +338,7 @@ fn conflicting_virtual_definitions_are_rejected_but_local_reference_flags_are_in
 }
 
 #[test]
-fn real_catalog_pcm_automatically_sums_playback_and_produced_bus() {
+fn real_catalog_pcm_sends_only_graph_contributions_and_reads_driver_mix() {
     let apps = Apps(Cell::new(0));
     let a = GraphDocument::new(
         1,
@@ -367,21 +367,21 @@ fn real_catalog_pcm_automatically_sums_playback_and_produced_bus() {
     let output = pcm(&composed);
     samples_equal(
         &output[&composed.native_devices[&VirtualEndpointId::from("X")]],
-        1.05,
+        0.25,
     );
     samples_equal(
         &output[&composed.native_devices[&VirtualEndpointId::from("Y")]],
-        1.05,
+        0.8,
     );
     samples_equal(
         &output[&composed.native_devices[&VirtualEndpointId::from("Z")]],
-        1.05,
+        0.8,
     );
     assert_eq!(composed.native_sources.len(), 1);
     let self_route = compile(&[("loop".into(), reader("X"))], &[], &apps).unwrap();
     samples_equal(
         &pcm(&self_route)[&self_route.native_devices[&VirtualEndpointId::from("X")]],
-        1.6,
+        0.8,
     );
 }
 
@@ -397,6 +397,7 @@ fn application_owner_comes_only_from_resolver_and_failures_remain_visible() {
             channel_layout: ChannelLayout::Stereo,
         },
         source_playback: SourcePlaybackPolicy::Preserve,
+        forwarding_endpoint: None,
         gain_db: 0.0,
         requires_reselection: false,
     };
@@ -443,4 +444,159 @@ fn empty_catalog_does_not_resolve_apps_or_create_native_resources() {
     assert!(composed.native_outputs.is_empty());
     assert_eq!(composed.document.revision, 9);
     assert_eq!(apps.0.get(), 0);
+}
+
+#[test]
+fn disabled_capture_does_not_acquire_forwarding_endpoint_or_change_authored_policy() {
+    let apps = Apps(Cell::new(0));
+    let mut app = node(
+        "app",
+        NodeConfig::ApplicationCapture(ApplicationCaptureRequest {
+            selector: ApplicationSelector::ExecutablePath {
+                path: "/unavailable".into(),
+            },
+            stream: StreamSpec {
+                channels: 2,
+                channel_layout: ChannelLayout::Stereo,
+            },
+            source_playback: SourcePlaybackPolicy::MuteWhileCaptured,
+            forwarding_endpoint: Some(VirtualEndpointId::from("absent")),
+            gain_db: 0.0,
+            requires_reselection: false,
+        }),
+    );
+    app.control.enabled = false;
+    let documents = vec![("A".into(), GraphDocument::new(1, vec![app], vec![]))];
+    let original = documents.clone();
+    let inactive = compile(&documents, &[], &apps).unwrap();
+    assert_eq!(apps.0.get(), 0);
+    assert!(inactive.native_devices.is_empty());
+    assert!(inactive.native_sources.is_empty());
+    assert_eq!(documents, original);
+}
+
+#[test]
+fn application_widths_share_one_owner_and_incomplete_mute_is_rejected() {
+    let apps = Apps(Cell::new(0));
+    let graph = |channels, gain_db| {
+        GraphDocument::new(
+            1,
+            vec![node(
+                "app",
+                NodeConfig::ApplicationCapture(ApplicationCaptureRequest {
+                    selector: ApplicationSelector::ExecutablePath {
+                        path: "/verified/app".into(),
+                    },
+                    stream: StreamSpec {
+                        channels,
+                        channel_layout: ChannelLayout::Discrete,
+                    },
+                    source_playback: SourcePlaybackPolicy::Preserve,
+                    forwarding_endpoint: None,
+                    gain_db,
+                    requires_reselection: false,
+                }),
+            )],
+            Vec::new(),
+        )
+    };
+    let mut documents = vec![("A".into(), graph(1, -12.0)), ("B".into(), graph(32, 0.0))];
+    let composed = compile(&documents, &[], &apps).unwrap();
+    assert_eq!(composed.native_sources.len(), 1);
+    let source = composed
+        .document
+        .nodes
+        .iter()
+        .find_map(|node| match &node.config {
+            NodeConfig::ApplicationCapture(request) => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(source.stream.channels, 32);
+    assert_eq!(source.gain_db.to_bits(), 0.0_f32.to_bits());
+    documents.reverse();
+    let reordered = compile(&documents, &[], &apps).unwrap();
+    assert_eq!(reordered.native_sources, composed.native_sources);
+    assert!(
+        reordered
+            .document
+            .nodes
+            .iter()
+            .any(|node| { node.config == NodeConfig::ApplicationCapture(source.clone()) })
+    );
+    let NodeConfig::ApplicationCapture(request) = &mut documents[0].1.nodes[0].config else {
+        panic!("capture")
+    };
+    request.source_playback = SourcePlaybackPolicy::MuteWhileCaptured;
+    assert!(compile(&documents, &[], &apps).is_err());
+}
+
+#[test]
+fn application_mute_intent_is_graph_local_to_one_canonical_tap() {
+    let apps = Apps(Cell::new(0));
+    let request = ApplicationCaptureRequest {
+        selector: ApplicationSelector::ExecutablePath {
+            path: "/verified/app".into(),
+        },
+        stream: StreamSpec {
+            channels: 2,
+            channel_layout: ChannelLayout::Stereo,
+        },
+        source_playback: SourcePlaybackPolicy::Preserve,
+        forwarding_endpoint: None,
+        gain_db: 0.0,
+        requires_reselection: false,
+    };
+    let mut muted = request.clone();
+    muted.source_playback = SourcePlaybackPolicy::MuteWhileCaptured;
+    muted.forwarding_endpoint = Some(VirtualEndpointId::from("X"));
+    let documents = vec![
+        (
+            "A".into(),
+            GraphDocument::new(
+                1,
+                vec![node("app", NodeConfig::ApplicationCapture(request))],
+                vec![],
+            ),
+        ),
+        (
+            "B".into(),
+            GraphDocument::new(
+                1,
+                vec![
+                    node("app", NodeConfig::ApplicationCapture(muted)),
+                    node(
+                        "endpoint",
+                        NodeConfig::VirtualEndpoint(device("X", true, false)),
+                    ),
+                ],
+                vec![],
+            ),
+        ),
+    ];
+    let composed = compile(&documents, &[], &apps).unwrap();
+    assert_eq!(composed.native_sources.len(), 1);
+    assert_eq!(composed.playback_intents.len(), 1);
+    let intent = &composed.playback_intents[0];
+    assert_eq!(
+        composed.native_sources.get(&intent.source_id),
+        Some(&intent.capture_node_id)
+    );
+    assert_eq!(
+        intent.mask_node_id,
+        crate::graph_composition::runtime_node_id("B", &NodeId::from("app"))
+    );
+    assert_eq!(intent.forwarding_endpoint, VirtualEndpointId::from("X"));
+    assert_eq!(composed.native_devices.len(), 1);
+    let canonical = composed
+        .document
+        .nodes
+        .iter()
+        .find_map(|node| match &node.config {
+            NodeConfig::ApplicationCapture(request) => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(canonical.source_playback, SourcePlaybackPolicy::Preserve);
+    assert_eq!(canonical.forwarding_endpoint, None);
 }

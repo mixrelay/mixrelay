@@ -32,6 +32,9 @@ path = "src/lib.rs"
 [dependencies.libc]
 version = "0.2"
 
+[dependencies.base64]
+version = "0.22"
+
 [dependencies.libloading]
 version = "0.8"
 
@@ -47,6 +50,12 @@ features = ["derive"]
 
 [dependencies.serde_json]
 version = "1"
+
+[dependencies.sha2]
+version = "=0.10.9"
+
+[dependencies.tempfile]
+version = "3"
 
 [dependencies.truce-rack-core]
 version = "1.1.5"

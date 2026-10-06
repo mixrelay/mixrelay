@@ -70,6 +70,57 @@ it('provides virtual source gain alongside endpoint options, without an output g
   expect(onGain).toHaveBeenCalledWith(-0.5);
 });
 
+it.each([
+  {
+    kind: 'application capture',
+    type: 'application_capture',
+    config: {
+      gainDb: -6,
+      selector: { bundle_id: 'com.example.player', include_descendants: true, match: 'bundle_id' },
+      sourcePlayback: 'preserve',
+      stream: { channelLayout: 'stereo', channels: 2 },
+    },
+  },
+  {
+    kind: 'device input',
+    type: 'audio_device_input',
+    config: {
+      gainDb: -6,
+      outputChannels: 1,
+      selector: { match: 'persistent_uid', uid: 'fixture-device' },
+    },
+  },
+] as const)('binds $kind gain to its source config and card control', ({ type, config }) => {
+  const sourceDocument: RuntimeGraphDocument = {
+    schemaVersion: 2,
+    revision: 3,
+    edges: [],
+    nodes: [{ id: 'source', label: 'Source', type, config }],
+  };
+  const model = runtimeGraphToAudioGraph(sourceDocument);
+  const source = model.nodes[0];
+  expect(source?.appearance.gainControl).toEqual({ label: 'Source gain', valueDb: -6 });
+  if (!source) throw new Error('source missing');
+  const onGain = vi.fn();
+  render(
+    <MixRelayProvider>
+      <AudioNodeCard
+        {...source.appearance}
+        inputCount={source.inputPorts.length}
+        outputCount={source.outputPorts.length}
+        onSelect={vi.fn()}
+        onGainChange={onGain}
+      />
+    </MixRelayProvider>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Options' }));
+  fireEvent.keyDown(screen.getByRole('slider', { name: 'Source gain' }), { key: 'ArrowRight' });
+  expect(onGain).toHaveBeenCalledWith(-5.5);
+  const changed = updateRoutingNodeGain(model, source.id, -5.5);
+  const saved = audioGraphToRuntimeGraph(changed, sourceDocument);
+  expect(saved.nodes[0]).toMatchObject({ type, config: { ...config, gainDb: -5.5 } });
+});
+
 it('serializes the source gain once even when the sink is visited last or first', () => {
   const before = runtimeGraphToAudioGraph(document);
   const changed = updateRoutingNodeGain(before, sourceId, -12);

@@ -6,7 +6,7 @@ use mixrelay_test_support::FixtureDir;
 struct Fixture {
     control: Arc<HostedProcessorControl>,
     worker: Arc<WorkerControl>,
-    _directory: FixtureDir,
+    directory: FixtureDir,
 }
 
 impl Fixture {
@@ -33,7 +33,7 @@ impl Fixture {
         Self {
             control,
             worker: Arc::new(worker),
-            _directory: directory,
+            directory,
         }
     }
 
@@ -178,6 +178,7 @@ fn stale_close_tokens_cannot_snapshot_replaced_workers_or_newer_events() {
 fn matching_close_token_exports_native_state_and_stays_retryable() {
     let fixture = Fixture::new();
     let registry = ProcessorControlRegistry::default();
+    registry.configure_state_store(fixture.directory.join("states"));
     let node = NodeId::from("effect");
     let _registration = registry.register(&node, fixture.control());
     fixture.observed(true);
@@ -197,7 +198,8 @@ fn matching_close_token_exports_native_state_and_stays_retryable() {
     let state =
         registry.snapshot_state_for_editor_close(&node, observation, Duration::from_secs(1));
     worker.join().unwrap();
-    assert_eq!(state.unwrap(), serde_json::json!({"stateBase64":"AQID"}));
+    let reference = registry.state_store().unwrap().put(&[1, 2, 3]).unwrap();
+    assert_eq!(state.unwrap(), serde_json::json!({"stateRef":reference}));
     assert_eq!(
         registry.editor_close_observation(&node).unwrap(),
         observation
@@ -209,6 +211,7 @@ fn replacement_during_export_cannot_publish_state_into_the_new_instance() {
     let first = Fixture::new();
     let replacement = Fixture::new();
     let registry = ProcessorControlRegistry::default();
+    registry.configure_state_store(first.directory.join("states"));
     let node = NodeId::from("effect");
     let _first_registration = registry.register(&node, first.control());
     first.observed(true);
@@ -236,4 +239,75 @@ fn replacement_during_export_cannot_publish_state_into_the_new_instance() {
     release_tx.send(()).unwrap();
     worker.join().unwrap();
     assert_eq!(result, Err(ProcessorStateError::Unavailable));
+}
+
+#[test]
+fn close_reopen_close_during_export_does_not_checkpoint_old_reuse_identity() {
+    let fixture = Fixture::new();
+    let registry = ProcessorControlRegistry::default();
+    registry.configure_state_store(fixture.directory.join("states"));
+    let node = NodeId::from("effect");
+    let _registration = registry.register(&node, fixture.control());
+    fixture.control.active_owner.store(true, Ordering::Release);
+    fixture.observed(true);
+    fixture.observed(false);
+    let observation = registry.editor_close_observation(&node).unwrap();
+
+    let config = ProviderNodeConfig {
+        ports: None,
+        type_id: "fixture:provider".into(),
+        parameters: serde_json::json!({"nativeToken":"before-close"}),
+    };
+    let request = HostedProcessorPrepareRequest {
+        node_id: &node,
+        config: &config,
+        format: RenderFormat {
+            sample_rate: 48_000,
+            block_frames: 128,
+        },
+        input_channels: 2,
+        output_channels: 2,
+    };
+    *fixture.control.reuse.lock().unwrap() = Some(crate::reuse::ReuseSignature::new(&request));
+    assert_eq!(
+        registry.reuse_request(&request).unwrap().reuse_identity(),
+        Some(observation.instance_id)
+    );
+
+    let worker_control = Arc::clone(&fixture.worker);
+    let worker = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let (request, kind) = loop {
+            if let Some(pending) = worker_control.pending_request() {
+                break pending;
+            }
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(1));
+        };
+        assert_eq!(kind, crate::editor_surface::NATIVE_STATE);
+
+        // The original close token is now stale before its state response completes.
+        crate::publish_observed_editor_snapshot(
+            worker_control.header(),
+            rack_formats::EditorSnapshot {
+                open: true,
+                ..rack_formats::EditorSnapshot::default()
+            },
+        );
+        crate::publish_observed_editor_snapshot(
+            worker_control.header(),
+            rack_formats::EditorSnapshot::default(),
+        );
+        worker_control.publish(request, Ok(vec![9, 8, 7]));
+    });
+
+    let result =
+        registry.snapshot_state_for_editor_close(&node, observation, Duration::from_secs(1));
+    worker.join().unwrap();
+
+    assert_eq!(result, Err(ProcessorStateError::Unavailable));
+    assert_eq!(
+        registry.reuse_request(&request).unwrap().reuse_identity(),
+        Some(observation.instance_id)
+    );
 }

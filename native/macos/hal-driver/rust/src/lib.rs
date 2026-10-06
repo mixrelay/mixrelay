@@ -14,6 +14,7 @@ mod device;
 mod inventory;
 #[cfg(target_os = "macos")]
 mod native;
+mod output_control;
 #[cfg(target_os = "macos")]
 mod properties;
 mod registry;

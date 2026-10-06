@@ -47,10 +47,18 @@ typedef struct MRDeviceClockBreak {
     uint64_t count;
     double expected_sample, actual_sample;
     uint64_t previous_host, actual_host, flags;
+    uint64_t callback_host, callback_flags;
 } MRDeviceClockBreak;
-_Static_assert(sizeof(MRDeviceClockBreak) == 48, "Rust clock-break snapshot ABI");
-/* One bounded atomic read; false leaves output unchanged. Retain io throughout. */
-bool mr_device_io_clock_break(const MRDeviceIO *io, MRDeviceClockBreak *event);
+typedef struct MRDeviceClockBreakRecord {
+    MRDeviceClockBreak event;
+    uint64_t next_cursor, missed_before;
+} MRDeviceClockBreakRecord;
+_Static_assert(sizeof(MRDeviceClockBreak) == 64, "Rust clock-break event ABI");
+_Static_assert(sizeof(MRDeviceClockBreakRecord) == 80, "Rust clock-break record ABI");
+/* One bounded atomic read; false leaves output unchanged. Start cursor at zero
+ * per retained owner, then pass next_cursor. Overwrites appear in missed_before. */
+bool mr_device_io_next_clock_break(const MRDeviceIO *io, uint64_t cursor,
+                                 MRDeviceClockBreakRecord *record);
 uint64_t mr_device_io_native_frames(MRDeviceIO *io);
 uint64_t mr_device_io_graph_frames(MRDeviceIO *io);
 uint64_t mr_device_io_overflows(MRDeviceIO *io);

@@ -18,7 +18,7 @@ typedef struct MRHALIOContext {
     bool clock_running;
     _Atomic(MREndpointTransport *) transport;
     _Atomic(MRSharedAudioBuffer *) render_buffer;
-    _Atomic(MRSharedAudioBuffer *) capture_buffer;
+    _Atomic(void *) capture_buffer; /* Rust-owned bounded loopback storage. */
     uint32_t render_channels;
     uint32_t capture_channels;
 } MRHALIOContext;
@@ -53,13 +53,13 @@ void mr_hal_io_set_render_activity(MRHALIOContext *context,
 /* Converts Core Audio's integral sample-time domain without losing precision. */
 bool mr_hal_io_sample_frame(double sample_time, uint64_t *sample_frame);
 
-/* OS output -> MixRelay engine render buffer. */
+/* OS-mixed output -> HAL render and capture rings at the exact sample frame. */
 bool mr_hal_io_write_render(MRHALIOContext *context,
                             uint64_t start_frame,
                             const float *interleaved_samples,
                             uint32_t frame_count);
 
-/* MixRelay engine capture buffer -> OS input. Missing data becomes silence. */
+/* HAL mixed capture ring -> OS input. Missing or stale data becomes silence. */
 uint32_t mr_hal_io_read_capture(MRHALIOContext *context,
                                 uint64_t start_frame,
                                 float *interleaved_samples,

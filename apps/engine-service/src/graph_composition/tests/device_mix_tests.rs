@@ -6,10 +6,11 @@ fn asymmetric_registry() -> DeviceRegistry {
         channel_layout: ChannelLayout::Discrete,
     };
     let mut x = device("X");
+    x.render = Some(wide);
     x.capture = Some(wide);
     let mut y = device("Y");
-    y.render = None;
-    y.capture = Some(wide);
+    y.render = Some(wide);
+    y.capture = None;
     DeviceRegistry::new(vec![x, y])
         .unwrap()
         .with_sources(vec![SharedSource {
@@ -31,6 +32,7 @@ fn asymmetric_composition() -> ComposedGraph {
         source_id: "input".into(),
         channels: 4,
         gain_db: 0.0,
+        forwarding_endpoint: None,
     }];
     let writer = GraphDocument::new(
         1,
@@ -102,8 +104,8 @@ fn asymmetric_native_geometry_sums_all_channels_before_per_reference_gain() {
         .iter()
         .map(|binding| {
             if binding.virtual_endpoint_id().is_some() {
-                assert_eq!(binding.channels(), 2);
-                [0.8, 0.6].repeat(4)
+                assert_eq!(binding.channels(), 4);
+                [1.0, 1.0, 0.6, 0.8].repeat(4)
             } else {
                 [0.2, 0.4, 0.6, 0.8].repeat(4)
             }
@@ -131,7 +133,7 @@ fn asymmetric_native_geometry_sums_all_channels_before_per_reference_gain() {
             .unwrap();
         for (binding, samples) in plan.sink_bindings().iter().zip(&outputs) {
             let expected = if binding.virtual_endpoint_id().unwrap().as_str() == "X" {
-                [1.0, 1.0, 0.6, 0.8]
+                [0.2, 0.4, 0.6, 0.8]
             } else if cycle == 0 {
                 [0.0; 4]
             } else {
@@ -145,5 +147,57 @@ fn asymmetric_native_geometry_sums_all_channels_before_per_reference_gain() {
         }
     }
     assert_eq!(composed.native_devices.len(), 2);
-    assert_eq!(composed.device_buses.len(), 2);
+    assert_eq!(composed.device_buses.len(), 1);
+}
+
+#[test]
+fn explicit_driver_feedback_is_finite_and_off_or_mute_stops_only_contributions() {
+    let registry = DeviceRegistry::new(vec![device("X")]).unwrap();
+    let document = GraphDocument::new(
+        1,
+        vec![],
+        vec![edge("feedback", "x", FROM_OS_PORT_ID, "x", TO_OS_PORT_ID)],
+    );
+    for (enabled, muted) in [(true, false), (true, true), (false, false)] {
+        let mut local = reference("x", "X", true, true);
+        local.control = mixrelay_audio_graph::NodeControl { enabled, muted };
+        let composed = compose(
+            &registry,
+            &[GraphFragment {
+                id: "feedback",
+                document: &document,
+                device_references: &[local],
+                source_references: &[],
+                output_references: &[],
+            }],
+            1,
+            context(),
+            &GraphCompiler::default(),
+        )
+        .unwrap();
+        let mut processor =
+            BlockProcessor::new(Arc::new(RenderPlan::prepare(&composed.execution).unwrap()));
+        let mut capture = [1.0; 8];
+        let mut contribution = [0.0; 8];
+        for expected in [0.0, 1.0, 1.0, 2.0, 2.0] {
+            let measured = allocation_counter::measure(|| {
+                processor
+                    .process_block(4, &[&capture], &mut [&mut contribution])
+                    .unwrap();
+            });
+            assert_eq!(measured.count_total, 0);
+            let expected = if enabled && !muted { expected } else { 0.0 };
+            assert!(
+                contribution
+                    .iter()
+                    .all(|sample| (*sample - expected).abs() < 0.000_001)
+            );
+            // The native Driver performs this sum in its own callback. Feeding the
+            // next observed capture cannot execute graph work recursively in this block.
+            for (mixed, graph) in capture.iter_mut().zip(contribution) {
+                *mixed = 1.0 + graph;
+            }
+        }
+        assert_eq!(registry.devices().count(), 1);
+    }
 }

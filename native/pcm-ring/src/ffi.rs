@@ -1,8 +1,123 @@
-use super::{PcmRing, RingStats};
+use super::{PcmRing, RingStats, SampleFormat};
 use std::{
-    ptr,
+    ffi::c_void,
+    ptr, slice,
     sync::atomic::Ordering::{Acquire, Release},
 };
+
+/// Writes interleaved LE PCM directly into free float ring spans. Invalid format
+/// IDs/null input return zero; valid zero frames still acknowledge the epoch.
+/// # Safety
+/// Retained initialized ring and exactly one serialized producer. For nonzero
+/// frames input is readable for `frames * channels * format.bytes_per_sample()` bytes,
+/// disjoint from the ring mapping, and retained until return. No byte alignment
+/// is required. No consumer or other writer may access the reserved free spans.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_pcm_ring_write_pcm(
+    ring: *mut PcmRing,
+    input: *const c_void,
+    frames: u32,
+    format: u32,
+) -> u32 {
+    let Some(format) = SampleFormat::from_raw(format) else {
+        return 0;
+    };
+    if format == SampleFormat::Float32
+        && cfg!(target_endian = "little")
+        && input.addr().is_multiple_of(align_of::<f32>())
+    {
+        // SAFETY: byte extent equals the float extent and alignment is checked.
+        return unsafe { mr_pcm_ring_write(ring, input.cast(), frames) };
+    }
+    // SAFETY: retained native owner; immutable geometry is shared with the consumer.
+    let Some(ring) = (unsafe { ring.as_ref() }) else {
+        return 0;
+    };
+    if ring.storage.samples.is_null() || (frames != 0 && input.is_null()) {
+        return 0;
+    }
+    // SAFETY: only the serialized producer accesses its epoch cell.
+    let writer = unsafe { &mut *ring.writer_epoch.get() };
+    let Some(cursor) = ring.reserve_write(writer, frames) else {
+        return 0;
+    };
+    let (start, first, second) = ring.spans(cursor, frames);
+    let width = format.bytes_per_sample();
+    // SAFETY: caller's complete byte extent is disjoint from the mapping. The
+    // consumer's acquire/release cursor grants precisely these free spans, not
+    // the whole allocation. Their lengths sum to frames*channels samples.
+    unsafe {
+        let bytes = slice::from_raw_parts(input.cast::<u8>(), (first + second) * width);
+        let destination = slice::from_raw_parts_mut(ring.storage.samples.add(start), first);
+        let _ = format.decode(&bytes[..first * width], destination);
+        if second != 0 {
+            let destination = slice::from_raw_parts_mut(ring.storage.samples, second);
+            let _ = format.decode(&bytes[first * width..], destination);
+        }
+    }
+    ring.publication
+        .written
+        .store(cursor.wrapping_add(u64::from(frames)), Release);
+    frames
+}
+
+/// Reads interleaved LE PCM after the existing two-quantum prefill, silencing
+/// the complete byte output on shortage/epoch invalidation. Invalid format IDs
+/// return zero without touching output, since their byte width is unknown.
+/// # Safety
+/// Retained initialized ring and exactly one serialized consumer (including
+/// discard). For nonzero frames output is writable for
+/// `frames * channels * format.bytes_per_sample()` bytes, disjoint from the mapping and
+/// all other live references. The buffer needs no float alignment.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_pcm_ring_read_pcm(
+    ring: *mut PcmRing,
+    output: *mut c_void,
+    frames: u32,
+    format: u32,
+) -> u32 {
+    let Some(format) = SampleFormat::from_raw(format) else {
+        return 0;
+    };
+    if format == SampleFormat::Float32
+        && cfg!(target_endian = "little")
+        && output.addr().is_multiple_of(align_of::<f32>())
+    {
+        // SAFETY: byte extent equals float extent and alignment is checked.
+        return unsafe { mr_pcm_ring_read(ring, output.cast(), frames) };
+    }
+    // SAFETY: initialized owner retained throughout the serialized consumer call.
+    let Some(ring) = (unsafe { ring.as_ref() }) else {
+        return 0;
+    };
+    if ring.storage.samples.is_null() || output.is_null() || frames == 0 {
+        return 0;
+    }
+    let count = frames as usize * ring.channels as usize * format.bytes_per_sample();
+    // SAFETY: exclusive caller buffer, sized as documented, independent of ring spans.
+    let bytes = unsafe { slice::from_raw_parts_mut(output.cast::<u8>(), count) };
+    // SAFETY: only this consumer touches its private reader cell.
+    let reader = unsafe { &mut *ring.reader.get() };
+    if let Some(window) = ring.reserve_read(reader, frames, true) {
+        let (start, first, second) = ring.spans(window.cursor, frames);
+        let split = first * format.bytes_per_sample();
+        // SAFETY: acquired producer publication grants immutable access to only
+        // these completed spans until finish_read releases them for producer reuse.
+        unsafe {
+            let source = slice::from_raw_parts(ring.storage.samples.add(start), first);
+            let _ = format.encode(source, &mut bytes[..split]);
+            if second != 0 {
+                let source = slice::from_raw_parts(ring.storage.samples, second);
+                let _ = format.encode(source, &mut bytes[split..]);
+            }
+        }
+        if ring.finish_read(reader, &window, frames) {
+            return frames;
+        }
+    }
+    bytes.fill(0);
+    0
+}
 
 /// Initializes exclusive native storage; invalid geometry/mapping failure returns
 /// false with an empty, clearable ring. Call only on fresh or cleared storage.

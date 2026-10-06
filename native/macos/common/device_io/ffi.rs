@@ -220,6 +220,11 @@ pub unsafe extern "C" fn mr_device_io_direct_binding(
     let Some(binding) = native::resolve(&io.selection, &System) else {
         return false;
     };
+    if !native::admitted_format(&io.selection, binding, &System)
+        .is_some_and(|format| format.layout.all_float())
+    {
+        return false;
+    }
     // SAFETY: caller supplies three disjoint exclusive scalar outputs.
     unsafe {
         device.write(binding.device);

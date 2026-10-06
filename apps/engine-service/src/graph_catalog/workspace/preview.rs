@@ -26,7 +26,7 @@ impl EngineGraphController {
                 None,
             ),
             WorkspaceAction::Open { path } => {
-                let (catalog, digest) = load_fingerprinted(file_path(&path)?)?;
+                let (catalog, digest, _) = load_fingerprinted(file_path(&path)?)?;
                 (catalog, Some(digest))
             }
             WorkspaceAction::Save { .. } => {
@@ -57,7 +57,7 @@ impl EngineGraphController {
             *self.context.read(),
         )?;
         Ok(WorkspacePreview {
-            manifest: crate::execution_control::capture_manifest(&composed.document)?,
+            manifest: crate::execution_control::composed_capture_manifest(&composed)?,
             file_digest: digest,
         })
     }

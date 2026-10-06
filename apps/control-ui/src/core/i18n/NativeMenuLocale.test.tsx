@@ -20,10 +20,12 @@ describe('NativeMenuLocale', () => {
 
   it('sends the resolved UI language and updates when it changes', () => {
     const view = render(<NativeMenuLocale />);
-    expect(native.invoke).toHaveBeenLastCalledWith('set_tray_locale', { locale: 'ko-KR' });
+    expect(native.invoke).toHaveBeenLastCalledWith('set_native_menu_locale', {
+      locale: 'ko-KR',
+    });
     native.i18n.resolvedLanguage = 'en';
     view.rerender(<NativeMenuLocale />);
-    expect(native.invoke).toHaveBeenLastCalledWith('set_tray_locale', { locale: 'en' });
+    expect(native.invoke).toHaveBeenLastCalledWith('set_native_menu_locale', { locale: 'en' });
   });
 
   it('does not invoke native commands in the browser', () => {

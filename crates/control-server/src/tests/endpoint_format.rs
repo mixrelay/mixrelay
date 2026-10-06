@@ -1,7 +1,7 @@
 use super::{
-    Arc, Body, ErrorCode, GraphApplyResponse, GraphApplyState, PROTOCOL_VERSION, ProtocolError,
-    Request, ServiceExt, StatusCode, TestBackend, VIRTUAL_ENDPOINT_FORMAT_ROUTE, json,
-    router_with_backend,
+    Arc, Body, ControlOperations, ErrorCode, GraphApplyResponse, GraphApplyState, PROTOCOL_VERSION,
+    ProtocolError, Request, ServiceExt, StatusCode, TestBackend, VIRTUAL_ENDPOINT_FORMAT_ROUTE,
+    json, router_with_backend,
 };
 
 fn accepted() -> Arc<TestBackend> {
@@ -14,7 +14,7 @@ fn accepted() -> Arc<TestBackend> {
 }
 
 async fn send(backend: Arc<TestBackend>, body: serde_json::Value) -> axum::response::Response {
-    router_with_backend(backend)
+    router_with_backend(backend, ControlOperations::new())
         .oneshot(
             Request::put(VIRTUAL_ENDPOINT_FORMAT_ROUTE)
                 .header("content-type", "application/json")

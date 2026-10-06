@@ -7,3 +7,7 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+# Serialize measured PCM evidence from native/offline tests, never production callbacks.
+serde.workspace = true

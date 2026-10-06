@@ -1,6 +1,7 @@
 //! Graph device selection and deterministic aggregate membership, without IO.
-use mixrelay_audio_graph::{DeviceSelector, GraphDocument};
+use mixrelay_audio_graph::{DeviceSelector, GraphDocument, NodeConfig};
 use mixrelay_engine_service::resource_requirements::DeviceRequirements;
+use mixrelay_macos_transport::endpoint_identity::{endpoint_uid, parse_endpoint_id};
 use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::CString,
@@ -23,7 +24,7 @@ impl Spec {
 }
 pub(super) fn specs(document: &GraphDocument) -> BTreeMap<String, Spec> {
     let requirements = DeviceRequirements::from_document(document);
-    requirements
+    let mut selected: BTreeMap<_, _> = requirements
         .inputs
         .into_iter()
         .map(|(id, config)| {
@@ -46,7 +47,33 @@ pub(super) fn specs(document: &GraphDocument) -> BTreeMap<String, Spec> {
                 },
             )
         }))
-        .collect()
+        .collect();
+    for node in &document.nodes {
+        let NodeConfig::VirtualEndpointTransport(endpoint) = &node.config else {
+            continue;
+        };
+        let Some(id) = parse_endpoint_id(endpoint.id.as_str()) else {
+            continue;
+        };
+        for (input, stream, suffix) in [
+            (true, endpoint.capture, "/capture"),
+            (false, endpoint.render, "/render"),
+        ] {
+            if let Some(stream) = stream {
+                selected.insert(
+                    format!("{}{suffix}", node.id.as_str()),
+                    Spec {
+                        selector: DeviceSelector::PersistentUid {
+                            uid: endpoint_uid(id),
+                        },
+                        input,
+                        channels: stream.channels,
+                    },
+                );
+            }
+        }
+    }
+    selected
 }
 
 /// Fixed selections only. A default selector continues following the OS default
@@ -79,6 +106,50 @@ mod tests {
     use mixrelay_audio_graph::{
         AudioDeviceInputConfig, AudioDeviceOutputConfig, NodeConfig, NodeSpec,
     };
+
+    #[test]
+    fn driver_clients_attach_native_capture_input_and_render_output_to_one_stable_uid() {
+        let mut document: GraphDocument = serde_json::from_value(serde_json::json!({
+            "schemaVersion": 2, "revision": 1, "nodes": [{
+                "id":"driver", "type":"virtual_endpoint",
+                "config":{"id":"01010101-0101-0101-0101-010101010101","displayName":"Fixture",
+                    "reference":{"render":true,"capture":true},
+                    "render":{"channels":7,"channelLayout":"discrete"},
+                    "capture":{"channels":3,"channelLayout":"discrete"},
+                    "supportedSampleRates":[48000],"defaultSampleRate":48000}
+            }], "edges":[]
+        }))
+        .unwrap();
+        if let NodeConfig::VirtualEndpoint(endpoint) = &document.nodes[0].config {
+            document.nodes[0].config = NodeConfig::VirtualEndpointTransport(endpoint.spec.clone());
+        }
+        let selected = specs(&document);
+        assert_eq!(selected.len(), 2);
+        assert!(selected["driver/capture"].input);
+        assert_eq!(selected["driver/capture"].channels, 3);
+        assert!(!selected["driver/render"].input);
+        assert_eq!(selected["driver/render"].channels, 7);
+        let uid = endpoint_uid([1; 16]);
+        assert_eq!(
+            selected["driver/capture"]
+                .native_uid()
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            uid
+        );
+        assert_eq!(
+            selected["driver/render"]
+                .native_uid()
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            uid
+        );
+        assert_eq!(aggregate_members(&selected), vec![uid]);
+        document.nodes.clear();
+        assert!(specs(&document).is_empty());
+    }
 
     #[test]
     fn shared_requirements_preserve_native_direction_width_and_output_clock_priority() {

@@ -1,13 +1,14 @@
 // Read-only installed-engine acceptance. Retains failures and never resets counters.
-import { open } from 'node:fs/promises';
+import { open, readFile } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import assert from 'node:assert/strict';
 
-const [output, logPath, durationText = '600'] = process.argv.slice(2);
+const [output, logPath, durationText = '600', referencePath] = process.argv.slice(2);
 const duration = Number(durationText);
 assert(output && logPath && isAbsolute(output) && isAbsolute(logPath), 'Use absolute output and engine log paths');
 assert(Number.isInteger(duration) && duration >= 30 && duration <= 3600, 'Duration must be 30..3600 seconds');
+assert(!referencePath || isAbsolute(referencePath), 'Reference output must use an absolute path');
 const file = await open(output, 'wx');
 const log = await open(logPath, 'r');
 const buffer = Buffer.alloc(65536);
@@ -67,7 +68,26 @@ try {
   }
   const afterGraphs = await Promise.all(['graph-1', 'graph-105'].map(id => get(`graphs/${id}`)));
   if (JSON.stringify(graphs) !== JSON.stringify(afterGraphs)) failures.push('Graph configuration/revision changed');
-  await emit({ type: 'result', durationSeconds: (Date.now() - started) / 1000, passed: failures.length === 0, failures,
+  // An individually quiet observation window must not erase errors accumulated
+  // since the agreed pre-work baseline. Never reset native counters to make it pass.
+  if (referencePath) {
+    const reference = JSON.parse((await readFile(referencePath, 'utf8')).trim().split('\n').at(-1));
+    assert(reference.type === 'result' && reference.after && reference.afterGraphs, 'Reference needs a completed observation');
+    if (JSON.stringify(reference.afterGraphs) !== JSON.stringify(afterGraphs)) failures.push('Reference graph configuration/revision changed');
+    for (const field of ['underruns', 'overruns']) {
+      if (last.status[field] !== reference.after.status[field]) failures.push(`Reference ${field}: ${reference.after.status[field]} -> ${last.status[field]}`);
+    }
+    for (const field of ['discontinuities', 'format']) {
+      if (JSON.stringify(last.status.audioSession?.[field]) !== JSON.stringify(reference.after.status.audioSession?.[field])) failures.push(`Reference session ${field} changed`);
+    }
+    if (Object.keys(reference.after.devices).sort().join(',') !== Object.keys(last.devices).sort().join(',')) failures.push('Reference native owner set changed');
+    for (const [id, initial] of Object.entries(reference.after.devices)) {
+      for (const field of ['pcm_starvations', 'overflows', 'clock_gaps', 'epoch', 'native_rate', 'graph_rate', 'enabled', 'ready']) {
+        if (initial[field] !== last.devices[id]?.[field]) failures.push(`Reference device ${id} ${field}: ${initial[field]} -> ${last.devices[id]?.[field]}`);
+      }
+    }
+  }
+  await emit({ type: 'result', referencePath, durationSeconds: (Date.now() - started) / 1000, passed: failures.length === 0, failures,
     before, after: last, afterGraphs });
   process.exitCode = failures.length ? 1 : 0;
 } catch (error) {

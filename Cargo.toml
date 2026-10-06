@@ -1,23 +1,37 @@
 [workspace]
 resolver = "2"
-exclude = ["vendor/truce-rack-vst3", "vendor/truce-rack-clap", "vendor/truce-rack-lv2"]
+exclude = ["vendor/truce-rack-au", "vendor/truce-rack-lv2"]
 members = [
+  "vendor/truce-rack-core",
+  "vendor/truce-rack-clap",
+  "vendor/truce-rack-vst3",
   "apps/desktop/src-tauri",
   "apps/engine-service",
+  "apps/driver-service",
   "crates/audio-io",
   "crates/audio-graph",
   "crates/audio-engine",
   "crates/audio-recorder",
   "crates/processor-host",
+  "crates/processor-state",
   "crates/control-protocol",
   "crates/control-server",
+  "crates/driver-control",
+  "crates/engine-process",
+  "crates/licensing",
   "crates/macos-test-support",
   "crates/test-support",
+  "tests/fixtures/native-clap",
   "native/macos/hal-driver/rust",
   "native/macos/hal-driver/bundle",
   "native/macos/common",
+  "native/macos/driver-control",
+  "native/macos/installer",
   "native/macos/process-tap",
   "native/pcm-ring",
+  "native/linux/pipewire",
+  "native/linux/driver-control",
+  "native/linux/pipewire/tests/buffer-observer",
 ]
 
 [workspace.package]
@@ -45,7 +59,6 @@ truce-rack-au = "1.1.5"
 truce-rack-au3 = "1.1.5"
 truce-rack-lv2 = "1.1.5"
 truce-rack-vst3 = "1.1.5"
-tao = { version = "0.35.3", default-features = false, features = ["rwh_06"] }
 x11-dl = "2.21.0"
 tokio = { version = "1.53.1", features = ["macros", "net", "rt-multi-thread", "signal"] }
 mixrelay-audio-io = { path = "crates/audio-io" }
@@ -72,6 +85,11 @@ lto = "thin"
 panic = "abort"
 strip = "symbols"
 
+# Stripped proc-macro dylibs can have invalid LINKEDIT alignment on macOS 27.
+# Build-only tools are not shipped; keep their symbols without changing product stripping.
+[profile.release.build-override]
+strip = "none"
+
 # Keep real-time sample conversion within its callback budget in `tauri dev`.
 # The application remains debuggable; only the measured DSP hot path is optimized.
 [profile.dev.package.mixrelay-audio-io]
@@ -88,8 +106,10 @@ opt-level = 3
 [profile.dev.package.audioadapter-buffers]
 opt-level = 3
 
-# Narrow, source-preserving fixes for Linux ARM64 C ABI signedness; see vendor/README.md.
+# Source-preserving native format/state/latency fixes; see vendor/README.md.
 [patch.crates-io]
+truce-rack-core = { path = "vendor/truce-rack-core" }
+truce-rack-au = { path = "vendor/truce-rack-au" }
 truce-rack-vst3 = { path = "vendor/truce-rack-vst3" }
 truce-rack-clap = { path = "vendor/truce-rack-clap" }
 truce-rack-lv2 = { path = "vendor/truce-rack-lv2" }

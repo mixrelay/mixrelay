@@ -1,5 +1,10 @@
+use std::{fs::File, path::Path};
+
 use super::*;
 use crate::{controller_test_support::settle, endpoint_settings_tests::controller};
+use mixrelay_audio_graph::{NodeId, NodeSpec, ProviderNodeConfig, ProviderPorts};
+use mixrelay_processor_state::{StateRef, StateStore, read_bundle, write_bundle};
+use sha2::{Digest, Sha256};
 
 fn request(engine: &EngineGraphController, operation: WorkspaceAction) -> WorkspaceRequest {
     let catalog = engine.read_catalog().unwrap();
@@ -9,6 +14,53 @@ fn request(engine: &EngineGraphController, operation: WorkspaceAction) -> Worksp
         expected_catalog_revision: catalog.catalog_revision,
         operation,
     }
+}
+
+fn write_bundle_fixture(
+    path: &Path,
+    catalog: Catalog,
+    references: &[StateRef],
+    store: &StateStore,
+    version: u32,
+) {
+    let manifest = serde_json::to_vec(&WorkspaceFile {
+        format: "MixRelay".into(),
+        version,
+        catalog,
+    })
+    .unwrap();
+    let mut file = File::create(path).unwrap();
+    write_bundle(&mut file, &manifest, references, store).unwrap();
+}
+
+fn add_provider(catalog: &mut Catalog, id: &str, parameters: serde_json::Value) {
+    let mut ports = ProviderPorts::canonical_stereo("fixture-eight");
+    for bus in ports.inputs.iter_mut().chain(&mut ports.outputs) {
+        bus.channels = 8;
+        bus.channel_format = mixrelay_audio_graph::ProviderChannelFormat::Surround7_1;
+    }
+    let document = &mut catalog.graphs[0].document;
+    document.nodes.push(NodeSpec {
+        control: mixrelay_audio_graph::NodeControl::default(),
+        id: NodeId::from(id),
+        label: Some("Saved Effect".into()),
+        config: NodeConfig::Provider(ProviderNodeConfig {
+            type_id: "vst3:not-installed".into(),
+            parameters,
+            ports: Some(ports),
+        }),
+    });
+    catalog.graphs[0].layout.positions.insert(
+        id.into(),
+        mixrelay_control_protocol::GraphNodePosition { x: 150.0, y: 220.0 },
+    );
+}
+
+fn with_state(reference: &StateRef) -> serde_json::Value {
+    serde_json::json!({
+        "stateRef": reference,
+        "parameterValues": {"7": 0.75}
+    })
 }
 
 #[test]
@@ -40,20 +92,31 @@ fn save_open_preserves_catalog_ids_and_layout_and_advances_revisions() {
 }
 
 #[test]
-fn invalid_file_and_unknown_version_leave_current_workspace_untouched() {
+fn invalid_binary_manifest_and_json_only_file_leave_workspace_untouched() {
     let dir = mixrelay_test_support::FixtureDir::new("workspace-invalid").unwrap();
     let engine = controller(GraphDocument::new(9, vec![], vec![]))
         .with_graph_catalog_path(dir.join("graphs.json"));
     let before = engine.read_catalog().unwrap();
-    let bytes = std::fs::read(dir.join("graphs.json")).unwrap();
-    let catalog: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    for contents in [
-        "{".to_owned(),
-        serde_json::json!({"format":"Other","version":1,"catalog":catalog}).to_string(),
-        serde_json::json!({"format":"MixRelay","version":99,"catalog":catalog}).to_string(),
-    ] {
-        let path = dir.join("bad.mix");
-        std::fs::write(&path, contents).unwrap();
+    let graph_bytes = std::fs::read(dir.join("graphs.json")).unwrap();
+    let catalog: serde_json::Value = serde_json::from_slice(&graph_bytes).unwrap();
+    let empty_store = StateStore::new(dir.join("empty-assets"));
+    let unknown_version = dir.join("unknown.mix");
+    write_bundle_fixture(
+        &unknown_version,
+        serde_json::from_value(catalog.clone()).unwrap(),
+        &[],
+        &empty_store,
+        99,
+    );
+    let json_only = dir.join("json-only.mix");
+    std::fs::write(
+        &json_only,
+        serde_json::json!({"format":"MixRelay","version":1,"catalog":catalog}).to_string(),
+    )
+    .unwrap();
+    let truncated = dir.join("truncated.mix");
+    std::fs::write(&truncated, b"MixRelay").unwrap();
+    for path in [unknown_version, json_only, truncated] {
         assert!(
             engine
                 .workspace_operation(request(
@@ -65,10 +128,10 @@ fn invalid_file_and_unknown_version_leave_current_workspace_untouched() {
                 .is_err()
         );
         assert_eq!(engine.read_catalog().unwrap(), before);
-        assert_eq!(std::fs::read(dir.join("graphs.json")).unwrap(), bytes);
+        assert_eq!(std::fs::read(dir.join("graphs.json")).unwrap(), graph_bytes);
     }
     assert!(file_path("relative.mix").is_err());
-    assert!(file_path("/tmp/wrong.json").is_err());
+    assert!(file_path("/fixture/wrong.json").is_err());
 }
 
 #[test]
@@ -94,7 +157,7 @@ fn failed_save_does_not_destroy_destination_or_current_catalog() {
 }
 
 #[test]
-fn workspace_capture_preview_is_read_only_and_changed_file_cannot_commit() {
+fn preview_hashes_every_bundle_byte_without_importing_state_and_fences_open() {
     let dir = mixrelay_test_support::FixtureDir::new("workspace-preview").unwrap();
     let engine = controller(GraphDocument::new(1, vec![], vec![]))
         .with_graph_catalog_path(dir.join("graphs.json"));
@@ -108,15 +171,22 @@ fn workspace_capture_preview_is_read_only_and_changed_file_cannot_commit() {
     let before = engine.read_catalog().unwrap();
     let mut open = request(&engine, WorkspaceAction::Open { path: path.clone() });
     let preview = engine.preview_workspace(open.clone()).unwrap();
+    let file_bytes = std::fs::read(&path).unwrap();
+    assert_eq!(
+        preview.file_digest,
+        Some(format!("{:x}", Sha256::digest(&file_bytes)))
+    );
     assert_eq!(engine.read_catalog().unwrap(), before);
     assert!(preview.manifest.sources.is_empty());
     assert!(preview.manifest.revision > before.document.revision);
+
+    let changed = Catalog::imported(GraphDocument::new(12, vec![], vec![]));
+    let store = StateStore::new(dir.join("fixture-assets"));
+    write_bundle_fixture(Path::new(&path), changed, &[], &store, 1);
     open.file_digest = preview.file_digest;
-    let mut bytes = std::fs::read(&path).unwrap();
-    bytes.push(b' ');
-    std::fs::write(&path, &bytes).unwrap();
     assert!(engine.workspace_operation(open).is_err());
     assert_eq!(engine.read_catalog().unwrap(), before);
+
     let mut retry = request(&engine, WorkspaceAction::Open { path });
     let preview = engine.preview_workspace(retry.clone()).unwrap();
     retry.file_digest = preview.file_digest;
@@ -125,69 +195,166 @@ fn workspace_capture_preview_is_read_only_and_changed_file_cannot_commit() {
 }
 
 #[test]
-fn shared_devices_connections_and_missing_plugin_state_survive_file_round_trip() {
-    use mixrelay_audio_graph::{NodeId, NodeSpec, ProviderNodeConfig, ProviderPorts};
-    let dir = mixrelay_test_support::FixtureDir::new("workspace-shared").unwrap();
+fn missing_unreferenced_and_malformed_state_assets_do_not_change_catalog() {
+    let dir = mixrelay_test_support::FixtureDir::new("workspace-assets-invalid").unwrap();
     let engine = controller(GraphDocument::new(1, vec![], vec![]))
         .with_graph_catalog_path(dir.join("graphs.json"));
-    let mut catalog = Catalog::imported(crate::default_duplex_document(1, Some(-6.0)));
-    let mut second = catalog.graphs[0].clone();
-    second.id = "second".into();
-    second.name = "Recording".into();
-    second.document.nodes.push(NodeSpec {
-        control: mixrelay_audio_graph::NodeControl::default(),
-        id: NodeId::from("missing-effect"),
-        label: Some("Saved Effect".into()),
-        config: NodeConfig::Provider(ProviderNodeConfig {
-            type_id: "vst3:not-installed".into(),
-            parameters: serde_json::json!({"stateBase64":"AQ==","parameterValues":{"7":0.75}}),
-            ports: Some(ProviderPorts {
-                inputs: 8,
-                outputs: 8,
-            }),
-        }),
-    });
-    second.layout.positions.insert(
-        "missing-effect".into(),
-        mixrelay_control_protocol::GraphNodePosition { x: 150.0, y: 220.0 },
+    let before = engine.read_catalog().unwrap();
+    let store = engine.processor_controls.state_store().unwrap();
+    let reference = store.put(b"fixture processor state").unwrap();
+
+    let mut missing_catalog = Catalog::imported(GraphDocument::new(2, vec![], vec![]));
+    add_provider(
+        &mut missing_catalog,
+        "missing-state",
+        with_state(&reference),
     );
-    catalog.graphs.push(second);
-    let path = dir.join("shared.mix");
-    stage_json(
-        &path,
-        &WorkspaceFile {
-            format: "MixRelay".into(),
-            version: 1,
-            catalog: catalog.clone(),
-        },
+    let missing = dir.join("missing-asset.mix");
+    write_bundle_fixture(&missing, missing_catalog.clone(), &[], &store, 1);
+
+    let corrupted = dir.join("corrupted-payload.mix");
+    write_bundle_fixture(
+        &corrupted,
+        missing_catalog,
+        std::slice::from_ref(&reference),
+        &store,
+        1,
+    );
+    let mut corrupted_bytes = std::fs::read(&corrupted).unwrap();
+    let final_byte = corrupted_bytes.len() - 1;
+    corrupted_bytes[final_byte] ^= 0xff;
+    std::fs::write(&corrupted, corrupted_bytes).unwrap();
+
+    let unreferenced = dir.join("unreferenced-asset.mix");
+    write_bundle_fixture(
+        &unreferenced,
+        Catalog::imported(GraphDocument::new(3, vec![], vec![])),
+        std::slice::from_ref(&reference),
+        &store,
+        1,
+    );
+
+    let mut malformed_catalog = Catalog::imported(GraphDocument::new(4, vec![], vec![]));
+    add_provider(
+        &mut malformed_catalog,
+        "malformed-state",
+        serde_json::json!({"stateRef":{"sha256":"bad","byteLength":7}}),
+    );
+    let malformed = dir.join("malformed-state.mix");
+    write_bundle_fixture(&malformed, malformed_catalog, &[], &store, 1);
+
+    for path in [missing, unreferenced, malformed, corrupted] {
+        assert!(
+            engine
+                .workspace_operation(request(
+                    &engine,
+                    WorkspaceAction::Open {
+                        path: path.to_string_lossy().into_owned()
+                    }
+                ))
+                .is_err()
+        );
+        assert_eq!(engine.read_catalog().unwrap(), before);
+    }
+}
+
+#[test]
+fn portable_bundle_reopens_large_states_after_source_store_is_deleted() {
+    const STATE_BYTES: usize = 9 * 1024 * 1024;
+    let dir = mixrelay_test_support::FixtureDir::new("workspace-portable-state").unwrap();
+    let driver_inventory = crate::default_duplex_document(1, None);
+    let engine = crate::endpoint_settings_tests::controller_with_inventory(
+        GraphDocument::new(1, vec![], vec![]),
+        &driver_inventory,
     )
-    .unwrap()
-    .commit()
-    .unwrap();
-    engine
-        .workspace_operation(request(
-            &engine,
-            WorkspaceAction::Open {
-                path: path.to_string_lossy().into_owned(),
-            },
-        ))
-        .unwrap();
+    .with_graph_catalog_path(dir.join("graphs.json"));
+    let source_store = engine.processor_controls.state_store().unwrap();
+    let first_state = vec![0x35; STATE_BYTES];
+    let second_state = vec![0xa7; STATE_BYTES];
+    let first_ref = source_store.put(&first_state).unwrap();
+    let second_ref = source_store.put(&second_state).unwrap();
+    let mut catalog = Catalog::imported(crate::default_duplex_document(1, Some(-6.0)));
+    add_provider(&mut catalog, "missing-effect-a", with_state(&first_ref));
+    add_provider(&mut catalog, "missing-effect-b", with_state(&second_ref));
+    let references = state_assets::referenced(&catalog).unwrap();
+    assert!(
+        references
+            .windows(2)
+            .all(|pair| pair[0].sha256() < pair[1].sha256())
+    );
+    let source = dir.join("portable-source.mix");
+    write_bundle_fixture(&source, catalog.clone(), &references, &source_store, 1);
+    let source_bytes = std::fs::read(&source).unwrap();
+    assert!(source_bytes.len() > 16 * 1024 * 1024);
+    let preview_engine = crate::endpoint_settings_tests::controller_with_inventory(
+        GraphDocument::new(1, vec![], vec![]),
+        &driver_inventory,
+    )
+    .with_graph_catalog_path(dir.join("preview-graphs.json"));
+    let preview_store = preview_engine.processor_controls.state_store().unwrap();
+    let preview_request = request(
+        &preview_engine,
+        WorkspaceAction::Open {
+            path: source.to_string_lossy().into_owned(),
+        },
+    );
+    let preview = preview_engine.preview_workspace(preview_request).unwrap();
+    assert!(!preview_store.root().exists());
+    assert_eq!(
+        preview.file_digest,
+        Some(format!("{:x}", Sha256::digest(&source_bytes)))
+    );
+    drop(source_bytes);
+
+    let mut open = request(
+        &engine,
+        WorkspaceAction::Open {
+            path: source.to_string_lossy().into_owned(),
+        },
+    );
+
+    std::fs::remove_dir_all(source_store.root()).unwrap();
+    open.file_digest = preview.file_digest;
+    engine.workspace_operation(open).unwrap();
     let _processor = settle(&engine);
-    engine.checkpoint_processor_state(None).unwrap();
+
+    let imported_store = engine.processor_controls.state_store().unwrap();
+    assert_eq!(imported_store.read(&first_ref).unwrap(), first_state);
+    assert_eq!(imported_store.read(&second_ref).unwrap(), second_state);
+    let output = dir.join("portable-output.mix");
     engine
         .workspace_operation(request(
             &engine,
             WorkspaceAction::Save {
-                path: path.to_string_lossy().into_owned(),
+                path: output.to_string_lossy().into_owned(),
             },
         ))
         .unwrap();
-    let restored = load(&path).unwrap();
-    assert_eq!(restored.device_specs().unwrap().len(), 1);
-    for (saved, original) in restored.graphs.iter().zip(&catalog.graphs) {
-        assert_eq!(saved.id, original.id);
-        assert_eq!(saved.document.nodes, original.document.nodes);
-        assert_eq!(saved.document.edges, original.document.edges);
-        assert_eq!(saved.layout, original.layout);
+
+    let reopened_store = StateStore::new(dir.join("reopened-assets"));
+    let (manifest, bundled_refs) =
+        read_bundle(File::open(&output).unwrap(), Some(&reopened_store)).unwrap();
+    let reopened: WorkspaceFile = serde_json::from_slice(&manifest).unwrap();
+    assert_eq!(
+        state_assets::referenced(&reopened.catalog).unwrap(),
+        bundled_refs
+    );
+    assert_eq!(reopened_store.read(&first_ref).unwrap(), first_state);
+    assert_eq!(reopened_store.read(&second_ref).unwrap(), second_state);
+    assert_saved_provider_overlays(&reopened.catalog);
+}
+
+fn assert_saved_provider_overlays(catalog: &Catalog) {
+    for id in ["missing-effect-a", "missing-effect-b"] {
+        let provider = catalog.graphs[0]
+            .document
+            .nodes
+            .iter()
+            .find(|node| node.id.as_str() == id)
+            .unwrap();
+        let NodeConfig::Provider(provider) = &provider.config else {
+            panic!("fixture must remain a provider");
+        };
+        assert_eq!(provider.parameters["parameterValues"]["7"], 0.75);
     }
 }

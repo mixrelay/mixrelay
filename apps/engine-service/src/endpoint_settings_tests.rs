@@ -1,20 +1,118 @@
 use super::*;
 use mixrelay_audio_io::{
-    VirtualEndpointSettings,
+    NativeDeviceFormats, NativeSampleFormat, NativeStreamFormat, NativeStreamFormats,
+    VirtualEndpointDeviceSettings, VirtualEndpointSettings,
     session::{AudioBackendKind, AudioSessionCapabilities, ClockAuthority, SessionFormat},
 };
 
-struct ConfigurableBackend(VirtualEndpointCapabilities);
+struct ConfigurableBackend(
+    VirtualEndpointCapabilities,
+    Vec<VirtualEndpointDeviceSettings>,
+);
+
+struct CatalogReadbackBackend {
+    base: Arc<dyn VirtualEndpointBackend>,
+    owner: Mutex<std::sync::Weak<EngineGraphController>>,
+}
+
+impl VirtualEndpointBackend for CatalogReadbackBackend {
+    fn capabilities(&self) -> &VirtualEndpointCapabilities {
+        self.base.capabilities()
+    }
+
+    fn settings(&self) -> Option<VirtualEndpointSettings> {
+        if let Some(owner) = self.owner.lock().upgrade() {
+            assert!(
+                owner.catalog.try_lock().is_some(),
+                "Driver read must not hold catalog"
+            );
+        }
+        let mut settings = self.base.settings()?;
+        settings.devices.clear();
+        let document = endpoint_document(1, "Native name");
+        let NodeConfig::VirtualEndpoint(endpoint) = &document.nodes[0].config else {
+            panic!("endpoint fixture")
+        };
+        let format = NativeStreamFormat {
+            sample_rate: 48_000,
+            channels: 64,
+            sample_format: NativeSampleFormat::Float32,
+        };
+        settings.devices.push(VirtualEndpointDeviceSettings {
+            spec: endpoint.spec.clone(),
+            native_device_ids: vec!["native-readback-id".into()],
+            observed_sample_rate: Some(48_000),
+            supported_sample_rates: vec![48_000],
+            can_set_sample_rate: true,
+            native_formats: NativeDeviceFormats {
+                render: NativeStreamFormats {
+                    current: Some(format),
+                    supported: vec![format],
+                },
+                capture: NativeStreamFormats::default(),
+            },
+        });
+        Some(settings)
+    }
+
+    fn sample_rate(&self, _: &VirtualEndpointId) -> Result<u32, HostAudioBackendError> {
+        let owner = self.owner.lock().upgrade().unwrap();
+        assert!(
+            owner.catalog.try_lock().is_some(),
+            "native read must not hold catalog"
+        );
+        Ok(48_000)
+    }
+
+    fn prepare_graph_attachments(
+        &self,
+        specs: &[VirtualEndpointSpec],
+    ) -> Result<(), HostAudioBackendError> {
+        self.base.prepare_graph_attachments(specs)
+    }
+}
+
+#[test]
+fn driver_readback_does_not_hold_catalog_and_overrides_copied_graph_specs() {
+    let mut engine = controller(endpoint_document(1, "Readback"));
+    let backend = Arc::new(CatalogReadbackBackend {
+        base: engine.endpoint_backend.clone(),
+        owner: Mutex::new(std::sync::Weak::new()),
+    });
+    engine.endpoint_backend = backend.clone();
+    let engine = Arc::new(engine);
+    *backend.owner.lock() = Arc::downgrade(&engine);
+    let observed = engine.endpoint_settings().unwrap();
+    assert_eq!(observed.devices.len(), 1);
+    assert_eq!(observed.devices[0].spec.display_name, "Native name");
+    assert_eq!(observed.devices[0].observed_sample_rate, Some(48_000));
+    assert_eq!(
+        observed.devices[0].native_device_ids,
+        ["native-readback-id"]
+    );
+    let formats = &observed.devices[0].native_formats;
+    assert_eq!(formats.render.supported.len(), 1);
+    assert_eq!(formats.render.current, Some(formats.render.supported[0]));
+    assert_eq!(formats.render.supported[0].channels, 64);
+    assert_eq!(
+        formats.render.supported[0].sample_format,
+        NativeSampleFormat::Float32
+    );
+    assert_eq!(formats.capture, NativeStreamFormats::default());
+}
 
 impl Default for ConfigurableBackend {
     fn default() -> Self {
-        Self(VirtualEndpointCapabilities {
-            max_render_channels: 64,
-            max_capture_channels: 64,
-            supported_sample_rates: mixrelay_audio_io::formats::SAMPLE_RATES.to_vec(),
-            supports_duplex: true,
-            supports_dynamic_creation: true,
-        })
+        Self(
+            VirtualEndpointCapabilities {
+                max_render_channels: 64,
+                max_capture_channels: 64,
+                supported_sample_rates: mixrelay_audio_io::formats::SAMPLE_RATES.to_vec(),
+                supports_duplex: true,
+                supports_dynamic_creation: true,
+            },
+            Vec::new(),
+        )
     }
 }
 
@@ -23,25 +121,70 @@ impl VirtualEndpointBackend for ConfigurableBackend {
         &self.0
     }
     fn settings(&self) -> Option<VirtualEndpointSettings> {
-        Some(VirtualEndpointSettings::configurable(self.capabilities()))
+        let mut settings = VirtualEndpointSettings::configurable(self.capabilities());
+        settings.devices.clone_from(&self.1);
+        Some(settings)
     }
     fn prepare_graph_attachments(
         &self,
         specs: &[VirtualEndpointSpec],
     ) -> Result<(), HostAudioBackendError> {
-        if specs.iter().any(|spec| spec.display_name == "rejected") {
-            return Err(HostAudioBackendError::BackendFailure {
-                message: "native staging rejected".into(),
-            });
-        }
-        Ok(())
+        self.resolve_graph_devices(specs).map(|_| ())
+    }
+
+    fn resolve_graph_devices(
+        &self,
+        desired: &[VirtualEndpointSpec],
+    ) -> Result<Vec<VirtualEndpointSpec>, HostAudioBackendError> {
+        desired
+            .iter()
+            .map(|reference| {
+                self.1
+                    .iter()
+                    .find(|device| device.spec.id == reference.id)
+                    .map(|device| device.spec.clone())
+                    .ok_or_else(|| HostAudioBackendError::BackendFailure {
+                        message: "Driver device is missing".into(),
+                    })
+            })
+            .collect()
     }
 }
 
 pub(super) fn controller(document: GraphDocument) -> EngineGraphController {
+    let inventory = document.clone();
+    controller_with_inventory(document, &inventory)
+}
+
+/// Seeds an independent Driver inventory before attaching any graph references.
+pub(super) fn controller_with_inventory(
+    document: GraphDocument,
+    inventory: &GraphDocument,
+) -> EngineGraphController {
     let format = RenderFormat {
         sample_rate: 48_000,
         block_frames: 128,
+    };
+    let devices = inventory
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let NodeConfig::VirtualEndpoint(config) = &node.config else {
+                return None;
+            };
+            Some(VirtualEndpointDeviceSettings {
+                spec: config.spec.clone(),
+                native_device_ids: Vec::new(),
+                observed_sample_rate: None,
+                supported_sample_rates: config.supported_sample_rates.clone(),
+                can_set_sample_rate: false,
+                native_formats: NativeDeviceFormats::default(),
+            })
+        })
+        .collect();
+    let backend = ConfigurableBackend {
+        1: devices,
+        ..ConfigurableBackend::default()
     };
     EngineGraphController::new_with_initial_document(
         Arc::new(ProcessorExchange::new(document.revision)),
@@ -49,7 +192,7 @@ pub(super) fn controller(document: GraphDocument) -> EngineGraphController {
             format,
             meters: default_peak_meter_bank(),
             initial_bindings: vec![],
-            endpoint_backend: Arc::new(ConfigurableBackend::default()),
+            endpoint_backend: Arc::new(backend),
             required_endpoint_node_id: None,
             processor_catalog: ProcessorCatalog::default(),
             graph_resources: Arc::new(NoopGraphResourceBackend),
@@ -121,26 +264,30 @@ pub(super) fn endpoint_document(revision: u64, name: &str) -> GraphDocument {
 }
 
 #[test]
-fn rejected_staging_preserves_devices_and_final_removal_keeps_only_creation_choices() {
+fn missing_reference_and_final_reference_removal_preserve_driver_devices() {
     let initial = endpoint_document(1, "SPAT send-return");
     let controller = controller(initial.clone());
     let expected = settings(&controller);
     assert_eq!(expected.devices.len(), 1);
     assert_eq!(expected.devices[0].spec.display_name, "SPAT send-return");
     assert!(expected.creation_template.is_some());
+    assert_eq!(
+        expected.devices[0].native_formats,
+        NativeDeviceFormats::default()
+    );
     let mut rejected = initial;
     rejected.revision = 2;
     let NodeConfig::VirtualEndpoint(spec) = &mut rejected.nodes[0].config else {
         panic!()
     };
-    spec.display_name = "rejected".into();
-    assert!(controller.apply_graph(rejected).is_err());
+    spec.id = VirtualEndpointId::from("missing-driver-device");
+    assert!(controller.apply_graph_request(rejected.into()).is_err());
     assert_eq!(settings(&controller), expected);
     controller
-        .apply_graph(GraphDocument::new(2, vec![], vec![]))
+        .apply_graph_request(GraphDocument::new(2, vec![], vec![]).into())
         .unwrap();
     assert!(controller.graph().nodes.is_empty());
-    assert!(settings(&controller).devices.is_empty());
+    assert_eq!(settings(&controller).devices, expected.devices);
     assert_eq!(
         settings(&controller).creation_template,
         expected.creation_template
@@ -158,7 +305,18 @@ fn partial_reference_removal_never_changes_shared_device_stream_configuration() 
         panic!()
     };
     config.reference.capture = false;
-    controller.apply_graph(initial).unwrap();
+    controller.apply_graph_request(initial.into()).unwrap();
+    let processor = crate::controller_test_support::settle(&controller);
+    assert_eq!(processor.plan().source_bindings()[0].channels(), 16);
+    assert_eq!(
+        processor.plan().source_bindings()[0].port_id().as_str(),
+        FROM_OS_PORT_ID
+    );
+    assert_eq!(processor.plan().sink_bindings()[0].channels(), 64);
+    assert_eq!(
+        processor.plan().sink_bindings()[0].port_id().as_str(),
+        TO_OS_PORT_ID
+    );
     assert_eq!(settings(&controller).devices, expected);
     let graph = controller.graph();
     let NodeConfig::VirtualEndpoint(config) = &graph.nodes[0].config else {
@@ -203,4 +361,37 @@ fn settings_wire_roundtrip_exposes_creation_choices_and_identified_devices() {
         "SPAT send-return"
     );
     assert!(settings.get("defaultEndpoint").is_none());
+}
+
+#[test]
+fn stale_graph_settings_resolve_actual_driver_spec_without_native_mutation() {
+    let controller = controller(endpoint_document(1, "Driver name"));
+    let mut copied = endpoint_document(2, "Stale graph name");
+    let NodeConfig::VirtualEndpoint(config) = &mut copied.nodes[0].config else {
+        panic!()
+    };
+    config.default_sample_rate = 44_100;
+    let mut documents = vec![("graph".into(), copied.clone())];
+    controller
+        .resolve_execution_devices(&mut documents)
+        .unwrap();
+    let NodeConfig::VirtualEndpoint(resolved) = &documents[0].1.nodes[0].config else {
+        panic!()
+    };
+    assert_eq!(resolved.display_name, "Driver name");
+    assert_eq!(resolved.default_sample_rate, 48_000);
+    assert_eq!(settings(&controller).devices[0].spec, resolved.spec);
+    assert_eq!(copied.nodes[0].label.as_deref(), Some("Stale graph name"));
+}
+
+#[test]
+fn missing_driver_reference_is_rejected_without_creating_a_device() {
+    let controller = controller(GraphDocument::new(1, vec![], vec![]));
+    let mut documents = vec![("graph".into(), endpoint_document(2, "Missing"))];
+    assert!(
+        controller
+            .resolve_execution_devices(&mut documents)
+            .is_err()
+    );
+    assert!(settings(&controller).devices.is_empty());
 }

@@ -43,7 +43,7 @@ describe('DriverStatusCard', () => {
       const view = render(
         <MixRelayProvider>
           <I18nextProvider i18n={i18n}>
-            <DriverStatusCard state={state} />
+            <DriverStatusCard state={state} onAction={vi.fn()} />
           </I18nextProvider>
         </MixRelayProvider>,
       );

@@ -1,4 +1,13 @@
-import type { VirtualEndpointSettings, VirtualEndpointSpec } from '../../core/control-port/types';
+import type {
+  NativeDeviceFormats,
+  VirtualEndpointSettings,
+  VirtualEndpointSpec,
+} from '../../core/control-port/types';
+
+export const unknownNativeFormats: NativeDeviceFormats = {
+  render: { current: null, supported: [] },
+  capture: { current: null, supported: [] },
+};
 
 export const virtualSpec: VirtualEndpointSpec = {
   id: '095af572-6846-4ce6-b498-6dbeddb07435',
@@ -23,6 +32,7 @@ export const virtualPolicy: VirtualEndpointSettings = {
   devices: [
     {
       nativeDeviceIds: [],
+      nativeFormats: unknownNativeFormats,
       spec: virtualSpec,
       observedSampleRate: 48000,
       supportedSampleRates: [44100, 48000],

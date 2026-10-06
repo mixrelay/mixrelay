@@ -97,9 +97,7 @@ mod tests {
 
     #[test]
     fn server_admission_rechecks_desktop_under_engine_ownership() {
-        let directory =
-            std::env::temp_dir().join(format!("mixrelay-admission-{}", std::process::id()));
-        std::fs::create_dir(&directory).expect("test directory");
+        let directory = mixrelay_test_support::FixtureDir::new("app-lifecycle").unwrap();
         let app_path = directory.join("app");
         let engine_path = directory.join("engine");
         File::create(&app_path).expect("app inode");
@@ -122,14 +120,12 @@ mod tests {
                 .expect("late demand")
                 .is_none()
         );
-        std::fs::remove_file(app_path).expect("remove app inode");
-        std::fs::remove_file(engine_path).expect("remove engine inode");
-        std::fs::remove_dir(directory).expect("remove test directory");
     }
 
     #[test]
     fn ownership_follows_descriptor_lifetime_not_file_existence() {
-        let path = std::env::temp_dir().join(format!("mixrelay-lease-{}", std::process::id()));
+        let directory = mixrelay_test_support::FixtureDir::new("app-lifecycle").unwrap();
+        let path = directory.join("lease");
         let file = File::options()
             .write(true)
             .create_new(true)
@@ -148,12 +144,12 @@ mod tests {
         assert!(ProcessLease::acquire(&path).is_err());
         drop(lease);
         assert!(!is_owned(&path).expect("released probe"));
-        std::fs::remove_file(path).expect("remove test inode");
     }
 
     #[test]
     fn missing_lease_does_not_create_an_owner() {
-        let path = std::env::temp_dir().join("mixrelay-lease-missing-parent/owner");
+        let directory = mixrelay_test_support::FixtureDir::new("app-lifecycle").unwrap();
+        let path = directory.join("missing-parent/owner");
         assert!(is_owned(&path).is_err());
         assert!(ProcessLease::acquire(&path).is_err());
     }

@@ -16,7 +16,8 @@ use objc2_app_kit::{
     NSWindow, NSWindowStyleMask,
 };
 use objc2_foundation::{
-    NSDate, NSDefaultRunLoopMode, NSDictionary, NSPoint, NSRect, NSRunLoop, NSSize, NSTimer,
+    NSDate, NSDefaultRunLoopMode, NSDictionary, NSPoint, NSRect, NSRunLoop, NSSize, NSString,
+    NSTimer,
 };
 use std::{
     cell::Cell,
@@ -29,7 +30,6 @@ pub(crate) struct NativeEditorHost {
     shared: Arc<WorkerControl>,
     app: Retained<NSApplication>,
     surface: Option<Surface>,
-    target: Option<Retained<NSView>>,
     pub(super) pending_events: EditorHostEvents,
 }
 
@@ -44,6 +44,7 @@ struct SurfaceState {
     shared: Arc<WorkerControl>,
     session: u64,
     size: Cell<(u32, u32)>,
+    resizable: Cell<bool>,
     pressed: Cell<bool>,
     point: Cell<NSPoint>,
     capturing: Cell<bool>,
@@ -53,7 +54,9 @@ impl NativeEditorHost {
     pub(crate) fn new(shared: Arc<WorkerControl>) -> Result<Self, EditorHostFailure> {
         let main = MainThreadMarker::new().ok_or(EditorHostFailure::DisplayUnavailable)?;
         let app = NSApplication::sharedApplication(main);
-        app.setActivationPolicy(NSApplicationActivationPolicy::Prohibited);
+        if !app.setActivationPolicy(NSApplicationActivationPolicy::Accessory) {
+            return Err(EditorHostFailure::DisplayUnavailable);
+        }
         app.finishLaunching();
         // AppKit initializes its coordinate conversion on the first event read.
         for _ in 0..32 {
@@ -66,7 +69,6 @@ impl NativeEditorHost {
             shared,
             app,
             surface: None,
-            target: None,
             pending_events: EditorHostEvents::default(),
         })
     }
@@ -74,7 +76,7 @@ impl NativeEditorHost {
     pub(crate) fn open(
         &mut self,
         plugin: &mut RackWorkerPlugin,
-        _title: &str,
+        title: &str,
     ) -> Result<EditorSnapshot, EditorHostFailure> {
         let main = MainThreadMarker::new().ok_or(EditorHostFailure::DisplayUnavailable)?;
         if let Some(surface) = &self.surface {
@@ -96,13 +98,28 @@ impl NativeEditorHost {
                     WindowHandle::NSView(Retained::as_ptr(&view).cast_mut().cast()),
                     1.0,
                 )
-                .map_err(|_| EditorHostFailure::PluginRejected)?;
-            let (width, height) = snapshot.size.ok_or(EditorHostFailure::PluginRejected)?;
+                .map_err(|error| {
+                    tracing::warn!(%error, "native editor open failed");
+                    EditorHostFailure::PluginRejected
+                })?;
+            let (width, height) = snapshot.size.ok_or_else(|| {
+                tracing::warn!("native editor did not report a size after opening");
+                EditorHostFailure::PluginRejected
+            })?;
             let scale = window.backingScaleFactor();
             if !valid_size((width, height), scale) {
+                tracing::warn!(width, height, scale, "native editor surface size rejected");
                 return Err(EditorHostFailure::PluginRejected);
             }
+            window.setStyleMask(window_style(snapshot.resizable));
             window.setContentSize(NSSize::new(f64::from(width), f64::from(height)));
+            window.setTitle(&NSString::from_str(title));
+            window.center();
+            self.app.activate();
+            window.makeKeyAndOrderFront(None);
+            if !window.isVisible() {
+                return Err(EditorHostFailure::HostWindow);
+            }
             let state = Arc::new(MainThreadBound::new(
                 SurfaceState {
                     window: window.clone(),
@@ -113,6 +130,7 @@ impl NativeEditorHost {
                         .editor_sequence
                         .load(Ordering::Acquire),
                     size: Cell::new((width, height)),
+                    resizable: Cell::new(snapshot.resizable),
                     pressed: Cell::new(false),
                     point: Cell::new(NSPoint::new(0.0, 0.0)),
                     capturing: Cell::new(false),
@@ -124,28 +142,35 @@ impl NativeEditorHost {
         })();
         if result.is_err() {
             plugin.close_editor();
+            window.close();
         }
         result
     }
 
     pub(crate) fn close(&mut self, plugin: &mut RackWorkerPlugin) {
         // Called only after event dispatch/tracking has unwound on this main thread.
-        let surface = self.surface.take();
-        if let Some(surface) = &surface {
+        if let Some(surface) = &self.surface {
             surface.timer.invalidate();
         }
         plugin.close_editor();
-        drop(surface);
-        self.target = None;
+        self.dismiss_surface();
         self.pending_events = EditorHostEvents::default();
         reject_pending_frame(&self.shared);
     }
 
     pub(super) fn collect_events(&mut self) -> EditorHostEvents {
-        let Some(surface) = &self.surface else {
+        let Some(main) = MainThreadMarker::new() else {
             return EditorHostEvents::default();
         };
-        let Some(main) = MainThreadMarker::new() else {
+        service_idle_run_loop(self.surface.is_some(), || {
+            // A failed/timed-out AUv3 open leaves no surface, but its callback may still
+            // enqueue a Copy-rule controller release on dispatch's main queue. Service
+            // one bounded main-run-loop turn on this off-RT broker thread.
+            let mode = unsafe { NSDefaultRunLoopMode };
+            let deadline = NSDate::dateWithTimeIntervalSinceNow(0.001);
+            let _ = NSRunLoop::mainRunLoop().runMode_beforeDate(mode, &deadline);
+        });
+        let Some(surface) = &self.surface else {
             return EditorHostEvents::default();
         };
         let state = surface.state.get(main);
@@ -154,43 +179,29 @@ impl NativeEditorHost {
             let Some(event) = next_event(&self.app, NSEventMask::Any) else {
                 break;
             };
-            let point = event.locationInWindow();
-            if matches!(
-                event.r#type(),
-                NSEventType::LeftMouseDown
-                    | NSEventType::LeftMouseDragged
-                    | NSEventType::LeftMouseUp
-            ) && event.windowNumber() != state.window.windowNumber()
-            {
-                continue;
-            }
-            match event.r#type() {
-                NSEventType::LeftMouseDown => {
-                    self.target = state.view.hitTest(point);
-                    if let Some(target) = &self.target {
-                        target.mouseDown(&event);
-                    }
-                }
-                NSEventType::LeftMouseDragged => {
-                    if let Some(target) = &self.target {
-                        target.mouseDragged(&event);
-                    }
-                }
-                NSEventType::LeftMouseUp => {
-                    if let Some(target) = self.target.take() {
-                        target.mouseUp(&event);
-                    }
-                }
-                _ => self.app.sendEvent(&event),
-            }
+            self.app.sendEvent(&event);
         }
-        EditorHostEvents::default()
+        if !state.window.isVisible() {
+            return EditorHostEvents {
+                close_requested: true,
+                resized: None,
+            };
+        }
+        let Some(size) = state.window_size() else {
+            return EditorHostEvents {
+                close_requested: true,
+                resized: None,
+            };
+        };
+        EditorHostEvents {
+            close_requested: false,
+            resized: (size != state.size.get()).then_some(size),
+        }
     }
 
     pub(crate) fn refresh(&mut self, snapshot: EditorSnapshot) {
         if !snapshot.open {
-            self.surface.take();
-            self.target = None;
+            self.dismiss_surface();
             self.pending_events = EditorHostEvents::default();
             reject_pending_frame(&self.shared);
             return;
@@ -199,15 +210,37 @@ impl NativeEditorHost {
             (&self.surface, snapshot.size, MainThreadMarker::new())
         {
             let state = surface.state.get(main);
-            if !valid_size(size, state.window.backingScaleFactor()) {
-                self.pending_events.close_requested = true;
-            } else if state.size.get() != size {
-                state
-                    .window
-                    .setContentSize(NSSize::new(f64::from(size.0), f64::from(size.1)));
+            if valid_size(size, state.window.backingScaleFactor()) {
+                if state.window_size() != Some(size) {
+                    state
+                        .window
+                        .setContentSize(NSSize::new(f64::from(size.0), f64::from(size.1)));
+                }
                 state.size.set(size);
+                if state.resizable.replace(snapshot.resizable) != snapshot.resizable {
+                    state.window.setStyleMask(window_style(snapshot.resizable));
+                }
+            } else {
+                self.pending_events.close_requested = true;
             }
         }
+    }
+
+    fn dismiss_surface(&mut self) {
+        if let Some(surface) = self.surface.take() {
+            surface.timer.invalidate();
+            let main = MainThreadMarker::new().expect("native editor host is main-thread owned");
+            let window = &surface.state.get(main).window;
+            if window.isVisible() {
+                window.close();
+            }
+        }
+    }
+}
+
+impl Drop for NativeEditorHost {
+    fn drop(&mut self) {
+        self.dismiss_surface();
     }
 }
 
@@ -242,6 +275,15 @@ impl Drop for Surface {
 }
 
 impl SurfaceState {
+    fn window_size(&self) -> Option<(u32, u32)> {
+        let bounds = self.view.bounds();
+        let size = (
+            window_dimension(bounds.size.width)?,
+            window_dimension(bounds.size.height)?,
+        );
+        valid_size(size, self.window.backingScaleFactor()).then_some(size)
+    }
+
     fn tick(&self, main: MainThreadMarker) {
         let header = self.shared.header();
         let closing = header.editor_sequence.load(Ordering::Acquire) != self.session
@@ -366,9 +408,33 @@ fn valid_size((width, height): (u32, u32), scale: f64) -> bool {
         && f64::from(width) * f64::from(height) * scale * scale <= 4_000_000.0
 }
 
+fn window_dimension(value: f64) -> Option<u32> {
+    if !value.is_finite() || !(1.0..=4_000_000.0).contains(&value) {
+        return None;
+    }
+    // Window geometry is control-plane data. Parse the rounded point count rather than
+    // silently narrowing a CGFloat to an integer when the user drags a window edge.
+    value.round().to_string().parse().ok()
+}
+
+fn window_style(resizable: bool) -> NSWindowStyleMask {
+    let style = NSWindowStyleMask::Titled | NSWindowStyleMask::Closable;
+    if resizable {
+        style | NSWindowStyleMask::Resizable
+    } else {
+        style
+    }
+}
+
 fn reject_pending_frame(shared: &WorkerControl) {
     if let Some((request, EDITOR_FRAME)) = shared.pending_request() {
         (shared).publish(request, Err(ProcessorStateError::Unavailable));
+    }
+}
+
+fn service_idle_run_loop(surface_open: bool, pump_once: impl FnOnce()) {
+    if !surface_open {
+        pump_once();
     }
 }
 
@@ -384,15 +450,40 @@ fn next_event(app: &NSApplication, mask: NSEventMask) -> Option<Retained<NSEvent
 }
 
 fn parent_window(main: MainThreadMarker) -> Retained<NSWindow> {
-    // SAFETY: main-thread construction with a finite rectangle. The host never shows this
-    // window; its retained view stays alive through editor.close and timer invalidation.
+    // SAFETY: AppKit window construction and release policy are confined to the main thread.
+    // The host retains the window through plug-in detach, including after the user closes it.
     unsafe {
-        NSWindow::initWithContentRect_styleMask_backing_defer(
+        let window = NSWindow::initWithContentRect_styleMask_backing_defer(
             NSWindow::alloc(main),
             NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(500.0, 200.0)),
-            NSWindowStyleMask::Borderless,
+            window_style(false),
             NSBackingStoreType::Buffered,
             false,
-        )
+        );
+        window.setReleasedWhenClosed(false);
+        window
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{service_idle_run_loop, window_dimension};
+
+    #[test]
+    fn idle_broker_services_main_queue_after_failed_open() {
+        let mut turns = 0;
+        service_idle_run_loop(false, || turns += 1);
+        assert_eq!(turns, 1);
+        service_idle_run_loop(true, || turns += 1);
+        assert_eq!(turns, 1);
+    }
+
+    #[test]
+    fn window_geometry_is_finite_positive_and_bounded() {
+        assert_eq!(window_dimension(500.0), Some(500));
+        assert_eq!(window_dimension(500.6), Some(501));
+        for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY, 4_000_001.0] {
+            assert_eq!(window_dimension(invalid), None);
+        }
     }
 }

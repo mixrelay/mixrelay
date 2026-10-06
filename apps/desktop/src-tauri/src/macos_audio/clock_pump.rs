@@ -7,7 +7,7 @@ use super::{
 use mixrelay_audio_io::clock_bridge::{
     AsyncClockBridge, BridgeConfig, ClockFeedback, ClockRelation, Discontinuity, FeedbackQueue,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 pub(super) fn native_rate(rate: f64) -> Result<u32, String> {
@@ -171,16 +171,19 @@ pub(super) fn run_with_handoff(
     mut capture: NativeCaptureReader,
     mut transport: ApplicationSourceTransport,
     channels: usize,
-    stop: &AtomicBool,
-    handoff: &super::capture_transaction::CaptureHandoff<NativeCaptureReader>,
+    control: super::PumpControl<'_>,
 ) -> Result<(), String> {
     let mut input = vec![0.0; ENGINE_BLOCK_FRAMES * channels];
     let mut output = vec![0.0; ENGINE_BLOCK_FRAMES * channels];
     let mut state: Option<PumpClock> = None;
     let mut last_refresh = Instant::now();
     let mut format_pending = false;
-    while !stop.load(Ordering::Acquire) {
-        if let Some(replacement) = handoff.take() {
+    let mut scoped = super::ActivePlayback(None);
+    while !control.stop.load(Ordering::Acquire) {
+        if let Some(replacement) = control.playback.take() {
+            scoped = super::ActivePlayback(replacement);
+        }
+        if let Some(replacement) = control.capture.take() {
             // This pump is the only ring reader. The old tap is released on
             // this non-real-time worker, never on its Core Audio callback.
             capture = replacement;
@@ -189,6 +192,15 @@ pub(super) fn run_with_handoff(
             last_refresh = Instant::now();
         }
         if last_refresh.elapsed() >= Duration::from_millis(100) {
+            if let Some(playback) = &scoped.0 {
+                // A changed exact process/device lease revokes suppression;
+                // ordinary shared capture continues, without reacquiring mute.
+                if let Err(error) = playback.refresh() {
+                    playback.stop()?;
+                    tracing::warn!(%error, "scoped playback lease revoked; capture preserved");
+                    scoped = super::ActivePlayback(None);
+                }
+            }
             format_pending = !refresh_capture(&mut capture)?;
             last_refresh = Instant::now();
         }

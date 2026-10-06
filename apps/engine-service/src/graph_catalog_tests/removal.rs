@@ -129,7 +129,7 @@ fn removal_finalizes_recording_and_late_recorder_command_cannot_target_replaceme
         "nodes":[{"id":"record","type":"recorder","config":{"channels":1}}],"edges":[]
     }))
     .unwrap();
-    engine.apply_graph(mono.clone()).unwrap();
+    engine.apply_graph_request(mono.clone().into()).unwrap();
     settle(&engine);
     engine
         .mutate_graph_catalog(request(

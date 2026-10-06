@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { describe, expect, it, vi } from 'vitest';
 import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
@@ -41,25 +41,22 @@ const healthy: MixRelayStatus = {
   overruns: 0,
   audioSession: session,
 };
-type Case = [string, MixRelayStatus | null, string, string];
+type Case = [string, MixRelayStatus | null, string];
 const cases: Case[] = [
-  ['healthy', healthy, 'positive', 'routing.nodeStatus.running'],
+  ['healthy', healthy, 'routing.nodeStatus.running'],
   [
     'stopped',
     { ...healthy, audioSession: { ...session, processingState: 'stopped' } },
-    'critical',
     'routing.nodeStatus.stopped',
   ],
   [
     'processing failed',
     { ...healthy, audioSession: { ...session, issue: 'processing_failed' } },
-    'critical',
     'routing.nodeStatus.failed',
   ],
   [
     'unsynchronized clock',
     { ...healthy, audioSession: { ...session, issue: 'clock_not_synchronized' } },
-    'warning',
     'routing.nodeStatus.issues.clock_not_synchronized',
   ],
   [
@@ -68,65 +65,43 @@ const cases: Case[] = [
       ...healthy,
       audioSession: { ...session, observedDeviceBufferFrames: 512, issue: 'block_size_mismatch' },
     },
-    'warning',
     'routing.nodeStatus.issues.block_size_mismatch',
   ],
   [
     'missing app',
     { ...healthy, audioSession: { ...session, issue: 'application_unavailable' } },
-    'warning',
     'routing.nodeStatus.issues.application_unavailable',
   ],
   [
     'ambiguous app',
     { ...healthy, audioSession: { ...session, issue: 'application_ambiguous' } },
-    'warning',
     'routing.nodeStatus.issues.application_ambiguous',
   ],
   [
     'device unavailable',
     { ...healthy, audioSession: { ...session, issue: 'device_unavailable' } },
-    'warning',
     'routing.nodeStatus.issues.device_unavailable',
   ],
   [
     'settings warning',
     { ...healthy, audioSession: { ...session, endpointPreferencesUnavailable: true } },
-    'warning',
     'routing.nodeStatus.issues.preferences_unavailable',
   ],
   [
     'idle',
     { ...healthy, audioSession: { ...session, processingState: 'idle' } },
-    'warning',
     'routing.nodeStatus.idle',
   ],
   [
-    'old engine',
+    'unknown processing state',
     { ...healthy, audioSession: { ...session, processingState: undefined } },
-    'warning',
     'routing.nodeStatus.unknown',
   ],
-  [
-    'missing session',
-    { ...healthy, audioSession: undefined },
-    'warning',
-    'routing.nodeStatus.unknown',
-  ],
-  ['unavailable transport', null, 'warning', 'routing.nodeStatus.unknown'],
-  [
-    'unavailable driver',
-    { ...healthy, driverState: 'unavailable' },
-    'critical',
-    'driver.states.unavailable',
-  ],
-  ['blocked driver', { ...healthy, driverState: 'blocked' }, 'critical', 'driver.states.blocked'],
-  [
-    'installing driver',
-    { ...healthy, driverState: 'installing' },
-    'warning',
-    'driver.states.installing',
-  ],
+  ['missing session', { ...healthy, audioSession: undefined }, 'routing.nodeStatus.unknown'],
+  ['unavailable transport', null, 'routing.nodeStatus.unknown'],
+  ['unavailable driver', { ...healthy, driverState: 'unavailable' }, 'driver.states.unavailable'],
+  ['blocked driver', { ...healthy, driverState: 'blocked' }, 'driver.states.blocked'],
+  ['installing driver', { ...healthy, driverState: 'installing' }, 'driver.states.installing'],
 ];
 
 function fixture(status: MixRelayStatus | null) {
@@ -147,20 +122,73 @@ function fixture(status: MixRelayStatus | null) {
 
 describe.each(['en', 'ko-KR', 'pseudo'])('Studio footer health in %s', (locale) => {
   it.each(cases)(
-    'uses one consistent accessible label and color for %s',
-    async (_name, status, tone, key) => {
+    'describes %s on the disabled engine control when power is unavailable',
+    async (_name, status, key) => {
       await i18n.changeLanguage(locale);
       const view = fixture(status);
       const label = i18n.t(key);
       expect(label).not.toBe(key);
-      const marker = await screen.findByRole('img', { name: label });
-      expect(marker).toHaveAttribute('data-tone', tone);
+      const button = await screen.findByRole('button', { name: label });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute('aria-pressed', 'false');
+      expect(button).toHaveAttribute('aria-busy', 'false');
+      expect(button).toHaveAttribute('title', label);
+      expect(button).toHaveAttribute('aria-description', label);
+      expect(button).toHaveTextContent(i18n.t('studio.engineShort'));
+      expect(screen.queryByRole('img', { name: label })).not.toBeInTheDocument();
       expect(screen.queryByText(i18n.t('driver.states.ready'))).not.toBeInTheDocument();
       expect(screen.queryByText(label)).not.toBeInTheDocument();
-      if (_name === 'unsynchronized clock') {
-        fireEvent.mouseEnter(marker);
-        expect(await screen.findByRole('tooltip')).toHaveTextContent(label);
-      }
+      view.unmount();
+    },
+  );
+
+  it.each([
+    [true, false, 'audioSession.powerOff'],
+    [false, false, 'audioSession.powerOn'],
+    [true, true, 'audioSession.powerChanging'],
+    [false, true, 'audioSession.powerChanging'],
+  ] as const)(
+    'shows confirmed power %s with transition %s',
+    async (enabled, transitioning, key) => {
+      await i18n.changeLanguage(locale);
+      const view = fixture({ ...healthy, enginePower: { enabled, transitioning } });
+      const button = await screen.findByRole('button', { name: i18n.t(key) });
+      expect(button).toHaveAttribute('aria-pressed', String(enabled));
+      expect(button).toHaveAttribute('aria-busy', String(transitioning));
+      expect(button).toHaveAttribute(
+        'data-tone',
+        transitioning ? 'warning' : enabled ? 'positive' : 'neutral',
+      );
+      expect(button).toHaveAttribute('aria-description', i18n.t('routing.nodeStatus.running'));
+      // The fixture has no power mutation capability, so it must remain read-only.
+      expect(button).toBeDisabled();
+      expect(button).toHaveTextContent(i18n.t('studio.engineShort'));
+      view.unmount();
+    },
+  );
+
+  it.each([
+    ['running', null, 'positive', 'routing.nodeStatus.running'],
+    ['running', 'processing_failed', 'critical', 'routing.nodeStatus.failed'],
+    ['idle', null, 'warning', 'routing.nodeStatus.idle'],
+    [undefined, null, 'warning', 'routing.nodeStatus.unknown'],
+    ['stopped', null, 'critical', 'routing.nodeStatus.stopped'],
+  ] as const)(
+    'keeps %s/%s health independent from confirmed power',
+    async (processingState, issue, tone, key) => {
+      await i18n.changeLanguage(locale);
+      const view = fixture({
+        ...healthy,
+        audioSession: { ...session, processingState, issue },
+        enginePower: { enabled: true, transitioning: false },
+      });
+      const action = i18n.t('audioSession.powerOff');
+      const health = i18n.t(key);
+      const button = await screen.findByRole('button', { name: action });
+      expect(button).toHaveAttribute('aria-pressed', 'true');
+      expect(button).toHaveAttribute('data-tone', tone);
+      expect(button).toHaveAttribute('aria-description', health);
+      expect(button).toHaveAttribute('title', `${action} · ${health}`);
       view.unmount();
     },
   );

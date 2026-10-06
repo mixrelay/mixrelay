@@ -14,9 +14,17 @@ use super::{
     ControlBackend, EngineGraphController, ErrorCode, GraphDocument, NodeConfig, PROTOCOL_VERSION,
     ProtocolError,
 };
-use crate::persistence::{StagedWrite, config_directory, stage_json};
+use crate::persistence::{StagedWrite, config_directory, stage_json_limited};
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
+
+fn document_write_error(error: &std::io::Error) -> ProtocolError {
+    if error.kind() == std::io::ErrorKind::InvalidData {
+        invalid(&error.to_string())
+    } else {
+        unavailable(&error.to_string())
+    }
+}
 const MAX_GRAPHS: usize = 256;
 
 #[path = "graph_layout.rs"]
@@ -26,7 +34,7 @@ mod layout;
 mod native_state;
 
 #[path = "graph_live_state.rs"]
-mod live_state;
+pub(crate) mod live_state;
 
 #[path = "graph_restore.rs"]
 mod restore;
@@ -35,6 +43,7 @@ pub(super) use restore::PendingRestore;
 #[path = "device_catalog.rs"]
 mod devices;
 
+mod state_assets;
 mod workspace;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -160,6 +169,14 @@ impl Catalog {
         {
             return Err("invalid graph catalog identity, name or version".into());
         }
+        state_assets::referenced(self).map_err(|error| {
+            error
+                .parameters
+                .get("reason")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("invalid processor state reference")
+                .to_owned()
+        })?;
         Ok(())
     }
 
@@ -228,12 +245,15 @@ impl EngineGraphController {
     }
 
     pub(super) fn with_graph_catalog_path(self, path: PathBuf) -> Self {
+        self.processor_controls
+            .configure_state_store(path.with_extension("states"));
         let loaded = Catalog::load(&path);
         match loaded {
             Ok(None) => {
                 // Import the already prepared graph once. Never initialize an existing file.
                 let value = Catalog::imported(self.graph());
-                let saved = stage_json(&path, &value).and_then(StagedWrite::commit);
+                let saved =
+                    stage_json_limited(&path, &value, MAX_BYTES).and_then(StagedWrite::commit);
                 *self.catalog.lock() = Some(CatalogStore {
                     path,
                     value: saved.map(|()| value).map_err(|error| error.to_string()),
@@ -282,27 +302,58 @@ impl EngineGraphController {
         let Some(candidate) = candidate else {
             return Ok(None);
         };
-        let bytes =
-            serde_json::to_vec(candidate).map_err(|error| unavailable(&error.to_string()))?;
-        if bytes.len() as u64 > MAX_BYTES {
-            return Err(invalid("graph catalog exceeds size limit"));
-        }
-        let catalog = self.catalog.lock();
-        let store = catalog
-            .as_ref()
-            .ok_or_else(|| unavailable("graph catalog not enabled"))?;
-        stage_json(&store.path, candidate)
-            .map(Some)
-            .map_err(|error| unavailable(&error.to_string()))
+        let references = state_assets::referenced(candidate)?;
+        let (path, accepted_references) = {
+            let catalog = self.catalog.lock();
+            let store = catalog
+                .as_ref()
+                .ok_or_else(|| unavailable("graph catalog not enabled"))?;
+            let accepted_references = store
+                .value
+                .as_ref()
+                .ok()
+                .map(state_assets::referenced)
+                .transpose()?
+                .unwrap_or_default();
+            (store.path.clone(), accepted_references)
+        };
+        let mut verified = self.verified_catalog_state_refs.lock();
+        let next_verified = if references.is_empty() {
+            std::collections::BTreeSet::new()
+        } else {
+            let states = self
+                .processor_controls
+                .state_store()
+                .map_err(|error| unavailable(&error))?;
+            state_assets::verify_catalog_delta(
+                &references,
+                &accepted_references,
+                &verified,
+                |reference| {
+                    states
+                        .verify(reference)
+                        .map_err(|error| invalid(&error.to_string()))
+                },
+            )?
+        };
+        let staged = stage_json_limited(&path, candidate, MAX_BYTES)
+            .map_err(|error| document_write_error(&error))?;
+        *verified = next_verified;
+        Ok(Some(staged))
     }
 
     pub(super) fn commit_catalog_memory(&self, candidate: Option<Catalog>) {
+        self.replace_catalog_memory(candidate);
+        self.refresh_control_snapshot();
+    }
+
+    /// Updates authored selection before a prepared plan can become active.
+    pub(super) fn replace_catalog_memory(&self, candidate: Option<Catalog>) {
         if let Some(candidate) = candidate
             && let Some(store) = self.catalog.lock().as_mut()
         {
             store.value = Ok(candidate);
         }
-        self.refresh_control_snapshot();
     }
 
     pub(super) fn finish_catalog_write(&self, staged: Option<StagedWrite>) {
@@ -488,6 +539,7 @@ impl EngineGraphController {
         mut candidate: Catalog,
         revision: u64,
     ) -> Result<GraphCatalogResponse, ProtocolError> {
+        let reuse = self.processor_controls.reuse_transaction();
         let mut document = candidate.active_document().clone();
         document.revision = revision
             .checked_add(1)
@@ -501,6 +553,7 @@ impl EngineGraphController {
         // not by comparing graph-local node IDs against the previously selected graph.
         self.preserve_catalog_provider_state(&mut candidate)?;
         self.publish_graph_locked(candidate.active_document().clone(), Some(candidate))?;
+        reuse.commit();
         self.current_catalog_response()
     }
 }

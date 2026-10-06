@@ -11,12 +11,15 @@ import {
   type GraphRuntimeStatus,
   type MeterSnapshot,
   type MixRelayStatus,
+  type NodeControlResponse,
   type ProcessorEditorFrame,
   type ProcessorEditorInput,
   type ProcessorEditorStatus,
   type ProcessorParameterUpdateResponse,
+  type ProcessorRetryRequest,
   type ProtocolErrorBody,
   type RecorderRequest,
+  type RecorderSettings,
   type RecorderStatus,
   type RuntimeGraphDocument,
   type VirtualEndpointFormatRequest,
@@ -25,8 +28,29 @@ import {
 // The engine binds IPv4 loopback explicitly. Using `localhost` can resolve to `::1` first and
 // make the browser-only dev surface report a disconnected engine while Tauri remains healthy.
 const LOCAL_CONTROL_ORIGIN = 'http://127.0.0.1:19341';
+const OPERATION_HEADER = 'X-MixRelay-Operation';
+const OPERATION_RESULT_HEADER = 'X-MixRelay-Operation-Result';
+const OPERATION_POLL_INTERVAL_MS = 100;
+const OPERATION_POLL_TIMEOUT_MS = 5000;
+const OPERATION_ACK_TIMEOUT_MS = 1000;
+const MAX_OPERATION_ID_LENGTH = 128;
 
 export class HttpControlPort implements ControlPort {
+  public async recordingSettings(_graphId: string, _nodeId: string): Promise<RecorderSettings> {
+    throw new ControlPortError(501, {
+      code: 'control_request_failed',
+      parameters: { reason: 'Recording settings require the desktop application.' },
+    });
+  }
+
+  public async setRecordingSettings(
+    graphId: string,
+    nodeId: string,
+    _settings: RecorderSettings,
+    _expectedRevision: number,
+  ): Promise<RecorderSettings> {
+    return this.recordingSettings(graphId, nodeId);
+  }
   public getNodeControls(graphId: string): Promise<import('./types').GraphNodeControls> {
     return this.json(`/api/v1/graphs/${encodeURIComponent(graphId)}/nodes/controls`);
   }
@@ -34,7 +58,7 @@ export class HttpControlPort implements ControlPort {
     graphId: string,
     nodeId: string,
     request: import('./types').NodeControlRequest,
-  ): Promise<GraphApplyResponse> {
+  ): Promise<NodeControlResponse> {
     return this.json(
       `/api/v1/graphs/${encodeURIComponent(graphId)}/nodes/${encodeURIComponent(nodeId)}/control`,
       {
@@ -140,6 +164,14 @@ export class HttpControlPort implements ControlPort {
     return this.json('/api/v1/processors');
   }
 
+  public retryProcessor(request: ProcessorRetryRequest): Promise<GraphApplyResponse> {
+    return this.json('/api/v1/processors/retry', {
+      body: JSON.stringify(request),
+      headers: { 'content-type': 'application/json' },
+      method: 'PUT',
+    });
+  }
+
   public getProcessorEditor(nodeId: string): Promise<ProcessorEditorStatus> {
     return this.json(`/api/v1/processors/${encodeURIComponent(nodeId)}/editor`);
   }
@@ -199,9 +231,85 @@ export class HttpControlPort implements ControlPort {
     const request = this.request;
     const response = await request(`${this.origin}${path}`, init);
     const body: unknown = await response.json();
+    const operationId = pendingOperationId(response);
+    if (operationId !== undefined) {
+      validateOperationReceipt(body, operationId);
+      return this.pollOperation<T>(operationId);
+    }
     if (!response.ok) {
       throw new ControlPortError(response.status, body as ProtocolErrorBody);
     }
     return body as T;
+  }
+
+  private async pollOperation<T>(operationId: string): Promise<T> {
+    const path = `/api/v1/operations/${encodeURIComponent(operationId)}`;
+    const request = this.request;
+    for (;;) {
+      await new Promise<void>((resolve) => setTimeout(resolve, OPERATION_POLL_INTERVAL_MS));
+      const response = await request(`${this.origin}${path}`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(OPERATION_POLL_TIMEOUT_MS),
+      });
+      const body: unknown = await response.json();
+      const pendingId = pendingOperationId(response);
+      if (pendingId !== undefined) {
+        if (pendingId !== operationId) {
+          throw new Error('local control operation identity changed or was invalid');
+        }
+        validateOperationReceipt(body, operationId);
+        continue;
+      }
+      validateTerminalOperation(response, operationId);
+      await this.acknowledgeOperation(path);
+      if (!response.ok) {
+        throw new ControlPortError(response.status, body as ProtocolErrorBody);
+      }
+      return body as T;
+    }
+  }
+
+  private async acknowledgeOperation(path: string): Promise<void> {
+    try {
+      const request = this.request;
+      await request(`${this.origin}${path}`, {
+        method: 'DELETE',
+        signal: AbortSignal.timeout(OPERATION_ACK_TIMEOUT_MS),
+      });
+    } catch {
+      // The terminal response is already authoritative; acknowledgement only reclaims
+      // the server-side receipt and must not replace the observed operation result.
+    }
+  }
+}
+
+function pendingOperationId(response: Response): string | undefined {
+  const operationId = response.headers.get(OPERATION_HEADER);
+  if (operationId === null) return undefined;
+  if (
+    response.status !== 202 ||
+    operationId.length === 0 ||
+    operationId.length > MAX_OPERATION_ID_LENGTH
+  ) {
+    throw new Error('invalid operation receipt');
+  }
+  return operationId;
+}
+
+function validateOperationReceipt(body: unknown, operationId: string): void {
+  if (
+    typeof body !== 'object' ||
+    body === null ||
+    !('operationId' in body) ||
+    typeof body.operationId !== 'string' ||
+    body.operationId !== operationId
+  ) {
+    throw new Error('local control operation identity changed or was invalid');
+  }
+}
+
+function validateTerminalOperation(response: Response, operationId: string): void {
+  if (response.headers.get(OPERATION_RESULT_HEADER) !== operationId) {
+    throw new Error('local control operation result could not be confirmed');
   }
 }

@@ -31,3 +31,54 @@
   overflow-wrap: anywhere;
   padding: 4px var(--node-inset);
 }
+.folderField {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.folderLabel {
+  margin: 0;
+}
+.folderWrapper {
+  min-width: 0;
+}
+.folderPath {
+  text-overflow: ellipsis;
+  border: 0;
+  background: transparent;
+  color: var(--mantine-color-dimmed);
+  padding-left: 0;
+}
+.folderButton {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 5px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--mantine-color-dimmed);
+  cursor: pointer;
+}
+.folderButton:hover:not(:disabled) {
+  background: var(--mantine-color-dark-5);
+  color: var(--mantine-color-text);
+}
+.folderButton:focus-visible {
+  outline: 1px solid var(--mantine-color-signal-5);
+  outline-offset: -1px;
+}
+.folderButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.folderButton svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}

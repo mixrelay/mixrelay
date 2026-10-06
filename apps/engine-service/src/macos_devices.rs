@@ -70,22 +70,51 @@ impl DeviceSet {
             device.graph_quantum.store(frames, Ordering::Release);
         }
     }
-    pub(super) fn set_active(&self, id: &str, enabled: bool) {
-        if let Some(device) = self.0.get(id) {
+    fn binding_key(&self, id: &str, input: bool) -> Option<&str> {
+        if let Some((key, _)) = self.0.get_key_value(id) {
+            return Some(key);
+        }
+        if let Some((key, _)) = self.1.get_key_value(id) {
+            return Some(key);
+        }
+        let suffix = if input { "/capture" } else { "/render" };
+        let bounds = (std::ops::Bound::Included(id), std::ops::Bound::Unbounded);
+        self.0
+            .range::<str, _>(bounds)
+            .map(|(key, _)| key)
+            .take_while(|key| key.starts_with(id))
+            .chain(
+                self.1
+                    .range::<str, _>(bounds)
+                    .map(|(key, _)| key)
+                    .take_while(|key| key.starts_with(id)),
+            )
+            .find(|key| key.strip_suffix(suffix) == Some(id))
+            .map(String::as_str)
+    }
+
+    /// Applies the compiled binding gate to only its capture or render client.
+    pub(super) fn set_binding_active(&self, id: &str, input: bool, enabled: bool) {
+        if let Some(key) = self.binding_key(id, input)
+            && let Some(device) = self.0.get(key)
+        {
             device.set_active(enabled);
         }
     }
+
     pub(super) fn is_offline(&self, id: &str) -> bool {
         self.1.contains_key(id)
     }
-    /// Disabled or reconnecting owners have no active PCM bridge. This does not change
-    /// their selected identity or classify them as absent from native inventory.
-    pub(super) fn is_inactive(&self, id: &str) -> bool {
-        self.is_offline(id)
-            || self
-                .0
-                .get(id)
-                .is_some_and(|device| !device.ready() || !device.activity.enabled())
+
+    /// Observes disconnected/disabled clients without changing device identity.
+    pub(super) fn is_binding_inactive(&self, id: &str, input: bool) -> bool {
+        self.binding_key(id, input).is_some_and(|key| {
+            self.1.contains_key(key)
+                || self
+                    .0
+                    .get(key)
+                    .is_some_and(|device| !device.ready() || !device.activity.enabled())
+        })
     }
     /// Explicit graph pacing identity, never inferred from nominal sample rate.
     pub(super) fn set_clock_master(&self, owner_id: Option<u64>) {
@@ -109,9 +138,10 @@ impl DeviceSet {
             device.clock_aligned.store(aligned, Ordering::Release);
         }
     }
-    pub(super) fn clock_synchronized(&self, id: &str) -> Option<bool> {
-        self.0
-            .get(id)
+    /// Reports readiness of one direction's converter, or no native owner.
+    pub(super) fn clock_synchronized(&self, id: &str, input: bool) -> Option<bool> {
+        self.binding_key(id, input)
+            .and_then(|key| self.0.get(key))
             .map(|device| device.ready() && device.bridge_ready.load(Ordering::Acquire))
     }
     /// A pacing candidate is not proof that unrelated clocks are synchronized.
@@ -149,6 +179,7 @@ impl DeviceSet {
         })
     }
     pub(super) fn read(&self, id: &str, samples: &mut [f32]) -> Option<TransferOutcome> {
+        let id = self.binding_key(id, true)?;
         if let Some(spec) = self.1.get(id) {
             samples.fill(0.0);
             return Some(recovery::offline_transfer(
@@ -165,6 +196,7 @@ impl DeviceSet {
         self.0.get(id).map(|device| device.read(samples))
     }
     pub(super) fn write(&self, id: &str, samples: &[f32]) -> Option<TransferOutcome> {
+        let id = self.binding_key(id, false)?;
         if let Some(spec) = self.1.get(id) {
             return Some(recovery::offline_transfer(
                 samples.len(),
@@ -187,6 +219,7 @@ pub(super) struct MacDevices {
     format: Arc<PublishedFormat>,
     next_group_check: Mutex<Instant>,
     recovery_requested: AtomicBool,
+    stopping: AtomicBool,
     prepared_hardware_clock: Arc<AtomicBool>,
     hardware_clock: AtomicBool,
 }
@@ -211,6 +244,7 @@ impl MacDevices {
             format: Arc::new(PublishedFormat::new(rate, buffer_frames)),
             next_group_check: Mutex::new(Instant::now()),
             recovery_requested: AtomicBool::new(false),
+            stopping: AtomicBool::new(false),
             prepared_hardware_clock: Arc::default(),
             hardware_clock: AtomicBool::new(false),
         }
@@ -259,6 +293,21 @@ impl MacDevices {
     /// No native property access or resource construction occurs on the caller.
     pub(super) fn request_recovery(&self) {
         self.recovery_requested.store(true, Ordering::Release);
+    }
+
+    /// Cancels further preparation, without interrupting an in-flight native call or teardown.
+    pub(super) fn stop_preparing(&self) {
+        self.stopping.store(true, Ordering::Release);
+    }
+
+    fn require_preparation(&self) -> Result<(), HostAudioBackendError> {
+        if self.stopping.load(Ordering::Acquire) {
+            Err(backend_error(
+                "CoreAudio preparation cancelled during shutdown",
+            ))
+        } else {
+            Ok(())
+        }
     }
     pub(super) fn activation(&self) -> Result<DeviceActivation<'_>, &'static str> {
         Ok(DeviceActivation {
@@ -324,6 +373,7 @@ impl GraphResourceBackend for MacDevices {
         &self,
         selectors: &[&mixrelay_audio_io::DeviceSelector],
     ) -> Result<Vec<mixrelay_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
+        self.require_preparation()?;
         mixrelay_audio_io::macos::selected_devices(selectors.iter().copied())
     }
 
@@ -338,9 +388,12 @@ impl GraphResourceBackend for MacDevices {
     fn prepare_format_change(
         &self,
         document: &GraphDocument,
+        playback: mixrelay_engine_service::PlaybackBindings<'_>,
         current: RenderFormat,
         requested: RenderFormat,
     ) -> Result<Box<dyn PreparedGraphFormat>, HostAudioBackendError> {
+        application::validate_playback(&playback)?;
+        self.require_preparation()?;
         let cache = self
             .cache
             .lock()
@@ -349,7 +402,8 @@ impl GraphResourceBackend for MacDevices {
         let reservation = self.handoff.reserve_format().ok_or_else(|| {
             backend_error("CoreAudio resource or format update is already pending")
         })?;
-        let (devices, next_cache) = Self::prepare_device_set(&cache, specs(document), requested)?;
+        let (devices, next_cache) = self.prepare_device_set(&cache, specs(document), requested)?;
+        self.require_preparation()?;
         let format = PreparedDeviceFormat::prepare(
             devices.0.values().cloned(),
             self.format.clone(),
@@ -366,7 +420,13 @@ impl GraphResourceBackend for MacDevices {
             hardware_clock: self.prepared_hardware_clock.clone(),
         }))
     }
-    fn reconcile(&self, document: &GraphDocument) -> Result<(), HostAudioBackendError> {
+    fn reconcile(
+        &self,
+        document: &GraphDocument,
+        playback: mixrelay_engine_service::PlaybackBindings<'_>,
+    ) -> Result<(), HostAudioBackendError> {
+        application::validate_playback(&playback)?;
+        self.require_preparation()?;
         let desired = specs(document);
         // Adding a virtual endpoint does not transfer hardware's clock authority
         // to that endpoint. Cross-clock transport is an explicit bridge boundary.
@@ -465,10 +525,64 @@ impl RuntimeStatusBackend for MacDevices {
 mod tests {
     use super::*;
     #[test]
-    fn virtual_capture_activity_does_not_replace_existing_hardware_pacing() {
-        let (output, _) = synthetic_output(2, 48_000, 48_000);
-        let devices = DeviceSet(BTreeMap::from([("output".into(), output)]), BTreeMap::new());
-        crate::macos::pacing_tests::assert_hardware_keeps_authority(&devices);
+    fn duplex_driver_binding_lookup_keeps_capture_and_render_widths_without_rt_allocation() {
+        let selector = DeviceSelector::PersistentUid {
+            uid: mixrelay_macos_transport::endpoint_identity::endpoint_uid([1; 16]),
+        };
+        let devices = DeviceSet(
+            BTreeMap::new(),
+            BTreeMap::from([
+                (
+                    "driver/capture".into(),
+                    Spec {
+                        selector: selector.clone(),
+                        input: true,
+                        channels: 3,
+                    },
+                ),
+                (
+                    "driver/render".into(),
+                    Spec {
+                        selector,
+                        input: false,
+                        channels: 7,
+                    },
+                ),
+            ]),
+        );
+        let mut input = [9.0; 96];
+        let output = [0.5; 224];
+        let allocation = allocation_counter::measure(|| {
+            assert_eq!(devices.binding_key("driver", true), Some("driver/capture"));
+            assert_eq!(devices.binding_key("driver", false), Some("driver/render"));
+            assert_eq!(devices.read("driver", &mut input).unwrap().frames, 32);
+            assert_eq!(devices.write("driver", &output).unwrap().frames, 32);
+            assert!(input.iter().all(|sample| *sample == 0.0));
+            assert_eq!(devices.read("missing", &mut input), None);
+            assert_eq!(devices.write("missing", &output), None);
+        });
+        assert_eq!(allocation.count_total, 0);
+    }
+
+    #[test]
+    fn driver_native_quantum_is_preserved_when_dsp_slice_changes() {
+        let driver = Native::create(
+            &Spec {
+                selector: DeviceSelector::PersistentUid {
+                    uid: mixrelay_macos_transport::endpoint_identity::endpoint_uid([1; 16]),
+                },
+                input: false,
+                channels: 2,
+            },
+            48_000,
+            None,
+            32,
+        )
+        .unwrap();
+        assert!(!driver.owns_device_buffer);
+        driver.request_buffer(256);
+        let (physical, _) = synthetic_output(2, 48_000, 48_000);
+        assert!(physical.native.owns_device_buffer);
     }
     #[test]
     fn processing_admission_waits_for_native_rate_and_rebuilt_bridge() {
@@ -664,15 +778,15 @@ mod tests {
             BTreeMap::new(),
         );
         let owner = devices.hardware_clock_progress().unwrap().owner_id;
-        assert!(!devices.is_inactive("output"));
+        assert!(!devices.is_binding_inactive("output", false));
         device.set_active(false);
         let mut bridge = DeviceBridge::new(&context, 48_000).unwrap();
         assert!(!bridge.synchronize_activity(&context));
-        assert!(devices.is_inactive("output"));
+        assert!(devices.is_binding_inactive("output", false));
         assert_eq!(devices.hardware_clock_progress().unwrap().owner_id, owner);
         device.set_active(true);
-        assert!(!devices.is_inactive("output"));
-        assert_eq!(devices.clock_synchronized("output"), Some(false));
+        assert!(!devices.is_binding_inactive("output", false));
+        assert_eq!(devices.clock_synchronized("output", false), Some(false));
         assert_eq!(devices.hardware_clock_progress().unwrap().owner_id, owner);
     }
     pub(super) fn synthetic_output(
@@ -751,6 +865,13 @@ mod tests {
             )
             .unwrap(),
         );
+        // SAFETY: this fresh synthetic owner never connects to CoreAudio and no callback/queue
+        // role is published yet. Fixtures supply the matching interleaved Float32 ABL themselves.
+        assert!(unsafe {
+            mixrelay_macos_transport::device_io::test_observation::admit_float_callback(
+                native.pointer.as_ptr().cast(),
+            )
+        });
         let context = WorkerContext {
             activity: Arc::clone(&native.render.activity),
             native: native.clone(),
@@ -841,7 +962,80 @@ mod tests {
     }
 
     #[test]
-    fn format_staging_is_cancel_safe_and_mismatched_graph_rate_is_silent() {
+    fn format_reservation_cancellation_and_reclaim_are_safe() {
+        let (device, _context) = synthetic_output(2, 48_000, 44_100);
+        let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
+        let resources = MacDevices::new(status, 48_000, 256);
+        resources.cache.lock().unwrap().insert(
+            "output".into(),
+            (
+                Spec {
+                    selector: DeviceSelector::DefaultOutput,
+                    input: false,
+                    channels: 2,
+                },
+                Arc::downgrade(&device),
+            ),
+        );
+        let graph = output_test_graph();
+        let old = RenderFormat {
+            sample_rate: 48_000,
+            block_frames: 256,
+        };
+        let new = RenderFormat {
+            sample_rate: 96_000,
+            block_frames: 256,
+        };
+        assert_eq!(device.write(&[0.25; 512]).frames, 256);
+        let cancelled = resources
+            .prepare_format_change(
+                &graph,
+                mixrelay_engine_service::PlaybackBindings::Preserve,
+                old,
+                new,
+            )
+            .unwrap();
+        assert!(!resources.handoff.idle());
+        assert!(
+            resources
+                .prepare_format_change(
+                    &graph,
+                    mixrelay_engine_service::PlaybackBindings::Preserve,
+                    old,
+                    new
+                )
+                .is_err()
+        );
+        resources.reclaim();
+        assert!(
+            !resources.handoff.idle(),
+            "recovery must not take a format reservation"
+        );
+        assert_eq!(device.graph_rate.load(Ordering::Acquire), 48_000);
+        assert_eq!(
+            unsafe { mr_device_io_queued(device.native.pointer.as_ptr(), true) },
+            256
+        );
+        drop(cancelled);
+        assert!(
+            resources.handoff.idle(),
+            "cancellation releases resource preparation"
+        );
+        assert!(device.pending_bridge.lock().unwrap().is_none());
+        resources
+            .prepare_format_change(
+                &graph,
+                mixrelay_engine_service::PlaybackBindings::Preserve,
+                old,
+                new,
+            )
+            .unwrap()
+            .commit();
+        assert_eq!(device.graph_rate.load(Ordering::Acquire), 96_000);
+    }
+
+    #[test]
+    fn committed_format_rejects_mismatched_pcm_and_activates_pending_slot() {
         let (device, context) = synthetic_output(2, 48_000, 44_100);
         let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
         let resources = MacDevices::new(status, 48_000, 256);
@@ -866,27 +1060,13 @@ mod tests {
             block_frames: 256,
         };
         assert_eq!(device.write(&[0.25; 512]).frames, 256);
-        let cancelled = resources.prepare_format_change(&graph, old, new).unwrap();
-        assert!(!resources.handoff.idle());
-        assert!(resources.prepare_format_change(&graph, old, new).is_err());
-        resources.reclaim();
-        assert!(
-            !resources.handoff.idle(),
-            "recovery must not take a format reservation"
-        );
-        assert_eq!(device.graph_rate.load(Ordering::Acquire), 48_000);
-        assert_eq!(
-            unsafe { mr_device_io_queued(device.native.pointer.as_ptr(), true) },
-            256
-        );
-        drop(cancelled);
-        assert!(
-            resources.handoff.idle(),
-            "cancellation releases resource preparation"
-        );
-        assert!(device.pending_bridge.lock().unwrap().is_none());
         resources
-            .prepare_format_change(&graph, old, new)
+            .prepare_format_change(
+                &graph,
+                mixrelay_engine_service::PlaybackBindings::Preserve,
+                old,
+                new,
+            )
             .unwrap()
             .commit();
         assert!(
@@ -907,7 +1087,14 @@ mod tests {
             "old converter must not accept new-rate PCM"
         );
         assert!(
-            resources.prepare_format_change(&graph, new, old).is_err(),
+            resources
+                .prepare_format_change(
+                    &graph,
+                    mixrelay_engine_service::PlaybackBindings::Preserve,
+                    new,
+                    old
+                )
+                .is_err(),
             "pending publication slot cannot be replaced"
         );
         let mut prepared = device.pending_bridge.lock().unwrap().take().unwrap();

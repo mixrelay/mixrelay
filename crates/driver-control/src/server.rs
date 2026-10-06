@@ -1,0 +1,211 @@
+use std::{
+    sync::{Arc, Weak},
+    time::Duration,
+};
+
+use axum::{
+    Json, Router,
+    body::{Body, to_bytes},
+    extract::{Request, State},
+    http::{
+        HeaderValue, Method, StatusCode,
+        header::{CONTENT_TYPE, HOST, ORIGIN},
+    },
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::get,
+};
+use parking_lot::Mutex;
+use tokio::sync::Semaphore;
+use tower_http::cors::{AllowOrigin, CorsLayer};
+
+use crate::{
+    DriverCommand, DriverError, DriverManager, DriverSnapshot, SNAPSHOT_ROUTE, contract::JSON_LIMIT,
+};
+
+const ORIGINS: [&str; 5] = [
+    "http://127.0.0.1:1420",
+    "http://localhost:1420",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "tauri://localhost",
+];
+const HOSTS: [&str; 3] = ["127.0.0.1:19342", "localhost:19342", "[::1]:19342"];
+
+#[derive(Clone)]
+struct Control {
+    manager: Arc<Mutex<DriverManager>>,
+    ingress: Arc<Semaphore>,
+    operations: Arc<Semaphore>,
+}
+
+/// Builds the independent Driver GET/PUT API with bounded ingress and trusted local origins.
+/// The binary must bind only loopback and own the listener/service lifetime. No license or
+/// graph state is consulted. Native/file work is serialized outside the async reactor.
+/// Call from a Tokio runtime; startup inventory is initialized without client requests.
+pub fn router(manager: DriverManager) -> Router {
+    let state = Control {
+        manager: Arc::new(Mutex::new(manager)),
+        ingress: Arc::new(Semaphore::new(8)),
+        operations: Arc::new(Semaphore::new(8)),
+    };
+    tokio::spawn(maintain_inventory(Arc::downgrade(&state.manager)));
+    let origins = ORIGINS.map(HeaderValue::from_static);
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_methods([Method::GET, Method::PUT])
+        .allow_headers([CONTENT_TYPE]);
+    Router::new()
+        .route(SNAPSHOT_ROUTE, get(snapshot).put(mutate))
+        .layer(cors)
+        .layer(middleware::from_fn_with_state(state.clone(), admit))
+        .with_state(state)
+}
+
+async fn maintain_inventory(manager: Weak<Mutex<DriverManager>>) {
+    let mut previous_error = None;
+    loop {
+        let owner = manager.clone();
+        // Only an in-flight native transaction retains the manager. Waiting between
+        // recovery attempts cannot extend router ownership after service shutdown.
+        let result = tokio::task::spawn_blocking(move || {
+            let owner = owner.upgrade()?;
+            let result = owner.lock().maintain();
+            Some(result)
+        })
+        .await;
+        let delay = match result {
+            Ok(Some(Ok(true))) => {
+                tracing::info!("Driver native inventory restored");
+                previous_error = None;
+                Duration::from_secs(1)
+            }
+            Ok(None) => return,
+            Err(error) => {
+                tracing::error!(%error, "Driver inventory maintenance worker failed");
+                return;
+            }
+            Ok(Some(Ok(false))) => {
+                previous_error = None;
+                Duration::from_secs(1)
+            }
+            // Native transactions already have bounded ACK/readback waits. Keep
+            // their failure observable once and avoid rapid reapplication.
+            Ok(Some(Err(error))) => {
+                let detail = error.to_string();
+                if previous_error.as_ref() != Some(&detail) {
+                    tracing::error!(%error, "Driver inventory maintenance failed");
+                    previous_error = Some(detail);
+                }
+                Duration::from_secs(5)
+            }
+        };
+        tokio::time::sleep(delay).await;
+    }
+}
+
+async fn snapshot(State(control): State<Control>) -> Result<Json<DriverSnapshot>, ApiError> {
+    operate(control, None).await.map(Json)
+}
+
+async fn mutate(
+    State(control): State<Control>,
+    Json(command): Json<DriverCommand>,
+) -> Result<Json<DriverSnapshot>, ApiError> {
+    operate(control, Some(command)).await.map(Json)
+}
+
+async fn operate(
+    control: Control,
+    command: Option<DriverCommand>,
+) -> Result<DriverSnapshot, ApiError> {
+    let permit = control
+        .operations
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            ApiError(DriverError::Unavailable(
+                "Driver control queue is full".into(),
+            ))
+        })?;
+    tokio::task::spawn_blocking(move || {
+        let mut manager = control.manager.lock();
+        let result = match command {
+            Some(command) => manager.mutate(command),
+            None => manager.snapshot(),
+        };
+        // Admission follows the blocking operation even if its HTTP caller disconnects.
+        drop(permit);
+        result
+    })
+    .await
+    .map_err(|error| {
+        ApiError(DriverError::Backend(format!(
+            "Driver control worker: {error}"
+        )))
+    })?
+    .map_err(ApiError)
+}
+
+async fn admit(State(control): State<Control>, request: Request, next: Next) -> Response {
+    if request
+        .headers()
+        .get(ORIGIN)
+        .is_some_and(|origin| !ORIGINS.iter().any(|allowed| origin == *allowed))
+    {
+        return (StatusCode::FORBIDDEN, "untrusted Driver origin").into_response();
+    }
+    if request
+        .headers()
+        .get(HOST)
+        .is_some_and(|host| !HOSTS.iter().any(|allowed| host == *allowed))
+    {
+        return (StatusCode::FORBIDDEN, "non-loopback Driver host").into_response();
+    }
+    let Ok(permit) = control.ingress.try_acquire_owned() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Driver control ingress is full",
+        )
+            .into_response();
+    };
+    let (parts, body) = request.into_parts();
+    let body = match tokio::time::timeout(Duration::from_secs(2), to_bytes(body, JSON_LIMIT)).await
+    {
+        Ok(Ok(body)) => body,
+        Ok(Err(_)) => {
+            return (StatusCode::PAYLOAD_TOO_LARGE, "Driver body exceeds 1 MiB").into_response();
+        }
+        Err(_) => {
+            return (StatusCode::REQUEST_TIMEOUT, "Driver body read timed out").into_response();
+        }
+    };
+    let response = next.run(Request::from_parts(parts, Body::from(body))).await;
+    drop(permit);
+    response
+}
+
+struct ApiError(DriverError);
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        let status = match &self.0 {
+            DriverError::Invalid(_) | DriverError::Json(_) => StatusCode::BAD_REQUEST,
+            DriverError::RevisionMismatch { .. } => StatusCode::CONFLICT,
+            DriverError::NotFound(_) => StatusCode::NOT_FOUND,
+            DriverError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            DriverError::Backend(_)
+            | DriverError::Io(_)
+            | DriverError::Http(_)
+            | DriverError::Remote { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        (
+            status,
+            Json(serde_json::json!({"error":self.0.to_string()})),
+        )
+            .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests;

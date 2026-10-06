@@ -29,13 +29,89 @@ pub(crate) async fn control_set_recorder(
     node_id: String,
     request: Value,
 ) -> Result<ControlProxyResponse, String> {
-    client
-        .request(Method::PUT, &route(&graph_id, &node_id), Some(request))
-        .await
+    client.submit_recorder(&graph_id, &node_id, request).await
+}
+
+impl ControlProxyClient {
+    /// UI and local controllers submit the same action using desktop-owned next-take settings.
+    pub(super) async fn submit_recorder(
+        &self,
+        graph_id: &str,
+        node_id: &str,
+        mut request: Value,
+    ) -> Result<ControlProxyResponse, String> {
+        let _guard = self.recording_gate.lock().await;
+        let status = self.recording_status(graph_id, node_id).await?;
+        request["request"] = prepare_transport(
+            &request["request"],
+            &status,
+            &self.recording_preferences(graph_id, node_id)?,
+        )?;
+        if request["expectedRecording"].is_null() {
+            request["expectedRecording"] =
+                serde_json::json!({"state":status["state"],"path":status["path"]});
+        }
+        self.request(Method::PUT, &route(graph_id, node_id), Some(request))
+            .await
+    }
+}
+
+fn prepare_transport(
+    action: &Value,
+    status: &Value,
+    settings: &super::recording_settings::RecordingSettings,
+) -> Result<Value, String> {
+    if ["path", "sampleRate", "encoding"]
+        .iter()
+        .any(|key| !action[key].is_null())
+    {
+        return Err("recording options belong to the app recorder settings".into());
+    }
+    match action["action"].as_str() {
+        Some("record") if status["state"] != "paused" => settings.start_request(),
+        Some(action @ ("record" | "pause" | "stop")) => Ok(serde_json::json!({"action":action})),
+        _ => Err("invalid recorder action".into()),
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::recording_settings::{RecordingEncoding, RecordingSettings};
+    use super::*;
+
+    #[test]
+    fn transport_uses_shared_format_only_for_new_takes() {
+        let directory = tempfile::tempdir().unwrap();
+        let settings = RecordingSettings {
+            folder: directory.path().to_string_lossy().into_owned(),
+            sample_rate: Some(96_000),
+            encoding: RecordingEncoding::Pcm24,
+        };
+        let start = prepare_transport(
+            &serde_json::json!({"action":"record"}),
+            &serde_json::json!({"state":"stopped"}),
+            &settings,
+        )
+        .unwrap();
+        assert_eq!(start["sampleRate"], 96_000);
+        assert_eq!(start["encoding"], "pcm24");
+        for action in ["record", "pause", "stop"] {
+            let request = serde_json::json!({"action":action});
+            assert_eq!(
+                prepare_transport(&request, &serde_json::json!({"state":"paused"}), &settings)
+                    .unwrap(),
+                request
+            );
+        }
+        assert!(
+            prepare_transport(
+                &serde_json::json!({"action":"record", "path":"/unlinked.wav"}),
+                &serde_json::json!({"state":"stopped"}),
+                &settings
+            )
+            .is_err()
+        );
+    }
     #[test]
     fn route_preserves_graph_and_node_segments() {
         assert_eq!(

@@ -302,6 +302,38 @@ fn repeated_edits_coalesce_distinct_ids_stay_distinct_and_failure_retries() {
 }
 
 #[test]
+fn editor_values_queue_without_recursive_controller_setter_and_remain_pending_until_process() {
+    let controller = ComWrapper::new(Controller::new());
+    let pointer = controller.to_com_ptr::<IEditController>().unwrap();
+    let processor = ComWrapper::new(Processor::new());
+    let processor_pointer = processor.to_com_ptr::<IAudioProcessor>().unwrap();
+    let mut parameters = InputParameters::from_controller(&pointer, 2).unwrap();
+    controller.reject.set(true);
+
+    parameters.queue_id_value(7, 0.375).unwrap();
+    assert!(parameters.has_pending_changes());
+    assert_eq!(controller.values.borrow()[0].to_bits(), 1.0_f64.to_bits());
+    assert_eq!(
+        run(&mut parameters, &processor_pointer),
+        (kResultOk, 0.1875)
+    );
+    assert!(!parameters.has_pending_changes());
+}
+
+#[test]
+fn metadata_refresh_rejects_id_remapping_without_queuing_edits() {
+    let controller = ComWrapper::new(Controller::new());
+    let pointer = controller.to_com_ptr::<IEditController>().unwrap();
+    let mut parameters = InputParameters::from_controller(&pointer, 2).unwrap();
+    controller.values.replace([0.25, 0.75]);
+    parameters.refresh_metadata(&pointer).unwrap();
+    assert!(!parameters.has_pending_changes());
+    controller.duplicate_ids.set(true);
+    assert!(parameters.refresh_metadata(&pointer).is_err());
+    assert!(!parameters.has_pending_changes());
+}
+
+#[test]
 fn rejected_edits_and_invalid_abi_access_never_publish() {
     let controller = ComWrapper::new(Controller::new());
     let pointer = controller.to_com_ptr::<IEditController>().unwrap();

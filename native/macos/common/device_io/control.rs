@@ -1,11 +1,18 @@
 use std::{
     ffi::c_void,
     ptr::{self, NonNull},
-    sync::atomic::Ordering::{Acquire, Release},
+    sync::{
+        Arc,
+        atomic::{
+            AtomicBool,
+            Ordering::{Acquire, Release},
+        },
+    },
 };
 
 use super::{
     Connection, DeviceIo,
+    listeners::{Listeners, WatchTarget},
     native::{self, Properties, System},
 };
 use crate::{
@@ -18,24 +25,58 @@ struct Registration<'a> {
     io: &'a DeviceIo,
     connection: &'a mut Connection,
     context: NonNull<c_void>,
+    listeners: &'a mut Listeners,
 }
 
 impl Backend for Registration<'_> {
     fn prepare(&mut self, expected: u32) -> Result<u32, i32> {
         let binding = native::resolve(&self.io.selection, &System).ok_or(-2)?;
-        let rate = native::format(&self.io.selection, binding, &System).ok_or(-3)?;
         if expected != 0 && binding.device != expected {
             return Err(-5);
         }
-        *self.connection = Connection { binding, rate };
+        if !self.listeners.remove(&System) {
+            return Err(-6);
+        }
+        // A fresh registration owns its latch. Late copies of removed native blocks cannot
+        // invalidate the next registration. Metadata invalidation is reset only after drain.
+        self.io.progress.invalid.store(false, Release);
+        let watch_invalid = Arc::new(AtomicBool::new(false));
+        self.listeners.install(
+            &WatchTarget {
+                device: binding.device,
+                scope: u32::from_be_bytes(if self.io.selection.input {
+                    *b"inpt"
+                } else {
+                    *b"outp"
+                }),
+                limit: if self.io.selection.group.is_null() {
+                    64
+                } else {
+                    2048
+                },
+            },
+            &watch_invalid,
+            &System,
+        )?;
+        let format = native::admitted_format(&self.io.selection, binding, &System).ok_or(-3)?;
+        if watch_invalid.load(Acquire) {
+            return Err(-6);
+        }
+        *self.connection = Connection {
+            binding,
+            rate: format.rate,
+            formats: format.layout.clone(),
+            watch_invalid: watch_invalid.clone(),
+        };
         // SAFETY: lifecycle has no registration during prepare. The engine
         // control owner has acknowledged drain before reusing callback state.
         let callback = unsafe { &mut *self.io.callback.get() };
         callback.selection = native::buffer_selection(&self.io.selection, binding);
+        callback.formats = format.layout;
+        callback.watch_invalid = watch_invalid;
         callback.prime = true;
         // SAFETY: the preceding registration drained; atomic observers may remain.
         unsafe { mr_callback_clock_reset(ptr::from_ref(&self.io.clock).cast_mut()) };
-        self.io.progress.invalid.store(false, Release);
         Ok(binding.device)
     }
 
@@ -58,6 +99,9 @@ impl Backend for Registration<'_> {
     }
 
     fn start(&mut self, device: u32, procedure: NonNull<c_void>) -> i32 {
+        if self.io.progress.invalid.load(Acquire) || self.connection.watch_invalid.load(Acquire) {
+            return -6;
+        }
         // SAFETY: this pair came from create; no callback state mutable borrow survives.
         unsafe { native::start(device, procedure.as_ptr()) }
     }
@@ -83,25 +127,37 @@ pub(super) unsafe fn connect(io: &DeviceIo, expected: u32) -> i32 {
     // SAFETY: serialized control access; no whole-DeviceIo mutable reference is formed.
     let control = unsafe { &mut *io.control.get() };
     let context = NonNull::from(io).cast();
-    control.lifecycle.connect(
+    let status = control.lifecycle.connect(
         expected,
         &mut Registration {
             io,
             connection: &mut control.connection,
             context,
+            listeners: &mut control.listeners,
         },
-    )
+    );
+    if status != 0 && !control.lifecycle.registered() {
+        io.progress.invalid.store(true, Release);
+        control.listeners.remove(&System);
+    }
+    status
 }
 
 // SAFETY: sole control worker; owner remains allocated on failed unregister.
 pub(super) unsafe fn disconnect(io: &DeviceIo) -> bool {
     // SAFETY: callback borrows only disjoint cells, queues and atomics.
     let control = unsafe { &mut *io.control.get() };
-    control.lifecycle.disconnect(&mut Registration {
+    let drained = control.lifecycle.disconnect(&mut Registration {
         io,
         connection: &mut control.connection,
         context: NonNull::from(io).cast(),
-    })
+        listeners: &mut control.listeners,
+    });
+    if !drained {
+        return false;
+    }
+    io.progress.invalid.store(true, Release);
+    control.listeners.remove(&System)
 }
 
 // SAFETY: only control accesses registration/binding/rate. Native property
@@ -120,8 +176,11 @@ pub(super) unsafe fn alive(io: &DeviceIo, properties: &impl Properties) -> bool 
     }
     control.lifecycle.registered()
         && !io.progress.invalid.load(Acquire)
+        && !connection.watch_invalid.load(Acquire)
         && native::alive(connection.binding.device, properties)
-        && native::format(&io.selection, connection.binding, properties) == Some(connection.rate)
+        && native::admitted_format(&io.selection, connection.binding, properties).is_some_and(
+            |format| format.rate == connection.rate && format.layout == connection.formats,
+        )
 }
 
 fn group_ready(io: &DeviceIo) -> bool {

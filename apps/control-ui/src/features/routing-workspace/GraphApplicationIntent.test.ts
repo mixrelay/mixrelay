@@ -18,7 +18,10 @@ const change = (parameterId: number, value: number): ProcessorParameterChange =>
 function fixture(beforeApply?: () => Promise<void>) {
   const config = {
     typeId: 'vst3:test',
-    parameters: { stateBase64: 'stale', parameterValues: { '1': 0.1, '2': 0.2 } },
+    parameters: {
+      stateRef: { sha256: 'a'.repeat(64), byteLength: 8 },
+      parameterValues: { '1': 0.1, '2': 0.2 },
+    },
   };
   let draft: AudioGraphModel = {
     revision: 1,
@@ -164,6 +167,74 @@ it('Reload and reset discard stale intent instead of applying it to a new docume
   await flush();
   expect(f.port.applyGraph.mock.calls[1]?.[0]).not.toHaveProperty('processorParameterChanges');
   f.queue.reset();
+});
+
+it('automatic refresh never reads or applies saved reload layout', async () => {
+  const f = fixture();
+  const getReloadLayout = vi.fn().mockResolvedValue({
+    graphId: 'saved',
+    layoutRevision: 3,
+    layout: { positions: { p: { x: 851, y: 231 } } },
+  });
+  const callbacks = {
+    ...f.callbacks,
+    getGraphId: () => 'saved',
+    getReloadLayout,
+  };
+  const queue = new GraphApplicationQueue(f.port, callbacks);
+  queue.refresh();
+  await flush();
+  expect(callbacks.restore).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ revision: 1 }),
+  );
+  expect(getReloadLayout).not.toHaveBeenCalled();
+});
+
+it('does not restore a late layout reply after graph selection changes', async () => {
+  const f = fixture();
+  const reply = Promise.withResolvers<{
+    graphId: string;
+    layoutRevision: number;
+    layout: { positions: Record<string, { x: number; y: number }> };
+  }>();
+  let graphId = 'saved';
+  const getReloadLayout = vi.fn().mockReturnValue(reply.promise);
+  const callbacks = {
+    ...f.callbacks,
+    getGraphId: () => graphId,
+    getReloadLayout,
+  };
+  const queue = new GraphApplicationQueue(f.port, callbacks);
+  queue.reload();
+  await flush();
+  expect(getReloadLayout).toHaveBeenCalledExactlyOnceWith('saved');
+  graphId = 'other';
+  reply.resolve({ graphId: 'saved', layoutRevision: 3, layout: { positions: {} } });
+  await flush();
+  expect(callbacks.restore).not.toHaveBeenCalled();
+  expect(callbacks.state).toHaveBeenLastCalledWith('blocked');
+});
+
+it('does not restore a late layout reply after the queue is reset', async () => {
+  const f = fixture();
+  const reply = Promise.withResolvers<{
+    graphId: string;
+    layoutRevision: number;
+    layout: { positions: Record<string, { x: number; y: number }> };
+  }>();
+  const callbacks = {
+    ...f.callbacks,
+    getGraphId: () => 'saved',
+    getReloadLayout: vi.fn().mockReturnValue(reply.promise),
+  };
+  const queue = new GraphApplicationQueue(f.port, callbacks);
+  queue.reload();
+  await flush();
+  expect(callbacks.getReloadLayout).toHaveBeenCalledOnce();
+  queue.reset();
+  reply.resolve({ graphId: 'saved', layoutRevision: 3, layout: { positions: {} } });
+  await flush();
+  expect(callbacks.restore).not.toHaveBeenCalled();
 });
 
 it('does not send intent for removed or replaced processor identities', async () => {

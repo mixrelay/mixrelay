@@ -70,7 +70,23 @@ pub(super) unsafe extern "C" fn io_proc(
 }
 
 fn initialize(session: &TapSession, config: &TapConfig) -> Result<(), TapError> {
-    let description = native::Description::create(config)?;
+    let mut selection = native::Selection::new(config, &CoreAudio)?;
+    if selection.fallback {
+        native::add_inventory_listener(session)?;
+        let inventory_epoch = session.inventory_epoch.load(Ordering::Acquire);
+        selection.selected = CoreAudio.processes(
+            &selection.bundle,
+            selection.target_device.map(|lease| lease.object),
+        )?;
+        if selection.selected.is_empty() {
+            return Err(TapError::code(3));
+        }
+        if session.inventory_epoch.load(Ordering::Acquire) != inventory_epoch {
+            return Err(TapError::code(9));
+        }
+    }
+    let description = native::Description::create(&selection)?;
+    let _previous = session.selection.replace(Some(selection));
     description.tap(session)?;
     let format = CoreAudio.format(session.resources.get().tap)?;
     if !format.supported() {
@@ -100,6 +116,7 @@ unsafe fn create(config: &TapConfig) -> Result<*mut TapSession, TapError> {
     if config.bundle_id.is_null()
         || !(256..=1 << 20).contains(&config.ring_capacity_frames)
         || !config.ring_capacity_frames.is_power_of_two()
+        || config.mute_while_captured == config.target_device_uid.is_null()
     {
         return Err(TapError::code(1));
     }
@@ -107,6 +124,13 @@ unsafe fn create(config: &TapConfig) -> Result<*mut TapSession, TapError> {
     let bundle = unsafe { CStr::from_ptr(config.bundle_id) };
     if bundle.is_empty() || bundle.to_str().is_err() {
         return Err(TapError::code(1));
+    }
+    if !config.target_device_uid.is_null() {
+        // SAFETY: caller retains this NUL-terminated string through startup.
+        let uid = unsafe { CStr::from_ptr(config.target_device_uid) };
+        if !native::owned_endpoint_uid(uid) {
+            return Err(TapError::code(1));
+        }
     }
     let retirement_queue = native::prepare_cleanup()?;
     // SAFETY: fresh global allocation for exactly one correctly aligned owner.
@@ -180,7 +204,8 @@ pub unsafe extern "C" fn mr_process_tap_stop(session: *mut TapSession) -> TapErr
     })
 }
 
-/// Reconciles native format after producer drain; incompatible geometry stays gated.
+/// Reconciles native format and pre-bundle-selector app identity off the audio callback.
+/// Incompatible geometry stays gated; an absent selected app remains pending and silent.
 /// # Safety
 /// Session is owned and control calls are serialized with PCM read/start/stop/destroy.
 /// Atomic stat and peak observers may run concurrently while retaining owner lifetime.

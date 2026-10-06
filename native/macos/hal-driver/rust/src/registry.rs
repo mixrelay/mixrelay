@@ -1,3 +1,5 @@
+use mixrelay_pcm_ring::SampleFormat;
+use std::ffi::c_void;
 use std::ops::Deref;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::sync::Mutex;
@@ -5,7 +7,8 @@ use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
 use crate::abi::{
     ALIVE, CAPACITY, CONFIG_ACTION, FORMAT, Geometry, HostOps, INVALID, LIST, MAX_DEVICES, NAME,
-    NATIVE_ERROR, NOT_FOUND, NativeOps, OK, RUNNING, STREAM_ACTIVE, Snapshot, Timestamp,
+    NATIVE_ERROR, NOT_FOUND, NativeOps, OK, OUTPUT_MUTE, OUTPUT_VOLUME, RUNNING, STREAM_ACTIVE,
+    Snapshot, Timestamp,
 };
 use crate::device::{Attachment, Device, Pending, lock};
 
@@ -30,7 +33,7 @@ pub(crate) struct IoOperation {
     pub stream: u32,
     pub render: bool,
     pub frame: u64,
-    pub samples: *mut f32,
+    pub samples: *mut c_void,
     pub frames: u32,
 }
 
@@ -93,7 +96,9 @@ impl Registry {
         let offset = object.checked_sub(16)?;
         let index = (offset / 16) as usize % MAX_DEVICES;
         let pin = self.pin_slot(index)?;
-        (object >= pin.id && object <= pin.id + 2).then_some(pin)
+        // Device generations reserve a stride of 16: streams use +1/+2 and
+        // native output volume/mute controls use +3/+4 without slot collisions.
+        (object >= pin.id && object <= pin.id + 4).then_some(pin)
     }
 
     fn endpoint(&self, endpoint: [u8; 16]) -> Option<Pin<'_>> {
@@ -192,7 +197,7 @@ impl Registry {
         if control.pending.is_none()
             && unsafe {
                 (device.native.same_transport)(
-                    device.runtime,
+                    device.runtime.load(Ordering::Acquire),
                     attachment.descriptor.as_raw_fd(),
                     attachment.size,
                 )
@@ -213,6 +218,15 @@ impl Registry {
             || device.rate.load(Ordering::Acquire),
             |pending| pending.rate,
         );
+        let formats = control.pending.as_ref().map_or_else(
+            || {
+                [
+                    device.capture_format.format(),
+                    device.render_format.format(),
+                ]
+            },
+            |pending| pending.formats,
+        );
         control.pending = Some(Pending {
             generation,
             requested: false,
@@ -221,6 +235,7 @@ impl Registry {
             attachment: Some(attachment),
             name: name.into(),
             rate,
+            formats,
         });
         control.attachment_failed = false;
         Ok(AttachmentChange::Queued)
@@ -233,12 +248,31 @@ impl Registry {
         };
         let id = device.id;
         let mut control = lock(&device.control);
+        let frozen = device.freeze();
         device.alive.store(false, Ordering::Release);
         control.pending = None;
+        let runtime = device.runtime.swap(std::ptr::null_mut(), Ordering::AcqRel);
+        // SAFETY: control serializes native mutation and freeze drained every
+        // IO reader. Dead devices cannot admit another native runtime access.
+        // Client metadata remains valid for late StopIO/RemoveDeviceClient calls.
+        unsafe {
+            (self.native.destroy)(runtime);
+            device
+                .capture_format
+                .publish(device.capture_format.format(), Box::default());
+            device
+                .render_format
+                .publish(device.render_format.format(), Box::default());
+        }
+        let running = device.running.load(Ordering::Acquire) != 0;
+        drop(frozen);
         drop(control);
         drop(device);
         drop(guard);
         self.host.changed(id, ALIVE);
+        if running {
+            self.host.changed(id, RUNNING);
+        }
         self.host.changed(1, LIST);
         self.reclaim();
         OK
@@ -274,10 +308,11 @@ impl Registry {
         for id in self.devices() {
             let Some(device) = self.pin(id) else { continue };
             let control = lock(&device.control);
-            if control.pending.is_some() {
+            if !device.alive.load(Ordering::Acquire) || control.pending.is_some() {
                 continue;
             }
-            if unsafe { (self.native.requires_replacement)(device.runtime) } {
+            if unsafe { (self.native.requires_replacement)(device.runtime.load(Ordering::Acquire)) }
+            {
                 return Some(device.endpoint);
             }
         }
@@ -287,6 +322,13 @@ impl Registry {
     pub(crate) fn attachment_failed(&self, endpoint: [u8; 16]) -> bool {
         self.endpoint(endpoint)
             .is_some_and(|device| lock(&device.control).attachment_failed)
+    }
+
+    pub(crate) fn attachment_applied(&self, endpoint: [u8; 16]) -> bool {
+        self.endpoint(endpoint).is_some_and(|device| {
+            let control = lock(&device.control);
+            !control.attachment_failed && control.pending.is_none()
+        })
     }
 
     pub(crate) fn client(&self, id: u32, client: u32, add: bool) -> i32 {
@@ -313,10 +355,13 @@ impl Registry {
                     // Its removal releases only that client's runtime claim.
                     let frozen = device.freeze();
                     let count = device.running.load(Ordering::Acquire) - 1;
-                    if count == 0 {
-                        unsafe { (self.native.stop)(device.runtime) };
-                    } else {
-                        unsafe { (self.native.remaining_client)(device.runtime) };
+                    if device.alive.load(Ordering::Acquire) {
+                        let runtime = device.runtime.load(Ordering::Acquire);
+                        if count == 0 {
+                            unsafe { (self.native.stop)(runtime) };
+                        } else {
+                            unsafe { (self.native.remaining_client)(runtime) };
+                        }
                     }
                     device.running.store(count, Ordering::Release);
                     control.clients.remove(&client);
@@ -330,6 +375,9 @@ impl Registry {
         drop(device);
         if stopped {
             self.host.changed(id, RUNNING);
+        }
+        if !add {
+            self.reclaim();
         }
         OK
     }
@@ -353,7 +401,9 @@ impl Registry {
             return CAPACITY;
         }
         let frozen = device.freeze();
-        if count == 0 && !unsafe { (self.native.start)(device.runtime, now) } {
+        if count == 0
+            && !unsafe { (self.native.start)(device.runtime.load(Ordering::Acquire), now) }
+        {
             return NATIVE_ERROR;
         }
         *running = true;
@@ -380,10 +430,13 @@ impl Registry {
         }
         let frozen = device.freeze();
         let count = device.running.load(Ordering::Acquire) - 1;
-        if count == 0 {
-            unsafe { (self.native.stop)(device.runtime) };
-        } else {
-            unsafe { (self.native.remaining_client)(device.runtime) };
+        if device.alive.load(Ordering::Acquire) {
+            let runtime = device.runtime.load(Ordering::Acquire);
+            if count == 0 {
+                unsafe { (self.native.stop)(runtime) };
+            } else {
+                unsafe { (self.native.remaining_client)(runtime) };
+            }
         }
         *running = false;
         device.running.store(count, Ordering::Release);
@@ -397,17 +450,49 @@ impl Registry {
     }
 
     pub(crate) fn set_rate(&self, id: u32, rate: u32) -> i32 {
+        self.queue_configuration(id, rate, None)
+    }
+
+    pub(crate) fn set_format(&self, stream: u32, rate: u32, format: SampleFormat) -> i32 {
+        let Some(device) = self.pin(stream) else {
+            return NOT_FOUND;
+        };
+        let index = if stream == device.id + 1
+            && device.capture_channels.load(Ordering::Acquire) != 0
+        {
+            0
+        } else if stream == device.id + 2 && device.render_channels.load(Ordering::Acquire) != 0 {
+            1
+        } else {
+            return INVALID;
+        };
+        self.queue_configuration(device.id, rate, Some((index, format)))
+    }
+
+    fn queue_configuration(
+        &self,
+        id: u32,
+        rate: u32,
+        requested_format: Option<(usize, SampleFormat)>,
+    ) -> i32 {
         if !crate::formats::SAMPLE_RATES.contains(&rate) {
             return INVALID;
         }
         let Some(device) = self.pin(id).filter(|device| device.id == id) else {
             return NOT_FOUND;
         };
+        let mut control = lock(&device.control);
         if !device.alive.load(Ordering::Acquire) {
             return NOT_FOUND;
         }
-        let mut control = lock(&device.control);
-        if control.pending.is_none() && device.rate.load(Ordering::Acquire) == rate {
+        let current_formats = [
+            device.capture_format.format(),
+            device.render_format.format(),
+        ];
+        if control.pending.is_none()
+            && device.rate.load(Ordering::Acquire) == rate
+            && requested_format.is_none_or(|(index, format)| current_formats[index] == format)
+        {
             return OK;
         }
         let generation = control.next_generation;
@@ -415,10 +500,13 @@ impl Registry {
             return CAPACITY;
         };
         control.next_generation = next;
-        let (attachment, name) = control.pending.take().map_or_else(
-            || (None, control.name.clone()),
-            |pending| (pending.attachment, pending.name),
+        let (attachment, name, mut formats) = control.pending.take().map_or_else(
+            || (None, control.name.clone(), current_formats),
+            |pending| (pending.attachment, pending.name, pending.formats),
         );
+        if let Some((index, format)) = requested_format {
+            formats[index] = format;
+        }
         control.pending = Some(Pending {
             generation,
             requested: false,
@@ -427,6 +515,7 @@ impl Registry {
             attachment,
             name,
             rate,
+            formats,
         });
         drop(control);
         drop(device);
@@ -450,6 +539,49 @@ impl Registry {
         }
         drop(device);
         self.host.changed(stream, STREAM_ACTIVE);
+        OK
+    }
+
+    pub(crate) fn output_control(&self, object: u32) -> Option<(f32, bool)> {
+        let device = self.pin(object)?;
+        (device.render_channels.load(Ordering::Acquire) != 0)
+            .then(|| device.output_control.values())
+    }
+
+    pub(crate) fn set_output_volume(&self, object: u32, scalar: f32) -> i32 {
+        let Some(device) = self.pin(object).filter(|device| {
+            object == device.id + 3
+                && device.alive.load(Ordering::Acquire)
+                && device.render_channels.load(Ordering::Acquire) != 0
+        }) else {
+            return NOT_FOUND;
+        };
+        if crate::output_control::scalar_to_decibels(scalar).is_none() {
+            return INVALID;
+        }
+        let changed = device.output_control.set_scalar(scalar);
+        let id = device.id;
+        drop(device);
+        if changed {
+            self.host.changed(id, OUTPUT_VOLUME);
+        }
+        OK
+    }
+
+    pub(crate) fn set_output_mute(&self, object: u32, muted: bool) -> i32 {
+        let Some(device) = self.pin(object).filter(|device| {
+            object == device.id + 4
+                && device.alive.load(Ordering::Acquire)
+                && device.render_channels.load(Ordering::Acquire) != 0
+        }) else {
+            return NOT_FOUND;
+        };
+        let changed = device.output_control.set_muted(muted);
+        let id = device.id;
+        drop(device);
+        if changed {
+            self.host.changed(id, OUTPUT_MUTE);
+        }
         OK
     }
 
@@ -517,11 +649,13 @@ impl Registry {
             return OK;
         }
         let pending = control.pending.take().expect("matched pending generation");
+        // Allocate bounded directional storage on control, before draining callbacks.
+        let scratch = device.prepare_scratch(&pending);
         let frozen = device.freeze();
         let success = if let Some(attachment) = &pending.attachment {
             unsafe {
                 (self.native.replace)(
-                    device.runtime,
+                    device.runtime.load(Ordering::Acquire),
                     &raw const attachment.geometry,
                     pending.rate,
                     attachment.descriptor.as_raw_fd(),
@@ -529,21 +663,20 @@ impl Registry {
                 )
             }
         } else {
-            unsafe { (self.native.set_rate)(device.runtime, pending.rate) }
+            device.rate.load(Ordering::Acquire) == pending.rate
+                || unsafe {
+                    (self.native.set_rate)(device.runtime.load(Ordering::Acquire), pending.rate)
+                }
         };
         if !success {
             control.attachment_failed = pending.attachment.is_some();
             return NATIVE_ERROR;
         }
-        if let Some(attachment) = &pending.attachment {
-            device
-                .render_channels
-                .store(attachment.geometry.render_channels, Ordering::Release);
-            device
-                .capture_channels
-                .store(attachment.geometry.capture_channels, Ordering::Release);
+        // SAFETY: control and freeze are held, all IO pins are drained, and the native
+        // rate/mapping transition succeeded. Abort/failure never publishes these buffers.
+        unsafe {
+            device.publish_configuration(&pending, scratch);
         }
-        device.rate.store(pending.rate, Ordering::Release);
         let renamed = control.name != pending.name;
         control.name = pending.name;
         drop(frozen);
@@ -609,7 +742,9 @@ impl Registry {
             return false;
         };
         device.alive.load(Ordering::Acquire)
-            && unsafe { (self.native.timestamp)(device.runtime, now, output) }
+            && unsafe {
+                (self.native.timestamp)(device.runtime.load(Ordering::Acquire), now, output)
+            }
     }
 
     pub(crate) unsafe fn io(&self, operation: IoOperation) -> bool {
@@ -646,11 +781,14 @@ impl Registry {
             || device.running.load(Ordering::Acquire) == 0
         {
             if !render {
-                unsafe { std::ptr::write_bytes(samples, 0, frames as usize * channels as usize) };
+                let bytes = frames as usize
+                    * channels as usize
+                    * device.capture_format.format().bytes_per_sample();
+                unsafe { std::ptr::write_bytes(samples.cast::<u8>(), 0, bytes) };
             }
             return true;
         }
-        unsafe { (self.native.io)(device.runtime, render, frame, samples, frames) }
+        unsafe { device.process_io(render, frame, samples, frames) }
     }
 }
 

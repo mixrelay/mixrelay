@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import type {
   ControlPort,
@@ -6,15 +6,13 @@ import type {
   RecorderRequest,
   RecorderStatus,
 } from '../../core/control-port/types';
-import { ActionButton } from '../../core/ui/ActionButton';
 import { NodeOptionsSection } from '../../core/ui/NodeOptionsSection';
 import { useNodeOptionsState } from '../../core/ui/nodeOptionsState';
 import { SelectField } from '../../core/ui/SelectField';
 import { TextField } from '../../core/ui/TextField';
 import { TransportButton } from '../../core/ui/TransportButton';
-import { absoluteRecordingPath, RecorderController, recordingDuration } from './RecorderController';
+import { RecorderController, recordingDuration } from './RecorderController';
 import styles from './RecorderControls.module.css';
-import { useRecordingPath } from './useRecordingPath';
 
 const sampleRates = [44100, 48000, 88200, 96000, 176400, 192000];
 const encodings: { value: RecorderEncoding; label: string }[] = [
@@ -43,15 +41,11 @@ export function RecorderControls(props: {
     return () => controller.dispose();
   }, [controller]);
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot);
-  const picker = useRecordingPath(props.controlPort, snapshot.status);
-  const { path, setPath } = picker;
-  const [sampleRate, setSampleRate] = useState('auto');
-  const [encoding, setEncoding] = useState<RecorderEncoding>('pcm16');
+  const settings = snapshot.settings;
   const { opened: optionsOpened, toggle: toggleOptions } = useNodeOptionsState();
   const locked = snapshot.status?.state === 'recording' || snapshot.status?.state === 'paused';
-  const disabled = snapshot.busy || picker.busy || !snapshot.status || props.poweredOn === false;
-  const fieldsLocked = disabled || locked || !props.enabled;
-  const displayPath = locked ? (snapshot.status?.path ?? '') : path;
+  const disabled = snapshot.busy || !snapshot.status || props.poweredOn === false;
+  const fieldsLocked = disabled || locked || !props.enabled || !settings;
   return (
     <div className={styles.root}>
       <div className={styles.transport}>
@@ -65,18 +59,13 @@ export function RecorderControls(props: {
           {recordingDuration(snapshot.status)}
         </output>
         <RecorderButtons
-          canStart={props.enabled}
+          canStart={props.enabled && !!settings && !snapshot.settingsError}
           disabled={disabled}
           status={snapshot.status}
           command={(request) => controller.command(request, props.expectedRevision)}
-          settings={{
-            path,
-            sampleRate: sampleRate === 'auto' ? null : Number(sampleRate),
-            encoding,
-          }}
         />
       </div>
-      <RecorderError error={snapshot.error ?? picker.error} />
+      <RecorderError error={snapshot.error ?? snapshot.settingsError} />
       <NodeOptionsSection
         disabled={props.poweredOn === false}
         label={t('routing.nodes.options')}
@@ -94,35 +83,54 @@ export function RecorderControls(props: {
           onChange={(value) => props.onChannelsChange(Number(value))}
         />
         <TextField
-          label={t('recorder.path')}
-          value={displayPath}
-          disabled={fieldsLocked}
-          onChange={(event) => setPath(event.currentTarget.value)}
+          label={t('recorder.folder')}
+          value={settings?.folder ?? ''}
+          readOnly
+          classNames={{
+            root: styles.folderField,
+            label: styles.folderLabel,
+            wrapper: styles.folderWrapper,
+            input: styles.folderPath,
+          }}
+          rightSectionWidth={28}
+          rightSectionPointerEvents="auto"
+          rightSection={
+            props.controlPort.selectRecordingFolder ? (
+              <button
+                type="button"
+                className={styles.folderButton}
+                aria-label={t('recorder.chooseFolder')}
+                disabled={fieldsLocked}
+                onClick={() =>
+                  controller.chooseFolder(t('recorder.chooseFolder'), props.expectedRevision)
+                }
+              >
+                <svg aria-hidden="true" viewBox="0 0 20 20">
+                  <path d="M2 6V4h6l2 2h8v3M2 6v11h14l2-8H5l-3 8" />
+                </svg>
+              </button>
+            ) : null
+          }
         />
-        {props.controlPort.selectRecordingPath ? (
-          <ActionButton
-            size="xs"
-            variant="default"
-            disabled={fieldsLocked}
-            onClick={() => picker.choose(t('recorder.choosePath'))}
-          >
-            {t('recorder.choosePath')}
-          </ActionButton>
-        ) : null}
         <SelectField
           label={t('recorder.sampleRate')}
-          value={locked ? String(snapshot.status?.sampleRate ?? 'auto') : sampleRate}
+          value={String((locked ? snapshot.status?.sampleRate : settings?.sampleRate) ?? 'auto')}
           disabled={fieldsLocked}
           data={[
             { value: 'auto', label: t('recorder.sourceRate') },
-            ...recordingRateOptions(snapshot.status?.sampleRate),
+            ...recordingRateOptions(locked ? snapshot.status?.sampleRate : settings?.sampleRate),
           ]}
-          onChange={setSampleRate}
+          onChange={(value) =>
+            controller.saveSettings(
+              { sampleRate: value === 'auto' ? null : Number(value) },
+              props.expectedRevision,
+            )
+          }
         />
         <EncodingField
-          value={locked ? (snapshot.status?.encoding ?? encoding) : encoding}
+          value={(locked ? snapshot.status?.encoding : settings?.encoding) ?? 'pcm16'}
           disabled={fieldsLocked}
-          onChange={setEncoding}
+          onChange={(encoding) => controller.saveSettings({ encoding }, props.expectedRevision)}
         />
       </NodeOptionsSection>
     </div>
@@ -169,13 +177,11 @@ function RecorderButtons({
   disabled,
   status,
   command,
-  settings,
 }: {
   canStart: boolean;
   disabled: boolean;
   status: RecorderStatus | null;
   command: (request: RecorderRequest) => void;
-  settings: { path: string; sampleRate: number | null; encoding: RecorderEncoding };
 }) {
   const { t } = useTranslation();
   const locked = status?.state === 'recording' || status?.state === 'paused';
@@ -185,22 +191,8 @@ function RecorderButtons({
         icon={status?.state === 'paused' ? 'resume' : 'record'}
         label={status?.state === 'paused' ? t('recorder.resume') : t('recorder.record')}
         active={status?.state === 'recording'}
-        disabled={
-          disabled ||
-          status?.state === 'recording' ||
-          (!locked && !canStart) ||
-          (!locked && !absoluteRecordingPath(settings.path))
-        }
-        onClick={() =>
-          command(
-            status?.state === 'paused'
-              ? { action: 'record' }
-              : {
-                  action: 'record',
-                  ...settings,
-                },
-          )
-        }
+        disabled={disabled || status?.state === 'recording' || (!locked && !canStart)}
+        onClick={() => command({ action: 'record' })}
       />
       <TransportButton
         icon="pause"

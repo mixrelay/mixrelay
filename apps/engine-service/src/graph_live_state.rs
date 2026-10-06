@@ -1,19 +1,23 @@
 //! Graph edits carry explicit knob deltas, never an implicit replacement of a live preset.
 //! The UI's whole provider object may predate native-editor edits or a disk checkpoint.
 
-use std::{
-    collections::BTreeSet,
-    time::{Duration, Instant},
-};
+use std::{collections::BTreeSet, time::Duration};
 
 use mixrelay_audio_graph::{GraphDocument, NodeId, ProviderNodeConfig};
 use mixrelay_control_protocol::GraphProcessorParameterChange;
-use mixrelay_processor_host::ProcessorStateError;
+use mixrelay_processor_host::{PROCESSOR_STATE_TIMEOUT, ProcessorStateError};
 
 use super::{
     Catalog, EngineGraphController, ErrorCode, NodeConfig, ProtocolError, invalid, unavailable,
 };
 use crate::graph_composition::runtime_node_id;
+
+/// An explicit edit captures all live state; a retry preserves the failed instance's checkpoint.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum LiveStateIntent<'a> {
+    Edit(&'a [GraphProcessorParameterChange]),
+    Retry(&'a NodeId),
+}
 
 impl EngineGraphController {
     /// Caller owns mutation. Captures the selected graph before candidate preparation.
@@ -34,31 +38,48 @@ impl EngineGraphController {
         &self,
         proposed: &mut GraphDocument,
         changes: &[GraphProcessorParameterChange],
+        capture: impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,
+        writable: impl Fn(&str, u32) -> bool,
+    ) -> Result<(), ProtocolError> {
+        self.preserve_live_processor_state_for(
+            proposed,
+            LiveStateIntent::Edit(changes),
+            capture,
+            writable,
+        )
+    }
+
+    pub(crate) fn preserve_live_processor_state_excluding(
+        &self,
+        proposed: &mut GraphDocument,
+        excluded: &NodeId,
+    ) -> Result<(), ProtocolError> {
+        self.preserve_live_processor_state_for(
+            proposed,
+            LiveStateIntent::Retry(excluded),
+            |id, timeout| self.processor_controls.snapshot_state(id, timeout),
+            |kind, id| self.processor_catalog.parameter_is_writable(kind, id),
+        )
+    }
+
+    pub(crate) fn preserve_live_processor_state_for(
+        &self,
+        proposed: &mut GraphDocument,
+        intent: LiveStateIntent<'_>,
         mut capture: impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,
         writable: impl Fn(&str, u32) -> bool,
     ) -> Result<(), ProtocolError> {
+        let (changes, excluded): (&[GraphProcessorParameterChange], Option<&NodeId>) = match intent
+        {
+            LiveStateIntent::Edit(changes) => (changes, None),
+            LiveStateIntent::Retry(node_id) => (&[], Some(node_id)),
+        };
         let revisions = self.exchange.revisions();
-        if proposed.revision <= revisions.submitted {
-            return Err(ProtocolError {
-                code: ErrorCode::GraphRevisionStale,
-                parameters: serde_json::json!({
-                    "activeRevision": revisions.active,
-                    "submittedRevision": revisions.submitted,
-                    "proposedRevision": proposed.revision,
-                }),
-            });
-        }
-        if revisions.active != revisions.submitted {
-            return Err(ProtocolError {
-                code: ErrorCode::GraphExchangeBusy,
-                parameters: serde_json::json!({"proposedRevision": proposed.revision}),
-            });
-        }
+        validate_capture_revision(proposed.revision, revisions.active, revisions.submitted)?;
         let current = self.graph.read().clone();
         let graph_id = self.view_graph_id();
         let restoring = self.catalog_restore.lock().is_some();
         validate_changes(&current, proposed, changes, writable)?;
-        let deadline = Instant::now() + Duration::from_secs(5);
         let mut candidate = proposed.clone();
         for node in &mut candidate.nodes {
             let NodeConfig::Provider(provider) = &mut node.config else {
@@ -90,18 +111,20 @@ impl EngineGraphController {
                     parameters: serde_json::json!({"nodeId": node.id.as_str(), "reason": "processor worker is unavailable"}),
                 });
             }
-            if self
+            if excluded == Some(&runtime_id) {
+                provider.parameters.clone_from(&previous.parameters);
+            } else if self
                 .execution_enabled
                 .load(std::sync::atomic::Ordering::Acquire)
                 && !unavailable_worker
                 && (!restoring || self.provider_is_running(&runtime_id))
             {
-                let timeout = deadline.saturating_duration_since(Instant::now());
-                if timeout.is_zero() {
-                    return Err(unavailable("processor state snapshot deadline exceeded"));
-                }
                 provider.parameters = self
-                    .capture_node_state((&runtime_id, node.control.enabled), timeout, &mut capture)?
+                    .capture_node_state(
+                        (&runtime_id, node.control.enabled),
+                        PROCESSOR_STATE_TIMEOUT,
+                        &mut capture,
+                    )?
                     .unwrap_or_else(|| previous.parameters.clone());
             } else {
                 provider.parameters.clone_from(&previous.parameters);
@@ -124,21 +147,31 @@ impl EngineGraphController {
         &self,
         candidate: &mut Catalog,
     ) -> Result<(), ProtocolError> {
-        self.preserve_catalog_provider_state_with(candidate, |id, timeout| {
-            self.processor_controls.snapshot_state(id, timeout)
-        })
+        self.preserve_catalog_provider_state_excluding(candidate, None)
     }
 
-    pub(crate) fn preserve_catalog_provider_state_with(
+    pub(crate) fn preserve_catalog_provider_state_excluding(
+        &self,
+        candidate: &mut Catalog,
+        excluded: Option<&NodeId>,
+    ) -> Result<(), ProtocolError> {
+        self.preserve_catalog_provider_state_with_exclusion(
+            candidate,
+            |id, timeout| self.processor_controls.snapshot_state(id, timeout),
+            excluded,
+        )
+    }
+
+    pub(crate) fn preserve_catalog_provider_state_with_exclusion(
         &self,
         candidate: &mut Catalog,
         mut capture: impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,
+        excluded: Option<&NodeId>,
     ) -> Result<(), ProtocolError> {
         let current = self
             .catalog_candidate(&self.graph.read())
             .ok_or_else(|| unavailable("graph catalog is unavailable"))?;
         let selected = current.selected_id();
-        let deadline = Instant::now() + Duration::from_secs(5);
         let mut staged = candidate.clone();
         for (graph_id, document) in staged.documents_mut() {
             if graph_id == selected {
@@ -147,7 +180,12 @@ impl EngineGraphController {
             let Some((_, before)) = current.documents().find(|(id, _)| *id == graph_id) else {
                 continue;
             };
-            self.capture_background_graph((graph_id, document), before, deadline, &mut capture)?;
+            self.capture_background_graph_excluding(
+                (graph_id, document),
+                before,
+                &mut capture,
+                excluded,
+            )?;
         }
         *candidate = staged;
         Ok(())
@@ -157,8 +195,17 @@ impl EngineGraphController {
         &self,
         graph: (&str, &mut GraphDocument),
         before: &GraphDocument,
-        deadline: Instant,
         capture: &mut impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,
+    ) -> Result<(), ProtocolError> {
+        self.capture_background_graph_excluding(graph, before, capture, None)
+    }
+
+    fn capture_background_graph_excluding(
+        &self,
+        graph: (&str, &mut GraphDocument),
+        before: &GraphDocument,
+        capture: &mut impl FnMut(&NodeId, Duration) -> Result<serde_json::Value, ProcessorStateError>,
+        excluded: Option<&NodeId>,
     ) -> Result<(), ProtocolError> {
         let (graph_id, document) = graph;
         for node in &mut document.nodes {
@@ -166,6 +213,9 @@ impl EngineGraphController {
                 continue;
             };
             let runtime_id = runtime_node_id(graph_id, &node.id);
+            if excluded == Some(&runtime_id) {
+                continue;
+            }
             if provider.ports.is_some() && !self.processor_controls.has_worker(&runtime_id) {
                 continue;
             }
@@ -176,13 +226,11 @@ impl EngineGraphController {
             if !running || !same_provider {
                 continue;
             }
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return Err(unavailable("processor state snapshot deadline exceeded"));
-            }
-            if let Some(parameters) =
-                self.capture_node_state((&runtime_id, node.control.enabled), remaining, capture)?
-            {
+            if let Some(parameters) = self.capture_node_state(
+                (&runtime_id, node.control.enabled),
+                PROCESSOR_STATE_TIMEOUT,
+                capture,
+            )? {
                 provider.parameters = parameters;
             }
         }
@@ -217,6 +265,30 @@ impl EngineGraphController {
             ))),
         }
     }
+}
+
+fn validate_capture_revision(
+    proposed: u64,
+    active: u64,
+    submitted: u64,
+) -> Result<(), ProtocolError> {
+    if proposed <= submitted {
+        return Err(ProtocolError {
+            code: ErrorCode::GraphRevisionStale,
+            parameters: serde_json::json!({
+                "activeRevision": active,
+                "submittedRevision": submitted,
+                "proposedRevision": proposed,
+            }),
+        });
+    }
+    if active != submitted {
+        return Err(ProtocolError {
+            code: ErrorCode::GraphExchangeBusy,
+            parameters: serde_json::json!({"proposedRevision": proposed}),
+        });
+    }
+    Ok(())
 }
 
 fn provider_at<'a>(document: &'a GraphDocument, id: &str) -> Option<&'a ProviderNodeConfig> {

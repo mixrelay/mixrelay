@@ -10,7 +10,11 @@ use std::{
 struct TemporaryNativeFailure(std::sync::atomic::AtomicUsize);
 
 impl crate::GraphResourceBackend for TemporaryNativeFailure {
-    fn reconcile(&self, _: &GraphDocument) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
+    fn reconcile(
+        &self,
+        _: &GraphDocument,
+        _: crate::PlaybackBindings<'_>,
+    ) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
         if self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
             return Err(mixrelay_audio_io::HostAudioBackendError::BackendFailure {
                 message: "injected initialization timeout".into(),
@@ -235,7 +239,7 @@ fn restored_pid_graph_can_be_edited_and_saved_through_controller() {
         panic!("saved gain node");
     };
     gain.gain_db = -12.0;
-    engine.apply_graph(edited.clone()).unwrap();
+    engine.apply_graph_request(edited.clone().into()).unwrap();
     assert_eq!(engine.graph(), edited);
     let saved = Catalog::load(&fixture.path).unwrap().unwrap();
     assert_eq!(saved.active().document.nodes, edited.nodes);
@@ -245,7 +249,11 @@ fn restored_pid_graph_can_be_edited_and_saved_through_controller() {
 struct FixtureApplicationIdentities;
 
 impl crate::GraphResourceBackend for FixtureApplicationIdentities {
-    fn reconcile(&self, _: &GraphDocument) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
+    fn reconcile(
+        &self,
+        _: &GraphDocument,
+        _: crate::PlaybackBindings<'_>,
+    ) -> Result<(), mixrelay_audio_io::HostAudioBackendError> {
         Ok(())
     }
 

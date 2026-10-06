@@ -28,18 +28,30 @@ const graph: RuntimeGraphDocument = {
 
 const controlPort = new StorybookMockControlPort({
   applications: [
-    { bundleId: 'org.mozilla.firefox', displayName: 'Firefox', iconDataUrl: null, processId: 1001 },
+    {
+      bundleId: 'org.mozilla.firefox',
+      displayName: 'Firefox',
+      iconDataUrl: null,
+      processId: 1001,
+      selector: { match: 'bundle_id', bundle_id: 'org.mozilla.firefox', include_descendants: false },
+    },
     {
       bundleId: 'com.google.Chrome',
       displayName: 'Google Chrome',
       iconDataUrl: null,
       processId: 1002,
+      selector: { match: 'bundle_id', bundle_id: 'com.google.Chrome', include_descendants: false },
     },
     {
       bundleId: 'com.obsproject.obs-studio',
       displayName: 'OBS',
       iconDataUrl: null,
       processId: 1003,
+      selector: {
+        match: 'bundle_id',
+        bundle_id: 'com.obsproject.obs-studio',
+        include_descendants: false,
+      },
     },
   ],
   audioDevices: [
@@ -96,6 +108,9 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Default: Story = {};
+export const ShortcutTextEditingAcceptance: Story = {
+  name: 'Release acceptance · shortcut preserves text editing',
+};
 export const MobileNarrow: Story = {
   parameters: { viewport: { defaultViewport: 'mobile' } },
 };

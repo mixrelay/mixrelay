@@ -8,6 +8,38 @@ fi
 
 repo_root="${0:A:h:h}"
 
+product="app"
+if (( $# == 1 )) && [[ "$1" == "--driver" ]]; then
+  product="driver"
+elif (( $# != 0 )); then
+  print -u2 "Usage: scripts/build-macos-universal-app.sh [--driver]"
+  exit 1
+fi
+if [[ -n "${MIXRELAY_CODESIGN_IDENTITY:-}" && -n "${APPLE_SIGNING_IDENTITY:-}" &&
+      "${MIXRELAY_CODESIGN_IDENTITY}" != "${APPLE_SIGNING_IDENTITY}" ]]; then
+  print -u2 "MIXRELAY_CODESIGN_IDENTITY conflicts with APPLE_SIGNING_IDENTITY"
+  exit 1
+fi
+if [[ -n "${MIXRELAY_CODESIGN_IDENTITY:-}" ]]; then
+  export APPLE_SIGNING_IDENTITY="$MIXRELAY_CODESIGN_IDENTITY"
+fi
+if [[ "${APPLE_SIGNING_IDENTITY:-}" != "Developer ID Application: "* ]]; then
+  print -u2 "A Developer ID Application signing identity is required for a release bundle"
+  exit 1
+fi
+if [[ "$product" == "driver" ]]; then
+  if [[ ! "$APPLE_SIGNING_IDENTITY" =~ '\(([A-Z0-9]{10})\)$' ]]; then
+    print -u2 "Driver signing identity must contain its ten-character Apple Team ID"
+    exit 1
+  fi
+  signing_team="${match[1]}"
+fi
+if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+  print -u2 "Unset CARGO_TARGET_DIR for the checked universal app build"
+  exit 1
+fi
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
+
 if [[ -z "${DEVELOPER_DIR:-}" ]]; then
   selected_developer_dir="$(xcode-select -p 2>/dev/null || true)"
   if [[ "$selected_developer_dir" == *".app/Contents/Developer" ]]; then
@@ -38,15 +70,174 @@ export CC_x86_64_apple_darwin="$compiler"
 export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="$compiler"
 export CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER="$compiler"
 
-cd "$repo_root"
-pnpm --filter @mixrelay/desktop tauri build \
-  --bundles app \
-  --target universal-apple-darwin
-
 app_bundle="$repo_root/target/universal-apple-darwin/release/bundle/macos/MixRelay.app"
-if [[ ! -d "$app_bundle" ]]; then
+if [[ "$product" == "driver" ]]; then
+  app_bundle="$repo_root/target/universal-apple-darwin/release/bundle/macos/MixRelayDriver.app"
+fi
+bundle_parent="${app_bundle:h}"
+backup_root=""
+backup_bundle=""
+old_bundle_moved=0
+build_started=0
+
+reject_symlink_components() {
+  local path="$1"
+  local current="/"
+  local component
+  local -a components
+  components=("${(@s:/:)path}")
+  for component in "${components[@]}"; do
+    [[ -z "$component" ]] && continue
+    current="${current%/}/$component"
+    if [[ -L "$current" ]]; then
+      print -u2 "Refusing symlink path component: $current"
+      return 1
+    fi
+    [[ -e "$current" ]] || break
+  done
+}
+
+cleanup() {
+  local exit_code=$?
+  local cleanup_failed=0
+  trap - EXIT
+  set +e
+
+  if (( exit_code == 0 )); then
+    if [[ -n "$backup_root" && -e "$backup_root" ]]; then
+      if ! rm -rf "$backup_root"; then
+        print -u2 "Could not remove the release backup; preserving it at $backup_root"
+        cleanup_failed=1
+      fi
+    fi
+    (( cleanup_failed == 0 )) || exit_code=1
+    exit "$exit_code"
+  fi
+
+  if (( old_bundle_moved )); then
+    if [[ -e "$app_bundle" || -L "$app_bundle" ]]; then
+      rm -rf "$app_bundle"
+    fi
+    if [[ -e "$app_bundle" || -L "$app_bundle" ]]; then
+      print -u2 "Could not remove the failed new app output; preserving recovery backup at $backup_root"
+      exit 1
+    fi
+    if [[ -e "$backup_bundle" || -L "$backup_bundle" ]]; then
+      if ! mv "$backup_bundle" "$app_bundle"; then
+        print -u2 "Could not restore the previous app; preserving recovery backup at $backup_root"
+        exit 1
+      fi
+    else
+      print -u2 "Previous app backup is missing; preserving recovery directory at $backup_root"
+      exit 1
+    fi
+    if [[ -e "$backup_root" ]] && ! rm -rf "$backup_root"; then
+      print -u2 "Could not remove the restored app backup directory; preserving it at $backup_root"
+      exit 1
+    fi
+  else
+    if [[ -n "$backup_root" && -e "$backup_root" ]]; then
+      rm -rf "$backup_root"
+    fi
+    if (( build_started )) && [[ -e "$app_bundle" || -L "$app_bundle" ]]; then
+      rm -rf "$app_bundle"
+    fi
+  fi
+  exit "$exit_code"
+}
+
+trap cleanup EXIT
+reject_symlink_components "$bundle_parent"
+if [[ -L "$app_bundle" ]]; then
+  print -u2 "Expected app bundle must not be a symlink: $app_bundle"
+  exit 1
+fi
+if [[ -e "$app_bundle" || -d "$app_bundle" ]]; then
+  if [[ ! -d "$app_bundle" ]]; then
+    print -u2 "Expected app bundle must be a directory: $app_bundle"
+    exit 1
+  fi
+  if [[ -n "$(find "$app_bundle" -type l -print -quit)" ]]; then
+    print -u2 "Expected app bundle must not contain symlinks: $app_bundle"
+    exit 1
+  fi
+  backup_root="$(mktemp -d "$bundle_parent/.mixrelay-universal-app-backup.XXXXXX")"
+  backup_bundle="$backup_root/${app_bundle:t}"
+  if ! mv "$app_bundle" "$backup_bundle"; then
+    print -u2 "Could not move the previous app bundle to its private backup"
+    exit 1
+  fi
+  old_bundle_moved=1
+fi
+
+cd "$repo_root"
+build_started=1
+if [[ "$product" == "driver" ]]; then
+  for target in aarch64-apple-darwin x86_64-apple-darwin; do
+    cargo build -p mixrelay-macos-installer --release --target "$target" \
+      --bin mixrelay-driver-uninstaller --bin mixrelay-macos-installer \
+      --bin mixrelay-macos-payload-check
+  done
+  helper_output="$repo_root/target/universal-apple-darwin/release"
+  mkdir -p "$helper_output"
+  for helper in mixrelay-driver-uninstaller mixrelay-macos-installer mixrelay-macos-payload-check; do
+    reject_symlink_components "$helper_output/$helper"
+    xcrun lipo -create \
+      "$repo_root/target/aarch64-apple-darwin/release/$helper" \
+      "$repo_root/target/x86_64-apple-darwin/release/$helper" \
+      -output "$helper_output/$helper"
+    architectures="$(xcrun lipo -archs "$helper_output/$helper")"
+    if [[ "$architectures" != "arm64 x86_64" && "$architectures" != "x86_64 arm64" ]]; then
+      print -u2 "Driver helper must contain exactly arm64 and x86_64: $helper ($architectures)"
+      exit 1
+    fi
+    codesign --force --sign "$APPLE_SIGNING_IDENTITY" --options runtime \
+      --timestamp --identifier "$helper" "$helper_output/$helper"
+    codesign --verify --strict --all-architectures "$helper_output/$helper"
+  done
+  pnpm --filter @mixrelay/desktop tauri build \
+    --config src-tauri/tauri.driver.conf.json \
+    --bundles app --target universal-apple-darwin
+else
+  pnpm --filter @mixrelay/desktop tauri build \
+    --bundles app --target universal-apple-darwin
+fi
+
+if [[ -L "$app_bundle" || ! -d "$app_bundle" ]]; then
   print -u2 "Expected app bundle was not produced: $app_bundle"
   exit 1
+fi
+if [[ -n "$(find "$app_bundle" -type l -print -quit)" ]]; then
+  print -u2 "Produced app bundle must not contain symlinks: $app_bundle"
+  exit 1
+fi
+
+if [[ "$product" == "driver" ]]; then
+  uninstaller_app="$app_bundle/Contents/Helpers/Uninstall MixRelay Driver.app"
+  mkdir -p "$uninstaller_app/Contents/MacOS" "$uninstaller_app/Contents/Resources"
+  cp "$helper_output/mixrelay-driver-uninstaller" "$uninstaller_app/Contents/MacOS/mixrelay-driver-uninstaller"
+  cp "$helper_output/mixrelay-macos-installer" "$uninstaller_app/Contents/Resources/mixrelay-macos-installer"
+  cp "$repo_root/LICENSE-Driver.txt" "$repo_root/CHANGELOG.md" "$uninstaller_app/Contents/Resources/"
+  cp "$repo_root/apps/desktop/src-tauri/icons/icon.icns" "$uninstaller_app/Contents/Resources/icon.icns"
+  app_version="$(plutil -extract CFBundleShortVersionString raw -o - "$app_bundle/Contents/Info.plist")"
+  uninstaller_plist="$uninstaller_app/Contents/Info.plist"
+  plutil -create xml1 "$uninstaller_plist"
+  plutil -insert CFBundleIdentifier -string io.mixrelay.driver.uninstaller "$uninstaller_plist"
+  plutil -insert CFBundleName -string "Uninstall MixRelay Driver" "$uninstaller_plist"
+  plutil -insert CFBundleDisplayName -string "Uninstall MixRelay Driver" "$uninstaller_plist"
+  plutil -insert CFBundleExecutable -string mixrelay-driver-uninstaller "$uninstaller_plist"
+  plutil -insert CFBundlePackageType -string APPL "$uninstaller_plist"
+  plutil -insert CFBundleShortVersionString -string "$app_version" "$uninstaller_plist"
+  plutil -insert CFBundleVersion -string "$app_version" "$uninstaller_plist"
+  plutil -insert CFBundleIconFile -string icon.icns "$uninstaller_plist"
+  plutil -insert LSMinimumSystemVersion -string "$MACOSX_DEPLOYMENT_TARGET" "$uninstaller_plist"
+  plutil -insert NSHighResolutionCapable -bool YES "$uninstaller_plist"
+  plutil -insert MixRelaySigningTeam -string "$signing_team" "$uninstaller_plist"
+  codesign --force --sign "$APPLE_SIGNING_IDENTITY" --options runtime --timestamp \
+    --identifier io.mixrelay.driver.uninstaller "$uninstaller_app"
+  codesign --verify --deep --strict --all-architectures "$uninstaller_app"
+  codesign --force --sign "$APPLE_SIGNING_IDENTITY" --preserve-metadata=entitlements,flags,runtime \
+    --timestamp "$app_bundle"
 fi
 
 mach_o_count=0
@@ -69,6 +260,11 @@ done < <(find "$app_bundle" -type f -print0)
 
 if (( mach_o_count == 0 )); then
   print -u2 "No Mach-O executable was found in $app_bundle"
+  exit 1
+fi
+
+if ! codesign --verify --deep --strict "$app_bundle" 2>/dev/null; then
+  print -u2 "Universal app is not fully signed; Tauri signing must produce a valid nested signature"
   exit 1
 fi
 

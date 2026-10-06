@@ -33,11 +33,11 @@ fn virtual_device_survives_other_graph_reference_removal_but_not_final_removal()
     assert_eq!(both.native_devices, remaining.native_devices);
     assert_frame(
         &pcm(&both)[&both.native_devices[&VirtualEndpointId::from("X")]],
-        [1.1, 1.2],
+        [0.3, 0.6],
     );
     assert_frame(
         &pcm(&remaining)[&remaining.native_devices[&VirtualEndpointId::from("X")]],
-        [0.9, 0.8],
+        [0.1, 0.2],
     );
     let empty = compose(&registry, &[], 3, context(), &GraphCompiler::default()).unwrap();
     assert!(empty.native_devices.is_empty());

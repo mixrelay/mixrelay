@@ -17,7 +17,7 @@ case "$ID" in
     fi
     apt-get "${apt_options[@]}" update
     apt-get "${apt_options[@]}" install -y --no-install-recommends \
-      build-essential ca-certificates clang libclang-rt-dev cmake curl git pkg-config \
+      build-essential ca-certificates clang libclang-rt-dev cmake curl git pkg-config rsync ripgrep \
       libasound2-dev liblilv-dev libpipewire-0.3-dev libssl-dev \
       libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
       librsvg2-dev libx11-dev libxrandr-dev libxi-dev \
@@ -25,7 +25,7 @@ case "$ID" in
     ;;
   arch)
     pacman -Syu --noconfirm --needed \
-      base-devel ca-certificates clang compiler-rt cmake curl git pkgconf openssl \
+      base-devel ca-certificates clang compiler-rt cmake curl git pkgconf openssl rsync ripgrep \
       alsa-lib lilv pipewire wireplumber gtk3 webkit2gtk-4.1 \
       libayatana-appindicator librsvg libx11 libxrandr libxi \
       dbus xorg-server-xvfb xorg-xauth

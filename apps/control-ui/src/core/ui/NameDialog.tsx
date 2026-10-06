@@ -10,6 +10,7 @@ export function NameDialog({
   enabled,
   onCancel,
   onCreate,
+  error,
 }: {
   title: string;
   initialName: string;
@@ -18,6 +19,7 @@ export function NameDialog({
   enabled: boolean;
   onCancel: () => void;
   onCreate: (name: string) => void;
+  error?: string | null;
 }) {
   const [name, setName] = useState(initialName);
   return (
@@ -39,6 +41,7 @@ export function NameDialog({
         <ActionButton type="submit" mt="md" disabled={!enabled || !name.trim()}>
           {createLabel}
         </ActionButton>
+        {error ? <p role="alert">{error}</p> : null}
       </form>
     </Modal>
   );

@@ -7,11 +7,102 @@ import {
   runtimeGraphToAudioGraph,
   updateVirtualEndpoint,
 } from './model';
-import { duplexReference, virtualPolicy, virtualSpec } from './virtualEndpointFixtures';
+import {
+  duplexReference,
+  unknownNativeFormats,
+  virtualPolicy,
+  virtualSpec,
+} from './virtualEndpointFixtures';
 
 const empty: RuntimeGraphDocument = { schemaVersion: 2, revision: 1, nodes: [], edges: [] };
 const spec = virtualSpec;
 const policy = virtualPolicy;
+
+it.each([1, 32, 64])('applies advertised channel widths through 64: %i', (channels) => {
+  const model = addRoutingNode(
+    runtimeGraphToAudioGraph(empty),
+    { kind: 'virtual_input', spec },
+    { x: 0, y: 0 },
+    undefined,
+    policy,
+  );
+  const changed = updateVirtualEndpoint(
+    model,
+    'virtual-1::host-source',
+    { displayName: spec.displayName, renderChannels: channels, captureChannels: channels },
+    undefined,
+    policy,
+  );
+  expect(audioGraphToRuntimeGraph(changed, empty).nodes[0]?.config).toMatchObject({
+    render: { channels },
+    capture: { channels },
+  });
+});
+
+it.each([
+  [0, 16],
+  [65, 16],
+  [64, 0],
+  [64, 65],
+])('refuses unadvertised channel widths: %i/%i', (renderChannels, captureChannels) => {
+  const model = addRoutingNode(
+    runtimeGraphToAudioGraph(empty),
+    { kind: 'virtual_input', spec },
+    { x: 0, y: 0 },
+    undefined,
+    policy,
+  );
+  expect(
+    updateVirtualEndpoint(
+      model,
+      'virtual-1::host-source',
+      { displayName: spec.displayName, renderChannels, captureChannels },
+      undefined,
+      policy,
+    ),
+  ).toBe(model);
+});
+
+it('preserves saved 16-channel capture/source and 64-channel render/sink cables when presenting device settings', () => {
+  const document: RuntimeGraphDocument = {
+    ...empty,
+    nodes: [
+      {
+        id: 'virtual-1',
+        label: null,
+        type: 'virtual_endpoint',
+        config: { ...spec, reference: duplexReference },
+      },
+    ],
+    edges: [
+      {
+        id: 'channel-16-to-64',
+        source: { nodeId: 'virtual-1', portId: 'from_os' },
+        destination: { nodeId: 'virtual-1', portId: 'to_os' },
+        channelMapping: {
+          mode: 'explicit',
+          routes: [{ sourceChannel: 15, destinationChannel: 63 }],
+        },
+      },
+    ],
+  };
+  const model = runtimeGraphToAudioGraph(document);
+  const presented = presentVirtualEndpointSettings(model, policy);
+  const source = presented.nodes.find((node) => node.outputPorts.length);
+  expect(source?.outputPorts).toHaveLength(16);
+  expect(source?.appearance.meterBanks).toEqual([
+    { channels: 16, nodeId: 'virtual-1', portId: 'from_os' },
+  ]);
+  expect(source?.appearance.endpointControl).toMatchObject({
+    renderChannels: 64,
+    allowedRenderChannels: policy.renderChannels,
+    allowedCaptureChannels: policy.captureChannels,
+  });
+  expect(presented.edges).toEqual(model.edges);
+  expect(presented.revision).toBe(model.revision);
+  expect(audioGraphToRuntimeGraph(presented, document)).toEqual(document);
+});
+
 function observed(
   settings: VirtualEndpointSettings,
   value: number | null,
@@ -22,6 +113,7 @@ function observed(
     devices: [
       {
         nativeDeviceIds: [],
+        nativeFormats: unknownNativeFormats,
         spec,
         observedSampleRate: value,
         supportedSampleRates: [44100, 48000],
@@ -186,6 +278,7 @@ it.each([null, 0, Number.NaN, 48000])(
       devices: [
         {
           nativeDeviceIds: [],
+          nativeFormats: unknownNativeFormats,
           spec: { ...spec, id: 'another-device' },
           observedSampleRate: 48000,
           canSetSampleRate: true,
@@ -235,10 +328,10 @@ it.each(Array.from({ length: 64 }, (_, index) => index + 1))(
     });
     const reloaded = runtimeGraphToAudioGraph(serialized);
     expect(reloaded.nodes.find((node) => node.outputPorts.length)?.outputPorts).toHaveLength(
-      Math.max(channels, 65 - channels),
+      65 - channels,
     );
     expect(reloaded.nodes.find((node) => node.inputPorts.length)?.inputPorts).toHaveLength(
-      65 - channels,
+      channels,
     );
   },
 );
@@ -290,8 +383,8 @@ it.each(['virtual_input', 'virtual_output'] as const)(
       id: 'virtual-1',
       config: spec,
     });
-    expect(both.nodes.find((node) => node.outputPorts.length)?.outputPorts).toHaveLength(64);
-    expect(both.nodes.find((node) => node.inputPorts.length)?.inputPorts).toHaveLength(16);
+    expect(both.nodes.find((node) => node.outputPorts.length)?.outputPorts).toHaveLength(16);
+    expect(both.nodes.find((node) => node.inputPorts.length)?.inputPorts).toHaveLength(64);
     expect(addRoutingNode(both, { kind, spec }, { x: 0, y: 0 }, undefined, policy)).toBe(both);
   },
 );
@@ -422,12 +515,14 @@ it('keeps valid cables when reducing a configurable endpoint channel count', () 
   const output = both.nodes.find((node) => node.outputPorts.length);
   const input = both.nodes.find((node) => node.inputPorts.length);
   if (!output || !input) throw new Error('fixture requires both directions');
+  expect(output.outputPorts).toHaveLength(16);
+  expect(input.inputPorts).toHaveLength(64);
   const edges = [0, 63].map((channel) => ({
     id: `cable-${channel}`,
     sourceNodeId: output.id,
-    sourcePortId: output.outputPorts[channel]?.id ?? '',
+    sourcePortId: output.outputPorts[0]?.id ?? '',
     targetNodeId: input.id,
-    targetPortId: input.inputPorts[0]?.id ?? '',
+    targetPortId: input.inputPorts[channel]?.id ?? '',
   }));
   const updated = updateVirtualEndpoint(
     { ...both, edges },

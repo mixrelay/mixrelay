@@ -17,15 +17,19 @@ base64.workspace = true
 memmap2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# Stable bus topology identities across disposable probe and worker processes.
+sha2 = "0.10.9"
+# Typed preparation failures; error formatting stays outside the audio callback.
+thiserror.workspace = true
+# Native editor lifecycle diagnostics, emitted only on the worker's control thread.
+tracing = "0.1.41"
 mixrelay-audio-engine = { path = "../audio-engine" }
 mixrelay-audio-graph = { path = "../audio-graph" }
 mixrelay-control-protocol = { path = "../control-protocol" }
+mixrelay-processor-state = { path = "../processor-state" }
 truce-rack-clap.workspace = true
 truce-rack-core.workspace = true
 truce-rack-vst3.workspace = true
-
-[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
-tao.workspace = true
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 truce-rack-au.workspace = true
@@ -35,10 +39,15 @@ truce-rack-au3.workspace = true
 truce-rack-lv2.workspace = true
 x11-dl.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+# Immediate isolated-worker exit must not enter stalled vendor atexit handlers.
+libc = "0.2.189"
+
 [dev-dependencies]
 # Assert that channel-reference assembly stays allocation-free during processing.
 allocation-counter = "0.8.1"
 mixrelay-test-support = { path = "../test-support" }
+tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Main-thread-owned native UI surfaces and timers; no plug-in objects cross processes.

@@ -1,6 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { recordingFileName } from './recordingFileName';
 
 import {
   type AudioDeviceDescriptor,
@@ -17,12 +16,15 @@ import {
   type GraphRuntimeStatus,
   type MeterSnapshot,
   type MixRelayStatus,
+  type NodeControlResponse,
   type ProcessorEditorFrame,
   type ProcessorEditorInput,
   type ProcessorEditorStatus,
   type ProcessorParameterUpdateResponse,
+  type ProcessorRetryRequest,
   type ProtocolErrorBody,
   type RecorderRequest,
+  type RecorderSettings,
   type RecorderStatus,
   type RuntimeGraphDocument,
   type VirtualEndpointFormatRequest,
@@ -43,7 +45,7 @@ export class TauriControlPort implements ControlPort {
     graphId: string,
     nodeId: string,
     request: import('./types').NodeControlRequest,
-  ): Promise<GraphApplyResponse> {
+  ): Promise<NodeControlResponse> {
     return this.call('control_update_node_control', { graphId, nodeId, request });
   }
   public setEnginePower(enabled: boolean): Promise<GraphApplyResponse> {
@@ -69,13 +71,29 @@ export class TauriControlPort implements ControlPort {
       throw new ControlPortError(response.status, response.body as ProtocolErrorBody);
     return response.body as GraphCatalog;
   }
-  public async defaultRecordingPath(): Promise<string> {
+  public async recordingSettings(graphId: string, nodeId: string): Promise<RecorderSettings> {
     try {
-      return await this.invokeCommand<string>('default_recording_path', {
-        fileName: recordingFileName(),
+      return await this.invokeCommand<RecorderSettings>('recording_settings', { graphId, nodeId });
+    } catch (error) {
+      throw invocationError('recording_settings', error);
+    }
+  }
+
+  public async setRecordingSettings(
+    graphId: string,
+    nodeId: string,
+    settings: RecorderSettings,
+    expectedRevision: number,
+  ): Promise<RecorderSettings> {
+    try {
+      return await this.invokeCommand<RecorderSettings>('save_recording_settings', {
+        graphId,
+        nodeId,
+        settings,
+        expectedRevision,
       });
     } catch (error) {
-      throw invocationError('default_recording_path', error);
+      throw invocationError('save_recording_settings', error);
     }
   }
 
@@ -96,14 +114,14 @@ export class TauriControlPort implements ControlPort {
     });
   }
 
-  public async selectRecordingPath(options: {
+  public async selectRecordingFolder(options: {
     defaultPath?: string;
     title?: string;
   }): Promise<string | null> {
     try {
-      return await this.invokeCommand<string | null>('select_recording_path', options);
+      return await this.invokeCommand<string | null>('select_recording_folder', options);
     } catch (error) {
-      throw invocationError('select_recording_path', error);
+      throw invocationError('select_recording_folder', error);
     }
   }
 
@@ -156,6 +174,10 @@ export class TauriControlPort implements ControlPort {
 
   public getProcessors(): Promise<ExternalProcessorCatalog> {
     return this.call('control_get_processors');
+  }
+
+  public retryProcessor(request: ProcessorRetryRequest): Promise<GraphApplyResponse> {
+    return this.call('control_retry_processor', { request });
   }
 
   public getProcessorEditor(nodeId: string): Promise<ProcessorEditorStatus> {

@@ -392,7 +392,7 @@ mod tests {
         });
         let state = control.snapshot_state(Duration::from_secs(2));
         worker.join().unwrap();
-        assert_eq!(state.unwrap(), serde_json::json!({ "stateBase64": "Ag==" }));
+        assert_eq!(state.unwrap(), vec![2]);
     }
 
     #[test]

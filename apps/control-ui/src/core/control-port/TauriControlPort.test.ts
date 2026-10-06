@@ -21,6 +21,23 @@ it('forwards graph-scoped node power/mute with a captured revision', async () =>
   });
 });
 
+it('forwards explicit processor retry identity and both revision fences over Tauri', async () => {
+  const invoke = vi.fn().mockResolvedValue({
+    status: 202,
+    body: { protocolVersion: 1, revision: 4, state: 'pending' },
+  });
+  const port = new TauriControlPort(invoke);
+  const request = {
+    expectedCatalogRevision: 6,
+    expectedInstanceId: '18446744073709551615',
+    expectedRevision: 3,
+    graphId: 'graph-a',
+    nodeId: 'provider-a',
+  };
+  await expect(port.retryProcessor(request)).resolves.toMatchObject({ revision: 4 });
+  expect(invoke).toHaveBeenCalledExactlyOnceWith('control_retry_processor', { request });
+});
+
 it.each(['device-a', 'device-b'])(
   'forwards the %s rate change without rewriting the graph document',
   async (endpointId) => {
@@ -39,27 +56,39 @@ it.each(['device-a', 'device-b'])(
 );
 
 describe('TauriControlPort', () => {
-  it('resolves a fresh desktop filename through the interactive native session', async () => {
-    const invoke = vi.fn().mockResolvedValue('/Users/test/Desktop/take.wav');
+  it('loads and saves canonical recorder settings without filename generation', async () => {
+    const settings = {
+      folder: '/Users/test/Desktop',
+      sampleRate: null,
+      encoding: 'pcm16' as const,
+    };
+    const invoke = vi.fn().mockResolvedValue(settings);
     const port = new TauriControlPort(invoke);
-    await expect(port.defaultRecordingPath()).resolves.toBe('/Users/test/Desktop/take.wav');
-    expect(invoke).toHaveBeenCalledExactlyOnceWith('default_recording_path', {
-      fileName: expect.stringMatching(/^MixRelay-\d{4}-\d{2}-\d{2}_.*\.wav$/),
+    await expect(port.recordingSettings('graph-a', 'take-b')).resolves.toEqual(settings);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('recording_settings', {
+      graphId: 'graph-a',
+      nodeId: 'take-b',
+    });
+    await expect(port.setRecordingSettings('graph-a', 'take-b', settings, 3)).resolves.toEqual(
+      settings,
+    );
+    expect(invoke).toHaveBeenLastCalledWith('save_recording_settings', {
+      graphId: 'graph-a',
+      nodeId: 'take-b',
+      settings,
+      expectedRevision: 3,
     });
     invoke.mockRejectedValueOnce('Desktop unavailable');
-    await expect(port.defaultRecordingPath()).rejects.toMatchObject({
+    await expect(port.recordingSettings('graph-a', 'take-b')).rejects.toMatchObject({
       body: { code: 'control_request_failed', parameters: { reason: 'Desktop unavailable' } },
     });
   });
-  it('forwards recorder status/actions and the native WAV picker without graph writes', async () => {
+  it('forwards action-only recorder controls and native folder selection without graph writes', async () => {
     const invoke = vi.fn().mockResolvedValue({ status: 200, body: { state: 'stopped' } });
     const port = new TauriControlPort(invoke);
     await port.recorderStatus('graph-a', 'take-b');
     const request = {
       action: 'record' as const,
-      path: '/take.wav',
-      sampleRate: null,
-      encoding: 'float32' as const,
     };
     await port.controlRecorder('graph-a', 'take-b', request, 3);
     expect(invoke).toHaveBeenNthCalledWith(1, 'control_get_recorder_status', {
@@ -71,13 +100,13 @@ describe('TauriControlPort', () => {
       nodeId: 'take-b',
       request: { expectedRevision: 3, request },
     });
-    invoke.mockResolvedValueOnce('/chosen.wav');
+    invoke.mockResolvedValueOnce('/chosen');
     await expect(
-      port.selectRecordingPath({ defaultPath: '/take.wav', title: 'Choose file' }),
-    ).resolves.toBe('/chosen.wav');
-    expect(invoke).toHaveBeenLastCalledWith('select_recording_path', {
-      defaultPath: '/take.wav',
-      title: 'Choose file',
+      port.selectRecordingFolder({ defaultPath: '/Desktop', title: 'Choose folder' }),
+    ).resolves.toBe('/chosen');
+    expect(invoke).toHaveBeenLastCalledWith('select_recording_folder', {
+      defaultPath: '/Desktop',
+      title: 'Choose folder',
     });
   });
   it('forwards layout without submitting the audio document', async () => {

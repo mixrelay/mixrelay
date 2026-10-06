@@ -31,13 +31,9 @@ fn reply<T: serde::Serialize>(
     match result {
         Ok(Ok(value)) => (StatusCode::OK, Json(value)).into_response(),
         Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
-        Err(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ProtocolError {
-                code: ErrorCode::ControlUnavailable,
-                parameters: serde_json::json!({"reason": "editor surface task failed"}),
-            }),
-        )
-            .into_response(),
+        Err(_) => super::operations::task_failure(
+            ErrorCode::ControlUnavailable,
+            "editor surface task failed",
+        ),
     }
 }

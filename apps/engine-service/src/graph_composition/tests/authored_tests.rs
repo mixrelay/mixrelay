@@ -1,5 +1,140 @@
 use super::*;
 
+fn forwarding_request(id: &str) -> mixrelay_audio_graph::ApplicationCaptureRequest {
+    mixrelay_audio_graph::ApplicationCaptureRequest {
+        selector: mixrelay_audio_graph::ApplicationSelector::BundleId {
+            bundle_id: "org.example.Player".into(),
+            include_descendants: false,
+        },
+        stream: StreamSpec {
+            channels: 2,
+            channel_layout: ChannelLayout::Stereo,
+        },
+        source_playback: mixrelay_audio_graph::SourcePlaybackPolicy::MuteWhileCaptured,
+        forwarding_endpoint: Some(VirtualEndpointId::from(id)),
+        gain_db: 0.0,
+        requires_reselection: false,
+    }
+}
+
+#[test]
+fn forwarding_requires_exact_registered_render_endpoint() {
+    let source = || SharedSource {
+        id: "player".into(),
+        config: NodeConfig::ApplicationCapture(forwarding_request("X")),
+    };
+    assert!(
+        DeviceRegistry::new(vec![])
+            .unwrap()
+            .with_sources(vec![source()])
+            .is_err()
+    );
+    let mut capture_only = device("X");
+    capture_only.render = None;
+    assert!(
+        DeviceRegistry::new(vec![capture_only])
+            .unwrap()
+            .with_sources(vec![source()])
+            .is_err()
+    );
+    assert!(
+        DeviceRegistry::new(vec![device("X")])
+            .unwrap()
+            .with_sources(vec![source()])
+            .is_ok()
+    );
+}
+
+#[test]
+fn authored_forwarding_target_is_graph_local_after_resolution() {
+    let request = forwarding_request("X");
+    let registry = DeviceRegistry::new(vec![device("X"), device("Y")])
+        .unwrap()
+        .with_sources(vec![SharedSource {
+            id: "player".into(),
+            config: NodeConfig::ApplicationCapture(request.clone()),
+        }])
+        .unwrap();
+    let mut document = GraphDocument::new(
+        1,
+        vec![NodeSpec {
+            control: mixrelay_audio_graph::NodeControl::default(),
+            id: NodeId::from("app"),
+            label: None,
+            config: NodeConfig::ApplicationCapture(request),
+        }],
+        vec![],
+    );
+    let identities = ResolvedNodeIdentities {
+        sources: BTreeMap::from([(NodeId::from("app"), "player".into())]),
+        outputs: BTreeMap::new(),
+    };
+    assert!(lower_document(&document, &registry, &identities).is_ok());
+    let NodeConfig::ApplicationCapture(local) = &mut document.nodes[0].config else {
+        panic!("application capture");
+    };
+    local.forwarding_endpoint = Some(VirtualEndpointId::from("Y"));
+    let lowered = lower_document(&document, &registry, &identities).unwrap();
+    assert_eq!(
+        lowered.source_references[0].forwarding_endpoint,
+        Some(VirtualEndpointId::from("Y"))
+    );
+}
+
+#[test]
+fn forwarding_reference_retains_only_its_endpoint_until_last_reference_is_removed() {
+    let registry = DeviceRegistry::new(vec![device("X"), device("Y")])
+        .unwrap()
+        .with_sources(vec![SharedSource {
+            id: "player".into(),
+            config: NodeConfig::ApplicationCapture(forwarding_request("X")),
+        }])
+        .unwrap();
+    let document = GraphDocument::new(1, vec![], vec![]);
+    let reference = SourceReference {
+        control: mixrelay_audio_graph::NodeControl::default(),
+        node_id: NodeId::from("app"),
+        source_id: "player".into(),
+        channels: 2,
+        gain_db: 0.0,
+        forwarding_endpoint: Some(VirtualEndpointId::from("X")),
+    };
+    let fragment = GraphFragment {
+        id: "A",
+        document: &document,
+        device_references: &[],
+        source_references: &[reference],
+        output_references: &[],
+    };
+    let retained = compose(
+        &registry,
+        &[fragment],
+        1,
+        context(),
+        &GraphCompiler::default(),
+    )
+    .unwrap();
+    assert_eq!(retained.native_devices.len(), 1);
+    let owner = &retained.native_devices[&VirtualEndpointId::from("X")];
+    assert_eq!(
+        retained.native_control_bindings[owner],
+        vec![runtime_node_id("A", &NodeId::from("app"))]
+    );
+    for side in ["native", "mix", "snapshot"] {
+        assert_eq!(
+            retained.native_control_bindings[&device_node_id(&VirtualEndpointId::from("X"), side)],
+            vec![runtime_node_id("A", &NodeId::from("app"))]
+        );
+    }
+    assert_eq!(
+        retained.native_control_bindings[&retained.native_sources["player"]],
+        vec![runtime_node_id("A", &NodeId::from("app"))]
+    );
+    let removed = compose(&registry, &[], 2, context(), &GraphCompiler::default()).unwrap();
+    assert!(removed.native_devices.is_empty());
+    assert!(removed.native_sources.is_empty());
+}
+
 fn authored(selector: DeviceSelector, gain_db: f32) -> GraphDocument {
     GraphDocument::new(
         17,
@@ -76,7 +211,7 @@ fn explicit_default_alias_resolution_preserves_documents_and_shares_one_pcm_owne
     assert_eq!(composed.native_sources.len(), 1);
     assert_frame(
         &pcm(&composed)[&composed.native_devices[&VirtualEndpointId::from("X")]],
-        [1.1, 1.2],
+        [0.3, 0.6],
     );
 }
 
@@ -142,7 +277,7 @@ fn channel_projection_preserves_first_channel_without_inventing_native_width() {
     .unwrap();
     assert_frame(
         &pcm(&composed)[&composed.native_devices[&VirtualEndpointId::from("X")]],
-        [0.8, 0.8],
+        [0.0, 0.2],
     );
     let NodeConfig::AudioDeviceInput(config) = &mut doc.nodes[0].config else {
         panic!()
@@ -159,11 +294,11 @@ fn virtual_local_width_is_projected_against_canonical_device_not_metadata_equali
         channel_layout: ChannelLayout::Mono,
     };
     let mut input = device("X");
-    input.render = Some(mono);
-    input.capture = None;
+    input.capture = Some(mono);
+    input.render = None;
     let mut output = device("Y");
-    output.render = None;
-    output.capture = Some(mono);
+    output.capture = None;
+    output.render = Some(mono);
     let document = GraphDocument::new(
         1,
         vec![
@@ -255,7 +390,7 @@ fn one_source_reference_reads_completed_mix_and_invalid_port_is_rejected() {
     .unwrap();
     assert_frame(
         &pcm(&composed)[&composed.native_devices[&VirtualEndpointId::from("Y")]],
-        [1.0, 1.0],
+        [0.8, 0.6],
     );
     document.edges.push(edge(
         "invalid-port",

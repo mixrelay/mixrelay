@@ -9,6 +9,8 @@ crate-type = ["rlib", "staticlib"]
 
 [dependencies]
 mixrelay-macos-transport = { path = "../../common" }
+# Native integer buffers convert at the HAL boundary; transport remains Float32.
+mixrelay-pcm-ring = { path = "../../../pcm-ring" }
 
 [build-dependencies]
 # Compile the SDK Blocks adapter; Rust owns connection and timer lifetime.

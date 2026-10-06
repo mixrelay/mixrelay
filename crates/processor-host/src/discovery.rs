@@ -40,7 +40,7 @@ pub(super) fn rescan(catalog: &ProcessorCatalog, custom_paths: &[PathBuf]) {
 fn rescan_with(
     catalog: &ProcessorCatalog,
     formats: &[RackFormat],
-    mut scan: impl FnMut(RackFormat) -> Result<Vec<RackLocator>, String>,
+    mut scan: impl FnMut(RackFormat) -> Result<rack_formats::RackScanReport, String>,
     mut probe: impl FnMut(&RackLocator) -> Result<rack_formats::RackProbeRecord, String>,
 ) {
     let _scan = catalog
@@ -55,9 +55,22 @@ fn rescan_with(
     let mut next = CatalogSnapshot::default();
     for &format in formats {
         match scan(format) {
-            Ok(locators) => {
+            Ok(report) => {
+                retain_failed_path_entries(&previous, &mut next, format, &report.path_failures);
+                for failure in report.path_failures {
+                    next.diagnostics.push(ExternalProcessorDiagnostic {
+                        format: format.protocol(),
+                        stage: ProcessorDiscoveryStage::Scan,
+                        plugin_id: None,
+                        message: format!(
+                            "custom scan path {}: {}",
+                            failure.path.display(),
+                            failure.message
+                        ),
+                    });
+                }
                 let mut seen = BTreeSet::new();
-                for locator in locators {
+                for locator in report.locators {
                     if seen.insert((
                         locator.format.argument(),
                         locator.unique_id.clone(),
@@ -90,6 +103,24 @@ fn rescan_with(
         .unwrap_or_else(std::sync::PoisonError::into_inner) = next;
 }
 
+fn retain_failed_path_entries(
+    previous: &CatalogSnapshot,
+    next: &mut CatalogSnapshot,
+    format: RackFormat,
+    failures: &[rack_formats::ScanPathFailure],
+) {
+    for (id, entry) in previous.entries.iter().filter(|(_, entry)| {
+        entry.rack.locator.format == format
+            && failures
+                .iter()
+                .any(|failure| entry.rack.locator.path.starts_with(&failure.path))
+    }) {
+        next.entries
+            .entry(id.clone())
+            .or_insert_with(|| entry.clone());
+    }
+}
+
 fn probe_into_snapshot(
     previous: &CatalogSnapshot,
     next: &mut CatalogSnapshot,
@@ -100,7 +131,8 @@ fn probe_into_snapshot(
         Ok(record) => {
             // This catalog is audio effects only. A successful non-effect result is not a
             // scanner failure and does not justify preserving a previous effect descriptor.
-            if record.descriptor.input_channels == 0 || record.descriptor.output_channels == 0 {
+            if record.descriptor.layouts.is_empty() {
+                next.entries.remove(&record.descriptor.type_id);
                 return;
             }
             next.entries.insert(
@@ -109,7 +141,6 @@ fn probe_into_snapshot(
                     descriptor: record.descriptor,
                     rack: RackCatalogTarget {
                         locator: record.locator,
-                        layout_index: record.layout_index,
                     },
                 },
             );
@@ -142,7 +173,10 @@ fn same_candidate(left: &RackLocator, right: &RackLocator) -> bool {
     left.format == right.format && left.unique_id == right.unique_id && left.path == right.path
 }
 
-fn scan_format(format: RackFormat, custom_paths: &[PathBuf]) -> Result<Vec<RackLocator>, String> {
+fn scan_format(
+    format: RackFormat,
+    custom_paths: &[PathBuf],
+) -> Result<rack_formats::RackScanReport, String> {
     let executable =
         std::env::current_exe().map_err(|error| format!("scanner executable: {error}"))?;
     let mut command = Command::new(executable);

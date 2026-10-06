@@ -13,7 +13,7 @@ test("shutdown never uses UTM's forced-stop default", () => {
 });
 test("destructive commands, names, and option injection are rejected", () => {
   for (const action of ["delete", "kill", "stop", "reset"]) assert.throws(() => vmArguments(action, uuid));
-  for (const id of [undefined, "Windows", "--disposable", `${uuid}; echo no`]) {
+  for (const id of [undefined, "Linux", "--disposable", `${uuid}; echo no`]) {
     assert.throws(() => vmArguments("start", id));
   }
 });

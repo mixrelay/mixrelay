@@ -217,6 +217,28 @@
   margin-top: var(--audio-node-meter-margin, 2px);
 }
 
+.meterGroups {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.meterGroup {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.meterBankLabel {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .meterBank {
   display: grid;
   flex-shrink: 0;
