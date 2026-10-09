@@ -30,20 +30,48 @@ MixRelay 자체를 다른 제품·서비스의 구성요소로 제공하는 OEM�
 일반 앱 구매는 위 제품 편입·재배포 권리를 포함하지 않는다.
 제3자 구성요소의 원래 라이선스와 고지는 유지하며, 해당 구성요소에 부여된 권리를 자체 약관으로 제한하지 않는다.
 앱 원문은 [LICENSE.txt](../LICENSE.txt), 무료 Driver 원문은 [LICENSE-Driver.txt](../LICENSE-Driver.txt)다.
-통합 설치에서도 적용 범위는 분리한다. 사업자·대표자는 `에코 비전 랩(Echo Vision Lab)`·
-`배승현 (Seunghyun Bae)`이며 사업자등록번호·주소·연락처는 두 원문에 기재한다.
+통합 설치에서도 적용 범위는 분리한다. 사업자는 `에코 비전 랩 (Echo Vision Lab)`이며,
+사업자등록번호·주소·연락처를 계약서에 기재한다. 설치 약관에는 대표자 개인 이름을 기재하지 않는다.
+유료 판매 화면의 법정 사업자 고지 요건은 판매 채널에서 별도로 충족한다.
 
-두 약관은 영어 단일본으로 제공한다. 앱은 구매 메이저 버전·동시 3기기·30일 오프라인 인증을 구분하고,
+### 필수 지원 언어
+
+앱과 Driver는 영어, 일본어, 한국어, 중국어 간체, 중국어 번체, 프랑스어, 독일어,
+스페인어, 포르투갈어, 이탈리아어, 러시아어를 모두 지원해야 한다.
+지원 범위에는 전체 앱 UI·도움말·오류·접근성 문구, Driver 상태 메뉴·설정·대화상자,
+앱과 Driver의 전체 약관, 설치 안내와 제거 안내가 포함된다. 일부 제목만 번역하거나 지원 언어를
+영어로 대체한 상태를 완료로 보지 않는다. 제품 이름·기술 식별자·서버 진단 로그는 원래 표기를 유지한다.
+
+OS 또는 브라우저의 선호 언어 목록에서 첫 번째 지원 언어를 사용하며, 목록에 지원 언어가 없을 때 영어를 사용한다.
+중국어는 명시된 Hans/Hant 문자 체계를 우선한다. 문자 체계가 없으면 TW·HK·MO는 번체,
+CN·SG 및 일반 zh는 간체로 해석한다. 지역 변형은 해당 지원 언어로 연결한다.
+
+앱 약관과 Driver 약관은 각각 11개 언어의 전문을 제공한다. 약관은 언어에 따라 사용 허가·구매 조건·책임·
+개인정보·법정 권리의 내용이 달라지면 안 된다. 임의의 영어 우선 조항은 추가하지 않는다.
+정본 파일 및 Installer 리소스 대응은 [언어 목록](../packaging/localization/languages.json)에 정의한다.
+macOS Installer는 `en.lproj`, `ja.lproj`, `ko.lproj`, `zh-Hans.lproj`, `zh-Hant.lproj`,
+`fr.lproj`, `de.lproj`, `es.lproj`, `pt.lproj`, `it.lproj`, `ru.lproj`의 안내·약관과 네이티브 언어 선택 기능을 이용한다.
+설치 약관의 동의 버튼과 확인창은 Installer가 제공한다.
+
+번역 키·보간 변수·전체 계약 조항의 누락, 간체/번체 선택, 네이티브 메뉴와 안내의 언어 일치,
+앱·제거 앱·PKG·Linux 패키지에 포함된 원문을 검사한다. 실제 화면에서 긴 프랑스어·독일어 문구,
+CJK 글꼴·줄바꿈·접근성 레이블과 작은 창의 잘림도 확인해야 한다.
+새 사용자 기능과 계약 개정은 지원 언어 전체에 함께 반영하며, 미번역 사용자 문구를 출시 조건에서 검사한다.
+
+앱은 구매 메이저 버전·동시 3기기·30일 오프라인 인증을 구분하고,
 기기 교체·서버 비활성화·제거·재설치의 의미를 명시한다. Driver는 일반 상업 오디오 사용이 무료이며
 앱 구매·환불과 독립적이다. 계약 동의·사용자 작업 권리·업데이트·지원·적법 종료·책임·분쟁을 정리했다.
 무료 체험이나 약관 동의만으로 법정 환불·청약철회권을 일괄 배제하지 않는다.
 
 앱 원문·문의 링크와 패키지 리소스는 연결돼 있다. 원문 표시 검사도 개정 파일 전체와 비교한다.
-macOS Driver 설치·제거에는 영어 원문을 그대로 포함한다. 약관 언어와 앱 UI·도움말의 번역은 별개다.
+macOS Driver 설치·제거에는 지원 11개 언어의 Driver 원문을 그대로 포함하고, Manager에는 앱 원문 11개도 포함한다.
 영어 원문 표시와 패키지의 원문 바이트 일치 검사는 통과했다. 제거 앱도 같은 Driver 약관과 CHANGELOG를 포함한다.
-새 설치 PKG의 영어 원문 표시와 설치 동의도 확인했다. 웹사이트 연결 확인은 남아 있다.
-두 원문은 전문 법률 검토 전 초안이며 출시 전 체험 수치·실제 구매 및 환불·양도 조건을 확정한다.
-현재 과세유형·통신판매 신고 또는 면제 여부도 판매 전에 확인한다.
+개정 설치 PKG의 영어 원문 표시를 실제 Installer에서 확인했다. 이번 패키지의 설치 동의와
+관리자 설치는 아직 완료하지 않았다. 웹사이트 연결 확인은 남아 있다.
+2026-10-08 계약 조항을 제품 정책·인증 및 업데이트 코드·현행 법령과 대조하여 개정했다.
+내부 검토 상태나 출시 체크리스트를 사용자 계약서에 넣지 않는다.
+조항별 판단 근거와 구현·운영의 잔여 사항은 [법무 검토 기록](legal-review.md)에서 관리한다.
+체험의 14일 만료 구현, 판매 설정, 개인정보 처리방침과 국내 이용자 고지는 별도 출시 요건이다.
 Lemon Squeezy의 [거래상 판매자 역할](https://docs.lemonsqueezy.com/help/payments/merchant-of-record)과
 [환불 처리](https://docs.lemonsqueezy.com/help/payments/refunds-chargebacks)는 제품 지원 책임과 구분한다.
 
@@ -60,7 +88,7 @@ MPL 적용 부분의 의무를 자체 소스 전체 공개와 혼동하지 않�
 기본 장치 이름은 `MixRelay IO`, 사용자 장치 이름은 그대로 유지한다.
 제품 표시 이름을 바꾸기 위해 번들·서비스·장치의 안정적인 ID를 바꾸지 않는다.
 
-앱을 완전히 종료해도 드라이버가 관리하는 장치와 기본 playback → capture 루프백은 유지한다.
+유료 MixRelay 앱을 완전히 종료해도 실행 중인 Driver가 관리하는 장치와 기본 playback → capture 루프백은 유지한다.
 그래프 엔진·플러그인·녹음·앱별 캡처는 종료한다. 드라이버 소유자와 그래프 엔진의 수명을 분리하며,
 종료된 그래프의 DSP나 worker를 드라이버 유지 목적으로 남기지 않는다.
 창만 닫으면 트레이와 실행 중인 그래프 오디오를 유지한다.
@@ -69,9 +97,9 @@ MPL 적용 부분의 의무를 자체 소스 전체 공개와 혼동하지 않�
 지원하는 값만 변경할 수 있어야 한다. 드라이버·장치 상태와 그래프 엔진 상태를 혼동하지 않는다.
 독립 Driver 메뉴의 장치 설정은 샘플레이트(kHz)·비트 깊이·채널 수 세 가지다. 채널 수·PCM은 장치의 양방향에 함께 적용하며 실제 공통 지원값만 제공한다.
 방향별 캡처·재생 설정과 이름·라우팅 편집은 MixRelay 앱에서 제공한다. 트레이에는 장치별 세 설정과 ‘업데이트 확인’·‘종료’만 제공한다. 앱 열기·새로고침·제거·업데이트 목록은 두지 않는다. 업데이트 확인 결과는 메뉴 안에서 짧게 표시하고, 다운로드가 있을 때만 링크를 제공한다. 단순 상태 알림 팝업은 띄우지 않는다.
-업데이트 결과와 다운로드는 확인 후 표시하며 자동 설치하지 않는다. ‘종료’는 관리 UI만 닫고 장치·루프백은 유지한다.
+업데이트 결과와 다운로드는 확인 후 표시하며 자동 설치하지 않는다. Driver 상태 메뉴의 ‘종료’는 Driver의 모든 장치와 기본 루프백을 중지한 뒤 관리 앱을 종료한다. 저장된 장치 이름·채널·형식 설정은 삭제하지 않으며, MixRelay Driver를 다시 실행하면 복원한다. 중지 상태도 저장하여 서비스 재시작만으로 장치가 부활하지 않게 한다. 중지 또는 상태 저장 실패 시 관리 앱을 유지하고 다시 종료할 수 있게 오류를 안내한다. 이 동작은 유료 MixRelay 앱 종료·창 닫기·관리 앱 강제 종료와 구분한다.
 메뉴 상단은 `MixRelay Driver {설치 버전}`만 표시한다. 상태·오류를 제품명에 붙이지 않으며, 버전 확인 전에는 제품명만 표시한다.
-macOS Driver 관리 앱은 실행·다시 열기 시 Dock에 나타나지 않고 상태 표시줄에만 남는다. 그래프 앱의 Dock 동작은 변경하지 않는다.
+macOS Driver 관리 앱은 실행·다시 열기 시 Dock에 나타나지 않고 상태 표시줄에만 남는다. 그래프 앱은 Dock에 표시하며, 창 닫기는 숨김으로 유지한다. 시스템의 정상 종료 요청은 명시적 메뉴 종료와 같은 엔진 종료 절차를 거친다.
 Driver 채널 메뉴는 장치가 지원하는 2·4·8·16·32·64만 제공한다. 기타·범위 메뉴는 사용하지 않으며 백엔드의 1–64채널 계약은 유지한다.
 macOS 설치는 기본 Installer의 약관 표시 → 계속 → 동의 흐름을 유지한다. 자체 동의창이나 중복 안내를 추가하지 않는다.
 메뉴와 노드 Options는 같은 장치 제어 API를 사용하며 Driver 관리 모드는 그래프 엔진과 구매 인증을 시작하지 않는다.
@@ -152,7 +180,7 @@ AU/AUv3는 macOS, VST3·CLAP은 macOS·Linux, LV2는 Linux에서 기존 호스�
 
 장치 등록·설정 소유자를 `mixrelay-driver-service`로 옮기고 그래프 엔진은 일반 OS 오디오 클라이언트로 연결하도록 일부 재작성 중이다.
 macOS의 기본 루프백은 HAL callback, Linux는 독립 PipeWire 소유자가 처리한다. 두 OS의 장치 설정 API와 저장 의미는 같다.
-장치 제거는 새 I/O를 막고 진행 중 콜백을 배출한 뒤 PCM·매핑·변환 버퍼를 해제한다. 늦은 클라이언트 종료 호출을 위한 객체 정보는 마지막 참조까지 유지한다. 장치 소실 알림 뒤 우리 콜백은 무음으로 처리하며, 타 앱의 장치 재선택은 해당 앱이 담당한다. 관리 UI 종료는 장치 제거가 아니다. macOS HAL의 기본 루프백은 제어 서비스 재시작 중에도 유지한다.
+장치 제거는 새 I/O를 막고 진행 중 콜백을 배출한 뒤 PCM·매핑·변환 버퍼를 해제한다. 늦은 클라이언트 종료 호출을 위한 객체 정보는 마지막 참조까지 유지한다. 장치 소실 알림 뒤 우리 콜백은 무음으로 처리하며, 타 앱의 장치 재선택은 해당 앱이 담당한다. Driver 상태 메뉴의 명시적 종료는 저장 설정을 보존한 채 native 장치를 해제하여 기본 루프백을 중지한다. OS에 설치된 HAL·서비스 실행 파일을 제거하거나 언로드하는 기능은 아니며, 제어 서비스는 재실행 요청을 받을 수 있도록 남는다. 실행 중인 Driver의 macOS HAL 루프백은 제어 서비스 재시작 중에도 유지하지만, 명시적으로 중지한 상태에서는 저장 설정을 자동으로 활성화하지 않는다.
 macOS는 AudioServerPlugIn HAL과 XPC/shared memory, Linux는 PipeWire를 사용한다. 새 경계의 실제 PCM·설치 검증 전에는 완료로 취급하지 않는다.
 플랫폼 ABI 외의 정책·수명은 Rust가 소유한다.
 
@@ -219,11 +247,340 @@ Debian 13 저장소는 0.5.8, backports는 0.5.12이므로 최신 버전 의존�
 패키지 관리자 경로를 유지하고, 시스템 WirePlumber를 동봉본으로 덮어쓰거나 두 정책 관리자를 함께 실행하지 않는다.
 PipeWire 손실은 추가 원인 분리 전까지 확정 upstream 버그로 보고하지 않는다.
 
-**재개 지점:** 다음 조사 대상은 trigger 이후 스케줄링이다. Activation signal/awake와 scheduler trace 또는
-물리 Linux에서 PipeWire dispatch와 guest/host preemption을 구분한다. 확정한 경계만 수정·재검증하며
+**2026-10-08 Docker 소스/스케줄링 대조:** 기존 isolated runner를 Debian 13 ARM64 컨테이너에서 실행했다.
+PipeWire 1.4.2-1·WirePlumber 0.5.8·48kHz·release이며, 컨테이너 소스 복사본의 native quantum/minimum만
+1,024로 고정했다. 호스트 소스의 quantum 설정은 바꾸지 않았다. Docker Desktop의 Linux VM은
+`7.0.14-linuxkit`, `CONFIG_PREEMPT_LAZY=y`, HZ=1,000이고 PREEMPT_RT 커널이 아니다.
+호스트 오디오·장치·Docker socket을 연결하지 않은 별도 daemon 대조이며 설치 제품·물리 Linux의 무결성 판정이 아니다.
+이미지·runner 호출·원본 로그·trace·커널 설정·분석기는 `.lab/docker-audio/`에 보존하고 Git에 넣지 않는다.
+
+| 대조 조건 | 결과와 확인된 경계 |
+| --- | --- |
+| 32채널 PCM24, observer 없이 → observer → observer 없이 | 앞뒤 실행은 두 scope 모두 480,255 indexed frames를 정상 수신. observer 실행은 79,872→80,896 누락; capture queue에는 있고 reader dequeue에는 없음 |
+| 64채널 PCM16, observer 없이 | scope 1 실패, 첫 누락 100,352→101,376; wrong sample 2,048도 관측. 계측 없이도 실패하므로 observer만의 문제로 확정할 수 없음 |
+| 64채널 PCM16, 기존 observer | 184,320→185,344 누락; capture queue에는 있고 reader dequeue에는 없음. 모든 콜백 본문 ≤2.1805ms |
+| 32채널 PCM24, callback CPU 시각 추가 | scope 1 실패, 첫 누락 139,264→140,288. reader 버퍼 시작 표식의 불연속은 17곳; 감시기의 누적 gap distance로 이 횟수를 계산하지 않음 |
+| 64채널 PCM16, 서버 FIFO 88 / 클라이언트 FIFO 83 확인 | scope 1 실패, 109,568→110,592 누락. writer queue에는 있고 render dequeue부터 없음; 모든 콜백 본문 ≤2.449ms |
+
+첫 Docker PCM24 실패의 capture trigger→진입은 42µs로 빨랐지만 콜백 벽시각이 25.604833ms였다.
+79,872 queue 직후 0.641416ms 만에 다음 80,896이 queue됐고 reader는 후자만 받았다.
+반면 기존 64채널 PCM16 실패의 render 진입은 해당 stream의 clock-report 뒤 21.059478ms,
+capture queue는 22.449978ms였다. 그 report 주기의 reader 콜백은 없고 다음 주기로 넘어갔다.
+이 report 차이를 순수 kernel wake 대기나 서로 다른 stream의 절대 tick 위치로 해석하지 않는다.
+
+기본 컨테이너는 RTPRIO/NICE 한도 0이며 서버와 클라이언트 모두 SCHED_OTHER였다.
+RTPRIO=88만 허용한 중간 대조는 클라이언트만 FIFO 83이고 서버는 여전히 SCHED_OTHER였으므로
+전체 RT 대조로 취급하지 않는다. [module-rt.c](https://github.com/PipeWire/pipewire/blob/1.4.2/src/modules/module-rt.c#L1138)는
+요청한 nice=-11 조정이 실패하면 RTKit 경로로 바꾸고, 이 격리 환경에는 RTKit이 없어 module 초기화가 실패했다.
+RTPRIO=88와 NICE 한도 31을 함께 허용한 별도 컨테이너에서 서버 FIFO 88·nice=-11,
+클라이언트 FIFO 83을 실행 중 `ps`로 확인했지만 손실은 남았다. 이 실행에서 writer의
+clock-report→trigger는 28.163096ms, trigger→진입은 97.583µs였다. 늦은 구간은 trigger 이전에도 있다.
+Docker VM이 대조 사이 재시작됐고, 재시작 뒤 일반 스케줄링 64채널 실행도 두 scope를 통과했다.
+따라서 통과 실행 하나를 RT 개선의 인과 증거로 쓰지 않으며 단순한 RT 권한 부족만으로 손실을 설명하지 않는다.
+
+**공개 소스에서 확인한 계약:** [Linux 7.0.14 eventfd](https://github.com/gregkh/linux/blob/v7.0.14/fs/eventfd.c#L249)는
+write 횟수를 lock 안에서 누적하고 읽을 때 반환한다. 알림을 읽는 즉시 해당 thread를 실행한다는 계약은 없다.
+[epoll](https://github.com/gregkh/linux/blob/v7.0.14/fs/eventpoll.c#L1267)은 ready list와 waitqueue를 깨우고
+[스케줄러](https://github.com/gregkh/linux/blob/v7.0.14/kernel/sched/core.c#L4092)가 실행을 배정한다.
+일반 fair thread의 [wakeup preemption](https://github.com/gregkh/linux/blob/v7.0.14/kernel/sched/fair.c#L8803)은
+우선순위/eligibility를 판단하며 오디오의 21.33ms 마감 시간을 보장하지 않는다.
+PipeWire의 [trigger_target_v1](https://github.com/PipeWire/pipewire/blob/1.4.2/src/pipewire/private.h#L659)은
+activation CAS와 eventfd write 성공을 반환한다. downstream PCM 소비의 완료 응답이 아니다.
+[node_on_fd_events](https://github.com/PipeWire/pipewire/blob/1.4.2/src/pipewire/impl-node.c#L1547)는
+합쳐진 알림 `cmd > 1`을 xrun으로 기록하고 process를 한 번 호출한다.
+[다음 driver 주기](https://github.com/PipeWire/pipewire/blob/1.4.2/src/pipewire/impl-node.c#L2135)는 미완료 follower의
+activation을 초기화하고 이전 TRIGGERED/AWAKE를 xrun으로 다룬다.
+[SPA IO](https://github.com/PipeWire/pipewire/blob/1.4.2/spa/include/spa/node/io.h#L75)는 현재 buffer id/status의 교환이고
+async도 두 cycle slot이므로 늦은 모든 주기의 PCM을 다시 재생하는 무손실 메시지 큐가 아니다.
+더 구체적으로 [tee_process](https://github.com/PipeWire/pipewire/blob/1.4.2/src/pipewire/impl-port.c#L262)는
+`*mix->io[cycle] = *io`로 downstream의 현재 IO descriptor를 대입하고 producer IO를 NEED_DATA로 바꾼다.
+이 경로는 이전 descriptor의 HAVE_DATA 소비 완료를 검사하고 FIFO에 추가하는 방식이 아니다.
+따라서 downstream의 한 주기 처리가 건너뛰어진 뒤 다음 output tee가 실행되면 이전 buffer id를
+교체할 수 있는 구체적 소스 경로가 있다. 실패 실행의 정확한 port/descriptor 교체 여부는 이 내부 경계의 추가 trace로 확인해야 한다.
+관측은 deadline 초과와 주기 복구 중 손실에 부합하지만, 특정 buffer를 교체한 내부 명령이나 kernel 결함을 확정한 trace는 아직 없다.
+
+콜백 경계에 `CLOCK_THREAD_CPUTIME_ID`를 추가했다. 같은 native thread ID의 진입/종료만 짝지으며
+실패한 시각 조회는 0 대신 null로 남긴다. 32채널 실패의 최대 capture 벽시각 46.6895ms와
+guest CPU 46.687499ms가 거의 같았지만 이를 순수 PCM 계산 시간으로 판정하지 않는다.
+실제 `/proc/config.gz`는 PARAVIRT_TIME_ACCOUNTING과 IRQ_TIME_ACCOUNTING이 모두 꺼져 있다.
+[update_rq_clock_task](https://github.com/gregkh/linux/blob/v7.0.14/kernel/sched/core.c#L786)의 steal/IRQ 차감은
+해당 설정에 의존하므로 이 guest CPU 시각만으로 host vCPU 중단·IRQ·실제 계산을 분리할 수 없다.
+안정 커널 태그의 위 소스 분석은 LinuxKit의 모든 패치가 바이너리와 동일함을 증명하지 않는다.
+
+**2026-10-08 PipeWire 소스 수정·실행 대조:** 공식 1.4.2 소스를 원본과 수정본 모두 같은
+Meson release/O3·GCC·Ninja 설정으로 컴파일했다. 별도 prefix를 쓰고 native 실행의 실제 loaded mapping과
+라이브러리 SHA-256을 보존했다. 배포판 라이브러리·호스트 설치본·MixRelay PCM FIFO 용량은 바꾸지 않았다.
+기존 isolated native fixture의 bit-exact 판정과 두 client scope를 그대로 사용했다.
+Docker Linux ARM64·48kHz·native quantum 1,024이며 서버 FIFO 88·클라이언트 FIFO 83 환경이다.
+
+소비자 dispatch 지연을 통제하려고 ordinary reader의 100번째 eventfd wake에서 읽기 직전 한 번 50ms를
+지연시켰다. 원본과 수정본에 같은 진단 훅을 적용하고 각 reader 종료 때 실제 지연 시각을 출력했다.
+두 번째 scope는 새 reader와 반전된 indexed 신호를 쓰므로 지연도 별도로 발생한다. 이 훅은 최종 패치에 없다.
+
+| 소스 대조 | 원본 | 최종 수정본 |
+| --- | --- | --- |
+| 64채널 PCM16, reader 지연·observer 있음 | 실제 지연 50.829ms, 첫 누락 99,328→101,376: 2,048프레임 | 실제 지연 53.232/54.964ms, 두 scope 각 480,255프레임·누락/반복/오샘플/부분 입력 0 |
+| 32채널 PCM24, reader 지연·observer 없음 | 실제 지연 55.065ms, 첫 누락 98,304→100,352: 2,048프레임 | 실제 지연 53.863/53.100ms, 두 scope 각 480,255프레임·누락/반복/오샘플/부분 입력 0 |
+| 32채널 PCM24 및 64채널 PCM16, 지연 훅·observer 제거 | 위 통제 실행과 별도 조건 | 각 형식 두 scope 각 480,255프레임·누락/반복/오샘플/부분 입력 0 |
+
+수정은 `private.h`, `impl-port.c`, `impl-node.c` 세 파일이다. 수동 trigger 생산자의 동기 출력 링크에
+유효한 HAVE_DATA 버퍼가 남아 있으면 다음 input/process/output tee를 미루고 기존 버퍼를 유지한다.
+activation 완료와 downstream 깨우기는 계속 수행하므로 소비자는 기존 버퍼를 받을 수 있다.
+driving 노드·자동 capture/monitor의 입력 처리·async cycle slot은 기존 정책을 유지한다.
+실험 중 모든 non-driving 노드에 적용한 첫 수정은 FIFO 쓰기 거절과 scope 2 손실을 만들어 폐기했다.
+초기 통과 한 번이나 필터된 PipeWire 경고 로그를 수정의 실행 증거로 사용하지 않는다.
+
+최종 지연 대조에서 client capture 생산자가 실제 5주기(64채널)/4주기(32채널)를 미뤘으며 다른 노드는 0이다.
+이 수는 client 종료 진단 `output.log`에서 확인한다. 서버 proxy 노드의 `pipewire.log`와 구분한다.
+두 수정 대조와 훅 제거 실행 모두 PCM FIFO 쓰기 거절·consumer discard는 0이다.
+시작 시 한 번 발생하는 read starvation은 별도로 남으며 전체 read 거절 0을 주장하지 않는다.
+64채널 observer 기록 19,254개는 기록 누락·미완성 0, 두 신호 phase의 버퍼 시작 표식 불연속 0이다.
+모든 채널의 PCM 검증은 observer 표식 대신 기존 native assertion이 수행했다.
+최종 훅 제거 빌드의 PipeWire 검사 47개가 통과했다.
+
+검토할 패치는 [PipeWire 1.4.2 보존 패치](../native/linux/pipewire/tests/patches/pipewire-1.4.2-retain-manual-pending.patch)로
+버전 관리에 보존하며 자동 배포 적용은 하지 않는다. 전체 수정 소스와 적용 설명은
+`.lab/docker-audio/patches/manual-pending-source/` 및 `README.md`에 있다. 원본 archive, 빌드 옵션·로그·core 바이너리는
+`.lab/docker-audio/source/`와 `evidence/pw-build/`, 대조 로그는 `evidence/pw-control-reader-delay50-stats/`,
+`pw-control-32-reader-delay50/`, `pw-manual-pending-reader-delay50/`, `pw-manual-pending-32-delay50/`,
+`pw-manual-clean-32-final/`, `pw-manual-clean-64-final/`와 연결된 native evidence에 보존했다.
+`evidence/source-experiment-summary.json`은 위 여섯 실행의 PCM·transfer 결과, 실제 지연·보존 횟수,
+loaded mapping 확인 및 보존 core 바이너리의 해시 일치를 묶는다.
+통제한 consumer dispatch 지연의 손실 경로는 수정으로 막았지만 기존의 모든 자연 발생 손실이나
+kernel 결함을 해결·확정한 결과는 아니다. 오래 지연된 PCM 보존은 latency를 늘릴 수 있으며
+fanout·feedback·지속 과부하·물리 Linux·설치 제품은 이 패치로 아직 검증하지 않았다.
+
+**2026-10-08 kernel trace·upstream 제출 검토:** Docker Linux VM의 별도 tracefs instance에서
+`sched_waking`, `sched_wakeup`, `sched_switch`, fork/exec, IRQ/softIRQ를 guest `mono` 시각으로 수집했다.
+trace 컨테이너에만 SYS_ADMIN/SYS_PTRACE/PERFMON을 허용했고 제품/native 테스트는 기존 UID 10001과
+FIFO 우선순위를 유지했다. 전역 tracing 설정·커널 이미지·호스트 오디오를 변경하지 않았다.
+64채널 PCM16 원본은 통과했고, 별도 32채널 PCM24 원본은 자연 발생 393,216→394,240 누락을 재현했다.
+후자는 reader 지연 주입이나 SIGSTOP을 넣지 않은 실행이다. observer 기록 14,114개와 각 CPU trace에
+기록 누락·overrun·commit overrun·dropped event는 0이다.
+
+첫 손실의 reader kernel TID 15813/native TID 571, 대상 CPU 8을 같은 시각 축에 연결했다.
+`sched_waking`은 2662.092657s, IPI IRQ 진입은 2662.099905s, `sched_wakeup`은 2662.099910s,
+첫 switch-in은 2662.099915s였다. 깨우기 요청→runnable은 **7.253ms**, runnable→실행은 **5µs**다.
+그 사이 다음 driver 주기가 2662.098678s에 이미 시작했다. 첫 switch-in 구간에는 native process callback이
+없고 다음 reader callback/dequeue가 2662.102903709/2662.102911001s에 손실 뒤 표식을 받았다.
+이 trace만으로 내부 activation CAS가 실패한 정확한 명령까지 관측한 것으로 쓰지는 않는다.
+
+CPU 8은 앞서 idle로 전환됐고 마지막 trace 2662.090234s부터 위 IPI까지 9.671ms 동안 기록이 없었다.
+해당 구간에 다른 guest 태스크가 그 CPU를 점유하거나 길게 열린 IRQ handler는 관측되지 않았다.
+Linux의 [remote wake-list 경로](https://github.com/gregkh/linux/blob/v7.0.14/kernel/sched/core.c#L3787)는
+대상 CPU가 IPI를 받아 task를 enqueue한 뒤 runnable로 바꾼다. 따라서 이번 손실의 큰 지연은
+FIFO runnable 태스크의 일반 runqueue 대기보다 **remote CPU의 wake/IPI 처리 이전**에 있다.
+vCPU의 host 실행/virtual interrupt 전달 지연에 부합하지만 guest idle/interrupt-disabled 구간과
+host vCPU 중단은 guest trace만으로 구분할 수 없으므로 Linux scheduler 결함으로 단정하지 않는다.
+컨테이너 `cpu.max=max 100000`, CPU throttling 0, memory high/max/OOM 0을 확인했다.
+VM/호스트 CPU는 모두 12개이고 Docker 4.94.0이다. 이 개수만으로 host CPU 포화가 증명되지는 않는다.
+원본 trace·stats·시각 대조·분석기는 `.lab/docker-audio/evidence/kernel-review/`와
+`.lab/docker-audio/analyze-sched.py`에 보존했다. guest CPU accounting의 기존 한계도 유지한다.
+
+같은 장치 피드백의 기존 native 검사를 source-built 원본/수정본으로 대조했다.
+
+| 순서/소스 | 32채널 Float32 | 64채널 Float32 |
+| --- | --- | --- |
+| 1 원본 | fresh 48,128·wrong 0 통과 | fresh 48,128·wrong 0 통과 |
+| 2 훅 없는 보존 패치 | fresh 48,128·wrong 0 통과 | fresh 37,888·wrong 12,288 실패 |
+| 3 보존 패치+종료 카운터, 지연 주입 0 | fresh 48,128·wrong 0 통과 | fresh 48,128·wrong 0 통과, capture 보존 1주기 |
+| 4 원본 | fresh 48,128·wrong 0 통과 | fresh 48,128·wrong 0 통과 |
+
+이 검사는 PCM24/PCM16의 indexed 연속성 검사와 다른 causal feedback 판정이며 기준을 낮추지 않았다.
+기존에도 피드백의 간헐 실패가 있었고 수정본 반복은 통과했으므로 패치 유발 회귀라고 확정하지 않는다.
+하지만 수정본 실패가 남아 있어 **regression 없음으로 승인할 근거도 없다**. 실행은
+`pw-original-feedback-review`, `pw-pending-feedback-review`, `pw-pending-feedback-repeat`,
+`pw-original-feedback-repeat`와 연결된 native evidence에 보존했다.
+
+최신 공식 mirror의 master `b37700cb2083d68477cef9002d1f676dff796f3c`와 이력을 확인했다.
+이미 [2025-10-14 upstream 변경](https://github.com/PipeWire/pipewire/commit/20d2a331be58a68abead4b99a95bf783c9797033)에
+`node.reliable`/`port.reliable` opt-in과 `tee_process_reliable`, stream dequeue의 미소비 버퍼 검사,
+driver→async 입력 링크의 IO 순서 처리가 있다. key의 도입 버전은 1.6.0이다. 1.4.2에는 없다.
+이는 현재 실험 패치와 동일하지 않다. reliable tee는 사용 가능한 첫 링크 하나에 전달하고 멈추므로
+다중 reader multicast를 보장하지 않으며 audio fanout에 그대로 켜는 해결책으로 권고하지 않는다.
+현재 확인은 소스 검토이며 최신 reliable 빌드의 MixRelay PCM 통과 결과로 쓰지 않는다.
+공식 제출 경로는 [GitLab merge request/issue](https://github.com/PipeWire/pipewire/blob/b37700cb2083d68477cef9002d1f676dff796f3c/README.md#contributing)다.
+
+실험 패치는 3파일·35줄 추가로 작지만 중앙 scheduler에 영향을 준다. `node.trigger`는 추가 trigger 의존성이지
+reliable 전달 요청이 아니다. 임의의 수동 trigger 생산자에 보존 정책을 강제하고, 어느 동기 output 링크 하나가
+미소비 상태이면 생산자의 모든 input/process/output을 미루므로 다른 빠른 reader나 async 출력도 함께 늦을 수 있다.
+Mixed sync/async·fanout·drain 처리의 회귀 검증도 없다. 따라서 이 패치를 그대로 새 upstream MR로 제출하지 않는다.
+기존 reliable 기능의 audio 적용 가능성/한계를 먼저 재현하고, 남는 결함이 있으면 해당 경계의 opt-in 수정과
+공개 PipeWire만으로 실행되는 최소 회귀 검사를 준비한다. private MixRelay 소스·이미지·원시 lab 데이터는 제출하지 않는다.
+
+**2026-10-08 MixRelay API 사용 수정과 reliable 실행 대조:** `MRPipeWire.c`의 출력 콜백은
+`spa_chunk.size` 바이트 수만 설정하고 `pw_buffer.size` 프레임 수를 설정하지 않았다.
+[공개 stream 계약](https://github.com/PipeWire/pipewire/blob/1.4.2/src/pipewire/stream.h#L264)에 맞게
+실제 출력 프레임 수(무음 포함)를 기록하고, 반환할 재사용 출력 버퍼는 먼저 0으로 초기화하도록 수정했다.
+FIFO·클럭·trigger·PipeWire 소스 정책은 바꾸지 않았다. 새 C 회귀 검사는 실제 PCM ring과 제품 콜백을 사용하며
+원본 코드에서 프레임 수 assertion으로 실패하고 수정본에서 F32·PCM16·packed PCM24·PCM32를 통과했다.
+이 검사는 버퍼 용량 상한·무음·잘못된 형식/geometry·반환 횟수를 함께 확인한다.
+
+공식 1.6.9 소스를 같은 격리 컨테이너에서 수정 없이 빌드하고 기존 native PCM 검사로 대조했다.
+원본 MixRelay의 64채널 PCM16은 두 scope 각 480,255프레임·연속성 오류 0이었다.
+반면 수동 출력에 `node.reliable=true`를 추가한 실험은 1,024→2,048에서 1,024프레임 누락으로 실패했다.
+위 `pw_buffer.size` 수정까지 적용한 reliable 실험도 같은 첫 누락으로 실패했다.
+따라서 reliable은 제품 코드에 적용하지 않았으며 이 오디오 경로의 해결책으로 제시하지 않는다.
+개발 브랜치 1.7.0에서는 reliable 설정 유무 모두 PCM 검사 전에 capture 형식 협상에 실패했으므로
+해당 실행은 reliable 전달 효과를 판정하는 근거가 아니다. audio fanout 보장도 아직 확인되지 않았다.
+
+프레임 수 수정본을 원본 PipeWire 1.4.2로 실행한 64채널 PCM16은 두 scope 각 480,255프레임·연속성 오류 0이었다.
+지연 훅 없이 실행한 32채널 PCM24는 첫 scope를 통과했지만 두 번째 scope에서
+439,296→441,344의 2,048프레임 누락으로 실패했다. 기존 비결정적 손실도 남아 있다.
+그러나 같은 수정본에 기존 reader 지연 진단 훅을 사용한 32채널 PCM24는 실제 52.722333ms 지연 뒤
+98,304→100,352에서 2,048프레임 누락으로 실패했다. 프레임 수 수정은 확인된 API 메타데이터 문제를
+해결하지만 앞서 관측한 지연 손실을 해결하지 않는다. 일반 실행의 통과를 지연 손실 해결로 해석하지 않는다.
+"PipeWire 수정은 필요 없고 MixRelay의 API 오용만 고치면 해결된다"는 결론은 실행 근거로 뒷받침되지 않는다.
+동일 장치 feedback 검사는 프레임 수 수정본 첫 실행에서 32채널 fresh=0으로 실패했다.
+동일 조건의 수정 전 원본은 32채널을 통과했지만 64채널 fresh=32,768로 목표 48,000 미달이었다.
+수정본 재실행은 32·64채널 모두 fresh=48,128·wrong=0으로 통과했다. 세 실행의 불안정한 결과로
+프레임 수 변경의 회귀를 확정하거나 전체 회귀가 없다고 주장하지 않는다. 실패 판정 조건은 완화하지 않았다.
+새 원본 로그·loaded mapping·해시·진단 소스는 `.lab/docker-audio/evidence/pw-*`와
+`buffer-metadata/`에 보존한다. upstream 패치는 계속 실험 자료이며 제품에 적용하거나 PR을 보내지 않았다.
+
+**2026-10-08 시작 전 버퍼 준비:** native PCM ring은 이미 두 quantum 분량의 prefill 후 읽으며,
+부족해지면 무음과 재충전 상태로 돌아간다. 초기 prefill이 없는 구현은 아니었다.
+다만 익명 mmap PCM 페이지와 Linux Driver의 큰 zeroed scratch는 할당만 하고 첫 접근을 RT에 남겨 두었다.
+공유 ring 생성과 Driver 준비 단계에서 모든 페이지를 제어 스레드에서 미리 접근하도록 변경했다.
+샘플 비트·FIFO 커서·용량·두 quantum prefill·클록·SRC는 그대로다. 메모리 준비는 callback 공개 전에 끝나며
+페이지의 이후 상주를 영구 보장하거나 `mlock` 권한을 요구하지 않는다.
+Loopback의 `prepare_inputs`도 기존 render/input dependency 준비 후 capture/output 형식 협상을 확인한 뒤
+DSP를 공개하도록 변경했다. 대기는 제어 스레드에서 최대 3초이며, 미협상 상태는 시작 실패로 반환한다.
+
+macOS ARM64 ring 검사 17개, Docker Linux ARM64 ring 검사 18개, Linux Driver unit 검사 11개와
+변경 경계 strict Clippy·Rust fmt·C 버퍼 메타데이터 검사를 통과했다.
+공유 ring 생성 변경의 macOS 호출부도 확인했고 macOS transport unit 검사 176개를 통과했다(별도 native 검사 1개 제외).
+Linux 전체 mapping residency 검사는 기존 지연 할당 경로에서 실패하고 사전 준비 경로에서 통과했다.
+32·64채널 네 가지 PCM 형식의 실제 협상/설정 교체/제거 검사도 통과했다. 이 빠른 native 실행은
+1.19초에 끝나 별도 2초 후 scheduler sampler가 `/proc`에서 이미 종료된 PID를 읽는 데 실패했다.
+native 검사 exit=0과 별도 monitor 실패를 구분하며, 해당 짧은 실행의 loaded mapping은 확인했다고 쓰지 않는다.
+
+반면 변경본의 일반 32채널 PCM24 실행은 첫 scope의 100,352→101,376에서 1,024프레임 누락,
+wrong=2,048로 실패했고 64채널 PCM16은 두 scope 각 480,255프레임·연속성 오류 0이었다.
+서버/클라이언트 전체를 같은 guest CPU 2에 제한한 진단에서도 32채널은 첫 scope를 통과했지만
+둘째 scope의 269,312→270,336에서 1,024프레임 누락으로 실패했다. native thread affinity와
+서버 FIFO 88·클라이언트 FIFO 83을 실행 중 확인했다. affinity 제한은 격리 진단에만 사용하고 제품에 적용하지 않았다.
+따라서 시작 전 메모리 준비와 형식 확인은 보완했지만, 초기 준비 부족이나 CPU 간 이동만으로
+실행 중 손실을 설명하지 않는다. PCM 안정화/무손실 해결 완료로 표시하지 않는다.
+새 원본 자료는 `.lab/docker-audio/evidence/pw-startup-*`와 `startup-preparation/`에 보존한다.
+
+**2026-10-08 별도 Proxmox VM 대조:** 기존 호스트에 임시 Debian 13 x86_64 VM을 만들었다.
+2 vCPU·RAM 4GiB·디스크 32GiB이며, guest 커널은 `6.12.111+deb13-amd64`,
+Debian PipeWire `1.4.2-1`·WirePlumber `0.5.8-2`다. 격리 daemon의 native quantum 1,024와
+DSP 128은 그대로이며 실행 중 서버 FIFO 88·클라이언트 FIFO 83을 확인했다.
+CPU affinity나 커널 설정을 추가로 바꾸지 않았다. upstream 보존 패치와 reliable 설정도 적용하지 않았다.
+
+현재 수정본은 32채널 PCM24·64채널 PCM16을 각각 3회 실행해 모두 통과했다.
+각 실행의 두 독립 client scope는 각각 fresh=480,255·누락·반복·wrong·short=0이었다.
+PipeWire 기본 `pw-loopback`의 32채널 F32P도 두 scope에서 같은 판정을 통과했다.
+32·64채널 네 PCM 형식의 협상/설정 교체/제거, ring unit 18개·Driver unit 11개와
+C buffer 메타데이터 검사도 통과했다. 빠른 형식 검사는 0.28초에 끝났으므로
+native exit=0과 실행 중 scheduler snapshot 부재를 구분한다.
+
+수정 전 HEAD `a2d2160`은 별도의 빈 target에서 다시 빌드하여 32채널 PCM24·64채널 PCM16을
+각 1회 실행했고 모두 두 scope 각 480,255프레임·연속성 오류 0이었다.
+수정본/원본 native test 바이너리 SHA-256은 각각 `1520621348c76d3aafe982d543f939fdc96fc11eb2445c639a9cd451efa93066` /
+`4bcb6a7766588a4a255a377d055774588408c4384f5b665beadd778725095d07`이다.
+처음 shared Cargo target을 사용한 원본 비교는 archive의 오래된 mtime 때문에 현재 바이너리가
+재사용되어 제외했다. 해당 두 실행은 제외 이유와 함께 보존했으며 원본 통과 횟수에 넣지 않는다.
+
+이 유한 실행에서 누락이 재현되지 않았다는 환경 대조이며, startup 수정의 해결 효과나 전체 안정화 증명이 아니다.
+Docker ARM64/LinuxKit와 별도 x86_64/KVM은 CPU·아키텍처·guest 커널·hypervisor·PipeWire 빌드가
+함께 달라졌다. 특정 커널 결함으로 원인을 확정하지 않는다. 이 VM의 50ms reader 지연 복구·동일 장치
+feedback·장시간 운용은 아직 검증하지 않았다. source archive/manifest·VM 구성·원본 로그·loaded mapping·
+스레드 우선순위·native artifacts·비교 요약은 `.lab/remote-audio/`에 보존한다.
+
+**2026-10-08 최신 Linux Driver 패키지 검증:** 같은 Debian 13 VM의 정상 사용자 PipeWire
+세션에서 현재 수정본을 표준 `pnpm desktop:build --driver`로 빌드해 x86_64 DEB/RPM을 생성했다.
+DEB payload·ELF·문서·서비스/hook 검사를 통과하고 실제 APT 설치·사용자 서비스 Ready를 확인했다.
+설치된 서비스의 SHA-256은 빌드한 실제 sidecar와 일치한다. 2채널 Float32와 64채널 Float32·PCM16·
+PCM24·PCM32는 각각 독립 client scope 두 구간에서 fresh=480,255·누락·반복·wrong·short=0이었다.
+이 수치는 측정 구간의 PCM 판정이며 시작/종료 시 전체 transfer counter가 모두 0이라는 뜻은 아니다.
+당시 정책의 실제 D-Bus Quit 이벤트 후 관리자는 종료되고 같은 서비스 PID·장치 Ready가 유지됐다. 이 과거 검증은 이후 변경된 명시적 Driver 종료 동작의 검증으로 사용하지 않는다.
+관리자의 트레이 아이콘 시각 표시는 이번 최소 X11 세션에서 확인하지 못했다.
+
+같은 0.1.0 패키지 재설치 후 장치 ID·이름·64채널 PCM32와 사용자/권한은 보존됐다.
+서비스 재기동의 새 native owner 게시로 revision 8→9가 되어 파일 해시는 달라졌지만 설정 값은 동일하다.
+이는 같은 버전 교체 검증이며 서로 다른 릴리스 버전 사이의 업그레이드 검증으로 표시하지 않는다.
+정상 Polkit 제거·선택 삭제 결과는 아래 Driver 독립 수명 항목에 기록한다.
+당시 RPM은 빌드·payload 추출·실행 파일·hook·의존성 검사까지만 확인했다. 이후 실제 검증은 아래 2026-10-10 기록을 따른다.
+실제 관리 프로그램의 glibc 2.39 심볼 요구에 맞춰 Driver DEB/RPM의 최소 의존성을 2.39로 보완했다.
+패키지 검사 33개 통과와 수정 후 DEB/RPM 재빌드·실제 의존성 확인을 완료했다.
+최종 DEB의 관리자 메뉴에서 64채널·PCM32 선택을 실제 D-Bus 이벤트로 실행해 native readback을
+확인했고 당시 Quit 동작 뒤 같은 서비스 PID를 유지한 PCM 재검증 두 구간도 각각 fresh=480,255·연속성 오류 0이었다. 명시적 Driver 종료로 장치·루프백을 중지하는 새 동작은 별도 검증한다.
+macOS는 Notion의 기존 서명 백업을 복원하여 최신 서비스·HAL·관리 앱·설치/제거 도구의
+ARM64/Intel 통합 release 빌드와 실제 Developer ID Application 서명 검증을 완료했다.
+설치 payload의 아키텍처·게시자·launchd 설정 검증을 통과했고 Apple 공증은 Accepted였다
+(제출 ID `85c92976-8fa5-4580-9215-18afd6df2e3e`, issues 없음, ticket 18개).
+관리 앱과 독립 제거 앱은 staple/validate 및 Gatekeeper `Notarized Developer ID` 판정을 통과했다.
+기존 Installer 개인 키를 찾지 못해 사용자 지시에 따라 새 Developer ID Installer 인증서
+`G27855PS32`를 발급했다. 새 개인 키와 일치함을 확인하고 사용자 지시에 따라 암호 없는
+인증서·개인 키 PEM·중간 인증서·복원 설명서 ZIP을 Notion 서명 자료 페이지와 저장소 밖 개발 볼륨에
+각각 하나씩 보관했다. 중복 첨부·암호화 P12·임시 사본을 정리했다. Notion에서 내려받은 키와 인증서를
+별도 키체인에 복원해 유효 signing identity와 실제 PKG 서명을 확인했으며 최종 ZIP의 인증 자료와
+바이트가 일치했다(`macos-notion-backup-verification.json`).
+새 인증서로 실제 `MixRelay-Driver-Installer-0.1.0.pkg`를 생성했고 게시자·정확한 인증서 지문·timestamp를
+확인했다. PKG 공증 `0e8a8628-706d-4538-b097-3a79b0442a44`는 Accepted였다(issues 없음, ticket 21개).
+PKG와 독립 제거 앱의 staple/validate 및 Gatekeeper `Notarized Developer ID` 검증을 통과했다.
+최신 PKG의 실제 설치와 설치 후 runtime 검증은 아직 수행하지 않았다.
+이전 Installer 인증서 `FWXT2Q4U59`는 폐기 대상으로 지정하고 임시 키체인에서 공개 인증서를 제거했다.
+Developer ID는 계정에서 직접 revoke할 수 없어 Apple 보안팀에 보낼 폐기 요청 메일 초안을 준비했다.
+사용자 지시에 따라 메일은 발송하지 않으며 Apple 측 폐기는 미완료다. 앱 서명 인증서와 새 Installer 인증서는 폐기 대상이 아니다.
+과거 다른 설치본의 성공을 최신 수정본의 설치 성공으로 대체하지 않는다. 당시 Arch 패키지는 없었다.
+원본 로그·source manifest·설치 산출물은 `.lab/driver-release-20261008/`에 보존한다.
+
+**2026-10-10 Linux Driver 배포 패키지 검증:** 현재 0.1.0 x86_64 산출물은
+Debian 13의 DEB, Fedora 44의 RPM, Arch rolling의 pacman 패키지다. 각 KVM VM에서
+실제 설치·일반 사용자 서비스 Ready·관리자 메뉴 종료/재실행·실행 중 관리자에 대한 제거 차단·
+같은 버전 교체·설정과 명시적 종료 상태 보존·제거 후 프로세스/API/노드 해제·재설치를 확인했다.
+revision은 새 native owner 게시에 따라 증가할 수 있으며 장치 설정과 파일 소유자/권한을 보존했다.
+최종 설치 서비스의 바이트는 세 패키지에서 일치하고 root 소유 0755로 일반 사용자가 실행한다.
+
+Fedora와 Arch의 설치 서비스는 2채널 Float32 및 64채널 Float32·PCM16·PCM24·PCM32를
+각각 독립 client scope 두 구간에서 검사했다. 각 구간은 fresh=480,255, 누락·반복·wrong·short=0이다.
+이는 유한 구간의 PCM 판정이며 시작/종료 transfer counter 전체가 0이라는 의미는 아니다.
+Fedora의 최종 수명 검사는 동일 RPM 해시로 먼저 통과한 PCM 결과를 유지하고 실행했다.
+Debian의 기존 PCM 실측은 위의 별도 기록을 유지하며 이번에 다시 실행했다고 표시하지 않는다.
+최소 X11 세션의 시험용 StatusNotifier 호스트에 실제 관리자 메뉴의 D-Bus 이벤트를 전달했다.
+일반 데스크톱 패널의 트레이 아이콘 시각 배치는 이번 검증 범위에 포함하지 않았다.
+
+RPM의 glibc 버전 표현식이 bundler에서 하나의 의존성 이름으로 저장되는 문제는 실제 제공되는
+`libc.so.6(GLIBC_2.39)(64bit)` 요구로 수정했다. 빌드 umask로 sidecar가 0700이 되어 사용자
+서비스 실행이 실패하는 문제는 패키징 전 0755 설정으로 수정했다. 의존성 우회 없이 DNF 설치와
+서비스 실행을 확인했다. Arch는 검사한 DEB 공통 payload를 SHA-256으로 고정한 PKGBUILD로
+일반 사용자 `makepkg`에서 빌드하며, 패키지 전용 PreTransaction/AbortOnFail hook을 제공한다.
+제거 도구는 pacman의 고정 패키지 제거 명령을 지원한다.
+
+Fedora와 Arch의 실제 Zenity 제거 창에서 설정 삭제를 선택하고 Polkit을 통한 정상 제거 뒤
+정확한 Driver 설정 파일과 종료 마커 삭제를 확인했다. 시험 VM의 관리자 계정에만 고정 패키지
+관리 프로그램을 허용하는 임시 Polkit 규칙을 사용했으며 검사 뒤 제거했다. 테스트 설정은
+백업에서 복원하고 최종 패키지를 재설치해 Ready를 확인했다. 사용자 인증 창의 암호 입력 자체를
+검증했다는 뜻은 아니다. 기존 Debian의 승인/취소 검사는 아래 별도 기록을 유지한다.
+
+패키징·번역·빌드 경계 회귀 검사 69개가 통과했다. 배포 파일과 Arch 빌드 recipe는
+`artifacts/linux/`, 실제 패키지 해시·빌드 소스 해시·PCM 원본 로그·수명/제거 결과는
+`.lab/linux-release-20261010/`에 보관한다. 직접 다운로드용 파일 준비까지 완료했으며
+공개 게시·저장소 서명·AUR 등록은 수행하지 않았다. 서로 다른 버전 사이의 업그레이드,
+ARM64 설치 실행, 모든 파생 배포판과 실제 장비의 장시간 운용까지 검증한 것으로 확대하지 않는다.
+
+**Known issue — 일부 실행 환경에서 재생 중 PCM 프레임 누락:** 현재 재현 자료는
+Docker Desktop ARM64/LinuxKit 등의 가상화·스케줄링 지연 조건이며, 48kHz에서
+1,024~2,048프레임(약 21~43ms)의 간헐 누락을 확인했다. 원인은 미확정이고 해결 완료로 표시하지 않는다.
+별도 Debian 13 x86_64/KVM 대조에서는 수정 전·후 모두 위의 유한 연속성 검사를 통과했다.
+Arch Linux의 유한 PCM 검사는 위의 2026-10-10 기록에서 확인했다. 실제 사용자 장비의 장시간 운용은 아직 검증하지 않았다.
+사용자 결정에 따라 현재는 환경과 재현 조건을 명시한 known issue로 추적하며,
+이 결과만으로 Linux 전체의 출시 차단으로 분류하지 않는다. Debian 기반 전체나 Arch 전체의
+무결성을 보장한다는 뜻은 아니다. 지원 대상의 실제 환경에서 정상 사용 중 재현되면
+출시 판단을 다시 검토한다. 기존 PCM 검사와 실패 판정은 완화하지 않는다.
+
+**재개 지점:** 정상 callback 메타데이터·시작 전 버퍼 준비와 지연 시 전달 보장을 분리한다. 기존 reliable 설정만으로는 해결되지 않았으므로
+RAW follower·audio adapter·downstream IO의 미소비 경계를 대조하고, 다중 reader/feedback을 보존하는
+최소 전달 정책 변경이 필요한지 판단한다. 50ms 지연 PCM 검사를 통과하기 전에는 손실을 해결했다고 표시하지 않는다.
+실험 보존 패치는 regression 미확인으로 제출/배포 대기이며 indexed 지연 대조의 통과 결과는 유지한다.
+지연의 더 낮은 원인은 host vCPU/virtual IRQ trace 또는 물리 Linux 대조로 구분한다. 확정한 경계만 수정·재검증하며
 임의 FIFO 확대·Clock 재작성·판정 완화·새 runner·무가설 반복 검사를 하지 않는다.
-최신 콜백/trigger 계측의 포맷·strict Clippy·검사 8개·release 빌드·경고 금지 문서 검사는 통과했지만
-제품 연속성은 미해결이다. 일반 빌드에는 lab 훅이 없고 제품 오디오 동작·FIFO 용량도 바꾸지 않았다.
+최신 CPU 시각 계측의 포맷·strict Clippy·Linux release 검사 9개·경고 금지 문서 빌드는 통과했지만
+제품 연속성 전체는 검증 대기다. 일반 MixRelay 빌드에는 lab 훅이 없고 제품 오디오 동작·FIFO 용량도 바꾸지 않았다.
 기존 isolated lab의 project-managed `.lab/mixrelay-integration-current` 소스 루트에서 정상 사용자로 실행한다.
 
 ```sh
@@ -240,7 +597,7 @@ CARGO_BUILD_JOBS=1 MIXRELAY_LAB_TEST_NAME=native_driver_32_64_pcm_continues_afte
 - 앱은 시작 시·24시간마다 업데이트 서버를 조회하며 수동 확인도 제공한다. 앱과 Driver의 설치·게시 버전을 구분한다. 미게시·실패를 최신으로 표시하지 않고 다운로드를 누르면 현재 목록을 다시 확인한 뒤 링크만 연다. 설치·오디오 중단은 자동 실행하지 않는다.
 - 앱 제거는 로컬 유료 인증과 복구 저널을 자동 삭제한다. 기본 미선택인 체크박스로 앱의 그래프·캐시 삭제를 선택한다. 외부 프로젝트·녹음 파일은 보존한다.
 - Driver 제거는 Driver 장치·루프백을 내린다. 별도 기본 미선택 체크박스로 Driver 설정 삭제를 선택하며 앱의 구매 인증·그래프·녹음은 건드리지 않는다. 앱 제거만으로 Driver를 제거하지 않는다.
-- macOS 설치·업데이트는 `MixRelay Driver` PKG, 제거는 배포 파일에 동봉한 `Uninstall MixRelay Driver.app`을 사용한다. 배포 파일을 다시 내려받아 제거 앱을 실행할 수 있으며 트레이에는 제거 메뉴를 두지 않는다. 제거 시 약관 동의나 설치 화면을 표시하지 않고 삭제 범위 확인과 OS 관리자 인증만 요청한다.
+- macOS 설치·업데이트용 `MixRelay Driver` PKG는 Driver와 전용 제거 앱 `/Applications/Uninstall MixRelay Driver.app`을 함께 설치한다. 설치 화면에 제거 선택을 넣지 않는다. 제거 앱에서 기본 미선택인 Driver 설정 삭제 여부를 선택하고 제거를 실행하며 약관 절차는 없다. PKG가 설치한 on-demand 도우미는 제거 전용 관리자 인증과 동일 게시자의 서명된 앱 요청을 확인한 후 고정 제거 작업만 수행한다. 일반 앱의 광범위한 관리자 실행 권한·Installer 플러그인·별도 제거 PKG·트레이 제거 메뉴를 사용하지 않는다. 인증 취소 전에는 Driver 상태를 변경하지 않고, 성공 응답·실제 파일 부재·도우미 서비스 정리까지 확인한다. 새 구조의 실제 설치 및 제거 검증은 사용자 테스트가 완료된 뒤 기록한다.
 - Linux 설치·업데이트·제거는 APT·DNF 패키지 관리 경로를 유지한다.
 - 제거·업데이트 실패나 재부팅 뒤에도 재실행·재제거할 수 있어야 한다. 실패·취소한 제거는 인증을 지우지 않는다.
 - macOS는 Developer ID 서명·PKG 공증을 확인한다.
@@ -300,11 +657,11 @@ App Store 전환·AudioDriverKit 재작성·BPM·MIDI·새 JACK/ALSA 백엔드�
     - [x] macOS 앱 캡처 자원 회수: 128개 캡처 노드 순차 생성·종료, 활성/pause 64개 보존, stale lease·epoch 무효화·복사 후 종료 무음, 실제 FD 고갈 실패·reader 배출 후 매핑/FD 회수 통과. transport 10개·registry 12개 release 검사, 포맷·strict Clippy·문서·macOS 서비스 빌드 통과. 슬롯·매핑 회수는 다음 제어 수집에서 수행하며 RT에서 해제하지 않는다. 수정 앱/엔진은 아직 설치하지 않았다.
     - [x] Linux 단절 복구: 실제 native 노드 소실 후 같은 설정 복원·정상 다른 장치의 native ID 보존·명시 제거 후 재생성 없음 통과. GUI 요청 없는 maintenance·정상/pause 보존·재시도·종료 회귀와 제어 33개·Linux 11개·PipeWire 17개 release 검사, 포맷·strict Clippy·문서·서비스 빌드 통과. 정상 maintenance의 추가 readback·설정 저장 0회. 설치 서비스의 장시간 장애 복구는 별도 확인한다.
     - [x] Linux 콜백 관측: 검증 빌드 전용 진입/종료·스레드·버퍼 시각/대기 수. 포맷·strict Clippy·관측기 7개·release·runner 경계/정리 검사 통과. 진단 한 회의 기록 11,300개·콜백 쌍 2,823개 누락 0. 일반 빌드에는 훅 참조 없음.
-    - [ ] Linux 최적화본 연속성: 기존 32채널 Float32·PCM16 및 64채널 Float32 두 구간은 각 480,255프레임 오류 0. PCM24/PCM32·64채널 PCM16 gap은 미해결. 이번 32채널 PCM24는 source queue→Driver render에서 1,024프레임 누락. [누락 조사](#linux-1024프레임-누락-조사)에 이전 실행과 구분해 기록했다. cycle 전달·실행 지연 및 WirePlumber Format 오류를 확인한다. 원인·해결은 미완료.
+    - [ ] Linux 최적화본 연속성: 기존 32채널 Float32·PCM16 및 64채널 Float32 두 구간은 각 480,255프레임 오류 0. PipeWire 1.4.2 소스 보존 패치는 reader 지연 대조의 32채널 PCM24·64채널 PCM16 손실을 막았고, 훅 제거 실행도 두 구간 각 480,255프레임 오류 0이다. 기존 source queue→Driver render 손실·PCM32·fanout/feedback·설치 제품 전체 해결은 미확인이다. [누락 조사](#linux-1024프레임-누락-조사)에 빌드와 원본/수정 대조를 구분해 기록했다.
     - [ ] Linux 같은 장치 되돌림: 32채널 native 실행에서 기대 PCM에 도달했지만 유지하지 못했다(정상 20,480·이후 불일치 29,696프레임). PipeWire 전달 지연과 정상상태 신호 복구를 확인한다. 진단은 실제 수렴값·정상/오류 프레임을 표시하며 임계값은 유지한다. 진단 변경의 포맷·strict Clippy·단위 8개 통과.
     - [ ] 수정 설치본의 실제 DAW 및 장시간 운용 확인. 위의 유한 검사를 장기 현장 무결성·절대 누수 없음으로 확대해 주장하지 않는다.
 - [ ] 드라이버 독립 수명:
-  - [x] Linux 설치본: 관리 앱 Ctrl+Q·클라이언트 종료 뒤 서비스와 장치 유지. 2채널 Float32 및 64채널 네 PCM 형식은 각 두 구간에서 480,255프레임·오류 0개.
+  - [x] Linux 과거 설치본(이전 종료 정책): 관리 앱 Ctrl+Q·클라이언트 종료 뒤 서비스와 장치 유지. 2채널 Float32 및 64채널 네 PCM 형식은 각 두 구간에서 480,255프레임·오류 0개.
   - [x] Linux 패키지 관리자 제거: Driver 프로세스·노드·API·실행 파일 해제, 설정·App 패키지 보존. 업데이트·재설치 뒤 같은 설정과 일반 사용자 서비스 복원. 최종 설치본의 64채널 PCM32도 두 구간 각각 480,255프레임·오류 0개.
   - [x] Linux GUI 제거 취소. 인증 취소·실패 시 설정 보존과 한영 안내 회귀 검사 통과. 부분 설치 실패 상태에서도 패키지 제거를 재시도하도록 수정했다.
   - [x] macOS 수정 PKG 설치: 관리자 승인 후 성공. 서비스 Ready·버전 0.1.0, 설치된 관리 앱·제거 앱과 최신 패키지의 일치 및 서명을 확인했다. Mac 재부팅은 하지 않았다.
@@ -313,7 +670,7 @@ App Store 전환·AudioDriverKit 재작성·BPM·MIDI·새 JACK/ALSA 백엔드�
   - [x] macOS 최종 패키지 재설치: 표시·소유권 수정본 설치 성공. 재부팅 없이 서비스 Ready·장치 ID·이름·2채널·48kHz Float32 유지, 설치 앱의 payload·서명 일치 확인. 서비스 게시 revision만 증가했다. 그래프·오디오 설정은 변경되지 않았다.
   - [ ] macOS 제거 잔여: 인증 취소 시 관리 앱 복원·선택 삭제 확인 남음.
   - [ ] macOS 다른 계정 재설치: 제거 후 남은 lease 소유권을 잠금 아래에서 새 계정에 재결합하도록 수정했다. 설치 도구의 release 검사 115개·포맷·strict Clippy·독립 리뷰·ARM64/Intel 빌드·문서 검사는 통과했다. 수정한 Universal 2 패키지의 서명·payload·공증·ticket·Gatekeeper 검사를 통과했다. 실제 다른 UID 변경·재설치 확인은 남았다.
-  - [ ] Linux GUI 정상 승인·설정 삭제 선택: 검증 VM의 관리자 인증 설정 승인 대기.
+  - [x] Linux GUI 정상 승인·설정 삭제 선택: 2026-10-08 Debian 13 x86_64 VM의 설치된 제거 도구를 일반 사용자 터미널에서 실행했다. 실제 Zenity 확인창 취소는 exit 0·패키지/설정 보존, Polkit 암호 입력 EOF는 exit 127·인증 실패 안내·패키지/설정 보존이었다. 정상 Polkit 승인 후 기본 제거는 설정 해시 보존·서비스/API/실행 파일 해제, 재설치는 같은 64채널 PCM32 설정 복원, 삭제 선택 후 정상 승인은 정확한 Driver 설정 파일 삭제를 확인했다. 테스트 중 VM 계정에만 일회성 암호를 설정했고 원래 잠금 상태를 복원했다. GUI 인증 agent의 취소 exit 126은 이번 실제 실행에 포함하지 않았으며 기존 회귀 검사 결과로 구분한다.
 - [ ] 장치 입출력: 일반 CoreAudio·PipeWire 클라이언트로 전환. 입력=capture·출력=render의 UI·엔진 라이브러리와 macOS callback·변환 버퍼 검사 통과. Linux native 32/64채널 같은 장치 피드백과 설치된 64채널 네 PCM 형식 연속성 통과. 설치 장치가 필요한 6개 검사·다중 그래프 합산·회수 확인 남음.
 - [ ] 가상 장치 설정: macOS·Linux의 1–64채널 설정 경로 유지. Linux 설치 관리 앱의 64채널 PCM24 선택과 native readback 일치. 실제 DEB 업데이트·서비스 재시작 뒤 장치 ID·이름·64채널 PCM32·설정 파일의 소유자/권한 보존 확인. revision만 새 native 소유자 게시에 따라 증가한다. macOS 설치본 확인 남음.
   - [x] Driver 메뉴 단순화: 장치별 공통 샘플레이트·비트 깊이·채널 수만 표시. 앱 열기·장치 중간 메뉴·업데이트 팝업 제거. release 검사·Universal 2·서명·공증 통과. 설치본 화면에서 제품명·버전, 48kHz·24bit·4채널, PCM 선택지와 현재 값 체크 표시 확인. 업데이트 확인은 팝업 없이 메뉴에 ‘배포된 업데이트 없음’을 표시했다.
@@ -333,10 +690,23 @@ App Store 전환·AudioDriverKit 재작성·BPM·MIDI·새 JACK/ALSA 백엔드�
 - [ ] 플러그인 상태: 저장·재시작·Undo·포맷 변경 복원 확인.
 - [ ] 플러그인 에디터: 창·resize·worker 종료 후 회수 확인. 임의 파라미터가 PCM을 반드시 바꾼다고 요구하지 않음.
 - [ ] 배포:
-  - 완료: 패키지 문서·설정 보존·선택 삭제, 업데이트 API·R2 게시·패치 보관·목록 생성 검사. 앱의 업데이트 조회·링크 재확인과 기존 코드·UI 검사를 통과했다. Linux Driver ARM64 DEB 제품 빌드·실제 payload 검사 통과. macOS 설치·서비스 Ready, 제거 확인창·취소·미설치 안내와 설정 보존 제거・최종 패키지 재설치를 확인했다. 설치본 업데이트 확인은 남았다. 앱·Driver 약관은 영어 단일본이다. 설치 안내·약관의 RTF 표시 수정은 실제 다크 모드 화면·원문 보존·독립 리뷰·변경 경계 검사를 통과했다. 수정 패키지의 서명·새 공증·ticket·Gatekeeper 허용을 확인하고 현재 배포 산출물로 교체했다. 제거에는 약관 동의 단계가 없다.
-  - 남음: 실제 제품 게시·설치/업데이트/제거, 자동 인증 정리 변경·설치 약관 표시/동의·제3자 고지·전문 법률 검토 확인. 실제 제품 파일은 아직 게시하지 않음.
+  - 완료: 패키지 문서·설정 보존·선택 삭제, 업데이트 API·R2 게시·패치 보관·목록 생성 검사. 앱의 업데이트 조회·링크 재확인과 기존 코드·UI 검사를 통과했다. Linux Driver ARM64 DEB 제품 빌드·실제 payload 검사 통과. macOS 설치·서비스 Ready, 제거 확인창·취소·미설치 안내와 설정 보존 제거・최종 패키지 재설치를 확인했다. 설치본 업데이트 확인은 남았다. 앱과 Driver 약관은 각각 지원 11개 언어의 전문을 제공한다. 설치 안내·약관의 RTF 표시 수정은 실제 다크 모드 화면·원문 보존·독립 리뷰·변경 경계 검사를 통과했다. 수정 패키지의 서명·새 공증·ticket·Gatekeeper 허용을 확인하고 현재 배포 산출물로 교체했다. 설치 유형에서 제거를 선택하던 PKG 후보는 사용자 UX 검토에서 거부됐다. 현재는 설치·업데이트 PKG에 전용 제거 앱을 함께 설치하는 구조로 변경 중이며 새 구성의 실측 완료를 주장하지 않는다.
+  - 남음: 실제 제품 게시·설치/업데이트/제거, 자동 인증 정리 변경·설치 약관 표시/동의·제3자 고지와 법무 검토 기록의 구현·운영 요건. 실제 제품 파일은 아직 게시하지 않음.
 - [ ] 자원·성능: 정상·실패 시 회수, RT 무할당·무차단과 동일 조건 계측 확인.
 
 ### 미구현
 
 - [ ] 무료·유료 정책 적용: 기존 14일 체험 코드를 무기한 제한 체험으로 교체. 드라이버·장치 설정은 무료로 유지하고 그래프·매핑 저장·불러오기·자동 복원 제한을 같은 제어 경로에 적용. 무료 앱의 수치 제한은 확정 후 반영.
+
+
+2026-10-09 제거 흐름 검토: `installer-handoff` 후보는 일반 사용자 제거 앱에서
+서명된 scripts-only PKG를 macOS Installer로 넘겨 사용자 앱의 광범위한 관리자 접근 요청을
+없애도록 만들었다. 두 제거 PKG와 최종 설치 PKG의 서명·공증·Gatekeeper, 11언어 문구,
+Rust 9개·패키징/번역/가드 120개·strict Clippy를 통과했다. 실제 수정본 설치 후 네 실행 파일의
+payload 일치와 정상 종료·활성 클라이언트 배출·동일 장치 재시작을 확인했다. 인증 전 Installer
+취소는 관리 앱 PID·장치·설정 해시를 보존했다.
+그러나 제거를 Installer로 넘기면 시스템 UI가 다시 ‘설치’로 표시된다. 사용자가 이 혼란을
+지적하여 제거 실측을 중단하고 테스트가 연 Installer와 제거 앱을 모두 종료했다. 실제 제거는
+실행하지 않았고 Driver와 설정은 유지됐다. 이 후보는 배포 승인하지 않는다. 제거 전용 화면과
+권한 요청 흐름은 추가 수정이 필요하다. Debian 새 패키지의 실제 제거·재설치·설정 보존·상태
+메뉴 종료/재시작은 통과했고 VM은 원래의 종료 상태로 돌렸다.

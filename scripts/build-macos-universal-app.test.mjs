@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { chmodSync, copyFileSync, existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const sourceScript = fileURLToPath(new URL("./build-macos-universal-app.sh", import.meta.url));
 const driverLicense = readFileSync(new URL("../LICENSE-Driver.txt", import.meta.url));
+const driverLicenseKo = readFileSync(new URL("../LICENSE-Driver.ko.txt", import.meta.url));
+const languages = JSON.parse(readFileSync(new URL("../packaging/localization/languages.json", import.meta.url), "utf8"));
+const driverDocuments = Object.fromEntries(languages.map(language => [language.driverTerms, readFileSync(new URL(`../${language.driverTerms}`, import.meta.url))]));
 const changelog = readFileSync(new URL("../CHANGELOG.md", import.meta.url));
 
 function executable(path, contents) {
@@ -43,9 +46,12 @@ function fixture(t) {
   mkdirSync(join(root, "apps/desktop/src-tauri/icons"), { recursive: true });
   writeFileSync(join(root, "apps/desktop/src-tauri/icons/icon.icns"), "icon fixture");
   writeFileSync(join(root, "LICENSE-Driver.txt"), driverLicense);
+  writeFileSync(join(root, "LICENSE-Driver.ko.txt"), driverLicenseKo);
+  for (const [filename, bytes] of Object.entries(driverDocuments)) writeFileSync(join(root, filename), bytes);
   writeFileSync(join(root, "CHANGELOG.md"), changelog);
   writeFileSync(unrelated, "preserve me\n");
   copyFileSync(sourceScript, script);
+  writeFileSync(join(scripts,"build-macos-removal-app.mjs"), `import * as fs from 'node:fs'; import {join} from 'node:path'; const [, , executable,helper,output]=process.argv; fs.mkdirSync(join(output,'Contents'),{recursive:true}); fs.writeFileSync(join(output,'Contents/tested-arguments'),executable+'\\n'+helper);`);
   chmodSync(script, 0o755);
 
   executable(join(bin, "uname"), `#!/bin/sh
@@ -98,7 +104,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 mkdir -p "target/$target/release"
-for helper in mixrelay-driver-uninstaller mixrelay-macos-installer mixrelay-macos-payload-check; do
+for helper in mixrelay-macos-installer mixrelay-macos-payload-check mixrelay-driver-uninstaller; do
   if [ "\${MOCK_HELPER_SINGLE:-}" = 1 ]; then
     printf '%s\\n' 'MACHO SINGLE' > "target/$target/release/$helper"
   else
@@ -181,6 +187,7 @@ function runBuild(paths, extraEnv = {}, args = []) {
     "CARGO_BUILD_JOBS",
     "MIXRELAY_CODESIGN_IDENTITY",
     "APPLE_SIGNING_IDENTITY",
+    "APPLE_INSTALLER_SIGNING_IDENTITY",
     "CC_aarch64_apple_darwin",
     "CC_x86_64_apple_darwin",
     "CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER",
@@ -198,6 +205,7 @@ function runBuild(paths, extraEnv = {}, args = []) {
     MOCK_PNPM_MODE: "universal",
     MOCK_SDK: paths.sdk,
     APPLE_SIGNING_IDENTITY: "Developer ID Application: MixRelay",
+    APPLE_INSTALLER_SIGNING_IDENTITY: "Developer ID Installer: MixRelay (AB12C3D4E5)",
     ...extraEnv,
   });
   return spawnSync("zsh", [paths.script, ...args], { cwd: paths.root, encoding: "utf8", env });
@@ -243,23 +251,12 @@ test("Driver product builds source helpers and signs its independent removal app
   const commands = log(paths);
   const cargoBuilds = commands.split("\n").filter(line => line.startsWith("cargo "));
   assert.equal(cargoBuilds.length, 2);
-  assert.match(cargoBuilds[0], /--release --target aarch64-apple-darwin --bin mixrelay-driver-uninstaller --bin mixrelay-macos-installer --bin mixrelay-macos-payload-check$/);
-  assert.match(cargoBuilds[1], /--release --target x86_64-apple-darwin --bin mixrelay-driver-uninstaller --bin mixrelay-macos-installer --bin mixrelay-macos-payload-check$/);
+  assert.match(cargoBuilds[0], /--release --target aarch64-apple-darwin --bin mixrelay-macos-installer --bin mixrelay-macos-payload-check --bin mixrelay-driver-uninstaller$/);
+  assert.match(cargoBuilds[1], /--release --target x86_64-apple-darwin --bin mixrelay-macos-installer --bin mixrelay-macos-payload-check --bin mixrelay-driver-uninstaller$/);
   assert.ok(commands.indexOf(cargoBuilds[1]) < commands.indexOf("pnpm "));
-  const uninstaller = join(paths.app, "Contents/Helpers/Uninstall MixRelay Driver.app");
-  const info = JSON.parse(readFileSync(join(uninstaller, "Contents/Info.plist"), "utf8"));
-  assert.equal(info.CFBundleIdentifier, "io.mixrelay.driver.uninstaller");
-  assert.equal(info.CFBundleExecutable, "mixrelay-driver-uninstaller");
-  assert.equal(info.MixRelaySigningTeam, "AB12C3D4E5");
-  assert.equal(info.CFBundleShortVersionString, "1.2.3");
-  const helperOutput = join(paths.root, "target/universal-apple-darwin/release");
-  assert.deepEqual(readFileSync(join(uninstaller, "Contents/Resources/mixrelay-macos-installer")), readFileSync(join(helperOutput, "mixrelay-macos-installer")));
-  assert.deepEqual(readFileSync(join(uninstaller, "Contents/Resources/LICENSE-Driver.txt")), driverLicense);
-  assert.deepEqual(readFileSync(join(uninstaller, "Contents/Resources/CHANGELOG.md")), changelog);
-  assert.equal(readFileSync(join(uninstaller, "Contents/Resources/icon.icns"), "utf8"), "icon fixture");
-  const helperSign = commands.indexOf(`--identifier io.mixrelay.driver.uninstaller ${uninstaller}`);
-  const outerSign = commands.indexOf(`--preserve-metadata=entitlements,flags,runtime --timestamp ${paths.app}`);
-  assert.ok(helperSign >= 0 && outerSign > helperSign);
+  assert.equal(existsSync(join(paths.app, "Contents/Helpers/Uninstall MixRelay Driver.app")), false);
+  assert.ok(existsSync(join(dirname(paths.app),"Uninstall MixRelay Driver.app")));
+  assert.doesNotMatch(commands, /removal-packages|build-macos-removal-pkgs/);
   assert.match(commands, /--identifier mixrelay-macos-installer /);
   assert.match(commands, /--identifier mixrelay-macos-payload-check /);
 });

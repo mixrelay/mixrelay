@@ -1,4 +1,4 @@
-//! Keeps native Dock dismissal separate from explicit managed application exit.
+//! Routes native Quit through each product's acknowledged shutdown path.
 use std::{ffi::c_char, sync::Mutex};
 
 use objc2::{
@@ -91,13 +91,14 @@ extern "C-unwind" fn should_terminate(
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone();
-    if let Some(app) = app
-        && let Err(error) = crate::tray_menu::hide_main_window(&app)
-    {
-        tracing::error!(%error, "could not hide MixRelay from Dock");
+    if let Some(app) = app {
+        // AppKit termination bypasses Tauri's ExitRequested event. Re-enter
+        // that managed path so Driver/device or App/engine shutdown completes
+        // before exit. Window dismissal still follows the separate hide path.
+        app.exit(0);
     }
-    // Native dismissal only changes visibility. Explicit tray/menu Quit uses
-    // app.exit and the managed server drain, without entering this callback.
+    // AppKit must not exit immediately: the managed shutdown owns the decision.
+    // Explicit tray/menu Quit already uses that same path.
     NSApplicationTerminateReply::TerminateCancel
 }
 

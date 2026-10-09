@@ -5,10 +5,10 @@ use std::{error::Error, path::PathBuf};
 use thiserror::Error;
 
 use crate::{
-    FilesystemAdapter, FilesystemCommitted, FilesystemError, FilesystemLayout, FilesystemRecovery,
-    FilesystemSnapshot, FilesystemStaged, LIFECYCLE_DIRECTORY, LeaseError, LifecycleDirectory,
-    LifecycleLeaseGuard, PlatformBackend, Preflight, PreflightError, PreflightResult,
-    RollbackFailure, TransactionRequest,
+    FilesystemAdapter, FilesystemCommitted, FilesystemError, FilesystemLayout,
+    FilesystemRecoveryDiagnostics, FilesystemSnapshot, FilesystemStaged, LIFECYCLE_DIRECTORY,
+    LeaseError, LifecycleDirectory, LifecycleLeaseGuard, PlatformBackend, Preflight,
+    PreflightError, PreflightResult, RollbackFailure, TransactionRequest,
 };
 
 /// Platform validation and service registration participating in file rollback.
@@ -61,12 +61,12 @@ pub trait ServiceLifecycle {
 
     /// Stops and drains the current verified Driver before restoring any files.
     /// # Errors
-    /// Returns incomplete drain or identity verification; private staging is retained.
+    /// Returns incomplete drain or identity verification; cleanup is still attempted.
     fn prepare_restore(&mut self, snapshot: &Self::Snapshot) -> Result<(), Self::Error>;
 
     /// Restores registration after the prior files have been restored.
     /// # Errors
-    /// Returns incomplete service recovery. Private staging will be retained.
+    /// Returns incomplete service recovery. Private staging is still cleaned up.
     fn restore(&mut self, snapshot: &Self::Snapshot) -> Result<(), Self::Error>;
 }
 
@@ -88,19 +88,19 @@ pub enum CoordinatedError<E: Error + 'static> {
         /// The validation error that prevented mutation.
         #[source]
         cause: E,
-        /// The cleanup error; private staging is retained.
+        /// The cleanup error; private staging could not be removed.
         cleanup: Box<FilesystemError>,
     },
 }
 
-/// Recovery state retained when either files or registration could not recover.
+/// Recovery diagnostics when either files or registration could not recover.
 #[derive(Debug)]
-pub enum CoordinatedRecovery {
+pub enum CoordinatedRecoveryDiagnostics {
     /// Files were not fully restored; registration restoration was not attempted.
-    Filesystem(FilesystemRecovery),
+    Filesystem(FilesystemRecoveryDiagnostics),
     /// Driver drain or prior service restoration failed; files may still need recovery.
     Service {
-        /// Private staging retained for administrator investigation.
+        /// The attempted transaction path; successful cleanup removes it.
         staging_root: PathBuf,
     },
 }
@@ -133,7 +133,7 @@ impl<S: ServiceLifecycle> PlatformBackend for CoordinatedBackend<S> {
     type Drained = ();
     type Committed = FilesystemCommitted;
     type Registration = S::Registration;
-    type RetainedRecovery = CoordinatedRecovery;
+    type RecoveryDiagnostics = CoordinatedRecoveryDiagnostics;
     type Error = CoordinatedError<S::Error>;
 
     fn preflight(&mut self, request: &TransactionRequest) -> PreflightResult<Self> {
@@ -159,6 +159,12 @@ impl<S: ServiceLifecycle> PlatformBackend for CoordinatedBackend<S> {
             .service
             .inspect(request, layout)
             .map_err(|error| PreflightError::Backend(CoordinatedError::Service(error)))?;
+        // A previous transaction may have restored every original file but
+        // failed its service recovery check. Discard that abandoned transaction
+        // only after trust inspection and while all lifecycle leases are held.
+        self.filesystem
+            .cleanup_stale_staging()
+            .map_err(|error| PreflightError::Backend(CoordinatedError::Filesystem(error)))?;
         let files = self
             .filesystem
             .preflight(request)
@@ -223,13 +229,13 @@ impl<S: ServiceLifecycle> PlatformBackend for CoordinatedBackend<S> {
         preflight: &Preflight<Self::LeaseGuard, Self::Snapshot>,
         staged: &Self::Staged,
         committed: Option<&Self::Committed>,
-    ) -> Result<(), RollbackFailure<Self::Error, Self::RetainedRecovery>> {
+    ) -> Result<(), RollbackFailure<Self::Error, Self::RecoveryDiagnostics>> {
         self.service
             .prepare_restore(&preflight.snapshot().1)
             .map_err(|error| {
                 RollbackFailure::new(
                     CoordinatedError::Service(error),
-                    CoordinatedRecovery::Service {
+                    CoordinatedRecoveryDiagnostics::Service {
                         staging_root: staged.staging_root().to_path_buf(),
                     },
                 )
@@ -237,10 +243,10 @@ impl<S: ServiceLifecycle> PlatformBackend for CoordinatedBackend<S> {
         self.filesystem
             .rollback(request, &preflight.snapshot().0, staged, committed)
             .map_err(|failure| {
-                let (error, retained) = failure.into_parts();
+                let (error, diagnostics) = failure.into_parts();
                 RollbackFailure::new(
                     CoordinatedError::Filesystem(error),
-                    CoordinatedRecovery::Filesystem(retained),
+                    CoordinatedRecoveryDiagnostics::Filesystem(diagnostics),
                 )
             })?;
         // A registration attempt may have started the new Driver. It must be
@@ -250,7 +256,7 @@ impl<S: ServiceLifecycle> PlatformBackend for CoordinatedBackend<S> {
             .map_err(|error| {
                 RollbackFailure::new(
                     CoordinatedError::Service(error),
-                    CoordinatedRecovery::Service {
+                    CoordinatedRecoveryDiagnostics::Service {
                         staging_root: staged.staging_root().to_path_buf(),
                     },
                 )

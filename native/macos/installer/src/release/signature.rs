@@ -55,6 +55,7 @@ fn verify_signature_metadata(path: &Path, role: ArtifactRole) -> Result<(), Rele
     let metadata_path = match role {
         ArtifactRole::Application => path.join("Contents/MacOS/mixrelay-desktop"),
         ArtifactRole::Hal => path.join("Contents/MacOS/MixRelayHAL"),
+        ArtifactRole::Uninstaller => path.join("Contents/MacOS/mixrelay-driver-uninstaller"),
         ArtifactRole::Driver | ArtifactRole::Installer => path.to_path_buf(),
     };
     let slices = super::security_metadata::inspect_slices(&metadata_path, role)?;

@@ -72,10 +72,15 @@ pub fn resolve_console_account() -> Result<ResolvedServiceAccount, NativeError> 
         ));
     }
 
+    resolve_service_uid(uid)
+}
+
+/// Resolves the retained lifecycle lease owner even when the Driver plist is gone.
+pub(super) fn resolve_service_uid(uid: u32) -> Result<ResolvedServiceAccount, NativeError> {
     let record = passwd_for_uid(uid)?;
     if record.uid != uid || record.name == "root" {
         return Err(NativeError::Account(
-            "console UID does not match a non-root passwd record".to_owned(),
+            "service UID does not match a non-root passwd record".to_owned(),
         ));
     }
     let group_name = group_name_for_gid(record.gid)?;
@@ -84,7 +89,7 @@ pub fn resolve_console_account() -> Result<ResolvedServiceAccount, NativeError> 
     let resolved = resolve_service_account(&account)?;
     if resolved.uid != uid {
         return Err(NativeError::Account(
-            "console device owner changed during account resolution".to_owned(),
+            "service UID changed during account resolution".to_owned(),
         ));
     }
     Ok(resolved)

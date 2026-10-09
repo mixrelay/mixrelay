@@ -1,4 +1,9 @@
 use super::{ControlProxyClient, ControlProxyResponse, Method};
+use crate::native_text::{
+    Locale,
+    dialogs::{Text, text},
+    resolve_locale,
+};
 use serde::Deserialize;
 use std::{path::PathBuf, sync::Mutex};
 use tauri::Manager;
@@ -31,18 +36,18 @@ pub(crate) async fn workspace_file(
     files: tauri::State<'_, WorkspaceFiles>,
     request: FileRequest,
 ) -> Result<Option<ControlProxyResponse>, String> {
-    let korean = request.locale.starts_with("ko");
+    let locale = resolve_locale(&request.locale);
     if matches!(request.action, FileAction::New | FileAction::Open)
-        && !confirm_replace(&app, korean).await
+        && !confirm_replace(&app, locale).await
     {
         return Ok(None);
     }
     let current = files
         .0
         .lock()
-        .map_err(|_| "workspace path lock poisoned")?
+        .map_err(|_| text(locale, Text::WorkspaceLockFailed))?
         .clone();
-    let selected = select_path(&app, request.action, current, korean).await?;
+    let selected = select_path(&app, request.action, current, locale).await?;
     if selected.is_none() && request.action != FileAction::New {
         return Ok(None);
     }
@@ -58,7 +63,10 @@ pub(crate) async fn workspace_file(
     });
     let response = submit(&app, &client, request.action, payload).await?;
     if response.status >= 200 && response.status < 300 {
-        *files.0.lock().map_err(|_| "workspace path lock poisoned")? = selected;
+        *files
+            .0
+            .lock()
+            .map_err(|_| text(locale, Text::WorkspaceLockFailed))? = selected;
     }
     Ok(Some(response))
 }
@@ -82,32 +90,28 @@ async fn submit(
         .await
 }
 
-async fn confirm_replace(app: &tauri::AppHandle, korean: bool) -> bool {
+async fn confirm_replace(app: &tauri::AppHandle, locale: Locale) -> bool {
     let Some(window) = app.get_webview_window("main") else {
         return false;
     };
     rfd::AsyncMessageDialog::new()
         .set_parent(&window)
         .set_title("MixRelay")
-        .set_description(if korean {
-            "현재 작업 공간을 교체할까요? 보관하려면 취소한 뒤 먼저 저장하세요."
-        } else {
-            "Replace the current workspace? Cancel and save first to keep your work."
-        })
+        .set_description(text(locale, Text::WorkspaceReplacePrompt))
         .set_buttons(rfd::MessageButtons::OkCancelCustom(
-            if korean { "교체" } else { "Replace" }.into(),
-            if korean { "취소" } else { "Cancel" }.into(),
+            text(locale, Text::WorkspaceReplace).into(),
+            text(locale, Text::Cancel).into(),
         ))
         .show()
         .await
-        == rfd::MessageDialogResult::Custom(if korean { "교체" } else { "Replace" }.into())
+        == rfd::MessageDialogResult::Custom(text(locale, Text::WorkspaceReplace).into())
 }
 
 async fn select_path(
     app: &tauri::AppHandle,
     action: FileAction,
     current: Option<PathBuf>,
-    korean: bool,
+    locale: Locale,
 ) -> Result<Option<PathBuf>, String> {
     if action == FileAction::New {
         return Ok(None);
@@ -128,7 +132,7 @@ async fn select_path(
     let dialog = rfd::AsyncFileDialog::new()
         .set_parent(
             &app.get_webview_window("main")
-                .ok_or("main window unavailable")?,
+                .ok_or_else(|| text(locale, Text::MainWindowUnavailable))?,
         )
         .add_filter("MixRelay", &["mix"])
         .set_directory(
@@ -146,20 +150,12 @@ async fn select_path(
         );
     let path = if action == FileAction::Open {
         dialog
-            .set_title(if korean {
-                "작업 공간 열기"
-            } else {
-                "Open Workspace"
-            })
+            .set_title(text(locale, Text::WorkspaceOpen))
             .pick_file()
             .await
     } else {
         dialog
-            .set_title(if korean {
-                "작업 공간 저장"
-            } else {
-                "Save Workspace"
-            })
+            .set_title(text(locale, Text::WorkspaceSave))
             .save_file()
             .await
     };

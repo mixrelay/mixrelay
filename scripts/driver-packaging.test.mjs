@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +36,8 @@ test('Driver Linux package owns one manager, service and user-session activation
   assert.ok(!config.bundle.linux.deb.depends.includes('polkit-1-auth-agent | lxpolkit'));
   assert.ok(config.bundle.linux.rpm.depends.includes('polkit'));
   assert.ok(config.bundle.linux.rpm.depends.includes('xterm'));
+  assert.ok(config.bundle.linux.rpm.depends.includes('libc.so.6(GLIBC_2.39)(64bit)'));
+  assert.ok(!config.bundle.linux.rpm.depends.some(dependency => /\s[<>=]/.test(dependency)));
   assert.ok(!config.bundle.linux.rpm.depends.includes('PolicyKit-authentication-agent'));
   assert.match(read('packaging/linux/driver-uninstall.sh'), /FALSE "\$delete_label"/);
   assert.doesNotMatch(read('packaging/linux/driver-uninstall.sh'), /clear-local-license|graphs\.json|rm -rf/);
@@ -46,7 +48,7 @@ test('Driver removal retries partial installs and preserves settings on absence 
   const directory = mkdtempSync(resolve(root, 'target/linux-driver-uninstall-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   for (const [packageFormat, packageState] of [
-    ['deb', 'installed'], ['rpm', 'installed'],
+    ['deb', 'installed'], ['rpm', 'installed'], ['arch', 'installed'],
     ...['unpacked', 'half-configured', 'half-installed', 'triggers-awaited', 'triggers-pending',
       'not-installed', 'config-files'].map(state => ['deb', state]),
   ]) {
@@ -59,11 +61,13 @@ test('Driver removal retries partial installs and preserves settings on absence 
         const settings = join(userDirectory, '.config/mixrelay-driver/drivers.json');
         mkdirSync(dirname(settings), { recursive: true });
         writeFileSync(settings, 'saved Driver settings');
+        writeFileSync(`${settings}.stopped`, 'stopped');
         const log = join(fixtureDirectory, 'calls');
         const commands = {
           id: 'printf "1000\\n"',
           'dpkg-query': '[ "$TEST_PACKAGE" = deb ] || exit 1\n[ "$1" = -W ] && [ "$2" = \'-f=${db:Status-Status}\' ] && [ "$3" = mix-relay-driver ] || exit 1\nprintf "%s" "$TEST_PACKAGE_STATE"',
           rpm: '[ "$TEST_PACKAGE" = rpm ]',
+          pacman: '[ "$TEST_PACKAGE" = arch ] && [ "$1" = -Q ] && [ "$2" = mix-relay-driver ]',
           zenity: `printf '%s\\n' "$@" >> "$TEST_LOG"
 if [ "$1" = --list ]; then
   for value do last=$value; done
@@ -95,14 +99,17 @@ exit "$TEST_STATUS"`,
         } });
         assert.equal(result.status, !removable || status === 100 ? 1 : status, `${scenario}: ${result.stderr}`);
         assert.equal(existsSync(settings), !removable || status !== 0, scenario);
+        assert.equal(existsSync(`${settings}.stopped`), !removable || status !== 0, scenario);
         const calls = readFileSync(log, 'utf8');
         assert.match(calls, /FALSE\n/);
         if (!removable) {
           assert.doesNotMatch(calls, /pkexec|package-remove/);
         } else if (packageFormat === 'deb') {
           assert.match(calls, /pkexec\n\/usr\/bin\/apt-get\n-y\nremove\n--\nmix-relay-driver\n/);
-        } else {
+        } else if (packageFormat === 'rpm') {
           assert.match(calls, /pkexec\n\/usr\/bin\/dnf\n-y\n--setopt=clean_requirements_on_remove=False\nremove\nmix-relay-driver\n/);
+        } else {
+          assert.match(calls, /pkexec\n\/usr\/bin\/pacman\n--noconfirm\n-R\n--\nmix-relay-driver\n/);
         }
         if (removable && (status === 126 || status === 127)) {
           assert.doesNotMatch(calls, /package-remove|Quit MixRelay|앱과 Driver 관리자를 종료/);
@@ -115,7 +122,7 @@ exit "$TEST_STATUS"`,
             : /Authorization unavailable or authentication failed|승인 불가 또는 인증 오류/);
         } else if (!removable || status !== 0) {
           assert.match(calls, language === 'ko'
-            ? /앱과 Driver 관리자를 종료한 뒤 다시 시도/ : /Quit MixRelay and the Driver Manager, then retry/);
+            ? /MixRelay와 MixRelay Driver를 종료한 뒤 다시 시도/ : /Quit MixRelay and MixRelay Driver, then retry/);
         } else {
           assert.doesNotMatch(calls, /--error|--info/);
         }
@@ -132,6 +139,7 @@ test('Driver preparation publishes actual matching service/version inputs withou
     },
     mkdirSync() {},
     copyFileSync(from, to) { copies.push([from, to]); },
+    chmodSync() {},
     writeFileSync(path, text) { writes.push([path, text]); },
   };
   const result = prepareDriverPackage({
@@ -147,6 +155,24 @@ test('Driver preparation publishes actual matching service/version inputs withou
   assert.ok(!commands[0][1].includes('mixrelay-engine-service'));
   fsApi.readFileSync = path => path.endsWith('Cargo.toml') ? '[workspace.package]\nversion = "1.2.4"\n' : '{"version":"1.2.3"}';
   assert.throws(() => prepareDriverPackage({ args: ['--target', 'aarch64-unknown-linux-gnu'], rootDir: '/project', env: {}, fsApi }), /versions must match/);
+});
+
+test('Linux service packaging makes a restrictive build output executable for ordinary users', t => {
+  const directory = mkdtempSync(join(root, 'target/driver-sidecar-permissions-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, 'apps/desktop/src-tauri'), { recursive: true });
+  writeFileSync(join(directory, 'Cargo.toml'), '[workspace.package]\nversion = "1.2.3"\n');
+  writeFileSync(join(directory, 'apps/desktop/src-tauri/tauri.conf.json'), '{"version":"1.2.3"}');
+  const input = join(directory, 'target/x86_64-unknown-linux-gnu/release/mixrelay-driver-service');
+  const bytes = '#!/bin/sh\nexit 0\n';
+  mkdirSync(dirname(input), { recursive: true });
+  writeFileSync(input, bytes, { mode: 0o700 });
+  prepareDriverPackage({ args: ['--target', 'x86_64-unknown-linux-gnu'], rootDir: directory,
+    env: {}, run: () => ({ status: 0 }) });
+  const sidecar = join(directory, 'apps/desktop/src-tauri/binaries/mixrelay-driver-service-x86_64-unknown-linux-gnu');
+  assert.equal(readFileSync(sidecar, 'utf8'), bytes);
+  assert.equal(statSync(sidecar).mode & 0o777, 0o755);
+  assert.equal(statSync(input).mode & 0o777, 0o700);
 });
 
 function driverFixture() {

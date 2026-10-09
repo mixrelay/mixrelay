@@ -2,6 +2,15 @@
 Type=Application
 Name=Uninstall MixRelay Driver
 Name[ko]=MixRelay Driver 제거
+Name[ja]=MixRelay Driver のアンインストール
+Name[zh_CN]=卸载 MixRelay Driver
+Name[zh_TW]=解除安裝 MixRelay Driver
+Name[fr]=Désinstaller MixRelay Driver
+Name[de]=MixRelay Driver deinstallieren
+Name[es]=Desinstalar MixRelay Driver
+Name[pt]=Desinstalar MixRelay Driver
+Name[it]=Disinstallare MixRelay Driver
+Name[ru]=Удалить MixRelay Driver
 Exec=/bin/sh /usr/lib/mixrelay-driver/uninstall.sh
 Terminal=true
 Categories=AudioVideo;Audio;

@@ -7,6 +7,7 @@ pub(super) enum ArtifactRole {
     Hal,
     Driver,
     Installer,
+    Uninstaller,
 }
 
 #[cfg(any(target_os = "macos", test))]

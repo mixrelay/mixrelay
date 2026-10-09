@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import { inspectPackage, validatePackage } from './check-linux-package.mjs';
 
+const languages = JSON.parse(readFileSync(new URL('../packaging/localization/languages.json', import.meta.url), 'utf8'));
+const localizedDocuments = languages.flatMap(language => [language.appTerms, language.driverTerms]);
 const wirePlumberFiles = [
   'usr/share/wireplumber/scripts/mixrelay-source-mute.lua',
   'usr/share/wireplumber/wireplumber.conf.d/90-mixrelay-source-mute.conf',
@@ -17,8 +19,7 @@ const uninstallFiles = [
 ];
 const documentationFiles = [
   'usr/share/doc/mix-relay/CHANGELOG.md',
-  'usr/share/doc/mix-relay/LICENSE.txt',
-  'usr/share/doc/mix-relay/LICENSE-Driver.txt',
+  ...localizedDocuments.map(filename => `usr/share/doc/mix-relay/${filename}`),
 ];
 
 const lifecycleHook = readFileSync(new URL('../packaging/linux/require-app-closed.sh', import.meta.url), 'utf8');
@@ -118,7 +119,7 @@ test('shared resources and both Linux packages include release notes and unchang
   const linux = JSON.parse(readFileSync(new URL(
     '../apps/desktop/src-tauri/tauri.linux.conf.json', import.meta.url,
   ), 'utf8'));
-  for (const name of ['CHANGELOG.md', 'LICENSE.txt', 'LICENSE-Driver.txt']) {
+  for (const name of ['CHANGELOG.md', ...localizedDocuments]) {
     assert.equal(shared.bundle.resources[`../../../${name}`], name);
     assert.ok(readFileSync(new URL(`../${name}`, import.meta.url), 'utf8').trim());
     for (const format of ['deb', 'rpm']) {

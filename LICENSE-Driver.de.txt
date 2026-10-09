@@ -1,0 +1,65 @@
+MixRelay Driver
+Software-Lizenzvertrag
+Lizenzgeber und Urheberrechtsinhaber: Echo Vision Lab
+Version: 2026-10-08
+
+1. Nutzung des Drivers
+Diese Bedingungen gelten für MixRelay Driver und dessen Komponenten zur Geräteverwaltung und für grundlegendes Audio-Loopback unter macOS und Linux. Für die MixRelay-App und die Graph-Engine gilt gesondert LICENSE.txt, auch wenn sie im selben Installationsprogramm enthalten sind.
+
+Der Vertrag über die Softwarenutzung kommt zustande, wenn Sie diesen Bedingungen nach deren Anzeige und vor der Installation oder Nutzung zustimmen. Wenn Sie nicht zustimmen, installieren oder nutzen Sie die proprietären Driver-Komponenten von MixRelay nicht. Eine dazu befugte Person kann im Namen einer Organisation zustimmen. Rechte aus Lizenzen Dritter bleiben von der Annahme oder Ablehnung dieser Bedingungen unberührt.
+
+Echo Vision Lab erteilt Ihnen die nicht ausschließliche Erlaubnis, autorisierte Driver-Binärdateien kostenlos für private oder geschäftliche Audioarbeiten zu installieren und auszuführen, einschließlich kommerzieller Aufnahme, Produktion und Übertragung. Sie dürfen die für diese Nutzung erforderlichen Sicherungskopien aufbewahren. Das Eigentum an der Software wird nicht übertragen.
+
+2. Kostenloser Driver und kostenpflichtige App
+Für die kostenlosen Funktionen des Drivers sind weder der Kauf der kostenpflichtigen App noch eine Kaufverifizierung erforderlich. Der kostenlose Driver stellt ein grundlegendes virtuelles Standardgerät bereit, dessen Name, Kanalanzahl, Abtastrate und PCM-Format kostenlos eingestellt werden können. Die Beschränkungen der App-Testversion schränken weder die Kanäle des Drivers noch das Speichern von Geräteeinstellungen ein.
+
+Das Erstellen oder Entfernen mehrerer virtueller Geräteidentitäten (Create/Remove) erfordert die kostenpflichtige App; weder die kostenlose App noch der eigenständige Driver bieten diese Funktionen. Bereits mit der kostenpflichtigen App erstellte virtuelle Geräte bleiben nach dem Beenden der App verfügbar.
+
+Das Nutzungsrecht für die gekaufte Hauptversion der kostenpflichtigen App, deren Aktivierungsgrenze von drei Geräten und deren 30-tägiger Zeitraum für die Offline-Authentifizierung schränken diese kostenlose Driver-Erlaubnis nicht ein. Die Neuinstallation des Drivers und Änderungen seiner Grundeinstellungen erfordern keine kostenpflichtige Aktivierung. Diese gewöhnlichen Vorgänge unterscheiden sich von den Create/Remove-Funktionen der kostenpflichtigen App. Die Beendigung oder Erstattung einer Lizenz für die kostenpflichtige App hebt die gesonderte Driver-Erlaubnis nicht von sich aus auf.
+
+3. Weiterverbreitung, Integration und Lizenzen Dritter
+Die kostenlose Nutzung macht den proprietären Code von MixRelay nicht zu Open Source und gewährt keinen Zugang zu dessen privatem Quellcode-Repository. Diese Bedingungen gestatten weder die Veröffentlichung seines eigenen Quellcodes noch die Änderung oder Weiterverbreitung seiner proprietären Komponenten.
+
+OEM-Nutzung, Bündelung, Weiterverkauf, White-Label-Vertrieb und die Bereitstellung des Drivers selbst als Bestandteil eines Produkts oder Dienstes Dritter erfordern eine vorherige schriftliche Genehmigung und einen gesonderten kostenpflichtigen Vertrag. Die gewöhnliche geschäftliche Nutzung als installiertes Audiowerkzeug stellt für sich allein keine Produktintegration dar. Der Kauf einer App umfasst keine Rechte zur Integration oder Weiterverbreitung des Drivers. Wenden Sie sich wegen eines gesonderten Vertrags an support@mixrelay.com.
+
+Diese Einschränkungen setzen weder Rechte aus dem anwendbaren Recht, einschließlich rechtmäßiger Sicherungskopien oder Handlungen zur Herstellung der Interoperabilität, noch Rechte aus Lizenzen Dritter außer Kraft.
+
+Lizenzen Dritter gelten für die entsprechenden Komponenten und gehen widersprechenden Einschränkungen dieser Bedingungen vor. Aus Apple-Beispielen abgeleiteter Code behält die Rechte aus LICENSE.apple-null-audio.txt. Anbietercode unter MIT/Apache-2.0, dessen lizenzierte Änderungen und etwaige MPL-2.0-Komponenten behalten ihre ursprünglichen Rechte. Ihre lizenzierten Rechte auf Quellcodezugang, Änderung und Weiterverbreitung bleiben erhalten; die jeweils erforderlichen Urheberrechtshinweise, Lizenztexte und Hinweise zum Quellcodezugang müssen beigefügt sein.
+
+4. Ihre Audiodaten, Einstellungen und Dateien
+Sie behalten Ihre Rechte an Audiodaten, Aufnahmen, Projekten und anderen Inhalten, die Sie mit dem Driver erstellen oder verarbeiten. Diese Bedingungen gewähren Echo Vision Lab keine Eigentums-, Veröffentlichungs-, Marketing- oder Trainingsrechte an diesen Inhalten. Sie sind für die Genehmigungen verantwortlich, die für Aufnahme, Verarbeitung oder Übertragung von Inhalten Dritter erforderlich sind.
+
+Sichern Sie wichtige Geräteeinstellungen und Arbeiten, bevor Sie Ihre Konfiguration ändern. Nutzen Sie die bei der Deinstallation angebotenen Möglichkeiten zum Löschen der Einstellungen. Die Einstellung der Nutzung oder das Ende der Softwarelizenz überträgt Ihre Arbeiten nicht auf uns und verpflichtet Sie nicht, selbst erstellte Aufnahmen oder Projekte zu löschen.
+
+5. Updates, Kompatibilität und Support
+Updates werden über die offiziellen Vertriebskanäle zu den für die veröffentlichte Version angegebenen Bedingungen bereitgestellt. Ein Driver-Update wandelt diese kostenlose Erlaubnis nicht von sich aus in eine Lizenz für die kostenpflichtige App um. Prüfen Sie vor dem Update die unterstützten Betriebssysteme und Audiogerätekonfigurationen. Die Kompatibilität mit jeder Anwendung oder jedem Gerät sowie ein unterbrechungsfreier und fehlerloser Betrieb werden nicht zugesichert.
+
+Fragen zu Installation, Geräten und Kompatibilität richten Sie bitte an support@mixrelay.com. Diese Aussagen setzen weder die Produktbeschreibung noch vereinbarte Bedingungen oder gesetzliche Ansprüche wegen Qualitätsmängeln außer Kraft.
+
+6. Netzwerkverbindungen und personenbezogene Daten
+Der Driver verarbeitet Audiodaten und Geräteeinstellungen lokal und erfordert keine Authentifizierung einer kostenpflichtigen Lizenz. Die Suche nach Updates kontaktiert https://appserver.dsub.io/status über HTTPS mit Angaben zu Produkt, Betriebssystem und Prozessorarchitektur. Der Dienst erhält außerdem übliche Verbindungsinformationen wie Ihre IP-Adresse. Die Update-Anfrage überträgt keine Audiodaten, Aufnahmen, Projektinhalte, Graphen oder Namen von Audiogeräten. Sie können den Driver nutzen, ohne eine Suche nach Updates anzufordern.
+
+Beim Öffnen eines Downloads werden Ihr Browser und der gewählte Download-Anbieter verwendet. Wenn Sie den Support kontaktieren, erhalten wir die von Ihnen übermittelten Kontaktdaten, Nachrichten und Dateien. Senden Sie nur die für Ihre Anfrage erforderlichen Informationen. Anwendungen und Dienste Dritter haben eigene Verfahren zum Umgang mit Daten.
+
+Die Annahme dieses Vertrags ist keine Einwilligung in freiwilliges Marketing, optionale Analysen oder internationale Datenübermittlungen. Fragen zum Datenschutz und Anträge auf Auskunft, Berichtigung, Löschung oder Einschränkung der Verarbeitung Ihrer Daten können Sie an privacy@dsub.io richten. Anwendbare Anforderungen zur Identitätsprüfung und gesetzliche Aufbewahrungspflichten bleiben bestehen. Die gewöhnliche Nutzung des Drivers erfordert weder eine Gebühr noch eine kostenpflichtige Aktivierung oder eine Einwilligung in Marketing.
+
+7. Deinstallation, Beendigung und Haftung
+Sie können die Nutzung des Drivers jederzeit einstellen und ihn deinstallieren. Die Deinstallation allein storniert keinen Kauf der kostenpflichtigen App und bestätigt nicht deren Deaktivierung auf dem Server.
+
+Wenn ein Verstoß einen rechtmäßigen Grund für eine Einschränkung oder Beendigung darstellt, wird Echo Vision Lab die Gründe benennen und die Anforderungen des anwendbaren Rechts an eine Mitteilung und die Möglichkeit zur Behebung des Verstoßes beachten. Diese Bedingungen gewähren kein willkürliches Recht, die Nutzung zu beenden. Bei rechtmäßiger Beendigung stellen Sie die Nutzung der proprietären Komponenten ein, deren Erlaubnis beendet ist, und entfernen Sie die entsprechenden Kopien, vorbehaltlich des anwendbaren Rechts. Ihre Arbeiten, Rechte aus Lizenzen Dritter und Rechtsansprüche erlöschen nicht automatisch.
+
+Die Haftung jeder Partei richtet sich nach dem anwendbaren Recht. Diese Bedingungen schließen die Haftung für Vorsatz oder grobe Fahrlässigkeit nicht aus, setzen keine pauschale Schadensersatzobergrenze fest und verlagern keine Risiken entgegen zwingendem Recht auf Sie.
+
+8. Änderungen und Streitigkeiten
+Wir benennen die Änderungen und das Wirksamkeitsdatum einer Überarbeitung, informieren im Voraus und holen Ihre Zustimmung ein, soweit das anwendbare Recht dies verlangt. Schweigen oder die bloße Fortsetzung der Nutzung ist keine Zustimmung zum Verzicht auf zwingende Rechte. Individuell vereinbarte Bedingungen gehen widersprechenden Standardbedingungen vor, soweit das anwendbare Recht dies vorsieht.
+
+Auslegung und Streitigkeiten unterliegen weiterhin dem anwendbaren Recht und zwingenden Verbraucherrechten, einschließlich der Zuständigkeitsregeln. Hier werden weder ein ausschließlicher Gerichtsstand noch eine pauschale Rechtswahl festgelegt. Produktbeschwerden richten Sie bitte an support@mixrelay.com und rechtliche Fragen an legal@dsub.io. Diese Kontakte beschränken weder den Zugang zu Gerichten noch zu gesetzlichen Streitbeilegungsverfahren.
+
+Unternehmensangaben
+Entwickler, Lizenzgeber und Urheberrechtsinhaber: Echo Vision Lab (에코 비전 랩), koreanisches Einzelunternehmen
+Unternehmensregistrierungsnummer: 111-42-04359
+Anschrift: Room 505-S80, 5F, 30, Nonhyeon-ro 10-gil, Gangnam-gu, Seoul, Republic of Korea
+Telefon: +82 10-6380-9646
+Produktsupport und Integration: support@mixrelay.com
+Rechtliche Fragen: legal@dsub.io
+Datenschutzfragen: privacy@dsub.io

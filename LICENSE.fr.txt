@@ -1,0 +1,82 @@
+Application MixRelay
+Contrat de licence du logiciel
+Concédant et titulaire des droits d’auteur : Echo Vision Lab
+Version : 2026-10-08
+
+1. Utilisation de l’application
+Ce contrat régit l’application MixRelay gratuite et payante et son moteur de graphe sur macOS et Linux. MixRelay Driver est régi séparément par LICENSE-Driver.txt, même lorsqu’il est fourni dans le même programme d’installation.
+
+Le contrat d’utilisation du logiciel est conclu lorsque vous acceptez ces conditions après qu’elles vous ont été présentées avant l’installation ou l’utilisation. Si vous ne les acceptez pas, n’installez pas et n’utilisez pas les composants propriétaires de l’application MixRelay. Une personne habilitée peut les accepter au nom d’une organisation. L’acceptation ou le refus de ces conditions n’affecte pas les droits conférés par les licences de tiers.
+
+Echo Vision Lab vous accorde une autorisation non exclusive d’installer et d’exécuter les binaires autorisés de l’application pour des travaux audio personnels ou professionnels, y compris l’enregistrement, la production et la diffusion à des fins commerciales, dans les limites des fonctionnalités applicables et des droits acquis par votre achat. Vous pouvez conserver les copies de sauvegarde nécessaires à cette utilisation. La propriété du logiciel n’est pas transférée.
+
+2. Évaluation gratuite, achats et mises à jour
+L’application gratuite propose une évaluation sans limite de durée, avec des fonctionnalités limitées. La sauvegarde et le chargement des graphes et des mappages sont limités ; les réglages du Driver restent gratuits. Aucune dégradation de la qualité audio, aucun bruit ni délai artificiel n’est ajouté pour l’évaluation.
+
+Le Driver gratuit fournit un périphérique virtuel de base par défaut, avec des réglages gratuits du nom, du nombre de canaux, de la fréquence d’échantillonnage et du format PCM. La création ou la suppression de plusieurs identités de périphériques virtuels (Create/Remove) nécessite l’application payante ; ni l’application gratuite ni le Driver autonome ne proposent ces opérations. Les périphériques virtuels déjà créés par l’application payante restent disponibles après sa fermeture. Les éventuelles limites de graphes, de nœuds, de canaux de traitement ou d’enregistrement figurent dans les informations sur les fonctionnalités de la version utilisée. L’achat couvre les fonctionnalités décrites dans son offre ; ces conditions n’autorisent ni des limites non annoncées ni une réduction des fonctionnalités achetées.
+
+La licence payante couvre la version majeure achetée et autorise jusqu’à trois appareils activés simultanément. Les mises à jour proposées au sein de cette version majeure sont comprises dans la licence achetée. Une version majeure ultérieure n’est pas automatiquement incluse. Les prix et conditions de mise à niveau sont présentés avant que vous décidiez de l’acheter.
+
+Il ne s’agit pas d’un abonnement mensuel. L’installation d’une mise à jour n’annule pas à elle seule vos droits sur la version majeure achetée.
+
+3. Activation et changement d’appareil
+L’application payante nécessite une authentification en ligne de l’achat. Après une vérification en ligne réussie, elle peut être utilisée hors ligne pendant un maximum de 30 jours. Il s’agit de la période d’authentification hors ligne, et non de la durée de la licence ou d’une période de paiement récurrent. Un redémarrage ou l’échec d’une vérification ne la prolonge pas. À son expiration, une nouvelle vérification en ligne réussie est nécessaire pour accéder aux fonctionnalités payantes. L’expiration ou une erreur réseau n’annule pas à elle seule l’achat. L’audio déjà en cours de lecture n’est pas brusquement interrompu au seul motif que l’authentification expire ou qu’une vérification réseau échoue.
+
+Pour remplacer un appareil activé, désactivez en ligne l’ancienne activation, puis activez le nouvel appareil dans la limite de trois appareils. Si vous ne pouvez pas accéder à l’ancien appareil ou terminer la désactivation, contactez support@mixrelay.com.
+
+La désactivation sur le serveur n’est terminée qu’après confirmation par le service de licences. La désinstallation, la réinstallation ou la suppression des données d’authentification locales ne libère pas à elle seule une activation sur le serveur et n’annule pas l’achat. Une nouvelle activation peut être nécessaire après réinstallation. Ne partagez pas les clés pour une utilisation non autorisée et ne contournez pas l’authentification de l’achat ou les limites de l’évaluation.
+
+4. Redistribution, intégration et licences de tiers
+Le code propriétaire propre à MixRelay reste privé. La distribution gratuite ou l’achat de l’application ne donne pas accès à son dépôt de code source privé et n’autorise pas la publication de ce code, la modification de ses composants propriétaires ou leur redistribution.
+
+L’OEM, le regroupement en offres, la revente, la distribution en marque blanche et la fourniture de MixRelay lui-même comme composant d’un produit ou service tiers nécessitent une autorisation écrite préalable et un contrat payant distinct. L’utilisation ordinaire comme outil audio installé pour des travaux commerciaux ne constitue pas à elle seule une intégration dans un produit. L’achat de l’application n’inclut pas ces droits d’intégration ou de redistribution. Pour un contrat distinct, contactez support@mixrelay.com.
+
+Ces restrictions ne prévalent pas sur les droits accordés par le droit applicable, notamment les actes licites de sauvegarde ou liés à l’interopérabilité, ou par les licences de tiers.
+
+Les licences de tiers régissent leurs composants respectifs et prévalent sur les restrictions incompatibles du présent contrat. Cela comprend le code de fournisseurs sous MIT/Apache-2.0 et ses modifications couvertes par ces licences, notamment les changements d’état LV2 écrits par MixRelay, les composants MPL-2.0 inclus et le code dérivé d’exemples Apple sous leurs licences d’origine. Les droits accordés sur les sources, leur modification et leur redistribution sont conservés. Les avis de droits d’auteur, les textes de licence et les indications requises pour l’accès aux sources doivent accompagner les composants concernés.
+
+5. Vos travaux, fichiers et plug-ins
+Vous conservez vos droits sur les enregistrements, projets et autres éléments créés ou traités avec MixRelay. Ces conditions ne donnent à Echo Vision Lab aucun droit de propriété, de publication, de marketing ou d’utilisation pour l’entraînement sur ces éléments. Il vous appartient d’obtenir les autorisations nécessaires pour enregistrer, traiter ou diffuser des éléments de tiers. L’achat de MixRelay ne fournit pas de licence pour un plug-in tiers.
+
+Conservez des copies de vos travaux importants avant de modifier votre configuration. L’arrêt de l’utilisation ou la fin de la licence du logiciel ne nous transfère pas vos travaux et n’impose pas leur suppression. Pour les fichiers gérés par l’application, utilisez les choix de suppression des données proposés lors de la désinstallation ; vos enregistrements et projets externes ne sont pas l’objet de la licence du logiciel.
+
+6. Achats et remboursements
+Pour les achats via Lemon Squeezy, Lemon Squeezy est le vendeur officiel de la transaction (merchant of record) et gère les paiements, les taxes sur les ventes, les remboursements et les rétrofacturations selon ses conditions de transaction. Echo Vision Lab reste le développeur et le concédant de l’application et assure le support produit et les obligations qui lui incombent au titre de ces conditions et du droit applicable.
+
+Le vendeur, le prix, les taxes, la portée de la licence et les conditions de remboursement applicables sont affichés avant le paiement. Pour demander une annulation ou un remboursement, contactez support@mixrelay.com ou le canal de support des commandes indiqué sur votre reçu, en fournissant l’identifiant de commande et votre demande. N’envoyez pas de données de carte de paiement ni de mots de passe. Nous vous aiderons pour les réclamations liées au produit ; le recours à Lemon Squeezy n’exclut aucune responsabilité imposée à Echo Vision Lab par le droit applicable.
+
+Les droits impératifs de rétractation, de remboursement et de recours pour défaut restent applicables. Lorsque le droit coréen de la consommation en matière de commerce électronique s’applique, le délai ordinaire de rétractation est de sept jours à compter de la réception des informations contractuelles écrites, ou de la fourniture si elle est ultérieure. Les prolongations légales s’appliquent lorsque les informations requises manquent ou que la rétractation a été entravée. Le commencement de la fourniture de contenu numérique ne peut limiter la rétractation ordinaire que si les conditions légales sont réunies, notamment une information claire et les mesures d’essai ou d’examen requises. Les parties séparables non fournies restent susceptibles de rétractation. L’essai de l’application gratuite ou l’acceptation de ces conditions ne constitue pas en soi une renonciation au droit de rétractation.
+
+Pour un contenu fourni contrairement à sa description ou au contrat, le droit coréen permet la rétractation dans les trois mois suivant la fourniture et dans les 30 jours suivant le moment où la non-conformité a été connue ou aurait pu l’être. Une rétractation légale d’un achat de contenu numérique exige le remboursement dans les trois jours ouvrables suivant la rétractation, les mesures d’annulation du paiement et toute indemnisation légale du retard. Aucune pénalité de rétractation n’est imposée. Les droits locaux impératifs plus favorables et les conditions de remboursement convenues restent préservés. Les droits payants remboursés peuvent prendre fin, mais l’autorisation distincte d’utiliser gratuitement le Driver continue.
+
+7. Licences, mises à jour et données personnelles
+L’activation en ligne envoie directement à Lemon Squeezy, via HTTPS, votre clé de licence et le nom d’activation que vous avez choisi. La validation et la désactivation envoient la clé et l’identifiant d’activation. Ces demandes authentifient l’achat et gèrent les activations d’appareils. Les identifiants d’activation locaux utilisent le stockage des identifiants du système d’exploitation. Les informations de paiement sont saisies dans la page de paiement Lemon Squeezy, et non dans le formulaire de clé de licence de l’application.
+
+L’application recherche les mises à jour au lancement et toutes les 24 heures pendant son exécution, ainsi que lorsque vous demandez une vérification. Ces vérifications contactent https://appserver.dsub.io/status en transmettant le produit, le système d’exploitation et l’architecture du processeur. Le service reçoit aussi les informations de connexion habituelles, telles que votre adresse IP. Les demandes de licence et de mise à jour n’envoient pas votre audio, vos enregistrements, le contenu de vos projets, vos graphes ni les noms de vos périphériques audio. L’ouverture d’un téléchargement utilise votre navigateur et l’hôte de téléchargement choisi. Les plug-ins et services tiers ont leurs propres pratiques de traitement des données.
+
+Lorsque vous contactez le support, nous recevons les coordonnées, le message et les fichiers que vous choisissez d’envoyer. N’envoyez que les informations nécessaires à votre demande. Le traitement des données d’achat et de licence par Lemon Squeezy, y compris hors de votre pays, est décrit à https://www.lemonsqueezy.com/privacy.
+
+L’acceptation de ce contrat ne vaut pas consentement au marketing facultatif, à l’analyse facultative ou aux transferts internationaux. Vous pouvez envoyer à privacy@dsub.io vos questions sur la confidentialité et vos demandes d’accès, de rectification, de suppression ou de limitation du traitement de vos informations. Les exigences applicables de vérification d’identité et les obligations légales de conservation des documents restent en vigueur. Le refus d’un traitement facultatif ne vous prive pas de votre licence de logiciel ni de vos droits légaux.
+
+8. Support, compatibilité et responsabilité
+Utilisez les configurations de système d’exploitation, de périphériques et de plug-ins prises en charge qui sont indiquées pour la version publiée. Les questions de support et de compatibilité peuvent être adressées à support@mixrelay.com. La compatibilité avec toute configuration et un fonctionnement sans interruption ni erreur ne sont pas garantis. Ces déclarations ne prévalent pas sur la description du produit, les conditions d’achat convenues ou les recours légaux relatifs à la qualité.
+
+La responsabilité de chaque partie est déterminée par le droit applicable. Ces conditions n’excluent pas la responsabilité pour faute intentionnelle ou faute lourde, ne fixent pas de plafond général de dommages-intérêts et ne vous transfèrent pas de risques en violation de règles impératives.
+
+9. Désinstallation et fin de licence
+Vous pouvez à tout moment cesser d’utiliser l’application et la désinstaller. Cela n’annule pas à lui seul un achat et ne constitue pas une demande de remboursement. La désactivation des appareils suit la section 3.
+
+Si un manquement fournit des motifs légitimes de restriction ou de résiliation, Echo Vision Lab en indiquera les motifs et respectera les exigences de notification et de possibilité de correction prévues par le droit applicable. Ces conditions ne donnent pas le droit de révoquer arbitrairement une licence payante. En cas de résiliation légitime, cessez d’utiliser les composants propriétaires dont l’autorisation a pris fin et supprimez les copies correspondantes, sous réserve du droit applicable. Vos travaux, les droits conférés par les licences de tiers, les demandes de remboursement ou de dommages-intérêts et les droits relatifs au Driver régi séparément ne s’éteignent pas automatiquement.
+
+10. Modifications et litiges
+Nous indiquons les changements et la date d’effet d’une révision, donnons un préavis et obtenons le consentement lorsque le droit applicable l’exige. Le silence ou la poursuite de l’utilisation ne vaut pas à lui seul accord à une réduction des droits achetés ou à une renonciation aux droits impératifs. Une condition d’achat convenue individuellement prévaut sur une condition standard contradictoire dans la mesure prévue par le droit applicable.
+
+L’interprétation et tout litige restent soumis au droit applicable et aux droits impératifs des consommateurs, y compris les règles de compétence. Aucune compétence juridictionnelle exclusive ni désignation générale d’un droit applicable n’est instaurée ici. Pour les réclamations relatives au produit ou à l’achat, contactez support@mixrelay.com ; pour les questions juridiques, legal@dsub.io. Ces contacts ne limitent pas l’accès aux tribunaux ou aux procédures légales de règlement des litiges.
+
+Informations sur l’entreprise
+Développeur, concédant et titulaire des droits d’auteur : Echo Vision Lab (에코 비전 랩), entreprise individuelle coréenne
+Numéro d’enregistrement de l’entreprise : 111-42-04359
+Adresse : Room 505-S80, 5F, 30, Nonhyeon-ro 10-gil, Gangnam-gu, Seoul, Republic of Korea
+Téléphone : +82 10-6380-9646
+Support produit et intégration : support@mixrelay.com
+Contacts juridiques et confidentialité : legal@dsub.io / privacy@dsub.io

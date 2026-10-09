@@ -1,13 +1,16 @@
 //! macOS-only privileged adapter for account, trust and launchd boundaries.
 
 mod account;
+mod audio_probe;
 mod launchctl;
 mod service;
 mod trust;
 mod user_data;
 
 pub use account::{ResolvedServiceAccount, resolve_console_account};
+pub use audio_probe::{check_coreaudio_response, hal_is_loaded};
 pub use service::{NativeServiceLifecycle, NativeServiceRegistration, NativeServiceSnapshot};
+pub(crate) use trust::validate_destination_ancestors;
 pub use trust::{initialize_lifecycle_storage, require_lifecycle_storage, require_root};
 pub use user_data::cleanup_user_data;
 
@@ -29,18 +32,21 @@ pub fn resolve_install_account() -> Result<ResolvedServiceAccount, NativeError> 
     }
 }
 
-/// Resolves the account from a verified existing installation for removal.
-/// Unlike fresh install selection, removal never guesses from the current console.
+/// Resolves the installed account, retaining its lease owner when a user has
+/// already deleted the launchd plist. With no installation identity, uses the console.
 /// # Errors
-/// Returns when no installed launchd plist exists or its account cannot be
-/// reconstructed and revalidated against the operating system.
+/// Returns when a present plist or lease is untrusted, or the account cannot be
+/// revalidated against the operating system.
 pub fn resolve_removal_account() -> Result<ResolvedServiceAccount, NativeError> {
     require_root()?;
-    let bytes = trust::read_installed_launchd_plist()?.ok_or(NativeError::LaunchdState(
-        "cannot identify the installed service account without its launchd plist",
-    ))?;
-    let account = LaunchdConfiguration::installed_account(&bytes)?;
-    account::resolve_service_account(&account)
+    if let Some(bytes) = trust::read_installed_launchd_plist()? {
+        let account = LaunchdConfiguration::installed_account(&bytes)?;
+        return account::resolve_service_account(&account);
+    }
+    match trust::read_lifecycle_account()? {
+        Some(account) => Ok(account),
+        None => resolve_console_account(),
+    }
 }
 
 use std::{io, path::PathBuf};

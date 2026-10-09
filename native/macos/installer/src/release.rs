@@ -11,8 +11,8 @@ use serde::Deserialize;
 use thiserror::Error;
 
 use crate::{
-    FilesystemStaged, InstallSources, LaunchdConfiguration, LaunchdError, OwnedTarget,
-    ServiceAccount, UniversalError, validate_universal_binary,
+    FilesystemLayout, FilesystemStaged, InstallSources, LaunchdConfiguration, LaunchdError,
+    OwnedTarget, ServiceAccount, UniversalError, validate_universal_binary,
 };
 
 mod policy;
@@ -41,6 +41,12 @@ impl SigningTeam {
             return Err(ReleaseError::SigningTeam);
         }
         Ok(Self(value))
+    }
+
+    /// Returns the validated publisher Team ID.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
 
     fn requirement(&self, identifier: &str) -> String {
@@ -165,6 +171,84 @@ impl ReleasePayloadVerifier {
         )
     }
 
+    /// Verifies each remaining removal target independently. Missing targets
+    /// are already removed; they do not exempt present code from publisher checks.
+    /// # Errors
+    /// Returns invalid present files, identities, signatures or launch policy.
+    pub fn verify_for_removal(
+        &self,
+        layout: &FilesystemLayout,
+    ) -> Result<Option<LaunchdConfiguration>, ReleaseError> {
+        self.verify_removal_with(layout, verify_signature)
+    }
+
+    fn verify_removal_with(
+        &self,
+        layout: &FilesystemLayout,
+        mut signature: impl FnMut(&Path, &str, ArtifactRole) -> Result<(), ReleaseError>,
+    ) -> Result<Option<LaunchdConfiguration>, ReleaseError> {
+        let mut definition = None;
+        for target in OwnedTarget::all() {
+            let path = layout.root().join(target.path().trim_start_matches('/'));
+            match std::fs::symlink_metadata(&path) {
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(source) => return Err(ReleaseError::Io { path, source }),
+            }
+            match target {
+                OwnedTarget::App | OwnedTarget::Hal | OwnedTarget::Uninstaller => {
+                    let (identifier, executable, role) = match target {
+                        OwnedTarget::App => (
+                            "io.mixrelay.driver.desktop",
+                            "mixrelay-desktop",
+                            ArtifactRole::Application,
+                        ),
+                        OwnedTarget::Hal => {
+                            ("io.mixrelay.audio.driver", "MixRelayHAL", ArtifactRole::Hal)
+                        }
+                        _ => (
+                            "io.mixrelay.driver.uninstaller",
+                            "mixrelay-driver-uninstaller",
+                            ArtifactRole::Uninstaller,
+                        ),
+                    };
+                    verify_bundle(&path, identifier, executable)?;
+                    signature(&path, &self.team.requirement(identifier), role)?;
+                    if target == OwnedTarget::Uninstaller {
+                        self.verify_installer_executable_with(
+                            &path.join("Contents/Helpers/mixrelay-macos-installer"),
+                            &mut signature,
+                        )?;
+                    }
+                }
+                OwnedTarget::Driver => {
+                    verify_architecture(&path)?;
+                    signature(
+                        &path,
+                        &self.team.requirement("mixrelay-driver-service"),
+                        ArtifactRole::Driver,
+                    )?;
+                }
+                OwnedTarget::Launchd => {
+                    definition = Some(LaunchdConfiguration::validate_installed(
+                        &read_configuration(&path, 16 * 1024)?,
+                        &self.account,
+                    )?);
+                }
+                OwnedTarget::RemovalLaunchd => {
+                    #[cfg(target_os = "macos")]
+                    crate::removal::verify_removal_launchd(&path, &self.team).map_err(|error| {
+                        ReleaseError::Io {
+                            path: path.clone(),
+                            source: io::Error::other(error.to_string()),
+                        }
+                    })?;
+                }
+            }
+        }
+        Ok(definition)
+    }
+
     /// Verifies private install copies, not the original source paths.
     /// # Errors
     /// Returns absent/removal payloads or failed signature, format or policy checks.
@@ -172,12 +256,36 @@ impl ReleasePayloadVerifier {
         &self,
         staged: &FilesystemStaged,
     ) -> Result<LaunchdConfiguration, ReleaseError> {
-        self.verify_sources(&InstallSources::new(
+        let mut sources = InstallSources::new(
             staged.payload_path(OwnedTarget::App),
             staged.payload_path(OwnedTarget::Hal),
             staged.payload_path(OwnedTarget::Driver),
             staged.payload_path(OwnedTarget::Launchd),
-        ))
+        );
+        let remover = staged.payload_path(OwnedTarget::Uninstaller);
+        let plist = staged.payload_path(OwnedTarget::RemovalLaunchd);
+        if remover.exists() || plist.exists() {
+            sources = sources.with_remover(remover, plist);
+        }
+        self.verify_sources(&sources)
+    }
+
+    /// Verifies the separately installed remover and its embedded fixed CLI.
+    /// # Errors
+    /// Returns an invalid bundle, executable, signature or publisher identity.
+    pub fn verify_uninstaller_bundle(&self, bundle: impl AsRef<Path>) -> Result<(), ReleaseError> {
+        let bundle = bundle.as_ref();
+        verify_bundle(
+            bundle,
+            "io.mixrelay.driver.uninstaller",
+            "mixrelay-driver-uninstaller",
+        )?;
+        verify_signature(
+            bundle,
+            &self.team.requirement("io.mixrelay.driver.uninstaller"),
+            ArtifactRole::Uninstaller,
+        )?;
+        self.verify_installer_executable(bundle.join("Contents/Helpers/mixrelay-macos-installer"))
     }
 
     /// Verifies the signed universal installer helper before it is embedded in a package.
@@ -190,36 +298,6 @@ impl ReleasePayloadVerifier {
     /// metadata error.
     pub fn verify_installer_executable(&self, path: impl AsRef<Path>) -> Result<(), ReleaseError> {
         self.verify_installer_executable_with(path.as_ref(), verify_signature)
-    }
-
-    /// Verifies the fixed uninstaller bundle before trusting its publisher metadata.
-    ///
-    /// Both executable slices must meet the installer signing policy. The bundle's
-    /// resource seal also binds its embedded helper and `MixRelaySigningTeam` plist entry.
-    /// # Errors
-    /// Returns an invalid path, bundle identity, architecture, or Developer ID signature.
-    pub fn verify_uninstaller_bundle(&self, path: impl AsRef<Path>) -> Result<(), ReleaseError> {
-        self.verify_uninstaller_bundle_with(path.as_ref(), verify_signature)
-    }
-
-    fn verify_uninstaller_bundle_with(
-        &self,
-        path: &Path,
-        signature: impl FnOnce(&Path, &str, ArtifactRole) -> Result<(), ReleaseError>,
-    ) -> Result<(), ReleaseError> {
-        if !path.is_absolute() {
-            return Err(ReleaseError::SourcePath(path.to_path_buf()));
-        }
-        verify_bundle(
-            path,
-            "io.mixrelay.driver.uninstaller",
-            "mixrelay-driver-uninstaller",
-        )?;
-        signature(
-            path,
-            &self.team.requirement("io.mixrelay.driver.uninstaller"),
-            ArtifactRole::Installer,
-        )
     }
 
     fn verify_installer_executable_with(
@@ -260,6 +338,32 @@ impl ReleasePayloadVerifier {
         } else {
             LaunchdConfiguration::validate_installed(&launchd, &self.account)?
         };
+        if let (Some(app), Some(plist)) = (sources.remover(), sources.removal_launchd()) {
+            if !app.is_absolute() || !plist.is_absolute() {
+                return Err(ReleaseError::SourcePath(app.to_path_buf()));
+            }
+            signature(
+                app,
+                &self.team.requirement("io.mixrelay.driver.uninstaller"),
+                ArtifactRole::Uninstaller,
+            )?;
+            verify_bundle(
+                app,
+                "io.mixrelay.driver.uninstaller",
+                "mixrelay-driver-uninstaller",
+            )?;
+            self.verify_installer_executable_with(
+                &app.join("Contents/Helpers/mixrelay-macos-installer"),
+                &mut signature,
+            )?;
+            #[cfg(target_os = "macos")]
+            crate::removal::verify_removal_launchd(plist, &self.team).map_err(|error| {
+                ReleaseError::Io {
+                    path: plist.to_path_buf(),
+                    source: std::io::Error::other(error.to_string()),
+                }
+            })?;
+        }
         for (bundle, identifier, executable, role) in [
             (
                 sources.app(),
@@ -361,65 +465,3 @@ fn read_configuration(path: &Path, limit: u64) -> Result<Vec<u8>, ReleaseError> 
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod uninstaller_tests {
-    use super::*;
-    use std::fs;
-
-    #[test]
-    fn uninstaller_bundle_binds_fixed_identity_and_installer_signature_policy() {
-        let fixture = mixrelay_test_support::FixtureDir::new("macos-uninstaller").unwrap();
-        let bundle = fixture.path().join("Uninstall MixRelay Driver.app");
-        fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
-        fs::write(
-            bundle.join("Contents/Info.plist"),
-            "<plist version=\"1.0\"><dict><key>CFBundleIdentifier</key>\
-             <string>io.mixrelay.driver.uninstaller</string><key>CFBundleExecutable</key>\
-             <string>mixrelay-driver-uninstaller</string></dict></plist>",
-        )
-        .unwrap();
-        fs::write(
-            bundle.join("Contents/MacOS/mixrelay-driver-uninstaller"),
-            crate::universal::tests::fixture(true),
-        )
-        .unwrap();
-        let verifier = ReleasePayloadVerifier::new(
-            SigningTeam::new("ABCD123456".to_owned()).unwrap(),
-            ServiceAccount::new(
-                "tester".to_owned(),
-                "staff".to_owned(),
-                "/Users/tester".into(),
-            )
-            .unwrap(),
-        );
-        verifier
-            .verify_uninstaller_bundle_with(&bundle, |path, requirement, role| {
-                assert_eq!(path, bundle);
-                assert!(requirement.contains("identifier \"io.mixrelay.driver.uninstaller\""));
-                assert!(requirement.contains("ABCD123456"));
-                assert_eq!(role, ArtifactRole::Installer);
-                Ok(())
-            })
-            .unwrap();
-        assert!(matches!(
-            verifier.verify_uninstaller_bundle_with(Path::new("relative.app"), |_, _, _| {
-                panic!("relative paths cannot reach signature verification")
-            }),
-            Err(ReleaseError::SourcePath(_))
-        ));
-        fs::write(
-            bundle.join("Contents/Info.plist"),
-            "<plist version=\"1.0\"><dict><key>CFBundleIdentifier</key>\
-             <string>io.mixrelay.desktop</string><key>CFBundleExecutable</key>\
-             <string>mixrelay-driver-uninstaller</string></dict></plist>",
-        )
-        .unwrap();
-        assert!(matches!(
-            verifier.verify_uninstaller_bundle_with(&bundle, |_, _, _| {
-                panic!("wrong bundle identities cannot reach signature verification")
-            }),
-            Err(ReleaseError::BundleIdentity(_))
-        ));
-    }
-}

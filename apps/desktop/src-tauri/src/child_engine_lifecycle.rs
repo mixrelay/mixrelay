@@ -7,6 +7,10 @@ use std::{
     time::Duration,
 };
 
+use crate::native_text::{
+    current_locale,
+    dialogs::{Text, detail, text},
+};
 use mixrelay_engine_process::DesktopEngine;
 use tauri::Manager;
 
@@ -22,7 +26,7 @@ impl EngineLifecycle {
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let path = bundled_engine_path(&executable)?;
         let engine = DesktopEngine::start(&path)
-            .map_err(|error| format!("Could not start the bundled audio engine: {error}"))?;
+            .map_err(|error| detail(current_locale(), Text::BundledEngineStartFailed, error))?;
         Ok(Self {
             engine: Mutex::new(engine),
             quitting: AtomicBool::new(false),
@@ -49,6 +53,9 @@ impl EngineLifecycle {
                             .set_title("MixRelay")
                             .set_description(&warning)
                             .set_level(rfd::MessageLevel::Error)
+                            .set_buttons(rfd::MessageButtons::OkCustom(
+                                text(current_locale(), Text::Ok).into(),
+                            ))
                             .show()
                             .await;
                     }
@@ -63,6 +70,9 @@ impl EngineLifecycle {
                         .set_title("MixRelay")
                         .set_description(&error)
                         .set_level(rfd::MessageLevel::Error)
+                        .set_buttons(rfd::MessageButtons::OkCustom(
+                            text(current_locale(), Text::Ok).into(),
+                        ))
                         .show()
                         .await;
                 }
@@ -74,12 +84,13 @@ impl EngineLifecycle {
 fn bundled_engine_path(desktop: &Path) -> Result<PathBuf, String> {
     let directory = desktop
         .parent()
-        .ok_or("Desktop executable has no parent directory")?;
+        .ok_or_else(|| text(current_locale(), Text::DesktopExecutableParentMissing))?;
     let engine = directory.join("mixrelay-engine-service");
     if !engine.is_file() {
-        return Err(format!(
-            "Bundled audio engine is missing: {}",
-            engine.display()
+        return Err(detail(
+            current_locale(),
+            Text::BundledEngineMissing,
+            engine.display(),
         ));
     }
     Ok(engine)
@@ -103,12 +114,14 @@ pub(crate) fn monitor(app: &tauri::AppHandle) {
             let result = lifecycle
                 .engine
                 .lock()
-                .map_err(|_| "Engine ownership lock failed".to_owned())
+                .map_err(|_| text(current_locale(), Text::EngineOwnershipLockFailed).to_owned())
                 .and_then(|mut engine| engine.try_wait().map_err(|error| error.to_string()));
             let error = match result {
                 Ok(None) => continue,
-                Ok(Some(status)) => format!("Audio engine exited unexpectedly: {status}"),
-                Err(error) => format!("Could not observe audio engine: {error}"),
+                Ok(Some(status)) => {
+                    detail(current_locale(), Text::EngineExitedUnexpectedly, status)
+                }
+                Err(error) => detail(current_locale(), Text::EngineObserveFailed, error),
             };
             if lifecycle.quitting.load(Ordering::Acquire) {
                 continue;
@@ -124,23 +137,28 @@ pub(crate) fn monitor(app: &tauri::AppHandle) {
 }
 
 async fn offer_engine_recovery(app: &tauri::AppHandle) -> bool {
-    let mut message = "The audio engine stopped. Restart it?";
+    let mut message = Text::EngineRestartPrompt;
     loop {
+        let locale = current_locale();
+        let restart = text(locale, Text::EngineRestart);
         let choice = rfd::AsyncMessageDialog::new()
             .set_title("MixRelay")
-            .set_description(message)
+            .set_description(text(locale, message))
             .set_level(rfd::MessageLevel::Error)
-            .set_buttons(rfd::MessageButtons::YesNo)
+            .set_buttons(rfd::MessageButtons::OkCancelCustom(
+                restart.into(),
+                text(locale, Text::Cancel).into(),
+            ))
             .show()
             .await;
-        if choice != rfd::MessageDialogResult::Yes {
+        if choice != rfd::MessageDialogResult::Custom(restart.into()) {
             return false;
         }
         match restart_owned_engine(app).await {
             Ok(restarted) => return restarted,
             Err(error) => {
                 tracing::error!(%error, "owned audio engine restart failed");
-                message = "Could not restart the audio engine. Try again?";
+                message = Text::EngineRestartFailedPrompt;
             }
         }
     }
@@ -157,13 +175,13 @@ async fn restart_owned_engine(app: &tauri::AppHandle) -> Result<bool, String> {
         let mut engine = lifecycle
             .engine
             .lock()
-            .map_err(|_| "Engine ownership lock failed".to_owned())?;
+            .map_err(|_| text(current_locale(), Text::EngineOwnershipLockFailed).to_owned())?;
         if engine
             .try_wait()
             .map_err(|error| error.to_string())?
             .is_none()
         {
-            return Err("The previous audio engine is still running".to_owned());
+            return Err(text(current_locale(), Text::PreviousEngineRunning).to_owned());
         }
     }
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
@@ -176,7 +194,7 @@ async fn restart_owned_engine(app: &tauri::AppHandle) -> Result<bool, String> {
         let mut engine = lifecycle
             .engine
             .lock()
-            .map_err(|_| "Engine ownership lock failed".to_owned())?;
+            .map_err(|_| text(current_locale(), Text::EngineOwnershipLockFailed).to_owned())?;
         if lifecycle.quitting.load(Ordering::Acquire) {
             // Dropping the uninstalled child closes only its private shutdown lease.
             return Ok(false);
@@ -195,7 +213,7 @@ async fn finish_engine(app: &tauri::AppHandle) -> Result<Option<String>, String>
         lifecycle
             .engine
             .lock()
-            .map_err(|_| "Engine ownership lock failed")?
+            .map_err(|_| text(current_locale(), Text::EngineOwnershipLockFailed))?
             .request_shutdown();
     }
     let notice = tokio::time::Instant::now() + Duration::from_secs(30);
@@ -205,19 +223,18 @@ async fn finish_engine(app: &tauri::AppHandle) -> Result<Option<String>, String>
             .state::<EngineLifecycle>()
             .engine
             .lock()
-            .map_err(|_| "Engine ownership lock failed")?
+            .map_err(|_| text(current_locale(), Text::EngineOwnershipLockFailed))?
             .try_wait()
             .map_err(|error| error.to_string())?;
         if let Some(status) = status {
-            return Ok((!status.success()).then(|| {
-                format!("Audio engine stopped, but clean finalization failed: {status}")
-            }));
+            return Ok((!status.success())
+                .then(|| detail(current_locale(), Text::EngineFinalizationFailed, status)));
         }
         if !notified && tokio::time::Instant::now() >= notice {
             notified = true;
             tracing::warn!("waiting for owned audio engine finalization");
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_title("MixRelay — 오디오 서버 종료 중");
+                let _ = window.set_title(text(current_locale(), Text::EngineStoppingTitle));
             }
         }
         tokio::time::sleep(Duration::from_millis(100)).await;

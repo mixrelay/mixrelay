@@ -1,55 +1,71 @@
-use std::{
-    fs,
-    io::ErrorKind,
-    path::PathBuf,
-    process::Command,
-    time::{Duration, Instant},
-};
+use std::{fs, io::ErrorKind, path::PathBuf};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use mixrelay_macos_installer::{
-    APP_PATH, DRIVER_PATH, HAL_PATH, LAUNCHD_PATH, ReleasePayloadVerifier, SigningTeam,
-    resolve_console_account,
+    OwnedTarget, ReleasePayloadVerifier, SigningTeam, resolve_console_account,
 };
-use objc2::{
-    AnyThread, MainThreadMarker, MainThreadOnly, msg_send, rc::Retained, runtime::AnyObject,
-};
+use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSAlert, NSAlertSecondButtonReturn, NSAlertStyle, NSApplication, NSApplicationActivationPolicy,
-    NSButton, NSButtonType, NSControlStateValueOff, NSControlStateValueOn, NSRunningApplication,
+    NSButton, NSButtonType, NSControlStateValueOff, NSControlStateValueOn,
 };
-use objc2_foundation::{
-    NSAppleEventDescriptor, NSAppleScript, NSBundle, NSDate, NSDictionary, NSLocale, NSNumber,
-    NSPoint, NSRect, NSRunLoop, NSSize, NSString,
-};
+use objc2_foundation::{NSBundle, NSLocale, NSPoint, NSRect, NSSize, NSString};
 
-use super::{
-    authorization_cancelled, authorization_script, manager_should_restart, removal_command,
-    validate_bundle_layout,
-};
+use super::validate_bundle_layout;
+
+#[path = "localization.rs"]
+mod localization;
+use localization::{Text, UiLocale};
 
 #[derive(Clone, Copy)]
 struct NativeUi {
     main: MainThreadMarker,
-    korean: bool,
+    locale: UiLocale,
 }
 
 impl NativeUi {
-    fn text(self, korean: &'static str, english: &'static str) -> &'static str {
-        if self.korean { korean } else { english }
+    fn text(self, text: Text) -> &'static str {
+        self.locale.text(text)
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Diagnostic {
+    DownloadAgain,
+    Authorization,
+}
+
+impl std::fmt::Display for Diagnostic {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::DownloadAgain => "The signed removal bundle could not be verified.",
+            Self::Authorization => "Could not authorize or confirm the fixed removal operation.",
+        })
+    }
+}
+
+impl std::error::Error for Diagnostic {}
+
+fn error_text(error: &anyhow::Error) -> Text {
+    error
+        .downcast_ref::<Diagnostic>()
+        .map_or(Text::Retry, |diagnostic| match diagnostic {
+            Diagnostic::DownloadAgain => Text::DownloadAgain,
+            Diagnostic::Authorization => Text::Authorization,
+        })
 }
 
 /// Presents removal consent and diagnostics on the process's main thread.
 pub(super) fn run() -> Result<()> {
     let main =
         MainThreadMarker::new().ok_or_else(|| anyhow!("AppKit requires the main thread."))?;
+    let languages: Vec<_> = NSLocale::preferredLanguages()
+        .iter()
+        .map(|language| language.to_string())
+        .collect();
     let ui = NativeUi {
         main,
-        korean: NSLocale::preferredLanguages()
-            .iter()
-            .next()
-            .is_some_and(|language| language.to_string().starts_with("ko")),
+        locale: UiLocale::from_preferences(languages.iter().map(String::as_str)),
     };
     let application = NSApplication::sharedApplication(main);
     if application.activationPolicy() != NSApplicationActivationPolicy::Regular {
@@ -66,11 +82,8 @@ pub(super) fn run() -> Result<()> {
         tracing::error!("Driver removal failed: {error:#}");
         message(
             ui,
-            ui.text(
-                "MixRelay Driver를 제거하지 못했습니다.",
-                "MixRelay Driver could not be removed.",
-            ),
-            &bounded_detail(&format!("{error:#}")),
+            ui.text(Text::FailedTitle),
+            ui.text(error_text(error)),
             NSAlertStyle::Warning,
         );
     }
@@ -82,25 +95,21 @@ fn remove_driver(ui: NativeUi) -> Result<()> {
         return Ok(());
     };
     if !driver_is_installed()? {
+        let account = resolve_console_account()?;
+        mixrelay_macos_installer::cleanup_user_data(
+            account.account().home(),
+            delete_settings,
+            false,
+        )?;
         message(
             ui,
-            ui.text(
-                "MixRelay Driver가 설치되어 있지 않습니다.",
-                "MixRelay Driver is not installed.",
-            ),
-            ui.text("제거할 항목이 없습니다.", "There is nothing to remove."),
+            ui.text(Text::NotInstalledTitle),
+            ui.text(Text::NothingToRemove),
             NSAlertStyle::Informational,
         );
         return Ok(());
     }
-    ensure!(
-        running_applications("io.mixrelay.desktop").is_empty(),
-        "{}", ui.text(
-            "MixRelay에서 작업을 저장하고 앱을 종료한 뒤 제거 앱을 다시 실행하십시오.",
-            "Quit MixRelay before removing its Driver. Save your work and run the uninstaller again."
-        )
-    );
-    let (bundle, helper, team) = bundled_helper()?;
+    let (bundle, helper, team) = bundled_helper().context(Diagnostic::DownloadAgain)?;
     // Signature policy needs only an OS-resolved identity; the authorized CLI
     // separately resolves the installed service account under its root boundary.
     let account = resolve_console_account()?;
@@ -108,62 +117,37 @@ fn remove_driver(ui: NativeUi) -> Result<()> {
         ReleasePayloadVerifier::new(SigningTeam::new(team.clone())?, account.account().clone());
     verifier
         .verify_uninstaller_bundle(&bundle)
-        .context("The uninstaller's signature could not be verified. Download it again.")?;
+        .context("The uninstaller's signature could not be verified. Download it again.")
+        .context(Diagnostic::DownloadAgain)?;
     verifier
         .verify_installer_executable(&helper)
-        .context("The bundled removal tool's signature could not be verified.")?;
-    let command = removal_command(&helper, &team, delete_settings)?;
-    if remove_with_manager(ui, &command)? {
-        message(
-            ui,
-            ui.text(
-                "MixRelay Driver를 제거했습니다.",
-                "MixRelay Driver removed.",
-            ),
-            ui.text(
-                "MixRelay 그래프와 녹음 파일은 그대로 유지됩니다.",
-                "Your MixRelay graphs and recordings are unchanged.",
-            ),
-            NSAlertStyle::Informational,
-        );
-    }
-    Ok(())
-}
-
-fn remove_with_manager(ui: NativeUi, command: &str) -> Result<bool> {
-    let was_running = !running_applications("io.mixrelay.driver.desktop").is_empty();
-    let removal = quit_driver_manager(ui).and_then(|()| authorize_removal(command));
-    if manager_should_restart(was_running, removal.as_ref().is_ok_and(|removed| *removed))
-        && let Err(restoration) = restore_driver_manager(ui)
-    {
-        return match removal {
-            Ok(_) => Err(restoration),
-            Err(error) => Err(error.context(format!("{restoration:#}"))),
-        };
-    }
-    removal
-}
-
-fn restore_driver_manager(ui: NativeUi) -> Result<()> {
-    match fs::symlink_metadata(APP_PATH) {
-        Ok(_) => {}
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error).context("Could not locate MixRelay Driver Manager."),
-    }
-    let diagnostic = ui.text(
-        "MixRelay Driver 관리 앱을 다시 열지 못했습니다. 응용 프로그램에서 직접 실행하십시오.",
-        "Could not reopen MixRelay Driver Manager. Open it from Applications.",
+        .context("The bundled removal tool's signature could not be verified.")
+        .context(Diagnostic::DownloadAgain)?;
+    let Some(authorization) =
+        mixrelay_macos_installer::removal::RemovalAuthorization::request(ui.text(Text::Remove))
+            .context(Diagnostic::Authorization)?
+    else {
+        return Ok(());
+    };
+    let team = SigningTeam::new(team)?;
+    // Authentication succeeded; later failures concern removal/confirmation,
+    // and must not tell the user that administrator authentication failed.
+    perform_removal(ui, authorization, team, delete_settings)?;
+    message(
+        ui,
+        ui.text(Text::RemovedTitle),
+        ui.text(if delete_settings {
+            Text::SettingsDeleted
+        } else {
+            Text::SettingsPreserved
+        }),
+        NSAlertStyle::Informational,
     );
-    let status = Command::new("/usr/bin/open")
-        .args(["-a", APP_PATH])
-        .status()
-        .context(diagnostic)?;
-    ensure!(status.success(), "{diagnostic} ({status})");
     Ok(())
 }
 
 fn driver_is_installed() -> Result<bool> {
-    for path in [APP_PATH, HAL_PATH, DRIVER_PATH, LAUNCHD_PATH] {
+    for path in OwnedTarget::all().map(OwnedTarget::path) {
         match fs::symlink_metadata(path) {
             Ok(_) => return Ok(true),
             Err(error) if error.kind() == ErrorKind::NotFound => {}
@@ -176,30 +160,19 @@ fn driver_is_installed() -> Result<bool> {
 fn confirm_removal(ui: NativeUi) -> Option<bool> {
     let alert = NSAlert::new(ui.main);
     alert.setAlertStyle(NSAlertStyle::Warning);
-    alert.setMessageText(&NSString::from_str(ui.text(
-        "MixRelay Driver를 제거하시겠습니까?",
-        "Remove MixRelay Driver?",
-    )));
-    alert.setInformativeText(&NSString::from_str(ui.text(
-        "Driver 장치와 루프백이 중지되며 시스템 오디오가 잠시 끊깁니다. \
-         계속하기 전에 녹음과 통화 앱을 종료하십시오.\n\n\
-         MixRelay 그래프, 녹음 파일과 구매 인증은 그대로 유지됩니다.",
-        "Removing the Driver stops its devices and loopback, and briefly interrupts system audio. \
-         Quit recording and call apps before continuing.\n\n\
-         Your MixRelay graphs, recordings, and purchase activation are unchanged.",
-    )));
-    let cancel = alert.addButtonWithTitle(&NSString::from_str(ui.text("취소", "Cancel")));
+    alert.setMessageText(&NSString::from_str(ui.text(Text::ConfirmTitle)));
+    alert.setInformativeText(&NSString::from_str(ui.text(Text::ConfirmDetail)));
+    let cancel = alert.addButtonWithTitle(&NSString::from_str(ui.text(Text::Cancel)));
     cancel.setKeyEquivalent(&NSString::from_str("\u{1b}"));
-    alert.addButtonWithTitle(&NSString::from_str(ui.text("Driver 제거", "Remove Driver")));
+    alert.addButtonWithTitle(&NSString::from_str(ui.text(Text::Remove)));
     let checkbox = NSButton::initWithFrame(
         NSButton::alloc(ui.main),
         NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(340.0, 24.0)),
     );
     checkbox.setButtonType(NSButtonType::Switch);
-    checkbox.setTitle(&NSString::from_str(
-        ui.text("저장된 Driver 설정 삭제", "Delete saved Driver settings"),
-    ));
+    checkbox.setTitle(&NSString::from_str(ui.text(Text::DeleteSettings)));
     checkbox.setState(NSControlStateValueOff);
+    checkbox.sizeToFit();
     alert.setAccessoryView(Some(&checkbox));
     (alert.runModal() == NSAlertSecondButtonReturn)
         .then(|| checkbox.state() == NSControlStateValueOn)
@@ -210,7 +183,7 @@ fn bundled_helper() -> Result<(PathBuf, PathBuf, String)> {
     let bundle_path = fs::canonicalize(bundle.bundlePath().to_string())
         .context("Could not locate the uninstaller bundle.")?;
     let executable = fs::canonicalize(std::env::current_exe()?)?;
-    let helper = fs::canonicalize(bundle_path.join("Contents/Resources/mixrelay-macos-installer"))
+    let helper = fs::canonicalize(bundle_path.join("Contents/Helpers/mixrelay-macos-installer"))
         .context("The bundled removal tool is missing.")?;
     validate_bundle_layout(&bundle_path, &executable, &helper)?;
     let team = bundle
@@ -221,82 +194,106 @@ fn bundled_helper() -> Result<(PathBuf, PathBuf, String)> {
     Ok((bundle_path, helper, team))
 }
 
-fn running_applications(
-    identifier: &str,
-) -> Retained<objc2_foundation::NSArray<NSRunningApplication>> {
-    NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(identifier))
-}
-
-fn quit_driver_manager(ui: NativeUi) -> Result<()> {
-    let applications = running_applications("io.mixrelay.driver.desktop");
-    for application in &applications {
-        ensure!(
-            application.isTerminated() || application.terminate(),
-            "{}",
-            ui.text(
-                "MixRelay Driver 관리 앱을 종료한 뒤 제거 앱을 다시 실행하십시오.",
-                "Quit MixRelay Driver Manager and run the uninstaller again."
-            )
-        );
-    }
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while applications
-        .iter()
-        .any(|application| !application.isTerminated())
-    {
-        ensure!(
-            Instant::now() < deadline,
-            "{}", ui.text(
-                "MixRelay Driver 관리 앱이 아직 실행 중입니다. 종료한 뒤 제거 앱을 다시 실행하십시오.",
-                "MixRelay Driver Manager is still running. Quit it and run the uninstaller again."
-            )
-        );
-        // AppKit updates NSRunningApplication termination state when its run loop advances.
-        NSRunLoop::mainRunLoop().runUntilDate(&NSDate::dateWithTimeIntervalSinceNow(0.05));
-    }
-    Ok(())
-}
-
-fn authorize_removal(command: &str) -> Result<bool> {
-    let source = NSString::from_str(&authorization_script(command));
-    let script = NSAppleScript::initWithSource(NSAppleScript::alloc(), &source)
-        .ok_or_else(|| anyhow!("Could not prepare administrator authorization."))?;
-    let mut error: Option<Retained<NSDictionary<NSString, AnyObject>>> = None;
-    // SAFETY: NSAppleScript documents this out parameter as NSDictionary<NSString, id>.
-    // The local retained dictionary slot remains valid for this synchronous call. The
-    // nullable descriptor return matches Apple's API, including authorization errors.
-    let descriptor: Option<Retained<NSAppleEventDescriptor>> =
-        unsafe { msg_send![&script, executeAndReturnError: &mut error] };
-    if let Some(error) = error {
-        let number = error
-            .objectForKey(&NSString::from_str("NSAppleScriptErrorNumber"))
-            .and_then(|value| value.downcast::<NSNumber>().ok())
-            .map(|value| value.intValue());
-        if authorization_cancelled(number) {
-            return Ok(false);
-        }
-        let detail = error
-            .objectForKey(&NSString::from_str("NSAppleScriptErrorMessage"))
-            .and_then(|value| value.downcast::<NSString>().ok())
-            .map_or_else(
-                || "Administrator authorization failed.".to_owned(),
-                |value| value.to_string(),
-            );
-        anyhow::bail!("{}", bounded_detail(&detail));
-    }
-    ensure!(descriptor.is_some(), "The removal tool returned no result.");
-    Ok(true)
-}
-
 fn message(ui: NativeUi, title: &str, detail: &str, style: NSAlertStyle) {
     let alert = NSAlert::new(ui.main);
     alert.setAlertStyle(style);
     alert.setMessageText(&NSString::from_str(title));
     alert.setInformativeText(&NSString::from_str(detail));
-    alert.addButtonWithTitle(&NSString::from_str(ui.text("확인", "OK")));
+    alert.addButtonWithTitle(&NSString::from_str(ui.text(Text::Ok)));
     alert.runModal();
 }
 
-fn bounded_detail(detail: &str) -> String {
-    detail.chars().take(600).collect()
+fn perform_removal(
+    ui: NativeUi,
+    authorization: mixrelay_macos_installer::removal::RemovalAuthorization,
+    team: SigningTeam,
+    delete_settings: bool,
+) -> Result<()> {
+    use objc2_app_kit::{
+        NSBackingStoreType, NSProgressIndicator, NSTextField, NSWindow, NSWindowStyleMask,
+    };
+    use objc2_foundation::{NSDate, NSRunLoop};
+    // SAFETY: main-thread marker, finite frame, and no delegated window lifetime.
+    let window = unsafe {
+        NSWindow::initWithContentRect_styleMask_backing_defer(
+            NSWindow::alloc(ui.main),
+            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(480.0, 100.0)),
+            NSWindowStyleMask::Titled,
+            NSBackingStoreType::Buffered,
+            false,
+        )
+    };
+    // AppKit must not release the Rust-owned window when it closes.
+    unsafe {
+        window.setReleasedWhenClosed(false);
+    }
+    window.setTitle(&NSString::from_str(ui.text(Text::Remove)));
+    let label = NSTextField::labelWithString(&NSString::from_str(ui.text(Text::Working)), ui.main);
+    label.setFrame(NSRect::new(
+        NSPoint::new(20.0, 60.0),
+        NSSize::new(440.0, 24.0),
+    ));
+    let progress = NSProgressIndicator::initWithFrame(
+        NSProgressIndicator::alloc(ui.main),
+        NSRect::new(NSPoint::new(20.0, 25.0), NSSize::new(440.0, 16.0)),
+    );
+    progress.setIndeterminate(true);
+    // SAFETY: nil sender; progress indicator belongs to the main thread.
+    unsafe {
+        progress.startAnimation(None);
+    }
+    let content = window.contentView().context("missing progress content")?;
+    content.addSubview(&label);
+    content.addSubview(&progress);
+    window.center();
+    window.makeKeyAndOrderFront(None);
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = sender.send(authorization.remove(&team, delete_settings));
+    });
+    let result = loop {
+        match receiver.try_recv() {
+            Ok(result) => break result,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                break Err(anyhow!("removal worker ended without a result"));
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                NSRunLoop::mainRunLoop().runUntilDate(&NSDate::dateWithTimeIntervalSinceNow(0.05));
+            }
+        }
+    };
+    // SAFETY: nil sender; the main thread still owns the indicator.
+    unsafe {
+        progress.stopAnimation(None);
+    }
+    window.close();
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_failures_are_logged_but_not_used_as_user_diagnostics() {
+        let error = anyhow!("internal command failure with a private path");
+        let detail = UiLocale::French.text(error_text(&error));
+        assert_eq!(detail, UiLocale::French.text(Text::Retry));
+        assert!(!detail.contains("private path"));
+        assert!(detail.contains("support@mixrelay.com"));
+    }
+
+    #[test]
+    fn typed_failure_context_selects_localized_recovery() {
+        let error = anyhow!("technical signature details").context(Diagnostic::DownloadAgain);
+        assert_eq!(
+            UiLocale::German.text(error_text(&error)),
+            UiLocale::German.text(Text::DownloadAgain)
+        );
+        let error = anyhow!("OS authorization details").context(Diagnostic::Authorization);
+        assert_eq!(
+            UiLocale::Korean.text(error_text(&error)),
+            UiLocale::Korean.text(Text::Authorization)
+        );
+    }
 }

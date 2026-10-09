@@ -20,6 +20,7 @@ pub struct DriverManager {
     installed_version: Option<String>,
     persistence_error: Option<String>,
     initial_inventory_pending: bool,
+    active: bool,
 }
 
 impl DriverManager {
@@ -35,6 +36,7 @@ impl DriverManager {
     ) -> Result<Self, DriverError> {
         let path = path.into();
         let stored = store::load(&path)?;
+        let active = store::is_active(&path)?;
         let (revision, inventory) = stored.map_or_else(
             || (0, vec![default_device()]),
             |stored| (stored.revision, stored.devices),
@@ -49,6 +51,7 @@ impl DriverManager {
             installed_version: None,
             persistence_error: None,
             initial_inventory_pending: true,
+            active,
         };
         manager.initialize()?;
         Ok(manager)
@@ -65,9 +68,10 @@ impl DriverManager {
         if self.backend.state() != DriverState::Ready {
             return Ok(false);
         }
-        self.backend.replace(&self.inventory)?;
+        self.backend
+            .replace(if self.active { &self.inventory } else { &[] })?;
         let settings = self.backend.settings()?;
-        let persisted = self.observe(settings, true)?;
+        let persisted = self.observe(settings, self.active)?;
         self.initial_inventory_pending = false;
         if !persisted {
             self.persist();
@@ -82,6 +86,9 @@ impl DriverManager {
     pub(crate) fn maintain(&mut self) -> Result<bool, DriverError> {
         if self.initial_inventory_pending {
             return self.initialize();
+        }
+        if !self.active {
+            return Ok(false);
         }
         let recovered = self.backend.recover(&self.inventory)?;
         if recovered {
@@ -128,6 +135,14 @@ impl DriverManager {
                 current: self.revision,
             });
         }
+        match command {
+            DriverCommand::Activate { .. } => return self.set_active(true),
+            DriverCommand::Deactivate { .. } => return self.set_active(false),
+            _ if !self.active => {
+                return Err(DriverError::Unavailable("Driver is stopped".into()));
+            }
+            _ => {}
+        }
         let desired = self.desired(command)?;
         validate_inventory(&desired)?;
         let revision = next_revision(self.revision)?;
@@ -145,6 +160,31 @@ impl DriverManager {
         Ok(self.current_snapshot())
     }
 
+    fn set_active(&mut self, active: bool) -> Result<DriverSnapshot, DriverError> {
+        if active != self.active {
+            let revision = next_revision(self.revision)?;
+            self.backend
+                .replace(if active { &self.inventory } else { &[] })?;
+            // Keep desired settings independent of an intentionally empty native readback.
+            // A readback/save failure must not let maintenance revive stopped devices.
+            self.active = active;
+            self.revision = revision;
+        }
+        self.settings = self.backend.settings()?;
+        if active {
+            self.inventory = observed_inventory(&self.settings);
+        } else if !self.settings.devices.is_empty() {
+            return Err(DriverError::Backend("Driver devices did not stop".into()));
+        }
+        self.persist();
+        if let Some(error) = &self.persistence_error {
+            return Err(DriverError::Unavailable(format!(
+                "Driver run state was not saved: {error}"
+            )));
+        }
+        Ok(self.current_snapshot())
+    }
+
     fn refresh(&mut self) -> Result<bool, DriverError> {
         // Startup intent is authoritative until its first native ACK/readback.
         // An empty observation before that point must never become a saved empty inventory.
@@ -157,7 +197,7 @@ impl DriverManager {
             Err(_) if !ready => unavailable_settings(),
             Err(error) => return Err(error),
         };
-        self.observe(settings, ready)
+        self.observe(settings, ready && self.active)
     }
 
     fn observe(
@@ -199,14 +239,18 @@ impl DriverManager {
     }
 
     fn persist(&mut self) {
-        self.persistence_error = store::save(&self.path, self.revision, &self.inventory)
-            .err()
-            .map(|error| error.to_string());
+        self.persistence_error =
+            store::save(&self.path, self.revision, self.active, &self.inventory)
+                .err()
+                .map(|error| error.to_string());
     }
 
     fn desired(&self, command: DriverCommand) -> Result<Vec<DriverDeviceConfig>, DriverError> {
         let mut desired = self.inventory.clone();
         match command {
+            DriverCommand::Activate { .. } | DriverCommand::Deactivate { .. } => {
+                unreachable!("run-state commands are handled before inventory commands");
+            }
             DriverCommand::Create { spec, .. } => {
                 if !self.settings.can_create {
                     return Err(DriverError::Invalid(

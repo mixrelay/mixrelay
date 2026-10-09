@@ -80,6 +80,10 @@ pub struct DriverSnapshot {
     deny_unknown_fields
 )]
 pub enum DriverCommand {
+    /// Restore retained devices after an explicit Driver manager quit.
+    Activate { expected_revision: u64 },
+    /// Stop native devices and loopback without deleting saved device settings.
+    Deactivate { expected_revision: u64 },
     /// Create a previously absent identity.
     Create {
         expected_revision: u64,
@@ -115,7 +119,9 @@ pub enum DriverCommand {
 impl DriverCommand {
     pub(crate) const fn expected_revision(&self) -> u64 {
         match self {
-            Self::Create {
+            Self::Activate { expected_revision }
+            | Self::Deactivate { expected_revision }
+            | Self::Create {
                 expected_revision, ..
             }
             | Self::Configure {

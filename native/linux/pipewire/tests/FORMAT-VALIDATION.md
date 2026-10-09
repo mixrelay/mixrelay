@@ -56,3 +56,45 @@ The lifecycle test uses only its own source and observer. It deliberately queues
 obsolete PCM around native state transitions to check the production epoch
 handoff. Keep its result separate from ordinary ring unit tests; an unexecuted or
 failing native fixture is not lifecycle acceptance.
+
+The output callback sets `pw_buffer.size` to the emitted audio frame count,
+including silence, and clears it before reusing an output buffer. PipeWire uses
+this field for queued-frame time accounting; `spa_chunk.size` remains bytes.
+The following C regression test exercises the production callback with the real
+PCM ring and mocked dequeue/queue calls. It covers all four PCM formats, buffer
+capacity, silence, invalid format/geometry, and returning each buffer once.
+It starts no daemon and accesses no audio devices:
+
+```sh
+bash native/linux/pipewire/tests/run-stream-buffer-metadata.sh
+```
+
+Correct frame accounting does not make the realtime graph lossless when a
+consumer misses its processing deadline. The controlled reader-delay failure
+and source-policy experiments are recorded in `docs/product.md`.
+
+Startup preparation touches every native PCM ring page and the Linux driver's
+callback scratch pages on control before publishing them. The loopback processor
+also waits for the capture/output format after preparing the render/input
+dependency, before DSP publication. This adds no fixed sleep to RT processing.
+The existing two-quantum FIFO prefill remains unchanged. Linux residency tests
+query the full mapping before PCM access; macOS and Linux tests check sample-bit
+preservation and allocation-free callbacks. Prefaulting does not permanently
+lock pages in memory or guarantee delivery after a missed graph deadline.
+
+A separate Debian 13 x86_64 KVM guest (2 vCPUs, 4 GiB; Linux 6.12.111,
+PipeWire 1.4.2, WirePlumber 0.5.8; server/client FIFO 88/83) passed the current
+32-channel PCM24 and 64-channel PCM16 continuity cases three times each.
+Each case retained 480,255 indexed frames with zero continuity errors in each
+of two independent client scopes. Separately built HEAD passed both cases once.
+The reference PipeWire loopback and all-format negotiation/removal cases passed.
+This finite environment comparison does not qualify delayed-reader recovery,
+same-device feedback, or long-duration operation. Hardware, architecture, kernel,
+hypervisor and PipeWire build differ from the Docker lab; see `docs/product.md`
+for provenance and the excluded shared-build-cache comparison.
+
+The environment-dependent midstream PCM loss remains a known issue. The current
+release decision does not treat these reproductions alone as a blanket Linux
+release blocker. Arch Linux and long-duration operation on user hardware remain
+unqualified; a reproduction during normal use in a supported environment requires
+reassessment. Keep all continuity assertions and failure thresholds unchanged.

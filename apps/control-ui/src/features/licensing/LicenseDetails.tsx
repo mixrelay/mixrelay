@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import licenseTerms from '../../../../../LICENSE.txt?raw';
+import { formattingLocale, resolveLocale } from '../../core/i18n';
 import { LicensingKeyField } from '../../core/licensing/LicensingFields';
 import type { LicensingPort, LicensingStatus } from '../../core/licensing/LicensingPort';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { TextField } from '../../core/ui/TextField';
+import { appLicenseTerms } from './appLicenseTerms';
 import styles from './LicenseAccess.module.css';
 import type { LicenseErrorCode } from './useLicenseSession';
 
@@ -20,7 +21,7 @@ function expiryDate(unix: number | null, locale: string): string | null {
   if (unix == null || !Number.isFinite(unix)) return null;
   const date = new Date(unix * 1000);
   if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat(locale === 'ko-KR' ? 'ko-KR' : 'en', {
+  return new Intl.DateTimeFormat(formattingLocale(locale), {
     dateStyle: 'medium',
   }).format(date);
 }
@@ -90,7 +91,7 @@ function ActivationForm({
 }
 
 export function LicenseTerms() {
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
 
   return (
     <div className={styles.terms}>
@@ -100,7 +101,9 @@ export function LicenseTerms() {
       </p>
       <details>
         <summary>{t('licensing.termsTitle')}</summary>
-        <pre className={styles.termsText}>{licenseTerms}</pre>
+        <pre className={styles.termsText} lang={resolveLocale(i18n.language)}>
+          {appLicenseTerms(i18n.language)}
+        </pre>
       </details>
     </div>
   );

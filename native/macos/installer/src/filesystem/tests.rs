@@ -333,6 +333,123 @@ fn remove_commit_and_rollback_never_touch_user_data() {
 }
 
 #[test]
+fn removal_succeeds_for_every_partial_target_set_and_on_repeat() {
+    for mask in 0u8..64 {
+        let fixture = Fixture::new();
+        for (index, target) in OwnedTarget::all().into_iter().enumerate() {
+            if mask & (1 << index) != 0 {
+                let path = fixture.destination(target);
+                if target_kind(target) == TargetKind::Directory {
+                    write_file(&path.join("owned"), "remove");
+                } else {
+                    write_file(&path, "remove");
+                }
+            }
+        }
+        let adapter = fixture.adapter();
+        let request = TransactionRequest::remove();
+        for _ in 0..2 {
+            let snapshot = adapter.preflight(&request).unwrap();
+            let staged = adapter.stage(&request, &snapshot).unwrap();
+            adapter.commit(&request, &snapshot, &staged).unwrap();
+            adapter.cleanup(&staged).unwrap();
+            assert!(
+                OwnedTarget::all()
+                    .iter()
+                    .all(|target| !fixture.destination(*target).exists())
+            );
+            assert_eq!(read(&fixture.user_data), "keep-this-data");
+        }
+    }
+}
+
+fn stale_stage(fixture: &Fixture) -> PathBuf {
+    let path = fixture.adapter().layout().staging_root().to_path_buf();
+    fs::create_dir(&path).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::create_dir(path.join("payload")).unwrap();
+    fs::create_dir(path.join("backups")).unwrap();
+    path
+}
+
+#[test]
+fn restored_staging_is_automatically_reclaimed_for_install_and_repeat() {
+    let fixture = Fixture::new();
+    fixture.create_old_targets();
+    let path = stale_stage(&fixture);
+    write_file(
+        &path.join("payload/app/Contents/stale"),
+        "unused new payload",
+    );
+    let adapter = fixture.adapter();
+    adapter.cleanup_stale_staging().unwrap();
+    adapter.cleanup_stale_staging().unwrap();
+    adapter.preflight(&fixture.sources()).unwrap();
+    assert!(!path.exists());
+    assert_eq!(
+        read(&fixture.destination(OwnedTarget::Driver)),
+        "old-engine"
+    );
+    assert_eq!(read(&fixture.user_data), "keep-this-data");
+}
+
+#[test]
+fn already_deleted_transaction_staging_is_successful_cleanup() {
+    let fixture = Fixture::new();
+    let adapter = fixture.adapter();
+    let request = TransactionRequest::Remove;
+    let snapshot = adapter.preflight(&request).unwrap();
+    let staged = adapter.stage(&request, &snapshot).unwrap();
+    fs::remove_dir_all(staged.staging_root()).unwrap();
+    adapter.cleanup(&staged).unwrap();
+    adapter.cleanup(&staged).unwrap();
+    assert!(!staged.staging_root().exists());
+    assert_eq!(read(&fixture.user_data), "keep-this-data");
+}
+
+#[test]
+fn abandoned_original_backups_are_cleaned_for_install_and_remove() {
+    for install in [true, false] {
+        let fixture = Fixture::new();
+        let path = stale_stage(&fixture);
+        write_file(&path.join("backups/driver"), "original driver");
+        let request = if install {
+            fixture.sources()
+        } else {
+            TransactionRequest::Remove
+        };
+        fixture.adapter().cleanup_stale_staging().unwrap();
+        fixture.adapter().preflight(&request).unwrap();
+        assert!(!path.exists());
+        assert_eq!(read(&fixture.user_data), "keep-this-data");
+    }
+}
+
+#[test]
+fn stale_cleanup_removes_all_residue_without_following_external_links() {
+    for case in ["unknown", "symlink", "hardlink", "writable"] {
+        let fixture = Fixture::new();
+        let path = stale_stage(&fixture);
+        match case {
+            "unknown" => write_file(&path.join("foreign"), "keep"),
+            "symlink" => symlink(&fixture.user_data, path.join("payload/driver")).unwrap(),
+            "hardlink" => fs::hard_link(&fixture.user_data, path.join("payload/driver")).unwrap(),
+            _ => {
+                write_file(&path.join("payload/driver"), "bad mode");
+                fs::set_permissions(
+                    path.join("payload/driver"),
+                    fs::Permissions::from_mode(0o666),
+                )
+                .unwrap();
+            }
+        }
+        fixture.adapter().cleanup_stale_staging().unwrap();
+        assert!(!path.exists());
+        assert_eq!(read(&fixture.user_data), "keep-this-data");
+    }
+}
+
+#[test]
 fn target_symlink_is_rejected_before_any_mutation() {
     let fixture = Fixture::new();
     fixture.create_old_targets();
@@ -365,16 +482,6 @@ fn partial_commit_failure_rolls_back_real_fixture_files() {
         .commit(&request, &snapshot, &staged)
         .expect_err("missing payload must fail after earlier renames");
     assert!(matches!(error, FilesystemError::Io { .. }));
-    let cleanup_error = adapter
-        .cleanup(&staged)
-        .expect_err("failed commit must retain rollback evidence");
-    assert!(matches!(
-        cleanup_error,
-        FilesystemError::InvalidStageState {
-            operation: "cleanup",
-            state: FilesystemStageState::CommitFailed,
-        }
-    ));
     adapter
         .rollback(&request, &snapshot, &staged, None)
         .expect("partial commit rollback succeeds");
@@ -417,7 +524,7 @@ fn created_parent_replacement_is_retained_until_identity_is_restored() {
         failure.error(),
         FilesystemError::CreatedDirectoryChanged { .. }
     ));
-    assert!(failure.retained().staging_root().is_dir());
+    assert!(failure.diagnostics().staging_root().is_dir());
     assert!(!launchd.exists());
 
     fs::remove_dir(&launchd_parent).expect("replacement parent removes");
@@ -466,7 +573,7 @@ fn staging_replacement_is_rejected_without_recursive_cleanup() {
 }
 
 #[test]
-fn rollback_failure_retains_private_evidence_and_does_not_cleanup() {
+fn rollback_failure_cleans_backups_without_changing_foreign_targets() {
     let fixture = Fixture::new();
     fixture.create_old_targets();
     let adapter = fixture.adapter();
@@ -484,34 +591,18 @@ fn rollback_failure_retains_private_evidence_and_does_not_cleanup() {
     let failure = adapter
         .rollback(&request, &snapshot, &staged, Some(&committed))
         .expect_err("rollback must retain evidence when target is replaced");
-    assert!(failure.retained().staging_root().is_dir());
+    assert!(failure.diagnostics().staging_root().is_dir());
     assert!(staged.staging_root().is_dir());
     assert!(!fixture.destination(OwnedTarget::Launchd).exists());
     assert!(!fixture.destination(OwnedTarget::Hal).exists());
     assert_eq!(read(&fixture.user_data), "keep-this-data");
-    let cleanup_error = adapter
-        .cleanup(&staged)
-        .expect_err("failed rollback must retain private evidence");
-    assert!(matches!(
-        cleanup_error,
-        FilesystemError::InvalidStageState {
-            operation: "cleanup",
-            state: FilesystemStageState::RollbackFailed,
-        }
-    ));
-
-    fs::remove_file(&engine).expect("engine symlink removes");
-    fs::rename(&moved_engine, &engine).expect("new engine restores");
-    adapter
-        .rollback(&request, &snapshot, &staged, Some(&committed))
-        .expect("rollback retry succeeds after the changed target is restored");
-    assert_eq!(
-        read(&fixture.destination(OwnedTarget::Driver)),
-        "old-engine"
-    );
     adapter
         .cleanup(&staged)
-        .expect("cleanup succeeds after retry");
+        .expect("failed rollback still cleans staging");
+    assert!(!staged.staging_root().exists());
+    assert!(engine.is_symlink());
+    assert_eq!(read(&moved_engine), "new-engine");
+    assert_eq!(read(&fixture.user_data), "keep-this-data");
 }
 
 #[test]
@@ -519,4 +610,53 @@ fn install_request_shape_remains_explicit() {
     let fixture = Fixture::new();
     assert_eq!(fixture.sources().kind(), OperationKind::Install);
     assert_eq!(TransactionRequest::remove().kind(), OperationKind::Remove);
+}
+
+#[test]
+fn legacy_upgrade_adds_removal_app_and_helper_as_one_recoverable_payload_set() {
+    let fixture = Fixture::new();
+    fixture.create_old_targets();
+    let remover = fixture.root.join("sources/Uninstall.app");
+    let helper_plist = fixture.root.join("sources/removal.plist");
+    write_executable(
+        &remover.join("Contents/MacOS/mixrelay-driver-uninstaller"),
+        "new-remover",
+    );
+    write_file(&remover.join("Contents/Info.plist"), "remover-info");
+    write_file(&helper_plist, "new-helper-plist");
+    let request = TransactionRequest::install(
+        InstallSources::new(
+            &fixture.app,
+            &fixture.hal,
+            &fixture.engine,
+            &fixture.launchd,
+        )
+        .with_remover(&remover, &helper_plist),
+    );
+    let adapter = fixture.adapter();
+    let snapshot = adapter.preflight(&request).unwrap();
+    let staged = adapter.stage(&request, &snapshot).unwrap();
+    let committed = adapter.commit(&request, &snapshot, &staged).unwrap();
+    assert_eq!(
+        read(
+            &fixture
+                .destination(OwnedTarget::Uninstaller)
+                .join("Contents/MacOS/mixrelay-driver-uninstaller")
+        ),
+        "new-remover"
+    );
+    assert_eq!(
+        read(&fixture.destination(OwnedTarget::RemovalLaunchd)),
+        "new-helper-plist"
+    );
+    adapter
+        .rollback(&request, &snapshot, &staged, Some(&committed))
+        .unwrap();
+    assert!(!fixture.destination(OwnedTarget::Uninstaller).exists());
+    assert!(!fixture.destination(OwnedTarget::RemovalLaunchd).exists());
+    assert_eq!(
+        read(&fixture.destination(OwnedTarget::Driver)),
+        "old-engine"
+    );
+    adapter.cleanup(&staged).unwrap();
 }

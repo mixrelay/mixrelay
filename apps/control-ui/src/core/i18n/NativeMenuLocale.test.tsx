@@ -5,7 +5,7 @@ import { NativeMenuLocale } from './NativeMenuLocale';
 const native = vi.hoisted(() => ({
   invoke: vi.fn(),
   isTauri: vi.fn(),
-  i18n: { resolvedLanguage: 'ko-KR', language: 'ko-KR' },
+  i18n: { resolvedLanguage: 'ko-KR' as string | undefined, language: 'ko-KR' },
 }));
 
 vi.mock('@tauri-apps/api/core', () => native);
@@ -33,6 +33,22 @@ describe('NativeMenuLocale', () => {
     render(<NativeMenuLocale />);
     expect(native.invoke).not.toHaveBeenCalled();
   });
+
+  it('sends the requested language before a resource has been resolved', () => {
+    native.i18n.resolvedLanguage = undefined;
+    native.i18n.language = 'pt-BR';
+    render(<NativeMenuLocale />);
+    expect(native.invoke).toHaveBeenLastCalledWith('set_native_menu_locale', { locale: 'pt-BR' });
+  });
+
+  it.each(['ja', 'zh-Hans', 'zh-Hant', 'fr', 'de', 'es', 'pt', 'it', 'ru'])(
+    'sends %s to native menus without substituting English',
+    (locale) => {
+      native.i18n.resolvedLanguage = locale;
+      render(<NativeMenuLocale />);
+      expect(native.invoke).toHaveBeenLastCalledWith('set_native_menu_locale', { locale });
+    },
+  );
 
   it('reports native failures without an unhandled rejection', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});

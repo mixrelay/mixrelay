@@ -1,0 +1,227 @@
+{
+  "ja": {
+    "app": {
+      "title": "MixRelay のアンインストール",
+      "message": "アンインストール前にメニューまたはトレイから MixRelay を終了してください。グラフと設定は既定で保持されます。録音とエクスポートしたプロジェクトは保持され、有料ライセンスのログイン情報は消去されます。",
+      "delete_label": "保存されたグラフと設定を削除",
+      "remove_label": "アンインストール",
+      "cancel_label": "キャンセル",
+      "failed": "アンインストールできませんでした。MixRelay を終了し、権限要求を承認してから再試行してください。保存されたデータは削除していません。",
+      "unsafe": "データのパスが安全でないため、アンインストールを中止しました。保存されたデータは削除していません。",
+      "cleanup_failed": "アプリは削除されましたが、一部のグラフまたは設定を削除できませんでした。",
+      "auth_failed": "アプリは削除されましたが、ライセンスのログイン情報を消去できませんでした。アプリを再インストールし、アンインストールを再試行してください。グラフと設定は保持されています。",
+      "root_error": "ログイン中の一般ユーザーとして MixRelay のアンインストールを実行してください。",
+      "missing": "インストール済みの MixRelay パッケージが見つかりませんでした。",
+      "done_message": "MixRelay をアンインストールしました。"
+    },
+    "driver": {
+      "title": "MixRelay Driver のアンインストール",
+      "message": "MixRelay Driverの仮想デバイスとサービスを削除し、システム音声を一時的に中断します。",
+      "delete_label": "保存された MixRelay Driver デバイス設定を削除",
+      "failed": "MixRelay Driver を削除できませんでした。MixRelay と MixRelay Driver 管理アプリを終了してから再試行してください。",
+      "auth_cancelled": "認証がキャンセルされました。MixRelay Driver パッケージは削除されず、保存された設定も削除されていません。",
+      "auth_failed": "認証を利用できないか、認証に失敗しました。MixRelay Driver パッケージは削除されず、保存された設定も削除されていません。",
+      "root_error": "ログイン中の一般ユーザーとして MixRelay Driver の削除を実行してください。"
+    }
+  },
+  "zh-Hans": {
+    "app": {
+      "title": "卸载 MixRelay",
+      "message": "卸载前，请从菜单或托盘退出 MixRelay。默认保留图和设置。录音和导出的项目会保留，付费许可证登录信息会清除。",
+      "delete_label": "删除保存的图和设置",
+      "remove_label": "卸载",
+      "cancel_label": "取消",
+      "failed": "卸载失败。请退出 MixRelay，批准授权请求后重试。保存的数据未删除。",
+      "unsafe": "数据路径不安全，已停止卸载。保存的数据未删除。",
+      "cleanup_failed": "应用已卸载，但部分图或设置无法删除。",
+      "auth_failed": "应用已卸载，但许可证登录信息无法清除。请重新安装应用后重试卸载。图和设置已保留。",
+      "root_error": "请以已登录的普通用户身份运行 MixRelay 卸载程序。",
+      "missing": "未找到已安装的 MixRelay 软件包。",
+      "done_message": "MixRelay 已卸载。"
+    },
+    "driver": {
+      "title": "卸载 MixRelay Driver",
+      "message": "移除 MixRelay Driver 的虚拟设备和服务，并暂时中断系统音频。",
+      "delete_label": "删除保存的 MixRelay Driver 设备设置",
+      "failed": "MixRelay Driver 移除失败。请退出 MixRelay 和 MixRelay Driver 管理应用后重试。",
+      "auth_cancelled": "认证已取消。MixRelay Driver 软件包未移除，保存的设置未删除。",
+      "auth_failed": "无法授权或认证失败。MixRelay Driver 软件包未移除，保存的设置未删除。",
+      "root_error": "请以已登录的普通用户身份移除 MixRelay Driver。"
+    }
+  },
+  "zh-Hant": {
+    "app": {
+      "title": "解除安裝 MixRelay",
+      "message": "解除安裝前，請從選單或系統匣結束 MixRelay。預設保留圖與設定。錄音與匯出的專案會保留，付費授權登入資訊會清除。",
+      "delete_label": "刪除儲存的圖與設定",
+      "remove_label": "解除安裝",
+      "cancel_label": "取消",
+      "failed": "解除安裝失敗。請結束 MixRelay，核准授權要求後重試。儲存的資料未刪除。",
+      "unsafe": "資料路徑不安全，已停止解除安裝。儲存的資料未刪除。",
+      "cleanup_failed": "應用程式已移除，但部分圖或設定無法刪除。",
+      "auth_failed": "應用程式已移除，但授權登入資訊無法清除。請重新安裝應用程式後重試解除安裝。圖與設定已保留。",
+      "root_error": "請以已登入的一般使用者身分執行 MixRelay 解除安裝程式。",
+      "missing": "找不到已安裝的 MixRelay 套件。",
+      "done_message": "MixRelay 已解除安裝。"
+    },
+    "driver": {
+      "title": "解除安裝 MixRelay Driver",
+      "message": "移除 MixRelay Driver 的虛擬裝置與服務，並暫時中斷系統音訊。",
+      "delete_label": "刪除儲存的 MixRelay Driver 裝置設定",
+      "failed": "MixRelay Driver 移除失敗。請結束 MixRelay 與 MixRelay Driver 管理應用程式後重試。",
+      "auth_cancelled": "驗證已取消。MixRelay Driver 套件未移除，儲存的設定未刪除。",
+      "auth_failed": "無法授權或驗證失敗。MixRelay Driver 套件未移除，儲存的設定未刪除。",
+      "root_error": "請以已登入的一般使用者身分移除 MixRelay Driver。"
+    }
+  },
+  "fr": {
+    "app": {
+      "title": "Désinstaller MixRelay",
+      "message": "Quittez MixRelay depuis son menu ou la barre d’état avant la désinstallation. Les graphes et paramètres sont conservés par défaut. Les enregistrements et projets exportés sont conservés. Les informations de connexion de la licence payante seront effacées.",
+      "delete_label": "Supprimer les graphes et paramètres enregistrés",
+      "remove_label": "Désinstaller",
+      "cancel_label": "Annuler",
+      "failed": "La désinstallation a échoué. Quittez MixRelay, approuvez la demande d’autorisation et réessayez. Les données enregistrées n’ont pas été supprimées.",
+      "unsafe": "La désinstallation a été arrêtée, car un chemin de données n’est pas sûr. Les données enregistrées n’ont pas été supprimées.",
+      "cleanup_failed": "L’application a été supprimée, mais certains graphes ou paramètres n’ont pas pu être supprimés.",
+      "auth_failed": "L’application a été supprimée, mais les informations de connexion de la licence n’ont pas pu être effacées. Réinstallez l’application et réessayez la désinstallation. Les graphes et paramètres ont été conservés.",
+      "root_error": "Exécutez la désinstallation de MixRelay avec le compte utilisateur ordinaire connecté.",
+      "missing": "Le paquet MixRelay installé est introuvable.",
+      "done_message": "MixRelay a été désinstallé."
+    },
+    "driver": {
+      "title": "Désinstaller MixRelay Driver",
+      "message": "Supprime les périphériques virtuels et le service de MixRelay Driver, et interrompt brièvement l’audio du système.",
+      "delete_label": "Supprimer les paramètres de périphériques MixRelay Driver enregistrés",
+      "failed": "La suppression de MixRelay Driver a échoué. Quittez MixRelay et le gestionnaire MixRelay Driver, puis réessayez.",
+      "auth_cancelled": "L’authentification a été annulée. Le paquet MixRelay Driver n’a pas été supprimé et les paramètres enregistrés n’ont pas été effacés.",
+      "auth_failed": "L’autorisation est indisponible ou l’authentification a échoué. Le paquet MixRelay Driver n’a pas été supprimé et les paramètres enregistrés n’ont pas été effacés.",
+      "root_error": "Exécutez la suppression de MixRelay Driver avec le compte utilisateur ordinaire connecté."
+    }
+  },
+  "de": {
+    "app": {
+      "title": "MixRelay deinstallieren",
+      "message": "Beenden Sie MixRelay vor der Deinstallation über das Menü oder die Statusleiste. Graphen und Einstellungen bleiben standardmäßig erhalten. Aufnahmen und exportierte Projekte bleiben erhalten. Die Anmeldedaten der kostenpflichtigen Lizenz werden gelöscht.",
+      "delete_label": "Gespeicherte Graphen und Einstellungen löschen",
+      "remove_label": "Deinstallieren",
+      "cancel_label": "Abbrechen",
+      "failed": "Die Deinstallation ist fehlgeschlagen. Beenden Sie MixRelay, genehmigen Sie die Berechtigungsanfrage und versuchen Sie es erneut. Gespeicherte Daten wurden nicht gelöscht.",
+      "unsafe": "Die Deinstallation wurde wegen eines unsicheren Datenpfads angehalten. Gespeicherte Daten wurden nicht gelöscht.",
+      "cleanup_failed": "Die App wurde entfernt, aber einige Graphen oder Einstellungen konnten nicht gelöscht werden.",
+      "auth_failed": "Die App wurde entfernt, aber die Lizenz-Anmeldedaten konnten nicht gelöscht werden. Installieren Sie die App erneut und wiederholen Sie die Deinstallation. Graphen und Einstellungen wurden erhalten.",
+      "root_error": "Führen Sie die Deinstallation von MixRelay als angemeldeter regulärer Benutzer aus.",
+      "missing": "Das installierte MixRelay-Paket wurde nicht gefunden.",
+      "done_message": "MixRelay wurde deinstalliert."
+    },
+    "driver": {
+      "title": "MixRelay Driver deinstallieren",
+      "message": "Entfernt die virtuellen Geräte und den Dienst von MixRelay Driver und unterbricht kurz das Systemaudio.",
+      "delete_label": "Gespeicherte MixRelay Driver-Geräteeinstellungen löschen",
+      "failed": "Der MixRelay Driver konnte nicht entfernt werden. Beenden Sie MixRelay und den MixRelay Driver Manager und versuchen Sie es erneut.",
+      "auth_cancelled": "Die Authentifizierung wurde abgebrochen. Das MixRelay Driver-Paket wurde nicht entfernt und gespeicherte Einstellungen wurden nicht gelöscht.",
+      "auth_failed": "Die Autorisierung ist nicht verfügbar oder die Authentifizierung ist fehlgeschlagen. Das MixRelay Driver-Paket wurde nicht entfernt und gespeicherte Einstellungen wurden nicht gelöscht.",
+      "root_error": "Führen Sie die MixRelay Driver-Entfernung als angemeldeter regulärer Benutzer aus."
+    }
+  },
+  "es": {
+    "app": {
+      "title": "Desinstalar MixRelay",
+      "message": "Cierre MixRelay desde su menú o la bandeja antes de desinstalarlo. Los grafos y la configuración se conservan de forma predeterminada. Se conservan las grabaciones y los proyectos exportados. Se borrarán los datos de inicio de sesión de la licencia de pago.",
+      "delete_label": "Eliminar los grafos y la configuración guardados",
+      "remove_label": "Desinstalar",
+      "cancel_label": "Cancelar",
+      "failed": "No se pudo desinstalar. Cierre MixRelay, apruebe la solicitud de autorización e inténtelo de nuevo. Los datos guardados no se han eliminado.",
+      "unsafe": "Se detuvo la desinstalación porque una ruta de datos no es segura. Los datos guardados no se han eliminado.",
+      "cleanup_failed": "Se eliminó la aplicación, pero no se pudieron eliminar algunos grafos o ajustes guardados.",
+      "auth_failed": "Se eliminó la aplicación, pero no se pudieron borrar los datos de inicio de sesión de la licencia. Reinstale la aplicación y vuelva a desinstalarla. Los grafos y la configuración se han conservado.",
+      "root_error": "Ejecute la desinstalación de MixRelay con el usuario normal que ha iniciado sesión.",
+      "missing": "No se encontró el paquete de MixRelay instalado.",
+      "done_message": "MixRelay se ha desinstalado."
+    },
+    "driver": {
+      "title": "Desinstalar MixRelay Driver",
+      "message": "Elimina los dispositivos virtuales y el servicio de MixRelay Driver e interrumpe brevemente el audio del sistema.",
+      "delete_label": "Eliminar la configuración guardada de los dispositivos de MixRelay Driver",
+      "failed": "No se pudo eliminar MixRelay Driver. Cierre MixRelay y el administrador de MixRelay Driver e inténtelo de nuevo.",
+      "auth_cancelled": "Se canceló la autenticación. No se eliminó el paquete MixRelay Driver ni la configuración guardada.",
+      "auth_failed": "La autorización no está disponible o la autenticación falló. No se eliminó el paquete MixRelay Driver ni la configuración guardada.",
+      "root_error": "Ejecute la eliminación de MixRelay Driver con el usuario normal que ha iniciado sesión."
+    }
+  },
+  "pt": {
+    "app": {
+      "title": "Desinstalar MixRelay",
+      "message": "Feche o MixRelay pelo menu ou pela área de notificação antes de desinstalar. Os grafos e as definições são mantidos por predefinição. As gravações e os projetos exportados são mantidos. Os dados de início de sessão da licença paga serão apagados.",
+      "delete_label": "Eliminar grafos e definições guardados",
+      "remove_label": "Desinstalar",
+      "cancel_label": "Cancelar",
+      "failed": "A desinstalação falhou. Feche o MixRelay, aprove o pedido de autorização e tente novamente. Os dados guardados não foram eliminados.",
+      "unsafe": "A desinstalação foi interrompida porque um caminho de dados não é seguro. Os dados guardados não foram eliminados.",
+      "cleanup_failed": "A aplicação foi removida, mas não foi possível eliminar alguns grafos ou definições guardados.",
+      "auth_failed": "A aplicação foi removida, mas não foi possível apagar os dados de início de sessão da licença. Reinstale a aplicação e tente desinstalar novamente. Os grafos e as definições foram mantidos.",
+      "root_error": "Execute a desinstalação do MixRelay como o utilizador normal com sessão iniciada.",
+      "missing": "O pacote MixRelay instalado não foi encontrado.",
+      "done_message": "O MixRelay foi desinstalado."
+    },
+    "driver": {
+      "title": "Desinstalar MixRelay Driver",
+      "message": "Remove os dispositivos virtuais e o serviço do MixRelay Driver e interrompe brevemente o áudio do sistema.",
+      "delete_label": "Eliminar definições guardadas dos dispositivos MixRelay Driver",
+      "failed": "A remoção do MixRelay Driver falhou. Feche o MixRelay e o gestor do MixRelay Driver e tente novamente.",
+      "auth_cancelled": "A autenticação foi cancelada. O pacote MixRelay Driver não foi removido e as definições guardadas não foram eliminadas.",
+      "auth_failed": "A autorização não está disponível ou a autenticação falhou. O pacote MixRelay Driver não foi removido e as definições guardadas não foram eliminadas.",
+      "root_error": "Execute a remoção do MixRelay Driver como o utilizador normal com sessão iniciada."
+    }
+  },
+  "it": {
+    "app": {
+      "title": "Disinstallare MixRelay",
+      "message": "Chiudere MixRelay dal menu o dall’area di notifica prima della disinstallazione. Grafi e impostazioni vengono conservati per impostazione predefinita. Registrazioni e progetti esportati vengono conservati. I dati di accesso della licenza a pagamento verranno cancellati.",
+      "delete_label": "Eliminare grafi e impostazioni salvati",
+      "remove_label": "Disinstallare",
+      "cancel_label": "Annulla",
+      "failed": "Disinstallazione non riuscita. Chiudere MixRelay, approvare la richiesta di autorizzazione e riprovare. I dati salvati non sono stati eliminati.",
+      "unsafe": "Disinstallazione interrotta perché un percorso dei dati non è sicuro. I dati salvati non sono stati eliminati.",
+      "cleanup_failed": "L’applicazione è stata rimossa, ma non è stato possibile eliminare alcuni grafi o impostazioni salvati.",
+      "auth_failed": "L’applicazione è stata rimossa, ma non è stato possibile cancellare i dati di accesso della licenza. Reinstallare l’applicazione e riprovare la disinstallazione. Grafi e impostazioni sono stati conservati.",
+      "root_error": "Eseguire la disinstallazione di MixRelay con l’utente normale che ha effettuato l’accesso.",
+      "missing": "Il pacchetto MixRelay installato non è stato trovato.",
+      "done_message": "MixRelay è stato disinstallato."
+    },
+    "driver": {
+      "title": "Disinstallare MixRelay Driver",
+      "message": "Rimuove i dispositivi virtuali e il servizio di MixRelay Driver e interrompe brevemente l’audio del sistema.",
+      "delete_label": "Eliminare le impostazioni salvate dei dispositivi MixRelay Driver",
+      "failed": "Rimozione di MixRelay Driver non riuscita. Chiudere MixRelay e il gestore di MixRelay Driver, quindi riprovare.",
+      "auth_cancelled": "Autenticazione annullata. Il pacchetto MixRelay Driver non è stato rimosso e le impostazioni salvate non sono state eliminate.",
+      "auth_failed": "Autorizzazione non disponibile o autenticazione non riuscita. Il pacchetto MixRelay Driver non è stato rimosso e le impostazioni salvate non sono state eliminate.",
+      "root_error": "Eseguire la rimozione di MixRelay Driver con l’utente normale che ha effettuato l’accesso."
+    }
+  },
+  "ru": {
+    "app": {
+      "title": "Удалить MixRelay",
+      "message": "Перед удалением закройте MixRelay через меню или системный лоток. По умолчанию графы и настройки сохраняются. Записи и экспортированные проекты сохраняются. Данные входа для платной лицензии будут удалены.",
+      "delete_label": "Удалить сохранённые графы и настройки",
+      "remove_label": "Удалить",
+      "cancel_label": "Отмена",
+      "failed": "Не удалось удалить приложение. Закройте MixRelay, одобрите запрос разрешения и повторите попытку. Сохранённые данные не удалены.",
+      "unsafe": "Удаление остановлено, поскольку путь к данным небезопасен. Сохранённые данные не удалены.",
+      "cleanup_failed": "Приложение удалено, но некоторые сохранённые графы или настройки удалить не удалось.",
+      "auth_failed": "Приложение удалено, но данные входа для лицензии удалить не удалось. Установите приложение заново и повторите удаление. Графы и настройки сохранены.",
+      "root_error": "Запустите удаление MixRelay от имени обычного пользователя, вошедшего в систему.",
+      "missing": "Установленный пакет MixRelay не найден.",
+      "done_message": "MixRelay удалён."
+    },
+    "driver": {
+      "title": "Удалить MixRelay Driver",
+      "message": "Удаляет виртуальные устройства и службу MixRelay Driver и ненадолго прерывает системный звук.",
+      "delete_label": "Удалить сохранённые настройки устройств MixRelay Driver",
+      "failed": "Не удалось удалить MixRelay Driver. Закройте MixRelay и приложение управления MixRelay Driver, затем повторите попытку.",
+      "auth_cancelled": "Авторизация отменена. Пакет MixRelay Driver и сохранённые настройки не удалены.",
+      "auth_failed": "Разрешение недоступно или авторизация не удалась. Пакет MixRelay Driver и сохранённые настройки не удалены.",
+      "root_error": "Запустите удаление MixRelay Driver от имени обычного пользователя, вошедшего в систему."
+    }
+  }
+}

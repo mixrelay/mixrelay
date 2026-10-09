@@ -111,6 +111,10 @@ pub(crate) struct Record {
     pub(crate) stream: usize,
     pub(crate) monotonic_ns: Option<u64>,
     native_thread_id: Option<u64>,
+    // Cumulative CPU execution of this thread, sampled only at callback edges.
+    // Pair with the same thread ID. Guest accounting may charge host vCPU pauses
+    // or interrupt time when the kernel does not separately account for them.
+    native_thread_cpu_ns: Option<u64>,
     #[serde(serialize_with = "serialize_name")]
     name: [u8; 32],
     pub(crate) result: i32,
@@ -138,10 +142,14 @@ fn serialize_name<S: serde::Serializer>(name: &[u8; 32], serializer: S) -> Resul
 }
 
 pub(crate) fn monotonic_ns() -> Option<u64> {
+    clock_ns(libc::CLOCK_MONOTONIC)
+}
+
+fn clock_ns(clock: libc::clockid_t) -> Option<u64> {
     let mut value = MaybeUninit::<libc::timespec>::uninit();
-    // SAFETY: complete output storage; CLOCK_MONOTONIC neither changes the clock
-    // nor takes ownership. Read the initialized fields only after success.
-    if unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, value.as_mut_ptr()) } != 0 {
+    // SAFETY: complete output storage; querying a clock changes no clock or
+    // scheduling policy. Read the initialized fields only after success.
+    if unsafe { libc::clock_gettime(clock, value.as_mut_ptr()) } != 0 {
         return None;
     }
     // SAFETY: successful clock_gettime initialized both native timespec fields.
@@ -171,6 +179,12 @@ impl Record {
             stream,
             monotonic_ns: monotonic_ns(),
             native_thread_id: native_thread_id(),
+            native_thread_cpu_ns: matches!(
+                operation,
+                Operation::ProcessEnter | Operation::ProcessExit
+            )
+            .then(|| clock_ns(libc::CLOCK_THREAD_CPUTIME_ID))
+            .flatten(),
             name: [0; 32],
             result: 0,
             buffer_present,
@@ -463,6 +477,7 @@ mod tests {
                 assert!(record.buffer_time_ns.is_none() && record.buffered_frames.is_none());
                 assert!(record.queued_buffers.is_none() && record.avail_buffers.is_none());
                 assert!(record.native_thread_id.is_some() && record.monotonic_ns.is_some());
+                assert!(record.native_thread_cpu_ns.is_some());
                 assert_eq!(record.native_time_result, -libc::EINVAL);
                 assert!(!record.payload.valid);
             });
@@ -471,6 +486,7 @@ mod tests {
             let encoded = serde_json::to_value(record).unwrap();
             assert_eq!(encoded["operation"], name);
             assert!(encoded["native_thread_id"].is_number());
+            assert!(encoded["native_thread_cpu_ns"].is_number());
             assert!(encoded["buffer_time_ns"].is_null());
         }
     }
@@ -488,6 +504,7 @@ mod tests {
                 assert_eq!(record.operation, operation);
                 assert_eq!(record.name, [0; 32]);
                 assert!(record.monotonic_ns.is_some() && record.native_thread_id.is_some());
+                assert!(record.native_thread_cpu_ns.is_none());
                 assert!(!record.buffer_present && !record.payload.valid);
                 assert!(record.geometry.is_none() && record.header.is_none());
                 assert!(record.buffer_time_ns.is_none() && record.buffered_frames.is_none());
@@ -504,7 +521,16 @@ mod tests {
             assert_eq!(encoded["stream"], 0);
             assert_eq!(encoded["result"], -libc::EIO);
             assert_eq!(encoded["name"], "");
+            assert!(encoded["native_thread_cpu_ns"].is_null());
         }
+    }
+
+    #[test]
+    fn cpu_clock_is_monotonic_and_failed_queries_do_not_invent_zero_time() {
+        let before = clock_ns(libc::CLOCK_THREAD_CPUTIME_ID).unwrap();
+        let after = clock_ns(libc::CLOCK_THREAD_CPUTIME_ID).unwrap();
+        assert!(after >= before);
+        assert_eq!(clock_ns(-1), None);
     }
 
     #[test]

@@ -232,7 +232,7 @@ fn pending_stored_configuration_and_explicit_empty_survive_late_readiness() {
     for devices in [vec![saved], vec![]] {
         let fixture = FixtureDir::new("driver-pending-stored").unwrap();
         let path = fixture.join("drivers.json");
-        store::save(&path, 7, &devices).unwrap();
+        store::save(&path, 7, true, &devices).unwrap();
         let bytes = fs::read(&path).unwrap();
         let (backend, observed) = FakeBackend::ready();
         observed.lock().state = DriverState::InstalledNotLoaded;
@@ -259,7 +259,7 @@ fn failed_initial_apply_and_readback_preserve_pending_intent_and_store() {
         let fixture = FixtureDir::new("driver-pending-failure").unwrap();
         let path = fixture.join("drivers.json");
         let desired = vec![default_device()];
-        store::save(&path, 7, &desired).unwrap();
+        store::save(&path, 7, true, &desired).unwrap();
         let bytes = fs::read(&path).unwrap();
         let (backend, observed) = FakeBackend::ready();
         observed.lock().state = DriverState::InstalledNotLoaded;
@@ -474,7 +474,7 @@ fn shared_sample_format_applies_duplex_once_and_preserves_rate_and_channels() {
     saved.render_format.as_mut().unwrap().sample_rate = 44_100;
     saved.capture_format.as_mut().unwrap().sample_rate = 44_100;
     saved.capture_format.as_mut().unwrap().channels = 4;
-    store::save(&path, 7, &[saved]).unwrap();
+    store::save(&path, 7, true, &[saved]).unwrap();
     let (backend, observed) = FakeBackend::ready();
     let mut manager = DriverManager::open(backend, &path).unwrap();
     let before = manager.snapshot().unwrap();
@@ -572,7 +572,7 @@ fn shared_sample_format_does_not_create_an_absent_direction() {
                 saved.render_format = None;
             }
         }
-        store::save(&path, 7, std::slice::from_ref(&saved)).unwrap();
+        store::save(&path, 7, true, std::slice::from_ref(&saved)).unwrap();
         let (backend, observed) = FakeBackend::ready();
         let mut manager = DriverManager::open(backend, &path).unwrap();
         let before = manager.snapshot().unwrap();
@@ -745,4 +745,206 @@ fn absent_native_formats_are_not_invented_during_snapshot_or_save() {
             .render_format
             .is_none()
     );
+}
+
+#[test]
+fn explicit_quit_stops_native_devices_and_restores_saved_geometry_after_restart() {
+    let fixture = FixtureDir::new("driver-explicit-quit").unwrap();
+    let path = fixture.join("drivers.json");
+    let (backend, observed) = FakeBackend::ready();
+    let mut manager = DriverManager::open(backend, &path).unwrap();
+    let mut spec = manager.inventory[0].spec.clone();
+    spec.display_name = "Retained studio device".into();
+    spec.render.as_mut().unwrap().channels = 64;
+    spec.render.as_mut().unwrap().channel_layout = ChannelLayout::Discrete;
+    spec.capture.as_mut().unwrap().channels = 64;
+    spec.capture.as_mut().unwrap().channel_layout = ChannelLayout::Discrete;
+    let configured = manager
+        .mutate(DriverCommand::Configure {
+            expected_revision: manager.revision,
+            spec,
+        })
+        .unwrap();
+    manager
+        .mutate(DriverCommand::SetSampleFormat {
+            expected_revision: configured.revision,
+            endpoint_id: configured.settings.devices[0].spec.id.clone(),
+            sample_format: NativeSampleFormat::Signed16,
+        })
+        .unwrap();
+    let retained = manager.inventory.clone();
+    let stopped = manager
+        .mutate(DriverCommand::Deactivate {
+            expected_revision: manager.revision,
+        })
+        .unwrap();
+    assert!(stopped.settings.devices.is_empty());
+    assert!(observed.lock().settings.devices.is_empty());
+    assert_eq!(manager.inventory, retained);
+    let saved = store::load(&path).unwrap().unwrap();
+    assert!(!store::is_active(&path).unwrap());
+    assert_eq!(saved.devices, retained);
+    observed
+        .lock()
+        .failed_devices
+        .insert(retained[0].spec.id.as_str().into());
+    let applies = observed.lock().applies;
+    for _ in 0..3 {
+        assert!(!manager.maintain().unwrap());
+        assert!(manager.snapshot().unwrap().settings.devices.is_empty());
+    }
+    assert_eq!(observed.lock().applies, applies);
+    assert_eq!(store::load(&path).unwrap().unwrap().devices, retained);
+    assert!(matches!(
+        manager.mutate(DriverCommand::Configure {
+            expected_revision: manager.revision,
+            spec: retained[0].spec.clone(),
+        }),
+        Err(DriverError::Unavailable(_))
+    ));
+    drop(manager);
+    // A launchd/systemd restart retains the stop rather than reviving audio.
+    let (backend, observed) = FakeBackend::ready();
+    let mut restarted = DriverManager::open(backend, &path).unwrap();
+    assert!(restarted.snapshot().unwrap().settings.devices.is_empty());
+    assert!(observed.lock().settings.devices.is_empty());
+    assert_eq!(restarted.inventory, retained);
+    let resumed = restarted
+        .mutate(DriverCommand::Activate {
+            expected_revision: restarted.revision,
+        })
+        .unwrap();
+    assert_eq!(observed_inventory(&resumed.settings), retained);
+    assert!(store::is_active(&path).unwrap());
+}
+
+#[test]
+fn failed_stop_preserves_running_devices_and_can_be_retried() {
+    let fixture = FixtureDir::new("driver-failed-stop").unwrap();
+    let path = fixture.join("drivers.json");
+    let (backend, observed) = FakeBackend::ready();
+    let mut manager = DriverManager::open(backend, &path).unwrap();
+    let running = manager.snapshot().unwrap();
+    let saved = fs::read(&path).unwrap();
+    observed.lock().fail_apply = true;
+    assert!(
+        manager
+            .mutate(DriverCommand::Deactivate {
+                expected_revision: running.revision,
+            })
+            .is_err()
+    );
+    assert!(manager.active);
+    assert_eq!(manager.snapshot().unwrap(), running);
+    assert_eq!(fs::read(&path).unwrap(), saved);
+    observed.lock().fail_apply = false;
+    let stopped = manager
+        .mutate(DriverCommand::Deactivate {
+            expected_revision: running.revision,
+        })
+        .unwrap();
+    assert!(stopped.settings.devices.is_empty());
+    assert!(!manager.active);
+}
+
+#[test]
+fn stopped_state_save_failure_is_reported_and_idempotent_retry_saves_it() {
+    let fixture = FixtureDir::new("driver-stop-save-failure").unwrap();
+    let path = fixture.join("settings/drivers.json");
+    let (backend, observed) = FakeBackend::ready();
+    let mut manager = DriverManager::open(backend, &path).unwrap();
+    let retained = manager.inventory.clone();
+    fs::remove_file(&path).unwrap();
+    fs::remove_dir(path.parent().unwrap()).unwrap();
+    fs::write(path.parent().unwrap(), b"not a directory").unwrap();
+    assert!(
+        manager
+            .mutate(DriverCommand::Deactivate {
+                expected_revision: manager.revision,
+            })
+            .is_err()
+    );
+    assert!(!manager.active);
+    assert!(observed.lock().settings.devices.is_empty());
+    assert!(!manager.maintain().unwrap());
+    assert_eq!(manager.inventory, retained);
+    fs::remove_file(path.parent().unwrap()).unwrap();
+    manager
+        .mutate(DriverCommand::Deactivate {
+            expected_revision: manager.revision,
+        })
+        .unwrap();
+    let saved = store::load(&path).unwrap().unwrap();
+    assert!(!store::is_active(&path).unwrap());
+    assert_eq!(saved.devices, retained);
+}
+
+#[test]
+fn old_settings_without_run_state_remain_active_and_empty_inventory_stays_empty() {
+    let fixture = FixtureDir::new("driver-old-store").unwrap();
+    let path = fixture.join("drivers.json");
+    fs::write(&path, br#"{"revision":5,"devices":[]}"#).unwrap();
+    let (backend, _) = FakeBackend::ready();
+    let mut manager = DriverManager::open(backend, &path).unwrap();
+    assert!(manager.active);
+    manager
+        .mutate(DriverCommand::Deactivate {
+            expected_revision: manager.revision,
+        })
+        .unwrap();
+    manager
+        .mutate(DriverCommand::Activate {
+            expected_revision: manager.revision,
+        })
+        .unwrap();
+    assert!(manager.snapshot().unwrap().settings.devices.is_empty());
+    assert!(store::load(&path).unwrap().unwrap().devices.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn stop_marker_never_follows_or_replaces_a_symlink() {
+    let fixture = FixtureDir::new("driver-stop-marker-symlink").unwrap();
+    let path = fixture.join("drivers.json");
+    let outside = fixture.join("unrelated.txt");
+    fs::write(&outside, b"retained unrelated data").unwrap();
+    std::os::unix::fs::symlink(&outside, fixture.join("drivers.json.stopped")).unwrap();
+    assert!(store::is_active(&path).is_err());
+    assert!(store::save(&path, 0, false, &[]).is_err());
+    assert!(store::save(&path, 0, true, &[]).is_err());
+    assert!(!path.exists());
+    assert_eq!(fs::read(outside).unwrap(), b"retained unrelated data");
+}
+
+#[test]
+fn stopped_marker_preserves_previous_release_json_schema_and_private_permissions() {
+    let fixture = FixtureDir::new("driver-marker-schema").unwrap();
+    let path = fixture.join("drivers.json");
+    let (backend, _) = FakeBackend::ready();
+    let mut manager = DriverManager::open(backend, &path).unwrap();
+    manager
+        .mutate(DriverCommand::Deactivate {
+            expected_revision: manager.revision,
+        })
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(
+        json.as_object().unwrap().len(),
+        2,
+        "original settings schema"
+    );
+    assert!(json.get("active").is_none());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_eq!(
+            fs::metadata(path.with_file_name("drivers.json.stopped"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    assert!(!store::load(&path).unwrap().unwrap().devices.is_empty());
 }

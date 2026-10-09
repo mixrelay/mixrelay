@@ -3,12 +3,13 @@ use mixrelay_driver_control::DriverState;
 use tauri::menu::{CheckMenuItem, Submenu};
 
 use super::{
-    MenuState, UpdateResult,
+    MenuState, QuitState, UpdateResult,
     choices::{self, SettingAction, SettingChoice},
 };
 use crate::updates::UpdateState;
 
-/// Korean and English text used by the native Driver menu.
+/// Text for the supported native Driver menu languages.
+#[derive(Clone, Copy)]
 pub(super) struct Labels {
     pub(super) loading: &'static str,
     pub(super) check_updates: &'static str,
@@ -24,39 +25,166 @@ pub(super) struct Labels {
     download_failed: &'static str,
 }
 
-/// Supplies the existing ko/en locale contract for native Driver menus.
+const LABELS: [Labels; 11] = [
+    Labels {
+        loading: "Checking…",
+        check_updates: "Check for Updates",
+        quit: "Quit",
+        download: "Download…",
+        channels: "Channels",
+        sample_rate: "Sample Rate",
+        bit_depth: "Bit Depth",
+        mixed: "Mixed",
+        current: "Up to Date",
+        unpublished: "No Published Updates",
+        update_failed: "Update Check Failed",
+        download_failed: "Download Link Failed",
+    },
+    Labels {
+        loading: "확인 중…",
+        check_updates: "업데이트 확인",
+        quit: "종료",
+        download: "다운로드…",
+        channels: "채널 수",
+        sample_rate: "샘플레이트",
+        bit_depth: "비트 깊이",
+        mixed: "혼합",
+        current: "최신 버전입니다",
+        unpublished: "배포된 업데이트 없음",
+        update_failed: "업데이트 확인 실패",
+        download_failed: "다운로드 링크 열기 실패",
+    },
+    Labels {
+        loading: "確認中…",
+        check_updates: "アップデートを確認",
+        quit: "終了",
+        download: "ダウンロード…",
+        channels: "チャンネル数",
+        sample_rate: "サンプルレート",
+        bit_depth: "ビット深度",
+        mixed: "混在",
+        current: "最新です",
+        unpublished: "公開されたアップデートはありません",
+        update_failed: "アップデートの確認に失敗",
+        download_failed: "ダウンロードリンクを開けませんでした",
+    },
+    Labels {
+        loading: "正在检查…",
+        check_updates: "检查更新",
+        quit: "退出",
+        download: "下载…",
+        channels: "声道数",
+        sample_rate: "采样率",
+        bit_depth: "位深度",
+        mixed: "混合",
+        current: "已是最新版本",
+        unpublished: "没有已发布的更新",
+        update_failed: "检查更新失败",
+        download_failed: "无法打开下载链接",
+    },
+    Labels {
+        loading: "正在檢查…",
+        check_updates: "檢查更新",
+        quit: "結束",
+        download: "下載…",
+        channels: "聲道數",
+        sample_rate: "取樣率",
+        bit_depth: "位元深度",
+        mixed: "混合",
+        current: "已是最新版本",
+        unpublished: "沒有已發布的更新",
+        update_failed: "檢查更新失敗",
+        download_failed: "無法開啟下載連結",
+    },
+    Labels {
+        loading: "Vérification…",
+        check_updates: "Rechercher des mises à jour",
+        quit: "Quitter",
+        download: "Télécharger…",
+        channels: "Canaux",
+        sample_rate: "Fréquence d’échantillonnage",
+        bit_depth: "Profondeur de bits",
+        mixed: "Mixte",
+        current: "À jour",
+        unpublished: "Aucune mise à jour publiée",
+        update_failed: "Échec de la vérification des mises à jour",
+        download_failed: "Impossible d’ouvrir le lien de téléchargement",
+    },
+    Labels {
+        loading: "Wird geprüft…",
+        check_updates: "Nach Updates suchen",
+        quit: "Beenden",
+        download: "Herunterladen…",
+        channels: "Kanäle",
+        sample_rate: "Abtastrate",
+        bit_depth: "Bittiefe",
+        mixed: "Gemischt",
+        current: "Aktuell",
+        unpublished: "Keine veröffentlichten Updates",
+        update_failed: "Updateprüfung fehlgeschlagen",
+        download_failed: "Downloadlink konnte nicht geöffnet werden",
+    },
+    Labels {
+        loading: "Comprobando…",
+        check_updates: "Buscar actualizaciones",
+        quit: "Salir",
+        download: "Descargar…",
+        channels: "Canales",
+        sample_rate: "Frecuencia de muestreo",
+        bit_depth: "Profundidad de bits",
+        mixed: "Mixto",
+        current: "Actualizado",
+        unpublished: "No hay actualizaciones publicadas",
+        update_failed: "Error al buscar actualizaciones",
+        download_failed: "No se pudo abrir el enlace de descarga",
+    },
+    Labels {
+        loading: "A verificar…",
+        check_updates: "Procurar atualizações",
+        quit: "Sair",
+        download: "Baixar…",
+        channels: "Canais",
+        sample_rate: "Taxa de amostragem",
+        bit_depth: "Profundidade de bits",
+        mixed: "Misto",
+        current: "Atualizado",
+        unpublished: "Não há atualizações publicadas",
+        update_failed: "Falha ao verificar atualizações",
+        download_failed: "Não foi possível abrir o link de download",
+    },
+    Labels {
+        loading: "Verifica…",
+        check_updates: "Verifica aggiornamenti",
+        quit: "Esci",
+        download: "Scarica…",
+        channels: "Canali",
+        sample_rate: "Frequenza di campionamento",
+        bit_depth: "Profondità di bit",
+        mixed: "Misto",
+        current: "Versione aggiornata",
+        unpublished: "Nessun aggiornamento pubblicato",
+        update_failed: "Verifica aggiornamenti non riuscita",
+        download_failed: "Impossibile aprire il link di download",
+    },
+    Labels {
+        loading: "Проверка…",
+        check_updates: "Проверить обновления",
+        quit: "Выйти",
+        download: "Скачать…",
+        channels: "Каналы",
+        sample_rate: "Частота дискретизации",
+        bit_depth: "Разрядность",
+        mixed: "Смешанный",
+        current: "Последняя версия",
+        unpublished: "Опубликованных обновлений нет",
+        update_failed: "Не удалось проверить обновления",
+        download_failed: "Не удалось открыть ссылку загрузки",
+    },
+];
+
+/// Matches the UI locale, including Chinese region and script aliases.
 pub(super) fn labels(locale: &str) -> Labels {
-    if locale.starts_with("ko") {
-        Labels {
-            loading: "확인 중…",
-            check_updates: "업데이트 확인",
-            quit: "종료",
-            download: "다운로드…",
-            channels: "채널 수",
-            sample_rate: "샘플레이트",
-            bit_depth: "비트 깊이",
-            mixed: "혼합",
-            current: "최신 버전입니다",
-            unpublished: "배포된 업데이트 없음",
-            update_failed: "업데이트 확인 실패",
-            download_failed: "다운로드 링크 열기 실패",
-        }
-    } else {
-        Labels {
-            loading: "Checking…",
-            check_updates: "Check for Updates",
-            quit: "Quit",
-            download: "Download…",
-            channels: "Channels",
-            sample_rate: "Sample Rate",
-            bit_depth: "Bit Depth",
-            mixed: "Mixed",
-            current: "Up to Date",
-            unpublished: "No Published Updates",
-            update_failed: "Update Check Failed",
-            download_failed: "Download Link Failed",
-        }
-    }
+    LABELS[crate::native_text::resolve_locale(locale).index()]
 }
 
 /// Displays only the product name and observed installed version.
@@ -85,7 +213,9 @@ pub(super) fn device_menus(
         let submenu = Submenu::new(
             app,
             device.spec.display_name.replace('&', "&&"),
-            snapshot.state == DriverState::Ready && !state.busy,
+            snapshot.state == DriverState::Ready
+                && !state.busy
+                && state.quit_state != QuitState::Stopping,
         )?;
         let mut builder = DeviceMenu {
             app,
@@ -280,6 +410,46 @@ pub(super) fn update_result_label(result: &UpdateResult, text: &Labels) -> Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn driver_settings_and_update_messages_are_complete_in_supported_languages() {
+        for (locale, channels) in [
+            ("en", "Channels"),
+            ("ko", "채널 수"),
+            ("ja", "チャンネル数"),
+            ("zh-Hans", "声道数"),
+            ("zh-Hant", "聲道數"),
+            ("fr", "Canaux"),
+            ("de", "Kanäle"),
+            ("es", "Canales"),
+            ("pt", "Canais"),
+            ("it", "Canali"),
+            ("ru", "Каналы"),
+        ] {
+            let text = labels(locale);
+            assert_eq!(text.channels, channels);
+            for message in [
+                text.loading,
+                text.check_updates,
+                text.quit,
+                text.download,
+                text.sample_rate,
+                text.bit_depth,
+                text.mixed,
+                text.current,
+                text.unpublished,
+                text.update_failed,
+                text.download_failed,
+            ] {
+                assert!(!message.is_empty());
+                if locale != "en" {
+                    assert_ne!(message, "Quit");
+                }
+            }
+        }
+        assert_eq!(labels("zh-TW").sample_rate, "取樣率");
+        assert_eq!(labels("zh-SG").sample_rate, "采样率");
+    }
     use mixrelay_audio_io::VirtualEndpointSettings;
     use mixrelay_driver_control::DriverSnapshot;
 
@@ -316,7 +486,7 @@ mod tests {
             ("Sample Rate", "샘플레이트")
         );
         assert_eq!((en.bit_depth, ko.bit_depth), ("Bit Depth", "비트 깊이"));
-        assert_eq!(labels("ja").check_updates, "Check for Updates");
+        assert_eq!(labels("ja-JP").check_updates, "アップデートを確認");
     }
 
     #[test]

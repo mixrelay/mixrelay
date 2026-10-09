@@ -5,6 +5,9 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+const LANGUAGES = JSON.parse(readFileSync(new URL("../packaging/localization/languages.json", import.meta.url), "utf8"));
+const DOCUMENTS = LANGUAGES.flatMap(language => [language.appTerms, language.driverTerms]);
+
 import {
   EXPECTED_MANAGER_IDENTIFIER,
   EXPECTED_HAL_IDENTIFIER,
@@ -44,22 +47,29 @@ function fixture(t, simulatedUmask = 0) {
   const manager = join(root, "MixRelay Driver.app");
   const hal = join(root, "MixRelayHAL.driver");
   const driver = join(root, "mixrelay-driver-service");
+  const uninstaller = join(root, "Uninstall MixRelay Driver.app");
   const output = join(root, "payload");
-  for (const bundle of [manager, hal]) {
+  for (const bundle of [manager, hal, uninstaller]) {
     mkdirSync(join(bundle, "Contents/MacOS"), { recursive: true });
     writeFileSync(join(bundle, "Contents/Info.plist"), "fixture");
   }
   mkdirSync(join(manager, "Contents/Resources/empty"), { recursive: true });
   writeFileSync(join(manager, "Contents/Resources/LICENSE.txt"), "Proprietary license fixture\n원문 그대로\n");
   writeFileSync(join(manager, "Contents/Resources/LICENSE-Driver.txt"), "Free proprietary Driver license fixture\nDriver 원문 그대로\n");
+  for (const filename of DOCUMENTS.filter(filename => !["LICENSE.txt", "LICENSE-Driver.txt"].includes(filename))) writeFileSync(join(manager, "Contents/Resources", filename), readFileSync(new URL(`../${filename}`, import.meta.url)));
   writeFileSync(join(manager, "Contents/Resources/CHANGELOG.md"), "# Changelog\n\n- Release fixture\n");
   writeFileSync(join(manager, "Contents/MacOS/mixrelay-desktop"), "manager-binary");
   writeFileSync(join(hal, "Contents/MacOS/MixRelayHAL"), "hal-binary");
   writeFileSync(driver, "driver-binary");
+  writeFileSync(join(uninstaller, "Contents/MacOS/mixrelay-driver-uninstaller"), "uninstaller-binary");
+  chmodSync(join(uninstaller, "Contents/MacOS/mixrelay-driver-uninstaller"), 0o755);
+  mkdirSync(join(uninstaller, "Contents/Helpers"));
+  writeFileSync(join(uninstaller, "Contents/Helpers/mixrelay-macos-installer"), "helper-binary");
+  chmodSync(join(uninstaller, "Contents/Helpers/mixrelay-macos-installer"), 0o755);
   chmodSync(join(manager, "Contents/MacOS/mixrelay-desktop"), 0o755);
   chmodSync(join(hal, "Contents/MacOS/MixRelayHAL"), 0o755);
   chmodSync(driver, 0o755);
-  return { root, manager, hal, driver, output, fsApi: fsAdapter(simulatedUmask) };
+  return { root, manager, hal, driver, uninstaller, output, fsApi: fsAdapter(simulatedUmask) };
 }
 
 function runner(ids = new Map()) {
@@ -67,7 +77,7 @@ function runner(ids = new Map()) {
     if (command === "/usr/bin/plutil") {
       const path = args.at(-1);
       const key = args[1];
-      return { status: 0, stdout: key === "CFBundleIdentifier" ? ids.get(path) : "" };
+      return { status: 0, stdout: key === "CFBundleIdentifier" ? ids.get(path) : key === "MixRelaySigningTeam" ? "AB12C3D4E5" : "" };
     }
     if (command === "/usr/bin/file") return { status: 0, stdout: "Mach-O 64-bit dynamically linked shared library" };
     if (command === "/usr/bin/xcrun") return { status: 0, stdout: "arm64 x86_64" };
@@ -80,20 +90,22 @@ function validFixture(t) {
   const ids = new Map([
     [join(paths.manager, "Contents/Info.plist"), EXPECTED_MANAGER_IDENTIFIER],
     [join(paths.hal, "Contents/Info.plist"), EXPECTED_HAL_IDENTIFIER],
+    [join(paths.uninstaller, "Contents/Info.plist"), "io.mixrelay.driver.uninstaller"],
   ]);
   return { ...paths, ids };
 }
 
 test("parseArgs requires explicit absolute release artifacts", () => {
-  assert.deepEqual(parseArgs(["--manager=/release/MixRelay.app", "--hal", "/release/HAL.driver", "--driver", "/release/driver", "--output", "/fixture/payload"]), {
+  assert.deepEqual(parseArgs(["--manager=/release/MixRelay.app", "--hal", "/release/HAL.driver", "--driver", "/release/driver", "--uninstaller", "/release/Uninstall.app", "--output", "/fixture/payload"]), {
     help: false,
     manager: "/release/MixRelay.app",
     hal: "/release/HAL.driver",
     driver: "/release/driver",
+    uninstaller: "/release/Uninstall.app",
     output: "/fixture/payload",
   });
   assert.throws(() => parseArgs(["--manager", "relative.app", "--hal", "/b", "--driver", "/c", "--output", "/d"]), /absolute/);
-  assert.throws(() => parseArgs(["--manager", "/a", "--hal", "/b", "--driver", "/c"]), /Missing required option: --output/);
+  assert.throws(() => parseArgs(["--manager", "/a", "--hal", "/b", "--driver", "/c"]), /Missing required option: --uninstaller/);
 });
 
 test("prepares a deterministic inspectable payload and never creates a pkg", (t) => {
@@ -108,15 +120,15 @@ test("prepares a deterministic inspectable payload and never creates a pkg", (t)
   });
   assert.match(readFileSync(join(paths.output, "templates/io.mixrelay.audio.driver.plist.in"), "utf8"), /__MIXRELAY_SERVICE_USER__/);
   assert.equal(existsSync(join(paths.output, "Applications/MixRelay Driver.app/Contents/Resources/empty")), true);
-  for (const filename of ["LICENSE.txt", "LICENSE-Driver.txt", "CHANGELOG.md"]) {
+  for (const filename of [...DOCUMENTS, "CHANGELOG.md"]) {
     assert.deepEqual(
       readFileSync(join(paths.output, "Applications/MixRelay Driver.app/Contents/Resources", filename)),
       readFileSync(join(paths.manager, "Contents/Resources", filename)),
     );
   }
   const manifest = JSON.parse(readFileSync(join(paths.output, "payload-manifest.json"), "utf8"));
-  assert.equal(manifest.artifacts.length, 4);
-  for (const filename of ["LICENSE.txt", "LICENSE-Driver.txt", "CHANGELOG.md"]) {
+  assert.equal(manifest.artifacts.length, 6);
+  for (const filename of [...DOCUMENTS, "CHANGELOG.md"]) {
     assert.ok(manifest.artifacts[0].files.some(file => file.path === `Contents/Resources/${filename}`));
   }
   assert.equal(manifest.installContract.requiresPostinstallUserExpansion, true);
@@ -218,7 +230,7 @@ test("rejects zero-size executables", (t) => {
   assert.throws(() => preparePayload({ ...paths, run: runner(paths.ids) }), /driver must be a non-empty executable/);
 });
 
-for (const filename of ["LICENSE.txt", "LICENSE-Driver.txt", "CHANGELOG.md"]) {
+for (const filename of [...DOCUMENTS, "CHANGELOG.md"]) {
   for (const kind of ["missing", "empty"]) {
     test(`rejects ${kind} ${filename} before staging without modifying the manager`, (t) => {
       const paths = validFixture(t);

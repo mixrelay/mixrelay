@@ -36,6 +36,10 @@ path = "src/bin/installer.rs"
 name = "mixrelay-driver-uninstaller"
 path = "src/bin/uninstaller.rs"
 
+[build-dependencies]
+cc = "1.2"
+
+
 [target.'cfg(unix)'.dependencies]
 # Safe descriptor-relative opens prevent following replaced lease-path symlinks.
 rustix = { version = "1.1.4", features = ["fs"] }
@@ -47,10 +51,10 @@ libc = "0.2.189"
 core-foundation = "=0.10.1"
 # Reuse the bounded fixed-endpoint Driver snapshot and readiness contract.
 mixrelay-driver-control = { path = "../../../crates/driver-control" }
-# Native confirmation and the system administrator authorization prompt.
+# Acknowledged native Quit in the installed user's session.
 objc2 = "0.6.4"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSButton", "NSButtonCell", "NSCell", "NSControl", "NSResponder", "NSRunningApplication", "NSView", "NSWindow"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSAppleEventDescriptor", "NSAppleScript", "NSArray", "NSBundle", "NSDate", "NSDictionary", "NSEnumerator", "NSGeometry", "NSLocale", "NSObject", "NSRunLoop", "NSString", "NSValue"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "libc", "NSRunningApplication", "NSAlert", "NSApplication", "NSButton", "NSButtonCell", "NSCell", "NSGraphics", "NSControl", "NSResponder", "NSView", "NSWindow", "NSProgressIndicator", "NSTextField"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDate", "NSEnumerator", "NSObject", "NSRunLoop", "NSString", "NSURL", "NSBundle", "NSLocale", "NSGeometry"] }
 
 [dev-dependencies]
 mixrelay-test-support = { path = "../../../crates/test-support" }

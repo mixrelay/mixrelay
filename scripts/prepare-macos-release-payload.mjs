@@ -4,6 +4,9 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
+const LANGUAGES = JSON.parse(readFileSync(new URL("../packaging/localization/languages.json", import.meta.url), "utf8"));
+const DOCUMENTS = LANGUAGES.flatMap(language => [language.appTerms, language.driverTerms]);
+
 export const EXPECTED_ARCHITECTURES = ["arm64", "x86_64"];
 export const EXPECTED_MANAGER_IDENTIFIER = "io.mixrelay.driver.desktop";
 export const EXPECTED_HAL_IDENTIFIER = "io.mixrelay.audio.driver";
@@ -35,7 +38,7 @@ const runCommand = (command, args, options) => spawnSync(command, args, options)
  * debug output.
  */
 export function parseArgs(args) {
-  const values = { manager: undefined, hal: undefined, driver: undefined, output: undefined };
+  const values = { manager: undefined, hal: undefined, driver: undefined, uninstaller: undefined, output: undefined };
   let help = false;
   const options = new Set(Object.keys(values));
 
@@ -67,7 +70,7 @@ export function parseArgs(args) {
 
 function usage() {
   return [
-    "Usage: node scripts/prepare-macos-release-payload.mjs --manager MANAGER --hal HAL --driver DRIVER --output OUTPUT",
+    "Usage: node scripts/prepare-macos-release-payload.mjs --manager MANAGER --hal HAL --driver DRIVER --uninstaller UNINSTALLER --output OUTPUT",
     "",
     "Preflights and stages an inspectable macOS release payload. It does not build, sign, notarize, or create a .pkg.",
   ].join("\n");
@@ -323,8 +326,8 @@ function treeManifest(fsApi, source) {
  * Validate and stage release artifacts without invoking pkgbuild, productbuild,
  * installer, launchctl, codesign, or any privileged operation.
  */
-export function preparePayload({ manager, hal, driver, output, fsApi = defaultFs, run = runCommand }) {
-  for (const [name, path] of [["--manager", manager], ["--hal", hal], ["--driver", driver], ["--output", output]]) {
+export function preparePayload({ manager, hal, driver, uninstaller, output, fsApi = defaultFs, run = runCommand }) {
+  for (const [name, path] of [["--manager", manager], ["--hal", hal], ["--driver", driver], ["--uninstaller", uninstaller], ["--output", output]]) {
     assertAbsolute(name, path);
     rejectDevelopmentPath(name, path);
   }
@@ -332,14 +335,18 @@ export function preparePayload({ manager, hal, driver, output, fsApi = defaultFs
   assertNoSymlinkComponents(fsApi, "--hal", hal);
   assertNoSymlinkComponents(fsApi, "--driver", driver);
   assertNoSymlinkComponents(fsApi, "--output", output, true);
-  assertDisjointArtifacts(output, [["manager", manager], ["HAL", hal], ["driver", driver]]);
+  assertDisjointArtifacts(output, [["manager", manager], ["HAL", hal], ["driver", driver], ["uninstaller", uninstaller]]);
   assertOutput(fsApi, output);
   const managerInfo = validateBundleTree(fsApi, run, "manager", manager, "Contents/MacOS/mixrelay-desktop", EXPECTED_MANAGER_IDENTIFIER);
-  for (const filename of ["LICENSE.txt", "LICENSE-Driver.txt", "CHANGELOG.md"]) {
+  for (const filename of [...DOCUMENTS, "CHANGELOG.md"]) {
     const document = join(manager, "Contents/Resources", filename);
     assertRegularFile(fsApi, `manager ${filename}`, document);
     if (stat(fsApi, document).size === 0) throw new Error(`manager ${filename} must be non-empty: ${document}`);
   }
+  const uninstallerInfo = validateBundleTree(fsApi, run, "uninstaller", uninstaller, "Contents/MacOS/mixrelay-driver-uninstaller", "io.mixrelay.driver.uninstaller");
+  const team = plistValue(run, join(uninstaller, "Contents/Info.plist"), "MixRelaySigningTeam");
+  if (!/^[A-Z0-9]{10}$/.test(team)) throw new Error("uninstaller publisher identity is invalid");
+  assertExecutable(fsApi, "removal helper", join(uninstaller, "Contents/Helpers/mixrelay-macos-installer"));
   const halInfo = validateBundleTree(fsApi, run, "HAL", hal, "Contents/MacOS/MixRelayHAL", EXPECTED_HAL_IDENTIFIER);
   assertExecutable(fsApi, "driver", driver);
   const driverArchitectures = universalArchitectures(run, driver);
@@ -350,10 +357,12 @@ export function preparePayload({ manager, hal, driver, output, fsApi = defaultFs
   const plistTarget = join(output, "templates/io.mixrelay.audio.driver.plist.in");
   fsApi.mkdirSync(output, { recursive: true, mode: 0o755 });
   copyTree(fsApi, manager, managerTarget, output);
+  copyTree(fsApi, uninstaller, join(output, "Applications/Uninstall MixRelay Driver.app"), output);
   copyTree(fsApi, hal, halTarget, output);
   copyTree(fsApi, driver, driverTarget, output);
   ensureDirectories(fsApi, output, dirname(plistTarget));
   fsApi.writeFileSync(plistTarget, launchdTemplate(), "utf8");
+  fsApi.writeFileSync(join(output, "templates/io.mixrelay.driver.removal.plist"), removalLaunchdTemplate(team), "utf8");
 
   const manifest = {
     format: 1,
@@ -363,6 +372,8 @@ export function preparePayload({ manager, hal, driver, output, fsApi = defaultFs
       driver: DRIVER_DESTINATION,
       hal: HAL_DESTINATION,
       launchd: LAUNCHD_DESTINATION,
+      uninstaller: "/Applications/Uninstall MixRelay Driver.app",
+      removalLaunchd: "/Library/LaunchDaemons/io.mixrelay.driver.removal.plist",
       destinations: [
         { path: MANAGER_DESTINATION, owner: "root:wheel", mode: "0755" },
         { path: DRIVER_DESTINATION, owner: "root:wheel", mode: "0755" },
@@ -380,6 +391,8 @@ export function preparePayload({ manager, hal, driver, output, fsApi = defaultFs
     },
     artifacts: [
       { kind: "manager", source: manager, target: MANAGER_DESTINATION, identifier: managerInfo.identifier, architectures: EXPECTED_ARCHITECTURES, files: treeManifest(fsApi, manager) },
+      { kind: "uninstaller", source: uninstaller, target: "/Applications/Uninstall MixRelay Driver.app", identifier: uninstallerInfo.identifier, architectures: EXPECTED_ARCHITECTURES, files: treeManifest(fsApi, uninstaller) },
+      { kind: "removal-launchd", target: "/Library/LaunchDaemons/io.mixrelay.driver.removal.plist", template: "templates/io.mixrelay.driver.removal.plist" },
       { kind: "hal", source: hal, target: HAL_DESTINATION, identifier: halInfo.identifier, architectures: EXPECTED_ARCHITECTURES, files: treeManifest(fsApi, hal) },
       { kind: "driver", source: driver, target: DRIVER_DESTINATION, architectures: driverArchitectures, sha256: sha256(fsApi, driver) },
       { kind: "launchd-template", target: LAUNCHD_DESTINATION, template: "templates/io.mixrelay.audio.driver.plist.in" },
@@ -413,4 +426,17 @@ export function main(args = process.argv.slice(2)) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   process.exitCode = main();
+}
+
+export function removalLaunchdTemplate(team) {
+  if (!/^[A-Z0-9]{10}$/.test(team)) throw new Error("Invalid removal helper team");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>io.mixrelay.driver.removal</string>
+<key>ProgramArguments</key><array><string>/Applications/Uninstall MixRelay Driver.app/Contents/Helpers/mixrelay-macos-installer</string><string>removal-helper</string><string>${team}</string></array>
+<key>MachServices</key><dict><key>io.mixrelay.driver.removal</key><true/></dict>
+<key>AssociatedBundleIdentifiers</key><array><string>io.mixrelay.driver.uninstaller</string></array>
+</dict></plist>
+`;
 }

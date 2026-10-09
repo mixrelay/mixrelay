@@ -73,19 +73,18 @@ where
     Backend(#[source] E),
 }
 
-/// A failed rollback together with the backend-owned evidence that must remain
-/// available for later administrator recovery.
+/// A failed rollback together with diagnostics captured before staging cleanup.
 #[derive(Debug)]
 pub struct RollbackFailure<E, R> {
     error: E,
-    retained: R,
+    diagnostics: R,
 }
 
 impl<E, R> RollbackFailure<E, R> {
-    /// Creates a rollback failure that retains its private recovery evidence.
+    /// Creates a rollback failure with diagnostics captured before cleanup.
     #[must_use]
-    pub fn new(error: E, retained: R) -> Self {
-        Self { error, retained }
+    pub fn new(error: E, diagnostics: R) -> Self {
+        Self { error, diagnostics }
     }
 
     /// Returns the rollback failure.
@@ -94,16 +93,16 @@ impl<E, R> RollbackFailure<E, R> {
         &self.error
     }
 
-    /// Returns the retained recovery evidence.
+    /// Returns rollback diagnostics, whose staging paths may already be removed.
     #[must_use]
-    pub fn retained(&self) -> &R {
-        &self.retained
+    pub fn diagnostics(&self) -> &R {
+        &self.diagnostics
     }
 
-    /// Consumes the failure and returns both its error and retained evidence.
+    /// Consumes the failure and returns both its error and recovery diagnostics.
     #[must_use]
     pub fn into_parts(self) -> (E, R) {
-        (self.error, self.retained)
+        (self.error, self.diagnostics)
     }
 }
 
@@ -125,8 +124,8 @@ pub trait PlatformBackend {
     type Committed;
     /// Receipt describing launchd registration or removal.
     type Registration;
-    /// Backend-owned evidence retained when rollback cannot restore targets.
-    type RetainedRecovery;
+    /// Backend diagnostics when rollback cannot restore targets.
+    type RecoveryDiagnostics;
     /// Backend failure type, retaining platform error context.
     type Error: Error + Send + Sync + 'static;
 
@@ -197,24 +196,23 @@ pub trait PlatformBackend {
     ///
     /// `committed` is absent when commit returned an error after a partial
     /// mutation and present when registration returned an error. On failure,
-    /// the returned [`RollbackFailure`] must retain enough private backup state
-    /// for administrator recovery; the orchestrator will not call `cleanup`.
-    /// The backend must ensure dropping `Staged` cannot delete that retained
-    /// evidence after ownership transfers into the returned failure.
+    /// the returned [`RollbackFailure`] reports recovery diagnostics. The
+    /// orchestrator still calls `cleanup` before releasing lifecycle leases;
+    /// rollback failure never exempts temporary backups from deletion.
     /// Any newly started owned process must be drained before restoring files;
     /// prior native runtime and registration are restored only afterward.
     ///
     /// # Errors
-    /// Returns a rollback failure with retained recovery evidence.
+    /// Returns a rollback failure with recovery diagnostics.
     fn rollback(
         &mut self,
         request: &TransactionRequest,
         preflight: &Preflight<Self::LeaseGuard, Self::Snapshot>,
         staged: &Self::Staged,
         committed: Option<&Self::Committed>,
-    ) -> Result<(), RollbackFailure<Self::Error, Self::RetainedRecovery>>;
+    ) -> Result<(), RollbackFailure<Self::Error, Self::RecoveryDiagnostics>>;
 
-    /// Removes only private staging state after success or recovery.
+    /// Removes private staging after success or any recovery attempt, even failure.
     ///
     /// # Errors
     /// Returns the backend cleanup failure.

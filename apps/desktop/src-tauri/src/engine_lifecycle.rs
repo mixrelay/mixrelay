@@ -6,6 +6,10 @@ use std::{
     time::Duration,
 };
 
+use crate::native_text::{
+    Locale, current_locale,
+    dialogs::{Text, detail, text},
+};
 use mixrelay_macos_transport::app_lifecycle::{
     APP_LEASE, ENGINE_LEASE, EngineWake, ProcessLease, engine_exit_record, is_owned,
 };
@@ -34,12 +38,9 @@ impl EngineLifecycle {
     pub(crate) fn start() -> Result<Self, String> {
         validate_installation()?;
         let lease = ProcessLease::acquire(APP_LEASE)
-            .map_err(|error| format!("could not acquire desktop ownership: {error}"))?;
+            .map_err(|error| detail(current_locale(), Text::DesktopOwnershipFailed, error))?;
         if is_owned(ENGINE_LEASE).map_err(|error| error.to_string())? {
-            return Err(
-                "The audio server is still shutting down. Try opening MixRelay again shortly."
-                    .into(),
-            );
+            return Err(text(current_locale(), Text::AudioServerShuttingDownRetry).into());
         }
         let wake = EngineWake::start().map_err(|error| error.to_string())?;
         Ok(Self {
@@ -71,6 +72,9 @@ impl EngineLifecycle {
                             .set_title("MixRelay")
                             .set_description(&warning)
                             .set_level(rfd::MessageLevel::Error)
+                            .set_buttons(rfd::MessageButtons::OkCustom(
+                                text(current_locale(), Text::Ok).into(),
+                            ))
                             .show()
                             .await;
                     }
@@ -85,6 +89,9 @@ impl EngineLifecycle {
                         .set_title("MixRelay")
                         .set_description(&error)
                         .set_level(rfd::MessageLevel::Error)
+                        .set_buttons(rfd::MessageButtons::OkCustom(
+                            text(current_locale(), Text::Ok).into(),
+                        ))
                         .show()
                         .await;
                 }
@@ -103,7 +110,7 @@ async fn finish_local_controls(app: &tauri::AppHandle) -> Result<Option<String>,
     app.state::<EngineLifecycle>()
         .owner
         .lock()
-        .map_err(|_| "desktop lifecycle ownership lock failed".to_owned())?
+        .map_err(|_| text(current_locale(), Text::DesktopLifecycleLockFailed).to_owned())?
         .take();
     wait_for_engine_exit(app).await
 }
@@ -120,9 +127,9 @@ fn validate_installation() -> Result<(), String> {
         .output()
         .map_err(|error| error.to_string())?;
     let config: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|_| "MixRelay audio service installation is missing or invalid.".to_owned())?;
+        .map_err(|_| text(current_locale(), Text::AudioServiceInvalid).to_owned())?;
     if !is_app_owned_configuration(&config) {
-        return Err("The MixRelay audio service is missing or incompatible. Reinstall MixRelay using its installer.".into());
+        return Err(text(current_locale(), Text::AudioServiceIncompatible).into());
     }
     Ok(())
 }
@@ -159,7 +166,7 @@ async fn wait_for_engine_exit(app: &tauri::AppHandle) -> Result<Option<String>, 
     await_engine_exit(observe_engine_exit, || {
         tracing::warn!("waiting for native audio server teardown; exit remains pending");
         if let Some(window) = app.get_webview_window("main") {
-            let _ = window.set_title("MixRelay — 오디오 서버 종료 중");
+            let _ = window.set_title(text(current_locale(), Text::EngineStoppingTitle));
         }
     })
     .await
@@ -184,11 +191,16 @@ async fn await_engine_exit(
 }
 
 fn exit_warning(record: &str) -> Option<String> {
+    exit_warning_for(current_locale(), record)
+}
+
+fn exit_warning_for(locale: Locale, record: &str) -> Option<String> {
     if record == "stopped" {
         return None;
     }
     Some(format!(
-        "오디오 서버 종료 중 오류가 발생했습니다.\n{}",
+        "{}\n{}",
+        text(locale, Text::AudioServerShutdownWarning),
         record.strip_prefix("failed\n").unwrap_or(record)
     ))
 }
@@ -243,12 +255,34 @@ mod tests {
     #[test]
     fn failed_shutdown_warning_reports_the_record_without_claiming_data_loss() {
         assert_eq!(
-            exit_warning("failed\nCoreAudio worker panicked during retirement"),
+            exit_warning_for(Locale::Ko, "failed\nCoreAudio worker panicked during retirement"),
             Some(
                 "오디오 서버 종료 중 오류가 발생했습니다.\nCoreAudio worker panicked during retirement"
                     .into()
             )
         );
+    }
+
+    #[test]
+    fn localized_shutdown_warning_preserves_the_diagnostic_record() {
+        for locale in [
+            Locale::En,
+            Locale::Ko,
+            Locale::Ja,
+            Locale::ZhHans,
+            Locale::ZhHant,
+            Locale::Fr,
+            Locale::De,
+        ] {
+            assert!(exit_warning_for(locale, "stopped").is_none());
+            assert_eq!(
+                exit_warning_for(locale, "failed\nCoreAudio worker stopped"),
+                Some(format!(
+                    "{}\nCoreAudio worker stopped",
+                    text(locale, Text::AudioServerShutdownWarning)
+                ))
+            );
+        }
     }
 
     #[test]

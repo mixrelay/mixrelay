@@ -155,6 +155,7 @@ fn cleanup_files(home: &Path, delete_settings: bool) -> anyhow::Result<()> {
         return Ok(());
     };
     remove_file(&parent, c"drivers.json")?;
+    remove_file(&parent, c"drivers.json.stopped")?;
     Ok(())
 }
 
@@ -218,7 +219,7 @@ mod tests {
         executable: &std::path::Path,
         home: &std::path::Path,
     ) -> super::PendingCleanup {
-        super::PendingCleanup::spawn(
+        let pending = super::PendingCleanup::spawn(
             Command::new(executable)
                 .args([
                     "--exact",
@@ -228,7 +229,18 @@ mod tests {
                 .env_clear()
                 .env("MIXRELAY_CLEANUP_FIXTURE_HOME", home),
         )
-        .expect("prepared cleanup fixture")
+        .expect("prepared cleanup fixture");
+        // Wait for actual child startup before testing unlink of its executable.
+        // spawn() alone can return while dyld is still opening that path.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !home.join("cleanup-test-ready").exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "cleanup child did not reach commit wait"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        pending
     }
 
     #[test]
@@ -236,6 +248,8 @@ mod tests {
         let Some(home) = std::env::var_os("MIXRELAY_CLEANUP_FIXTURE_HOME") else {
             return;
         };
+        fs::write(PathBuf::from(&home).join("cleanup-test-ready"), b"ready")
+            .expect("startup signal");
         if super::read_commit(&mut std::io::stdin().lock()).expect("commit read") {
             super::cleanup_files(&PathBuf::from(home), true).expect("committed cleanup");
         }
@@ -344,6 +358,7 @@ mod tests {
         let settings = home.join("Library/Application Support/io.mixrelay.driver");
         fs::create_dir_all(&settings).expect("settings directory");
         fs::write(settings.join("drivers.json"), b"devices").expect("driver settings");
+        fs::write(settings.join("drivers.json.stopped"), b"stopped").expect("stop marker");
         for name in [
             "graphs.json",
             "audio-session.json",
@@ -354,6 +369,7 @@ mod tests {
         }
         super::cleanup_files(&home, true).expect("cleanup");
         assert!(!settings.join("drivers.json").exists());
+        assert!(!settings.join("drivers.json.stopped").exists());
         for name in [
             "graphs.json",
             "audio-session.json",
@@ -374,10 +390,15 @@ mod tests {
         let settings = home.join("Library/Application Support/io.mixrelay.driver");
         fs::create_dir_all(&settings).expect("settings directory");
         fs::write(settings.join("drivers.json"), b"devices").expect("settings");
+        fs::write(settings.join("drivers.json.stopped"), b"stopped").expect("stop marker");
         super::cleanup_files(&home, false).expect("unchecked removal");
         assert_eq!(
             fs::read(settings.join("drivers.json")).expect("settings"),
             b"devices"
+        );
+        assert_eq!(
+            fs::read(settings.join("drivers.json.stopped")).expect("stop marker"),
+            b"stopped"
         );
     }
 

@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+const languages = JSON.parse(readFileSync(new URL("../packaging/localization/languages.json", import.meta.url), "utf8"));
+const localizedDocuments = languages.flatMap(language => [language.appTerms, language.driverTerms]);
+
 const requiredDependencies = [
   ['libpipewire-0.3-0t64'], ['liblilv-0-0'], ['libgcc-s1'], ['libc6'],
   ['libwebkit2gtk-4.1-0'], ['libgtk-3-0', 'libgtk-3-0t64'],
@@ -22,8 +25,7 @@ const uninstallFiles = [
 ];
 const documentationFiles = [
   'usr/share/doc/mix-relay/CHANGELOG.md',
-  'usr/share/doc/mix-relay/LICENSE.txt',
-  'usr/share/doc/mix-relay/LICENSE-Driver.txt',
+  ...localizedDocuments.map(filename => `usr/share/doc/mix-relay/${filename}`),
 ];
 const driverExecutables = ['usr/bin/mixrelay-driver-manager', 'usr/bin/mixrelay-driver-service'];
 const driverFiles = [
@@ -35,7 +37,7 @@ const driverFiles = [
   'usr/share/applications/mixrelay-driver-uninstall.desktop',
   'usr/share/mixrelay-driver/version.json',
   'usr/share/doc/mix-relay-driver/CHANGELOG.md',
-  'usr/share/doc/mix-relay-driver/LICENSE-Driver.txt',
+  ...localizedDocuments.map(filename => `usr/share/doc/mix-relay-driver/${filename}`),
   'usr/share/doc/mix-relay-driver/third-party/truce-rack/LICENSE-MIT',
   'usr/share/doc/mix-relay-driver/third-party/truce-rack/LICENSE-APACHE',
 ];

@@ -69,6 +69,109 @@ fn verifier() -> ReleasePayloadVerifier {
 }
 
 #[test]
+fn removal_verifies_present_targets_in_all_partial_installations() {
+    for mask in 0u8..64 {
+        let fixture = Fixture::new();
+        let verifier = verifier();
+        for (index, target) in OwnedTarget::all().into_iter().enumerate() {
+            if mask & (1 << index) == 0 {
+                continue;
+            }
+            let path = fixture.root.join(target.path().trim_start_matches('/'));
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            match target {
+                OwnedTarget::App => fs::rename(fixture.sources.app(), &path).unwrap(),
+                OwnedTarget::Hal => fs::rename(fixture.sources.hal(), &path).unwrap(),
+                OwnedTarget::Driver => fs::rename(fixture.sources.driver(), &path).unwrap(),
+                OwnedTarget::Launchd => {
+                    let bytes = fs::read(fixture.sources.launchd()).unwrap();
+                    fs::write(
+                        &path,
+                        LaunchdConfiguration::from_template(&bytes, &verifier.account)
+                            .unwrap()
+                            .to_xml()
+                            .unwrap(),
+                    )
+                    .unwrap();
+                }
+                OwnedTarget::Uninstaller => {
+                    fs::create_dir_all(path.join("Contents/MacOS")).unwrap();
+                    fs::create_dir_all(path.join("Contents/Helpers")).unwrap();
+                    fs::write(path.join("Contents/Info.plist"),
+                        b"<plist version=\"1.0\"><dict><key>CFBundleIdentifier</key><string>io.mixrelay.driver.uninstaller</string><key>CFBundleExecutable</key><string>mixrelay-driver-uninstaller</string></dict></plist>").unwrap();
+                    for file in [
+                        "Contents/MacOS/mixrelay-driver-uninstaller",
+                        "Contents/Helpers/mixrelay-macos-installer",
+                    ] {
+                        fs::write(path.join(file), crate::universal::tests::fixture(true)).unwrap();
+                    }
+                }
+                OwnedTarget::RemovalLaunchd => {
+                    #[cfg(target_os = "macos")]
+                    fs::write(
+                        path,
+                        crate::removal::removal_launchd_template(&verifier.team),
+                    )
+                    .unwrap();
+                    #[cfg(not(target_os = "macos"))]
+                    fs::write(path, b"fixture").unwrap();
+                }
+            }
+        }
+        let mut checked = Vec::new();
+        let definition = verifier
+            .verify_removal_with(
+                &FilesystemLayout::new(&fixture.root).unwrap(),
+                |path, requirement, role| {
+                    assert!(requirement.contains("anchor apple generic"));
+                    assert!(requirement.contains("ABCD123456"));
+                    checked.push((path.to_path_buf(), role));
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(definition.is_some(), mask & (1 << 3) != 0);
+        let expected = usize::from(mask & 1 != 0)
+            + usize::from(mask & 2 != 0)
+            + usize::from(mask & 4 != 0)
+            + 2 * usize::from(mask & 16 != 0);
+        assert_eq!(checked.len(), expected);
+        for (path, _) in checked {
+            assert!(path.exists());
+        }
+    }
+}
+
+#[test]
+fn removal_does_not_ignore_present_invalid_code_or_configuration() {
+    let fixture = Fixture::new();
+    let layout = FilesystemLayout::new(&fixture.root).unwrap();
+    let path = fixture
+        .root
+        .join(OwnedTarget::Driver.path().trim_start_matches('/'));
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::rename(fixture.sources.driver(), &path).unwrap();
+    assert!(matches!(
+        verifier().verify_removal_with(&layout, |path, _, _| Err(ReleaseError::Signature {
+            path: path.to_path_buf(),
+            status: "wrong publisher".into()
+        })),
+        Err(ReleaseError::Signature { .. })
+    ));
+    fs::remove_file(&path).unwrap();
+    let path = fixture
+        .root
+        .join(OwnedTarget::Launchd.path().trim_start_matches('/'));
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, b"invalid configuration").unwrap();
+    assert!(
+        verifier()
+            .verify_removal_with(&layout, |_, _, _| Ok(()))
+            .is_err()
+    );
+}
+
+#[test]
 fn binds_all_three_code_identities_and_team_without_shell_interpolation() {
     let fixture = Fixture::new();
     let mut checks = Vec::new();

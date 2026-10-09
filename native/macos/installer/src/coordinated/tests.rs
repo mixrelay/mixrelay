@@ -20,7 +20,10 @@ impl Fixture {
         for target in OwnedTarget::all() {
             let path = root.join(target.path().trim_start_matches('/'));
             fs::create_dir_all(path.parent().unwrap()).unwrap();
-            if matches!(target, OwnedTarget::App | OwnedTarget::Hal) {
+            if matches!(
+                target,
+                OwnedTarget::App | OwnedTarget::Hal | OwnedTarget::Uninstaller
+            ) {
                 fs::create_dir(&path).unwrap();
                 fs::write(path.join("owned"), b"original").unwrap();
             } else {
@@ -113,7 +116,7 @@ impl ServiceLifecycle for Service {
         ) {
             fs::rename(
                 staged.staging_root(),
-                staged.staging_root().with_extension("retained"),
+                staged.staging_root().with_extension("displaced"),
             )
             .unwrap();
             fs::create_dir(staged.staging_root()).unwrap();
@@ -248,7 +251,7 @@ fn missing_approval_prevents_leases_staging_and_target_mutations() {
 }
 
 #[test]
-fn rollback_drain_failure_retains_backups_without_restoring_live_files() {
+fn rollback_drain_failure_cleans_backups_without_restoring_live_files() {
     let fixture = Fixture::new();
     let mut backend = fixture.backend(true, false);
     backend.service.stage_failure = Some(StageFailure::PrepareRestore);
@@ -256,24 +259,13 @@ fn rollback_drain_failure_retains_backups_without_restoring_live_files() {
         execute(&mut backend, &TransactionRequest::remove()),
         Err(TransactionError::MutationRecovery {
             recovery: RecoveryStatus::Failed {
-                retained: CoordinatedRecovery::Service { .. },
+                diagnostics: CoordinatedRecoveryDiagnostics::Service { .. },
                 ..
             },
             ..
         })
     ));
-    assert!(backend.filesystem.layout().staging_root().is_dir());
-    assert_eq!(
-        fs::read(
-            backend
-                .filesystem
-                .layout()
-                .staging_root()
-                .join("backups/driver")
-        )
-        .unwrap(),
-        b"original"
-    );
+    assert!(!backend.filesystem.layout().staging_root().exists());
     assert_eq!(backend.service.events.last(), Some(&"prepare_restore"));
     for target in OwnedTarget::all() {
         assert!(
@@ -286,7 +278,7 @@ fn rollback_drain_failure_retains_backups_without_restoring_live_files() {
 }
 
 #[test]
-fn service_restore_failure_retains_staging_instead_of_reporting_recovery() {
+fn service_restore_failure_cleans_staging_without_claiming_recovery() {
     let fixture = Fixture::new();
     let mut backend = fixture.backend(true, true);
     let result = execute(&mut backend, &TransactionRequest::remove());
@@ -294,12 +286,12 @@ fn service_restore_failure_retains_staging_instead_of_reporting_recovery() {
         Err(TransactionError::MutationRecovery {
             recovery:
                 RecoveryStatus::Failed {
-                    retained: CoordinatedRecovery::Service { staging_root },
+                    diagnostics: CoordinatedRecoveryDiagnostics::Service { staging_root },
                     ..
                 },
             ..
         }) => {
-            assert!(staging_root.is_dir());
+            assert!(!staging_root.exists());
             assert_eq!(staging_root, backend.filesystem.layout().staging_root());
         }
         result => panic!("unexpected recovery result: {result:?}"),
@@ -325,6 +317,39 @@ fn busy_installer_prevents_staging_and_target_changes() {
     ));
     assert!(!backend.filesystem.layout().staging_root().exists());
     assert!(fixture.path.join(APP_PATH.trim_start_matches('/')).is_dir());
+}
+
+#[test]
+fn abandoned_staging_cleanup_waits_for_installer_serialization() {
+    let fixture = Fixture::new();
+    let mut backend = fixture.backend(false, false);
+    let staging = backend.filesystem.layout().staging_root().to_path_buf();
+    fs::create_dir(&staging).unwrap();
+    fs::set_permissions(&staging, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::create_dir(staging.join("backups")).unwrap();
+    fs::create_dir(staging.join("payload")).unwrap();
+    fs::write(staging.join("backups/driver"), b"old transaction").unwrap();
+    let directory = LifecycleDirectory::open(
+        fixture
+            .path
+            .join(LIFECYCLE_DIRECTORY.trim_start_matches('/')),
+    )
+    .unwrap();
+    let guard = directory.acquire().unwrap();
+    assert!(matches!(
+        execute(&mut backend, &TransactionRequest::Remove),
+        Err(TransactionError::LeaseBusy { .. })
+    ));
+    assert!(staging.join("backups/driver").exists());
+    drop(guard);
+    execute(&mut backend, &TransactionRequest::Remove).unwrap();
+    assert!(!staging.exists());
+    assert!(OwnedTarget::all().iter().all(|target| {
+        !fixture
+            .path
+            .join(target.path().trim_start_matches('/'))
+            .exists()
+    }));
 }
 
 #[test]
@@ -367,7 +392,7 @@ fn rejected_stage_reports_both_validation_and_cleanup_failures() {
             .filesystem
             .layout()
             .staging_root()
-            .with_extension("retained")
+            .with_extension("displaced")
             .is_dir()
     );
     assert_eq!(

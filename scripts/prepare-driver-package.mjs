@@ -54,6 +54,9 @@ export function prepareDriverPackage({ args = [], env = process.env, rootDir = R
     const sidecar = join(rootDir, 'apps/desktop/src-tauri/binaries', `${binary}-${target}`);
     fsApi.mkdirSync(dirname(sidecar), { recursive: true });
     fsApi.copyFileSync(output, sidecar);
+    // RPM preserves sidecar permissions; a restrictive build umask must not
+    // make the root-owned installed service inaccessible to ordinary users.
+    fsApi.chmodSync(sidecar, 0o755);
   }
   const receipt = join(rootDir, 'target/driver-package/version.json');
   fsApi.mkdirSync(dirname(receipt), { recursive: true });

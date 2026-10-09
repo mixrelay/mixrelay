@@ -20,6 +20,26 @@ unsafe extern "C" {
         offset: i64,
     ) -> *mut c_void;
     fn munmap(address: *mut c_void, length: usize) -> c_int;
+    fn getpagesize() -> c_int;
+}
+
+/// Touches every PCM page on control before handing the buffer to audio callbacks.
+/// Preserves sample bits, allocates nothing, and does not pin pages against later
+/// memory pressure. The exclusive borrow must precede producer/consumer publication.
+pub fn prefault_pcm(samples: &mut [f32]) {
+    // SAFETY: getpagesize has no arguments or borrowed state on supported Unix targets.
+    let page_bytes = usize::try_from(unsafe { getpagesize() }).unwrap_or(4096);
+    let step = (page_bytes / size_of::<f32>()).max(1);
+    for sample in samples.iter_mut().step_by(step) {
+        // SAFETY: the exclusive sample is initialized and writable. Volatile
+        // writes force private writable pages even when all samples are zero.
+        unsafe { ptr::write_volatile(sample, ptr::read_volatile(sample)) };
+    }
+    // A heap slice need not begin on a page boundary; include its final page.
+    if let Some(sample) = samples.last_mut() {
+        // SAFETY: same exclusive initialized sample contract as above.
+        unsafe { ptr::write_volatile(sample, ptr::read_volatile(sample)) };
+    }
 }
 
 /// Private anonymous PCM pages. A zero value owns no mapping and is safe to drop
@@ -62,10 +82,14 @@ impl Storage {
         if memory.addr() == usize::MAX {
             return Err(io::Error::last_os_error());
         }
-        Ok(Self {
+        let storage = Self {
             samples: memory.cast(),
             bytes,
-        })
+        };
+        // SAFETY: this fresh exclusive anonymous mapping is zero-initialized
+        // and contains exactly samples floats; no callback can access it yet.
+        prefault_pcm(unsafe { std::slice::from_raw_parts_mut(storage.samples, samples) });
+        Ok(storage)
     }
 }
 

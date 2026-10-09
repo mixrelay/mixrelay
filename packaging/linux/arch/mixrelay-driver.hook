@@ -1,0 +1,11 @@
+[Trigger]
+Operation = Upgrade
+Operation = Remove
+Type = Package
+Target = mix-relay-driver
+
+[Action]
+Description = Stopping MixRelay Driver before package replacement or removal...
+When = PreTransaction
+Exec = /bin/sh /usr/lib/mixrelay-driver/before-change.sh
+AbortOnFail

@@ -142,6 +142,76 @@ pub fn require_lifecycle_storage(account: &ResolvedServiceAccount) -> Result<(),
     Ok(())
 }
 
+/// Missing plist fallback: root-owned lifecycle parents retain the original
+/// service user's fixed lease inodes. Missing individual leases are recreated
+/// later; present untrusted or inconsistent leases never select another user.
+pub(super) fn read_lifecycle_account() -> Result<Option<ResolvedServiceAccount>, NativeError> {
+    let path = Path::new(LIFECYCLE_DIRECTORY);
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(NativeError::Io {
+                operation: "inspect retained lifecycle account",
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    }
+    let directory = open_existing_directory(path)?;
+    let wheel = Gid::from_raw(group_id_for_name("wheel")?);
+    validate_root_directory(path, &directory, Some(wheel))?;
+    let mut account = None;
+    for name in USER_LEASE_NAMES {
+        let descriptor = match openat(
+            &directory,
+            name,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        ) {
+            Ok(descriptor) => descriptor,
+            Err(Errno::NOENT) => continue,
+            Err(source) => {
+                return Err(NativeError::Io {
+                    operation: "open retained account lease",
+                    path: path.join(name),
+                    source: source.into(),
+                });
+            }
+        };
+        let metadata = File::from(descriptor)
+            .metadata()
+            .map_err(|source| NativeError::Io {
+                operation: "inspect retained account lease",
+                path: path.join(name),
+                source,
+            })?;
+        if !metadata.is_file()
+            || metadata.nlink() != 1
+            || metadata.uid() == 0
+            || metadata.mode() & 0o7777 != u32::from(LEASE_FILE_MODE)
+        {
+            return Err(NativeError::Trust {
+                path: path.join(name),
+                reason: "invalid retained service account lease",
+            });
+        }
+        let resolved = super::account::resolve_service_uid(metadata.uid())?;
+        if metadata.gid() != resolved.gid()
+            || account
+                .as_ref()
+                .is_some_and(|previous| previous != &resolved)
+        {
+            return Err(NativeError::Trust {
+                path: path.join(name),
+                reason: "retained service account leases disagree",
+            });
+        }
+        account = Some(resolved);
+    }
+    Ok(account)
+}
+
 /// Reads the fixed installed launchd plist through a trusted directory descriptor.
 /// Missing is reported only for an actual `ENOENT`; malformed or unsafe objects
 /// remain errors so callers never fall back to a different console identity.
@@ -206,7 +276,7 @@ pub(super) fn read_installed_launchd_plist() -> Result<Option<Vec<u8>>, NativeEr
 }
 
 /// Revalidates every existing directory leading to an install target without changing it.
-pub(super) fn validate_destination_ancestors(root: &Path) -> Result<(), NativeError> {
+pub(crate) fn validate_destination_ancestors(root: &Path) -> Result<(), NativeError> {
     if root != Path::new("/") {
         return Err(NativeError::Trust {
             path: root.to_path_buf(),

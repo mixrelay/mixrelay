@@ -72,3 +72,70 @@ fn service_rejections_keep_status_and_error_message() {
     );
     assert!(decode_response(reqwest::StatusCode::OK, b"not JSON").is_err());
 }
+
+#[tokio::test]
+async fn lifecycle_client_stops_real_http_inventory_and_reactivates_retained_settings() {
+    use axum::http::{HeaderMap, HeaderValue, header::HOST};
+    let fixture = mixrelay_test_support::FixtureDir::new("driver-lifecycle-client").unwrap();
+    let (backend, observed) = crate::test_backend::FakeBackend::ready();
+    let manager = crate::DriverManager::open(backend, fixture.join("drivers.json")).unwrap();
+    let expected = observed.lock().settings.devices.clone();
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let service = tokio::spawn(async move {
+        axum::serve(listener, crate::router(manager)).await.unwrap();
+    });
+    let mut headers = HeaderMap::new();
+    headers.insert(HOST, HeaderValue::from_static("127.0.0.1:19342"));
+    let client = DriverClient {
+        client: reqwest::Client::builder()
+            .no_proxy()
+            .default_headers(headers)
+            .build()
+            .unwrap(),
+        endpoint: format!("http://{address}{SNAPSHOT_ROUTE}"),
+    };
+    let stopped = client.set_active(false).await.unwrap();
+    assert!(stopped.settings.devices.is_empty());
+    assert!(observed.lock().settings.devices.is_empty());
+    let resumed = client.set_active(true).await.unwrap();
+    assert_eq!(resumed.settings.devices, expected);
+    service.abort();
+}
+
+#[tokio::test]
+async fn absent_native_driver_can_quit_without_attempting_a_stop() {
+    use axum::http::{HeaderMap, HeaderValue, header::HOST};
+    let fixture = mixrelay_test_support::FixtureDir::new("driver-absent-quit").unwrap();
+    let (backend, observed) = crate::test_backend::FakeBackend::ready();
+    observed.lock().state = crate::DriverState::NotInstalled;
+    let manager = crate::DriverManager::open(backend, fixture.join("drivers.json")).unwrap();
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let service = tokio::spawn(async move {
+        axum::serve(listener, crate::router(manager)).await.unwrap();
+    });
+    let mut headers = HeaderMap::new();
+    headers.insert(HOST, HeaderValue::from_static("127.0.0.1:19342"));
+    let client = DriverClient {
+        client: reqwest::Client::builder()
+            .no_proxy()
+            .default_headers(headers)
+            .build()
+            .unwrap(),
+        endpoint: format!("http://{address}{SNAPSHOT_ROUTE}"),
+    };
+    let absent = client.set_active(false).await.unwrap();
+    assert_eq!(absent.state, crate::DriverState::NotInstalled);
+    assert!(absent.settings.devices.is_empty());
+    assert_eq!(observed.lock().applies, 0);
+    // An installed but unloaded driver must not be treated as safely stopped.
+    observed.lock().state = crate::DriverState::InstalledNotLoaded;
+    assert!(client.set_active(false).await.is_err());
+    assert_eq!(observed.lock().applies, 0);
+    service.abort();
+}

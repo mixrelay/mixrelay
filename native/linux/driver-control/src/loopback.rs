@@ -70,6 +70,19 @@ impl DriverProcess for Loopback {
         if let Some(render) = &mut self.render {
             render.bind_inputs(inputs).map_err(DriverError::Input)?;
         }
+        if let Some(capture) = &self.capture {
+            // Keep DSP unpublished until both native directions are negotiated.
+            // This runs on control; PipeWire can still prepare the active graph.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            while !capture.ready() {
+                if std::time::Instant::now() >= deadline {
+                    return Err(DriverError::Input(
+                        "loopback output format did not negotiate before DSP publication".into(),
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
         Ok(())
     }
 

@@ -13,6 +13,7 @@ pub struct InstallSources {
     hal: PathBuf,
     driver: PathBuf,
     launchd: PathBuf,
+    remover: Option<(PathBuf, PathBuf)>,
 }
 
 impl InstallSources {
@@ -29,7 +30,27 @@ impl InstallSources {
             hal: hal.into(),
             driver: driver.into(),
             launchd: launchd.into(),
+            remover: None,
         }
+    }
+
+    /// Adds the separately installed remover app and its on-demand helper plist.
+    #[must_use]
+    pub fn with_remover(mut self, app: impl Into<PathBuf>, plist: impl Into<PathBuf>) -> Self {
+        self.remover = Some((app.into(), plist.into()));
+        self
+    }
+
+    /// Returns the optional remover app source (absent in legacy fixture requests).
+    #[must_use]
+    pub fn remover(&self) -> Option<&Path> {
+        self.remover.as_ref().map(|(app, _)| app.as_path())
+    }
+
+    /// Returns the optional fixed root helper definition source.
+    #[must_use]
+    pub fn removal_launchd(&self) -> Option<&Path> {
+        self.remover.as_ref().map(|(_, plist)| plist.as_path())
     }
 
     /// Returns the application source path.

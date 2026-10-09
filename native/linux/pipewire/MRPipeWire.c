@@ -209,6 +209,8 @@ static void playback_buffer(MRPWStream *s, struct pw_buffer *buffer,
     pcm->chunk->offset = 0;
     pcm->chunk->stride = (int32_t)stride;
     pcm->chunk->size = frames * stride;
+    /* PipeWire time accounting uses frames, including any emitted silence. */
+    buffer->size = frames;
 }
 
 static void capture_buffer(MRPWStream *s, struct spa_data *pcm, uint32_t graph_frames) {
@@ -243,6 +245,8 @@ static void stream_process_buffer(MRPWStream *s) {
     atomic_store_explicit(&s->clock_snapshot, snapshot, memory_order_release);
     struct pw_buffer *b = pw_stream_dequeue_buffer(s->stream);
     if (!b) return;
+    /* A recycled output must not retain the previous buffer's frame count. */
+    if (s->native_output) b->size = 0;
     struct spa_buffer *buffer = b->buffer;
     /* Every dequeued buffer, including unusable buffers, is returned exactly once. */
     if (!buffer || buffer->n_datas != 1) {

@@ -11,6 +11,8 @@ pub(crate) struct WorkspaceMenu {
     open: MenuItem<tauri::Wry>,
     save: MenuItem<tauri::Wry>,
     save_as: MenuItem<tauri::Wry>,
+    #[cfg(target_os = "macos")]
+    application_quit: MenuItem<tauri::Wry>,
     #[cfg(target_os = "linux")]
     quit: MenuItem<tauri::Wry>,
 }
@@ -22,6 +24,8 @@ impl WorkspaceMenu {
         self.open.set_text(labels.workspace_open)?;
         self.save.set_text(labels.workspace_save)?;
         self.save_as.set_text(labels.workspace_save_as)?;
+        #[cfg(target_os = "macos")]
+        self.application_quit.set_text(labels.app_quit)?;
         #[cfg(target_os = "linux")]
         self.quit.set_text(labels.tray_quit)?;
         Ok(())
@@ -31,7 +35,7 @@ impl WorkspaceMenu {
 pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
     let menu = Menu::default(app.handle())?;
     #[cfg(target_os = "macos")]
-    install_app_menu(app, &menu)?;
+    let application_quit = install_app_menu(app, &menu)?;
     let file = menu
         .items()?
         .into_iter()
@@ -91,6 +95,8 @@ pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
         open,
         save,
         save_as,
+        #[cfg(target_os = "macos")]
+        application_quit,
         #[cfg(target_os = "linux")]
         quit,
     });
@@ -109,8 +115,18 @@ pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
 /// Native predefined Quit calls `NSApp` terminate directly, bypassing `ExitRequested`.
 /// Route the menu and shortcut through the same preventable exit event as the tray.
 #[cfg(target_os = "macos")]
-fn install_app_menu(app: &tauri::App, menu: &Menu<tauri::Wry>) -> tauri::Result<()> {
+fn install_app_menu(
+    app: &tauri::App,
+    menu: &Menu<tauri::Wry>,
+) -> tauri::Result<MenuItem<tauri::Wry>> {
     use tauri::menu::{AboutMetadata, PredefinedMenuItem};
+    let quit = MenuItem::with_id(
+        app,
+        "app:quit",
+        crate::tray_menu::labels("en").app_quit,
+        true,
+        Some("Cmd+Q"),
+    )?;
     let application = Submenu::with_items(
         app,
         "MixRelay",
@@ -131,10 +147,11 @@ fn install_app_menu(app: &tauri::App, menu: &Menu<tauri::Wry>) -> tauri::Result<
             &PredefinedMenuItem::hide(app, None)?,
             &PredefinedMenuItem::hide_others(app, None)?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "app:quit", "Quit MixRelay", true, Some("Cmd+Q"))?,
+            &quit,
         ],
     )?;
     // Menu::default on macOS starts with its application submenu.
     menu.remove_at(0)?;
-    menu.prepend(&application)
+    menu.prepend(&application)?;
+    Ok(quit)
 }

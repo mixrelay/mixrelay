@@ -1,4 +1,5 @@
-//! Installed Driver owner. GUI and graph process exits never terminate this service.
+//! Installed Driver control owner. Explicit manager quit stops devices through its API;
+//! the service remains reachable independently of manager and graph process lifetimes.
 
 use std::{ffi::OsString, net::Ipv4Addr, path::PathBuf};
 

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Mutex, time::Duration};
 
-use mixrelay_driver_control::DriverSnapshot;
+use mixrelay_driver_control::{DriverClient, DriverSnapshot};
 use tauri::{
     Manager,
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -22,11 +22,21 @@ enum UpdateResult {
     DownloadFailed,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum QuitState {
+    #[default]
+    Idle,
+    Stopping,
+    Stopped,
+}
+
 #[derive(Default)]
 struct MenuState {
     locale: String,
     snapshot: Option<DriverSnapshot>,
     busy: bool,
+    quit_state: QuitState,
+    startup_cancelled: bool,
     error: Option<String>,
     update_result: Option<UpdateResult>,
     updates_busy: bool,
@@ -38,6 +48,7 @@ struct MenuState {
 pub(crate) struct DriverMenu {
     app: tauri::AppHandle,
     state: Mutex<MenuState>,
+    lifecycle: tokio::sync::Mutex<()>,
     status: MenuItem<tauri::Wry>,
     tray: Menu<tauri::Wry>,
     application: Submenu<tauri::Wry>,
@@ -46,7 +57,7 @@ pub(crate) struct DriverMenu {
 }
 
 impl DriverMenu {
-    /// Relabels native controls and their current values for the selected ko/en locale.
+    /// Relabels native controls and their current values for the selected UI locale.
     pub(crate) fn set_labels(&self, locale: &str) -> tauri::Result<()> {
         if let Ok(mut state) = self.state.lock() {
             locale.clone_into(&mut state.locale);
@@ -90,6 +101,8 @@ impl DriverMenu {
             .set_text(menu::update_label(state.updates_busy, &text))?;
         self.updates.set_enabled(!state.updates_busy)?;
         self.quit.set_text(text.quit)?;
+        self.quit
+            .set_enabled(state.quit_state != QuitState::Stopping)?;
         self.status.set_text(menu::status_text(&state))?;
         state.generation = state.generation.wrapping_add(1);
         state.actions.clear();
@@ -129,7 +142,7 @@ impl DriverMenu {
     }
 }
 
-/// Installs native Driver settings; exiting this manager never stops the Driver owner.
+/// Installs native Driver settings and restores devices stopped by an explicit manager quit.
 pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     if !tauri::is_dev() {
@@ -142,9 +155,126 @@ pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
     app.manage(menu);
     app.on_menu_event(|app, event| handle_menu_event(app, &event));
     install_tray(app, &tray)?;
-    refresh_snapshot(app.handle());
+    activate_driver(app.handle());
     start_update_checks(app.handle());
     Ok(())
+}
+
+fn activate_driver(app: &tauri::AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let menu = app.state::<DriverMenu>();
+        let _lifecycle = menu.lifecycle.lock().await;
+        let client = match DriverClient::new() {
+            Ok(client) => client,
+            Err(error) => {
+                finish_snapshot(&app, Err(error.to_string()));
+                return;
+            }
+        };
+        // Login/installation can start the manager before the native owner is ready.
+        // The bounded retry is cancelled before a requested stop.
+        for attempt in 0..20 {
+            if menu
+                .state
+                .lock()
+                .map_or(true, |state| state.startup_cancelled)
+            {
+                return;
+            }
+            let result = client.set_active(true).await;
+            let waiting = matches!(&result,
+                Err(mixrelay_driver_control::DriverError::Http(error)) if error.is_connect()
+            ) || matches!(
+                &result,
+                Err(mixrelay_driver_control::DriverError::Remote { status: 503, .. })
+            );
+            if waiting && attempt < 19 {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            }
+            finish_snapshot(&app, result.map_err(|error| error.to_string()));
+            return;
+        }
+    });
+}
+
+/// Every explicit exit waits for acknowledged native stop and saved restart state.
+/// Failed stops leave the manager available for another attempt instead of silently exiting.
+pub(crate) fn exit_requested(app: &tauri::AppHandle, api: &tauri::ExitRequestApi) {
+    let menu = app.state::<DriverMenu>();
+    let Ok(mut state) = menu.state.lock() else {
+        api.prevent_exit();
+        return;
+    };
+    if state.quit_state == QuitState::Stopped {
+        return;
+    }
+    api.prevent_exit();
+    if state.quit_state == QuitState::Stopping {
+        return;
+    }
+    state.quit_state = QuitState::Stopping;
+    // A queued startup must not revive devices after either a successful stop
+    // or a failed stop/save followed by dismissal of the retry dialog.
+    state.startup_cancelled = true;
+    state.busy = true;
+    let locale = state.locale.clone();
+    drop(state);
+    let _ = menu.refresh_menu();
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let menu = app.state::<DriverMenu>();
+        let _lifecycle = menu.lifecycle.lock().await;
+        let result = stop_driver(&app).await;
+        let menu = app.state::<DriverMenu>();
+        if let Ok(mut state) = menu.state.lock() {
+            state.quit_state = if result.is_ok() {
+                QuitState::Stopped
+            } else {
+                QuitState::Idle
+            };
+            state.busy = false;
+        }
+        match result {
+            Ok(_) => app.exit(0),
+            Err(error) => {
+                tracing::error!(%error, "Driver did not complete explicit quit");
+                let _ = menu.refresh_menu();
+                let (title, body) = crate::native_text::driver_quit_failed(&locale);
+                rfd::AsyncMessageDialog::new()
+                    .set_title(title)
+                    .set_description(body)
+                    .set_buttons(rfd::MessageButtons::OkCustom(
+                        crate::native_text::dialogs::text(
+                            crate::native_text::resolve_locale(&locale),
+                            crate::native_text::dialogs::Text::Ok,
+                        )
+                        .into(),
+                    ))
+                    .set_level(rfd::MessageLevel::Error)
+                    .show()
+                    .await;
+            }
+        }
+    });
+}
+
+async fn stop_driver(app: &tauri::AppHandle) -> Result<DriverSnapshot, String> {
+    let result = DriverClient::new()
+        .map_err(|error| error.to_string())?
+        .set_active(false)
+        .await;
+    if matches!(&result, Err(mixrelay_driver_control::DriverError::Http(error)) if error.is_connect())
+        && let Ok(snapshot) = crate::driver_control::driver_status(app.clone()).await
+        && snapshot.state == mixrelay_driver_control::DriverState::NotInstalled
+        && snapshot.settings.devices.is_empty()
+    {
+        // An uninstalled Driver has nothing to stop. A merely unloaded or
+        // unreachable installed backend is not proof that native audio stopped.
+        return Ok(snapshot);
+    }
+    result.map_err(|error| error.to_string())
 }
 
 fn create_menu(app: &tauri::App) -> tauri::Result<(DriverMenu, Menu<tauri::Wry>)> {
@@ -165,6 +295,7 @@ fn create_menu(app: &tauri::App) -> tauri::Result<(DriverMenu, Menu<tauri::Wry>)
     let menu = DriverMenu {
         app: app.handle().clone(),
         state: Mutex::new(MenuState::default()),
+        lifecycle: tokio::sync::Mutex::new(()),
         status,
         tray: tray.clone(),
         application,
@@ -231,7 +362,7 @@ fn begin_snapshot(app: &tauri::AppHandle) -> bool {
     let Ok(mut state) = menu.state.lock() else {
         return false;
     };
-    if state.busy {
+    if state.busy || state.quit_state != QuitState::Idle {
         return false;
     }
     state.busy = true;

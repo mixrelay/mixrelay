@@ -2919,6 +2919,7 @@ name = "mixrelay-macos-installer"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cc",
  "core-foundation 0.10.1",
  "libc",
  "mixrelay-driver-control",

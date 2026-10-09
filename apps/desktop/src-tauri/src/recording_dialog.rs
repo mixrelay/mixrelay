@@ -1,3 +1,7 @@
+use crate::native_text::{
+    current_locale,
+    dialogs::{Text, text},
+};
 use tauri::Manager as _;
 
 /// Resolves an existing user folder without requiring Linux XDG Desktop setup.
@@ -20,7 +24,7 @@ fn choose_default_folder(
     }
     let folder = home()?;
     if !folder.is_absolute() || !folder.is_dir() {
-        return Err("No existing user folder is available for recording".into());
+        return Err(text(current_locale(), Text::RecordingFolderUnavailable).into());
     }
     Ok(folder)
 }
@@ -37,7 +41,11 @@ pub(crate) async fn select_recording_folder(
         |path| Ok(std::path::PathBuf::from(path)),
     )?;
     let mut dialog = rfd::AsyncFileDialog::new()
-        .set_title(title.as_deref().unwrap_or("Choose recording folder"))
+        .set_title(
+            title
+                .as_deref()
+                .unwrap_or_else(|| text(current_locale(), Text::RecordingFolder)),
+        )
         .set_directory(directory);
     if let Some(window) = app.get_webview_window("main") {
         dialog = dialog.set_parent(&window);
@@ -51,7 +59,7 @@ pub(crate) async fn select_recording_folder(
                 .to_path_buf()
                 .into_os_string()
                 .into_string()
-                .map_err(|_| "recording folder must be valid Unicode".into())
+                .map_err(|_| text(current_locale(), Text::RecordingFolderUnicode).into())
         })
         .transpose()
 }

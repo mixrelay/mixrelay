@@ -10,7 +10,7 @@
 //! between a check and the operation. The privileged native adapter must own
 //! the fixed parent directories and lifecycle leases during this work.
 //!
-//! Removal and cleanup are limited to the four `OwnedTarget` paths and the
+//! Removal and cleanup are limited to the six `OwnedTarget` paths and the
 //! private staging directory. Lifecycle lease inodes and user data are never
 //! recursive removal targets here.
 
@@ -35,6 +35,8 @@ const APP_PAYLOAD_NAME: &str = "app";
 const DRIVER_PAYLOAD_NAME: &str = "driver";
 const HAL_PAYLOAD_NAME: &str = "hal";
 const LAUNCHD_PAYLOAD_NAME: &str = "launchd";
+const UNINSTALLER_PAYLOAD_NAME: &str = "uninstaller";
+const REMOVAL_LAUNCHD_PAYLOAD_NAME: &str = "removal-launchd";
 
 /// The expected filesystem kind of an owned destination.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -63,22 +65,22 @@ pub enum FilesystemStageState {
     CommitFailed,
     /// Rollback restored the preflight snapshot.
     RolledBack,
-    /// Rollback failed; retained evidence must not be cleaned up.
+    /// Rollback failed; temporary staging must still be cleaned up.
     RollbackFailed,
     /// Private staging was successfully removed.
     Cleaned,
 }
 
-/// A private recovery location retained after rollback cannot restore targets.
+/// Filesystem rollback diagnostics captured before mandatory staging cleanup.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FilesystemRecovery {
+pub struct FilesystemRecoveryDiagnostics {
     staging_root: PathBuf,
     backed_up_targets: Vec<OwnedTarget>,
     installed_targets: Vec<OwnedTarget>,
 }
 
-impl FilesystemRecovery {
-    /// Returns the private staging directory that must remain available for recovery.
+impl FilesystemRecoveryDiagnostics {
+    /// Returns the attempted staging path; successful cleanup removes it.
     #[must_use]
     pub fn staging_root(&self) -> &Path {
         &self.staging_root
@@ -266,6 +268,17 @@ impl FilesystemAdapter {
         &self.layout
     }
 
+    /// Cleans an abandoned, caller-owned private transaction directory.
+    ///
+    /// The coordinated caller must hold all lifecycle leases and validate the
+    /// fixed destination parents first. Abandoned original backups and unused
+    /// payloads are removed for both installation and removal.
+    /// # Errors
+    /// Returns unsafe staging contents or cleanup errors.
+    pub fn cleanup_stale_staging(&self) -> Result<(), FilesystemError> {
+        stale::cleanup(&self.layout)
+    }
+
     /// Reads exact owned target state and validates install sources without mutation.
     ///
     /// This method does not acquire lifecycle locks. A native platform adapter
@@ -340,7 +353,7 @@ impl FilesystemAdapter {
         }
     }
 
-    /// Replaces or removes exactly the four owned destinations with recoverable renames.
+    /// Replaces or removes exactly the six owned destinations with recoverable renames.
     ///
     /// The operation is coordinated but not one filesystem-wide atomic operation.
     /// Partial progress remains recorded in `staged` for rollback. A failed
@@ -373,6 +386,13 @@ impl FilesystemAdapter {
             staged,
         };
         for target in OwnedTarget::all() {
+            if matches!(
+                target,
+                OwnedTarget::Uninstaller | OwnedTarget::RemovalLaunchd
+            ) && matches!(request, TransactionRequest::Install(sources) if sources.remover().is_none())
+            {
+                continue;
+            }
             if let Err(error) = self.commit_target(&context, target, &mut progress) {
                 progress.state = FilesystemStageState::CommitFailed;
                 return Err(error);
@@ -388,32 +408,32 @@ impl FilesystemAdapter {
 
     /// Restores every target changed by a partial commit without deleting user data.
     ///
-    /// A failed rollback returns retained private recovery evidence and must not
-    /// be followed by `cleanup`.
+    /// A failed rollback returns recovery diagnostics. The coordinator must
+    /// still call `cleanup` after this attempt, regardless of its result.
     ///
     /// # Errors
-    /// Returns a rollback failure with evidence retained under private staging.
+    /// Returns a rollback failure with filesystem recovery diagnostics.
     pub fn rollback(
         &self,
         request: &TransactionRequest,
         snapshot: &FilesystemSnapshot,
         staged: &FilesystemStaged,
         committed: Option<&FilesystemCommitted>,
-    ) -> Result<(), Box<RollbackFailure<FilesystemError, FilesystemRecovery>>> {
+    ) -> Result<(), Box<RollbackFailure<FilesystemError, FilesystemRecoveryDiagnostics>>> {
         if let Err(error) = self.ensure_staged_binding(request, snapshot, staged) {
-            return Err(Box::new(Self::retained_failure(staged, error)));
+            return Err(Box::new(Self::rollback_failure(staged, error)));
         }
         let mut progress = match staged.progress.try_lock() {
             Ok(progress) => progress,
             Err(error) => {
-                return Err(Box::new(Self::retained_failure(
+                return Err(Box::new(Self::rollback_failure(
                     staged,
                     receipt_lock_error(&error),
                 )));
             }
         };
         if progress.state == FilesystemStageState::Cleaned {
-            return Err(Box::new(Self::retained_failure_with_progress(
+            return Err(Box::new(Self::rollback_failure_with_progress(
                 staged,
                 FilesystemError::InvalidStageState {
                     operation: "rollback",
@@ -424,7 +444,7 @@ impl FilesystemAdapter {
         }
         if let Err(error) = ensure_staging_identity(staged) {
             progress.state = FilesystemStageState::RollbackFailed;
-            return Err(Box::new(Self::retained_failure_with_progress(
+            return Err(Box::new(Self::rollback_failure_with_progress(
                 staged, error, &progress,
             )));
         }
@@ -432,7 +452,7 @@ impl FilesystemAdapter {
             && (receipt.binding != staged.binding
                 || receipt.staging_identity != staged.staging_identity)
         {
-            return Err(Box::new(Self::retained_failure_with_progress(
+            return Err(Box::new(Self::rollback_failure_with_progress(
                 staged,
                 FilesystemError::ReceiptMismatch,
                 &progress,
@@ -441,13 +461,13 @@ impl FilesystemAdapter {
         let result = self.restore_progress(snapshot, staged, &mut progress);
         if let Err(error) = result {
             progress.state = FilesystemStageState::RollbackFailed;
-            return Err(Box::new(Self::retained_failure_with_progress(
+            return Err(Box::new(Self::rollback_failure_with_progress(
                 staged, error, &progress,
             )));
         }
         if let Err(error) = self.ensure_snapshot(snapshot) {
             progress.state = FilesystemStageState::RollbackFailed;
-            return Err(Box::new(Self::retained_failure_with_progress(
+            return Err(Box::new(Self::rollback_failure_with_progress(
                 staged, error, &progress,
             )));
         }
@@ -455,11 +475,11 @@ impl FilesystemAdapter {
         Ok(())
     }
 
-    /// Removes only private staging after a valid transaction boundary.
+    /// Removes only private staging after success or a completed recovery attempt.
     ///
     /// The caller must complete service registration after a successful commit
-    /// before invoking this method. A failed or unfinished commit, or a failed
-    /// rollback, is rejected so private backups remain available.
+    /// before invoking this method. On failure, attempt rollback first; cleanup
+    /// also discards backups when rollback itself fails.
     ///
     /// # Errors
     /// Returns a filesystem error; user data and all fixed destinations are untouched.
@@ -471,17 +491,6 @@ impl FilesystemAdapter {
             .progress
             .try_lock()
             .map_err(|error| receipt_lock_error(&error))?;
-        if !matches!(
-            progress.state,
-            FilesystemStageState::Uncommitted
-                | FilesystemStageState::Committed
-                | FilesystemStageState::RolledBack
-        ) {
-            return Err(FilesystemError::InvalidStageState {
-                operation: "cleanup",
-                state: progress.state,
-            });
-        }
         remove_staging_root_if_identity(&staged.staging_root, staged.staging_identity)?;
         progress.state = FilesystemStageState::Cleaned;
         Ok(())
@@ -508,13 +517,15 @@ impl FilesystemAdapter {
         }
     }
 
-    fn observe_targets(&self) -> Result<[TargetSnapshot; 4], FilesystemError> {
+    fn observe_targets(&self) -> Result<[TargetSnapshot; 6], FilesystemError> {
         let targets = OwnedTarget::all();
         Ok([
             self.observe_target(targets[0])?,
             self.observe_target(targets[1])?,
             self.observe_target(targets[2])?,
             self.observe_target(targets[3])?,
+            self.observe_target(targets[4])?,
+            self.observe_target(targets[5])?,
         ])
     }
 
@@ -582,12 +593,16 @@ impl FilesystemAdapter {
     }
 
     fn validate_sources(&self, sources: &crate::InstallSources) -> Result<(), FilesystemError> {
-        let paths = [
+        let mut paths = vec![
             ("app", sources.app(), TargetKind::Directory),
             ("hal", sources.hal(), TargetKind::Directory),
             ("driver", sources.driver(), TargetKind::File),
             ("launchd", sources.launchd(), TargetKind::File),
         ];
+        if let (Some(app), Some(plist)) = (sources.remover(), sources.removal_launchd()) {
+            paths.push((UNINSTALLER_PAYLOAD_NAME, app, TargetKind::Directory));
+            paths.push((REMOVAL_LAUNCHD_PAYLOAD_NAME, plist, TargetKind::File));
+        }
         for (index, (_, path, _)) in paths.iter().enumerate() {
             for (_, other, _) in paths.iter().skip(index + 1) {
                 if is_within(path, other) || is_within(other, path) {
@@ -648,6 +663,15 @@ impl FilesystemAdapter {
             copy_tree(sources.driver(), &payload_root.join(DRIVER_PAYLOAD_NAME))?;
             copy_tree(sources.hal(), &payload_root.join(HAL_PAYLOAD_NAME))?;
             copy_tree(sources.launchd(), &payload_root.join(LAUNCHD_PAYLOAD_NAME))?;
+            if let (Some(app), Some(plist)) = (sources.remover(), sources.removal_launchd()) {
+                copy_tree(app, &payload_root.join(UNINSTALLER_PAYLOAD_NAME))?;
+                copy_tree(plist, &payload_root.join(REMOVAL_LAUNCHD_PAYLOAD_NAME))?;
+                fs::set_permissions(
+                    payload_root.join(REMOVAL_LAUNCHD_PAYLOAD_NAME),
+                    std::os::unix::fs::PermissionsExt::from_mode(0o644),
+                )
+                .map_err(|error| io_failure("set removal launchd permissions", plist, error))?;
+            }
             // Launch configuration is data even when its source had executable bits.
             fs::set_permissions(
                 payload_root.join(LAUNCHD_PAYLOAD_NAME),
@@ -749,25 +773,25 @@ impl FilesystemAdapter {
         self.ensure_snapshot(snapshot)
     }
 
-    fn retained_failure(
+    fn rollback_failure(
         staged: &FilesystemStaged,
         error: FilesystemError,
-    ) -> RollbackFailure<FilesystemError, FilesystemRecovery> {
+    ) -> RollbackFailure<FilesystemError, FilesystemRecoveryDiagnostics> {
         let progress = staged
             .progress
             .try_lock()
             .map_or_else(|_| MutationProgress::default(), |progress| progress.clone());
-        Self::retained_failure_with_progress(staged, error, &progress)
+        Self::rollback_failure_with_progress(staged, error, &progress)
     }
 
-    fn retained_failure_with_progress(
+    fn rollback_failure_with_progress(
         staged: &FilesystemStaged,
         error: FilesystemError,
         progress: &MutationProgress,
-    ) -> RollbackFailure<FilesystemError, FilesystemRecovery> {
+    ) -> RollbackFailure<FilesystemError, FilesystemRecoveryDiagnostics> {
         RollbackFailure::new(
             error,
-            FilesystemRecovery {
+            FilesystemRecoveryDiagnostics {
                 staging_root: staged.staging_root.clone(),
                 backed_up_targets: progress.backed_up.clone(),
                 installed_targets: progress
@@ -784,7 +808,7 @@ impl FilesystemAdapter {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FilesystemSnapshot {
     layout: FilesystemLayout,
-    targets: [TargetSnapshot; 4],
+    targets: [TargetSnapshot; 6],
 }
 
 impl FilesystemSnapshot {
@@ -958,6 +982,7 @@ struct FilesystemIdentity {
 }
 
 mod payload;
+mod stale;
 #[cfg(test)]
 mod tests;
 

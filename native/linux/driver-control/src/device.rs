@@ -72,6 +72,20 @@ impl DevicePreparation {
         let [render_format, capture_format] = requested_formats(config);
         let render_channels = render_format.map_or(0, |format| usize::from(format.channels));
         let capture_channels = capture_format.map_or(0, |format| usize::from(format.channels));
+        let mut input = vec![0.0; render_channels * MAX_FRAMES].into_boxed_slice();
+        let mut output = vec![
+            0.0;
+            if render_channels == capture_channels {
+                0
+            } else {
+                capture_channels * MAX_FRAMES
+            }
+        ]
+        .into_boxed_slice();
+        // calloc/mmap can leave zeroed pages uncommitted. Prepare the entire
+        // callback storage on control before publishing the native processor.
+        mixrelay_pcm_ring::prefault_pcm(&mut input);
+        mixrelay_pcm_ring::prefault_pcm(&mut output);
         Ok(Self {
             config: config.clone(),
             name: native_name(&config.spec.id),
@@ -82,16 +96,8 @@ impl DevicePreparation {
                 capture: None,
                 render_channels,
                 capture_channels,
-                input: vec![0.0; render_channels * MAX_FRAMES].into_boxed_slice(),
-                output: vec![
-                    0.0;
-                    if render_channels == capture_channels {
-                        0
-                    } else {
-                        capture_channels * MAX_FRAMES
-                    }
-                ]
-                .into_boxed_slice(),
+                input,
+                output,
                 mapper: mixrelay_audio_io::frame_budget::FrameBudgetMapper::new(
                     config.spec.default_sample_rate,
                 )

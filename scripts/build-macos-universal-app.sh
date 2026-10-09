@@ -33,6 +33,7 @@ if [[ "$product" == "driver" ]]; then
     exit 1
   fi
   signing_team="${match[1]}"
+
 fi
 if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
   print -u2 "Unset CARGO_TARGET_DIR for the checked universal app build"
@@ -175,12 +176,13 @@ build_started=1
 if [[ "$product" == "driver" ]]; then
   for target in aarch64-apple-darwin x86_64-apple-darwin; do
     cargo build -p mixrelay-macos-installer --release --target "$target" \
-      --bin mixrelay-driver-uninstaller --bin mixrelay-macos-installer \
-      --bin mixrelay-macos-payload-check
+      --bin mixrelay-macos-installer \
+      --bin mixrelay-macos-payload-check \
+      --bin mixrelay-driver-uninstaller
   done
   helper_output="$repo_root/target/universal-apple-darwin/release"
   mkdir -p "$helper_output"
-  for helper in mixrelay-driver-uninstaller mixrelay-macos-installer mixrelay-macos-payload-check; do
+  for helper in mixrelay-macos-installer mixrelay-macos-payload-check mixrelay-driver-uninstaller; do
     reject_symlink_components "$helper_output/$helper"
     xcrun lipo -create \
       "$repo_root/target/aarch64-apple-darwin/release/$helper" \
@@ -212,33 +214,6 @@ if [[ -n "$(find "$app_bundle" -type l -print -quit)" ]]; then
   exit 1
 fi
 
-if [[ "$product" == "driver" ]]; then
-  uninstaller_app="$app_bundle/Contents/Helpers/Uninstall MixRelay Driver.app"
-  mkdir -p "$uninstaller_app/Contents/MacOS" "$uninstaller_app/Contents/Resources"
-  cp "$helper_output/mixrelay-driver-uninstaller" "$uninstaller_app/Contents/MacOS/mixrelay-driver-uninstaller"
-  cp "$helper_output/mixrelay-macos-installer" "$uninstaller_app/Contents/Resources/mixrelay-macos-installer"
-  cp "$repo_root/LICENSE-Driver.txt" "$repo_root/CHANGELOG.md" "$uninstaller_app/Contents/Resources/"
-  cp "$repo_root/apps/desktop/src-tauri/icons/icon.icns" "$uninstaller_app/Contents/Resources/icon.icns"
-  app_version="$(plutil -extract CFBundleShortVersionString raw -o - "$app_bundle/Contents/Info.plist")"
-  uninstaller_plist="$uninstaller_app/Contents/Info.plist"
-  plutil -create xml1 "$uninstaller_plist"
-  plutil -insert CFBundleIdentifier -string io.mixrelay.driver.uninstaller "$uninstaller_plist"
-  plutil -insert CFBundleName -string "Uninstall MixRelay Driver" "$uninstaller_plist"
-  plutil -insert CFBundleDisplayName -string "Uninstall MixRelay Driver" "$uninstaller_plist"
-  plutil -insert CFBundleExecutable -string mixrelay-driver-uninstaller "$uninstaller_plist"
-  plutil -insert CFBundlePackageType -string APPL "$uninstaller_plist"
-  plutil -insert CFBundleShortVersionString -string "$app_version" "$uninstaller_plist"
-  plutil -insert CFBundleVersion -string "$app_version" "$uninstaller_plist"
-  plutil -insert CFBundleIconFile -string icon.icns "$uninstaller_plist"
-  plutil -insert LSMinimumSystemVersion -string "$MACOSX_DEPLOYMENT_TARGET" "$uninstaller_plist"
-  plutil -insert NSHighResolutionCapable -bool YES "$uninstaller_plist"
-  plutil -insert MixRelaySigningTeam -string "$signing_team" "$uninstaller_plist"
-  codesign --force --sign "$APPLE_SIGNING_IDENTITY" --options runtime --timestamp \
-    --identifier io.mixrelay.driver.uninstaller "$uninstaller_app"
-  codesign --verify --deep --strict --all-architectures "$uninstaller_app"
-  codesign --force --sign "$APPLE_SIGNING_IDENTITY" --preserve-metadata=entitlements,flags,runtime \
-    --timestamp "$app_bundle"
-fi
 
 mach_o_count=0
 while IFS= read -r -d '' candidate; do
@@ -269,3 +244,12 @@ if ! codesign --verify --deep --strict "$app_bundle" 2>/dev/null; then
 fi
 
 print "MixRelay Universal app: $app_bundle"
+
+if [[ "$product" == "driver" ]]; then
+  remover_bundle="$bundle_parent/Uninstall MixRelay Driver.app"
+  reject_symlink_components "$remover_bundle"
+  version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$app_bundle/Contents/Info.plist")"
+  node scripts/build-macos-removal-app.mjs \
+    "$helper_output/mixrelay-driver-uninstaller" "$helper_output/mixrelay-macos-installer" \
+    "$remover_bundle" "$version" "$APPLE_SIGNING_IDENTITY"
+fi

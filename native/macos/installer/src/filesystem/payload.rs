@@ -11,7 +11,7 @@ use std::{
 use super::{
     APP_PAYLOAD_NAME, CreatedDirectory, DRIVER_PAYLOAD_NAME, FilesystemError, FilesystemIdentity,
     FilesystemStaged, HAL_PAYLOAD_NAME, InstalledTarget, LAUNCHD_PAYLOAD_NAME, MetadataFingerprint,
-    TargetKind,
+    REMOVAL_LAUNCHD_PAYLOAD_NAME, TargetKind, UNINSTALLER_PAYLOAD_NAME,
 };
 use crate::contract::OwnedTarget;
 
@@ -89,8 +89,10 @@ pub(super) fn metadata(path: &Path, kind: &'static str) -> Result<Metadata, File
 
 pub(super) fn target_kind(target: OwnedTarget) -> TargetKind {
     match target {
-        OwnedTarget::App | OwnedTarget::Hal => TargetKind::Directory,
-        OwnedTarget::Driver | OwnedTarget::Launchd => TargetKind::File,
+        OwnedTarget::App | OwnedTarget::Hal | OwnedTarget::Uninstaller => TargetKind::Directory,
+        OwnedTarget::Driver | OwnedTarget::Launchd | OwnedTarget::RemovalLaunchd => {
+            TargetKind::File
+        }
     }
 }
 
@@ -100,6 +102,8 @@ pub(super) fn target_name(target: OwnedTarget) -> &'static str {
         OwnedTarget::Driver => DRIVER_PAYLOAD_NAME,
         OwnedTarget::Hal => HAL_PAYLOAD_NAME,
         OwnedTarget::Launchd => LAUNCHD_PAYLOAD_NAME,
+        OwnedTarget::Uninstaller => UNINSTALLER_PAYLOAD_NAME,
+        OwnedTarget::RemovalLaunchd => REMOVAL_LAUNCHD_PAYLOAD_NAME,
     }
 }
 
@@ -156,6 +160,8 @@ pub(super) fn validate_bundle_source(
 ) -> Result<(), FilesystemError> {
     let executable = if kind == APP_PAYLOAD_NAME {
         path.join("Contents/MacOS/mixrelay-desktop")
+    } else if kind == UNINSTALLER_PAYLOAD_NAME {
+        path.join("Contents/MacOS/mixrelay-driver-uninstaller")
     } else {
         path.join("Contents/MacOS/MixRelayHAL")
     };
@@ -481,7 +487,11 @@ pub(super) fn remove_staging_root_if_identity(
     path: &Path,
     expected: FilesystemIdentity,
 ) -> Result<(), FilesystemError> {
-    let observed = identity(&metadata(path, "private staging")?);
+    let observed = match metadata(path, "private staging") {
+        Ok(metadata) => identity(&metadata),
+        Err(FilesystemError::Missing { .. }) => return Ok(()),
+        Err(error) => return Err(error),
+    };
     if observed != expected {
         return Err(FilesystemError::StagingIdentityChanged {
             path: path.to_path_buf(),

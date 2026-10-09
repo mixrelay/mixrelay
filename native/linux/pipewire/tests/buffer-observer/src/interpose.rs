@@ -152,6 +152,7 @@ extern "C" fn finalize() {
                 "Close": "after native destroy and callback drain return",
                 "ProcessEnter": "entry hook; pair matching stream and native_thread_id",
                 "ProcessExit": "exit hook; elapsed includes observer work and preemption",
+                "native_thread_cpu_ns": "cumulative guest-accounted CLOCK_THREAD_CPUTIME_ID at process edges only; pair matching native_thread_id; includes observer work; kernel IRQ/steal accounting determines whether host vCPU pauses are excluded",
                 "TriggerEnter": "before native trigger call; elapsed to ProcessEnter includes observer work, native dispatch and preemption, not pure wake time",
                 "TriggerExit": "after native trigger returns; result preserved, no native clock metadata"
             },

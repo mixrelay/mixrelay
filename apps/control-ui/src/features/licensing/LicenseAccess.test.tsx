@@ -165,7 +165,7 @@ it('keeps terms and product-integration contact available without configured or 
   expect(terms).toBeInTheDocument();
   expect(terms).not.toHaveAttribute('open');
   expect(terms?.querySelector('pre')).toHaveTextContent(
-    'MixRelay App Terms of Use',
+    'MixRelay App Software License Agreement',
   );
   expect(terms?.querySelector('pre')?.textContent).toBe(licenseTerms);
 });

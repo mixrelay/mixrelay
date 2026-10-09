@@ -1,6 +1,6 @@
 //! macOS distribution transaction planning and unprivileged filesystem staging.
 //!
-//! `FilesystemAdapter` stages and restores the four owned payload paths under an
+//! `FilesystemAdapter` stages and restores the six owned payload paths under an
 //! explicit filesystem root. It does not implement launchd, `CoreAudio`, signing, or
 //! privilege acquisition. A platform adapter supplies those operations via
 //! [`PlatformBackend`], which enforces one ordered transaction,
@@ -21,6 +21,8 @@ mod leases;
 mod native;
 #[cfg(unix)]
 mod release;
+#[cfg(target_os = "macos")]
+pub mod removal;
 mod request;
 mod transaction;
 mod universal;
@@ -30,16 +32,18 @@ pub use backend::{
 };
 pub use contract::{
     APP_LEASE_PATH, APP_PATH, DRIVER_MANAGER_LEASE_PATH, DRIVER_PATH, ENGINE_LEASE_PATH, HAL_PATH,
-    INSTALLER_LEASE_PATH, LAUNCHD_PATH, LIFECYCLE_DIRECTORY, OwnedTarget,
+    INSTALLER_LEASE_PATH, LAUNCHD_PATH, LIFECYCLE_DIRECTORY, OwnedTarget, REMOVAL_LAUNCHD_PATH,
+    UNINSTALLER_PATH,
 };
 #[cfg(unix)]
 pub use coordinated::{
-    CoordinatedBackend, CoordinatedError, CoordinatedRecovery, ServiceLifecycle,
+    CoordinatedBackend, CoordinatedError, CoordinatedRecoveryDiagnostics, ServiceLifecycle,
 };
 #[cfg(unix)]
 pub use filesystem::{
-    FilesystemAdapter, FilesystemCommitted, FilesystemError, FilesystemLayout, FilesystemRecovery,
-    FilesystemSnapshot, FilesystemStageState, FilesystemStaged, TargetPresence,
+    FilesystemAdapter, FilesystemCommitted, FilesystemError, FilesystemLayout,
+    FilesystemRecoveryDiagnostics, FilesystemSnapshot, FilesystemStageState, FilesystemStaged,
+    TargetPresence,
 };
 pub use launchd::{LaunchdConfiguration, LaunchdError, ServiceAccount};
 #[cfg(unix)]
@@ -47,9 +51,9 @@ pub use leases::{LeaseError, LifecycleDirectory, LifecycleLeaseGuard};
 #[cfg(target_os = "macos")]
 pub use native::{
     NativeError, NativeServiceLifecycle, NativeServiceRegistration, NativeServiceSnapshot,
-    ResolvedServiceAccount, cleanup_user_data, initialize_lifecycle_storage,
-    require_lifecycle_storage, require_root, resolve_console_account, resolve_install_account,
-    resolve_removal_account,
+    ResolvedServiceAccount, check_coreaudio_response, cleanup_user_data, hal_is_loaded,
+    initialize_lifecycle_storage, require_lifecycle_storage, require_root, resolve_console_account,
+    resolve_install_account, resolve_removal_account,
 };
 #[cfg(unix)]
 pub use release::{ReleaseError, ReleasePayloadVerifier, SigningTeam};

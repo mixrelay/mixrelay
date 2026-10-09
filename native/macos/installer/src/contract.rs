@@ -8,6 +8,10 @@ pub const DRIVER_PATH: &str = "/Library/Application Support/MixRelay/bin/mixrela
 pub const HAL_PATH: &str = "/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver";
 /// The launchd configuration owned by the installer.
 pub const LAUNCHD_PATH: &str = "/Library/LaunchDaemons/io.mixrelay.audio.driver.plist";
+/// The separate removal app installed alongside the Driver manager.
+pub const UNINSTALLER_PATH: &str = "/Applications/Uninstall MixRelay Driver.app";
+/// The on-demand, fixed-operation removal helper's launchd definition.
+pub const REMOVAL_LAUNCHD_PATH: &str = "/Library/LaunchDaemons/io.mixrelay.driver.removal.plist";
 /// The root-owned directory containing the three lifecycle lease inodes.
 pub const LIFECYCLE_DIRECTORY: &str = "/Library/Application Support/MixRelay/lifecycle";
 /// The fixed desktop ownership lease inode.
@@ -32,6 +36,10 @@ pub enum OwnedTarget {
     Hal,
     /// The launchd property list.
     Launchd,
+    /// The separate removal app and its embedded privileged executable.
+    Uninstaller,
+    /// The on-demand removal helper definition.
+    RemovalLaunchd,
 }
 
 impl OwnedTarget {
@@ -43,12 +51,21 @@ impl OwnedTarget {
             Self::Driver => DRIVER_PATH,
             Self::Hal => HAL_PATH,
             Self::Launchd => LAUNCHD_PATH,
+            Self::Uninstaller => UNINSTALLER_PATH,
+            Self::RemovalLaunchd => REMOVAL_LAUNCHD_PATH,
         }
     }
 
     /// Returns every replaceable target in deterministic transaction order.
     #[must_use]
-    pub const fn all() -> [Self; 4] {
-        [Self::App, Self::Driver, Self::Hal, Self::Launchd]
+    pub const fn all() -> [Self; 6] {
+        [
+            Self::App,
+            Self::Driver,
+            Self::Hal,
+            Self::Launchd,
+            Self::Uninstaller,
+            Self::RemovalLaunchd,
+        ]
     }
 }

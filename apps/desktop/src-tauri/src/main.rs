@@ -5,6 +5,7 @@ mod control_proxy;
 mod driver_control;
 mod driver_manager;
 mod licensing;
+mod native_text;
 mod processor_dialog;
 mod recording_dialog;
 mod tray_menu;
@@ -34,6 +35,8 @@ use linux_audio as platform_audio;
 use macos_audio as platform_audio;
 
 fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "macos")]
+    app.manage(native_termination::install(app.handle())?);
     if !app.state::<app_mode::AppMode>().starts_graph() {
         driver_manager::install(app)?;
         return Ok(());
@@ -50,8 +53,6 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
             app.state::<std::sync::Arc<licensing::LicensingState>>()
                 .inner(),
         ));
-    #[cfg(target_os = "macos")]
-    app.manage(native_termination::install(app.handle())?);
     let access = licensing::now().and_then(|now| {
         app.state::<std::sync::Arc<licensing::LicensingState>>()
             .snapshot(now)
@@ -260,6 +261,11 @@ fn handle_application_event(app: &tauri::AppHandle, event: &tauri::RunEvent) {
     #[cfg(target_os = "macos")]
     if matches!(event, tauri::RunEvent::Exit) {
         native_termination::release();
+    }
+    if let tauri::RunEvent::ExitRequested { api, .. } = event
+        && !app.state::<app_mode::AppMode>().starts_graph()
+    {
+        driver_manager::exit_requested(app, api);
     }
     if let tauri::RunEvent::ExitRequested { api, .. } = event
         && let Some(lifecycle) = app.try_state::<engine_lifecycle::EngineLifecycle>()

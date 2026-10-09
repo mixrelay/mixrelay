@@ -28,5 +28,8 @@ apps/desktop/src-tauri/binaries/
 # Local cross-OS lab reports and guest artifacts
 .lab/
 
+# Generated release bundles and packages
+/artifacts/
+
 # Local recordings and raw diagnostic captures (summaries live in docs/validation)
 /output/

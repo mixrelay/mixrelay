@@ -24,6 +24,7 @@ pub use ffi::{
     mr_pcm_ring_write, mr_pcm_ring_write_pcm,
 };
 pub use sample_format::SampleFormat;
+pub use storage::prefault_pcm;
 
 /// Embedded opaque native storage. Zero-initialization owns no resources; init
 /// must finish before callbacks start. Never copy, clear or reinitialize it live.
@@ -83,7 +84,7 @@ const _: () = assert!(size_of::<RingStats>() == 40 && align_of::<RingStats>() ==
 const _: () = assert!(cfg!(target_has_atomic = "64") && cfg!(target_has_atomic = "32"));
 
 impl PcmRing {
-    /// Allocates a device-owned ring before producer/consumer publication.
+    /// Allocates and prefaults a device-owned ring before producer/consumer publication.
     /// Returns `None` for unsupported geometry or mapping failure. Dropping the
     /// owner releases its mapping and requires all ring users to have drained.
     #[must_use]

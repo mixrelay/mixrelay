@@ -1,4 +1,11 @@
 export const pseudo = {
+  workspaceFile: {
+    file: '[Fïlë]',
+    new: '[Nëw Wörkspâcë]',
+    open: '[Öpën…]',
+    save: '[Sâvë]',
+    saveAs: '[Sâvë Âs…]',
+  },
   licensing: {
     title: '[!! Lïcénsé !!]',
     close: '[!! Clösé !!]',

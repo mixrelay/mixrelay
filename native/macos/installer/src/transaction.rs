@@ -62,12 +62,14 @@ impl<E: Display> Display for CleanupStatus<E> {
 pub enum RecoveryStatus<E, R> {
     /// The preflight snapshot was restored; cleanup may still have failed.
     Restored { cleanup: CleanupStatus<E> },
-    /// Rollback failed; the backend retained recovery evidence and cleanup was skipped.
+    /// Rollback failed; diagnostics and mandatory staging cleanup are reported.
     Failed {
         /// The rollback failure that prevents a success claim.
         rollback: E,
-        /// Backend-owned evidence retained for later administrator recovery.
-        retained: R,
+        /// Rollback diagnostics; referenced staging paths may already be removed.
+        diagnostics: R,
+        /// Cleanup is attempted even when rollback cannot restore the snapshot.
+        cleanup: CleanupStatus<E>,
     },
 }
 
@@ -75,12 +77,9 @@ impl<E: Display, R> Display for RecoveryStatus<E, R> {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Restored { cleanup } => write!(formatter, "rollback restored targets; {cleanup}"),
-            Self::Failed { rollback, .. } => {
-                write!(
-                    formatter,
-                    "rollback failed: {rollback}; recovery evidence retained"
-                )
-            }
+            Self::Failed {
+                rollback, cleanup, ..
+            } => write!(formatter, "rollback failed: {rollback}; {cleanup}"),
         }
     }
 }
@@ -111,7 +110,7 @@ where
         /// The original mutation failure.
         #[source]
         cause: E,
-        /// Rollback, retained evidence, and cleanup results.
+        /// Rollback diagnostics and cleanup results.
         recovery: RecoveryStatus<E, R>,
     },
     /// Registration succeeded but private staging cleanup failed.
@@ -150,7 +149,7 @@ pub struct TransactionOutcome<R> {
 /// Result type returned by [`execute`] for a concrete backend.
 pub type ExecutionResult<B> = Result<
     TransactionOutcome<<B as PlatformBackend>::Registration>,
-    TransactionError<<B as PlatformBackend>::Error, <B as PlatformBackend>::RetainedRecovery>,
+    TransactionError<<B as PlatformBackend>::Error, <B as PlatformBackend>::RecoveryDiagnostics>,
 >;
 
 impl<R> TransactionOutcome<R> {
@@ -181,8 +180,8 @@ impl<R> TransactionOutcome<R> {
 ///
 /// # Errors
 /// Returns a typed boundary failure. Commit and registration failures always
-/// include rollback and private-staging cleanup results. A failed rollback
-/// retains recovery evidence instead of invoking cleanup.
+/// include rollback and private-staging cleanup results. Cleanup is attempted
+/// under retained leases after every rollback result, including failure.
 pub fn execute<B: PlatformBackend>(
     backend: &mut B,
     request: &TransactionRequest,
@@ -258,14 +257,18 @@ fn recover<B: PlatformBackend>(
     preflight: &Preflight<B::LeaseGuard, B::Snapshot>,
     staged: B::Staged,
     committed: Option<&B::Committed>,
-) -> RecoveryStatus<B::Error, B::RetainedRecovery> {
-    match backend.rollback(request, preflight, &staged, committed) {
-        Ok(()) => RecoveryStatus::Restored {
-            cleanup: cleanup_status(backend, request, preflight, staged),
-        },
+) -> RecoveryStatus<B::Error, B::RecoveryDiagnostics> {
+    let rollback_result = backend.rollback(request, preflight, &staged, committed);
+    let cleanup = cleanup_status(backend, request, preflight, staged);
+    match rollback_result {
+        Ok(()) => RecoveryStatus::Restored { cleanup },
         Err(failure) => {
-            let (rollback, retained) = failure.into_parts();
-            RecoveryStatus::Failed { rollback, retained }
+            let (rollback, diagnostics) = failure.into_parts();
+            RecoveryStatus::Failed {
+                rollback,
+                diagnostics,
+                cleanup,
+            }
         }
     }
 }
@@ -365,7 +368,7 @@ mod tests {
         type Drained = &'static str;
         type Committed = &'static str;
         type Registration = &'static str;
-        type RetainedRecovery = &'static str;
+        type RecoveryDiagnostics = &'static str;
         type Error = FakeError;
 
         fn preflight(
@@ -443,11 +446,11 @@ mod tests {
             preflight: &Preflight<Self::LeaseGuard, Self::Snapshot>,
             _staged: &Self::Staged,
             _committed: Option<&Self::Committed>,
-        ) -> Result<(), crate::RollbackFailure<Self::Error, Self::RetainedRecovery>> {
+        ) -> Result<(), crate::RollbackFailure<Self::Error, Self::RecoveryDiagnostics>> {
             Self::assert_guard_live(preflight);
             self.event("rollback");
             self.fail_if_configured(Failure::Rollback)
-                .map_err(|error| crate::RollbackFailure::new(error, "backup-retained"))
+                .map_err(|error| crate::RollbackFailure::new(error, "rollback-diagnostics"))
         }
 
         fn cleanup(
@@ -592,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn rollback_failure_retains_recovery_evidence_without_cleanup() {
+    fn rollback_failure_still_cleans_staging_before_releasing_leases() {
         let mut backend = FakeBackend::new()
             .fails_at(Failure::Commit)
             .fails_at(Failure::Rollback);
@@ -603,7 +606,8 @@ mod tests {
             Err(TransactionError::MutationRecovery {
                 recovery: RecoveryStatus::Failed {
                     rollback: FakeError(Failure::Rollback),
-                    retained: "backup-retained",
+                    diagnostics: "rollback-diagnostics",
+                    cleanup: CleanupStatus::Succeeded,
                 },
                 ..
             })
@@ -616,13 +620,14 @@ mod tests {
                 "drain",
                 "commit",
                 "rollback",
+                "cleanup",
                 "guard-drop"
             ]
         );
     }
 
     #[test]
-    fn registration_rollback_failure_retains_evidence_without_cleanup() {
+    fn registration_rollback_failure_still_cleans_staging() {
         let mut backend = FakeBackend::new()
             .fails_at(Failure::Register)
             .fails_at(Failure::Rollback);
@@ -634,7 +639,8 @@ mod tests {
                 phase: RecoveryPhase::Registration,
                 recovery: RecoveryStatus::Failed {
                     rollback: FakeError(Failure::Rollback),
-                    retained: "backup-retained",
+                    diagnostics: "rollback-diagnostics",
+                    cleanup: CleanupStatus::Succeeded,
                 },
                 ..
             })
@@ -648,6 +654,7 @@ mod tests {
                 "commit",
                 "register",
                 "rollback",
+                "cleanup",
                 "guard-drop"
             ]
         );
@@ -704,6 +711,33 @@ mod tests {
     }
 
     #[test]
+    fn rollback_and_cleanup_failures_are_both_reported_under_leases() {
+        let mut backend = FakeBackend::new()
+            .fails_at(Failure::Register)
+            .fails_at(Failure::Rollback)
+            .fails_at(Failure::Cleanup);
+        let error = execute(&mut backend, &install_request()).unwrap_err();
+        assert!(matches!(
+            error,
+            TransactionError::MutationRecovery {
+                recovery: RecoveryStatus::Failed {
+                    rollback: FakeError(Failure::Rollback),
+                    cleanup: CleanupStatus::Failed(FakeError(Failure::Cleanup)),
+                    ..
+                },
+                ..
+            }
+        ));
+        let description = error.to_string();
+        assert!(description.contains("rollback failed"));
+        assert!(description.contains("staging cleanup failed"));
+        assert_eq!(
+            &backend.events()[5..],
+            &["rollback", "cleanup", "guard-drop"]
+        );
+    }
+
+    #[test]
     fn remove_request_has_no_source_paths_or_unrelated_target_operation() {
         let mut backend = FakeBackend::new();
         let result = execute(&mut backend, &TransactionRequest::remove()).expect("remove succeeds");
@@ -717,6 +751,8 @@ mod tests {
                 crate::DRIVER_PATH,
                 crate::HAL_PATH,
                 crate::LAUNCHD_PATH,
+                crate::UNINSTALLER_PATH,
+                crate::REMOVAL_LAUNCHD_PATH,
             ]
         );
     }

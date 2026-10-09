@@ -35,6 +35,10 @@ fn main() -> anyhow::Result<()> {
         root.join("Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver"),
         root.join("Library/Application Support/MixRelay/bin/mixrelay-driver-service"),
         root.join("templates/io.mixrelay.audio.driver.plist.in"),
+    )
+    .with_remover(
+        root.join("Applications/Uninstall MixRelay Driver.app"),
+        root.join("templates/io.mixrelay.driver.removal.plist"),
     );
     for binary in [
         sources.app().join("Contents/MacOS/mixrelay-desktop"),

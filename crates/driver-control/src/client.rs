@@ -41,11 +41,50 @@ impl DriverClient {
         let response = self
             .client
             .put(&self.endpoint)
+            // Native inventory ACK/drain can take six seconds; allow its bounded result.
+            .timeout(
+                if matches!(
+                    command,
+                    DriverCommand::Activate { .. } | DriverCommand::Deactivate { .. }
+                ) {
+                    Duration::from_secs(15)
+                } else {
+                    Duration::from_secs(5)
+                },
+            )
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(command_bytes(command)?)
             .send()
             .await?;
         read_response(response).await
+    }
+
+    /// Starts or stops native devices while retaining their saved settings.
+    /// Retries a bounded revision conflict from another settings client.
+    /// # Errors
+    /// Returns transport, native stop/start, persistence or revision errors.
+    pub async fn set_active(&self, active: bool) -> Result<DriverSnapshot, DriverError> {
+        for attempt in 0..3 {
+            let snapshot = self.snapshot().await?;
+            if !active
+                && snapshot.state == crate::DriverState::NotInstalled
+                && snapshot.settings.devices.is_empty()
+            {
+                return Ok(snapshot);
+            }
+            let expected_revision = snapshot.revision;
+            let command = if active {
+                DriverCommand::Activate { expected_revision }
+            } else {
+                DriverCommand::Deactivate { expected_revision }
+            };
+            let result = self.mutate(&command).await;
+            if attempt < 2 && matches!(result, Err(DriverError::Remote { status: 409, .. })) {
+                continue;
+            }
+            return result;
+        }
+        unreachable!("bounded revision retries return on the final attempt")
     }
 
     /// Reads actual Driver state on a non-async control worker.
@@ -61,6 +100,17 @@ impl DriverClient {
     pub fn mutate_blocking(&self, command: &DriverCommand) -> Result<DriverSnapshot, DriverError> {
         let response = blocking_client()?
             .put(&self.endpoint)
+            // Native inventory ACK/drain can take six seconds; allow its bounded result.
+            .timeout(
+                if matches!(
+                    command,
+                    DriverCommand::Activate { .. } | DriverCommand::Deactivate { .. }
+                ) {
+                    Duration::from_secs(15)
+                } else {
+                    Duration::from_secs(5)
+                },
+            )
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(command_bytes(command)?)
             .send()?;

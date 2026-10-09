@@ -392,6 +392,50 @@ fn mapping_failure_returns_an_error_without_publishing_storage() {
 }
 
 #[test]
+fn control_prefault_preserves_sample_bits_without_allocations() {
+    let mut samples: Vec<f32> = (0..8193)
+        .map(|index| f32::from_bits(0x7fc0_0000 + index))
+        .collect();
+    let expected: Vec<u32> = samples.iter().map(|sample| sample.to_bits()).collect();
+    let measured = allocation_counter::measure(|| {
+        prefault_pcm(&mut samples[1..]); // Unaligned start and a partial final page.
+        prefault_pcm(&mut []);
+    });
+    assert_eq!(measured.count_total, 0);
+    assert!(
+        samples
+            .iter()
+            .zip(expected)
+            .all(|(sample, bits)| sample.to_bits() == bits)
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn all_pcm_pages_are_resident_before_callback_publication() {
+    unsafe extern "C" {
+        fn getpagesize() -> std::ffi::c_int;
+        fn mincore(address: *mut std::ffi::c_void, length: usize, vector: *mut u8) -> i32;
+    }
+    let ring = PcmRing::new(64, 32768).unwrap();
+    let bytes = 64 * 32768 * size_of::<f32>();
+    // SAFETY: getpagesize has no arguments or borrowed state.
+    let page_bytes = usize::try_from(unsafe { getpagesize() }).unwrap();
+    let mut residency = vec![0; bytes.div_ceil(page_bytes)];
+    // SAFETY: the ring owns a page-aligned live mapping of bytes, and residency
+    // has one writable byte per page. Query before reading or writing any PCM.
+    assert_eq!(
+        unsafe { mincore(ring.storage.samples.cast(), bytes, residency.as_mut_ptr()) },
+        0
+    );
+    assert!(residency.iter().all(|state| state & 1 != 0));
+    // Preparation must not publish PCM or alter the initial FIFO cursors.
+    assert_eq!(ring.stats().written, 0);
+    assert_eq!(ring.stats().read, 0);
+    assert_eq!(ring.stats().queued, 0);
+}
+
+#[test]
 fn retirement_returns_mapped_pages_to_the_os_in_an_isolated_process() {
     unsafe extern "C" {
         fn mprotect(address: *mut std::ffi::c_void, length: usize, protection: i32) -> i32;

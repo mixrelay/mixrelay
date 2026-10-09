@@ -110,13 +110,12 @@ it.each(
     expect(screen.queryByText(i18n.t('audioSession.diagnostics'))).not.toBeInTheDocument();
     expect(screen.getByText(`${i18n.t('audioSession.bufferLatency')} 5.33 ms`)).toBeInTheDocument();
     // Keep one editable settings form; native and persisted values remain an internal contract.
-    const visibleInput = { selector: 'select' };
-    expect(screen.queryByLabelText(i18n.t('audioSession.sampleRate'), visibleInput)).toBeNull();
+    expect(screen.queryByRole('combobox', { name: i18n.t('audioSession.sampleRate') })).toBeNull();
     expect(
-      screen.getAllByLabelText(i18n.t('audioSession.processingBuffer'), visibleInput),
+      screen.getAllByRole('combobox', { name: i18n.t('audioSession.processingBuffer') }),
     ).toHaveLength(1);
     expect(
-      screen.getByLabelText(i18n.t('audioSession.processingBuffer'), visibleInput),
+      screen.getByRole('combobox', { name: i18n.t('audioSession.processingBuffer') }),
     ).toHaveValue('256');
     expect(screen.getAllByText(i18n.t('audioSession.processingBuffer'))).toHaveLength(1);
     for (const key of hiddenDiagnostics)
