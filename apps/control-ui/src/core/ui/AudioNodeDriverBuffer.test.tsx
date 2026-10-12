@@ -2,7 +2,8 @@ import { fireEvent, render } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 
 import { MixRelayProvider } from '../theme/MixRelayProvider';
-import { AudioNodeCard, type EndpointControl } from './AudioNodeCard';
+import { AudioNodeCard } from './AudioNodeCard';
+import type { EndpointControl } from './AudioNodeEndpointOptions';
 
 it('routes node buffer choices separately while retaining endpoint identity and geometry', () => {
   const endpointControl: EndpointControl = {

@@ -7,7 +7,7 @@
   border: 0;
   border-radius: var(--control-radius);
   background: transparent;
-  color: var(--muted);
+  color: var(--text-muted);
   cursor: default;
 }
 .button svg {
@@ -20,18 +20,18 @@
   stroke-linejoin: round;
 }
 .button:hover:not(:disabled) {
-  background: var(--surface-raised);
+  background: var(--surface-hover);
 }
 .button:focus-visible {
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: -1px;
 }
 .button[data-action="mute"][aria-pressed="true"] {
-  color: var(--amber);
-  background: color-mix(in srgb, var(--amber) 10%, transparent);
+  color: var(--status-warning);
+  background: color-mix(in srgb, var(--status-warning) 10%, transparent);
 }
 .button[data-action="power"][aria-pressed="true"] {
-  color: var(--positive);
+  color: var(--status-positive);
 }
 .button:disabled {
   opacity: var(--control-disabled-opacity);

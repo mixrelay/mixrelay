@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { inspectCss, inspectScript } from './ui-boundary-rules.mjs';
+import {
+  inspectCss,
+  inspectIntegrationTests,
+  inspectScript,
+  inspectVariableReferences,
+} from './ui-boundary-rules.mjs';
 
 const script = (source) => inspectScript('features/example/Example.tsx', source).violations;
 const css = (source, classes) => inspectCss('features/example/Example.module.css', source, classes);
@@ -79,23 +84,17 @@ test('inline story geometry and local layout variables do not require a visual t
   );
 });
 
-test('layout container bindings are checked against the associated CSS module', () => {
-  const source =
-    "import { ApplicationStatusBar as Header } from '../../core/ui/ApplicationStatusBar'; import s from './Example.module.css'; const C=()=> <Header className={s.toolbar} />;";
-  const result = inspectScript('features/example/Example.tsx', source);
-  assert.deepEqual(result.violations, []);
-  assert.deepEqual(result.layoutBindings, [{ source: './Example.module.css', name: 'toolbar' }]);
-  assert.deepEqual(css('.toolbar { z-index:6; grid-row:3; }', new Set(['toolbar'])), []);
-  assert.ok(
-    has(css('.toolbar { color:var(--red); height:24px; }', new Set(['toolbar'])), 'layout'),
-  );
-  assert.ok(
-    has(
-      script(
-        "import { ApplicationStatusBar } from '../../core/ui/ApplicationStatusBar'; const C=()=> <ApplicationStatusBar className={dynamic} />;",
-      ),
-      'layout',
+test('Core components take no caller className, including former layout slots', () => {
+  for (const source of [
+    "import { ApplicationStatusBar as Header } from '../../core/ui/ApplicationStatusBar'; import s from './Example.module.css'; const C=()=> <Header className={s.toolbar} />;",
+    "import { ApplicationStatusBar } from '../../core/ui/ApplicationStatusBar'; const C=()=> <ApplicationStatusBar className={dynamic} />;",
+  ])
+    assert.ok(has(script(source), 'override'));
+  assert.deepEqual(
+    script(
+      "import { ApplicationStatusBar } from '../../core/ui/ApplicationStatusBar'; import s from './Example.module.css'; const C=()=> <div className={s.toolbar}><ApplicationStatusBar controls={null} /></div>;",
     ),
+    [],
   );
 });
 
@@ -125,6 +124,23 @@ test('typography and all color forms use system roles, including named colors', 
     assert.ok(has(css(`.root { color:${value}; }`), 'color'));
   assert.ok(has(css('.root { font-size:12px; }'), 'typography'));
   assert.ok(has(css('.root { font-family:Arial; }'), 'typography'));
+  for (const value of [
+    '500 8px var(--font-mono)',
+    'var(--font-label) Arial',
+    '12px/1 "IBM Plex"',
+    '500 var(--font-label, 12px) var(--font-sans)',
+    'var(--font-label) var(--font-sans, Arial)',
+    'var(--font-label, var(--font-body, 13px)) var(--font-sans)',
+    'var(--font-label, ?) var(--font-sans)',
+    'var(--font-label, {a:b}) var(--font-sans)',
+  ])
+    assert.ok(has(css(`.root { font:${value}; }`), 'typography'));
+  assert.deepEqual(
+    css(
+      '.root { font:500 var(--font-label) / 1 var(--font-sans); } .b { font:inherit; } .c { font:italic var(--font-weight-medium) var(--font-body) / var(--line-height-body) var(--font-sans); } .d { font:revert; } .e { font:revert-layer; } .f { font:var(--font-label, var(--font-body)) var(--font-sans); }',
+    ),
+    [],
+  );
   assert.deepEqual(
     css(
       '.root { color:currentColor; background:transparent; font-size:var(--font-control); font-family:inherit; }',
@@ -187,4 +203,141 @@ test('Core can declare bundled font faces while consumer typography still requir
   assert.deepEqual(inspectCss('core/theme/Fonts.css', face), []);
   assert.ok(has(css(face), 'typography'));
   assert.ok(has(inspectCss('core/theme/Bad.css', "p { font-family: 'Other'; }"), 'typography'));
+});
+
+test('stacking and motion use layer and motion tokens', () => {
+  for (const rule of ['z-index:6', 'z-index:-1', 'z-index:var(--space-2)'])
+    assert.ok(has(css(`.root { ${rule}; }`), 'layer'));
+  for (const rule of [
+    'transition:opacity 120ms ease',
+    'transition-duration:0.2s',
+    'animation:spin 1s linear infinite',
+    'animation-delay:50ms',
+    'transition:opacity var(--motion-duration-fast, 120ms) ease',
+    'animation:spin var(--motion-duration-spin, 1s) linear infinite',
+    'transition:opacity var(--motion-duration-fast, ?) ease',
+  ])
+    assert.ok(has(css(`.root { ${rule}; }`), 'motion'));
+  assert.deepEqual(
+    css(
+      '.root { z-index:var(--layer-shell-chrome); transition:opacity var(--motion-duration-fast) var(--motion-easing-standard); } .b { z-index:auto; animation:spin var(--motion-duration-spin) linear infinite; }',
+    ),
+    [],
+  );
+});
+
+test('every referenced variable is defined by tokens, CSS or inline style; tests are excluded', () => {
+  const files = [
+    { filename: 'core/theme/tokens.ts', source: "export const v = { '--text-primary': '#000' };" },
+    { filename: 'core/ui/A.module.css', source: '.a { --local-gap: 2px; gap: var(--local-gap); }' },
+    { filename: 'core/ui/B.tsx', source: "const s = { '--inline-x': '1px' };" },
+    {
+      filename: 'core/ui/C.module.css',
+      source:
+        '.c { color: var(--text-primary); width: var(--inline-x); max-width: var(--trigger-width); }',
+    },
+    {
+      filename: 'core/ui/C.test.tsx',
+      source: "const s = { '--muted': 'red' }; var(--only-in-test)",
+    },
+    { filename: 'features/D.module.css', source: '.d {\n  color: var(--muted);\n}' },
+    {
+      filename: 'core/ui/E.module.css',
+      source:
+        '@property --registered { syntax: "<length>"; inherits: false; initial-value: 0px; }\n/* --commented: 1px; */\n.e { width: var(--registered); height: var(--commented); }',
+    },
+    {
+      filename: 'core/ui/F.tsx',
+      source:
+        "const a = { [`--template-key`]: '1px' }; el.style.setProperty('--set-property', '2px'); getComputedStyle(el).getPropertyValue('--read-only'); const b = 'var(--template-key) var(--set-property)';",
+    },
+    { filename: 'core/ui/G.module.css', source: '.g { width: var(--read-only); }' },
+    {
+      filename: 'core/ui/H.module.css',
+      source: '.h { width: var(--text-primary, var(--fallback-missing)); }',
+    },
+    {
+      filename: 'core/ui/I.module.css',
+      source:
+        '.i { --local: /* var(--commented-out) */ 1px; content: "var(--literal-text)"; width: var(--local); }',
+    },
+    {
+      filename: 'core/ui/J.tsx',
+      source:
+        "el.style['setProperty']('--computed-method', '1px'); el.style?.setProperty('--optional-call', '1px'); other.setProperty('--not-style', '1px'); const c = 'var(--computed-method) var(--optional-call)';",
+    },
+    { filename: 'core/ui/K.module.css', source: '.k { width: var(--not-style); }' },
+    {
+      filename: 'core/ui/L.module.css',
+      source:
+        '.l { --data: { color: var(--block-missing); /* var(--block-comment) */ content: "var(--block-string)"; }; }',
+    },
+    {
+      filename: 'core/ui/M.module.css',
+      source: '.m { --data: { content: "/*"; color: var(--after-quoted-marker); /* end */ }; }',
+    },
+  ];
+  const violations = inspectVariableReferences(files);
+  assert.deepEqual(
+    violations.map(({ filename, line, code }) => [filename, line, code]),
+    [
+      ['features/D.module.css', 2, 'token'],
+      ['core/ui/E.module.css', 3, 'token'],
+      ['core/ui/G.module.css', 1, 'token'],
+      ['core/ui/H.module.css', 1, 'token'],
+      ['core/ui/K.module.css', 1, 'token'],
+      ['core/ui/L.module.css', 1, 'token'],
+      ['core/ui/M.module.css', 1, 'token'],
+    ],
+  );
+});
+
+test('screen-level tests side-effect import the integration timeout owner; others need not', () => {
+  const files = [
+    { filename: 'screens/A.test.tsx', source: "import { StudioScreen } from './StudioScreen';" },
+    {
+      filename: 'screens/B.test.tsx',
+      source:
+        "import '../test-support/integration'; import { StudioScreen } from './StudioScreen';",
+    },
+    { filename: 'app/C.test.tsx', source: "import { App } from './App';" },
+    {
+      filename: 'features/D.test.tsx',
+      source: "import type { RoutingWorkspace } from './RoutingWorkspace';",
+    },
+    { filename: 'core/ui/E.test.tsx', source: "import { ActionButton } from './ActionButton';" },
+    {
+      filename: 'features/F.test.tsx',
+      source: "import { type RoutingWorkspace } from './RoutingWorkspace';",
+    },
+    {
+      filename: 'screens/StudioScreen.tsx',
+      source: "import { RoutingWorkspace } from '../x/RoutingWorkspace';",
+    },
+    {
+      filename: 'screens/G.test.tsx',
+      source:
+        "import type { integrationTestTimeout } from '../test-support/integration'; import { StudioScreen } from './StudioScreen';",
+    },
+    { filename: 'app/H.test.tsx', source: "import * as AppModule from './App';" },
+    {
+      filename: 'screens/I.test.tsx',
+      source: "import { MockStudioScreen } from './MockStudioScreen';",
+    },
+    {
+      filename: 'screens/J.test.tsx',
+      source:
+        "import { integrationTestTimeout } from '../test-support/integration'; import { StudioScreen } from './StudioScreen';",
+    },
+  ];
+  assert.deepEqual(
+    inspectIntegrationTests(files).map(({ filename }) => filename),
+    [
+      'screens/A.test.tsx',
+      'app/C.test.tsx',
+      'screens/G.test.tsx',
+      'app/H.test.tsx',
+      'screens/J.test.tsx',
+    ],
+  );
 });

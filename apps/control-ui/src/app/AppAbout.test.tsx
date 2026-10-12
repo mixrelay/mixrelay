@@ -1,3 +1,4 @@
+import '../test-support/integration';
 import { act, render, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';

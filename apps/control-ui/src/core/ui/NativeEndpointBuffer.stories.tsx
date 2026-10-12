@@ -4,7 +4,8 @@ import { useTranslation } from 'react-i18next';
 
 import type { NativeSampleFormat } from '../control-port/types';
 import { ActionButton } from './ActionButton';
-import { AudioNodeCard, type EndpointControl } from './AudioNodeCard';
+import { AudioNodeCard } from './AudioNodeCard';
+import type { EndpointControl } from './AudioNodeEndpointOptions';
 import { NativeEndpointBuffer } from './NativeEndpointBuffer';
 import { Stack } from './Stack';
 import { Text } from './Text';

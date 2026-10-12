@@ -348,6 +348,32 @@ export const zhHans = {
     title: '虚拟输入输出路由',
     description: '将 macOS 应用发送到 MixRelay 的音频路由回 OBS 和 DAW 使用的设备输入。',
     canvasLabel: 'MixRelay 虚拟输入输出路由图',
+    ports: {
+      application: '应用音频',
+      deviceInput: '设备输入',
+      deviceOutput: '设备输出',
+      effectInput: '{{name}} 输入',
+      effectOutput: '{{name}} 输出',
+      gainInput: '增益输入',
+      gainOutput: '增益输出',
+      mixerInput: '混音器输入',
+      mixerOutput: '混音器输出',
+    },
+    a11y: {
+      nodeDescription:
+        '按 Enter 或空格键选择节点。选中后用方向键移动，按住 Shift 可移动更大距离。按 Delete 删除，按 Escape 取消。',
+      nodeDescriptionStatic: '按 Enter 或空格键选择节点。按 Delete 删除，按 Escape 取消。',
+      nodeMoved: '已将所选节点向{{direction}}移动。新位置：x {{x}}，y {{y}}。',
+      directions: {
+        up: '上',
+        down: '下',
+        left: '左',
+        right: '右',
+      },
+      edgeDescription: '按 Enter 或空格键选择连线。按 Delete 删除，按 Escape 取消。',
+      edgeLabel: '{{source}} CH {{sourceChannel}} → {{target}} CH {{targetChannel}}',
+      meterChannel: '{{name}} 通道 {{channel}}',
+    },
     toggleGain: '增益 −6 dB',
     apply: '应用',
     nodes: {

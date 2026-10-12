@@ -9,7 +9,7 @@
   border: 0;
   border-radius: var(--control-radius);
   background: transparent;
-  color: var(--muted);
+  color: var(--text-muted);
   cursor: default;
 }
 .root[data-density="regular"] {
@@ -17,16 +17,16 @@
   height: var(--control-height);
 }
 .root[data-tone="critical"] {
-  color: var(--red);
+  color: var(--status-danger);
 }
 .root[data-tone="warning"] {
-  color: var(--amber);
+  color: var(--status-warning);
 }
 .root:hover:not(:disabled) {
   background: var(--control-background-hover);
 }
 .root[aria-pressed="true"] {
-  color: var(--text);
+  color: var(--text-primary);
   background: var(--surface-active);
 }
 .root:focus-visible {
@@ -52,5 +52,5 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--status-accent);
 }

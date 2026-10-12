@@ -1,6 +1,6 @@
 .root {
   background: var(--surface);
-  border: var(--border-width) solid var(--line);
+  border: var(--border-width) solid var(--border-default);
   padding: var(--space-4);
 }
 

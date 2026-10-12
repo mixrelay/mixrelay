@@ -22,3 +22,7 @@
 UI 조작 위치 목록은 `pnpm --filter @mixrelay/control-ui audit:ui`로 확인한다.
 `--json`은 표준 출력에 구조화된 목록을 제공하며 파일을 생성하지 않는다. `--help`로 사용법을 확인한다.
 목록은 소스 검토의 범위이며 실제 접근성 이름·키보드 동작은 테스트와 Storybook에서 검증한다.
+
+UI 테스트(`apps/control-ui`)는 실제 시간을 기다리지 않는다. 제품 코드의 폴링·재확인 타이머(노드 제어 1초, 런타임 연결 2초 등)에 의존하는 테스트는 `vi.useFakeTimers()`와 `src/test-support/fakeTimerQueries.ts`의 `find`/`findIn`/`eventually`/`advance`를 사용한다. Testing Library의 `findBy`/`waitFor`는 가짜 타이머에서 끝나지 않으므로 이 도우미가 가짜 시계를 넘기며 확인한다. 화면 전체(App·StudioScreen·RoutingWorkspace)를 렌더하는 테스트는 `src/test-support/integration`을 import해 통합 테스트 제한 시간(15초)을 쓴다. 경계 검사가 이 import를 강제한다. 제한 시간은 멈춤 방지용이며 속도는 따로 측정한다. Storybook 스토리의 axe 검사는 `test:a11y`로 일반 테스트와 분리해 실행한다.
+
+디자인 시스템 계약 도구는 `docs:api <source> <Name>`(계약 API 발췌 출력)과 `docs:page <Name> [--force|--stdout]`(표준 컴포넌트 문서 생성)이다. 둘 다 `--help`로 사용법을 확인한다.

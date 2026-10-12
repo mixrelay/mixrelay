@@ -1,3 +1,4 @@
+import '../../test-support/integration';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { expect, it, vi } from 'vitest';

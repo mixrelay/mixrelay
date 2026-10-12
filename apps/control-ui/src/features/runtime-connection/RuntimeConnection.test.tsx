@@ -1,8 +1,9 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider, i18n } from '../../core/i18n';
 import type { RuntimePort, RuntimeStatus } from '../../core/runtime/RuntimePort';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
+import { eventually, find } from '../../test-support/fakeTimerQueries';
 import { RuntimeConnection } from './RuntimeConnection';
 
 function renderConnection(port: RuntimePort, install = vi.fn()) {
@@ -81,20 +82,26 @@ describe('Driver connection gate', () => {
   });
 
   it('preserves editor state on disconnect and never automatically restarts stopped audio', async () => {
-    const connect = vi.fn<RuntimePort['connect']>().mockResolvedValue('ready');
-    const status = vi.fn<RuntimePort['status']>().mockResolvedValue('unavailable');
-    renderConnection({ connect, status });
-    const input = await screen.findByRole('textbox');
-    fireEvent.change(input, { target: { value: 'Unsaved edit' } });
-    await waitFor(
-      () =>
-        expect(screen.getByRole('heading', { name: 'Cannot connect to MixRelay' })).toBeVisible(),
-      { timeout: 4000 },
-    );
-    expect(input).not.toBeVisible();
-    expect(connect).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry connection' }));
-    expect(await screen.findByRole('textbox')).toHaveValue('Unsaved edit');
+    // The two-second readiness re-check runs on the fake clock instead of wall time.
+    vi.useFakeTimers();
+    try {
+      const connect = vi.fn<RuntimePort['connect']>().mockResolvedValue('ready');
+      const status = vi.fn<RuntimePort['status']>().mockResolvedValue('unavailable');
+      renderConnection({ connect, status });
+      const input = await find('textbox');
+      fireEvent.change(input, { target: { value: 'Unsaved edit' } });
+      await eventually(
+        () =>
+          expect(screen.getByRole('heading', { name: 'Cannot connect to MixRelay' })).toBeVisible(),
+        { timeout: 4000 },
+      );
+      expect(input).not.toBeVisible();
+      expect(connect).toHaveBeenCalledOnce();
+      fireEvent.click(screen.getByRole('button', { name: 'Retry connection' }));
+      expect(await find('textbox')).toHaveValue('Unsaved edit');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('ignores a completed connection after unmount', async () => {

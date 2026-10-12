@@ -5,8 +5,8 @@ const meta = {
   title: 'Core/Playgrounds/Text',
   component: Text,
   argTypes: {
-    kind: { control: 'select', options: ['body', 'supporting', 'label', 'caption'] },
-    as: { control: 'select', options: ['p', 'span', 'small'] },
+    kind: { control: 'select', options: ['heading', 'body', 'supporting', 'label', 'caption'] },
+    as: { control: 'select', options: ['h1', 'h2', 'p', 'span', 'small'] },
     tone: {
       control: 'select',
       options: ['neutral', 'accent', 'positive', 'warning', 'critical', 'muted'],
@@ -47,3 +47,6 @@ export const Playground: Story = {};
 export const Supporting: Story = { args: { kind: 'supporting', tone: 'muted' } };
 export const Critical: Story = { args: { tone: 'critical' } };
 export const Caption: Story = { args: { kind: 'caption', as: 'small' } };
+export const Heading: Story = {
+  args: { kind: 'heading', as: 'h1', children: 'MixRelay에 연결할 수 없습니다' },
+};

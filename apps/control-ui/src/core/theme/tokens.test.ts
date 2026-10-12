@@ -37,6 +37,11 @@ it('keeps all DSUB steps in descending luminance and the brand source fixed', ()
   expect(Object.keys(themeRoles.light).some((role) => role.includes('orange'))).toBe(false);
 });
 
+it('keeps field placeholders on a text role whose contrast is checked below', () => {
+  // Placeholders show the original name in rename fields, so they are information.
+  expect(mixrelayVariables['--control-placeholder']).toBe('var(--text-muted)');
+});
+
 describe.each(['light', 'dark'] as const)('%s theme contrast', (scheme) => {
   const roles = themeRoles[scheme];
   const surfaces = [

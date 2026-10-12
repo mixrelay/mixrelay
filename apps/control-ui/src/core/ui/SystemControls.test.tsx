@@ -162,7 +162,7 @@ it('keeps checkbox confirmation and retry as real controls', () => {
 });
 
 it('rejects styling hidden in typed spreads for public controls', () => {
-  const override = { style: { color: 'var(--red)' }, disabled: false };
+  const override = { style: { color: 'var(--status-danger)' }, disabled: false };
   // @ts-expect-error A spread cannot introduce a style override.
   const command: ComponentProps<typeof ActionButton> = override;
   // @ts-expect-error TextField only exposes functional input props.

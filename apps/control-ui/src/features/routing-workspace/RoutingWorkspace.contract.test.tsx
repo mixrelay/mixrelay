@@ -1,3 +1,4 @@
+import '../../test-support/integration';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AudioGraphCanvasProps } from '../../core/audio-graph/AudioGraphCanvas';
@@ -13,6 +14,7 @@ import type {
 import { ControlPortError } from '../../core/control-port/types';
 import { I18nProvider, i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
+import { advance, eventually, find } from '../../test-support/fakeTimerQueries';
 import { GraphApplicationError } from './GraphApplicationQueue';
 import {
   addRoutingNode,
@@ -110,8 +112,9 @@ function canvas() {
   return harness.canvas;
 }
 async function ready() {
-  await screen.findByRole('region', { name: 'MixRelay virtual I/O routing graph' });
-  await act(async () => Promise.resolve());
+  // The first render of a whole screen can exceed waitFor's 1 s default under load.
+  await find('region', { name: 'MixRelay virtual I/O routing graph' }, { timeout: 5000 });
+  await advance();
 }
 const session: AudioSessionStatus = {
   format: { sampleRate: 48000, blockFrames: 128 },
@@ -274,6 +277,7 @@ it('renders power and mute against actual node controls, reconciles revision cha
 });
 
 it('omits unavailable node controls and disables confirmed buttons while interaction is disabled', async () => {
+  vi.useFakeTimers();
   const native = port(document(signalSource));
   const read = vi
     .spyOn(native, 'getNodeControls')
@@ -285,9 +289,7 @@ it('omits unavailable node controls and disables confirmed buttons while interac
   rendered.unmount();
   const confirmed = render(view(native, { graphId: 'graph-1' }));
   await ready();
-  expect(
-    await screen.findByRole('button', { name: 'Disable Hardware input' }, { timeout: 3000 }),
-  ).toBeEnabled();
+  expect(await find('button', { name: 'Disable Hardware input' })).toBeEnabled();
   confirmed.rerender(view(native, { graphId: 'graph-1', interactionDisabled: true }));
   expect(screen.getByRole('button', { name: 'Disable Hardware input' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Mute Hardware input' })).toBeDisabled();
@@ -691,6 +693,7 @@ it('shows a bounded graph-apply timeout with the recoverable draft preserved', a
 });
 
 it('rebuilds from authoritative native topology when a node control requires a graph reload', async () => {
+  vi.useFakeTimers();
   const initial = document(signalSource);
   const native = port(initial);
   const replacement = document(signalSource, { kind: 'limiter' });
@@ -703,10 +706,8 @@ it('rebuilds from authoritative native topology when a node control requires a g
   }));
   render(view(native, { graphId: 'graph-1' }));
   await ready();
-  fireEvent.click(
-    await screen.findByRole('button', { name: 'Disable Hardware input' }, { timeout: 3000 }),
-  );
-  await waitFor(() => expect(canvas().model.nodes).toHaveLength(2));
+  fireEvent.click(await find('button', { name: 'Disable Hardware input' }));
+  await eventually(() => expect(canvas().model.nodes).toHaveLength(2));
   expect(canvas().model.nodes[0]?.runtime?.control?.enabled).toBe(false);
 });
 
@@ -753,6 +754,7 @@ it('ignores a virtual endpoint setting aimed at a node that is no longer present
 it.each(['same topology', 'changed topology'] as const)(
   'keeps a rejected native node control honest with %s readback',
   async (topology) => {
+    vi.useFakeTimers();
     const initial = document(signalSource);
     const replacement =
       topology === 'changed topology' ? document(signalSource, { kind: 'limiter' }) : initial;
@@ -774,18 +776,18 @@ it.each(['same topology', 'changed topology'] as const)(
     });
     render(view(native, { graphId: 'graph-1' }));
     await ready();
-    await waitFor(() =>
+    await eventually(() =>
       expect(screen.getByRole('button', { name: 'Disable Hardware input' })).toBeEnabled(),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Disable Hardware input' }));
-    await waitFor(() =>
+    await eventually(() =>
       expect(read).toHaveBeenCalledTimes(topology === 'changed topology' ? 3 : 2),
     );
     if (topology === 'changed topology') {
-      expect(await screen.findByRole('button', { name: 'Retry' })).toBeVisible();
+      expect(await find('button', { name: 'Retry' })).toBeVisible();
       expect(canvas().model.nodes).toHaveLength(1);
     } else {
-      expect(await screen.findByRole('alert')).toBeVisible();
+      expect(await find('alert')).toBeVisible();
       expect(
         screen.queryByRole('button', { name: 'Overwrite engine with these edits' }),
       ).not.toBeInTheDocument();

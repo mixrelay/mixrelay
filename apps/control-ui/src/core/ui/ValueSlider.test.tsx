@@ -23,7 +23,8 @@ it('exposes native range limits and units while waiting for confirmed readback',
   expect(slider).toHaveAttribute('min', '-60');
   expect(slider).toHaveAttribute('max', '12');
   expect(slider).toHaveAttribute('step', '0.5');
-  expect(slider).toHaveAccessibleDescription('-6 dB');
+  expect(slider).toHaveAttribute('aria-valuetext', '-6 dB');
+  expect(slider).toHaveAccessibleDescription('');
   fireEvent.change(slider, { target: { value: '-5.5' } });
   expect(change).toHaveBeenCalledExactlyOnceWith(-5.5);
   expect(slider).toHaveValue('-6');
@@ -42,7 +43,7 @@ it('exposes native range limits and units while waiting for confirmed readback',
   );
   expect(screen.getByRole('slider')).toBe(slider);
   expect(slider).toHaveValue('-5.5');
-  expect(slider).toHaveAccessibleDescription('-5.5 dB');
+  expect(slider).toHaveAttribute('aria-valuetext', '-5.5 dB');
 });
 
 it('exposes a disabled native range and defaults to whole steps', () => {

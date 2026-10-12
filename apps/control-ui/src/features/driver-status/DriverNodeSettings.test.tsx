@@ -1,3 +1,4 @@
+import '../../test-support/integration';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { App } from '../../app/App';
@@ -7,7 +8,8 @@ import type { DriverPort, DriverSnapshot } from '../../core/driver/DriverPort';
 import { I18nProvider, i18n } from '../../core/i18n';
 import type { LicensingPort } from '../../core/licensing/LicensingPort';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
-import { AudioNodeCard, type EndpointUpdate } from '../../core/ui/AudioNodeCard';
+import { AudioNodeCard } from '../../core/ui/AudioNodeCard';
+import type { EndpointUpdate } from '../../core/ui/AudioNodeEndpointOptions';
 import { readyDriver } from './driverFixtures';
 
 // Layout belongs to React Flow's browser tests; keep the real node fields and App/Driver wiring here.

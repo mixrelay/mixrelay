@@ -12,6 +12,6 @@
 }
 
 .value {
-  color: var(--muted);
+  color: var(--text-muted);
   font: var(--font-label) var(--font-mono);
 }

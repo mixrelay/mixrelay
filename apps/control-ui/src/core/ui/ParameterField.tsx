@@ -34,7 +34,6 @@ export function ParameterField({
   onChange: (value: number) => void;
 }) {
   const unitId = useId();
-  const labelId = useId();
   if (control.choices) {
     return (
       <SelectField
@@ -58,9 +57,7 @@ export function ParameterField({
     >
       {control.presentation === 'knob' ? (
         <>
-          <span id={labelId} className={styles.knobLabel}>
-            {control.label}
-          </span>
+          <span className={styles.knobLabel}>{control.label}</span>
           <Knob
             label={control.label}
             value={control.value}

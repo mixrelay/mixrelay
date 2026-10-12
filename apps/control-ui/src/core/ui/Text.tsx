@@ -9,15 +9,18 @@ export function Text({
   kind = 'body',
   tone = 'neutral',
   as: Element = 'p',
+  id,
 }: PropsWithChildren<
   NoAppearanceOverrides & {
-    kind?: 'body' | 'supporting' | 'label' | 'caption';
+    kind?: 'heading' | 'body' | 'supporting' | 'label' | 'caption';
     tone?: StatusTone | 'muted';
-    as?: 'p' | 'span' | 'small';
+    as?: 'h1' | 'h2' | 'p' | 'span' | 'small';
+    /** For aria-labelledby relationships; the element still owns no spacing. */
+    id?: string;
   }
 >) {
   return (
-    <Element className={styles.root} data-text-role={kind} data-tone={tone}>
+    <Element className={styles.root} data-text-role={kind} data-tone={tone} id={id}>
       {children}
     </Element>
   );

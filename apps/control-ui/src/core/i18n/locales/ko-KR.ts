@@ -360,6 +360,34 @@ export const koKR = {
     description:
       'macOS 앱이 MixRelay로 출력한 소리를 OBS와 DAW가 입력으로 사용하는 가상 장치에 다시 연결합니다.',
     canvasLabel: 'MixRelay 가상 I/O 라우팅 그래프',
+    ports: {
+      application: '앱 오디오',
+      deviceInput: '장치 입력',
+      deviceOutput: '장치 출력',
+      effectInput: '{{name}} 입력',
+      effectOutput: '{{name}} 출력',
+      gainInput: '게인 입력',
+      gainOutput: '게인 출력',
+      mixerInput: '믹서 입력',
+      mixerOutput: '믹서 출력',
+    },
+    a11y: {
+      nodeDescription:
+        'Enter 또는 Space로 노드를 선택합니다. 선택한 뒤 방향키로 옮기고, Shift를 누르면 더 크게 옮깁니다. Delete로 삭제하고 Escape로 취소합니다.',
+      nodeDescriptionStatic:
+        'Enter 또는 Space로 노드를 선택합니다. Delete로 삭제하고 Escape로 취소합니다.',
+      nodeMoved: '선택한 노드를 {{direction}} 옮겼습니다. 새 위치: x {{x}}, y {{y}}.',
+      directions: {
+        up: '위로',
+        down: '아래로',
+        left: '왼쪽으로',
+        right: '오른쪽으로',
+      },
+      edgeDescription:
+        'Enter 또는 Space로 케이블을 선택합니다. Delete로 삭제하고 Escape로 취소합니다.',
+      edgeLabel: '{{source}} CH {{sourceChannel}} → {{target}} CH {{targetChannel}}',
+      meterChannel: '{{name}} 채널 {{channel}}',
+    },
     toggleGain: '−6 dB 게인',
     apply: '적용',
     nodes: {
@@ -384,7 +412,7 @@ export const koKR = {
       limiterDescription: '출력 피크를 실링 아래로 제한',
       makeupGain: '메이크업',
       mixer: '믹서',
-      options: 'Options',
+      options: '옵션',
       virtualSinkPort: '장치로 보내는 오디오',
       processor: '프로세서',
       processorLayoutUnavailable: '프로세서 레이아웃을 사용할 수 없음',

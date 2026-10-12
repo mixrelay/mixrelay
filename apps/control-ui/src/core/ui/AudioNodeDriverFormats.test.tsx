@@ -2,7 +2,8 @@ import { fireEvent, render } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import type { NativeDeviceFormats, NativeSampleFormat } from '../control-port/types';
 import { MixRelayProvider } from '../theme/MixRelayProvider';
-import { AudioNodeCard, type EndpointControl } from './AudioNodeCard';
+import { AudioNodeCard } from './AudioNodeCard';
+import type { EndpointControl } from './AudioNodeEndpointOptions';
 
 const stream = {
   current: { sampleRate: 48000, channels: 2, sampleFormat: 'float32' as const },

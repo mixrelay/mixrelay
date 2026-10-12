@@ -8,9 +8,10 @@ export type LayoutGap = 'tight' | 'regular' | 'section' | 'wide';
 export function Stack({
   children,
   gap = 'regular',
-}: PropsWithChildren<NoAppearanceOverrides & { gap?: LayoutGap }>) {
+  align = 'stretch',
+}: PropsWithChildren<NoAppearanceOverrides & { gap?: LayoutGap; align?: 'stretch' | 'center' }>) {
   return (
-    <div className={styles.stack} data-gap={gap}>
+    <div className={styles.stack} data-gap={gap} data-align={align}>
       {children}
     </div>
   );

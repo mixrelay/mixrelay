@@ -41,6 +41,13 @@
 .inline[data-align="baseline"] {
   align-items: baseline;
 }
+.stack[data-align="center"] {
+  align-items: center;
+  text-align: center;
+}
+.inline[data-justify="center"] {
+  justify-content: center;
+}
 .inline[data-justify="end"] {
   justify-content: flex-end;
 }

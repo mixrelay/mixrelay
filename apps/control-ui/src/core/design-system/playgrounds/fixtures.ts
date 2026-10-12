@@ -1,6 +1,9 @@
 import type { AudioGraphModel } from '../../audio-graph/model';
 import { AudioMeterStore } from '../../audio-meter/AudioMeterStore';
 import type { NativeDeviceFormats } from '../../control-port/types';
+import type { EndpointControl } from '../../ui/AudioNodeEndpointOptions';
+import type { AudioNodeMeterBank } from '../../ui/AudioNodeMeterBanks';
+import type { AudioNodeParameterControl } from '../../ui/AudioNodeParameterGrid';
 import type { DynamicsMeterContract } from '../../ui/DynamicsMeter';
 import type { GraphicEqualizerContract } from '../../ui/GraphicEqualizer';
 import type { EndpointBufferControl } from '../../ui/NativeEndpointBuffer';
@@ -135,3 +138,90 @@ export const equalizerControls: ParameterFieldControl[] = ['low', 'mid', 'high']
     },
   ],
 );
+
+export const endpointControl: EndpointControl = {
+  displayName: 'Studio monitor',
+  nameLabel: '장치 이름',
+  channelsLabel: '채널',
+  canRename: true,
+  renderChannels: 2,
+  captureChannels: 2,
+  allowedRenderChannels: [2, 4, 8],
+  allowedCaptureChannels: [2, 4],
+  observedRate: { label: '샘플레이트', value: 48000 },
+  sampleRateOptions: [44100, 48000, 96000],
+  nativeFormats: sampleFormats,
+  nativeFormatLabels: { bitDepth: '비트 심도', unknown: '미확인', mixed: '입출력 불일치' },
+  bufferControl,
+};
+export const meterBanks: AudioNodeMeterBank[] = [
+  { channels: 2, nodeId: 'sample-meter', portId: 'main' },
+];
+export const labelledMeterBanks: AudioNodeMeterBank[] = [
+  { channels: 2, nodeId: 'sample-meter', portId: 'main', label: 'Main' },
+  { channels: 1, nodeId: 'sample-meter', portId: 'sidechain', label: 'Sidechain' },
+];
+export const nodeMeterStore = new AudioMeterStore();
+nodeMeterStore.update({
+  protocolVersion: 1,
+  revision: 1,
+  nodes: [
+    { nodeId: 'sample-meter', portId: 'main', peaks: [0.72, 0.48] },
+    { nodeId: 'sample-meter', portId: 'sidechain', peaks: [0.3] },
+    {
+      nodeId: 'sample-meter',
+      portId: 'surround',
+      peaks: Array.from({ length: 16 }, (_, index) => ((index % 8) + 1) / 9),
+    },
+  ],
+});
+export const knobParameters: AudioNodeParameterControl[] = [
+  {
+    id: 'cutoff',
+    label: '컷오프',
+    value: 1200,
+    minimum: 20,
+    maximum: 20000,
+    step: 1,
+    suffix: 'Hz',
+    scale: 'logarithmic',
+    presentation: 'knob',
+  },
+  {
+    id: 'resonance',
+    label: '레조넌스',
+    value: 0.7,
+    minimum: 0.1,
+    maximum: 10,
+    step: 0.01,
+    suffix: '',
+    presentation: 'knob',
+  },
+  {
+    id: 'mix',
+    label: '믹스',
+    value: 100,
+    minimum: 0,
+    maximum: 100,
+    step: 1,
+    suffix: '%',
+    presentation: 'knob',
+  },
+];
+export const mixedParameters: AudioNodeParameterControl[] = [
+  {
+    id: 'mode',
+    label: '채널 처리',
+    value: 0,
+    minimum: 0,
+    maximum: 1,
+    step: 1,
+    suffix: '',
+    choices: [
+      { value: 0, label: '스테레오', description: 'L → L, R → R' },
+      { value: 1, label: '모노 합산', description: '(L + R) / 2 → L/R' },
+    ],
+  },
+  { id: 'level', label: '레벨', value: -6, minimum: -60, maximum: 12, step: 0.5, suffix: 'dB' },
+  { ...gainControl, id: 'trim', label: '트림', precise: true },
+];

@@ -365,6 +365,34 @@ export const ru = {
     description:
       'Направьте аудио, передаваемое приложениями macOS в MixRelay, на вход устройства, используемого OBS и DAW.',
     canvasLabel: 'Граф маршрутизации виртуального ввода/вывода MixRelay',
+    ports: {
+      application: 'Звук приложения',
+      deviceInput: 'Вход устройства',
+      deviceOutput: 'Выход устройства',
+      effectInput: 'Вход {{name}}',
+      effectOutput: 'Выход {{name}}',
+      gainInput: 'Вход усиления',
+      gainOutput: 'Выход усиления',
+      mixerInput: 'Вход микшера',
+      mixerOutput: 'Выход микшера',
+    },
+    a11y: {
+      nodeDescription:
+        'Нажмите Enter или Пробел, чтобы выбрать узел. Затем перемещайте его стрелками, с Shift — крупным шагом. Delete удаляет узел, Escape отменяет.',
+      nodeDescriptionStatic:
+        'Нажмите Enter или Пробел, чтобы выбрать узел. Delete удаляет узел, Escape отменяет.',
+      nodeMoved: 'Выбранный узел перемещён {{direction}}. Новое положение: x {{x}}, y {{y}}.',
+      directions: {
+        up: 'вверх',
+        down: 'вниз',
+        left: 'влево',
+        right: 'вправо',
+      },
+      edgeDescription:
+        'Нажмите Enter или Пробел, чтобы выбрать кабель. Delete удаляет кабель, Escape отменяет.',
+      edgeLabel: '{{source}} CH {{sourceChannel}} → {{target}} CH {{targetChannel}}',
+      meterChannel: '{{name}} канал {{channel}}',
+    },
     toggleGain: 'Усиление −6 дБ',
     apply: 'Применить',
     nodes: {

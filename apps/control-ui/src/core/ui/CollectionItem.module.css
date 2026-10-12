@@ -15,7 +15,7 @@
   border: 0;
   border-radius: var(--control-radius);
   background: transparent;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: var(--font-control);
   font-weight: 500;
   text-align: left;
@@ -25,11 +25,11 @@
 
 .select[aria-current="page"],
 .row:hover .select {
-  background: var(--surface-raised);
+  background: var(--surface-hover);
 }
 
 .select[aria-current="page"] {
-  color: var(--text);
+  color: var(--text-primary);
 }
 
 .remove {
@@ -43,7 +43,7 @@
   border: 0;
   border-radius: var(--control-radius);
   background: transparent;
-  color: var(--muted);
+  color: var(--text-muted);
   opacity: 0;
 }
 
@@ -53,7 +53,7 @@
 }
 .remove:hover {
   background: var(--surface);
-  color: var(--text);
+  color: var(--text-primary);
 }
 .remove:disabled {
   opacity: var(--control-disabled-opacity);

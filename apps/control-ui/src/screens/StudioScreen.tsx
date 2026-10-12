@@ -9,6 +9,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import type { ControlPort, RuntimeGraphDocument } from '../core/control-port/types';
 import { usePaidFeatures } from '../core/licensing/FeatureAccess';
+import { shellBreakpoints } from '../core/theme/tokens';
 import { ActionButton } from '../core/ui/ActionButton';
 import { ApplicationStatusBar } from '../core/ui/ApplicationStatusBar';
 import { ProductHeading } from '../core/ui/BrandIdentity';
@@ -239,9 +240,44 @@ function StudioFrame({
   applicationActions?: ReactNode;
 }) {
   const { t } = useTranslation();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const overlay = useOverlaySidebar();
+  const [sidebarOpen, setSidebarOpen] = useState(() => !overlay);
+  const shell = useRef<HTMLElement>(null);
+  const pendingSelection = useRef<string | null>(null);
+  const returnFocus = useRef(false);
+  // Closing while focus is inside the sidebar hands focus to the visible toggle.
+  const closeSidebar = useCallback(() => {
+    const sidebarElement = shell.current?.querySelector('#graph-sidebar');
+    returnFocus.current = Boolean(sidebarElement?.contains(document.activeElement));
+    setSidebarOpen(false);
+  }, []);
+  // Entering the overlay width closes the sidebar so it never starts over the canvas.
+  useEffect(() => {
+    if (overlay) closeSidebar();
+  }, [overlay, closeSidebar]);
+  // An overlay closes only once the chosen graph is active. A request that settles without
+  // activating it (failure, or another graph became active) ends the intent, so the
+  // sidebar and its error stay visible and a later refresh cannot reuse it.
+  const activeId = sidebar.collection.catalog?.activeId;
+  const catalogBusy = sidebar.collection.busy;
+  const catalogError = sidebar.collection.error;
+  useEffect(() => {
+    const pending = pendingSelection.current;
+    if (pending === null) return;
+    if (pending === activeId) {
+      pendingSelection.current = null;
+      if (overlay) closeSidebar();
+    } else if (!catalogBusy || catalogError) {
+      pendingSelection.current = null;
+    }
+  }, [activeId, catalogBusy, catalogError, overlay, closeSidebar]);
+  useEffect(() => {
+    if (sidebarOpen || !returnFocus.current) return;
+    returnFocus.current = false;
+    shell.current?.querySelector<HTMLElement>('[aria-controls="graph-sidebar"]')?.focus();
+  }, [sidebarOpen]);
   return (
-    <main className={styles.shell} data-sidebar-open={sidebarOpen}>
+    <main ref={shell} className={styles.shell} data-sidebar-open={sidebarOpen}>
       <header className={styles.applicationHeader}>
         <ProductHeading />
         <span className={styles.applicationActions}>
@@ -249,7 +285,14 @@ function StudioFrame({
           {applicationActions}
         </span>
       </header>
-      <GraphSidebar hidden={!sidebarOpen} {...sidebar} />
+      <GraphSidebar
+        hidden={!sidebarOpen}
+        {...sidebar}
+        onSelect={(id) => {
+          pendingSelection.current = id;
+          sidebar.onSelect(id);
+        }}
+      />
       <SidebarToggle
         label={t('studio.graphs')}
         opened={sidebarOpen}
@@ -268,16 +311,17 @@ function StudioStatusBar({
   applicationInfo?: ReactNode;
 }) {
   return (
-    <ApplicationStatusBar
-      className={styles.statusBar}
-      information={applicationInfo}
-      controls={
-        <>
-          <AudioSessionNotices status={props.status} />
-          <AudioPauseControl {...props} />
-        </>
-      }
-    />
+    <div className={styles.statusBar}>
+      <ApplicationStatusBar
+        information={applicationInfo}
+        controls={
+          <>
+            <AudioSessionNotices status={props.status} />
+            <AudioPauseControl {...props} />
+          </>
+        }
+      />
+    </div>
   );
 }
 
@@ -381,4 +425,19 @@ function driverInstallNotice(session: DriverSession | undefined, onInstall?: () 
 
 function bufferRoutingActions(action: ReturnType<typeof useDeviceBufferControl>, busy: boolean) {
   return { ...action, enabled: action.enabled && !busy };
+}
+
+const overlayQuery = `(max-width: ${shellBreakpoints.overlaySidebar}px)`;
+
+/** Whether the viewport is narrow enough for the sidebar to overlay the canvas. */
+function useOverlaySidebar() {
+  const [overlay, setOverlay] = useState(() => window.matchMedia(overlayQuery).matches);
+  useEffect(() => {
+    const query = window.matchMedia(overlayQuery);
+    const update = () => setOverlay(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  return overlay;
 }

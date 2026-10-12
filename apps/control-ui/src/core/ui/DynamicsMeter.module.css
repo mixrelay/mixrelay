@@ -1,7 +1,7 @@
 .root {
   padding-block: var(--space-1);
   padding-inline: var(--node-inset);
-  color: var(--text);
+  color: var(--text-primary);
 }
 .banks {
   display: flex;
@@ -60,7 +60,7 @@
   position: absolute;
   inset-block: calc(-1 * var(--space-half));
   width: var(--border-width);
-  background: var(--text);
+  background: var(--text-primary);
 }
 .threshold::before {
   content: "";
@@ -69,7 +69,7 @@
   left: calc(-1 * var(--space-half));
   width: calc(2 * var(--space-half) + var(--border-width));
   height: var(--space-half);
-  background: var(--text);
+  background: var(--text-primary);
   clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
 .channelName {

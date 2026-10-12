@@ -33,6 +33,7 @@ export function ConfirmationDialog(props: ConfirmationDialogProps) {
           tone="critical"
           emphasis="strong"
           disabled={props.disabled}
+          loading={props.busy}
           onClick={props.onConfirm}
         >
           {props.title}

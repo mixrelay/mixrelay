@@ -13,7 +13,7 @@
 .headerActions {
   flex-shrink: 0;
   padding-left: var(--space-2);
-  border-left: 1px solid var(--line);
+  border-left: 1px solid var(--border-default);
 }
 
 .canvas {
@@ -26,7 +26,7 @@
   min-height: 0;
   flex: 1;
   place-items: center;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 .scanDiagnostics {
@@ -41,11 +41,11 @@
 }
 
 .scanDiagnostics li + li {
-  margin-top: 12px;
+  margin-top: var(--space-3);
 }
 
 .scanDiagnostics p {
-  margin: 4px 0;
+  margin: var(--space-1) 0;
 }
 
 .scanTechnicalDetails pre {

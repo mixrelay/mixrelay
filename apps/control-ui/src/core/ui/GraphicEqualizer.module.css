@@ -81,7 +81,7 @@
 }
 .summaryRow[data-selected="true"] {
   background: var(--surface-active);
-  color: var(--text);
+  color: var(--text-primary);
 }
 .bandSelect {
   display: flex;

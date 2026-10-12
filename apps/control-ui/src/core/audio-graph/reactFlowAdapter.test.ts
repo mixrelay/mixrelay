@@ -10,6 +10,8 @@ import {
 } from './model';
 import {
   applyAudioNodeLayers,
+  audioGraphEdgeEndpoints,
+  namedAudioPorts,
   reconcileAudioFlowEdges,
   reconcileAudioFlowNodes,
 } from './reactFlowAdapter';
@@ -196,4 +198,120 @@ it('uses instance display names in graph accessibility labels without changing s
     nodes: graph.nodes.map((node) => ({ ...node, displayName: undefined })),
   });
   expect(restored[0]?.ariaLabel).toBe('Firefox');
+});
+
+it('names each cable by display name and channel, and relabels it when a node is renamed', () => {
+  const graph: AudioGraphModel = {
+    ...largeGraph(2),
+    nodes: largeGraph(2).nodes.map((node, index) =>
+      index === 0
+        ? { ...node, outputPorts: [{ id: 'out', label: 'Output', channelIndex: 1 }] }
+        : node,
+    ),
+  };
+  const label = (value: {
+    source: string;
+    sourceChannel: number;
+    target: string;
+    targetChannel: number;
+  }) => `${value.source} ${value.sourceChannel} > ${value.target} ${value.targetChannel}`;
+  const edges = reconcileAudioFlowEdges([], graph, label);
+  expect(edges[0]?.ariaLabel).toBe('0 2 > 1 1');
+  expect(reconcileAudioFlowEdges(edges, graph, label)).toBe(edges);
+
+  const renamed: AudioGraphModel = {
+    ...graph,
+    nodes: graph.nodes.map((node, index) => (index === 1 ? { ...node, displayName: 'Mix' } : node)),
+  };
+  const relabeled = reconcileAudioFlowEdges(edges, renamed, label);
+  expect(relabeled[0]).not.toBe(edges[0]);
+  expect(relabeled[0]?.ariaLabel).toBe('0 2 > Mix 1');
+  expect(reconcileAudioFlowEdges([], graph)[0]?.ariaLabel).toBeUndefined();
+
+  const [edge] = graph.edges;
+  assert(edge);
+  const dangling: AudioGraphModel = {
+    ...graph,
+    edges: [
+      { ...edge, id: 'missing-port', sourcePortId: 'gone' },
+      { ...edge, id: 'missing-node', targetNodeId: 'gone' },
+    ],
+  };
+  // React Flow keeps its own fallback when an endpoint is not in the model.
+  expect(reconcileAudioFlowEdges([], dangling, label).map((flow) => flow.ariaLabel)).toEqual([
+    undefined,
+    undefined,
+  ]);
+});
+
+it('adds the port name only where a channel number repeats across buses', () => {
+  const base = largeGraph(2);
+  const [source, mixer] = base.nodes;
+  assert(source && mixer);
+  const graph: AudioGraphModel = {
+    ...base,
+    nodes: [
+      source,
+      {
+        ...mixer,
+        inputPorts: [
+          { id: 'a::0', label: 'Mixer input 1 1', channelIndex: 0 },
+          { id: 'b::0', label: 'Mixer input 2 1', channelIndex: 0 },
+        ],
+      },
+    ],
+    edges: [
+      {
+        id: 'to-a',
+        sourceNodeId: 'node-0',
+        sourcePortId: 'out',
+        targetNodeId: 'node-1',
+        targetPortId: 'a::0',
+      },
+      {
+        id: 'to-b',
+        sourceNodeId: 'node-0',
+        sourcePortId: 'out',
+        targetNodeId: 'node-1',
+        targetPortId: 'b::0',
+      },
+    ],
+  };
+  const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
+  expect(graph.edges.map((edge) => audioGraphEdgeEndpoints(nodesById, edge))).toEqual([
+    { source: '0', sourceChannel: 1, target: '1', targetChannel: 1, targetPort: 'Mixer input 1 1' },
+    { source: '0', sourceChannel: 1, target: '1', targetChannel: 1, targetPort: 'Mixer input 2 1' },
+  ]);
+});
+
+it('numbers ports that repeat both a bus name and a channel so every name is unique', () => {
+  expect(
+    namedAudioPorts([
+      { id: 'a', label: 'Main', channelIndex: 0 },
+      { id: 'b', label: 'Main', channelIndex: 1 },
+      { id: 'c', label: 'Main', channelIndex: 0 },
+      { id: 'd', label: 'Sidechain', channelIndex: 0 },
+      { id: 'e', label: '' },
+      { id: 'f', label: '' },
+    ]).map(({ name, channel }) => [name, channel]),
+  ).toEqual([
+    ['Main (1)', 1],
+    ['Main', 2],
+    ['Main (2)', 1],
+    ['Sidechain', 1],
+    ['', 5],
+    ['', 6],
+  ]);
+});
+
+it('keeps generated port ordinals unique and stable when ports reorder', () => {
+  const ports = [
+    { id: 'b', label: 'Main', channelIndex: 0 },
+    { id: 'a', label: 'Main', channelIndex: 0 },
+    { id: 'c', label: 'Main (2)', channelIndex: 0 },
+  ];
+  const names = (list: typeof ports) =>
+    Object.fromEntries(namedAudioPorts(list).map(({ port, name }) => [port.id, name]));
+  expect(names(ports)).toEqual({ a: 'Main (1)', b: 'Main (3)', c: 'Main (2)' });
+  expect(names([...ports].reverse())).toEqual(names(ports));
 });

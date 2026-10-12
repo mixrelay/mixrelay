@@ -6,6 +6,7 @@ const meta = {
   component: Tooltip,
   argTypes: {
     position: { control: 'select', options: ['top', 'bottom', 'left', 'right'] },
+    kind: { control: 'inline-radio', options: ['label', 'readout'] },
     children: { control: false },
   },
   args: {
@@ -13,6 +14,7 @@ const meta = {
     position: 'top',
     delay: 350,
     offset: 4,
+    kind: 'label',
     nonInteractive: false,
     children: <button type="button">설명 대상</button>,
   },
@@ -52,3 +54,18 @@ export const NonInteractive: Story = {
   args: { nonInteractive: true, children: <span>읽기 전용 설명 대상</span> },
 };
 export const Right: Story = { args: { position: 'right' } };
+export const Readout: Story = {
+  args: {
+    kind: 'readout',
+    label: 'CH 3',
+    position: 'right',
+    offset: 7,
+    opened: true,
+    nonInteractive: true,
+    children: (
+      <span role="img" aria-label="Main 3, CH 3">
+        ●
+      </span>
+    ),
+  },
+};

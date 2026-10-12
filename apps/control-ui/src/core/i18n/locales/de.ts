@@ -378,6 +378,35 @@ export const de = {
     description:
       'Leiten Sie Audio, das macOS-Anwendungen an MixRelay senden, zum Geräteeingang für OBS und DAWs zurück.',
     canvasLabel: 'MixRelay-Routing-Graph für virtuelle Ein-/Ausgänge',
+    ports: {
+      application: 'App-Audio',
+      deviceInput: 'Geräteeingang',
+      deviceOutput: 'Geräteausgang',
+      effectInput: '{{name}}-Eingang',
+      effectOutput: '{{name}}-Ausgang',
+      gainInput: 'Gain-Eingang',
+      gainOutput: 'Gain-Ausgang',
+      mixerInput: 'Mixer-Eingang',
+      mixerOutput: 'Mixer-Ausgang',
+    },
+    a11y: {
+      nodeDescription:
+        'Drücken Sie Eingabe oder Leertaste, um einen Knoten auszuwählen. Verschieben Sie ihn dann mit den Pfeiltasten, mit Umschalt in größeren Schritten. Entf löscht ihn, Escape bricht ab.',
+      nodeDescriptionStatic:
+        'Drücken Sie Eingabe oder Leertaste, um einen Knoten auszuwählen. Entf löscht ihn, Escape bricht ab.',
+      nodeMoved:
+        'Ausgewählten Knoten nach {{direction}} verschoben. Neue Position: x {{x}}, y {{y}}.',
+      directions: {
+        up: 'oben',
+        down: 'unten',
+        left: 'links',
+        right: 'rechts',
+      },
+      edgeDescription:
+        'Drücken Sie Eingabe oder Leertaste, um ein Kabel auszuwählen. Entf löscht es, Escape bricht ab.',
+      edgeLabel: '{{source}} CH {{sourceChannel}} → {{target}} CH {{targetChannel}}',
+      meterChannel: '{{name}} Kanal {{channel}}',
+    },
     toggleGain: '−6 dB Verstärkung',
     apply: 'Anwenden',
     nodes: {

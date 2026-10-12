@@ -6,7 +6,7 @@
 }
 .label {
   margin: 0;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: var(--font-label);
 }
 .wrapper {
@@ -21,7 +21,7 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: var(--font-control);
   text-overflow: ellipsis;
   min-width: 0;

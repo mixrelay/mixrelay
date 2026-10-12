@@ -370,6 +370,35 @@ export const it = {
     description:
       'Rimanda l’audio inviato a MixRelay dalle applicazioni macOS all’ingresso del dispositivo usato da OBS e DAW.',
     canvasLabel: 'Grafo di instradamento I/O virtuale MixRelay',
+    ports: {
+      application: "Audio dell'app",
+      deviceInput: 'Ingresso dispositivo',
+      deviceOutput: 'Uscita dispositivo',
+      effectInput: 'Ingresso {{name}}',
+      effectOutput: 'Uscita {{name}}',
+      gainInput: 'Ingresso guadagno',
+      gainOutput: 'Uscita guadagno',
+      mixerInput: 'Ingresso mixer',
+      mixerOutput: 'Uscita mixer',
+    },
+    a11y: {
+      nodeDescription:
+        'Premi Invio o Spazio per selezionare un nodo. Poi spostalo con le frecce; tieni premuto Maiusc per passi più ampi. Premi Canc per eliminarlo o Esc per annullare.',
+      nodeDescriptionStatic:
+        'Premi Invio o Spazio per selezionare un nodo. Premi Canc per eliminarlo o Esc per annullare.',
+      nodeMoved:
+        'Nodo selezionato spostato verso {{direction}}. Nuova posizione: x {{x}}, y {{y}}.',
+      directions: {
+        up: "l'alto",
+        down: 'il basso',
+        left: 'sinistra',
+        right: 'destra',
+      },
+      edgeDescription:
+        'Premi Invio o Spazio per selezionare un cavo. Premi Canc per eliminarlo o Esc per annullare.',
+      edgeLabel: '{{source}} CH {{sourceChannel}} → {{target}} CH {{targetChannel}}',
+      meterChannel: '{{name}} canale {{channel}}',
+    },
     toggleGain: 'Guadagno −6 dB',
     apply: 'Applica',
     nodes: {

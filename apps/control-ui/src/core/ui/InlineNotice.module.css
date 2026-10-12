@@ -43,14 +43,14 @@
   color: var(--notice-warning-text);
 }
 .root[data-tone="accent"] {
-  border-color: var(--accent);
+  border-color: var(--status-accent);
   background: var(--status-accent-surface);
-  color: var(--accent);
+  color: var(--status-accent);
 }
 .root[data-tone="positive"] {
-  border-color: var(--positive);
+  border-color: var(--status-positive);
   background: var(--status-positive-surface);
-  color: var(--positive);
+  color: var(--status-positive);
 }
 .root[data-tone="critical"] {
   border-color: var(--feedback-critical-border);

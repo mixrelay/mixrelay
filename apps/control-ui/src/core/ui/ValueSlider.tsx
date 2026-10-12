@@ -1,6 +1,7 @@
-import { useId, useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { Slider, SliderThumb, SliderTrack } from 'react-aria-components';
 import styles from '../theme/ComponentTheme.module.css';
+import { clampParameter, isLogarithmicRange, steppedParameterKey } from './parameterValue';
 
 /** Core slider behavior and hit area, shared by levels and node parameters. */
 export function ValueSlider({
@@ -24,9 +25,8 @@ export function ValueSlider({
   scale?: 'linear' | 'logarithmic';
   onChange: (value: number) => void;
 }) {
-  const valueDescriptionId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
-  const logarithmic = scale === 'logarithmic' && min > 0 && max > min;
+  const logarithmic = isLogarithmicRange({ minimum: min, maximum: max, step, scale });
   // The maximum derivative defines enough positions to preserve the public parameter step.
   const resolution = logarithmic ? Math.ceil((Math.log(max / min) * max) / step) : 1;
   const toSlider = (next: number) =>
@@ -54,11 +54,11 @@ export function ValueSlider({
     <div
       onKeyDownCapture={(event) => {
         if (!logarithmic || disabled) return;
-        const next = logarithmicKeyValue(event.key, value, step, min, max);
+        const next = steppedParameterKey(event.key, value, { minimum: min, maximum: max, step });
         if (next === undefined) return;
         event.preventDefault();
         event.stopPropagation();
-        onChange(Math.max(min, Math.min(max, next)));
+        onChange(clampParameter(next, { minimum: min, maximum: max, step }));
       }}
     >
       <Slider
@@ -78,34 +78,12 @@ export function ValueSlider({
                 className={styles.sliderBar}
                 style={{ width: `${state.getThumbPercent(0) * 100}%` }}
               />
-              <SliderThumb
-                inputRef={inputRef}
-                className={styles.sliderThumb}
-                aria-describedby={valueText ? valueDescriptionId : undefined}
-              />
+              {/* valueText is the announced value (aria-valuetext), not a second description. */}
+              <SliderThumb inputRef={inputRef} className={styles.sliderThumb} />
             </>
           )}
         </SliderTrack>
-        {valueText ? (
-          <span id={valueDescriptionId} hidden>
-            {valueText}
-          </span>
-        ) : null}
       </Slider>
     </div>
   );
-}
-
-function logarithmicKeyValue(key: string, value: number, step: number, min: number, max: number) {
-  const changes: Record<string, number> = {
-    ArrowUp: value + step,
-    ArrowRight: value + step,
-    ArrowDown: value - step,
-    ArrowLeft: value - step,
-    PageUp: value + step * 10,
-    PageDown: value - step * 10,
-    Home: min,
-    End: max,
-  };
-  return changes[key];
 }

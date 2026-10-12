@@ -361,6 +361,34 @@ export const en = {
     description:
       'Route audio written to MixRelay by macOS applications back to the device input used by OBS and DAWs.',
     canvasLabel: 'MixRelay virtual I/O routing graph',
+    ports: {
+      application: 'Application audio',
+      deviceInput: 'Device input',
+      deviceOutput: 'Device output',
+      effectInput: '{{name}} input',
+      effectOutput: '{{name}} output',
+      gainInput: 'Gain input',
+      gainOutput: 'Gain output',
+      mixerInput: 'Mixer input',
+      mixerOutput: 'Mixer output',
+    },
+    a11y: {
+      nodeDescription:
+        'Press Enter or Space to select a node. Then use the arrow keys to move it, holding Shift for larger steps. Press Delete to remove it or Escape to cancel.',
+      nodeDescriptionStatic:
+        'Press Enter or Space to select a node. Press Delete to remove it or Escape to cancel.',
+      nodeMoved: 'Moved the selected node {{direction}}. New position: x {{x}}, y {{y}}.',
+      directions: {
+        up: 'up',
+        down: 'down',
+        left: 'left',
+        right: 'right',
+      },
+      edgeDescription:
+        'Press Enter or Space to select a cable. Press Delete to remove it or Escape to cancel.',
+      edgeLabel: '{{source}} CH {{sourceChannel}} → {{target}} CH {{targetChannel}}',
+      meterChannel: '{{name}} channel {{channel}}',
+    },
     toggleGain: '−6 dB gain',
     apply: 'Apply',
     nodes: {

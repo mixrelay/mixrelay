@@ -3,10 +3,10 @@
   padding-block: var(--section-padding);
 }
 .root[data-divider="before"] {
-  border-top: var(--border-width) solid var(--line);
+  border-top: var(--border-width) solid var(--border-default);
 }
 .root[data-divider="after"] {
-  border-bottom: var(--border-width) solid var(--line);
+  border-bottom: var(--border-width) solid var(--border-default);
 }
 .title {
   margin: 0;
@@ -14,6 +14,6 @@
   font-size: var(--section-title-size);
   font-weight: var(--font-weight-medium);
   line-height: var(--line-height-body);
-  color: var(--text);
+  color: var(--text-primary);
   overflow-wrap: anywhere;
 }

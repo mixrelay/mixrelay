@@ -1,15 +1,14 @@
-import {
-  type KeyboardEvent,
-  type PointerEvent,
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Input, NumberField } from 'react-aria-components';
 import styles from './NumericValueControl.module.css';
+import {
+  clampParameter,
+  isLogarithmicRange,
+  type ParameterRange,
+  snapParameter,
+  steppedParameterKey,
+  useCapturedPointerDrag,
+} from './parameterValue';
 
 export interface NumericValueControlProps {
   label: string;
@@ -24,84 +23,41 @@ export interface NumericValueControlProps {
   onChange: (value: number) => void;
   onActivate?: () => void;
 }
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-function normalize(value: number, props: NumericValueControlProps) {
-  return clamp(
-    Number(
-      (props.minimum + Math.round((value - props.minimum) / props.step) * props.step).toPrecision(
-        12,
-      ),
-    ),
-    props.minimum,
-    props.maximum,
-  );
-}
-function keyboardValue(event: KeyboardEvent, props: NumericValueControlProps) {
-  const amount = props.step;
-  const changes: Record<string, number> = {
-    ArrowUp: props.value + amount,
-    ArrowDown: props.value - amount,
-    PageUp: props.value + props.step * 10,
-    PageDown: props.value - props.step * 10,
-    Home: props.minimum,
-    End: props.maximum,
+function rangeOf(props: NumericValueControlProps): ParameterRange {
+  return {
+    minimum: props.minimum,
+    maximum: props.maximum,
+    step: props.step,
+    scale: props.scale,
   };
-  return changes[event.key];
+}
+function normalize(value: number, props: NumericValueControlProps) {
+  return snapParameter(value, rangeOf(props));
 }
 function useValueDrag(props: NumericValueControlProps) {
-  const drag = useRef<{
-    element: HTMLDivElement;
-    pointer: number;
-    y: number;
-    value: number;
-  } | null>(null);
-  const finish = useCallback(() => {
-    const active = drag.current;
-    drag.current = null;
-    if (active?.element.hasPointerCapture(active.pointer))
-      active.element.releasePointerCapture(active.pointer);
-  }, []);
-  useEffect(() => {
-    if (props.disabled) finish();
-    return finish;
-  }, [props.disabled, finish]);
-  const start = (event: PointerEvent<HTMLDivElement>) => {
-    if (props.disabled || event.button !== 0 || drag.current) return;
-    event.currentTarget.querySelector('input')?.focus();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = {
-      element: event.currentTarget,
-      pointer: event.pointerId,
-      y: event.clientY,
-      value: props.value,
-    };
-  };
-  const move = (event: PointerEvent<HTMLDivElement>) => {
-    const active = drag.current;
-    if (!active || active.pointer !== event.pointerId || active.y === event.clientY) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const pixels = active.y - event.clientY;
-    active.value = clamp(
-      props.scale === 'logarithmic' && props.minimum > 0 && !event.shiftKey
-        ? active.value * (props.maximum / props.minimum) ** (pixels / 240)
-        : active.value + pixels * props.step * (event.shiftKey ? 0.1 : 1),
-      props.minimum,
-      props.maximum,
-    );
-    active.y = event.clientY;
-    props.onChange(normalize(active.value, props));
-  };
-  const end = (event: PointerEvent<HTMLDivElement>) => {
-    if (drag.current?.pointer === event.pointerId) finish();
-  };
-  return {
-    onPointerDown: start,
-    onPointerMove: move,
-    onPointerUp: end,
-    onPointerCancel: end,
-    onLostPointerCapture: finish,
-  };
+  return useCapturedPointerDrag({
+    disabled: props.disabled,
+    begin(event) {
+      event.currentTarget.querySelector('input')?.focus();
+      return { y: event.clientY, value: props.value };
+    },
+    update(active, event) {
+      if (active.y === event.clientY) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const pixels = active.y - event.clientY;
+      // Log ranges move by a continuous ratio (240px per decade span); Shift and linear
+      // ranges move in public steps, Shift at one tenth. Only the reported value snaps.
+      active.value = clampParameter(
+        isLogarithmicRange(rangeOf(props)) && !event.shiftKey
+          ? active.value * (props.maximum / props.minimum) ** (pixels / 240)
+          : active.value + pixels * props.step * (event.shiftKey ? 0.1 : 1),
+        rangeOf(props),
+      );
+      active.y = event.clientY;
+      props.onChange(normalize(active.value, props));
+    },
+  });
 }
 function useValueWheel(props: NumericValueControlProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -156,7 +112,7 @@ export function NumericValueControl(props: NumericValueControlProps) {
       {...drag}
       onKeyDownCapture={(event) => {
         if (props.disabled) return;
-        const next = keyboardValue(event, props);
+        const next = steppedParameterKey(event.key, props.value, rangeOf(props), 'vertical');
         if (next === undefined) return;
         event.preventDefault();
         event.stopPropagation();

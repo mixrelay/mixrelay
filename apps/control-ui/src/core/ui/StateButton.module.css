@@ -7,7 +7,7 @@
   border: 0;
   border-radius: var(--control-radius);
   background: var(--control-background);
-  color: var(--muted);
+  color: var(--text-muted);
   font: inherit;
   font-size: var(--font-control);
   font-weight: var(--font-weight-medium);
@@ -52,23 +52,23 @@
 }
 
 .button[data-tone="positive"] .icon {
-  color: var(--positive);
+  color: var(--status-positive);
 }
 .button[data-tone="accent"] .icon {
-  color: var(--accent);
+  color: var(--status-accent);
 }
 
 .button[data-tone="warning"] .icon {
-  color: var(--amber);
+  color: var(--status-warning);
 }
 
 .button[data-tone="critical"] .icon {
-  color: var(--red);
+  color: var(--status-danger);
 }
 
 .button:hover:not(:disabled) {
   background: var(--control-background-hover);
-  color: var(--text);
+  color: var(--text-primary);
 }
 
 .button:active:not(:disabled) {

@@ -3,7 +3,7 @@
   width: 200px;
   min-width: 200px;
   padding: var(--space-1);
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--border-strong);
   border-radius: var(--control-radius);
   background: var(--surface-floating);
   box-shadow: var(--floating-shadow);
@@ -111,16 +111,16 @@
 .item[data-focused],
 .item[data-hovered] {
   background: var(--menu-background-hover);
-  color: var(--text);
+  color: var(--text-primary);
 }
 
 .item[data-disabled] {
-  color: var(--muted);
+  color: var(--text-muted);
   opacity: 0.45;
   cursor: default;
 }
 .item[data-destructive]:not([data-disabled]) {
-  color: var(--red);
+  color: var(--status-danger);
 }
 .item[data-destructive]:not([data-disabled]):hover {
   background: var(--menu-destructive-background-hover);
@@ -135,7 +135,7 @@
   border: 0;
   border-radius: var(--control-radius);
   background: transparent;
-  color: var(--text);
+  color: var(--text-primary);
   font-size: var(--font-control);
 }
 .trigger[data-hovered] {

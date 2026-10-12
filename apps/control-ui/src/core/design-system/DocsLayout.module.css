@@ -1,8 +1,8 @@
 .root {
   min-width: 0;
   padding: var(--space-4);
-  background: var(--bg);
-  color: var(--text);
+  background: var(--background);
+  color: var(--text-primary);
   font: var(--font-body) / var(--line-height-body) var(--font-sans);
   overflow-wrap: anywhere;
 }
@@ -13,8 +13,8 @@
   gap: var(--space-3);
   padding-block-end: var(--space-3);
   margin-block-end: var(--space-6);
-  border-bottom: var(--border-width) solid var(--line);
-  color: var(--muted);
+  border-bottom: var(--border-width) solid var(--border-default);
+  color: var(--text-muted);
   font-size: var(--font-label);
 }
 .root :is(h1, h2, h3, h4, p, li, th, td) {
@@ -47,7 +47,7 @@
 .root :is(th, td) {
   min-width: 96px;
   padding: var(--space-2);
-  border: var(--border-width) solid var(--line);
+  border: var(--border-width) solid var(--border-default);
   background: var(--surface);
   text-align: start;
   vertical-align: top;
@@ -56,7 +56,7 @@
   font-weight: var(--font-weight-medium);
 }
 .root a {
-  color: var(--text);
+  color: var(--text-primary);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -66,7 +66,7 @@
 }
 .root :is(code, pre) {
   font: var(--font-control) / var(--line-height-body) var(--font-mono);
-  color: var(--text);
+  color: var(--text-primary);
   background: var(--surface-inset);
 }
 .root code {

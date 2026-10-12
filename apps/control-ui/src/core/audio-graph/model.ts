@@ -1,6 +1,6 @@
 import type { RuntimeGraphEdge } from '../control-port/types';
 import { nodeWidths } from '../theme/tokens';
-import type { EndpointControl } from '../ui/AudioNodeCard';
+import type { EndpointControl } from '../ui/AudioNodeEndpointOptions';
 import type { DynamicsMeterContract } from '../ui/DynamicsMeter';
 import type { GraphicEqualizerContract } from '../ui/GraphicEqualizer';
 import type { StatusTone } from '../ui/StatusBadge';

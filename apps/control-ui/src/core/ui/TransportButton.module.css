@@ -22,16 +22,16 @@
   color: var(--transport-record-text);
 }
 :root .root[data-tone="critical"] {
-  color: var(--red);
+  color: var(--status-danger);
 }
 :root .root[data-tone="warning"] {
-  color: var(--amber);
+  color: var(--status-warning);
 }
 :root .root[data-tone="positive"] {
-  color: var(--positive);
+  color: var(--status-positive);
 }
 :root .root[data-tone="accent"] {
-  color: var(--accent);
+  color: var(--status-accent);
 }
 :root .root:hover:not(:disabled) {
   border-color: var(--transport-border-hover);

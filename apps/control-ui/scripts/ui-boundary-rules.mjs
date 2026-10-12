@@ -2,7 +2,6 @@ import { parse } from '@babel/parser';
 import * as css from 'css-tree';
 
 const controls = new Set(['button', 'input', 'select', 'textarea', 'option']);
-const layoutComponents = new Set(['ApplicationStatusBar']);
 const stylingProps = new Set([
   'style',
   'styles',
@@ -11,15 +10,6 @@ const stylingProps = new Set([
   'unstyled',
   'renderRoot',
   'dangerouslySetInnerHTML',
-]);
-const placementProperties = new Set([
-  'grid-column',
-  'grid-row',
-  'grid-area',
-  'order',
-  'z-index',
-  'align-self',
-  'justify-self',
 ]);
 const libraryPattern = /^(?:@mantine\/|react-aria-components(?:$|\/)|@xyflow\/react(?:$|\/))/u;
 const colorPattern = /#[\da-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/iu;
@@ -166,7 +156,7 @@ function expandedAttributes(attributes, bindings, seen = new Set()) {
   return result;
 }
 
-function checkElement(node, imports, bindings, violations, layoutBindings) {
+function checkElement(node, imports, bindings, violations) {
   const name = node.name.name;
   const imported = imports.get(name);
   if (controls.has(name))
@@ -181,17 +171,14 @@ function checkElement(node, imports, bindings, violations, layoutBindings) {
   for (const attribute of expandedAttributes(node.attributes, bindings)) {
     if (attribute.type !== 'JSXAttribute') continue;
     checkAppearance(attribute, name, imported, violations);
-    if (attribute.name.name === 'className' && imported?.source.includes('/core/')) {
-      if (layoutComponents.has(imported.name))
-        recordLayout(attribute, imports, violations, layoutBindings);
-      else
-        issue(
-          violations,
-          attribute,
-          'override',
-          'Core component appearance cannot be replaced with a caller className.',
-        );
-    }
+    // Placement belongs to a consumer-owned wrapper element, never to a Core className.
+    if (attribute.name.name === 'className' && imported?.source.includes('/core/'))
+      issue(
+        violations,
+        attribute,
+        'override',
+        'Core component appearance cannot be replaced with a caller className.',
+      );
   }
 }
 
@@ -229,30 +216,10 @@ function checkAppearance(attribute, name, imported, violations) {
   }
 }
 
-function recordLayout(attribute, imports, violations, layoutBindings) {
-  const value = attribute.value?.expression;
-  const imported = imports.get(value?.object?.name);
-  if (
-    value?.type !== 'MemberExpression' ||
-    value.computed ||
-    !imported?.source.endsWith('.module.css')
-  ) {
-    issue(
-      violations,
-      attribute,
-      'layout',
-      'Core layout className must reference one local CSS module class.',
-    );
-    return;
-  }
-  layoutBindings.push({ source: imported.source, name: value.property.name });
-}
-
 export function inspectScript(filename, source) {
   const core = filename.startsWith('core/');
   const test = /\.test\.tsx?$/u.test(filename);
   const violations = [];
-  const layoutBindings = [];
   const ast = parse(source, { sourceType: 'module', plugins: ['typescript', 'jsx'] });
   const imports = new Map();
   const bindings = new Map();
@@ -290,9 +257,9 @@ export function inspectScript(filename, source) {
       issue(violations, node, 'color', 'Define color literals in core/theme/tokens.ts.');
     }
     if (!core && !test && node.type === 'JSXOpeningElement')
-      checkElement(node, imports, bindings, violations, layoutBindings);
+      checkElement(node, imports, bindings, violations);
   });
-  return { violations, layoutBindings };
+  return { violations };
 }
 
 function checkCoreApi(ast, imports, violations) {
@@ -392,51 +359,160 @@ function checkAttributeSelector(part, violations) {
   }
 }
 
+const namedColorExceptions = new Set(['transparent', 'currentcolor', 'inherit']);
+
+function hasNamedColor(value) {
+  let named = false;
+  css.walk(value, (part) => {
+    if (
+      part.type === 'Identifier' &&
+      !namedColorExceptions.has(part.name.toLowerCase()) &&
+      css.lexer.matchType('color', part.name).matched
+    )
+      named = true;
+  });
+  return named;
+}
+
+/** One entry per declaration rule; `consumer` rules apply outside Core only. */
+const declarationRules = [
+  {
+    consumer: true,
+    code: 'important',
+    message: 'Change the owning contract instead of adding !important.',
+    test: (node) => node.important,
+  },
+  {
+    consumer: true,
+    code: 'token',
+    message: 'Visual tokens are defined in Core; only --layout-* variables may be local.',
+    test: (node) => node.property.startsWith('--') && !node.property.startsWith('--layout-'),
+  },
+  {
+    code: 'token',
+    message: 'Layout variables cannot replace visual role tokens.',
+    test: (node, value) => !layoutProperties.has(node.property) && /var\(--layout-/u.test(value),
+  },
+  {
+    code: 'typography',
+    message: 'Use a typography role from core/theme/tokens.ts.',
+    test: (node, value) =>
+      ['font-size', 'font-family'].includes(node.property) &&
+      !/^(?:var\(--[\w-]+\)|inherit)$/u.test(value),
+  },
+  {
+    code: 'layer',
+    message: 'Stacking order uses a --layer-* token from tokens.ts.',
+    test: (node, value) =>
+      node.property === 'z-index' && !/^(?:auto|var\(--layer-[\w-]+\))$/u.test(value),
+  },
+  {
+    code: 'motion',
+    message: 'Durations use a --motion-* token so reduced motion applies.',
+    test: (node) => motionProperties.has(node.property) && hasLiteralDuration(node.value),
+  },
+  {
+    code: 'typography',
+    message: 'The font shorthand also takes size and family roles.',
+    test: (node) => node.property === 'font' && hasLiteralFontPart(node.value),
+  },
+  {
+    code: 'color',
+    message: 'Define color literals in core/theme/tokens.ts.',
+    test: (_node, value) => colorPattern.test(value),
+  },
+  {
+    code: 'color',
+    message: 'Named colors also belong in core/theme/tokens.ts.',
+    test: (node) => hasNamedColor(node.value),
+  },
+];
+
 function checkDeclaration(node, core, violations, atrule) {
   if (isCoreFontDescriptor(core, atrule)) return;
   const value = css.generate(node.value);
-  if (!core && node.important)
-    issue(
-      violations,
-      node,
-      'important',
-      'Change the owning contract instead of adding !important.',
-    );
-  if (!core && node.property.startsWith('--') && !node.property.startsWith('--layout-')) {
-    issue(
-      violations,
-      node,
-      'token',
-      'Visual tokens are defined in Core; only --layout-* variables may be local.',
-    );
-  }
-  if (!layoutProperties.has(node.property) && /var\(--layout-/u.test(value)) {
-    issue(violations, node, 'token', 'Layout variables cannot replace visual role tokens.');
-  }
-  if (
-    ['font-size', 'font-family'].includes(node.property) &&
-    !/^(?:var\(--[\w-]+\)|inherit)$/u.test(value)
-  ) {
-    issue(violations, node, 'typography', 'Use a typography role from core/theme/tokens.ts.');
-  }
-  if (colorPattern.test(value))
-    issue(violations, node, 'color', 'Define color literals in core/theme/tokens.ts.');
-  css.walk(node.value, (part) => {
-    if (
-      part.type === 'Identifier' &&
-      !['transparent', 'currentcolor', 'inherit'].includes(part.name.toLowerCase()) &&
-      css.lexer.matchType('color', part.name).matched
-    ) {
-      issue(violations, node, 'color', 'Named colors also belong in core/theme/tokens.ts.');
+  for (const rule of declarationRules)
+    if (!(rule.consumer && core) && rule.test(node, value))
+      issue(violations, node, rule.code, rule.message);
+}
+
+const fontKeywords = new Set([
+  'inherit',
+  'initial',
+  'unset',
+  'revert',
+  'revert-layer',
+  'normal',
+  'italic',
+  'oblique',
+  'bold',
+  'bolder',
+  'lighter',
+  'small-caps',
+]);
+
+const motionProperties = new Set([
+  'transition',
+  'transition-duration',
+  'transition-delay',
+  'animation',
+  'animation-duration',
+  'animation-delay',
+]);
+
+function hasLiteralDuration(value) {
+  let literal = false;
+  css.walk(value, (part) => {
+    if (part.type === 'Dimension' && /^m?s$/iu.test(part.unit)) literal = true;
+    // var() fallbacks arrive as Raw text; unparseable text is not a motion token either.
+    if (part.type === 'Raw' && part.value.trim()) {
+      try {
+        literal ||= hasLiteralDuration(
+          css.parse(part.value, { context: 'value', onParseError: fail }),
+        );
+      } catch {
+        literal = true;
+      }
     }
   });
+  return literal;
+}
+
+/** Fallback grammar is wider than a value; text the parser rejects is not a role either. */
+function hasLiteralFallback(raw) {
+  try {
+    return hasLiteralFontPart(css.parse(raw, { context: 'value', onParseError: fail }));
+  } catch {
+    return true;
+  }
+}
+
+function fail(error) {
+  throw error;
+}
+
+/** Weights and unitless line heights may be literal; sizes and families are roles.
+ * var() fallbacks arrive as Raw text and are parsed so they cannot hide literals. */
+function hasLiteralFontPart(value) {
+  let literal = false;
+  css.walk(value, (part) => {
+    if (part.type === 'Raw' && part.value.trim()) literal ||= hasLiteralFallback(part.value);
+    if (['Dimension', 'Percentage', 'String'].includes(part.type)) literal = true;
+    if (
+      part.type === 'Identifier' &&
+      !part.name.startsWith('--') &&
+      !fontKeywords.has(part.name.toLowerCase())
+    )
+      literal = true;
+  });
+  return literal;
 }
 
 function isCoreFontDescriptor(core, atrule) {
   return core && atrule?.name === 'font-face';
 }
 
-export function inspectCss(filename, source, layoutClasses = new Set()) {
+export function inspectCss(filename, source) {
   const core = filename.startsWith('core/');
   const violations = [];
   const ast = css.parse(source, { positions: true });
@@ -447,20 +523,207 @@ export function inspectCss(filename, source, layoutClasses = new Set()) {
     if (node.type !== 'Declaration') return;
     // Font-face descriptors declare the bundled family; they are not consumer typography.
     checkDeclaration(node, core, violations, this.atrule);
-    if (!core && this.rule?.prelude) {
-      let layout = false;
-      css.walk(this.rule.prelude, (part) => {
-        if (part.type === 'ClassSelector' && layoutClasses.has(part.name)) layout = true;
-      });
-      if (layout && !placementProperties.has(node.property)) {
-        issue(
-          violations,
-          node,
-          'layout',
-          'Core container className may only set outer placement; sizing and internal spacing belong in Core.',
-        );
-      }
-    }
   });
+  return violations;
+}
+
+// Variables that React Aria writes onto its overlay elements at runtime.
+const libraryVariables = new Set(['--trigger-width', '--available-height']);
+const variableReference = /var\(\s*(--[\w-]+)/gu;
+
+/** Raw CSS with comments and quoted strings blanked, scanned left to right so a quote
+ * inside a comment or a comment marker inside a string is read in its own context. */
+function strippedRaw(text) {
+  let output = '';
+  let index = 0;
+  while (index < text.length) {
+    if (text.startsWith('/*', index)) {
+      const end = text.indexOf('*/', index + 2);
+      index = end < 0 ? text.length : end + 2;
+      output += ' ';
+    } else if (text[index] === '"' || text[index] === "'") {
+      index = stringEnd(text, index);
+      output += ' ';
+    } else {
+      output += text[index];
+      index += 1;
+    }
+  }
+  return output;
+}
+
+function stringEnd(text, start) {
+  let index = start + 1;
+  while (index < text.length && text[index] !== text[start]) index += text[index] === '\\' ? 2 : 1;
+  return index + 1;
+}
+
+function varName(part) {
+  if (part.type !== 'Function' || part.name.toLowerCase() !== 'var') return undefined;
+  const name = part.children.first;
+  return name?.type === 'Identifier' && name.name.startsWith('--') ? name.name : undefined;
+}
+
+/** Custom-property values and var() fallbacks arrive as Raw text. Parsing drops comments
+ * and keeps strings as strings; token-stream blocks that are not a value
+ * (`--data: { color: var(--x) }`) are scanned without comments or strings. */
+function rawReferences(raw, line, referenced) {
+  try {
+    cssValueReferences(css.parse(raw, { context: 'value' }), line, referenced);
+  } catch {
+    for (const match of strippedRaw(raw).matchAll(variableReference))
+      referenced.push({ name: match[1], line });
+  }
+}
+
+function cssValueReferences(value, line, referenced) {
+  css.walk(value, (part) => {
+    const name = varName(part);
+    if (name) referenced.push({ name, line });
+    if (part.type === 'Raw' && part.value.trim()) rawReferences(part.value, line, referenced);
+  });
+}
+
+/** Custom properties a stylesheet defines (declarations and @property) and the
+ * var() names it reads, including names inside var() fallbacks. */
+function cssVariables(source) {
+  const defined = [];
+  const referenced = [];
+  const ast = css.parse(source, { positions: true, parseCustomProperty: false });
+  css.walk(ast, (node) => {
+    if (node.type === 'Declaration' && node.property.startsWith('--')) defined.push(node.property);
+    if (node.type === 'Atrule' && node.name === 'property' && node.prelude)
+      defined.push(css.generate(node.prelude).trim());
+    if (node.type === 'Declaration')
+      cssValueReferences(node.value, node.loc?.start.line ?? 1, referenced);
+  });
+  return { defined, referenced };
+}
+
+const members = new Set(['MemberExpression', 'OptionalMemberExpression']);
+
+function memberName(node) {
+  return node.computed ? staticKey(node.property) : node.property?.name;
+}
+
+/** The custom property named by `<…>.style.setProperty('--x', …)`, including computed and
+ * optional forms. setProperty on anything other than a style declaration defines nothing. */
+function styleSetProperty(node) {
+  if (node.type !== 'CallExpression' && node.type !== 'OptionalCallExpression') return undefined;
+  const callee = node.callee;
+  if (!members.has(callee.type) || memberName(callee) !== 'setProperty') return undefined;
+  const target = callee.object;
+  const style = members.has(target.type)
+    ? memberName(target) === 'style'
+    : target.type === 'Identifier' && target.name === 'style';
+  return style ? staticKey(node.arguments[0]) : undefined;
+}
+
+function staticKey(node) {
+  if (node?.type === 'StringLiteral') return node.value;
+  if (node?.type === 'TemplateLiteral' && node.expressions.length === 0)
+    return node.quasis[0]?.value.cooked;
+  return undefined;
+}
+
+function literalTexts(node) {
+  if (node.type === 'StringLiteral') return [node.value];
+  if (node.type === 'TemplateLiteral') return node.quasis.map((quasi) => quasi.value.cooked ?? '');
+  return [];
+}
+
+/** Inline-style keys and style.setProperty() names define variables; var() inside string
+ * or template text references them. getPropertyValue() reads and defines nothing. */
+function scriptVariables(source) {
+  const defined = [];
+  const referenced = [];
+  const ast = parse(source, { sourceType: 'module', plugins: ['typescript', 'jsx'] });
+  visit(ast, (node) => {
+    if (node.type === 'ObjectProperty') {
+      const key = staticKey(node.key);
+      if (key?.startsWith('--')) defined.push(key);
+    }
+    const property = styleSetProperty(node);
+    if (property?.startsWith('--')) defined.push(property);
+    for (const text of literalTexts(node))
+      for (const match of text.matchAll(variableReference))
+        referenced.push({ name: match[1], line: node.loc?.start.line ?? 1 });
+  });
+  return { defined, referenced };
+}
+
+/** Every var(--name) used by product code must be defined by tokens, a stylesheet,
+ * @property or an inline style. Removed aliases and misspelled roles therefore fail
+ * instead of falling back silently. Tests are excluded as both sources and definitions. */
+export function inspectVariableReferences(files) {
+  const product = files.filter(({ filename }) => !/\.(test|spec)\.[cm]?[jt]sx?$/u.test(filename));
+  const scanned = product.map(({ filename, source }) => ({
+    filename,
+    ...(filename.endsWith('.css') ? cssVariables(source) : scriptVariables(source)),
+  }));
+  const defined = new Set(libraryVariables);
+  for (const file of scanned) for (const name of file.defined) defined.add(name);
+  const violations = [];
+  for (const { filename, referenced } of scanned)
+    for (const { name, line } of referenced)
+      if (!defined.has(name))
+        violations.push({
+          filename,
+          line,
+          code: 'token',
+          message: `${name} is not defined by tokens, a stylesheet or an inline style.`,
+        });
+  return violations;
+}
+
+// Screen owners and their module basenames; a path matches only that exact module.
+const screenModules = ['App', 'StudioScreen', 'RoutingWorkspace'];
+
+function screenModule(source) {
+  return screenModules.some((name) => new RegExp(`(?:^|/)${name}$`, 'u').test(source));
+}
+
+/** Only a bare side-effect import is guaranteed to execute the module: unused value
+ * imports may be dropped by the transform, and type imports are always erased. */
+function sideEffectImport(statement) {
+  return statement.importKind !== 'type' && statement.specifiers.length === 0;
+}
+
+function rendersScreen(statement) {
+  if (!screenModule(statement.source.value) || statement.importKind === 'type') return false;
+  return statement.specifiers.some(
+    (specifier) =>
+      specifier.importKind !== 'type' &&
+      (specifier.type === 'ImportNamespaceSpecifier' ||
+        screenModules.includes(specifier.imported?.name)),
+  );
+}
+
+/** A test that renders a whole screen (App, StudioScreen, RoutingWorkspace) imports
+ * test-support/integration, which owns the integration-test timeout. Unit tests keep
+ * the default, so a screen-level test cannot silently run under the unit budget. */
+export function inspectIntegrationTests(files) {
+  const violations = [];
+  for (const { filename, source } of files) {
+    if (!/\.test\.tsx?$/u.test(filename)) continue;
+    const imports = parse(source, {
+      sourceType: 'module',
+      plugins: ['typescript', 'jsx'],
+    }).program.body.filter((statement) => statement.type === 'ImportDeclaration');
+    const screen = imports.find(rendersScreen);
+    if (!screen) continue;
+    const integration = imports.some(
+      (statement) =>
+        statement.source.value.endsWith('test-support/integration') && sideEffectImport(statement),
+    );
+    if (integration) continue;
+    violations.push({
+      filename,
+      line: screen.loc?.start.line ?? 1,
+      code: 'test',
+      message:
+        "Screen-level tests add `import '…/test-support/integration'` for the integration timeout.",
+    });
+  }
   return violations;
 }

@@ -10,7 +10,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import type { VirtualEndpointSpec } from '../../core/control-port/types';
 import type { DriverAction, DriverPort, DriverSnapshot } from '../../core/driver/DriverPort';
-import type { EndpointUpdate } from '../../core/ui/AudioNodeCard';
+import type { EndpointUpdate } from '../../core/ui/AudioNodeEndpointOptions';
 
 interface Owner {
   port: DriverPort;

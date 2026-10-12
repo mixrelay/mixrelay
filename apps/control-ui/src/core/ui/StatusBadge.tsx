@@ -4,13 +4,12 @@ import styles from './StatusBadge.module.css';
 export type StatusTone = 'neutral' | 'accent' | 'positive' | 'warning' | 'critical';
 
 interface StatusBadgeProps extends PropsWithChildren {
-  className?: string;
   tone?: StatusTone;
 }
 
-export function StatusBadge({ children, className, tone = 'neutral' }: StatusBadgeProps) {
+export function StatusBadge({ children, tone = 'neutral' }: StatusBadgeProps) {
   return (
-    <span className={[styles.root, className].filter(Boolean).join(' ')} data-tone={tone}>
+    <span className={styles.root} data-tone={tone}>
       {children}
     </span>
   );

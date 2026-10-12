@@ -1,8 +1,8 @@
 @import "./Fonts.css";
 
 :root {
-  color: var(--text);
-  background: var(--bg);
+  color: var(--text-primary);
+  background: var(--background);
   font-family: var(--font-sans);
   font-size: var(--font-body);
   line-height: 1.5;
@@ -31,7 +31,7 @@ body {
   min-width: 320px;
   min-height: 100dvh;
   margin: 0;
-  background: var(--bg);
+  background: var(--background);
 }
 
 button,
@@ -74,8 +74,8 @@ input {
     /* biome-ignore lint/complexity/noImportantStyles: Reduced motion must override component styles. */
     scroll-behavior: auto !important;
     /* biome-ignore lint/complexity/noImportantStyles: Reduced motion must override component styles. */
-    transition-duration: 0.01ms !important;
+    transition-duration: var(--motion-duration-reduced) !important;
     /* biome-ignore lint/complexity/noImportantStyles: Reduced motion must override component styles. */
-    animation-duration: 0.01ms !important;
+    animation-duration: var(--motion-duration-reduced) !important;
   }
 }

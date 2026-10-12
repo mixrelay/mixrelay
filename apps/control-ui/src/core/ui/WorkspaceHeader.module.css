@@ -7,6 +7,6 @@
   height: var(--workspace-header-height);
   min-height: var(--workspace-header-height);
   padding: 0 var(--space-3) 0 var(--layout-workspace-header-inset, var(--space-4));
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--border-default);
   background: var(--surface);
 }

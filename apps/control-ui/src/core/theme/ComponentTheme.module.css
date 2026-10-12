@@ -83,7 +83,7 @@
   gap: var(--space-1);
 }
 .fieldLabel {
-  color: var(--muted);
+  color: var(--text-muted);
   font: var(--font-weight-medium) var(--font-label) / var(--line-height-control) var(--font-sans);
 }
 .passwordField {
@@ -99,11 +99,11 @@
   place-items: center;
   border: 0;
   background: transparent;
-  color: var(--muted);
+  color: var(--text-muted);
   border-radius: var(--control-radius);
 }
 .passwordToggle[data-hovered] {
-  color: var(--text);
+  color: var(--text-primary);
 }
 .passwordToggle[data-focus-visible] {
   outline: var(--focus-width) solid var(--focus-color);
@@ -122,7 +122,7 @@
   border: var(--border-width) solid var(--control-border);
   border-radius: var(--control-radius);
   background: var(--surface-inset);
-  color: var(--text);
+  color: var(--text-primary);
   font: var(--font-control) / var(--line-height-control) var(--font-sans);
 }
 .selectButton {
@@ -139,15 +139,19 @@
 }
 .selectChevron {
   flex-shrink: 0;
-  color: var(--muted);
+  color: var(--text-muted);
   transition: transform var(--motion-duration-fast) var(--motion-easing-standard);
 }
 .selectButton[aria-expanded="true"] .selectChevron {
   transform: rotate(180deg);
 }
+.input::placeholder {
+  color: var(--control-placeholder);
+  opacity: 1;
+}
 .input[aria-invalid],
 .field[data-invalid] .selectButton {
-  border-color: var(--red);
+  border-color: var(--status-danger);
 }
 .input:focus,
 .selectButton[data-focus-visible] {
@@ -157,7 +161,7 @@
 .input:disabled,
 .selectButton:disabled {
   background: var(--surface-inset);
-  color: var(--muted);
+  color: var(--text-muted);
   opacity: var(--control-disabled-opacity);
 }
 .passwordField .input {
@@ -169,10 +173,10 @@
   overflow-wrap: anywhere;
 }
 .fieldDescription {
-  color: var(--muted);
+  color: var(--text-muted);
 }
 .fieldError {
-  color: var(--red);
+  color: var(--status-danger);
 }
 .field[data-label-placement="inline"] {
   display: inline-flex;
@@ -193,10 +197,10 @@
   width: var(--trigger-width);
   max-width: calc(100vw - var(--space-6));
   padding: var(--space-1);
-  border: var(--border-width) solid var(--line-strong);
+  border: var(--border-width) solid var(--border-strong);
   border-radius: var(--control-radius);
   background: var(--surface-floating);
-  color: var(--text);
+  color: var(--text-primary);
   box-shadow: var(--floating-shadow);
 }
 .listBox {
@@ -213,7 +217,7 @@
   min-height: var(--control-height);
   padding: var(--space-1) var(--space-2);
   border-radius: var(--control-radius);
-  color: var(--text);
+  color: var(--text-primary);
   font-size: var(--font-control);
   white-space: normal;
   overflow-wrap: anywhere;
@@ -221,10 +225,10 @@
 }
 .option[data-focused],
 .option[data-selected] {
-  background: var(--surface-raised);
+  background: var(--surface-hover);
 }
 .option[data-disabled] {
-  color: var(--muted);
+  color: var(--text-muted);
   opacity: var(--control-disabled-opacity);
 }
 .toggle,
@@ -232,7 +236,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  color: var(--text);
+  color: var(--text-primary);
   font: var(--font-control) / var(--line-height-body) var(--font-sans);
 }
 .toggleTrack {
@@ -241,7 +245,7 @@
   width: 30px;
   height: 18px;
   padding: 2px;
-  border: var(--border-width) solid var(--line-strong);
+  border: var(--border-width) solid var(--border-strong);
   border-radius: var(--control-radius);
   background: var(--surface-inset);
 }
@@ -249,12 +253,12 @@
   width: 10px;
   height: 12px;
   border-radius: var(--radius-small);
-  background: var(--muted);
+  background: var(--text-muted);
   transition: transform var(--motion-duration-fast) var(--motion-easing-standard);
 }
 .toggle[data-selected] .toggleTrack {
-  border-color: var(--text);
-  background: var(--text);
+  border-color: var(--text-primary);
+  background: var(--text-primary);
 }
 .toggle[data-selected] .toggleThumb {
   transform: translateX(12px);
@@ -276,8 +280,8 @@
   background: var(--surface-inset);
 }
 .checkboxLabel[data-selected] .checkbox {
-  border-color: var(--text);
-  background: var(--text);
+  border-color: var(--text-primary);
+  background: var(--text-primary);
   color: var(--surface);
 }
 .toggle[data-focus-visible] .toggleTrack,
@@ -304,7 +308,7 @@
 .sliderTrack::before {
   content: "";
   width: 100%;
-  background: var(--line-strong);
+  background: var(--border-strong);
 }
 .sliderBar {
   background: var(--control-text);
@@ -340,7 +344,7 @@
   max-width: 100%;
   max-height: calc(100dvh - 2 * var(--dialog-viewport-inset));
   overflow-y: auto;
-  border: var(--border-width) solid var(--line-strong);
+  border: var(--border-width) solid var(--border-strong);
   border-radius: var(--control-radius);
   background: var(--surface-floating);
   box-shadow: var(--floating-shadow);
@@ -363,20 +367,20 @@
   min-height: var(--dialog-header-min-height);
   gap: var(--control-gap);
   padding: var(--dialog-header-block-inset) var(--dialog-content-inset);
-  border-bottom: var(--border-width) solid var(--line);
+  border-bottom: var(--border-width) solid var(--border-default);
 }
 .dialogTitle {
   min-width: 0;
   flex: 1;
   margin: 0;
   overflow-wrap: anywhere;
-  color: var(--text);
+  color: var(--text-primary);
   font:
     var(--font-weight-medium) var(--dialog-title-size) / var(--line-height-control) var(--font-sans);
 }
 .dialogBody {
   padding: var(--dialog-content-inset);
-  color: var(--text);
+  color: var(--text-primary);
   font-size: var(--font-body);
 }
 .closeButton {
@@ -387,12 +391,12 @@
   border: 0;
   border-radius: var(--control-radius);
   background: transparent;
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: var(--font-heading);
 }
 .closeButton[data-hovered] {
-  background: var(--surface-raised);
-  color: var(--text);
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 .closeButton[data-disabled] {
   opacity: var(--control-disabled-opacity);
@@ -402,10 +406,10 @@
   width: 340px;
   max-width: calc(100vw - var(--space-6));
   padding: var(--space-3);
-  border: var(--border-width) solid var(--line-strong);
+  border: var(--border-width) solid var(--border-strong);
   border-radius: var(--control-radius);
   background: var(--surface-floating);
-  color: var(--text);
+  color: var(--text-primary);
   font-size: var(--font-body);
   box-shadow: var(--floating-shadow);
   overflow-wrap: anywhere;
@@ -414,14 +418,27 @@
   z-index: var(--layer-tooltip);
   max-width: min(320px, calc(100vw - var(--space-6)));
   padding: var(--space-1) var(--space-2);
-  border: var(--border-width) solid var(--line-strong);
+  border: var(--border-width) solid var(--border-strong);
   border-radius: var(--control-radius);
   background: var(--surface-floating);
-  color: var(--text);
+  color: var(--text-primary);
   font-size: var(--font-label);
   line-height: var(--line-height-control);
   white-space: normal;
   pointer-events: none;
+}
+.tooltipReadout {
+  padding: var(--tooltip-readout-padding);
+  border-color: var(--tooltip-readout-border);
+  border-radius: 0;
+  background: var(--tooltip-readout-background);
+  box-shadow: var(--tooltip-readout-shadow);
+  color: var(--tooltip-readout-text);
+  font:
+    var(--tooltip-readout-font-weight) var(--tooltip-readout-font-size) /
+    var(--tooltip-readout-line-height) var(--tooltip-readout-font-family);
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 .popover[data-entering],
 .selectPopover[data-entering],

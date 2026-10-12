@@ -10,6 +10,7 @@ import type {
 import {
   addRoutingNode,
   audioGraphToRuntimeGraph,
+  defaultPresentation,
   providerPortsFrom,
   runtimeGraphToAudioGraph,
   updateRoutingNodeParameter,
@@ -505,4 +506,31 @@ it('rejects provider bus geometry outside the native 64-channel direction bound'
       { id: 'custom-output', name: '', kind: 'main', channels: 2, channelFormat: 'stereo' },
     ],
   });
+});
+
+it('names runtime ports from the translated presentation instead of fixed English text', () => {
+  const english = runtimeGraphToAudioGraph(gainFixture());
+  const gain = english.nodes.find((node) => node.id === 'output-gain');
+  expect(gain?.inputPorts.map((port) => port.label)).toEqual(['Gain input 1', 'Gain input 2']);
+
+  const korean = runtimeGraphToAudioGraph(gainFixture(), {
+    ...defaultPresentation,
+    ports: {
+      application: '앱 오디오',
+      deviceInput: '장치 입력',
+      deviceOutput: '장치 출력',
+      effectInput: '{{name}} 입력',
+      effectOutput: '{{name}} 출력',
+      gainInput: '게인 입력',
+      gainOutput: '게인 출력',
+      mixerInput: '믹서 입력',
+      mixerOutput: '믹서 출력',
+    },
+  });
+  const translated = korean.nodes.find((node) => node.id === 'output-gain');
+  expect(translated?.inputPorts.map((port) => port.label)).toEqual(['게인 입력 1', '게인 입력 2']);
+  expect(translated?.outputPorts[0]?.label).toBe('게인 출력 1');
+  expect(translated?.inputPorts.map((port) => port.id)).toEqual(
+    gain?.inputPorts.map((port) => port.id),
+  );
 });

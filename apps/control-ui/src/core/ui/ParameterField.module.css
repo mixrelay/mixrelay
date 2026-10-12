@@ -20,7 +20,7 @@
 }
 .unit {
   flex-shrink: 0;
-  color: var(--muted);
+  color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: var(--font-label);
 }

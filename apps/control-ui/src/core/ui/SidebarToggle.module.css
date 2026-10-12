@@ -1,7 +1,7 @@
 .sidebarBoundary {
   position: absolute;
   grid-area: auto;
-  z-index: 6;
+  z-index: var(--layer-shell-chrome);
   top: var(--workspace-header-height);
   bottom: var(--app-status-height);
   left: calc(var(--layout-sidebar-width) - 5px);
@@ -25,7 +25,7 @@
   width: 2px;
   height: 24px;
   border-radius: 1px;
-  background: var(--line-strong);
+  background: var(--border-strong);
   content: "";
 }
 
@@ -40,7 +40,7 @@
 
 .sidebarReopen {
   position: absolute;
-  z-index: 6;
+  z-index: var(--layer-shell-chrome);
   /* The canvas add button occupies y=12..42; keep this tab below its hit area. */
   top: calc(var(--workspace-header-height) + 52px);
   left: 0;
@@ -49,11 +49,11 @@
   width: 20px;
   height: 28px;
   padding: 0;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--border-strong);
   border-left: 0;
   border-radius: 0 var(--control-radius) var(--control-radius) 0;
-  background: var(--surface-raised);
-  color: var(--muted);
+  background: var(--surface-hover);
+  color: var(--text-muted);
   cursor: default;
 }
 

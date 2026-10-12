@@ -55,6 +55,11 @@ it('keeps the deletion confirmation while a native write is busy and permits dis
   props.busy = true;
   view.rerender(content());
   expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  const confirm = within(dialog).getByRole('button', { name: 'Delete graph' });
+  expect(confirm).toBeDisabled();
+  expect(confirm).toHaveAttribute('aria-busy', 'true');
+  fireEvent.click(confirm);
+  expect(props.onDelete).not.toHaveBeenCalled();
   act(() => currentConfirmation().onCancel());
   expect(screen.getByRole('dialog')).toBe(dialog);
   expect(props.onDelete).not.toHaveBeenCalled();

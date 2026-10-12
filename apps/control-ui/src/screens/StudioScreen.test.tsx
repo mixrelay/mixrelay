@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import '../test-support/integration';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
 import type {
@@ -29,7 +30,10 @@ interface WorkspaceBinding {
   onBusyChange: (busy: boolean) => void;
   onTitleChange: (title: string) => void;
   deviceDriverAction: {
-    change: (endpointId: string, update: import('../core/ui/AudioNodeCard').EndpointUpdate) => void;
+    change: (
+      endpointId: string,
+      update: import('../core/ui/AudioNodeEndpointOptions').EndpointUpdate,
+    ) => void;
     enabled: boolean;
     error: { endpointId: string | null; message: string } | null;
   };
@@ -480,4 +484,129 @@ it('adopts a confirmed native session revision while the catalog is still loadin
   act(() => apply(document));
   expect(workspaceBindings.get(controlPort)?.sessionDocument).toEqual(document);
   await act(async () => pending.resolve({ ...catalog, document }));
+});
+
+it('starts the overlay sidebar closed on narrow screens and closes it after a choice', async () => {
+  const listeners = new Set<() => void>();
+  const media = { matches: true };
+  const matchMedia = vi.spyOn(window, 'matchMedia').mockImplementation(
+    (query: string) =>
+      ({
+        get matches() {
+          return media.matches;
+        },
+        media: query,
+        addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+      }) as unknown as MediaQueryList,
+  );
+  const controlPort = port(2);
+  const document = { schemaVersion: 2 as const, revision: 2, nodes: [], edges: [] };
+  const catalog = {
+    protocolVersion: 1,
+    catalogRevision: 1,
+    activeId: 'a',
+    graphs: [
+      { id: 'a', name: 'Graph A' },
+      { id: 'b', name: 'Graph B' },
+    ],
+    document,
+  };
+  vi.spyOn(controlPort, 'getGraphCatalog').mockResolvedValue(catalog);
+  vi.spyOn(controlPort, 'mutateGraphCatalog').mockResolvedValue({
+    ...catalog,
+    catalogRevision: 2,
+    activeId: 'b',
+  });
+  try {
+    render(view(controlPort));
+    const toggle = await screen.findByRole('button', { name: 'Graphs' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    const list = screen.getByRole('navigation', { name: 'Graphs' });
+    fireEvent.click(within(list).getByRole('button', { name: 'Graph B' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument(),
+    );
+
+    media.matches = false;
+    act(() => {
+      for (const listener of listeners) listener();
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Graphs' }));
+    const graphA = within(screen.getByRole('navigation', { name: 'Graphs' })).getByRole('button', {
+      name: 'Graph A',
+    });
+    act(() => graphA.focus());
+    expect(graphA).toHaveFocus();
+    media.matches = true;
+    act(() => {
+      for (const listener of listeners) listener();
+    });
+    expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument();
+    // Focus that lived in the closed sidebar moves to the visible toggle.
+    expect(screen.getByRole('button', { name: 'Graphs' })).toHaveFocus();
+  } finally {
+    matchMedia.mockRestore();
+  }
+});
+
+it('keeps the overlay sidebar open when a graph switch fails', async () => {
+  const matchMedia = vi.spyOn(window, 'matchMedia').mockImplementation(
+    (query: string) =>
+      ({
+        matches: true,
+        media: query,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      }) as unknown as MediaQueryList,
+  );
+  const controlPort = port(2);
+  vi.spyOn(controlPort, 'getGraphCatalog').mockResolvedValue({
+    protocolVersion: 1,
+    catalogRevision: 1,
+    activeId: 'a',
+    graphs: [
+      { id: 'a', name: 'Graph A' },
+      { id: 'b', name: 'Graph B' },
+    ],
+    document: { schemaVersion: 2, revision: 2, nodes: [], edges: [] },
+  });
+  vi.spyOn(controlPort, 'mutateGraphCatalog').mockRejectedValue(new Error('graph_invalid'));
+  try {
+    render(view(controlPort));
+    fireEvent.click(await screen.findByRole('button', { name: 'Graphs' }));
+    const list = screen.getByRole('navigation', { name: 'Graphs' });
+    fireEvent.click(within(list).getByRole('button', { name: 'Graph B' }));
+    await waitFor(() => expect(controlPort.mutateGraphCatalog).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.getByRole('navigation', { name: 'Graphs' })).toBeVisible();
+    // The failed choice is over: a later refresh that activates B does not close the sidebar.
+    vi.mocked(controlPort.getGraphCatalog).mockResolvedValue({
+      protocolVersion: 1,
+      catalogRevision: 3,
+      activeId: 'b',
+      graphs: [
+        { id: 'a', name: 'Graph A' },
+        { id: 'b', name: 'Graph B' },
+      ],
+      document: { schemaVersion: 2, revision: 3, nodes: [], edges: [] },
+    });
+    const loads = vi.mocked(controlPort.getGraphCatalog).mock.calls.length;
+    fireEvent.click(within(list).getByRole('button', { name: 'Reload graphs' }));
+    await waitFor(() =>
+      expect(vi.mocked(controlPort.getGraphCatalog).mock.calls.length).toBeGreaterThan(loads),
+    );
+    await waitFor(() =>
+      expect(within(list).getByRole('button', { name: 'Graph B' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      ),
+    );
+    expect(screen.getByRole('navigation', { name: 'Graphs' })).toBeVisible();
+  } finally {
+    matchMedia.mockRestore();
+  }
 });

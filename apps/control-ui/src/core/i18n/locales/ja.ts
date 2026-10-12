@@ -372,6 +372,34 @@ export const ja = {
     description:
       'macOS アプリケーションが MixRelay に送る音声を、OBS や DAW が使用するデバイス入力に戻します。',
     canvasLabel: 'MixRelay の仮想入出力ルーティンググラフ',
+    ports: {
+      application: 'アプリのオーディオ',
+      deviceInput: 'デバイス入力',
+      deviceOutput: 'デバイス出力',
+      effectInput: '{{name}} 入力',
+      effectOutput: '{{name}} 出力',
+      gainInput: 'ゲイン入力',
+      gainOutput: 'ゲイン出力',
+      mixerInput: 'ミキサー入力',
+      mixerOutput: 'ミキサー出力',
+    },
+    a11y: {
+      nodeDescription:
+        'Enter または Space でノードを選択します。選択後は矢印キーで移動し、Shift を押すと大きく移動します。Delete で削除、Escape でキャンセルします。',
+      nodeDescriptionStatic:
+        'Enter または Space でノードを選択します。Delete で削除、Escape でキャンセルします。',
+      nodeMoved: '選択したノードを{{direction}}へ移動しました。新しい位置: x {{x}}、y {{y}}。',
+      directions: {
+        up: '上',
+        down: '下',
+        left: '左',
+        right: '右',
+      },
+      edgeDescription:
+        'Enter または Space でケーブルを選択します。Delete で削除、Escape でキャンセルします。',
+      edgeLabel: '{{source}} CH {{sourceChannel}} → {{target}} CH {{targetChannel}}',
+      meterChannel: '{{name}} チャンネル {{channel}}',
+    },
     toggleGain: 'ゲイン −6 dB',
     apply: '適用',
     nodes: {

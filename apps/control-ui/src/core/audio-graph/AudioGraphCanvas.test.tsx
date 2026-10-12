@@ -3,6 +3,7 @@ import type { ComponentType, CSSProperties, PropsWithChildren } from 'react';
 import { useState } from 'react';
 import { assert, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AudioMeterStore } from '../audio-meter/AudioMeterStore';
+import { i18n } from '../i18n';
 import { MixRelayProvider } from '../theme/MixRelayProvider';
 import { frequencyPosition, gainPosition } from '../ui/equalizerResponse';
 import { NodeOptionsSection } from '../ui/NodeOptionsSection';
@@ -338,6 +339,7 @@ function MockReactFlow({ children, ...props }: PropsWithChildren<Record<string, 
       data-pan-activation-key={props.panActivationKeyCode as string}
       data-testid="react-flow"
     >
+      <MockAriaLabels config={props.ariaLabelConfig as MockItem} edges={edges} />
       {nodes.map((node) => (
         // biome-ignore lint/a11y/useSemanticElements: Match React Flow's focusable node group.
         <div
@@ -479,6 +481,24 @@ vi.mock('@xyflow/react', () => ({
   useUpdateNodeInternals: () => updateNodeInternals,
   useViewport: () => ({ zoom: previewHarness.zoom }),
 }));
+
+function MockAriaLabels({ config, edges }: { config: MockItem; edges: MockItem[] }) {
+  const moved = config['node.a11yDescription.ariaLiveMessage'] as (value: MockItem) => string;
+  return (
+    <div data-testid="flow-aria">
+      <span data-testid="node-description">
+        {config['node.a11yDescription.keyboardDisabled'] as string}
+      </span>
+      <span data-testid="edge-description">{config['edge.a11yDescription.default'] as string}</span>
+      <span data-testid="node-moved">{moved({ direction: 'left', x: 12, y: 34 })}</span>
+      {edges.map((edge) => (
+        <span data-testid="edge-label" key={edge.id as string}>
+          {edge.ariaLabel as string}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 function model(): AudioGraphModel {
   return {
@@ -2081,4 +2101,55 @@ it('offers display-name editing on title double-click and F2 without an audio/mo
     key: 'F2',
   });
   expect(request).toHaveBeenCalledTimes(4);
+});
+
+it('names cables, ports and React Flow keyboard help in the current language', async () => {
+  await i18n.changeLanguage('en');
+  const view = render(
+    <AudioGraphCanvas ariaLabel="Graph" model={model()} onModelChange={vi.fn()} />,
+    {
+      wrapper: CanvasTestProvider,
+    },
+  );
+  expect(screen.getByTestId('edge-label')).toHaveTextContent('Source CH 1 → Processor CH 1');
+  expect(screen.getByRole('img', { name: 'Source output, CH 1' })).not.toHaveAttribute(
+    'tabindex',
+    '0',
+  );
+  const twoBuses = model();
+  const [sourceNode, processor] = twoBuses.nodes;
+  assert(sourceNode && processor);
+  sourceNode.outputPorts = [
+    { id: 'out', label: 'Out A', channelIndex: 0 },
+    { id: 'alt', label: 'Out B', channelIndex: 0 },
+  ];
+  processor.inputPorts = [
+    { id: 'in', label: 'Main', channelIndex: 0 },
+    { id: 'side', label: 'Sidechain', channelIndex: 0 },
+  ];
+  view.rerender(<AudioGraphCanvas ariaLabel="Graph" model={twoBuses} onModelChange={vi.fn()} />);
+  expect(screen.getByTestId('edge-label')).toHaveTextContent(
+    'Source · Out A CH 1 → Processor · Main CH 1',
+  );
+  processor.inputPorts = [
+    { id: 'in', label: 'Main', channelIndex: 0 },
+    { id: 'side', label: 'Main', channelIndex: 0 },
+  ];
+  view.rerender(
+    <AudioGraphCanvas ariaLabel="Graph" model={{ ...twoBuses }} onModelChange={vi.fn()} />,
+  );
+  expect(screen.getByTestId('edge-label')).toHaveTextContent(
+    'Source · Out A CH 1 → Processor · Main (1) CH 1',
+  );
+  expect(screen.getByRole('img', { name: 'Main (2), CH 1' })).toBeInTheDocument();
+  expect(screen.getByTestId('node-description')).toHaveTextContent(/arrow keys.*Shift/);
+  expect(screen.getByTestId('node-moved')).toHaveTextContent(
+    'Moved the selected node left. New position: x 12, y 34.',
+  );
+
+  await act(() => i18n.changeLanguage('ko-KR'));
+  view.rerender(<AudioGraphCanvas ariaLabel="Graph" model={model()} onModelChange={vi.fn()} />);
+  expect(screen.getByTestId('edge-description')).toHaveTextContent('케이블을 선택합니다');
+  expect(screen.getByTestId('node-moved')).toHaveTextContent('왼쪽으로 옮겼습니다');
+  await act(() => i18n.changeLanguage('en'));
 });

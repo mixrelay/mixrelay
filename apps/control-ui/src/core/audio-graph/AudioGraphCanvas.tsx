@@ -1,6 +1,7 @@
 import '@xyflow/react/dist/base.css';
 
 import {
+  type AriaLabelConfig,
   Background,
   BackgroundVariant,
   type Connection,
@@ -43,7 +44,8 @@ import { useTranslation } from 'react-i18next';
 import { AudioMeterProvider } from '../audio-meter/AudioMeterProvider';
 import type { AudioMeterStore } from '../audio-meter/AudioMeterStore';
 import type { ProcessorEditorFailure, ProcessorEditorStatus } from '../control-port/types';
-import { AudioNodeCard, type EndpointUpdate } from '../ui/AudioNodeCard';
+import { AudioNodeCard } from '../ui/AudioNodeCard';
+import type { EndpointUpdate } from '../ui/AudioNodeEndpointOptions';
 import { audioNodePortTop } from '../ui/audioNodeLayout';
 import {
   HierarchicalContextMenu,
@@ -77,8 +79,11 @@ import {
 import { PortSelectionFeedback } from './PortSelectionFeedback';
 import {
   type AudioFlowEdge,
+  type AudioFlowEdgeLabel,
   type AudioFlowNode,
+  type AudioGraphEdgeEndpoints,
   applyAudioNodeLayers,
+  namedAudioPorts,
   reconcileAudioFlowEdges,
   reconcileAudioFlowNodes,
 } from './reactFlowAdapter';
@@ -329,16 +334,52 @@ function useNodeMenu(onOpenedChange?: (opened: boolean) => void) {
   };
 }
 
+function useEdgeLabel(): AudioFlowEdgeLabel {
+  const { t } = useTranslation();
+  return useCallback(
+    ({ source, sourcePort, target, targetPort, ...channels }: AudioGraphEdgeEndpoints) =>
+      t('routing.a11y.edgeLabel', {
+        ...channels,
+        // Bus names disambiguate repeated channel numbers, matching the port's own name.
+        source: sourcePort ? `${source} · ${sourcePort}` : source,
+        target: targetPort ? `${target} · ${targetPort}` : target,
+      }),
+    [t],
+  );
+}
+
+/** React Flow's built-in keyboard and live-region text follows the app language. */
+function useGraphAriaLabels(): Partial<AriaLabelConfig> {
+  const { t } = useTranslation();
+  return useMemo(
+    () => ({
+      'node.a11yDescription.default': t('routing.a11y.nodeDescriptionStatic'),
+      'node.a11yDescription.keyboardDisabled': t('routing.a11y.nodeDescription'),
+      'node.a11yDescription.ariaLiveMessage': ({ direction, x, y }) =>
+        t('routing.a11y.nodeMoved', {
+          direction: t(`routing.a11y.directions.${direction as ArrowDirection}`),
+          x,
+          y,
+        }),
+      'edge.a11yDescription.default': t('routing.a11y.edgeDescription'),
+    }),
+    [t],
+  );
+}
+
+type ArrowDirection = 'up' | 'down' | 'left' | 'right';
+
 function useAudioFlowCollections(
   model: AudioGraphModel,
   commit: CommitGraph,
   disclosureHeights: Map<string, number>,
   openedNodeId: string | null,
 ) {
+  const edgeLabel = useEdgeLabel();
   const initialNodes = useRef<AudioFlowNode[] | null>(null);
   const initialEdges = useRef<AudioFlowEdge[] | null>(null);
   initialNodes.current ??= reconcileAudioFlowNodes([], model);
-  initialEdges.current ??= reconcileAudioFlowEdges([], model);
+  initialEdges.current ??= reconcileAudioFlowEdges([], model, edgeLabel);
   const [nodes, setNodes, applyNodeChanges] = useNodesState<AudioFlowNode>(initialNodes.current);
   const [edges, setEdges, applyEdgeChanges] = useEdgesState<AudioFlowEdge>(initialEdges.current);
 
@@ -347,8 +388,8 @@ function useAudioFlowCollections(
     [model, setNodes],
   );
   useEffect(
-    () => setEdges((current) => reconcileAudioFlowEdges(current, model)),
-    [model, setEdges],
+    () => setEdges((current) => reconcileAudioFlowEdges(current, model, edgeLabel)),
+    [edgeLabel, model, setEdges],
   );
   const onNodesChange = useNodeChangeHandler(model, commit, applyNodeChanges, disclosureHeights);
   const layeredNodes = useMemo(
@@ -878,9 +919,11 @@ function useCanvasViewport(
 }
 
 function GraphFlowSurface(props: ReactFlowProps<AudioFlowNode, AudioFlowEdge>) {
+  const ariaLabelConfig = useGraphAriaLabels();
   return (
     <ReactFlow<AudioFlowNode, AudioFlowEdge>
       {...props}
+      ariaLabelConfig={ariaLabelConfig}
       colorMode="dark"
       proOptions={{ hideAttribution: true }}
       connectionLineComponent={BatchConnectionLine}
@@ -1169,10 +1212,11 @@ function NodePortHandles({
   side: AudioPortSide;
 }) {
   const ports = side === 'input' ? node.inputPorts : node.outputPorts;
-  return ports.map((port, index) => (
+  return namedAudioPorts(ports).map(({ port, name, channel }, index) => (
     <AudioPortHandle
+      channel={channel}
+      name={name}
       top={audioNodePortTop(geometry, index, ports.length)}
-      index={index}
       key={port.id}
       nodeId={node.id}
       port={port}
@@ -1225,18 +1269,19 @@ function processorEditorProps(
 
 function AudioPortHandle({
   top,
-  index,
+  channel: channelNumber,
+  name,
   nodeId,
   port,
   side,
 }: {
   top: number;
-  index: number;
+  channel: number;
+  name: string;
   nodeId: string;
   port: AudioGraphPort;
   side: 'input' | 'output';
 }) {
-  const channelNumber = (port.channelIndex ?? index) + 1;
   const isConnectionTarget = useConnection(
     (connection) =>
       connection.inProgress &&
@@ -1246,7 +1291,7 @@ function AudioPortHandle({
 
   return (
     <Tooltip
-      className={styles.portTooltip}
+      kind="readout"
       nonInteractive
       label={`CH ${channelNumber}`}
       offset={7}
@@ -1254,8 +1299,10 @@ function AudioPortHandle({
       delay={isConnectionTarget ? 0 : 160}
       position={side === 'input' ? 'left' : 'right'}
     >
+      {/* A named graphic: ports stay out of Tab order but expose node direction and channel. */}
       <Handle
-        aria-label={`${port.label}, CH ${channelNumber}`}
+        role="img"
+        aria-label={`${name}, CH ${channelNumber}`}
         className={`${styles.handle} ${side === 'input' ? styles.inputHandle : ''}`}
         data-audio-node-id={nodeId}
         data-audio-port-id={port.id}

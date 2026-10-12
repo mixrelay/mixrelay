@@ -2,8 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from '@babel/parser';
+import { componentContracts } from '../src/core/design-system/componentContracts.ts';
 
 const project = fileURLToPath(new URL('../', import.meta.url));
+// Native and React Aria primitives, plus every documented Core command, field and
+// contract marked interactive (its own trigger outside those groups).
+// Core names come from the contract registry so new controls are audited automatically.
 const controls = new Set([
   'button',
   'input',
@@ -12,28 +16,12 @@ const controls = new Set([
   'Button',
   'NumberField',
   'Slider',
-  'ActionButton',
-  'AppInformationButton',
-  'AudioNodeFace',
-  'CollectionItem',
-  'HierarchicalMenuButton',
-  'IconActionButton',
-  'InlineSelect',
-  'NodeMuteButton',
-  'NodeOptionsSection',
-  'NodePowerButton',
-  'PathField',
-  'SelectField',
-  'SidebarToggle',
-  'StateButton',
-  'TextField',
-  'ThemePicker',
-  'ToggleField',
-  'TransportButton',
-  'NativeEndpointBuffer',
-  'NativeSampleFormatField',
-  'NumericValueControl',
-  'ValueSlider',
+  ...componentContracts
+    .filter(
+      (contract) =>
+        contract.group === 'Commands' || contract.group === 'Fields' || contract.interactive,
+    )
+    .map((contract) => contract.name),
 ]);
 
 function walk(node, visit, owner = 'render adapter') {

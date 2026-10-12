@@ -5,7 +5,7 @@
   padding: 0 var(--space-2);
   border: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--text-primary);
   max-width: 100%;
   font-size: var(--app-info-font-size);
   font-weight: var(--app-info-font-weight);
@@ -26,7 +26,7 @@
 
 .separator {
   flex: 0 0 auto;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 .status {
@@ -34,7 +34,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--muted);
+  color: var(--text-muted);
 }
 
 .root[data-focus-visible] {

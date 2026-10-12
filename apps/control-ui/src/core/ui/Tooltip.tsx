@@ -3,14 +3,15 @@ import { Tooltip as AriaTooltip, Focusable, TooltipTrigger } from 'react-aria-co
 import styles from '../theme/ComponentTheme.module.css';
 import { motion } from '../theme/tokens';
 
-/** Non-interactive markers never become an extra Tab stop. */
+/** Non-interactive markers never become an extra Tab stop. `readout` is the compact
+ * monospaced value form used next to graph ports. */
 export function Tooltip({
   children,
   label,
   position = 'top',
   delay = motion.tooltipDelay,
   opened,
-  className,
+  kind = 'label',
   offset = 4,
   nonInteractive = false,
 }: {
@@ -19,7 +20,7 @@ export function Tooltip({
   position?: 'top' | 'bottom' | 'left' | 'right';
   delay?: number;
   opened?: boolean;
-  className?: string;
+  kind?: 'label' | 'readout';
   offset?: number;
   nonInteractive?: boolean;
 }) {
@@ -35,7 +36,9 @@ export function Tooltip({
       )}
       <AriaTooltip
         style={{ zIndex: 'var(--layer-tooltip)' }}
-        className={className ? `${styles.tooltip} ${className}` : styles.tooltip}
+        className={
+          kind === 'readout' ? `${styles.tooltip} ${styles.tooltipReadout}` : styles.tooltip
+        }
         placement={position}
         offset={offset}
       >

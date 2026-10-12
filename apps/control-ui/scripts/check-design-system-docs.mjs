@@ -478,20 +478,163 @@ async function checkFile(contract, value, label, failures) {
   }
   return filename;
 }
-async function checkFileLists(contract, failures) {
-  for (const kind of ['consumers', 'tests']) {
-    if (!Array.isArray(contract[kind])) {
-      failures.push(`${contract.name}: missing ${kind} list`);
-      continue;
-    }
-    const seen = new Set();
-    for (const value of contract[kind]) {
-      if (seen.has(value)) failures.push(`${contract.name}: duplicate ${kind} path ${value}`);
-      seen.add(value);
-      await checkFile(contract, value, kind, failures);
-    }
+function specifierName(specifier) {
+  if (specifier.type === 'ImportDefaultSpecifier') return 'default';
+  return specifier.imported.name ?? specifier.imported.value;
+}
+
+function addSpecifiers(entry, specifiers) {
+  for (const specifier of specifiers) {
+    if (specifier.importKind === 'type') continue;
+    if (specifier.type === 'ImportNamespaceSpecifier') entry.namespace = true;
+    else entry.names.add(specifierName(specifier));
   }
 }
+
+/** Runtime (non-type) bindings a file imports, per resolved repository module: the
+ * imported export names, or a namespace import that can reach every export. */
+async function importedBindings(filename) {
+  const program = parseModule(await readFile(filename, 'utf8'), filename);
+  const result = new Map();
+  const runtimeImports = program.body.filter(
+    (statement) => statement.type === 'ImportDeclaration' && statement.importKind !== 'type',
+  );
+  for (const statement of runtimeImports) {
+    const module = await resolveImport(filename, statement.source.value);
+    if (!module) continue;
+    const entry = result.get(module) ?? { names: new Set(), namespace: false };
+    addSpecifiers(entry, statement.specifiers);
+    if (entry.namespace || entry.names.size) result.set(module, entry);
+  }
+  return result;
+}
+
+const componentName = (name) => /^[A-Z]/u.test(name ?? '');
+
+/** The imported binding inside `memo(X)` / `forwardRef(X)`, if X is imported. */
+function wrappedImport(node, info) {
+  if (node?.type !== 'CallExpression') return undefined;
+  if (!['memo', 'forwardRef'].includes(reactCallName(node.callee, info))) return undefined;
+  const [inner] = node.arguments;
+  return inner?.type === 'Identifier' ? info.imports.get(inner.name) : undefined;
+}
+
+/** Whether a local export value is a component, following imports through `isImported`. */
+async function isComponentValue(local, node, info, isImported) {
+  if (isComponent(node === undefined ? namedCallable(local, info) : callable(node, info), info))
+    return true;
+  const imported =
+    (local !== undefined ? info.imports.get(local) : undefined) ??
+    wrappedImport(node ?? info.bindings.get(local), info);
+  return Boolean(imported && (await isImported(imported.source, imported.imported)));
+}
+
+/** Export names (as imported, so a default export is 'default') under which a module
+ * exports components, judged like exportedComponents (a capitalised name whose value is a
+ * component). Re-exports and memo/forwardRef wrappers of imported bindings are followed
+ * to their source module through `isImported(source, name)`, so re-exported constants or
+ * helpers never count. */
+async function localComponentExports(info, isImported, names) {
+  for (const [exported, local] of info.exports) {
+    if (!componentName(exported === 'default' ? local : exported)) continue;
+    if (await isComponentValue(local, undefined, info, isImported)) names.add(exported);
+  }
+  const fallback = info.anonymousDefault;
+  if (fallback && (await isComponentValue(undefined, fallback, info, isImported)))
+    names.add('default');
+}
+
+async function sourceReexports(program, isImported, names) {
+  const reexports = program.body.filter(
+    (statement) => statement.type === 'ExportNamedDeclaration' && statement.source,
+  );
+  for (const statement of reexports)
+    for (const specifier of statement.specifiers) {
+      // `export * as Name from` re-exports a namespace object, not a component.
+      if (specifier.type !== 'ExportSpecifier') continue;
+      const exported = specifier.exported.name ?? specifier.exported.value;
+      if (!componentName(exported)) continue;
+      if (await isImported(statement.source.value, specifier.local.name)) names.add(exported);
+    }
+}
+
+async function componentExportNames(program, isImported) {
+  const names = new Set();
+  await localComponentExports(moduleInfo(program), isImported, names);
+  await sourceReexports(program, isImported, names);
+  return names;
+}
+
+/** The cycle guard is per (module, export): two modules may wrap each other's other
+ * exports, but resolving the same export again ends the chain. */
+async function componentExports(filename, seen = new Set()) {
+  const program = parseModule(await readFile(filename, 'utf8'), filename);
+  return componentExportNames(program, async (source, name) => {
+    const module = await resolveImport(filename, source);
+    const key = `${module}#${name}`;
+    if (!module || seen.has(key)) return false;
+    return (await componentExports(module, new Set([...seen, key]))).has(name);
+  });
+}
+
+/** A runtime import of one of the module's components, or a namespace import;
+ * constants, helpers and types do not exercise a consumer. */
+async function importsComponent(bindings, module) {
+  const entry = bindings.get(module);
+  if (!entry) return false;
+  if (entry.namespace) return true;
+  const components = await componentExports(module);
+  return [...entry.names].some((name) => components.has(name));
+}
+
+async function anyAsync(items, predicate) {
+  for (const item of items) if (await predicate(item)) return true;
+  return false;
+}
+
+function importsExport(bindings, module, name) {
+  const entry = bindings.get(module);
+  return Boolean(entry && (entry.namespace || entry.names.has(name)));
+}
+function checkListShape(contract, kind, failures) {
+  if (!Array.isArray(contract[kind])) {
+    failures.push(`${contract.name}: missing ${kind} list`);
+    return [];
+  }
+  const seen = new Set();
+  for (const value of contract[kind]) {
+    if (seen.has(value)) failures.push(`${contract.name}: duplicate ${kind} path ${value}`);
+    seen.add(value);
+  }
+  return [...seen];
+}
+/** Listed consumers must import the component itself (a runtime import of its export
+ * name); listed tests must import it or a component from a listed consumer. Stale or
+ * type-only associations therefore fail instead of drifting. */
+async function checkFileLists(contract, failures) {
+  const source = path.resolve(repositoryRoot, contract.source ?? '');
+  const consumers = [];
+  for (const value of checkListShape(contract, 'consumers', failures)) {
+    const filename = await checkFile(contract, value, 'consumers', failures);
+    if (!filename) continue;
+    consumers.push(filename);
+    if (!importsExport(await importedBindings(filename), source, contract.name))
+      failures.push(`${contract.name}: consumer ${value} does not import ${contract.name}`);
+  }
+  for (const value of checkListShape(contract, 'tests', failures)) {
+    const filename = await checkFile(contract, value, 'tests', failures);
+    if (!filename) continue;
+    const bindings = await importedBindings(filename);
+    if (
+      !importsExport(bindings, source, contract.name) &&
+      !(await anyAsync(consumers, (file) => importsComponent(bindings, file)))
+    )
+      failures.push(
+        `${contract.name}: test ${value} imports neither ${contract.name} nor a listed consumer`,
+      );
+  }
+}
+
 function checkStateStories(contract, { entries, failures }) {
   if (contract.stateStories === undefined) return;
   if (!Array.isArray(contract.stateStories)) {
@@ -660,10 +803,14 @@ function checkPublicOwner(component, filename, { byName, failures }) {
   else if (path.resolve(repositoryRoot, contract.source) !== filename)
     failures.push(`${component.name}: registry source differs from export owner ${relative}`);
 }
+/** Every component exported from Core is public: it needs a contract. Only the
+ * documentation's own rendering helpers under core/design-system are exempt. */
 async function checkPublicCoverage(context) {
   let count = 0;
-  for (const directory of ['src/core/ui', 'src/core/audio-graph']) {
+  const documentation = path.join(appRoot, 'src/core/design-system');
+  for (const directory of ['src/core']) {
     for (const filename of await sourceFiles(path.join(appRoot, directory))) {
+      if (filename.startsWith(documentation + path.sep)) continue;
       let info;
       try {
         info = await context.readModule(filename);
@@ -747,7 +894,7 @@ async function checkDocumentation() {
       `Design system documentation check failed (${context.failures.length}):\n${context.failures.join('\n')}`,
     );
   console.log(
-    `Design system documentation checked: ${context.names.size} unique contracts, ${publicCount} public Core UI/audio-graph exports, source API/type/default parity, existing consumer/test paths, independent pages and all fixed links.`,
+    `Design system documentation checked: ${context.names.size} unique contracts, ${publicCount} public Core exports, source API/type/default parity, consumers that import and tests that exercise each component, independent pages and all fixed links.`,
   );
 }
 
@@ -785,9 +932,68 @@ function testPlaygroundRenderAndDefaults() {
   checkExplicitDefaults({ name: 'Button' }, meta('2'), source, failures);
   assert.match(failures.join('\n'), /default step differs from Core/);
 }
-function selfTest() {
+function testApiExcerpts() {
+  const info = (source) => moduleInfo(parseModule(source));
+  const forms = {
+    Plain: `type Props = { label: string }; export function Plain({ label }: Props) { return <b>{label}</b>; }`,
+    Defaulted: `const size = 'md'; export function Defaulted({ size: value = size }: { size?: string }) { return <i>{value}</i>; }`,
+    Memo: `type Props = { label: string }; export const Memo = memo(function Memo({ label }: Props) { return <b>{label}</b>; });`,
+    Ref: `type Props = { label: string }; export const Ref = forwardRef<HTMLButtonElement, Props>((props, ref) => <button ref={ref} />);`,
+    Arrow: `export const Arrow = ({ label }: { label: string }) => <b>{label}</b>;`,
+    Public: `type Props = { label: string }; function Internal({ label }: Props) { return <b>{label}</b>; } export { Internal as Public };`,
+  };
+  for (const [name, source] of Object.entries(forms)) {
+    const excerpt = apiExcerpt(source, name);
+    assert.deepEqual(compareApi(name, info(source), moduleInfo(parseApi(excerpt))), [], name);
+  }
+  assert.ok(!apiExcerpt(forms.Plain, 'Plain').includes('return'));
+}
+
+async function testComponentExports() {
+  const modules = {
+    './Button': 'export function Button() { return <button />; }',
+    './constants': "export const CONSTANT = 1; export const Palette = { red: '#f00' };",
+  };
+  const names = async (source) => {
+    const resolve = async (module, name) =>
+      modules[module] !== undefined &&
+      (await componentExportNames(parseModule(modules[module]), resolve)).has(name);
+    return [...(await componentExportNames(parseModule(source), resolve))].sort();
+  };
+  const consumer = `export const Palette = { red: '#f00' };
+export const CONSTANT = 1;
+export function Compute(value: number) { return value * 2; }
+export function Panel() { return <section />; }
+export default function Consumer() { return <button />; }`;
+  assert.deepEqual(await names(consumer), ['Panel', 'default']);
+  assert.deepEqual(await names('export function renderPlaceholder() { return <span />; }'), []);
+  assert.deepEqual(await names('export default () => <button />;'), ['default']);
+  assert.deepEqual(
+    await names(
+      "import { Button } from './Button'; import { memo } from 'react'; export { Button as Consumer }; export const Wrapped = memo(Button); export { Button as Field } from './Button';",
+    ),
+    ['Consumer', 'Field', 'Wrapped'],
+  );
+  assert.deepEqual(
+    await names(
+      "import { CONSTANT } from './constants'; export { CONSTANT }; export { Palette } from './constants';",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    await names(
+      "import { Button } from './Button'; import { memo } from 'react'; export default memo(Button);",
+    ),
+    ['default'],
+  );
+  assert.deepEqual(await names("export * as Widgets from './Button';"), []);
+}
+
+async function selfTest() {
   testPlaygroundMetadata();
   testPlaygroundRenderAndDefaults();
+  testApiExcerpts();
+  await testComponentExports();
   const info = (source) => moduleInfo(parseModule(source));
   const source = `type Props = { label: string; tone?: 'neutral' | 'critical' }; export function Button({tone = 'neutral', ...props}: Props) { return <button />; }`;
   const api = `type Props={tone?:'critical'|'neutral'; label:string}; export function Button({tone='neutral',...props}:Props)`;
@@ -916,5 +1122,55 @@ function testTypedConstAndGenericScope() {
   );
 }
 
-if (process.argv.includes('--self-test')) selfTest();
+/** The API excerpt a contract needs for an exported component, built with the same
+ * parser and type closure as the parity check: local default constants, every
+ * source-local type the signature reaches, then the component. A function declaration
+ * is cut before its body; wrapped components (memo, forwardRef, arrows) keep their
+ * whole statement so the excerpt stays parseable; an export alias is restated. */
+function apiExcerpt(source, name, filename = 'source') {
+  const program = parseModule(source, filename);
+  const info = moduleInfo(program);
+  const local = info.exports.get(name) ?? name;
+  const call = namedCallable(local, info);
+  if (!call?.fn) throw new Error(`${filename}: ${name} is not an exported component`);
+  const statementOf = (node) =>
+    program.body.find((statement) => statement.start <= node.start && node.end <= statement.end);
+  const text = (node) => source.slice(statementOf(node).start, statementOf(node).end);
+  const pieces = [];
+  walk(call.fn.params, (node) => {
+    if (node.type !== 'AssignmentPattern' || node.right.type !== 'Identifier') return;
+    const binding = info.bindings.get(node.right.name);
+    if (binding && !callable(binding, info)) pieces.push(text(binding));
+  });
+  for (const declaration of [...localTypeClosure(info, call).values()].reverse())
+    pieces.push(text(declaration));
+  const statement = statementOf(call.fn);
+  const declaration =
+    statement.type === 'ExportNamedDeclaration' ? statement.declaration : statement;
+  pieces.push(
+    declaration?.type === 'FunctionDeclaration' && call.fn === declaration
+      ? source.slice(statement.start, call.fn.body.start).trimEnd()
+      : text(call.fn),
+  );
+  if (local !== name) pieces.push(`export { ${local} as ${name} };`);
+  return [...new Set(pieces)].join('\n\n');
+}
+
+async function printApi(sourcePath, name) {
+  const source = await readFile(path.resolve(repositoryRoot, sourcePath), 'utf8');
+  console.log(JSON.stringify(apiExcerpt(source, name, sourcePath)));
+}
+
+if (process.argv.includes('--help')) {
+  console.log(`Usage: node scripts/check-design-system-docs.mjs [--self-test | --print-api <source> <Name>]
+  (no option)   check every contract against storybook-static and the Core sources
+  --self-test   run the checker's own fixtures
+  --print-api   print the contract API excerpt for an exported component (pnpm docs:api)
+Runs inside build-storybook; output goes to the terminal only.`);
+  process.exit(0);
+}
+const printApiIndex = process.argv.indexOf('--print-api');
+if (process.argv.includes('--self-test')) await selfTest();
+else if (printApiIndex >= 0)
+  await printApi(process.argv[printApiIndex + 1], process.argv[printApiIndex + 2]);
 else await checkDocumentation();

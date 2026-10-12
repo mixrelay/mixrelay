@@ -24,7 +24,7 @@ import { ControlPortError } from '../../core/control-port/types';
 import { type HistoryStep, useUndoHistory } from '../../core/history/useUndoHistory';
 import { usePaidFeatures } from '../../core/licensing/FeatureAccess';
 import { ActionButton } from '../../core/ui/ActionButton';
-import type { EndpointControl } from '../../core/ui/AudioNodeCard';
+import type { EndpointControl } from '../../core/ui/AudioNodeEndpointOptions';
 import { InlineNotice } from '../../core/ui/InlineNotice';
 import { NodeMuteButton, NodePowerButton } from '../../core/ui/NodeSignalControls';
 import { hasPlatformModifier, isNativeTextEntryTarget } from '../../core/ui/platformShortcut';
@@ -146,6 +146,17 @@ function useGraphPresentation(): GraphPresentation {
       outputGain: t('routing.nodes.outputGain'),
       processor: t('routing.nodes.processor'),
       processorLayoutUnavailable: t('routing.nodes.processorLayoutUnavailable'),
+      ports: {
+        application: t('routing.ports.application'),
+        deviceInput: t('routing.ports.deviceInput'),
+        deviceOutput: t('routing.ports.deviceOutput'),
+        effectInput: t('routing.ports.effectInput', { name: '{{name}}' }),
+        effectOutput: t('routing.ports.effectOutput', { name: '{{name}}' }),
+        gainInput: t('routing.ports.gainInput'),
+        gainOutput: t('routing.ports.gainOutput'),
+        mixerInput: t('routing.ports.mixerInput'),
+        mixerOutput: t('routing.ports.mixerOutput'),
+      },
       providerBusKinds: {
         main: t('routing.processorLayouts.main'),
         sidechain: t('routing.processorLayouts.sidechain'),

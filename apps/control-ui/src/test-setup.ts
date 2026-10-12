@@ -2,6 +2,8 @@ import '@testing-library/jest-dom/vitest';
 
 import { cleanup } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
+// Core components resolve accessible names through the app's i18n instance, as at runtime.
+import './core/i18n';
 
 afterEach(cleanup);
 
@@ -49,3 +51,17 @@ class TestPointerEvent extends MouseEvent {
 Object.defineProperty(globalThis, 'PointerEvent', { configurable: true, value: TestPointerEvent });
 
 Object.defineProperty(window, 'PointerEvent', { configurable: true, value: TestPointerEvent });
+
+// jsdom has no DOMMatrixReadOnly. React Flow reads the viewport zoom (m22) from it, as in
+// React Flow's own jsdom testing guide; only the scale component is modelled.
+class TestDOMMatrixReadOnly {
+  readonly m22: number;
+  constructor(transform?: string) {
+    const scale = transform?.match(/scale\(([\d.]+)\)/u)?.[1];
+    this.m22 = scale === undefined ? 1 : Number(scale);
+  }
+}
+Object.defineProperty(window, 'DOMMatrixReadOnly', {
+  configurable: true,
+  value: TestDOMMatrixReadOnly,
+});

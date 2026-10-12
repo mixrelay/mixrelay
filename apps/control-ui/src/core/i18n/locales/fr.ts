@@ -372,6 +372,35 @@ export const fr = {
     description:
       'Renvoyez l’audio écrit dans MixRelay par les applications macOS vers l’entrée du périphérique utilisée par OBS et les stations audio numériques.',
     canvasLabel: 'Graphe de routage des E/S virtuelles MixRelay',
+    ports: {
+      application: "Audio de l'application",
+      deviceInput: "Entrée de l'appareil",
+      deviceOutput: "Sortie de l'appareil",
+      effectInput: 'Entrée {{name}}',
+      effectOutput: 'Sortie {{name}}',
+      gainInput: 'Entrée du gain',
+      gainOutput: 'Sortie du gain',
+      mixerInput: 'Entrée du mixeur',
+      mixerOutput: 'Sortie du mixeur',
+    },
+    a11y: {
+      nodeDescription:
+        'Appuyez sur Entrée ou Espace pour sélectionner un nœud. Utilisez ensuite les flèches pour le déplacer, avec Maj pour des pas plus grands. Appuyez sur Suppr pour le supprimer ou Échap pour annuler.',
+      nodeDescriptionStatic:
+        'Appuyez sur Entrée ou Espace pour sélectionner un nœud. Appuyez sur Suppr pour le supprimer ou Échap pour annuler.',
+      nodeMoved:
+        'Nœud sélectionné déplacé vers {{direction}}. Nouvelle position : x {{x}}, y {{y}}.',
+      directions: {
+        up: 'le haut',
+        down: 'le bas',
+        left: 'la gauche',
+        right: 'la droite',
+      },
+      edgeDescription:
+        'Appuyez sur Entrée ou Espace pour sélectionner un câble. Appuyez sur Suppr pour le supprimer ou Échap pour annuler.',
+      edgeLabel: '{{source}} CH {{sourceChannel}} → {{target}} CH {{targetChannel}}',
+      meterChannel: '{{name}} canal {{channel}}',
+    },
     toggleGain: 'Gain de −6 dB',
     apply: 'Appliquer',
     nodes: {

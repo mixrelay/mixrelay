@@ -224,22 +224,10 @@ export function ContrastReference() {
 
 const tokenGroups = [
   {
-    name: '공통 역할 별칭',
-    prefixes: [
-      '--bg',
-      '--surface-',
-      '--line',
-      '--line-strong',
-      '--text',
-      '--muted',
-      '--signal',
-      '--accent',
-      '--positive',
-      '--amber',
-      '--red',
-      '--shadow-',
-    ],
-    purpose: '기존 Core가 소비하는 의미 별칭. 테마별 HEX를 소비자가 직접 선택하지 않는다.',
+    name: '공통 표면·그림자',
+    prefixes: ['--surface-', '--shadow-'],
+    purpose:
+      '테마 역할을 참조하는 표면 의미(노드·떠 있는 화면·사이드바). 소비자가 HEX를 직접 선택하지 않는다.',
   },
   {
     name: '서체·간격·경계·포커스·모션·포털',

@@ -15,7 +15,7 @@ import * as Api from "../playgrounds/Inline.stories";
 
 <a href="/?path=/story/core-playgrounds-inline--playground" target="_top">Inline Playground 열기</a>. Controls는 실제 공개 props를 전달합니다. 구현 기본값은 아래 API 표와 소스 대조 계약을 따르며, Playground의 args는 재현용 입력입니다.
 
-샘플 callback은 Actions에 기록하며 제품 요청을 실행하지 않습니다.
+Controls는 실제 공개 props를 전달합니다. 샘플 callback은 Actions에 기록하며 제품 요청을 실행하지 않습니다.
 
 <Canvas of={Api.Playground} story={{ inline: false, height: 220 }} sourceState="hidden" />
 <ArgTypes of={Api.Playground} exclude={["className","classNames","style","styles","vars","unstyled","color","c","size","radius","variant","component","renderRoot","dangerouslySetInnerHTML"]} />
@@ -30,7 +30,6 @@ API 표의 *는 필수 입력입니다. Default의 —는 선언된 기본값이
 
 <Canvas of={Example.Interactive} story={{ inline: false, height: 560 }} />
 
-
 ## 개별 상태 예제
 
 ### Wrap
@@ -40,6 +39,10 @@ API 표의 *는 필수 입력입니다. Default의 —는 선언된 기본값이
 ### Between
 
 <Canvas of={Api.Between} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+### Centered
+
+<Canvas of={Api.Centered} story={{ inline: false, height: 400 }} sourceState="hidden" />
 
 ### Baseline
 

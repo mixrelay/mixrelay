@@ -7,9 +7,9 @@
   justify-content: space-between;
   gap: var(--space-2);
   padding: var(--app-status-padding-block) var(--app-status-padding-inline);
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--border-default);
   background: var(--surface);
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: var(--font-caption);
 }
 

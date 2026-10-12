@@ -43,7 +43,7 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--text-primary);
   font-family: var(--font-mono);
   font-size: var(--numeric-value-font-size);
   font-variant-numeric: tabular-nums;

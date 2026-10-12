@@ -1,7 +1,12 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
-import { inspectCss, inspectScript } from './ui-boundary-rules.mjs';
+import {
+  inspectCss,
+  inspectIntegrationTests,
+  inspectScript,
+  inspectVariableReferences,
+} from './ui-boundary-rules.mjs';
 
 const sourceRoot = path.resolve(import.meta.dirname, '../src');
 const extensions = new Set(['.ts', '.tsx', '.css']);
@@ -18,8 +23,8 @@ async function collect(directory) {
 
 const files = await collect(sourceRoot);
 const cssFiles = new Map();
-const layouts = new Map();
 const violations = [];
+const sources = [];
 function report(filename, items) {
   for (const item of items)
     violations.push(
@@ -30,21 +35,19 @@ function report(filename, items) {
 for (const filename of files) {
   const source = await readFile(filename, 'utf8');
   const relative = path.relative(sourceRoot, filename);
+  sources.push({ filename, source });
   if (filename.endsWith('.css')) {
     cssFiles.set(filename, source);
     continue;
   }
   const result = inspectScript(relative, source);
   report(filename, result.violations);
-  for (const binding of result.layoutBindings) {
-    const cssFile = path.resolve(path.dirname(filename), binding.source);
-    if (!layouts.has(cssFile)) layouts.set(cssFile, new Set());
-    layouts.get(cssFile).add(binding.name);
-  }
 }
 for (const [filename, source] of cssFiles) {
-  report(filename, inspectCss(path.relative(sourceRoot, filename), source, layouts.get(filename)));
+  report(filename, inspectCss(path.relative(sourceRoot, filename), source));
 }
+for (const item of inspectVariableReferences(sources)) report(item.filename, [item]);
+for (const item of inspectIntegrationTests(sources)) report(item.filename, [item]);
 if (violations.length) {
   console.error('UI system boundary check failed. Update tokens / theme / Core before consumers:');
   for (const violation of violations) console.error(`- ${violation}`);

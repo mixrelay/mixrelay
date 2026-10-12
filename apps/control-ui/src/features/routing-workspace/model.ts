@@ -59,8 +59,38 @@ const SOURCE_NODE_SUFFIX = '::host-source';
 const SINK_NODE_SUFFIX = '::host-sink';
 const CHANNEL_PORT_SEPARATOR = '::channel:';
 
+/** Port group names; `{{name}}` in effect labels is the node title. */
+export interface GraphPortLabels {
+  application: string;
+  deviceInput: string;
+  deviceOutput: string;
+  effectInput: string;
+  effectOutput: string;
+  gainInput: string;
+  gainOutput: string;
+  mixerInput: string;
+  mixerOutput: string;
+}
+
+const defaultPortLabels: GraphPortLabels = {
+  application: 'Application audio',
+  deviceInput: 'Device input',
+  deviceOutput: 'Device output',
+  effectInput: '{{name}} input',
+  effectOutput: '{{name}} output',
+  gainInput: 'Gain input',
+  gainOutput: 'Gain output',
+  mixerInput: 'Mixer input',
+  mixerOutput: 'Mixer output',
+};
+
+function portLabels(presentation: GraphPresentation) {
+  return presentation.ports ?? defaultPortLabels;
+}
+
 export interface GraphPresentation {
   effectLabels?: EffectLabels;
+  ports?: GraphPortLabels;
   application: string;
   audioInput: string;
   audioOutput: string;
@@ -92,7 +122,7 @@ export interface GraphPresentation {
   virtualOutput: string;
 }
 
-const defaultPresentation: GraphPresentation = {
+export const defaultPresentation: GraphPresentation = {
   application: 'Application',
   audioInput: 'Default input',
   audioOutput: 'Default output',
@@ -635,7 +665,7 @@ function editableParameterState(config: Record<string, unknown>) {
 export interface VirtualEndpointUpdate {
   /** Runtime-owned I/O transaction; never serialized into the authored graph. */
   bufferFrames?: number;
-  sampleFormat?: import('../../core/ui/AudioNodeCard').EndpointUpdate['sampleFormat'];
+  sampleFormat?: import('../../core/ui/AudioNodeEndpointOptions').EndpointUpdate['sampleFormat'];
   /** Dedicated native-device transaction; never serialized by updateVirtualEndpoint. */
   sampleRate?: number;
   captureChannels: number;
@@ -1166,8 +1196,16 @@ function processorNode(
         : {}),
       title,
     },
-    inputPorts: channelPorts(AUDIO_PORT_ID, channels, `${title} input`),
-    outputPorts: channelPorts(AUDIO_PORT_ID, channels, `${title} output`),
+    inputPorts: channelPorts(
+      AUDIO_PORT_ID,
+      channels,
+      portLabels(presentation).effectInput.replace('{{name}}', title),
+    ),
+    outputPorts: channelPorts(
+      AUDIO_PORT_ID,
+      channels,
+      portLabels(presentation).effectOutput.replace('{{name}}', title),
+    ),
     runtime: { config, type },
   };
 }
@@ -1266,7 +1304,7 @@ function applicationNode(
       title: request.title,
     },
     inputPorts: [],
-    outputPorts: channelPorts(AUDIO_PORT_ID, 2, 'Application audio'),
+    outputPorts: channelPorts(AUDIO_PORT_ID, 2, portLabels(presentation).application),
     runtime: {
       config: {
         gainDb: 0,
@@ -1300,7 +1338,11 @@ function audioInputNode(
       title: request.title,
     },
     inputPorts: [],
-    outputPorts: channelPorts(AUDIO_PORT_ID, request.channels, 'Device input'),
+    outputPorts: channelPorts(
+      AUDIO_PORT_ID,
+      request.channels,
+      portLabels(presentation).deviceInput,
+    ),
     runtime: {
       config: {
         gainDb: 0,
@@ -1326,7 +1368,11 @@ function audioOutputNode(
       meterBanks: [{ channels: request.channels, nodeId: base.id, portId: AUDIO_PORT_ID }],
       title: request.title,
     },
-    inputPorts: channelPorts(AUDIO_PORT_ID, request.channels, 'Device output'),
+    inputPorts: channelPorts(
+      AUDIO_PORT_ID,
+      request.channels,
+      portLabels(presentation).deviceOutput,
+    ),
     outputPorts: [],
     runtime: {
       config: {
@@ -1410,7 +1456,11 @@ function runtimeSourceNode(
     );
     parsed.appearance.channelCount = channels;
     parsed.appearance.meterBanks = [{ channels, nodeId: node.id, portId: AUDIO_PORT_ID }];
-    parsed.outputPorts = channelPorts(AUDIO_PORT_ID, channels, 'Application audio');
+    parsed.outputPorts = channelPorts(
+      AUDIO_PORT_ID,
+      channels,
+      portLabels(presentation).application,
+    );
     parsed.appearance.gainControl = {
       label: presentation.sourceGain,
       valueDb: directNumber(node.config, 'gainDb') ?? 0,
@@ -1503,12 +1553,12 @@ function runtimeProcessorNode(
       inputPorts: channelPorts(
         AUDIO_PORT_ID,
         directNumber(node.config, 'channels') ?? 2,
-        'Gain input',
+        portLabels(presentation).gainInput,
       ),
       outputPorts: channelPorts(
         AUDIO_PORT_ID,
         directNumber(node.config, 'channels') ?? 2,
-        'Gain output',
+        portLabels(presentation).gainOutput,
       ),
       runtime,
     };
@@ -1532,9 +1582,9 @@ function runtimeProcessorNode(
         title: node.label ?? presentation.mixer,
       },
       inputPorts: inputs.flatMap((id, inputIndex) =>
-        channelPorts(id, channels, `Mixer input ${inputIndex + 1}`),
+        channelPorts(id, channels, `${portLabels(presentation).mixerInput} ${inputIndex + 1}`),
       ),
-      outputPorts: channelPorts(AUDIO_PORT_ID, channels, 'Mixer output'),
+      outputPorts: channelPorts(AUDIO_PORT_ID, channels, portLabels(presentation).mixerOutput),
       runtime,
     };
   }

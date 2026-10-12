@@ -8,7 +8,7 @@ const meta = {
   component: Inline,
   argTypes: {
     align: { control: 'select', options: ['start', 'center', 'baseline'] },
-    justify: { control: 'select', options: ['start', 'end', 'between'] },
+    justify: { control: 'select', options: ['start', 'center', 'end', 'between'] },
     gap: { control: 'select', options: ['tight', 'regular', 'section', 'wide'] },
     children: { control: false },
   },
@@ -67,4 +67,5 @@ export const Wrap: Story = {
   },
 };
 export const Between: Story = { args: { justify: 'between' } };
+export const Centered: Story = { args: { justify: 'center' } };
 export const Baseline: Story = { args: { align: 'baseline' } };

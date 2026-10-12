@@ -47,7 +47,7 @@ function SemanticColors() {
               style={{
                 height: 40,
                 background: `var(${role})`,
-                border: 'var(--border-width) solid var(--line)',
+                border: 'var(--border-width) solid var(--border-default)',
               }}
             />
             <Text kind="label">{role}</Text>
@@ -233,7 +233,7 @@ function Spacing() {
             style={{
               width: size,
               height: 'var(--space-2)',
-              background: 'var(--muted)',
+              background: 'var(--text-muted)',
               flexShrink: 0,
             }}
           />

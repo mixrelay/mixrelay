@@ -465,7 +465,7 @@ function ReleaseAcceptanceGraph() {
         aria-label="Release acceptance fixture"
         style={{
           background: 'var(--surface)',
-          borderLeft: '1px solid var(--line-strong)',
+          borderLeft: '1px solid var(--border-strong)',
           overflow: 'auto',
           padding: 16,
         }}

@@ -13,7 +13,7 @@ export function Inline({
   NoAppearanceOverrides & {
     gap?: LayoutGap;
     align?: 'start' | 'center' | 'baseline';
-    justify?: 'start' | 'end' | 'between';
+    justify?: 'start' | 'center' | 'end' | 'between';
     wrap?: boolean;
   }
 >) {

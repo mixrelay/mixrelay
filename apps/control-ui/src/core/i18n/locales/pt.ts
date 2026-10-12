@@ -373,6 +373,34 @@ export const pt = {
     description:
       'Encaminhe o áudio enviado ao MixRelay pelas aplicações do macOS de volta à entrada do dispositivo usada pelo OBS e pelas DAWs.',
     canvasLabel: 'Grafo de roteamento de E/S virtual do MixRelay',
+    ports: {
+      application: 'Áudio do aplicativo',
+      deviceInput: 'Entrada do dispositivo',
+      deviceOutput: 'Saída do dispositivo',
+      effectInput: 'Entrada de {{name}}',
+      effectOutput: 'Saída de {{name}}',
+      gainInput: 'Entrada de ganho',
+      gainOutput: 'Saída de ganho',
+      mixerInput: 'Entrada do mixer',
+      mixerOutput: 'Saída do mixer',
+    },
+    a11y: {
+      nodeDescription:
+        'Pressione Enter ou Espaço para selecionar um nó. Depois mova-o com as setas; segure Shift para passos maiores. Pressione Delete para removê-lo ou Esc para cancelar.',
+      nodeDescriptionStatic:
+        'Pressione Enter ou Espaço para selecionar um nó. Pressione Delete para removê-lo ou Esc para cancelar.',
+      nodeMoved: 'Nó selecionado movido para {{direction}}. Nova posição: x {{x}}, y {{y}}.',
+      directions: {
+        up: 'cima',
+        down: 'baixo',
+        left: 'a esquerda',
+        right: 'a direita',
+      },
+      edgeDescription:
+        'Pressione Enter ou Espaço para selecionar um cabo. Pressione Delete para removê-lo ou Esc para cancelar.',
+      edgeLabel: '{{source}} CH {{sourceChannel}} → {{target}} CH {{targetChannel}}',
+      meterChannel: '{{name}} canal {{channel}}',
+    },
     toggleGain: 'Ganho de −6 dB',
     apply: 'Aplicar',
     nodes: {

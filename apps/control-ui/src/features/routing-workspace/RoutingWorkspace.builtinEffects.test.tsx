@@ -1,3 +1,4 @@
+import '../../test-support/integration';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { AudioGraphCanvasProps } from '../../core/audio-graph/AudioGraphCanvas';
@@ -8,6 +9,7 @@ import { I18nProvider, i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { AudioNodeCard } from '../../core/ui/AudioNodeCard';
 import { HierarchicalMenuButton } from '../../core/ui/HierarchicalMenu';
+import { advance, eventually, find, findIn } from '../../test-support/fakeTimerQueries';
 import { RoutingWorkspace } from './RoutingWorkspace';
 
 const harness = vi.hoisted(() => ({ canvas: null as AudioGraphCanvasProps | null }));
@@ -103,20 +105,21 @@ function fixture(graph = empty, graphId?: string) {
 }
 
 async function ready() {
-  await screen.findByRole('region', { name: 'MixRelay virtual I/O routing graph' });
-  await act(async () => Promise.resolve());
+  // The first render of a whole screen can exceed waitFor's 1 s default under load.
+  await find('region', { name: 'MixRelay virtual I/O routing graph' }, { timeout: 5000 });
+  await advance();
 }
 
 async function addFromMenu(name: string, chain = false) {
   fireEvent.click(screen.getByRole('button', { name: 'Add node' }));
   for (const label of chain ? ['Processor', 'Effect chains'] : ['Processor']) {
-    const item = await screen.findByRole('menuitem', { name: label });
+    const item = await find('menuitem', { name: label });
     act(() => item.focus());
     fireEvent.keyDown(item, { key: 'ArrowRight' });
   }
-  fireEvent.click(await screen.findByRole('menuitem', { name }));
-  await waitFor(() => expect(screen.queryAllByRole('menu')).toHaveLength(0));
-  await act(async () => Promise.resolve());
+  fireEvent.click(await find('menuitem', { name }));
+  await eventually(() => expect(screen.queryAllByRole('menu')).toHaveLength(0));
+  await advance();
 }
 
 async function choose(label: string, option: string) {
@@ -170,7 +173,10 @@ beforeEach(async () => {
   vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(768);
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 it.each([
   ['parameter', 'loading'],
@@ -762,6 +768,7 @@ it.each(['Compressor', 'Limiter'] as const)(
 it.each(['Compressor', 'Limiter'] as const)(
   'recovers stored Off and Mute on %s separately while retaining its bypass and DSP settings',
   async (name) => {
+    vi.useFakeTimers();
     const created = fixture();
     await ready();
     await addFromMenu(name);
@@ -784,10 +791,10 @@ it.each(['Compressor', 'Limiter'] as const)(
     expect(
       card.getByRole('button', { name: (name) => name.endsWith('Bypass: Bypassed') }),
     ).toBeDisabled();
-    const enable = await card.findByRole('button', { name: `Enable ${name}` });
+    const enable = await findIn(card, 'button', { name: `Enable ${name}` });
     act(() => enable.focus());
     fireEvent.click(enable);
-    await waitFor(() =>
+    await eventually(() =>
       expect(card.queryByRole('button', { name: `Enable ${name}` })).not.toBeInTheDocument(),
     );
     expect(control).toHaveBeenLastCalledWith(
@@ -800,7 +807,7 @@ it.each(['Compressor', 'Limiter'] as const)(
     const unmute = card.getByRole('button', { name: `Unmute ${name}` });
     expect(unmute).toHaveFocus();
     fireEvent.click(unmute);
-    await waitFor(() =>
+    await eventually(() =>
       expect(card.queryByRole('button', { name: `Unmute ${name}` })).not.toBeInTheDocument(),
     );
     expect(control).toHaveBeenLastCalledWith(
@@ -824,6 +831,7 @@ it.each(['Compressor', 'Limiter'] as const)(
 );
 
 it('loads externally disabled EQ settings and offers only recovery to processing', async () => {
+  vi.useFakeTimers();
   const created = fixture();
   await ready();
   await addFromMenu('Equalizer');
@@ -861,10 +869,10 @@ it('loads externally disabled EQ settings and offers only recovery to processing
     clientY: 28,
   });
   expect(apply).toHaveBeenCalledTimes(count);
-  const enable = await screen.findByRole('button', { name: 'Enable Equalizer' });
+  const enable = await find('button', { name: 'Enable Equalizer' });
   act(() => enable.focus());
   fireEvent.click(enable);
-  await waitFor(() =>
+  await eventually(() =>
     expect(
       screen.getByRole('button', { name: (name) => name.endsWith('Bypass: Processing') }),
     ).toBeEnabled(),
@@ -888,6 +896,7 @@ it('loads externally disabled EQ settings and offers only recovery to processing
 });
 
 it('recovers a saved Off and muted EQ in separate steps without changing DSP settings', async () => {
+  vi.useFakeTimers();
   const created = fixture();
   await ready();
   await addFromMenu('Equalizer');
@@ -904,10 +913,10 @@ it('recovers a saved Off and muted EQ in separate steps without changing DSP set
   const control = vi.spyOn(port, 'updateNodeControl');
   await ready();
   expect(screen.queryByRole('button', { name: 'Disable Equalizer' })).not.toBeInTheDocument();
-  const enable = await screen.findByRole('button', { name: 'Enable Equalizer' });
+  const enable = await find('button', { name: 'Enable Equalizer' });
   act(() => enable.focus());
   fireEvent.click(enable);
-  await waitFor(() =>
+  await eventually(() =>
     expect(screen.queryByRole('button', { name: 'Enable Equalizer' })).not.toBeInTheDocument(),
   );
   expect(control).toHaveBeenLastCalledWith(
@@ -918,8 +927,8 @@ it('recovers a saved Off and muted EQ in separate steps without changing DSP set
   expect(screen.getByRole('button', { name: 'Unmute Equalizer' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Unmute Equalizer' })).toHaveFocus();
   expect((await port.getGraph()).nodes[0]?.control).toEqual({ enabled: true, muted: true });
-  fireEvent.click(await screen.findByRole('button', { name: 'Unmute Equalizer' }));
-  await waitFor(() =>
+  fireEvent.click(await find('button', { name: 'Unmute Equalizer' }));
+  await eventually(() =>
     expect(screen.queryByRole('button', { name: 'Unmute Equalizer' })).not.toBeInTheDocument(),
   );
   expect(control).toHaveBeenLastCalledWith(
@@ -990,6 +999,7 @@ it.each([
 );
 
 it('reads externally changed effect settings automatically, then edits those current values without a recovery prompt', async () => {
+  vi.useFakeTimers();
   const { port, apply, view } = fixture(empty, 'graph-1');
   await ready();
   await addFromMenu('Reverb');
@@ -1018,9 +1028,12 @@ it('reads externally changed effect settings automatically, then edits those cur
   await act(async () => {
     await port.applyGraph(current);
   });
-  await waitFor(() => expect(screen.getByRole('textbox', { name: 'Damping' })).toHaveValue('0.6'), {
-    timeout: 2500,
-  });
+  await eventually(
+    () => expect(screen.getByRole('textbox', { name: 'Damping' })).toHaveValue('0.6'),
+    {
+      timeout: 2500,
+    },
+  );
   expect(
     screen.queryByRole('button', { name: 'Overwrite engine with these edits' }),
   ).not.toBeInTheDocument();
@@ -1028,7 +1041,7 @@ it('reads externally changed effect settings automatically, then edits those cur
   fireEvent.focus(damping);
   fireEvent.change(damping, { target: { value: '0.7' } });
   fireEvent.blur(damping);
-  await waitFor(() =>
+  await eventually(() =>
     expect(lastDocument(apply)).toMatchObject({
       revision: current.revision + 1,
       nodes: [{ config: { effect: { parameters: { damping: 0.7, mix: 0.4, decaySeconds: 3 } } } }],

@@ -10,12 +10,17 @@
   border-radius: 0;
   outline: none;
   background: transparent;
-  color: var(--text);
+  color: var(--text-primary);
   font-size: var(--font-body);
   font-weight: 500;
   letter-spacing: -0.015em;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.root::placeholder {
+  color: var(--control-placeholder);
+  opacity: 1;
 }
 
 .root:hover,
@@ -29,5 +34,5 @@
 
 .root:disabled {
   opacity: var(--control-disabled-opacity);
-  color: var(--muted);
+  color: var(--text-muted);
 }

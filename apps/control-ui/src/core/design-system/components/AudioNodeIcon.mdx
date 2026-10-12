@@ -1,0 +1,61 @@
+import { Meta, Canvas, ArgTypes } from '@storybook/addon-docs/blocks';
+import { DocsLayout } from '../DocsLayout';
+import { ComponentContract } from '../ComponentsReference';
+import * as Example from '../../ui/NodeFrame.stories';
+
+import * as Api from "../playgrounds/AudioNodeIcon.stories";
+
+<Meta title="Design System/Components/AudioNodeIcon" />
+
+<DocsLayout>
+
+<ComponentContract name="AudioNodeIcon" />
+
+## Playground·API·기본값
+
+<a href="/?path=/story/core-playgrounds-audionodeicon--playground" target="_top">AudioNodeIcon Playground 열기</a>. Controls는 실제 공개 props를 전달합니다. 구현 기본값은 아래 API 표와 소스 대조 계약을 따르며, Playground의 args는 재현용 입력입니다.
+
+발견된 앱·플랫폼 아이콘(iconUrl)이 우선이며, 없거나 불러오지 못한 경우에만 icon 종류의 공통 기호를 표시합니다.
+
+<Canvas of={Api.Playground} story={{ inline: false, height: 320 }} sourceState="hidden" />
+<ArgTypes of={Api.Playground} exclude={["className","classNames","style","styles","vars","unstyled","color","c","size","radius","variant","component","renderRoot","dangerouslySetInnerHTML"]} />
+
+API 표의 *는 필수 입력입니다. Default의 —는 선언된 기본값이 없다는 뜻이며, 파생값·fallback과 초기 상태는 위 소스 대조 계약에 명시합니다.
+
+속성은 Playground의 Controls에서 변경합니다. Source는 현재 JSX를, 위의 실행 예제 전체 코드는 실제 상태 갱신·이벤트·슬롯 구성을 보여줍니다.
+
+## 실제 사용례
+
+이 Canvas는 아래 계약을 소비하는 기존 스토리입니다. 여러 컴포넌트의 조합이면 해당 조합에서의 역할을 함께 확인합니다. 독립 컴포넌트 전용 예시나 실제 장치 실행으로 해석하지 않습니다.
+
+<Canvas of={Example.Default} story={{ inline: false, height: 560 }} />
+
+## 개별 상태 예제
+
+### ProvidedIcon
+
+<Canvas of={Api.ProvidedIcon} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+### FailedIcon
+
+<Canvas of={Api.FailedIcon} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+### Input
+
+<Canvas of={Api.Input} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+### Output
+
+<Canvas of={Api.Output} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+### Processor
+
+<Canvas of={Api.Processor} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+### Device
+
+<Canvas of={Api.Device} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+<a href="/?path=/docs/design-system-components--docs" target="_top">전체 컴포넌트와 사용 구분</a>
+
+</DocsLayout>

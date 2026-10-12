@@ -26,6 +26,9 @@ export interface ComponentContract {
   readonly storyTitle: string;
   readonly playgroundStory: string;
   readonly stateStories?: readonly { readonly id: string; readonly label: string }[];
+  /** Renders its own interactive trigger although its group is not Commands/Fields;
+   * the UI audit then inventories its call sites. */
+  readonly interactive?: true;
 }
 export const componentContracts: readonly ComponentContract[] = [
   {
@@ -136,10 +139,7 @@ export const componentContracts: readonly ComponentContract[] = [
     source: 'apps/control-ui/src/core/ui/StateButton.tsx',
     api: "export interface ButtonState {\n  value: string;\n  label: string;\n  icon: ReactNode;\n}\n\nexport function StateButton({\n  states,\n  value,\n  tone = 'neutral',\n  ...props\n}: Omit<ComponentPropsWithoutRef<'button'>, 'children' | 'value' | keyof NoAppearanceOverrides> &\n  NoAppearanceOverrides & {\n    states: readonly ButtonState[];\n    value: string;\n    tone?: StatusTone;\n  })",
     consumers: [],
-    tests: [
-      'apps/control-ui/src/core/ui/StateButton.test.tsx',
-      'apps/control-ui/src/core/ui/SystemControls.test.tsx',
-    ],
+    tests: ['apps/control-ui/src/core/ui/StateButton.test.tsx'],
     storyId: 'core-controls-statebutton--interactive',
     storyTitle: 'Core/Controls/StateButton',
     stateStories: [
@@ -218,7 +218,7 @@ export const componentContracts: readonly ComponentContract[] = [
     avoid: 'Mute·Bypass·앱 전체 Pause나 화면 선택을 전원 상태로 표시하지 않는다.',
     anatomy: '24px button → 14px power SVG.',
     states: 'enabled와 disabled 필수·독립. aria-pressed=enabled.',
-    tokens: '--node-control-size 24; enabled --positive; hover --surface-raised; focus 역할.',
+    tokens: '--node-control-size 24; enabled --status-positive; hover --surface-hover; focus 역할.',
     interaction:
       'Enter/Space. label은 aria-label과 공통 Tooltip에 사용한다. 클릭 전파를 막고 wrapper Tab 대상을 만들지 않는다. pending 중 disabled와 복구 버튼 제거 후 인접 명령 포커스를 유지한다.',
     source: 'apps/control-ui/src/core/ui/NodeSignalControls.tsx',
@@ -249,7 +249,7 @@ export const componentContracts: readonly ComponentContract[] = [
     avoid: 'Off나 전체 재생 Pause로 대체하지 않는다.',
     anatomy: '24px button → 14px speaker/waves 또는 cross SVG.',
     states: 'muted와 disabled 필수·독립. aria-pressed=muted.',
-    tokens: '--node-control-size 24; muted --amber + 10% 혼합 표면; focus·disabled 역할.',
+    tokens: '--node-control-size 24; muted --status-warning + 10% 혼합 표면; focus·disabled 역할.',
     interaction:
       'Enter/Space. 클릭 전파를 막고 대상 이름이 들어간 label을 aria-label·공통 Tooltip에 사용한다. muted·disabled를 독립적으로 제공한다.',
     source: 'apps/control-ui/src/core/ui/NodeSignalControls.tsx',
@@ -314,17 +314,15 @@ export const componentContracts: readonly ComponentContract[] = [
     api: "type TextFieldProps = Pick<\n  ComponentPropsWithoutRef<'input'>,\n  | 'value'\n  | 'defaultValue'\n  | 'placeholder'\n  | 'disabled'\n  | 'readOnly'\n  | 'required'\n  | 'maxLength'\n  | 'minLength'\n  | 'name'\n  | 'id'\n  | 'type'\n  | 'autoComplete'\n  | 'autoFocus'\n  | 'onChange'\n  | 'onBlur'\n  | 'onFocus'\n  | 'onKeyDown'\n  | 'aria-label'\n  | 'aria-describedby'\n> &\n  NoAppearanceOverrides & {\n    label?: string;\n    description?: ReactNode;\n    error?: ReactNode;\n    'data-autofocus'?: boolean;\n  };\n\nexport function TextField({\n  label,\n  description,\n  error,\n  disabled,\n  readOnly,\n  required,\n  defaultValue,\n  ...props\n}: TextFieldProps)",
     consumers: [
       'apps/control-ui/src/core/ui/NameDialog.tsx',
-      'apps/control-ui/src/core/ui/PathField.tsx',
-      'apps/control-ui/src/core/ui/AudioNodeCard.tsx',
       'apps/control-ui/src/core/licensing/LicensingFields.tsx',
       'apps/control-ui/src/features/graphs/GraphCreateDialog.tsx',
       'apps/control-ui/src/features/licensing/LicenseDetails.tsx',
+      'apps/control-ui/src/core/ui/AudioNodeEndpointOptions.tsx',
     ],
     tests: [
       'apps/control-ui/src/core/ui/IconButtonKeyboard.test.tsx',
       'apps/control-ui/src/core/ui/Composition.test.tsx',
       'apps/control-ui/src/core/ui/Dialog.test.tsx',
-      'apps/control-ui/src/core/ui/SystemControls.test.tsx',
       'apps/control-ui/src/core/ui/TextField.test.tsx',
     ],
     storyId: 'core-design-system-system-controls--interactive',
@@ -387,9 +385,9 @@ export const componentContracts: readonly ComponentContract[] = [
       'apps/control-ui/src/core/ui/ParameterField.tsx',
       'apps/control-ui/src/core/ui/NativeEndpointBuffer.tsx',
       'apps/control-ui/src/core/ui/InlineSelect.tsx',
-      'apps/control-ui/src/core/ui/AudioNodeCard.tsx',
       'apps/control-ui/src/core/ui/NativeSampleFormatField.tsx',
       'apps/control-ui/src/features/recorder/RecorderControls.tsx',
+      'apps/control-ui/src/core/ui/AudioNodeEndpointOptions.tsx',
     ],
     tests: ['apps/control-ui/src/core/ui/FeedbackControls.test.tsx'],
     storyId: 'core-design-system-component-catalog--overview',
@@ -584,7 +582,7 @@ export const componentContracts: readonly ComponentContract[] = [
       'Tab 대상 없음. 이름·최소0·최대100·현재값 제공. 측정값 공급·업데이트는 별도 store 소유.',
     source: 'apps/control-ui/src/core/ui/Meter.tsx',
     api: "interface MeterProps {\n  orientation?: 'horizontal' | 'vertical';\n  label: string;\n  level: number;\n}\n\nexport function Meter({ label, level, orientation = 'vertical' }: MeterProps)",
-    consumers: ['apps/control-ui/src/core/ui/AudioNodeCard.tsx'],
+    consumers: ['apps/control-ui/src/core/ui/AudioNodeMeterBanks.tsx'],
     tests: ['apps/control-ui/src/core/ui/AudioControls.test.tsx'],
     storyId: 'core-feedback-meter--vertical',
     storyTitle: 'Core/Feedback/Meter',
@@ -635,13 +633,13 @@ export const componentContracts: readonly ComponentContract[] = [
     avoid: '색만 남기거나 상태를 클릭 가능한 명령으로 꾸미지 않는다.',
     anatomy: 'span → 4px pseudo marker + children.',
     states:
-      'tone=neutral/accent/positive/warning/critical. 자동 live region 없음. className은 현재 공개 API에 있음.',
+      'tone=neutral/accent/positive/warning/critical. 자동 live region 없음. 외관 확장점 없음.',
     tokens: '--font-label 11; text-secondary / accent / positive / amber / red.',
     interaction: 'Tab 없음. 상태 문구가 읽히며 새 오류 발표는 InlineNotice/RetryAlert를 사용한다.',
     source: 'apps/control-ui/src/core/ui/StatusBadge.tsx',
-    api: "interface StatusBadgeProps extends PropsWithChildren {\n  className?: string;\n  tone?: StatusTone;\n}\n\nexport type StatusTone = 'neutral' | 'accent' | 'positive' | 'warning' | 'critical';\n\nexport function StatusBadge({ children, className, tone = 'neutral' }: StatusBadgeProps)",
+    api: "interface StatusBadgeProps extends PropsWithChildren {\n  tone?: StatusTone;\n}\n\nexport type StatusTone = 'neutral' | 'accent' | 'positive' | 'warning' | 'critical';\n\nexport function StatusBadge({ children, tone = 'neutral' }: StatusBadgeProps)",
     consumers: ['apps/control-ui/src/features/driver-status/DriverStatusCard.tsx'],
-    tests: [],
+    tests: ['apps/control-ui/src/core/ui/StatusDisplays.test.tsx'],
     storyId: 'core-feedback-statusbadge--default',
     storyTitle: 'Core/Feedback/StatusBadge',
   },
@@ -652,14 +650,19 @@ export const componentContracts: readonly ComponentContract[] = [
     purpose: '조밀한 노드에서 이름 있는 상태 표식을 제공한다.',
     use: 'label을 tooltip과 접근성 이름에 동일하게 사용한다.',
     avoid: '선택·상태를 하나의 색으로 합치거나 표식에 추가 Tab을 만들지 않는다.',
-    anatomy: 'nonInteractive Tooltip → span role=img.',
-    states: 'label/tone 필수; className은 표식의 배치·형태를 공급하는 기존 API.',
-    tokens: '소비자 Core CSS가 dot 크기·data-tone을 정함; 공통 의미색.',
+    anatomy: 'nonInteractive Tooltip → span role=img (Core 7px 원형 표식).',
+    states:
+      'label 필수; tone=neutral 기본·accent·positive·warning·critical; position=top 기본(노드 헤더는 left).',
+    tokens:
+      '--status-indicator-size 7px; --status-indicator-neutral(text-muted); status-accent/positive/warning/danger.',
     interaction: 'Tab 없음. aria-label=label. tooltip은 동일 상태 설명이며 단독 색 의미가 아님.',
     source: 'apps/control-ui/src/core/ui/StatusIndicator.tsx',
-    api: 'export function StatusIndicator({\n  className,\n  label,\n  tone,\n}: {\n  className?: string;\n  label: string;\n  tone: StatusTone;\n})',
-    consumers: [],
-    tests: ['apps/control-ui/src/core/ui/FeedbackControls.test.tsx'],
+    api: "export function StatusIndicator({\n  label,\n  tone = 'neutral',\n  position = 'top',\n}: {\n  label: string;\n  tone?: StatusTone;\n  position?: 'top' | 'bottom' | 'left' | 'right';\n})",
+    consumers: ['apps/control-ui/src/core/ui/AudioNodeCard.tsx'],
+    tests: [
+      'apps/control-ui/src/core/ui/FeedbackControls.test.tsx',
+      'apps/control-ui/src/core/ui/StatusDisplays.test.tsx',
+    ],
     storyId: 'core-audio-nodes-frame--default',
     storyTitle: 'Core/Audio Nodes/Frame',
     stateStories: [
@@ -669,6 +672,7 @@ export const componentContracts: readonly ComponentContract[] = [
       { id: 'core-feedback-statusbadge--critical', label: 'Critical' },
       { id: 'core-playgrounds-statusindicator--critical', label: 'StatusIndicator / Critical' },
       { id: 'core-playgrounds-statusindicator--warning', label: 'StatusIndicator / Warning' },
+      { id: 'core-playgrounds-statusindicator--neutral', label: 'StatusIndicator / Neutral' },
     ],
   },
   {
@@ -704,6 +708,32 @@ export const componentContracts: readonly ComponentContract[] = [
     ],
   },
   {
+    name: 'ProgressIndicator',
+    playgroundStory: 'core-playgrounds-progressindicator--playground',
+    group: 'Feedback',
+    purpose: '진행률을 알 수 없는 대기(연결·준비)를 표시한다.',
+    use: '대기 중인 동작을 설명하는 label을 전달한다. 영역에는 호출자가 aria-busy를 둔다.',
+    avoid: '확정된 진행률·완료를 표현하거나 대기 문구 없이 링만 두지 않는다.',
+    anatomy: 'span → 회전 링(aria-hidden) + 시각적으로 숨긴 role=status label.',
+    states: 'label 필수. reduced motion에서는 회전 없음.',
+    tokens:
+      '--progress-size 16px; --progress-track(border-default); --progress-indicator(text-muted); --motion-duration-spin.',
+    interaction: 'Tab 없음. label이 status로 발표되며 반복 발표하지 않는다.',
+    source: 'apps/control-ui/src/core/ui/ProgressIndicator.tsx',
+    api: 'export function ProgressIndicator({ label }: { label: string })',
+    consumers: ['apps/control-ui/src/features/runtime-connection/RuntimeConnection.tsx'],
+    tests: ['apps/control-ui/src/features/runtime-connection/RuntimeConnection.test.tsx'],
+    storyId: 'core-playgrounds-progressindicator--playground',
+    storyTitle: 'Core/Playgrounds/ProgressIndicator',
+    stateStories: [
+      {
+        id: 'core-playgrounds-progressindicator--long-label',
+        label: 'ProgressIndicator / LongLabel',
+      },
+    ],
+  },
+
+  {
     name: 'Dialog',
     playgroundStory: 'core-playgrounds-dialog--playground',
     group: 'Overlays',
@@ -723,7 +753,6 @@ export const componentContracts: readonly ComponentContract[] = [
       'apps/control-ui/src/core/ui/NameDialog.tsx',
       'apps/control-ui/src/core/ui/UpdatesDialog.tsx',
       'apps/control-ui/src/core/ui/ConfirmationDialog.tsx',
-      'apps/control-ui/src/core/ui/InfoPopover.tsx',
       'apps/control-ui/src/core/licensing/LicensingFields.tsx',
       'apps/control-ui/src/features/graphs/GraphCreateDialog.tsx',
       'apps/control-ui/src/features/licensing/AboutDialog.tsx',
@@ -753,12 +782,13 @@ export const componentContracts: readonly ComponentContract[] = [
     avoid: '필수 행동을 tooltip에만 숨기거나 설명 안에 조작을 넣지 않는다.',
     anatomy: 'TooltipTrigger → children/Focusable → AriaTooltip.',
     states:
-      'position=top; delay=motion.tooltipDelay; offset=4; nonInteractive=false; opened 제어 선택. closeDelay0.',
-    tokens: '--layer-tooltip; max-width min(320, viewport-24); caption/label 규격; floating 경계.',
+      'position=top; delay=motion.tooltipDelay; offset=4; nonInteractive=false; kind=label 기본, readout은 포트 채널 같은 고정폭 값 표시; opened 제어 선택. closeDelay0.',
+    tokens:
+      '--layer-tooltip; max-width min(320, viewport-24); caption/label 규격; floating 경계. readout은 --tooltip-readout-* (mono label·padding·shadow).',
     interaction:
       '기존 trigger가 focus 소유. nonInteractive는 Tab 제외. React Aria tooltip 연결. pointer-events none.',
     source: 'apps/control-ui/src/core/ui/Tooltip.tsx',
-    api: "export function Tooltip({\n  children,\n  label,\n  position = 'top',\n  delay = motion.tooltipDelay,\n  opened,\n  className,\n  offset = 4,\n  nonInteractive = false,\n}: {\n  children: ReactElement;\n  label: string;\n  position?: 'top' | 'bottom' | 'left' | 'right';\n  delay?: number;\n  opened?: boolean;\n  className?: string;\n  offset?: number;\n  nonInteractive?: boolean;\n})",
+    api: "export function Tooltip({\n  children,\n  label,\n  position = 'top',\n  delay = motion.tooltipDelay,\n  opened,\n  kind = 'label',\n  offset = 4,\n  nonInteractive = false,\n}: {\n  children: ReactElement;\n  label: string;\n  position?: 'top' | 'bottom' | 'left' | 'right';\n  delay?: number;\n  opened?: boolean;\n  kind?: 'label' | 'readout';\n  offset?: number;\n  nonInteractive?: boolean;\n})",
     consumers: [
       'apps/control-ui/src/core/ui/AppInformationButton.tsx',
       'apps/control-ui/src/core/ui/StatusIndicator.tsx',
@@ -770,7 +800,7 @@ export const componentContracts: readonly ComponentContract[] = [
       'apps/control-ui/src/core/ui/ThemePicker.tsx',
       'apps/control-ui/src/core/audio-graph/AudioGraphCanvas.tsx',
     ],
-    tests: [],
+    tests: ['apps/control-ui/src/core/ui/StatusDisplays.test.tsx'],
     storyId: 'core-feedback-shortcuttooltip--default',
     storyTitle: 'Core/Feedback/ShortcutTooltip',
     stateStories: [
@@ -781,6 +811,7 @@ export const componentContracts: readonly ComponentContract[] = [
       { id: 'core-playgrounds-tooltip--opened', label: 'Tooltip / Opened' },
       { id: 'core-playgrounds-tooltip--non-interactive', label: 'Tooltip / NonInteractive' },
       { id: 'core-playgrounds-tooltip--right', label: 'Tooltip / Right' },
+      { id: 'core-playgrounds-tooltip--readout', label: 'Tooltip / Readout' },
     ],
   },
   {
@@ -867,6 +898,7 @@ export const componentContracts: readonly ComponentContract[] = [
   },
   {
     name: 'HierarchicalMenuButton',
+    interactive: true,
     playgroundStory: 'core-playgrounds-hierarchicalmenubutton--playground',
     group: 'Overlays',
     purpose: '이름 있는 버튼에서 계층 명령 메뉴를 연다.',
@@ -978,25 +1010,24 @@ export const componentContracts: readonly ComponentContract[] = [
     purpose: '문장·보조·레이블·캡션의 공통 서체와 의미색을 제공한다.',
     use: 'kind와 tone을 선택하고 간격은 Stack/Inline/ContentSection에 맡긴다.',
     avoid: 'Feature에서 글자 크기·폰트·margin을 다시 정의하지 않는다.',
-    anatomy: 'p/span/small Element → children.',
+    anatomy: 'h1/h2/p/span/small Element(id 선택) → children.',
     states:
-      'kind=body(body13/supporting12/label11/caption10); tone=neutral 또는 muted/상태색; as=p.',
+      'kind=body(heading16 medium/body13/supporting12/label11/caption10); tone=neutral 또는 muted/상태색; as=p. heading은 제목 요소(as=h1/h2)와 함께 쓴다.',
     tokens: '--font-sans; --font-weight-regular; --line-height-body 1.5; 해당 text 역할.',
     interaction: 'Tab 없음. as가 의미 요소를 결정하며 자동 live 발표는 없음.',
     source: 'apps/control-ui/src/core/ui/Text.tsx',
-    api: "export function Text({\n  children,\n  kind = 'body',\n  tone = 'neutral',\n  as: Element = 'p',\n}: PropsWithChildren<\n  NoAppearanceOverrides & {\n    kind?: 'body' | 'supporting' | 'label' | 'caption';\n    tone?: StatusTone | 'muted';\n    as?: 'p' | 'span' | 'small';\n  }\n>)",
+    api: "export function Text({\n  children,\n  kind = 'body',\n  tone = 'neutral',\n  as: Element = 'p',\n  id,\n}: PropsWithChildren<\n  NoAppearanceOverrides & {\n    kind?: 'heading' | 'body' | 'supporting' | 'label' | 'caption';\n    tone?: StatusTone | 'muted';\n    as?: 'h1' | 'h2' | 'p' | 'span' | 'small';\n    /** For aria-labelledby relationships; the element still owns no spacing. */\n    id?: string;\n  }\n>)",
     consumers: [
-      'apps/control-ui/src/core/ui/HierarchicalMenu.tsx',
-      'apps/control-ui/src/core/ui/TextField.tsx',
-      'apps/control-ui/src/core/ui/SelectField.tsx',
       'apps/control-ui/src/features/updates/UpdateAccess.tsx',
       'apps/control-ui/src/features/licensing/AboutDialog.tsx',
+      'apps/control-ui/src/features/runtime-connection/RuntimeConnection.tsx',
     ],
     tests: ['apps/control-ui/src/core/ui/Composition.test.tsx'],
     storyId: 'core-composition-form-flow--interactive',
     storyTitle: 'Core/Composition/Form Flow',
     stateStories: [
       { id: 'core-playgrounds-text--supporting', label: 'Text / Supporting' },
+      { id: 'core-playgrounds-text--heading', label: 'Text / Heading' },
       { id: 'core-playgrounds-text--critical', label: 'Text / Critical' },
       { id: 'core-playgrounds-text--caption', label: 'Text / Caption' },
     ],
@@ -1009,15 +1040,16 @@ export const componentContracts: readonly ComponentContract[] = [
     use: 'gap tight/regular/section/wide를 사용한다.',
     avoid: '자식마다 margin을 덧붙여 반복 간격을 흩뜨리지 않는다.',
     anatomy: 'flex column div → children.',
-    states: 'gap=regular. 포커스·상태 없음.',
+    states: 'gap=regular; align=stretch(center는 자식과 글자를 가운데 정렬). 포커스·상태 없음.',
     tokens:
       '--composition-gap-tight4 / regular8 / section16 / wide24px; min-width0. 세로 flex column.',
     interaction: 'Tab 없음. DOM 순서를 유지하고 읽기 순서는 children 의미 요소가 정한다.',
     source: 'apps/control-ui/src/core/ui/Stack.tsx',
-    api: "export type LayoutGap = 'tight' | 'regular' | 'section' | 'wide';\n\nexport function Stack({\n  children,\n  gap = 'regular',\n}: PropsWithChildren<NoAppearanceOverrides & { gap?: LayoutGap }>)",
+    api: "export type LayoutGap = 'tight' | 'regular' | 'section' | 'wide';\n\nexport function Stack({\n  children,\n  gap = 'regular',\n  align = 'stretch',\n}: PropsWithChildren<NoAppearanceOverrides & { gap?: LayoutGap; align?: 'stretch' | 'center' }>)",
     consumers: [
       'apps/control-ui/src/core/ui/ContentSection.tsx',
       'apps/control-ui/src/features/licensing/AboutDialog.tsx',
+      'apps/control-ui/src/features/runtime-connection/RuntimeConnection.tsx',
     ],
     tests: ['apps/control-ui/src/core/ui/Composition.test.tsx'],
     storyId: 'core-composition-form-flow--interactive',
@@ -1025,6 +1057,7 @@ export const componentContracts: readonly ComponentContract[] = [
     stateStories: [
       { id: 'core-playgrounds-stack--tight', label: 'Stack / Tight' },
       { id: 'core-playgrounds-stack--wide', label: 'Stack / Wide' },
+      { id: 'core-playgrounds-stack--centered', label: 'Stack / Centered' },
     ],
   },
   {
@@ -1036,19 +1069,24 @@ export const componentContracts: readonly ComponentContract[] = [
     avoid:
       '화면 CSS에서 같은 명령군 간격을 재정의하거나 좁은 폭에서 무조건 nowrap을 사용하지 않는다.',
     anatomy: 'flex row div → children.',
-    states: 'gap=regular; align=center(start/baseline); justify=start(end/between); wrap=true.',
+    states:
+      'gap=regular; align=center(start/baseline); justify=start(center/end/between); wrap=true.',
     tokens:
       '--composition-gap-tight4 / regular8 / section16 / wide24px; min-width0. wrap은 실제 flex-wrap.',
     interaction: 'Tab 없음. DOM 순서대로 읽히며 정렬 자체가 상태가 아님.',
     source: 'apps/control-ui/src/core/ui/Inline.tsx',
-    api: "export function Inline({\n  children,\n  gap = 'regular',\n  align = 'center',\n  justify = 'start',\n  wrap = true,\n}: PropsWithChildren<\n  NoAppearanceOverrides & {\n    gap?: LayoutGap;\n    align?: 'start' | 'center' | 'baseline';\n    justify?: 'start' | 'end' | 'between';\n    wrap?: boolean;\n  }\n>)",
-    consumers: ['apps/control-ui/src/features/updates/UpdateAccess.tsx'],
+    api: "export function Inline({\n  children,\n  gap = 'regular',\n  align = 'center',\n  justify = 'start',\n  wrap = true,\n}: PropsWithChildren<\n  NoAppearanceOverrides & {\n    gap?: LayoutGap;\n    align?: 'start' | 'center' | 'baseline';\n    justify?: 'start' | 'center' | 'end' | 'between';\n    wrap?: boolean;\n  }\n>)",
+    consumers: [
+      'apps/control-ui/src/features/updates/UpdateAccess.tsx',
+      'apps/control-ui/src/features/runtime-connection/RuntimeConnection.tsx',
+    ],
     tests: ['apps/control-ui/src/core/ui/Composition.test.tsx'],
     storyId: 'core-composition-form-flow--interactive',
     storyTitle: 'Core/Composition/Form Flow',
     stateStories: [
       { id: 'core-playgrounds-inline--wrap', label: 'Inline / Wrap' },
       { id: 'core-playgrounds-inline--between', label: 'Inline / Between' },
+      { id: 'core-playgrounds-inline--centered', label: 'Inline / Centered' },
       { id: 'core-playgrounds-inline--baseline', label: 'Inline / Baseline' },
     ],
   },
@@ -1096,7 +1134,7 @@ export const componentContracts: readonly ComponentContract[] = [
     source: 'apps/control-ui/src/core/ui/WorkspaceHeader.tsx',
     api: 'export function WorkspaceHeader({ children }: PropsWithChildren)',
     consumers: ['apps/control-ui/src/features/routing-workspace/RoutingWorkspace.tsx'],
-    tests: [],
+    tests: ['apps/control-ui/src/core/ui/ShellParts.test.tsx'],
     storyId: 'app-workspace--light',
     storyTitle: 'App/Workspace',
     stateStories: [
@@ -1109,16 +1147,17 @@ export const componentContracts: readonly ComponentContract[] = [
     group: 'Layout',
     purpose: '앱 정보와 하나의 전체 오디오 동작을 고정 한 행에 배치한다.',
     use: 'information 선택 슬롯, controls 필수 슬롯을 사용한다.',
-    avoid: 'className으로 높이·padding·표면을 변경하지 않는다. 외부 grid 위치만 허용한다.',
+    avoid:
+      '높이·padding·표면을 사용처에서 바꾸지 않는다. Screen의 grid 배치는 Screen이 소유한 감싸는 요소에 둔다.',
     anatomy: 'footer → information flexible area + controls fixed area.',
-    states: 'information 선택; controls 필수; className 기존 배치 API.',
+    states: 'information 선택; controls 필수. 외관·배치 확장점 없음.',
     tokens:
       '--app-status-height 27px; --app-status-padding-block/inline; surface·line; 부모 기본 caption10, AppInformationButton은 자체control12.',
     interaction: 'footer 자체 Tab 없음. AppInformationButton/TransportButton이 각 행동 소유자.',
     source: 'apps/control-ui/src/core/ui/ApplicationStatusBar.tsx',
-    api: 'export function ApplicationStatusBar({\n  information,\n  controls,\n  className,\n}: {\n  information?: ReactNode;\n  controls: ReactNode;\n  className?: string;\n})',
+    api: 'export function ApplicationStatusBar({\n  information,\n  controls,\n}: {\n  information?: ReactNode;\n  controls: ReactNode;\n})',
     consumers: ['apps/control-ui/src/screens/StudioScreen.tsx'],
-    tests: [],
+    tests: ['apps/control-ui/src/core/ui/ShellParts.test.tsx'],
     storyId: 'app-workspace--light',
     storyTitle: 'App/Workspace',
     stateStories: [
@@ -1239,7 +1278,7 @@ export const componentContracts: readonly ComponentContract[] = [
       'SelectField 키. 같은 값 재시도 전달. pending/관측 불일치는 status로 알리고 변경 확인은 Feature/Driver 소유.',
     source: 'apps/control-ui/src/core/ui/NativeEndpointBuffer.tsx',
     api: 'export interface EndpointBufferControl {\n  label: string;\n  framesLabel: string;\n  currentFrames: number | null;\n  preferredFrames: number | null;\n  unselectedLabel: string;\n  pendingLabel: string;\n  observedLabel: string;\n  options: readonly number[];\n  disabled: boolean;\n  error?: string | null;\n}\n\nexport function NativeEndpointBuffer({\n  control,\n  onChange,\n}: {\n  control: EndpointBufferControl;\n  onChange: (frames: number) => void;\n})',
-    consumers: ['apps/control-ui/src/core/ui/AudioNodeCard.tsx'],
+    consumers: ['apps/control-ui/src/core/ui/AudioNodeEndpointOptions.tsx'],
     tests: ['apps/control-ui/src/core/ui/NativeEndpointBuffer.test.tsx'],
     storyId: 'core-audio-nodes-buffer-size--device-output',
     storyTitle: 'Core/Audio Nodes/Buffer Size',
@@ -1302,7 +1341,7 @@ export const componentContracts: readonly ComponentContract[] = [
       'SelectField 키. 지원값이며 현재와 다른 경우만 onChange. 장애시 확정 readback 유지 책임은 소유자.',
     source: 'apps/control-ui/src/core/ui/NativeSampleFormatField.tsx',
     api: 'export function NativeSampleFormatField({\n  formats,\n  render,\n  capture,\n  label,\n  unknownLabel,\n  mixedLabel,\n  disabled,\n  error,\n  onChange,\n}: {\n  formats: NativeDeviceFormats;\n  render: boolean;\n  capture: boolean;\n  label: string;\n  unknownLabel: string;\n  mixedLabel?: string;\n  disabled?: boolean;\n  error?: string | null;\n  onChange: (format: NativeSampleFormat) => void;\n})',
-    consumers: ['apps/control-ui/src/core/ui/AudioNodeCard.tsx'],
+    consumers: ['apps/control-ui/src/core/ui/AudioNodeEndpointOptions.tsx'],
     tests: ['apps/control-ui/src/core/ui/NativeSampleFormatField.test.tsx'],
     storyId: 'core-audio-nodes-bit-depth--shared',
     storyTitle: 'Core/Audio Nodes/Bit Depth',
@@ -1383,11 +1422,8 @@ export const componentContracts: readonly ComponentContract[] = [
       '선택 listbox 또는 실제 number/range 각각. 모든 조작은 같은 onChange(value). nokey 경계로 그래프 키 분리.',
     source: 'apps/control-ui/src/core/ui/ParameterField.tsx',
     api: "export interface ParameterFieldControl {\n  id: string;\n  label: string;\n  description?: string;\n  minimum: number;\n  maximum: number;\n  step: number;\n  suffix: string;\n  value: number;\n  scale?: 'linear' | 'logarithmic';\n  choices?: readonly { value: number; label: string; description?: string }[];\n  presentation?: 'slider' | 'knob';\n  group?: { id: string; label: string };\n  endpoints?: { minimum: string; maximum: string };\n}\n\nexport function ParameterField({\n  control,\n  disabled,\n  onChange,\n}: {\n  control: ParameterFieldControl;\n  disabled?: boolean;\n  onChange: (value: number) => void;\n})",
-    consumers: ['apps/control-ui/src/core/ui/AudioNodeCard.tsx'],
-    tests: [
-      'apps/control-ui/src/core/ui/GraphicEqualizer.test.tsx',
-      'apps/control-ui/src/core/ui/ParameterField.test.tsx',
-    ],
+    consumers: ['apps/control-ui/src/core/ui/AudioNodeParameterGrid.tsx'],
+    tests: ['apps/control-ui/src/core/ui/ParameterField.test.tsx'],
     storyId: 'core-parameter-field--frequency',
     storyTitle: 'Core/Parameter Field',
     stateStories: [
@@ -1571,7 +1607,7 @@ export const componentContracts: readonly ComponentContract[] = [
     source: 'apps/control-ui/src/core/ui/UpdatesDialog.tsx',
     api: 'export function UpdatesDialog({\n  children,\n  closeLabel,\n  onClose,\n  opened,\n  title,\n}: {\n  children: ReactNode;\n  closeLabel: string;\n  onClose: () => void;\n  opened: boolean;\n  title: string;\n})',
     consumers: ['apps/control-ui/src/features/updates/UpdateAccess.tsx'],
-    tests: [],
+    tests: ['apps/control-ui/src/core/ui/ShellParts.test.tsx'],
     storyId: 'core-design-system-component-catalog--overview',
     storyTitle: 'Core/Design System/Component Catalog',
     stateStories: [
@@ -1580,6 +1616,7 @@ export const componentContracts: readonly ComponentContract[] = [
   },
   {
     name: 'InfoPopover',
+    interactive: true,
     playgroundStory: 'core-playgrounds-infopopover--playground',
     group: 'Overlays',
     purpose: '현재 작업의 상세 정보를 떠 있는 dialog로 보여 준다.',
@@ -1630,6 +1667,7 @@ export const componentContracts: readonly ComponentContract[] = [
   },
   {
     name: 'NodeOptionsSection',
+    interactive: true,
     playgroundStory: 'core-playgrounds-nodeoptionssection--playground',
     group: 'Layout',
     purpose: '노드의 공통 Options 트리거와 접힌 설정 패널을 연결한다.',
@@ -1676,7 +1714,7 @@ export const componentContracts: readonly ComponentContract[] = [
     source: 'apps/control-ui/src/core/ui/NodeTransportRow.tsx',
     api: 'export function NodeTransportRow({\n  value,\n  label,\n  state,\n  description,\n  children,\n}: {\n  value: ReactNode;\n  label: string;\n  state?: string;\n  description?: string;\n  children: ReactNode;\n})',
     consumers: ['apps/control-ui/src/features/recorder/RecorderControls.tsx'],
-    tests: [],
+    tests: ['apps/control-ui/src/core/ui/StatusDisplays.test.tsx'],
     storyId: 'core-audio-nodes-frame--default',
     storyTitle: 'Core/Audio Nodes/Frame',
     stateStories: [
@@ -1689,6 +1727,7 @@ export const componentContracts: readonly ComponentContract[] = [
   },
   {
     name: 'RetryAlert',
+    interactive: true,
     playgroundStory: 'core-playgrounds-retryalert--playground',
     group: 'Feedback',
     purpose: '복구 가능한 실패 문구와 재시도를 함께 제공한다.',
@@ -1736,7 +1775,7 @@ export const componentContracts: readonly ComponentContract[] = [
       'apps/control-ui/src/features/routing-workspace/RoutingWorkspace.tsx',
       'apps/control-ui/src/features/routing-workspace/ProcessorParameterAlert.tsx',
     ],
-    tests: [],
+    tests: ['apps/control-ui/src/core/ui/ShellParts.test.tsx'],
     storyId: 'core-feedback-recovery-actions--removed-focus-return',
     storyTitle: 'Core/Feedback/Recovery Actions',
     stateStories: [
@@ -1793,15 +1832,15 @@ export const componentContracts: readonly ComponentContract[] = [
     avoid:
       'selected를 running으로 표시하거나 offline/Off를 전체 opacity로 표현하지 않는다. 실제 앱 iconUrl을 fallback으로 덮어쓰지 않는다.',
     anatomy:
-      'header actions/title/Options → face(icon·meter·EQ/dynamics·content) → utility → disclosure fields; ports 별도 geometry.',
+      'header actions/title/Options → face(AudioNodeIcon·AudioNodeMeterBanks·EQ/dynamics·AudioNodeParameterGrid·content) → utility → disclosure(AudioNodeEndpointOptions·fields); ports 별도 geometry.',
     states:
-      'poweredOff/bypassed/offline/selected 독립=false. faceMode=standard; showPorts=true; channelCount0; statusTone=neutral; parameter/meter lists=[]; optionsLabel=Options.',
+      'poweredOff/bypassed/offline/selected 독립=false. faceMode=standard; showPorts=true; channelCount0; statusTone=neutral; parameter/meter lists=[]; optionsLabel 생략 시 현재 언어의 routing.nodes.options.',
     tokens:
       'audioNodeFrame header26/utility24/minBody68/border1; node widths·face metrics; off 표면; 포트 좌표는 Options 밖.',
     interaction:
       '독립 onSelect 있을 때만 card 선택 행동. 내부 실제 버튼/입력 nokey 경계. Options·Bypass·에디터의 이름은 title: 행동이고 공통 Tooltip을 사용한다. 앱 아이콘 실패만 fallback; meters 읽기전용; 헤더 Off→Mute→Options.',
     source: 'apps/control-ui/src/core/ui/AudioNodeCard.tsx',
-    api: "export interface AudioNodeCardProps {\n  equalizer?: GraphicEqualizerContract;\n  onParametersChange?: (updates: readonly { id: string; value: number }[]) => void;\n  headerActions?: ReactNode;\n  muteControl?: ReactNode;\n  poweredOff?: boolean;\n  processingTimeNs?: number;\n  content?: ReactNode;\n  bypassed?: boolean;\n  /** Device presence only; selection and configuration remain available. */\n  offline?: boolean;\n  category: string;\n  channelCount?: number;\n  detail?: string;\n  endpointControl?: EndpointControl;\n  faceHeight?: number;\n  faceMode?: AudioNodeFaceMode;\n  onFaceHeightChange?: (height: number) => void;\n  onContentHeightChange?: (height: number, disclosureHeight: number) => void;\n  gainControl?: { label: string; valueDb: number };\n  icon: string;\n  iconUrl?: string;\n  inputCount: number;\n  meterBanks?: readonly AudioNodeMeterBank[];\n  outputCount: number;\n  optionsLabel?: string;\n  parameterControls?: readonly {\n    id: string;\n    label: string;\n    description?: string;\n    section?: 'main' | 'options';\n    maximum: number;\n    minimum: number;\n    step: number;\n    suffix: string;\n    value: number;\n    scale?: 'linear' | 'logarithmic';\n    choices?: readonly { value: number; label: string; description?: string }[];\n    precise?: boolean;\n    presentation?: 'slider' | 'knob';\n    group?: { id: string; label: string };\n    endpoints?: { minimum: string; maximum: string };\n  }[];\n  dynamics?: DynamicsMeterContract;\n  processorEditor?: {\n    actionLabel: string;\n    failureLabel?: string;\n    state: 'unavailable' | 'closed' | 'opening' | 'open' | 'failed';\n  };\n  showPorts?: boolean;\n  selected?: boolean;\n  status?: string;\n  statusTone?: StatusTone;\n  title: string;\n  /** Omit when a parent graph owns node selection and keyboard focus. */\n  onSelect?: () => void;\n  onGainChange?: (gainDb: number) => void;\n  onEndpointChange?: (value: EndpointUpdate) => void;\n  onLayoutChange?: () => void;\n  onParameterChange?: (parameterId: string, value: number) => void;\n  onProcessorEditorRetry?: () => void;\n}\n\nexport interface AudioNodeMeterBank {\n  channels: number;\n  label?: string;\n  nodeId: string;\n  portId: string;\n}\n\nexport interface EndpointControl {\n  bufferControl?: EndpointBufferControl;\n  nativeFormats?: NativeDeviceFormats;\n  nativeFormatLabels?: { bitDepth: string; unknown: string; mixed?: string };\n  channelsLabel?: string;\n  formatError?: string | null;\n  formatsDisabled?: boolean;\n  observedRate?: { label: string; value: number };\n  sampleRateOptions?: number[];\n  rateError?: string | null;\n  canRename?: boolean;\n  allowedRenderChannels?: number[];\n  allowedCaptureChannels?: number[];\n  captureChannels: number;\n  displayName: string;\n  nameLabel: string;\n  renderChannels: number;\n}\n\nexport interface EndpointUpdate {\n  bufferFrames?: number;\n  sampleRate?: number;\n  sampleFormat?: NativeSampleFormat;\n  captureChannels: number;\n  displayName: string;\n  renderChannels: number;\n}\n\nexport function AudioNodeCard({\n  headerActions,\n  muteControl,\n  poweredOff = false,\n  processingTimeNs,\n  bypassed = false,\n  offline = false,\n  category,\n  content,\n  channelCount = 0,\n  detail,\n  endpointControl,\n  faceHeight,\n  faceMode = 'standard',\n  onFaceHeightChange,\n  onContentHeightChange,\n  gainControl,\n  icon,\n  iconUrl,\n  inputCount,\n  meterBanks = [],\n  outputCount,\n  optionsLabel = 'Options',\n  onSelect,\n  onEndpointChange,\n  onGainChange,\n  onLayoutChange,\n  onParameterChange,\n  onProcessorEditorRetry,\n  parameterControls = [],\n  equalizer,\n  dynamics,\n  onParametersChange,\n  processorEditor,\n  selected = false,\n  showPorts = true,\n  status,\n  statusTone = 'neutral',\n  title,\n}: AudioNodeCardProps)",
+    api: "export interface AudioNodeCardProps {\n  equalizer?: GraphicEqualizerContract;\n  onParametersChange?: (updates: readonly { id: string; value: number }[]) => void;\n  headerActions?: ReactNode;\n  muteControl?: ReactNode;\n  poweredOff?: boolean;\n  processingTimeNs?: number;\n  content?: ReactNode;\n  bypassed?: boolean;\n  /** Device presence only; selection and configuration remain available. */\n  offline?: boolean;\n  category: string;\n  channelCount?: number;\n  detail?: string;\n  endpointControl?: EndpointControl;\n  faceHeight?: number;\n  faceMode?: AudioNodeFaceMode;\n  onFaceHeightChange?: (height: number) => void;\n  onContentHeightChange?: (height: number, disclosureHeight: number) => void;\n  gainControl?: { label: string; valueDb: number };\n  icon: string;\n  iconUrl?: string;\n  inputCount: number;\n  meterBanks?: readonly AudioNodeMeterBank[];\n  outputCount: number;\n  optionsLabel?: string;\n  parameterControls?: readonly AudioNodeParameterControl[];\n  dynamics?: DynamicsMeterContract;\n  processorEditor?: {\n    actionLabel: string;\n    failureLabel?: string;\n    state: 'unavailable' | 'closed' | 'opening' | 'open' | 'failed';\n  };\n  showPorts?: boolean;\n  selected?: boolean;\n  status?: string;\n  statusTone?: StatusTone;\n  title: string;\n  /** Omit when a parent graph owns node selection and keyboard focus. */\n  onSelect?: () => void;\n  onGainChange?: (gainDb: number) => void;\n  onEndpointChange?: (value: EndpointUpdate) => void;\n  onLayoutChange?: () => void;\n  onParameterChange?: (parameterId: string, value: number) => void;\n  onProcessorEditorRetry?: () => void;\n}\n\nexport function AudioNodeCard({\n  headerActions,\n  muteControl,\n  poweredOff = false,\n  processingTimeNs,\n  bypassed = false,\n  offline = false,\n  category,\n  content,\n  channelCount = 0,\n  detail,\n  endpointControl,\n  faceHeight,\n  faceMode = 'standard',\n  onFaceHeightChange,\n  onContentHeightChange,\n  gainControl,\n  icon,\n  iconUrl,\n  inputCount,\n  meterBanks = [],\n  outputCount,\n  optionsLabel,\n  onSelect,\n  onEndpointChange,\n  onGainChange,\n  onLayoutChange,\n  onParameterChange,\n  onProcessorEditorRetry,\n  parameterControls = [],\n  equalizer,\n  dynamics,\n  onParametersChange,\n  processorEditor,\n  selected = false,\n  showPorts = true,\n  status,\n  statusTone = 'neutral',\n  title,\n}: AudioNodeCardProps)",
     consumers: ['apps/control-ui/src/core/audio-graph/AudioGraphCanvas.tsx'],
     tests: [
       'apps/control-ui/src/core/ui/IconButtonKeyboard.test.tsx',
@@ -1837,6 +1876,159 @@ export const componentContracts: readonly ComponentContract[] = [
       { id: 'core-playgrounds-audionodecard--fallback', label: 'AudioNodeCard / Fallback' },
     ],
   },
+  {
+    name: 'AudioNodeIcon',
+    playgroundStory: 'core-playgrounds-audionodeicon--playground',
+    group: 'Audio graph',
+    purpose: '노드 제목 앞의 출처 아이콘. 발견된 실제 앱·플랫폼 아이콘을 우선 표시한다.',
+    use: 'iconUrl에는 플랫폼이 준 이미지(데이터 URL 포함)를 그대로 전달하고 icon에는 노드 종류를 전달한다.',
+    avoid: '앱 로고를 다시 그리거나 iconUrl이 있는데 fallback 기호를 강제하지 않는다.',
+    anatomy: 'iconUrl 이미지(alt 없음) 또는 16×16 선형 SVG 기호(APP·GAIN/MIX·ADC/MIC·DAC·기타).',
+    states: 'iconUrl 있음·로드 실패(같은 URL은 다시 시도하지 않음)·없음. icon 대소문자 무시.',
+    tokens:
+      '--node-icon-size 14px; AudioNodeIcon.module.css가 이미지·기호 크기와 선을 소유; 색은 부모 currentColor.',
+    interaction:
+      'Tab 없음. 장식이며 노드 이름이 정보를 제공하므로 접근성 트리에서 제외(부모 aria-hidden).',
+    source: 'apps/control-ui/src/core/ui/AudioNodeIcon.tsx',
+    api: 'export function AudioNodeIcon({ icon, iconUrl }: { icon: string; iconUrl?: string })',
+    consumers: ['apps/control-ui/src/core/ui/AudioNodeCard.tsx'],
+    tests: ['apps/control-ui/src/core/ui/AudioNodeCard.test.tsx'],
+    storyId: 'core-audio-nodes-frame--default',
+    storyTitle: 'Core/Audio Nodes/Frame',
+    stateStories: [
+      {
+        id: 'core-playgrounds-audionodeicon--provided-icon',
+        label: 'AudioNodeIcon / ProvidedIcon',
+      },
+      { id: 'core-playgrounds-audionodeicon--failed-icon', label: 'AudioNodeIcon / FailedIcon' },
+      { id: 'core-playgrounds-audionodeicon--input', label: 'AudioNodeIcon / Input' },
+      { id: 'core-playgrounds-audionodeicon--output', label: 'AudioNodeIcon / Output' },
+      { id: 'core-playgrounds-audionodeicon--processor', label: 'AudioNodeIcon / Processor' },
+      { id: 'core-playgrounds-audionodeicon--device', label: 'AudioNodeIcon / Device' },
+    ],
+  },
+
+  {
+    name: 'AudioNodeEndpointOptions',
+    playgroundStory: 'core-playgrounds-audionodeendpointoptions--playground',
+    group: 'Audio graph',
+    purpose: '장치 노드 Options의 이름·채널·샘플레이트·비트 심도·출력 버퍼 편집.',
+    use: 'Feature는 Driver가 읽어 온 현재값·지원값·오류를 control로, 변경 요청을 onChange로 연결한다.',
+    avoid:
+      '요청을 적용 완료로 표시하거나 지원하지 않는 값을 선택 가능하게 두지 않는다. 별도 Driver 설정 모달을 만들지 않는다.',
+    anatomy:
+      'TextField(이름) → SelectField(공통 채널) → SelectField(샘플레이트) → NativeSampleFormatField → NativeEndpointBuffer(출력만).',
+    states:
+      'canRename=false면 읽기 전용 이름. 선택값이 하나뿐이고 현재값과 같으면 선택기 disabled. rateError/formatError는 필드 오류. 빈 이름 blur는 원래 이름 복원.',
+    tokens: 'AudioNodeCard .endpointOptions 간격; 필드 규격은 TextField/SelectField 소유.',
+    interaction:
+      'DOM·Tab 순서 = 이름 → 채널 → 샘플레이트 → 비트 심도 → 버퍼. 이름은 Enter/blur에서 확정. nokey 경계 안에서 그래프 키와 분리.',
+    source: 'apps/control-ui/src/core/ui/AudioNodeEndpointOptions.tsx',
+    api: 'export interface EndpointControl {\n  bufferControl?: EndpointBufferControl;\n  nativeFormats?: NativeDeviceFormats;\n  nativeFormatLabels?: { bitDepth: string; unknown: string; mixed?: string };\n  channelsLabel?: string;\n  formatError?: string | null;\n  formatsDisabled?: boolean;\n  observedRate?: { label: string; value: number };\n  sampleRateOptions?: number[];\n  rateError?: string | null;\n  canRename?: boolean;\n  allowedRenderChannels?: number[];\n  allowedCaptureChannels?: number[];\n  captureChannels: number;\n  displayName: string;\n  nameLabel: string;\n  renderChannels: number;\n}\n\nexport interface EndpointUpdate {\n  bufferFrames?: number;\n  sampleRate?: number;\n  sampleFormat?: NativeSampleFormat;\n  captureChannels: number;\n  displayName: string;\n  renderChannels: number;\n}\n\ninterface EndpointOptionsProps {\n  control: EndpointControl;\n  onChange: (value: EndpointUpdate) => void;\n}\n\nexport function AudioNodeEndpointOptions({ control, onChange }: EndpointOptionsProps)',
+    consumers: ['apps/control-ui/src/core/ui/AudioNodeCard.tsx'],
+    tests: [
+      'apps/control-ui/src/core/ui/AudioNodeCard.boundaries.test.tsx',
+      'apps/control-ui/src/core/ui/AudioNodeDriverBuffer.test.tsx',
+      'apps/control-ui/src/core/ui/AudioNodeDriverFormats.test.tsx',
+    ],
+    storyId: 'core-audio-nodes-frame--default',
+    storyTitle: 'Core/Audio Nodes/Frame',
+    stateStories: [
+      {
+        id: 'core-playgrounds-audionodeendpointoptions--read-only-name',
+        label: 'AudioNodeEndpointOptions / ReadOnlyName',
+      },
+      {
+        id: 'core-playgrounds-audionodeendpointoptions--render-only',
+        label: 'AudioNodeEndpointOptions / RenderOnly',
+      },
+      {
+        id: 'core-playgrounds-audionodeendpointoptions--single-choice',
+        label: 'AudioNodeEndpointOptions / SingleChoice',
+      },
+      {
+        id: 'core-playgrounds-audionodeendpointoptions--failed',
+        label: 'AudioNodeEndpointOptions / Failed',
+      },
+    ],
+  },
+
+  {
+    name: 'AudioNodeMeterBanks',
+    playgroundStory: 'core-playgrounds-audionodemeterbanks--playground',
+    group: 'Audio graph',
+    purpose: '노드 포트별 실제 출력 레벨을 채널 미터 묶음으로 표시한다.',
+    use: 'banks에 노드·포트 ID와 채널 수를 전달한다. 레벨은 AudioMeterProvider의 store가 공급한다.',
+    avoid: '미터를 조작 대상으로 만들거나 색 구간을 clipping 판정으로 설명하지 않는다.',
+    anatomy:
+      'bank마다 선택적 이름 → 8채널 이하 가로 행(L/R 또는 번호) · 초과 시 세로 격자(1·8의 배수·마지막 번호).',
+    states:
+      'offline이면 레벨을 비우고 배치 유지. 채널 수 1–64로 제한; 0채널 bank는 생략. 여러 bank일 때만 이름 표시.',
+    tokens:
+      '--meter-*; --meter-scale-font-size 8px 눈금; 행 높이는 audioNodeLayout channelRowMetrics와 일치.',
+    interaction:
+      "Tab 없음. 각 미터는 role=meter와 '{노드} {bank} 채널 N' 번역 이름. 실시간 값을 계속 발표하지 않음.",
+    source: 'apps/control-ui/src/core/ui/AudioNodeMeterBanks.tsx',
+    api: 'export interface AudioNodeMeterBank {\n  channels: number;\n  label?: string;\n  nodeId: string;\n  portId: string;\n}\n\nexport function AudioNodeMeterBanks({\n  banks,\n  offline,\n  title,\n}: {\n  banks: readonly AudioNodeMeterBank[];\n  offline: boolean;\n  title: string;\n})',
+    consumers: ['apps/control-ui/src/core/ui/AudioNodeCard.tsx'],
+    tests: ['apps/control-ui/src/core/ui/AudioNodeCard.test.tsx'],
+    storyId: 'core-audio-nodes-frame--multichannel',
+    storyTitle: 'Core/Audio Nodes/Frame',
+    stateStories: [
+      {
+        id: 'core-playgrounds-audionodemeterbanks--labelled',
+        label: 'AudioNodeMeterBanks / Labelled',
+      },
+      {
+        id: 'core-playgrounds-audionodemeterbanks--multichannel',
+        label: 'AudioNodeMeterBanks / Multichannel',
+      },
+      {
+        id: 'core-playgrounds-audionodemeterbanks--offline',
+        label: 'AudioNodeMeterBanks / Offline',
+      },
+    ],
+  },
+
+  {
+    name: 'AudioNodeParameterGrid',
+    playgroundStory: 'core-playgrounds-audionodeparametergrid--playground',
+    group: 'Audio graph',
+    purpose: '노드 본문·Options의 반복 오디오 파라미터를 같은 배치 규칙으로 놓는다.',
+    use: 'Feature는 값·범위·step·scale·presentation·group만 전달하고 onChange(id, value)로 요청한다.',
+    avoid: '파라미터마다 별도 레이아웃을 만들거나 노브·슬라이더를 같은 값에 중복 표시하지 않는다.',
+    anatomy:
+      '연속된 knob(선택형 제외)은 group별 최대 3열 격자; 선택형·precise·scale 값은 ParameterField; 그 외는 이름·값·ValueSlider 행.',
+    states: 'disabled면 inert. 1·2개 노브 그룹은 개수만큼 열. group.label이 있으면 그룹 이름 표시.',
+    tokens:
+      'AudioNodeCard .parameterList/.knobGroup(subgrid 라벨 높이 공유); 필드 규격은 ParameterField/Knob/ValueSlider.',
+    interaction:
+      '각 입력이 Tab 대상; 노브·숫자·슬라이더 키보드 규칙은 parameterValue 공통 모듈. nodrag/nowheel로 그래프 조작과 분리.',
+    source: 'apps/control-ui/src/core/ui/AudioNodeParameterGrid.tsx',
+    api: "export interface AudioNodeParameterControl extends ParameterFieldControl {\n  section?: 'main' | 'options';\n  precise?: boolean;\n}\n\nexport function AudioNodeParameterGrid({\n  controls,\n  disabled,\n  onChange,\n}: {\n  controls: readonly AudioNodeParameterControl[];\n  disabled: boolean;\n  onChange: (parameterId: string, value: number) => void;\n})",
+    consumers: ['apps/control-ui/src/core/ui/AudioNodeCard.tsx'],
+    tests: [
+      'apps/control-ui/src/core/ui/AudioNodeCard.knob.test.tsx',
+      'apps/control-ui/src/core/ui/AudioControls.test.tsx',
+    ],
+    storyId: 'core-audio-nodes-frame--default',
+    storyTitle: 'Core/Audio Nodes/Frame',
+    stateStories: [
+      {
+        id: 'core-playgrounds-audionodeparametergrid--mixed',
+        label: 'AudioNodeParameterGrid / Mixed',
+      },
+      {
+        id: 'core-playgrounds-audionodeparametergrid--two-knobs',
+        label: 'AudioNodeParameterGrid / TwoKnobs',
+      },
+      {
+        id: 'core-playgrounds-audionodeparametergrid--disabled',
+        label: 'AudioNodeParameterGrid / Disabled',
+      },
+    ],
+  },
+
   {
     name: 'AudioGraphCanvas',
     playgroundStory: 'core-playgrounds-audiographcanvas--playground',
@@ -1942,6 +2134,29 @@ export const componentContracts: readonly ComponentContract[] = [
       { id: 'core-playgrounds-mixrelayprovider--dark', label: 'MixRelayProvider / Dark' },
     ],
   },
+  {
+    name: 'I18nProvider',
+    playgroundStory: 'core-playgrounds-i18nprovider--playground',
+    group: 'Environment',
+    purpose: '앱 i18n 인스턴스를 공급하고 문서 언어(html lang)를 현재 언어에 맞춘다.',
+    use: '앱 최상위와 Storybook preview에서 한 번 감싼다. 언어 변경은 i18n.changeLanguage가 소유한다.',
+    avoid: '컴포넌트마다 별도 i18n 인스턴스를 만들거나 lang을 직접 바꾸지 않는다.',
+    anatomy: 'I18nextProvider(app i18n) → children; languageChanged 구독으로 html lang 갱신.',
+    states: 'resolvedLanguage가 없으면 요청 언어로 lang을 정한다. pseudo는 지원 locale로 해석.',
+    tokens: '없음. 서체 선택은 Fonts.css의 html lang 규칙이 소비한다.',
+    interaction: 'Tab 없음. 언어가 바뀌면 보조 기술과 지역 서체가 같은 lang을 사용한다.',
+    source: 'apps/control-ui/src/core/i18n/index.tsx',
+    api: 'export function I18nProvider({ children }: PropsWithChildren)',
+    consumers: ['apps/control-ui/src/main.tsx'],
+    tests: ['apps/control-ui/src/core/i18n/DocumentLanguage.test.tsx'],
+    storyId: 'core-playgrounds-i18nprovider--playground',
+    storyTitle: 'Core/Playgrounds/I18nProvider',
+    stateStories: [
+      { id: 'core-playgrounds-i18nprovider--english', label: 'I18nProvider / English' },
+      { id: 'core-playgrounds-i18nprovider--pseudo', label: 'I18nProvider / Pseudo' },
+    ],
+  },
+
   {
     name: 'AudioMeterProvider',
     playgroundStory: 'core-playgrounds-audiometerprovider--playground',

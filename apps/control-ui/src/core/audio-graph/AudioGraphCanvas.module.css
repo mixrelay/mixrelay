@@ -24,7 +24,7 @@
 }
 
 .nodeToolbar {
-  z-index: 5;
+  z-index: var(--layer-canvas-toolbar);
   margin: var(--space-3);
   margin-left: var(--layout-canvas-toolbar-inset, var(--space-3));
 }
@@ -68,7 +68,7 @@
 }
 
 .root :global(svg.react-flow__connectionline) {
-  z-index: 0;
+  z-index: var(--layer-canvas-connection-line);
 }
 
 .root :global(.react-flow__edge.selected .react-flow__edge-path) {
@@ -121,7 +121,7 @@
 }
 
 .node .resizeHandle:hover {
-  color: var(--signal);
+  color: var(--canvas-resize-text-hover);
 }
 
 .handle {
@@ -132,7 +132,7 @@
   --port-selected-border: var(--port-output-border-selected);
   --port-selected-ring: var(--port-output-ring-selected);
 
-  z-index: 3;
+  z-index: var(--layer-canvas-handle);
   /* React Flow anchors cables to this box, not the expanded pointer target. */
   min-width: 0;
   width: 3px;
@@ -165,14 +165,14 @@
   content: "";
   transform: translate(-50%, -50%);
   transition:
-    width 80ms ease,
-    height 80ms ease,
-    background-color 80ms ease,
-    box-shadow 80ms ease;
+    width var(--motion-duration-instant) var(--motion-easing-standard),
+    height var(--motion-duration-instant) var(--motion-easing-standard),
+    background-color var(--motion-duration-instant) var(--motion-easing-standard),
+    box-shadow var(--motion-duration-instant) var(--motion-easing-standard);
 }
 
 .handle:hover {
-  z-index: 6;
+  z-index: var(--layer-canvas-handle-hover);
 }
 
 .handle:hover::after,
@@ -186,7 +186,7 @@
 }
 
 .handle[data-port-selected]::after {
-  z-index: 5;
+  z-index: var(--layer-canvas-port-selection);
   width: 3px;
   height: 9px;
   border-color: var(--port-selected-border);
@@ -203,30 +203,17 @@
   --port-selected-ring: var(--port-input-ring-selected);
 }
 
-.portTooltip {
-  padding: 3px 5px;
-  border: 1px solid var(--port-tooltip-border);
-  border-radius: 0;
-  background: var(--port-tooltip-background);
-  box-shadow: 0 4px 12px var(--port-tooltip-shadow);
-  color: var(--port-tooltip-text);
-  font:
-    var(--port-tooltip-font-weight) var(--port-tooltip-font-size) / var(--port-tooltip-line-height)
-    var(--port-tooltip-font-family);
-  letter-spacing: 0;
-}
-
 .portSelectionFeedback {
   position: absolute;
   top: clamp(8px, var(--selection-y), calc(100% - 32px));
   left: clamp(8px, var(--selection-x), calc(100% - 180px));
-  z-index: 8;
+  z-index: var(--layer-canvas-selection-feedback);
   max-width: min(172px, calc(100% - 16px));
   overflow: hidden;
   padding: 3px 6px;
   border-radius: 3px;
   background: var(--surface-floating);
-  color: var(--text);
+  color: var(--text-primary);
   font-size: var(--font-label);
   font-variant-numeric: tabular-nums;
   line-height: 1.4;

@@ -8,6 +8,7 @@ const meta = {
   component: Stack,
   argTypes: {
     gap: { control: 'select', options: ['tight', 'regular', 'section', 'wide'] },
+    align: { control: 'inline-radio', options: ['stretch', 'center'] },
     children: { control: false },
   },
   args: {
@@ -52,3 +53,4 @@ type Story = StoryObj<typeof meta>;
 export const Playground: Story = {};
 export const Tight: Story = { args: { gap: 'tight' } };
 export const Wide: Story = { args: { gap: 'wide' } };
+export const Centered: Story = { args: { align: 'center' } };

@@ -1,0 +1,33 @@
+.root {
+  display: inline-flex;
+}
+.ring {
+  display: inline-block;
+  width: var(--progress-size);
+  height: var(--progress-size);
+  border: var(--border-width) solid var(--progress-track);
+  border-top-color: var(--progress-indicator);
+  border-radius: 50%;
+  animation: turn var(--motion-duration-spin) linear infinite;
+}
+/* Visually hidden; the status text is what assistive technology reads. */
+.label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@keyframes turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ring {
+    animation: none;
+  }
+}

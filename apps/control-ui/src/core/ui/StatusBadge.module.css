@@ -20,14 +20,14 @@
 }
 
 .root[data-tone="positive"] {
-  color: var(--positive);
+  color: var(--status-positive);
 }
 .root[data-tone="accent"] {
-  color: var(--accent);
+  color: var(--status-accent);
 }
 .root[data-tone="warning"] {
-  color: var(--amber);
+  color: var(--status-warning);
 }
 .root[data-tone="critical"] {
-  color: var(--red);
+  color: var(--status-danger);
 }

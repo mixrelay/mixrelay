@@ -5,14 +5,12 @@ import styles from './ApplicationStatusBar.module.css';
 export function ApplicationStatusBar({
   information,
   controls,
-  className,
 }: {
   information?: ReactNode;
   controls: ReactNode;
-  className?: string;
 }) {
   return (
-    <footer className={[styles.root, className].filter(Boolean).join(' ')}>
+    <footer className={styles.root}>
       <div className={styles.information}>{information}</div>
       <div className={styles.controls}>{controls}</div>
     </footer>

@@ -15,14 +15,16 @@ export function NodeTransportRow({
   description?: string;
   children: ReactNode;
 }) {
+  // One summary serves the accessible description and the pointer tooltip; empty is omitted.
+  const summary = [state, description].filter(Boolean).join(' · ') || undefined;
   return (
     <div className={styles.transportRow}>
       <output
         className={styles.transportValue}
         aria-label={label}
         aria-live="off"
-        aria-description={[state, description].filter(Boolean).join(' · ')}
-        title={[state, description].filter(Boolean).join(' · ')}
+        aria-description={summary}
+        title={summary}
       >
         {value}
       </output>

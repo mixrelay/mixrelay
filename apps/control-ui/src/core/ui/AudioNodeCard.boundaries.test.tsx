@@ -2,7 +2,8 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MixRelayProvider } from '../theme/MixRelayProvider';
-import { AudioNodeCard, type AudioNodeCardProps, type EndpointControl } from './AudioNodeCard';
+import { AudioNodeCard, type AudioNodeCardProps } from './AudioNodeCard';
+import type { EndpointControl } from './AudioNodeEndpointOptions';
 
 function fixture(props: Partial<AudioNodeCardProps> = {}) {
   const onEndpointChange = vi.fn();
