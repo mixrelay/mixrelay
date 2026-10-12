@@ -39,9 +39,35 @@ export default defineConfig({
     strictPort: true,
   },
   test: {
-    exclude: [...configDefaults.exclude, 'scripts/**', ...(a11yRun ? [] : [a11yTests])],
-    ...(a11yRun ? { include: [a11yTests] } : {}),
     maxWorkers: Number(process.env.MIXRELAY_UI_TEST_WORKERS ?? 4),
+    // `.test.tsx` renders or touches the DOM and runs in jsdom; `.test.ts` is DOM-free and
+    // runs in Node without jsdom's per-file environment cost. A logic test that needs the
+    // DOM is named `.test.tsx`.
+    projects: [
+      {
+        extends: true as const,
+        test: {
+          name: 'dom',
+          environment: 'jsdom',
+          setupFiles: './src/test-setup.ts',
+          include: a11yRun ? [a11yTests] : ['src/**/*.test.tsx'],
+          exclude: [...configDefaults.exclude, ...(a11yRun ? [] : [a11yTests])],
+        },
+      },
+      ...(a11yRun
+        ? []
+        : [
+            {
+              extends: true as const,
+              test: {
+                name: 'node',
+                environment: 'node',
+                setupFiles: './src/test-setup.node.ts',
+                include: ['src/**/*.test.ts'],
+              },
+            },
+          ]),
+    ],
     coverage: {
       reportsDirectory: process.env.MIXRELAY_UI_COVERAGE_DIR ?? './coverage',
       exclude: [
@@ -51,6 +77,7 @@ export default defineConfig({
         'src/**/*.test.{ts,tsx}',
         'src/main.tsx',
         'src/test-setup.ts',
+        'src/test-setup.node.ts',
       ],
       include: ['src/**/*.{ts,tsx}'],
       provider: 'v8',
@@ -62,7 +89,5 @@ export default defineConfig({
         statements: 100,
       },
     },
-    environment: 'jsdom',
-    setupFiles: './src/test-setup.ts',
   },
 });
