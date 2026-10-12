@@ -69,6 +69,7 @@ struct SavedGraph {
 
 pub(super) struct CatalogStore {
     pub(super) path: PathBuf,
+    pub(super) persistent: bool,
     pub(super) value: Result<Catalog, String>,
 }
 
@@ -237,6 +238,7 @@ impl EngineGraphController {
             Err(error) => {
                 *self.catalog.lock() = Some(CatalogStore {
                     path: PathBuf::new(),
+                    persistent: false,
                     value: Err(error.to_string()),
                 });
                 self
@@ -245,9 +247,27 @@ impl EngineGraphController {
     }
 
     pub(super) fn with_graph_catalog_path(self, path: PathBuf) -> Self {
+        let loaded = Catalog::load(&path);
+        let protected = match &loaded {
+            Ok(Some(catalog)) => self
+                .validate_workspace_feature_usage(catalog)
+                .is_err_and(|error| error.code == ErrorCode::FeatureLimit),
+            Err(_) => true,
+            Ok(None) => false,
+        };
+        if !self.is_paid() && protected {
+            self.processor_controls
+                .configure_state_store(path.with_extension("states"));
+            *self.catalog.lock() = Some(CatalogStore {
+                path,
+                persistent: false,
+                value: Ok(Catalog::imported(self.graph())),
+            });
+            self.refresh_control_snapshot();
+            return self;
+        }
         self.processor_controls
             .configure_state_store(path.with_extension("states"));
-        let loaded = Catalog::load(&path);
         match loaded {
             Ok(None) => {
                 // Import the already prepared graph once. Never initialize an existing file.
@@ -256,6 +276,7 @@ impl EngineGraphController {
                     stage_json_limited(&path, &value, MAX_BYTES).and_then(StagedWrite::commit);
                 *self.catalog.lock() = Some(CatalogStore {
                     path,
+                    persistent: true,
                     value: saved.map(|()| value).map_err(|error| error.to_string()),
                 });
             }
@@ -263,6 +284,7 @@ impl EngineGraphController {
                 let document = value.active().document.clone();
                 *self.catalog.lock() = Some(CatalogStore {
                     path,
+                    persistent: true,
                     value: Ok(value),
                 });
                 // The editable document is durable user data, not the bootstrap audio
@@ -275,6 +297,7 @@ impl EngineGraphController {
             Err(error) => {
                 *self.catalog.lock() = Some(CatalogStore {
                     path,
+                    persistent: true,
                     value: Err(error),
                 });
             }
@@ -299,9 +322,20 @@ impl EngineGraphController {
         &self,
         candidate: Option<&Catalog>,
     ) -> Result<Option<StagedWrite>, ProtocolError> {
+        if self
+            .catalog
+            .lock()
+            .as_ref()
+            .is_some_and(|store| !store.persistent)
+        {
+            return Ok(None);
+        }
         let Some(candidate) = candidate else {
             return Ok(None);
         };
+        if self.validate_workspace_export_usage(candidate).is_err() {
+            return Ok(None);
+        }
         let references = state_assets::referenced(candidate)?;
         let (path, accepted_references) = {
             let catalog = self.catalog.lock();
@@ -395,10 +429,9 @@ impl EngineGraphController {
                     .to_owned()
             })
             .and_then(|staged| {
-                staged
-                    .expect("enabled catalog stages a file")
-                    .commit()
-                    .map_err(|error| error.to_string())
+                staged.map_or(Ok(()), |write| {
+                    write.commit().map_err(|error| error.to_string())
+                })
             });
         self.commit_catalog_memory(Some(candidate));
         let error = result.err();
@@ -504,10 +537,12 @@ impl EngineGraphController {
         let mut document = value.active_document().clone();
         document.revision = revisions.submitted;
         value.update_document(document.clone());
-        self.stage_catalog(Some(&value))?
-            .expect("catalog staged")
-            .commit()
-            .map_err(|error| unavailable(&error.to_string()))?;
+        self.validate_feature_usage(&document, Some(&value))?;
+        if let Some(staged) = self.stage_catalog(Some(&value))? {
+            staged
+                .commit()
+                .map_err(|error| unavailable(&error.to_string()))?;
+        }
         *self.graph.write() = document;
         *self.catalog_write_error.lock() = None;
         self.commit_catalog_memory(Some(value.clone()));
@@ -548,6 +583,7 @@ impl EngineGraphController {
             self.preserve_live_processor_state(&mut document, &[])?;
         }
         candidate.update_document(document);
+        self.validate_feature_usage(candidate.active_document(), Some(&candidate))?;
         self.reconcile_catalog_devices(&mut candidate)?;
         // The selected identity may have changed. Preserve providers by catalog owner,
         // not by comparing graph-local node IDs against the previously selected graph.

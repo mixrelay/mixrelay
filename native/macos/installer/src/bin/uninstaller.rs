@@ -52,7 +52,7 @@ mod tests {
 
     #[test]
     fn only_fixed_bundle_executable_and_resource_helper_are_accepted() {
-        let bundle = Path::new("/Applications/Uninstall MixRelay Driver.app");
+        let bundle = Path::new("/Applications/Uninstall MixRelay.app");
         let executable = bundle.join("Contents/MacOS/mixrelay-driver-uninstaller");
         let helper = bundle.join("Contents/Helpers/mixrelay-macos-installer");
         assert!(validate_bundle_layout(bundle, &executable, &helper).is_ok());

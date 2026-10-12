@@ -425,7 +425,7 @@ fn source_gain_retains_float_headroom_and_meter_peaks_across_unity_boost_and_mut
             assert!((output[3] + 2.0).abs() <= 0.000_001);
         }
         for index in 0..plan.meter_bindings().len() {
-            let peaks = meters.take_peaks(plan.revision(), index, 2);
+            let peaks = meters.take_peaks(revision, index, 2);
             assert_eq!(peaks.len(), 2);
             for (actual, expected) in peaks.into_iter().zip([0.5 * scale, scale]) {
                 assert!((actual - expected).abs() <= 0.000_001);
@@ -538,6 +538,7 @@ fn mute_publication_retains_running_dynamics_and_unmute_continues_the_envelope()
     for config in [
         NodeConfig::Compressor(mixrelay_audio_graph::CompressorConfig {
             version: 1,
+            bypass: false,
             channels: 2,
             threshold_db: -18.0,
             ratio: 4.0,
@@ -547,6 +548,7 @@ fn mute_publication_retains_running_dynamics_and_unmute_continues_the_envelope()
         }),
         NodeConfig::Limiter(mixrelay_audio_graph::LimiterConfig {
             version: 1,
+            bypass: false,
             channels: 2,
             ceiling_db: -6.0,
             release_ms: 100.0,

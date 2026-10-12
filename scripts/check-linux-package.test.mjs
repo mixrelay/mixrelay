@@ -102,9 +102,9 @@ test('Debian ARM64 and amd64 payloads include both executable owners and depende
     });
   }
 });
-test('both Linux package configurations register the WirePlumber hook and policy fragment', () => {
+test('both Driver package formats own the WirePlumber hook and policy fragment', () => {
   const config = JSON.parse(readFileSync(new URL(
-    '../apps/desktop/src-tauri/tauri.linux.conf.json', import.meta.url,
+    './fixtures/legacy-driver-linux.json', import.meta.url,
   ), 'utf8'));
   for (const format of ['deb', 'rpm']) {
     for (const path of wirePlumberFiles) {
@@ -158,12 +158,12 @@ test('Linux product builds select package-manager formats and register lifecycle
   assert.deepEqual(config.bundle.targets, ['deb', 'rpm']);
   for (const format of ['deb', 'rpm']) {
     assert.equal(config.bundle.linux[format].preInstallScript,
-      '../../../packaging/linux/require-app-closed.sh');
+      '../../../packaging/linux/driver-before-change.sh');
   }
   assert.equal(config.bundle.linux.deb.preRemoveScript,
-    '../../../packaging/linux/require-app-closed.sh');
+    '../../../packaging/linux/driver-pre-remove.sh');
   assert.equal(config.bundle.linux.rpm.preRemoveScript,
-    '../../../packaging/linux/rpm-pre-remove.sh');
+    '../../../packaging/linux/driver-rpm-pre-remove.sh');
   for (const name of ['gtk3', 'webkit2gtk4.1', 'librsvg2']) {
     assert.ok(config.bundle.linux.rpm.depends.includes(name));
   }
@@ -198,7 +198,7 @@ test('package lifecycle refuses active installed payloads without touching user 
     for (const args of [['install'], ['upgrade', '0.1.0', '0.2.0'], ['remove']]) {
       const result = runHook('require-app-closed.sh', args);
       assert.equal(result.status, 1);
-      assert.match(result.stderr, /Quit MixRelay/);
+      assert.match(result.stderr, /Stop all audio.*close the MixRelay editor/);
     }
     assert.equal(runHook('rpm-pre-remove.sh', ['0']).status, 1);
     assert.equal(runHook('rpm-pre-remove.sh', ['1']).status, 0);
@@ -383,7 +383,7 @@ test('required dependencies cannot be optional alternatives', () => {
 });
 test('audio session, Secret Service provider and native dialogs are mandatory in Debian and RPM', () => {
   const config = JSON.parse(readFileSync(new URL(
-    '../apps/desktop/src-tauri/tauri.linux.conf.json', import.meta.url,
+    './fixtures/legacy-driver-linux.json', import.meta.url,
   ), 'utf8'));
   for (const format of ['deb', 'rpm']) {
     for (const name of ['pipewire', 'wireplumber', 'gnome-keyring', 'zenity']) {
@@ -623,4 +623,48 @@ test('Debian artifact inspection rejects missing or modified lifecycle hooks', a
     }), fakeExtractor(new Map(Object.entries(data.elfHeaders)), [], data.contents)),
     new RegExp(`Missing or mismatched package lifecycle hook: ${script}`));
   }
+});
+
+
+test('0.1.2 editor excludes the runtime and Driver owns all three executable payloads', () => {
+  for (const architecture of ['arm64', 'amd64']) {
+    const oldApp = fixture(architecture);
+    const app = { ...oldApp, version: '0.1.2', contents: oldApp.contents.split('\n')
+      .filter(line => !line.includes('mixrelay-engine-service') && !wirePlumberFiles.some(path => line.includes(path))).join('\n') };
+    assert.deepEqual(validatePackage(app).executables, ['usr/bin/mixrelay-desktop']);
+    assert.throws(() => validatePackage({ ...app, contents: oldApp.contents }), /must not own the Driver runtime/);
+    const config = JSON.parse(readFileSync(new URL('./fixtures/legacy-driver-linux.json', import.meta.url), 'utf8'));
+    const binaries = ['mixrelay-driver-manager', 'mixrelay-driver-service', 'mixrelay-engine-service'];
+    const driver = { architecture, packageName: 'mix-relay-driver', version: '0.1.2-1', versionReceipt: '{"version":"0.1.2"}',
+      depends: oldApp.depends + ', xterm, systemd, util-linux',
+      contents: [...binaries.map(name => `-rwxr-xr-x 0/0 64 2026-10-10 00:00 ./usr/bin/${name}`),
+        ...Object.entries(config.bundle.linux.deb.files).filter(([,source]) => source).map(([path]) => `-rw-r--r-- 0/0 32 2026-10-10 00:00 .${path}`)].join('\n'),
+      elfHeaders: Object.fromEntries(binaries.map(name => [`usr/bin/${name}`, elfHeader(architecture === 'arm64' ? 183 : 62)])),
+    };
+    assert.deepEqual(validatePackage(driver).executables, binaries.map(name => `usr/bin/${name}`));
+    assert.throws(() => validatePackage({ ...driver, contents: driver.contents.split('\n').filter(line => !line.includes('mixrelay-engine-service')).join('\n') }), /Missing non-empty regular executable/);
+    assert.throws(() => validatePackage({ ...driver, depends: driver.depends.replace('liblilv-0-0, ', '') }), /Missing required dependency: liblilv/);
+    assert.throws(() => validatePackage({ ...driver, contents: driver.contents + '\n' + oldApp.contents.split('\n')[0] }), /must not own App executables/);
+  }
+});
+
+test('the unified 0.1.0 product contains editor, both services, one remover and the same version receipt', () => {
+  const config = JSON.parse(readFileSync(new URL('../apps/desktop/src-tauri/tauri.linux.conf.json', import.meta.url), 'utf8'));
+  const old = fixture('amd64');
+  const binaries = ['mixrelay-desktop', 'mixrelay-engine-service', 'mixrelay-driver-service'];
+  const product = { ...old, version: '0.1.0', versionReceipt: '{"version":"0.1.0"}',
+    depends: old.depends + ', xterm, systemd, util-linux',
+    contents: [...binaries.map(name => `-rwxr-xr-x 0/0 64 2026-10-12 00:00 ./usr/bin/${name}`), ...Object.keys(config.bundle.linux.deb.files).map(path => `-rw-r--r-- 0/0 32 2026-10-12 00:00 .${path}`)].join('\n'),
+    elfHeaders: Object.fromEntries(binaries.map(name => [`usr/bin/${name}`, elfHeader(62)])),
+  };
+  assert.deepEqual(validatePackage({ ...product, requireUnified: true }).executables, binaries.map(name => `usr/bin/${name}`));
+  for (const missing of binaries) {
+    assert.throws(() => validatePackage({ ...product, requireUnified: true, contents: product.contents.split('\n').filter(line => !line.includes(`/usr/bin/${missing}`)).join('\n') }), /complete MixRelay package|Missing non-empty regular executable/);
+  }
+  assert.throws(() => validatePackage({ ...old, requireUnified: true }), /complete MixRelay package/);
+  assert.throws(() => validatePackage({ ...product, versionReceipt: '{"version":"0.1.1"}' }), /receipt/);
+  assert.throws(() => validatePackage({ ...product, contents: product.contents + '\n-rwxr-xr-x 0/0 64 2026-10-12 00:00 ./usr/bin/mixrelay-driver-manager' }), /one public launch/);
+  assert.equal(config.bundle.linux.deb.recommends, undefined);
+  assert.deepEqual(config.bundle.linux.deb.replaces, ['mix-relay-driver']);
+  assert.deepEqual(config.bundle.linux.rpm.obsoletes, ['mix-relay-driver']);
 });

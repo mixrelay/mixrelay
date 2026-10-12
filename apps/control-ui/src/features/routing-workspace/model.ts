@@ -1,9 +1,14 @@
 import type {
   AudioGraphModel,
   AudioGraphNode,
+  AudioGraphPort,
   AudioGraphPosition,
 } from '../../core/audio-graph/model';
-import { addAudioGraphNode } from '../../core/audio-graph/model';
+import {
+  addAudioGraphNode,
+  connectAudioGraph,
+  graphNodeDefaultWidth,
+} from '../../core/audio-graph/model';
 import type {
   CapturableApplication,
   ExternalProcessorDescriptor,
@@ -22,8 +27,30 @@ import type {
   VirtualEndpointSettings,
   VirtualEndpointSpec,
 } from '../../core/control-port/types';
+import { nodeInsertionGap } from '../../core/theme/tokens';
 import { applicationInventorySelection, applicationSelectorKey } from './applicationIdentity';
+import {
+  type ChainKind,
+  chainEffects,
+  defaultEffectLabels,
+  type EffectKind,
+  type EffectLabels,
+  effectConfig,
+  effectControls,
+  effectPresets,
+  isEffectKind,
+  refreshEffectControls,
+} from './builtinEffects';
 import { serializeGraphEdges } from './graphEdgeProjection';
+
+// Runtime projection always retains native identity and channel metadata.
+type RuntimeAudioPort = AudioGraphPort &
+  Required<Pick<AudioGraphPort, 'channelIndex' | 'runtimePortId'>>;
+interface RuntimeAudioNode extends AudioGraphNode {
+  inputPorts: RuntimeAudioPort[];
+  outputPorts: RuntimeAudioPort[];
+  runtime: NonNullable<AudioGraphNode['runtime']>;
+}
 
 const AUDIO_PORT_ID = 'audio';
 const FROM_OS_PORT_ID = 'from_os';
@@ -33,11 +60,12 @@ const SINK_NODE_SUFFIX = '::host-sink';
 const CHANNEL_PORT_SEPARATOR = '::channel:';
 
 export interface GraphPresentation {
+  effectLabels?: EffectLabels;
   application: string;
   audioInput: string;
   audioOutput: string;
   recorder: string;
-  captureChannels: string;
+  channels: string;
   ceiling: string;
   compressor: string;
   deviceName: string;
@@ -52,7 +80,6 @@ export interface GraphPresentation {
   processor: string;
   processorLayoutUnavailable: string;
   providerBusKinds: Record<ProviderBusKind, string>;
-  renderChannels: string;
   ratio: string;
   release: string;
   routing: string;
@@ -70,7 +97,7 @@ const defaultPresentation: GraphPresentation = {
   audioInput: 'Default input',
   audioOutput: 'Default output',
   recorder: 'Recorder',
-  captureChannels: 'Outputs',
+  channels: 'Channels',
   ceiling: 'Ceiling',
   compressor: 'Compressor',
   deviceName: 'Device name',
@@ -85,7 +112,6 @@ const defaultPresentation: GraphPresentation = {
   processor: 'Processor',
   processorLayoutUnavailable: 'Processor layout unavailable',
   providerBusKinds: { main: 'Main', sidechain: 'Sidechain', auxiliary: 'Auxiliary' },
-  renderChannels: 'Inputs',
   ratio: 'Ratio',
   release: 'Release',
   routing: 'Routing',
@@ -107,7 +133,7 @@ export function runtimeGraphToAudioGraph(
   const nodes = document.nodes.flatMap((node, index) =>
     runtimeNodeToAudioNodes(node, index, presentation, processors, reservedIds).map((view) => ({
       ...view,
-      runtime: view.runtime ? { ...view.runtime, control: node.control } : undefined,
+      runtime: { ...view.runtime, control: node.control },
     })),
   );
   const projected = document.edges.map((edge) => ({
@@ -209,6 +235,8 @@ function audioNodeToRuntimeNode(
 }
 
 export type RoutingNodeRequest =
+  | { kind: 'effect'; effect: EffectKind; parameters?: Record<string, number> }
+  | { kind: 'effect_chain'; preset: ChainKind }
   | { kind: 'recorder' }
   | {
       bundleId: string;
@@ -226,7 +254,7 @@ export type RoutingNodeRequest =
 
 type MaterializedRoutingNodeRequest = Exclude<
   RoutingNodeRequest,
-  { kind: 'virtual_input' } | { kind: 'virtual_output' }
+  { kind: 'virtual_input' } | { kind: 'virtual_output' } | { kind: 'effect_chain' }
 >;
 
 export function addRoutingNode(
@@ -236,6 +264,8 @@ export function addRoutingNode(
   presentation: GraphPresentation = defaultPresentation,
   endpointSettings?: VirtualEndpointSettings,
 ): AudioGraphModel {
+  if (request.kind === 'effect_chain')
+    return addEffectChain(model, request.preset, position, presentation);
   if (request.kind === 'virtual_input' || request.kind === 'virtual_output') {
     if (
       endpointSettings &&
@@ -252,6 +282,53 @@ export function addRoutingNode(
   };
   const node = createRoutingNode(base, request, presentation);
   return addAudioGraphNode(model, node);
+}
+
+function addEffectChain(
+  model: AudioGraphModel,
+  preset: import('./builtinEffects').ChainKind,
+  position: AudioGraphPosition,
+  presentation: GraphPresentation,
+): AudioGraphModel {
+  let next = model;
+  let previous: AudioGraphNode | undefined;
+  let nextX = position.x;
+  const requests: Extract<RoutingNodeRequest, { kind: 'effect' | 'compressor' }>[] = chainEffects(
+    preset,
+  ).map((effect) => ({
+    kind: 'effect',
+    effect: effect.kind,
+    parameters: effect.parameters,
+  }));
+  if (preset === 'radio') requests.push({ kind: 'compressor' });
+  for (const item of requests) {
+    const node = createRoutingNode(
+      { id: nextNodeId(next, item.kind), position: { x: nextX, y: position.y } },
+      item,
+      presentation,
+    );
+    next = addAudioGraphNode(next, node);
+    if (previous) {
+      // Generated processor port arrays are dense; connect only channels present on both nodes.
+      for (
+        let channel = 0;
+        channel < Math.min(previous.outputPorts.length, node.inputPorts.length);
+        channel += 1
+      ) {
+        const source = previous.outputPorts[channel] as AudioGraphPort;
+        const target = node.inputPorts[channel] as AudioGraphPort;
+        next = connectAudioGraph(next, {
+          sourceNodeId: previous.id,
+          sourcePortId: source.id,
+          targetNodeId: node.id,
+          targetPortId: target.id,
+        });
+      }
+    }
+    previous = node;
+    nextX += graphNodeDefaultWidth(node) + nodeInsertionGap;
+  }
+  return { ...next, revision: model.revision + 1 };
 }
 
 function addVirtualEndpointSide(
@@ -369,45 +446,53 @@ export function updateRoutingNodeParameter(
   if (!Number.isFinite(value)) return model;
   let changed = false;
   const nodes = model.nodes.map((node) => {
-    const control = node.appearance.parameterControls?.find(
-      (candidate) => candidate.id === parameterId,
-    );
+    const controls = node.appearance.parameterControls;
+    if (!controls) return node;
+    const control = controls.find((candidate) => candidate.id === parameterId);
     const config = objectValue(node.runtime?.config);
     if (node.id !== nodeId || !node.runtime || !config || !control) return node;
-    const stepped = Math.round(value / control.step) * control.step;
+    if (control.value === value) return node;
+    const stepped = Number(
+      (
+        control.minimum +
+        Math.round((value - control.minimum) / control.step) * control.step
+      ).toPrecision(12),
+    );
     const normalized = Math.max(control.minimum, Math.min(control.maximum, stepped));
-    if (node.runtime.type === 'provider') {
-      const id = parameterId.startsWith('external:') ? parameterId.slice(9) : parameterId;
-      const parameters = objectValue(config.parameters) ?? {};
-      const values = objectValue(parameters.parameterValues) ?? {};
-      if (values[id] === normalized) return node;
-      changed = true;
-      return {
-        ...node,
-        appearance: {
-          ...node.appearance,
-          parameterControls: node.appearance.parameterControls?.map((candidate) =>
-            candidate.id === parameterId ? { ...candidate, value: normalized } : candidate,
-          ),
-        },
-        runtime: {
-          ...node.runtime,
-          config: {
-            ...config,
-            parameters: { ...parameters, parameterValues: { ...values, [id]: normalized } },
-          },
-        },
-      };
+    if (node.runtime.type === 'effect') {
+      const next = updateBuiltinEffect(
+        node,
+        node.runtime,
+        config,
+        controls,
+        parameterId,
+        normalized,
+      );
+      changed ||= next !== node;
+      return next;
     }
-    if (config[parameterId] === normalized) return node;
+    if (node.runtime.type === 'provider') {
+      const next = updateProviderParameter(
+        node,
+        node.runtime,
+        config,
+        controls,
+        parameterId,
+        normalized,
+      );
+      changed ||= next !== node;
+      return next;
+    }
+    const nextValue = dynamicsParameterValue(node.runtime.type, parameterId, normalized);
+    if (config[parameterId] === nextValue) return node;
     changed = true;
-    const nextConfig = { ...config, [parameterId]: normalized };
+    const nextConfig = { ...config, [parameterId]: nextValue };
     return {
       ...node,
       appearance: {
         ...node.appearance,
         detail: processorDetail(node.runtime.type, nextConfig),
-        parameterControls: node.appearance.parameterControls?.map((candidate) =>
+        parameterControls: controls.map((candidate) =>
           candidate.id === parameterId ? { ...candidate, value: normalized } : candidate,
         ),
       },
@@ -417,8 +502,140 @@ export function updateRoutingNodeParameter(
   return changed ? { ...model, nodes, revision: model.revision + 1 } : model;
 }
 
+function dynamicsParameterValue(type: string, parameterId: string, value: number) {
+  return parameterId === 'bypass' && (type === 'compressor' || type === 'limiter')
+    ? Boolean(value)
+    : value;
+}
+
+/** Apply a multi-axis gesture to the latest intermediate model as one graph edit. */
+export function updateRoutingNodeParameters(
+  model: AudioGraphModel,
+  nodeId: string,
+  changes: readonly { id: string; value: number }[],
+): AudioGraphModel {
+  const next = changes.reduce(
+    (current, change) => updateRoutingNodeParameter(current, nodeId, change.id, change.value),
+    model,
+  );
+  return next === model ? model : { ...next, revision: model.revision + 1 };
+}
+
+function externalParameterIdentity(parameterId: string): number | null {
+  const encodedId = parameterId.slice(9);
+  const identity = Number(encodedId);
+  return parameterId.startsWith('external:') &&
+    /^\d+$/u.test(encodedId) &&
+    Number.isSafeInteger(identity)
+    ? identity
+    : null;
+}
+
+function updateProviderParameter(
+  node: AudioGraphNode,
+  runtime: NonNullable<AudioGraphNode['runtime']>,
+  config: Record<string, unknown>,
+  controls: NonNullable<AudioGraphNode['appearance']['parameterControls']>,
+  parameterId: string,
+  normalized: number,
+): AudioGraphNode {
+  const externalId = externalParameterIdentity(parameterId);
+  if (externalId === null) return node;
+  return updateExternalParameter(
+    node,
+    runtime,
+    config,
+    controls,
+    parameterId,
+    externalId,
+    normalized,
+  );
+}
+
+function updateExternalParameter(
+  node: AudioGraphNode,
+  runtime: NonNullable<AudioGraphNode['runtime']>,
+  config: Record<string, unknown>,
+  controls: NonNullable<AudioGraphNode['appearance']['parameterControls']>,
+  parameterId: string,
+  externalId: number,
+  normalized: number,
+): AudioGraphNode {
+  const id = String(externalId);
+  const { parameters, values } = editableParameterState(config);
+  if (values[id] === normalized) return node;
+  return {
+    ...node,
+    appearance: {
+      ...node.appearance,
+      parameterControls: controls.map((candidate) =>
+        candidate.id === parameterId ? { ...candidate, value: normalized } : candidate,
+      ),
+    },
+    runtime: {
+      ...runtime,
+      config: {
+        ...config,
+        parameters: { ...parameters, parameterValues: { ...values, [id]: normalized } },
+      },
+    },
+  };
+}
+
+function updateBuiltinEffect(
+  node: AudioGraphNode,
+  runtime: NonNullable<AudioGraphNode['runtime']>,
+  config: Record<string, unknown>,
+  controls: NonNullable<AudioGraphNode['appearance']['parameterControls']>,
+  parameterId: string,
+  normalized: number,
+): AudioGraphNode {
+  const effect = objectValue(config.effect);
+  if (!effect || !isEffectKind(effect.kind)) return node;
+  const parameters = objectValue(effect.parameters) ?? {};
+  let nextParameters = parameters;
+  let nextConfig: Record<string, unknown>;
+  if (parameterId === 'preset') {
+    const preset = effectPresets[effect.kind]?.[normalized - 1];
+    if (!preset) return node;
+    nextParameters = { ...preset.parameters };
+    nextConfig = { ...config, effect: { ...effect, parameters: nextParameters } };
+  } else if (parameterId === 'bypass') {
+    if (Number(Boolean(config.bypass)) === normalized) return node;
+    nextConfig = { ...config, bypass: normalized === 1 };
+  } else {
+    if (parameters[parameterId] === normalized) return node;
+    nextParameters = { ...parameters, [parameterId]: normalized };
+    nextConfig = {
+      ...config,
+      effect: { ...effect, parameters: nextParameters },
+    };
+  }
+  return {
+    ...node,
+    runtime: { ...runtime, config: nextConfig },
+    appearance: {
+      ...node.appearance,
+      parameterControls: refreshEffectControls(
+        effect.kind,
+        nextParameters,
+        nextConfig.bypass === true,
+        controls,
+      ),
+    },
+  };
+}
+
+function editableParameterState(config: Record<string, unknown>) {
+  const parameters = objectValue(config.parameters) ?? {};
+  const values = objectValue(parameters.parameterValues) ?? {};
+  return { parameters, values };
+}
+
 export interface VirtualEndpointUpdate {
-  nativeFormat?: import('../../core/ui/AudioNodeCard').EndpointUpdate['nativeFormat'];
+  /** Runtime-owned I/O transaction; never serialized into the authored graph. */
+  bufferFrames?: number;
+  sampleFormat?: import('../../core/ui/AudioNodeCard').EndpointUpdate['sampleFormat'];
   /** Dedicated native-device transaction; never serialized by updateVirtualEndpoint. */
   sampleRate?: number;
   captureChannels: number;
@@ -468,7 +685,7 @@ export function updateVirtualEndpoint(
   const nodes = model.nodes.map((node) =>
     node.runtime?.type === 'virtual_endpoint' &&
     directString(node.runtime.config, 'id') === deviceId
-      ? updatedVirtualEndpointNode(node, value, presentation)
+      ? updatedVirtualEndpointNode(node, node.runtime, value, presentation)
       : node,
   );
   return updateNodeGeometry(model, nodes);
@@ -582,11 +799,13 @@ function presentEndpointRate(
 
 function updatedVirtualEndpointNode(
   node: AudioGraphNode,
+  runtime: NonNullable<AudioGraphNode['runtime']>,
   update: VirtualEndpointUpdate,
   presentation: GraphPresentation,
 ): AudioGraphNode {
-  const config = objectValue(node.runtime?.config) ?? {};
-  const isSourceNode = node.runtime?.binding?.side === 'source';
+  // Called only after the virtual type and a nonempty ID in this config matched.
+  const config = runtime.config as Record<string, unknown>;
+  const isSourceNode = runtime.binding?.side === 'source';
   const channelCount = isSourceNode ? update.captureChannels : update.renderChannels;
   const runtimePortId = isSourceNode ? FROM_OS_PORT_ID : TO_OS_PORT_ID;
   const label = isSourceNode ? presentation.virtualSourcePort : presentation.virtualSinkPort;
@@ -609,7 +828,7 @@ function updatedVirtualEndpointNode(
     inputPorts: isSourceNode ? [] : ports,
     outputPorts: isSourceNode ? ports : [],
     runtime: {
-      ...node.runtime,
+      ...runtime,
       config: updatedVirtualDeviceConfig(config, update),
       type: 'virtual_endpoint',
     },
@@ -620,22 +839,30 @@ function createRoutingNode(
   base: { id: string; position: AudioGraphPosition },
   request: MaterializedRoutingNodeRequest,
   presentation: GraphPresentation,
-): AudioGraphNode {
+): RuntimeAudioNode {
   if (request.kind === 'application') return applicationNode(base, request, presentation);
   if (request.kind === 'audio_input') return audioInputNode(base, request, presentation);
   if (request.kind === 'audio_output') return audioOutputNode(base, request, presentation);
   if (request.kind === 'recorder') return recorderNode(base, 2, presentation);
   if (request.kind === 'compressor') return compressorNode(base, presentation);
   if (request.kind === 'limiter') return limiterNode(base, presentation);
+  if (request.kind === 'effect')
+    return builtinEffectNode(
+      base,
+      effectConfig(request.effect, request.parameters),
+      request.effect,
+      presentation,
+    );
   return externalProcessorNode(base, request.processor, request.ports, presentation);
 }
 
 function compressorNode(
   base: { id: string; position: AudioGraphPosition },
   presentation: GraphPresentation,
-): AudioGraphNode {
+): RuntimeAudioNode {
   const config = {
     attackMs: 10,
+    bypass: false,
     channels: 2,
     makeupGainDb: 0,
     ratio: 4,
@@ -654,11 +881,68 @@ function compressorNode(
   );
 }
 
+function builtinEffectNode(
+  base: { id: string; position: AudioGraphPosition },
+  config: Record<string, unknown>,
+  kind: EffectKind,
+  presentation: GraphPresentation,
+): RuntimeAudioNode {
+  // New nodes carry effectConfig; restored nodes pass only after kind validation.
+  const effect = config.effect as Record<string, unknown>;
+  const labels = presentation.effectLabels ?? defaultEffectLabels;
+  const title = labels[kind] ?? defaultEffectLabels[kind];
+  const channels = directNumber(config, 'channels') ?? 2;
+  const outputs = kind === 'pan' ? 2 : channels;
+  const node = processorNode(
+    base,
+    'effect',
+    title,
+    'FX',
+    config,
+    effectControls(kind, objectValue(effect.parameters) ?? {}, config.bypass === true, labels),
+    presentation,
+  );
+  node.outputPorts = channelPorts(AUDIO_PORT_ID, outputs, title);
+  node.appearance.channelCount = outputs;
+  node.appearance.meterBanks = [{ channels: outputs, nodeId: base.id, portId: AUDIO_PORT_ID }];
+  if (kind === 'equalizer')
+    node.appearance.equalizer = {
+      bands: [
+        {
+          id: 'low',
+          label: labels.lowDb ?? defaultEffectLabels.lowDb,
+          frequencyId: 'lowFrequencyHz',
+          gainId: 'lowDb',
+          qId: 'lowQ',
+        },
+        {
+          id: 'mid',
+          label: labels.midDb ?? defaultEffectLabels.midDb,
+          frequencyId: 'frequencyHz',
+          gainId: 'midDb',
+          qId: 'q',
+        },
+        {
+          id: 'high',
+          label: labels.highDb ?? defaultEffectLabels.highDb,
+          frequencyId: 'highFrequencyHz',
+          gainId: 'highDb',
+          qId: 'highQ',
+        },
+      ],
+    };
+  if (kind === 'ducking')
+    node.inputPorts.push(
+      ...channelPorts('sidechain', 1, labels.sidechain ?? defaultEffectLabels.sidechain),
+    );
+  return node;
+}
+
 function limiterNode(
   base: { id: string; position: AudioGraphPosition },
   presentation: GraphPresentation,
-): AudioGraphNode {
-  const config = { ceilingDb: -1, channels: 2, releaseMs: 80, version: 1 };
+): RuntimeAudioNode {
+  const config = { bypass: false, ceilingDb: -1, channels: 2, releaseMs: 80, version: 1 };
   return processorNode(
     base,
     'limiter',
@@ -675,7 +959,7 @@ function externalProcessorNode(
   processor: ExternalProcessorDescriptor,
   ports: ProviderPorts,
   presentation: GraphPresentation,
-): AudioGraphNode {
+): RuntimeAudioNode {
   const parameterValues = Object.fromEntries(
     processor.parameters.map((parameter) => [String(parameter.id), parameter.defaultValue]),
   );
@@ -846,14 +1130,15 @@ function externalParameterControls(
 
 function processorNode(
   base: { id: string; position: AudioGraphPosition },
-  type: 'compressor' | 'limiter',
+  type: 'compressor' | 'limiter' | 'effect',
   title: string,
   icon: string,
   config: Record<string, unknown>,
   parameterControls: NonNullable<AudioGraphNode['appearance']['parameterControls']>,
   presentation: GraphPresentation,
-): AudioGraphNode {
+): RuntimeAudioNode {
   const channels = directNumber(config, 'channels') ?? 2;
+  const labels = presentation.effectLabels ?? defaultEffectLabels;
   return {
     ...base,
     appearance: {
@@ -864,6 +1149,21 @@ function processorNode(
       meterBanks: [{ channels, nodeId: base.id, portId: AUDIO_PORT_ID }],
       optionsLabel: presentation.options,
       parameterControls,
+      ...(type === 'compressor' || type === 'limiter'
+        ? {
+            dynamics: {
+              channels,
+              nodeId: base.id,
+              portId: AUDIO_PORT_ID,
+              thresholdId: type === 'compressor' ? 'thresholdDb' : 'ceilingDb',
+              inputLabel: labels.dynamicsInput ?? defaultEffectLabels.dynamicsInput,
+              outputLabel: labels.dynamicsOutput ?? defaultEffectLabels.dynamicsOutput,
+              reductionLabel: labels.gainReduction ?? defaultEffectLabels.gainReduction,
+              unavailableLabel:
+                labels.dynamicsUnavailable ?? defaultEffectLabels.dynamicsUnavailable,
+            },
+          }
+        : {}),
       title,
     },
     inputPorts: channelPorts(AUDIO_PORT_ID, channels, `${title} input`),
@@ -877,9 +1177,10 @@ function compressorControls(
   presentation: GraphPresentation,
 ): NonNullable<AudioGraphNode['appearance']['parameterControls']> {
   return [
+    dynamicsBypassControl(config, presentation),
     parameterControl('thresholdDb', presentation.threshold, -60, 0, 0.5, 'dB', config),
     parameterControl('ratio', presentation.ratio, 1, 20, 0.5, ':1', config),
-    parameterControl('attackMs', presentation.attack, 0.1, 200, 0.5, 'ms', config),
+    parameterControl('attackMs', presentation.attack, 0.1, 200, 0.1, 'ms', config),
     parameterControl('releaseMs', presentation.release, 5, 2_000, 5, 'ms', config),
     parameterControl('makeupGainDb', presentation.makeupGain, 0, 24, 0.5, 'dB', config),
   ];
@@ -890,9 +1191,27 @@ function limiterControls(
   presentation: GraphPresentation,
 ): NonNullable<AudioGraphNode['appearance']['parameterControls']> {
   return [
+    dynamicsBypassControl(config, presentation),
     parameterControl('ceilingDb', presentation.ceiling, -24, 0, 0.5, 'dB', config),
     parameterControl('releaseMs', presentation.release, 5, 2_000, 5, 'ms', config),
   ];
+}
+
+function dynamicsBypassControl(config: Record<string, unknown>, presentation: GraphPresentation) {
+  const labels = presentation.effectLabels ?? defaultEffectLabels;
+  return {
+    id: 'bypass',
+    label: labels.bypass ?? defaultEffectLabels.bypass,
+    value: Number(config.bypass === true),
+    minimum: 0,
+    maximum: 1,
+    step: 1,
+    suffix: '',
+    choices: [
+      { value: 0, label: labels.processing ?? defaultEffectLabels.processing },
+      { value: 1, label: labels.bypassed ?? defaultEffectLabels.bypassed },
+    ],
+  };
 }
 
 function parameterControl(
@@ -912,6 +1231,8 @@ function parameterControl(
     step,
     suffix,
     value: directNumber(config, id) ?? minimum,
+    precise: true,
+    presentation: 'knob' as const,
   };
 }
 
@@ -932,7 +1253,7 @@ function applicationNode(
   base: { id: string; position: AudioGraphPosition },
   request: Extract<RoutingNodeRequest, { kind: 'application' }>,
   presentation: GraphPresentation,
-): AudioGraphNode {
+): RuntimeAudioNode {
   return {
     ...base,
     appearance: {
@@ -966,7 +1287,7 @@ function audioInputNode(
   base: { id: string; position: AudioGraphPosition },
   request: Extract<RoutingNodeRequest, { kind: 'audio_input' }>,
   presentation: GraphPresentation,
-): AudioGraphNode {
+): RuntimeAudioNode {
   return {
     ...base,
     appearance: {
@@ -995,7 +1316,7 @@ function audioOutputNode(
   base: { id: string; position: AudioGraphPosition },
   request: Extract<RoutingNodeRequest, { kind: 'audio_output' }>,
   presentation: GraphPresentation,
-): AudioGraphNode {
+): RuntimeAudioNode {
   return {
     ...base,
     appearance: {
@@ -1021,7 +1342,7 @@ function recorderNode(
   base: { id: string; position: AudioGraphPosition },
   channels: number,
   presentation: GraphPresentation,
-): AudioGraphNode {
+): RuntimeAudioNode {
   return {
     ...base,
     appearance: {
@@ -1049,7 +1370,7 @@ function runtimeNodeToAudioNodes(
   presentation: GraphPresentation,
   processors: readonly ExternalProcessorDescriptor[],
   reservedIds: ReadonlySet<string>,
-): AudioGraphNode[] {
+): RuntimeAudioNode[] {
   if (node.type === 'virtual_endpoint')
     return virtualEndpointNodes(node, presentation, reservedIds);
   const base = {
@@ -1075,7 +1396,7 @@ function runtimeSourceNode(
   base: { id: string; position: AudioGraphPosition },
   runtime: NonNullable<AudioGraphNode['runtime']>,
   presentation: GraphPresentation,
-): AudioGraphNode | null {
+): RuntimeAudioNode | null {
   if (node.type === 'application_capture') {
     const channels = nestedNumber(node.config, 'stream', 'channels') ?? 2;
     const parsed = applicationNode(
@@ -1132,13 +1453,29 @@ function runtimeSourceNode(
   return null;
 }
 
+function runtimeBuiltinEffectNode(
+  node: RuntimeGraphNode,
+  base: { id: string; position: AudioGraphPosition },
+  runtime: NonNullable<AudioGraphNode['runtime']>,
+  presentation: GraphPresentation,
+): RuntimeAudioNode | null {
+  const config = objectValue(node.config);
+  const effect = objectValue(config?.effect);
+  if (!config || !isEffectKind(effect?.kind)) return null;
+  const parsed = builtinEffectNode(base, config, effect.kind, presentation);
+  parsed.runtime = runtime;
+  parsed.appearance.title = node.label ?? parsed.appearance.title;
+  return parsed;
+}
+
 function runtimeProcessorNode(
   node: RuntimeGraphNode,
   base: { id: string; position: AudioGraphPosition },
   runtime: NonNullable<AudioGraphNode['runtime']>,
   presentation: GraphPresentation,
   processors: readonly ExternalProcessorDescriptor[],
-): AudioGraphNode | null {
+): RuntimeAudioNode | null {
+  if (node.type === 'effect') return runtimeBuiltinEffectNode(node, base, runtime, presentation);
   const dynamics = runtimeDynamicsNode(node, base, runtime, presentation);
   if (dynamics) return dynamics;
   if (node.type === 'provider')
@@ -1210,7 +1547,7 @@ function runtimeExternalProcessorNode(
   runtime: NonNullable<AudioGraphNode['runtime']>,
   presentation: GraphPresentation,
   processors: readonly ExternalProcessorDescriptor[],
-): AudioGraphNode | null {
+): RuntimeAudioNode | null {
   const typeId = directString(node.config, 'typeId');
   const descriptor = processors.find((processor) => processor.typeId === typeId);
   const config = objectValue(node.config) ?? {};
@@ -1288,7 +1625,7 @@ function unavailableProcessorNode(
   descriptor: ExternalProcessorDescriptor,
   runtime: NonNullable<AudioGraphNode['runtime']>,
   presentation: GraphPresentation,
-): AudioGraphNode {
+): RuntimeAudioNode {
   return {
     ...base,
     appearance: {
@@ -1310,7 +1647,7 @@ function runtimeDynamicsNode(
   base: { id: string; position: AudioGraphPosition },
   runtime: NonNullable<AudioGraphNode['runtime']>,
   presentation: GraphPresentation,
-): AudioGraphNode | null {
+): RuntimeAudioNode | null {
   if (node.type !== 'compressor' && node.type !== 'limiter') return null;
   const config = objectValue(node.config) ?? {};
   const compressor = node.type === 'compressor';
@@ -1331,7 +1668,7 @@ function unsupportedRuntimeNode(
   node: RuntimeGraphNode,
   base: { id: string; position: AudioGraphPosition },
   presentation: GraphPresentation,
-): AudioGraphNode {
+): RuntimeAudioNode {
   return {
     ...base,
     appearance: {
@@ -1391,7 +1728,7 @@ function virtualEndpointNodes(
   node: RuntimeGraphNode,
   presentation: GraphPresentation,
   reservedIds: ReadonlySet<string>,
-): AudioGraphNode[] {
+): RuntimeAudioNode[] {
   const title = directString(node.config, 'displayName') ?? node.label ?? node.id;
   const renderChannels = nestedNumber(node.config, 'render', 'channels') ?? 0;
   const captureChannels = nestedNumber(node.config, 'capture', 'channels') ?? 0;
@@ -1399,7 +1736,7 @@ function virtualEndpointNodes(
   if (!reference) return [];
   const control = endpointControl(title, renderChannels, captureChannels, presentation);
   const runtime = { config: node.config, type: node.type };
-  const nodes: AudioGraphNode[] = [];
+  const nodes: RuntimeAudioNode[] = [];
   if (reference.render === true && captureChannels > 0) {
     nodes.push({
       appearance: {
@@ -1456,11 +1793,10 @@ function endpointControl(
 ): NonNullable<AudioGraphNode['appearance']['endpointControl']> {
   return {
     captureChannels,
-    captureChannelsLabel: presentation.captureChannels,
+    channelsLabel: presentation.channels,
     displayName,
     nameLabel: presentation.deviceName,
     renderChannels,
-    renderChannelsLabel: presentation.renderChannels,
   };
 }
 
@@ -1554,7 +1890,7 @@ function runtimeEdge(
 
 function runtimeEdgeToAudioEdges(
   edge: RuntimeGraphEdge,
-  nodes: readonly AudioGraphNode[],
+  nodes: readonly RuntimeAudioNode[],
 ): AudioGraphModel['edges'] {
   const sourceNodeId = graphNodeId(nodes, edge.source.nodeId, edge.source.portId);
   const targetNodeId = graphNodeId(nodes, edge.destination.nodeId, edge.destination.portId);
@@ -1589,7 +1925,7 @@ function runtimeEdgeToAudioEdges(
 
 function runtimeRoutes(
   edge: RuntimeGraphEdge,
-  nodes: readonly AudioGraphNode[],
+  nodes: readonly RuntimeAudioNode[],
   sourceNodeId: string,
   targetNodeId: string,
 ): RuntimeChannelRoute[] {
@@ -1612,7 +1948,7 @@ function channelPorts(
   channels: number,
   label: string,
   boundary?: 'sink' | 'source',
-): AudioGraphNode['inputPorts'] {
+): RuntimeAudioPort[] {
   const count = Math.max(0, Math.min(64, Math.trunc(channels)));
   return Array.from({ length: count }, (_, channelIndex) => ({
     boundary,
@@ -1639,7 +1975,7 @@ function channelBinding(
 }
 
 function channelPortFor(
-  nodes: readonly AudioGraphNode[],
+  nodes: readonly RuntimeAudioNode[],
   nodeId: string,
   runtimePortId: string,
   channelIndex: number,
@@ -1649,14 +1985,13 @@ function channelPortFor(
     .find((node) => node.id === nodeId)
     ?.[direction].find(
       (candidate) =>
-        (candidate.runtimePortId ?? candidate.id) === runtimePortId &&
-        (candidate.channelIndex ?? 0) === channelIndex,
+        candidate.runtimePortId === runtimePortId && candidate.channelIndex === channelIndex,
     );
   return port?.id ?? null;
 }
 
 function portChannelCount(
-  nodes: readonly AudioGraphNode[],
+  nodes: readonly RuntimeAudioNode[],
   nodeId: string,
   runtimePortId: string,
   direction: 'inputPorts' | 'outputPorts',
@@ -1664,7 +1999,7 @@ function portChannelCount(
   return (
     nodes
       .find((node) => node.id === nodeId)
-      ?.[direction].filter((port) => (port.runtimePortId ?? port.id) === runtimePortId).length ?? 0
+      ?.[direction].filter((port) => port.runtimePortId === runtimePortId).length ?? 0
   );
 }
 

@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { type RefObject, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { AudioGraphModel, AudioGraphPosition } from '../../core/audio-graph/model';
-import type { ControlPort, VirtualEndpointSettings, VirtualEndpointSpec } from '../../core/control-port/types';
+import type {
+  ControlPort,
+  VirtualEndpointSettings,
+  VirtualEndpointSpec,
+} from '../../core/control-port/types';
 import { NameDialog } from '../../core/ui/NameDialog';
 import { addRoutingNode, type GraphPresentation } from './model';
 import {
@@ -14,6 +18,38 @@ interface Creation {
   owner: ControlPort;
   side: VirtualNodeSide;
   position: AudioGraphPosition;
+}
+
+function creationTemplate(settings: VirtualEndpointSettings | undefined) {
+  // Only the canCreate dialog invokes confirmation; readback still rechecks live permission.
+  return settings?.creationTemplate;
+}
+
+function ownsCreation(creation: Creation | null, owner: ControlPort): creation is Creation {
+  return creation?.owner === owner;
+}
+
+function canCompleteCreation(
+  mounted: boolean,
+  current: { owner: ControlPort; creation: Creation | null; settings?: VirtualEndpointSettings },
+  owner: ControlPort,
+  pending: Creation,
+) {
+  return (
+    mounted &&
+    current.owner === owner &&
+    current.creation === pending &&
+    current.settings?.canCreate
+  );
+}
+
+function creationIdentity(
+  creation: Creation,
+  pendingIdentity: RefObject<{ creation: Creation; id: string } | null>,
+) {
+  if (pendingIdentity.current?.creation !== creation)
+    pendingIdentity.current = { creation, id: crypto.randomUUID() };
+  return pendingIdentity.current.id;
 }
 
 /** Identity is allocated only on confirmation; queue retries reuse the same graph snapshot. */
@@ -43,7 +79,9 @@ export function useVirtualEndpointCreation({
   current.current = { owner, model, creation, settings };
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+    };
   }, []);
   useEffect(() => {
     setCreation((pending) => (pending?.owner === owner ? pending : null));
@@ -66,30 +104,28 @@ export function useVirtualEndpointCreation({
     return true;
   };
   const create = async (displayName: string) => {
-    if (
-      !enabled ||
-      !model ||
-      !creation ||
-      creation.owner !== owner ||
-      !settings?.canCreate ||
-      !settings.creationTemplate
-    )
-      return;
+    const template = creationTemplate(settings);
+    if (!enabled || !model || !ownsCreation(creation, owner) || !template) return;
     if (creating) return;
-    if (!createDevice) { setFailed(true); return; }
+    if (!createDevice) {
+      setFailed(true);
+      return;
+    }
     const pending = creation;
-    if (pendingIdentity.current?.creation !== creation)
-      pendingIdentity.current = { creation, id: crypto.randomUUID() };
-    const spec = { ...settings.creationTemplate, id: pendingIdentity.current.id, displayName };
+    const spec = { ...template, id: creationIdentity(creation, pendingIdentity), displayName };
     setCreating(true);
     setFailed(false);
     const actual = await createDevice(spec).catch(() => null);
-    if (!mounted.current || current.current.owner !== owner || current.current.creation !== pending || !current.current.settings?.canCreate) return;
-    if (!actual) { setFailed(true); setCreating(false); return; }
-    const request = virtualEndpointNodeRequest(creation.side, actual);
-    if (!request) { setFailed(true); setCreating(false); return; }
+    if (!canCompleteCreation(mounted.current, current.current, owner, pending)) return;
+    const request = actual ? virtualEndpointNodeRequest(creation.side, actual) : null;
+    if (!request) {
+      setFailed(true);
+      setCreating(false);
+      return;
+    }
     const latest = current.current.model;
-    if (latest) updateModel(addRoutingNode(latest, request, creation.position, presentation, settings));
+    if (latest)
+      updateModel(addRoutingNode(latest, request, creation.position, presentation, settings));
     setCreating(false);
     setCreation(null);
   };
@@ -97,18 +133,19 @@ export function useVirtualEndpointCreation({
     tryAdd,
     dialog:
       creation?.owner === owner && settings?.canCreate ? (
-        <>
         <NameDialog
           title={t('routing.nodes.newVirtualDevice')}
           initialName="MixRelay IO"
           nameLabel={t('routing.nodes.deviceName')}
           createLabel={t('common.create')}
           enabled={enabled && !creating}
-          onCancel={() => { setCreation(null); setCreating(false); }}
+          onCancel={() => {
+            setCreation(null);
+            setCreating(false);
+          }}
           onCreate={(name) => void create(name)}
           error={failed ? t('driverManagement.changeFailed') : null}
         />
-        </>
       ) : null,
   };
 }

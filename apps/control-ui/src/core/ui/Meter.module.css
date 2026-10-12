@@ -1,25 +1,36 @@
 .root {
+  display: inline-block;
   position: relative;
-  width: 10px;
+  width: var(--meter-width);
   height: 100%;
   overflow: hidden;
-  background: #1f2c32;
+  background: var(--meter-background);
 }
 
 .fill {
   position: absolute;
   inset: 0;
-  background: linear-gradient(to top, #23bc85 0 70%, #e0b14c 70% 90%, #ed6f67 90%);
+  background: linear-gradient(
+    to top,
+    var(--meter-normal) 0 70%,
+    var(--meter-high) 70% 90%,
+    var(--meter-peak) 90%
+  );
   clip-path: inset(var(--meter-unfilled, 100%) 0 0);
-  transition: clip-path 50ms linear;
+  transition: clip-path var(--meter-response-duration) linear;
 }
 
 .root[data-orientation="horizontal"] {
   width: 100%;
-  height: 4px;
+  height: var(--meter-height-horizontal);
 }
 
 .root[data-orientation="horizontal"] .fill {
-  background: linear-gradient(to right, #23bc85 0 70%, #e0b14c 70% 90%, #ed6f67 90%);
+  background: linear-gradient(
+    to right,
+    var(--meter-normal) 0 70%,
+    var(--meter-high) 70% 90%,
+    var(--meter-peak) 90%
+  );
   clip-path: inset(0 var(--meter-unfilled, 100%) 0 0);
 }

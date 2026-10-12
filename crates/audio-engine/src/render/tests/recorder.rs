@@ -39,7 +39,7 @@ fn channel_change_can_be_cancelled_then_committed_without_losing_previous_transp
     registry
         .command(&record_key(), request(RecorderAction::Stop, None))
         .unwrap();
-    let old_file = hound::WavReader::open(old_path).unwrap();
+    let old_file = mixrelay_test_support::rf64::open(old_path).unwrap();
     assert_eq!(old_file.spec().channels, 2);
     assert_eq!(old_file.duration(), 2);
     assert!(
@@ -66,7 +66,7 @@ fn channel_change_can_be_cancelled_then_committed_without_losing_previous_transp
     registry
         .command(&new_key, request(RecorderAction::Stop, None))
         .unwrap();
-    let new_file = hound::WavReader::open(new_path).unwrap();
+    let new_file = mixrelay_test_support::rf64::open(new_path).unwrap();
     assert_eq!(new_file.spec().channels, 8);
     assert_eq!(new_file.duration(), 2);
 }
@@ -110,7 +110,7 @@ fn muted_recorder_writes_silence_without_stopping_recording() {
     registry
         .command(&record_key(), request(RecorderAction::Stop, None))
         .unwrap();
-    let mut file = hound::WavReader::open(path).unwrap();
+    let mut file = mixrelay_test_support::rf64::open(path).unwrap();
     assert_eq!(file.duration(), 2);
     assert!(
         file.samples::<f32>()
@@ -176,7 +176,7 @@ fn mixed_sources_record_without_any_hardware_output() {
     registry
         .command(&record_key(), request(RecorderAction::Stop, None))
         .unwrap();
-    let mut file = hound::WavReader::open(path).unwrap();
+    let mut file = mixrelay_test_support::rf64::open(path).unwrap();
     let expected: Vec<f32> = left.iter().zip(right).map(|(a, b)| a + b).collect();
     assert_eq!(
         file.samples::<f32>()
@@ -225,7 +225,7 @@ fn recorder_captures_final_routing_without_native_sink_or_callback_allocation() 
         .unwrap();
     assert_eq!(stopped.state, RecorderState::Stopped);
     assert_eq!(stopped.frames, 2);
-    let mut reader = hound::WavReader::open(path).unwrap();
+    let mut reader = mixrelay_test_support::rf64::open(path).unwrap();
     assert_eq!(reader.spec().sample_rate, 48_000);
     assert_eq!(
         reader
@@ -282,7 +282,7 @@ fn rebuild_and_pause_preserve_take_and_final_tap_removal_finalizes_it() {
         .unwrap();
     drop(replacement);
     registry.reap_unused().unwrap();
-    let reader = hound::WavReader::open(path).unwrap();
+    let reader = mixrelay_test_support::rf64::open(path).unwrap();
     assert_eq!(reader.duration(), 4);
 }
 
@@ -358,7 +358,7 @@ fn control_publications_preserve_recording_and_off_skips_capture_instead_of_writ
 }
 
 fn assert_continuous_recording_with_final_muted_block(path: &std::path::Path) {
-    let mut reader = hound::WavReader::open(path).unwrap();
+    let mut reader = mixrelay_test_support::rf64::open(path).unwrap();
     let samples = reader
         .samples::<f32>()
         .map(Result::unwrap)

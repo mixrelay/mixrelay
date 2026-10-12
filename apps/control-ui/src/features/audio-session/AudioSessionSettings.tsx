@@ -7,6 +7,7 @@ import {
   type RuntimeGraphDocument,
 } from '../../core/control-port/types';
 import { ActionButton } from '../../core/ui/ActionButton';
+import { InlineNotice } from '../../core/ui/InlineNotice';
 import { InlineSelect } from '../../core/ui/InlineSelect';
 import styles from './AudioSessionControl.module.css';
 import { waitForGraphActivation } from './waitForGraphActivation';
@@ -63,6 +64,7 @@ function useSessionSettings({
   const apply = async (nextFrames: string) => {
     if (
       disabled ||
+      !session.capabilities.canReconfigureLive ||
       releaseBusy.current ||
       !controlPort.reconfigureSession ||
       !Number.isFinite(session.format.sampleRate) ||
@@ -81,6 +83,7 @@ function useSessionSettings({
     try {
       const next = await reconfigure(
         controlPort,
+        controlPort.reconfigureSession.bind(controlPort),
         {
           sampleRate: session.format.sampleRate,
           blockFrames: Number(nextFrames),
@@ -118,7 +121,11 @@ export function AudioSessionSettings(props: AudioSessionSettingsProps) {
       <InlineSelect
         label={t('audioSession.processingBuffer')}
         value={frames}
-        title={t('audioSession.changeNotice')}
+        title={t(
+          session.capabilities.canReconfigureLive
+            ? 'audioSession.changeNotice'
+            : 'audioSession.locked',
+        )}
         onChange={(value) => void apply(value)}
         disabled={
           busy ||
@@ -138,8 +145,7 @@ export function AudioSessionSettings(props: AudioSessionSettingsProps) {
       <AudioSessionAlerts messages={[error?.message ?? '', ...sessionAlerts]} />
       {session.issue || error ? (
         <ActionButton
-          size="compact-xs"
-          variant="subtle"
+          density="compact"
           disabled={
             busy ||
             disabled ||
@@ -159,10 +165,12 @@ export function AudioSessionSettings(props: AudioSessionSettingsProps) {
 export function AudioSessionAlerts({ messages }: { messages: readonly string[] }) {
   const visible = [...new Set(messages.filter(Boolean))];
   return visible.length ? (
-    <div className={styles.error} role="alert">
-      {visible.map((message) => (
-        <p key={message}>{message}</p>
-      ))}
+    <div className={styles.error}>
+      <InlineNotice tone="critical">
+        {visible.map((message) => (
+          <p key={message}>{message}</p>
+        ))}
+      </InlineNotice>
     </div>
   ) : null;
 }
@@ -175,13 +183,13 @@ function sessionErrorKey(cause: unknown): string {
 
 async function reconfigure(
   controlPort: ControlPort,
+  reconfigureSession: NonNullable<ControlPort['reconfigureSession']>,
   format: AudioSessionStatus['format'],
   isCurrent: () => boolean,
 ): Promise<RuntimeGraphDocument | null> {
-  if (!controlPort.reconfigureSession) return null;
   const graph = await controlPort.getGraph();
   if (!isCurrent()) return null;
-  const response = await controlPort.reconfigureSession({
+  const response = await reconfigureSession({
     expectedRevision: graph.revision,
     format,
   });

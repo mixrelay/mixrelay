@@ -79,3 +79,30 @@ it('does not infer missing devices before discovery or substitute the default ou
   expect(presented.nodes[1]?.appearance.status).toBe(i18n.t('routing.nodeStatus.offline'));
   expect(presented.nodes[1]?.runtime).toBe(model.nodes[1]?.runtime);
 });
+
+it('does not label malformed or default selectors as a missing persistent device', () => {
+  const model = runtimeGraphToAudioGraph(document);
+  const original = model.nodes[0];
+  if (!original?.runtime) throw new Error('fixture runtime');
+  const configs = [
+    null,
+    'invalid',
+    {},
+    { selector: null },
+    { selector: 'invalid' },
+    { selector: {} },
+    { selector: { match: 'default' } },
+    { selector: { match: 'persistent_uid' } },
+    { selector: { match: 'persistent_uid', uid: 7 } },
+  ];
+  for (const config of configs) {
+    const candidate = { ...original, runtime: { ...original.runtime, config } };
+    expect(
+      presentHardwareNodeStatus({ ...model, nodes: [candidate] }, [], true, i18n.t).nodes[0],
+    ).toBe(candidate);
+  }
+  const uiOnly = { ...original, runtime: undefined };
+  expect(presentHardwareNodeStatus({ ...model, nodes: [uiOnly] }, [], true, i18n.t).nodes[0]).toBe(
+    uiOnly,
+  );
+});

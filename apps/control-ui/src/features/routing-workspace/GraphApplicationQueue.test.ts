@@ -120,31 +120,28 @@ it('serializes edits and coalesces only the queued snapshot, using engine revisi
   expect(vi.getTimerCount()).toBe(0);
 });
 
-it('refreshes conflicts without discarding the draft, and pauses subsequent edits', async () => {
+it('adopts a newer authoritative graph after a definite conflict and permits the next edit', async () => {
   const f = fixture();
   f.port.applyGraph.mockRejectedValueOnce(
     new ControlPortError(409, { code: 'graph_revision_stale', parameters: {} }),
   );
-  f.port.getGraph.mockResolvedValue({ ...empty, revision: 8 });
-  f.queue.submit(f.draft);
-  await flush();
-  expect(f.callbacks.document).toHaveBeenLastCalledWith({ ...empty, revision: 8 });
-  expect(f.callbacks.restore).not.toHaveBeenCalled();
-  expect(f.callbacks.state).toHaveBeenLastCalledWith('blocked');
-  f.queue.submit(f.edit());
-  await flush();
-  expect(f.port.applyGraph).toHaveBeenCalledTimes(1);
-  expect(f.queue.canPublishParameters).toBe(false);
+  const current = { ...empty, revision: 8 };
+  f.port.getGraph.mockResolvedValue(current);
   f.port.getGraphStatus.mockResolvedValue({
     activeRevision: 8,
     submittedRevision: 8,
     protocolVersion: 1,
   });
-  f.queue.retry();
+  f.queue.submit(f.draft);
+  await flush();
+  expect(f.callbacks.restore).toHaveBeenLastCalledWith(current);
+  expect(f.callbacks.state).toHaveBeenLastCalledWith('active');
+  expect(f.callbacks.error).toHaveBeenLastCalledWith(null);
+  expect(f.port.applyGraph).toHaveBeenCalledTimes(1);
+  expect(f.queue.canPublishParameters).toBe(true);
+  f.queue.submit(f.edit());
   await flush();
   expect(f.port.applyGraph.mock.calls[1]?.[0].revision).toBe(9);
-  expect(f.callbacks.state).toHaveBeenLastCalledWith('active');
-  expect(f.queue.canPublishParameters).toBe(true);
 });
 
 it('does not treat a newer active graph as acknowledgement of our edit', async () => {

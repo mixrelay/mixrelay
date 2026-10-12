@@ -31,7 +31,7 @@ fn native_linux_service_desktop_owned_shutdown() {
     );
     drop(TcpListener::bind(ADDRESS).expect("private control port must be unused"));
     let executable = Path::new(env!("CARGO_BIN_EXE_mixrelay-engine-service"));
-    let mut engine = mixrelay_engine_process::DesktopEngine::start(executable).unwrap();
+    let mut engine = mixrelay_engine_process::ControllerEngine::start(executable).unwrap();
     let pid = engine.id();
     let deadline = Instant::now() + Duration::from_secs(5);
     while !processing_is_running() {
@@ -47,7 +47,7 @@ fn native_linux_service_desktop_owned_shutdown() {
         "native owner was not published"
     );
     // A second launch must fail its own handshake, not adopt or stop this listener.
-    assert!(mixrelay_engine_process::DesktopEngine::start(executable).is_err());
+    assert!(mixrelay_engine_process::ControllerEngine::start(executable).is_err());
     assert!(engine.try_wait().unwrap().is_none());
     assert!(processing_is_running());
     engine.request_shutdown();

@@ -11,7 +11,7 @@
   <key>GroupName</key><string>__MIXRELAY_SERVICE_GROUP__</string>
   <key>KeepAlive</key><true/>
   <key>Label</key><string>io.mixrelay.audio.driver</string>
-  <key>AssociatedBundleIdentifiers</key><string>io.mixrelay.driver.desktop</string>
+  <key>AssociatedBundleIdentifiers</key><string>io.mixrelay.desktop</string>
   <key>MachServices</key>
   <dict><key>io.mixrelay.audio.driver</key><true/></dict>
   <key>ProcessType</key><string>Interactive</string>

@@ -1,57 +1,57 @@
 {
   "en": [
-    "Quit MixRelay and MixRelay Driver before updating or removing MixRelay Driver.",
-    "Quit MixRelay from its menu or tray, then retry the installation, update or removal.",
-    "Run MixRelay Driver as the signed-in user."
+    "Stop all audio from the MixRelay status menu, close the MixRelay editor and MixRelay, then retry.",
+    "Stop all audio from the MixRelay status menu, close the MixRelay editor and MixRelay, then retry.",
+    "Run MixRelay as the signed-in user."
   ],
   "ko": [
-    "MixRelay Driver를 업데이트하거나 제거하기 전에 MixRelay와 MixRelay Driver를 종료하세요.",
-    "MixRelay 메뉴나 트레이에서 종료한 뒤 설치, 업데이트 또는 제거를 다시 시도하세요.",
-    "로그인한 사용자로 MixRelay Driver를 실행하세요."
+    "MixRelay 상태 메뉴에서 모든 오디오를 중지하고 MixRelay 편집 앱과 MixRelay를 종료한 뒤 다시 시도하세요.",
+    "MixRelay 상태 메뉴에서 모든 오디오를 중지하고 MixRelay 편집 앱과 MixRelay를 종료한 뒤 다시 시도하세요.",
+    "로그인한 사용자로 MixRelay를 실행하세요."
   ],
   "ja": [
-    "MixRelay Driverの更新または削除前にMixRelayとMixRelay Driverを終了してください。",
-    "MixRelayのメニューまたはトレイから終了し、インストール、更新、削除を再試行してください。",
-    "ログイン中のユーザーとしてMixRelay Driverを実行してください。"
+    "MixRelayのステータスメニューですべてのオーディオを停止し、MixRelayエディターとMixRelayを終了してから再試行してください。",
+    "MixRelayのステータスメニューですべてのオーディオを停止し、MixRelayエディターとMixRelayを終了してから再試行してください。",
+    "ログイン中のユーザーとしてMixRelayを実行してください。"
   ],
   "zh-Hans": [
-    "更新或移除 MixRelay Driver 前，请退出 MixRelay 和 MixRelay Driver。",
-    "请从菜单或托盘退出 MixRelay，然后重试安装、更新或移除。",
-    "请以已登录的用户身份运行 MixRelay Driver。"
+    "请从 MixRelay 状态菜单停止所有音频，关闭 MixRelay 编辑器和 MixRelay，然后重试。",
+    "请从 MixRelay 状态菜单停止所有音频，关闭 MixRelay 编辑器和 MixRelay，然后重试。",
+    "请以已登录的用户身份运行 MixRelay。"
   ],
   "zh-Hant": [
-    "更新或移除 MixRelay Driver 前，請結束 MixRelay 與 MixRelay Driver。",
-    "請從選單或系統匣結束 MixRelay，然後重試安裝、更新或移除。",
-    "請以已登入的使用者身分執行 MixRelay Driver。"
+    "請從 MixRelay 狀態選單停止所有音訊，關閉 MixRelay 編輯器與 MixRelay，然後重試。",
+    "請從 MixRelay 狀態選單停止所有音訊，關閉 MixRelay 編輯器與 MixRelay，然後重試。",
+    "請以已登入的使用者身分執行 MixRelay。"
   ],
   "fr": [
-    "Quittez MixRelay et MixRelay Driver avant de mettre à jour ou de supprimer MixRelay Driver.",
-    "Quittez MixRelay depuis son menu ou la barre d’état, puis réessayez l’installation, la mise à jour ou la suppression.",
-    "Exécutez MixRelay Driver avec le compte utilisateur connecté."
+    "Arrêtez tout l’audio depuis le menu d’état de MixRelay, fermez l’éditeur MixRelay et MixRelay, puis réessayez.",
+    "Arrêtez tout l’audio depuis le menu d’état de MixRelay, fermez l’éditeur MixRelay et MixRelay, puis réessayez.",
+    "Exécutez MixRelay avec le compte utilisateur connecté."
   ],
   "de": [
-    "Beenden Sie MixRelay und MixRelay Driver vor dem Aktualisieren oder Entfernen von MixRelay Driver.",
-    "Beenden Sie MixRelay über das Menü oder die Statusleiste und wiederholen Sie die Installation, das Update oder die Entfernung.",
-    "Führen Sie MixRelay Driver als angemeldeter Benutzer aus."
+    "Stoppen Sie alle Audiovorgänge im MixRelay-Statusmenü, schließen Sie den MixRelay-Editor und MixRelay und versuchen Sie es erneut.",
+    "Stoppen Sie alle Audiovorgänge im MixRelay-Statusmenü, schließen Sie den MixRelay-Editor und MixRelay und versuchen Sie es erneut.",
+    "Führen Sie MixRelay als angemeldeter Benutzer aus."
   ],
   "es": [
-    "Cierre MixRelay y MixRelay Driver antes de actualizar o eliminar MixRelay Driver.",
-    "Cierre MixRelay desde su menú o bandeja y vuelva a intentar la instalación, actualización o eliminación.",
-    "Ejecute MixRelay Driver con el usuario que ha iniciado sesión."
+    "Detenga todo el audio desde el menú de estado de MixRelay, cierre el editor de MixRelay y MixRelay y vuelva a intentarlo.",
+    "Detenga todo el audio desde el menú de estado de MixRelay, cierre el editor de MixRelay y MixRelay y vuelva a intentarlo.",
+    "Ejecute MixRelay con el usuario que ha iniciado sesión."
   ],
   "pt": [
-    "Feche o MixRelay e o MixRelay Driver antes de atualizar ou remover o MixRelay Driver.",
-    "Feche o MixRelay pelo menu ou pela área de notificação e tente instalar, atualizar ou remover novamente.",
-    "Execute o MixRelay Driver como o utilizador com sessão iniciada."
+    "Pare todo o áudio pelo menu de estado do MixRelay, feche o editor do MixRelay e o MixRelay e tente novamente.",
+    "Pare todo o áudio pelo menu de estado do MixRelay, feche o editor do MixRelay e o MixRelay e tente novamente.",
+    "Execute o MixRelay como o utilizador com sessão iniciada."
   ],
   "it": [
-    "Chiudere MixRelay e MixRelay Driver prima di aggiornare o rimuovere MixRelay Driver.",
-    "Chiudere MixRelay dal menu o dall’area di notifica, quindi riprovare l’installazione, l’aggiornamento o la rimozione.",
-    "Eseguire MixRelay Driver con l’utente che ha effettuato l’accesso."
+    "Interrompi tutto l’audio dal menu di stato di MixRelay, chiudi l’editor MixRelay e MixRelay e riprova.",
+    "Interrompi tutto l’audio dal menu di stato di MixRelay, chiudi l’editor MixRelay e MixRelay e riprova.",
+    "Eseguire MixRelay con l’utente che ha effettuato l’accesso."
   ],
   "ru": [
-    "Перед обновлением или удалением MixRelay Driver закройте MixRelay и MixRelay Driver.",
-    "Закройте MixRelay через меню или системный лоток, затем повторите установку, обновление или удаление.",
-    "Запустите MixRelay Driver от имени пользователя, вошедшего в систему."
+    "Остановите всё аудио через меню состояния MixRelay, закройте редактор MixRelay и MixRelay, затем повторите попытку.",
+    "Остановите всё аудио через меню состояния MixRelay, закройте редактор MixRelay и MixRelay, затем повторите попытку.",
+    "Запустите MixRelay от имени пользователя, вошедшего в систему."
   ]
 }

@@ -1,10 +1,10 @@
-import { MantineProvider } from '@mantine/core';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ComponentType, CSSProperties, PropsWithChildren } from 'react';
 import { useState } from 'react';
 import { assert, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AudioMeterStore } from '../audio-meter/AudioMeterStore';
-import { mixrelayTheme } from '../theme/MixRelayProvider';
+import { MixRelayProvider } from '../theme/MixRelayProvider';
+import { frequencyPosition, gainPosition } from '../ui/equalizerResponse';
 import { NodeOptionsSection } from '../ui/NodeOptionsSection';
 import { useNodeOptionsState } from '../ui/nodeOptionsState';
 import { AudioGraphCanvas, type AudioGraphViewport } from './AudioGraphCanvas';
@@ -13,29 +13,31 @@ import type { AudioGraphModel } from './model';
 type MockItem = Record<string, unknown>;
 
 function CanvasTestProvider({ children }: PropsWithChildren) {
-  // jsdom has no layout. Mantine's floating hideDetached middleware can otherwise
-  // hide an open menu once its zero-size geometry settles, racing role queries.
-  // Keep real menu events/focus behavior; only geometry and transitions use test mode.
-  return (
-    <MantineProvider env="test" forceColorScheme="dark" theme={mixrelayTheme}>
-      {children}
-    </MantineProvider>
-  );
+  return <MixRelayProvider>{children}</MixRelayProvider>;
 }
 
 const viewportHarness = {
   current: { x: 0, y: 0, zoom: 1 } as AudioGraphViewport,
   setViewport: vi.fn(),
+  fitView: vi.fn(() => Promise.resolve(true)),
+  initialize: null as (() => void) | null,
   lastMoveEnd: null as ((event: Event | null, view: AudioGraphViewport) => void) | null,
 };
 const updateNodeInternals = vi.fn();
 const connectionHarness: MockItem = { inProgress: false, toHandle: null };
-const previewHarness = { enabled: false, sourcePortId: 'out', targetPortId: 'in', zoom: 1 };
+const previewHarness = {
+  targetAvailable: true,
+  enabled: false,
+  sourcePortId: 'out' as string | null,
+  targetPortId: 'in',
+  zoom: 1,
+};
 const resizeHarness = { height: 480 };
 
 beforeEach(() => {
   connectionHarness.inProgress = false;
   connectionHarness.toHandle = null;
+  previewHarness.targetAvailable = true;
   previewHarness.enabled = false;
   previewHarness.sourcePortId = 'out';
   previewHarness.targetPortId = 'in';
@@ -60,10 +62,11 @@ function MockViewportActions({ props }: { props: Record<string, unknown> }) {
         finish(null, viewport);
         return Promise.resolve(true);
       },
-      fitView: () => Promise.resolve(true),
+      fitView: viewportHarness.fitView,
       screenToFlowPosition: (position: { x: number; y: number }) => position,
     });
   };
+  viewportHarness.initialize = initialize;
   return (
     <>
       <button aria-label="initialize viewport" onClick={initialize} type="button" />
@@ -198,6 +201,40 @@ function MockMoveAction({ onNodesChange }: { onNodesChange: (changes: MockItem[]
   );
 }
 
+function MockMeasurementActions({
+  onNodesChange,
+}: {
+  onNodesChange: (changes: MockItem[]) => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="measure source"
+        onClick={() =>
+          onNodesChange([
+            { id: 'source', type: 'dimensions', dimensions: { width: 320, height: 250 } },
+          ])
+        }
+      />
+      <button
+        type="button"
+        aria-label="resize sink"
+        onClick={() =>
+          onNodesChange([
+            {
+              id: 'sink',
+              type: 'dimensions',
+              dimensions: { width: 320, height: 250 },
+              setAttributes: true,
+            },
+          ])
+        }
+      />
+    </>
+  );
+}
+
 function applyMockNodeDimensions(node: MockItem, changes: MockItem[]) {
   const change = changes.find(
     (candidate) => candidate.type === 'dimensions' && candidate.id === node.id,
@@ -242,6 +279,28 @@ function mockConnectionNode(id: string, side: 'source' | 'target', pitch: number
   };
 }
 
+function MockRenameBoundary({
+  props,
+  nodes,
+}: {
+  props: Record<string, unknown>;
+  nodes: MockItem[];
+}) {
+  return (
+    <button
+      type="button"
+      aria-label="non-element node double-click"
+      onClick={() => {
+        const callback = props.onNodeDoubleClick as
+          | ((event: unknown, node: MockItem) => void)
+          | undefined;
+        const node = nodes[0];
+        if (node) callback?.({ target: document.createTextNode('Source') }, node);
+      }}
+    />
+  );
+}
+
 function MockReactFlow({ children, ...props }: PropsWithChildren<Record<string, unknown>>) {
   const nodes = props.nodes as MockItem[];
   const edges = props.edges as MockItem[];
@@ -262,6 +321,14 @@ function MockReactFlow({ children, ...props }: PropsWithChildren<Record<string, 
   const isValidConnection = props.isValidConnection as (connection: MockItem) => boolean;
   return (
     <div
+      data-selected-nodes={nodes
+        .filter((node) => node.selected)
+        .map((node) => node.id)
+        .join(',')}
+      data-selected-edges={edges
+        .filter((edge) => edge.selected)
+        .map((edge) => edge.id)
+        .join(',')}
       data-connection-valid={isValidConnection(validConnection)}
       data-reconnect-valid={isValidConnection(edges[0] ?? {})}
       data-fit-view={props.fitView as boolean}
@@ -271,19 +338,31 @@ function MockReactFlow({ children, ...props }: PropsWithChildren<Record<string, 
       data-pan-activation-key={props.panActivationKeyCode as string}
       data-testid="react-flow"
     >
-      {nodes.map((node, index) => (
+      {nodes.map((node) => (
+        // biome-ignore lint/a11y/useSemanticElements: Match React Flow's focusable node group.
         <div
           className="react-flow__node"
+          role="group"
+          aria-label={node.ariaLabel as string}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: Mirror the real graph keyboard owner.
+          tabIndex={0}
           data-id={node.id as string}
           data-flow-height={node.height as number | undefined}
           data-flow-measured-height={
             (node.measured as MockItem | undefined)?.height as number | undefined
           }
           key={node.id as string}
+          onDoubleClick={(event) =>
+            (props.onNodeDoubleClick as ((event: unknown, node: MockItem) => void) | undefined)?.(
+              event,
+              node,
+            )
+          }
         >
-          <AudioNode data={node.data} selected={index === 1} />
+          <AudioNode data={node.data} selected={Boolean(node.selected)} />
         </div>
       ))}
+      <MockRenameBoundary props={props} nodes={nodes} />
       <MockConnectionActions
         edges={edges}
         invalidConnection={invalidConnection}
@@ -299,6 +378,7 @@ function MockReactFlow({ children, ...props }: PropsWithChildren<Record<string, 
         onEdgeDoubleClick={props.onEdgeDoubleClick as never}
       />
       <MockMoveAction onNodesChange={props.onNodesChange as never} />
+      <MockMeasurementActions onNodesChange={props.onNodesChange as never} />
       <button
         aria-label="resize source"
         onClick={() =>
@@ -314,6 +394,18 @@ function MockReactFlow({ children, ...props }: PropsWithChildren<Record<string, 
         type="button"
       />
       <MockViewportActions props={props} />
+      <MockConnectionPreview props={props} />
+      <button className="react-flow__pane" type="button" onClick={props.onPaneClick as () => void}>
+        Graph background
+      </button>
+      {children}
+    </div>
+  );
+}
+
+function MockConnectionPreview({ props }: { props: Record<string, unknown> }) {
+  return (
+    <>
       {previewHarness.enabled && (
         <svg aria-label="Connection preview">
           {(() => {
@@ -325,8 +417,14 @@ function MockReactFlow({ children, ...props }: PropsWithChildren<Record<string, 
                 fromPosition="right"
                 fromX={10}
                 fromY={20}
-                toHandle={{ id: previewHarness.targetPortId }}
-                toNode={mockConnectionNode('sink', 'target', 26)}
+                toHandle={
+                  previewHarness.targetAvailable ? { id: previewHarness.targetPortId } : undefined
+                }
+                toNode={
+                  previewHarness.targetAvailable
+                    ? mockConnectionNode('sink', 'target', 26)
+                    : undefined
+                }
                 toPosition="left"
                 toX={100}
                 toY={40}
@@ -335,11 +433,7 @@ function MockReactFlow({ children, ...props }: PropsWithChildren<Record<string, 
           })()}
         </svg>
       )}
-      <button className="react-flow__pane" type="button" onClick={props.onPaneClick as () => void}>
-        Graph background
-      </button>
-      {children}
-    </div>
+    </>
   );
 }
 
@@ -364,11 +458,20 @@ vi.mock('@xyflow/react', () => ({
     position,
     style,
     minHeight,
+    minWidth,
   }: {
     position: string;
     style: CSSProperties;
     minHeight: number;
-  }) => <span data-resize-grip={position} data-min-height={minHeight} style={style} />,
+    minWidth: number;
+  }) => (
+    <span
+      data-resize-grip={position}
+      data-min-height={minHeight}
+      data-min-width={minWidth}
+      style={style}
+    />
+  ),
   ReactFlow: MockReactFlow,
   useConnection: (selector: (connection: MockItem) => unknown) => selector(connectionHarness),
   useEdgesState: useMockFlowState,
@@ -424,7 +527,7 @@ it('keeps Options and the same gain slider mounted across external control revis
   const view = render(<AudioGraphCanvas {...props} model={initial} />, {
     wrapper: CanvasTestProvider,
   });
-  const options = screen.getByRole('button', { name: 'Options' });
+  const options = screen.getByRole('button', { name: (name) => name.endsWith('Options') });
   fireEvent.click(options);
   const slider = screen.getByRole('slider', { name: 'Input gain' });
   let revision = initial.revision;
@@ -446,7 +549,7 @@ it('keeps Options and the same gain slider mounted across external control revis
         }}
       />,
     );
-    await waitFor(() => expect(slider).toHaveAttribute('aria-valuenow', String(valueDb)));
+    await waitFor(() => expect(slider).toHaveValue(String(valueDb)));
     expect(screen.getByRole('slider', { name: 'Input gain' })).toBe(slider);
     expect(options).toHaveAttribute('aria-expanded', 'true');
   }
@@ -519,7 +622,7 @@ it.each(['input', 'output'] as const)(
     );
     expect(handles).toHaveLength(128);
     const anchors = handles.map((handle) => handle.style.top);
-    const options = screen.getByRole('button', { name: 'Options' });
+    const options = screen.getByRole('button', { name: (name) => name.endsWith('Options') });
     fireEvent.click(options);
     expect(screen.getByRole('slider', { name: 'Input gain' })).toBeVisible();
     expect(handles.map((handle) => handle.style.top)).toEqual(anchors);
@@ -574,28 +677,36 @@ function selectPortRectangle(
   end: { x: number; y: number },
   additive = false,
 ) {
-  const pane = screen.getByRole('button', { name: 'Graph background' });
   for (const [type, point] of [
     ['pointerdown', start],
     ['pointerup', end],
   ] as const) {
-    fireEvent(
-      pane,
-      Object.assign(
-        new MouseEvent(type, {
-          bubbles: true,
-          button: 0,
-          clientX: point.x,
-          clientY: point.y,
-          shiftKey: additive,
-        }),
-        { pointerId: 1, pointerType: 'mouse', isPrimary: true },
-      ),
-    );
+    portPointer(type, point, additive);
   }
 }
 
-it('maps 64 box-selected outputs to 16 Shift-selected inputs in one graph edit', () => {
+function portPointer(
+  type: string,
+  point: { x: number; y: number },
+  additive = false,
+  pointerId = 1,
+) {
+  fireEvent(
+    screen.getByRole('button', { name: 'Graph background' }),
+    Object.assign(
+      new MouseEvent(type, {
+        bubbles: true,
+        button: 0,
+        clientX: point.x,
+        clientY: point.y,
+        shiftKey: additive,
+      }),
+      { pointerId, pointerType: 'mouse', isPrimary: true },
+    ),
+  );
+}
+
+it('maps 64 selected outputs to destination capacity without box-selecting inputs', () => {
   const graph = model();
   const processor = graph.nodes[1];
   const sink = graph.nodes[2];
@@ -626,7 +737,7 @@ it('maps 64 box-selected outputs to 16 Shift-selected inputs in one graph edit',
   selectPortRectangle({ x: 0, y: 0 }, { x: 20, y: 200 });
   expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(64);
   selectPortRectangle({ x: 90, y: 0 }, { x: 110, y: 50 }, true);
-  expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(80);
+  expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(64);
   fireEvent.click(screen.getByRole('button', { name: 'connect' }));
   expect(onChange).toHaveBeenCalledOnce();
   const [changed, kind] = onChange.mock.calls[0] as [AudioGraphModel, string];
@@ -641,7 +752,7 @@ it('maps 64 box-selected outputs to 16 Shift-selected inputs in one graph edit',
   expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(0);
 });
 
-it('previews the released target when one source and several target ports are selected', () => {
+it('previews the released target even when a rectangle covers several unselectable inputs', () => {
   const graph = model();
   const sink = graph.nodes[2];
   assert(sink);
@@ -661,7 +772,7 @@ it('previews the released target when one source and several target ports are se
     );
   });
   selectPortRectangle({ x: 90, y: 0 }, { x: 110, y: 50 });
-  expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(2);
+  expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(0);
   view.rerender(<AudioGraphCanvas {...props} />);
   expect(view.container.querySelectorAll('.react-flow__connection-path')).toHaveLength(1);
   expect(view.container.querySelector('.react-flow__connection-path')).toHaveAttribute(
@@ -709,9 +820,7 @@ it.each([true, false])(
     }
     selectPortRectangle({ x: 0, y: 0 }, { x: 20, y: 80 });
     if (selectTargets) selectPortRectangle({ x: 90, y: 0 }, { x: 110, y: 80 }, true);
-    expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(
-      selectTargets ? 8 : 4,
-    );
+    expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(4);
     view.rerender(<AudioGraphCanvas {...props} />);
     expect(view.container.querySelectorAll('.react-flow__connection-path')).toHaveLength(3);
     expect(
@@ -826,8 +935,10 @@ function resizedNodeElements(container: HTMLElement) {
   assert(flowNode);
   const card = flowNode.querySelector<HTMLElement>('[data-face-mode="standard"]');
   assert(card);
-  const options = within(flowNode).getByRole('button', { name: 'Options' });
-  const controls = options.parentElement?.parentElement;
+  const options = within(flowNode).getByRole('button', {
+    name: (name) => name.endsWith('Options'),
+  });
+  const controls = flowNode.querySelector<HTMLElement>('[data-node-controls]');
   assert(controls);
   const inner = flowNode.querySelector<HTMLElement>('[style*="min-height"]');
   const grip = flowNode.querySelector('[data-resize-grip="bottom-right"]');
@@ -858,7 +969,7 @@ it('keeps stored size and port anchors stable through Options and normalizes ope
     const closedTop = port.style.top;
 
     fireEvent.click(options);
-    const panel = options.nextElementSibling;
+    const panel = flowNode.querySelector('[data-node-disclosure]');
     assert(panel);
     reportHeight(panel, 37.5);
     reportHeight(controls, 62.5);
@@ -891,7 +1002,7 @@ it('keeps stored size and port anchors stable through Options and normalizes ope
     expect(committed).toHaveBeenCalledTimes(1);
     const resizedTop = (port as HTMLElement).style.top;
     fireEvent.click(options);
-    const reopenedPanel = options.nextElementSibling;
+    const reopenedPanel = flowNode.querySelector('[data-node-disclosure]');
     assert(reopenedPanel);
     reportHeight(reopenedPanel, 37.5);
     reportHeight(controls, 62.5);
@@ -951,7 +1062,9 @@ it('shares one open Options panel across regular and recorder nodes and closes o
       />
     </CanvasTestProvider>,
   );
-  const [gain, recorder] = screen.getAllByRole('button', { name: 'Options' });
+  const [gain, recorder] = screen.getAllByRole('button', {
+    name: (name) => name.endsWith('Options'),
+  });
   assert(gain && recorder);
   fireEvent.click(gain);
   expect(gain).toHaveAttribute('aria-expanded', 'true');
@@ -1006,25 +1119,27 @@ function recorderCanvas(channels: number) {
 
 it('aligns recorder handles with content-sized meter rows through channel edits and disclosure changes', () => {
   const view = render(recorderCanvas(2));
-  const face = screen.getByRole('button', { name: 'Recorder, Output' });
-  const root = face.closest('[data-face-mode]');
+  const face = screen.getByRole('group', { name: 'Recorder' }).querySelector('[data-node-face]');
+  const root = face?.closest('[data-face-mode]');
   expect(root?.parentElement).toHaveAttribute('data-node-type', 'recorder');
   expect(root?.parentElement?.style.width).toBe('');
-  expect(root).toHaveStyle({ '--audio-node-face-height': '65px' });
-  expect(screen.getByLabelText('Recorder input, CH 1')).toHaveStyle({ top: '41px' });
-  expect(screen.getByLabelText('Recorder input, CH 2')).toHaveStyle({ top: '54px' });
+  expect(root).toHaveStyle({ '--audio-node-face-height': '94px' });
+  expect(screen.getByLabelText('Recorder input, CH 1')).toHaveStyle({ top: '55.5px' });
+  expect(screen.getByLabelText('Recorder input, CH 2')).toHaveStyle({ top: '68.5px' });
   expect(screen.queryByText('2 CH')).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Options' }));
+  fireEvent.click(screen.getByRole('button', { name: (name) => name.endsWith('Options') }));
   expect(screen.getByText('Recording settings')).toBeInTheDocument();
-  expect(root).toHaveStyle({ '--audio-node-face-height': '65px' });
-  expect(screen.getByLabelText('Recorder input, CH 2')).toHaveStyle({ top: '54px' });
+  expect(root).toHaveStyle({ '--audio-node-face-height': '94px' });
+  expect(screen.getByLabelText('Recorder input, CH 2')).toHaveStyle({ top: '68.5px' });
   for (const channels of [8, 1, 2]) {
     updateNodeInternals.mockClear();
     view.rerender(recorderCanvas(channels));
-    expect(root).toHaveStyle({ '--audio-node-face-height': `${39 + channels * 13}px` });
+    expect(root).toHaveStyle({
+      '--audio-node-face-height': `${Math.max(94, 39 + channels * 13)}px`,
+    });
     for (let index = 0; index < channels; index += 1)
       expect(screen.getByLabelText(`Recorder input, CH ${index + 1}`)).toHaveStyle({
-        top: `${41 + index * 13}px`,
+        top: `${41 + Math.max(0, 94 - (39 + channels * 13)) / 2 + index * 13}px`,
       });
     expect(screen.queryByLabelText(`Recorder input, CH ${channels + 1}`)).not.toBeInTheDocument();
     expect(updateNodeInternals).toHaveBeenCalledWith('take');
@@ -1153,32 +1268,38 @@ describe('AudioGraphCanvas persisted zoom limits', () => {
 });
 
 describe('AudioGraphCanvas discovery menu lifecycle', () => {
-  it('reports both add and context menu open/close to the inventory owner', async () => {
-    const onOpened = vi.fn();
-    render(
-      <CanvasTestProvider>
-        <AudioGraphCanvas
-          addNodeLabel="Add node"
-          ariaLabel="Routing graph"
-          model={model()}
-          nodeMenuItems={[{ id: 'test', label: 'Test source' }]}
-          onModelChange={vi.fn()}
-          onNodeMenuOpenedChange={onOpened}
-        />
-      </CanvasTestProvider>,
-    );
-    expect(onOpened).toHaveBeenLastCalledWith(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Add node' }));
-    await waitFor(() => expect(onOpened).toHaveBeenLastCalledWith(true));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Test source' }));
-    await waitFor(() => expect(onOpened).toHaveBeenLastCalledWith(false));
-    fireEvent.contextMenu(screen.getByRole('button', { name: 'Processor, Processor, Gain' }));
-    await waitFor(() => expect(onOpened).toHaveBeenLastCalledWith(true));
-    fireEvent.pointerDown(screen.getByRole('button', { name: 'Source, Source, App' }), {
-      button: 0,
-    });
-    await waitFor(() => expect(onOpened).toHaveBeenLastCalledWith(false));
-  });
+  it.each(['Add node', '', '   ', undefined])(
+    'reports discovery menu lifecycle with label %s',
+    async (label) => {
+      const onOpened = vi.fn();
+      render(
+        <CanvasTestProvider>
+          <AudioGraphCanvas
+            addNodeLabel={label}
+            ariaLabel="Routing graph"
+            model={model()}
+            nodeMenuItems={[{ id: 'test', label: 'Test source' }]}
+            onModelChange={vi.fn()}
+            onNodeMenuOpenedChange={onOpened}
+          />
+        </CanvasTestProvider>,
+      );
+      expect(onOpened).toHaveBeenLastCalledWith(false);
+      const add = screen.getByRole('button', { name: 'Add node' });
+      expect(add).toHaveTextContent('+');
+      expect(add).not.toHaveTextContent('Add node');
+      fireEvent.click(add);
+      await waitFor(() => expect(onOpened).toHaveBeenLastCalledWith(true));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Test source' }));
+      await waitFor(() => expect(onOpened).toHaveBeenLastCalledWith(false));
+      fireEvent.contextMenu(screen.getByRole('group', { name: 'Processor' }));
+      await waitFor(() => expect(onOpened).toHaveBeenLastCalledWith(true));
+      fireEvent.pointerDown(screen.getByRole('group', { name: 'Source' }), {
+        button: 0,
+      });
+      await waitFor(() => expect(onOpened).toHaveBeenLastCalledWith(false));
+    },
+  );
 });
 
 describe('AudioGraphCanvas context menu wiring', () => {
@@ -1189,7 +1310,7 @@ describe('AudioGraphCanvas context menu wiring', () => {
         <AudioGraphCanvas ariaLabel="Routing graph" model={model()} onModelChange={onModelChange} />
       </CanvasTestProvider>,
     );
-    fireEvent.contextMenu(screen.getByRole('button', { name: 'Processor, Processor, Gain' }), {
+    fireEvent.contextMenu(screen.getByRole('group', { name: 'Processor' }), {
       clientX: 140,
       clientY: 100,
     });
@@ -1229,9 +1350,9 @@ describe('AudioGraphCanvas context menu wiring', () => {
         <AudioGraphCanvas ariaLabel="Routing graph" model={model()} onModelChange={onModelChange} />
       </CanvasTestProvider>,
     );
-    fireEvent.contextMenu(screen.getByRole('button', { name: 'Processor, Processor, Gain' }));
+    fireEvent.contextMenu(screen.getByRole('group', { name: 'Processor' }));
     await screen.findByRole('menu');
-    fireEvent.pointerDown(screen.getByRole('button', { name: 'Source, Source, App' }), {
+    fireEvent.pointerDown(screen.getByRole('group', { name: 'Source' }), {
       button: 0,
     });
     await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
@@ -1260,8 +1381,8 @@ describe('AudioGraphCanvas', () => {
       'target',
     );
     expect(screen.getByTestId('background')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Source, Source, App' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Processor, Processor, Gain' }));
+    fireEvent.click(screen.getByRole('group', { name: 'Source' }));
+    fireEvent.click(screen.getByRole('group', { name: 'Processor' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'invalid connect' }));
     fireEvent.click(screen.getByRole('button', { name: 'invalid reconnect' }));
@@ -1294,4 +1415,670 @@ describe('AudioGraphCanvas', () => {
       'layout',
     );
   });
+});
+
+function selectionCanvas() {
+  const graph = model();
+  const source = graph.nodes[0];
+  const processor = graph.nodes[1];
+  assert(source && processor);
+  source.outputPorts = [5, 8, 9, 10].map((channelIndex) => ({
+    id: `channel-${channelIndex}`,
+    channelIndex,
+    label: 'Source output',
+  }));
+  processor.outputPorts = [0, 1].map((channelIndex) => ({
+    id: `other-${channelIndex}`,
+    channelIndex,
+    label: 'Other output',
+  }));
+  const changed = vi.fn();
+  const view = render(
+    <AudioGraphCanvas ariaLabel="Graph" model={graph} onModelChange={changed} />,
+    { wrapper: CanvasTestProvider },
+  );
+  for (const handle of view.container.querySelectorAll<HTMLElement>('[data-audio-port-side]')) {
+    const isSource = handle.dataset.audioNodeId === 'source';
+    const ports = isSource ? source.outputPorts : processor.outputPorts;
+    const index = ports.findIndex((port) => port.id === handle.dataset.audioPortId);
+    vi.spyOn(handle, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(isSource ? 10 : 100, 10 + index * 20, 2, 2),
+    );
+  }
+  return { ...view, changed };
+}
+
+it('shows live channel ranges and counts before committing a one-node output selection', () => {
+  const view = selectionCanvas();
+  portPointer('pointerdown', { x: 0, y: 0 });
+  portPointer('pointermove', { x: 20, y: 55 });
+  expect(screen.getByRole('status')).toHaveTextContent('CH 6, 9–10 · 3 ch');
+  expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(3);
+  expect(view.changed).not.toHaveBeenCalled();
+  portPointer('pointerup', { x: 20, y: 55 });
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(3);
+});
+
+it('locks a drag to its first source even when the rectangle later covers other nodes', () => {
+  const view = selectionCanvas();
+  portPointer('pointerdown', { x: 0, y: 0 });
+  portPointer('pointermove', { x: 20, y: 55 });
+  portPointer('pointermove', { x: 120, y: 55 });
+  portPointer('pointerup', { x: 120, y: 55 });
+  const selected = view.container.querySelectorAll<HTMLElement>('[data-port-selected]');
+  expect(selected).toHaveLength(3);
+  expect(Array.from(selected).every((port) => port.dataset.audioNodeId === 'source')).toBe(true);
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  selectPortRectangle({ x: 90, y: 0 }, { x: 120, y: 55 }, true);
+  expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(3);
+  selectPortRectangle({ x: 90, y: 0 }, { x: 120, y: 55 });
+  expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(2);
+  expect(
+    Array.from(view.container.querySelectorAll<HTMLElement>('[data-port-selected]')).every(
+      (port) => port.dataset.audioNodeId === 'processor',
+    ),
+  ).toBe(true);
+});
+
+it('restores the committed selection on pointer cancellation and Escape during a drag', () => {
+  const view = selectionCanvas();
+  selectPortRectangle({ x: 0, y: 0 }, { x: 20, y: 35 });
+  for (const cancel of ['pointercancel', 'Escape']) {
+    portPointer('pointerdown', { x: 0, y: 45 }, true);
+    portPointer('pointermove', { x: 20, y: 80 }, true);
+    expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(4);
+    if (cancel === 'Escape')
+      fireEvent.keyDown(screen.getByRole('region', { name: 'Graph' }), { key: 'Escape' });
+    else portPointer('pointercancel', { x: 20, y: 80 });
+    expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(2);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    portPointer('pointerup', { x: 20, y: 80 });
+    expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(2);
+  }
+  fireEvent.keyDown(screen.getByRole('region', { name: 'Graph' }), { key: 'Escape' });
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(0);
+});
+
+it('hides feedback for empty drags and ignores releases from unrelated pointers', () => {
+  selectionCanvas();
+  portPointer('pointerdown', { x: 0, y: 0 });
+  portPointer('pointermove', { x: 20, y: 35 });
+  expect(screen.getByRole('status')).toHaveTextContent('CH 6, 9 · 2 ch');
+  portPointer('pointerup', { x: 20, y: 35 }, false, 2);
+  expect(screen.getByRole('status')).toHaveTextContent('CH 6, 9 · 2 ch');
+  portPointer('pointerup', { x: 20, y: 35 });
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  portPointer('pointerdown', { x: 0, y: 300 });
+  portPointer('pointermove', { x: 20, y: 320 });
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  portPointer('pointerup', { x: 20, y: 320 });
+});
+
+it('exposes one named node focus target and preserves independent node controls', () => {
+  const view = render(
+    <AudioGraphCanvas ariaLabel="Graph" model={model()} onModelChange={vi.fn()} />,
+    {
+      wrapper: CanvasTestProvider,
+    },
+  );
+  expect(screen.getByRole('region', { name: 'Graph' })).toHaveAttribute('tabindex', '-1');
+  for (const title of ['Source', 'Processor', 'Sink']) {
+    const node = screen.getByRole('group', { name: title });
+    expect(node).toHaveAttribute('tabindex', '0');
+    expect(node.querySelector('[data-node-face]')).not.toHaveAttribute('tabindex');
+    expect(node.querySelector('[data-node-face]')?.tagName).toBe('DIV');
+  }
+  expect(view.container.querySelectorAll('[data-node-face]')).toHaveLength(3);
+});
+
+it('adds a node from the canvas context menu and fits the initialized viewport without changing audio', async () => {
+  const onAddNode = vi.fn();
+  const onModelChange = vi.fn();
+  render(
+    <AudioGraphCanvas
+      ariaLabel="Graph"
+      model={model()}
+      nodeMenuItems={[{ id: 'source:new', label: 'New source' }]}
+      onAddNode={onAddNode}
+      onModelChange={onModelChange}
+    />,
+    { wrapper: CanvasTestProvider },
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'initialize viewport' }));
+  fireEvent.contextMenu(screen.getByRole('button', { name: 'Graph background' }), {
+    clientX: 120,
+    clientY: 80,
+  });
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'New source' }));
+  expect(onAddNode).toHaveBeenCalledExactlyOnceWith('source:new', { x: 120, y: 80 });
+  fireEvent.contextMenu(screen.getByRole('button', { name: 'Graph background' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Fit graph' }));
+  expect(viewportHarness.fitView).toHaveBeenCalledWith({ padding: 0.15, maxZoom: 1 });
+  expect(onModelChange).not.toHaveBeenCalled();
+});
+
+it('preserves the node keyboard focus while Escape clears its selection', async () => {
+  const onModelChange = vi.fn();
+  render(<AudioGraphCanvas ariaLabel="Graph" model={model()} onModelChange={onModelChange} />, {
+    wrapper: CanvasTestProvider,
+  });
+  fireEvent.contextMenu(screen.getByRole('button', { name: 'Graph background' }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Select all' }));
+  expect(screen.getByTestId('react-flow')).toHaveAttribute(
+    'data-selected-nodes',
+    'source,processor,sink',
+  );
+  const node = screen.getByRole('group', { name: 'Processor' });
+  node.focus();
+  fireEvent.keyDown(node, { key: 'Escape' });
+  expect(document.activeElement).toBe(node);
+  expect(screen.getByTestId('react-flow')).toHaveAttribute('data-selected-nodes', '');
+  expect(onModelChange).not.toHaveBeenCalled();
+});
+
+it('keeps native text context menus from triggering canvas actions', () => {
+  const onModelChange = vi.fn();
+  render(
+    <AudioGraphCanvas
+      ariaLabel="Graph"
+      model={model()}
+      onModelChange={onModelChange}
+      renderNodeContent={(node) =>
+        node.id === 'source' ? <input aria-label="Native editable label" /> : null
+      }
+    />,
+    { wrapper: CanvasTestProvider },
+  );
+  fireEvent.contextMenu(screen.getByRole('textbox', { name: 'Native editable label' }));
+  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  expect(onModelChange).not.toHaveBeenCalled();
+});
+
+it('prepares the exact node context for a touch long press and ignores empty touches', async () => {
+  vi.useFakeTimers();
+  const onModelChange = vi.fn();
+  const view = render(
+    <AudioGraphCanvas ariaLabel="Graph" model={model()} onModelChange={onModelChange} />,
+    { wrapper: CanvasTestProvider },
+  );
+  try {
+    const node = screen.getByRole('group', { name: 'Processor' });
+    fireEvent.touchStart(node, { touches: [] });
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    fireEvent.touchStart(node, { touches: [{ clientX: 140, clientY: 100 }] });
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete node' }));
+    expect(onModelChange).toHaveBeenCalledWith(expect.objectContaining({ edges: [] }), 'runtime');
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+  }
+});
+
+it.each([false, true])(
+  'renders a free-drag connection preview with target available=%s without inventing target channels',
+  (targetAvailable) => {
+    previewHarness.enabled = true;
+    previewHarness.targetAvailable = targetAvailable;
+    previewHarness.targetPortId = '';
+    render(<AudioGraphCanvas ariaLabel="Graph" model={model()} onModelChange={vi.fn()} />, {
+      wrapper: CanvasTestProvider,
+    });
+    expect(screen.getByLabelText('Connection preview').querySelectorAll('path')).toHaveLength(1);
+  },
+);
+
+it('forwards node gain and plugin parameter edits to the corresponding native owner callback', () => {
+  const graph = model();
+  const source = graph.nodes[0];
+  const processor = graph.nodes[1];
+  assert(source && processor);
+  source.appearance.gainControl = { label: 'Source gain', valueDb: 0 };
+  processor.appearance.parameterControls = [
+    { id: 'ratio', label: 'Ratio', minimum: 1, maximum: 10, step: 1, suffix: ':1', value: 3 },
+  ];
+  const gain = vi.fn();
+  const parameter = vi.fn();
+  render(
+    <AudioGraphCanvas
+      ariaLabel="Graph"
+      model={graph}
+      onModelChange={vi.fn()}
+      onNodeGainChange={gain}
+      onNodeParameterChange={parameter}
+    />,
+    { wrapper: CanvasTestProvider },
+  );
+  const sourceView = screen.getByRole('group', { name: 'Source' });
+  fireEvent.click(
+    within(sourceView).getByRole('button', { name: (name) => name.endsWith('Options') }),
+  );
+  const gainSlider = screen.getByRole('slider', { name: 'Source gain' });
+  gainSlider.focus();
+  fireEvent.keyDown(gainSlider, { key: 'ArrowLeft' });
+  expect(gain).toHaveBeenCalledExactlyOnceWith('source', -0.5);
+  const ratio = screen.getByRole('slider', { name: 'Ratio' });
+  ratio.focus();
+  fireEvent.keyDown(ratio, { key: 'ArrowRight' });
+  expect(parameter).toHaveBeenCalledExactlyOnceWith('processor', 'ratio', 4);
+});
+
+it('sends a device-name edit from that device node to its native owner', () => {
+  const graph = model();
+  const sink = graph.nodes[2];
+  assert(sink);
+  sink.appearance.endpointControl = {
+    displayName: 'Sink',
+    nameLabel: 'Device name',
+    renderChannels: 2,
+    captureChannels: 2,
+  };
+  const changed = vi.fn();
+  render(
+    <AudioGraphCanvas
+      ariaLabel="Graph"
+      model={graph}
+      onModelChange={vi.fn()}
+      onNodeEndpointChange={changed}
+    />,
+    { wrapper: CanvasTestProvider },
+  );
+  fireEvent.click(
+    within(screen.getByRole('group', { name: 'Sink' })).getByRole('button', {
+      name: (name) => name.endsWith('Options'),
+    }),
+  );
+  const name = screen.getByRole('textbox', { name: 'Device name' });
+  fireEvent.change(name, { target: { value: 'Monitoring' } });
+  fireEvent.blur(name);
+  expect(changed).toHaveBeenCalledExactlyOnceWith('sink', {
+    displayName: 'Monitoring',
+    renderChannels: 2,
+    captureChannels: 2,
+  });
+});
+
+it('opens the selected native editor, reports its failure, retries it and follows its native size', () => {
+  const graph = model();
+  const processor = graph.nodes[1];
+  assert(processor);
+  processor.appearance.hasProcessorEditor = true;
+  const retry = vi.fn();
+  const props = {
+    ariaLabel: 'Graph',
+    model: graph,
+    onModelChange: vi.fn(),
+    onProcessorEditorRetry: retry,
+    processorEditorLabels: {
+      open: 'Open editor',
+      retry: 'Retry editor',
+      failure: {
+        no_editor: 'No editor',
+        display_unavailable: 'No display',
+        host_window_failed: 'Window failed',
+        plugin_rejected: 'Plug-in rejected',
+        worker_unavailable: 'Host stopped',
+      },
+    },
+  };
+  const view = render(<AudioGraphCanvas {...props} />, { wrapper: CanvasTestProvider });
+  fireEvent.click(screen.getByRole('button', { name: (name) => name.endsWith('Open editor') }));
+  expect(retry).toHaveBeenCalledExactlyOnceWith('processor');
+  view.rerender(
+    <AudioGraphCanvas
+      {...props}
+      processorEditorStatuses={
+        new Map([
+          [
+            'processor',
+            {
+              protocolVersion: 1,
+              nodeId: 'processor',
+              state: 'failed',
+              failure: 'plugin_rejected',
+              resizable: false,
+              width: null,
+              height: null,
+            },
+          ],
+        ])
+      }
+    />,
+  );
+  expect(screen.getByRole('status')).toHaveTextContent('Plug-in rejected');
+  fireEvent.click(screen.getByRole('button', { name: (name) => name.endsWith('Retry editor') }));
+  expect(retry).toHaveBeenCalledTimes(2);
+  view.rerender(
+    <AudioGraphCanvas
+      {...props}
+      processorEditorStatuses={
+        new Map([
+          [
+            'processor',
+            {
+              protocolVersion: 1,
+              nodeId: 'processor',
+              state: 'open',
+              failure: null,
+              resizable: true,
+              width: 720,
+              height: 420,
+            },
+          ],
+        ])
+      }
+    />,
+  );
+  expect(
+    screen.queryByRole('button', { name: (name) => name.endsWith('Retry editor') }),
+  ).not.toBeInTheDocument();
+  const shell = screen.getByRole('group', { name: 'Processor' }).firstElementChild;
+  expect(shell).toHaveStyle({ width: '720px' });
+});
+
+it('selects a cable through Shift box selection without changing routing or losing an existing selection', async () => {
+  const original = globalThis.DOMPoint;
+  globalThis.DOMPoint = class {
+    constructor(
+      public x = 0,
+      public y = 0,
+    ) {}
+    matrixTransform() {
+      return this;
+    }
+  } as unknown as typeof DOMPoint;
+  try {
+    const changed = vi.fn();
+    const view = render(
+      <AudioGraphCanvas ariaLabel="Graph" model={model()} onModelChange={changed} />,
+      {
+        wrapper: CanvasTestProvider,
+      },
+    );
+    const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    group.classList.add('react-flow__edge');
+    group.dataset.id = 'source-to-processor';
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.classList.add('react-flow__edge-path');
+    Object.defineProperties(path, {
+      getScreenCTM: { value: () => ({}) },
+      getTotalLength: { value: () => 10 },
+      getPointAtLength: { value: (length: number) => ({ x: 12 + length / 10, y: 12 }) },
+      getBoundingClientRect: { value: () => new DOMRect(10, 10, 10, 10) },
+    });
+    group.append(path);
+    view.container.querySelector('[data-testid="react-flow"]')?.append(group);
+    const pane = screen.getByRole('button', { name: 'Graph background' });
+    for (const kind of ['pointerdown', 'pointerup', 'pointerdown', 'pointerup']) {
+      fireEvent(
+        pane,
+        new PointerEvent(kind, {
+          bubbles: true,
+          clientX: kind === 'pointerdown' ? 10 : 20,
+          clientY: kind === 'pointerdown' ? 10 : 20,
+          shiftKey: true,
+        }),
+      );
+      if (kind === 'pointerup') await act(() => new Promise(requestAnimationFrame));
+    }
+    expect(screen.getByTestId('react-flow')).toHaveAttribute(
+      'data-selected-edges',
+      'source-to-processor',
+    );
+    expect(changed).not.toHaveBeenCalled();
+  } finally {
+    globalThis.DOMPoint = original;
+  }
+});
+
+it('keeps a single free-drag preview while the originating node disappears from the current graph', () => {
+  const graph = model();
+  graph.nodes = graph.nodes.filter((node) => node.id !== 'processor');
+  graph.edges = [];
+  previewHarness.enabled = true;
+  previewHarness.targetAvailable = false;
+  const changed = vi.fn();
+  render(<AudioGraphCanvas ariaLabel="Graph" model={graph} onModelChange={changed} />, {
+    wrapper: CanvasTestProvider,
+  });
+  expect(screen.getByLabelText('Connection preview').querySelectorAll('path')).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'connect' }));
+  expect(changed).not.toHaveBeenCalled();
+});
+
+it('ignores React Flow initialization that finishes after its canvas has unmounted', () => {
+  resetViewportHarness();
+  const view = render(canvas({ x: 40, y: 20, zoom: 1.5 }, vi.fn()));
+  const initialize = viewportHarness.initialize;
+  assert(initialize);
+  view.unmount();
+  initialize();
+  expect(viewportHarness.setViewport).not.toHaveBeenCalled();
+});
+
+it('keeps live measurement distinct from an explicit device-node resize without a disclosure panel', () => {
+  const changed = vi.fn();
+  const view = render(
+    <AudioGraphCanvas ariaLabel="Graph" model={model()} onModelChange={changed} />,
+    {
+      wrapper: CanvasTestProvider,
+    },
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'measure source' }));
+  expect(view.container.querySelector('[data-id="source"]')).toHaveAttribute(
+    'data-flow-measured-height',
+    '250',
+  );
+  expect(changed).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'resize sink' }));
+  expect(changed).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      nodes: expect.arrayContaining([
+        expect.objectContaining({ id: 'sink', size: { width: 320, height: 250 } }),
+      ]),
+    }),
+    'layout',
+  );
+});
+
+it('keeps the context menu open for right-button gestures and closes it for ordinary selection', async () => {
+  render(<AudioGraphCanvas ariaLabel="Graph" model={model()} onModelChange={vi.fn()} />, {
+    wrapper: CanvasTestProvider,
+  });
+  fireEvent.contextMenu(screen.getByRole('group', { name: 'Processor' }));
+  const menu = await screen.findByRole('menu');
+  fireEvent.pointerDown(screen.getByRole('button', { name: 'Graph background' }), { button: 2 });
+  expect(menu).toBeInTheDocument();
+  fireEvent.pointerDown(screen.getByRole('button', { name: 'Graph background' }), { button: 0 });
+  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+});
+
+it('retains one preview for a React Flow connection with no named source handle', () => {
+  previewHarness.enabled = true;
+  previewHarness.sourcePortId = null;
+  previewHarness.targetAvailable = false;
+  render(<AudioGraphCanvas ariaLabel="Graph" model={model()} onModelChange={vi.fn()} />, {
+    wrapper: CanvasTestProvider,
+  });
+  expect(screen.getByLabelText('Connection preview').querySelectorAll('path')).toHaveLength(1);
+});
+
+it.each(['missing port', 'missing device'] as const)(
+  'refuses a selected-channel batch when the target has a %s during a native drag',
+  (targetMode) => {
+    const graph = model();
+    const processor = graph.nodes[1];
+    assert(processor);
+    processor.outputPorts.push({ id: 'out-2', label: 'Second output' });
+    const changed = vi.fn();
+    const view = render(
+      <AudioGraphCanvas ariaLabel="Graph" model={graph} onModelChange={changed} />,
+      {
+        wrapper: CanvasTestProvider,
+      },
+    );
+    view.container
+      .querySelectorAll<HTMLElement>('[data-audio-port-side]')
+      .forEach((handle, index) => {
+        const selected =
+          handle.dataset.audioNodeId === 'processor' && handle.dataset.audioPortSide === 'output';
+        vi.spyOn(handle, 'getBoundingClientRect').mockReturnValue(
+          new DOMRect(selected ? 10 : 100, index * 4 + 1, 2, 2),
+        );
+      });
+    selectPortRectangle({ x: 0, y: 0 }, { x: 20, y: 70 });
+    expect(view.container.querySelectorAll('[data-port-selected]')).toHaveLength(2);
+    previewHarness.enabled = true;
+    if (targetMode === 'missing port') previewHarness.targetPortId = 'removed';
+    const latest = {
+      ...graph,
+      nodes:
+        targetMode === 'missing device'
+          ? graph.nodes.filter((node) => node.id !== 'sink')
+          : graph.nodes,
+    };
+    view.rerender(<AudioGraphCanvas ariaLabel="Graph" model={latest} onModelChange={changed} />);
+    expect(screen.getByLabelText('Connection preview').querySelectorAll('path')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'connect' }));
+    expect(changed).not.toHaveBeenCalled();
+  },
+);
+
+it('keeps EQ resize minimum aligned with its shared 320px display width', () => {
+  const graph = model();
+  const processor = graph.nodes.find((node) => node.id === 'processor');
+  if (!processor) throw new Error('Processor fixture is missing');
+  processor.appearance.equalizer = { bands: [] };
+  processor.size = { width: 228, height: 160 };
+  const view = render(
+    <AudioGraphCanvas ariaLabel="Graph" model={graph} onModelChange={vi.fn()} />,
+    { wrapper: CanvasTestProvider },
+  );
+  const eq = view.container.querySelector('[data-equalizer]');
+  expect(eq).toHaveStyle({ width: '320px' });
+  expect(eq?.querySelector('[data-resize-grip]')).toHaveAttribute('data-min-width', '320');
+  const normal = view.container.querySelector('[data-id="source"] [data-resize-grip]');
+  expect(normal).toHaveAttribute('data-min-width', '180');
+});
+
+it('forwards an EQ graph drag atomically with its node identity while arrows retain single-value editing', () => {
+  const graph = model();
+  const processor = graph.nodes.find((node) => node.id === 'processor');
+  assert(processor);
+  processor.appearance.equalizer = {
+    sampleRate: 48000,
+    bands: [{ id: 'mid', label: 'Mid', frequencyId: 'frequencyHz', gainId: 'midDb', qId: 'q' }],
+  };
+  processor.appearance.parameterControls = [
+    {
+      id: 'frequencyHz',
+      label: 'Frequency',
+      value: 1000,
+      minimum: 20,
+      maximum: 20000,
+      step: 1,
+      suffix: 'Hz',
+      scale: 'logarithmic',
+    },
+    { id: 'midDb', label: 'Gain', value: 0, minimum: -24, maximum: 24, step: 0.1, suffix: 'dB' },
+    {
+      id: 'q',
+      label: 'Q',
+      value: Number(Math.SQRT1_2.toFixed(3)),
+      minimum: 0.1,
+      maximum: 10,
+      step: 0.001,
+      suffix: '',
+    },
+  ];
+  const batch = vi.fn();
+  const single = vi.fn();
+  const changed = vi.fn();
+  render(
+    <AudioGraphCanvas
+      ariaLabel="Graph"
+      model={graph}
+      onModelChange={changed}
+      onNodeParameterChange={single}
+      onNodeParametersChange={batch}
+    />,
+    { wrapper: CanvasTestProvider },
+  );
+  const handle = screen.getByRole('button', { name: /^1 Mid, 1000 Hz/ });
+  const plot = handle.parentElement;
+  assert(plot);
+  plot.setPointerCapture = vi.fn();
+  plot.hasPointerCapture = vi.fn(() => true);
+  plot.releasePointerCapture = vi.fn();
+  vi.spyOn(plot, 'getBoundingClientRect').mockReturnValue(new DOMRect(10, 20, 300, 120));
+  fireEvent.pointerDown(handle, { button: 0, pointerId: 93 });
+  fireEvent.pointerMove(plot, {
+    pointerId: 93,
+    clientX: 10 + frequencyPosition(2200),
+    clientY: 20 + gainPosition(6),
+  });
+  fireEvent.pointerUp(plot, { pointerId: 93 });
+  expect(batch).toHaveBeenCalledExactlyOnceWith('processor', [
+    { id: 'frequencyHz', value: 2200 },
+    { id: 'midDb', value: 6 },
+  ]);
+  expect(single).not.toHaveBeenCalled();
+  expect(changed).not.toHaveBeenCalled();
+  expect(plot.releasePointerCapture).toHaveBeenCalledWith(93);
+  fireEvent.keyDown(handle, { key: 'ArrowRight' });
+  expect(single).toHaveBeenCalledExactlyOnceWith('processor', 'frequencyHz', 1001);
+  expect(batch).toHaveBeenCalledOnce();
+});
+
+it('offers display-name editing on title double-click and F2 without an audio/model edit', () => {
+  const graph = model();
+  const first = graph.nodes[0];
+  assert(first);
+  const request = vi.fn();
+  const change = vi.fn();
+  const view = render(
+    <AudioGraphCanvas
+      ariaLabel="Graph"
+      model={graph}
+      onModelChange={change}
+      onNodeRenameRequest={request}
+    />,
+    { wrapper: CanvasTestProvider },
+  );
+  const node = screen.getByRole('group', { name: first.appearance.title });
+  const title = node.querySelector('[data-node-title]');
+  assert(title);
+  fireEvent.doubleClick(title);
+  expect(request).toHaveBeenLastCalledWith(first.id);
+  expect(node).toHaveFocus();
+  fireEvent.keyDown(node, { key: 'F2' });
+  expect(request).toHaveBeenCalledTimes(2);
+  fireEvent.keyDown(title, { key: 'F2' });
+  const face = node.querySelector('[data-node-face]');
+  assert(face);
+  fireEvent.doubleClick(face);
+  const text = title.firstChild;
+  assert(text);
+  fireEvent.doubleClick(text);
+  expect(request).toHaveBeenCalledTimes(3);
+  fireEvent.click(screen.getByRole('button', { name: 'non-element node double-click' }));
+  expect(request).toHaveBeenCalledTimes(3);
+  node.removeAttribute('data-id');
+  fireEvent.keyDown(node, { key: 'F2' });
+  expect(request).toHaveBeenCalledTimes(3);
+  node.classList.remove('react-flow__node');
+  fireEvent.doubleClick(title);
+  expect(request).toHaveBeenCalledTimes(4);
+  expect(change).not.toHaveBeenCalled();
+  view.unmount();
+  render(<AudioGraphCanvas ariaLabel="Graph" model={graph} onModelChange={change} />, {
+    wrapper: CanvasTestProvider,
+  });
+  fireEvent.keyDown(screen.getByRole('group', { name: first.appearance.title }), {
+    key: 'F2',
+  });
+  expect(request).toHaveBeenCalledTimes(4);
 });

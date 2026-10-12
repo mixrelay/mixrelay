@@ -1,7 +1,7 @@
-import { Badge } from '@mantine/core';
 import type { PropsWithChildren } from 'react';
+import styles from './StatusBadge.module.css';
 
-export type StatusTone = 'neutral' | 'positive' | 'warning' | 'critical';
+export type StatusTone = 'neutral' | 'accent' | 'positive' | 'warning' | 'critical';
 
 interface StatusBadgeProps extends PropsWithChildren {
   className?: string;
@@ -9,26 +9,9 @@ interface StatusBadgeProps extends PropsWithChildren {
 }
 
 export function StatusBadge({ children, className, tone = 'neutral' }: StatusBadgeProps) {
-  const colors: Record<StatusTone, string> = {
-    neutral: 'gray',
-    positive: 'healthy',
-    warning: 'yellow',
-    critical: 'red',
-  };
-
   return (
-    <Badge
-      className={className}
-      color={colors[tone]}
-      radius={999}
-      size="sm"
-      styles={{
-        label: { lineHeight: 1.25, whiteSpace: 'normal' },
-        root: { height: 'auto', maxWidth: '100%', minHeight: '1.75rem' },
-      }}
-      variant="light"
-    >
+    <span className={[styles.root, className].filter(Boolean).join(' ')} data-tone={tone}>
       {children}
-    </Badge>
+    </span>
   );
 }

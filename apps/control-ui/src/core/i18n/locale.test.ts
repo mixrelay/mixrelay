@@ -8,10 +8,12 @@ import { fr } from './locales/fr';
 import { it as italian } from './locales/it';
 import { ja } from './locales/ja';
 import { koKR } from './locales/ko-KR';
+import { pseudo } from './locales/pseudo';
 import { pt } from './locales/pt';
 import { ru } from './locales/ru';
 import { zhHans } from './locales/zh-Hans';
 import { zhHant } from './locales/zh-Hant';
+import { pseudoResource } from './pseudoResource';
 
 const translations = {
   en,
@@ -39,6 +41,28 @@ function flatten(resource: object, prefix = ''): Record<string, string> {
 
 afterEach(async () => {
   await i18n.changeLanguage('en');
+});
+
+it('fills every Pseudo key without English fallback and preserves interpolation tokens', () => {
+  const base = flatten(en);
+  const expanded = flatten(pseudo);
+  expect(Object.keys(expanded).sort()).toEqual(Object.keys(base).sort());
+  for (const [key, text] of Object.entries(base)) {
+    expect(expanded[key]?.length).toBeGreaterThan(0);
+    expect(expanded[key]?.match(/\{\{[^}]+\}\}/g) ?? []).toEqual(
+      text.match(/\{\{[^}]+\}\}/g) ?? [],
+    );
+  }
+  for (const key of [
+    'studio.deleteGraph',
+    'studio.deleteGraphNotice',
+    'updates.title',
+    'updates.installed',
+  ])
+    expect(expanded[key]).not.toBe(base[key]);
+  expect(pseudoResource({ action: 'Save {{name}}' })).toEqual({
+    action: '[!! Save {{name}} — expanded translation !!]',
+  });
 });
 
 describe('language preference resolution', () => {

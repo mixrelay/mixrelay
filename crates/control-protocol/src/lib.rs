@@ -38,6 +38,18 @@ pub struct VirtualEndpointFormatRequest {
     pub sample_rate: u32,
 }
 
+/// Changes the Driver runtime's I/O client buffer for one virtual device.
+/// The DSP processing block and other applications' client buffers are unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VirtualEndpointBufferRequest {
+    pub expected_revision: u64,
+    pub endpoint_id: mixrelay_audio_io::VirtualEndpointId,
+    pub expected_buffer_frames: Option<u32>,
+    pub expected_preferred_frames: Option<u32>,
+    pub buffer_frames: u32,
+}
+
 pub const PROTOCOL_VERSION: u16 = 1;
 
 /// Publishes graph topology while retaining surviving providers' native state.
@@ -98,6 +110,9 @@ pub struct GraphCatalogResponse {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GraphLayout {
+    /// Display-only names for graph UI instances. Never used as application/device identities.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub node_labels: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub positions: std::collections::BTreeMap<String, GraphNodePosition>,
     /// User-resized cards keyed by UI identity; absent entries use their natural size.
@@ -216,6 +231,9 @@ pub struct AppStatus {
     pub buffer_frames: Option<u32>,
     pub underruns: u64,
     pub overruns: u64,
+    /// Lifetime non-finite PCM replacements by Core boundary; no audio or node identities.
+    #[serde(default)]
+    pub sample_faults: mixrelay_audio_io::process::SampleFaults,
     /// Absent in older engines. UI must not manufacture capabilities when unavailable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_session: Option<mixrelay_audio_io::session::AudioSessionStatus>,
@@ -305,6 +323,17 @@ pub struct NodeMeterSnapshot {
     pub node_id: String,
     pub port_id: String,
     pub peaks: Vec<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamics: Option<DynamicsMeterSnapshot>,
+}
+
+/// Block peak input and actual maximum detector attenuation since the previous meter poll.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicsMeterSnapshot {
+    pub input_peaks: Vec<f32>,
+    pub gain_reduction_db: f32,
+    pub threshold_db: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -313,6 +342,38 @@ pub struct MeterSnapshot {
     pub protocol_version: u16,
     pub revision: u64,
     pub nodes: Vec<NodeMeterSnapshot>,
+}
+
+#[cfg(test)]
+mod dynamics_meter_contract_tests {
+    use super::{DynamicsMeterSnapshot, NodeMeterSnapshot};
+
+    #[test]
+    fn legacy_meter_json_remains_valid_and_actual_dynamics_roundtrips_without_peak_inference() {
+        let mut meter: NodeMeterSnapshot = serde_json::from_value(serde_json::json!({
+            "nodeId":"compressor", "portId":"audio", "peaks":[1.5,0.75],
+        }))
+        .unwrap();
+        assert!(meter.dynamics.is_none());
+        assert!(
+            serde_json::to_value(&meter)
+                .unwrap()
+                .get("dynamics")
+                .is_none()
+        );
+        meter.dynamics = Some(DynamicsMeterSnapshot {
+            input_peaks: vec![1.0, 0.5],
+            gain_reduction_db: 13.5,
+            threshold_db: -18.0,
+        });
+        let encoded = serde_json::to_value(&meter).unwrap();
+        assert_eq!(encoded["dynamics"]["gainReductionDb"], 13.5);
+        assert_eq!(encoded["dynamics"]["thresholdDb"], -18.0);
+        assert_eq!(
+            serde_json::from_value::<NodeMeterSnapshot>(encoded).unwrap(),
+            meter
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -369,6 +430,8 @@ pub struct ExternalProcessorDiagnostic {
     pub stage: ProcessorDiscoveryStage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_name: Option<String>,
     pub message: String,
 }
 
@@ -469,6 +532,7 @@ impl Default for AppStatus {
             buffer_frames: None,
             underruns: 0,
             overruns: 0,
+            sample_faults: mixrelay_audio_io::process::SampleFaults::default(),
             audio_session: None,
         }
     }
@@ -498,6 +562,8 @@ pub enum ErrorCode {
     NodeDisabled,
     ProcessorUnavailable,
     RecorderFailed,
+    /// A free-edition quota or paid-only operation was exceeded.
+    FeatureLimit,
     AudioSessionUnsupported,
     AudioSessionProcessorStateUnavailable,
     AudioSessionReconfigureFailed,
@@ -621,6 +687,21 @@ mod tests {
     }
 
     #[test]
+    fn graph_ui_instance_labels_are_optional_and_round_trip_separately() {
+        let legacy: super::GraphLayout =
+            serde_json::from_value(serde_json::json!({"positions":{}})).unwrap();
+        assert!(legacy.node_labels.is_empty());
+        assert_eq!(
+            serde_json::to_value(legacy).unwrap(),
+            serde_json::json!({"positions":{}})
+        );
+        let value =
+            serde_json::json!({"positions":{}, "nodeLabels":{"app-1":"영상용", "app-2":"회의용"}});
+        let layout: super::GraphLayout = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(layout).unwrap(), value);
+    }
+
+    #[test]
     fn unavailable_driver_is_distinct_from_policy_block_and_round_trips() {
         let status = super::AppStatus {
             driver_state: super::DriverState::Unavailable,
@@ -633,6 +714,33 @@ mod tests {
         assert_ne!(decoded.driver_state, super::DriverState::Blocked);
     }
     use super::*;
+
+    #[test]
+    fn sample_fault_status_preserves_legacy_status_and_serializes_boundary_counts() {
+        let mut value = serde_json::to_value(AppStatus::default()).unwrap();
+        value.as_object_mut().unwrap().remove("sampleFaults");
+        let legacy: AppStatus = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            legacy.sample_faults,
+            mixrelay_audio_io::process::SampleFaults::default()
+        );
+
+        let status = AppStatus {
+            sample_faults: mixrelay_audio_io::process::SampleFaults {
+                source_samples: 2,
+                input_samples: 3,
+                output_samples: 4,
+                blocks: 1,
+            },
+            ..Default::default()
+        };
+        let value = serde_json::to_value(&status).unwrap();
+        assert_eq!(
+            value["sampleFaults"],
+            serde_json::json!({"sourceSamples":2,"inputSamples":3,"outputSamples":4,"blocks":1})
+        );
+        assert_eq!(serde_json::from_value::<AppStatus>(value).unwrap(), status);
+    }
 
     #[test]
     fn status_contract_uses_stable_machine_values() {
@@ -758,6 +866,7 @@ mod tests {
             format: ExternalProcessorFormat::Clap,
             stage: ProcessorDiscoveryStage::Probe,
             plugin_id: Some("clap:fixture".to_owned()),
+            plugin_name: None,
             message: "child timed out".to_owned(),
         });
         let encoded = serde_json::to_value(&catalog).unwrap();

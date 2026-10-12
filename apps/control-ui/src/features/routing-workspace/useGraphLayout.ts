@@ -7,7 +7,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from 'react';
-import type { AudioGraphModel } from '../../core/audio-graph/model';
+import { type AudioGraphModel, normalizeAudioGraphNodeSize } from '../../core/audio-graph/model';
 import type { ControlPort, GraphLayout } from '../../core/control-port/types';
 import { GraphLayoutController } from './GraphLayoutController';
 
@@ -41,20 +41,40 @@ export function useGraphLayout(
           nodes: current.nodes.map((node) => ({
             ...node,
             position: state.layout.positions[node.id] ?? node.position,
-            size: state.layout.sizes?.[node.id],
+            size: normalizeAudioGraphNodeSize(node, state.layout.sizes?.[node.id]),
           })),
         },
     );
   }, [controller, model, setModel, state.layout, state.restoreVersion]);
   const updateNodes = useCallback(
     (next: AudioGraphModel) => {
+      const layout = controller.snapshot().layout;
+      const ids = new Set(next.nodes.map((node) => node.id));
       controller.update({
-        ...controller.snapshot().layout,
+        ...layout,
+        ...(layout.nodeLabels
+          ? {
+              nodeLabels: Object.fromEntries(
+                Object.entries(layout.nodeLabels).filter(([id]) => ids.has(id)),
+              ),
+            }
+          : {}),
         positions: Object.fromEntries(next.nodes.map((node) => [node.id, { ...node.position }])),
         sizes: Object.fromEntries(
           next.nodes.flatMap((node) => (node.size ? [[node.id, { ...node.size }]] : [])),
         ),
       });
+    },
+    [controller],
+  );
+  const updateNodeLabel = useCallback(
+    (nodeId: string, value: string) => {
+      const layout = controller.snapshot().layout;
+      const nodeLabels = new Map(Object.entries(layout.nodeLabels ?? {}));
+      const label = value.trim();
+      if (label) nodeLabels.set(nodeId, label);
+      else nodeLabels.delete(nodeId);
+      controller.update({ ...layout, nodeLabels: Object.fromEntries(nodeLabels) });
     },
     [controller],
   );
@@ -64,5 +84,5 @@ export function useGraphLayout(
     },
     [controller],
   );
-  return { ...state, controller, updateNodes, updateViewport };
+  return { ...state, controller, updateNodes, updateNodeLabel, updateViewport };
 }

@@ -11,7 +11,8 @@ use std::{
 use super::{
     APP_PAYLOAD_NAME, CreatedDirectory, DRIVER_PAYLOAD_NAME, FilesystemError, FilesystemIdentity,
     FilesystemStaged, HAL_PAYLOAD_NAME, InstalledTarget, LAUNCHD_PAYLOAD_NAME, MetadataFingerprint,
-    REMOVAL_LAUNCHD_PAYLOAD_NAME, TargetKind, UNINSTALLER_PAYLOAD_NAME,
+    REMOVAL_LAUNCHD_PAYLOAD_NAME, RUNTIME_ENGINE_PAYLOAD_NAME, RUNTIME_LAUNCHD_PAYLOAD_NAME,
+    TargetKind, UNINSTALLER_PAYLOAD_NAME,
 };
 use crate::contract::OwnedTarget;
 
@@ -89,10 +90,16 @@ pub(super) fn metadata(path: &Path, kind: &'static str) -> Result<Metadata, File
 
 pub(super) fn target_kind(target: OwnedTarget) -> TargetKind {
     match target {
-        OwnedTarget::App | OwnedTarget::Hal | OwnedTarget::Uninstaller => TargetKind::Directory,
-        OwnedTarget::Driver | OwnedTarget::Launchd | OwnedTarget::RemovalLaunchd => {
-            TargetKind::File
-        }
+        OwnedTarget::App
+        | OwnedTarget::Hal
+        | OwnedTarget::Uninstaller
+        | OwnedTarget::LegacyManager
+        | OwnedTarget::LegacyUninstaller => TargetKind::Directory,
+        OwnedTarget::Driver
+        | OwnedTarget::Launchd
+        | OwnedTarget::RemovalLaunchd
+        | OwnedTarget::RuntimeEngine
+        | OwnedTarget::RuntimeLaunchd => TargetKind::File,
     }
 }
 
@@ -104,6 +111,10 @@ pub(super) fn target_name(target: OwnedTarget) -> &'static str {
         OwnedTarget::Launchd => LAUNCHD_PAYLOAD_NAME,
         OwnedTarget::Uninstaller => UNINSTALLER_PAYLOAD_NAME,
         OwnedTarget::RemovalLaunchd => REMOVAL_LAUNCHD_PAYLOAD_NAME,
+        OwnedTarget::RuntimeEngine => RUNTIME_ENGINE_PAYLOAD_NAME,
+        OwnedTarget::RuntimeLaunchd => RUNTIME_LAUNCHD_PAYLOAD_NAME,
+        OwnedTarget::LegacyManager => "legacy-manager",
+        OwnedTarget::LegacyUninstaller => "legacy-uninstaller",
     }
 }
 
@@ -144,7 +155,9 @@ pub(super) fn validate_file_source(
             reason: "file is empty",
         });
     }
-    if kind == DRIVER_PAYLOAD_NAME && metadata.permissions().mode() & 0o111 == 0 {
+    if matches!(kind, DRIVER_PAYLOAD_NAME | RUNTIME_ENGINE_PAYLOAD_NAME)
+        && metadata.permissions().mode() & 0o111 == 0
+    {
         return Err(FilesystemError::InvalidSource {
             kind,
             path: path.to_path_buf(),

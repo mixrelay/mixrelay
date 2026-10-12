@@ -39,8 +39,8 @@ scratch, plus bounded slot/owner metadata. A callback accepts
 at most 4,096 frames (at most seventeen slot claims including carried partial
 PCM, with bounded sample stores). Pool
 exhaustion, invalid input, non-finite PCM and write/conversion/finalization failures
-fail the recorder, never the audio graph. The RIFF 32-bit size boundary starts the
-next numbered WAV rather than ending an otherwise healthy take.
+fail the recorder, never the audio graph. Every take is a single RF64 file,
+including small recordings; the 4 GiB RIFF boundary does not split a take.
 Admission errors preserve and finalize the already accepted valid prefix; an
 actual writer/converter failure stops that drain at its first failing packet.
 An inactive writer blocks waiting for a command; only an open take uses the 2 ms
@@ -59,46 +59,56 @@ Same-rate float32 bypasses conversion and preserves sample bits. PCM16/24 apply
 TPDF dither once, immediately before final integer quantization. Product sample
 rate choices come from `mixrelay_audio_io::formats::SAMPLE_RATES`.
 
-## Automatic WAV splitting
+## One RF64 file per take
 
-A take automatically continues in `first-002.wav`, `first-003.wav`, and later
-numbered files before a WAV would exceed RIFF's 32-bit size field. The first file
-uses the requested path unchanged; later parts insert a minimum-three-digit
-sequence before its extension (or use `.wav` if there was no extension). File
-limits are rounded down to whole channel frames, reserving 256 bytes for headers
-and padding. No frame is split between files.
+All recordings use RF64 from creation, with the `.wav` extension. There is no
+RIFF compatibility mode, format-policy selector or numbered-file rollover. Small
+recordings use the same container as large ones. External readers must support
+RF64; legacy RIFF-only readers are not supported for new recordings.
 
-`wave/files.rs` owns only the current writer, per-file frame count, ordinal and
-file paths. It finalizes/closes the previous writer before exclusively creating
-the next. Only one file writer is open; it does not retain an unbounded part list.
-The original take path remains in `RecorderStatus.path` and is still used by
-Resume. Status frames are cumulative across all parts. SRC history, fractional
-output-frame carry and TPDF state belong to the take/signal writer and are never
-reset by file rollover. No callback code or packet transport changes for splitting.
+`wave/files.rs` exclusively creates one buffered file and retains sticky I/O
+errors. `wave/files/container.rs` owns the RF64 container and its 64-bit byte
+counter. It reuses Hound only for the validated `fmt` header and sample encoding,
+so the existing channel layout, PCM16/24 quantization and float32 sample bytes are
+preserved without Hound's 32-bit data-size counter. `ds64` is the first chunk;
+it holds 64-bit RIFF size, data size and per-channel frame count. RIFF/data sizes
+use the RF64 sentinel. Float files include a `fact` sentinel referring to the
+`ds64` count. Odd-length PCM24 data receives an alignment byte excluded from its
+data size and frame count. Finalization updates sizes and flushes before a
+successful Stop is returned. Creation, writing, seeking or flushing errors
+include the recording path and fail the recorder without affecting routing.
+Finalization is attempted even if SRC-tail processing fails.
 
-The next part is opened only when another complete output frame must be written.
-Stop exactly at a file limit therefore produces no empty next part. A filename
-collision, failed file creation, disk write, or WAV finalization fails the
-recorder with the affected file path in its error. Existing files and previously
-completed parts are preserved; the current failed part may be incomplete. Errors
-are sticky so final cleanup cannot append duplicate PCM after a failed rollover.
-Finalization is attempted even if SRC-tail processing returns an error.
+Pause/Resume retains the file and original path. Status frames count the take's
+actual output frames. Resampling, fractional frame carry, dither, packet storage
+and callback behavior retain their existing ownership. No file I/O was moved to
+the audio callback.
 
-The production rollover path is exercised with a small, internal `cfg(test)`
-frame limit, not a public option and not a separate writer implementation. Tests
-compare exact decoded PCM across parts at 1, 2 and 8 channels, verify PCM16/24
-dither and float32 output against one unsplit file during input-rate transitions
-and SRC-tail flush, preserve existing files on collisions, inject write/header
-flush failures, and retain original-path/cumulative status through Pause/Resume.
-No 4 GiB fixture was written: the same frame-boundary transition is tested with
-small files, while limit arithmetic is checked against the real RIFF bound.
-This is a functionality change, not a throughput optimization claim.
+Validation covers empty and short files in all three encodings at 1, 2 and 8
+channels, exact PCM, alignment, pause/resume, rate transitions, packet chunking,
+accepted-prefix retention and injected write/seek/flush errors. Sparse files
+cross the real 4 GiB boundary in PCM16, PCM24 and multichannel float32: a sparse
+zero prefix is followed by real written PCM, with 64-bit sizes and frame counts
+checked after finalization. This validates addressing, not sustained throughput.
 
-Final split-file checkpoint: 32 crate tests passed, zero failed/ignored (0.13 s);
-strict Clippy with all four repository complexity gates, `cargo fmt --check`, and
-`cargo doc --no-deps` succeeded. Independent review found no P1/P2/P3 in the
-changed file-ownership, signal-state and failure boundaries. Installed-app and
-long-duration disk validation remain separate integration evidence.
+Independent FFmpeg checks explicitly decode all nine small format/channel
+combinations and seek/decode the exact float32 PCM after the large-file boundary:
+
+```sh
+cargo test -p mixrelay-audio-recorder ffmpeg_decodes -- --ignored
+```
+
+These integration tests require `ffmpeg` and `ffprobe` on PATH and are ignored
+by default. They are development checks, not production dependencies. Installed
+app and long-duration recording qualification remain separate from these tests.
+The container follows [EBU Tech 3306](https://tech.ebu.ch/docs/tech/tech3306v1_1.pdf).
+
+The 2026-10-10 checkpoint passed 33 recorder unit tests and both explicit FFmpeg
+tests, 119 audio-engine unit tests, nine test-support tests and five engine-service
+recorder lifecycle tests. Recorder/test-support Clippy passed with all four
+complexity gates; audio-engine Clippy passed its normal repository warning gates.
+Formatting and diff whitespace checks passed. The checkpoints below are historical.
+
 
 ## Executed crate checkpoint
 

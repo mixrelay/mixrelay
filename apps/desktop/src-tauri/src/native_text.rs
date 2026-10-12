@@ -23,6 +23,12 @@ impl Locale {
     pub(crate) fn index(self) -> usize {
         usize::from(self as u8)
     }
+
+    pub(crate) fn tag(self) -> &'static str {
+        [
+            "en", "ko", "ja", "zh-Hans", "zh-Hant", "fr", "de", "es", "pt", "it", "ru",
+        ][self.index()]
+    }
 }
 
 static CURRENT_LOCALE: AtomicU8 = AtomicU8::new(Locale::En as u8);
@@ -70,48 +76,48 @@ pub(crate) fn current_locale() -> Locale {
 pub(crate) fn driver_quit_failed(locale: &str) -> (&'static str, &'static str) {
     const TEXT: [(&str, &str); 11] = [
         (
-            "Could Not Stop MixRelay Driver",
-            "The devices and loopback could not be stopped, or the stopped state could not be saved. MixRelay Driver has not quit. Try Quit again from the status menu shortly.",
+            "Could Not Stop MixRelay",
+            "The devices and loopback could not be stopped, or the stopped state could not be saved. MixRelay has not quit. Try Quit again from the status menu shortly.",
         ),
         (
-            "MixRelay Driver를 종료하지 못했습니다",
-            "장치와 루프백을 중지하거나 종료 상태를 저장하지 못했습니다. MixRelay Driver는 아직 종료되지 않았습니다. 잠시 후 상태 메뉴에서 종료를 다시 선택하십시오.",
+            "MixRelay를 종료하지 못했습니다",
+            "장치와 루프백을 중지하거나 종료 상태를 저장하지 못했습니다. MixRelay는 아직 종료되지 않았습니다. 잠시 후 상태 메뉴에서 종료를 다시 선택하십시오.",
         ),
         (
-            "MixRelay Driverを終了できませんでした",
-            "デバイスとループバックを停止するか、停止状態を保存することができませんでした。MixRelay Driverはまだ終了していません。しばらくしてからステータスメニューの終了をもう一度選択してください。",
+            "MixRelayを終了できませんでした",
+            "デバイスとループバックを停止するか、停止状態を保存することができませんでした。MixRelayはまだ終了していません。しばらくしてからステータスメニューの終了をもう一度選択してください。",
         ),
         (
-            "无法停止 MixRelay Driver",
-            "无法停止设备和回环，或无法保存停止状态。MixRelay Driver 尚未退出。请稍后在状态菜单中再次选择退出。",
+            "无法停止 MixRelay",
+            "无法停止设备和回环，或无法保存停止状态。MixRelay 尚未退出。请稍后在状态菜单中再次选择退出。",
         ),
         (
-            "無法停止 MixRelay Driver",
-            "無法停止裝置和回送，或無法儲存停止狀態。MixRelay Driver 尚未結束。請稍後在狀態選單中再次選擇結束。",
+            "無法停止 MixRelay",
+            "無法停止裝置和回送，或無法儲存停止狀態。MixRelay 尚未結束。請稍後在狀態選單中再次選擇結束。",
         ),
         (
-            "Impossible d’arrêter MixRelay Driver",
-            "Les périphériques et le bouclage n’ont pas pu être arrêtés, ou leur état d’arrêt n’a pas pu être enregistré. La fermeture de MixRelay Driver n’est pas terminée. Réessayez de quitter depuis le menu d’état dans un instant.",
+            "Impossible d’arrêter MixRelay",
+            "Les périphériques et le bouclage n’ont pas pu être arrêtés, ou leur état d’arrêt n’a pas pu être enregistré. La fermeture de MixRelay n’est pas terminée. Réessayez de quitter depuis le menu d’état dans un instant.",
         ),
         (
-            "MixRelay Driver konnte nicht beendet werden",
-            "Die Geräte und das Loopback konnten nicht gestoppt werden oder der Stoppzustand konnte nicht gespeichert werden. MixRelay Driver wurde noch nicht beendet. Wählen Sie gleich noch einmal Beenden im Statusmenü.",
+            "MixRelay konnte nicht beendet werden",
+            "Die Geräte und das Loopback konnten nicht gestoppt werden oder der Stoppzustand konnte nicht gespeichert werden. MixRelay wurde noch nicht beendet. Wählen Sie gleich noch einmal Beenden im Statusmenü.",
         ),
         (
-            "No se pudo detener MixRelay Driver",
-            "No se pudieron detener los dispositivos y el bucle de retorno, o no se pudo guardar el estado detenido. MixRelay Driver aún no ha salido. Vuelva a elegir Salir en el menú de estado dentro de un momento.",
+            "No se pudo detener MixRelay",
+            "No se pudieron detener los dispositivos y el bucle de retorno, o no se pudo guardar el estado detenido. MixRelay aún no ha salido. Vuelva a elegir Salir en el menú de estado dentro de un momento.",
         ),
         (
-            "Não foi possível parar o MixRelay Driver",
-            "Não foi possível parar os dispositivos e o loopback ou salvar o estado de parada. O MixRelay Driver ainda não foi encerrado. Tente escolher Sair novamente no menu de estado dentro de instantes.",
+            "Não foi possível parar o MixRelay",
+            "Não foi possível parar os dispositivos e o loopback ou salvar o estado de parada. O MixRelay ainda não foi encerrado. Tente escolher Sair novamente no menu de estado dentro de instantes.",
         ),
         (
-            "Impossibile fermare MixRelay Driver",
-            "Impossibile fermare i dispositivi e il loopback oppure salvare lo stato di arresto. MixRelay Driver non è ancora uscito. Tra poco scegli di nuovo Esci dal menu di stato.",
+            "Impossibile fermare MixRelay",
+            "Impossibile fermare i dispositivi e il loopback oppure salvare lo stato di arresto. MixRelay non è ancora uscito. Tra poco scegli di nuovo Esci dal menu di stato.",
         ),
         (
-            "Не удалось остановить MixRelay Driver",
-            "Не удалось остановить устройства и loopback или сохранить состояние остановки. MixRelay Driver ещё не завершился. Через некоторое время снова выберите «Выйти» в меню состояния.",
+            "Не удалось остановить MixRelay",
+            "Не удалось остановить устройства и loopback или сохранить состояние остановки. MixRelay ещё не завершился. Через некоторое время снова выберите «Выйти» в меню состояния.",
         ),
     ];
     TEXT[resolve_locale(locale).index()]

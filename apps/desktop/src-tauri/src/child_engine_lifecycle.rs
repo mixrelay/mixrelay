@@ -11,12 +11,12 @@ use crate::native_text::{
     current_locale,
     dialogs::{Text, detail, text},
 };
-use mixrelay_engine_process::DesktopEngine;
+use mixrelay_engine_process::ControllerEngine;
 use tauri::Manager;
 
-/// Owns only this desktop's bundled engine, not an existing localhost listener.
+/// Owns only this controller's bundled engine, not an existing localhost listener.
 pub(crate) struct EngineLifecycle {
-    engine: Mutex<DesktopEngine>,
+    engine: Mutex<ControllerEngine>,
     quitting: AtomicBool,
     finished: AtomicBool,
 }
@@ -25,7 +25,7 @@ impl EngineLifecycle {
     pub(crate) fn start() -> Result<Self, String> {
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let path = bundled_engine_path(&executable)?;
-        let engine = DesktopEngine::start(&path)
+        let engine = ControllerEngine::start(&path)
             .map_err(|error| detail(current_locale(), Text::BundledEngineStartFailed, error))?;
         Ok(Self {
             engine: Mutex::new(engine),
@@ -63,9 +63,10 @@ impl EngineLifecycle {
                     app.exit(0);
                 }
                 Err(error) => {
+                    crate::background::menu::shutdown_failed(&app);
                     app.state::<Self>().quitting.store(false, Ordering::Release);
                     tracing::error!(%error, "owned audio engine shutdown failed");
-                    let _ = crate::tray_menu::show_main_window(&app);
+                    let _ = crate::app_menu::show_main_window(&app);
                     rfd::AsyncMessageDialog::new()
                         .set_title("MixRelay")
                         .set_description(&error)
@@ -186,7 +187,7 @@ async fn restart_owned_engine(app: &tauri::AppHandle) -> Result<bool, String> {
     }
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let path = bundled_engine_path(&executable)?;
-    let replacement = tauri::async_runtime::spawn_blocking(move || DesktopEngine::start(&path))
+    let replacement = tauri::async_runtime::spawn_blocking(move || ControllerEngine::start(&path))
         .await
         .map_err(|error| error.to_string())?
         .map_err(|error| error.to_string())?;
@@ -205,6 +206,9 @@ async fn restart_owned_engine(app: &tauri::AppHandle) -> Result<bool, String> {
 }
 
 async fn finish_engine(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    app.state::<crate::control_proxy::local::socket::LocalSocket>()
+        .shutdown()
+        .await?;
     app.state::<crate::control_proxy::ControlProxyClient>()
         .drain()
         .await?;

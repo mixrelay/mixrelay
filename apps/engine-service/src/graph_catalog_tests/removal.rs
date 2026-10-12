@@ -174,11 +174,7 @@ fn removal_finalizes_recording_and_late_recorder_command_cannot_target_replaceme
             .control_recorder(&before.active_id, "record", command)
             .is_err()
     );
-    let wav = fs::read(fixture.0.join("take.wav")).unwrap();
-    assert_eq!(&wav[..4], b"RIFF");
-    assert_eq!(
-        u32::from_le_bytes(wav[4..8].try_into().unwrap()) as usize,
-        wav.len() - 8
-    );
-    assert!(wav.len() > 44);
+    let metadata = mixrelay_test_support::rf64::inspect(fixture.0.join("take.wav")).unwrap();
+    assert!(metadata.frames > 0);
+    assert_eq!(metadata.data_bytes, metadata.frames * 2 * 3);
 }

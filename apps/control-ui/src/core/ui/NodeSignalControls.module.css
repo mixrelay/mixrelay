@@ -1,11 +1,11 @@
 .button {
   display: grid;
   place-items: center;
-  width: 20px;
-  height: 20px;
-  padding: 3px;
+  width: var(--node-control-size);
+  height: var(--node-control-size);
+  padding: var(--node-control-padding);
   border: 0;
-  border-radius: 3px;
+  border-radius: var(--control-radius);
   background: transparent;
   color: var(--muted);
   cursor: default;
@@ -23,7 +23,7 @@
   background: var(--surface-raised);
 }
 .button:focus-visible {
-  outline: 1px solid var(--signal);
+  outline: var(--focus-width) solid var(--focus-color);
   outline-offset: -1px;
 }
 .button[data-action="mute"][aria-pressed="true"] {
@@ -34,5 +34,5 @@
   color: var(--positive);
 }
 .button:disabled {
-  opacity: 0.4;
+  opacity: var(--control-disabled-opacity);
 }

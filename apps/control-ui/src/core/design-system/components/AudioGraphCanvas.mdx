@@ -1,0 +1,56 @@
+import { Meta, Canvas, ArgTypes } from '@storybook/addon-docs/blocks';
+import { DocsLayout } from '../DocsLayout';
+import { ComponentContract } from '../ComponentsReference';
+import * as Example from '../../audio-graph/AudioGraphCanvas.stories';
+
+import * as Api from "../playgrounds/AudioGraphCanvas.stories";
+
+import * as Names from '../../../features/routing-workspace/NodeDisplayNames.stories';
+
+<Meta title="Design System/Components/AudioGraphCanvas" />
+
+<DocsLayout>
+
+<ComponentContract name="AudioGraphCanvas" />
+
+추가 트리거는 보이는 +만 사용하고 addNodeLabel은 접근성 이름·툴팁·메뉴 이름으로 제공합니다. Enter/Space로 열고 Escape로 닫아 트리거로 돌아갑니다. 기본 레이블은 현재 언어의 노드 추가입니다.
+
+## Playground·API·기본값
+
+<a href="/?path=/story/core-playgrounds-audiographcanvas--playground" target="_top">AudioGraphCanvas Playground 열기</a>. Controls는 실제 공개 props를 전달합니다. 구현 기본값은 아래 API 표와 소스 대조 계약을 따르며, Playground의 args는 재현용 입력입니다.
+
+동일 React Flow 편집기를 사용합니다. 변경은 이 표본의 모델에만 저장하며 오디오 포트를 사용하지 않습니다.
+
+<Canvas of={Api.Playground} story={{ inline: false, height: 560 }} sourceState="hidden" />
+<ArgTypes of={Api.Playground} exclude={["className","classNames","style","styles","vars","unstyled","color","c","size","radius","variant","component","renderRoot","dangerouslySetInnerHTML"]} />
+
+API 표의 *는 필수 입력입니다. Default의 —는 선언된 기본값이 없다는 뜻이며, 파생값·fallback과 초기 상태는 위 소스 대조 계약에 명시합니다.
+
+속성은 Playground의 Controls에서 변경합니다. Source는 현재 JSX를, 위의 실행 예제 전체 코드는 실제 상태 갱신·이벤트·슬롯 구성을 보여줍니다.
+
+## 실제 사용례
+
+이 Canvas는 아래 계약을 소비하는 기존 스토리입니다. 여러 컴포넌트의 조합이면 해당 조합에서의 역할을 함께 확인합니다. 독립 컴포넌트 전용 예시나 실제 장치 실행으로 해석하지 않습니다.
+
+<Canvas of={Example.ConnectDisconnectReconnect} story={{ inline: false, height: 800 }} />
+
+
+## 개별 상태 예제
+
+### Empty
+
+<Canvas of={Api.Empty} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+## 그래프 인스턴스 표시 이름
+
+이름 텍스트의 더블클릭, 노드 바깥 그룹의 F2, 단일 노드 컨텍스트 메뉴가 같은 `onNodeRenameRequest(id)`로 연결됩니다. 이름·필드·포트·Options의 다른 행동을 함께 실행하지 않습니다. Core는 편집 요청·단일 노드 포커스·표시·접근성 이름을 소유하고 Feature는 같은 Core NameDialog와 그래프 표시 메타데이터를 사용합니다.
+
+`AudioGraphNode.displayName`은 UI 별칭입니다. 실제 앱 이름·selector·장치 이름·runtime label·노드 ID·오디오 revision을 변경하지 않습니다. 별칭은 `GraphLayout.nodeLabels`에 UI ID로 저장합니다. 같은 앱이나 한 duplex 장치의 입력·출력 카드도 각각 이름을 가집니다. 빈 이름은 기본 이름으로 돌아가며 Escape는 저장하지 않습니다. 다른 창의 별칭은 인스턴스별로 자동 병합하고 저장 실패의 초안·재시도는 표시 메타데이터의 기존 복구 경로를 따릅니다.
+
+<Canvas of={Names.Rename} story={{ inline: false, height: 640, autoplay: true }} />
+<Canvas of={Names.Reset} story={{ inline: false, height: 640, autoplay: true }} />
+<Canvas of={Names.Cancel} story={{ inline: false, height: 640, autoplay: true }} />
+
+<a href="/?path=/docs/design-system-components--docs" target="_top">전체 컴포넌트와 사용 구분</a>
+
+</DocsLayout>

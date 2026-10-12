@@ -229,6 +229,7 @@ mod tests {
                 capture_channels: vec![2, 4],
                 creation_template: None,
                 devices: vec![VirtualEndpointDeviceSettings {
+                    native_buffer: None,
                     spec: VirtualEndpointSpec {
                         id: VirtualEndpointId::from("device"),
                         display_name: "IO".into(),

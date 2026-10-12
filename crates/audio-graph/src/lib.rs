@@ -1,4 +1,5 @@
 mod compiler;
+mod effects;
 mod model;
 mod provider_layout;
 
@@ -10,6 +11,7 @@ pub use compiler::{
     GraphIssueCode, GraphResource, NodeResolutionError, NodeResolver, ResolvedNode,
     validate_virtual_endpoint_gain,
 };
+pub use effects::*;
 pub use mixrelay_audio_io::{
     ApplicationCaptureRequest, ApplicationSelector, ChannelLayout, SourcePlaybackPolicy,
     StreamSpec, VirtualEndpointId, VirtualEndpointSpec,

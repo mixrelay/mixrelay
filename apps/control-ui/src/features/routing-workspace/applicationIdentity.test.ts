@@ -48,13 +48,16 @@ describe('application presentation identity across platforms', () => {
   it('keeps menu choices distinct for instances sharing an application ID', () => {
     const first = application(process(10)),
       second = application(process(20), 20);
-    expect(applicationInventorySelection(first)?.id).not.toBe(applicationInventorySelection(second)?.id);
+    expect(applicationInventorySelection(first)?.id).not.toBe(
+      applicationInventorySelection(second)?.id,
+    );
     expect(applicationInventorySelection({ ...first, displayName: 'Translated name' })?.id).toBe(
       applicationInventorySelection(first)?.id,
     );
     expect(
       [first, second].find(
-        (item) => applicationInventorySelection(item)?.id === applicationInventorySelection(second)?.id,
+        (item) =>
+          applicationInventorySelection(item)?.id === applicationInventorySelection(second)?.id,
       ),
     ).toBe(second);
   });
@@ -62,7 +65,10 @@ describe('application presentation identity across platforms', () => {
   it('rejects absent, malformed and process-mismatched inventory selectors', () => {
     const valid = application(process(10));
     expect(
-      applicationInventorySelection({ ...valid, selector: undefined } as unknown as CapturableApplication),
+      applicationInventorySelection({
+        ...valid,
+        selector: undefined,
+      } as unknown as CapturableApplication),
     ).toBeUndefined();
     expect(
       applicationInventorySelection({
@@ -115,8 +121,9 @@ describe('application presentation identity across platforms', () => {
       ...application(),
       selector: { match: 'process_id', process_id: 0, include_descendants: true },
     } as CapturableApplication;
-    expect(presentRoutingApplicationIcons(selected, [malformed]).nodes[0]?.appearance.iconUrl)
-      .toBeUndefined();
+    expect(
+      presentRoutingApplicationIcons(selected, [malformed]).nodes[0]?.appearance.iconUrl,
+    ).toBeUndefined();
   });
 
   it('retains an available icon when another instance of the same bundle has none', () => {
@@ -132,7 +139,9 @@ describe('application presentation identity across platforms', () => {
     expect(shown.nodes[0]?.appearance.iconUrl).toBe('data:image/png;base64,pid-10');
     expect(shown.nodes[0]?.appearance.title).toBe('My saved label');
   });
+});
 
+describe('application icon lifetime and executable identity', () => {
   it('matches explicit executable selectors by path, never filename alone', () => {
     const selected: RuntimeApplicationSelector = { match: 'executable_path', path: '/opt/player' };
     const shown = presentRoutingApplicationIcons(graph(selected), [
@@ -162,13 +171,16 @@ describe('application presentation identity across platforms', () => {
     const original = graph(process(10));
     const restored = {
       ...original,
-      nodes: original.nodes.map((node) => ({
-        ...node,
-        runtime: {
-          ...node.runtime!,
-          config: { ...(node.runtime!.config as object), requiresReselection: true },
-        },
-      })),
+      nodes: original.nodes.map((node) => {
+        if (!node.runtime) throw new Error('Application fixture requires runtime configuration');
+        return {
+          ...node,
+          runtime: {
+            ...node.runtime,
+            config: { ...(node.runtime.config as object), requiresReselection: true },
+          },
+        };
+      }),
     };
     const shown = presentRoutingApplicationIcons(restored, [
       { ...application(process(10)), displayName: 'Different app' },

@@ -10,11 +10,13 @@ import {
   type ControlPort,
   ControlPortError,
   type ExternalProcessorDescriptor,
+  type GraphLayoutResponse,
   type ProviderPorts,
   type RuntimeGraphDocument,
 } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
+import { GraphApplicationError } from './GraphApplicationQueue';
 import type { VirtualEndpointUpdate } from './model';
 import { RoutingWorkspace } from './RoutingWorkspace';
 import {
@@ -83,6 +85,33 @@ function RateUpdateButtons({
   ));
 }
 
+function BufferUpdateButtons({
+  model,
+  onChange,
+}: {
+  model: AudioGraphModel;
+  onChange?: (nodeId: string, value: VirtualEndpointUpdate) => void;
+}) {
+  return model.nodes.map((node) =>
+    node.appearance.endpointControl?.bufferControl ? (
+      <button
+        key={node.id}
+        type="button"
+        onClick={() =>
+          onChange?.(node.id, {
+            displayName: node.appearance.title,
+            renderChannels: 2,
+            captureChannels: 2,
+            bufferFrames: 256,
+          })
+        }
+      >
+        buffer {node.id}
+      </button>
+    ) : null,
+  );
+}
+
 vi.mock('../../core/audio-graph/AudioGraphCanvas', () => ({
   AudioGraphCanvas: ({
     ariaLabel,
@@ -127,6 +156,7 @@ vi.mock('../../core/audio-graph/AudioGraphCanvas', () => ({
         share fixture source
       </button>
       <RateUpdateButtons model={model} onChange={onNodeEndpointChange} />
+      <BufferUpdateButtons model={model} onChange={onNodeEndpointChange} />
       <button type="button" onClick={() => onNodeGainChange?.('input', -6)}>
         change gain
       </button>
@@ -353,7 +383,7 @@ function expectBlockedWorkspace() {
     'blocked',
   );
   expect(screen.queryByText('Not applied')).not.toBeInTheDocument();
-  expect(screen.getByRole('alert')).toBeInTheDocument();
+  expect(screen.getAllByRole('alert').length).toBeGreaterThan(0);
 }
 
 function renderWorkspace(controlPort: ControlPort, onBusyChange?: (busy: boolean) => void) {
@@ -568,8 +598,10 @@ it('applies recorder channel edits through graph history and restores the width 
       }),
     });
     render(workspace(source, undefined, 'graph-1'));
-    fireEvent.click(await screen.findByRole('button', { name: 'Options' }));
-    const channels = screen.getByRole('combobox', { name: 'Channels' });
+    fireEvent.click(
+      await screen.findByRole('button', { name: (name) => name.endsWith('Options') }),
+    );
+    const channels = screen.getByRole('button', { name: /Channels$/ });
     await waitFor(() => expect(channels).toBeEnabled());
     fireEvent.click(channels);
     fireEvent.click(await screen.findByRole('option', { name: '1' }));
@@ -580,10 +612,10 @@ it('applies recorder channel edits through graph history and restores the width 
         ],
       });
     await waitFor(() => expect(source.applyGraph).toHaveBeenLastCalledWith(graphWithChannels(1)));
-    expect(channels).toHaveValue('1');
+    expect(channels).toHaveTextContent('1');
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
     await waitFor(() => expect(source.applyGraph).toHaveBeenLastCalledWith(graphWithChannels(2)));
-    expect(channels).toHaveValue('2');
+    expect(channels).toHaveTextContent('2');
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true });
     await waitFor(() => expect(source.applyGraph).toHaveBeenLastCalledWith(graphWithChannels(1)));
   } finally {
@@ -620,7 +652,12 @@ describe('RoutingWorkspace processor discovery evidence', () => {
     await waitFor(() => expect(menu).toHaveTextContent('Effect · Stereo · 2'));
     const items = JSON.parse(menu.textContent ?? '[]') as AudioGraphNodeMenuItem[];
     const processorItems = items.find((item) => item.id === 'processor')?.children ?? [];
-    expect(processorItems.every((item) => item.children === undefined)).toBe(true);
+    expect(
+      processorItems
+        .filter((item) => item.id !== 'effect-chains')
+        .every((item) => item.children === undefined),
+    ).toBe(true);
+    expect(processorItems.find((item) => item.id === 'effect-chains')?.children).toHaveLength(5);
     expect(processorItems.map((item) => item.id)).toEqual(
       expect.arrayContaining([
         'compressor',
@@ -871,7 +908,8 @@ describe('RoutingWorkspace virtual device menu rows', () => {
       const source = port({
         getGraph: vi.fn().mockResolvedValue({ ...document, nodes: [], edges: [] }),
       });
-      const device = virtualPolicy.devices[0]!;
+      const device = virtualPolicy.devices[0];
+      if (!device) throw new Error('Missing virtual device fixture');
       const spec = {
         ...device.spec,
         render: direction === 'render' ? device.spec.render : null,
@@ -958,7 +996,10 @@ describe('RoutingWorkspace virtual device menu rows', () => {
     expect(source.applyGraph).not.toHaveBeenCalled();
     rendered.unmount();
   });
+});
 
+describe('RoutingWorkspace attached virtual device metadata', () => {
+  const session = virtualMenuSession;
   it.each(['en', 'ko-KR', 'pseudo'])(
     'describes attached channels without repeating routing prose in %s',
     async (locale) => {
@@ -1111,6 +1152,35 @@ it.each(['MacIntel', 'Linux x86_64'])(
     }
   },
 );
+
+it('keeps canvas layout and undo through playback-only revision acknowledgements', async () => {
+  await i18n.changeLanguage('en');
+  const source = port();
+  const view = (sessionDocument: RuntimeGraphDocument) => (
+    <MixRelayProvider>
+      <I18nextProvider i18n={i18n}>
+        <RoutingWorkspace controlPort={source} sessionDocument={sessionDocument} />
+      </I18nextProvider>
+    </MixRelayProvider>
+  );
+  const mounted = render(view(document));
+  await screen.findByRole('button', { name: 'resize node' });
+  const canvas = screen.getByTestId('node-sizes');
+  const original = canvas.textContent;
+  fireEvent.click(screen.getByRole('button', { name: 'resize node' }));
+  const resized = canvas.textContent;
+  mounted.rerender(view({ ...document, revision: 3 }));
+  await waitFor(() => expect(screen.getByTestId('model-revision')).toHaveTextContent('3'));
+  expect(screen.getByTestId('node-sizes')).toBe(canvas);
+  expect(canvas.textContent).toBe(resized);
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
+  expect(canvas.textContent).toBe(original);
+  mounted.rerender(view({ ...document, revision: 4 }));
+  await waitFor(() => expect(screen.getByTestId('model-revision')).toHaveTextContent('4'));
+  fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true });
+  expect(canvas.textContent).toBe(resized);
+  expect(source.applyGraph).not.toHaveBeenCalled();
+});
 
 describe('RoutingWorkspace layout history', () => {
   it('undoes and redoes resizing without advancing the audio revision or submitting DSP', async () => {
@@ -1290,7 +1360,7 @@ describe('RoutingWorkspace application', () => {
 });
 
 describe('RoutingWorkspace recovery', () => {
-  it('preserves undo and redo after a rejection and reapplies only on explicit retry', async () => {
+  it('automatically rebases a definite revision rejection and applies the current user edit', async () => {
     await i18n.changeLanguage('en');
     const controlPort = port({
       applyGraph: vi
@@ -1306,32 +1376,36 @@ describe('RoutingWorkspace recovery', () => {
       getGraph: vi
         .fn()
         .mockResolvedValueOnce(document)
-        .mockResolvedValue({ ...document, revision: 9 }),
+        .mockResolvedValue({
+          ...document,
+          revision: 9,
+          nodes: [
+            ...document.nodes,
+            { id: 'remote-gain', type: 'gain', label: 'Remote gain', config: { gainDb: 0 } },
+          ],
+        }),
       getGraphStatus: vi
         .fn()
         .mockResolvedValue({ activeRevision: 9, submittedRevision: 9, protocolVersion: 1 }),
     });
     renderWorkspace(controlPort);
     await screen.findByRole('region');
-    const originalEdges = screen.getByTestId('edge-count').textContent;
     fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
-    await waitFor(expectBlockedWorkspace);
-    fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
-    expect(screen.getByTestId('edge-count').textContent).toBe(originalEdges);
-    fireEvent.keyDown(window, { key: 'z', ctrlKey: true, shiftKey: true });
-    expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
-    expect(controlPort.applyGraph).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Overwrite engine with these edits' }));
     await waitFor(expectActiveWorkspace);
+    await waitFor(() => expect(controlPort.applyGraph).toHaveBeenCalledTimes(2));
     expect(controlPort.applyGraph).toHaveBeenLastCalledWith(
       expect.objectContaining({ revision: 10, edges: [] }),
     );
+    expect(
+      screen.queryByRole('button', { name: 'Overwrite engine with these edits' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
   });
 
-  it('explicit reload adopts engine state and clears incompatible history without a write', async () => {
+  it('allows explicit discard only after an unresolved conflict and reloads without a write', async () => {
     await i18n.changeLanguage('en');
     const controlPort = port({
-      applyGraph: vi.fn().mockRejectedValue(new Error('offline')),
+      applyGraph: vi.fn().mockRejectedValue(new GraphApplicationError('graph_conflict_unresolved')),
       getGraphStatus: vi
         .fn()
         .mockResolvedValue({ activeRevision: 1, submittedRevision: 1, protocolVersion: 1 }),
@@ -1341,12 +1415,44 @@ describe('RoutingWorkspace recovery', () => {
     const originalEdges = screen.getByTestId('edge-count').textContent;
     fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
     await waitFor(expectBlockedWorkspace);
+    expect(screen.getByRole('button', { name: 'Overwrite engine with these edits' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Discard edits and reload engine' }));
     await waitFor(expectActiveWorkspace);
     expect(screen.getByTestId('edge-count').textContent).toBe(originalEdges);
     fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
     expect(controlPort.applyGraph).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('edge-count').textContent).toBe(originalEdges);
+  });
+});
+
+describe('RoutingWorkspace explicit conflict retry', () => {
+  it('keeps the conflicted draft when the user explicitly retries it', async () => {
+    await i18n.changeLanguage('en');
+    const controlPort = port({
+      applyGraph: vi
+        .fn()
+        .mockRejectedValueOnce(new GraphApplicationError('graph_conflict_unresolved'))
+        .mockResolvedValue({ protocolVersion: 1, revision: 2, state: 'active' }),
+      getGraphStatus: vi
+        .fn()
+        .mockResolvedValue({ activeRevision: 1, submittedRevision: 1, protocolVersion: 1 }),
+    });
+    renderWorkspace(controlPort);
+    await screen.findByRole('region');
+    fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
+    await waitFor(expectBlockedWorkspace);
+    expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
+    const retry = screen.getByRole('button', { name: 'Overwrite engine with these edits' });
+    act(() => retry.focus());
+    fireEvent.click(retry);
+    await waitFor(expectActiveWorkspace);
+    expect(screen.getByRole('textbox', { name: 'Graph name' })).toHaveFocus();
+    expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
+    expect(controlPort.applyGraph).toHaveBeenCalledTimes(2);
+    expect(controlPort.applyGraph).toHaveBeenLastCalledWith(
+      expect.objectContaining({ revision: 2, edges: [] }),
+    );
   });
 });
 
@@ -1381,7 +1487,7 @@ it('places new remote nodes from saved layout while keeping local geometry and v
     .fn()
     .mockResolvedValue({ graphId: 'saved', layoutRevision: 3, layout: saved });
   const controlPort = port({
-    applyGraph: vi.fn().mockRejectedValue(new Error('offline')),
+    applyGraph: vi.fn().mockRejectedValue(new GraphApplicationError('graph_conflict_unresolved')),
     getGraph: vi.fn().mockResolvedValueOnce(document).mockResolvedValue(remote),
     getGraphLayout,
     setGraphLayout: vi.fn(),
@@ -1444,7 +1550,7 @@ it.each(['read failure', 'identity mismatch'])(
           : Promise.resolve({ graphId: 'other', layoutRevision: 3, layout: saved }),
       );
     const controlPort = port({
-      applyGraph: vi.fn().mockRejectedValue(new Error('offline')),
+      applyGraph: vi.fn().mockRejectedValue(new GraphApplicationError('graph_conflict_unresolved')),
       getGraph: vi.fn().mockResolvedValue(document),
       getGraphLayout,
       setGraphLayout: vi.fn(),
@@ -1567,7 +1673,7 @@ describe('RoutingWorkspace persistence warnings', () => {
     const warning = await screen.findByText(
       /Audio is active, but graph changes could not be saved/,
     );
-    expect(warning).toHaveAttribute('role', 'status');
+    expect(warning.closest('[role="status"]')).not.toBeNull();
     expectActiveWorkspace();
     // The warning is rendered before the passive busy callback from the same settled edit.
     await waitFor(() => expect(onBusyChange).toHaveBeenLastCalledWith(false));
@@ -1652,13 +1758,95 @@ it.each(['en', 'ko-KR', 'pseudo'])(
   },
 );
 
-describe('RoutingWorkspace failure recovery', () => {
-  it('shows unavailable state when the initial graph cannot be loaded', async () => {
+describe('RoutingWorkspace initial readiness', () => {
+  it('exposes initial graph loading as a non-focusable status and removes it after success', async () => {
     await i18n.changeLanguage('en');
-    renderWorkspace(port({ getGraph: vi.fn().mockRejectedValue(new Error('offline')) }));
-    expect(await screen.findByText('Engine unavailable')).toBeInTheDocument();
+    const graphLoad = deferred<RuntimeGraphDocument>();
+    renderWorkspace(port({ getGraph: vi.fn(() => graphLoad.promise) }));
+    const loading = screen.getByRole('status');
+    expect(loading).toHaveTextContent('Loading engine');
+    expect(loading).not.toHaveAttribute('tabindex');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await act(async () => graphLoad.resolve(document));
+    expect(
+      screen.getByRole('region', { name: 'MixRelay virtual I/O routing graph' }),
+    ).toBeInTheDocument();
+    expect(loading).not.toBeInTheDocument();
+    expect(screen.queryByText('Loading engine')).not.toBeInTheDocument();
   });
 
+  it('keeps a loading status until the graph layout is available', async () => {
+    await i18n.changeLanguage('en');
+    const graphLoad = deferred<RuntimeGraphDocument>();
+    const layoutLoad = deferred<GraphLayoutResponse>();
+    const source = port({
+      getGraph: vi.fn(() => graphLoad.promise),
+      getGraphLayout: vi.fn(() => layoutLoad.promise),
+      setGraphLayout: vi.fn(),
+    });
+    render(workspace(source, undefined, 'saved'));
+    await act(async () => graphLoad.resolve(document));
+    expectActiveWorkspace();
+    const loading = screen.getByRole('status');
+    expect(loading).toHaveTextContent('Loading engine');
+    expect(
+      screen.queryByRole('region', { name: 'MixRelay virtual I/O routing graph' }),
+    ).not.toBeInTheDocument();
+    await act(async () =>
+      layoutLoad.resolve({ graphId: 'saved', layoutRevision: 1, layout: { positions: {} } }),
+    );
+    expect(
+      screen.getByRole('region', { name: 'MixRelay virtual I/O routing graph' }),
+    ).toBeInTheDocument();
+    expect(loading).not.toBeInTheDocument();
+  });
+
+  it.each([false, true])(
+    'exposes initial graph failure as an alert and clears it after automatic recovery (layout pending: %s)',
+    async (layoutPending) => {
+      await i18n.changeLanguage('en');
+      vi.useFakeTimers();
+      const graphLoad = deferred<RuntimeGraphDocument>();
+      const recoveredGraph = deferred<RuntimeGraphDocument>();
+      const layoutLoad = deferred<GraphLayoutResponse>();
+      const source = port({
+        getGraph: vi
+          .fn()
+          .mockReturnValueOnce(graphLoad.promise)
+          .mockReturnValue(recoveredGraph.promise),
+        ...(layoutPending
+          ? { getGraphLayout: vi.fn(() => layoutLoad.promise), setGraphLayout: vi.fn() }
+          : {}),
+      });
+      render(workspace(source, undefined, 'saved'));
+      const loading = screen.getByRole('status');
+      await act(async () => graphLoad.reject(new Error('offline')));
+      const failure = screen.getByRole('alert');
+      expect(failure).toHaveTextContent('Engine unavailable');
+      expect(failure).not.toHaveAttribute('tabindex');
+      expect(loading).not.toBeInTheDocument();
+      expect(screen.queryByText('Loading engine')).not.toBeInTheDocument();
+      await act(async () => vi.advanceTimersByTimeAsync(500));
+      expect(source.getGraph).toHaveBeenCalledTimes(2);
+      await act(async () => recoveredGraph.resolve(document));
+      expect(failure).not.toBeInTheDocument();
+      expect(screen.queryByText('Engine unavailable')).not.toBeInTheDocument();
+      if (layoutPending) {
+        expect(screen.getByRole('status')).toHaveTextContent('Loading engine');
+        await act(async () =>
+          layoutLoad.resolve({ graphId: 'saved', layoutRevision: 1, layout: { positions: {} } }),
+        );
+      }
+      expect(
+        screen.getByRole('region', { name: 'MixRelay virtual I/O routing graph' }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('Loading engine')).not.toBeInTheDocument();
+      expect(source.applyGraph).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe('RoutingWorkspace failure recovery', () => {
   it('returns a pending polling failure to an editable state', async () => {
     await i18n.changeLanguage('en');
     const controlPort = port({
@@ -1706,4 +1894,87 @@ describe('RoutingWorkspace failure recovery', () => {
     pollingView.unmount();
     expect(vi.getTimerCount()).toBeLessThan(timerCount);
   });
+});
+
+it('sends output buffer changes to the runtime independently of Driver format commands and graph edits', async () => {
+  const source = port();
+  const runtimeChange = vi.fn();
+  const driverChange = vi.fn();
+  render(
+    <MixRelayProvider>
+      <I18nextProvider i18n={i18n}>
+        <RoutingWorkspace
+          controlPort={source}
+          audioSession={{
+            ...virtualMenuSession,
+            virtualEndpointSettings: {
+              ...virtualPolicy,
+              devices: virtualPolicy.devices.map((device) => ({
+                ...device,
+                nativeBuffer: {
+                  currentFrames: 128,
+                  preferredFrames: null,
+                  minimumFrames: 32,
+                  maximumFrames: 4096,
+                  canSet: true,
+                },
+              })),
+            },
+          }}
+          deviceBufferAction={{ enabled: true, error: null, change: runtimeChange }}
+          deviceDriverAction={{
+            enabled: true,
+            settings: virtualPolicy,
+            error: null,
+            change: driverChange,
+            create: vi.fn(),
+          }}
+        />
+      </I18nextProvider>
+    </MixRelayProvider>,
+  );
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'buffer default-virtual-io::host-sink' }),
+  );
+  expect(runtimeChange).toHaveBeenCalledExactlyOnceWith(virtualSpec.id, 256);
+  expect(driverChange).not.toHaveBeenCalled();
+  expect(source.applyGraph).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole('button', { name: 'buffer default-virtual-io::host-source' }),
+  ).not.toBeInTheDocument();
+});
+
+it.each([
+  new Error('offline'),
+  new ControlPortError(503, { code: 'control_unavailable', parameters: {} }),
+])('retries a preserved draft after a transient request failure (%s)', async (failure) => {
+  await i18n.changeLanguage('en');
+  const controlPort = port({
+    getGraphStatus: vi
+      .fn()
+      .mockResolvedValue({ protocolVersion: 1, activeRevision: 1, submittedRevision: 1 }),
+    applyGraph: vi
+      .fn()
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue({ protocolVersion: 1, revision: 2, state: 'active' }),
+  });
+  renderWorkspace(controlPort);
+  await screen.findByRole('region');
+  fireEvent.click(screen.getByRole('button', { name: 'edit graph' }));
+  await waitFor(expectBlockedWorkspace);
+  expect(
+    screen.queryByRole('button', { name: 'Overwrite engine with these edits' }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: 'Discard edits and reload engine' }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
+  const retry = screen.getByRole('button', { name: 'Retry' });
+  act(() => retry.focus());
+  fireEvent.click(retry);
+  await waitFor(expectActiveWorkspace);
+  expect(screen.getByRole('textbox', { name: 'Graph name' })).toHaveFocus();
+  expect(controlPort.applyGraph).toHaveBeenCalledTimes(2);
+  expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });

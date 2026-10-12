@@ -1,0 +1,358 @@
+import type { Meta, StoryObj } from '@storybook/react-vite';
+import { builtinEffectsFixture } from '../../.storybook/fixtures/builtinEffects';
+import quickTimeIcon from '../core/audio-graph/fixtures/quicktime-player.png';
+import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
+import type {
+  MixRelayStatus,
+  NativeSampleFormat,
+  RuntimeGraphDocument,
+} from '../core/control-port/types';
+import { ControlPortError } from '../core/control-port/types';
+import type { LicensingPort } from '../core/licensing/LicensingPort';
+import { readyDriver } from '../features/driver-status/driverFixtures';
+import { App } from './App';
+
+const graph: RuntimeGraphDocument = {
+  schemaVersion: 2,
+  revision: 1,
+  nodes: [
+    {
+      id: 'app',
+      label: 'QuickTime Player',
+      type: 'application_capture',
+      config: {
+        selector: {
+          match: 'bundle_id',
+          bundle_id: 'com.apple.QuickTimePlayer',
+          include_descendants: true,
+        },
+        sourcePlayback: 'preserve',
+        stream: { channels: 2, channelLayout: 'stereo' },
+        gainDb: 0,
+      },
+    },
+    { id: 'trim', label: 'Monitor trim', type: 'gain', config: { channels: 2, gainDb: -3 } },
+    {
+      id: 'device-a',
+      label: 'Monitor',
+      type: 'virtual_endpoint',
+      config: {
+        ...readyDriver.settings.devices[0]?.spec,
+        reference: { render: true, capture: true },
+      },
+    },
+    { id: 'recorder', label: 'Recorder', type: 'recorder', config: { channels: 2 } },
+  ],
+  edges: [
+    {
+      id: 'app-trim',
+      source: { nodeId: 'app', portId: 'audio' },
+      destination: { nodeId: 'trim', portId: 'audio' },
+      channelMapping: { mode: 'auto' },
+    },
+    {
+      id: 'trim-monitor',
+      source: { nodeId: 'trim', portId: 'audio' },
+      destination: { nodeId: 'device-a', portId: 'to_os' },
+      channelMapping: { mode: 'auto' },
+    },
+    {
+      id: 'trim-recorder',
+      source: { nodeId: 'trim', portId: 'audio' },
+      destination: { nodeId: 'recorder', portId: 'audio' },
+      channelMapping: { mode: 'auto' },
+    },
+  ],
+};
+
+const workspaceDriver = structuredClone(readyDriver);
+const workspaceDevice = workspaceDriver.settings.devices[0];
+if (!workspaceDevice) throw new Error('Workspace preview requires a device.');
+const workspaceChannels = workspaceDevice.spec.render?.channels;
+if (!workspaceChannels) throw new Error('Workspace preview requires a playback stream.');
+const workspaceEncodings: NativeSampleFormat[] = ['signed16', 'signed24', 'signed32', 'float32'];
+workspaceDevice.nativeFormats.render.supported = workspaceDevice.spec.supportedSampleRates.flatMap(
+  (sampleRate) =>
+    workspaceEncodings.map((sampleFormat) => ({
+      sampleRate,
+      channels: workspaceChannels,
+      sampleFormat,
+    })),
+);
+workspaceDevice.nativeFormats.capture = structuredClone(workspaceDevice.nativeFormats.render);
+workspaceDevice.nativeBuffer = {
+  currentFrames: 128,
+  preferredFrames: 128,
+  minimumFrames: 32,
+  maximumFrames: 2048,
+  canSet: true,
+};
+
+const status: MixRelayStatus = {
+  protocolVersion: 1,
+  driverState: 'ready',
+  sampleRate: 48000,
+  bufferFrames: 128,
+  underruns: 0,
+  overruns: 0,
+  enginePower: { enabled: true, transitioning: false },
+  audioSession: {
+    virtualEndpointSettings: workspaceDriver.settings,
+    processingState: 'running',
+    issue: null,
+    format: { sampleRate: 48000, blockFrames: 128 },
+    clockAuthority: 'engine_timer',
+    observedDeviceSampleRate: null,
+    transportLatencyFrames: null,
+    capabilities: {
+      backend: 'core_audio',
+      supportedSampleRates: [48000],
+      supportedBlockFrames: [128],
+      canReconfigureLive: false,
+      hardwareInput: true,
+      hardwareOutput: true,
+      virtualEndpoint: true,
+      applicationCapture: true,
+      sampleRateConversion: false,
+      driftCorrection: false,
+    },
+  },
+};
+
+async function workspaceFixture({ parameters }: { parameters: Record<string, unknown> }) {
+  if (parameters.allEffects) return { controlPort: builtinEffectsFixture() };
+  const state = {
+    graph: structuredClone(graph),
+    graphStatus: { protocolVersion: 1 as const, activeRevision: 1, submittedRevision: 1 },
+    status: structuredClone(status),
+    applications: [
+      {
+        bundleId: 'com.apple.QuickTimePlayer',
+        displayName: 'QuickTime Player',
+        iconDataUrl: quickTimeIcon,
+        processId: 42,
+        selector: {
+          match: 'bundle_id' as const,
+          bundle_id: 'com.apple.QuickTimePlayer',
+          include_descendants: true,
+        },
+      },
+    ],
+    meters: {
+      protocolVersion: 1 as const,
+      revision: 1,
+      nodes: [
+        { nodeId: 'app', portId: 'audio', peaks: [0.4, 0.28] },
+        { nodeId: 'trim', portId: 'audio', peaks: [0.28, 0.2] },
+        { nodeId: 'device-a', portId: 'to_os', peaks: [0.28, 0.2] },
+      ],
+    },
+  };
+  if (parameters.emptyGraph) {
+    state.graph.nodes = [];
+    state.graph.edges = [];
+    state.meters.nodes = [];
+  }
+  if (parameters.playbackPaused) {
+    state.status.enginePower = { enabled: false, transitioning: false };
+    state.meters.nodes = [];
+  }
+  const port = new StorybookMockControlPort(state);
+  const controlPort = Object.assign(port, {
+    setVirtualEndpointBufferFrames: async (request: {
+      expectedRevision: number;
+      endpointId: string;
+      expectedBufferFrames: number | null;
+      expectedPreferredFrames: number | null;
+      bufferFrames: number;
+    }) => {
+      const current = state.status.audioSession?.virtualEndpointSettings?.devices.find(
+        (device) => device.spec.id === request.endpointId,
+      )?.nativeBuffer;
+      if (
+        !current ||
+        request.expectedRevision !== state.graph.revision ||
+        current.currentFrames !== request.expectedBufferFrames ||
+        current.preferredFrames !== request.expectedPreferredFrames
+      )
+        throw new Error('graph_revision_stale');
+      current.currentFrames = request.bufferFrames;
+      current.preferredFrames = request.bufferFrames;
+      return {
+        protocolVersion: 1 as const,
+        revision: state.graph.revision,
+        state: 'active' as const,
+      };
+    },
+    setEnginePower: async (enabled: boolean) => {
+      state.status.enginePower = { enabled, transitioning: false };
+      return {
+        protocolVersion: 1 as const,
+        revision: state.graph.revision,
+        state: 'active' as const,
+      };
+    },
+  });
+  await port.setGraphLayout('graph-1', {
+    expectedLayoutRevision: 0,
+    layout: {
+      positions: {
+        app: { x: 20, y: 30 },
+        trim: { x: 320, y: 30 },
+        'device-a::host-source': { x: 20, y: 280 },
+        'device-a::host-sink': { x: 620, y: 30 },
+        recorder: { x: 320, y: 280 },
+      },
+      viewport: { x: 80, y: 80, zoom: 1 },
+    },
+  });
+  if (parameters.longGraphList) await populateGraphList(port);
+  configureCatalogState(controlPort, parameters);
+  return { controlPort };
+}
+
+function configureCatalogState(
+  port: StorybookMockControlPort,
+  parameters: Record<string, unknown>,
+) {
+  if (parameters.catalogUnavailable)
+    port.getGraphCatalog = async () => {
+      throw new ControlPortError(503, {
+        code: 'control_request_failed',
+        parameters: { resource: 'graph_catalog' },
+      });
+    };
+  if (parameters.catalogPending) port.getGraphCatalog = () => new Promise(() => undefined);
+}
+
+async function populateGraphList(port: StorybookMockControlPort) {
+  for (let index = 1; index <= 32; index += 1) {
+    const catalog = await port.getGraphCatalog();
+    await port.mutateGraphCatalog({
+      action: 'create',
+      name: `Session ${index}`,
+      expectedRevision: catalog.document.revision,
+      expectedCatalogRevision: catalog.catalogRevision,
+    });
+  }
+  const catalog = await port.getGraphCatalog();
+  await port.mutateGraphCatalog({
+    action: 'select',
+    id: 'graph-1',
+    expectedRevision: catalog.document.revision,
+    expectedCatalogRevision: catalog.catalogRevision,
+  });
+}
+
+function licenseFixture(licensed: boolean): LicensingPort {
+  const value = {
+    status: licensed ? ('licensed' as const) : ('free' as const),
+    configured: false,
+    remainingDays: licensed ? 27 : 0,
+    expiresAtUnix: licensed ? 1900000000 : null,
+  };
+  return {
+    getStatus: async () => value,
+    activate: async () => value,
+    validate: async () => value,
+    deactivate: async () => value,
+    openCheckout: async () => {},
+  };
+}
+
+const meta = {
+  title: 'App/Workspace',
+  component: App,
+  args: {
+    licensingPort: licenseFixture(true),
+    runtimePort: { connect: async () => 'ready', status: async () => 'ready' },
+    driverPort: {
+      getSnapshot: async () => workspaceDriver,
+      mutate: async () => {
+        throw new Error('Native driver changes are unavailable in this preview.');
+      },
+    },
+    updatesPort: null,
+    mode: null,
+  },
+  loaders: [workspaceFixture],
+  render: (args, { loaded }) => <App {...args} controlPort={loaded.controlPort} />,
+  parameters: {
+    layout: 'fullscreen',
+    docs: {
+      description: {
+        component:
+          'The production App composition with deterministic preview ports. No native audio or files are changed.',
+      },
+    },
+  },
+} satisfies Meta<typeof App>;
+export default meta;
+type Story = StoryObj<typeof meta>;
+export const Workspace: Story = {};
+export const AllEffects: Story = {
+  parameters: {
+    allEffects: true,
+    docs: {
+      description: {
+        story:
+          '실제 App 안에서 내장 효과 전체를 검토합니다. 그래프·최초 계측만 fixture이고 효과 조작은 제품의 동일한 Feature를 통과합니다. 실제 오디오 처리 검증은 별도입니다.',
+      },
+    },
+  },
+};
+export const Light: Story = { globals: { theme: 'light' } };
+export const Dark: Story = { globals: { theme: 'dark' } };
+export const Empty: Story = {
+  parameters: {
+    emptyGraph: true,
+    docs: {
+      description: {
+        story: '실제 App의 빈 그래프. 장치 삭제나 오디오 실행은 fixture에서 수행하지 않습니다.',
+      },
+    },
+  },
+};
+export const AudioPaused: Story = {
+  parameters: {
+    playbackPaused: true,
+    docs: {
+      description: {
+        story:
+          '실행부의 확인된 enginePower.enabled=false를 실제 App이 표시합니다. 노드 Off·Mute·개별 녹음 Pause와 별개입니다. 실제 오디오 중지·재개 검증은 아닙니다.',
+      },
+    },
+  },
+};
+export const LongGraphList: Story = { parameters: { longGraphList: true } };
+export const Free: Story = { args: { licensingPort: licenseFixture(false) } };
+export const LicenseUnavailable: Story = {
+  args: { licensingPort: null },
+};
+export const NarrowLicenseUnavailable: Story = {
+  args: { licensingPort: null },
+  globals: { locale: 'pseudo', viewport: { value: 'mobile' } },
+};
+export const NarrowLicenseWarning: Story = {
+  args: {
+    licensingPort: {
+      ...licenseFixture(false),
+      getStatus: async () => ({
+        status: 'clock_invalid',
+        configured: false,
+        remainingDays: 0,
+        expiresAtUnix: null,
+      }),
+    },
+  },
+  globals: { locale: 'pseudo', viewport: { value: 'mobile' } },
+};
+export const Connecting: Story = {
+  args: { runtimePort: { connect: () => new Promise(() => {}), status: async () => 'ready' } },
+};
+export const NarrowLongTranslation: Story = {
+  globals: { locale: 'pseudo', viewport: { value: 'mobile' } },
+};
+
+export const CatalogUnavailable: Story = { parameters: { catalogUnavailable: true } };
+export const CatalogPending: Story = { parameters: { catalogPending: true } };

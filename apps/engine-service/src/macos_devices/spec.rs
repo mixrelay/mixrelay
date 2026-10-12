@@ -84,6 +84,11 @@ pub(super) fn aggregate_members(specs: &BTreeMap<String, Spec>) -> Vec<String> {
     let mut primary = None;
     for spec in specs.values() {
         if let DeviceSelector::PersistentUid { uid } = &spec.selector {
+            // Independent virtual clients own their selected buffers. Including them
+            // in one private aggregate would replace those with a shared quantum.
+            if super::endpoint_buffer::is_virtual_selection(&spec.selector) {
+                continue;
+            }
             uids.insert(uid.clone());
             if !spec.input && primary.is_none() {
                 primary = Some(uid.clone());
@@ -146,9 +151,44 @@ mod tests {
                 .unwrap(),
             uid
         );
-        assert_eq!(aggregate_members(&selected), vec![uid]);
+        assert!(aggregate_members(&selected).is_empty());
         document.nodes.clear();
         assert!(specs(&document).is_empty());
+    }
+
+    #[test]
+    fn physical_clock_group_excludes_independent_virtual_clients() {
+        let selected = BTreeMap::from([
+            (
+                "virtual".into(),
+                Spec {
+                    selector: DeviceSelector::PersistentUid {
+                        uid: endpoint_uid([1; 16]),
+                    },
+                    input: false,
+                    channels: 2,
+                },
+            ),
+            (
+                "speaker".into(),
+                Spec {
+                    selector: DeviceSelector::PersistentUid {
+                        uid: "speaker".into(),
+                    },
+                    input: false,
+                    channels: 2,
+                },
+            ),
+            (
+                "mic".into(),
+                Spec {
+                    selector: DeviceSelector::PersistentUid { uid: "mic".into() },
+                    input: true,
+                    channels: 2,
+                },
+            ),
+        ]);
+        assert_eq!(aggregate_members(&selected), ["speaker", "mic"]);
     }
 
     #[test]

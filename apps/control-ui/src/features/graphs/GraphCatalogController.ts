@@ -56,6 +56,10 @@ function workspaceRejected(error: ControlPortError): boolean {
   );
 }
 
+function workspaceUncertain(error: unknown) {
+  return !(error instanceof ControlPortError) || (error.status >= 500 && !workspaceRejected(error));
+}
+
 function retryableRead(error: unknown) {
   if (!(error instanceof ControlPortError)) return true;
   if (errorCode(error) === 'graph_catalog_unavailable') return false;
@@ -126,7 +130,8 @@ export class GraphCatalogController {
       });
       if (retryRead && !this.state.catalog && retryableRead(error)) {
         this.retryTimer = setTimeout(() => {
-          if (generation === this.generation) void this.reload();
+          // Every operation and disposal clears this timer before changing its generation.
+          void this.reload();
         }, this.retryDelay);
         this.retryDelay = Math.min(5000, this.retryDelay * 2);
       }
@@ -168,11 +173,7 @@ export class GraphCatalogController {
           expectedCatalogRevision: catalog.catalogRevision,
         })
         .catch((error: unknown) => {
-          if (
-            generation === this.generation &&
-            (!(error instanceof ControlPortError) ||
-              (error.status >= 500 && !workspaceRejected(error)))
-          )
+          if (generation === this.generation && workspaceUncertain(error))
             this.patch({ uncertain: true });
           throw error;
         });
@@ -184,14 +185,18 @@ export class GraphCatalogController {
         return;
       }
       this.accept(next, generation, action === 'new' || action === 'open');
-      if (generation !== this.generation) return;
-      this.patch({ uncertain: true });
-      await this.waitActive(next.document.revision, generation);
-      if (generation !== this.generation) return;
-      // The accepted document remains visible even if capture synchronization fails.
-      const confirmed = this.port.getGraphCatalog ? await this.port.getGraphCatalog() : next;
-      this.accept(confirmed, generation, false);
+      await this.confirmWorkspaceFile(next, generation);
     });
+
+  private async confirmWorkspaceFile(next: GraphCatalog, generation: number) {
+    if (generation !== this.generation) return;
+    this.patch({ uncertain: true });
+    await this.waitActive(next.document.revision, generation);
+    if (generation !== this.generation) return;
+    // The accepted document remains visible even if capture synchronization fails.
+    const confirmed = this.port.getGraphCatalog ? await this.port.getGraphCatalog() : next;
+    this.accept(confirmed, generation, false);
+  }
 
   private async waitActive(revision: number, generation: number) {
     const deadline = Date.now() + 10_000;

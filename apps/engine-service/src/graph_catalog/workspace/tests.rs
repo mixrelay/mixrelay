@@ -1,8 +1,12 @@
 use std::{fs::File, path::Path};
 
 use super::*;
-use crate::{controller_test_support::settle, endpoint_settings_tests::controller};
+use crate::{
+    controller_test_support::settle,
+    endpoint_settings_tests::{controller, controller_with_inventory},
+};
 use mixrelay_audio_graph::{NodeId, NodeSpec, ProviderNodeConfig, ProviderPorts};
+use mixrelay_control_server::ControlBackend;
 use mixrelay_processor_state::{StateRef, StateStore, read_bundle, write_bundle};
 use sha2::{Digest, Sha256};
 
@@ -61,6 +65,394 @@ fn with_state(reference: &StateRef) -> serde_json::Value {
         "stateRef": reference,
         "parameterValues": {"7": 0.75}
     })
+}
+
+fn free_controller(document: GraphDocument) -> EngineGraphController {
+    let mut engine = controller(document);
+    engine.paid_access = std::sync::Arc::new(|| false);
+    engine
+}
+
+fn add_unavailable_provider(document: &mut GraphDocument) {
+    document.nodes.push(NodeSpec {
+        id: "missing-plugin".into(),
+        label: Some("Unavailable effect".into()),
+        control: mixrelay_audio_graph::NodeControl::default(),
+        config: NodeConfig::Provider(ProviderNodeConfig {
+            type_id: "vst3:not-installed".into(),
+            parameters: serde_json::json!({"parameterValues":{"7":0.75}}),
+            ports: None,
+        }),
+    });
+}
+
+fn five_route_mapping() -> mixrelay_audio_graph::ChannelMapping {
+    mixrelay_audio_graph::ChannelMapping::Explicit {
+        routes: (0..5)
+            .map(|channel| mixrelay_audio_graph::ChannelRoute {
+                source_channel: channel,
+                destination_channel: channel,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn free_save_preserves_missing_driver_and_plugin_work_without_execution_admission() {
+    let dir = mixrelay_test_support::FixtureDir::new("free-unavailable-export").unwrap();
+    let mut document = crate::default_duplex_document(1, None);
+    add_unavailable_provider(&mut document);
+    let empty = GraphDocument::new(1, vec![], vec![]);
+    let mut engine = controller_with_inventory(document.clone(), &empty);
+    engine.paid_access = std::sync::Arc::new(|| false);
+    let engine = engine.with_graph_catalog_path(dir.join("graphs.json"));
+    let before = engine.read_catalog().unwrap();
+    let candidate = Catalog::imported(document.clone());
+    assert!(engine.validate_workspace_feature_usage(&candidate).is_err());
+    let path = dir.join("preserved.mix");
+    engine
+        .workspace_operation(request(
+            &engine,
+            WorkspaceAction::Save {
+                path: path.to_string_lossy().into_owned(),
+            },
+        ))
+        .unwrap();
+    assert_eq!(
+        load(&path).unwrap().graphs[0].document.nodes,
+        document.nodes
+    );
+    assert_eq!(
+        load(&path).unwrap().graphs[0].document.edges,
+        document.edges
+    );
+    assert_eq!(engine.read_catalog().unwrap(), before);
+    assert_eq!(
+        Catalog::load(&dir.join("graphs.json"))
+            .unwrap()
+            .unwrap()
+            .graphs[0]
+            .document
+            .nodes,
+        document.nodes
+    );
+    assert!(
+        engine
+            .preview_workspace(request(
+                &engine,
+                WorkspaceAction::Open {
+                    path: path.to_string_lossy().into_owned(),
+                }
+            ))
+            .is_err()
+    );
+    assert_eq!(engine.read_catalog().unwrap(), before);
+}
+
+#[test]
+fn free_export_retains_unknown_plugin_geometry_but_rejects_known_excess_routes() {
+    let mut document = crate::default_duplex_document(1, None);
+    add_unavailable_provider(&mut document);
+    let engine = free_controller(document.clone());
+    assert!(
+        engine
+            .validate_workspace_feature_usage(&Catalog::imported(document.clone()))
+            .is_err()
+    );
+    assert!(
+        engine
+            .validate_workspace_export_usage(&Catalog::imported(document.clone()))
+            .is_ok()
+    );
+    document.edges[0].source.node_id = "missing-plugin".into();
+    document.edges[0].source.port_id = "audio".into();
+    assert!(
+        engine
+            .validate_workspace_export_usage(&Catalog::imported(document.clone()))
+            .is_ok()
+    );
+    document.edges[0].channel_mapping = five_route_mapping();
+    let error = engine
+        .validate_workspace_export_usage(&Catalog::imported(document))
+        .unwrap_err();
+    assert_eq!(
+        error.code,
+        mixrelay_control_protocol::ErrorCode::FeatureLimit
+    );
+    assert_eq!(error.parameters["resource"], "driverMappings");
+}
+
+#[test]
+fn free_export_counts_auto_routes_without_compiling_an_unrelated_missing_plugin() {
+    let mut document = crate::default_duplex_document(1, None);
+    let NodeConfig::VirtualEndpoint(endpoint) = &mut document.nodes[0].config else {
+        panic!("endpoint")
+    };
+    for stream in [&mut endpoint.spec.render, &mut endpoint.spec.capture] {
+        stream.as_mut().unwrap().channels = 64;
+        stream.as_mut().unwrap().channel_layout = mixrelay_audio_graph::ChannelLayout::Discrete;
+    }
+    document.edges.truncate(1);
+    document.edges[0].channel_mapping = mixrelay_audio_graph::ChannelMapping::Auto;
+    add_unavailable_provider(&mut document);
+    let engine = free_controller(document.clone());
+    let error = engine
+        .validate_workspace_export_usage(&Catalog::imported(document))
+        .unwrap_err();
+    assert_eq!(
+        error.code,
+        mixrelay_control_protocol::ErrorCode::FeatureLimit
+    );
+    assert_eq!(error.parameters["resource"], "driverMappings");
+    assert_eq!(error.parameters["used"], 64);
+}
+
+#[test]
+fn free_save_does_not_require_a_disconnected_hardware_output_to_be_available() {
+    let dir = mixrelay_test_support::FixtureDir::new("free-hardware-export").unwrap();
+    let document = GraphDocument::new(
+        1,
+        vec![NodeSpec {
+            id: "output".into(),
+            label: Some("Disconnected interface".into()),
+            control: mixrelay_audio_graph::NodeControl::default(),
+            config: NodeConfig::AudioDeviceOutput(mixrelay_audio_graph::AudioDeviceOutputConfig {
+                selector: mixrelay_audio_io::DeviceSelector::PersistentUid {
+                    uid: "offline-interface".into(),
+                },
+                input_channels: 2,
+            }),
+        }],
+        vec![],
+    );
+    let engine = free_controller(document.clone()).with_graph_catalog_path(dir.join("graphs.json"));
+    assert!(
+        engine
+            .validate_workspace_feature_usage(&Catalog::imported(document.clone()))
+            .is_err()
+    );
+    let path = dir.join("hardware.mix");
+    engine
+        .workspace_operation(request(
+            &engine,
+            WorkspaceAction::Save {
+                path: path.to_string_lossy().into_owned(),
+            },
+        ))
+        .unwrap();
+    assert_eq!(load(&path).unwrap().graphs[0].document, document);
+}
+
+#[test]
+fn free_single_graph_can_save_open_and_restore_its_routing_and_layout_after_restart() {
+    let dir = mixrelay_test_support::FixtureDir::new("free-workspace").unwrap();
+    let catalog_path = dir.join("graphs.json");
+    let initial = crate::default_duplex_document(9, Some(-6.0));
+    let engine = free_controller(initial.clone()).with_graph_catalog_path(catalog_path.clone());
+    let catalog = engine.read_catalog().unwrap();
+    let mut layout = mixrelay_control_protocol::GraphLayout::default();
+    layout.positions.insert(
+        initial.nodes[0].id.as_str().into(),
+        mixrelay_control_protocol::GraphNodePosition { x: 125.0, y: 250.0 },
+    );
+    layout.node_labels.insert(
+        format!("{}:input", initial.nodes[0].id.as_str()),
+        "회의용".into(),
+    );
+    engine
+        .update_graph_layout(
+            &catalog.active_id,
+            mixrelay_control_protocol::GraphLayoutRequest {
+                expected_layout_revision: catalog.layout_revision,
+                layout: layout.clone(),
+            },
+        )
+        .unwrap();
+    let path = dir.join("free.mix").to_string_lossy().into_owned();
+    engine
+        .workspace_operation(request(
+            &engine,
+            WorkspaceAction::Save { path: path.clone() },
+        ))
+        .unwrap();
+    engine
+        .workspace_operation(request(&engine, WorkspaceAction::New))
+        .unwrap();
+    let _processor = settle(&engine);
+    assert!(engine.graph().nodes.is_empty());
+    let open = request(&engine, WorkspaceAction::Open { path });
+    let preview = engine.preview_workspace(open.clone()).unwrap();
+    let mut open = open;
+    open.file_digest = preview.file_digest;
+    let loaded = engine.workspace_operation(open).unwrap();
+    let _processor = settle(&engine);
+    assert_eq!(loaded.document.nodes, initial.nodes);
+    assert_eq!(loaded.document.edges, initial.edges);
+    assert_eq!(loaded.layout, layout);
+    drop(engine);
+    let mut restarted = controller_with_inventory(GraphDocument::new(1, vec![], vec![]), &initial);
+    restarted.paid_access = std::sync::Arc::new(|| false);
+    let restarted = restarted.with_graph_catalog_path(catalog_path);
+    let _processor = settle(&restarted);
+    let restored = restarted.read_catalog().unwrap();
+    assert_eq!(restored.graphs.len(), 1);
+    assert_eq!(restored.document.nodes, initial.nodes);
+    assert_eq!(restored.document.edges, initial.edges);
+    assert_eq!(restored.layout, layout);
+}
+
+#[test]
+fn free_workspace_files_reject_multiple_graphs_and_excess_mappings_before_mutation() {
+    let dir = mixrelay_test_support::FixtureDir::new("free-import-limits").unwrap();
+    let catalog_path = dir.join("graphs.json");
+    let store = StateStore::new(dir.join("assets"));
+    let mut multiple = Catalog::imported(GraphDocument::new(1, vec![], vec![]));
+    let mut second = multiple.graphs[0].clone();
+    second.id = "graph-2".into();
+    multiple.graphs.push(second);
+    let mut mappings = crate::default_duplex_document(1, None);
+    let NodeConfig::VirtualEndpoint(endpoint) = &mut mappings.nodes[0].config else {
+        panic!("endpoint")
+    };
+    for stream in [&mut endpoint.spec.render, &mut endpoint.spec.capture] {
+        stream.as_mut().unwrap().channels = 64;
+        stream.as_mut().unwrap().channel_layout = mixrelay_audio_graph::ChannelLayout::Discrete;
+    }
+    mappings.edges.truncate(1);
+    mappings.edges[0].channel_mapping = mixrelay_audio_graph::ChannelMapping::Auto;
+    let mut explicit_mappings = mappings.clone();
+    explicit_mappings.edges[0].channel_mapping = five_route_mapping();
+    let mut plugins = Catalog::imported(GraphDocument::new(1, vec![], vec![]));
+    for id in ["one", "two", "three"] {
+        add_provider(&mut plugins, id, serde_json::json!({}));
+    }
+    let recorder = Catalog::imported(GraphDocument::new(
+        1,
+        vec![NodeSpec {
+            id: "record".into(),
+            label: None,
+            control: mixrelay_audio_graph::NodeControl::default(),
+            config: NodeConfig::Recorder { channels: 8 },
+        }],
+        vec![],
+    ));
+    let mut engine = controller_with_inventory(GraphDocument::new(1, vec![], vec![]), &mappings);
+    engine.paid_access = std::sync::Arc::new(|| false);
+    let engine = engine.with_graph_catalog_path(catalog_path.clone());
+    let before = engine.read_catalog().unwrap();
+    let bytes = std::fs::read(&catalog_path).unwrap();
+    let mut allowed_plugins = plugins.clone();
+    allowed_plugins.graphs[0].document.nodes.truncate(2);
+    allowed_plugins.graphs[0].layout.positions.remove("three");
+    assert!(
+        engine
+            .validate_workspace_feature_usage(&allowed_plugins)
+            .is_ok()
+    );
+    for (name, candidate, resource) in [
+        ("multiple", multiple, "graphs"),
+        ("mappings", Catalog::imported(mappings), "driverMappings"),
+        (
+            "explicit-mappings",
+            Catalog::imported(explicit_mappings),
+            "driverMappings",
+        ),
+        ("plugins", plugins, "externalPlugins"),
+        ("recorder", recorder, "recordingChannels"),
+    ] {
+        let file = dir.join(format!("{name}.mix"));
+        write_bundle_fixture(&file, candidate, &[], &store, 1);
+        let open = request(
+            &engine,
+            WorkspaceAction::Open {
+                path: file.to_string_lossy().into_owned(),
+            },
+        );
+        for error in [
+            engine.preview_workspace(open.clone()).unwrap_err(),
+            engine.workspace_operation(open).unwrap_err(),
+        ] {
+            assert_eq!(
+                error.code,
+                mixrelay_control_protocol::ErrorCode::FeatureLimit
+            );
+            assert_eq!(error.parameters["resource"], resource);
+        }
+        assert_eq!(engine.read_catalog().unwrap(), before);
+        assert_eq!(std::fs::read(&catalog_path).unwrap(), bytes);
+        assert_eq!(engine.exchange.revisions().submitted, 1);
+    }
+}
+
+#[test]
+fn saving_after_paid_expiry_cannot_export_a_multiple_graph_workspace_or_replace_a_file() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let dir = mixrelay_test_support::FixtureDir::new("expired-workspace-save").unwrap();
+    let path = dir.join("graphs.json");
+    let mut catalog = Catalog::imported(GraphDocument::new(1, vec![], vec![]));
+    let mut second = catalog.graphs[0].clone();
+    second.id = "graph-2".into();
+    catalog.graphs.push(second);
+    let bytes = serde_json::to_vec(&catalog).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    let paid = Arc::new(AtomicBool::new(true));
+    let mut engine = controller(GraphDocument::new(1, vec![], vec![]));
+    engine.paid_access = {
+        let paid = Arc::clone(&paid);
+        Arc::new(move || paid.load(Ordering::Acquire))
+    };
+    let engine = engine.with_graph_catalog_path(path.clone());
+    let _processor = settle(&engine);
+    let before = engine.read_catalog().unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    paid.store(false, Ordering::Release);
+    let target = dir.join("existing.mix");
+    std::fs::write(&target, b"existing export").unwrap();
+    let error = engine
+        .workspace_operation(request(
+            &engine,
+            WorkspaceAction::Save {
+                path: target.to_string_lossy().into_owned(),
+            },
+        ))
+        .unwrap_err();
+    assert_eq!(
+        error.code,
+        mixrelay_control_protocol::ErrorCode::FeatureLimit
+    );
+    assert_eq!(error.parameters["resource"], "graphs");
+    assert_eq!(std::fs::read(&target).unwrap(), b"existing export");
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(engine.read_catalog().unwrap(), before);
+}
+
+#[test]
+fn free_startup_protects_a_saved_multiple_graph_catalog_from_automatic_overwrite() {
+    let dir = mixrelay_test_support::FixtureDir::new("free-protected-catalog").unwrap();
+    let path = dir.join("graphs.json");
+    let mut catalog = Catalog::imported(GraphDocument::new(1, vec![], vec![]));
+    let mut second = catalog.graphs[0].clone();
+    second.id = "graph-2".into();
+    catalog.graphs.push(second);
+    let bytes = serde_json::to_vec(&catalog).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    let engine = free_controller(GraphDocument::new(1, vec![], vec![]))
+        .with_graph_catalog_path(path.clone());
+    let selected = engine.read_catalog().unwrap();
+    assert_eq!(selected.graphs.len(), 1);
+    engine
+        .update_graph_layout(
+            &selected.active_id,
+            mixrelay_control_protocol::GraphLayoutRequest {
+                expected_layout_revision: selected.layout_revision,
+                layout: mixrelay_control_protocol::GraphLayout::default(),
+            },
+        )
+        .unwrap();
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
 }
 
 #[test]

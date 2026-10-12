@@ -131,10 +131,11 @@ impl EngineGraphController {
                 Ok(())
             };
         }
-        self.stage_catalog(Some(&candidate))?
-            .expect("enabled catalog stages a file")
-            .commit()
-            .map_err(|error| unavailable(&error.to_string()))?;
+        if let Some(staged) = self.stage_catalog(Some(&candidate))? {
+            staged
+                .commit()
+                .map_err(|error| unavailable(&error.to_string()))?;
+        }
         *self.graph.write() = candidate.active_document().clone();
         self.commit_catalog_memory(Some(candidate));
         *self.catalog_write_error.lock() = None;

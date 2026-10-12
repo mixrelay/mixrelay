@@ -112,12 +112,22 @@ export interface NativeDeviceFormats {
 }
 
 export interface VirtualEndpointDevice {
+  /** Actual native I/O size observed by the runtime owning this endpoint. */
+  nativeBuffer?: NativeBufferSettings | null;
   nativeDeviceIds: string[];
   nativeFormats: NativeDeviceFormats;
   spec: VirtualEndpointSpec;
   observedSampleRate: number | null;
   supportedSampleRates: number[];
   canSetSampleRate: boolean;
+}
+
+export interface NativeBufferSettings {
+  currentFrames: number | null;
+  preferredFrames: number | null;
+  minimumFrames: number;
+  maximumFrames: number;
+  canSet: boolean;
 }
 
 export interface RuntimeStreamSpec {
@@ -241,6 +251,11 @@ export interface NodeMeterSnapshot {
   nodeId: string;
   peaks: number[];
   portId: string;
+  dynamics?: {
+    inputPeaks: number[];
+    gainReductionDb: number;
+    thresholdDb: number;
+  };
 }
 
 export interface MeterSnapshot {
@@ -299,6 +314,7 @@ export interface ExternalProcessorDiagnostic {
   format: ExternalProcessorDescriptor['format'];
   stage: 'scan' | 'probe';
   pluginId?: string;
+  pluginName?: string;
   message: string;
 }
 
@@ -365,6 +381,7 @@ export interface GraphApplyRequest extends RuntimeGraphDocument {
 }
 
 export type ProtocolErrorCode =
+  | 'feature_limit'
   | 'node_not_found'
   | 'node_disabled'
   | 'recorder_failed'
@@ -459,6 +476,13 @@ export interface ControlPort {
   ): Promise<RecorderSettings>;
   selectRecordingFolder?(options: { defaultPath?: string; title?: string }): Promise<string | null>;
   setVirtualEndpointSampleRate?(request: VirtualEndpointFormatRequest): Promise<GraphApplyResponse>;
+  setVirtualEndpointBufferFrames?(request: {
+    expectedRevision: number;
+    endpointId: string;
+    expectedBufferFrames: number | null;
+    expectedPreferredFrames: number | null;
+    bufferFrames: number;
+  }): Promise<GraphApplyResponse>;
   getGraphLayout?(graphId: string): Promise<GraphLayoutResponse>;
   setGraphLayout?(graphId: string, request: GraphLayoutRequest): Promise<GraphLayoutResponse>;
   getGraphCatalog?(): Promise<GraphCatalog>;
@@ -524,6 +548,8 @@ export interface GraphCatalog {
 
 /** Presentation-only metadata. Saving it must never submit or reprepare the audio graph. */
 export interface GraphLayout {
+  /** Display-only labels keyed by UI instance, including split endpoint cards. */
+  nodeLabels?: Record<string, string>;
   positions: Record<string, { x: number; y: number }>;
   sizes?: Record<string, { width: number; height: number }>;
   viewport?: { x: number; y: number; zoom: number };

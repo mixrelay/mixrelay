@@ -7,7 +7,7 @@ const meta = {
   title: 'Core/Feedback/ShortcutTooltip',
   component: ShortcutTooltip,
   args: {
-    children: <ActionButton variant="transparent">New graph</ActionButton>,
+    children: <ActionButton>New graph</ActionButton>,
     shortcut: 'Mod+N',
   },
 } satisfies Meta<typeof ShortcutTooltip>;

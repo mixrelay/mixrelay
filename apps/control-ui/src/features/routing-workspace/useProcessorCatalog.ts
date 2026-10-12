@@ -98,12 +98,12 @@ class CatalogSession {
 /** Preserve the last catalog on failure; cancellation never pretends a scan succeeded. */
 export function useProcessorCatalog(controlPort: CatalogPort) {
   const [state, setState] = useState(initialState);
-  const request = useRef<(action?: CatalogAction) => void>(() => undefined);
+  const request = useRef<((action?: CatalogAction) => void) | null>(null);
   const refresh = useCallback(
-    (directory: boolean) => request.current(directory ? 'directory' : 'scan'),
+    (directory: boolean) => request.current?.(directory ? 'directory' : 'scan'),
     [],
   );
-  const retry = useCallback(() => request.current(), []);
+  const retry = useCallback(() => request.current?.(), []);
   useEffect(() => {
     setState(initialState);
     const session = new CatalogSession(controlPort, (patch) =>
@@ -115,7 +115,7 @@ export function useProcessorCatalog(controlPort: CatalogPort) {
     void session.run('initial');
     return () => {
       session.dispose();
-      request.current = () => undefined;
+      request.current = null;
     };
   }, [controlPort]);
   return { ...state, refresh, retry };

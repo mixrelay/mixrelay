@@ -5,6 +5,8 @@ use std::{
 
 use parking_lot::{Mutex, RwLock};
 mod engine_power;
+mod feature_policy;
+mod meter_snapshot;
 mod node_control;
 mod node_control_snapshot;
 mod recorder_control;
@@ -55,6 +57,8 @@ mod processor_recovery;
 mod processor_timing;
 pub use control_maintenance::ControlMaintenance;
 pub mod catalog_execution;
+mod endpoint_buffer;
+pub mod endpoint_buffer_preferences;
 mod endpoint_format;
 #[cfg(test)]
 mod endpoint_format_tests;
@@ -132,6 +136,30 @@ pub trait GraphResourceBackend: Send + Sync {
     ) -> Result<Vec<mixrelay_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
         Err(HostAudioBackendError::CapabilityUnavailable {
             capability: "native device identity resolution".into(),
+        })
+    }
+
+    /// Reads this runtime's actual I/O client buffer for an owned virtual device.
+    fn virtual_endpoint_buffer(
+        &self,
+        _id: &mixrelay_audio_io::VirtualEndpointId,
+    ) -> Option<mixrelay_audio_io::NativeBufferSettings> {
+        None
+    }
+
+    /// Applies one native client setting, verifies readback and saves runtime intent.
+    /// # Errors
+    /// Rejects unsupported owners, stale buffer values and failed native writes.
+    /// A successful native change returns an optional persistence error.
+    fn set_virtual_endpoint_buffer(
+        &self,
+        _id: &mixrelay_audio_io::VirtualEndpointId,
+        _expected: Option<u32>,
+        _expected_preferred: Option<u32>,
+        _frames: u32,
+    ) -> Result<Option<String>, HostAudioBackendError> {
+        Err(HostAudioBackendError::CapabilityUnavailable {
+            capability: "virtual device I/O client buffer control".into(),
         })
     }
 
@@ -305,6 +333,7 @@ impl RuntimeStatusBackend for FixedRuntimeStatus {
             buffer_frames: ready.then_some(format.block_frames),
             underruns: 0,
             overruns: 0,
+            sample_faults: mixrelay_audio_io::process::SampleFaults::default(),
             audio_session: None,
         }
     }
@@ -421,7 +450,9 @@ enum PrepareProcessorError {
 }
 
 pub struct EngineGraphController {
+    paid_access: Arc<dyn Fn() -> bool + Send + Sync>,
     execution_enabled: std::sync::atomic::AtomicBool,
+    suspended_recorders: Mutex<Vec<engine_power::SuspendedRecorder>>,
     recorder_cleanup_error: Mutex<Option<String>>,
     node_control_warning: Mutex<Option<String>>,
     recorders: mixrelay_audio_recorder::RecorderRegistry,
@@ -441,6 +472,7 @@ pub struct EngineGraphController {
     execution_views: RwLock<BTreeMap<u64, execution_control::ExecutionView>>,
     control_snapshot: RwLock<Option<node_control_snapshot::ControlReadView>>,
     meters: Arc<PeakMeterBank>,
+    meter_publisher: Mutex<meter_snapshot::MeterPublisher>,
     processor_catalog: ProcessorCatalog,
     processor_controls: ProcessorControlRegistry,
     graph_resources: Arc<dyn GraphResourceBackend>,
@@ -550,9 +582,11 @@ impl EngineGraphController {
         let processor_controls = ProcessorControlRegistry::default();
         let recorders = mixrelay_audio_recorder::RecorderRegistry::default();
         let controller = Self {
+            paid_access: feature_policy::default_access_provider(),
             recorder_cleanup_error: Mutex::new(None),
             node_control_warning: Mutex::new(None),
             execution_enabled: std::sync::atomic::AtomicBool::new(true),
+            suspended_recorders: Mutex::new(Vec::new()),
             recorders: recorders.clone(),
             exchange,
             factory: Arc::new(BuiltInProcessorFactory {
@@ -580,6 +614,7 @@ impl EngineGraphController {
             meter_bindings: RwLock::new(meter_bindings),
             execution_views: RwLock::new(BTreeMap::new()),
             control_snapshot: RwLock::new(None),
+            meter_publisher: Mutex::new(meter_snapshot::MeterPublisher::new(Arc::clone(&meters))),
             meters,
             processor_catalog,
             processor_controls,
@@ -774,6 +809,10 @@ impl ControlBackend for EngineGraphController {
             }
         }
         let request = request.request;
+        let free = !self.is_paid();
+        if free && request.action == mixrelay_audio_recorder::RecorderAction::Record {
+            self.validate_free_record_start(graph_id, node_id, &id)?;
+        }
         if matches!(
             request.action,
             mixrelay_audio_recorder::RecorderAction::Stop
@@ -803,7 +842,11 @@ impl ControlBackend for EngineGraphController {
             }
         }
         self.recorders
-            .command(id.as_str(), request)
+            .command_with_duration_limit(
+                id.as_str(),
+                request,
+                free.then_some(feature_policy::FREE_RECORDING_SECONDS),
+            )
             .map_err(recorder_control::recorder_error)
     }
     fn application_capture_manifest(
@@ -824,6 +867,13 @@ impl ControlBackend for EngineGraphController {
     ) -> Result<GraphApplyResponse, ProtocolError> {
         self.change_endpoint_format(&request)
     }
+    fn reconfigure_virtual_endpoint_buffer(
+        &self,
+        request: mixrelay_control_protocol::VirtualEndpointBufferRequest,
+    ) -> Result<GraphApplyResponse, ProtocolError> {
+        self.change_endpoint_buffer(&request)
+    }
+
     fn graph_layout(
         &self,
         id: &str,
@@ -896,45 +946,7 @@ impl ControlBackend for EngineGraphController {
     }
 
     fn meters(&self) -> MeterSnapshot {
-        let catalog = self.catalog.lock();
-        let graph_id = catalog
-            .as_ref()
-            .and_then(|store| store.value.as_ref().ok())
-            .map_or("session", |catalog| catalog.selected_id());
-        let bindings = self.meter_bindings.read();
-        let views = self.execution_views.read();
-        // Read guards retain the active layout while native mutations prepare another plan.
-        let revision = self.exchange.plan_revisions().active;
-        let view = views.get(&revision);
-        let snapshot_revision = view.map_or(revision, |view| {
-            revision.max(view.controls.applied_revision())
-        });
-        let nodes = bindings
-            .get(&revision)
-            .into_iter()
-            .flatten()
-            .enumerate()
-            .filter_map(|(index, binding)| {
-                // Drain hidden meters too: selecting a graph must not expose old peaks.
-                let peaks = self.meters.take_peaks(revision, index, binding.channels());
-                let origin = view?.origins.get(binding.node_id())?;
-                (origin.graph_id == graph_id).then(|| NodeMeterSnapshot {
-                    node_id: origin.node_id.as_str().to_owned(),
-                    port_id: origin
-                        .meter_port
-                        .as_ref()
-                        .unwrap_or(binding.port_id())
-                        .as_str()
-                        .to_owned(),
-                    peaks,
-                })
-            })
-            .collect();
-        MeterSnapshot {
-            protocol_version: PROTOCOL_VERSION,
-            revision: snapshot_revision,
-            nodes,
-        }
+        self.meter_snapshot_at(std::time::Instant::now())
     }
 
     fn processors(&self) -> ExternalProcessorCatalog {
@@ -1085,6 +1097,7 @@ impl ControlBackend for EngineGraphController {
         let _mutation = self.mutation.lock();
         let reuse = self.processor_controls.reuse_transaction();
         let mut document = request.document;
+        self.validate_feature_usage(&document, self.catalog_candidate(&document).as_ref())?;
         self.preserve_live_processor_state(&mut document, &request.processor_parameter_changes)?;
         let catalog = self.catalog_candidate(&document);
         let result = self.apply_graph_locked(document, catalog)?;
@@ -1175,6 +1188,7 @@ impl EngineGraphController {
         mut catalog: Option<graph_catalog::Catalog>,
     ) -> Result<GraphApplyResponse, ProtocolError> {
         let reuse = self.processor_controls.reuse_transaction();
+        self.validate_feature_usage(&document, catalog.as_ref())?;
         self.validate_recorder_channel_change(&document)?;
         if let Some(candidate) = &mut catalog {
             self.reconcile_catalog_devices(candidate)?;
@@ -1213,6 +1227,7 @@ impl EngineGraphController {
                 }),
             });
         }
+        self.validate_feature_usage(&document, catalog.as_ref())?;
         let revision = document.revision;
         // Reject known durability failures before preparing native workers or streams.
         // The temporary document is still unpublished and drops on any later failure.
@@ -1287,6 +1302,89 @@ impl EngineGraphController {
 }
 
 impl EngineGraphController {
+    fn meter_snapshot_at(&self, now: std::time::Instant) -> MeterSnapshot {
+        use std::sync::atomic::Ordering;
+        let catalog = self.catalog.lock();
+        let graph_id = catalog
+            .as_ref()
+            .and_then(|store| store.value.as_ref().ok())
+            .map_or("session", |catalog| catalog.selected_id());
+        let bindings = self.meter_bindings.read();
+        let views = self.execution_views.read();
+        let revisions = self.exchange.plan_revisions();
+        let view = views.get(&revisions.active);
+        let applied_revision = view.map_or(revisions.active, |view| {
+            revisions.active.max(view.controls.applied_revision())
+        });
+        let key = meter_snapshot::MeterKey {
+            graph_id: graph_id.to_owned(),
+            plan_revision: revisions.active,
+            submitted_revision: revisions.submitted,
+            applied_revision,
+            enabled: self.execution_enabled.load(Ordering::Acquire),
+        };
+        let valid = || {
+            self.exchange.plan_revisions() == revisions
+                && view.is_none_or(|view| {
+                    revisions.active.max(view.controls.applied_revision()) == applied_revision
+                })
+                && self.execution_enabled.load(Ordering::Acquire) == key.enabled
+        };
+        self.meter_publisher.lock().read(
+            now,
+            key.clone(),
+            |measured| {
+                let nodes = bindings
+                    .get(&revisions.active)
+                    .into_iter()
+                    .flatten()
+                    .enumerate()
+                    .filter_map(|(index, binding)| {
+                        // Only this publisher drains. Hidden graph bindings are also consumed.
+                        let peaks = if measured {
+                            self.meters
+                                .take_peaks(applied_revision, index, binding.channels())
+                        } else {
+                            vec![0.0; usize::from(binding.channels())]
+                        };
+                        let dynamics = (measured && binding.has_dynamics())
+                            .then(|| {
+                                self.meters.take_dynamics(
+                                    applied_revision,
+                                    index,
+                                    binding.channels(),
+                                )
+                            })
+                            .flatten()
+                            .map(|reading| mixrelay_control_protocol::DynamicsMeterSnapshot {
+                                input_peaks: reading.input_peaks,
+                                gain_reduction_db: reading.gain_reduction_db,
+                                threshold_db: reading.threshold_db,
+                            });
+                        let origin = view?.origins.get(binding.node_id())?;
+                        (origin.graph_id == graph_id).then(|| NodeMeterSnapshot {
+                            node_id: origin.node_id.as_str().to_owned(),
+                            port_id: origin
+                                .meter_port
+                                .as_ref()
+                                .unwrap_or(binding.port_id())
+                                .as_str()
+                                .to_owned(),
+                            peaks,
+                            dynamics,
+                        })
+                    })
+                    .collect();
+                MeterSnapshot {
+                    protocol_version: PROTOCOL_VERSION,
+                    revision: applied_revision,
+                    nodes,
+                }
+            },
+            valid,
+        )
+    }
+
     /// Publishes read-side metadata after native preparation, before the exchange exposes a plan.
     fn publish_execution_metadata(
         &self,

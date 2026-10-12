@@ -48,9 +48,10 @@ use vst3::Steinberg::Vst::{
     ProcessData, ProcessModes_, ProcessSetup, SymbolicSampleSizes_, ViewType,
 };
 use vst3::Steinberg::{
-    IPlugView, IPlugViewTrait, IPluginBase, IPluginBaseTrait, IPluginFactory, IPluginFactoryTrait,
-    PClassInfo, PClassInfo_, TUID, ViewRect, kPlatformTypeHWND, kPlatformTypeNSView,
-    kPlatformTypeX11EmbedWindowID, kResultOk, kResultTrue,
+    IPlugView, IPlugViewTrait, IPluginBase, IPluginBaseTrait, IPluginFactory, IPluginFactory2,
+    IPluginFactory2Trait, IPluginFactoryTrait, PClassInfo, PClassInfo_, PClassInfo2, TUID,
+    ViewRect, kPlatformTypeHWND, kPlatformTypeNSView, kPlatformTypeX11EmbedWindowID, kResultOk,
+    kResultTrue,
 };
 use vst3::{Class, ComPtr, ComWrapper};
 
@@ -253,6 +254,7 @@ fn scan_bundle_error(bundle: &Path, error: &Error) -> Error {
 fn scan_bundle_into(bundle: &Path, out: &mut Vec<PluginInfo>) -> Result<()> {
     let module = unsafe { LoadedModule::open(bundle) }?;
     let factory = module.factory()?;
+    let factory2 = factory.as_com_ref().cast::<IPluginFactory2>();
     let count = unsafe { factory.countClasses() };
     if count < 0 {
         return Err(Error::Other(format!(
@@ -274,19 +276,46 @@ fn scan_bundle_into(bundle: &Path, out: &mut Vec<PluginInfo>) -> Result<()> {
             continue;
         }
         let name = char8_array_to_string(&info.name);
+        // Audio Module Class includes instruments. Use the extended class metadata before
+        // loading any instances so an instrument is not probed as an insert effect.
+        // SAFETY: PClassInfo2 contains only integers and fixed-size integer arrays.
+        let mut extended: PClassInfo2 = unsafe { std::mem::zeroed() };
+        let has_extended = factory2.as_ref().is_some_and(|factory| {
+            (unsafe { factory.getClassInfo2(idx, &raw mut extended) }) == kResultOk
+        });
+        let category = if has_extended {
+            class_category(&char8_array_to_string(&extended.subCategories))
+        } else {
+            PluginCategory::Effect
+        };
         out.push(PluginInfo {
             name,
-            vendor: String::new(),
+            vendor: if has_extended {
+                char8_array_to_string(&extended.vendor)
+            } else {
+                String::new()
+            },
             version: 0,
-            category: PluginCategory::Effect,
+            category,
             path: bundle.to_path_buf(),
             unique_id: tuid_to_hex(&info.cid),
             format: FORMAT,
             has_editor: false,
-            accepts_midi: false,
+            accepts_midi: category == PluginCategory::Instrument,
         });
     }
     Ok(())
+}
+
+fn class_category(subcategories: &str) -> PluginCategory {
+    if subcategories
+        .split('|')
+        .any(|category| category == "Instrument")
+    {
+        PluginCategory::Instrument
+    } else {
+        PluginCategory::Effect
+    }
 }
 
 fn empty_pclass_info() -> PClassInfo {
@@ -778,13 +807,11 @@ impl Vst3Plugin {
             processor,
             lifecycle: mut component_lifecycle,
         } = load_component(&context, &cid)?;
-        let mut controller_cid: TUID = [0; 16];
-        let cls_id_status = unsafe { component.getControllerClassId(&raw mut controller_cid) };
         let ControllerParts {
             controller,
             separate,
             lifecycle: mut controller_lifecycle,
-        } = load_controller(&context, &component, &controller_cid, cls_id_status)?;
+        } = load_controller(&context, &component)?;
 
         if !separate {
             host_services
@@ -1019,11 +1046,20 @@ fn load_component(context: &LoadContext<'_>, cid: &TUID) -> Result<ComponentPart
 fn load_controller(
     context: &LoadContext<'_>,
     component: &ComPtr<IComponent>,
-    cid: &TUID,
-    status: i32,
 ) -> Result<ControllerParts> {
+    // A combined component exposes its controller directly and need not return a class ID.
+    // Query it first, matching the SDK host's PlugProvider initialization sequence.
+    if let Some(controller) = component.as_com_ref().cast::<IEditController>() {
+        return Ok(ControllerParts {
+            controller,
+            separate: false,
+            lifecycle: None,
+        });
+    }
+    let mut cid: TUID = [0; 16];
+    let status = unsafe { component.getControllerClassId(&raw mut cid) };
     if status == kResultTrue {
-        let controller = unsafe { create_instance::<IEditController>(context.factory, cid) }
+        let controller = unsafe { create_instance::<IEditController>(context.factory, &cid) }
             .ok_or_else(|| Error::LoadFailed {
                 path: context.info.path.clone(),
                 reason: "factory.createInstance(IEditController) returned NULL".into(),
@@ -1045,20 +1081,12 @@ fn load_controller(
     if status != vst3::Steinberg::kResultFalse {
         return Err(Error::LoadFailed {
             path: context.info.path.clone(),
-            reason: "IComponent::getControllerClassId failed".into(),
+            reason: format!("IComponent::getControllerClassId failed ({status})"),
         });
     }
-    let controller = component
-        .as_com_ref()
-        .cast::<IEditController>()
-        .ok_or_else(|| Error::LoadFailed {
-            path: context.info.path.clone(),
-            reason: "component reported no separate controller but lacks IEditController".into(),
-        })?;
-    Ok(ControllerParts {
-        controller,
-        separate: false,
-        lifecycle: None,
+    Err(Error::LoadFailed {
+        path: context.info.path.clone(),
+        reason: "component reported no separate controller but lacks IEditController".into(),
     })
 }
 
@@ -1837,6 +1865,21 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn factory_subcategories_distinguish_instruments_from_insert_effects() {
+        assert_eq!(
+            class_category("Instrument|Sampler"),
+            PluginCategory::Instrument
+        );
+        assert_eq!(
+            class_category("Fx|Instrument|Sampler"),
+            PluginCategory::Instrument
+        );
+        assert_eq!(class_category("Fx|Dynamics"), PluginCategory::Effect);
+        assert_eq!(class_category("Fx|Instrumental"), PluginCategory::Effect);
+        assert_eq!(class_category(""), PluginCategory::Effect);
+    }
 
     struct ScannerFixture {
         root: PathBuf,

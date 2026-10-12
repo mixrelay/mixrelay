@@ -80,6 +80,7 @@ impl CompensationTopology {
                 NodeConfig::AudioDeviceOutput(_) | NodeConfig::Recorder { .. } => LatencyNode::Sink,
                 NodeConfig::Provider(_) => LatencyNode::Processing(None),
                 NodeConfig::Compressor(_)
+                | NodeConfig::Effect(_)
                 | NodeConfig::Limiter(_)
                 | NodeConfig::Mixer(_)
                 | NodeConfig::Gain(_) => LatencyNode::Processing(Some(0)),

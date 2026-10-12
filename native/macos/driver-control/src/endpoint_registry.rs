@@ -2,7 +2,9 @@
 //!
 //! A callback receives an immutable pinned handle before rendering starts. It
 //! never discovers an endpoint through a global pointer or locks this registry.
-//! Retired mappings remain owned here until explicit control-thread collection.
+//! Retired mappings remain owned here until control-thread collection or preparation.
+#[path = "endpoint_registry/budget.rs"]
+mod budget;
 #[path = "endpoint_registry/inventory.rs"]
 mod inventory;
 #[path = "endpoint_registry/mapping.rs"]
@@ -106,7 +108,7 @@ impl EndpointRegistry {
             })
     }
 
-    /// The only normal retirement reclamation point. Run on the control thread.
+    /// Reclaims retired storage on the control thread; preparation also collects it.
     pub(crate) fn collect(&self) -> usize {
         let mut state = self.state.lock();
         let before = state.retired.len();

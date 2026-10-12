@@ -15,7 +15,10 @@ const graph: RuntimeGraphDocument = {
       label: null,
       config: {
         typeId: 'vst3:test',
-        parameters: { stateRef: { sha256: 'b'.repeat(64), byteLength: 9 }, parameterValues: { '1': 0.7, '2': 0.8 } },
+        parameters: {
+          stateRef: { sha256: 'b'.repeat(64), byteLength: 9 },
+          parameterValues: { '1': 0.7, '2': 0.8 },
+        },
       },
     },
   ],
@@ -24,9 +27,13 @@ const intent = [{ nodeId: 'p', typeId: 'vst3:test', parameterId: 1, value: 0.3 }
 const request: GraphApplyRequest = { ...graph, revision: 2, processorParameterChanges: intent };
 
 it('HTTP forwards explicit intent and state references without changing document fields', async () => {
-  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
-    protocolVersion: 1, revision: 2, state: 'active',
-  }));
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+    Response.json({
+      protocolVersion: 1,
+      revision: 2,
+      state: 'active',
+    }),
+  );
   await new HttpControlPort('http://control', fetcher).applyGraph(request);
   expect(fetcher).toHaveBeenCalledWith('http://control/api/v1/graph', {
     method: 'PUT',
@@ -67,7 +74,10 @@ const stale: RuntimeGraphDocument = {
       label: null,
       config: {
         typeId: 'vst3:test',
-        parameters: { stateRef: { sha256: 'a'.repeat(64), byteLength: 8 }, parameterValues: { '1': 0.1, '2': 0.2 } },
+        parameters: {
+          stateRef: { sha256: 'a'.repeat(64), byteLength: 8 },
+          parameterValues: { '1': 0.1, '2': 0.2 },
+        },
       },
     },
   ],

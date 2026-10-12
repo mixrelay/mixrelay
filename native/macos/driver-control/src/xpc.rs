@@ -149,7 +149,7 @@ pub(crate) unsafe extern "C" fn mr_driver_service_accept_peer(peer: Object) -> b
     if peers.values.iter().any(|entry| entry.object.raw() == peer) {
         return true;
     }
-    if peers.values.len() == 128 {
+    if peers.values.len() >= 128 || peers.values.try_reserve(1).is_err() {
         return false;
     }
     // SAFETY: listener callback retains its borrowed peer throughout this call.

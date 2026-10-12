@@ -47,27 +47,22 @@ fn empty_publication_is_not_current() {
 }
 
 #[test]
-fn driver_update_does_not_accept_an_app_catalog_or_report_failures_as_current() {
+fn product_update_never_reports_unpublished_or_failed_checks_as_current() {
     for source in [
         Err(UpdateError::Unavailable),
         Ok(Catalog {
-            product: Product::MixRelayDriver,
+            product: Product::MixRelay,
             latest: LatestVersion::Empty(()),
             releases: Vec::new(),
         }),
-        Ok(catalog(
-            Product::MixRelay,
-            "1.2.10",
-            vec![download("macos", "universal")],
-        )),
     ] {
         let update = product_update(
-            Product::MixRelayDriver,
+            Product::MixRelay,
             Some("0.1.0".into()),
             platform("macos", "arm64"),
             source,
         );
-        assert_eq!(update.product, Product::MixRelayDriver);
+        assert_eq!(update.product, Product::MixRelay);
         assert!(matches!(
             update.state(),
             UpdateState::Unavailable | UpdateState::NotPublished
@@ -153,11 +148,6 @@ fn missing_malformed_or_inapplicable_release_is_unavailable() {
         absent_release,
         catalog(Product::MixRelay, "1.2.10", vec![]),
         catalog(Product::MixRelay, "1.2.10", vec![download("linux", "x64")]),
-        catalog(
-            Product::MixRelayDriver,
-            "1.2.10",
-            vec![download("macos", "arm64")],
-        ),
         catalog(Product::MixRelay, "1.2.10", vec![invalid_asset]),
         catalog(
             Product::MixRelay,
@@ -198,11 +188,11 @@ fn download_urls_require_https_without_credentials() {
 #[test]
 fn unknown_driver_version_reports_publication_without_inventing_app_version() {
     let update = product_update(
-        Product::MixRelayDriver,
+        Product::MixRelay,
         None,
         platform("linux", "x64"),
         Ok(catalog(
-            Product::MixRelayDriver,
+            Product::MixRelay,
             "1.2.10",
             vec![download("linux", "x64")],
         )),
@@ -210,7 +200,7 @@ fn unknown_driver_version_reports_publication_without_inventing_app_version() {
     assert_eq!(update.state, UpdateState::Published);
     assert!(update.installed_version.is_none());
     let serialized = serde_json::to_value(update).expect("serializable contract");
-    assert_eq!(serialized["product"], "mix-relay-driver");
+    assert_eq!(serialized["product"], "mix-relay");
     assert_eq!(serialized["installedVersion"], serde_json::Value::Null);
     assert_eq!(serialized["latestVersion"], "1.2.10");
     assert!(serialized.get("notesUrl").is_some());
@@ -226,11 +216,11 @@ fn product_failure_does_not_suppress_other_product() {
         Err(UpdateError::Unavailable),
     );
     let driver = product_update(
-        Product::MixRelayDriver,
+        Product::MixRelay,
         Some("0.1.0".into()),
         platform,
         Ok(catalog(
-            Product::MixRelayDriver,
+            Product::MixRelay,
             "1.2.10",
             vec![download("macos", "universal")],
         )),
@@ -309,4 +299,15 @@ async fn response_body_limit_checks_declared_and_streamed_size() {
         ));
         server.await.expect("fixture server");
     }
+}
+
+#[test]
+fn retired_separate_product_cannot_be_checked_or_downloaded() {
+    assert!(serde_json::from_str::<Product>(r#""mix-relay-driver""#).is_err());
+    assert!(
+        serde_json::from_str::<Catalog>(
+            r#"{"product":"mix-relay-driver","latest":null,"releases":[]}"#
+        )
+        .is_err()
+    );
 }

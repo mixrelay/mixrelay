@@ -160,13 +160,6 @@ impl LicensingState {
         self.update(now, |vault| Ok(vault.record.observe(now)))
     }
 
-    pub(crate) fn allows_mutation(&self, now: u64) -> bool {
-        self.vault.lock().is_ok_and(|held| {
-            held.as_ref()
-                .is_some_and(|vault| super::allows_audio(&vault.record.access_at(now)))
-        })
-    }
-
     pub(super) fn saved_activation(
         &self,
     ) -> Result<Option<(SecretString, Activation)>, LicenseError> {

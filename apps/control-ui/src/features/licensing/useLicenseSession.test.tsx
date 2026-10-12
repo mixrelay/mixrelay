@@ -4,13 +4,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LicensingPort, LicensingStatus } from '../../core/licensing/LicensingPort';
 import { useLicenseSession } from './useLicenseSession';
 
-const trial: LicensingStatus = {
-  status: 'trial',
+const free: LicensingStatus = {
+  status: 'free',
   expiresAtUnix: 1_800_000_000,
-  remainingDays: 8,
+  remainingDays: 0,
   configured: true,
 };
-const expired: LicensingStatus = { ...trial, status: 'expired', remainingDays: 0 };
+const deactivated: LicensingStatus = { ...free, status: 'free', remainingDays: 0 };
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -55,7 +55,7 @@ describe('useLicenseSession without a native port', () => {
       initialProps: { value: initialPort as LicensingPort | null },
     });
     rerender({ value: null });
-    await act(async () => pending.resolve(trial));
+    await act(async () => pending.resolve(free));
     await act(async () => {
       expect(await result.current.run(async () => undefined)).toBe(true);
     });
@@ -66,7 +66,7 @@ describe('useLicenseSession without a native port', () => {
 describe('useLicenseSession scheduling', () => {
   it('skips a timed read while an operation is busy and blocks duplicate operations', async () => {
     vi.useFakeTimers();
-    const native = port(vi.fn().mockResolvedValue(trial));
+    const native = port(vi.fn().mockResolvedValue(free));
     const pending = deferred<LicensingStatus>();
     const action = vi.fn().mockReturnValue(pending.promise);
     const { result } = renderHook(() => useLicenseSession(native));
@@ -82,7 +82,7 @@ describe('useLicenseSession scheduling', () => {
     expect(native.getStatus).toHaveBeenCalledTimes(1);
     expect(action).toHaveBeenCalledTimes(1);
     await act(async () => {
-      pending.resolve(trial);
+      pending.resolve(free);
       expect(await first).toBe(true);
     });
   });
@@ -93,7 +93,7 @@ describe('useLicenseSession scheduling', () => {
       vi.useFakeTimers();
       const timedRead = deferred<LicensingStatus>();
       const native = port(
-        vi.fn().mockResolvedValueOnce(trial).mockReturnValueOnce(timedRead.promise),
+        vi.fn().mockResolvedValueOnce(free).mockReturnValueOnce(timedRead.promise),
       );
       const mutation = deferred<LicensingStatus>();
       const { result } = renderHook(() => useLicenseSession(native));
@@ -104,13 +104,13 @@ describe('useLicenseSession scheduling', () => {
         operation = result.current.run(() => mutation.promise);
       });
       await act(async () => {
-        if (outcome === 'resolve') timedRead.resolve(expired);
+        if (outcome === 'resolve') timedRead.resolve(deactivated);
         else timedRead.reject('storage_unavailable');
       });
-      expect(result.current.status).toEqual(trial);
+      expect(result.current.status).toEqual(free);
       expect(result.current.error).toBeNull();
       await act(async () => {
-        mutation.resolve(trial);
+        mutation.resolve(free);
         await operation;
       });
     },
@@ -123,17 +123,17 @@ describe('useLicenseSession cancellation', () => {
     async (outcome) => {
       const pending = deferred<LicensingStatus>();
       const oldPort = port(vi.fn().mockReturnValue(pending.promise));
-      const nextPort = port(vi.fn().mockResolvedValue(trial));
+      const nextPort = port(vi.fn().mockResolvedValue(free));
       const { result, rerender } = renderHook(({ value }) => useLicenseSession(value), {
         initialProps: { value: oldPort },
       });
       rerender({ value: nextPort });
       await act(async () => Promise.resolve());
       await act(async () => {
-        if (outcome === 'resolve') pending.resolve(expired);
+        if (outcome === 'resolve') pending.resolve(deactivated);
         else pending.reject('storage_unavailable');
       });
-      expect(result.current.status).toEqual(trial);
+      expect(result.current.status).toEqual(free);
       expect(result.current.error).toBeNull();
     },
   );
@@ -141,8 +141,8 @@ describe('useLicenseSession cancellation', () => {
   it.each(['resolve', 'reject'])(
     'ignores a late %s mutation from the previous port',
     async (outcome) => {
-      const oldPort = port(vi.fn().mockResolvedValue(trial));
-      const nextPort = port(vi.fn().mockResolvedValue(expired));
+      const oldPort = port(vi.fn().mockResolvedValue(free));
+      const nextPort = port(vi.fn().mockResolvedValue(deactivated));
       const pending = deferred<LicensingStatus>();
       const { result, rerender } = renderHook(({ value }) => useLicenseSession(value), {
         initialProps: { value: oldPort },
@@ -154,24 +154,73 @@ describe('useLicenseSession cancellation', () => {
       });
       rerender({ value: nextPort });
       await act(async () => {
-        if (outcome === 'resolve') pending.resolve(trial);
+        if (outcome === 'resolve') pending.resolve(free);
         else pending.reject('rejected');
         expect(await operation).toBe(false);
       });
-      expect(result.current.status).toEqual(expired);
+      expect(result.current.status).toEqual(deactivated);
     },
   );
 });
 
 describe('useLicenseSession reconciliation', () => {
+  it('returns to the reconciled local free state after a rejected paid validation', async () => {
+    const native = port(
+      vi
+        .fn()
+        .mockResolvedValueOnce({ ...free, status: 'licensed' })
+        .mockResolvedValueOnce(free),
+    );
+    const { result } = renderHook(() => useLicenseSession(native));
+    await act(async () => Promise.resolve());
+    await act(async () => {
+      expect(await result.current.run(() => Promise.reject<void>('rejected'))).toBe(false);
+    });
+    expect(result.current.status).toEqual(free);
+    expect(result.current.error).toBe('rejected');
+    expect(result.current.busy).toBe(false);
+  });
+
+  it('shows a failed local reconciliation without retaining an outdated paid state', async () => {
+    const native = port(
+      vi
+        .fn()
+        .mockResolvedValueOnce({ ...free, status: 'licensed' })
+        .mockRejectedValueOnce('storage_unavailable'),
+    );
+    const { result } = renderHook(() => useLicenseSession(native));
+    await act(async () => Promise.resolve());
+    await act(async () => {
+      expect(await result.current.run(() => Promise.reject<void>('wrong_product'))).toBe(false);
+    });
+    expect(result.current.status).toBeNull();
+    expect(result.current.error).toBe('storage_unavailable');
+    expect(result.current.busy).toBe(false);
+  });
+
+  it('preserves the current free state and resumes local polling after a transient failure', async () => {
+    vi.useFakeTimers();
+    const native = port(vi.fn().mockResolvedValue(free));
+    const { result } = renderHook(() => useLicenseSession(native));
+    await act(async () => Promise.resolve());
+    await act(async () => {
+      expect(await result.current.run(() => Promise.reject<void>('unavailable'))).toBe(false);
+    });
+    expect(result.current.status).toEqual(free);
+    expect(result.current.error).toBe('unavailable');
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(native.getStatus).toHaveBeenCalledTimes(2);
+    expect(result.current.error).toBeNull();
+  });
+
   it.each(['resolve', 'reject'])(
     'ignores a late %s local reconciliation from the previous port',
     async (outcome) => {
       const pending = deferred<LicensingStatus>();
       const oldPort = port(
-        vi.fn().mockResolvedValueOnce(trial).mockReturnValueOnce(pending.promise),
+        vi.fn().mockResolvedValueOnce(free).mockReturnValueOnce(pending.promise),
       );
-      const nextPort = port(vi.fn().mockResolvedValue(expired));
+      const nextPort = port(vi.fn().mockResolvedValue(deactivated));
       const { result, rerender } = renderHook(({ value }) => useLicenseSession(value), {
         initialProps: { value: oldPort },
       });
@@ -184,11 +233,11 @@ describe('useLicenseSession reconciliation', () => {
       expect(oldPort.getStatus).toHaveBeenCalledTimes(2);
       rerender({ value: nextPort });
       await act(async () => {
-        if (outcome === 'resolve') pending.resolve(trial);
+        if (outcome === 'resolve') pending.resolve(free);
         else pending.reject('storage_unavailable');
         expect(await operation).toBe(false);
       });
-      expect(result.current.status).toEqual(expired);
+      expect(result.current.status).toEqual(deactivated);
     },
   );
 });

@@ -15,7 +15,7 @@ it.each(['Record', '녹음', '[Record]'])(
     const button = screen.getByRole('button', { name: label });
     expect(button.textContent).toBe('');
     expect(button.querySelector('circle')).not.toBeNull();
-    fireEvent.focus(button);
+    button.focus();
     expect(await screen.findByRole('tooltip')).toHaveTextContent(label);
     fireEvent.click(button);
     expect(click).toHaveBeenCalledTimes(1);
@@ -44,7 +44,7 @@ it.each(['record', 'pause', 'stop', 'resume'] as const)(
     );
     const button = screen.getByRole('button', { name: icon });
     expect(button).toHaveAttribute('data-transport', icon);
-    expect(button).toHaveAttribute('data-variant', 'default');
+    expect(button).toHaveAttribute('data-compact', 'false');
     expect(button.querySelector('svg')).toHaveAttribute('width', '16');
     expect(button.querySelector('svg')).toHaveAttribute('height', '16');
   },

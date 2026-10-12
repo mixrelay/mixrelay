@@ -24,7 +24,10 @@ fn node_identity(id: &str) -> bool {
 }
 
 pub(super) fn validate(layout: &GraphLayout) -> Result<(), &'static str> {
-    if layout.positions.len() > MAX_POSITIONS || layout.sizes.len() > MAX_POSITIONS {
+    if layout.positions.len() > MAX_POSITIONS
+        || layout.sizes.len() > MAX_POSITIONS
+        || layout.node_labels.len() > MAX_POSITIONS
+    {
         return Err("layout contains too many node entries");
     }
     if layout.positions.iter().any(|(id, position)| {
@@ -40,6 +43,14 @@ pub(super) fn validate(layout: &GraphLayout) -> Result<(), &'static str> {
             || !(26.0..=4096.0).contains(&size.height)
     }) {
         return Err("layout has an invalid UI node identity or size");
+    }
+    if layout.node_labels.iter().any(|(id, label)| {
+        !node_identity(id)
+            || label.trim().is_empty()
+            || label.chars().count() > 128
+            || label.chars().any(char::is_control)
+    }) {
+        return Err("layout has an invalid UI node identity or display label");
     }
     if let Some(viewport) = layout.viewport
         && (!coordinate(viewport.x)
@@ -127,17 +138,14 @@ impl EngineGraphController {
         };
         // A failed write has no runtime side effects to reconcile: reject and preserve both
         // the previous disk file and in-memory layout, so retry uses the same revision.
-        self.stage_catalog(Some(&candidate))
-            .map_err(|failure| {
-                error(
-                    ErrorCode::ControlUnavailable,
-                    id,
-                    &format!("layout staging failed: {failure:?}"),
-                )
-            })?
-            .expect("catalog candidate was supplied")
-            .commit()
-            .map_err(|failure| error(ErrorCode::ControlUnavailable, id, &failure.to_string()))?;
+        if let Some(staged) = self
+            .stage_catalog(Some(&candidate))
+            .map_err(|failure| error(failure.code, id, &failure.parameters.to_string()))?
+        {
+            staged.commit().map_err(|failure| {
+                error(ErrorCode::ControlUnavailable, id, &failure.to_string())
+            })?;
+        }
         self.commit_catalog_memory(Some(candidate));
         *self.catalog_write_error.lock() = None;
         Ok(response)

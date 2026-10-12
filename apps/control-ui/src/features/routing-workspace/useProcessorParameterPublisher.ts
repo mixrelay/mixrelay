@@ -30,7 +30,7 @@ export function useProcessorParameterPublisher(
     setFailures([]);
     return () => {
       session.close();
-      if (queue.current === session) queue.current = null;
+      queue.current = null;
     };
   }, [controlPort]);
 

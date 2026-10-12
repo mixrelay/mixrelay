@@ -1,5 +1,5 @@
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 const tauriHost = process.env.TAURI_DEV_HOST;
 
@@ -12,8 +12,13 @@ export default defineConfig({
     strictPort: true,
   },
   test: {
+    exclude: [...configDefaults.exclude, 'scripts/**'],
+    maxWorkers: Number(process.env.MIXRELAY_UI_TEST_WORKERS ?? 4),
     coverage: {
+      reportsDirectory: process.env.MIXRELAY_UI_COVERAGE_DIR ?? './coverage',
       exclude: [
+        // Storybook-only documentation is verified in its built browser surface.
+        'src/core/design-system/**',
         'src/**/*.stories.{ts,tsx}',
         'src/**/*.test.{ts,tsx}',
         'src/main.tsx',
@@ -21,7 +26,7 @@ export default defineConfig({
       ],
       include: ['src/**/*.{ts,tsx}'],
       provider: 'v8',
-      reporter: ['text'],
+      reporter: ['text', 'json'],
       thresholds: {
         branches: 100,
         functions: 100,

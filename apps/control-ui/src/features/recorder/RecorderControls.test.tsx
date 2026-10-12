@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
 import type {
@@ -7,8 +7,22 @@ import type {
   RecorderStatus,
 } from '../../core/control-port/types';
 import { I18nProvider, i18n } from '../../core/i18n';
+import { FeatureAccess } from '../../core/licensing/FeatureAccess';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
+import type { SelectFieldProps } from '../../core/ui/SelectField';
 import { RecorderControls } from './RecorderControls';
+
+const selections = vi.hoisted(() => new Map<string, SelectFieldProps>());
+vi.mock('../../core/ui/SelectField', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../core/ui/SelectField')>();
+  return {
+    ...actual,
+    SelectField: (props: SelectFieldProps) => {
+      selections.set(props.label, props);
+      return <actual.SelectField {...props} />;
+    },
+  };
+});
 
 const stopped: RecorderStatus = {
   state: 'stopped',
@@ -57,10 +71,13 @@ function fixture() {
 function recorderView(
   port: StorybookMockControlPort,
   options: {
+    channels?: number;
     enabled?: boolean;
     poweredOn?: boolean;
+    playbackPaused?: boolean;
     graphId?: string;
     nodeId?: string;
+    name?: string;
     onChannelsChange?: (channels: number) => void;
   } = {},
 ) {
@@ -71,23 +88,58 @@ function recorderView(
           controlPort={port}
           graphId={options.graphId ?? 'graph-a'}
           nodeId={options.nodeId ?? 'recorder-1'}
+          name={options.name}
           expectedRevision={1}
           poweredOn={options.poweredOn ?? true}
+          playbackPaused={options.playbackPaused}
           enabled={options.enabled ?? true}
-          channels={2}
+          channels={options.channels ?? 2}
           onChannelsChange={options.onChannelsChange ?? vi.fn()}
         />
       </I18nProvider>
     </MixRelayProvider>
   );
 }
+it('names recording and folder actions by graph instance and shows the free limit once in settings', async () => {
+  const { port, write } = fixture();
+  render(<FeatureAccess value={false}>{recorderView(port, { name: 'Music' })}</FeatureAccess>);
+  const record = await screen.findByRole('button', { name: 'Music: Record' });
+  expect(screen.getByLabelText('Recorded time')).toHaveAttribute('aria-live', 'off');
+  await waitFor(() => expect(record).toBeEnabled());
+  fireEvent.click(record);
+  await waitFor(() =>
+    expect(write).toHaveBeenLastCalledWith('graph-a', 'recorder-1', { action: 'record' }, 1),
+  );
+  const pause = screen.getByRole('button', { name: 'Music: Pause' });
+  await waitFor(() => expect(pause).toBeEnabled());
+  fireEvent.click(pause);
+  const resume = await screen.findByRole('button', { name: 'Music: Resume' });
+  await waitFor(() => expect(resume).toBeEnabled());
+  fireEvent.click(resume);
+  await waitFor(() =>
+    expect(write).toHaveBeenLastCalledWith('graph-a', 'recorder-1', { action: 'record' }, 1),
+  );
+  const stop = screen.getByRole('button', { name: 'Music: Stop' });
+  await waitFor(() => expect(stop).toBeEnabled());
+  fireEvent.click(stop);
+  await waitFor(() =>
+    expect(write).toHaveBeenLastCalledWith('graph-a', 'recorder-1', { action: 'stop' }, 1),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Music: Options' }));
+  expect(screen.getByRole('button', { name: 'Music: Choose folder…' })).toBeEnabled();
+  expect(screen.getAllByText(i18n.t('recorder.freeLimit'))).toHaveLength(1);
+});
+
 async function openOptions() {
-  fireEvent.click(screen.getByRole('button', { name: i18n.t('routing.nodes.options') }));
+  fireEvent.click(
+    screen.getByRole('button', { name: (name) => name.endsWith(i18n.t('routing.nodes.options')) }),
+  );
   await waitFor(() =>
     expect(screen.getByLabelText(i18n.t('recorder.folder'))).toHaveValue('/Desktop'),
   );
 }
 beforeEach(async () => {
+  selections.clear();
   await i18n.changeLanguage('en');
   vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(
     new DOMRect(20, 20, 240, 32),
@@ -95,7 +147,85 @@ beforeEach(async () => {
   vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1024);
   vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(768);
 });
+
+it('keeps nonstandard native sample-rate readback and can explicitly restore the source rate', async () => {
+  const { port, save } = fixture();
+  vi.spyOn(port, 'recordingSettings').mockResolvedValue({
+    folder: '/Desktop',
+    sampleRate: 32000,
+    encoding: 'pcm16',
+  });
+  render(recorderView(port));
+  await openOptions();
+  expect(screen.getByRole('button', { name: /WAV sample rate$/ })).toHaveTextContent('32 kHz');
+  fireEvent.click(screen.getByRole('button', { name: /WAV sample rate$/ }));
+  fireEvent.click(await screen.findByRole('option', { name: 'Input rate' }));
+  await waitFor(() =>
+    expect(save).toHaveBeenCalledExactlyOnceWith(
+      'graph-a',
+      'recorder-1',
+      { folder: '/Desktop', sampleRate: null, encoding: 'pcm16' },
+      1,
+    ),
+  );
+});
+
+it('rejects an unsupported field callback and a free over-limit channel while allowing a mono edit', async () => {
+  const { port, save } = fixture();
+  const onChannelsChange = vi.fn();
+  render(
+    <FeatureAccess value={false}>
+      {recorderView(port, { channels: 8, onChannelsChange })}
+    </FeatureAccess>,
+  );
+  await openOptions();
+  fireEvent.click(screen.getByRole('button', { name: /Channels$/ }));
+  const overLimit = await screen.findByRole('option', { name: '8' });
+  expect(overLimit).toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(overLimit);
+  expect(onChannelsChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('option', { name: '1' }));
+  expect(onChannelsChange).toHaveBeenCalledExactlyOnceWith(1);
+  const channel = selections.get('Channels');
+  const encoding = selections.get('Bit depth');
+  if (!channel || !encoding) throw new Error('Recorder option fields must be mounted');
+  // The Feature boundary also rejects unexpected values from its Core callback.
+  act(() => {
+    channel.onChange('8');
+    encoding.onChange('unsupported');
+  });
+  expect(onChannelsChange).toHaveBeenCalledTimes(1);
+  expect(save).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: /Bit depth$/ })).toHaveTextContent('16-bit PCM');
+});
+
+it('keeps canonical folder readback without a chooser when the native platform has no chooser capability', async () => {
+  const { port } = fixture();
+  render(recorderView(Object.assign(port, { selectRecordingFolder: undefined })));
+  await openOptions();
+  expect(screen.getByLabelText('Recording folder')).toHaveValue('/Desktop');
+  expect(screen.getByLabelText('Recording folder')).toHaveAttribute('readonly');
+  expect(screen.queryByRole('button', { name: 'Choose folder…' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Record' })).toBeEnabled();
+});
 afterEach(() => vi.restoreAllMocks());
+
+it('allows finalizing a take while global playback is paused without allowing a local resume', async () => {
+  const { port, write } = fixture();
+  const view = render(recorderView(port));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Record' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Record' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Resume' })).toBeEnabled());
+  view.rerender(recorderView(port, { playbackPaused: true }));
+  expect(screen.getByRole('button', { name: 'Resume' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Record' })).toBeDisabled());
+  expect(write.mock.calls.map((call) => call[2].action)).toEqual(['record', 'pause', 'stop']);
+});
 
 it.each(['en', 'ko-KR', 'pseudo'])(
   'shows a readonly shared folder and native chooser in %s',
@@ -148,11 +278,11 @@ it('saves encoding and sample rate independently without graph mutation', async 
   const { port, save, apply } = fixture();
   render(recorderView(port));
   await openOptions();
-  fireEvent.click(screen.getByRole('combobox', { name: 'WAV sample rate' }));
+  fireEvent.click(screen.getByRole('button', { name: /WAV sample rate$/ }));
   fireEvent.click(await screen.findByRole('option', { name: '96 kHz' }));
   await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Bit depth' })).toBeEnabled());
-  fireEvent.click(screen.getByRole('combobox', { name: 'Bit depth' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: /Bit depth$/ })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: /Bit depth$/ }));
   fireEvent.click(await screen.findByRole('option', { name: '24-bit PCM' }));
   await waitFor(() =>
     expect(save).toHaveBeenLastCalledWith(
@@ -235,7 +365,7 @@ it('preserves channels 1–8 and locks channel/settings edits for active takes',
   const onChannelsChange = vi.fn();
   render(recorderView(port, { onChannelsChange }));
   await openOptions();
-  fireEvent.click(screen.getByRole('combobox', { name: 'Channels' }));
+  fireEvent.click(screen.getByRole('button', { name: /Channels$/ }));
   const options = await screen.findAllByRole('option');
   expect(options.map((option) => option.textContent)).toEqual([
     '1',
@@ -252,7 +382,7 @@ it('preserves channels 1–8 and locks channel/settings edits for active takes',
   fireEvent.click(screen.getByRole('button', { name: 'Record' }));
   await waitFor(() => expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled());
   for (const label of ['Channels', 'WAV sample rate', 'Bit depth'])
-    expect(screen.getByRole('combobox', { name: label })).toBeDisabled();
+    expect(screen.getByRole('button', { name: (name) => name.endsWith(label) })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Choose folder…' })).toBeDisabled();
 });
 
@@ -294,12 +424,42 @@ it('keeps Stop available and shows actual take format when canonical preferences
   vi.spyOn(port, 'recordingSettings').mockRejectedValue(new Error('Preferences unavailable'));
   render(recorderView(port));
   expect(await screen.findByRole('alert')).toHaveTextContent('Preferences unavailable');
-  fireEvent.click(screen.getByRole('button', { name: 'Options' }));
-  expect(screen.getByRole('combobox', { name: 'WAV sample rate' })).toHaveValue('48 kHz');
-  expect(screen.getByRole('combobox', { name: 'Bit depth' })).toHaveValue('24-bit PCM');
+  fireEvent.click(screen.getByRole('button', { name: (name) => name.endsWith('Options') }));
+  expect(screen.getByRole('button', { name: /WAV sample rate$/ })).toHaveTextContent('48 kHz');
+  expect(screen.getByRole('button', { name: /Bit depth$/ })).toHaveTextContent('24-bit PCM');
   expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
   fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
   await waitFor(() =>
     expect(write).toHaveBeenCalledExactlyOnceWith('graph-a', 'recorder-1', { action: 'stop' }, 1),
+  );
+});
+
+it('free mode blocks new eight-channel takes while preserving an existing paused take', async () => {
+  const { port, write } = fixture();
+  const status = vi.mocked(port.recorderStatus);
+  status.mockResolvedValue({ ...stopped, state: 'stopped' });
+  const view = () => (
+    <FeatureAccess value={false}>{recorderView(port, { channels: 8 })}</FeatureAccess>
+  );
+  const rendered = render(view());
+  await waitFor(() => expect(status).toHaveBeenCalled());
+  expect(screen.getByRole('button', { name: 'Record' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: (name) => name.endsWith('Options') }));
+  expect(screen.getByText(i18n.t('recorder.freeLimit'))).toBeInTheDocument();
+  rendered.unmount();
+  status.mockResolvedValue({
+    ...stopped,
+    state: 'paused',
+    path: '/Desktop/paid.wav',
+    sampleRate: 48000,
+    frames: 96000,
+  });
+  render(view());
+  const resume = await screen.findByRole('button', { name: 'Resume' });
+  await waitFor(() => expect(resume).toBeEnabled());
+  expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled();
+  fireEvent.click(resume);
+  await waitFor(() =>
+    expect(write).toHaveBeenCalledWith('graph-a', 'recorder-1', { action: 'record' }, 1),
   );
 });

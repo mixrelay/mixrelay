@@ -135,6 +135,15 @@ export class HttpControlPort implements ControlPort {
       method: 'PUT',
     });
   }
+  public setVirtualEndpointBufferFrames(
+    request: Parameters<NonNullable<ControlPort['setVirtualEndpointBufferFrames']>>[0],
+  ): Promise<GraphApplyResponse> {
+    return this.json('/api/v1/audio/virtual-endpoint/buffer', {
+      body: JSON.stringify(request),
+      headers: { 'content-type': 'application/json' },
+      method: 'PUT',
+    });
+  }
   public constructor(
     private readonly origin = LOCAL_CONTROL_ORIGIN,
     private readonly request: typeof fetch = fetch,

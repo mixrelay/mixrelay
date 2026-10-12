@@ -9,7 +9,7 @@ use std::{
 
 use plist::Value;
 
-use crate::DRIVER_PATH;
+use crate::contract::DRIVER_PATH;
 
 use super::NativeError;
 
@@ -29,6 +29,8 @@ const KNOWN_STATUS_KEYS: &[&str] = &[
     "EnableTransactions",
     "LimitLoadToSessionType",
     "MachServices",
+    "StandardOutPath",
+    "StandardErrorPath",
 ];
 
 // For the fixed-label list query, launchctl error 113 means the specified service
@@ -60,6 +62,27 @@ fn classify_status_output(
     stdout: &[u8],
     stderr: &[u8],
 ) -> Result<RegistrationState, NativeError> {
+    classify_status_output_for(exit_code, stdout, stderr, SERVICE_LABEL, DRIVER_PATH)
+}
+
+pub(super) fn inspect_engine_registration() -> Result<RegistrationState, NativeError> {
+    let output = run_command(PROGRAM, &["list", "io.mixrelay.audio.engine"])?;
+    classify_status_output_for(
+        output.status.code(),
+        &output.stdout,
+        &output.stderr,
+        "io.mixrelay.audio.engine",
+        crate::RUNTIME_ENGINE_PATH,
+    )
+}
+
+fn classify_status_output_for(
+    exit_code: Option<i32>,
+    stdout: &[u8],
+    stderr: &[u8],
+    label: &str,
+    program: &str,
+) -> Result<RegistrationState, NativeError> {
     if exit_code == Some(ABSENT_EXIT_CODE) && stdout.is_empty() {
         return Ok(RegistrationState::Absent);
     }
@@ -78,7 +101,7 @@ fn classify_status_output(
             "successful status query unexpectedly wrote to stderr",
         ));
     }
-    parse_status(stdout)
+    parse_status_for(stdout, label, program)
 }
 
 pub(super) fn bootstrap() -> Result<(), NativeError> {
@@ -112,7 +135,10 @@ fn run_mutation(program: &'static str, arguments: &[&str]) -> Result<(), NativeE
     }
 }
 
-fn run_command(program: &'static str, arguments: &[&str]) -> Result<ChildOutput, NativeError> {
+pub(super) fn run_command(
+    program: &'static str,
+    arguments: &[&str],
+) -> Result<ChildOutput, NativeError> {
     let child = Command::new(program)
         .env_clear()
         .env("LC_ALL", "C")
@@ -223,7 +249,16 @@ fn read_bounded(mut reader: impl Read, limit: usize) -> io::Result<BoundedBytes>
     Ok(BoundedBytes { bytes, truncated })
 }
 
+#[cfg(test)]
 fn parse_status(bytes: &[u8]) -> Result<RegistrationState, NativeError> {
+    parse_status_for(bytes, SERVICE_LABEL, DRIVER_PATH)
+}
+
+fn parse_status_for(
+    bytes: &[u8],
+    label: &str,
+    program: &str,
+) -> Result<RegistrationState, NativeError> {
     if bytes.is_empty() || bytes.len() > MAX_CHILD_OUTPUT {
         return Err(NativeError::LaunchdState(
             "successful exact-label query returned empty or oversized output",
@@ -245,7 +280,7 @@ fn parse_status(bytes: &[u8]) -> Result<RegistrationState, NativeError> {
         ));
     };
     validate_status_schema(dictionary, &value, atoms)?;
-    validate_status_identity(dictionary, atoms.mach_port)?;
+    validate_status_identity(dictionary, atoms.mach_port, label, program)?;
     validate_runtime_fields(dictionary)?;
     Ok(RegistrationState::Loaded {
         pid: parse_pid(dictionary)?,
@@ -283,11 +318,13 @@ fn validate_status_schema(
 fn validate_status_identity(
     dictionary: &plist::Dictionary,
     mach_port_atoms: usize,
+    expected_label: &str,
+    expected_program: &str,
 ) -> Result<(), NativeError> {
     if dictionary
         .get("Label")
         .and_then(Value::as_string)
-        .is_none_or(|label| label != "io.mixrelay.audio.driver")
+        .is_none_or(|label| label != expected_label)
     {
         return Err(NativeError::LaunchdState(
             "exact-label result is missing the fixed service label",
@@ -307,7 +344,7 @@ fn validate_status_identity(
         .ok_or(NativeError::LaunchdState(
             "exact-label result is missing or has malformed ProgramArguments",
         ))?;
-    if program != DRIVER_PATH {
+    if program != expected_program {
         return Err(NativeError::LaunchdState(
             "registered executable differs from the fixed engine path",
         ));
@@ -315,7 +352,7 @@ fn validate_status_identity(
     if arguments.len() != 1
         || arguments[0]
             .as_string()
-            .is_none_or(|argument| argument != DRIVER_PATH)
+            .is_none_or(|argument| argument != expected_program)
     {
         return Err(NativeError::LaunchdState(
             "registered arguments differ from the fixed engine invocation",
@@ -326,7 +363,7 @@ fn validate_status_identity(
             "exact-label result must contain exactly one launchctl MachServices object",
         ));
     }
-    validate_runtime_mach_services(dictionary)?;
+    validate_runtime_mach_services(dictionary, expected_label)?;
     Ok(())
 }
 
@@ -353,6 +390,17 @@ fn validate_runtime_fields(dictionary: &plist::Dictionary) -> Result<(), NativeE
         return Err(NativeError::LaunchdState(
             "LimitLoadToSessionType has an unexpected type",
         ));
+    }
+    // launchctl reports these paths for the engine's configured log files.
+    // They are status metadata; the signed, account-bound plist is checked separately.
+    for key in ["StandardOutPath", "StandardErrorPath"] {
+        if let Some(value) = dictionary.get(key)
+            && value.as_string().is_none_or(|path| !path.starts_with('/'))
+        {
+            return Err(NativeError::LaunchdState(
+                "runtime log path is not an absolute string path",
+            ));
+        }
     }
     Ok(())
 }
@@ -385,7 +433,10 @@ fn parse_pid(dictionary: &plist::Dictionary) -> Result<Option<u32>, NativeError>
         .map(|pid| pid.filter(|pid| *pid != 0))
 }
 
-fn validate_runtime_mach_services(dictionary: &plist::Dictionary) -> Result<(), NativeError> {
+fn validate_runtime_mach_services(
+    dictionary: &plist::Dictionary,
+    label: &str,
+) -> Result<(), NativeError> {
     let Some(services) = dictionary
         .get("MachServices")
         .and_then(Value::as_dictionary)
@@ -395,10 +446,7 @@ fn validate_runtime_mach_services(dictionary: &plist::Dictionary) -> Result<(), 
         ));
     };
     if services.len() != 1
-        || services
-            .get("io.mixrelay.audio.driver")
-            .and_then(Value::as_string)
-            != Some(MACH_PORT_OBJECT_MARKER)
+        || services.get(label).and_then(Value::as_string) != Some(MACH_PORT_OBJECT_MARKER)
     {
         return Err(NativeError::LaunchdState(
             "runtime MachServices differs from the fixed product service",
@@ -589,10 +637,10 @@ fn escaped(bytes: &[u8]) -> String {
     result
 }
 
-struct ChildOutput {
-    status: ExitStatus,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
+pub(super) struct ChildOutput {
+    pub(super) status: ExitStatus,
+    pub(super) stdout: Vec<u8>,
+    pub(super) stderr: Vec<u8>,
 }
 
 struct BoundedBytes {
@@ -673,6 +721,59 @@ mod tests {
             parse_status(bytes).expect("known runtime status parses"),
             RegistrationState::Loaded { pid: None }
         );
+    }
+
+    #[test]
+    fn engine_registration_rejects_driver_or_arbitrary_program_identity() {
+        let label = "io.mixrelay.audio.engine";
+        let program = crate::RUNTIME_ENGINE_PATH;
+        let status = format!(
+            r#"{{"Label"="{label}";"Program"="{program}";"ProgramArguments"=("{program}");"MachServices"={{"{label}"=mach-port-object;}};}}"#
+        );
+        assert_eq!(
+            parse_status_for(status.as_bytes(), label, program).unwrap(),
+            RegistrationState::Loaded { pid: None }
+        );
+        for invalid in [
+            status.replace(program, crate::contract::DRIVER_PATH),
+            status.replace(label, "io.mixrelay.audio.driver"),
+            status.replace(program, "/tmp/arbitrary"),
+        ] {
+            assert!(parse_status_for(invalid.as_bytes(), label, program).is_err());
+        }
+    }
+
+    #[test]
+    fn engine_registration_accepts_launchctl_log_paths_and_checks_their_types() {
+        // Shape observed from a launchd job with stdout/stderr logging enabled.
+        let label = "io.mixrelay.audio.engine";
+        let program = crate::RUNTIME_ENGINE_PATH;
+        let status = format!(
+            r#"{{
+                "StandardOutPath" = "/Users/listener/Library/Logs/MixRelay/engine.stdout.log";
+                "LimitLoadToSessionType" = "Background";
+                "StandardErrorPath" = "/Users/listener/Library/Logs/MixRelay/engine.stderr.log";
+                "MachServices" = {{ "{label}" = mach-port-object; }};
+                "Label" = "{label}";
+                "OnDemand" = true;
+                "LastExitStatus" = 0;
+                "Program" = "{program}";
+                "ProgramArguments" = ("{program}";);
+            }};"#
+        );
+        assert_eq!(
+            parse_status_for(status.as_bytes(), label, program).unwrap(),
+            RegistrationState::Loaded { pid: None }
+        );
+        for path in ["engine.stdout.log", "engine.stderr.log"] {
+            let quoted = format!("\"/Users/listener/Library/Logs/MixRelay/{path}\"");
+            for invalid in ["123", "true", "\"relative.log\"", "\"\""] {
+                let malformed = status.replace(&quoted, invalid);
+                assert!(parse_status_for(malformed.as_bytes(), label, program).is_err());
+            }
+        }
+        let unknown = status.replace("\"LastExitStatus\" = 0;", "\"NewKey\" = \"unknown\";");
+        assert!(parse_status_for(unknown.as_bytes(), label, program).is_err());
     }
 
     #[test]

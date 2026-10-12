@@ -1,4 +1,11 @@
-import type { ControlPort, GraphLayout, GraphLayoutResponse } from '../../core/control-port/types';
+import {
+  type ControlPort,
+  ControlPortError,
+  type GraphLayout,
+  type GraphLayoutResponse,
+} from '../../core/control-port/types';
+import { runtimeGraphToAudioGraph } from './model';
+import { rebaseGraphLayout } from './rebaseGraphLayout';
 
 export interface LayoutState {
   layout: GraphLayout;
@@ -30,9 +37,11 @@ function bounded<T>(request: Promise<T>): Promise<T> {
 export class GraphLayoutController {
   private state: LayoutState;
   private revision = 0;
+  private base: GraphLayout = { positions: {} };
   private generation = 0;
   private disposed = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private cancelRecoveryPause: (() => void) | null = null;
   private readonly listeners = new Set<() => void>();
   readonly enabled: boolean;
 
@@ -70,6 +79,7 @@ export class GraphLayoutController {
   dispose = () => {
     this.disposed = true;
     this.cancelTimer();
+    this.cancelRecoveryPause?.();
     if (this.state.loading) this.generation++;
     // Switching graphs must not discard the final drag/resize debounce. An in-flight
     // writer finishes before save() submits the latest dirty layout at its new revision.
@@ -87,12 +97,14 @@ export class GraphLayoutController {
     // React StrictMode may set up this same owner again after its cleanup probe.
     this.disposed = false;
     this.cancelTimer();
+    this.cancelRecoveryPause?.();
     const generation = ++this.generation;
     this.patch({ loading: true, saving: false, error: false });
     try {
       const response = this.validate(await bounded(this.port.getGraphLayout(this.graphId)));
       if (generation !== this.generation) return;
       this.revision = response.layoutRevision;
+      this.base = response.layout;
       this.patch({
         layout: response.layout,
         loaded: true,
@@ -117,25 +129,122 @@ export class GraphLayoutController {
       }, 400);
   };
 
+  private definiteConflict(error: unknown) {
+    if (!(error instanceof ControlPortError) || error.body.code !== 'graph_revision_stale')
+      return false;
+    const parameters = error.body.parameters as Record<string, unknown> | null;
+    return parameters?.resource === 'graph_layout' && parameters.graphId === this.graphId;
+  }
+
+  private async rebase(generation: number) {
+    if (!this.graphId || !this.port.getGraphLayout) throw new Error('layout reader unavailable');
+    const catalog = this.port.getGraphCatalog
+      ? await bounded(this.port.getGraphCatalog())
+      : undefined;
+    if (generation !== this.generation) return false;
+    if (this.disposed) throw new Error('layout owner disposed');
+    if (catalog && catalog.activeId !== this.graphId)
+      throw new Error('layout graph identity mismatch');
+    const response = this.validate(
+      catalog?.layout && catalog.layoutRevision !== undefined
+        ? {
+            graphId: catalog.activeId,
+            layoutRevision: catalog.layoutRevision,
+            layout: catalog.layout,
+          }
+        : await bounded(this.port.getGraphLayout(this.graphId)),
+    );
+    if (generation !== this.generation) return false;
+    if (this.disposed) throw new Error('layout owner disposed');
+    const nodeIds = catalog
+      ? new Set(runtimeGraphToAudioGraph(catalog.document).nodes.map((node) => node.id))
+      : undefined;
+    const layout = rebaseGraphLayout(this.base, this.state.layout, response.layout, nodeIds);
+    this.revision = response.layoutRevision;
+    this.base = response.layout;
+    this.patch({ layout, error: false, restoreVersion: this.state.restoreVersion + 1 });
+    if (generation !== this.generation) return false;
+    if (this.disposed) throw new Error('layout owner disposed');
+    return true;
+  }
+
+  private async write(
+    generation: number,
+    graphId: string,
+    writer: NonNullable<ControlPort['setGraphLayout']>,
+  ) {
+    if (generation !== this.generation || this.state.loading) return;
+    const layout = this.state.layout;
+    const response = this.validate(
+      await bounded(
+        writer.call(this.port, graphId, {
+          expectedLayoutRevision: this.revision,
+          layout,
+        }),
+      ),
+    );
+    if (generation !== this.generation) return;
+    this.revision = response.layoutRevision;
+    this.base = response.layout;
+    this.patch({ dirty: this.state.layout !== layout, error: false });
+  }
+
+  private async saveAttempt(
+    generation: number,
+    graphId: string,
+    writer: NonNullable<ControlPort['setGraphLayout']>,
+  ) {
+    const deadline = Date.now() + 10_000;
+    let retried = false;
+    while (true) {
+      try {
+        await this.write(generation, graphId, writer);
+        return;
+      } catch (error) {
+        if (!(await this.recoverRejectedWrite(error, generation, deadline, retried))) return;
+        retried = true;
+      }
+    }
+  }
+
+  private async recoverRejectedWrite(
+    error: unknown,
+    generation: number,
+    deadline: number,
+    retried: boolean,
+  ) {
+    if (generation !== this.generation) return false;
+    // Only a definite CAS rejection proves this write applied nothing. Merge
+    // ordinary concurrent geometry; unknown acknowledgements require explicit retry.
+    if (!this.definiteConflict(error) || Date.now() >= deadline) throw error;
+    if (retried && !(await this.pauseRecovery())) {
+      if (this.disposed) throw new Error('layout owner disposed');
+      return false;
+    }
+    return this.rebase(generation);
+  }
+
+  private pauseRecovery(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const settle = (ready: boolean) => {
+        clearTimeout(timer);
+        this.cancelRecoveryPause = null;
+        resolve(ready);
+      };
+      const timer = setTimeout(() => settle(true), 200);
+      this.cancelRecoveryPause = () => settle(false);
+    });
+  }
+
   private async save() {
     this.cancelTimer();
-    if (!this.graphId || !this.port.setGraphLayout || this.state.saving || !this.state.dirty)
-      return;
+    const graphId = this.graphId;
+    const writer = this.port.setGraphLayout;
+    if (!graphId || !writer || this.state.saving || this.state.loading || !this.state.dirty) return;
     const generation = this.generation;
-    const layout = this.state.layout;
     this.patch({ saving: true });
     try {
-      const response = this.validate(
-        await bounded(
-          this.port.setGraphLayout(this.graphId, {
-            expectedLayoutRevision: this.revision,
-            layout,
-          }),
-        ),
-      );
-      if (generation !== this.generation) return;
-      this.revision = response.layoutRevision;
-      this.patch({ dirty: this.state.layout !== layout, error: false });
+      await this.saveAttempt(generation, graphId, writer);
     } catch {
       if (generation === this.generation) this.patch({ error: true });
     } finally {
@@ -146,7 +255,7 @@ export class GraphLayoutController {
     }
   }
 
-  /** Only the explicit "Save current layout" action rebases a conflicting local draft. */
+  /** Explicit retry uses the same field merge, preserving other writers' geometry. */
   retry = async () => {
     if (this.disposed || this.state.loading || this.state.saving) return;
     if (!this.state.dirty) return this.reload();
@@ -154,10 +263,7 @@ export class GraphLayoutController {
     const generation = ++this.generation;
     this.patch({ loading: true });
     try {
-      const response = this.validate(await bounded(this.port.getGraphLayout(this.graphId)));
-      if (generation !== this.generation) return;
-      this.revision = response.layoutRevision;
-      this.patch({ error: false });
+      await this.rebase(generation);
     } catch {
       if (generation === this.generation) this.patch({ error: true });
     } finally {

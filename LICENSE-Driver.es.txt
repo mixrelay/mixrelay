@@ -1,7 +1,7 @@
 MixRelay Driver
 Acuerdo de licencia de software
 Licenciante y titular de los derechos de autor: Echo Vision Lab
-Versión: 2026-10-08
+Versión: 2026-10-10
 
 1. Uso del Driver
 Estas condiciones regulan MixRelay Driver y sus componentes de gestión de dispositivos y retorno de audio básico en macOS y Linux. La aplicación MixRelay y el motor de grafos se rigen por separado por LICENSE.txt, incluso cuando se incluyen en el mismo instalador.
@@ -11,11 +11,11 @@ El acuerdo de uso del software se celebra cuando acepta estas condiciones despu�
 Echo Vision Lab le concede permiso no exclusivo para instalar y ejecutar gratuitamente los binarios autorizados del Driver en trabajos de audio personales o profesionales, incluidas la grabación, la producción y la transmisión comerciales. Puede conservar las copias de seguridad necesarias para ese uso. No se transfiere la propiedad del software.
 
 2. Driver gratuito y aplicación de pago
-No se requiere comprar la aplicación de pago ni autenticar una compra para las funciones gratuitas del Driver. El Driver gratuito proporciona un dispositivo virtual básico predeterminado cuyos ajustes de nombre, número de canales, frecuencia de muestreo y formato PCM son gratuitos. Los límites de evaluación de la aplicación no restringen los canales del Driver ni el almacenamiento de los ajustes de los dispositivos.
+No se requiere comprar la aplicación de pago ni autenticar una compra para las funciones gratuitas del Driver. El Driver gratuito proporciona un dispositivo virtual básico predeterminado cuyos ajustes de número de canales, frecuencia de muestreo y formato PCM son gratuitos. Cambiar el nombre de un dispositivo requiere la aplicación de pago. Los límites de evaluación de la aplicación no restringen los canales del Driver ni el almacenamiento de los ajustes de los dispositivos.
 
 Crear o eliminar varias identidades de dispositivos virtuales (Create/Remove) requiere la aplicación de pago; ni la aplicación gratuita ni el Driver independiente ofrecen estas operaciones. Los dispositivos virtuales ya creados mediante la aplicación de pago siguen disponibles después de cerrar esa aplicación.
 
-Los derechos sobre la versión principal adquirida de la aplicación de pago, el límite de activación de tres dispositivos y el período de autenticación sin conexión de 30 días no limitan este permiso gratuito del Driver. Reinstalar el Driver o modificar sus ajustes básicos no requiere una activación de pago. Estas operaciones habituales son distintas de las operaciones Create/Remove de la aplicación de pago. Terminar o reembolsar una licencia de la aplicación de pago no cancela por sí solo el permiso independiente del Driver.
+Los derechos de la versión comprada y las condiciones de activación y autenticación sin conexión de la aplicación de pago no limitan este permiso gratuito del Driver. Reinstalar el Driver o cambiar ajustes básicos no requiere activación de pago. Terminar, desactivar o reembolsar los derechos de pago no cancela el permiso gratuito del Driver ni elimina ajustes, grabaciones o proyectos.
 
 3. Redistribución, integración y licencias de terceros
 El uso gratuito no convierte el código propietario de MixRelay en código abierto ni concede acceso a su repositorio de código fuente privado. Estas condiciones no permiten publicar su código propio, modificar sus componentes propietarios ni redistribuirlos.
@@ -36,6 +36,8 @@ Las actualizaciones se proporcionan a través de los canales de distribución of
 
 Envíe consultas sobre instalación, dispositivos y compatibilidad a support@mixrelay.com. Estas declaraciones no anulan la descripción del producto, las condiciones acordadas ni los recursos legales relativos a la calidad.
 
+Nuestro objetivo es una primera respuesta en dos días hábiles de Corea, excluidos fines de semana y festivos de Corea del Sur (Asia/Seoul). Es un objetivo de respuesta, no un plazo de solución garantizado, y no amplía los plazos legales de respuesta o reembolso.
+
 6. Conexiones de red e información personal
 El Driver procesa el audio y los ajustes de los dispositivos localmente y no requiere autenticación de una licencia de pago. Seleccionar Buscar actualizaciones contacta con https://appserver.dsub.io/status mediante HTTPS con el producto, el sistema operativo y la arquitectura del procesador. El servicio también recibe la información habitual de conexión, como su dirección IP. La solicitud de actualización no sube audio, grabaciones, contenidos de proyectos, grafos ni nombres de dispositivos de audio. Puede utilizar el Driver sin solicitar una comprobación de actualizaciones.
 
@@ -43,8 +45,12 @@ Abrir una descarga utiliza su navegador y el servidor de descarga seleccionado. 
 
 Aceptar este acuerdo no constituye consentimiento para marketing opcional, análisis opcionales ni transferencias internacionales. Puede enviar consultas de privacidad y solicitudes de acceso, rectificación, eliminación o limitación del tratamiento de su información a privacy@dsub.io. Se mantienen los requisitos aplicables de verificación de identidad y las obligaciones legales de conservación de registros. El uso habitual del Driver no requiere pago, activación de pago ni consentimiento de marketing.
 
+Cuando elige activar o gestionar los derechos de las funciones de pago de MixRelay, el proceso de gestión del Driver tramita las solicitudes de licencia de la aplicación. Los datos transmitidos, su finalidad y el almacenamiento de credenciales se describen en la sección 7 de LICENSE.txt. El uso gratuito del Driver no requiere estas solicitudes.
+
 7. Desinstalación, terminación y responsabilidad
 Puede dejar de utilizar el Driver y desinstalarlo en cualquier momento. La desinstalación por sí sola no cancela una compra de la aplicación de pago ni confirma la desactivación de esa aplicación en el servidor.
+
+Desactivar o reembolsar los derechos de la aplicación de pago no termina por sí solo este permiso gratuito del Driver.
 
 Si un incumplimiento proporciona motivos legales para restringir o terminar el uso, Echo Vision Lab identificará esos motivos y cumplirá los requisitos de notificación y oportunidad de subsanación de la legislación aplicable. Estas condiciones no conceden un derecho arbitrario a terminar el uso. Tras una terminación legítima, deje de utilizar los componentes propietarios cuyo permiso haya terminado y elimine las copias correspondientes, con sujeción a la legislación aplicable. Sus trabajos, los derechos derivados de licencias de terceros y las reclamaciones legales no se extinguen automáticamente.
 

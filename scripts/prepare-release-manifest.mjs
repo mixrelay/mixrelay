@@ -26,8 +26,8 @@ export function prepareReleaseManifest(args) {
   for (const name of ["directory", "product", "version", "published-at"]) {
     if (!values[name]) throw new Error(`Missing required option: --${name}`);
   }
-  if (!["mix-relay", "mix-relay-driver"].includes(values.product)) {
-    throw new Error("--product must be mix-relay or mix-relay-driver");
+  if (values.product !== "mix-relay") {
+    throw new Error("--product must be mix-relay");
   }
   if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(values.version)) {
     throw new Error("--version must be canonical stable MAJOR.MINOR.PATCH");

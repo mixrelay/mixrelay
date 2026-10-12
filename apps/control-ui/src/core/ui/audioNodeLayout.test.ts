@@ -11,19 +11,31 @@ it.each(Array.from({ length: 64 }, (_, index) => index + 1))(
   (channels) => {
     const rows = Math.ceil(channels / (channels > 32 ? 16 : 8));
     const content = channels <= 8 ? channels * 10 + (channels - 1) * 3 : rows * 35 + (rows - 1) * 4;
-    for (const detail of [false, true]) {
-      expect(
-        minimumAudioNodeFaceHeight([{ channels }], detail) - 26 - 23 - 14 - 2 - (detail ? 15 : 0),
-      ).toBeGreaterThanOrEqual(content);
-    }
+    expect(minimumAudioNodeFaceHeight([{ channels }]) - 26 - 24 - 14 - 2).toBeGreaterThanOrEqual(
+      content,
+    );
   },
 );
 
 it('keeps the normal stereo face compact and reserves space for the eighth label', () => {
-  expect(minimumAudioNodeFaceHeight([])).toBe(116);
-  expect(minimumAudioNodeFaceHeight([{ channels: 2 }])).toBe(132);
-  expect(minimumAudioNodeFaceHeight([{ channels: 8 }])).toBe(166);
+  expect(minimumAudioNodeFaceHeight([])).toBe(118);
+  expect(minimumAudioNodeFaceHeight([{ channels: 2 }])).toBe(118);
+  expect(minimumAudioNodeFaceHeight([{ channels: 8 }])).toBe(167);
 });
+
+it.each([1, 2, 4])(
+  'shares the 120px collapsed frame across normal and recorder nodes with %i channels',
+  (channels) => {
+    const normal = audioNodeFaceGeometry({ meterBanks: [{ channels }], portCount: channels });
+    const recorder = audioNodeFaceGeometry({
+      meterBanks: [{ channels }],
+      portCount: channels,
+      mode: 'channel-rows',
+    });
+    expect(normal.height + 2).toBe(120);
+    expect(recorder.height + 24 + 2).toBe(120);
+  },
+);
 
 it.each(Array.from({ length: 8 }, (_, index) => index + 1))(
   'fits %i recorder rows and anchors every cable at its meter center',
@@ -35,13 +47,14 @@ it.each(Array.from({ length: 8 }, (_, index) => index + 1))(
     });
     const { headerHeight, bodyPadding, meterMargin, rowHeight, rowGap, borderWidth } =
       channelRowMetrics;
-    expect(geometry.height).toBe(39 + channels * 13);
+    expect(geometry.height).toBe(Math.max(94, 39 + channels * 13));
     for (let index = 0; index < channels; index += 1) {
       const center =
         borderWidth +
         headerHeight +
         bodyPadding +
         meterMargin +
+        Math.max(0, 94 - (39 + channels * 13)) / 2 +
         rowHeight / 2 +
         index * (rowHeight + rowGap);
       expect(audioNodePortTop(geometry, index, channels)).toBe(center);
@@ -55,28 +68,29 @@ it.each(Array.from({ length: 8 }, (_, index) => index + 1))(
 
 it('preserves standard faces and their distributed port positions', () => {
   const stereo = audioNodeFaceGeometry({ meterBanks: [{ channels: 2 }], portCount: 2 });
-  expect(stereo.height).toBe(132);
-  expect([audioNodePortTop(stereo, 0, 2), audioNodePortTop(stereo, 1, 2)]).toEqual([44, 88]);
-  expect(audioNodeFaceGeometry({ meterBanks: [{ channels: 64 }], portCount: 64 }).height).toBe(780);
+  expect(stereo.height).toBe(118);
+  expect(audioNodePortTop(stereo, 0, 2)).toBeCloseTo(26 + 68 / 3);
+  expect(audioNodePortTop(stereo, 1, 2)).toBeCloseTo(26 + 136 / 3);
+  expect(audioNodeFaceGeometry({ meterBanks: [{ channels: 64 }], portCount: 64 }).height).toBe(830);
 });
 
 it.each([
-  { channels: 8, expectedHeight: 298 },
-  { channels: 16, expectedHeight: 244 },
-  { channels: 64, expectedHeight: 400 },
-])('reserves the full face for two labelled $channels-channel meter banks', ({
-  channels,
-  expectedHeight,
-}) => {
-  const twoBanks = audioNodeFaceGeometry({
-    meterBanks: [
-      { channels, label: 'Main' },
-      { channels, label: 'Sidechain' },
-    ],
-  });
-  // Both labels, both meter margins, and the 3px CSS gap between bank groups.
-  expect(twoBanks.height).toBe(expectedHeight);
-});
+  { channels: 8, expectedHeight: 299 },
+  { channels: 16, expectedHeight: 245 },
+  { channels: 64, expectedHeight: 401 },
+])(
+  'reserves the full face for two labelled $channels-channel meter banks',
+  ({ channels, expectedHeight }) => {
+    const twoBanks = audioNodeFaceGeometry({
+      meterBanks: [
+        { channels, label: 'Main' },
+        { channels, label: 'Sidechain' },
+      ],
+    });
+    // Both labels, both meter margins, and the 3px CSS gap between bank groups.
+    expect(twoBanks.height).toBe(expectedHeight);
+  },
+);
 
 it.each([1, 2, 4, 8])('keeps an unmetered plug-in header compact with %i ports', (ports) => {
   const geometry = audioNodeFaceGeometry({ mode: 'compact', portCount: ports });
@@ -100,3 +114,10 @@ it.each([1, 2, 8])(
     }
   },
 );
+
+it('uses one placeholder recorder row while channel metadata is unavailable', () => {
+  const unresolved = audioNodeFaceGeometry({ mode: 'channel-rows', meterBanks: [] });
+  const mono = audioNodeFaceGeometry({ mode: 'channel-rows', meterBanks: [{ channels: 1 }] });
+  expect(unresolved).toEqual(mono);
+  expect(audioNodePortTop(unresolved, 0, 1)).toBeGreaterThan(channelRowMetrics.headerHeight);
+});

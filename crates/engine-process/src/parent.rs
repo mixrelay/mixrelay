@@ -11,24 +11,24 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 const STARTUP_FAILURE_GRACE: Duration = Duration::from_millis(500);
 const READY_EXIT_POLL: Duration = Duration::from_millis(1);
 
-/// A desktop-owned engine process and its private shutdown lease.
+/// A controller-owned engine process and its private shutdown lease.
 ///
 /// The lease is the only object used to request an orderly engine shutdown:
 /// closing it closes the child's standard-input pipe. The child handle remains
 /// owned here until the engine has exited, and is moved to a named reaper thread
 /// when this value is dropped.
-pub struct DesktopEngine {
+pub struct ControllerEngine {
     child: Option<Child>,
     lease: Option<ChildStdin>,
     id: u32,
     reaped: bool,
 }
 
-impl DesktopEngine {
-    /// Spawns `executable` in desktop-owned mode and waits for its readiness
+impl ControllerEngine {
+    /// Spawns `executable` in controller-owned mode and waits for its readiness
     /// acknowledgement on the child's private standard-output pipe.
     ///
-    /// The executable is invoked with exactly [`crate::DESKTOP_ARGUMENT`]. Its
+    /// The executable is invoked with exactly [`crate::CONTROLLER_ARGUMENT`]. Its
     /// standard input and output are piped, while standard error is inherited.
     /// Startup fails if the acknowledgement is not received within 30 seconds,
     /// is malformed, or the child exits before the startup check completes.
@@ -42,7 +42,7 @@ impl DesktopEngine {
     pub fn start(executable: &Path) -> io::Result<Self> {
         let mut command = Command::new(executable);
         command
-            .arg(crate::DESKTOP_ARGUMENT)
+            .arg(crate::CONTROLLER_ARGUMENT)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
@@ -52,14 +52,14 @@ impl DesktopEngine {
         let Some(lease) = child.stdin.take() else {
             return Err(fail_start(
                 child,
-                io::Error::other("desktop-owned engine stdin pipe was not created"),
+                io::Error::other("controller-owned engine stdin pipe was not created"),
             ));
         };
         let Some(stdout) = child.stdout.take() else {
             drop(lease);
             return Err(fail_start(
                 child,
-                io::Error::other("desktop-owned engine stdout pipe was not created"),
+                io::Error::other("controller-owned engine stdout pipe was not created"),
             ));
         };
 
@@ -111,7 +111,7 @@ impl DesktopEngine {
     }
 }
 
-impl Drop for DesktopEngine {
+impl Drop for ControllerEngine {
     fn drop(&mut self) {
         self.lease.take();
         let Some(child) = self.child.take() else {
@@ -121,7 +121,7 @@ impl Drop for DesktopEngine {
             return;
         }
         if let Err(error) = reap_without_blocking_owner(child) {
-            tracing::error!(%error, "failed to reap owned desktop engine");
+            tracing::error!(%error, "failed to reap owned controller engine");
         }
     }
 }
@@ -151,10 +151,10 @@ fn wait_for_ready_with_timeout(
         Ok(result) => result,
         Err(mpsc::RecvTimeoutError::Timeout) => Err(io::Error::new(
             io::ErrorKind::TimedOut,
-            "desktop-owned engine readiness timed out",
+            "controller-owned engine readiness timed out",
         )),
         Err(mpsc::RecvTimeoutError::Disconnected) => Err(io::Error::other(
-            "desktop-owned engine readiness reader ended without a result",
+            "controller-owned engine readiness reader ended without a result",
         )),
     }
 }
@@ -165,7 +165,7 @@ fn read_ready(reader: &mut impl Read) -> io::Result<()> {
     if acknowledgement != *crate::READY {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "desktop-owned engine readiness acknowledgement was invalid",
+            "controller-owned engine readiness acknowledgement was invalid",
         ));
     }
     Ok(())
@@ -174,7 +174,7 @@ fn read_ready(reader: &mut impl Read) -> io::Result<()> {
 fn reject_child_that_exited_during_startup(child: &mut Child) -> io::Result<()> {
     if let Some(status) = child.try_wait()? {
         return Err(io::Error::other(format!(
-            "desktop-owned engine exited during startup: {status}"
+            "controller-owned engine exited during startup: {status}"
         )));
     }
     Ok(())
@@ -277,7 +277,7 @@ fn wait_for_owned_child(slot: &Arc<Mutex<Option<Child>>>) -> io::Result<()> {
     if let Some(mut child) = child {
         let pid = child.id();
         if let Err(error) = child.wait() {
-            tracing::error!(pid, %error, "owned desktop engine wait failed");
+            tracing::error!(pid, %error, "owned controller engine wait failed");
             return Err(error);
         }
     }
@@ -334,7 +334,7 @@ mod tests {
         #[test]
         fn owned_fixture_starts_and_exits_after_lease_closure() {
             let (_directory, executable) = fixture("cat >/dev/null");
-            let mut engine = DesktopEngine::start(&executable).expect("fixture should start");
+            let mut engine = ControllerEngine::start(&executable).expect("fixture should start");
             assert_ne!(engine.id(), 0);
             assert!(
                 engine
@@ -351,7 +351,7 @@ mod tests {
         #[test]
         fn malformed_fixture_is_rejected_and_reaped() {
             let (_directory, executable) = fixture_without_ready("printf 'MRREADY?\\n'\nexit 0");
-            let Err(error) = DesktopEngine::start(&executable) else {
+            let Err(error) = ControllerEngine::start(&executable) else {
                 panic!("malformed fixture must not start");
             };
             assert_eq!(error.kind(), io::ErrorKind::InvalidData);
@@ -360,7 +360,7 @@ mod tests {
         #[test]
         fn child_exiting_before_ready_is_rejected() {
             let (_directory, executable) = fixture_without_ready("exit 0");
-            let Err(error) = DesktopEngine::start(&executable) else {
+            let Err(error) = ControllerEngine::start(&executable) else {
                 panic!("early-exit fixture must not start");
             };
             assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
@@ -369,7 +369,7 @@ mod tests {
         #[test]
         fn drop_closes_lease_without_waiting_for_the_child() {
             let (_directory, executable) = fixture("cat >/dev/null");
-            let engine = DesktopEngine::start(&executable).expect("fixture should start");
+            let engine = ControllerEngine::start(&executable).expect("fixture should start");
             let marker = marker_path(&executable);
             let started = Instant::now();
             drop(engine);
@@ -403,7 +403,7 @@ mod tests {
             PathBuf::from(format!("{}.marker", executable.display()))
         }
 
-        fn wait_for_exit(engine: &mut DesktopEngine) -> ExitStatus {
+        fn wait_for_exit(engine: &mut ControllerEngine) -> ExitStatus {
             let deadline = Instant::now() + Duration::from_secs(2);
             loop {
                 if let Some(status) = engine.try_wait().expect("fixture status") {

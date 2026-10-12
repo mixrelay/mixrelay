@@ -9,7 +9,7 @@ import {
   reconcileAudioFlowEdges,
   reconcileAudioFlowNodes,
 } from './reactFlowAdapter';
-import { useGraphContextMenu } from './useGraphContextMenu';
+import { type GraphContextMenuLabels, useGraphContextMenu } from './useGraphContextMenu';
 
 const model: AudioGraphModel = {
   revision: 1,
@@ -45,7 +45,12 @@ function target(
   if (kind === 'selection') element.className = 'react-flow__nodesselection-rect';
   return { target: element };
 }
-function setup(selectedNodes: string[] = [], selectedEdges: string[] = [], ports: Port[] = []) {
+function setup(
+  selectedNodes: string[] = [],
+  selectedEdges: string[] = [],
+  ports: Port[] = [],
+  renaming: { renameNode?: (id: string) => void; labels?: GraphContextMenuLabels } = {},
+) {
   const committed = vi.fn();
   const fitView = vi.fn();
   const selectPorts = vi.fn();
@@ -66,6 +71,7 @@ function setup(selectedNodes: string[] = [], selectedEdges: string[] = [], ports
     const selectedPorts = useRef(ports);
     const history = useUndoHistory<AudioGraphModel, 'runtime'>();
     const menu = useGraphContextMenu({
+      ...renaming,
       model: current,
       nodes,
       edges,
@@ -189,4 +195,98 @@ it('selects all, clears all and fits the viewport without recording a graph muta
   expect(f.result.current.edges.some((e) => e.selected)).toBe(false);
   expect(f.fitView).toHaveBeenCalledOnce();
   expect(f.committed).not.toHaveBeenCalled();
+});
+
+it('right-clicking an unselected cable replaces the current node selection before deleting only that cable', () => {
+  const f = setup(['a'], ['ab']);
+  act(() => f.result.current.menu.prepare(target('edge', 'cb')));
+  expect(f.result.current.edges.filter((edge) => edge.selected).map((edge) => edge.id)).toEqual([
+    'cb',
+  ]);
+  expect(f.result.current.nodes.some((node) => node.selected)).toBe(false);
+  act(() => f.result.current.menu.execute('context:remove'));
+  expect(f.result.current.current.edges.map((edge) => edge.id)).toEqual(['ab']);
+});
+
+it('ignores non-element events and unknown built-in action IDs without affecting the existing selection', () => {
+  const f = setup(['a']);
+  act(() => f.result.current.menu.prepare({ target: null }));
+  expect(f.result.current.menu.execute('context:unknown')).toBe(true);
+  expect(f.result.current.nodes.filter((node) => node.selected).map((node) => node.id)).toEqual([
+    'a',
+  ]);
+  expect(f.committed).not.toHaveBeenCalled();
+});
+
+it('clears node, cable and port selections without mutating the graph', () => {
+  const f = setup(['a'], ['ab'], [{ nodeId: 'c', portId: 'out', side: 'output' }]);
+  act(() => f.result.current.menu.clearSelection());
+  expect(f.result.current.nodes.every((node) => !node.selected)).toBe(true);
+  expect(f.result.current.edges.every((edge) => !edge.selected)).toBe(true);
+  expect(f.result.current.selectedPorts.current).toEqual([]);
+  expect(f.committed).not.toHaveBeenCalled();
+});
+
+it.each(['missing-node', 'missing-port', 'invalid-side'] as const)(
+  'treats an incomplete %s port target as canvas instead of disconnecting an unrelated channel',
+  (invalid) => {
+    const f = setup();
+    const event = target('port');
+    if (invalid === 'missing-node') delete event.target.dataset.audioNodeId;
+    if (invalid === 'missing-port') delete event.target.dataset.audioPortId;
+    if (invalid === 'invalid-side') event.target.dataset.audioPortSide = 'invalid';
+    act(() => f.result.current.menu.prepare(event));
+    expect(f.result.current.menu.items.some((item) => item.id === 'context:fit')).toBe(true);
+    act(() => f.result.current.menu.execute('context:disconnect'));
+    expect(f.committed).not.toHaveBeenCalled();
+  },
+);
+
+it('preserves the entire selected group when its selected node opens a context menu', () => {
+  const f = setup(['a', 'c'], ['cb']);
+  act(() => f.result.current.menu.prepare(target('node', 'a')));
+  expect(f.result.current.nodes.filter((node) => node.selected).map((node) => node.id)).toEqual([
+    'a',
+    'c',
+  ]);
+  act(() => f.result.current.menu.execute('context:remove'));
+  expect(f.result.current.current.nodes.map((node) => node.id)).toEqual(['b']);
+  expect(f.result.current.current.edges).toEqual([]);
+});
+
+it('offers rename only for one node and delegates without editing the audio graph', () => {
+  const rename = vi.fn();
+  const f = setup([], [], [], { renameNode: rename });
+  act(() => f.result.current.menu.prepare(target('node', 'a')));
+  expect(f.result.current.menu.items[0]).toMatchObject({
+    id: 'context:rename',
+    label: 'Rename display name',
+    description: 'F2',
+  });
+  act(() => f.result.current.menu.execute('context:rename'));
+  expect(rename).toHaveBeenCalledExactlyOnceWith('a');
+  expect(f.committed).not.toHaveBeenCalled();
+  expect(f.result.current.current).toBe(model);
+  const multiple = setup(['a', 'b'], [], [], { renameNode: rename });
+  act(() => multiple.result.current.menu.prepare(target('node', 'a')));
+  expect(multiple.result.current.menu.items.some((item) => item.id === 'context:rename')).toBe(
+    false,
+  );
+  const named = setup([], [], [], {
+    renameNode: rename,
+    labels: {
+      renameNode: '표시 이름 변경',
+      removeNode: 'Delete',
+      removeSelection: 'Delete selection',
+      disconnect: 'Disconnect',
+      disconnectPort: 'Disconnect port',
+      disconnectPorts: 'Disconnect ports',
+      removeCable: 'Delete cable',
+      fitView: 'Fit',
+      selectAll: 'All',
+      clearSelection: 'Clear',
+    },
+  });
+  act(() => named.result.current.menu.prepare(target('node', 'b')));
+  expect(named.result.current.menu.items[0]?.label).toBe('표시 이름 변경');
 });

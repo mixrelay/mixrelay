@@ -11,9 +11,12 @@ export type NodeOptionsState = [string | null, Dispatch<SetStateAction<string | 
 
 /** A canvas owns one open disclosure; isolated cards keep their own state. */
 export const NodeOptionsContext = createContext<NodeOptionsState | null>(null);
+export const NodeOptionsIdContext = createContext<string | undefined>(undefined);
 
 export function useNodeOptionsState() {
-  const id = useId();
+  const localId = useId();
+  const nodeId = useContext(NodeOptionsIdContext);
+  const id = nodeId ?? localId;
   const local = useState<string | null>(null);
   const [openedId, setOpenedId] = useContext(NodeOptionsContext) ?? local;
   return {

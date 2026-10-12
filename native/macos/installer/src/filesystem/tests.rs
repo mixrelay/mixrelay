@@ -334,7 +334,7 @@ fn remove_commit_and_rollback_never_touch_user_data() {
 
 #[test]
 fn removal_succeeds_for_every_partial_target_set_and_on_repeat() {
-    for mask in 0u8..64 {
+    for mask in 0u16..1024 {
         let fixture = Fixture::new();
         for (index, target) in OwnedTarget::all().into_iter().enumerate() {
             if mask & (1 << index) != 0 {
@@ -658,5 +658,107 @@ fn legacy_upgrade_adds_removal_app_and_helper_as_one_recoverable_payload_set() {
         read(&fixture.destination(OwnedTarget::Driver)),
         "old-engine"
     );
+    adapter.cleanup(&staged).unwrap();
+}
+
+#[test]
+fn driver_runtime_is_committed_restored_and_removed_with_its_payload() {
+    let fixture = Fixture::new();
+    let engine = fixture.root.join("sources/audio-engine");
+    let plist = fixture.root.join("sources/audio-engine.plist");
+    write_executable(&engine, "new-runtime");
+    write_file(&plist, "new-runtime-definition");
+    write_executable(
+        &fixture.destination(OwnedTarget::RuntimeEngine),
+        "old-runtime",
+    );
+    write_file(
+        &fixture.destination(OwnedTarget::RuntimeLaunchd),
+        "old-runtime-definition",
+    );
+    let request = TransactionRequest::install(
+        InstallSources::new(
+            &fixture.app,
+            &fixture.hal,
+            &fixture.engine,
+            &fixture.launchd,
+        )
+        .with_runtime(&engine, &plist),
+    );
+    let adapter = fixture.adapter();
+    let snapshot = adapter.preflight(&request).unwrap();
+    let staged = adapter.stage(&request, &snapshot).unwrap();
+    let committed = adapter.commit(&request, &snapshot, &staged).unwrap();
+    assert_eq!(
+        read(&fixture.destination(OwnedTarget::RuntimeEngine)),
+        "new-runtime"
+    );
+    adapter
+        .rollback(&request, &snapshot, &staged, Some(&committed))
+        .unwrap();
+    assert_eq!(
+        read(&fixture.destination(OwnedTarget::RuntimeEngine)),
+        "old-runtime"
+    );
+    assert_eq!(
+        read(&fixture.destination(OwnedTarget::RuntimeLaunchd)),
+        "old-runtime-definition"
+    );
+    adapter.cleanup(&staged).unwrap();
+    let request = TransactionRequest::remove();
+    let snapshot = adapter.preflight(&request).unwrap();
+    let staged = adapter.stage(&request, &snapshot).unwrap();
+    adapter.commit(&request, &snapshot, &staged).unwrap();
+    adapter.cleanup(&staged).unwrap();
+    assert!(!fixture.destination(OwnedTarget::RuntimeEngine).exists());
+    assert!(!fixture.destination(OwnedTarget::RuntimeLaunchd).exists());
+    assert_eq!(read(&fixture.user_data), "keep-this-data");
+}
+
+#[test]
+fn unified_install_retires_split_apps_and_rollback_restores_them_with_data() {
+    let fixture = Fixture::new();
+    fixture.create_old_targets();
+    for target in [OwnedTarget::LegacyManager, OwnedTarget::LegacyUninstaller] {
+        write_file(
+            &fixture.destination(target).join("Contents/old.txt"),
+            "legacy",
+        );
+    }
+    let data = [
+        "devices.json",
+        "graphs.json",
+        "settings.json",
+        "recording.wav",
+        "auth.json",
+    ];
+    for name in data {
+        write_file(&fixture.root.join(name), "retain");
+    }
+    let adapter = fixture.adapter();
+    let request = fixture.sources();
+    let snapshot = adapter.preflight(&request).unwrap();
+    let staged = adapter.stage(&request, &snapshot).unwrap();
+    let committed = adapter.commit(&request, &snapshot, &staged).unwrap();
+    assert!(fixture.destination(OwnedTarget::App).exists());
+    for target in [OwnedTarget::LegacyManager, OwnedTarget::LegacyUninstaller] {
+        assert!(!fixture.destination(target).exists());
+        assert!(committed.backed_up_targets().contains(&target));
+    }
+    for name in data {
+        assert_eq!(read(&fixture.root.join(name)), "retain");
+    }
+    adapter
+        .rollback(&request, &snapshot, &staged, Some(&committed))
+        .unwrap();
+    for target in [OwnedTarget::LegacyManager, OwnedTarget::LegacyUninstaller] {
+        assert_eq!(
+            read(&fixture.destination(target).join("Contents/old.txt")),
+            "legacy"
+        );
+    }
+    for name in data {
+        assert_eq!(read(&fixture.root.join(name)), "retain");
+    }
     adapter.cleanup(&staged).unwrap();
 }

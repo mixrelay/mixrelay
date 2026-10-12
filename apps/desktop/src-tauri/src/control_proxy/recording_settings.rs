@@ -1,4 +1,4 @@
-//! Local destination preferences belong to the interactive desktop, not the audio plan.
+//! Destination preferences belong to the background controller, outside the audio plan.
 //! UI edits and hardware starts share the same serialized store and take preparation.
 use std::{collections::BTreeMap, fs, io::Read as _, path::PathBuf};
 
@@ -7,13 +7,9 @@ use tauri::Manager as _;
 
 use super::{ControlProxyClient, Method, recorder};
 
-/// Resolve user-owned defaults once during desktop setup, before admitting controllers.
+/// Resolve user-owned defaults once during controller setup, before admitting controllers.
 pub(crate) fn initialize(app: &tauri::App) -> Result<(), String> {
-    let path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("recording-settings.json");
+    let path = crate::background::settings_directory(app.handle())?.join("recording-settings.json");
     let desktop = crate::recording_dialog::default_recording_folder(app)?;
     let store = RecordingStore::load(path, desktop)?;
     let client = app.state::<ControlProxyClient>();

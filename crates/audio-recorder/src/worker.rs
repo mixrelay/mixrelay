@@ -12,7 +12,11 @@ use std::sync::{
 use std::time::Duration;
 
 pub(crate) enum Command {
-    Request(RecorderRequest, SyncSender<Result<RecorderStatus, String>>),
+    Request(
+        RecorderRequest,
+        Option<u64>,
+        SyncSender<Result<RecorderStatus, String>>,
+    ),
     Shutdown,
 }
 
@@ -21,6 +25,7 @@ pub(crate) struct Worker {
     pub(crate) status: Arc<Mutex<RecorderStatus>>,
     take: Option<Take>,
     token: u64,
+    next_take_limit_seconds: Option<u64>,
     packet: Packet,
 }
 
@@ -32,6 +37,7 @@ impl Worker {
             status,
             take: None,
             token: 0,
+            next_take_limit_seconds: None,
         }
     }
 
@@ -56,7 +62,8 @@ impl Worker {
                 receiver.recv().map_err(|_| RecvTimeoutError::Disconnected)
             };
             match command {
-                Ok(Command::Request(request, reply)) => {
+                Ok(Command::Request(request, seconds, reply)) => {
+                    self.next_take_limit_seconds = seconds;
                     let result = self.command(&request);
                     let _ = reply.send(result);
                 }
@@ -119,13 +126,14 @@ impl Worker {
                 encoding: Some(request.encoding.unwrap_or(crate::Encoding::Pcm24)),
                 ..RecorderStatus::default()
             };
-            let take = match Take::new(request, channels, observed) {
+            let mut take = match Take::new(request, channels, observed) {
                 Ok(take) => take,
                 Err(error) => {
                     self.fail(error.clone());
                     return Err(error);
                 }
             };
+            take.set_duration_limit(self.next_take_limit_seconds)?;
             *self.status.lock() = RecorderStatus {
                 state: RecorderState::Stopped,
                 path: request.path.clone(),
@@ -151,7 +159,7 @@ impl Worker {
             self.fail(error.clone());
             return Err(error);
         }
-        let result = if pause {
+        let mut result = if pause {
             self.take
                 .as_mut()
                 .map_or(Ok(()), Take::flush_segment)
@@ -165,6 +173,9 @@ impl Worker {
                 .take()
                 .map_or(Ok(self.status.lock().frames), Take::finish)
         };
+        if self.take.as_ref().is_some_and(Take::limit_reached) {
+            result = self.take.take().expect("limited take").finish();
+        }
         match result {
             Ok(frames) => {
                 let mut status = self.status.lock();
@@ -198,6 +209,17 @@ impl Worker {
                 )
             });
             result?;
+            if self.take.as_ref().is_some_and(Take::limit_reached) {
+                if let Some(error) = self.transport.cutoff() {
+                    return Err(error.into());
+                }
+                while self.transport.read_packet(&mut self.packet) {}
+                let frames = self.take.take().expect("limited take").finish()?;
+                let mut status = self.status.lock();
+                status.frames = frames;
+                status.state = RecorderState::Stopped;
+                break;
+            }
         }
         if let Some(take) = &self.take {
             self.status.lock().frames = take.frames();

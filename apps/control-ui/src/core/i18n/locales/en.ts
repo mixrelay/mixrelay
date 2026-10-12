@@ -1,4 +1,43 @@
+import { effectTranslations } from '../effects';
 export const en = {
+  effects: effectTranslations.en,
+  theme: {
+    label: 'Appearance',
+    current: 'Appearance: {{theme}}',
+    system: 'System',
+    light: 'Light',
+    dark: 'Dark',
+  },
+  about: {
+    title: 'About MixRelay',
+    version: 'Version {{version}}',
+    licensed: 'Licensed',
+    unknown: 'License status unavailable',
+  },
+  runtimeConnection: {
+    connecting: {
+      title: 'Connecting to MixRelay',
+      description: 'Preparing audio. Your workspace will open when MixRelay is ready.',
+    },
+    not_installed: {
+      title: 'MixRelay is required',
+      description:
+        'Install MixRelay to use audio routing, effects and recording. Then try connecting again.',
+    },
+    incompatible: {
+      title: 'Update MixRelay',
+      description:
+        'The installed MixRelay is not compatible with this app. Update it, then try connecting again.',
+    },
+    unavailable: {
+      title: 'Cannot connect to MixRelay',
+      description:
+        'MixRelay could not be reached or its audio engine is not ready. Try connecting again.',
+    },
+    install: 'Install MixRelay',
+    update: 'Update MixRelay',
+    retry: 'Retry connection',
+  },
   workspaceFile: {
     file: 'File',
     new: 'New Workspace',
@@ -7,14 +46,18 @@ export const en = {
     saveAs: 'Save As…',
   },
   driverManagement: {
+    mixed: 'Mixed',
+    channels: 'Channels',
+    bitDepth: 'Bit depth',
+    unselectedBuffer: 'Not selected',
+    pendingBuffer: 'Applied when the device connects.',
+    observedBuffer: 'Currently applied',
+    bufferSize: 'Buffer size',
+    frames: 'frames',
     title: 'Driver settings',
     loading: 'Reading driver…',
     unavailable: 'Driver service unavailable.',
     name: 'Device name',
-    renderChannels: 'Playback channels',
-    captureChannels: 'Capture channels',
-    renderFormat: 'Playback format',
-    captureFormat: 'Capture format',
     unknown: 'Unknown',
     create: 'Create device',
     save: 'Apply',
@@ -24,7 +67,7 @@ export const en = {
     changeFailed: 'Could not change the device. Refresh and try again.',
     saveFailed: 'Device changed, but settings could not be saved.',
     deviceMissing: 'This device no longer exists. Refresh the device list.',
-    paidRequired: 'Adding or removing devices requires a paid MixRelay license.',
+    paidRequired: 'This action requires a paid MixRelay license.',
     openApp: 'Open MixRelay',
     appUnavailable: 'MixRelay is not installed or could not be opened.',
   },
@@ -51,13 +94,19 @@ export const en = {
     },
   },
   licensing: {
+    limits: {
+      graphs: 'Free: 1 graph',
+      inputs: 'Free: 2 inputs',
+      outputs: 'Free: 2 outputs',
+      plugins: 'Free: 2 external plug-ins',
+      virtualDevices: 'Free: 1 virtual device',
+    },
+    freeSummary:
+      'Free: 1 graph, 2 inputs, 2 outputs, 1 virtual device, 4 Driver channel mappings, 2 external plug-ins, and 1 stereo recorder. You can save and load the free graph and its channel mappings. Renaming devices requires a license.',
     title: 'License',
     close: 'Close',
     loading: 'Checking license…',
     retry: 'Check again',
-    stopAudio: 'Stop audio',
-    stopRequested: 'Stop request sent.',
-    stopFailed: 'Could not stop audio. Try again or use Quit.',
     key: 'License key',
     instanceName: 'Device name',
     activate: 'Activate',
@@ -65,19 +114,16 @@ export const en = {
     deactivate: 'Deactivate this device',
     purchase: 'Buy a license',
     expires: 'Valid until {{date}}',
-    expiredOn: 'Expired on {{date}}',
     storeUnavailable: 'Purchases and activation are not available in this build.',
     termsTitle: 'Terms of use',
     integrationNotice:
       'General use and rights to integrate or redistribute MixRelay in third-party products are separate. Product integration requires a separate paid agreement.',
     states: {
-      trial: 'Trial · {{count}} days left',
+      free: 'Free',
       licensed: 'Licensed · {{count}} days of offline access left',
-      expired: 'Access expired',
       clock_invalid: 'Device clock needs attention',
     },
     messages: {
-      expired: 'Your access has ended. Activate a license or check an existing license online.',
       clock_invalid: 'Check your device clock, then check or activate your license.',
     },
     errors: {
@@ -96,6 +142,8 @@ export const en = {
     },
   },
   recorder: {
+    freeLimit:
+      'Free recording: up to 2 channels and 2 hours per take. Paused time is excluded. Recording stops automatically; audio routing continues.',
     channels: 'Channels',
     title: 'Recorder',
     folder: 'Recording folder',
@@ -113,13 +161,13 @@ export const en = {
     states: { stopped: 'Stopped', recording: 'Recording', paused: 'Paused', failed: 'Failed' },
   },
   audioSession: {
-    powerOn: 'Turn engine on',
-    powerOff: 'Turn engine off',
-    powerChanging: 'Switching engine…',
-    powerFailed: 'Engine switch failed. Check the current state.',
+    resume: 'Resume',
+    pause: 'Pause',
+    changing: 'Changing audio state…',
+    pauseFailed: 'Could not pause or resume. Check the current state.',
     diagnostics: 'Audio details',
     processingRate: 'Processing sample rate',
-    processingBuffer: 'Buffer size',
+    processingBuffer: 'Processing buffer',
     bufferLatency: 'Buffer delay',
     bufferLatencyHint:
       'One processing buffer (samples ÷ sample rate), not total input/output latency.',
@@ -128,7 +176,7 @@ export const en = {
     blockSize: 'Buffer size',
     apply: 'Apply',
     applying: 'Applying…',
-    changeNotice: 'Brief audio interruption; undo history clears.',
+    changeNotice: 'Changing this setting briefly interrupts audio.',
     captureRateLocked: 'Application capture currently requires 48 kHz.',
     changeFailed: 'Could not change the audio session. Check the engine status.',
     errors: {
@@ -190,6 +238,8 @@ export const en = {
     },
   },
   common: {
+    showPassword: 'Show password',
+    hidePassword: 'Hide password',
     appName: 'MixRelay',
     beta: 'Private preview',
     cancel: 'Cancel',
@@ -248,6 +298,11 @@ export const en = {
         preferences_unavailable: 'Session: settings not saved',
         stored_format_unavailable: 'Session: saved format unavailable',
       },
+    },
+    nodeName: {
+      title: 'Rename display name',
+      label: 'Display name',
+      save: 'Save',
     },
     context: {
       removeNode: 'Delete node',
@@ -350,6 +405,8 @@ export const en = {
       unavailable: 'Engine unavailable',
     },
     errors: {
+      feature_limit:
+        'This change exceeds the free plan. Reduce the connections or nodes, or activate a license.',
       audio_device_disconnected: 'The virtual audio device configuration could not be applied.',
       audio_source_unavailable:
         'Application audio capture is unavailable. Check the app and audio capture permission.',
@@ -362,7 +419,8 @@ export const en = {
       graph_exchange_busy: 'The audio engine is still activating the previous graph.',
       graph_invalid: 'The engine rejected an invalid audio graph.',
       graph_draft_changed: 'Edits changed during reload. Your draft was kept; choose again.',
-      graph_revision_stale: 'The graph changed elsewhere. Reload before applying again.',
+      graph_revision_stale: 'The change could not be applied. Try again.',
+      graph_conflict_unresolved: 'Concurrent changes could not be applied automatically.',
       processor_unavailable: 'The selected audio processor is unavailable.',
     },
     recovery: {
@@ -383,6 +441,10 @@ export const en = {
       reload: 'Load saved layout',
     },
     processorControl: {
+      probeFailed: 'This plug-in could not be loaded. Other effects remain available.',
+      scanFailed:
+        'This plug-in search could not be completed. Previously available effects are retained.',
+      technicalDetails: 'Technical details',
       scanning: 'Scanning audio effects…',
       incomplete: 'Effect search incomplete',
       partial: 'Some effects could not be scanned. Previously available effects are retained.',
@@ -498,8 +560,9 @@ export const en = {
     },
   },
   driver: {
+    installNotice: 'Virtual audio devices are unavailable.',
+    getInstaller: 'Get MixRelay installer',
     title: 'Virtual audio driver',
-    description: 'MixRelay Capture and MixRelay Stream',
     actionInstall: 'Install driver',
     actionRestart: 'Restart audio services',
     actionDiagnose: 'Open diagnostics',

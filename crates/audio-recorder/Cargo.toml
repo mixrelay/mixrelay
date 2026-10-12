@@ -14,7 +14,7 @@ workspace = true
 serde.workspace = true
 mixrelay-audio-io.workspace = true
 parking_lot.workspace = true
-# WAV container/encoding only; sample-rate conversion stays on the writer thread.
+# WAV format headers and sample encoding; RF64 sizes live in our writer.
 hound = "3.5.1"
 rubato.workspace = true
 audioadapter-buffers.workspace = true

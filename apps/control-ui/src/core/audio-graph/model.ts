@@ -1,6 +1,30 @@
 import type { RuntimeGraphEdge } from '../control-port/types';
+import { nodeWidths } from '../theme/tokens';
 import type { EndpointControl } from '../ui/AudioNodeCard';
+import type { DynamicsMeterContract } from '../ui/DynamicsMeter';
+import type { GraphicEqualizerContract } from '../ui/GraphicEqualizer';
 import type { StatusTone } from '../ui/StatusBadge';
+
+/** Shared default geometry; explicit resized dimensions remain authoritative. */
+export function graphNodeDefaultWidth(node: AudioGraphNode) {
+  if (node.appearance.equalizer) return nodeWidths.equalizer;
+  return node.appearance.dynamics ? nodeWidths.dynamics : nodeWidths.default;
+}
+
+/** Preserve complete processor faces while standard nodes retain their resize floor. */
+export function graphNodeMinimumWidth(node: AudioGraphNode) {
+  return node.appearance.equalizer || node.appearance.dynamics ? graphNodeDefaultWidth(node) : 180;
+}
+
+/** Normalize old saved sizes without rewriting their height or the audio document. */
+export function normalizeAudioGraphNodeSize(
+  node: AudioGraphNode,
+  size: AudioGraphNodeSize | undefined,
+) {
+  if (!size) return undefined;
+  const width = Math.max(graphNodeMinimumWidth(node), size.width);
+  return width === size.width ? size : { ...size, width };
+}
 
 export interface AudioGraphPosition {
   x: number;
@@ -21,6 +45,8 @@ export interface AudioGraphPort {
 }
 
 export interface AudioGraphNodeAppearance {
+  dynamics?: DynamicsMeterContract;
+  equalizer?: GraphicEqualizerContract;
   processingTimeNs?: number;
   category: string;
   channelCount?: number;
@@ -50,14 +76,24 @@ export interface AudioGraphMeterBank {
 export interface AudioNodeParameterControl {
   id: string;
   label: string;
+  description?: string;
+  section?: 'main' | 'options';
   maximum: number;
   minimum: number;
   step: number;
   suffix: string;
   value: number;
+  scale?: 'linear' | 'logarithmic';
+  choices?: readonly { value: number; label: string; description?: string }[];
+  precise?: boolean;
+  presentation?: 'slider' | 'knob';
+  group?: { id: string; label: string };
+  endpoints?: { minimum: string; maximum: string };
 }
 
 export interface AudioGraphNode {
+  /** UI instance alias; audio identity, runtime label and config remain unchanged. */
+  displayName?: string;
   appearance: AudioGraphNodeAppearance;
   id: string;
   inputPorts: AudioGraphPort[];
@@ -72,6 +108,10 @@ export interface AudioGraphNode {
     config: unknown;
     type: string;
   };
+}
+
+export function audioGraphNodeTitle(node: AudioGraphNode): string {
+  return node.displayName ?? node.appearance.title;
 }
 
 export interface AudioGraphEdge {
@@ -306,13 +346,13 @@ export function resizeAudioGraphNode(
   size: AudioGraphNodeSize,
 ): AudioGraphModel {
   if (!Number.isFinite(size.width) || !Number.isFinite(size.height)) return model;
+  const node = model.nodes.find((candidate) => candidate.id === nodeId);
+  if (!node) return model;
   const bounded = {
-    width: Math.max(180, Math.min(4096, size.width)),
+    width: Math.max(graphNodeMinimumWidth(node), Math.min(4096, size.width)),
     height: Math.max(26, Math.min(4096, size.height)),
   };
-  const node = model.nodes.find((candidate) => candidate.id === nodeId);
-  if (!node || (node.size?.width === bounded.width && node.size.height === bounded.height))
-    return model;
+  if (node.size?.width === bounded.width && node.size.height === bounded.height) return model;
   return {
     ...model,
     nodes: model.nodes.map((candidate) =>

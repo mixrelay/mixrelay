@@ -171,7 +171,8 @@ describe.each(['en', 'ko-KR', 'pseudo'])('virtual node session status: %s', (loc
     const marker = screen.getByRole('img', { name: t('routing.nodeStatus.running') });
     expect(marker).toHaveAttribute('data-tone', 'positive');
     expect(screen.queryByText(t('routing.nodeStatus.running'))).not.toBeInTheDocument();
-    fireEvent.mouseEnter(marker);
+    fireEvent.pointerMove(window.document.body);
+    fireEvent.pointerOver(marker);
     expect(await screen.findByRole('tooltip')).toHaveTextContent(t('routing.nodeStatus.running'));
     view.unmount();
   });

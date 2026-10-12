@@ -1,7 +1,7 @@
 MixRelay App
 Software License Agreement
 Licensor and copyright holder: Echo Vision Lab
-Version: 2026-10-08
+Version: 2026-10-10
 
 1. Using the app
 These terms govern the free and paid MixRelay app and its graph engine on
@@ -21,12 +21,12 @@ features and purchase entitlement. You may keep backup copies necessary for
 that use. Software ownership is not transferred.
 
 2. Free evaluation, purchases and updates
-The free app provides a feature-limited evaluation with no time limit. It
-restricts graph and mapping save/load; Driver settings remain free. No reduced
+The free app provides a feature-limited evaluation with no time limit. The free app can save and load one graph and its channel mappings. Driver settings remain free. No reduced
 audio quality, noise or artificial delay is added for evaluation purposes.
 
-The free Driver provides one default basic virtual device with free name,
-channel-count, sample-rate and PCM-format settings. Creating or removing
+The free Driver provides one default basic virtual device with free
+channel-count, sample-rate and PCM-format settings. Renaming devices
+requires the paid app. Creating or removing
 multiple virtual device identities (Create/Remove) requires the paid app;
 neither the free app nor standalone Driver provides these operations. Virtual
 devices already created through the paid app remain available after the app
@@ -35,33 +35,35 @@ the feature information for the version you use. A purchase covers the
 features described in its offer; these terms do not authorize undisclosed
 limits or a reduction of purchased features.
 
-A paid license covers the purchased major version and permits up to three
-simultaneously activated devices. Updates made available within that major
-version are within the purchased license. A later major version is not
-automatically included. Upgrade prices and conditions are presented before you
-decide whether to purchase an upgrade.
+A paid license covers the purchased major version. Any activation limit is
+stated in the offer before payment. Updates made available within that major
+version are included. If another major version is offered, purchasing it is
+optional. Not purchasing another version does not cancel the purchased-version
+entitlement.
 
 This is not a monthly subscription. Installing an update does not by itself
 cancel your purchased-major-version entitlement.
 
 3. Activation and changing devices
-The paid app requires online purchase authentication. After a successful
-online check, it can be used offline for up to 30 days. This is the offline
-authentication period, not the license term or a recurring payment period.
-Restarting or a failed check does not extend it. Once it expires, another
-successful online check is required for paid access. Expiry or a network error
-does not by itself cancel the purchase. Already-playing audio is not abruptly
-interrupted solely because authentication expires or a network check fails.
+The paid app requires online purchase authentication. Offline authorization
+lasts 30 days from the last successful online verification. Online recheck
+conditions are stated before payment.
+This period is not the license term or a recurring payment period. Restarting
+or a failed check does not extend it. Expiry or a network error does not by
+itself cancel the purchase or abruptly interrupt already-playing audio.
 
-To replace an activated device, deactivate the old activation online and
-activate the new device within the three-device limit. If you cannot access
-the old device or complete deactivation, contact support@mixrelay.com.
+To move your activation, deactivate the old device online and activate the new
+device within the purchased activation conditions. Server deactivation is
+complete only after the licensing service confirms it. If the old device is
+inaccessible or deactivation cannot be completed, contact
+support@mixrelay.com. Uninstalling, reinstalling or deleting local credentials
+does not by itself release a server activation or cancel the purchase.
 
-Server deactivation is completed only after the licensing service confirms it.
-Uninstalling, reinstalling or deleting local authentication data does not by
-itself release a server activation or cancel your purchase. Reactivation may
-be needed after reinstalling. Do not share keys for unauthorized use or bypass
-purchase authentication or evaluation limits.
+After deactivation or withdrawal of paid access, the system may continue using
+the free app and free Driver features. Recordings, projects and device
+settings are not deleted by that change. Paid-only operations remain subject
+to a valid paid entitlement. Do not share keys for unauthorized use or bypass
+purchase authentication or free-feature limits.
 
 4. Redistribution, integration and third-party licenses
 MixRelay's own proprietary code remains private. Free distribution or an app
@@ -111,9 +113,18 @@ applicable law.
 The seller, price, taxes, license scope and applicable refund conditions are
 shown before payment. To request cancellation or a refund, contact
 support@mixrelay.com or the order-support channel on your receipt with your
-order identifier and request. Do not send payment-card details or passwords.
-We will assist with product-related claims; using Lemon Squeezy does not
-exclude any responsibility imposed on Echo Vision Lab by applicable law.
+information identifying the purchase and your request. Do not send payment-
+card details or passwords. We will assist with product-related claims; using
+Lemon Squeezy does not exclude any responsibility imposed on Echo Vision Lab
+by applicable law.
+
+You may request a full refund within 30 calendar days after purchase without
+giving a reason. Send your request to support@mixrelay.com or the
+order-support channel on your receipt; include information identifying the
+purchase. A request sent within that period qualifies even if it is processed
+later. This policy supplements, and does not limit, mandatory withdrawal,
+refund or defect remedies. Downloading, installing or using the app does not
+by itself exclude this 30-day refund policy.
 
 Mandatory withdrawal, refund and defect remedies remain available. Where
 Korean e-commerce consumer law applies, the ordinary withdrawal period is
@@ -126,13 +137,22 @@ parts remain subject to withdrawal. Trying the free app or accepting these
 terms does not itself waive withdrawal rights.
 
 For content supplied contrary to its description or contract, Korean law
-allows withdrawal within three months of supply and within 30 days of when the
+allows withdrawal within three months of supply or within 30 days of when the
 discrepancy was known or could have been known. A statutory withdrawal from a
 digital-content purchase requires reimbursement within three business days of
 withdrawal, together with payment-cancellation measures and any statutory
 delay compensation. No withdrawal penalty is imposed. More favorable mandatory
 local rights and agreed refund conditions remain intact. A refunded paid
 entitlement may end, but the separate free Driver permission continues.
+
+Following a full refund, paid access is withdrawn when an online response from
+the licensing service confirms that the refunded paid entitlement is no longer
+valid. A connection failure alone is not that confirmation. We do not require
+an offline computer to reconnect solely to enforce the refund and permit
+continued use within its existing offline authorization. This does not extend
+the applicable offline period or authorize a new paid activation. Free app and
+Driver features remain available; the refund does not delete user recordings,
+projects or device settings.
 
 7. Licensing, updates and personal information
 Online activation sends your license key and chosen activation name directly
@@ -171,6 +191,11 @@ uninterrupted, error-free operation are not promised. These statements do not
 override the product description, agreed purchase conditions or statutory
 quality remedies.
 
+Our target is a first response within two Korean business days, excluding
+weekends and public holidays in South Korea (Asia/Seoul). This is a response
+target, not a guaranteed resolution deadline, and does not extend statutory
+response or refund deadlines.
+
 Each party's liability is determined by applicable law. These terms do not
 exclude liability for intent or gross negligence, impose a blanket damages
 cap, or shift risks to you contrary to mandatory law.
@@ -179,6 +204,10 @@ cap, or shift risks to you contrary to mandatory law.
 You may stop using and uninstall the app at any time. This alone does not
 cancel a purchase or constitute a refund request. Device deactivation follows
 section 3.
+
+Device deactivation or a refund of paid access does not itself end permission
+to use the free app or free Driver and does not require uninstalling them or
+deleting your work.
 
 If a breach provides lawful grounds for restriction or termination, Echo
 Vision Lab will identify the grounds and follow the notice and
@@ -204,7 +233,8 @@ contacts do not limit access to courts or statutory dispute-resolution
 procedures.
 
 Business information
-Developer, licensor and copyright holder: Echo Vision Lab (에코 비전 랩), a Korean sole proprietorship
+Developer, licensor and copyright holder: Echo Vision Lab (에코 비전 랩), a Korean
+sole proprietorship
 Business registration number: 111-42-04359
 Address: Room 505-S80, 5F, 30, Nonhyeon-ro 10-gil, Gangnam-gu, Seoul,
 Republic of Korea

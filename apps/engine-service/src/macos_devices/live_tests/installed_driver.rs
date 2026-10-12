@@ -74,6 +74,7 @@ struct Fault {
 struct Sequence {
     seen: u32,
     next: Option<u32>,
+    looping: bool,
 }
 
 impl Sequence {
@@ -100,7 +101,7 @@ impl Sequence {
             };
             for (lane, sample) in (0..channels).zip(frame) {
                 let expected = marker(position, lane).to_bits();
-                if position >= FRAME_LIMIT || sample.to_bits() != expected {
+                if (!self.looping && position >= FRAME_LIMIT) || sample.to_bits() != expected {
                     return Err(Fault {
                         frame: position,
                         lane,
@@ -109,7 +110,11 @@ impl Sequence {
                     });
                 }
             }
-            self.next = Some(position + 1);
+            self.next = Some(if self.looping {
+                (position + 1) % FRAME_LIMIT
+            } else {
+                position + 1
+            });
             checked += 1;
         }
         Ok(checked)
@@ -145,7 +150,7 @@ struct Probe {
 
 impl Probe {
     fn output(&self, scratch: &mut Scratch, frames: u32) -> bool {
-        if scratch.sent + frames >= FRAME_LIMIT {
+        if !scratch.sequence.looping && scratch.sent + frames >= FRAME_LIMIT {
             self.statistics.faults.fetch_or(1, Ordering::Release);
             return false;
         }
@@ -273,6 +278,10 @@ struct Client {
 
 impl Client {
     fn connect(spec: &Spec, statistics: &Arc<Statistics>) -> Self {
+        Self::connect_with_sequence(spec, statistics, false)
+    }
+
+    fn connect_with_sequence(spec: &Spec, statistics: &Arc<Statistics>, looping: bool) -> Self {
         let native = Native::create(spec, RATE, None, 0).expect("prepare installed Driver client");
         assert!(
             !native.owns_device_buffer,
@@ -287,7 +296,10 @@ impl Client {
                 samples: vec![0.0; MAX_FRAMES * usize::from(spec.channels)].into_boxed_slice(),
                 sent: 0,
                 previous_frames: 0,
-                sequence: Sequence::default(),
+                sequence: Sequence {
+                    looping,
+                    ..Sequence::default()
+                },
                 clock_breaks: None,
             }),
         });
@@ -311,6 +323,139 @@ impl Client {
             RATE
         );
         client
+    }
+}
+
+/// Repeats the exact frame/lane words through wrap. A three-second progress
+/// watchdog prevents an entire marker period being silently lost or replayed.
+#[test]
+#[ignore = "explicit installed Driver, exclusive PCM path and soak duration required"]
+fn installed_driver_pcm_soak() {
+    let seconds: u64 = std::env::var("MIXRELAY_TEST_SOAK_SECONDS")
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(
+        (30..=86_400).contains(&seconds),
+        "soak duration must be 30..86400 seconds"
+    );
+    let output_spec = selection();
+    let input_spec = Spec {
+        input: true,
+        ..output_spec.clone()
+    };
+    let statistics = Arc::new(Statistics::default());
+    let output = Client::connect_with_sequence(&output_spec, &statistics, true);
+    let input = Client::connect_with_sequence(&input_spec, &statistics, true);
+    let other = Device::open(&input_spec, RATE).expect("ordinary graph capture client");
+    let mut other = Some(other);
+    let mut detached_at = None;
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(seconds + 10);
+    let mut last_progress = started;
+    let mut previous = 0;
+    let mut last_report = started;
+    let target = u64::from(RATE) * seconds;
+    while statistics.checked.load(Ordering::Acquire) < target {
+        assert_no_pcm_faults(&statistics);
+        let now = Instant::now();
+        let checked = statistics.checked.load(Ordering::Acquire);
+        if checked != previous {
+            previous = checked;
+            last_progress = now;
+        }
+        assert!(
+            now < deadline && now.duration_since(last_progress) < Duration::from_secs(3),
+            "soak deadline/progress failed: checked={checked} target={target}"
+        );
+        if checked >= target / 2 && other.is_some() {
+            let retired = Arc::downgrade(&other.as_ref().unwrap().native);
+            drop(other.take());
+            while retired.upgrade().is_some() {
+                worker_retirement::WORKERS.reclaim();
+                assert!(Instant::now() < deadline, "soak client did not drain");
+                thread::park_timeout(Duration::from_millis(10));
+            }
+            detached_at = Some(checked);
+        }
+        if now.duration_since(last_report) >= Duration::from_mins(1) {
+            eprintln!(
+                "installed_pcm_soak elapsed_seconds={} checked={checked} target={target} detached_at={detached_at:?} faults=0",
+                started.elapsed().as_secs()
+            );
+            last_report = now;
+        }
+        thread::park_timeout(Duration::from_millis(10));
+    }
+    assert!(
+        started.elapsed() >= Duration::from_secs(seconds - 2),
+        "native frame clock ran faster than elapsed time"
+    );
+    assert_no_client_overflows(&input, &output);
+    drop(input);
+    drop(output);
+    assert_eq!(statistics.faults.load(Ordering::Acquire), 0);
+    assert_eq!(
+        selection().channels,
+        output_spec.channels,
+        "native format changed during soak"
+    );
+    eprintln!(
+        "installed_pcm_soak PASS elapsed_seconds={} checked={} channels={} rate={RATE} detached_at={detached_at:?} all_lanes_bit_exact=true faults=0",
+        started.elapsed().as_secs(),
+        statistics.checked.load(Ordering::Acquire),
+        output_spec.channels
+    );
+}
+
+fn assert_no_client_overflows(input: &Client, output: &Client) {
+    for client in [input, output] {
+        // SAFETY: connected Client retains the native owner; query is atomic only.
+        assert_eq!(
+            unsafe { ffi::mr_device_io_overflows(client.native.pointer.as_ptr()) },
+            0
+        );
+    }
+}
+
+fn assert_no_pcm_faults(statistics: &Statistics) {
+    assert_eq!(
+        statistics.faults.load(Ordering::Acquire),
+        0,
+        "soak PCM fault: frame={} lane={} expected={:#x} actual={:#x}",
+        statistics.bad_frame.load(Ordering::Relaxed),
+        statistics.bad_lane.load(Ordering::Relaxed),
+        statistics.expected.load(Ordering::Relaxed),
+        statistics.actual.load(Ordering::Relaxed)
+    );
+}
+
+#[test]
+fn looping_words_validate_wrap_and_reject_a_gap_or_repeat_at_the_boundary() {
+    let samples: Vec<_> = (FRAME_LIMIT - 3..FRAME_LIMIT + 3)
+        .flat_map(|frame| (0..2).map(move |lane| marker(frame, lane)))
+        .collect();
+    let mut sequence = Sequence {
+        looping: true,
+        ..Sequence::default()
+    };
+    assert_eq!(sequence.check(&samples, 2, 0), Ok(6));
+    assert_eq!(sequence.next, Some(3));
+    for defect in [0, 1] {
+        let mut changed = samples.clone();
+        if defect == 0 {
+            changed.drain(6..8);
+        } else {
+            changed.splice(6..6, samples[4..6].iter().copied());
+        }
+        assert!(
+            Sequence {
+                looping: true,
+                ..Sequence::default()
+            }
+            .check(&changed, 2, 0)
+            .is_err()
+        );
     }
 }
 

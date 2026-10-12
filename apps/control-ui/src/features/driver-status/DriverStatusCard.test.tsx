@@ -53,3 +53,17 @@ describe('DriverStatusCard', () => {
     }
   });
 });
+
+it('keeps a read-only diagnostic visible without inventing an actionable command', async () => {
+  await i18n.changeLanguage('en');
+  render(
+    <MixRelayProvider>
+      <DriverStatusCard state="ready">
+        <p>Device owner connected</p>
+      </DriverStatusCard>
+    </MixRelayProvider>,
+  );
+  expect(screen.getByText('Device owner connected')).toBeInTheDocument();
+  expect(screen.getByText(i18n.t('driver.states.ready'))).toBeInTheDocument();
+  expect(screen.queryByRole('button')).not.toBeInTheDocument();
+});

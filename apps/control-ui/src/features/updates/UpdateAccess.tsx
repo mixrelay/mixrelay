@@ -1,7 +1,13 @@
 import { type ReactNode, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-
 import { ActionButton } from '../../core/ui/ActionButton';
+import { ContentSection } from '../../core/ui/ContentSection';
+import { FormActions } from '../../core/ui/FormActions';
+import { IconActionButton } from '../../core/ui/IconActionButton';
+import { Inline } from '../../core/ui/Inline';
+import { InlineNotice } from '../../core/ui/InlineNotice';
+import type { StatusTone } from '../../core/ui/StatusBadge';
+import { Text } from '../../core/ui/Text';
 import { UpdatesDialog } from '../../core/ui/UpdatesDialog';
 import type {
   ProductUpdate,
@@ -9,10 +15,16 @@ import type {
   UpdateProduct,
   UpdatesPort,
 } from '../../core/updates/UpdatesPort';
-import styles from './UpdateAccess.module.css';
 import { useUpdatesSession } from './useUpdatesSession';
 
-const products: UpdateProduct[] = ['mix-relay', 'mix-relay-driver'];
+const products: UpdateProduct[] = ['mix-relay'];
+const updateTones = {
+  current: 'positive',
+  unavailable: 'critical',
+  available: 'accent',
+  published: 'accent',
+  not_published: 'neutral',
+} satisfies Record<ProductUpdate['state'], StatusTone>;
 
 function downloadLabel(download: UpdateDownload) {
   const extension = new URL(download.url).pathname.match(/\.(pkg|dmg|deb|rpm|appimage)$/i)?.[1];
@@ -32,31 +44,33 @@ function ProductRelease({
   const state = session.failed ? 'unavailable' : (update?.state ?? 'unavailable');
   const downloads =
     state === 'unavailable' || state === 'not_published' ? [] : (update?.downloads ?? []);
-  const name = product === 'mix-relay' ? 'MixRelay' : 'MixRelay Driver';
   return (
-    <section className={styles.product} aria-label={name}>
-      <h2>{name}</h2>
-      <p className={styles.versions}>
+    <ContentSection title="MixRelay" divider="after">
+      <Text kind="supporting" tone="muted">
         {t('updates.installed', { version: update?.installedVersion ?? t('updates.unknown') })}
-      </p>
-      {update?.latestVersion ? (
-        <p className={styles.versions}>{t('updates.latest', { version: update.latestVersion })}</p>
+      </Text>
+      {update?.latestVersion && update.latestVersion !== update.installedVersion ? (
+        <Text kind="supporting" tone="muted">
+          {t('updates.latest', { version: update.latestVersion })}
+        </Text>
       ) : null}
-      {session.checked ? <p>{t(`updates.states.${state}`)}</p> : null}
-      <div className={styles.downloads}>
+      {session.checked ? (
+        <Text kind="supporting" tone={updateTones[state]}>
+          {t(`updates.states.${state}`)}
+        </Text>
+      ) : null}
+      <Inline>
         {downloads.map((download) => (
           <ActionButton
             key={download.url}
             disabled={session.checking || session.opening !== null}
             onClick={() => void session.openDownload(product, download.url)}
-            size="xs"
-            variant="light"
           >
             {t('updates.openDownload', { asset: downloadLabel(download) })}
           </ActionButton>
         ))}
-      </div>
-    </section>
+      </Inline>
+    </ContentSection>
   );
 }
 
@@ -65,7 +79,7 @@ export function UpdateAccess({
   children,
   port,
 }: {
-  children: (action: ReactNode) => ReactNode;
+  children: (action: ReactNode, openDriverInstaller: (() => void) | undefined) => ReactNode;
   port: UpdatesPort | null;
 }) {
   const { t } = useTranslation();
@@ -74,14 +88,11 @@ export function UpdateAccess({
   const available = session.products.some((product) => product.state === 'available');
   const actionLabel = t(available ? 'updates.available' : 'updates.check');
   const action = port ? (
-    <ActionButton
-      aria-label={actionLabel}
-      title={actionLabel}
+    <IconActionButton
+      label={actionLabel}
+      indicator={available}
       aria-expanded={opened}
       aria-haspopup="dialog"
-      className={styles.action}
-      variant="subtle"
-      size="xs"
       onClick={() => {
         setOpened(true);
         void session.refresh();
@@ -90,20 +101,31 @@ export function UpdateAccess({
       <svg aria-hidden="true" viewBox="0 0 16 16">
         <path d="M8 2v8m-3-3 3 3 3-3M3 11v3h10v-3" />
       </svg>
-      {available ? <span className={styles.available} aria-hidden="true" /> : null}
-    </ActionButton>
+    </IconActionButton>
   ) : null;
 
   return (
     <>
-      {children(action)}
+      {children(
+        action,
+        port
+          ? () => {
+              setOpened(true);
+              void session.refresh();
+            }
+          : undefined,
+      )}
       <UpdatesDialog
         opened={opened && port !== null}
         onClose={() => setOpened(false)}
         closeLabel={t('updates.close')}
         title={t('updates.title')}
       >
-        {session.checking ? <p role="status">{t('updates.checking')}</p> : null}
+        {session.checking ? (
+          <div role="status">
+            <Text kind="supporting">{t('updates.checking')}</Text>
+          </div>
+        ) : null}
         {products.map((product) => (
           <ProductRelease
             key={product}
@@ -112,18 +134,20 @@ export function UpdateAccess({
             update={session.products.find((update) => update.product === product)}
           />
         ))}
-        {session.openFailed ? <p role="alert">{t('updates.openFailed')}</p> : null}
-        <p className={styles.notice}>{t('updates.installNotice')}</p>
-        <div className={styles.footer}>
+        {session.openFailed ? (
+          <InlineNotice tone="critical">{t('updates.openFailed')}</InlineNotice>
+        ) : null}
+        <Text kind="supporting" tone="muted">
+          {t('updates.installNotice')}
+        </Text>
+        <FormActions>
           <ActionButton
             disabled={session.checking || session.opening !== null}
-            size="xs"
-            variant="subtle"
             onClick={() => void session.refresh()}
           >
             {t('updates.checkAgain')}
           </ActionButton>
-        </div>
+        </FormActions>
       </UpdatesDialog>
     </>
   );

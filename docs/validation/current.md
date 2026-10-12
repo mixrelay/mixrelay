@@ -1,0 +1,44 @@
+# 검증 현황
+
+제품 동작·범위·남은 작업은 [product.md](../product.md)가 기준이다. MixRelay는 아직 출시하지 않았다.
+이 문서는 현재 소스 검사와 로컬 개발 설치본의 검증 범위만 구분한다.
+
+## 현재 소스
+
+- 2026-10-12 단일 MixRelay 제품을 소스와 실제 macOS 설치 파일에 반영했다. 공개 앱·메뉴·업데이트 카탈로그는 MixRelay 하나이며, Cargo·앱·HAL·서비스·제거 앱은 모두 0.1.0이다. 전체 PKG에는 편집 앱·HAL·두 서비스·제거 앱이 항상 포함되고 Driver 선택은 없다. 완성 PKG를 확장해 Publisher 서명·Universal 2·전체 구성·버전을 다시 확인했다. 장치·그래프·설정·녹음·인증 저장 위치와 서비스 식별자는 보존하며, 기존 분리 앱의 검증·퇴역·실패 시 복원과 부분 설치 조합은 native fixture로 확인했다. 네이티브 설치 검사 153개·데스크톱 검사 154개, 패키징 검사 235개·추가 lifecycle 검사 8개, strict Clippy·전체 Rust 포맷 검사가 통과했다. UI 검사 163개 파일·2,081개와 네 coverage 항목 100%, 앱·Storybook 빌드·문서 계약 검사가 통과했다. 390px에서 단일 업데이트 모달의 Light/English·Dark/Pseudo 렌더와 Tab 순환·Enter 열기·Escape 반환 포커스, 한국어 버전 불일치 복구 화면을 직접 확인했다. 긴 다운로드 명령의 넘침은 Core ActionButton의 최소 높이·부모 폭·줄바꿈 계약으로 수정하고 Storybook 예제를 추가했다. 산출물·확장 검사 결과는 `.work/product-integration-artifact.json`, 화면 증거는 `.work/storybook-review/unified-*.png`에 있다. 설치 파일은 Developer ID 서명본이며 공증·호스트 설치·기존 설치본 실제 이관 검증은 수행하지 않았다. Linux는 패키지 소스·검사 계약을 통합했으며 새 전체 패키지의 실제 배포판 빌드·설치 검증은 별도다.
+
+- 2026-10-12 앱 전체 TSX 86개·조작 소스 위치 107개·소유 파일 49개를 대조하고 반복 아이콘 행동의 대상 이름·Tooltip·실제 키 실행·포커스 복귀를 보완했다. 그래프 삭제·노드 Options/Bypass/에디터·녹음/폴더·비밀번호 행동을 Core와 실제 Feature에 연결했다. 동작별 무료 한도·중복 상태·일반 설명을 줄이고 가상 장치 부재 안내를 수정했다. Pseudo 전체 키 생성과 보간 토큰 보존으로 긴 번역 검수의 영어 fallback을 제거했다. UI 품질·경계·타입·앱/Storybook 빌드·61개 문서 계약 검사, 163개 파일의 2,082개 검사와 coverage 100%가 통과했다. 현재 문서 69개·스토리 459개다. Core 아이콘 검사 19개·브라우저 KeyboardOwners·RecoveryKeyboard play, 주요 App/Feature 렌더와 390px Dark/Pseudo를 확인했다. `pnpm --filter @mixrelay/control-ui audit:ui`는 재사용 소스 목록 도구이며 실제 접근성 합격 판정과 구별한다. 설치본·실제 스크린리더·모든 play 조합의 검증은 별도다. 이 UI 검수 당시 단일 제품은 명세 기준이었으며 후속 소스·패키지 통합 결과는 위 기록을 따른다.
+
+- 2026-10-12 기호 행동과 기본값의 중복 문구를 정리했다. Core AudioGraphCanvas의 노드 추가·StudioScreen의 새 그래프는 +만 표시하고 접근성 이름·툴팁·키 실행을 유지한다. Core NameDialog의 placeholder를 표시 이름 편집이 소비하며 별칭이 없으면 빈 값·원래 이름 placeholder를 사용한다. 효과 메뉴의 일반 설명과 업데이트의 동일 버전 중복 표기를 생략했다. OriginalPlaceholder play, 실제 App의 Enter 생성/취소 포커스, 효과 메뉴·업데이트 상태와 390px Dark/Pseudo 모달을 확인했다. UI 품질·경계·타입·앱/Storybook 빌드·문서 계약 검사, 162개 파일의 2,056개 검사와 coverage 100%가 통과했다. 현재 Storybook은 문서 69개·스토리 455개다. 설치본 반영·실제 스크린리더 검증과 구별한다.
+- 2026-10-12 전체 모달의 공통 Dialog 토큰·테마와 FormActions 규격을 통일했다. 폭 300/360/420px·기본 헤더 32px/제목 13px·본문 12px, 폼 하단 우측 정렬과 위 12px/버튼 간격 8px를 사용한다. NameDialog·ConfirmationDialog·GraphCreateDialog·LicenseDetails의 생성/변경/확인 버튼이 이를 소비한다. 이름·생성·삭제·업데이트·라이선스·제품 정보 6종의 Light/Dark와 390px Dark/Pseudo, 긴 제목·라이선스 활성화 폼·Tab 순서·Enter/Escape를 확인했다. UI 품질·경계·타입·앱/Storybook 빌드·문서 계약 검사, 162개 파일의 2,056개 검사와 coverage 100%가 통과했다. 현재 Storybook은 문서 69개·스토리 454개다. 개발 설치본에는 아직 반영하지 않았다.
+- 2026-10-12 그래프 인스턴스별 표시 이름을 Core AudioGraphCanvas·NameDialog와 Feature RoutingWorkspace에 연결했다. 이름 더블클릭·F2·단일 노드 메뉴로 편집하고, 빈 값은 원래 이름 복원, Escape는 취소·같은 노드로 포커스 반환이다. GraphLayout.nodeLabels가 별칭 저장·자동 병합을 소유하며 앱 이름·selector·runtime config·오디오 revision은 유지한다. Storybook 변경·복원·취소 play 3개와 390px Dark/Pseudo에서 긴 이름·Tab·Enter·넘침을 확인했다. UI 품질·경계·타입·앱/Storybook 빌드·문서 계약 검사, 162개 파일의 2,056개 검사와 coverage 100%가 통과했다. 프로토콜 호환 1개·엔진 메타데이터 9개·파일 저장/열기/재시작 1개 검사도 통과했다. 현재 Storybook은 문서 69개·스토리 451개다. 이 변경은 개발 설치본에 아직 반영하지 않았다.
+- macOS 종료 경로의 데스크톱 검사 153개, 엔진 소유권 상실·종료 실패 검사 3개, 런처 패키징 검사 12개와 런처 수명 검사 4개가 통과했다. AppKit 초기화 스레드에서 Tokio 신호 등록이 충돌하던 문제를 수정하고 회귀 검사에 포함했다. 런처는 종료 신호를 Driver에 전달하고 종료를 회수하며, 종료 신호와 자식 종료 사이의 대기 경쟁을 막는다.
+- 녹음 마무리의 자동 검사는 활성 tap이 있는 `stop_all`, 마지막 tap 회수, PCM 캡처와 Stop의 경쟁을 다루며, 마무리된 실제 파일을 읽어 수락한 PCM의 보존과 종료 후 쓰기 차단을 확인한다(`crates/audio-recorder/src/tests.rs`). 엔진 종료는 같은 `stop_all`을 수행하고, 소유권 상실·마무리 실패 뒤에도 native 오디오 중지를 시도하며 실패를 보존하는 종료 검사가 있다. 실제 Dock에서 이 종료 경로로 진입하는 연결은 아래 설치본 검사로 확인했다.
+- Engine 유닛 검사는 공통 PCM 경계·효과 이력·예약 실패 회수·활성 상태 보존을 포함해 통과했다.
+- macOS Driver의 순수 자원 한도 유닛 검사는 Mapping 합산·공유 영역 중복 제외·한도/overflow 거부를 포함해 통과했다.
+- 관련 Rust 패키지의 all-target strict Clippy와 변경 파일 포맷 검사는 통과했다.
+- 2026-10-12 `pnpm check:ui-quality`와 `pnpm --filter @mixrelay/control-ui check`가 통과했다. Core 경계·타입, 160개 파일의 동작 검사 2,042개, 앱·Storybook 빌드가 통과했고 statement 5,936/5,936·branch 4,988/4,988·function 1,737/1,737·line 5,096/5,096으로 모두 100%다. 자동 revision 병합·반복 충돌·지연 응답·초안 보존·수동 재시도·배치 저장 취소와 포커스 회귀를 포함한다. coverage 기준은 낮추지 않았다.
+- Storybook 기준 문서 6개·독립 컴포넌트 문서 61개와 실제 스토리 217개를 Carbon 검수표 기준으로 리뷰했다. 빌드 검사는 계약 61개·공개 Core UI/audio-graph export 57개의 API·타입·기본값, 소비자·테스트 경로, 독립 문서와 고정·상태 스토리 링크를 대조한다. 토큰·타이포의 실제 값, 지역 글꼴, 지원 상태 조합, 페이지의 복구·편집 제한 계약을 수정했다. 브라우저에서 문서 67개와 기본 스토리 198개의 Light/Dark 렌더, 추가 상태 예시, 검색·키보드 선택, 390px Pseudo 복구 화면, 아이콘 명령의 Tab·Enter·툴팁, 연속 revision의 자동 병합과 재시도 후 편집·포커스 보존을 확인했다. 렌더 검사는 모든 play 입력 조합의 완료를 뜻하지 않는다. 문서용 UI는 제품 코드 coverage에서 제외하고 실제 렌더·빌드 계약으로 검수한다. 실제 엔진·파일·장치와 스크린리더 검증은 별도다.
+- 2026-10-12 Storybook 공식 문서 세 편을 기준으로 GetStarted·Contributing을 추가했다. 첫 적용 당시 운영·기준 문서 8개·독립 컴포넌트 문서 61개·스토리 230개였다. ActionButton·TextField·StatusBadge의 전용 Playground를 실제 Core 메타데이터·Controls·ArgTypes·Source에 연결하고 AST 빌드 검사에 소유 경로 대조를 추가했다. 추가 스토리 13개의 Light/Dark 렌더와 변경 문서 5개의 390px 레이아웃, 버튼 Tab·Enter·Space, 필드 빠른 입력·blur·Controls 연동을 확인했다. 첫 적용의 전용 Playground는 위 세 컴포넌트였으며 전체 play·시각 회귀 기준 이미지 검증으로 표시하지 않는다.
+- 2026-10-12 전체 컴포넌트 계약 61개에 실제 Core export의 Playground·API·기본값·Source·개별 상태·사용 조합을 연결했다. 현재 Storybook은 문서 69개·스토리 445개다. 전체 61개 계약에서 실제 CSF 전체 코드와 입력 상태 helper를 읽을 수 있다. 빌드 검사는 Playground import 소유자와 실제 JSX 소비, 명시 기본값, 독립 API 연결, App/Screen 공개 화면의 Pages 목록, 10개 화면·과업 소유 파일과 상태 링크를 대조한다. 새 컴포넌트 예제는 189개, 페이지 예제는 26개다. preview 훅과 로컬 입력 상태를 사용하고 외부 args의 실제 변경만 동기화하며 최신 변경 값만 blur에서 공유한다. 숫자 확정·Select 선택의 값 복귀와 재렌더 오류를 수정했다. 문서 61개의 390px 레이아웃, 61개 Playground·새 상태 131종의 Light/Dark 렌더, 숫자 빠른 입력·Controls 양방향, Select·토글·TextField 입력을 확인했다. 새 Core 회귀 play 4개·Feature 페이지 play 24개가 통과했고 실제 App의 catalog 실패·대기에서 작업 유지·생성 잠금을 확인했다. Pages의 긴 inline 코드 넘침은 공통 DocsLayout에서 수정했다. 한국어 제목의 목차는 smooth-scroll의 ID 인코딩 불일치를 피하도록 문서 소유 DOM에서 hash를 해석해 제목으로 이동·포커스를 옮기고 제목 hash 링크를 보존하며 실제 이동을 확인했다. 전체 입력 조합·시각 회귀 기준 이미지·실제 스크린리더·설치본 검증은 구별한다.
+- 일반 그래프 revision 업데이트는 자동 병합하고 통신 실패·확인되지 않은 적용은 초안을 보존한 채 재시도 하나만 표시한다. 10초 동안 지속된 확정 revision 충돌만 초안 적용·취소를 선택하게 한다. GraphApplicationQueue·GraphLayoutController가 병합·재시도·취소를 소유하고 RoutingWorkspace가 실패·복구 표시와 포커스를 소비한다. 임의의 저장본 선택을 요구하지 않는다.
+- 공통 비정상 PCM 차단·진단 카운터, 효과 이력 통합, fallible PCM 버퍼 준비와 Driver Mapping 한도는 개발 설치본에 반영하지 않았다. UI 후속 수정과 진단 파일명 `dump.json` 변경도 미반영이다.
+- 메모리 부족 방어는 준비·교체 경계의 예약 실패와 제품 자원 한도를 다룬다. 작은 객체의 모든 할당이나 원격 프로세스 자원까지 보호하지 않는다.
+- 방어 검증은 유닛 실패 주입과 정적 검사로 충분하다. 새 장시간 시험이나 시스템 강제 오류 통합 시험은 진행하지 않는다.
+
+## 로컬 개발 설치본
+
+- 2026-10-12 사용자가 서명된 전체 제거 CLI를 관리자 권한으로 실행하고 남은 제거 도우미의 launchd 등록을 해제했다. 실제 설치 대상 10개가 모두 없고 오디오 서비스·엔진·제거 도우미의 system 등록이 없으며 CoreAudio의 HAL 부재를 확인했다. 장치 설정 `drivers.json`은 남아 있다. 결과는 `.work/product-integration-removal.json`에 기록했다. 새 전체 PKG의 설치·업그레이드 검증과 구별한다.
+
+macOS 백그라운드 실행 중단은 완료했다. 아래 설치본 검사와 녹음·종료 경로 자동 검사를 완료 근거로 삼는다.
+
+- 2026-10-11 macOS 27.0.1에서 Driver·엔진·HAL과 편집 앱을 Developer ID 서명 패키지로 업데이트하고 설치 파일 일치·서명을 확인했다. 최종 편집 앱은 비 UI 런처를 직접 실행하며, 이전 시험 Agent의 등록 해제도 확인했다. 편집 앱 일반 종료 뒤 런처·Driver 실행부·엔진·가상 장치 1개가 유지됐다.
+- 사용자가 실제 MixRelay의 Dock **백그라운드 실행 중단**을 누른 뒤 런처·Driver 실행부·엔진이 모두 종료되고, native 장치 목록과 CoreAudio 장치 목록에서 MixRelay 장치가 사라졌다. 중지 마커와 저장 장치 설정이 보존됐으며, 반복 상태 조회와 39초 경과 후에도 장치 0개·실행부 및 엔진 종료 상태가 유지됐다. 앱을 명시적으로 다시 열었을 때 같은 장치 ID·설정으로 장치 1개와 엔진이 복원됐고, 장치 설정 해시도 중지 전과 일치했다. 재연결 시험 후에는 검증된 런처에 SIGTERM을 보내 다시 중지했다. 이 마지막 정리는 실제 Dock 클릭 검증과 구별한다.
+- 실제 녹음 중 Dock 클릭으로 파일을 마무리하는 조합은 직접 실행하지 않았다. 녹음 파일·종료 경로의 자동 검사와 실제 Dock 종료 연결 검사로 이번 변경을 검증하며, 이 조합의 별도 실기 검사를 필수 미완료 항목으로 두지 않는다. 설치 패키지는 로컬 검증용 Developer ID 서명본이며 공증한 공개 배포판은 아니다.
+- macOS 내장 효과의 PCM·bypass·Off·Mute·Dynamics 텔레메트리와 HAL의 유한 구간 오디오 검사는 통과했다. 전체 제품의 장시간 연속성·무누수 판정은 미완료다.
+- Linux VM의 소프트웨어 source/sink와 다채널 검사는 통과했다. 사용자가 제공한 실제 사용 결과에서도 Proxmox 등 x64 Linux VM은 정상 동작한다. 기존 가상 환경의 PCM 누락·되돌림 제한은 Docker 컨테이너·Docker 기반 VM의 오디오 실행에 한정하며, 일반 Linux VM이나 ARM 전체의 미해결 문제로 두지 않는다. 해당 환경에서는 제품 오디오를 실행하지 않도록 안내한다.
+- 실제 설치본의 효과 설정·프리셋·EQ 키보드 조작은 확인했다. EQ 휠·드래그와 모든 입력 수단, 실제 스크린리더·전체 번역·플랫폼 접근성 검증을 대신하지 않는다.
+- 설치·업데이트 뒤 최초 연결 실패와 서비스 재시작 시 Off가 On으로 초기화되는 문제는 해결 확인이 필요하다.
+
+현재 소스의 설치 검증, 제품 전체의 실제 사용 흐름과 출시 요건은 제품 문서의 미완료 상태를 따른다.
+소스 테스트나 유한 구간 통과를 설치본 전체의 연속성·무누수·출시 완료로 표시하지 않는다.

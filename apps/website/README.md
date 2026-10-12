@@ -16,3 +16,5 @@ python3 -m http.server 4173 --bind 127.0.0.1
 브라우저에서 `http://localhost:4173/`를 엽니다. 종료하려면 서버 터미널에서 `Ctrl+C`를 누릅니다.
 
 페이지는 사전 공개 초안입니다. 실제 제품 공개 전에 제품·OS 검증 상태와 설치 안내를 확인하고, 확정된 구매 링크와 가격만 추가해야 합니다.
+
+서체는 Core의 IBM Plex 원본을 동봉합니다. Core 서체 계약을 바꾸면 `node scripts/sync-website-fonts.mjs`로 웹 자산을 생성한 뒤 구조 검사를 실행합니다. `assets/fonts/OFL.txt`가 원본 라이선스입니다.

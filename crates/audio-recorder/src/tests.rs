@@ -50,7 +50,7 @@ fn start(registry: &RecorderRegistry, path: &Path, rate: u32, encoding: Encoding
 }
 
 fn read(path: &Path) -> (hound::WavSpec, Vec<f32>) {
-    let mut reader = hound::WavReader::open(path).unwrap();
+    let mut reader = mixrelay_test_support::rf64::open(path).unwrap();
     (
         reader.spec(),
         reader.samples::<f32>().map(Result::unwrap).collect(),
@@ -270,7 +270,7 @@ fn integer_encodings_clip_and_dither_at_the_final_quantizer() {
         registry
             .command("rec", request(RecorderAction::Stop))
             .unwrap();
-        let mut reader = hound::WavReader::open(path).unwrap();
+        let mut reader = mixrelay_test_support::rf64::open(path).unwrap();
         assert_eq!(reader.spec().bits_per_sample, bits);
         let samples: Vec<i32> = reader.samples().map(Result::unwrap).collect();
         assert_eq!(&samples[..2], &[-(1 << (bits - 1)), (1 << (bits - 1)) - 1]);
@@ -330,5 +330,56 @@ fn stop_racing_capture_finalizes_before_return_and_excludes_later_callbacks() {
             .1
             .iter()
             .all(|sample| sample.to_bits() == 0.125_f32.to_bits())
+    );
+}
+
+#[test]
+fn registry_duration_limit_survives_resume_and_finalizes_without_stop() {
+    let directory = FixtureDir::new("registry-duration").unwrap();
+    let path = directory.join("take.wav");
+    let registry = RecorderRegistry::new();
+    let tap = registry.prepare("rec", 2).unwrap();
+    tap.capture(&[], 48_000);
+    registry
+        .command_with_duration_limit(
+            "rec",
+            RecorderRequest {
+                path: Some(path.to_str().unwrap().into()),
+                encoding: Some(Encoding::Float32),
+                ..request(RecorderAction::Record)
+            },
+            Some(1),
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    for quantum in 1..=188 {
+        tap.capture(&[0.25; 512], 48_000);
+        let expected = (quantum * 256).min(48_000);
+        while registry.status("rec").frames < expected {
+            assert!(
+                Instant::now() < deadline,
+                "writer did not drain the accepted prefix"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        if quantum == 48 {
+            registry
+                .command("rec", request(RecorderAction::Pause))
+                .unwrap();
+            tap.capture(&[0.5; 512], 48_000);
+            // A resumed take retains its original cap even when this command is unrestricted.
+            registry
+                .command("rec", request(RecorderAction::Record))
+                .unwrap();
+        }
+    }
+    let status = registry.status("rec");
+    assert_eq!(
+        (status.state, status.frames, status.error),
+        (RecorderState::Stopped, 48_000, None)
+    );
+    assert_eq!(
+        mixrelay_test_support::rf64::inspect(&path).unwrap().frames,
+        48_000
     );
 }

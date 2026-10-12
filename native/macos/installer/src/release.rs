@@ -182,6 +182,44 @@ impl ReleasePayloadVerifier {
         self.verify_removal_with(layout, verify_signature)
     }
 
+    fn verify_removal_bundle(
+        &self,
+        target: OwnedTarget,
+        path: &Path,
+        signature: &mut impl FnMut(&Path, &str, ArtifactRole) -> Result<(), ReleaseError>,
+    ) -> Result<(), ReleaseError> {
+        let (identifier, executable, role) = match target {
+            OwnedTarget::App => (
+                "io.mixrelay.desktop",
+                "mixrelay-desktop",
+                ArtifactRole::Application,
+            ),
+            OwnedTarget::LegacyManager => (
+                "io.mixrelay.driver.desktop",
+                "mixrelay-desktop",
+                ArtifactRole::Application,
+            ),
+            OwnedTarget::Hal => ("io.mixrelay.audio.driver", "MixRelayHAL", ArtifactRole::Hal),
+            _ => (
+                "io.mixrelay.driver.uninstaller",
+                "mixrelay-driver-uninstaller",
+                ArtifactRole::Uninstaller,
+            ),
+        };
+        verify_bundle(path, identifier, executable)?;
+        signature(path, &self.team.requirement(identifier), role)?;
+        if matches!(
+            target,
+            OwnedTarget::Uninstaller | OwnedTarget::LegacyUninstaller
+        ) {
+            self.verify_installer_executable_with(
+                &path.join("Contents/Helpers/mixrelay-macos-installer"),
+                signature,
+            )?;
+        }
+        Ok(())
+    }
+
     fn verify_removal_with(
         &self,
         layout: &FilesystemLayout,
@@ -196,30 +234,30 @@ impl ReleasePayloadVerifier {
                 Err(source) => return Err(ReleaseError::Io { path, source }),
             }
             match target {
-                OwnedTarget::App | OwnedTarget::Hal | OwnedTarget::Uninstaller => {
-                    let (identifier, executable, role) = match target {
-                        OwnedTarget::App => (
-                            "io.mixrelay.driver.desktop",
-                            "mixrelay-desktop",
-                            ArtifactRole::Application,
-                        ),
-                        OwnedTarget::Hal => {
-                            ("io.mixrelay.audio.driver", "MixRelayHAL", ArtifactRole::Hal)
-                        }
-                        _ => (
-                            "io.mixrelay.driver.uninstaller",
-                            "mixrelay-driver-uninstaller",
-                            ArtifactRole::Uninstaller,
-                        ),
-                    };
-                    verify_bundle(&path, identifier, executable)?;
-                    signature(&path, &self.team.requirement(identifier), role)?;
-                    if target == OwnedTarget::Uninstaller {
-                        self.verify_installer_executable_with(
-                            &path.join("Contents/Helpers/mixrelay-macos-installer"),
-                            &mut signature,
-                        )?;
-                    }
+                OwnedTarget::App
+                | OwnedTarget::Hal
+                | OwnedTarget::Uninstaller
+                | OwnedTarget::LegacyManager
+                | OwnedTarget::LegacyUninstaller => {
+                    self.verify_removal_bundle(target, &path, &mut signature)?;
+                }
+                OwnedTarget::RuntimeEngine => {
+                    verify_architecture(&path)?;
+                    signature(
+                        &path,
+                        &self.team.requirement("mixrelay-engine-service"),
+                        ArtifactRole::Engine,
+                    )?;
+                }
+                OwnedTarget::RuntimeLaunchd => {
+                    crate::runtime_definition::validate_installed(
+                        &read_configuration(&path, 16 * 1024)?,
+                        &self.account,
+                    )
+                    .map_err(|source| ReleaseError::Io {
+                        path: path.clone(),
+                        source: io::Error::other(source.to_string()),
+                    })?;
                 }
                 OwnedTarget::Driver => {
                     verify_architecture(&path)?;
@@ -267,6 +305,11 @@ impl ReleasePayloadVerifier {
         if remover.exists() || plist.exists() {
             sources = sources.with_remover(remover, plist);
         }
+        let engine = staged.payload_path(OwnedTarget::RuntimeEngine);
+        let plist = staged.payload_path(OwnedTarget::RuntimeLaunchd);
+        if engine.exists() || plist.exists() {
+            sources = sources.with_runtime(engine, plist);
+        }
         self.verify_sources(&sources)
     }
 
@@ -300,6 +343,38 @@ impl ReleasePayloadVerifier {
         self.verify_installer_executable_with(path.as_ref(), verify_signature)
     }
 
+    /// Checks the graph app and its separate on-demand audio engine.
+    /// # Errors
+    /// Rejects incorrect identities, architecture slices, entitlements or signatures.
+    pub fn verify_graph_app(&self, app: &Path, engine: &Path) -> Result<(), ReleaseError> {
+        self.verify_graph_bundle(app)?;
+        self.verify_graph_engine(engine)
+    }
+
+    /// Checks an existing graph app before replacing it.
+    /// # Errors
+    /// Rejects an app from a different publisher or with an unexpected identity.
+    pub fn verify_graph_bundle(&self, app: &Path) -> Result<(), ReleaseError> {
+        verify_bundle(app, "io.mixrelay.desktop", "mixrelay-desktop")?;
+        verify_signature(
+            app,
+            &self.team.requirement("io.mixrelay.desktop"),
+            ArtifactRole::Application,
+        )
+    }
+
+    /// Checks an existing graph engine before replacing it.
+    /// # Errors
+    /// Rejects incorrect architecture, publisher or entitlement metadata.
+    pub fn verify_graph_engine(&self, engine: &Path) -> Result<(), ReleaseError> {
+        verify_architecture(engine)?;
+        verify_signature(
+            engine,
+            &self.team.requirement("mixrelay-engine-service"),
+            ArtifactRole::Engine,
+        )
+    }
+
     fn verify_installer_executable_with(
         &self,
         path: &Path,
@@ -314,6 +389,36 @@ impl ReleasePayloadVerifier {
             &self.team.requirement("mixrelay-macos-installer"),
             ArtifactRole::Installer,
         )
+    }
+
+    fn verify_runtime_with(
+        &self,
+        sources: &InstallSources,
+        is_template: bool,
+        mut signature: impl FnMut(&Path, &str, ArtifactRole) -> Result<(), ReleaseError>,
+    ) -> Result<(), ReleaseError> {
+        if let (Some(engine), Some(plist)) = (sources.runtime_engine(), sources.runtime_launchd()) {
+            if !engine.is_absolute() || !plist.is_absolute() {
+                return Err(ReleaseError::SourcePath(engine.to_path_buf()));
+            }
+            verify_architecture(engine)?;
+            signature(
+                engine,
+                &self.team.requirement("mixrelay-engine-service"),
+                ArtifactRole::Engine,
+            )?;
+            let bytes = read_configuration(plist, 16 * 1024)?;
+            let result = if is_template {
+                crate::runtime_definition::from_template(&bytes, &self.account)
+            } else {
+                crate::runtime_definition::validate_installed(&bytes, &self.account)
+            };
+            result.map_err(|source| ReleaseError::Io {
+                path: plist.to_path_buf(),
+                source: io::Error::other(source.to_string()),
+            })?;
+        }
+        Ok(())
     }
 
     fn verify_with(
@@ -338,6 +443,7 @@ impl ReleasePayloadVerifier {
         } else {
             LaunchdConfiguration::validate_installed(&launchd, &self.account)?
         };
+        self.verify_runtime_with(sources, is_template, &mut signature)?;
         if let (Some(app), Some(plist)) = (sources.remover(), sources.removal_launchd()) {
             if !app.is_absolute() || !plist.is_absolute() {
                 return Err(ReleaseError::SourcePath(app.to_path_buf()));
@@ -367,7 +473,7 @@ impl ReleasePayloadVerifier {
         for (bundle, identifier, executable, role) in [
             (
                 sources.app(),
-                "io.mixrelay.driver.desktop",
+                "io.mixrelay.desktop",
                 "mixrelay-desktop",
                 ArtifactRole::Application,
             ),

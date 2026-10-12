@@ -20,7 +20,7 @@ fn template_binds_account_and_roundtrips_with_driver_autostart() {
     assert_eq!(definition.0.program_arguments, [DRIVER_PATH]);
     assert_eq!(
         definition.0.associated_bundle_identifiers,
-        "io.mixrelay.driver.desktop"
+        "io.mixrelay.desktop"
     );
     assert!(definition.0.run_at_load);
     assert!(definition.0.keep_alive);
@@ -82,11 +82,11 @@ fn associated_bundle_identifier_must_be_the_exact_desktop_identity() {
     let original = String::from_utf8(template()).unwrap();
     for replacement in [
         "<string>io.other.desktop</string>",
-        "<array><string>io.mixrelay.driver.desktop</string></array>",
+        "<array><string>io.mixrelay.desktop</string></array>",
         "<integer>7</integer>",
     ] {
         let modified = original.replace(
-            "<key>AssociatedBundleIdentifiers</key><string>io.mixrelay.driver.desktop</string>",
+            "<key>AssociatedBundleIdentifiers</key><string>io.mixrelay.desktop</string>",
             &format!("<key>AssociatedBundleIdentifiers</key>{replacement}"),
         );
         assert!(LaunchdConfiguration::from_template(modified.as_bytes(), &account()).is_err());

@@ -12,7 +12,10 @@ use rustix::{
     io::Errno,
 };
 
-use crate::{LAUNCHD_PATH, LIFECYCLE_DIRECTORY, LifecycleDirectory, OwnedTarget};
+use crate::{
+    EditorLeaseGuard, LAUNCHD_PATH, LIFECYCLE_DIRECTORY, LeaseError, LifecycleDirectory,
+    LifecycleLeaseGuard, OwnedTarget,
+};
 
 use super::{
     NativeError, ResolvedServiceAccount,
@@ -64,6 +67,74 @@ fn root_wheel_identity(user_id: u32, group_id: u32, wheel_gid: u32) -> bool {
 /// # Errors
 /// Returns when ownership, mode, inode type, or fixed path validation fails.
 pub fn initialize_lifecycle_storage(account: &ResolvedServiceAccount) -> Result<(), NativeError> {
+    initialize_selected_lifecycle_storage(account, InitializationScope::Distribution)
+}
+
+/// Initializes shared leases for the app, retaining a running Driver manager.
+/// # Errors
+/// Returns when path ownership or the installation account is invalid.
+pub fn initialize_app_lifecycle_storage(
+    account: &ResolvedServiceAccount,
+) -> Result<(), NativeError> {
+    initialize_selected_lifecycle_storage(account, InitializationScope::AppRuntime)
+}
+
+/// Initializes editor installation leases while preserving Driver-owned audio.
+/// Existing same-account runtime owners may remain active. Account rebinding
+/// still requires every owner to stop and the complete distribution to be absent.
+/// # Errors
+/// Returns on unsafe storage, changed account, another installer or unsafe rebinding.
+pub fn initialize_editor_lifecycle_storage(
+    account: &ResolvedServiceAccount,
+) -> Result<(), NativeError> {
+    initialize_selected_lifecycle_storage(account, InitializationScope::Editor)
+}
+
+#[derive(Clone, Copy)]
+enum InitializationScope {
+    Distribution,
+    AppRuntime,
+    Editor,
+}
+
+struct InitializationGuard {
+    _runtime: Option<LifecycleLeaseGuard>,
+    _editor: Option<EditorLeaseGuard>,
+}
+
+fn acquire_initialization_guard(
+    directory: &LifecycleDirectory,
+    scope: InitializationScope,
+    previous: &[(u32, u32); 3],
+    owner: (u32, u32),
+) -> Result<InitializationGuard, LeaseError> {
+    let owner_changed = previous.iter().any(|current| *current != owner);
+    if owner_changed || matches!(scope, InitializationScope::Distribution) {
+        return directory.acquire().map(|guard| InitializationGuard {
+            _runtime: Some(guard),
+            _editor: None,
+        });
+    }
+    if matches!(scope, InitializationScope::Editor) {
+        return directory
+            .acquire_for_editor_update()
+            .map(|guard| InitializationGuard {
+                _runtime: None,
+                _editor: Some(guard),
+            });
+    }
+    directory
+        .acquire_for_app_update()
+        .map(|guard| InitializationGuard {
+            _runtime: Some(guard),
+            _editor: None,
+        })
+}
+
+fn initialize_selected_lifecycle_storage(
+    account: &ResolvedServiceAccount,
+    scope: InitializationScope,
+) -> Result<(), NativeError> {
     require_root()?;
     if &resolve_service_account(account.account())? != account {
         return Err(NativeError::Account(
@@ -106,9 +177,9 @@ pub fn initialize_lifecycle_storage(account: &ResolvedServiceAccount) -> Result<
     let directory = LifecycleDirectory::open(LIFECYCLE_DIRECTORY)?;
     // Shared process locks exclude their exclusive owners; installer exclusivity
     // serializes this ownership change with every install/remove transaction.
-    let _guard = directory.acquire()?;
     let previous = inspect_user_lease_owners(&leases)?;
     let owner = (account.uid(), account.gid());
+    let _guard = acquire_initialization_guard(&directory, scope, &previous, owner)?;
     if previous.iter().any(|current| *current != owner) {
         require_removed_distribution()?;
         rebind_user_leases(&leases, &previous, owner, change_lease_owner)?;
@@ -819,6 +890,100 @@ mod tests {
     }
 
     #[test]
+    fn editor_initialization_retains_running_driver_runtime_engine_and_manager() {
+        let (root, leases) = lease_fixture("editor-init-live-runtime");
+        let directory = crate::LifecycleDirectory::open(root.path()).expect("directory");
+        for lease in &leases {
+            lease.try_lock().expect("runtime owner");
+        }
+        let previous = super::inspect_user_lease_owners(&leases).expect("owners");
+        let metadata = leases.each_ref().map(|lease| lease.metadata().unwrap());
+        let guard = super::acquire_initialization_guard(
+            &directory,
+            super::InitializationScope::Editor,
+            &previous,
+            previous[0],
+        )
+        .expect("same-account editor initialization preserves audio owners");
+        for (index, lease) in leases.iter().enumerate() {
+            let after = lease.metadata().unwrap();
+            assert_eq!(
+                (
+                    after.dev(),
+                    after.ino(),
+                    after.uid(),
+                    after.gid(),
+                    after.mode()
+                ),
+                (
+                    metadata[index].dev(),
+                    metadata[index].ino(),
+                    metadata[index].uid(),
+                    metadata[index].gid(),
+                    metadata[index].mode()
+                )
+            );
+            let contender = File::open(root.join(super::USER_LEASE_NAMES[index])).unwrap();
+            assert!(matches!(
+                contender.try_lock_shared(),
+                Err(fs::TryLockError::WouldBlock)
+            ));
+        }
+        assert!(matches!(
+            directory.acquire_for_editor_update(),
+            Err(crate::LeaseError::Busy {
+                kind: crate::LeaseKind::Installer
+            })
+        ));
+        drop(guard);
+        drop(directory.acquire_for_editor_update().unwrap());
+    }
+
+    #[test]
+    fn editor_initialization_cannot_rebind_any_active_owner_to_another_account() {
+        for name in super::USER_LEASE_NAMES {
+            let (root, leases) = lease_fixture("editor-init-owner-change");
+            let owner = File::options()
+                .read(true)
+                .write(true)
+                .open(root.join(name))
+                .unwrap();
+            owner.try_lock().expect("runtime owner");
+            let previous = super::inspect_user_lease_owners(&leases).unwrap();
+            let directory = crate::LifecycleDirectory::open(root.path()).unwrap();
+            let result = super::acquire_initialization_guard(
+                &directory,
+                super::InitializationScope::Editor,
+                &previous,
+                (previous[0].0 + 1, previous[0].1),
+            );
+            assert!(matches!(result, Err(crate::LeaseError::Busy { .. })));
+            assert_eq!(super::inspect_user_lease_owners(&leases).unwrap(), previous);
+        }
+    }
+
+    #[test]
+    fn editor_initialization_rejects_an_active_installer_without_changing_owners() {
+        let (root, leases) = lease_fixture("editor-init-installer-busy");
+        let directory = crate::LifecycleDirectory::open(root.path()).unwrap();
+        let installer = directory.acquire_for_editor_update().unwrap();
+        let previous = super::inspect_user_lease_owners(&leases).unwrap();
+        assert!(matches!(
+            super::acquire_initialization_guard(
+                &directory,
+                super::InitializationScope::Editor,
+                &previous,
+                previous[0]
+            ),
+            Err(crate::LeaseError::Busy {
+                kind: crate::LeaseKind::Installer
+            })
+        ));
+        assert_eq!(super::inspect_user_lease_owners(&leases).unwrap(), previous);
+        drop(installer);
+    }
+
+    #[test]
     fn every_active_owner_prevents_the_rebinding_guard() {
         for name in super::USER_LEASE_NAMES
             .into_iter()
@@ -841,6 +1006,8 @@ mod tests {
                 super::inspect_user_lease_owners(&leases).expect("retained owners"),
                 before
             );
+            // Runtime owners explicitly unlock on Drop, before inherited FDs close.
+            owner.unlock().expect("release active owner lease");
             drop(owner);
             drop(directory.acquire().expect("released owner"));
         }

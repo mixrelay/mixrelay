@@ -20,7 +20,7 @@ int MRRemovalRightRegister(void) {
     AuthorizationRef reference = NULL;
     OSStatus status = AuthorizationCreate(NULL, NULL, kAuthorizationFlagDefaults, &reference);
     if (status != errAuthorizationSuccess) return status;
-    NSURL *url = [NSURL fileURLWithPath:@"/Applications/Uninstall MixRelay Driver.app"];
+    NSURL *url = [NSURL fileURLWithPath:@"/Applications/Uninstall MixRelay.app"];
     CFBundleRef bundle = CFBundleCreate(NULL, (__bridge CFURLRef)url);
     // Credentials belong only to this authorization reference. A short transfer
     // window lets the helper verify its external form without asking again.

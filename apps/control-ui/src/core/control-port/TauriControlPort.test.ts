@@ -7,6 +7,24 @@ import { ControlPortError, type RuntimeGraphDocument } from './types';
 
 const graph: RuntimeGraphDocument = { edges: [], nodes: [], revision: 3, schemaVersion: 2 };
 
+it('sends the selected device buffer to the Driver runtime without rewriting a graph', async () => {
+  const invoke = vi.fn().mockResolvedValue({ status: 200, body: { revision: 3, state: 'active' } });
+  const port = new TauriControlPort(invoke);
+  const request = {
+    endpointId: 'device-b',
+    expectedRevision: 3,
+    expectedBufferFrames: null,
+    expectedPreferredFrames: 512,
+    bufferFrames: 256,
+  };
+  await expect(port.setVirtualEndpointBufferFrames(request)).resolves.toMatchObject({
+    revision: 3,
+  });
+  expect(invoke).toHaveBeenCalledExactlyOnceWith('control_set_virtual_endpoint_buffer_frames', {
+    request,
+  });
+});
+
 it('forwards graph-scoped node power/mute with a captured revision', async () => {
   const invoke = vi.fn().mockResolvedValue({ status: 200, body: { revision: 4, state: 'active' } });
   const port = new TauriControlPort(invoke);
@@ -220,4 +238,125 @@ describe('TauriControlPort graph operations', () => {
     expect(createLocalControlPort(false)).toBeInstanceOf(HttpControlPort);
     expect(createLocalControlPort(true)).toBeInstanceOf(TauriControlPort);
   });
+});
+
+describe('TauriControlPort workspace and editor boundaries', () => {
+  it('treats a cancelled native workspace picker as cancellation and preserves protocol failure', async () => {
+    const request = {
+      action: 'open' as const,
+      expectedRevision: 3,
+      expectedCatalogRevision: 1,
+      locale: 'ko',
+    };
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 200,
+        body: { activeId: 'graph-2' },
+      })
+      .mockResolvedValueOnce({ status: 422, body: { code: 'graph_invalid', parameters: {} } });
+    const port = new TauriControlPort(invoke);
+    await expect(port.workspaceFile(request)).resolves.toBeNull();
+    await expect(port.workspaceFile(request)).resolves.toEqual({ activeId: 'graph-2' });
+    await expect(port.workspaceFile(request)).rejects.toMatchObject({
+      status: 422,
+      body: { code: 'graph_invalid' },
+    });
+    expect(invoke).toHaveBeenNthCalledWith(1, 'workspace_file', { request });
+  });
+
+  it('keeps explicit power, meter and reconfiguration requests independent of graph writes', async () => {
+    const invoke = vi
+      .fn()
+      .mockResolvedValue({ status: 200, body: { revision: 3, state: 'active' } });
+    const port = new TauriControlPort(invoke);
+    await port.setEnginePower(false);
+    await port.getMeters();
+    const request = { expectedRevision: 3, format: { sampleRate: 96000, blockFrames: 128 } };
+    await port.reconfigureSession(request);
+    expect(invoke.mock.calls).toEqual([
+      ['control_set_engine_power', { enabled: false }],
+      ['control_get_meters', undefined],
+      ['control_reconfigure_session', { request }],
+    ]);
+  });
+
+  it('forwards native processor frames, input and rescan without graph replacement', async () => {
+    const invoke = vi.fn().mockResolvedValue({ status: 200, body: { protocolVersion: 1 } });
+    const port = new TauriControlPort(invoke);
+    const input = {
+      instanceId: 'instance-1',
+      session: 3,
+      kind: 'down' as const,
+      x: 12,
+      y: 24,
+      modifiers: 0,
+    };
+    await port.getProcessorEditorFrame('fx-1');
+    await port.sendProcessorEditorInput('fx-1', input);
+    await port.rescanProcessors(['/Library/Audio/Plug-Ins/VST3']);
+    expect(invoke.mock.calls).toEqual([
+      ['control_get_processor_editor_frame', { nodeId: 'fx-1' }],
+      ['control_send_processor_editor_input', { nodeId: 'fx-1', input }],
+      ['control_rescan_processors', { paths: ['/Library/Audio/Plug-Ins/VST3'] }],
+    ]);
+  });
+});
+
+describe('TauriControlPort native pickers and inventory', () => {
+  it('returns native application and audio device inventory and nullable directory selection', async () => {
+    const applications = [{ name: 'Firefox', id: 'org.mozilla.firefox' }];
+    const devices = [{ id: 'output-1', name: 'Speakers' }];
+    const invoke = vi
+      .fn()
+      .mockResolvedValueOnce(applications)
+      .mockResolvedValueOnce(devices)
+      .mockResolvedValueOnce('/plugins')
+      .mockResolvedValueOnce(null);
+    const port = new TauriControlPort(invoke);
+    await expect(port.listCapturableApplications()).resolves.toEqual(applications);
+    await expect(port.listAudioDevices()).resolves.toEqual(devices);
+    await expect(port.selectProcessorDirectory()).resolves.toBe('/plugins');
+    await expect(port.selectProcessorDirectory()).resolves.toBeNull();
+    expect(invoke.mock.calls).toEqual([
+      ['list_capturable_applications'],
+      ['list_audio_devices'],
+      ['select_processor_directory'],
+      ['select_processor_directory'],
+    ]);
+  });
+
+  it.each([
+    'applications',
+    'devices',
+    'processor-directory',
+    'recording-directory',
+    'save-settings',
+  ] as const)(
+    'reports a native %s failure as a request failure, not an audio engine outage',
+    async (operation) => {
+      const cause = new Error('Native access denied');
+      const port = new TauriControlPort(vi.fn().mockRejectedValue(cause));
+      const result =
+        operation === 'applications'
+          ? port.listCapturableApplications()
+          : operation === 'devices'
+            ? port.listAudioDevices()
+            : operation === 'processor-directory'
+              ? port.selectProcessorDirectory()
+              : operation === 'recording-directory'
+                ? port.selectRecordingFolder({})
+                : port.setRecordingSettings(
+                    'graph-1',
+                    'take-1',
+                    { folder: '/Desktop', sampleRate: null, encoding: 'pcm16' },
+                    3,
+                  );
+      await expect(result).rejects.toMatchObject({
+        status: 500,
+        body: { code: 'control_request_failed', parameters: { reason: 'Native access denied' } },
+      });
+    },
+  );
 });

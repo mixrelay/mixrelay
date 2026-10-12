@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MixRelayProvider } from '../theme/MixRelayProvider';
@@ -9,14 +9,23 @@ const viewport = { width: 800, height: 600 };
 const menuSize = { width: 200, height: 120 };
 
 function isMenu(element: HTMLElement) {
-  return element.getAttribute('role') === 'menu';
+  return (
+    element.classList.contains(styles.dropdown ?? '') || element.getAttribute('role') === 'menu'
+  );
 }
 
+const initialViewport = { width: window.innerWidth, height: window.innerHeight };
 beforeEach(() => {
-  // jsdom has no layout. Supply only measured DOM geometry; Mantine's real
-  // cursor anchor and Floating UI middleware still calculate the position.
+  window.innerWidth = viewport.width;
+  window.innerHeight = viewport.height;
+  // jsdom has no layout. Supply measured DOM geometry; React Aria calculates placement.
   vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(viewport.width);
   vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(viewport.height);
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return isMenu(this) ? menuSize.height : viewport.height;
+  });
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (
     this: HTMLElement,
   ) {
@@ -30,6 +39,13 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
     this: HTMLElement,
   ) {
+    if (this.classList.contains(styles.cursorAnchor ?? ''))
+      return new DOMRect(
+        Number.parseFloat(this.style.left),
+        Number.parseFloat(this.style.top),
+        0,
+        0,
+      );
     if (isMenu(this)) {
       return new DOMRect(
         Number.parseFloat(this.style.left) || 0,
@@ -42,9 +58,13 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  window.innerWidth = initialViewport.width;
+  window.innerHeight = initialViewport.height;
+});
 
-function openAt(x: number, y: number) {
+async function openAt(x: number, y: number) {
   render(
     <MixRelayProvider>
       <HierarchicalContextMenu items={[{ id: 'delete', label: 'Delete' }]} onSelect={vi.fn()}>
@@ -53,14 +73,16 @@ function openAt(x: number, y: number) {
     </MixRelayProvider>,
   );
   fireEvent.contextMenu(screen.getByTestId('canvas'), { clientX: x, clientY: y });
-  return screen.findByRole('menu');
+  const menu = await screen.findByRole('menu');
+  if (!menu.parentElement) throw new Error('Menu needs a positioned popover');
+  return menu.parentElement;
 }
 
 describe('Context menu cursor placement', () => {
   it('starts at the cursor x coordinate, immediately below the cursor', async () => {
     const menu = await openAt(300, 200);
     await waitFor(() => {
-      expect(menu).toHaveAttribute('data-position', 'bottom-start');
+      expect(menu).toHaveAttribute('data-placement', 'bottom');
       expect(menu).toHaveStyle({ left: '300px', top: '202px' });
     });
   });
@@ -68,8 +90,8 @@ describe('Context menu cursor placement', () => {
   it('flips above the cursor near the bottom edge', async () => {
     const menu = await openAt(300, 590);
     await waitFor(() => {
-      expect(menu).toHaveAttribute('data-position', 'top-start');
-      expect(menu).toHaveStyle({ left: '300px', top: '468px' });
+      expect(menu).toHaveAttribute('data-placement', 'top');
+      expect(menu).toHaveStyle({ left: '300px', bottom: '12px' });
     });
   });
 
@@ -77,8 +99,10 @@ describe('Context menu cursor placement', () => {
     const menu = await openAt(798, 598);
     await waitFor(() => {
       const left = Number.parseFloat(menu.style.left);
-      const top = Number.parseFloat(menu.style.top);
-      expect(menu).toHaveAttribute('data-position', 'top-end');
+      const top = menu.style.top
+        ? Number.parseFloat(menu.style.top)
+        : viewport.height - Number.parseFloat(menu.style.bottom) - menuSize.height;
+      expect(menu).toHaveAttribute('data-placement', 'top');
       expect(left).toBeGreaterThanOrEqual(0);
       expect(left + menuSize.width).toBeLessThanOrEqual(viewport.width);
       expect(top).toBeGreaterThanOrEqual(0);
@@ -131,11 +155,9 @@ describe.each(['context', 'button'] as const)('%s nested menu', (entry) => {
       for (const name of ['Source', 'Virtual IO']) {
         const item = await screen.findByRole('menuitem', { name });
         if (input === 'mouse') {
-          fireEvent.mouseEnter(item);
+          fireEvent.pointerMove(document.body);
+          fireEvent.pointerOver(item);
           await waitFor(() => expect(item).toHaveAttribute('aria-expanded', 'true'));
-          fireEvent.mouseDown(item);
-          fireEvent.mouseUp(item);
-          fireEvent.click(item);
         } else {
           item.focus();
           fireEvent.keyDown(item, { key: 'ArrowRight' });
@@ -144,11 +166,10 @@ describe.each(['context', 'button'] as const)('%s nested menu', (entry) => {
       const leaf = await screen.findByRole('menuitem', { name: 'New device' });
       const menus = screen.getAllByRole('menu');
       expect(menus).toHaveLength(3);
-      // A child must escape every scroll clip without leaving the owning menu
-      // (Mantine's outside-click detection depends on DOM containment).
+      // Each submenu escapes its parent's scroll viewport and stays in the overlay group.
       for (const [index, menu] of menus.entries()) {
-        expect(menu.closest(`.${styles.scrollArea}`)).toBeNull();
-        if (index > 0) expect(menus[index - 1]).toContainElement(menu);
+        expect(menu).toHaveClass(styles.scrollArea ?? '');
+        if (index > 0) expect(menus[index - 1]).not.toContainElement(menu);
       }
       expect(onSelect).not.toHaveBeenCalled();
       if (input === 'mouse') {
@@ -162,9 +183,65 @@ describe.each(['context', 'button'] as const)('%s nested menu', (entry) => {
         fireEvent.click(leaf, { detail: 0 });
       }
       expect(onSelect).toHaveBeenCalledExactlyOnceWith('create');
-      await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.queryAllByRole('menu')).toHaveLength(0));
     },
   );
+});
+
+it('cancels long-press on movement, release and disabling, then executes a stationary touch action', async () => {
+  vi.useFakeTimers();
+  const selected = vi.fn();
+  const started = vi.fn();
+  const moved = vi.fn();
+  const ended = vi.fn();
+  const menu = (disabled = false) => (
+    <MixRelayProvider>
+      <HierarchicalContextMenu
+        disabled={disabled}
+        items={[{ id: 'mute', label: 'Mute' }]}
+        onSelect={selected}
+      >
+        <div
+          data-testid="touch-canvas"
+          onTouchStart={started}
+          onTouchMove={moved}
+          onTouchEnd={ended}
+        >
+          Canvas
+        </div>
+      </HierarchicalContextMenu>
+    </MixRelayProvider>
+  );
+  const view = render(menu());
+  const canvas = screen.getByTestId('touch-canvas');
+  const press = () => fireEvent.touchStart(canvas, { touches: [{ clientX: 200, clientY: 150 }] });
+  try {
+    press();
+    fireEvent.touchMove(canvas);
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    press();
+    fireEvent.touchEnd(canvas);
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    press();
+    view.rerender(menu(true));
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    fireEvent.contextMenu(canvas);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    view.rerender(menu());
+    press();
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Mute' }));
+    expect(selected).toHaveBeenCalledExactlyOnceWith('mute');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(started).toHaveBeenCalledTimes(4);
+    expect(moved).toHaveBeenCalledOnce();
+    expect(ended).toHaveBeenCalledOnce();
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+  }
 });
 
 it('shows the reason a disabled menu leaf cannot be selected', async () => {
@@ -188,7 +265,7 @@ it('shows the reason a disabled menu leaf cannot be selected', async () => {
   );
   fireEvent.click(screen.getByRole('button', { name: 'Add' }));
   const item = await screen.findByRole('menuitem', { name: /Unavailable input/ });
-  expect(item).toBeDisabled();
+  expect(item).toHaveAttribute('aria-disabled', 'true');
   expect(item).toHaveAttribute('data-disabled', 'true');
   expect(screen.getByText('Device is in use')).toBeInTheDocument();
   fireEvent.click(item);

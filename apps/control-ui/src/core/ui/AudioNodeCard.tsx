@@ -1,15 +1,4 @@
 import {
-  ActionIcon,
-  Image,
-  Paper,
-  Select,
-  Slider,
-  TextInput,
-  Tooltip,
-  UnstyledButton,
-} from '@mantine/core';
-import { useResizeObserver } from '@mantine/hooks';
-import {
   type CSSProperties,
   type ReactNode,
   type Ref,
@@ -19,38 +8,54 @@ import {
   useRef,
   useState,
 } from 'react';
-
+import { Button } from 'react-aria-components';
 import { useAudioMeterLevels } from '../audio-meter/useAudioMeterLevels';
+import type { NativeDeviceFormats, NativeSampleFormat } from '../control-port/types';
+import { sharedChannelCounts } from '../driver/sharedDeviceFormat';
 import styles from './AudioNodeCard.module.css';
 import {
   type AudioNodeFaceMode,
   audioNodeFaceGeometry,
+  audioNodeFrame,
   channelRowMetrics,
 } from './audioNodeLayout';
+import { DynamicsMeter, type DynamicsMeterContract } from './DynamicsMeter';
+import { GraphicEqualizer, type GraphicEqualizerContract } from './GraphicEqualizer';
+import { IconActionButton } from './IconActionButton';
 import { Meter } from './Meter';
-import { NodeDisclosureMeasureContext, NodeOptionsSection } from './NodeOptionsSection';
+import { type EndpointBufferControl, NativeEndpointBuffer } from './NativeEndpointBuffer';
+import { NativeSampleFormatField } from './NativeSampleFormatField';
+import {
+  NodeDisclosureMeasureContext,
+  NodeHeaderOptionsContext,
+  NodeOptionsSection,
+} from './NodeOptionsSection';
 import { useNodeOptionsState } from './nodeOptionsState';
+import { ParameterField } from './ParameterField';
 import { ProcessorTimingLabel } from './ProcessorTimingLabel';
+import { SelectField } from './SelectField';
 import type { StatusTone } from './StatusBadge';
-import type { NativeStreamFormat, NativeDeviceFormats } from '../control-port/types';
-import type { NativeDirection } from '../driver/DriverPort';
-import { nativeFormatKey, nativeFormatLabel } from '../driver/nativeFormatLabel';
+import { TextField } from './TextField';
+import { Tooltip } from './Tooltip';
+import { useElementBounds } from './useElementBounds';
+import { useNodeHeaderFocus } from './useNodeHeaderFocus';
+import { ValueSlider } from './ValueSlider';
 
 const portIds = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
-const channelOptions = (
-  current: number,
-  allowed = Array.from({ length: 64 }, (_, index) => index + 1),
-) =>
+const channelOptions = (current: number, allowed: number[]) =>
   [...new Set([...allowed, current])]
     .sort((a, b) => a - b)
     .map((channels) => ({
       label: `${channels}`,
       value: `${channels}`,
+      disabled: !allowed.includes(channels),
     }));
 
 export interface EndpointControl {
+  bufferControl?: EndpointBufferControl;
   nativeFormats?: NativeDeviceFormats;
-  nativeFormatLabels?: { render: string; capture: string; unknown: string };
+  nativeFormatLabels?: { bitDepth: string; unknown: string; mixed?: string };
+  channelsLabel?: string;
   formatError?: string | null;
   formatsDisabled?: boolean;
   observedRate?: { label: string; value: number };
@@ -60,22 +65,23 @@ export interface EndpointControl {
   allowedRenderChannels?: number[];
   allowedCaptureChannels?: number[];
   captureChannels: number;
-  captureChannelsLabel: string;
   displayName: string;
   nameLabel: string;
   renderChannels: number;
-  renderChannelsLabel: string;
 }
 
 export interface EndpointUpdate {
+  bufferFrames?: number;
   sampleRate?: number;
-  nativeFormat?: { direction: NativeDirection; format: NativeStreamFormat };
+  sampleFormat?: NativeSampleFormat;
   captureChannels: number;
   displayName: string;
   renderChannels: number;
 }
 
 export interface AudioNodeCardProps {
+  equalizer?: GraphicEqualizerContract;
+  onParametersChange?: (updates: readonly { id: string; value: number }[]) => void;
   headerActions?: ReactNode;
   muteControl?: ReactNode;
   poweredOff?: boolean;
@@ -102,12 +108,21 @@ export interface AudioNodeCardProps {
   parameterControls?: readonly {
     id: string;
     label: string;
+    description?: string;
+    section?: 'main' | 'options';
     maximum: number;
     minimum: number;
     step: number;
     suffix: string;
     value: number;
+    scale?: 'linear' | 'logarithmic';
+    choices?: readonly { value: number; label: string; description?: string }[];
+    precise?: boolean;
+    presentation?: 'slider' | 'knob';
+    group?: { id: string; label: string };
+    endpoints?: { minimum: string; maximum: string };
   }[];
+  dynamics?: DynamicsMeterContract;
   processorEditor?: {
     actionLabel: string;
     failureLabel?: string;
@@ -118,7 +133,8 @@ export interface AudioNodeCardProps {
   status?: string;
   statusTone?: StatusTone;
   title: string;
-  onSelect: () => void;
+  /** Omit when a parent graph owns node selection and keyboard focus. */
+  onSelect?: () => void;
   onGainChange?: (gainDb: number) => void;
   onEndpointChange?: (value: EndpointUpdate) => void;
   onLayoutChange?: () => void;
@@ -168,8 +184,8 @@ function useCardMeasurements({
   onFaceHeightChange,
   onContentHeightChange,
 }: Pick<AudioNodeCardProps, 'onFaceHeightChange' | 'onContentHeightChange'>) {
-  const [faceRef, faceBounds] = useResizeObserver<HTMLButtonElement>();
-  const [contentRef, contentBounds] = useResizeObserver<HTMLDivElement>();
+  const [faceRef, faceBounds] = useElementBounds<HTMLElement>();
+  const [contentRef, contentBounds] = useElementBounds<HTMLDivElement>();
   const controlsNode = useRef<HTMLDivElement | null>(null);
   const measureRef = useCallback(
     (element: HTMLDivElement | null) => {
@@ -229,6 +245,9 @@ export function AudioNodeCard({
   onParameterChange,
   onProcessorEditorRetry,
   parameterControls = [],
+  equalizer,
+  dynamics,
+  onParametersChange,
   processorEditor,
   selected = false,
   showPorts = true,
@@ -241,7 +260,9 @@ export function AudioNodeCard({
     onContentHeightChange,
   });
   const { opened: optionsOpened, toggle } = useNodeOptionsState();
-  const { hasGainControl, hasEndpointControl, hasParameterControls } = nodeOptionsAvailability({
+  const [headerOptionsTarget, setHeaderOptionsTarget] = useState<HTMLDivElement | null>(null);
+  const [headerRef, headerBounds] = useElementBounds<HTMLDivElement>();
+  const { hasOptions, hasEndpointControl, hasParameterControls } = nodeOptionsAvailability({
     gainControl,
     onGainChange,
     endpointControl,
@@ -250,84 +271,180 @@ export function AudioNodeCard({
     onParameterChange,
     processorEditor,
   });
-  const levelMute = hasGainControl ? undefined : muteControl;
-  const hasOptions = hasGainControl || hasEndpointControl || hasParameterControls;
+  const editor = { title, control: processorEditor, onRetry: onProcessorEditorRetry };
   return (
-    <Paper
-      className={styles.root}
-      data-bypassed={bypassed || undefined}
-      data-offline={offline || undefined}
-      data-powered-off={poweredOff}
+    <div
+      className={`${styles.root} nokey`}
+      data-equalizer={Boolean(equalizer) || undefined}
+      {...cardStateAttributes({ bypassed, offline, poweredOff, selected, dynamics })}
       data-endpoint-options={hasEndpointControl || undefined}
       data-has-options={hasOptions || undefined}
       data-header-actions={Boolean(headerActions)}
       data-metered={meterBanks.length > 0 || undefined}
-      data-meter-actions={Boolean(levelMute) || undefined}
       data-inline-controls={Boolean(content) || faceMode === 'channel-rows' || undefined}
       data-face-mode={faceMode}
       data-options-opened={optionsOpened || undefined}
-      data-selected={selected || undefined}
-      style={audioNodeCardStyle({ faceHeight, faceMode, meterBanks, detail }, faceBounds.height)}
-      withBorder
+      style={cardRootStyle({ faceHeight, faceMode, meterBanks, faceBounds, headerBounds })}
     >
       <NodeDisclosureMeasureContext.Provider value={measureControls}>
-        <AudioNodeFace
-          processingTimeNs={processingTimeNs}
-          faceRef={faceRef}
-          category={category}
-          channelCount={channelCount}
-          hideSummary={Boolean(content) || faceMode !== 'standard'}
-          detail={detail}
-          icon={icon}
-          iconUrl={iconUrl}
-          inputCount={inputCount}
-          meterBanks={meterBanks}
-          faceMode={faceMode}
-          offline={offline}
-          onSelect={onSelect}
-          outputCount={outputCount}
-          selected={selected}
-          status={status}
-          statusTone={statusTone}
-          title={title}
-        />
-        <NodeHeaderActions actions={headerActions} />
-        <NodeLevelMute control={levelMute} faceMode={faceMode} placement="face" />
-        <AudioNodeControls
-          content={content}
-          compactMeterBanks={meterBanksForCompactFace(faceMode, meterBanks)}
-          faceMode={faceMode}
-          measureRef={contentRef}
-          offline={offline || poweredOff}
-          title={title}
-        >
-          <NodeLevelMute control={levelMute} faceMode={faceMode} placement="settings" />
-          <div inert={poweredOff}>
-            <ProcessorEditorOption control={processorEditor} onRetry={onProcessorEditorRetry} />
-          </div>
-          <NodeOptions
-            muteControl={hasGainControl ? muteControl : undefined}
-            disabled={poweredOff}
-            endpointControl={endpointControl}
-            gainControl={gainControl}
-            hasOptions={hasOptions}
-            label={optionsLabel}
-            onEndpointChange={onEndpointChange}
-            onGainChange={onGainChange}
-            onParameterChange={onParameterChange}
-            onToggle={() => toggleNodeOptions(toggle, onLayoutChange)}
-            opened={optionsOpened}
-            parameterControls={hasParameterControls ? parameterControls : []}
+        <NodeHeaderOptionsContext.Provider value={headerOptionsTarget}>
+          <AudioNodeFace
+            processingTimeNs={processingTimeNs}
+            faceRef={faceRef}
+            category={category}
+            channelCount={channelCount}
+            hideSummary={Boolean(content) || faceMode !== 'standard'}
+            detail={detail}
+            icon={icon}
+            iconUrl={iconUrl}
+            inputCount={inputCount}
+            meterBanks={dynamics ? [] : meterBanks}
+            faceMode={faceMode}
+            offline={offline}
+            onSelect={onSelect}
+            outputCount={outputCount}
+            selected={selected}
+            status={status}
+            statusTone={statusTone}
+            title={title}
           />
-        </AudioNodeControls>
-        <NodePortOverlays inputCount={inputCount} outputCount={outputCount} visible={showPorts} />
+          <NodeHeaderActions
+            {...{ title, actions: headerActions, mute: muteControl }}
+            bypassControls={parameterControls}
+            bypassDisabled={poweredOff}
+            onBypassChange={onParameterChange}
+            headerRef={headerRef}
+            targetRef={setHeaderOptionsTarget}
+          />
+          <AudioNodeControls
+            content={content}
+            compactMeterBanks={dynamics ? [] : meterBanksForCompactFace(faceMode, meterBanks)}
+            dynamics={dynamics}
+            parameterControls={parameterControls}
+            bypassed={bypassed}
+            faceMode={faceMode}
+            measureRef={contentRef}
+            offline={offline || poweredOff}
+            title={title}
+          >
+            <div inert={poweredOff}>
+              <ProcessorEditorOption {...editor} />
+            </div>
+            <NodeOptions
+              disabled={poweredOff}
+              endpointControl={endpointControl}
+              gainControl={gainControl}
+              hasOptions={hasOptions}
+              label={`${title}: ${optionsLabel}`}
+              onEndpointChange={onEndpointChange}
+              onGainChange={onGainChange}
+              onParameterChange={onParameterChange}
+              onToggle={() => toggleNodeOptions(toggle, onLayoutChange)}
+              opened={optionsOpened}
+              parameterControls={hasParameterControls ? parameterControls : []}
+              equalizer={equalizer}
+              onParametersChange={onParametersChange}
+            />
+          </AudioNodeControls>
+          <NodePortOverlays inputCount={inputCount} outputCount={outputCount} visible={showPorts} />
+        </NodeHeaderOptionsContext.Provider>
       </NodeDisclosureMeasureContext.Provider>
-    </Paper>
+    </div>
   );
 }
 
-function NodeHeaderActions({ actions }: { actions?: ReactNode }) {
-  return actions ? <div className={styles.headerActions}>{actions}</div> : null;
+function cardStateAttributes({
+  bypassed,
+  offline,
+  poweredOff,
+  selected,
+  dynamics,
+}: Pick<AudioNodeCardProps, 'bypassed' | 'offline' | 'poweredOff' | 'selected' | 'dynamics'>) {
+  return {
+    'data-bypassed': bypassed || undefined,
+    'data-offline': offline || undefined,
+    'data-powered-off': poweredOff,
+    'data-selected': selected || undefined,
+    'data-dynamics': Boolean(dynamics) || undefined,
+  };
+}
+
+function cardRootStyle(
+  props: Parameters<typeof audioNodeCardStyle>[0] & {
+    faceBounds: { height: number };
+    headerBounds: { width: number };
+  },
+): CSSProperties {
+  return {
+    ...audioNodeCardStyle(props, props.faceBounds.height),
+    '--audio-node-header-actions-inset': `${props.headerBounds.width + 12}px`,
+  } as CSSProperties;
+}
+
+function NodeHeaderActions({
+  title,
+  actions,
+  mute,
+  bypassControls,
+  bypassDisabled,
+  onBypassChange,
+  headerRef,
+  targetRef,
+}: {
+  title: string;
+  actions?: ReactNode;
+  mute?: ReactNode;
+  bypassControls: NonNullable<AudioNodeCardProps['parameterControls']>;
+  bypassDisabled: boolean;
+  onBypassChange?: AudioNodeCardProps['onParameterChange'];
+  headerRef: Ref<HTMLDivElement>;
+  targetRef: Ref<HTMLDivElement>;
+}) {
+  const focus = useNodeHeaderFocus();
+  return (
+    <div className={styles.headerActions} ref={headerRef} {...focus}>
+      <div className={styles.headerSlot}>{actions}</div>
+      <div className={styles.headerSlot}>{mute}</div>
+      <div className={styles.headerSlot}>
+        <BuiltinBypass
+          title={title}
+          controls={bypassControls}
+          disabled={bypassDisabled}
+          onChange={onBypassChange}
+        />
+      </div>
+      <div className={styles.headerSlot} ref={targetRef} />
+    </div>
+  );
+}
+
+function BuiltinBypass({
+  title,
+  controls,
+  disabled,
+  onChange,
+}: {
+  title: string;
+  controls: NonNullable<AudioNodeCardProps['parameterControls']>;
+  disabled: boolean;
+  onChange: AudioNodeCardProps['onParameterChange'];
+}) {
+  const control = controls.find((item) => item.id === 'bypass');
+  if (!control || !onChange) return null;
+  const label = `${title}: ${control.label}: ${control.choices?.find((choice) => choice.value === control.value)?.label ?? control.value}`;
+  return (
+    <IconActionButton
+      label={label}
+      aria-pressed={Boolean(control.value)}
+      disabled={disabled}
+      onClick={() => onChange(control.id, control.value ? 0 : 1)}
+    >
+      <svg viewBox="0 0 20 20" aria-hidden="true">
+        <path d="M2 10h4m8 0h4M6 6h8v8H6z" />
+        {control.value ? <path d="m4 16 12-12" /> : null}
+      </svg>
+    </IconActionButton>
+  );
 }
 
 function nodeOptionsAvailability(
@@ -342,32 +459,24 @@ function nodeOptionsAvailability(
     | 'processorEditor'
   >,
 ) {
+  const hasGainControl = Boolean(props.gainControl && props.onGainChange);
+  const hasEndpointControl = Boolean(props.endpointControl && props.onEndpointChange);
+  const hasParameterControls =
+    Boolean(props.parameterControls?.length && props.onParameterChange) &&
+    !prefersProcessorEditor(props.processorEditor);
   return {
-    hasGainControl: Boolean(props.gainControl && props.onGainChange),
-    hasEndpointControl: Boolean(props.endpointControl && props.onEndpointChange),
-    hasParameterControls:
-      Boolean(props.parameterControls?.length && props.onParameterChange) &&
-      !prefersProcessorEditor(props.processorEditor),
+    hasOptions: hasGainControl || hasEndpointControl || hasParameterControls,
+    hasEndpointControl,
+    hasParameterControls,
   };
-}
-
-function NodeLevelMute({
-  control,
-  faceMode,
-  placement,
-}: {
-  control: ReactNode;
-  faceMode: AudioNodeFaceMode;
-  placement: 'face' | 'settings';
-}) {
-  const compact = faceMode === 'compact';
-  if (!control || compact !== (placement === 'settings')) return null;
-  return <div className={compact ? styles.levelActions : styles.meterActions}>{control}</div>;
 }
 
 function AudioNodeControls({
   content,
   compactMeterBanks,
+  dynamics,
+  parameterControls,
+  bypassed,
   faceMode,
   measureRef,
   offline,
@@ -376,6 +485,9 @@ function AudioNodeControls({
 }: {
   content: ReactNode;
   compactMeterBanks: readonly AudioNodeMeterBank[];
+  dynamics?: DynamicsMeterContract;
+  parameterControls: NonNullable<AudioNodeCardProps['parameterControls']>;
+  bypassed: boolean;
   faceMode: AudioNodeFaceMode;
   measureRef: Ref<HTMLDivElement>;
   offline: boolean;
@@ -384,11 +496,20 @@ function AudioNodeControls({
 }) {
   // Native surfaces stretch with the node. Only intrinsic settings constrain its minimum height.
   const compact = faceMode === 'compact';
+  const dynamicsMeter = dynamics ? (
+    <DynamicsMeter
+      contract={dynamics}
+      controls={parameterControls}
+      disabled={offline}
+      bypassed={bypassed}
+    />
+  ) : null;
   if (compact && compactMeterBanks.length > 0) {
     return (
-      <div className={styles.controls}>
+      <div className={styles.controls} data-node-controls="">
         <div ref={measureRef} className={styles.settings}>
           <NodeMeterBanks banks={compactMeterBanks} offline={offline} title={title} />
+          {dynamicsMeter}
           {children}
         </div>
         {content ? <div className={`${styles.content} nodrag nopan nowheel`}>{content}</div> : null}
@@ -396,9 +517,10 @@ function AudioNodeControls({
     );
   }
   return (
-    <div ref={compact ? undefined : measureRef} className={styles.controls}>
+    <div ref={compact ? undefined : measureRef} className={styles.controls} data-node-controls="">
       {content ? <div className={`${styles.content} nodrag nopan nowheel`}>{content}</div> : null}
       <div ref={compact ? measureRef : undefined} className={styles.settings}>
+        {dynamicsMeter}
         {children}
       </div>
     </div>
@@ -410,18 +532,19 @@ function audioNodeCardStyle(
     faceHeight,
     faceMode,
     meterBanks,
-    detail,
-  }: Pick<AudioNodeCardProps, 'faceHeight' | 'faceMode' | 'meterBanks' | 'detail'>,
+  }: Pick<AudioNodeCardProps, 'faceHeight' | 'faceMode' | 'meterBanks'>,
   renderedFaceHeight: number,
 ): CSSProperties {
   const geometry = audioNodeFaceGeometry({
     meterBanks,
-    hasDetail: Boolean(detail),
     mode: faceMode,
   });
   const height = Math.max(faceHeight ?? 0, geometry.height);
   return {
     '--audio-node-face-height': `${height}px`,
+    '--audio-node-header-height': `${audioNodeFrame.headerHeight}px`,
+    '--audio-node-utility-height': `${audioNodeFrame.utilityHeight}px`,
+    '--audio-node-border-width': `${audioNodeFrame.borderWidth}px`,
     '--audio-node-rendered-face-height': `${renderedFaceHeight > 0 ? renderedFaceHeight : height}px`,
     ...(faceMode === 'channel-rows'
       ? {
@@ -454,7 +577,7 @@ function AudioNodeFace(
     | 'status'
     | 'statusTone'
     | 'title'
-  > & { hideSummary?: boolean; faceRef?: Ref<HTMLButtonElement> },
+  > & { hideSummary?: boolean; faceRef?: (element: HTMLElement | null) => void },
 ) {
   const {
     processingTimeNs,
@@ -475,11 +598,16 @@ function AudioNodeFace(
     statusTone,
     title,
   } = props;
+  const Face = onSelect ? 'button' : 'div';
   return (
-    <UnstyledButton
-      ref={props.faceRef}
-      aria-label={[title, category, detail, status].filter(Boolean).join(', ')}
-      aria-pressed={selected}
+    <Face
+      type={onSelect ? 'button' : undefined}
+      ref={props.faceRef as Ref<HTMLButtonElement & HTMLDivElement>}
+      data-node-face=""
+      aria-label={
+        onSelect ? [title, category, detail, status].filter(Boolean).join(', ') : undefined
+      }
+      aria-pressed={onSelect ? selected : undefined}
       className={styles.button}
       onClick={onSelect}
     >
@@ -487,24 +615,29 @@ function AudioNodeFace(
         <span className={styles.icon} aria-hidden="true">
           <NodeIcon icon={icon} iconUrl={iconUrl} />
         </span>
-        <span className={styles.category}>{title}</span>
+        <span className={styles.category} data-node-title>
+          {title}
+        </span>
         <ProcessorTimingLabel nanoseconds={processingTimeNs} />
         <NodeStatus status={status} tone={statusTone} />
       </span>
       <span className={styles.body}>
-        {detail ? <small className={styles.detail}>{detail}</small> : null}
+        {hideSummary && detail ? <small className={styles.detail}>{detail}</small> : null}
         {faceMode !== 'compact' && meterBanks.length > 0 ? (
           <NodeMeterBanks banks={meterBanks} offline={Boolean(offline)} title={title} />
         ) : null}
       </span>
       {!hideSummary ? (
-        <span className={styles.ioSummary} aria-hidden="true">
-          <span>{inputCount > 0 ? `IN ${inputCount}` : ''}</span>
-          <span>{channelCount > 0 ? `${channelCount} CH` : ''}</span>
-          <span>{outputCount > 0 ? `OUT ${outputCount}` : ''}</span>
+        <span className={styles.ioSummary}>
+          <span aria-hidden="true">
+            {inputCount > 0 && outputCount > 0 && inputCount !== outputCount
+              ? `IN ${inputCount} / OUT ${outputCount}`
+              : `${Math.max(channelCount, inputCount, outputCount)} CH`}
+          </span>
+          {detail ? <small className={styles.detail}>{detail}</small> : null}
         </span>
       ) : null}
-    </UnstyledButton>
+    </Face>
   );
 }
 
@@ -512,7 +645,7 @@ function NodeIcon({ icon, iconUrl }: { icon: string; iconUrl?: string }) {
   const [failedUrl, setFailedUrl] = useState<string>();
   if (iconUrl && iconUrl !== failedUrl) {
     return (
-      <Image
+      <img
         alt=""
         className={styles.iconImage}
         src={iconUrl}
@@ -565,14 +698,13 @@ function NodeIcon({ icon, iconUrl }: { icon: string; iconUrl?: string }) {
 function NodeStatus({ status, tone }: { status?: string; tone?: StatusTone }) {
   if (!status) return null;
   return (
-    <Tooltip label={status} openDelay={350} position="left">
+    <Tooltip nonInteractive label={status} position="left">
       <span aria-label={status} className={styles.statusDot} data-tone={tone} role="img" />
     </Tooltip>
   );
 }
 
 function NodeOptions({
-  muteControl,
   disabled,
   endpointControl,
   gainControl,
@@ -584,8 +716,9 @@ function NodeOptions({
   onToggle,
   opened,
   parameterControls,
+  equalizer,
+  onParametersChange,
 }: {
-  muteControl?: ReactNode;
   disabled: boolean;
   endpointControl?: EndpointControl;
   gainControl?: { label: string; valueDb: number };
@@ -597,8 +730,37 @@ function NodeOptions({
   onToggle: () => void;
   opened: boolean;
   parameterControls: NonNullable<AudioNodeCardProps['parameterControls']>;
+  equalizer?: GraphicEqualizerContract;
+  onParametersChange?: AudioNodeCardProps['onParametersChange'];
 }) {
   if (!hasOptions) return null;
+  if (equalizer && onParameterChange)
+    return (
+      <div className={`${styles.optionsPanel} nodrag nopan nowheel`}>
+        <GraphicEqualizer
+          contract={equalizer}
+          controls={parameterControls}
+          disabled={disabled}
+          bypassed={Boolean(parameterControls.find((control) => control.id === 'bypass')?.value)}
+          onChange={onParameterChange}
+          onParametersChange={onParametersChange}
+          renderValues={(values) => (
+            <NodeOptionsSection
+              label={label}
+              opened={opened}
+              onToggle={onToggle}
+              disabled={disabled}
+            >
+              {values}
+            </NodeOptionsSection>
+          )}
+        />
+      </div>
+    );
+  const mainParameters = parameterControls.filter(
+    (control) => control.id !== 'bypass' && control.section !== 'options',
+  );
+  const optionParameters = parameterControls.filter((control) => control.section === 'options');
   const controls = (
     <>
       {endpointControl && onEndpointChange ? (
@@ -607,32 +769,66 @@ function NodeOptions({
         </div>
       ) : null}
       {gainControl && onGainChange ? (
-        <NodeGainControl
-          control={gainControl}
-          onChange={onGainChange}
-          disabled={disabled}
-          muteControl={muteControl}
-        />
+        <NodeGainControl control={gainControl} onChange={onGainChange} disabled={disabled} />
       ) : null}
-      {onParameterChange && parameterControls.length > 0 ? (
-        <div className={styles.parameterList} inert={disabled}>
-          {parameterControls.map((control) => (
-            <NodeParameterControl
-              control={control}
-              key={control.id}
-              onChange={(value) => onParameterChange(control.id, value)}
-            />
-          ))}
-        </div>
+      {onParameterChange && parameterControls.length > 0 && !equalizer ? (
+        <NodeParameterFields
+          controls={mainParameters}
+          disabled={disabled}
+          onChange={onParameterChange}
+        />
       ) : null}
     </>
   );
   return parameterControls.length > 0 ? (
-    <div className={`${styles.optionsPanel} nodrag nopan nowheel`}>{controls}</div>
+    <>
+      <div className={`${styles.optionsPanel} nodrag nopan nowheel`}>{controls}</div>
+      {onParameterChange && optionParameters.length > 0 ? (
+        <NodeOptionsSection label={label} opened={opened} onToggle={onToggle} disabled={disabled}>
+          <NodeParameterFields
+            controls={optionParameters}
+            disabled={disabled}
+            onChange={onParameterChange}
+          />
+        </NodeOptionsSection>
+      ) : null}
+    </>
   ) : (
     <NodeOptionsSection label={label} opened={opened} onToggle={onToggle}>
       {controls}
     </NodeOptionsSection>
+  );
+}
+
+function NodeParameterFields({
+  controls,
+  disabled,
+  onChange,
+}: {
+  controls: NonNullable<AudioNodeCardProps['parameterControls']>;
+  disabled: boolean;
+  onChange: NonNullable<AudioNodeCardProps['onParameterChange']>;
+}) {
+  return (
+    <div className={styles.parameterList} inert={disabled}>
+      {parameterControlGroups(controls).map((group) => (
+        <div
+          key={group.id}
+          className={group.knobs ? styles.knobGroup : undefined}
+          data-columns={Math.min(3, group.controls.length)}
+        >
+          {group.label ? <span className={styles.parameterGroupLabel}>{group.label}</span> : null}
+          {group.controls.map((control) => (
+            <NodeParameterControl
+              control={control}
+              key={control.id}
+              disabled={disabled}
+              onChange={(value) => onChange(control.id, value)}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -641,9 +837,11 @@ function prefersProcessorEditor(control: AudioNodeCardProps['processorEditor']) 
 }
 
 function ProcessorEditorOption({
+  title,
   control,
   onRetry,
 }: {
+  title: string;
   control?: AudioNodeCardProps['processorEditor'];
   onRetry?: AudioNodeCardProps['onProcessorEditorRetry'];
 }) {
@@ -651,33 +849,33 @@ function ProcessorEditorOption({
     return null;
   return (
     <div className={`${styles.processorEditor} nodrag nopan nowheel`}>
-      <ActionIcon
-        aria-label={control.actionLabel}
-        className={styles.processorEditorButton}
-        data-state={control.state}
-        onClick={(event) => {
-          event.stopPropagation();
-          onRetry();
-        }}
-        size={24}
-        variant="subtle"
-      >
-        <svg
-          aria-hidden="true"
-          width="14"
-          height="14"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.25"
+      <Tooltip label={`${title}: ${control.actionLabel}`}>
+        <Button
+          aria-label={`${title}: ${control.actionLabel}`}
+          className={styles.processorEditorButton}
+          data-state={control.state}
+          onClick={(event) => {
+            event.stopPropagation();
+            onRetry();
+          }}
         >
-          {control.state === 'closed' ? (
-            <path d="M6 3H3v10h10v-3M9 3h4v4M13 3 7 9" />
-          ) : (
-            <path d="M13 7a5 5 0 1 0-1 4M13 2v5H8" />
-          )}
-        </svg>
-      </ActionIcon>
+          <svg
+            aria-hidden="true"
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.25"
+          >
+            {control.state === 'closed' ? (
+              <path d="M6 3H3v10h10v-3M9 3h4v4M13 3 7 9" />
+            ) : (
+              <path d="M13 7a5 5 0 1 0-1 4M13 2v5H8" />
+            )}
+          </svg>
+        </Button>
+      </Tooltip>
       {control.failureLabel ? (
         <span role="status" className={styles.processorEditorFailure}>
           {control.failureLabel}
@@ -687,35 +885,63 @@ function ProcessorEditorOption({
   );
 }
 
+function parameterControlGroups(controls: NonNullable<AudioNodeCardProps['parameterControls']>) {
+  const groups: {
+    id: string;
+    label?: string;
+    knobs: boolean;
+    controls: (typeof controls)[number][];
+  }[] = [];
+  for (const control of controls) {
+    const id =
+      control.presentation === 'knob' && !control.choices
+        ? (control.group?.id ?? 'knobs')
+        : control.id;
+    const last = groups.at(-1);
+    if (last?.id === id) last.controls.push(control);
+    else
+      groups.push({
+        id,
+        label: control.group?.label,
+        knobs: control.presentation === 'knob' && !control.choices,
+        controls: [control],
+      });
+  }
+  return groups;
+}
+
 function NodeParameterControl({
   control,
   onChange,
+  disabled,
 }: {
   control: NonNullable<AudioNodeCardProps['parameterControls']>[number];
   onChange: (value: number) => void;
+  disabled?: boolean;
 }) {
   const [value, setValue] = useState(control.value);
   useEffect(() => setValue(control.value), [control.value]);
+  if (control.precise || control.choices || control.scale) {
+    return <ParameterField control={control} onChange={onChange} disabled={disabled} />;
+  }
   return (
     <div className={`${styles.parameterControl} nodrag nopan nowheel`}>
       <span className={styles.parameterLabel}>{control.label}</span>
       <span className={styles.parameterValue}>
         {value.toFixed(control.step < 1 ? 1 : 0)} {control.suffix}
       </span>
-      <Slider
-        className={styles.parameterSlider}
-        label={null}
+      <ValueSlider
+        disabled={disabled}
         max={control.maximum}
         min={control.minimum}
-        onClick={(event) => event.stopPropagation()}
         onChange={(nextValue) => {
           setValue(nextValue);
           onChange(nextValue);
         }}
-        onPointerDown={(event) => event.stopPropagation()}
         step={control.step}
-        thumbLabel={control.label}
+        label={control.label}
         value={value}
+        valueText={`${value} ${control.suffix}`}
       />
     </div>
   );
@@ -760,9 +986,8 @@ function EndpointOptions({ control, onChange }: EndpointOptionsProps) {
   };
   return (
     <div className={styles.endpointOptions}>
-      <TextInput
+      <TextField
         readOnly={control.canRename === false}
-        className={styles.optionField}
         label={control.nameLabel}
         maxLength={40}
         onBlur={commitName}
@@ -770,97 +995,120 @@ function EndpointOptions({ control, onChange }: EndpointOptionsProps) {
         onKeyDown={(event) => {
           if (event.key === 'Enter') event.currentTarget.blur();
         }}
-        size="xs"
         value={displayName}
       />
-      <div className={styles.endpointChannels}>
-        <Select
-          allowDeselect={false}
-          className={styles.optionField}
-          data={channelOptions(control.renderChannels, control.allowedRenderChannels)}
-          disabled={
-            control.allowedRenderChannels !== undefined && control.allowedRenderChannels.length < 2
-          }
-          label={control.renderChannelsLabel}
-          onChange={(value) => {
-            if (value)
-              onChange(endpointValue(control, { displayName, renderChannels: Number(value) }));
-          }}
-          size="xs"
-          value={`${control.renderChannels}`}
+      <EndpointChannels control={control} displayName={displayName} onChange={onChange} />
+      <EndpointSampleRate control={control} onChange={onChange} />
+      {control.nativeFormats && control.nativeFormatLabels ? (
+        <NativeEndpointFormats
+          control={control}
+          formats={control.nativeFormats}
+          labels={control.nativeFormatLabels}
+          onChange={onChange}
         />
-        <Select
-          allowDeselect={false}
-          className={styles.optionField}
-          data={channelOptions(control.captureChannels, control.allowedCaptureChannels)}
-          disabled={
-            control.allowedCaptureChannels !== undefined &&
-            control.allowedCaptureChannels.length < 2
-          }
-          label={control.captureChannelsLabel}
-          onChange={(value) => {
-            if (value) {
-              onChange(endpointValue(control, { captureChannels: Number(value), displayName }));
-            }
-          }}
-          size="xs"
-          value={`${control.captureChannels}`}
+      ) : null}
+      {control.bufferControl ? (
+        <NativeEndpointBuffer
+          control={control.bufferControl}
+          onChange={(bufferFrames) => onChange({ ...endpointValue(control, {}), bufferFrames })}
         />
-      </div>
+      ) : null}
+    </div>
+  );
+}
+
+function EndpointChannels({
+  control,
+  displayName,
+  onChange,
+}: EndpointOptionsProps & { displayName: string }) {
+  const hasRender = control.renderChannels > 0;
+  const hasCapture = control.captureChannels > 0;
+  const current =
+    hasRender && hasCapture && control.renderChannels !== control.captureChannels
+      ? null
+      : hasRender
+        ? control.renderChannels
+        : control.captureChannels;
+  const allowed = sharedChannelCounts(
+    control.allowedRenderChannels ?? Array.from({ length: 64 }, (_, index) => index + 1),
+    control.allowedCaptureChannels ?? Array.from({ length: 64 }, (_, index) => index + 1),
+    hasRender,
+    hasCapture,
+  );
+  return (
+    <SelectField
+      label={control.channelsLabel ?? 'Channels'}
+      placeholder={control.nativeFormatLabels?.mixed ?? 'Mixed'}
+      data={channelOptions(current ?? 0, allowed).filter((option) => option.value !== '0')}
+      value={current === null ? null : String(current)}
+      disabled={allowed.length === 0 || (allowed.length === 1 && allowed[0] === current)}
+      onChange={(value) => {
+        // The select disables observed counts outside the allowed device capability.
+        onChange(
+          endpointValue(control, {
+            displayName,
+            renderChannels: hasRender ? Number(value) : 0,
+            captureChannels: hasCapture ? Number(value) : 0,
+          }),
+        );
+      }}
+    />
+  );
+}
+
+function EndpointSampleRate({ control, onChange }: EndpointOptionsProps) {
+  return (
+    <>
       {control.observedRate && control.sampleRateOptions?.length ? (
-        <Select
-          allowDeselect={false}
-          className={styles.optionField}
+        <SelectField
           label={control.observedRate.label}
           error={control.rateError}
           data={[...new Set([...control.sampleRateOptions, control.observedRate.value])].map(
             (value) => ({ value: String(value), label: `${value / 1000} kHz` }),
           )}
           value={String(control.observedRate.value)}
+          disabled={
+            control.sampleRateOptions.length === 1 &&
+            control.sampleRateOptions[0] === control.observedRate.value
+          }
           onChange={(value) => {
-            if (value) onChange({ ...endpointValue(control, {}), sampleRate: Number(value) });
+            onChange({ ...endpointValue(control, {}), sampleRate: Number(value) });
           }}
-          size="xs"
         />
       ) : control.observedRate ? (
-        <TextInput
+        <TextField
           readOnly
-          className={styles.optionField}
           label={control.observedRate.label}
-          size="xs"
           value={`${control.observedRate.value / 1000} kHz`}
         />
       ) : null}
-      {control.nativeFormats && control.nativeFormatLabels ? (
-        <NativeEndpointFormats control={control} onChange={onChange} />
-      ) : null}
-    </div>
+    </>
   );
 }
 
-function NativeEndpointFormats({ control, onChange }: EndpointOptionsProps) {
-  return <>
-    {(['render', 'capture'] as const).map((direction) => {
-      const formats = control.nativeFormats?.[direction];
-      if (!formats) return null;
-      if (!formats.current) return <TextInput key={direction} readOnly size="xs"
-        label={control.nativeFormatLabels?.[direction]} value={control.nativeFormatLabels?.unknown} />;
-      const data = [...formats.supported];
-      if (!data.some((format) => nativeFormatKey(format) === nativeFormatKey(formats.current!))) data.push(formats.current);
-      return <Select key={direction} allowDeselect={false} size="xs"
-        className={styles.optionField} label={control.nativeFormatLabels?.[direction]}
-        error={control.formatError}
-        disabled={control.formatsDisabled || formats.supported.length === 0}
-        value={nativeFormatKey(formats.current)}
-        data={data.map((format) => ({ value: nativeFormatKey(format),
-          label: nativeFormatLabel(format) }))}
-        onChange={(value) => {
-          const format = formats.supported.find((candidate) => nativeFormatKey(candidate) === value);
-          if (format) onChange({ ...endpointValue(control, {}), nativeFormat: { direction, format } });
-        }} />;
-    })}
-    {control.formatError ? <p role="alert">{control.formatError}</p> : null}
-  </>;
+function NativeEndpointFormats({
+  control,
+  formats,
+  labels,
+  onChange,
+}: EndpointOptionsProps & {
+  formats: NativeDeviceFormats;
+  labels: NonNullable<EndpointControl['nativeFormatLabels']>;
+}) {
+  return (
+    <NativeSampleFormatField
+      formats={formats}
+      render={control.renderChannels > 0}
+      capture={control.captureChannels > 0}
+      label={labels.bitDepth}
+      unknownLabel={labels.unknown}
+      mixedLabel={labels.mixed}
+      disabled={control.formatsDisabled}
+      error={control.formatError}
+      onChange={(sampleFormat) => onChange({ ...endpointValue(control, {}), sampleFormat })}
+    />
+  );
 }
 
 function endpointValue(
@@ -878,39 +1126,29 @@ function NodeGainControl({
   control,
   onChange,
   disabled,
-  muteControl,
 }: {
   control: { label: string; valueDb: number };
   onChange: (gainDb: number) => void;
   disabled: boolean;
-  muteControl?: ReactNode;
 }) {
   const [value, setValue] = useState(control.valueDb);
   useEffect(() => setValue(control.valueDb), [control.valueDb]);
   return (
-    <span
-      className={`${styles.gainControl} nodrag nopan nowheel`}
-      data-mute-control={Boolean(muteControl)}
-    >
+    <span className={`${styles.gainControl} nodrag nopan nowheel`}>
       <span className={styles.gainValue}>{value.toFixed(1)} dB</span>
-      <Slider
-        aria-label={control.label}
+      <ValueSlider
         disabled={disabled}
-        className={styles.gainSlider}
-        label={null}
         max={12}
         min={-60}
-        onClick={(event) => event.stopPropagation()}
         onChange={(nextValue) => {
           setValue(nextValue);
           onChange(nextValue);
         }}
-        onPointerDown={(event) => event.stopPropagation()}
         step={0.5}
-        thumbLabel={control.label}
+        label={control.label}
         value={value}
+        valueText={`${value} dB`}
       />
-      {muteControl}
     </span>
   );
 }

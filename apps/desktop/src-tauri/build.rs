@@ -2,11 +2,12 @@ fn main() {
     println!("cargo:rustc-check-cfg=cfg(mixrelay_application_clock_fixture)");
     println!("cargo:rerun-if-env-changed=MIXRELAY_APPLICATION_CLOCK_FIXTURE");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
-        if is_driver_manager_build() {
-            embed_driver_identity();
+        let identity = if is_driver_manager_build() {
+            "Info.driver.plist"
         } else {
-            build_macos_application_capture();
-        }
+            "Info.plist"
+        };
+        build_macos_audio(identity);
     }
     tauri_build::build();
 }
@@ -18,21 +19,10 @@ fn is_driver_manager_build() -> bool {
         .is_some_and(|config| config["identifier"] == "io.mixrelay.driver.desktop")
 }
 
-fn embed_driver_identity() {
+fn build_macos_audio(identity: &str) {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
         .expect("Cargo provides CARGO_MANIFEST_DIR to build scripts");
-    let info_plist = std::path::Path::new(&manifest_dir).join("Info.driver.plist");
-    println!(
-        "cargo:rustc-link-arg=-Wl,-sectcreate,__TEXT,__info_plist,{}",
-        info_plist.display()
-    );
-    println!("cargo:rerun-if-changed={}", info_plist.display());
-}
-
-fn build_macos_application_capture() {
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .expect("Cargo provides CARGO_MANIFEST_DIR to build scripts");
-    let info_plist = std::path::Path::new(&manifest_dir).join("Info.plist");
+    let info_plist = std::path::Path::new(&manifest_dir).join(identity);
     let native_root = "../../../native/macos/application-capture";
     let engine_root = "../../../native/macos/engine-service";
     let hal_root = "../../../native/macos/hal-driver";
@@ -61,6 +51,15 @@ fn build_macos_application_capture() {
     println!("cargo:rustc-link-lib=framework=CoreAudio");
     println!("cargo:rustc-link-lib=framework=AppKit");
     println!("cargo:rustc-link-lib=framework=Foundation");
+    println!("cargo:rustc-link-lib=framework=ServiceManagement");
+    cc::Build::new()
+        .file("native/MRBackgroundAgent.m")
+        .flag("-fobjc-arc")
+        .flag("-Wall")
+        .flag("-Wextra")
+        .flag("-Werror")
+        .compile("mixrelay_background_agent");
+    println!("cargo:rerun-if-changed=native/MRBackgroundAgent.m");
     // `tauri dev` launches the bare Mach-O instead of an application bundle. Embed the
     // privacy usage description and stable bundle identity in that executable as well, so
     // Core Audio process-tap permission is attributed and prompted exactly like the bundled app.

@@ -211,6 +211,7 @@ impl DriverBackend for MacDriver {
                     device::supports(id, rate)
                 });
                 Ok(VirtualEndpointDeviceSettings {
+                    native_buffer: None,
                     spec: observed_spec(&config.spec, rate, &supported),
                     native_device_ids: device::device(id)
                         .map(|_| vec![endpoint_uid(id)])

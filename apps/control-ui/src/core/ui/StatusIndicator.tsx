@@ -1,5 +1,5 @@
-import { Tooltip } from '@mantine/core';
 import type { StatusTone } from './StatusBadge';
+import { Tooltip } from './Tooltip';
 
 /** The tooltip and accessible name describe exactly the same status as the colored marker. */
 export function StatusIndicator({
@@ -12,7 +12,7 @@ export function StatusIndicator({
   tone: StatusTone;
 }) {
   return (
-    <Tooltip label={label} openDelay={350} position="top">
+    <Tooltip nonInteractive label={label} position="top">
       <span className={className} data-tone={tone} role="img" aria-label={label} />
     </Tooltip>
   );

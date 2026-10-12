@@ -84,6 +84,25 @@ fn guard_excludes_process_owners_and_other_installers_until_drop() {
 }
 
 #[test]
+fn owned_lock_drop_releases_locks_even_when_inherited_descriptors_remain_open() {
+    let fixture = Fixture::new();
+    let directory = fixture.directory();
+    for kind in [
+        LeaseKind::App,
+        LeaseKind::Engine,
+        LeaseKind::DriverManager,
+        LeaseKind::Installer,
+    ] {
+        let owner = directory.acquire_lock(kind, true).unwrap();
+        // A fork shares this open-file description until exec closes CLOEXEC FDs.
+        let inherited = owner.0.try_clone().unwrap();
+        drop(owner);
+        drop(directory.acquire_lock(kind, true).unwrap());
+        drop(inherited);
+    }
+}
+
+#[test]
 fn acquisition_never_replaces_or_truncates_existing_inodes() {
     let fixture = Fixture::new();
     let directory = fixture.directory();
@@ -232,4 +251,48 @@ fn independent_process_owner_excludes_installer_and_death_releases_lock() {
     child.0.kill().unwrap();
     assert!(!child.0.wait().unwrap().success());
     drop(directory.acquire().unwrap());
+}
+
+#[test]
+fn app_update_retains_a_running_driver_manager_and_excludes_app_engine_and_other_installers() {
+    let fixture = Fixture::new();
+    let directory = fixture.directory();
+    let _manager = directory
+        .acquire_lock(LeaseKind::DriverManager, true)
+        .unwrap();
+    let guard = directory.acquire_for_app_update().unwrap();
+    for kind in [LeaseKind::App, LeaseKind::Engine, LeaseKind::Installer] {
+        assert!(matches!(
+            directory.acquire_lock(kind, true),
+            Err(LeaseError::Busy { .. })
+        ));
+    }
+    drop(guard);
+    drop(directory.acquire_lock(LeaseKind::App, true).unwrap());
+}
+
+#[test]
+fn editor_only_update_preserves_driver_runtime_and_engine_ownership() {
+    let fixture = Fixture::new();
+    let directory = fixture.directory();
+    let controller = directory.acquire_lock(LeaseKind::App, true).unwrap();
+    let engine = directory.acquire_lock(LeaseKind::Engine, true).unwrap();
+    let update = directory.acquire_for_editor_update().unwrap();
+    assert!(matches!(
+        directory.acquire_for_editor_update(),
+        Err(LeaseError::Busy {
+            kind: LeaseKind::Installer
+        })
+    ));
+    assert!(matches!(
+        directory.acquire_lock(LeaseKind::App, true),
+        Err(LeaseError::Busy { .. })
+    ));
+    assert!(matches!(
+        directory.acquire_lock(LeaseKind::Engine, true),
+        Err(LeaseError::Busy { .. })
+    ));
+    drop(update);
+    drop(directory.acquire_for_editor_update().unwrap());
+    drop((controller, engine));
 }

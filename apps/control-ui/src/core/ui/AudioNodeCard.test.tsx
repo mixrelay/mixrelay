@@ -77,8 +77,8 @@ it('reports one DOM-coherent controls/disclosure pair across observer order and 
         />
       </MixRelayProvider>,
     );
-    const options = view.getByRole('button', { name: 'Options' });
-    const controls = options.parentElement?.parentElement as HTMLElement;
+    const options = view.getByRole('button', { name: (name) => name.endsWith('Options') });
+    const controls = view.container.querySelector<HTMLElement>('[data-node-controls]');
     assert(controls);
     controls.style.boxSizing = 'border-box';
     controls.style.height = '25px';
@@ -86,7 +86,7 @@ it('reports one DOM-coherent controls/disclosure pair across observer order and 
     await waitFor(() => expect(onContentHeightChange).toHaveBeenLastCalledWith(25, 0));
 
     fireEvent.click(options);
-    const panel = options.nextElementSibling as HTMLElement;
+    const panel = view.container.querySelector<HTMLElement>('[data-node-disclosure]');
     assert(panel);
     panel.style.boxSizing = 'border-box';
     panel.style.height = '37.5px';
@@ -148,11 +148,12 @@ it('renders every generic plug-in parameter without an internal scroll viewport'
       />
     </MixRelayProvider>,
   );
-  expect(view.queryByRole('button', { name: 'Options' })).not.toBeInTheDocument();
+  expect(
+    view.queryByRole('button', { name: (name) => name.endsWith('Options') }),
+  ).not.toBeInTheDocument();
   expect(view.getAllByRole('slider')).toHaveLength(24);
   expect(view.getByRole('slider', { name: 'Parameter 24' })).toBeVisible();
   expect(view.container.querySelector('[data-radix-scroll-area-viewport]')).toBeNull();
-  expect(view.container.querySelector('.mantine-ScrollArea-root')).toBeNull();
 });
 
 it('places native plug-in content under a compact unmetered face', () => {
@@ -177,6 +178,131 @@ it('places native plug-in content under a compact unmetered face', () => {
   expect(root).not.toHaveAttribute('data-metered');
   expect(view.queryByText('IN 2')).not.toBeInTheDocument();
   expect(view.queryByText('OUT 2')).not.toBeInTheDocument();
+});
+
+it('keeps primary effect controls available while advanced values use the shared disclosure', () => {
+  const change = vi.fn();
+  const view = render(
+    <MixRelayProvider>
+      <AudioNodeCard
+        category="Processor"
+        icon="FX"
+        title="Reverb"
+        faceMode="compact"
+        onParameterChange={change}
+        inputCount={2}
+        outputCount={2}
+        parameterControls={[
+          {
+            id: 'mix',
+            label: 'Mix',
+            minimum: 0,
+            maximum: 1,
+            step: 0.01,
+            suffix: '',
+            value: 0.2,
+            precise: true,
+            presentation: 'knob',
+          },
+          {
+            id: 'preDelayMs',
+            label: 'Pre-delay',
+            minimum: 0,
+            maximum: 200,
+            step: 1,
+            suffix: 'ms',
+            value: 20,
+            precise: true,
+            presentation: 'knob',
+            section: 'options',
+          },
+        ]}
+      />
+    </MixRelayProvider>,
+  );
+  const options = view.getByRole('button', { name: (name) => name.endsWith('Options') });
+  expect(options).toHaveAttribute('aria-expanded', 'false');
+  expect(view.getByRole('textbox', { name: 'Mix' })).toBeVisible();
+  expect(view.queryByRole('textbox', { name: 'Pre-delay' })).not.toBeInTheDocument();
+  fireEvent.click(options);
+  expect(options).toHaveAttribute('aria-expanded', 'true');
+  const advanced = view.getByRole('textbox', { name: 'Pre-delay' });
+  expect(advanced.closest('[data-node-disclosure]')?.id).toBe(
+    options.getAttribute('aria-controls'),
+  );
+  fireEvent.focus(advanced);
+  fireEvent.change(advanced, { target: { value: '35' } });
+  fireEvent.blur(advanced);
+  expect(change).toHaveBeenCalledExactlyOnceWith('preDelayMs', 35);
+  fireEvent.click(options);
+  expect(view.queryByRole('textbox', { name: 'Pre-delay' })).not.toBeInTheDocument();
+  expect(view.getByRole('textbox', { name: 'Mix' })).toBeVisible();
+});
+
+it('shows applied dynamics readings instead of duplicate output meters or inferred reduction', () => {
+  const store = new AudioMeterStore();
+  store.update({
+    protocolVersion: 1,
+    revision: 1,
+    nodes: [
+      {
+        nodeId: 'compressor',
+        portId: 'output',
+        peaks: [0.5, 0.25],
+        dynamics: { inputPeaks: [0.5, 0.25], gainReductionDb: 8, thresholdDb: -24 },
+      },
+    ],
+  });
+  const view = render(
+    <MixRelayProvider>
+      <AudioMeterProvider store={store}>
+        <AudioNodeCard
+          category="Processor"
+          icon="FX"
+          title="Compressor"
+          faceMode="compact"
+          inputCount={2}
+          outputCount={2}
+          meterBanks={[{ nodeId: 'compressor', portId: 'output', channels: 2 }]}
+          dynamics={{
+            nodeId: 'compressor',
+            portId: 'output',
+            thresholdId: 'thresholdDb',
+            inputLabel: 'Input',
+            outputLabel: 'Output',
+            reductionLabel: 'Gain reduction',
+            unavailableLabel: 'Waiting for meter data',
+          }}
+          onParameterChange={vi.fn()}
+          parameterControls={[
+            {
+              id: 'thresholdDb',
+              label: 'Threshold',
+              value: -18,
+              minimum: -80,
+              maximum: 0,
+              step: 0.1,
+              suffix: 'dB',
+              precise: true,
+              presentation: 'knob',
+            },
+          ]}
+        />
+      </AudioMeterProvider>
+    </MixRelayProvider>,
+  );
+  expect(view.getAllByRole('meter')).toHaveLength(5);
+  expect(view.getByRole('meter', { name: 'Gain reduction' })).toHaveAttribute(
+    'aria-valuetext',
+    '8.0 dB',
+  );
+  expect(view.getByText('Threshold -24.0 dB')).toBeVisible();
+  expect(view.getByRole('textbox', { name: 'Threshold' })).toHaveValue('-18');
+  expect(view.queryByRole('meter', { name: 'Compressor channel 1' })).not.toBeInTheDocument();
+  act(() => store.clear());
+  expect(view.queryByRole('meter')).not.toBeInTheDocument();
+  expect(view.queryByText('Waiting for meter data')).not.toBeInTheDocument();
+  expect(view.getByRole('img', { name: 'Gain reduction: Waiting for meter data' })).toBeVisible();
 });
 
 it.each(['closed', 'opening', 'open', 'failed', 'unavailable', undefined] as const)(
@@ -214,15 +340,19 @@ it.each(['closed', 'opening', 'open', 'failed', 'unavailable', undefined] as con
     );
     const needsParameters = !state || state === 'failed' || state === 'unavailable';
     if (needsParameters) {
-      expect(view.queryByRole('button', { name: 'Options' })).not.toBeInTheDocument();
+      expect(
+        view.queryByRole('button', { name: (name) => name.endsWith('Options') }),
+      ).not.toBeInTheDocument();
       expect(view.getByRole('slider', { name: 'Cutoff' })).toBeEnabled();
     } else {
-      expect(view.queryByRole('button', { name: 'Options' })).not.toBeInTheDocument();
+      expect(
+        view.queryByRole('button', { name: (name) => name.endsWith('Options') }),
+      ).not.toBeInTheDocument();
       expect(view.queryByRole('slider')).not.toBeInTheDocument();
     }
     if (state === 'failed' || state === 'closed') {
       const button = view.getByRole('button', {
-        name: state === 'closed' ? 'Open editor' : 'Retry editor',
+        name: state === 'closed' ? 'Filter: Open editor' : 'Filter: Retry editor',
       });
       expect(button.textContent).toBe('');
       expect(view.queryByText('Plug-in editor')).not.toBeInTheDocument();
@@ -231,8 +361,12 @@ it.each(['closed', 'opening', 'open', 'failed', 'unavailable', undefined] as con
       fireEvent.click(button);
       expect(onToggle).toHaveBeenCalledOnce();
     } else {
-      expect(view.queryByRole('button', { name: 'Retry editor' })).not.toBeInTheDocument();
-      expect(view.queryByRole('button', { name: 'Open editor' })).not.toBeInTheDocument();
+      expect(
+        view.queryByRole('button', { name: (name) => name.endsWith('Retry editor') }),
+      ).not.toBeInTheDocument();
+      expect(
+        view.queryByRole('button', { name: (name) => name.endsWith('Open editor') }),
+      ).not.toBeInTheDocument();
     }
   },
 );
@@ -313,7 +447,7 @@ it('clears offline meters while keeping selection and options editable, then res
   expect(view.container.querySelectorAll('[title$=": 0%"]')).toHaveLength(2);
   fireEvent.click(button);
   expect(onSelect).toHaveBeenCalledOnce();
-  fireEvent.click(view.getByRole('button', { name: 'Options' }));
+  fireEvent.click(view.getByRole('button', { name: (name) => name.endsWith('Options') }));
   expect(view.getByRole('slider', { name: 'Gain' })).toBeEnabled();
   view.rerender(
     <MixRelayProvider>
@@ -442,4 +576,85 @@ it('keeps both directions of a duplex endpoint on their own visible meter banks'
   expect(sink?.querySelectorAll('[data-orientation="horizontal"]')).toHaveLength(2);
   expect(source?.querySelectorAll('[title$=": 100%"]')).toHaveLength(1);
   expect(sink?.querySelectorAll('[title$=": 100%"]')).toHaveLength(1);
+});
+
+it('renders a display face when the parent owns selection, while options stay interactive', () => {
+  const view = render(
+    <MixRelayProvider>
+      <AudioNodeCard
+        category="Application"
+        icon="APP"
+        title="Player"
+        inputCount={0}
+        outputCount={2}
+        gainControl={{ label: 'Gain', valueDb: 0 }}
+        onGainChange={vi.fn()}
+      />
+    </MixRelayProvider>,
+  );
+  expect(view.queryByRole('button', { name: 'Player, Application' })).not.toBeInTheDocument();
+  expect(view.container.querySelector('[data-node-face]')?.tagName).toBe('DIV');
+  fireEvent.click(view.getByRole('button', { name: (name) => name.endsWith('Options') }));
+  expect(view.getByRole('slider', { name: 'Gain' })).toBeInTheDocument();
+});
+
+it('includes content-box padding and borders and rejects incomplete DOM measurements', () => {
+  const { emit, restore } = installResizeObserverHarness();
+  try {
+    const onContentHeightChange = vi.fn();
+    const onFaceHeightChange = vi.fn();
+    const view = render(
+      <MixRelayProvider>
+        <AudioNodeCard
+          title="Input"
+          category="Input"
+          icon="MIC"
+          inputCount={0}
+          outputCount={2}
+          gainControl={{ label: 'Gain', valueDb: 0 }}
+          onGainChange={vi.fn()}
+          onContentHeightChange={onContentHeightChange}
+          onFaceHeightChange={onFaceHeightChange}
+        />
+      </MixRelayProvider>,
+    );
+    const controls = view.container.querySelector<HTMLElement>('[data-node-controls]');
+    const face = view.container.querySelector<HTMLElement>('[data-node-face]');
+    assert(controls && face);
+    Object.assign(controls.style, {
+      boxSizing: 'content-box',
+      height: '20px',
+      paddingTop: '2px',
+      paddingBottom: '3px',
+      borderTopWidth: '1px',
+      borderBottomWidth: '1px',
+    });
+    emit(controls, 27);
+    expect(onContentHeightChange).toHaveBeenLastCalledWith(27, 0);
+    emit(face, 64);
+    expect(onFaceHeightChange).toHaveBeenLastCalledWith(64);
+    controls.style.paddingTop = 'var(--pending-layout)';
+    controls.style.paddingBottom = 'var(--pending-layout)';
+    controls.style.borderTopWidth = 'var(--pending-layout)';
+    controls.style.borderBottomWidth = 'var(--pending-layout)';
+    emit(controls, 20);
+    expect(onContentHeightChange).toHaveBeenLastCalledWith(20, 0);
+    onContentHeightChange.mockClear();
+    controls.style.height = 'auto';
+    emit(controls, 30);
+    expect(onContentHeightChange).not.toHaveBeenCalled();
+    controls.style.height = '40px';
+    fireEvent.click(view.getByRole('button', { name: (name) => name.endsWith('Options') }));
+    const panel = view.container.querySelector<HTMLElement>('[data-node-disclosure]');
+    assert(panel);
+    onContentHeightChange.mockClear();
+    panel.style.height = 'auto';
+    emit(controls, 41);
+    expect(onContentHeightChange).not.toHaveBeenCalled();
+    panel.style.height = '80px';
+    emit(controls, 42);
+    expect(onContentHeightChange).not.toHaveBeenCalled();
+  } finally {
+    restore();
+  }
 });

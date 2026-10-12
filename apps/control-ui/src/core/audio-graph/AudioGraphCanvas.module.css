@@ -4,48 +4,40 @@
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  background: #121417;
+  background: var(--canvas-background);
+}
+
+/* The canvas is focused programmatically for selection cancellation, not by Tab. */
+.root:focus {
+  outline: none;
+}
+
+.root :global(.react-flow__node:focus-visible) {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 2px;
 }
 
 .root :global(.react-flow) {
+  /* Override the library's fixed dark canvas with the Core theme role. */
+  --xy-background-color: var(--canvas-background);
   min-height: 0;
 }
 
 .nodeToolbar {
   z-index: 5;
-  margin: 12px;
-  margin-left: var(--canvas-toolbar-inset, 12px);
+  margin: var(--space-3);
+  margin-left: var(--layout-canvas-toolbar-inset, var(--space-3));
 }
 
 .addNode {
-  --button-bg: #17191d;
-  --button-hover: #202329;
-  --button-bd: 1px solid #3e444d;
-
-  width: 30px;
-  min-width: 30px;
-  height: 30px;
+  width: var(--control-height);
+  height: var(--control-height);
   padding: 0;
-  border: 1px solid #3e444d;
-  border-radius: 0;
-  background: #191b1f;
-  color: #bdc2ca;
-  cursor: default;
-  font: inherit;
-  font-size: 11px;
 }
 
-.addNode:hover,
-.addNode[data-expanded] {
-  border-color: #59616c;
-  background: #202329;
-  color: var(--text);
-}
-
-.addNode :global(.mantine-Button-label) {
-  color: var(--signal);
-  font-size: 18px;
-  font-weight: 350;
+.addNode > :first-child {
+  font-size: var(--font-command-symbol);
+  font-weight: 400;
   line-height: 1;
 }
 
@@ -65,13 +57,13 @@
 }
 
 .root :global(.react-flow__selection) {
-  border: 1px solid #7895c8;
-  background: rgba(112, 143, 198, 0.09);
+  border: 1px solid var(--canvas-selection-border);
+  background: var(--canvas-selection-background);
 }
 
 .root :global(.react-flow__edge-path),
 .root :global(.react-flow__connection-path) {
-  stroke: #84969b;
+  stroke: var(--cable);
   stroke-width: 1.5;
 }
 
@@ -80,20 +72,26 @@
 }
 
 .root :global(.react-flow__edge.selected .react-flow__edge-path) {
-  stroke: #c2d1d3;
+  stroke: var(--cable-selected);
   stroke-width: 2;
 }
 
 .node {
   display: flex;
   flex-direction: column;
-  width: 228px;
+  width: var(--node-default-width);
   position: relative;
   box-sizing: border-box;
 }
 
-.node[data-node-type="recorder"] {
-  width: 180px;
+.node[data-equalizer] {
+  width: var(--node-equalizer-width);
+  min-width: var(--node-equalizer-width);
+}
+
+.node[data-dynamics] {
+  width: var(--node-dynamics-width);
+  min-width: var(--node-dynamics-width);
 }
 
 .node .resizeHandle:global(.react-flow__resize-control.handle.bottom.right) {
@@ -119,7 +117,7 @@
 }
 
 .node .resizeHandle {
-  color: #6b737e;
+  color: var(--canvas-resize-text);
 }
 
 .node .resizeHandle:hover {
@@ -127,12 +125,12 @@
 }
 
 .handle {
-  --port-accent: #9fadb0;
-  --port-accent-border: #73878c;
-  --port-accent-ring: rgba(132, 150, 155, 0.18);
-  --port-selected: #d0ddde;
-  --port-selected-border: #a7bcbe;
-  --port-selected-ring: rgba(132, 150, 155, 0.24);
+  --port-accent: var(--port-output-hover);
+  --port-accent-border: var(--port-output-border-hover);
+  --port-accent-ring: var(--port-output-ring-hover);
+  --port-selected: var(--port-output-selected);
+  --port-selected-border: var(--port-output-border-selected);
+  --port-selected-ring: var(--port-output-ring-selected);
 
   z-index: 3;
   /* React Flow anchors cables to this box, not the expanded pointer target. */
@@ -161,9 +159,9 @@
   left: 50%;
   width: 3px;
   height: 9px;
-  border: 1px solid #59616b;
+  border: 1px solid var(--port-border);
   border-radius: 1px;
-  background: #69717b;
+  background: var(--port-background);
   content: "";
   transform: translate(-50%, -50%);
   transition:
@@ -189,33 +187,50 @@
 
 .handle[data-port-selected]::after {
   z-index: 5;
-  width: 4px;
-  height: 12px;
+  width: 3px;
+  height: 9px;
   border-color: var(--port-selected-border);
   background: var(--port-selected);
-  box-shadow: 0 0 0 2px var(--port-selected-ring);
+  box-shadow: none;
 }
 
 .inputHandle {
-  --port-accent: #e4c17e;
-  --port-accent-border: #ae905a;
-  --port-accent-ring: rgba(212, 177, 108, 0.18);
-  --port-selected: #f3d69d;
-  --port-selected-border: #c6a86f;
-  --port-selected-ring: rgba(212, 177, 108, 0.22);
+  --port-accent: var(--port-input-hover);
+  --port-accent-border: var(--port-input-border-hover);
+  --port-accent-ring: var(--port-input-ring-hover);
+  --port-selected: var(--port-input-selected);
+  --port-selected-border: var(--port-input-border-selected);
+  --port-selected-ring: var(--port-input-ring-selected);
 }
 
 .portTooltip {
   padding: 3px 5px;
-  border: 1px solid #3b4149;
+  border: 1px solid var(--port-tooltip-border);
   border-radius: 0;
-  background: #121418;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.36);
-  color: #c8cdd5;
+  background: var(--port-tooltip-background);
+  box-shadow: 0 4px 12px var(--port-tooltip-shadow);
+  color: var(--port-tooltip-text);
   font:
-    600 8px ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace;
-  letter-spacing: 0.04em;
+    var(--port-tooltip-font-weight) var(--port-tooltip-font-size) / var(--port-tooltip-line-height)
+    var(--port-tooltip-font-family);
+  letter-spacing: 0;
+}
+
+.portSelectionFeedback {
+  position: absolute;
+  top: clamp(8px, var(--selection-y), calc(100% - 32px));
+  left: clamp(8px, var(--selection-x), calc(100% - 180px));
+  z-index: 8;
+  max-width: min(172px, calc(100% - 16px));
+  overflow: hidden;
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: var(--surface-floating);
+  color: var(--text);
+  font-size: var(--font-label);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
 }

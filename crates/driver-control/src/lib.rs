@@ -1,4 +1,4 @@
-//! Independent Driver configuration and loopback control, without graph or license policy.
+//! Independent Driver configuration and loopback control with service-enforced inventory access.
 
 mod client;
 mod contract;
@@ -15,4 +15,4 @@ pub use contract::{
     DriverSnapshot, DriverState, NativeDirection, SNAPSHOT_ROUTE,
 };
 pub use manager::DriverManager;
-pub use server::router;
+pub use server::{router, router_with_access};

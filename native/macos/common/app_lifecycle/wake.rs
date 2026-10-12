@@ -6,7 +6,7 @@ unsafe extern "C" {
     fn xpc_release(object: *mut c_void);
 }
 
-/// One native demand-start connection. Drop before releasing the desktop lease,
+/// One native demand-start connection. Drop before releasing the controller lease,
 /// so XPC cannot retry this connection after the engine has been shut down.
 #[derive(Debug)]
 pub struct EngineWake(NonNull<c_void>);

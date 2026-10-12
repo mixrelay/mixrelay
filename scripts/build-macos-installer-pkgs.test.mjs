@@ -54,7 +54,7 @@ function assertCanonicalDriverLicense(resources, plainTerms) {
   assert.doesNotMatch(text, /Distribution draft|Professional legal review|Before publication|MixRelay Driver 이용 조건|배포 초안|전문 법률 검토 미완료|\n한국어\n/);
   const rtf = resources["en.lproj/INSTALLER-LICENSE.rtf"];
   assertInstallerTypography(rtf);
-  assert.equal(presentationWords(rtfText(rtf)), presentationWords(text), "rendered agreement preserves every legal word, business contact and version");
+  assert.equal(presentationWords(rtfText(rtf)), presentationWords("Proprietary license fixture\n원문 그대로\n\n" + text), "rendered agreement preserves every legal word, business contact and version");
   assert.equal([...rtf.toString("utf8").matchAll(/\\fs22\\b\\sb200\\sa80 \d+\. /g)].length, 8);
   assert.match(rtf.toString("utf8"), /\\fs24\\b0\\sb0\\sa160 Software License Agreement\\par/);
   assert.match(rtfText(rtf), /separately governed by LICENSE\.txt, even when included in the same installer\.\nThe software-use agreement/);
@@ -64,18 +64,18 @@ function assertCanonicalDriverLicense(resources, plainTerms) {
   for (const entry of LANGUAGES) {
     const document = resources[`${entry.language}.lproj/INSTALLER-LICENSE.rtf`];
     assertInstallerTypography(document);
-    assert.equal(presentationWords(rtfText(document)), presentationWords(SOURCE_DOCUMENTS[entry.driverTerms].toString("utf8")), `${entry.language}: entire contract retained`);
-    assert.deepEqual([...rtfText(document).matchAll(/^(\d+)\. /gm)].map(match => match[1]), ["1", "2", "3", "4", "5", "6", "7", "8"]);
+    assert.equal(presentationWords(rtfText(document)), presentationWords((entry.language === "en" ? "Proprietary license fixture\n원문 그대로\n" : SOURCE_DOCUMENTS[entry.appTerms].toString("utf8")) + "\n\n" + SOURCE_DOCUMENTS[entry.driverTerms].toString("utf8")), `${entry.language}: entire contract retained`);
+    assert.deepEqual([...rtfText(document).matchAll(/^(\d+)\. /gm)].map(match => match[1]), [...((entry.language === "en" ? "" : SOURCE_DOCUMENTS[entry.appTerms].toString("utf8")) + "\n\n" + SOURCE_DOCUMENTS[entry.driverTerms].toString("utf8")).matchAll(/^(\d+)\. /gm)].map(match => match[1]));
     assert.ok(rtfText(document).includes(entry.agreementTitle));
     assert.ok(rtfText(document).includes("111-42-04359"));
-    assert.equal([...document.toString("utf8").matchAll(/\\fs22\\b\\sb200\\sa80 \d+\. /g)].length, 8);
+    assert.equal([...document.toString("utf8").matchAll(/\\fs22\\b\\sb200\\sa80 \d+\. /g)].length, [...rtfText(document).matchAll(/^(\d+)\. /gm)].length);
   }
   const korean = resources["ko.lproj/INSTALLER-LICENSE.rtf"];
   assertInstallerTypography(korean);
-  assert.equal(presentationWords(rtfText(korean)), presentationWords(DRIVER_LICENSE_KO), "native Korean localization preserves the full Korean agreement");
-  assert.deepEqual([...rtfText(korean).matchAll(/^(\d+)\. /gm)].map(match => match[1]), ["1", "2", "3", "4", "5", "6", "7", "8"]);
-  assert.match(rtfText(korean), /^MixRelay Driver\n소프트웨어 사용권 계약\n/);
-  assert.ok(rtfText(korean).includes("버전: 2026-10-08"));
+  assert.equal(presentationWords(rtfText(korean)), presentationWords(SOURCE_DOCUMENTS["LICENSE.ko.txt"].toString("utf8") + "\n\n" + DRIVER_LICENSE_KO), "native Korean localization preserves the full Korean agreement");
+  assert.deepEqual([...rtfText(korean).matchAll(/^(\d+)\. /gm)].map(match => match[1]), [...(SOURCE_DOCUMENTS["LICENSE.ko.txt"].toString("utf8") + "\n\n" + DRIVER_LICENSE_KO).matchAll(/^(\d+)\. /gm)].map(match => match[1]));
+  assert.match(rtfText(korean), /MixRelay Driver\n소프트웨어 사용권 계약\n/);
+  assert.ok(rtfText(korean).includes("버전: 2026-10-10"));
   assert.ok(rtfText(korean).includes("111-42-04359"));
   assert.doesNotMatch(rtfText(korean), /배포 초안|검토 미완료|영어.*우선/);
 }
@@ -84,20 +84,13 @@ function assertInstallerReadme(resources) {
   const readme = resources["en.lproj/INSTALLER-README.rtf"];
   assertInstallerTypography(readme);
   const notice = rtfText(readme);
-  assert.match(notice, /^MixRelay Driver\nInstallation Guide\n/);
-  assert.match(notice, /MixRelay Driver is a free virtual audio driver for macOS\./);
+  assert.match(notice, /^MixRelay\nInstallation Guide\n/);
+  assert.match(notice, /installs the audio editor, virtual audio devices and background audio services together/);
   assert.match(notice, /Before installation\n/);
   assert.match(notice, /After installation\n/);
-  assert.match(notice, /Choose Quit in the Driver status menu to stop all Driver devices and basic loopback while keeping your device settings\./);
-  assert.match(notice, /Open MixRelay Driver again to restart its devices and loopback with those settings\./);
-  assert.match(notice, /Quitting the MixRelay app alone does not stop the Driver\./);
-  assert.match(notice, /Installing or updating MixRelay Driver briefly interrupts all system audio\./);
-  assert.match(notice, /Quit recording and call apps before continuing\./);
-  assert.match(notice, /Installer asks you to close MixRelay and MixRelay Driver if they are running\./);
-  assert.match(notice, /A Mac reboot is not required\./);
-  assert.match(notice, /Use its status-bar menu to configure channel count, sample rate and PCM format\./);
-  assert.match(notice, /Saved settings are also preserved when updating\./);
-  assert.match(notice, /Uninstall MixRelay Driver/);
+  assert.match(notice, /Quitting the MixRelay app alone does not stop the Driver/);
+  assert.match(notice, /Saved settings are also preserved when updating/);
+  assert.match(notice, /Uninstall MixRelay/);
   assert.doesNotMatch(notice, /success|Terms of Use|Changelog|Unreleased|Release notes|Release fixture/i);
   assert.equal(resources["INSTALLER-README.rtf"], undefined, "unlocalized guidance must not shadow the preferred language");
   for (const entry of LANGUAGES.filter(({ language }) => !["en", "ko"].includes(language))) {
@@ -110,10 +103,10 @@ function assertInstallerReadme(resources) {
   }
   const korean = resources["ko.lproj/INSTALLER-README.rtf"];
   assertInstallerTypography(korean);
-  assert.match(rtfText(korean), /^MixRelay Driver\n설치 안내\n/);
+  assert.match(rtfText(korean), /^MixRelay\n설치 안내\n/);
   assert.match(rtfText(korean), /시스템 전체의 오디오가 잠시 중단됩니다/);
   assert.match(rtfText(korean), /Mac을 재부팅할 필요는 없습니다/);
-  assert.match(rtfText(korean), /Driver 상태 메뉴에서 종료를 선택하면 모든 Driver 장치와 기본 루프백이 중지되며, 장치 설정은 유지됩니다/);
+  assert.match(rtfText(korean), /MixRelay 상태 메뉴에서 종료를 선택하면 모든 Driver 장치와 기본 루프백이 중지되며, 장치 설정은 유지됩니다/);
   assert.match(rtfText(korean), /저장된 설정으로 장치와 루프백을 다시 시작합니다/);
   assert.match(rtfText(korean), /MixRelay 앱을 종료하는 것만으로는 Driver가 중지되지 않습니다/);
 }
@@ -124,15 +117,15 @@ function fixture(t) {
   const root = mkdtempSync(join(fixtureRoot, "mixrelay-macos-pkg-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const payload = join(root, "prepared payload");
-  const manager = join(payload, "Applications/MixRelay Driver.app");
-  const uninstaller = join(payload, "Applications/Uninstall MixRelay Driver.app");
+  const manager = join(payload, "Applications/MixRelay.app");
+  const uninstaller = join(payload, "Applications/Uninstall MixRelay.app");
   const hal = join(payload, "Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver");
   const driver = join(payload, "Library/Application Support/MixRelay/bin/mixrelay-driver-service");
   const template = join(payload, "templates/io.mixrelay.audio.driver.plist.in");
   const cli = join(root, "mixrelay-macos-installer");
   const payloadChecker = join(root, "mixrelay-macos-payload-check");
   for (const [bundle, identifier, packageType] of [
-    [manager, "io.mixrelay.driver.desktop", "APPL"],
+    [manager, "io.mixrelay.desktop", "APPL"],
     [uninstaller, "io.mixrelay.driver.uninstaller", "APPL"],
     [hal, "io.mixrelay.audio.MixRelayHAL", "BNDL"],
   ]) {
@@ -150,10 +143,14 @@ function fixture(t) {
   mkdirSync(join(nested, "Contents/MacOS"), { recursive: true });
   for (const bundle of [manager, hal, nested]) chmodSync(bundle, 0o755);
   writeFileSync(join(nested, "Contents/MacOS/editor"), "nested editor fixture");
-  writeFileSync(join(nested, "Contents/Info.plist"), "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>CFBundleIdentifier</key><string>io.mixrelay.driver.desktop.editor</string><key>CFBundleName</key><string>MixRelayEditor</string><key>CFBundlePackageType</key><string>XPC!</string><key>CFBundleVersion</key><string>1.2.3</string></dict></plist>");
+  writeFileSync(join(nested, "Contents/Info.plist"), "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>CFBundleIdentifier</key><string>io.mixrelay.desktop.editor</string><key>CFBundleName</key><string>MixRelayEditor</string><key>CFBundlePackageType</key><string>XPC!</string><key>CFBundleVersion</key><string>1.2.3</string></dict></plist>");
   mkdirSync(join(payload, "Library/Application Support/MixRelay/bin"), { recursive: true });
   mkdirSync(join(payload, "templates"), { recursive: true });
   writeFileSync(driver, "universal driver fixture");
+  const engine = join(payload, "Library/Application Support/MixRelay/bin/mixrelay-engine-service");
+  writeFileSync(engine, "universal engine fixture");
+  chmodSync(engine, 0o755);
+  writeFileSync(join(payload, "templates/io.mixrelay.audio.engine.plist.in"), "engine template fixture");
   writeFileSync(template, "launchd template fixture");
   writeFileSync(join(payload, "templates/io.mixrelay.driver.removal.plist"), "removal plist fixture");
   writeFileSync(cli, "universal cli fixture");
@@ -165,9 +162,11 @@ function fixture(t) {
     format: 1,
     status: "payload-prepared-not-package",
     installContract: {
-      manager: "/Applications/MixRelay Driver.app",
-      uninstaller: "/Applications/Uninstall MixRelay Driver.app",
+      manager: "/Applications/MixRelay.app",
+      uninstaller: "/Applications/Uninstall MixRelay.app",
       removalLaunchd: "/Library/LaunchDaemons/io.mixrelay.driver.removal.plist",
+      engine: "/Library/Application Support/MixRelay/bin/mixrelay-engine-service",
+      engineLaunchd: "/Library/LaunchDaemons/io.mixrelay.audio.engine.plist",
       hal: "/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver",
       driver: "/Library/Application Support/MixRelay/bin/mixrelay-driver-service",
       launchd: "/Library/LaunchDaemons/io.mixrelay.audio.driver.plist",
@@ -189,6 +188,7 @@ function fakeRunner(calls, signature = IDENTITY, inspectPackageRoot = () => {}, 
       call.environment = options.env;
       return payloadCheck;
     }
+    if (args[0] === "--version") return { status: 0, stdout: "1.2.3" };
     if (command === "/usr/bin/file") return { status: 0, stdout: "Mach-O 64-bit executable" };
     if (command === "/usr/bin/xcrun") return { status: 0, stdout: "arm64 x86_64" };
     if (command === "/usr/bin/codesign") return { status: 0, stdout: "" };
@@ -197,6 +197,7 @@ function fakeRunner(calls, signature = IDENTITY, inspectPackageRoot = () => {}, 
       return { status: 0, stdout: "" };
     }
     if (command === "/usr/bin/plutil") {
+      if (args[0] === "-extract" && args[1] === "CFBundleShortVersionString") return { status: 0, stdout: "1.2.3" };
       if (args[0] === "-extract") {
         const plist = readFileSync(args.at(-1), "utf8");
         return { status: 0, stdout: plist.match(/<key>MixRelaySigningTeam<\/key><string>([^<]+)<\/string>/)?.[1] ?? "" };
@@ -330,7 +331,7 @@ test("builds one installation/update package with an independently installed rem
   });
   assert.equal(result.status, "signed-artifacts-built");
   assert.deepEqual(readdirSync(paths.output).sort(), [
-    "MixRelay-Driver-Installer-1.2.3.pkg",
+    "MixRelay-Installer-1.2.3.pkg",
   ]);
   assert.match(result.stagingIds.installer, /^[a-f0-9]{32}$/);
   assert.deepEqual(Object.keys(result.stagingIds), ["installer"]);
@@ -348,27 +349,27 @@ test("builds one installation/update package with an independently installed rem
   assert.equal(componentAnalyses.length, 1);
   assert.equal(componentPackages.length, 1);
   assert.equal(productBuilds.length, 1);
-  assert.match(productBuilds[0].distribution, /<title>MixRelay Driver<\/title>/);
+  assert.match(productBuilds[0].distribution, /<title>MixRelay<\/title>/);
   for (const call of [...componentPackages, ...productBuilds]) {
     assert.ok(call.args.includes("--sign"));
     assert.ok(call.args.includes(IDENTITY));
     assert.ok(call.args.includes("--timestamp"));
   }
   assert.ok(componentPackages[0].args.includes("--component-plist"));
-  assert.ok(componentPackages[0].packageFiles.some(path => path.endsWith("payload/Applications/MixRelay Driver.app/Contents/MacOS/main")));
-  assert.ok(componentPackages[0].packageFiles.some(path => path.includes("Uninstall MixRelay Driver.app")));
+  assert.ok(componentPackages[0].packageFiles.some(path => path.endsWith("payload/Applications/MixRelay.app/Contents/MacOS/main")));
+  assert.ok(componentPackages[0].packageFiles.some(path => path.includes("Uninstall MixRelay.app")));
   assert.ok(!componentPackages[0].args.includes("--nopayload"));
   for (const filename of [...DOCUMENTS, "CHANGELOG.md"]) {
-    const source = readFileSync(join(paths.payload, "Applications/MixRelay Driver.app/Contents/Resources", filename));
-    const installerPath = componentPackages[0].packageFiles.find(path => path.endsWith(`payload/Applications/MixRelay Driver.app/Contents/Resources/${filename}`));
+    const source = readFileSync(join(paths.payload, "Applications/MixRelay.app/Contents/Resources", filename));
+    const installerPath = componentPackages[0].packageFiles.find(path => path.endsWith(`payload/Applications/MixRelay.app/Contents/Resources/${filename}`));
     assert.ok(installerPath);
     assert.deepEqual(componentPackages[0].packageDocuments[installerPath], source);
   }
   for (const product of productBuilds) {
     assert.deepEqual(Object.keys(product.resources).sort(), ["CHANGELOG.md", ...LANGUAGES.flatMap(({language}) => [`${language}.lproj/INSTALLER-LICENSE.rtf`, `${language}.lproj/INSTALLER-README.rtf`, `${language}.lproj/Localizable.strings`])].sort());
     assert.match(product.distribution, /<readme file="INSTALLER-README\.rtf" mime-type="text\/rtf"\/>/);
-    assert.deepEqual(product.resources["CHANGELOG.md"], readFileSync(join(paths.payload, "Applications/MixRelay Driver.app/Contents/Resources/CHANGELOG.md")));
-    const driverTermsPath = componentPackages[0].packageFiles.find(path => path.endsWith("payload/Applications/MixRelay Driver.app/Contents/Resources/LICENSE-Driver.txt"));
+    assert.deepEqual(product.resources["CHANGELOG.md"], readFileSync(join(paths.payload, "Applications/MixRelay.app/Contents/Resources/CHANGELOG.md")));
+    const driverTermsPath = componentPackages[0].packageFiles.find(path => path.endsWith("payload/Applications/MixRelay.app/Contents/Resources/LICENSE-Driver.txt"));
     assertCanonicalDriverLicense(product.resources, componentPackages[0].packageDocuments[driverTermsPath]);
     assertInstallerReadme(product.resources);
   }
@@ -381,10 +382,10 @@ test("builds one installation/update package with an independently installed rem
   };
   flatten(componentPackages[0].componentPolicy);
   assert.ok(policyEntries.length >= 3, "the manager, HAL driver, and nested extension are all analyzed");
-  assert.ok(policyEntries.some(entry => entry.RootRelativeBundlePath.endsWith("/Applications/MixRelay Driver.app")));
+  assert.ok(policyEntries.some(entry => entry.RootRelativeBundlePath.endsWith("/Applications/MixRelay.app")));
   assert.ok(policyEntries.some(entry => entry.RootRelativeBundlePath.endsWith("/MixRelayHAL.driver")));
   assert.ok(policyEntries.some(entry => entry.RootRelativeBundlePath.endsWith("/MixRelayEditor.appex")));
-  assert.ok(policyEntries.some(entry => entry.RootRelativeBundlePath.endsWith("/Uninstall MixRelay Driver.app")));
+  assert.ok(policyEntries.some(entry => entry.RootRelativeBundlePath.endsWith("/Uninstall MixRelay.app")));
   for (const entry of policyEntries) {
     assert.equal(entry.BundleIsRelocatable, false);
     assert.equal(entry.BundleIsVersionChecked, false);
@@ -399,7 +400,7 @@ test("builds one installation/update package with an independently installed rem
   assert.match(installPostinstall, /\/bin\/rm -rf "\$stage"/);
   assert.match(installPostinstall, /check_shared_application_support_dir "\$3\/Library\/Application Support"/);
   const installCommand = installPostinstall.replace(/[ \t]*\\\n[ \t]*/g, " ").split("\n").find(line => line.startsWith('"$cli" install '));
-  assert.equal(installCommand, `"$cli" install ${TEAM} "$stage/payload/Applications/MixRelay Driver.app" "$stage/payload/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver" "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-driver-service" "$stage/payload/templates/io.mixrelay.audio.driver.plist.in" "$stage/payload/Applications/Uninstall MixRelay Driver.app" "$stage/payload/templates/io.mixrelay.driver.removal.plist" --reload-coreaudio`);
+  assert.equal(installCommand, `"$cli" install ${TEAM} "$stage/payload/Applications/MixRelay.app" "$stage/payload/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver" "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-driver-service" "$stage/payload/templates/io.mixrelay.audio.driver.plist.in" "$stage/payload/Applications/Uninstall MixRelay.app" "$stage/payload/templates/io.mixrelay.driver.removal.plist" "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-engine-service" "$stage/payload/templates/io.mixrelay.audio.engine.plist.in" --reload-coreaudio`);
   assert.doesNotMatch(installPostinstall, /--delete-user-data/);
   assert.match(installPreinstall, /unexpected file in interrupted package inputs/);
   assert.match(installPreinstall, /private package staging inode changed; left it untouched/);
@@ -414,10 +415,10 @@ test("builds one installation/update package with an independently installed rem
   assert.match(distributions[0], /customize="never"/);
   assert.match(distributions[0], /allow-external-scripts="false"/);
   assert.doesNotMatch(distributions[0], /system\.run\(/);
-  assert.match(distributions[0], /<title>MixRelay Driver<\/title>/);
+  assert.match(distributions[0], /<title>MixRelay<\/title>/);
   assert.match(distributions[0], /<license file="INSTALLER-LICENSE\.rtf" mime-type="text\/rtf"\/>/);
-  assert.match(distributions[0], /<pkg-ref id="io\.mixrelay\.driver\.installer\.component" version="1\.2\.3">MixRelay-Driver-Installer-1\.2\.3\.component\.pkg<\/pkg-ref>/);
-  const closeReference = distributions[0].match(/<pkg-ref id="io\.mixrelay\.driver\.installer\.component">\s*<must-close>([\s\S]*?)<\/must-close>\s*<\/pkg-ref>/);
+  assert.match(distributions[0], /<pkg-ref id="io\.mixrelay\.installer\.component" version="1\.2\.3">MixRelay-Installer-1\.2\.3\.component\.pkg<\/pkg-ref>/);
+  const closeReference = distributions[0].match(/<pkg-ref id="io\.mixrelay\.installer\.component">\s*<must-close>([\s\S]*?)<\/must-close>\s*<\/pkg-ref>/);
   assert.ok(closeReference, "native close requirements use a separate reference to the same component package");
   assert.deepEqual([...closeReference[1].matchAll(/<app id="([^"]+)"\/>/g)].map(match => match[1]), [
     "io.mixrelay.driver.uninstaller",
@@ -436,7 +437,7 @@ test("RTF agreement preserves Unicode and escaped text while unwrapping presenta
   const paths = fixture(t);
   const terms = "MixRelay Driver Terms of Use\r\nLicensor: Echo Vision Lab\r\n\r\n1. Text preservation\r\n"
     + String.raw`Keep \path{terms} and literal \u123? intact.` + "\r\n한국어 — café 😀\r\nwrapped body continues.\r\n";
-  const manager = join(paths.payload, "Applications/MixRelay Driver.app");
+  const manager = join(paths.payload, "Applications/MixRelay.app");
   for (const path of [
     join(manager, "Contents/Resources/LICENSE-Driver.txt"),
   ]) writeFileSync(path, terms);
@@ -450,7 +451,7 @@ test("RTF agreement preserves Unicode and escaped text while unwrapping presenta
   for (const [, contents] of plainTerms) {
     assert.deepEqual(contents, Buffer.from(terms), "plain CRLF source is copied byte-for-byte into each bundle");
   }
-  assert.equal(presentationWords(rtfText(resources["en.lproj/INSTALLER-LICENSE.rtf"])), presentationWords(terms));
+  assert.equal(presentationWords(rtfText(resources["en.lproj/INSTALLER-LICENSE.rtf"])), presentationWords("Proprietary license fixture\n원문 그대로\n\n" + terms));
   assert.ok(rtf.includes(String.raw`\\path\{terms\}`));
   assert.ok(rtf.includes(String.raw`\\u123?`));
   assert.ok(rtf.includes(String.raw`\u-10179?\u-8704?`), "supplementary characters use their signed UTF-16 pair");
@@ -580,7 +581,7 @@ esac
 
 test("rejects an obsolete separate removal app before package creation", t => {
   const paths = fixture(t);
-  mkdirSync(join(paths.payload, "Applications/MixRelay Driver.app/Contents/Helpers/Uninstall MixRelay Driver.app"), { recursive: true });
+  mkdirSync(join(paths.payload, "Applications/MixRelay.app/Contents/Helpers/Uninstall MixRelay.app"), { recursive: true });
   const calls = [];
   assert.throws(() => buildPackages({ ...paths, teamId: TEAM, version: "1.2.3", signingIdentity: IDENTITY, run: fakeRunner(calls) }), /must not contain a separate uninstaller/);
   assert.equal(calls.length, 0);
@@ -757,7 +758,7 @@ test("normalizes package staging directories despite a restrictive umask", (t) =
 
 test("rejects payload bundle roots that would fail postinstall ownership checks", (t) => {
   const paths = fixture(t);
-  chmodSync(join(paths.payload, "Applications/MixRelay Driver.app"), 0o700);
+  chmodSync(join(paths.payload, "Applications/MixRelay.app"), 0o700);
   const calls = [];
   assert.throws(() => buildPackages({
     ...paths,
@@ -773,7 +774,7 @@ for (const filename of [...DOCUMENTS, "CHANGELOG.md"]) {
   for (const kind of ["missing", "empty"]) {
     test(`rejects ${kind} ${filename} before package commands`, (t) => {
       const paths = fixture(t);
-      const document = join(paths.payload, "Applications/MixRelay Driver.app/Contents/Resources", filename);
+      const document = join(paths.payload, "Applications/MixRelay.app/Contents/Resources", filename);
       if (kind === "missing") rmSync(document);
       else writeFileSync(document, "");
       const calls = [];
@@ -788,7 +789,7 @@ for (const filename of [...DOCUMENTS, "CHANGELOG.md"]) {
 
 test("does not overwrite a package path that appears during publication", (t) => {
   const paths = fixture(t);
-  const installer = join(paths.output, "MixRelay-Driver-Installer-1.2.3.pkg");
+  const installer = join(paths.output, "MixRelay-Installer-1.2.3.pkg");
   const safeFs = {
     ...fs,
     linkSync(source, path) {
@@ -809,7 +810,7 @@ test("does not overwrite a package path that appears during publication", (t) =>
     signingIdentity: IDENTITY,
     run: fakeRunner([]),
   }), /destination exists/);
-  assert.deepEqual(readdirSync(paths.output), ["MixRelay-Driver-Installer-1.2.3.pkg"]);
+  assert.deepEqual(readdirSync(paths.output), ["MixRelay-Installer-1.2.3.pkg"]);
   assert.equal(readFileSync(installer, "utf8"), "concurrent user file");
 });
 
@@ -842,9 +843,11 @@ test("rejects symlinked payloads, unprepared manifests and nonempty output befor
     format: 1,
     status: "payload-prepared-not-package",
     installContract: {
-      manager: "/Applications/MixRelay Driver.app",
-      uninstaller: "/Applications/Uninstall MixRelay Driver.app",
+      manager: "/Applications/MixRelay.app",
+      uninstaller: "/Applications/Uninstall MixRelay.app",
       removalLaunchd: "/Library/LaunchDaemons/io.mixrelay.driver.removal.plist",
+      engine: "/Library/Application Support/MixRelay/bin/mixrelay-engine-service",
+      engineLaunchd: "/Library/LaunchDaemons/io.mixrelay.audio.engine.plist",
       hal: "/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver",
       driver: "/Library/Application Support/MixRelay/bin/mixrelay-driver-service",
       launchd: "/Library/LaunchDaemons/io.mixrelay.audio.driver.plist",
@@ -865,7 +868,7 @@ test("rejects symlinked payloads, unprepared manifests and nonempty output befor
 
 test("fixed component policy rejects unpinned or out-of-scope analyzed bundles", () => {
   const packageRoot = "/fixture/mixrelay-package-root";
-  const manager = join(packageRoot, "stage/payload/Applications/MixRelay Driver.app");
+  const manager = join(packageRoot, "stage/payload/Applications/MixRelay.app");
   const hal = join(packageRoot, "stage/payload/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver");
   const appRelative = relative(packageRoot, manager);
   const halRelative = relative(packageRoot, hal);
@@ -893,13 +896,13 @@ test("native pkgbuild expands fixed-path bundles without relocation or version-s
   const root = mkdtempSync(join(target, "macos-component-policy-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const packageRoot = join(root, "package-root");
-  const manager = join(packageRoot, "Library/Application Support/MixRelay/.installer-inputs/fixture/payload/Applications/MixRelay Driver.app");
+  const manager = join(packageRoot, "Library/Application Support/MixRelay/.installer-inputs/fixture/payload/Applications/MixRelay.app");
   const hal = join(packageRoot, "Library/Application Support/MixRelay/.installer-inputs/fixture/payload/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver");
   const nested = join(manager, "Contents/PlugIns/MixRelayEditor.appex");
   for (const [bundle, identifier, type] of [
-    [manager, "io.mixrelay.driver.desktop", "APPL"],
+    [manager, "io.mixrelay.desktop", "APPL"],
     [hal, "io.mixrelay.audio.MixRelayHAL", "BNDL"],
-    [nested, "io.mixrelay.driver.desktop.editor", "XPC!"],
+    [nested, "io.mixrelay.desktop.editor", "XPC!"],
   ]) {
     mkdirSync(join(bundle, "Contents/MacOS"), { recursive: true });
     writeFileSync(join(bundle, "Contents/MacOS/main"), "fixture binary");

@@ -1,5 +1,6 @@
-import { Modal, PasswordInput } from '@mantine/core';
 import type { ReactNode } from 'react';
+import { Dialog } from '../ui/Dialog';
+import { TextField } from '../ui/TextField';
 
 export function LicensingDialog({
   busy,
@@ -17,11 +18,9 @@ export function LicensingDialog({
   title: string;
 }) {
   return (
-    <Modal
-      centered
-      closeButtonProps={{ 'aria-label': closeLabel }}
-      closeOnClickOutside={!busy}
-      closeOnEscape={!busy}
+    <Dialog
+      closeLabel={closeLabel}
+      busy={busy}
       onClose={onClose}
       opened={opened}
       size="sm"
@@ -29,7 +28,7 @@ export function LicensingDialog({
       withCloseButton={!busy}
     >
       {children}
-    </Modal>
+    </Dialog>
   );
 }
 
@@ -45,12 +44,12 @@ export function LicensingKeyField({
   value: string;
 }) {
   return (
-    <PasswordInput
+    <TextField
+      type="password"
       autoComplete="off"
       disabled={disabled}
       label={label}
       onChange={(event) => onChange(event.currentTarget.value)}
-      size="xs"
       value={value}
     />
   );

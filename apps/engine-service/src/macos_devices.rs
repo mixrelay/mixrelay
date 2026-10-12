@@ -9,6 +9,7 @@ mod buffer_control;
 mod buffer_transaction;
 mod device;
 pub(super) mod direct;
+mod endpoint_buffer;
 mod ffi;
 mod format;
 mod group_plan;
@@ -32,7 +33,8 @@ use handoff::{Publication, ResourceConsumer, ResourceHandoff};
 use mixrelay_audio_graph::{GraphDocument, RenderFormat};
 use mixrelay_audio_io::{HostAudioBackendError, process::TransferOutcome};
 use mixrelay_engine_service::{
-    GraphResourceBackend, PreparedGraphFormat, RuntimeStatusBackend, session::AdapterRuntimeStatus,
+    GraphResourceBackend, PreparedGraphFormat, RuntimeStatusBackend,
+    endpoint_buffer_preferences::EndpointBufferPreferences, session::AdapterRuntimeStatus,
 };
 use spec::{Spec, aggregate_members, specs};
 use std::{
@@ -218,6 +220,7 @@ pub(super) struct MacDevices {
     status: Arc<AdapterRuntimeStatus>,
     format: Arc<PublishedFormat>,
     next_group_check: Mutex<Instant>,
+    endpoint_buffers: Mutex<Result<EndpointBufferPreferences, String>>,
     recovery_requested: AtomicBool,
     stopping: AtomicBool,
     prepared_hardware_clock: Arc<AtomicBool>,
@@ -237,12 +240,17 @@ impl MacDevices {
         self.handoff.has_pending()
     }
     pub(super) fn new(status: Arc<AdapterRuntimeStatus>, rate: u32, buffer_frames: u32) -> Self {
+        let endpoint_buffers = EndpointBufferPreferences::load().map_err(|error| {
+            tracing::warn!(%error, "Driver client buffer preferences unavailable");
+            error.to_string()
+        });
         Self {
             cache: Arc::default(),
             handoff: Arc::default(),
             status,
             format: Arc::new(PublishedFormat::new(rate, buffer_frames)),
             next_group_check: Mutex::new(Instant::now()),
+            endpoint_buffers: Mutex::new(endpoint_buffers),
             recovery_requested: AtomicBool::new(false),
             stopping: AtomicBool::new(false),
             prepared_hardware_clock: Arc::default(),
@@ -366,6 +374,21 @@ fn backend_error(message: impl Into<String>) -> HostAudioBackendError {
     }
 }
 impl GraphResourceBackend for MacDevices {
+    fn virtual_endpoint_buffer(
+        &self,
+        id: &mixrelay_audio_io::VirtualEndpointId,
+    ) -> Option<mixrelay_audio_io::NativeBufferSettings> {
+        self.endpoint_buffer_settings(id)
+    }
+    fn set_virtual_endpoint_buffer(
+        &self,
+        id: &mixrelay_audio_io::VirtualEndpointId,
+        expected: Option<u32>,
+        expected_preferred: Option<u32>,
+        frames: u32,
+    ) -> Result<Option<String>, HostAudioBackendError> {
+        self.change_endpoint_buffer(id, expected, expected_preferred, frames)
+    }
     fn execution_released(&self) -> bool {
         native::Native::active_owners() == 0 && Aggregate::active_owners() == 0
     }

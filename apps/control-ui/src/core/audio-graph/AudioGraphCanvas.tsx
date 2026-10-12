@@ -1,6 +1,5 @@
 import '@xyflow/react/dist/base.css';
 
-import { Tooltip } from '@mantine/core';
 import {
   Background,
   BackgroundVariant,
@@ -28,60 +27,69 @@ import {
   createContext,
   type Dispatch,
   memo,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
-  type PointerEvent as ReactPointerEvent,
   type SetStateAction,
   useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
-
+import { useTranslation } from 'react-i18next';
 import { AudioMeterProvider } from '../audio-meter/AudioMeterProvider';
 import type { AudioMeterStore } from '../audio-meter/AudioMeterStore';
 import type { ProcessorEditorFailure, ProcessorEditorStatus } from '../control-port/types';
-import { AudioNodeCard } from '../ui/AudioNodeCard';
+import { AudioNodeCard, type EndpointUpdate } from '../ui/AudioNodeCard';
 import { audioNodePortTop } from '../ui/audioNodeLayout';
 import {
   HierarchicalContextMenu,
   HierarchicalMenuButton,
   type HierarchicalMenuItem,
 } from '../ui/HierarchicalMenu';
-import { NodeOptionsContext, type NodeOptionsState } from '../ui/nodeOptionsState';
+import {
+  NodeOptionsContext,
+  NodeOptionsIdContext,
+  type NodeOptionsState,
+} from '../ui/nodeOptionsState';
 import { platformModifier } from '../ui/platformShortcut';
+import { Tooltip } from '../ui/Tooltip';
 import styles from './AudioGraphCanvas.module.css';
 import {
   type AudioGraphConnection,
   type AudioGraphModel,
   type AudioGraphNode,
   type AudioGraphPort,
+  audioGraphNodeTitle,
   canConnectAudioGraph,
   connectAudioGraphBatch,
   disconnectAudioGraph,
+  graphNodeMinimumWidth,
   moveAudioGraphNode,
+  normalizeAudioGraphNodeSize,
   reconnectAudioGraph,
   removeAudioGraphItems,
   resizeAudioGraphNode,
 } from './model';
+import { PortSelectionFeedback } from './PortSelectionFeedback';
 import {
   type AudioFlowEdge,
   type AudioFlowNode,
+  applyAudioNodeLayers,
   reconcileAudioFlowEdges,
   reconcileAudioFlowNodes,
 } from './reactFlowAdapter';
 import { graphNodeFaceMode, useAudioNodeLayout } from './useAudioNodeLayout';
+import { type SelectedAudioPort, useAudioPortSelection } from './useAudioPortSelection';
 import { type GraphContextMenuLabels, useGraphContextMenu } from './useGraphContextMenu';
 
 const nodeTypes = { audio: memo(AudioFlowNodeView) };
 const deleteKeyCode = ['Backspace', 'Delete'];
 const panMouseButtons = [1];
 const snapGrid: [number, number] = [12, 12];
-const portSelectionDistance = 3;
-const portTooltipClassNames = { tooltip: styles.portTooltip };
-const portTooltipTransition = { duration: 80 };
 const emptyProcessorEditorStatuses = new Map<string, ProcessorEditorStatus>();
 const NodeGainContext = createContext<((nodeId: string, gainDb: number) => void) | undefined>(
   undefined,
@@ -93,9 +101,10 @@ const NodeEndpointContext = createContext<
     ) => void)
   | undefined
 >(undefined);
-const NodeParameterContext = createContext<
-  ((nodeId: string, parameterId: string, value: number) => void) | undefined
->(undefined);
+const NodeParameterContext = createContext<{
+  single?: (nodeId: string, parameterId: string, value: number) => void;
+  batch?: (nodeId: string, updates: readonly { id: string; value: number }[]) => void;
+}>({});
 export interface ProcessorEditorLabels {
   open: string;
   retry: string;
@@ -117,7 +126,12 @@ export interface AudioNodeControlSlots {
 const NodeControlsContext = createContext<
   ((node: AudioGraphNode) => AudioNodeControlSlots | null) | undefined
 >(undefined);
-export type AudioGraphChangeKind = 'layout' | 'level' | 'processor_parameter' | 'runtime';
+export type AudioGraphChangeKind =
+  | 'layout'
+  | 'level'
+  | 'processor_parameter'
+  | 'parameter_group'
+  | 'runtime';
 export interface AudioGraphViewport {
   x: number;
   y: number;
@@ -127,12 +141,6 @@ type CommitGraph = (nextModel: AudioGraphModel, kind: AudioGraphChangeKind) => v
 type ReconnectEnd = NonNullable<ReactFlowProps<AudioFlowNode, AudioFlowEdge>['onReconnectEnd']>;
 
 type AudioPortSide = 'input' | 'output';
-
-interface SelectedAudioPort {
-  nodeId: string;
-  portId: string;
-  side: AudioPortSide;
-}
 
 interface AudioPortSelectionContextValue {
   model: AudioGraphModel;
@@ -153,18 +161,15 @@ export interface AudioGraphCanvasProps {
   nodeMenuItems?: readonly AudioGraphNodeMenuItem[];
   onAddNode?: (itemId: string, position: XYPosition) => void;
   onNodeMenuOpenedChange?: (opened: boolean) => void;
+  onNodeRenameRequest?: (nodeId: string) => void;
   onModelChange: (model: AudioGraphModel, kind: AudioGraphChangeKind) => void;
-  onNodeEndpointChange?: (
-    nodeId: string,
-    value: {
-      captureChannels: number;
-      displayName: string;
-      renderChannels: number;
-      sampleRate?: number;
-    },
-  ) => void;
+  onNodeEndpointChange?: (nodeId: string, value: EndpointUpdate) => void;
   onNodeGainChange?: (nodeId: string, gainDb: number) => void;
   onNodeParameterChange?: (nodeId: string, parameterId: string, value: number) => void;
+  onNodeParametersChange?: (
+    nodeId: string,
+    updates: readonly { id: string; value: number }[],
+  ) => void;
   onProcessorEditorRetry?: (nodeId: string) => void;
   processorEditorLabels?: ProcessorEditorLabels;
   processorEditorStatuses?: ReadonlyMap<string, ProcessorEditorStatus>;
@@ -185,6 +190,7 @@ function AudioGraphProviders({
   onEndpointChange,
   onGainChange,
   onParameterChange,
+  onParametersChange,
   selectedRef,
   renderNodeContent,
   renderNodeControls,
@@ -198,6 +204,7 @@ function AudioGraphProviders({
   onEndpointChange: AudioGraphCanvasProps['onNodeEndpointChange'];
   onGainChange: AudioGraphCanvasProps['onNodeGainChange'];
   onParameterChange: AudioGraphCanvasProps['onNodeParameterChange'];
+  onParametersChange: AudioGraphCanvasProps['onNodeParametersChange'];
   selectedRef: AudioPortSelectionContextValue['selectedRef'];
   renderNodeContent: AudioGraphCanvasProps['renderNodeContent'];
   renderNodeControls: AudioGraphCanvasProps['renderNodeControls'];
@@ -206,7 +213,9 @@ function AudioGraphProviders({
   return (
     <AudioMeterProvider store={meterStore}>
       <NodeProcessorEditorContext.Provider value={editor}>
-        <NodeParameterContext.Provider value={onParameterChange}>
+        <NodeParameterContext.Provider
+          value={{ single: onParameterChange, batch: onParametersChange }}
+        >
           <NodeEndpointContext.Provider value={onEndpointChange}>
             <NodeGainContext.Provider value={onGainChange}>
               <AudioPortSelectionContext.Provider value={{ model, selectedRef }}>
@@ -283,24 +292,26 @@ function useNodeMenu(onOpenedChange?: (opened: boolean) => void) {
   );
   const prepareContextPosition = useCallback((event: { clientX: number; clientY: number }) => {
     setButtonOpened(false);
-    const bounds = rootRef.current?.getBoundingClientRect();
+    // These handlers run from the mounted canvas and its child trigger.
+    const bounds = (rootRef.current as HTMLElement).getBoundingClientRect();
     const screenPosition = {
-      x: event.clientX - (bounds?.left ?? 0),
-      y: event.clientY - (bounds?.top ?? 0),
+      x: event.clientX - bounds.left,
+      y: event.clientY - bounds.top,
     };
     positionRef.current =
       flowRef.current?.screenToFlowPosition({ x: event.clientX, y: event.clientY }) ??
       screenPosition;
   }, []);
-  const prepareButtonPosition = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
+  const prepareButtonPosition = useCallback((event: ReactMouseEvent<Element>) => {
     event.stopPropagation();
     setContextOpened(false);
-    const bounds = rootRef.current?.getBoundingClientRect();
+    // These handlers run from the mounted canvas and its child trigger.
+    const bounds = (rootRef.current as HTMLElement).getBoundingClientRect();
     const screenPosition = { x: 132, y: 92 };
     positionRef.current =
       flowRef.current?.screenToFlowPosition({
-        x: (bounds?.left ?? 0) + screenPosition.x,
-        y: (bounds?.top ?? 0) + screenPosition.y,
+        x: bounds.left + screenPosition.x,
+        y: bounds.top + screenPosition.y,
       }) ?? screenPosition;
   }, []);
   return {
@@ -318,238 +329,11 @@ function useNodeMenu(onOpenedChange?: (opened: boolean) => void) {
   };
 }
 
-function audioPortKey(port: SelectedAudioPort) {
-  return `${port.side}\u0000${port.nodeId}\u0000${port.portId}`;
-}
-
-interface PortSelectionStart {
-  additive: boolean;
-  pointerId: number;
-  x: number;
-  y: number;
-}
-
-interface SelectionRectangle {
-  bottom: number;
-  left: number;
-  right: number;
-  top: number;
-}
-
-function portSelectionStart(event: ReactPointerEvent<HTMLElement>): PortSelectionStart | null {
-  const target = event.target;
-  if (
-    event.pointerType !== 'mouse' ||
-    event.button !== 0 ||
-    !event.isPrimary ||
-    event.metaKey ||
-    event.ctrlKey ||
-    !(target instanceof Element) ||
-    !target.classList.contains('react-flow__pane')
-  ) {
-    return null;
-  }
-  return {
-    additive: event.shiftKey,
-    pointerId: event.pointerId,
-    x: event.clientX,
-    y: event.clientY,
-  };
-}
-
-function selectionRectangle(
-  start: PortSelectionStart,
-  end: { x: number; y: number },
-): SelectionRectangle {
-  return {
-    bottom: Math.max(start.y, end.y),
-    left: Math.min(start.x, end.x),
-    right: Math.max(start.x, end.x),
-    top: Math.min(start.y, end.y),
-  };
-}
-
-function pointInsideRectangle(point: DOMPoint, rectangle: SelectionRectangle) {
-  return (
-    point.x >= rectangle.left &&
-    point.x <= rectangle.right &&
-    point.y >= rectangle.top &&
-    point.y <= rectangle.bottom
-  );
-}
-
-function segmentsIntersect(
-  firstStart: DOMPoint,
-  firstEnd: DOMPoint,
-  secondStart: DOMPoint,
-  secondEnd: DOMPoint,
-) {
-  const rangesOverlap = (firstA: number, firstB: number, secondA: number, secondB: number) =>
-    Math.max(Math.min(firstA, firstB), Math.min(secondA, secondB)) <=
-    Math.min(Math.max(firstA, firstB), Math.max(secondA, secondB));
-  if (
-    !rangesOverlap(firstStart.x, firstEnd.x, secondStart.x, secondEnd.x) ||
-    !rangesOverlap(firstStart.y, firstEnd.y, secondStart.y, secondEnd.y)
-  ) {
-    return false;
-  }
-  const cross = (start: DOMPoint, end: DOMPoint, point: DOMPoint) =>
-    (end.x - start.x) * (point.y - start.y) - (end.y - start.y) * (point.x - start.x);
-  const firstSideA = cross(firstStart, firstEnd, secondStart);
-  const firstSideB = cross(firstStart, firstEnd, secondEnd);
-  const secondSideA = cross(secondStart, secondEnd, firstStart);
-  const secondSideB = cross(secondStart, secondEnd, firstEnd);
-  return firstSideA * firstSideB <= 0 && secondSideA * secondSideB <= 0;
-}
-
-function segmentIntersectsRectangle(start: DOMPoint, end: DOMPoint, rectangle: SelectionRectangle) {
-  if (pointInsideRectangle(start, rectangle) || pointInsideRectangle(end, rectangle)) return true;
-  const topLeft = new DOMPoint(rectangle.left, rectangle.top);
-  const topRight = new DOMPoint(rectangle.right, rectangle.top);
-  const bottomRight = new DOMPoint(rectangle.right, rectangle.bottom);
-  const bottomLeft = new DOMPoint(rectangle.left, rectangle.bottom);
-  return (
-    segmentsIntersect(start, end, topLeft, topRight) ||
-    segmentsIntersect(start, end, topRight, bottomRight) ||
-    segmentsIntersect(start, end, bottomRight, bottomLeft) ||
-    segmentsIntersect(start, end, bottomLeft, topLeft)
-  );
-}
-
-function edgeIntersectsRectangle(path: SVGPathElement, rectangle: SelectionRectangle) {
-  const bounds = path.getBoundingClientRect();
-  if (
-    bounds.right < rectangle.left ||
-    bounds.left > rectangle.right ||
-    bounds.bottom < rectangle.top ||
-    bounds.top > rectangle.bottom
-  ) {
-    return false;
-  }
-  const transform = path.getScreenCTM();
-  if (!transform) return false;
-  const length = path.getTotalLength();
-  const sampleLength = 10;
-  const initialPoint = path.getPointAtLength(0);
-  let previous = new DOMPoint(initialPoint.x, initialPoint.y).matrixTransform(transform);
-  for (let distance = sampleLength; distance < length + sampleLength; distance += sampleLength) {
-    const point = path.getPointAtLength(Math.min(distance, length));
-    const current = new DOMPoint(point.x, point.y).matrixTransform(transform);
-    if (segmentIntersectsRectangle(previous, current, rectangle)) return true;
-    previous = current;
-  }
-  return false;
-}
-
-function selectedAudioEdgeIds(root: HTMLElement | null, rectangle: SelectionRectangle) {
-  const ids: string[] = [];
-  const paths = root?.querySelectorAll<SVGPathElement>('.react-flow__edge .react-flow__edge-path');
-  for (const path of paths ?? []) {
-    if (!edgeIntersectsRectangle(path, rectangle)) continue;
-    const id = path.closest<SVGGElement>('.react-flow__edge')?.dataset.id;
-    if (id) ids.push(id);
-  }
-  return ids;
-}
-
-function selectedAudioPorts(
-  root: HTMLElement | null,
-  start: PortSelectionStart,
-  end: { x: number; y: number },
-) {
-  const selectionRect = selectionRectangle(start, end);
-  const handles = root?.querySelectorAll<HTMLElement>('[data-audio-port-side]');
-  const hits: SelectedAudioPort[] = [];
-  for (const handle of handles ?? []) {
-    const bounds = handle.getBoundingClientRect();
-    const misses =
-      bounds.right < selectionRect.left ||
-      bounds.left > selectionRect.right ||
-      bounds.bottom < selectionRect.top ||
-      bounds.top > selectionRect.bottom;
-    if (misses) continue;
-    const nodeId = handle.dataset.audioNodeId;
-    const portId = handle.dataset.audioPortId;
-    const side = handle.dataset.audioPortSide;
-    if (nodeId && portId && (side === 'input' || side === 'output')) {
-      hits.push({ nodeId, portId, side });
-    }
-  }
-  return hits;
-}
-
-function mergeAudioPorts(
-  current: readonly SelectedAudioPort[],
-  added: readonly SelectedAudioPort[],
-) {
-  const combined = new Map(current.map((port) => [audioPortKey(port), port]));
-  for (const port of added) combined.set(audioPortKey(port), port);
-  return [...combined.values()];
-}
-
-function useAudioPortSelection(
-  rootRef: { current: HTMLElement | null },
-  onSelectEdges: (edgeIds: readonly string[]) => void,
-) {
-  const selectedRef = useRef<SelectedAudioPort[]>([]);
-  const dragStartRef = useRef<PortSelectionStart | null>(null);
-  const syncSelection = useCallback(
-    (selected: readonly SelectedAudioPort[]) => {
-      selectedRef.current = [...selected];
-      const selectedKeys = new Set(selected.map(audioPortKey));
-      const handles = rootRef.current?.querySelectorAll<HTMLElement>('[data-audio-port-side]');
-      for (const handle of handles ?? []) {
-        const side = handle.dataset.audioPortSide;
-        if (side !== 'input' && side !== 'output') continue;
-        const key = audioPortKey({
-          nodeId: handle.dataset.audioNodeId ?? '',
-          portId: handle.dataset.audioPortId ?? '',
-          side,
-        });
-        handle.toggleAttribute('data-port-selected', selectedKeys.has(key));
-      }
-    },
-    [rootRef],
-  );
-  const clear = useCallback(() => syncSelection([]), [syncSelection]);
-  const onPointerDownCapture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    dragStartRef.current = portSelectionStart(event);
-  }, []);
-  const onPointerUpCapture = useCallback(
-    (event: ReactPointerEvent<HTMLElement>) => {
-      const start = dragStartRef.current;
-      dragStartRef.current = null;
-      if (!start || start.pointerId !== event.pointerId) return;
-      if (Math.hypot(event.clientX - start.x, event.clientY - start.y) <= portSelectionDistance) {
-        return;
-      }
-      const end = {
-        x: event.clientX,
-        y: event.clientY,
-      };
-      const hits = selectedAudioPorts(rootRef.current, start, end);
-      syncSelection(start.additive ? mergeAudioPorts(selectedRef.current, hits) : hits);
-      if (start.additive) {
-        onSelectEdges(selectedAudioEdgeIds(rootRef.current, selectionRectangle(start, end)));
-      }
-    },
-    [onSelectEdges, rootRef, syncSelection],
-  );
-  const onPointerCancelCapture = useCallback(() => {
-    dragStartRef.current = null;
-  }, []);
-  return {
-    captureProps: { onPointerCancelCapture, onPointerDownCapture, onPointerUpCapture },
-    clear,
-    selectedRef,
-    select: syncSelection,
-  };
-}
-
 function useAudioFlowCollections(
   model: AudioGraphModel,
   commit: CommitGraph,
   disclosureHeights: Map<string, number>,
+  openedNodeId: string | null,
 ) {
   const initialNodes = useRef<AudioFlowNode[] | null>(null);
   const initialEdges = useRef<AudioFlowEdge[] | null>(null);
@@ -567,7 +351,11 @@ function useAudioFlowCollections(
     [model, setEdges],
   );
   const onNodesChange = useNodeChangeHandler(model, commit, applyNodeChanges, disclosureHeights);
-  return { applyEdgeChanges, onNodesChange, edges, nodes, setEdges, setNodes };
+  const layeredNodes = useMemo(
+    () => applyAudioNodeLayers(nodes, openedNodeId),
+    [nodes, openedNodeId],
+  );
+  return { applyEdgeChanges, onNodesChange, edges, nodes: layeredNodes, setEdges, setNodes };
 }
 
 function toGraphConnection(connection: Connection | Edge): AudioGraphConnection {
@@ -579,21 +367,19 @@ function toGraphConnection(connection: Connection | Edge): AudioGraphConnection 
   };
 }
 
-function selectedNodePorts(
+function selectedOutputPorts(
   model: AudioGraphModel,
   selectedPorts: readonly SelectedAudioPort[],
   nodeId: string,
-  side: AudioPortSide,
 ) {
   const node = model.nodes.find((candidate) => candidate.id === nodeId);
   if (!node) return [];
   const selectedIds = new Set(
     selectedPorts
-      .filter((port) => port.nodeId === nodeId && port.side === side)
+      .filter((port) => port.nodeId === nodeId && port.side === 'output')
       .map((port) => port.portId),
   );
-  const ports = side === 'input' ? node.inputPorts : node.outputPorts;
-  return ports.filter((port) => selectedIds.has(port.id));
+  return node.outputPorts.filter((port) => selectedIds.has(port.id));
 }
 
 function portVerticalOffset(
@@ -611,25 +397,6 @@ function portVerticalOffset(
   return port.y + port.height / 2 - anchor.y - anchor.height / 2;
 }
 
-function relativeTargetPort(
-  model: AudioGraphModel,
-  sourceNodeId: string,
-  sourcePortId: string,
-  sourceAnchorId: string,
-  targetNodeId: string,
-  targetAnchorId: string,
-) {
-  const sourcePorts = model.nodes.find((node) => node.id === sourceNodeId)?.outputPorts;
-  const targetPorts = model.nodes.find((node) => node.id === targetNodeId)?.inputPorts;
-  const sourceIndex = sourcePorts?.findIndex((port) => port.id === sourcePortId) ?? -1;
-  const sourceAnchorIndex = sourcePorts?.findIndex((port) => port.id === sourceAnchorId) ?? -1;
-  const targetAnchorIndex = targetPorts?.findIndex((port) => port.id === targetAnchorId) ?? -1;
-  if (!targetPorts || sourceIndex < 0 || sourceAnchorIndex < 0 || targetAnchorIndex < 0) {
-    return undefined;
-  }
-  return targetPorts[targetAnchorIndex + sourceIndex - sourceAnchorIndex];
-}
-
 interface ConnectionPreviewPair {
   sourcePort: Pick<AudioGraphPort, 'id'>;
   targetPort?: Pick<AudioGraphPort, 'id'>;
@@ -643,7 +410,7 @@ function connectionPreviewPairs(
   targetNodeId?: string,
   targetAnchorId?: string,
 ): ConnectionPreviewPair[] {
-  const selectedSources = selectedNodePorts(model, selectedPorts, sourceNodeId, 'output');
+  const selectedSources = selectedOutputPorts(model, selectedPorts, sourceNodeId);
   const activeSources =
     selectedSources.length > 1 && selectedSources.some((port) => port.id === sourceAnchorId)
       ? selectedSources
@@ -671,73 +438,37 @@ function selectedConnectionBatch(
   connection: AudioGraphConnection,
   selectedPorts: readonly SelectedAudioPort[],
 ): AudioGraphConnection[] {
-  const selectedOutputs = selectedNodePorts(
-    model,
-    selectedPorts,
-    connection.sourceNodeId,
-    'output',
-  );
+  const sourceNode = model.nodes.find((node) => node.id === connection.sourceNodeId);
+  if (!sourceNode) return [connection];
+  const selectedOutputs = selectedOutputPorts(model, selectedPorts, connection.sourceNodeId);
   if (
     selectedOutputs.length < 2 ||
     !selectedOutputs.some((port) => port.id === connection.sourcePortId)
   ) {
     return [connection];
   }
-  const sourceNode = model.nodes.find((node) => node.id === connection.sourceNodeId);
   const targetNode = model.nodes.find((node) => node.id === connection.targetNodeId);
-  const sourceAnchorIndex = sourceNode?.outputPorts.findIndex(
-    (port) => port.id === connection.sourcePortId,
-  );
-  const targetAnchorIndex = targetNode?.inputPorts.findIndex(
-    (port) => port.id === connection.targetPortId,
-  );
-  if (
-    !sourceNode ||
-    !targetNode ||
-    sourceAnchorIndex === undefined ||
-    sourceAnchorIndex < 0 ||
-    targetAnchorIndex === undefined ||
-    targetAnchorIndex < 0
-  ) {
+  if (!targetNode?.inputPorts.some((port) => port.id === connection.targetPortId)) {
     return [connection];
   }
 
-  const selectedInputs = selectedNodePorts(model, selectedPorts, connection.targetNodeId, 'input');
-  const selectedTargetAnchor = selectedInputs.findIndex(
+  const sourceAnchorIndex = sourceNode.outputPorts.findIndex(
+    (port) => port.id === connection.sourcePortId,
+  );
+  const targetAnchorIndex = targetNode.inputPorts.findIndex(
     (port) => port.id === connection.targetPortId,
   );
-  if (selectedTargetAnchor >= 0) {
-    const selectedSourceAnchor = selectedOutputs.findIndex(
-      (port) => port.id === connection.sourcePortId,
-    );
-    return selectedOutputs.flatMap((sourcePort, index) => {
-      const targetPort = selectedInputs[selectedTargetAnchor + index - selectedSourceAnchor];
-      return targetPort
-        ? [
-            {
-              sourceNodeId: sourceNode.id,
-              sourcePortId: sourcePort.id,
-              targetNodeId: targetNode.id,
-              targetPortId: targetPort.id,
-            },
-          ]
-        : [];
-    });
-  }
 
+  // Selection gestures retain output channels from one source node. Destination
+  // channels are mapped relative to the released input anchor, never a second selection.
   return selectedOutputs.flatMap((sourcePort) => {
-    const targetPort = relativeTargetPort(
-      model,
-      sourceNode.id,
-      sourcePort.id,
-      connection.sourcePortId,
-      targetNode.id,
-      connection.targetPortId,
-    );
+    // Both anchors and each selected source were validated above against these arrays.
+    const sourceIndex = sourceNode.outputPorts.findIndex((port) => port.id === sourcePort.id);
+    const targetPort = targetNode.inputPorts[targetAnchorIndex + sourceIndex - sourceAnchorIndex];
     return targetPort
       ? [
           {
-            sourceNodeId: sourceNode.id,
+            sourceNodeId: connection.sourceNodeId,
             sourcePortId: sourcePort.id,
             targetNodeId: targetNode.id,
             targetPortId: targetPort.id,
@@ -761,28 +492,25 @@ function BatchConnectionLine({
   toX,
   toY,
 }: ConnectionLineComponentProps<AudioFlowNode>) {
-  const selection = useContext(AudioPortSelectionContext);
+  // This private renderer is installed only below AudioGraphProviders.
+  const selection = useContext(AudioPortSelectionContext) as AudioPortSelectionContextValue;
   const sourceAnchorId = fromHandle.id ?? '';
   const targetAnchorId = toHandle?.id ?? '';
-  const previews = selection
-    ? connectionPreviewPairs(
-        selection.model,
-        selection.selectedRef.current,
-        fromNode.id,
-        sourceAnchorId,
-        toNode?.id,
-        targetAnchorId,
-      )
-    : [{ sourcePort: { id: sourceAnchorId } }];
+  const previews = connectionPreviewPairs(
+    selection.model,
+    selection.selectedRef.current,
+    fromNode.id,
+    sourceAnchorId,
+    toNode?.id,
+    targetAnchorId,
+  );
 
   return (
     <>
       {previews.map(({ sourcePort, targetPort }, index) => {
-        const sourceOffset = selection
-          ? portVerticalOffset(fromNode, 'output', sourcePort.id, sourceAnchorId)
-          : 0;
+        const sourceOffset = portVerticalOffset(fromNode, 'output', sourcePort.id, sourceAnchorId);
         const targetOffset =
-          selection && toNode && targetPort
+          toNode && targetPort
             ? portVerticalOffset(toNode, 'input', targetPort.id, targetAnchorId)
             : 0;
         const [path] = getBezierPath({
@@ -940,6 +668,8 @@ function AddNodePanel({
   nodeMenu: ReturnType<typeof useNodeMenu>;
   nodeMenuItems: readonly AudioGraphNodeMenuItem[];
 }) {
+  const { t } = useTranslation();
+  const actionLabel = label?.trim() || t('routing.addNode');
   if (nodeMenuItems.length === 0) return null;
   return (
     <ReactFlowPanel className={`${styles.nodeToolbar} nodrag nopan nowheel`} position="top-left">
@@ -947,12 +677,12 @@ function AddNodePanel({
         buttonClassName={`${styles.addNode} nodrag nopan nowheel`}
         buttonContent={<span aria-hidden="true">+</span>}
         items={nodeMenuItems}
-        label={label ?? ''}
+        label={actionLabel}
+        tooltip={actionLabel}
         onClick={nodeMenu.prepareButtonPosition}
         onOpenedChange={nodeMenu.setButtonOpened}
         onSelect={addNode}
         opened={nodeMenu.buttonOpened}
-        tooltip={label}
       />
     </ReactFlowPanel>
   );
@@ -966,7 +696,7 @@ function GraphCanvasBackground({
 }: Parameters<typeof AddNodePanel>[0]) {
   return (
     <>
-      <Background color="#1e2228" gap={24} size={1} variant={BackgroundVariant.Lines} />
+      <Background color="var(--canvas-grid)" gap={24} size={1} variant={BackgroundVariant.Lines} />
       <AddNodePanel
         addNode={addNode}
         label={label}
@@ -994,6 +724,34 @@ function useEdgeBoxSelection(setEdges: Dispatch<SetStateAction<AudioFlowEdge[]>>
   );
 }
 
+function handleGraphKeyDown(
+  event: ReactKeyboardEvent<HTMLElement>,
+  captureProps: ReturnType<typeof useAudioPortSelection>['captureProps'],
+  clearSelection: () => void,
+  renameNode?: (nodeId: string) => void,
+) {
+  if (event.key === 'F2' && event.target instanceof HTMLElement && renameNode) {
+    const id = event.target.matches('.react-flow__node') ? event.target.dataset.id : undefined;
+    if (id) {
+      event.preventDefault();
+      event.stopPropagation();
+      renameNode(id);
+      return;
+    }
+  }
+  captureProps.onKeyDownCapture(event);
+  if (
+    event.key === 'Escape' &&
+    event.target instanceof Element &&
+    event.target.matches('.react-flow__node, .react-flow__edge')
+  ) {
+    // React Flow blurs on Escape. Clear selection while keeping the user's place.
+    event.preventDefault();
+    event.stopPropagation();
+    clearSelection();
+  }
+}
+
 function GraphContextSurface({
   children,
   contextMenu,
@@ -1001,6 +759,7 @@ function GraphContextSurface({
   addNode,
   ariaLabel,
   captureProps,
+  renameNode,
 }: {
   children: ReactNode;
   contextMenu: ReturnType<typeof useGraphContextMenu>;
@@ -1008,6 +767,7 @@ function GraphContextSurface({
   addNode: (id: string) => void;
   ariaLabel: string;
   captureProps: ReturnType<typeof useAudioPortSelection>['captureProps'];
+  renameNode?: (nodeId: string) => void;
 }) {
   return (
     <HierarchicalContextMenu
@@ -1021,6 +781,9 @@ function GraphContextSurface({
     >
       <section
         {...captureProps}
+        onKeyDownCapture={(event) =>
+          handleGraphKeyDown(event, captureProps, contextMenu.clearSelection, renameNode)
+        }
         onPointerDownCapture={(event) => {
           // The whole canvas is the context trigger, so the menu's outside-click
           // handler cannot dismiss clicks on other nodes or ports inside it.
@@ -1028,6 +791,7 @@ function GraphContextSurface({
           captureProps.onPointerDownCapture(event);
         }}
         aria-label={ariaLabel}
+        tabIndex={-1}
         className={styles.root}
         ref={nodeMenu.rootRef}
         onContextMenu={(event) => {
@@ -1035,7 +799,7 @@ function GraphContextSurface({
           nodeMenu.prepareContextPosition(event);
         }}
         onTouchStart={(event) => {
-          // Mantine's long-press opens without dispatching a contextmenu event.
+          // the context trigger's long-press opens without dispatching a contextmenu event.
           // Capture the target and position for that path as well.
           const touch = event.touches[0];
           if (!touch) return;
@@ -1121,9 +885,10 @@ function GraphFlowSurface(props: ReactFlowProps<AudioFlowNode, AudioFlowEdge>) {
       proOptions={{ hideAttribution: true }}
       connectionLineComponent={BatchConnectionLine}
       connectionMode={ConnectionMode.Strict}
+      zIndexMode="manual"
       deleteKeyCode={deleteKeyCode}
       edgesReconnectable
-      fitView={props.fitView ?? true}
+      fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
       // Match the persisted layout contract; React Flow's defaults would clamp restored views.
       minZoom={0.05}
       maxZoom={8}
@@ -1151,6 +916,11 @@ function useGraphCommit(
   );
 }
 
+function clearPaneOptions(clear: (value: string | null) => void, click: () => void) {
+  clear(null);
+  click();
+}
+
 export function AudioGraphCanvas({
   addNodeLabel,
   contextMenuLabels,
@@ -1161,9 +931,11 @@ export function AudioGraphCanvas({
   onAddNode,
   onModelChange,
   onNodeMenuOpenedChange,
+  onNodeRenameRequest,
   onNodeEndpointChange,
   onNodeGainChange,
   onNodeParameterChange,
+  onNodeParametersChange,
   onProcessorEditorRetry,
   processorEditorLabels,
   processorEditorStatuses = emptyProcessorEditorStatuses,
@@ -1178,7 +950,7 @@ export function AudioGraphCanvas({
   const viewportEvents = useCanvasViewport(viewport, onViewportChange, nodeMenu);
   const commit = useGraphCommit(model, onModelChange);
   const { applyEdgeChanges, onNodesChange, edges, nodes, setEdges, setNodes } =
-    useAudioFlowCollections(model, commit, disclosureHeights);
+    useAudioFlowCollections(model, commit, disclosureHeights, options[0]);
   const selectEdges = useEdgeBoxSelection(setEdges);
   const portSelection = useAudioPortSelection(nodeMenu.rootRef, selectEdges);
   const { isValidConnection, onConnect, onReconnect, onReconnectEnd } = useConnectionHandlers(
@@ -1196,20 +968,18 @@ export function AudioGraphCanvas({
     nodeMenu,
     portSelection.clear,
   );
+  const renaming = useNodeRenameRequests(onNodeRenameRequest, nodeMenu.rootRef);
   const contextMenu = useGraphContextMenu({
-    model,
-    nodes,
-    edges,
-    setNodes,
-    setEdges,
+    ...{ model, nodes, edges, setNodes, setEdges },
     addItems: nodeMenuItems,
     labels: contextMenuLabels,
+    renameNode: renaming.request,
     commit,
     clearPorts: portSelection.clear,
     selectPorts: portSelection.select,
     selectedPorts: portSelection.selectedRef,
     fitView: () => {
-      void nodeMenu.flowRef.current?.fitView({ padding: 0.15 });
+      void nodeMenu.flowRef.current?.fitView({ padding: 0.15, maxZoom: 1 });
     },
   });
 
@@ -1220,7 +990,9 @@ export function AudioGraphCanvas({
       addNode={addNode}
       ariaLabel={ariaLabel}
       captureProps={portSelection.captureProps}
+      renameNode={renaming.request}
     >
+      <PortSelectionFeedback model={model} {...portSelection.feedback} />
       <AudioGraphProviders
         options={options}
         editor={editorContext}
@@ -1229,6 +1001,7 @@ export function AudioGraphCanvas({
         onEndpointChange={onNodeEndpointChange}
         onGainChange={onNodeGainChange}
         onParameterChange={onNodeParameterChange}
+        onParametersChange={onNodeParametersChange}
         selectedRef={portSelection.selectedRef}
         renderNodeContent={renderNodeContent}
         renderNodeControls={renderNodeControls}
@@ -1244,12 +1017,10 @@ export function AudioGraphCanvas({
           onConnect={onConnect}
           onDelete={onDelete}
           onEdgeDoubleClick={onEdgeDoubleClick}
+          onNodeDoubleClick={renaming.doubleClick}
           onEdgesChange={applyEdgeChanges}
           onNodesChange={onNodesChange}
-          onPaneClick={() => {
-            options[1](null);
-            onPaneClick();
-          }}
+          onPaneClick={() => clearPaneOptions(options[1], onPaneClick)}
           onReconnect={onReconnect}
           onReconnectEnd={onReconnectEnd}
         >
@@ -1265,12 +1036,45 @@ export function AudioGraphCanvas({
   );
 }
 
+function useNodeRenameRequests(
+  onRequest: AudioGraphCanvasProps['onNodeRenameRequest'],
+  root: { current: HTMLElement | null },
+) {
+  const request = useMemo(() => {
+    if (!onRequest) return undefined;
+    return (id: string) => {
+      const owner = [
+        ...(root.current as HTMLElement).querySelectorAll<HTMLElement>('.react-flow__node'),
+      ].find((element) => element.dataset.id === id);
+      owner?.focus();
+      onRequest(id);
+    };
+  }, [root, onRequest]);
+  return {
+    request,
+    doubleClick: request
+      ? (event: ReactMouseEvent, node: AudioFlowNode) => renameNodeTitle(event, node.id, request)
+      : undefined,
+  };
+}
+
+function renameNodeTitle(event: ReactMouseEvent, id: string, rename: (nodeId: string) => void) {
+  if (!(event.target instanceof Element) || !event.target.closest('[data-node-title]')) return;
+  event.preventDefault();
+  event.stopPropagation();
+  event.target.closest<HTMLElement>('.react-flow__node')?.focus();
+  rename(id);
+}
+
 function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
+  const { t } = useTranslation();
   const { graphNode } = data;
-  const disclosureHeights = useContext(NodeDisclosureHeightsContext);
+  // AudioFlowNodeView is private to the canvas provider tree.
+  const disclosureHeights = useContext(NodeDisclosureHeightsContext) as Map<string, number>;
   const onNodeGainChange = useContext(NodeGainContext);
   const onNodeEndpointChange = useContext(NodeEndpointContext);
-  const onNodeParameterChange = useContext(NodeParameterContext);
+  const { single: onNodeParameterChange, batch: onNodeParametersChange } =
+    useContext(NodeParameterContext);
   const processorEditors = useContext(NodeProcessorEditorContext);
   const renderNodeContent = useContext(NodeContentContext);
   const controls = useContext(NodeControlsContext)?.(graphNode);
@@ -1282,66 +1086,76 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
     height: editorStatus?.height ?? null,
   });
   useLayoutEffect(() => {
-    if (layout.disclosureHeight > 0) disclosureHeights?.set(graphNode.id, layout.disclosureHeight);
-    else disclosureHeights?.delete(graphNode.id);
+    if (layout.disclosureHeight > 0) disclosureHeights.set(graphNode.id, layout.disclosureHeight);
+    else disclosureHeights.delete(graphNode.id);
     return () => {
-      disclosureHeights?.delete(graphNode.id);
+      disclosureHeights.delete(graphNode.id);
     };
   }, [disclosureHeights, graphNode.id, layout.disclosureHeight]);
   return (
-    <div
-      className={styles.node}
-      data-node-type={graphNode.runtime?.type}
-      style={{
-        width:
-          graphNode.size?.width ??
-          (editorWidth ? Math.min(1600, Math.max(240, editorWidth)) : undefined),
-        height: layout.height,
-        minHeight: layout.minHeight,
-      }}
-    >
-      <NodePortHandles node={graphNode} geometry={layout.ports} side="input" />
-      <AudioNodeCard
-        {...graphNode.appearance}
-        content={renderNodeContent?.(graphNode)}
-        headerActions={controls?.power}
-        muteControl={controls?.mute}
-        poweredOff={graphNode.runtime?.control?.enabled === false}
-        faceHeight={layout.faceHeight}
-        faceMode={graphNodeFaceMode(graphNode)}
-        onFaceHeightChange={layout.onFaceHeightChange}
-        onContentHeightChange={layout.onContentHeightChange}
-        inputCount={graphNode.inputPorts.length}
-        onGainChange={
-          onNodeGainChange ? (gainDb) => onNodeGainChange(graphNode.id, gainDb) : undefined
-        }
-        onEndpointChange={
-          onNodeEndpointChange ? (value) => onNodeEndpointChange(graphNode.id, value) : undefined
-        }
-        onLayoutChange={() => updateNodeInternals(graphNode.id)}
-        onParameterChange={
-          onNodeParameterChange
-            ? (parameterId, value) => onNodeParameterChange(graphNode.id, parameterId, value)
-            : undefined
-        }
-        onProcessorEditorRetry={
-          graphNode.appearance.hasProcessorEditor && processorEditors
-            ? () => processorEditors.onRetry(graphNode.id)
-            : undefined
-        }
-        onSelect={() => undefined}
-        outputCount={graphNode.outputPorts.length}
-        processorEditor={processorEditorProps(
-          graphNode.id,
-          graphNode.appearance.hasProcessorEditor,
-          processorEditors,
-        )}
-        selected={selected}
-        showPorts={false}
-      />
-      <NodePortHandles node={graphNode} geometry={layout.ports} side="output" />
-      <NodeResizeGrip minHeight={layout.minHeight} />
-    </div>
+    <NodeOptionsIdContext.Provider value={graphNode.id}>
+      <div
+        className={styles.node}
+        data-node-type={graphNode.runtime?.type}
+        data-equalizer={Boolean(graphNode.appearance.equalizer) || undefined}
+        data-dynamics={Boolean(graphNode.appearance.dynamics) || undefined}
+        style={{
+          width:
+            normalizeAudioGraphNodeSize(graphNode, graphNode.size)?.width ??
+            (editorWidth ? Math.min(1600, Math.max(240, editorWidth)) : undefined),
+          height: layout.height,
+          minHeight: layout.minHeight,
+        }}
+      >
+        <NodePortHandles node={graphNode} geometry={layout.ports} side="input" />
+        <AudioNodeCard
+          {...graphNode.appearance}
+          title={audioGraphNodeTitle(graphNode)}
+          optionsLabel={graphNode.appearance.optionsLabel ?? t('routing.nodes.options')}
+          content={renderNodeContent?.(graphNode)}
+          headerActions={controls?.power}
+          muteControl={controls?.mute}
+          poweredOff={graphNode.runtime?.control?.enabled === false}
+          faceHeight={layout.faceHeight}
+          faceMode={graphNodeFaceMode(graphNode)}
+          onFaceHeightChange={layout.onFaceHeightChange}
+          onContentHeightChange={layout.onContentHeightChange}
+          inputCount={graphNode.inputPorts.length}
+          onGainChange={
+            onNodeGainChange ? (gainDb) => onNodeGainChange(graphNode.id, gainDb) : undefined
+          }
+          onEndpointChange={
+            onNodeEndpointChange ? (value) => onNodeEndpointChange(graphNode.id, value) : undefined
+          }
+          onLayoutChange={() => updateNodeInternals(graphNode.id)}
+          onParameterChange={
+            onNodeParameterChange
+              ? (parameterId, value) => onNodeParameterChange(graphNode.id, parameterId, value)
+              : undefined
+          }
+          onParametersChange={
+            onNodeParametersChange
+              ? (updates) => onNodeParametersChange(graphNode.id, updates)
+              : undefined
+          }
+          onProcessorEditorRetry={
+            graphNode.appearance.hasProcessorEditor && processorEditors
+              ? () => processorEditors.onRetry(graphNode.id)
+              : undefined
+          }
+          outputCount={graphNode.outputPorts.length}
+          processorEditor={processorEditorProps(
+            graphNode.id,
+            graphNode.appearance.hasProcessorEditor,
+            processorEditors,
+          )}
+          selected={selected}
+          showPorts={false}
+        />
+        <NodePortHandles node={graphNode} geometry={layout.ports} side="output" />
+        <NodeResizeGrip minHeight={layout.minHeight} minWidth={graphNodeMinimumWidth(graphNode)} />
+      </div>
+    </NodeOptionsIdContext.Provider>
   );
 }
 
@@ -1367,14 +1181,14 @@ function NodePortHandles({
   ));
 }
 
-function NodeResizeGrip({ minHeight }: { minHeight: number }) {
+function NodeResizeGrip({ minHeight, minWidth }: { minHeight: number; minWidth: number }) {
   return (
     <NodeResizeControl
       className={`${styles.resizeHandle} nodrag nopan`}
       // Keep the independent translate reset out of CSS transform lowering.
       style={{ translate: 'none' }}
       position="bottom-right"
-      minWidth={180}
+      minWidth={minWidth}
       minHeight={minHeight}
       maxWidth={4096}
       maxHeight={4096}
@@ -1432,13 +1246,13 @@ function AudioPortHandle({
 
   return (
     <Tooltip
-      classNames={portTooltipClassNames}
+      className={styles.portTooltip}
+      nonInteractive
       label={`CH ${channelNumber}`}
       offset={7}
       opened={isConnectionTarget ? true : undefined}
-      openDelay={isConnectionTarget ? 0 : 160}
+      delay={isConnectionTarget ? 0 : 160}
       position={side === 'input' ? 'left' : 'right'}
-      transitionProps={portTooltipTransition}
     >
       <Handle
         aria-label={`${port.label}, CH ${channelNumber}`}

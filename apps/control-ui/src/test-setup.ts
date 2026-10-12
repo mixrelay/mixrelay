@@ -33,3 +33,19 @@ Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
   configurable: true,
   value: vi.fn(),
 });
+
+// jsdom lacks PointerEvent. Model browser event fields, keeping React Aria handlers real.
+class TestPointerEvent extends MouseEvent {
+  readonly pointerType: string;
+  readonly pointerId: number;
+  readonly isPrimary: boolean;
+  constructor(type: string, init: PointerEventInit = {}) {
+    super(type, init);
+    this.pointerType = init.pointerType ?? 'mouse';
+    this.pointerId = init.pointerId ?? 1;
+    this.isPrimary = init.isPrimary ?? true;
+  }
+}
+Object.defineProperty(globalThis, 'PointerEvent', { configurable: true, value: TestPointerEvent });
+
+Object.defineProperty(window, 'PointerEvent', { configurable: true, value: TestPointerEvent });

@@ -79,6 +79,21 @@ impl RecorderRegistry {
             .map_or_else(RecorderStatus::default, Session::status)
     }
 
+    /// Retains open takes while an owner temporarily retires its render plans.
+    /// These taps prevent worker retirement; they do not admit PCM by themselves.
+    #[must_use]
+    pub fn open_take_taps(&self) -> Vec<(String, RecorderTap, RecorderState)> {
+        self.sessions
+            .lock()
+            .iter()
+            .filter_map(|(id, session)| {
+                let state = session.status().state;
+                matches!(state, RecorderState::Recording | RecorderState::Paused)
+                    .then(|| (id.clone(), session.tap(), state))
+            })
+            .collect()
+    }
+
     /// Execute and acknowledge a writer command on the control thread.
     /// Stop/Pause cut off producers, drain accepted packets and flush conversion
     /// tails before returning. Stop also finalizes and closes the file.
@@ -86,11 +101,23 @@ impl RecorderRegistry {
     /// Reports absent identities, invalid transitions, file/conversion failures,
     /// and disconnected writer threads. These errors never stop the audio graph.
     pub fn command(&self, id: &str, request: RecorderRequest) -> Result<RecorderStatus, String> {
+        self.command_with_duration_limit(id, request, None)
+    }
+
+    /// Apply a control-owned duration policy to a new take. Resume retains its original limit.
+    /// # Errors
+    /// Reports the same lifecycle and writer failures as `command`.
+    pub fn command_with_duration_limit(
+        &self,
+        id: &str,
+        request: RecorderRequest,
+        seconds: Option<u64>,
+    ) -> Result<RecorderStatus, String> {
         self.sessions
             .lock()
             .get(id)
             .ok_or("recorder identity is not prepared")?
-            .command(request)
+            .command_with_limit(request, seconds)
     }
 
     /// Stop/drain/join sessions with no live taps after render-plan retirement.
@@ -194,9 +221,17 @@ impl Session {
     }
 
     fn command(&self, request: RecorderRequest) -> Result<RecorderStatus, String> {
+        self.command_with_limit(request, None)
+    }
+
+    fn command_with_limit(
+        &self,
+        request: RecorderRequest,
+        seconds: Option<u64>,
+    ) -> Result<RecorderStatus, String> {
         let (reply, receiver) = mpsc::sync_channel(1);
         self.sender
-            .send(Command::Request(request, reply))
+            .send(Command::Request(request, seconds, reply))
             .map_err(|_| "recording writer disconnected")?;
         receiver
             .recv()

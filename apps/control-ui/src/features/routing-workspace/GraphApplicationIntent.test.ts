@@ -209,10 +209,15 @@ it('does not restore a late layout reply after graph selection changes', async (
   await flush();
   expect(getReloadLayout).toHaveBeenCalledExactlyOnceWith('saved');
   graphId = 'other';
+  callbacks.error.mockClear();
+  callbacks.state.mockClear();
   reply.resolve({ graphId: 'saved', layoutRevision: 3, layout: { positions: {} } });
   await flush();
   expect(callbacks.restore).not.toHaveBeenCalled();
-  expect(callbacks.state).toHaveBeenLastCalledWith('blocked');
+  expect(callbacks.document).not.toHaveBeenCalled();
+  expect(callbacks.error).not.toHaveBeenCalled();
+  expect(callbacks.state).not.toHaveBeenCalled();
+  expect(f.port.applyGraph).not.toHaveBeenCalled();
 });
 
 it('does not restore a late layout reply after the queue is reset', async () => {

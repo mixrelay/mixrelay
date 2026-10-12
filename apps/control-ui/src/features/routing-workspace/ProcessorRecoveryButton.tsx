@@ -1,4 +1,4 @@
-import styles from './ProcessorRecoveryButton.module.css';
+import { IconActionButton } from '../../core/ui/IconActionButton';
 
 export function ProcessorRecoveryButton(props: {
   disabled: boolean;
@@ -7,12 +7,11 @@ export function ProcessorRecoveryButton(props: {
   onRetry: () => void;
 }) {
   return (
-    <button
-      aria-label={props.label}
+    <IconActionButton
+      label={props.label}
       aria-busy={props.retrying}
-      className={`${styles.button} nodrag nopan`}
       data-action="processor-retry"
-      data-tone={props.retrying ? 'warning' : 'critical'}
+      tone={props.retrying ? 'warning' : 'critical'}
       disabled={props.disabled}
       type="button"
       onClick={(event) => {
@@ -23,6 +22,6 @@ export function ProcessorRecoveryButton(props: {
       <svg aria-hidden="true" viewBox="0 0 20 20">
         <path d="M16 6V2m0 4h-4M16 6a7 7 0 1 0 1.7 7.6" />
       </svg>
-    </button>
+    </IconActionButton>
   );
 }

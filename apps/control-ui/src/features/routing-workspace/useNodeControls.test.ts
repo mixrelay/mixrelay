@@ -45,3 +45,25 @@ it('discards a late old-graph response and does not issue overlapping polls', as
   expect(application.refresh).not.toHaveBeenCalled();
   view.unmount();
 });
+
+it('clears stale actionable controls on failure and ignores a rejection after disposal', async () => {
+  vi.useFakeTimers();
+  const pending = Promise.withResolvers<GraphNodeControls>();
+  const getNodeControls = vi
+    .fn()
+    .mockResolvedValueOnce(snapshot)
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockReturnValueOnce(pending.promise);
+  const application = queue();
+  const port = { getNodeControls } as unknown as ControlPort;
+  const view = renderHook(() => useNodeControls(port, 'a', 2, true, application));
+  await act(async () => {});
+  expect(view.result.current).toEqual(snapshot);
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  expect(view.result.current).toBeNull();
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  view.unmount();
+  await act(async () => pending.reject(new Error('disposed')));
+  expect(vi.getTimerCount()).toBe(0);
+  expect(application.refresh).not.toHaveBeenCalled();
+});

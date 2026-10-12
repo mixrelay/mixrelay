@@ -15,9 +15,13 @@ pub(super) struct Labels {
     pub(super) check_updates: &'static str,
     pub(super) quit: &'static str,
     pub(super) download: &'static str,
+    devices: &'static str,
     channels: &'static str,
     sample_rate: &'static str,
     bit_depth: &'static str,
+    pub(super) buffer_size: &'static str,
+    pub(super) saved: &'static str,
+    pub(super) buffer_failed: &'static str,
     mixed: &'static str,
     current: &'static str,
     unpublished: &'static str,
@@ -31,9 +35,13 @@ const LABELS: [Labels; 11] = [
         check_updates: "Check for Updates",
         quit: "Quit",
         download: "Download…",
+        devices: "Devices",
         channels: "Channels",
         sample_rate: "Sample Rate",
         bit_depth: "Bit Depth",
+        buffer_size: "Buffer Size",
+        saved: "Saved",
+        buffer_failed: "Could not complete the MixRelay buffer setting",
         mixed: "Mixed",
         current: "Up to Date",
         unpublished: "No Published Updates",
@@ -45,9 +53,13 @@ const LABELS: [Labels; 11] = [
         check_updates: "업데이트 확인",
         quit: "종료",
         download: "다운로드…",
+        devices: "장치",
         channels: "채널 수",
         sample_rate: "샘플레이트",
         bit_depth: "비트 깊이",
+        buffer_size: "버퍼 크기",
+        saved: "저장됨",
+        buffer_failed: "MixRelay 버퍼 설정을 완료하지 못했습니다",
         mixed: "혼합",
         current: "최신 버전입니다",
         unpublished: "배포된 업데이트 없음",
@@ -59,9 +71,13 @@ const LABELS: [Labels; 11] = [
         check_updates: "アップデートを確認",
         quit: "終了",
         download: "ダウンロード…",
+        devices: "デバイス",
         channels: "チャンネル数",
         sample_rate: "サンプルレート",
         bit_depth: "ビット深度",
+        buffer_size: "バッファサイズ",
+        saved: "保存済み",
+        buffer_failed: "MixRelayのバッファ設定を完了できませんでした",
         mixed: "混在",
         current: "最新です",
         unpublished: "公開されたアップデートはありません",
@@ -73,9 +89,13 @@ const LABELS: [Labels; 11] = [
         check_updates: "检查更新",
         quit: "退出",
         download: "下载…",
+        devices: "设备",
         channels: "声道数",
         sample_rate: "采样率",
         bit_depth: "位深度",
+        buffer_size: "缓冲区大小",
+        saved: "已保存",
+        buffer_failed: "无法完成MixRelay的缓冲区设置",
         mixed: "混合",
         current: "已是最新版本",
         unpublished: "没有已发布的更新",
@@ -87,9 +107,13 @@ const LABELS: [Labels; 11] = [
         check_updates: "檢查更新",
         quit: "結束",
         download: "下載…",
+        devices: "裝置",
         channels: "聲道數",
         sample_rate: "取樣率",
         bit_depth: "位元深度",
+        buffer_size: "緩衝區大小",
+        saved: "已儲存",
+        buffer_failed: "無法完成MixRelay的緩衝區設定",
         mixed: "混合",
         current: "已是最新版本",
         unpublished: "沒有已發布的更新",
@@ -101,9 +125,13 @@ const LABELS: [Labels; 11] = [
         check_updates: "Rechercher des mises à jour",
         quit: "Quitter",
         download: "Télécharger…",
+        devices: "Périphériques",
         channels: "Canaux",
         sample_rate: "Fréquence d’échantillonnage",
         bit_depth: "Profondeur de bits",
+        buffer_size: "Taille du tampon",
+        saved: "Enregistré",
+        buffer_failed: "Impossible de terminer le réglage du tampon de MixRelay",
         mixed: "Mixte",
         current: "À jour",
         unpublished: "Aucune mise à jour publiée",
@@ -115,9 +143,13 @@ const LABELS: [Labels; 11] = [
         check_updates: "Nach Updates suchen",
         quit: "Beenden",
         download: "Herunterladen…",
+        devices: "Geräte",
         channels: "Kanäle",
         sample_rate: "Abtastrate",
         bit_depth: "Bittiefe",
+        buffer_size: "Puffergröße",
+        saved: "Gespeichert",
+        buffer_failed: "Die Puffereinstellung von MixRelay konnte nicht abgeschlossen werden",
         mixed: "Gemischt",
         current: "Aktuell",
         unpublished: "Keine veröffentlichten Updates",
@@ -129,9 +161,13 @@ const LABELS: [Labels; 11] = [
         check_updates: "Buscar actualizaciones",
         quit: "Salir",
         download: "Descargar…",
+        devices: "Dispositivos",
         channels: "Canales",
         sample_rate: "Frecuencia de muestreo",
         bit_depth: "Profundidad de bits",
+        buffer_size: "Tamaño del búfer",
+        saved: "Guardado",
+        buffer_failed: "No se pudo completar la configuración del búfer de MixRelay",
         mixed: "Mixto",
         current: "Actualizado",
         unpublished: "No hay actualizaciones publicadas",
@@ -143,9 +179,13 @@ const LABELS: [Labels; 11] = [
         check_updates: "Procurar atualizações",
         quit: "Sair",
         download: "Baixar…",
+        devices: "Dispositivos",
         channels: "Canais",
         sample_rate: "Taxa de amostragem",
         bit_depth: "Profundidade de bits",
+        buffer_size: "Tamanho do buffer",
+        saved: "Salvo",
+        buffer_failed: "Não foi possível concluir a configuração do buffer do MixRelay",
         mixed: "Misto",
         current: "Atualizado",
         unpublished: "Não há atualizações publicadas",
@@ -157,9 +197,13 @@ const LABELS: [Labels; 11] = [
         check_updates: "Verifica aggiornamenti",
         quit: "Esci",
         download: "Scarica…",
+        devices: "Dispositivi",
         channels: "Canali",
         sample_rate: "Frequenza di campionamento",
         bit_depth: "Profondità di bit",
+        buffer_size: "Dimensione buffer",
+        saved: "Salvato",
+        buffer_failed: "Impossibile completare la configurazione del buffer di MixRelay",
         mixed: "Misto",
         current: "Versione aggiornata",
         unpublished: "Nessun aggiornamento pubblicato",
@@ -171,9 +215,13 @@ const LABELS: [Labels; 11] = [
         check_updates: "Проверить обновления",
         quit: "Выйти",
         download: "Скачать…",
+        devices: "Устройства",
         channels: "Каналы",
         sample_rate: "Частота дискретизации",
         bit_depth: "Разрядность",
+        buffer_size: "Размер буфера",
+        saved: "Сохранено",
+        buffer_failed: "Не удалось завершить настройку буфера MixRelay",
         mixed: "Смешанный",
         current: "Последняя версия",
         unpublished: "Опубликованных обновлений нет",
@@ -194,13 +242,27 @@ pub(super) fn status_text(state: &MenuState) -> String {
         .as_ref()
         .and_then(|snapshot| snapshot.installed_version.as_deref())
         .map_or_else(
-            || "MixRelay Driver".to_owned(),
-            |version| format!("MixRelay Driver {version}"),
+            || "MixRelay".to_owned(),
+            |version| format!("MixRelay {version}"),
         )
 }
 
+/// Uses the same device hierarchy for every license and observed device count.
+pub(super) fn devices_menu(
+    app: &tauri::AppHandle,
+    state: &mut MenuState,
+    text: &Labels,
+) -> tauri::Result<Submenu<tauri::Wry>> {
+    let devices = device_menus(app, state, text)?;
+    let menu = Submenu::new(app, text.devices, !devices.is_empty())?;
+    for device in devices {
+        menu.append(&device)?;
+    }
+    Ok(menu)
+}
+
 /// Creates named device submenus with sample rate, bit depth, and channel count controls.
-pub(super) fn device_menus(
+fn device_menus(
     app: &tauri::AppHandle,
     state: &mut MenuState,
     text: &Labels,
@@ -215,6 +277,7 @@ pub(super) fn device_menus(
             device.spec.display_name.replace('&', "&&"),
             snapshot.state == DriverState::Ready
                 && !state.busy
+                && state.audio_change.is_none()
                 && state.quit_state != QuitState::Stopping,
         )?;
         let mut builder = DeviceMenu {
@@ -226,6 +289,7 @@ pub(super) fn device_menus(
         };
         builder.rates(&submenu)?;
         builder.pcm(&submenu)?;
+        super::buffer::append_menu(app, builder.state, device, &submenu, text)?;
         builder.channels(
             &submenu,
             &choices::channel_choices(device, &snapshot.settings),
@@ -429,12 +493,16 @@ mod tests {
             let text = labels(locale);
             assert_eq!(text.channels, channels);
             for message in [
+                text.devices,
                 text.loading,
                 text.check_updates,
                 text.quit,
                 text.download,
                 text.sample_rate,
                 text.bit_depth,
+                text.buffer_size,
+                text.saved,
+                text.buffer_failed,
                 text.mixed,
                 text.current,
                 text.unpublished,
@@ -476,16 +544,21 @@ mod tests {
     }
 
     #[test]
-    fn menu_labels_have_three_settings_and_plain_quit_in_both_languages() {
+    fn menu_labels_name_device_settings_and_plain_quit_in_both_languages() {
         let en = labels("en");
         let ko = labels("ko-KR");
         assert_eq!((en.quit, ko.quit), ("Quit", "종료"));
+        assert_eq!((en.devices, ko.devices), ("Devices", "장치"));
         assert_eq!((en.channels, ko.channels), ("Channels", "채널 수"));
         assert_eq!(
             (en.sample_rate, ko.sample_rate),
             ("Sample Rate", "샘플레이트")
         );
         assert_eq!((en.bit_depth, ko.bit_depth), ("Bit Depth", "비트 깊이"));
+        assert_eq!(
+            (en.buffer_size, ko.buffer_size),
+            ("Buffer Size", "버퍼 크기")
+        );
         assert_eq!(labels("ja-JP").check_updates, "アップデートを確認");
     }
 
@@ -548,9 +621,9 @@ mod tests {
                 DriverState::Unavailable,
             ] {
                 for (version, expected) in [
-                    (None, "MixRelay Driver"),
-                    (Some("0.1.0"), "MixRelay Driver 0.1.0"),
-                    (Some("7.3.2"), "MixRelay Driver 7.3.2"),
+                    (None, "MixRelay"),
+                    (Some("0.1.0"), "MixRelay 0.1.0"),
+                    (Some("7.3.2"), "MixRelay 7.3.2"),
                 ] {
                     let mut state = header_state(driver_state, version);
                     state.locale = locale.into();
@@ -576,10 +649,10 @@ mod tests {
                 locale: locale.into(),
                 ..MenuState::default()
             };
-            assert_eq!(status_text(&state), "MixRelay Driver");
+            assert_eq!(status_text(&state), "MixRelay");
             state.busy = true;
             state.error = Some("raw action failure".into());
-            assert_eq!(status_text(&state), "MixRelay Driver");
+            assert_eq!(status_text(&state), "MixRelay");
         }
     }
 

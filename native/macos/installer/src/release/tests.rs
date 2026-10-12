@@ -21,15 +21,11 @@ impl Fixture {
             root.join("launchd"),
         );
         for (bundle, identifier, executable) in [
-            (
-                sources.app(),
-                "io.mixrelay.driver.desktop",
-                "mixrelay-desktop",
-            ),
+            (sources.app(), "io.mixrelay.desktop", "mixrelay-desktop"),
             (sources.hal(), "io.mixrelay.audio.driver", "MixRelayHAL"),
         ] {
             fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
-            let audio_capture_description = if identifier == "io.mixrelay.driver.desktop" {
+            let audio_capture_description = if identifier == "io.mixrelay.desktop" {
                 "<key>NSAudioCaptureUsageDescription</key><string>MixRelay captures system audio when you enable it.</string><key>NSMicrophoneUsageDescription</key><string>MixRelay accesses selected audio inputs.</string>"
             } else {
                 ""
@@ -68,55 +64,81 @@ fn verifier() -> ReleasePayloadVerifier {
     )
 }
 
+fn prepare_installed_target(
+    fixture: &Fixture,
+    verifier: &ReleasePayloadVerifier,
+    target: OwnedTarget,
+) {
+    let path = fixture.root.join(target.path().trim_start_matches('/'));
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    match target {
+        OwnedTarget::App => fs::rename(fixture.sources.app(), &path).unwrap(),
+        OwnedTarget::LegacyManager => {
+            fs::create_dir_all(path.join("Contents/MacOS")).unwrap();
+            fs::write(path.join("Contents/Info.plist"), b"<plist version=\"1.0\"><dict><key>CFBundleIdentifier</key><string>io.mixrelay.driver.desktop</string><key>CFBundleExecutable</key><string>mixrelay-desktop</string></dict></plist>").unwrap();
+            fs::write(
+                path.join("Contents/MacOS/mixrelay-desktop"),
+                crate::universal::tests::fixture(true),
+            )
+            .unwrap();
+        }
+        OwnedTarget::Hal => fs::rename(fixture.sources.hal(), &path).unwrap(),
+        OwnedTarget::RuntimeEngine => {
+            fs::write(&path, crate::universal::tests::fixture(true)).unwrap();
+        }
+        OwnedTarget::RuntimeLaunchd => {
+            crate::runtime_definition::for_account(&verifier.account)
+                .unwrap()
+                .to_file_xml(&path)
+                .unwrap();
+        }
+        OwnedTarget::Driver => fs::rename(fixture.sources.driver(), &path).unwrap(),
+        OwnedTarget::Launchd => {
+            let bytes = fs::read(fixture.sources.launchd()).unwrap();
+            fs::write(
+                &path,
+                LaunchdConfiguration::from_template(&bytes, &verifier.account)
+                    .unwrap()
+                    .to_xml()
+                    .unwrap(),
+            )
+            .unwrap();
+        }
+        OwnedTarget::Uninstaller | OwnedTarget::LegacyUninstaller => {
+            fs::create_dir_all(path.join("Contents/MacOS")).unwrap();
+            fs::create_dir_all(path.join("Contents/Helpers")).unwrap();
+            fs::write(path.join("Contents/Info.plist"),
+                b"<plist version=\"1.0\"><dict><key>CFBundleIdentifier</key><string>io.mixrelay.driver.uninstaller</string><key>CFBundleExecutable</key><string>mixrelay-driver-uninstaller</string></dict></plist>").unwrap();
+            for file in [
+                "Contents/MacOS/mixrelay-driver-uninstaller",
+                "Contents/Helpers/mixrelay-macos-installer",
+            ] {
+                fs::write(path.join(file), crate::universal::tests::fixture(true)).unwrap();
+            }
+        }
+        OwnedTarget::RemovalLaunchd => {
+            #[cfg(target_os = "macos")]
+            fs::write(
+                path,
+                crate::removal::removal_launchd_template(&verifier.team),
+            )
+            .unwrap();
+            #[cfg(not(target_os = "macos"))]
+            fs::write(path, b"fixture").unwrap();
+        }
+    }
+}
+
 #[test]
 fn removal_verifies_present_targets_in_all_partial_installations() {
-    for mask in 0u8..64 {
+    for mask in 0u16..1024 {
         let fixture = Fixture::new();
         let verifier = verifier();
         for (index, target) in OwnedTarget::all().into_iter().enumerate() {
             if mask & (1 << index) == 0 {
                 continue;
             }
-            let path = fixture.root.join(target.path().trim_start_matches('/'));
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            match target {
-                OwnedTarget::App => fs::rename(fixture.sources.app(), &path).unwrap(),
-                OwnedTarget::Hal => fs::rename(fixture.sources.hal(), &path).unwrap(),
-                OwnedTarget::Driver => fs::rename(fixture.sources.driver(), &path).unwrap(),
-                OwnedTarget::Launchd => {
-                    let bytes = fs::read(fixture.sources.launchd()).unwrap();
-                    fs::write(
-                        &path,
-                        LaunchdConfiguration::from_template(&bytes, &verifier.account)
-                            .unwrap()
-                            .to_xml()
-                            .unwrap(),
-                    )
-                    .unwrap();
-                }
-                OwnedTarget::Uninstaller => {
-                    fs::create_dir_all(path.join("Contents/MacOS")).unwrap();
-                    fs::create_dir_all(path.join("Contents/Helpers")).unwrap();
-                    fs::write(path.join("Contents/Info.plist"),
-                        b"<plist version=\"1.0\"><dict><key>CFBundleIdentifier</key><string>io.mixrelay.driver.uninstaller</string><key>CFBundleExecutable</key><string>mixrelay-driver-uninstaller</string></dict></plist>").unwrap();
-                    for file in [
-                        "Contents/MacOS/mixrelay-driver-uninstaller",
-                        "Contents/Helpers/mixrelay-macos-installer",
-                    ] {
-                        fs::write(path.join(file), crate::universal::tests::fixture(true)).unwrap();
-                    }
-                }
-                OwnedTarget::RemovalLaunchd => {
-                    #[cfg(target_os = "macos")]
-                    fs::write(
-                        path,
-                        crate::removal::removal_launchd_template(&verifier.team),
-                    )
-                    .unwrap();
-                    #[cfg(not(target_os = "macos"))]
-                    fs::write(path, b"fixture").unwrap();
-                }
-            }
+            prepare_installed_target(&fixture, &verifier, target);
         }
         let mut checked = Vec::new();
         let definition = verifier
@@ -134,7 +156,10 @@ fn removal_verifies_present_targets_in_all_partial_installations() {
         let expected = usize::from(mask & 1 != 0)
             + usize::from(mask & 2 != 0)
             + usize::from(mask & 4 != 0)
-            + 2 * usize::from(mask & 16 != 0);
+            + 2 * usize::from(mask & 16 != 0)
+            + usize::from(mask & 64 != 0)
+            + usize::from(mask & 256 != 0)
+            + 2 * usize::from(mask & 512 != 0);
         assert_eq!(checked.len(), expected);
         for (path, _) in checked {
             assert!(path.exists());
@@ -183,7 +208,7 @@ fn binds_all_three_code_identities_and_team_without_shell_interpolation() {
         .unwrap();
     assert_eq!(checks.len(), 3);
     for ((_, requirement, role), (identifier, expected_role)) in checks.iter().zip([
-        ("io.mixrelay.driver.desktop", ArtifactRole::Application),
+        ("io.mixrelay.desktop", ArtifactRole::Application),
         ("io.mixrelay.audio.driver", ArtifactRole::Hal),
         ("mixrelay-driver-service", ArtifactRole::Driver),
     ]) {

@@ -1,18 +1,18 @@
 import { useUpdateNodeInternals } from '@xyflow/react';
 import { useCallback, useEffect, useState } from 'react';
 
-import { audioNodeFaceGeometry } from '../ui/audioNodeLayout';
+import { audioNodeFaceGeometry, minimumAudioNodeFaceHeight } from '../ui/audioNodeLayout';
 import type { AudioGraphNode } from './model';
 
 export function graphNodeFaceMode(node: AudioGraphNode) {
-  if (node.runtime?.type === 'provider') return 'compact';
+  if (['provider', 'effect', 'compressor', 'limiter'].includes(node.runtime?.type ?? ''))
+    return 'compact';
   return node.runtime?.type === 'recorder' ? 'channel-rows' : 'standard';
 }
 
 export function graphNodeFaceGeometry(node: AudioGraphNode) {
   return audioNodeFaceGeometry({
     meterBanks: node.appearance.meterBanks,
-    hasDetail: Boolean(node.appearance.detail),
     portCount: Math.max(node.inputPorts.length, node.outputPorts.length),
     mode: graphNodeFaceMode(node),
   });
@@ -53,7 +53,7 @@ export function useAudioNodeLayout(
   const face = graphNodeFaceGeometry(node);
   const compact = graphNodeFaceMode(node) === 'compact';
   const portCount = Math.max(node.inputPorts.length, node.outputPorts.length);
-  const compactPortHeight = Math.max(88, 26 + (portCount + 1) * 18);
+  const compactPortHeight = Math.max(minimumAudioNodeFaceHeight() + 2, 26 + (portCount + 1) * 18);
   const collapsedHeight = controls.total - controls.disclosure;
   const baseFaceHeight =
     !compact && node.size

@@ -21,4 +21,3 @@ mixrelay-audio-recorder = { path = "../audio-recorder" }
 [dev-dependencies]
 serde_json.workspace = true
 mixrelay-test-support = { path = "../test-support" }
-hound = "3.5.1"

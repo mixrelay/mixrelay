@@ -26,17 +26,30 @@ pub(crate) async fn driver_mutate(
     app: tauri::AppHandle,
     command: DriverCommand,
 ) -> Result<DriverSnapshot, String> {
-    if requires_paid_inventory_access(&command) {
+    let client = DriverClient::new().map_err(|error| error.to_string())?;
+    let rename = if let DriverCommand::Configure { spec, .. } = &command {
+        client
+            .snapshot()
+            .await
+            .map_err(|error| error.to_string())?
+            .settings
+            .devices
+            .iter()
+            .find(|device| device.spec.id == spec.id)
+            .is_some_and(|device| device.spec.display_name != spec.display_name)
+    } else {
+        false
+    };
+    if rename || requires_paid_inventory_access(&command) {
         let mode = *app.state::<crate::app_mode::AppMode>();
         if !mode.starts_graph() {
             return Err("Create and remove devices in the licensed MixRelay app".into());
         }
         if !inventory_access_allowed(mode, paid_access(&app).await?) {
-            return Err("Creating or removing devices requires a MixRelay license".into());
+            return Err("Adding, removing or renaming devices requires a MixRelay license".into());
         }
     }
-    let snapshot = DriverClient::new()
-        .map_err(|error| error.to_string())?
+    let snapshot = client
         .mutate(&command)
         .await
         .map_err(|error| error.to_string())?;
@@ -52,6 +65,7 @@ async fn visible_snapshot(app: &tauri::AppHandle, mut snapshot: DriverSnapshot) 
         || !paid_access(app).await.unwrap_or(false)
     {
         snapshot.settings.can_create = false;
+        snapshot.settings.can_rename = false;
     }
     snapshot
 }
@@ -218,6 +232,8 @@ mod tests {
     fn inventory_changes_require_the_licensed_graph_app() {
         use crate::app_mode::AppMode;
         assert!(inventory_access_allowed(AppMode::Graph, true));
+        assert!(inventory_access_allowed(AppMode::Service, true));
+        assert!(!inventory_access_allowed(AppMode::Service, false));
         assert!(!inventory_access_allowed(AppMode::Graph, false));
         assert!(!inventory_access_allowed(AppMode::Driver, true));
         assert!(!inventory_access_allowed(AppMode::Driver, false));

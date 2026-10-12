@@ -5,15 +5,16 @@ use std::ffi::OsStr;
 pub(crate) enum AppMode {
     Graph,
     Driver,
+    Service,
 }
 
 impl AppMode {
-    pub(crate) fn detect<'a>(
-        identifier: &str,
-        mut arguments: impl Iterator<Item = &'a OsStr>,
-    ) -> Self {
-        if identifier == "io.mixrelay.driver.desktop"
-            || arguments.any(|argument| argument == "--driver")
+    pub(crate) fn detect<'a>(identifier: &str, arguments: impl Iterator<Item = &'a OsStr>) -> Self {
+        let arguments: Vec<_> = arguments.collect();
+        if arguments.contains(&OsStr::new("--driver-runtime")) {
+            Self::Service
+        } else if identifier == "io.mixrelay.driver.desktop"
+            || arguments.iter().any(|argument| *argument == "--driver")
         {
             Self::Driver
         } else {
@@ -21,22 +22,25 @@ impl AppMode {
         }
     }
 
-    /// Driver mode owns only its tray and name prompt; it never admits graph engine startup.
+    /// The editor and background controller can author graph work; Driver-only mode cannot.
     pub(crate) const fn starts_graph(self) -> bool {
-        matches!(self, Self::Graph)
+        matches!(self, Self::Graph | Self::Service)
     }
 
     /// Applies Driver prompt defaults to the main window without changing the bundle identity.
     pub(crate) fn configure(self, config: &mut tauri::Config) {
-        if self == Self::Driver {
-            config.product_name = Some("MixRelayDriver".into());
+        if self == Self::Service {
+            // The controller has no editor webview or Dock window.
+            config.app.windows.clear();
+        } else if self == Self::Driver {
+            config.product_name = Some("MixRelay".into());
             if let Some(window) = config
                 .app
                 .windows
                 .iter_mut()
                 .find(|window| window.label == "main")
             {
-                window.title = "MixRelay Driver".into();
+                window.title = "MixRelay".into();
                 window.url = tauri::WebviewUrl::App("index.html?mode=driver".into());
                 window.width = 400.0;
                 window.height = 180.0;
@@ -52,6 +56,24 @@ impl AppMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn driver_runtime_has_no_editor_window_and_editor_cannot_select_it() {
+        let args = [OsStr::new("--driver-runtime")];
+        let mode = AppMode::detect("io.mixrelay.driver.desktop", args.into_iter());
+        assert_eq!(mode, AppMode::Service);
+        let mut config = tauri::Config::default();
+        config
+            .app
+            .windows
+            .push(tauri::utils::config::WindowConfig::default());
+        mode.configure(&mut config);
+        assert!(config.app.windows.is_empty());
+        assert_eq!(
+            AppMode::detect("io.mixrelay.desktop", args.into_iter()),
+            AppMode::Service
+        );
+    }
 
     #[test]
     fn installed_driver_manager_does_not_need_a_cli_switch() {
@@ -84,7 +106,7 @@ mod tests {
             .push(tauri::utils::config::WindowConfig::default());
         AppMode::Driver.configure(&mut config);
         assert_eq!(config.identifier, "io.mixrelay.desktop");
-        assert_eq!(config.product_name.as_deref(), Some("MixRelayDriver"));
+        assert_eq!(config.product_name.as_deref(), Some("MixRelay"));
         assert!(!config.app.windows[0].visible);
         assert!(!config.app.windows[0].resizable);
         assert_eq!(config.app.windows[0].width.to_bits(), 400.0_f64.to_bits());

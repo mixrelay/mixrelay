@@ -1,15 +1,18 @@
-pkgname=mix-relay-driver
+pkgname=mix-relay
 pkgver=@VERSION@
 pkgrel=1
-pkgdesc='Free virtual audio devices and native format controls'
+pkgdesc='MixRelay audio routing, recording and virtual devices'
 arch=('@ARCH@')
 url='https://mixrelay.com'
 license=('LicenseRef-MixRelay-Driver')
 depends=('glibc>=2.39' 'gcc-libs' 'gtk3' 'webkit2gtk-4.1' 'librsvg'
          'libayatana-appindicator' 'pipewire' 'libpipewire' 'wireplumber'
-         'polkit' 'xterm' 'zenity' 'systemd' 'util-linux')
+         'polkit' 'xterm' 'zenity' 'systemd' 'util-linux' 'lilv' 'gnome-keyring')
+conflicts=('mix-relay-driver')
+replaces=('mix-relay-driver')
+provides=("mix-relay-driver=$pkgver")
 options=('!strip' '!debug')
-install=mixrelay-driver.install
+install=mixrelay.install
 source=("$pkgname-$pkgver-$CARCH.tar.gz")
 sha256sums=('@SHA256@')
 

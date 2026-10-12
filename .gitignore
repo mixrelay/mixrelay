@@ -33,3 +33,12 @@ apps/desktop/src-tauri/binaries/
 
 # Local recordings and raw diagnostic captures (summaries live in docs/validation)
 /output/
+
+# Reproducible local work and tool caches
+/.work/
+.cache/
+.vite/
+.vite-temp/
+__pycache__/
+*.pyc
+*.tsbuildinfo

@@ -266,7 +266,8 @@ it('does not retarget queued power intent to a replacement node with the same ID
   pending.resolve();
   await task;
   expect(f.port.updateNodeControl).not.toHaveBeenCalled();
-  expect(f.callbacks.error).toHaveBeenLastCalledWith('graph_revision_stale');
+  expect(f.callbacks.error).toHaveBeenLastCalledWith(null);
+  expect(f.callbacks.state).toHaveBeenLastCalledWith('active');
 });
 
 it('preserves a concurrently edited draft after a rejected node command', async () => {

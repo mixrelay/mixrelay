@@ -1,4 +1,44 @@
+import { effectTranslations } from '../effects';
 export const pt = {
+  effects: effectTranslations.pt,
+  theme: {
+    label: 'Aparência',
+    current: 'Aparência: {{theme}}',
+    system: 'Sistema',
+    light: 'Claro',
+    dark: 'Escuro',
+  },
+  about: {
+    title: 'Sobre o MixRelay',
+    version: 'Versão {{version}}',
+    licensed: 'Licenciado',
+    unknown: 'Estado da licença desconhecido',
+  },
+  runtimeConnection: {
+    connecting: {
+      title: 'Conectando ao MixRelay',
+      description:
+        'Preparando o áudio. A área de trabalho abrirá quando o MixRelay estiver pronto.',
+    },
+    not_installed: {
+      title: 'O MixRelay é necessário',
+      description:
+        'Instale o MixRelay para usar o roteamento de áudio, os efeitos e a gravação. Depois, tente conectar novamente.',
+    },
+    incompatible: {
+      title: 'Atualize o MixRelay',
+      description:
+        'O MixRelay instalado não é compatível com este aplicativo. Atualize-o e tente conectar novamente.',
+    },
+    unavailable: {
+      title: 'Não foi possível conectar ao MixRelay',
+      description:
+        'O MixRelay não responde ou o mecanismo de áudio não está pronto. Tente conectar novamente.',
+    },
+    install: 'Instalar MixRelay',
+    update: 'Atualizar MixRelay',
+    retry: 'Conectar novamente',
+  },
   workspaceFile: {
     file: 'Arquivo',
     'new': 'Novo espaço de trabalho',
@@ -7,14 +47,18 @@ export const pt = {
     saveAs: 'Salvar como…',
   },
   driverManagement: {
+    mixed: 'Diferente',
+    channels: 'Canais',
+    bitDepth: 'Profundidade de bits',
+    unselectedBuffer: 'Não selecionado',
+    pendingBuffer: 'Aplicado quando o dispositivo é conectado.',
+    observedBuffer: 'Valor aplicado',
+    bufferSize: 'Tamanho do buffer',
+    frames: 'quadros',
     title: 'Configurações do driver',
     loading: 'Lendo o driver…',
     unavailable: 'O serviço do driver não está disponível.',
     name: 'Nome do dispositivo',
-    renderChannels: 'Canais de reprodução',
-    captureChannels: 'Canais de captura',
-    renderFormat: 'Formato de reprodução',
-    captureFormat: 'Formato de captura',
     unknown: 'Desconhecido',
     create: 'Criar dispositivo',
     save: 'Aplicar',
@@ -24,7 +68,7 @@ export const pt = {
     changeFailed: 'Não foi possível alterar o dispositivo. Atualize a lista e tente novamente.',
     saveFailed: 'O dispositivo foi alterado, mas não foi possível salvar as configurações.',
     deviceMissing: 'Este dispositivo já não existe. Atualize a lista de dispositivos.',
-    paidRequired: 'Adicionar ou remover dispositivos exige uma licença paga do MixRelay.',
+    paidRequired: 'Esta ação exige uma licença paga do MixRelay.',
     openApp: 'Abrir MixRelay',
     appUnavailable: 'O MixRelay não está instalado ou não pôde ser aberto.',
   },
@@ -52,13 +96,19 @@ export const pt = {
     },
   },
   licensing: {
+    limits: {
+      graphs: 'Grátis: 1 grafo',
+      inputs: 'Grátis: 2 entradas',
+      outputs: 'Grátis: 2 saídas',
+      plugins: 'Grátis: 2 plug-ins externos',
+      virtualDevices: 'Grátis: 1 dispositivo virtual',
+    },
+    freeSummary:
+      'Grátis: 1 grafo, 2 entradas, 2 dispositivos de saída, 1 dispositivo virtual, 4 mapeamentos de canais Driver, 2 plug-ins externos e 1 gravador estéreo. É possível salvar e carregar o grafo gratuito e seus mapeamentos de canais. Renomear dispositivos exige uma licença.',
     title: 'Licença',
     close: 'Fechar',
     loading: 'Verificando a licença…',
     retry: 'Verificar novamente',
-    stopAudio: 'Parar áudio',
-    stopRequested: 'Solicitação de parada enviada.',
-    stopFailed: 'Não foi possível parar o áudio. Tente novamente ou use Sair.',
     key: 'Chave de licença',
     instanceName: 'Nome do dispositivo',
     activate: 'Ativar',
@@ -66,20 +116,16 @@ export const pt = {
     deactivate: 'Desativar este dispositivo',
     purchase: 'Comprar uma licença',
     expires: 'Válida até {{date}}',
-    expiredOn: 'Expirou em {{date}}',
     storeUnavailable: 'As compras e a ativação não estão disponíveis nesta compilação.',
     termsTitle: 'Termos de uso',
     integrationNotice:
       'O uso geral e os direitos de integrar ou redistribuir o MixRelay em produtos de terceiros são independentes. A integração em produtos exige um contrato pago separado.',
     states: {
-      trial: 'Avaliação · Restam {{count}} dias',
+      free: 'Grátis',
       licensed: 'Licenciado · Restam {{count}} dias de acesso offline',
-      expired: 'Acesso expirado',
       clock_invalid: 'Verifique o relógio do dispositivo',
     },
     messages: {
-      expired:
-        'O seu acesso terminou. Ative uma licença ou verifique online uma licença existente.',
       clock_invalid:
         'Verifique o relógio do dispositivo e depois verifique ou ative a sua licença.',
     },
@@ -100,6 +146,8 @@ export const pt = {
     },
   },
   recorder: {
+    freeLimit:
+      'Gravação gratuita: até 2 canais e 2 horas por tomada, sem contar as pausas. A gravação para automaticamente; o roteamento de áudio continua.',
     channels: 'Canais',
     title: 'Gravador',
     folder: 'Pasta de gravação',
@@ -122,13 +170,13 @@ export const pt = {
     },
   },
   audioSession: {
-    powerOn: 'Ligar o motor',
-    powerOff: 'Desligar o motor',
-    powerChanging: 'Alterando o estado do motor…',
-    powerFailed: 'Não foi possível alterar o estado do motor. Verifique o estado atual.',
+    resume: 'Retomar',
+    pause: 'Pausar',
+    changing: 'Alterando o estado do áudio…',
+    pauseFailed: 'Não foi possível pausar ou retomar. Verifique o estado atual.',
     diagnostics: 'Detalhes do áudio',
     processingRate: 'Taxa de amostragem de processamento',
-    processingBuffer: 'Tamanho do buffer',
+    processingBuffer: 'Buffer de processamento',
     bufferLatency: 'Atraso do buffer',
     bufferLatencyHint:
       'Atraso de um buffer de processamento (amostras ÷ taxa de amostragem), não a latência total de entrada e saída.',
@@ -137,7 +185,7 @@ export const pt = {
     blockSize: 'Tamanho do buffer',
     apply: 'Aplicar',
     applying: 'Aplicando…',
-    changeNotice: 'O áudio será interrompido brevemente e o histórico de desfazer será apagado.',
+    changeNotice: 'Alterar esta configuração interrompe brevemente o áudio.',
     captureRateLocked: 'A captura de áudio de aplicações exige atualmente 48 kHz.',
     changeFailed: 'Não foi possível alterar a sessão de áudio. Verifique o estado do motor.',
     errors: {
@@ -200,6 +248,8 @@ export const pt = {
     },
   },
   common: {
+    showPassword: 'Mostrar palavra-passe',
+    hidePassword: 'Ocultar palavra-passe',
     appName: 'MixRelay',
     beta: 'Prévia privada',
     cancel: 'Cancelar',
@@ -260,6 +310,11 @@ export const pt = {
         preferences_unavailable: 'Sessão: configurações não salvas',
         stored_format_unavailable: 'Sessão: formato salvo indisponível',
       },
+    },
+    nodeName: {
+      title: 'Alterar nome exibido',
+      label: 'Nome exibido',
+      save: 'Salvar',
     },
     context: {
       removeNode: 'Excluir nó',
@@ -362,6 +417,8 @@ export const pt = {
       unavailable: 'Motor indisponível',
     },
     errors: {
+      feature_limit:
+        'Esta alteração excede os limites da versão gratuita. Reduza as conexões ou os nós, ou ative uma licença.',
       audio_device_disconnected:
         'Não foi possível aplicar a configuração do dispositivo de áudio virtual.',
       audio_source_unavailable:
@@ -376,7 +433,9 @@ export const pt = {
       graph_invalid: 'O motor rejeitou um grafo de áudio inválido.',
       graph_draft_changed:
         'As edições mudaram durante o recarregamento. O seu rascunho foi preservado; escolha novamente.',
-      graph_revision_stale: 'O grafo mudou em outro local. Recarregue antes de aplicar novamente.',
+      graph_revision_stale: 'Não foi possível aplicar a alteração. Tente novamente.',
+      graph_conflict_unresolved:
+        'Não foi possível aplicar automaticamente as alterações simultâneas.',
       processor_unavailable: 'O processador de áudio selecionado não está disponível.',
     },
     recovery: {
@@ -400,6 +459,11 @@ export const pt = {
       reload: 'Carregar a disposição salva',
     },
     processorControl: {
+      probeFailed:
+        'Não foi possível carregar este plug-in. Os outros efeitos continuam disponíveis.',
+      scanFailed:
+        'Não foi possível concluir a busca de plug-ins. Os efeitos disponíveis anteriormente são mantidos.',
+      technicalDetails: 'Detalhes técnicos',
       scanning: 'Buscando efeitos de áudio…',
       incomplete: 'Busca de efeitos incompleta',
       partial:
@@ -578,8 +642,9 @@ export const pt = {
     },
   },
   driver: {
+    installNotice: 'Os dispositivos de áudio virtuais não estão disponíveis.',
+    getInstaller: 'Obter o instalador do MixRelay',
     title: 'Driver de áudio virtual',
-    description: 'MixRelay Capture e MixRelay Stream',
     actionInstall: 'Instalar driver',
     actionRestart: 'Reiniciar serviços de áudio',
     actionDiagnose: 'Abrir diagnóstico',

@@ -2,7 +2,9 @@ use super::{
     HostAudioBackendError, NativeStream, RenderFormat, VirtualEndpointSpec, native::StreamRole,
 };
 use mixrelay_audio_io::process::{InputActivity, ProcessReport, TransferOutcome};
-pub(super) use mixrelay_linux_driver::{native_name, native_names};
+pub(super) use mixrelay_linux_driver::native_name;
+#[cfg(test)]
+pub(super) use mixrelay_linux_driver::native_names;
 use std::collections::BTreeMap;
 
 #[path = "linux_endpoint_properties.rs"]

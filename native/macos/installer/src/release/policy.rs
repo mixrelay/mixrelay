@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ArtifactRole {
     Application,
+    Engine,
     Hal,
     Driver,
     Installer,
@@ -92,8 +93,14 @@ fn verify_slice(role: ArtifactRole, metadata: &SignatureMetadata) -> Result<(), 
 }
 
 #[cfg(any(target_os = "macos", test))]
-pub(super) const fn expected_entitlements(_role: ArtifactRole) -> &'static [(&'static str, bool)] {
-    &[]
+pub(super) const fn expected_entitlements(role: ArtifactRole) -> &'static [(&'static str, bool)] {
+    match role {
+        ArtifactRole::Engine => &[
+            ("com.apple.security.device.audio-input", true),
+            ("com.apple.security.cs.disable-library-validation", true),
+        ],
+        _ => &[],
+    }
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -174,6 +181,7 @@ mod tests {
         );
         for role in [
             ArtifactRole::Application,
+            ArtifactRole::Engine,
             ArtifactRole::Hal,
             ArtifactRole::Installer,
         ] {

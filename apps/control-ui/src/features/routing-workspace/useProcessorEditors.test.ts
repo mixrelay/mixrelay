@@ -291,3 +291,39 @@ describe('processor editor automatic presentation', () => {
     expect(source.setProcessorEditor).not.toHaveBeenCalled();
   });
 });
+
+it('rejects a mismatched native node identity and leaves a retryable issue', async () => {
+  const source = port();
+  source.getProcessorEditor.mockResolvedValueOnce({ ...status('open'), nodeId: 'unrelated' });
+  const { result } = renderHook(() => useProcessorEditors(source, model()));
+  await settle();
+  expect(result.current.statuses.size).toBe(0);
+  expect(result.current.issues.has('effect')).toBe(true);
+  act(() => result.current.retry('effect'));
+  await settle();
+  expect(result.current.statuses.get('effect')?.state).toBe('open');
+});
+it('ignores a retry after disposal or for an unknown node while preserving unavailable native state', async () => {
+  const source = port();
+  source.getProcessorEditor.mockResolvedValue(status('unavailable'));
+  const graph = model();
+  graph.nodes = graph.nodes.map((node) => ({ ...node, runtime: { type: 'provider', config: {} } }));
+  const { result, unmount } = renderHook(() => useProcessorEditors(source, graph));
+  await settle();
+  expect(result.current.statuses.get('effect')?.state).toBe('unavailable');
+  act(() => result.current.retry('unknown'));
+  const retry = result.current.retry;
+  unmount();
+  act(() => retry('effect'));
+  expect(source.getProcessorEditor).toHaveBeenCalledTimes(1);
+  expect(source.setProcessorEditor).not.toHaveBeenCalled();
+});
+
+it('keeps an unloaded graph free of editor requests', async () => {
+  const source = port();
+  const { result } = renderHook(() => useProcessorEditors(source, null));
+  await settle();
+  expect(result.current.statuses.size).toBe(0);
+  expect(source.getProcessorEditor).not.toHaveBeenCalled();
+  expect(source.setProcessorEditor).not.toHaveBeenCalled();
+});

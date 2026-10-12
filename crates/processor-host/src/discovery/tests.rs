@@ -41,6 +41,42 @@ fn scan_ok(locators: Vec<RackLocator>) -> rack_formats::RackScanReport {
     }
 }
 
+#[test]
+fn failed_probe_keeps_display_name_separate_from_vendor_diagnostics() {
+    let catalog = ProcessorCatalog::default();
+    let candidate = locator(RackFormat::Vst3, "565354fixture");
+    rescan_with(
+        &catalog,
+        &[RackFormat::Vst3],
+        |_| Ok(scan_ok(vec![candidate.clone()])),
+        |_| Err("PasteBoard: vendor log\nMixRelay processor probe failed: load rejected".into()),
+    );
+    let diagnostics = catalog.protocol_catalog().diagnostics;
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].plugin_name.as_deref(), Some("565354fixture"));
+    assert!(diagnostics[0].message.contains("vendor log"));
+}
+
+#[test]
+fn instruments_are_not_probed_or_published_as_effects() {
+    let catalog = ProcessorCatalog::default();
+    let instrument: RackLocator = serde_json::from_value(serde_json::json!({
+        "format":"vst3", "uniqueId":"instrument", "path":"/fixture/instrument.vst3",
+        "name":"Example Instrument", "vendor":"fixture", "version":1,
+        "category":"instrument", "hasEditor":true, "acceptsMidi":true
+    }))
+    .unwrap();
+    rescan_with(
+        &catalog,
+        &[RackFormat::Vst3],
+        |_| Ok(scan_ok(vec![instrument.clone()])),
+        |_| panic!("instruments must not reach instance validation"),
+    );
+    let result = catalog.protocol_catalog();
+    assert!(result.processors.is_empty());
+    assert!(result.diagnostics.is_empty());
+}
+
 fn assert_locator_path(catalog: &ProcessorCatalog, id: &str, expected: &str) {
     let snapshot = catalog
         .snapshot

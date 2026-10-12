@@ -63,6 +63,7 @@ impl DriverBackend for FakeBackend {
         observation.settings.devices = desired
             .iter()
             .map(|device| VirtualEndpointDeviceSettings {
+                native_buffer: None,
                 spec: device.spec.clone(),
                 native_device_ids: vec![format!("native:{}", device.spec.id.as_str())],
                 observed_sample_rate: Some(device.spec.default_sample_rate),

@@ -1,0 +1,16 @@
+.indicator {
+  display: inline-block;
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.indicator[data-tone="positive"] {
+  background: var(--positive);
+}
+.indicator[data-tone="warning"] {
+  background: var(--amber);
+}
+.indicator[data-tone="critical"] {
+  background: var(--red);
+}

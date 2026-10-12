@@ -145,3 +145,89 @@ fn removal_marks_the_old_owner_inactive_before_retired_reclamation() {
     exchange.reclaim_retired();
     assert_eq!(Arc::strong_count(&active), 1);
 }
+
+#[test]
+fn pending_and_retired_shutdown_release_each_hosted_owner_once() {
+    for _ in 0..128 {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let pending = ProcessorExchange::new(1);
+        pending.submit(processor(2, false, &drops)).unwrap();
+        drop(pending);
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(Arc::strong_count(&drops), 1);
+
+        let exchange = ProcessorExchange::new(1);
+        let mut current = processor(1, false, &drops);
+        exchange.submit(processor(2, false, &drops)).unwrap();
+        assert!(exchange.activate_pending(&mut current));
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        drop(exchange);
+        assert_eq!(drops.load(Ordering::Relaxed), 2);
+        assert_eq!(Arc::strong_count(&drops), 2);
+        drop(current);
+        assert_eq!(drops.load(Ordering::Relaxed), 3);
+        assert_eq!(Arc::strong_count(&drops), 1);
+    }
+}
+
+#[test]
+fn reuse_replacement_and_removal_never_accumulate_hosted_owners() {
+    let drops = Arc::new(AtomicUsize::new(0));
+    let exchange = ProcessorExchange::new(1);
+    let mut current = processor(1, false, &drops);
+    for revision in 2..=1_025 {
+        let reuse = revision % 2 == 0;
+        exchange.submit(processor(revision, reuse, &drops)).unwrap();
+        assert!(exchange.activate_pending(&mut current));
+        exchange.reclaim_retired();
+        // This includes placeholders: their retained Arc must also be released.
+        assert_eq!(Arc::strong_count(&drops), 2);
+        assert_eq!(
+            drops.load(Ordering::Relaxed),
+            usize::try_from((revision - 1) / 2).unwrap()
+        );
+    }
+    let mut removed = processor(1_026, true, &drops);
+    removed.hosted_processors = Box::new([]);
+    removed.hosted_identities = Box::new([]);
+    exchange.submit(removed).unwrap();
+    assert!(exchange.activate_pending(&mut current));
+    exchange.reclaim_retired();
+    assert_eq!(drops.load(Ordering::Relaxed), 513);
+    assert_eq!(Arc::strong_count(&drops), 1);
+}
+
+#[test]
+fn failed_submission_and_activation_release_hosted_owners_without_touching_active() {
+    let drops = Arc::new(AtomicUsize::new(0));
+    let exchange = ProcessorExchange::new(1);
+    let mut current = processor(1, false, &drops);
+    assert_eq!(
+        exchange.submit_configured(processor(2, false, &drops), || Err("configuration failed")),
+        Err(crate::ProcessorConfigurationError::Configuration(
+            "configuration failed"
+        ))
+    );
+    assert_eq!(drops.load(Ordering::Relaxed), 1);
+    exchange.submit(processor(2, false, &drops)).unwrap();
+    assert_eq!(
+        exchange.submit(processor(3, false, &drops)),
+        Err(crate::ProcessorSubmitError::Busy {
+            proposed_revision: 3
+        })
+    );
+    assert_eq!(drops.load(Ordering::Relaxed), 2);
+    assert_eq!(
+        exchange.activate_pending_configured(&mut current, |_| Err("activation failed")),
+        Err("activation failed")
+    );
+    assert_eq!(drops.load(Ordering::Relaxed), 2);
+    drop(exchange);
+    assert_eq!(drops.load(Ordering::Relaxed), 3);
+    let mut output = [0.0];
+    assert!(current.hosted_processors[0].process(&[], &mut output, 1));
+    assert_eq!(output[0].to_bits(), 1.0_f32.to_bits());
+    drop(current);
+    assert_eq!(drops.load(Ordering::Relaxed), 4);
+    assert_eq!(Arc::strong_count(&drops), 1);
+}

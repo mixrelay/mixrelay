@@ -48,6 +48,16 @@ impl EndpointRegistry {
         }
         let mut state = self.state.lock();
         require_unreserved(&state)?;
+        state
+            .retired
+            .retain(|mapping| Arc::strong_count(mapping) != 1);
+        check_budget(&state, specs, replacement)?;
+        // Commit/cancel must retire pins without another allocation after publication.
+        let reserve = specs.len().max(state.active.len());
+        state
+            .retired
+            .try_reserve(reserve)
+            .map_err(io::Error::other)?;
         if replacement.is_some_and(|id| {
             !state.active.contains_key(&id) || !specs.iter().any(|spec| spec.id == id)
         }) {
@@ -97,6 +107,36 @@ impl EndpointRegistry {
             desired,
         })
     }
+}
+
+fn check_budget(
+    state: &super::State,
+    specs: &[EndpointSpec],
+    replacement: Option<EndpointId>,
+) -> io::Result<()> {
+    use super::budget::{Budget, MAX_MAPPINGS, MAX_REGION_BYTES};
+    let mut budget = Budget::new(MAX_MAPPINGS, MAX_REGION_BYTES);
+    for mapping in state.active.values().chain(&state.retired) {
+        let (region, bytes) = mapping.region_usage();
+        budget.reserve(Some(region), bytes)?;
+    }
+    for spec in specs {
+        spec.validate()?;
+        let current = state
+            .active
+            .get(&spec.id)
+            .filter(|_| replacement != Some(spec.id));
+        if current.is_some_and(|mapping| mapping.spec() == spec) {
+            continue; // The exact Arc owner is reused, not another mapping.
+        }
+        if let Some(current) = current.filter(|mapping| mapping.can_reconfigure(spec)) {
+            let (region, bytes) = current.region_usage();
+            budget.reserve(Some(region), bytes)?;
+        } else {
+            budget.reserve(None, Mapping::required_bytes(spec)?)?;
+        }
+    }
+    Ok(())
 }
 
 impl<'a> PreparedInventory<'a> {

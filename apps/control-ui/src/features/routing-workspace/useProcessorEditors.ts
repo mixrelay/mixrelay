@@ -94,12 +94,11 @@ class EditorSession {
       }
       return;
     }
-    if (status.state === 'open' || status.state === 'opening') {
-      entry.autoOpen = false;
-      entry.timer = setTimeout(() => {
-        void this.run(entry, { kind: 'poll' });
-      }, EDITOR_POLL_MS);
-    }
+    // Failed, unavailable and closed states returned above; open/ opening keep polling.
+    entry.autoOpen = false;
+    entry.timer = setTimeout(() => {
+      void this.run(entry, { kind: 'poll' });
+    }, EDITOR_POLL_MS);
   }
   private async run(entry: Entry, action: Action) {
     if (this.cancelled || entry.command) return;

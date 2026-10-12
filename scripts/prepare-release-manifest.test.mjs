@@ -21,12 +21,12 @@ function fixture(t) {
   return { directory, args };
 }
 
-test("both products produce the exact publisher schema and preserve installer inputs", t => {
+test("one product produces the exact publisher schema and preserve installer inputs", t => {
   const { directory, args } = fixture(t);
   const file = "MixRelay Install.pkg";
   const original = readFileSync(join(directory, file));
   writeFileSync(join(directory, "Uninstall MixRelay.pkg"), "Uninstaller is not selected\n");
-  for (const product of ["mix-relay", "mix-relay-driver"]) {
+  for (const product of ["mix-relay"]) {
     const selected = args.map(value => value === "mix-relay" ? product : value);
     const path = prepareReleaseManifest([...selected, "--artifact", `macos:universal:${file}`]);
     assert.equal(path, join(directory, `${product}.release.json`));
@@ -37,7 +37,7 @@ test("both products produce the exact publisher schema and preserve installer in
   }
   assert.deepEqual(readFileSync(join(directory, file)), original);
   assert.equal(readFileSync(join(directory, "Uninstall MixRelay.pkg"), "utf8"), "Uninstaller is not selected\n");
-  assert.equal(readdirSync(directory).length, 7);
+  assert.equal(readdirSync(directory).length, 6);
 });
 
 test("the CLI permits DEB and RPM for the same Linux target and an explicit public notes URL", t => {

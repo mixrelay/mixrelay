@@ -11,6 +11,66 @@ pub(super) fn recorder_error(reason: String) -> ProtocolError {
 }
 
 impl EngineGraphController {
+    pub(super) fn validate_free_record_start(
+        &self,
+        graph_id: &str,
+        node_id: &str,
+        id: &str,
+    ) -> Result<(), ProtocolError> {
+        use mixrelay_audio_recorder::RecorderState;
+        if self.recorders.status(id).state == RecorderState::Paused {
+            return Ok(());
+        }
+        let document = self.catalog_document_locked(graph_id)?;
+        if let Some(channels) = document
+            .nodes
+            .iter()
+            .find(|node| node.id.as_str() == node_id)
+            .and_then(|node| match node.config {
+                NodeConfig::Recorder { channels } => Some(channels),
+                _ => None,
+            })
+            && channels > 2
+        {
+            return Err(crate::feature_policy::limit(
+                "recordingChannels",
+                2,
+                usize::from(channels),
+            ));
+        }
+        let current = self.graph.read().clone();
+        let catalog = self.catalog_candidate(&current);
+        let graphs: Vec<_> = catalog.as_ref().map_or_else(
+            || vec![(self.view_graph_id(), &current)],
+            |catalog| {
+                catalog
+                    .documents()
+                    .map(|(id, graph)| (id.to_owned(), graph))
+                    .collect()
+            },
+        );
+        for (graph_id, graph) in graphs {
+            for node in &graph.nodes {
+                let NodeConfig::Recorder { channels } = node.config else {
+                    continue;
+                };
+                let key = mixrelay_audio_engine::recording_session_key(
+                    &graph_composition::runtime_node_id(&graph_id, &node.id),
+                    channels,
+                );
+                if key != id
+                    && matches!(
+                        self.recorders.status(&key).state,
+                        RecorderState::Recording | RecorderState::Paused
+                    )
+                {
+                    return Err(crate::feature_policy::limit("recorders", 1, 2));
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn stop_inactive_recorders(
         &self,
         proposed: &mixrelay_audio_graph::GraphDocument,
@@ -69,6 +129,13 @@ impl EngineGraphController {
 
     pub(super) fn reclaim_recorders(&self) {
         self.exchange.reclaim_retired();
+        self.suspended_recorders.lock().retain(|recorder| {
+            matches!(
+                self.recorders.status(&recorder.id).state,
+                mixrelay_audio_recorder::RecorderState::Recording
+                    | mixrelay_audio_recorder::RecorderState::Paused
+            )
+        });
         if let Err(reason) = self.recorders.reap_unused() {
             tracing::error!(reason, "recorder finalization failed");
             *self.recorder_cleanup_error.lock() = Some(reason);

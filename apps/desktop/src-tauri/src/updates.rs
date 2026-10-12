@@ -5,7 +5,6 @@ use std::time::Duration;
 use reqwest::{Client, Url};
 use semver::Version;
 use serde::{Deserialize, Serialize};
-use tauri::Manager as _;
 use thiserror::Error;
 
 const STATUS_ORIGIN: &str = "https://appserver.dsub.io/status";
@@ -17,15 +16,12 @@ const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) enum Product {
     /// The desktop application.
     MixRelay,
-    /// The separately installed free audio driver.
-    MixRelayDriver,
 }
 
 impl Product {
     fn slug(self) -> &'static str {
         match self {
             Self::MixRelay => "mix-relay",
-            Self::MixRelayDriver => "mix-relay-driver",
         }
     }
 }
@@ -309,18 +305,14 @@ fn product_update(
     update
 }
 
-async fn installed_driver_version() -> Option<String> {
-    tauri::async_runtime::spawn_blocking(crate::driver_control::installed_driver_version)
-        .await
-        .ok()
-        .flatten()
-}
-
-/// Checks only the free Driver catalog for its independent status-bar manager.
-/// Returns an unavailable observation on discovery or network failure; never installs software.
+/// Checks the one complete `MixRelay` release for the background status menu.
 pub(crate) async fn updates_check_driver() -> ProductUpdate {
-    let product = Product::MixRelayDriver;
-    let installed = installed_driver_version().await;
+    let product = Product::MixRelay;
+    let installed =
+        tauri::async_runtime::spawn_blocking(crate::driver_control::installed_mixrelay_version)
+            .await
+            .ok()
+            .flatten();
     let (Ok(platform), Ok(client)) = (Platform::current(), client()) else {
         return unavailable_product(product, installed);
     };
@@ -332,35 +324,20 @@ pub(crate) async fn updates_check_driver() -> ProductUpdate {
     )
 }
 
-/// Check both public product catalogs for manual and periodic UI requests.
-///
-/// Each product reads its own installed artifact and returns an independent observation,
-/// including `unavailable` on failure; no license, device identifier, or audio state is accessed.
+/// Checks the complete product; no license, devices or audio state are transmitted.
 #[tauri::command]
 pub(crate) async fn updates_check(app: tauri::AppHandle) -> Vec<ProductUpdate> {
-    let installed_app = if app.state::<crate::app_mode::AppMode>().starts_graph() {
-        Some(app.package_info().version.to_string())
-    } else {
-        tauri::async_runtime::spawn_blocking(crate::driver_control::installed_mixrelay_version)
-            .await
-            .ok()
-            .flatten()
-    };
-    let installed_driver = installed_driver_version().await;
+    let product = Product::MixRelay;
+    let installed = Some(app.package_info().version.to_string());
     let (Ok(platform), Ok(client)) = (Platform::current(), client()) else {
-        return vec![
-            unavailable_product(Product::MixRelay, installed_app),
-            unavailable_product(Product::MixRelayDriver, installed_driver),
-        ];
+        return vec![unavailable_product(product, installed)];
     };
-    let (application, driver) = tokio::join!(
-        fetch_catalog(&client, Product::MixRelay, platform),
-        fetch_catalog(&client, Product::MixRelayDriver, platform),
-    );
-    vec![
-        product_update(Product::MixRelay, installed_app, platform, application),
-        product_update(Product::MixRelayDriver, installed_driver, platform, driver),
-    ]
+    vec![product_update(
+        product,
+        installed,
+        platform,
+        fetch_catalog(&client, product, platform).await,
+    )]
 }
 
 fn unavailable_product(product: Product, installed_version: Option<String>) -> ProductUpdate {

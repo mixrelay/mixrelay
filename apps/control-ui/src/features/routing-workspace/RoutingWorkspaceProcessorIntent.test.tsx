@@ -232,11 +232,11 @@ it('keeps failed intent after a failed reload and clears it only after an author
     .mockRejectedValueOnce(new Error('offline'));
   await waitFor(() => expect(screen.getByRole('button', { name: 'parameter edit' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'parameter edit' }));
-  await screen.findByRole('button', { name: 'Retry' });
+  const parameterRetry = await screen.findByRole('button', { name: 'Retry' });
   const getGraph = vi.spyOn(port, 'getGraph').mockRejectedValue(new Error('reload offline'));
   fireEvent.click(screen.getByRole('button', { name: 'Discard edits and reload engine' }));
   await waitFor(() => expect(getGraph).toHaveBeenCalledTimes(2));
-  expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  expect(parameterRetry).toBeInTheDocument();
   expect(screen.getByTestId('parameter-value')).toHaveTextContent('0.2');
   expect(busy).toHaveBeenLastCalledWith(true);
   getGraph.mockRestore();

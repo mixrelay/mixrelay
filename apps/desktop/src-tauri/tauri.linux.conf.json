@@ -5,20 +5,19 @@
       "rpm"
     ],
     "externalBin": [
+      "binaries/mixrelay-driver-service",
       "binaries/mixrelay-engine-service"
     ],
     "linux": {
       "deb": {
-        "preInstallScript": "../../../packaging/linux/require-app-closed.sh",
-        "preRemoveScript": "../../../packaging/linux/require-app-closed.sh",
+        "preInstallScript": "../../../packaging/linux/driver-before-change.sh",
+        "preRemoveScript": "../../../packaging/linux/driver-pre-remove.sh",
         "files": {
           "/usr/share/doc/mix-relay/CHANGELOG.md": "../../../CHANGELOG.md",
           "/usr/share/doc/mix-relay/LICENSE.txt": "../../../LICENSE.txt",
           "/usr/share/doc/mix-relay/LICENSE-Driver.txt": "../../../LICENSE-Driver.txt",
           "/usr/lib/mixrelay/uninstall.sh": "../../../packaging/linux/uninstall.sh",
           "/usr/share/applications/mixrelay-uninstall.desktop": "../../../packaging/linux/mixrelay-uninstall.desktop",
-          "/usr/share/wireplumber/scripts/mixrelay-source-mute.lua": "../../../native/linux/wireplumber/mixrelay-source-mute.lua",
-          "/usr/share/wireplumber/wireplumber.conf.d/90-mixrelay-source-mute.conf": "../../../native/linux/wireplumber/90-mixrelay-source-mute.conf",
           "/usr/share/doc/mix-relay/LICENSE.ja.txt": "../../../LICENSE.ja.txt",
           "/usr/share/doc/mix-relay/LICENSE-Driver.ja.txt": "../../../LICENSE-Driver.ja.txt",
           "/usr/share/doc/mix-relay/LICENSE.ko.txt": "../../../LICENSE.ko.txt",
@@ -38,7 +37,39 @@
           "/usr/share/doc/mix-relay/LICENSE.it.txt": "../../../LICENSE.it.txt",
           "/usr/share/doc/mix-relay/LICENSE-Driver.it.txt": "../../../LICENSE-Driver.it.txt",
           "/usr/share/doc/mix-relay/LICENSE.ru.txt": "../../../LICENSE.ru.txt",
-          "/usr/share/doc/mix-relay/LICENSE-Driver.ru.txt": "../../../LICENSE-Driver.ru.txt"
+          "/usr/share/doc/mix-relay/LICENSE-Driver.ru.txt": "../../../LICENSE-Driver.ru.txt",
+          "/usr/share/wireplumber/scripts/mixrelay-source-mute.lua": "../../../native/linux/wireplumber/mixrelay-source-mute.lua",
+          "/usr/share/wireplumber/wireplumber.conf.d/90-mixrelay-source-mute.conf": "../../../native/linux/wireplumber/90-mixrelay-source-mute.conf",
+          "/usr/share/mixrelay-driver/version.json": "../../../target/driver-package/version.json",
+          "/usr/share/doc/mix-relay-driver/CHANGELOG.md": "../../../CHANGELOG.md",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.txt": "../../../LICENSE-Driver.txt",
+          "/usr/share/doc/mix-relay-driver/third-party/truce-rack/LICENSE-MIT": "../../../vendor/LICENSE-MIT",
+          "/usr/share/doc/mix-relay-driver/third-party/truce-rack/LICENSE-APACHE": "../../../vendor/LICENSE-APACHE",
+          "/usr/lib/systemd/user/mixrelay-driver.service": "../../../packaging/linux/mixrelay-driver.service",
+          "/etc/xdg/autostart/mixrelay-driver.desktop": "../../../packaging/linux/mixrelay-driver-autostart.desktop",
+          "/usr/lib/mixrelay-driver/session-start.sh": "../../../packaging/linux/session-start.sh",
+          "/usr/lib/mixrelay-driver/before-change.sh": "../../../packaging/linux/driver-before-change.sh",
+          "/usr/share/doc/mix-relay-driver/LICENSE.txt": "../../../LICENSE.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.ja.txt": "../../../LICENSE.ja.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.ja.txt": "../../../LICENSE-Driver.ja.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.ko.txt": "../../../LICENSE.ko.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.ko.txt": "../../../LICENSE-Driver.ko.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.zh-Hans.txt": "../../../LICENSE.zh-Hans.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.zh-Hans.txt": "../../../LICENSE-Driver.zh-Hans.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.zh-Hant.txt": "../../../LICENSE.zh-Hant.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.zh-Hant.txt": "../../../LICENSE-Driver.zh-Hant.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.fr.txt": "../../../LICENSE.fr.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.fr.txt": "../../../LICENSE-Driver.fr.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.de.txt": "../../../LICENSE.de.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.de.txt": "../../../LICENSE-Driver.de.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.es.txt": "../../../LICENSE.es.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.es.txt": "../../../LICENSE-Driver.es.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.pt.txt": "../../../LICENSE.pt.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.pt.txt": "../../../LICENSE-Driver.pt.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.it.txt": "../../../LICENSE.it.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.it.txt": "../../../LICENSE-Driver.it.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.ru.txt": "../../../LICENSE.ru.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.ru.txt": "../../../LICENSE-Driver.ru.txt"
         },
         "depends": [
           "libpipewire-0.3-0t64",
@@ -53,20 +84,33 @@
           "librsvg2-common",
           "pkexec",
           "polkit-1-auth-agent | lxpolkit",
-          "zenity"
+          "zenity",
+          "libc6 (>= 2.39)",
+          "xterm | x-terminal-emulator",
+          "systemd",
+          "util-linux"
+        ],
+        "postInstallScript": "../../../packaging/linux/driver-after-install.sh",
+        "postRemoveScript": "../../../packaging/linux/driver-after-remove.sh",
+        "conflicts": [
+          "mix-relay-driver"
+        ],
+        "replaces": [
+          "mix-relay-driver"
+        ],
+        "provides": [
+          "mix-relay-driver (= 0.1.0)"
         ]
       },
       "rpm": {
-        "preInstallScript": "../../../packaging/linux/require-app-closed.sh",
-        "preRemoveScript": "../../../packaging/linux/rpm-pre-remove.sh",
+        "preInstallScript": "../../../packaging/linux/driver-before-change.sh",
+        "preRemoveScript": "../../../packaging/linux/driver-rpm-pre-remove.sh",
         "files": {
           "/usr/share/doc/mix-relay/CHANGELOG.md": "../../../CHANGELOG.md",
           "/usr/share/doc/mix-relay/LICENSE.txt": "../../../LICENSE.txt",
           "/usr/share/doc/mix-relay/LICENSE-Driver.txt": "../../../LICENSE-Driver.txt",
           "/usr/lib/mixrelay/uninstall.sh": "../../../packaging/linux/uninstall.sh",
           "/usr/share/applications/mixrelay-uninstall.desktop": "../../../packaging/linux/mixrelay-uninstall.desktop",
-          "/usr/share/wireplumber/scripts/mixrelay-source-mute.lua": "../../../native/linux/wireplumber/mixrelay-source-mute.lua",
-          "/usr/share/wireplumber/wireplumber.conf.d/90-mixrelay-source-mute.conf": "../../../native/linux/wireplumber/90-mixrelay-source-mute.conf",
           "/usr/share/doc/mix-relay/LICENSE.ja.txt": "../../../LICENSE.ja.txt",
           "/usr/share/doc/mix-relay/LICENSE-Driver.ja.txt": "../../../LICENSE-Driver.ja.txt",
           "/usr/share/doc/mix-relay/LICENSE.ko.txt": "../../../LICENSE.ko.txt",
@@ -86,7 +130,39 @@
           "/usr/share/doc/mix-relay/LICENSE.it.txt": "../../../LICENSE.it.txt",
           "/usr/share/doc/mix-relay/LICENSE-Driver.it.txt": "../../../LICENSE-Driver.it.txt",
           "/usr/share/doc/mix-relay/LICENSE.ru.txt": "../../../LICENSE.ru.txt",
-          "/usr/share/doc/mix-relay/LICENSE-Driver.ru.txt": "../../../LICENSE-Driver.ru.txt"
+          "/usr/share/doc/mix-relay/LICENSE-Driver.ru.txt": "../../../LICENSE-Driver.ru.txt",
+          "/usr/share/wireplumber/scripts/mixrelay-source-mute.lua": "../../../native/linux/wireplumber/mixrelay-source-mute.lua",
+          "/usr/share/wireplumber/wireplumber.conf.d/90-mixrelay-source-mute.conf": "../../../native/linux/wireplumber/90-mixrelay-source-mute.conf",
+          "/usr/share/mixrelay-driver/version.json": "../../../target/driver-package/version.json",
+          "/usr/share/doc/mix-relay-driver/CHANGELOG.md": "../../../CHANGELOG.md",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.txt": "../../../LICENSE-Driver.txt",
+          "/usr/share/doc/mix-relay-driver/third-party/truce-rack/LICENSE-MIT": "../../../vendor/LICENSE-MIT",
+          "/usr/share/doc/mix-relay-driver/third-party/truce-rack/LICENSE-APACHE": "../../../vendor/LICENSE-APACHE",
+          "/usr/lib/systemd/user/mixrelay-driver.service": "../../../packaging/linux/mixrelay-driver.service",
+          "/etc/xdg/autostart/mixrelay-driver.desktop": "../../../packaging/linux/mixrelay-driver-autostart.desktop",
+          "/usr/lib/mixrelay-driver/session-start.sh": "../../../packaging/linux/session-start.sh",
+          "/usr/lib/mixrelay-driver/before-change.sh": "../../../packaging/linux/driver-before-change.sh",
+          "/usr/share/doc/mix-relay-driver/LICENSE.txt": "../../../LICENSE.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.ja.txt": "../../../LICENSE.ja.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.ja.txt": "../../../LICENSE-Driver.ja.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.ko.txt": "../../../LICENSE.ko.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.ko.txt": "../../../LICENSE-Driver.ko.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.zh-Hans.txt": "../../../LICENSE.zh-Hans.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.zh-Hans.txt": "../../../LICENSE-Driver.zh-Hans.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.zh-Hant.txt": "../../../LICENSE.zh-Hant.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.zh-Hant.txt": "../../../LICENSE-Driver.zh-Hant.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.fr.txt": "../../../LICENSE.fr.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.fr.txt": "../../../LICENSE-Driver.fr.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.de.txt": "../../../LICENSE.de.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.de.txt": "../../../LICENSE-Driver.de.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.es.txt": "../../../LICENSE.es.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.es.txt": "../../../LICENSE-Driver.es.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.pt.txt": "../../../LICENSE.pt.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.pt.txt": "../../../LICENSE-Driver.pt.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.it.txt": "../../../LICENSE.it.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.it.txt": "../../../LICENSE-Driver.it.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE.ru.txt": "../../../LICENSE.ru.txt",
+          "/usr/share/doc/mix-relay-driver/LICENSE-Driver.ru.txt": "../../../LICENSE-Driver.ru.txt"
         },
         "depends": [
           "pipewire-libs",
@@ -103,7 +179,23 @@
           "gnome-keyring-pam",
           "polkit",
           "PolicyKit-authentication-agent",
-          "zenity"
+          "zenity",
+          "libc.so.6(GLIBC_2.39)(64bit)",
+          "xterm",
+          "systemd",
+          "util-linux",
+          "lilv"
+        ],
+        "postInstallScript": "../../../packaging/linux/driver-after-install.sh",
+        "postRemoveScript": "../../../packaging/linux/driver-after-remove.sh",
+        "conflicts": [
+          "mix-relay-driver"
+        ],
+        "obsoletes": [
+          "mix-relay-driver"
+        ],
+        "provides": [
+          "mix-relay-driver = 0.1.0"
         ]
       }
     }

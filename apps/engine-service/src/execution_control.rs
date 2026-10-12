@@ -224,6 +224,23 @@ impl EngineGraphController {
         })?;
         let revision = self.exchange.plan_revisions().submitted;
         let views = self.execution_views.read();
+        // Native adapters start with an already compiled empty processor before
+        // any graph submission publishes an execution view. It owns no captures.
+        if views.is_empty() {
+            let document = self.graph.read();
+            let plans = self.exchange.plan_revisions();
+            if document.nodes.is_empty()
+                && document.edges.is_empty()
+                && document.revision == plans.active
+                && plans.active == plans.submitted
+            {
+                return Ok(ApplicationCaptureManifest {
+                    protocol_version: PROTOCOL_VERSION,
+                    revision: self.exchange.revisions().submitted,
+                    sources: Vec::new(),
+                });
+            }
+        }
         let view = views.get(&revision).ok_or_else(|| ProtocolError {
             code: ErrorCode::ControlUnavailable,
             parameters: serde_json::json!({
@@ -249,6 +266,10 @@ impl EngineGraphController {
         request: GraphApplyRequest,
     ) -> Result<ApplicationCaptureManifest, ProtocolError> {
         let _mutation = self.mutation.lock();
+        self.validate_feature_usage(
+            &request.document,
+            self.catalog_candidate(&request.document).as_ref(),
+        )?;
         let revisions = self.exchange.revisions();
         if request.document.revision <= revisions.submitted {
             return Err(ProtocolError {

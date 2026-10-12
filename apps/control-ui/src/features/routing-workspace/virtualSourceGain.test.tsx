@@ -61,9 +61,12 @@ it('provides virtual source gain alongside endpoint options, without an output g
       />
     </MixRelayProvider>,
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Options' }));
+  fireEvent.click(screen.getByRole('button', { name: (name) => name.endsWith('Options') }));
   expect(screen.getByRole('textbox', { name: 'Device name' })).toBeInTheDocument();
-  expect(screen.getAllByRole('combobox')).toHaveLength(2);
+  expect(screen.getAllByRole('button', { name: (name) => name.endsWith('Options') })).toHaveLength(
+    1,
+  );
+  expect(screen.getByRole('button', { name: /Channels$/ })).toHaveTextContent('Mixed');
   expect(onEndpoint).not.toHaveBeenCalled();
   const slider = screen.getByRole('slider', { name: 'Source gain' });
   fireEvent.keyDown(slider, { key: 'ArrowLeft' });
@@ -113,7 +116,7 @@ it.each([
       />
     </MixRelayProvider>,
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Options' }));
+  fireEvent.click(screen.getByRole('button', { name: (name) => name.endsWith('Options') }));
   fireEvent.keyDown(screen.getByRole('slider', { name: 'Source gain' }), { key: 'ArrowRight' });
   expect(onGain).toHaveBeenCalledWith(-5.5);
   const changed = updateRoutingNodeGain(model, source.id, -5.5);

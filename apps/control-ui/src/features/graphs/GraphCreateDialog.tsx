@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ActionButton } from '../../core/ui/ActionButton';
-import styles from './GraphCreateDialog.module.css';
+import { Dialog } from '../../core/ui/Dialog';
+import { FormActions } from '../../core/ui/FormActions';
+import { InlineNotice } from '../../core/ui/InlineNotice';
+import { Stack } from '../../core/ui/Stack';
+import { TextField } from '../../core/ui/TextField';
 
 export interface GraphCreateDialogProps {
   busy?: boolean;
@@ -22,57 +26,44 @@ export function GraphCreateDialog({
   error,
 }: GraphCreateDialogProps) {
   const { t } = useTranslation();
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const [name, setName] = useState(suggestedName);
   const normalizedName = name.trim();
 
-  useEffect(() => inputRef.current?.focus(), []);
-
   return (
-    <div className={styles.backdrop} role="presentation">
-      <section
-        aria-labelledby="new-graph-title"
-        aria-modal="true"
-        className={styles.dialog}
-        role="dialog"
+    <Dialog
+      opened
+      title={t('studio.newGraph')}
+      onClose={onCancel}
+      busy={creating}
+      withCloseButton={false}
+      size="xs"
+    >
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (normalizedName && !busy) onCreate(normalizedName);
+        }}
       >
-        <header className={styles.header}>
-          <h2 id="new-graph-title">{t('studio.newGraph')}</h2>
-        </header>
+        <Stack>
+          <TextField
+            data-autofocus
+            label={t('studio.graphName')}
+            disabled={busy}
+            onChange={(event) => setName(event.currentTarget.value)}
+            value={name}
+          />
+          {error ? <InlineNotice tone="critical">{error}</InlineNotice> : null}
+        </Stack>
 
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (normalizedName && !busy) onCreate(normalizedName);
-          }}
-        >
-          <label className={styles.field}>
-            <span>{t('studio.graphName')}</span>
-            <input
-              disabled={busy}
-              onChange={(event) => setName(event.currentTarget.value)}
-              ref={inputRef}
-              value={name}
-            />
-          </label>
-          {error ? <p role="alert">{error}</p> : null}
-
-          <footer className={styles.actions}>
-            <ActionButton
-              disabled={creating}
-              color="gray"
-              onClick={onCancel}
-              type="button"
-              variant="subtle"
-            >
-              {t('common.cancel')}
-            </ActionButton>
-            <ActionButton disabled={!normalizedName || busy} type="submit" variant="filled">
-              {t('common.create')}
-            </ActionButton>
-          </footer>
-        </form>
-      </section>
-    </div>
+        <FormActions>
+          <ActionButton disabled={creating} onClick={onCancel} type="button">
+            {t('common.cancel')}
+          </ActionButton>
+          <ActionButton disabled={!normalizedName || busy} type="submit" emphasis="strong">
+            {t('common.create')}
+          </ActionButton>
+        </FormActions>
+      </form>
+    </Dialog>
   );
 }

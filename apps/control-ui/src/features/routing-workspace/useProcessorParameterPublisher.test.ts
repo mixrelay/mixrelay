@@ -260,3 +260,17 @@ describe('processor parameter retry and session ownership', () => {
     await expect(result.current.whenIdle()).rejects.toBeInstanceOf(ControlPortError);
   });
 });
+
+it('makes retained publication callbacks inert after unmount and resolves idle immediately', async () => {
+  const port = { setProcessorParameter: vi.fn().mockResolvedValue(response) };
+  const { result, unmount } = renderHook(() => useProcessorParameterPublisher(port));
+  const actions = result.current;
+  unmount();
+  act(() => {
+    actions.publish(update);
+    actions.retryFailed();
+    actions.discardFailures();
+  });
+  await expect(actions.whenIdle()).resolves.toBeUndefined();
+  expect(port.setProcessorParameter).not.toHaveBeenCalled();
+});

@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { inspectPackage } from "./check-linux-package.mjs";
@@ -44,25 +44,16 @@ export function validateLicensingBuildEnvironment(env) {
 }
 
 export function desktopBuildCommand(platform, args = []) {
-  const { driver, buildArgs } = productArguments(args);
+  const { buildArgs } = productArguments(args);
   if (platform === "darwin") {
     if (buildArgs.length !== 0) {
       throw new Error("macOS desktop:build produces a universal release app and accepts no overrides");
     }
-    return ["zsh", "scripts/build-macos-universal-app.sh", ...(driver ? ["--driver"] : [])];
+    return ["zsh", "scripts/build-macos-universal-app.sh", ];
   }
   if (platform === "linux") {
     const cli = require.resolve("@tauri-apps/cli/tauri.js", { paths: [desktopRoot] });
-    if (!driver) return [process.execPath, cli, "build", ...buildArgs];
-    if (hasLinuxConfigOverride(buildArgs)) {
-      throw new Error("Driver builds use the canonical Driver configuration and do not accept --config/-c");
-    }
-    const shared = JSON.parse(readFileSync(resolve(desktopRoot, "src-tauri/tauri.driver.conf.json"), "utf8"));
-    const linux = JSON.parse(readFileSync(resolve(desktopRoot, "src-tauri/tauri.driver.linux.conf.json"), "utf8"));
-    // Tauri applies this patch to the automatically loaded App platform config.
-    // Keep the Linux file-map nulls: RFC 7396 uses them to delete App-owned files.
-    const config = { ...shared, ...linux, bundle: { ...shared.bundle, ...linux.bundle } };
-    return [process.execPath, cli, "build", "--config", JSON.stringify(config), ...buildArgs];
+    return [process.execPath, cli, "build", ...buildArgs];
   }
   throw new Error(`Unsupported desktop build host: ${platform}`);
 }
@@ -70,10 +61,10 @@ export function desktopBuildCommand(platform, args = []) {
 function productArguments(args) {
   const separator = args.indexOf("--");
   const options = separator === -1 ? args : args.slice(0, separator);
-  const driver = options.includes("--driver");
+  if (options.includes("--driver")) throw new Error("MixRelay includes its audio components; --driver is no longer a separate build");
   const buildArgs = options.filter(argument => argument !== "--driver");
   if (separator !== -1) buildArgs.push(...args.slice(separator));
-  return { driver, buildArgs };
+  return { buildArgs };
 }
 
 function bundleArguments(args) {
@@ -196,9 +187,9 @@ export async function main(
 ) {
   try {
     const buildEnv = { ...env };
-    const { driver, buildArgs } = productArguments(args);
+    const { buildArgs } = productArguments(args);
     assertDesktopPackagingAllowed(buildEnv);
-    if (!driver) validateLicensingBuildEnvironment(buildEnv);
+    validateLicensingBuildEnvironment(buildEnv);
     if (platform === "linux") validateLinuxConfigBuildArguments(buildArgs);
     const [command, ...commandArgs] = desktopBuildCommand(platform, args);
     // Tauri and its engine hook run from different directories. Resolve once
@@ -217,14 +208,13 @@ export async function main(
     if (status !== 0 || platform !== "linux" || !linuxBuildIncludesDebian(buildArgs)) return status;
 
     const bundleDirectory = linuxDebianBundleDirectory(buildArgs, buildEnv);
-    const packages = findDebianPackages(bundleDirectory).filter(path =>
-      !driver || /^(?:MixRelayDriver|mix-relay-driver)_/.test(basename(path)));
+    const packages = findDebianPackages(bundleDirectory).filter(path => !/^(?:MixRelayDriver|mix-relay-driver)_/.test(basename(path)));
     if (packages.length !== 1) {
       throw new Error(`Expected exactly one Debian package in ${bundleDirectory}; found ${packages.length}`);
     }
-    const inspected = await inspectDebianPackage(packages[0]);
-    if (driver && inspected?.packageName !== "mix-relay-driver") {
-      throw new Error("The Driver build must produce the mix-relay-driver package");
+    const inspected = await inspectDebianPackage(packages[0], undefined, undefined, { requireUnified: true });
+    if (inspected && inspected.packageName !== "mix-relay") {
+      throw new Error("The product build must produce the complete mix-relay package");
     }
     return 0;
   } catch (error) {
@@ -234,5 +224,15 @@ export async function main(
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
-  main().then(status => { process.exitCode = status; });
+  const build = async () => {
+    if (process.platform !== "darwin") return main();
+    desktopBuildCommand("darwin", process.argv.slice(2));
+    const { checkMacosSigning, withMacosSigning } = await import("./macos-signing.mjs");
+    checkMacosSigning();
+    return withMacosSigning(env => main(process.argv.slice(2), "darwin", spawnSync, inspectPackage, listDebianPackages, env));
+  };
+  build().then(status => { process.exitCode = status; }).catch(error => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
 }

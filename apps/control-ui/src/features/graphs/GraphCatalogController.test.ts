@@ -85,7 +85,9 @@ describe('workspace files', () => {
     expect(replacementStates).not.toContain(true);
     expect(controller.snapshot().uncertain).toBe(false);
   });
+});
 
+describe('workspace file outcomes', () => {
   it('cancel and save preserve document identity and history', async () => {
     const { port, controller } = fixture();
     await controller.reload();
@@ -242,9 +244,11 @@ describe('catalog read recovery', () => {
     async (parameters) => {
       vi.useFakeTimers();
       const { port, controller } = fixture();
-      const read = vi.spyOn(port, 'getGraphCatalog').mockRejectedValueOnce(
-        new ControlPortError(503, { code: 'control_unavailable', parameters }),
-      );
+      const read = vi
+        .spyOn(port, 'getGraphCatalog')
+        .mockRejectedValueOnce(
+          new ControlPortError(503, { code: 'control_unavailable', parameters }),
+        );
       await controller.reload();
       expect(controller.snapshot().catalog).toBeNull();
       await vi.advanceTimersByTimeAsync(500);

@@ -1,4 +1,42 @@
+import { effectTranslations } from '../effects';
 export const koKR = {
+  effects: effectTranslations.koKR,
+  theme: {
+    label: '화면 테마',
+    current: '화면 테마: {{theme}}',
+    system: '시스템',
+    light: '라이트',
+    dark: '다크',
+  },
+  about: {
+    title: 'MixRelay 정보',
+    version: '버전 {{version}}',
+    licensed: '인증됨',
+    unknown: '인증 상태 미확인',
+  },
+  runtimeConnection: {
+    connecting: {
+      title: 'MixRelay에 연결 중',
+      description: '오디오를 준비하고 있습니다. MixRelay가 준비되면 작업 화면이 열립니다.',
+    },
+    not_installed: {
+      title: 'MixRelay가 필요합니다',
+      description:
+        '오디오 라우팅, 이펙트, 녹음을 사용하려면 MixRelay를 설치한 뒤 다시 연결해 주세요.',
+    },
+    incompatible: {
+      title: 'MixRelay를 업데이트해 주세요',
+      description: '설치된 MixRelay가 이 앱과 호환되지 않습니다. 업데이트한 뒤 다시 연결해 주세요.',
+    },
+    unavailable: {
+      title: 'MixRelay에 연결할 수 없습니다',
+      description:
+        'MixRelay가 응답하지 않거나 오디오 엔진이 준비되지 않았습니다. 다시 연결해 주세요.',
+    },
+    install: 'MixRelay 설치',
+    update: 'MixRelay 업데이트',
+    retry: '다시 연결',
+  },
   workspaceFile: {
     file: '파일',
     new: '새 작업 공간',
@@ -7,14 +45,18 @@ export const koKR = {
     saveAs: '다른 이름으로 저장…',
   },
   driverManagement: {
+    mixed: '불일치',
+    channels: '채널 수',
+    bitDepth: '비트 심도',
+    unselectedBuffer: '선택하지 않음',
+    pendingBuffer: '장치가 연결되면 적용됩니다.',
+    observedBuffer: '현재 적용값',
+    bufferSize: '버퍼 크기',
+    frames: '프레임',
     title: '드라이버 설정',
     loading: '드라이버 확인 중…',
     unavailable: '드라이버 서비스에 연결할 수 없습니다.',
     name: '장치 이름',
-    renderChannels: '재생 채널',
-    captureChannels: '캡처 채널',
-    renderFormat: '재생 형식',
-    captureFormat: '캡처 형식',
     unknown: '알 수 없음',
     create: '장치 만들기',
     save: '적용',
@@ -24,7 +66,7 @@ export const koKR = {
     changeFailed: '장치를 변경하지 못했습니다. 새로고침한 뒤 다시 시도하세요.',
     saveFailed: '장치는 변경됐지만 설정을 저장하지 못했습니다.',
     deviceMissing: '이 장치가 더 이상 존재하지 않습니다. 장치 목록을 새로고침하세요.',
-    paidRequired: '장치 추가·제거에는 MixRelay 유료 라이선스가 필요합니다.',
+    paidRequired: '이 작업에는 유료 MixRelay 라이선스가 필요합니다.',
     openApp: 'MixRelay 열기',
     appUnavailable: 'MixRelay가 설치되지 않았거나 열 수 없습니다.',
   },
@@ -51,13 +93,19 @@ export const koKR = {
     },
   },
   licensing: {
+    limits: {
+      graphs: '무료: 그래프 1개 한도',
+      inputs: '무료: 입력 2개 한도',
+      outputs: '무료: 출력 장치 2개 한도',
+      plugins: '무료: 외부 플러그인 2개 한도',
+      virtualDevices: '무료: 가상 장치 1개 한도',
+    },
+    freeSummary:
+      '무료: 그래프 1개, 입력 2개, 출력 장치 2개, 가상 장치 1개, Driver 채널 매핑 4개, 외부 플러그인 2개, 스테레오 레코더 1개. 무료 그래프와 채널 매핑은 저장·불러오기할 수 있습니다. 장치 이름 변경에는 라이선스가 필요합니다.',
     title: '라이선스',
     close: '닫기',
     loading: '라이선스 확인 중…',
     retry: '다시 확인',
-    stopAudio: '오디오 중지',
-    stopRequested: '중지 요청을 보냈습니다.',
-    stopFailed: '오디오를 중지하지 못했습니다. 다시 시도하거나 종료 메뉴를 사용하세요.',
     key: '라이선스 키',
     instanceName: '기기 이름',
     activate: '활성화',
@@ -65,20 +113,16 @@ export const koKR = {
     deactivate: '이 기기 비활성화',
     purchase: '라이선스 구매',
     expires: '{{date}}까지 유효',
-    expiredOn: '사용 기간 종료: {{date}}',
     storeUnavailable: '이 빌드에서는 구매와 활성화를 사용할 수 없습니다.',
     termsTitle: '이용 조건',
     integrationNotice:
       '일반 사용과 타사 제품 편입·재배포 권리는 별개이며, 제품 편입은 별도 유료 계약이 필요합니다.',
     states: {
-      trial: '평가판 · {{count}}일 남음',
+      free: '무료',
       licensed: '라이선스 사용 중 · 오프라인 {{count}}일 남음',
-      expired: '사용 기간 종료',
       clock_invalid: '기기 시간 확인 필요',
     },
     messages: {
-      expired:
-        '사용 기간이 끝났습니다. 라이선스를 활성화하거나 기존 라이선스를 온라인으로 확인하세요.',
       clock_invalid: '기기 시간을 확인한 뒤 라이선스를 확인하거나 활성화하세요.',
     },
     errors: {
@@ -97,6 +141,8 @@ export const koKR = {
     },
   },
   recorder: {
+    freeLimit:
+      '무료 녹음: 테이크당 최대 2채널·2시간. 일시정지 시간은 제외됩니다. 녹음은 자동 종료되고 오디오 라우팅은 계속됩니다.',
     channels: '채널 수',
     title: '레코더',
     folder: '녹음 폴더',
@@ -114,13 +160,13 @@ export const koKR = {
     states: { stopped: '정지됨', recording: '녹음 중', paused: '일시정지됨', failed: '실패' },
   },
   audioSession: {
-    powerOn: '엔진 켜기',
-    powerOff: '엔진 끄기',
-    powerChanging: '엔진 전환 중…',
-    powerFailed: '엔진 전환 실패. 현재 상태를 확인하세요.',
+    resume: '재개',
+    pause: '일시정지',
+    changing: '오디오 상태 변경 중…',
+    pauseFailed: '일시정지 또는 재개에 실패했습니다. 현재 상태를 확인하세요.',
     diagnostics: '오디오 정보',
     processingRate: '처리 샘플레이트',
-    processingBuffer: '버퍼 사이즈',
+    processingBuffer: '처리 버퍼',
     bufferLatency: '버퍼 지연',
     bufferLatencyHint:
       '처리 버퍼 한 개의 시간(샘플 수 ÷ 샘플레이트)입니다. 전체 입출력 지연은 아닙니다.',
@@ -129,7 +175,7 @@ export const koKR = {
     blockSize: '버퍼 사이즈',
     apply: '적용',
     applying: '적용 중…',
-    changeNotice: '잠시 오디오 중단 · 실행 취소 기록 초기화',
+    changeNotice: '설정을 변경하는 동안 오디오가 잠시 중단됩니다.',
     captureRateLocked: '현재 앱 캡처는 48 kHz에서 지원됩니다.',
     changeFailed: '오디오 세션을 변경하지 못했습니다. 엔진 상태를 확인해 주세요.',
     errors: {
@@ -191,6 +237,8 @@ export const koKR = {
     },
   },
   common: {
+    showPassword: '비밀번호 표시',
+    hidePassword: '비밀번호 숨기기',
     appName: 'MixRelay',
     beta: '비공개 프리뷰',
     cancel: '취소',
@@ -249,6 +297,11 @@ export const koKR = {
         preferences_unavailable: '세션: 설정 저장 안 됨',
         stored_format_unavailable: '세션: 저장된 형식 사용 불가',
       },
+    },
+    nodeName: {
+      title: '표시 이름 변경',
+      label: '표시 이름',
+      save: '저장',
     },
     context: {
       removeNode: '노드 삭제',
@@ -351,6 +404,8 @@ export const koKR = {
       unavailable: '엔진 연결 불가',
     },
     errors: {
+      feature_limit:
+        '무료 사용 한도를 초과합니다. 연결이나 노드를 줄이거나 라이선스를 활성화하세요.',
       audio_device_disconnected: '가상 오디오 장치 구성을 적용할 수 없습니다.',
       audio_source_unavailable:
         '애플리케이션 오디오를 캡처할 수 없습니다. 실행 상태와 오디오 캡처 권한을 확인하세요.',
@@ -364,7 +419,8 @@ export const koKR = {
       graph_invalid: '오디오 엔진이 올바르지 않은 그래프를 거부했습니다.',
       graph_draft_changed:
         '불러오는 동안 편집이 변경되어 편집본을 보존했습니다. 다시 선택해 주세요.',
-      graph_revision_stale: '다른 곳에서 그래프가 변경되었습니다. 다시 불러온 뒤 적용하세요.',
+      graph_revision_stale: '변경을 적용하지 못했습니다. 다시 시도해 주세요.',
+      graph_conflict_unresolved: '다른 변경과 계속 충돌해 자동으로 적용하지 못했습니다.',
       processor_unavailable: '선택한 오디오 프로세서를 사용할 수 없습니다.',
     },
     recovery: {
@@ -385,6 +441,9 @@ export const koKR = {
       reload: '저장된 배치 불러오기',
     },
     processorControl: {
+      probeFailed: '이 플러그인을 불러오지 못했습니다. 다른 이펙트는 계속 사용할 수 있습니다.',
+      scanFailed: '이 플러그인 검색을 완료하지 못했습니다. 이전에 확인된 이펙트는 유지됩니다.',
+      technicalDetails: '기술 정보',
       scanning: '오디오 이펙트 검색 중…',
       incomplete: '이펙트 검색 미완료',
       partial: '일부 이펙트를 검색하지 못했습니다. 이전에 확인된 이펙트는 유지됩니다.',
@@ -483,8 +542,9 @@ export const koKR = {
     },
   },
   driver: {
+    installNotice: '가상 오디오 장치를 사용할 수 없습니다.',
+    getInstaller: 'MixRelay 설치 파일 받기',
     title: '가상 오디오 드라이버',
-    description: 'MixRelay Capture 및 MixRelay Stream',
     actionInstall: '드라이버 설치',
     actionRestart: '오디오 서비스 재시작',
     actionDiagnose: '진단 열기',

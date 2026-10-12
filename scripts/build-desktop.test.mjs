@@ -78,54 +78,74 @@ test("desktop build rejects partial licensing configuration before spawning and 
 
 test("macOS defaults exclusively to the checked universal build", () => {
   assert.deepEqual(desktopBuildCommand("darwin"), ["zsh", "scripts/build-macos-universal-app.sh"]);
-  assert.deepEqual(desktopBuildCommand("darwin", ["--driver"]), ["zsh", "scripts/build-macos-universal-app.sh", "--driver"]);
+  assert.throws(() => desktopBuildCommand("darwin", ["--driver"]), /no longer a separate build/);
   for (const args of [["--target", "aarch64-apple-darwin"], ["--debug"], ["--config", "other.json"]]) {
     assert.throws(() => desktopBuildCommand("darwin", args), /accepts no overrides/);
   }
 });
 
-test("macOS Driver alone declares an agent app in its canonical bundle plist", () => {
-  const directory = new URL("../apps/desktop/src-tauri/", import.meta.url);
-  const driver = JSON.parse(readFileSync(new URL("tauri.driver.conf.json", directory), "utf8"));
-  const graph = JSON.parse(readFileSync(new URL("tauri.conf.json", directory), "utf8"));
-  assert.equal(driver.bundle.macOS.infoPlist, "Info.driver.plist");
-  const driverPlist = readFileSync(new URL(driver.bundle.macOS.infoPlist, directory), "utf8");
-  assert.match(driverPlist, /<key>LSUIElement<\/key>\s*<true\s*\/>/);
-  assert.notEqual(graph.bundle.macOS.infoPlist, driver.bundle.macOS.infoPlist);
-  const graphPlist = readFileSync(new URL(graph.bundle.macOS.infoPlist ?? "Info.plist", directory), "utf8");
-  assert.doesNotMatch(graphPlist, /<key>LSUIElement<\/key>/);
-});
-
-test("Linux Driver builds use both canonical profiles and retain RFC 7396 App-file deletions", () => {
-  const command = desktopBuildCommand("linux", ["--driver", "--bundles", "deb"]);
-  assert.equal(command[2], "build");
-  assert.equal(command[3], "--config");
-  const config = JSON.parse(command[4]);
-  const shared = JSON.parse(readFileSync(new URL("../apps/desktop/src-tauri/tauri.driver.conf.json", import.meta.url), "utf8"));
-  const linux = JSON.parse(readFileSync(new URL("../apps/desktop/src-tauri/tauri.driver.linux.conf.json", import.meta.url), "utf8"));
-  assert.deepEqual(config, { ...shared, ...linux, bundle: { ...shared.bundle, ...linux.bundle } });
-  assert.equal(config.identifier, "io.mixrelay.driver.desktop");
-  assert.equal(config.mainBinaryName, "mixrelay-driver-manager");
+test("one public bundle supplies the editor and internal background runtime", () => {
+  const config = JSON.parse(readFileSync(new URL("../apps/desktop/src-tauri/tauri.conf.json", import.meta.url), "utf8"));
+  assert.equal(config.productName, "MixRelay");
+  assert.equal(config.identifier, "io.mixrelay.desktop");
   assert.match(config.build.beforeBuildCommand, /desktop:prepare-driver --profile release/);
-  assert.doesNotMatch(config.build.beforeBuildCommand, /desktop:prepare-engine/);
-  assert.deepEqual(config.bundle.externalBin, ["binaries/mixrelay-driver-service"]);
-  for (const format of ["deb", "rpm"]) {
-    const files = config.bundle.linux[format].files;
-    assert.equal(files["/usr/lib/mixrelay/uninstall.sh"], null);
-    assert.equal(files["/usr/share/wireplumber/scripts/mixrelay-source-mute.lua"], null);
-    assert.ok(files["/usr/share/mixrelay-driver/version.json"]);
-  }
-  assert.deepEqual(command.slice(5), ["--bundles", "deb"]);
-  assert.throws(() => desktopBuildCommand("linux", ["--driver", "--config", "other.json"]), /canonical Driver configuration/);
-  assert.deepEqual(desktopBuildCommand("linux", ["--", "--driver"]).slice(2), ["build", "--", "--driver"]);
+  assert.match(config.build.beforeBuildCommand, /desktop:prepare-engine --profile release/);
+  assert.throws(() => desktopBuildCommand("linux", ["--driver"]), /no longer a separate build/);
 });
 
-test("free Driver builds do not require the paid App licensing build environment", async () => {
-  const env = { MIXRELAY_LEMON_STORE_ID: "1" };
-  assert.equal(await main(["--driver"], "darwin", (_command, args) => {
-    assert.deepEqual(args, ["scripts/build-macos-universal-app.sh", "--driver"]);
-    return { status: 0 };
-  }, undefined, undefined, env), 0);
+test("free Driver builds accept an entirely absent licensing configuration", async () => {
+  for (const platform of ["darwin", "linux"]) {
+    const args = platform === "darwin" ? [] : ["--no-bundle"];
+    let builds = 0;
+    assert.equal(await main(args, platform, (_command, _args, options) => {
+      builds += 1;
+      for (const key of licensingKeys) assert.equal(options.env[key], undefined);
+      return { status: 0 };
+    }, undefined, undefined, {}), 0);
+    assert.equal(builds, 1);
+  }
+});
+
+test("Driver builds forward complete licensing configuration to their runtime build", async () => {
+  const env = {
+    MIXRELAY_LEMON_STORE_ID: "1",
+    MIXRELAY_LEMON_PRODUCT_ID: "2",
+    MIXRELAY_LEMON_VARIANT_ID: "3",
+    MIXRELAY_LEMON_CHECKOUT_URL: "https://mixrelay.lemonsqueezy.com/buy/product",
+  };
+  for (const platform of ["darwin", "linux"]) {
+    const args = platform === "darwin" ? [] : ["--no-bundle"];
+    let builds = 0;
+    assert.equal(await main(args, platform, (_command, _args, options) => {
+      builds += 1;
+      for (const key of licensingKeys) assert.equal(options.env[key], env[key]);
+      return { status: 0 };
+    }, undefined, undefined, env), 0);
+    assert.equal(builds, 1);
+  }
+});
+
+test("Driver builds reject partial or blank licensing configuration before spawning", async t => {
+  const complete = {
+    MIXRELAY_LEMON_STORE_ID: "1",
+    MIXRELAY_LEMON_PRODUCT_ID: "2",
+    MIXRELAY_LEMON_VARIANT_ID: "3",
+    MIXRELAY_LEMON_CHECKOUT_URL: "https://mixrelay.lemonsqueezy.com/buy/product",
+  };
+  const errors = [];
+  t.mock.method(console, "error", message => errors.push(message));
+  for (const platform of ["darwin", "linux"]) {
+    const args = platform === "darwin" ? [] : ["--no-bundle"];
+    for (const key of licensingKeys) {
+      for (const value of [undefined, "", "   "]) {
+        const env = { ...complete, [key]: value };
+        assert.equal(await main(args, platform,
+          () => assert.fail("invalid Driver licensing configuration must not spawn"),
+          undefined, undefined, env), 1);
+        assert.match(errors.at(-1), /all unset or all non-empty/);
+      }
+    }
+  }
 });
 
 test("Linux retains Tauri build arguments", () => {
@@ -338,32 +358,12 @@ test("successful Linux Debian build inspects its single produced artifact before
   assert.deepEqual(inspected, ["/fixture/MixRelay_0.1.0_amd64.deb"]);
 });
 
-test("Linux Driver builds inspect the actual Driver package beside a prior App artifact", async () => {
+test("complete product builds select MixRelay beside a stale Driver artifact", async () => {
   const inspected = [];
-  const status = await main(["--driver", "--bundles", "deb"], "linux", (_command, args) => {
-    assert.equal(args.includes("--driver"), false);
-    assert.equal(JSON.parse(args[args.indexOf("--config") + 1]).identifier, "io.mixrelay.driver.desktop");
-    return { status: 0 };
-  }, async path => {
-    inspected.push(path);
-    return { packageName: "mix-relay-driver" };
-  }, () => ["/fixture/MixRelay_0.1.0_amd64.deb", "/fixture/MixRelayDriver_0.1.0_amd64.deb"], {});
-  assert.equal(status, 0);
-  assert.deepEqual(inspected, ["/fixture/MixRelayDriver_0.1.0_amd64.deb"]);
-});
-
-test("Driver builds reject missing, ambiguous, and mislabeled Driver package artifacts", async t => {
-  t.mock.method(console, "error", () => {});
-  for (const packages of [
-    ["/fixture/MixRelay_0.1.0_amd64.deb"],
-    ["/fixture/MixRelayDriver_0.1.0_amd64.deb", "/fixture/MixRelayDriver_0.2.0_amd64.deb"],
-  ]) {
-    assert.equal(await main(["--driver"], "linux", () => ({ status: 0 }),
-      () => assert.fail("must select one Driver artifact"), () => packages, {}), 1);
-  }
-  assert.equal(await main(["--driver"], "linux", () => ({ status: 0 }),
-    async () => ({ packageName: "mix-relay" }),
-    () => ["/fixture/MixRelayDriver_0.1.0_amd64.deb"], {}), 1);
+  assert.equal(await main(["--bundles", "deb"], "linux", () => ({ status: 0 }), async path => {
+    inspected.push(path); return { packageName: "mix-relay" };
+  }, () => ["/fixture/MixRelay_0.1.0_amd64.deb", "/fixture/MixRelayDriver_0.1.0_amd64.deb"], {}), 0);
+  assert.deepEqual(inspected, ["/fixture/MixRelay_0.1.0_amd64.deb"]);
 });
 
 test("missing or multiple Debian artifacts fail without inspecting a guessed package", async t => {

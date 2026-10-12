@@ -1,5 +1,5 @@
-import { Modal } from '@mantine/core';
 import type { ReactNode } from 'react';
+import { Dialog } from './Dialog';
 
 export function UpdatesDialog({
   children,
@@ -15,15 +15,8 @@ export function UpdatesDialog({
   title: string;
 }) {
   return (
-    <Modal
-      centered
-      closeButtonProps={{ 'aria-label': closeLabel }}
-      onClose={onClose}
-      opened={opened}
-      size="sm"
-      title={title}
-    >
+    <Dialog closeLabel={closeLabel} onClose={onClose} opened={opened} size="sm" title={title}>
       {children}
-    </Modal>
+    </Dialog>
   );
 }

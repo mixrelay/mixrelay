@@ -169,7 +169,7 @@ impl RackLocator {
         &self.name
     }
 
-    fn is_audio_processor(&self) -> bool {
+    pub(super) fn is_audio_processor(&self) -> bool {
         self.category == RackCategory::Effect
             && match self.format {
                 // Audio Unit generators and instruments can expose nominal stereo buses even
@@ -247,6 +247,7 @@ pub(crate) fn supported_formats() -> Vec<RackFormat> {
 ///
 /// Returns an error when discovery fails or its result cannot be serialized.
 pub fn run_scan(format: RackFormat, custom_paths: &[PathBuf]) -> Result<(), String> {
+    crate::prepare_plugin_process()?;
     let (infos, path_failures) = match format {
         RackFormat::Clap => {
             let scanner = truce_rack_clap::ClapScanner::new();
@@ -343,6 +344,7 @@ fn scan_with_paths(
 ///
 /// Returns an error when the processor cannot load, activate, or expose a supported layout.
 pub fn run_probe(locator: RackLocator) -> Result<(), String> {
+    crate::prepare_plugin_process()?;
     let record = probe(locator)?;
     println!(
         "{}",

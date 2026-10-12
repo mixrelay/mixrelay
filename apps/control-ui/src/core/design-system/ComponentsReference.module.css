@@ -1,0 +1,90 @@
+.reference {
+  min-width: 0;
+}
+.filters {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--space-3);
+}
+.count {
+  color: var(--text-secondary);
+  font-size: var(--font-label);
+}
+.layout {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+.index {
+  display: flex;
+  flex-direction: column;
+  max-height: 600px;
+  overflow: auto;
+  gap: var(--space-half);
+  border-inline-end: var(--border-width) solid var(--line);
+  padding-inline-end: var(--space-2);
+}
+.contract {
+  min-width: 0;
+  scroll-margin-top: var(--space-4);
+}
+.heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+.heading h2 {
+  margin: 0;
+  color: var(--text);
+  font: var(--font-weight-medium) var(--font-heading) / var(--line-height-body) var(--font-sans);
+  overflow-wrap: anywhere;
+}
+.heading span {
+  color: var(--text-secondary);
+  font-size: var(--font-label);
+}
+.definition {
+  display: grid;
+  grid-template-columns: minmax(90px, 130px) minmax(0, 1fr);
+  gap: var(--space-2) var(--space-3);
+  margin-block: var(--space-4);
+}
+.definition dt {
+  color: var(--text-secondary);
+  font-size: var(--font-label);
+  font-weight: var(--font-weight-medium);
+}
+.definition dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.api {
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface-muted);
+  padding: var(--space-3);
+  font: var(--font-weight-regular) var(--font-control) / var(--line-height-body) var(--font-mono);
+}
+@media (max-width: 720px) {
+  .filters,
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .index {
+    max-height: 200px;
+    border-inline-end: 0;
+    border-bottom: var(--border-width) solid var(--line);
+    padding-bottom: var(--space-2);
+  }
+  .definition {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+  }
+  .definition dd {
+    margin-bottom: var(--space-2);
+  }
+}

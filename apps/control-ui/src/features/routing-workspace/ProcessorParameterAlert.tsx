@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
+import { InlineNotice } from '../../core/ui/InlineNotice';
 import { RecoveryActions } from '../../core/ui/RecoveryActions';
-import styles from './RoutingWorkspace.module.css';
 import type { useProcessorParameterPublisher } from './useProcessorParameterPublisher';
 
 /** Unapplied parameter intent is separate from graph persistence warnings. */
@@ -17,7 +17,7 @@ export function ProcessorParameterAlert({
   const failure = parameters.failures[0];
   if (!failure) return null;
   return (
-    <div className={styles.error} role="alert" inert={parameters.busy || applying}>
+    <InlineNotice layout="banner" tone="critical" inert={parameters.busy || applying}>
       <div>{t(`routing.errors.${failure.code}`)}</div>
       <div>{t('routing.recovery.draftPreserved')}</div>
       <RecoveryActions
@@ -26,6 +26,6 @@ export function ProcessorParameterAlert({
         onRetry={parameters.retryFailed}
         onReload={onReload}
       />
-    </div>
+    </InlineNotice>
   );
 }

@@ -1,0 +1,78 @@
+import { Meta, Canvas, ArgTypes } from '@storybook/addon-docs/blocks';
+import { DocsLayout } from '../DocsLayout';
+import { ComponentContract } from '../ComponentsReference';
+import * as Example from '../../ui/ComponentCatalog.stories';
+
+import * as States from '../../ui/ContractStates.stories';
+
+import * as Api from "../playgrounds/Dialog.stories";
+
+<Meta title="Design System/Components/Dialog" />
+
+<DocsLayout>
+
+<ComponentContract name="Dialog" />
+
+## 공통 모달 규격
+
+| 항목 | 규격 |
+| --- | --- |
+| 폭 | xs 300px: 이름·짧은 확인 / sm 360px: 라이선스·업데이트·정보 / md 420px: 긴 콘텐츠 |
+| 헤더 | 기본 높이 32px, 제목 13px Medium, 상하 2px·좌우 12px. 긴 제목은 줄바꿈하며 높이 확장 |
+| 본문 | 12px 여백. 필드·설명·오류 간격은 Core Stack이 소유 |
+| 폼 하단 | FormActions, 위 간격 12px·버튼 간격 8px·우측 정렬. 취소 → 저장/확인 순서 |
+| 닫기 | 폼은 하단 취소와 Escape, 정보 모달은 헤더 닫기. busy 중 닫힘 차단 유지 |
+| 좁은 화면 | viewport 양쪽 12px 유지, 모달 내부 세로 스크롤, 제목·버튼 줄바꿈 |
+
+폭·헤더·본문은 tokens.ts의 dialog 역할과 Core Dialog가 소유합니다. Feature에서 padding·제목 크기·버튼 정렬을 다시 정의하지 않습니다. 조작 높이는 일반 28px, 헤더 닫기 24px를 유지합니다.
+
+<Canvas of={Api.CompactForm} story={{ inline: false, height: 420 }} sourceState="hidden" />
+<Canvas of={Api.LongTitle} story={{ inline: false, height: 420 }} sourceState="hidden" />
+
+## Playground·API·기본값
+
+<a href="/?path=/story/core-playgrounds-dialog--playground" target="_top">Dialog Playground 열기</a>. Controls는 실제 공개 props를 전달합니다. 구현 기본값은 아래 API 표와 소스 대조 계약을 따르며, Playground의 args는 재현용 입력입니다.
+
+opened=false가 예제의 초기값입니다. 모달 열기로 열며 busy 표본은 Controls에서 busy를 해제한 뒤 닫습니다.
+
+<Canvas of={Api.Playground} story={{ inline: false, height: 560 }} sourceState="hidden" />
+<ArgTypes of={Api.Playground} exclude={["className","classNames","style","styles","vars","unstyled","color","c","radius","variant","component","renderRoot","dangerouslySetInnerHTML"]} />
+
+API 표의 *는 필수 입력입니다. Default의 —는 선언된 기본값이 없다는 뜻이며, 파생값·fallback과 초기 상태는 위 소스 대조 계약에 명시합니다.
+
+속성은 Playground의 Controls에서 변경합니다. Source는 현재 JSX를, 위의 실행 예제 전체 코드는 실제 상태 갱신·이벤트·슬롯 구성을 보여줍니다.
+
+## 실제 사용례
+
+이 Canvas는 아래 계약을 소비하는 기존 스토리입니다. 여러 컴포넌트의 조합이면 해당 조합에서의 역할을 함께 확인합니다. 독립 컴포넌트 전용 예시나 실제 장치 실행으로 해석하지 않습니다.
+
+<Canvas of={Example.Overview} story={{ inline: false, height: 560 }} />
+
+## 지원 상태·조합 검수
+
+기본값과 별도로 비활성·대기·오류·포커스 관계를 확인합니다. 이 예시에서 Tab/Shift+Tab, 실제 키 실행, hover·pressed를 조작합니다. 보조 기술의 실제 읽기와 설치본 실행은 별도 검증입니다.
+
+<Canvas of={States.Overlays} story={{ inline: false, height: 640 }} />
+
+
+## 개별 상태 예제
+
+### Busy
+
+<Canvas of={Api.Busy} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+### Small
+
+<Canvas of={Api.Small} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+### NoCloseButton
+
+<Canvas of={Api.NoCloseButton} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+### Keyboard
+
+<Canvas of={Api.Keyboard} story={{ inline: false, height: 400, autoplay: true }} sourceState="hidden" />
+
+<a href="/?path=/docs/design-system-components--docs" target="_top">전체 컴포넌트와 사용 구분</a>
+
+</DocsLayout>

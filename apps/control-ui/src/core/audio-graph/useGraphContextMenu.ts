@@ -4,6 +4,7 @@ import { type AudioGraphModel, disconnectAudioGraph, removeAudioGraphItems } fro
 import type { AudioFlowEdge, AudioFlowNode } from './reactFlowAdapter';
 
 export interface GraphContextMenuLabels {
+  renameNode?: string;
   removeNode: string;
   removeSelection: string;
   disconnect: string;
@@ -33,12 +34,10 @@ interface PortTarget {
   side: 'input' | 'output';
 }
 
-interface Scope {
-  kind: 'canvas' | 'node' | 'edge' | 'port' | 'selection';
-  nodes: string[];
-  edges: string[];
-  ports?: readonly PortTarget[];
-}
+type Scope = { nodes: string[]; edges: string[] } & (
+  | { kind: 'canvas' | 'node' | 'edge' | 'selection' }
+  | { kind: 'port'; ports: readonly PortTarget[] }
+);
 
 interface ContextOptions {
   model: AudioGraphModel;
@@ -48,6 +47,7 @@ interface ContextOptions {
   setEdges: Dispatch<SetStateAction<AudioFlowEdge[]>>;
   addItems: readonly HierarchicalMenuItem[];
   labels?: GraphContextMenuLabels;
+  renameNode?: (nodeId: string) => void;
   commit: (model: AudioGraphModel, kind: 'runtime') => void;
   fitView: () => void;
   clearPorts: () => void;
@@ -101,7 +101,7 @@ function connectedEdges(model: AudioGraphModel, scope: Scope): string[] {
   const nodes = new Set(scope.nodes);
   return model.edges
     .filter((edge) => {
-      if (scope.ports) {
+      if (scope.kind === 'port') {
         return scope.ports.some(({ nodeId, portId, side }) =>
           side === 'input'
             ? edge.targetNodeId === nodeId && edge.targetPortId === portId
@@ -117,6 +117,17 @@ function connectedEdges(model: AudioGraphModel, scope: Scope): string[] {
     .map((edge) => edge.id);
 }
 
+function renameItems(scope: Scope, options: ContextOptions): HierarchicalMenuItem[] {
+  if (scope.kind !== 'node' || scope.nodes.length !== 1 || !options.renameNode) return [];
+  return [
+    {
+      id: 'context:rename',
+      label: options.labels?.renameNode ?? 'Rename display name',
+      description: 'F2',
+    },
+  ];
+}
+
 function contextItems(scope: Scope, options: ContextOptions): HierarchicalMenuItem[] {
   const labels = options.labels ?? defaultLabels;
   const count = scope.nodes.length + scope.edges.length;
@@ -124,11 +135,11 @@ function contextItems(scope: Scope, options: ContextOptions): HierarchicalMenuIt
     return [
       {
         id: 'context:disconnect',
-        label: (scope.ports?.length ?? 0) > 1 ? labels.disconnectPorts : labels.disconnectPort,
+        label: scope.ports.length > 1 ? labels.disconnectPorts : labels.disconnectPort,
         disabled: connectedEdges(options.model, scope).length === 0,
       },
     ];
-  const actions: HierarchicalMenuItem[] = [];
+  const actions = renameItems(scope, options);
   if (scope.nodes.length)
     actions.push({
       id: 'context:disconnect',
@@ -177,8 +188,9 @@ export function useGraphContextMenu(options: ContextOptions) {
   const prepare = (event: { target: EventTarget | null }) => {
     if (!(event.target instanceof Element)) return;
     const next = resolveScope(event.target, options.nodes, options.edges);
-    const clickedPort = next.ports?.[0];
+    const clickedPort = next.kind === 'port' ? next.ports[0] : undefined;
     if (
+      next.kind === 'port' &&
       clickedPort &&
       options.selectedPorts.current.some(
         (port) =>
@@ -193,7 +205,7 @@ export function useGraphContextMenu(options: ContextOptions) {
     if (next.kind === 'port') {
       // The highlighted set must be exactly the set the menu will operate on.
       select([], []);
-      options.selectPorts(next.ports ?? []);
+      options.selectPorts(next.ports);
     } else if (next.kind !== 'canvas') {
       select(next.nodes, next.edges);
       options.clearPorts();
@@ -204,6 +216,9 @@ export function useGraphContextMenu(options: ContextOptions) {
     const item = contextItems(scope, options).find((item) => item.id === id);
     if (!item || item.disabled) return true;
     switch (id) {
+      case 'context:rename':
+        (options.renameNode as (nodeId: string) => void)(scope.nodes[0] as string);
+        break;
       case 'context:remove':
         options.commit(removeAudioGraphItems(options.model, scope.nodes, scope.edges), 'runtime');
         select([], []);
@@ -230,5 +245,9 @@ export function useGraphContextMenu(options: ContextOptions) {
     options.clearPorts();
     return true;
   };
-  return { items: contextItems(scope, options), prepare, execute };
+  const clearSelection = () => {
+    select([], []);
+    options.clearPorts();
+  };
+  return { items: contextItems(scope, options), prepare, execute, clearSelection };
 }

@@ -5,14 +5,17 @@ broadcasters. The current release targets macOS and Linux/PipeWire. Its portable
 and DSP engine is shared across platforms, while native discovery, capture, and
 virtual-device lifecycles remain isolated behind host-audio interfaces.
 
-The virtual-audio component is named **MixRelay Driver**. One driver installation
-supports multiple independently named virtual devices created through MixRelay;
-channel counts do not require separate driver installations. Virtual devices
-support 1–64 channels per direction on macOS/Linux.
+MixRelay ships the editor and virtual-audio components in one installer, with one
+version and update catalog. There is one public MixRelay application and no Driver
+selection. One installation supports multiple independently named virtual devices;
+channel counts do not require separate installations. Virtual devices support
+1–64 channels per direction on macOS/Linux.
 
 ## Project status
 
 - [Product and implementation status](docs/product.md): free driver, free/paid app policy, behavior, implementation boundaries and the single work checklist.
+- [Design system](docs/design-system.md): Core tokens and contracts, with Foundations, Components, Patterns, Pages and Review documentation in Storybook (`pnpm storybook`).
+- [Pause and resume manual](docs/manual/playback.md): shared playback controls and how paused intervals affect recordings, in the 11 supported languages.
 - [Product website draft](apps/website/README.md): static product page and HTML guide; local preview only, with no checkout or downloads yet.
 
 ## Repository layout
@@ -73,12 +76,12 @@ Code checks do not require installer sidecars or signed driver files. Release bu
 use `pnpm desktop:build`, which retains those payload and signature requirements.
 Do not use code-check artifacts as installed-product evidence.
 
-The UI dependency direction is `Mantine -> Core -> Feature -> Screen`. Direct
-Mantine imports outside `apps/control-ui/src/core` fail the boundary check.
+The UI dependency direction is `React Aria / React Flow -> Core -> Feature -> Screen`.
+Shared components and visual contracts belong to `apps/control-ui/src/core`.
 
 Product decisions and completion status live in [one product document](docs/product.md).
-[Performance measurements](docs/performance/audio-engine-render-baseline.md) retain
-comparison conditions and numbers in one file, not a second backlog.
+[Performance measurement procedures](docs/performance/audio-engine-render-baseline.md)
+describe the native harnesses and comparison conditions.
 
 ## Publishing release installers
 
@@ -108,10 +111,8 @@ Attach the manifest and every selected installer to the matching published
 `vMAJOR.MINOR.PATCH` GitHub release. `publish-updates.yml` then requests central
 catalog publication; retry that workflow manually if assets were attached after
 publication. The central publisher computes SHA-256 and size from the installers.
-`--product mix-relay-driver` writes `mix-relay-driver.release.json` for a qualified
-standalone Driver release. That product remains unfinished: manifest generation
-does not create it, and the current Driver must not be released as a standalone
-product. This command does not build, copy or upload installers.
+Only `--product mix-relay` is accepted. Every selected artifact must install the
+complete product. This command does not build, copy or upload installers.
 
 R2 retains the latest patch installer for each product's major/minor series.
 After a new patch is published and verified, previous patch files leave R2 and

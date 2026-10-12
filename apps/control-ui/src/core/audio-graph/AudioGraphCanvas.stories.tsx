@@ -1,7 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useState } from 'react';
+import { expect, userEvent, within } from 'storybook/test';
 
+import mixrelayAppIcon from '../../../../desktop/src-tauri/icons/32x32.png';
 import { AudioGraphCanvas, type AudioGraphNodeMenuItem } from './AudioGraphCanvas';
+import quickTimeAppIcon from './fixtures/quicktime-player.png';
 import type { AudioGraphModel, AudioGraphPort } from './model';
 
 const broadcastMix: AudioGraphModel = {
@@ -116,10 +119,104 @@ export const ResizedProviderOptions: Story = {
   render: () => <InteractiveGraph initialModel={resizedProviderOptionsFixture} />,
 };
 
+export const OverlappingOptions: Story = {
+  render: () => {
+    const source = resizedOptionsFixture.nodes[0];
+    if (!source) throw new Error('Overlapping options require a source node.');
+    return (
+      <InteractiveGraph
+        initialModel={{
+          ...resizedOptionsFixture,
+          nodes: [
+            {
+              ...source,
+              size: undefined,
+              position: { x: 60, y: 60 },
+            },
+            {
+              ...source,
+              id: 'overlapping-source',
+              size: undefined,
+              position: { x: 60, y: 225 },
+              appearance: {
+                ...source.appearance,
+                title: 'Overlapping source',
+              },
+            },
+          ],
+        }}
+      />
+    );
+  },
+};
+
+export const ChannelSelectionFeedback: Story = {
+  render: () => <InteractiveGraph initialModel={channelSelectionFixture} />,
+};
+
+export const TwoApplicationSources: Story = {
+  name: 'Two application sources · channel selection',
+  render: () => <InteractiveGraph initialModel={twoApplicationSourcesFixture} />,
+};
+
+export const ChannelSelectionLongTranslation: Story = {
+  globals: { locale: 'pseudo' },
+  render: () => <InteractiveGraph initialModel={channelSelectionFixture} />,
+};
+
+export const PortTooltipTypography: Story = {
+  render: () => <PortTooltipGraph />,
+  play: async ({ canvasElement }) => {
+    const port = await within(canvasElement).findByLabelText('Output channel 64, CH 64');
+    await userEvent.hover(port);
+    await expect(
+      await within(canvasElement.ownerDocument.body).findByRole('tooltip'),
+    ).toHaveTextContent('CH 64');
+  },
+};
+
+export const PortTooltipNarrowLongTranslation: Story = {
+  ...PortTooltipTypography,
+  globals: { locale: 'pseudo' },
+  render: () => <PortTooltipGraph narrow />,
+};
+
+function PortTooltipGraph({ narrow = false }: { narrow?: boolean }) {
+  return (
+    <div style={{ width: narrow ? 390 : '100%', maxWidth: '100%', height: 500 }}>
+      <AudioGraphCanvas
+        ariaLabel="64-channel port tooltip"
+        model={{
+          revision: 1,
+          nodes: [
+            {
+              id: 'tooltip-source',
+              position: { x: 40, y: 40 },
+              size: { width: 280, height: 380 },
+              inputPorts: [],
+              outputPorts: channels('tooltip-source', 'output', 64),
+              appearance: {
+                category: 'Source',
+                channelCount: 64,
+                icon: 'IO',
+                title: narrow
+                  ? 'Sehr langer Gerätename · 入力チャンネル · 입력 채널 · Output channels'
+                  : 'Output channels',
+              },
+            },
+          ],
+          edges: [],
+        }}
+        onModelChange={() => undefined}
+      />
+    </div>
+  );
+}
+
 function InteractiveGraph({ initialModel = broadcastMix }: { initialModel?: AudioGraphModel }) {
   const [model, setModel] = useState(initialModel);
   return (
-    <div style={{ width: '100vw', height: '100vh', padding: 24 }}>
+    <div style={{ width: '100%', height: '100dvh' }}>
       <AudioGraphCanvas
         ariaLabel="MixRelay audio routing playground"
         model={model}
@@ -225,6 +322,63 @@ const routingFixture: AudioGraphModel = {
   edges: [],
 };
 
+const channelSelectionFixture: AudioGraphModel = {
+  ...routingFixture,
+  nodes: [
+    ...routingFixture.nodes,
+    {
+      id: 'second-source',
+      position: { x: 400, y: 55 },
+      inputPorts: [],
+      outputPorts: channels('second-source', 'output', 8),
+      appearance: {
+        category: 'Source',
+        channelCount: 8,
+        icon: 'APP',
+        title: 'Second source · not included in the first source selection',
+        meterBanks: [{ channels: 8, nodeId: 'second-source', portId: 'audio' }],
+      },
+    },
+  ],
+};
+
+const twoApplicationSourcesFixture: AudioGraphModel = {
+  revision: 1,
+  nodes: [
+    ...[
+      { id: 'mixrelay-app', title: 'MixRelay', iconUrl: mixrelayAppIcon, y: 40 },
+      { id: 'quicktime-app', title: 'QuickTime Player', iconUrl: quickTimeAppIcon, y: 500 },
+    ].map(({ id, title, iconUrl, y }) => ({
+      id,
+      position: { x: 100, y },
+      size: { width: 280, height: 320 },
+      inputPorts: [],
+      outputPorts: channels(id, 'output', 32),
+      appearance: {
+        category: 'Application',
+        channelCount: 32,
+        icon: 'APP',
+        iconUrl,
+        title,
+      },
+    })),
+    {
+      id: 'test-output',
+      position: { x: 640, y: 270 },
+      size: { width: 280, height: 320 },
+      inputPorts: channels('test-output', 'input', 32),
+      outputPorts: [],
+      appearance: {
+        category: 'Output',
+        channelCount: 32,
+        icon: 'IO',
+        title: 'Output 32',
+      },
+    },
+  ],
+  edges: [],
+};
+
 const releaseMenuItems: readonly AudioGraphNodeMenuItem[] = [
   {
     children: Array.from({ length: 36 }, (_, index) => ({
@@ -275,7 +429,7 @@ function ReleaseAcceptanceGraph() {
       style={{
         display: 'grid',
         gridTemplateColumns: 'minmax(0, 1fr) 280px',
-        height: 'calc(100vh - 48px)',
+        height: '100dvh',
         minHeight: 700,
       }}
     >
@@ -319,12 +473,13 @@ function ReleaseAcceptanceGraph() {
         <h2 style={{ fontSize: 16, marginTop: 0 }}>Browser acceptance fixture</h2>
         <p>Real AudioGraphCanvas and ReactFlow; changes stay in this local story fixture.</p>
         <p>
-          64 output channels → 16 input channels. Select ports, drag a cable, and compare
-          preview/final mapping.
+          64 output channels → 16 input channels. Box-select outputs on one node; the live summary
+          shows a small range/count label beside the pointer only while selecting. Drop on an input
+          to compare preview/final mapping.
         </p>
         <p>
-          Use Shift for additive selection, then Delete for a multi-selection; test middle-button
-          and Mod-drag pan.
+          Shift adds outputs from the same node; inputs and other sources are excluded. Esc cancels
+          channel selection. Test middle-button and Mod-drag pan separately.
         </p>
         <p>
           Open Source 64 Options and confirm CH anchors stay put. Add node → catalog submenu to test

@@ -12,7 +12,7 @@ for executable in /proc/[0-9]*/exe; do
   case "$target" in
     /usr/bin/mixrelay-desktop|'/usr/bin/mixrelay-desktop (deleted)'|\
     /usr/bin/mixrelay-engine-service|'/usr/bin/mixrelay-engine-service (deleted)')
-      printf '%s\n' 'Quit MixRelay from its menu or tray, then retry the removal.' >&2
+      printf '%s\n' 'Stop all audio from the MixRelay status menu, close the MixRelay editor and MixRelay Driver, then retry.' >&2
       exit 1
       ;;
   esac

@@ -1,22 +1,37 @@
 import { act, renderHook } from '@testing-library/react';
-import { StrictMode, type ReactNode } from 'react';
+import { type ReactNode, StrictMode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ProductUpdate, UpdatesPort } from '../../core/updates/UpdatesPort';
 import { useUpdatesSession } from './useUpdatesSession';
 
 const day = 24 * 60 * 60 * 1_000;
-const release: ProductUpdate[] = [{
-  product: 'mix-relay', installedVersion: '0.1.0', latestVersion: '0.1.1',
-  state: 'available', notesUrl: null,
-  downloads: [{ os: 'macos', arch: 'universal', url: 'https://downloads.example/app.pkg',
-    size: 12, sha256: 'a'.repeat(64) }],
-}];
+const release: ProductUpdate[] = [
+  {
+    product: 'mix-relay',
+    installedVersion: '0.1.0',
+    latestVersion: '0.1.1',
+    state: 'available',
+    notesUrl: null,
+    downloads: [
+      {
+        os: 'macos',
+        arch: 'universal',
+        url: 'https://downloads.example/app.pkg',
+        size: 12,
+        sha256: 'a'.repeat(64),
+      },
+    ],
+  },
+];
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
   return { promise, resolve, reject };
 }
 
@@ -50,7 +65,10 @@ describe('update check scheduling', () => {
     const native = port(vi.fn().mockReturnValue(pending.promise));
     const { result } = renderHook(() => useUpdatesSession(native));
     await act(async () => Promise.resolve());
-    await act(async () => { await result.current.refresh(); await result.current.refresh(); });
+    await act(async () => {
+      await result.current.refresh();
+      await result.current.refresh();
+    });
     await act(async () => vi.advanceTimersByTimeAsync(day));
     expect(native.check).toHaveBeenCalledTimes(1);
     await act(async () => pending.resolve(release));
@@ -62,16 +80,30 @@ describe('update check scheduling', () => {
   it('does not schedule or send a check without a native port', async () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useUpdatesSession(null));
-    await act(async () => { await result.current.refresh(); await vi.advanceTimersByTimeAsync(day); });
+    await act(async () => {
+      await result.current.refresh();
+      await vi.advanceTimersByTimeAsync(day);
+    });
     expect(result.current.checked).toBe(false);
     expect(result.current.products).toEqual([]);
     expect(vi.getTimerCount()).toBe(0);
   });
 });
 
+it('does not start a queued native check when its owner unmounts before the startup microtask', async () => {
+  const native = port();
+  const { unmount } = renderHook(() => useUpdatesSession(native));
+  unmount();
+  await act(async () => Promise.resolve());
+  expect(native.check).not.toHaveBeenCalled();
+});
+
 describe('update result lifetime', () => {
   it('clears old installer URLs after a failed refresh and allows retry', async () => {
-    const check = vi.fn().mockResolvedValueOnce(release).mockRejectedValueOnce('unavailable')
+    const check = vi
+      .fn()
+      .mockResolvedValueOnce(release)
+      .mockRejectedValueOnce('unavailable')
       .mockResolvedValueOnce([]);
     const native = port(check);
     const { result } = renderHook(() => useUpdatesSession(native));
@@ -135,7 +167,10 @@ describe('update result lifetime', () => {
     });
     expect(oldPort.openDownload).toHaveBeenCalledTimes(1);
     rerender({ value: nextPort });
-    await act(async () => { pending.reject('private failure'); await operation; });
+    await act(async () => {
+      pending.reject('private failure');
+      await operation;
+    });
     expect(result.current.openFailed).toBe(false);
     expect(result.current.opening).toBeNull();
   });

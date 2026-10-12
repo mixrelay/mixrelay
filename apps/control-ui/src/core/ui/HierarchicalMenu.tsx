@@ -1,13 +1,28 @@
-import { Button, Image, Menu, Tooltip } from '@mantine/core';
 import {
+  cloneElement,
   type MouseEventHandler,
   type PropsWithChildren,
+  type ReactElement,
   type ReactNode,
+  useEffect,
   useRef,
   useState,
 } from 'react';
-
+import {
+  Button,
+  type ButtonProps,
+  Header,
+  Menu,
+  MenuItem,
+  MenuSection,
+  MenuTrigger,
+  Popover,
+  Separator,
+  SubmenuTrigger,
+  Text,
+} from 'react-aria-components';
 import styles from './HierarchicalMenu.module.css';
+import { Tooltip } from './Tooltip';
 
 export interface HierarchicalMenuItem {
   children?: readonly HierarchicalMenuItem[];
@@ -19,7 +34,6 @@ export interface HierarchicalMenuItem {
   kind?: 'divider' | 'item' | 'label';
   label: string;
 }
-
 interface MenuContentProps {
   items: readonly HierarchicalMenuItem[];
   onSelect: (itemId: string) => void;
@@ -39,47 +53,44 @@ export function HierarchicalMenuButton({
   buttonClassName?: string;
   buttonContent: ReactNode;
   label: string;
-  onClick?: MouseEventHandler<HTMLButtonElement>;
+  onClick?: ButtonProps['onClick'];
   onOpenedChange?: (opened: boolean) => void;
   opened?: boolean;
   tooltip?: string;
 }) {
-  const targetRef = useRef<HTMLButtonElement>(null);
   const button = (
     <Button
       aria-label={label}
-      className={buttonClassName}
+      className={`${styles.trigger} ${buttonClassName ?? ''}`}
       onClick={onClick}
-      ref={targetRef}
-      type="button"
-      variant="transparent"
     >
       {buttonContent}
     </Button>
   );
   return (
-    <>
-      <Menu
-        classNames={menuClassNames}
-        onChange={onOpenedChange}
-        opened={opened}
-        position="bottom-start"
-        shadow="md"
-        offset={4}
-        withinPortal
-      >
-        <Menu.Target>{button}</Menu.Target>
-        <Menu.Dropdown className={styles.dropdown}>
-          <MenuItems items={items} onSelect={onSelect} />
-        </Menu.Dropdown>
-      </Menu>
+    <MenuTrigger isOpen={opened} onOpenChange={onOpenedChange}>
       {tooltip ? (
-        <Tooltip label={tooltip} openDelay={350} position="right" target={targetRef} />
-      ) : null}
-    </>
+        <Tooltip label={tooltip} position="right">
+          {button}
+        </Tooltip>
+      ) : (
+        button
+      )}
+      <Popover
+        style={{ zIndex: 'var(--layer-floating)' }}
+        className={styles.dropdown}
+        placement="bottom start"
+        offset={4}
+      >
+        <Menu className={styles.scrollArea} aria-label={label}>
+          {menuEntries(items, onSelect)}
+        </Menu>
+      </Popover>
+    </MenuTrigger>
   );
 }
 
+/** A DOM point anchors React Aria's positioning; no separate menu keyboard implementation. */
 export function HierarchicalContextMenu({
   children,
   disabled,
@@ -94,106 +105,158 @@ export function HierarchicalContextMenu({
     opened?: boolean;
   }
 >) {
-  return (
-    <Menu
-      classNames={menuClassNames}
-      onChange={onOpenedChange}
-      opened={opened}
-      position="bottom-start"
-      offset={2}
-      shadow="md"
-      withinPortal
-      closeOnClickOutside
-      closeOnEscape
-    >
-      <Menu.ContextMenu disabled={disabled}>{children}</Menu.ContextMenu>
-      <Menu.Dropdown className={styles.dropdown}>
-        <MenuItems items={items} onSelect={onSelect} />
-      </Menu.Dropdown>
-    </Menu>
-  );
-}
-
-function MenuItems({ items, onSelect }: MenuContentProps): ReactNode {
-  const [submenuHost, setSubmenuHost] = useState<HTMLDivElement | null>(null);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const [point, setPoint] = useState({ x: 0, y: 0 });
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    if (disabled) clearTimeout(timer.current);
+    return () => clearTimeout(timer.current);
+  }, [disabled]);
+  const changeOpen = (value: boolean) => {
+    setInternalOpen(value);
+    onOpenedChange?.(value);
+  };
+  const open = (x: number, y: number) => {
+    if (!disabled) {
+      setPoint({ x, y });
+      changeOpen(true);
+    }
+  };
+  const child = children as ReactElement<{
+    onContextMenu?: MouseEventHandler;
+    onTouchStart?: React.TouchEventHandler;
+    onTouchEnd?: React.TouchEventHandler;
+    onTouchMove?: React.TouchEventHandler;
+  }>;
   return (
     <>
-      <div className={styles.scrollArea}>
-        {items.map((item) => (
-          <MenuEntry item={item} key={item.id} onSelect={onSelect} submenuHost={submenuHost} />
-        ))}
-      </div>
-      {/* Portals stay inside the owning menu, but outside its scroll clip. */}
-      <div ref={setSubmenuHost} />
+      {cloneElement(child, {
+        onContextMenu: (event) => {
+          child.props.onContextMenu?.(event);
+          if (disabled) return;
+          event.preventDefault();
+          open(event.clientX, event.clientY);
+        },
+        onTouchStart: (event) => {
+          child.props.onTouchStart?.(event);
+          const touch = event.touches[0];
+          if (touch) timer.current = setTimeout(() => open(touch.clientX, touch.clientY), 500);
+        },
+        onTouchEnd: (event) => {
+          clearTimeout(timer.current);
+          child.props.onTouchEnd?.(event);
+        },
+        onTouchMove: (event) => {
+          clearTimeout(timer.current);
+          child.props.onTouchMove?.(event);
+        },
+      })}
+      <MenuTrigger isOpen={opened ?? internalOpen} onOpenChange={changeOpen}>
+        <Button
+          aria-label="Actions"
+          render={(props) => <button {...props} tabIndex={-1} aria-hidden="true" />}
+          excludeFromTabOrder
+          className={styles.cursorAnchor}
+          style={{ left: point.x, top: point.y }}
+        />
+        <Popover
+          style={{ zIndex: 'var(--layer-floating)' }}
+          className={styles.dropdown}
+          placement="bottom start"
+          offset={2}
+          isNonModal
+        >
+          <Menu className={styles.scrollArea} aria-label="Actions">
+            {menuEntries(items, (id) => {
+              onSelect(id);
+              changeOpen(false);
+            })}
+          </Menu>
+        </Popover>
+      </MenuTrigger>
     </>
   );
 }
 
-function MenuEntry({
-  item,
-  onSelect,
-  submenuHost,
-}: {
-  item: HierarchicalMenuItem;
-  onSelect: MenuContentProps['onSelect'];
-  submenuHost: HTMLDivElement | null;
-}): ReactNode {
-  if (item.kind === 'divider') {
-    return <Menu.Divider className={styles.divider} key={item.id} />;
+function menuEntries(
+  items: readonly HierarchicalMenuItem[],
+  onSelect: MenuContentProps['onSelect'],
+): ReactNode[] {
+  const entries: ReactNode[] = [];
+  for (let index = 0; index < items.length; index++) {
+    // The bounded index reads the dense item collection supplied by the owner.
+    const item = items[index] as HierarchicalMenuItem;
+    if (item.kind === 'divider')
+      entries.push(<Separator className={styles.divider} key={item.id} />);
+    else if (item.kind === 'label') {
+      const group: HierarchicalMenuItem[] = [];
+      let next = items[index + 1];
+      while (isGroupEntry(next)) {
+        group.push(next);
+        next = items[++index + 1];
+      }
+      entries.push(
+        <MenuSection key={item.id}>
+          <Header className={styles.label}>{item.label}</Header>
+          {menuEntries(group, onSelect)}
+        </MenuSection>,
+      );
+    } else entries.push(menuEntry(item, onSelect));
   }
-  if (item.kind === 'label') {
-    return (
-      <Menu.Label className={styles.label} key={item.id}>
-        {item.label}
-      </Menu.Label>
-    );
-  }
-  return item.children?.length ? (
-    <Menu.Sub
-      key={item.id}
-      offset={3}
-      width={232}
-      withinPortal
-      portalProps={{ target: submenuHost ?? undefined }}
-      floatingStrategy="fixed"
-      disabled={item.disabled}
-    >
-      <Menu.Sub.Target>
-        <Menu.Sub.Item className={styles.item} disabled={item.disabled}>
-          {item.label}
-        </Menu.Sub.Item>
-      </Menu.Sub.Target>
-      <Menu.Sub.Dropdown className={`${styles.dropdown} ${styles.submenu}`}>
-        <MenuItems items={item.children} onSelect={onSelect} />
-      </Menu.Sub.Dropdown>
-    </Menu.Sub>
-  ) : (
-    <Menu.Item
+  return entries;
+}
+
+function menuEntry(
+  item: HierarchicalMenuItem,
+  onSelect: MenuContentProps['onSelect'],
+): ReactElement {
+  const children = item.children ?? [];
+  const hasChildren = children.length > 0;
+  const entry = (
+    <MenuItem
+      id={item.id}
+      textValue={item.label}
+      isDisabled={item.disabled}
       className={styles.item}
       data-description={item.description || undefined}
       data-destructive={item.destructive || undefined}
-      disabled={item.disabled}
-      key={item.id}
-      leftSection={
-        item.iconUrl ? (
-          <Image alt="" className={styles.itemIcon} height={18} src={item.iconUrl} width={18} />
-        ) : undefined
-      }
-      onClick={() => onSelect(item.id)}
+      onAction={hasChildren ? undefined : () => onSelect(item.id)}
     >
+      {item.iconUrl ? (
+        <img alt="" className={styles.itemIcon} src={item.iconUrl} width={18} height={18} />
+      ) : null}
       <span className={styles.itemText}>
-        <span className={styles.itemTitle}>{item.label}</span>
+        <Text slot="label" className={styles.itemTitle}>
+          {item.label}
+        </Text>
         {item.description ? (
-          <span className={styles.itemDescription}>{item.description}</span>
+          <Text slot="description" className={styles.itemDescription}>
+            {item.description}
+          </Text>
         ) : null}
       </span>
-    </Menu.Item>
+      {hasChildren ? <span aria-hidden="true">›</span> : null}
+    </MenuItem>
+  );
+  return hasChildren ? (
+    <SubmenuTrigger key={item.id}>
+      {entry}
+      <Popover
+        style={{ zIndex: 'var(--layer-floating)' }}
+        className={`${styles.dropdown} ${styles.submenu}`}
+        placement="right top"
+        offset={3}
+      >
+        <Menu className={styles.scrollArea} aria-label={item.label}>
+          {menuEntries(children, onSelect)}
+        </Menu>
+      </Popover>
+    </SubmenuTrigger>
+  ) : (
+    cloneElement(entry, { key: item.id })
   );
 }
 
-const menuClassNames = {
-  dropdown: styles.dropdown,
-  item: styles.item,
-  itemLabel: styles.itemLabel,
-  itemSection: styles.itemSection,
-};
+function isGroupEntry(item: HierarchicalMenuItem | undefined): item is HierarchicalMenuItem {
+  return Boolean(item && item.kind !== 'label' && item.kind !== 'divider');
+}

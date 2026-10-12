@@ -9,7 +9,9 @@ mod entitlement;
 mod response;
 
 pub use client::LicenseClient;
-pub use credentials::{LOCAL_LICENSE_SERVICE, StoredLicense, clear_local_license};
+pub use credentials::{
+    LOCAL_LICENSE_SERVICE, StoredLicense, clear_local_license, has_local_paid_access,
+};
 pub use entitlement::{AccessSnapshot, AccessStatus, EntitlementRecord};
 pub use secrecy::SecretString;
 

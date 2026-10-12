@@ -1,0 +1,64 @@
+import { Meta, Canvas, ArgTypes } from '@storybook/addon-docs/blocks';
+import { DocsLayout } from '../DocsLayout';
+import { ComponentContract } from '../ComponentsReference';
+import * as Example from '../../ui/SystemControls.stories';
+import * as Api from '../../ui/ActionButton.stories';
+
+import * as States from '../../ui/ContractStates.stories';
+
+<Meta title="Design System/Components/ActionButton" />
+
+<DocsLayout>
+
+<ComponentContract name="ActionButton" />
+
+## Playground·API·주요 속성
+
+실제 ActionButton의 지원 속성을 조작하는 <a href="/?path=/story/core-controls-actionbutton--playground" target="_top">Playground 열기</a>. iframe 예시 옆의 정적 속성 표는 실행 값을 바꾸지 않습니다. Playground 화면의 Controls에서 값을 바꾸고 코드를 확인합니다.
+
+<Canvas of={Api.Playground} story={{ inline: false, height: 180 }} sourceState="hidden" />
+<ArgTypes of={Api.Playground} include={['children', 'tone', 'density', 'emphasis', 'stretch', 'align', 'loading', 'disabled', 'onClick']} />
+
+strong은 해당 폼의 최종 제출, quiet는 일반 명령에 사용합니다. loading은 현재 제출의 중복 실행을 막으며 제출 결과를 대신 표시하지 않습니다. 실제 조합과 키보드 상태는 아래 예시를 함께 확인합니다.
+
+기본 높이는 regular 28px·compact 24px입니다. 좁은 폭의 긴 명령은 부모 폭 안에서 줄바꿈하며 높이가 늘어납니다. 이름을 자르거나 모달에 가로 스크롤을 만들지 않습니다.
+
+<Canvas of={Api.NarrowLongLabel} story={{ inline: false, height: 160 }} sourceState="hidden" />
+
+## 실제 사용례
+
+이 Canvas는 아래 계약을 소비하는 기존 스토리입니다. 여러 컴포넌트의 조합이면 해당 조합에서의 역할을 함께 확인합니다. 독립 컴포넌트 전용 예시나 실제 장치 실행으로 해석하지 않습니다.
+
+<Canvas of={Example.Interactive} story={{ inline: false, height: 560 }} />
+
+## 지원 상태·조합 검수
+
+기본값과 별도로 비활성·대기·오류·포커스 관계를 확인합니다. 이 예시에서 Tab/Shift+Tab, 실제 키 실행, hover·pressed를 조작합니다. 보조 기술의 실제 읽기와 설치본 실행은 별도 검증입니다.
+
+<Canvas of={States.Commands} story={{ inline: false, height: 640 }} />
+
+## 개별 상태 예제
+
+### Submit
+
+<Canvas of={Api.Submit} story={{ inline: false, height: 240 }} sourceState="hidden" />
+
+### Loading
+
+<Canvas of={Api.Loading} story={{ inline: false, height: 240 }} sourceState="hidden" />
+
+### Disabled
+
+<Canvas of={Api.Disabled} story={{ inline: false, height: 240 }} sourceState="hidden" />
+
+### Destructive
+
+<Canvas of={Api.Destructive} story={{ inline: false, height: 240 }} sourceState="hidden" />
+
+### Keyboard
+
+<Canvas of={Api.Keyboard} story={{ inline: false, height: 240, autoplay: true }} sourceState="hidden" />
+
+<a href="/?path=/docs/design-system-components--docs" target="_top">전체 컴포넌트와 사용 구분</a>
+
+</DocsLayout>

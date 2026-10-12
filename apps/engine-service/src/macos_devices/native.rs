@@ -110,6 +110,12 @@ impl Native {
             self.requested_buffer.store(frames, Ordering::Release);
         }
     }
+    /// Explicit per-endpoint client intent is independent of common DSP format edits.
+    pub(super) fn request_endpoint_buffer(&self, frames: u32) {
+        if !self.owns_device_buffer && self.group.is_none() {
+            self.requested_buffer.store(frames, Ordering::Release);
+        }
+    }
     pub(super) fn connect(&self, stop: &AtomicBool) -> Result<(), String> {
         let requested = self.requested_buffer.load(Ordering::Acquire);
         let setting = if requested == 0 {

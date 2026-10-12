@@ -656,6 +656,7 @@ impl NativeStream {
                 counters.overflows.saturating_sub(self.counters.overflows)
             },
             discontinuities: 0,
+            sample_faults: mixrelay_audio_io::process::SampleFaults::default(),
         };
         self.counters = counters;
         report

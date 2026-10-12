@@ -1,4 +1,5 @@
-import { Button, Group } from '@mantine/core';
+import { ActionButton } from './ActionButton';
+import { FormActions } from './FormActions';
 
 export function RecoveryActions({
   retryLabel,
@@ -12,13 +13,9 @@ export function RecoveryActions({
   onReload: () => void;
 }) {
   return (
-    <Group gap="xs" mt="xs">
-      <Button size="xs" variant="light" onClick={onRetry}>
-        {retryLabel}
-      </Button>
-      <Button size="xs" variant="subtle" onClick={onReload}>
-        {reloadLabel}
-      </Button>
-    </Group>
+    <FormActions align="start">
+      <ActionButton onClick={onRetry}>{retryLabel}</ActionButton>
+      <ActionButton onClick={onReload}>{reloadLabel}</ActionButton>
+    </FormActions>
   );
 }

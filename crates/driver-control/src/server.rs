@@ -35,6 +35,7 @@ const HOSTS: [&str; 3] = ["127.0.0.1:19342", "localhost:19342", "[::1]:19342"];
 #[derive(Clone)]
 struct Control {
     manager: Arc<Mutex<DriverManager>>,
+    paid_access: Arc<dyn Fn() -> bool + Send + Sync>,
     ingress: Arc<Semaphore>,
     operations: Arc<Semaphore>,
 }
@@ -44,8 +45,19 @@ struct Control {
 /// graph state is consulted. Native/file work is serialized outside the async reactor.
 /// Call from a Tokio runtime; startup inventory is initialized without client requests.
 pub fn router(manager: DriverManager) -> Router {
+    router_with_access(manager, Arc::new(|| false))
+}
+
+/// Applies publisher-provided paid access at the actual mutation boundary.
+/// Free geometry, activation and basic loopback never require a paid credential.
+/// The provider runs on a blocking control worker, never an audio callback.
+pub fn router_with_access(
+    manager: DriverManager,
+    paid_access: Arc<dyn Fn() -> bool + Send + Sync>,
+) -> Router {
     let state = Control {
         manager: Arc::new(Mutex::new(manager)),
+        paid_access,
         ingress: Arc::new(Semaphore::new(8)),
         operations: Arc::new(Semaphore::new(8)),
     };
@@ -130,10 +142,20 @@ async fn operate(
         })?;
     tokio::task::spawn_blocking(move || {
         let mut manager = control.manager.lock();
+        let paid = (control.paid_access)();
         let result = match command {
-            Some(command) => manager.mutate(command),
+            Some(command) => {
+                let current = manager.snapshot()?;
+                authorize(&command, &current, paid)?;
+                manager.mutate(command)
+            }
             None => manager.snapshot(),
-        };
+        }
+        .map(|mut snapshot| {
+            snapshot.settings.can_create &= paid;
+            snapshot.settings.can_rename &= paid;
+            snapshot
+        });
         // Admission follows the blocking operation even if its HTTP caller disconnects.
         drop(permit);
         result
@@ -145,6 +167,27 @@ async fn operate(
         )))
     })?
     .map_err(ApiError)
+}
+
+fn authorize(
+    command: &DriverCommand,
+    snapshot: &DriverSnapshot,
+    paid: bool,
+) -> Result<(), DriverError> {
+    let restricted = match command {
+        DriverCommand::Create { .. } | DriverCommand::Remove { .. } => true,
+        DriverCommand::Configure { spec, .. } => snapshot
+            .settings
+            .devices
+            .iter()
+            .find(|device| device.spec.id == spec.id)
+            .is_some_and(|device| device.spec.display_name != spec.display_name),
+        _ => false,
+    };
+    if restricted && !paid {
+        return Err(DriverError::AccessDenied);
+    }
+    Ok(())
 }
 
 async fn admit(State(control): State<Control>, request: Request, next: Next) -> Response {
@@ -193,6 +236,7 @@ impl IntoResponse for ApiError {
             DriverError::Invalid(_) | DriverError::Json(_) => StatusCode::BAD_REQUEST,
             DriverError::RevisionMismatch { .. } => StatusCode::CONFLICT,
             DriverError::NotFound(_) => StatusCode::NOT_FOUND,
+            DriverError::AccessDenied => StatusCode::FORBIDDEN,
             DriverError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             DriverError::Backend(_)
             | DriverError::Io(_)

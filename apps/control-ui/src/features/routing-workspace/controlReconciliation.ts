@@ -81,8 +81,8 @@ export function controlChanges(
   if (JSON.stringify(structural(before)) !== JSON.stringify(structural(after))) return null;
   const previous = new Map(before.nodes.map((node) => [node.id, node]));
   return after.nodes.flatMap((node) => {
-    const old = previous.get(node.id);
-    if (!old) return [];
+    // The exact structural match above guarantees identical node IDs.
+    const old = previous.get(node.id) as RuntimeGraphNode;
     const value: Change['value'] = {};
     for (const key of ['enabled', 'muted'] as const) {
       const defaultValue = key === 'enabled';

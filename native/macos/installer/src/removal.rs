@@ -24,7 +24,7 @@ use anyhow::{Context, Result, ensure};
 pub const SERVICE: &str = "io.mixrelay.driver.removal";
 /// Root-owned CLI executable embedded in the separately installed remover.
 pub const HELPER: &str =
-    "/Applications/Uninstall MixRelay Driver.app/Contents/Helpers/mixrelay-macos-installer";
+    "/Applications/Uninstall MixRelay.app/Contents/Helpers/mixrelay-macos-installer";
 
 mod executable;
 use executable::RemovalExecutable;
@@ -126,7 +126,13 @@ pub fn verify_removal_launchd(path: &Path, team: &SigningTeam) -> Result<()> {
     let actual: plist::Value = plist::from_bytes(&fs::read(path)?)?;
     let expected: plist::Value = plist::from_bytes(removal_launchd_template(team).as_bytes())?;
     ensure!(
-        actual == expected,
+        actual == expected
+            || actual
+                == plist::from_bytes::<plist::Value>(
+                    removal_launchd_template(team)
+                        .replace("Uninstall MixRelay.app", "Uninstall MixRelay Driver.app")
+                        .as_bytes()
+                )?,
         "removal helper plist has an unexpected operation or destination"
     );
     Ok(())
@@ -216,11 +222,16 @@ fn helper_is_registered() -> Result<bool> {
 /// # Errors
 /// Returns any ownership, symlink, code-signing or fixed-path violation.
 pub fn verify_installed_remover(team: &SigningTeam) -> Result<()> {
-    validate_root_tree(Path::new(UNINSTALLER_PATH))?;
+    let bundle = if Path::new(UNINSTALLER_PATH).exists() {
+        UNINSTALLER_PATH
+    } else {
+        "/Applications/Uninstall MixRelay Driver.app"
+    };
+    validate_root_tree(Path::new(bundle))?;
     validate_root_file(Path::new(REMOVAL_LAUNCHD_PATH), 0o644)?;
     crate::native::validate_destination_ancestors(Path::new("/"))?;
     ReleasePayloadVerifier::new(team.clone(), verification_account()?)
-        .verify_uninstaller_bundle(UNINSTALLER_PATH)?;
+        .verify_uninstaller_bundle(bundle)?;
     verify_removal_launchd(Path::new(REMOVAL_LAUNCHD_PATH), team)
 }
 

@@ -2,8 +2,8 @@ use std::{future::Future, io, io::Read, io::Write, thread};
 
 use tokio::sync::oneshot;
 
-/// Engine-side observation of the desktop's private pipe lifetime.
-/// Construct only for [`crate::DESKTOP_ARGUMENT`], never for standalone services
+/// Engine-side observation of the controller's private pipe lifetime.
+/// Construct only for [`crate::CONTROLLER_ARGUMENT`], never for standalone services
 /// or plugin subprocesses. No thread, descriptor or wait enters audio callbacks.
 #[derive(Debug)]
 pub struct EngineOwner {
@@ -11,7 +11,7 @@ pub struct EngineOwner {
 }
 
 impl EngineOwner {
-    /// Observes the inherited stdin pipe until its desktop writer closes.
+    /// Observes the inherited stdin pipe until its controller writer closes.
     ///
     /// The dedicated blocking reader is intentionally outside the Tokio runtime:
     /// an OS-triggered exit must not wait for an uncancellable Tokio stdin task.
@@ -27,7 +27,7 @@ impl EngineOwner {
     fn from_reader(mut reader: impl Read + Send + 'static) -> io::Result<Self> {
         let (sender, closed) = oneshot::channel();
         thread::Builder::new()
-            .name("mixrelay-desktop-owner".into())
+            .name("mixrelay-controller-owner".into())
             .spawn(move || {
                 let mut byte = [0];
                 let result = loop {
@@ -36,7 +36,7 @@ impl EngineOwner {
                         Ok(_) => {
                             break Err(io::Error::new(
                                 io::ErrorKind::InvalidData,
-                                "desktop ownership pipe must carry no payload",
+                                "controller ownership pipe must carry no payload",
                             ));
                         }
                         Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
@@ -52,7 +52,7 @@ impl EngineOwner {
     async fn closed(self) -> io::Result<()> {
         self.closed
             .await
-            .map_err(|_| io::Error::other("desktop ownership observer ended without a result"))?
+            .map_err(|_| io::Error::other("controller ownership observer ended without a result"))?
     }
 }
 

@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 # Application startup and contextual fatal errors, outside real-time native callbacks.
 anyhow = "1.0.102"
+mixrelay-licensing = { path = "../../crates/licensing" }
 mixrelay-driver-control = { path = "../../crates/driver-control" }
 axum.workspace = true
 tokio.workspace = true

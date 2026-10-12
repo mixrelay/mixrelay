@@ -1,11 +1,13 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { MixRelayProvider } from '../theme/MixRelayProvider';
 import { formatPlatformShortcut } from './platformShortcut';
 import { ShortcutTooltip } from './ShortcutTooltip';
 
-afterEach(() => {
+afterEach(async () => {
+  cleanup();
+  if (vi.isFakeTimers()) await act(async () => vi.advanceTimersByTimeAsync(2000));
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
@@ -24,12 +26,15 @@ it.each([
       </ShortcutTooltip>
     </MixRelayProvider>,
   );
-  fireEvent.mouseEnter(screen.getByRole('button', { name: 'New graph' }));
-  expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  fireEvent.pointerMove(document.body);
+  fireEvent.pointerOver(screen.getByRole('button', { name: 'New graph' }));
+  if (platform === 'MacIntel') expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   await act(async () => vi.advanceTimersByTimeAsync(350));
-  // Mantine mounts its portal transition on the following animation frame.
+  // React Aria completes hover state on the following animation frame.
   await act(async () => vi.advanceTimersByTimeAsync(200));
   expect(screen.getByRole('tooltip')).toHaveTextContent(label);
+  fireEvent.pointerOut(screen.getByRole('button', { name: 'New graph' }));
+  await act(async () => vi.advanceTimersByTimeAsync(2000));
 });
 
 it('does not rewrite explicit non-Mod keys or unknown shortcuts', () => {

@@ -165,6 +165,13 @@ mod tests {
     use mixrelay_driver_control::DriverState;
 
     #[test]
+    fn graphs_without_virtual_endpoints_require_no_driver_connection() {
+        let backend = MacVirtualEndpointBackend::new(vec![48_000]);
+        assert!(backend.resolve_graph_devices(&[]).unwrap().is_empty());
+        backend.prepare_graph_attachments(&[]).unwrap();
+    }
+
+    #[test]
     fn driver_resolution_uses_actual_geometry_without_retargeting_identity() {
         let capabilities = MacVirtualEndpointBackend::new(vec![48_000]).capabilities;
         let mut settings = mixrelay_audio_io::VirtualEndpointSettings::configurable(&capabilities);
@@ -183,6 +190,7 @@ mod tests {
             default_sample_rate: 48_000,
         };
         settings.devices.push(VirtualEndpointDeviceSettings {
+            native_buffer: None,
             spec: actual.clone(),
             native_device_ids: vec![],
             observed_sample_rate: Some(48_000),

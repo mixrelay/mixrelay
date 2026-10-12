@@ -1,4 +1,9 @@
-import type { NativeSampleFormat, NativeStreamFormat, VirtualEndpointSettings, VirtualEndpointSpec } from '../control-port/types';
+import type {
+  NativeSampleFormat,
+  NativeStreamFormat,
+  VirtualEndpointSettings,
+  VirtualEndpointSpec,
+} from '../control-port/types';
 
 export type NativeDirection = 'render' | 'capture';
 
@@ -16,7 +21,12 @@ export type DriverAction =
   | { action: 'configure'; spec: VirtualEndpointSpec }
   | { action: 'remove'; endpointId: string }
   | { action: 'set_sample_format'; endpointId: string; sampleFormat: NativeSampleFormat }
-  | { action: 'set_format'; endpointId: string; direction: NativeDirection; format: NativeStreamFormat };
+  | {
+      action: 'set_format';
+      endpointId: string;
+      direction: NativeDirection;
+      format: NativeStreamFormat;
+    };
 
 export type DriverCommand = DriverAction & { expectedRevision: number };
 

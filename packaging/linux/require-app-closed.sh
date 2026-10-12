@@ -2,22 +2,22 @@
 set -eu
 
 case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
-  en*) instruction='Quit MixRelay from its menu or tray, then retry the installation, update or removal.' ;;
-  ko*) instruction='MixRelay 메뉴나 트레이에서 종료한 뒤 설치, 업데이트 또는 제거를 다시 시도하세요.' ;;
-  ja*) instruction='MixRelayのメニューまたはトレイから終了し、インストール、更新、削除を再試行してください。' ;;
-  zh_Hans*|zh-Hans*) instruction='请从菜单或托盘退出 MixRelay，然后重试安装、更新或移除。' ;;
-  zh_Hant*|zh-Hant*|zh_TW*|zh-TW*|zh_HK*|zh-HK*|zh_MO*|zh-MO*) instruction='請從選單或系統匣結束 MixRelay，然後重試安裝、更新或移除。' ;;
-  zh*) instruction='请从菜单或托盘退出 MixRelay，然后重试安装、更新或移除。' ;;
-  fr*) instruction='Quittez MixRelay depuis son menu ou la barre d’état, puis réessayez l’installation, la mise à jour ou la suppression.' ;;
-  de*) instruction='Beenden Sie MixRelay über das Menü oder die Statusleiste und wiederholen Sie die Installation, das Update oder die Entfernung.' ;;
-  es*) instruction='Cierre MixRelay desde su menú o bandeja y vuelva a intentar la instalación, actualización o eliminación.' ;;
-  pt*) instruction='Feche o MixRelay pelo menu ou pela área de notificação e tente instalar, atualizar ou remover novamente.' ;;
-  it*) instruction='Chiudere MixRelay dal menu o dall’area di notifica, quindi riprovare l’installazione, l’aggiornamento o la rimozione.' ;;
-  ru*) instruction='Закройте MixRelay через меню или системный лоток, затем повторите установку, обновление или удаление.' ;;
-  *) instruction='Quit MixRelay from its menu or tray, then retry the installation, update or removal.' ;;
+  en*) instruction='Stop all audio from the MixRelay status menu, close the MixRelay editor and MixRelay Driver, then retry.' ;;
+  ko*) instruction='MixRelay 상태 메뉴에서 모든 오디오를 중지하고 MixRelay 편집 앱과 MixRelay Driver를 종료한 뒤 다시 시도하세요.' ;;
+  ja*) instruction='MixRelayのステータスメニューですべてのオーディオを停止し、MixRelayエディターとMixRelay Driverを終了してから再試行してください。' ;;
+  zh_Hans*|zh-Hans*) instruction='请从 MixRelay 状态菜单停止所有音频，关闭 MixRelay 编辑器和 MixRelay Driver，然后重试。' ;;
+  zh_Hant*|zh-Hant*|zh_TW*|zh-TW*|zh_HK*|zh-HK*|zh_MO*|zh-MO*) instruction='請從 MixRelay 狀態選單停止所有音訊，關閉 MixRelay 編輯器與 MixRelay Driver，然後重試。' ;;
+  zh*) instruction='请从 MixRelay 状态菜单停止所有音频，关闭 MixRelay 编辑器和 MixRelay Driver，然后重试。' ;;
+  fr*) instruction='Arrêtez tout l’audio depuis le menu d’état de MixRelay, fermez l’éditeur MixRelay et MixRelay Driver, puis réessayez.' ;;
+  de*) instruction='Stoppen Sie alle Audiovorgänge im MixRelay-Statusmenü, schließen Sie den MixRelay-Editor und MixRelay Driver und versuchen Sie es erneut.' ;;
+  es*) instruction='Detenga todo el audio desde el menú de estado de MixRelay, cierre el editor de MixRelay y MixRelay Driver y vuelva a intentarlo.' ;;
+  pt*) instruction='Pare todo o áudio pelo menu de estado do MixRelay, feche o editor do MixRelay e o MixRelay Driver e tente novamente.' ;;
+  it*) instruction='Interrompi tutto l’audio dal menu di stato di MixRelay, chiudi l’editor MixRelay e MixRelay Driver e riprova.' ;;
+  ru*) instruction='Остановите всё аудио через меню состояния MixRelay, закройте редактор MixRelay и MixRelay Driver, затем повторите попытку.' ;;
+  *) instruction='Stop all audio from the MixRelay status menu, close the MixRelay editor and MixRelay Driver, then retry.' ;;
 esac
 
-# The installed desktop owns the interactive engine. Let the user save and quit
+# The background controller owns audio independently of the editor. Save and stop audio
 # before the package manager replaces or removes either executable.
 for executable in /proc/[0-9]*/exe; do
   target=$(readlink "$executable" 2>/dev/null) || continue

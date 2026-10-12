@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{Activation, LicenseError};
 
 const SECONDS_PER_DAY: u64 = 86_400;
-const TRIAL_SECONDS: u64 = 14 * SECONDS_PER_DAY;
+
 const PAID_LEASE_SECONDS: u64 = 30 * SECONDS_PER_DAY;
 // Keeps persisted timestamps within the conventional four-digit UTC year range.
 const MAX_UNIX_TIMESTAMP: u64 = 253_402_300_799;
@@ -12,13 +12,11 @@ const MAX_UNIX_TIMESTAMP: u64 = 253_402_300_799;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AccessStatus {
-    /// The original fourteen-day trial has not ended.
-    Trial,
+    /// The unlimited-duration free edition.
+    Free,
     /// A successful paid check is within its thirty-day offline lease.
     Licensed,
-    /// Neither the trial nor a paid lease remains active.
-    Expired,
-    /// The record or clock is invalid, so access cannot be inferred safely.
+    /// The record or clock is invalid, so paid access cannot be inferred safely.
     ClockInvalid,
 }
 
@@ -28,7 +26,7 @@ pub enum AccessStatus {
 pub struct AccessSnapshot {
     /// The access state at the observed clock value.
     pub status: AccessStatus,
-    /// The selected trial or paid expiry; absent when the clock is invalid.
+    /// The paid lease expiry; absent for free access or an invalid clock.
     pub expires_at_unix: Option<u64>,
     /// Days remaining, rounded up; zero once expired or clock-invalid.
     pub remaining_days: u64,
@@ -36,11 +34,12 @@ pub struct AccessSnapshot {
 
 /// Persisted offline entitlement policy. The caller owns durable storage and clock sourcing.
 ///
-/// Deserialization rejects inconsistent fields. The first trial timestamp and the latest
+/// Deserialization rejects inconsistent fields. The first initial timestamp and the latest
 /// observed clock are preserved across restarts; remote failures do not renew either lease.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", try_from = "StoredEntitlement")]
 pub struct EntitlementRecord {
+    // Retained wire name for existing credentials; no trial expiry is applied.
     trial_started_at_unix: u64,
     latest_observed_at_unix: u64,
     paid_verified_at_unix: Option<u64>,
@@ -72,7 +71,7 @@ impl TryFrom<StoredEntitlement> for EntitlementRecord {
 }
 
 impl EntitlementRecord {
-    /// Begin the sole trial at `now`, a Unix timestamp in seconds.
+    /// Initialize free access and the clock watermark at `now`.
     ///
     /// An out-of-range timestamp produces a record that only reports `ClockInvalid`;
     /// callers should obtain a valid clock before persisting it.
@@ -150,7 +149,7 @@ impl EntitlementRecord {
 
     /// Clear the paid seat and lease after confirmed deactivation or rejection.
     ///
-    /// This preserves the original trial start and latest observed clock.
+    /// This preserves the original initial timestamp and latest observed clock.
     pub fn clear_paid(&mut self) {
         self.paid_verified_at_unix = None;
         self.activation = None;
@@ -167,10 +166,6 @@ impl EntitlementRecord {
         if !valid_time(self.trial_started_at_unix)
             || !valid_time(self.latest_observed_at_unix)
             || self.trial_started_at_unix > self.latest_observed_at_unix
-            || self
-                .trial_started_at_unix
-                .checked_add(TRIAL_SECONDS)
-                .is_none_or(|end| !valid_time(end))
         {
             return Err(LicenseError::InvalidState);
         }
@@ -191,25 +186,21 @@ impl EntitlementRecord {
     }
 
     fn snapshot_at(&self, now: u64) -> AccessSnapshot {
-        let trial_end = self.trial_started_at_unix + TRIAL_SECONDS;
         let paid_end = self
             .paid_verified_at_unix
             .map(|verified| verified + PAID_LEASE_SECONDS);
-        let (status, expiry) = if let Some(end) = paid_end.filter(|&end| now < end) {
-            (AccessStatus::Licensed, end)
-        } else if now < trial_end {
-            (AccessStatus::Trial, trial_end)
+        if let Some(expiry) = paid_end.filter(|&expiry| now < expiry) {
+            AccessSnapshot {
+                status: AccessStatus::Licensed,
+                expires_at_unix: Some(expiry),
+                remaining_days: expiry.saturating_sub(now).div_ceil(SECONDS_PER_DAY),
+            }
         } else {
-            (
-                AccessStatus::Expired,
-                paid_end.map_or(trial_end, |end| end.max(trial_end)),
-            )
-        };
-        let seconds_remaining = expiry.saturating_sub(now);
-        AccessSnapshot {
-            status,
-            expires_at_unix: Some(expiry),
-            remaining_days: seconds_remaining.div_ceil(SECONDS_PER_DAY),
+            AccessSnapshot {
+                status: AccessStatus::Free,
+                expires_at_unix: None,
+                remaining_days: 0,
+            }
         }
     }
 }
@@ -238,22 +229,24 @@ mod tests {
     }
 
     #[test]
-    fn trial_boundary_and_rounding_are_exact() {
+    fn free_access_never_expires_or_restarts_a_trial() {
         let mut record = EntitlementRecord::new(START);
-        assert_eq!(record.observe(START).status, AccessStatus::Trial);
-        assert_eq!(record.observe(START).remaining_days, 14);
-        let before_end = record.observe(START + TRIAL_SECONDS - 1);
-        assert_eq!(before_end.expires_at_unix, Some(START + TRIAL_SECONDS));
-        assert_eq!(before_end.remaining_days, 1);
-        let at_end = record.observe(START + TRIAL_SECONDS);
-        assert_eq!(at_end.status, AccessStatus::Expired);
-        assert_eq!(at_end.remaining_days, 0);
+        for now in [
+            START,
+            START + 14 * SECONDS_PER_DAY,
+            START + 3650 * SECONDS_PER_DAY,
+        ] {
+            let access = record.observe(now);
+            assert_eq!(access.status, AccessStatus::Free);
+            assert_eq!(access.remaining_days, 0);
+            assert_eq!(access.expires_at_unix, None);
+        }
     }
 
     #[test]
     fn verified_lease_expires_and_only_new_verification_renews_it() {
         let mut record = EntitlementRecord::new(START);
-        let verified_at = START + TRIAL_SECONDS;
+        let verified_at = START + (14 * SECONDS_PER_DAY);
         let paid = record
             .record_verified(activation(), verified_at)
             .expect("verified");
@@ -266,7 +259,7 @@ mod tests {
         );
         assert_eq!(
             record.observe(verified_at + PAID_LEASE_SECONDS).status,
-            AccessStatus::Expired
+            AccessStatus::Free
         );
         assert_eq!(
             record
@@ -299,7 +292,7 @@ mod tests {
     #[test]
     fn rollback_cannot_renew_or_grant_access() {
         let mut record = EntitlementRecord::new(START);
-        assert_eq!(record.observe(START + 100).status, AccessStatus::Trial);
+        assert_eq!(record.observe(START + 100).status, AccessStatus::Free);
         let before = record.clone();
         assert_eq!(
             record.observe(START + 99).status,
@@ -311,26 +304,26 @@ mod tests {
             Err(LicenseError::ClockInvalid)
         );
         assert_eq!(record, before);
-        assert_eq!(record.observe(START + 100).status, AccessStatus::Trial);
+        assert_eq!(record.observe(START + 100).status, AccessStatus::Free);
     }
 
     #[test]
     fn read_only_access_does_not_move_watermark() {
         let mut record = EntitlementRecord::new(START);
         let original = record.clone();
-        assert_eq!(record.access_at(START + 100).status, AccessStatus::Trial);
+        assert_eq!(record.access_at(START + 100).status, AccessStatus::Free);
         assert_eq!(
             record.access_at(START - 1).status,
             AccessStatus::ClockInvalid
         );
         assert_eq!(record, original);
-        assert_eq!(record.observe(START + 50).status, AccessStatus::Trial);
+        assert_eq!(record.observe(START + 50).status, AccessStatus::Free);
     }
 
     #[test]
     fn read_only_access_checks_persisted_watermark_after_restart() {
         let mut record = EntitlementRecord::new(START);
-        assert_eq!(record.observe(START + 100).status, AccessStatus::Trial);
+        assert_eq!(record.observe(START + 100).status, AccessStatus::Free);
         let encoded = serde_json::to_string(&record).expect("serialize");
         let mut loaded: EntitlementRecord = serde_json::from_str(&encoded).expect("reload");
         let saved = loaded.clone();
@@ -338,9 +331,9 @@ mod tests {
             loaded.access_at(START + 99).status,
             AccessStatus::ClockInvalid
         );
-        assert_eq!(loaded.access_at(START + 101).status, AccessStatus::Trial);
+        assert_eq!(loaded.access_at(START + 101).status, AccessStatus::Free);
         assert_eq!(loaded, saved);
-        assert_eq!(loaded.observe(START + 101).status, AccessStatus::Trial);
+        assert_eq!(loaded.observe(START + 101).status, AccessStatus::Free);
         assert_eq!(
             loaded.access_at(START + 100).status,
             AccessStatus::ClockInvalid
@@ -355,33 +348,33 @@ mod tests {
             .expect("verified");
         record.clear_paid();
         assert!(record.activation().is_none());
-        assert_eq!(record.observe(START + 2).status, AccessStatus::Trial);
+        assert_eq!(record.observe(START + 2).status, AccessStatus::Free);
         assert_eq!(
-            record.observe(START + TRIAL_SECONDS).status,
-            AccessStatus::Expired
+            record.observe(START + (14 * SECONDS_PER_DAY)).status,
+            AccessStatus::Free
         );
     }
 
     #[test]
-    fn deactivation_restores_remaining_trial_without_extra_days() {
+    fn deactivation_restores_unlimited_free_access() {
         let mut record = EntitlementRecord::new(START);
         record
             .record_verified(activation(), START)
             .expect("verified");
         record.clear_paid();
         let trial = record.observe(START + 10 * SECONDS_PER_DAY);
-        assert_eq!(trial.status, AccessStatus::Trial);
-        assert_eq!(trial.remaining_days, 4);
-        assert_eq!(trial.expires_at_unix, Some(START + TRIAL_SECONDS));
+        assert_eq!(trial.status, AccessStatus::Free);
+        assert_eq!(trial.remaining_days, 0);
+        assert_eq!(trial.expires_at_unix, None);
     }
 
     #[test]
     fn snapshot_json_uses_the_desktop_contract() {
         let snapshot = EntitlementRecord::new(START).observe(START);
         let json = serde_json::to_value(snapshot).expect("snapshot JSON");
-        assert_eq!(json["status"], "trial");
-        assert_eq!(json["expiresAtUnix"], START + TRIAL_SECONDS);
-        assert_eq!(json["remainingDays"], 14);
+        assert_eq!(json["status"], "free");
+        assert_eq!(json["expiresAtUnix"], serde_json::Value::Null);
+        assert_eq!(json["remainingDays"], 0);
     }
 
     #[test]

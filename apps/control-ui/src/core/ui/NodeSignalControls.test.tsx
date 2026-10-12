@@ -30,3 +30,14 @@ it('prevents clicks while a command is awaiting acknowledgement', () => {
   fireEvent.click(view.getByRole('button', { name: 'Enable Gain' }));
   expect(onPower).not.toHaveBeenCalled();
 });
+
+it('shows a muted node independently of power and restores its owner through the mute action', () => {
+  const onMute = vi.fn();
+  const view = render(
+    <NodeMuteButton muted disabled={false} label="Unmute Gain" onChange={onMute} />,
+  );
+  const mute = view.getByRole('button', { name: 'Unmute Gain' });
+  expect(mute).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(mute);
+  expect(onMute).toHaveBeenCalledOnce();
+});

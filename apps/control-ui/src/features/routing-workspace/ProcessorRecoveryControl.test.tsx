@@ -124,3 +124,23 @@ describe('ProcessorRecoveryControl', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
+
+it('keeps a replacement instance retry busy when an older retry settles', async () => {
+  await i18n.changeLanguage('en');
+  const old = Promise.withResolvers<unknown>();
+  const replacement = Promise.withResolvers<unknown>();
+  const onRetry = vi.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(replacement.promise);
+  const view = render(recovery({ onRetry }));
+  fireEvent.click(screen.getByRole('button', { name: 'Retry crashed plug-in: Crashy' }));
+  view.rerender(
+    recovery({ onRetry, failedProcessors: [{ ...failed, instanceId: 'replacement' }] }),
+  );
+  const button = screen.getByRole('button', { name: 'Retry crashed plug-in: Crashy' });
+  fireEvent.click(button);
+  await act(async () => old.resolve(undefined));
+  expect(button).toHaveAttribute('aria-busy', 'true');
+  expect(button).toBeDisabled();
+  await act(async () => replacement.resolve(undefined));
+  expect(button).toHaveAttribute('aria-busy', 'false');
+  expect(button).toBeEnabled();
+});

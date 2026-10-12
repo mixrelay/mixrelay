@@ -14,6 +14,7 @@
 //! private staging directory. Lifecycle lease inodes and user data are never
 //! recursive removal targets here.
 
+use std::os::unix::fs::PermissionsExt as _;
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -37,6 +38,8 @@ const HAL_PAYLOAD_NAME: &str = "hal";
 const LAUNCHD_PAYLOAD_NAME: &str = "launchd";
 const UNINSTALLER_PAYLOAD_NAME: &str = "uninstaller";
 const REMOVAL_LAUNCHD_PAYLOAD_NAME: &str = "removal-launchd";
+const RUNTIME_ENGINE_PAYLOAD_NAME: &str = "runtime-engine";
+const RUNTIME_LAUNCHD_PAYLOAD_NAME: &str = "runtime-launchd";
 
 /// The expected filesystem kind of an owned destination.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -393,6 +396,13 @@ impl FilesystemAdapter {
             {
                 continue;
             }
+            if matches!(
+                target,
+                OwnedTarget::RuntimeEngine | OwnedTarget::RuntimeLaunchd
+            ) && matches!(request, TransactionRequest::Install(sources) if sources.runtime_engine().is_none())
+            {
+                continue;
+            }
             if let Err(error) = self.commit_target(&context, target, &mut progress) {
                 progress.state = FilesystemStageState::CommitFailed;
                 return Err(error);
@@ -517,7 +527,7 @@ impl FilesystemAdapter {
         }
     }
 
-    fn observe_targets(&self) -> Result<[TargetSnapshot; 6], FilesystemError> {
+    fn observe_targets(&self) -> Result<[TargetSnapshot; 10], FilesystemError> {
         let targets = OwnedTarget::all();
         Ok([
             self.observe_target(targets[0])?,
@@ -526,6 +536,10 @@ impl FilesystemAdapter {
             self.observe_target(targets[3])?,
             self.observe_target(targets[4])?,
             self.observe_target(targets[5])?,
+            self.observe_target(targets[6])?,
+            self.observe_target(targets[7])?,
+            self.observe_target(targets[8])?,
+            self.observe_target(targets[9])?,
         ])
     }
 
@@ -603,6 +617,10 @@ impl FilesystemAdapter {
             paths.push((UNINSTALLER_PAYLOAD_NAME, app, TargetKind::Directory));
             paths.push((REMOVAL_LAUNCHD_PAYLOAD_NAME, plist, TargetKind::File));
         }
+        if let (Some(engine), Some(plist)) = (sources.runtime_engine(), sources.runtime_launchd()) {
+            paths.push((RUNTIME_ENGINE_PAYLOAD_NAME, engine, TargetKind::File));
+            paths.push((RUNTIME_LAUNCHD_PAYLOAD_NAME, plist, TargetKind::File));
+        }
         for (index, (_, path, _)) in paths.iter().enumerate() {
             for (_, other, _) in paths.iter().skip(index + 1) {
                 if is_within(path, other) || is_within(other, path) {
@@ -659,6 +677,22 @@ impl FilesystemAdapter {
         create_directory(&payload_root)?;
         create_directory(&backup_root)?;
         if let TransactionRequest::Install(sources) = request {
+            if let (Some(engine), Some(plist)) =
+                (sources.runtime_engine(), sources.runtime_launchd())
+            {
+                copy_tree(engine, &payload_root.join(RUNTIME_ENGINE_PAYLOAD_NAME))?;
+                copy_tree(plist, &payload_root.join(RUNTIME_LAUNCHD_PAYLOAD_NAME))?;
+                fs::set_permissions(
+                    payload_root.join(RUNTIME_ENGINE_PAYLOAD_NAME),
+                    fs::Permissions::from_mode(0o755),
+                )
+                .map_err(|error| io_failure("set runtime engine mode", engine, error))?;
+                fs::set_permissions(
+                    payload_root.join(RUNTIME_LAUNCHD_PAYLOAD_NAME),
+                    fs::Permissions::from_mode(0o644),
+                )
+                .map_err(|error| io_failure("set runtime launchd mode", plist, error))?;
+            }
             copy_tree(sources.app(), &payload_root.join(APP_PAYLOAD_NAME))?;
             copy_tree(sources.driver(), &payload_root.join(DRIVER_PAYLOAD_NAME))?;
             copy_tree(sources.hal(), &payload_root.join(HAL_PAYLOAD_NAME))?;
@@ -709,7 +743,7 @@ impl FilesystemAdapter {
             rename_path(&destination, &backup)?;
             progress.backed_up.push(target);
         }
-        if context.request.kind() == crate::OperationKind::Install {
+        if context.request.kind() == crate::OperationKind::Install && !target.retired() {
             let payload = context.staged.payload_path(target);
             validate_staged_payload(target, &payload)?;
             let payload_fingerprint = fingerprint(&metadata(&payload, "staged payload")?);
@@ -808,7 +842,7 @@ impl FilesystemAdapter {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FilesystemSnapshot {
     layout: FilesystemLayout,
-    targets: [TargetSnapshot; 6],
+    targets: [TargetSnapshot; 10],
 }
 
 impl FilesystemSnapshot {

@@ -48,15 +48,15 @@ export function processorLayoutLabel(layout: ProviderPorts, t: TFunction): strin
 }
 
 function mainBusLabel(buses: ProviderPorts['inputs'], t: TFunction) {
-  if (buses.length === 0) return null;
-  if (buses.length === 1) return channelFormatLabel(buses[0], t);
+  const [first] = buses;
+  if (!first) return null;
+  if (buses.length === 1) return channelFormatLabel(first, t);
   return t('routing.processorLayouts.channelCount', {
     count: buses.reduce((total, bus) => total + bus.channels, 0),
   });
 }
 
-function channelFormatLabel(bus: ProviderPorts['inputs'][number] | undefined, t: TFunction) {
-  if (!bus) return null;
+function channelFormatLabel(bus: ProviderPorts['inputs'][number], t: TFunction) {
   switch (bus.channelFormat) {
     case 'mono':
       return t('routing.processorLayouts.mono');
@@ -72,18 +72,18 @@ function channelFormatLabel(bus: ProviderPorts['inputs'][number] | undefined, t:
 }
 
 function processorLayoutDescription(layout: ProviderPorts, t: TFunction) {
+  // Menu descriptions only receive layouts validated with non-empty inputs and outputs.
   const describe = (buses: ProviderPorts['inputs']) =>
-    buses.length
-      ? buses
-          .map((bus) =>
-            t('routing.processorLayouts.busDescription', {
-              kind: t(`routing.processorLayouts.${bus.kind}`),
-              name: bus.name,
-              channels: t('routing.processorLayouts.channelCount', { count: bus.channels }),
-            }),
-          )
-          .join(', ')
-      : t('routing.processorLayouts.none');
+    buses
+      .map((bus) =>
+        t('routing.processorLayouts.busDescription', {
+          kind: t(`routing.processorLayouts.${bus.kind}`),
+          name: bus.name,
+          channels: t('routing.processorLayouts.channelCount', { count: bus.channels }),
+        }),
+      )
+      .join(', ');
+
   return t('routing.processorLayouts.directions', {
     inputs: describe(layout.inputs),
     outputs: describe(layout.outputs),
@@ -97,10 +97,9 @@ export function processorSelectionForMenuItem(
 ): { ports: ProviderPorts; processor: ExternalProcessorDescriptor } | null {
   for (const processor of processors) {
     const layouts = selectableLayouts(processor);
-    if (layouts.length === 1 && processorItemId(processor) === itemId) {
-      const ports = layouts[0];
-      if (ports) return { ports, processor };
-    }
+    const onlyLayout = layouts.length === 1 ? layouts.at(0) : undefined;
+    if (onlyLayout && processorItemId(processor) === itemId)
+      return { ports: onlyLayout, processor };
     for (const ports of layouts) {
       if (processorLayoutItemId(processor.typeId, ports.layoutId) === itemId)
         return { ports, processor };
@@ -132,29 +131,29 @@ function processorMenuItems(processor: ExternalProcessorDescriptor, t: TFunction
   const identity = [t(`routing.groups.${processor.format}`), processor.vendor]
     .filter(Boolean)
     .join(' · ');
-  if (layouts.length === 0) return [];
+  const [onlyLayout] = layouts;
+  if (!onlyLayout) return [];
   if (layouts.length === 1) {
-    const layout = layouts[0];
-    return layout
-      ? [
-          {
-            description: `${identity} · ${processorLayoutLabel(layout, t)}`,
-            id: processorItemId(processor),
-            label: processor.displayName,
-          },
-        ]
-      : [];
+    return [
+      {
+        description: `${identity} · ${processorLayoutLabel(onlyLayout, t)}`,
+        id: processorItemId(processor),
+        label: processor.displayName,
+      },
+    ];
   }
 
-  const baseLabels = layouts.map((layout) => processorLayoutLabel(layout, t));
+  const namedLayouts = layouts.map((layout) => ({
+    layout,
+    label: processorLayoutLabel(layout, t),
+  }));
   const labelCounts = new Map<string, number>();
-  for (const label of baseLabels) labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+  for (const { label } of namedLayouts) labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
   const seenLabels = new Map<string, number>();
-  return layouts.map((layout, index) => {
-    const baseLabel = baseLabels[index] ?? processorLayoutLabel(layout, t);
+  return namedLayouts.map(({ layout, label: baseLabel }) => {
     const ordinal = (seenLabels.get(baseLabel) ?? 0) + 1;
     seenLabels.set(baseLabel, ordinal);
-    const label = (labelCounts.get(baseLabel) ?? 0) > 1 ? `${baseLabel} · ${ordinal}` : baseLabel;
+    const label = labelCounts.get(baseLabel) !== 1 ? `${baseLabel} · ${ordinal}` : baseLabel;
     return {
       description: `${identity} · ${processorLayoutDescription(layout, t)}`,
       id: processorLayoutItemId(processor.typeId, layout.layoutId),

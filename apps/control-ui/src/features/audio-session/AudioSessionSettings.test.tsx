@@ -1,11 +1,12 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { expect, it, vi } from 'vitest';
 import { StorybookMockControlPort } from '../../core/control-port/StorybookMockControlPort';
-import type {
-  AudioSessionStatus,
-  GraphApplyResponse,
-  RuntimeGraphDocument,
+import {
+  type AudioSessionStatus,
+  ControlPortError,
+  type GraphApplyResponse,
+  type RuntimeGraphDocument,
 } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
@@ -91,16 +92,14 @@ function view(
   );
 }
 
-async function chooseBuffer(value = '128', allowHiddenOption = false) {
-  const input = screen.getByRole('combobox', { name: 'Buffer size' });
-  if (input.hasAttribute('disabled')) return;
-  fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
-  fireEvent.click(input);
-  fireEvent.click(
-    allowHiddenOption
-      ? screen.getByRole('option', { name: value, hidden: true })
-      : await screen.findByRole('option', { name: value }),
-  );
+async function chooseBuffer(value = '128') {
+  if (!screen.queryByRole('listbox')) {
+    const input = screen.getByRole('button', { name: /Processing buffer$/ });
+    if (input.hasAttribute('disabled')) return;
+    fireEvent.click(input);
+  }
+  const list = await screen.findByRole('listbox');
+  fireEvent.click(within(list).getByRole('option', { name: value }));
 }
 
 it('stacks native and request errors and allows retry of the same single supported buffer', async () => {
@@ -142,7 +141,7 @@ it('blocks buffer writes, including a delivered selector callback, while graph e
   const selectorSpy = vi.spyOn(inlineSelectModule, 'InlineSelect');
   try {
     render(view(controlPort, onApplied, onBusyChange, session, true));
-    expect(screen.getByRole('combobox')).toBeDisabled();
+    expect(screen.getByRole('button')).toBeDisabled();
     const selectorProps = selectorSpy.mock.calls.at(-1)?.[0];
     expect(selectorProps?.disabled).toBe(true);
     if (!selectorProps) throw new Error('InlineSelect was not rendered');
@@ -163,9 +162,9 @@ it('submits advertised processing buffer 32 without changing the clock-owned rat
     capabilities: { ...session.capabilities, supportedBlockFrames: [32, 64, 128, 256] },
   };
   render(view(controlPort, vi.fn(), vi.fn(), editable));
-  fireEvent.click(screen.getByRole('combobox', { name: 'Buffer size' }));
+  fireEvent.click(screen.getByRole('button', { name: /Processing buffer$/ }));
   await chooseBuffer('32');
-  expect(screen.getByRole('combobox', { name: 'Buffer size' })).toHaveValue('32');
+  expect(screen.getByRole('button', { name: /Processing buffer$/ })).toHaveTextContent('32');
   await waitFor(() =>
     expect(controlPort.reconfigureSession).toHaveBeenCalledWith({
       expectedRevision: graph.revision,
@@ -190,8 +189,8 @@ it('exposes all advertised buffers without offering an independent graph sample 
       },
     }),
   );
-  expect(screen.queryByRole('combobox', { name: 'Sample rate' })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('combobox', { name: 'Buffer size' }));
+  expect(screen.queryByRole('button', { name: /Sample rate$/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /Processing buffer$/ }));
   for (const buffer of buffers)
     expect(screen.getByRole('option', { name: String(buffer) })).toBeInTheDocument();
   await chooseBuffer('2048');
@@ -211,11 +210,11 @@ it('does not submit stale choices while native format discovery is unavailable',
     capabilities: { ...session.capabilities, supportedBlockFrames: [] },
   };
   const { rerender } = render(view(controlPort, vi.fn(), vi.fn(), unavailable));
-  expect(screen.getByRole('combobox')).toBeDisabled();
+  expect(screen.getByRole('button')).toBeDisabled();
   await chooseBuffer();
   expect(controlPort.reconfigureSession).not.toHaveBeenCalled();
   rerender(view(controlPort));
-  expect(screen.getByRole('combobox')).toBeEnabled();
+  expect(screen.getByRole('button')).toBeEnabled();
   await chooseBuffer();
   await waitFor(() => expect(controlPort.reconfigureSession).toHaveBeenCalledOnce());
 });
@@ -237,13 +236,13 @@ it('does not deliver an old port final document or clear the new owner busy stat
   // jsdom has no layout bounds after a disabled-to-enabled rerender, so Floating UI
   // hides the portal even though the Combobox is expanded. Exercise this port race
   // through the same option submission without weakening its ownership assertions.
-  await chooseBuffer('128', true);
+  await chooseBuffer('128');
   await waitFor(() => expect(nextPort.getGraph).toHaveBeenCalledTimes(1));
   const busyCalls = onBusyChange.mock.calls.length;
   await act(async () => oldRead.resolve({ ...graph, revision: 100 }));
   expect(onApplied).not.toHaveBeenCalled();
   expect(onBusyChange).toHaveBeenCalledTimes(busyCalls);
-  expect(screen.getByRole('combobox')).toBeDisabled();
+  expect(screen.getByRole('button')).toBeDisabled();
   rendered.unmount();
   await act(async () => nextRead.resolve(graph));
   expect(nextPort.reconfigureSession).not.toHaveBeenCalled();
@@ -279,7 +278,7 @@ it('ignores a rejected old request after replacing the port', async () => {
   await act(async () => read.reject(new Error('old connection failed')));
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   expect(onBusyChange).toHaveBeenCalledTimes(busyCalls);
-  expect(screen.getByRole('combobox')).toBeEnabled();
+  expect(screen.getByRole('button')).toBeEnabled();
 });
 
 it.each(['reconfiguration', 'activation'] as const)(
@@ -354,11 +353,11 @@ it('follows external format changes in untouched fields without sending a native
     },
   };
   rendered.rerender(view(controlPort, vi.fn(), vi.fn(), nextSession));
-  expect(screen.queryByRole('combobox', { name: 'Sample rate' })).not.toBeInTheDocument();
-  expect(screen.getByRole('combobox', { name: 'Buffer size' })).toHaveValue('256');
+  expect(screen.queryByRole('button', { name: /Sample rate$/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Processing buffer$/ })).toHaveTextContent('256');
   expect(controlPort.reconfigureSession).not.toHaveBeenCalled();
   rendered.rerender(view(port(), vi.fn(), vi.fn(), nextSession));
-  expect(screen.getByRole('combobox', { name: 'Buffer size' })).toHaveValue('256');
+  expect(screen.getByRole('button', { name: /Processing buffer$/ })).toHaveTextContent('256');
 });
 
 it('uses the current clock rate for a selection after an external format change', async () => {
@@ -380,9 +379,9 @@ it('uses the current clock rate for a selection after an external format change'
   );
   // An unchanged stale status poll must not flash back to the old buffer.
   rendered.rerender(view(controlPort, vi.fn(), vi.fn(), { ...changed }));
-  expect(screen.getByRole('combobox')).toHaveValue('256');
+  expect(screen.getByRole('button')).toHaveTextContent('256');
   rendered.rerender(view(port(), vi.fn(), vi.fn(), changed));
-  expect(screen.getByRole('combobox')).toHaveValue('512');
+  expect(screen.getByRole('button')).toHaveTextContent('512');
 });
 
 it('defers external field updates during apply and adopts them when the request finishes', async () => {
@@ -409,13 +408,47 @@ it('defers external field updates during apply and adopts them when the request 
       format: { sampleRate: 44100, blockFrames: 256 },
     }),
   );
-  expect(screen.getByRole('combobox', { name: 'Buffer size' })).toHaveValue('128');
-  expect(screen.getByRole('combobox', { name: 'Buffer size' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: /Processing buffer$/ })).toHaveTextContent('128');
+  expect(screen.getByRole('button', { name: /Processing buffer$/ })).toBeDisabled();
   await act(async () => pending.resolve({ protocolVersion: 1, revision: 2, state: 'active' }));
-  expect(screen.getByRole('combobox', { name: 'Buffer size' })).toHaveValue('256');
+  expect(screen.getByRole('button', { name: /Processing buffer$/ })).toHaveTextContent('256');
   expect(controlPort.reconfigureSession).toHaveBeenCalledTimes(1);
   expect(controlPort.reconfigureSession).toHaveBeenCalledWith({
     expectedRevision: graph.revision,
     format: session.format,
   });
+});
+
+it('keeps readback unchanged and releases its lease when native reconfiguration reports the existing revision', async () => {
+  await i18n.changeLanguage('en');
+  const source = port();
+  source.reconfigureSession.mockResolvedValue({
+    protocolVersion: 1,
+    revision: graph.revision,
+    state: 'active',
+  });
+  const read = vi.spyOn(source, 'getGraph');
+  const applied = vi.fn();
+  const busy = vi.fn();
+  render(view(source, applied, busy));
+  await chooseBuffer();
+  await waitFor(() => expect(busy).toHaveBeenLastCalledWith(false));
+  expect(read).toHaveBeenCalledOnce();
+  expect(applied).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: /Processing buffer$/ })).toHaveTextContent('128');
+});
+
+it('shows the native session rejection code without replacing its readback', async () => {
+  await i18n.changeLanguage('en');
+  const source = port();
+  source.reconfigureSession.mockRejectedValue(
+    new ControlPortError(409, { code: 'graph_revision_stale', parameters: {} }),
+  );
+  render(view(source));
+  await chooseBuffer();
+  await waitFor(() => expect(screen.getByRole('alert')).toBeVisible());
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    i18n.t('audioSession.errors.graph_revision_stale'),
+  );
+  expect(screen.getByRole('button', { name: /Processing buffer$/ })).toHaveTextContent('128');
 });

@@ -132,9 +132,9 @@ describe.each(['en', 'ko-KR', 'pseudo'])('Studio footer health in %s', (locale) 
       expect(button).toBeDisabled();
       expect(button).toHaveAttribute('aria-pressed', 'false');
       expect(button).toHaveAttribute('aria-busy', 'false');
-      expect(button).toHaveAttribute('title', label);
+      expect(button).not.toHaveAttribute('title');
       expect(button).toHaveAttribute('aria-description', label);
-      expect(button).toHaveTextContent(i18n.t('studio.engineShort'));
+      expect(button.textContent).toBe('');
       expect(screen.queryByRole('img', { name: label })).not.toBeInTheDocument();
       expect(screen.queryByText(i18n.t('driver.states.ready'))).not.toBeInTheDocument();
       expect(screen.queryByText(label)).not.toBeInTheDocument();
@@ -143,32 +143,29 @@ describe.each(['en', 'ko-KR', 'pseudo'])('Studio footer health in %s', (locale) 
   );
 
   it.each([
-    [true, false, 'audioSession.powerOff'],
-    [false, false, 'audioSession.powerOn'],
-    [true, true, 'audioSession.powerChanging'],
-    [false, true, 'audioSession.powerChanging'],
+    [true, false, 'audioSession.pause'],
+    [false, false, 'audioSession.resume'],
+    [true, true, 'audioSession.changing'],
+    [false, true, 'audioSession.changing'],
   ] as const)(
     'shows confirmed power %s with transition %s',
     async (enabled, transitioning, key) => {
       await i18n.changeLanguage(locale);
       const view = fixture({ ...healthy, enginePower: { enabled, transitioning } });
       const button = await screen.findByRole('button', { name: i18n.t(key) });
-      expect(button).toHaveAttribute('aria-pressed', String(enabled));
+      expect(button).toHaveAttribute('aria-pressed', String(!enabled));
       expect(button).toHaveAttribute('aria-busy', String(transitioning));
-      expect(button).toHaveAttribute(
-        'data-tone',
-        transitioning ? 'warning' : enabled ? 'positive' : 'neutral',
-      );
+      expect(button).toHaveAttribute('data-tone', transitioning ? 'warning' : 'neutral');
       expect(button).toHaveAttribute('aria-description', i18n.t('routing.nodeStatus.running'));
       // The fixture has no power mutation capability, so it must remain read-only.
       expect(button).toBeDisabled();
-      expect(button).toHaveTextContent(i18n.t('studio.engineShort'));
+      expect(button.textContent).toBe('');
       view.unmount();
     },
   );
 
   it.each([
-    ['running', null, 'positive', 'routing.nodeStatus.running'],
+    ['running', null, 'neutral', 'routing.nodeStatus.running'],
     ['running', 'processing_failed', 'critical', 'routing.nodeStatus.failed'],
     ['idle', null, 'warning', 'routing.nodeStatus.idle'],
     [undefined, null, 'warning', 'routing.nodeStatus.unknown'],
@@ -182,13 +179,13 @@ describe.each(['en', 'ko-KR', 'pseudo'])('Studio footer health in %s', (locale) 
         audioSession: { ...session, processingState, issue },
         enginePower: { enabled: true, transitioning: false },
       });
-      const action = i18n.t('audioSession.powerOff');
+      const action = i18n.t('audioSession.pause');
       const health = i18n.t(key);
       const button = await screen.findByRole('button', { name: action });
-      expect(button).toHaveAttribute('aria-pressed', 'true');
+      expect(button).toHaveAttribute('aria-pressed', 'false');
       expect(button).toHaveAttribute('data-tone', tone);
       expect(button).toHaveAttribute('aria-description', health);
-      expect(button).toHaveAttribute('title', `${action} · ${health}`);
+      expect(button).not.toHaveAttribute('title');
       view.unmount();
     },
   );

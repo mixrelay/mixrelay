@@ -11,6 +11,11 @@ use std::{fs, sync::Arc};
 
 fn layout(x: f64) -> GraphLayout {
     GraphLayout {
+        node_labels: [
+            ("default-virtual-io:input".into(), "영상용".into()),
+            ("default-virtual-io:output".into(), "회의용".into()),
+        ]
+        .into(),
         positions: [
             (
                 "default-virtual-io:input".into(),
@@ -391,4 +396,69 @@ fn pre_layout_catalogs_load_without_reinitialization_and_corrupt_layouts_are_pro
         controller(default_duplex_document(1, None)).with_graph_catalog_path(fixture.path());
     assert!(rejected.graph_catalog().is_err());
     assert_eq!(fs::read(fixture.path()).unwrap(), bytes);
+}
+
+#[test]
+fn display_labels_validate_without_changing_audio_identity_or_revision() {
+    for label in ["", "   ", "line\nbreak", "tab\tname"] {
+        let mut value = GraphLayout::default();
+        value.node_labels.insert("node".into(), label.into());
+        assert_layout_validity(value, false);
+    }
+    let mut long = GraphLayout::default();
+    long.node_labels.insert("node".into(), "a".repeat(129));
+    assert_layout_validity(long, false);
+    let mut invalid_id = GraphLayout::default();
+    invalid_id.node_labels.insert(" ".into(), "Video".into());
+    assert_layout_validity(invalid_id, false);
+    let mut many = GraphLayout::default();
+    many.node_labels = (0..4097)
+        .map(|id| (format!("node-{id}"), "name".into()))
+        .collect();
+    assert_layout_validity(many, false);
+    let fixture = Fixture::new();
+    let engine =
+        controller(default_duplex_document(1, None)).with_graph_catalog_path(fixture.path());
+    let before = engine.graph_catalog().unwrap();
+    let saved = engine
+        .update_graph_layout(
+            &before.active_id,
+            GraphLayoutRequest {
+                expected_layout_revision: before.layout_revision,
+                layout: layout(120.0),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        saved.layout.node_labels["default-virtual-io:input"],
+        "영상용"
+    );
+    assert_eq!(
+        saved.layout.node_labels["default-virtual-io:output"],
+        "회의용"
+    );
+    let after = engine.graph_catalog().unwrap();
+    assert_eq!(before.document, after.document);
+    assert_eq!(before.catalog_revision, after.catalog_revision);
+    let mut reset = saved.layout;
+    reset.node_labels.remove("default-virtual-io:input");
+    let saved = engine
+        .update_graph_layout(
+            &before.active_id,
+            GraphLayoutRequest {
+                expected_layout_revision: saved.layout_revision,
+                layout: reset,
+            },
+        )
+        .unwrap();
+    assert!(
+        !saved
+            .layout
+            .node_labels
+            .contains_key("default-virtual-io:input")
+    );
+    assert_eq!(
+        saved.layout.node_labels["default-virtual-io:output"],
+        "회의용"
+    );
 }

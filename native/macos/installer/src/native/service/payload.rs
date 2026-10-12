@@ -19,46 +19,21 @@ impl NativeServiceLifecycle {
     ) -> Result<Option<LaunchdConfiguration>, NativeError> {
         let path_for =
             |target: OwnedTarget| layout.root().join(target.path().trim_start_matches('/'));
-        let mut present_targets = Vec::new();
-        for target in OwnedTarget::all() {
-            let path = path_for(target);
-            match fs::symlink_metadata(&path) {
-                Ok(_) => present_targets.push(target),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(source) => {
-                    return Err(NativeError::Io {
-                        operation: "inspect owned payload",
-                        path,
-                        source,
-                    });
-                }
-            }
-        }
+        let present_targets = present_targets(layout)?;
         if present_targets.is_empty() {
             return Ok(None);
         }
-        if self.operation == OperationKind::Install {
-            let core_targets = [
-                OwnedTarget::App,
-                OwnedTarget::Driver,
-                OwnedTarget::Hal,
-                OwnedTarget::Launchd,
-            ];
-            let core_complete = core_targets
-                .iter()
-                .all(|target| present_targets.contains(target));
-            let remover_complete = present_targets.contains(&OwnedTarget::Uninstaller)
-                == present_targets.contains(&OwnedTarget::RemovalLaunchd);
-            if !core_complete || !remover_complete {
-                return Err(NativeError::Trust {
-                    path: layout.root().to_path_buf(),
-                    reason: "an existing MixRelay installation is partial; refusing replacement",
-                });
-            }
-        }
+        let core_present = present_targets.iter().any(|target| {
+            matches!(
+                target,
+                OwnedTarget::App | OwnedTarget::Driver | OwnedTarget::Hal | OwnedTarget::Launchd
+            )
+        });
         for target in &present_targets {
             let mode = match target {
-                OwnedTarget::Launchd | OwnedTarget::RemovalLaunchd => 0o644,
+                OwnedTarget::Launchd
+                | OwnedTarget::RemovalLaunchd
+                | OwnedTarget::RuntimeLaunchd => 0o644,
                 _ => 0o755,
             };
             validate_owned_target(&path_for(*target), mode)?;
@@ -70,17 +45,32 @@ impl NativeServiceLifecycle {
                 .verify_for_removal(layout)
                 .map_err(NativeError::from);
         }
-        if present_targets.contains(&OwnedTarget::Uninstaller) {
-            crate::removal::verify_installed_remover(&self.team).map_err(NativeError::UserData)?;
+        if present_targets.contains(&OwnedTarget::RuntimeEngine)
+            != present_targets.contains(&OwnedTarget::RuntimeLaunchd)
+        {
+            return Err(NativeError::Trust {
+                path: layout.root().to_path_buf(),
+                reason: "runtime installation is partial",
+            });
         }
-        self.verifier
-            .verify_installed(
-                path_for(OwnedTarget::App),
-                path_for(OwnedTarget::Hal),
-                path_for(OwnedTarget::Driver),
-                path_for(OwnedTarget::Launchd),
+        if present_targets.contains(&OwnedTarget::RuntimeEngine) {
+            self.verifier
+                .verify_graph_engine(&path_for(OwnedTarget::RuntimeEngine))?;
+            crate::runtime_definition::validate_installed(
+                &read_bounded_file(&path_for(OwnedTarget::RuntimeLaunchd))?,
+                self.account.account(),
             )
-            .map(Some)
+            .map_err(NativeError::UserData)?;
+        }
+        if !core_present {
+            self.verifier.verify_for_removal(layout)?;
+            return Ok(None);
+        }
+        // Verify every present target separately, including legacy bundles. A
+        // split install or missing component may be repaired, but foreign code
+        // never becomes ours merely because it occupies an expected path.
+        self.verifier
+            .verify_for_removal(layout)
             .map_err(NativeError::from)
     }
 
@@ -90,48 +80,86 @@ impl NativeServiceLifecycle {
     ) -> Result<(), NativeError> {
         let path = staged.payload_path(OwnedTarget::Launchd);
         let bytes = definition.to_xml()?;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(&path)
-            .map_err(|source| NativeError::Io {
-                operation: "open private launchd payload",
-                path: path.clone(),
-                source,
-            })?;
-        let metadata = file.metadata().map_err(|source| NativeError::Io {
-            operation: "inspect private launchd payload",
-            path: path.clone(),
-            source,
-        })?;
-        if !metadata.is_file() || metadata.nlink() != 1 || metadata.uid() != 0 {
-            return Err(NativeError::Trust {
-                path,
-                reason: "private launchd payload is not a private root-owned regular inode",
-            });
-        }
-        file.set_len(0).map_err(|source| NativeError::Io {
-            operation: "truncate private launchd payload",
-            path: path.clone(),
-            source,
-        })?;
-        file.write_all(&bytes).map_err(|source| NativeError::Io {
-            operation: "write account-bound launchd payload",
-            path: path.clone(),
-            source,
-        })?;
-        file.sync_all().map_err(|source| NativeError::Io {
-            operation: "sync account-bound launchd payload",
-            path: path.clone(),
-            source,
-        })?;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).map_err(|source| {
-            NativeError::Io {
-                operation: "set account-bound launchd payload mode",
-                path,
-                source,
+        write_private_plist(&path, &bytes)
+    }
+}
+
+fn present_targets(layout: &FilesystemLayout) -> Result<Vec<OwnedTarget>, NativeError> {
+    let path_for = |target: OwnedTarget| layout.root().join(target.path().trim_start_matches('/'));
+    let mut present_targets = Vec::new();
+    for target in OwnedTarget::all() {
+        let path = path_for(target);
+        match fs::symlink_metadata(&path) {
+            Ok(_) => present_targets.push(target),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(NativeError::Io {
+                    operation: "inspect owned payload",
+                    path,
+                    source,
+                });
             }
-        })
+        }
+    }
+    Ok(present_targets)
+}
+
+fn write_private_plist(path: &std::path::Path, bytes: &[u8]) -> Result<(), NativeError> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .map_err(|source| NativeError::Io {
+            operation: "open private launchd payload",
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let metadata = file.metadata().map_err(|source| NativeError::Io {
+        operation: "inspect private launchd payload",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if !metadata.is_file() || metadata.nlink() != 1 || metadata.uid() != 0 {
+        return Err(NativeError::Trust {
+            path: path.to_path_buf(),
+            reason: "private launchd payload is not a private root-owned regular inode",
+        });
+    }
+    file.set_len(0).map_err(|source| NativeError::Io {
+        operation: "truncate private launchd payload",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    file.write_all(bytes).map_err(|source| NativeError::Io {
+        operation: "write account-bound launchd payload",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    file.sync_all().map_err(|source| NativeError::Io {
+        operation: "sync account-bound launchd payload",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o644)).map_err(|source| NativeError::Io {
+        operation: "set account-bound launchd payload mode",
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+impl NativeServiceLifecycle {
+    pub(super) fn write_runtime_plist(&self, staged: &FilesystemStaged) -> Result<(), NativeError> {
+        let path = staged.payload_path(OwnedTarget::RuntimeLaunchd);
+        if path.exists() {
+            let definition = crate::runtime_definition::for_account(self.account.account())
+                .map_err(NativeError::UserData)?;
+            let mut bytes = Vec::new();
+            definition
+                .to_writer_xml(&mut bytes)
+                .map_err(|error| NativeError::UserData(error.into()))?;
+            write_private_plist(&path, &bytes)?;
+        }
+        Ok(())
     }
 }
 

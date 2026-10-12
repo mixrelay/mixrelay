@@ -73,3 +73,70 @@ it('default controls and object key order do not manufacture structural conflict
   };
   expect(controlChanges(before, after)).toEqual([]);
 });
+
+it('restores omitted controls to defaults and ignores nonnumeric gain values', () => {
+  const old = {
+    ...before,
+    nodes: [{ ...first(before.nodes), control: { enabled: false, muted: true } }],
+  };
+  expect(controlChanges(old, before)).toEqual([
+    { id: 'gain', type: 'gain', value: { enabled: true, muted: false } },
+  ]);
+  const malformed = {
+    ...before,
+    nodes: [{ ...first(before.nodes), config: { channels: 2, gainDb: 'invalid' } }],
+  };
+  expect(controlChanges(before, malformed)).toEqual([]);
+  const absent = { ...before, nodes: [{ ...first(before.nodes), config: null }] };
+  expect(acknowledgedNodeControl(absent, 'gain', { gainDb: -3 }, 4).nodes[0]?.config).toEqual({
+    gainDb: -3,
+  });
+});
+
+it('does not attach runtime controls to UI-only nodes or a replacement processor type', () => {
+  const model = runtimeGraphToAudioGraph(before);
+  const firstNode = first(model.nodes);
+  const uiOnly = { ...firstNode, id: 'visual', runtime: undefined };
+  const replacement = {
+    ...firstNode,
+    runtime: { ...firstNode.runtime, type: 'limiter', config: null },
+  };
+  const rebased = rebaseControls({ ...model, nodes: [uiOnly, replacement] }, [
+    { id: 'gain', type: 'gain', value: { gainDb: -4 } },
+  ]);
+  expect(rebased.nodes).toEqual([uiOnly, replacement]);
+});
+
+it('rebases a mute with missing configuration without inventing gain geometry', () => {
+  const model = runtimeGraphToAudioGraph(before);
+  const original = first(model.nodes);
+  if (!original.runtime) throw new Error('fixture runtime');
+  const malformed = {
+    ...original,
+    appearance: { ...original.appearance, gainControl: undefined },
+    runtime: { ...original.runtime, config: null },
+  };
+  const result = rebaseControls({ ...model, nodes: [malformed] }, [
+    { id: 'gain', type: 'gain', value: { gainDb: -4, muted: true } },
+  ]);
+  expect(first(result.nodes).runtime?.config).toBeNull();
+  expect(first(result.nodes).runtime?.control?.muted).toBe(true);
+  expect(first(result.nodes).appearance.gainControl).toBeUndefined();
+});
+
+it('updates gain configuration without requiring a gain widget or a gain node type', () => {
+  const created = runtimeGraphToAudioGraph(before);
+  const original = first(created.nodes);
+  if (!original.runtime) throw new Error('fixture runtime');
+  const virtual = {
+    ...original,
+    appearance: { ...original.appearance, gainControl: undefined },
+    runtime: { ...original.runtime, type: 'application_capture' },
+  };
+  const result = rebaseControls({ ...created, nodes: [virtual] }, [
+    { id: 'gain', type: 'application_capture', value: { gainDb: -8 } },
+  ]);
+  expect(first(result.nodes).runtime?.config).toMatchObject({ gainDb: -8 });
+  expect(first(result.nodes).appearance.detail).toBe(original.appearance.detail);
+  expect(first(result.nodes).appearance.gainControl).toBeUndefined();
+});

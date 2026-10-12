@@ -11,12 +11,16 @@ it('checks and opens an installer through native catalog commands', async () => 
   const port = new TauriUpdatesPort();
   vi.mocked(invoke).mockResolvedValue(undefined);
   await port.check();
-  await port.openDownload('mix-relay-driver', 'https://downloads.example/driver.pkg');
+  await port.openDownload('mix-relay', 'https://downloads.example/driver.pkg');
   expect(vi.mocked(invoke).mock.calls).toEqual([
     ['updates_check'],
-    ['updates_open_download', {
-      product: 'mix-relay-driver', url: 'https://downloads.example/driver.pkg',
-    }],
+    [
+      'updates_open_download',
+      {
+        product: 'mix-relay',
+        url: 'https://downloads.example/driver.pkg',
+      },
+    ],
   ]);
 });
 

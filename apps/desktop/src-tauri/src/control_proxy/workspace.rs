@@ -11,7 +11,29 @@ use tauri::Manager;
 #[derive(Default)]
 pub(crate) struct WorkspaceFiles(Mutex<Option<PathBuf>>);
 
-#[derive(Clone, Copy, Deserialize, PartialEq)]
+impl WorkspaceFiles {
+    pub(crate) fn current(&self) -> Result<Option<PathBuf>, String> {
+        self.0
+            .lock()
+            .map(|path| path.clone())
+            .map_err(|_| "workspace path lock poisoned".into())
+    }
+
+    fn remember(&self, action: FileAction, payload: &serde_json::Value) -> Result<(), String> {
+        let path = if action == FileAction::New {
+            None
+        } else {
+            Some(
+                serde_json::from_value(payload["operation"]["path"].clone())
+                    .map_err(|_| "invalid workspace path")?,
+            )
+        };
+        *self.0.lock().map_err(|_| "workspace path lock poisoned")? = path;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Deserialize, serde::Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum FileAction {
     New,
@@ -36,17 +58,26 @@ pub(crate) async fn workspace_file(
     files: tauri::State<'_, WorkspaceFiles>,
     request: FileRequest,
 ) -> Result<Option<ControlProxyResponse>, String> {
+    let connection = client
+        .background
+        .lock()
+        .map_err(|_| "background connection lock poisoned")?
+        .clone();
     let locale = resolve_locale(&request.locale);
     if matches!(request.action, FileAction::New | FileAction::Open)
         && !confirm_replace(&app, locale).await
     {
         return Ok(None);
     }
-    let current = files
-        .0
-        .lock()
-        .map_err(|_| text(locale, Text::WorkspaceLockFailed))?
-        .clone();
+    let current = if let Some(connection) = connection {
+        let value = connection
+            .invoke("workspace_path", serde_json::Value::Null)
+            .await
+            .map_err(|error| error.to_string())?;
+        serde_json::from_value(value).map_err(|error| error.to_string())?
+    } else {
+        files.current()?
+    };
     let selected = select_path(&app, request.action, current, locale).await?;
     if selected.is_none() && request.action != FileAction::New {
         return Ok(None);
@@ -71,7 +102,35 @@ pub(crate) async fn workspace_file(
     Ok(Some(response))
 }
 
-async fn submit(
+pub(crate) async fn submit(
+    app: &tauri::AppHandle,
+    client: &ControlProxyClient,
+    action: FileAction,
+    payload: serde_json::Value,
+) -> Result<ControlProxyResponse, String> {
+    let background = client
+        .background
+        .lock()
+        .map_err(|_| "background connection lock poisoned")?
+        .clone();
+    if let Some(connection) = background {
+        let value = connection
+            .invoke(
+                "workspace_submit",
+                serde_json::json!({"action":action,"payload":payload}),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        return serde_json::from_value(value).map_err(|error| error.to_string());
+    }
+    let response = submit_local(app, client, action, payload.clone()).await?;
+    if (200..300).contains(&response.status) {
+        app.state::<WorkspaceFiles>().remember(action, &payload)?;
+    }
+    Ok(response)
+}
+
+async fn submit_local(
     app: &tauri::AppHandle,
     client: &ControlProxyClient,
     action: FileAction,

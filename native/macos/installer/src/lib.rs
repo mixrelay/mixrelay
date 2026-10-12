@@ -24,8 +24,11 @@ mod release;
 #[cfg(target_os = "macos")]
 pub mod removal;
 mod request;
+mod runtime_definition;
 mod transaction;
 mod universal;
+mod versions;
+pub use versions::optional_driver_install_needed;
 
 pub use backend::{
     LeaseKind, PlatformBackend, Preflight, PreflightError, PreflightResult, RollbackFailure,
@@ -33,7 +36,7 @@ pub use backend::{
 pub use contract::{
     APP_LEASE_PATH, APP_PATH, DRIVER_MANAGER_LEASE_PATH, DRIVER_PATH, ENGINE_LEASE_PATH, HAL_PATH,
     INSTALLER_LEASE_PATH, LAUNCHD_PATH, LIFECYCLE_DIRECTORY, OwnedTarget, REMOVAL_LAUNCHD_PATH,
-    UNINSTALLER_PATH,
+    RUNTIME_ENGINE_PATH, RUNTIME_LAUNCHD_PATH, UNINSTALLER_PATH,
 };
 #[cfg(unix)]
 pub use coordinated::{
@@ -47,13 +50,14 @@ pub use filesystem::{
 };
 pub use launchd::{LaunchdConfiguration, LaunchdError, ServiceAccount};
 #[cfg(unix)]
-pub use leases::{LeaseError, LifecycleDirectory, LifecycleLeaseGuard};
+pub use leases::{EditorLeaseGuard, LeaseError, LifecycleDirectory, LifecycleLeaseGuard};
 #[cfg(target_os = "macos")]
 pub use native::{
     NativeError, NativeServiceLifecycle, NativeServiceRegistration, NativeServiceSnapshot,
-    ResolvedServiceAccount, check_coreaudio_response, cleanup_user_data, hal_is_loaded,
-    initialize_lifecycle_storage, require_lifecycle_storage, require_root, resolve_console_account,
-    resolve_install_account, resolve_removal_account,
+    ResolvedServiceAccount, check_coreaudio_response, cleanup_user_data, graph_app_ready,
+    hal_is_loaded, initialize_app_lifecycle_storage, initialize_editor_lifecycle_storage,
+    initialize_lifecycle_storage, install_graph_app, require_lifecycle_storage, require_root,
+    resolve_console_account, resolve_install_account, resolve_removal_account,
 };
 #[cfg(unix)]
 pub use release::{ReleaseError, ReleasePayloadVerifier, SigningTeam};

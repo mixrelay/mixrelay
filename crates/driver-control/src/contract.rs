@@ -165,6 +165,9 @@ pub trait DriverBackend: Send {
 /// Control, native, persistence and HTTP failures kept distinct for callers.
 #[derive(Debug, Error)]
 pub enum DriverError {
+    /// Paid inventory changes were rejected by the service owner.
+    #[error("Adding, removing or renaming devices requires a MixRelay license")]
+    AccessDenied,
     /// Invalid geometry, capability or command.
     #[error("invalid Driver request: {0}")]
     Invalid(String),

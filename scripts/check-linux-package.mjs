@@ -49,7 +49,7 @@ const MAX_PACKAGE_CONTENT_BYTES = 1024 * 1024 * 1024;
 const MAX_LISTING_ENTRIES = 50_000;
 const MAX_TAR_STREAM_BYTES = MAX_PACKAGE_CONTENT_BYTES + MAX_LISTING_ENTRIES * 1024 + 1024;
 const MAX_EXECUTABLE_BYTES = 256 * 1024 * 1024;
-const MAX_ELF_OUTPUT_BYTES = executables.length * MAX_EXECUTABLE_BYTES;
+const MAX_ELF_OUTPUT_BYTES = 3 * MAX_EXECUTABLE_BYTES;
 const MAX_STDERR_BYTES = 16 * 1024;
 const PROCESS_TIMEOUT_MS = 120_000;
 
@@ -67,10 +67,19 @@ function inspectionEnvironment() {
   return env;
 }
 
-function packageMetadata({ architecture, depends, contents, packageName = 'mix-relay' }) {
+function packageMetadata({ architecture, depends, contents, packageName = 'mix-relay', version, requireUnified = false }) {
   if (!['mix-relay', 'mix-relay-driver'].includes(packageName)) throw new Error(`Unsupported package: ${packageName}`);
   const driver = packageName === 'mix-relay-driver';
-  const requiredExecutables = driver ? driverExecutables : executables;
+  const unified = !driver && contents.includes('usr/bin/mixrelay-driver-service');
+  if (requireUnified && (packageName !== 'mix-relay' || !unified)) throw new Error('The complete MixRelay package must include the editor and both audio services');
+  const parsedVersion = version?.match(/^(\d+)\.(\d+)\.(\d+)(?:-\d+)?$/);
+  const driverRuntime = parsedVersion && (Number(parsedVersion[1]) > 0 || Number(parsedVersion[2]) > 1 || Number(parsedVersion[3]) >= 2);
+  const requiredExecutables = unified ? [...executables, 'usr/bin/mixrelay-driver-service'] : driverRuntime
+    ? (driver ? [...driverExecutables, 'usr/bin/mixrelay-engine-service'] : ['usr/bin/mixrelay-desktop'])
+    : (driver ? driverExecutables : executables);
+  const dependencies = driver && driverRuntime
+    ? driverDependencies.concat([['liblilv-0-0'], ['gnome-keyring'], ['libpam-gnome-keyring']])
+    : (driver ? driverDependencies : requiredDependencies);
   const normalizedArchitecture = architecture.trim();
   if (!Object.hasOwn(expectedElf, normalizedArchitecture)) {
     throw new Error(`Unsupported package architecture: ${normalizedArchitecture}`);
@@ -86,7 +95,7 @@ function packageMetadata({ architecture, depends, contents, packageName = 'mix-r
     return normalized.match(/^([a-z0-9][a-z0-9+.-]*)(?:\s+\([^)]*\))?$/)?.[1];
   };
   const clauses = depends.split(',').map(clause => clause.split('|').map(parseDependencyTerm));
-  for (const alternatives of driver ? driverDependencies : requiredDependencies) {
+  for (const alternatives of dependencies) {
     if (!clauses.some(clause => clause.length && clause.every(name => alternatives.includes(name)))) {
       throw new Error(`Missing required dependency: ${alternatives.join(' or ')}`);
     }
@@ -132,7 +141,7 @@ function packageMetadata({ architecture, depends, contents, packageName = 'mix-r
     }
     executableEntries.push({ path, size: file.size, memberPath: file.memberPath });
   }
-  for (const path of driver ? [] : wirePlumberFiles) {
+  for (const path of (unified || (driverRuntime ? driver : !driver)) ? wirePlumberFiles : []) {
     const file = files.get(path);
     if (!file || file.size === 0 || file.mode[0] !== '-') {
       throw new Error(`Missing non-empty regular WirePlumber payload: ${path}`);
@@ -147,14 +156,18 @@ function packageMetadata({ architecture, depends, contents, packageName = 'mix-r
       throw new Error(`Missing or invalid uninstall payload: ${path}`);
     }
   }
-  for (const path of driver ? driverFiles : documentationFiles) {
+  for (const path of unified ? [...documentationFiles, ...driverFiles.filter(path => !path.endsWith('/uninstall.sh') && !path.includes('/applications/mixrelay-driver'))] : driver ? driverFiles : documentationFiles) {
     const file = files.get(path);
     if (!file || file.size === 0 || file.mode !== '-rw-r--r--' || file.owner !== '0/0') {
       throw new Error(`Missing or invalid package documentation: ${path}`);
     }
   }
-  if (driver && (files.has('usr/bin/mixrelay-engine-service') || files.has('usr/bin/mixrelay-desktop'))) {
-    throw new Error('Driver package must not own App or graph-engine executables');
+  if (driver && (files.has('usr/bin/mixrelay-desktop') || (!driverRuntime && files.has('usr/bin/mixrelay-engine-service')))) {
+    throw new Error('Driver package must not own App executables; legacy Driver packages must not own the graph engine');
+  }
+  if (unified && (files.has('usr/bin/mixrelay-driver-manager') || files.has('usr/share/applications/mixrelay-driver-uninstall.desktop'))) throw new Error('MixRelay must have one public launch app and one remover');
+  if (!unified && driverRuntime && !driver && (files.has('usr/bin/mixrelay-engine-service') || wirePlumberFiles.some(path => files.has(path)))) {
+    throw new Error('App package must not own the Driver runtime or its WirePlumber policy');
   }
   return { architecture: normalizedArchitecture, files, executableEntries, executables: requiredExecutables };
 }
@@ -177,9 +190,9 @@ function elfHeaderArchitecture(header, path) {
 }
 
 /** Checks metadata and ELF headers without installing or executing package payloads. */
-export function validatePackage({ architecture, depends, contents, elfHeaders, packageName = 'mix-relay', version, versionReceipt }) {
-  const { architecture: normalizedArchitecture, executableEntries, executables: requiredExecutables } = packageMetadata({ architecture, depends, contents, packageName });
-  if (packageName === 'mix-relay-driver') {
+export function validatePackage({ architecture, depends, contents, elfHeaders, packageName = 'mix-relay', version, versionReceipt, requireUnified = false }) {
+  const { architecture: normalizedArchitecture, executableEntries, executables: requiredExecutables } = packageMetadata({ architecture, depends, contents, packageName, version, requireUnified });
+  if (packageName === 'mix-relay-driver' || requiredExecutables.includes('usr/bin/mixrelay-driver-service')) {
     const receipt = JSON.parse(versionReceipt ?? 'null');
     if (!receipt || !/^\d+\.\d+\.\d+$/.test(receipt.version) || receipt.version !== version?.replace(/-\d+$/, '')) {
       throw new Error('Driver version receipt must match the actual package version');
@@ -350,7 +363,7 @@ async function extractElfHeaders(archive, executableEntries, spawnProcess = spaw
   for (const entry of executableEntries) {
     const result = await extractOneElfHeader(archive, entry, spawnProcess);
     archiveBytesTotal += result.archiveBytes;
-    if (archiveBytesTotal > MAX_TAR_STREAM_BYTES * executables.length) {
+    if (archiveBytesTotal > MAX_TAR_STREAM_BYTES * executableEntries.length) {
       throw new Error('Repeated Debian payload streams exceed the bounded inspection size');
     }
     headers[entry.path] = result.header;
@@ -358,7 +371,7 @@ async function extractElfHeaders(archive, executableEntries, spawnProcess = spaw
   return headers;
 }
 
-export async function inspectPackage(path, run = spawnSync, spawnProcess = spawn) {
+export async function inspectPackage(path, run = spawnSync, spawnProcess = spawn, { requireUnified = false } = {}) {
   const archive = resolve(path);
   const field = name => {
     // Field names follow the archive for dpkg-deb --field.
@@ -369,6 +382,7 @@ export async function inspectPackage(path, run = spawnSync, spawnProcess = spawn
     return result.stdout;
   };
   const packageDetails = {
+    requireUnified,
     packageName: field('Package').trim(),
     version: field('Version').trim(),
     architecture: field('Architecture'),
@@ -376,7 +390,8 @@ export async function inspectPackage(path, run = spawnSync, spawnProcess = spawn
     contents: await listNumericOwnedContents(archive, spawnProcess),
   };
   const driver = packageDetails.packageName === 'mix-relay-driver';
-  const hooks = driver ? { preinst: 'driver-before-change.sh', prerm: 'driver-pre-remove.sh', postinst: 'driver-after-install.sh', postrm: 'driver-after-remove.sh' }
+  const unified = packageDetails.packageName === 'mix-relay' && packageDetails.contents.includes('usr/bin/mixrelay-driver-service');
+  const hooks = driver || unified ? { preinst: 'driver-before-change.sh', prerm: 'driver-pre-remove.sh', postinst: 'driver-after-install.sh', postrm: 'driver-after-remove.sh' }
     : { preinst: 'require-app-closed.sh', prerm: 'require-app-closed.sh' };
   for (const [script, source] of Object.entries(hooks)) {
     const expectedHook = readFileSync(new URL(`../packaging/linux/${source}`, import.meta.url), 'utf8');
@@ -389,7 +404,7 @@ export async function inspectPackage(path, run = spawnSync, spawnProcess = spawn
   }
   const { architecture, executableEntries, files } = packageMetadata(packageDetails);
   const elfHeaders = await extractElfHeaders(archive, executableEntries, spawnProcess);
-  if (driver) {
+  if (driver || unified) {
     const receipt = files.get('usr/share/mixrelay-driver/version.json');
     if (receipt.size > 64) throw new Error('Driver version receipt is oversized');
     const extracted = await extractOneElfHeader(archive, receipt, spawnProcess);
@@ -405,7 +420,7 @@ export async function inspectPackage(path, run = spawnSync, spawnProcess = spawn
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
     if (process.argv.length !== 3) throw new Error('Usage: node scripts/check-linux-package.mjs PACKAGE.deb');
-    console.log(JSON.stringify(await inspectPackage(process.argv[2]), null, 2));
+    console.log(JSON.stringify(await inspectPackage(process.argv[2], undefined, undefined, { requireUnified: true }), null, 2));
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

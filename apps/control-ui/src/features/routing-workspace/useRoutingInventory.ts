@@ -71,8 +71,8 @@ function useInventoryCategory<T>(load: () => Promise<T[]>) {
     failed: false,
     refreshing: false,
   });
-  const request = useRef<() => void>(() => undefined);
-  const refresh = useCallback(() => request.current(), []);
+  const request = useRef<(() => void) | null>(null);
+  const refresh = useCallback(() => request.current?.(), []);
 
   useEffect(() => {
     let active = true;
@@ -103,7 +103,7 @@ function useInventoryCategory<T>(load: () => Promise<T[]>) {
     discover();
     return () => {
       active = false;
-      request.current = () => undefined;
+      request.current = null;
     };
   }, [load]);
 

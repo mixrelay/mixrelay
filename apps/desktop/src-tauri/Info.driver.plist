@@ -15,6 +15,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>MixRelay Driver captures audio from applications you select in MixRelay for routing and recording.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MixRelay Driver accesses selected microphones and audio input devices for routing and recording.</string>
 	<key>CFBundleLocalizations</key>
 	<array>
 		<string>en</string>

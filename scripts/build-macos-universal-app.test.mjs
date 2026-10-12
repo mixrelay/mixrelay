@@ -51,6 +51,15 @@ function fixture(t) {
   writeFileSync(join(root, "CHANGELOG.md"), changelog);
   writeFileSync(unrelated, "preserve me\n");
   copyFileSync(sourceScript, script);
+  executable(join(scripts, "build-macos-driver-launcher.sh"), `#!/bin/sh
+printf 'launcher built\\n' >> "$MOCK_LOG"
+mkdir -p target/universal-apple-darwin/release
+printf 'MACHO universal SIGNED\\n' > target/universal-apple-darwin/release/mixrelay-driver-launcher
+`);
+  executable(join(scripts, "build-macos-universal-engine.sh"), `#!/bin/sh
+printf 'engine built\\n' >> "$MOCK_LOG"
+[ "\${MOCK_ENGINE_FAIL:-}" != 1 ]
+`);
   writeFileSync(join(scripts,"build-macos-removal-app.mjs"), `import * as fs from 'node:fs'; import {join} from 'node:path'; const [, , executable,helper,output]=process.argv; fs.mkdirSync(join(output,'Contents'),{recursive:true}); fs.writeFileSync(join(output,'Contents/tested-arguments'),executable+'\\n'+helper);`);
   chmodSync(script, 0o755);
 
@@ -140,6 +149,7 @@ printf 'pnpm %s\\n' "$*" >> "$MOCK_LOG"
 printf 'APPLE_SIGNING_IDENTITY=%s\\n' "\${APPLE_SIGNING_IDENTITY:-}" >> "$MOCK_LOG"
 printf 'MIXRELAY_CODESIGN_IDENTITY=%s\\n' "\${MIXRELAY_CODESIGN_IDENTITY:-}" >> "$MOCK_LOG"
 if [ "\${MOCK_PNPM_MODE:-universal}" = missing ]; then exit 0; fi
+case "$*" in *tauri.driver.conf.json*) MOCK_APP="$(dirname "$MOCK_APP")/MixRelayDriver.app" ;; esac
 mkdir -p "$MOCK_APP/Contents/MacOS"
 printf '%s\\n' '{"CFBundleShortVersionString":"1.2.3"}' > "$MOCK_APP/Contents/Info.plist"
 if [ "\${MOCK_PNPM_MODE:-universal}" = single ]; then
@@ -204,7 +214,7 @@ function runBuild(paths, extraEnv = {}, args = []) {
     MOCK_LOG: paths.log,
     MOCK_PNPM_MODE: "universal",
     MOCK_SDK: paths.sdk,
-    APPLE_SIGNING_IDENTITY: "Developer ID Application: MixRelay",
+    APPLE_SIGNING_IDENTITY: "Developer ID Application: MixRelay (AB12C3D4E5)",
     APPLE_INSTALLER_SIGNING_IDENTITY: "Developer ID Installer: MixRelay (AB12C3D4E5)",
     ...extraEnv,
   });
@@ -222,11 +232,13 @@ function assertPreserved(paths) {
 
 test("maps explicit identity before Tauri and does not force-resign valid output", (t) => {
   const paths = fixture(t);
-  const result = runBuild(paths, { MIXRELAY_CODESIGN_IDENTITY: "Developer ID Application: MixRelay" });
+  const result = runBuild(paths, { MIXRELAY_CODESIGN_IDENTITY: "Developer ID Application: MixRelay (AB12C3D4E5)" });
   assert.equal(result.status, 0, result.stderr);
   assert.match(log(paths), /--target universal-apple-darwin/);
+  assert.ok(log(paths).indexOf("launcher built") < log(paths).indexOf("pnpm "));
+  assert.ok(log(paths).indexOf("engine built") < log(paths).indexOf("pnpm "));
   assert.match(log(paths), /APPLE_SIGNING_IDENTITY=Developer ID Application: MixRelay/);
-  assert.doesNotMatch(log(paths), /codesign --force/);
+  assert.ok(!log(paths).split("\n").some(line => line.startsWith("codesign --force") && line.endsWith("/MixRelay.app")));
   assert.equal(readFileSync(paths.unrelated, "utf8"), "preserve me\n");
 });
 
@@ -240,13 +252,12 @@ test("rejects conflicting signing identities before invoking Tauri", (t) => {
   assert.doesNotMatch(log(paths), /^pnpm /m);
 });
 
-test("Driver product builds source helpers and signs its independent removal app before the outer manager", (t) => {
+test("complete product builds helpers and engine with one public app and remover", (t) => {
   const paths = fixture(t);
-  paths.app = paths.app.replace(/MixRelay\.app$/, "MixRelayDriver.app");
   const identity = "Developer ID Application: MixRelay (AB12C3D4E5)";
-  const result = runBuild(paths, { APPLE_SIGNING_IDENTITY: identity }, ["--driver"]);
+  const result = runBuild(paths, { APPLE_SIGNING_IDENTITY: identity }, []);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(log(paths), /--config src-tauri\/tauri\.driver\.conf\.json/);
+  assert.doesNotMatch(log(paths), /tauri\.driver\.conf\.json/);
   assert.ok(existsSync(paths.app));
   const commands = log(paths);
   const cargoBuilds = commands.split("\n").filter(line => line.startsWith("cargo "));
@@ -254,8 +265,8 @@ test("Driver product builds source helpers and signs its independent removal app
   assert.match(cargoBuilds[0], /--release --target aarch64-apple-darwin --bin mixrelay-macos-installer --bin mixrelay-macos-payload-check --bin mixrelay-driver-uninstaller$/);
   assert.match(cargoBuilds[1], /--release --target x86_64-apple-darwin --bin mixrelay-macos-installer --bin mixrelay-macos-payload-check --bin mixrelay-driver-uninstaller$/);
   assert.ok(commands.indexOf(cargoBuilds[1]) < commands.indexOf("pnpm "));
-  assert.equal(existsSync(join(paths.app, "Contents/Helpers/Uninstall MixRelay Driver.app")), false);
-  assert.ok(existsSync(join(dirname(paths.app),"Uninstall MixRelay Driver.app")));
+  assert.equal(existsSync(join(paths.app, "Contents/Helpers/Uninstall MixRelay.app")), false);
+  assert.ok(existsSync(join(dirname(paths.app),"Uninstall MixRelay.app")));
   assert.doesNotMatch(commands, /removal-packages|build-macos-removal-pkgs/);
   assert.match(commands, /--identifier mixrelay-macos-installer /);
   assert.match(commands, /--identifier mixrelay-macos-payload-check /);
@@ -270,19 +281,18 @@ test("rejects an unsigned release identity before invoking Tauri", (t) => {
 
 test("Driver product rejects a missing signing Team ID before building helpers", (t) => {
   const paths = fixture(t);
-  const result = runBuild(paths, {}, ["--driver"]);
+  const result = runBuild(paths, { APPLE_SIGNING_IDENTITY: "Developer ID Application: MixRelay" }, []);
   assert.notEqual(result.status, 0);
   assert.doesNotMatch(log(paths), /^cargo |^pnpm /m);
 });
 
 test("Driver product rejects single-architecture helper output and restores its manager", (t) => {
   const paths = fixture(t);
-  paths.app = paths.app.replace(/MixRelay\.app$/, "MixRelayDriver.app");
   createApp(paths.app, { architecture: "old", signed: true });
   const result = runBuild(paths, {
     APPLE_SIGNING_IDENTITY: "Developer ID Application: MixRelay (AB12C3D4E5)",
     MOCK_HELPER_SINGLE: "1",
-  }, ["--driver"]);
+  }, []);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Driver helper must contain exactly arm64 and x86_64/);
   assertPreserved(paths);
@@ -295,7 +305,7 @@ test("rejects nested unsigned output and restores the old app", (t) => {
   const result = runBuild(paths, { MOCK_PNPM_MODE: "nested", MOCK_INVALID_SIGNATURE: "1" });
   assert.notEqual(result.status, 0);
   assertPreserved(paths);
-  assert.doesNotMatch(log(paths), /codesign --force/);
+  assert.ok(!log(paths).split("\n").some(line => line.startsWith("codesign --force") && line.endsWith("/MixRelay.app")));
 });
 
 test("fails on missing fresh output and restores the old app", (t) => {
@@ -331,4 +341,16 @@ test("rejects a pre-existing app symlink without invoking Tauri", (t) => {
   assert.notEqual(result.status, 0);
   assert.equal(lstatSync(paths.app).isSymbolicLink(), true);
   assert.doesNotMatch(log(paths), /^pnpm /m);
+});
+
+
+test("launcher and retired agent definition belong only to the editor and never start at login", () => {
+  const editor = JSON.parse(readFileSync(new URL("../apps/desktop/src-tauri/tauri.conf.json", import.meta.url), "utf8"));
+  const name = "Library/LaunchAgents/io.mixrelay.driver.runtime.plist";
+  assert.equal(editor.bundle.macOS.files[name], "../../../packaging/macos/io.mixrelay.driver.runtime.plist");
+  assert.equal(editor.bundle.macOS.files["Resources/mixrelay-driver-launcher"], "../../../target/universal-apple-darwin/release/mixrelay-driver-launcher");
+  const plist = readFileSync(new URL("../packaging/macos/io.mixrelay.driver.runtime.plist", import.meta.url), "utf8");
+  assert.match(plist, /<key>BundleProgram<\/key><string>Contents\/Resources\/mixrelay-driver-launcher<\/string>/);
+  assert.match(plist, /<key>KeepAlive<\/key><false\/>/);
+  assert.match(plist, /<key>RunAtLoad<\/key><false\/>/);
 });

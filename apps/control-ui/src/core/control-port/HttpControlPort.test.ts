@@ -5,6 +5,29 @@ import { ControlPortError, type RuntimeGraphDocument } from './types';
 
 const graph: RuntimeGraphDocument = { edges: [], nodes: [], revision: 2, schemaVersion: 2 };
 
+it('targets a Driver device buffer with both graph and observed buffer fences', async () => {
+  const request = vi
+    .fn<typeof fetch>()
+    .mockResolvedValue(response({ revision: 2, state: 'active' }));
+  const port = new HttpControlPort('http://control', request);
+  const buffer = {
+    endpointId: 'device-b',
+    expectedRevision: 2,
+    expectedBufferFrames: 512,
+    expectedPreferredFrames: null,
+    bufferFrames: 128,
+  };
+  await expect(port.setVirtualEndpointBufferFrames(buffer)).resolves.toMatchObject({ revision: 2 });
+  expect(request).toHaveBeenCalledExactlyOnceWith(
+    'http://control/api/v1/audio/virtual-endpoint/buffer',
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(buffer),
+    },
+  );
+});
+
 it('does not fabricate a remote API for desktop-owned recorder preferences', async () => {
   const request = vi.fn<typeof fetch>();
   const port = new HttpControlPort('http://control', request);
@@ -418,4 +441,105 @@ describe('HttpControlPort terminal receipts', () => {
       vi.useRealTimers();
     }
   });
+});
+
+describe('HttpControlPort native-independent controls', () => {
+  it('encodes node identities and preserves gain, power and mute revision fences', async () => {
+    const controls = { graphId: 'graph/a', revision: 7, nodes: [] };
+    const request = vi.fn<typeof fetch>().mockResolvedValue(response(controls));
+    const port = new HttpControlPort('http://control', request);
+    await expect(port.getNodeControls('graph/a')).resolves.toEqual(controls);
+    const mutation = { expectedRevision: 7, gainDb: -12, enabled: false, muted: true };
+    await port.updateNodeControl('graph/a', 'app/b', mutation);
+    expect(request.mock.calls).toEqual([
+      ['http://control/api/v1/graphs/graph%2Fa/nodes/controls', undefined],
+      [
+        'http://control/api/v1/graphs/graph%2Fa/nodes/app%2Fb/control',
+        {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(mutation),
+        },
+      ],
+    ]);
+  });
+
+  it('returns meter snapshots and uses independent session format commands', async () => {
+    const meters = { protocolVersion: 1, revision: 7, nodes: [] };
+    const request = vi.fn<typeof fetch>().mockResolvedValue(response(meters));
+    const port = new HttpControlPort('http://control', request);
+    await expect(port.getMeters()).resolves.toEqual(meters);
+    const settings = { expectedRevision: 7, format: { sampleRate: 96000, blockFrames: 256 } };
+    await port.reconfigureSession(settings);
+    expect(request).toHaveBeenNthCalledWith(1, 'http://control/api/v1/meters', undefined);
+    expect(request).toHaveBeenNthCalledWith(2, 'http://control/api/v1/audio/session', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+  });
+
+  it('keeps plugin rescan, native frame and editor input on dedicated routes', async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(response({ protocolVersion: 1 }));
+    const port = new HttpControlPort('http://control', request);
+    await port.rescanProcessors(['/Library/Audio/Plug-Ins/VST3']);
+    await port.getProcessorEditorFrame('fx/a');
+    const input = {
+      instanceId: 'instance-1',
+      session: 3,
+      kind: 'down' as const,
+      x: 12,
+      y: 24,
+      modifiers: 0,
+    };
+    await port.sendProcessorEditorInput('fx/a', input);
+    expect(request).toHaveBeenNthCalledWith(1, 'http://control/api/v1/processors/scan', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ paths: ['/Library/Audio/Plug-Ins/VST3'] }),
+    });
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      'http://control/api/v1/processors/fx%2Fa/editor/frame',
+      undefined,
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      3,
+      'http://control/api/v1/processors/fx%2Fa/editor/input',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      },
+    );
+  });
+});
+
+describe('HttpControlPort invalid pending receipts', () => {
+  it.each([
+    ['non-pending response', 'operation-1', 200],
+    ['empty identity', '', 202],
+    ['oversize identity', 'x'.repeat(129), 202],
+  ])('rejects %s without polling or replaying the graph write', async (_name, id, status) => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(operationResponse({ operationId: id }, true, status, id));
+    await expect(new HttpControlPort('http://control', request).applyGraph(graph)).rejects.toThrow(
+      'invalid operation receipt',
+    );
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it.each([null, 'operation-1', {}, { operationId: 1 }])(
+    'rejects malformed pending receipt body %j',
+    async (body) => {
+      const request = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(operationResponse(body, true, 202, 'operation-1'));
+      await expect(
+        new HttpControlPort('http://control', request).applyGraph(graph),
+      ).rejects.toThrow('identity changed or was invalid');
+      expect(request).toHaveBeenCalledOnce();
+    },
+  );
 });

@@ -1,7 +1,7 @@
 MixRelay Driver
 Software License Agreement
 Licensor and copyright holder: Echo Vision Lab
-Version: 2026-10-08
+Version: 2026-10-10
 
 1. Using the Driver
 These terms govern MixRelay Driver and its device-management/basic-loopback
@@ -22,7 +22,8 @@ backup copies necessary for that use. Software ownership is not transferred.
 2. Free Driver and paid app
 No paid app purchase or purchase authentication is required for the Driver's
 free functionality. The free Driver provides one default basic virtual device
-with free name, channel-count, sample-rate and PCM-format settings. The app's
+with free channel-count, sample-rate and PCM-format settings. Renaming devices
+requires the paid app. The app's
 evaluation limits do not restrict Driver channels or device-settings storage.
 
 Creating or removing multiple virtual device identities (Create/Remove)
@@ -30,12 +31,11 @@ requires the paid app; neither the free app nor standalone Driver provides
 these operations. Virtual devices already created through the paid app remain
 available after the app quits.
 
-The paid app's purchased-major-version entitlement, three-device activation
-limit and 30-day offline authentication period do not limit this free Driver
-permission. Reinstalling the Driver or changing its basic settings does not
-require a paid activation. These ordinary operations are distinct from the
-paid app's Create/Remove operations. Ending or refunding a paid app license
-does not by itself cancel the separate Driver permission.
+The paid app's purchased-version entitlement, activation conditions and
+offline authentication conditions do not limit this free Driver permission.
+Reinstalling the Driver or changing basic settings does not require paid
+activation. Ending, deactivating or refunding paid access does not cancel the
+free Driver permission or delete your device settings, recordings or projects.
 
 3. Redistribution, integration and third-party licenses
 Free use does not make MixRelay's own proprietary code open source or grant
@@ -84,6 +84,11 @@ Send installation, device and compatibility inquiries to support@mixrelay.com.
 These statements do not override the product description, agreed conditions or
 statutory quality remedies.
 
+Our target is a first response within two Korean business days, excluding
+weekends and public holidays in South Korea (Asia/Seoul). This is a response
+target, not a guaranteed resolution deadline, and does not extend statutory
+response or refund deadlines.
+
 6. Network connections and personal information
 The Driver processes audio and device settings locally and does not require
 paid-license authentication. Choosing Check for updates contacts
@@ -105,7 +110,15 @@ privacy@dsub.io. Applicable identity-verification requirements and statutory
 record-retention obligations remain in effect. Ordinary Driver use does not
 require a fee, paid activation or marketing consent.
 
+When you choose to activate or manage paid MixRelay features, the Driver
+management process handles the app's licensing requests. The transmitted data,
+purpose and credential storage are described in section 7 of LICENSE.txt. Free
+Driver use does not require these requests.
+
 7. Uninstalling, termination and responsibility
+
+Deactivating or refunding paid app access does not itself end this free Driver
+permission.
 
 You may stop using and uninstall the Driver at any time. Uninstalling alone
 does not cancel a paid app purchase or confirm server deactivation of that
@@ -137,7 +150,8 @@ and legal inquiries to legal@dsub.io. These contacts do not limit access to
 courts or statutory dispute-resolution procedures.
 
 Business information
-Developer, licensor and copyright holder: Echo Vision Lab (에코 비전 랩), a Korean sole proprietorship
+Developer, licensor and copyright holder: Echo Vision Lab (에코 비전 랩), a Korean
+sole proprietorship
 Business registration number: 111-42-04359
 Address: Room 505-S80, 5F, 30, Nonhyeon-ro 10-gil, Gangnam-gu, Seoul,
 Republic of Korea

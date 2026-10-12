@@ -9,11 +9,11 @@ import { validatePackage } from './check-linux-package.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const read = path => readFileSync(resolve(root, path), 'utf8');
-const config = JSON.parse(read('apps/desktop/src-tauri/tauri.driver.linux.conf.json'));
+const config = JSON.parse(read('scripts/fixtures/legacy-driver-linux.json'));
 
 test('Driver Linux package owns one manager, service and user-session activation contract', () => {
   assert.equal(config.mainBinaryName, 'mixrelay-driver-manager');
-  assert.deepEqual(config.bundle.externalBin, ['binaries/mixrelay-driver-service']);
+  assert.deepEqual(config.bundle.externalBin, ['binaries/mixrelay-driver-service', 'binaries/mixrelay-engine-service']);
   for (const format of ['deb', 'rpm']) {
     const files = config.bundle.linux[format].files;
     assert.ok(files['/usr/lib/systemd/user/mixrelay-driver.service']);
@@ -179,7 +179,7 @@ function driverFixture() {
   const elf = Buffer.alloc(64);
   elf.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]);
   elf[16] = 2; elf[18] = 183; elf[52] = 64;
-  const executables = ['usr/bin/mixrelay-driver-manager', 'usr/bin/mixrelay-driver-service'];
+  const executables = ['usr/bin/mixrelay-driver-manager', 'usr/bin/mixrelay-driver-service', 'usr/bin/mixrelay-engine-service'];
   const files = Object.entries(config.bundle.linux.deb.files).filter(([, source]) => source !== null).map(([path]) => path.slice(1));
   return {
     packageName: 'mix-relay-driver', version: '1.2.3', versionReceipt: '{"version":"1.2.3"}',
@@ -191,12 +191,12 @@ function driverFixture() {
   };
 }
 
-test('Driver checker requires a terminal and rejects graph ownership and mismatched installed-version receipts', () => {
+test('Driver checker requires a terminal and runtime and rejects editor ownership and mismatched installed-version receipts', () => {
   const fixture = driverFixture();
-  assert.equal(validatePackage(fixture).executables.length, 2);
+  assert.equal(validatePackage(fixture).executables.length, 3);
   assert.equal(validatePackage({ ...fixture,
     depends: fixture.depends.replace('xterm | x-terminal-emulator', 'x-terminal-emulator'),
-  }).executables.length, 2);
+  }).executables.length, 3);
   assert.throws(() => validatePackage({ ...fixture,
     depends: fixture.depends.replace('xterm | x-terminal-emulator, ', ''),
   }), /Missing required dependency: xterm or x-terminal-emulator/);
@@ -204,7 +204,7 @@ test('Driver checker requires a terminal and rejects graph ownership and mismatc
     depends: fixture.depends.replace('xterm | x-terminal-emulator', 'xterm | unrelated'),
   }), /Missing required dependency: xterm or x-terminal-emulator/);
   assert.throws(() => validatePackage({ ...fixture, versionReceipt: '{"version":"1.2.2"}' }), /receipt/);
-  assert.throws(() => validatePackage({ ...fixture, contents: `${fixture.contents}\n-rwxr-xr-x 0/0 64 2026-10-06 12:00 ./usr/bin/mixrelay-engine-service` }), /must not own/);
+  assert.throws(() => validatePackage({ ...fixture, contents: `${fixture.contents}\n-rwxr-xr-x 0/0 64 2026-10-06 12:00 ./usr/bin/mixrelay-desktop` }), /must not own/);
   assert.throws(() => validatePackage({ ...fixture, contents: fixture.contents.replace('usr/share/mixrelay-driver/version.json', 'usr/share/mixrelay-driver/missing.json') }), /documentation/);
 });
 
@@ -212,7 +212,8 @@ test('macOS Driver-only ownership, autostart and optional cleanup preserve App b
   const contract = read('native/macos/installer/src/contract.rs');
   assert.match(contract, /\/Applications\/MixRelay Driver\.app/);
   assert.match(contract, /driver-manager\.owner/);
-  assert.doesNotMatch(contract, /\/Applications\/MixRelay\.app|bin\/mixrelay-engine-service/);
+  assert.match(contract, /pub const APP_PATH: &str = "\/Applications\/MixRelay\.app"/);
+  assert.match(contract, /bin\/mixrelay-engine-service/);
   const launchd = read('packaging/macos/io.mixrelay.audio.driver.plist.in');
   assert.match(launchd, /<key>KeepAlive<\/key><true\/>/);
   assert.match(launchd, /<key>RunAtLoad<\/key><true\/>/);

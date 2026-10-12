@@ -27,6 +27,11 @@ interface QueueCallbacks {
   getModel: () => AudioGraphModel | null;
   document: (document: RuntimeGraphDocument) => void;
   restore: (document: RuntimeGraphDocument, savedLayout?: GraphLayout) => void;
+  rebase?: (
+    before: RuntimeGraphDocument,
+    current: RuntimeGraphDocument,
+    local: AudioGraphModel,
+  ) => AudioGraphModel;
   reconcile?: (before: RuntimeGraphDocument, after: RuntimeGraphDocument) => boolean;
   state: (state: 'active' | 'applying' | 'blocked') => void;
   error: (code: string | null) => void;
@@ -51,7 +56,7 @@ function failedNodeControl(error: unknown, sent: boolean, accepted: boolean): No
   };
 }
 
-class GraphApplicationError extends Error {
+export class GraphApplicationError extends Error {
   constructor(readonly code: string) {
     super(code);
   }
@@ -135,17 +140,17 @@ function pause(signal: AbortSignal): Promise<void> {
       resolve();
     }, POLL_MS);
     signal.addEventListener('abort', cancel, { once: true });
-    if (signal.aborted) cancel();
   });
 }
 
-/** One writer per workspace. Failures retain the editable draft and require an explicit decision. */
+/** One writer per workspace; external changes refresh the acknowledged settings automatically. */
 export class GraphApplicationQueue {
   private operation: AbortController | null = null;
   private pending: AudioGraphModel | null = null;
   private pendingParameters = new Map<string, ProcessorParameterChange>();
   private blocked = false;
   private document: RuntimeGraphDocument | null = null;
+  private recoveryBaseline: RuntimeGraphDocument | null = null;
 
   constructor(
     private readonly port: Pick<
@@ -166,6 +171,7 @@ export class GraphApplicationQueue {
     this.pendingParameters.clear();
     this.blocked = false;
     this.document = document;
+    this.recoveryBaseline = null;
   }
 
   submit(model: AudioGraphModel, changes: ProcessorParameterChange[] = []) {
@@ -237,7 +243,8 @@ export class GraphApplicationQueue {
 
   /** Retries one failed processor through the graph writer without replacing its draft. */
   async retryFailedProcessor(target: ProcessorRetryTarget): Promise<NodeControlResult> {
-    if (!this.port.retryProcessor) return { state: 'rejected', code: 'control_unavailable' };
+    const retryProcessor = this.port.retryProcessor;
+    if (!retryProcessor) return { state: 'rejected', code: 'control_unavailable' };
     const source = this.document ?? this.callbacks.getDocument();
     if (!source) return { state: 'rejected', code: 'node_not_found' };
     const rejection = this.processorRetryRejection(source, target);
@@ -250,7 +257,7 @@ export class GraphApplicationQueue {
     this.callbacks.error(null);
     const attempt = { accepted: false, sent: false };
     try {
-      return await this.runProcessorRetry(source, target, signal, attempt);
+      return await this.runProcessorRetry(source, target, signal, attempt, retryProcessor);
     } catch (error) {
       return this.handleProcessorRetryError(error, signal, target.graphId, attempt);
     } finally {
@@ -263,6 +270,7 @@ export class GraphApplicationQueue {
     target: ProcessorRetryTarget,
     signal: AbortSignal,
     attempt: { accepted: boolean; sent: boolean },
+    retryProcessor: NonNullable<ControlPort['retryProcessor']>,
   ): Promise<NodeControlResult> {
     if (this.callbacks.beforeApply)
       await bounded(this.callbacks.beforeApply(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
@@ -273,8 +281,6 @@ export class GraphApplicationQueue {
       ...target,
       expectedRevision: source.revision,
     };
-    const retryProcessor = this.port.retryProcessor;
-    if (!retryProcessor) throw failure('control_unavailable');
     const response = await bounded(
       retryProcessor.call(this.port, request),
       signal,
@@ -314,10 +320,7 @@ export class GraphApplicationQueue {
     return failedNodeControl(error, attempt.sent, attempt.accepted);
   }
 
-  private processorRetryRejection(
-    source: RuntimeGraphDocument | null,
-    target: ProcessorRetryTarget,
-  ) {
+  private processorRetryRejection(source: RuntimeGraphDocument, target: ProcessorRetryTarget) {
     if (!this.canPublishParameters) return 'graph_exchange_busy';
     if (this.callbacks.getGraphId?.() !== target.graphId) return 'graph_revision_stale';
     if (
@@ -333,11 +336,7 @@ export class GraphApplicationQueue {
     return null;
   }
 
-  private validateProcessorRetrySource(
-    source: RuntimeGraphDocument | null,
-    target: ProcessorRetryTarget,
-  ): asserts source is RuntimeGraphDocument {
-    if (!source) throw failure('node_not_found');
+  private validateProcessorRetrySource(source: RuntimeGraphDocument, target: ProcessorRetryTarget) {
     const node = source.nodes.find((candidate) => candidate.id === target.nodeId);
     if (node?.type !== 'provider') throw failure('node_not_found');
     if (node.control?.enabled === false) throw failure('node_disabled');
@@ -406,9 +405,11 @@ export class GraphApplicationQueue {
       : acknowledgedNodeControl(source, nodeId, change, response.revision);
     if (this.pending) throw failure('graph_draft_changed');
     if (response.requiresGraphReload) this.callbacks.restore(document);
-    else this.acceptControls(source, document);
+    else this.acceptControls(source, document, signal, graphId);
+    this.guardOwner(signal, graphId);
     this.document = document;
     this.callbacks.document(document);
+    this.recoveryBaseline = null;
   }
 
   private nodeControlRejection(graphId: string, expectedRevision?: number) {
@@ -420,10 +421,22 @@ export class GraphApplicationQueue {
     return null;
   }
 
-  private acceptControls(before: RuntimeGraphDocument, after: RuntimeGraphDocument) {
+  private acceptControls(
+    before: RuntimeGraphDocument,
+    after: RuntimeGraphDocument,
+    signal: AbortSignal,
+    graphId: string | undefined,
+    allowRestore = false,
+  ) {
     if (this.callbacks.reconcile) {
-      if (!this.callbacks.reconcile(before, after)) throw failure('graph_revision_stale');
+      const reconciled = this.callbacks.reconcile(before, after);
+      this.guardOwner(signal, graphId);
+      if (!reconciled) {
+        if (!allowRestore) throw failure('graph_revision_stale');
+        this.callbacks.restore(after);
+      }
     } else this.callbacks.restore(after);
+    this.guardOwner(signal, graphId);
   }
 
   private validateNodeControlSource(
@@ -449,8 +462,10 @@ export class GraphApplicationQueue {
         const before = this.document ?? this.callbacks.getDocument();
         const document = await this.readEngine(signal, true, { graphId });
         if (!this.pending && before) {
-          this.acceptControls(before, document);
-          this.callbacks.error(errorCode(error));
+          this.acceptControls(before, document, signal, graphId);
+          this.callbacks.error(
+            errorCode(error) === 'graph_revision_stale' ? null : errorCode(error),
+          );
           this.callbacks.state('active');
           return;
         }
@@ -463,7 +478,8 @@ export class GraphApplicationQueue {
 
   private async waitForRevision(revision: number, signal: AbortSignal) {
     const deadline = Date.now() + GRAPH_APPLICATION_TIMEOUT_MS;
-    while (!signal.aborted) {
+    while (true) {
+      signal.throwIfAborted();
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw failure('graph_apply_timeout');
       const status = await bounded(this.port.getGraphStatus(), signal, remaining);
@@ -475,25 +491,34 @@ export class GraphApplicationQueue {
       if (status.activeRevision === revision) return;
       await pause(signal);
     }
-    throw signal.reason;
+  }
+
+  private guardOwner(signal: AbortSignal, graphId: string | undefined) {
+    signal.throwIfAborted();
+    if (this.callbacks.getGraphId?.() !== graphId) {
+      // Prevent recovery from reading/republishing the newly selected graph for an old writer.
+      throw failure('graph_revision_stale');
+    }
   }
 
   private async readEngine(
     signal: AbortSignal,
     wait: boolean,
     expected?: { graphId: string; revision?: number },
+    publication: 'immediate' | 'deferred' = 'immediate',
   ) {
+    const graphId = expected?.graphId ?? this.callbacks.getGraphId?.();
     const document = await bounded(this.port.getGraph(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
     if (wait) await this.waitForRevision(document.revision, signal);
-    signal.throwIfAborted();
-    if (
-      expected &&
-      (this.callbacks.getGraphId?.() !== expected.graphId ||
-        (expected.revision !== undefined && document.revision !== expected.revision))
-    )
+    this.guardOwner(signal, graphId);
+    if (expected?.revision !== undefined && document.revision !== expected.revision)
       throw failure('graph_revision_stale');
-    this.document = document;
-    this.callbacks.document(document);
+    if (publication === 'immediate') {
+      this.document = document;
+      this.callbacks.document(document);
+      // Publication can synchronously retire this writer (graph selection/unmount).
+      this.guardOwner(signal, graphId);
+    }
     return document;
   }
 
@@ -530,10 +555,33 @@ export class GraphApplicationQueue {
     this.callbacks.persistenceWarning?.(response.persistenceError ?? null);
     this.document = document;
     this.callbacks.document(document);
+    this.recoveryBaseline = null;
+  }
+
+  private async restoreRevisionConflict(error: unknown, signal: AbortSignal, graphId?: string) {
+    if (!(error instanceof ControlPortError) || error.body.code !== 'graph_revision_stale')
+      return false;
+    try {
+      const document = await this.readEngine(signal, true, graphId ? { graphId } : undefined);
+      this.pending = null;
+      this.pendingParameters.clear();
+      this.callbacks.restore(document);
+      this.guardOwner(signal, graphId);
+      this.blocked = false;
+      this.callbacks.error(null);
+      this.callbacks.state('active');
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async recover(error: unknown, signal: AbortSignal, graphId?: string) {
+    if (signal.aborted || this.callbacks.getGraphId?.() !== graphId) return;
+    if (!this.pending && (await this.restoreRevisionConflict(error, signal, graphId))) return;
+    if (signal.aborted) return;
     this.blocked = true;
+    this.recoveryBaseline ??= this.document ?? this.callbacks.getDocument();
     // Refresh the engine baseline, never overwrite the user's draft/history on a failed edit.
     // A failed read leaves the queue blocked; retry/reload must read it again before writing.
     try {
@@ -549,16 +597,82 @@ export class GraphApplicationQueue {
 
   private async applyPending(model: AudioGraphModel, signal: AbortSignal) {
     const parameters = this.pendingParameters;
+    const before = this.document ?? this.callbacks.getDocument();
     this.pendingParameters = new Map();
     this.pending = null;
     try {
       await this.apply(model, [...parameters.values()], signal);
     } catch (error) {
-      // Keep unacknowledged intent for explicit Retry. A newer queued edit wins per ID.
       if (!signal.aborted)
         this.pendingParameters = new Map([...parameters, ...this.pendingParameters]);
+      if (
+        error instanceof ControlPortError &&
+        error.body.code === 'graph_revision_stale' &&
+        before &&
+        this.callbacks.rebase
+      ) {
+        await this.rebaseRejectedEdit(before, model, parameters, signal);
+        return;
+      }
       throw error;
     }
+  }
+
+  private async rebaseRejectedEdit(
+    before: RuntimeGraphDocument,
+    model: AudioGraphModel,
+    parameters: Map<string, ProcessorParameterChange>,
+    signal: AbortSignal,
+  ) {
+    const graphId = this.callbacks.getGraphId?.();
+    const deadline = Date.now() + GRAPH_APPLICATION_TIMEOUT_MS;
+    const rebase = this.callbacks.rebase as NonNullable<QueueCallbacks['rebase']>;
+    let baseline = before;
+    this.pending ??= model;
+    this.pendingParameters = new Map([...parameters, ...this.pendingParameters]);
+    while (true) {
+      const current = await this.readEngine(signal, true, graphId ? { graphId } : undefined);
+      const rebased = rebase(baseline, current, this.pending as AudioGraphModel);
+      this.guardOwner(signal, graphId);
+      this.pending = null;
+      const latestParameters = this.pendingParameters;
+      this.pendingParameters = new Map();
+      try {
+        await this.apply(rebased, [...latestParameters.values()], signal);
+        return;
+      } catch (error) {
+        if (signal.aborted) throw error;
+        this.pending ??= rebased;
+        this.pendingParameters = new Map([...latestParameters, ...this.pendingParameters]);
+        // A definite CAS rejection applied nothing. Rebase ordinary concurrent edits
+        // again; a lost acknowledgement must never be replayed automatically.
+        if (!(error instanceof ControlPortError) || error.body.code !== 'graph_revision_stale')
+          throw error;
+        if (Date.now() >= deadline) throw failure('graph_conflict_unresolved');
+        baseline = current;
+        await pause(signal);
+      }
+    }
+  }
+
+  private acceptRefresh(
+    before: RuntimeGraphDocument | null,
+    document: RuntimeGraphDocument,
+    signal: AbortSignal,
+    graphId: string | undefined,
+  ) {
+    if (before && this.pending && this.callbacks.rebase) {
+      const rebased = this.callbacks.rebase(before, document, this.pending);
+      this.guardOwner(signal, graphId);
+      this.pending = rebased;
+    } else {
+      if (this.pending) throw failure('graph_draft_changed');
+      if (before) this.acceptControls(before, document, signal, graphId, true);
+      else this.callbacks.restore(document);
+    }
+    this.guardOwner(signal, graphId);
+    this.blocked = false;
+    this.recoveryBaseline = null;
   }
 
   private async readReloadLayout(graphId: string | undefined, signal: AbortSignal) {
@@ -581,14 +695,16 @@ export class GraphApplicationQueue {
   ) {
     if (mode === 'reload' && this.callbacks.beforeReload)
       await bounded(this.callbacks.beforeReload(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
-    const before = this.document ?? this.callbacks.getDocument();
+    const before = this.recoveryBaseline ?? this.document ?? this.callbacks.getDocument();
     const graphId = this.callbacks.getGraphId?.();
-    const document = await this.readEngine(signal, true, graphId ? { graphId } : undefined);
+    const document = await this.readEngine(
+      signal,
+      mode !== 'refresh',
+      graphId ? { graphId } : undefined,
+      mode === 'reload' ? 'deferred' : 'immediate',
+    );
     if (mode === 'refresh') {
-      // Layout edits may continue while reading; reconciliation uses the latest model.
-      // An audio edit queued meanwhile requires explicit recovery, never a silent overwrite.
-      if (!before || this.pending) throw failure('graph_draft_changed');
-      this.acceptControls(before, document);
+      this.acceptRefresh(before, document, signal, graphId);
       return;
     }
     if (mode === 'reload') {
@@ -596,9 +712,23 @@ export class GraphApplicationQueue {
       if (this.callbacks.getModel() !== initialModel) throw failure('graph_draft_changed');
       this.pending = null;
       this.pendingParameters.clear();
+      // Publishing the document refreshes presentation and therefore the model identity.
+      // Defer that side effect until every asynchronous read and the draft guard have finished.
+      this.document = document;
+      this.callbacks.document(document);
+      this.guardOwner(signal, graphId);
       this.callbacks.restore(document, savedLayout);
+      this.guardOwner(signal, graphId);
+      this.recoveryBaseline = null;
     } else {
-      this.pending = this.callbacks.getModel();
+      const local = this.callbacks.getModel();
+      const rebased =
+        before && local && this.callbacks.rebase
+          ? this.callbacks.rebase(before, document, local)
+          : local;
+      this.guardOwner(signal, graphId);
+      this.pending = rebased;
+      this.recoveryBaseline = document;
     }
     this.blocked = false;
   }
@@ -607,6 +737,7 @@ export class GraphApplicationQueue {
     const operation = new AbortController();
     const { signal } = operation;
     this.operation = operation;
+    const graphId = this.callbacks.getGraphId?.();
     this.callbacks.state('applying');
     this.callbacks.error(null);
     const initialModel = this.callbacks.getModel();
@@ -617,7 +748,7 @@ export class GraphApplicationQueue {
       }
       if (!signal.aborted) this.callbacks.state('active');
     } catch (error) {
-      if (!signal.aborted) await this.recover(error, signal);
+      if (!signal.aborted) await this.recover(error, signal, graphId);
     } finally {
       if (this.operation === operation) this.operation = null;
     }

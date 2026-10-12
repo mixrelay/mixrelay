@@ -89,7 +89,7 @@ unsafe impl Send for Mapping {}
 unsafe impl Sync for Mapping {}
 
 impl Mapping {
-    pub(super) fn new(spec: EndpointSpec, generation: u64) -> io::Result<Self> {
+    pub(super) fn required_bytes(spec: &EndpointSpec) -> io::Result<usize> {
         let config = EndpointTransportConfig {
             endpoint_id: spec.id,
             capacity_frames: spec.capacity_frames,
@@ -103,6 +103,16 @@ impl Mapping {
                 "invalid native endpoint layout",
             ));
         }
+        Ok(length)
+    }
+    pub(super) fn new(spec: EndpointSpec, generation: u64) -> io::Result<Self> {
+        let length = Self::required_bytes(&spec)?;
+        let config = EndpointTransportConfig {
+            endpoint_id: spec.id,
+            capacity_frames: spec.capacity_frames,
+            render_channels: spec.render_channels,
+            capture_channels: spec.capture_channels,
+        };
         let region = Region::new(length)?;
         let transport = NonNull::new(unsafe {
             mr_endpoint_transport_initialize(region.address.as_ptr(), length, &raw const config)
@@ -123,15 +133,20 @@ impl Mapping {
         })
     }
     pub(super) fn reconfigured(&self, spec: EndpointSpec, generation: u64) -> Option<Self> {
-        (self.spec.render_channels == spec.render_channels
+        self.can_reconfigure(&spec).then(|| Self {
+            spec,
+            generation,
+            region: Arc::clone(&self.region),
+            transport: self.transport,
+        })
+    }
+    pub(super) fn can_reconfigure(&self, spec: &EndpointSpec) -> bool {
+        self.spec.render_channels == spec.render_channels
             && self.spec.capture_channels == spec.capture_channels
-            && self.spec.capacity_frames == spec.capacity_frames)
-            .then(|| Self {
-                spec,
-                generation,
-                region: Arc::clone(&self.region),
-                transport: self.transport,
-            })
+            && self.spec.capacity_frames == spec.capacity_frames
+    }
+    pub(super) fn region_usage(&self) -> (usize, usize) {
+        (Arc::as_ptr(&self.region) as usize, self.region.length)
     }
     pub(super) fn spec(&self) -> &EndpointSpec {
         &self.spec

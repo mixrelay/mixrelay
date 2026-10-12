@@ -8,11 +8,8 @@ fi
 
 repo_root="${0:A:h:h}"
 
-product="app"
-if (( $# == 1 )) && [[ "$1" == "--driver" ]]; then
-  product="driver"
-elif (( $# != 0 )); then
-  print -u2 "Usage: scripts/build-macos-universal-app.sh [--driver]"
+if (( $# != 0 )); then
+  print -u2 "Usage: scripts/build-macos-universal-app.sh"
   exit 1
 fi
 if [[ -n "${MIXRELAY_CODESIGN_IDENTITY:-}" && -n "${APPLE_SIGNING_IDENTITY:-}" &&
@@ -27,7 +24,7 @@ if [[ "${APPLE_SIGNING_IDENTITY:-}" != "Developer ID Application: "* ]]; then
   print -u2 "A Developer ID Application signing identity is required for a release bundle"
   exit 1
 fi
-if [[ "$product" == "driver" ]]; then
+if true; then
   if [[ ! "$APPLE_SIGNING_IDENTITY" =~ '\(([A-Z0-9]{10})\)$' ]]; then
     print -u2 "Driver signing identity must contain its ten-character Apple Team ID"
     exit 1
@@ -72,8 +69,8 @@ export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="$compiler"
 export CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER="$compiler"
 
 app_bundle="$repo_root/target/universal-apple-darwin/release/bundle/macos/MixRelay.app"
-if [[ "$product" == "driver" ]]; then
-  app_bundle="$repo_root/target/universal-apple-darwin/release/bundle/macos/MixRelayDriver.app"
+if true; then
+  app_bundle="$repo_root/target/universal-apple-darwin/release/bundle/macos/MixRelay.app"
 fi
 bundle_parent="${app_bundle:h}"
 backup_root=""
@@ -173,7 +170,7 @@ fi
 
 cd "$repo_root"
 build_started=1
-if [[ "$product" == "driver" ]]; then
+if true; then
   for target in aarch64-apple-darwin x86_64-apple-darwin; do
     cargo build -p mixrelay-macos-installer --release --target "$target" \
       --bin mixrelay-macos-installer \
@@ -197,10 +194,9 @@ if [[ "$product" == "driver" ]]; then
       --timestamp --identifier "$helper" "$helper_output/$helper"
     codesign --verify --strict --all-architectures "$helper_output/$helper"
   done
-  pnpm --filter @mixrelay/desktop tauri build \
-    --config src-tauri/tauri.driver.conf.json \
-    --bundles app --target universal-apple-darwin
-else
+  # One bundle supplies both the editor and its internal background role.
+  zsh "$repo_root/scripts/build-macos-driver-launcher.sh"
+  zsh "$repo_root/scripts/build-macos-universal-engine.sh"
   pnpm --filter @mixrelay/desktop tauri build \
     --bundles app --target universal-apple-darwin
 fi
@@ -245,8 +241,8 @@ fi
 
 print "MixRelay Universal app: $app_bundle"
 
-if [[ "$product" == "driver" ]]; then
-  remover_bundle="$bundle_parent/Uninstall MixRelay Driver.app"
+if true; then
+  remover_bundle="$bundle_parent/Uninstall MixRelay.app"
   reject_symlink_components "$remover_bundle"
   version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$app_bundle/Contents/Info.plist")"
   node scripts/build-macos-removal-app.mjs \

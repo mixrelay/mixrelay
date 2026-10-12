@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import de from '../../../../../LICENSE.de.txt?raw';
 import es from '../../../../../LICENSE.es.txt?raw';
@@ -12,7 +12,7 @@ import en from '../../../../../LICENSE.txt?raw';
 import zhHans from '../../../../../LICENSE.zh-Hans.txt?raw';
 import zhHant from '../../../../../LICENSE.zh-Hant.txt?raw';
 import { I18nProvider, i18n } from '../../core/i18n';
-import { LicenseTerms } from './LicenseDetails';
+import { LicenseTerms } from './LicenseTerms';
 
 afterEach(async () => {
   await i18n.changeLanguage('en');
@@ -47,14 +47,11 @@ describe('localized App license presentation', () => {
     expect(displayed?.textContent).toBe(source);
     expect(displayed).toHaveAttribute('lang', locale);
     expect(source.match(/^\d+\. /gm)).toHaveLength(10);
-    expect(source).toContain('2026-10-08');
+    expect(source).toContain('2026-10-10');
     expect(source).toContain('111-42-04359');
     expect(source).toContain('https://appserver.dsub.io/status');
     expect(source).toContain('https://www.lemonsqueezy.com/privacy');
-    expect(screen.getByRole('link', { name: 'support@mixrelay.com' })).toHaveAttribute(
-      'href',
-      'mailto:support@mixrelay.com',
-    );
+    expect(source).toContain('support@mixrelay.com');
   });
 
   it('changes an already open contract when the app language changes', async () => {

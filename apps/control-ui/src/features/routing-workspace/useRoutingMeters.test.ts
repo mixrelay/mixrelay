@@ -298,3 +298,18 @@ describe('routing meter owner lifecycle', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+
+it('ignores a rejected native telemetry response after the store is disposed', async () => {
+  const source = port();
+  const pending = Promise.withResolvers<MeterSnapshot>();
+  source.getMeters.mockReturnValueOnce(pending.promise);
+  const { result, unmount } = renderHook(() => useRoutingMeters(source));
+  await advance();
+  const store = result.current;
+  unmount();
+  await act(async () => pending.reject(new Error('old transport')));
+  await advance(1000);
+  expect(source.getMeters).toHaveBeenCalledTimes(1);
+  expect(store.levels(key)).toEqual([]);
+  expect(vi.getTimerCount()).toBe(0);
+});

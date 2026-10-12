@@ -92,3 +92,77 @@ describe('workspace layout restoration', () => {
     hook.unmount();
   });
 });
+
+it('restores legacy EQ widths to the Core minimum without changing saved audio or writing layout', async () => {
+  const saved = {
+    ...response,
+    layout: { ...response.layout, sizes: { 'virtual:input': { width: 228, height: 160 } } },
+  };
+  const getGraphLayout = vi.fn().mockResolvedValue(saved);
+  const setGraphLayout = vi.fn();
+  const port = { getGraphLayout, setGraphLayout } as unknown as ControlPort;
+  const initial = model();
+  const eq = initial.nodes[0];
+  if (!eq) throw new Error('Expected node');
+  eq.appearance.equalizer = { bands: [] };
+  const hook = renderHook(() => {
+    const [graph, setGraph] = useState<AudioGraphModel | null>(initial);
+    return { graph, layout: useGraphLayout(port, 'a', graph, setGraph) };
+  });
+  await waitFor(() => expect(hook.result.current.graph?.nodes[0]?.size?.width).toBe(320));
+  expect(hook.result.current.graph?.nodes[0]?.size?.height).toBe(160);
+  expect(hook.result.current.graph?.nodes[0]?.position).toEqual({ x: 100, y: 120 });
+  expect(hook.result.current.graph?.revision).toBe(initial.revision);
+  expect(saved.layout.sizes['virtual:input'].width).toBe(228);
+  expect(setGraphLayout).not.toHaveBeenCalled();
+  hook.unmount();
+});
+
+it('checkpoints labels per UI identity, resets a label and prunes only removed instances', async () => {
+  const read = vi.fn().mockResolvedValue(response);
+  const write = vi.fn().mockImplementation(async (_id, request) => ({
+    graphId: 'a',
+    layoutRevision: 5,
+    layout: request.layout,
+  }));
+  const port = { getGraphLayout: read, setGraphLayout: write } as unknown as ControlPort;
+  const hook = renderHook(() => {
+    const [graph, setGraph] = useState<AudioGraphModel | null>(model());
+    return useGraphLayout(port, 'a', graph, setGraph);
+  });
+  await waitFor(() => expect(hook.result.current.loaded).toBe(true));
+  act(() => hook.result.current.updateNodeLabel('virtual:input', '  Video  '));
+  act(() => hook.result.current.updateNodeLabel('virtual:output', 'Meeting'));
+  expect(hook.result.current.layout.nodeLabels).toEqual({
+    'virtual:input': 'Video',
+    'virtual:output': 'Meeting',
+  });
+  act(() => hook.result.current.updateNodes(model()));
+  expect(hook.result.current.layout.nodeLabels).toEqual({
+    'virtual:input': 'Video',
+    'virtual:output': 'Meeting',
+  });
+  act(() => hook.result.current.updateNodeLabel('virtual:input', '  '));
+  expect(hook.result.current.layout.nodeLabels).toEqual({ 'virtual:output': 'Meeting' });
+  act(() =>
+    hook.result.current.updateNodes({
+      ...model(),
+      nodes: model().nodes.filter((node) => node.id === 'virtual:input'),
+    }),
+  );
+  expect(hook.result.current.layout.nodeLabels).toEqual({});
+  act(() => hook.result.current.updateNodeLabel('__proto__', 'Video'));
+  act(() => hook.result.current.updateNodeLabel('constructor', 'Meeting'));
+  expect(Object.entries(hook.result.current.layout.nodeLabels ?? {})).toEqual([
+    ['__proto__', 'Video'],
+    ['constructor', 'Meeting'],
+  ]);
+  act(() => hook.result.current.updateNodeLabel('__proto__', ''));
+  act(() => hook.result.current.updateNodeLabel('constructor', ''));
+  await waitFor(() => expect(write).toHaveBeenCalled());
+  expect(write).toHaveBeenCalledWith(
+    'a',
+    expect.objectContaining({ layout: expect.objectContaining({ nodeLabels: {} }) }),
+  );
+  hook.unmount();
+});

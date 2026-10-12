@@ -181,6 +181,7 @@ impl EngineGraphController {
                 {
                     return Err(invalid("workspace file changed after capture preparation"));
                 }
+                self.validate_workspace_feature_usage(&candidate)?;
                 let store = self
                     .processor_controls
                     .state_store()
@@ -193,10 +194,19 @@ impl EngineGraphController {
                 &current,
             )?,
         }
+        // An explicit file operation opts this session into durable recall.
+        // Failed file operations never replace a protected saved catalog.
+        if let Some(store) = self.catalog.lock().as_mut() {
+            store.persistent = true;
+        }
+        let candidate = self.catalog_candidate(&self.graph.read());
+        let staged = self.stage_catalog(candidate.as_ref())?;
+        self.finish_catalog_write(staged);
         self.read_catalog()
     }
 
     fn save_workspace(&self, path: &Path, mut candidate: Catalog) -> Result<(), ProtocolError> {
+        self.validate_workspace_export_usage(&candidate)?;
         // Export does not publish the running catalog, even when the file write succeeds.
         let _reuse = self.processor_controls.reuse_transaction();
         for (id, document) in candidate.documents_mut() {
@@ -240,6 +250,7 @@ impl EngineGraphController {
         mut candidate: Catalog,
         current: &Catalog,
     ) -> Result<(), ProtocolError> {
+        self.validate_workspace_feature_usage(&candidate)?;
         let reuse = self.processor_controls.reuse_transaction();
         self.require_stopped_recorders(current)?;
         let revision = candidate

@@ -3,11 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
 import type { ControlPort, MixRelayStatus, RuntimeGraphDocument } from '../core/control-port/types';
+import type { DriverPort } from '../core/driver/DriverPort';
 import { I18nProvider, i18n, resolveLocale } from '../core/i18n';
 import type { LicensingPort } from '../core/licensing/LicensingPort';
-import type { DriverPort } from '../core/driver/DriverPort';
-import type { UpdatesPort } from '../core/updates/UpdatesPort';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';
+import type { UpdatesPort } from '../core/updates/UpdatesPort';
+import { readyDriver } from '../features/driver-status/driverFixtures';
 import { App } from './App';
 
 function controlPortWithStatus(
@@ -34,25 +35,25 @@ function controlPortWithStatus(
   };
 }
 
-describe('App composition', () => {
-  const graph: RuntimeGraphDocument = { edges: [], nodes: [], revision: 1, schemaVersion: 2 };
-  const status: MixRelayStatus = {
-    bufferFrames: null,
-    driverState: 'not_installed',
-    overruns: 0,
-    protocolVersion: 1,
-    sampleRate: null,
-    underruns: 0,
-  };
-  let controlPort: StorybookMockControlPort;
-  beforeEach(() => {
-    controlPort = new StorybookMockControlPort({
-      graph,
-      graphStatus: { activeRevision: 1, protocolVersion: 1, submittedRevision: 1 },
-      status,
-    });
+const graph: RuntimeGraphDocument = { edges: [], nodes: [], revision: 1, schemaVersion: 2 };
+const status: MixRelayStatus = {
+  bufferFrames: null,
+  driverState: 'not_installed',
+  overruns: 0,
+  protocolVersion: 1,
+  sampleRate: null,
+  underruns: 0,
+};
+let controlPort: StorybookMockControlPort;
+beforeEach(() => {
+  controlPort = new StorybookMockControlPort({
+    graph,
+    graphStatus: { activeRevision: 1, protocolVersion: 1, submittedRevision: 1 },
+    status,
   });
+});
 
+describe('App composition', () => {
   it('renders the Core to Feature to Screen composition', async () => {
     await i18n.changeLanguage('en');
     render(
@@ -65,7 +66,7 @@ describe('App composition', () => {
 
     expect(screen.getByRole('heading', { name: 'MixRelay' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Graphs' })).not.toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: /Untitled Graph/u })).toHaveAttribute(
+    expect(await screen.findByRole('button', { name: 'Untitled Graph' })).toHaveAttribute(
       'aria-current',
       'page',
     );
@@ -78,7 +79,7 @@ describe('App composition', () => {
       target: { value: 'Broadcast' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
-    expect(await screen.findByRole('button', { name: /Broadcast/u })).toHaveAttribute(
+    expect(await screen.findByRole('button', { name: 'Broadcast' })).toHaveAttribute(
       'aria-current',
       'page',
     );
@@ -86,6 +87,62 @@ describe('App composition', () => {
     expect(screen.getByRole('region', { name: 'Routing workspace' })).toBeInTheDocument();
   });
 
+  it('keeps a connected workspace when the virtual-device component is missing and opens its installer', async () => {
+    await i18n.changeLanguage('en');
+    const driver: DriverPort = {
+      getSnapshot: vi.fn().mockResolvedValue({
+        ...readyDriver,
+        state: 'not_installed',
+        installedVersion: null,
+        settings: { ...readyDriver.settings, devices: [], canCreate: false },
+      }),
+      mutate: vi.fn(),
+    };
+    const url = 'https://downloads.example/MixRelay-Driver.pkg';
+    const updates: UpdatesPort = {
+      check: vi.fn().mockResolvedValue([
+        {
+          product: 'mix-relay',
+          installedVersion: null,
+          latestVersion: '0.1.0',
+          state: 'published',
+          downloads: [{ os: 'macos', arch: 'universal', url, sha256: 'a'.repeat(64), size: 100 }],
+          notesUrl: null,
+        },
+      ]),
+      openDownload: vi.fn().mockResolvedValue(undefined),
+    };
+    render(
+      <MixRelayProvider>
+        <I18nProvider>
+          <App
+            mode={null}
+            controlPort={controlPort}
+            driverPort={driver}
+            updatesPort={updates}
+            licensingPort={null}
+          />
+        </I18nProvider>
+      </MixRelayProvider>,
+    );
+    const install = await screen.findByRole('button', { name: 'Get MixRelay installer' });
+    expect(screen.getByText('Virtual audio devices are unavailable.')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Routing workspace' })).toBeInTheDocument();
+    expect(driver.mutate).not.toHaveBeenCalled();
+    expect(updates.openDownload).not.toHaveBeenCalled();
+    fireEvent.click(install);
+    const dialog = await screen.findByRole('dialog', { name: 'Updates' });
+    expect(within(dialog).getByRole('heading', { name: /^MixRelay$/ })).toBeInTheDocument();
+    const download = await within(dialog).findByRole('button', {
+      name: 'Open PKG · universal download',
+    });
+    await waitFor(() => expect(download).toBeEnabled());
+    fireEvent.click(download);
+    await waitFor(() => expect(updates.openDownload).toHaveBeenCalledWith('mix-relay', url));
+  });
+});
+
+describe('App platform states', () => {
   it('resolves supported locales and returns mock control status', async () => {
     expect(resolveLocale('ko-KR')).toBe('ko-KR');
     expect(resolveLocale('en-US')).toBe('en');
@@ -130,7 +187,7 @@ describe('App composition', () => {
     await act(async () => Promise.resolve());
     expect(container.querySelector('main')).toBeNull();
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(driver.getSnapshot).not.toHaveBeenCalled();
@@ -174,27 +231,32 @@ describe('App composition', () => {
   });
 });
 
-it('accepts an injected licensing port before rendering live controls', async () => {
+it('keeps authentication separate from the confirmed global audio pause control', async () => {
   await i18n.changeLanguage('en');
-  const stopEngine = vi.fn().mockResolvedValue({ revision: 1, state: 'active' });
+  const nativeStatus: MixRelayStatus = {
+    bufferFrames: null,
+    driverState: 'ready',
+    overruns: 0,
+    protocolVersion: 1,
+    sampleRate: null,
+    underruns: 0,
+    enginePower: { enabled: true, transitioning: false },
+  };
+  const stopEngine = vi.fn(async (enabled: boolean) => {
+    nativeStatus.enginePower = { enabled, transitioning: false };
+    return { protocolVersion: 1 as const, revision: 1, state: 'active' as const };
+  });
   const controlPort = Object.assign(
     new StorybookMockControlPort({
       graph: { edges: [], nodes: [], revision: 1, schemaVersion: 2 },
       graphStatus: { activeRevision: 1, protocolVersion: 1, submittedRevision: 1 },
-      status: {
-        bufferFrames: null,
-        driverState: 'ready',
-        overruns: 0,
-        protocolVersion: 1,
-        sampleRate: null,
-        underruns: 0,
-      },
+      status: nativeStatus,
     }),
     { setEnginePower: stopEngine },
   );
   const licensingPort: LicensingPort = {
     getStatus: vi.fn().mockResolvedValue({
-      status: 'expired',
+      status: 'free',
       expiresAtUnix: null,
       remainingDays: 0,
       configured: false,
@@ -211,14 +273,26 @@ it('accepts an injected licensing port before rendering live controls', async ()
       </I18nProvider>
     </MixRelayProvider>,
   );
-  expect(await screen.findByText(/Your access has ended/u)).toBeInTheDocument();
-  expect(screen.queryByRole('heading', { name: 'MixRelay' })).not.toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'License' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'MixRelay' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'New graph' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'License' }));
+  expect(await screen.findByRole('dialog', { name: 'License' })).toBeInTheDocument();
   expect(licensingPort.getStatus).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole('button', { name: 'Stop audio' }));
+  const licenseDialog = screen.getByRole('dialog', { name: 'License' });
+  expect(within(licenseDialog).queryByText('Terms of use')).not.toBeInTheDocument();
+  expect(
+    within(licenseDialog).queryByRole('button', { name: 'Stop audio' }),
+  ).not.toBeInTheDocument();
+  expect(stopEngine).not.toHaveBeenCalled();
+  fireEvent.click(within(licenseDialog).getByRole('button', { name: 'Close' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Pause' }));
   await waitFor(() => expect(stopEngine).toHaveBeenCalledWith(false));
   expect(stopEngine).toHaveBeenCalledTimes(1);
-  expect(await screen.findByText('Stop request sent.')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Stop audio' })).toBeDisabled();
+  expect(await screen.findByRole('button', { name: 'Resume' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
 });
 
 it('keeps file actions in the graph header and toggles navigation without changing the graph', async () => {

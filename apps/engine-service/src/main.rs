@@ -24,6 +24,10 @@ mod linux;
 mod latency_maintenance;
 
 fn main() {
+    if std::env::args().skip(1).eq(["--version"]) {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::builder()
@@ -34,15 +38,15 @@ fn main() {
         .init();
     let mut arguments = std::env::args().skip(1);
     if let Some(mode) = arguments.next() {
-        if mode == mixrelay_engine_process::DESKTOP_ARGUMENT {
+        if mode == mixrelay_engine_process::CONTROLLER_ARGUMENT {
             if arguments.next().is_some() || cfg!(target_os = "macos") {
-                tracing::error!("invalid desktop-owned engine launch");
+                tracing::error!("invalid controller-owned engine launch");
                 std::process::exit(2);
             }
             let owner = match mixrelay_engine_process::EngineOwner::from_stdin() {
                 Ok(owner) => owner,
                 Err(error) => {
-                    tracing::error!(%error, "could not observe desktop ownership");
+                    tracing::error!(%error, "could not observe controller ownership");
                     std::process::exit(1);
                 }
             };

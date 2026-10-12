@@ -51,6 +51,24 @@ pub use rack_formats::{
     run_probe as run_plugin_probe, run_scan as run_plugin_scan,
 };
 
+// Establish agent status before a vendor loads AppKit or creates an editor. Setting it
+// only when our editor host starts is too late for discovery and instance creation.
+fn prepare_plugin_process() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::MainThreadMarker;
+        use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+        let main =
+            MainThreadMarker::new().ok_or("plug-in process must start on the main thread")?;
+        let app = NSApplication::sharedApplication(main);
+        if !app.setActivationPolicy(NSApplicationActivationPolicy::Accessory) {
+            return Err("could not initialize background plug-in process".into());
+        }
+        app.finishLaunching();
+    }
+    Ok(())
+}
+
 #[cfg(not(target_has_atomic = "64"))]
 compile_error!("MixRelay processor shared transport requires native 64-bit atomics");
 
@@ -200,6 +218,7 @@ impl ProcessorCatalog {
 ///
 /// Returns a diagnostic when the target identity, shared transport, or plug-in cannot initialize.
 pub fn run_plugin_worker(arguments: &[String]) -> Result<(), String> {
+    prepare_plugin_process()?;
     let [encoded_locator, shared_path, config_path] = arguments else {
         return Err(
             "processor worker requires locator, shared-memory, and config paths".to_owned(),

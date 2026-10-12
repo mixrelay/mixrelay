@@ -1,0 +1,54 @@
+import { Meta, Canvas, ArgTypes } from '@storybook/addon-docs/blocks';
+import { DocsLayout } from '../DocsLayout';
+import { ComponentContract } from '../ComponentsReference';
+import * as Example from '../../ui/NativeSampleFormatField.stories';
+
+import * as Api from "../playgrounds/NativeSampleFormatField.stories";
+
+<Meta title="Design System/Components/NativeSampleFormatField" />
+
+<DocsLayout>
+
+<ComponentContract name="NativeSampleFormatField" />
+
+## Playground·API·기본값
+
+<a href="/?path=/story/core-playgrounds-nativesampleformatfield--playground" target="_top">NativeSampleFormatField Playground 열기</a>. Controls는 실제 공개 props를 전달합니다. 구현 기본값은 아래 API 표와 소스 대조 계약을 따르며, Playground의 args는 재현용 입력입니다.
+
+변경 요청과 확인된 formats를 구별합니다. 선택 callback은 readback을 자동 변경하지 않습니다.
+
+<Canvas of={Api.Playground} story={{ inline: false, height: 560 }} sourceState="hidden" />
+<ArgTypes of={Api.Playground} exclude={["className","classNames","style","styles","vars","unstyled","color","c","size","radius","variant","component","renderRoot","dangerouslySetInnerHTML"]} />
+
+API 표의 *는 필수 입력입니다. Default의 —는 선언된 기본값이 없다는 뜻이며, 파생값·fallback과 초기 상태는 위 소스 대조 계약에 명시합니다.
+
+속성은 Playground의 Controls에서 변경합니다. Source는 현재 JSX를, 위의 실행 예제 전체 코드는 실제 상태 갱신·이벤트·슬롯 구성을 보여줍니다.
+
+## 실제 사용례
+
+이 Canvas는 아래 계약을 소비하는 기존 스토리입니다. 여러 컴포넌트의 조합이면 해당 조합에서의 역할을 함께 확인합니다. 독립 컴포넌트 전용 예시나 실제 장치 실행으로 해석하지 않습니다.
+
+<Canvas of={Example.Shared} story={{ inline: false, height: 560 }} />
+
+
+## 개별 상태 예제
+
+### Disabled
+
+<Canvas of={Api.Disabled} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+### Mixed
+
+<Canvas of={Api.Mixed} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+### Unavailable
+
+<Canvas of={Api.Unavailable} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+### Failed
+
+<Canvas of={Api.Failed} story={{ inline: false, height: 400 }} sourceState="hidden" />
+
+<a href="/?path=/docs/design-system-components--docs" target="_top">전체 컴포넌트와 사용 구분</a>
+
+</DocsLayout>

@@ -7,6 +7,7 @@ import {
   addAudioGraphNode,
   canConnectAudioGraph,
   connectAudioGraph,
+  connectAudioGraphBatch,
   disconnectAudioGraph,
   moveAudioGraphNode,
   reconnectAudioGraph,
@@ -208,4 +209,10 @@ it('encodes endpoint components into deterministic edge IDs', () => {
   expect(
     connectAudioGraph(model, connection('source / one', 'target', 'out 1', 'in/1')).edges[0]?.id,
   ).toBe('edge:source%20%2F%20one:out%201:target:in%2F1');
+});
+
+it('keeps the same graph when a channel batch contains no connections', () => {
+  const model = emptyModel();
+  expect(connectAudioGraphBatch(model, [])).toBe(model);
+  expect(model.revision).toBe(4);
 });

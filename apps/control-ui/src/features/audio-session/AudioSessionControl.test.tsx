@@ -52,6 +52,83 @@ it('retains recorder finalization errors even without an audio session or record
   expect(screen.getByRole('alert')).toHaveTextContent('Recording error: take.wav: Disk full');
 });
 
+it('keeps the same buffer control and value when playback pauses or configuration locks', async () => {
+  await i18n.changeLanguage('en');
+  const session: AudioSessionStatus = {
+    format: { sampleRate: 48000, blockFrames: 256 },
+    clockAuthority: 'engine_timer',
+    observedDeviceSampleRate: null,
+    issue: null,
+    transportLatencyFrames: null,
+    capabilities: {
+      backend: 'core_audio',
+      supportedSampleRates: [48000],
+      supportedBlockFrames: [128, 256],
+      canReconfigureLive: true,
+      hardwareInput: true,
+      hardwareOutput: true,
+      virtualEndpoint: true,
+      applicationCapture: true,
+      sampleRateConversion: true,
+      driftCorrection: true,
+    },
+  };
+  const status: MixRelayStatus = {
+    protocolVersion: 1,
+    driverState: 'ready',
+    sampleRate: 48000,
+    bufferFrames: 256,
+    underruns: 0,
+    overruns: 0,
+    audioSession: session,
+    enginePower: { enabled: true, transitioning: false },
+  };
+  const port = new StorybookMockControlPort({
+    status,
+    graph: { schemaVersion: 2, revision: 1, nodes: [], edges: [] },
+    graphStatus: { protocolVersion: 1, activeRevision: 1, submittedRevision: 1 },
+  });
+  const view = (next: MixRelayStatus) => (
+    <MixRelayProvider>
+      <AudioSessionControl
+        status={next}
+        controlPort={port}
+        onApplied={vi.fn()}
+        onBusyChange={vi.fn()}
+      />
+    </MixRelayProvider>
+  );
+  const rendered = render(view(status));
+  const buffer = screen.getByRole('button', {
+    name: (name) => name.endsWith(i18n.t('audioSession.processingBuffer')),
+  });
+  expect(buffer).toHaveTextContent('256');
+  rendered.rerender(view({ ...status, enginePower: { enabled: false, transitioning: false } }));
+  expect(
+    screen.getByRole('button', {
+      name: (name) => name.endsWith(i18n.t('audioSession.processingBuffer')),
+    }),
+  ).toBe(buffer);
+  expect(buffer).toHaveTextContent('256');
+  rendered.rerender(
+    view({
+      ...status,
+      audioSession: {
+        ...session,
+        capabilities: { ...session.capabilities, canReconfigureLive: false },
+      },
+    }),
+  );
+  expect(
+    screen.getByRole('button', {
+      name: (name) => name.endsWith(i18n.t('audioSession.processingBuffer')),
+    }),
+  ).toBe(buffer);
+  expect(buffer).toBeDisabled();
+  expect(buffer).toHaveTextContent('256');
+  expect(buffer.closest('[title]')).toHaveAttribute('title', i18n.t('audioSession.locked'));
+});
+
 it.each(
   ['en', 'ko-KR', 'pseudo'].flatMap((language) =>
     [null, { sampleRate: 48000, blockFrames: 256 }, { sampleRate: 44100, blockFrames: 128 }].map(
@@ -110,13 +187,17 @@ it.each(
     expect(screen.queryByText(i18n.t('audioSession.diagnostics'))).not.toBeInTheDocument();
     expect(screen.getByText(`${i18n.t('audioSession.bufferLatency')} 5.33 ms`)).toBeInTheDocument();
     // Keep one editable settings form; native and persisted values remain an internal contract.
-    expect(screen.queryByRole('combobox', { name: i18n.t('audioSession.sampleRate') })).toBeNull();
+    expect(screen.queryByRole('button', { name: i18n.t('audioSession.sampleRate') })).toBeNull();
     expect(
-      screen.getAllByRole('combobox', { name: i18n.t('audioSession.processingBuffer') }),
+      screen.getAllByRole('button', {
+        name: (name) => name.endsWith(i18n.t('audioSession.processingBuffer')),
+      }),
     ).toHaveLength(1);
     expect(
-      screen.getByRole('combobox', { name: i18n.t('audioSession.processingBuffer') }),
-    ).toHaveValue('256');
+      screen.getByRole('button', {
+        name: (name) => name.endsWith(i18n.t('audioSession.processingBuffer')),
+      }),
+    ).toHaveTextContent('256');
     expect(screen.getAllByText(i18n.t('audioSession.processingBuffer'))).toHaveLength(1);
     for (const key of hiddenDiagnostics)
       expect(screen.queryByText(i18n.t(`audioSession.${key}`))).not.toBeInTheDocument();
@@ -215,3 +296,57 @@ it.each(
       expect(locale.audioSession.issues.endpoint_preferences_unavailable).toBeTruthy();
   },
 );
+
+it.each([
+  { sampleRate: 0, blockFrames: 128 },
+  { sampleRate: 48000, blockFrames: 0 },
+  { sampleRate: Number.NaN, blockFrames: 128 },
+  { sampleRate: 48000, blockFrames: Number.POSITIVE_INFINITY },
+])('does not present a fabricated buffer duration for invalid native format %j', async (format) => {
+  await i18n.changeLanguage('en');
+  const status: MixRelayStatus = {
+    protocolVersion: 1,
+    driverState: 'ready',
+    sampleRate: null,
+    bufferFrames: null,
+    underruns: 0,
+    overruns: 0,
+    audioSession: {
+      format,
+      clockAuthority: 'engine_timer',
+      observedDeviceSampleRate: null,
+      issue: null,
+      transportLatencyFrames: null,
+      capabilities: {
+        backend: 'core_audio',
+        supportedSampleRates: [],
+        supportedBlockFrames: [],
+        canReconfigureLive: false,
+        hardwareInput: false,
+        hardwareOutput: false,
+        virtualEndpoint: false,
+        applicationCapture: false,
+        sampleRateConversion: false,
+        driftCorrection: false,
+      },
+    },
+  };
+  const port = new StorybookMockControlPort({
+    status,
+    graph: { schemaVersion: 2, revision: 1, nodes: [], edges: [] },
+    graphStatus: { protocolVersion: 1, activeRevision: 1, submittedRevision: 1 },
+  });
+  render(
+    <I18nextProvider i18n={i18n}>
+      <MixRelayProvider>
+        <AudioSessionControl
+          status={status}
+          controlPort={port}
+          onApplied={vi.fn()}
+          onBusyChange={vi.fn()}
+        />
+      </MixRelayProvider>
+    </I18nextProvider>,
+  );
+  expect(screen.getByText(`${i18n.t('audioSession.bufferLatency')} —`)).toBeInTheDocument();
+});

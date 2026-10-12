@@ -89,7 +89,8 @@ it.each(['en', 'ko-KR', 'pseudo'])(
     );
     const marker = screen.getByRole('img', { name: t('routing.nodeStatus.reselectApplication') });
     expect(marker).toHaveAttribute('data-tone', 'warning');
-    fireEvent.mouseEnter(marker);
+    fireEvent.pointerMove(window.document.body);
+    fireEvent.pointerOver(marker);
     expect(await screen.findByRole('tooltip')).toHaveTextContent(
       t('routing.nodeStatus.reselectApplication'),
     );
@@ -211,7 +212,9 @@ it('updates only the icon when an exact app disappears and reappears in inventor
     </MixRelayProvider>,
   );
   const presentation = await screen.findByTestId('application-presentation');
-  expect(presentation).toHaveTextContent(JSON.stringify([{ iconUrl: null, title: 'My saved name' }]));
+  expect(presentation).toHaveTextContent(
+    JSON.stringify([{ iconUrl: null, title: 'My saved name' }]),
+  );
   inventory = [
     {
       bundleId: 'org.example.player',
@@ -230,7 +233,9 @@ it('updates only the icon when an exact app disappears and reappears in inventor
   inventory = [];
   window.dispatchEvent(new Event('focus'));
   await waitFor(() =>
-    expect(presentation).toHaveTextContent(JSON.stringify([{ iconUrl: null, title: 'My saved name' }])),
+    expect(presentation).toHaveTextContent(
+      JSON.stringify([{ iconUrl: null, title: 'My saved name' }]),
+    ),
   );
   expect(apply).not.toHaveBeenCalled();
   expect(await port.getGraph()).toEqual(graph);

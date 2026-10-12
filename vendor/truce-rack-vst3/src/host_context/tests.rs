@@ -570,7 +570,108 @@ struct ControllerProbe {
 }
 
 impl Class for ControllerProbe {
-    type Interfaces = (IEditController,);
+    type Interfaces = (IEditController, vst3::Steinberg::Vst::IComponent);
+}
+
+impl vst3::Steinberg::Vst::IComponentTrait for ControllerProbe {
+    unsafe fn getControllerClassId(&self, _: *mut vst3::Steinberg::TUID) -> i32 {
+        panic!("a combined controller must not be asked for a separate controller class")
+    }
+    unsafe fn setIoMode(&self, _: i32) -> i32 {
+        kResultOk
+    }
+    unsafe fn getBusCount(&self, _: i32, _: i32) -> i32 {
+        0
+    }
+    unsafe fn getBusInfo(
+        &self,
+        _: i32,
+        _: i32,
+        _: i32,
+        _: *mut vst3::Steinberg::Vst::BusInfo,
+    ) -> i32 {
+        kInvalidArgument
+    }
+    unsafe fn getRoutingInfo(
+        &self,
+        _: *mut vst3::Steinberg::Vst::RoutingInfo,
+        _: *mut vst3::Steinberg::Vst::RoutingInfo,
+    ) -> i32 {
+        kInvalidArgument
+    }
+    unsafe fn activateBus(&self, _: i32, _: i32, _: i32, _: u8) -> i32 {
+        kResultOk
+    }
+    unsafe fn setActive(&self, _: u8) -> i32 {
+        kResultOk
+    }
+    unsafe fn setState(&self, _: *mut IBStream) -> i32 {
+        kResultOk
+    }
+    unsafe fn getState(&self, _: *mut IBStream) -> i32 {
+        kResultOk
+    }
+}
+
+struct UnusedFactory;
+impl Class for UnusedFactory {
+    type Interfaces = (vst3::Steinberg::IPluginFactory,);
+}
+impl vst3::Steinberg::IPluginFactoryTrait for UnusedFactory {
+    unsafe fn getFactoryInfo(&self, _: *mut vst3::Steinberg::PFactoryInfo) -> i32 {
+        panic!("unused factory")
+    }
+    unsafe fn countClasses(&self) -> i32 {
+        panic!("unused factory")
+    }
+    unsafe fn getClassInfo(&self, _: i32, _: *mut vst3::Steinberg::PClassInfo) -> i32 {
+        panic!("unused factory")
+    }
+    unsafe fn createInstance(
+        &self,
+        _: *const std::ffi::c_char,
+        _: *const std::ffi::c_char,
+        _: *mut *mut std::ffi::c_void,
+    ) -> i32 {
+        panic!("combined controller must not create a separate instance")
+    }
+}
+
+#[test]
+fn combined_component_load_uses_its_existing_controller_without_reinitializing() {
+    let ControllerFixture {
+        controller, events, ..
+    } = controller_probe(false);
+    let component = controller
+        .to_com_ptr::<vst3::Steinberg::Vst::IComponent>()
+        .unwrap();
+    let services = HostServices::new();
+    let base = component.as_com_ref().cast::<IPluginBase>().unwrap();
+    let _lifecycle =
+        crate::lifecycle::InitializedPlugin::initialize(&base, services.context_ptr()).unwrap();
+    let factory = ComWrapper::new(UnusedFactory)
+        .to_com_ptr::<vst3::Steinberg::IPluginFactory>()
+        .unwrap();
+    let info = truce_rack_core::info::PluginInfo {
+        name: "Combined".into(),
+        vendor: "Fixture".into(),
+        version: 1,
+        category: truce_rack_core::info::PluginCategory::Effect,
+        path: "combined.vst3".into(),
+        unique_id: "fixture".into(),
+        format: "vst3",
+        has_editor: false,
+        accepts_midi: false,
+    };
+    let context = crate::LoadContext {
+        info: &info,
+        factory: &factory,
+        host_services: &services,
+    };
+    let parts = crate::load_controller(&context, &component).unwrap();
+    assert!(!parts.separate);
+    assert!(parts.lifecycle.is_none());
+    assert_eq!(*events.lock().unwrap(), ["initialize"]);
 }
 
 impl IPluginBaseTrait for ControllerProbe {

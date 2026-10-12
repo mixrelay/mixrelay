@@ -44,10 +44,11 @@ function fixture(t, simulatedUmask = 0) {
   mkdirSync(fixtureRoot, { recursive: true });
   const root = mkdtempSync(join(fixtureRoot, "mixrelay-macos-payload-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const manager = join(root, "MixRelay Driver.app");
+  const manager = join(root, "MixRelay.app");
   const hal = join(root, "MixRelayHAL.driver");
   const driver = join(root, "mixrelay-driver-service");
-  const uninstaller = join(root, "Uninstall MixRelay Driver.app");
+  const engine = join(root, "mixrelay-engine-service");
+  const uninstaller = join(root, "Uninstall MixRelay.app");
   const output = join(root, "payload");
   for (const bundle of [manager, hal, uninstaller]) {
     mkdirSync(join(bundle, "Contents/MacOS"), { recursive: true });
@@ -61,6 +62,8 @@ function fixture(t, simulatedUmask = 0) {
   writeFileSync(join(manager, "Contents/MacOS/mixrelay-desktop"), "manager-binary");
   writeFileSync(join(hal, "Contents/MacOS/MixRelayHAL"), "hal-binary");
   writeFileSync(driver, "driver-binary");
+  writeFileSync(engine, "engine-binary");
+  chmodSync(engine, 0o755);
   writeFileSync(join(uninstaller, "Contents/MacOS/mixrelay-driver-uninstaller"), "uninstaller-binary");
   chmodSync(join(uninstaller, "Contents/MacOS/mixrelay-driver-uninstaller"), 0o755);
   mkdirSync(join(uninstaller, "Contents/Helpers"));
@@ -69,7 +72,7 @@ function fixture(t, simulatedUmask = 0) {
   chmodSync(join(manager, "Contents/MacOS/mixrelay-desktop"), 0o755);
   chmodSync(join(hal, "Contents/MacOS/MixRelayHAL"), 0o755);
   chmodSync(driver, 0o755);
-  return { root, manager, hal, driver, uninstaller, output, fsApi: fsAdapter(simulatedUmask) };
+  return { root, manager, hal, driver, engine, uninstaller, output, fsApi: fsAdapter(simulatedUmask) };
 }
 
 function runner(ids = new Map()) {
@@ -96,16 +99,17 @@ function validFixture(t) {
 }
 
 test("parseArgs requires explicit absolute release artifacts", () => {
-  assert.deepEqual(parseArgs(["--manager=/release/MixRelay.app", "--hal", "/release/HAL.driver", "--driver", "/release/driver", "--uninstaller", "/release/Uninstall.app", "--output", "/fixture/payload"]), {
+  assert.deepEqual(parseArgs(["--manager=/release/MixRelay.app", "--hal", "/release/HAL.driver", "--driver", "/release/driver", "--engine", "/release/engine", "--uninstaller", "/release/Uninstall.app", "--output", "/fixture/payload"]), {
     help: false,
     manager: "/release/MixRelay.app",
     hal: "/release/HAL.driver",
     driver: "/release/driver",
+    engine: "/release/engine",
     uninstaller: "/release/Uninstall.app",
     output: "/fixture/payload",
   });
   assert.throws(() => parseArgs(["--manager", "relative.app", "--hal", "/b", "--driver", "/c", "--output", "/d"]), /absolute/);
-  assert.throws(() => parseArgs(["--manager", "/a", "--hal", "/b", "--driver", "/c"]), /Missing required option: --uninstaller/);
+  assert.throws(() => parseArgs(["--manager", "/a", "--hal", "/b", "--driver", "/c", "--engine", "/e"]), /Missing required option: --uninstaller/);
 });
 
 test("prepares a deterministic inspectable payload and never creates a pkg", (t) => {
@@ -119,15 +123,15 @@ test("prepares a deterministic inspectable payload and never creates a pkg", (t)
     mode: "0755",
   });
   assert.match(readFileSync(join(paths.output, "templates/io.mixrelay.audio.driver.plist.in"), "utf8"), /__MIXRELAY_SERVICE_USER__/);
-  assert.equal(existsSync(join(paths.output, "Applications/MixRelay Driver.app/Contents/Resources/empty")), true);
+  assert.equal(existsSync(join(paths.output, "Applications/MixRelay.app/Contents/Resources/empty")), true);
   for (const filename of [...DOCUMENTS, "CHANGELOG.md"]) {
     assert.deepEqual(
-      readFileSync(join(paths.output, "Applications/MixRelay Driver.app/Contents/Resources", filename)),
+      readFileSync(join(paths.output, "Applications/MixRelay.app/Contents/Resources", filename)),
       readFileSync(join(paths.manager, "Contents/Resources", filename)),
     );
   }
   const manifest = JSON.parse(readFileSync(join(paths.output, "payload-manifest.json"), "utf8"));
-  assert.equal(manifest.artifacts.length, 6);
+  assert.equal(manifest.artifacts.length, 8);
   for (const filename of [...DOCUMENTS, "CHANGELOG.md"]) {
     assert.ok(manifest.artifacts[0].files.some(file => file.path === `Contents/Resources/${filename}`));
   }
@@ -148,9 +152,9 @@ test("normalizes staged bundle and wrapper directories under a restrictive umask
   preparePayload({ ...paths, run: runner(paths.ids) });
   const directories = [
     join(paths.output, "Applications"),
-    join(paths.output, "Applications/MixRelay Driver.app"),
-    join(paths.output, "Applications/MixRelay Driver.app/Contents"),
-    join(paths.output, "Applications/MixRelay Driver.app/Contents/Resources/empty"),
+    join(paths.output, "Applications/MixRelay.app"),
+    join(paths.output, "Applications/MixRelay.app/Contents"),
+    join(paths.output, "Applications/MixRelay.app/Contents/Resources/empty"),
     join(paths.output, "Library"),
     join(paths.output, "Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver"),
     join(paths.output, "Library/Application Support/MixRelay/bin"),
@@ -209,7 +213,7 @@ test("rejects symlinked input and output ancestors", (t) => {
   symlinkSync(inputPaths.root, inputAlias);
   assert.throws(() => preparePayload({
     ...inputPaths,
-    manager: join(inputAlias, "MixRelay Driver.app"),
+    manager: join(inputAlias, "MixRelay.app"),
     run: runner(inputPaths.ids),
   }), /--manager path must not contain symlinks/);
 

@@ -3,7 +3,7 @@ use super::super::{SERVICE, mr_engine_service_start};
 use mixrelay_audio_io::{ChannelLayout, StreamSpec, VirtualEndpointId, VirtualEndpointSpec};
 use mixrelay_driver_control::{DriverClient, DriverCommand, DriverState};
 use mixrelay_macos_transport::{
-    app_lifecycle::{APP_LEASE, ENGINE_LEASE, ProcessLease},
+    app_lifecycle::{CONTROLLER_LEASE, ENGINE_LEASE, ProcessLease},
     device_io::{
         DeviceIo, mr_device_io_bridge_read, mr_device_io_connect, mr_device_io_create,
         mr_device_io_destroy,
@@ -52,7 +52,7 @@ impl InventoryOwner {
             "explicit sole-launchd-owner fixture opt-in required"
         );
         let mut owner = Self {
-            _app: ProcessLease::acquire(APP_LEASE).expect("desktop must not be running"),
+            _app: ProcessLease::acquire(CONTROLLER_LEASE).expect("controller must not be running"),
             _engine: ProcessLease::acquire(ENGINE_LEASE).expect("engine must not be running"),
             started: false,
         };

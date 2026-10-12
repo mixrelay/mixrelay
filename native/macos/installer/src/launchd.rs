@@ -11,7 +11,7 @@ use thiserror::Error;
 use crate::DRIVER_PATH;
 
 const SERVICE_LABEL: &str = "io.mixrelay.audio.driver";
-const DESKTOP_BUNDLE_IDENTIFIER: &str = "io.mixrelay.driver.desktop";
+const DESKTOP_BUNDLE_IDENTIFIER: &str = "io.mixrelay.desktop";
 const MAX_PLIST_BYTES: usize = 16 * 1024;
 const TEMPLATE_USER: &str = "__MIXRELAY_SERVICE_USER__";
 const TEMPLATE_GROUP: &str = "__MIXRELAY_SERVICE_GROUP__";
@@ -143,7 +143,10 @@ impl LaunchdConfiguration {
     pub(crate) fn installed_account(bytes: &[u8]) -> Result<ServiceAccount, LaunchdError> {
         let definition = Self::decode(bytes)?;
         if definition.label != SERVICE_LABEL
-            || definition.associated_bundle_identifiers != DESKTOP_BUNDLE_IDENTIFIER
+            || !matches!(
+                definition.associated_bundle_identifiers.as_str(),
+                DESKTOP_BUNDLE_IDENTIFIER | "io.mixrelay.driver.desktop"
+            )
             || definition.program_arguments != [DRIVER_PATH]
             || !definition.mach_services.driver
             || definition.process_type != "Interactive"
@@ -187,7 +190,11 @@ impl LaunchdConfiguration {
         account: &ServiceAccount,
     ) -> Result<Self, LaunchdError> {
         let definition = Self::decode(bytes)?;
-        if definition != Definition::for_account(account) {
+        let mut expected = Definition::for_account(account);
+        if definition.associated_bundle_identifiers == "io.mixrelay.driver.desktop" {
+            expected.associated_bundle_identifiers = "io.mixrelay.driver.desktop".into();
+        }
+        if definition != expected {
             return Err(LaunchdError::Policy);
         }
         Ok(Self(definition))

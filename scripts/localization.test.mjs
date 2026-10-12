@@ -6,13 +6,22 @@ import test from "node:test";
 const languages = JSON.parse(readFileSync(new URL("../packaging/localization/languages.json", import.meta.url), "utf8"));
 const removal = JSON.parse(readFileSync(new URL("../packaging/localization/linux-removal.json", import.meta.url), "utf8"));
 
+test("every App contract states the approved 30-day offline authorization separately from refunds", () => {
+  for (const entry of languages) {
+    const terms = readFileSync(new URL(`../${entry.appTerms}`, import.meta.url), "utf8");
+    const activation = terms.split(/^3\. /m)[1]?.split(/^4\. /m)[0];
+    assert.ok(activation, `${entry.appTerms}: activation section`);
+    assert.match(activation, /30/, `${entry.appTerms}: approved offline authorization period`);
+  }
+});
+
 test("required languages have complete distinct App and Driver contracts", () => {
   assert.deepEqual(languages.map(entry => entry.language).sort(), ["de", "en", "es", "fr", "it", "ja", "ko", "pt", "ru", "zh-Hans", "zh-Hant"]);
   for (const entry of languages) {
     for (const [key, sections] of [["appTerms", 10], ["driverTerms", 8]]) {
       const terms = readFileSync(new URL(`../${entry[key]}`, import.meta.url), "utf8");
       assert.deepEqual([...terms.matchAll(/^(\d+)\. /gm)].map(match => Number(match[1])), Array.from({ length: sections }, (_, i) => i + 1));
-      for (const value of ["2026-10-08", "111-42-04359", "support@mixrelay.com", "privacy@dsub.io", "legal@dsub.io", "+82 10-6380-9646"]) assert.ok(terms.includes(value), `${entry[key]}: ${value}`);
+      for (const value of ["2026-10-10", "111-42-04359", "support@mixrelay.com", "privacy@dsub.io", "legal@dsub.io", "+82 10-6380-9646", "Asia/Seoul"]) assert.ok(terms.includes(value), `${entry[key]}: ${value}`);
       assert.doesNotMatch(terms, /Professional legal review|review not completed|검토 미완료|Seunghyun Bae|배승현/);
     }
     const driver = readFileSync(new URL(`../${entry.driverTerms}`, import.meta.url), "utf8");

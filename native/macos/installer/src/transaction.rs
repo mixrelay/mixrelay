@@ -753,6 +753,10 @@ mod tests {
                 crate::LAUNCHD_PATH,
                 crate::UNINSTALLER_PATH,
                 crate::REMOVAL_LAUNCHD_PATH,
+                crate::RUNTIME_ENGINE_PATH,
+                crate::RUNTIME_LAUNCHD_PATH,
+                "/Applications/MixRelay Driver.app",
+                "/Applications/Uninstall MixRelay Driver.app",
             ]
         );
     }

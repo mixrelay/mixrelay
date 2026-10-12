@@ -140,7 +140,13 @@ impl EngineGraphController {
     }
 
     pub(crate) fn endpoint_settings(&self) -> Option<VirtualEndpointSettings> {
-        self.endpoint_backend.settings()
+        let mut settings = self.endpoint_backend.settings()?;
+        for device in &mut settings.devices {
+            device.native_buffer = self
+                .graph_resources
+                .virtual_endpoint_buffer(&device.spec.id);
+        }
+        Some(settings)
     }
 
     /// Refreshes all catalog references from the Driver before publication.

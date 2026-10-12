@@ -21,22 +21,22 @@ it('keeps the compact controlled value and exposes a portalled, scrollable optio
       />
     </MixRelayProvider>,
   );
-  const input = screen.getByRole('combobox', { name: 'Buffer size' });
-  expect(input).toHaveValue('128');
+  const input = screen.getByRole('button', { name: /Buffer size$/ });
+  expect(input).toHaveTextContent('128');
   expect(input.closest('[title]')).toHaveAttribute('title', 'Brief audio interruption');
   fireEvent.click(input);
   expect(screen.getByRole('option', { name: '2048' })).toBeInTheDocument();
   expect(view.container.querySelector('[role="option"]')).toBeNull();
-  expect(document.querySelector('.mantine-ScrollArea-root')).not.toBeNull();
+  expect(screen.getByRole('listbox')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('option', { name: '2048' }));
   expect(onChange).toHaveBeenCalledExactlyOnceWith('2048');
-  expect(input).toHaveValue('128');
+  expect(input).toHaveTextContent('128');
   view.rerender(
     <MixRelayProvider>
       <InlineSelect label="Buffer size" value="2048" data={data} onChange={onChange} />
     </MixRelayProvider>,
   );
-  expect(screen.getByRole('combobox', { name: 'Buffer size' })).toHaveValue('2048');
+  expect(screen.getByRole('button', { name: /Buffer size$/ })).toHaveTextContent('2048');
 });
 
 it('submits the current option once for same-value retry', () => {
@@ -46,11 +46,11 @@ it('submits the current option once for same-value retry', () => {
       <InlineSelect label="Buffer size" value="2048" data={data} onChange={onChange} />
     </MixRelayProvider>,
   );
-  const input = screen.getByRole('combobox', { name: 'Buffer size' });
+  const input = screen.getByRole('button', { name: /Buffer size$/ });
   fireEvent.click(input);
   fireEvent.click(screen.getByRole('option', { name: '2048' }));
   expect(onChange).toHaveBeenCalledExactlyOnceWith('2048');
-  expect(input).toHaveValue('2048');
+  expect(input).toHaveTextContent('2048');
 });
 
 it('preserves disabled, Escape, Arrow and Enter selection semantics without clearing', () => {
@@ -60,7 +60,7 @@ it('preserves disabled, Escape, Arrow and Enter selection semantics without clea
       <InlineSelect label="Buffer size" value="128" data={data} disabled onChange={onChange} />
     </MixRelayProvider>,
   );
-  let input = screen.getByRole('combobox', { name: 'Buffer size' });
+  let input = screen.getByRole('button', { name: /Buffer size$/ });
   fireEvent.click(input);
   expect(input).toBeDisabled();
   expect(screen.queryByRole('option')).not.toBeInTheDocument();
@@ -69,14 +69,16 @@ it('preserves disabled, Escape, Arrow and Enter selection semantics without clea
       <InlineSelect label="Buffer size" value="128" data={data} onChange={onChange} />
     </MixRelayProvider>,
   );
-  input = screen.getByRole('combobox', { name: 'Buffer size' });
+  input = screen.getByRole('button', { name: /Buffer size$/ });
   fireEvent.click(input);
-  fireEvent.keyDown(input, { key: 'Escape' });
+  fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' });
   expect(screen.queryByRole('option')).not.toBeInTheDocument();
   expect(onChange).not.toHaveBeenCalled();
   fireEvent.click(input);
-  fireEvent.keyDown(input, { key: 'ArrowDown', code: 'ArrowDown' });
-  fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+  const option = screen.getByRole('option', { name: '256' });
+  option.focus();
+  fireEvent.keyDown(option, { key: 'Enter', code: 'Enter' });
+  fireEvent.keyUp(option, { key: 'Enter', code: 'Enter' });
   expect(onChange).toHaveBeenCalledTimes(1);
   expect(onChange.mock.calls[0]?.[0]).toBeTypeOf('string');
   expect(onChange.mock.calls[0]?.[0]).not.toBeNull();

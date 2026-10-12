@@ -1,4 +1,40 @@
+import { effectTranslations } from '../effects';
 export const zhHant = {
+  effects: effectTranslations.zhHant,
+  theme: {
+    label: '外觀',
+    current: '外觀：{{theme}}',
+    system: '跟隨系統',
+    light: '淺色',
+    dark: '深色',
+  },
+  about: {
+    title: '關於 MixRelay',
+    version: '版本 {{version}}',
+    licensed: '已授權',
+    unknown: '授權狀態未知',
+  },
+  runtimeConnection: {
+    connecting: {
+      title: '正在連線至 MixRelay',
+      description: '正在準備音訊。MixRelay 就緒後將開啟工作區。',
+    },
+    not_installed: {
+      title: '需要 MixRelay',
+      description: '請安裝 MixRelay 以使用音訊路由、效果和錄音，然後重新連線。',
+    },
+    incompatible: {
+      title: '請更新 MixRelay',
+      description: '已安裝的 MixRelay 與此應用程式不相容。請更新後重新連線。',
+    },
+    unavailable: {
+      title: '無法連線至 MixRelay',
+      description: 'MixRelay 沒有回應或音訊引擎尚未就緒。請重新連線。',
+    },
+    install: '安裝 MixRelay',
+    update: '更新 MixRelay',
+    retry: '重新連線',
+  },
   workspaceFile: {
     file: '檔案',
     'new': '新增工作區',
@@ -7,14 +43,18 @@ export const zhHant = {
     saveAs: '另存新檔…',
   },
   driverManagement: {
+    mixed: '不一致',
+    channels: '聲道',
+    bitDepth: '位元深度',
+    unselectedBuffer: '未選擇',
+    pendingBuffer: '裝置連線時套用。',
+    observedBuffer: '目前套用值',
+    bufferSize: '緩衝區大小',
+    frames: '影格',
     title: '驅動程式設定',
     loading: '正在讀取驅動程式狀態…',
     unavailable: '驅動程式服務無法使用。',
     name: '裝置名稱',
-    renderChannels: '播放聲道數',
-    captureChannels: '擷取聲道數',
-    renderFormat: '播放格式',
-    captureFormat: '擷取格式',
     unknown: '不明',
     create: '建立裝置',
     save: '套用',
@@ -24,7 +64,7 @@ export const zhHant = {
     changeFailed: '無法更改裝置。請重新整理後重試。',
     saveFailed: '裝置已更改，但無法儲存設定。',
     deviceMissing: '此裝置已不存在。請重新整理裝置清單。',
-    paidRequired: '新增或移除裝置需要付費 MixRelay 授權。',
+    paidRequired: '此操作需要付費 MixRelay 授權。',
     openApp: '開啟 MixRelay',
     appUnavailable: 'MixRelay 未安裝或無法開啟。',
   },
@@ -50,13 +90,19 @@ export const zhHant = {
     },
   },
   licensing: {
+    limits: {
+      graphs: '免費版：1 個圖',
+      inputs: '免費版：2 個輸入',
+      outputs: '免費版：2 個輸出',
+      plugins: '免費版：2 個外部外掛',
+      virtualDevices: '免費版：1 個虛擬裝置',
+    },
+    freeSummary:
+      '免費：1個圖、2個輸入、2個輸出裝置、1個虛擬裝置、4個Driver聲道對應、2個外部外掛及1個立體聲錄音器。免費圖及其聲道對應可以儲存和載入。重新命名裝置需要授權。',
     title: '授權',
     close: '關閉',
     loading: '正在檢查授權…',
     retry: '再次檢查',
-    stopAudio: '停止音訊',
-    stopRequested: '已傳送停止請求。',
-    stopFailed: '無法停止音訊。請重試或使用「結束」。',
     key: '授權金鑰',
     instanceName: '裝置名稱',
     activate: '啟用',
@@ -64,19 +110,16 @@ export const zhHant = {
     deactivate: '取消此裝置的授權',
     purchase: '購買授權',
     expires: '有效期至 {{date}}',
-    expiredOn: '已於 {{date}} 到期',
     storeUnavailable: '此版本不支援購買和啟用。',
     termsTitle: '使用條款',
     integrationNotice:
       '一般使用與將 MixRelay 整合至第三方產品或隨第三方產品再散布的權利相互獨立。產品整合需要另行簽訂付費協議。',
     states: {
-      trial: '試用 · 剩餘 {{count}} 天',
+      free: '免費',
       licensed: '已取得授權 · 剩餘 {{count}} 天離線使用時間',
-      expired: '使用權限已到期',
       clock_invalid: '請檢查裝置時鐘',
     },
     messages: {
-      expired: '您的使用權限已到期。請啟用授權或線上檢查現有授權。',
       clock_invalid: '請檢查裝置時鐘，然後檢查或啟用授權。',
     },
     errors: {
@@ -95,6 +138,7 @@ export const zhHant = {
     },
   },
   recorder: {
+    freeLimit: '免費錄音：每次最多2個聲道、2小時，不計暫停時間。錄音自動停止，音訊路由持續運作。',
     channels: '聲道',
     title: '錄音機',
     folder: '錄音資料夾',
@@ -117,13 +161,13 @@ export const zhHant = {
     },
   },
   audioSession: {
-    powerOn: '開啟引擎',
-    powerOff: '關閉引擎',
-    powerChanging: '正在切換引擎狀態…',
-    powerFailed: '引擎狀態切換失敗。請檢查目前狀態。',
+    resume: '繼續',
+    pause: '暫停',
+    changing: '正在變更音訊狀態…',
+    pauseFailed: '暫停或繼續失敗。請檢查目前狀態。',
     diagnostics: '音訊詳情',
     processingRate: '處理取樣率',
-    processingBuffer: '緩衝區大小',
+    processingBuffer: '處理緩衝區',
     bufferLatency: '緩衝區延遲',
     bufferLatencyHint: '一個處理緩衝區的延遲（取樣數 ÷ 取樣率），並非總輸入輸出延遲。',
     frames: '訊框',
@@ -131,7 +175,7 @@ export const zhHant = {
     blockSize: '緩衝區大小',
     apply: '套用',
     applying: '正在套用…',
-    changeNotice: '音訊會短暫中斷，復原紀錄將被清除。',
+    changeNotice: '變更此設定時，音訊會短暫中斷。',
     captureRateLocked: '應用程式音訊擷取目前要求 48 kHz。',
     changeFailed: '無法更改音訊工作階段。請檢查引擎狀態。',
     errors: {
@@ -184,6 +228,8 @@ export const zhHant = {
     },
   },
   common: {
+    showPassword: '顯示密碼',
+    hidePassword: '隱藏密碼',
     appName: 'MixRelay',
     beta: '非公開預覽',
     cancel: '取消',
@@ -241,6 +287,11 @@ export const zhHant = {
         preferences_unavailable: '工作階段：設定未儲存',
         stored_format_unavailable: '工作階段：已儲存的格式無法使用',
       },
+    },
+    nodeName: {
+      title: '變更顯示名稱',
+      label: '顯示名稱',
+      save: '儲存',
     },
     context: {
       removeNode: '刪除節點',
@@ -342,6 +393,7 @@ export const zhHant = {
       unavailable: '引擎無法使用',
     },
     errors: {
+      feature_limit: '此變更超出免費方案的上限。請減少連線或節點，或啟用授權。',
       audio_device_disconnected: '無法套用虛擬音訊裝置設定。',
       audio_source_unavailable: '應用程式音訊擷取無法使用。請檢查應用程式及音訊擷取權限。',
       control_unavailable: '本地音訊引擎無法使用。',
@@ -352,7 +404,8 @@ export const zhHant = {
       graph_exchange_busy: '音訊引擎仍在啟用上一個音訊圖。',
       graph_invalid: '引擎拒絕了無效的音訊圖。',
       graph_draft_changed: '重新載入期間編輯內容發生了變化。草稿已保留；請重新選擇。',
-      graph_revision_stale: '音訊圖已在其他位置變更。請重新載入後再套用。',
+      graph_revision_stale: '無法套用變更。請重試。',
+      graph_conflict_unresolved: '並行變更持續衝突，無法自動套用。',
       processor_unavailable: '所選音訊處理器無法使用。',
     },
     recovery: {
@@ -373,6 +426,9 @@ export const zhHant = {
       reload: '載入已儲存的配置',
     },
     processorControl: {
+      probeFailed: '無法載入此外掛。其他效果器仍可使用。',
+      scanFailed: '無法完成此次外掛搜尋。保留先前可用的效果器。',
+      technicalDetails: '技術資訊',
       scanning: '正在掃描音訊效果器…',
       incomplete: '效果器搜尋尚未完成',
       partial: '部分效果器無法掃描。此前可用的效果器已保留。',
@@ -549,8 +605,9 @@ export const zhHant = {
     },
   },
   driver: {
+    installNotice: '虛擬音訊裝置無法使用。',
+    getInstaller: '取得 MixRelay 安裝程式',
     title: '虛擬音訊驅動程式',
-    description: 'MixRelay Capture 和 MixRelay Stream',
     actionInstall: '安裝驅動程式',
     actionRestart: '重新啟動音訊服務',
     actionDiagnose: '開啟診斷',

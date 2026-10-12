@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { formattingLocale, resolveLocale } from '../../core/i18n';
+import { formattingLocale } from '../../core/i18n';
 import { LicensingKeyField } from '../../core/licensing/LicensingFields';
 import type { LicensingPort, LicensingStatus } from '../../core/licensing/LicensingPort';
 import { ActionButton } from '../../core/ui/ActionButton';
+import { FormActions } from '../../core/ui/FormActions';
+import { Stack } from '../../core/ui/Stack';
 import { TextField } from '../../core/ui/TextField';
-import { appLicenseTerms } from './appLicenseTerms';
 import styles from './LicenseAccess.module.css';
 import type { LicenseErrorCode } from './useLicenseSession';
 
@@ -28,15 +29,15 @@ function expiryDate(unix: number | null, locale: string): string | null {
 
 function ExpiryLine({ status }: { status: LicensingStatus }) {
   const { i18n, t } = useTranslation();
-  if (status.status === 'clock_invalid') return null;
+  if (status.status !== 'licensed') return null;
   const expires = expiryDate(status.expiresAtUnix, i18n.language);
   if (!expires) return null;
-  const label = status.status === 'expired' ? 'licensing.expiredOn' : 'licensing.expires';
+  const label = 'licensing.expires';
   return <p>{t(label, { date: expires })}</p>;
 }
 
 function hasStateLine(status: LicensingStatus): boolean {
-  return status.status === 'trial' || status.status === 'licensed';
+  return status.status === 'licensed';
 }
 
 export interface LicenseDetailsProps {
@@ -75,87 +76,96 @@ function ActivationForm({
         void activate();
       }}
     >
-      <LicensingKeyField disabled={busy} label={t('licensing.key')} onChange={setKey} value={key} />
-      <TextField
-        autoComplete="off"
-        disabled={busy}
-        label={t('licensing.instanceName')}
-        onChange={(event) => setInstanceName(event.currentTarget.value)}
-        value={instanceName}
-      />
-      <ActionButton disabled={busy || !key.trim() || !instanceName.trim()} type="submit">
-        {t('licensing.activate')}
-      </ActionButton>
+      <Stack>
+        <LicensingKeyField
+          disabled={busy}
+          label={t('licensing.key')}
+          onChange={setKey}
+          value={key}
+        />
+        <TextField
+          autoComplete="off"
+          disabled={busy}
+          label={t('licensing.instanceName')}
+          onChange={(event) => setInstanceName(event.currentTarget.value)}
+          value={instanceName}
+        />
+      </Stack>
+      <FormActions>
+        <ActionButton
+          disabled={busy || !key.trim() || !instanceName.trim()}
+          type="submit"
+          emphasis="strong"
+        >
+          {t('licensing.activate')}
+        </ActionButton>
+      </FormActions>
     </form>
-  );
-}
-
-export function LicenseTerms() {
-  const { i18n, t } = useTranslation();
-
-  return (
-    <div className={styles.terms}>
-      <p>{t('licensing.integrationNotice')}</p>
-      <p>
-        <a href="mailto:support@mixrelay.com">support@mixrelay.com</a>
-      </p>
-      <details>
-        <summary>{t('licensing.termsTitle')}</summary>
-        <pre className={styles.termsText} lang={resolveLocale(i18n.language)}>
-          {appLicenseTerms(i18n.language)}
-        </pre>
-      </details>
-    </div>
   );
 }
 
 export function LicenseDetails({ busy, error, onMutated, port, run, status }: LicenseDetailsProps) {
   const { t } = useTranslation();
-  const canActivate = status.status === 'trial' || status.status === 'expired';
+  const hasActivation = status.hasActivation ?? status.status === 'licensed';
+  const canActivate = status.status === 'free' && !hasActivation;
 
   return (
     <div className={styles.details}>
       {hasStateLine(status) ? <p className={styles.state}>{licenseStateText(status, t)}</p> : null}
       <ExpiryLine status={status} />
+      {status.status !== 'licensed' ? <p>{t('licensing.freeSummary')}</p> : null}
       {!status.configured ? <p>{t('licensing.storeUnavailable')}</p> : null}
       {error ? <p role="alert">{t(`licensing.errors.${error}`)}</p> : null}
       {status.status === 'clock_invalid' ? (
-        <div className={styles.actions}>
+        <FormActions>
           <ActionButton disabled={busy} onClick={() => void run(() => port.getStatus())}>
             {t('licensing.retry')}
           </ActionButton>
-        </div>
+        </FormActions>
       ) : null}
       {status.configured && canActivate ? (
         <ActivationForm busy={busy} onMutated={onMutated} port={port} run={run} />
       ) : null}
-      {status.configured && status.status !== 'clock_invalid' ? (
-        <div className={styles.actions}>
-          {canActivate ? (
-            <ActionButton disabled={busy} onClick={() => void run(() => port.openCheckout())}>
-              {t('licensing.purchase')}
-            </ActionButton>
-          ) : null}
-          {status.status !== 'trial' ? (
-            <ActionButton disabled={busy} onClick={() => void run(() => port.validate())}>
-              {t('licensing.validate')}
-            </ActionButton>
-          ) : null}
-          {status.status === 'licensed' ? (
-            <ActionButton
-              disabled={busy}
-              onClick={() => {
-                void run(() => port.deactivate()).then((success) => {
-                  if (success) onMutated();
-                });
-              }}
-            >
-              {t('licensing.deactivate')}
-            </ActionButton>
-          ) : null}
-        </div>
-      ) : null}
-      <LicenseTerms />
+      <LicenseActions busy={busy} onMutated={onMutated} port={port} run={run} status={status} />
     </div>
+  );
+}
+
+function LicenseActions({
+  busy,
+  onMutated,
+  port,
+  run,
+  status,
+}: Omit<LicenseDetailsProps, 'error'>) {
+  const { t } = useTranslation();
+  const hasActivation = status.hasActivation ?? status.status === 'licensed';
+  const canActivate = status.status === 'free' && !hasActivation;
+  if (!status.configured || status.status === 'clock_invalid') return null;
+  return (
+    <FormActions>
+      {canActivate ? (
+        <ActionButton disabled={busy} onClick={() => void run(() => port.openCheckout())}>
+          {t('licensing.purchase')}
+        </ActionButton>
+      ) : null}
+      {hasActivation ? (
+        <ActionButton disabled={busy} onClick={() => void run(() => port.validate())}>
+          {t('licensing.validate')}
+        </ActionButton>
+      ) : null}
+      {hasActivation ? (
+        <ActionButton
+          disabled={busy}
+          onClick={() => {
+            void run(() => port.deactivate()).then((success) => {
+              if (success) onMutated();
+            });
+          }}
+        >
+          {t('licensing.deactivate')}
+        </ActionButton>
+      ) : null}
+    </FormActions>
   );
 }

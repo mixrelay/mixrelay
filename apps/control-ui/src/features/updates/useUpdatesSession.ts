@@ -33,6 +33,10 @@ function initialState(port: UpdatesPort | null): UpdateState {
   };
 }
 
+function ownsUpdateSession(current: UpdateSession, owner: { current: UpdatesPort | null }) {
+  return current.active && owner.current === current.port;
+}
+
 export function useUpdatesSession(port: UpdatesPort | null) {
   const [state, setState] = useState(() => initialState(port));
   const session = useRef<UpdateSession | null>(null);
@@ -41,18 +45,16 @@ export function useUpdatesSession(port: UpdatesPort | null) {
 
   const refresh = useCallback(async () => {
     const current = session.current;
-    if (
-      !current || !current.active || current.port !== port || current.checking || current.opening
-    ) return;
+    if (!current?.active || current.port !== port || current.checking || current.opening) return;
     current.checking = true;
     setState((value) => ({ ...value, checking: true, openFailed: false }));
     try {
       const products = await current.port.check();
-      if (current.active && owner.current === current.port) {
+      if (ownsUpdateSession(current, owner)) {
         setState((value) => ({ ...value, products, checked: true, failed: false }));
       }
     } catch {
-      if (current.active && owner.current === current.port) {
+      if (ownsUpdateSession(current, owner)) {
         setState((value) => ({
           ...value,
           products: value.products.map((product) => ({
@@ -68,7 +70,7 @@ export function useUpdatesSession(port: UpdatesPort | null) {
       }
     } finally {
       current.checking = false;
-      if (current.active && owner.current === current.port) {
+      if (ownsUpdateSession(current, owner)) {
         setState((value) => ({ ...value, checking: false }));
       }
     }
@@ -96,20 +98,18 @@ export function useUpdatesSession(port: UpdatesPort | null) {
   const openDownload = useCallback(
     async (product: UpdateProduct, url: string) => {
       const current = session.current;
-      if (
-        !current || !current.active || current.port !== port || current.opening || current.checking
-      ) return;
+      if (!current?.active || current.port !== port || current.opening || current.checking) return;
       current.opening = true;
       setState((value) => ({ ...value, opening: url, openFailed: false }));
       try {
         await current.port.openDownload(product, url);
       } catch {
-        if (current.active && owner.current === current.port) {
+        if (ownsUpdateSession(current, owner)) {
           setState((value) => ({ ...value, openFailed: true }));
         }
       } finally {
         current.opening = false;
-        if (current.active && owner.current === current.port) {
+        if (ownsUpdateSession(current, owner)) {
           setState((value) => ({ ...value, opening: null }));
         }
       }

@@ -1,4 +1,4 @@
-//! Process-owned leases for the desktop and its audio server. Lock files are
+//! Process-owned leases for the background controller and its audio server. Lock files are
 //! installed once in a root-owned directory; their existence is not an on/off flag.
 
 use std::{
@@ -10,8 +10,8 @@ use std::{
 mod wake;
 pub use wake::EngineWake;
 
-/// Fixed, administrator-installed desktop lease. Only the configured user can write it.
-pub const APP_LEASE: &str = "/Library/Application Support/MixRelay/lifecycle/app.owner";
+/// Fixed, administrator-installed controller lease. Only the configured user can write it.
+pub const CONTROLLER_LEASE: &str = "/Library/Application Support/MixRelay/lifecycle/app.owner";
 /// Server lease, held until all native/audio owners have been destroyed.
 pub const ENGINE_LEASE: &str = "/Library/Application Support/MixRelay/lifecycle/engine.owner";
 
@@ -30,12 +30,12 @@ impl ProcessLease {
         Ok(Self(file))
     }
 
-    /// Claims server ownership before testing the desktop's liveness, closing
+    /// Claims server ownership before testing the controller's liveness, closing
     /// the gap where Quit could observe no server while one was being admitted.
     ///
     /// # Errors
-    /// Returns lease-file or lock errors. An absent desktop returns `Ok(None)`.
-    pub fn acquire_for_app(
+    /// Returns lease-file or lock errors. An absent controller returns `Ok(None)`.
+    pub fn acquire_for_controller(
         engine_path: impl AsRef<Path>,
         app_path: impl AsRef<Path>,
     ) -> io::Result<Option<Self>> {
@@ -103,20 +103,20 @@ mod tests {
         File::create(&app_path).expect("app inode");
         File::create(&engine_path).expect("engine inode");
         assert!(
-            ProcessLease::acquire_for_app(&engine_path, &app_path)
+            ProcessLease::acquire_for_controller(&engine_path, &app_path)
                 .expect("absent app")
                 .is_none()
         );
         assert!(!is_owned(&engine_path).expect("rejected owner released"));
         let app = ProcessLease::acquire(&app_path).expect("app owner");
-        let engine = ProcessLease::acquire_for_app(&engine_path, &app_path)
+        let engine = ProcessLease::acquire_for_controller(&engine_path, &app_path)
             .expect("live app")
             .expect("admitted");
         drop(app);
         assert!(is_owned(&engine_path).expect("Quit must wait for engine teardown"));
         drop(engine);
         assert!(
-            ProcessLease::acquire_for_app(&engine_path, &app_path)
+            ProcessLease::acquire_for_controller(&engine_path, &app_path)
                 .expect("late demand")
                 .is_none()
         );

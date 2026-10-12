@@ -208,3 +208,49 @@ describe('processor catalog lifecycle and stored paths', () => {
     expect(result.current.failure).toBeNull();
   });
 });
+
+it.each(['{}', '[42]'])('rejects structurally invalid persisted search paths %s', async (saved) => {
+  window.localStorage.setItem('mixrelay.processorPaths.v1', saved);
+  const source = port();
+  const { result } = renderHook(() => useProcessorCatalog(source));
+  await settle();
+  expect(result.current.failure).toBe('paths');
+  expect(source.getProcessors).not.toHaveBeenCalled();
+});
+it('reports an unavailable native directory picker without replacing the catalog', async () => {
+  const source = port();
+  const native = { getProcessors: source.getProcessors, rescanProcessors: source.rescanProcessors };
+  const { result } = renderHook(() => useProcessorCatalog(native));
+  await settle();
+  act(() => result.current.refresh(true));
+  await settle();
+  expect(result.current.failure).toBe('directory');
+  expect(result.current.processors).toEqual(loaded.processors);
+});
+it('does not publish a late rejected request or dispatch callbacks after unmount', async () => {
+  const source = port();
+  const pending = Promise.withResolvers<ExternalProcessorCatalog>();
+  source.getProcessors.mockReturnValue(pending.promise);
+  const { result, unmount } = renderHook(() => useProcessorCatalog(source));
+  const refresh = result.current.refresh,
+    retry = result.current.retry;
+  await settle();
+  expect(source.getProcessors).toHaveBeenCalledTimes(1);
+  unmount();
+  await act(async () => pending.reject(new Error('retired')));
+  act(() => {
+    refresh(false);
+    retry();
+  });
+  expect(source.rescanProcessors).not.toHaveBeenCalled();
+});
+
+it('scans persisted nonempty search paths instead of reading a possibly stale default catalog', async () => {
+  window.localStorage.setItem('mixrelay.processorPaths.v1', '["/User/Effects"]');
+  const source = port();
+  const { result } = renderHook(() => useProcessorCatalog(source));
+  await settle();
+  expect(source.rescanProcessors).toHaveBeenCalledExactlyOnceWith(['/User/Effects']);
+  expect(source.getProcessors).not.toHaveBeenCalled();
+  expect(result.current.processors).toEqual(loaded.processors);
+});

@@ -1,4 +1,4 @@
-//! Shared desktop/remover credential format; removal never starts another trial.
+//! Shared desktop/remover credential format; removal preserves the clock watermark.
 
 use secrecy::ExposeSecret as _;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ pub const LOCAL_LICENSE_SERVICE: &str = if cfg!(debug_assertions) {
 /// The entitlement and its optional paid key are persisted together in one native entry.
 #[derive(Clone)]
 pub struct StoredLicense {
-    /// Original trial/clock history and the currently verified paid seat.
+    /// Original clock history and the currently verified paid seat.
     pub record: EntitlementRecord,
     /// The secret paid key; it never crosses the desktop's UI IPC boundary.
     pub key: Option<SecretString>,
@@ -78,16 +78,35 @@ impl StoredLicense {
     }
 }
 
+/// Read paid access for the local engine without exposing the key or renewing its lease.
+/// Missing, malformed, inaccessible or expired credentials retain free access.
+#[must_use]
+pub fn has_local_paid_access() -> bool {
+    let Ok(entry) = keyring::Entry::new(LOCAL_LICENSE_SERVICE, "desktop") else {
+        return false;
+    };
+    let Ok(value) = entry.get_password() else {
+        return false;
+    };
+    let Ok(saved) = StoredLicense::decode(&SecretString::from(value)) else {
+        return false;
+    };
+    let Ok(now) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) else {
+        return false;
+    };
+    saved.record.access_at(now.as_secs()).status == crate::AccessStatus::Licensed
+}
+
 /// Forget this user's local paid key, seat and offline lease during true uninstall.
 ///
-/// Original trial and clock history remain, so reinstall cannot restart the trial.
+/// Clock history remains; uninstall does not renew paid access.
 /// An absent entry is left absent. This makes no remote request and does not revoke
 /// the purchase. Call as the installed interactive user, never as an administrator
 /// acting on a different user's credential store. Updates must not invoke it.
 ///
 /// # Errors
 /// Returns `StorageUnavailable` if the native store cannot be read or updated, or
-/// its existing entry cannot safely preserve the original trial history.
+/// its existing entry cannot safely preserve the original clock history.
 pub fn clear_local_license() -> Result<(), LicenseError> {
     let entry = keyring::Entry::new(LOCAL_LICENSE_SERVICE, "desktop")
         .map_err(|_| LicenseError::StorageUnavailable)?;

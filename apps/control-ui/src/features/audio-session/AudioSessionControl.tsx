@@ -40,17 +40,15 @@ export function AudioSessionControl({
       : '—';
   return (
     <section className={styles.content} aria-label={t('studio.audioEngine')}>
-      {capabilities.canReconfigureLive ? (
-        <AudioSessionSettings {...settings} session={session} sessionAlerts={alerts} />
-      ) : (
-        <span title={t('audioSession.locked')}>
-          {t('audioSession.processingBuffer')} {format.blockFrames}
-        </span>
-      )}
+      <AudioSessionSettings
+        {...settings}
+        disabled={settings.disabled || !capabilities.canReconfigureLive}
+        session={session}
+        sessionAlerts={alerts}
+      />
       <span className={styles.latency} title={t('audioSession.bufferLatencyHint')}>
         {t('audioSession.bufferLatency')} {duration}
       </span>
-      {!capabilities.canReconfigureLive ? <AudioSessionAlerts messages={alerts} /> : null}
     </section>
   );
 }

@@ -5,62 +5,15 @@
   flex-direction: column;
 }
 
-.toolbar {
-  gap: 12px;
-}
-
 .titleBlock {
   min-width: 0;
   flex: 1;
 }
 
-.graphTitle {
-  display: block;
-  width: 100%;
-  max-width: 420px;
-  overflow: hidden;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-bottom: 1px solid transparent;
-  border-radius: 0;
-  outline: none;
-  background: transparent;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: -0.015em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.graphTitle:hover,
-.graphTitle:focus {
-  border-bottom-color: #454b55;
-}
-
-.graphTitle:focus {
-  border-bottom-color: var(--signal);
-}
-
 .headerActions {
   flex-shrink: 0;
-  padding-left: 10px;
+  padding-left: var(--space-2);
   border-left: 1px solid var(--line);
-}
-
-.headerActions button {
-  height: 24px;
-  min-height: 24px;
-  padding-inline: 6px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.headerActions button:hover {
-  background: var(--surface-raised);
-  color: var(--text);
 }
 
 .canvas {
@@ -76,23 +29,6 @@
   color: var(--muted);
 }
 
-.error {
-  margin: 0;
-  padding: 8px 18px;
-  border-bottom: 1px solid #553b3e;
-  background: #261b1d;
-  color: #e59494;
-  font-size: 12px;
-}
-
-.warning {
-  padding: 8px 18px;
-  border-bottom: 1px solid #554a35;
-  background: #252219;
-  color: var(--amber);
-  font-size: 12px;
-}
-
 .scanDiagnostics {
   max-height: 160px;
   overflow: auto;
@@ -104,8 +40,18 @@
   cursor: default;
 }
 
-@media (max-width: 720px) {
-  .toolbar {
-    gap: 10px;
-  }
+.scanDiagnostics li + li {
+  margin-top: 12px;
+}
+
+.scanDiagnostics p {
+  margin: 4px 0;
+}
+
+.scanTechnicalDetails pre {
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--font-label);
 }

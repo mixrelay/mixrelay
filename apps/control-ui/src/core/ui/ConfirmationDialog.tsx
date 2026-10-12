@@ -1,6 +1,7 @@
-import { Modal } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { ActionButton } from './ActionButton';
+import { Dialog } from './Dialog';
+import { FormActions } from './FormActions';
 
 interface ConfirmationDialogProps {
   opened: boolean;
@@ -15,31 +16,28 @@ interface ConfirmationDialogProps {
 
 export function ConfirmationDialog(props: ConfirmationDialogProps) {
   return (
-    <Modal
+    <Dialog
       opened={props.opened}
       onClose={props.onCancel}
       title={props.title}
       size="xs"
-      centered
-      closeOnEscape={!props.busy}
-      closeOnClickOutside={!props.busy}
+      busy={props.busy}
       withCloseButton={false}
     >
       {props.children}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <ActionButton
-          data-autofocus
-          disabled={props.busy}
-          variant="subtle"
-          color="gray"
-          onClick={props.onCancel}
-        >
+      <FormActions>
+        <ActionButton data-autofocus disabled={props.busy} onClick={props.onCancel}>
           {props.cancelLabel}
         </ActionButton>
-        <ActionButton color="red" disabled={props.disabled} onClick={props.onConfirm}>
+        <ActionButton
+          tone="critical"
+          emphasis="strong"
+          disabled={props.disabled}
+          onClick={props.onConfirm}
+        >
           {props.title}
         </ActionButton>
-      </div>
-    </Modal>
+      </FormActions>
+    </Dialog>
   );
 }

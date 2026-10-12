@@ -36,7 +36,7 @@ jobs:
           jq -e --arg tag "$RELEASE_TAG" \
             '.tag_name == $tag and .draft == false and .prerelease == false' <<<"$release" >/dev/null
           products=()
-          for product in mix-relay mix-relay-driver; do
+          for product in mix-relay; do
             manifest="$product.release.json"
             if jq -e --arg name "$manifest" 'any(.assets[]; .name == $name)' <<<"$release" >/dev/null; then
               products+=("$product")

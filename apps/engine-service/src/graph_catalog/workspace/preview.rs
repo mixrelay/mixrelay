@@ -33,6 +33,7 @@ impl EngineGraphController {
                 return Err(invalid("saving does not need capture preparation"));
             }
         };
+        self.validate_workspace_feature_usage(&candidate)?;
         let revision = candidate
             .next_audio_revision(request.expected_revision)
             .ok_or_else(|| invalid("audio revision overflow"))?;

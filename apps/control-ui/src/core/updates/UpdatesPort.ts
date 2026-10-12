@@ -1,4 +1,4 @@
-export type UpdateProduct = 'mix-relay' | 'mix-relay-driver';
+export type UpdateProduct = 'mix-relay';
 
 export interface UpdateDownload {
   os: string;

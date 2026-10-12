@@ -1,6 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import type { ComponentProps } from 'react';
 
-import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
+import {
+  type StorybookControlState,
+  StorybookMockControlPort,
+} from '../core/control-port/StorybookMockControlPort';
 import type { RuntimeGraphDocument } from '../core/control-port/types';
 import { StudioScreen } from './StudioScreen';
 
@@ -26,14 +30,18 @@ const graph: RuntimeGraphDocument = {
   schemaVersion: 2,
 };
 
-const controlPort = new StorybookMockControlPort({
+const controlState = {
   applications: [
     {
       bundleId: 'org.mozilla.firefox',
       displayName: 'Firefox',
       iconDataUrl: null,
       processId: 1001,
-      selector: { match: 'bundle_id', bundle_id: 'org.mozilla.firefox', include_descendants: false },
+      selector: {
+        match: 'bundle_id',
+        bundle_id: 'org.mozilla.firefox',
+        include_descendants: false,
+      },
     },
     {
       bundleId: 'com.google.Chrome',
@@ -95,23 +103,21 @@ const controlPort = new StorybookMockControlPort({
     sampleRate: 48_000,
     underruns: 0,
   },
-});
+} satisfies StorybookControlState;
 
 const meta = {
   title: 'Screens/Studio',
   component: StudioScreen,
-  args: { controlPort },
+  loaders: [() => ({ controlPort: new StorybookMockControlPort(structuredClone(controlState)) })],
+  render: (args, { loaded }) => <StudioScreen {...args} controlPort={loaded.controlPort} />,
   parameters: { layout: 'fullscreen' },
 } satisfies Meta<typeof StudioScreen>;
 
 export default meta;
-type Story = StoryObj<typeof meta>;
+type Story = StoryObj<Partial<ComponentProps<typeof StudioScreen>>>;
 
 export const Default: Story = {};
-export const ShortcutTextEditingAcceptance: Story = {
-  name: 'Release acceptance · shortcut preserves text editing',
-};
 export const MobileNarrow: Story = {
-  parameters: { viewport: { defaultViewport: 'mobile' } },
+  globals: { viewport: { value: 'mobile' } },
 };
 export const LongTranslation: Story = { globals: { locale: 'pseudo' } };

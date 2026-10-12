@@ -10,6 +10,21 @@ fn main() -> anyhow::Result<()> {
     use std::{env, ffi::OsString, path::PathBuf};
 
     let arguments: Vec<OsString> = env::args_os().skip(1).collect();
+    if let [command, team, app, installer] = arguments.as_slice()
+        && command == "--editor"
+    {
+        let team = SigningTeam::new(team.to_str().context("Team ID must be UTF-8")?.into())?;
+        let account = ServiceAccount::new(
+            "releasecheck".into(),
+            "staff".into(),
+            "/Users/releasecheck".into(),
+        )?;
+        let verifier = ReleasePayloadVerifier::new(team, account);
+        verifier.verify_graph_bundle(std::path::Path::new(app))?;
+        verifier.verify_installer_executable(std::path::Path::new(installer))?;
+        println!("Graph app, engine and installer verified; installation was not performed");
+        return Ok(());
+    }
     let [root, team, user, group, home, installer] = arguments.as_slice() else {
         bail!(
             "usage: mixrelay-macos-payload-check PAYLOAD_ROOT TEAM_ID SERVICE_USER SERVICE_GROUP SERVICE_HOME INSTALLER_EXECUTABLE"
@@ -31,14 +46,18 @@ fn main() -> anyhow::Result<()> {
         "installer executable must be absolute"
     );
     let sources = InstallSources::new(
-        root.join("Applications/MixRelay Driver.app"),
+        root.join("Applications/MixRelay.app"),
         root.join("Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver"),
         root.join("Library/Application Support/MixRelay/bin/mixrelay-driver-service"),
         root.join("templates/io.mixrelay.audio.driver.plist.in"),
     )
     .with_remover(
-        root.join("Applications/Uninstall MixRelay Driver.app"),
+        root.join("Applications/Uninstall MixRelay.app"),
         root.join("templates/io.mixrelay.driver.removal.plist"),
+    )
+    .with_runtime(
+        root.join("Library/Application Support/MixRelay/bin/mixrelay-engine-service"),
+        root.join("templates/io.mixrelay.audio.engine.plist.in"),
     );
     for binary in [
         sources.app().join("Contents/MacOS/mixrelay-desktop"),

@@ -14,6 +14,7 @@ pub struct InstallSources {
     driver: PathBuf,
     launchd: PathBuf,
     remover: Option<(PathBuf, PathBuf)>,
+    runtime: Option<(PathBuf, PathBuf)>,
 }
 
 impl InstallSources {
@@ -31,6 +32,7 @@ impl InstallSources {
             driver: driver.into(),
             launchd: launchd.into(),
             remover: None,
+            runtime: None,
         }
     }
 
@@ -39,6 +41,25 @@ impl InstallSources {
     pub fn with_remover(mut self, app: impl Into<PathBuf>, plist: impl Into<PathBuf>) -> Self {
         self.remover = Some((app.into(), plist.into()));
         self
+    }
+
+    /// Includes the audio engine and its fixed on-demand launch template.
+    #[must_use]
+    pub fn with_runtime(mut self, engine: impl Into<PathBuf>, plist: impl Into<PathBuf>) -> Self {
+        self.runtime = Some((engine.into(), plist.into()));
+        self
+    }
+
+    /// Returns the runtime engine, absent only in legacy fixture requests.
+    #[must_use]
+    pub fn runtime_engine(&self) -> Option<&Path> {
+        self.runtime.as_ref().map(|(engine, _)| engine.as_path())
+    }
+
+    /// Returns the fixed runtime launch template.
+    #[must_use]
+    pub fn runtime_launchd(&self) -> Option<&Path> {
+        self.runtime.as_ref().map(|(_, plist)| plist.as_path())
     }
 
     /// Returns the optional remover app source (absent in legacy fixture requests).

@@ -114,16 +114,6 @@ fn impossible_key_activation_pair_is_rejected_without_resetting_saved_data() {
 }
 
 #[test]
-fn native_mutation_admission_observes_expiry_without_network_or_ui_polling() {
-    let state = LicensingState::with_store(Arc::new(MemoryCredentials::default()));
-    assert!(!state.allows_mutation(1_000));
-    state.snapshot(1_000).expect("trial");
-    assert!(state.allows_mutation(1_000));
-    assert!(!state.allows_mutation(1_000 + 14 * 86_400));
-    assert!(!state.allows_mutation(999));
-}
-
-#[test]
 fn credential_write_failure_recovers_the_committed_seat_after_restart() {
     let directory = tempfile::tempdir().expect("directory");
     let path = directory.path().join("receipt.json");
@@ -181,7 +171,6 @@ fn confirmed_clear_cannot_restore_an_old_paid_lease_after_restart() {
     store.fail.store(true, Ordering::Relaxed);
     let expired_trial = 1_000 + 14 * 86_400;
     assert!(state.clear_paid(expired_trial).is_err());
-    assert!(!state.allows_mutation(expired_trial));
     drop(state);
     store.fail.store(false, Ordering::Relaxed);
     let reopened = LicensingState::with_store(store);
@@ -191,7 +180,7 @@ fn confirmed_clear_cannot_restore_an_old_paid_lease_after_restart() {
             .snapshot(expired_trial + 1)
             .expect("clear restored")
             .status,
-        mixrelay_licensing::AccessStatus::Expired
+        mixrelay_licensing::AccessStatus::Free
     );
     assert!(reopened.saved_activation().expect("cleared").is_none());
     assert!(!path.exists());
@@ -223,7 +212,6 @@ fn journal_io_failure_retains_activation_and_reconciles_confirmed_clear_in_memor
     let expired_trial = 1_000 + 14 * 86_400;
     assert!(state.clear_paid(expired_trial).is_err());
     assert!(state.saved_activation().expect("cleared").is_none());
-    assert!(!state.allows_mutation(expired_trial));
 }
 
 #[test]

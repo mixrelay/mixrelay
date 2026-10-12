@@ -153,13 +153,21 @@ it('does not collide edited cable IDs with preserved authoritative route IDs', (
     targetPortId: 'audio:0',
   };
   const result = serializeGraphEdges(
-    { nodes: [], revision: 1, edges: [cable], edgeProjections: [{ edge: original, views: [] }] },
+    {
+      nodes: [],
+      revision: 1,
+      edges: [cable],
+      edgeProjections: [
+        { edge: original, views: [] },
+        { edge: { ...original, id: '@route:["existing"]' }, views: [] },
+      ],
+    },
     new Set(['a', 'b']),
     () => original,
   );
   expect(result[0]).toEqual(original);
-  expect(result).toHaveLength(2);
-  expect(new Set(result.map((edge) => edge.id)).size).toBe(2);
+  expect(result).toHaveLength(3);
+  expect(new Set(result.map((edge) => edge.id)).size).toBe(3);
 });
 
 it('keeps N identities distinct while sharing each identity between its input and output references', () => {
@@ -462,4 +470,56 @@ it('retains unresolved provider edges through unrelated edits and restores exact
       graph,
     ).edges,
   ).toEqual([]);
+});
+
+it('drops explicit routes that no longer fit authoritative recorder inputs', () => {
+  const source: RuntimeGraphDocument = {
+    schemaVersion: 2,
+    revision: 1,
+    nodes: [
+      { id: 'gain', type: 'gain', label: null, config: { channels: 2 } },
+      { id: 'rec', type: 'recorder', label: null, config: { channels: 1 } },
+    ],
+    edges: [
+      {
+        id: 'stale',
+        source: { nodeId: 'gain', portId: 'audio' },
+        destination: { nodeId: 'rec', portId: 'audio' },
+        channelMapping: { mode: 'explicit', routes: [{ sourceChannel: 0, destinationChannel: 3 }] },
+      },
+    ],
+  };
+  expect(audioGraphToRuntimeGraph(runtimeGraphToAudioGraph(source), source).edges).toEqual([]);
+});
+
+it('keeps authoritative routes only when a legacy recorder port still names its runtime channel', () => {
+  const original: RuntimeGraphDocument = {
+    schemaVersion: 2,
+    revision: 1,
+    nodes: [
+      { id: 'gain', type: 'gain', label: null, config: { channels: 2 } },
+      { id: 'rec', type: 'recorder', label: null, config: { channels: 1 } },
+    ],
+    edges: [
+      {
+        id: 'route',
+        source: { nodeId: 'gain', portId: 'audio' },
+        destination: { nodeId: 'rec', portId: 'audio' },
+        channelMapping: { mode: 'auto' },
+      },
+    ],
+  };
+  const model = runtimeGraphToAudioGraph(original);
+  const legacy = {
+    ...model,
+    nodes: model.nodes.map((node) =>
+      node.id === 'rec'
+        ? {
+            ...node,
+            inputPorts: node.inputPorts.map((port) => ({ ...port, channelIndex: undefined })),
+          }
+        : node,
+    ),
+  };
+  expect(audioGraphToRuntimeGraph(legacy, original).edges).toEqual([]);
 });

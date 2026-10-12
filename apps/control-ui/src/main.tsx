@@ -5,7 +5,6 @@ import { App } from './app/App';
 import { I18nProvider } from './core/i18n';
 import { NativeMenuLocale } from './core/i18n/NativeMenuLocale';
 import { MixRelayProvider } from './core/theme/MixRelayProvider';
-import './styles.css';
 
 const root = document.getElementById('root');
 

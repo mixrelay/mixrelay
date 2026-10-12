@@ -62,6 +62,7 @@ fn rescan_with(
                         format: format.protocol(),
                         stage: ProcessorDiscoveryStage::Scan,
                         plugin_id: None,
+                        plugin_name: None,
                         message: format!(
                             "custom scan path {}: {}",
                             failure.path.display(),
@@ -71,6 +72,9 @@ fn rescan_with(
                 }
                 let mut seen = BTreeSet::new();
                 for locator in report.locators {
+                    if !locator.is_audio_processor() {
+                        continue;
+                    }
                     if seen.insert((
                         locator.format.argument(),
                         locator.unique_id.clone(),
@@ -85,6 +89,7 @@ fn rescan_with(
                     format: format.protocol(),
                     stage: ProcessorDiscoveryStage::Scan,
                     plugin_id: None,
+                    plugin_name: None,
                     message,
                 });
                 next.entries.extend(
@@ -154,6 +159,7 @@ fn probe_into_snapshot(
                     locator.format.argument(),
                     locator.unique_id
                 )),
+                plugin_name: Some(locator.display_name().to_owned()),
                 message,
             });
             // A successful format scan is authoritative for removed plug-ins. Retain only the

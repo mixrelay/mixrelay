@@ -1,0 +1,13 @@
+# Shared native meter publication
+
+The engine service owns one bounded meter publisher. UI and diagnostic API readers receive the same immutable measurement in a controller-clock 50 ms bucket; API reads do not independently clear audio peak or dynamics accumulators. The cache holds one snapshot, and its bank owner is released with the controller. Publication requires no telemetry timer, thread, real-time lock or real-time allocation.
+
+The bucket boundaries are fixed at controller construction. They are not a guaranteed minimum 50 ms between captures: requests on either side of a boundary can be closer together. If nobody reads, the next measurement contains the peak/minimum detector gain accumulated since the previous drain, subject to the rejected-capture limitation below. Reader timestamps delayed by lock contention cannot regress the publisher's bucket.
+
+The publication identity includes selected graph, active and submitted topology revision, applied control revision and engine power. Identity changes invalidate the cached reading. Pending topology changes and Off produce zero output peaks with absent dynamics. An expired bucket without a newly completed audio callback also has absent dynamics; it is waiting, not a fabricated zero gain-reduction measurement. A new completed silent callback can provide real zero input/output telemetry and the detector's actual release state. A waiting bucket can be replaced immediately when a full fresh callback completes.
+
+Audio brackets meter writes with an atomic odd/even sequence and publishes the same effective revision as the applied block controls. The service accepts a drain only if the completed sequence, revision and execution identity remain stable across it. A rejected capture may have partially consumed a concurrently written block, so its rejection floor also excludes that block's next even completion. Only a later fully completed block is eligible. The counter wraps with wrapping arithmetic; a separate observed flag distinguishes initial zero from a valid wrapped zero.
+
+Under a drain/write race, an individual transient peak can be lost and telemetry waits for a later callback. A mixed-revision value or a partially drained zero is never deliberately presented as a valid measurement. This contract governs telemetry publication; audio processing uses the existing accumulators. Installed qualification requires simultaneous UI/API readers; source unit tests alone do not establish installed behavior.
+
+Source ownership is `audio-engine::PeakMeterBank` and `BlockProcessor::capture_and_meter` for the real-time fence, and `engine-service::MeterPublisher` consumed by `EngineGraphController::meters` for the shared control-side publication.

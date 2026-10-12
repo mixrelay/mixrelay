@@ -7,15 +7,16 @@ import type {
   RuntimeGraphDocument,
 } from '../core/control-port/types';
 import { I18nProvider } from '../core/i18n';
+import { FeatureAccess } from '../core/licensing/FeatureAccess';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';
+import type { DriverSession } from '../features/driver-status/useDriverSession';
+import type { DeviceBufferAction } from '../features/routing-workspace/endpointBuffers';
 import {
   unknownNativeFormats,
   virtualPolicy,
   virtualSpec,
 } from '../features/routing-workspace/virtualEndpointFixtures';
 import { StudioScreen } from './StudioScreen';
-import styles from './StudioScreen.module.css';
-import type { DriverSession } from '../features/driver-status/useDriverSession';
 
 const callbacks = vi.hoisted(
   () => new Map<ControlPort, (document: RuntimeGraphDocument) => void>(),
@@ -32,12 +33,14 @@ interface WorkspaceBinding {
     enabled: boolean;
     error: { endpointId: string | null; message: string } | null;
   };
+  deviceBufferAction?: DeviceBufferAction;
+  headerActions: React.ReactNode;
 }
 const workspaceBindings = vi.hoisted(() => new Map<ControlPort, WorkspaceBinding>());
 const workspaceRenders = vi.hoisted(() => [] as WorkspaceBinding[]);
 const sessionDisabled = vi.hoisted(() => new Map<ControlPort, boolean>());
-vi.mock('../features/audio-session/AudioSessionControl', () => ({
-  AudioSessionControl: ({
+vi.mock('../features/audio-session/AudioPauseControl', () => ({
+  AudioPauseControl: ({
     controlPort,
     onApplied,
     disabled,
@@ -55,7 +58,12 @@ vi.mock('../features/routing-workspace/RoutingWorkspace', () => ({
   RoutingWorkspace: (binding: WorkspaceBinding) => {
     workspaceBindings.set(binding.controlPort, binding);
     workspaceRenders.push(binding);
-    return <output data-testid="document">{JSON.stringify(binding.sessionDocument)}</output>;
+    return (
+      <>
+        <output data-testid="document">{JSON.stringify(binding.sessionDocument)}</output>
+        {binding.headerActions}
+      </>
+    );
   },
 }));
 function port(revision: number) {
@@ -126,6 +134,13 @@ function devicePort() {
           nativeDeviceIds: [],
           nativeFormats: unknownNativeFormats,
           spec: { ...virtualSpec, id: 'device-a' },
+          nativeBuffer: {
+            currentFrames: 128,
+            preferredFrames: 128,
+            minimumFrames: 32,
+            maximumFrames: 1024,
+            canSet: true,
+          },
           canSetSampleRate: true,
           observedSampleRate: 48000,
           supportedSampleRates: [44100, 48000],
@@ -167,6 +182,38 @@ function devicePort() {
   return controlPort;
 }
 
+it('lets free users save and open their single graph while refusing a second graph', async () => {
+  const file = vi.fn().mockResolvedValue(null);
+  const controlPort = Object.assign(port(1), { workspaceFile: file });
+  const bounds = vi
+    .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, 0, 200, 120));
+  const width = vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(800);
+  const height = vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(600);
+  render(<FeatureAccess.Provider value={false}>{view(controlPort)}</FeatureAccess.Provider>);
+  await waitFor(() => expect(workspaceBindings.get(controlPort)?.graphId).toBe('graph-1'));
+  fireEvent.click(screen.getByRole('button', { name: 'File' }));
+  const save = screen.getByRole('menuitem', { name: 'Save' });
+  expect(save).not.toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(save);
+  await waitFor(() =>
+    expect(file).toHaveBeenCalledWith(expect.objectContaining({ action: 'save' })),
+  );
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: 'File' }));
+  const open = screen.getByRole('menuitem', { name: 'Open…' });
+  expect(open).not.toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(open);
+  await waitFor(() =>
+    expect(file).toHaveBeenCalledWith(expect.objectContaining({ action: 'open' })),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'New graph' }));
+  expect(screen.queryByRole('dialog', { name: 'New graph' })).not.toBeInTheDocument();
+  bounds.mockRestore();
+  width.mockRestore();
+  height.mockRestore();
+});
+
 it('keeps the new-graph launcher stable across background saves but guards creation', async () => {
   const controlPort = port(1);
   const mutate = vi.spyOn(controlPort, 'mutateGraphCatalog');
@@ -174,14 +221,12 @@ it('keeps the new-graph launcher stable across background saves but guards creat
   const launcher = await screen.findByRole('button', { name: 'New graph' });
   await waitFor(() => expect(launcher).toBeEnabled());
   expect(launcher).toHaveAttribute('aria-keyshortcuts', 'Control+Shift+N');
-  expect(launcher.className).toContain(styles.graph);
-  expect(launcher.className).toContain(styles.newGraph);
-  expect(launcher).not.toHaveClass('mantine-Button-root');
   vi.useFakeTimers();
   try {
-    fireEvent.mouseEnter(launcher);
+    fireEvent.pointerMove(document.body);
+    fireEvent.pointerOver(launcher);
     await act(async () => vi.advanceTimersByTime(500));
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    expect(screen.getByRole('tooltip')).toHaveTextContent('New graph');
   } finally {
     vi.useRealTimers();
   }
@@ -272,12 +317,11 @@ it('uses a visible chevron tab to reopen the sidebar without changing the graph 
   await screen.findByRole('button', { name: 'Untitled Graph' });
   const logo = screen.getByRole('heading', { name: 'MixRelay' });
   const boundary = screen.getByRole('button', { name: 'Graphs' });
-  expect(boundary.className).toContain(styles.sidebarBoundary);
+  expect(boundary.querySelector('svg')).toBeNull();
   expect(boundary).toHaveAttribute('aria-expanded', 'true');
   fireEvent.click(boundary);
   const tab = screen.getByRole('button', { name: 'Graphs' });
-  expect(tab.className).toContain(styles.sidebarReopen);
-  expect(tab.className).not.toContain(styles.sidebarBoundary);
+  expect(tab).toHaveAttribute('aria-controls', 'graph-sidebar');
   expect(tab).toHaveAttribute('aria-expanded', 'false');
   expect(tab.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
   expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument();
@@ -285,9 +329,7 @@ it('uses a visible chevron tab to reopen the sidebar without changing the graph 
   expect(logo.parentElement).not.toContainElement(tab);
   fireEvent.click(tab);
   expect(screen.getByRole('navigation', { name: 'Graphs' })).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Graphs' }).className).toContain(
-    styles.sidebarBoundary,
-  );
+  expect(screen.getByRole('button', { name: 'Graphs' })).toHaveAttribute('aria-expanded', 'true');
   expect(mutate).not.toHaveBeenCalled();
 });
 
@@ -301,18 +343,32 @@ it('sends device edits through the independent Driver owner during graph title e
   const changeDevice = vi.fn().mockResolvedValue(null);
   const driverSession: DriverSession = {
     port: null,
-    snapshot: { protocolVersion: 1, revision: 4, state: 'ready', installedVersion: '0.1.0', settings: virtualPolicy },
-    busy: false, error: null, endpointId: null,
+    snapshot: {
+      protocolVersion: 1,
+      revision: 4,
+      state: 'ready',
+      installedVersion: '0.1.0',
+      settings: virtualPolicy,
+    },
+    busy: false,
+    error: null,
+    endpointId: null,
     allowMultiDevice: false,
-    refresh: vi.fn().mockResolvedValue(undefined), mutate: vi.fn().mockResolvedValue(null), changeDevice,
+    refresh: vi.fn().mockResolvedValue(undefined),
+    mutate: vi.fn().mockResolvedValue(null),
+    changeDevice,
   };
   render(view(controlPort, driverSession));
   await waitFor(() => expect(binding().deviceDriverAction.enabled).toBe(true));
   act(() => binding().onTitleChange('Unsaved title'));
   expect(binding().deviceDriverAction.enabled).toBe(true);
   expect(sessionDisabled.get(controlPort)).toBe(true);
-  const update = { displayName: 'Monitor', renderChannels: 2, captureChannels: 2,
-    nativeFormat: { direction: 'render' as const, format: { sampleRate: 44100, channels: 2, sampleFormat: 'signed24' as const } } };
+  const update = {
+    displayName: 'Monitor',
+    renderChannels: 2,
+    captureChannels: 2,
+    sampleFormat: 'signed24' as const,
+  };
   await act(async () => {
     binding().deviceDriverAction.change('device-a', update);
   });
@@ -374,4 +430,54 @@ describe('Studio session document ownership', () => {
     expect(screen.getByTestId('document')).not.toHaveTextContent('"revision":101');
     rendered.unmount();
   });
+});
+
+it('owns the busy lease and status refresh for a per-device native buffer command', async () => {
+  const controlPort = devicePort();
+  const pending =
+    Promise.withResolvers<
+      Awaited<ReturnType<NonNullable<ControlPort['setVirtualEndpointBufferFrames']>>>
+    >();
+  const write = vi
+    .fn<NonNullable<ControlPort['setVirtualEndpointBufferFrames']>>()
+    .mockReturnValue(pending.promise);
+  Object.assign(controlPort, { setVirtualEndpointBufferFrames: write });
+  render(view(controlPort));
+  const binding = () => {
+    const value = workspaceBindings.get(controlPort);
+    if (!value) throw new Error('Expected workspace');
+    return value;
+  };
+  await waitFor(() =>
+    expect(binding().audioSession?.virtualEndpointSettings?.devices[0]?.nativeBuffer?.canSet).toBe(
+      true,
+    ),
+  );
+  const before = vi.mocked(controlPort.getStatus).mock.calls.length;
+  await act(async () => binding().deviceBufferAction?.change('device-a', 256));
+  await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+  expect(binding().deviceBufferAction?.enabled).toBe(false);
+  expect(write.mock.calls[0]?.[0]).toMatchObject({
+    endpointId: 'device-a',
+    bufferFrames: 256,
+    expectedBufferFrames: 128,
+    expectedPreferredFrames: 128,
+  });
+  await act(async () => pending.resolve({ protocolVersion: 1, revision: 2, state: 'active' }));
+  await waitFor(() => expect(binding().deviceBufferAction?.enabled).toBe(true));
+  expect(vi.mocked(controlPort.getStatus).mock.calls.length).toBeGreaterThan(before);
+});
+
+it('adopts a confirmed native session revision while the catalog is still loading', async () => {
+  const controlPort = port(1);
+  const catalog = await controlPort.getGraphCatalog();
+  const pending = Promise.withResolvers<typeof catalog>();
+  vi.spyOn(controlPort, 'getGraphCatalog').mockReturnValue(pending.promise);
+  render(view(controlPort));
+  const apply = callbacks.get(controlPort);
+  if (!apply) throw new Error('Expected public audio session callback');
+  const document = { ...catalog.document, revision: 2 };
+  act(() => apply(document));
+  expect(workspaceBindings.get(controlPort)?.sessionDocument).toEqual(document);
+  await act(async () => pending.resolve({ ...catalog, document }));
 });

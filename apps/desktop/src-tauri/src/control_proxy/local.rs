@@ -1,4 +1,5 @@
 //! Local controllers use the same capture-aware command boundary as the desktop UI.
+#[cfg(target_os = "macos")]
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,6 +10,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{ControlProxyClient, ControlProxyResponse, Method, rejected};
+#[cfg(target_os = "macos")]
 use crate::macos_audio::ApplicationCaptureState;
 
 pub(crate) mod socket;
@@ -31,6 +33,10 @@ impl Request {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
     Snapshot {},
+    Invoke {
+        name: String,
+        arguments: Value,
+    },
     Node {
         session: String,
         target: Target,
@@ -52,23 +58,32 @@ struct Target {
 
 pub(crate) struct LocalControl {
     client: ControlProxyClient,
+    #[cfg(target_os = "macos")]
     captures: Arc<ApplicationCaptureState>,
+    app: Option<tauri::AppHandle>,
     session: String,
 }
 
 impl LocalControl {
     pub(crate) fn new(
         client: ControlProxyClient,
-        captures: Arc<ApplicationCaptureState>,
+        #[cfg(target_os = "macos")] captures: Arc<ApplicationCaptureState>,
     ) -> Result<Self, String> {
         let started = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|error| error.to_string())?;
         Ok(Self {
             client,
+            #[cfg(target_os = "macos")]
             captures,
+            app: None,
             session: format!("{}-{}", std::process::id(), started.as_nanos()),
         })
+    }
+
+    pub(crate) fn with_app(mut self, app: tauri::AppHandle) -> Self {
+        self.app = Some(app);
+        self
     }
 
     pub(crate) async fn dispatch(&self, request: Request) -> Value {
@@ -78,6 +93,7 @@ impl LocalControl {
             .unwrap_or_else(|reason| ControlProxyResponse {
                 status: 503,
                 body: json!({"code":"control_unavailable", "parameters":{"reason":reason}}),
+                #[cfg(target_os = "macos")]
                 delivery: super::RequestDelivery::Uncertain,
             });
         json!({"id":request.id,"status":response.status,"body":response.body})
@@ -85,6 +101,22 @@ impl LocalControl {
 
     async fn execute(&self, command: Command) -> Result<ControlProxyResponse, String> {
         match command {
+            Command::Invoke { name, arguments } => {
+                let app = self
+                    .app
+                    .as_ref()
+                    .ok_or("background controller unavailable")?;
+                let result = crate::background::dispatch(app, &name, arguments).await;
+                Ok(ControlProxyResponse {
+                    status: 200,
+                    body: match result {
+                        Ok(value) => json!({"ok":value}),
+                        Err(error) => json!({"error":error}),
+                    },
+                    #[cfg(target_os = "macos")]
+                    delivery: super::RequestDelivery::ServerResponse,
+                })
+            }
             Command::Snapshot {} => self.snapshot().await,
             Command::Node {
                 session,
@@ -94,6 +126,16 @@ impl LocalControl {
                 if session != self.session {
                     return Ok(rejected("graph_revision_stale"));
                 }
+                #[cfg(target_os = "linux")]
+                return self
+                    .client
+                    .request(
+                        Method::PUT,
+                        &super::node_control::route(&target.graph_id, Some(&target.node_id))?,
+                        Some(serde_json::to_value(request).map_err(|error| error.to_string())?),
+                    )
+                    .await;
+                #[cfg(target_os = "macos")]
                 self.client
                     .update_node_control(
                         &self.captures,
@@ -176,6 +218,7 @@ mod tests {
             ControlProxyResponse {
                 status: 200,
                 body: body.clone(),
+                #[cfg(target_os = "macos")]
                 delivery: super::super::RequestDelivery::ServerResponse,
             },
             "session",
@@ -194,6 +237,7 @@ mod tests {
             ControlProxyResponse {
                 status: 503,
                 body: body.clone(),
+                #[cfg(target_os = "macos")]
                 delivery: super::super::RequestDelivery::ServerResponse,
             },
             "session",
@@ -221,8 +265,12 @@ mod tests {
 
     #[tokio::test]
     async fn previous_session_and_unfenced_recorder_never_reach_engine() {
-        let control =
-            LocalControl::new(ControlProxyClient::default(), Arc::default()).expect("control");
+        let control = LocalControl::new(
+            ControlProxyClient::default(),
+            #[cfg(target_os = "macos")]
+            Arc::default(),
+        )
+        .expect("control");
         for (kind, session, request) in [
             (
                 "node",

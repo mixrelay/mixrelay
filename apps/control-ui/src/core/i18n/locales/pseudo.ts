@@ -1,4 +1,59 @@
-export const pseudo = {
+import { effectTranslations } from '../effects';
+import { pseudoResource } from '../pseudoResource';
+import { en } from './en';
+
+const overrides = {
+  effects: Object.fromEntries(
+    Object.entries(effectTranslations.en).map(([key, value]) => [key, `[!! ${value} expanded !!]`]),
+  ),
+  theme: {
+    label: '[!! Appearance preference — expanded !!]',
+    current: '[!! Appearance preference: {{theme}} — expanded !!]',
+    system: '[!! Follow the operating system appearance !!]',
+    light: '[!! Warm off-white light appearance !!]',
+    dark: '[!! Deep graphite dark appearance !!]',
+  },
+  driverManagement: {
+    mixed: '[Mîxëd · ñôt sûñchrôñîzëd]',
+    channels: '[Channels]',
+    bitDepth: '[Bit depth]',
+    unselectedBuffer: '[!! Not selected — expanded !!]',
+    pendingBuffer: '[!! Applied when the device connects — expanded !!]',
+    observedBuffer: '[!! Currently applied — expanded !!]',
+    bufferSize: '[!! Native buffer size — expanded !!]',
+    frames: '[frames]',
+  },
+  about: {
+    title: '[Àbôût MîxRëlây · îñfôrmâtîôñ]',
+    version: '[Vërsîôñ {{version}}]',
+    licensed: '[Lîcëñsëd · âûthëñtîcâtëd]',
+    unknown: '[Lîcëñsë stâtûs ûñâvâîlâblë]',
+  },
+  runtimeConnection: {
+    connecting: {
+      title: '[!! Connecting to MixRelay — expanded !!]',
+      description:
+        '[!! Preparing audio. Your workspace will open when MixRelay is ready. — expanded !!]',
+    },
+    not_installed: {
+      title: '[!! MixRelay is required — expanded !!]',
+      description:
+        '[!! Install MixRelay to use audio routing, effects and recording. Then try connecting again. — expanded !!]',
+    },
+    incompatible: {
+      title: '[!! Update MixRelay — expanded !!]',
+      description:
+        '[!! The installed MixRelay is not compatible with this app. Update it, then try connecting again. — expanded !!]',
+    },
+    unavailable: {
+      title: '[!! Cannot connect to MixRelay — expanded !!]',
+      description:
+        '[!! MixRelay could not be reached or its audio engine is not ready. Try connecting again. — expanded !!]',
+    },
+    install: '[!! Install MixRelay — expanded !!]',
+    update: '[!! Update MixRelay — expanded !!]',
+    retry: '[!! Retry connection — expanded !!]',
+  },
   workspaceFile: {
     file: '[Fïlë]',
     new: '[Nëw Wörkspâcë]',
@@ -7,13 +62,19 @@ export const pseudo = {
     saveAs: '[Sâvë Âs…]',
   },
   licensing: {
+    limits: {
+      graphs: '[!! Free graph limit: one graph — expanded !!]',
+      inputs: '[!! Free input limit: two inputs — expanded !!]',
+      outputs: '[!! Free output limit: two output devices — expanded !!]',
+      plugins: '[!! Free plug-in limit: two external plug-ins — expanded !!]',
+      virtualDevices: '[!! Free virtual device limit: one device — expanded !!]',
+    },
+    freeSummary:
+      '[Free: 1 graph, 2 inputs, 2 outputs, 1 virtual device, 4 Driver channel mappings, 2 external plug-ins, and 1 stereo recorder. You can save and load the free graph and its channel mappings. Renaming devices requires a license.]',
     title: '[!! Lïcénsé !!]',
     close: '[!! Clösé !!]',
     loading: '[!! Chéckïñg lïcénsé… !!]',
     retry: '[!! Chéck ågåïñ !!]',
-    stopAudio: '[!! Stöp åüdïö !!]',
-    stopRequested: '[!! Stöp réqüést séñt. !!]',
-    stopFailed: '[!! Cöüld ñöt stöp åüdïö. Trÿ ågåïñ ör Qüït. !!]',
     key: '[!! Lïcénsé kéÿ !!]',
     instanceName: '[!! Dévïcé nåmé !!]',
     activate: '[!! Åctïvåté !!]',
@@ -21,19 +82,16 @@ export const pseudo = {
     deactivate: '[!! Déåctïvåté thïs dévïcé !!]',
     purchase: '[!! Büÿ å lïcénsé !!]',
     expires: '[!! Vålïd üñtïl {{date}} !!]',
-    expiredOn: '[!! Éxpïréd öñ {{date}} !!]',
     storeUnavailable: '[!! Pürchåsés åñd åctïvåtïöñ åré üñåvåïlåblé ïñ thïs büïld. !!]',
     termsTitle: '[!! Térms öf üsé !!]',
     integrationNotice:
       '[!! Géñérål üsé åñd prödüct ïñtégråtïöñ ör rédïstrïbütïöñ rïghts åré sépåråté. Prödüct ïñtégråtïöñ réqüïrés å sépåråté påïd ågrééméñt. !!]',
     states: {
-      trial: '[!! Trïål · {{count}} dåÿs léft !!]',
+      free: '[Free]',
       licensed: '[!! Lïcénśéd · {{count}} öfflïñé dåÿs léft !!]',
-      expired: '[!! Åccéss éxpïréd !!]',
       clock_invalid: '[!! Dévïcé clöck ñééds åttéñtïöñ !!]',
     },
     messages: {
-      expired: '[!! Åctïvåté ör chéck åñ éxïstïñg lïcénsé öñlïñé. !!]',
       clock_invalid: '[!! Chéck ÿöür clöck, théñ chéck ör åctïvåté. !!]',
     },
     errors: {
@@ -52,6 +110,8 @@ export const pseudo = {
     },
   },
   recorder: {
+    freeLimit:
+      '[Free recording: up to 2 channels and 2 hours per take. Paused time is excluded. Recording stops automatically; audio routing continues.]',
     channels: '[Channels]',
     title: '[Recorder]',
     folder: '[Recording folder]',
@@ -74,13 +134,13 @@ export const pseudo = {
     },
   },
   audioSession: {
-    powerOn: '[Turn engine on]',
-    powerOff: '[Turn engine off]',
-    powerChanging: '[Switching engine…]',
-    powerFailed: '[Engine switch failed. Check the current state.]',
+    resume: '[Resume]',
+    pause: '[Pause]',
+    changing: '[Changing audio state…]',
+    pauseFailed: '[Could not pause or resume. Check the current state.]',
     diagnostics: '[Audio details]',
     processingRate: '[Processing sample rate]',
-    processingBuffer: '[Buffer size]',
+    processingBuffer: '[Processing buffer]',
     bufferLatency: '[Buffer delay]',
     bufferLatencyHint:
       '[One processing buffer (samples ÷ sample rate), not total input/output latency.]',
@@ -89,7 +149,7 @@ export const pseudo = {
     blockSize: '[Buffer size]',
     apply: '[Apply]',
     applying: '[Applying…]',
-    changeNotice: '[Brief audio interruption; undo history clears.]',
+    changeNotice: '[Changing this setting briefly interrupts audio.]',
     captureRateLocked: '[Application capture requires 48 kHz.]',
     changeFailed: '[Could not change audio session.]',
     errors: {
@@ -144,7 +204,9 @@ export const pseudo = {
     },
   },
   common: {
-    appName: '[!! TóñéÑåri !!]',
+    showPassword: '⟦ Show password with a longer translated label ⟧',
+    hidePassword: '⟦ Hide password with a longer translated label ⟧',
+    appName: '[!! MixRelay !!]',
     beta: '[!! Prïvåté préviéw—expanded !!]',
     cancel: '[!! Cåñcél !!]',
     create: '[!! Créåté !!]',
@@ -201,6 +263,11 @@ export const pseudo = {
         stored_format_unavailable: '[Session: saved format unavailable]',
       },
     },
+    nodeName: {
+      title: '[!! Rename the display name of this graph instance !!]',
+      label: '[!! Display name — expanded !!]',
+      save: '[!! Save display name !!]',
+    },
     context: {
       removeNode: '[Delete node]',
       removeSelection: '[Delete selection]',
@@ -255,8 +322,8 @@ export const pseudo = {
       directions: '[!! Ïñ: {{inputs}} · Öüt: {{outputs}} !!]',
     },
     title: '[!! Vïrtüål Ï/Ö röütïñg !!]',
-    description: '[!! Röüté åüdïö wrïttéñ tö TóñéÑåri båck tö OBS åñd DÅW ïñpüts—expanded !!]',
-    canvasLabel: '[!! TóñéÑåri vïrtüål Ï/Ö röütïñg gråph !!]',
+    description: '[!! Röüté åüdïö wrïttéñ tö MixRelay båck tö OBS åñd DÅW ïñpüts—expanded !!]',
+    canvasLabel: '[!! MixRelay vïrtüål Ï/Ö röütïñg gråph !!]',
     toggleGain: '[!! −6 dB gåïñ !!]',
     apply: '[!! Åpplÿ !!]',
     nodes: {
@@ -271,7 +338,7 @@ export const pseudo = {
       deviceName: '[!! Dévïcé ñåmé !!]',
       virtualOutput: '[!! Gråph → dévïcé !!]',
       virtualInput: '[!! Dévïcé → gråph !!]',
-      virtualDevice: '[!! TóñéÑåri Vïrtüål Ï/Ö !!]',
+      virtualDevice: '[!! MixRelay Vïrtüål Ï/Ö !!]',
       newVirtualDevice: '[!! New virtual device !!]',
       virtualAvailable: '[!! Çöññéçt !!]',
       virtualAttached: '[!! Çöññéçtéd !!]',
@@ -301,6 +368,8 @@ export const pseudo = {
       unavailable: '[!! Éñgïñé üñåvåïlåblé !!]',
     },
     errors: {
+      feature_limit:
+        '[This change exceeds the free plan. Reduce the connections or nodes, or activate a license.]',
       audio_device_disconnected: '[!! Vïrtüål åüdïö dévïcé çöñfïgüråtïöñ fåïléd !!]',
       audio_source_unavailable:
         '[!! Åpplïcåtïöñ åüdïö cåptüré ïs üñåvåïlåblé. Chéck thé åpp åñd pérmïssïöñ. !!]',
@@ -313,7 +382,9 @@ export const pseudo = {
       graph_exchange_busy: '[!! Thé prévïöüs gråph ïs stïll åctïvåtïñg !!]',
       graph_invalid: '[!! Thé éñgïñé réjéctéd thé åüdïö gråph !!]',
       graph_draft_changed: '[Draft changed during reload. Choose again.]',
-      graph_revision_stale: '[!! Rélöåd thé gråph béföré åpplÿïñg !!]',
+      graph_revision_stale: '[!! The change could not be applied — try again !!]',
+      graph_conflict_unresolved:
+        '[!! Concurrent changes could not be applied automatically — expanded !!]',
       processor_unavailable: '[!! Thé séléçtéd åüdïö pröçéssör ïs üñåvåïlåblé !!]',
     },
     recovery: {
@@ -335,6 +406,9 @@ export const pseudo = {
       reload: '[Load saved layout]',
     },
     processorControl: {
+      probeFailed: '[!! Plug-in could not be loaded; other effects remain available !!]',
+      scanFailed: '[!! Plug-in search incomplete; previous effects retained !!]',
+      technicalDetails: '[!! Technical details !!]',
       scanning: '[Scanning audio effects…]',
       incomplete: '[Effect search incomplete]',
       partial: '[Some effects could not be scanned. Previously available effects are retained.]',
@@ -366,7 +440,7 @@ export const pseudo = {
     },
   },
   studioGraph: {
-    editorLabel: '[!! TóñéÑåri åüdïö gråph édïtör !!]',
+    editorLabel: '[!! MixRelay åüdïö gråph édïtör !!]',
     canvasLabel: '[!! Bröådcåst mïx sïgñål gråph !!]',
     sessionName: '[!! Bröådcåst mïx / Måïñ !!]',
     saved: '[!! Såvéd jüst ñöw !!]',
@@ -404,7 +478,7 @@ export const pseudo = {
       twoSources: '[!! Chrömé + mïcröphöñé !!]',
       streamControl: '[!! Thréshöld −12 dB !!]',
       voiceContour: '[!! 4 båñds · Vöïcé clårïtÿ !!]',
-      stereo48k: '[!! TóñéÑåri Stréåm · 48 kHz !!]',
+      stereo48k: '[!! MixRelay Stréåm · 48 kHz !!]',
       headphones: '[!! MåcBöök Prö spéåkérs !!]',
     },
     controls: {
@@ -469,8 +543,8 @@ export const pseudo = {
     },
   },
   driver: {
+    getInstaller: '[Get MixRelay installer]',
     title: '[!! Vïrtüål åüdïö drïvér !!]',
-    description: '[!! TóñéÑåri Cåptüré åñd TóñéÑåri Stréåm !!]',
     actionInstall: '[!! Ïñståll drïvér—expanded !!]',
     actionRestart: '[!! Réstårt åüdïö sérvïcés—expanded !!]',
     actionDiagnose: '[!! Öpéñ dïågñöstïcs—expanded !!]',
@@ -487,3 +561,5 @@ export const pseudo = {
     },
   },
 } as const;
+
+export const pseudo = pseudoResource(en, overrides);

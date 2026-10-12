@@ -2,6 +2,7 @@ mod direct;
 mod endpoint_backend;
 mod format;
 mod maintenance;
+mod shutdown;
 use super::macos_pacing::{ApplicationClockSnapshot, ApplicationPacer, HardwarePacer, Pace};
 use std::{
     sync::Arc,
@@ -120,11 +121,12 @@ fn prepare_runtime() -> AdapterRuntimeStatus {
 }
 
 pub(super) async fn run() -> Result<(), String> {
-    use mixrelay_macos_transport::app_lifecycle::{APP_LEASE, ENGINE_LEASE, ProcessLease};
-    let Some(engine_lease) = ProcessLease::acquire_for_app(ENGINE_LEASE, APP_LEASE)
-        .map_err(|error| format!("could not claim engine lifecycle: {error}"))?
+    use mixrelay_macos_transport::app_lifecycle::{CONTROLLER_LEASE, ENGINE_LEASE, ProcessLease};
+    let Some(engine_lease) =
+        ProcessLease::acquire_for_controller(ENGINE_LEASE, CONTROLLER_LEASE)
+            .map_err(|error| format!("could not claim engine lifecycle: {error}"))?
     else {
-        tracing::info!("desktop is absent; refusing demand-started audio execution");
+        tracing::info!("controller is absent; refusing demand-started audio execution");
         return Ok(());
     };
     engine_lease
@@ -132,7 +134,18 @@ pub(super) async fn run() -> Result<(), String> {
         .map_err(|error| format!("engine lifecycle record failed: {error}"))?;
     let result = run_owned().await;
     let retired = super::macos_devices::MacDevices::finish_retirement();
-    let result = result.and(retired);
+    // A killed controller cannot run its own Quit handler. Its OS-owned lease
+    // still releases, so the surviving engine finalizes recordings and then
+    // shuts down the independent HAL inventory, preserving the stopped state.
+    let result = shutdown::finish(result.and(retired), async {
+        mixrelay_driver_control::DriverClient::new()
+            .map_err(|error| error.to_string())?
+            .set_active(false)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    })
+    .await;
     let outcome = result
         .as_ref()
         .map_or_else(|error| format!("failed\n{error}"), |()| "stopped".into());
@@ -216,7 +229,7 @@ async fn run_owned() -> Result<(), String> {
     let shutdown = async {
         tokio::select! {
             result = mixrelay_engine_service::session::shutdown_signal() => result,
-            () = desktop_released() => Ok(()),
+            () = controller_released() => Ok(()),
         }
     };
     let result = service
@@ -229,20 +242,8 @@ async fn run_owned() -> Result<(), String> {
     result.and(saved).and(stopped).and(released)
 }
 
-async fn desktop_released() {
-    use mixrelay_macos_transport::app_lifecycle::{APP_LEASE, is_owned};
-    let mut interval = tokio::time::interval(Duration::from_millis(100));
-    loop {
-        interval.tick().await;
-        match is_owned(APP_LEASE) {
-            Ok(true) => continue,
-            Ok(false) => tracing::info!("desktop released ownership; finalizing audio server"),
-            Err(error) => {
-                tracing::error!(%error, "desktop lease probe failed; stopping audio server");
-            }
-        }
-        break;
-    }
+async fn controller_released() {
+    shutdown::wait_for_controller(mixrelay_macos_transport::app_lifecycle::CONTROLLER_LEASE).await;
 }
 
 fn initialize_native_transport() -> Result<(), String> {

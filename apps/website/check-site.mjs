@@ -70,12 +70,20 @@ for (const reference of styles.matchAll(/url\((?:\s*["']?)([^)"']+)(?:["']?\s*)\
 assert.ok(!/@import\s+(?:url\()?\s*["']?https?:/i.test(styles), 'styles.css: no remote imports');
 
 const home = sources.get('index.html');
-for (const phrase of ['14일', '30일', '다운로드와 구매는 제공하지 않습니다', '구매 스토어는 아직 개설되지 않았습니다']) {
+for (const phrase of ['기간 제한 없이', '무료 Driver', '최대 64채널', '다운로드와 구매는 제공하지 않습니다', '구매 스토어는 아직 개설되지 않았습니다']) {
   assert.ok(home.includes(phrase), `index.html: truthful availability and license detail includes “${phrase}”`);
 }
 const guide = sources.get('guide.html');
-for (const phrase of ['그래프와 연결', '프로세서와 제어', '녹음하기', 'Stream Deck', '작업 공간과 종료', '평가판과 라이선스']) {
+for (const phrase of ['그래프와 연결', '프로세서와 제어', '녹음하기', 'Stream Deck', '작업 공간과 종료', '무료 모드와 라이선스', '기간 제한 없이', '최대 64채널']) {
   assert.ok(guide.includes(phrase), `guide.html: manual topic includes “${phrase}”`);
+}
+for (const [page, html] of sources) {
+  assert.doesNotMatch(html, /14일|평가판\s*·|영구 무료 기능 요금제는 없습니다|기간이 끝난 뒤 계속 사용하려면 구매가 필요/, `${page}: obsolete time-limited trial policy is not published`);
+  assert.doesNotMatch(html, /최대\s*30일|30일(?:간)?\s*오프라인|(?:최대|동시)\s*3(?:대|기기)/, `${page}: undecided activation and offline limits are not advertised`);
+  assert.doesNotMatch(html, /그래프·매핑 저장 및 불러오기는 유료 기능|유료 라이선스로 추가 기능과 저장·복원/, `${page}: approved free graph file access is not contradicted`);
+  for (const phrase of ['무료 기능은 계속 사용할 수 있습니다', '새 기기에서 같은', '구매 후 30일 이내', '이유를 묻지 않고 전액 환불', '한국의 영업일 기준 2일 이내 첫 응답을 목표']) {
+    assert.ok(html.includes(phrase), `${page}: confirmed purchase policy includes “${phrase}”`);
+  }
 }
 
 console.log(`Static website checks passed for ${pages.length} pages (structure, local destinations/assets, and basic accessibility).`);

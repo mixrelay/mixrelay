@@ -19,10 +19,10 @@
     "check:rust": "cargo fmt --all --check && cargo machete && node scripts/lab/native-check.mjs cargo clippy --workspace --all-targets --all-features -- -D warnings && pnpm coverage:rust",
     "check:ui-quality": "biome check biome.json apps/control-ui",
     "coverage:rust": "node scripts/lab/native-check.mjs cargo llvm-cov --workspace --lib --show-missing-lines --fail-under-functions 100 --fail-under-lines 100 --fail-under-regions 100 --fail-uncovered-functions 0 --fail-uncovered-lines 0 --fail-uncovered-regions 0",
-    "desktop:icons": "pnpm --filter @mixrelay/desktop tauri icon ../../branding/icon.png && pnpm --filter @mixrelay/desktop tauri icon ../../branding/tray-white.svg --output src-tauri/tray-icons --png 512 && pnpm --filter @mixrelay/desktop tauri icon src-tauri/tray-icons/512x512.png --output src-tauri/tray-icons --png 32 --png 64",
+    "desktop:icons": "pnpm branding:build && pnpm --filter @mixrelay/desktop tauri icon ../../branding/icon.png && pnpm --filter @mixrelay/desktop tauri icon ../../branding/tray-white.svg --output src-tauri/tray-icons --png 512 && pnpm --filter @mixrelay/desktop tauri icon src-tauri/tray-icons/512x512.png --output src-tauri/tray-icons --png 32 --png 64",
     "desktop:build": "node scripts/build-desktop.mjs",
     "release:manifest": "node scripts/prepare-release-manifest.mjs",
-    "desktop:build:macos-universal": "./scripts/build-macos-universal-app.sh",
+    "desktop:build:macos-universal": "node scripts/build-desktop.mjs",
     "engine:build:macos-universal": "zsh scripts/build-macos-universal-engine.sh",
     "desktop:dev": "pnpm --filter @mixrelay/desktop tauri dev",
     "format": "pnpm format:ui && pnpm format:rust",
@@ -34,7 +34,14 @@
     "desktop:prepare-driver": "node scripts/prepare-driver-package.mjs",
     "storybook": "pnpm --filter @mixrelay/control-ui storybook",
     "storybook:build": "pnpm --filter @mixrelay/control-ui build-storybook",
-    "smoke:macos-installed-duplex": "./scripts/smoke-macos-installed-duplex.sh"
+    "smoke:macos-installed-duplex": "./scripts/smoke-macos-installed-duplex.sh",
+    "desktop:pkg:macos": "node scripts/build-macos-app-installer.mjs",
+    "branding:build": "node branding/build.mjs && pnpm --filter @mixrelay/desktop tauri icon ../../branding/identity/app-icon.svg --output ../../branding/identity/exports --png 1024 && node branding/sync-raster.mjs",
+    "branding:kit": "pnpm desktop:icons && node branding/export-kit.mjs",
+    "product:version": "node scripts/product-version.mjs",
+    "check:product": "node scripts/product-version.mjs check && node --test scripts/product-version.test.mjs",
+    "release:macos": "node scripts/release-macos.mjs",
+    "signing:check": "node scripts/macos-signing.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.11"

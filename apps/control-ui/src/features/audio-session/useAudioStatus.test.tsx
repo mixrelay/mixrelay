@@ -1,64 +1,108 @@
-import { act, renderHook } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { expect, it, vi } from 'vitest';
 import type { ControlPort, MixRelayStatus } from '../../core/control-port/types';
 import { useAudioStatus } from './useAudioStatus';
 
-afterEach(() => vi.useRealTimers());
-const observed: MixRelayStatus = {
+const status: MixRelayStatus = {
   protocolVersion: 1,
   driverState: 'ready',
-  sampleRate: 44100,
+  sampleRate: 48000,
   bufferFrames: 128,
   underruns: 0,
   overruns: 0,
+  enginePower: { enabled: true, transitioning: false },
 };
 
-it('ignores a pre-change native response after explicit device refresh and cancels polling on unmount', async () => {
-  vi.useFakeTimers();
-  let resolveOld!: (value: MixRelayStatus) => void;
-  const getStatus = vi
-    .fn()
-    .mockReturnValueOnce(
-      new Promise((resolve) => {
-        resolveOld = resolve;
-      }),
-    )
-    .mockResolvedValue(observed);
-  const port = { getStatus } as unknown as ControlPort;
-  const { result, rerender, unmount } = renderHook(({ refresh }) => useAudioStatus(port, refresh), {
+it('retains the status while refreshing, then adopts the acknowledged pause', async () => {
+  let resolve!: (value: MixRelayStatus) => void;
+  const pending = new Promise<MixRelayStatus>((done) => {
+    resolve = done;
+  });
+  const port = {
+    getStatus: vi.fn().mockResolvedValueOnce(status).mockReturnValueOnce(pending),
+  } as unknown as ControlPort;
+  const hook = renderHook(({ refresh }) => useAudioStatus(port, refresh), {
     initialProps: { refresh: 0 },
   });
-  await act(async () => {
-    rerender({ refresh: 1 });
-  });
-  expect(result.current).toEqual(observed);
-  await act(async () => {
-    resolveOld({ ...observed, sampleRate: 48000 });
-  });
-  expect(result.current).toEqual(observed);
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(1000);
-  });
-  expect(getStatus).toHaveBeenCalledTimes(3);
-  unmount();
-  await vi.advanceTimersByTimeAsync(5000);
-  expect(getStatus).toHaveBeenCalledTimes(3);
-  expect(vi.getTimerCount()).toBe(0);
+  await waitFor(() => expect(hook.result.current).toBe(status));
+  hook.rerender({ refresh: 1 });
+  expect(hook.result.current).toBe(status);
+  const paused = { ...status, enginePower: { enabled: false, transitioning: false } };
+  await act(async () => resolve(paused));
+  expect(hook.result.current).toBe(paused);
 });
 
-it('clears stale healthy observations when the native status request fails', async () => {
-  const getStatus = vi
-    .fn()
-    .mockResolvedValueOnce(observed)
-    .mockRejectedValueOnce(new Error('offline'));
-  const port = { getStatus } as unknown as ControlPort;
-  const { result, rerender } = renderHook(({ refresh }) => useAudioStatus(port, refresh), {
+it('never retains ready health for a replacement or failed service', async () => {
+  const first = { getStatus: vi.fn().mockResolvedValue(status) } as unknown as ControlPort;
+  const next = {
+    getStatus: vi.fn().mockRejectedValue(new Error('offline')),
+  } as unknown as ControlPort;
+  const hook = renderHook(({ port, refresh }) => useAudioStatus(port, refresh), {
+    initialProps: { port: first, refresh: 0 },
+  });
+  await waitFor(() => expect(hook.result.current).toBe(status));
+  vi.mocked(first.getStatus).mockRejectedValueOnce(new Error('offline'));
+  hook.rerender({ port: first, refresh: 1 });
+  await waitFor(() => expect(hook.result.current).toBeNull());
+  hook.rerender({ port: next, refresh: 2 });
+  expect(hook.result.current).toBeNull();
+  await waitFor(() => expect(next.getStatus).toHaveBeenCalledOnce());
+});
+
+it('polls after completion and ignores late replies from a cancelled refresh', async () => {
+  vi.useFakeTimers();
+  let resolve!: (value: MixRelayStatus) => void;
+  const late = new Promise<MixRelayStatus>((done) => {
+    resolve = done;
+  });
+  const port = {
+    getStatus: vi
+      .fn()
+      .mockResolvedValueOnce(status)
+      .mockReturnValueOnce(late)
+      .mockResolvedValue(status),
+  } as unknown as ControlPort;
+  const hook = renderHook(({ refresh }) => useAudioStatus(port, refresh), {
     initialProps: { refresh: 0 },
   });
-  await act(async () => {});
-  expect(result.current).toEqual(observed);
+  try {
+    await act(async () => {});
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(port.getStatus).toHaveBeenCalledTimes(2);
+    expect(hook.result.current).toBe(status);
+    hook.rerender({ refresh: 1 });
+    await act(async () => {});
+    await act(async () => resolve({ ...status, driverState: 'unavailable' }));
+    expect(hook.result.current).toBe(status);
+    hook.unmount();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(port.getStatus).toHaveBeenCalledTimes(3);
+  } finally {
+    hook.unmount();
+    vi.useRealTimers();
+  }
+});
+
+it('ignores a failed status read from a replaced service instead of hiding the current service health', async () => {
+  let reject: ((error: Error) => void) | undefined;
+  const old = {
+    getStatus: vi.fn().mockReturnValue(
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+    ),
+  } as unknown as ControlPort;
+  const current = { getStatus: vi.fn().mockResolvedValue(status) } as unknown as ControlPort;
+  const hook = renderHook(({ port }) => useAudioStatus(port), { initialProps: { port: old } });
+  hook.rerender({ port: current });
+  await waitFor(() => expect(hook.result.current).toBe(status));
   await act(async () => {
-    rerender({ refresh: 1 });
+    if (!reject) throw new Error('Previous status request was not started');
+    reject(new Error('Old service disconnected'));
   });
-  expect(result.current).toBeNull();
+  expect(hook.result.current).toBe(status);
 });

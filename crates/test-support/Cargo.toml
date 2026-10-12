@@ -11,3 +11,6 @@ workspace = true
 [dependencies]
 # Serialize measured PCM evidence from native/offline tests, never production callbacks.
 serde.workspace = true
+
+# Decode PCM in RF64 test fixtures independently of the production writer.
+hound = "3.5.1"

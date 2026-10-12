@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "io.mixrelay.desktop",
   "build": {
-    "beforeDevCommand": "pnpm --dir ../.. desktop:prepare-engine --profile dev && pnpm --dir ../.. desktop:icons && pnpm --dir ../control-ui dev",
-    "beforeBuildCommand": "pnpm --dir ../.. desktop:prepare-engine --profile release && pnpm --dir ../.. desktop:icons && pnpm --dir ../control-ui build",
+    "beforeDevCommand": "pnpm --dir ../.. desktop:icons && pnpm --dir ../control-ui dev",
+    "beforeBuildCommand": "pnpm --dir ../.. desktop:prepare-engine --profile release && pnpm --dir ../.. desktop:prepare-driver --profile release && pnpm --dir ../.. desktop:icons && pnpm --dir ../control-ui build",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../../control-ui/dist"
   },
@@ -34,6 +34,7 @@
       "../../../LICENSE-Driver.txt": "LICENSE-Driver.txt",
       "../../../LICENSE-Driver.ko.txt": "LICENSE-Driver.ko.txt",
       "../../../CHANGELOG.md": "CHANGELOG.md",
+      "../../control-ui/src/core/theme/fonts/OFL.txt": "third-party/IBM-Plex/OFL.txt",
       "../../../vendor/LICENSE-MIT": "third-party/truce-rack/LICENSE-MIT",
       "../../../vendor/LICENSE-APACHE": "third-party/truce-rack/LICENSE-APACHE",
       "../../../LICENSE.ja.txt": "LICENSE.ja.txt",
@@ -77,7 +78,11 @@
     "shortDescription": "Audio routing and processing",
     "longDescription": "Route audio between devices and applications, apply audio processors, and record signals using node-based graphs.",
     "macOS": {
-      "minimumSystemVersion": "14.2"
+      "minimumSystemVersion": "14.2",
+      "files": {
+        "Library/LaunchAgents/io.mixrelay.driver.runtime.plist": "../../../packaging/macos/io.mixrelay.driver.runtime.plist",
+        "Resources/mixrelay-driver-launcher": "../../../target/universal-apple-darwin/release/mixrelay-driver-launcher"
+      }
     }
   }
 }

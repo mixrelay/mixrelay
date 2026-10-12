@@ -23,8 +23,8 @@ import { pathToFileURL } from "node:url";
 const LANGUAGES = JSON.parse(readFileSync(new URL("../packaging/localization/languages.json", import.meta.url), "utf8"));
 const LOCALIZED_NOTICES = JSON.parse(readFileSync(new URL("../packaging/localization/installer-notices.json", import.meta.url), "utf8"));
 const STAGING_BASE = "Library/Application Support/MixRelay";
-const INSTALLER_ID = "io.mixrelay.driver.installer";
-const INSTALLER_COMPONENT_ID = "io.mixrelay.driver.installer.component";
+const INSTALLER_ID = "io.mixrelay.installer";
+const INSTALLER_COMPONENT_ID = "io.mixrelay.installer.component";
 const OPERATIONS = JSON.parse(readFileSync(new URL("../packaging/localization/installer-operations.json", import.meta.url), "utf8"));
 const MAX_COMMAND_OUTPUT = 4 * 1024 * 1024;
 const ARCHITECTURES = ["arm64", "x86_64"];
@@ -165,11 +165,16 @@ function walkFiles(fs, root) {
 
 function validatePayload(fs, root) {
   requirePath(fs, "--payload", root, "directory");
-  const manager = join(root, "Applications/MixRelay Driver.app");
+  const manager = join(root, "Applications/MixRelay.app");
   const hal = join(root, "Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver");
   const driver = join(root, "Library/Application Support/MixRelay/bin/mixrelay-driver-service");
+  const engine = join(root, "Library/Application Support/MixRelay/bin/mixrelay-engine-service");
+  const engineTemplate = join(root, "templates/io.mixrelay.audio.engine.plist.in");
+  const engineMetadata = requirePath(fs, "engine payload", engine, "file");
+  requirePath(fs, "engine template", engineTemplate, "file");
+  if (!engineMetadata.size || (engineMetadata.mode & 0o111) === 0) throw new Error("Runtime engine must be executable");
   const template = join(root, "templates/io.mixrelay.audio.driver.plist.in");
-  const uninstaller = join(root, "Applications/Uninstall MixRelay Driver.app");
+  const uninstaller = join(root, "Applications/Uninstall MixRelay.app");
   const removalTemplate = join(root, "templates/io.mixrelay.driver.removal.plist");
   requirePath(fs, "uninstaller payload", uninstaller, "directory");
   requirePath(fs, "removal launchd template", removalTemplate, "file");
@@ -205,18 +210,20 @@ function validatePayload(fs, root) {
   for (const tree of [manager, hal, uninstaller]) walkFiles(fs, tree);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   if (manifest.format !== 1 || manifest.status !== "payload-prepared-not-package"
-    || manifest.installContract?.manager !== "/Applications/MixRelay Driver.app"
+    || manifest.installContract?.manager !== "/Applications/MixRelay.app"
     || manifest.installContract?.hal !== "/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver"
     || manifest.installContract?.driver !== "/Library/Application Support/MixRelay/bin/mixrelay-driver-service"
     || manifest.installContract?.launchd !== "/Library/LaunchDaemons/io.mixrelay.audio.driver.plist"
-    || manifest.installContract?.uninstaller !== "/Applications/Uninstall MixRelay Driver.app"
-    || manifest.installContract?.removalLaunchd !== "/Library/LaunchDaemons/io.mixrelay.driver.removal.plist") {
+    || manifest.installContract?.uninstaller !== "/Applications/Uninstall MixRelay.app"
+    || manifest.installContract?.removalLaunchd !== "/Library/LaunchDaemons/io.mixrelay.driver.removal.plist"
+    || manifest.installContract?.engine !== "/Library/Application Support/MixRelay/bin/mixrelay-engine-service"
+    || manifest.installContract?.engineLaunchd !== "/Library/LaunchDaemons/io.mixrelay.audio.engine.plist") {
     throw new Error("payload manifest does not describe the fixed MixRelay install contract");
   }
-  if (fs.existsSync(join(manager, "Contents/Helpers/Uninstall MixRelay Driver.app"))) {
+  if (fs.existsSync(join(manager, "Contents/Helpers/Uninstall MixRelay.app"))) {
     throw new Error("A single-package release must not contain a separate uninstaller app");
   }
-  return { manager, hal, driver, template, uninstaller, removalTemplate, license, driverLicense, driverLicenseKo, changelog, driverTerms };
+  return { manager, hal, driver, engine, engineTemplate, template, uninstaller, removalTemplate, license, driverLicense, driverLicenseKo, changelog, driverTerms };
 }
 
 function validateUniversalExecutable(fs, path, run, name) {
@@ -453,20 +460,24 @@ cli="$stage/bin/mixrelay-macos-installer"
 [ -f "$cli" ] && [ ! -L "$cli" ] && [ -x "$cli" ] || fail "embedded installer CLI is missing or unsafe"
 check_file "$cli"
 check_dir "$stage/payload"
-check_dir "$stage/payload/Applications/MixRelay Driver.app"
+check_dir "$stage/payload/Applications/MixRelay.app"
 check_dir "$stage/payload/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver"
 check_file "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-driver-service"
 check_file "$stage/payload/templates/io.mixrelay.audio.driver.plist.in"
-check_dir "$stage/payload/Applications/Uninstall MixRelay Driver.app"
+check_dir "$stage/payload/Applications/Uninstall MixRelay.app"
 check_file "$stage/payload/templates/io.mixrelay.driver.removal.plist"
+check_file "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-engine-service"
+check_file "$stage/payload/templates/io.mixrelay.audio.engine.plist.in"
 set +e
 "$cli" install ${teamId} \\
-  "$stage/payload/Applications/MixRelay Driver.app" \\
+  "$stage/payload/Applications/MixRelay.app" \\
   "$stage/payload/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver" \\
   "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-driver-service" \\
   "$stage/payload/templates/io.mixrelay.audio.driver.plist.in" \\
-  "$stage/payload/Applications/Uninstall MixRelay Driver.app" \\
-  "$stage/payload/templates/io.mixrelay.driver.removal.plist" --reload-coreaudio
+  "$stage/payload/Applications/Uninstall MixRelay.app" \\
+  "$stage/payload/templates/io.mixrelay.driver.removal.plist" \\
+  "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-engine-service" \\
+  "$stage/payload/templates/io.mixrelay.audio.engine.plist.in" --reload-coreaudio
 result=$?
 set -e
 if [ -L "$stage" ]; then
@@ -480,7 +491,7 @@ exit "$result"
 `;
 }
 
-function preinstall(stagingId, fs, packageStage) {
+export function preinstall(stagingId, fs, packageStage) {
   const allowedInputs = new Set([""]);
   const collectInputs = directory => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -559,7 +570,7 @@ exit 0
 `;
 }
 
-function installerRtf(text) {
+export function installerRtf(text, ...additionalDocuments) {
   // RTF uses signed UTF-16 code units, including one escape per surrogate.
   const escape = value => value.replace(/[\\{}]|[^\x20-\x7e]/g, character => {
     if (character === "\n") return "\\line ";
@@ -570,8 +581,9 @@ function installerRtf(text) {
   });
   const paragraph = (value, style = "\\fs22\\b0\\sl280\\slmult0\\sb0\\sa120") =>
     `\\pard\\ql\\f0${style} ${escape(value)}\\par\n`;
-  const blocks = text.trim().replace(/\r\n?/g, "\n").split(/\n[ \t]*\n+/);
-  const paragraphs = blocks.flatMap((block, index) => {
+  const paragraphs = [text, ...additionalDocuments].flatMap(document => {
+  const blocks = document.trim().replace(/\r\n?/g, "\n").split(/\n[ \t]*\n+/);
+  return blocks.flatMap((block, index) => {
     const lines = block.split("\n");
     const heading = lines[0];
     if (index === 0 && LANGUAGES.some(language => [language.agreementTitle, language.guideTitle].includes(lines[1]))) {
@@ -593,6 +605,7 @@ function installerRtf(text) {
     }
     return [paragraph(lines.join(" "))];
   });
+  });
   // No color table or foreground/background overrides: Installer owns appearance.
   return `{\\rtf1\\ansi\\deff0\\uc1{\\fonttbl{\\f0\\fswiss Helvetica;}}\n${paragraphs.join("")}}\n`;
 }
@@ -600,7 +613,7 @@ function installerRtf(text) {
 export function distribution(packageFilename, version) {
   return `<?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
-  <title>MixRelay Driver</title>
+  <title>MixRelay</title>
   <readme file="INSTALLER-README.rtf" mime-type="text/rtf"/>
   <license file="INSTALLER-LICENSE.rtf" mime-type="text/rtf"/>
   <options customize="never" allow-external-scripts="false"/>
@@ -636,13 +649,15 @@ function buildInstaller({ fs, run, work, packageRoot, stagingId, paths, installe
   copyWithDitto(fs, run, installerCli, binPath, packageRoot);
   const stagedPayload = join(packageStage, "payload");
   ensurePackageDirectories(fs, packageRoot, stagedPayload);
-  const stagedManager = join(stagedPayload, "Applications/MixRelay Driver.app");
+  const stagedManager = join(stagedPayload, "Applications/MixRelay.app");
   const stagedHal = join(stagedPayload, "Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver");
   copyWithDitto(fs, run, paths.manager, stagedManager, packageRoot);
   copyWithDitto(fs, run, paths.hal, stagedHal, packageRoot);
-  const stagedUninstaller = join(stagedPayload, "Applications/Uninstall MixRelay Driver.app");
+  const stagedUninstaller = join(stagedPayload, "Applications/Uninstall MixRelay.app");
   copyWithDitto(fs, run, paths.uninstaller, stagedUninstaller, packageRoot);
   requiredBundleRoots.push(stagedManager, stagedHal, stagedUninstaller);
+  copyWithDitto(fs, run, paths.engine, join(stagedPayload, "Library/Application Support/MixRelay/bin/mixrelay-engine-service"), packageRoot);
+  copyWithDitto(fs, run, paths.engineTemplate, join(stagedPayload, "templates/io.mixrelay.audio.engine.plist.in"), packageRoot);
   copyWithDitto(fs, run, paths.driver, join(stagedPayload, "Library/Application Support/MixRelay/bin/mixrelay-driver-service"), packageRoot);
   copyWithDitto(fs, run, paths.template, join(stagedPayload, "templates/io.mixrelay.audio.driver.plist.in"), packageRoot);
 
@@ -656,7 +671,7 @@ function buildInstaller({ fs, run, work, packageRoot, stagingId, paths, installe
   fs.writeFileSync(join(scriptsPath, "postinstall"), script, { encoding: "utf8", mode: 0o755 });
   fs.chmodSync(join(scriptsPath, "postinstall"), 0o755);
 
-  const componentFilename = `MixRelay-Driver-Installer-${version}.component.pkg`;
+  const componentFilename = `MixRelay-Installer-${version}.component.pkg`;
   const componentPath = join(work, componentFilename);
   const componentPlist = prepareComponentPlist({ fs, run, packageRoot, work, mode, requiredBundleRoots });
   runChecked(run, "/usr/bin/pkgbuild", [
@@ -683,7 +698,7 @@ function buildInstaller({ fs, run, work, packageRoot, stagingId, paths, installe
   for (const entry of paths.driverTerms) {
     const { language, path: terms } = entry;
     const notice = LOCALIZED_NOTICES[language];
-    if (!notice || !notice.startsWith(`MixRelay Driver\n${entry.guideTitle}\n`)) {
+    if (!notice || !notice.startsWith(`MixRelay\n${entry.guideTitle}\n`)) {
       throw new Error(`Missing or mismatched installation guide: ${language}`);
     }
     const labels = OPERATIONS[language];
@@ -691,10 +706,10 @@ function buildInstaller({ fs, run, work, packageRoot, stagingId, paths, installe
     const localized = join(resourcesPath, `${language}.lproj`);
     fs.mkdirSync(localized, { mode: 0o755 });
     fs.writeFileSync(join(localized, "Localizable.strings"), Object.entries(labels).map(([key, value]) => `${JSON.stringify(key)} = ${JSON.stringify(value)};`).join("\n") + "\n", "utf8");
-    fs.writeFileSync(join(localized, "INSTALLER-LICENSE.rtf"), installerRtf(fs.readFileSync(terms, "utf8")), "utf8");
+    fs.writeFileSync(join(localized, "INSTALLER-LICENSE.rtf"), installerRtf(fs.readFileSync(join(paths.manager, "Contents/Resources", entry.appTerms), "utf8"), fs.readFileSync(terms, "utf8")), "utf8");
     fs.writeFileSync(join(localized, "INSTALLER-README.rtf"), installerRtf(notice), "utf8");
   }
-  const productPath = join(work, `MixRelay-Driver-Installer-${version}.pkg`);
+  const productPath = join(work, `MixRelay-Installer-${version}.pkg`);
   runChecked(run, "/usr/bin/productbuild", [
     "--distribution", distributionPath,
     "--resources", resourcesPath,
@@ -708,10 +723,10 @@ function buildInstaller({ fs, run, work, packageRoot, stagingId, paths, installe
   requirePath(fs, `${mode} product package`, productPath, "file");
   const signature = runChecked(run, "/usr/sbin/pkgutil", ["--check-signature", productPath], `verify signed ${mode} package`);
   verifyPackageSignature(signature, signingIdentity, mode);
-  return { productPath, filename: `MixRelay-Driver-Installer-${version}.pkg` };
+  return { productPath, filename: `MixRelay-Installer-${version}.pkg` };
 }
 
-function verifyPackageSignature(signature, signingIdentity, mode) {
+export function verifyPackageSignature(signature, signingIdentity, mode) {
   const signatureStatus = signature.match(/^[ \t]*Status:[ \t]*([^\r\n]+)\r?$/m)?.[1].trim();
   const trustedStatus = signatureStatus === "signed by a certificate trusted by macOS"
     || signatureStatus === "signed by a developer certificate issued by Apple for distribution";
@@ -746,6 +761,15 @@ export function buildPackages({ payload, installerCli, payloadChecker, teamId, v
   validateUniversalExecutable(fs, installerCli, run, "installer CLI");
   validatePayloadChecker(fs, payloadChecker);
   verifyPayloadReleaseContract(run, payloadChecker, payload, teamId, installerCli);
+  // Inspect services only after the native publisher/signature gate. --version
+  // exits before opening devices, sockets, settings or authentication.
+  for (const bundle of [paths.manager, paths.hal, paths.uninstaller]) {
+    const actual = runChecked(run, "/usr/bin/plutil", ["-extract", "CFBundleShortVersionString", "raw", "-o", "-", join(bundle, "Contents/Info.plist")], "read product bundle version");
+    if (actual !== version) throw new Error("Every MixRelay bundle must match the product version");
+  }
+  for (const binary of [paths.driver, paths.engine]) {
+    if (runChecked(run, binary, ["--version"], "read product service version") !== version) throw new Error("Every MixRelay service must match the product version");
+  }
   assertEmptyOutput(fs, output);
 
   const stageId = fingerprint(fs, Object.entries(paths).filter(([label]) => label !== "driverTerms"), installerCli);

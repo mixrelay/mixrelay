@@ -6,10 +6,13 @@ import type {
   RecorderRequest,
   RecorderStatus,
 } from '../../core/control-port/types';
+import { usePaidFeatures } from '../../core/licensing/FeatureAccess';
+import { InlineNotice } from '../../core/ui/InlineNotice';
 import { NodeOptionsSection } from '../../core/ui/NodeOptionsSection';
+import { NodeTransportRow } from '../../core/ui/NodeTransportRow';
 import { useNodeOptionsState } from '../../core/ui/nodeOptionsState';
+import { PathField } from '../../core/ui/PathField';
 import { SelectField } from '../../core/ui/SelectField';
-import { TextField } from '../../core/ui/TextField';
 import { TransportButton } from '../../core/ui/TransportButton';
 import { RecorderController, recordingDuration } from './RecorderController';
 import styles from './RecorderControls.module.css';
@@ -25,13 +28,17 @@ export function RecorderControls(props: {
   controlPort: ControlPort;
   graphId: string;
   nodeId: string;
+  name?: string;
   expectedRevision: number;
   poweredOn?: boolean;
+  playbackPaused?: boolean;
   enabled: boolean;
   channels: number;
   onChannelsChange: (channels: number) => void;
 }) {
   const { t } = useTranslation();
+  const paid = usePaidFeatures();
+  const freeLimit = paid ? undefined : t('recorder.freeLimit');
   const controller = useMemo(
     () => new RecorderController(props.controlPort, props.graphId, props.nodeId),
     [props.controlPort, props.graphId, props.nodeId],
@@ -48,68 +55,49 @@ export function RecorderControls(props: {
   const fieldsLocked = disabled || locked || !props.enabled || !settings;
   return (
     <div className={styles.root}>
-      <div className={styles.transport}>
-        <output
-          className={styles.time}
-          aria-label={t('recorder.duration')}
-          title={
-            snapshot.status ? t(`recorder.states.${snapshot.status.state}`) : t('recorder.loading')
-          }
-        >
-          {recordingDuration(snapshot.status)}
-        </output>
+      <NodeTransportRow
+        value={recordingDuration(snapshot.status)}
+        label={t('recorder.duration')}
+        description={freeLimit}
+        state={
+          snapshot.status ? t(`recorder.states.${snapshot.status.state}`) : t('recorder.loading')
+        }
+      >
         <RecorderButtons
-          canStart={props.enabled && !!settings && !snapshot.settingsError}
+          name={props.name}
+          canStart={
+            props.enabled && !!settings && !snapshot.settingsError && (paid || props.channels <= 2)
+          }
           disabled={disabled}
+          playbackPaused={props.playbackPaused === true}
           status={snapshot.status}
           command={(request) => controller.command(request, props.expectedRevision)}
         />
-      </div>
+      </NodeTransportRow>
       <RecorderError error={snapshot.error ?? snapshot.settingsError} />
       <NodeOptionsSection
         disabled={props.poweredOn === false}
-        label={t('routing.nodes.options')}
+        label={recorderActionLabel(props.name, t('routing.nodes.options'))}
         opened={optionsOpened}
         onToggle={toggleOptions}
+        description={freeLimit}
       >
-        <SelectField
-          label={t('recorder.channels')}
-          value={String(props.channels)}
+        <ChannelsField
+          channels={props.channels}
           disabled={fieldsLocked}
-          data={Array.from({ length: 8 }, (_, index) => ({
-            value: String(index + 1),
-            label: String(index + 1),
-          }))}
-          onChange={(value) => props.onChannelsChange(Number(value))}
+          onChange={props.onChannelsChange}
         />
-        <TextField
+        <PathField
           label={t('recorder.folder')}
           value={settings?.folder ?? ''}
-          readOnly
-          classNames={{
-            root: styles.folderField,
-            label: styles.folderLabel,
-            wrapper: styles.folderWrapper,
-            input: styles.folderPath,
-          }}
-          rightSectionWidth={28}
-          rightSectionPointerEvents="auto"
-          rightSection={
-            props.controlPort.selectRecordingFolder ? (
-              <button
-                type="button"
-                className={styles.folderButton}
-                aria-label={t('recorder.chooseFolder')}
-                disabled={fieldsLocked}
-                onClick={() =>
-                  controller.chooseFolder(t('recorder.chooseFolder'), props.expectedRevision)
+          actionLabel={recorderActionLabel(props.name, t('recorder.chooseFolder'))}
+          disabled={fieldsLocked}
+          onChoose={
+            props.controlPort.selectRecordingFolder
+              ? () => {
+                  void controller.chooseFolder(t('recorder.chooseFolder'), props.expectedRevision);
                 }
-              >
-                <svg aria-hidden="true" viewBox="0 0 20 20">
-                  <path d="M2 6V4h6l2 2h8v3M2 6v11h14l2-8H5l-3 8" />
-                </svg>
-              </button>
-            ) : null
+              : undefined
           }
         />
         <SelectField
@@ -137,12 +125,36 @@ export function RecorderControls(props: {
   );
 }
 
+function ChannelsField(props: {
+  channels: number;
+  disabled: boolean;
+  onChange: (channels: number) => void;
+}) {
+  const { t } = useTranslation();
+  const paid = usePaidFeatures();
+  return (
+    <SelectField
+      label={t('recorder.channels')}
+      value={String(props.channels)}
+      disabled={props.disabled}
+      data={Array.from({ length: paid ? 8 : Math.max(2, props.channels) }, (_, index) => ({
+        value: String(index + 1),
+        label: String(index + 1),
+        disabled: !paid && index >= 2,
+      }))}
+      onChange={(value) => {
+        if (paid || Number(value) <= 2) props.onChange(Number(value));
+      }}
+    />
+  );
+}
+
 function RecorderError({ error }: { error: string | null }) {
   const { t } = useTranslation();
   return error ? (
-    <div className={styles.error} role="alert">
+    <InlineNotice tone="critical">
       {t('recorder.failed')}: {error}
-    </div>
+    </InlineNotice>
   ) : null;
 }
 
@@ -173,39 +185,50 @@ function EncodingField(props: {
 }
 
 function RecorderButtons({
+  name,
   canStart,
   disabled,
+  playbackPaused,
   status,
   command,
 }: {
+  name?: string;
   canStart: boolean;
   disabled: boolean;
+  playbackPaused: boolean;
   status: RecorderStatus | null;
   command: (request: RecorderRequest) => void;
 }) {
   const { t } = useTranslation();
   const locked = status?.state === 'recording' || status?.state === 'paused';
+  const label = (action: string) => recorderActionLabel(name, action);
   return (
-    <div className={styles.actions}>
+    <>
       <TransportButton
         icon={status?.state === 'paused' ? 'resume' : 'record'}
-        label={status?.state === 'paused' ? t('recorder.resume') : t('recorder.record')}
+        label={label(status?.state === 'paused' ? t('recorder.resume') : t('recorder.record'))}
         active={status?.state === 'recording'}
-        disabled={disabled || status?.state === 'recording' || (!locked && !canStart)}
+        disabled={
+          disabled || playbackPaused || status?.state === 'recording' || (!locked && !canStart)
+        }
         onClick={() => command({ action: 'record' })}
       />
       <TransportButton
         icon="pause"
-        label={t('recorder.pause')}
-        disabled={disabled || status?.state !== 'recording'}
+        label={label(t('recorder.pause'))}
+        disabled={disabled || playbackPaused || status?.state !== 'recording'}
         onClick={() => command({ action: 'pause' })}
       />
       <TransportButton
         icon="stop"
-        label={t('recorder.stop')}
+        label={label(t('recorder.stop'))}
         disabled={disabled || !locked}
         onClick={() => command({ action: 'stop' })}
       />
-    </div>
+    </>
   );
+}
+
+function recorderActionLabel(name: string | undefined, action: string) {
+  return name ? `${name}: ${action}` : action;
 }

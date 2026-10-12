@@ -1,0 +1,41 @@
+import { invoke } from '@tauri-apps/api/core';
+import { afterEach, expect, it, vi } from 'vitest';
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+
+const original = Object.getOwnPropertyDescriptor(window, '__TAURI_INTERNALS__');
+afterEach(() => {
+  Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  if (original) Object.defineProperty(window, '__TAURI_INTERNALS__', original);
+  vi.mocked(invoke).mockReset();
+  vi.resetModules();
+});
+
+it('does not contact a native runtime in a browser preview', async () => {
+  Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+  vi.resetModules();
+  expect((await import('./TauriRuntimePort')).localRuntimePort).toBeNull();
+  expect(invoke).not.toHaveBeenCalled();
+});
+
+it('observes runtime status without restarting it and connects only on an explicit request', async () => {
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+  vi.resetModules();
+  const { localRuntimePort } = await import('./TauriRuntimePort');
+  if (!localRuntimePort) throw new Error('Native runtime adapter was not available');
+  vi.mocked(invoke).mockResolvedValueOnce('unavailable').mockResolvedValueOnce('ready');
+  await expect(localRuntimePort.status()).resolves.toBe('unavailable');
+  expect(invoke).toHaveBeenCalledExactlyOnceWith('runtime_status');
+  await expect(localRuntimePort.connect()).resolves.toBe('ready');
+  expect(invoke).toHaveBeenLastCalledWith('runtime_connect');
+});
+
+it('preserves native connection failures for the connection screen', async () => {
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+  vi.resetModules();
+  const { localRuntimePort } = await import('./TauriRuntimePort');
+  if (!localRuntimePort) throw new Error('Native runtime adapter was not available');
+  const failure = new Error('Driver is not installed');
+  vi.mocked(invoke).mockRejectedValueOnce(failure);
+  await expect(localRuntimePort.connect()).rejects.toBe(failure);
+});

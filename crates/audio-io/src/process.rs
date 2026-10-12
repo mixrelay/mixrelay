@@ -48,12 +48,27 @@ impl TransferOutcome {
     }
 }
 
+/// Non-finite PCM replaced at prepared Core boundaries, without retaining samples or identities.
+/// Counts describe replacements, not distinct source frames; `blocks` counts affected cycles once.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SampleFaults {
+    /// Replacements while admitting external source PCM.
+    pub source_samples: u64,
+    /// Replacements after route accumulation, before a node consumes PCM.
+    pub input_samples: u64,
+    /// Replacements after a node produces PCM, including hosted processors.
+    pub output_samples: u64,
+    pub blocks: u64,
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ProcessReport {
     /// Per-binding insufficient transfers, not inferred from sample amplitude.
     pub input_starvations: u64,
     pub output_overflows: u64,
     pub discontinuities: u64,
+    pub sample_faults: SampleFaults,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

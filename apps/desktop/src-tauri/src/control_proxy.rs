@@ -9,7 +9,6 @@ use crate::macos_audio::ApplicationCaptureState;
 #[cfg(target_os = "macos")]
 mod application_capture;
 mod exchange;
-#[cfg(target_os = "macos")]
 pub(crate) mod local;
 pub(crate) mod node_control;
 pub(crate) mod recorder;
@@ -68,13 +67,11 @@ pub(crate) async fn control_set_graph_layout(
 #[derive(Debug, Clone)]
 pub(crate) struct ControlProxyClient {
     client: Client,
+    pub(crate) background: std::sync::Arc<std::sync::Mutex<Option<crate::background::Connection>>>,
     #[cfg(target_os = "macos")]
     capture_gate: Arc<tauri::async_runtime::Mutex<()>>,
     closing: std::sync::Arc<std::sync::atomic::AtomicBool>,
     unavailable: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    licensed: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    license_state:
-        std::sync::Arc<std::sync::OnceLock<std::sync::Arc<crate::licensing::LicensingState>>>,
     requests: std::sync::Arc<tokio::sync::RwLock<()>>,
     operation_liveness: std::sync::Arc<tokio::sync::Notify>,
     recordings: std::sync::Arc<std::sync::RwLock<recording_settings::RecordingStore>>,
@@ -85,10 +82,9 @@ impl Default for ControlProxyClient {
     fn default() -> Self {
         Self {
             client: Client::new(),
+            background: std::sync::Arc::default(),
             closing: std::sync::Arc::default(),
             unavailable: std::sync::Arc::default(),
-            licensed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            license_state: std::sync::Arc::default(),
             requests: std::sync::Arc::default(),
             operation_liveness: std::sync::Arc::default(),
             recordings: std::sync::Arc::default(),
@@ -99,45 +95,26 @@ impl Default for ControlProxyClient {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ControlProxyResponse {
-    status: u16,
-    body: Value,
+    pub(crate) status: u16,
+    pub(crate) body: Value,
     #[cfg(target_os = "macos")]
     #[serde(skip)]
     delivery: RequestDelivery,
 }
 
 #[cfg(target_os = "macos")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum RequestDelivery {
+    #[default]
     ServerResponse,
     NotSent,
     Uncertain,
 }
 
 impl ControlProxyClient {
-    pub(crate) fn attach_license_state(
-        &self,
-        state: std::sync::Arc<crate::licensing::LicensingState>,
-    ) {
-        let _ = self.license_state.set(state);
-    }
-
-    fn license_allows_mutation(&self) -> bool {
-        self.licensed.load(std::sync::atomic::Ordering::Acquire)
-            && self.license_state.get().is_none_or(|state| {
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .is_ok_and(|time| state.allows_mutation(time.as_secs()))
-            })
-    }
-    pub(crate) fn set_license_admission(&self, allowed: bool) {
-        self.licensed
-            .store(allowed, std::sync::atomic::Ordering::Release);
-    }
-
     #[cfg(any(test, target_os = "linux"))]
     pub(crate) fn suspend_admission(&self) {
         self.unavailable
@@ -176,16 +153,28 @@ impl ControlProxyClient {
         .await
     }
 
-    async fn request(
+    pub(crate) async fn request(
         &self,
         method: Method,
         path: &str,
         body: Option<Value>,
     ) -> Result<ControlProxyResponse, String> {
-        let _admission = self.requests.read().await;
-        if !license_safe_request(&method, path, body.as_ref()) && !self.license_allows_mutation() {
-            return Ok(rejected("license_required"));
+        let background = self
+            .background
+            .lock()
+            .map_err(|_| "background connection lock poisoned")?
+            .clone();
+        if let Some(connection) = background {
+            let value = connection
+                .invoke(
+                    "engine_request",
+                    serde_json::json!({"method":method.as_str(),"path":path,"body":body}),
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            return serde_json::from_value(value).map_err(|error| error.to_string());
         }
+        let _admission = self.requests.read().await;
         if self.closing.load(std::sync::atomic::Ordering::Acquire)
             || self.unavailable.load(std::sync::atomic::Ordering::Acquire)
         {
@@ -193,21 +182,6 @@ impl ControlProxyClient {
         }
         exchange::request(self, CONTROL_ORIGIN, method, path, body).await
     }
-}
-
-// Expiry blocks new work, not observation or explicit shutdown of current audio/recording.
-fn license_safe_request(method: &Method, path: &str, body: Option<&Value>) -> bool {
-    if *method == Method::GET {
-        return true;
-    }
-    let Some(body) = body else {
-        return false;
-    };
-    *method == Method::PUT
-        && ((path == "/api/v1/audio/power" && body.get("enabled") == Some(&Value::Bool(false)))
-            || (path.starts_with("/api/v1/graphs/")
-                && path.contains("/recorders/")
-                && body.pointer("/request/action").and_then(Value::as_str) == Some("stop")))
 }
 
 // A receipt proves that the server still owns the accepted operation, not that
@@ -245,18 +219,26 @@ pub(crate) async fn control_get_status(
     client: tauri::State<'_, ControlProxyClient>,
     app: tauri::AppHandle,
 ) -> Result<ControlProxyResponse, String> {
+    use tauri::Manager as _;
     let response = client.request(Method::GET, "/api/v1/status", None).await?;
     #[cfg(target_os = "macos")]
-    {
-        use tauri::Manager as _;
+    let response = {
         let captures = app.state::<Arc<ApplicationCaptureState>>();
-        return application_capture::power_status(&client, captures.inner(), response).await;
+        application_capture::power_status(&client, captures.inner(), response).await?
+    };
+    if let Some(menu) = app.try_state::<crate::driver_manager::DriverMenu>() {
+        menu.observe_audio_session_buffers(if response.is_success() {
+            serde_json::from_value(response.body["audioSession"].clone()).ok()
+        } else {
+            None
+        });
+        menu.observe_audio_power(if response.is_success() {
+            serde_json::from_value(response.body["enginePower"].clone()).ok()
+        } else {
+            None
+        });
     }
-    #[cfg(target_os = "linux")]
-    {
-        let _ = app;
-        Ok(response)
-    }
+    Ok(response)
 }
 
 #[tauri::command]
@@ -266,6 +248,20 @@ pub(crate) async fn control_reconfigure_session(
 ) -> Result<ControlProxyResponse, String> {
     client
         .request(Method::PUT, "/api/v1/audio/session", Some(request))
+        .await
+}
+
+#[tauri::command]
+pub(crate) async fn control_set_virtual_endpoint_buffer_frames(
+    client: tauri::State<'_, ControlProxyClient>,
+    request: Value,
+) -> Result<ControlProxyResponse, String> {
+    client
+        .request(
+            Method::PUT,
+            "/api/v1/audio/virtual-endpoint/buffer",
+            Some(request),
+        )
         .await
 }
 
@@ -568,59 +564,6 @@ fn application_capture_error(reason: &str) -> ControlProxyResponse {
 
 #[cfg(test)]
 mod layout_tests {
-    #[test]
-    fn expiry_allows_observation_and_safe_stop_not_new_audio_work() {
-        use reqwest::Method;
-        use serde_json::json;
-        assert!(super::license_safe_request(
-            &Method::GET,
-            "/api/v1/graph",
-            None
-        ));
-        assert!(super::license_safe_request(
-            &Method::PUT,
-            "/api/v1/audio/power",
-            Some(&json!({"enabled": false}))
-        ));
-        assert!(!super::license_safe_request(
-            &Method::PUT,
-            "/api/v1/audio/power",
-            Some(&json!({"enabled": true}))
-        ));
-        let path = "/api/v1/graphs/a/recorders/b";
-        assert!(super::license_safe_request(
-            &Method::PUT,
-            path,
-            Some(&json!({"request": {"action": "stop"}}))
-        ));
-        assert!(!super::license_safe_request(
-            &Method::PUT,
-            path,
-            Some(&json!({"request": {"action": "record"}}))
-        ));
-        assert!(!super::license_safe_request(
-            &Method::PUT,
-            "/api/v1/graph",
-            Some(&json!({}))
-        ));
-    }
-
-    #[tokio::test]
-    async fn expired_mutation_is_rejected_before_local_transport() {
-        let client = super::ControlProxyClient::default();
-        client.set_license_admission(false);
-        let response = client
-            .request(
-                reqwest::Method::PUT,
-                "/api/v1/graph",
-                Some(serde_json::json!({})),
-            )
-            .await
-            .expect("local rejection");
-        assert_eq!(response.body["code"], "license_required");
-        client.set_license_admission(true);
-        assert!(client.licensed.load(std::sync::atomic::Ordering::Acquire));
-    }
     #[tokio::test]
     async fn recovery_does_not_reopen_shutdown_admission() {
         let client = super::ControlProxyClient::default();

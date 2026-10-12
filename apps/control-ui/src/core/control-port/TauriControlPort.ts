@@ -154,6 +154,11 @@ export class TauriControlPort implements ControlPort {
   }): Promise<GraphApplyResponse> {
     return this.call('control_reconfigure_session', { request });
   }
+  public setVirtualEndpointBufferFrames(
+    request: Parameters<NonNullable<ControlPort['setVirtualEndpointBufferFrames']>>[0],
+  ): Promise<GraphApplyResponse> {
+    return this.call('control_set_virtual_endpoint_buffer_frames', { request });
+  }
   public constructor(private readonly invokeCommand: Invoke = invoke) {}
 
   public applyGraph(document: GraphApplyRequest): Promise<GraphApplyResponse> {

@@ -16,7 +16,7 @@ test('native Installer has one fixed installation operation and no removal or pr
  // so that a previously running manager can be reopened after the update.
  assert.doesNotMatch(xml, /<app id="io\.mixrelay\.driver\.desktop"/);
  assert.doesNotMatch(xml, /<app id="io\.mixrelay\.desktop"/);
- run('/usr/bin/pkgbuild',['--nopayload','--identifier','io.mixrelay.driver.installer.component','--version','1.2.3',join(root,'install.component.pkg')]);
+ run('/usr/bin/pkgbuild',['--nopayload','--identifier','io.mixrelay.installer.component','--version','1.2.3',join(root,'install.component.pkg')]);
  const resources=join(root,'Resources');mkdirSync(join(resources,'en.lproj'),{recursive:true});
  for(const name of ['INSTALLER-README.rtf','INSTALLER-LICENSE.rtf'])writeFileSync(join(resources,'en.lproj',name),'{\\rtf1 Fixture notice}');
  const source=join(root,'Distribution');writeFileSync(source,xml);const pkg=join(root,'fixture.pkg');run('/usr/bin/productbuild',['--distribution',source,'--package-path',root,'--resources',resources,pkg]);

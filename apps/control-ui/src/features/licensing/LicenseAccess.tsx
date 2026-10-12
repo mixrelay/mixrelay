@@ -1,27 +1,46 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useAppInformation } from '../../core/app-info/useAppInformation';
 
 import { LicensingDialog } from '../../core/licensing/LicensingFields';
 import type { LicensingPort } from '../../core/licensing/LicensingPort';
 import { ActionButton } from '../../core/ui/ActionButton';
+import { AppInformationButton } from '../../core/ui/AppInformationButton';
+import { InlineNotice } from '../../core/ui/InlineNotice';
+import { AboutDialog } from './AboutDialog';
 import styles from './LicenseAccess.module.css';
-import { LicenseDetails, LicenseTerms, licenseStateText } from './LicenseDetails';
-import { StopAudioAction } from './StopAudioAction';
+import { LicenseDetails, licenseStateText } from './LicenseDetails';
 import { useLicenseSession } from './useLicenseSession';
 
 export interface LicenseAccessProps {
-  children: ReactNode;
-  additionalActions?: ReactNode;
+  children: ReactNode | ((action: ReactNode) => ReactNode);
+  presentation?: 'license' | 'footer';
   onPaidAccessChange?: (paid: boolean) => void;
-  onStopAudio?: () => Promise<void>;
   port: LicensingPort | null;
 }
 
 /** A desktop presentation gate. Native licensing and engine policy remain authoritative. */
-export function LicenseAccess({ children, additionalActions, onStopAudio, onPaidAccessChange, port }: LicenseAccessProps) {
+export function LicenseAccess({
+  children,
+  onPaidAccessChange,
+  port,
+  presentation = 'license',
+}: LicenseAccessProps) {
   const { t } = useTranslation();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const { status, error, busy, run, clearError } = useLicenseSession(port);
+  const footer = presentation === 'footer';
+  const openDialog = () => {
+    clearError();
+    setAboutOpen(false);
+    setDialogOpen(true);
+  };
+  const version = useAppInformation(() => {
+    if (busy) return;
+    setDialogOpen(false);
+    setAboutOpen(true);
+  }, footer);
   const reportedPort = useRef(port);
   useEffect(() => {
     if (reportedPort.current !== port) {
@@ -32,87 +51,134 @@ export function LicenseAccess({ children, additionalActions, onStopAudio, onPaid
     onPaidAccessChange?.(Boolean(port && status?.status === 'licensed'));
   }, [onPaidAccessChange, port, status?.status]);
 
-  if (!port) return <>{children}</>;
-
-  if (!status) {
-    return (
-      <main className={styles.blocked}>
-        <section aria-labelledby="licensing-title" className={styles.card}>
-          <h1 id="licensing-title">{t('licensing.title')}</h1>
-          {error ? (
-            <>
-              <p role="alert">{t(`licensing.errors.${error}`)}</p>
-              <ActionButton disabled={busy} onClick={() => void run(() => port.getStatus())}>
-                {t('licensing.retry')}
-              </ActionButton>
-            </>
-          ) : (
-            <p role="status">{t('licensing.loading')}</p>
-          )}
-          {error && onStopAudio ? <StopAudioAction onStopAudio={onStopAudio} /> : null}
-          {additionalActions}
-          <LicenseTerms />
-        </section>
-      </main>
-    );
-  }
-
-  const details = (
-    <LicenseDetails
-      busy={busy}
-      error={error}
-      onMutated={() => setDialogOpen(false)}
-      port={port}
-      run={run}
+  if (!port && !footer) return <>{typeof children === 'function' ? children(null) : children}</>;
+  const title = t('licensing.title');
+  const action = (
+    <LicenseEntry
+      footer={footer}
+      version={version}
       status={status}
+      error={error}
+      opened={dialogOpen}
+      onOpen={openDialog}
     />
   );
-  const active = status.status === 'trial' || status.status === 'licensed';
-  if (!active) {
-    return (
-      <main className={styles.blocked}>
-        <section aria-labelledby="licensing-title" className={styles.card}>
-          <h1 id="licensing-title">{t('licensing.title')}</h1>
-          <p>{t(`licensing.messages.${status.status}`)}</p>
-          {details}
-          {onStopAudio ? <StopAudioAction onStopAudio={onStopAudio} /> : null}
-          {additionalActions}
-        </section>
-      </main>
-    );
-  }
-
   return (
     <>
-      {children}
-      <aside className={styles.entry} aria-label={t('licensing.title')}>
-        <ActionButton
-          aria-expanded={dialogOpen}
-          aria-haspopup="dialog"
-          onClick={() => {
-            clearError();
-            setDialogOpen(true);
-          }}
-          size="xs"
-          variant="light"
-        >
-          {licenseStateText(status, t)}
-        </ActionButton>
-        {error && !dialogOpen ? (
-          <p className={styles.entryError} role="alert">
-            {t(`licensing.errors.${error}`)}
-          </p>
-        ) : null}
-      </aside>
+      {typeof children === 'function' ? children(action) : children}
+      {typeof children !== 'function' ? (
+        <aside className={styles.entry} aria-label={title}>
+          {action}
+        </aside>
+      ) : null}
       <LicensingDialog
         busy={busy}
         closeLabel={t('licensing.close')}
         onClose={() => setDialogOpen(false)}
         opened={dialogOpen}
-        title={t('licensing.title')}
+        title={title}
       >
-        {details}
+        <LicenseContents
+          session={{ status, error, busy, run }}
+          port={port}
+          onMutated={() => setDialogOpen(false)}
+        />
       </LicensingDialog>
+      {footer ? (
+        <AboutDialog version={version} opened={aboutOpen} onClose={() => setAboutOpen(false)} />
+      ) : null}
+    </>
+  );
+}
+
+type Session = ReturnType<typeof useLicenseSession>;
+function LicenseEntry({
+  footer,
+  version,
+  status,
+  error,
+  opened,
+  onOpen,
+}: {
+  footer: boolean;
+  version: string;
+  status: Session['status'];
+  error: Session['error'];
+  opened: boolean;
+  onOpen: () => void;
+}) {
+  const { t } = useTranslation();
+  const state = footer
+    ? status?.status === 'licensed'
+      ? t('about.licensed')
+      : status
+        ? licenseStateText(status, t)
+        : t('about.unknown')
+    : status
+      ? licenseStateText(status, t)
+      : t('licensing.states.free');
+  return (
+    <div className={styles.infoEntry}>
+      {footer ? (
+        <AppInformationButton
+          label={t('licensing.title')}
+          version={version}
+          status={state}
+          opened={opened}
+          onOpen={onOpen}
+        />
+      ) : (
+        <ActionButton
+          aria-expanded={opened}
+          aria-haspopup="dialog"
+          onClick={onOpen}
+          density="compact"
+        >
+          {state}
+        </ActionButton>
+      )}
+      {error && !opened ? (
+        <div className={styles.entryError}>
+          <InlineNotice tone="critical">{t(`licensing.errors.${error}`)}</InlineNotice>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function LicenseContents({
+  session,
+  port,
+  onMutated,
+}: {
+  session: Pick<Session, 'status' | 'error' | 'busy' | 'run'>;
+  port: LicensingPort | null;
+  onMutated: () => void;
+}) {
+  const { t } = useTranslation();
+  const { status, error, busy, run } = session;
+  if (!port) return <p>{t('about.unknown')}</p>;
+  if (status)
+    return (
+      <LicenseDetails
+        busy={busy}
+        error={error}
+        onMutated={onMutated}
+        port={port}
+        run={run}
+        status={status}
+      />
+    );
+  return (
+    <>
+      {error ? (
+        <p role="alert">{t(`licensing.errors.${error}`)}</p>
+      ) : (
+        <p role="status">{t('licensing.loading')}</p>
+      )}
+      <ActionButton disabled={busy} onClick={() => void run(() => port.getStatus())}>
+        {t('licensing.retry')}
+      </ActionButton>
     </>
   );
 }

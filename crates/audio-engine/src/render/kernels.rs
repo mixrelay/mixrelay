@@ -6,6 +6,10 @@ pub(super) struct KernelResources<'a> {
     pub(super) sources: &'a [Box<[f32]>],
     pub(super) sinks: &'a mut [Box<[f32]>],
     pub(super) dynamics_envelopes: &'a mut [f32],
+    pub(super) dynamics_minimum_gains: &'a mut [f32],
+    pub(super) dynamics_wet: &'a mut [f32],
+    pub(super) effect_states: &'a mut [super::effects::State],
+    pub(super) effects: &'a [super::effects::Binding],
     pub(super) device_bus_state: &'a mut [f32],
     pub(super) device_bus_cursor: usize,
     pub(super) hosted_scratch: &'a mut [f32],
@@ -13,6 +17,7 @@ pub(super) struct KernelResources<'a> {
     pub(super) hosted_processors: &'a mut [Box<dyn HostedAudioProcessor>],
 }
 
+#[allow(clippy::too_many_lines)] // Exhaustive dispatch borrows each prepared resource without allocating.
 pub(super) fn apply_kernel(
     resources: KernelResources<'_>,
     kernel: &Kernel,
@@ -20,6 +25,21 @@ pub(super) fn apply_kernel(
     frames: usize,
 ) {
     match kernel {
+        Kernel::Effect {
+            input,
+            output,
+            sidechain,
+            state,
+        } => {
+            resources.effect_states[*state].process(
+                &resources.effects[*state].design,
+                resources.arena,
+                *input,
+                *output,
+                *sidechain,
+                frames,
+            );
+        }
         Kernel::DeviceBus(bus) => bus.apply(
             resources.arena,
             resources.device_bus_state,
@@ -42,6 +62,8 @@ pub(super) fn apply_kernel(
             attack_coefficient,
             release_coefficient,
             makeup_gain,
+            bypass,
+            bypass_coefficient,
         } => apply_compressor(
             DynamicKernelContext {
                 arena: resources.arena,
@@ -49,6 +71,10 @@ pub(super) fn apply_kernel(
                 output: *output,
                 frames,
                 envelope: &mut resources.dynamics_envelopes[*state_index],
+                minimum_gain: &mut resources.dynamics_minimum_gains[*state_index],
+                wet: &mut resources.dynamics_wet[*state_index],
+                wet_target: f32::from(!*bypass),
+                bypass_coefficient: *bypass_coefficient,
             },
             CompressorKernelParameters {
                 threshold_linear: *threshold_linear,
@@ -64,6 +90,8 @@ pub(super) fn apply_kernel(
             state_index,
             ceiling_linear,
             release_coefficient,
+            bypass,
+            bypass_coefficient,
         } => apply_limiter(
             DynamicKernelContext {
                 arena: resources.arena,
@@ -71,6 +99,10 @@ pub(super) fn apply_kernel(
                 output: *output,
                 frames,
                 envelope: &mut resources.dynamics_envelopes[*state_index],
+                minimum_gain: &mut resources.dynamics_minimum_gains[*state_index],
+                wet: &mut resources.dynamics_wet[*state_index],
+                wet_target: f32::from(!*bypass),
+                bypass_coefficient: *bypass_coefficient,
             },
             LimiterKernelParameters {
                 ceiling_linear: *ceiling_linear,
@@ -315,6 +347,20 @@ struct DynamicKernelContext<'a> {
     output: PortSlot,
     frames: usize,
     envelope: &'a mut f32,
+    minimum_gain: &'a mut f32,
+    wet: &'a mut f32,
+    wet_target: f32,
+    bypass_coefficient: f32,
+}
+
+fn smooth_dynamics_wet(wet: &mut f32, target: f32, coefficient: f32) -> f32 {
+    let next = coefficient.mul_add(target - *wet, *wet);
+    *wet = if (target - next).abs() < 0.000_001 || next.to_bits() == wet.to_bits() {
+        target
+    } else {
+        next
+    };
+    *wet
 }
 
 fn apply_compressor(context: DynamicKernelContext<'_>, parameters: CompressorKernelParameters) {
@@ -324,6 +370,10 @@ fn apply_compressor(context: DynamicKernelContext<'_>, parameters: CompressorKer
         output,
         frames,
         envelope,
+        minimum_gain,
+        wet,
+        wet_target,
+        bypass_coefficient,
     } = context;
     let channels = usize::from(input.channels);
     for frame in 0..frames {
@@ -338,12 +388,14 @@ fn apply_compressor(context: DynamicKernelContext<'_>, parameters: CompressorKer
             parameters.release_coefficient
         };
         *envelope = coefficient.mul_add(*envelope, (1.0 - coefficient) * peak);
-        let gain = if *envelope > parameters.threshold_linear {
+        let reduction_gain = if *envelope > parameters.threshold_linear {
             (parameters.threshold_linear / *envelope).powf(parameters.exponent)
-                * parameters.makeup_gain
         } else {
-            parameters.makeup_gain
+            1.0
         };
+        let wet = smooth_dynamics_wet(wet, wet_target, bypass_coefficient);
+        *minimum_gain = minimum_gain.min(wet.mul_add(reduction_gain - 1.0, 1.0));
+        let gain = wet.mul_add(reduction_gain * parameters.makeup_gain - 1.0, 1.0);
         for channel in 0..channels {
             arena[output_frame + channel] = arena[input_frame + channel] * gain;
         }
@@ -363,6 +415,10 @@ fn apply_limiter(context: DynamicKernelContext<'_>, parameters: LimiterKernelPar
         output,
         frames,
         envelope,
+        minimum_gain,
+        wet,
+        wet_target,
+        bypass_coefficient,
     } = context;
     let channels = usize::from(input.channels);
     for frame in 0..frames {
@@ -383,6 +439,9 @@ fn apply_limiter(context: DynamicKernelContext<'_>, parameters: LimiterKernelPar
         } else {
             1.0
         };
+        let gain =
+            smooth_dynamics_wet(wet, wet_target, bypass_coefficient).mul_add(gain - 1.0, 1.0);
+        *minimum_gain = minimum_gain.min(gain);
         for channel in 0..channels {
             arena[output_frame + channel] = arena[input_frame + channel] * gain;
         }

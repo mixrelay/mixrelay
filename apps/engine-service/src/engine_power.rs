@@ -6,7 +6,79 @@ use mixrelay_control_protocol::{EnginePowerStatus, GraphApplyResponse, GraphAppl
 
 use crate::{EngineGraphController, ProtocolError, session_error};
 
+use mixrelay_audio_recorder::{RecorderAction, RecorderRequest, RecorderState, RecorderTap};
+
+pub(super) struct SuspendedRecorder {
+    pub(super) id: String,
+    // The empty paused graph owns no taps. Keep the open take alive until resume.
+    _tap: RecorderTap,
+    resume: bool,
+}
+
+fn recorder_request(action: RecorderAction) -> RecorderRequest {
+    RecorderRequest {
+        action,
+        path: None,
+        sample_rate: None,
+        encoding: None,
+    }
+}
+
 impl EngineGraphController {
+    fn suspend_recorders(&self) -> Result<(), ProtocolError> {
+        let mut held = self.suspended_recorders.lock();
+        *held = self
+            .recorders
+            .open_take_taps()
+            .into_iter()
+            .map(|(id, tap, state)| SuspendedRecorder {
+                id,
+                _tap: tap,
+                resume: state == RecorderState::Recording,
+            })
+            .collect();
+        for recorder in held.iter().filter(|recorder| recorder.resume) {
+            if let Err(reason) = self
+                .recorders
+                .command(&recorder.id, recorder_request(RecorderAction::Pause))
+            {
+                drop(held);
+                let rollback = self.resume_recorders();
+                return Err(crate::recorder_control::recorder_error(format!(
+                    "cannot pause recording: {reason}; rollback: {rollback:?}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn resume_recorders(&self) -> Result<(), ProtocolError> {
+        let mut held = self.suspended_recorders.lock();
+        let mut failures = Vec::new();
+        held.retain(|recorder| {
+            if !recorder.resume
+                || self.recorders.status(&recorder.id).state != RecorderState::Paused
+            {
+                return false;
+            }
+            match self
+                .recorders
+                .command(&recorder.id, recorder_request(RecorderAction::Record))
+            {
+                Ok(_) => false,
+                Err(reason) => {
+                    failures.push(format!("{}: {reason}", recorder.id));
+                    true
+                }
+            }
+        });
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(crate::recorder_control::recorder_error(failures.join("; ")))
+        }
+    }
+
     pub(super) fn preview_engine_start(
         &self,
     ) -> Result<mixrelay_control_protocol::ApplicationCaptureManifest, ProtocolError> {
@@ -50,6 +122,9 @@ impl EngineGraphController {
             return Err(session_error("engine power preflight is stale"));
         }
         if enabled == previous {
+            if enabled {
+                self.resume_recorders()?;
+            }
             return Ok(GraphApplyResponse {
                 protocol_version: mixrelay_control_protocol::PROTOCOL_VERSION,
                 revision: revisions.submitted,
@@ -68,21 +143,25 @@ impl EngineGraphController {
         } else {
             None
         };
-        if !enabled && let Err(reason) = self.recorders.stop_all() {
-            tracing::error!(%reason, "engine stop recorder finalization failed");
-            *self.recorder_cleanup_error.lock() = Some(reason);
-        }
         let mut document = self.graph.read().clone();
         document.revision = revisions
             .submitted
             .checked_add(1)
             .ok_or_else(|| session_error("engine revision exhausted"))?;
         let catalog = self.catalog_candidate(&document);
+        if !enabled {
+            self.suspend_recorders()?;
+        }
         self.execution_enabled.store(enabled, Ordering::Release);
         let context = *self.context.read();
         let result = self.publish_graph_context(document, catalog, context, enabled);
         if result.is_err() {
             self.execution_enabled.store(previous, Ordering::Release);
+            if !enabled {
+                self.resume_recorders()?;
+            }
+        } else if enabled {
+            self.resume_recorders()?;
         }
         if let Some(error) = checkpoint_error {
             tracing::error!(?error, "engine stop retained last saved plug-in state");
@@ -99,6 +178,7 @@ impl EngineGraphController {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use mixrelay_audio_graph::GraphDocument;
     use mixrelay_control_server::ControlBackend;
 
@@ -109,6 +189,170 @@ mod tests {
             "edges":[]
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn pause_retires_render_taps_but_resumes_the_same_rf64_without_the_gap() {
+        let directory = mixrelay_test_support::FixtureDir::new("engine-pause-recording").unwrap();
+        let path = directory.join("take.wav");
+        let engine = crate::endpoint_settings_tests::controller(graph(1))
+            .with_graph_catalog_path(directory.join("graphs.json"));
+        let catalog = engine.graph_catalog().unwrap();
+        let id = engine
+            .recorder_session_id(&catalog.active_id, "record")
+            .unwrap();
+        let mut processor = engine
+            .prepare_and_validate(&engine.graph(), *engine.context.read())
+            .unwrap()
+            .processor;
+        let tap = engine.recorders.prepare(&id, 2).unwrap();
+        tap.capture(&[], 48_000);
+        engine
+            .recorders
+            .command(
+                &id,
+                RecorderRequest {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    encoding: Some(mixrelay_audio_recorder::Encoding::Float32),
+                    ..recorder_request(RecorderAction::Record)
+                },
+            )
+            .unwrap();
+        let first = [0.25, -0.5, 0.125, -0.25];
+        let second = [-0.75, 0.5, -0.125, 0.25];
+        for _ in 0..3 {
+            tap.capture(&first, 48_000);
+            engine.change_engine_power(false, None).unwrap();
+            assert!(engine.exchange.activate_pending(&mut processor));
+            engine.reclaim_recorders();
+            let paused = engine.recorders.status(&id);
+            assert_eq!(paused.state, RecorderState::Paused);
+            assert_eq!(paused.path.as_deref(), path.to_str());
+            tap.capture(&[0.99; 16], 48_000);
+            engine.change_engine_power(false, None).unwrap();
+            engine.change_engine_power(true, None).unwrap();
+            assert!(engine.exchange.activate_pending(&mut processor));
+            assert_eq!(engine.recorders.status(&id).state, RecorderState::Recording);
+            tap.capture(&second, 48_000);
+        }
+        // Simulate complete plan/tap retirement while a take is paused.
+        engine.change_engine_power(false, None).unwrap();
+        assert!(engine.exchange.activate_pending(&mut processor));
+        drop(tap);
+        engine.reclaim_recorders();
+        assert_eq!(engine.recorders.status(&id).state, RecorderState::Paused);
+        engine.change_engine_power(true, None).unwrap();
+        assert!(engine.exchange.activate_pending(&mut processor));
+        engine
+            .recorders
+            .command(&id, recorder_request(RecorderAction::Stop))
+            .unwrap();
+        let mut file = mixrelay_test_support::rf64::open(&path).unwrap();
+        let samples: Vec<f32> = file.samples::<f32>().map(Result::unwrap).collect();
+        assert_eq!(samples, [first, second].concat().repeat(3));
+        assert_eq!(
+            mixrelay_test_support::rf64::inspect(&path).unwrap().frames,
+            12
+        );
+    }
+
+    #[test]
+    fn global_resume_preserves_manual_pause_and_stopping_while_paused_finalizes() {
+        let directory = mixrelay_test_support::FixtureDir::new("engine-manual-pause").unwrap();
+        let path = directory.join("take.wav");
+        let engine = crate::endpoint_settings_tests::controller(graph(1))
+            .with_graph_catalog_path(directory.join("graphs.json"));
+        let catalog = engine.graph_catalog().unwrap();
+        let id = engine
+            .recorder_session_id(&catalog.active_id, "record")
+            .unwrap();
+        let mut processor = engine
+            .prepare_and_validate(&engine.graph(), *engine.context.read())
+            .unwrap()
+            .processor;
+        let tap = engine.recorders.prepare(&id, 2).unwrap();
+        tap.capture(&[], 48_000);
+        engine
+            .recorders
+            .command(
+                &id,
+                RecorderRequest {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    ..recorder_request(RecorderAction::Record)
+                },
+            )
+            .unwrap();
+        tap.capture(&[0.25; 4], 48_000);
+        engine
+            .recorders
+            .command(&id, recorder_request(RecorderAction::Pause))
+            .unwrap();
+        engine.change_engine_power(false, None).unwrap();
+        assert!(engine.exchange.activate_pending(&mut processor));
+        drop(tap);
+        engine.reclaim_recorders();
+        assert_eq!(engine.recorders.status(&id).state, RecorderState::Paused);
+        engine.change_engine_power(true, None).unwrap();
+        assert!(engine.exchange.activate_pending(&mut processor));
+        assert_eq!(engine.recorders.status(&id).state, RecorderState::Paused);
+        engine.change_engine_power(false, None).unwrap();
+        assert!(engine.exchange.activate_pending(&mut processor));
+        engine.reclaim_recorders();
+        engine.recorders.stop_all().unwrap();
+        assert_eq!(engine.recorders.status(&id).state, RecorderState::Stopped);
+        assert_eq!(
+            mixrelay_test_support::rf64::inspect(&path).unwrap().frames,
+            2
+        );
+        engine.change_engine_power(true, None).unwrap();
+        assert_eq!(engine.recorders.status(&id).state, RecorderState::Stopped);
+    }
+
+    #[test]
+    fn failed_resume_keeps_the_open_take_paused() {
+        let directory = mixrelay_test_support::FixtureDir::new("engine-resume-failure").unwrap();
+        let path = directory.join("take.wav");
+        let engine = crate::endpoint_settings_tests::controller(graph(1))
+            .with_graph_catalog_path(directory.join("graphs.json"));
+        let catalog = engine.graph_catalog().unwrap();
+        let id = engine
+            .recorder_session_id(&catalog.active_id, "record")
+            .unwrap();
+        let mut processor = engine
+            .prepare_and_validate(&engine.graph(), *engine.context.read())
+            .unwrap()
+            .processor;
+        let tap = engine.recorders.prepare(&id, 2).unwrap();
+        tap.capture(&[], 48_000);
+        engine
+            .recorders
+            .command(
+                &id,
+                RecorderRequest {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    ..recorder_request(RecorderAction::Record)
+                },
+            )
+            .unwrap();
+        tap.capture(&[0.25; 4], 48_000);
+        engine.change_engine_power(false, None).unwrap();
+        assert!(engine.exchange.activate_pending(&mut processor));
+        drop(tap);
+        engine.reclaim_recorders();
+        engine.graph.write().nodes[0].config =
+            mixrelay_audio_graph::NodeConfig::Recorder { channels: 0 };
+        assert!(engine.change_engine_power(true, None).is_err());
+        assert!(!engine.engine_power_status().enabled);
+        assert_eq!(engine.recorders.status(&id).state, RecorderState::Paused);
+        engine.graph.write().nodes[0].config =
+            mixrelay_audio_graph::NodeConfig::Recorder { channels: 2 };
+        engine.change_engine_power(true, None).unwrap();
+        assert_eq!(engine.recorders.status(&id).state, RecorderState::Recording);
+        engine.recorders.stop_all().unwrap();
+        assert_eq!(
+            mixrelay_test_support::rf64::inspect(&path).unwrap().frames,
+            2
+        );
     }
 
     #[test]

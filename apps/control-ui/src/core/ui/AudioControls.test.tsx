@@ -25,31 +25,24 @@ it('selects a native device rate without changing its observed value optimistica
           displayName: 'LAB',
           nameLabel: 'Device name',
           renderChannels: 2,
-          renderChannelsLabel: 'Render channels',
           captureChannels: 2,
-          captureChannelsLabel: 'Capture channels',
           observedRate: { label: 'Device sample rate', value: 48000 },
           sampleRateOptions: [44100, 48000],
         }}
       />
     </MixRelayProvider>,
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Options' }));
+  fireEvent.click(screen.getByRole('button', { name: (name) => name.endsWith('Options') }));
   const nameField = screen.getByRole('textbox', { name: 'Device name' });
-  const inputField = screen.getByRole('combobox', { name: 'Render channels' });
-  const outputField = screen.getByRole('combobox', { name: 'Capture channels' });
-  const rateField = screen.getByRole('combobox', { name: 'Device sample rate' });
-  for (const [previous, next] of [
-    [nameField, inputField],
-    [inputField, outputField],
-    [outputField, rateField],
-  ] as const)
-    expect(previous.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(inputField.closest('[class*="endpointChannels"]')).not.toBeNull();
-  expect(inputField.closest('[class*="endpointChannels"]')).toBe(
-    outputField.closest('[class*="endpointChannels"]'),
-  );
-  fireEvent.click(screen.getByRole('combobox', { name: 'Device sample rate' }));
+  const channels = screen.getByRole('button', { name: /Channels$/ });
+  const rateField = screen.getByRole('button', { name: /Device sample rate$/ });
+  expect(
+    nameField.compareDocumentPosition(channels) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    channels.compareDocumentPosition(rateField) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /Device sample rate$/ }));
   fireEvent.click(screen.getByRole('option', { name: '44.1 kHz' }));
   expect(onChange).toHaveBeenCalledWith({
     displayName: 'LAB',
@@ -57,7 +50,7 @@ it('selects a native device rate without changing its observed value optimistica
     captureChannels: 2,
     sampleRate: 44100,
   });
-  expect(screen.getByRole('combobox', { name: 'Device sample rate' })).toHaveValue('48 kHz');
+  expect(screen.getByRole('button', { name: /Device sample rate$/ })).toHaveTextContent('48 kHz');
 });
 
 describe('Native endpoint controls', () => {
@@ -78,9 +71,7 @@ describe('Native endpoint controls', () => {
             displayName: 'LAB',
             nameLabel: 'Device name',
             renderChannels: 2,
-            renderChannelsLabel: 'Render channels',
             captureChannels: 1,
-            captureChannelsLabel: 'Capture channels',
             canRename: false,
             observedRate: { label: 'Device sample rate', value: 44100 },
             allowedRenderChannels: [2],
@@ -89,10 +80,10 @@ describe('Native endpoint controls', () => {
         />
       </MixRelayProvider>,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Options' }));
+    fireEvent.click(screen.getByRole('button', { name: (name) => name.endsWith('Options') }));
     expect(screen.getByLabelText('Device name')).toHaveAttribute('readonly');
-    expect(screen.getByRole('combobox', { name: 'Render channels' })).toBeDisabled();
-    expect(screen.getByRole('combobox', { name: 'Capture channels' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Channels$/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Channels$/ })).toHaveTextContent('Mixed');
     expect(screen.getByLabelText('Device sample rate')).toHaveValue('44.1 kHz');
     expect(screen.getByLabelText('Device sample rate')).toHaveAttribute('readonly');
     fireEvent.blur(screen.getByLabelText('Device name'));
@@ -175,9 +166,21 @@ describe('Core audio controls', () => {
       </MixRelayProvider>,
     );
 
-    expect(screen.queryByRole('button', { name: 'Options' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: (name) => name.endsWith('Options') }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('Plug-in editor')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Compressor: Retry' }));
     expect(onEditorToggle).toHaveBeenCalledOnce();
   });
+});
+
+it('exposes a read-only meter value without adding a keyboard stop or live announcements', () => {
+  const view = render(<Meter label="Input level" level={140} />);
+  const meter = screen.getByRole('meter', { name: 'Input level' });
+  expect(meter).toHaveAttribute('aria-valuenow', '100');
+  expect(meter).not.toHaveAttribute('tabindex');
+  expect(meter).not.toHaveAttribute('aria-live');
+  view.rerender(<Meter label="Input level" level={-20} />);
+  expect(meter).toHaveAttribute('aria-valuenow', '0');
 });

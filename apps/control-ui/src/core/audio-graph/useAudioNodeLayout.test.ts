@@ -36,7 +36,9 @@ it.each(['audio_input', 'recorder', 'provider'] as const)(
     act(() => result.current.onContentHeightChange(200));
     expect(result.current.minHeight).toBe(face.height + 200 + 2);
     act(() => result.current.onContentHeightChange(24));
-    expect(result.current.minHeight).toBe(Math.max(type === 'provider' ? 88 : 0, face.height + 26));
+    expect(result.current.minHeight).toBe(
+      Math.max(type === 'provider' ? 120 : 0, face.height + 26),
+    );
   },
 );
 
@@ -61,8 +63,8 @@ it('keeps compact provider anchors fixed when Options expand and collapse', () =
   const portTop = audioNodePortTop(result.current.ports, 0, 1);
   for (const contentHeight of [200, 420, 24]) {
     act(() => result.current.onContentHeightChange(contentHeight));
-    expect(result.current.minHeight).toBe(Math.max(88, 28 + contentHeight));
-    expect(result.current.ports.height).toBe(88);
+    expect(result.current.minHeight).toBe(Math.max(120, 28 + contentHeight));
+    expect(result.current.ports.height).toBe(120);
     expect(audioNodePortTop(result.current.ports, 0, 1)).toBe(portTop);
   }
 });
@@ -110,12 +112,12 @@ it('keeps compact disclosure temporary while explicit resize changes only its sa
         { ...graphNode, size: { width: 300, height } },
         { width: null, height: null },
       ),
-    { initialProps: { height: 88 } },
+    { initialProps: { height: 120 } },
   );
   act(() => result.current.onContentHeightChange(24, 0));
   const baselineTop = audioNodePortTop(result.current.ports, 0, 1);
   act(() => result.current.onContentHeightChange(224, 200));
-  expect(result.current.height).toBe(288);
+  expect(result.current.height).toBe(320);
   expect(result.current.disclosureHeight).toBe(200);
   expect(audioNodePortTop(result.current.ports, 0, 1)).toBe(baselineTop);
   rerender({ height: 200 });

@@ -8,6 +8,10 @@ use mixrelay_driver_control::{DRIVER_PORT, DriverManager};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    if std::env::args().skip(1).eq(["--version"]) {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     #[cfg(target_os = "macos")]
     {
         // SAFETY: syslog retains the static identifier, and the process owns this logger.
@@ -87,19 +91,25 @@ async fn run() -> Result<()> {
         .await
         .context("initialize native Driver owner")??;
     tracing::info!("Driver control API starting; native readiness is reported separately");
-    axum::serve(listener, mixrelay_driver_control::router(manager))
-        .with_graceful_shutdown(async move {
-            tokio::select! {
-                result = tokio::signal::ctrl_c() => {
-                    if let Err(error) = result {
-                        tracing::error!(%error, "Driver interrupt observer failed");
-                    }
+    axum::serve(
+        listener,
+        mixrelay_driver_control::router_with_access(
+            manager,
+            std::sync::Arc::new(mixrelay_licensing::has_local_paid_access),
+        ),
+    )
+    .with_graceful_shutdown(async move {
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                if let Err(error) = result {
+                    tracing::error!(%error, "Driver interrupt observer failed");
                 }
-                _ = terminate.recv() => {}
             }
-        })
-        .await
-        .context("serve Driver control requests")?;
+            _ = terminate.recv() => {}
+        }
+    })
+    .await
+    .context("serve Driver control requests")?;
     // Graceful shutdown closes request admission and awaits native control transactions.
     // Dropping its final backend drains PipeWire callbacks. The HAL independently owns its
     // PCM mappings; macOS control-only descriptors close with this service process.

@@ -12,6 +12,7 @@ build = "build.rs"
 workspace = true
 
 [dependencies]
+mixrelay-licensing = { path = "../../crates/licensing" }
 mixrelay-processor-state = { path = "../../crates/processor-state" }
 mixrelay-engine-process = { path = "../../crates/engine-process" }
 mixrelay-audio-recorder = { path = "../../crates/audio-recorder" }

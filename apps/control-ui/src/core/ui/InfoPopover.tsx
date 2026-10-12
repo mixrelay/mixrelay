@@ -1,22 +1,28 @@
-import { Button, Popover } from '@mantine/core';
 import type { PropsWithChildren } from 'react';
+import { Dialog, DialogTrigger, Popover } from 'react-aria-components';
+import styles from '../theme/ComponentTheme.module.css';
+import { ActionButton } from './ActionButton';
 
 export function InfoPopover({
   children,
   label,
   critical = false,
-}: PropsWithChildren<{
-  label: string;
-  critical?: boolean;
-}>) {
+}: PropsWithChildren<{ label: string; critical?: boolean }>) {
   return (
-    <Popover position="top-end" width={340} withArrow withinPortal>
-      <Popover.Target>
-        <Button color={critical ? 'red' : 'gray'} size="compact-xs" variant="subtle">
-          {label}
-        </Button>
-      </Popover.Target>
-      <Popover.Dropdown>{children}</Popover.Dropdown>
-    </Popover>
+    <DialogTrigger>
+      <ActionButton tone={critical ? 'critical' : 'neutral'} density="compact">
+        {label}
+      </ActionButton>
+      <Popover
+        style={{ zIndex: 'var(--layer-floating)' }}
+        className={styles.popover}
+        placement="top end"
+        offset={4}
+      >
+        <Dialog aria-label={label} className={styles.infoDialog}>
+          {children}
+        </Dialog>
+      </Popover>
+    </DialogTrigger>
   );
 }

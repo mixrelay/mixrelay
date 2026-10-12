@@ -1,10 +1,19 @@
-import { Modal, TextInput } from '@mantine/core';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ActionButton } from './ActionButton';
+import { Dialog } from './Dialog';
+import { FormActions } from './FormActions';
+import { InlineNotice } from './InlineNotice';
+import { Stack } from './Stack';
+import { TextField } from './TextField';
 
 export function NameDialog({
   title,
   initialName,
+  allowEmpty = false,
+  maxLength = 40,
+  description,
+  placeholder,
   nameLabel,
   createLabel,
   enabled,
@@ -14,6 +23,10 @@ export function NameDialog({
 }: {
   title: string;
   initialName: string;
+  allowEmpty?: boolean;
+  maxLength?: number;
+  description?: string;
+  placeholder?: string;
   nameLabel: string;
   createLabel: string;
   enabled: boolean;
@@ -21,28 +34,42 @@ export function NameDialog({
   onCreate: (name: string) => void;
   error?: string | null;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState(initialName);
   return (
-    <Modal opened onClose={onCancel} title={title} size="xs" centered>
+    <Dialog opened onClose={onCancel} title={title} size="xs" withCloseButton={false}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (enabled && name.trim()) onCreate(name.trim());
+          if (enabled && (allowEmpty || name.trim())) onCreate(name.trim());
         }}
       >
-        <TextInput
-          data-autofocus
-          label={nameLabel}
-          value={name}
-          maxLength={40}
-          disabled={!enabled}
-          onChange={(event) => setName(event.currentTarget.value)}
-        />
-        <ActionButton type="submit" mt="md" disabled={!enabled || !name.trim()}>
-          {createLabel}
-        </ActionButton>
-        {error ? <p role="alert">{error}</p> : null}
+        <Stack>
+          <TextField
+            data-autofocus
+            label={nameLabel}
+            value={name}
+            maxLength={maxLength}
+            description={description}
+            placeholder={placeholder}
+            disabled={!enabled}
+            onChange={(event) => setName(event.currentTarget.value)}
+          />
+          {error ? <InlineNotice tone="critical">{error}</InlineNotice> : null}
+        </Stack>
+        <FormActions>
+          <ActionButton type="button" onClick={onCancel}>
+            {t('common.cancel')}
+          </ActionButton>
+          <ActionButton
+            type="submit"
+            emphasis="strong"
+            disabled={!enabled || (!allowEmpty && !name.trim())}
+          >
+            {createLabel}
+          </ActionButton>
+        </FormActions>
       </form>
-    </Modal>
+    </Dialog>
   );
 }

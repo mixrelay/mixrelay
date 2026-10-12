@@ -1,6 +1,8 @@
 //! User-owned Unix socket transport. No network listener, detached command queue, or audio work.
 use std::future::Future;
 use std::io;
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::OpenOptionsExt as _;
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,8 +15,8 @@ use tokio::task::JoinSet;
 
 use super::{LocalControl, Request};
 
-const FRAME_LIMIT: u64 = 16 * 1024;
-const RESPONSE_LIMIT: usize = 4 * 1024 * 1024;
+pub(crate) const FRAME_LIMIT: u64 = 4 * 1024 * 1024;
+pub(crate) const RESPONSE_LIMIT: usize = 4 * 1024 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 
@@ -27,6 +29,10 @@ pub(crate) struct LocalSocket {
 struct SocketPath {
     path: PathBuf,
     inode: u64,
+    // Linux may immediately reuse an unlinked inode. Retain its VFS identity until
+    // this guard is dropped so it cannot mistake a replacement socket for its own.
+    #[cfg(target_os = "linux")]
+    _inode_handle: std::fs::File,
 }
 
 impl Drop for SocketPath {
@@ -121,6 +127,11 @@ async fn bind(directory: &Path, uid: u32) -> io::Result<(UnixListener, SocketPat
     let listener = UnixListener::bind(&path)?;
     let owner = SocketPath {
         inode: std::fs::symlink_metadata(&path)?.ino(),
+        #[cfg(target_os = "linux")]
+        _inode_handle: std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&path)?,
         path,
     };
     std::fs::set_permissions(&owner.path, std::fs::Permissions::from_mode(0o600))?;
@@ -141,7 +152,7 @@ async fn serve(
             Some(_) = clients.join_next(), if !clients.is_empty() => {},
             accepted = listener.accept() => {
                 let Ok((stream, _)) = accepted else { break; };
-                if clients.len() >= 8 || !stream.peer_cred().is_ok_and(|peer| peer.uid() == uid) { continue; }
+                if clients.len() >= 32 || !stream.peer_cred().is_ok_and(|peer| peer.uid() == uid) { continue; }
                 let control = Arc::clone(&control);
                 let stopped = stop.clone();
                 clients.spawn(async move { let _ = connection(stream, control, stopped).await; });
@@ -306,6 +317,7 @@ mod tests {
         let uid = std::fs::metadata(fixture.path()).expect("metadata").uid();
         let control = LocalControl::new(
             crate::control_proxy::ControlProxyClient::default(),
+            #[cfg(target_os = "macos")]
             Arc::default(),
         )
         .expect("control");

@@ -1,6 +1,6 @@
-import { Tooltip } from '@mantine/core';
 import type { ReactElement } from 'react';
 import { formatPlatformShortcut } from './platformShortcut';
+import { Tooltip } from './Tooltip';
 
 export interface ShortcutTooltipProps {
   children: ReactElement;
@@ -9,7 +9,7 @@ export interface ShortcutTooltipProps {
 
 export function ShortcutTooltip({ children, shortcut }: ShortcutTooltipProps) {
   return (
-    <Tooltip label={formatPlatformShortcut(shortcut)} openDelay={350} position="right">
+    <Tooltip label={formatPlatformShortcut(shortcut)} position="right">
       {children}
     </Tooltip>
   );

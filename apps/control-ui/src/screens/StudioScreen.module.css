@@ -1,11 +1,11 @@
 .shell {
-  --sidebar-width: 200px;
+  --layout-sidebar-width: 200px;
   position: relative;
   display: grid;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-  grid-template-rows: var(--workspace-header-height) minmax(0, 1fr) 27px;
+  grid-template-columns: var(--layout-sidebar-width) minmax(0, 1fr);
+  grid-template-rows: var(--workspace-header-height) minmax(0, 1fr) var(--app-status-height);
   width: 100%;
-  height: 100vh;
+  height: 100dvh;
   min-height: 320px;
   overflow: hidden;
   background: var(--bg);
@@ -23,53 +23,9 @@
   background: var(--surface);
 }
 
-.applicationHeader h1 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.applicationActions { display: flex; align-items: center; }
-
-.sidebarBoundary {
-  position: absolute;
-  grid-area: auto;
-  z-index: 6;
-  top: var(--workspace-header-height);
-  bottom: 27px;
-  left: calc(var(--sidebar-width) - 5px);
-  width: 10px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: default;
-}
-
-.sidebarBoundary::before {
-  position: absolute;
-  inset: 0 4px;
-  content: "";
-}
-
-.sidebarBoundary::after {
-  position: absolute;
-  top: calc(50% - 12px);
-  left: 4px;
-  width: 2px;
-  height: 24px;
-  border-radius: 1px;
-  background: var(--line-strong);
-  content: "";
-}
-
-.sidebarBoundary:hover::before,
-.sidebarBoundary:focus-visible::before {
-  background: var(--signal);
-}
-
-.sidebarBoundary:focus-visible {
-  outline: none;
+.applicationActions {
+  display: flex;
+  align-items: center;
 }
 
 .shell[data-sidebar-open="false"] {
@@ -81,49 +37,11 @@
   padding: 0 8px;
 }
 
-.sidebarReopen {
-  position: absolute;
-  z-index: 6;
-  /* The canvas add button occupies y=12..42; keep this tab below its hit area. */
-  top: calc(var(--workspace-header-height) + 52px);
-  left: 0;
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 28px;
-  padding: 0;
-  border: 1px solid var(--line-strong);
-  border-left: 0;
-  border-radius: 0 3px 3px 0;
-  background: var(--surface-raised);
-  color: var(--signal);
-  cursor: default;
-}
-
-.sidebarReopen svg {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.sidebarReopen:hover,
-.sidebarReopen:focus-visible {
-  border-color: var(--signal);
-  background: var(--surface);
-}
-
-.sidebarReopen:focus-visible {
-  outline: 1px solid var(--signal);
-  outline-offset: -1px;
-}
-
 .sidebar {
   display: flex;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   flex-direction: column;
   grid-column: 1;
   grid-row: 2;
@@ -138,6 +56,8 @@
 .graphList {
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: none;
   padding: 6px;
 }
 
@@ -148,7 +68,7 @@
   min-height: 30px;
   padding: 5px 10px;
   border: 0;
-  border-radius: 3px;
+  border-radius: var(--control-radius);
   background: transparent;
   color: var(--muted);
   text-align: left;
@@ -169,17 +89,8 @@
 }
 
 .graph:focus-visible {
-  outline: 2px solid var(--signal);
+  outline: var(--focus-width) solid var(--focus-color);
   outline-offset: -2px;
-}
-
-.graphName {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: 500;
 }
 
 .sidebarFooter {
@@ -188,50 +99,10 @@
   border-top: 1px solid var(--line);
 }
 
-.newGraph {
-  height: 28px;
-  min-height: 28px;
-  max-height: 28px;
-  gap: 6px;
-  justify-content: flex-start;
-  padding: 0 10px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.newGraph:hover {
-  border-color: transparent;
-  background: var(--surface-raised);
-  color: var(--text);
-}
-
-.newGraphIcon {
-  display: grid;
-  flex: 0 0 14px;
-  width: 14px;
-  height: 14px;
-  place-items: center;
-  color: var(--signal);
-  font-size: 16px;
-  font-weight: 400;
-  line-height: 1;
-}
-
 .statusBar {
-  display: flex;
+  z-index: 6;
   grid-column: 1 / -1;
   grid-row: 3;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 7px;
-  padding: 0 10px;
-  border-top: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--muted);
-  font-size: 10px;
-  letter-spacing: 0.03em;
 }
 
 .workspace {
@@ -243,8 +114,8 @@
 }
 
 :where(.shell[data-sidebar-open="false"]) .workspace {
-  --workspace-header-inset: 144px;
-  --canvas-toolbar-inset: 32px;
+  --layout-workspace-header-inset: 144px;
+  --layout-canvas-toolbar-inset: 32px;
   grid-column: 1 / -1;
 }
 
@@ -263,14 +134,28 @@
     grid-area: auto;
     z-index: 5;
     top: var(--workspace-header-height);
-    bottom: 27px;
+    bottom: var(--app-status-height);
     left: 0;
-    width: var(--sidebar-width);
-    box-shadow: 4px 0 12px #0003;
+    width: var(--layout-sidebar-width);
+    box-shadow: 4px 0 12px var(--shadow-subtle);
   }
 
   .workspace {
-    --workspace-header-inset: 144px;
+    --layout-workspace-header-inset: 144px;
     grid-column: 1 / -1;
   }
+}
+
+.driverNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--font-control);
+  line-height: 1.5;
 }

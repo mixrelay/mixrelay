@@ -53,6 +53,10 @@ pub struct AdapterRuntimeStatus {
     input_starvations: AtomicU64,
     output_overflows: AtomicU64,
     discontinuities: AtomicU64,
+    sample_fault_sources: AtomicU64,
+    sample_fault_inputs: AtomicU64,
+    sample_fault_outputs: AtomicU64,
+    sample_fault_blocks: AtomicU64,
     profile: AdapterProfile,
     // Control-plane discovery can narrow capabilities without restarting the
     // engine. Never read/write this lock from the real-time processing path.
@@ -90,6 +94,10 @@ impl AdapterRuntimeStatus {
             input_starvations: AtomicU64::new(0),
             output_overflows: AtomicU64::new(0),
             discontinuities: AtomicU64::new(0),
+            sample_fault_sources: AtomicU64::new(0),
+            sample_fault_inputs: AtomicU64::new(0),
+            sample_fault_outputs: AtomicU64::new(0),
+            sample_fault_blocks: AtomicU64::new(0),
             profile,
             discovered_sample_rates: RwLock::new(None),
             endpoint_observation: AtomicU32::new(0),
@@ -251,6 +259,15 @@ impl AdapterRuntimeStatus {
         self.processing.stop_requested()
     }
 
+    fn sample_faults(&self) -> mixrelay_audio_io::process::SampleFaults {
+        mixrelay_audio_io::process::SampleFaults {
+            source_samples: self.sample_fault_sources.load(Ordering::Relaxed),
+            input_samples: self.sample_fault_inputs.load(Ordering::Relaxed),
+            output_samples: self.sample_fault_outputs.load(Ordering::Relaxed),
+            blocks: self.sample_fault_blocks.load(Ordering::Relaxed),
+        }
+    }
+
     /// Lock-free reporting from the DSP boundary. Zero samples are not failures.
     pub fn record_process(&self, report: mixrelay_audio_io::process::ProcessReport) {
         self.discontinuities
@@ -259,6 +276,27 @@ impl AdapterRuntimeStatus {
             .fetch_add(report.input_starvations, Ordering::Relaxed);
         self.output_overflows
             .fetch_add(report.output_overflows, Ordering::Relaxed);
+        for (counter, increment) in [
+            (
+                &self.sample_fault_sources,
+                report.sample_faults.source_samples,
+            ),
+            (
+                &self.sample_fault_inputs,
+                report.sample_faults.input_samples,
+            ),
+            (
+                &self.sample_fault_outputs,
+                report.sample_faults.output_samples,
+            ),
+            (&self.sample_fault_blocks, report.sample_faults.blocks),
+        ] {
+            if increment != 0 {
+                let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    Some(current.saturating_add(increment))
+                });
+            }
+        }
     }
 
     #[must_use]
@@ -853,6 +891,7 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
             buffer_frames: Some(format.block_frames),
             underruns: self.input_starvations.load(Ordering::Relaxed),
             overruns: self.output_overflows.load(Ordering::Relaxed),
+            sample_faults: self.sample_faults(),
             audio_session: Some(AudioSessionStatus {
                 endpoint_preferences_unavailable: false,
                 virtual_endpoint_settings: None,
@@ -1173,6 +1212,12 @@ mod tests {
             input_starvations: 3,
             output_overflows: 2,
             discontinuities: 4,
+            sample_faults: mixrelay_audio_io::process::SampleFaults {
+                source_samples: 5,
+                input_samples: 6,
+                output_samples: 7,
+                blocks: 2,
+            },
         });
         let format = RenderFormat {
             sample_rate: 48_000,
@@ -1181,6 +1226,10 @@ mod tests {
         let running = status.status(format);
         assert_eq!((running.underruns, running.overruns), (3, 2));
         assert_eq!(running.audio_session.as_ref().unwrap().discontinuities, 4);
+        assert_eq!(running.sample_faults.source_samples, 5);
+        assert_eq!(running.sample_faults.input_samples, 6);
+        assert_eq!(running.sample_faults.output_samples, 7);
+        assert_eq!(running.sample_faults.blocks, 2);
         assert_eq!(
             running.audio_session.unwrap().processing_state,
             mixrelay_audio_io::process::ProcessingState::Running
@@ -1191,6 +1240,45 @@ mod tests {
             Some(SessionIssue::ProcessingFailed)
         );
         assert!(status.begin_processing().is_err());
+    }
+
+    #[test]
+    fn sample_fault_totals_saturate_and_do_not_reset_on_clean_cycles() {
+        let status = AdapterRuntimeStatus::new(profile(AudioBackendKind::PipeWire));
+        let faults = mixrelay_audio_io::process::SampleFaults {
+            source_samples: u64::MAX - 1,
+            input_samples: u64::MAX - 2,
+            output_samples: u64::MAX - 3,
+            blocks: u64::MAX - 4,
+        };
+        status.record_process(mixrelay_audio_io::process::ProcessReport {
+            sample_faults: faults,
+            ..Default::default()
+        });
+        status.record_process(mixrelay_audio_io::process::ProcessReport {
+            sample_faults: mixrelay_audio_io::process::SampleFaults {
+                source_samples: 8,
+                input_samples: 8,
+                output_samples: 8,
+                blocks: 8,
+            },
+            ..Default::default()
+        });
+        status.record_process(mixrelay_audio_io::process::ProcessReport::default());
+        assert_eq!(
+            status
+                .status(RenderFormat {
+                    sample_rate: 48_000,
+                    block_frames: 128
+                })
+                .sample_faults,
+            mixrelay_audio_io::process::SampleFaults {
+                source_samples: u64::MAX,
+                input_samples: u64::MAX,
+                output_samples: u64::MAX,
+                blocks: u64::MAX,
+            }
+        );
     }
 
     #[test]

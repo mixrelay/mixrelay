@@ -7,18 +7,19 @@ use mixrelay_audio_graph::{
     RenderFormat, TO_OS_PORT_ID,
 };
 use mixrelay_audio_io::VirtualEndpointId;
-use mixrelay_audio_io::process::{ProcessCycle, ProcessReport, TransferOutcome};
+use mixrelay_audio_io::process::{ProcessCycle, ProcessReport, SampleFaults, TransferOutcome};
 use mixrelay_audio_recorder::{RecorderRegistry, RecorderTap};
 use thiserror::Error;
 
 use crate::runtime_control::{ControlValue, RuntimeControlBank};
 mod buffers;
 mod compensation;
+mod effects;
+mod history;
 mod kernels;
 mod route_delay;
 mod routing;
 mod schedule;
-mod source_history;
 use buffers::port_pair;
 pub(crate) use compensation::DelayBank;
 pub use compensation::{CompensationState, HostedLatencySource};
@@ -129,9 +130,21 @@ pub struct MeterBinding {
     port_id: PortId,
     channels: u16,
     slot: PortSlot,
+    dynamics: Option<DynamicsMeterBinding>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DynamicsMeterBinding {
+    input: PortSlot,
+    state_index: usize,
+    threshold_db: f32,
 }
 
 impl MeterBinding {
+    #[must_use]
+    pub const fn has_dynamics(&self) -> bool {
+        self.dynamics.is_some()
+    }
     #[must_use]
     pub const fn node_id(&self) -> &NodeId {
         &self.node_id
@@ -186,9 +199,11 @@ pub struct RenderPlan {
     arena_samples: usize,
     dynamics_state_count: usize,
     dynamics_bindings: Box<[DynamicsBinding]>,
+    effects: Box<[effects::Binding]>,
     device_bus_samples: usize,
     device_bus_bindings: Box<[DeviceBusBinding]>,
-    source_history: Box<[source_history::Targets]>,
+    history: Box<[history::Binding]>,
+    source_history: Box<[history::Targets]>,
     hosted_input_scratch_samples: usize,
     hosted_scratch_samples: usize,
     controls: Arc<RuntimeControlBank>,
@@ -211,6 +226,7 @@ impl RenderPlan {
         Ok(plan)
     }
 
+    #[allow(clippy::too_many_lines)] // Ordered control-thread preparation of independent bounded resources.
     fn prepare_internal(
         execution: &ExecutionPlan,
         hosted_factory: Option<&dyn HostedProcessorFactory>,
@@ -225,6 +241,8 @@ impl RenderPlan {
         let mut steps = Vec::with_capacity(execution.nodes().len());
         let mut prepared = Vec::with_capacity(execution.nodes().len());
         let mut dynamics_state_count = 0;
+        let mut effect_count = 0;
+        let effects = prepare_effects(execution)?;
         let mut device_bus_samples = 0;
         let mut hosted_input_scratch_samples = 0;
         let mut hosted_output_scratch_samples = 0;
@@ -242,6 +260,7 @@ impl RenderPlan {
             let incoming_routes = routes.incoming.remove(node.id()).unwrap_or_default();
             let mut state = LoweringState {
                 dynamics_state_count: &mut dynamics_state_count,
+                effect_count: &mut effect_count,
                 device_bus_samples: &mut device_bus_samples,
                 hosted_input_scratch_samples: &mut hosted_input_scratch_samples,
                 hosted_output_scratch_samples: &mut hosted_output_scratch_samples,
@@ -261,8 +280,10 @@ impl RenderPlan {
         let recorder_controls =
             binding_controls(&controls, recorder_bindings.iter().map(|b| &b.node_id));
         let device_bus_bindings = device_bus_bindings(execution, &slots)?;
+        let dynamics_bindings = dynamics_bindings(execution);
+        let history = history::bindings(execution, &effects, &dynamics_bindings);
         let source_history =
-            source_history::prepare(execution, &source_bindings, &device_bus_bindings);
+            history::prepare(execution, &source_bindings, &device_bus_bindings, &history);
         let hosted_scratch_samples = hosted_input_scratch_samples
             .checked_add(hosted_output_scratch_samples)
             .ok_or(RenderPlanError::BufferSizeOverflow)?;
@@ -285,9 +306,11 @@ impl RenderPlan {
                 meter_bindings: meter_bindings.into_boxed_slice(),
                 arena_samples,
                 dynamics_state_count,
-                dynamics_bindings: dynamics_bindings(execution),
+                dynamics_bindings,
+                effects,
                 device_bus_samples,
                 device_bus_bindings,
+                history,
                 source_history,
                 hosted_input_scratch_samples,
                 hosted_scratch_samples,
@@ -352,10 +375,13 @@ pub struct BlockProcessor {
     cycle_tracker: mixrelay_audio_io::process::CycleTracker,
     plan: Arc<RenderPlan>,
     arena: Box<[f32]>,
-    source_buffers: Box<[Box<[f32]>]>,
-    sink_buffers: Box<[Box<[f32]>]>,
+    source_buffers: ExternalBuffers,
+    sink_buffers: ExternalBuffers,
     meters: Option<Arc<crate::PeakMeterBank>>,
     dynamics_envelopes: Box<[f32]>,
+    dynamics_minimum_gains: Box<[f32]>,
+    dynamics_wet: Box<[f32]>,
+    effect_states: Box<[effects::State]>,
     device_bus_state: Box<[f32]>,
     device_bus_cursor: usize,
     hosted_scratch: Box<[f32]>,
@@ -383,6 +409,9 @@ impl fmt::Debug for BlockProcessor {
             .field("sink_buffers", &self.sink_buffers.len())
             .field("has_meters", &self.meters.is_some())
             .field("dynamics_envelopes", &self.dynamics_envelopes.len())
+            .field("dynamics_minimum_gains", &self.dynamics_minimum_gains.len())
+            .field("dynamics_wet", &self.dynamics_wet.len())
+            .field("effect_states", &self.effect_states.len())
             .field("device_bus_state", &self.device_bus_state.len())
             .field("device_bus_cursor", &self.device_bus_cursor)
             .field("hosted_scratch", &self.hosted_scratch.len())
@@ -497,17 +526,41 @@ pub trait ExternalIo {
 
 impl BlockProcessor {
     #[must_use]
+    /// # Panics
+    /// Panics if built-in storage cannot be prepared. Runtime publication uses `try_new`.
     pub fn new(plan: Arc<RenderPlan>) -> Self {
+        Self::try_new(plan).expect("built-in effect storage must be prepared before rendering")
+    }
+
+    /// # Errors
+    /// Returns a storage reservation error before any audio ownership is published.
+    pub fn try_new(plan: Arc<RenderPlan>) -> Result<Self, RenderPlanError> {
+        let effect_states = plan
+            .effects
+            .iter()
+            .map(|binding| effects::State::new(&binding.design))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(RenderPlanError::BuiltinPreparation)?
+            .into_boxed_slice();
         let hosted_input_scratch_samples = plan.hosted_input_scratch_samples;
         let hosted_scratch_samples = plan.hosted_scratch_samples;
-        let arena = vec![0.0; plan.arena_samples].into_boxed_slice();
-        let source_buffers = allocate_external_buffers(&plan.source_bindings, plan.format);
-        let sink_buffers = allocate_external_buffers(&plan.sink_bindings, plan.format);
-        let dynamics_envelopes = vec![0.0; plan.dynamics_state_count].into_boxed_slice();
-        let device_bus_state = vec![0.0; plan.device_bus_samples].into_boxed_slice();
+        let arena = buffers::filled(plan.arena_samples, 0.0)?;
+        let source_buffers = allocate_external_buffers(&plan.source_bindings, plan.format)?;
+        let sink_buffers = allocate_external_buffers(&plan.sink_bindings, plan.format)?;
+        let dynamics_envelopes = buffers::filled(plan.dynamics_state_count, 0.0)?;
+        let dynamics_minimum_gains = buffers::filled(plan.dynamics_state_count, 1.0)?;
+        let mut dynamics_wet = buffers::filled(plan.dynamics_state_count, 1.0)?;
+        for binding in &plan.dynamics_bindings {
+            dynamics_wet[binding.state_index] = match &binding.config {
+                NodeConfig::Compressor(config) => f32::from(!config.bypass),
+                NodeConfig::Limiter(config) => f32::from(!config.bypass),
+                _ => unreachable!("only dynamics nodes own dynamics state"),
+            };
+        }
+        let device_bus_state = buffers::filled(plan.device_bus_samples, 0.0)?;
         let controls = plan.controls.values();
         let control_scratch = controls.clone();
-        Self {
+        Ok(Self {
             recorders: Box::new([]),
             cycle_tracker: mixrelay_audio_io::process::CycleTracker::default(),
             plan,
@@ -516,9 +569,12 @@ impl BlockProcessor {
             sink_buffers,
             meters: None,
             dynamics_envelopes,
+            dynamics_minimum_gains,
+            dynamics_wet,
+            effect_states,
             device_bus_state,
             device_bus_cursor: 0,
-            hosted_scratch: vec![0.0; hosted_scratch_samples].into_boxed_slice(),
+            hosted_scratch: buffers::filled(hosted_scratch_samples, 0.0)?,
             hosted_input_scratch_samples,
             hosted_processors: Box::new([]),
             hosted_identities: Box::new([]),
@@ -526,7 +582,7 @@ impl BlockProcessor {
             control_scratch,
             sampled_control_epoch: None,
             delay_bank: None,
-        }
+        })
     }
 
     #[must_use]
@@ -548,7 +604,8 @@ impl BlockProcessor {
         factory: &dyn HostedProcessorFactory,
     ) -> Result<Self, RenderPlanError> {
         let (plan, hosted_processors) = RenderPlan::prepare_internal(execution, Some(factory))?;
-        let mut processor = Self::with_peak_meters(Arc::new(plan), meters);
+        let mut processor = Self::try_new(Arc::new(plan))?;
+        processor.meters = Some(meters);
         processor.hosted_processors = hosted_processors;
         let mut identities: Vec<_> = processor
             .hosted_processors
@@ -610,24 +667,8 @@ impl BlockProcessor {
         }
     }
 
-    pub(crate) fn retain_dynamics_state(&mut self, previous: &Self) {
-        if self.plan.format != previous.plan.format {
-            return;
-        }
-        for binding in &self.plan.dynamics_bindings {
-            let Ok(index) = previous
-                .plan
-                .dynamics_bindings
-                .binary_search_by(|candidate| candidate.node_id.cmp(&binding.node_id))
-            else {
-                continue;
-            };
-            let source = &previous.plan.dynamics_bindings[index];
-            if source.config == binding.config {
-                self.dynamics_envelopes[binding.state_index] =
-                    previous.dynamics_envelopes[source.state_index];
-            }
-        }
+    pub(crate) fn retain_history(&mut self, previous: &mut Self) {
+        history::retain(self, previous);
     }
 
     pub(crate) fn retain_device_bus_state(&mut self, previous: &Self) {
@@ -787,18 +828,26 @@ impl BlockProcessor {
                 if let Some(bank) = &mut self.delay_bank {
                     bank.reset_routes(&targets.delay_routes);
                 }
+                for &state in &targets.histories {
+                    state.reset(&mut self.effect_states, &mut self.dynamics_envelopes);
+                }
             }
         }
         // An individual input invalidates only its downstream histories above.
         // A global clock loss invalidates the complete processing timeline.
         if reset_history {
+            for binding in &self.plan.history {
+                binding
+                    .state
+                    .reset(&mut self.effect_states, &mut self.dynamics_envelopes);
+            }
             self.device_bus_state.fill(0.0);
             self.device_bus_cursor = 0;
             if let Some(bank) = &mut self.delay_bank {
                 bank.reset();
             }
         }
-        self.process_loaded_block(frames_usize);
+        report.sample_faults = self.process_loaded_block(frames_usize);
         for ((binding, source), &control_index) in self
             .plan
             .sink_bindings
@@ -863,11 +912,25 @@ impl BlockProcessor {
         }
     }
 
-    fn process_loaded_block(&mut self, frames: usize) {
+    fn process_loaded_block(&mut self, frames: usize) -> SampleFaults {
+        let mut faults = SampleFaults::default();
+        for ((binding, source), &control_index) in self
+            .plan
+            .source_bindings
+            .iter()
+            .zip(&mut self.source_buffers)
+            .zip(&self.plan.source_controls)
+        {
+            if self.controls[control_index].control.enabled {
+                faults.source_samples +=
+                    sanitize_samples(&mut source[..sample_count(frames, binding.channels)]);
+            }
+        }
         if let Some(bank) = &mut self.delay_bank {
             bank.validate();
         }
         self.arena.fill(0.0);
+        self.dynamics_minimum_gains.fill(1.0);
         for (sink, &control_index) in self.sink_buffers.iter_mut().zip(&self.plan.sink_controls) {
             if !self.controls[control_index].control.enabled {
                 sink.fill(0.0);
@@ -887,7 +950,7 @@ impl BlockProcessor {
                     self.delay_bank.as_deref_mut(),
                 );
             }
-            self.process_phase(phase, frames);
+            self.process_phase(phase, frames, &mut faults);
         }
         if !self.device_bus_state.is_empty() {
             // All buses read before publishing at the same prepared-quantum
@@ -896,6 +959,10 @@ impl BlockProcessor {
                 (self.device_bus_cursor + frames) % self.plan.format.block_frames as usize;
         }
         self.capture_and_meter(frames);
+        faults.blocks = u64::from(
+            faults.source_samples != 0 || faults.input_samples != 0 || faults.output_samples != 0,
+        );
+        faults
     }
 
     fn sample_controls(&mut self) {
@@ -918,7 +985,7 @@ impl BlockProcessor {
         }
     }
 
-    fn process_phase(&mut self, phase: RenderPhase, frames: usize) {
+    fn process_phase(&mut self, phase: RenderPhase, frames: usize, faults: &mut SampleFaults) {
         for &index in self.plan.schedule.nodes(phase) {
             let step = &self.plan.steps[index];
             let control = self.controls[index];
@@ -926,6 +993,27 @@ impl BlockProcessor {
                 for kernel in step.kernels(phase) {
                     if let Kernel::Hosted { processor, .. } = kernel {
                         self.hosted_processors[*processor].suspend_processing();
+                    }
+                    let history = match kernel {
+                        Kernel::Effect { state, .. } => Some(history::State::Effect(*state)),
+                        Kernel::Compressor {
+                            state_index,
+                            bypass,
+                            ..
+                        }
+                        | Kernel::Limiter {
+                            state_index,
+                            bypass,
+                            ..
+                        } => {
+                            // OFF settles the parameter transition; timeline resets keep it.
+                            self.dynamics_wet[*state_index] = f32::from(!*bypass);
+                            Some(history::State::Dynamics(*state_index))
+                        }
+                        _ => None,
+                    };
+                    if let Some(state) = history {
+                        state.reset(&mut self.effect_states, &mut self.dynamics_envelopes);
                     }
                 }
                 continue;
@@ -939,6 +1027,9 @@ impl BlockProcessor {
                     self.delay_bank.as_deref_mut(),
                 );
             }
+            // Routes can overflow even when each upstream sample is finite.
+            // Protect every consumer, including sidechains and native/recorder sinks.
+            faults.input_samples += sanitize_slots(&mut self.arena, &step.inputs, frames);
             if matches!(phase, RenderPhase::Sinks) && control.control.muted {
                 silence_slots(&mut self.arena, &step.inputs, frames);
             }
@@ -949,6 +1040,10 @@ impl BlockProcessor {
                         sources: &self.source_buffers,
                         sinks: &mut self.sink_buffers,
                         dynamics_envelopes: &mut self.dynamics_envelopes,
+                        dynamics_minimum_gains: &mut self.dynamics_minimum_gains,
+                        dynamics_wet: &mut self.dynamics_wet,
+                        effect_states: &mut self.effect_states,
+                        effects: &self.plan.effects,
                         device_bus_state: &mut self.device_bus_state,
                         device_bus_cursor: self.device_bus_cursor,
                         hosted_scratch: &mut self.hosted_scratch,
@@ -960,6 +1055,9 @@ impl BlockProcessor {
                     frames,
                 );
             }
+            // Source gain, mixing and hosted processors share this boundary.
+            // Invalid output must not become the next node's recursive history.
+            faults.output_samples += sanitize_slots(&mut self.arena, &step.outputs, frames);
             if !matches!(phase, RenderPhase::Sinks) && control.control.muted {
                 silence_slots(&mut self.arena, &step.outputs, frames);
             }
@@ -984,15 +1082,38 @@ impl BlockProcessor {
             );
         }
         if let Some(meters) = &self.meters {
+            if frames == 0 {
+                return;
+            }
+            let revision = self
+                .plan
+                .revision
+                .max(self.plan.controls.applied_revision());
+            meters.begin_publication();
             for (index, binding) in self.plan.meter_bindings.iter().enumerate() {
                 let samples = sample_count(frames, binding.channels);
                 meters.record_interleaved(
-                    self.plan.revision,
+                    revision,
                     index,
                     binding.channels,
                     &self.arena[binding.slot.offset..binding.slot.offset + samples],
                 );
+                if let Some(dynamics) = binding.dynamics {
+                    meters.record_dynamics(
+                        revision,
+                        index,
+                        &self.arena[dynamics.input.offset
+                            ..dynamics.input.offset
+                                + sample_count(frames, dynamics.input.channels)],
+                        crate::DynamicsMeterBlock {
+                            channels: dynamics.input.channels,
+                            minimum_gain: self.dynamics_minimum_gains[dynamics.state_index],
+                            threshold_db: dynamics.threshold_db,
+                        },
+                    );
+                }
             }
+            meters.finish_publication(revision);
         }
     }
 
@@ -1028,21 +1149,28 @@ impl BlockProcessor {
     }
 }
 
+type ExternalBuffers = Box<[Box<[f32]>]>;
+
 fn allocate_external_buffers(
     bindings: &[ExternalBinding],
     format: RenderFormat,
-) -> Box<[Box<[f32]>]> {
-    bindings
-        .iter()
-        .map(|binding| {
-            vec![0.0; sample_count(format.block_frames as usize, binding.channels)]
-                .into_boxed_slice()
-        })
-        .collect()
+) -> Result<ExternalBuffers, RenderPlanError> {
+    let mut result = buffers::reserve(bindings.len())?;
+    for binding in bindings {
+        result.push(buffers::filled(
+            sample_count(format.block_frames as usize, binding.channels),
+            0.0,
+        )?);
+    }
+    Ok(result.into_boxed_slice())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum RenderPlanError {
+    #[error("render buffer preparation failed: {0}")]
+    BufferPreparation(String),
+    #[error("built-in effect preparation failed: {0}")]
+    BuiltinPreparation(String),
     /// Derived route alignment could not be prepared before publication.
     #[error("route delay preparation failed: {0}")]
     CompensationPreparation(String),
@@ -1201,7 +1329,8 @@ fn device_bus_bindings(
 }
 
 fn dynamics_bindings(execution: &ExecutionPlan) -> Box<[DynamicsBinding]> {
-    let mut bindings: Vec<_> = execution
+    // State indices follow lowering order; only the common history registry is sorted.
+    let bindings: Vec<_> = execution
         .nodes()
         .iter()
         .filter(|node| {
@@ -1217,8 +1346,35 @@ fn dynamics_bindings(execution: &ExecutionPlan) -> Box<[DynamicsBinding]> {
             state_index,
         })
         .collect();
-    bindings.sort_unstable_by(|left, right| left.node_id.cmp(&right.node_id));
     bindings.into_boxed_slice()
+}
+
+fn prepare_effects(execution: &ExecutionPlan) -> Result<Box<[effects::Binding]>, RenderPlanError> {
+    let mut bindings = Vec::new();
+    let mut bytes = 0_usize;
+    for node in execution.nodes() {
+        if let NodeConfig::Effect(config) = node.config() {
+            let design = effects::Design::new(config, execution.format())
+                .map_err(RenderPlanError::BuiltinPreparation)?;
+            bytes = bytes
+                .checked_add(
+                    design
+                        .storage_bytes()
+                        .map_err(RenderPlanError::BuiltinPreparation)?,
+                )
+                .ok_or(RenderPlanError::BufferSizeOverflow)?;
+            if bytes > effects::MAX_EFFECT_BYTES {
+                return Err(RenderPlanError::BuiltinPreparation(
+                    "aggregate built-in effect memory capacity exceeded".into(),
+                ));
+            }
+            bindings.push(effects::Binding {
+                node_id: node.id().clone(),
+                design,
+            });
+        }
+    }
+    Ok(bindings.into_boxed_slice())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -1298,6 +1454,28 @@ fn silence_slots(arena: &mut [f32], slots: &[PortSlot], frames: usize) {
     }
 }
 
+fn sanitize_slots(arena: &mut [f32], slots: &[PortSlot], frames: usize) -> u64 {
+    slots.iter().fold(0, |count, slot| {
+        count
+            + sanitize_samples(
+                &mut arena[slot.offset..slot.offset + sample_count(frames, slot.channels)],
+            )
+    })
+}
+
+// Preserve every finite bit pattern, including signed zero and subnormals.
+// A fixed counter replaces logging or retained PCM on the realtime path.
+fn sanitize_samples(samples: &mut [f32]) -> u64 {
+    let mut count = 0;
+    for sample in samples {
+        if !sample.is_finite() {
+            *sample = 0.0;
+            count += 1;
+        }
+    }
+    count
+}
+
 #[derive(Debug, Default)]
 struct LoweredRoutes {
     incoming: BTreeMap<NodeId, Vec<RouteOp>>,
@@ -1313,6 +1491,12 @@ struct LoweredKernels {
 
 #[derive(Debug)]
 enum Kernel {
+    Effect {
+        input: PortSlot,
+        output: PortSlot,
+        sidechain: Option<PortSlot>,
+        state: usize,
+    },
     DeviceBus(DeviceBusKernel),
     Source {
         binding: usize,
@@ -1335,6 +1519,8 @@ enum Kernel {
         attack_coefficient: f32,
         release_coefficient: f32,
         makeup_gain: f32,
+        bypass: bool,
+        bypass_coefficient: f32,
     },
     Limiter {
         input: PortSlot,
@@ -1342,6 +1528,8 @@ enum Kernel {
         state_index: usize,
         ceiling_linear: f32,
         release_coefficient: f32,
+        bypass: bool,
+        bypass_coefficient: f32,
     },
     Mixer {
         inputs: Box<[PortSlot]>,
@@ -1574,14 +1762,33 @@ fn collect_meter_bindings(
     slots: &BTreeMap<PortKey, PortSlot>,
 ) -> Result<Vec<MeterBinding>, RenderPlanError> {
     let mut bindings = Vec::with_capacity(execution.nodes().len());
+    let mut dynamics_index = 0;
     for node in execution.nodes() {
+        let threshold = match node.config() {
+            NodeConfig::Compressor(config) => Some(config.threshold_db),
+            NodeConfig::Limiter(config) => Some(config.ceiling_db),
+            _ => None,
+        };
+        let dynamics = if let Some(threshold_db) = threshold {
+            let binding = DynamicsMeterBinding {
+                input: node_slot(
+                    node,
+                    &PortId::from(AUDIO_PORT_ID),
+                    PortDirection::Input,
+                    slots,
+                )?,
+                state_index: dynamics_index,
+                threshold_db,
+            };
+            dynamics_index += 1;
+            Some(binding)
+        } else {
+            None
+        };
         for port in node.outputs() {
-            bindings.push(meter_binding(
-                node,
-                port.id(),
-                PortDirection::Output,
-                slots,
-            )?);
+            let mut binding = meter_binding(node, port.id(), PortDirection::Output, slots)?;
+            binding.dynamics = dynamics;
+            bindings.push(binding);
         }
         if node.outputs().is_empty()
             || matches!(node.config(), NodeConfig::VirtualEndpointTransport(_))
@@ -1625,6 +1832,7 @@ fn meter_binding(
         port_id: port_id.clone(),
         channels: slot.channels,
         slot,
+        dynamics: None,
     })
 }
 
@@ -1664,6 +1872,7 @@ struct LoweringContext<'a> {
 
 struct LoweringState<'a> {
     dynamics_state_count: &'a mut usize,
+    effect_count: &'a mut usize,
     device_bus_samples: &'a mut usize,
     hosted_input_scratch_samples: &'a mut usize,
     hosted_output_scratch_samples: &'a mut usize,
@@ -1692,6 +1901,7 @@ fn lower_kernels(
             sinks: vec![],
         }),
         NodeConfig::Compressor(_)
+        | NodeConfig::Effect(_)
         | NodeConfig::Limiter(_)
         | NodeConfig::Mixer(_)
         | NodeConfig::Gain(_) => lower_builtin_processor(node, context, state),
@@ -1706,12 +1916,54 @@ fn lower_kernels(
     }
 }
 
+fn lower_effect(
+    node: &CompiledNode,
+    config: &mixrelay_audio_graph::EffectConfig,
+    context: &LoweringContext<'_>,
+    state: &mut LoweringState<'_>,
+) -> Result<LoweredKernels, RenderPlanError> {
+    let (input, output) = processor_slots(node, context.slots)?;
+    if input.channels != config.channels || output.channels != config.output_channels() {
+        return Err(RenderPlanError::BuiltinPreparation(
+            "effect port geometry does not match configuration".into(),
+        ));
+    }
+    let sidechain = if matches!(config.effect, mixrelay_audio_graph::Effect::Ducking(_)) {
+        Some(node_slot(
+            node,
+            &PortId::from(mixrelay_audio_graph::SIDECHAIN_PORT_ID),
+            PortDirection::Input,
+            context.slots,
+        )?)
+    } else {
+        None
+    };
+    if sidechain.is_some_and(|port| port.channels != 1) {
+        return Err(RenderPlanError::BuiltinPreparation(
+            "ducking control input must be mono".into(),
+        ));
+    }
+    let index = *state.effect_count;
+    *state.effect_count += 1;
+    Ok(LoweredKernels {
+        sources: vec![],
+        processing: vec![Kernel::Effect {
+            input,
+            output,
+            sidechain,
+            state: index,
+        }],
+        sinks: vec![],
+    })
+}
+
 fn lower_builtin_processor(
     node: &CompiledNode,
     context: &LoweringContext<'_>,
     state: &mut LoweringState<'_>,
 ) -> Result<LoweredKernels, RenderPlanError> {
     match node.config() {
+        NodeConfig::Effect(config) => lower_effect(node, config, context, state),
         NodeConfig::Compressor(config) => lower_compressor(node, config, context, state),
         NodeConfig::Limiter(config) => {
             let (input, output) = processor_slots(node, context.slots)?;
@@ -1728,6 +1980,9 @@ fn lower_builtin_processor(
                         config.release_ms,
                         context.format.sample_rate,
                     ),
+                    bypass: config.bypass,
+                    bypass_coefficient: 1.0
+                        - smoothing_coefficient(5.0, context.format.sample_rate),
                 }],
                 sinks: vec![],
             })
@@ -1796,6 +2051,8 @@ fn lower_compressor(
                 context.format.sample_rate,
             ),
             makeup_gain: db_to_linear(config.makeup_gain_db),
+            bypass: config.bypass,
+            bypass_coefficient: 1.0 - smoothing_coefficient(5.0, context.format.sample_rate),
         }],
         sinks: vec![],
     })
@@ -2226,8 +2483,14 @@ const fn sample_count(frames: usize, channels: u16) -> usize {
 
 #[cfg(test)]
 mod tests {
+    mod builtin_effects;
     mod compensation;
     mod controls;
+    mod dynamics_telemetry;
+    mod history_policy;
+    mod memory;
+    mod memory_pressure;
+    mod nonfinite;
     mod provider_buses;
     mod recorder;
     mod scaling;
@@ -2250,6 +2513,29 @@ mod tests {
     // callback window. All native/plugin preparation stays outside that window.
     std::thread_local! {
         static HEAP_OPERATIONS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+        static HEAP_BALANCE: std::cell::Cell<Option<HeapBalance>> = const { std::cell::Cell::new(None) };
+    }
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    struct HeapBalance {
+        allocated_bytes: usize,
+        freed_bytes: usize,
+        allocations: usize,
+        frees: usize,
+    }
+    fn account_heap_bytes(allocated: Option<usize>, freed: Option<usize>) {
+        let _ = HEAP_BALANCE.try_with(|count| {
+            if let Some(mut balance) = count.get() {
+                if let Some(bytes) = allocated {
+                    balance.allocated_bytes += bytes;
+                    balance.allocations += 1;
+                }
+                if let Some(bytes) = freed {
+                    balance.freed_bytes += bytes;
+                    balance.frees += 1;
+                }
+                count.set(Some(balance));
+            }
+        });
     }
     struct CountedAllocator;
     fn count_heap_operation() {
@@ -2263,15 +2549,24 @@ mod tests {
     unsafe impl std::alloc::GlobalAlloc for CountedAllocator {
         unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
             count_heap_operation();
-            unsafe { std::alloc::System.alloc(layout) }
+            let pointer = unsafe { std::alloc::System.alloc(layout) };
+            if !pointer.is_null() {
+                account_heap_bytes(Some(layout.size()), None);
+            }
+            pointer
         }
         unsafe fn dealloc(&self, pointer: *mut u8, layout: std::alloc::Layout) {
             count_heap_operation();
+            account_heap_bytes(None, Some(layout.size()));
             unsafe { std::alloc::System.dealloc(pointer, layout) };
         }
         unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
             count_heap_operation();
-            unsafe { std::alloc::System.alloc_zeroed(layout) }
+            let pointer = unsafe { std::alloc::System.alloc_zeroed(layout) };
+            if !pointer.is_null() {
+                account_heap_bytes(Some(layout.size()), None);
+            }
+            pointer
         }
         unsafe fn realloc(
             &self,
@@ -2280,7 +2575,11 @@ mod tests {
             size: usize,
         ) -> *mut u8 {
             count_heap_operation();
-            unsafe { std::alloc::System.realloc(pointer, layout, size) }
+            let replacement = unsafe { std::alloc::System.realloc(pointer, layout, size) };
+            if !replacement.is_null() {
+                account_heap_bytes(Some(size), Some(layout.size()));
+            }
+            replacement
         }
     }
     #[global_allocator]

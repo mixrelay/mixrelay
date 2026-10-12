@@ -5,37 +5,67 @@ use anyhow::{Result, ensure};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SessionApp {
     Graph,
+    /// The preceding app-owned controller, closed during migration.
+    LegacyService,
+    Service,
     Driver,
+    /// The background role of the unified `MixRelay` bundle.
+    UnifiedRuntime,
 }
 
 impl SessionApp {
-    pub(super) const ALL: [Self; 2] = [Self::Graph, Self::Driver];
+    pub(super) const ALL: [Self; 5] = [
+        Self::Graph,
+        Self::LegacyService,
+        Self::Service,
+        Self::Driver,
+        Self::UnifiedRuntime,
+    ];
 
     pub(super) const fn bundle(self) -> &'static str {
         match self {
-            Self::Graph => "/Applications/MixRelay.app",
-            Self::Driver => "/Applications/MixRelay Driver.app",
+            Self::Graph | Self::LegacyService | Self::UnifiedRuntime => {
+                "/Applications/MixRelay.app"
+            }
+            Self::Driver | Self::Service => "/Applications/MixRelay Driver.app",
         }
     }
 
     pub(super) const fn identifier(self) -> &'static str {
         match self {
-            Self::Graph => "io.mixrelay.desktop",
-            Self::Driver => "io.mixrelay.driver.desktop",
+            Self::Graph | Self::LegacyService | Self::UnifiedRuntime => "io.mixrelay.desktop",
+            Self::Driver | Self::Service => "io.mixrelay.driver.desktop",
+        }
+    }
+
+    pub(super) fn matches_command(self, command: &str) -> bool {
+        let executable = format!("{}/Contents/MacOS/mixrelay-desktop", self.bundle());
+        match self {
+            Self::LegacyService => command == format!("{executable} --background-service"),
+            Self::Service | Self::UnifiedRuntime => {
+                command == format!("{executable} --driver-runtime")
+            }
+            Self::Graph | Self::Driver => command == executable,
         }
     }
 
     pub(super) const fn quit_action(self) -> &'static str {
         match self {
             Self::Graph => "quit-graph-app",
+            Self::LegacyService => "quit-background-service",
+            Self::Service => "quit-driver-runtime",
             Self::Driver => "quit-driver-manager",
+            Self::UnifiedRuntime => "quit-mixrelay-runtime",
         }
     }
 
     pub(super) const fn restore_action(self) -> &'static str {
         match self {
             Self::Graph => "restore-graph-app",
+            Self::LegacyService => "restore-background-service",
+            Self::Service => "restore-driver-runtime",
             Self::Driver => "restore-driver-manager",
+            Self::UnifiedRuntime => "restore-mixrelay-runtime",
         }
     }
 }
@@ -89,7 +119,7 @@ mod tests {
     use std::cell::RefCell;
 
     #[test]
-    fn update_reopens_both_apps_only_after_commit_and_in_dependency_order() {
+    fn update_reopens_editor_controller_and_driver_only_after_commit() {
         let events = RefCell::new(Vec::new());
         run_with_apps_closed(
             &SessionApp::ALL,
@@ -109,9 +139,15 @@ mod tests {
             *events.borrow(),
             [
                 "quit-graph-app",
+                "quit-background-service",
+                "quit-driver-runtime",
                 "quit-driver-manager",
+                "quit-mixrelay-runtime",
                 "commit",
+                "restore-mixrelay-runtime",
                 "restore-driver-manager",
+                "restore-driver-runtime",
+                "restore-background-service",
                 "restore-graph-app"
             ]
         );
@@ -152,8 +188,14 @@ mod tests {
             actions,
             [
                 "quit-graph-app",
+                "quit-background-service",
+                "quit-driver-runtime",
                 "quit-driver-manager",
-                "restore-driver-manager"
+                "quit-mixrelay-runtime",
+                "restore-mixrelay-runtime",
+                "restore-driver-manager",
+                "restore-driver-runtime",
+                "restore-background-service"
             ]
         );
     }
@@ -215,8 +257,12 @@ mod tests {
             actions,
             [
                 "quit-graph-app",
+                "quit-background-service",
+                "quit-driver-runtime",
                 "quit-driver-manager",
                 "restore-driver-manager",
+                "restore-driver-runtime",
+                "restore-background-service",
                 "restore-graph-app"
             ]
         );
@@ -246,9 +292,15 @@ mod tests {
             *events.borrow(),
             [
                 "quit-graph-app",
+                "quit-background-service",
+                "quit-driver-runtime",
                 "quit-driver-manager",
+                "quit-mixrelay-runtime",
                 "commit",
+                "restore-mixrelay-runtime",
                 "restore-driver-manager",
+                "restore-driver-runtime",
+                "restore-background-service",
                 "restore-graph-app"
             ]
         );

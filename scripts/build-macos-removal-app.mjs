@@ -30,7 +30,7 @@ export function buildRemovalApp({executable, helper, output, version, identity})
   command('/usr/bin/codesign', ['--verify','--strict','--all-architectures',helper]);
   fs.mkdirSync(dirname(output), {recursive:true});
   const work = fs.mkdtempSync(join(dirname(output),'.mixrelay-remover-build-'));
-  const app = join(work, 'Uninstall MixRelay Driver.app');
+  const app = join(work, 'Uninstall MixRelay.app');
   let previous;
   try {
     for (const directory of ['MacOS','Helpers','Resources']) fs.mkdirSync(join(app,'Contents',directory), {recursive:true,mode:0o755});
@@ -47,8 +47,8 @@ export function buildRemovalApp({executable, helper, output, version, identity})
       fs.writeFileSync(join(localized,'Authorization.strings'),`"Remove MixRelay Driver" = ${JSON.stringify(title)};\n`);
     }
     const info = {
-      CFBundleIdentifier:'io.mixrelay.driver.uninstaller', CFBundleName:'Uninstall MixRelay Driver',
-      CFBundleDisplayName:'Uninstall MixRelay Driver',CFBundleExecutable:'mixrelay-driver-uninstaller',
+      CFBundleIdentifier:'io.mixrelay.driver.uninstaller', CFBundleName:'Uninstall MixRelay',
+      CFBundleDisplayName:'Uninstall MixRelay',CFBundleExecutable:'mixrelay-driver-uninstaller',
       CFBundlePackageType:'APPL',CFBundleShortVersionString:version,CFBundleVersion:version,
       CFBundleIconFile:'icon.icns',CFBundleDevelopmentRegion:'en',CFBundleLocalizations:languages.map(l=>l.language),
       LSMinimumSystemVersion:'14.2',NSHighResolutionCapable:true,MixRelaySigningTeam:team,

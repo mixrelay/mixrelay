@@ -7,21 +7,24 @@ import {
   useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-
-import type {
-  ControlPort,
-  GraphCatalogAction,
-  RuntimeGraphDocument,
-} from '../core/control-port/types';
+import type { ControlPort, RuntimeGraphDocument } from '../core/control-port/types';
+import { usePaidFeatures } from '../core/licensing/FeatureAccess';
 import { ActionButton } from '../core/ui/ActionButton';
+import { ApplicationStatusBar } from '../core/ui/ApplicationStatusBar';
+import { ProductHeading } from '../core/ui/BrandIdentity';
+import { IconActionButton } from '../core/ui/IconActionButton';
 import {
   hasPlatformModifier,
   isNativeTextEntryTarget,
   platformModifier,
 } from '../core/ui/platformShortcut';
-import { AudioSessionControl } from '../features/audio-session/AudioSessionControl';
-import { EnginePowerControl } from '../features/audio-session/EnginePowerControl';
+import { SidebarToggle } from '../core/ui/SidebarToggle';
+import { ThemePicker } from '../core/ui/ThemePicker';
+import { AudioPauseControl } from '../features/audio-session/AudioPauseControl';
+import { AudioSessionNotices } from '../features/audio-session/AudioSessionNotices';
 import { useAudioStatus } from '../features/audio-session/useAudioStatus';
+import { useDeviceBufferControl } from '../features/audio-session/useDeviceBufferControl';
+import { DriverInstallNotice } from '../features/driver-status/DriverInstallNotice';
 import type { DriverSession } from '../features/driver-status/useDriverSession';
 import { GraphCreateDialog } from '../features/graphs/GraphCreateDialog';
 import { GraphList } from '../features/graphs/GraphList';
@@ -96,36 +99,48 @@ function workspaceSessionDocument(
     : fallback;
 }
 
-function routingWorkspaceRevisionProps(
+function routingWorkspaceRuntimeProps(
   status: ReturnType<typeof useAudioStatus>,
   catalog: ReturnType<typeof useGraphCatalog>['catalog'],
 ) {
   return {
     failedProcessors: status?.failedProcessors,
     catalogRevision: catalog?.catalogRevision,
+    playbackPaused: status?.enginePower?.enabled === false || status?.enginePower?.transitioning,
   };
 }
 
 export function StudioScreen({
   controlPort,
   applicationActions,
+  applicationInfo,
   driverSession,
+  onInstallDriver,
 }: {
   controlPort: ControlPort;
   applicationActions?: ReactNode;
+  applicationInfo?: ReactNode;
   driverSession?: DriverSession;
+  onInstallDriver?: () => void;
 }) {
   const { t } = useTranslation();
+  const paid = usePaidFeatures();
   const [statusRefresh, setStatusRefresh] = useState(0);
   const status = useAudioStatus(controlPort, statusRefresh);
   const collection = useGraphCatalog(controlPort);
   const catalogErrorText = useCatalogError(collection.error);
   const { catalog, busy: catalogBusy, uncertain: catalogUncertain } = collection;
   const [sessionBusy, setSessionBusy] = useState(false);
+  const deviceBufferAction = useDeviceBufferControl(controlPort, status, setSessionBusy, () =>
+    setStatusRefresh((value) => value + 1),
+  );
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const ownedSession = useOwnedSessionDocument(controlPort, collection.document);
   const [sessionDocument, setSessionDocument] = ownedSession;
-  const { isCreatingGraph, setIsCreatingGraph, openNewGraph } = useGraphCreation(catalog?.activeId);
+  const { isCreatingGraph, setIsCreatingGraph, openNewGraph } = useGraphCreation(
+    catalog?.activeId,
+    paid || !catalog?.graphs.length,
+  );
   const busy = catalogBusy || sessionBusy || workspaceBusy || catalogUncertain;
   const title = useCatalogTitle(collection, busy, t('studio.untitledGraph'));
   const controlsDisabled = busy || title.unsaved;
@@ -133,9 +148,7 @@ export function StudioScreen({
     setSessionDocument(document);
     setStatusRefresh((value) => value + 1);
   };
-  const mutateCatalog = (action: GraphCatalogAction) => {
-    if (!busy) return collection.mutate(action);
-  };
+  const mutateCatalog = busy ? () => undefined : collection.mutate;
   const documentForWorkspace = workspaceSessionDocument(
     sessionDocument,
     catalog?.document.revision,
@@ -156,6 +169,7 @@ export function StudioScreen({
         inert={sessionBusy || catalogBusy || catalogUncertain}
       >
         <RoutingWorkspace
+          notice={driverInstallNotice(driverSession, onInstallDriver)}
           headerActions={
             <WorkspaceFileMenu
               controlPort={controlPort}
@@ -163,25 +177,14 @@ export function StudioScreen({
               run={collection.workspaceFile}
             />
           }
-          deviceDriverAction={{
-            settings: driverSession?.snapshot ? {
-              ...driverSession.snapshot.settings,
-              canCreate: driverSession.allowMultiDevice && driverSession.snapshot.settings.canCreate,
-            } : undefined,
-            enabled: driverSession?.snapshot?.state === 'ready' && !driverSession.busy,
-            error: driverSession?.error ? { endpointId: driverSession.endpointId, message: driverSession.error } : null,
-            change: (endpointId, update) => { void driverSession?.changeDevice(endpointId, update); },
-            create: async (spec) => {
-              const snapshot = await driverSession?.mutate({ action: 'create', spec });
-              return snapshot?.settings.devices.find((device) => device.spec.id === spec.id)?.spec ?? null;
-            },
-          }}
+          deviceDriverAction={driverRoutingActions(driverSession)}
+          deviceBufferAction={bufferRoutingActions(deviceBufferAction, sessionBusy)}
           key={`${catalog?.activeId ?? 'engine'}:${collection.documentGeneration}`}
           graphId={catalog?.activeId}
           interactionDisabled={catalogBusy || catalogUncertain || sessionBusy}
           audioSession={status?.audioSession}
           processorTimings={status?.processorTimings}
-          {...routingWorkspaceRevisionProps(status, catalog)}
+          {...routingWorkspaceRuntimeProps(status, catalog)}
           sessionDocument={documentForWorkspace}
           controlPort={controlPort}
           onBusyChange={setWorkspaceBusy}
@@ -191,6 +194,7 @@ export function StudioScreen({
       </section>
 
       <StudioStatusBar
+        applicationInfo={applicationInfo}
         disabled={controlsDisabled}
         status={status}
         controlPort={controlPort}
@@ -214,13 +218,15 @@ export function StudioScreen({
   );
 }
 
-function useGraphCreation(activeId: string | undefined) {
+function useGraphCreation(activeId: string | undefined, allowed: boolean) {
   const [isCreatingGraph, setIsCreatingGraph] = useState(false);
   useEffect(() => {
     if (activeId) setIsCreatingGraph(false);
   }, [activeId]);
-  const openNewGraph = useCallback(() => setIsCreatingGraph(true), []);
-  useNewGraphShortcut(Boolean(activeId), openNewGraph);
+  const openNewGraph = useCallback(() => {
+    if (allowed) setIsCreatingGraph(true);
+  }, [allowed]);
+  useNewGraphShortcut(Boolean(activeId) && allowed, openNewGraph);
   return { isCreatingGraph, setIsCreatingGraph, openNewGraph };
 }
 
@@ -237,35 +243,41 @@ function StudioFrame({
   return (
     <main className={styles.shell} data-sidebar-open={sidebarOpen}>
       <header className={styles.applicationHeader}>
-        <h1>MixRelay</h1>
-        <span className={styles.applicationActions}>{applicationActions}</span>
+        <ProductHeading />
+        <span className={styles.applicationActions}>
+          <ThemePicker />
+          {applicationActions}
+        </span>
       </header>
       <GraphSidebar hidden={!sidebarOpen} {...sidebar} />
-      <button
-        className={sidebarOpen ? styles.sidebarBoundary : styles.sidebarReopen}
-        type="button"
-        aria-label={t('studio.graphs')}
-        aria-expanded={sidebarOpen}
-        aria-controls="graph-sidebar"
-        onClick={() => setSidebarOpen((open) => !open)}
-      >
-        {!sidebarOpen ? (
-          <svg aria-hidden="true" viewBox="0 0 16 16">
-            <path d="m6 4 4 4-4 4" />
-          </svg>
-        ) : null}
-      </button>
+      <SidebarToggle
+        label={t('studio.graphs')}
+        opened={sidebarOpen}
+        controls="graph-sidebar"
+        onToggle={() => setSidebarOpen((open) => !open)}
+      />
       {children}
     </main>
   );
 }
 
-function StudioStatusBar(props: ComponentProps<typeof AudioSessionControl>) {
+function StudioStatusBar({
+  applicationInfo,
+  ...props
+}: ComponentProps<typeof AudioPauseControl> & {
+  applicationInfo?: ReactNode;
+}) {
   return (
-    <footer className={styles.statusBar}>
-      <AudioSessionControl {...props} />
-      <EnginePowerControl {...props} />
-    </footer>
+    <ApplicationStatusBar
+      className={styles.statusBar}
+      information={applicationInfo}
+      controls={
+        <>
+          <AudioSessionNotices status={props.status} />
+          <AudioPauseControl {...props} />
+        </>
+      }
+    />
   );
 }
 
@@ -284,6 +296,7 @@ function GraphSidebar({
 }) {
   const { t } = useTranslation();
   const { catalog, busy: catalogBusy, error: catalogError, reload: reloadCatalog } = collection;
+  const paid = usePaidFeatures();
   const catalogErrorText = useCatalogError(catalogError);
   return (
     <aside
@@ -308,31 +321,64 @@ function GraphSidebar({
         {catalogError ? (
           <div role="alert">
             <p>{catalogErrorText}</p>
-            <ActionButton
-              disabled={catalogBusy}
-              onClick={() => void reloadCatalog()}
-              variant="subtle"
-            >
+            <ActionButton disabled={catalogBusy} onClick={() => void reloadCatalog()}>
               {t('studio.reloadGraphs')}
             </ActionButton>
           </div>
         ) : null}
         {catalog?.persistenceError ? <p role="alert">{t('studio.graphSaveFailed')}</p> : null}
         <div className={styles.sidebarFooter}>
-          <button
-            type="button"
+          <IconActionButton
             aria-keyshortcuts={`${platformModifier()}+Shift+N`}
-            className={`${styles.graph} ${styles.newGraph}`}
-            disabled={!catalog}
+            label={t('studio.newGraph')}
+            disabled={!catalog || (!paid && catalog.graphs.length >= 1)}
+            aria-description={!paid ? t('licensing.limits.graphs') : undefined}
             onClick={onCreate}
           >
-            <span className={styles.newGraphIcon} aria-hidden="true">
-              +
-            </span>
-            <span className={styles.graphName}>{t('studio.newGraph')}</span>
-          </button>
+            <svg aria-hidden="true" viewBox="0 0 16 16">
+              <path d="M8 3v10M3 8h10" />
+            </svg>
+          </IconActionButton>
         </div>
       </nav>
     </aside>
   );
+}
+
+function driverRoutingActions(session: DriverSession | undefined) {
+  return {
+    settings: session?.snapshot
+      ? {
+          ...session.snapshot.settings,
+          canCreate: session.allowMultiDevice && session.snapshot.settings.canCreate,
+          canRename: session.allowMultiDevice && session.snapshot.settings.canRename,
+        }
+      : undefined,
+    enabled: session?.snapshot?.state === 'ready' && !session.busy,
+    error: session?.error ? { endpointId: session.endpointId, message: session.error } : null,
+    change: (
+      endpointId: string,
+      update: import('../features/routing-workspace/model').VirtualEndpointUpdate,
+    ) => {
+      void session?.changeDevice(endpointId, update);
+    },
+    create: async (spec: import('../core/control-port/types').VirtualEndpointSpec) => {
+      const snapshot = await session?.mutate({ action: 'create', spec });
+      return snapshot?.settings.devices.find((device) => device.spec.id === spec.id)?.spec ?? null;
+    },
+  };
+}
+
+function driverInstallNotice(session: DriverSession | undefined, onInstall?: () => void) {
+  return (
+    <DriverInstallNotice
+      state={session?.snapshot?.state}
+      onInstall={onInstall}
+      className={styles.driverNotice}
+    />
+  );
+}
+
+function bufferRoutingActions(action: ReturnType<typeof useDeviceBufferControl>, busy: boolean) {
+  return { ...action, enabled: action.enabled && !busy };
 }

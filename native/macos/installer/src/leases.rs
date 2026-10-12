@@ -99,6 +99,46 @@ impl LifecycleDirectory {
     /// Returns [`LeaseError::Busy`] for lock contention, or a validation/I/O
     /// error for an unusable lifecycle inode.
     pub fn acquire(&self) -> Result<LifecycleLeaseGuard, LeaseError> {
+        self.acquire_selected(true)
+    }
+
+    /// Locks the graph app and engine without interrupting the independent Driver manager.
+    /// # Errors
+    /// Returns when a selected owner or another installer holds a lock.
+    pub fn acquire_for_app_update(&self) -> Result<LifecycleLeaseGuard, LeaseError> {
+        self.acquire_selected(false)
+    }
+
+    /// Serializes an editor-only replacement without interrupting Driver-owned audio.
+    /// # Errors
+    /// Returns when the directory changed or another installer is active.
+    pub fn acquire_for_editor_update(&self) -> Result<EditorLeaseGuard, LeaseError> {
+        let current = Self::open(self.path.clone())?;
+        let previous = self.directory.metadata().map_err(|source| LeaseError::Io {
+            kind: LeaseKind::Installer,
+            path: self.path.clone(),
+            source,
+        })?;
+        let now = current
+            .directory
+            .metadata()
+            .map_err(|source| LeaseError::Io {
+                kind: LeaseKind::Installer,
+                path: self.path.clone(),
+                source,
+            })?;
+        if (previous.dev(), previous.ino()) != (now.dev(), now.ino()) {
+            return Err(LeaseError::UnsafePath {
+                path: self.path.clone(),
+                reason: "lifecycle directory was replaced",
+            });
+        }
+        Ok(EditorLeaseGuard(
+            self.acquire_lock(LeaseKind::Installer, true)?,
+        ))
+    }
+
+    fn acquire_selected(&self, include_manager: bool) -> Result<LifecycleLeaseGuard, LeaseError> {
         let current = Self::open(self.path.clone())?;
         let previous = self.directory.metadata().map_err(|source| LeaseError::Io {
             kind: LeaseKind::Installer,
@@ -121,7 +161,9 @@ impl LifecycleDirectory {
         }
         let app = self.acquire_lock(LeaseKind::App, false)?;
         let engine = self.acquire_lock(LeaseKind::Engine, false)?;
-        let manager = self.acquire_lock(LeaseKind::DriverManager, false)?;
+        let manager = include_manager
+            .then(|| self.acquire_lock(LeaseKind::DriverManager, false))
+            .transpose()?;
         let installer = self.acquire_lock(LeaseKind::Installer, true)?;
         Ok(LifecycleLeaseGuard {
             _app: app,
@@ -131,7 +173,7 @@ impl LifecycleDirectory {
         })
     }
 
-    fn acquire_lock(&self, kind: LeaseKind, exclusive: bool) -> Result<File, LeaseError> {
+    fn acquire_lock(&self, kind: LeaseKind, exclusive: bool) -> Result<LifecycleLock, LeaseError> {
         let path = self.lease_path(kind);
         let file = open_lease_file(&self.directory, &path, kind)?;
         let result = if exclusive {
@@ -143,7 +185,7 @@ impl LifecycleDirectory {
             fs::TryLockError::WouldBlock => LeaseError::Busy { kind },
             fs::TryLockError::Error(source) => LeaseError::Io { kind, path, source },
         })?;
-        Ok(file)
+        Ok(LifecycleLock(file))
     }
 
     fn lease_path(&self, kind: LeaseKind) -> PathBuf {
@@ -158,14 +200,26 @@ impl LifecycleDirectory {
 
 /// Retained app/engine shared and installer-exclusive lifecycle locks.
 ///
-/// Dropping this guard closes all three files, which releases the advisory
-/// locks. It contains no path-removal or installation behavior.
+/// Dropping this guard releases its locks before closing the files, even when
+/// a concurrent fork has inherited descriptors that remain open until exec.
+/// It contains no path-removal or installation behavior.
 #[derive(Debug)]
 pub struct LifecycleLeaseGuard {
-    _app: File,
-    _engine: File,
-    _manager: File,
-    _installer: File,
+    _app: LifecycleLock,
+    _engine: LifecycleLock,
+    _manager: Option<LifecycleLock>,
+    _installer: LifecycleLock,
+}
+
+#[derive(Debug)]
+struct LifecycleLock(File);
+
+impl Drop for LifecycleLock {
+    fn drop(&mut self) {
+        // CLOEXEC cannot close a forked descriptor until the child reaches exec.
+        // The guard owns this lock, so release it at its own lifetime boundary.
+        let _ = self.0.unlock();
+    }
 }
 
 /// Errors from lifecycle-directory validation or nonblocking lease acquisition.
@@ -393,3 +447,6 @@ fn validate_lease_metadata(path: &Path, metadata: &Metadata) -> Result<(), Lease
 
 #[cfg(test)]
 mod tests;
+
+/// Retains the exclusive transaction lease for an editor-only update.
+pub struct EditorLeaseGuard(#[allow(dead_code)] LifecycleLock);

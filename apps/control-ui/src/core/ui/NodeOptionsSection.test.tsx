@@ -40,10 +40,11 @@ it('keeps header power and volume mute independent of Options and usable while O
     gainControl: { label: 'Level', valueDb: 0 },
     onGainChange: vi.fn(),
   });
-  const options = screen.getByRole('button', { name: 'Options' });
+  const options = screen.getByRole('button', { name: (name) => name.endsWith('Options') });
   const power = screen.getByRole('button', { name: 'Enable Gain' });
-  expect(screen.queryByRole('button', { name: 'Mute Gain' })).toBeNull();
-  expect(options.parentElement).not.toContainElement(power);
+  const mute = screen.getByRole('button', { name: 'Mute Gain' });
+  expect(options.parentElement?.parentElement).toContainElement(power);
+  expect(options).not.toContainElement(power);
   expect(power.closest('[data-header-actions]')).toBeInTheDocument();
   expect(power.closest('button')).toBe(power);
   expect(power.parentElement?.closest('button')).toBeNull();
@@ -52,10 +53,9 @@ it('keeps header power and volume mute independent of Options and usable while O
   expect(onPower).toHaveBeenCalledOnce();
   expect(options).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(options);
-  const mute = screen.getByRole('button', { name: 'Mute Gain' });
   expect(options).not.toContainElement(mute);
-  expect(mute.parentElement).toContainElement(screen.getByRole('slider'));
-  expect(screen.getByRole('slider')).toHaveAttribute('data-disabled');
+  expect(mute.parentElement).not.toContainElement(screen.getByRole('slider'));
+  expect(screen.getByRole('slider')).toBeDisabled();
   expect(mute.closest('[inert]')).toBeNull();
   fireEvent.click(mute);
   expect(onMute).toHaveBeenCalledOnce();
@@ -66,7 +66,7 @@ it('keeps header power and volume mute independent of Options and usable while O
 
 it('provides controls without a meaningless disclosure when the node has no settings', () => {
   const { onPower } = node({ faceMode: 'compact' });
-  expect(screen.queryByRole('button', { name: 'Options' })).toBeNull();
+  expect(screen.queryByRole('button', { name: (name) => name.endsWith('Options') })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Enable Gain' }));
   expect(onPower).toHaveBeenCalledOnce();
 });
@@ -79,7 +79,7 @@ it('shows generic plugin parameters directly and leaves power outside their disa
     ],
     onParameterChange: vi.fn(),
   });
-  expect(screen.queryByRole('button', { name: 'Options' })).toBeNull();
+  expect(screen.queryByRole('button', { name: (name) => name.endsWith('Options') })).toBeNull();
   expect(screen.getByRole('slider').closest('[inert]')).not.toBeNull();
   expect(screen.getByRole('button', { name: 'Enable Gain' }).closest('[inert]')).toBeNull();
 });

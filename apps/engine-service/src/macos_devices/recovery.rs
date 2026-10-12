@@ -140,9 +140,10 @@ impl MacDevices {
         let mut devices = BTreeMap::new();
         for (id, spec) in online {
             self.require_preparation()?;
-            let selected = matches!(spec.selector, DeviceSelector::PersistentUid { .. })
-                .then(|| group.cloned())
-                .flatten();
+            let selected = (matches!(spec.selector, DeviceSelector::PersistentUid { .. })
+                && !super::endpoint_buffer::is_virtual_selection(&spec.selector))
+            .then(|| group.cloned())
+            .flatten();
             let existing = cache
                 .get(id)
                 .filter(|(old, _)| old == spec)
@@ -160,6 +161,16 @@ impl MacDevices {
                     .map_err(backend_error)?,
                 ),
             };
+            if let Some(frames) = self.saved_endpoint_buffer(&spec.selector) {
+                let owners: Vec<_> = cache
+                    .values()
+                    .filter_map(|(_, owner)| owner.upgrade())
+                    .filter(|owner| owner.ready())
+                    .chain(devices.values().cloned())
+                    .chain(std::iter::once(device.clone()))
+                    .collect();
+                super::endpoint_buffer::restore_saved(&device, frames, &owners)?;
+            }
             devices.insert(id.clone(), device);
         }
         Ok(devices)

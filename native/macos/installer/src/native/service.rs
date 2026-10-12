@@ -14,6 +14,7 @@ use super::{
     trust::{require_lifecycle_storage, require_root, validate_destination_ancestors},
 };
 
+mod engine;
 mod payload;
 mod runtime;
 
@@ -177,6 +178,11 @@ impl ServiceLifecycle for NativeServiceLifecycle {
         if let TransactionRequest::Install(sources) = request {
             self.verifier.verify_sources(sources)?;
         }
+        let engine_was_registered = recoverable_engine_registration(
+            request.kind(),
+            engine::registered().map_err(NativeError::UserData)?,
+            std::path::Path::new(crate::RUNTIME_LAUNCHD_PATH).is_file(),
+        )?;
         self.registration_after_drain = None;
         self.coreaudio_reload_attempted = false;
         Ok(NativeServiceSnapshot {
@@ -184,6 +190,7 @@ impl ServiceLifecycle for NativeServiceLifecycle {
             launchd_configuration: installed,
             account: self.account.clone(),
             team: self.team.clone(),
+            engine_was_registered,
             hal_was_present: fs::symlink_metadata(HAL_PATH).is_ok(),
             remover_was_present: fs::symlink_metadata(crate::REMOVAL_LAUNCHD_PATH).is_ok()
                 && fs::symlink_metadata(crate::UNINSTALLER_PATH).is_ok(),
@@ -208,7 +215,8 @@ impl ServiceLifecycle for NativeServiceLifecycle {
             return Ok(());
         }
         let definition = self.verifier.verify_staged(staged)?;
-        Self::write_bound_plist(staged, &definition)
+        Self::write_bound_plist(staged, &definition)?;
+        self.write_runtime_plist(staged)
     }
 
     fn drain(&mut self, snapshot: &Self::Snapshot) -> Result<(), Self::Error> {
@@ -235,6 +243,7 @@ impl ServiceLifecycle for NativeServiceLifecycle {
         if self.operation == crate::OperationKind::Install {
             crate::removal::unregister_helper().map_err(NativeError::UserData)?;
         }
+        engine::drain().map_err(NativeError::UserData)?;
         self.registration_after_drain = Some(RegistrationState::Absent);
         Ok(())
     }
@@ -287,6 +296,9 @@ impl ServiceLifecycle for NativeServiceLifecycle {
         Self::ensure_idle(&current)?;
         match request {
             TransactionRequest::Install(_) => {
+                if std::path::Path::new(crate::RUNTIME_LAUNCHD_PATH).exists() {
+                    engine::register().map_err(NativeError::UserData)?;
+                }
                 let version = installed_hal_version()?;
                 activate_driver(
                     &mut self.coreaudio_reload_attempted,
@@ -317,6 +329,7 @@ impl ServiceLifecycle for NativeServiceLifecycle {
 
     fn prepare_restore(&mut self, snapshot: &Self::Snapshot) -> Result<(), Self::Error> {
         drop(self.pending_user_data_cleanup.take());
+        engine::drain().map_err(NativeError::UserData)?;
         if self.operation == crate::OperationKind::Install {
             crate::removal::unregister_helper().map_err(NativeError::UserData)?;
         }
@@ -383,6 +396,9 @@ impl ServiceLifecycle for NativeServiceLifecycle {
         } else if self.operation == crate::OperationKind::Install {
             crate::removal::remove_right().map_err(NativeError::UserData)?;
         }
+        if snapshot.engine_was_registered {
+            engine::register().map_err(NativeError::UserData)?;
+        }
         match &snapshot.registration {
             RegistrationState::Absent => {
                 if self.coreaudio_reload_attempted {
@@ -414,6 +430,7 @@ pub struct NativeServiceSnapshot {
     launchd_configuration: Option<LaunchdConfiguration>,
     account: ResolvedServiceAccount,
     team: SigningTeam,
+    engine_was_registered: bool,
     hal_was_present: bool,
     remover_was_present: bool,
 }
@@ -427,4 +444,34 @@ fn require_reload_approval(approved: bool) -> Result<(), NativeError> {
         return Err(NativeError::CoreAudioReloadApprovalRequired);
     }
     Ok(())
+}
+
+// Removal can drain an exact-identity job even after its definition was deleted.
+// Rollback can re-register it only when the original definition existed.
+fn recoverable_engine_registration(
+    operation: crate::OperationKind,
+    registered: bool,
+    definition_present: bool,
+) -> Result<bool, NativeError> {
+    if operation == crate::OperationKind::Install && registered && !definition_present {
+        return Err(NativeError::LaunchdState(
+            "audio engine registration has no validated owned definition",
+        ));
+    }
+    Ok(registered && definition_present)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn removal_accepts_a_deleted_engine_definition_without_inventing_rollback_payload() {
+        assert!(
+            !recoverable_engine_registration(crate::OperationKind::Remove, true, false).unwrap()
+        );
+        assert!(
+            recoverable_engine_registration(crate::OperationKind::Install, true, false).is_err()
+        );
+        assert!(recoverable_engine_registration(crate::OperationKind::Remove, true, true).unwrap());
+    }
 }

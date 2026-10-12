@@ -1,4 +1,43 @@
+import { effectTranslations } from '../effects';
 export const ja = {
+  effects: effectTranslations.ja,
+  theme: {
+    label: '外観',
+    current: '外観: {{theme}}',
+    system: 'システム',
+    light: 'ライト',
+    dark: 'ダーク',
+  },
+  about: {
+    title: 'MixRelayについて',
+    version: 'バージョン {{version}}',
+    licensed: '認証済み',
+    unknown: 'ライセンス状態を確認できません',
+  },
+  runtimeConnection: {
+    connecting: {
+      title: 'MixRelayに接続中',
+      description: 'オーディオを準備しています。MixRelayの準備が完了すると作業画面が開きます。',
+    },
+    not_installed: {
+      title: 'MixRelayが必要です',
+      description:
+        'オーディオのルーティング、エフェクト、録音を使用するには、MixRelayをインストールしてから再接続してください。',
+    },
+    incompatible: {
+      title: 'MixRelayを更新してください',
+      description:
+        'インストール済みのMixRelayはこのアプリと互換性がありません。更新してから再接続してください。',
+    },
+    unavailable: {
+      title: 'MixRelayに接続できません',
+      description:
+        'MixRelayが応答しないか、オーディオエンジンの準備ができていません。再接続してください。',
+    },
+    install: 'MixRelayをインストール',
+    update: 'MixRelayを更新',
+    retry: '再接続',
+  },
   workspaceFile: {
     file: 'ファイル',
     'new': '新規ワークスペース',
@@ -7,14 +46,18 @@ export const ja = {
     saveAs: '名前を付けて保存…',
   },
   driverManagement: {
+    mixed: '不一致',
+    channels: 'チャンネル',
+    bitDepth: 'ビット深度',
+    unselectedBuffer: '未選択',
+    pendingBuffer: 'デバイス接続時に適用されます。',
+    observedBuffer: '現在の適用値',
+    bufferSize: 'バッファサイズ',
+    frames: 'フレーム',
     title: 'ドライバー設定',
     loading: 'ドライバーの状態を読み込み中…',
     unavailable: 'ドライバーサービスを利用できません。',
     name: 'デバイス名',
-    renderChannels: '再生チャンネル数',
-    captureChannels: 'キャプチャチャンネル数',
-    renderFormat: '再生形式',
-    captureFormat: 'キャプチャ形式',
     unknown: '不明',
     create: 'デバイスを作成',
     save: '適用',
@@ -24,7 +67,7 @@ export const ja = {
     changeFailed: 'デバイスを変更できませんでした。更新してから、もう一度お試しください。',
     saveFailed: 'デバイスは変更されましたが、設定を保存できませんでした。',
     deviceMissing: 'このデバイスは存在しません。デバイス一覧を更新してください。',
-    paidRequired: 'デバイスの追加や削除には、有料の MixRelay ライセンスが必要です。',
+    paidRequired: 'この操作には有料のMixRelayライセンスが必要です。',
     openApp: 'MixRelay を開く',
     appUnavailable: 'MixRelay がインストールされていないか、開くことができませんでした。',
   },
@@ -53,13 +96,19 @@ export const ja = {
     },
   },
   licensing: {
+    limits: {
+      graphs: '無料版: グラフ1個まで',
+      inputs: '無料版: 入力2個まで',
+      outputs: '無料版: 出力2個まで',
+      plugins: '無料版: 外部プラグイン2個まで',
+      virtualDevices: '無料版: 仮想デバイス1個まで',
+    },
+    freeSummary:
+      '無料：グラフ1個、入力2個、出力デバイス2個、仮想デバイス1個、Driverのチャンネル割り当て4個、外部プラグイン2個、ステレオレコーダー1個。無料グラフとチャンネル割り当ては保存・読み込みできます。デバイス名の変更にはライセンスが必要です。',
     title: 'ライセンス',
     close: '閉じる',
     loading: 'ライセンスを確認中…',
     retry: '再確認',
-    stopAudio: '音声を停止',
-    stopRequested: '停止要求を送信しました。',
-    stopFailed: '音声を停止できませんでした。もう一度試すか、「終了」を使用してください。',
     key: 'ライセンスキー',
     instanceName: 'デバイス名',
     activate: 'アクティベート',
@@ -67,20 +116,16 @@ export const ja = {
     deactivate: 'このデバイスの認証を解除',
     purchase: 'ライセンスを購入',
     expires: '有効期限: {{date}}',
-    expiredOn: '{{date}} に期限切れ',
     storeUnavailable: 'このビルドでは購入とアクティベーションを利用できません。',
     termsTitle: '利用規約',
     integrationNotice:
       '通常の利用と、他社製品への MixRelay の組み込みや再配布の権利は別です。製品への組み込みには、別途有料の契約が必要です。',
     states: {
-      trial: '試用版 · 残り {{count}} 日',
+      free: '無料',
       licensed: 'ライセンス認証済み · オフラインでの利用は残り {{count}} 日',
-      expired: '利用期限切れ',
       clock_invalid: 'デバイスの時計を確認してください',
     },
     messages: {
-      expired:
-        '利用期限が終了しました。ライセンスをアクティベートするか、既存のライセンスをオンラインで確認してください。',
       clock_invalid:
         'デバイスの時計を確認してから、ライセンスを確認またはアクティベートしてください。',
     },
@@ -102,6 +147,8 @@ export const ja = {
     },
   },
   recorder: {
+    freeLimit:
+      '無料録音：1テイクにつき最大2チャンネル・2時間。一時停止時間は含みません。録音は自動停止し、音声ルーティングは継続します。',
     channels: 'チャンネル',
     title: 'レコーダー',
     folder: '録音フォルダー',
@@ -124,13 +171,13 @@ export const ja = {
     },
   },
   audioSession: {
-    powerOn: 'エンジンをオンにする',
-    powerOff: 'エンジンをオフにする',
-    powerChanging: 'エンジンを切り替え中…',
-    powerFailed: 'エンジンの切り替えに失敗しました。現在の状態を確認してください。',
+    resume: '再開',
+    pause: '一時停止',
+    changing: 'オーディオの状態を変更中…',
+    pauseFailed: '一時停止または再開に失敗しました。現在の状態を確認してください。',
     diagnostics: 'オーディオの詳細',
     processingRate: '処理サンプルレート',
-    processingBuffer: 'バッファーサイズ',
+    processingBuffer: '処理バッファー',
     bufferLatency: 'バッファー遅延',
     bufferLatencyHint:
       '処理バッファー 1 個分の遅延（サンプル数 ÷ サンプルレート）です。入出力全体の遅延ではありません。',
@@ -139,7 +186,7 @@ export const ja = {
     blockSize: 'バッファーサイズ',
     apply: '適用',
     applying: '適用中…',
-    changeNotice: '音声が一時的に途切れ、取り消し履歴が消去されます。',
+    changeNotice: '設定の変更中は音声が一時的に途切れます。',
     captureRateLocked: '現在、アプリケーション音声のキャプチャには 48 kHz が必要です。',
     changeFailed: 'オーディオセッションを変更できませんでした。エンジンの状態を確認してください。',
     errors: {
@@ -202,6 +249,8 @@ export const ja = {
     },
   },
   common: {
+    showPassword: 'パスワードを表示',
+    hidePassword: 'パスワードを隠す',
     appName: 'MixRelay',
     beta: '限定プレビュー',
     cancel: 'キャンセル',
@@ -260,6 +309,11 @@ export const ja = {
         preferences_unavailable: 'セッション: 設定が保存されていません',
         stored_format_unavailable: 'セッション: 保存済みの形式を利用できません',
       },
+    },
+    nodeName: {
+      title: '表示名を変更',
+      label: '表示名',
+      save: '保存',
     },
     context: {
       removeNode: 'ノードを削除',
@@ -362,6 +416,8 @@ export const ja = {
       unavailable: 'エンジンを利用できません',
     },
     errors: {
+      feature_limit:
+        '無料プランの上限を超えています。接続やノードを減らすか、ライセンスを有効にしてください。',
       audio_device_disconnected: '仮想オーディオデバイスの設定を適用できませんでした。',
       audio_source_unavailable:
         'アプリケーションの音声をキャプチャできません。アプリケーションと音声キャプチャの権限を確認してください。',
@@ -375,8 +431,8 @@ export const ja = {
       graph_invalid: '無効なオーディオグラフがエンジンによって拒否されました。',
       graph_draft_changed:
         '再読み込み中に編集内容が変わりました。編集中の内容は保持されています。もう一度選択してください。',
-      graph_revision_stale:
-        'グラフが別の場所で変更されました。再読み込みしてから再適用してください。',
+      graph_revision_stale: '変更を適用できませんでした。もう一度お試しください。',
+      graph_conflict_unresolved: '同時の変更が競合し、自動で適用できませんでした。',
       processor_unavailable: '選択したオーディオプロセッサーを利用できません。',
     },
     recovery: {
@@ -399,6 +455,10 @@ export const ja = {
       reload: '保存済みの配置を読み込み',
     },
     processorControl: {
+      probeFailed: 'このプラグインを読み込めませんでした。他のエフェクトは引き続き使用できます。',
+      scanFailed:
+        'プラグインの検索を完了できませんでした。以前に確認されたエフェクトは保持されます。',
+      technicalDetails: '技術情報',
       scanning: 'オーディオエフェクトをスキャン中…',
       incomplete: 'エフェクトの検索が完了していません',
       partial:
@@ -578,8 +638,9 @@ export const ja = {
     },
   },
   driver: {
+    installNotice: '仮想オーディオデバイスを利用できません。',
+    getInstaller: 'MixRelay のインストーラーを入手',
     title: '仮想オーディオドライバー',
-    description: 'MixRelay Capture と MixRelay Stream',
     actionInstall: 'ドライバーをインストール',
     actionRestart: 'オーディオサービスを再起動',
     actionDiagnose: '診断を開く',

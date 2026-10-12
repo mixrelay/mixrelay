@@ -34,6 +34,7 @@ describe('processor native scan diagnostics', () => {
                 format: 'vst3',
                 stage: 'probe',
                 pluginId: 'fixture',
+                pluginName: 'Example Effect',
                 message: '<script>denied</script>',
               },
             ],
@@ -56,6 +57,21 @@ describe('processor native scan diagnostics', () => {
       );
       expect(container.querySelector('details')).not.toHaveAttribute('open');
       expect(container.querySelector('li')).toHaveTextContent('VST3');
+      expect(container.querySelector('li')).toHaveTextContent('Example Effect');
+      expect(container.querySelector('li')).toHaveTextContent(
+        i18n.t('routing.processorControl.probeFailed'),
+      );
+      const technicalDetails = container.querySelector('li details');
+      expect(technicalDetails).not.toHaveAttribute('open');
+      expect(technicalDetails?.querySelector('pre')).toHaveTextContent('<script>denied</script>');
+      expect(technicalDetails?.querySelector('pre')).not.toBeVisible();
+      const scanSummary = container.querySelector('details > summary');
+      const technicalSummary = technicalDetails?.querySelector('summary');
+      if (!scanSummary || !technicalSummary) throw new Error('missing scan disclosure controls');
+      fireEvent.click(scanSummary);
+      expect(technicalDetails?.querySelector('pre')).not.toBeVisible();
+      fireEvent.click(technicalSummary);
+      expect(technicalDetails?.querySelector('pre')).toBeVisible();
       expect(container.querySelector('li')).toHaveTextContent('<script>denied</script>');
       expect(container.querySelector('script')).toBeNull();
       fireEvent.click(

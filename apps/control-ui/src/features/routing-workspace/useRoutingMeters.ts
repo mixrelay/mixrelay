@@ -22,7 +22,8 @@ class MeterRequestOwner {
     };
     this.pending = request;
     const release = () => {
-      if (this.pending === request) this.pending = undefined;
+      // read() reuses this owner until settlement, so this is its only pending request.
+      this.pending = undefined;
     };
     void request.promise.then(release, release);
     return request;

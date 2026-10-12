@@ -1,4 +1,40 @@
+import { effectTranslations } from '../effects';
 export const zhHans = {
+  effects: effectTranslations.zhHans,
+  theme: {
+    label: '外观',
+    current: '外观：{{theme}}',
+    system: '跟随系统',
+    light: '浅色',
+    dark: '深色',
+  },
+  about: {
+    title: '关于 MixRelay',
+    version: '版本 {{version}}',
+    licensed: '已授权',
+    unknown: '授权状态未知',
+  },
+  runtimeConnection: {
+    connecting: {
+      title: '正在连接 MixRelay',
+      description: '正在准备音频。MixRelay 就绪后将打开工作区。',
+    },
+    not_installed: {
+      title: '需要 MixRelay',
+      description: '请安装 MixRelay 以使用音频路由、效果和录音，然后重新连接。',
+    },
+    incompatible: {
+      title: '请更新 MixRelay',
+      description: '已安装的 MixRelay 与此应用不兼容。请更新后重新连接。',
+    },
+    unavailable: {
+      title: '无法连接 MixRelay',
+      description: 'MixRelay 未响应或音频引擎尚未就绪。请重新连接。',
+    },
+    install: '安装 MixRelay',
+    update: '更新 MixRelay',
+    retry: '重新连接',
+  },
   workspaceFile: {
     file: '文件',
     'new': '新建工作区',
@@ -7,14 +43,18 @@ export const zhHans = {
     saveAs: '另存为…',
   },
   driverManagement: {
+    mixed: '不一致',
+    channels: '通道',
+    bitDepth: '位深度',
+    unselectedBuffer: '未选择',
+    pendingBuffer: '设备连接时应用。',
+    observedBuffer: '当前应用值',
+    bufferSize: '缓冲区大小',
+    frames: '帧',
     title: '驱动程序设置',
     loading: '正在读取驱动程序状态…',
     unavailable: '驱动程序服务不可用。',
     name: '设备名称',
-    renderChannels: '播放通道数',
-    captureChannels: '采集通道数',
-    renderFormat: '播放格式',
-    captureFormat: '采集格式',
     unknown: '未知',
     create: '创建设备',
     save: '应用',
@@ -24,7 +64,7 @@ export const zhHans = {
     changeFailed: '无法更改设备。请刷新后重试。',
     saveFailed: '设备已更改，但无法保存设置。',
     deviceMissing: '此设备已不存在。请刷新设备列表。',
-    paidRequired: '添加或移除设备需要付费 MixRelay 许可证。',
+    paidRequired: '此操作需要付费 MixRelay 许可证。',
     openApp: '打开 MixRelay',
     appUnavailable: 'MixRelay 未安装或无法打开。',
   },
@@ -50,13 +90,19 @@ export const zhHans = {
     },
   },
   licensing: {
+    limits: {
+      graphs: '免费版：1 个图',
+      inputs: '免费版：2 个输入',
+      outputs: '免费版：2 个输出',
+      plugins: '免费版：2 个外部插件',
+      virtualDevices: '免费版：1 个虚拟设备',
+    },
+    freeSummary:
+      '免费：1个图、2个输入、2个输出设备、1个虚拟设备、4个Driver通道映射、2个外部插件和1个立体声录音器。免费图及其通道映射可以保存和加载。重命名设备需要许可证。',
     title: '许可证',
     close: '关闭',
     loading: '正在检查许可证…',
     retry: '再次检查',
-    stopAudio: '停止音频',
-    stopRequested: '已发送停止请求。',
-    stopFailed: '无法停止音频。请重试或使用“退出”。',
     key: '许可证密钥',
     instanceName: '设备名称',
     activate: '激活',
@@ -64,19 +110,16 @@ export const zhHans = {
     deactivate: '取消此设备的激活',
     purchase: '购买许可证',
     expires: '有效期至 {{date}}',
-    expiredOn: '已于 {{date}} 到期',
     storeUnavailable: '此版本不支持购买和激活。',
     termsTitle: '使用条款',
     integrationNotice:
       '一般使用与将 MixRelay 集成到第三方产品中或随第三方产品再分发的权利相互独立。产品集成需要单独签订付费协议。',
     states: {
-      trial: '试用 · 剩余 {{count}} 天',
+      free: '免费',
       licensed: '已获许可 · 剩余 {{count}} 天离线使用时间',
-      expired: '使用权限已到期',
       clock_invalid: '请检查设备时钟',
     },
     messages: {
-      expired: '您的使用权限已到期。请激活许可证或在线检查现有许可证。',
       clock_invalid: '请检查设备时钟，然后检查或激活许可证。',
     },
     errors: {
@@ -95,6 +138,7 @@ export const zhHans = {
     },
   },
   recorder: {
+    freeLimit: '免费录音：每次最多2个通道、2小时，不计暂停时间。录音自动停止，音频路由继续运行。',
     channels: '通道',
     title: '录音器',
     folder: '录音文件夹',
@@ -117,13 +161,13 @@ export const zhHans = {
     },
   },
   audioSession: {
-    powerOn: '开启引擎',
-    powerOff: '关闭引擎',
-    powerChanging: '正在切换引擎状态…',
-    powerFailed: '引擎状态切换失败。请检查当前状态。',
+    resume: '继续',
+    pause: '暂停',
+    changing: '正在更改音频状态…',
+    pauseFailed: '暂停或继续失败。请检查当前状态。',
     diagnostics: '音频详情',
     processingRate: '处理采样率',
-    processingBuffer: '缓冲区大小',
+    processingBuffer: '处理缓冲区',
     bufferLatency: '缓冲区延迟',
     bufferLatencyHint: '一个处理缓冲区的延迟（采样数 ÷ 采样率），并非总输入输出延迟。',
     frames: '帧',
@@ -131,7 +175,7 @@ export const zhHans = {
     blockSize: '缓冲区大小',
     apply: '应用',
     applying: '正在应用…',
-    changeNotice: '音频会短暂中断，撤销历史将被清空。',
+    changeNotice: '更改此设置时，音频会短暂中断。',
     captureRateLocked: '应用音频采集目前要求 48 kHz。',
     changeFailed: '无法更改音频会话。请检查引擎状态。',
     errors: {
@@ -183,6 +227,8 @@ export const zhHans = {
     },
   },
   common: {
+    showPassword: '显示密码',
+    hidePassword: '隐藏密码',
     appName: 'MixRelay',
     beta: '非公开预览',
     cancel: '取消',
@@ -240,6 +286,11 @@ export const zhHans = {
         preferences_unavailable: '会话：设置未保存',
         stored_format_unavailable: '会话：已保存的格式不可用',
       },
+    },
+    nodeName: {
+      title: '更改显示名称',
+      label: '显示名称',
+      save: '保存',
     },
     context: {
       removeNode: '删除节点',
@@ -341,6 +392,7 @@ export const zhHans = {
       unavailable: '引擎不可用',
     },
     errors: {
+      feature_limit: '此更改超出免费方案的上限。请减少连接或节点，或激活许可证。',
       audio_device_disconnected: '无法应用虚拟音频设备配置。',
       audio_source_unavailable: '应用音频采集不可用。请检查应用及音频采集权限。',
       control_unavailable: '本地音频引擎不可用。',
@@ -351,7 +403,8 @@ export const zhHans = {
       graph_exchange_busy: '音频引擎仍在启用上一个音频图。',
       graph_invalid: '引擎拒绝了无效的音频图。',
       graph_draft_changed: '重新加载期间编辑内容发生了变化。草稿已保留；请重新选择。',
-      graph_revision_stale: '音频图已在其他位置更改。请重新加载后再应用。',
+      graph_revision_stale: '无法应用更改。请重试。',
+      graph_conflict_unresolved: '并发更改持续冲突，无法自动应用。',
       processor_unavailable: '所选音频处理器不可用。',
     },
     recovery: {
@@ -372,6 +425,9 @@ export const zhHans = {
       reload: '加载已保存的布局',
     },
     processorControl: {
+      probeFailed: '无法加载此插件。其他效果器仍可使用。',
+      scanFailed: '无法完成此次插件搜索。保留之前可用的效果器。',
+      technicalDetails: '技术详情',
       scanning: '正在扫描音频效果器…',
       incomplete: '效果器搜索未完成',
       partial: '部分效果器无法扫描。此前可用的效果器已保留。',
@@ -548,8 +604,9 @@ export const zhHans = {
     },
   },
   driver: {
+    installNotice: '虚拟音频设备不可用。',
+    getInstaller: '获取 MixRelay 安装程序',
     title: '虚拟音频驱动程序',
-    description: 'MixRelay Capture 和 MixRelay Stream',
     actionInstall: '安装驱动程序',
     actionRestart: '重启音频服务',
     actionDiagnose: '打开诊断',

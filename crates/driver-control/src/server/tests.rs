@@ -7,7 +7,10 @@ use crate::test_backend::FakeBackend;
 
 fn app(fixture: &FixtureDir) -> Router {
     let (backend, _) = FakeBackend::ready();
-    router(DriverManager::open(backend, fixture.join("drivers.json")).unwrap())
+    router_with_access(
+        DriverManager::open(backend, fixture.join("drivers.json")).unwrap(),
+        Arc::new(|| true),
+    )
 }
 
 #[tokio::test]
@@ -256,4 +259,115 @@ async fn stale_revision_and_missing_identity_are_distinct_failures() {
             expected_status
         );
     }
+}
+
+#[tokio::test]
+async fn direct_free_requests_cannot_rename_create_or_remove_devices() {
+    let fixture = FixtureDir::new("driver-http-free-access").unwrap();
+    let (backend, observed) = FakeBackend::ready();
+    let path = fixture.join("drivers.json");
+    let mut manager = DriverManager::open(backend, &path).unwrap();
+    let snapshot = manager.snapshot().unwrap();
+    let baseline = std::fs::read(&path).unwrap();
+    let applies = observed.lock().applies;
+    let mut renamed = snapshot.settings.devices[0].spec.clone();
+    renamed.display_name = "Renamed without paid access".into();
+    let mut created = renamed.clone();
+    created.id = "second-device".into();
+    let app = router(manager); // No publisher provider defaults to free access.
+    for command in [
+        DriverCommand::Configure {
+            expected_revision: snapshot.revision,
+            spec: renamed,
+        },
+        DriverCommand::Create {
+            expected_revision: snapshot.revision,
+            spec: created,
+        },
+        DriverCommand::Remove {
+            expected_revision: snapshot.revision,
+            endpoint_id: snapshot.settings.devices[0].spec.id.clone(),
+        },
+    ] {
+        let request = Request::builder()
+            .method(Method::PUT)
+            .uri(SNAPSHOT_ROUTE)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_vec(&command).unwrap()))
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(request).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+    }
+    assert_eq!(std::fs::read(path).unwrap(), baseline);
+    assert_eq!(observed.lock().applies, applies);
+}
+
+#[tokio::test]
+async fn service_rechecks_expiry_without_removing_paid_devices_and_keeps_free_64_channels() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let fixture = FixtureDir::new("driver-http-expiry").unwrap();
+    let (backend, _) = FakeBackend::ready();
+    let mut manager = DriverManager::open(backend, fixture.join("drivers.json")).unwrap();
+    let initial = manager.snapshot().unwrap();
+    let paid = Arc::new(AtomicBool::new(true));
+    let access = paid.clone();
+    let app = router_with_access(manager, Arc::new(move || access.load(Ordering::Acquire)));
+    let mut spec = initial.settings.devices[0].spec.clone();
+    spec.id = "paid-second-device".into();
+    spec.display_name = "Paid second device".into();
+    let create = DriverCommand::Create {
+        expected_revision: initial.revision,
+        spec: spec.clone(),
+    };
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri(SNAPSHOT_ROUTE)
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&create).unwrap()))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let snapshot: DriverSnapshot =
+        serde_json::from_slice(&to_bytes(response.into_body(), JSON_LIMIT).await.unwrap()).unwrap();
+    paid.store(false, Ordering::Release);
+    // Existing paid inventory stays; free geometry changes remain available.
+    let mut spec = snapshot.settings.devices[0].spec.clone();
+    spec.render = Some(mixrelay_audio_io::StreamSpec {
+        channels: 64,
+        channel_layout: mixrelay_audio_io::ChannelLayout::Discrete,
+    });
+    spec.capture = spec.render;
+    let configure = DriverCommand::Configure {
+        expected_revision: snapshot.revision,
+        spec,
+    };
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri(SNAPSHOT_ROUTE)
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&configure).unwrap()))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let snapshot: DriverSnapshot =
+        serde_json::from_slice(&to_bytes(response.into_body(), JSON_LIMIT).await.unwrap()).unwrap();
+    assert_eq!(snapshot.settings.devices.len(), 2);
+    assert!(!snapshot.settings.can_create);
+    assert!(!snapshot.settings.can_rename);
+    let remove = DriverCommand::Remove {
+        expected_revision: snapshot.revision,
+        endpoint_id: "paid-second-device".into(),
+    };
+    let request = Request::builder()
+        .method(Method::PUT)
+        .uri(SNAPSHOT_ROUTE)
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_vec(&remove).unwrap()))
+        .unwrap();
+    assert_eq!(
+        app.oneshot(request).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
 }

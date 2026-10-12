@@ -1,0 +1,199 @@
+import { Meta, Canvas } from '@storybook/addon-docs/blocks';
+import * as FoundationsStories from '../theme/Foundations.stories';
+import * as DesignLanguageStories from '../theme/DesignLanguage.stories';
+import * as NumericValueStories from '../ui/NumericValueControl.stories';
+import * as ParameterFieldStories from '../ui/ParameterField.stories';
+import { DocsLayout } from './DocsLayout';
+import { SemanticTokenReference, PaletteReference, ComponentTokenReference, ContrastReference, TypographyReference, FontSourceReference, GeometryReference, BrandReference } from './FoundationsReference';
+
+<Meta title="Design System/Foundations" />
+
+<DocsLayout>
+
+# Foundations
+
+MixRelay의 색·서체·간격·밀도·형태·상태 규칙입니다. 앱과 아래 Canvas는 같은 Core 토큰과 컴포넌트를 사용합니다. 참조표의 값은 `tokens.ts`에서 직접 읽습니다.
+
+| 소유자 | 소유하는 것 | 변경 위치 |
+| --- | --- | --- |
+| Foundations | 팔레트·의미 역할·서체·반복 간격·경계·모션 | `core/theme/tokens.ts`, `Fonts.css` |
+| Theme | 같은 역할의 Light/Dark 연결·시스템 선택·공통 조작 표현 | `theme.ts`, `MixRelayProvider.tsx`, `ComponentTheme.module.css` |
+| Core | 컴포넌트의 의미·상태·크기·접근성·부위 배치 | 해당 Core 컴포넌트와 Story |
+| Feature | 실제 데이터·명령·문구·확인된 상태 | 해당 Feature |
+| Screen | Core와 Feature의 제품 화면 조합 | 해당 Screen |
+
+Feature와 Screen은 `tone`, `density`, `emphasis` 같은 Core 계약을 선택합니다. 사용처의 색·글꼴·모서리·상태 CSS로 공통 규격을 우회하지 않습니다. 같은 색을 쓰더라도 역할이 다른 토큰은 구분합니다.
+
+### Carbon 기준의 적용 범위
+
+Carbon의 [테마](https://www.carbondesignsystem.com/building-blocks/foundations/themes/overview)에서 역할과 값의 분리를, [타이포그래피](https://www.carbondesignsystem.com/building-blocks/foundations/typography/type-sets)에서 크기·두께·행간을 함께 검토하는 방식을, [간격](https://www.carbondesignsystem.com/building-blocks/foundations/spacing/overview)에서 반복되는 스케일을 참고합니다. MixRelay의 팔레트·조밀한 오디오 UI 크기·Regular/Medium 구성은 아래 코드의 제품 결정입니다. Carbon 패키지나 IBM 팔레트를 도입한 시스템으로 표시하지 않습니다.
+
+## 색과 테마
+
+`palette → themeRoles.light/dark → mixrelayVariables → Core → 화면` 순서로 적용합니다. 팔레트는 원시 값이고, 의미 역할은 용도입니다. 컴포넌트 CSS는 역할 변수를 소비합니다. 예를 들어 `--knob-surface → --surface → 테마별 팔레트`를 따라 같은 노브가 두 테마를 지원합니다.
+
+Light는 따뜻한 오프화이트, Dark는 그래파이트를 기본으로 합니다. 일반 명령은 중립색이며 기본 배경은 투명합니다. 강한 제출·확인은 중립 반전 표면을 씁니다. 정보·성공·주의·실패는 문구와 의미색을 함께 제공합니다.
+
+### 의미 역할
+
+<SemanticTokenReference />
+
+`--border-default`는 장식 구분선입니다. 실제 입력의 경계는 `--border-control`을 사용합니다. 포커스는 `--text-secondary`에 연결된 중립 표시이며 선택·pressed·실행 성공을 대신하지 않습니다.
+
+<Canvas of={FoundationsStories.ColorRoles} />
+
+### 대비
+
+본문과 의미색 텍스트의 목표는 4.5:1, 기능 경계·선택·포커스의 목표는 3:1입니다. 이는 `tokens.test.ts`가 검사하는 조합의 기준입니다. 장식 구분선과 기능 경계를 구분하며 작은 본문을 큰 글자 예외로 처리하지 않습니다.
+
+<ContrastReference />
+
+위 표는 원시 색 쌍의 계산 결과입니다. 비활성 조작의 opacity, 그림자, 반투명 선택 표면, 이미지, 실제 포커스 배치는 이 계산에 포함하지 않습니다. 전체 접근성 검증을 대신하지 않습니다. 자동 검사는 각 테마의 기본·노드·hover·pressed 표면과 글자·기능 경계·강한 명령·피드백의 조합을 검사합니다.
+
+### 팔레트
+
+DSUB 웹 팔레트의 결정값입니다. 제조사의 도장색·실측값으로 설명하지 않습니다. 단계는 계열 안의 상대 순서이며, 다른 계열의 같은 번호가 같은 명도라는 뜻은 아닙니다. Orange에는 현재 제품 상태 의미를 배정하지 않았습니다.
+
+<Canvas of={FoundationsStories.FullPalette} />
+
+<details>
+  <summary>전체 팔레트 값</summary>
+  <PaletteReference />
+</details>
+
+### 컴포넌트 역할과 별칭
+
+`--bg`, `--text`, `--muted`는 기존 소비자의 공통 별칭입니다. `--transport-*`, `--meter-*`, `--node-*`, `--port-*`는 해당 컴포넌트의 의미를 소유합니다. 토큰을 삭제·합치기 전에 참조 체인과 모든 소비자를 확인합니다.
+
+<ComponentTokenReference />
+
+### 테마 선택
+
+앱의 기본값은 System입니다. Provider는 OS의 색 구성 변경을 따라가며 명시적 선택은 `mixrelay.theme`에 저장합니다. 저장소 접근 실패 시에도 현재 세션에서 선택할 수 있습니다. Storybook의 theme 선택은 앱의 저장값을 쓰지 않습니다.
+
+아래 두 Canvas는 명시적인 Light/Dark 표본입니다. 문서 상단의 테마 선택은 문서 표면을 바꾸며, Canvas는 Storybook의 해당 Story globals를 사용합니다. 값 표와 실제 표본을 함께 비교합니다.
+
+<Canvas of={FoundationsStories.Light} />
+<Canvas of={FoundationsStories.Dark} />
+
+## 타이포그래피
+
+문장·명령·이름은 Sans, 수치·시간·단위·미터 값은 Mono를 사용합니다. 숫자는 등폭 숫자로 정렬합니다. `typography`는 크기 역할이고 두께·행간은 각 Core의 조판 계약입니다. 레이블 크기라는 이유로 모든 레이블이 Medium인 것은 아닙니다.
+
+<TypographyReference />
+
+`Text`의 body/supporting/label/caption은 Regular와 본문 행간을 공유합니다. 필드 레이블과 섹션 제목의 Medium은 각 컴포넌트가 선택합니다. `NumericValueControl`의 기본 값은 label 크기이며 `ParameterField`의 노브 부모가 `--numeric-value-font-size → --knob-value-font-size → --font-caption`으로 값과 단위를 함께 줄입니다. `density="compact"` 하나가 숫자 글꼴 크기를 바꾸는 것은 아닙니다. 표는 `Text.module.css`, `ComponentTheme.module.css`, `ContentSection.module.css`, `StatusBadge.module.css`, `NumericValueControl.module.css`, `ParameterField.module.css`의 현행 계약입니다.
+
+20px display는 문서용 역할입니다. 조밀한 미터 눈금의 8px는 해당 계측 컴포넌트의 예외이며 일반 설명·버튼에 확대 적용하지 않습니다. 숫자의 표시 크기와 클릭·포커스 영역을 구별합니다.
+
+<Canvas of={FoundationsStories.TypeAndDensity} />
+
+### 숫자와 조합의 조판
+
+아래 Compact 수치 표본은 기본 label 크기를 유지하며 배치 높이를 줄입니다. 노브 파라미터 표본은 실제 노드의 반복 배치 부모에서 caption 크기의 값·단위와 label 크기의 이름을 함께 보여 줍니다. 부모 계약이 빠진 독립 표본을 노드의 조판 규격으로 사용하지 않습니다.
+
+<Canvas of={NumericValueStories.Compact} />
+<Canvas of={ParameterFieldStories.FrequencyKnob} />
+
+### 언어와 동봉 글꼴
+
+`Fonts.css`가 원본 IBM Plex WOFF2와 `html lang`·명시적 `lang` 영역에 따른 지역 선택을 소유합니다. 한국어 문서는 `lang="ko-KR"`로 선언하고 Canvas는 선택한 전역 언어를 사용합니다. 언어 영역에서 Sans/Mono family 역할만 다시 연결하며 크기·행간·색은 부모 계약을 유지합니다. Latin Sans/Mono를 먼저 사용하고 해당 문자에 지역별 CJK 글꼴을 이어서 사용합니다. Regular와 Medium만 동봉하고 `font-synthesis: none`으로 합성 두께를 금지합니다. CDN이나 사용자 PC의 글꼴 설치에 의존하지 않습니다.
+
+| 문자·언어 | Sans의 지역 글꼴 | 확인할 것 |
+| --- | --- | --- |
+| Latin·키릴 문자 | IBM Plex Sans | 문자 폭·명령 기준선 |
+| 한국어 `ko` | IBM Plex Sans KR | 혼합 문자열·레이블 줄바꿈 |
+| 일본어 `ja` | IBM Plex Sans JP | 한자·가나·숫자 정렬 |
+| 중국어 `zh` | IBM Plex Sans SC | 간체 글리프·긴 항목 |
+| `zh-Hant`, `zh-TW`, `zh-HK`, `zh-MO` | IBM Plex Sans TC | 번체 글리프·혼합 문자열 |
+| 숫자·단위·시간 | IBM Plex Mono + 같은 지역 fallback | 부호·소수점·단위·편집 폭 |
+
+글꼴의 기본 지역 fallback은 KR이며 실제 문서 `lang` 선택은 위 규칙을 따릅니다. 원본을 수정하거나 서브셋하지 않습니다. OFL과 다운로드 출처·SHA-256은 `core/theme/fonts`에 보관합니다.
+
+<details>
+  <summary>동봉한 글꼴과 원본 출처</summary>
+  <FontSourceReference />
+</details>
+
+Typography Locale Proof의 언어 toolbar에서 지원 언어를 바꿉니다. Narrow 표본은 같은 입력과 숫자를 좁은 폭에서 보여줍니다. 긴 번역·CJK 기준선·필드 클리핑을 각각 확인합니다.
+
+<Canvas of={FoundationsStories.TypographyLocaleProof} />
+<Canvas of={FoundationsStories.TypographyLocaleNarrow} />
+
+## 간격·밀도·형태
+
+조합의 간격은 자식 margin을 누적하지 않고 부모가 소유합니다. 필드 묶음은 `Stack`, 명령 묶음은 `Inline`, 폼의 최종 명령은 `FormActions`를 사용합니다. 공통 조합의 `tight / regular / section / wide`는 `--composition-gap-*`에 연결됩니다. `spacing.regular`와 조합 `gap="regular"`는 이름이 같아도 다른 역할이므로 참조값을 확인합니다.
+
+보이는 컨트롤의 높이·노브 그림·숫자 줄 높이와 실제 조작 영역은 다릅니다. 24px 노브 그림은 40px 조작 영역을 가지며, compact 숫자 줄도 실제 24px 조작 영역을 유지합니다. 작은 그림의 경계를 포커스·포인터 영역의 기준으로 삼지 않습니다.
+
+<GeometryReference />
+
+컨트롤과 떠 있는 UI는 얇은 경계와 작은 모서리를 사용합니다. 노드는 평면이며 떠 있는 메뉴·팝오버·모달에 그림자를 제공합니다. 포트 좌표·SVG 경로·노드의 저장 크기·관측한 기하는 반복 간격 토큰으로 대체하지 않습니다.
+
+<Canvas of={FoundationsStories.SpacingAndComposition} />
+
+### 모션과 쌓임
+
+모션은 상태 변화·chevron의 펼침·떠 있는 UI의 등장에 사용합니다. 세로 Options와 선택 필드의 chevron은 닫힘에서 아래, 열림에서 위를 향합니다. 옆으로 여는 하위 메뉴는 오른쪽 방향 표시를 사용합니다.
+
+`prefers-reduced-motion`에서는 공통 motion 변수와 전역 전환·애니메이션 규칙이 움직임을 줄입니다. 필요한 상태 문구와 의미는 남겨 둡니다. `layers`는 포털 수준이며 캔버스 내부 노드 순서는 Core audio graph가 소유합니다.
+
+## 아이콘과 상태
+
+일반 명령은 짧은 문구를 사용합니다. 재생·녹음·전원·음소거는 익숙한 기호를 사용하며 버튼의 접근성 이름에 대상과 행동을 담습니다. 반복 정보를 전달하는 SVG는 `aria-hidden`으로 제외하고 버튼 하나가 포커스를 소유합니다. 앱 노드는 발견된 실제 앱 아이콘을 우선하며 없거나 로드 실패한 경우에만 공통 fallback을 표시합니다.
+
+명령 아이콘·노드 아이콘·transport는 각 Core의 원본 SVG와 크기를 유지합니다. 모든 그림에 동일한 임의 stroke·viewBox·색을 적용하지 않습니다. 새로운 기호는 Core 계약과 상태 표본을 함께 추가합니다.
+
+| 상태 | 의미 | 구별할 것 |
+| --- | --- | --- |
+| Focus | 지금 키보드로 조작할 대상 | 선택·pressed·실행 여부 |
+| Selected | 명령이 적용될 대상 | 실제 오디오 실행 |
+| Hover / Pressed | 포인터 진입 / 누르는 동안 | 지속되는 선택·활성 상태 |
+| Busy | 요청 처리 중 | 확인된 완료 |
+| Disabled | 현재 실행 불가 | 실제 On·녹음 유지 여부 |
+| Neutral | 일반 설명·분류·로딩 | 성공 확인 |
+| Accent | 의미 있는 정보·처리 진행 | 실행 성공 |
+| Positive | 확인된 성공·연결·정상 신호 | 단순 선택 |
+| Warning | 사용자 조치·복구 가능한 중단 | 치명적인 실패 |
+| Critical | 실패·잘못된 입력·거부 | 녹음의 빨강은 별도 transport 의미 |
+
+`StatusBadge`, `StatusIndicator`, `Text`, `InlineNotice`는 같은 상태 언어를 사용합니다. `InlineNotice`의 critical은 기본 alert, 다른 의미는 기본 status이며 문구의 시급성은 명시적 announcement로 전달합니다. 실시간 미터는 읽기 전용이며 값 변화를 계속 announce하지 않습니다.
+
+노드 Off는 신호 차단, Mute는 처리 유지 상태입니다. 앱 전체 오디오 일시정지와 레코더 녹음 일시정지도 각각 구분합니다. Off 노드 전체의 opacity를 낮추지 않고 전용 표면과 실제 버튼 상태로 나타냅니다. 비활성 조작의 opacity를 노드 전체에 적용하지 않습니다.
+
+<Canvas of={DesignLanguageStories.SymbolsAndStates} />
+<Canvas of={DesignLanguageStories.Interactive} />
+<Canvas of={DesignLanguageStories.NarrowLongTranslation} />
+
+## 브랜드
+
+현행 `BrandIdentity`는 승인된 Optical Grid 심벌을 렌더합니다. `ProductHeading`은 같은 심벌을 제목으로 사용합니다. 앱·트레이 아이콘은 기존 정사각형 자산이며 외부 앱 아이콘의 형태와 색은 해당 앱이 소유합니다. 브랜드 primary는 테마에 따라 틴트·filter를 바꾸지 않습니다.
+
+별도로 승인된 Optical 워드마크·lockup SVG는 준비된 브랜드 자산입니다. 아래 manifest의 적용 기록과 실제 화면을 구분합니다. 이 문서의 자산 목록이 Core를 워드마크로 교체하거나 제품 적용 완료를 뜻하지 않습니다.
+
+<BrandReference />
+
+워드마크는 원본 글자 path와 심벌의 비율·기준선·보호 여백을 유지합니다. 글자와 심벌을 따로 늘리거나 내부 간격을 다시 조절하지 않습니다. 아웃라인은 충분히 큰 배치에 사용하고 작은 헤더에는 채움형을 사용합니다. 테마별 공식 SVG 파일을 선택하며 CSS filter로 반전하지 않습니다.
+
+<Canvas of={FoundationsStories.ProductIdentity} />
+
+## 사용·변경·리뷰
+
+1. 제품 동작을 확인하고 `tokens → Theme → Core → 실제 소비자`를 읽습니다.
+2. 값은 Foundations, 공통 표현은 Theme, 컴포넌트 상태·부위는 해당 Core에서 변경합니다.
+3. 공개 계약과 실제 소비자를 함께 갱신하고 지원 상태의 Story를 추가합니다.
+4. Light/Dark·키보드·좁은 폭·긴 번역·오류·disabled의 실제 결과를 확인합니다.
+5. 검증한 범위와 미확인 범위를 구분해서 기록합니다.
+
+같은 행동에는 포커스 소유자 하나를 둡니다. 입력·선택·모달·메뉴는 해당 Core의 키보드와 이름·역할·상태 계약을 따릅니다. Canvas에서 Tab/Shift+Tab, 실제 Enter/Space, 오류 후 복귀를 확인합니다. Story 이미지로 키보드 동작이나 엔진 명령 완료를 판단하지 않습니다.
+
+| 근거 | 확인하는 범위 | 별도로 필요한 것 |
+| --- | --- | --- |
+| `tokens.test.ts` | 역할 대칭·명도 순서·브랜드 유지·정의된 대비 조합 | 실제 렌더와 전체 접근성 적합 |
+| Core·Feature 회귀 검사 | 검사한 이름·역할·상태·키 실행·복귀 | 모든 상태·실제 보조 기술 |
+| Storybook Canvas | 같은 Core의 표현·조합·언어·폭 | 설치된 앱·오디오 드라이버·파일 동작 |
+| `check:ui-quality`, UI `check` | 스타일·경계·타입·회귀·빌드의 실행 결과 | 실제 설치본과 수동 검증 |
+
+실행 결과는 <a href="/?path=/docs/design-system-review--docs" target="_top">검증 문서</a>에 기록합니다. 규격 문서와 Canvas를 제공하는 것 자체를 전체 검증 완료로 표시하지 않습니다.
+
+</DocsLayout>

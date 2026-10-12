@@ -1,4 +1,4 @@
-//! Bounded realtime capture into a control-owned WAV recording session.
+//! Bounded realtime capture into a control-owned RF64 recording session.
 //!
 //! A registry outlives its render plans. Preparing or dropping a plan never closes
 //! a take: only a control command, reaping after all taps retire, or registry
@@ -68,21 +68,20 @@ pub enum RecorderState {
 }
 
 /// Control-visible state. Frames count output frames actually written, excluding
-/// pauses, across all automatically split WAV files. A stopped result is returned
+/// pauses, in the take’s single RF64 file. A stopped result is returned
 /// only after WAV finalization succeeds.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecorderStatus {
     /// Current writer state.
     pub state: RecorderState,
-    /// Original absolute take destination (also the first file), retained across
-    /// automatic numbered parts so Resume keeps the same take identity.
+    /// Absolute take destination, retained across pause/resume.
     pub path: Option<String>,
     /// Fixed output rate for the take.
     pub sample_rate: Option<u32>,
     /// Fixed output encoding for the take.
     pub encoding: Option<Encoding>,
-    /// Complete output frames written so far across every file in this take.
+    /// Complete output frames written so far in this take.
     pub frames: u64,
     /// Recorder-local error, retained until a new take starts successfully.
     pub error: Option<String>,

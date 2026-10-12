@@ -18,6 +18,7 @@ pub(crate) struct LicensingStatus {
     #[serde(flatten)]
     access: AccessSnapshot,
     configured: bool,
+    has_activation: bool,
 }
 
 pub(crate) fn now() -> Result<u64, LicenseError> {
@@ -29,7 +30,7 @@ pub(crate) fn now() -> Result<u64, LicenseError> {
 pub(crate) fn allows_audio(snapshot: &AccessSnapshot) -> bool {
     matches!(
         snapshot.status,
-        AccessStatus::Trial | AccessStatus::Licensed
+        AccessStatus::Free | AccessStatus::Licensed | AccessStatus::ClockInvalid
     )
 }
 async fn snapshot(state: Arc<LicensingState>) -> Result<AccessSnapshot, LicenseError> {
@@ -46,11 +47,13 @@ pub(crate) async fn has_paid_access(state: Arc<LicensingState>) -> Result<bool, 
         .map(|snapshot| snapshot.status == AccessStatus::Licensed)
 }
 fn status(app: &tauri::AppHandle, access: AccessSnapshot) -> Result<LicensingStatus, LicenseError> {
-    app.state::<crate::control_proxy::ControlProxyClient>()
-        .set_license_admission(allows_audio(&access));
     Ok(LicensingStatus {
         access,
         configured: configuration::configuration()?.is_some(),
+        has_activation: app
+            .state::<Arc<LicensingState>>()
+            .saved_activation()?
+            .is_some(),
     })
 }
 async fn current(
@@ -59,11 +62,7 @@ async fn current(
 ) -> Result<LicensingStatus, LicenseError> {
     match snapshot(state).await {
         Ok(access) => status(app, access),
-        Err(error) => {
-            app.state::<crate::control_proxy::ControlProxyClient>()
-                .set_license_admission(false);
-            Err(error)
-        }
+        Err(error) => Err(error),
     }
 }
 
@@ -77,17 +76,25 @@ async fn prepare_request(
     }
     Ok(())
 }
-async fn resume_audio(app: &tauri::AppHandle) -> Result<(), LicenseError> {
+async fn resume_audio(app: &tauri::AppHandle) {
     let (sender, receiver) = tokio::sync::oneshot::channel();
     let target = app.clone();
-    app.run_on_main_thread(move || {
-        let _ = sender.send(crate::start_audio(&target));
-    })
-    .map_err(|_| LicenseError::Unavailable)?;
-    receiver
-        .await
-        .map_err(|_| LicenseError::Unavailable)?
-        .map_err(|_| LicenseError::Unavailable)
+    if app
+        .run_on_main_thread(move || {
+            let _ = sender.send(crate::start_audio(&target));
+        })
+        .is_err()
+    {
+        tracing::warn!("audio start dispatch unavailable");
+        return;
+    }
+    match receiver.await {
+        Ok(Ok(())) => {}
+        result => tracing::warn!(
+            ?result,
+            "audio service unavailable; license status retained"
+        ),
+    }
 }
 
 /// Report persisted access without contacting the vendor or revealing the saved key.
@@ -99,7 +106,7 @@ pub(crate) async fn licensing_status(
     let _gate = state.mutations.lock().await;
     let result = current(&app, Arc::clone(state.inner())).await?;
     if allows_audio(&result.access) {
-        resume_audio(&app).await?;
+        resume_audio(&app).await;
     }
     Ok(result)
 }
@@ -162,7 +169,7 @@ pub(crate) async fn licensing_activate(
             .await
             .map_err(|_| LicenseError::StorageUnavailable)??;
     let result = status(&app, access)?;
-    resume_audio(&app).await?;
+    resume_audio(&app).await;
     Ok(result)
 }
 
@@ -195,7 +202,7 @@ pub(crate) async fn licensing_validate(
             .await
             .map_err(|_| LicenseError::StorageUnavailable)??;
     let result = status(&app, access)?;
-    resume_audio(&app).await?;
+    resume_audio(&app).await;
     Ok(result)
 }
 async fn clear_paid(

@@ -16,6 +16,8 @@ Kali/Arch는 선택 환경이다. 이 문서 때문에 새 VM·백엔드·물리
 클록·자원 수명·설치 조건은 매트릭스에서 유지한다.
 
 Docker는 컴파일용이며 desktop 로그인·native audio·editor 검증을 대체하지 않는다.
+Docker 컨테이너·Docker 기반 VM에서 제품 오디오를 실행하지 않는다. Proxmox 등 x64 Linux VM의
+정상 사용자 PipeWire 세션을 사용하며, Docker의 오디오 제한을 일반 Linux VM의 결함으로 기록하지 않는다.
 macOS VM은 필요 없다. 기존 VM을 재사용하고 무거운 빌드/오디오 계측은 한 번에 하나씩
 실행한다. 경량 확인과 독립 코드 수정까지 이 제한으로 직렬화하지 않는다.
 자원과 여유 공간을 확인하고 host audio interface를 임의로 guest에 넘기지 않는다.

@@ -1,0 +1,19 @@
+.root {
+  min-width: 0;
+  padding-block: var(--section-padding);
+}
+.root[data-divider="before"] {
+  border-top: var(--border-width) solid var(--line);
+}
+.root[data-divider="after"] {
+  border-bottom: var(--border-width) solid var(--line);
+}
+.title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--section-title-size);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-body);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}

@@ -11,23 +11,25 @@ use crate::native_text::{
     dialogs::{Text, detail, text},
 };
 use mixrelay_macos_transport::app_lifecycle::{
-    APP_LEASE, ENGINE_LEASE, EngineWake, ProcessLease, engine_exit_record, is_owned,
+    CONTROLLER_LEASE, ENGINE_LEASE, EngineWake, ProcessLease, engine_exit_record, is_owned,
 };
 use tauri::Manager;
 
-/// Desktop ownership, independent of window visibility and graph power state.
+/// Background controller ownership, independent of window visibility and graph power state.
 pub(crate) struct EngineLifecycle {
-    owner: Mutex<Option<DesktopOwner>>,
+    owner: Mutex<Option<ControllerOwner>>,
     quitting: AtomicBool,
     finished: AtomicBool,
+    driver_transition: tokio::sync::Mutex<()>,
+    driver_start_cancelled: AtomicBool,
 }
 
-struct DesktopOwner {
+struct ControllerOwner {
     wake: Option<EngineWake>,
     lease: Option<ProcessLease>,
 }
 
-impl Drop for DesktopOwner {
+impl Drop for ControllerOwner {
     fn drop(&mut self) {
         self.wake.take();
         self.lease.take();
@@ -37,20 +39,37 @@ impl Drop for DesktopOwner {
 impl EngineLifecycle {
     pub(crate) fn start() -> Result<Self, String> {
         validate_installation()?;
-        let lease = ProcessLease::acquire(APP_LEASE)
+        let lease = ProcessLease::acquire(CONTROLLER_LEASE)
             .map_err(|error| detail(current_locale(), Text::DesktopOwnershipFailed, error))?;
         if is_owned(ENGINE_LEASE).map_err(|error| error.to_string())? {
             return Err(text(current_locale(), Text::AudioServerShuttingDownRetry).into());
         }
         let wake = EngineWake::start().map_err(|error| error.to_string())?;
         Ok(Self {
-            owner: Mutex::new(Some(DesktopOwner {
+            owner: Mutex::new(Some(ControllerOwner {
                 wake: Some(wake),
                 lease: Some(lease),
             })),
             quitting: AtomicBool::new(false),
             finished: AtomicBool::new(false),
+            driver_transition: tokio::sync::Mutex::const_new(()),
+            driver_start_cancelled: AtomicBool::new(false),
         })
+    }
+
+    pub(crate) async fn restore_driver(
+        &self,
+    ) -> Result<Option<mixrelay_driver_control::DriverSnapshot>, String> {
+        let _transition = self.driver_transition.lock().await;
+        if self.driver_start_cancelled.load(Ordering::Acquire) {
+            return Ok(None);
+        }
+        mixrelay_driver_control::DriverClient::new()
+            .map_err(|error| error.to_string())?
+            .set_active(true)
+            .await
+            .map(Some)
+            .map_err(|error| error.to_string())
     }
 
     pub(crate) fn exit_requested(&self, app: &tauri::AppHandle, api: &tauri::ExitRequestApi) {
@@ -61,6 +80,9 @@ impl EngineLifecycle {
         if self.quitting.swap(true, Ordering::AcqRel) {
             return;
         }
+        self.driver_start_cancelled.store(true, Ordering::Release);
+        app.state::<crate::driver_manager::DriverMenu>()
+            .set_runtime_stopping(true);
         app.state::<crate::control_proxy::ControlProxyClient>()
             .close_admission();
         let app = app.clone();
@@ -82,9 +104,10 @@ impl EngineLifecycle {
                     app.exit(0);
                 }
                 Err(error) => {
+                    crate::background::menu::shutdown_failed(&app);
                     app.state::<Self>().quitting.store(false, Ordering::Release);
                     tracing::error!(%error, "audio server exit is not confirmed");
-                    let _ = crate::tray_menu::show_main_window(&app);
+                    let _ = crate::app_menu::show_main_window(&app);
                     rfd::AsyncMessageDialog::new()
                         .set_title("MixRelay")
                         .set_description(&error)
@@ -107,6 +130,13 @@ async fn finish_local_controls(app: &tauri::AppHandle) -> Result<Option<String>,
     app.state::<crate::control_proxy::ControlProxyClient>()
         .drain()
         .await?;
+    // Native AppKit Quit and a system background-stop request enter here too,
+    // without going through the status menu's stop_all command. Stop and save
+    // the HAL inventory before releasing the controller; otherwise its loopback
+    // outlives both the controller and the graph engine.
+    let lifecycle = app.state::<EngineLifecycle>();
+    let _transition = lifecycle.driver_transition.lock().await;
+    crate::driver_manager::stop_driver(app).await?;
     app.state::<EngineLifecycle>()
         .owner
         .lock()
@@ -208,6 +238,33 @@ fn exit_warning_for(locale: Locale, record: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn queued_start_cannot_revive_driver_after_a_stop_even_if_stop_needs_retry() {
+        let lifecycle = EngineLifecycle {
+            owner: Mutex::new(None),
+            quitting: AtomicBool::new(false),
+            finished: AtomicBool::new(false),
+            driver_transition: tokio::sync::Mutex::const_new(()),
+            driver_start_cancelled: AtomicBool::new(false),
+        };
+        let in_flight = lifecycle.driver_transition.lock().await;
+        let queued = lifecycle.restore_driver();
+        tokio::pin!(queued);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(1), &mut queued)
+                .await
+                .is_err()
+        );
+        lifecycle
+            .driver_start_cancelled
+            .store(true, Ordering::Release);
+        // The quit-in-progress flag resets on a failed stop, allowing retry.
+        // That must not restore permission for the old queued startup.
+        lifecycle.quitting.store(false, Ordering::Release);
+        drop(in_flight);
+        assert!(queued.await.unwrap().is_none());
+    }
 
     #[tokio::test(start_paused = true)]
     async fn slow_native_exit_completes_without_a_second_quit_request() {

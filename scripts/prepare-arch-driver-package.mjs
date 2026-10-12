@@ -25,13 +25,13 @@ export function renderArchRecipe({ version, architecture, checksum }) {
 }
 
 /** Prepare a native makepkg recipe from the validated common release payload. */
-export async function prepareArchDriverPackage({ deb, output }) {
+export async function prepareArchPackage({ deb, output }) {
   const archive = resolve(deb);
   const destination = resolve(output);
   if (!fs.lstatSync(archive).isFile()) throw new Error('DEB input must be a regular file');
   if (fs.existsSync(destination)) throw new Error('Arch build directory must not already exist');
-  const inspected = await inspectPackage(archive);
-  if (inspected.packageName !== 'mix-relay-driver') throw new Error('Expected the Driver DEB');
+  const inspected = await inspectPackage(archive, undefined, undefined, { requireUnified: true });
+  if (inspected.packageName !== 'mix-relay') throw new Error('Expected the complete MixRelay DEB');
   const arch = { amd64: 'x86_64', arm64: 'aarch64' }[inspected.architecture];
   const version = runTool('dpkg-deb', ['--field', archive, 'Version']).replace(/-\d+$/, '');
   // Validate all shell substitutions before creating a build directory.
@@ -46,10 +46,10 @@ export async function prepareArchDriverPackage({ deb, output }) {
     const hooks = join(payload, 'usr/share/libalpm/hooks');
     fs.mkdirSync(hooks, { recursive: true });
     fs.copyFileSync(join(root, 'packaging/linux/arch/mixrelay-driver.hook'), join(hooks, 'mixrelay-driver.hook'));
-    const licenseDir = join(payload, 'usr/share/licenses/mix-relay-driver');
+    const licenseDir = join(payload, 'usr/share/licenses/mix-relay');
     fs.mkdirSync(licenseDir, { recursive: true });
     fs.copyFileSync(join(payload, 'usr/share/doc/mix-relay-driver/LICENSE-Driver.txt'), join(licenseDir, 'LICENSE'));
-    const payloadName = `mix-relay-driver-${version}-${arch}.tar.gz`;
+    const payloadName = `mix-relay-${version}-${arch}.tar.gz`;
     const payloadArchive = join(staging, payloadName);
     runTool('tar', ['-czf', payloadArchive, '-C', staging, 'payload']);
     const checksum = createHash('sha256').update(fs.readFileSync(payloadArchive)).digest('hex');
@@ -57,7 +57,7 @@ export async function prepareArchDriverPackage({ deb, output }) {
     // Removal cannot execute a script from the just-removed package tree.
     const afterRemove = fs.readFileSync(join(root, 'packaging/linux/driver-after-remove.sh'), 'utf8')
       .replace(/^#![^\n]*\n/, '').replace(/^set -eu\n/m, '');
-    fs.writeFileSync(join(staging, 'mixrelay-driver.install'),
+    fs.writeFileSync(join(staging, 'mixrelay.install'),
       `post_install() { /bin/sh /usr/lib/mixrelay-driver/after-install.sh; }\n` +
       `post_upgrade() { post_install; }\npost_remove() {\n${afterRemove}\n}\n`);
     fs.writeFileSync(join(staging, 'release-input.json'), `${JSON.stringify({
@@ -78,7 +78,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     console.error('Usage: node scripts/prepare-arch-driver-package.mjs INPUT.deb NEW_BUILD_DIRECTORY');
     process.exitCode = 1;
   } else {
-    prepareArchDriverPackage({ deb, output }).then(result => console.log(JSON.stringify(result)))
+    prepareArchPackage({ deb, output }).then(result => console.log(JSON.stringify(result)))
       .catch(error => { console.error(error.message); process.exitCode = 1; });
   }
 }

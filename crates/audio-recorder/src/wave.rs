@@ -5,7 +5,7 @@ use rubato::{Async, FixedAsync, Resampler, SincInterpolationParameters};
 use std::path::Path;
 
 mod files;
-use files::{DiskFiles, FileSeries};
+use files::{DiskFiles, WaveFile};
 
 pub(crate) struct Take {
     sink: WaveSink,
@@ -53,19 +53,36 @@ impl Take {
         // Build the first converter before Record opens callback admission.
         // Packet rate tags still replace it if the actual clock changes here.
         let segment = Segment::new(observed, rate, usize::from(channels))?;
-        let files = FileSeries::new(Path::new(path), spec, DiskFiles)?;
+        let file = WaveFile::new(Path::new(path), spec, DiskFiles)?;
         Ok(Self {
             sink: WaveSink {
-                files,
+                file,
                 rate,
                 encoding,
                 channels: usize::from(channels),
                 frames: 0,
+                max_frames: None,
                 noise: Noise(0x8c67_24fb_69da_b813),
             },
             segment: Some(segment),
             fraction: 0.0,
         })
+    }
+
+    pub(crate) fn set_duration_limit(&mut self, seconds: Option<u64>) -> Result<(), String> {
+        self.sink.max_frames = seconds
+            .map(|seconds| {
+                seconds
+                    .checked_mul(u64::from(self.rate()))
+                    .ok_or("recording duration limit overflow".to_owned())
+            })
+            .transpose()?;
+        Ok(())
+    }
+    pub(crate) fn limit_reached(&self) -> bool {
+        self.sink
+            .max_frames
+            .is_some_and(|limit| self.frames() >= limit)
     }
 
     pub(crate) fn frames(&self) -> u64 {
@@ -121,50 +138,47 @@ impl Take {
             (Err(error), Err(finalization)) => Err(format!("{error}; {finalization}")),
         }
     }
-
-    #[cfg(test)]
-    pub(crate) fn limit_file_frames(&mut self, limit: u64) {
-        self.sink.files.limit_frames(limit);
-    }
 }
 
 struct WaveSink {
-    files: FileSeries,
+    file: WaveFile,
     channels: usize,
     rate: u32,
     encoding: Encoding,
     frames: u64,
+    max_frames: Option<u64>,
     noise: Noise,
 }
 
 impl WaveSink {
     fn write(&mut self, samples: &[f32]) -> Result<(), String> {
         for frame in samples.chunks_exact(self.channels) {
+            if self.max_frames.is_some_and(|limit| self.frames >= limit) {
+                break;
+            }
             let next = self
                 .frames
                 .checked_add(1)
                 .ok_or("recording frame counter overflow")?;
-            self.files.prepare_frame()?;
             for sample in frame {
                 let result = match self.encoding {
-                    Encoding::Float32 => self.files.write_sample(*sample),
+                    Encoding::Float32 => self.file.write_sample(*sample),
                     Encoding::Pcm16 => self
-                        .files
+                        .file
                         .write_sample(self.noise.quantize(*sample, 32_768.0)),
                     Encoding::Pcm24 => self
-                        .files
+                        .file
                         .write_sample(self.noise.quantize(*sample, 8_388_608.0)),
                 };
                 result?;
             }
-            self.files.complete_frame();
             self.frames = next;
         }
         Ok(())
     }
 
     fn finalize(mut self) -> Result<u64, String> {
-        self.files.finalize()?;
+        self.file.finalize()?;
         Ok(self.frames)
     }
 }

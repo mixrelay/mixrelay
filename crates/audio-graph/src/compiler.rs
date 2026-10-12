@@ -125,6 +125,7 @@ impl NodeResolver for BuiltInNodeResolver {
                 validate_limiter(config)?;
                 Ok(audio_processor(config.channels))
             }
+            NodeConfig::Effect(config) => resolve_effect(config, context),
             NodeConfig::Mixer(config) => resolve_mixer(config, context),
             NodeConfig::Gain(config) => {
                 validate_channels(config.channels, context.limits.max_channels_per_port)?;
@@ -150,6 +151,30 @@ impl NodeResolver for BuiltInNodeResolver {
             }),
         }
     }
+}
+
+fn resolve_effect(
+    config: &crate::EffectConfig,
+    context: &CompileContext,
+) -> Result<ResolvedNode, NodeResolutionError> {
+    validate_channels(config.channels, context.limits.max_channels_per_port)?;
+    validate_channels(
+        config.output_channels(),
+        context.limits.max_channels_per_port,
+    )?;
+    config.validate().map_err(invalid)?;
+    let mut resolved = ResolvedNode {
+        inputs: vec![audio_port(PortDirection::Input, config.channels)],
+        outputs: vec![audio_port(PortDirection::Output, config.output_channels())],
+    };
+    if matches!(config.effect, crate::Effect::Ducking(_)) {
+        resolved.inputs.push(CompiledPort::new(
+            PortId::from(crate::SIDECHAIN_PORT_ID),
+            PortDirection::Input,
+            1,
+        ));
+    }
+    Ok(resolved)
 }
 
 /// Validates a virtual-device reference's gain in decibels before DSP lowering.

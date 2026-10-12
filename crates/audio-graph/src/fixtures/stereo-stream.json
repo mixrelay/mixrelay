@@ -27,11 +27,11 @@
         "id": "io.mixrelay.virtual.spat",
         "displayName": "MixRelay SPAT In",
         "reference": { "render": true, "capture": false },
-        "render": {
+        "render": null,
+        "capture": {
           "channels": 64,
           "channelLayout": "discrete"
         },
-        "capture": null,
         "supportedSampleRates": [48000, 96000],
         "defaultSampleRate": 48000
       }
@@ -62,11 +62,11 @@
         "id": "io.mixrelay.virtual.stream.default",
         "displayName": "MixRelay OBS Mix",
         "reference": { "render": false, "capture": true },
-        "render": null,
-        "capture": {
+        "render": {
           "channels": 2,
           "channelLayout": "stereo"
         },
+        "capture": null,
         "supportedSampleRates": [48000, 96000],
         "defaultSampleRate": 48000
       }
