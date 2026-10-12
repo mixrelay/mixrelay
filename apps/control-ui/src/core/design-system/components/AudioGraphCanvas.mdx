@@ -41,6 +41,10 @@ API 표의 *는 필수 입력입니다. Default의 —는 선언된 기본값이
 
 <Canvas of={Api.Empty} story={{ inline: false, height: 400 }} sourceState="hidden" />
 
+## 키보드 채널 연결
+
+노드 바깥 그룹이나 그래프에서 Shift+F10·ContextMenu 키를 누르면 보조 클릭과 같은 컨텍스트 메뉴가 열립니다. 단일 노드의 출력이나 한 노드의 선택된 출력 포트에서 '채널 연결…'을 고르면 Core <a href="/?path=/docs/design-system-components-channelconnectiondialog--docs" target="_top">ChannelConnectionDialog</a>가 드래그와 같은 매핑으로 대상·첫 입력 채널을 고르고 건너뛸 채널을 미리 보입니다. 연결은 한 번의 `runtime` 변경이며 닫으면 출발 노드로 포커스가 돌아옵니다. 그래프 삭제 키는 포커스가 그래프 안에 있을 때만 동작합니다.
+
 ## 그래프 인스턴스 표시 이름
 
 이름 텍스트의 더블클릭, 노드 바깥 그룹의 F2, 단일 노드 컨텍스트 메뉴가 같은 `onNodeRenameRequest(id)`로 연결됩니다. 이름·필드·포트·Options의 다른 행동을 함께 실행하지 않습니다. Core는 편집 요청·단일 노드 포커스·표시·접근성 이름을 소유하고 Feature는 같은 Core NameDialog와 그래프 표시 메타데이터를 사용합니다.

@@ -1824,6 +1824,42 @@ export const componentContracts: readonly ComponentContract[] = [
     ],
   },
   {
+    name: 'ChannelConnectionDialog',
+    playgroundStory: 'core-playgrounds-channelconnectiondialog--playground',
+    group: 'Overlays',
+    purpose: '포트 드래그와 같은 채널 매핑을 키보드로 고르고 미리 본 뒤 한 번에 연결한다.',
+    use: '그래프 노드·출력 포트 선택에서 열고 onConnect(accepted)를 connectAudioGraphBatch 한 번으로 runtime commit한다.',
+    avoid:
+      '포트마다 Tab 정지점을 늘리거나 미리보기와 다른 규칙으로 연결하지 않는다. 열린 동안 그래프 삭제 키를 받지 않는다.',
+    anatomy:
+      'Dialog sm → form → 출발 노드 Text → 채널 범위 SelectField 2개 또는 선택 채널 Text+범위 전환 ActionButton → 대상 SelectField → 첫 입력 채널 SelectField → 미리보기(status 요약 + list) → FormActions 취소/strong 연결.',
+    states:
+      '노드에서 열면 모든 출력 범위, 포트 선택에서 열면 sparse 선택 유지. 대상 미선택은 pending·연결 비활성. 대상 없음은 InlineNotice. 건너뜀 사유 out-of-range/existing/cycle/invalid. 고른 첫 출력·입력 채널이나 대상이 사라지면 자동 대체 없이 다시 선택(pending). 경계 자기 연결이 가능한 노드는 자신도 대상.',
+    tokens: 'Dialog sm; field28; composition-gap tight; preview font-control, 건너뜀 text-muted.',
+    interaction:
+      'Shift+F10/ContextMenu 키 또는 보조 클릭 → 연결 메뉴. 첫 필드 focus, Esc 취소, Enter 제출. 제출 때 현재 model로 재검증. 닫으면 출발 노드 바깥 그룹으로 focus 복귀. 요약만 polite status로 알린다.',
+    source: 'apps/control-ui/src/core/audio-graph/ChannelConnectionDialog.tsx',
+    api: 'export interface ChannelConnectionDialogProps {\n  model: AudioGraphModel;\n  sourceNodeId: string;\n  /** Output ports chosen on the canvas; kept as a sparse set until a range is chosen. */\n  sourcePortIds?: readonly string[];\n  onCancel: () => void;\n  /** Receives the accepted connections, validated again against `model` on submit. */\n  onConnect: (connections: AudioGraphConnection[]) => void;\n}\n\nexport function ChannelConnectionDialog({\n  model,\n  sourceNodeId,\n  sourcePortIds,\n  onCancel,\n  onConnect,\n}: ChannelConnectionDialogProps)',
+    consumers: ['apps/control-ui/src/core/audio-graph/AudioGraphCanvas.tsx'],
+    tests: [
+      'apps/control-ui/src/core/audio-graph/ChannelConnectionDialog.test.tsx',
+      'apps/control-ui/src/core/audio-graph/AudioGraphCanvas.test.tsx',
+    ],
+    storyId: 'core-playgrounds-channelconnectiondialog--playground',
+    storyTitle: 'Core/Playgrounds/ChannelConnectionDialog',
+    stateStories: [
+      {
+        id: 'core-playgrounds-channelconnectiondialog--selected-channels',
+        label: '포트 선택 유지·범위 전환',
+      },
+      {
+        id: 'core-playgrounds-channelconnectiondialog--skipped-channels',
+        label: '건너뜀 사유 미리보기',
+      },
+      { id: 'core-playgrounds-channelconnectiondialog--no-targets', label: '대상 없음' },
+    ],
+  },
+  {
     name: 'AudioNodeCard',
     playgroundStory: 'core-playgrounds-audionodecard--playground',
     group: 'Audio graph',

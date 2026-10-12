@@ -5,6 +5,7 @@ import type { AudioFlowEdge, AudioFlowNode } from './reactFlowAdapter';
 
 export interface GraphContextMenuLabels {
   renameNode?: string;
+  connectChannels?: string;
   removeNode: string;
   removeSelection: string;
   disconnect: string;
@@ -48,6 +49,8 @@ interface ContextOptions {
   addItems: readonly HierarchicalMenuItem[];
   labels?: GraphContextMenuLabels;
   renameNode?: (nodeId: string) => void;
+  /** Opens the keyboard connection dialog; `portIds` keeps a canvas port selection. */
+  connectChannels?: (nodeId: string, portIds?: readonly string[]) => void;
   commit: (model: AudioGraphModel, kind: 'runtime') => void;
   fitView: () => void;
   clearPorts: () => void;
@@ -128,18 +131,49 @@ function renameItems(scope: Scope, options: ContextOptions): HierarchicalMenuIte
   ];
 }
 
+/** Opens the connection dialog when the scope is exactly one node's outputs. */
+function connectionSource(scope: Scope, options: ContextOptions): (() => void) | undefined {
+  const connect = options.connectChannels;
+  if (!connect) return undefined;
+  if (scope.kind === 'port') {
+    // Port scopes always hold the clicked port first.
+    const first = scope.ports[0] as PortTarget;
+    if (scope.ports.some((port) => port.side !== 'output' || port.nodeId !== first.nodeId))
+      return undefined;
+    return () =>
+      connect(
+        first.nodeId,
+        scope.ports.map((port) => port.portId),
+      );
+  }
+  if (scope.kind !== 'node' || scope.nodes.length !== 1 || scope.edges.length) return undefined;
+  const node = options.model.nodes.find((candidate) => candidate.id === scope.nodes[0]);
+  return node?.outputPorts.length ? () => connect(node.id) : undefined;
+}
+
+function connectItems(scope: Scope, options: ContextOptions): HierarchicalMenuItem[] {
+  if (!connectionSource(scope, options)) return [];
+  return [
+    {
+      id: 'context:connect',
+      label: options.labels?.connectChannels ?? 'Connect channels…',
+    },
+  ];
+}
+
 function contextItems(scope: Scope, options: ContextOptions): HierarchicalMenuItem[] {
   const labels = options.labels ?? defaultLabels;
   const count = scope.nodes.length + scope.edges.length;
   if (scope.kind === 'port')
     return [
+      ...connectItems(scope, options),
       {
         id: 'context:disconnect',
         label: scope.ports.length > 1 ? labels.disconnectPorts : labels.disconnectPort,
         disabled: connectedEdges(options.model, scope).length === 0,
       },
     ];
-  const actions = renameItems(scope, options);
+  const actions = [...renameItems(scope, options), ...connectItems(scope, options)];
   if (scope.nodes.length)
     actions.push({
       id: 'context:disconnect',
@@ -216,6 +250,10 @@ export function useGraphContextMenu(options: ContextOptions) {
     const item = contextItems(scope, options).find((item) => item.id === id);
     if (!item || item.disabled) return true;
     switch (id) {
+      case 'context:connect':
+        // The item exists only when the scope has a connection source.
+        (connectionSource(scope, options) as () => void)();
+        break;
       case 'context:rename':
         (options.renameNode as (nodeId: string) => void)(scope.nodes[0] as string);
         break;

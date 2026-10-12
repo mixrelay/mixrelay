@@ -194,17 +194,21 @@ function ordersProcessing(model: AudioGraphModel, connection: AudioGraphConnecti
   );
 }
 
-export function canConnectAudioGraph(
+/** Why a connection cannot be made, or undefined when it can. `invalid` covers missing
+ * nodes or ports and a processing self-connection; boundary ports may self-connect. */
+export type AudioGraphConnectionRejection = 'invalid' | 'existing' | 'cycle';
+
+export function audioGraphConnectionRejection(
   model: AudioGraphModel,
   connection: AudioGraphConnection,
   ignoredEdgeId?: string,
-): boolean {
+): AudioGraphConnectionRejection | undefined {
   if (
     (connection.sourceNodeId === connection.targetNodeId && ordersProcessing(model, connection)) ||
     connection.sourcePortId.length === 0 ||
     connection.targetPortId.length === 0
   ) {
-    return false;
+    return 'invalid';
   }
   const source = model.nodes.find((node) => node.id === connection.sourceNodeId);
   const target = model.nodes.find((node) => node.id === connection.targetNodeId);
@@ -214,7 +218,7 @@ export function canConnectAudioGraph(
     !hasPort(source.outputPorts, connection.sourcePortId) ||
     !hasPort(target.inputPorts, connection.targetPortId)
   ) {
-    return false;
+    return 'invalid';
   }
   const conflicts = model.edges.some(
     (edge) =>
@@ -224,13 +228,21 @@ export function canConnectAudioGraph(
       edge.targetNodeId === connection.targetNodeId &&
       edge.targetPortId === connection.targetPortId,
   );
-  return (
-    !conflicts &&
-    (!ordersProcessing(model, connection) || !createsCycle(model, connection, ignoredEdgeId))
-  );
+  if (conflicts) return 'existing';
+  if (ordersProcessing(model, connection) && createsCycle(model, connection, ignoredEdgeId))
+    return 'cycle';
+  return undefined;
 }
 
-function connectionId(connection: AudioGraphConnection): string {
+export function canConnectAudioGraph(
+  model: AudioGraphModel,
+  connection: AudioGraphConnection,
+  ignoredEdgeId?: string,
+): boolean {
+  return audioGraphConnectionRejection(model, connection, ignoredEdgeId) === undefined;
+}
+
+export function audioGraphConnectionId(connection: AudioGraphConnection): string {
   return [
     'edge',
     connection.sourceNodeId,
@@ -258,7 +270,7 @@ export function connectAudioGraphBatch(
   const pendingModel = { ...model, edges };
   for (const connection of connections) {
     if (!canConnectAudioGraph(pendingModel, connection)) continue;
-    edges.push({ id: connectionId(connection), ...connection });
+    edges.push({ id: audioGraphConnectionId(connection), ...connection });
   }
   if (edges.length === model.edges.length) return model;
   return {

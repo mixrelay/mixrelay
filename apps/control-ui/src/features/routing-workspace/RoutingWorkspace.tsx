@@ -1314,6 +1314,7 @@ function presentDriverEndpointControls(
 function routingContextLabels(t: TFunction) {
   return {
     renameNode: t('routing.nodeName.title'),
+    connectChannels: t('routing.context.connectChannels'),
     removeNode: t('routing.context.removeNode'),
     removeSelection: t('routing.context.removeSelection'),
     disconnect: t('routing.context.disconnect'),

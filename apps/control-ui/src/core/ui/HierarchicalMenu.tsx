@@ -21,6 +21,7 @@ import {
   SubmenuTrigger,
   Text,
 } from 'react-aria-components';
+import { useTranslation } from 'react-i18next';
 import styles from './HierarchicalMenu.module.css';
 import { Tooltip } from './Tooltip';
 
@@ -105,6 +106,7 @@ export function HierarchicalContextMenu({
     opened?: boolean;
   }
 >) {
+  const { t } = useTranslation();
   const [internalOpen, setInternalOpen] = useState(false);
   const [point, setPoint] = useState({ x: 0, y: 0 });
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -153,7 +155,7 @@ export function HierarchicalContextMenu({
       })}
       <MenuTrigger isOpen={opened ?? internalOpen} onOpenChange={changeOpen}>
         <Button
-          aria-label="Actions"
+          aria-label={t('common.actions')}
           render={(props) => <button {...props} tabIndex={-1} aria-hidden="true" />}
           excludeFromTabOrder
           className={styles.cursorAnchor}
@@ -166,7 +168,7 @@ export function HierarchicalContextMenu({
           offset={2}
           isNonModal
         >
-          <Menu className={styles.scrollArea} aria-label="Actions">
+          <Menu className={styles.scrollArea} aria-label={t('common.actions')}>
             {menuEntries(items, (id) => {
               onSelect(id);
               changeOpen(false);

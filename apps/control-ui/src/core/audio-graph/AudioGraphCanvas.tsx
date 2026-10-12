@@ -31,6 +31,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
+  type RefObject,
   type SetStateAction,
   useCallback,
   useContext,
@@ -60,6 +61,17 @@ import {
 import { platformModifier } from '../ui/platformShortcut';
 import { Tooltip } from '../ui/Tooltip';
 import styles from './AudioGraphCanvas.module.css';
+import { ChannelConnectionDialog } from './ChannelConnectionDialog';
+import {
+  type ChannelConnectionRequest,
+  mapChannelConnections,
+  planChannelConnections,
+} from './channelConnections';
+import {
+  focusGraphNode,
+  openContextMenuFromKeyboard,
+  useChannelConnectionRequests,
+} from './graphKeyboard';
 import {
   type AudioGraphConnection,
   type AudioGraphModel,
@@ -93,6 +105,7 @@ import { type GraphContextMenuLabels, useGraphContextMenu } from './useGraphCont
 
 const nodeTypes = { audio: memo(AudioFlowNodeView) };
 const deleteKeyCode = ['Backspace', 'Delete'];
+const fitViewOptions = { padding: 0.15, maxZoom: 1 };
 const panMouseButtons = [1];
 const snapGrid: [number, number] = [12, 12];
 const emptyProcessorEditorStatuses = new Map<string, ProcessorEditorStatus>();
@@ -474,49 +487,36 @@ function connectionPreviewPairs(
   }));
 }
 
+/** A drag from `connection`'s source port carries the other selected outputs of that node
+ * when the grabbed port is part of the selection; otherwise only the grabbed port. */
+function dragConnectionRequest(
+  model: AudioGraphModel,
+  connection: AudioGraphConnection,
+  selectedPorts: readonly SelectedAudioPort[],
+): ChannelConnectionRequest {
+  const selected = selectedOutputPorts(model, selectedPorts, connection.sourceNodeId);
+  const batch = selected.length > 1 && selected.some((port) => port.id === connection.sourcePortId);
+  return {
+    sourceNodeId: connection.sourceNodeId,
+    sourcePortIds: batch ? selected.map((port) => port.id) : [connection.sourcePortId],
+    sourceAnchorPortId: connection.sourcePortId,
+    targetNodeId: connection.targetNodeId,
+    targetAnchorPortId: connection.targetPortId,
+  };
+}
+
 function selectedConnectionBatch(
   model: AudioGraphModel,
   connection: AudioGraphConnection,
   selectedPorts: readonly SelectedAudioPort[],
 ): AudioGraphConnection[] {
-  const sourceNode = model.nodes.find((node) => node.id === connection.sourceNodeId);
-  if (!sourceNode) return [connection];
-  const selectedOutputs = selectedOutputPorts(model, selectedPorts, connection.sourceNodeId);
-  if (
-    selectedOutputs.length < 2 ||
-    !selectedOutputs.some((port) => port.id === connection.sourcePortId)
-  ) {
-    return [connection];
-  }
-  const targetNode = model.nodes.find((node) => node.id === connection.targetNodeId);
-  if (!targetNode?.inputPorts.some((port) => port.id === connection.targetPortId)) {
-    return [connection];
-  }
-
-  const sourceAnchorIndex = sourceNode.outputPorts.findIndex(
-    (port) => port.id === connection.sourcePortId,
+  const { pairs } = mapChannelConnections(
+    model,
+    dragConnectionRequest(model, connection, selectedPorts),
   );
-  const targetAnchorIndex = targetNode.inputPorts.findIndex(
-    (port) => port.id === connection.targetPortId,
-  );
-
-  // Selection gestures retain output channels from one source node. Destination
-  // channels are mapped relative to the released input anchor, never a second selection.
-  return selectedOutputs.flatMap((sourcePort) => {
-    // Both anchors and each selected source were validated above against these arrays.
-    const sourceIndex = sourceNode.outputPorts.findIndex((port) => port.id === sourcePort.id);
-    const targetPort = targetNode.inputPorts[targetAnchorIndex + sourceIndex - sourceAnchorIndex];
-    return targetPort
-      ? [
-          {
-            sourceNodeId: connection.sourceNodeId,
-            sourcePortId: sourcePort.id,
-            targetNodeId: targetNode.id,
-            targetPortId: targetPort.id,
-          },
-        ]
-      : [];
-  });
+  // A target without the hovered port still previews the grabbed cable alone; committing
+  // validates through planChannelConnections and creates nothing.
+  return pairs.length ? pairs : [connection];
 }
 
 function BatchConnectionLine({
@@ -594,10 +594,9 @@ function useConnectionHandlers(
   );
   const onConnect = useCallback(
     (connection: Connection) => {
-      const connections = selectedConnectionBatch(
+      const { accepted: connections } = planChannelConnections(
         model,
-        toGraphConnection(connection),
-        selectedPortsRef.current,
+        dragConnectionRequest(model, toGraphConnection(connection), selectedPortsRef.current),
       );
       const nextModel = connectAudioGraphBatch(model, connections);
       commit(nextModel, 'runtime');
@@ -771,6 +770,7 @@ function handleGraphKeyDown(
   clearSelection: () => void,
   renameNode?: (nodeId: string) => void,
 ) {
+  if (openContextMenuFromKeyboard(event)) return;
   if (event.key === 'F2' && event.target instanceof HTMLElement && renameNode) {
     const id = event.target.matches('.react-flow__node') ? event.target.dataset.id : undefined;
     if (id) {
@@ -918,8 +918,18 @@ function useCanvasViewport(
   return { onInit, onMoveEnd };
 }
 
-function GraphFlowSurface(props: ReactFlowProps<AudioFlowNode, AudioFlowEdge>) {
+function GraphFlowSurface({
+  focusRoot,
+  ...props
+}: ReactFlowProps<AudioFlowNode, AudioFlowEdge> & { focusRoot: RefObject<HTMLElement | null> }) {
   const ariaLabelConfig = useGraphAriaLabels();
+  // React Flow's deletion keys listen on the whole document. Keeping the listener mounted
+  // preserves its key tracking; deletion itself proceeds only while focus is in the graph,
+  // so Delete in a dialog or elsewhere never removes the selection behind it.
+  const onBeforeDelete = useCallback(
+    () => Promise.resolve(Boolean(focusRoot.current?.contains(document.activeElement))),
+    [focusRoot],
+  );
   return (
     <ReactFlow<AudioFlowNode, AudioFlowEdge>
       {...props}
@@ -930,8 +940,9 @@ function GraphFlowSurface(props: ReactFlowProps<AudioFlowNode, AudioFlowEdge>) {
       connectionMode={ConnectionMode.Strict}
       zIndexMode="manual"
       deleteKeyCode={deleteKeyCode}
+      onBeforeDelete={onBeforeDelete}
       edgesReconnectable
-      fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
+      fitViewOptions={fitViewOptions}
       // Match the persisted layout contract; React Flow's defaults would clamp restored views.
       minZoom={0.05}
       maxZoom={8}
@@ -1011,72 +1022,112 @@ export function AudioGraphCanvas({
     nodeMenu,
     portSelection.clear,
   );
-  const renaming = useNodeRenameRequests(onNodeRenameRequest, nodeMenu.rootRef);
+  const { renaming, connecting } = useNodeRequests(onNodeRenameRequest, nodeMenu.rootRef);
   const contextMenu = useGraphContextMenu({
     ...{ model, nodes, edges, setNodes, setEdges },
     addItems: nodeMenuItems,
     labels: contextMenuLabels,
     renameNode: renaming.request,
+    connectChannels: connecting.request,
     commit,
     clearPorts: portSelection.clear,
     selectPorts: portSelection.select,
     selectedPorts: portSelection.selectedRef,
-    fitView: () => {
-      void nodeMenu.flowRef.current?.fitView({ padding: 0.15, maxZoom: 1 });
-    },
+    fitView: () => void nodeMenu.flowRef.current?.fitView(fitViewOptions),
   });
 
   return (
-    <GraphContextSurface
-      contextMenu={contextMenu}
-      nodeMenu={nodeMenu}
-      addNode={addNode}
-      ariaLabel={ariaLabel}
-      captureProps={portSelection.captureProps}
-      renameNode={renaming.request}
-    >
-      <PortSelectionFeedback model={model} {...portSelection.feedback} />
-      <AudioGraphProviders
-        options={options}
-        editor={editorContext}
-        meterStore={meterStore ?? null}
-        model={model}
-        onEndpointChange={onNodeEndpointChange}
-        onGainChange={onNodeGainChange}
-        onParameterChange={onNodeParameterChange}
-        onParametersChange={onNodeParametersChange}
-        selectedRef={portSelection.selectedRef}
-        renderNodeContent={renderNodeContent}
-        renderNodeControls={renderNodeControls}
-        disclosureHeights={disclosureHeights}
+    <>
+      <GraphContextSurface
+        contextMenu={contextMenu}
+        nodeMenu={nodeMenu}
+        addNode={addNode}
+        ariaLabel={ariaLabel}
+        captureProps={portSelection.captureProps}
+        renameNode={renaming.request}
       >
-        <GraphFlowSurface
-          {...viewportEvents}
-          defaultViewport={viewport}
-          edges={edges}
-          fitView={viewport === undefined}
-          isValidConnection={isValidConnection}
-          nodes={nodes}
-          onConnect={onConnect}
-          onDelete={onDelete}
-          onEdgeDoubleClick={onEdgeDoubleClick}
-          onNodeDoubleClick={renaming.doubleClick}
-          onEdgesChange={applyEdgeChanges}
-          onNodesChange={onNodesChange}
-          onPaneClick={() => clearPaneOptions(options[1], onPaneClick)}
-          onReconnect={onReconnect}
-          onReconnectEnd={onReconnectEnd}
+        <PortSelectionFeedback model={model} {...portSelection.feedback} />
+        <AudioGraphProviders
+          options={options}
+          editor={editorContext}
+          meterStore={meterStore ?? null}
+          model={model}
+          onEndpointChange={onNodeEndpointChange}
+          onGainChange={onNodeGainChange}
+          onParameterChange={onNodeParameterChange}
+          onParametersChange={onNodeParametersChange}
+          selectedRef={portSelection.selectedRef}
+          renderNodeContent={renderNodeContent}
+          renderNodeControls={renderNodeControls}
+          disclosureHeights={disclosureHeights}
         >
-          <GraphCanvasBackground
-            addNode={addNode}
-            label={addNodeLabel}
-            nodeMenu={nodeMenu}
-            nodeMenuItems={nodeMenuItems}
-          />
-        </GraphFlowSurface>
-      </AudioGraphProviders>
-    </GraphContextSurface>
+          <GraphFlowSurface
+            {...viewportEvents}
+            focusRoot={nodeMenu.rootRef}
+            defaultViewport={viewport}
+            edges={edges}
+            fitView={viewport === undefined}
+            isValidConnection={isValidConnection}
+            nodes={nodes}
+            onConnect={onConnect}
+            onDelete={onDelete}
+            onEdgeDoubleClick={onEdgeDoubleClick}
+            onNodeDoubleClick={renaming.doubleClick}
+            onEdgesChange={applyEdgeChanges}
+            onNodesChange={onNodesChange}
+            onPaneClick={() => clearPaneOptions(options[1], onPaneClick)}
+            onReconnect={onReconnect}
+            onReconnectEnd={onReconnectEnd}
+          >
+            <GraphCanvasBackground
+              addNode={addNode}
+              label={addNodeLabel}
+              nodeMenu={nodeMenu}
+              nodeMenuItems={nodeMenuItems}
+            />
+          </GraphFlowSurface>
+        </AudioGraphProviders>
+      </GraphContextSurface>
+      <CanvasConnectionDialog connecting={connecting} model={model} commit={commit} />
+    </>
   );
+}
+
+function CanvasConnectionDialog({
+  connecting,
+  model,
+  commit,
+}: {
+  connecting: ReturnType<typeof useChannelConnectionRequests>;
+  model: AudioGraphModel;
+  commit: ReturnType<typeof useGraphCommit>;
+}) {
+  if (!connecting.current) return null;
+  return (
+    <ChannelConnectionDialog
+      key={connecting.current.nodeId}
+      model={model}
+      sourceNodeId={connecting.current.nodeId}
+      sourcePortIds={connecting.current.portIds}
+      onCancel={connecting.close}
+      onConnect={(connections) => {
+        // One commit, so the whole batch is a single undo step.
+        commit(connectAudioGraphBatch(model, connections), 'runtime');
+        connecting.close();
+      }}
+    />
+  );
+}
+
+/** Node-scoped dialogs share one focus contract: the node's outer group owns return focus. */
+function useNodeRequests(
+  onRename: AudioGraphCanvasProps['onNodeRenameRequest'],
+  root: { current: HTMLElement | null },
+) {
+  return {
+    renaming: useNodeRenameRequests(onRename, root),
+    connecting: useChannelConnectionRequests(root),
+  };
 }
 
 function useNodeRenameRequests(
@@ -1086,10 +1137,7 @@ function useNodeRenameRequests(
   const request = useMemo(() => {
     if (!onRequest) return undefined;
     return (id: string) => {
-      const owner = [
-        ...(root.current as HTMLElement).querySelectorAll<HTMLElement>('.react-flow__node'),
-      ].find((element) => element.dataset.id === id);
-      owner?.focus();
+      focusGraphNode(root.current as HTMLElement, id);
       onRequest(id);
     };
   }, [root, onRequest]);

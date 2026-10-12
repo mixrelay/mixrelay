@@ -34,6 +34,10 @@ const previewHarness = {
   zoom: 1,
 };
 const resizeHarness = { height: 480 };
+const deleteHarness = {
+  onBeforeDelete: null as (() => Promise<boolean>) | null,
+  allowed: () => (deleteHarness.onBeforeDelete as () => Promise<boolean>)(),
+};
 
 beforeEach(() => {
   connectionHarness.inProgress = false;
@@ -307,6 +311,7 @@ function MockReactFlow({ children, ...props }: PropsWithChildren<Record<string, 
   const edges = props.edges as MockItem[];
   const nodeTypes = props.nodeTypes as Record<string, ComponentType<MockItem>>;
   const AudioNode = nodeTypes.audio as ComponentType<MockItem>;
+  deleteHarness.onBeforeDelete = props.onBeforeDelete as () => Promise<boolean>;
   const validConnection = {
     source: 'processor',
     sourceHandle: previewHarness.sourcePortId,
@@ -2152,4 +2157,88 @@ it('names cables, ports and React Flow keyboard help in the current language', a
   expect(screen.getByTestId('edge-description')).toHaveTextContent('케이블을 선택합니다');
   expect(screen.getByTestId('node-moved')).toHaveTextContent('왼쪽으로 옮겼습니다');
   await act(() => i18n.changeLanguage('en'));
+});
+
+describe('AudioGraphCanvas keyboard channel connection', () => {
+  function renderCanvas() {
+    const onModelChange = vi.fn();
+    render(
+      <AudioGraphCanvas ariaLabel="Routing graph" model={model()} onModelChange={onModelChange} />,
+      { wrapper: CanvasTestProvider },
+    );
+    return onModelChange;
+  }
+
+  it('opens the node menu with Shift+F10 and connects in one runtime commit', async () => {
+    const onModelChange = renderCanvas();
+    const node = screen.getByRole('group', { name: 'Processor' });
+    act(() => node.focus());
+    await expect(deleteHarness.allowed()).resolves.toBe(true);
+    const key = fireEvent.keyDown(node, { key: 'F10', shiftKey: true });
+    expect(key).toBe(false);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Connect channels…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Connect channels' });
+    expect(dialog).toHaveTextContent('From Processor');
+    // Deletion keys must not reach the selected node while the dialog owns focus.
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    await expect(deleteHarness.allowed()).resolves.toBe(false);
+    fireEvent.click(within(dialog).getByRole('button', { name: /Destination$/ }));
+    fireEvent.click(screen.getByRole('option', { name: 'Sink' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Connect' }));
+    expect(onModelChange).toHaveBeenCalledOnce();
+    expect(onModelChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        edges: expect.arrayContaining([
+          expect.objectContaining({
+            sourceNodeId: 'processor',
+            sourcePortId: 'out',
+            targetNodeId: 'sink',
+            targetPortId: 'in',
+          }),
+        ]),
+      }),
+      'runtime',
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(node).toHaveFocus());
+  });
+
+  it('opens the canvas menu from the ContextMenu key and ignores repeats and nested controls', async () => {
+    renderCanvas();
+    const canvas = screen.getByRole('region', { name: 'Routing graph' });
+    fireEvent.keyDown(canvas, { key: 'ContextMenu', repeat: true });
+    fireEvent.keyDown(canvas, { key: 'F10' });
+    fireEvent.keyDown(canvas, { key: 'F10', shiftKey: true, ctrlKey: true });
+    fireEvent.keyDown(canvas, { key: 'ContextMenu', isComposing: true });
+    fireEvent.keyDown(screen.getByLabelText('Processor input, CH 1'), { key: 'ContextMenu' });
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    fireEvent.keyDown(canvas, { key: 'ContextMenu' });
+    expect(await screen.findByRole('menuitem', { name: 'Fit graph' })).toBeInTheDocument();
+    expect(screen.getByRole('menu', { name: 'Actions' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Connect channels…' })).toBeNull();
+  });
+
+  it("offers the connection only for one node or one node's output channels", async () => {
+    renderCanvas();
+    fireEvent.contextMenu(screen.getByRole('group', { name: 'Sink' }));
+    await screen.findByRole('menuitem', { name: 'Delete node' });
+    expect(screen.queryByRole('menuitem', { name: 'Connect channels…' })).toBeNull();
+    fireEvent.contextMenu(screen.getByLabelText('Processor input, CH 1'));
+    await screen.findByRole('menuitem', { name: 'Disconnect channel' });
+    expect(screen.queryByRole('menuitem', { name: 'Connect channels…' })).toBeNull();
+    fireEvent.contextMenu(screen.getByLabelText('Source output, CH 1'));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Connect channels…' }));
+    expect(await screen.findByRole('dialog', { name: 'Connect channels' })).toHaveTextContent(
+      'Selected channels: CH 1',
+    );
+  });
+
+  it('lets graph deletion proceed only while focus is inside the graph', async () => {
+    renderCanvas();
+    await expect(deleteHarness.allowed()).resolves.toBe(false);
+    act(() => screen.getByRole('group', { name: 'Source' }).focus());
+    await expect(deleteHarness.allowed()).resolves.toBe(true);
+    act(() => (document.activeElement as HTMLElement).blur());
+    await expect(deleteHarness.allowed()).resolves.toBe(false);
+  });
 });
