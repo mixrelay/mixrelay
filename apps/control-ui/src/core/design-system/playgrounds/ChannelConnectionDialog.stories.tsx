@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useState } from 'storybook/preview-api';
+import { useState } from 'react';
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test';
 import { ChannelConnectionDialog } from '../../audio-graph/ChannelConnectionDialog';
 import type { AudioGraphModel, AudioGraphNode } from '../../audio-graph/model';
@@ -60,6 +60,8 @@ const meta = {
       },
     },
   },
+  // React state, not Storybook hooks: a Storybook hook update re-renders the story and
+  // clears the argument spies before the play can read them.
   render: function Interactive(args) {
     const [visible, setVisible] = useState(true);
     return visible ? (
