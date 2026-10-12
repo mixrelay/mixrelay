@@ -380,7 +380,7 @@ export const componentContracts: readonly ComponentContract[] = [
     interaction:
       '버튼 Enter/Space, listbox 방향키·Enter·Esc. 같은 현재 옵션 재선택도 onChange 재시도로 전달. error alert.',
     source: 'apps/control-ui/src/core/ui/SelectField.tsx',
-    api: "export interface SelectFieldProps extends NoAppearanceOverrides {\n  label: string;\n  value: string | null;\n  placeholder?: string;\n  data: { value: string; label: string; description?: string; disabled?: boolean }[];\n  disabled?: boolean;\n  error?: string | null;\n  description?: string;\n  density?: 'regular' | 'compact';\n  labelPlacement?: 'above' | 'inline';\n  onChange: (value: string) => void;\n}\n\nexport function SelectField({\n  label,\n  value,\n  placeholder,\n  data,\n  disabled,\n  error,\n  description,\n  density = 'regular',\n  labelPlacement = 'above',\n  onChange,\n}: SelectFieldProps)",
+    api: "export interface SelectFieldProps extends NoAppearanceOverrides {\n  label: string;\n  value: string | null;\n  placeholder?: string;\n  data: { value: string; label: string; description?: string; disabled?: boolean }[];\n  disabled?: boolean;\n  error?: string | null;\n  description?: string;\n  density?: 'regular' | 'compact';\n  labelPlacement?: 'above' | 'inline';\n  /** Takes focus on mount, e.g. as a dialog's first field. */\n  autoFocus?: boolean;\n  onChange: (value: string) => void;\n}\n\nexport function SelectField({\n  label,\n  value,\n  placeholder,\n  data,\n  disabled,\n  error,\n  description,\n  density = 'regular',\n  labelPlacement = 'above',\n  autoFocus,\n  onChange,\n}: SelectFieldProps)",
     consumers: [
       'apps/control-ui/src/core/ui/ParameterField.tsx',
       'apps/control-ui/src/core/ui/NativeEndpointBuffer.tsx',

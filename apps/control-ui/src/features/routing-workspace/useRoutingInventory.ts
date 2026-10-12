@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 import type { ControlPort } from '../../core/control-port/types';
+import { useSharedState } from '../../core/structuralShare';
 
 export const INVENTORY_POLL_MS = 5_000;
 export const DEVICE_PRESENCE_POLL_MS = 2_000;
@@ -22,13 +23,14 @@ export function useRoutingInventory(
   const devices = useInventoryCategory(loadDevices);
   const refreshApplications = applications.refresh;
   const refreshDevices = devices.refresh;
+  const pollDevices = devices.poll;
   const refresh = useCallback(() => {
     refreshApplications();
     refreshDevices();
   }, [refreshApplications, refreshDevices]);
 
   useEffect(() => {
-    const timer = setInterval(refreshDevices, DEVICE_PRESENCE_POLL_MS);
+    const timer = setInterval(pollDevices, DEVICE_PRESENCE_POLL_MS);
     window.addEventListener('focus', refresh);
     document.addEventListener('visibilitychange', refresh);
     return () => {
@@ -36,7 +38,7 @@ export function useRoutingInventory(
       window.removeEventListener('focus', refresh);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [refresh, refreshDevices]);
+  }, [refresh, pollDevices]);
 
   useEffect(() => {
     if (!menuOpened) return;
@@ -65,14 +67,15 @@ interface InventorySnapshot<T> {
 /** Each category owns one request fence: a hung icon lookup cannot block device presence.
  * Native invokes cannot be cancelled, so cleanup invalidates their publication instead. */
 function useInventoryCategory<T>(load: () => Promise<T[]>) {
-  const [snapshot, setSnapshot] = useState<InventorySnapshot<T>>({
+  const [snapshot, setSnapshot] = useSharedState<InventorySnapshot<T>>({
     items: [],
     observed: false,
     failed: false,
     refreshing: false,
   });
-  const request = useRef<(() => void) | null>(null);
+  const request = useRef<((quiet?: boolean) => void) | null>(null);
   const refresh = useCallback(() => request.current?.(), []);
+  const poll = useCallback(() => request.current?.(true), []);
 
   useEffect(() => {
     let active = true;
@@ -88,10 +91,11 @@ function useInventoryCategory<T>(load: () => Promise<T[]>) {
           : { ...current, failed: true, refreshing: false };
       });
     };
-    const discover = () => {
+    // Background presence polls stay quiet: only a requested refresh shows progress.
+    const discover = (quiet = false) => {
       if (!active || running || document.visibilityState === 'hidden') return;
       running = true;
-      setSnapshot((current) => ({ ...current, refreshing: true }));
+      if (!quiet) setSnapshot((current) => ({ ...current, refreshing: true }));
       void Promise.resolve()
         .then(load)
         .then(
@@ -105,7 +109,7 @@ function useInventoryCategory<T>(load: () => Promise<T[]>) {
       active = false;
       request.current = null;
     };
-  }, [load]);
+  }, [load, setSnapshot]);
 
-  return { ...snapshot, refresh };
+  return { ...snapshot, refresh, poll };
 }

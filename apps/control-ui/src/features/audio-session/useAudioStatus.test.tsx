@@ -24,12 +24,13 @@ it('retains the status while refreshing, then adopts the acknowledged pause', as
   const hook = renderHook(({ refresh }) => useAudioStatus(port, refresh), {
     initialProps: { refresh: 0 },
   });
-  await waitFor(() => expect(hook.result.current).toBe(status));
+  await waitFor(() => expect(hook.result.current).toEqual(status));
   hook.rerender({ refresh: 1 });
-  expect(hook.result.current).toBe(status);
+  expect(hook.result.current).toEqual(status);
   const paused = { ...status, enginePower: { enabled: false, transitioning: false } };
   await act(async () => resolve(paused));
-  expect(hook.result.current).toBe(paused);
+  // Unchanged parts keep their identity; the reply's content is adopted.
+  expect(hook.result.current).toEqual(paused);
 });
 
 it('never retains ready health for a replacement or failed service', async () => {
@@ -40,7 +41,7 @@ it('never retains ready health for a replacement or failed service', async () =>
   const hook = renderHook(({ port, refresh }) => useAudioStatus(port, refresh), {
     initialProps: { port: first, refresh: 0 },
   });
-  await waitFor(() => expect(hook.result.current).toBe(status));
+  await waitFor(() => expect(hook.result.current).toEqual(status));
   vi.mocked(first.getStatus).mockRejectedValueOnce(new Error('offline'));
   hook.rerender({ port: first, refresh: 1 });
   await waitFor(() => expect(hook.result.current).toBeNull());
@@ -71,11 +72,11 @@ it('polls after completion and ignores late replies from a cancelled refresh', a
       await vi.advanceTimersByTimeAsync(1000);
     });
     expect(port.getStatus).toHaveBeenCalledTimes(2);
-    expect(hook.result.current).toBe(status);
+    expect(hook.result.current).toEqual(status);
     hook.rerender({ refresh: 1 });
     await act(async () => {});
     await act(async () => resolve({ ...status, driverState: 'unavailable' }));
-    expect(hook.result.current).toBe(status);
+    expect(hook.result.current).toEqual(status);
     hook.unmount();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1000);
@@ -99,10 +100,34 @@ it('ignores a failed status read from a replaced service instead of hiding the c
   const current = { getStatus: vi.fn().mockResolvedValue(status) } as unknown as ControlPort;
   const hook = renderHook(({ port }) => useAudioStatus(port), { initialProps: { port: old } });
   hook.rerender({ port: current });
-  await waitFor(() => expect(hook.result.current).toBe(status));
+  await waitFor(() => expect(hook.result.current).toEqual(status));
   await act(async () => {
     if (!reject) throw new Error('Previous status request was not started');
     reject(new Error('Old service disconnected'));
   });
-  expect(hook.result.current).toBe(status);
+  expect(hook.result.current).toEqual(status);
+});
+
+it('keeps an unchanged poll reply, but marks the first reply after a refresh as new', async () => {
+  vi.useFakeTimers();
+  try {
+    // The same object every time, as fixture ports do.
+    const port = { getStatus: vi.fn(async () => status) } as unknown as ControlPort;
+    const hook = renderHook(({ refresh }) => useAudioStatus(port, refresh), {
+      initialProps: { refresh: 0 },
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    const first = hook.result.current;
+    expect(first).toEqual(status);
+    // An equal follow-up reply renders nothing new.
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(hook.result.current).toBe(first);
+    // An acknowledgement refresh is a new observation even when its content is equal.
+    hook.rerender({ refresh: 1 });
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(hook.result.current).toEqual(status);
+    expect(hook.result.current).not.toBe(first);
+  } finally {
+    vi.useRealTimers();
+  }
 });

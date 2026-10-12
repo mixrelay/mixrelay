@@ -156,7 +156,8 @@ describe.each(['en', 'ko-KR', 'pseudo'])('Studio footer health in %s', (locale) 
       const button = await screen.findByRole('button', { name: i18n.t(key) });
       expect(button).toHaveAttribute('aria-pressed', String(!enabled));
       expect(button).toHaveAttribute('aria-busy', String(transitioning));
-      expect(button).toHaveAttribute('data-tone', transitioning ? 'warning' : 'neutral');
+      // A transition is announced by aria-busy and its label, not by colour.
+      expect(button).toHaveAttribute('data-tone', 'neutral');
       expect(button).toHaveAttribute('aria-description', i18n.t('routing.nodeStatus.running'));
       // The fixture has no power mutation capability, so it must remain read-only.
       expect(button).toBeDisabled();
@@ -168,8 +169,9 @@ describe.each(['en', 'ko-KR', 'pseudo'])('Studio footer health in %s', (locale) 
   it.each([
     ['running', null, 'neutral', 'routing.nodeStatus.running'],
     ['running', 'processing_failed', 'critical', 'routing.nodeStatus.failed'],
-    ['idle', null, 'warning', 'routing.nodeStatus.idle'],
-    [undefined, null, 'warning', 'routing.nodeStatus.unknown'],
+    ['idle', null, 'neutral', 'routing.nodeStatus.idle'],
+    // Only a failed session colours the shared pause/resume control.
+    [undefined, null, 'neutral', 'routing.nodeStatus.unknown'],
     ['stopped', null, 'critical', 'routing.nodeStatus.stopped'],
   ] as const)(
     'keeps %s/%s health independent from confirmed power',

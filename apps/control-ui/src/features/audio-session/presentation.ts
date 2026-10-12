@@ -27,10 +27,8 @@ export function getAudioSessionPresentation(
       label: t(`routing.nodeStatus.issues.${session.issue ?? 'preferences_unavailable'}`),
       tone: 'warning',
     };
-  return {
-    label: t(`routing.nodeStatus.${session.processingState}`),
-    tone: session.processingState === 'running' ? 'positive' : 'warning',
-  };
+  // An idle session is ready and healthy: it has nothing to process, not a fault.
+  return { label: t(`routing.nodeStatus.${session.processingState}`), tone: 'positive' };
 }
 
 export function getEnginePresentation(status: MixRelayStatus | null, t: TFunction) {

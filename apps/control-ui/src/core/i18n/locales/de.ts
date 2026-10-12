@@ -300,7 +300,7 @@ export const de = {
       reselectApplication: 'Anwendung erneut auswählen',
       unknown: 'Audiostatus unbekannt',
       running: 'Audiositzung läuft',
-      idle: 'Audiositzung im Leerlauf',
+      idle: 'Audio bereit',
       stopped: 'Audioverarbeitung gestoppt',
       failed: 'Audioverarbeitung fehlgeschlagen',
       issues: {

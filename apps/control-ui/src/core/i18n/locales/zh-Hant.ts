@@ -272,7 +272,7 @@ export const zhHant = {
       reselectApplication: '重新選擇應用程式',
       unknown: '音訊狀態不明',
       running: '音訊工作階段正在運作',
-      idle: '音訊工作階段閒置',
+      idle: '音訊已就緒',
       stopped: '音訊處理已停止',
       failed: '音訊處理失敗',
       issues: {

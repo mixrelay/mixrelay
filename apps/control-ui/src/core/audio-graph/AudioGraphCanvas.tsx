@@ -45,6 +45,7 @@ import { useTranslation } from 'react-i18next';
 import { AudioMeterProvider } from '../audio-meter/AudioMeterProvider';
 import type { AudioMeterStore } from '../audio-meter/AudioMeterStore';
 import type { ProcessorEditorFailure, ProcessorEditorStatus } from '../control-port/types';
+import { useStructuralShare } from '../structuralShare';
 import { AudioNodeCard } from '../ui/AudioNodeCard';
 import type { EndpointUpdate } from '../ui/AudioNodeEndpointOptions';
 import { audioNodePortTop } from '../ui/audioNodeLayout';
@@ -383,11 +384,14 @@ function useGraphAriaLabels(): Partial<AriaLabelConfig> {
 type ArrowDirection = 'up' | 'down' | 'left' | 'right';
 
 function useAudioFlowCollections(
-  model: AudioGraphModel,
+  presented: AudioGraphModel,
   commit: CommitGraph,
   disclosureHeights: Map<string, number>,
   openedNodeId: string | null,
 ) {
+  // Presenters rebuild node objects on every status poll; equal nodes keep their identity
+  // so memoized node views and React Flow skip them.
+  const model = useStructuralShare(presented);
   const edgeLabel = useEdgeLabel();
   const initialNodes = useRef<AudioFlowNode[] | null>(null);
   const initialEdges = useRef<AudioFlowEdge[] | null>(null);

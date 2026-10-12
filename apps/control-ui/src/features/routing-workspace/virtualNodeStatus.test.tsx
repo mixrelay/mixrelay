@@ -106,7 +106,13 @@ const cases: Array<[string, GraphAvailability, AudioSessionStatus | undefined, s
     'warning',
     'routing.nodeStatus.unknown',
   ],
-  ['idle', 'active', { ...running, processingState: 'idle' }, 'warning', 'routing.nodeStatus.idle'],
+  [
+    'idle',
+    'active',
+    { ...running, processingState: 'idle' },
+    'positive',
+    'routing.nodeStatus.idle',
+  ],
   [
     'missing app',
     'active',

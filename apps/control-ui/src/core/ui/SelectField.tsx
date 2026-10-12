@@ -21,6 +21,8 @@ export interface SelectFieldProps extends NoAppearanceOverrides {
   description?: string;
   density?: 'regular' | 'compact';
   labelPlacement?: 'above' | 'inline';
+  /** Takes focus on mount, e.g. as a dialog's first field. */
+  autoFocus?: boolean;
   onChange: (value: string) => void;
 }
 
@@ -35,6 +37,7 @@ export function SelectField({
   description,
   density = 'regular',
   labelPlacement = 'above',
+  autoFocus,
   onChange,
 }: SelectFieldProps) {
   const selectedDescription = description ?? data.find((item) => item.value === value)?.description;
@@ -48,6 +51,7 @@ export function SelectField({
       // Every item ID below is a string; this select does not allow deselection.
       onSelectionChange={(key) => onChange(key as string)}
       placeholder={placeholder}
+      autoFocus={autoFocus}
       isDisabled={disabled}
       isInvalid={Boolean(error)}
     >

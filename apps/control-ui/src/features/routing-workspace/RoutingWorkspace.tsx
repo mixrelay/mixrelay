@@ -32,6 +32,7 @@ import { RecoveryActions } from '../../core/ui/RecoveryActions';
 import { RetryAlert } from '../../core/ui/RetryAlert';
 import { TitleField } from '../../core/ui/TitleField';
 import { useRemovedFocusReturn } from '../../core/ui/useRemovedFocusReturn';
+import { useSustainedProblem } from '../../core/ui/useSustainedProblem';
 import { WorkspaceHeader } from '../../core/ui/WorkspaceHeader';
 import { RecorderControls } from '../recorder/RecorderControls';
 import { applicationInventorySelection } from './applicationIdentity';
@@ -1180,11 +1181,12 @@ function usePresentedModel(props: WorkspaceViewProps) {
     audioDevices,
     inventory,
     audioSession,
-    state,
     deviceRateAction,
     deviceDriverAction,
     deviceBufferAction,
   } = props;
+  // A graph apply usually settles well under a second; only a lasting one is a warning.
+  const state = useSustainedProblem(props.state, (current) => current !== 'active');
   const presented = useMemo(
     () =>
       model

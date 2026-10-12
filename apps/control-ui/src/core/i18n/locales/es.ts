@@ -294,7 +294,7 @@ export const es = {
       reselectApplication: 'Seleccionar de nuevo la aplicación',
       unknown: 'Estado de audio desconocido',
       running: 'Sesión de audio en ejecución',
-      idle: 'Sesión de audio inactiva',
+      idle: 'Audio listo',
       stopped: 'Procesamiento de audio detenido',
       failed: 'Error en el procesamiento de audio',
       issues: {

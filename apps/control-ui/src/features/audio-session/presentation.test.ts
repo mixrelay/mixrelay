@@ -62,7 +62,8 @@ it.each(['running', 'idle'] as const)(
   (processingState) => {
     const result = getAudioSessionPresentation(session({ processingState }), i18n.t);
     expect(result.label).toBe(i18n.t(`routing.nodeStatus.${processingState}`));
-    expect(result.tone).toBe(processingState === 'running' ? 'positive' : 'warning');
+    // Idle is ready, not degraded: it must not look like a waiting or failing session.
+    expect(result.tone).toBe('positive');
   },
 );
 

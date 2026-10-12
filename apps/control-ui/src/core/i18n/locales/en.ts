@@ -283,7 +283,7 @@ export const en = {
       reselectApplication: 'Select the application again',
       unknown: 'Audio status unknown',
       running: 'Audio session running',
-      idle: 'Audio session idle',
+      idle: 'Audio ready',
       stopped: 'Audio processing stopped',
       failed: 'Audio processing failed',
       issues: {

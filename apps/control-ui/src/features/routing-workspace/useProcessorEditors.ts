@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { AudioGraphModel } from '../../core/audio-graph/model';
 import type { ControlPort, ProcessorEditorStatus } from '../../core/control-port/types';
+import { structuralShare } from '../../core/structuralShare';
 
 export const EDITOR_POLL_MS = 250;
 type EditorPort = Pick<ControlPort, 'getProcessorEditor' | 'setProcessorEditor'>;
@@ -170,11 +171,18 @@ export function useProcessorEditors(
       nodes,
       {
         status: (status) => {
+          // Polled every few hundred ms: an unchanged status must not re-render the graph.
+          const previous = statusesRef.current.get(status.nodeId);
+          if (structuralShare(previous, status) === previous) return;
           statusesRef.current = new Map(statusesRef.current).set(status.nodeId, status);
           setStatuses(statusesRef.current);
         },
         issue: (entry, busy) =>
           setIssues((current) => {
+            const existing = current.get(entry.id);
+            // Every poll reports its issue state; an unchanged one must not re-render.
+            // An entry's name is fixed for its lifetime; the session resets the map.
+            if (busy === null ? !existing : existing?.busy === busy) return current;
             const next = new Map(current);
             if (busy === null) next.delete(entry.id);
             else next.set(entry.id, { nodeId: entry.id, name: entry.name, busy });

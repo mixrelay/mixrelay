@@ -46,7 +46,6 @@ export function AudioPauseControl({
   const power = effectiveStatus?.enginePower;
   const pending = busy || power?.transitioning;
   const health = getEnginePresentation(effectiveStatus, t);
-  const tone = pending ? 'warning' : power?.enabled === false ? 'neutral' : health.tone;
   const action = power?.enabled === false ? 'audioSession.resume' : 'audioSession.pause';
   const label = pending ? t('audioSession.changing') : t(action);
   const accessibleLabel = power ? label : health.label;
@@ -86,7 +85,8 @@ export function AudioPauseControl({
         label={accessibleLabel}
         description={health.label}
         tooltip={accessibleLabel === health.label ? accessibleLabel : `${label} · ${health.label}`}
-        tone={tone === 'positive' ? 'neutral' : tone}
+        // Pause and resume share one neutral colour; only a failed session is coloured.
+        tone={!pending && health.tone === 'critical' ? 'critical' : 'neutral'}
         pressed={power?.enabled === false}
         busy={Boolean(pending)}
         compact

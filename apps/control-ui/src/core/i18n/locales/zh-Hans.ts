@@ -271,7 +271,7 @@ export const zhHans = {
       reselectApplication: '重新选择应用',
       unknown: '音频状态未知',
       running: '音频会话正在运行',
-      idle: '音频会话空闲',
+      idle: '音频已就绪',
       stopped: '音频处理已停止',
       failed: '音频处理失败',
       issues: {

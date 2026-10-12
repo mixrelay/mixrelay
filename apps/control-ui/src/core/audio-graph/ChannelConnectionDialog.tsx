@@ -109,6 +109,8 @@ export function ChannelConnectionDialog({
           )}
           {targets.length ? (
             <SelectField
+              // A kept canvas selection has no source fields, so the destination comes first.
+              autoFocus={!sourceRange}
               label={t('routing.connect.target')}
               placeholder={t('routing.connect.chooseTarget')}
               value={target ? target.id : null}
@@ -243,6 +245,7 @@ function SourceRange({
   return (
     <>
       <SelectField
+        autoFocus
         label={t('routing.connect.sourceStart')}
         value={start < 0 ? null : range.startPortId}
         placeholder={t('routing.connect.chooseChannel')}

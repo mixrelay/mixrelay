@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { MixRelayProvider } from '../theme/MixRelayProvider';
 import { ChannelConnectionDialog } from './ChannelConnectionDialog';
@@ -286,4 +286,14 @@ it('opens without channels for a source that vanished before it opened', () => {
     'Choose a channel',
   );
   expect(screen.getByRole('button', { name: 'Connect' })).toBeDisabled();
+});
+
+it('focuses the first field: the source channel, or the destination for a kept selection', async () => {
+  const { unmount } = renderDialog();
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: /First output channel$/ })).toHaveFocus(),
+  );
+  unmount();
+  renderDialog({ sourcePortIds: ['out1'] });
+  await waitFor(() => expect(screen.getByRole('button', { name: /Destination$/ })).toHaveFocus());
 });

@@ -294,7 +294,7 @@ export const ja = {
       reselectApplication: 'アプリケーションを再選択',
       unknown: '音声の状態が不明',
       running: 'オーディオセッション動作中',
-      idle: 'オーディオセッション待機中',
+      idle: 'オーディオ準備完了',
       stopped: 'オーディオ処理停止中',
       failed: 'オーディオ処理に失敗',
       issues: {

@@ -292,7 +292,7 @@ export const it = {
       reselectApplication: 'Seleziona di nuovo l’applicazione',
       unknown: 'Stato audio sconosciuto',
       running: 'Sessione audio in esecuzione',
-      idle: 'Sessione audio inattiva',
+      idle: 'Audio pronto',
       stopped: 'Elaborazione audio ferma',
       failed: 'Elaborazione audio non riuscita',
       issues: {

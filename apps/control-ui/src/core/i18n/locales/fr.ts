@@ -294,7 +294,7 @@ export const fr = {
       reselectApplication: 'Sélectionner à nouveau l’application',
       unknown: 'État audio inconnu',
       running: 'Session audio en cours',
-      idle: 'Session audio inactive',
+      idle: 'Audio prêt',
       stopped: 'Traitement audio arrêté',
       failed: 'Échec du traitement audio',
       issues: {

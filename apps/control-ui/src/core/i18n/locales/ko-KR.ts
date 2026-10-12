@@ -282,7 +282,7 @@ export const koKR = {
       reselectApplication: '앱을 다시 선택하세요',
       unknown: '오디오 상태 알 수 없음',
       running: '오디오 세션 실행 중',
-      idle: '오디오 세션 대기 중',
+      idle: '오디오 준비됨',
       stopped: '오디오 처리 중지됨',
       failed: '오디오 처리 실패',
       issues: {

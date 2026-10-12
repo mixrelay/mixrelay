@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import type { ControlPort, GraphNodeControls } from '../../core/control-port/types';
+import { useSharedState } from '../../core/structuralShare';
 import type { GraphApplicationQueue } from './GraphApplicationQueue';
 
 /** A single bounded-rate reader; stale graph/port replies cannot affect a replacement workspace. */
@@ -10,7 +11,7 @@ export function useNodeControls(
   idle: boolean,
   application: GraphApplicationQueue,
 ) {
-  const [snapshot, setSnapshot] = useState<GraphNodeControls | null>(null);
+  const [snapshot, setSnapshot] = useSharedState<GraphNodeControls | null>(null);
   const latest = useRef({ revision, idle });
   latest.current = { revision, idle };
   useEffect(() => {
@@ -39,6 +40,6 @@ export function useNodeControls(
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [port, graphId, application]);
+  }, [port, graphId, application, setSnapshot]);
   return snapshot;
 }

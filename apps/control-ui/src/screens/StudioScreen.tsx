@@ -25,6 +25,7 @@ import { AudioPauseControl } from '../features/audio-session/AudioPauseControl';
 import { AudioSessionNotices } from '../features/audio-session/AudioSessionNotices';
 import { useAudioStatus } from '../features/audio-session/useAudioStatus';
 import { useDeviceBufferControl } from '../features/audio-session/useDeviceBufferControl';
+import { useSettledAudioStatus } from '../features/audio-session/useSettledAudioStatus';
 import { DriverInstallNotice } from '../features/driver-status/DriverInstallNotice';
 import type { DriverSession } from '../features/driver-status/useDriverSession';
 import { GraphCreateDialog } from '../features/graphs/GraphCreateDialog';
@@ -127,7 +128,7 @@ export function StudioScreen({
   const { t } = useTranslation();
   const paid = usePaidFeatures();
   const [statusRefresh, setStatusRefresh] = useState(0);
-  const status = useAudioStatus(controlPort, statusRefresh);
+  const status = useSettledAudioStatus(useAudioStatus(controlPort, statusRefresh));
   const collection = useGraphCatalog(controlPort);
   const catalogErrorText = useCatalogError(collection.error);
   const { catalog, busy: catalogBusy, uncertain: catalogUncertain } = collection;

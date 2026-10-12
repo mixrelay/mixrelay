@@ -295,7 +295,7 @@ export const pt = {
       reselectApplication: 'Selecionar a aplicação novamente',
       unknown: 'Estado do áudio desconhecido',
       running: 'Sessão de áudio em execução',
-      idle: 'Sessão de áudio ociosa',
+      idle: 'Áudio pronto',
       stopped: 'Processamento de áudio parado',
       failed: 'Falha no processamento de áudio',
       issues: {

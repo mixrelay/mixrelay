@@ -34,6 +34,9 @@ export const nodeInsertionGap = spacing.large;
 
 export const border = { width: 1, radius: 2, smallRadius: 1 };
 export const motion = { instant: 80, fast: 120, state: 180, spin: 1000, tooltipDelay: 350 };
+/** A transient problem (an apply, a missed poll) is shown only once it has lasted this
+ * long, so brief stalls do not flash warnings while real slowdowns still surface. */
+export const feedback = { problemDelay: 1000 };
 // Portal levels sit above the application shell; shell levels sit above the canvas.
 export const layers = { dialog: 200, floating: 300, tooltip: 1000 };
 export const shellLayers = { header: 2, sidebarOverlay: 5, chrome: 6 };
