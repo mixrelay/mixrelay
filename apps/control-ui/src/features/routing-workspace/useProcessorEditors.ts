@@ -37,10 +37,47 @@ function identities(model: AudioGraphModel | null) {
           node.appearance.hasProcessorEditor,
       )
       .map((node) => {
-        const config = node.runtime?.config as { typeId?: string } | undefined;
-        return [node.id, config?.typeId ?? '', node.appearance.title] as const;
+        const config = node.runtime?.config as
+          | { typeId?: string; ports?: { layoutId?: string } }
+          | undefined;
+        // A layout change replaces the native instance, so it is part of the identity.
+        const identity = JSON.stringify([config?.typeId ?? '', config?.ports?.layoutId ?? '']);
+        return [node.id, identity, node.appearance.title] as const;
       }) ?? []
   );
+}
+
+/** New nodes present their editor once. A node whose native instance is replaced (e.g. a
+ * new channel layout) reopens only if its editor was open. The layout reaches the model
+ * before the engine applies it, so until a newer document revision arrives the old, still
+ * open instance may answer; the intent is kept (`reopen`, by revision of the change) and
+ * spent on the first session at a later revision, which polls the replacement. */
+function editorsToOpen(
+  nodes: readonly (readonly [string, string, string])[],
+  history: {
+    kept: ReadonlyMap<string, ProcessorEditorStatus>;
+    before: ReadonlyMap<string, ProcessorEditorStatus>;
+    reopen: Map<string, number>;
+    /** The previous session's document revision: a change seen without a newer one is
+     * still optimistic. */
+    priorRevision: number;
+    revision: number;
+  },
+) {
+  const { kept, before, reopen, priorRevision, revision } = history;
+  const present = new Set(nodes.map(([id]) => id));
+  for (const id of reopen.keys()) if (!present.has(id)) reopen.delete(id);
+  const open = new Set<string>();
+  for (const [id] of nodes) {
+    const replaced = kept.has(id) ? undefined : before.get(id);
+    if (replaced?.state === 'open') reopen.set(id, priorRevision);
+    const changedAt = reopen.get(id);
+    if (changedAt !== undefined && revision > changedAt) {
+      reopen.delete(id);
+      open.add(id);
+    } else if (!kept.has(id) && !replaced) open.add(id);
+  }
+  return open;
 }
 
 /** Node/port lifetime and per-node request ordering stay independent of React render timing. */
@@ -52,7 +89,7 @@ class EditorSession {
     nodes: [string, string, string][],
     private callbacks: Callbacks,
     private expectedRevision: number,
-    previousStatuses: ReadonlyMap<string, ProcessorEditorStatus>,
+    autoOpen: ReadonlySet<string>,
   ) {
     this.entries = new Map(
       nodes.map(([id, , name]) => [
@@ -62,7 +99,7 @@ class EditorSession {
           name,
           sequence: 0,
           command: false,
-          autoOpen: !previousStatuses.has(id),
+          autoOpen: autoOpen.has(id),
           retry: { kind: 'poll' },
         },
       ]),
@@ -144,27 +181,37 @@ export function useProcessorEditors(
   const statusesRef = useRef(statuses);
   statusesRef.current = statuses;
   const sessionRef = useRef<EditorSession | null>(null);
+  const reopenRef = useRef(new Map<string, number>());
   const previous = useRef<{
     port: EditorPort;
     keys: Map<string, string>;
     graphId?: string;
+    revision: number;
   } | null>(null);
   const key = JSON.stringify([model?.revision ?? 0, identities(model)]);
   useEffect(() => {
     const [expectedRevision, nodes]: [number, [string, string, string][]] = JSON.parse(key);
     const keys = new Map(nodes.map(([id, type]) => [id, type]));
     const prior = previous.current;
+    const before = statusesRef.current;
+    const samePlace = prior?.port === controlPort && prior.graphId === graphId;
+    // Intents belong to one graph on one port; node IDs repeat across graphs.
+    if (!samePlace) reopenRef.current.clear();
     statusesRef.current = new Map(
-      [...statusesRef.current].filter(
-        ([id]) =>
-          prior?.port === controlPort &&
-          prior.graphId === graphId &&
-          keys.has(id) &&
-          prior.keys.get(id) === keys.get(id),
+      [...before].filter(
+        ([id]) => samePlace && keys.has(id) && prior?.keys.get(id) === keys.get(id),
       ),
     );
+    const autoOpen = editorsToOpen(nodes, {
+      kept: statusesRef.current,
+      before: samePlace ? before : new Map(),
+      reopen: reopenRef.current,
+      // Used only for replaced nodes, which exist only when a prior session does.
+      priorRevision: prior?.revision ?? expectedRevision,
+      revision: expectedRevision,
+    });
     setStatuses(statusesRef.current);
-    previous.current = { port: controlPort, keys, graphId };
+    previous.current = { port: controlPort, keys, graphId, revision: expectedRevision };
     setIssues(new Map());
     const session = new EditorSession(
       controlPort,
@@ -196,7 +243,7 @@ export function useProcessorEditors(
           ),
       },
       expectedRevision,
-      statusesRef.current,
+      autoOpen,
     );
     sessionRef.current = session;
     session.start();

@@ -383,6 +383,7 @@ export const de = {
       vst3: 'VST3',
     },
     processorLayouts: {
+      title: 'Kanalkonfiguration',
       main: 'Hauptbus',
       sidechain: 'Sidechain',
       auxiliary: 'Zusatzbus',

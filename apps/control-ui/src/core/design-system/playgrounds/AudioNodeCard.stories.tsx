@@ -64,3 +64,25 @@ export const Bypassed: Story = { args: { bypassed: true } };
 export const Offline: Story = { args: { offline: true } };
 export const Selected: Story = { args: { selected: true } };
 export const Fallback: Story = { args: { iconUrl: undefined } };
+
+/** A plug-in whose channel layout is chosen on the node, not in the Add node menu. */
+export const ChannelLayoutChoice: Story = {
+  args: {
+    category: 'Processor · AU',
+    icon: 'AU',
+    iconUrl: undefined,
+    title: 'AUBandpass',
+    inputCount: 2,
+    outputCount: 2,
+    channelLayoutControl: {
+      label: '채널 구성',
+      value: 'stereo',
+      options: [
+        { value: 'mono', label: '모노' },
+        { value: 'stereo', label: '스테레오' },
+        { value: 'six', label: '6채널' },
+      ],
+    },
+    onChannelLayoutChange: fn(),
+  },
+};

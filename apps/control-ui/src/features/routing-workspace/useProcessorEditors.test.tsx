@@ -327,3 +327,111 @@ it('keeps an unloaded graph free of editor requests', async () => {
   expect(source.getProcessorEditor).not.toHaveBeenCalled();
   expect(source.setProcessorEditor).not.toHaveBeenCalled();
 });
+
+function withLayout(layoutId: string, revision: number): AudioGraphModel {
+  const base = model();
+  return {
+    ...base,
+    revision,
+    nodes: base.nodes.map((node) => ({
+      ...node,
+      runtime: { type: 'provider', config: { typeId: 'vst3:one', ports: { layoutId } } },
+    })),
+  };
+}
+
+/** Re-renders with the next graph and lets every resulting poll and command settle. */
+async function step(view: { rerender: (props: never) => void }, props: unknown) {
+  view.rerender(props as never);
+  await settle();
+  await settle();
+}
+
+describe('a replaced native instance (new channel layout)', () => {
+  it.each([
+    ['reopens an editor that was open', 'open', 2],
+    ['leaves a closed editor closed', 'closed', 1],
+  ] as const)('%s', async (_name, afterOpen, opens) => {
+    const source = port();
+    source.setProcessorEditor.mockResolvedValue(status(afterOpen));
+    const view = renderHook(({ graph }) => useProcessorEditors(source, graph), {
+      initialProps: { graph: withLayout('stereo', 1) },
+    });
+    await settle();
+    await settle();
+    expect(source.setProcessorEditor).toHaveBeenCalledTimes(1);
+    await step(view, { graph: withLayout('mono', 2) });
+    expect(source.setProcessorEditor).toHaveBeenCalledTimes(opens);
+  });
+
+  it('keeps the reopen intent while the old instance still answers before the apply lands', async () => {
+    const source = port();
+    source.setProcessorEditor.mockResolvedValue(status('open'));
+    const view = renderHook(({ graph }) => useProcessorEditors(source, graph), {
+      initialProps: { graph: withLayout('stereo', 1) },
+    });
+    await settle();
+    await settle();
+    expect(source.setProcessorEditor).toHaveBeenCalledTimes(1);
+    // The new layout reaches the model first; the old native instance is still open.
+    source.getProcessorEditor.mockResolvedValue(status('open'));
+    await step(view, { graph: withLayout('mono', 1) });
+    expect(source.setProcessorEditor).toHaveBeenCalledTimes(1);
+    // The applied document arrives; its replacement instance starts closed.
+    source.getProcessorEditor.mockResolvedValue(status('closed'));
+    await step(view, { graph: withLayout('mono', 2) });
+    expect(source.setProcessorEditor).toHaveBeenCalledTimes(2);
+  });
+
+  it('forgets the intent for a node that is removed', async () => {
+    const source = port();
+    source.setProcessorEditor.mockResolvedValue(status('open'));
+    const view = renderHook(({ graph }) => useProcessorEditors(source, graph), {
+      initialProps: { graph: withLayout('stereo', 1) },
+    });
+    await settle();
+    await settle();
+    view.rerender({ graph: withLayout('mono', 1) });
+    await settle();
+    view.rerender({ graph: { ...withLayout('mono', 2), nodes: [] } });
+    await settle();
+    await step(view, { graph: withLayout('mono', 3) });
+    // Re-added later it is a new node and opens once, not twice.
+    expect(source.setProcessorEditor).toHaveBeenCalledTimes(2);
+  });
+
+  // Statuses carry no instance identity, so a closed reply before the applied revision may
+  // already be the replacement; the editor that was open is reopened rather than lost.
+  it('reopens even when the replacement answers closed before the applied revision', async () => {
+    const source = port();
+    source.setProcessorEditor.mockResolvedValue(status('open'));
+    const view = renderHook(({ graph }) => useProcessorEditors(source, graph), {
+      initialProps: { graph: withLayout('stereo', 1) },
+    });
+    await settle();
+    await settle();
+    source.getProcessorEditor.mockResolvedValue(status('closed'));
+    await step(view, { graph: withLayout('mono', 1) });
+    await step(view, { graph: withLayout('mono', 2) });
+    expect(source.setProcessorEditor).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not carry an intent to another graph with the same node ID', async () => {
+    const source = port();
+    source.setProcessorEditor.mockResolvedValue(status('open'));
+    const view = renderHook(({ graph, id }) => useProcessorEditors(source, graph, id), {
+      initialProps: { graph: withLayout('stereo', 5), id: 'first' },
+    });
+    await settle();
+    await settle();
+    source.getProcessorEditor.mockResolvedValue(status('open'));
+    await step(view, { graph: withLayout('mono', 5), id: 'first' });
+    // Another graph opens its node once as new; it is not reopened later by the old intent.
+    source.getProcessorEditor.mockResolvedValue(status('closed'));
+    source.setProcessorEditor.mockResolvedValue(status('closed'));
+    await step(view, { graph: withLayout('mono', 1), id: 'second' });
+    const opened = source.setProcessorEditor.mock.calls.length;
+    await step(view, { graph: withLayout('mono', 6), id: 'second' });
+    expect(source.setProcessorEditor).toHaveBeenCalledTimes(opened);
+  });
+});

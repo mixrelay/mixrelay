@@ -625,7 +625,7 @@ it('applies recorder channel edits through graph history and restores the width 
 });
 
 describe('RoutingWorkspace processor discovery evidence', () => {
-  it('places explicit plug-in layouts beside built-in processors and catalog actions', async () => {
+  it('lists a multi-layout plug-in once beside built-in processors and catalog actions', async () => {
     await i18n.changeLanguage('en');
     const source = port({
       getProcessors: vi.fn().mockResolvedValue({
@@ -650,7 +650,7 @@ describe('RoutingWorkspace processor discovery evidence', () => {
     });
     renderWorkspace(source);
     const menu = await screen.findByTestId('node-menu');
-    await waitFor(() => expect(menu).toHaveTextContent('Effect · Stereo · 2'));
+    await waitFor(() => expect(menu).toHaveTextContent('processor:vst3:vendor:effect'));
     const items = JSON.parse(menu.textContent ?? '[]') as AudioGraphNodeMenuItem[];
     const processorItems = items.find((item) => item.id === 'processor')?.children ?? [];
     expect(
@@ -667,9 +667,10 @@ describe('RoutingWorkspace processor discovery evidence', () => {
         'rescan-processors',
       ]),
     );
-    expect(processorItems.filter((item) => item.id.startsWith('processor-layout:'))).toHaveLength(
-      2,
-    );
+    // The layout is chosen on the node; the menu offers the plug-in once.
+    expect(processorItems.filter((item) => item.id.startsWith('processor:'))).toEqual([
+      expect.objectContaining({ id: 'processor:vst3:vendor:effect', label: 'Effect' }),
+    ]);
     expect(source.applyGraph).not.toHaveBeenCalled();
   });
 

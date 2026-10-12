@@ -354,6 +354,7 @@ export const zhHans = {
       vst3: 'VST3',
     },
     processorLayouts: {
+      title: '声道布局',
       main: '主',
       sidechain: '侧链',
       auxiliary: '辅助',

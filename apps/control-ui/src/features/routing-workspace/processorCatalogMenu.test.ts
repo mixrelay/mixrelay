@@ -3,8 +3,10 @@ import type { ExternalProcessorDescriptor, ProviderPorts } from '../../core/cont
 import { i18n } from '../../core/i18n';
 import {
   createProcessorMenuItems,
+  initialProcessorLayout,
   processorCatalogPlaceholder,
-  processorLayoutItemId,
+  processorLayoutDescription,
+  processorLayoutLabel,
   processorSelectionForMenuItem,
 } from './processorCatalogMenu';
 
@@ -66,7 +68,7 @@ it('lists every format as sorted direct leaves with distinguishable identities',
   ]);
 });
 
-it('offers explicit multi-layout choices with concise topology labels and opaque exact keys', () => {
+it('lists a multi-layout plug-in once and starts it stereo even when another layout is the default', () => {
   const stereo = stereoLayout('layout-v1:sha256:stereo');
   const sidechain: ProviderPorts = {
     layoutId: 'layout-v1:sha256:sidechain',
@@ -88,7 +90,6 @@ it('offers explicit multi-layout choices with concise topology labels and opaque
     ],
     outputs: stereo.outputs,
   };
-  const duplicate = { ...sidechain, layoutId: 'layout-v1:sha256:duplicate' };
   const processor: ExternalProcessorDescriptor = {
     typeId: 'vst3:vendor:effect',
     displayName: 'Effect',
@@ -97,37 +98,33 @@ it('offers explicit multi-layout choices with concise topology labels and opaque
     format: 'vst3',
     hasEditor: true,
     parameters: [],
-    layouts: [stereo, sidechain, duplicate],
-    defaultLayoutId: stereo.layoutId,
+    layouts: [sidechain, stereo],
+    defaultLayoutId: sidechain.layoutId,
   };
   const items = createProcessorMenuItems([processor], i18n.t.bind(i18n), 'Empty');
-  expect(items.every((item) => item.children === undefined)).toBe(true);
-  expect(items.map((item) => item.label)).toEqual([
-    'Effect · Stereo',
-    'Effect · Stereo + Sidechain 2 ch · 1',
-    'Effect · Stereo + Sidechain 2 ch · 2',
+  expect(items).toEqual([
+    { id: 'processor:vst3:vendor:effect', label: 'Effect', description: 'VST3 · Vendor · Stereo' },
   ]);
-  expect(items.map((item) => item.id)).toEqual([
-    processorLayoutItemId(processor.typeId, stereo.layoutId),
-    processorLayoutItemId(processor.typeId, sidechain.layoutId),
-    processorLayoutItemId(processor.typeId, duplicate.layoutId),
-  ]);
-  expect(processorSelectionForMenuItem(items[1]?.id ?? '', [processor])).toEqual({
+  expect(processorSelectionForMenuItem(items[0]?.id ?? '', [processor])).toEqual({
     processor,
-    ports: sidechain,
+    ports: stereo,
   });
-  expect(items[1]?.description).toContain('VST3 · Vendor');
-  expect(items[1]?.description).toContain('Detector');
-  expect(processorSelectionForMenuItem(`processor:${processor.typeId}`, [processor])).toBeNull();
+  expect(processorSelectionForMenuItem('processor:unknown', [processor])).toBeNull();
+  // Without a plain stereo layout the plug-in's own default is used, then the first one.
+  const noStereo = { ...processor, layouts: [sidechain] };
+  expect(initialProcessorLayout(noStereo)).toEqual(sidechain);
+  const mono = {
+    ...stereo,
+    layoutId: 'mono',
+    inputs: [{ ...stereo.inputs[0], channels: 1, channelFormat: 'mono' as const }],
+  } as ProviderPorts;
   expect(
-    processorSelectionForMenuItem(processorLayoutItemId(processor.typeId, 'unknown'), [processor]),
-  ).toBeNull();
-
-  const separatorPairs = [
-    processorLayoutItemId('vst3:one:two', 'layout:three'),
-    processorLayoutItemId('vst3:one', 'two:layout:three'),
-  ];
-  expect(new Set(separatorPairs).size).toBe(2);
+    initialProcessorLayout({
+      ...processor,
+      layouts: [mono, sidechain],
+      defaultLayoutId: 'missing',
+    }),
+  ).toEqual(mono);
 });
 
 it('localizes layout directions and bus roles without showing machine-kind keys', () => {
@@ -170,10 +167,12 @@ it('localizes layout directions and bus roles without showing machine-kind keys'
     defaultLayoutId: directional.layoutId,
     parameters: [],
   };
-  const items = createProcessorMenuItems([processor], i18n.getFixedT('ko-KR'), '없음');
-  const selected = items[0];
-  expect(selected?.label).toBe('Effect · 모노 입력 → 스테레오 출력 + 사이드체인 2채널');
-  expect(selected?.description).toContain('입력:');
+  const ko = i18n.getFixedT('ko-KR');
+  expect(processorLayoutLabel(directional, ko)).toBe(
+    '모노 입력 → 스테레오 출력 + 사이드체인 2채널',
+  );
+  expect(processorLayoutDescription(directional, ko)).toContain('입력:');
+  const items = createProcessorMenuItems([processor], ko, '없음');
   expect(JSON.stringify(items).toLowerCase()).not.toContain('sidechain');
 });
 
@@ -192,11 +191,6 @@ it('rejects duplicate layout identities instead of selecting the default or firs
   };
   expect(createProcessorMenuItems([processor], i18n.t.bind(i18n), 'Empty')).toEqual([]);
   expect(processorSelectionForMenuItem(`processor:${processor.typeId}`, [processor])).toBeNull();
-  expect(
-    processorSelectionForMenuItem(processorLayoutItemId(processor.typeId, first.layoutId), [
-      processor,
-    ]),
-  ).toBeNull();
 });
 
 describe('empty processor menu evidence', () => {
@@ -222,4 +216,42 @@ describe('empty processor menu evidence', () => {
       'routing.noProcessors',
     );
   });
+});
+
+it('starts stereo only from one stereo main bus each way, not dual mono or a discrete pair', () => {
+  const bus = (
+    id: string,
+    channels: number,
+    channelFormat: ProviderPorts['inputs'][number]['channelFormat'],
+  ) => ({
+    id,
+    name: id,
+    kind: 'main' as const,
+    channels,
+    channelFormat,
+  });
+  const dualMono: ProviderPorts = {
+    layoutId: 'dual-mono',
+    inputs: [bus('l', 1, 'mono'), bus('r', 1, 'mono')],
+    outputs: [bus('l', 1, 'mono'), bus('r', 1, 'mono')],
+  };
+  const discrete: ProviderPorts = {
+    layoutId: 'discrete-2',
+    inputs: [bus('audio', 2, 'discrete')],
+    outputs: [bus('audio', 2, 'discrete')],
+  };
+  const stereo = stereoLayout('stereo');
+  const processor: ExternalProcessorDescriptor = {
+    typeId: 'au:pair',
+    displayName: 'Pair',
+    vendor: 'Vendor',
+    version: '1',
+    format: 'au',
+    hasEditor: false,
+    parameters: [],
+    layouts: [dualMono, discrete, stereo],
+    defaultLayoutId: 'dual-mono',
+  };
+  expect(initialProcessorLayout(processor)).toEqual(stereo);
+  expect(initialProcessorLayout({ ...processor, layouts: [dualMono, discrete] })).toEqual(dualMono);
 });

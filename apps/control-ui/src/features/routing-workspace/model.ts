@@ -751,6 +751,48 @@ export function updateRecorderChannels(
   return updateNodeGeometry(model, nodes);
 }
 
+/** Switches a plug-in node to another catalog layout. Channel ports keep their IDs, so
+ * cables on channels that still exist stay; cables to removed channels are dropped. */
+export function changeProcessorLayout(
+  model: AudioGraphModel,
+  nodeId: string,
+  processor: ExternalProcessorDescriptor,
+  ports: ProviderPorts,
+  presentation: GraphPresentation,
+): AudioGraphModel {
+  const selected = model.nodes.find((node) => node.id === nodeId);
+  const config = selected?.runtime?.config as ProviderNodeConfig | undefined;
+  if (
+    !selected ||
+    selected.runtime?.type !== 'provider' ||
+    config?.typeId !== processor.typeId ||
+    config.ports?.layoutId === ports.layoutId
+  )
+    return model;
+  const rebuilt = externalProcessorNode(
+    { id: runtimeNodeId(selected), position: selected.position },
+    processor,
+    ports,
+    presentation,
+  );
+  const nodes = model.nodes.map((node) =>
+    node === selected
+      ? {
+          ...node,
+          appearance: {
+            ...node.appearance,
+            channelCount: rebuilt.appearance.channelCount,
+            meterBanks: rebuilt.appearance.meterBanks,
+          },
+          inputPorts: rebuilt.inputPorts,
+          outputPorts: rebuilt.outputPorts,
+          runtime: { ...selected.runtime, type: 'provider', config: { ...config, ports } },
+        }
+      : node,
+  );
+  return updateNodeGeometry(model, nodes);
+}
+
 function updateNodeGeometry(model: AudioGraphModel, nodes: AudioGraphNode[]): AudioGraphModel {
   const validNodePorts = new Map(
     nodes.map((node) => [

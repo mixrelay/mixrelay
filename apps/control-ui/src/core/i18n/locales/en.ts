@@ -366,6 +366,7 @@ export const en = {
       vst3: 'VST3',
     },
     processorLayouts: {
+      title: 'Channel layout',
       main: 'Main',
       sidechain: 'Sidechain',
       auxiliary: 'Auxiliary',

@@ -113,13 +113,11 @@ const emptyProcessorEditorStatuses = new Map<string, ProcessorEditorStatus>();
 const NodeGainContext = createContext<((nodeId: string, gainDb: number) => void) | undefined>(
   undefined,
 );
-const NodeEndpointContext = createContext<
-  | ((
-      nodeId: string,
-      value: { captureChannels: number; displayName: string; renderChannels: number },
-    ) => void)
-  | undefined
->(undefined);
+/** Node settings edited from Options; one memoized value so nodes skip unchanged renders. */
+const NodeSettingsContext = createContext<{
+  endpoint?: AudioGraphCanvasProps['onNodeEndpointChange'];
+  channelLayout?: AudioGraphCanvasProps['onNodeChannelLayoutChange'];
+}>({});
 const NodeParameterContext = createContext<{
   single?: (nodeId: string, parameterId: string, value: number) => void;
   batch?: (nodeId: string, updates: readonly { id: string; value: number }[]) => void;
@@ -183,6 +181,8 @@ export interface AudioGraphCanvasProps {
   onNodeRenameRequest?: (nodeId: string) => void;
   onModelChange: (model: AudioGraphModel, kind: AudioGraphChangeKind) => void;
   onNodeEndpointChange?: (nodeId: string, value: EndpointUpdate) => void;
+  /** A choice from the node's `channelLayoutControl`. */
+  onNodeChannelLayoutChange?: (nodeId: string, value: string) => void;
   onNodeGainChange?: (nodeId: string, gainDb: number) => void;
   onNodeParameterChange?: (nodeId: string, parameterId: string, value: number) => void;
   onNodeParametersChange?: (
@@ -200,16 +200,29 @@ export interface AudioGraphCanvasProps {
 
 export type AudioGraphNodeMenuItem = HierarchicalMenuItem;
 
+/** Per-node edits a node card reports from its controls and Options. */
+type NodeEdits = Pick<
+  AudioGraphCanvasProps,
+  | 'onNodeEndpointChange'
+  | 'onNodeChannelLayoutChange'
+  | 'onNodeGainChange'
+  | 'onNodeParameterChange'
+  | 'onNodeParametersChange'
+>;
+
 function AudioGraphProviders({
   children,
   options,
   editor,
   meterStore,
   model,
-  onEndpointChange,
-  onGainChange,
-  onParameterChange,
-  onParametersChange,
+  edits: {
+    onNodeEndpointChange: onEndpointChange,
+    onNodeChannelLayoutChange: onChannelLayoutChange,
+    onNodeGainChange: onGainChange,
+    onNodeParameterChange: onParameterChange,
+    onNodeParametersChange: onParametersChange,
+  },
   selectedRef,
   renderNodeContent,
   renderNodeControls,
@@ -220,24 +233,29 @@ function AudioGraphProviders({
   editor: NodeProcessorEditorContextValue | null;
   meterStore: AudioMeterStore | null;
   model: AudioGraphModel;
-  onEndpointChange: AudioGraphCanvasProps['onNodeEndpointChange'];
-  onGainChange: AudioGraphCanvasProps['onNodeGainChange'];
-  onParameterChange: AudioGraphCanvasProps['onNodeParameterChange'];
-  onParametersChange: AudioGraphCanvasProps['onNodeParametersChange'];
+  edits: NodeEdits;
   selectedRef: AudioPortSelectionContextValue['selectedRef'];
   renderNodeContent: AudioGraphCanvasProps['renderNodeContent'];
   renderNodeControls: AudioGraphCanvasProps['renderNodeControls'];
   disclosureHeights: Map<string, number>;
 }) {
+  // Context values are memoized: a new object would re-render every node.
+  const parameters = useMemo(
+    () => ({ single: onParameterChange, batch: onParametersChange }),
+    [onParameterChange, onParametersChange],
+  );
+  const settings = useMemo(
+    () => ({ endpoint: onEndpointChange, channelLayout: onChannelLayoutChange }),
+    [onEndpointChange, onChannelLayoutChange],
+  );
+  const selection = useMemo(() => ({ model, selectedRef }), [model, selectedRef]);
   return (
     <AudioMeterProvider store={meterStore}>
       <NodeProcessorEditorContext.Provider value={editor}>
-        <NodeParameterContext.Provider
-          value={{ single: onParameterChange, batch: onParametersChange }}
-        >
-          <NodeEndpointContext.Provider value={onEndpointChange}>
+        <NodeParameterContext.Provider value={parameters}>
+          <NodeSettingsContext.Provider value={settings}>
             <NodeGainContext.Provider value={onGainChange}>
-              <AudioPortSelectionContext.Provider value={{ model, selectedRef }}>
+              <AudioPortSelectionContext.Provider value={selection}>
                 <NodeContentContext.Provider value={renderNodeContent}>
                   <NodeControlsContext.Provider value={renderNodeControls}>
                     <NodeOptionsContext.Provider value={options}>
@@ -249,7 +267,7 @@ function AudioGraphProviders({
                 </NodeContentContext.Provider>
               </AudioPortSelectionContext.Provider>
             </NodeGainContext.Provider>
-          </NodeEndpointContext.Provider>
+          </NodeSettingsContext.Provider>
         </NodeParameterContext.Provider>
       </NodeProcessorEditorContext.Provider>
     </AudioMeterProvider>
@@ -990,10 +1008,6 @@ export function AudioGraphCanvas({
   onModelChange,
   onNodeMenuOpenedChange,
   onNodeRenameRequest,
-  onNodeEndpointChange,
-  onNodeGainChange,
-  onNodeParameterChange,
-  onNodeParametersChange,
   onProcessorEditorRetry,
   processorEditorLabels,
   processorEditorStatuses = emptyProcessorEditorStatuses,
@@ -1001,6 +1015,7 @@ export function AudioGraphCanvas({
   renderNodeControls,
   viewport,
   onViewportChange,
+  ...edits
 }: AudioGraphCanvasProps) {
   const options = useState<string | null>(null);
   const disclosureHeights = useRef(new Map<string, number>()).current;
@@ -1056,10 +1071,7 @@ export function AudioGraphCanvas({
           editor={editorContext}
           meterStore={meterStore ?? null}
           model={model}
-          onEndpointChange={onNodeEndpointChange}
-          onGainChange={onNodeGainChange}
-          onParameterChange={onNodeParameterChange}
-          onParametersChange={onNodeParametersChange}
+          edits={edits}
           selectedRef={portSelection.selectedRef}
           renderNodeContent={renderNodeContent}
           renderNodeControls={renderNodeControls}
@@ -1167,7 +1179,7 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
   // AudioFlowNodeView is private to the canvas provider tree.
   const disclosureHeights = useContext(NodeDisclosureHeightsContext) as Map<string, number>;
   const onNodeGainChange = useContext(NodeGainContext);
-  const onNodeEndpointChange = useContext(NodeEndpointContext);
+  const settings = useContext(NodeSettingsContext);
   const { single: onNodeParameterChange, batch: onNodeParametersChange } =
     useContext(NodeParameterContext);
   const processorEditors = useContext(NodeProcessorEditorContext);
@@ -1219,8 +1231,13 @@ function AudioFlowNodeView({ data, selected }: NodeProps<AudioFlowNode>) {
           onGainChange={
             onNodeGainChange ? (gainDb) => onNodeGainChange(graphNode.id, gainDb) : undefined
           }
+          onChannelLayoutChange={
+            settings.channelLayout
+              ? (value) => settings.channelLayout?.(graphNode.id, value)
+              : undefined
+          }
           onEndpointChange={
-            onNodeEndpointChange ? (value) => onNodeEndpointChange(graphNode.id, value) : undefined
+            settings.endpoint ? (value) => settings.endpoint?.(graphNode.id, value) : undefined
           }
           onLayoutChange={() => updateNodeInternals(graphNode.id)}
           onParameterChange={

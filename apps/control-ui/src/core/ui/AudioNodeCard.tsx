@@ -26,6 +26,7 @@ import {
 } from './NodeOptionsSection';
 import { useNodeOptionsState } from './nodeOptionsState';
 import { ProcessorTimingLabel } from './ProcessorTimingLabel';
+import { SelectField } from './SelectField';
 import type { StatusTone } from './StatusBadge';
 import { StatusIndicator } from './StatusIndicator';
 import { Tooltip } from './Tooltip';
@@ -35,6 +36,13 @@ import { useNodeHeaderFocus } from './useNodeHeaderFocus';
 import { ValueSlider } from './ValueSlider';
 
 const portIds = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+/** A node setting chosen from a fixed list, such as a plug-in's channel layout. */
+export interface NodeChoiceControl {
+  label: string;
+  value: string;
+  options: readonly { value: string; label: string; description?: string }[];
+}
+
 export interface AudioNodeCardProps {
   equalizer?: GraphicEqualizerContract;
   onParametersChange?: (updates: readonly { id: string; value: number }[]) => void;
@@ -50,6 +58,8 @@ export interface AudioNodeCardProps {
   channelCount?: number;
   detail?: string;
   endpointControl?: EndpointControl;
+  /** Offered in Options when there is more than one choice. */
+  channelLayoutControl?: NodeChoiceControl;
   faceHeight?: number;
   faceMode?: AudioNodeFaceMode;
   onFaceHeightChange?: (height: number) => void;
@@ -77,6 +87,7 @@ export interface AudioNodeCardProps {
   onSelect?: () => void;
   onGainChange?: (gainDb: number) => void;
   onEndpointChange?: (value: EndpointUpdate) => void;
+  onChannelLayoutChange?: (value: string) => void;
   onLayoutChange?: () => void;
   onParameterChange?: (parameterId: string, value: number) => void;
   onProcessorEditorRetry?: () => void;
@@ -105,12 +116,10 @@ export function AudioNodeCard({
   content,
   channelCount = 0,
   detail,
-  endpointControl,
   faceHeight,
   faceMode = 'standard',
   onFaceHeightChange,
   onContentHeightChange,
-  gainControl,
   icon,
   iconUrl,
   inputCount,
@@ -118,8 +127,6 @@ export function AudioNodeCard({
   outputCount,
   optionsLabel,
   onSelect,
-  onEndpointChange,
-  onGainChange,
   onLayoutChange,
   onParameterChange,
   onProcessorEditorRetry,
@@ -133,6 +140,8 @@ export function AudioNodeCard({
   status,
   statusTone = 'neutral',
   title,
+  // Endpoint, channel layout and gain settings, which only the Options panel reads.
+  ...settings
 }: AudioNodeCardProps) {
   const { t } = useTranslation();
   const resolvedOptionsLabel = optionsLabel ?? t('routing.nodes.options');
@@ -143,15 +152,8 @@ export function AudioNodeCard({
   const { opened: optionsOpened, toggle } = useNodeOptionsState();
   const [headerOptionsTarget, setHeaderOptionsTarget] = useState<HTMLDivElement | null>(null);
   const [headerRef, headerBounds] = useElementBounds<HTMLDivElement>();
-  const { hasOptions, hasEndpointControl, hasParameterControls } = nodeOptionsAvailability({
-    gainControl,
-    onGainChange,
-    endpointControl,
-    onEndpointChange,
-    parameterControls,
-    onParameterChange,
-    processorEditor,
-  });
+  const { hasOptions, hasEndpointControl, hasParameterControls, channelLayout } =
+    nodeOptionsAvailability({ ...settings, parameterControls, onParameterChange, processorEditor });
   const editor = { title, control: processorEditor, onRetry: onProcessorEditorRetry };
   return (
     <div
@@ -213,12 +215,10 @@ export function AudioNodeCard({
             </div>
             <NodeOptions
               disabled={poweredOff}
-              endpointControl={endpointControl}
-              gainControl={gainControl}
+              {...settings}
+              channelLayout={channelLayout}
               hasOptions={hasOptions}
               label={`${title}: ${resolvedOptionsLabel}`}
-              onEndpointChange={onEndpointChange}
-              onGainChange={onGainChange}
               onParameterChange={onParameterChange}
               onToggle={() => toggleNodeOptions(toggle, onLayoutChange)}
               opened={optionsOpened}
@@ -335,18 +335,28 @@ function nodeOptionsAvailability(
     | 'onGainChange'
     | 'endpointControl'
     | 'onEndpointChange'
+    | 'channelLayoutControl'
+    | 'onChannelLayoutChange'
     | 'parameterControls'
     | 'onParameterChange'
     | 'processorEditor'
   >,
 ) {
   const hasGainControl = Boolean(props.gainControl && props.onGainChange);
+  const channelLayout =
+    props.channelLayoutControl &&
+    props.onChannelLayoutChange &&
+    props.channelLayoutControl.options.length > 1
+      ? { control: props.channelLayoutControl, onChange: props.onChannelLayoutChange }
+      : undefined;
   const hasEndpointControl = Boolean(props.endpointControl && props.onEndpointChange);
   const hasParameterControls =
     Boolean(props.parameterControls?.length && props.onParameterChange) &&
     !prefersProcessorEditor(props.processorEditor);
   return {
-    hasOptions: hasGainControl || hasEndpointControl || hasParameterControls,
+    hasOptions:
+      hasGainControl || hasEndpointControl || hasParameterControls || Boolean(channelLayout),
+    channelLayout,
     hasEndpointControl,
     hasParameterControls,
   };
@@ -526,23 +536,10 @@ function AudioNodeFace(
   );
 }
 
-function NodeOptions({
-  disabled,
-  endpointControl,
-  gainControl,
-  hasOptions,
-  label,
-  onEndpointChange,
-  onGainChange,
-  onParameterChange,
-  onToggle,
-  opened,
-  parameterControls,
-  equalizer,
-  onParametersChange,
-}: {
+interface NodeOptionsProps {
   disabled: boolean;
   endpointControl?: EndpointControl;
+  channelLayout?: { control: NodeChoiceControl; onChange: (value: string) => void };
   gainControl?: { label: string; valueDb: number };
   hasOptions: boolean;
   label: string;
@@ -554,37 +551,90 @@ function NodeOptions({
   parameterControls: NonNullable<AudioNodeCardProps['parameterControls']>;
   equalizer?: GraphicEqualizerContract;
   onParametersChange?: AudioNodeCardProps['onParametersChange'];
+}
+
+function NodeOptions(props: NodeOptionsProps) {
+  if (!props.hasOptions) return null;
+  const layoutField = props.channelLayout ? (
+    <SelectField
+      density="compact"
+      label={props.channelLayout.control.label}
+      value={props.channelLayout.control.value}
+      data={[...props.channelLayout.control.options]}
+      disabled={props.disabled}
+      onChange={props.channelLayout.onChange}
+    />
+  ) : null;
+  return props.equalizer && props.onParameterChange ? (
+    <EqualizerOptions
+      {...props}
+      equalizer={props.equalizer}
+      onParameterChange={props.onParameterChange}
+      layoutField={layoutField}
+    />
+  ) : (
+    <StandardOptions {...props} layoutField={layoutField} />
+  );
+}
+
+function EqualizerOptions({
+  disabled,
+  equalizer,
+  label,
+  layoutField,
+  onParameterChange,
+  onParametersChange,
+  onToggle,
+  opened,
+  parameterControls,
+}: NodeOptionsProps & {
+  equalizer: GraphicEqualizerContract;
+  onParameterChange: NonNullable<AudioNodeCardProps['onParameterChange']>;
+  layoutField: ReactNode;
 }) {
-  if (!hasOptions) return null;
-  if (equalizer && onParameterChange)
-    return (
-      <div className={`${styles.optionsPanel} nodrag nopan nowheel`}>
-        <GraphicEqualizer
-          contract={equalizer}
-          controls={parameterControls}
-          disabled={disabled}
-          bypassed={Boolean(parameterControls.find((control) => control.id === 'bypass')?.value)}
-          onChange={onParameterChange}
-          onParametersChange={onParametersChange}
-          renderValues={(values) => (
-            <NodeOptionsSection
-              label={label}
-              opened={opened}
-              onToggle={onToggle}
-              disabled={disabled}
-            >
-              {values}
-            </NodeOptionsSection>
-          )}
-        />
-      </div>
-    );
+  return (
+    <div className={`${styles.optionsPanel} nodrag nopan nowheel`}>
+      <GraphicEqualizer
+        contract={equalizer}
+        controls={parameterControls}
+        disabled={disabled}
+        bypassed={Boolean(parameterControls.find((control) => control.id === 'bypass')?.value)}
+        onChange={onParameterChange}
+        onParametersChange={onParametersChange}
+        renderValues={(values) => (
+          <NodeOptionsSection label={label} opened={opened} onToggle={onToggle} disabled={disabled}>
+            {layoutField}
+            {values}
+          </NodeOptionsSection>
+        )}
+      />
+    </div>
+  );
+}
+
+function StandardOptions({
+  disabled,
+  endpointControl,
+  gainControl,
+  label,
+  layoutField,
+  onEndpointChange,
+  onGainChange,
+  onParameterChange,
+  onToggle,
+  opened,
+  parameterControls,
+}: NodeOptionsProps & { layoutField: ReactNode }) {
+  const inline = parameterControls.length > 0;
   const mainParameters = parameterControls.filter(
     (control) => control.id !== 'bypass' && control.section !== 'options',
   );
-  const optionParameters = parameterControls.filter((control) => control.section === 'options');
+  const optionParameters = onParameterChange
+    ? parameterControls.filter((control) => control.section === 'options')
+    : [];
   const controls = (
     <>
+      {inline ? null : layoutField}
       {endpointControl && onEndpointChange ? (
         <div inert={disabled && !endpointControl.nativeFormats}>
           <AudioNodeEndpointOptions control={endpointControl} onChange={onEndpointChange} />
@@ -593,7 +643,7 @@ function NodeOptions({
       {gainControl && onGainChange ? (
         <NodeGainControl control={gainControl} onChange={onGainChange} disabled={disabled} />
       ) : null}
-      {onParameterChange && parameterControls.length > 0 && !equalizer ? (
+      {onParameterChange && inline ? (
         <AudioNodeParameterGrid
           controls={mainParameters}
           disabled={disabled}
@@ -602,23 +652,28 @@ function NodeOptions({
       ) : null}
     </>
   );
-  return parameterControls.length > 0 ? (
+  if (!inline)
+    return (
+      <NodeOptionsSection label={label} opened={opened} onToggle={onToggle}>
+        {controls}
+      </NodeOptionsSection>
+    );
+  return (
     <>
       <div className={`${styles.optionsPanel} nodrag nopan nowheel`}>{controls}</div>
-      {onParameterChange && optionParameters.length > 0 ? (
+      {layoutField || optionParameters.length > 0 ? (
         <NodeOptionsSection label={label} opened={opened} onToggle={onToggle} disabled={disabled}>
-          <AudioNodeParameterGrid
-            controls={optionParameters}
-            disabled={disabled}
-            onChange={onParameterChange}
-          />
+          {layoutField}
+          {onParameterChange && optionParameters.length > 0 ? (
+            <AudioNodeParameterGrid
+              controls={optionParameters}
+              disabled={disabled}
+              onChange={onParameterChange}
+            />
+          ) : null}
         </NodeOptionsSection>
       ) : null}
     </>
-  ) : (
-    <NodeOptionsSection label={label} opened={opened} onToggle={onToggle}>
-      {controls}
-    </NodeOptionsSection>
   );
 }
 

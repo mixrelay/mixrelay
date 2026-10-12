@@ -9,11 +9,6 @@ export function processorItemId(processor: ExternalProcessorDescriptor): string 
   return `processor:${processor.typeId}`;
 }
 
-/** Encodes the complete native selection as a JSON tuple, never delimiter-splits IDs. */
-export function processorLayoutItemId(typeId: string, layoutId: string): string {
-  return `processor-layout:${JSON.stringify([typeId, layoutId])}`;
-}
-
 export function processorLayoutLabel(layout: ProviderPorts, t: TFunction): string {
   const mainInputs = layout.inputs.filter((bus) => bus.kind === 'main');
   const mainOutputs = layout.outputs.filter((bus) => bus.kind === 'main');
@@ -71,7 +66,7 @@ function channelFormatLabel(bus: ProviderPorts['inputs'][number], t: TFunction) 
   }
 }
 
-function processorLayoutDescription(layout: ProviderPorts, t: TFunction) {
+export function processorLayoutDescription(layout: ProviderPorts, t: TFunction) {
   // Menu descriptions only receive layouts validated with non-empty inputs and outputs.
   const describe = (buses: ProviderPorts['inputs']) =>
     buses
@@ -90,25 +85,35 @@ function processorLayoutDescription(layout: ProviderPorts, t: TFunction) {
   });
 }
 
-/** Resolves the opaque menu action back to its exact descriptor and authored layout. */
+/** Resolves the menu action to its descriptor and the layout a new node starts with. */
 export function processorSelectionForMenuItem(
   itemId: string,
   processors: readonly ExternalProcessorDescriptor[],
 ): { ports: ProviderPorts; processor: ExternalProcessorDescriptor } | null {
-  for (const processor of processors) {
-    const layouts = selectableLayouts(processor);
-    const onlyLayout = layouts.length === 1 ? layouts.at(0) : undefined;
-    if (onlyLayout && processorItemId(processor) === itemId)
-      return { ports: onlyLayout, processor };
-    for (const ports of layouts) {
-      if (processorLayoutItemId(processor.typeId, ports.layoutId) === itemId)
-        return { ports, processor };
-    }
-  }
-  return null;
+  const processor = processors.find((candidate) => processorItemId(candidate) === itemId);
+  const ports = processor ? initialProcessorLayout(processor) : null;
+  return processor && ports ? { ports, processor } : null;
 }
 
-/** Keep selectable plug-in layouts directly below Processor, without format submenus. */
+/** New nodes start stereo when the plug-in offers a plain 2-in/2-out layout; otherwise
+ * with the plug-in's own default. The layout is then changed on the node. */
+export function initialProcessorLayout(processor: ExternalProcessorDescriptor) {
+  const layouts = selectableProcessorLayouts(processor);
+  // Exactly one stereo main bus each way; dual mono or a discrete pair is not "stereo".
+  const stereo = (buses: ProviderPorts['inputs']) =>
+    buses.length === 1 &&
+    buses[0]?.kind === 'main' &&
+    buses[0].channelFormat === 'stereo' &&
+    buses[0].channels === 2;
+  return (
+    layouts.find((layout) => stereo(layout.inputs) && stereo(layout.outputs)) ??
+    layouts.find((layout) => layout.layoutId === processor.defaultLayoutId) ??
+    layouts[0] ??
+    null
+  );
+}
+
+/** One entry per plug-in directly below Processor; the channel layout is chosen on the node. */
 export function createProcessorMenuItems(
   processors: readonly ExternalProcessorDescriptor[],
   t: TFunction,
@@ -127,42 +132,24 @@ export function createProcessorMenuItems(
 }
 
 function processorMenuItems(processor: ExternalProcessorDescriptor, t: TFunction) {
-  const layouts = selectableLayouts(processor);
+  const initial = initialProcessorLayout(processor);
+  if (!initial) return [];
   const identity = [t(`routing.groups.${processor.format}`), processor.vendor]
     .filter(Boolean)
     .join(' · ');
-  const [onlyLayout] = layouts;
-  if (!onlyLayout) return [];
-  if (layouts.length === 1) {
-    return [
-      {
-        description: `${identity} · ${processorLayoutLabel(onlyLayout, t)}`,
-        id: processorItemId(processor),
-        label: processor.displayName,
-      },
-    ];
-  }
-
-  const namedLayouts = layouts.map((layout) => ({
-    layout,
-    label: processorLayoutLabel(layout, t),
-  }));
-  const labelCounts = new Map<string, number>();
-  for (const { label } of namedLayouts) labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
-  const seenLabels = new Map<string, number>();
-  return namedLayouts.map(({ layout, label: baseLabel }) => {
-    const ordinal = (seenLabels.get(baseLabel) ?? 0) + 1;
-    seenLabels.set(baseLabel, ordinal);
-    const label = labelCounts.get(baseLabel) !== 1 ? `${baseLabel} · ${ordinal}` : baseLabel;
-    return {
-      description: `${identity} · ${processorLayoutDescription(layout, t)}`,
-      id: processorLayoutItemId(processor.typeId, layout.layoutId),
-      label: `${processor.displayName} · ${label}`,
-    };
-  });
+  return [
+    {
+      description: `${identity} · ${processorLayoutLabel(initial, t)}`,
+      id: processorItemId(processor),
+      label: processor.displayName,
+    },
+  ];
 }
 
-function selectableLayouts(processor: ExternalProcessorDescriptor): ProviderPorts[] {
+/** Layouts with a unique ID that validate as provider ports, in catalog order. */
+export function selectableProcessorLayouts(
+  processor: ExternalProcessorDescriptor,
+): ProviderPorts[] {
   const counts = new Map<string, number>();
   for (const layout of processor.layouts) {
     counts.set(layout.layoutId, (counts.get(layout.layoutId) ?? 0) + 1);

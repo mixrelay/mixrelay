@@ -355,6 +355,7 @@ export const zhHant = {
       vst3: 'VST3',
     },
     processorLayouts: {
+      title: '聲道配置',
       main: '主',
       sidechain: '側鏈',
       auxiliary: '輔助',

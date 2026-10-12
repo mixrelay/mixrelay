@@ -370,6 +370,7 @@ export const ru = {
       vst3: 'VST3',
     },
     processorLayouts: {
+      title: 'Конфигурация каналов',
       main: 'Основной',
       sidechain: 'Сайдчейн',
       auxiliary: 'Вспомогательный',

@@ -2242,3 +2242,31 @@ describe('AudioGraphCanvas keyboard channel connection', () => {
     await expect(deleteHarness.allowed()).resolves.toBe(false);
   });
 });
+
+it('reports a node channel layout choice with the node identity', () => {
+  const graph = model();
+  const processor = graph.nodes[1];
+  assert(processor);
+  processor.appearance.channelLayoutControl = {
+    label: 'Channel layout',
+    value: 'stereo',
+    options: [
+      { value: 'mono', label: 'Mono' },
+      { value: 'stereo', label: 'Stereo' },
+    ],
+  };
+  const onNodeChannelLayoutChange = vi.fn();
+  render(
+    <AudioGraphCanvas
+      ariaLabel="Graph"
+      model={graph}
+      onModelChange={vi.fn()}
+      onNodeChannelLayoutChange={onNodeChannelLayoutChange}
+    />,
+    { wrapper: CanvasTestProvider },
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Processor: Options' }));
+  fireEvent.click(screen.getByRole('button', { name: /Channel layout$/ }));
+  fireEvent.click(screen.getByRole('option', { name: 'Mono' }));
+  expect(onNodeChannelLayoutChange).toHaveBeenCalledWith('processor', 'mono');
+});

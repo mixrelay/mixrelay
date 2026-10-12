@@ -375,6 +375,7 @@ export const it = {
       vst3: 'VST3',
     },
     processorLayouts: {
+      title: 'Configurazione canali',
       main: 'Principale',
       sidechain: 'Sidechain',
       auxiliary: 'Ausiliario',

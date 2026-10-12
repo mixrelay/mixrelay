@@ -3,7 +3,6 @@ import type { ExternalProcessorDescriptor, ProviderPorts } from '../../core/cont
 import { i18n } from '../../core/i18n';
 import {
   createProcessorMenuItems,
-  processorLayoutItemId,
   processorLayoutLabel,
   processorSelectionForMenuItem,
 } from './processorCatalogMenu';
@@ -96,11 +95,12 @@ describe('deterministic plugin identity sorting and selection', () => {
     ]);
     expect(processors[0]?.typeId).toBe('fx:z');
   });
-  it('allows the exact layout identity even for a single-layout descriptor', () => {
+  it('selects a single-layout descriptor by its plug-in identity', () => {
     const fx = processor();
-    expect(processorSelectionForMenuItem(processorLayoutItemId(fx.typeId, 'stereo'), [fx])).toEqual(
-      { ports: stereo, processor: fx },
-    );
+    expect(processorSelectionForMenuItem('processor:fx:one', [fx])).toEqual({
+      ports: stereo,
+      processor: fx,
+    });
     expect(processorSelectionForMenuItem('processor:missing', [fx])).toBeNull();
   });
   it('drops malformed layouts and keeps remaining valid selections exact', () => {
@@ -112,9 +112,6 @@ describe('deterministic plugin identity sorting and selection', () => {
       ports: stereo,
       processor: fx,
     });
-    expect(
-      processorSelectionForMenuItem(processorLayoutItemId(fx.typeId, 'invalid'), [fx]),
-    ).toBeNull();
     expect(createProcessorMenuItems([processor({ layouts: [invalid] })], t, 'Empty')).toEqual([]);
   });
 });

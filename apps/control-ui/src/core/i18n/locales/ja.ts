@@ -377,6 +377,7 @@ export const ja = {
       vst3: 'VST3',
     },
     processorLayouts: {
+      title: 'チャンネル構成',
       main: 'メイン',
       sidechain: 'サイドチェイン',
       auxiliary: '補助',

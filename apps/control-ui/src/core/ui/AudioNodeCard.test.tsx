@@ -658,3 +658,60 @@ it('includes content-box padding and borders and rejects incomplete DOM measurem
     restore();
   }
 });
+
+describe('channel layout choice', () => {
+  const control = {
+    label: 'Channel layout',
+    value: 'stereo',
+    options: [
+      { value: 'mono', label: 'Mono' },
+      { value: 'stereo', label: 'Stereo' },
+    ],
+  };
+  const props = {
+    category: 'Processor',
+    icon: 'AU',
+    inputCount: 2,
+    outputCount: 2,
+    title: 'AUBandpass',
+  };
+
+  it.each([
+    ['without parameters', []],
+    [
+      'beside inline parameters',
+      [{ id: 'gain', label: 'Gain', minimum: 0, maximum: 1, step: 0.1, suffix: '', value: 0.5 }],
+    ],
+  ])('is offered in Options %s and reports the choice', (_case, parameterControls) => {
+    const onChannelLayoutChange = vi.fn();
+    const view = render(
+      <MixRelayProvider>
+        <AudioNodeCard
+          {...props}
+          parameterControls={parameterControls}
+          onParameterChange={vi.fn()}
+          channelLayoutControl={control}
+          onChannelLayoutChange={onChannelLayoutChange}
+        />
+      </MixRelayProvider>,
+    );
+    fireEvent.click(view.getByRole('button', { name: 'AUBandpass: Options' }));
+    fireEvent.click(view.getByRole('button', { name: /Channel layout$/ }));
+    fireEvent.click(view.getByRole('option', { name: 'Mono' }));
+    expect(onChannelLayoutChange).toHaveBeenCalledWith('mono');
+  });
+
+  it('is not offered with a single layout or without an owner', () => {
+    const single = {
+      ...control,
+      options: [control.options[1] as (typeof control.options)[number]],
+    };
+    const view = render(
+      <MixRelayProvider>
+        <AudioNodeCard {...props} channelLayoutControl={single} onChannelLayoutChange={vi.fn()} />
+        <AudioNodeCard {...props} title="Other" channelLayoutControl={control} />
+      </MixRelayProvider>,
+    );
+    expect(view.queryByRole('button', { name: /Options$/ })).toBeNull();
+  });
+});

@@ -1,5 +1,6 @@
 import type { RuntimeGraphEdge } from '../control-port/types';
 import { nodeWidths } from '../theme/tokens';
+import type { NodeChoiceControl } from '../ui/AudioNodeCard';
 import type { EndpointControl } from '../ui/AudioNodeEndpointOptions';
 import type { DynamicsMeterContract } from '../ui/DynamicsMeter';
 import type { GraphicEqualizerContract } from '../ui/GraphicEqualizer';
@@ -52,6 +53,8 @@ export interface AudioGraphNodeAppearance {
   channelCount?: number;
   detail?: string;
   endpointControl?: EndpointControl;
+  /** A plug-in's channel layout, chosen in the node's Options. */
+  channelLayoutControl?: NodeChoiceControl;
   gainControl?: { label: string; valueDb: number };
   hasProcessorEditor?: boolean;
   icon: string;

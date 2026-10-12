@@ -67,6 +67,7 @@ import { ProcessorCatalogAlert, ProcessorEditorAlerts } from './ProcessorControl
 import { ProcessorParameterAlert } from './ProcessorParameterAlert';
 import { ProcessorRecoveryControl } from './ProcessorRecoveryControl';
 import { processorCatalogPlaceholder, processorSelectionForMenuItem } from './processorCatalogMenu';
+import { presentProcessorLayouts, useProcessorLayoutChange } from './processorLayouts';
 import { presentProcessorTimings } from './processorTiming';
 import styles from './RoutingWorkspace.module.css';
 import { rebaseGraphEdit } from './rebaseGraphEdit';
@@ -1072,6 +1073,12 @@ function useWorkspaceNodeActions(options: {
   const updateNodeGain = useRoutingNodeGain(options.model, options.updateModel);
   const updateNodeParameter = useRoutingNodeParameter(options.model, options.updateModel);
   const updateNodeParameters = useRoutingNodeParameters(options.model, options.updateModel);
+  const updateChannelLayout = useProcessorLayoutChange(
+    options.model,
+    options.processors,
+    options.presentation,
+    options.updateModel,
+  );
   const updateEndpoint = useVirtualEndpointUpdate(
     options.model,
     options.presentation,
@@ -1083,6 +1090,7 @@ function useWorkspaceNodeActions(options: {
   );
   return {
     addNode,
+    updateChannelLayout,
     updateEndpoint,
     updateNodeGain,
     updateNodeParameter,
@@ -1147,6 +1155,7 @@ interface WorkspaceViewProps {
   title?: string;
   updateModel: (model: AudioGraphModel, kind: AudioGraphChangeKind) => void;
   updateEndpoint?: (nodeId: string, update: VirtualEndpointUpdate) => void;
+  updateChannelLayout?: (nodeId: string, layoutId: string) => void;
   updateNodeGain?: (nodeId: string, gainDb: number) => void;
   updateNodeParameter?: (nodeId: string, parameterId: string, value: number) => void;
   updateNodeParameters?: (
@@ -1235,14 +1244,20 @@ function usePresentedModel(props: WorkspaceViewProps) {
     () =>
       presented &&
       presentNodeDisplayNames(
-        presentEqualizerSampleRate(
-          presentProcessorTimings(presented, props.processorTimings, props.graphId),
-          audioSession?.format.sampleRate,
-        ) as AudioGraphModel,
+        presentProcessorLayouts(
+          presentEqualizerSampleRate(
+            presentProcessorTimings(presented, props.processorTimings, props.graphId),
+            audioSession?.format.sampleRate,
+          ) as AudioGraphModel,
+          props.processors,
+          t,
+        ),
         props.layout.layout.nodeLabels,
       ),
     [
       presented,
+      props.processors,
+      t,
       props.processorTimings,
       props.graphId,
       audioSession?.format.sampleRate,
@@ -1407,6 +1422,7 @@ function WorkspaceView(props: WorkspaceViewProps) {
             onNodeGainChange={updateNodeGain}
             onNodeParameterChange={updateNodeParameter}
             onNodeParametersChange={updateNodeParameters}
+            onNodeChannelLayoutChange={props.updateChannelLayout}
             onProcessorEditorRetry={processorEditors.retry}
             processorEditorLabels={processorEditorLabels}
             processorEditorStatuses={processorEditors.statuses}

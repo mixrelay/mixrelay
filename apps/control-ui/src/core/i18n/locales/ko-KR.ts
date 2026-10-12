@@ -365,6 +365,7 @@ export const koKR = {
       vst3: 'VST3',
     },
     processorLayouts: {
+      title: '채널 구성',
       main: '메인',
       sidechain: '사이드체인',
       auxiliary: '보조',
