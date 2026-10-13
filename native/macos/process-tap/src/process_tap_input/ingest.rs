@@ -1,4 +1,4 @@
-use super::{MAX_CHANNELS, TapFormat, TapInputResult, TapPeaks};
+use super::{MAX_CHANNELS, TapFormat, TapInputResult, TapPeaks, finite_magnitude};
 use mixrelay_macos_transport::{
     audio_buffer::{AudioBuffer, AudioBufferList, buffers},
     capture_ring::{AudioRing, mr_audio_ring_write_interleaved, mr_audio_ring_write_planar},
@@ -24,27 +24,47 @@ fn frame_count(format: &TapFormat, parts: &[AudioBuffer]) -> Option<usize> {
     usize::try_from(first.byte_size / format.bytes_per_frame).ok()
 }
 
+/// One channel's peak, reduced in independent lanes so the scan can vectorize; a single
+/// running maximum would serialize every comparison.
+pub(super) fn plane_peak(samples: &[f32]) -> f32 {
+    const LANES: usize = 8;
+    let mut lanes = [0.0_f32; LANES];
+    let mut chunks = samples.chunks_exact(LANES);
+    for chunk in &mut chunks {
+        for (lane, &sample) in lanes.iter_mut().zip(chunk) {
+            *lane = lane.max(finite_magnitude(sample));
+        }
+    }
+    let tail = chunks
+        .remainder()
+        .iter()
+        .fold(0.0, |peak: f32, &sample| peak.max(finite_magnitude(sample)));
+    lanes.into_iter().fold(tail, f32::max)
+}
+
 // SAFETY: frame_count validated non-null/aligned native parts, equal complete
 // Float32 extents and channels. CoreAudio retains readable bytes for this callback.
 unsafe fn record(peaks: &TapPeaks, format: &TapFormat, parts: &[AudioBuffer]) {
+    let mut block = [0.0_f32; MAX_CHANNELS];
+    let channels = format.channels as usize;
     if format.planar() {
-        for (channel, part) in parts.iter().enumerate() {
+        for (peak, part) in block.iter_mut().zip(parts) {
             // SAFETY: each validated planar part contains byte_size / 4 floats.
             let samples = unsafe { slice::from_raw_parts(part.data, part.byte_size as usize / 4) };
-            for &sample in samples {
-                peaks.record(channel, sample);
-            }
+            *peak = plane_peak(samples);
         }
     } else {
         let part = &parts[0];
         // SAFETY: validated interleaved extent consists of whole channel frames.
         let samples = unsafe { slice::from_raw_parts(part.data, part.byte_size as usize / 4) };
-        for frame in samples.chunks_exact(format.channels as usize) {
-            for (channel, &sample) in frame.iter().enumerate() {
-                peaks.record(channel, sample);
+        // Frame-major, in memory order, so the scan stays sequential.
+        for frame in samples.chunks_exact(channels) {
+            for (peak, &sample) in block.iter_mut().zip(frame) {
+                *peak = peak.max(finite_magnitude(sample));
             }
         }
     }
+    peaks.publish(&block[..channels.min(MAX_CHANNELS)]);
 }
 
 /// Validates one tap block, records its peaks and writes its PCM without allocation.

@@ -265,12 +265,26 @@ fn full_queue_still_observes_input_peaks_and_frames_without_allocating() {
 #[test]
 fn peak_clear_preserves_output_bounds() {
     let peaks = TapPeaks::default();
-    peaks.record(0, -0.0);
-    peaks.record(1, -2.0);
+    peaks.publish(&[finite_magnitude(-0.0), finite_magnitude(-2.0)]);
+    // A smaller later block never lowers an undrained peak, and non-finite input is no level.
+    peaks.publish(&[finite_magnitude(f32::NAN), finite_magnitude(-1.0)]);
     let mut output = [9.0; 65];
     peaks.take(&mut output);
     assert_eq!(output[0].to_bits(), 0.0_f32.to_bits());
     assert_eq!(output[1].to_bits(), 2.0_f32.to_bits());
     assert_eq!(output[64].to_bits(), 9.0_f32.to_bits());
     peaks.clear();
+}
+
+#[test]
+fn plane_peaks_include_lanes_and_the_unaligned_tail() {
+    assert_eq!(ingest::plane_peak(&[]).to_bits(), 0.0_f32.to_bits());
+    // Eight lane samples, then a three-sample tail holding the peak; NaN never counts.
+    let mut samples = [0.25; 11];
+    samples[3] = f32::NAN;
+    samples[9] = -0.875;
+    assert_eq!(ingest::plane_peak(&samples).to_bits(), 0.875_f32.to_bits());
+    samples[9] = 0.0;
+    samples[5] = -0.5;
+    assert_eq!(ingest::plane_peak(&samples).to_bits(), 0.5_f32.to_bits());
 }

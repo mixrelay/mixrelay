@@ -69,3 +69,27 @@ fn a_new_revision_resets_output_input_and_gain_before_it_is_published() {
     assert_eq!(reading.threshold_db, -12.0);
     assert_eq!(bank.take_dynamics(7, 0, 2), None);
 }
+
+#[test]
+fn interleaved_peaks_ignore_non_finite_samples_and_cover_wide_ports() {
+    let bank = PeakMeterBank::new(1, 2);
+    bank.record_interleaved(3, 0, 2, &[f32::NAN, -0.5, f32::INFINITY, 0.25, -0.75, -0.0]);
+    let peaks = bank.take_peaks(3, 0, 2);
+    assert_eq!(peaks, [0.75, 0.5]);
+    // Ports wider than one reduction group publish every channel once.
+    let channels = 70_u16;
+    let frame: Vec<f32> = (0..channels)
+        .map(|channel| f32::from(channel) / 100.0)
+        .collect();
+    let mut published = Vec::new();
+    for_each_interleaved_peak(
+        &frame.repeat(2),
+        channels,
+        usize::from(channels),
+        |channel, peak| {
+            published.push((channel, peak));
+        },
+    );
+    assert_eq!(published.len(), usize::from(channels));
+    assert_eq!(published[69], (69, 0.69));
+}

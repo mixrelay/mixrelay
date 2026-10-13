@@ -10,6 +10,7 @@ use thiserror::Error;
 
 mod latency_exchange;
 mod latency_plan;
+
 #[cfg(test)]
 mod meter_publication_tests;
 mod render;
@@ -166,17 +167,8 @@ impl PeakMeterBank {
         dynamics
             .minimum_gain_bits
             .fetch_min(minimum_gain.clamp(0.0, 1.0).to_bits(), Ordering::Release);
-        for channel in 0..usize::from(channels).min(self.maximum_channels) {
-            let peak = samples
-                .chunks_exact(usize::from(channels))
-                .fold(0.0_f32, |peak, frame| {
-                    let value = frame[channel].abs();
-                    if value.is_finite() {
-                        peak.max(value)
-                    } else {
-                        peak
-                    }
-                });
+        let channel_count = usize::from(channels).min(self.maximum_channels);
+        for_each_interleaved_peak(samples, channels, channel_count, |channel, peak| {
             if let Some(cell) = self.input_cell(binding_index, channel) {
                 if cell.revision.load(Ordering::Relaxed) != revision {
                     cell.peak_bits.store(0, Ordering::Release);
@@ -184,7 +176,7 @@ impl PeakMeterBank {
                 }
                 cell.peak_bits.fetch_max(peak.to_bits(), Ordering::Release);
             }
-        }
+        });
         dynamics.observed.store(true, Ordering::Release);
     }
 
@@ -239,16 +231,9 @@ impl PeakMeterBank {
             return;
         }
         let channel_count = usize::from(channels).min(self.maximum_channels);
-        for channel in 0..channel_count {
-            let mut peak = 0.0_f32;
-            for frame in samples.chunks_exact(usize::from(channels)) {
-                let magnitude = frame[channel].abs();
-                if magnitude.is_finite() {
-                    peak = peak.max(magnitude);
-                }
-            }
+        for_each_interleaved_peak(samples, channels, channel_count, |channel, peak| {
             self.record_peak(revision, binding_index, channel, peak);
-        }
+        });
     }
 
     fn record_peak(&self, revision: u64, binding_index: usize, channel: usize, peak: f32) {
@@ -739,6 +724,41 @@ impl AudioEngine {
     #[must_use]
     pub const fn counters(&self) -> &RuntimeCounters {
         &self.counters
+    }
+}
+
+/// Channels whose block peaks are reduced together in one frame-major pass.
+const PEAK_GROUP: usize = 64;
+
+/// Reports each of the first `channel_count` channels' finite block peak once. Interleaved
+/// PCM is read in memory order, a frame at a time, so the scan stays sequential and can be
+/// vectorized; wider ports are reduced in groups of [`PEAK_GROUP`] channels.
+fn for_each_interleaved_peak(
+    samples: &[f32],
+    channels: u16,
+    channel_count: usize,
+    mut publish: impl FnMut(usize, f32),
+) {
+    let stride = usize::from(channels);
+    let mut peaks = [0.0_f32; PEAK_GROUP];
+    for start in (0..channel_count).step_by(PEAK_GROUP) {
+        let width = (channel_count - start).min(PEAK_GROUP);
+        let group = &mut peaks[..width];
+        group.fill(0.0);
+        for frame in samples.chunks_exact(stride) {
+            for (peak, &value) in group.iter_mut().zip(&frame[start..start + width]) {
+                let magnitude = value.abs();
+                // Non-finite samples are faults, not levels; they never raise a meter.
+                *peak = peak.max(if magnitude.is_finite() {
+                    magnitude
+                } else {
+                    0.0
+                });
+            }
+        }
+        for (offset, &peak) in group.iter().enumerate() {
+            publish(start + offset, peak);
+        }
     }
 }
 

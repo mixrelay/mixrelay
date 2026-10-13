@@ -61,7 +61,6 @@ impl ExternalIo for CallbackIo<'_> {
         destination: &mut [f32],
         cycle: &ProcessCycle,
     ) -> TransferOutcome {
-        destination.fill(0.0);
         if let Some(result) = self
             .bridged
             .and_then(|devices| devices.read(binding.node_id().as_str(), destination))
@@ -527,7 +526,8 @@ mod tests {
             monotonic_ns: None,
             discontinuity: true,
         };
-        let mut pcm = [9.0; 64];
+        // The engine hands every source a zeroed buffer; offline input leaves it silent.
+        let mut pcm = [0.0; 64];
         let input = io.read_source(&processor.plan().source_bindings()[0], &mut pcm, &cycle);
         assert_eq!(
             input,

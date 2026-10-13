@@ -197,6 +197,9 @@ pub struct RenderPlan {
     meter_bindings: Box<[MeterBinding]>,
     recorder_bindings: Box<[MeterBinding]>,
     arena_samples: usize,
+    /// Every port slot, so a block shorter than the prepared quantum clears only
+    /// the frames it renders instead of the whole arena.
+    arena_slots: Box<[PortSlot]>,
     dynamics_state_count: usize,
     dynamics_bindings: Box<[DynamicsBinding]>,
     effects: Box<[effects::Binding]>,
@@ -305,6 +308,7 @@ impl RenderPlan {
                 sink_bindings: sink_bindings.into_boxed_slice(),
                 meter_bindings: meter_bindings.into_boxed_slice(),
                 arena_samples,
+                arena_slots: slots.values().copied().collect(),
                 dynamics_state_count,
                 dynamics_bindings,
                 effects,
@@ -509,6 +513,8 @@ pub trait ExternalIo {
 
     /// Native I/O must consume this cycle's timeline, not infer a second clock
     /// from the destination capacity. Never block or allocate at this boundary.
+    /// The destination arrives zeroed, so an adapter fills only what it reads and
+    /// need not clear it again.
     fn read_source(
         &mut self,
         binding: &ExternalBinding,
@@ -929,7 +935,11 @@ impl BlockProcessor {
         if let Some(bank) = &mut self.delay_bank {
             bank.validate();
         }
-        self.arena.fill(0.0);
+        if frames == self.plan.format.block_frames as usize {
+            self.arena.fill(0.0);
+        } else {
+            silence_slots(&mut self.arena, &self.plan.arena_slots, frames);
+        }
         self.dynamics_minimum_gains.fill(1.0);
         for (sink, &control_index) in self.sink_buffers.iter_mut().zip(&self.plan.sink_controls) {
             if !self.controls[control_index].control.enabled {

@@ -77,15 +77,25 @@ impl Default for TapPeaks {
     }
 }
 
+/// A sample's contribution to a level meter; non-finite samples are faults, not levels.
+fn finite_magnitude(sample: f32) -> f32 {
+    let magnitude = sample.abs();
+    if magnitude.is_finite() {
+        magnitude
+    } else {
+        0.0
+    }
+}
+
 impl TapPeaks {
-    fn record(&self, channel: usize, sample: f32) {
-        let magnitude = sample.abs();
-        if magnitude.is_finite() {
-            // Positive finite IEEE bits have numeric order. Keep per-sample
-            // publication so a concurrent meter drain retains its old boundary.
-            let proposed = magnitude.to_bits();
-            if self.values[channel].load(Ordering::Relaxed) < proposed {
-                self.values[channel].fetch_max(proposed, Ordering::Relaxed);
+    /// Publishes one callback block's per-channel peaks, once per channel rather than
+    /// per sample. A drain racing the publication may count some channels' block peaks
+    /// in its next window, but no peak is lost. Positive finite IEEE bits have numeric order.
+    fn publish(&self, block: &[f32]) {
+        for (value, &peak) in self.values.iter().zip(block) {
+            let proposed = peak.to_bits();
+            if value.load(Ordering::Relaxed) < proposed {
+                value.fetch_max(proposed, Ordering::Relaxed);
             }
         }
     }
