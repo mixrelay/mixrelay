@@ -91,7 +91,6 @@ impl Drop for Mapping {
 fn endpoint_abi_and_invalid_configuration_contract() {
     assert_eq!(size_of::<EndpointTransport>(), 72);
     assert_eq!(size_of::<EndpointTransportConfig>(), 28);
-    assert_eq!(size_of::<EndpointTransportStats>(), 16);
     assert_eq!(size_of::<EndpointClock>(), 96);
     assert_eq!(size_of::<EndpointClockSnapshot>(), 40);
     let valid = duplex();
@@ -164,15 +163,6 @@ fn independent_duplex_buffers_preserve_pcm_and_configuration() {
             assert_eq!(output.map(f32::to_bits), expected.map(f32::to_bits));
             assert_eq!(audio::mr_shared_audio_buffer_stats(buffer).epoch, 1);
         }
-        assert_eq!(mr_endpoint_transport_touch_driver(mapping.pointer), 1);
-        assert_eq!(mr_endpoint_transport_touch_engine(mapping.pointer), 1);
-        assert_eq!(
-            mr_endpoint_transport_stats(mapping.pointer),
-            EndpointTransportStats {
-                driver_heartbeat: 1,
-                engine_heartbeat: 1
-            }
-        );
     }
 }
 
@@ -198,12 +188,6 @@ fn one_way_mappings_and_null_accessors_do_not_invent_other_direction() {
     unsafe {
         assert!(mr_endpoint_transport_render_buffer(ptr::null_mut()).is_null());
         assert!(mr_endpoint_transport_capture_buffer(ptr::null_mut()).is_null());
-        assert_eq!(mr_endpoint_transport_touch_driver(ptr::null_mut()), 0);
-        assert_eq!(mr_endpoint_transport_touch_engine(ptr::null_mut()), 0);
-        assert_eq!(
-            mr_endpoint_transport_stats(ptr::null()),
-            EndpointTransportStats::default()
-        );
     }
 }
 

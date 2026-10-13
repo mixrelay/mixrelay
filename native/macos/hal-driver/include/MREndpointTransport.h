@@ -24,11 +24,6 @@ typedef struct MREndpointTransportConfig {
     uint32_t capture_channels;
 } MREndpointTransportConfig;
 
-typedef struct MREndpointTransportStats {
-    uint64_t driver_heartbeat;
-    uint64_t engine_heartbeat;
-} MREndpointTransportStats;
-
 /* Native callback credits; deliberately no fabricated host timestamp. */
 typedef struct MREndpointClockSnapshot {
     uint64_t epoch;
@@ -71,10 +66,6 @@ MRSharedAudioBuffer *mr_endpoint_transport_render_buffer(
 MRSharedAudioBuffer *mr_endpoint_transport_capture_buffer(
     MREndpointTransport *transport);
 
-uint64_t mr_endpoint_transport_touch_driver(MREndpointTransport *transport);
-uint64_t mr_endpoint_transport_touch_engine(MREndpointTransport *transport);
-MREndpointTransportStats mr_endpoint_transport_stats(
-    const MREndpointTransport *transport);
 
 #ifdef __cplusplus
 }

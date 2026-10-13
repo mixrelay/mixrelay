@@ -49,8 +49,9 @@ pub struct EndpointTransport {
     render_offset: u32,
     capture_offset: u32,
     reserved: u32,
-    driver_heartbeat: AtomicU64,
-    engine_heartbeat: AtomicU64,
+    // Formerly heartbeats; nothing reads liveness from the mapping, so the HAL IO path
+    // writes nothing here. Kept so the header layout and size are unchanged.
+    reserved_tail: [u64; 2],
 }
 
 #[repr(C)]
@@ -67,13 +68,6 @@ struct EndpointClock {
     // Immutable mapping identity survives FD duplication and is independent of
     // process restarts and POSIX shared-memory fstat device/inode placeholders.
     incarnation: [u8; 16],
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[repr(C)]
-pub struct EndpointTransportStats {
-    pub driver_heartbeat: u64,
-    pub engine_heartbeat: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -254,8 +248,7 @@ pub unsafe extern "C" fn mr_endpoint_transport_initialize(
             render_offset: layout.render_offset,
             capture_offset: layout.capture_offset,
             reserved: layout.audio_bytes,
-            driver_heartbeat: AtomicU64::new(0),
-            engine_heartbeat: AtomicU64::new(0),
+            reserved_tail: [0; 2],
         });
         let clock = memory
             .cast::<u64>()
@@ -498,6 +491,7 @@ pub unsafe extern "C" fn mr_endpoint_transport_clock_snapshot(
 /// # Safety
 /// Non-null transport must be attached and its complete mapping must remain pinned
 /// through this call. `expected` must not alias memory concurrently written by others.
+#[must_use]
 pub unsafe fn clock_matches(
     transport: *const EndpointTransport,
     expected: &EndpointClockSnapshot,
@@ -595,46 +589,6 @@ pub unsafe extern "C" fn mr_endpoint_transport_capture_buffer(
 ) -> *mut SharedAudioBuffer {
     unsafe { transport.as_ref() }.map_or(ptr::null_mut(), |transport| unsafe {
         transport.buffer(transport.capture_offset)
-    })
-}
-
-/// # Safety
-/// Non-null transport must be attached and live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mr_endpoint_transport_touch_driver(
-    transport: *mut EndpointTransport,
-) -> u64 {
-    unsafe { transport.as_ref() }.map_or(0, |transport| {
-        transport
-            .driver_heartbeat
-            .fetch_add(1, Ordering::Relaxed)
-            .wrapping_add(1)
-    })
-}
-/// # Safety
-/// Non-null transport must be attached and live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mr_endpoint_transport_touch_engine(
-    transport: *mut EndpointTransport,
-) -> u64 {
-    unsafe { transport.as_ref() }.map_or(0, |transport| {
-        transport
-            .engine_heartbeat
-            .fetch_add(1, Ordering::Relaxed)
-            .wrapping_add(1)
-    })
-}
-/// # Safety
-/// Non-null transport must be attached and live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mr_endpoint_transport_stats(
-    transport: *const EndpointTransport,
-) -> EndpointTransportStats {
-    unsafe { transport.as_ref() }.map_or(EndpointTransportStats::default(), |transport| {
-        EndpointTransportStats {
-            driver_heartbeat: transport.driver_heartbeat.load(Ordering::Relaxed),
-            engine_heartbeat: transport.engine_heartbeat.load(Ordering::Relaxed),
-        }
     })
 }
 

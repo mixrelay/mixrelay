@@ -8,7 +8,7 @@ use crate::endpoint_transport::{
     mr_endpoint_transport_begin_clock_transition, mr_endpoint_transport_capture_buffer,
     mr_endpoint_transport_clock_demand, mr_endpoint_transport_clock_state,
     mr_endpoint_transport_config, mr_endpoint_transport_render_buffer,
-    mr_endpoint_transport_requires_replacement, mr_endpoint_transport_touch_driver,
+    mr_endpoint_transport_requires_replacement,
 };
 use crate::shared_audio_buffer::{self as buffer, SharedAudioBuffer};
 use std::{
@@ -435,7 +435,6 @@ pub unsafe extern "C" fn mr_hal_io_write_render(
         context.render_activity.store(3, Ordering::Release);
         buffer::mr_shared_audio_buffer_set_producer_activity(render, 3);
         mr_endpoint_transport_clock_demand(transport, true, start + u64::from(count), count);
-        mr_endpoint_transport_touch_driver(transport);
     }
     true
 }
@@ -463,12 +462,11 @@ pub unsafe extern "C" fn mr_hal_io_read_capture(
         return 0;
     }
     let available = unsafe { buffer::mr_shared_audio_buffer_read(capture, start, samples, count) };
-    unsafe {
-        // Real callback demand exists even while a pending mapping returns silence.
-        if count != 0 {
+    // Real callback demand exists even while a pending mapping returns silence.
+    if count != 0 {
+        unsafe {
             mr_endpoint_transport_clock_demand(transport, false, start + u64::from(count), count);
         }
-        mr_endpoint_transport_touch_driver(transport);
     }
     available
 }

@@ -152,11 +152,6 @@ fn duplex_pcm_is_looped_back_at_the_exact_render_sample_time() {
     assert_eq!(fixture.clock().sample_rate, 96000);
     assert_eq!(fixture.clock().render_through, 6);
     assert_eq!(fixture.clock().capture_through, 6);
-    assert_eq!(
-        unsafe { endpoint::mr_endpoint_transport_stats(fixture.endpoint.transport) }
-            .driver_heartbeat,
-        2
-    );
 }
 
 #[test]
