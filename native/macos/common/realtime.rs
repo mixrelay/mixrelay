@@ -4,6 +4,7 @@
 //! XPC and reclamation never become realtime. See
 //! `docs/design/realtime-and-control-protocol.md`.
 use std::{
+    cell::Cell,
     ffi::{CStr, c_char, c_void},
     io,
     marker::PhantomData,
@@ -11,12 +12,13 @@ use std::{
     time::Duration,
 };
 
-type KernReturn = i32;
+pub type KernReturn = i32;
 type MachPort = u32;
 
 const KERN_SUCCESS: KernReturn = 0;
 const KERN_OPERATION_TIMED_OUT: KernReturn = 49;
 const KERN_ABORTED: KernReturn = 14;
+const THREAD_STANDARD_POLICY: u32 = 1;
 const THREAD_TIME_CONSTRAINT_POLICY: u32 = 2;
 const THREAD_TIME_CONSTRAINT_POLICY_COUNT: u32 = 4;
 const SYNC_POLICY_FIFO: i32 = 0;
@@ -236,6 +238,89 @@ fn applied_policy(
     })
 }
 
+/// Returns the calling thread to standard (timeshare) scheduling.
+///
+/// # Errors
+/// Returns the kernel's refusal.
+pub fn demote_current_thread() -> io::Result<()> {
+    let thread = ThreadPort::current();
+    // SAFETY: the standard policy takes no policy data; this is the thread's own port.
+    kern(unsafe { thread_policy_set(thread.0, THREAD_STANDARD_POLICY, std::ptr::null_mut(), 0) })
+}
+
+/// A thread running PCM work in the realtime class, which steps out of it for control
+/// work (property queries, native object teardown, lease refreshes) so a realtime thread
+/// never blocks on or spends its budget for non-audio operations.
+pub struct RealtimeThread {
+    budget: Cell<(Duration, Duration, Duration)>,
+    applied: Cell<RealtimePolicy>,
+    _thread: PhantomData<*const ()>,
+}
+
+/// A scheduling change that failed around control work.
+#[derive(Debug)]
+pub enum Transition {
+    /// The thread stayed realtime while the control work ran.
+    Demote(io::Error),
+    /// The thread stays at standard priority until a later re-entry succeeds.
+    Promote(io::Error),
+}
+
+impl RealtimeThread {
+    /// Promotes the calling thread; see [`promote_current_thread`].
+    ///
+    /// # Errors
+    /// Returns the promotion error. The thread is then left at standard priority, even
+    /// if the kernel applied the request but it could not be read back.
+    pub fn promote(
+        period: Duration,
+        computation: Duration,
+        constraint: Duration,
+    ) -> io::Result<Self> {
+        promote_current_thread(period, computation, constraint)
+            .map(|applied| Self {
+                budget: Cell::new((period, computation, constraint)),
+                applied: Cell::new(applied),
+                _thread: PhantomData,
+            })
+            .inspect_err(|_| {
+                let _ = demote_current_thread();
+            })
+    }
+
+    #[must_use]
+    pub fn applied(&self) -> RealtimePolicy {
+        self.applied.get()
+    }
+
+    /// Changes the budget; it takes effect when the thread next re-enters the class.
+    pub fn retune(&self, period: Duration, computation: Duration, constraint: Duration) {
+        self.budget.set((period, computation, constraint));
+    }
+
+    /// Runs control work at standard priority, then re-enters the realtime class.
+    /// The work runs even when demotion fails, since control work cannot be skipped;
+    /// the failure is reported so the owner can treat the thread as degraded.
+    pub fn outside<R>(&self, work: impl FnOnce() -> R) -> (R, Result<(), Transition>) {
+        let demoted = demote_current_thread();
+        let result = work();
+        (result, self.restore(demoted))
+    }
+
+    /// Re-enters the realtime class after control work, unless demotion had failed.
+    fn restore(&self, demoted: io::Result<()>) -> Result<(), Transition> {
+        demoted.map_err(Transition::Demote)?;
+        let (period, computation, constraint) = self.budget.get();
+        promote_current_thread(period, computation, constraint)
+            .map(|applied| self.applied.set(applied))
+            .map_err(|error| {
+                // A request applied but not read back would otherwise stay realtime.
+                let _ = demote_current_thread();
+                Transition::Promote(error)
+            })
+    }
+}
+
 /// The thread port `mach_thread_self` returns carries a reference this guard releases.
 struct ThreadPort(MachPort);
 
@@ -384,10 +469,13 @@ impl Drop for Joined<'_> {
 /// Why a [`Notifier::wait`] returned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Wake {
-    /// A producer published; recheck authoritative state.
-    Notified,
+    /// A producer published; recheck authoritative state. `published_at` is the host
+    /// time of the oldest publication this wake answers.
+    Notified { published_at: u64 },
     /// The deadline passed; recheck state anyway, since a wake may have been lost.
     TimedOut,
+    /// The kernel refused the wait (its code); the caller should stop relying on it.
+    Failed(KernReturn),
 }
 
 /// A coalescing wakeup for one consumer thread. A notification means "recheck
@@ -398,10 +486,12 @@ pub enum Wake {
 /// [`Notifier::notify`] (`pending` swap, acquire-release). After consuming a token the
 /// consumer swaps `pending` back to zero (acquire-release) before its acquire loads of
 /// state, so it observes every publication that found `pending` already set.
+#[derive(Debug)]
 pub struct Notifier {
     semaphore: MachPort,
     pending: AtomicU32,
     failed_signals: AtomicU64,
+    notified_at: AtomicU64,
 }
 
 // SAFETY: a Mach semaphore may be signaled and waited from any thread of the task.
@@ -421,12 +511,15 @@ impl Notifier {
             semaphore,
             pending: AtomicU32::new(0),
             failed_signals: AtomicU64::new(0),
+            notified_at: AtomicU64::new(0),
         })
     }
 
     /// Producer side, after publishing state. Never blocks or allocates.
     pub fn notify(&self) {
         if self.pending.swap(1, Ordering::AcqRel) == 0 {
+            // The first publication a wake answers; later ones coalesce into it.
+            self.notified_at.store(host_time(), Ordering::Release);
             // SAFETY: the semaphore lives as long as `self`.
             self.signaled(unsafe { semaphore_signal(self.semaphore) });
         }
@@ -450,18 +543,17 @@ impl Notifier {
 
     /// Consumer side: waits for a notification or `timeout`. On a notification the
     /// pending flag is cleared before returning, so a publication racing the caller's
-    /// subsequent state check either is seen by that check or posts a new token.
-    ///
-    /// # Errors
-    /// Returns kernel errors other than timeout or interruption.
-    pub fn wait(&self, timeout: Duration) -> io::Result<Wake> {
+    /// subsequent state check either is seen by that check or posts a new token. Never
+    /// allocates, including on failure.
+    pub fn wait(&self, timeout: Duration) -> Wake {
         let wait = MachTimespec {
             seconds: u32::try_from(timeout.as_secs()).unwrap_or(u32::MAX),
             nanoseconds: i32::try_from(timeout.subsec_nanos()).unwrap_or(0),
         };
         // SAFETY: the semaphore lives as long as `self`.
-        let wake = wake_result(unsafe { semaphore_timedwait(self.semaphore, wait) });
-        if matches!(wake, Ok(Wake::Notified)) {
+        let result = unsafe { semaphore_timedwait(self.semaphore, wait) };
+        let wake = wake_result(result, self.notified_at.load(Ordering::Acquire));
+        if matches!(wake, Wake::Notified { .. }) {
             self.pending.swap(0, Ordering::AcqRel);
         }
         wake
@@ -476,11 +568,70 @@ impl Drop for Notifier {
     }
 }
 
-fn wake_result(result: KernReturn) -> io::Result<Wake> {
+/// Delays in power-of-two microsecond buckets, recorded without allocation or locks by
+/// the one thread that owns it; read and reset by that thread's control step.
+#[derive(Debug, Default, Clone)]
+pub struct LatencyHistogram {
+    buckets: [u64; LATENCY_BUCKETS],
+    maximum_ns: u64,
+}
+
+const LATENCY_BUCKETS: usize = 24;
+
+/// A window's summary: each percentile is its bucket's upper bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LatencySummary {
+    pub count: u64,
+    pub p50_us: u64,
+    pub p99_us: u64,
+    pub p999_us: u64,
+    pub maximum_us: u64,
+}
+
+impl LatencyHistogram {
+    pub fn record(&mut self, nanoseconds: u64) {
+        let microseconds = nanoseconds / 1_000;
+        // Bucket b holds delays below 2^b µs; the last also holds everything longer.
+        let bucket = (u64::BITS - microseconds.leading_zeros()) as usize;
+        self.buckets[bucket.min(LATENCY_BUCKETS - 1)] += 1;
+        self.maximum_ns = self.maximum_ns.max(nanoseconds);
+    }
+
+    /// Summarizes and clears the window; `None` when nothing was recorded.
+    pub fn take(&mut self) -> Option<LatencySummary> {
+        let window = std::mem::take(self);
+        let count: u64 = window.buckets.iter().sum();
+        if count == 0 {
+            return None;
+        }
+        let at = |permille: u64| {
+            let rank = (count * permille).div_ceil(1_000);
+            let bucket = window
+                .buckets
+                .iter()
+                .scan(0, |seen, &observed| {
+                    *seen += observed;
+                    Some(*seen)
+                })
+                .position(|seen| seen >= rank)
+                .unwrap_or(LATENCY_BUCKETS - 1);
+            1_u64 << bucket
+        };
+        Some(LatencySummary {
+            count,
+            p50_us: at(500),
+            p99_us: at(990),
+            p999_us: at(999),
+            maximum_us: window.maximum_ns / 1_000,
+        })
+    }
+}
+
+fn wake_result(result: KernReturn, published_at: u64) -> Wake {
     match result {
-        KERN_SUCCESS => Ok(Wake::Notified),
-        KERN_OPERATION_TIMED_OUT | KERN_ABORTED => Ok(Wake::TimedOut),
-        error => Err(kern_error(error)),
+        KERN_SUCCESS => Wake::Notified { published_at },
+        KERN_OPERATION_TIMED_OUT | KERN_ABORTED => Wake::TimedOut,
+        error => Wake::Failed(error),
     }
 }
 

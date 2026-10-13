@@ -174,15 +174,15 @@ fn mailbox_retains_old_reader_until_commit_and_worker_handoff() {
     let mailbox = CaptureHandoff::default();
     let mut worker_capture = owner("old", &dropped);
     let prepared = owner("new", &dropped);
-    assert!(mailbox.take().is_none());
+    assert!(mailbox.try_take().is_none());
     assert_eq!(worker_capture.name, "old");
     mailbox.publish(prepared);
     assert_eq!(worker_capture.name, "old");
     assert!(dropped.lock().unwrap().is_empty());
-    worker_capture = mailbox.take().unwrap();
+    worker_capture = mailbox.try_take().unwrap();
     assert_eq!(worker_capture.name, "new");
     assert_eq!(*dropped.lock().unwrap(), ["old"]);
-    assert!(mailbox.take().is_none());
+    assert!(mailbox.try_take().is_none());
 }
 
 #[test]
@@ -192,7 +192,7 @@ fn consecutive_commits_coalesce_without_leaking_intermediate_capture() {
     mailbox.publish(owner("intermediate", &dropped));
     mailbox.publish(owner("latest", &dropped));
     assert_eq!(*dropped.lock().unwrap(), ["intermediate"]);
-    let worker_capture = mailbox.take().unwrap();
+    let worker_capture = mailbox.try_take().unwrap();
     assert_eq!(worker_capture.name, "latest");
     drop(mailbox);
     assert_eq!(*dropped.lock().unwrap(), ["intermediate"]);
@@ -355,4 +355,16 @@ fn stale_or_conflicting_same_revision_cannot_replace_accepted_owners() {
         assert_eq!(owners.latest().unwrap().sources[0].session.name, "old");
     }
     assert_eq!(*dropped.lock().unwrap(), ["rejected"]);
+}
+
+#[test]
+fn a_realtime_consumer_never_waits_for_a_publisher() {
+    let handoff = CaptureHandoff::default();
+    handoff.publish(7);
+    let held = handoff.0.lock().unwrap();
+    // Contended: nothing is taken, and the published value stays for a later pass.
+    assert_eq!(handoff.try_take(), None);
+    drop(held);
+    assert_eq!(handoff.try_take(), Some(7));
+    assert_eq!(handoff.try_take(), None);
 }

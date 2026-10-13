@@ -115,6 +115,7 @@ unsafe extern "C" {
     fn mr_process_tap_start(session: *mut NativeProcessTapSession) -> NativeError;
     fn mr_process_tap_stop(session: *mut NativeProcessTapSession) -> NativeError;
     fn mr_process_tap_refresh_format(session: *mut NativeProcessTapSession) -> NativeError;
+    fn mr_process_tap_wakeup(session: *const NativeProcessTapSession) -> *const c_void;
     fn mr_process_tap_destroy(session: *mut NativeProcessTapSession);
     fn mr_process_tap_read(
         session: *mut NativeProcessTapSession,
@@ -222,6 +223,17 @@ unsafe impl Send for CaptureProbeSession {}
 unsafe impl Sync for CaptureProbeSession {}
 
 impl CaptureProbeSession {
+    /// Signaled after each tap callback's ring write; `None` means poll on a timer.
+    fn wakeup(&self) -> Option<&mixrelay_macos_transport::realtime::Notifier> {
+        // SAFETY: the notifier lives as long as this session's native owner, which this
+        // borrow keeps alive.
+        unsafe {
+            mr_process_tap_wakeup(self.native.as_ptr())
+                .cast::<mixrelay_macos_transport::realtime::Notifier>()
+                .as_ref()
+        }
+    }
+
     fn start(bundle_id: &str, target_device_uid: Option<&str>) -> Result<Self, CaptureProbeError> {
         let session = Self::prepare(bundle_id, target_device_uid)?;
         session.start_native()?;

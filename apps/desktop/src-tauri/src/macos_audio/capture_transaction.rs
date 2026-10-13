@@ -291,11 +291,14 @@ impl<S> CaptureHandoff<S> {
         drop(retired);
     }
 
-    pub(super) fn take(&self) -> Option<S> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
+    /// For a realtime consumer: never waits for a publisher. A contended handoff stays
+    /// published and is taken on a later pass.
+    pub(super) fn try_take(&self) -> Option<S> {
+        match self.0.try_lock() {
+            Ok(mut slot) => slot.take(),
+            Err(std::sync::TryLockError::Poisoned(slot)) => slot.into_inner().take(),
+            Err(std::sync::TryLockError::WouldBlock) => None,
+        }
     }
 }
 

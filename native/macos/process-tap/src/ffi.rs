@@ -65,6 +65,10 @@ pub(super) unsafe extern "C" fn io_proc(
         session
             .captured
             .fetch_add(result.written as u64, Ordering::Relaxed);
+        // After the ring write and its counters: the pump rechecks published state.
+        if let Some(wakeup) = session.wakeup.get() {
+            wakeup.notify();
+        }
     }
     0
 }
@@ -143,6 +147,10 @@ unsafe fn create(config: &TapConfig) -> Result<*mut TapSession, TapError> {
     // SAFETY: unpublished allocation is exclusively initialized before any borrowing.
     let mut owner = TapSession::default();
     owner.retirement_queue = retirement_queue;
+    // Without a notifier the pump falls back to timed waits; capture still works.
+    if let Ok(notifier) = mixrelay_macos_transport::realtime::Notifier::new() {
+        let _ = owner.wakeup.set(notifier);
+    }
     unsafe { pointer.write(owner) };
     // SAFETY: initialized owner remains stable through every native registration.
     let session = unsafe { &*pointer };
@@ -158,6 +166,18 @@ unsafe fn create(config: &TapConfig) -> Result<*mut TapSession, TapError> {
         return Err(error);
     }
     Ok(pointer)
+}
+
+/// The session's wakeup, signaled after each callback's ring write, or null when the
+/// session has none. Borrowed: valid until `mr_process_tap_destroy`.
+/// # Safety
+/// `session` is null or a live session returned by `mr_process_tap_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_process_tap_wakeup(session: *const TapSession) -> *const c_void {
+    // SAFETY: the caller passes null or a live session.
+    unsafe { session.as_ref() }
+        .and_then(|session| session.wakeup.get())
+        .map_or(ptr::null(), |wakeup| ptr::from_ref(wakeup).cast())
 }
 
 /// Creates and owns a prepared tap. Failure returns null and its original error;

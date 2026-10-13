@@ -63,13 +63,13 @@ fn prepared_reader_does_not_replace_active_consumer_until_committed_handoff() {
     let mut worker = ExclusiveReader::acquire(Arc::clone(&old)).unwrap();
     let prepared = ExclusiveReader::acquire(Arc::clone(&next)).unwrap();
     let mailbox = CaptureHandoff::default();
-    assert!(mailbox.take().is_none());
+    assert!(mailbox.try_take().is_none());
     assert!(std::ptr::eq(worker.owner(), old.as_ref()));
     // HTTP acceptance moves, never clones or reacquires, the reserved reader.
     mailbox.publish(prepared);
     assert!(ExclusiveReader::acquire(Arc::clone(&old)).is_none());
     assert!(ExclusiveReader::acquire(Arc::clone(&next)).is_none());
-    worker = mailbox.take().unwrap();
+    worker = mailbox.try_take().unwrap();
     assert!(!old.claim.load(Ordering::Acquire));
     assert!(std::ptr::eq(worker.owner(), next.as_ref()));
     assert!(next.claim.load(Ordering::Acquire));

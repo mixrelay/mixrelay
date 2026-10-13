@@ -1,5 +1,7 @@
-//! Non-real-time owner for process-tap SRC. Feedback comes from the engine's
-//! consumed shared-ring cursor, never capture amplitude or the private staging FIFO.
+//! Owner of process-tap SRC. Conversion runs in the realtime class, woken by the tap
+//! callback; control work (format and lease refresh, replacing captures or converters)
+//! steps out of it. Feedback comes from the engine's consumed shared-ring cursor, never
+//! capture amplitude or the private staging FIFO.
 use super::{
     ApplicationSourceTransport, CAPTURE_RING_CAPACITY_FRAMES, ENGINE_BLOCK_FRAMES,
     NativeCaptureReader, NativeClockSnapshot, PUMP_IDLE_INTERVAL,
@@ -7,14 +9,199 @@ use super::{
 use mixrelay_audio_io::clock_bridge::{
     AsyncClockBridge, BridgeConfig, ClockFeedback, ClockRelation, Discontinuity, FeedbackQueue,
 };
+use mixrelay_macos_transport::realtime::{
+    LatencyHistogram, LatencySummary, RealtimeThread, Timebase, Transition, Wake,
+    demote_current_thread, host_time,
+};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
-pub(super) fn native_rate(rate: f64) -> Result<u32, String> {
+/// Until the tap's cadence is known, assume a common 512-frame callback at 48 kHz.
+const DEFAULT_PERIOD: Duration = Duration::from_micros(10_667);
+
+/// Realtime budget for one tap callback's worth of conversion: computation within 40%
+/// and completion within 80% of the callback period.
+fn budget(period: Duration) -> (Duration, Duration, Duration) {
+    (period, period * 2 / 5, period * 4 / 5)
+}
+
+/// The tap's average callback length so far, bounded to plausible native quanta.
+fn callback_period(health: &super::CaptureProbeStats, rate: u32) -> Duration {
+    let frames = health
+        .captured_frames
+        .checked_div(health.callback_count)
+        .unwrap_or(512)
+        .clamp(64, 4_096);
+    Duration::from_nanos(frames * 1_000_000_000 / u64::from(rate.max(1)))
+}
+
+/// Runs control work outside the realtime class, so it never blocks or spends the
+/// realtime budget on property queries, lease checks, allocation or native teardown.
+fn off_realtime<R>(realtime: Option<&RealtimeThread>, work: impl FnOnce() -> R) -> R {
+    let Some(realtime) = realtime else {
+        return work();
+    };
+    let (result, transition) = realtime.outside(work);
+    match transition {
+        Ok(()) => {}
+        Err(Transition::Demote(error)) => {
+            tracing::warn!(%error, "capture pump ran control work in the realtime class");
+        }
+        Err(Transition::Promote(error)) => {
+            tracing::warn!(%error, "capture pump could not re-enter the realtime class");
+        }
+    }
+    result
+}
+
+/// Waits for tap callbacks. Measures how late the pump wakes after a callback it was
+/// waiting for, and counts wakes it was too busy to wait for, timeouts and failures.
+struct Waker {
+    timebase: Timebase,
+    period: Duration,
+    wakes: LatencyHistogram,
+    busy: u64,
+    timeouts: u64,
+    failures: u64,
+    /// A failed notifier is not trusted again for this capture; poll instead.
+    degraded: bool,
+    reported: Option<Instant>,
+    reported_failed_signals: u64,
+}
+
+impl Waker {
+    fn new() -> Self {
+        Self {
+            timebase: Timebase::current(),
+            period: DEFAULT_PERIOD,
+            wakes: LatencyHistogram::default(),
+            busy: 0,
+            timeouts: 0,
+            failures: 0,
+            degraded: false,
+            reported: None,
+            reported_failed_signals: 0,
+        }
+    }
+
+    /// Waits for the tap's next callback, at most two callback periods; polls when
+    /// the capture has no usable notifier.
+    fn for_tap(&mut self, capture: &NativeCaptureReader) {
+        self.wait(capture, self.period * 2);
+    }
+
+    /// Short bounded wait for progress no notification reports (the engine consuming,
+    /// a format settling); a tap callback may still end it early.
+    fn briefly(&mut self, capture: &NativeCaptureReader) {
+        self.wait(capture, PUMP_IDLE_INTERVAL);
+    }
+
+    fn wait(&mut self, capture: &NativeCaptureReader, timeout: Duration) {
+        let Some(wakeup) = capture.session().wakeup().filter(|_| !self.degraded) else {
+            std::thread::sleep(PUMP_IDLE_INTERVAL);
+            return;
+        };
+        let waiting_since = host_time();
+        match wakeup.wait(timeout) {
+            Wake::Notified { published_at } if published_at >= waiting_since => {
+                let late = host_time().saturating_sub(published_at);
+                self.wakes.record(self.timebase.nanoseconds(late));
+            }
+            Wake::Notified { .. } => self.busy += 1,
+            Wake::TimedOut => self.timeouts += 1,
+            Wake::Failed(_) => {
+                self.failures += 1;
+                self.degraded = true;
+            }
+        }
+    }
+
+    /// A replacement capture brings its own notifier.
+    fn replaced(&mut self) {
+        self.degraded = false;
+    }
+
+    /// Control step: logs the window every ten seconds.
+    fn report(&mut self, capture: &NativeCaptureReader) {
+        let now = Instant::now();
+        if self
+            .reported
+            .is_some_and(|at| now.duration_since(at) < Duration::from_secs(10))
+        {
+            return;
+        }
+        self.reported = Some(now);
+        let failed_signals = capture.session().wakeup().map_or(
+            0,
+            mixrelay_macos_transport::realtime::Notifier::failed_signals,
+        );
+        let window = self.wakes.take();
+        let (busy, timeouts, failures) = (
+            std::mem::take(&mut self.busy),
+            std::mem::take(&mut self.timeouts),
+            std::mem::take(&mut self.failures),
+        );
+        let new_failed_signals =
+            std::mem::replace(&mut self.reported_failed_signals, failed_signals) != failed_signals;
+        if window.is_none() && busy == 0 && timeouts == 0 && failures == 0 && !new_failed_signals {
+            return;
+        }
+        let window = window.unwrap_or(LatencySummary {
+            count: 0,
+            p50_us: 0,
+            p99_us: 0,
+            p999_us: 0,
+            maximum_us: 0,
+        });
+        tracing::info!(
+            wakes = window.count,
+            p50_us = window.p50_us,
+            p99_us = window.p99_us,
+            p999_us = window.p999_us,
+            max_us = window.maximum_us,
+            busy,
+            timeouts,
+            failures,
+            failed_signals,
+            degraded = self.degraded,
+            period_us = self.period.as_micros(),
+            "capture pump wakes after tap callbacks"
+        );
+    }
+}
+
+/// Pump failures. Variants raised on the realtime path carry no heap data; they are
+/// formatted only after the pump has left the realtime class.
+#[derive(Debug)]
+enum PumpError {
+    UnsupportedRate(f64),
+    TapStopped,
+    Bridge(mixrelay_audio_io::clock_bridge::BridgeError),
+    Count(std::num::TryFromIntError),
+    /// From control work, which already ran outside the realtime class.
+    Control(String),
+}
+
+impl std::fmt::Display for PumpError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedRate(rate) => {
+                write!(
+                    formatter,
+                    "unsupported application capture sample rate: {rate}"
+                )
+            }
+            Self::TapStopped => formatter.write_str("native process tap stopped"),
+            Self::Bridge(error) => error.fmt(formatter),
+            Self::Count(error) => error.fmt(formatter),
+            Self::Control(error) => formatter.write_str(error),
+        }
+    }
+}
+
+fn checked_rate(rate: f64) -> Result<u32, PumpError> {
     if !rate.is_finite() || !(8_000.0..=192_000.0).contains(&rate) || rate.fract().abs() > 0.001 {
-        return Err(format!(
-            "unsupported application capture sample rate: {rate}"
-        ));
+        return Err(PumpError::UnsupportedRate(rate));
     }
     #[expect(
         clippy::cast_possible_truncation,
@@ -22,6 +209,10 @@ pub(super) fn native_rate(rate: f64) -> Result<u32, String> {
         reason = "finite integral validated sample rate"
     )]
     Ok(rate as u32)
+}
+
+pub(super) fn native_rate(rate: f64) -> Result<u32, String> {
+    checked_rate(rate).map_err(|error| error.to_string())
 }
 
 struct PumpClock {
@@ -91,16 +282,16 @@ impl PumpClock {
         })
     }
 
-    fn observe(&mut self, clock: NativeClockSnapshot) -> Result<usize, String> {
+    fn observe(&mut self, clock: NativeClockSnapshot) -> Result<usize, PumpError> {
         let queued = clock.produced_frames.saturating_sub(clock.consumed_frames);
-        let queued = usize::try_from(queued).map_err(|e| e.to_string())?;
+        let queued = usize::try_from(queued).map_err(PumpError::Count)?;
         let elapsed = clock.consumer_ticks.saturating_sub(self.ticks);
         self.ticks = clock.consumer_ticks;
         // A stopped consumer does not turn clock-running merely because its last
         // published flag was true. No position advance means no PI update.
-        let elapsed = usize::try_from(elapsed).map_err(|e| e.to_string())?;
+        let elapsed = usize::try_from(elapsed).map_err(PumpError::Count)?;
         let output_rate =
-            usize::try_from(self.format & u64::from(u32::MAX)).map_err(|e| e.to_string())?;
+            usize::try_from(self.format & u64::from(u32::MAX)).map_err(PumpError::Count)?;
         self.bridge
             .observe_clock(ClockFeedback {
                 queue: FeedbackQueue::Output,
@@ -110,7 +301,7 @@ impl PumpClock {
                 elapsed_frames: elapsed.min(output_rate),
                 clock_running: clock.consumer_running != 0 && elapsed > 0 && elapsed <= output_rate,
             })
-            .map_err(|e| e.to_string())?;
+            .map_err(PumpError::Bridge)?;
         Ok(queued)
     }
 
@@ -146,7 +337,7 @@ impl PumpClock {
         capture: &mut NativeCaptureReader,
         input: &mut [f32],
         output: &mut [f32],
-    ) -> Result<usize, String> {
+    ) -> Result<usize, PumpError> {
         let channels = usize::from(capture.session().resolved.stream.channels);
         let frames = if self.queued_input < 256 {
             capture.read_interleaved(input)
@@ -156,107 +347,234 @@ impl PumpClock {
         if frames > 0 {
             self.bridge
                 .push_interleaved(&input[..frames * channels])
-                .map_err(|e| e.to_string())?;
+                .map_err(PumpError::Bridge)?;
         }
         let report = self
             .bridge
             .pull_interleaved(output)
-            .map_err(|e| e.to_string())?;
+            .map_err(PumpError::Bridge)?;
         self.queued_input = report.queued_input_frames;
         Ok(report.transferred_frames)
     }
 }
 
 pub(super) fn run_with_handoff(
-    mut capture: NativeCaptureReader,
-    mut transport: ApplicationSourceTransport,
+    capture: NativeCaptureReader,
+    transport: ApplicationSourceTransport,
     channels: usize,
     control: super::PumpControl<'_>,
 ) -> Result<(), String> {
-    let mut input = vec![0.0; ENGINE_BLOCK_FRAMES * channels];
-    let mut output = vec![0.0; ENGINE_BLOCK_FRAMES * channels];
-    let mut state: Option<PumpClock> = None;
-    let mut last_refresh = Instant::now();
-    let mut format_pending = false;
-    let mut scoped = super::ActivePlayback(None);
-    while !control.stop.load(Ordering::Acquire) {
-        if let Some(replacement) = control.playback.take() {
-            scoped = super::ActivePlayback(replacement);
+    // Everything the pump owns is allocated before promotion and freed after demotion.
+    let mut pump = Pump {
+        capture,
+        transport,
+        channels,
+        input: vec![0.0; ENGINE_BLOCK_FRAMES * channels],
+        output: vec![0.0; ENGINE_BLOCK_FRAMES * channels],
+        state: None,
+        scoped: super::ActivePlayback(None),
+        waker: Waker::new(),
+        format_pending: false,
+        last_refresh: Instant::now(),
+    };
+    let (period, computation, constraint) = budget(DEFAULT_PERIOD);
+    let realtime = RealtimeThread::promote(period, computation, constraint)
+        .inspect_err(|error| tracing::warn!(%error, "capture pump runs at standard priority"))
+        .ok();
+    let result = pump.run(&control, realtime.as_ref());
+    if realtime.is_some() {
+        // Leave the realtime class before the pump's converters, taps and playback
+        // leases are released below, and before formatting any error.
+        if let Err(error) = demote_current_thread() {
+            tracing::warn!(%error, "capture pump stops in the realtime class");
         }
-        if let Some(replacement) = control.capture.take() {
-            // This pump is the only ring reader. The old tap is released on
-            // this non-real-time worker, never on its Core Audio callback.
-            capture = replacement;
-            state = None;
-            format_pending = false;
-            last_refresh = Instant::now();
-        }
-        if last_refresh.elapsed() >= Duration::from_millis(100) {
-            if let Some(playback) = &scoped.0 {
-                // A changed exact process/device lease revokes suppression;
-                // ordinary shared capture continues, without reacquiring mute.
-                if let Err(error) = playback.refresh() {
-                    playback.stop()?;
-                    tracing::warn!(%error, "scoped playback lease revoked; capture preserved");
-                    scoped = super::ActivePlayback(None);
+    }
+    result.map_err(|error| error.to_string())
+}
+
+struct Pump {
+    capture: NativeCaptureReader,
+    transport: ApplicationSourceTransport,
+    channels: usize,
+    input: Vec<f32>,
+    output: Vec<f32>,
+    state: Option<PumpClock>,
+    scoped: super::ActivePlayback,
+    waker: Waker,
+    format_pending: bool,
+    last_refresh: Instant,
+}
+
+impl Pump {
+    fn run(
+        &mut self,
+        control: &super::PumpControl<'_>,
+        realtime: Option<&RealtimeThread>,
+    ) -> Result<(), PumpError> {
+        while !control.stop.load(Ordering::Acquire) {
+            self.adopt(control, realtime);
+            if self.last_refresh.elapsed() >= Duration::from_millis(100) {
+                self.format_pending = off_realtime(realtime, || {
+                    self.waker.report(&self.capture);
+                    self.retime(realtime);
+                    refresh(&mut self.scoped, &mut self.capture).map_err(PumpError::Control)
+                })?;
+                self.last_refresh = Instant::now();
+            }
+            if self.format_pending {
+                self.transport.publish_native(0, false);
+                if self.state.is_some() {
+                    off_realtime(realtime, || {
+                        if let Some(previous) = self.state.take() {
+                            self.transport.reset(previous.format, previous.native_rate);
+                        }
+                    });
                 }
+                self.waker.briefly(&self.capture);
+                continue;
             }
-            format_pending = !refresh_capture(&mut capture)?;
-            last_refresh = Instant::now();
+            self.pass(realtime)?;
         }
-        if format_pending {
-            transport.publish_native(0, false);
-            if let Some(previous) = state.take() {
-                transport.reset(previous.format, previous.native_rate);
+        Ok(())
+    }
+
+    /// Takes a published replacement without waiting for its publisher; the old tap,
+    /// converter and lease are released outside the realtime class.
+    fn adopt(&mut self, control: &super::PumpControl<'_>, realtime: Option<&RealtimeThread>) {
+        let playback = control.playback.try_take();
+        let capture = control.capture.try_take();
+        if playback.is_none() && capture.is_none() {
+            return;
+        }
+        off_realtime(realtime, || {
+            if let Some(replacement) = playback {
+                self.scoped = super::ActivePlayback(replacement);
             }
-            std::thread::sleep(PUMP_IDLE_INTERVAL);
-            continue;
-        }
-        let Some(clock) = transport.clock() else {
-            std::thread::sleep(PUMP_IDLE_INTERVAL);
-            continue;
+            if let Some(replacement) = capture {
+                // This pump is the only ring reader; the old tap is released here,
+                // never on its Core Audio callback.
+                self.capture = replacement;
+                self.state = None;
+                self.format_pending = false;
+                self.last_refresh = Instant::now();
+                self.waker.replaced();
+            }
+        });
+    }
+
+    /// One conversion step, or a bounded wait when there is nothing to convert.
+    fn pass(&mut self, realtime: Option<&RealtimeThread>) -> Result<(), PumpError> {
+        let Some(clock) = self
+            .transport
+            .clock()
+            .filter(|clock| clock.format_word != 0)
+        else {
+            self.waker.briefly(&self.capture);
+            return Ok(());
         };
-        if clock.format_word == 0 {
-            std::thread::sleep(PUMP_IDLE_INTERVAL);
-            continue;
-        }
-        let health = capture.session().stats();
+        let health = self.capture.session().stats();
         // Ring acceptance is not the native clock: overflowed callback frames
         // still elapsed. A drop also forces the epoch reset below.
-        transport.publish_native(
+        self.transport.publish_native(
             health.captured_frames.saturating_add(health.dropped_frames),
             health.running,
         );
-        let rate = native_rate(health.sample_rate)?;
+        let rate = checked_rate(health.sample_rate)?;
         if !health.running {
-            return Err("native process tap stopped".to_owned());
+            return Err(PumpError::TapStopped);
         }
-        if state
+        if self
+            .state
             .as_ref()
-            .is_none_or(|s| s.needs_reset(clock, &health, rate))
+            .is_none_or(|state| state.needs_reset(clock, &health, rate))
         {
-            let fresh = PumpClock::new(channels, rate, clock, health.dropped_frames)?;
-            state = fresh.start_epoch(&mut capture, &mut transport, &mut input, &health);
-            continue;
+            return off_realtime(realtime, || {
+                self.start_epoch(clock, &health, rate, realtime)
+            });
         }
-        let Some(state) = state.as_mut() else {
-            continue;
+        let Some(state) = self.state.as_mut() else {
+            return Ok(());
         };
         if state.observe(clock)? >= CAPTURE_RING_CAPACITY_FRAMES - ENGINE_BLOCK_FRAMES {
-            std::thread::sleep(PUMP_IDLE_INTERVAL);
-            continue;
+            // The engine has not consumed yet; its progress is not signaled here.
+            self.waker.briefly(&self.capture);
+            return Ok(());
         }
-        let transferred = state.transfer(&mut capture, &mut input, &mut output)?;
-        if transferred > 0 && !transport.write(&output[..transferred * channels], transferred) {
+        let transferred = state.transfer(&mut self.capture, &mut self.input, &mut self.output)?;
+        if transferred > 0
+            && !self
+                .transport
+                .write(&self.output[..transferred * self.channels], transferred)
+        {
             // A format change races the worker safely: no old-rate PCM is accepted;
-            // next tick observes the new token and reconstructs off the RT thread.
-            continue;
+            // the next pass observes the new token and reconstructs off realtime.
+            return Ok(());
         }
         if transferred == 0 {
-            std::thread::sleep(PUMP_IDLE_INTERVAL);
+            // Converted output can be empty while tap input is still readable (the
+            // converter is priming); read on instead of waiting for another callback.
+            let readable =
+                self.capture.session().stats().available_frames > 0 && state.queued_input < 256;
+            if !readable {
+                self.waker.for_tap(&self.capture);
+            }
+        }
+        Ok(())
+    }
+
+    /// Control work: build the epoch's converter (allocating) and release the previous
+    /// one, then fit the realtime budget to the tap's callback cadence.
+    fn start_epoch(
+        &mut self,
+        clock: NativeClockSnapshot,
+        health: &super::CaptureProbeStats,
+        rate: u32,
+        realtime: Option<&RealtimeThread>,
+    ) -> Result<(), PumpError> {
+        let fresh = PumpClock::new(self.channels, rate, clock, health.dropped_frames)
+            .map_err(PumpError::Control)?;
+        self.state = fresh.start_epoch(
+            &mut self.capture,
+            &mut self.transport,
+            &mut self.input,
+            health,
+        );
+        self.retime(realtime);
+        Ok(())
+    }
+
+    /// Control work: fits the realtime budget and tap wait to the tap's measured
+    /// callback cadence; applied when the thread re-enters the realtime class.
+    fn retime(&mut self, realtime: Option<&RealtimeThread>) {
+        let health = self.capture.session().stats();
+        let Ok(rate) = checked_rate(health.sample_rate) else {
+            return;
+        };
+        let period = callback_period(&health, rate);
+        self.waker.period = period;
+        if let Some(realtime) = realtime {
+            let (period, computation, constraint) = budget(period);
+            realtime.retune(period, computation, constraint);
         }
     }
-    Ok(())
+}
+
+/// Periodic control work: drop a revoked playback lease and refresh the tap format.
+/// Returns whether the format is still pending.
+fn refresh(
+    scoped: &mut super::ActivePlayback,
+    capture: &mut NativeCaptureReader,
+) -> Result<bool, String> {
+    if let Some(playback) = &scoped.0 {
+        // A changed exact process/device lease revokes suppression;
+        // ordinary shared capture continues, without reacquiring mute.
+        if let Err(error) = playback.refresh() {
+            playback.stop()?;
+            tracing::warn!(%error, "scoped playback lease revoked; capture preserved");
+            *scoped = super::ActivePlayback(None);
+        }
+    }
+    refresh_capture(capture).map(|ready| !ready)
 }
 
 fn refresh_capture(capture: &mut NativeCaptureReader) -> Result<bool, String> {
@@ -276,6 +594,50 @@ fn refresh_capture(capture: &mut NativeCaptureReader) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn the_realtime_budget_follows_the_tap_callback_cadence() {
+        let mut health = super::super::CaptureProbeStats {
+            callback_count: 0,
+            captured_frames: 0,
+            dropped_frames: 0,
+            available_frames: 0,
+            channels: 2,
+            sample_rate: 48_000.0,
+            format_generation: 1,
+            clock_discontinuities: 0,
+            running: true,
+            sample_time: 0.0,
+            host_time: 0,
+            clock_valid: false,
+        };
+        // Before any callback: the 512-frame default.
+        assert_eq!(
+            callback_period(&health, 48_000),
+            Duration::from_nanos(10_666_666)
+        );
+        health.callback_count = 100;
+        health.captured_frames = 12_800;
+        assert_eq!(
+            callback_period(&health, 48_000),
+            Duration::from_nanos(2_666_666)
+        );
+        // Implausible averages are bounded to native quanta.
+        health.captured_frames = 100;
+        assert_eq!(
+            callback_period(&health, 48_000),
+            Duration::from_nanos(1_333_333)
+        );
+        let (period, computation, constraint) = budget(Duration::from_millis(10));
+        assert_eq!(
+            (period, computation, constraint),
+            (
+                Duration::from_millis(10),
+                Duration::from_millis(4),
+                Duration::from_millis(8)
+            )
+        );
+    }
+
     #[test]
     fn timestamp_break_resets_even_without_a_rate_change_or_ring_overflow() {
         let snapshot = NativeClockSnapshot {
