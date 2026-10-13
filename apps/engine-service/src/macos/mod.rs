@@ -132,7 +132,13 @@ pub(super) async fn run() -> Result<(), String> {
     engine_lease
         .record("running")
         .map_err(|error| format!("engine lifecycle record failed: {error}"))?;
-    let result = run_owned().await;
+    // Stops are caught before anything can fail, and the crash guard covers the whole run.
+    let signals = mixrelay_engine_service::session::ShutdownSignals::register()
+        .map_err(|error| format!("could not observe shutdown requests: {error}"))?;
+    let (guard, tripped) = mixrelay_engine_service::crash_guard::CrashGuard::arm(
+        mixrelay_engine_service::config_directory(),
+    );
+    let result = run_owned(signals, tripped).await;
     let retired = super::macos_devices::MacDevices::finish_retirement();
     // A killed controller cannot run its own Quit handler. Its OS-owned lease
     // still releases, so the surviving engine finalizes recordings and then
@@ -152,10 +158,18 @@ pub(super) async fn run() -> Result<(), String> {
     engine_lease
         .record(&outcome)
         .map_err(|error| format!("engine exit record failed: {error}"))?;
+    if result.is_ok()
+        && let Some(guard) = guard
+    {
+        guard.finish();
+    }
     result
 }
 
-async fn run_owned() -> Result<(), String> {
+async fn run_owned(
+    signals: mixrelay_engine_service::session::ShutdownSignals,
+    repeated_failures: bool,
+) -> Result<(), String> {
     // Reserve the control endpoint before native publication or audio ownership.
     // A second service must fail without preparing devices beside the running one.
     let service = ControlService::bind()
@@ -169,7 +183,7 @@ async fn run_owned() -> Result<(), String> {
     let initial_document = mixrelay_audio_graph::GraphDocument::new(1, Vec::new(), Vec::new());
     let processor = create_initial_processor(&initial_document, format, Arc::clone(&meters))?;
     let exchange = Arc::new(ProcessorExchange::new(processor.plan().revision()));
-    let _latency = crate::latency_maintenance::Observer::start(&exchange, processor.plan())?;
+    let latency = crate::latency_maintenance::Observer::start(&exchange, processor.plan())?;
     let initial_bindings = processor.plan().meter_bindings().to_vec();
     let endpoint_backend = Arc::new(MacVirtualEndpointBackend::new(
         mixrelay_audio_io::formats::SAMPLE_RATES.to_vec(),
@@ -197,9 +211,13 @@ async fn run_owned() -> Result<(), String> {
     // Saved device references are resolved through Driver's blocking control API.
     // Recall must finish before audio starts, but outside the Tokio IO executor.
     let controller = Arc::new(
-        tokio::task::spawn_blocking(move || controller.with_graph_catalog())
-            .await
-            .map_err(|error| format!("could not restore graph catalog: {error}"))?,
+        tokio::task::spawn_blocking(move || {
+            controller
+                .after_repeated_failures(repeated_failures)
+                .with_graph_catalog()
+        })
+        .await
+        .map_err(|error| format!("could not restore graph catalog: {error}"))?,
     );
     // Declared before AudioWorker so reclamation remains available until the
     // audio owner has stopped and joined, including partial-startup failures.
@@ -226,20 +244,26 @@ async fn run_owned() -> Result<(), String> {
         mixrelay_engine_service::session::AudioWorker::new(runtime_status.clone(), audio_thread);
     let observers =
         maintenance::ControlObservers::start(&runtime_status, &controller, &monitor_devices)?;
-    let shutdown = async {
-        tokio::select! {
-            result = mixrelay_engine_service::session::shutdown_signal() => result,
-            () = controller_released() => Ok(()),
-        }
-    };
-    let result = service
-        .serve(controller, shutdown, || observers.stop_observing())
+    service
+        .serve(controller, stop_requested(signals), || {
+            observers.stop_observing();
+        })
         .await
-        .map_err(|error| error.to_string());
-    let saved = observers.finish();
-    let stopped = worker.finish();
-    let released = reclaimer.finish();
-    result.and(saved).and(stopped).and(released)
+        .map_err(|error| error.to_string())
+        .and(observers.finish())
+        .and(worker.finish())
+        .and(reclaimer.finish())
+        .and(latency.finish())
+}
+
+/// An OS shutdown request or the controller releasing the engine.
+async fn stop_requested(
+    signals: mixrelay_engine_service::session::ShutdownSignals,
+) -> std::io::Result<()> {
+    tokio::select! {
+        result = signals.requested() => result,
+        () = controller_released() => Ok(()),
+    }
 }
 
 async fn controller_released() {

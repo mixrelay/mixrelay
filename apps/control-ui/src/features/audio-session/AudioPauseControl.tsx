@@ -75,7 +75,11 @@ export function AudioPauseControl({
   };
   return (
     <div className={styles.control}>
-      <PauseNotice failed={error} unsaved={Boolean(power?.unsaved)} />
+      <PauseNotice
+        failed={error}
+        unsaved={Boolean(power?.unsaved)}
+        pausedAfterFailures={power?.pauseReason === 'repeatedFailures'}
+      />
       <TransportButton
         icon={power?.enabled === false ? 'resume' : 'pause'}
         label={accessibleLabel}
@@ -93,16 +97,30 @@ export function AudioPauseControl({
   );
 }
 
-/** A failed change is an alert. An applied change the service has not yet saved for its next
- * start is a warning read from its status, so it ends when the service's retry succeeds. */
-function PauseNotice({ failed, unsaved }: { failed: boolean; unsaved: boolean }) {
+/** A failed change is an alert. A pause the engine chose after repeated failures, and an
+ * applied change the service has not yet saved for its next start, are warnings read from its
+ * status, so they end with Resume or with the service's successful retry. */
+function PauseNotice({
+  failed,
+  unsaved,
+  pausedAfterFailures,
+}: {
+  failed: boolean;
+  unsaved: boolean;
+  pausedAfterFailures: boolean;
+}) {
   const { t } = useTranslation();
-  if (!failed && !unsaved) return null;
+  const message = failed
+    ? 'audioSession.pauseFailed'
+    : pausedAfterFailures
+      ? 'audioSession.pausedAfterFailures'
+      : unsaved
+        ? 'audioSession.pauseNotSaved'
+        : undefined;
+  if (!message) return null;
   return (
     <div className={styles.error}>
-      <InlineNotice tone={failed ? 'critical' : 'warning'}>
-        {t(failed ? 'audioSession.pauseFailed' : 'audioSession.pauseNotSaved')}
-      </InlineNotice>
+      <InlineNotice tone={failed ? 'critical' : 'warning'}>{t(message)}</InlineNotice>
     </div>
   );
 }

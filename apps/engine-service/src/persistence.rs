@@ -167,7 +167,11 @@ fn absolute_env(name: &str) -> Option<PathBuf> {
 
 /// Resolves the application's configuration directory without creating it.
 /// Returns an invalid override or unavailable user-directory error.
-pub(crate) fn config_directory() -> io::Result<PathBuf> {
+/// The engine's configuration directory (`MIXRELAY_CONFIG_DIR` when set).
+///
+/// # Errors
+/// Fails when the directory cannot be determined from the environment.
+pub fn config_directory() -> io::Result<PathBuf> {
     if env::var_os("MIXRELAY_CONFIG_DIR").is_some() {
         return absolute_env("MIXRELAY_CONFIG_DIR").ok_or_else(|| {
             io::Error::new(

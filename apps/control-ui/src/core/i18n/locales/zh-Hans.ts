@@ -165,6 +165,7 @@ export const zhHans = {
     pause: '暂停',
     changing: '正在更改音频状态…',
     pauseFailed: '暂停或继续失败。请检查当前状态。',
+    pausedAfterFailures: '引擎多次意外停止，MixRelay 已暂停音频。请检查最近的更改，然后继续。',
     pauseNotSaved: '已应用但无法保存。重新启动 MixRelay 后可能不会保留。',
     diagnostics: '音频详情',
     processingRate: '处理采样率',

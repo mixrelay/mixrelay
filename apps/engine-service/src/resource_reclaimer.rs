@@ -47,14 +47,31 @@ impl ResourceReclaimer {
     }
 }
 
+impl ResourceReclaimer {
+    /// Stops and joins the worker.
+    ///
+    /// # Errors
+    /// Reports a reclaimer that panicked, so the service does not count as cleanly stopped.
+    pub fn finish(mut self) -> Result<(), String> {
+        self.stop_and_join()
+    }
+
+    fn stop_and_join(&mut self) -> Result<(), String> {
+        self.stopping.store(true, Ordering::Release);
+        let Some(worker) = self.worker.take() else {
+            return Ok(());
+        };
+        worker.thread().unpark();
+        worker
+            .join()
+            .map_err(|_| "audio resource reclaimer panicked".to_owned())
+    }
+}
+
 impl Drop for ResourceReclaimer {
     fn drop(&mut self) {
-        self.stopping.store(true, Ordering::Release);
-        if let Some(worker) = self.worker.take() {
-            worker.thread().unpark();
-            if worker.join().is_err() {
-                tracing::error!("audio resource reclaimer panicked during shutdown");
-            }
+        if self.stop_and_join().is_err() {
+            tracing::error!("audio resource reclaimer panicked during shutdown");
         }
     }
 }
@@ -132,5 +149,28 @@ mod tests {
         drop(reclaimer);
         assert_eq!(Arc::strong_count(&owner), 1);
         assert_eq!(receiver.try_recv(), Err(mpsc::TryRecvError::Disconnected));
+    }
+
+    #[test]
+    fn finish_reports_a_reclaimer_that_panicked() {
+        let quiet = ResourceReclaimer::start("mixrelay-test-reclaimer", || false).unwrap();
+        assert_eq!(quiet.finish(), Ok(()));
+        let panicking =
+            ResourceReclaimer::start("mixrelay-test-reclaimer", || panic!("reclaim failed"))
+                .unwrap();
+        while !panicking.worker.as_ref().unwrap().is_finished() {
+            thread::yield_now();
+        }
+        assert_eq!(
+            panicking.finish(),
+            Err("audio resource reclaimer panicked".to_owned())
+        );
+        // Dropped rather than finished, the panic is logged instead of returned.
+        let dropped =
+            ResourceReclaimer::start("mixrelay-test-reclaimer", || panic!("dropped")).unwrap();
+        while !dropped.worker.as_ref().unwrap().is_finished() {
+            thread::yield_now();
+        }
+        drop(dropped);
     }
 }

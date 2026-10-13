@@ -108,7 +108,10 @@ fn catalog_restart_restores_device_format_name_and_graph_local_reference() {
     assert_eq!(next.graph_status().active_revision, 1);
     settle(&next);
     assert_eq!(next.graph_status().active_revision, 3);
-    assert_eq!(fs::read_dir(fixture.directory.path()).unwrap().count(), 1);
+    assert_eq!(
+        crate::controller_test_support::stored_files(fixture.directory.path()),
+        1
+    );
 }
 
 #[test]
@@ -202,7 +205,10 @@ fn native_staging_rejection_preserves_catalog_bytes_and_current_device() {
     assert_eq!(first.graph(), expected);
     assert_eq!(settings(&first).devices, independent_devices);
     assert_eq!(fs::read(fixture.path()).unwrap(), original);
-    assert_eq!(fs::read_dir(fixture.directory.path()).unwrap().count(), 1);
+    assert_eq!(
+        crate::controller_test_support::stored_files(fixture.directory.path()),
+        1
+    );
     fixture.reject_attachments.store(false, Ordering::Release);
     drop(first);
     assert_eq!(fixture.restart().graph().nodes, expected.nodes);
@@ -263,7 +269,10 @@ fn corrupt_catalog_is_untouched_and_reports_an_observable_error() {
     assert_eq!(fs::read(fixture.path()).unwrap(), original);
     drop(engine);
     assert!(fixture.restart().graph_catalog().is_err());
-    assert_eq!(fs::read_dir(fixture.directory.path()).unwrap().count(), 1);
+    assert_eq!(
+        crate::controller_test_support::stored_files(fixture.directory.path()),
+        1
+    );
 }
 
 #[test]

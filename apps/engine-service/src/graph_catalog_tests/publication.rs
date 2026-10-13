@@ -103,6 +103,9 @@ fn invalid_graph_after_successful_staging_removes_only_its_temporary_document() 
     );
     assert_eq!(engine.exchange.revisions(), revisions);
     assert_eq!(fs::read(fixture.path()).unwrap(), disk);
-    assert_eq!(fs::read_dir(fixture.0.path()).unwrap().count(), 1);
+    assert_eq!(
+        crate::controller_test_support::stored_files(fixture.0.path()),
+        1
+    );
     assert_eq!(prepares.load(Ordering::Relaxed), 0);
 }

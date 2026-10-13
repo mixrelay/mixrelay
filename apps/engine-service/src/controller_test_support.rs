@@ -21,3 +21,15 @@ pub(crate) fn settle(controller: &EngineGraphController) -> Box<BlockProcessor> 
     controller.exchange.reclaim_retired();
     processor
 }
+
+/// Files a catalog directory keeps, without the crash guard's run marker and lock that
+/// every running (or uncleanly dropped) engine leaves beside its catalog.
+pub(crate) fn stored_files(directory: &std::path::Path) -> usize {
+    std::fs::read_dir(directory)
+        .unwrap()
+        .filter(|entry| {
+            let name = entry.as_ref().unwrap().file_name();
+            name != crate::crash_guard::RUN_MARKER && name != crate::crash_guard::RUN_LOCK
+        })
+        .count()
+}

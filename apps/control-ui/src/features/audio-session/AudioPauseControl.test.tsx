@@ -326,3 +326,35 @@ it('presents the healthy running transport with its neutral action tone and nati
   expect(pause).toHaveAttribute('aria-description', i18n.t('routing.nodeStatus.running'));
   expect(pause).toBeEnabled();
 });
+
+it('explains a pause the engine chose after repeated failures until Resume', async () => {
+  await i18n.changeLanguage('en');
+  const port = fixture();
+  const status = {
+    ...(await port.getStatus()),
+    enginePower: {
+      enabled: false,
+      transitioning: false,
+      unsaved: true,
+      pauseReason: 'repeatedFailures' as const,
+    },
+  };
+  const view = (current: MixRelayStatus) => (
+    <MixRelayProvider>
+      <I18nextProvider i18n={i18n}>
+        <AudioPauseControl
+          controlPort={port}
+          status={current}
+          onApplied={vi.fn()}
+          onBusyChange={vi.fn()}
+        />
+      </I18nextProvider>
+    </MixRelayProvider>
+  );
+  const { rerender } = render(view(status));
+  // The reason for the pause outranks the save warning; neither is an alert.
+  expect(screen.getByRole('status')).toHaveTextContent(i18n.t('audioSession.pausedAfterFailures'));
+  expect(screen.queryByRole('alert')).toBeNull();
+  rerender(view({ ...status, enginePower: { enabled: true, transitioning: false } }));
+  expect(screen.queryByRole('status')).toBeNull();
+});

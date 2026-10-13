@@ -164,6 +164,8 @@ export const koKR = {
     pause: '일시정지',
     changing: '오디오 상태 변경 중…',
     pauseFailed: '일시정지 또는 재개에 실패했습니다. 현재 상태를 확인하세요.',
+    pausedAfterFailures:
+      '엔진이 여러 번 예기치 않게 종료되어 오디오를 일시정지했습니다. 최근 변경을 확인한 뒤 재개하세요.',
     pauseNotSaved:
       '적용했지만 저장하지 못했습니다. MixRelay를 다시 시작하면 유지되지 않을 수 있습니다.',
     diagnostics: '오디오 정보',

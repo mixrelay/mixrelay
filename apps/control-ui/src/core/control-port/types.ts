@@ -10,8 +10,15 @@ export type DriverState =
   | 'ready';
 
 export interface MixRelayStatus {
-  /** `unsaved`: the service could not yet save this state for its next start and keeps retrying. */
-  enginePower?: { enabled: boolean; transitioning: boolean; unsaved?: boolean };
+  /** `unsaved`: the service could not yet save this state for its next start and keeps retrying.
+   * `pauseReason`: why the engine paused itself (absent for a pause the user chose);
+   * `repeatedFailures` means it ended unexpectedly several times in a row. */
+  enginePower?: {
+    enabled: boolean;
+    transitioning: boolean;
+    unsaved?: boolean;
+    pauseReason?: 'repeatedFailures';
+  };
   failedProcessors?: FailedProcessorInstance[];
   processorTimings?: ProcessorTiming[];
   processorLatencies?: ProcessorLatency[];

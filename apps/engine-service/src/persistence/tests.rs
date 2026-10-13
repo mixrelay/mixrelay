@@ -22,7 +22,10 @@ fn state_document_staging_allocation_measurement() {
         start.elapsed().as_micros()
     );
     assert!(!path.exists());
-    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
+    assert_eq!(
+        crate::controller_test_support::stored_files(directory.path()),
+        0
+    );
     assert!(allocation.bytes_max < 128 * 1024);
 }
 
@@ -41,7 +44,10 @@ fn complete_file_limit_includes_newline_and_preserves_previous_document() {
         let error = stage_json_limited(&path, &"ab", limit).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert_eq!(fs::read(&path).unwrap(), accepted);
-        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+        assert_eq!(
+            crate::controller_test_support::stored_files(directory.path()),
+            1
+        );
     }
 }
 
@@ -89,7 +95,10 @@ fn commit_replaces_only_after_explicit_acceptance_and_leaves_no_staged_file() {
     staged.commit().unwrap();
 
     assert_eq!(fs::read(&path).unwrap(), b"{\"revision\":2}\n");
-    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    assert_eq!(
+        crate::controller_test_support::stored_files(directory.path()),
+        1
+    );
 }
 
 #[test]
@@ -103,7 +112,10 @@ fn cancelling_does_not_replace_or_create_the_destination() {
     drop(stage_json(&path, &18).unwrap());
 
     assert_eq!(fs::read(&path).unwrap(), b"accepted");
-    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    assert_eq!(
+        crate::controller_test_support::stored_files(directory.path()),
+        1
+    );
 }
 
 struct PartialSerializationFailure;
@@ -130,7 +142,10 @@ fn partial_serialization_failure_cleans_staging_without_touching_accepted_bytes(
     );
 
     assert_eq!(fs::read(&path).unwrap(), b"accepted");
-    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    assert_eq!(
+        crate::controller_test_support::stored_files(directory.path()),
+        1
+    );
 }
 
 #[test]
@@ -160,7 +175,10 @@ fn failed_commit_cleans_staging_and_preserves_the_destination() {
 
     assert!(!temporary.exists());
     assert_eq!(fs::read(&marker).unwrap(), b"accepted");
-    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    assert_eq!(
+        crate::controller_test_support::stored_files(directory.path()),
+        1
+    );
 }
 
 #[test]
@@ -176,7 +194,10 @@ fn cancelling_one_transaction_does_not_remove_another_transactions_file() {
     assert!(second.temporary.exists());
     second.commit().unwrap();
     assert_eq!(fs::read(&path).unwrap(), b"2\n");
-    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    assert_eq!(
+        crate::controller_test_support::stored_files(directory.path()),
+        1
+    );
 }
 
 #[cfg(unix)]

@@ -31,15 +31,41 @@ fn recorder_request(action: RecorderAction) -> RecorderRequest {
 /// A pause outlives the service: a restarted or rebooted engine stays paused until
 /// Resume. Running is the default, so Resume removes the marker.
 const SAVED_PAUSE: &str = "engine-paused.json";
+/// Saved with a pause the engine chose after repeated unexpected ends.
+const REPEATED_FAILURES: &str = "repeatedFailures";
 
 impl EngineGraphController {
+    /// Starts paused because the service's crash guard found repeated unexpected ends.
+    /// Apply before the durable catalog, which saves the pause and its reason.
+    #[must_use]
+    pub fn after_repeated_failures(self, tripped: bool) -> Self {
+        if tripped {
+            self.execution_enabled.store(false, Ordering::Release);
+            self.paused_after_failures.store(true, Ordering::Release);
+        }
+        self
+    }
+
     pub(super) fn restore_saved_pause(&mut self, catalog: &Path) {
         let marker = catalog.with_file_name(SAVED_PAUSE);
         if marker.exists() {
             tracing::info!("engine stays paused from the previous session");
             self.execution_enabled = AtomicBool::new(false);
+            // The reason stays until Resume, across restarts; an unreadable one is dropped,
+            // never the pause itself.
+            let saved: serde_json::Value = std::fs::read(&marker)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .unwrap_or_default();
+            if saved["reason"] == REPEATED_FAILURES {
+                self.paused_after_failures = AtomicBool::new(true);
+            }
         }
         self.saved_pause = Some(marker);
+        if self.paused_after_failures.load(Ordering::Acquire) {
+            // Like a user pause: the graph is restored without audio until Resume.
+            self.persist_pause(false);
+        }
     }
 
     fn save_pause(&self, enabled: bool) -> io::Result<()> {
@@ -47,11 +73,12 @@ impl EngineGraphController {
             return Ok(());
         };
         if !enabled {
-            return crate::persistence::stage_json(
-                marker,
-                &serde_json::json!({ "enabled": false }),
-            )
-            .and_then(crate::persistence::StagedWrite::commit);
+            let mut saved = serde_json::json!({ "enabled": false });
+            if self.paused_after_failures.load(Ordering::Acquire) {
+                saved["reason"] = REPEATED_FAILURES.into();
+            }
+            return crate::persistence::stage_json(marker, &saved)
+                .and_then(crate::persistence::StagedWrite::commit);
         }
         match std::fs::remove_file(marker) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -169,6 +196,8 @@ impl EngineGraphController {
             transitioning: revisions.active != revisions.submitted
                 || (!enabled && !self.graph_resources.execution_released()),
             unsaved: self.pause_save_warning.lock().is_some(),
+            pause_reason: (!enabled && self.paused_after_failures.load(Ordering::Acquire))
+                .then_some(mixrelay_control_protocol::EnginePauseReason::RepeatedFailures),
         }
     }
 
@@ -230,6 +259,7 @@ impl EngineGraphController {
                 self.resume_recorders()?;
             }
         } else if enabled {
+            self.paused_after_failures.store(false, Ordering::Release);
             self.resume_recorders()?;
         }
         if let Some(error) = checkpoint_error {
@@ -286,6 +316,44 @@ mod tests {
         assert!(!marker.exists());
         drop(restarted);
         assert!(start().engine_power_status().enabled);
+    }
+
+    #[test]
+    fn a_pause_after_repeated_failures_keeps_its_reason_until_resume() {
+        use crate::controller_test_support::settle;
+        use mixrelay_control_protocol::EnginePauseReason;
+        let directory = mixrelay_test_support::FixtureDir::new("engine-crash-loop").unwrap();
+        let catalog = directory.join("graphs.json");
+        let start = |tripped| {
+            crate::endpoint_settings_tests::controller(graph(1))
+                .after_repeated_failures(tripped)
+                .with_graph_catalog_path(catalog.clone())
+        };
+        let engine = start(true);
+        let status = engine.engine_power_status();
+        assert!(!status.enabled);
+        assert_eq!(
+            status.pause_reason,
+            Some(EnginePauseReason::RepeatedFailures)
+        );
+        drop(engine);
+        // A later clean start keeps both the pause and why it happened.
+        let restarted = start(false);
+        assert_eq!(
+            restarted.engine_power_status().pause_reason,
+            Some(EnginePauseReason::RepeatedFailures)
+        );
+        settle(&restarted);
+        restarted.change_engine_power(true, None).unwrap();
+        settle(&restarted);
+        assert_eq!(restarted.engine_power_status().pause_reason, None);
+        // A user pause carries no reason.
+        restarted.change_engine_power(false, None).unwrap();
+        settle(&restarted);
+        drop(restarted);
+        let paused = start(false);
+        assert!(!paused.engine_power_status().enabled);
+        assert_eq!(paused.engine_power_status().pause_reason, None);
     }
 
     #[test]

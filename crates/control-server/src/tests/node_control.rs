@@ -42,6 +42,7 @@ pub(super) fn snapshot() -> mixrelay_control_protocol::EngineControlSnapshot {
             enabled: true,
             transitioning: false,
             unsaved: false,
+            pause_reason: None,
         },
         graphs: vec![GraphControlSnapshot {
             id: "graph B".into(),

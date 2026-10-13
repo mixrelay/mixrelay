@@ -57,12 +57,25 @@ fn observe(exchange: &Weak<ProcessorExchange>, stop: &mpsc::Receiver<()>) {
     }
 }
 
+impl Observer {
+    /// Stops and joins the observer; a panic means the service did not stop cleanly.
+    pub(crate) fn finish(mut self) -> Result<(), String> {
+        self.stop_and_join()
+    }
+
+    fn stop_and_join(&mut self) -> Result<(), String> {
+        let _ = self.stop.try_send(());
+        self.worker.take().map_or(Ok(()), |worker| {
+            worker
+                .join()
+                .map_err(|_| "route latency observer panicked".to_owned())
+        })
+    }
+}
+
 impl Drop for Observer {
     fn drop(&mut self) {
-        let _ = self.stop.try_send(());
-        if let Some(worker) = self.worker.take()
-            && worker.join().is_err()
-        {
+        if self.stop_and_join().is_err() {
             tracing::error!("route latency observer panicked");
         }
     }
@@ -74,6 +87,25 @@ mod tests {
     use mixrelay_audio_graph::{
         CompileContext, CompileLimits, GraphCompiler, GraphDocument, RenderFormat,
     };
+
+    #[test]
+    fn finishing_an_observer_joins_it() {
+        let execution = GraphCompiler::default()
+            .compile(
+                &GraphDocument::new(1, Vec::new(), Vec::new()),
+                CompileContext {
+                    format: RenderFormat {
+                        sample_rate: 48_000,
+                        block_frames: 32,
+                    },
+                    limits: CompileLimits::default(),
+                },
+            )
+            .unwrap();
+        let plan = Arc::new(RenderPlan::prepare(&execution).unwrap());
+        let exchange = Arc::new(ProcessorExchange::new(1));
+        assert_eq!(Observer::start(&exchange, &plan).unwrap().finish(), Ok(()));
+    }
 
     #[test]
     fn observer_publishes_without_ui_and_joins_on_drop() {

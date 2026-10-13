@@ -4,6 +4,7 @@ use std::{
 };
 
 use parking_lot::{Mutex, RwLock};
+pub mod crash_guard;
 mod engine_power;
 mod feature_policy;
 mod meter_snapshot;
@@ -52,6 +53,7 @@ mod controller_startup_tests;
 mod controller_test_support;
 pub mod device_worker;
 mod persistence;
+pub use persistence::config_directory;
 mod processor_latency;
 mod processor_recovery;
 mod processor_timing;
@@ -456,6 +458,8 @@ pub struct EngineGraphController {
     incarnation: String,
     /// Marks a pause that must outlive the service; set with the durable catalog.
     saved_pause: Option<std::path::PathBuf>,
+    /// The engine paused itself after ending unexpectedly several times; cleared by Resume.
+    paused_after_failures: std::sync::atomic::AtomicBool,
     suspended_recorders: Mutex<Vec<engine_power::SuspendedRecorder>>,
     recorder_cleanup_error: Mutex<Option<String>>,
     node_control_warning: Mutex<Option<String>>,
@@ -594,6 +598,7 @@ impl EngineGraphController {
             execution_enabled: std::sync::atomic::AtomicBool::new(true),
             incarnation: new_incarnation(),
             saved_pause: None,
+            paused_after_failures: std::sync::atomic::AtomicBool::new(false),
             suspended_recorders: Mutex::new(Vec::new()),
             recorders: recorders.clone(),
             exchange,
@@ -1753,7 +1758,7 @@ fn processor_parameter_error(node_id: &str, parameter_id: u32, reason: &str) -> 
 }
 
 /// 128 random bits from two independently keyed hashes of this process and its start.
-fn new_incarnation() -> String {
+pub(crate) fn new_incarnation() -> String {
     use std::hash::{BuildHasher as _, RandomState};
     let started = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

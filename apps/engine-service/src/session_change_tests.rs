@@ -347,7 +347,10 @@ fn native_rejection_cancels_staged_resources_without_publishing_graph() {
     assert_eq!(cancelled.load(Ordering::Acquire), 1);
     assert_eq!(committed.load(Ordering::Acquire), 0);
     assert_eq!(std::fs::read(&path).unwrap(), saved);
-    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    assert_eq!(
+        crate::controller_test_support::stored_files(directory.path()),
+        1
+    );
     runtime.fail.store(false, Ordering::Release);
     assert!(
         controller
@@ -357,7 +360,10 @@ fn native_rejection_cancels_staged_resources_without_publishing_graph() {
     );
     assert_eq!(committed.load(Ordering::Acquire), 1);
     assert_ne!(std::fs::read(path).unwrap(), saved);
-    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    assert_eq!(
+        crate::controller_test_support::stored_files(directory.path()),
+        1
+    );
 }
 
 struct RejectNative(Resources);

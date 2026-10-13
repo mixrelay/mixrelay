@@ -173,6 +173,8 @@ export const fr = {
     pause: 'Mettre en pause',
     changing: 'Changement de l’état audio…',
     pauseFailed: 'Impossible de mettre en pause ou de reprendre. Vérifiez l’état actuel.',
+    pausedAfterFailures:
+      'MixRelay a mis l’audio en pause, car le moteur s’est arrêté de façon inattendue plusieurs fois. Vérifiez les modifications récentes, puis reprenez.',
     pauseNotSaved:
       'Appliqué, mais non enregistré. Ce choix pourrait ne pas être conservé après le redémarrage de MixRelay.',
     diagnostics: 'Détails audio',

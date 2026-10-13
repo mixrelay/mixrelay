@@ -248,6 +248,17 @@ pub struct EnginePowerStatus {
     /// The service could not yet save this state for its next start; it keeps retrying.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unsaved: bool,
+    /// Why the engine paused itself; absent for a pause the user chose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause_reason: Option<EnginePauseReason>,
+}
+
+/// A pause the engine chose rather than the user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EnginePauseReason {
+    /// It ended unexpectedly several times in a row; it stays paused until Resume.
+    RepeatedFailures,
 }
 
 /// Idempotent execution command; never changes authored graphs or service installation.

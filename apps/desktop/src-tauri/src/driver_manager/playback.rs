@@ -87,6 +87,7 @@ pub(super) fn power(app: &tauri::AppHandle, state: &MenuState) -> Option<EngineP
                 enabled: !snapshot.settings.devices.is_empty(),
                 transitioning: state.busy,
                 unsaved: false,
+                pause_reason: None,
             })
     }
 }

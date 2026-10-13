@@ -138,6 +138,8 @@ const overrides = {
     pause: '[Pause]',
     changing: '[Changing audio state…]',
     pauseFailed: '[Could not pause or resume. Check the current state.]',
+    pausedAfterFailures:
+      '[MixRelay paused audio because its engine stopped unexpectedly several times. Check recent changes, then resume.]',
     pauseNotSaved:
       '[This change was applied but could not be saved, so it may not be kept after MixRelay restarts.]',
     diagnostics: '[Audio details]',

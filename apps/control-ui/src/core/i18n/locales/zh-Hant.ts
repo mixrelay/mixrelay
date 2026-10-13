@@ -165,6 +165,7 @@ export const zhHant = {
     pause: '暫停',
     changing: '正在變更音訊狀態…',
     pauseFailed: '暫停或繼續失敗。請檢查目前狀態。',
+    pausedAfterFailures: '引擎多次意外停止，MixRelay 已暫停音訊。請檢查最近的變更，然後繼續。',
     pauseNotSaved: '已套用但無法儲存。重新啟動 MixRelay 後可能不會保留。',
     diagnostics: '音訊詳情',
     processingRate: '處理取樣率',

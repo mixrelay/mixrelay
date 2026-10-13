@@ -85,13 +85,25 @@ impl Monitor {
         })
     }
 }
+impl Monitor {
+    /// Stops and joins the monitor; a panic means the service did not stop cleanly.
+    pub(super) fn finish(mut self) -> Result<(), String> {
+        self.stop_and_join()
+    }
+
+    fn stop_and_join(&mut self) -> Result<(), String> {
+        self.stop_observing();
+        self.worker.take().map_or(Ok(()), |worker| {
+            worker
+                .join()
+                .map_err(|_| "MixRelay endpoint format monitor panicked".to_owned())
+        })
+    }
+}
 impl Drop for Monitor {
     fn drop(&mut self) {
-        self.stop_observing();
-        if let Some(worker) = self.worker.take()
-            && worker.join().is_err()
-        {
-            tracing::error!("MixRelay endpoint format monitor panicked");
+        if let Err(error) = self.stop_and_join() {
+            tracing::error!(%error);
         }
     }
 }

@@ -175,6 +175,8 @@ export const ja = {
     pause: '一時停止',
     changing: 'オーディオの状態を変更中…',
     pauseFailed: '一時停止または再開に失敗しました。現在の状態を確認してください。',
+    pausedAfterFailures:
+      'エンジンが何度も予期せず終了したため、MixRelay はオーディオを一時停止しました。最近の変更を確認してから再開してください。',
     pauseNotSaved:
       '適用しましたが保存できませんでした。MixRelay を再起動すると維持されない場合があります。',
     diagnostics: 'オーディオの詳細',

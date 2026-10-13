@@ -155,8 +155,12 @@ async function workspaceFixture({ parameters }: { parameters: Record<string, unk
     state.graph.edges = [];
     state.meters.nodes = [];
   }
-  if (parameters.playbackPaused) {
-    state.status.enginePower = { enabled: false, transitioning: false };
+  if (parameters.playbackPaused || parameters.pausedAfterFailures) {
+    state.status.enginePower = {
+      enabled: false,
+      transitioning: false,
+      ...(parameters.pausedAfterFailures ? { pauseReason: 'repeatedFailures' as const } : {}),
+    };
     state.meters.nodes = [];
   }
   const port = new StorybookMockControlPort(state);
@@ -328,6 +332,24 @@ export const AudioPaused: Story = {
           '실행부의 확인된 enginePower.enabled=false를 실제 App이 표시합니다. 노드 Off·Mute·개별 녹음 Pause와 별개입니다. 실제 오디오 중지·재개 검증은 아닙니다.',
       },
     },
+  },
+};
+export const AudioPausedAfterFailures: Story = {
+  parameters: {
+    pausedAfterFailures: true,
+    docs: {
+      description: {
+        story:
+          '엔진이 짧은 시간에 여러 번 비정상 종료되어 스스로 일시정지한 상태입니다. 같은 그래프로 계속 실패하지 않도록 재개 전까지 오디오를 멈추고, 경고(status)로 이유를 알립니다.',
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByText(i18n.t('audioSession.pausedAfterFailures'))).toBeVisible();
+    await expect(
+      canvas.getByRole('button', { name: i18n.t('audioSession.resume') }),
+    ).toHaveAttribute('aria-pressed', 'true');
   },
 };
 export const AudioPauseNotSaved: Story = {

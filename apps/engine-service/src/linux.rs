@@ -90,6 +90,29 @@ pub(super) fn run(owner: Option<mixrelay_engine_process::EngineOwner>) -> Result
     let service = runtime
         .block_on(ControlService::bind())
         .map_err(|error| error.to_string())?;
+    // Stops are caught before anything can fail, and the crash guard covers the whole run.
+    let signals = runtime
+        .block_on(async { mixrelay_engine_service::session::ShutdownSignals::register() })
+        .map_err(|error| format!("could not observe shutdown requests: {error}"))?;
+    let (guard, tripped) = mixrelay_engine_service::crash_guard::CrashGuard::arm(
+        mixrelay_engine_service::config_directory(),
+    );
+    let result = run_bound(&runtime, service, owner, signals, tripped);
+    if result.is_ok()
+        && let Some(guard) = guard
+    {
+        guard.finish();
+    }
+    result
+}
+
+fn run_bound(
+    runtime: &tokio::runtime::Runtime,
+    service: ControlService,
+    owner: Option<mixrelay_engine_process::EngineOwner>,
+    signals: mixrelay_engine_service::session::ShutdownSignals,
+    repeated_failures: bool,
+) -> Result<(), String> {
     let mut runtime_status = AdapterRuntimeStatus::new(adapter_profile())
         .with_graph_format_control()
         .with_observed_rate_following(format::observed_endpoint_rate);
@@ -104,7 +127,7 @@ pub(super) fn run(owner: Option<mixrelay_engine_process::EngineOwner>) -> Result
     let processor =
         create_initial_processor(&initial_document, Arc::clone(&meters), initial_format)?;
     let exchange = Arc::new(ProcessorExchange::new(processor.plan().revision()));
-    let _latency = crate::latency_maintenance::Observer::start(&exchange, processor.plan())?;
+    let latency = crate::latency_maintenance::Observer::start(&exchange, processor.plan())?;
     let controller = Arc::new(
         EngineGraphController::new_with_initial_document(
             Arc::clone(&exchange),
@@ -120,11 +143,12 @@ pub(super) fn run(owner: Option<mixrelay_engine_process::EngineOwner>) -> Result
             },
             initial_document,
         )
+        .after_repeated_failures(repeated_failures)
         .with_graph_catalog(),
     );
 
-    let _reclaimer = spawn_reclaimers(&exchange, &endpoint_backend)?;
-    let _recovery = spawn_device_recovery(&endpoint_backend, &exchange)?;
+    let reclaimer = spawn_reclaimers(&exchange, &endpoint_backend)?;
+    let recovery = spawn_device_recovery(&endpoint_backend, &exchange)?;
     let worker_status = runtime_status.clone();
     let audio_thread = thread::Builder::new()
         .name("mixrelay-pipewire-audio".to_owned())
@@ -132,25 +156,28 @@ pub(super) fn run(owner: Option<mixrelay_engine_process::EngineOwner>) -> Result
             run_audio_worker(processor, exchange, &endpoint_backend, &worker_status);
         })
         .map_err(|error| format!("could not start PipeWire audio worker: {error}"))?;
-    let _worker = mixrelay_engine_service::session::AudioWorker::new(runtime_status, audio_thread);
+    let worker = mixrelay_engine_service::session::AudioWorker::new(runtime_status, audio_thread);
     let format_monitor = format::Monitor::start(&controller)?;
     let maintenance = controller.start_control_maintenance()?;
 
     let result = runtime
         .block_on(service.serve(
             controller,
-            mixrelay_engine_process::shutdown(
-                owner,
-                mixrelay_engine_service::session::shutdown_signal(),
-            ),
+            mixrelay_engine_process::shutdown(owner, signals.requested()),
             || {
                 format_monitor.stop_observing();
                 maintenance.stop_observing();
             },
         ))
         .map_err(|error| error.to_string());
-    drop(format_monitor);
-    result.and(maintenance.finish())
+    // Every owner has finished before the run counts as a clean exit.
+    result
+        .and(format_monitor.finish())
+        .and(maintenance.finish())
+        .and(worker.finish())
+        .and(recovery.finish())
+        .and(reclaimer.finish())
+        .and(latency.finish())
 }
 
 fn create_initial_processor(
@@ -209,11 +236,25 @@ struct DeviceRecoveryWorker {
     stopping: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
 }
+impl DeviceRecoveryWorker {
+    /// Stops and joins the worker; a panic means the service did not stop cleanly.
+    fn finish(mut self) -> Result<(), String> {
+        self.stop_and_join()
+    }
+
+    fn stop_and_join(&mut self) -> Result<(), String> {
+        self.stopping.store(true, Ordering::Release);
+        self.worker.take().map_or(Ok(()), |worker| {
+            worker
+                .join()
+                .map_err(|_| "MixRelay device recovery worker panicked".to_owned())
+        })
+    }
+}
 impl Drop for DeviceRecoveryWorker {
     fn drop(&mut self) {
-        self.stopping.store(true, Ordering::Release);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
+        if let Err(error) = self.stop_and_join() {
+            tracing::error!(%error);
         }
     }
 }
