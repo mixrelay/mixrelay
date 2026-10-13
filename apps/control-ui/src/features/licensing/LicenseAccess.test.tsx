@@ -113,8 +113,12 @@ it('retains running controls on lease expiry, clock rollback and storage errors'
   await act(async () => vi.advanceTimersByTimeAsync(120_000));
   expect(screen.getByText('Live controls')).toBeInTheDocument();
   expect(screen.getByRole('alert')).toHaveTextContent('License storage is unavailable');
-  await act(async () => vi.advanceTimersByTimeAsync(120_000));
   expect(native.getStatus).toHaveBeenCalledTimes(4);
+  // A failed check is retried soon instead of waiting for the next regular check.
+  await act(async () => vi.advanceTimersByTimeAsync(2_000));
+  expect(native.getStatus).toHaveBeenCalledTimes(5);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(paid).toHaveBeenLastCalledWith(true);
 });
 
 it('offers clock correction without disabling free audio', async () => {
@@ -140,14 +144,24 @@ it('keeps license limits available without mixing legal information into authent
 });
 
 it('hides raw failures, supports explicit retry and guards pending license actions', async () => {
+  vi.useFakeTimers();
   const native = port();
-  vi.mocked(native.getStatus).mockRejectedValueOnce(new Error('secret-key'));
+  vi.mocked(native.getStatus)
+    .mockRejectedValueOnce(new Error('secret-key'))
+    .mockRejectedValueOnce(new Error('secret-key'))
+    .mockRejectedValueOnce(new Error('secret-key'));
   view(native);
-  expect(await screen.findByRole('alert')).toHaveTextContent('Could not check the license');
+  await act(async () => Promise.resolve());
+  // An unreached check (the runtime may still be starting) is retried before it is shown.
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  await act(async () => vi.advanceTimersByTimeAsync(6_000));
+  expect(native.getStatus).toHaveBeenCalledTimes(3);
+  expect(screen.getByRole('alert')).toHaveTextContent('Could not check the license');
   expect(screen.queryByText('secret-key')).not.toBeInTheDocument();
+  vi.useRealTimers();
   const dialog = await open();
   fireEvent.click(dialog.getByRole('button', { name: 'Check again' }));
-  await waitFor(() => expect(native.getStatus).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(native.getStatus).toHaveBeenCalledTimes(4));
   expect(screen.getByText('Live controls')).toBeInTheDocument();
 });
 

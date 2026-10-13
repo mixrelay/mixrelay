@@ -63,6 +63,82 @@ describe('useLicenseSession without a native port', () => {
   });
 });
 
+describe('useLicenseSession retries', () => {
+  it('resets the failure count when a manual check succeeds', async () => {
+    vi.useFakeTimers();
+    const unreached = new Error('background controller unavailable');
+    const getStatus = vi
+      .fn()
+      .mockRejectedValueOnce(unreached)
+      .mockRejectedValueOnce(unreached)
+      .mockRejectedValueOnce(unreached)
+      .mockResolvedValue(free);
+    const native = port(getStatus);
+    const { result } = renderHook(() => useLicenseSession(native));
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    expect(getStatus).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      expect(await result.current.run(() => Promise.resolve(free))).toBe(true);
+    });
+    // The next unreached check is the first of a new run: no error yet, retried in 2 s.
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(getStatus).toHaveBeenCalledTimes(3);
+    expect(result.current.status).toEqual(free);
+    expect(result.current.error).toBeNull();
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    expect(getStatus).toHaveBeenCalledTimes(4);
+  });
+
+  it('leaves the replacement session schedule alone when an old reconciliation settles', async () => {
+    vi.useFakeTimers();
+    const reconcile = deferred<LicensingStatus>();
+    const first = port(vi.fn().mockResolvedValueOnce(free).mockReturnValueOnce(reconcile.promise));
+    const second = port(vi.fn().mockResolvedValue(free));
+    const { result, rerender } = renderHook(({ value }) => useLicenseSession(value), {
+      initialProps: { value: first },
+    });
+    await act(async () => Promise.resolve());
+    let operation!: Promise<boolean>;
+    act(() => {
+      operation = result.current.run(() => Promise.reject<void>('rejected'));
+    });
+    await act(async () => Promise.resolve());
+    rerender({ value: second });
+    await act(async () => {
+      reconcile.reject(new Error('gone'));
+      expect(await operation).toBe(false);
+    });
+    // The replacement keeps its regular cadence: no early retry from the old session.
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(second.getStatus).toHaveBeenCalledTimes(1);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('keeps checking after a failed manual check supersedes a background retry', async () => {
+    vi.useFakeTimers();
+    const backgroundRetry = deferred<LicensingStatus>();
+    const getStatus = vi
+      .fn()
+      .mockRejectedValueOnce('storage_unavailable')
+      .mockReturnValueOnce(backgroundRetry.promise)
+      .mockResolvedValue(free);
+    const native = port(getStatus);
+    const { result } = renderHook(() => useLicenseSession(native));
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    expect(getStatus).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      expect(await result.current.run(() => Promise.reject<void>('request_failed'))).toBe(false);
+    });
+    await act(async () => backgroundRetry.resolve(free));
+    // The superseded retry is discarded, but checking resumes with backoff.
+    expect(result.current.status).toBeNull();
+    await act(async () => vi.advanceTimersByTimeAsync(4_000));
+    expect(getStatus).toHaveBeenCalledTimes(3);
+    expect(result.current.status).toEqual(free);
+    expect(result.current.error).toBeNull();
+  });
+});
+
 describe('useLicenseSession scheduling', () => {
   it('skips a timed read while an operation is busy and blocks duplicate operations', async () => {
     vi.useFakeTimers();

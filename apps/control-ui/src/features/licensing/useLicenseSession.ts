@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { type MutableRefObject, useEffect, useRef, useState } from 'react';
 
 import type { LicensingPort, LicensingStatus } from '../../core/licensing/LicensingPort';
 
@@ -23,8 +23,84 @@ function errorCode(error: unknown): LicenseErrorCode {
   return errorCodes.find((code) => code === message) ?? 'unknown';
 }
 
+/** A failed background check is retried with backoff (2 s, 4 s, ... up to the regular
+ * check interval). A failure without a license error code means the check did not reach
+ * the license service (the runtime is still starting or restarting), so it is shown
+ * only once it persists. */
+const CHECK_INTERVAL_MS = 60_000;
+const UNREACHED_GRACE_FAILURES = 3;
+
+function retryDelay(failures: number): number {
+  return Math.min(CHECK_INTERVAL_MS, 2_000 * 2 ** (failures - 1));
+}
+
 function needsLocalReconciliation(code: LicenseErrorCode): boolean {
   return code === 'rejected' || code === 'wrong_product' || code === 'storage_unavailable';
+}
+
+interface SessionRefs {
+  busy: MutableRefObject<boolean>;
+  generation: MutableRefObject<number>;
+  operationVersion: MutableRefObject<number>;
+  failures: MutableRefObject<number>;
+  schedule: MutableRefObject<(delay?: number) => void>;
+}
+
+/** Runs one port's background checks until the returned cleanup; an operation that began
+ * after a check was sent makes that check's result stale. */
+function startChecks(
+  port: LicensingPort,
+  refs: SessionRefs,
+  {
+    setStatus,
+    setError,
+  }: {
+    setStatus: (status: LicensingStatus | null) => void;
+    setError: (error: LicenseErrorCode | null) => void;
+  },
+): () => void {
+  const current = ++refs.generation.current;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  refs.failures.current = 0;
+  const schedule = (delay = CHECK_INTERVAL_MS) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(check, delay);
+  };
+  const check = () => {
+    if (refs.busy.current) {
+      schedule();
+      return;
+    }
+    const version = refs.operationVersion.current;
+    const stale = () =>
+      refs.generation.current !== current || refs.operationVersion.current !== version;
+    void port.getStatus().then(
+      (next) => {
+        if (stale()) return;
+        refs.failures.current = 0;
+        setStatus(next);
+        setError(null);
+        schedule();
+      },
+      (failure: unknown) => {
+        if (stale()) return;
+        refs.failures.current += 1;
+        const code = errorCode(failure);
+        if (code !== 'unknown' || refs.failures.current >= UNREACHED_GRACE_FAILURES) {
+          setStatus(null);
+          setError(code);
+        }
+        schedule(retryDelay(refs.failures.current));
+      },
+    );
+  };
+  refs.schedule.current = schedule;
+  check();
+  return () => {
+    refs.generation.current++;
+    if (timer) clearTimeout(timer);
+    refs.schedule.current = () => {};
+  };
 }
 
 export function useLicenseSession(port: LicensingPort | null) {
@@ -34,60 +110,36 @@ export function useLicenseSession(port: LicensingPort | null) {
   const busyRef = useRef(false);
   const generation = useRef(0);
   const operationVersion = useRef(0);
-  const scheduleRef = useRef<() => void>(() => {});
+  const scheduleRef = useRef<(delay?: number) => void>(() => {});
+  // Consecutive failed checks, background or manual; any accepted status resets it.
+  const failures = useRef(0);
 
   useEffect(() => {
     if (!port) return;
-    const current = ++generation.current;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const schedule = () => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(check, 60_000);
-    };
-    const check = () => {
-      if (busyRef.current) {
-        schedule();
-        return;
-      }
-      const version = operationVersion.current;
-      void port.getStatus().then(
-        (next) => {
-          if (generation.current !== current || operationVersion.current !== version) return;
-          setStatus(next);
-          setError(null);
-          schedule();
-        },
-        (failure: unknown) => {
-          if (generation.current !== current || operationVersion.current !== version) return;
-          setStatus(null);
-          setError(errorCode(failure));
-        },
-      );
-    };
-    scheduleRef.current = schedule;
     busyRef.current = false;
     setBusy(false);
     setStatus(null);
     setError(null);
-    check();
-    return () => {
-      generation.current++;
-      if (timer) clearTimeout(timer);
-      scheduleRef.current = () => {};
-    };
+    return startChecks(
+      port,
+      { busy: busyRef, generation, operationVersion, failures, schedule: scheduleRef },
+      { setStatus, setError },
+    );
   }, [port]);
 
+  /** Returns whether a reconciled status was accepted. */
   async function reconcileStateError(code: LicenseErrorCode, current: number) {
-    if (!port || !needsLocalReconciliation(code)) return;
+    if (!port || !needsLocalReconciliation(code)) return false;
     setStatus(null);
     try {
       const latest = await port.getStatus();
-      if (generation.current === current) {
-        setStatus(latest);
-        scheduleRef.current();
-      }
+      if (generation.current !== current) return false;
+      failures.current = 0;
+      setStatus(latest);
+      return true;
     } catch (statusFailure) {
       if (generation.current === current) setError(errorCode(statusFailure));
+      return false;
     }
   }
 
@@ -95,8 +147,19 @@ export function useLicenseSession(port: LicensingPort | null) {
     if (generation.current !== current) return;
     const code = errorCode(failure);
     setError(code);
-    await reconcileStateError(code, current);
-    if (status && !needsLocalReconciliation(code)) scheduleRef.current();
+    const reconciled = await reconcileStateError(code, current);
+    // The port may have changed while reconciling; its new session owns scheduling.
+    if (generation.current !== current) return;
+    if (reconciled) {
+      scheduleRef.current();
+      return;
+    }
+    // A failed operation may have superseded a background check; checking must continue.
+    // A known status keeps the regular cadence; without one, retry with backoff.
+    failures.current += 1;
+    scheduleRef.current(
+      status && !needsLocalReconciliation(code) ? undefined : retryDelay(failures.current),
+    );
   }
 
   async function run(action: () => Promise<LicensingStatus> | Promise<void>): Promise<boolean> {
@@ -109,7 +172,10 @@ export function useLicenseSession(port: LicensingPort | null) {
     try {
       const next = await action();
       if (generation.current !== current) return false;
-      if (next) setStatus(next);
+      if (next) {
+        failures.current = 0;
+        setStatus(next);
+      }
       scheduleRef.current();
       return true;
     } catch (failure) {
