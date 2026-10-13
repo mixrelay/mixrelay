@@ -131,7 +131,7 @@ pub(crate) fn spawn_controller(executable: &std::path::Path) -> std::io::Result<
         && executable
             == std::path::Path::new("/Applications/MixRelay.app/Contents/MacOS/mixrelay-desktop")
     {
-        retire_background_agent()?;
+        retire_or_confirm_absent()?;
         let launcher = std::env::current_exe()?
             .parent()
             .and_then(std::path::Path::parent)
@@ -176,6 +176,33 @@ fn spawn_reaped_controller(
             }
         })?;
     Ok(ControllerLaunch { exited })
+}
+
+/// Removing the agent registration left by earlier builds is cleanup, not a precondition:
+/// a failed unregister once kept every Reconnect from starting the runtime. Starting
+/// directly is safe only when launchd holds no such job for this user, since a loaded
+/// job could relaunch the runtime after Quit releases its lease.
+#[cfg(target_os = "macos")]
+fn retire_or_confirm_absent() -> std::io::Result<()> {
+    let Err(error) = retire_background_agent() else {
+        return Ok(());
+    };
+    // The session owner, as the editor's own control connection resolves it.
+    let home = std::env::var_os("HOME").ok_or_else(|| std::io::Error::other("HOME is unset"))?;
+    let uid = std::os::unix::fs::MetadataExt::uid(&std::fs::metadata(home)?);
+    let target = format!("gui/{uid}/io.mixrelay.driver.runtime");
+    let loaded = std::process::Command::new("/bin/launchctl")
+        .args(["print", &target])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?
+        .success();
+    if loaded {
+        tracing::error!(%error, "previous background agent is still loaded and could not be retired");
+        return Err(error);
+    }
+    tracing::warn!(%error, "previous background agent cleanup failed; none is loaded, starting directly");
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]

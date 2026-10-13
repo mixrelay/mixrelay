@@ -66,18 +66,25 @@ pub(crate) async fn runtime_connect(app: tauri::AppHandle) -> Result<RuntimeStat
     let connection = app.state::<Connection>();
     let status = readiness(&connection).await;
     if status != RuntimeStatus::Unavailable {
+        tracing::info!(?status, "Driver runtime already answering");
         publish_readiness(&app, status);
         return Ok(status);
     }
     publish_readiness(&app, status);
     let executable = driver_executable();
     if !executable.is_file() {
+        tracing::warn!(path = %executable.display(), "Driver runtime is not installed");
         return Ok(RuntimeStatus::NotInstalled);
     }
     #[cfg(target_os = "macos")]
     if !tauri::is_dev() {
         let version = installed_runtime_version().await;
         if !version.as_deref().is_some_and(supported_version) {
+            tracing::warn!(
+                expected = env!("CARGO_PKG_VERSION"),
+                installed = version.as_deref().unwrap_or("unreadable"),
+                "installed Driver runtime version is not supported"
+            );
             return Ok(RuntimeStatus::Incompatible);
         }
     }
@@ -87,7 +94,11 @@ pub(crate) async fn runtime_connect(app: tauri::AppHandle) -> Result<RuntimeStat
         START_TIMEOUT,
         controller_admission_available,
     )
-    .await?;
+    .await
+    .inspect_err(|error| tracing::error!(%error, "Driver runtime could not be started"))?;
+    if status != RuntimeStatus::Ready {
+        tracing::warn!(?status, "Driver runtime did not become ready");
+    }
     publish_readiness(&app, status);
     Ok(status)
 }

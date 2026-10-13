@@ -8,6 +8,7 @@ mod diagnostics;
 mod driver_control;
 mod driver_manager;
 mod licensing;
+mod logging;
 mod native_text;
 mod processor_dialog;
 mod recording_dialog;
@@ -179,6 +180,16 @@ fn main() {
     handle_license_maintenance();
     let mut context = tauri::generate_context!();
     let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    logging::init(
+        if arguments
+            .iter()
+            .any(|argument| argument == "--driver-runtime")
+        {
+            "driver-runtime"
+        } else {
+            "desktop"
+        },
+    );
     if arguments
         .iter()
         .any(|argument| argument == "--background-service")
