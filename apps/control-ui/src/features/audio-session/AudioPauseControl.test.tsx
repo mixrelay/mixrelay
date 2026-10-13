@@ -90,6 +90,47 @@ it('shows failure without inventing an off state', async () => {
   expect(screen.getByRole('button', { name: 'Pause' })).toHaveAttribute('aria-pressed', 'false');
 });
 
+it('warns while the service reports the state unsaved and clears when its retry saves it', async () => {
+  await i18n.changeLanguage('en');
+  const port = fixture();
+  const running = {
+    ...(await port.getStatus()),
+    enginePower: { enabled: true, transitioning: false },
+  };
+  const graph = await port.getGraph();
+  const controlPort = Object.assign(port, {
+    setEnginePower: vi.fn().mockResolvedValue({ revision: graph.revision }),
+  });
+  vi.spyOn(port, 'getStatus').mockResolvedValue({
+    ...running,
+    enginePower: { enabled: false, transitioning: false, unsaved: true },
+  });
+  const onApplied = vi.fn();
+  const view = (status: MixRelayStatus) => (
+    <MixRelayProvider>
+      <I18nextProvider i18n={i18n}>
+        <AudioPauseControl
+          controlPort={controlPort}
+          status={status}
+          onApplied={onApplied}
+          onBusyChange={vi.fn()}
+        />
+      </I18nextProvider>
+    </MixRelayProvider>
+  );
+  const { rerender } = render(view(running));
+  fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+  await waitFor(() => expect(onApplied).toHaveBeenCalledWith(graph));
+  // The change stands; only its durability is in doubt, so this is not an alert.
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'This change was applied but could not be saved',
+  );
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Resume' })).toHaveAttribute('aria-pressed', 'true');
+  rerender(view({ ...running, enginePower: { enabled: false, transitioning: false } }));
+  expect(screen.queryByRole('status')).toBeNull();
+});
+
 it('follows Driver menu changes without sending another toggle', async () => {
   await i18n.changeLanguage('en');
   const port = fixture();

@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{
     collections::BTreeSet,
     ffi::{CStr, CString, c_char, c_void},
@@ -766,6 +766,8 @@ pub(crate) struct ApplicationCaptureState {
     owners: Mutex<capture_transaction::CaptureOwners<ApplicationAudioSession>>,
     backend: MacApplicationCaptureBackend,
     pub(crate) monitor_active: AtomicBool,
+    /// Counts engines; observations taken before a release describe the lost engine.
+    engine_generation: AtomicU64,
 }
 
 impl ApplicationCaptureState {
@@ -886,6 +888,25 @@ impl ApplicationCaptureState {
         // Destruction joins native pump workers only on this blocking control thread.
         drop(retired);
         Ok(())
+    }
+
+    /// Drops every owner once the engine is lost: their transports map that engine's
+    /// memory, and its successor publishes its own revisions. Joins pump workers, so
+    /// call it on a blocking thread.
+    pub(crate) fn release_all(&self) -> Result<(), String> {
+        let mut owners = self
+            .owners
+            .lock()
+            .map_err(|_| "application capture state is poisoned".to_owned())?;
+        self.engine_generation.fetch_add(1, Ordering::AcqRel);
+        let released = std::mem::take(&mut *owners);
+        drop(owners);
+        drop(released);
+        Ok(())
+    }
+
+    pub(crate) fn engine_generation(&self) -> u64 {
+        self.engine_generation.load(Ordering::Acquire)
     }
 
     pub(crate) fn has_pending(&self) -> Result<bool, String> {

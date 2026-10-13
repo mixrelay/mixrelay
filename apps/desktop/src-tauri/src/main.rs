@@ -79,8 +79,14 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     #[cfg(target_os = "macos")]
     native_termination::observe_background_stop(app.handle())?;
     background::restore_driver(app.handle());
-    // The controller restores capture ownership even when no editor is open.
-    let controller = app.handle().clone();
+    restore_captures(app.handle());
+    Ok(())
+}
+
+/// The controller restores capture ownership even when no editor is open, at startup and
+/// after a lost engine is replaced.
+pub(crate) fn restore_captures(app: &tauri::AppHandle) {
+    let controller = app.clone();
     tauri::async_runtime::spawn(async move {
         for _ in 0..30 {
             if background::dispatch(
@@ -96,7 +102,6 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     });
-    Ok(())
 }
 
 /// Free audio remains available independently of paid entitlement.
@@ -119,18 +124,13 @@ fn start_audio(app: &tauri::AppHandle) -> Result<(), String> {
         .try_state::<engine_lifecycle::EngineLifecycle>()
         .is_some()
     {
+        // The macOS runtime is admitted before its event loop; watch it once here.
+        #[cfg(target_os = "macos")]
+        engine_lifecycle::monitor(app);
         return Ok(());
     }
-    let lifecycle = engine_lifecycle::EngineLifecycle::start()?;
-    #[cfg(target_os = "linux")]
-    {
-        app.manage(lifecycle);
-        engine_lifecycle::monitor(app);
-    }
-    #[cfg(target_os = "macos")]
-    {
-        app.manage(lifecycle);
-    }
+    app.manage(engine_lifecycle::EngineLifecycle::start()?);
+    engine_lifecycle::monitor(app);
     Ok(())
 }
 

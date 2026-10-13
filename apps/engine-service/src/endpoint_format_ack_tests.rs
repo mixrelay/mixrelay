@@ -229,7 +229,7 @@ fn add_shared_reference(controller: &EngineGraphController) {
             GraphLayoutRequest {
                 expected_layout_revision: 0,
                 layout: GraphLayout {
-                    node_labels: Default::default(),
+                    node_labels: std::collections::BTreeMap::default(),
                     positions: [(
                         DEFAULT_ENDPOINT_NODE_ID.into(),
                         GraphNodePosition { x: 12.0, y: 34.0 },

@@ -763,8 +763,7 @@ export function changeProcessorLayout(
   const selected = model.nodes.find((node) => node.id === nodeId);
   const config = selected?.runtime?.config as ProviderNodeConfig | undefined;
   if (
-    !selected ||
-    selected.runtime?.type !== 'provider' ||
+    selected?.runtime?.type !== 'provider' ||
     config?.typeId !== processor.typeId ||
     config.ports?.layoutId === ports.layoutId
   )

@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { expect, userEvent, within } from 'storybook/test';
 import { builtinEffectsFixture } from '../../.storybook/fixtures/builtinEffects';
 import quickTimeIcon from '../core/audio-graph/fixtures/quicktime-player.png';
 import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
@@ -8,6 +9,7 @@ import type {
   RuntimeGraphDocument,
 } from '../core/control-port/types';
 import { ControlPortError } from '../core/control-port/types';
+import { i18n } from '../core/i18n';
 import type { LicensingPort } from '../core/licensing/LicensingPort';
 import { readyDriver } from '../features/driver-status/driverFixtures';
 import { App } from './App';
@@ -185,7 +187,11 @@ async function workspaceFixture({ parameters }: { parameters: Record<string, unk
       };
     },
     setEnginePower: async (enabled: boolean) => {
-      state.status.enginePower = { enabled, transitioning: false };
+      state.status.enginePower = {
+        enabled,
+        transitioning: false,
+        unsaved: Boolean(parameters.pauseNotSaved),
+      };
       return {
         protocolVersion: 1 as const,
         revision: state.graph.revision,
@@ -322,6 +328,33 @@ export const AudioPaused: Story = {
           '실행부의 확인된 enginePower.enabled=false를 실제 App이 표시합니다. 노드 Off·Mute·개별 녹음 Pause와 별개입니다. 실제 오디오 중지·재개 검증은 아닙니다.',
       },
     },
+  },
+};
+export const AudioPauseNotSaved: Story = {
+  parameters: {
+    pauseNotSaved: true,
+    docs: {
+      description: {
+        story:
+          '일시정지는 적용됐지만 서비스가 다음 시작을 위해 저장하지 못한 경우입니다. 변경은 유지되므로 경고(status)로 알리고, 실패(alert)로 표시하지 않습니다.',
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      await canvas.findByRole('button', { name: i18n.t('audioSession.pause') }),
+    );
+    // The control waits for the service to confirm the change before reporting it.
+    const notice = await canvas.findByText(
+      i18n.t('audioSession.pauseNotSaved'),
+      {},
+      { timeout: 10000 },
+    );
+    await expect(notice).toBeVisible();
+    await expect(
+      canvas.getByRole('button', { name: i18n.t('audioSession.resume') }),
+    ).toHaveAttribute('aria-pressed', 'true');
   },
 };
 export const LongGraphList: Story = { parameters: { longGraphList: true } };

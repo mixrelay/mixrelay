@@ -371,6 +371,9 @@ async fn observe_ack(
     client: &ControlProxyClient,
     weak: &Weak<ApplicationCaptureState>,
 ) -> Result<(), String> {
+    let Some(generation) = weak.upgrade().map(|captures| captures.engine_generation()) else {
+        return Ok(());
+    };
     let response = tokio::time::timeout(
         Duration::from_secs(10),
         client.request(Method::GET, "/api/v1/graph/status", None),
@@ -383,7 +386,11 @@ async fn observe_ack(
     let status: GraphRuntimeStatus = serde_json::from_value(response.body)
         .map_err(|error| format!("invalid capture acknowledgement: {error}"))?;
     let _guard = client.capture_gate.lock().await;
-    let Some(captures) = weak.upgrade() else {
+    // A status read before the engine was lost cannot acknowledge its successor's captures.
+    let Some(captures) = weak
+        .upgrade()
+        .filter(|captures| captures.engine_generation() == generation)
+    else {
         return Ok(());
     };
     if captures.requires_manifest(status.submitted_revision)? {

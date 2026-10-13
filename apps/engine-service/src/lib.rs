@@ -452,6 +452,8 @@ enum PrepareProcessorError {
 pub struct EngineGraphController {
     paid_access: Arc<dyn Fn() -> bool + Send + Sync>,
     execution_enabled: std::sync::atomic::AtomicBool,
+    /// Marks a pause that must outlive the service; set with the durable catalog.
+    saved_pause: Option<std::path::PathBuf>,
     suspended_recorders: Mutex<Vec<engine_power::SuspendedRecorder>>,
     recorder_cleanup_error: Mutex<Option<String>>,
     node_control_warning: Mutex<Option<String>>,
@@ -465,6 +467,8 @@ pub struct EngineGraphController {
     verified_catalog_state_refs:
         Mutex<std::collections::BTreeSet<mixrelay_processor_state::StateRef>>,
     catalog_write_error: Mutex<Option<String>>,
+    /// Kept apart from catalog saves, which clear their own warning on success.
+    pause_save_warning: Mutex<Option<String>>,
     catalog_restore: Mutex<Option<graph_catalog::PendingRestore>>,
     required_endpoint_node_id: Option<NodeId>,
     endpoint_backend: Arc<dyn VirtualEndpointBackend>,
@@ -586,6 +590,7 @@ impl EngineGraphController {
             recorder_cleanup_error: Mutex::new(None),
             node_control_warning: Mutex::new(None),
             execution_enabled: std::sync::atomic::AtomicBool::new(true),
+            saved_pause: None,
             suspended_recorders: Mutex::new(Vec::new()),
             recorders: recorders.clone(),
             exchange,
@@ -608,6 +613,7 @@ impl EngineGraphController {
             catalog: Mutex::new(None),
             verified_catalog_state_refs: Mutex::new(std::collections::BTreeSet::new()),
             catalog_write_error: Mutex::new(None),
+            pause_save_warning: Mutex::new(None),
             catalog_restore: Mutex::new(None),
             required_endpoint_node_id,
             endpoint_backend,
@@ -1172,7 +1178,9 @@ impl EngineGraphController {
         persist_processor_parameter(provider, parameter_id, value);
         let document = graph.clone();
         drop(graph);
-        let persistence_error = self.persist_parameter_document(&document);
+        let persistence_error = self
+            .persist_parameter_document(&document)
+            .or_else(|| self.pause_save_warning.lock().clone());
         Ok(ProcessorParameterUpdateResponse {
             protocol_version: PROTOCOL_VERSION,
             node_id: node_id.to_owned(),
@@ -1548,7 +1556,7 @@ impl EngineGraphController {
             protocol_version: PROTOCOL_VERSION,
             revision,
             state: GraphApplyState::Pending,
-            persistence_error: self.catalog_write_error.lock().clone(),
+            persistence_error: self.graph_persistence_warning(),
         })
     }
 
@@ -1610,7 +1618,7 @@ impl EngineGraphController {
             protocol_version: PROTOCOL_VERSION,
             revision,
             state: GraphApplyState::Active,
-            persistence_error: self.catalog_write_error.lock().clone(),
+            persistence_error: self.graph_persistence_warning(),
         })
     }
 

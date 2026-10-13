@@ -86,6 +86,7 @@ pub(super) fn power(app: &tauri::AppHandle, state: &MenuState) -> Option<EngineP
             .map(|snapshot| EnginePowerStatus {
                 enabled: !snapshot.settings.devices.is_empty(),
                 transitioning: state.busy,
+                unsaved: false,
             })
     }
 }

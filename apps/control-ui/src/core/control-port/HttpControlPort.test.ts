@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { HttpControlPort } from './HttpControlPort';
 import { ControlPortError, type RuntimeGraphDocument } from './types';
 
+/** Reads carry a deadline; mutations (asserted with their exact init) carry none. */
+const read = { signal: expect.any(AbortSignal) };
 const graph: RuntimeGraphDocument = { edges: [], nodes: [], revision: 2, schemaVersion: 2 };
 
 it('targets a Driver device buffer with both graph and observed buffer fences', async () => {
@@ -134,7 +136,7 @@ describe('HttpControlPort', () => {
     expect(request).toHaveBeenNthCalledWith(
       1,
       'http://control/api/v1/graphs/graph%2Fa/recorders/record%2Fb',
-      undefined,
+      read,
     );
     expect(request).toHaveBeenNthCalledWith(
       2,
@@ -167,7 +169,7 @@ describe('HttpControlPort', () => {
     expect(request).toHaveBeenNthCalledWith(
       1,
       'http://control/api/v1/graphs/graph%2F1/layout',
-      undefined,
+      read,
     );
     expect(request).toHaveBeenNthCalledWith(2, 'http://control/api/v1/graphs/graph%2F1/layout', {
       method: 'PUT',
@@ -189,7 +191,7 @@ describe('HttpControlPort graph operations', () => {
       expectedCatalogRevision: 1,
     };
     await port.mutateGraphCatalog(mutation);
-    expect(request).toHaveBeenNthCalledWith(1, 'http://control/api/v1/graphs', undefined);
+    expect(request).toHaveBeenNthCalledWith(1, 'http://control/api/v1/graphs', read);
     expect(request).toHaveBeenNthCalledWith(2, 'http://control/api/v1/graphs', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -229,7 +231,7 @@ describe('HttpControlPort graph operations', () => {
     await expect(port.setProcessorEditor('vst/node', true, 3)).resolves.toMatchObject({
       state: 'opening',
     });
-    expect(request).toHaveBeenNthCalledWith(1, 'http://control/api/v1/status', undefined);
+    expect(request).toHaveBeenNthCalledWith(1, 'http://control/api/v1/status', read);
     expect(request).toHaveBeenNthCalledWith(4, 'http://control/api/v1/graph', {
       body: JSON.stringify({ ...graph, revision: 3 }),
       headers: { 'content-type': 'application/json' },
@@ -247,7 +249,7 @@ describe('HttpControlPort graph operations', () => {
     expect(request).toHaveBeenNthCalledWith(
       7,
       'http://control/api/v1/processors/vst%2Fnode/editor',
-      undefined,
+      read,
     );
     expect(request).toHaveBeenNthCalledWith(
       8,
@@ -452,7 +454,7 @@ describe('HttpControlPort native-independent controls', () => {
     const mutation = { expectedRevision: 7, gainDb: -12, enabled: false, muted: true };
     await port.updateNodeControl('graph/a', 'app/b', mutation);
     expect(request.mock.calls).toEqual([
-      ['http://control/api/v1/graphs/graph%2Fa/nodes/controls', undefined],
+      ['http://control/api/v1/graphs/graph%2Fa/nodes/controls', read],
       [
         'http://control/api/v1/graphs/graph%2Fa/nodes/app%2Fb/control',
         {
@@ -471,7 +473,7 @@ describe('HttpControlPort native-independent controls', () => {
     await expect(port.getMeters()).resolves.toEqual(meters);
     const settings = { expectedRevision: 7, format: { sampleRate: 96000, blockFrames: 256 } };
     await port.reconfigureSession(settings);
-    expect(request).toHaveBeenNthCalledWith(1, 'http://control/api/v1/meters', undefined);
+    expect(request).toHaveBeenNthCalledWith(1, 'http://control/api/v1/meters', read);
     expect(request).toHaveBeenNthCalledWith(2, 'http://control/api/v1/audio/session', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -501,7 +503,7 @@ describe('HttpControlPort native-independent controls', () => {
     expect(request).toHaveBeenNthCalledWith(
       2,
       'http://control/api/v1/processors/fx%2Fa/editor/frame',
-      undefined,
+      read,
     );
     expect(request).toHaveBeenNthCalledWith(
       3,

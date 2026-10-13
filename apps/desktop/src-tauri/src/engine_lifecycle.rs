@@ -22,6 +22,7 @@ pub(crate) struct EngineLifecycle {
     finished: AtomicBool,
     driver_transition: tokio::sync::Mutex<()>,
     driver_start_cancelled: AtomicBool,
+    watching: AtomicBool,
 }
 
 struct ControllerOwner {
@@ -54,6 +55,7 @@ impl EngineLifecycle {
             finished: AtomicBool::new(false),
             driver_transition: tokio::sync::Mutex::const_new(()),
             driver_start_cancelled: AtomicBool::new(false),
+            watching: AtomicBool::new(false),
         })
     }
 
@@ -120,6 +122,129 @@ impl EngineLifecycle {
                 }
             }
         });
+    }
+}
+
+/// launchd starts the engine on demand but never restarts it (`KeepAlive` is false, so
+/// a stopped app cannot leave it running). While this controller owns audio, an engine
+/// that dies is woken again; it restores its saved graph and pause on start, and app
+/// captures bound to the lost engine are rebuilt for its successor.
+pub(crate) fn monitor(app: &tauri::AppHandle) {
+    if app
+        .state::<EngineLifecycle>()
+        .watching
+        .swap(true, Ordering::AcqRel)
+    {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut absence = Absence::default();
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let lifecycle = app.state::<EngineLifecycle>();
+            if lifecycle.finished.load(Ordering::Acquire) {
+                return;
+            }
+            if lifecycle.stopping() {
+                continue;
+            }
+            let owned = match is_owned(ENGINE_LEASE) {
+                Ok(owned) => owned,
+                Err(error) => {
+                    tracing::warn!(%error, "could not observe the audio engine");
+                    continue;
+                }
+            };
+            match absence.observe(owned) {
+                Watch::Running | Watch::Waiting => {}
+                Watch::Lost { unexpected } => {
+                    if unexpected {
+                        tracing::warn!("audio engine stopped unexpectedly; starting it again");
+                    }
+                    if let Err(error) =
+                        crate::control_proxy::release_lost_engine_captures(&app).await
+                    {
+                        tracing::error!(%error, "could not release captures of the lost engine");
+                    }
+                }
+                Watch::Wake => lifecycle.wake_engine(),
+                Watch::Recovered => {
+                    tracing::info!("audio engine is running; restoring app captures");
+                    crate::restore_captures(&app);
+                }
+            }
+        }
+    });
+}
+
+impl EngineLifecycle {
+    /// A stop request, even one whose shutdown failed and may be retried, means the
+    /// engine is no longer wanted.
+    fn stopping(&self) -> bool {
+        self.quitting.load(Ordering::Acquire) || self.driver_start_cancelled.load(Ordering::Acquire)
+    }
+
+    fn wake_engine(&self) {
+        let Ok(mut owner) = self.owner.lock() else {
+            return;
+        };
+        // Rechecked under the owner lock; a completed quit has already taken the owner.
+        let Some(owner) = owner.as_mut().filter(|_| !self.stopping()) else {
+            return;
+        };
+        match EngineWake::start() {
+            // The previous connection is cancelled only after the new request is queued.
+            Ok(wake) => owner.wake = Some(wake),
+            Err(error) => tracing::error!(%error, "could not start the audio engine again"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Watch {
+    Running,
+    /// The engine is absent; reported once per outage. Captures are released even
+    /// before the engine was first seen, since one may have died between checks.
+    Lost {
+        unexpected: bool,
+    },
+    Waiting,
+    Wake,
+    Recovered,
+}
+
+/// Wakes on every second absent check, so an engine still starting is left alone. An engine
+/// not yet seen running is not reported as an unexpected stop.
+#[derive(Default)]
+struct Absence {
+    checks: u8,
+    seen: bool,
+    lost: bool,
+}
+
+impl Absence {
+    fn observe(&mut self, owned: bool) -> Watch {
+        if owned {
+            self.checks = 0;
+            self.seen = true;
+            return if std::mem::take(&mut self.lost) {
+                Watch::Recovered
+            } else {
+                Watch::Running
+            };
+        }
+        self.checks += 1;
+        if !std::mem::replace(&mut self.lost, true) {
+            return Watch::Lost {
+                unexpected: self.seen,
+            };
+        }
+        if self.checks < 2 {
+            return Watch::Waiting;
+        }
+        self.checks = 0;
+        Watch::Wake
     }
 }
 
@@ -247,6 +372,7 @@ mod tests {
             finished: AtomicBool::new(false),
             driver_transition: tokio::sync::Mutex::const_new(()),
             driver_start_cancelled: AtomicBool::new(false),
+            watching: AtomicBool::new(false),
         };
         let in_flight = lifecycle.driver_transition.lock().await;
         let queued = lifecycle.restore_driver();
@@ -295,6 +421,35 @@ mod tests {
         )
         .await;
         assert_eq!(result, Err("lease inaccessible".into()));
+    }
+
+    #[test]
+    fn a_lost_engine_is_reported_once_woken_every_second_check_and_recovered() {
+        let mut absence = Absence::default();
+        let seen: Vec<_> = [
+            false, false, true, false, false, false, false, true, true, false, true,
+        ]
+        .into_iter()
+        .map(|owned| absence.observe(owned))
+        .collect();
+        assert_eq!(
+            seen,
+            [
+                // A slow first start is asked again but is not an unexpected stop.
+                Watch::Lost { unexpected: false },
+                Watch::Wake,
+                Watch::Recovered,
+                Watch::Lost { unexpected: true },
+                Watch::Wake,
+                Watch::Waiting,
+                Watch::Wake,
+                Watch::Recovered,
+                Watch::Running,
+                // An engine restarted by someone else still gets its captures rebuilt.
+                Watch::Lost { unexpected: true },
+                Watch::Recovered,
+            ]
+        );
     }
 
     #[test]

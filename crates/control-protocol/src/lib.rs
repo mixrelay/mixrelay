@@ -245,6 +245,9 @@ pub struct AppStatus {
 pub struct EnginePowerStatus {
     pub enabled: bool,
     pub transitioning: bool,
+    /// The service could not yet save this state for its next start; it keeps retrying.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unsaved: bool,
 }
 
 /// Idempotent execution command; never changes authored graphs or service installation.

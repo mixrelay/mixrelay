@@ -33,6 +33,9 @@ const OPERATION_RESULT_HEADER = 'X-MixRelay-Operation-Result';
 const OPERATION_POLL_INTERVAL_MS = 100;
 const OPERATION_POLL_TIMEOUT_MS = 5000;
 const OPERATION_ACK_TIMEOUT_MS = 1000;
+// Reads are safe to abandon; mutations are never cut short, so a sent edit is not reported
+// as failed while the engine may still apply it.
+const READ_TIMEOUT_MS = 5000;
 const MAX_OPERATION_ID_LENGTH = 128;
 
 export class HttpControlPort implements ControlPort {
@@ -238,7 +241,10 @@ export class HttpControlPort implements ControlPort {
     // Browser fetch is a Web IDL method, not an adapter method. Calling it with
     // this port as receiver throws before any HTTP request is sent in WebKit.
     const request = this.request;
-    const response = await request(`${this.origin}${path}`, init);
+    const response = await request(
+      `${this.origin}${path}`,
+      init ?? { signal: AbortSignal.timeout(READ_TIMEOUT_MS) },
+    );
     const body: unknown = await response.json();
     const operationId = pendingOperationId(response);
     if (operationId !== undefined) {

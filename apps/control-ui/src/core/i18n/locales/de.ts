@@ -179,6 +179,8 @@ export const de = {
     pause: 'Pausieren',
     changing: 'Audiostatus wird geändert…',
     pauseFailed: 'Pausieren oder Fortsetzen fehlgeschlagen. Prüfen Sie den aktuellen Zustand.',
+    pauseNotSaved:
+      'Übernommen, aber nicht gespeichert. Nach einem Neustart von MixRelay bleibt dies eventuell nicht erhalten.',
     diagnostics: 'Audiodetails',
     processingRate: 'Verarbeitungsabtastrate',
     processingBuffer: 'Verarbeitungspuffer',

@@ -1,6 +1,10 @@
 //! Execution is independent of authored documents and control-service lifetime.
 //! Empty publication uses the same acknowledged resource handoff as graph edits.
-use std::sync::atomic::Ordering;
+use std::{
+    io,
+    path::Path,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use mixrelay_control_protocol::{EnginePowerStatus, GraphApplyResponse, GraphApplyState};
 
@@ -24,7 +28,64 @@ fn recorder_request(action: RecorderAction) -> RecorderRequest {
     }
 }
 
+/// A pause outlives the service: a restarted or rebooted engine stays paused until
+/// Resume. Running is the default, so Resume removes the marker.
+const SAVED_PAUSE: &str = "engine-paused.json";
+
 impl EngineGraphController {
+    pub(super) fn restore_saved_pause(&mut self, catalog: &Path) {
+        let marker = catalog.with_file_name(SAVED_PAUSE);
+        if marker.exists() {
+            tracing::info!("engine stays paused from the previous session");
+            self.execution_enabled = AtomicBool::new(false);
+        }
+        self.saved_pause = Some(marker);
+    }
+
+    fn save_pause(&self, enabled: bool) -> io::Result<()> {
+        let Some(marker) = &self.saved_pause else {
+            return Ok(());
+        };
+        if !enabled {
+            return crate::persistence::stage_json(
+                marker,
+                &serde_json::json!({ "enabled": false }),
+            )
+            .and_then(crate::persistence::StagedWrite::commit);
+        }
+        match std::fs::remove_file(marker) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            removed => removed,
+        }
+    }
+
+    /// A failed save is reported with the other save warnings and retried by control
+    /// maintenance until storage accepts it.
+    fn persist_pause(&self, enabled: bool) {
+        let mut warning = self.pause_save_warning.lock();
+        match self.save_pause(enabled) {
+            Ok(()) if warning.take().is_some() => {
+                tracing::info!(enabled, "engine pause choice saved after retry");
+            }
+            Ok(()) => {}
+            Err(error) => {
+                if warning.is_none() {
+                    tracing::error!(%error, enabled, "engine pause choice was not saved");
+                }
+                *warning = Some(format!("engine pause: {error}"));
+            }
+        }
+    }
+
+    pub(super) fn retry_pause_save(&self) {
+        if self.pause_save_warning.lock().is_none() {
+            return;
+        }
+        // Serialized with power changes, so a retry cannot save a superseded choice.
+        let _mutation = self.mutation.lock();
+        self.persist_pause(self.execution_enabled.load(Ordering::Acquire));
+    }
+
     fn suspend_recorders(&self) -> Result<(), ProtocolError> {
         let mut held = self.suspended_recorders.lock();
         *held = self
@@ -107,6 +168,7 @@ impl EngineGraphController {
             enabled,
             transitioning: revisions.active != revisions.submitted
                 || (!enabled && !self.graph_resources.execution_released()),
+            unsaved: self.pause_save_warning.lock().is_some(),
         }
     }
 
@@ -129,7 +191,7 @@ impl EngineGraphController {
                 protocol_version: mixrelay_control_protocol::PROTOCOL_VERSION,
                 revision: revisions.submitted,
                 state: GraphApplyState::Pending,
-                persistence_error: self.catalog_write_error.lock().clone(),
+                persistence_error: self.graph_persistence_warning(),
             });
         }
         if revisions.active != revisions.submitted
@@ -154,7 +216,14 @@ impl EngineGraphController {
         }
         self.execution_enabled.store(enabled, Ordering::Release);
         let context = *self.context.read();
-        let result = self.publish_graph_context(document, catalog, context, enabled);
+        // The choice is saved once published, before recorder resume can fail.
+        let result = self
+            .publish_graph_context(document, catalog, context, enabled)
+            .map(|mut response| {
+                self.persist_pause(enabled);
+                response.persistence_error = self.graph_persistence_warning();
+                response
+            });
         if result.is_err() {
             self.execution_enabled.store(previous, Ordering::Release);
             if !enabled {
@@ -189,6 +258,95 @@ mod tests {
             "edges":[]
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_pause_outlives_the_service_until_resume() {
+        use crate::controller_test_support::settle;
+        let directory = mixrelay_test_support::FixtureDir::new("engine-saved-pause").unwrap();
+        let catalog = directory.join("graphs.json");
+        let marker = directory.join(SAVED_PAUSE);
+        let start = || {
+            crate::endpoint_settings_tests::controller(graph(1))
+                .with_graph_catalog_path(catalog.clone())
+        };
+        let engine = start();
+        assert!(engine.engine_power_status().enabled);
+        engine.change_engine_power(false, None).unwrap();
+        settle(&engine);
+        assert!(marker.is_file());
+        drop(engine);
+        let restarted = start();
+        assert!(!restarted.engine_power_status().enabled);
+        // The audio worker takes the restored graph before the user resumes.
+        settle(&restarted);
+        let resumed = restarted.change_engine_power(true, None).unwrap();
+        assert_eq!(resumed.persistence_error, None);
+        settle(&restarted);
+        assert!(!marker.exists());
+        drop(restarted);
+        assert!(start().engine_power_status().enabled);
+    }
+
+    #[test]
+    fn an_unsaved_pause_choice_is_reported_until_maintenance_saves_it() {
+        use crate::controller_test_support::settle;
+        let directory = mixrelay_test_support::FixtureDir::new("engine-unsaved-pause").unwrap();
+        let engine = crate::endpoint_settings_tests::controller(graph(1))
+            .with_graph_catalog_path(directory.join("graphs.json"));
+        let marker = directory.join(SAVED_PAUSE);
+        let warning = || engine.graph_catalog().unwrap().persistence_error;
+        let unsaved = |warning: Option<String>| {
+            assert!(warning.unwrap().starts_with("engine pause: "));
+        };
+        // A directory in the marker's place can be neither replaced nor removed.
+        std::fs::create_dir(&marker).unwrap();
+        unsaved(
+            engine
+                .change_engine_power(false, None)
+                .unwrap()
+                .persistence_error,
+        );
+        assert!(!engine.engine_power_status().enabled);
+        settle(&engine);
+        // A successful catalog save does not clear the unsaved pause.
+        engine
+            .update_graph_layout(
+                &engine.view_graph_id(),
+                mixrelay_control_protocol::GraphLayoutRequest {
+                    expected_layout_revision: 0,
+                    layout: mixrelay_control_protocol::GraphLayout::default(),
+                },
+            )
+            .unwrap();
+        unsaved(warning());
+        engine.retry_pause_save();
+        unsaved(warning());
+        assert!(engine.engine_power_status().unsaved);
+        std::fs::remove_dir(&marker).unwrap();
+        // A later successful change does not report the earlier failure.
+        let resumed = engine.change_engine_power(true, None).unwrap();
+        assert_eq!(resumed.persistence_error, None);
+        settle(&engine);
+        engine.change_engine_power(false, None).unwrap();
+        settle(&engine);
+        assert!(marker.is_file());
+        std::fs::remove_file(&marker).unwrap();
+        std::fs::create_dir(&marker).unwrap();
+        unsaved(
+            engine
+                .change_engine_power(true, None)
+                .unwrap()
+                .persistence_error,
+        );
+        settle(&engine);
+        std::fs::remove_dir(&marker).unwrap();
+        engine.retry_pause_save();
+        assert_eq!(warning(), None);
+        assert!(!engine.engine_power_status().unsaved);
+        assert!(!marker.exists());
+        // Nothing left to retry.
+        engine.retry_pause_save();
     }
 
     #[test]

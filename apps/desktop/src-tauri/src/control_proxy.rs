@@ -338,6 +338,19 @@ pub(crate) async fn control_get_graph_status(
         .await
 }
 
+/// Releases capture owners bound to a lost engine before its successor publishes a
+/// manifest; the successor's captures are then prepared like a cold start.
+#[cfg(target_os = "macos")]
+pub(crate) async fn release_lost_engine_captures(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager as _;
+    let client = app.state::<ControlProxyClient>();
+    let captures = Arc::clone(app.state::<Arc<ApplicationCaptureState>>().inner());
+    let _guard = client.capture_gate.lock().await;
+    tauri::async_runtime::spawn_blocking(move || captures.release_all())
+        .await
+        .map_err(|error| format!("capture release task failed: {error}"))?
+}
+
 #[cfg(target_os = "linux")]
 #[tauri::command]
 pub(crate) async fn control_get_graph_catalog(

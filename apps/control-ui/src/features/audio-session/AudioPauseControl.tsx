@@ -75,11 +75,7 @@ export function AudioPauseControl({
   };
   return (
     <div className={styles.control}>
-      {error ? (
-        <div className={styles.error}>
-          <InlineNotice tone="critical">{t('audioSession.pauseFailed')}</InlineNotice>
-        </div>
-      ) : null}
+      <PauseNotice failed={error} unsaved={Boolean(power?.unsaved)} />
       <TransportButton
         icon={power?.enabled === false ? 'resume' : 'pause'}
         label={accessibleLabel}
@@ -93,6 +89,20 @@ export function AudioPauseControl({
         disabled={Boolean(disabled || pending || !power || !controlPort.setEnginePower)}
         onClick={() => void toggle()}
       />
+    </div>
+  );
+}
+
+/** A failed change is an alert. An applied change the service has not yet saved for its next
+ * start is a warning read from its status, so it ends when the service's retry succeeds. */
+function PauseNotice({ failed, unsaved }: { failed: boolean; unsaved: boolean }) {
+  const { t } = useTranslation();
+  if (!failed && !unsaved) return null;
+  return (
+    <div className={styles.error}>
+      <InlineNotice tone={failed ? 'critical' : 'warning'}>
+        {t(failed ? 'audioSession.pauseFailed' : 'audioSession.pauseNotSaved')}
+      </InlineNotice>
     </div>
   );
 }

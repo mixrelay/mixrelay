@@ -246,7 +246,9 @@ impl EngineGraphController {
         }
     }
 
-    pub(super) fn with_graph_catalog_path(self, path: PathBuf) -> Self {
+    pub(super) fn with_graph_catalog_path(mut self, path: PathBuf) -> Self {
+        // A paused engine restores its graph without claiming audio.
+        self.restore_saved_pause(&path);
         let loaded = Catalog::load(&path);
         let protected = match &loaded {
             Ok(Some(catalog)) => self
@@ -458,6 +460,7 @@ impl EngineGraphController {
         self.catalog_write_error
             .lock()
             .clone()
+            .or_else(|| self.pause_save_warning.lock().clone())
             .or_else(|| self.node_control_warning.lock().clone())
     }
 
@@ -547,9 +550,7 @@ impl EngineGraphController {
         *self.catalog_write_error.lock() = None;
         self.commit_catalog_memory(Some(value.clone()));
         let mut response = value.response();
-        response
-            .persistence_error
-            .clone_from(&self.catalog_write_error.lock());
+        response.persistence_error = self.graph_persistence_warning();
         Ok(response)
     }
 
@@ -563,9 +564,7 @@ impl EngineGraphController {
             .map_err(|error| unavailable(error))?
             .response();
         response.document = self.graph.read().clone();
-        response
-            .persistence_error
-            .clone_from(&self.catalog_write_error.lock());
+        response.persistence_error = self.graph_persistence_warning();
         Ok(response)
     }
 

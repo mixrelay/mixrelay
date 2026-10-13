@@ -411,10 +411,12 @@ fn display_labels_validate_without_changing_audio_identity_or_revision() {
     let mut invalid_id = GraphLayout::default();
     invalid_id.node_labels.insert(" ".into(), "Video".into());
     assert_layout_validity(invalid_id, false);
-    let mut many = GraphLayout::default();
-    many.node_labels = (0..4097)
-        .map(|id| (format!("node-{id}"), "name".into()))
-        .collect();
+    let many = GraphLayout {
+        node_labels: (0..4097)
+            .map(|id| (format!("node-{id}"), "name".into()))
+            .collect(),
+        ..GraphLayout::default()
+    };
     assert_layout_validity(many, false);
     let fixture = Fixture::new();
     let engine =

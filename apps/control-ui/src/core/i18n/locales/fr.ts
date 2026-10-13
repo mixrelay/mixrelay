@@ -173,6 +173,8 @@ export const fr = {
     pause: 'Mettre en pause',
     changing: 'Changement de l’état audio…',
     pauseFailed: 'Impossible de mettre en pause ou de reprendre. Vérifiez l’état actuel.',
+    pauseNotSaved:
+      'Appliqué, mais non enregistré. Ce choix pourrait ne pas être conservé après le redémarrage de MixRelay.',
     diagnostics: 'Détails audio',
     processingRate: 'Fréquence d’échantillonnage du traitement',
     processingBuffer: 'Tampon de traitement',
