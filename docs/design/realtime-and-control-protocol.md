@@ -1,0 +1,63 @@
+# 실시간 오디오 실행과 제어 프로토콜 설계
+
+제품 범위와 진행 상태는 [제품 문서](../product.md)가 기준이다. 이 문서는 실시간 오디오 실행 경로와 UI↔실행부↔엔진 제어 프로토콜의 설계 결정을 기록한다. 측정 전에는 지연·성능 개선을 주장하지 않는다.
+
+## 현재 구조와 확인된 사실
+
+- **오디오 데이터 경로는 이미 공유 메모리다.** HAL Driver(coreaudiod)와 엔진은 lock-free 공유 링으로 PCM을 주고받으며, 콜백마다 소켓·시스템 호출을 쓰지 않는다. Driver는 재생을 캡처 링에 직접 써서 BlackHole과 같은 Driver 내부 루프백을 제공한다([hal_io.rs](../../native/macos/common/hal_io.rs)).
+- **그래프 렌더링은 대부분 CoreAudio IOProc 안에서 실행된다.** 엔진은 MixRelay 가상 장치도 일반 CoreAudio 클라이언트로 열며([spec.rs](../../apps/engine-service/src/macos_devices/spec.rs)), 사용 가능한 장치 클록이 있으면 그 IOProc에서 동기적으로 렌더링한다([direct.rs](../../apps/engine-service/src/macos_devices/direct.rs)). 이 경로는 이미 실시간 스케줄링을 받는다.
+- **폴링·일반 우선순위로 실행되는 경로가 남아 있다.**
+  - 장치 클록이 없을 때의 대체 워커는 250µs 잠들며 폴링한다([macos/mod.rs](../../apps/engine-service/src/macos/mod.rs)).
+  - 앱 캡처 pump는 250µs 폴링이며 변환과 형식 갱신·자원 교체 같은 제어 작업을 한 스레드에서 처리한다. 엔진 쪽 읽기 지연은 512프레임(48kHz에서 10.7ms)으로 고정돼 있다.
+  - 플러그인 DSP 스레드는 100µs 폴링과 `try_lock`/`yield` 재시도를 사용한다([processor-host](../../crates/processor-host/src/lib.rs)).
+  - MixRelay가 만든 스레드는 실시간 스케줄링(time-constraint)이나 오디오 workgroup을 사용하지 않는다.
+- **제어 경로는 요청/응답 폴링이다.** UI → 편집 앱(Tauri invoke) → 실행부(사용자 Unix 소켓, 줄 단위 JSON) → 엔진(127.0.0.1 HTTP/JSON). 미터 20회/s, 열린 플러그인 에디터마다 4회/s, 노드 제어 1회/s, 오디오 상태 약 1회/s를 폴링한다. 연결은 재사용한다.
+
+## 결정 1. 실시간 실행
+
+- CoreAudio IOProc와 HAL `DoIOOperation`의 스케줄링·workgroup은 바꾸지 않는다. 콜백 안에서 다른 프로세스를 기다리지 않는다.
+- MixRelay가 소유하는 PCM 스레드(대체 워커, 앱 캡처 pump, 플러그인 DSP)만 실시간으로 만든다. 감독·준비·XPC·회수·로그·디스크 쓰기 스레드는 실시간으로 올리지 않는다.
+- 실시간 정책: 기본 주기 `P = 실제 네이티브 콜백 quantum / 실제 샘플레이트`(그래프 내부 분할 크기가 아님). 제약 `D = 0.8P`, 계산 예산 `C = max(측정 p99.9 × 1.25, D/2)`, 측정 전 임시값 `C = 0.4P`. 설정 후 실제 적용값을 다시 읽어 기록한다.
+- 같은 장치 주기를 공유하는 스레드만 장치 workgroup(`kAudioDevicePropertyIOThreadOSWorkgroup`)에 참여한다. 그 밖에는 `AudioWorkIntervalCreate`로 만든 자체 interval workgroup을 쓰고 예상 release 시각 기준으로 interval을 시작·종료한다.
+- 실시간 정책이나 workgroup 참여가 실패하면 성능 저하 상태로 표시하고, 낮은 지연 구성을 보장한다고 표시하지 않는다.
+
+## 결정 2. 이벤트 기반 깨우기
+
+- 깨우기는 "권한 있는 상태를 다시 확인하라"는 뜻이며 프레임 credit이 아니다. PCM·클록 발행과 분리한다.
+- 같은 프로세스 안(탭 IOProc → 캡처 pump)은 로컬 세마포어를 쓴다.
+- 프로세스 사이는 macOS 14.2를 지원하기 위해 **XPC로 전달한 Mach 세마포어**를 기본으로 한다. 14.4 이상의 공유 futex(`os_sync_wait_on_address` + `OS_SYNC_*_SHARED`)는 측정 후 협상 가능한 대체 구현으로 둔다. 비공개 `__ulock`은 쓰지 않는다.
+- 생산자: 상태 발행 → `sequence` 증가 → `pending`이 0에서 1로 바뀔 때만 signal. 소비자: 토큰을 받으면 `pending`을 먼저 0으로 바꾼 뒤 상태를 확인한다. 대기는 다음 마감 또는 `2P` 중 이른 시각까지로 제한해 깨우기 유실이나 생산자 종료가 진행을 영구히 멈추지 못하게 한다. 연속 실패 시 알림 경로를 교체하고 그동안 `min(P/4, 250µs)` 폴링으로 복구한다.
+- 알림 영역은 포인터 없이 magic·version·incarnation과 정렬된 `sequence`/`pending`/`state` 셀로 구성하며, 형식을 바꾸면 전송 버전을 올리고 살아 있는 매핑을 제자리에서 바꾸지 않는다.
+
+## 결정 3. 지연 정책
+
+- 고정 512프레임 읽기 지연과 pump의 고정 목표를 측정 기반 정책으로 바꾼다: 생산자·소비자·변환기 burst + 측정한 전달 지터 + drift 보정 여유.
+- underrun이 확인되면 빠르게 늘리고, 안정 구간을 확인한 뒤에만 천천히 줄인다. 읽기 커서를 반복해서 "최신 − 목표"로 건너뛰지 않는다.
+- drift 보정은 독립 클록 경계에서만 한다. 대기 시간을 바꿔 drift를 보정하지 않는다.
+
+## 결정 4. 제어 프로토콜
+
+- **변경 요청은 요청/응답을 유지한다.** 보내기 전에 만든 작업 ID를 편집 앱·실행부·엔진에 그대로 전달하고, 엔진 incarnation이 다르면 부작용 전에 거부한다. 결과는 `not_admitted / accepted / completed / uncertain`으로 구분하며 자동으로 다시 보내지 않는다. 빠르게 끝난 결과도 실행부가 받을 때까지 보관한다.
+- **상태는 push로 전달한다.** 미터·다이내믹스, 플러그인 에디터 상태, 노드 제어, 엔진 전원·세션, 그래프 revision을 변경 시점에 발행한다. 미터는 엔진의 기존 단일 발행자를 정기 발행으로 바꾸고 binding 목록과 packed `f32` 배열로 보낸다.
+- 구간: 엔진→실행부는 WebSocket 구독 하나, 실행부↔편집 앱은 길이 접두 framed 스트림 하나(명령과 구독 다중화), 편집 앱→웹뷰는 Tauri Channel과 명시적 credit.
+- 모든 상태에는 `runtimeIncarnation`, `engineIncarnation`, 구독 세대, 상태 버전, 미터 sequence, binding 표 버전을 붙이고 재연결 시 전체 snapshot부터 다시 받는다. 느린 구독자는 최신값만 유지하고, 미터는 구간 최대값으로 합친다.
+- 엔진 HTTP 수신은 사용자 소유 Unix 소켓으로 옮겨 peer를 인증한다. 폴링은 대체 경로로 남긴다.
+
+## 측정
+
+- 경로별(IOProc 직접 렌더, 연결된 장치, 대체 워커, 앱 캡처, 플러그인) 콜백 지연·실행 시간·깨우기 지연·발행→소비 시간의 p50/p99/p99.9/max와 마감 여유를 `mach_absolute_time`으로 기록한다. 계측은 할당·잠금·로그 없이 미리 할당한 ring에 쓴다.
+- underrun, 누락·중복 프레임, discontinuity, 깨우기 timeout·실패를 따로 센다.
+- 같은 기기·형식에서 BlackHole(HAL 루프백)과 Loopback(캡처·믹스 구성)을 비교한다. 상관 신호로 종단 지연과 채널 순서를 확인한다.
+
+## 하지 않는 일
+
+감독 스레드의 실시간 승격, 콜백 안 XPC·속성 API 호출, HAL에서 엔진 완료 대기, 깨우기를 프레임 credit으로 취급, 네이티브 타임스탬프 대신 깨운 시각 사용, 512프레임 상수만 낮추기, 측정 없는 BlackHole 동등 지연 주장, 자동 변경 재전송, 노드별 스트림·무제한 큐·중복 미터 drain.
+
+## 단계
+
+1. 실행 경로·타이밍 계측
+2. 실시간 스레드 지원과 앱 캡처 pump의 제어 작업 분리
+3. 알림 프로토콜(세마포어/futex)과 모델 테스트, 실제 폴링 교체
+4. 측정 기반 지연 정책
+5. 제어 프로토콜: incarnation·작업 ID → 엔진 구독 → framed 실행부 스트림 → Tauri Channel → Unix 소켓 엔진 수신
+6. 128채널(별도 설계)
