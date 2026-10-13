@@ -1,5 +1,14 @@
 import type { TFunction } from 'i18next';
-import { type ReactNode, type Ref, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  type Ref,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   AudioGraphCanvas,
@@ -1371,6 +1380,7 @@ function WorkspaceView(props: WorkspaceViewProps) {
   const processorEditorLabels = useProcessorEditorLabels();
   const menuItems = useWorkspaceMenuItems(props, t);
   const presentedModel = usePresentedModel(props);
+  const nodeRenderers = useNodeRenderers(props, t, nodeControls, presentedModel);
   const nodeNames = useNodeDisplayNameEditor(
     presentedModel,
     props.layout,
@@ -1404,8 +1414,8 @@ function WorkspaceView(props: WorkspaceViewProps) {
       {presentedModel && props.layout.loaded ? (
         <div className={styles.canvas} inert={props.layout.loading}>
           <AudioGraphCanvas
-            renderNodeControls={(node) => nodeSignalControls(props, node, t, nodeControls)}
-            renderNodeContent={(node) => recorderNodeContent(props, node, presentedModel)}
+            renderNodeControls={nodeRenderers.controls}
+            renderNodeContent={nodeRenderers.content}
             viewport={props.layout.layout.viewport}
             onViewportChange={props.layout.updateViewport}
             contextMenuLabels={routingContextLabels(t)}
@@ -1502,10 +1512,94 @@ function WorkspaceToolbar({
   );
 }
 
-function recorderNodeContent(
+/** What node controls and recorder content read. Memoized so the canvas render functions
+ * keep their identity and nodes re-render only when one of these changes. */
+type NodeRenderInputs = Pick<
+  WorkspaceViewProps,
+  | 'application'
+  | 'catalogRevision'
+  | 'controlPort'
+  | 'documentRevision'
+  | 'failedProcessors'
+  | 'graphId'
+  | 'interactionDisabled'
+  | 'playbackPaused'
+  | 'state'
+  | 'updateModel'
+> & { idle: boolean; layoutDirty: boolean };
+
+function useNodeRenderers(
   props: WorkspaceViewProps,
+  t: TFunction,
+  snapshot: import('../../core/control-port/types').GraphNodeControls | null,
+  model: AudioGraphModel | null,
+) {
+  const idle = nodeControlIdle(props);
+  const {
+    application,
+    catalogRevision,
+    controlPort,
+    documentRevision,
+    failedProcessors,
+    graphId,
+    interactionDisabled,
+    playbackPaused,
+    state,
+    updateModel,
+  } = props;
+  const layoutDirty = props.layout.dirty;
+  const inputs = useMemo<NodeRenderInputs>(
+    () => ({
+      application,
+      catalogRevision,
+      controlPort,
+      documentRevision,
+      failedProcessors,
+      graphId,
+      idle,
+      interactionDisabled,
+      layoutDirty,
+      playbackPaused,
+      state,
+      updateModel,
+    }),
+    [
+      application,
+      catalogRevision,
+      controlPort,
+      documentRevision,
+      failedProcessors,
+      graphId,
+      idle,
+      interactionDisabled,
+      layoutDirty,
+      playbackPaused,
+      state,
+      updateModel,
+    ],
+  );
+  // Recorder edits apply to the committed model current when they are made, not the one
+  // their node last rendered with; it is published on commit, never from a discarded render.
+  const latestModel = useRef(model);
+  useLayoutEffect(() => {
+    latestModel.current = model;
+  }, [model]);
+  return {
+    controls: useCallback(
+      (node: AudioGraphNode) => nodeSignalControls(inputs, node, t, snapshot),
+      [inputs, t, snapshot],
+    ),
+    content: useCallback(
+      (node: AudioGraphNode) => recorderNodeContent(inputs, node, latestModel),
+      [inputs],
+    ),
+  };
+}
+
+function recorderNodeContent(
+  props: NodeRenderInputs,
   node: AudioGraphNode,
-  model: AudioGraphModel,
+  model: { current: AudioGraphModel | null },
 ) {
   if (node.runtime?.type !== 'recorder' || !props.graphId) return null;
   return (
@@ -1525,7 +1619,11 @@ function recorderNodeContent(
       }
       channels={node.inputPorts.length}
       onChannelsChange={(channels) =>
-        props.updateModel(updateRecorderChannels(model, node.id, channels), 'runtime')
+        // Recorder content exists only while the workspace has a model.
+        props.updateModel(
+          updateRecorderChannels(model.current as AudioGraphModel, node.id, channels),
+          'runtime',
+        )
       }
     />
   );
@@ -1553,7 +1651,7 @@ function useWorkspaceNodeControls(props: WorkspaceViewProps) {
 }
 
 function nodeRecoveryControl(
-  props: WorkspaceViewProps,
+  props: NodeRenderInputs,
   node: AudioGraphNode,
   enabled: boolean,
   disabled: boolean,
@@ -1570,7 +1668,7 @@ function nodeRecoveryControl(
     props.controlPort.retryProcessor !== undefined;
   return retryAvailable ? (
     <ProcessorRecoveryControl
-      busy={disabled || props.layout.dirty}
+      busy={disabled || props.layoutDirty}
       catalogRevision={props.catalogRevision}
       enabled={enabled}
       failedProcessors={props.failedProcessors}
@@ -1597,7 +1695,7 @@ function signalControlCapabilities(
 }
 
 function nodeSignalControls(
-  props: WorkspaceViewProps,
+  props: NodeRenderInputs,
   node: AudioGraphNode,
   t: TFunction,
   snapshot: import('../../core/control-port/types').GraphNodeControls | null,
@@ -1611,7 +1709,7 @@ function nodeSignalControls(
   const nodeId = node.runtime?.binding?.nodeId ?? node.id;
   const entry = snapshot?.nodes.find((candidate) => candidate.nodeId === nodeId);
   const capabilities = signalControlCapabilities(entry?.capabilities, control, recoveryOnly);
-  const disabled = !nodeControlIdle(props);
+  const disabled = !props.idle;
   const retry = nodeRecoveryControl(props, node, control.enabled, disabled);
   const retryAvailable = retry !== null;
   const graphId = props.graphId;

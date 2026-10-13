@@ -72,14 +72,20 @@ export type AudioFlowEdgeLabel = (endpoints: AudioGraphEdgeEndpoints) => string;
 export function namedAudioPorts(ports: readonly AudioGraphPort[]) {
   const entries = ports.map((port, index) => ({ port, channel: (port.channelIndex ?? index) + 1 }));
   const names = new Map(entries.map(({ port }) => [port.id, port.label]));
-  for (const channel of new Set(entries.map((entry) => entry.channel))) {
-    const group = entries.filter((entry) => entry.channel === channel).map(({ port }) => port);
-    const count = (label: string) => group.filter((port) => port.label === label).length;
+  const groups = new Map<number, AudioGraphPort[]>();
+  for (const { port, channel } of entries) {
+    const group = groups.get(channel);
+    if (group) group.push(port);
+    else groups.set(channel, [port]);
+  }
+  for (const group of groups.values()) {
+    const counts = new Map<string, number>();
+    for (const port of group) counts.set(port.label, (counts.get(port.label) ?? 0) + 1);
     const taken = new Set(
-      group.filter((port) => count(port.label) === 1).map((port) => port.label),
+      group.filter((port) => counts.get(port.label) === 1).map((port) => port.label),
     );
-    const repeated = group.filter((port) => count(port.label) > 1);
-    for (const port of [...repeated].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+    const repeated = group.filter((port) => (counts.get(port.label) as number) > 1);
+    for (const port of repeated.sort((a, b) => (a.id < b.id ? -1 : 1))) {
       let ordinal = 1;
       while (taken.has(`${port.label} (${ordinal})`)) ordinal += 1;
       const name = `${port.label} (${ordinal})`;
@@ -90,12 +96,30 @@ export function namedAudioPorts(ports: readonly AudioGraphPort[]) {
   return entries.map((entry) => ({ ...entry, name: names.get(entry.port.id) as string }));
 }
 
+type PortEndpoint = { channel: number; port: string | undefined };
+/** One endpoint index per port list. Port lists are immutable and keep their identity across
+ * reconciliations (structural sharing), so cable names are not recomputed per cable or update. */
+const portEndpointIndex = new WeakMap<
+  readonly AudioGraphPort[],
+  ReadonlyMap<string, PortEndpoint>
+>();
+
 function portEndpoint(ports: readonly AudioGraphPort[], portId: string) {
-  const named = namedAudioPorts(ports);
-  const entry = named.find(({ port }) => port.id === portId);
-  if (!entry) return null;
-  const shared = named.filter(({ channel }) => channel === entry.channel).length > 1;
-  return { channel: entry.channel, port: shared ? entry.name : undefined };
+  let index = portEndpointIndex.get(ports);
+  if (!index) {
+    const named = namedAudioPorts(ports);
+    const perChannel = new Map<number, number>();
+    for (const { channel } of named) perChannel.set(channel, (perChannel.get(channel) ?? 0) + 1);
+    index = new Map(
+      named.map(({ port, channel, name }) => [
+        port.id,
+        // A port name is only needed where several ports share the channel number.
+        { channel, port: (perChannel.get(channel) as number) > 1 ? name : undefined },
+      ]),
+    );
+    portEndpointIndex.set(ports, index);
+  }
+  return index.get(portId) ?? null;
 }
 
 export function audioGraphEdgeEndpoints(

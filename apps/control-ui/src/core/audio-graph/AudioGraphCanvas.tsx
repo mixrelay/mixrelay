@@ -249,6 +249,12 @@ function AudioGraphProviders({
     [onEndpointChange, onChannelLayoutChange],
   );
   const selection = useMemo(() => ({ model, selectedRef }), [model, selectedRef]);
+  // `useState` returns a new tuple every render; keep the context value stable.
+  const [openedOptions, setOpenedOptions] = options;
+  const optionsValue = useMemo<NodeOptionsState>(
+    () => [openedOptions, setOpenedOptions],
+    [openedOptions, setOpenedOptions],
+  );
   return (
     <AudioMeterProvider store={meterStore}>
       <NodeProcessorEditorContext.Provider value={editor}>
@@ -258,7 +264,7 @@ function AudioGraphProviders({
               <AudioPortSelectionContext.Provider value={selection}>
                 <NodeContentContext.Provider value={renderNodeContent}>
                   <NodeControlsContext.Provider value={renderNodeControls}>
-                    <NodeOptionsContext.Provider value={options}>
+                    <NodeOptionsContext.Provider value={optionsValue}>
                       <NodeDisclosureHeightsContext.Provider value={disclosureHeights}>
                         {children}
                       </NodeDisclosureHeightsContext.Provider>
@@ -298,15 +304,17 @@ function useCanvasViewActions(
     nodeMenu.close();
     clearPortSelection();
   }, [clearPortSelection, nodeMenu.close]);
-  return {
-    addNode,
-    editorContext: processorEditorContext(
-      onProcessorEditorRetry,
-      processorEditorLabels,
-      processorEditorStatuses,
-    ),
-    onPaneClick,
-  };
+  // A new context object each render would re-render every node.
+  const editorContext = useMemo(
+    () =>
+      processorEditorContext(
+        onProcessorEditorRetry,
+        processorEditorLabels,
+        processorEditorStatuses,
+      ),
+    [onProcessorEditorRetry, processorEditorLabels, processorEditorStatuses],
+  );
+  return { addNode, editorContext, onPaneClick };
 }
 
 function useNodeMenu(onOpenedChange?: (opened: boolean) => void) {

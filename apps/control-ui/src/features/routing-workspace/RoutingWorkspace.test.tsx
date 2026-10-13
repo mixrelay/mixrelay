@@ -113,6 +113,11 @@ function BufferUpdateButtons({
   );
 }
 
+const canvasHarness = vi.hoisted(() => ({
+  renderNodeContent: undefined as ((node: AudioGraphNode) => ReactNode) | undefined,
+  model: undefined as AudioGraphModel | undefined,
+}));
+
 vi.mock('../../core/audio-graph/AudioGraphCanvas', () => ({
   AudioGraphCanvas: ({
     ariaLabel,
@@ -138,108 +143,114 @@ vi.mock('../../core/audio-graph/AudioGraphCanvas', () => ({
     nodeMenuItems?: readonly unknown[];
     onAddNode?: (itemId: string, position: { x: number; y: number }) => void;
     renderNodeContent?: (node: AudioGraphNode) => ReactNode;
-  }) => (
-    <section aria-label={ariaLabel}>
-      <span data-testid="model-revision">{model.revision}</span>
-      <output data-testid="node-sizes">
-        {JSON.stringify(Object.fromEntries(model.nodes.map((node) => [node.id, node.size])))}
-      </output>
-      {model.nodes.map((node) => (
-        <div key={`content:${node.id}`}>{renderNodeContent?.(node)}</div>
-      ))}
-      <button type="button" onClick={() => onAddNode?.('recorder', { x: 120, y: 60 })}>
-        add recorder
-      </button>
-      <button
-        type="button"
-        onClick={() => onAddNode?.(`virtual/input/${virtualSpec.id}`, { x: 0, y: 0 })}
-      >
-        share fixture source
-      </button>
-      <RateUpdateButtons model={model} onChange={onNodeEndpointChange} />
-      <BufferUpdateButtons model={model} onChange={onNodeEndpointChange} />
-      <button type="button" onClick={() => onNodeGainChange?.('input', -6)}>
-        change gain
-      </button>
-      <PanViewportButton onChange={onViewportChange} />
-      <button
-        type="button"
-        disabled={
-          !model.nodes.some((node) =>
-            node.appearance.parameterControls?.some((parameter) => parameter.id === 'external:42'),
-          )
-        }
-        onClick={() => onNodeParameterChange?.('processor-1', 'external:42', 0.2)}
-      >
-        lower parameter
-      </button>
-      <button
-        type="button"
-        onClick={() => onNodeParameterChange?.('processor-1', 'external:42', 0.8)}
-      >
-        raise parameter
-      </button>
-      <output data-testid="edge-count">{model.edges.length}</output>
-      <output data-testid="node-statuses">
-        {JSON.stringify(
-          model.nodes.map((node) => ({
-            id: node.id,
-            status: node.appearance.status,
-            tone: node.appearance.statusTone,
-          })),
-        )}
-      </output>
-      <output data-testid="node-menu">{JSON.stringify(nodeMenuItems)}</output>
-      <output data-testid="layout">
-        {JSON.stringify({
-          positions: Object.fromEntries(model.nodes.map((node) => [node.id, node.position])),
-          viewport,
-        })}
-      </output>
-      <button
-        onClick={() =>
-          onModelChange({ ...model, edges: [], revision: model.revision + 1 }, 'runtime')
-        }
-        type="button"
-      >
-        edit graph
-      </button>
-      <button
-        onClick={() =>
-          onModelChange(
-            {
-              ...model,
-              nodes: model.nodes.map((node) => ({
-                ...node,
-                position: { x: node.position.x + 20, y: node.position.y },
-              })),
-            },
-            'layout',
-          )
-        }
-        type="button"
-      >
-        move node
-      </button>
-      <button
-        onClick={() =>
-          onModelChange(
-            {
-              ...model,
-              nodes: model.nodes.map((node) => ({
-                ...node,
-                size: { width: 400, height: 220 },
-              })),
-            },
-            'layout',
-          )
-        }
-        type="button"
-      >
-        resize node
-      </button>
-    </section>
-  ),
+  }) => {
+    canvasHarness.renderNodeContent = renderNodeContent;
+    canvasHarness.model = model;
+    return (
+      <section aria-label={ariaLabel}>
+        <span data-testid="model-revision">{model.revision}</span>
+        <output data-testid="node-sizes">
+          {JSON.stringify(Object.fromEntries(model.nodes.map((node) => [node.id, node.size])))}
+        </output>
+        {model.nodes.map((node) => (
+          <div key={`content:${node.id}`}>{renderNodeContent?.(node)}</div>
+        ))}
+        <button type="button" onClick={() => onAddNode?.('recorder', { x: 120, y: 60 })}>
+          add recorder
+        </button>
+        <button
+          type="button"
+          onClick={() => onAddNode?.(`virtual/input/${virtualSpec.id}`, { x: 0, y: 0 })}
+        >
+          share fixture source
+        </button>
+        <RateUpdateButtons model={model} onChange={onNodeEndpointChange} />
+        <BufferUpdateButtons model={model} onChange={onNodeEndpointChange} />
+        <button type="button" onClick={() => onNodeGainChange?.('input', -6)}>
+          change gain
+        </button>
+        <PanViewportButton onChange={onViewportChange} />
+        <button
+          type="button"
+          disabled={
+            !model.nodes.some((node) =>
+              node.appearance.parameterControls?.some(
+                (parameter) => parameter.id === 'external:42',
+              ),
+            )
+          }
+          onClick={() => onNodeParameterChange?.('processor-1', 'external:42', 0.2)}
+        >
+          lower parameter
+        </button>
+        <button
+          type="button"
+          onClick={() => onNodeParameterChange?.('processor-1', 'external:42', 0.8)}
+        >
+          raise parameter
+        </button>
+        <output data-testid="edge-count">{model.edges.length}</output>
+        <output data-testid="node-statuses">
+          {JSON.stringify(
+            model.nodes.map((node) => ({
+              id: node.id,
+              status: node.appearance.status,
+              tone: node.appearance.statusTone,
+            })),
+          )}
+        </output>
+        <output data-testid="node-menu">{JSON.stringify(nodeMenuItems)}</output>
+        <output data-testid="layout">
+          {JSON.stringify({
+            positions: Object.fromEntries(model.nodes.map((node) => [node.id, node.position])),
+            viewport,
+          })}
+        </output>
+        <button
+          onClick={() =>
+            onModelChange({ ...model, edges: [], revision: model.revision + 1 }, 'runtime')
+          }
+          type="button"
+        >
+          edit graph
+        </button>
+        <button
+          onClick={() =>
+            onModelChange(
+              {
+                ...model,
+                nodes: model.nodes.map((node) => ({
+                  ...node,
+                  position: { x: node.position.x + 20, y: node.position.y },
+                })),
+              },
+              'layout',
+            )
+          }
+          type="button"
+        >
+          move node
+        </button>
+        <button
+          onClick={() =>
+            onModelChange(
+              {
+                ...model,
+                nodes: model.nodes.map((node) => ({
+                  ...node,
+                  size: { width: 400, height: 220 },
+                })),
+              },
+              'layout',
+            )
+          }
+          type="button"
+        >
+          resize node
+        </button>
+      </section>
+    );
+  },
 }));
 
 const document: RuntimeGraphDocument = {
@@ -1979,4 +1990,42 @@ it.each([
   expect(controlPort.applyGraph).toHaveBeenCalledTimes(2);
   expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+it('applies an earlier rendered recorder channel change to the latest graph', async () => {
+  await i18n.changeLanguage('en');
+  let revision = 1;
+  const source = port({
+    applyGraph: vi.fn().mockImplementation(async () => {
+      revision += 1;
+      return { protocolVersion: 1, revision, state: 'active' };
+    }),
+    getGraphStatus: vi.fn().mockImplementation(async () => ({
+      activeRevision: revision,
+      protocolVersion: 1,
+      submittedRevision: revision,
+    })),
+  });
+  render(workspace(source, undefined, 'graph-1'));
+  const add = await screen.findByRole('button', { name: 'add recorder' });
+  fireEvent.click(add);
+  await waitFor(() => expect(source.applyGraph).toHaveBeenCalledTimes(1));
+  // Keep the first recorder's rendered callback, then edit the graph elsewhere.
+  const renderContent = canvasHarness.renderNodeContent;
+  const first = canvasHarness.model?.nodes.find((node) => node.runtime?.type === 'recorder');
+  if (!renderContent || !first) throw new Error('recorder fixture missing');
+  fireEvent.click(add);
+  await waitFor(() => expect(source.applyGraph).toHaveBeenCalledTimes(2));
+  const element = renderContent(first) as {
+    props: { onChannelsChange: (channels: number) => void };
+  };
+  act(() => element.props.onChannelsChange(1));
+  await waitFor(() => expect(source.applyGraph).toHaveBeenCalledTimes(3));
+  const [latest] = vi.mocked(source.applyGraph).mock.calls.at(-1) as [RuntimeGraphDocument];
+  const recorders = latest.nodes.filter((node) => node.type === 'recorder');
+  // The second recorder, added after the callback was rendered, is kept.
+  expect(recorders.map((node) => node.config)).toEqual(
+    expect.arrayContaining([{ channels: 1 }, { channels: 2 }]),
+  );
+  expect(recorders).toHaveLength(2);
 });
