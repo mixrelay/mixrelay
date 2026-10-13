@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
 import {
@@ -15,6 +15,8 @@ import {
   type GraphLayoutResponse,
   type GraphRuntimeStatus,
   type MeterSnapshot,
+  type MeterTelemetry,
+  type MeterTelemetryListener,
   type MixRelayStatus,
   type NodeControlResponse,
   type ProcessorEditorFrame,
@@ -31,6 +33,9 @@ import {
 } from './types';
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+type MeterMessage = MeterTelemetry | { ended: true };
+/** The native side keeps its end; the webview only receives. */
+type MessageChannel = { onmessage: (message: MeterMessage) => void };
 
 interface ControlProxyResponse {
   body: unknown;
@@ -159,7 +164,10 @@ export class TauriControlPort implements ControlPort {
   ): Promise<GraphApplyResponse> {
     return this.call('control_set_virtual_endpoint_buffer_frames', { request });
   }
-  public constructor(private readonly invokeCommand: Invoke = invoke) {}
+  public constructor(
+    private readonly invokeCommand: Invoke = invoke,
+    private readonly createChannel: () => MessageChannel = () => new Channel<MeterMessage>(),
+  ) {}
 
   public applyGraph(document: GraphApplyRequest): Promise<GraphApplyResponse> {
     return this.call('control_apply_graph', { document });
@@ -175,6 +183,33 @@ export class TauriControlPort implements ControlPort {
 
   public getMeters(): Promise<MeterSnapshot> {
     return this.call('control_get_meters');
+  }
+
+  /** Each consumed window returns one credit, so a stalled webview receives nothing more
+   * instead of accumulating messages natively. Windows can arrive before the id does. */
+  public async subscribeMeters(listener: MeterTelemetryListener): Promise<() => void> {
+    const channel = this.createChannel();
+    let id: number | undefined;
+    let owed = 0;
+    let active = true;
+    const credit = () => {
+      if (id === undefined) owed += 1;
+      else void this.invokeCommand('control_meter_credit', { id }).catch(() => undefined);
+    };
+    channel.onmessage = (message) => {
+      // After unsubscribing, nothing is delivered and no credit returns, so even a lost
+      // unsubscribe ends natively once credit runs out.
+      if (!active) return;
+      if ('ended' in message) return listener.ended();
+      listener.window(message);
+      credit();
+    };
+    id = await this.invokeCommand<number>('control_subscribe_meters', { channel });
+    for (; owed > 0; owed -= 1) credit();
+    return () => {
+      active = false;
+      void this.invokeCommand('control_unsubscribe_meters', { id }).catch(() => undefined);
+    };
   }
 
   public getProcessors(): Promise<ExternalProcessorCatalog> {

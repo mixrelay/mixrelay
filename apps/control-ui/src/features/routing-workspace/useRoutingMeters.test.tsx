@@ -313,3 +313,203 @@ it('ignores a rejected native telemetry response after the store is disposed', a
   expect(store.levels(key)).toEqual([]);
   expect(vi.getTimerCount()).toBe(0);
 });
+
+function pushPort() {
+  const listeners: import('../../core/control-port/types').MeterTelemetryListener[] = [];
+  const unsubscribe = vi.fn<() => void>();
+  const source = {
+    ...port(),
+    subscribeMeters: vi.fn(
+      async (
+        listener: import('../../core/control-port/types').MeterTelemetryListener,
+      ): Promise<() => void> => {
+        listeners.push(listener);
+        return unsubscribe;
+      },
+    ),
+  };
+  const push = (peak: number, engineIncarnation = 'engine-a') =>
+    act(() => listeners.at(-1)?.window({ engineIncarnation, sequence: 1, meters: frame(peak) }));
+  return { source, listeners, unsubscribe, push };
+}
+
+describe('pushed routing meters', () => {
+  it('shows pushed windows without polling and clears them when they stop', async () => {
+    const { source, push } = pushPort();
+    const { result } = renderHook(() => useRoutingMeters(source));
+    await advance();
+    expect(source.subscribeMeters).toHaveBeenCalledOnce();
+    push(1);
+    expect(result.current.levels(key)).toEqual([100]);
+    await advance(250);
+    expect(result.current.levels(key)).toEqual([]);
+    expect(source.getMeters).not.toHaveBeenCalled();
+  });
+
+  it('forgets a replaced engine and resubscribes after the stream ends', async () => {
+    const { source, listeners, push } = pushPort();
+    const { result } = renderHook(() => useRoutingMeters(source));
+    await advance();
+    push(1);
+    const clear = vi.spyOn(result.current, 'clear');
+    push(0.5, 'engine-b');
+    expect(clear).toHaveBeenCalledOnce();
+    act(() => listeners.at(-1)?.ended());
+    expect(result.current.levels(key)).toEqual([]);
+    await advance(499);
+    expect(source.subscribeMeters).toHaveBeenCalledOnce();
+    await advance(1);
+    expect(source.subscribeMeters).toHaveBeenCalledTimes(2);
+  });
+
+  it('polls while push is refused and stops polling once push works', async () => {
+    const { source } = pushPort();
+    source.subscribeMeters
+      .mockRejectedValueOnce(new Error('engine starting'))
+      .mockRejectedValueOnce(new Error('engine starting'));
+    const { result } = renderHook(() => useRoutingMeters(source));
+    await advance();
+    expect(source.getMeters).toHaveBeenCalledOnce();
+    expect(result.current.levels(key)).toEqual([100]);
+    await advance(5000);
+    expect(source.subscribeMeters).toHaveBeenCalledTimes(2);
+    await advance(5000);
+    expect(source.subscribeMeters).toHaveBeenCalledTimes(3);
+    const polls = source.getMeters.mock.calls.length;
+    await advance(1000);
+    expect(source.getMeters).toHaveBeenCalledTimes(polls);
+  });
+
+  it('unsubscribes while hidden and on dispose, ignoring late windows', async () => {
+    const { source, listeners, unsubscribe } = pushPort();
+    const { result, unmount } = renderHook(() => useRoutingMeters(source));
+    await advance();
+    visibility('hidden');
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    act(() =>
+      listeners[0]?.window({ engineIncarnation: 'engine-a', sequence: 2, meters: frame() }),
+    );
+    act(() => listeners[0]?.ended());
+    expect(result.current.levels(key)).toEqual([]);
+    visibility('visible');
+    await advance();
+    expect(source.subscribeMeters).toHaveBeenCalledTimes(2);
+    unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('pushed routing meter subscriptions', () => {
+  it('hands the store to push at its first window, even before it resolves', async () => {
+    const { source, listeners } = pushPort();
+    source.subscribeMeters.mockRejectedValueOnce(new Error('engine starting'));
+    const { result } = renderHook(() => useRoutingMeters(source));
+    await advance();
+    let fail!: (reason: Error) => void;
+    source.getMeters.mockImplementation(
+      () => new Promise<MeterSnapshot>((_, reject) => (fail = reject)),
+    );
+    source.subscribeMeters.mockImplementationOnce(async (listener) => {
+      listeners.push(listener);
+      return new Promise<() => void>(() => undefined);
+    });
+    await advance(5000);
+    act(() =>
+      listeners.at(-1)?.window({ engineIncarnation: 'engine-a', sequence: 1, meters: frame() }),
+    );
+    await act(async () => fail(new Error('late')));
+    expect(result.current.levels(key)).toEqual([100]);
+  });
+
+  it('releases a subscription that ended before it resolved without touching its successor', async () => {
+    const { source, listeners, unsubscribe } = pushPort();
+    let resolve!: (value: () => void) => void;
+    source.subscribeMeters.mockImplementationOnce(async (listener) => {
+      listeners.push(listener);
+      return new Promise<() => void>((done) => (resolve = done));
+    });
+    const { unmount } = renderHook(() => useRoutingMeters(source));
+    await advance();
+    act(() => listeners[0]?.ended());
+    await advance(500);
+    expect(source.subscribeMeters).toHaveBeenCalledTimes(2);
+    const stale = vi.fn();
+    await act(async () => resolve(stale));
+    expect(stale).toHaveBeenCalledOnce();
+    unmount();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+});
+
+describe('pushed routing meter polling handoff', () => {
+  it('keeps one polling loop across refused retries', async () => {
+    const { source } = pushPort();
+    source.subscribeMeters.mockRejectedValue(new Error('engine starting'));
+    renderHook(() => useRoutingMeters(source));
+    await advance(10_000);
+    const polls = source.getMeters.mock.calls.length;
+    await advance(1000);
+    expect(source.getMeters.mock.calls.length - polls).toBe(20);
+  });
+
+  it('never lets a poll from before push overwrite or clear pushed meters', async () => {
+    const { source, push } = pushPort();
+    source.subscribeMeters.mockRejectedValueOnce(new Error('engine starting'));
+    const { result } = renderHook(() => useRoutingMeters(source));
+    await advance();
+    let fail!: (reason: Error) => void;
+    source.getMeters.mockImplementation(
+      () => new Promise<MeterSnapshot>((_, reject) => (fail = reject)),
+    );
+    await advance(4950);
+    await advance(50);
+    expect(source.subscribeMeters).toHaveBeenCalledTimes(2);
+    push(0.5);
+    const pushed = result.current.levels(key);
+    const polls = source.getMeters.mock.calls.length;
+    await act(async () => fail(new Error('late')));
+    expect(result.current.levels(key)).toEqual(pushed);
+    expect(pushed).not.toEqual([]);
+    await advance(200);
+    expect(source.getMeters).toHaveBeenCalledTimes(polls);
+  });
+
+  it('releases a subscription that resolves after the session moved on', async () => {
+    const { source, unsubscribe } = pushPort();
+    let resolve!: (value: () => void) => void;
+    source.subscribeMeters.mockImplementationOnce(
+      () => new Promise<() => void>((done) => (resolve = done)),
+    );
+    const { unmount } = renderHook(() => useRoutingMeters(source));
+    await advance();
+    unmount();
+    await act(async () => resolve(unsubscribe));
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the session pushed when a refusal arrives after it moved on', async () => {
+    const { source } = pushPort();
+    let reject!: (reason: Error) => void;
+    source.subscribeMeters.mockImplementationOnce(
+      () => new Promise<() => void>((_, fail) => (reject = fail)),
+    );
+    renderHook(() => useRoutingMeters(source));
+    await advance();
+    visibility('hidden');
+    visibility('visible');
+    await act(async () => reject(new Error('late')));
+    await advance();
+    expect(source.subscribeMeters).toHaveBeenCalledTimes(2);
+    expect(source.getMeters).not.toHaveBeenCalled();
+  });
+
+  it('keeps meters from the same engine across windows', async () => {
+    const { source, push } = pushPort();
+    const { result } = renderHook(() => useRoutingMeters(source));
+    await advance();
+    push(1);
+    const clear = vi.spyOn(result.current, 'clear');
+    push(0.5);
+    expect(clear).not.toHaveBeenCalled();
+  });
+});

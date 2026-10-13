@@ -265,6 +265,20 @@ export interface MeterSnapshot {
   revision: number;
 }
 
+/** One pushed meter window; the incarnation identifies the engine run that measured it. */
+export interface MeterTelemetry {
+  engineIncarnation: string;
+  sequence: number;
+  meters: MeterSnapshot;
+}
+
+/** Receives pushed meter windows until the stream ends. */
+export interface MeterTelemetryListener {
+  window(telemetry: MeterTelemetry): void;
+  /** The engine or runtime ended the stream; subscribe again to resume. */
+  ended(): void;
+}
+
 export interface ProcessorParameterDescriptor {
   canAutomate: boolean;
   defaultValue: number;
@@ -496,6 +510,8 @@ export interface ControlPort {
   getGraph(): Promise<RuntimeGraphDocument>;
   getGraphStatus(): Promise<GraphRuntimeStatus>;
   getMeters(): Promise<MeterSnapshot>;
+  /** Push alternative to polling `getMeters`; resolves to an unsubscribe function. */
+  subscribeMeters?(listener: MeterTelemetryListener): Promise<() => void>;
   getProcessors(): Promise<ExternalProcessorCatalog>;
   getProcessorEditor(nodeId: string): Promise<ProcessorEditorStatus>;
   rescanProcessors(paths: string[]): Promise<ExternalProcessorCatalog>;

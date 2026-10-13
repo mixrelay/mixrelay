@@ -11,7 +11,7 @@
   - 앱 캡처 pump는 250µs 폴링이며 변환과 형식 갱신·자원 교체 같은 제어 작업을 한 스레드에서 처리한다. 엔진 쪽 읽기 지연은 512프레임(48kHz에서 10.7ms)으로 고정돼 있다.
   - 플러그인 DSP 스레드는 100µs 폴링과 `try_lock`/`yield` 재시도를 사용한다([processor-host](../../crates/processor-host/src/lib.rs)).
   - MixRelay가 만든 스레드는 실시간 스케줄링(time-constraint)이나 오디오 workgroup을 사용하지 않는다.
-- **제어 경로는 요청/응답 폴링이다.** UI → 편집 앱(Tauri invoke) → 실행부(사용자 Unix 소켓, 줄 단위 JSON) → 엔진(127.0.0.1 HTTP/JSON). 미터 20회/s, 열린 플러그인 에디터마다 4회/s, 노드 제어 1회/s, 오디오 상태 약 1회/s를 폴링한다. 연결은 재사용한다.
+- **제어 경로는 요청/응답 폴링이다(미터는 [적용 상태](#적용-상태)처럼 push로 바뀜).** UI → 편집 앱(Tauri invoke) → 실행부(사용자 Unix 소켓, 줄 단위 JSON) → 엔진(127.0.0.1 HTTP/JSON). 미터 20회/s, 열린 플러그인 에디터마다 4회/s, 노드 제어 1회/s, 오디오 상태 약 1회/s를 폴링한다. 연결은 재사용한다.
 
 ## 결정 1. 실시간 실행
 
@@ -39,9 +39,18 @@
 
 - **변경 요청은 요청/응답을 유지한다.** 보내기 전에 만든 작업 ID를 편집 앱·실행부·엔진에 그대로 전달하고, 엔진 incarnation이 다르면 부작용 전에 거부한다. 결과는 `not_admitted / accepted / completed / uncertain`으로 구분하며 자동으로 다시 보내지 않는다. 빠르게 끝난 결과도 실행부가 받을 때까지 보관한다.
 - **상태는 push로 전달한다.** 미터·다이내믹스, 플러그인 에디터 상태, 노드 제어, 엔진 전원·세션, 그래프 revision을 변경 시점에 발행한다. 미터는 엔진의 기존 단일 발행자를 정기 발행으로 바꾸고 binding 목록과 packed `f32` 배열로 보낸다.
-- 구간: 엔진→실행부는 WebSocket 구독 하나, 실행부↔편집 앱은 길이 접두 framed 스트림 하나(명령과 구독 다중화), 편집 앱→웹뷰는 Tauri Channel과 명시적 credit.
+- 구간: 엔진→실행부는 실행부 전체가 공유하는 단방향 구독 하나(SSE. 상태는 엔진에서 실행부로만 흐르므로 WebSocket이 필요 없다), 실행부↔편집 앱은 길이 접두 framed 스트림 하나(명령과 구독 다중화), 편집 앱→웹뷰는 Tauri Channel과 명시적 credit.
 - 모든 상태에는 `runtimeIncarnation`, `engineIncarnation`, 구독 세대, 상태 버전, 미터 sequence, binding 표 버전을 붙이고 재연결 시 전체 snapshot부터 다시 받는다. 느린 구독자는 최신값만 유지하고, 미터는 구간 최대값으로 합친다.
 - 엔진 HTTP 수신은 사용자 소유 Unix 소켓으로 옮겨 peer를 인증한다. 폴링은 대체 경로로 남긴다.
+
+### 적용 상태
+
+- **미터 push (2026-10-13).**
+  - 엔진은 `/api/v1/telemetry/meters`에서 50ms 발행 창마다 `MeterTelemetry {engineIncarnation, sequence, meters}`를 보낸다. 값이 같아도 매 창 보내므로 구독자는 2초 무소식을 고장으로 판단한다. 수신 종료(admission close) 시 스트림도 끝나 graceful shutdown을 막지 않는다.
+  - 실행부는 엔진 스트림 하나를 모든 편집 앱 연결에 나눠 준다. 연결마다 창 하나짜리 mailbox를 두고, 느린 연결의 미전달 창에는 새 창을 구간 최대값으로 합친다(`MeterTelemetry::absorb`).
+  - 편집 앱은 첫 창을 받아야 구독 성공으로 본다. 웹뷰에는 credit 2개 안에서만 보내고, 웹뷰가 창을 처리할 때마다 credit을 돌려준다.
+  - UI는 push를 거부당하면 폴링하면서 5초마다 push를 다시 시도한다. 엔진이 바뀌면 이전 미터를 지운다.
+  - 아직 남은 것: 실행부↔편집 앱 다중화 스트림(지금은 구독마다 연결 하나), packed `f32` 형식, 미터 외 상태의 push, 변경 요청의 작업 ID·incarnation 확인, 엔진 Unix 소켓 수신.
 
 ## 측정
 

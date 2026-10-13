@@ -2749,6 +2749,7 @@ name = "mixrelay-control-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "futures-util",
  "mixrelay-audio-graph",
  "mixrelay-control-protocol",
  "serde",

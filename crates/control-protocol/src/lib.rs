@@ -347,6 +347,156 @@ pub struct MeterSnapshot {
     pub nodes: Vec<NodeMeterSnapshot>,
 }
 
+/// One pushed meter window. The engine incarnation identifies the engine process that
+/// measured it: windows from a replaced engine never mix with its successor's.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeterTelemetry {
+    pub engine_incarnation: String,
+    /// Increases with every window this subscription delivers; gaps are allowed.
+    pub sequence: u64,
+    pub meters: MeterSnapshot,
+}
+
+impl MeterTelemetry {
+    /// Folds a newer window into this undelivered one, so a slow subscriber keeps the
+    /// latest state and the interval maximum instead of a queue. Peaks and gain reduction
+    /// take the maximum per binding; everything else follows the newer window. A window
+    /// from another engine or plan revision replaces this one, since its bindings differ.
+    pub fn absorb(&mut self, newer: Self) {
+        if newer.engine_incarnation != self.engine_incarnation
+            || newer.meters.protocol_version != self.meters.protocol_version
+            || newer.meters.revision != self.meters.revision
+        {
+            *self = newer;
+            return;
+        }
+        let mut older = std::mem::take(&mut self.meters.nodes);
+        self.sequence = newer.sequence;
+        self.meters = newer.meters;
+        for node in &mut self.meters.nodes {
+            let Some(index) = older
+                .iter()
+                .position(|old| old.node_id == node.node_id && old.port_id == node.port_id)
+            else {
+                continue;
+            };
+            let old = older.swap_remove(index);
+            max_peaks(&mut node.peaks, &old.peaks);
+            if let (Some(dynamics), Some(old)) = (&mut node.dynamics, old.dynamics) {
+                max_peaks(&mut dynamics.input_peaks, &old.input_peaks);
+                dynamics.gain_reduction_db = dynamics.gain_reduction_db.max(old.gain_reduction_db);
+            }
+        }
+    }
+}
+
+/// Element-wise maximum when both windows describe the same channels.
+fn max_peaks(peaks: &mut [f32], older: &[f32]) {
+    if peaks.len() == older.len() {
+        for (peak, old) in peaks.iter_mut().zip(older) {
+            *peak = peak.max(*old);
+        }
+    }
+}
+
+#[cfg(test)]
+mod meter_telemetry_tests {
+    use super::{DynamicsMeterSnapshot, MeterSnapshot, MeterTelemetry, NodeMeterSnapshot};
+
+    fn node(id: &str, peaks: &[f32], reduction: Option<f32>) -> NodeMeterSnapshot {
+        NodeMeterSnapshot {
+            node_id: id.to_owned(),
+            port_id: "out".to_owned(),
+            peaks: peaks.to_vec(),
+            dynamics: reduction.map(|gain_reduction_db| DynamicsMeterSnapshot {
+                input_peaks: peaks.to_vec(),
+                gain_reduction_db,
+                threshold_db: -gain_reduction_db,
+            }),
+        }
+    }
+
+    fn window(
+        engine: &str,
+        revision: u64,
+        sequence: u64,
+        nodes: Vec<NodeMeterSnapshot>,
+    ) -> MeterTelemetry {
+        MeterTelemetry {
+            engine_incarnation: engine.to_owned(),
+            sequence,
+            meters: MeterSnapshot {
+                protocol_version: 1,
+                revision,
+                nodes,
+            },
+        }
+    }
+
+    #[test]
+    fn a_slow_subscriber_keeps_the_interval_maximum_of_the_latest_bindings() {
+        let mut pending = window(
+            "a",
+            3,
+            1,
+            vec![
+                node("loud", &[0.9, 0.1], Some(6.0)),
+                node("gone", &[1.0], None),
+                node("resized", &[0.8], None),
+                node("plain", &[0.7], Some(1.0)),
+            ],
+        );
+        pending.absorb(window(
+            "a",
+            3,
+            2,
+            vec![
+                node("loud", &[0.2, 0.5], Some(2.0)),
+                node("new", &[0.3], None),
+                node("resized", &[0.1, 0.1], None),
+                node("plain", &[0.2], None),
+            ],
+        ));
+        assert_eq!(
+            pending,
+            window(
+                "a",
+                3,
+                2,
+                vec![
+                    NodeMeterSnapshot {
+                        dynamics: Some(DynamicsMeterSnapshot {
+                            input_peaks: vec![0.9, 0.5],
+                            gain_reduction_db: 6.0,
+                            threshold_db: -2.0,
+                        }),
+                        ..node("loud", &[0.9, 0.5], None)
+                    },
+                    node("new", &[0.3], None),
+                    node("resized", &[0.1, 0.1], None),
+                    node("plain", &[0.7], None),
+                ],
+            )
+        );
+    }
+
+    #[test]
+    fn another_engine_or_plan_replaces_the_pending_window() {
+        let newer = window("b", 3, 1, vec![node("x", &[0.1], None)]);
+        let mut pending = window("a", 3, 9, vec![node("x", &[1.0], None)]);
+        pending.absorb(newer.clone());
+        assert_eq!(pending, newer);
+        let newer = window("b", 4, 2, vec![node("x", &[0.1], None)]);
+        pending.absorb(newer.clone());
+        assert_eq!(pending, newer);
+        let mut newer = window("b", 4, 3, vec![node("x", &[0.1], None)]);
+        newer.meters.protocol_version = 2;
+        pending.absorb(newer.clone());
+        assert_eq!(pending, newer);
+    }
+}
+
 #[cfg(test)]
 mod dynamics_meter_contract_tests {
     use super::{DynamicsMeterSnapshot, NodeMeterSnapshot};

@@ -1,4 +1,5 @@
 //! One user-owned controller keeps audio alive independently of editor windows.
+use mixrelay_control_protocol::MeterTelemetry;
 use serde_json::{Value, json};
 use std::os::unix::process::CommandExt as _;
 use std::{
@@ -24,6 +25,9 @@ pub(crate) use dispatch::{dispatch, is_service_command};
 
 static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(3);
+/// Covers the runtime opening the engine stream (`local::meters::OPEN_TIMEOUT`) and its
+/// first window.
+const SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Idle connections kept for reuse, and how long one stays reusable: well inside the
 /// controller's idle timeout, so a pooled connection is never one it is closing for
@@ -91,6 +95,32 @@ impl Connection {
             && idle.len() < POOL_LIMIT
         {
             idle.push((stream, std::time::Instant::now()));
+        }
+    }
+
+    /// Opens a dedicated connection on which the runtime pushes meter windows. Succeeds
+    /// only once the first window arrives, so an engine or runtime without push is an
+    /// error the caller can fall back from, not a stream that ends at once.
+    pub(crate) async fn subscribe_meters(&self) -> Result<StartedMeterSubscription, String> {
+        let id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
+        let mut stream = self.connect().await?;
+        let frame = format!(
+            "{}\n",
+            json!({"id": id, "command": {"type": "subscribe_meters"}})
+        );
+        tokio::time::timeout(EXCHANGE_TIMEOUT, stream.write_all(frame.as_bytes()))
+            .await
+            .map_err(|_| "meter subscription request timed out")?
+            .map_err(|e| e.to_string())?;
+        let mut subscription = MeterSubscription {
+            id,
+            reader: BufReader::new(stream),
+        };
+        // The runtime may first open the engine stream (bounded by its own timeout).
+        match tokio::time::timeout(SUBSCRIBE_TIMEOUT, subscription.frame()).await {
+            Ok(Ok(window)) => Ok(subscription.with_first(window)),
+            Ok(Err(reason)) => Err(reason),
+            Err(_) => Err("meter subscription timed out".to_owned()),
         }
     }
 
@@ -385,6 +415,64 @@ fn shared_directory(app: &tauri::AppHandle, identifier: &str) -> Result<PathBuf,
         .parent()
         .ok_or("application data has no parent")?
         .join(identifier))
+}
+
+/// Pushed meter windows on their own runtime connection.
+pub(crate) struct MeterSubscription {
+    id: u64,
+    reader: BufReader<UnixStream>,
+}
+
+/// A subscription whose first window has been read but not yet returned.
+pub(crate) struct StartedMeterSubscription {
+    first: Option<MeterTelemetry>,
+    stream: MeterSubscription,
+}
+
+impl MeterSubscription {
+    fn with_first(self, window: MeterTelemetry) -> StartedMeterSubscription {
+        StartedMeterSubscription {
+            first: Some(window),
+            stream: self,
+        }
+    }
+
+    /// Reads one frame: a window, or why the runtime ended the stream.
+    async fn frame(&mut self) -> Result<MeterTelemetry, String> {
+        let mut line = Vec::new();
+        (&mut self.reader)
+            .take(crate::control_proxy::local::socket::RESPONSE_LIMIT as u64 + 1)
+            .read_until(b'\n', &mut line)
+            .await
+            .map_err(|error| error.to_string())?;
+        let mut frame: Value =
+            serde_json::from_slice(&line).map_err(|_| "meter stream closed".to_owned())?;
+        if frame["id"] != self.id {
+            return Err("meter stream answered another request".to_owned());
+        }
+        if frame["status"] != 206 {
+            let reason = frame["body"]["parameters"]["reason"].as_str();
+            return Err(reason.unwrap_or("meter push unavailable").to_owned());
+        }
+        serde_json::from_value(frame["body"].take()).map_err(|error| error.to_string())
+    }
+}
+
+impl StartedMeterSubscription {
+    /// The next window, or `None` once the runtime ends the stream, it breaks, or it
+    /// falls silent although the engine publishes continuously.
+    pub(crate) async fn next(&mut self) -> Option<MeterTelemetry> {
+        if let Some(window) = self.first.take() {
+            return Some(window);
+        }
+        tokio::time::timeout(
+            crate::control_proxy::telemetry::SILENCE_LIMIT,
+            self.stream.frame(),
+        )
+        .await
+        .ok()?
+        .ok()
+    }
 }
 
 fn open_and_quiet(stream: &UnixStream) -> bool {

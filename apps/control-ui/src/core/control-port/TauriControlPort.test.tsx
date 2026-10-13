@@ -360,3 +360,68 @@ describe('TauriControlPort native pickers and inventory', () => {
     },
   );
 });
+
+describe('pushed meters', () => {
+  it('relays channel messages to the listener and unsubscribes by id', async () => {
+    const invoke = vi.fn().mockResolvedValue(7);
+    let channel!: { onmessage: (message: unknown) => void };
+    const port = new TauriControlPort(invoke, () => {
+      channel = { onmessage: () => undefined };
+      return channel;
+    });
+    const listener = { window: vi.fn(), ended: vi.fn() };
+    const unsubscribe = await port.subscribeMeters(listener);
+    expect(invoke).toHaveBeenCalledWith('control_subscribe_meters', { channel });
+    const telemetry = {
+      engineIncarnation: 'engine-a',
+      sequence: 1,
+      meters: { protocolVersion: 1, revision: 2, nodes: [] },
+    };
+    invoke.mockRejectedValueOnce(new Error('subscription gone'));
+    channel.onmessage(telemetry);
+    channel.onmessage({ ended: true });
+    expect(listener.window).toHaveBeenCalledWith(telemetry);
+    expect(listener.ended).toHaveBeenCalledOnce();
+    // Each consumed window returns a credit; the end of the stream does not.
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke).toHaveBeenLastCalledWith('control_meter_credit', { id: 7 });
+    invoke.mockRejectedValueOnce(new Error('runtime gone'));
+    unsubscribe();
+    await Promise.resolve();
+    expect(invoke).toHaveBeenLastCalledWith('control_unsubscribe_meters', { id: 7 });
+    // A failed unsubscribe neither delivers nor returns credit afterwards.
+    channel.onmessage(telemetry);
+    expect(listener.window).toHaveBeenCalledOnce();
+    expect(invoke).toHaveBeenCalledTimes(3);
+  });
+
+  it('returns credit for windows that arrived before the subscription id', async () => {
+    let subscribed!: (id: number) => void;
+    const invoke = vi.fn((command: string) =>
+      command === 'control_subscribe_meters'
+        ? new Promise<number>((resolve) => (subscribed = resolve))
+        : Promise.resolve(),
+    );
+    let channel!: { onmessage: (message: unknown) => void };
+    const port = new TauriControlPort(invoke as never, () => {
+      channel = { onmessage: () => undefined };
+      return channel;
+    });
+    const listener = { window: vi.fn(), ended: vi.fn() };
+    const subscribing = port.subscribeMeters(listener);
+    const telemetry = {
+      engineIncarnation: 'engine-a',
+      sequence: 1,
+      meters: { protocolVersion: 1, revision: 2, nodes: [] },
+    };
+    channel.onmessage(telemetry);
+    channel.onmessage({ ...telemetry, sequence: 2 });
+    expect(invoke).toHaveBeenCalledOnce();
+    subscribed(4);
+    await subscribing;
+    expect(invoke.mock.calls.slice(1)).toEqual([
+      ['control_meter_credit', { id: 4 }],
+      ['control_meter_credit', { id: 4 }],
+    ]);
+  });
+});

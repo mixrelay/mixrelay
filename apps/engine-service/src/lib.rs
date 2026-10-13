@@ -452,6 +452,8 @@ enum PrepareProcessorError {
 pub struct EngineGraphController {
     paid_access: Arc<dyn Fn() -> bool + Send + Sync>,
     execution_enabled: std::sync::atomic::AtomicBool,
+    /// Random identity of this engine run; telemetry from a replaced engine never mixes in.
+    incarnation: String,
     /// Marks a pause that must outlive the service; set with the durable catalog.
     saved_pause: Option<std::path::PathBuf>,
     suspended_recorders: Mutex<Vec<engine_power::SuspendedRecorder>>,
@@ -590,6 +592,7 @@ impl EngineGraphController {
             recorder_cleanup_error: Mutex::new(None),
             node_control_warning: Mutex::new(None),
             execution_enabled: std::sync::atomic::AtomicBool::new(true),
+            incarnation: new_incarnation(),
             saved_pause: None,
             suspended_recorders: Mutex::new(Vec::new()),
             recorders: recorders.clone(),
@@ -953,6 +956,10 @@ impl ControlBackend for EngineGraphController {
 
     fn meters(&self) -> MeterSnapshot {
         self.meter_snapshot_at(std::time::Instant::now())
+    }
+
+    fn incarnation(&self) -> String {
+        self.incarnation.clone()
     }
 
     fn processors(&self) -> ExternalProcessorCatalog {
@@ -1745,6 +1752,20 @@ fn processor_parameter_error(node_id: &str, parameter_id: u32, reason: &str) -> 
     }
 }
 
+/// 128 random bits from two independently keyed hashes of this process and its start.
+fn new_incarnation() -> String {
+    use std::hash::{BuildHasher as _, RandomState};
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let seed = (std::process::id(), started);
+    format!(
+        "{:016x}{:016x}",
+        RandomState::new().hash_one(seed),
+        RandomState::new().hash_one(seed)
+    )
+}
+
 fn processor_editor_error(node_id: &str, reason: &str) -> ProtocolError {
     ProtocolError {
         code: ErrorCode::ProcessorUnavailable,
@@ -2077,6 +2098,16 @@ fn channel_edge(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_engine_run_has_its_own_incarnation() {
+        let (first, second) = (new_incarnation(), new_incarnation());
+        assert_ne!(first, second);
+        assert_eq!(first.len(), 32);
+        assert!(first.chars().all(|character| character.is_ascii_hexdigit()));
+        let engine = crate::endpoint_settings_tests::controller(default_duplex_document(1, None));
+        assert_eq!(ControlBackend::incarnation(&engine), engine.incarnation);
+    }
 
     #[test]
     fn explicit_empty_startup_does_not_invent_a_default_endpoint() {

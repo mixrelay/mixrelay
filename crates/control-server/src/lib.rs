@@ -42,6 +42,10 @@ pub const GRAPH_CATALOG_ROUTE: &str = "/api/v1/graphs";
 pub const GRAPH_CATALOG_DOCUMENT_ROUTE: &str = "/api/v1/graphs/{id}";
 pub const GRAPH_LAYOUT_ROUTE: &str = "/api/v1/graphs/{id}/layout";
 pub const METERS_ROUTE: &str = "/api/v1/meters";
+/// Server-sent meter windows, one per publication window; a push alternative to polling.
+pub const METER_TELEMETRY_ROUTE: &str = "/api/v1/telemetry/meters";
+/// The publication window pushed meters follow.
+const METER_TELEMETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
 pub const APPLICATION_CAPTURE_MANIFEST_ROUTE: &str = "/api/v1/application-capture/manifest";
 pub const APPLICATION_CAPTURE_PREVIEW_ROUTE: &str = "/api/v1/application-capture/preview";
 pub const PROCESSORS_ROUTE: &str = "/api/v1/processors";
@@ -284,6 +288,10 @@ pub trait ControlBackend: Send + Sync {
     fn graph(&self) -> GraphDocument;
     fn graph_status(&self) -> GraphRuntimeStatus;
     fn meters(&self) -> MeterSnapshot;
+    /// Identifies this engine process; a restarted engine has a new one.
+    fn incarnation(&self) -> String {
+        String::new()
+    }
     fn processors(&self) -> ExternalProcessorCatalog;
 
     /// Rebuilds the external processor catalog from standard and explicit directories.
@@ -522,6 +530,7 @@ pub fn router_with_backend(
         .route(GRAPH_STATUS_ROUTE, get(graph_status))
         .route(CONTROL_SNAPSHOT_ROUTE, get(node_control::snapshot))
         .route(METERS_ROUTE, get(meters))
+        .route(METER_TELEMETRY_ROUTE, get(meter_telemetry))
         .route(
             APPLICATION_CAPTURE_MANIFEST_ROUTE,
             get(application_capture_manifest),
@@ -714,6 +723,43 @@ async fn catalog_task(work: impl FnOnce() -> Response + Send + 'static) -> Respo
             "graph catalog control task failed",
         )
     })
+}
+
+/// Pushes every publication window from the engine's shared publisher, so a steady
+/// signal stays lit and subscribers can treat silence on the stream as a failure. Missed
+/// ticks are skipped, never queued: the publisher keeps the peak until it is drained.
+/// The stream ends when admission closes, so it never holds up graceful shutdown.
+async fn meter_telemetry(
+    State(state): State<ControlState>,
+    axum::Extension(operations): axum::Extension<ControlOperations>,
+) -> axum::response::sse::Sse<
+    impl futures_util::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+> {
+    use futures_util::StreamExt as _;
+    let backend = state.backend;
+    let incarnation = backend.incarnation();
+    let mut interval = tokio::time::interval(METER_TELEMETRY_INTERVAL);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let stream =
+        futures_util::stream::unfold((interval, 0_u64), move |(mut interval, sequence)| {
+            let backend = Arc::clone(&backend);
+            let incarnation = incarnation.clone();
+            async move {
+                interval.tick().await;
+                let sequence = sequence + 1;
+                let event = axum::response::sse::Event::default()
+                    .event("meters")
+                    .json_data(mixrelay_control_protocol::MeterTelemetry {
+                        engine_incarnation: incarnation,
+                        sequence,
+                        meters: backend.meters(),
+                    })
+                    .unwrap_or_default();
+                Some((Ok(event), (interval, sequence)))
+            }
+        })
+        .take_until(operations.closed());
+    axum::response::sse::Sse::new(stream)
 }
 
 async fn meters(State(state): State<ControlState>) -> Json<MeterSnapshot> {
@@ -1489,6 +1535,60 @@ mod tests {
             .expect("response should have a body");
         let value = serde_json::from_slice(&bytes).expect("response should be JSON");
         (status, value)
+    }
+
+    #[tokio::test]
+    async fn meter_telemetry_streams_every_window_until_admission_closes() {
+        use futures_util::StreamExt as _;
+        let backend = TestBackend::with_result(Ok(GraphApplyResponse {
+            protocol_version: PROTOCOL_VERSION,
+            revision: 4,
+            state: GraphApplyState::Active,
+            persistence_error: None,
+        }));
+        let operations = ControlOperations::new();
+        let response = router_with_backend(backend, operations.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(METER_TELEMETRY_ROUTE)
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("request should run");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[CONTENT_TYPE], "text/event-stream");
+        let mut events = response.into_body().into_data_stream();
+        let first = tokio::time::timeout(std::time::Duration::from_secs(2), events.next())
+            .await
+            .expect("first window")
+            .expect("open stream")
+            .expect("event bytes");
+        let text = String::from_utf8(first.to_vec()).expect("utf-8 event");
+        assert!(text.starts_with("event: meters\n"), "{text}");
+        let data = text
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .expect("event data");
+        let telemetry: mixrelay_control_protocol::MeterTelemetry =
+            serde_json::from_str(data).expect("telemetry JSON");
+        assert_eq!(telemetry.sequence, 1);
+        assert_eq!(telemetry.meters.revision, 4);
+        // The test backend has no engine identity.
+        assert_eq!(telemetry.engine_incarnation, "");
+        // A steady window is sent again, so subscribers can tell it from a stall.
+        let second = tokio::time::timeout(std::time::Duration::from_secs(2), events.next())
+            .await
+            .expect("second window")
+            .expect("open stream")
+            .expect("event bytes");
+        assert!(String::from_utf8_lossy(&second).contains("\"sequence\":2"));
+        operations.close_admission();
+        let ended = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while events.next().await.is_some() {}
+        })
+        .await;
+        assert!(ended.is_ok(), "closing admission ends the stream");
     }
 
     #[tokio::test]

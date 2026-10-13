@@ -191,3 +191,93 @@ fn controller_survives_actual_editor_process_exit() {
         std::thread::sleep(Duration::from_millis(10));
     }
 }
+
+/// A runtime that answers one meter subscription with `replies` (the request id fills in
+/// `"id": null`), then closes the connection.
+fn meter_runtime(connection: &Connection, replies: Vec<Value>) -> tokio::task::JoinHandle<()> {
+    let listener = UnixListener::bind(&connection.path).unwrap();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut reader = BufReader::new(stream);
+        let mut frame = String::new();
+        reader.read_line(&mut frame).await.unwrap();
+        let request: Value = serde_json::from_str(&frame).unwrap();
+        assert_eq!(request["command"]["type"], "subscribe_meters");
+        for mut reply in replies {
+            if reply["id"].is_null() {
+                reply["id"] = request["id"].clone();
+            }
+            reader
+                .get_mut()
+                .write_all(format!("{reply}\n").as_bytes())
+                .await
+                .unwrap();
+        }
+    })
+}
+
+fn meter_window(sequence: u64) -> Value {
+    json!({"id": null, "status": 206, "body": {
+        "engineIncarnation": "engine",
+        "sequence": sequence,
+        "meters": {"protocolVersion": 1, "revision": 1, "nodes": []}
+    }})
+}
+
+#[tokio::test]
+async fn a_meter_subscription_yields_pushed_windows_until_the_runtime_ends_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = fixture_connection(directory.path());
+    let server = meter_runtime(
+        &connection,
+        vec![
+            meter_window(1),
+            meter_window(2),
+            json!({"id": null, "status": 503, "body": {}}),
+        ],
+    );
+    let mut subscription = connection.subscribe_meters().await.unwrap();
+    let sequence = |window: Option<mixrelay_control_protocol::MeterTelemetry>| {
+        window.map(|window| window.sequence)
+    };
+    assert_eq!(sequence(subscription.next().await), Some(1));
+    assert_eq!(sequence(subscription.next().await), Some(2));
+    // The terminal frame ends the stream, as does a closed connection.
+    assert_eq!(sequence(subscription.next().await), None);
+    assert_eq!(sequence(subscription.next().await), None);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_meter_subscription_without_a_first_window_is_refused() {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = fixture_connection(directory.path());
+    for (replies, reason) in [
+        (
+            vec![
+                json!({"id": null, "status": 503, "body": {"parameters": {"reason": "HTTP 404"}}}),
+            ],
+            "HTTP 404",
+        ),
+        (
+            vec![json!({"id": null, "status": 400, "body": {}})],
+            "meter push unavailable",
+        ),
+        (
+            vec![json!({"id": 0, "status": 206, "body": {}})],
+            "meter stream answered another request",
+        ),
+        // A runtime that does not know the command closes the connection.
+        (Vec::new(), "meter stream closed"),
+        (
+            vec![json!({"id": null, "status": 206, "body": {"sequence": "x"}})],
+            "invalid type: string \"x\", expected u64",
+        ),
+    ] {
+        let _ = std::fs::remove_file(&connection.path);
+        let server = meter_runtime(&connection, replies);
+        let refused = connection.subscribe_meters().await.err().unwrap();
+        assert!(refused.starts_with(reason), "{refused}");
+        server.await.unwrap();
+    }
+}

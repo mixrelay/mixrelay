@@ -13,6 +13,7 @@ use super::{ControlProxyClient, ControlProxyResponse, Method, rejected};
 #[cfg(target_os = "macos")]
 use crate::macos_audio::ApplicationCaptureState;
 
+mod meters;
 pub(crate) mod socket;
 
 /// One request per connection. Callers refresh after any disconnect and never replay writes.
@@ -27,12 +28,18 @@ impl Request {
     pub(super) fn is_read(&self) -> bool {
         matches!(self.command, Command::Snapshot {})
     }
+
+    /// The connection becomes a stream of pushed meter windows.
+    pub(super) fn is_meter_subscription(&self) -> bool {
+        matches!(self.command, Command::SubscribeMeters {})
+    }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
     Snapshot {},
+    SubscribeMeters {},
     Invoke {
         name: String,
         arguments: Value,
@@ -86,6 +93,10 @@ impl LocalControl {
         self
     }
 
+    pub(super) async fn meter_stream(&self) -> Result<reqwest::Response, String> {
+        self.client.meter_stream().await
+    }
+
     pub(crate) async fn dispatch(&self, request: Request) -> Value {
         let response = self
             .execute(request.command)
@@ -118,6 +129,10 @@ impl LocalControl {
                 })
             }
             Command::Snapshot {} => self.snapshot().await,
+            // The socket streams subscriptions on their own connection before dispatch.
+            Command::SubscribeMeters {} => {
+                Err("meter subscriptions stream on their own connection".to_owned())
+            }
             Command::Node {
                 session,
                 target,

@@ -13,6 +13,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
+use super::meters::MeterHub;
 use super::{LocalControl, Request};
 
 pub(crate) const FRAME_LIMIT: u64 = 4 * 1024 * 1024;
@@ -148,6 +149,7 @@ async fn serve(
     uid: u32,
 ) {
     let mut clients = JoinSet::new();
+    let meters = MeterHub::new(Arc::clone(&control), stop.clone());
     loop {
         tokio::select! {
             biased;
@@ -157,8 +159,9 @@ async fn serve(
                 let Ok((stream, _)) = accepted else { break; };
                 if clients.len() >= 32 || !stream.peer_cred().is_ok_and(|peer| peer.uid() == uid) { continue; }
                 let control = Arc::clone(&control);
+                let meters = Arc::clone(&meters);
                 let stopped = stop.clone();
-                clients.spawn(async move { let _ = connection(stream, control, stopped).await; });
+                clients.spawn(async move { let _ = connection(stream, control, meters, stopped).await; });
             }
         }
     }
@@ -169,6 +172,7 @@ async fn serve(
 async fn connection(
     stream: UnixStream,
     control: Arc<LocalControl>,
+    meters: Arc<MeterHub<LocalControl>>,
     mut stop: watch::Receiver<bool>,
 ) -> io::Result<()> {
     let (read, mut write) = stream.into_split();
@@ -191,6 +195,10 @@ async fn connection(
         }
         let request: Request = serde_json::from_slice(&frame).map_err(io::Error::other)?;
         let request_id = request.id;
+        if request.is_meter_subscription() {
+            // The connection now carries only this subscription until either side ends it.
+            return super::meters::relay(request_id, &meters, &mut read, &mut write, stop).await;
+        }
         if !request.is_read() {
             let delivered = dispatch_mutation(
                 request_id,
@@ -245,7 +253,7 @@ where
     }
 }
 
-async fn write_frame<W>(write: &mut W, response: &serde_json::Value) -> io::Result<()>
+pub(super) async fn write_frame<W>(write: &mut W, response: &serde_json::Value) -> io::Result<()>
 where
     W: AsyncWrite + Unpin,
 {

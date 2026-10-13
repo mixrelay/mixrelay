@@ -52,6 +52,8 @@ struct Inner {
     owner_nonce: u128,
     next_id: std::sync::atomic::AtomicU64,
     wake: Notify,
+    /// Becomes true when admission closes; long-lived streams end with it.
+    closing: tokio::sync::watch::Sender<bool>,
 }
 
 struct State {
@@ -118,6 +120,7 @@ impl ControlOperations {
                 owner_nonce: now ^ (u128::from(sequence) << 64),
                 next_id: std::sync::atomic::AtomicU64::new(1),
                 wake: Notify::new(),
+                closing: tokio::sync::watch::Sender::new(false),
             }),
         }
     }
@@ -126,6 +129,15 @@ impl ControlOperations {
     pub fn close_admission(&self) {
         let mut state = self.lock_state();
         state.admission_open = false;
+        self.inner.closing.send_replace(true);
+    }
+
+    /// Resolves once admission closes, so streamed responses let graceful shutdown finish.
+    pub(crate) fn closed(&self) -> impl std::future::Future<Output = ()> + Send + use<> {
+        let mut closing = self.inner.closing.subscribe();
+        async move {
+            let _ = closing.wait_for(|closing| *closing).await;
+        }
     }
 
     /// Waits until every admitted handler has published a terminal receipt.

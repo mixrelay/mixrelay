@@ -13,9 +13,12 @@ pub(crate) mod local;
 pub(crate) mod node_control;
 pub(crate) mod recorder;
 pub(crate) mod recording_settings;
+pub(crate) mod telemetry;
 pub(crate) mod workspace;
 
 const CONTROL_ORIGIN: &str = "http://127.0.0.1:19341";
+/// The engine's server-sent meter windows (`mixrelay_control_server::METER_TELEMETRY_ROUTE`).
+const METER_TELEMETRY_ROUTE: &str = "/api/v1/telemetry/meters";
 const PROCESSOR_RETRY_ROUTE: &str = "/api/v1/processors/retry";
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -181,6 +184,27 @@ impl ControlProxyClient {
             return Ok(rejected("control_unavailable"));
         }
         exchange::request(self, CONTROL_ORIGIN, method, path, body).await
+    }
+
+    /// Opens the engine's pushed meter windows. The stream is long-lived, so it holds
+    /// no request admission: shutdown never waits for a subscriber.
+    pub(crate) async fn meter_stream(&self) -> Result<reqwest::Response, String> {
+        if self.closing.load(std::sync::atomic::Ordering::Acquire)
+            || self.unavailable.load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Err("control unavailable".to_owned());
+        }
+        let response = self
+            .client
+            .get(format!("{CONTROL_ORIGIN}{METER_TELEMETRY_ROUTE}"))
+            .send()
+            .await
+            .map_err(|error| error.to_string())?;
+        if response.status().is_success() {
+            Ok(response)
+        } else {
+            Err(format!("meter telemetry HTTP {}", response.status()))
+        }
     }
 }
 
