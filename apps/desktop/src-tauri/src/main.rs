@@ -365,6 +365,13 @@ fn handle_application_event(app: &tauri::AppHandle, event: &tauri::RunEvent) {
     if let tauri::RunEvent::Reopen { .. } = event
         && *app.state::<app_mode::AppMode>() == app_mode::AppMode::Service
     {
+        // With no editor running, reopening MixRelay targets this process, and
+        // LaunchServices promotes it to a Dock app because the shared bundle is a
+        // regular app. The runtime stays in the background; the editor it opens is
+        // the one Dock app.
+        if let Err(error) = app.set_activation_policy(tauri::ActivationPolicy::Accessory) {
+            tracing::error!(%error, "could not keep the runtime in the background");
+        }
         background::menu::open_editor(app);
     }
     #[cfg(target_os = "macos")]
