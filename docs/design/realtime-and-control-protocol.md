@@ -4,13 +4,13 @@
 
 ## 현재 구조와 확인된 사실
 
-- **오디오 데이터 경로는 이미 공유 메모리다.** HAL Driver(coreaudiod)와 엔진은 lock-free 공유 링으로 PCM을 주고받으며, 콜백마다 소켓·시스템 호출을 쓰지 않는다. Driver는 재생을 캡처 링에 직접 써서 BlackHole과 같은 Driver 내부 루프백을 제공한다([hal_io.rs](../../native/macos/common/hal_io.rs)).
+- **HAL 공유 링은 HAL이 소유하는 루프백 저장소다.** Driver 서비스가 익명 공유 메모리를 할당하고 HAL Driver(coreaudiod)에 전달한다. HAL은 재생을 캡처 링에 직접 써서 Driver 내부 루프백을 제공한다([hal_io.rs](../../native/macos/common/hal_io.rs)). 그래프 엔진은 일반 CoreAudio 클라이언트로 장치를 열며 HAL 링을 직접 처리하지 않는다. 앱 소스의 공유 메모리 전송은 이 루프백 저장소와 별도다.
 - **그래프 렌더링은 대부분 CoreAudio IOProc 안에서 실행된다.** 엔진은 MixRelay 가상 장치도 일반 CoreAudio 클라이언트로 열며([spec.rs](../../apps/engine-service/src/macos_devices/spec.rs)), 사용 가능한 장치 클록이 있으면 그 IOProc에서 동기적으로 렌더링한다([direct.rs](../../apps/engine-service/src/macos_devices/direct.rs)). 이 경로는 이미 실시간 스케줄링을 받는다.
-- **폴링·일반 우선순위로 실행되는 경로가 남아 있다.**
+- **실시간 승격과 알림 대기는 일부 경로에 적용됐고, 폴링·제어 작업 분리는 남아 있다.**
   - 장치 클록이 없을 때의 대체 워커는 250µs 잠들며 폴링한다([macos/mod.rs](../../apps/engine-service/src/macos/mod.rs)).
-  - 앱 캡처 pump는 250µs 폴링이며 변환과 형식 갱신·자원 교체 같은 제어 작업을 한 스레드에서 처리한다. 엔진 쪽 읽기 지연은 512프레임(48kHz에서 10.7ms)으로 고정돼 있다.
-  - 플러그인 DSP 스레드는 100µs 폴링과 `try_lock`/`yield` 재시도를 사용한다([processor-host](../../crates/processor-host/src/lib.rs)).
-  - MixRelay가 만든 스레드는 실시간 스케줄링(time-constraint)이나 오디오 workgroup을 사용하지 않는다.
+  - 앱 캡처 pump는 tap 콜백 알림으로 깨어나고 변환 구간에 time-constraint 우선순위를 적용한다. 형식 갱신·자원 교체 같은 제어 작업은 여전히 같은 스레드에서 실시간 정책을 잠시 해제한 채 처리한다([clock_pump.rs](../../apps/desktop/src-tauri/src/macos_audio/clock_pump.rs)). 엔진 쪽 읽기 지연은 512프레임(48kHz에서 10.7ms)으로 고정돼 있다.
+  - 플러그인 DSP 스레드는 macOS에서 time-constraint 우선순위를 적용하고, macOS 14.4 이상에서는 공유 futex로 대기한다. 100µs 폴링은 futex를 사용할 수 없거나 대기가 실패했을 때의 대체 경로다. 플러그인 `try_lock` 경합 시에는 50µs 잠든 뒤 재시도한다([processor-host](../../crates/processor-host/src/lib.rs)).
+  - MixRelay가 만든 앱 캡처 pump와 플러그인 DSP 스레드는 실시간 스케줄링(time-constraint) 승격을 시도하며 실패 시 일반 우선순위로 동작한다. 대체 그래프 워커의 실시간 승격과 오디오 workgroup 참여는 아직 적용되지 않았다.
 - **제어 경로는 요청/응답 폴링이다(미터는 [적용 상태](#적용-상태)처럼 push로 바뀜).** UI → 편집 앱(Tauri invoke) → 실행부(사용자 Unix 소켓, 줄 단위 JSON) → 엔진(127.0.0.1 HTTP/JSON). 미터 20회/s, 열린 플러그인 에디터마다 4회/s, 노드 제어 1회/s, 오디오 상태 약 1회/s를 폴링한다. 연결은 재사용한다.
 
 ## 결정 1. 실시간 실행

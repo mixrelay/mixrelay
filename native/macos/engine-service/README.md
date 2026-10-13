@@ -1,34 +1,29 @@
-# MixRelay macOS engine service
+# MixRelay macOS engine service native boundary
 
-This is the launchd-activated control-plane companion for the macOS HAL plug-in.
-The executable entry point is Rust; the native layer is limited to the named
-XPC listener, fixed-layout endpoint transport, and descriptor transfer required
-by macOS.
+This directory provides the C ABI headers and the Blocks-based XPC listener
+adapter for the Rust graph engine. The launchd Mach service
+`io.mixrelay.audio.engine` handles application-source transport attachment and
+engine wake messages. Rust owns listener and peer lifetimes, request handling,
+and the graph-owned application-source registry; `src/MREngineService.c`
+bridges XPC event-handler Blocks into that Rust implementation.
 
-The service creates an unlinked temporary backing file, maps and initializes a
-duplex endpoint transport, and responds only to the versioned endpoint request
-defined by `MRHALControlProtocol`. No PCM crosses XPC. The HAL receives a
-duplicated descriptor and performs its own full layout and channel validation.
+Application capture producers obtain a descriptor for a separate shared-memory
+source transport through this listener. Captured PCM travels through that
+transport to the graph, not through XPC messages.
 
-After initialization, the Rust worker prepares a stereo virtual-I/O
-pass-through graph once, allocates its block buffers once, and processes
-128-frame chunks directly between the shared render and capture buffers. The
-shared transport publishes an absolute-frame watermark and stream epoch, so the
-worker neither guesses the Core Audio cursor nor replays a previous timeline.
-Graph lowering resolves node IDs, ports, and channel routes before the loop;
-the steady-state block path performs no graph lookup, allocation, or lock.
+Virtual-device control belongs to the Driver service
+(`io.mixrelay.audio.driver`). The HAL connects to that service for endpoint
+inventory and transport descriptors. The Driver service allocates anonymous
+shared memory and owns mapping replacement and inventory generation policy.
+The endpoint rings hold HAL-owned loopback audio: HAL publishes playback into
+its capture storage without requiring the graph engine to run.
 
-Run the non-installing smoke test with:
+The graph engine opens MixRelay virtual devices and other audio devices as
+ordinary CoreAudio clients. Device IOProc callbacks supply the graph's device
+I/O; the engine does not directly process the HAL endpoint rings. The headers
+and fixtures here also describe the native device, aggregate, and application
+clock boundaries implemented by the Rust audio adapters.
 
-```sh
-pnpm smoke:macos-engine-xpc
-```
-
-The script registers an ephemeral user LaunchAgent, crosses the real named Mach
-service, validates the received transport through the HAL attachment layer, and
-removes the service on both success and failure. It does not install the HAL
-driver or modify `/Library`.
-
-The current same-user peer check is a development baseline, not final client
-authentication. Signed production builds must validate the expected peer
-identity before exposing live audio transport.
+The current engine listener accepts peers belonging to the console user. This
+is a development baseline; signed production peer-identity validation remains
+required before exposing live application-source transport.

@@ -16,7 +16,7 @@ use crate::registry::Registry;
 #[derive(Default)]
 pub(crate) struct InventoryState {
     // Generation counters are scoped to an authenticated XPC connection, not
-    // coreaudiod's lifetime. Engine restarts allocate a new counter namespace.
+    // coreaudiod's lifetime. Driver service restarts allocate a new counter namespace.
     authority: u64,
     connection: u64,
     // Highest fully reconciled generation and highest validated intent differ

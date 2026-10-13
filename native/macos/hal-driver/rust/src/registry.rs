@@ -213,7 +213,7 @@ impl Registry {
         let generation = control.next_generation;
         control.next_generation = generation.checked_add(1).ok_or(CAPACITY)?;
         // Reconnection must not overwrite a DAW-owned nominal rate with stale
-        // engine metadata. A pending explicit rate request is preserved too.
+        // Driver service inventory metadata. A pending explicit rate request is preserved too.
         let rate = control.pending.as_ref().map_or_else(
             || device.rate.load(Ordering::Acquire),
             |pending| pending.rate,

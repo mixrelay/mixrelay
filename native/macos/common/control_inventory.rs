@@ -1,5 +1,5 @@
 //! Versioned XPC inventory codec. This module owns message/descriptor lifetimes,
-//! not the engine or HAL registry. A failed snapshot never publishes a partial
+//! not the Driver service or HAL registry. A failed snapshot never publishes a partial
 //! authoritative list, so malformed traffic cannot trigger device removal.
 #![cfg(target_os = "macos")]
 
@@ -471,7 +471,7 @@ pub unsafe extern "C" fn mr_hal_control_parse_endpoint_remove(
     true
 }
 
-/// Creates a replacement intent, not a registry mutation. The engine must
+/// Creates a replacement intent, not a registry mutation. The Driver service must
 /// compare the expected generation before retiring an endpoint's mapping.
 ///
 /// # Safety
@@ -504,7 +504,7 @@ pub unsafe extern "C" fn mr_hal_control_create_transport_replacement_request(
 
 /// # Safety
 /// Message must be live XPC; outputs must be writable, distinct storage. Invalid
-/// messages leave both outputs unchanged. Generation policy belongs to engine.
+/// messages leave both outputs unchanged. Generation policy belongs to the Driver service.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mr_hal_control_parse_transport_replacement_request(
     message: Xpc,

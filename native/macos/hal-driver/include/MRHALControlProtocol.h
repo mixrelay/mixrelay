@@ -11,7 +11,9 @@
 extern "C" {
 #endif
 
-#define MR_HAL_CONTROL_SERVICE_NAME "io.mixrelay.audio.engine"
+/* Engine application-source transport and wake service only.
+ * HAL inventory/control connects to the Driver service (io.mixrelay.audio.driver). */
+#define MR_ENGINE_SERVICE_NAME "io.mixrelay.audio.engine"
 
 enum {
     MR_HAL_CONTROL_PROTOCOL_VERSION = 1,
@@ -58,7 +60,7 @@ bool mr_hal_control_parse_endpoint_remove(
     xpc_object_t message, uint8_t endpoint_id[MR_ENDPOINT_ID_BYTES],
     uint64_t *generation);
 
-/* Replacement intent only. The engine compares expected_generation so repeated
+/* Replacement intent only. The Driver service compares expected_generation so repeated
  * requests cannot replace a newly published mapping a second time. */
 xpc_object_t mr_hal_control_create_transport_replacement_request(
     const uint8_t endpoint_id[MR_ENDPOINT_ID_BYTES], uint64_t expected_generation);

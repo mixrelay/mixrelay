@@ -44,7 +44,6 @@ fn build_macos_service() {
     println!("cargo:rerun-if-changed=../../crates/audio-io/src/formats.rs");
     println!("cargo:rerun-if-changed=../../crates/audio-io/native_format_header.rs");
     println!("cargo:rerun-if-changed=../../native/pcm-ring/include/MRPcmRing.h");
-    println!("cargo:rerun-if-changed={engine_include}/MREndpointPeers.h");
     println!("cargo:rerun-if-changed={engine_include}/MREngineSourceRegistry.h");
     println!("cargo:rerun-if-changed={hal_include}/MRHALControlProtocol.h");
     println!("cargo:rerun-if-changed={hal_include}/MREndpointTransport.h");

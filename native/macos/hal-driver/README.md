@@ -123,9 +123,10 @@ Hook storage remains retained until native unregister drains, including failure.
 
 ## Installation and acceptance
 
-Driver installation uses the independent package described in
-[macOS packaging](../../../packaging/macos/README.md). Installing or removing HAL
-requires OS approval and a CoreAudio reload, not a Mac reboot; it does not install the graph App.
+Driver and HAL ship with the editor and engine in the complete MixRelay installer
+described in [macOS packaging](../../../packaging/macos/README.md); there is no
+separate Driver installation. Installing or removing HAL requires OS approval
+and a CoreAudio reload, not a Mac reboot.
 The installer warns about the brief system-audio interruption and verifies actual
 activation. Runtime virtual-device edits require neither reload nor reboot. Driver and
 HAL use the same current inventory contract. Do not retain a previous implementation
