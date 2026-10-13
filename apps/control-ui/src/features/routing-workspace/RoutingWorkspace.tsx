@@ -46,7 +46,7 @@ import { WorkspaceHeader } from '../../core/ui/WorkspaceHeader';
 import { RecorderControls } from '../recorder/RecorderControls';
 import { applicationInventorySelection } from './applicationIdentity';
 import { defaultEffectLabels, isChainKind, isEffectKind } from './builtinEffects';
-import { controlChanges, rebaseControls } from './controlReconciliation';
+import { controlChanges, rebaseControlsWithHistory } from './controlReconciliation';
 import {
   changeEndpointBuffer,
   type DeviceBufferAction,
@@ -632,8 +632,8 @@ function useGraphApplication(
           const changes = controlChanges(before, document);
           const model = currentModel.current;
           if (!changes || !model) return false;
-          latest.current.history.rebase((entry) => rebaseControls(entry, changes));
-          const next = { ...rebaseControls(model, changes), revision: document.revision };
+          const rebased = rebaseControlsWithHistory(model, changes, latest.current.history.rebase);
+          const next = { ...rebased, revision: document.revision };
           currentModel.current = next;
           latest.current.graph.setModel(next);
           return true;

@@ -16,6 +16,23 @@ export interface HistoryStep<Value, Kind> {
   value: Value;
 }
 
+/** Adjacent entries share snapshots (one's `after` is the next one's `before`). Each
+ * distinct snapshot is transformed once, so the rebased history keeps sharing them. */
+function rebaseEntries<Value, Kind>(
+  entries: HistoryEntry<Value, Kind>[],
+  transform: (value: Value) => Value,
+) {
+  const rebased = new Map<Value, Value>();
+  const once = (value: Value) => {
+    if (!rebased.has(value)) rebased.set(value, transform(value));
+    return rebased.get(value) as Value;
+  };
+  for (const entry of entries) {
+    entry.before = once(entry.before);
+    entry.after = once(entry.after);
+  }
+}
+
 export function useUndoHistory<Value, Kind>() {
   const undoStack = useRef<HistoryEntry<Value, Kind>[]>([]);
   const redoStack = useRef<HistoryEntry<Value, Kind>[]>([]);
@@ -111,10 +128,7 @@ export function useUndoHistory<Value, Kind>() {
   const rebase = useCallback((transform: (value: Value) => Value) => {
     const entries = [...undoStack.current, ...redoStack.current];
     if (pendingEntry.current) entries.push(pendingEntry.current);
-    for (const entry of entries) {
-      entry.before = transform(entry.before);
-      entry.after = transform(entry.after);
-    }
+    rebaseEntries(entries, transform);
   }, []);
 
   useEffect(() => () => cancelPendingTimer(), [cancelPendingTimer]);

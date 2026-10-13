@@ -6,6 +6,7 @@ fn fixture_connection(directory: &std::path::Path) -> Connection {
     Connection {
         path: directory.join("service.sock"),
         uid: fs::metadata(directory).unwrap().uid(),
+        idle: Arc::default(),
     }
 }
 
@@ -39,6 +40,70 @@ async fn heartbeat_keeps_one_command_alive_and_returns_the_service_error() {
             .unwrap_err(),
         json!({"code":"feature_limit"})
     );
+    server.await.unwrap();
+}
+
+/// Answers `count` requests on one accepted stream with `{"ok": id}`.
+async fn answer(reader: &mut BufReader<tokio::net::UnixStream>, count: usize) {
+    for _ in 0..count {
+        let mut frame = String::new();
+        reader.read_line(&mut frame).await.unwrap();
+        let request: Value = serde_json::from_str(&frame).unwrap();
+        let reply = json!({"id":request["id"],"status":200,"body":{"ok":request["id"]}});
+        reader
+            .get_mut()
+            .write_all(format!("{reply}\n").as_bytes())
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn sequential_requests_reuse_one_open_connection() {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = fixture_connection(directory.path());
+    let listener = UnixListener::bind(&connection.path).unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        answer(&mut BufReader::new(stream), 2).await;
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                .await
+                .is_err()
+        );
+    });
+    for _ in 0..2 {
+        assert!(
+            connection
+                .invoke("control_get_meters", json!({}))
+                .await
+                .is_ok()
+        );
+    }
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_connection_the_controller_closed_is_replaced_not_reused() {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = fixture_connection(directory.path());
+    let listener = UnixListener::bind(&connection.path).unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        answer(&mut BufReader::new(stream), 1).await;
+        // The first stream is closed here; the next request needs a new connection.
+        let (stream, _) = listener.accept().await.unwrap();
+        answer(&mut BufReader::new(stream), 1).await;
+    });
+    assert!(
+        connection
+            .invoke("control_get_meters", json!({}))
+            .await
+            .is_ok()
+    );
+    // Give the close time to reach the client before it chooses a connection.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(connection.invoke("driver_mutate", json!({})).await.is_ok());
     server.await.unwrap();
 }
 

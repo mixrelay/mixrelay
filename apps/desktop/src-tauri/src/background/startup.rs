@@ -270,6 +270,7 @@ mod tests {
             Connection {
                 path: directory.join("control.sock"),
                 uid: std::fs::metadata(directory).unwrap().uid(),
+                idle: std::sync::Arc::default(),
             },
             executable,
         )
@@ -377,15 +378,17 @@ mod tests {
             let connection = Connection {
                 path: directory.path().join("control.sock"),
                 uid: std::fs::metadata(directory.path()).unwrap().uid(),
+                idle: std::sync::Arc::default(),
             };
             let listener = UnixListener::bind(&connection.path).unwrap();
             let server = tokio::spawn(async move {
+                // The controller keeps a connection open for the next request.
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut reader = BufReader::new(stream);
                 for result in [
                     json!({"protocolVersion":2,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")}),
                     json!({"status":code}),
                 ] {
-                    let (stream, _) = listener.accept().await.unwrap();
-                    let mut reader = BufReader::new(stream);
                     let mut frame = String::new();
                     reader.read_line(&mut frame).await.unwrap();
                     let request: Value = serde_json::from_str(&frame).unwrap();

@@ -67,6 +67,32 @@ describe('pending history rebasing and cleanup', () => {
     expect(result.current.redo()).toEqual({ kind: 'gain', value: 11 });
   });
 
+  it('transforms each shared snapshot once so rebased entries keep sharing it', () => {
+    const snapshots = [{ value: 0 }, { value: 1 }, { value: 2 }];
+    const { result } = renderHook(() => useUndoHistory<{ value: number }, 'layout'>());
+    act(() => {
+      result.current.record(
+        snapshots[0] as { value: number },
+        snapshots[1] as { value: number },
+        'layout',
+      );
+      result.current.record(
+        snapshots[1] as { value: number },
+        snapshots[2] as { value: number },
+        'layout',
+      );
+    });
+    const transform = vi.fn((snapshot: { value: number }) => ({ value: snapshot.value + 10 }));
+    act(() => result.current.rebase(transform));
+    expect(transform).toHaveBeenCalledTimes(3);
+    const second = result.current.undo();
+    const first = result.current.undo();
+    expect(second?.value).toEqual({ value: 11 });
+    // The first entry's `after` and the second's `before` are still one object.
+    expect(result.current.redo()?.value).toBe(second?.value);
+    expect(first?.value).toEqual({ value: 10 });
+  });
+
   it('flushes a pending gesture before changing its group or operation kind', () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useUndoHistory<number, 'gain' | 'layout'>());

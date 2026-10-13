@@ -1,6 +1,11 @@
 import { expect, it } from 'vitest';
 import type { RuntimeGraphDocument } from '../../core/control-port/types';
-import { acknowledgedNodeControl, controlChanges, rebaseControls } from './controlReconciliation';
+import {
+  acknowledgedNodeControl,
+  controlChanges,
+  rebaseControls,
+  rebaseControlsWithHistory,
+} from './controlReconciliation';
 import { runtimeGraphToAudioGraph } from './model';
 
 const before: RuntimeGraphDocument = {
@@ -139,4 +144,33 @@ it('updates gain configuration without requiring a gain widget or a gain node ty
   expect(first(result.nodes).runtime?.config).toMatchObject({ gainDb: -8 });
   expect(first(result.nodes).appearance.detail).toBe(original.appearance.detail);
   expect(first(result.nodes).appearance.gainControl).toBeUndefined();
+});
+
+it('keeps unaffected snapshots and nodes shared across a rebased history', () => {
+  const after = structuredClone(before);
+  after.nodes[0] = { ...first(after.nodes), control: { enabled: false, muted: false } };
+  const changes = controlChanges(before, after) ?? [];
+  const model = runtimeGraphToAudioGraph(before);
+  const moved = { ...model, nodes: model.nodes.map((node) => ({ ...node })) };
+  const rebased = new Map();
+  const left = rebaseControls(model, changes, rebased);
+  // A second snapshot holding the same node object gets the same rebased node.
+  const right = rebaseControls({ ...model, revision: 9 }, changes, rebased);
+  expect(right.nodes[0]).toBe(left.nodes[0]);
+  expect(rebaseControls(moved, changes, rebased).nodes[0]).not.toBe(left.nodes[0]);
+  const untouched = { ...model, nodes: [] };
+  expect(rebaseControls(untouched, changes)).toBe(untouched);
+});
+
+it('rebases the history and the live model with one node cache', () => {
+  const after = structuredClone(before);
+  after.nodes[0] = { ...first(after.nodes), control: { enabled: false, muted: false } };
+  const changes = controlChanges(before, after) ?? [];
+  const model = runtimeGraphToAudioGraph(before);
+  let historic = model;
+  const live = rebaseControlsWithHistory(model, changes, (transform) => {
+    historic = transform(historic);
+  });
+  expect(live.nodes[0]).toBe(historic.nodes[0]);
+  expect(live.nodes[0]?.runtime?.control?.enabled).toBe(false);
 });

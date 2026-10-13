@@ -25,10 +25,23 @@ pub(crate) use dispatch::{dispatch, is_service_command};
 static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// Idle connections kept for reuse, and how long one stays reusable: well inside the
+/// controller's idle timeout, so a pooled connection is never one it is closing for
+/// idleness. The editor is single-instance, so its one pool holds at most 4 of the
+/// controller's 32 connection slots. A controller exiting between the reuse check and
+/// the write fails that request as an exit mid-request would; it is never replayed.
+const POOL_LIMIT: usize = 4;
+const REUSE_WINDOW: Duration = Duration::from_secs(10);
+const _: () = assert!(
+    REUSE_WINDOW.as_secs() * 2 < crate::control_proxy::local::socket::IDLE_TIMEOUT.as_secs()
+);
+
 #[derive(Clone, Debug)]
 pub(crate) struct Connection {
     path: PathBuf,
     uid: u32,
+    /// Verified connections that finished their last exchange cleanly, newest last.
+    idle: Arc<std::sync::Mutex<Vec<(UnixStream, std::time::Instant)>>>,
 }
 
 impl Connection {
@@ -40,6 +53,7 @@ impl Connection {
         Ok(Self {
             path: directory.join("control/control.sock"),
             uid,
+            idle: Arc::default(),
         })
     }
 
@@ -47,6 +61,37 @@ impl Connection {
         self.exchange(name, arguments)
             .await
             .map_err(Value::String)?
+    }
+
+    async fn connect(&self) -> Result<UnixStream, String> {
+        let stream = tokio::time::timeout(EXCHANGE_TIMEOUT, UnixStream::connect(&self.path))
+            .await
+            .map_err(|_| "background connection timed out")?
+            .map_err(|e| e.to_string())?;
+        if !stream.peer_cred().is_ok_and(|peer| peer.uid() == self.uid) {
+            return Err("background controller belongs to a different user".into());
+        }
+        Ok(stream)
+    }
+
+    /// A pooled connection is reused only while recent and still open with nothing
+    /// unread: a request must never be sent into a connection the controller closed.
+    fn reusable(&self) -> Option<UnixStream> {
+        let mut idle = self.idle.lock().ok()?;
+        while let Some((stream, since)) = idle.pop() {
+            if since.elapsed() < REUSE_WINDOW && open_and_quiet(&stream) {
+                return Some(stream);
+            }
+        }
+        None
+    }
+
+    fn release(&self, stream: UnixStream) {
+        if let Ok(mut idle) = self.idle.lock()
+            && idle.len() < POOL_LIMIT
+        {
+            idle.push((stream, std::time::Instant::now()));
+        }
     }
 
     async fn exchange(&self, name: &str, arguments: Value) -> Result<Result<Value, Value>, String> {
@@ -59,13 +104,10 @@ impl Connection {
         if frame.len() as u64 > crate::control_proxy::local::socket::FRAME_LIMIT {
             return Err("background request is too large".into());
         }
-        let mut stream = tokio::time::timeout(EXCHANGE_TIMEOUT, UnixStream::connect(&self.path))
-            .await
-            .map_err(|_| "background connection timed out")?
-            .map_err(|e| e.to_string())?;
-        if !stream.peer_cred().is_ok_and(|peer| peer.uid() == self.uid) {
-            return Err("background controller belongs to a different user".into());
-        }
+        let mut stream = match self.reusable() {
+            Some(stream) => stream,
+            None => self.connect().await?,
+        };
         tokio::time::timeout(EXCHANGE_TIMEOUT, stream.write_all(&frame))
             .await
             .map_err(|_| "background request delivery is uncertain")?
@@ -98,13 +140,18 @@ impl Connection {
             if reply["status"] != 200 {
                 return Err("background controller unavailable".into());
             }
-            if let Some(value) = reply["body"].get("ok") {
-                return Ok(Ok(value.clone()));
+            let result = if let Some(value) = reply["body"].get("ok") {
+                Ok(value.clone())
+            } else if let Some(error) = reply["body"].get("error") {
+                Err(error.clone())
+            } else {
+                return Err("invalid background result".into());
+            };
+            // The exchange ended on a frame boundary, so the connection can carry the next.
+            if reader.buffer().is_empty() {
+                self.release(reader.into_inner());
             }
-            if let Some(error) = reply["body"].get("error") {
-                return Ok(Err(error.clone()));
-            }
-            return Err("invalid background result".into());
+            return Ok(result);
         }
     }
 
@@ -338,4 +385,21 @@ fn shared_directory(app: &tauri::AppHandle, identifier: &str) -> Result<PathBuf,
         .parent()
         .ok_or("application data has no parent")?
         .join(identifier))
+}
+
+fn open_and_quiet(stream: &UnixStream) -> bool {
+    use std::os::fd::AsRawFd as _;
+    let mut byte = 0_u8;
+    // SAFETY: a nonblocking peek of at most one byte into a live local buffer; the
+    // descriptor stays owned by `stream` and nothing is consumed.
+    let peeked = unsafe {
+        libc::recv(
+            stream.as_raw_fd(),
+            (&raw mut byte).cast(),
+            1,
+            libc::MSG_PEEK | libc::MSG_DONTWAIT,
+        )
+    };
+    // Closed (0) or unexpected data (>0) both disqualify the connection.
+    peeked < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::WouldBlock
 }

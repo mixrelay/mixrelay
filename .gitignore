@@ -10,6 +10,8 @@ CLAUDE.md
 
 # Rust
 target/
+# LLVM coverage output from tests that run in a source directory
+*.profraw
 
 # JavaScript
 node_modules/
