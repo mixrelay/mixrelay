@@ -1,5 +1,5 @@
-//! Run alone in release mode: `cargo test --release -p mixrelay-macos-transport
-//! realtime::benchmark -- --nocapture --test-threads=1`. A realtime producer releases a
+//! Run alone in release mode: `cargo test --release -p mixrelay-realtime
+//! macos::benchmark -- --nocapture --test-threads=1`. A realtime producer releases a
 //! numbered publication every 128 frames at 48 kHz, like a device IO cycle, recording
 //! its time in a preallocated ring. The consumer measures every publication's delay,
 //! including ones it slept through, comparing today's normal-priority 250 µs polling

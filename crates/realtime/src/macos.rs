@@ -400,12 +400,12 @@ impl Drop for WorkInterval {
 ///
 /// ```compile_fail
 /// fn send<T: Send>(_: T) {}
-/// let interval = mixrelay_macos_transport::realtime::WorkInterval::create(c"x").unwrap();
+/// let interval = mixrelay_realtime::WorkInterval::create(c"x").unwrap();
 /// send(interval.join().unwrap());
 /// ```
 /// ```compile_fail
 /// fn sync<T: Sync>(_: &T) {}
-/// let interval = mixrelay_macos_transport::realtime::WorkInterval::create(c"x").unwrap();
+/// let interval = mixrelay_realtime::WorkInterval::create(c"x").unwrap();
 /// sync(&interval.join().unwrap());
 /// ```
 pub struct Joined<'a> {
@@ -653,6 +653,113 @@ fn kern(result: KernReturn) -> io::Result<()> {
 
 fn kern_error(result: KernReturn) -> io::Error {
     io::Error::other(format!("mach kernel error {result}"))
+}
+
+/// Wait and wake on a 64-bit word in memory shared between processes, so a consumer
+/// sleeps until its producer advances a sequence instead of polling it. Uses the public
+/// shared-futex API, which exists from macOS 14.4; [`shared_futex`] is `None` before.
+pub struct SharedFutex {
+    wait: WaitOnAddress,
+    wake: WakeByAddress,
+}
+
+type WaitOnAddress = unsafe extern "C" fn(*mut c_void, u64, usize, u32, u32, u64) -> i32;
+type WakeByAddress = unsafe extern "C" fn(*mut c_void, usize, u32) -> i32;
+
+const OS_SYNC_WAIT_ON_ADDRESS_SHARED: u32 = 1;
+const OS_SYNC_WAKE_BY_ADDRESS_SHARED: u32 = 1;
+const ETIMEDOUT: i32 = 60;
+/// `RTLD_DEFAULT`: search every image loaded into the process.
+const RTLD_DEFAULT: *mut c_void = -2_isize as *mut c_void;
+
+unsafe extern "C" {
+    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+}
+
+/// Why a [`SharedFutex::wait`] returned. Every outcome means "recheck the word's state".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FutexWake {
+    /// Woken, or the word no longer held the expected value.
+    Changed,
+    TimedOut,
+    /// The kernel refused the wait (its errno); the caller should poll instead.
+    Failed(i32),
+}
+
+/// The process's shared-futex API, resolved once.
+#[must_use]
+pub fn shared_futex() -> Option<&'static SharedFutex> {
+    static FUTEX: std::sync::OnceLock<Option<SharedFutex>> = std::sync::OnceLock::new();
+    FUTEX
+        .get_or_init(|| {
+            // SAFETY: lookups of NUL-terminated names across loaded images.
+            let (wait, wake) = unsafe {
+                (
+                    dlsym(
+                        RTLD_DEFAULT,
+                        c"os_sync_wait_on_address_with_timeout".as_ptr(),
+                    ),
+                    dlsym(RTLD_DEFAULT, c"os_sync_wake_by_address_any".as_ptr()),
+                )
+            };
+            SharedFutex::from_symbols(wait, wake)
+        })
+        .as_ref()
+}
+
+impl SharedFutex {
+    /// The resolved functions, or `None` when either is absent (before macOS 14.4).
+    fn from_symbols(wait: *mut c_void, wake: *mut c_void) -> Option<Self> {
+        if wait.is_null() || wake.is_null() {
+            return None;
+        }
+        // SAFETY: both symbols are the documented libSystem functions with these
+        // C signatures; the non-null addresses come from the dynamic loader.
+        Some(unsafe {
+            Self {
+                wait: std::mem::transmute::<*mut c_void, WaitOnAddress>(wait),
+                wake: std::mem::transmute::<*mut c_void, WakeByAddress>(wake),
+            }
+        })
+    }
+
+    /// Sleeps while `word` still holds `expected`, for at most `timeout`. The caller
+    /// reads `expected` before checking the state the word guards, so a producer
+    /// advancing it in between makes this return at once instead of losing the wake.
+    pub fn wait(&self, word: &AtomicU64, expected: u64, timeout: Duration) -> FutexWake {
+        let timeout = u64::try_from(timeout.as_nanos()).unwrap_or(u64::MAX).max(1);
+        // SAFETY: an aligned 8-byte atomic that outlives the call; the shared flag
+        // matches the producer's wake on the same mapped object.
+        let result = unsafe {
+            (self.wait)(
+                word.as_ptr().cast(),
+                expected,
+                8,
+                OS_SYNC_WAIT_ON_ADDRESS_SHARED,
+                OS_CLOCK_MACH_ABSOLUTE_TIME,
+                timeout,
+            )
+        };
+        futex_wake(
+            result,
+            io::Error::last_os_error().raw_os_error().unwrap_or(0),
+        )
+    }
+
+    /// Wakes one waiter after the producer advanced `word`. Never blocks; waking with no
+    /// waiter is harmless.
+    pub fn wake(&self, word: &AtomicU64) {
+        // SAFETY: as in `wait`.
+        let _ = unsafe { (self.wake)(word.as_ptr().cast(), 8, OS_SYNC_WAKE_BY_ADDRESS_SHARED) };
+    }
+}
+
+fn futex_wake(result: i32, errno: i32) -> FutexWake {
+    match (result, errno) {
+        (0.., _) => FutexWake::Changed,
+        (_, ETIMEDOUT) => FutexWake::TimedOut,
+        (_, error) => FutexWake::Failed(error),
+    }
 }
 
 #[cfg(all(test, not(debug_assertions)))]

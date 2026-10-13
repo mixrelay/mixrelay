@@ -2774,6 +2774,7 @@ dependencies = [
  "mixrelay-licensing",
  "mixrelay-macos-transport",
  "mixrelay-process-tap",
+ "mixrelay-realtime",
  "mixrelay-test-support",
  "objc2",
  "objc2-app-kit",
@@ -3023,6 +3024,7 @@ dependencies = [
  "allocation-counter",
  "cc",
  "mixrelay-macos-transport",
+ "mixrelay-realtime",
  "thiserror 2.0.20",
 ]
 
@@ -3041,6 +3043,7 @@ dependencies = [
  "mixrelay-audio-graph",
  "mixrelay-control-protocol",
  "mixrelay-processor-state",
+ "mixrelay-realtime",
  "mixrelay-test-support",
  "objc2",
  "objc2-app-kit",
@@ -3071,6 +3074,10 @@ dependencies = [
  "sha2",
  "thiserror 2.0.20",
 ]
+
+[[package]]
+name = "mixrelay-realtime"
+version = "0.1.0"
 
 [[package]]
 name = "mixrelay-test-support"

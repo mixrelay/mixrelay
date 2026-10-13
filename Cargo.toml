@@ -14,6 +14,7 @@ members = [
   "crates/audio-recorder",
   "crates/processor-host",
   "crates/processor-state",
+  "crates/realtime",
   "crates/control-protocol",
   "crates/control-server",
   "crates/driver-control",

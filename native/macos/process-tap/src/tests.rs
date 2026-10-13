@@ -703,17 +703,16 @@ fn each_callback_wakes_the_capture_pump_through_the_session_notifier() {
     assert!(unsafe { ffi::mr_process_tap_wakeup(&raw const session) }.is_null());
     session
         .wakeup
-        .set(mixrelay_macos_transport::realtime::Notifier::new().unwrap())
+        .set(mixrelay_realtime::Notifier::new().unwrap())
         .unwrap();
     // SAFETY: the accessor borrows the notifier for the live session's lifetime.
     let wakeup = unsafe {
-        &*ffi::mr_process_tap_wakeup(&raw const session)
-            .cast::<mixrelay_macos_transport::realtime::Notifier>()
+        &*ffi::mr_process_tap_wakeup(&raw const session).cast::<mixrelay_realtime::Notifier>()
     };
     let mut samples = [0.25_f32; 8];
     callback(&session, &mut samples, None);
     assert!(matches!(
         wakeup.wait(std::time::Duration::from_secs(1)),
-        mixrelay_macos_transport::realtime::Wake::Notified { .. }
+        mixrelay_realtime::Wake::Notified { .. }
     ));
 }

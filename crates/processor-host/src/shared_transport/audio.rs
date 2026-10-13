@@ -120,6 +120,8 @@ impl ParentAudio {
         );
         before_publish();
         header.input_sequence.store(sequence, Ordering::Release);
+        // The worker sleeps on this word between blocks instead of polling it.
+        wake_worker(&header.input_sequence);
         true
     }
 
@@ -265,7 +267,19 @@ impl ParentAudio {
             }
         }
         header.output_consumed.store(sequence, Ordering::Release);
+        // A worker whose output slot was full sleeps on this word.
+        wake_worker(&header.output_consumed);
     }
+}
+
+/// Wakes the plug-in worker sleeping on `word` after the parent advanced it.
+fn wake_worker(word: &std::sync::atomic::AtomicU64) {
+    #[cfg(target_os = "macos")]
+    if let Some(futex) = mixrelay_realtime::shared_futex() {
+        futex.wake(word);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = word;
 }
 
 fn cache_slot(frame: u64, block_frames: usize) -> usize {
@@ -299,6 +313,34 @@ impl WorkerAudio {
     }
     pub(crate) fn layout(&self) -> AudioLayout {
         self.mapping.layout
+    }
+
+    /// The words the parent advances to unblock this worker. Snapshot them, pick the one
+    /// to wait on with [`Self::blocking_word`], and only then check
+    /// [`Self::input_pending`].
+    pub(crate) fn wake_words(&self) -> (u64, u64) {
+        let header = self.header();
+        (
+            header.input_sequence.load(Ordering::Acquire),
+            header.output_consumed.load(Ordering::Acquire),
+        )
+    }
+
+    /// Why no input is pending: a published output the parent has not consumed, or no
+    /// new input. Returns that word and its snapshot from [`Self::wake_words`], so a
+    /// change made after the snapshot ends the wait at once instead of being missed.
+    pub(crate) fn blocking_word(
+        &self,
+        (input, consumed): (u64, u64),
+    ) -> (&std::sync::atomic::AtomicU64, u64) {
+        let header = self.header();
+        if header.output_sequence.load(Ordering::Acquire)
+            == header.output_consumed.load(Ordering::Acquire)
+        {
+            (&header.input_sequence, input)
+        } else {
+            (&header.output_consumed, consumed)
+        }
     }
 
     pub(crate) fn input_pending(&self) -> bool {

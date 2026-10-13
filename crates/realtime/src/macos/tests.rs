@@ -178,3 +178,34 @@ fn histograms_summarize_windows() {
     assert_eq!(summary.maximum_us, 3_600_000_000);
     assert_eq!(histogram.take(), None);
 }
+
+#[test]
+fn shared_futex_waits_for_a_changed_word_and_reports_outcomes() {
+    assert_eq!(futex_wake(-1, 22), FutexWake::Failed(22));
+    // Before macOS 14.4 the symbols are absent and callers poll.
+    assert!(SharedFutex::from_symbols(std::ptr::null_mut(), std::ptr::null_mut()).is_none());
+    // Exercised where the API exists (macOS 14.4 and later).
+    if let Some(futex) = shared_futex() {
+        let word = Arc::new(AtomicU64::new(5));
+        // A stale expectation returns at once.
+        assert_eq!(
+            futex.wait(&word, 4, Duration::from_secs(1)),
+            FutexWake::Changed
+        );
+        assert_eq!(
+            futex.wait(&word, 5, Duration::from_millis(5)),
+            FutexWake::TimedOut
+        );
+        let producer = Arc::clone(&word);
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(5));
+            producer.store(6, Ordering::Release);
+            shared_futex().unwrap().wake(&producer);
+        });
+        assert_eq!(
+            futex.wait(&word, 5, Duration::from_secs(5)),
+            FutexWake::Changed
+        );
+        handle.join().unwrap();
+    }
+}

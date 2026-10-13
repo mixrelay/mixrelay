@@ -15,6 +15,7 @@ workspace = true
 # Typed capture failures retain their native status at the C boundary.
 thiserror.workspace = true
 # Share transport/clock primitives without making HAL/engine depend on AppKit.
+mixrelay-realtime = { path = "../../../crates/realtime" }
 mixrelay-macos-transport = { path = "../common" }
 
 [build-dependencies]

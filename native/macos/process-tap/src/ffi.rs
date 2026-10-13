@@ -148,7 +148,7 @@ unsafe fn create(config: &TapConfig) -> Result<*mut TapSession, TapError> {
     let mut owner = TapSession::default();
     owner.retirement_queue = retirement_queue;
     // Without a notifier the pump falls back to timed waits; capture still works.
-    if let Ok(notifier) = mixrelay_macos_transport::realtime::Notifier::new() {
+    if let Ok(notifier) = mixrelay_realtime::Notifier::new() {
         let _ = owner.wakeup.set(notifier);
     }
     unsafe { pointer.write(owner) };

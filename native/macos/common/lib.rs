@@ -23,7 +23,6 @@ pub mod control_inventory;
 pub mod endpoint_identity;
 pub mod endpoint_transport;
 pub mod hal_io;
-pub mod realtime;
 pub mod shared_audio_buffer;
 pub mod source_control;
 pub mod transport_inspection;

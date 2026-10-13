@@ -224,12 +224,12 @@ unsafe impl Sync for CaptureProbeSession {}
 
 impl CaptureProbeSession {
     /// Signaled after each tap callback's ring write; `None` means poll on a timer.
-    fn wakeup(&self) -> Option<&mixrelay_macos_transport::realtime::Notifier> {
+    fn wakeup(&self) -> Option<&mixrelay_realtime::Notifier> {
         // SAFETY: the notifier lives as long as this session's native owner, which this
         // borrow keeps alive.
         unsafe {
             mr_process_tap_wakeup(self.native.as_ptr())
-                .cast::<mixrelay_macos_transport::realtime::Notifier>()
+                .cast::<mixrelay_realtime::Notifier>()
                 .as_ref()
         }
     }

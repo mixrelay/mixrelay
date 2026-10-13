@@ -242,6 +242,7 @@ pub fn run_plugin_worker(arguments: &[String]) -> Result<(), String> {
     if plugin.input_channels() != layout.inputs || plugin.output_channels() != layout.outputs {
         return Err("loaded processor layout does not match the catalog".to_owned());
     }
+    let prepared_rate = prepared.sample_rate;
     let has_editor = plugin.has_editor();
     latency::publish_intrinsic_frames(editor_shared.header(), plugin.intrinsic_latency_frames());
     let plugin = Arc::new(Mutex::new(plugin));
@@ -249,7 +250,15 @@ pub fn run_plugin_worker(arguments: &[String]) -> Result<(), String> {
     let dsp_shutdown = Arc::clone(&shutdown);
     let dsp_thread = thread::Builder::new()
         .name("mixrelay-plugin-dsp".to_owned())
-        .spawn(move || rack_worker_loop(&mut audio_shared, &dsp_plugin, layout, &dsp_shutdown))
+        .spawn(move || {
+            rack_worker_loop(
+                &mut audio_shared,
+                &dsp_plugin,
+                layout,
+                &dsp_shutdown,
+                prepared_rate,
+            );
+        })
         .map_err(|error| error.to_string())?;
     // Retain the creator's instance owner until DSP has joined, including broker unwinding.
     let dsp_owner =
@@ -275,26 +284,77 @@ pub fn run_plugin_worker(arguments: &[String]) -> Result<(), String> {
     dsp_owner.finish(result)
 }
 
+/// One processing block's duration at the prepared rate (48 kHz if it is unusable).
+fn block_period(block_frames: usize, sample_rate: f64) -> Duration {
+    let rate = if sample_rate.is_finite() && sample_rate > 0.0 {
+        sample_rate
+    } else {
+        48_000.0
+    };
+    Duration::from_secs_f64(f64::from(u32::try_from(block_frames).unwrap_or(u32::MAX)) / rate)
+}
+
+/// Sleeps until the parent advances the word blocking the worker, at most two blocks (a
+/// missed wake costs at most that). Polls where the shared wake API is unavailable, after
+/// a failed wait, and for good after repeated failures.
+#[derive(Default)]
+struct Waiter {
+    failures: u32,
+}
+
+impl Waiter {
+    const POLL: Duration = Duration::from_micros(100);
+    const MAXIMUM_FAILURES: u32 = 8;
+
+    fn wait(&mut self, word: &std::sync::atomic::AtomicU64, observed: u64, block: Duration) {
+        #[cfg(target_os = "macos")]
+        if self.failures < Self::MAXIMUM_FAILURES
+            && let Some(futex) = mixrelay_realtime::shared_futex()
+        {
+            if let mixrelay_realtime::FutexWake::Failed(_) = futex.wait(word, observed, block * 2) {
+                self.failures += 1;
+            } else {
+                self.failures = 0;
+                return;
+            }
+        }
+        let _ = (word, observed, block);
+        thread::sleep(Self::POLL);
+    }
+}
+
 fn rack_worker_loop(
     shared: &mut WorkerAudio,
     plugin: &Mutex<rack_formats::RackWorkerPlugin>,
     layout: AudioLayout,
     parent_closed: &AtomicBool,
+    sample_rate: f64,
 ) {
+    let block = block_period(layout.block_frames, sample_rate);
+    // One block of plug-in processing per release: finish within 80% of it.
+    #[cfg(target_os = "macos")]
+    let _realtime = mixrelay_realtime::RealtimeThread::promote(block, block / 2, block * 4 / 5)
+        .inspect_err(|error| tracing::warn!(%error, "plug-in DSP runs at standard priority"))
+        .ok();
+    let mut waiter = Waiter::default();
     loop {
         let header = shared.header();
         if parent_closed.load(Ordering::Acquire) || header.shutdown.load(Ordering::Acquire) != 0 {
             return;
         }
-        let audio_pending = shared.input_pending();
-        if !audio_pending {
-            thread::sleep(Duration::from_micros(100));
+        // Choose what to wait for before the final readiness check: whichever parent
+        // transition then happens either makes input pending or changes the chosen word.
+        let (word, value) = shared.blocking_word(shared.wake_words());
+        if !shared.input_pending() {
+            waiter.wait(word, value, block);
             continue;
         }
         let mut plugin = match plugin.try_lock() {
             Ok(plugin) => plugin,
             Err(std::sync::TryLockError::WouldBlock) => {
-                thread::yield_now();
+                // The editor holds the instance briefly; sleep rather than spin at
+                // realtime priority against a lower-priority holder.
+                thread::sleep(Duration::from_micros(50));
                 continue;
             }
             Err(std::sync::TryLockError::Poisoned(_)) => {
@@ -1630,6 +1690,32 @@ fn bypass_rack(plugin: &mut rack_formats::RackWorkerPlugin, frames: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_worker_waiter_returns_on_a_changed_word_and_polls_after_failures() {
+        let word = std::sync::atomic::AtomicU64::new(3);
+        let mut waiter = Waiter::default();
+        let started = std::time::Instant::now();
+        // A stale snapshot ends the wait at once.
+        waiter.wait(&word, 2, Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        // After repeated failures the futex is no longer trusted; a short poll remains.
+        waiter.failures = Waiter::MAXIMUM_FAILURES;
+        waiter.wait(&word, 3, Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn plug_in_blocks_last_their_frames_at_the_prepared_rate() {
+        assert_eq!(
+            block_period(128, 48_000.0),
+            Duration::from_secs_f64(128.0 / 48_000.0)
+        );
+        // An unusable rate falls back to 48 kHz rather than a zero or infinite period.
+        for rate in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(block_period(480, rate), Duration::from_millis(10));
+        }
+    }
 
     #[test]
     fn saved_selection_is_not_retargeted_by_equal_totals_or_catalog_order() {

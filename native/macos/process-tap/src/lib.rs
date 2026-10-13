@@ -165,7 +165,7 @@ pub struct TapSession {
     active_callbacks: AtomicU32,
     active_listeners: AtomicU32,
     /// Signaled after each callback's ring write so the capture pump need not poll.
-    wakeup: OnceLock<mixrelay_macos_transport::realtime::Notifier>,
+    wakeup: OnceLock<mixrelay_realtime::Notifier>,
 }
 
 impl TapSession {

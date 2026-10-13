@@ -38,6 +38,9 @@ pub(super) fn create(
     layout: AudioLayout,
 ) -> Result<(ParentAudio, ControlMailbox), String> {
     let length = shared_length(layout)?;
+    // Resolve the wake API here, so its first lookup never runs on an audio thread.
+    #[cfg(target_os = "macos")]
+    let _ = mixrelay_realtime::shared_futex();
     for count in [layout.inputs, layout.outputs, layout.block_frames] {
         if u32::try_from(count).is_err() {
             return Err("processor transport dimensions exceed u32".to_owned());

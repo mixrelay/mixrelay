@@ -9,7 +9,7 @@ use super::{
 use mixrelay_audio_io::clock_bridge::{
     AsyncClockBridge, BridgeConfig, ClockFeedback, ClockRelation, Discontinuity, FeedbackQueue,
 };
-use mixrelay_macos_transport::realtime::{
+use mixrelay_realtime::{
     LatencyHistogram, LatencySummary, RealtimeThread, Timebase, Transition, Wake,
     demote_current_thread, host_time,
 };
@@ -131,10 +131,10 @@ impl Waker {
             return;
         }
         self.reported = Some(now);
-        let failed_signals = capture.session().wakeup().map_or(
-            0,
-            mixrelay_macos_transport::realtime::Notifier::failed_signals,
-        );
+        let failed_signals = capture
+            .session()
+            .wakeup()
+            .map_or(0, mixrelay_realtime::Notifier::failed_signals);
         let window = self.wakes.take();
         let (busy, timeouts, failures) = (
             std::mem::take(&mut self.busy),

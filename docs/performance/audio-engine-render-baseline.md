@@ -8,7 +8,7 @@
 | --- | --- |
 | [MRCallbackClockBench.c](../../native/macos/common/tests/MRCallbackClockBench.c) | 128프레임 간격의 연속 timestamp 2,000,000개. 마지막 snapshot과 discontinuity 0 확인. 단위는 ns/record |
 | [MRAudioRingBench.c](../../native/macos/application-capture/tests/MRAudioRingBench.c) | 용량 1,024, 2/8/64채널 × 32/256프레임 × interleaved/planar 입력. 20,000 write/read 쌍 뒤 PCM·빈 queue·drop 0 확인. 생성/해제는 계측 제외. 단위는 ns/pair |
-| [realtime/benchmark.rs](../../native/macos/common/realtime/benchmark.rs) | 실시간 생산자가 128프레임(48kHz) 주기로 번호 붙은 발행 3,000개를 기록하고, 소비자가 놓친 발행을 포함한 모든 발행의 지연을 잰다. 일반 우선순위 250µs 폴링과 실시간 스레드 + 세마포어 깨우기를 비교한다. 단위는 µs이며 p50/p99/p99.9/max와 한 주기보다 늦은 발행 수를 출력한다 |
+| [realtime/benchmark.rs](../../crates/realtime/src/macos/benchmark.rs) | 실시간 생산자가 128프레임(48kHz) 주기로 번호 붙은 발행 3,000개를 기록하고, 소비자가 놓친 발행을 포함한 모든 발행의 지연을 잰다. 일반 우선순위 250µs 폴링과 실시간 스레드 + 세마포어 깨우기를 비교한다. 단위는 µs이며 p50/p99/p99.9/max와 한 주기보다 늦은 발행 수를 출력한다 |
 | [MRPcmRingBench.c](../../native/pcm-ring/tests/MRPcmRingBench.c) | 용량 16,384, 한 블록 사전 적재, 2/8/64채널 × 32/256프레임 × 두 읽기 경로. 20,000 write/read 쌍 뒤 PCM 확인. 생성/해제는 계측 제외. 단위는 ns/pair |
 
 ## 비교 방법

@@ -50,6 +50,8 @@ mixrelay-test-support = { path = "../test-support" }
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Realtime DSP scheduling and a shared-memory wake from the engine's submit.
+mixrelay-realtime = { path = "../realtime" }
 # Main-thread-owned native UI surfaces and timers; no plug-in objects cross processes.
 block2 = "0.6.2"
 dispatch2 = "0.3.1"
