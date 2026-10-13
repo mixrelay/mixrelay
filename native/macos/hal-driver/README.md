@@ -45,6 +45,22 @@ settings or graphs and uses the actual directional native ASBDs. Positive levels
 allow 10 ppm relative SRC rounding error plus one native integer LSB;
 mute requires exact zero. This checks amplitude and mute, not latency or continuity.
 
+`pnpm probe:macos-roundtrip OUTPUT_UID [INPUT_UID]` measures a path on installed
+devices of any vendor, so MixRelay, Loopback and BlackHole can be compared on one
+Mac. It plays a deterministic signal into the output device and records the input
+device (default: the same device). Signal samples are exact in Float32 and every
+integer depth, never zero, carry independent content per channel (a mix of
+channels is detected), and encode their channel and frame position, so the probe
+tracks every signal frame in linear time: received, missing (head and tail separately) and repeated frames,
+damaged samples (zero, wrong, non-finite), slips, channel order and channel
+changes. Latency is measured in host time (with each timestamp's rate scalar) and,
+on one device, also in device frames; the devices' reported latency (latency +
+safety offset + stream latency, unknown when a query fails) is printed beside it.
+`--list` prints device UIDs; `--json` prints one object; `--self-test` checks the
+analysis on synthetic damage without devices. It changes no default device or
+device setting. Recording needs microphone permission for the terminal that runs
+it; without it every input is silent and the probe exits with status 3.
+
 The installed Driver continuity test uses normal Rust `Native` clients and the
 production native PCM codecs, with no graph server or session changes:
 

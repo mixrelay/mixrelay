@@ -34,6 +34,7 @@
     "desktop:prepare-driver": "node scripts/prepare-driver-package.mjs",
     "storybook": "pnpm --filter @mixrelay/control-ui storybook",
     "storybook:build": "pnpm --filter @mixrelay/control-ui build-storybook",
+    "probe:macos-roundtrip": "./scripts/probe-macos-roundtrip.sh",
     "smoke:macos-installed-duplex": "./scripts/smoke-macos-installed-duplex.sh",
     "desktop:pkg:macos": "node scripts/build-macos-app-installer.mjs",
     "branding:build": "node branding/build.mjs && pnpm --filter @mixrelay/desktop tauri icon ../../branding/identity/app-icon.svg --output ../../branding/identity/exports --png 1024 && node branding/sync-raster.mjs",
