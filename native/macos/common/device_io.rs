@@ -36,6 +36,22 @@ pub mod test_observation;
 mod tests;
 
 pub use callback::mr_device_io_process;
+
+/// Called from every device callback after it publishes frame credit, so the engine's
+/// graph worker can wait for devices instead of polling. Set once by the engine; it must
+/// be realtime-safe (no allocation, locks or blocking).
+static CREDIT_SIGNAL: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
+
+/// Registers the process's device-credit signal. Returns false if one was already set.
+pub fn on_device_credit(signal: impl Fn() + Send + Sync + 'static) -> bool {
+    CREDIT_SIGNAL.set(Box::new(signal)).is_ok()
+}
+
+fn signal_graph_worker() {
+    if let Some(signal) = CREDIT_SIGNAL.get() {
+        signal();
+    }
+}
 pub use diagnostics::{
     CLOCK_BREAK_CAPACITY, ClockBreak, ClockBreakRecord, mr_device_io_next_clock_break,
 };

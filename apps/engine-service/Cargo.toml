@@ -50,6 +50,8 @@ mixrelay-linux-driver = { path = "../../native/linux/driver-control" }
 mixrelay-pipewire = { path = "../../native/linux/pipewire", features = ["test-observation"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Time-constraint scheduling and the coalescing device-credit wakeup for the graph worker.
+mixrelay-realtime = { path = "../../crates/realtime" }
 mixrelay-macos-transport = { path = "../../native/macos/common" }
 libc = "0.2.189"
 

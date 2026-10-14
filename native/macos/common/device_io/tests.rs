@@ -910,3 +910,18 @@ fn unavailable_buffer_info_initializes_an_uninitialized_output_slot() {
     assert_eq!(result.minimum.to_bits(), 0_f64.to_bits());
     assert_eq!(result.maximum.to_bits(), 0_f64.to_bits());
 }
+
+#[test]
+fn device_credit_reaches_the_registered_signal() {
+    static SIGNALS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    assert!(super::on_device_credit(|| {
+        SIGNALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }));
+    assert!(!super::on_device_credit(|| {}), "the signal is set once");
+    let before = SIGNALS.load(std::sync::atomic::Ordering::Relaxed);
+    let input = owner(true, 2);
+    let mut source = samples(2, 64);
+    let mut list = buffers(&mut source, 2, 64, false);
+    process(&input, &mut list);
+    assert!(SIGNALS.load(std::sync::atomic::Ordering::Relaxed) > before);
+}

@@ -121,6 +121,7 @@ pub unsafe extern "C" fn mr_device_io_process(
     io.progress
         .native_frames
         .fetch_add(u64::from(frames), Release);
+    super::signal_graph_worker();
     0
 }
 

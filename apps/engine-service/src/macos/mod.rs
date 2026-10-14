@@ -3,6 +3,7 @@ mod endpoint_backend;
 mod format;
 mod maintenance;
 mod shutdown;
+mod worker_runtime;
 use super::macos_pacing::{ApplicationClockSnapshot, ApplicationPacer, HardwarePacer, Pace};
 use std::{
     sync::Arc,
@@ -333,64 +334,108 @@ fn run_audio_worker(
     let mut timeline = MacTimeline::new();
     let mut pacers = NativePacers::default();
     let mut awaiting_format = false;
-
-    while !runtime_status.stop_requested() {
-        if runtime_status.checkpoint() {
-            std::thread::sleep(Duration::from_millis(1));
-            timeline.deadline = Instant::now();
-            continue;
-        }
-        if context.activate(&mut processor, &mut active_devices, &mut activation)? {
-            timeline.reset();
-            pacers = NativePacers::default();
-        }
-        let format = processor.plan().format();
-        if !active_devices.processing_ready(format.sample_rate) {
-            if !awaiting_format {
-                tracing::info!(
-                    processing_rate = format.sample_rate,
-                    "CoreAudio rendering gated until device format is ready"
-                );
-                awaiting_format = true;
+    let mut runtime = worker_runtime::WorkerRuntime::new();
+    // Whether a direct (IOProc-rendered) plan must be looked for again. Looking allocates
+    // and queries devices, so it happens off realtime and only after something changed,
+    // or once a second in case a device became eligible on its own.
+    let mut direct_recheck = true;
+    let mut direct_checked = Instant::now();
+    let result = (|| {
+        while !runtime_status.stop_requested() {
+            if runtime_status.checkpoint() {
+                runtime.off_realtime(|| std::thread::sleep(Duration::from_millis(1)));
+                timeline.deadline = Instant::now();
+                continue;
             }
-            runtime_status.observe_clock_idle();
-            timeline.reset();
-            pacers = NativePacers::default();
-            std::thread::sleep(Duration::from_millis(1));
-            continue;
+            // Activation is a lock-free handoff of prepared plans and device sets (atomic
+            // checks, then pointer swaps; retirement happens elsewhere), so it stays in the
+            // realtime class.
+            if context.activate(&mut processor, &mut active_devices, &mut activation)? {
+                timeline.reset();
+                pacers = NativePacers::default();
+                direct_recheck = true;
+            }
+            let format = processor.plan().format();
+            if !active_devices.processing_ready(format.sample_rate) {
+                if !std::mem::replace(&mut awaiting_format, true) {
+                    runtime.off_realtime(|| {
+                        tracing::info!(
+                            processing_rate = format.sample_rate,
+                            "CoreAudio rendering gated until device format is ready"
+                        );
+                    });
+                }
+                runtime_status.observe_clock_idle();
+                timeline.reset();
+                pacers = NativePacers::default();
+                direct_recheck = true;
+                runtime.off_realtime(|| std::thread::sleep(Duration::from_millis(1)));
+                continue;
+            }
+            if std::mem::take(&mut awaiting_format) {
+                runtime.off_realtime(|| {
+                    tracing::info!(
+                        processing_rate = format.sample_rate,
+                        "CoreAudio device format ready; rendering admitted"
+                    );
+                });
+            }
+            runtime_status.activate_format(format);
+            if direct_recheck || direct_checked.elapsed() >= Duration::from_secs(1) {
+                direct_recheck = false;
+                direct_checked = Instant::now();
+                if run_direct(&mut runtime, &active_devices, &mut processor, context)? {
+                    timeline.reset();
+                    pacers = NativePacers::default();
+                    direct_recheck = true;
+                    continue;
+                }
+            }
+            process_worker_block(
+                &mut timeline,
+                &mut pacers,
+                &mut WorkerBlock {
+                    processor: &mut processor,
+                    devices: &active_devices,
+                    status: runtime_status,
+                    runtime: &mut runtime,
+                },
+            )?;
         }
-        if std::mem::take(&mut awaiting_format) {
-            tracing::info!(
-                processing_rate = format.sample_rate,
-                "CoreAudio device format ready; rendering admitted"
-            );
-        }
-        runtime_status.activate_format(format);
-        if let Some(plan) =
-            super::macos_devices::direct::DirectPlan::prepare(&active_devices, processor.plan())
-        {
-            direct::run(&plan, &mut processor, context)?;
-            timeline.reset();
-            pacers = NativePacers::default();
-            continue;
-        }
-        process_worker_block(
-            &mut timeline,
-            &mut pacers,
-            &mut WorkerBlock {
-                processor: &mut processor,
-                devices: &active_devices,
-                status: runtime_status,
-            },
-        )?;
-    }
-    Ok(())
+        Ok(())
+    })();
+    runtime.finish();
+    result
+}
+
+/// Hands rendering to a device `IOProc` when a direct plan exists, and supervises it until
+/// it ends. Looking for, running and dropping the plan all happen off realtime.
+fn run_direct(
+    runtime: &mut worker_runtime::WorkerRuntime,
+    devices: &super::macos_devices::DeviceSet,
+    processor: &mut Box<BlockProcessor>,
+    context: AudioContext<'_>,
+) -> Result<bool, String> {
+    let plan = runtime.off_realtime(|| {
+        super::macos_devices::direct::DirectPlan::prepare(devices, processor.plan())
+    });
+    let Some(plan) = plan else {
+        return Ok(false);
+    };
+    runtime.record(worker_runtime::Path::Direct);
+    runtime.off_realtime(|| {
+        let result = direct::run(&plan, processor, context);
+        drop(plan);
+        result
+    })?;
+    Ok(true)
 }
 
 struct WorkerBlock<'a> {
     processor: &'a mut BlockProcessor,
     devices: &'a super::macos_devices::DeviceSet,
     status: &'a AdapterRuntimeStatus,
+    runtime: &'a mut worker_runtime::WorkerRuntime,
 }
 
 fn process_worker_block(
@@ -404,12 +449,28 @@ fn process_worker_block(
     else {
         // Waking this thread creates no credit; only the selected native clock
         // advances the processor's device-owned frame coordinates.
-        std::thread::sleep(Duration::from_micros(250));
+        block.runtime.wait_for_credit(clock_id);
         return Ok(());
     };
-    let period = Duration::from_secs_f64(
-        f64::from(frames) / f64::from(block.processor.plan().format().sample_rate),
-    );
+    let format = block.processor.plan().format();
+    let period = Duration::from_secs_f64(f64::from(frames) / f64::from(format.sample_rate));
+    // The scheduling budget follows the wake cadence, not this (possibly partial) block:
+    // once per device callback under a device clock, once per graph block otherwise.
+    let block_period =
+        Duration::from_secs_f64(f64::from(format.block_frames) / f64::from(format.sample_rate));
+    let wake_period = (clock_id == worker_runtime::HARDWARE_CLOCK)
+        .then(|| block.devices.hardware_clock_progress())
+        .flatten()
+        .filter(|hardware| hardware.native_rate != 0 && hardware.quantum != 0)
+        .map_or(block_period, |hardware| {
+            Duration::from_secs_f64(f64::from(hardware.quantum) / f64::from(hardware.native_rate))
+        });
+    block.runtime.render_at(wake_period);
+    block.runtime.record(match clock_id {
+        worker_runtime::HARDWARE_CLOCK => worker_runtime::Path::Hardware,
+        worker_runtime::APPLICATION_CLOCK => worker_runtime::Path::Application,
+        _ => worker_runtime::Path::Timer,
+    });
     let report = process_native_cycle(
         block.processor,
         &mut MacEngineExternalIo {
