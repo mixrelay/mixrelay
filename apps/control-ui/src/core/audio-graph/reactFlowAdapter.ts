@@ -40,6 +40,7 @@ function createFlowNode(graphNode: AudioGraphNode, previous?: AudioFlowNode): Au
     data: { graphNode },
     deletable: true,
     ariaLabel: audioGraphNodeTitle(graphNode),
+    domAttributes: { 'aria-description': graphNode.appearance.deviceAppActivity?.summary },
     id: graphNode.id,
     position: graphNode.position,
     width: normalizeAudioGraphNodeSize(graphNode, graphNode.size)?.width,

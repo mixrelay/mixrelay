@@ -16,6 +16,7 @@ import {
   audioNodeFrame,
   channelRowMetrics,
 } from './audioNodeLayout';
+import { DeviceAppActivity, type DeviceAppActivityProps } from './DeviceAppActivity';
 import { DynamicsMeter, type DynamicsMeterContract } from './DynamicsMeter';
 import { GraphicEqualizer, type GraphicEqualizerContract } from './GraphicEqualizer';
 import { IconActionButton } from './IconActionButton';
@@ -44,6 +45,7 @@ export interface NodeChoiceControl {
 }
 
 export interface AudioNodeCardProps {
+  deviceAppActivity?: DeviceAppActivityProps;
   equalizer?: GraphicEqualizerContract;
   onParametersChange?: (updates: readonly { id: string; value: number }[]) => void;
   headerActions?: ReactNode;
@@ -106,6 +108,7 @@ function toggleNodeOptions(toggle: () => void, onLayoutChange?: () => void) {
 }
 
 export function AudioNodeCard({
+  deviceAppActivity,
   headerActions,
   muteControl,
   poweredOff = false,
@@ -177,6 +180,7 @@ export function AudioNodeCard({
             category={category}
             channelCount={channelCount}
             hideSummary={Boolean(content) || faceMode !== 'standard'}
+            deviceAppActivity={deviceAppActivity}
             detail={detail}
             icon={icon}
             iconUrl={iconUrl}
@@ -457,6 +461,7 @@ function AudioNodeFace(
     | 'channelCount'
     | 'detail'
     | 'faceMode'
+    | 'deviceAppActivity'
     | 'icon'
     | 'iconUrl'
     | 'inputCount'
@@ -471,6 +476,7 @@ function AudioNodeFace(
   > & { hideSummary?: boolean; faceRef?: (element: HTMLElement | null) => void },
 ) {
   const {
+    deviceAppActivity,
     processingTimeNs,
     category,
     channelCount = 0,
@@ -498,6 +504,7 @@ function AudioNodeFace(
       aria-label={
         onSelect ? [title, category, detail, status].filter(Boolean).join(', ') : undefined
       }
+      aria-description={onSelect ? deviceAppActivity?.summary : undefined}
       aria-pressed={onSelect ? selected : undefined}
       className={styles.button}
       onClick={onSelect}
@@ -523,16 +530,31 @@ function AudioNodeFace(
         ) : null}
       </span>
       {!hideSummary ? (
-        <span className={styles.ioSummary}>
-          <span aria-hidden="true">
-            {inputCount > 0 && outputCount > 0 && inputCount !== outputCount
-              ? `IN ${inputCount} / OUT ${outputCount}`
-              : `${Math.max(channelCount, inputCount, outputCount)} CH`}
-          </span>
-          {detail ? <small className={styles.detail}>{detail}</small> : null}
-        </span>
+        <NodeIoSummary {...{ inputCount, outputCount, channelCount, deviceAppActivity, detail }} />
       ) : null}
     </Face>
+  );
+}
+
+function NodeIoSummary({
+  inputCount,
+  outputCount,
+  channelCount,
+  deviceAppActivity,
+  detail,
+}: Pick<AudioNodeCardProps, 'inputCount' | 'outputCount' | 'deviceAppActivity' | 'detail'> & {
+  channelCount: number;
+}) {
+  return (
+    <span className={styles.ioSummary}>
+      <span aria-hidden="true">
+        {inputCount > 0 && outputCount > 0 && inputCount !== outputCount
+          ? `IN ${inputCount} / OUT ${outputCount}`
+          : `${Math.max(channelCount, inputCount, outputCount)} CH`}
+      </span>
+      {deviceAppActivity ? <DeviceAppActivity {...deviceAppActivity} /> : null}
+      {detail ? <small className={styles.detail}>{detail}</small> : null}
+    </span>
   );
 }
 

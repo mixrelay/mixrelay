@@ -36,6 +36,7 @@ function nodeGain(node: RuntimeGraphNode): number | undefined {
 }
 
 export interface StorybookControlState {
+  deviceAppActivity?: Record<string, import('./types').DeviceAppActivity[]>;
   layout?: GraphLayout;
   applications?: CapturableApplication[];
   audioDevices?: AudioDeviceDescriptor[];
@@ -401,6 +402,12 @@ export class StorybookMockControlPort implements ControlPort {
 
   public async listCapturableApplications(): Promise<CapturableApplication[]> {
     return this.state.applications ?? [];
+  }
+
+  public async getVirtualDeviceAppActivity(): Promise<
+    Record<string, import('./types').DeviceAppActivity[]>
+  > {
+    return structuredClone(this.state.deviceAppActivity ?? {});
   }
 
   public async listAudioDevices(): Promise<AudioDeviceDescriptor[]> {

@@ -263,6 +263,21 @@ export const zhHant = {
     remoteDescription: '此 Mac 明確啟用配對前，區域網路控制保持關閉。',
   },
   routing: {
+    deviceApps: {
+      playing: '正在向裝置播放',
+      recording: '正在從裝置錄音',
+      playingApp: '{{app}} — 正在向 {{device}} 播放',
+      recordingApp: '{{app}} — 正在從 {{device}} 錄音',
+      playingSummary: '正在向 {{device}} 播放的應用程式：{{apps}}',
+      recordingSummary: '正在從 {{device}} 錄音的應用程式：{{apps}}',
+      morePlaying: '正在向 {{device}} 播放的其他應用程式（{{count}} 個）：{{apps}}',
+      moreRecording: '正在從 {{device}} 錄音的其他應用程式（{{count}} 個）：{{apps}}',
+      empty: '無應用程式',
+      emptyPlaying: '沒有應用程式正在向 {{device}} 播放',
+      emptyRecording: '沒有應用程式正在從 {{device}} 錄音',
+      loading: '正在檢查應用程式…',
+      unavailable: '無法取得應用程式活動',
+    },
     nodeControl: {
       powerOn: '啟用 {{name}}',
       powerOff: '停用 {{name}}',

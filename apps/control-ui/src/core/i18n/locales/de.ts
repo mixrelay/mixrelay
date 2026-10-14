@@ -293,6 +293,21 @@ export const de = {
       'Die LAN-Steuerung bleibt deaktiviert, bis die Kopplung auf diesem Mac ausdrücklich aktiviert wird.',
   },
   routing: {
+    deviceApps: {
+      playing: 'Wiedergabe an Gerät',
+      recording: 'Aufnahme von Gerät',
+      playingApp: '{{app}} — Wiedergabe an {{device}}',
+      recordingApp: '{{app}} — Aufnahme von {{device}}',
+      playingSummary: 'Apps mit Wiedergabe an {{device}}: {{apps}}',
+      recordingSummary: 'Apps mit Aufnahme von {{device}}: {{apps}}',
+      morePlaying: 'Weitere Apps mit Wiedergabe an {{device}} ({{count}}): {{apps}}',
+      moreRecording: 'Weitere Apps mit Aufnahme von {{device}} ({{count}}): {{apps}}',
+      empty: 'Keine Apps',
+      emptyPlaying: 'Keine Apps mit Wiedergabe an {{device}}',
+      emptyRecording: 'Keine Apps mit Aufnahme von {{device}}',
+      loading: 'Apps werden geprüft…',
+      unavailable: 'App-Aktivität nicht verfügbar',
+    },
     nodeControl: {
       powerOn: '{{name}} aktivieren',
       powerOff: '{{name}} deaktivieren',

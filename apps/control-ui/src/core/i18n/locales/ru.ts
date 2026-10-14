@@ -280,6 +280,21 @@ export const ru = {
     remoteDescription: 'Управление по LAN выключено, пока на этом Mac явно не включено сопряжение.',
   },
   routing: {
+    deviceApps: {
+      playing: 'Воспроизведение на устройство',
+      recording: 'Запись с устройства',
+      playingApp: '{{app}} — воспроизведение на {{device}}',
+      recordingApp: '{{app}} — запись с {{device}}',
+      playingSummary: 'Приложения, воспроизводящие на {{device}}: {{apps}}',
+      recordingSummary: 'Приложения, записывающие с {{device}}: {{apps}}',
+      morePlaying: 'Другие приложения, воспроизводящие на {{device}} ({{count}}): {{apps}}',
+      moreRecording: 'Другие приложения, записывающие с {{device}} ({{count}}): {{apps}}',
+      empty: 'Нет приложений',
+      emptyPlaying: 'Нет приложений, воспроизводящих на {{device}}',
+      emptyRecording: 'Нет приложений, записывающих с {{device}}',
+      loading: 'Проверка приложений…',
+      unavailable: 'Активность приложений недоступна',
+    },
     nodeControl: {
       powerOn: 'Включить {{name}}',
       powerOff: 'Выключить {{name}}',

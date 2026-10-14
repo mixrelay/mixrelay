@@ -278,6 +278,12 @@ export class TauriControlPort implements ControlPort {
     }
   }
 
+  public getVirtualDeviceAppActivity(): Promise<
+    Record<string, import('./types').DeviceAppActivity[]>
+  > {
+    return this.invokeCommand('list_device_app_activity');
+  }
+
   public async listAudioDevices(): Promise<AudioDeviceDescriptor[]> {
     try {
       return await this.invokeCommand<AudioDeviceDescriptor[]>('list_audio_devices');

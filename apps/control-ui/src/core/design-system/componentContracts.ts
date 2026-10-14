@@ -32,6 +32,51 @@ export interface ComponentContract {
 }
 export const componentContracts: readonly ComponentContract[] = [
   {
+    name: 'DeviceAppActivity',
+    group: 'Audio graph',
+    purpose: '가상 장치에 재생하거나 장치에서 녹음하는 앱의 읽기 전용 요약.',
+    use: 'Feature가 native UID 관찰·방향 필터·중복 제거·번역 문구를 공급하고 AudioNodeCard utility가 표시한다.',
+    avoid:
+      '미터·Off·Mute·선택으로 앱 활동을 추정하거나 확인 불가를 앱 없음으로 표시하지 않는다. 아이콘 색을 바꾸거나 추가 Tab 정지점을 만들지 않는다.',
+    anatomy:
+      '방향 glyph → 최대 세 개 AudioNodeIcon → +N. 실제 앱 아이콘은 그대로 전달하고 누락/실패 시만 APP fallback.',
+    states:
+      'playing / recording; apps=[]이면 Feature의 empty/loading/unavailable label. 기본값 없음. 폭이 좁으면 상태 문구를 줄임표로 표시하고 채널 수는 유지한다.',
+    tokens:
+      '--node-icon-size; --space-1; --text-muted; --font-caption / --font-sans / --font-mono.',
+    interaction:
+      '읽기 전용, Tab 대상 없음. 전체 목록은 바깥 React Flow node의 기존 aria-describedby 안내에 추가되며 같은 focus/hover tooltip으로 제공한다. 아이콘과 overflow는 개별 hover 설명. 변경은 live announcement하지 않는다.',
+    source: 'apps/control-ui/src/core/ui/DeviceAppActivity.tsx',
+    api: "export interface DeviceAppActivityProps {\n  direction: 'playing' | 'recording';\n  apps: readonly { id: string; label: string; iconUrl?: string }[];\n  /** Complete localized list, also supplied to the outer node accessible description. */\n  summary: string;\n  /** Empty, checking or unavailable wording supplied by Feature. */\n  label: string;\n  overflowLabel: string;\n  overflowDescription: string;\n}\n\nexport function DeviceAppActivity({\n  direction,\n  apps,\n  summary,\n  label,\n  overflowLabel,\n  overflowDescription,\n}: DeviceAppActivityProps)",
+    consumers: ['apps/control-ui/src/core/ui/AudioNodeCard.tsx'],
+    tests: ['apps/control-ui/src/core/ui/DeviceAppActivity.test.tsx'],
+    storyId: 'core-audio-nodes-application-icon--device-apps',
+    storyTitle: 'Core/Audio Nodes/Application Icon',
+    playgroundStory: 'core-playgrounds-deviceappactivity--playground',
+    stateStories: [
+      {
+        id: 'core-playgrounds-deviceappactivity--recording',
+        label: 'Recording',
+      },
+      {
+        id: 'core-playgrounds-deviceappactivity--empty',
+        label: 'Empty',
+      },
+      {
+        id: 'core-playgrounds-deviceappactivity--checking',
+        label: 'Checking',
+      },
+      {
+        id: 'core-playgrounds-deviceappactivity--unavailable',
+        label: 'Unavailable',
+      },
+      {
+        id: 'core-playgrounds-deviceappactivity--broken-icon',
+        label: 'Broken icon',
+      },
+    ],
+  },
+  {
     name: 'ActionButton',
     playgroundStory: 'core-controls-actionbutton--playground',
     group: 'Commands',
@@ -788,7 +833,7 @@ export const componentContracts: readonly ComponentContract[] = [
     interaction:
       '기존 trigger가 focus 소유. nonInteractive는 Tab 제외. React Aria tooltip 연결. pointer-events none.',
     source: 'apps/control-ui/src/core/ui/Tooltip.tsx',
-    api: "export function Tooltip({\n  children,\n  label,\n  position = 'top',\n  delay = motion.tooltipDelay,\n  opened,\n  kind = 'label',\n  offset = 4,\n  nonInteractive = false,\n}: {\n  children: ReactElement;\n  label: string;\n  position?: 'top' | 'bottom' | 'left' | 'right';\n  delay?: number;\n  opened?: boolean;\n  kind?: 'label' | 'readout';\n  offset?: number;\n  nonInteractive?: boolean;\n})",
+    api: "export function Tooltip({\n  children,\n  label,\n  position = 'top',\n  delay = motion.tooltipDelay,\n  opened,\n  onOpenChange,\n  kind = 'label',\n  offset = 4,\n  nonInteractive = false,\n}: {\n  children: ReactElement;\n  label: string;\n  position?: 'top' | 'bottom' | 'left' | 'right';\n  delay?: number;\n  opened?: boolean;\n  /** With `opened`, lets the tooltip ask to close (Escape) instead of staying forced open. */\n  onOpenChange?: (open: boolean) => void;\n  kind?: 'label' | 'readout';\n  offset?: number;\n  nonInteractive?: boolean;\n})",
     consumers: [
       'apps/control-ui/src/core/ui/AppInformationButton.tsx',
       'apps/control-ui/src/core/ui/StatusIndicator.tsx',
@@ -1874,9 +1919,9 @@ export const componentContracts: readonly ComponentContract[] = [
     tokens:
       'audioNodeFrame header26/utility24/minBody68/border1; node widths·face metrics; off 표면; 포트 좌표는 Options 밖.',
     interaction:
-      '독립 onSelect 있을 때만 card 선택 행동. 내부 실제 버튼/입력 nokey 경계. Options·Bypass·에디터의 이름은 title: 행동이고 공통 Tooltip을 사용한다. 앱 아이콘 실패만 fallback; meters 읽기전용; 헤더 Off→Mute→Options.',
+      'deviceAppActivity는 방향·최대 세 앱·overflow와 전체 목록 설명을 제공하며 Tab 대상을 추가하지 않는다. 독립 onSelect 있을 때만 card 선택 행동. 내부 실제 버튼/입력 nokey 경계. Options·Bypass·에디터의 이름은 title: 행동이고 공통 Tooltip을 사용한다. 앱 아이콘 실패만 fallback; meters 읽기전용; 헤더 Off→Mute→Options.',
     source: 'apps/control-ui/src/core/ui/AudioNodeCard.tsx',
-    api: "export interface NodeChoiceControl {\n  label: string;\n  value: string;\n  options: readonly { value: string; label: string; description?: string }[];\n}\n\nexport interface AudioNodeCardProps {\n  equalizer?: GraphicEqualizerContract;\n  onParametersChange?: (updates: readonly { id: string; value: number }[]) => void;\n  headerActions?: ReactNode;\n  muteControl?: ReactNode;\n  poweredOff?: boolean;\n  processingTimeNs?: number;\n  content?: ReactNode;\n  bypassed?: boolean;\n  /** Device presence only; selection and configuration remain available. */\n  offline?: boolean;\n  category: string;\n  channelCount?: number;\n  detail?: string;\n  endpointControl?: EndpointControl;\n  /** Offered in Options when there is more than one choice. */\n  channelLayoutControl?: NodeChoiceControl;\n  faceHeight?: number;\n  faceMode?: AudioNodeFaceMode;\n  onFaceHeightChange?: (height: number) => void;\n  onContentHeightChange?: (height: number, disclosureHeight: number) => void;\n  gainControl?: { label: string; valueDb: number };\n  icon: string;\n  iconUrl?: string;\n  inputCount: number;\n  meterBanks?: readonly AudioNodeMeterBank[];\n  outputCount: number;\n  optionsLabel?: string;\n  parameterControls?: readonly AudioNodeParameterControl[];\n  dynamics?: DynamicsMeterContract;\n  processorEditor?: {\n    actionLabel: string;\n    failureLabel?: string;\n    state: 'unavailable' | 'closed' | 'opening' | 'open' | 'failed';\n  };\n  showPorts?: boolean;\n  selected?: boolean;\n  status?: string;\n  statusTone?: StatusTone;\n  title: string;\n  /** Omit when a parent graph owns node selection and keyboard focus. */\n  onSelect?: () => void;\n  onGainChange?: (gainDb: number) => void;\n  onEndpointChange?: (value: EndpointUpdate) => void;\n  onChannelLayoutChange?: (value: string) => void;\n  onLayoutChange?: () => void;\n  onParameterChange?: (parameterId: string, value: number) => void;\n  onProcessorEditorRetry?: () => void;\n}\n\nexport function AudioNodeCard({\n  headerActions,\n  muteControl,\n  poweredOff = false,\n  processingTimeNs,\n  bypassed = false,\n  offline = false,\n  category,\n  content,\n  channelCount = 0,\n  detail,\n  faceHeight,\n  faceMode = 'standard',\n  onFaceHeightChange,\n  onContentHeightChange,\n  icon,\n  iconUrl,\n  inputCount,\n  meterBanks = [],\n  outputCount,\n  optionsLabel,\n  onSelect,\n  onLayoutChange,\n  onParameterChange,\n  onProcessorEditorRetry,\n  parameterControls = [],\n  equalizer,\n  dynamics,\n  onParametersChange,\n  processorEditor,\n  selected = false,\n  showPorts = true,\n  status,\n  statusTone = 'neutral',\n  title,\n  // Endpoint, channel layout and gain settings, which only the Options panel reads.\n  ...settings\n}: AudioNodeCardProps)",
+    api: "export interface NodeChoiceControl {\n  label: string;\n  value: string;\n  options: readonly { value: string; label: string; description?: string }[];\n}\n\nexport interface AudioNodeCardProps {\n  deviceAppActivity?: DeviceAppActivityProps;\n  equalizer?: GraphicEqualizerContract;\n  onParametersChange?: (updates: readonly { id: string; value: number }[]) => void;\n  headerActions?: ReactNode;\n  muteControl?: ReactNode;\n  poweredOff?: boolean;\n  processingTimeNs?: number;\n  content?: ReactNode;\n  bypassed?: boolean;\n  /** Device presence only; selection and configuration remain available. */\n  offline?: boolean;\n  category: string;\n  channelCount?: number;\n  detail?: string;\n  endpointControl?: EndpointControl;\n  /** Offered in Options when there is more than one choice. */\n  channelLayoutControl?: NodeChoiceControl;\n  faceHeight?: number;\n  faceMode?: AudioNodeFaceMode;\n  onFaceHeightChange?: (height: number) => void;\n  onContentHeightChange?: (height: number, disclosureHeight: number) => void;\n  gainControl?: { label: string; valueDb: number };\n  icon: string;\n  iconUrl?: string;\n  inputCount: number;\n  meterBanks?: readonly AudioNodeMeterBank[];\n  outputCount: number;\n  optionsLabel?: string;\n  parameterControls?: readonly AudioNodeParameterControl[];\n  dynamics?: DynamicsMeterContract;\n  processorEditor?: {\n    actionLabel: string;\n    failureLabel?: string;\n    state: 'unavailable' | 'closed' | 'opening' | 'open' | 'failed';\n  };\n  showPorts?: boolean;\n  selected?: boolean;\n  status?: string;\n  statusTone?: StatusTone;\n  title: string;\n  /** Omit when a parent graph owns node selection and keyboard focus. */\n  onSelect?: () => void;\n  onGainChange?: (gainDb: number) => void;\n  onEndpointChange?: (value: EndpointUpdate) => void;\n  onChannelLayoutChange?: (value: string) => void;\n  onLayoutChange?: () => void;\n  onParameterChange?: (parameterId: string, value: number) => void;\n  onProcessorEditorRetry?: () => void;\n}\n\nexport function AudioNodeCard({\n  deviceAppActivity,\n  headerActions,\n  muteControl,\n  poweredOff = false,\n  processingTimeNs,\n  bypassed = false,\n  offline = false,\n  category,\n  content,\n  channelCount = 0,\n  detail,\n  faceHeight,\n  faceMode = 'standard',\n  onFaceHeightChange,\n  onContentHeightChange,\n  icon,\n  iconUrl,\n  inputCount,\n  meterBanks = [],\n  outputCount,\n  optionsLabel,\n  onSelect,\n  onLayoutChange,\n  onParameterChange,\n  onProcessorEditorRetry,\n  parameterControls = [],\n  equalizer,\n  dynamics,\n  onParametersChange,\n  processorEditor,\n  selected = false,\n  showPorts = true,\n  status,\n  statusTone = 'neutral',\n  title,\n  // Endpoint, channel layout and gain settings, which only the Options panel reads.\n  ...settings\n}: AudioNodeCardProps)",
     consumers: ['apps/control-ui/src/core/audio-graph/AudioGraphCanvas.tsx'],
     tests: [
       'apps/control-ui/src/core/ui/IconButtonKeyboard.test.tsx',

@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useMemo } from 'react';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
+import mixrelayAppIcon from '../../../../desktop/src-tauri/icons/32x32.png';
 import {
   type StorybookControlState,
   StorybookMockControlPort,
@@ -15,6 +16,7 @@ import { ActionButton } from '../../core/ui/ActionButton';
 import type { ChainKind } from './builtinEffects';
 import { addRoutingNode, audioGraphToRuntimeGraph } from './model';
 import { RoutingWorkspace, type RoutingWorkspaceProps } from './RoutingWorkspace';
+import { deviceActivityFixture, deviceActivitySession } from './virtualEndpointFixtures';
 
 const graph: RuntimeGraphDocument = {
   edges: [],
@@ -502,3 +504,51 @@ function ExternalLayoutDemo() {
   );
 }
 export const ExternalLayoutRevision: Story = { render: () => <ExternalLayoutDemo /> };
+
+export const DeviceApps: Story = {
+  args: { audioSession: deviceActivitySession },
+  loaders: [() => ({ controlPort: deviceActivityPort('observed') })],
+};
+export const DeviceAppsEmpty: Story = {
+  ...DeviceApps,
+  loaders: [() => ({ controlPort: deviceActivityPort('empty') })],
+};
+export const DeviceAppsUnavailable: Story = {
+  ...DeviceApps,
+  loaders: [() => ({ controlPort: deviceActivityPort('unavailable') })],
+};
+export const DeviceAppsChecking: Story = {
+  ...DeviceApps,
+  loaders: [() => ({ controlPort: deviceActivityPort('loading') })],
+};
+export const DeviceAppsNarrowPseudo: Story = {
+  ...DeviceApps,
+  globals: { locale: 'pseudo', theme: 'dark' },
+  parameters: {
+    viewport: {
+      defaultViewport: 'mobile',
+      options: { mobile: { name: '390px', styles: { width: '390px', height: '844px' } } },
+    },
+  },
+};
+
+function deviceActivityPort(state: 'observed' | 'empty' | 'unavailable' | 'loading') {
+  const fixture = Object.fromEntries(
+    Object.entries(structuredClone(deviceActivityFixture)).map(([uid, records]) => [
+      uid,
+      records.filter((app) => app.processId !== 51),
+    ]),
+  );
+  for (const records of Object.values(fixture))
+    for (const app of records) {
+      if (app.bundleId === 'io.mixrelay.desktop') app.iconDataUrl = mixrelayAppIcon;
+    }
+  const port = new StorybookMockControlPort({
+    ...structuredClone(controlState),
+    deviceAppActivity: state === 'empty' ? {} : fixture,
+  });
+  if (state === 'unavailable')
+    port.getVirtualDeviceAppActivity = () => Promise.reject(new Error('unavailable'));
+  if (state === 'loading') port.getVirtualDeviceAppActivity = () => new Promise(() => {});
+  return port;
+}

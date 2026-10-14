@@ -425,3 +425,16 @@ describe('pushed meters', () => {
     ]);
   });
 });
+
+it('reads device clients with a no-argument native invoke and preserves unavailable failures', async () => {
+  const activity = {
+    native: [{ bundleId: 'app', displayName: 'App', processId: 1, playing: true, recording: true }],
+  };
+  const invoke = vi.fn().mockResolvedValue(activity);
+  const port = new TauriControlPort(invoke);
+  await expect(port.getVirtualDeviceAppActivity()).resolves.toEqual(activity);
+  expect(invoke).toHaveBeenCalledExactlyOnceWith('list_device_app_activity');
+  invoke.mockRejectedValueOnce(new Error('unsupported'));
+  await expect(port.getVirtualDeviceAppActivity()).rejects.toThrow('unsupported');
+  expect(new HttpControlPort()).not.toHaveProperty('getVirtualDeviceAppActivity');
+});

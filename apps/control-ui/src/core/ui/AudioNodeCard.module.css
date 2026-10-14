@@ -440,8 +440,14 @@
   line-height: var(--audio-node-row-height, 10px);
 }
 
+.ioSummary > :first-child {
+  flex: none;
+}
+
 .ioSummary {
   display: flex;
+  min-width: 0;
+  overflow: hidden;
   align-items: center;
   gap: 8px;
   padding: 0 var(--node-inset);

@@ -2,6 +2,7 @@ import { Meta, Canvas, ArgTypes } from '@storybook/addon-docs/blocks';
 import { DocsLayout } from '../DocsLayout';
 import { ComponentContract } from '../ComponentsReference';
 import * as Example from '../../ui/NodeFrame.stories';
+import * as Activity from '../../ui/AudioNodeCard.stories';
 
 import * as Api from "../playgrounds/AudioNodeCard.stories";
 
@@ -30,6 +31,15 @@ API 표의 *는 필수 입력입니다. Default의 —는 선언된 기본값이
 
 <Canvas of={Example.Default} story={{ inline: false, height: 800 }} />
 
+
+## 장치 앱 활동
+
+`deviceAppActivity`는 채널 요약 뒤에 방향, 최대 세 앱 아이콘, `+N`을 표시한다. Feature가 native UID로 합친 관찰값과 번역 문구를 공급한다. source는 playing, sink는 recording만 표시하고 Off·Mute·미터·선택으로 활동을 추정하지 않는다.
+
+전체 목록은 바깥 노드의 기존 키보드 설명에 추가되며 같은 노드의 focus tooltip으로 표시된다. 읽기 전용 아이콘·overflow는 Tab 정지점을 추가하지 않는다. 확인된 빈 응답은 “앱 없음”, 미지원·실패·3초 경과는 확인 불가로 구분한다.
+
+<Canvas of={Activity.DeviceApps} story={{ inline: false, height: 320 }} />
+<Canvas of={Activity.DeviceAppsMinimumWidth} story={{ inline: false, height: 320 }} />
 
 ## 개별 상태 예제
 

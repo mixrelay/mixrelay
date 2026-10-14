@@ -287,6 +287,21 @@ export const es = {
       'El control por LAN permanece desactivado hasta que este Mac habilite explícitamente el emparejamiento.',
   },
   routing: {
+    deviceApps: {
+      playing: 'Reproduciendo en el dispositivo',
+      recording: 'Grabando desde el dispositivo',
+      playingApp: '{{app}} — reproduciendo en {{device}}',
+      recordingApp: '{{app}} — grabando desde {{device}}',
+      playingSummary: 'Apps reproduciendo en {{device}}: {{apps}}',
+      recordingSummary: 'Apps grabando desde {{device}}: {{apps}}',
+      morePlaying: 'Más apps reproduciendo en {{device}} ({{count}}): {{apps}}',
+      moreRecording: 'Más apps grabando desde {{device}} ({{count}}): {{apps}}',
+      empty: 'Sin apps',
+      emptyPlaying: 'Ninguna app reproduce en {{device}}',
+      emptyRecording: 'Ninguna app graba desde {{device}}',
+      loading: 'Comprobando apps…',
+      unavailable: 'Actividad de apps no disponible',
+    },
     nodeControl: {
       powerOn: 'Activar {{name}}',
       powerOff: 'Desactivar {{name}}',

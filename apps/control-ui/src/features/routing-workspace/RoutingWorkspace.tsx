@@ -95,7 +95,9 @@ import { useProcessorEditors } from './useProcessorEditors';
 import { useProcessorParameterPublisher } from './useProcessorParameterPublisher';
 import { useRoutingInventory } from './useRoutingInventory';
 import { useRoutingMeters } from './useRoutingMeters';
+import { useVirtualDeviceAppActivity } from './useVirtualDeviceAppActivity';
 import { useVirtualEndpointCreation } from './useVirtualEndpointCreation';
+import { presentVirtualDeviceAppActivity } from './virtualDeviceAppActivity';
 import { presentApplicationReselection, presentVirtualNodeStatus } from './virtualNodeStatus';
 
 type WorkspaceState = 'active' | 'applying' | 'loading' | 'unavailable' | 'blocked';
@@ -1191,10 +1193,22 @@ function useProcessorEditorLabels() {
   );
 }
 
+function useDeviceActivityModel(props: WorkspaceViewProps) {
+  const { t, i18n } = useTranslation();
+  const settings = props.audioSession?.virtualEndpointSettings;
+  const activity = useVirtualDeviceAppActivity(props.controlPort, settings);
+  return useMemo(
+    () =>
+      props.model &&
+      presentVirtualDeviceAppActivity(props.model, settings, activity, t, i18n.language),
+    [props.model, settings, activity, t, i18n.language],
+  );
+}
+
 function usePresentedModel(props: WorkspaceViewProps) {
   const { t } = useTranslation();
+  const model = useDeviceActivityModel(props);
   const {
-    model,
     applications,
     audioDevices,
     inventory,

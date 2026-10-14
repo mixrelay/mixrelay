@@ -287,6 +287,21 @@ export const ja = {
     remoteDescription: 'この Mac で明示的にペアリングを有効にするまで、LAN 経由の操作は無効です。',
   },
   routing: {
+    deviceApps: {
+      playing: 'デバイスへ再生中',
+      recording: 'デバイスから録音中',
+      playingApp: '{{app}} — {{device}}へ再生中',
+      recordingApp: '{{app}} — {{device}}から録音中',
+      playingSummary: '{{device}}へ再生中のアプリ: {{apps}}',
+      recordingSummary: '{{device}}から録音中のアプリ: {{apps}}',
+      morePlaying: '{{device}}へ再生中の他のアプリ（{{count}}件）: {{apps}}',
+      moreRecording: '{{device}}から録音中の他のアプリ（{{count}}件）: {{apps}}',
+      empty: 'アプリなし',
+      emptyPlaying: '{{device}}へ再生中のアプリなし',
+      emptyRecording: '{{device}}から録音中のアプリなし',
+      loading: 'アプリを確認中…',
+      unavailable: 'アプリの動作を確認できません',
+    },
     nodeControl: {
       powerOn: '{{name}} を有効にする',
       powerOff: '{{name}} を無効にする',

@@ -287,6 +287,21 @@ export const fr = {
       'La commande LAN reste désactivée tant que ce Mac n’a pas explicitement activé l’appairage.',
   },
   routing: {
+    deviceApps: {
+      playing: 'Lecture vers le périphérique',
+      recording: 'Enregistrement depuis le périphérique',
+      playingApp: '{{app}} — lecture vers {{device}}',
+      recordingApp: '{{app}} — enregistrement depuis {{device}}',
+      playingSummary: 'Applications en lecture vers {{device}} : {{apps}}',
+      recordingSummary: 'Applications enregistrant depuis {{device}} : {{apps}}',
+      morePlaying: 'Autres applications en lecture vers {{device}} ({{count}}) : {{apps}}',
+      moreRecording: 'Autres applications enregistrant depuis {{device}} ({{count}}) : {{apps}}',
+      empty: 'Aucune application',
+      emptyPlaying: 'Aucune application en lecture vers {{device}}',
+      emptyRecording: 'Aucune application enregistrant depuis {{device}}',
+      loading: 'Vérification des applications…',
+      unavailable: 'Activité des applications indisponible',
+    },
     nodeControl: {
       powerOn: 'Activer {{name}}',
       powerOff: 'Désactiver {{name}}',

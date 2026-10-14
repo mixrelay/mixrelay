@@ -276,6 +276,21 @@ export const en = {
     remoteDescription: 'LAN control stays off until this Mac explicitly enables pairing.',
   },
   routing: {
+    deviceApps: {
+      playing: 'Playing to device',
+      recording: 'Recording from device',
+      playingApp: '{{app}} — playing to {{device}}',
+      recordingApp: '{{app}} — recording from {{device}}',
+      playingSummary: 'Apps playing to {{device}}: {{apps}}',
+      recordingSummary: 'Apps recording from {{device}}: {{apps}}',
+      morePlaying: 'Additional apps playing to {{device}} ({{count}}): {{apps}}',
+      moreRecording: 'Additional apps recording from {{device}} ({{count}}): {{apps}}',
+      empty: 'No apps',
+      emptyPlaying: 'No apps playing to {{device}}',
+      emptyRecording: 'No apps recording from {{device}}',
+      loading: 'Checking apps…',
+      unavailable: 'App activity unavailable',
+    },
     nodeControl: {
       powerOn: 'Enable {{name}}',
       powerOff: 'Disable {{name}}',

@@ -11,6 +11,7 @@ export function Tooltip({
   position = 'top',
   delay = motion.tooltipDelay,
   opened,
+  onOpenChange,
   kind = 'label',
   offset = 4,
   nonInteractive = false,
@@ -20,13 +21,15 @@ export function Tooltip({
   position?: 'top' | 'bottom' | 'left' | 'right';
   delay?: number;
   opened?: boolean;
+  /** With `opened`, lets the tooltip ask to close (Escape) instead of staying forced open. */
+  onOpenChange?: (open: boolean) => void;
   kind?: 'label' | 'readout';
   offset?: number;
   nonInteractive?: boolean;
 }) {
   const nativeProps = children.props as { disabled?: boolean };
   return (
-    <TooltipTrigger delay={delay} closeDelay={0} isOpen={opened}>
+    <TooltipTrigger delay={delay} closeDelay={0} isOpen={opened} onOpenChange={onOpenChange}>
       {typeof children.type === 'string' || nonInteractive ? (
         <Focusable isDisabled={nativeProps.disabled} excludeFromTabOrder={nonInteractive}>
           {children as ComponentProps<typeof Focusable>['children']}

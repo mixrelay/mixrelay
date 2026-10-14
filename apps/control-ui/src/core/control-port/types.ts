@@ -464,7 +464,19 @@ export interface RecorderStatus {
   error: string | null;
 }
 
+/** Observed native device clients; flags describe OS playback/capture, not graph state. */
+export interface DeviceAppActivity {
+  bundleId: string;
+  displayName: string;
+  iconDataUrl?: string;
+  processId: number;
+  playing: boolean;
+  recording: boolean;
+}
+
 export interface ControlPort {
+  /** A successful missing UID is observed empty; rejection means unavailable. */
+  getVirtualDeviceAppActivity?(): Promise<Record<string, DeviceAppActivity[]>>;
   getNodeControls?(graphId: string): Promise<GraphNodeControls>;
   updateNodeControl?(
     graphId: string,

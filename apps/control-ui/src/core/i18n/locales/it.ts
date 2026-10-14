@@ -285,6 +285,21 @@ export const it = {
       'Il controllo LAN resta disattivato finché questo Mac non abilita esplicitamente l’abbinamento.',
   },
   routing: {
+    deviceApps: {
+      playing: 'Riproduzione sul dispositivo',
+      recording: 'Registrazione dal dispositivo',
+      playingApp: '{{app}} — riproduzione su {{device}}',
+      recordingApp: '{{app}} — registrazione da {{device}}',
+      playingSummary: 'App in riproduzione su {{device}}: {{apps}}',
+      recordingSummary: 'App in registrazione da {{device}}: {{apps}}',
+      morePlaying: 'Altre app in riproduzione su {{device}} ({{count}}): {{apps}}',
+      moreRecording: 'Altre app in registrazione da {{device}} ({{count}}): {{apps}}',
+      empty: 'Nessuna app',
+      emptyPlaying: 'Nessuna app in riproduzione su {{device}}',
+      emptyRecording: 'Nessuna app in registrazione da {{device}}',
+      loading: 'Verifica delle app…',
+      unavailable: 'Attività delle app non disponibile',
+    },
     nodeControl: {
       powerOn: 'Abilita {{name}}',
       powerOff: 'Disabilita {{name}}',

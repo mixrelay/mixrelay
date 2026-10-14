@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 
 import { type StorybookControlState, StorybookMockControlPort } from './StorybookMockControlPort';
 import type { ProcessorRetryRequest, RuntimeGraphDocument } from './types';
@@ -342,4 +342,20 @@ describe('preview catalog concurrency and omitted control fields', () => {
       control: { enabled: true, muted: true },
     });
   });
+});
+
+it('returns isolated native activity fixtures and observed empty by default', async () => {
+  const { state, port } = fixture();
+  await expect(port.getVirtualDeviceAppActivity()).resolves.toEqual({});
+  state.deviceAppActivity = {
+    native: [
+      { bundleId: 'app', displayName: 'App', processId: 1, playing: true, recording: false },
+    ],
+  };
+  const snapshot = await port.getVirtualDeviceAppActivity();
+  expect(snapshot).toEqual(state.deviceAppActivity);
+  const cloned = snapshot.native?.[0];
+  assert(cloned);
+  cloned.playing = false;
+  expect(state.deviceAppActivity.native?.[0]?.playing).toBe(true);
 });

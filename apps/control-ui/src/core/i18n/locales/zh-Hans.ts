@@ -262,6 +262,21 @@ export const zhHans = {
     remoteDescription: '此 Mac 明确启用配对前，局域网控制保持关闭。',
   },
   routing: {
+    deviceApps: {
+      playing: '正在向设备播放',
+      recording: '正在从设备录音',
+      playingApp: '{{app}} — 正在向 {{device}} 播放',
+      recordingApp: '{{app}} — 正在从 {{device}} 录音',
+      playingSummary: '正在向 {{device}} 播放的应用：{{apps}}',
+      recordingSummary: '正在从 {{device}} 录音的应用：{{apps}}',
+      morePlaying: '正在向 {{device}} 播放的其他应用（{{count}} 个）：{{apps}}',
+      moreRecording: '正在从 {{device}} 录音的其他应用（{{count}} 个）：{{apps}}',
+      empty: '无应用',
+      emptyPlaying: '没有应用正在向 {{device}} 播放',
+      emptyRecording: '没有应用正在从 {{device}} 录音',
+      loading: '正在检查应用…',
+      unavailable: '无法获取应用活动',
+    },
     nodeControl: {
       powerOn: '启用 {{name}}',
       powerOff: '停用 {{name}}',

@@ -275,6 +275,21 @@ export const koKR = {
     remoteDescription: '이 Mac에서 페어링을 명시적으로 켜기 전까지 LAN 제어는 꺼져 있습니다.',
   },
   routing: {
+    deviceApps: {
+      playing: '장치로 재생 중',
+      recording: '장치에서 녹음 중',
+      playingApp: '{{app}} — {{device}}로 재생 중',
+      recordingApp: '{{app}} — {{device}}에서 녹음 중',
+      playingSummary: '{{device}}로 재생 중인 앱: {{apps}}',
+      recordingSummary: '{{device}}에서 녹음 중인 앱: {{apps}}',
+      morePlaying: '{{device}}로 재생 중인 추가 앱 {{count}}개: {{apps}}',
+      moreRecording: '{{device}}에서 녹음 중인 추가 앱 {{count}}개: {{apps}}',
+      empty: '앱 없음',
+      emptyPlaying: '{{device}}로 재생 중인 앱 없음',
+      emptyRecording: '{{device}}에서 녹음 중인 앱 없음',
+      loading: '앱 확인 중…',
+      unavailable: '앱 활동을 확인할 수 없음',
+    },
     nodeControl: {
       powerOn: '{{name}} 켜기',
       powerOff: '{{name}} 끄기',
