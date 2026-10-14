@@ -15,9 +15,11 @@ bool mr_hal_identity_start(int32_t pid, uint64_t *seconds, uint64_t *micros) {
     return true;
 }
 
-bool mr_hal_identity_bundle(int32_t pid, char *output, size_t capacity) {
+/* The identifier of the innermost .app enclosing an executable path. Reads only the
+ * bundle's Info.plist; nothing is launched. */
+bool mr_hal_identity_bundle_at(const char *executable, char *output, size_t capacity) {
     char path[PROC_PIDPATHINFO_MAXSIZE] = {0};
-    if (proc_pidpath(pid, path, sizeof(path)) <= 0) return false;
+    if (strlcpy(path, executable, sizeof(path)) >= sizeof(path)) return false;
     char *end = path + strlen(path);
     while (end > path) {
         *end = '\0';
@@ -38,4 +40,10 @@ bool mr_hal_identity_bundle(int32_t pid, char *output, size_t capacity) {
         if (end == NULL) break;
     }
     return false;
+}
+
+bool mr_hal_identity_bundle(int32_t pid, char *output, size_t capacity) {
+    char path[PROC_PIDPATHINFO_MAXSIZE] = {0};
+    if (proc_pidpath(pid, path, sizeof(path)) <= 0) return false;
+    return mr_hal_identity_bundle_at(path, output, capacity);
 }

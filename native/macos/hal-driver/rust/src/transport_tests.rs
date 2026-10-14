@@ -436,30 +436,55 @@ fn unknown_process_worker_caches_misses() {
 }
 
 #[test]
-fn unknown_bundle_is_resolved_by_the_worker_from_the_enclosing_app() {
+fn the_enclosing_app_identifies_an_executable_without_launching_it() {
+    unsafe extern "C" {
+        fn mr_hal_identity_bundle_at(
+            executable: *const c_char,
+            output: *mut c_char,
+            capacity: usize,
+        ) -> bool;
+    }
+    let identify = |path: &std::path::Path| {
+        let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        let mut bytes = [0 as c_char; 128];
+        unsafe { mr_hal_identity_bundle_at(path.as_ptr(), bytes.as_mut_ptr(), bytes.len()) }.then(
+            || {
+                unsafe { CStr::from_ptr(bytes.as_ptr()) }
+                    .to_string_lossy()
+                    .into_owned()
+            },
+        )
+    };
+    // A bundle layout with a placeholder file: Info.plist is read, nothing is executed,
+    // so macOS never assesses (or reports as damaged) an unsigned test application.
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../../target/test-artifacts")
         .join(format!("transport-bundle-{}", std::process::id()));
-    let contents = root.join("Probe.app/Contents");
-    std::fs::create_dir_all(contents.join("MacOS")).unwrap();
-    let executable = contents.join("MacOS/probe");
-    std::fs::copy("/bin/cat", &executable).unwrap();
+    let contents = root.join("Fixture.app/Contents");
+    std::fs::create_dir_all(contents.join("MacOS/Helpers")).unwrap();
+    std::fs::write(contents.join("MacOS/fixture"), b"").unwrap();
     std::fs::write(contents.join("Info.plist"), r#"<?xml version="1.0"?>
-<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.test.BundleProbe</string>
-<key>CFBundleExecutable</key><string>probe</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>"#).unwrap();
-    let mut child = std::process::Command::new(executable)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
-    let pid = i32::try_from(child.id()).unwrap();
-    let transport = Transport::default();
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.test.BundleProbe</string></dict></plist>"#).unwrap();
+    let found = identify(&contents.join("MacOS/fixture"));
+    let nested = identify(&contents.join("MacOS/Helpers/tool"));
+    let outside = identify(&root.join("tool"));
+    std::fs::remove_dir_all(root).unwrap();
+    assert_eq!(found.as_deref(), Some("com.test.BundleProbe"));
+    assert_eq!(nested.as_deref(), Some("com.test.BundleProbe"));
+    assert_eq!(outside, None);
+    // This unbundled test process has no enclosing application.
+    let pid = i32::try_from(std::process::id()).unwrap();
+    assert_eq!(bundle(pid), None);
+}
+
+#[test]
+fn unknown_bundle_is_resolved_by_the_worker_and_answered_within_the_caller_budget() {
+    let pid = i32::try_from(std::process::id()).unwrap();
+    let transport = Transport::with_discovery(move |key| {
+        (key.0 == pid).then(|| "com.test.BundleProbe".to_owned())
+    });
     transport.policy(vec!["com.test.BundleProbe".into()]);
     // Inject a generous caller budget; production remains bounded to 20 ms.
-    let value = transport.query(16, pid, Duration::from_secs(1));
-    child.kill().unwrap();
-    child.wait().unwrap();
-    std::fs::remove_dir_all(root).unwrap();
-    assert_eq!(value, USB);
-    assert_eq!(transport.query(16, pid, QUERY_BUDGET), VIRTUAL);
+    assert_eq!(transport.query(16, pid, Duration::from_secs(1)), USB);
+    assert_eq!(transport.query(16, pid, QUERY_BUDGET), USB);
 }
