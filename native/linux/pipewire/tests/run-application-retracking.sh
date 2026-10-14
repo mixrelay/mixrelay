@@ -239,6 +239,7 @@ bash "$fixture/configure-application-policy.sh" "$fixture" "$lab" "$policy_hook"
 cp "$fixture/application-lab-pipewire.conf" "$lab/pipewire.conf"
 sed -i "s/default.clock.rate = 48000/default.clock.rate = $graph_rate/" "$lab/pipewire.conf"
 export XDG_RUNTIME_DIR="$lab/runtime" XDG_CONFIG_HOME="$lab/config" XDG_STATE_HOME="$lab/state" XDG_DATA_HOME="$lab/data"
+export MIXRELAY_IPC_DIR="$lab/ipc"
 export WIREPLUMBER_CONFIG_DIR="$lab/config/wireplumber"
 if [[ "$policy_hook" == source-mute ]]; then
     export WIREPLUMBER_DATA_DIR="$lab/data/wireplumber"

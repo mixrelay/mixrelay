@@ -1,10 +1,7 @@
 //! User-owned Unix socket transport. No network listener, detached command queue, or audio work.
 use std::future::Future;
 use std::io;
-#[cfg(target_os = "linux")]
-use std::os::unix::fs::OpenOptionsExt as _;
-use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,25 +27,6 @@ pub(crate) struct LocalSocket {
     operation_liveness: Arc<tokio::sync::Notify>,
 }
 
-struct SocketPath {
-    path: PathBuf,
-    inode: u64,
-    // Linux may immediately reuse an unlinked inode. Retain its VFS identity until
-    // this guard is dropped so it cannot mistake a replacement socket for its own.
-    #[cfg(target_os = "linux")]
-    _inode_handle: std::fs::File,
-}
-
-impl Drop for SocketPath {
-    fn drop(&mut self) {
-        if std::fs::symlink_metadata(&self.path)
-            .is_ok_and(|metadata| metadata.ino() == self.inode && metadata.file_type().is_socket())
-        {
-            let _ = std::fs::remove_file(&self.path);
-        }
-    }
-}
-
 impl LocalSocket {
     /// Binds only within an owner-only directory. Existing live sockets are never replaced.
     pub(crate) async fn start(
@@ -56,7 +34,8 @@ impl LocalSocket {
         owner_uid: u32,
         control: LocalControl,
     ) -> io::Result<Self> {
-        let (listener, path) = bind(directory, owner_uid).await?;
+        let (listener, path) =
+            mixrelay_local_socket::bind(directory, "control.sock", owner_uid).await?;
         let operation_liveness = Arc::clone(&control.client.operation_liveness);
         let (stop, stopped) = watch::channel(false);
         let (finished, done) = watch::channel(false);
@@ -93,53 +72,6 @@ impl Drop for LocalSocket {
     fn drop(&mut self) {
         let _ = self.stop.send(true);
     }
-}
-
-async fn bind(directory: &Path, uid: u32) -> io::Result<(UnixListener, SocketPath)> {
-    match std::fs::DirBuilder::new().mode(0o700).create(directory) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-        Err(error) => return Err(error),
-    }
-    let metadata = std::fs::symlink_metadata(directory)?;
-    if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o777 != 0o700 {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "local control directory must be owned by this user with mode 0700",
-        ));
-    }
-    let path = directory.join("control.sock");
-    if let Ok(metadata) = std::fs::symlink_metadata(&path) {
-        if !metadata.file_type().is_socket() || metadata.uid() != uid {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "local control path is not an owned socket",
-            ));
-        }
-        match tokio::time::timeout(IO_TIMEOUT, UnixStream::connect(&path)).await {
-            Ok(Err(error)) if error.kind() == io::ErrorKind::ConnectionRefused => {
-                std::fs::remove_file(&path)?;
-            }
-            _ => {
-                return Err(io::Error::new(
-                    io::ErrorKind::AddrInUse,
-                    "local control socket is active",
-                ));
-            }
-        }
-    }
-    let listener = UnixListener::bind(&path)?;
-    let owner = SocketPath {
-        inode: std::fs::symlink_metadata(&path)?.ino(),
-        #[cfg(target_os = "linux")]
-        _inode_handle: std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-            .open(&path)?,
-        path,
-    };
-    std::fs::set_permissions(&owner.path, std::fs::Permissions::from_mode(0o600))?;
-    Ok((listener, owner))
 }
 
 async fn serve(
@@ -272,66 +204,8 @@ where
 mod tests {
     use super::*;
     use serde_json::Value;
+    use std::os::unix::fs::MetadataExt as _;
     use tokio::sync::oneshot;
-
-    #[tokio::test]
-    async fn owned_socket_refuses_live_replacement_and_cleans_up() {
-        let fixture = mixrelay_test_support::FixtureDir::new("ipc").expect("fixture");
-        let directory = fixture.join("control");
-        let uid = std::fs::metadata(fixture.path()).expect("metadata").uid();
-        let (listener, owner) = bind(&directory, uid).await.expect("bind");
-        assert_eq!(
-            std::fs::metadata(&directory).expect("directory").mode() & 0o777,
-            0o700
-        );
-        assert_eq!(
-            std::fs::metadata(&owner.path).expect("socket").mode() & 0o777,
-            0o600
-        );
-        assert_eq!(
-            bind(&directory, uid)
-                .await
-                .err()
-                .expect("live rejection")
-                .kind(),
-            io::ErrorKind::AddrInUse
-        );
-        drop(listener);
-        // A dead listener's inode is recoverable, but the old guard cannot delete its replacement.
-        let (replacement, next) = bind(&directory, uid).await.expect("stale recovery");
-        drop(owner);
-        assert!(next.path.exists());
-        drop(replacement);
-        let path = next.path.clone();
-        drop(next);
-        assert!(!path.exists());
-    }
-
-    #[tokio::test]
-    async fn unsafe_directories_and_non_socket_targets_are_not_overwritten() {
-        let fixture = mixrelay_test_support::FixtureDir::new("ipc-path").expect("fixture");
-        let uid = std::fs::metadata(fixture.path()).expect("metadata").uid();
-        assert_eq!(
-            bind(fixture.path(), uid)
-                .await
-                .err()
-                .expect("permissions")
-                .kind(),
-            io::ErrorKind::PermissionDenied
-        );
-        let directory = fixture.join("control");
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&directory)
-            .expect("directory");
-        let path = directory.join("control.sock");
-        std::fs::write(&path, b"user data").expect("file");
-        assert!(bind(&directory, uid).await.is_err());
-        assert_eq!(std::fs::read(path).expect("retained file"), b"user data");
-        let link = fixture.join("link");
-        std::os::unix::fs::symlink(&directory, &link).expect("symlink");
-        assert!(bind(&link, uid).await.is_err());
-    }
 
     #[tokio::test]
     async fn shutdown_cancels_idle_readers_and_removes_only_owned_socket() {

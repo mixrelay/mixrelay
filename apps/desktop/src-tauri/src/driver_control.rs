@@ -7,7 +7,7 @@ use tauri::Manager as _;
 /// Read the installed Driver owner; free device settings do not require graph admission.
 #[tauri::command]
 pub(crate) async fn driver_status(app: tauri::AppHandle) -> Result<DriverSnapshot, String> {
-    let client = DriverClient::new().map_err(|error| error.to_string())?;
+    let client = DriverClient::session().map_err(|error| error.to_string())?;
     let snapshot = match client.snapshot().await {
         Ok(snapshot) => Ok(snapshot),
         Err(DriverError::Http(error)) if error.is_connect() => {
@@ -26,7 +26,7 @@ pub(crate) async fn driver_mutate(
     app: tauri::AppHandle,
     command: DriverCommand,
 ) -> Result<DriverSnapshot, String> {
-    let client = DriverClient::new().map_err(|error| error.to_string())?;
+    let client = DriverClient::session().map_err(|error| error.to_string())?;
     let rename = if let DriverCommand::Configure { spec, .. } = &command {
         client
             .snapshot()

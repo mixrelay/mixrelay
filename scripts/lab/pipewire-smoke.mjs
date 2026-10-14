@@ -1,3 +1,4 @@
+import { engineSocket, socketJson } from '../local-socket.mjs';
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
@@ -14,6 +15,8 @@ for (const [suffix, mediaClass] of [["render", "Audio/Sink"], ["capture", "Audio
   assert.ok(inventory.some(item => item.info?.props?.["node.name"] === `${prefix}.${suffix}`
     && item.info.props["media.class"] === mediaClass), `Missing explicit ${suffix} target`);
 }
+const socket = engineSocket();
+const requestOptions = { headers: { host: 'mixrelay-engine' }, timeoutMs: 2000 };
 const children = [];
 function launch(args) {
   const child = spawn("pw-cat", args, { stdio: ["pipe", "pipe", "pipe"] });
@@ -47,9 +50,7 @@ try {
   const meters = [];
   for (let index = 0; index < 12; index++) {
     await delay(250);
-    const response = await fetch("http://127.0.0.1:19341/api/v1/meters", { signal: AbortSignal.timeout(2000) });
-    assert.ok(response.ok);
-    meters.push(await response.json());
+    meters.push(await socketJson(socket, '/api/v1/meters', requestOptions));
   }
   for (const state of children) {
     assert.equal(state.error, null, state.error?.message);
@@ -89,9 +90,7 @@ try {
     return { port, peaks };
   });
   const activeFraction = activeFrames / Math.max(1, lastActive - firstActive + 1);
-  const statusResponse = await fetch("http://127.0.0.1:19341/api/v1/status", { signal: AbortSignal.timeout(2000) });
-  assert.ok(statusResponse.ok);
-  const runtimeStatus = await statusResponse.json();
+  const runtimeStatus = await socketJson(socket, '/api/v1/status', requestOptions);
   console.log(JSON.stringify({ recordedFrames: Math.floor(recorded.length / 8), activeFrames, peaks, meterPeaks,
     activeFraction, longestInternalSilenceFrames: longestInternalSilence,
     firstActiveFrame: firstActive, longestSilenceStartFrame, runtimeStatus,

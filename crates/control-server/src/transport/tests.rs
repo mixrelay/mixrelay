@@ -9,7 +9,7 @@ use std::{
 };
 use tokio::{io::AsyncWriteExt, net::TcpListener, time::timeout};
 
-async fn test_listener(capacity: usize) -> (ControlListener, SocketAddr) {
+async fn test_listener(capacity: usize) -> (ControlListener<TcpListener>, SocketAddr) {
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
         .await
         .expect("test listener should bind");

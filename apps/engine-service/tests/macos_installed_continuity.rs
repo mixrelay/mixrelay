@@ -6,6 +6,7 @@
 use mixrelay_audio_graph::{ChannelMapping, GraphDocument, NodeConfig};
 use mixrelay_audio_io::process::ProcessingState;
 use mixrelay_control_protocol::AppStatus;
+use mixrelay_local_socket::{ENGINE_SOCKET, socket_directory};
 use reqwest::blocking::Client;
 use std::{
     collections::BTreeSet,
@@ -17,7 +18,7 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const API: &str = "http://127.0.0.1:19341/api/v1";
+const API: &str = "http://mixrelay-engine/api/v1";
 const OBSERVATION: Duration = Duration::from_secs(30);
 const MAX_CHANNELS: usize = 64;
 #[path = "macos_installed_continuity/recording.rs"]
@@ -630,7 +631,10 @@ fn installed_mixed_route_pcm_continuity_without_changing_graph_or_format() -> Re
         std::env::var("MIXRELAY_TEST_INSTALLED_ENGINE").as_deref() == Ok("1"),
         "explicit installed read-only measurement authorization required: MIXRELAY_TEST_INSTALLED_ENGINE=1; no I/O started",
     )?;
-    let client = Client::builder().timeout(Duration::from_secs(3)).build()?;
+    let client = Client::builder()
+        .unix_socket(socket_directory()?.join(ENGINE_SOCKET))
+        .timeout(Duration::from_secs(3))
+        .build()?;
     let graph_url = selected_graph_url()?;
     let status = || -> Result<AppStatus> {
         Ok(client

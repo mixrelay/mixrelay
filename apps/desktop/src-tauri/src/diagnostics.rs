@@ -96,7 +96,7 @@ pub(crate) fn export(app: &tauri::AppHandle) {
             return;
         };
         let driver = tokio::time::timeout(Duration::from_secs(4), async {
-            DriverClient::new()?.snapshot().await
+            DriverClient::session()?.snapshot().await
         })
         .await
         .ok()

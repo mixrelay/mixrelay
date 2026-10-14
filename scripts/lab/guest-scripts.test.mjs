@@ -120,9 +120,11 @@ for (const scenario of ["occupied", "start-failed", "probe-failed", "success"]) 
     mock("sha256sum", "exit 0");
     mock("pw-cat", "exit 0");
     mock("engine", "exit 0");
-    // A 404 response is still an occupied API port. The first probe must not
+    // A 404 response is still an occupied control socket. The first probe must not
     // use curl --fail, which would incorrectly allow replacing that service.
     mock("curl", `
+      [ "$1" = --unix-socket ] && [ "$2" = "$LAB_MOCK_ROOT/ipc/engine.sock" ] || exit 99
+      [ "$3" = --header ] && [ "$4" = 'Host: mixrelay-engine' ] || exit 99
       case " $* " in *" --fail "*) fail=1 ;; *) fail=0 ;; esac
       if [ ! -f "$LAB_MOCK_ROOT/queried" ]; then
         touch "$LAB_MOCK_ROOT/queried"
@@ -130,14 +132,18 @@ for (const scenario of ["occupied", "start-failed", "probe-failed", "success"]) 
         exit 7
       fi
       exit 0`);
-    mock("systemd-run", `echo start >> "$LAB_MOCK_ROOT/lifecycle"
+    mock("systemd-run", `
+      case " $* " in *" --setenv=MIXRELAY_IPC_DIR=$LAB_MOCK_ROOT/ipc "*) ;; *) exit 99 ;; esac
+      echo start >> "$LAB_MOCK_ROOT/lifecycle"
       [ "$LAB_SCENARIO" != start-failed ]`);
     mock("systemctl", `echo "$*" >> "$LAB_MOCK_ROOT/lifecycle"`);
-    mock("node", `echo probe >> "$LAB_MOCK_ROOT/lifecycle"
+    mock("node", `
+      [ "$MIXRELAY_IPC_DIR" = "$LAB_MOCK_ROOT/ipc" ] || exit 99
+      echo probe >> "$LAB_MOCK_ROOT/lifecycle"
       [ "$LAB_SCENARIO" != probe-failed ]`);
     const result = spawnSync("bash", [pipewireCheck, join(bin, "engine"), join(bin, "node"), "/unused-probe"], {
       encoding: "utf8", timeout: 5000,
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, LAB_MOCK_ROOT: directory, LAB_SCENARIO: scenario },
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, LAB_MOCK_ROOT: directory, LAB_SCENARIO: scenario, MIXRELAY_IPC_DIR: join(directory, "ipc") },
     });
     assert.equal(result.error, undefined, `${result.stderr}\n${result.stdout}`);
     assert.equal(result.status, { occupied: 2, "start-failed": 1, "probe-failed": 1, success: 0 }[scenario], result.stderr);

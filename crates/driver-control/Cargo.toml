@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+mixrelay-local-socket = { path = "../local-socket" }
 # Common endpoint types; no graph, engine, licensing, or platform dependency.
 mixrelay-audio-io.workspace = true
 axum.workspace = true
@@ -16,7 +17,6 @@ thiserror.workspace = true
 # Startup failures are reported by the service's existing tracing subscriber.
 tracing = "0.1.41"
 tokio = { workspace = true, features = ["sync", "time"] }
-tower-http.workspace = true
 
 [dev-dependencies]
 mixrelay-test-support = { path = "../test-support" }

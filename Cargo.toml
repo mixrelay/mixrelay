@@ -20,6 +20,7 @@ members = [
   "crates/driver-control",
   "crates/engine-process",
   "crates/licensing",
+  "crates/local-socket",
   "crates/macos-test-support",
   "crates/test-support",
   "tests/fixtures/native-clap",

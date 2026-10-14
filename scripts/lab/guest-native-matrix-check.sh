@@ -7,14 +7,17 @@ probe=${3:?Expected matrix probe}
 [[ "$engine" == /* && -x "$engine" && "$node" == /* && -x "$node" ]] || exit 2
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
-if curl --silent --max-time 2 http://127.0.0.1:19341/health >/dev/null; then
+export MIXRELAY_IPC_DIR="${MIXRELAY_IPC_DIR:-$XDG_RUNTIME_DIR/mixrelay}"
+[[ "$MIXRELAY_IPC_DIR" == /* ]] || { echo 'MIXRELAY_IPC_DIR must be absolute' >&2; exit 2; }
+engine_socket="$MIXRELAY_IPC_DIR/engine.sock"
+if curl --unix-socket "$engine_socket" --header 'Host: mixrelay-engine' --silent --max-time 2 http://mixrelay-engine/health >/dev/null; then
   echo "Refusing to replace an existing engine" >&2; exit 2
 fi
-systemd-run --user --unit=mixrelay-lab-matrix --collect "$engine"
+systemd-run --user --unit=mixrelay-lab-matrix --collect --setenv="MIXRELAY_IPC_DIR=$MIXRELAY_IPC_DIR" "$engine"
 trap 'systemctl --user stop mixrelay-lab-matrix' EXIT
 ready=false
 for ((n=0; n<100; n++)); do
-  if curl --silent --fail --max-time 1 http://127.0.0.1:19341/health >/dev/null; then ready=true; break; fi
+  if curl --unix-socket "$engine_socket" --header 'Host: mixrelay-engine' --silent --fail --max-time 1 http://mixrelay-engine/health >/dev/null; then ready=true; break; fi
   sleep .1
 done
 [[ "$ready" == true ]] || exit 1

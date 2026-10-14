@@ -5,8 +5,6 @@ use mixrelay_audio_io::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-/// Fixed loopback port owned by the installed Driver service.
-pub const DRIVER_PORT: u16 = 19_342;
 /// Driver snapshot GET route.
 pub const SNAPSHOT_ROUTE: &str = "/api/v1/driver";
 /// Driver command PUT route.

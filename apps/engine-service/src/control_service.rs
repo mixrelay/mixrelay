@@ -1,35 +1,41 @@
-//! Owns loopback admission and HTTP draining, independently of native audio adapters.
+//! Owns local-socket admission and HTTP draining, independently of native audio adapters.
 //! The caller binds before preparing devices and retains audio owners until serve finishes.
 
-use std::{future::Future, future::IntoFuture, io, net::SocketAddr, sync::Arc};
+use std::{
+    future::Future,
+    future::IntoFuture,
+    io,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use axum::Router;
 use mixrelay_control_server::{
     ControlBackend, ControlOperations, bounded_listener, router_with_backend,
 };
+use mixrelay_local_socket::AuthorizedListener;
 use thiserror::Error;
-use tokio::{net::TcpListener, sync::oneshot};
+use tokio::sync::oneshot;
 
 #[cfg(test)]
 mod tests;
 
-const CONTROL_PORT: u16 = 19_341;
-
-/// Exclusive loopback endpoint reservation, held before native audio startup.
-/// Dropping this owner after a preparation failure releases the listening socket.
+/// Exclusive control socket reservation, held before native audio startup. Only
+/// processes of the engine's own user may connect (the runtime and editor run as it).
+/// Dropping this owner after a preparation failure releases and removes the socket.
 #[derive(Debug)]
 pub struct ControlService {
-    listener: TcpListener,
+    listener: AuthorizedListener,
 }
 
 /// Admission, serving and shutdown-signal failures remain distinguishable to the caller.
 #[derive(Debug, Error)]
 pub enum ControlServiceError {
     /// Another listener or an OS socket error prevented startup admission.
-    #[error("could not bind local control server at {address}: {source}")]
+    #[error("could not bind local control server at {}: {source}", path.display())]
     Bind {
-        /// The loopback address that could not be reserved.
-        address: SocketAddr,
+        /// The socket path that could not be reserved.
+        path: PathBuf,
         /// Original operating-system error.
         source: io::Error,
     },
@@ -42,20 +48,32 @@ pub enum ControlServiceError {
 }
 
 impl ControlService {
-    /// Reserves the fixed IPv4 loopback endpoint before native publication or device opens.
+    /// Reserves the engine socket in `directory` (normally the session's socket directory)
+    /// before native publication or device opens.
     ///
     /// # Errors
     /// Returns [`ControlServiceError::Bind`] without acquiring any native audio resource.
-    pub async fn bind() -> Result<Self, ControlServiceError> {
-        Self::bind_port(CONTROL_PORT).await
+    pub async fn bind(directory: io::Result<PathBuf>) -> Result<Self, ControlServiceError> {
+        match directory {
+            Ok(directory) => Self::bind_in(&directory).await,
+            Err(source) => Err(ControlServiceError::Bind {
+                path: PathBuf::from(mixrelay_local_socket::ENGINE_SOCKET),
+                source,
+            }),
+        }
     }
 
-    async fn bind_port(port: u16) -> Result<Self, ControlServiceError> {
-        let address = SocketAddr::from(([127, 0, 0, 1], port));
-        TcpListener::bind(address)
+    async fn bind_in(directory: &Path) -> Result<Self, ControlServiceError> {
+        let uid = mixrelay_local_socket::current_uid();
+        mixrelay_local_socket::bind(directory, mixrelay_local_socket::ENGINE_SOCKET, uid)
             .await
-            .map(|listener| Self { listener })
-            .map_err(|source| ControlServiceError::Bind { address, source })
+            .map(|(listener, socket)| Self {
+                listener: AuthorizedListener::new(listener, socket, vec![uid]),
+            })
+            .map_err(|source| ControlServiceError::Bind {
+                path: directory.join(mixrelay_local_socket::ENGINE_SOCKET),
+                source,
+            })
     }
 
     /// Serves the existing engine routes until the adapter's shutdown future resolves.

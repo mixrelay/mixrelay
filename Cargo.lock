@@ -2752,11 +2752,11 @@ dependencies = [
  "futures-util",
  "mixrelay-audio-graph",
  "mixrelay-control-protocol",
+ "mixrelay-local-socket",
  "serde",
  "serde_json",
  "tokio",
  "tower",
- "tower-http 0.7.1",
  "tracing",
 ]
 
@@ -2773,6 +2773,7 @@ dependencies = [
  "mixrelay-driver-control",
  "mixrelay-engine-process",
  "mixrelay-licensing",
+ "mixrelay-local-socket",
  "mixrelay-macos-transport",
  "mixrelay-process-tap",
  "mixrelay-realtime",
@@ -2803,6 +2804,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "mixrelay-audio-io",
+ "mixrelay-local-socket",
  "mixrelay-test-support",
  "parking_lot",
  "reqwest",
@@ -2811,7 +2813,6 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tower",
- "tower-http 0.7.1",
  "tracing",
 ]
 
@@ -2825,6 +2826,7 @@ dependencies = [
  "mixrelay-driver-control",
  "mixrelay-licensing",
  "mixrelay-linux-driver",
+ "mixrelay-local-socket",
  "mixrelay-macos-driver",
  "tokio",
  "tracing",
@@ -2858,6 +2860,7 @@ dependencies = [
  "mixrelay-engine-process",
  "mixrelay-licensing",
  "mixrelay-linux-driver",
+ "mixrelay-local-socket",
  "mixrelay-macos-test-support",
  "mixrelay-macos-transport",
  "mixrelay-pcm-ring",
@@ -2922,6 +2925,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mixrelay-local-socket"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "libc",
+ "mixrelay-test-support",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "mixrelay-macos-driver"
 version = "0.1.0"
 dependencies = [
@@ -2943,11 +2957,13 @@ dependencies = [
  "core-foundation 0.10.1",
  "libc",
  "mixrelay-driver-control",
+ "mixrelay-local-socket",
  "mixrelay-test-support",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
  "plist",
+ "reqwest",
  "rustix",
  "serde",
  "serde_json",
@@ -4202,7 +4218,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-util",
  "tower",
- "tower-http 0.6.11",
+ "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
@@ -5642,21 +5658,6 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "url",
-]
-
-[[package]]
-name = "tower-http"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08a05a66a4fdd61cbbe0a1d755ffe0ca6aba159dd4820936a0ff8a8278245b9c"
-dependencies = [
- "bitflags 2.13.1",
- "bytes",
- "http",
- "percent-encoding",
- "pin-project-lite",
- "tower-layer",
- "tower-service",
 ]
 
 [[package]]

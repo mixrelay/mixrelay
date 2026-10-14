@@ -43,6 +43,10 @@ impl ControllerEngine {
         let mut command = Command::new(executable);
         command
             .arg(crate::CONTROLLER_ARGUMENT)
+            // The controller reaches its engine at the session's socket directory, so the
+            // child must not follow a socket-directory override (MIXRELAY_IPC_DIR) it
+            // happened to inherit.
+            .env_remove("MIXRELAY_IPC_DIR")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());

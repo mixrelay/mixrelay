@@ -1,3 +1,4 @@
+use axum::http::{Method, header::CONTENT_TYPE};
 use axum::{body::Body, http::Request};
 use mixrelay_test_support::FixtureDir;
 use tower::ServiceExt as _;
@@ -170,7 +171,17 @@ async fn untrusted_origins_hosts_and_non_json_mutations_are_rejected() {
     for (header, value) in [
         (ORIGIN, "https://example.com"),
         (ORIGIN, "null"),
+        (ORIGIN, "http://127.0.0.1:1420"),
+        (ORIGIN, "http://localhost:1420"),
+        (ORIGIN, "http://tauri.localhost"),
+        (ORIGIN, "https://tauri.localhost"),
+        (ORIGIN, "tauri://localhost"),
+        (ORIGIN, "http://mixrelay-driver"),
         (HOST, "example.com:19342"),
+        (HOST, "127.0.0.1:19342"),
+        (HOST, "localhost:19342"),
+        (HOST, "[::1]:19342"),
+        (HOST, "mixrelay-driver:19342"),
     ] {
         let request = Request::builder()
             .method(Method::PUT)
@@ -197,23 +208,20 @@ async fn untrusted_origins_hosts_and_non_json_mutations_are_rejected() {
 }
 
 #[tokio::test]
-async fn exact_local_origin_is_allowed_and_body_limit_is_enforced() {
+async fn logical_authority_is_allowed_and_body_limit_is_enforced() {
     let fixture = FixtureDir::new("driver-http-limits").unwrap();
     let app = app(&fixture);
     let request = Request::builder()
         .uri(SNAPSHOT_ROUTE)
-        .header(ORIGIN, ORIGINS[0])
-        .header(HOST, HOSTS[0])
+        .header(HOST, "mixrelay-driver")
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        response
+    assert!(
+        !response
             .headers()
-            .get("access-control-allow-origin")
-            .unwrap(),
-        ORIGINS[0]
+            .contains_key("access-control-allow-origin")
     );
     let request = Request::builder()
         .method(Method::PUT)

@@ -25,9 +25,9 @@ import {
   type VirtualEndpointFormatRequest,
 } from './types';
 
-// The engine binds IPv4 loopback explicitly. Using `localhost` can resolve to `::1` first and
-// make the browser-only dev surface report a disconnected engine while Tauri remains healthy.
-const LOCAL_CONTROL_ORIGIN = 'http://127.0.0.1:19341';
+// The engine listens only on a user-owned Unix socket. In the browser development surface,
+// `vite dev` forwards this same-origin path to it; Tauri uses native IPC instead.
+const LOCAL_CONTROL_ORIGIN = '/engine';
 const OPERATION_HEADER = 'X-MixRelay-Operation';
 const OPERATION_RESULT_HEADER = 'X-MixRelay-Operation-Result';
 const OPERATION_POLL_INTERVAL_MS = 100;

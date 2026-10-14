@@ -7,14 +7,42 @@ use serde_json::Value;
 use std::{
     fs::{self, File},
     io::{Read, Write},
-    net::{TcpListener, TcpStream},
+    os::unix::{fs::FileTypeExt, net::UnixStream},
     path::{Path, PathBuf},
     process::{Child, Command, ExitStatus, Stdio},
     thread,
     time::{Duration, Instant},
 };
 
-const ADDRESS: &str = "127.0.0.1:19341";
+/// The controller-owned engine binds the session's socket directory (the controller drops
+/// any MIXRELAY_IPC_DIR override), which the harness confines to the lab's runtime directory.
+fn engine_socket() -> PathBuf {
+    mixrelay_local_socket::session_socket_directory()
+        .unwrap()
+        .join(mixrelay_local_socket::ENGINE_SOCKET)
+}
+
+fn assert_private_socket_unused(lab: &Path) {
+    assert!(
+        engine_socket().starts_with(lab),
+        "engine socket {} is outside the lab",
+        engine_socket().display()
+    );
+    assert_socket_removed();
+}
+
+fn assert_socket_removed() {
+    let socket = engine_socket();
+    assert!(
+        !socket.try_exists().unwrap(),
+        "engine left {}",
+        socket.display()
+    );
+    assert!(
+        UnixStream::connect(&socket).is_err(),
+        "control socket is still connectable"
+    );
+}
 
 #[test]
 #[ignore = "requires owned isolated PipeWire daemon and private config namespace"]
@@ -29,7 +57,7 @@ fn native_linux_service_desktop_owned_shutdown() {
         PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap()),
         lab.join("config")
     );
-    drop(TcpListener::bind(ADDRESS).expect("private control port must be unused"));
+    assert_private_socket_unused(lab);
     let executable = Path::new(env!("CARGO_BIN_EXE_mixrelay-engine-service"));
     let mut engine = mixrelay_engine_process::ControllerEngine::start(executable).unwrap();
     let pid = engine.id();
@@ -63,7 +91,7 @@ fn native_linux_service_desktop_owned_shutdown() {
         assert!(Instant::now() < deadline, "owner EOF did not stop engine");
         thread::sleep(Duration::from_millis(10));
     }
-    drop(TcpListener::bind(ADDRESS).expect("owned engine left control listener"));
+    assert_socket_removed();
     let deadline = Instant::now() + Duration::from_secs(3);
     while owned_registry_objects(pid) != 0 {
         assert!(
@@ -84,6 +112,8 @@ impl Engine {
         let log = lab.join(format!("{label}.log"));
         let child = Command::new(env!("CARGO_BIN_EXE_mixrelay-engine-service"))
             .env("MIXRELAY_CONFIG_DIR", lab.join("engine-config"))
+            // Both engines in this file bind the lab session socket (see engine_socket).
+            .env_remove("MIXRELAY_IPC_DIR")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(File::create_new(&log).unwrap())
@@ -133,12 +163,12 @@ impl Drop for Engine {
 
 fn get_json(path: &str) -> Option<Value> {
     let timeout = Duration::from_millis(200);
-    let mut stream = TcpStream::connect_timeout(&ADDRESS.parse().ok()?, timeout).ok()?;
+    let mut stream = UnixStream::connect(engine_socket()).ok()?;
     stream.set_read_timeout(Some(timeout)).ok()?;
     stream.set_write_timeout(Some(timeout)).ok()?;
     write!(
         stream,
-        "GET {path} HTTP/1.1\r\nHost: {ADDRESS}\r\nConnection: close\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: mixrelay-engine\r\nConnection: close\r\n\r\n"
     )
     .ok()?;
     let mut response = String::new();
@@ -189,7 +219,7 @@ fn owned_registry_objects(pid: u32) -> usize {
 }
 
 #[test]
-#[ignore = "requires owned isolated PipeWire daemon and private network/config namespaces"]
+#[ignore = "requires owned isolated PipeWire daemon and private socket/config namespaces"]
 fn native_linux_service_startup_shutdown() {
     let fixture = PathBuf::from(std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap());
     let lab = fixture.parent().unwrap();
@@ -202,7 +232,7 @@ fn native_linux_service_startup_shutdown() {
         PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR").unwrap()),
         lab.join("runtime")
     );
-    drop(TcpListener::bind(ADDRESS).expect("private control port must be unused"));
+    assert_private_socket_unused(lab);
     let mut engine = Engine::start(lab, "engine");
     wait_running(&mut engine);
     let graph: mixrelay_audio_graph::GraphDocument =
@@ -212,7 +242,13 @@ fn native_linux_service_startup_shutdown() {
         owned_registry_objects(engine.child.id()) > 0,
         "native graph driver was not published"
     );
-    let mut rejected = Engine::start(lab, "occupied-port");
+    assert!(
+        fs::metadata(engine_socket())
+            .unwrap()
+            .file_type()
+            .is_socket()
+    );
+    let mut rejected = Engine::start(lab, "occupied-socket");
     assert!(!rejected.wait().success());
     assert!(
         fs::read_to_string(&rejected.log)
@@ -231,7 +267,7 @@ fn native_linux_service_startup_shutdown() {
         );
         thread::sleep(Duration::from_millis(10));
     }
-    drop(TcpListener::bind(ADDRESS).expect("control listener survived engine shutdown"));
+    assert_socket_removed();
     let mut restarted = Engine::start(lab, "restarted-engine");
     wait_running(&mut restarted);
     let restored: mixrelay_audio_graph::GraphDocument =
@@ -248,7 +284,8 @@ fn native_linux_service_startup_shutdown() {
         }
     );
     restarted.terminate();
+    assert_socket_removed();
     println!(
-        "ordinary_startup=running; implicit_nodes=0; occupied_port=native_owners_0; graceful_exit=0; native_owners_after_exit=0; restart=persisted_empty_graph"
+        "ordinary_startup=running; implicit_nodes=0; occupied_socket=native_owners_0; graceful_exit=0; native_owners_after_exit=0; restart=persisted_empty_graph"
     );
 }

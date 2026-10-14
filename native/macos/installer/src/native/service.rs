@@ -19,7 +19,9 @@ mod payload;
 mod runtime;
 
 use payload::{installed_hal_version, read_bounded_file};
-use runtime::{activate_driver, wait_for_driver_ready, wait_for_service_exit};
+use runtime::{
+    activate_driver, wait_for_driver_ready, wait_for_restored_driver_ready, wait_for_service_exit,
+};
 
 /// The actual macOS `ServiceLifecycle` boundary for the coordinated transaction.
 pub struct NativeServiceLifecycle {
@@ -137,11 +139,11 @@ impl NativeServiceLifecycle {
                 &mut self.coreaudio_reload_attempted,
                 launchctl::bootstrap,
                 launchctl::reload_coreaudio,
-                || wait_for_driver_ready(&version),
+                || wait_for_restored_driver_ready(&version, self.account.account().home()),
             )
         } else {
             launchctl::bootstrap()?;
-            wait_for_driver_ready(&version)
+            wait_for_restored_driver_ready(&version, self.account.account().home())
         }
     }
 }
@@ -304,7 +306,7 @@ impl ServiceLifecycle for NativeServiceLifecycle {
                     &mut self.coreaudio_reload_attempted,
                     launchctl::bootstrap,
                     launchctl::reload_coreaudio,
-                    || wait_for_driver_ready(&version),
+                    || wait_for_driver_ready(&version, self.account.account().home()),
                 )?;
                 if fs::symlink_metadata(crate::REMOVAL_LAUNCHD_PATH).is_ok() {
                     crate::removal::register_helper(&self.team).map_err(NativeError::UserData)?;

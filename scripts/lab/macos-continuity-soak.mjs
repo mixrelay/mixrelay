@@ -1,4 +1,5 @@
 // Read-only installed-engine acceptance. Retains failures and never resets counters.
+import { engineSocket, socketJson } from '../local-socket.mjs';
 import { open, readFile } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -13,10 +14,11 @@ const file = await open(output, 'wx');
 const log = await open(logPath, 'r');
 const buffer = Buffer.alloc(65536);
 const failures = [];
+const socket = engineSocket();
 async function get(path) {
-  const response = await fetch(`http://127.0.0.1:19341/api/v1/${path}`, { signal: AbortSignal.timeout(3000) });
-  assert(response.ok, `${path}: ${response.status}`);
-  return response.json();
+  return socketJson(socket, `/api/v1/${path}`, {
+    headers: { host: 'mixrelay-engine' }, timeoutMs: 3000,
+  });
 }
 async function trace() {
   const { size } = await log.stat();

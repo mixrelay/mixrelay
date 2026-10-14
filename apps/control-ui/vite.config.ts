@@ -1,8 +1,10 @@
+import { request as forwardRequest, type IncomingHttpHeaders } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
 import { type HtmlTagDescriptor, type Plugin, runnerImport } from 'vite';
 import { configDefaults, defineConfig } from 'vitest/config';
+import { engineSocket } from '../../scripts/local-socket.mjs';
 
 /** Puts the token theme CSS and the saved-preference bootstrap at the start of <head>.
  * The tags come from src/core/theme/themeDocument.ts, loaded through Vite's module
@@ -24,6 +26,92 @@ function mixrelayThemeDocument(): Plugin {
   };
 }
 
+// Connection-scoped headers belong to each hop, never forwarded (RFC 9110 §7.6.1).
+const HOP_BY_HOP = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
+
+function endToEnd(headers: IncomingHttpHeaders): IncomingHttpHeaders {
+  const named = String(headers.connection ?? '')
+    .split(',')
+    .map((name) => name.trim().toLowerCase());
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) => !HOP_BY_HOP.has(name) && !named.includes(name)),
+  );
+}
+
+/** Development only, opt-in (`MIXRELAY_DEV_ENGINE_BRIDGE=1`): the browser cannot reach
+ * the engine's Unix socket, so `vite dev` on loopback forwards same-origin `/engine/*`
+ * requests to it. Requests must name this dev server as their Host (no DNS rebinding) and
+ * carry no foreign Origin (no other site's page). While it runs, anything that can reach
+ * the dev server, including other accounts on this Mac, acts with the developer's access
+ * to the engine; it is never part of a build. */
+function mixrelayEngineBridge(): Plugin {
+  return {
+    name: 'mixrelay-engine-bridge',
+    apply: 'serve',
+    configureServer(server) {
+      if (process.env.MIXRELAY_DEV_ENGINE_BRIDGE !== '1') return;
+      const { host, port } = server.config.server;
+      if (typeof host !== 'string' || !['127.0.0.1', 'localhost', '::1'].includes(host)) {
+        server.config.logger.warn('engine bridge disabled: the dev server is not loopback-only');
+        return;
+      }
+      const hosts = [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`];
+      server.middlewares.use('/engine', (incoming, outgoing) => {
+        const origin = incoming.headers.origin;
+        if (
+          !hosts.includes(incoming.headers.host ?? '') ||
+          (origin !== undefined && !hosts.some((allowed) => origin === `http://${allowed}`))
+        ) {
+          outgoing.statusCode = 403;
+          outgoing.end('engine bridge accepts only this dev server');
+          return;
+        }
+        const {
+          host: _host,
+          origin: _origin,
+          referer: _referer,
+          cookie: _cookie,
+          ...headers
+        } = endToEnd(incoming.headers);
+        const forward = forwardRequest(
+          {
+            socketPath: engineSocket(),
+            method: incoming.method,
+            path: incoming.url,
+            headers: { ...headers, host: 'mixrelay-engine' },
+          },
+          (response) => {
+            outgoing.writeHead(response.statusCode ?? 502, endToEnd(response.headers));
+            // An engine that drops a streamed response ends the browser's too.
+            response.on('aborted', () => outgoing.destroy());
+            response.on('error', () => outgoing.destroy());
+            response.pipe(outgoing);
+          },
+        );
+        forward.on('error', () => {
+          if (outgoing.headersSent) return outgoing.destroy();
+          outgoing.statusCode = 503;
+          outgoing.end('engine unavailable');
+        });
+        // A browser that goes away releases the engine request (and any stream) too.
+        outgoing.on('close', () => {
+          if (!outgoing.writableFinished) forward.destroy();
+        });
+        incoming.pipe(forward);
+      });
+    },
+  };
+}
+
 const tauriHost = process.env.TAURI_DEV_HOST;
 // Story accessibility rendering is heavy; it runs as its own step so it never competes
 // with timing-sensitive behaviour tests (pnpm test:a11y).
@@ -31,7 +119,7 @@ const a11yRun = process.env.MIXRELAY_UI_A11Y === '1';
 const a11yTests = 'src/**/*.a11y.test.tsx';
 
 export default defineConfig({
-  plugins: [react(), mixrelayThemeDocument()],
+  plugins: [react(), mixrelayThemeDocument(), mixrelayEngineBridge()],
   clearScreen: false,
   server: {
     host: tauriHost || '127.0.0.1',

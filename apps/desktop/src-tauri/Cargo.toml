@@ -26,6 +26,7 @@ open = "5.4.4"
 secrecy = { version = "0.10.3", features = ["serde"] }
 sha2 = "0.10.9"
 reqwest = { workspace = true, features = ["query", "rustls"] }
+mixrelay-local-socket = { path = "../../../crates/local-socket" }
 # Numeric ordering of canonical stable release versions.
 semver = "1.0.28"
 thiserror.workspace = true

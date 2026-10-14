@@ -66,7 +66,7 @@ impl EngineLifecycle {
         if self.driver_start_cancelled.load(Ordering::Acquire) {
             return Ok(None);
         }
-        mixrelay_driver_control::DriverClient::new()
+        mixrelay_driver_control::DriverClient::session()
             .map_err(|error| error.to_string())?
             .set_active(true)
             .await
@@ -303,9 +303,13 @@ enum ExitObservation {
 
 async fn observe_engine_exit() -> Result<ExitObservation, String> {
     let owned = is_owned(ENGINE_LEASE).map_err(|error| error.to_string())?;
+    // A connectable engine socket means the service is still serving its teardown.
+    let socket = mixrelay_local_socket::session_socket_directory()
+        .map(|directory| directory.join(mixrelay_local_socket::ENGINE_SOCKET))
+        .map_err(|error| error.to_string())?;
     let connected = tokio::time::timeout(
         Duration::from_millis(250),
-        tokio::net::TcpStream::connect("127.0.0.1:19341"),
+        tokio::net::UnixStream::connect(socket),
     )
     .await
     .is_ok_and(|result| result.is_ok());

@@ -1,3 +1,4 @@
+import { engineSocket, socketJson } from '../local-socket.mjs';
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -9,15 +10,13 @@ assert.equal(process.platform, "linux");
 assert.equal(process.argv[2], "--run");
 const pid = Number(process.env.MIXRELAY_LAB_OWNED_ENGINE_PID);
 assert.ok(Number.isSafeInteger(pid) && pid > 1, "Use guest-native-matrix-check.sh");
-const base = "http://127.0.0.1:19341/api/v1";
 const prefix = "io.mixrelay.lab-native";
+const socket = engineSocket();
 async function api(path, body) {
-  const response = await fetch(`${base}/${path}`, { method: body ? "PUT" : "GET",
-    headers: body ? { "content-type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(5000) });
-  const result = await response.json();
-  assert.ok(response.ok, JSON.stringify(result));
-  return result;
+  return socketJson(socket, `/api/v1/${path}`, {
+    method: body ? 'PUT' : 'GET', headers: { host: 'mixrelay-engine' },
+    json: body, timeoutMs: 5000,
+  });
 }
 async function until(check, message) {
   for (let n = 0; n < 100; n++) { if (await check()) return; await delay(30); }

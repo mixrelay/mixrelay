@@ -10,9 +10,28 @@ use axum::{
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
+    net::UnixStream,
     sync::Notify,
 };
+
+#[tokio::test]
+async fn a_missing_socket_directory_is_a_bind_failure() {
+    let error = ControlService::bind(Err(io::Error::other("no session")))
+        .await
+        .unwrap_err();
+    assert!(matches!(error, ControlServiceError::Bind { .. }));
+    let fixture = fixture(line!());
+    assert!(
+        ControlService::bind(Ok(fixture.path().join("ipc")))
+            .await
+            .is_ok()
+    );
+}
+
+/// An isolated socket directory; never the session's real one.
+fn fixture(line: u32) -> mixrelay_test_support::FixtureDir {
+    mixrelay_test_support::FixtureDir::new(&format!("engine-ipc-{line}")).expect("fixture")
+}
 
 fn backend() -> Arc<dyn ControlBackend> {
     Arc::new(crate::EngineGraphController::new(
@@ -146,8 +165,8 @@ impl ControlBackend for BlockingPowerBackend {
     }
 }
 
-async fn request(address: SocketAddr, bytes: &[u8]) -> Vec<u8> {
-    let mut stream = TcpStream::connect(address).await.expect("loopback client");
+async fn request(address: &std::path::Path, bytes: &[u8]) -> Vec<u8> {
+    let mut stream = UnixStream::connect(address).await.expect("socket client");
     stream.write_all(bytes).await.expect("request");
     let mut response = Vec::new();
     tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut response))
@@ -159,25 +178,34 @@ async fn request(address: SocketAddr, bytes: &[u8]) -> Vec<u8> {
 
 #[tokio::test]
 async fn occupied_control_address_rejects_admission_and_leaves_listener_alive() {
-    let service = ControlService::bind_port(0).await.expect("first owner");
-    let address = service.listener.local_addr().expect("address");
+    let fixture = fixture(line!());
+    let service = ControlService::bind_in(&fixture.path().join("ipc"))
+        .await
+        .expect("first owner");
+    let address = service.listener.path().to_path_buf();
 
-    let error = ControlService::bind_port(address.port()).await.unwrap_err();
+    let error = ControlService::bind_in(address.parent().unwrap())
+        .await
+        .unwrap_err();
 
     assert!(matches!(&error, ControlServiceError::Bind { source, .. }
         if source.kind() == io::ErrorKind::AddrInUse));
-    assert!(error.to_string().contains(&address.to_string()));
-    let connection = TcpStream::connect(address)
+    assert!(error.to_string().contains(&address.display().to_string()));
+    let connection = UnixStream::connect(&address)
         .await
         .expect("original listener");
-    let (_, peer) = service.listener.accept().await.expect("accept");
-    assert_eq!(peer, connection.local_addr().expect("client address"));
+    let mut service = service;
+    let _accepted = axum::serve::Listener::accept(&mut service.listener).await;
+    drop(connection);
 }
 
 #[tokio::test]
 async fn dropping_admission_after_startup_failure_releases_the_address() {
-    let service = ControlService::bind_port(0).await.expect("reservation");
-    let address = service.listener.local_addr().expect("address");
+    let fixture = fixture(line!());
+    let service = ControlService::bind_in(&fixture.path().join("ipc"))
+        .await
+        .expect("reservation");
+    let address = service.listener.path().to_path_buf();
     let failed = async move {
         let _service = service;
         Err::<(), _>("native preparation failed")
@@ -185,17 +213,19 @@ async fn dropping_admission_after_startup_failure_releases_the_address() {
     .await;
 
     assert!(failed.is_err());
-    let replacement = ControlService::bind_port(address.port())
+    let replacement = ControlService::bind_in(address.parent().unwrap())
         .await
         .expect("rebind");
-    assert_eq!(replacement.listener.local_addr().expect("address"), address);
+    assert_eq!(replacement.listener.path(), address);
 }
 
 #[tokio::test]
 async fn public_service_keeps_existing_routes_and_stops_observation_once() {
-    let service = ControlService::bind_port(0).await.expect("reservation");
-    let address = service.listener.local_addr().expect("address");
-    assert!(address.ip().is_loopback());
+    let fixture = fixture(line!());
+    let service = ControlService::bind_in(&fixture.path().join("ipc"))
+        .await
+        .expect("reservation");
+    let address = service.listener.path().to_path_buf();
     let stopped = Arc::new(AtomicUsize::new(0));
     let observed = Arc::clone(&stopped);
     let (stop, shutdown) = oneshot::channel();
@@ -211,7 +241,7 @@ async fn public_service_keeps_existing_routes_and_stops_observation_once() {
     ));
 
     let response = request(
-        address,
+        &address,
         b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
     )
     .await;
@@ -224,7 +254,7 @@ async fn public_service_keeps_existing_routes_and_stops_observation_once() {
         .expect("server task")
         .expect("serve");
     assert_eq!(stopped.load(Ordering::SeqCst), 1);
-    ControlService::bind_port(address.port())
+    ControlService::bind_in(address.parent().unwrap())
         .await
         .expect("released endpoint");
 }
@@ -248,8 +278,11 @@ async fn accepted_transaction_finishes_after_observation_stops() {
             "committed"
         }),
     );
-    let service = ControlService::bind_port(0).await.expect("reservation");
-    let address = service.listener.local_addr().expect("address");
+    let fixture = fixture(line!());
+    let service = ControlService::bind_in(&fixture.path().join("ipc"))
+        .await
+        .expect("reservation");
+    let address = service.listener.path().to_path_buf();
     let (stop, shutdown) = oneshot::channel();
     let (closed, observing_stopped) = oneshot::channel();
     let server = tokio::spawn(service.serve_router(
@@ -264,7 +297,7 @@ async fn accepted_transaction_finishes_after_observation_stops() {
         },
     ));
     let client = tokio::spawn(async move {
-        request(address, b"POST /transaction HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await
+        request(&address, b"POST /transaction HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await
     });
     tokio::time::timeout(Duration::from_secs(2), entered.notified())
         .await
@@ -304,8 +337,11 @@ async fn incomplete_ingress_cannot_hold_any_platform_service_open() {
             }
         }),
     );
-    let service = ControlService::bind_port(0).await.expect("reservation");
-    let address = service.listener.local_addr().expect("address");
+    let fixture = fixture(line!());
+    let service = ControlService::bind_in(&fixture.path().join("ipc"))
+        .await
+        .expect("reservation");
+    let address = service.listener.path().to_path_buf();
     let (stop, shutdown) = oneshot::channel();
     let server = tokio::spawn(service.serve_router(
         router,
@@ -316,7 +352,7 @@ async fn incomplete_ingress_cannot_hold_any_platform_service_open() {
         },
         || {},
     ));
-    let mut client = TcpStream::connect(address).await.expect("client");
+    let mut client = UnixStream::connect(&address).await.expect("client");
     client.write_all(b"PUT /api/v1/audio/power HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{")
         .await.expect("partial body");
     tokio::time::timeout(Duration::from_secs(2), entered.notified())
@@ -339,8 +375,11 @@ async fn incomplete_ingress_cannot_hold_any_platform_service_open() {
 
 #[tokio::test]
 async fn signal_failure_still_stops_observation_and_releases_the_endpoint() {
-    let service = ControlService::bind_port(0).await.expect("reservation");
-    let address = service.listener.local_addr().expect("address");
+    let fixture = fixture(line!());
+    let service = ControlService::bind_in(&fixture.path().join("ipc"))
+        .await
+        .expect("reservation");
+    let address = service.listener.path().to_path_buf();
     let stopped = AtomicUsize::new(0);
 
     let result = service
@@ -355,7 +394,7 @@ async fn signal_failure_still_stops_observation_and_releases_the_endpoint() {
 
     assert!(matches!(result, Err(ControlServiceError::Shutdown(_))));
     assert_eq!(stopped.load(Ordering::SeqCst), 1);
-    ControlService::bind_port(address.port())
+    ControlService::bind_in(address.parent().unwrap())
         .await
         .expect("released endpoint");
 }
@@ -364,8 +403,11 @@ async fn signal_failure_still_stops_observation_and_releases_the_endpoint() {
 async fn disconnected_operation_receipt_drains_before_control_service_returns() {
     let started = Arc::new(AtomicBool::new(false));
     let released = Arc::new(AtomicBool::new(false));
-    let service = ControlService::bind_port(0).await.expect("reservation");
-    let address = service.listener.local_addr().expect("address");
+    let fixture = fixture(line!());
+    let service = ControlService::bind_in(&fixture.path().join("ipc"))
+        .await
+        .expect("reservation");
+    let address = service.listener.path().to_path_buf();
     let (stop, shutdown) = oneshot::channel();
     let backend = Arc::new(BlockingPowerBackend {
         started: started.clone(),
@@ -380,7 +422,7 @@ async fn disconnected_operation_receipt_drains_before_control_service_returns() 
         || {},
     ));
 
-    let mut client = TcpStream::connect(address).await.expect("client");
+    let mut client = UnixStream::connect(&address).await.expect("client");
     let body = br#"{"enabled":true,"expectedRevision":null}"#;
     let request = format!(
         "PUT /api/v1/audio/power HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",

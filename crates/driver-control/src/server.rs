@@ -8,8 +8,8 @@ use axum::{
     body::{Body, to_bytes},
     extract::{Request, State},
     http::{
-        HeaderValue, Method, StatusCode,
-        header::{CONTENT_TYPE, HOST, ORIGIN},
+        StatusCode,
+        header::{HOST, ORIGIN},
     },
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -17,20 +17,10 @@ use axum::{
 };
 use parking_lot::Mutex;
 use tokio::sync::Semaphore;
-use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use crate::{
     DriverCommand, DriverError, DriverManager, DriverSnapshot, SNAPSHOT_ROUTE, contract::JSON_LIMIT,
 };
-
-const ORIGINS: [&str; 5] = [
-    "http://127.0.0.1:1420",
-    "http://localhost:1420",
-    "http://tauri.localhost",
-    "https://tauri.localhost",
-    "tauri://localhost",
-];
-const HOSTS: [&str; 3] = ["127.0.0.1:19342", "localhost:19342", "[::1]:19342"];
 
 #[derive(Clone)]
 struct Control {
@@ -40,8 +30,8 @@ struct Control {
     operations: Arc<Semaphore>,
 }
 
-/// Builds the independent Driver GET/PUT API with bounded ingress and trusted local origins.
-/// The binary must bind only loopback and own the listener/service lifetime. No license or
+/// Builds the independent Driver GET/PUT API with bounded ingress and no browser origins.
+/// The binary must use a peer-authorized Unix listener and own its lifetime. No license or
 /// graph state is consulted. Native/file work is serialized outside the async reactor.
 /// Call from a Tokio runtime; startup inventory is initialized without client requests.
 pub fn router(manager: DriverManager) -> Router {
@@ -62,14 +52,8 @@ pub fn router_with_access(
         operations: Arc::new(Semaphore::new(8)),
     };
     tokio::spawn(maintain_inventory(Arc::downgrade(&state.manager)));
-    let origins = ORIGINS.map(HeaderValue::from_static);
-    let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::list(origins))
-        .allow_methods([Method::GET, Method::PUT])
-        .allow_headers([CONTENT_TYPE]);
     Router::new()
         .route(SNAPSHOT_ROUTE, get(snapshot).put(mutate))
-        .layer(cors)
         .layer(middleware::from_fn_with_state(state.clone(), admit))
         .with_state(state)
 }
@@ -191,19 +175,15 @@ fn authorize(
 }
 
 async fn admit(State(control): State<Control>, request: Request, next: Next) -> Response {
-    if request
-        .headers()
-        .get(ORIGIN)
-        .is_some_and(|origin| !ORIGINS.iter().any(|allowed| origin == *allowed))
-    {
+    if request.headers().contains_key(ORIGIN) {
         return (StatusCode::FORBIDDEN, "untrusted Driver origin").into_response();
     }
     if request
         .headers()
         .get(HOST)
-        .is_some_and(|host| !HOSTS.iter().any(|allowed| host == *allowed))
+        .is_some_and(|host| host != "mixrelay-driver")
     {
-        return (StatusCode::FORBIDDEN, "non-loopback Driver host").into_response();
+        return (StatusCode::FORBIDDEN, "untrusted Driver host").into_response();
     }
     let Ok(permit) = control.ingress.try_acquire_owned() else {
         return (

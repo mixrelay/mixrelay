@@ -88,7 +88,9 @@ pub(super) fn run(owner: Option<mixrelay_engine_process::EngineOwner>) -> Result
         .map_err(|error| format!("could not initialize Linux async runtime: {error}"))?;
     // Admission precedes publishing PipeWire endpoints or starting audio owners.
     let service = runtime
-        .block_on(ControlService::bind())
+        .block_on(ControlService::bind(
+            mixrelay_local_socket::socket_directory(),
+        ))
         .map_err(|error| error.to_string())?;
     // Stops are caught before anything can fail, and the crash guard covers the whole run.
     let signals = runtime

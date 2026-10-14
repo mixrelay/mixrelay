@@ -16,7 +16,8 @@ pub(crate) mod recording_settings;
 pub(crate) mod telemetry;
 pub(crate) mod workspace;
 
-const CONTROL_ORIGIN: &str = "http://127.0.0.1:19341";
+/// Requests reach the engine over its user-owned Unix socket; this authority only names it.
+const CONTROL_ORIGIN: &str = mixrelay_local_socket::ENGINE_AUTHORITY;
 /// The engine's server-sent meter windows (`mixrelay_control_server::METER_TELEMETRY_ROUTE`).
 const METER_TELEMETRY_ROUTE: &str = "/api/v1/telemetry/meters";
 const PROCESSOR_RETRY_ROUTE: &str = "/api/v1/processors/retry";
@@ -75,6 +76,9 @@ pub(crate) struct ControlProxyClient {
     capture_gate: Arc<tauri::async_runtime::Mutex<()>>,
     closing: std::sync::Arc<std::sync::atomic::AtomicBool>,
     unavailable: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The client reaches the engine only through its socket. Without one (no session
+    /// directory, or no client), every request is rejected here and never sent elsewhere.
+    connected: bool,
     requests: std::sync::Arc<tokio::sync::RwLock<()>>,
     operation_liveness: std::sync::Arc<tokio::sync::Notify>,
     recordings: std::sync::Arc<std::sync::RwLock<recording_settings::RecordingStore>>,
@@ -83,8 +87,29 @@ pub(crate) struct ControlProxyClient {
 
 impl Default for ControlProxyClient {
     fn default() -> Self {
+        // The session's socket: installed services never see an override set for the app.
+        let socket = mixrelay_local_socket::session_socket_directory()
+            .map(|directory| directory.join(mixrelay_local_socket::ENGINE_SOCKET))
+            .inspect_err(|error| tracing::error!(%error, "no engine control socket"))
+            .ok();
+        Self::with_socket(socket)
+    }
+}
+
+impl ControlProxyClient {
+    /// A client of the engine socket at `socket`; without one, every request is rejected.
+    pub(crate) fn with_socket(socket: Option<std::path::PathBuf>) -> Self {
+        let client = socket.and_then(|socket| {
+            Client::builder()
+                .unix_socket(socket)
+                .no_proxy()
+                .build()
+                .inspect_err(|error| tracing::error!(%error, "no engine control client"))
+                .ok()
+        });
         Self {
-            client: Client::new(),
+            connected: client.is_some(),
+            client: client.unwrap_or_default(),
             background: std::sync::Arc::default(),
             closing: std::sync::Arc::default(),
             unavailable: std::sync::Arc::default(),
@@ -178,7 +203,8 @@ impl ControlProxyClient {
             return serde_json::from_value(value).map_err(|error| error.to_string());
         }
         let _admission = self.requests.read().await;
-        if self.closing.load(std::sync::atomic::Ordering::Acquire)
+        if !self.connected
+            || self.closing.load(std::sync::atomic::Ordering::Acquire)
             || self.unavailable.load(std::sync::atomic::Ordering::Acquire)
         {
             return Ok(rejected("control_unavailable"));
@@ -189,7 +215,8 @@ impl ControlProxyClient {
     /// Opens the engine's pushed meter windows. The stream is long-lived, so it holds
     /// no request admission: shutdown never waits for a subscriber.
     pub(crate) async fn meter_stream(&self) -> Result<reqwest::Response, String> {
-        if self.closing.load(std::sync::atomic::Ordering::Acquire)
+        if !self.connected
+            || self.closing.load(std::sync::atomic::Ordering::Acquire)
             || self.unavailable.load(std::sync::atomic::Ordering::Acquire)
         {
             return Err("control unavailable".to_owned());
@@ -601,6 +628,17 @@ fn application_capture_error(reason: &str) -> ControlProxyResponse {
 
 #[cfg(test)]
 mod layout_tests {
+    #[tokio::test]
+    async fn without_an_engine_socket_nothing_is_sent() {
+        let client = super::ControlProxyClient::with_socket(None);
+        let rejected = client
+            .request(reqwest::Method::GET, "/api/v1/status", None)
+            .await
+            .expect("rejected locally");
+        assert_eq!(rejected.status, 409);
+        assert!(client.meter_stream().await.is_err());
+    }
+
     #[tokio::test]
     async fn recovery_does_not_reopen_shutdown_admission() {
         let client = super::ControlProxyClient::default();

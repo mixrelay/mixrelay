@@ -1,14 +1,17 @@
-use std::{future::Future, io, net::SocketAddr};
+use std::{future::Future, io};
 
 use mixrelay_control_server::{ControlOperations, bounded_listener};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // LAN access is opt-in. The initial server cannot leave loopback.
-    let address = SocketAddr::from(([127, 0, 0, 1], 19_341));
-    let listener = tokio::net::TcpListener::bind(address).await?;
-
-    tracing::info!(%address, "MixRelay control server listening");
+    // A standalone server without audio, on the engine's user-owned socket; never a network
+    // listener.
+    let directory = mixrelay_local_socket::socket_directory()?;
+    let uid = mixrelay_local_socket::current_uid();
+    let (listener, socket) =
+        mixrelay_local_socket::bind(&directory, mixrelay_local_socket::ENGINE_SOCKET, uid).await?;
+    tracing::info!(path = %socket.path().display(), "MixRelay control server listening");
+    let listener = mixrelay_local_socket::AuthorizedListener::new(listener, socket, vec![uid]);
     let operations = ControlOperations::new();
     let result = axum::serve(
         bounded_listener(listener),

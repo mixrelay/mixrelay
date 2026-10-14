@@ -33,6 +33,7 @@ mixrelay-audio-graph = { path = "../../crates/audio-graph" }
 mixrelay-audio-io.workspace = true
 mixrelay-control-protocol = { path = "../../crates/control-protocol" }
 mixrelay-control-server = { path = "../../crates/control-server" }
+mixrelay-local-socket = { path = "../../crates/local-socket" }
 mixrelay-driver-control = { path = "../../crates/driver-control" }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]

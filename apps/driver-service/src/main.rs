@@ -1,10 +1,13 @@
 //! Installed Driver control owner. Explicit manager quit stops devices through its API;
 //! the service remains reachable independently of manager and graph process lifetimes.
 
-use std::{ffi::OsString, net::Ipv4Addr, path::PathBuf};
+use std::{ffi::OsString, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
-use mixrelay_driver_control::{DRIVER_PORT, DriverManager};
+use mixrelay_driver_control::DriverManager;
+use mixrelay_local_socket::{
+    AuthorizedListener, DRIVER_SOCKET, bind, current_uid, socket_directory,
+};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -82,9 +85,12 @@ async fn run() -> Result<()> {
     let path = settings_path(std::env::args_os().skip(1))?;
     // Reserve admission before any native inventory can become visible. A duplicate process
     // must fail here rather than publish another owner of the same device identities.
-    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, DRIVER_PORT))
+    let uid = current_uid();
+    let (listener, socket) = bind(&socket_directory()?, DRIVER_SOCKET, uid)
         .await
-        .context("reserve Driver control port")?;
+        .context("reserve Driver control socket")?;
+    // Root is admitted for the macOS installer's readiness probe of the installed user's service.
+    let listener = AuthorizedListener::new(listener, socket, vec![uid, 0]);
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .context("observe Driver service termination")?;
     let manager = tokio::task::spawn_blocking(move || open_manager(path))

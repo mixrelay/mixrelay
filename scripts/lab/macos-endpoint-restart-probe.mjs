@@ -1,5 +1,6 @@
 // Explicit installed-service acceptance. Saves the live graph before any restart
 // and restores it in finally; never restarts coreaudiod or changes default devices.
+import { engineSocket, socketJson } from '../local-socket.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -11,7 +12,6 @@ assert.equal(process.platform, 'darwin');
 const [engine, inspect, evidence, approval] = process.argv.slice(2);
 assert.equal(approval, '--restart-installed-service');
 assert.ok([engine, inspect, evidence].every(isAbsolute));
-const base = 'http://127.0.0.1:19341/api/v1';
 const target = 'system/io.mixrelay.audio.engine';
 const endpointId = randomUUID();
 const uid = `io.mixrelay.audio.endpoint.${endpointId.replaceAll('-', '')}`;
@@ -29,13 +29,12 @@ function servicePid() {
   assert.equal(Number(owner), process.getuid(), 'Refusing to signal another user');
   return pid;
 }
+const socket = engineSocket();
 async function api(path, body) {
-  const response = await fetch(`${base}/${path}`, { method: body ? 'PUT' : 'GET',
-    headers: body ? { 'content-type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(3000) });
-  const value = await response.json();
-  assert.ok(response.ok, JSON.stringify(value));
-  return value;
+  return socketJson(socket, `/api/v1/${path}`, {
+    method: body ? 'PUT' : 'GET', headers: { host: 'mixrelay-engine' },
+    json: body, timeoutMs: 3000,
+  });
 }
 async function until(check, message) {
   const deadline = Date.now() + 30000;

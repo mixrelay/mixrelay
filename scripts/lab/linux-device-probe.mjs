@@ -1,5 +1,6 @@
 // Native device boundary acceptance in an owned guest session. Fixtures stand
 // in for multichannel hardware; they are not proof of a physical 64-channel ADC.
+import { engineSocket, socketRequest } from '../local-socket.mjs';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, readFileSync, openSync, closeSync } from 'node:fs';
@@ -11,10 +12,8 @@ assert.equal(process.platform, 'linux');
 assert.notEqual(process.getuid(), 0);
 const [enginePath, fixturePath, evidence] = process.argv.slice(2);
 assert.ok([enginePath, fixturePath, evidence].every(isAbsolute));
-const base = 'http://127.0.0.1:19341/api/v1/';
-let occupied = false;
-try { await fetch(base + 'status', { signal: AbortSignal.timeout(1000) }); occupied = true; } catch {}
-assert.equal(occupied, false, 'Refusing to replace an existing engine');
+const ipcDirectory = join(evidence, 'ipc');
+const socket = engineSocket({ MIXRELAY_IPC_DIR: ipcDirectory });
 mkdirSync(evidence, { mode: 0o700 });
 let engine, fixture, run = 0;
 const results = [];
@@ -25,16 +24,18 @@ async function until(check, message) {
   assert.fail(message);
 }
 async function api(path, body, rejected = false) {
-  const response = await fetch(base + path, { method: body ? 'PUT' : 'GET',
-    headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(6000) });
-  const result = await response.json();
-  assert.equal(response.ok, !rejected, JSON.stringify(result));
+  const response = await socketRequest(socket, `/api/v1/${path}`, {
+    method: body ? 'PUT' : 'GET',
+    headers: { host: 'mixrelay-engine', ...(body ? { 'content-type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined, timeoutMs: 6000,
+  });
+  const result = JSON.parse(response.body);
+  assert.equal(response.status >= 200 && response.status < 300, !rejected, JSON.stringify(result));
   return result;
 }
 function launch(path, args, log) {
   const fd = openSync(join(evidence, log), 'wx', 0o600);
-  const child = spawn(path, args, { env: { ...process.env, MIXRELAY_CONFIG_DIR: join(evidence, 'config') }, stdio: ['ignore', fd, fd] });
+  const child = spawn(path, args, { env: { ...process.env, MIXRELAY_CONFIG_DIR: join(evidence, 'config'), MIXRELAY_IPC_DIR: ipcDirectory }, stdio: ['ignore', fd, fd] });
   closeSync(fd);
   child.on('error', error => { child.launchError = error; });
   return child;

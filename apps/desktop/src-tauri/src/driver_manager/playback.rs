@@ -150,7 +150,7 @@ async fn change(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
     if *app.state::<crate::app_mode::AppMode>() == crate::app_mode::AppMode::Driver {
         let menu = app.state::<DriverMenu>();
         let _lifecycle = menu.lifecycle.lock().await;
-        let result = DriverClient::new()
+        let result = DriverClient::session()
             .map_err(|error| error.to_string())?
             .set_active(enabled)
             .await;

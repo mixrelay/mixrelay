@@ -363,7 +363,7 @@ pub(crate) fn restore_driver(app: &tauri::AppHandle) {
             .restore_driver()
             .await;
         #[cfg(target_os = "linux")]
-        let result = match mixrelay_driver_control::DriverClient::new() {
+        let result = match mixrelay_driver_control::DriverClient::session() {
             Ok(client) => client
                 .set_active(true)
                 .await

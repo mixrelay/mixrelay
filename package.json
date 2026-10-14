@@ -41,6 +41,7 @@
     "branding:kit": "pnpm desktop:icons && node branding/export-kit.mjs",
     "product:version": "node scripts/product-version.mjs",
     "check:product": "node scripts/product-version.mjs check && node --test scripts/product-version.test.mjs",
+    "test:scripts": "node --test scripts/*.test.mjs scripts/lab/*.test.mjs",
     "release:macos": "node scripts/release-macos.mjs",
     "signing:check": "node scripts/macos-signing.mjs"
   },

@@ -1,4 +1,5 @@
 // Isolated user-session restart qualification. Never run over a user's engine.
+import { engineSocket, socketJson } from '../local-socket.mjs';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
@@ -10,22 +11,18 @@ assert.equal(process.platform, 'linux');
 assert.notEqual(process.getuid(), 0);
 const [engine, evidence] = process.argv.slice(2);
 assert.ok(isAbsolute(engine) && isAbsolute(evidence));
-const base = 'http://127.0.0.1:19341/api/v1';
-let occupied = false;
-try { await fetch(base + '/status', { signal: AbortSignal.timeout(1000) }); occupied = true; } catch {}
-assert.equal(occupied, false, 'Refusing to replace an existing engine');
+const ipcDirectory = join(evidence, 'ipc');
+const socket = engineSocket({ MIXRELAY_IPC_DIR: ipcDirectory });
 mkdirSync(evidence, { mode: 0o700 }); // Exclusive, never overwrite earlier evidence.
 const config = join(evidence, 'config');
 const uid = process.getuid();
 let child;
 let run = 0;
 async function api(path, body) {
-  const response = await fetch(`${base}/${path}`, { method: body ? 'PUT' : 'GET',
-    headers: body ? { 'content-type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(3000) });
-  const result = await response.json();
-  assert.ok(response.ok, JSON.stringify(result));
-  return result;
+  return socketJson(socket, `/api/v1/${path}`, {
+    method: body ? 'PUT' : 'GET', headers: { host: 'mixrelay-engine' },
+    json: body, timeoutMs: 3000,
+  });
 }
 async function until(check, message) {
   for (let n = 0; n < 150; n++) {
@@ -41,7 +38,7 @@ async function start() {
   const fd = openSync(join(evidence, `engine-${++run}.log`), 'wx', 0o600);
   try {
     child = spawn(engine, [], { stdio: ['ignore', fd, fd], env: { ...process.env,
-      MIXRELAY_CONFIG_DIR: config, XDG_RUNTIME_DIR: `/run/user/${uid}`,
+      MIXRELAY_CONFIG_DIR: config, MIXRELAY_IPC_DIR: ipcDirectory, XDG_RUNTIME_DIR: `/run/user/${uid}`,
       DBUS_SESSION_BUS_ADDRESS: `unix:path=/run/user/${uid}/bus` } });
   } finally { closeSync(fd); }
   child.on('error', error => { console.error(error); });

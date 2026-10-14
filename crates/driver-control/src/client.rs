@@ -1,29 +1,56 @@
-use std::{io::Read, time::Duration};
-
-use crate::{
-    DRIVER_PORT, DriverCommand, DriverError, DriverSnapshot, SNAPSHOT_ROUTE, contract::JSON_LIMIT,
+use std::{
+    io::Read,
+    path::{Path, PathBuf},
+    time::Duration,
 };
+
+use mixrelay_local_socket::{
+    DRIVER_AUTHORITY, DRIVER_SOCKET, session_socket_directory, socket_directory,
+};
+
+use crate::{DriverCommand, DriverError, DriverSnapshot, SNAPSHOT_ROUTE, contract::JSON_LIMIT};
 
 /// Cloneable client fixed to the independent local Driver service, with a five-second deadline.
 #[derive(Debug, Clone)]
 pub struct DriverClient {
     client: reqwest::Client,
     endpoint: String,
+    socket_path: PathBuf,
 }
 
 impl DriverClient {
-    /// Creates the fixed loopback client without proxies or redirects.
+    /// Creates the current session's Unix socket client without proxies or redirects.
+    /// # Errors
+    /// Returns socket directory resolution or HTTP client initialization errors.
+    pub fn new() -> Result<Self, DriverError> {
+        Self::with_socket_path(socket_directory()?.join(DRIVER_SOCKET))
+    }
+
+    /// Creates a client of the session's Driver socket, ignoring a socket-directory
+    /// override: the desktop app uses this, because the installed Driver service never
+    /// sees an override set in the app's environment.
+    /// # Errors
+    /// Returns socket directory resolution or HTTP client initialization errors.
+    pub fn session() -> Result<Self, DriverError> {
+        Self::with_socket_path(session_socket_directory()?.join(DRIVER_SOCKET))
+    }
+
+    /// Creates a client for an explicit service socket, using the logical Driver authority.
+    /// Privileged installers must use the installed service account's socket path.
     /// # Errors
     /// Returns HTTP client initialization errors.
-    pub fn new() -> Result<Self, DriverError> {
+    pub fn with_socket_path(socket_path: impl AsRef<Path>) -> Result<Self, DriverError> {
+        let socket_path = socket_path.as_ref().to_path_buf();
         let client = reqwest::Client::builder()
+            .unix_socket(socket_path.clone())
             .timeout(Duration::from_secs(5))
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .build()?;
         Ok(Self {
             client,
-            endpoint: format!("http://127.0.0.1:{DRIVER_PORT}{SNAPSHOT_ROUTE}"),
+            endpoint: format!("{DRIVER_AUTHORITY}{SNAPSHOT_ROUTE}"),
+            socket_path,
         })
     }
 
@@ -91,14 +118,18 @@ impl DriverClient {
     /// # Errors
     /// Returns transport, size, JSON or service rejection errors. Must not run on a Tokio reactor.
     pub fn snapshot_blocking(&self) -> Result<DriverSnapshot, DriverError> {
-        read_blocking_response(blocking_client()?.get(&self.endpoint).send()?)
+        read_blocking_response(
+            blocking_client(&self.socket_path)?
+                .get(&self.endpoint)
+                .send()?,
+        )
     }
 
     /// Sends one command on a non-async control worker.
     /// # Errors
     /// Returns transport, size, JSON or service rejection errors. Must not run on a Tokio reactor.
     pub fn mutate_blocking(&self, command: &DriverCommand) -> Result<DriverSnapshot, DriverError> {
-        let response = blocking_client()?
+        let response = blocking_client(&self.socket_path)?
             .put(&self.endpoint)
             // Native inventory ACK/drain can take six seconds; allow its bounded result.
             .timeout(
@@ -118,8 +149,9 @@ impl DriverClient {
     }
 }
 
-fn blocking_client() -> Result<reqwest::blocking::Client, DriverError> {
+fn blocking_client(socket_path: &Path) -> Result<reqwest::blocking::Client, DriverError> {
     Ok(reqwest::blocking::Client::builder()
+        .unix_socket(socket_path.to_path_buf())
         .timeout(Duration::from_secs(5))
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())

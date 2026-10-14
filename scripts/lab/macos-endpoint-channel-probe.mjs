@@ -1,5 +1,6 @@
 // Installed-HAL acceptance without service restarts, node replacement or edge
 // deletion. Restore only our exact revision; never overwrite concurrent edits.
+import { engineSocket, socketJson } from '../local-socket.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -13,15 +14,12 @@ assert.ok(isAbsolute(inspect) && isAbsolute(evidence));
 assert.match(endpointId, /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
 assert.notEqual(endpointId, '00000000-0000-0000-0000-000000000000');
 const uid = `io.mixrelay.audio.endpoint.${endpointId.replaceAll('-', '')}`;
-const base = 'http://127.0.0.1:19341/api/v1';
+const socket = engineSocket();
 async function api(path, body) {
-  const response = await fetch(`${base}/${path}`, {
-    method: body ? 'PUT' : 'GET', headers: body ? { 'content-type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(5000),
+  return socketJson(socket, `/api/v1/${path}`, {
+    method: body ? 'PUT' : 'GET', headers: { host: 'mixrelay-engine' },
+    json: body, timeoutMs: 5000,
   });
-  const result = await response.json();
-  assert.ok(response.ok, JSON.stringify(result));
-  return result;
 }
 function native() {
   return JSON.parse(execFileSync('/usr/bin/plutil', ['-convert', 'json', '-o', '-', '-'], {

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Path, State, rejection::JsonRejection},
-    http::{HeaderValue, Method, StatusCode, header::CONTENT_TYPE},
+    http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post, put},
 };
@@ -16,7 +16,6 @@ use mixrelay_control_protocol::{
     ProcessorParameterUpdateResponse, ProcessorRetryRequest, ProcessorScanRequest, ProtocolError,
     SessionReconfigureRequest,
 };
-use tower_http::cors::{AllowOrigin, CorsLayer};
 mod editor_surface;
 mod engine_power;
 mod ingress;
@@ -571,27 +570,8 @@ pub fn router_with_backend(
         .layer(axum::middleware::from_fn(ingress::read_body))
         // Ingress already bounds every body; avoid Json's separate 2 MiB default.
         .layer(DefaultBodyLimit::disable())
-        .layer(control_cors())
         .layer(axum::Extension(operations))
         .with_state(ControlState { backend })
-}
-
-fn control_cors() -> CorsLayer {
-    let origins = [
-        HeaderValue::from_static("http://127.0.0.1:1420"),
-        HeaderValue::from_static("http://localhost:1420"),
-        HeaderValue::from_static("http://tauri.localhost"),
-        HeaderValue::from_static("https://tauri.localhost"),
-        HeaderValue::from_static("tauri://localhost"),
-    ];
-    CorsLayer::new()
-        .allow_origin(AllowOrigin::list(origins))
-        .allow_methods([Method::GET, Method::PUT, Method::POST, Method::DELETE])
-        .allow_headers([CONTENT_TYPE])
-        .expose_headers([
-            axum::http::header::HeaderName::from_static("x-mixrelay-operation"),
-            axum::http::header::HeaderName::from_static("x-mixrelay-operation-result"),
-        ])
 }
 
 async fn status(State(state): State<ControlState>) -> Response {
@@ -1039,7 +1019,10 @@ mod tests {
     mod recorder;
     use std::sync::Mutex;
 
-    use axum::{body::Body, http::Request};
+    use axum::{
+        body::Body,
+        http::{Method, Request, header::CONTENT_TYPE},
+    };
     use mixrelay_control_protocol::GraphApplyState;
     use serde_json::{Value, json};
     use tower::ServiceExt;

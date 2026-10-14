@@ -23,13 +23,14 @@ use mixrelay_audio_io::{
 };
 use mixrelay_control_protocol::{AppStatus, GraphApplyResponse};
 use mixrelay_driver_control::{DriverClient, DriverCommand};
+use mixrelay_local_socket::{ENGINE_SOCKET, socket_directory};
 use mixrelay_macos_transport::endpoint_identity::format_endpoint_id;
 use mixrelay_macos_transport::endpoint_identity::parse_endpoint_id;
 use reqwest::{StatusCode, blocking::Client};
 use serde::{Deserialize, de::DeserializeOwned};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const API: &str = "http://127.0.0.1:19341/api/v1";
+const API: &str = "http://mixrelay-engine/api/v1";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -166,7 +167,10 @@ fn preferences_path() -> Result<PathBuf> {
 
 impl InstalledSession {
     fn connect() -> Result<Self> {
-        let client = Client::builder().timeout(Duration::from_secs(12)).build()?;
+        let client = Client::builder()
+            .unix_socket(socket_directory()?.join(ENGINE_SOCKET))
+            .timeout(Duration::from_secs(12))
+            .build()?;
         let initial: AppStatus = client
             .get(format!("{API}/status"))
             .send()?
@@ -468,6 +472,7 @@ fn installed_hardware_route_has_no_starvations_at_32_and_256() {
         Ok("1")
     );
     let client = Client::builder()
+        .unix_socket(socket_directory().unwrap().join(ENGINE_SOCKET))
         .timeout(Duration::from_secs(12))
         .build()
         .unwrap();

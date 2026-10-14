@@ -1,5 +1,6 @@
 // Capture the physical reference and the OS-visible engine output, preserving
 // AVFoundation timestamps. Never changes the user's graph or device defaults.
+import { engineSocket, socketJson } from '../local-socket.mjs';
 import { spawn } from 'node:child_process';
 import { mkdir, open, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -10,12 +11,11 @@ const seconds = Number(process.argv[3] ?? 30);
 if (!Number.isFinite(seconds) || seconds < 1 || seconds > 120) throw new Error('Invalid duration');
 await mkdir(directory, { recursive: false });
 const observations = [];
+const socket = engineSocket();
 async function read(path) {
-  const response = await fetch(`http://127.0.0.1:19341/api/v1/${path}`, {
-    signal: AbortSignal.timeout(2000),
+  return socketJson(socket, `/api/v1/${path}`, {
+    headers: { host: 'mixrelay-engine' }, timeoutMs: 2000,
   });
-  if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
-  return response.json();
 }
 async function observe() {
   const at = new Date().toISOString();

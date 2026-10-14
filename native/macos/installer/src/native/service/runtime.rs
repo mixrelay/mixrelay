@@ -3,8 +3,10 @@
 use super::super::launchctl::{self, RegistrationState};
 use crate::NativeError;
 use mixrelay_driver_control::{DriverClient, DriverSnapshot, DriverState};
+use mixrelay_local_socket::{DRIVER_SOCKET, socket_directory_in_home};
 use std::{
     io,
+    path::Path,
     time::{Duration, Instant},
 };
 
@@ -50,19 +52,61 @@ fn validate_driver_ready(
     Ok(())
 }
 
-pub(super) fn wait_for_driver_ready(version: &str) -> Result<(), NativeError> {
-    let client = DriverClient::new()
-        .map_err(|error| NativeError::Activation(format!("Driver client: {error}")))?;
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        let result = client
+/// The service account's Driver socket. The installer runs as root; its own HOME or socket
+/// override must not select it.
+fn socket_client(home: &Path) -> Result<DriverClient, NativeError> {
+    DriverClient::with_socket_path(socket_directory_in_home(home).join(DRIVER_SOCKET))
+        .map_err(|error| NativeError::Activation(format!("Driver client: {error}")))
+}
+
+pub(super) fn wait_for_driver_ready(version: &str, home: &Path) -> Result<(), NativeError> {
+    let client = socket_client(home)?;
+    wait_until_ready(version, || {
+        client
             .snapshot_blocking()
             .map_err(|error| NativeError::Activation(format!("Driver snapshot: {error}")))
-            .and_then(|snapshot| {
-                // Inspect after the response so a stale owner cannot satisfy readiness.
-                let registration = launchctl::inspect_registration()?;
-                validate_driver_ready(&snapshot, &registration, version)
-            });
+    })
+}
+
+/// Readiness of a Driver restored by rollback. A restored release older than the socket
+/// transport still serves its loopback TCP API, so that is tried when the socket is not.
+pub(super) fn wait_for_restored_driver_ready(
+    version: &str,
+    home: &Path,
+) -> Result<(), NativeError> {
+    let client = socket_client(home)?;
+    wait_until_ready(version, || {
+        client
+            .snapshot_blocking()
+            .or_else(|_| legacy_loopback_snapshot())
+            .map_err(|error| NativeError::Activation(format!("Driver snapshot: {error}")))
+    })
+}
+
+/// The pre-socket Driver API, used only to verify a rollback to such a release.
+fn legacy_loopback_snapshot() -> Result<DriverSnapshot, mixrelay_driver_control::DriverError> {
+    let response = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?
+        .get("http://127.0.0.1:19342/api/v1/driver")
+        .send()?
+        .error_for_status()?;
+    Ok(response.json()?)
+}
+
+fn wait_until_ready(
+    version: &str,
+    snapshot: impl Fn() -> Result<DriverSnapshot, NativeError>,
+) -> Result<(), NativeError> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let result = snapshot().and_then(|snapshot| {
+            // Inspect after the response so a stale owner cannot satisfy readiness.
+            let registration = launchctl::inspect_registration()?;
+            validate_driver_ready(&snapshot, &registration, version)
+        });
         match result {
             Ok(()) => return Ok(()),
             Err(error) if Instant::now() >= deadline => return Err(error),

@@ -1,19 +1,27 @@
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
+    net::UnixListener,
     task::JoinHandle,
 };
 
 use super::*;
 
-async fn server(
+/// A one-shot engine on a socket in its own fixture directory, and a client of it.
+fn server(
     replies: Vec<(u16, Option<&'static str>, &'static str)>,
-) -> (String, JoinHandle<Vec<String>>) {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind fixture");
-    let origin = format!("http://{}", listener.local_addr().expect("address"));
+) -> (String, ControlProxyClient, JoinHandle<Vec<String>>) {
+    static FIXTURES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let fixture = mixrelay_test_support::FixtureDir::new(&format!(
+        "exchange-{}",
+        FIXTURES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ))
+    .expect("fixture");
+    let path = fixture.join("engine.sock");
+    let listener = UnixListener::bind(&path).expect("bind fixture");
+    let client = ControlProxyClient::with_socket(Some(path));
+    let origin = super::super::CONTROL_ORIGIN.to_owned();
     let task = tokio::spawn(async move {
+        let _fixture = fixture;
         let mut requests = Vec::new();
         let mut accepted = None;
         for (status, receipt, body) in replies {
@@ -49,27 +57,20 @@ async fn server(
         }
         requests
     });
-    (origin, task)
+    (origin, client, task)
 }
 
 #[tokio::test]
 async fn polls_once_submitted_work_and_preserves_terminal_accepted_status() {
-    let (origin, server) = server(vec![
+    let (origin, client, server) = server(vec![
         (202, Some("session-1"), r#"{"operationId":"session-1"}"#),
         (202, Some("session-1"), r#"{"operationId":"session-1"}"#),
         (202, None, r#"{"revision":12,"state":"pending"}"#),
         (204, None, ""),
-    ])
-    .await;
-    let result = request(
-        &ControlProxyClient::default(),
-        &origin,
-        Method::PUT,
-        "/graph",
-        None,
-    )
-    .await
-    .expect("terminal response");
+    ]);
+    let result = request(&client, &origin, Method::PUT, "/graph", None)
+        .await
+        .expect("terminal response");
     assert_eq!(result.status, 202);
     assert_eq!(result.body["revision"], 12);
     let requests = server.await.expect("fixture finished");
@@ -82,36 +83,23 @@ async fn polls_once_submitted_work_and_preserves_terminal_accepted_status() {
 
 #[tokio::test]
 async fn quick_accepted_status_is_not_an_operation_receipt() {
-    let (origin, server) = server(vec![(202, None, r#"{"revision":4}"#)]).await;
-    let result = request(
-        &ControlProxyClient::default(),
-        &origin,
-        Method::PUT,
-        "/graph",
-        None,
-    )
-    .await
-    .expect("response");
+    let (origin, client, server) = server(vec![(202, None, r#"{"revision":4}"#)]);
+    let result = request(&client, &origin, Method::PUT, "/graph", None)
+        .await
+        .expect("response");
     assert_eq!(result.body["revision"], 4);
     assert_eq!(server.await.expect("fixture").len(), 1);
 }
 
 #[tokio::test]
 async fn failed_acknowledgement_preserves_terminal_error() {
-    let (origin, server) = server(vec![
+    let (origin, client, server) = server(vec![
         (202, Some("session-2"), r#"{"operationId":"session-2"}"#),
         (409, None, r#"{"code":"graph_exchange_busy"}"#),
-    ])
-    .await;
-    let result = request(
-        &ControlProxyClient::default(),
-        &origin,
-        Method::PUT,
-        "/graph",
-        None,
-    )
-    .await
-    .expect("terminal response survives lost acknowledgement");
+    ]);
+    let result = request(&client, &origin, Method::PUT, "/graph", None)
+        .await
+        .expect("terminal response survives lost acknowledgement");
     assert_eq!(result.status, 409);
     assert_eq!(result.body["code"], "graph_exchange_busy");
     assert_eq!(server.await.expect("fixture").len(), 2);
@@ -119,21 +107,14 @@ async fn failed_acknowledgement_preserves_terminal_error() {
 
 #[tokio::test]
 async fn lost_poll_is_uncertain_even_when_connect_fails() {
-    let (origin, server) = server(vec![(
+    let (origin, client, server) = server(vec![(
         202,
         Some("session-3"),
         r#"{"operationId":"session-3"}"#,
-    )])
-    .await;
-    let result = request(
-        &ControlProxyClient::default(),
-        &origin,
-        Method::PUT,
-        "/graph",
-        None,
-    )
-    .await
-    .expect("structured failure");
+    )]);
+    let result = request(&client, &origin, Method::PUT, "/graph", None)
+        .await
+        .expect("structured failure");
     assert_eq!(result.status, 503);
     #[cfg(target_os = "macos")]
     assert_eq!(result.delivery, RequestDelivery::Uncertain);
@@ -147,17 +128,11 @@ async fn lost_poll_is_uncertain_even_when_connect_fails() {
 
 #[tokio::test]
 async fn initial_connection_refusal_is_distinct_from_a_lost_poll() {
-    let (origin, server) = server(Vec::new()).await;
+    let (origin, client, server) = server(Vec::new());
     server.await.expect("listener closed");
-    let result = request(
-        &ControlProxyClient::default(),
-        &origin,
-        Method::PUT,
-        "/graph",
-        None,
-    )
-    .await
-    .expect("structured failure");
+    let result = request(&client, &origin, Method::PUT, "/graph", None)
+        .await
+        .expect("structured failure");
     assert_eq!(result.status, 503);
     #[cfg(target_os = "macos")]
     assert_eq!(result.delivery, RequestDelivery::NotSent);
@@ -165,40 +140,25 @@ async fn initial_connection_refusal_is_distinct_from_a_lost_poll() {
 
 #[tokio::test]
 async fn changed_receipt_is_rejected_without_resubmitting() {
-    let (origin, server) = server(vec![
+    let (origin, client, server) = server(vec![
         (202, Some("session-4"), r#"{"operationId":"session-4"}"#),
         (202, Some("different"), r#"{"operationId":"different"}"#),
-    ])
-    .await;
+    ]);
     assert!(
-        request(
-            &ControlProxyClient::default(),
-            &origin,
-            Method::PUT,
-            "/graph",
-            None
-        )
-        .await
-        .is_err()
+        request(&client, &origin, Method::PUT, "/graph", None)
+            .await
+            .is_err()
     );
     assert_eq!(server.await.expect("fixture").len(), 2);
 }
 
 #[tokio::test]
 async fn unknown_receipt_is_not_a_definitive_mutation_rejection() {
-    let (origin, server) = server(vec![
+    let (origin, client, server) = server(vec![
         (202, Some("session-5"), r#"{"operationId":"session-5"}"#),
         (404, None, r#"{"code":"control_unavailable"}"#),
-    ])
-    .await;
-    let result = request(
-        &ControlProxyClient::default(),
-        &origin,
-        Method::PUT,
-        "/graph",
-        None,
-    )
-    .await;
+    ]);
+    let result = request(&client, &origin, Method::PUT, "/graph", None).await;
     assert!(
         result
             .expect_err("unconfirmed outcome")

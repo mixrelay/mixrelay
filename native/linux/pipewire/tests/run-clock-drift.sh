@@ -77,7 +77,6 @@ for dependency in ss cc pkg-config pipewire wireplumber dbus-daemon busctl prlim
 done
 port=49178
 [[ -z $(ss -H -lun "sport = :$port") ]] || { echo 'Owned RTP port is occupied'; exit 2; }
-[[ -z $(ss -H -ltn 'sport = :19341') ]] || { echo 'Engine control port is occupied'; exit 2; }
 mkdir -p "$target/native-tests"
 lab=$(mktemp -d "$target/native-tests/drift-lab-XXXXXX")
 printf 'isolated_lab=%s engine_sha256=%s ppm=%s seconds=%s resample.disable=%s quantum=%s\n' "$lab" "$engine_sha" "$ppm" "$seconds" "$disable" "$quantum"
@@ -90,6 +89,9 @@ bash "$workspace/native/linux/pipewire/tests/configure-application-policy.sh" \
     "$workspace/native/linux/pipewire/tests" "$lab"
 sed -e "s/@PORT@/$port/" -e "s/@DISABLE@/$disable/" -e "s/@QUANTUM@/$quantum/g" -e "s/@RT_MODULE@/$rt_module/" "$fixture/drift-lab-pipewire.conf" > "$lab/pipewire.conf"
 export XDG_RUNTIME_DIR="$lab/runtime" XDG_CONFIG_HOME="$lab/config" XDG_STATE_HOME="$lab/state" XDG_DATA_HOME="$lab/data"
+export MIXRELAY_IPC_DIR="$lab/ipc"
+engine_socket="$MIXRELAY_IPC_DIR/engine.sock"
+[[ ! -e "$engine_socket" && ! -L "$engine_socket" ]] || { echo 'Engine control socket is occupied'; exit 2; }
 export WIREPLUMBER_CONFIG_DIR="$lab/config/wireplumber"
 unset PIPEWIRE_REMOTE PIPEWIRE_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
 cc -O2 -Wall -Wextra -Werror "$sender_source" -lm -o "$lab/drift-sender"
@@ -272,14 +274,14 @@ jq -n --arg source "$source_serial" --arg sink "$sink_serial" '{rtpSourceSerial:
 MIXRELAY_CONFIG_DIR="$lab/engine-config" "$engine" >"$lab/engine.log" 2>&1 &
 engine_pid=$!
 record_owned "$engine_pid" "$engine"
-api=http://127.0.0.1:19341/api/v1
+api=http://mixrelay-engine/api/v1
 for _ in {1..100}; do
-    if curl --fail --silent --show-error --max-time 1 "$api/status" >"$lab/status-ready.json" 2>"$lab/status-ready-error.log"; then break; fi
+    if curl --unix-socket "$engine_socket" --header 'Host: mixrelay-engine' --fail --silent --show-error --max-time 1 "$api/status" >"$lab/status-ready.json" 2>"$lab/status-ready-error.log"; then break; fi
     kill -0 "$engine_pid" 2>/dev/null || { echo 'Release engine exited before API readiness' >&2; exit 1; }
     sleep 0.1
 done
 [[ -s "$lab/status-ready.json" ]] || { echo 'Release engine API did not become ready' >&2; exit 1; }
-curl --fail --silent --show-error --max-time 3 "$api/graph" >"$lab/graph-before.json"
+curl --unix-socket "$engine_socket" --header 'Host: mixrelay-engine' --fail --silent --show-error --max-time 3 "$api/graph" >"$lab/graph-before.json"
 jq --arg source 'io.mixrelay.lab-drift-rtp' --arg sink 'io.mixrelay.lab-device-sink' '
     .revision += 1 |
     .nodes = [
@@ -288,11 +290,11 @@ jq --arg source 'io.mixrelay.lab-drift-rtp' --arg sink 'io.mixrelay.lab-device-s
     ] |
     .edges = [{id:"drift-route",source:{nodeId:"drift-input",portId:"audio"},destination:{nodeId:"drift-output",portId:"audio"},channelMapping:{mode:"auto"}}]
 ' "$lab/graph-before.json" >"$lab/graph-request.json"
-http_code=$(curl --silent --show-error --max-time 5 --output "$lab/graph-apply.json" --write-out '%{http_code}' \
+http_code=$(curl --unix-socket "$engine_socket" --header 'Host: mixrelay-engine' --silent --show-error --max-time 5 --output "$lab/graph-apply.json" --write-out '%{http_code}' \
     --request PUT --header 'content-type: application/json' --data-binary @"$lab/graph-request.json" "$api/graph")
 [[ "$http_code" == 202 ]] || { printf 'Graph apply HTTP %s\n' "$http_code" >&2; exit 1; }
 for _ in {1..100}; do
-    curl --fail --silent --show-error --max-time 2 "$api/graph/status" >"$lab/graph-status.json"
+    curl --unix-socket "$engine_socket" --header 'Host: mixrelay-engine' --fail --silent --show-error --max-time 2 "$api/graph/status" >"$lab/graph-status.json"
     if jq -e --argjson revision "$(jq -r .revision "$lab/graph-request.json")" \
         '.activeRevision == $revision and .submittedRevision == $revision' "$lab/graph-status.json" >/dev/null; then break; fi
     sleep 0.1
@@ -349,15 +351,15 @@ sender_pid=$!
 record_owned "$sender_pid" "$lab/drift-sender"
 sleep 20
 printf 'warmup_before_ns=%s\n' "$(python3 -c 'import time; print(time.monotonic_ns())')" >"$lab/phase-times.txt"
-curl --fail --silent --show-error --max-time 3 "$api/status" >"$lab/engine-status-warmup.json"
+curl --unix-socket "$engine_socket" --header 'Host: mixrelay-engine' --fail --silent --show-error --max-time 3 "$api/status" >"$lab/engine-status-warmup.json"
 printf 'warmup_after_ns=%s\n' "$(python3 -c 'import time; print(time.monotonic_ns())')" >>"$lab/phase-times.txt"
 sleep 37
 printf 'end_before_ns=%s\n' "$(python3 -c 'import time; print(time.monotonic_ns())')" >>"$lab/phase-times.txt"
-curl --fail --silent --show-error --max-time 3 "$api/status" >"$lab/engine-status-end.json"
+curl --unix-socket "$engine_socket" --header 'Host: mixrelay-engine' --fail --silent --show-error --max-time 3 "$api/status" >"$lab/engine-status-end.json"
 printf 'end_after_ns=%s\n' "$(python3 -c 'import time; print(time.monotonic_ns())')" >>"$lab/phase-times.txt"
 ps -L -p "$pipewire_pid,$engine_pid,$fixture_pid" -o pid,tid,cls,rtprio,comm >"$lab/thread-policy.txt"
 wait "$sender_pid"; sender_pid=''
-curl --fail --silent --show-error --max-time 3 "$api/status" >"$lab/engine-status-after-sender.json"
+curl --unix-socket "$engine_socket" --header 'Host: mixrelay-engine' --fail --silent --show-error --max-time 3 "$api/status" >"$lab/engine-status-after-sender.json"
 stopped_fixture_pid=$fixture_pid
 stop_owned "$fixture_pid"; fixture_pid=''
 [[ $(<"$lab/process-$stopped_fixture_pid.exit-code") == 0 ]] || { echo 'Owned sink capture did not finalize cleanly' >&2; exit 1; }
@@ -370,7 +372,10 @@ pw-dump >"$lab/before-engine-shutdown.json"
 stopped_engine_pid=$engine_pid
 stop_owned "$engine_pid"; engine_pid=''
 [[ $(<"$lab/process-$stopped_engine_pid.exit-code") == 0 ]] || { echo 'Release engine did not shut down cleanly' >&2; exit 1; }
-[[ -z $(ss -H -ltn 'sport = :19341') ]] || { echo 'Release engine left the API listener' >&2; exit 1; }
+[[ ! -e "$engine_socket" && ! -L "$engine_socket" ]] || { echo 'Release engine left the API socket' >&2; exit 1; }
+if curl --unix-socket "$engine_socket" --header 'Host: mixrelay-engine' --silent --max-time 1 "$api/status" >/dev/null; then
+    echo 'Release engine control socket is still connectable' >&2; exit 1
+fi
 pw-dump >"$lab/after.json"
 jq -e --arg pid "$stopped_engine_pid" '[.[] | select((.info.props."application.process.id" | tostring) == $pid)] | length == 0' "$lab/after.json" >/dev/null || {
     echo 'Release engine left owned PipeWire objects' >&2; exit 1;

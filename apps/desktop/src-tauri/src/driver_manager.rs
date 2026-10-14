@@ -251,7 +251,7 @@ fn activate_driver(app: &tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let menu = app.state::<DriverMenu>();
         let _lifecycle = menu.lifecycle.lock().await;
-        let client = match DriverClient::new() {
+        let client = match DriverClient::session() {
             Ok(client) => client,
             Err(error) => {
                 finish_snapshot(&app, Err(error.to_string()));
@@ -355,7 +355,7 @@ pub(crate) fn exit_requested(app: &tauri::AppHandle, api: &tauri::ExitRequestApi
 }
 
 pub(crate) async fn stop_driver(app: &tauri::AppHandle) -> Result<DriverSnapshot, String> {
-    let result = DriverClient::new()
+    let result = DriverClient::session()
         .map_err(|error| error.to_string())?
         .set_active(false)
         .await;

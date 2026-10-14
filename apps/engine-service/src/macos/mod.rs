@@ -172,7 +172,7 @@ async fn run_owned(
 ) -> Result<(), String> {
     // Reserve the control endpoint before native publication or audio ownership.
     // A second service must fail without preparing devices beside the running one.
-    let service = ControlService::bind()
+    let service = ControlService::bind(mixrelay_local_socket::socket_directory())
         .await
         .map_err(|error| error.to_string())?;
     initialize_native_transport()?;

@@ -11,6 +11,7 @@ publish = false
 workspace = true
 
 [dependencies]
+mixrelay-local-socket = { path = "../../crates/local-socket" }
 # Application startup and contextual fatal errors, outside real-time native callbacks.
 anyhow = "1.0.102"
 mixrelay-licensing = { path = "../../crates/licensing" }

@@ -20,7 +20,7 @@ tokio = { workspace = true, features = ["time", "sync"] }
 tracing = "0.1.41"
 mixrelay-audio-graph = { path = "../audio-graph" }
 mixrelay-control-protocol = { path = "../control-protocol" }
-tower-http.workspace = true
+mixrelay-local-socket = { path = "../local-socket" }
 
 [dev-dependencies]
 tower.workspace = true
