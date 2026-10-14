@@ -34,7 +34,19 @@ typedef struct MRApplicationSourceClockSnapshot {
     uint64_t consumer_ticks;
     uint32_t consumer_running;
     uint32_t clock_master;
+    uint32_t target_backlog_frames;
+    uint32_t consumer_burst_frames;
+    uint64_t starvation_episodes;
+    uint64_t starvation_frames;
+    uint64_t rebuffer_frames;
+    uint64_t overwrite_skips;
+    uint32_t insufficient_headroom;
+
 } MRApplicationSourceClockSnapshot;
+
+void mr_application_source_transport_publish_measurements(
+    MRApplicationSourceTransport *transport, uint32_t producer_burst_frames,
+    uint32_t converter_burst_frames, uint32_t publication_drought_frames);
 
 bool mr_application_source_transport_clock(
     MRApplicationSourceTransport *transport, MRApplicationSourceClockSnapshot *snapshot);

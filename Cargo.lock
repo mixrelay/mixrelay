@@ -2737,6 +2737,7 @@ dependencies = [
 name = "mixrelay-control-protocol"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "mixrelay-audio-graph",
  "mixrelay-audio-io",
  "mixrelay-audio-recorder",
@@ -2868,6 +2869,7 @@ dependencies = [
  "mixrelay-process-tap",
  "mixrelay-processor-host",
  "mixrelay-processor-state",
+ "mixrelay-realtime",
  "mixrelay-test-support",
  "parking_lot",
  "reqwest",

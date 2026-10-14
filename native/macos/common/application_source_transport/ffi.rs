@@ -283,3 +283,18 @@ pub unsafe extern "C" fn mr_application_source_transport_destroy(transport: *mut
         drop(unsafe { Box::from_raw(transport) });
     }
 }
+
+/// Publishes epoch-scoped graph-frame burst maxima; never allocates or waits.
+/// # Safety
+/// Handle is null or retained by its sole pump; destroy cannot overlap this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_application_source_transport_publish_measurements(
+    transport: *const SourceTransport,
+    producer: u32,
+    converter: u32,
+    drought: u32,
+) {
+    if let Some(transport) = unsafe { transport.as_ref() } {
+        transport.publish_measurements(producer, converter, drought);
+    }
+}

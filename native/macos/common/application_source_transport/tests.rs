@@ -47,6 +47,7 @@ fn reset_write_snapshot_and_stale_lease_use_the_actual_mapping() {
             64,
             64,
             true,
+            384,
         );
     };
     let snapshot = producer.clock().unwrap();
@@ -289,4 +290,83 @@ fn retirement_unmaps_and_closes_storage_in_an_isolated_process() {
     );
     assert_eq!(unsafe { fcntl(descriptor, 1) }, -1);
     assert_eq!(std::io::Error::last_os_error().raw_os_error(), Some(9));
+}
+
+#[test]
+fn measured_bursts_are_epoch_scoped_and_closed_or_busy_leases_cannot_publish() {
+    let (mapping, mut producer) = fixture();
+    let format = unsafe { mr_application_clock_request_rate(mapping.clock.as_ptr(), 48_000) };
+    assert!(producer.reset(format, 44_100));
+    unsafe {
+        mr_application_source_transport_publish_measurements(ptr::null(), 512, 128, 64);
+    }
+    producer.publish_measurements(1024, 140, 50);
+    producer.publish_measurements(128, 128, 1);
+    let clock = mapping.clock();
+    assert_eq!(clock.producer_burst_frames.load(Ordering::Acquire), 1024);
+    assert_eq!(clock.converter_burst_frames.load(Ordering::Acquire), 140);
+    assert_eq!(clock.publication_drought_frames.load(Ordering::Acquire), 50);
+    let claim = ProducerClaim::acquire(clock).unwrap();
+    producer.publish_measurements(4096, 4096, 4096);
+    drop(claim);
+    assert_eq!(clock.producer_burst_frames.load(Ordering::Acquire), 1024);
+    assert!(producer.reset(format, 44_100));
+    assert_eq!(clock.producer_burst_frames.load(Ordering::Acquire), 0);
+    assert_eq!(clock.converter_burst_frames.load(Ordering::Acquire), 0);
+    assert_eq!(clock.publication_drought_frames.load(Ordering::Acquire), 0);
+    unsafe {
+        mr_application_clock_publish_consumer(
+            mapping.clock.as_ptr(),
+            producer.owned_epoch,
+            42,
+            128,
+            false,
+            768,
+        );
+    }
+    assert_eq!(producer.clock().unwrap().target_backlog_frames, 768);
+    assert!(producer.reset(format, 44_100));
+    let stale = producer.clock().unwrap();
+    assert_eq!(
+        (
+            stale.consumed_frames,
+            stale.consumer_running,
+            stale.target_backlog_frames
+        ),
+        (0, 0, 0)
+    );
+    clock.producer_lease.store(0, Ordering::Release);
+    producer.publish_measurements(4096, 4096, 4096);
+    assert_eq!(clock.producer_burst_frames.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn concurrent_target_and_cursor_snapshots_are_coherent() {
+    let (mapping, producer) = fixture();
+    assert_eq!(std::mem::size_of::<SourceClockSnapshot>(), 96);
+    let clock = mapping.clock();
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            for target in 1..=4000 {
+                unsafe {
+                    mr_application_clock_publish_consumer(
+                        std::ptr::from_ref(clock).cast_mut(),
+                        producer.owned_epoch,
+                        u64::from(target) * 2,
+                        1,
+                        true,
+                        target,
+                    );
+                }
+            }
+        });
+        for _ in 0..10000 {
+            if let Some(snapshot) = producer.clock() {
+                assert_eq!(
+                    snapshot.consumed_frames,
+                    u64::from(snapshot.target_backlog_frames) * 2
+                );
+            }
+        }
+    });
 }

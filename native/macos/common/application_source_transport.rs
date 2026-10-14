@@ -5,8 +5,9 @@ mod ffi;
 pub use ffi::{
     TransportError, TransportErrorCode, mr_application_source_transport_attach,
     mr_application_source_transport_clock, mr_application_source_transport_connect,
-    mr_application_source_transport_destroy, mr_application_source_transport_publish_native,
-    mr_application_source_transport_reset, mr_application_source_transport_write,
+    mr_application_source_transport_destroy, mr_application_source_transport_publish_measurements,
+    mr_application_source_transport_publish_native, mr_application_source_transport_reset,
+    mr_application_source_transport_write,
 };
 
 use crate::{
@@ -37,6 +38,13 @@ pub struct SourceClockSnapshot {
     pub consumer_running: u32,
     /// Whether the source drives the graph clock.
     pub clock_master: u32,
+    pub target_backlog_frames: u32,
+    pub consumer_burst_frames: u32,
+    pub starvation_episodes: u64,
+    pub starvation_frames: u64,
+    pub rebuffer_frames: u64,
+    pub overwrite_skips: u64,
+    pub insufficient_headroom: u32,
 }
 
 /// Opaque C handle exclusively owned by one desktop pump until its join/drop.
@@ -82,6 +90,7 @@ impl SourceTransport {
         let position = clock.consumer_position.load(Ordering::Acquire);
         let ticks = clock.consumer_ticks.load(Ordering::Acquire);
         let running = clock.consumer_running.load(Ordering::Acquire);
+        let target = clock.target_backlog_frames.load(Ordering::Acquire);
         if sequence & 1 != 0
             || sequence != clock.consumer_sequence.load(Ordering::Acquire)
             || format != clock.format_word.load(Ordering::Acquire)
@@ -98,6 +107,13 @@ impl SourceTransport {
             consumer_ticks: ticks,
             consumer_running: if current { running } else { 0 },
             clock_master: clock.clock_master.load(Ordering::Acquire),
+            target_backlog_frames: if current { target } else { 0 },
+            consumer_burst_frames: clock.consumer_burst_frames.load(Ordering::Acquire),
+            starvation_episodes: clock.starvation_episodes.load(Ordering::Acquire),
+            starvation_frames: clock.starvation_frames.load(Ordering::Acquire),
+            rebuffer_frames: clock.rebuffer_frames.load(Ordering::Acquire),
+            overwrite_skips: clock.overwrite_skips.load(Ordering::Acquire),
+            insufficient_headroom: clock.insufficient_headroom.load(Ordering::Acquire),
         })
     }
 
@@ -125,8 +141,29 @@ impl SourceTransport {
         clock
             .native_sample_rate
             .store(native_rate, Ordering::Release);
+        clock.producer_burst_frames.store(0, Ordering::Release);
+        clock.converter_burst_frames.store(0, Ordering::Release);
+        clock.publication_drought_frames.store(0, Ordering::Release);
         clock.acknowledged_format.store(format, Ordering::Release);
         true
+    }
+
+    fn publish_measurements(&self, producer: u32, converter: u32, drought: u32) {
+        let clock = self.mapping.clock();
+        let Some(_claim) = ProducerClaim::acquire(clock) else {
+            return;
+        };
+        if self.owns_stream() {
+            clock
+                .producer_burst_frames
+                .fetch_max(producer, Ordering::Release);
+            clock
+                .converter_burst_frames
+                .fetch_max(converter, Ordering::Release);
+            clock
+                .publication_drought_frames
+                .fetch_max(drought, Ordering::Release);
+        }
     }
 
     fn publish_native(&self, frames: u64, running: bool) {

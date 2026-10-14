@@ -47,7 +47,7 @@ fn clocked_request_preserves_identity_geometry_and_version() {
     let message = request();
     let mut parsed = SourceRequest::default();
     assert!(unsafe { mr_engine_control_parse_source_request(message.0, &raw mut parsed) });
-    assert_eq!(parsed.transport_version, 2);
+    assert_eq!(parsed.transport_version, 3);
     assert_eq!(parsed.capacity_frames, 128);
     assert_eq!(parsed.channels, 2);
     assert_eq!(
@@ -61,8 +61,8 @@ fn clocked_request_preserves_identity_geometry_and_version() {
 }
 
 #[test]
-fn only_explicit_typed_version_two_requests_are_accepted() {
-    for invalid in [0, 1, 3, u64::MAX] {
+fn only_explicit_typed_version_three_requests_are_accepted() {
+    for invalid in [0, 1, 2, 4, u64::MAX] {
         let message = request();
         unsafe {
             xpc_dictionary_set_uint64(message.0, c"source_transport_version".as_ptr(), invalid);

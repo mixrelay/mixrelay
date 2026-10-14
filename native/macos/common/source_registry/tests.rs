@@ -549,3 +549,80 @@ fn exercise_failed_grant_and_reclamation() {
     assert_eq!(unsafe { fcntl(descriptor, 1) }, -1);
     assert_eq!(io::Error::last_os_error().raw_os_error(), Some(9));
 }
+
+#[test]
+#[expect(
+    clippy::float_cmp,
+    reason = "bit-exact numbered PCM proves no replay or splice"
+)]
+fn adaptive_rebuffer_holds_numbered_pcm_cursor_without_replay_or_allocation() {
+    let registry = SourceRegistry::new();
+    let request = SourceRequest {
+        capacity_frames: 2048,
+        channels: 1,
+        ..request("adaptive")
+    };
+    let mut owner = producer(&registry, &request);
+    let read = registry.read(token(b"adaptive"));
+    let source = read.source().unwrap();
+    let clock = source.mapping.clock();
+    let format =
+        unsafe { mr_application_clock_request_rate(source.mapping.clock.as_ptr(), 48_000) };
+    assert!(unsafe { mr_application_source_transport_reset(&raw mut owner, format, 48_000) });
+    unsafe {
+        mr_application_source_transport_publish_native(&raw const owner, 512, true);
+        crate::application_source_transport::mr_application_source_transport_publish_measurements(
+            &raw const owner,
+            128,
+            128,
+            0,
+        );
+    }
+    let numbered: Vec<f32> = (0_u16..4096).map(f32::from).collect();
+    let write = |owner: &mut SourceTransport, start: usize, frames: u32| {
+        assert!(unsafe {
+            mr_application_source_transport_write(owner, numbered[start..].as_ptr(), frames)
+        });
+    };
+    let mut output = [0.0; 128];
+    let consume = |output: &mut [f32]| {
+        // Explicit separated scheduling bursts, without sleeping in a test.
+        unsafe {
+            (*source.timeline.get()).previous_read = None;
+        }
+        registry.read_audio(source.token, output, 128, 48_000)
+    };
+    write(&mut owner, 0, 512);
+    let measured = allocation_counter::measure(|| {
+        assert_eq!(consume(&mut output), 128);
+        assert_eq!(output, numbered[256..384]);
+        assert_eq!(consume(&mut output), 128);
+        assert_eq!(output, numbered[384..512]);
+        assert_eq!(consume(&mut output), 0);
+        assert_eq!(clock.target_backlog_frames.load(Ordering::Acquire), 384);
+        assert_eq!(
+            clock.consumer_position.load(Ordering::Acquire) & crate::application_clock::FRAME_MASK,
+            512
+        );
+        write(&mut owner, 512, 128);
+        for _ in 0..4 {
+            assert_eq!(consume(&mut output), 0);
+            assert_eq!(output, [0.0; 128]);
+        }
+        assert_eq!(clock.starvation_episodes.load(Ordering::Acquire), 1);
+        assert_eq!(clock.starvation_frames.load(Ordering::Acquire), 128);
+        assert_eq!(clock.rebuffer_frames.load(Ordering::Acquire), 640);
+        assert_eq!(clock.consumer_running.load(Ordering::Acquire), 0);
+        write(&mut owner, 640, 256);
+        assert_eq!(consume(&mut output), 128);
+        assert_eq!(output, numbered[512..640]);
+        assert_eq!(consume(&mut output), 128);
+        assert_eq!(output, numbered[640..768]);
+        assert_eq!(clock.overwrite_skips.load(Ordering::Acquire), 0);
+    });
+    assert_eq!(measured.count_total, 0);
+    write(&mut owner, 896, 2048);
+    assert_eq!(consume(&mut output), 128);
+    assert_eq!(output, numbered[2560..2688]);
+    assert_eq!(clock.overwrite_skips.load(Ordering::Acquire), 1792);
+}

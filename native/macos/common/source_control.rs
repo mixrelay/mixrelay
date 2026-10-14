@@ -77,7 +77,8 @@ fn positive_u32(message: Xpc, key: &CStr) -> Option<u32> {
 }
 fn parse_request(message: Xpc) -> Option<SourceRequest> {
     if !operation(message, c"request_source_transport")
-        || uint(message, c"source_transport_version") != Some(2)
+        || uint(message, c"source_transport_version")
+            != Some(u64::from(crate::application_clock::VERSION))
     {
         return None;
     }
@@ -85,7 +86,7 @@ fn parse_request(message: Xpc) -> Option<SourceRequest> {
     let mut parsed = SourceRequest {
         capacity_frames: positive_u32(message, c"capacity_frames")?,
         channels: positive_u32(message, c"channels")?,
-        transport_version: 2,
+        transport_version: crate::application_clock::VERSION,
         ..SourceRequest::default()
     };
     for (target, byte) in parsed.source_id.iter_mut().zip(source.as_bytes()) {
@@ -119,14 +120,18 @@ pub unsafe extern "C" fn mr_engine_control_create_clocked_source_request(
             u64::from(capacity_frames),
         );
         xpc_dictionary_set_uint64(message.0, c"channels".as_ptr(), u64::from(channels));
-        xpc_dictionary_set_uint64(message.0, c"source_transport_version".as_ptr(), 2);
+        xpc_dictionary_set_uint64(
+            message.0,
+            c"source_transport_version".as_ptr(),
+            u64::from(crate::application_clock::VERSION),
+        );
     }
     message.into_raw()
 }
 
 /// # Safety
 /// Message is null or live XPC. Output is writable. Malformed requests leave
-/// output unchanged; only clocked transport version 2 is accepted.
+/// output unchanged; only clocked transport version 3 is accepted.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mr_engine_control_parse_source_request(
     message: Xpc,
@@ -159,7 +164,11 @@ fn populate_attachment(
             c"operation".as_ptr(),
             c"attach_source_transport".as_ptr(),
         );
-        xpc_dictionary_set_uint64(message.0, c"source_transport_version".as_ptr(), 2);
+        xpc_dictionary_set_uint64(
+            message.0,
+            c"source_transport_version".as_ptr(),
+            u64::from(crate::application_clock::VERSION),
+        );
         xpc_dictionary_set_fd(message.0, c"transport_fd".as_ptr(), descriptor);
         xpc_dictionary_set_uint64(message.0, c"mapped_size".as_ptr(), size as u64);
         xpc_dictionary_set_uint64(message.0, c"producer_lease".as_ptr(), lease);
@@ -212,7 +221,8 @@ pub unsafe extern "C" fn mr_engine_control_parse_source_attachment(
 ) -> bool {
     if attachment.is_null()
         || !operation(message, c"attach_source_transport")
-        || uint(message, c"source_transport_version") != Some(2)
+        || uint(message, c"source_transport_version")
+            != Some(u64::from(crate::application_clock::VERSION))
     {
         return false;
     }

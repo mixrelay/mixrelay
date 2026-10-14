@@ -1,8 +1,8 @@
-# Application source clock transport v2
+# Application source clock transport v3
 
 This transport is private to the desktop process-tap pump and engine service.
 Both processes use the current shared-buffer ABI and the required XPC
-`source_transport_version: 2` contract. Missing or different versions are
+`source_transport_version: 3` contract. Missing or different versions are
 rejected before an attachment or producer lease is granted. There is no raw-frame
 or previous-protocol mode. `native/macos/common/source_control.rs` owns the codec.
 
@@ -14,8 +14,15 @@ use. The trailer contains integers and atomics only, never local pointers.
 Ownership:
 
 - The engine consumer publishes requested graph rate/generation, its own next
-  read position plus stream epoch, actual callback frame ticks, and running flag.
-  A bounded sequence snapshot prevents torn position/tick observations.
+  read position plus stream epoch, actual callback frame ticks, running flag and adaptive target backlog.
+  A bounded sequence snapshot prevents torn position/tick/target observations.
+  The initial target is rounded burst + excess publication drought + graph block,
+  capped at half capacity. Unknown producer cadence bootstraps at 512 frames.
+  Consecutive graph slices accumulate into measured consumer scheduling bursts.
+  Starvation grows once per episode and holds the next unread cursor until the
+  target is buffered. Live shrink and replay are disabled; only startup, epoch
+  changes and unavoidable overwrite recovery anchor a cursor. Fixed atomic
+  per-source counters are reported from the pump's off-realtime control step.
 - The pump acknowledges the requested format only after resetting its SRC and
   shared timeline. It owns its write position, native rate/frame progress and
   native running flag. Native frame progress includes captured **and dropped**

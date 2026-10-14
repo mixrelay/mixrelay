@@ -7,7 +7,9 @@ use std::{
     sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
 
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
+const HEADER_BYTES: u32 = 152;
+const _: () = assert!(size_of::<ApplicationClock>() == HEADER_BYTES as usize);
 const MAGIC: u64 = 0x4d52_4150_5043_4c4b;
 pub const FRAME_MASK: u64 = 0x0000_ffff_ffff_ffff;
 
@@ -28,6 +30,17 @@ pub struct ApplicationClock {
     pub native_running: AtomicU32,
     pub clock_master: AtomicU32,
     pub producer_lease: AtomicU64,
+    pub target_backlog_frames: AtomicU32,
+    /// Epoch-scoped pump measurements, in graph frames.
+    pub producer_burst_frames: AtomicU32,
+    pub converter_burst_frames: AtomicU32,
+    pub publication_drought_frames: AtomicU32,
+    pub starvation_episodes: AtomicU64,
+    pub starvation_frames: AtomicU64,
+    pub rebuffer_frames: AtomicU64,
+    pub overwrite_skips: AtomicU64,
+    pub consumer_burst_frames: AtomicU32,
+    pub insufficient_headroom: AtomicU32,
 }
 
 fn offset(capacity: u32, channels: u32) -> Option<usize> {
@@ -100,16 +113,13 @@ pub unsafe extern "C" fn mr_application_clock_initialize(
     {
         return std::ptr::null_mut();
     }
-    let Ok(header_bytes) = u32::try_from(size_of::<ApplicationClock>()) else {
-        return std::ptr::null_mut();
-    };
     // The checks above establish aligned, writable storage for the whole clock.
     let clock = unsafe { memory.byte_add(offset).cast::<ApplicationClock>() };
     unsafe {
         clock.write(ApplicationClock {
             magic: MAGIC,
             version: VERSION,
-            header_bytes,
+            header_bytes: HEADER_BYTES,
             format_word: AtomicU64::new(0),
             acknowledged_format: AtomicU64::new(0),
             consumer_position: AtomicU64::new(0),
@@ -122,6 +132,16 @@ pub unsafe extern "C" fn mr_application_clock_initialize(
             native_running: AtomicU32::new(0),
             clock_master: AtomicU32::new(0),
             producer_lease: AtomicU64::new(0),
+            target_backlog_frames: AtomicU32::new(0),
+            producer_burst_frames: AtomicU32::new(0),
+            converter_burst_frames: AtomicU32::new(0),
+            publication_drought_frames: AtomicU32::new(0),
+            starvation_episodes: AtomicU64::new(0),
+            starvation_frames: AtomicU64::new(0),
+            rebuffer_frames: AtomicU64::new(0),
+            overwrite_skips: AtomicU64::new(0),
+            consumer_burst_frames: AtomicU32::new(0),
+            insufficient_headroom: AtomicU32::new(0),
         });
     }
     clock
@@ -186,6 +206,7 @@ pub unsafe extern "C" fn mr_application_clock_publish_consumer(
     next_frame: u64,
     frames: u32,
     running: bool,
+    target_backlog_frames: u32,
 ) {
     let Some(clock) = (unsafe { clock.as_ref() }) else {
         return;
@@ -200,5 +221,109 @@ pub unsafe extern "C" fn mr_application_clock_publish_consumer(
     clock
         .consumer_running
         .store(u32::from(running), Ordering::Release);
+    clock
+        .target_backlog_frames
+        .store(target_backlog_frames, Ordering::Release);
     clock.consumer_sequence.fetch_add(1, Ordering::Release);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::alloc::{Layout, alloc_zeroed, dealloc};
+
+    struct Storage(*mut c_void, Layout);
+    impl Storage {
+        fn new() -> Self {
+            let layout =
+                Layout::from_size_align(mr_application_clock_required_bytes(1024, 2), 64).unwrap();
+            let memory = unsafe { alloc_zeroed(layout) }.cast::<c_void>();
+            assert!(!memory.is_null());
+            Self(memory, layout)
+        }
+        fn clock(&self) -> *mut ApplicationClock {
+            unsafe { mr_application_clock_initialize(self.0, self.1.size(), 1024, 2) }
+        }
+    }
+    impl Drop for Storage {
+        fn drop(&mut self) {
+            unsafe { dealloc(self.0.cast(), self.1) };
+        }
+    }
+
+    #[test]
+    fn v3_layout_rejects_v2_and_invalid_geometry_without_touching_pcm() {
+        assert_eq!(size_of::<ApplicationClock>(), 152);
+        assert_eq!(
+            std::mem::offset_of!(ApplicationClock, target_backlog_frames),
+            96
+        );
+        assert_eq!(mr_application_clock_required_bytes(0, 2), 0);
+        let storage = Storage::new();
+        let clock = storage.clock();
+        assert!(!clock.is_null());
+        unsafe {
+            assert_eq!(
+                mr_application_clock_attach(storage.0, storage.1.size(), 1024, 2),
+                clock
+            );
+            (*clock).version = 2;
+            assert!(mr_application_clock_attach(storage.0, storage.1.size(), 1024, 2).is_null());
+            (*clock).version = VERSION;
+            (*clock).header_bytes = 96;
+            assert!(mr_application_clock_attach(storage.0, storage.1.size(), 1024, 2).is_null());
+            (*clock).header_bytes = u32::try_from(size_of::<ApplicationClock>()).unwrap();
+            (*clock).magic = 0;
+            assert!(mr_application_clock_attach(storage.0, storage.1.size(), 1024, 2).is_null());
+            for (memory, bytes, capacity) in [
+                (std::ptr::null_mut(), storage.1.size(), 1024),
+                (storage.0, 1, 1024),
+                (storage.0, storage.1.size() - 1, 1024),
+                (storage.0.byte_add(1), storage.1.size(), 1024),
+                (storage.0, storage.1.size(), 0),
+            ] {
+                assert!(mr_application_clock_attach(memory, bytes, capacity, 2).is_null());
+                assert!(mr_application_clock_initialize(memory, bytes, capacity, 2).is_null());
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_publication_is_allocation_free_and_carries_target_with_cursor() {
+        let storage = Storage::new();
+        let pointer = storage.clock();
+        let clock = unsafe { &*pointer };
+        let measured = allocation_counter::measure(|| unsafe {
+            assert!(!mr_application_clock_try_producer(std::ptr::null_mut()));
+            mr_application_clock_release_producer(std::ptr::null_mut());
+            assert!(mr_application_clock_try_producer(pointer));
+            assert!(!mr_application_clock_try_producer(pointer));
+            mr_application_clock_release_producer(pointer);
+            assert_eq!(
+                mr_application_clock_request_rate(std::ptr::null_mut(), 48000),
+                0
+            );
+            assert_eq!(mr_application_clock_request_rate(pointer, 1), 0);
+            let format = mr_application_clock_request_rate(pointer, 48000);
+            assert_eq!(format, mr_application_clock_request_rate(pointer, 48000));
+            mr_application_clock_publish_consumer(std::ptr::null_mut(), 1, 0, 128, false, 512);
+            for (next, target, running) in [(128, 384, true), (128, 640, false), (256, 640, true)] {
+                mr_application_clock_publish_consumer(pointer, 3, next, 128, running, target);
+                assert_eq!(
+                    clock.consumer_position.load(Ordering::Acquire),
+                    (3 << 48) | next
+                );
+                assert_eq!(clock.target_backlog_frames.load(Ordering::Acquire), target);
+                assert_eq!(
+                    clock.consumer_running.load(Ordering::Acquire),
+                    u32::from(running)
+                );
+                assert_eq!(clock.consumer_sequence.load(Ordering::Acquire) & 1, 0);
+            }
+            assert_eq!(clock.consumer_ticks.load(Ordering::Acquire), 384);
+            clock.format_word.store(u64::MAX, Ordering::Release);
+            assert_eq!(mr_application_clock_request_rate(pointer, 48000), 0);
+        });
+        assert_eq!(measured.count_total, 0);
+    }
 }

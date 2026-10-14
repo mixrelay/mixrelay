@@ -122,7 +122,7 @@ impl Waker {
     }
 
     /// Control step: logs the window every ten seconds.
-    fn report(&mut self, capture: &NativeCaptureReader) {
+    fn report(&mut self, capture: &NativeCaptureReader, clock: Option<NativeClockSnapshot>) {
         let now = Instant::now();
         if self
             .reported
@@ -131,6 +131,20 @@ impl Waker {
             return;
         }
         self.reported = Some(now);
+        if let Some(clock) = clock {
+            tracing::info!(
+                source_id = %capture.session().resolved.source_id,
+                epoch = clock.epoch,
+                target_frames = clock.target_backlog_frames,
+                consumer_burst_frames = clock.consumer_burst_frames,
+                starvation_episodes = clock.starvation_episodes,
+                starvation_frames = clock.starvation_frames,
+                rebuffer_frames = clock.rebuffer_frames,
+                overwrite_skips = clock.overwrite_skips,
+                insufficient_headroom = clock.insufficient_headroom,
+                "application consumer latency"
+            );
+        }
         let failed_signals = capture
             .session()
             .wakeup()
@@ -215,6 +229,16 @@ pub(super) fn native_rate(rate: f64) -> Result<u32, String> {
     checked_rate(rate).map_err(|error| error.to_string())
 }
 
+/// Round native/coalesced callback bursts upward into graph frames.
+fn graph_frames(native_frames: u64, native_rate: u32, graph_rate: u32) -> u32 {
+    u32::try_from(
+        u128::from(native_frames)
+            .saturating_mul(u128::from(graph_rate))
+            .div_ceil(u128::from(native_rate.max(1))),
+    )
+    .unwrap_or(u32::MAX)
+}
+
 struct PumpClock {
     bridge: AsyncClockBridge,
     format: u64,
@@ -226,6 +250,10 @@ struct PumpClock {
     native_generation: u64,
     native_discontinuities: u64,
     clock_master: bool,
+    measured_native_frames: u64,
+    producer_burst: u32,
+    publication_burst: u32,
+    previous_publication: Option<Instant>,
 }
 
 impl PumpClock {
@@ -279,6 +307,10 @@ impl PumpClock {
             native_generation: 0,
             native_discontinuities: 0,
             clock_master: clock.clock_master != 0,
+            measured_native_frames: 0,
+            producer_burst: 0,
+            publication_burst: 0,
+            previous_publication: None,
         })
     }
 
@@ -297,9 +329,12 @@ impl PumpClock {
                 queue: FeedbackQueue::Output,
                 epoch: self.epoch,
                 queued_frames: queued,
-                target_frames: 512,
+                target_frames: clock.target_backlog_frames.max(1) as usize,
                 elapsed_frames: elapsed.min(output_rate),
-                clock_running: clock.consumer_running != 0 && elapsed > 0 && elapsed <= output_rate,
+                clock_running: clock.consumer_running != 0
+                    && clock.target_backlog_frames != 0
+                    && elapsed > 0
+                    && elapsed <= output_rate,
             })
             .map_err(PumpError::Bridge)?;
         Ok(queued)
@@ -326,10 +361,43 @@ impl PumpClock {
             remaining = remaining.saturating_sub(frames);
         }
         self.epoch = transport.clock()?.epoch;
+        self.measured_native_frames = health.captured_frames;
         self.native_generation = health.format_generation;
         self.native_discontinuities = health.clock_discontinuities;
         self.bridge.reset(self.epoch, Discontinuity::FormatChanged);
         Some(self)
+    }
+
+    fn measure_input(&mut self, captured: u64) -> (u32, u32) {
+        let graph_rate =
+            u32::try_from(self.format & u64::from(u32::MAX)).expect("masked graph rate");
+        let native_burst = captured.saturating_sub(self.measured_native_frames);
+        self.measured_native_frames = captured;
+        self.producer_burst =
+            self.producer_burst
+                .max(graph_frames(native_burst, self.native_rate, graph_rate));
+        let converter =
+            u32::try_from(self.bridge.processing_quantum().1).expect("bounded converter batch");
+        (self.producer_burst, converter)
+    }
+
+    fn published(&mut self, transferred: usize, now: Instant) -> (u32, u32) {
+        self.publication_burst = self
+            .publication_burst
+            .saturating_add(u32::try_from(transferred).unwrap_or(u32::MAX));
+        let graph_rate = self.format & u64::from(u32::MAX);
+        let drought = self.previous_publication.map_or(0, |previous| {
+            let elapsed = now
+                .duration_since(previous)
+                .as_nanos()
+                .saturating_mul(u128::from(graph_rate))
+                .div_ceil(1_000_000_000);
+            u32::try_from(elapsed)
+                .unwrap_or(u32::MAX)
+                .saturating_sub(self.producer_burst)
+        });
+        self.previous_publication = Some(now);
+        (self.producer_burst.max(self.publication_burst), drought)
     }
 
     fn transfer(
@@ -415,7 +483,7 @@ impl Pump {
             self.adopt(control, realtime);
             if self.last_refresh.elapsed() >= Duration::from_millis(100) {
                 self.format_pending = off_realtime(realtime, || {
-                    self.waker.report(&self.capture);
+                    self.waker.report(&self.capture, self.transport.clock());
                     self.retime(realtime);
                     refresh(&mut self.scoped, &mut self.capture).map_err(PumpError::Control)
                 })?;
@@ -496,10 +564,15 @@ impl Pump {
             return Ok(());
         };
         if state.observe(clock)? >= CAPTURE_RING_CAPACITY_FRAMES - ENGINE_BLOCK_FRAMES {
+            // Backpressure is not producer jitter or a coalesced publication.
+            state.publication_burst = 0;
+            state.previous_publication = None;
             // The engine has not consumed yet; its progress is not signaled here.
             self.waker.briefly(&self.capture);
             return Ok(());
         }
+        let (producer, converter) = state.measure_input(health.captured_frames);
+        self.transport.publish_measurements(producer, converter, 0);
         let transferred = state.transfer(&mut self.capture, &mut self.input, &mut self.output)?;
         if transferred > 0
             && !self
@@ -510,7 +583,13 @@ impl Pump {
             // the next pass observes the new token and reconstructs off realtime.
             return Ok(());
         }
+        if transferred > 0 {
+            let (producer, drought) = state.published(transferred, Instant::now());
+            self.transport
+                .publish_measurements(producer, converter, drought);
+        }
         if transferred == 0 {
+            state.publication_burst = 0;
             // Converted output can be empty while tap input is still readable (the
             // converter is priming); read on instead of waiting for another callback.
             let readable =
@@ -594,6 +673,86 @@ fn refresh_capture(capture: &mut NativeCaptureReader) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn measured_native_coalesced_and_converter_bursts_are_graph_frames() {
+        assert_eq!(graph_frames(128, 44_100, 48_000), 140);
+        assert_eq!(graph_frames(1024, 96_000, 44_100), 471);
+        assert_eq!(graph_frames(u64::MAX, 8000, 192_000), u32::MAX);
+        let snapshot = NativeClockSnapshot {
+            format_word: (1_u64 << 32) | 0xbb80,
+            ..NativeClockSnapshot::default()
+        };
+        let mut clock = PumpClock::new(2, 48_000, snapshot, 0).unwrap();
+        let (producer, converter) = clock.measure_input(256);
+        assert_eq!(producer, 256);
+        assert!(converter >= 128);
+        assert_eq!(clock.measure_input(1280).0, 1024);
+        assert_eq!(clock.measure_input(1280).0, 1024);
+        let now = Instant::now();
+        assert_eq!(clock.published(128, now), (1024, 0));
+        assert_eq!(clock.published(1024, now), (1152, 0));
+        let (_, drought) = clock.published(128, now + Duration::from_millis(30));
+        assert_eq!(drought, 416);
+    }
+
+    #[test]
+    fn published_target_changes_feedback_without_pcm_reset_and_inactive_freezes() {
+        for master in [0, 1] {
+            let mut snapshot = NativeClockSnapshot {
+                format_word: (1_u64 << 32) | 0xbb80,
+                produced_frames: 768,
+                target_backlog_frames: 256,
+                clock_master: master,
+                consumer_running: 1,
+                ..NativeClockSnapshot::default()
+            };
+            let mut clock = PumpClock::new(2, 48_000, snapshot, 0).unwrap();
+            clock.bridge.push_interleaved(&[0.5; 256]).unwrap();
+            for _ in 0..100 {
+                snapshot.consumer_ticks += 128;
+                clock.observe(snapshot).unwrap();
+            }
+            let correction = clock.bridge.correction_ppm();
+            snapshot.target_backlog_frames = 1536;
+            snapshot.consumer_running = 0;
+            for _ in 0..100 {
+                snapshot.consumer_ticks += 128;
+                clock.observe(snapshot).unwrap();
+            }
+            assert!((clock.bridge.correction_ppm() - correction).abs() < f64::EPSILON);
+            snapshot.consumer_running = 1;
+            for _ in 0..1000 {
+                snapshot.consumer_ticks += 128;
+                clock.observe(snapshot).unwrap();
+            }
+            if master == 0 {
+                assert!(clock.bridge.correction_ppm() > 0.0);
+            } else {
+                assert!(clock.bridge.correction_ppm().abs() < f64::EPSILON);
+            }
+            assert_eq!(clock.bridge.queued_input_frames(), 128);
+            let correction = clock.bridge.correction_ppm();
+            snapshot.target_backlog_frames = 0; // stale/unknown consumer publication
+            snapshot.consumer_ticks += 128;
+            clock.observe(snapshot).unwrap();
+            assert!((clock.bridge.correction_ppm() - correction).abs() < f64::EPSILON);
+        }
+        assert_eq!(
+            std::mem::size_of::<NativeClockSnapshot>(),
+            std::mem::size_of::<
+                mixrelay_macos_transport::application_source_transport::SourceClockSnapshot,
+            >()
+        );
+        assert_eq!(
+            std::mem::offset_of!(NativeClockSnapshot, target_backlog_frames),
+            48
+        );
+        assert_eq!(
+            std::mem::offset_of!(NativeClockSnapshot, starvation_episodes),
+            56
+        );
+    }
+
     #[test]
     fn the_realtime_budget_follows_the_tap_callback_cadence() {
         let mut health = super::super::CaptureProbeStats {
@@ -681,6 +840,7 @@ mod tests {
                 format_word: (1_u64 << 32) | 0xbb80,
                 produced_frames: 1_024,
                 consumer_running: 1,
+                target_backlog_frames: 512,
                 clock_master: master,
                 ..NativeClockSnapshot::default()
             };

@@ -8,7 +8,7 @@
 - **그래프 렌더링은 대부분 CoreAudio IOProc 안에서 실행된다.** 엔진은 MixRelay 가상 장치도 일반 CoreAudio 클라이언트로 열며([spec.rs](../../apps/engine-service/src/macos_devices/spec.rs)), 사용 가능한 장치 클록이 있으면 그 IOProc에서 동기적으로 렌더링한다([direct.rs](../../apps/engine-service/src/macos_devices/direct.rs)). 이 경로는 이미 실시간 스케줄링을 받는다.
 - **실시간 승격과 알림 대기는 일부 경로에 적용됐고, 폴링·제어 작업 분리는 남아 있다.**
   - 장치 클록이 없을 때의 대체 워커는 250µs 잠들며 폴링한다([macos/mod.rs](../../apps/engine-service/src/macos/mod.rs)).
-  - 앱 캡처 pump는 tap 콜백 알림으로 깨어나고 변환 구간에 time-constraint 우선순위를 적용한다. 형식 갱신·자원 교체 같은 제어 작업은 여전히 같은 스레드에서 실시간 정책을 잠시 해제한 채 처리한다([clock_pump.rs](../../apps/desktop/src-tauri/src/macos_audio/clock_pump.rs)). 엔진 쪽 읽기 지연은 512프레임(48kHz에서 10.7ms)으로 고정돼 있다.
+  - 앱 캡처 pump는 tap 콜백 알림으로 깨어나고 변환 구간에 time-constraint 우선순위를 적용한다. 형식 갱신·자원 교체 같은 제어 작업은 여전히 같은 스레드에서 실시간 정책을 잠시 해제한 채 처리한다([clock_pump.rs](../../apps/desktop/src-tauri/src/macos_audio/clock_pump.rs)). 엔진 소비자가 측정 burst를 바탕으로 적응 목표를 소유하고 공유 클록 v3로 pump에 발행한다.
   - 플러그인 DSP 스레드는 macOS에서 time-constraint 우선순위를 적용하고, macOS 14.4 이상에서는 공유 futex로 대기한다. 100µs 폴링은 futex를 사용할 수 없거나 대기가 실패했을 때의 대체 경로다. 플러그인 `try_lock` 경합 시에는 50µs 잠든 뒤 재시도한다([processor-host](../../crates/processor-host/src/lib.rs)).
   - MixRelay가 만든 앱 캡처 pump와 플러그인 DSP 스레드는 실시간 스케줄링(time-constraint) 승격을 시도하며 실패 시 일반 우선순위로 동작한다. 대체 그래프 워커의 실시간 승격과 오디오 workgroup 참여는 아직 적용되지 않았다.
 - **제어 경로는 요청/응답 폴링이다(미터는 [적용 상태](#적용-상태)처럼 push로 바뀜).** UI → 편집 앱(Tauri invoke) → 실행부(사용자 Unix 소켓, 줄 단위 JSON) → 엔진(사용자 소유 `engine.sock`의 HTTP/JSON). 미터 20회/s, 열린 플러그인 에디터마다 4회/s, 노드 제어 1회/s, 오디오 상태 약 1회/s를 폴링한다. 연결은 재사용한다.
@@ -33,7 +33,8 @@
 ## 결정 3. 지연 정책
 
 - 고정 512프레임 읽기 지연과 pump의 고정 목표를 측정 기반 정책으로 바꾼다: 생산자·소비자·변환기 burst + 측정한 전달 지터 + drift 보정 여유.
-- underrun이 확인되면 빠르게 늘리고, 안정 구간을 확인한 뒤에만 천천히 줄인다. 읽기 커서를 반복해서 "최신 − 목표"로 건너뛰지 않는다.
+- 구현 상태: 공유 클록 v3의 소비자 커서와 목표를 함께 발행하고 pump가 이를 따른다. 생산자·변환기 burst와 전달 공백, 연속 그래프 읽기의 누적 소비 burst로 초기 목표를 정하며 512는 생산자 측정 전 bootstrap에만 쓴다. 목표 상한은 capacity/2다.
+- 정상 스트림의 starvation episode당 한 번 늘리고, 다음 읽기 커서를 유지한 채 목표만큼 재버퍼링한다. 실행 중 축소는 하지 않으며 시작·epoch 변경·불가피한 overwrite에서만 재정렬한다. 소스별 starvation 횟수·프레임, rebuffer 프레임, overwrite skip·현재 목표는 고정 저장소에 기록하고 pump의 비실시간 구간에서 보고한다. 설치본의 지연·청감 검증은 별도다.
 - drift 보정은 독립 클록 경계에서만 한다. 대기 시간을 바꿔 drift를 보정하지 않는다.
 
 ## 결정 4. 제어 프로토콜

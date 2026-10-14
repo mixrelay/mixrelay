@@ -92,6 +92,13 @@ struct NativeClockSnapshot {
     consumer_ticks: u64,
     consumer_running: u32,
     clock_master: u32,
+    target_backlog_frames: u32,
+    consumer_burst_frames: u32,
+    starvation_episodes: u64,
+    starvation_frames: u64,
+    rebuffer_frames: u64,
+    overwrite_skips: u64,
+    insufficient_headroom: u32,
 }
 
 #[repr(C)]
@@ -159,6 +166,12 @@ unsafe extern "C" {
         format_word: u64,
         native_sample_rate: u32,
     ) -> bool;
+    fn mr_application_source_transport_publish_measurements(
+        transport: *mut NativeApplicationSourceTransport,
+        producer: u32,
+        converter: u32,
+        drought: u32,
+    );
     fn mr_application_source_transport_publish_native(
         transport: *mut NativeApplicationSourceTransport,
         native_frames: u64,
@@ -501,6 +514,18 @@ struct ApplicationSourceTransport {
 unsafe impl Send for ApplicationSourceTransport {}
 
 impl ApplicationSourceTransport {
+    fn publish_measurements(&mut self, producer: u32, converter: u32, drought: u32) {
+        // SAFETY: this pump exclusively owns the live transport.
+        unsafe {
+            mr_application_source_transport_publish_measurements(
+                self.native.as_ptr(),
+                producer,
+                converter,
+                drought,
+            );
+        }
+    }
+
     fn publish_native(&mut self, frames: u64, running: bool) {
         // SAFETY: sole pump owner; bounded atomic publication into validated trailer.
         unsafe {

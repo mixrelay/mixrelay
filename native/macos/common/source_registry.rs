@@ -9,7 +9,7 @@ use crate::{
     },
     application_source_mapping::Mapping,
     shared_audio_buffer::{
-        SharedAudioBufferStats, mr_shared_audio_buffer_read, mr_shared_audio_buffer_request_epoch,
+        mr_shared_audio_buffer_read, mr_shared_audio_buffer_request_epoch,
         mr_shared_audio_buffer_requires_replacement, mr_shared_audio_buffer_stats,
         mr_shared_audio_buffer_try_begin_epoch,
     },
@@ -31,7 +31,8 @@ use std::{
 
 const MAX_SOURCES: usize = 64;
 const MAX_RETAINED: usize = 128;
-const READ_LATENCY: u64 = 512;
+mod latency;
+use latency::{Latency, Observation, transition};
 const MAX_LEASE: u64 = (1 << 48) - 1;
 
 #[derive(Clone, Copy, Default)]
@@ -47,31 +48,78 @@ pub struct SourceClock {
 }
 #[derive(Default)]
 struct Timeline {
-    epoch: u64,
-    next: u64,
-    started: bool,
+    policy: Latency,
+    previous_read: Option<std::time::Instant>,
+    previous_frames: u32,
 }
 impl Timeline {
-    /// Select a readable range without advancing the single consumer cursor.
-    /// The caller publishes an inactive consumer when the range is unavailable.
-    fn ready(&mut self, stats: SharedAudioBufferStats, frames: u32, capacity: u32) -> bool {
-        if self.epoch != stats.epoch {
-            self.epoch = stats.epoch;
-            self.started = false;
+    fn observe(
+        &mut self,
+        source: &Source,
+        stats: crate::shared_audio_buffer::SharedAudioBufferStats,
+        frames: u32,
+        rate: u32,
+    ) -> Observation {
+        let clock = source.mapping.clock();
+        let now = std::time::Instant::now();
+        // Full scheduling bursts may comprise many graph slices. Accumulate
+        // adjacent calls, independently of concurrent producer publications.
+        let adjacent = self.previous_read.is_some_and(|previous| {
+            now.duration_since(previous).as_nanos() * u128::from(rate) * 2
+                < u128::from(self.previous_frames) * 1_000_000_000
+        });
+        self.previous_read = Some(now);
+        self.previous_frames = frames;
+        Observation {
+            epoch: stats.epoch,
+            published: stats.published_through_frame,
+            frames,
+            capacity: source.capacity,
+            producer_burst: clock.producer_burst_frames.load(Ordering::Acquire),
+            converter_burst: clock.converter_burst_frames.load(Ordering::Acquire),
+            drought: clock.publication_drought_frames.load(Ordering::Acquire),
+            running: clock.native_running.load(Ordering::Acquire) != 0,
+            adjacent,
+            copy_missing: 0,
         }
-        let published = stats.published_through_frame;
-        if !self.started {
-            self.next = 0;
-            if published < READ_LATENCY + u64::from(frames) {
-                return false;
-            }
-            self.next = published - READ_LATENCY;
-            self.started = true;
+    }
+
+    fn publish(&self, source: &Source, epoch: u64, frames: u32, running: bool) {
+        self.publish_telemetry(source.mapping.clock());
+        // SAFETY: the caller's nonblocking consumer claim owns this timeline;
+        // the read pin retains its mapping through bounded atomic publication.
+        unsafe {
+            mr_application_clock_publish_consumer(
+                source.mapping.clock.as_ptr(),
+                epoch,
+                self.policy.next,
+                frames,
+                running,
+                self.policy.target,
+            );
         }
-        if published > self.next.saturating_add(u64::from(capacity)) {
-            self.next = published - READ_LATENCY;
-        }
-        published >= self.next.saturating_add(u64::from(frames))
+    }
+
+    fn publish_telemetry(&self, clock: &ApplicationClock) {
+        let policy = self.policy;
+        clock
+            .starvation_episodes
+            .store(policy.starvation_episodes, Ordering::Release);
+        clock
+            .starvation_frames
+            .store(policy.starvation_frames, Ordering::Release);
+        clock
+            .rebuffer_frames
+            .store(policy.rebuffer_frames, Ordering::Release);
+        clock
+            .overwrite_skips
+            .store(policy.overwrite_skips, Ordering::Release);
+        clock
+            .consumer_burst_frames
+            .store(policy.consumer_burst, Ordering::Release);
+        clock
+            .insufficient_headroom
+            .store(u32::from(policy.insufficient_headroom), Ordering::Release);
     }
 }
 struct Source {
@@ -451,41 +499,39 @@ impl SourceRegistry {
             && stats.epoch != 0
             && clock.acknowledged_format.load(Ordering::Acquire) == format;
         if !valid {
-            timeline.started = false;
-            unsafe {
-                mr_application_clock_publish_consumer(clock_pointer, stats.epoch, 0, frames, false);
-            }
+            timeline.policy.started = false;
+            timeline.previous_read = None;
+            timeline.policy.next = 0;
+            timeline.publish(source, stats.epoch, frames, false);
             return 0;
         }
-        if !timeline.ready(stats, frames, source.capacity) {
-            // SAFETY: the consumer claim owns this timeline and the read guard
-            // retains its mapping through this bounded atomic publication.
-            unsafe {
-                mr_application_clock_publish_consumer(
-                    clock_pointer,
-                    stats.epoch,
-                    timeline.next,
-                    frames,
-                    false,
-                );
+        let observation = timeline.observe(source, stats, frames, rate);
+        let (policy, ready) = transition(timeline.policy, observation);
+        if !ready {
+            if source.read_is_current(lease, format, stats.epoch) {
+                timeline.policy = policy;
             }
+            timeline.publish(source, stats.epoch, frames, false);
             return 0;
         }
         let available = unsafe {
-            mr_shared_audio_buffer_read(buffer, timeline.next, samples.as_mut_ptr(), frames)
+            mr_shared_audio_buffer_read(buffer, policy.next, samples.as_mut_ptr(), frames)
         };
-        timeline.next += u64::from(frames);
         let valid = source.read_is_current(lease, format, stats.epoch);
-        unsafe {
-            mr_application_clock_publish_consumer(
-                clock_pointer,
-                stats.epoch,
-                timeline.next,
-                frames,
-                valid && available == frames,
-            );
+        if valid && available == frames {
+            timeline.policy = policy.consumed(frames);
+        } else if valid {
+            timeline.policy = transition(
+                policy,
+                Observation {
+                    copy_missing: frames - available,
+                    ..observation
+                },
+            )
+            .0;
         }
-        if valid {
+        timeline.publish(source, stats.epoch, frames, valid && available == frames);
+        if valid && available == frames {
             available
         } else {
             samples.fill(0.0);
