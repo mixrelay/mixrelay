@@ -26,9 +26,12 @@ function fakeFs(output) {
   };
 }
 
-test("Linux config bundles the matching engine sidecar", () => {
+test("Linux config bundles the internal Driver runtime and matching engine sidecars", () => {
   const linux = JSON.parse(readFileSync(join(root, "apps/desktop/src-tauri/tauri.linux.conf.json"), "utf8"));
-  assert.deepEqual(linux.bundle.externalBin, ["binaries/mixrelay-engine-service"]);
+  assert.deepEqual(linux.bundle.externalBin, [
+    "binaries/mixrelay-driver-service",
+    "binaries/mixrelay-engine-service",
+  ]);
 });
 
 test("arguments accept only the supported profiles and target form", () => {

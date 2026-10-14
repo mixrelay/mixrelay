@@ -112,7 +112,7 @@ exit "$TEST_STATUS"`,
           assert.match(calls, /pkexec\n\/usr\/bin\/pacman\n--noconfirm\n-R\n--\nmix-relay-driver\n/);
         }
         if (removable && (status === 126 || status === 127)) {
-          assert.doesNotMatch(calls, /package-remove|Quit MixRelay|앱과 Driver 관리자를 종료/);
+          assert.doesNotMatch(calls, /package-remove|Quit MixRelay|MixRelay를 종료/);
           assert.match(calls, language === 'ko'
             ? /패키지를 제거하지 않았습니다.*설정은 삭제하지 않았습니다/
             : /package was not removed and saved settings were not deleted/);
@@ -122,7 +122,7 @@ exit "$TEST_STATUS"`,
             : /Authorization unavailable or authentication failed|승인 불가 또는 인증 오류/);
         } else if (!removable || status !== 0) {
           assert.match(calls, language === 'ko'
-            ? /MixRelay와 MixRelay Driver를 종료한 뒤 다시 시도/ : /Quit MixRelay and MixRelay Driver, then retry/);
+            ? /MixRelay를 종료한 뒤 다시 시도/ : /Quit MixRelay, then retry/);
         } else {
           assert.doesNotMatch(calls, /--error|--info/);
         }

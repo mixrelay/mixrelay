@@ -7,7 +7,7 @@ set -eu
 case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
   ko*)
     title='MixRelay 제거'
-    message='MixRelay 상태 메뉴에서 모든 오디오를 중지하고 MixRelay 편집 앱과 MixRelay Driver를 종료한 뒤 다시 시도하세요. 그래프와 설정은 기본으로 보존합니다. 녹음 파일과 내보낸 프로젝트는 보존하며, 유료 라이선스 로그인 정보는 제거합니다.'
+    message='MixRelay 상태 메뉴에서 모든 오디오를 중지하고 MixRelay 편집 앱과 MixRelay를 종료한 뒤 다시 시도하세요. 그래프와 설정은 기본으로 보존합니다. 녹음 파일과 내보낸 프로젝트는 보존하며, 유료 라이선스 로그인 정보는 제거합니다.'
     delete_label='저장된 그래프와 설정 삭제'
     remove_label='제거'
     cancel_label='취소'
@@ -21,7 +21,7 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
     ;;
   ja*)
     title='MixRelay のアンインストール'
-    message='MixRelayのステータスメニューですべてのオーディオを停止し、MixRelayエディターとMixRelay Driverを終了してから再試行してください。 グラフと設定は既定で保持されます。録音とエクスポートしたプロジェクトは保持され、有料ライセンスのログイン情報は消去されます。'
+    message='MixRelayのステータスメニューですべてのオーディオを停止し、MixRelayエディターとMixRelayを終了してから再試行してください。 グラフと設定は既定で保持されます。録音とエクスポートしたプロジェクトは保持され、有料ライセンスのログイン情報は消去されます。'
     delete_label='保存されたグラフと設定を削除'
     remove_label='アンインストール'
     cancel_label='キャンセル'
@@ -35,7 +35,7 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
     ;;
   zh_Hans*|zh-Hans*)
     title='卸载 MixRelay'
-    message='请从 MixRelay 状态菜单停止所有音频，关闭 MixRelay 编辑器和 MixRelay Driver，然后重试。 默认保留图和设置。录音和导出的项目会保留，付费许可证登录信息会清除。'
+    message='请从 MixRelay 状态菜单停止所有音频，关闭 MixRelay 编辑器和 MixRelay，然后重试。 默认保留图和设置。录音和导出的项目会保留，付费许可证登录信息会清除。'
     delete_label='删除保存的图和设置'
     remove_label='卸载'
     cancel_label='取消'
@@ -49,7 +49,7 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
     ;;
   zh_Hant*|zh-Hant*|zh_TW*|zh-TW*|zh_HK*|zh-HK*|zh_MO*|zh-MO*)
     title='解除安裝 MixRelay'
-    message='請從 MixRelay 狀態選單停止所有音訊，關閉 MixRelay 編輯器與 MixRelay Driver，然後重試。 預設保留圖與設定。錄音與匯出的專案會保留，付費授權登入資訊會清除。'
+    message='請從 MixRelay 狀態選單停止所有音訊，關閉 MixRelay 編輯器與 MixRelay，然後重試。 預設保留圖與設定。錄音與匯出的專案會保留，付費授權登入資訊會清除。'
     delete_label='刪除儲存的圖與設定'
     remove_label='解除安裝'
     cancel_label='取消'
@@ -63,7 +63,7 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
     ;;
   zh*)
     title='卸载 MixRelay'
-    message='请从 MixRelay 状态菜单停止所有音频，关闭 MixRelay 编辑器和 MixRelay Driver，然后重试。 默认保留图和设置。录音和导出的项目会保留，付费许可证登录信息会清除。'
+    message='请从 MixRelay 状态菜单停止所有音频，关闭 MixRelay 编辑器和 MixRelay，然后重试。 默认保留图和设置。录音和导出的项目会保留，付费许可证登录信息会清除。'
     delete_label='删除保存的图和设置'
     remove_label='卸载'
     cancel_label='取消'
@@ -77,7 +77,7 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
     ;;
   fr*)
     title='Désinstaller MixRelay'
-    message='Arrêtez tout l’audio depuis le menu d’état de MixRelay, fermez l’éditeur MixRelay et MixRelay Driver, puis réessayez. Les graphes et paramètres sont conservés par défaut. Les enregistrements et projets exportés sont conservés. Les informations de connexion de la licence payante seront effacées.'
+    message='Arrêtez tout l’audio depuis le menu d’état de MixRelay, fermez l’éditeur MixRelay et MixRelay, puis réessayez. Les graphes et paramètres sont conservés par défaut. Les enregistrements et projets exportés sont conservés. Les informations de connexion de la licence payante seront effacées.'
     delete_label='Supprimer les graphes et paramètres enregistrés'
     remove_label='Désinstaller'
     cancel_label='Annuler'
@@ -91,7 +91,7 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
     ;;
   de*)
     title='MixRelay deinstallieren'
-    message='Stoppen Sie alle Audiovorgänge im MixRelay-Statusmenü, schließen Sie den MixRelay-Editor und MixRelay Driver und versuchen Sie es erneut. Graphen und Einstellungen bleiben standardmäßig erhalten. Aufnahmen und exportierte Projekte bleiben erhalten. Die Anmeldedaten der kostenpflichtigen Lizenz werden gelöscht.'
+    message='Stoppen Sie alle Audiovorgänge im MixRelay-Statusmenü, schließen Sie den MixRelay-Editor und MixRelay und versuchen Sie es erneut. Graphen und Einstellungen bleiben standardmäßig erhalten. Aufnahmen und exportierte Projekte bleiben erhalten. Die Anmeldedaten der kostenpflichtigen Lizenz werden gelöscht.'
     delete_label='Gespeicherte Graphen und Einstellungen löschen'
     remove_label='Deinstallieren'
     cancel_label='Abbrechen'
@@ -105,7 +105,7 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
     ;;
   es*)
     title='Desinstalar MixRelay'
-    message='Detenga todo el audio desde el menú de estado de MixRelay, cierre el editor de MixRelay y MixRelay Driver y vuelva a intentarlo. Los grafos y la configuración se conservan de forma predeterminada. Se conservan las grabaciones y los proyectos exportados. Se borrarán los datos de inicio de sesión de la licencia de pago.'
+    message='Detenga todo el audio desde el menú de estado de MixRelay, cierre el editor de MixRelay y MixRelay y vuelva a intentarlo. Los grafos y la configuración se conservan de forma predeterminada. Se conservan las grabaciones y los proyectos exportados. Se borrarán los datos de inicio de sesión de la licencia de pago.'
     delete_label='Eliminar los grafos y la configuración guardados'
     remove_label='Desinstalar'
     cancel_label='Cancelar'
@@ -119,7 +119,7 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
     ;;
   pt*)
     title='Desinstalar MixRelay'
-    message='Pare todo o áudio pelo menu de estado do MixRelay, feche o editor do MixRelay e o MixRelay Driver e tente novamente. Os grafos e as definições são mantidos por predefinição. As gravações e os projetos exportados são mantidos. Os dados de início de sessão da licença paga serão apagados.'
+    message='Pare todo o áudio pelo menu de estado do MixRelay, feche o editor do MixRelay e o MixRelay e tente novamente. Os grafos e as definições são mantidos por predefinição. As gravações e os projetos exportados são mantidos. Os dados de início de sessão da licença paga serão apagados.'
     delete_label='Eliminar grafos e definições guardados'
     remove_label='Desinstalar'
     cancel_label='Cancelar'
@@ -133,7 +133,7 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
     ;;
   it*)
     title='Disinstallare MixRelay'
-    message='Interrompi tutto l’audio dal menu di stato di MixRelay, chiudi l’editor MixRelay e MixRelay Driver e riprova. Grafi e impostazioni vengono conservati per impostazione predefinita. Registrazioni e progetti esportati vengono conservati. I dati di accesso della licenza a pagamento verranno cancellati.'
+    message='Interrompi tutto l’audio dal menu di stato di MixRelay, chiudi l’editor MixRelay e MixRelay e riprova. Grafi e impostazioni vengono conservati per impostazione predefinita. Registrazioni e progetti esportati vengono conservati. I dati di accesso della licenza a pagamento verranno cancellati.'
     delete_label='Eliminare grafi e impostazioni salvati'
     remove_label='Disinstallare'
     cancel_label='Annulla'
@@ -147,7 +147,7 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
     ;;
   ru*)
     title='Удалить MixRelay'
-    message='Остановите всё аудио через меню состояния MixRelay, закройте редактор MixRelay и MixRelay Driver, затем повторите попытку. По умолчанию графы и настройки сохраняются. Записи и экспортированные проекты сохраняются. Данные входа для платной лицензии будут удалены.'
+    message='Остановите всё аудио через меню состояния MixRelay, закройте редактор MixRelay и MixRelay, затем повторите попытку. По умолчанию графы и настройки сохраняются. Записи и экспортированные проекты сохраняются. Данные входа для платной лицензии будут удалены.'
     delete_label='Удалить сохранённые графы и настройки'
     remove_label='Удалить'
     cancel_label='Отмена'
@@ -161,7 +161,7 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
     ;;
   *)
     title='Uninstall MixRelay'
-    message='Stop all audio from the MixRelay status menu, close the MixRelay editor and MixRelay Driver, then retry. Graphs and settings are preserved by default. Recordings and exported projects are preserved. Paid-license sign-in will be cleared.'
+    message='Stop all audio from the MixRelay status menu, close the MixRelay editor and MixRelay, then retry. Graphs and settings are preserved by default. Recordings and exported projects are preserved. Paid-license sign-in will be cleared.'
     delete_label='Delete saved graphs and settings'
     remove_label='Uninstall'
     cancel_label='Cancel'
