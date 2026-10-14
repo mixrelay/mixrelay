@@ -274,6 +274,9 @@ impl Renderer<'_> {
             let Ok(Some(report)) = self.processor.process_external_cycle(cycle, &mut io) else {
                 return false;
             };
+            if let Some((plan, _)) = &self.native_clock {
+                plan.record_latency(self.processor, report, timing.copied(), cycle.clock.epoch);
+            }
             self.status.record_process(report);
             io.offset += count as usize;
         }
@@ -671,6 +674,7 @@ mod tests {
         let input_list = stereo_list(&mut input);
         let mut output_list = stereo_list(&mut output);
         let native = |sample_time: f64| mixrelay_macos_transport::device_io::IoTiming {
+            now: mixrelay_macos_transport::device_io::IoTimestamp::default(),
             input: mixrelay_macos_transport::device_io::IoTimestamp {
                 sample_time,
                 host_time: 0,

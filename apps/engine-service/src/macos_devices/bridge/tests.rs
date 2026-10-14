@@ -245,3 +245,99 @@ fn capture_clock_feedback_bounds_backlog_across_batched_graph_consumption() {
         "clock drift must not drop PCM or accumulate until a reset: {outcomes:?}"
     );
 }
+
+#[test]
+fn private_residence_advances_on_native_time_without_graph_producer_progress() {
+    let (_device, context) =
+        crate::macos_devices::tests::synthetic_device(1, 48_000, 48_000, false);
+    context.clock_aligned.store(true, Ordering::Release);
+    let mut bridge = DeviceBridge::new(&context, 48_000).unwrap();
+    bridge.bridge.push_interleaved(&[0.25; 128]).unwrap();
+    let before = bridge.bridge.pull_interleaved(&mut [0.0; 64]).unwrap();
+    let mut pcm = [0.0_f32; 480];
+    let mut native = InputBuffer {
+        count: 1,
+        buffers: [AudioBuffer {
+            channels: 1,
+            byte_size: 480 * 4,
+            data: pcm.as_mut_ptr(),
+        }],
+    };
+    // 480 native frames = 10 ms, while the graph producer remains idle.
+    native_callback(&context, &mut native);
+    assert_eq!(
+        unsafe { mr_device_io_graph_frames(context.native.pointer.as_ptr()) },
+        0
+    );
+    bridge.observe(&context, true).unwrap();
+    let waited = bridge.bridge.pull_interleaved(&mut [0.0; 64]).unwrap();
+    let delay_ns = waited
+        .output_residence
+        .unwrap()
+        .mean_since(before.output_residence.unwrap())
+        .unwrap()
+        * 0.5e9
+        / 48_000.0;
+    assert!((delay_ns - 10_000_000.0).abs() < 0.001);
+}
+
+#[test]
+fn graph_domain_src_residence_uses_native_scalar_in_both_directions() {
+    use mixrelay_audio_io::residence::ResidenceSnapshot;
+    for input in [true, false] {
+        let (_device, context) =
+            crate::macos_devices::tests::synthetic_device(1, 48_000, 48_000, input);
+        context.clock_aligned.store(true, Ordering::Release);
+        let mut bridge = DeviceBridge::new(&context, 48_000).unwrap();
+        let mut before = bridge.bridge.pull_interleaved(&mut [0.0; 64]).unwrap();
+        bridge.bridge.push_interleaved(&[0.25; 128]).unwrap();
+        if input {
+            // Capture: retain converted graph-domain output across callbacks.
+            before = bridge.bridge.pull_interleaved(&mut [0.0; 64]).unwrap();
+        }
+        let mut pcm = [0.0; 480];
+        let mut native = InputBuffer {
+            count: 1,
+            buffers: [AudioBuffer {
+                channels: 1,
+                byte_size: 480 * 4,
+                data: pcm.as_mut_ptr(),
+            }],
+        };
+        native_callback(&context, &mut native);
+        bridge.observe(&context, true).unwrap();
+        let waited = bridge.bridge.pull_interleaved(&mut [0.0; 64]).unwrap();
+        let mut old = crate::macos_devices::latency::tests::observation(false);
+        old.native_rate = 48_000;
+        let mut next = old;
+        let zero = ResidenceSnapshot {
+            sum: 0,
+            weight: 1,
+            invalid: 0,
+        };
+        next.native.acquisition = zero;
+        next.native.presentation = zero;
+        next.native.native_queue = zero;
+        next.native.graph_queue = zero;
+        next.src_input = zero;
+        next.src_output = zero;
+        next.native.input_scalar = ResidenceSnapshot {
+            sum: 1_001_000_000,
+            ..zero
+        };
+        next.native.output_scalar = next.native.input_scalar;
+        if input {
+            old.src_output = before.output_residence.unwrap();
+            next.src_output = waited.output_residence.unwrap();
+        } else {
+            // Render: retain graph-domain input until the native callback.
+            old.src_input = before.input_residence.unwrap();
+            next.src_input = waited.input_residence.unwrap();
+        }
+        let delay = next.delay_ns(old, input, 1.0).unwrap();
+        assert!(
+            (delay - 10_010_000.0).abs() < 0.001,
+            "input={input}: {delay}"
+        );
+    }
+}

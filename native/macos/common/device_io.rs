@@ -25,7 +25,9 @@ mod callback;
 mod control;
 mod diagnostics;
 mod ffi;
+mod latency;
 mod lifecycle;
+pub use latency::{LatencySnapshot, latency_snapshot, record_direct_latency};
 mod listeners;
 mod native;
 mod queues;
@@ -103,6 +105,7 @@ pub struct IoTimestamp {
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct IoTiming {
+    pub now: IoTimestamp,
     pub input: IoTimestamp,
     pub output: IoTimestamp,
 }
@@ -175,6 +178,7 @@ pub struct DeviceIo {
     clock: CallbackClock,
     clock_evidence: diagnostics::ClockEvidence,
     progress: Progress,
+    measurements: latency::Measurements,
 }
 
 impl DeviceIo {
@@ -228,6 +232,7 @@ impl DeviceIo {
             clock: CallbackClock::default(),
             clock_evidence: diagnostics::ClockEvidence::default(),
             progress: Progress::default(),
+            measurements: latency::Measurements::default(),
         })
     }
 

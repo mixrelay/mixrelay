@@ -33,6 +33,7 @@ pub(super) struct DeviceBridge {
     native_queue_target: QueueTargetPolicy,
     pub(super) epoch: u64,
     feedback_frames: u64,
+    residence_frames: u64,
     pub(super) streaming: bool,
     pub(super) transport_overflows: u64,
     pub(super) clock_discontinuities: u64,
@@ -127,16 +128,23 @@ impl DeviceBridge {
             native_queue_target,
             epoch,
             feedback_frames: 0,
+            residence_frames: 0,
             streaming: false,
             transport_overflows: 0,
             clock_discontinuities: 0,
         })
     }
     pub(super) fn activate(&mut self, context: &WorkerContext) {
+        context
+            .native
+            .latency
+            .faults
+            .fetch_add(1, Ordering::Release);
         context.bridge_ready.store(false, Ordering::Release);
         let pointer = context.native.pointer.as_ptr();
         // SAFETY: Native is retained and these progress/queue snapshots are atomic.
         let native_frames = unsafe { mr_device_io_native_frames(pointer) };
+        self.residence_frames = native_frames;
         // SAFETY: the PCM owner exclusively accesses its queue consumer; all counter reads are atomic
         // and the retained native resource outlives this activation.
         unsafe {
@@ -169,6 +177,17 @@ impl DeviceBridge {
             }
         };
         let elapsed = frames.wrapping_sub(self.feedback_frames);
+        // Residence advances with the actual native callback clock, even when
+        // the graph producer has not supplied any new PCM in this invocation.
+        // Areas use nominal callback time in both converter domains; the
+        // reporter applies the direction's measured scalar to both residences.
+        let native_frames = unsafe { mr_device_io_native_frames(pointer) };
+        let native_elapsed = native_frames.wrapping_sub(self.residence_frames);
+        self.residence_frames = native_frames;
+        self.bridge
+            .advance_residence(std::time::Duration::from_nanos(
+                native_elapsed.saturating_mul(1_000_000_000) / u64::from(self.native_rate),
+            ));
         self.feedback_frames = frames;
         if elapsed == 0 {
             return Ok(());
@@ -273,6 +292,24 @@ impl DeviceBridge {
             let report = self.bridge.pull_interleaved(
                 &mut self.destination[..(target - queued).min(PUMP_FRAMES) * context.channels],
             )?;
+            if let Some(value) = report.input_residence {
+                context.native.latency.src_input.publish(value);
+            }
+            if let Some(value) = report.output_residence {
+                context.native.latency.src_output.publish(value);
+            }
+            context
+                .native
+                .latency
+                .src_delay
+                .store(report.algorithmic_delay_frames as u64, Ordering::Release);
+            if report.state == TransferState::Priming {
+                context
+                    .native
+                    .latency
+                    .faults
+                    .fetch_add(1, Ordering::Release);
+            }
             self.streaming = report.state != TransferState::Priming;
             if report.transferred_frames == 0 {
                 break;

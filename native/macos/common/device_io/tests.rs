@@ -55,6 +55,35 @@ fn owner(input: bool, channels: u32) -> DeviceIo {
 }
 
 #[test]
+fn latency_fifo_taps_follow_actual_consumers_and_partial_reads() {
+    let io = owner(true, 1);
+    let mut pcm = [0.25; 64];
+    let mut list = buffers(&mut pcm, 1, 64, false);
+    let mut read = [0.0; 64];
+    // Establish freshness before writing graph PCM.
+    unsafe { queues::graph_read(&io, read.as_mut_ptr(), 1, 7) };
+    let before = unsafe { latency_snapshot(&raw const io, false) }.unwrap();
+    let allocations = allocation_counter::measure(|| {
+        process(&io, &mut list);
+        unsafe {
+            assert_eq!(queues::bridge_read(&io, read.as_mut_ptr(), 32), 32);
+            assert_eq!(queues::bridge_write(&io, pcm.as_ptr(), 64), 64);
+            assert_eq!(queues::graph_read(&io, read.as_mut_ptr(), 32, 7).frames, 32);
+            assert_eq!(queues::graph_read(&io, read.as_mut_ptr(), 64, 7).frames, 0);
+            assert_eq!(queues::graph_read(&io, read.as_mut_ptr(), 32, 7).frames, 32);
+        }
+    });
+    assert_eq!(allocations.count_total, 0);
+    let after = unsafe { latency_snapshot(&raw const io, false) }.unwrap();
+    assert_eq!(
+        after.native_queue.mean_since(before.native_queue),
+        Some(96.0)
+    );
+    assert_eq!(after.graph_queue.mean_since(before.graph_queue), Some(64.0));
+    assert_eq!(after.faults, before.faults + 1);
+}
+
+#[test]
 fn starvation_snapshot_distinguishes_the_graph_consumer_from_native_input_polling() {
     let io = owner(true, 1);
     let pointer = ptr::from_ref(&io).cast_mut();
@@ -927,6 +956,16 @@ fn device_credit_reaches_the_registered_signal() {
     assert!(SIGNALS.load(std::sync::atomic::Ordering::Relaxed) > before);
 }
 
+fn native_time(sample: f64, host: u64, rate_scalar: f64) -> callback::Timestamp {
+    callback::Timestamp {
+        sample,
+        host,
+        rate_scalar,
+        flags: 7,
+        ..Default::default()
+    }
+}
+
 #[test]
 fn native_timing_reaches_render_hook_without_heap_operations() {
     unsafe extern "C" fn timing_hook(
@@ -942,20 +981,14 @@ fn native_timing_reaches_render_hook_without_heap_operations() {
     }
     let io = owner(false, 2);
     let observed = Cell::new(IoTiming::default());
-    let input = callback::Timestamp {
-        sample: 123.0,
-        host: 456,
-        rate_scalar: 0.999,
-        flags: 7,
+    let input = native_time(123.0, 456, 0.999);
+    let output = native_time(789.0, 999, 1.001);
+    let now = callback::Timestamp {
+        host: 600,
+        flags: 2,
         ..Default::default()
     };
-    let output = callback::Timestamp {
-        sample: 789.0,
-        host: 999,
-        rate_scalar: 1.001,
-        flags: 7,
-        ..Default::default()
-    };
+    let before = unsafe { latency_snapshot(&raw const io, false) }.unwrap();
     let mut pcm = [0.0; 128];
     let mut list = buffers(&mut pcm, 2, 64, false);
     // SAFETY: disconnected exclusive fixture, complete PCM and native timestamps.
@@ -969,7 +1002,7 @@ fn native_timing_reaches_render_hook_without_heap_operations() {
     let allocated = allocation_counter::measure(|| unsafe {
         mr_device_io_process(
             0,
-            ptr::null(),
+            (&raw const now).cast(),
             ptr::null(),
             (&raw const input).cast(),
             (&raw mut list).cast(),
@@ -981,6 +1014,11 @@ fn native_timing_reaches_render_hook_without_heap_operations() {
     assert_eq!(
         observed.get(),
         IoTiming {
+            now: IoTimestamp {
+                host_time: 600,
+                flags: 2,
+                ..IoTimestamp::default()
+            },
             input: IoTimestamp {
                 sample_time: 123.0,
                 host_time: 456,
@@ -994,6 +1032,15 @@ fn native_timing_reaches_render_hook_without_heap_operations() {
                 flags: 7
             }
         }
+    );
+    let after = unsafe { latency_snapshot(&raw const io, false) }.unwrap();
+    assert_eq!(
+        after.acquisition.mean_since(before.acquisition),
+        Some(144.0)
+    );
+    assert_eq!(
+        after.presentation.mean_since(before.presentation),
+        Some(399.0)
     );
     process(&io, &mut list);
     assert_eq!(observed.get(), IoTiming::default());

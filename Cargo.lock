@@ -2992,6 +2992,7 @@ dependencies = [
  "block2",
  "cc",
  "loom",
+ "mixrelay-audio-io",
  "mixrelay-pcm-ring",
  "mixrelay-test-support",
 ]

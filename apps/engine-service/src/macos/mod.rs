@@ -3,6 +3,8 @@ mod endpoint_backend;
 mod format;
 mod maintenance;
 mod runtime_latency;
+#[cfg(test)]
+pub(crate) use runtime_latency::tests::feedback_processor as test_feedback_processor;
 mod shutdown;
 mod worker_runtime;
 use super::macos_pacing::{ApplicationClockSnapshot, ApplicationPacer, HardwarePacer, Pace};
@@ -219,6 +221,7 @@ async fn run_owned(
         maintenance::start_reclaimer(Arc::downgrade(&exchange), Arc::downgrade(&devices))?;
     let runtime_latency = runtime_latency::Reporter::start(
         Arc::clone(&exchange),
+        Arc::clone(&devices),
         mixrelay_control_server::ControlBackend::incarnation(controller.as_ref()),
     )?;
     let worker_status = runtime_status.clone();
@@ -495,6 +498,9 @@ fn process_worker_block(
             discontinuity: discontinuity || timeline.discontinuity_pending,
         },
     )?;
+    block
+        .devices
+        .record_latency_cycle(block.processor, report, timeline.epoch);
     timeline.discontinuity_pending = report.is_none();
     if let Some(report) = report {
         block.status.record_process(report);

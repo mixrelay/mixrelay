@@ -14,6 +14,7 @@ mod ffi;
 mod format;
 mod group_plan;
 mod handoff;
+pub(super) mod latency;
 mod native;
 mod recovery;
 mod retirement;

@@ -200,6 +200,15 @@ pub(in crate::macos_devices) unsafe extern "C" fn dispatch(context: *mut c_void)
                 slot.fault.store(code, Ordering::Release);
             }
         }
+        // This field access stays inside the exclusive rendering borrow.
+        if !admitted {
+            state
+                .context
+                .native
+                .latency
+                .faults
+                .fetch_add(1, Ordering::Release);
+        }
         // SAFETY: atomic geometry observation of the retained native owner.
         let quantum =
             unsafe { ffi::mr_device_io_quantum(state.context.native.pointer.as_ptr(), false) };

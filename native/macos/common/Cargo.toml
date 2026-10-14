@@ -17,6 +17,7 @@ workspace = true
 test-observation = []
 
 [dependencies]
+mixrelay-audio-io = { path = "../../../crates/audio-io" }
 # Shared native PCM ownership; the device adapter does not reimplement its queue.
 mixrelay-pcm-ring = { path = "../../pcm-ring" }
 # CoreAudio owns copied listener blocks; shared atomic captures survive late delivery safely.

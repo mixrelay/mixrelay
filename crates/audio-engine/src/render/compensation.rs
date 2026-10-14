@@ -1,12 +1,31 @@
 //! Prepared route history follows cached worker latency, never native plug-in queries.
 
-use std::{fmt, sync::Arc};
+use std::{
+    fmt,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use mixrelay_audio_graph::{ExecutionPlan, NodeConfig};
 
 use super::{HostedAudioProcessor, Kernel, NodeStep, RenderPlan, route_delay::RouteDelayLine};
 use crate::latency_plan::{LatencyNode, LatencyPlanError, LatencyRoute, plan_arrivals};
 use crate::runtime_control::ControlValue;
+
+/// Attempts at a consistent read before a window is reported as disturbed.
+const ACKNOWLEDGEMENT_READS: usize = 8;
+
+/// Why measured arrivals are unavailable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArrivalError {
+    /// The request does not match the prepared plan.
+    Invalid(String),
+    /// Every read overlapped the audio thread acknowledging installed delays; the window
+    /// is disturbed, not unknown, so a previously stable value remains valid.
+    Contended,
+}
 
 const MAX_HISTORY_BYTES: usize = 16 * 1024 * 1024;
 
@@ -36,20 +55,26 @@ pub enum CompensationState {
 /// Immutable route geometry and retained cached readers, prepared off the audio thread.
 pub(super) struct CompensationTopology {
     nodes: Vec<LatencyNode>,
+    content_nodes: Vec<LatencyNode>,
     ids: Vec<mixrelay_audio_graph::NodeId>,
     routes: Vec<LatencyRoute>,
     channels: Vec<usize>,
     readers: Vec<(usize, Arc<dyn HostedLatencySource>)>,
+    applied: Vec<AtomicU64>,
+    applied_sequence: AtomicU64,
 }
 
 impl fmt::Debug for CompensationTopology {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CompensationTopology")
             .field("nodes", &self.nodes.len())
+            .field("content_nodes", &self.content_nodes)
             .field("ids", &self.ids)
             .field("routes", &self.routes.len())
             .field("channels", &self.channels)
             .field("readers", &self.readers.len())
+            .field("applied", &self.applied)
+            .field("applied_sequence", &self.applied_sequence)
             .finish()
     }
 }
@@ -67,7 +92,7 @@ impl CompensationTopology {
             .enumerate()
             .map(|(i, node)| (node.id(), i))
             .collect();
-        let nodes = execution
+        let nodes: Vec<_> = execution
             .nodes()
             .iter()
             .map(|node| match node.config() {
@@ -88,6 +113,7 @@ impl CompensationTopology {
                 | NodeConfig::Gain(_) => LatencyNode::Processing(Some(0)),
             })
             .collect();
+        let content_nodes = content_nodes(execution, &nodes);
         let routes = execution
             .edges()
             .iter()
@@ -107,7 +133,7 @@ impl CompensationTopology {
                     .map_or(0, |port| usize::from(port.channels()))
             })
             .collect();
-        let readers = steps
+        let readers: Vec<_> = steps
             .iter()
             .enumerate()
             .flat_map(|(index, step)| {
@@ -128,8 +154,11 @@ impl CompensationTopology {
                 .map(|node| node.id().clone())
                 .collect(),
             nodes,
+            content_nodes,
             routes,
             channels,
+            applied: readers.iter().map(|_| AtomicU64::new(u64::MAX)).collect(),
+            applied_sequence: AtomicU64::new(0),
             readers,
         }
     }
@@ -191,6 +220,154 @@ impl CompensationTopology {
             .collect())
     }
 
+    pub(super) fn destination_source_indexes(&self, plan: &RenderPlan) -> Vec<Vec<usize>> {
+        let contributors =
+            crate::measured_arrivals::contributors(&self.content_nodes, &self.routes);
+        plan.sink_bindings()
+            .iter()
+            .map(|sink| {
+                self.ids
+                    .iter()
+                    .position(|id| id == sink.node_id())
+                    .map_or_else(Vec::new, |index| {
+                        contributors[index]
+                            .iter()
+                            .filter_map(|source| {
+                                plan.source_bindings()
+                                    .iter()
+                                    .position(|binding| binding.node_id() == &self.ids[*source])
+                            })
+                            .collect()
+                    })
+            })
+            .collect()
+    }
+
+    // Prepare destination path membership off the audio thread. Source nodes are
+    // causal boundaries: never follow a loopback's incoming route upstream.
+    pub(super) fn binding_routes(&self, id: &mixrelay_audio_graph::NodeId) -> Vec<usize> {
+        let mut visited = vec![false; self.nodes.len()];
+        if let Some(index) = self.ids.iter().position(|value| value == id) {
+            visited[index] = true;
+        }
+        let mut selected = vec![false; self.routes.len()];
+        for _ in 0..self.nodes.len() {
+            for (index, route) in self.routes.iter().enumerate() {
+                let (from, to) = (route.destination, route.source);
+                if visited[from] {
+                    selected[index] = true;
+                    if matches!(self.content_nodes[to], LatencyNode::Processing(_)) {
+                        visited[to] = true;
+                    }
+                }
+            }
+        }
+        selected
+            .iter()
+            .enumerate()
+            .filter_map(|(index, selected)| selected.then_some(index))
+            .collect()
+    }
+
+    /// Nanosecond roots retain fractional graph frames and never invent new histories.
+    /// The audio thread acknowledges installed delays every cycle; a read that keeps
+    /// overlapping it reports [`ArrivalError::Contended`] rather than unknown arrivals.
+    pub(super) fn measured_destination_arrivals(
+        &self,
+        plan: &RenderPlan,
+        observed: &[Option<f64>],
+        threshold_ns: f64,
+    ) -> Result<Vec<Option<f64>>, ArrivalError> {
+        let sources = plan.source_bindings();
+        let rate = plan.format().sample_rate;
+        if sources.len() != observed.len() || rate == 0 {
+            return Err(ArrivalError::Invalid(
+                "invalid measured source arrivals".into(),
+            ));
+        }
+        for _ in 0..ACKNOWLEDGEMENT_READS {
+            if let Some(arrivals) = self.read_arrivals(plan, observed, (rate, threshold_ns))? {
+                return Ok(arrivals);
+            }
+            std::hint::spin_loop();
+        }
+        Err(ArrivalError::Contended)
+    }
+
+    /// Holds the acknowledgement open (odd sequence) as the audio thread does mid-write.
+    #[cfg(test)]
+    pub(super) fn acknowledging(&self, active: bool) {
+        if active == (self.applied_sequence.load(Ordering::SeqCst) & 1 == 0) {
+            self.applied_sequence.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    /// One consistent read, or `None` when it overlapped an acknowledgement.
+    fn read_arrivals(
+        &self,
+        plan: &RenderPlan,
+        observed: &[Option<f64>],
+        (rate, threshold_ns): (u32, f64),
+    ) -> Result<Option<Vec<Option<f64>>>, ArrivalError> {
+        let sources = plan.source_bindings();
+        let sinks = plan.sink_bindings();
+        let observations = self.observations();
+        let sequence = self.applied_sequence.load(Ordering::SeqCst);
+        let acknowledged = self
+            .applied
+            .iter()
+            .zip(&observations)
+            .all(|(applied, value)| {
+                applied.load(Ordering::SeqCst) == value.map_or(1_u64 << 32, u64::from)
+            });
+        if sequence & 1 != 0 || self.applied_sequence.load(Ordering::SeqCst) != sequence {
+            return Ok(None);
+        }
+        // A consistent read whose histories are not installed yet is genuinely unknown.
+        if !acknowledged {
+            return Ok(Some(vec![None; sinks.len()]));
+        }
+        let (delays, state) = self.delays(&observations).map_err(ArrivalError::Invalid)?;
+        if state == CompensationState::CapacityExceeded {
+            return Ok(Some(vec![None; sinks.len()]));
+        }
+        let mut nodes = self.content_nodes.clone();
+        for ((index, _), frames) in self.readers.iter().zip(observations.iter().copied()) {
+            nodes[*index] = LatencyNode::Processing(frames);
+        }
+        let roots = self
+            .ids
+            .iter()
+            .map(|id| {
+                sources
+                    .iter()
+                    .position(|binding| binding.node_id() == id)
+                    .and_then(|index| observed[index])
+            })
+            .collect::<Vec<_>>();
+        let arrivals = crate::measured_arrivals::arrivals(
+            &nodes,
+            &self.routes,
+            &delays,
+            &roots,
+            (rate, threshold_ns),
+        );
+        if !self.matches(&observations) {
+            return Ok(None);
+        }
+        Ok(Some(
+            sinks
+                .iter()
+                .map(|sink| {
+                    self.ids
+                        .iter()
+                        .position(|id| id == sink.node_id())
+                        .and_then(|index| arrivals[index])
+                })
+                .collect(),
+        ))
+    }
+
     fn delays(&self, observed: &[Option<u32>]) -> Result<(Vec<u32>, CompensationState), String> {
         if observed.len() != self.readers.len() {
             return Err("latency observation does not match its prepared owners".into());
@@ -224,6 +401,23 @@ impl CompensationTopology {
     }
 }
 
+fn content_nodes(execution: &ExecutionPlan, nodes: &[LatencyNode]) -> Vec<LatencyNode> {
+    // Snapshot reads precede publishes into a prepared-quantum ring. Follow
+    // their real feeding routes for content evidence without changing the
+    // nominal compensation topology (which cuts causal feedback at buses).
+    execution
+        .nodes()
+        .iter()
+        .zip(nodes)
+        .map(|(node, latency)| match node.config() {
+            NodeConfig::DeviceBus { .. } => {
+                LatencyNode::Processing(Some(execution.format().block_frames))
+            }
+            _ => *latency,
+        })
+        .collect()
+}
+
 /// Mutable history belongs exclusively to the audio owner after block-boundary publication.
 pub(crate) struct DelayBank {
     pub(crate) plan: Arc<RenderPlan>,
@@ -233,6 +427,8 @@ pub(crate) struct DelayBank {
     control_gates: Vec<[bool; 2]>,
     state: CompensationState,
     valid: bool,
+    content_valid: bool,
+    content_routes: Vec<bool>,
 }
 
 impl DelayBank {
@@ -264,6 +460,8 @@ impl DelayBank {
                 state
             },
             valid: true,
+            content_valid: false,
+            content_routes: vec![false; delays.len()],
         })
     }
 
@@ -274,6 +472,31 @@ impl DelayBank {
         } else {
             CompensationState::Pending
         }
+    }
+
+    pub(crate) fn acknowledge_content_latency(&self) -> bool {
+        let topology = &self.plan.compensation;
+        topology.applied_sequence.fetch_add(1, Ordering::SeqCst);
+        for (applied, value) in topology.applied.iter().zip(&self.observed) {
+            applied.store(value.map_or(1_u64 << 32, u64::from), Ordering::SeqCst);
+        }
+        topology.applied_sequence.fetch_add(1, Ordering::SeqCst);
+        self.valid
+            && self.content_valid
+            && matches!(
+                self.state,
+                CompensationState::Current | CompensationState::Unknown
+            )
+            && self.histories.iter().flatten().all(RouteDelayLine::primed)
+    }
+
+    pub(super) fn content_ready_for_routes(&self, routes: &[usize]) -> bool {
+        self.valid
+            && matches!(
+                self.state,
+                CompensationState::Current | CompensationState::Unknown
+            )
+            && routes.iter().all(|&index| self.content_routes[index])
     }
 
     /// Equal derived observations on the same immutable topology need no history replacement.
@@ -288,10 +511,16 @@ impl DelayBank {
             self.reset();
         }
         self.valid = valid;
+        self.content_valid = valid;
+        for (ready, history) in self.content_routes.iter_mut().zip(&self.histories) {
+            *ready = valid && history.as_ref().is_none_or(RouteDelayLine::primed);
+        }
     }
 
     /// Invalidates every ring cursor without touching its backing PCM allocation.
     pub(crate) fn reset(&mut self) {
+        self.content_valid = false;
+        self.content_routes.fill(false);
         for history in self.histories.iter_mut().flatten() {
             history.reset();
         }
@@ -300,6 +529,7 @@ impl DelayBank {
     /// Invalidates only route indices prepared from this bank's immutable topology.
     pub(super) fn reset_routes(&mut self, routes: &[usize]) {
         for &index in routes {
+            self.content_routes[index] = false;
             if let Some(history) = &mut self.histories[index] {
                 history.reset();
             }
@@ -338,6 +568,8 @@ impl DelayBank {
             return None;
         }
         let history = self.histories.get_mut(index)?.as_mut()?;
+        self.content_routes[index] &= history.primed();
+        self.content_valid &= history.primed();
         let output = self.scratch.get_mut(..source.len())?;
         history.advance(source, output, frames).then_some(output)
     }

@@ -19,17 +19,35 @@ only when the effective integer changes. Stale leases/revisions are ignored;
 engine lease loss, disconnect and rate/configuration changes clear the value.
 The optional v1 inventory field is compatible with older service/HAL peers.
 
-The current engine sends unknown (`None`), so recording applications still see
-zero: per-content timing has not yet been carried through all PCM queues/SRC and
-HAL destination scheduling. Native timestamps, planned arrival arithmetic and
-hysteresis are implemented and tested; real measured end-to-end reporting is
-unfinished. See [content-latency design](../../../docs/design/audio-content-latency.md)
-for the contract, remaining integration and exact installed verification steps.
+The Stage 2 engine reports measured window-mean latency for validated device
+routes, including HAL loopback sources. Consumer-side native, graph and SRC FIFO
+residence, native acquisition/presentation, converter algorithmic delay and
+acknowledged processing/compensation are included. Same-callback direct routes
+have no FIFO/SRC terms. Application acquisition, invalid timestamps and unaligned
+contributors remain unknown (HAL zero). Restart/priming/underrun windows retain
+the previous stable value, with resets on graph/rate/clock/lease changes. See
+[content-latency design](../../../docs/design/audio-content-latency.md) for the
+model, remaining limits and installed verification.
 
-`pnpm probe:macos-roundtrip --latency DEVICE_UID` is a read-only mode printing
-input/output device latency, stream latency and safety offset in device-rate
-frames. It creates no IOProc, changes no settings and needs no recording permission.
-Compare it with the existing measured round-trip mode after measurement integration.
+After signed installation, obtain canonical A and D UIDs with
+`pnpm probe:macos-roundtrip --list`. Start a transparent A-to-D engine route with
+the engine as D's only rendering client, then compare these separate probes:
+
+- `pnpm probe:macos-roundtrip --latency D_UID` reads both device scopes, stream
+  latency and safety offsets in D-rate frames. It creates no IOProc and does not
+  disturb the engine-only gate. D input should become known after a stable window;
+  the other latency/safety properties remain zero.
+- `pnpm probe:macos-roundtrip --json --seconds 10 A_UID D_UID` plays A and records
+  D to measure host-time impulse delay. Convert that measured delay to D-rate
+  frames and compare with the read-only property, allowing
+  `max(32 frames, 1 ms)` hysteresis and measurement variation. Repeat dry and with
+  a plug-in that reports intrinsic latency. Ensure this recording IOProc does not
+  write D; an ordinary rendering client on D correctly gates its property to zero.
+
+Repeat with an additional playback client on D, graph/rate changes, transport
+loss and engine exit. Check gate clearing and stale-value resets. These commands
+are installed qualification steps; sandbox unit tests do not establish installed
+agreement.
 
 ## Build and verification
 

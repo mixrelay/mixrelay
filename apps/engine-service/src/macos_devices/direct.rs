@@ -171,8 +171,9 @@ struct BindingSelection {
 }
 
 pub(crate) struct DirectPlan {
-    master: Arc<Device>,
-    owners: Vec<Arc<Device>>,
+    pub(super) master: Arc<Device>,
+    pub(super) owners: Vec<Arc<Device>>,
+    pub(super) latency_bindings: Vec<(String, Arc<Device>)>,
     pub(crate) bindings: Vec<Binding>,
     pub(crate) bridged: DeviceSet,
     pub(crate) clock_id: u32,
@@ -205,6 +206,7 @@ impl DirectPlan {
             return None;
         }
         let mut bindings = Vec::new();
+        let mut latency_bindings = Vec::new();
         let mut bridged = DeviceSet::default();
         let mut owners = BTreeMap::from([(master.identity, Arc::clone(&master))]);
         for (input, list) in [
@@ -245,6 +247,7 @@ impl DirectPlan {
                 if map.offset.is_some() {
                     let device = devices.0.get(id)?;
                     owners.insert(device.identity, Arc::clone(device));
+                    latency_bindings.push((id.to_owned(), Arc::clone(device)));
                 }
                 bindings.push(map);
             }
@@ -255,6 +258,7 @@ impl DirectPlan {
         Some(Self {
             master,
             owners: owners.into_values().collect(),
+            latency_bindings,
             bindings,
             bridged,
             clock_id,

@@ -38,9 +38,18 @@ pub(super) unsafe fn graph_read(
         // SAFETY: discard changes only this graph consumer's cursor.
         unsafe { mr_pcm_ring_discard(ring) };
         *previous = Some(epoch);
+        io.measurements.faults.fetch_add(1, Release);
     }
     // SAFETY: retained ring and sole graph consumer, complete caller-owned output.
-    let frames = unsafe { mr_pcm_ring_read_available(ring, samples, frames) };
+    let fill = io.graph_ring.stats().queued;
+    let read = unsafe { mr_pcm_ring_read_available(ring, samples, frames) };
+    if read < frames {
+        io.measurements.faults.fetch_add(1, Release);
+    }
+    io.measurements
+        .graph_queue
+        .read(u64::from(fill), u64::from(read));
+    let frames = read;
     GraphRead {
         frames,
         initial_epoch,
@@ -70,15 +79,23 @@ pub(super) unsafe fn bridge_read(io: &DeviceIo, samples: *mut f32, frames: u32) 
     if frames == 0 || frames > MAX_FRAMES {
         return 0;
     }
+    let fill = io.ring(!io.selection.input).stats().queued;
+    let tap = if io.selection.input {
+        &io.measurements.native_queue
+    } else {
+        &io.measurements.graph_queue
+    };
     // No prefill: SRC owns priming, not a second native-queue latency policy.
     // SAFETY: the bridge owner's input ring depends only on immutable direction.
-    unsafe {
+    let read = unsafe {
         mr_pcm_ring_read_available(
             ptr::from_ref(io.ring(!io.selection.input)).cast_mut(),
             samples,
             frames,
         )
-    }
+    };
+    tap.read(u64::from(fill), u64::from(read));
+    read
 }
 
 // SAFETY: sole SRC owner producer, full immutable PCM disjoint from queue storage.

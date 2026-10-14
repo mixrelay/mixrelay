@@ -94,6 +94,10 @@ impl RouteDelayLine {
         })
     }
 
+    pub(super) fn primed(&self) -> bool {
+        self.valid_frames == self.delay_frames
+    }
+
     /// Resets transport history without clearing the backing PCM allocation.
     ///
     /// The next `delay_frames` of output are silence, so pre-reset samples cannot reappear.

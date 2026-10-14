@@ -11,6 +11,7 @@ use thiserror::Error;
 pub mod content_latency;
 mod latency_exchange;
 mod latency_plan;
+mod measured_arrivals;
 
 #[cfg(test)]
 mod meter_publication_tests;
@@ -20,10 +21,10 @@ mod runtime_control;
 pub use runtime_control::{RuntimeControlBank, RuntimeControlError, RuntimeControlUpdate};
 
 pub use render::{
-    BlockProcessor, CompensationState, CycleAdmission, ExternalBinding, ExternalControlState,
-    ExternalIo, HostedAudioProcessor, HostedLatencySource, HostedProcessorFactory,
-    HostedProcessorPrepareRequest, MeterBinding, ProcessBlockError, RenderPlan, RenderPlanError,
-    recording_session_key,
+    ArrivalError, BlockProcessor, CompensationState, CycleAdmission, ExternalBinding,
+    ExternalControlState, ExternalIo, HostedAudioProcessor, HostedLatencySource,
+    HostedProcessorFactory, HostedProcessorPrepareRequest, MeterBinding, ProcessBlockError,
+    RenderPlan, RenderPlanError, recording_session_key,
 };
 
 #[derive(Debug)]

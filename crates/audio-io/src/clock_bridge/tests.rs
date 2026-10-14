@@ -15,6 +15,66 @@ use std::f64::consts::TAU;
 mod realtime;
 
 #[test]
+fn converter_residence_counts_elapsed_time_only_for_pcm_retained_between_invocations() {
+    let mut options = config(1, 48_000, 48_000);
+    options.clock_relation = ClockRelation::ProvenSameClock;
+    options.priming_frames = 1;
+    let mut bridge = AsyncClockBridge::new(options).unwrap();
+    let empty = bridge.report(0, 0);
+    let allocations = allocation_counter::measure(|| {
+        // t=0: a whole chunk enters and leaves in one invocation, with no elapsed time.
+        bridge.advance_residence(std::time::Duration::ZERO);
+        bridge.push_interleaved(&[0.25; 128]).unwrap();
+        let immediate = bridge.pull_interleaved(&mut [0.0; 128]).unwrap();
+        assert_eq!(
+            immediate
+                .input_residence
+                .unwrap()
+                .mean_since(empty.input_residence.unwrap()),
+            Some(0.0)
+        );
+        assert_eq!(
+            immediate
+                .output_residence
+                .unwrap()
+                .mean_since(empty.output_residence.unwrap()),
+            Some(0.0)
+        );
+        // t=128: leave 32 scratch frames and 128 input frames behind.
+        bridge.advance_residence(std::time::Duration::from_secs_f64(128.0 / 48_000.0));
+        bridge.push_interleaved(&[0.25; 256]).unwrap();
+        let partial = bridge.pull_interleaved(&mut [0.0; 96]).unwrap();
+        // t=608: those frames have waited 480 input-clock frames = 10 ms.
+        bridge.advance_residence(std::time::Duration::from_millis(10));
+        let waited = bridge.pull_interleaved(&mut [0.0; 160]).unwrap();
+        let input_ns = waited
+            .input_residence
+            .unwrap()
+            .mean_since(partial.input_residence.unwrap())
+            .unwrap()
+            * 0.5e9
+            / 48_000.0;
+        let output_ns = waited
+            .output_residence
+            .unwrap()
+            .mean_since(partial.output_residence.unwrap())
+            .unwrap()
+            * 0.5e9
+            / 48_000.0;
+        assert_eq!(input_ns, 10_000_000.0);
+        // 32 of the 160 output frames waited 10 ms; newly produced frames waited zero.
+        assert_eq!(output_ns, 2_000_000.0);
+        assert_eq!(waited.algorithmic_delay_frames, 0);
+        bridge.reset(2, Discontinuity::StreamRestart);
+        assert_eq!(
+            bridge.report(0, 0).output_residence,
+            waited.output_residence
+        );
+    });
+    assert_eq!(allocations.count_total, 0);
+}
+
+#[test]
 fn authority_feedback_reset_preserves_queued_pcm_and_filter_history_without_allocation() {
     for relation in [ClockRelation::Independent, ClockRelation::ProvenSameClock] {
         let mut options = config(1, 48_000, 48_000);

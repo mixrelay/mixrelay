@@ -9,6 +9,7 @@
 //! from a greedily drained private staging queue. There is exactly one feedback
 //! authority per bridge; no amplitude/silence-based clock inference is performed.
 
+use crate::residence::ResidenceSnapshot;
 use audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Adjustable, Async, FixedAsync, Resampler, SincInterpolationParameters};
 use thiserror::Error;
@@ -87,6 +88,9 @@ pub struct PullReport {
     /// Sinc algorithmic delay in output frames; excludes external transport.
     pub algorithmic_delay_frames: usize,
     pub correction_ppm: f64,
+    /// Cumulative consumer-side residence taps, in twice input/output frames.
+    pub input_residence: Option<ResidenceSnapshot>,
+    pub output_residence: Option<ResidenceSnapshot>,
 }
 
 /// One worker owns both directions of this object. It is not an SPSC queue.
@@ -103,6 +107,8 @@ pub struct AsyncClockBridge {
     primed: bool,
     started: bool,
     epoch: u64,
+    input_residence: ResidenceSnapshot,
+    output_residence: ResidenceSnapshot,
 }
 
 impl AsyncClockBridge {
@@ -142,6 +148,8 @@ impl AsyncClockBridge {
             primed: false,
             started: false,
             epoch: 0,
+            input_residence: ResidenceSnapshot::default(),
+            output_residence: ResidenceSnapshot::default(),
             config,
             resampler,
         })
@@ -190,6 +198,7 @@ impl AsyncClockBridge {
                 break;
             }
             let count = (wanted - transferred).min(self.output_frames - self.output_read);
+            self.output_residence.weight = self.output_residence.weight.wrapping_add(count as u64);
             let channels = self.config.channels;
             output[transferred * channels..(transferred + count) * channels].copy_from_slice(
                 &self.output_scratch
@@ -201,6 +210,30 @@ impl AsyncClockBridge {
         let mut report = self.report(transferred, wanted);
         report.consumed_input_frames = input_before - self.input.frames();
         Ok(report)
+    }
+
+    /// Accounts for private PCM retained since the previous scheduling invocation.
+    /// Call before pushing/pulling this invocation with elapsed audio-clock time
+    /// (zero for additional pump iterations in the same invocation).
+    /// Only backlog that survived the invocation contributes queue-time area.
+    #[expect(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "bounded queue-time area in device frame domains"
+    )]
+    pub fn advance_residence(&mut self, elapsed: std::time::Duration) {
+        let area = |queued, rate| {
+            (queued as f64 * elapsed.as_secs_f64() * f64::from(rate) * 2.0).round() as u64
+        };
+        self.input_residence.sum = self
+            .input_residence
+            .sum
+            .wrapping_add(area(self.input.frames(), self.config.input_rate));
+        self.output_residence.sum = self
+            .output_residence
+            .sum
+            .wrapping_add(area(self.queued_output_frames(), self.config.output_rate));
     }
 
     /// Feeds exactly one actual clock-crossing FIFO observation to the drift PI.
@@ -327,6 +360,7 @@ impl AsyncClockBridge {
             if consumed == 0 && produced == 0 {
                 return Err(BridgeError::Resampler);
             }
+            self.input_residence.weight = self.input_residence.weight.wrapping_add(consumed as u64);
             self.input.consume(consumed);
             self.output_frames = produced;
         } else {
@@ -336,6 +370,7 @@ impl AsyncClockBridge {
             let frames = available.min(CHUNK);
             self.input
                 .peek(&mut self.output_scratch[..frames * self.config.channels]);
+            self.input_residence.weight = self.input_residence.weight.wrapping_add(frames as u64);
             self.input.consume(frames);
             self.output_frames = frames;
         }
@@ -363,6 +398,8 @@ impl AsyncClockBridge {
             queued_output_frames: self.output_frames - self.output_read,
             algorithmic_delay_frames: self.resampler.as_ref().map_or(0, Resampler::output_delay),
             correction_ppm: self.correction_ppm(),
+            input_residence: Some(self.input_residence),
+            output_residence: Some(self.output_residence),
         }
     }
 }

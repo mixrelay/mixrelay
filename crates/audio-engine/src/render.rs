@@ -14,6 +14,7 @@ use thiserror::Error;
 use crate::runtime_control::{ControlValue, RuntimeControlBank};
 mod buffers;
 mod compensation;
+pub use compensation::ArrivalError;
 mod effects;
 mod history;
 mod kernels;
@@ -381,6 +382,28 @@ impl RenderPlan {
         self.compensation.observations()
     }
 
+    /// Control-side causal source binding indexes for each destination binding.
+    #[must_use]
+    pub fn destination_source_indexes(&self) -> Vec<Vec<usize>> {
+        self.compensation.destination_source_indexes(self)
+    }
+
+    /// Control-side content arrivals in nanoseconds under existing route compensation.
+    /// Unlike integer source-frame observations, fractional measured roots are retained.
+    /// Contributors must agree within the supplied nanosecond threshold.
+    ///
+    /// # Errors
+    /// Rejects invalid source counts, rate or an invalid compensation plan, and reports
+    /// reads that kept overlapping the audio thread's acknowledgement as contended.
+    pub fn measured_destination_arrivals(
+        &self,
+        sources_ns: &[Option<f64>],
+        threshold_ns: f64,
+    ) -> Result<Vec<Option<f64>>, ArrivalError> {
+        self.compensation
+            .measured_destination_arrivals(self, sources_ns, threshold_ns)
+    }
+
     /// Compares cached worker delays without allocating or querying native plug-ins.
     pub(crate) fn latency_matches(&self, expected: &[Option<u32>]) -> bool {
         self.compensation.matches(expected)
@@ -394,6 +417,9 @@ pub struct BlockProcessor {
     arena: Box<[f32]>,
     source_buffers: ExternalBuffers,
     sink_buffers: ExternalBuffers,
+    source_latency_faults: Box<[bool]>,
+    sink_latency_faults: Box<[bool]>,
+    sink_latency_routes: Vec<Vec<usize>>,
     meters: Option<Arc<crate::PeakMeterBank>>,
     dynamics_envelopes: Box<[f32]>,
     dynamics_minimum_gains: Box<[f32]>,
@@ -424,6 +450,9 @@ impl fmt::Debug for BlockProcessor {
             .field("arena_samples", &self.arena.len())
             .field("source_buffers", &self.source_buffers.len())
             .field("sink_buffers", &self.sink_buffers.len())
+            .field("source_latency_faults", &self.source_latency_faults)
+            .field("sink_latency_faults", &self.sink_latency_faults)
+            .field("sink_latency_routes", &self.sink_latency_routes)
             .field("has_meters", &self.meters.is_some())
             .field("dynamics_envelopes", &self.dynamics_envelopes.len())
             .field("dynamics_minimum_gains", &self.dynamics_minimum_gains.len())
@@ -579,7 +608,17 @@ impl BlockProcessor {
         let device_bus_state = buffers::filled(plan.device_bus_samples, 0.0)?;
         let controls = plan.controls.values();
         let control_scratch = controls.clone();
+        let source_latency_faults = vec![false; plan.source_bindings.len()].into_boxed_slice();
+        let sink_latency_faults = vec![false; plan.sink_bindings.len()].into_boxed_slice();
+        let sink_latency_routes = plan
+            .sink_bindings
+            .iter()
+            .map(|binding| plan.compensation.binding_routes(binding.node_id()))
+            .collect();
         Ok(Self {
+            source_latency_faults,
+            sink_latency_faults,
+            sink_latency_routes,
             recorders: Box::new([]),
             cycle_tracker: mixrelay_audio_io::process::CycleTracker::default(),
             plan,
@@ -665,6 +704,49 @@ impl BlockProcessor {
         self.delay_bank
             .as_ref()
             .map_or(CompensationState::Unprepared, |bank| bank.state())
+    }
+
+    /// Audio-owner acknowledgement of the exact installed history observations.
+    /// Returns false while compensation is pending, unprepared or priming.
+    /// Atomic publication only; call after the processed cycle.
+    #[must_use]
+    pub fn acknowledge_content_latency(&self) -> bool {
+        self.delay_bank
+            .as_ref()
+            .is_some_and(|bank| bank.acknowledge_content_latency())
+    }
+
+    /// Block-local transfer and history readiness for one external path binding.
+    /// The reporter combines only the source/sink bindings contributing to its destination.
+    #[must_use]
+    pub fn binding_content_latency_ready(&self, id: &str, input: bool) -> bool {
+        let (bindings, faults, routes): (_, _, &[Vec<usize>]) = if input {
+            (
+                &self.plan.source_bindings,
+                &self.source_latency_faults,
+                &[][..],
+            )
+        } else {
+            (
+                &self.plan.sink_bindings,
+                &self.sink_latency_faults,
+                &self.sink_latency_routes,
+            )
+        };
+        bindings
+            .iter()
+            .enumerate()
+            .filter(|(_, binding)| {
+                id == binding.node_id().as_str()
+                    || id.strip_suffix(if input { "/capture" } else { "/render" })
+                        == Some(binding.node_id().as_str())
+            })
+            .any(|(index, _)| {
+                !faults[index]
+                    && self.delay_bank.as_ref().is_some_and(|bank| {
+                        bank.content_ready_for_routes(if input { &[] } else { &routes[index] })
+                    })
+            })
     }
 
     pub(crate) fn can_adopt_hosted(&self, previous: &Self) -> bool {
@@ -813,6 +895,8 @@ impl BlockProcessor {
         let frames = cycle.frames;
         let frames_usize = frames as usize;
         let mut report = ProcessReport::default();
+        self.source_latency_faults.fill(false);
+        self.sink_latency_faults.fill(false);
         for (source_index, ((binding, destination), &control_index)) in self
             .plan
             .source_bindings
@@ -834,10 +918,10 @@ impl BlockProcessor {
             // another cycle, even if it wrote beyond the reported prefix.
             destination[sample_count(transfer.frames as usize, binding.channels)..samples]
                 .fill(0.0);
-            report.input_starvations += u64::from(
-                transfer.activity == mixrelay_audio_io::process::InputActivity::Active
-                    && transfer.frames < frames,
-            );
+            let starved = transfer.activity == mixrelay_audio_io::process::InputActivity::Active
+                && transfer.frames < frames;
+            report.input_starvations += u64::from(starved);
+            self.source_latency_faults[source_index] = transfer.discontinuity || starved;
             report.discontinuities += u64::from(transfer.discontinuity);
             if transfer.discontinuity {
                 let targets = &self.plan.source_history[source_index];
@@ -867,12 +951,13 @@ impl BlockProcessor {
             }
         }
         report.sample_faults = self.process_loaded_block(frames_usize);
-        for ((binding, source), &control_index) in self
+        for (sink_index, ((binding, source), &control_index)) in self
             .plan
             .sink_bindings
             .iter()
             .zip(&self.sink_buffers)
             .zip(&self.plan.sink_controls)
+            .enumerate()
         {
             if !self.controls[control_index].control.enabled {
                 continue;
@@ -882,6 +967,8 @@ impl BlockProcessor {
             if transfer.frames > frames {
                 return Err(ProcessBlockError::InvalidTransfer);
             }
+            self.sink_latency_faults[sink_index] =
+                transfer.discontinuity || transfer.frames < frames;
             report.output_overflows += u64::from(transfer.frames < frames);
             report.discontinuities += u64::from(transfer.discontinuity);
         }

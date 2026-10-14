@@ -23,21 +23,113 @@ is rejected as unknown rather than claiming histories that audio never applied.
 This is a planned control-side calculation, not proof that a pending history bank
 has activated.
 
-`ContentLatency` sums isolated measured bridge/queue residence and destination
-scheduling residence with planned processing/compensation and SRC algorithmic
-delay. It converts once, rounding upward, to destination-rate frames. Timestamp
-intervals must identify the same content in a common host clock; device sample
-counters from independent devices must never be subtracted. Processing and SRC
-must not be counted again inside residence measurements. `LatencyHysteresis`
-retains a known value until three consecutive observations move beyond a supplied
-threshold in the same direction; unknown invalidates immediately. Reset it on
-rate, clock epoch, graph or lease changes.
+Stage 2 now measures and publishes device-source routes. The IOProc records
+acquisition as callback `now.hostTime - input.hostTime` and presentation as
+`output.hostTime - now.hostTime`, accepting only valid, forward host intervals.
+This also measures HAL loopback acquisition for a MixRelay virtual source.
+Direct owners use the timestamps of the callback that actually rendered their PCM.
+Missing native host timestamps remain unknown; sample-counter fallback is never
+acquisition/presentation latency evidence.
 
-**Measured residence is not yet wired through the PCM FIFOs, SRC, application
-capture or HAL destination scheduling.** The engine reporter therefore publishes
-`None` for every current virtual sink, and installed recording apps continue to
-see zero. The arithmetic and hysteresis are tested primitives, not a completed
-end-to-end latency estimator. No installed-driver latency agreement is claimed.
+Each native and graph FIFO is sampled by its sole consumer immediately before
+reading. The tap accumulates `(2 * fill - actual_read) * actual_read` and the
+number of frames read. Dividing the window sum by twice its weight estimates mean
+frame residence via Little's law. Failed reads contribute no residence; deadline
+shortages invalidate that window. AsyncClockBridge's private input and output
+batch FIFOs instead integrate retained backlog over elapsed native callback time
+between scheduling invocations, divided by the frames consumed in that domain.
+The elapsed interval advances even when a graph producer supplies no new PCM.
+The adapter advances this measurement before pumping; additional push/pull calls
+within the same invocation add no elapsed time. Newly converted scratch that is
+immediately transferred contributes zero residence. PCM left in staging or scratch
+across invocations contributes only the time it actually waited. Its
+`algorithmic_delay_frames` is added
+at the converter's output rate, separately from queue residence. Empty producer
+polls do not count as deadline underruns and are not residence samples.
+If a concurrent producer publishes after the fill sample but before the read,
+the successful read can exceed that sampled fill. A residence-invalid window
+is disturbed evidence: the reporter skips it, retaining its previous stable
+value and breaking a candidate streak, even without a deadline shortage fault.
+This applies to native/graph FIFO and both SRC residence invalid counters; the
+next valid window can resume publication from the updated baseline.
+
+Native callbacks also accumulate separate input/output window means of valid
+`AudioTimeStamp.rateScalar` values. Device-domain frame duration is the nominal
+frame duration multiplied by that direction's mean scalar; a window with no valid
+scalar falls back to nominal. This applies to native FIFO residence and to SRC
+algorithmic delay in the native device domain. SRC batch residence areas advance
+using native frames at nominal Hz; the reporter applies that native direction's
+measured scalar to both SRC residence domains, including capture-side graph output
+and render-side graph input. For example, backlog retained for 480 native frames
+at 48 kHz and scalar 1.001 waits 10.01 ms in either domain. Graph FIFO residence
+and graph-domain algorithmic delay retain the graph rate without this correction.
+Likewise, 12000 native FIFO frames at 48 kHz and scalar 1.001 take 250.25 ms.
+
+The reporter evaluates:
+
+```text
+source acquisition
++ native input FIFO / source rate
++ SRC input/output batch FIFO residence + input SRC algorithmic delay
++ graph input FIFO / graph rate
++ prepared DeviceBus snapshot quantum(s) / graph rate
++ planned hosted transport, intrinsic delay and installed route compensation
++ graph output FIFO / graph rate
++ SRC input/output batch FIFO residence + output SRC algorithmic delay
++ native output FIFO / destination rate
++ destination presentation
+```
+
+Same-callback direct bindings contribute acquisition, planned processing and
+presentation only. Mixed direct/bridged routes use the corresponding terms on
+each side. All terms stay in nanoseconds (including fractional measured means and
+fractional graph frames) until one upward conversion to destination-rate frames.
+The nanosecond counterpart of `RenderPlan::destination_arrivals`,
+`measured_destination_arrivals`, uses measured source roots and the installed
+compensation delays. It never prepares different histories or changes routing.
+Canonical device read references follow the real route from `A/native` into
+`A/snapshot` (DeviceBus), then through processing to `D/native`. The measured
+topology treats that snapshot as its feeding arrival plus exactly one prepared
+`RenderFormat.block_frames` quantum at the graph rate. The source-phase read
+precedes sink-phase publication into the same quantum-sized ring, whose cursor
+advances by actual rendered frames; shorter callback partitions do not shorten
+the delay. The nominal compensation topology still cuts causal bus boundaries.
+Source contributor/clock tracking and history readiness follow through the bus,
+so a source fault or epoch change also taints/resets its downstream destination.
+Unknown feeding arrivals and unresolved feedback remain unknown.
+The audio owner acknowledges exact installed hosted-latency observations;
+unacknowledged or changed observations fail closed. A destination propagates any
+unknown contributor and requires all compensated path arrivals to agree within
+`max(32 destination frames, 1 ms)`. Multiple sink bindings to one endpoint must
+also agree and produce exactly one publication.
+
+Taps use cumulative atomic sums/counts with a single serialized writer and a
+bounded coherent snapshot, rather than independently clearing sum and count from
+control. Window differences tolerate counter wrap. Native callbacks perform no
+measurement allocation, lock, IPC or syscall; the native callback's supplied host
+time is used, and the timebase is read on control. Control owns all maps, averaging,
+graph evaluation and publication. Synthetic timestamps and FIFO reads are covered
+by allocation-counter tests; existing native/direct/converter realtime tests also
+exercise the added taps.
+
+The existing 1-second Reporter and Driver lease publish the applied graph revision,
+including acknowledged control edits, as required by the Driver's revision fence.
+Tap selection, measurement baselines and topology validation use the active render
+plan revision. Gain/mute edits advance publication revision without replacing that
+plan or resetting its measurement windows.
+Each endpoint has `LatencyHysteresis`: changes outside its threshold need three
+consecutive stable observations in the same direction, while unknown clears
+immediately. Rate, topology revision, native owner/clock epoch, direct-mode generation
+and lease changes reset its state. Restart, priming, history warmup, overflow,
+deadline underflow or unready compensation in a contributing path taints the
+window: retain the previous stable value, or report unknown before the first stable
+window. Transfer faults and compensation-history readiness are tracked per binding
+and destination path; faults on unrelated routes cannot taint the destination.
+A contended or missing tap snapshot skips that window and retains its last coherent
+baseline and stable value. Clock metadata is read independently of tap coherence,
+so only real owner/rate/epoch/generation changes reset the context. Such windows
+also break a hysteresis candidate streak. A new graph/clock
+context cannot retain the old context's value.
 
 ## Ephemeral authority and compatibility
 
@@ -77,22 +169,21 @@ when the effective integer changes. Host callbacks run after registry, inventory
 device and identity locks are released. Tests reenter the property API while
 holding control locks and assert notification callbacks own none of those locks.
 
-## Remaining measurement integration
+## Remaining limits
 
-Carry per-content host-time provenance through native and graph FIFOs and SRC,
-including partial reads, converter phase, algorithmic delay, discard, underflow,
-overflow, restart and clock epochs. Each source must include validated acquisition
-latency; application capture and virtual-source boundaries are not zero roots.
-Measure destination scheduling against the actual consumed/scheduled content,
-not the most recent callback timestamp or nominal queue target.
+Application capture has no measurable native acquisition timestamp in this path
+and remains unknown. Device directions with missing/backward host timestamps,
+unavailable rates or no complete measurement window also remain unknown. Source
+latency differences outside the threshold are rejected; Stage 2 does not change
+source compensation or audio routing to align them.
 
-Publish measured source arrivals to the prepared compensation owner and acknowledge
-exact active observations before reporting. Every contributing path must arrive
-at one effective time under the actual installed histories; otherwise report
-unknown. Aggregate multiple graph bindings to one physical endpoint before
-publication (the runtime contract rejects duplicate endpoint IDs). Connect the
-measured destination result and per-endpoint hysteresis to the reporter, resetting
-on revision/rate/clock/lease transitions. These changes remain undone.
+This is a window-mean content latency estimate, not per-sample timestamp provenance
+carried with PCM. Short-term queue variation, asynchronous clocks and SRC phase can
+make an individual impulse differ from the one-second estimate. Active histories
+are checked against exact cached observations, but the estimator does not expose
+per-sample hosted transport timing. Installed engine/HAL property agreement still
+requires the signed installation and impulse procedure below. No installed audio
+qualification or release/install was performed during Stage 2.
 
 ## Installed verification
 
@@ -109,9 +200,9 @@ requires. Never leave a signing authentication window pending.
    It measures ordinary playback/capture, not an engine-only destination.
 4. Start an A-to-D engine route, with no ordinary playback client writing D.
    Run `pnpm probe:macos-roundtrip --latency D_UID`; the read-only mode creates no
-   IOProc and does not disturb the gate. **Current implementation still reports
-   zero here because measurement integration is unfinished.**
-5. Once measurement integration is complete, run
+   IOProc and does not disturb the gate. After a stable measurement window it
+   should report the validated content delay; unknown paths remain zero.
+5. Run
    `pnpm probe:macos-roundtrip --json --seconds 10 A_UID D_UID` with a transparent
    signal path, first dry and then through a plug-in with reported intrinsic delay.
    Compare D input frames with measured host-time delay converted at D's rate,
@@ -121,4 +212,4 @@ requires. Never leave a signing authentication window pending.
    that client: the validated engine value should return after the control tick.
    Change rates/graphs, inject transport loss and stop/kill the engine: obsolete
    values must clear. Repeat with old/new service/HAL combinations; missing fields
-   must remain safe zero. Nonzero agreement cannot pass until step (a) is finished.
+   must remain safe zero. Repeat restart/priming/underrun windows: no new unstable value may be reported.

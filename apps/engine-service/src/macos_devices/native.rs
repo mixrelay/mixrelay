@@ -39,6 +39,7 @@ pub(super) struct Native {
     pub(super) render: Box<super::direct::RenderSlot>,
     pub(super) pcm_metrics: PcmMetrics,
     pub(super) pcm: Box<super::worker::callback::PcmSlot>,
+    pub(super) latency: super::latency::BridgeMeasurements,
 }
 impl Native {
     pub(super) fn active_owners() -> usize {
@@ -88,6 +89,7 @@ impl Native {
             render: Box::default(),
             pcm_metrics: PcmMetrics::default(),
             pcm: Box::default(),
+            latency: super::latency::BridgeMeasurements::default(),
         };
         tracing::info!(owner = native.log_id, native_uid = %uid.to_string_lossy(),
             input = spec.input, channels = spec.channels, "CoreAudio native owner prepared");

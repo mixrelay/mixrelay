@@ -97,10 +97,12 @@ pub unsafe extern "C" fn mr_device_io_process(
     // SAFETY: OS retains both complete timestamps for this synchronous callback.
     let timing = unsafe {
         super::IoTiming {
+            now: copy_time(now),
             input: copy_time(input_time),
             output: copy_time(output_time),
         }
     };
+    io.measurements.callback(timing, false);
     let rendered = callback.formats.all_float()
         && callback.hook.is_some_and(|hook| unsafe {
             hook(callback.context, input, output, frames, &raw const timing)
@@ -150,6 +152,7 @@ unsafe fn prepare_output(io: &DeviceIo, callback: &mut super::Callback) {
     let epoch = io.progress.output_epoch.load(Acquire);
     if callback.prime || callback.epoch != epoch {
         unsafe { mr_pcm_ring_discard(ptr::from_ref(&io.native_ring).cast_mut()) };
+        io.measurements.faults.fetch_add(1, Release);
         callback.prime = false;
         callback.epoch = epoch;
     }
@@ -166,7 +169,15 @@ unsafe fn transfer(
     let ring = ptr::from_ref(&io.native_ring).cast_mut();
     if !io.selection.input {
         // SAFETY: sole native consumer and callback-owned, full-width scratch.
-        unsafe { mr_pcm_ring_read_available(ring, callback.scratch.as_mut_ptr(), frames) };
+        let fill = io.native_ring.stats().queued;
+        let read =
+            unsafe { mr_pcm_ring_read_available(ring, callback.scratch.as_mut_ptr(), frames) };
+        if read < frames {
+            io.measurements.faults.fetch_add(1, Release);
+        }
+        io.measurements
+            .native_queue
+            .read(u64::from(fill), u64::from(read));
     }
     // SAFETY: scratch is disjoint from native PCM; callback owns the selected output
     // or immutable input. Geometry was admitted for at most MAX_FRAMES*channels.
