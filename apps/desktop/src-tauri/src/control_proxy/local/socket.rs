@@ -5,20 +5,23 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use std::collections::HashMap;
+
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
-use super::meters::MeterHub;
-use super::{LocalControl, Request};
+use super::meters::TelemetryHub;
+use super::outbound::Outbound;
+use super::{LocalControl, Request, RequestKind};
 
 pub(crate) const FRAME_LIMIT: u64 = 4 * 1024 * 1024;
 pub(crate) const RESPONSE_LIMIT: usize = 4 * 1024 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
-/// A connection carries one request at a time and may be reused for the next. It closes
-/// after this long without one; clients reuse an idle connection for a shorter window.
+/// A connection with nothing in flight and no subscription closes after this long; clients
+/// reuse an idle connection for a shorter window.
 pub(crate) const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(crate) struct LocalSocket {
@@ -81,7 +84,7 @@ async fn serve(
     uid: u32,
 ) {
     let mut clients = JoinSet::new();
-    let meters = MeterHub::new(Arc::clone(&control), stop.clone());
+    let meters = TelemetryHub::new(Arc::clone(&control), stop.clone());
     loop {
         tokio::select! {
             biased;
@@ -101,69 +104,160 @@ async fn serve(
     while clients.join_next().await.is_some() {}
 }
 
+/// Requests one editor connection may have in flight or awaiting their reply's write; it
+/// stops reading until one finishes.
+const IN_FLIGHT_LIMIT: usize = 16;
+
+/// Serves one editor link: requests run concurrently, replies and telemetry share one
+/// writer. Reads end when the editor leaves or the runtime stops; mutations always run
+/// to completion, and the writer flushes what is queued before the connection closes.
 async fn connection(
     stream: UnixStream,
     control: Arc<LocalControl>,
-    meters: Arc<MeterHub<LocalControl>>,
-    mut stop: watch::Receiver<bool>,
+    meters: Arc<TelemetryHub<LocalControl>>,
+    stop: watch::Receiver<bool>,
 ) -> io::Result<()> {
     let (read, mut write) = stream.into_split();
-    let mut read = BufReader::new(read.take(FRAME_LIMIT + 1));
-    let mut frame = Vec::new();
-    loop {
-        frame.clear();
-        read.get_mut().set_limit(FRAME_LIMIT + 1);
-        let received = tokio::select! {
-            biased;
-            _ = stop.changed() => return Ok(()),
-            result = tokio::time::timeout(IDLE_TIMEOUT, read.read_until(b'\n', &mut frame)) => result??,
-        };
-        if received == 0
-            || *stop.borrow()
-            || frame.len() as u64 > FRAME_LIMIT
-            || frame.last() != Some(&b'\n')
-        {
-            return Ok(());
-        }
-        let request: Request = serde_json::from_slice(&frame).map_err(io::Error::other)?;
-        let request_id = request.id;
-        if request.is_meter_subscription() {
-            // The connection now carries only this subscription until either side ends it.
-            return super::meters::relay(request_id, &meters, &mut read, &mut write, stop).await;
-        }
-        if !request.is_read() {
-            let delivered = dispatch_mutation(
-                request_id,
-                &mut write,
-                control.dispatch(request),
-                HEARTBEAT_INTERVAL,
-            )
-            .await?;
-            // A peer that stopped reading cannot be trusted with another request.
-            if !delivered {
-                return Ok(());
+    let outbound = Arc::new(Outbound::default());
+    let writer = tokio::spawn({
+        let outbound = Arc::clone(&outbound);
+        async move { outbound.write_all(&mut write, IO_TIMEOUT).await }
+    });
+    let mut requests = Requests {
+        control,
+        meters,
+        outbound: Arc::clone(&outbound),
+        reads: JoinSet::new(),
+        mutations: JoinSet::new(),
+        streams: HashMap::new(),
+    };
+    let result = requests.serve(read, stop).await;
+    requests.reads.abort_all();
+    for (id, stream) in requests.streams.drain() {
+        stream.abort();
+        outbound.cancel(id);
+    }
+    while requests.mutations.join_next().await.is_some() {}
+    outbound.finish();
+    let _ = writer.await;
+    result
+}
+
+struct Requests {
+    control: Arc<LocalControl>,
+    meters: Arc<TelemetryHub<LocalControl>>,
+    outbound: Arc<Outbound>,
+    reads: JoinSet<()>,
+    mutations: JoinSet<()>,
+    streams: HashMap<u64, tokio::task::AbortHandle>,
+}
+
+impl Requests {
+    fn in_flight(&self) -> usize {
+        self.reads.len() + self.mutations.len()
+    }
+
+    async fn serve(
+        &mut self,
+        read: tokio::net::unix::OwnedReadHalf,
+        mut stop: watch::Receiver<bool>,
+    ) -> io::Result<()> {
+        let mut read = BufReader::new(read.take(FRAME_LIMIT + 1));
+        // A cancelled read keeps its partial bytes here, so a frame is never split.
+        let mut frame = Vec::new();
+        loop {
+            if frame.is_empty() {
+                read.get_mut().set_limit(FRAME_LIMIT + 1);
             }
-            continue;
-        }
-        let response = {
-            tokio::select! {
+            let idle = self.in_flight() == 0 && self.streams.is_empty();
+            // Unwritten replies count too, so a slow editor cannot grow the backlog.
+            let busy = self.in_flight() + self.outbound.backlog() >= IN_FLIGHT_LIMIT;
+            let room = IN_FLIGHT_LIMIT.saturating_sub(self.in_flight());
+            let outbound = Arc::clone(&self.outbound);
+            let received = tokio::select! {
                 biased;
                 _ = stop.changed() => return Ok(()),
-                response = control.dispatch(request) => response,
+                () = outbound.closed() => return Ok(()),
+                Some(_) = self.mutations.join_next(), if !self.mutations.is_empty() => continue,
+                Some(_) = self.reads.join_next(), if !self.reads.is_empty() => continue,
+                () = outbound.backlog_below(room), if busy => continue,
+                received = read_frame(&mut read, &mut frame, idle), if !busy => received?,
+            };
+            if received == 0
+                || *stop.borrow()
+                || frame.len() as u64 > FRAME_LIMIT
+                || frame.last() != Some(&b'\n')
+            {
+                return Ok(());
             }
-        };
-        write_frame(&mut write, &response).await?;
+            let request: Request = serde_json::from_slice(&frame).map_err(io::Error::other)?;
+            frame.clear();
+            self.start(request, &stop);
+        }
+    }
+
+    fn start(&mut self, request: Request, stop: &watch::Receiver<bool>) {
+        let id = request.id;
+        match request.kind() {
+            RequestKind::Cancel(subscription) => {
+                if let Some(stream) = self.streams.remove(&subscription) {
+                    stream.abort();
+                }
+                self.outbound.cancel(subscription);
+            }
+            RequestKind::Subscribe => {
+                self.outbound.open(id);
+                let pump =
+                    super::meters::pump(id, Arc::clone(&self.meters), Arc::clone(&self.outbound));
+                if let Some(old) = self.streams.insert(id, tokio::spawn(pump).abort_handle()) {
+                    old.abort();
+                }
+            }
+            RequestKind::Mutation => {
+                let control = Arc::clone(&self.control);
+                let outbound = Arc::clone(&self.outbound);
+                self.mutations.spawn(async move {
+                    dispatch_mutation(id, &outbound, control.dispatch(request), HEARTBEAT_INTERVAL)
+                        .await;
+                });
+            }
+            RequestKind::Read => {
+                let control = Arc::clone(&self.control);
+                let outbound = Arc::clone(&self.outbound);
+                let mut stop = stop.clone();
+                self.reads.spawn(async move {
+                    tokio::select! {
+                        biased;
+                        _ = stop.changed() => {}
+                        response = control.dispatch(request) => outbound.reply(response),
+                    }
+                });
+            }
+        }
     }
 }
 
-async fn dispatch_mutation<W, F>(
+/// Reads one frame; an idle connection closes after [`IDLE_TIMEOUT`].
+async fn read_frame<R>(read: &mut R, frame: &mut Vec<u8>, idle: bool) -> io::Result<usize>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    if !idle {
+        return read.read_until(b'\n', frame).await;
+    }
+    tokio::time::timeout(IDLE_TIMEOUT, read.read_until(b'\n', frame))
+        .await
+        .map_err(|_| io::Error::from(io::ErrorKind::TimedOut))?
+}
+
+/// Runs an accepted mutation to completion, sending a pending frame each interval so the
+/// editor knows it is alive. A gone editor never cancels it.
+async fn dispatch_mutation<F>(
     request_id: u64,
-    write: &mut W,
+    outbound: &Outbound,
     dispatch: F,
     heartbeat_interval: Duration,
-) -> io::Result<bool>
-where
-    W: AsyncWrite + Unpin,
+) where
     F: Future<Output = serde_json::Value>,
 {
     let mut dispatch = Box::pin(dispatch);
@@ -171,33 +265,12 @@ where
     let mut heartbeat = tokio::time::interval_at(first_heartbeat, heartbeat_interval);
     loop {
         tokio::select! {
-            response = &mut dispatch => return write_frame(write, &response).await.map(|()| true),
+            response = &mut dispatch => return outbound.reply(response),
             _ = heartbeat.tick() => {
-                let pending = serde_json::json!({"id": request_id, "status": 102, "body": {}});
-                if write_frame(write, &pending).await.is_err() {
-                    // The mutation was accepted before the peer failed. Keep it owned by this
-                    // connection task and wait for completion, but never write to the peer again.
-                    let _ = dispatch.await;
-                    return Ok(false);
-                }
+                outbound.reply(serde_json::json!({"id": request_id, "status": 102, "body": {}}));
             }
         }
     }
-}
-
-pub(super) async fn write_frame<W>(write: &mut W, response: &serde_json::Value) -> io::Result<()>
-where
-    W: AsyncWrite + Unpin,
-{
-    let mut bytes = serde_json::to_vec(response).map_err(io::Error::other)?;
-    if bytes.len() > RESPONSE_LIMIT {
-        return Err(io::Error::other("local control response exceeds limit"));
-    }
-    bytes.push(b'\n');
-    tokio::time::timeout(IO_TIMEOUT, write.write_all(&bytes))
-        .await
-        .map_err(|error| io::Error::new(io::ErrorKind::TimedOut, error))??;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -205,6 +278,7 @@ mod tests {
     use super::*;
     use serde_json::Value;
     use std::os::unix::fs::MetadataExt as _;
+    use tokio::io::AsyncWriteExt as _;
     use tokio::sync::oneshot;
 
     #[tokio::test]
@@ -238,17 +312,19 @@ mod tests {
 
     #[tokio::test]
     async fn mutation_emits_pending_then_terminal_frame() {
-        let (mut peer, mut writer) = tokio::io::duplex(4096);
+        let outbound = Outbound::default();
         let dispatch = async {
             tokio::time::sleep(Duration::from_millis(25)).await;
             serde_json::json!({"id": 7, "status": 200, "body": {"accepted": true}})
         };
-        assert!(
-            dispatch_mutation(7, &mut writer, dispatch, Duration::from_millis(5))
-                .await
-                .expect("frames")
-        );
-        drop(writer);
+        dispatch_mutation(7, &outbound, dispatch, Duration::from_millis(5)).await;
+        outbound.finish();
+        let (mut runtime, mut peer) = tokio::io::duplex(4096);
+        outbound
+            .write_all(&mut runtime, Duration::from_secs(1))
+            .await
+            .expect("frames");
+        drop(runtime);
 
         let mut output = Vec::new();
         peer.read_to_end(&mut output).await.expect("read frames");
@@ -269,24 +345,71 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_heartbeat_does_not_cancel_accepted_mutation() {
-        let (peer, mut writer) = tokio::io::duplex(64);
-        drop(peer);
+    async fn a_closed_link_does_not_cancel_an_accepted_mutation() {
+        let outbound = Outbound::default();
+        outbound.close();
         let (completed, received) = oneshot::channel();
         let dispatch = async move {
             tokio::time::sleep(Duration::from_millis(20)).await;
             let _ = completed.send(());
             serde_json::json!({"id": 8, "status": 200, "body": {}})
         };
-        assert!(
-            !dispatch_mutation(8, &mut writer, dispatch, Duration::from_millis(5))
-                .await
-                .expect("broken peer is contained")
-        );
+        dispatch_mutation(8, &outbound, dispatch, Duration::from_millis(5)).await;
         tokio::time::timeout(Duration::from_millis(100), received)
             .await
             .expect("mutation completion")
             .expect("completion signal");
+    }
+
+    #[tokio::test]
+    async fn one_connection_runs_commands_reads_and_a_subscription_together() {
+        let fixture = mixrelay_test_support::FixtureDir::new("ipc-mux").expect("fixture");
+        let directory = fixture.join("control");
+        let uid = std::fs::metadata(fixture.path()).expect("metadata").uid();
+        let control = LocalControl::new(
+            crate::control_proxy::ControlProxyClient::default(),
+            #[cfg(target_os = "macos")]
+            Arc::default(),
+        )
+        .expect("control");
+        let service = LocalSocket::start(&directory, uid, control)
+            .await
+            .expect("service");
+        let stream = UnixStream::connect(directory.join("control.sock"))
+            .await
+            .expect("connect");
+        let mut reader = BufReader::new(stream);
+        let requests = [
+            serde_json::json!({"id": 9, "command": {"type": "cancel", "subscription": 99}}),
+            serde_json::json!({"id": 1, "command": {"type": "invoke", "name": "hello", "arguments": {}}}),
+            serde_json::json!({"id": 2, "command": {"type": "subscribe_telemetry"}}),
+            serde_json::json!({"id": 3, "command": {"type": "snapshot"}}),
+        ];
+        let batch = requests
+            .iter()
+            .map(|request| format!("{request}\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        reader
+            .get_mut()
+            .write_all(batch.as_bytes())
+            .await
+            .expect("requests");
+        let mut answered = std::collections::BTreeMap::new();
+        while answered.len() < 3 {
+            let mut reply = String::new();
+            reader.read_line(&mut reply).await.expect("reply");
+            let reply: Value = serde_json::from_str(&reply).expect("json");
+            answered.insert(reply["id"].as_u64().expect("id"), reply["status"].clone());
+        }
+        // No engine: every request fails on its own; the cancel has no reply.
+        assert_eq!(answered.keys().copied().collect::<Vec<_>>(), [1, 2, 3]);
+        assert!(answered.values().all(|status| status == 503));
+        drop(reader);
+        tokio::time::timeout(Duration::from_secs(1), service.shutdown())
+            .await
+            .expect("bounded shutdown")
+            .expect("shutdown");
     }
 
     #[tokio::test]

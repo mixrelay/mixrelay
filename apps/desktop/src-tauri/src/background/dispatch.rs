@@ -68,7 +68,7 @@ pub(crate) async fn dispatch(
 ) -> Result<Value, Value> {
     match name {
         "hello" => Ok(
-            serde_json::json!({"protocolVersion":2,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION"),"pid":std::process::id()}),
+            serde_json::json!({"protocolVersion":super::LINK_PROTOCOL,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION"),"pid":std::process::id()}),
         ),
         "set_native_menu_locale" => {
             let locale: String = argument(&arguments, "locale")?;

@@ -11,6 +11,7 @@ publish = false
 workspace = true
 
 [dependencies]
+base64.workspace = true
 mixrelay-audio-recorder = { path = "../audio-recorder" }
 serde.workspace = true
 serde_json.workspace = true

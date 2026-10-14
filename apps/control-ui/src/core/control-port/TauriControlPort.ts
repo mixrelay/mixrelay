@@ -1,5 +1,6 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { type StateListener, TelemetryDecoder, TelemetryHub } from './telemetry';
 
 import {
   type AudioDeviceDescriptor,
@@ -33,7 +34,7 @@ import {
 } from './types';
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
-type MeterMessage = MeterTelemetry | { ended: true };
+type MeterMessage = MeterTelemetry | ArrayBuffer | { ended: true };
 /** The native side keeps its end; the webview only receives. */
 type MessageChannel = { onmessage: (message: MeterMessage) => void };
 
@@ -43,6 +44,13 @@ interface ControlProxyResponse {
 }
 
 export class TauriControlPort implements ControlPort {
+  private telemetry = new TelemetryHub((listener) => this.openTelemetry(listener));
+  public subscribeState(listener: StateListener) {
+    return this.telemetry.subscribeState(listener);
+  }
+  public subscribeMeters(listener: MeterTelemetryListener) {
+    return this.telemetry.subscribeMeters(listener);
+  }
   public getNodeControls(graphId: string): Promise<import('./types').GraphNodeControls> {
     return this.call('control_get_node_controls', { graphId });
   }
@@ -187,28 +195,37 @@ export class TauriControlPort implements ControlPort {
 
   /** Each consumed window returns one credit, so a stalled webview receives nothing more
    * instead of accumulating messages natively. Windows can arrive before the id does. */
-  public async subscribeMeters(listener: MeterTelemetryListener): Promise<() => void> {
+  private async openTelemetry(listener: MeterTelemetryListener): Promise<() => void> {
     const channel = this.createChannel();
     let id: number | undefined;
     let owed = 0;
     let active = true;
+    const decoder = new TelemetryDecoder();
     const credit = () => {
       if (id === undefined) owed += 1;
-      else void this.invokeCommand('control_meter_credit', { id }).catch(() => undefined);
+      else void this.invokeCommand('control_telemetry_credit', { id }).catch(() => undefined);
     };
     channel.onmessage = (message) => {
       // After unsubscribing, nothing is delivered and no credit returns, so even a lost
       // unsubscribe ends natively once credit runs out.
       if (!active) return;
-      if ('ended' in message) return listener.ended();
-      listener.window(message);
+      if ('ended' in message) {
+        active = false;
+        return listener.ended();
+      }
+      try {
+        listener.window(message instanceof ArrayBuffer ? decoder.raw(message) : message);
+      } catch {
+        active = false;
+        listener.ended();
+      }
       credit();
     };
-    id = await this.invokeCommand<number>('control_subscribe_meters', { channel });
+    id = await this.invokeCommand<number>('control_subscribe_telemetry', { channel });
     for (; owed > 0; owed -= 1) credit();
     return () => {
       active = false;
-      void this.invokeCommand('control_unsubscribe_meters', { id }).catch(() => undefined);
+      void this.invokeCommand('control_unsubscribe_telemetry', { id }).catch(() => undefined);
     };
   }
 

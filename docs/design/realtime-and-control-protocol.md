@@ -11,7 +11,7 @@
   - 앱 캡처 pump는 tap 콜백 알림으로 깨어나고 변환 구간에 time-constraint 우선순위를 적용한다. 형식 갱신·자원 교체 같은 제어 작업은 여전히 같은 스레드에서 실시간 정책을 잠시 해제한 채 처리한다([clock_pump.rs](../../apps/desktop/src-tauri/src/macos_audio/clock_pump.rs)). 엔진 소비자가 측정 burst를 바탕으로 적응 목표를 소유하고 공유 클록 v3로 pump에 발행한다.
   - 플러그인 DSP 스레드는 macOS에서 time-constraint 우선순위를 적용하고, macOS 14.4 이상에서는 공유 futex로 대기한다. 100µs 폴링은 futex를 사용할 수 없거나 대기가 실패했을 때의 대체 경로다. 플러그인 `try_lock` 경합 시에는 50µs 잠든 뒤 재시도한다([processor-host](../../crates/processor-host/src/lib.rs)).
   - MixRelay가 만든 앱 캡처 pump와 플러그인 DSP 스레드는 실시간 스케줄링(time-constraint) 승격을 시도하며 실패 시 일반 우선순위로 동작한다. 대체 그래프 워커의 실시간 승격과 오디오 workgroup 참여는 아직 적용되지 않았다.
-- **제어 경로는 요청/응답 폴링이다(미터는 [적용 상태](#적용-상태)처럼 push로 바뀜).** UI → 편집 앱(Tauri invoke) → 실행부(사용자 Unix 소켓, 줄 단위 JSON) → 엔진(사용자 소유 `engine.sock`의 HTTP/JSON). 미터 20회/s, 열린 플러그인 에디터마다 4회/s, 노드 제어 1회/s, 오디오 상태 약 1회/s를 폴링한다. 연결은 재사용한다.
+- **변경 요청은 요청/응답, 실행 상태는 통합 push다.** UI → 편집 앱(Tauri invoke) → 실행부(사용자 Unix 소켓, 줄 단위 JSON) → 엔진(`engine.sock`의 HTTP/JSON). 미터·전원/세션·그래프 revision·노드 제어·네이티브 에디터 상태는 아래 통합 스트림을 공유한다. push가 없거나 끊겼을 때만 UI가 해당 상태를 폴링하고 5초마다 push를 다시 시도한다. 장치·앱 발견과 OS 아이콘 목록의 폴링은 별도다.
 - **로컬 제어 주소:** 엔진은 `engine.sock`, Driver는 `driver.sock`을 사용한다. 소켓 디렉터리는 절대 경로인 `MIXRELAY_IPC_DIR`이 우선이며, 기본값은 macOS `~/Library/Application Support/MixRelay/ipc`, Linux `$XDG_RUNTIME_DIR/mixrelay`다. HTTP API와 경로는 유지하고 Host는 각각 `mixrelay-engine`·`mixrelay-driver`를 보낸다. Driver는 다른 Host와 모든 Origin 헤더를 거부한다. 설치된 서비스는 재정의를 보지 못하므로 편집 앱·실행부는 재정의를 무시하고 세션 디렉터리를 쓴다(재정의는 격리된 시험·lab 실행용).
 
 ## 결정 1. 실시간 실행
@@ -41,18 +41,25 @@
 
 - **변경 요청은 요청/응답을 유지한다.** 보내기 전에 만든 작업 ID를 편집 앱·실행부·엔진에 그대로 전달하고, 엔진 incarnation이 다르면 부작용 전에 거부한다. 결과는 `not_admitted / accepted / completed / uncertain`으로 구분하며 자동으로 다시 보내지 않는다. 빠르게 끝난 결과도 실행부가 받을 때까지 보관한다.
 - **상태는 push로 전달한다.** 미터·다이내믹스, 플러그인 에디터 상태, 노드 제어, 엔진 전원·세션, 그래프 revision을 변경 시점에 발행한다. 미터는 엔진의 기존 단일 발행자를 정기 발행으로 바꾸고 binding 목록과 packed `f32` 배열로 보낸다.
-- 구간: 엔진→실행부는 실행부 전체가 공유하는 단방향 구독 하나(SSE. 상태는 엔진에서 실행부로만 흐르므로 WebSocket이 필요 없다), 실행부↔편집 앱은 길이 접두 framed 스트림 하나(명령과 구독 다중화), 편집 앱→웹뷰는 Tauri Channel과 명시적 credit.
-- 모든 상태에는 `runtimeIncarnation`, `engineIncarnation`, 구독 세대, 상태 버전, 미터 sequence, binding 표 버전을 붙이고 재연결 시 전체 snapshot부터 다시 받는다. 느린 구독자는 최신값만 유지하고, 미터는 구간 최대값으로 합친다.
+- 구간: 엔진→실행부는 실행부 전체가 공유하는 단방향 구독 하나(SSE. 상태는 엔진에서 실행부로만 흐르므로 WebSocket이 필요 없다), 실행부↔편집 앱은 편집 앱당 줄 단위 연결 하나(명령과 구독을 요청 ID로 다중화), 편집 앱→웹뷰는 Tauri Channel과 명시적 credit.
+- 스트림에는 `engineIncarnation`, `sequence`, 전체 상태의 `generation`, 미터 binding의 그래프 `revision`을 붙이고 재연결 시 전체 snapshot부터 다시 받는다. UI는 포트별 구독 시도 세대로 늦은 응답을 거른다. 실행부 incarnation은 후속 범위다. 느린 구독자는 최신값만 유지하고, 미터는 구간 최대값으로 합친다.
 - 엔진 HTTP 수신은 사용자 소유 Unix 소켓으로 옮겨 peer를 인증한다. 폴링은 대체 경로로 남긴다.
 
 ### 적용 상태
 
-- **미터 push (2026-10-13).**
-  - 엔진은 `/api/v1/telemetry/meters`에서 50ms 발행 창마다 `MeterTelemetry {engineIncarnation, sequence, meters}`를 보낸다. 값이 같아도 매 창 보내므로 구독자는 2초 무소식을 고장으로 판단한다. 수신 종료(admission close) 시 스트림도 끝나 graceful shutdown을 막지 않는다.
-  - 실행부는 엔진 스트림 하나를 모든 편집 앱 연결에 나눠 준다. 연결마다 창 하나짜리 mailbox를 두고, 느린 연결의 미전달 창에는 새 창을 구간 최대값으로 합친다(`MeterTelemetry::absorb`).
-  - 편집 앱은 첫 창을 받아야 구독 성공으로 본다. 웹뷰에는 credit 2개 안에서만 보내고, 웹뷰가 창을 처리할 때마다 credit을 돌려준다.
-  - UI는 push를 거부당하면 폴링하면서 5초마다 push를 다시 시도한다. 엔진이 바뀌면 이전 미터를 지운다.
-  - 아직 남은 것: 실행부↔편집 앱 다중화 스트림(지금은 구독마다 연결 하나), packed `f32` 형식, 미터 외 상태의 push, 변경 요청의 작업 ID·incarnation 확인.
+- **통합 상태 push·packed 미터 (2026-10-14, 항목 10·11 소스 적용).**
+  - 엔진 SSE 경로는 `/api/v1/telemetry` 하나다. 공유 publisher가 50ms 창마다 `event: telemetry`를 발행하고 admission close 때 종료한다. 값이 같아도 미터 창을 보내므로 2초 무소식은 실패다. Unix 소켓·`X-MixRelay-Engine` fencing은 그대로다.
+  - 이벤트는 `ControlTelemetry { engineIncarnation, sequence, meters, state? }`다. `state`는 `ControlStateSnapshot { generation, status, graph, controls, editors }`의 전체 교체 snapshot이다. 제거된 노드·에디터와 사용할 수 없는 controls(`null`)도 이 교체에 포함한다. generation은 상태 변경에만 증가하고 같은 엔진의 재연결에서도 유지된다. 첫 이벤트에는 항상 전체 상태가 있다.
+  - native window close·worker 실패·블록 경계 채택은 HTTP 변경 요청 밖에서 일어나므로 엔진의 비실시간 worker가 관찰한다. 엔진은 batch당 mutation admission을 한 번 `try_lock`하고 바쁜 writer는 기다리지 않는다. 장치/Driver 정보는 기존 1초 관찰 주기와 revision/전원 변화 때 갱신하며, 공유 메모리의 에디터·실행 revision·노드/녹음·전원 상태는 50ms 창에서 읽는다. 서버는 변경된 상태만 스트림에 넣고 현재 전체 snapshot을 별도 보관한다.
+  - `meters`는 `{ protocolVersion, revision, bindings, samples }`다. binding은 `{ nodeId, portId, channels, inputChannels }`이며 `inputChannels: null`이면 다이내믹스가 없다. binding 순서대로 output peaks, dynamics input peaks, gain reduction dB, threshold dB를 little-endian `f32`로 이어 붙인다. 매 창 binding 전체를 보내며 `revision`이 binding의 그래프 버전이다.
+  - 엔진→실행부와 실행부→편집 앱 frame의 `samples`는 base64다. SSE의 텍스트 framing·기존 HTTP dev bridge·credit 경로를 그대로 쓰기 위한 선택이며 JSON float 배열은 보내지 않는다. 실행부는 엔진 구독 하나를 모든 편집 앱에 공유한다. 느린 mailbox는 미터를 구간 최대값으로 합치고 상태는 마지막 전체 snapshot을 보존한다. 뒤늦은 편집 앱 구독에는 보관한 전체 상태도 즉시 replay한다.
+  - 웹뷰는 구독자당 Tauri Channel 하나다(`control_subscribe_telemetry`, `control_telemetry_credit`, `control_unsubscribe_telemetry`). frame은 `InvokeResponseBody::Raw`: LE `u32` JSON 길이 + JSON 메타데이터 + 4바이트 정렬용 padding + packed `f32` 바이트다. 메타데이터의 `samples`는 빈 문자열이고 UI는 sample 영역을 `Float32Array`로 decoding한다(지원 macOS/Linux host는 little-endian). 종료는 같은 채널의 `{ ended: true }` JSON marker다.
+  - credit은 기존 2개·10초 미반환 종료를 유지한다. 미터 backpressure로 상태가 없어지지 않으며 종류별 상태는 하나의 coherent 전체 snapshot으로 함께 coalesce한다. 과거의 중간 전이는 기록 로그가 아니므로 최신 snapshot으로 대체된다.
+  - UI의 포트별 hub가 상태와 미터 구독을 하나로 공유한다. 상태 소비자와 그래프 적용 대기는 push에서 갱신하고, push 실패·stale 때 캐시를 무효화한 뒤 polling fallback과 5초 retry를 쓴다. 엔진 교체 시 이전 상태/미터를 지우고 full snapshot으로 resync하며, revision이 이전 엔진과 같아도 그래프를 다시 읽는다. push 뒤 도착한 fallback 응답과 에디터 명령의 오래된 관찰은 시도 세대로 거른다. 로컬 편집 중 받은 노드 상태는 편집이 끝난 뒤 다시 소비한다. macOS 캡처 종료 확인과 메뉴 관찰은 실행부의 상태 수신 경로에도 유지한다.
+  - `MIXRELAY_DEV_ENGINE_BRIDGE=1`의 same-origin `/engine/api/v1/telemetry`는 SSE를 그대로 전달한다. `HttpControlPort`도 같은 frame/schema를 decode하고 동일 hub·fallback을 쓴다.
+  - binding 목록은 스트림마다 직전에 보낸 것과 다를 때만 보낸다(엔진 SSE·실행부 연결의 구독·웹뷰 채널 각각). 모든 구간은 순서를 지키고 잃지 않으며, 합치기는 encode 전에 일어나므로 decoder는 마지막으로 받은 binding을 쓴다. binding 없이 시작한 스트림이나 decode할 수 없는 이벤트는 스트림을 끝내고 재구독하게 한다.
+  - 실행부↔편집 앱 연결(링크 프로토콜 3): 편집 앱은 실행부 연결 하나에 명령과 구독을 함께 싣는다. 요청은 `{id, command}`, 응답과 push는 같은 `id`를 단다. 실행부는 요청을 동시에(연결당 16개) 처리하고 응답을 하나의 writer로 보낸다. 명령 응답이 텔레메트리보다 먼저 나가고, 구독마다 쓰지 못한 창 하나만 유지해 느린 편집 앱이 응답을 막거나 메모리를 늘리지 않는다. 구독은 `{type: "cancel", subscription}`(응답 없음)이나 연결 종료로 끝난다. 변경 요청은 편집 앱이 떠나도 끝까지 실행하고, 읽기는 취소한다. 편집 앱은 writer가 받지 않은 요청만 새 연결로 한 번 다시 보내고, 그 밖의 끊김은 재전송하지 않는다. 10초 넘게 비어 있던 연결은 재사용하지 않는다(실행부 유휴 종료 30초).
+  - 설치본·네이티브 부하·실제 브라우저 화면 검증은 별도다.
 - **로컬 소켓 수신 (2026-10-14).** 엔진과 Driver의 loopback TCP(19341·19342)를 없애고 사용자 소유 Unix 소켓만 연다([mixrelay-local-socket](../../crates/local-socket/src/lib.rs)).
   - 소켓 디렉터리는 `0700`, 소켓은 `0600`이다. 정규 경로의 모든 상위 디렉터리가 이 사용자나 root 소유이고 다른 사용자가 쓸 수 없어야 한다(root 소유 sticky 디렉터리 제외).
   - 시작하는 서비스는 소켓 옆 lock으로 직렬화한다. 살아 있는 소켓은 바꾸지 않고, 이 사용자 소유의 오래된 소켓만 한 서비스가 교체한다. 서비스는 자기가 만든 소켓만 지운다.

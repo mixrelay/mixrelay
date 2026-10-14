@@ -14,6 +14,7 @@ use super::{ControlProxyClient, ControlProxyResponse, Method, rejected};
 use crate::macos_audio::ApplicationCaptureState;
 
 mod meters;
+mod outbound;
 pub(crate) mod socket;
 
 /// One request per connection. Callers refresh after any disconnect and never replay writes.
@@ -24,14 +25,27 @@ pub(crate) struct Request {
     command: Command,
 }
 
-impl Request {
-    pub(super) fn is_read(&self) -> bool {
-        matches!(self.command, Command::Snapshot {})
-    }
+/// How a connection handles a request.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum RequestKind {
+    /// Cancelled when the editor leaves or the runtime stops.
+    Read,
+    /// Always runs to completion once received; pending frames show it is alive.
+    Mutation,
+    /// Streams pushed telemetry under the request's ID until cancelled or ended.
+    Subscribe,
+    /// Ends the subscription with this ID. It has no reply.
+    Cancel(u64),
+}
 
-    /// The connection becomes a stream of pushed meter windows.
-    pub(super) fn is_meter_subscription(&self) -> bool {
-        matches!(self.command, Command::SubscribeMeters {})
+impl Request {
+    pub(super) fn kind(&self) -> RequestKind {
+        match self.command {
+            Command::Snapshot {} => RequestKind::Read,
+            Command::SubscribeTelemetry {} => RequestKind::Subscribe,
+            Command::Cancel { subscription } => RequestKind::Cancel(subscription),
+            _ => RequestKind::Mutation,
+        }
     }
 }
 
@@ -39,7 +53,10 @@ impl Request {
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Command {
     Snapshot {},
-    SubscribeMeters {},
+    SubscribeTelemetry {},
+    Cancel {
+        subscription: u64,
+    },
     Invoke {
         name: String,
         arguments: Value,
@@ -97,6 +114,41 @@ impl LocalControl {
         self.client.meter_stream().await
     }
 
+    /// Preserve native stop acknowledgement and menu observations when reads are pushed.
+    pub(super) async fn observe_telemetry(
+        &self,
+        window: &mut mixrelay_control_protocol::ControlTelemetry,
+    ) -> Result<(), String> {
+        let Some(state) = &mut window.state else {
+            return Ok(());
+        };
+        #[cfg(target_os = "macos")]
+        {
+            let response = ControlProxyResponse {
+                engine: Some(window.engine_incarnation.clone()),
+                status: 200,
+                body: serde_json::to_value(&state.status).map_err(|error| error.to_string())?,
+                delivery: super::RequestDelivery::ServerResponse,
+            };
+            let response =
+                super::application_capture::power_status(&self.client, &self.captures, response)
+                    .await?;
+            if !response.is_success() {
+                return Err("native power observation unavailable".to_owned());
+            }
+            state.status =
+                serde_json::from_value(response.body).map_err(|error| error.to_string())?;
+        }
+        if let Some(app) = &self.app {
+            use tauri::Manager as _;
+            if let Some(menu) = app.try_state::<crate::driver_manager::DriverMenu>() {
+                menu.observe_audio_session_buffers(state.status.audio_session.clone());
+                menu.observe_audio_power(state.status.engine_power);
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) async fn dispatch(&self, request: Request) -> Value {
         let response = self
             .execute(request.command)
@@ -134,8 +186,8 @@ impl LocalControl {
             }
             Command::Snapshot {} => self.snapshot().await,
             // The socket streams subscriptions on their own connection before dispatch.
-            Command::SubscribeMeters {} => {
-                Err("meter subscriptions stream on their own connection".to_owned())
+            Command::SubscribeTelemetry {} | Command::Cancel { .. } => {
+                Err("subscriptions are handled by the connection".to_owned())
             }
             Command::Node {
                 session,
@@ -277,11 +329,25 @@ mod tests {
         ] {
             assert!(serde_json::from_value::<Request>(value).is_err());
         }
-        assert!(
-            serde_json::from_value::<Request>(json!({"id":1,"command":{"type":"snapshot"}}))
-                .expect("snapshot")
-                .is_read()
-        );
+        for (command, kind) in [
+            (json!({"type":"snapshot"}), RequestKind::Read),
+            (
+                json!({"type":"subscribe_telemetry"}),
+                RequestKind::Subscribe,
+            ),
+            (
+                json!({"type":"cancel","subscription":7}),
+                RequestKind::Cancel(7),
+            ),
+            (
+                json!({"type":"invoke","name":"hello","arguments":null}),
+                RequestKind::Mutation,
+            ),
+        ] {
+            let request: Request =
+                serde_json::from_value(json!({"id":1,"command":command})).expect("request");
+            assert_eq!(request.kind(), kind);
+        }
     }
 
     #[tokio::test]

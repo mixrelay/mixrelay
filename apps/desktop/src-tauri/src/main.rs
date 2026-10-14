@@ -263,7 +263,7 @@ fn graph_builder(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::W
         .manage(std::sync::Arc::new(licensing::LicensingState::default()))
         .manage(control_proxy::ControlProxyClient::default())
         .manage(control_proxy::workspace::WorkspaceFiles::default())
-        .manage(control_proxy::telemetry::MeterSubscriptions::default());
+        .manage(control_proxy::telemetry::TelemetrySubscriptions::default());
     #[cfg(target_os = "macos")]
     let builder = builder
         .manage(macos_audio::CaptureProbeState::default())
@@ -300,9 +300,9 @@ fn graph_builder(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::W
             control_proxy::control_mutate_graph_catalog,
             control_proxy::control_get_graph_status,
             control_proxy::control_get_meters,
-            control_proxy::telemetry::control_subscribe_meters,
-            control_proxy::telemetry::control_meter_credit,
-            control_proxy::telemetry::control_unsubscribe_meters,
+            control_proxy::telemetry::control_subscribe_telemetry,
+            control_proxy::telemetry::control_telemetry_credit,
+            control_proxy::telemetry::control_unsubscribe_telemetry,
             control_proxy::control_get_processors,
             control_proxy::control_retry_processor,
             control_proxy::control_get_processor_editor,

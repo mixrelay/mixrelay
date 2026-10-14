@@ -10,6 +10,7 @@ import {
   type ProcessorRetryRequest,
   type RuntimeGraphDocument,
 } from '../../core/control-port/types';
+import { waitForPushedRevision } from '../../core/control-port/waitForPushedRevision';
 import { acknowledgedNodeControl } from './controlReconciliation';
 import { audioGraphToRuntimeGraph } from './model';
 
@@ -158,7 +159,12 @@ export class GraphApplicationQueue {
   constructor(
     private readonly port: Pick<
       ControlPort,
-      'applyGraph' | 'getGraph' | 'getGraphStatus' | 'retryProcessor' | 'updateNodeControl'
+      | 'applyGraph'
+      | 'getGraph'
+      | 'getGraphStatus'
+      | 'retryProcessor'
+      | 'updateNodeControl'
+      | 'subscribeState'
     >,
     private readonly callbacks: QueueCallbacks,
   ) {}
@@ -480,6 +486,14 @@ export class GraphApplicationQueue {
   }
 
   private async waitForRevision(revision: number, signal: AbortSignal) {
+    if (this.port.subscribeState)
+      return waitForPushedRevision(
+        this.port,
+        revision,
+        signal,
+        GRAPH_APPLICATION_TIMEOUT_MS,
+        failure,
+      );
     const deadline = Date.now() + GRAPH_APPLICATION_TIMEOUT_MS;
     while (true) {
       signal.throwIfAborted();

@@ -1,3 +1,5 @@
+import { openHttpTelemetry } from './httpTelemetry';
+import { type StateListener, TelemetryHub } from './telemetry';
 import {
   type ControlPort,
   ControlPortError,
@@ -39,6 +41,15 @@ const READ_TIMEOUT_MS = 5000;
 const MAX_OPERATION_ID_LENGTH = 128;
 
 export class HttpControlPort implements ControlPort {
+  private telemetry = new TelemetryHub((listener) =>
+    openHttpTelemetry(this.origin, this.request, listener),
+  );
+  public subscribeState(listener: StateListener) {
+    return this.telemetry.subscribeState(listener);
+  }
+  public subscribeMeters(listener: import('./types').MeterTelemetryListener) {
+    return this.telemetry.subscribeMeters(listener);
+  }
   public async recordingSettings(_graphId: string, _nodeId: string): Promise<RecorderSettings> {
     throw new ControlPortError(501, {
       code: 'control_request_failed',

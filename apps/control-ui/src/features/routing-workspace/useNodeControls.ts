@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { graphControls } from '../../core/control-port/telemetry';
 import type { ControlPort, GraphNodeControls } from '../../core/control-port/types';
 import { useSharedState } from '../../core/structuralShare';
 import type { GraphApplicationQueue } from './GraphApplicationQueue';
@@ -19,25 +20,61 @@ export function useNodeControls(
     if (!graphId || !port.getNodeControls) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
+    let incarnation: string | undefined;
+    let resync = false;
     const canRead = () => !cancelled && latest.current.idle && application.canPublishParameters;
     const receive = (result: GraphNodeControls | undefined) => {
-      if (!canRead() || result?.graphId !== graphId) return;
+      if (!canRead()) return;
+      if (resync) {
+        resync = false;
+        application.refresh();
+      }
+      if (result?.graphId !== graphId) return;
       setSnapshot(result);
       if (result.revision > latest.current.revision) application.refresh();
     };
+    let pushed = false;
+    let committed: GraphNodeControls | undefined;
+    let generation = 0;
+    const unsubscribe = port.subscribeState?.((state, engine) => {
+      if (state && engine) {
+        resync ||= incarnation !== undefined && incarnation !== engine;
+        incarnation = engine;
+      }
+      generation += 1;
+      pushed = Boolean(state);
+      committed = graphControls(state, graphId);
+      receive(committed);
+      if (!committed) setSnapshot(null);
+    });
+    const schedule = () => {
+      if (!cancelled) timer = setTimeout(() => void poll(), 1000);
+    };
+    const ready = () => {
+      if (pushed) receive(committed);
+      return !pushed && canRead();
+    };
     const poll = async () => {
+      const attempt = generation;
+      const current = () => !cancelled && attempt === generation;
+      if (!ready()) {
+        schedule();
+        return;
+      }
       try {
-        if (canRead()) receive(await port.getNodeControls?.(graphId));
+        const result = await port.getNodeControls?.(graphId);
+        if (current()) receive(result);
       } catch {
         // An unreachable controller must not leave apparently actionable stale buttons.
-        if (!cancelled) setSnapshot(null);
+        if (current()) setSnapshot(null);
       } finally {
-        if (!cancelled) timer = setTimeout(() => void poll(), 1000);
+        schedule();
       }
     };
     void poll();
     return () => {
       cancelled = true;
+      unsubscribe?.();
       clearTimeout(timer);
     };
   }, [port, graphId, application, setSnapshot]);

@@ -24,21 +24,41 @@ export function useAudioStatus(controlPort: ControlPort, refreshToken = 0) {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let first = true;
+    let pushed = false;
+    let generation = 0;
+    const unsubscribe = controlPort.subscribeState?.((state) => {
+      generation += 1;
+      pushed = Boolean(state);
+      if (state) {
+        setStatus(observation(controlPort, state.status, first));
+        first = false;
+      } else setStatus(null);
+    });
+    const schedule = () => {
+      if (!cancelled) timer = setTimeout(poll, 1000);
+    };
     const poll = async () => {
+      const attempt = generation;
+      const current = () => !cancelled && attempt === generation;
+      if (pushed) {
+        schedule();
+        return;
+      }
       try {
         const next = await controlPort.getStatus();
-        if (!cancelled) setStatus(observation(controlPort, next, first));
+        if (current()) setStatus(observation(controlPort, next, first));
         first = false;
       } catch {
         // Do not leave stale green health visible after the control service disappears.
-        if (!cancelled) setStatus(null);
+        if (current()) setStatus(null);
       } finally {
-        if (!cancelled) timer = setTimeout(poll, 1000);
+        schedule();
       }
     };
     void poll();
     return () => {
       cancelled = true;
+      unsubscribe?.();
       clearTimeout(timer);
     };
   }, [controlPort, refreshToken]);

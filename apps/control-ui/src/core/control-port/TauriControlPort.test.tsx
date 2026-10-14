@@ -371,7 +371,7 @@ describe('pushed meters', () => {
     });
     const listener = { window: vi.fn(), ended: vi.fn() };
     const unsubscribe = await port.subscribeMeters(listener);
-    expect(invoke).toHaveBeenCalledWith('control_subscribe_meters', { channel });
+    expect(invoke).toHaveBeenCalledWith('control_subscribe_telemetry', { channel });
     const telemetry = {
       engineIncarnation: 'engine-a',
       sequence: 1,
@@ -383,12 +383,13 @@ describe('pushed meters', () => {
     expect(listener.window).toHaveBeenCalledWith(telemetry);
     expect(listener.ended).toHaveBeenCalledOnce();
     // Each consumed window returns a credit; the end of the stream does not.
-    expect(invoke).toHaveBeenCalledTimes(2);
-    expect(invoke).toHaveBeenLastCalledWith('control_meter_credit', { id: 7 });
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(invoke).toHaveBeenNthCalledWith(2, 'control_telemetry_credit', { id: 7 });
+    expect(invoke).toHaveBeenLastCalledWith('control_unsubscribe_telemetry', { id: 7 });
     invoke.mockRejectedValueOnce(new Error('runtime gone'));
     unsubscribe();
     await Promise.resolve();
-    expect(invoke).toHaveBeenLastCalledWith('control_unsubscribe_meters', { id: 7 });
+    expect(invoke).toHaveBeenLastCalledWith('control_unsubscribe_telemetry', { id: 7 });
     // A failed unsubscribe neither delivers nor returns credit afterwards.
     channel.onmessage(telemetry);
     expect(listener.window).toHaveBeenCalledOnce();
@@ -398,7 +399,7 @@ describe('pushed meters', () => {
   it('returns credit for windows that arrived before the subscription id', async () => {
     let subscribed!: (id: number) => void;
     const invoke = vi.fn((command: string) =>
-      command === 'control_subscribe_meters'
+      command === 'control_subscribe_telemetry'
         ? new Promise<number>((resolve) => (subscribed = resolve))
         : Promise.resolve(),
     );
@@ -420,8 +421,8 @@ describe('pushed meters', () => {
     subscribed(4);
     await subscribing;
     expect(invoke.mock.calls.slice(1)).toEqual([
-      ['control_meter_credit', { id: 4 }],
-      ['control_meter_credit', { id: 4 }],
+      ['control_telemetry_credit', { id: 4 }],
+      ['control_telemetry_credit', { id: 4 }],
     ]);
   });
 });

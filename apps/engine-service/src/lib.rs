@@ -47,6 +47,7 @@ pub mod endpoint_service;
 
 mod control_maintenance;
 pub mod control_service;
+mod control_telemetry;
 #[cfg(test)]
 mod controller_startup_tests;
 #[cfg(test)]
@@ -483,6 +484,7 @@ pub struct EngineGraphController {
     control_snapshot: RwLock<Option<node_control_snapshot::ControlReadView>>,
     meters: Arc<PeakMeterBank>,
     meter_publisher: Mutex<meter_snapshot::MeterPublisher>,
+    telemetry_status: Mutex<Option<control_telemetry::CachedStatus>>,
     processor_catalog: ProcessorCatalog,
     processor_controls: ProcessorControlRegistry,
     graph_resources: Arc<dyn GraphResourceBackend>,
@@ -628,6 +630,7 @@ impl EngineGraphController {
             meter_bindings: RwLock::new(meter_bindings),
             execution_views: RwLock::new(BTreeMap::new()),
             control_snapshot: RwLock::new(None),
+            telemetry_status: Mutex::new(None),
             meter_publisher: Mutex::new(meter_snapshot::MeterPublisher::new(Arc::clone(&meters))),
             meters,
             processor_catalog,
@@ -747,6 +750,9 @@ impl EngineGraphController {
 }
 
 impl ControlBackend for EngineGraphController {
+    fn telemetry_state(&self) -> Option<mixrelay_control_protocol::ControlStateSnapshot> {
+        self.observe_control_state()
+    }
     fn controls_snapshot(
         &self,
     ) -> Result<mixrelay_control_protocol::EngineControlSnapshot, ProtocolError> {
@@ -1027,13 +1033,7 @@ impl ControlBackend for EngineGraphController {
         node_id: &str,
     ) -> Result<ProcessorEditorStatus, ProtocolError> {
         let _mutation = self.mutation.lock();
-        let runtime_id = self.external_processor_node(node_id)?;
-        let mut status = self
-            .processor_controls
-            .editor_status(&runtime_id)
-            .map_err(|reason| processor_editor_error(node_id, &reason))?;
-        node_id.clone_into(&mut status.node_id);
-        Ok(status)
+        self.processor_editor_status_locked(node_id)
     }
 
     fn retry_failed_processor(

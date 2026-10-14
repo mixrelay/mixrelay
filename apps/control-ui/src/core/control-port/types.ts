@@ -477,6 +477,7 @@ export interface DeviceAppActivity {
 }
 
 export interface ControlPort {
+  subscribeState?(listener: import('./telemetry').StateListener): () => void;
   /** A successful missing UID is observed empty; rejection means unavailable. */
   getVirtualDeviceAppActivity?(): Promise<Record<string, DeviceAppActivity[]>>;
   getNodeControls?(graphId: string): Promise<GraphNodeControls>;

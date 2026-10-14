@@ -11,8 +11,7 @@ use std::{
     time::Duration,
 };
 
-use mixrelay_control_protocol::MeterTelemetry;
-use serde_json::Value;
+use mixrelay_control_protocol::{ControlTelemetry, TelemetryEncoder};
 use tauri::Manager as _;
 use tokio::sync::{Notify, Semaphore};
 
@@ -33,7 +32,7 @@ pub(crate) struct Mailbox {
 
 #[derive(Default)]
 struct Pending {
-    window: Option<MeterTelemetry>,
+    window: Option<ControlTelemetry>,
     ended: Option<String>,
 }
 
@@ -42,7 +41,7 @@ impl Mailbox {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    pub(crate) fn deliver(&self, window: MeterTelemetry) {
+    pub(crate) fn deliver(&self, window: ControlTelemetry) {
         let mut pending = self.pending();
         match &mut pending.window {
             Some(older) => older.absorb(window),
@@ -61,7 +60,7 @@ impl Mailbox {
     }
 
     /// The pending window, or once none remains, why the stream ended.
-    pub(crate) async fn take(&self) -> Result<MeterTelemetry, String> {
+    pub(crate) async fn take(&self) -> Result<ControlTelemetry, String> {
         loop {
             {
                 let mut pending = self.pending();
@@ -80,7 +79,7 @@ impl Mailbox {
 
 /// The editor's live meter subscriptions. Each removes itself when it ends.
 #[derive(Default)]
-pub(crate) struct MeterSubscriptions {
+pub(crate) struct TelemetrySubscriptions {
     next: AtomicU64,
     live: Mutex<HashMap<u64, Subscriber>>,
 }
@@ -90,7 +89,7 @@ struct Subscriber {
     credit: Arc<Semaphore>,
 }
 
-impl MeterSubscriptions {
+impl TelemetrySubscriptions {
     fn live(&self) -> std::sync::MutexGuard<'_, HashMap<u64, Subscriber>> {
         self.live.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -103,17 +102,17 @@ impl MeterSubscriptions {
 /// # Errors
 /// Fails when the runtime or engine cannot deliver a first window; the UI then polls.
 #[tauri::command]
-pub(crate) async fn control_subscribe_meters(
+pub(crate) async fn control_subscribe_telemetry(
     app: tauri::AppHandle,
-    channel: tauri::ipc::Channel<Value>,
+    channel: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
 ) -> Result<u64, String> {
     let connection = app
         .try_state::<crate::background::Connection>()
         .ok_or("meter push needs the background runtime")?
         .inner()
         .clone();
-    let mut subscription = connection.subscribe_meters().await?;
-    let subscriptions = app.state::<MeterSubscriptions>();
+    let mut subscription = connection.subscribe_telemetry().await?;
+    let subscriptions = app.state::<TelemetrySubscriptions>();
     let id = subscriptions.next.fetch_add(1, Ordering::Relaxed) + 1;
     let credit = Arc::new(Semaphore::new(CREDITS));
     // Spawn under the lock so the task's own removal always follows its insertion.
@@ -122,17 +121,42 @@ pub(crate) async fn control_subscribe_meters(
         let app = app.clone();
         let credit = Arc::clone(&credit);
         async move {
+            // This subscriber's encoder: bindings follow only when they change.
+            let mut encoder = TelemetryEncoder::default();
             forward(
                 &mut subscription,
-                |message| channel.send(message).is_ok(),
+                |delivery| {
+                    channel
+                        .send(webview_message(&mut encoder, &delivery))
+                        .is_ok()
+                },
                 &credit,
             )
             .await;
-            app.state::<MeterSubscriptions>().live().remove(&id);
+            app.state::<TelemetrySubscriptions>().live().remove(&id);
         }
     });
     live.insert(id, Subscriber { task, credit });
     Ok(id)
+}
+
+/// What one webview subscriber receives, in order.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Delivery {
+    Window(Box<ControlTelemetry>),
+    /// The stream ended; the UI resubscribes or falls back to polling.
+    Ended,
+}
+
+/// The same credited channel carries binary telemetry frames and a terminal JSON marker.
+fn webview_message(
+    encoder: &mut TelemetryEncoder,
+    delivery: &Delivery,
+) -> tauri::ipc::InvokeResponseBody {
+    match delivery {
+        Delivery::Window(window) => tauri::ipc::InvokeResponseBody::Raw(encoder.raw(window)),
+        Delivery::Ended => tauri::ipc::InvokeResponseBody::Json(r#"{"ended":true}"#.to_owned()),
+    }
 }
 
 /// Returns a credit after the webview consumed a window.
@@ -141,7 +165,10 @@ pub(crate) async fn control_subscribe_meters(
     clippy::needless_pass_by_value,
     reason = "Tauri injects State by value; a borrowed State is not a command argument"
 )]
-pub(crate) fn control_meter_credit(subscriptions: tauri::State<'_, MeterSubscriptions>, id: u64) {
+pub(crate) fn control_telemetry_credit(
+    subscriptions: tauri::State<'_, TelemetrySubscriptions>,
+    id: u64,
+) {
     if let Some(subscriber) = subscriptions.live().get(&id)
         && subscriber.credit.available_permits() < CREDITS
     {
@@ -155,8 +182,8 @@ pub(crate) fn control_meter_credit(subscriptions: tauri::State<'_, MeterSubscrip
     clippy::needless_pass_by_value,
     reason = "Tauri injects State by value; a borrowed State is not a command argument"
 )]
-pub(crate) fn control_unsubscribe_meters(
-    subscriptions: tauri::State<'_, MeterSubscriptions>,
+pub(crate) fn control_unsubscribe_telemetry(
+    subscriptions: tauri::State<'_, TelemetrySubscriptions>,
     id: u64,
 ) {
     if let Some(subscriber) = subscriptions.live().remove(&id) {
@@ -166,11 +193,11 @@ pub(crate) fn control_unsubscribe_meters(
 
 /// A subscription's windows, `None` once it ended.
 pub(crate) trait Windows: Send {
-    fn next(&mut self) -> impl std::future::Future<Output = Option<MeterTelemetry>> + Send;
+    fn next(&mut self) -> impl std::future::Future<Output = Option<ControlTelemetry>> + Send;
 }
 
-impl Windows for crate::background::StartedMeterSubscription {
-    fn next(&mut self) -> impl std::future::Future<Output = Option<MeterTelemetry>> + Send {
+impl Windows for crate::background::StartedTelemetrySubscription {
+    fn next(&mut self) -> impl std::future::Future<Output = Option<ControlTelemetry>> + Send {
         Self::next(self)
     }
 }
@@ -180,7 +207,7 @@ impl Windows for crate::background::StartedMeterSubscription {
 /// webview stopped returning it) unless the channel is gone.
 pub(crate) async fn forward(
     windows: &mut impl Windows,
-    mut send: impl FnMut(Value) -> bool,
+    mut send: impl FnMut(Delivery) -> bool,
     credit: &Semaphore,
 ) {
     let mailbox = Mailbox::default();
@@ -195,18 +222,15 @@ pub(crate) async fn forward(
         loop {
             let Ok(Ok(permit)) = tokio::time::timeout(CREDIT_LIMIT, credit.acquire()).await else {
                 // Best effort: a webview that resumes learns to resubscribe.
-                send(serde_json::json!({"ended": true}));
+                send(Delivery::Ended);
                 return;
             };
             let Ok(window) = mailbox.take().await else {
-                send(serde_json::json!({"ended": true}));
+                send(Delivery::Ended);
                 return;
             };
             permit.forget();
-            let Ok(message) = serde_json::to_value(window) else {
-                continue;
-            };
-            if !send(message) {
+            if !send(Delivery::Window(Box::new(window))) {
                 return;
             }
         }
@@ -279,7 +303,35 @@ impl EventParser {
 mod tests {
     use super::*;
 
-    fn window(sequence: u64, peak: f32) -> MeterTelemetry {
+    #[test]
+    fn webview_messages_pack_meters_as_raw_bytes_send_bindings_once_and_end_as_json() {
+        let mut encoder = TelemetryEncoder::default();
+        let metadata = |body: tauri::ipc::InvokeResponseBody| {
+            let tauri::ipc::InvokeResponseBody::Raw(bytes) = body else {
+                panic!("meter samples must be raw");
+            };
+            let length = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
+            assert_eq!(bytes[(length + 7) & !3..], 0.5_f32.to_le_bytes());
+            serde_json::from_slice::<serde_json::Value>(&bytes[4..4 + length]).unwrap()
+        };
+        let first = metadata(webview_message(
+            &mut encoder,
+            &Delivery::Window(Box::new(window(1, 0.5))),
+        ));
+        assert_eq!(first["meters"]["bindings"][0]["channels"], 1);
+        assert!(first["meters"].get("nodes").is_none());
+        let second = metadata(webview_message(
+            &mut encoder,
+            &Delivery::Window(Box::new(window(2, 0.5))),
+        ));
+        assert!(second["meters"].get("bindings").is_none());
+        assert!(matches!(
+            webview_message(&mut encoder, &Delivery::Ended),
+            tauri::ipc::InvokeResponseBody::Json(_)
+        ));
+    }
+
+    fn window(sequence: u64, peak: f32) -> ControlTelemetry {
         serde_json::from_value(serde_json::json!({
             "engineIncarnation": "a",
             "sequence": sequence,
@@ -341,12 +393,12 @@ mod tests {
 
     /// Prepared windows (popped from the end), then either the end or silence.
     struct Prepared {
-        windows: Vec<MeterTelemetry>,
+        windows: Vec<ControlTelemetry>,
         then_silent: bool,
     }
 
     impl Windows for Prepared {
-        async fn next(&mut self) -> Option<MeterTelemetry> {
+        async fn next(&mut self) -> Option<ControlTelemetry> {
             tokio::task::yield_now().await;
             match self.windows.pop() {
                 Some(window) => Some(window),
@@ -375,8 +427,8 @@ mod tests {
         .await;
         // One credit: a single window, then the end once credit never returns.
         assert_eq!(sent.len(), 2);
-        assert!(sent[0].get("ended").is_none());
-        assert_eq!(sent[1], serde_json::json!({"ended": true}));
+        assert!(matches!(sent[0], Delivery::Window(_)));
+        assert_eq!(sent[1], Delivery::Ended);
     }
 
     #[tokio::test(start_paused = true)]
@@ -395,7 +447,7 @@ mod tests {
             &credit,
         )
         .await;
-        assert_eq!(sent, [serde_json::json!({"ended": true})]);
+        assert_eq!(sent, [Delivery::Ended]);
         let mut attempts = 0;
         forward(
             &mut Prepared {

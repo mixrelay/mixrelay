@@ -1,13 +1,28 @@
 use super::*;
 use std::{fs, os::unix::fs::PermissionsExt, time::Instant};
+use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::UnixListener;
 
 fn fixture_connection(directory: &std::path::Path) -> Connection {
     Connection {
         path: directory.join("service.sock"),
         uid: fs::metadata(directory).unwrap().uid(),
-        idle: Arc::default(),
+        link: Arc::default(),
     }
+}
+
+async fn request(reader: &mut BufReader<tokio::net::UnixStream>) -> Value {
+    let mut frame = String::new();
+    reader.read_line(&mut frame).await.unwrap();
+    serde_json::from_str(&frame).unwrap()
+}
+
+async fn send(reader: &mut BufReader<tokio::net::UnixStream>, frame: &Value) {
+    reader
+        .get_mut()
+        .write_all(format!("{frame}\n").as_bytes())
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -199,29 +214,26 @@ fn meter_runtime(connection: &Connection, replies: Vec<Value>) -> tokio::task::J
     tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut reader = BufReader::new(stream);
-        let mut frame = String::new();
-        reader.read_line(&mut frame).await.unwrap();
-        let request: Value = serde_json::from_str(&frame).unwrap();
-        assert_eq!(request["command"]["type"], "subscribe_meters");
+        let request = request(&mut reader).await;
+        assert_eq!(request["command"]["type"], "subscribe_telemetry");
         for mut reply in replies {
             if reply["id"].is_null() {
                 reply["id"] = request["id"].clone();
             }
-            reader
-                .get_mut()
-                .write_all(format!("{reply}\n").as_bytes())
-                .await
-                .unwrap();
+            send(&mut reader, &reply).await;
         }
     })
 }
 
 fn meter_window(sequence: u64) -> Value {
-    json!({"id": null, "status": 206, "body": {
+    let window: mixrelay_control_protocol::ControlTelemetry = serde_json::from_value(json!({
         "engineIncarnation": "engine",
         "sequence": sequence,
         "meters": {"protocolVersion": 1, "revision": 1, "nodes": []}
-    }})
+    }))
+    .unwrap();
+    let body = mixrelay_control_protocol::TelemetryEncoder::default().json(&window);
+    json!({"id": null, "status": 206, "body": body})
 }
 
 #[tokio::test]
@@ -236,14 +248,17 @@ async fn a_meter_subscription_yields_pushed_windows_until_the_runtime_ends_it() 
             json!({"id": null, "status": 503, "body": {}}),
         ],
     );
-    let mut subscription = connection.subscribe_meters().await.unwrap();
-    let sequence = |window: Option<mixrelay_control_protocol::MeterTelemetry>| {
+    let mut subscription = connection.subscribe_telemetry().await.unwrap();
+    let sequence = |window: Option<mixrelay_control_protocol::ControlTelemetry>| {
         window.map(|window| window.sequence)
     };
-    assert_eq!(sequence(subscription.next().await), Some(1));
-    assert_eq!(sequence(subscription.next().await), Some(2));
+    // Windows that arrive faster than they are read fold into the latest.
+    let mut received = vec![sequence(subscription.next().await)];
+    while let Some(window) = sequence(subscription.next().await) {
+        received.push(Some(window));
+    }
+    assert_eq!(received.last(), Some(&Some(2)));
     // The terminal frame ends the stream, as does a closed connection.
-    assert_eq!(sequence(subscription.next().await), None);
     assert_eq!(sequence(subscription.next().await), None);
     server.await.unwrap();
 }
@@ -263,12 +278,8 @@ async fn a_meter_subscription_without_a_first_window_is_refused() {
             vec![json!({"id": null, "status": 400, "body": {}})],
             "meter push unavailable",
         ),
-        (
-            vec![json!({"id": 0, "status": 206, "body": {}})],
-            "meter stream answered another request",
-        ),
         // A runtime that does not know the command closes the connection.
-        (Vec::new(), "meter stream closed"),
+        (Vec::new(), "runtime connection closed"),
         (
             vec![json!({"id": null, "status": 206, "body": {"sequence": "x"}})],
             "invalid type: string \"x\", expected u64",
@@ -276,8 +287,104 @@ async fn a_meter_subscription_without_a_first_window_is_refused() {
     ] {
         let _ = std::fs::remove_file(&connection.path);
         let server = meter_runtime(&connection, replies);
-        let refused = connection.subscribe_meters().await.err().unwrap();
+        let refused = connection.subscribe_telemetry().await.err().unwrap();
         assert!(refused.starts_with(reason), "{refused}");
         server.await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn concurrent_commands_share_one_connection_and_may_be_answered_out_of_order() {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = fixture_connection(directory.path());
+    let listener = UnixListener::bind(&connection.path).unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut reader = BufReader::new(stream);
+        let first = request(&mut reader).await;
+        let second = request(&mut reader).await;
+        // Unknown IDs are ignored; then the later request is answered first.
+        send(
+            &mut reader,
+            &json!({"id": 0, "status": 200, "body": {"ok": 0}}),
+        )
+        .await;
+        send(&mut reader, &json!({"id": "x"})).await;
+        for request in [&second, &first] {
+            let name = request["command"]["name"].clone();
+            send(
+                &mut reader,
+                &json!({"id": request["id"], "status": 200, "body": {"ok": name}}),
+            )
+            .await;
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                .await
+                .is_err()
+        );
+    });
+    let (slow, fast) = tokio::join!(
+        connection.invoke("slow", json!({})),
+        connection.invoke("fast", json!({}))
+    );
+    assert_eq!(
+        (slow.unwrap(), fast.unwrap()),
+        (json!("slow"), json!("fast"))
+    );
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_subscription_shares_the_link_with_commands_and_is_cancelled_when_dropped() {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = fixture_connection(directory.path());
+    let listener = UnixListener::bind(&connection.path).unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut reader = BufReader::new(stream);
+        let subscribe = request(&mut reader).await;
+        let mut window = meter_window(1);
+        window["id"] = subscribe["id"].clone();
+        send(&mut reader, &window).await;
+        let command = request(&mut reader).await;
+        send(
+            &mut reader,
+            &json!({"id": command["id"], "status": 102, "body": {}}),
+        )
+        .await;
+        // Telemetry keeps flowing while the command is pending.
+        let mut second = meter_window(2);
+        second["id"] = subscribe["id"].clone();
+        send(&mut reader, &second).await;
+        send(
+            &mut reader,
+            &json!({"id": command["id"], "status": 200, "body": {"ok": true}}),
+        )
+        .await;
+        let cancel = request(&mut reader).await;
+        assert_eq!(cancel["command"]["type"], "cancel");
+        assert_eq!(cancel["command"]["subscription"], subscribe["id"]);
+        // A connection the editor stopped using is closed by the editor, never reused late.
+        let mut byte = [0];
+        assert_eq!(reader.read(&mut byte).await.unwrap(), 0);
+    });
+    let mut subscription = connection.subscribe_telemetry().await.unwrap();
+    assert_eq!(
+        subscription.next().await.map(|window| window.sequence),
+        Some(1)
+    );
+    assert_eq!(
+        connection.invoke("driver_mutate", json!({})).await,
+        Ok(json!(true))
+    );
+    assert_eq!(
+        subscription.next().await.map(|window| window.sequence),
+        Some(2)
+    );
+    drop(subscription);
+    let link = connection.link.lock().await.take().unwrap();
+    tokio::task::yield_now().await;
+    link.close();
+    server.await.unwrap();
 }

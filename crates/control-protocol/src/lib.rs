@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+mod telemetry;
+pub use telemetry::{ControlStateSnapshot, ControlTelemetry, TelemetryDecoder, TelemetryEncoder};
 mod editor_surface;
 mod node_control;
 mod workspace;

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AudioGraphModel } from '../../core/audio-graph/model';
 import type { ProcessorEditorStatus } from '../../core/control-port/types';
+import { controlState, statePush } from '../../test-support/controlTelemetry';
 import { EDITOR_POLL_MS, useProcessorEditors } from './useProcessorEditors';
 
 function status(state: ProcessorEditorStatus['state']): ProcessorEditorStatus {
@@ -54,6 +55,84 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+it('consumes editor replacements without polling, clears removed editors and resumes fallback on loss', async () => {
+  vi.useFakeTimers();
+  const initial = controlState(1, 1);
+  initial.editors = [status('open')];
+  const push = statePush(initial);
+  const source = { ...port(), ...push };
+  const view = renderHook(() => useProcessorEditors(source, model()));
+  await settle();
+  expect(view.result.current.statuses.get('effect')?.state).toBe('open');
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  expect(source.getProcessorEditor).not.toHaveBeenCalled();
+  const replacement = controlState(2, 1);
+  act(() => push.push(replacement));
+  expect(view.result.current.statuses.size).toBe(0);
+  act(() => push.push(replacement));
+  expect(view.result.current.statuses.size).toBe(0);
+  const otherRevision = controlState(3, 2);
+  otherRevision.editors = [status('open')];
+  act(() => push.push(otherRevision));
+  await act(() => vi.advanceTimersByTimeAsync(1000));
+  expect(source.getProcessorEditor).not.toHaveBeenCalled();
+  act(() => push.push());
+  expect(view.result.current.statuses.size).toBe(0);
+  await act(() => vi.advanceTimersByTimeAsync(EDITOR_POLL_MS));
+  expect(source.getProcessorEditor).toHaveBeenCalledOnce();
+  view.unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it.each([true, false])(
+  'fences a pending native editor command after push is lost (success: %s)',
+  async (success) => {
+    vi.useFakeTimers();
+    const initial = controlState(1, 1);
+    initial.editors = [status('closed')];
+    const push = statePush(initial);
+    const source = { ...port(), ...push };
+    const command = Promise.withResolvers<ProcessorEditorStatus>();
+    source.setProcessorEditor.mockReturnValueOnce(command.promise);
+    const view = renderHook(() => useProcessorEditors(source, model()));
+    await settle();
+    expect(source.setProcessorEditor).toHaveBeenCalledOnce();
+    act(() => push.push());
+    await act(async () => {
+      if (success) command.resolve(status('open'));
+      else command.reject(new Error('old engine'));
+    });
+    expect(view.result.current.statuses.size).toBe(0);
+    expect(view.result.current.issues.get('effect')?.busy).toBe(false);
+    // Without push, the fallback poll resumes once the command completed.
+    source.getProcessorEditor.mockResolvedValueOnce(status('open'));
+    await act(() => vi.advanceTimersByTimeAsync(EDITOR_POLL_MS));
+    expect(source.getProcessorEditor).toHaveBeenCalledOnce();
+    expect(view.result.current.statuses.get('effect')?.state).toBe('open');
+    view.unmount();
+  },
+);
+
+it('uses the newest pushed editor state after a pending open, ignoring a late poll rejection', async () => {
+  vi.useFakeTimers();
+  const push = statePush();
+  const source = { ...port(), ...push };
+  const poll = Promise.withResolvers<ProcessorEditorStatus>();
+  source.getProcessorEditor.mockReturnValueOnce(poll.promise);
+  const view = renderHook(() => useProcessorEditors(source, model()));
+  const state = controlState(1, 1);
+  state.editors = [status('closed')];
+  const command = Promise.withResolvers<ProcessorEditorStatus>();
+  source.setProcessorEditor.mockReturnValueOnce(command.promise);
+  act(() => push.push(state));
+  await act(async () => poll.reject(new Error('late read')));
+  state.editors = [status('failed')];
+  act(() => push.push({ ...state, generation: 2 }));
+  await act(async () => command.resolve(status('open')));
+  expect(view.result.current.statuses.get('effect')?.state).toBe('failed');
+  view.unmount();
 });
 
 it('does not reopen an editor from a late response after the node is powered off', async () => {

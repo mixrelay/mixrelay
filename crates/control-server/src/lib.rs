@@ -22,6 +22,7 @@ mod ingress;
 mod node_control;
 mod operations;
 mod recorder;
+mod telemetry;
 mod transport;
 mod workspace;
 pub use operations::ControlOperations;
@@ -42,7 +43,8 @@ pub const GRAPH_CATALOG_DOCUMENT_ROUTE: &str = "/api/v1/graphs/{id}";
 pub const GRAPH_LAYOUT_ROUTE: &str = "/api/v1/graphs/{id}/layout";
 pub const METERS_ROUTE: &str = "/api/v1/meters";
 /// Server-sent meter windows, one per publication window; a push alternative to polling.
-pub const METER_TELEMETRY_ROUTE: &str = "/api/v1/telemetry/meters";
+pub const CONTROL_TELEMETRY_ROUTE: &str = "/api/v1/telemetry";
+pub const METER_TELEMETRY_ROUTE: &str = CONTROL_TELEMETRY_ROUTE;
 /// The publication window pushed meters follow.
 const METER_TELEMETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
 pub const APPLICATION_CAPTURE_MANIFEST_ROUTE: &str = "/api/v1/application-capture/manifest";
@@ -55,6 +57,12 @@ pub const PROCESSOR_EDITOR_ROUTE: &str = "/api/v1/processors/{node_id}/editor";
 pub const PROCESSOR_RETRY_ROUTE: &str = "/api/v1/processors/retry";
 
 pub trait ControlBackend: Send + Sync {
+    /// Observes state without preparing native resources. A busy writer may defer this
+    /// observation: the publisher retains the last committed snapshot until it succeeds.
+    fn telemetry_state(&self) -> Option<mixrelay_control_protocol::ControlStateSnapshot> {
+        Some(crate::telemetry::snapshot(self))
+    }
+
     /// Reads all targets, controls and recorder states from one engine observation.
     /// # Errors
     /// Reports unavailable control state; ordinary concurrent mutations do not fail reads.
@@ -382,6 +390,7 @@ pub trait ControlBackend: Send + Sync {
 
 #[derive(Clone)]
 struct ControlState {
+    telemetry: Arc<telemetry::Publisher>,
     backend: Arc<dyn ControlBackend>,
 }
 
@@ -490,8 +499,12 @@ pub fn router_with_backend(
     backend: Arc<dyn ControlBackend>,
     operations: ControlOperations,
 ) -> Router {
-    operation_middleware(control_routes(), operations, backend.incarnation())
-        .with_state(ControlState { backend })
+    operation_middleware(control_routes(), operations, backend.incarnation()).with_state(
+        ControlState {
+            backend,
+            telemetry: Arc::default(),
+        },
+    )
 }
 
 fn operation_middleware<S: Clone + Send + Sync + 'static>(
@@ -554,7 +567,7 @@ fn control_routes() -> Router<ControlState> {
         .route(GRAPH_STATUS_ROUTE, get(graph_status))
         .route(CONTROL_SNAPSHOT_ROUTE, get(node_control::snapshot))
         .route(METERS_ROUTE, get(meters))
-        .route(METER_TELEMETRY_ROUTE, get(meter_telemetry))
+        .route(CONTROL_TELEMETRY_ROUTE, get(telemetry::subscribe))
         .route(
             APPLICATION_CAPTURE_MANIFEST_ROUTE,
             get(application_capture_manifest),
@@ -720,43 +733,6 @@ async fn catalog_task(work: impl FnOnce() -> Response + Send + 'static) -> Respo
             "graph catalog control task failed",
         )
     })
-}
-
-/// Pushes every publication window from the engine's shared publisher, so a steady
-/// signal stays lit and subscribers can treat silence on the stream as a failure. Missed
-/// ticks are skipped, never queued: the publisher keeps the peak until it is drained.
-/// The stream ends when admission closes, so it never holds up graceful shutdown.
-async fn meter_telemetry(
-    State(state): State<ControlState>,
-    axum::Extension(operations): axum::Extension<ControlOperations>,
-) -> axum::response::sse::Sse<
-    impl futures_util::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
-> {
-    use futures_util::StreamExt as _;
-    let backend = state.backend;
-    let incarnation = backend.incarnation();
-    let mut interval = tokio::time::interval(METER_TELEMETRY_INTERVAL);
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let stream =
-        futures_util::stream::unfold((interval, 0_u64), move |(mut interval, sequence)| {
-            let backend = Arc::clone(&backend);
-            let incarnation = incarnation.clone();
-            async move {
-                interval.tick().await;
-                let sequence = sequence + 1;
-                let event = axum::response::sse::Event::default()
-                    .event("meters")
-                    .json_data(mixrelay_control_protocol::MeterTelemetry {
-                        engine_incarnation: incarnation,
-                        sequence,
-                        meters: backend.meters(),
-                    })
-                    .unwrap_or_default();
-                Some((Ok(event), (interval, sequence)))
-            }
-        })
-        .take_until(operations.closed());
-    axum::response::sse::Sse::new(stream)
 }
 
 async fn meters(State(state): State<ControlState>) -> Json<MeterSnapshot> {
@@ -1048,6 +1024,8 @@ mod tests {
 
     use super::*;
 
+    mod telemetry;
+
     struct TestBackend {
         incarnation: String,
         last_node_control: Mutex<Option<node_control::RecordedControl>>,
@@ -1094,6 +1072,16 @@ mod tests {
     }
 
     impl ControlBackend for TestBackend {
+        fn telemetry_state(&self) -> Option<mixrelay_control_protocol::ControlStateSnapshot> {
+            if self.incarnation == "deferred-observation" {
+                let mut admitted = self.last_preview.lock().unwrap();
+                if admitted.is_none() {
+                    *admitted = Some(document().into());
+                    return None;
+                }
+            }
+            Some(crate::telemetry::snapshot(self))
+        }
         fn incarnation(&self) -> String {
             self.incarnation.clone()
         }
@@ -1312,7 +1300,15 @@ mod tests {
         }
 
         fn graph(&self) -> GraphDocument {
-            document()
+            assert_ne!(self.incarnation, "panic-observation");
+            let mut graph = document();
+            if self.incarnation == "editor-observation" {
+                graph.nodes = serde_json::from_value(serde_json::json!([{
+                    "id": "effect", "type": "gain", "config": {"channels": 2, "gainDb": 0.0}
+                }]))
+                .unwrap();
+            }
+            graph
         }
 
         fn meters(&self) -> MeterSnapshot {
@@ -1652,12 +1648,12 @@ mod tests {
             .expect("open stream")
             .expect("event bytes");
         let text = String::from_utf8(first.to_vec()).expect("utf-8 event");
-        assert!(text.starts_with("event: meters\n"), "{text}");
+        assert!(text.starts_with("event: telemetry\n"), "{text}");
         let data = text
             .lines()
             .find_map(|line| line.strip_prefix("data: "))
             .expect("event data");
-        let telemetry: mixrelay_control_protocol::MeterTelemetry =
+        let telemetry: mixrelay_control_protocol::ControlTelemetry =
             serde_json::from_str(data).expect("telemetry JSON");
         assert_eq!(telemetry.sequence, 1);
         assert_eq!(telemetry.meters.revision, 4);

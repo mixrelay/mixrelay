@@ -13,7 +13,7 @@ import { TauriControlPort } from './TauriControlPort';
 it('creates a native channel for pushed meters by default', async () => {
   const port = new TauriControlPort();
   await port.subscribeMeters({ window: vi.fn(), ended: vi.fn() });
-  expect(native.invoke).toHaveBeenCalledWith('control_subscribe_meters', {
+  expect(native.invoke).toHaveBeenCalledWith('control_subscribe_telemetry', {
     channel: expect.any(native.Channel),
   });
 });

@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import type { ControlPort, MixRelayStatus } from '../../core/control-port/types';
+import { controlState, statePush } from '../../test-support/controlTelemetry';
 import { useAudioStatus } from './useAudioStatus';
 
 const status: MixRelayStatus = {
@@ -12,6 +13,30 @@ const status: MixRelayStatus = {
   overruns: 0,
   enginePower: { enabled: true, transitioning: false },
 };
+
+it('uses pushed power, fences late fallback responses and clears lost health before polling resumes', async () => {
+  vi.useFakeTimers();
+  try {
+    const source = statePush();
+    const pending = Promise.withResolvers<MixRelayStatus>();
+    const getStatus = vi.fn().mockReturnValueOnce(pending.promise).mockResolvedValue(status);
+    const port = { ...source, getStatus } as unknown as ControlPort;
+    const hook = renderHook(() => useAudioStatus(port));
+    act(() => source.push(controlState()));
+    await act(async () => pending.resolve({ ...status, driverState: 'unavailable' }));
+    expect(hook.result.current?.driverState).toBe('ready');
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(getStatus).toHaveBeenCalledOnce();
+    act(() => source.push());
+    expect(hook.result.current).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(hook.result.current).toEqual(status);
+    hook.unmount();
+    source.push(controlState());
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 it('retains the status while refreshing, then adopts the acknowledged pause', async () => {
   let resolve!: (value: MixRelayStatus) => void;

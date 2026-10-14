@@ -1,5 +1,5 @@
 //! One user-owned controller keeps audio alive independently of editor windows.
-use mixrelay_control_protocol::MeterTelemetry;
+use mixrelay_control_protocol::ControlTelemetry;
 use serde_json::{Value, json};
 use std::os::unix::process::CommandExt as _;
 use std::{
@@ -13,12 +13,10 @@ use std::{
     time::Duration,
 };
 use tauri::Manager as _;
-use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    net::UnixStream,
-};
+use tokio::net::UnixStream;
 
 mod dispatch;
+mod link;
 pub(crate) mod menu;
 pub(crate) mod startup;
 pub(crate) use dispatch::{dispatch, is_service_command};
@@ -28,24 +26,32 @@ const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(3);
 /// Covers the runtime opening the engine stream (`local::meters::OPEN_TIMEOUT`) and its
 /// first window.
 const SUBSCRIBE_TIMEOUT: Duration = Duration::from_secs(8);
+/// The editor↔runtime link version: one connection multiplexes commands and streams.
+pub(crate) const LINK_PROTOCOL: u64 = 3;
 
-/// Idle connections kept for reuse, and how long one stays reusable: well inside the
-/// controller's idle timeout, so a pooled connection is never one it is closing for
-/// idleness. The editor is single-instance, so its one pool holds at most 4 of the
-/// controller's 32 connection slots. A controller exiting between the reuse check and
-/// the write fails that request as an exit mid-request would; it is never replayed.
-const POOL_LIMIT: usize = 4;
+/// How long an idle link stays reusable: well inside the controller's idle timeout, so a
+/// reused link is never one it is closing for idleness. A controller exiting between the
+/// check and the write fails that request as an exit mid-request would; it is never
+/// replayed.
 const REUSE_WINDOW: Duration = Duration::from_secs(10);
 const _: () = assert!(
     REUSE_WINDOW.as_secs() * 2 < crate::control_proxy::local::socket::IDLE_TIMEOUT.as_secs()
 );
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct Connection {
     path: PathBuf,
     uid: u32,
-    /// Verified connections that finished their last exchange cleanly, newest last.
-    idle: Arc<std::sync::Mutex<Vec<(UnixStream, std::time::Instant)>>>,
+    link: Arc<tokio::sync::Mutex<Option<Arc<link::Link>>>>,
+}
+
+impl std::fmt::Debug for Connection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Connection")
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Connection {
@@ -57,7 +63,7 @@ impl Connection {
         Ok(Self {
             path: directory.join("control/control.sock"),
             uid,
-            idle: Arc::default(),
+            link: Arc::default(),
         })
     }
 
@@ -78,47 +84,86 @@ impl Connection {
         Ok(stream)
     }
 
-    /// A pooled connection is reused only while recent and still open with nothing
-    /// unread: a request must never be sent into a connection the controller closed.
-    fn reusable(&self) -> Option<UnixStream> {
-        let mut idle = self.idle.lock().ok()?;
-        while let Some((stream, since)) = idle.pop() {
-            if since.elapsed() < REUSE_WINDOW && open_and_quiet(&stream) {
-                return Some(stream);
-            }
-        }
-        None
-    }
-
-    fn release(&self, stream: UnixStream) {
-        if let Ok(mut idle) = self.idle.lock()
-            && idle.len() < POOL_LIMIT
+    /// Registers a route on the current link, opening a link when there is none or the
+    /// current one can no longer take new work.
+    async fn open(
+        &self,
+        id: u64,
+        route: &impl Fn() -> link::Route,
+    ) -> Result<Arc<link::Link>, String> {
+        let mut current = self.link.lock().await;
+        if let Some(link) = current.as_ref()
+            && link.register(id, route(), REUSE_WINDOW)
         {
-            idle.push((stream, std::time::Instant::now()));
+            return Ok(Arc::clone(link));
         }
+        let link = link::Link::start(self.connect().await?, EXCHANGE_TIMEOUT);
+        if !link.register(id, route(), REUSE_WINDOW) {
+            return Err("background connection closed".into());
+        }
+        *current = Some(Arc::clone(&link));
+        Ok(link)
     }
 
-    /// Opens a dedicated connection on which the runtime pushes meter windows. Succeeds
-    /// only once the first window arrives, so an engine or runtime without push is an
-    /// error the caller can fall back from, not a stream that ends at once.
-    pub(crate) async fn subscribe_meters(&self) -> Result<StartedMeterSubscription, String> {
+    /// Registers a route and queues its request. A request the runtime cannot have
+    /// received is queued once more on a fresh link; nothing else is ever replayed.
+    async fn start(
+        &self,
+        id: u64,
+        frame: &[u8],
+        route: impl Fn() -> link::Route,
+    ) -> Result<Arc<link::Link>, String> {
+        if frame.len() as u64 > crate::control_proxy::local::socket::FRAME_LIMIT {
+            return Err("background request is too large".into());
+        }
+        for _ in 0..2 {
+            let link = self.open(id, &route).await?;
+            if link.send(frame.to_vec(), EXCHANGE_TIMEOUT).await {
+                return Ok(link);
+            }
+            // Forget the route first: closing must not end what the retry registers anew.
+            link.remove(id);
+            link.close();
+        }
+        Err("background connection unavailable".into())
+    }
+
+    /// Subscribes to pushed telemetry on the shared link. Succeeds only once the first
+    /// window arrives, so an engine or runtime without push is an error the caller can
+    /// fall back from, not a stream that ends at once.
+    pub(crate) async fn subscribe_telemetry(&self) -> Result<StartedTelemetrySubscription, String> {
         let id = REQUEST_ID.fetch_add(1, Ordering::Relaxed);
-        let mut stream = self.connect().await?;
         let frame = format!(
             "{}\n",
-            json!({"id": id, "command": {"type": "subscribe_meters"}})
+            json!({"id": id, "command": {"type": "subscribe_telemetry"}})
         );
-        tokio::time::timeout(EXCHANGE_TIMEOUT, stream.write_all(frame.as_bytes()))
-            .await
-            .map_err(|_| "meter subscription request timed out")?
-            .map_err(|e| e.to_string())?;
-        let mut subscription = MeterSubscription {
-            id,
-            reader: BufReader::new(stream),
-        };
+        // Every attempt registers a fresh mailbox: one a failed attempt's link ended must
+        // not end the retry. The last one created is the one registered.
+        let registered = std::sync::Mutex::new(None);
+        let link = self
+            .start(id, frame.as_bytes(), || {
+                let mailbox = Arc::new(crate::control_proxy::telemetry::Mailbox::default());
+                *registered
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                    Some(Arc::clone(&mailbox));
+                link::Route::Telemetry {
+                    mailbox,
+                    decoder: mixrelay_control_protocol::TelemetryDecoder::default(),
+                }
+            })
+            .await?;
+        let mailbox = registered
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .ok_or("meter subscription was not registered")?;
+        let subscription = TelemetrySubscription { id, link, mailbox };
         // The runtime may first open the engine stream (bounded by its own timeout).
-        match tokio::time::timeout(SUBSCRIBE_TIMEOUT, subscription.frame()).await {
-            Ok(Ok(window)) => Ok(subscription.with_first(window)),
+        match tokio::time::timeout(SUBSCRIBE_TIMEOUT, subscription.mailbox.take()).await {
+            Ok(Ok(window)) => Ok(StartedTelemetrySubscription {
+                first: Some(window),
+                stream: subscription,
+            }),
             Ok(Err(reason)) => Err(reason),
             Err(_) => Err("meter subscription timed out".to_owned()),
         }
@@ -131,57 +176,34 @@ impl Connection {
         )
         .map_err(|e| e.to_string())?;
         frame.push(b'\n');
-        if frame.len() as u64 > crate::control_proxy::local::socket::FRAME_LIMIT {
-            return Err("background request is too large".into());
-        }
-        let mut stream = match self.reusable() {
-            Some(stream) => stream,
-            None => self.connect().await?,
-        };
-        tokio::time::timeout(EXCHANGE_TIMEOUT, stream.write_all(&frame))
-            .await
-            .map_err(|_| "background request delivery is uncertain")?
-            .map_err(|e| e.to_string())?;
-        let mut reader = BufReader::new(stream);
+        let (replies, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let link = self
+            .start(id, &frame, || link::Route::Command(replies.clone()))
+            .await?;
+        // The route holds the only sender: a closed link ends `received`.
+        drop(replies);
         loop {
-            let mut reply = Vec::new();
-            tokio::time::timeout(
-                EXCHANGE_TIMEOUT,
-                (&mut reader)
-                    .take(crate::control_proxy::local::socket::RESPONSE_LIMIT as u64 + 1)
-                    .read_until(b'\n', &mut reply),
-            )
-            .await
-            .map_err(|_| "background response is uncertain; command was not replayed")?
-            .map_err(|e| e.to_string())?;
-            if reply.len() > crate::control_proxy::local::socket::RESPONSE_LIMIT
-                || reply.last() != Some(&b'\n')
-            {
-                return Err("background disconnected; command was not replayed".into());
-            }
-            let reply: Value =
-                serde_json::from_slice(&reply).map_err(|_| "invalid background reply")?;
-            if reply["id"] != id {
-                return Err("background reply identity mismatch".into());
-            }
+            let reply = match tokio::time::timeout(EXCHANGE_TIMEOUT, received.recv()).await {
+                Ok(Some(reply)) => reply,
+                Ok(None) => return Err("background disconnected; command was not replayed".into()),
+                Err(_) => {
+                    link.remove(id);
+                    return Err("background response is uncertain; command was not replayed".into());
+                }
+            };
             if reply["status"] == 102 {
                 continue;
             }
             if reply["status"] != 200 {
                 return Err("background controller unavailable".into());
             }
-            let result = if let Some(value) = reply["body"].get("ok") {
-                Ok(value.clone())
+            return if let Some(value) = reply["body"].get("ok") {
+                Ok(Ok(value.clone()))
             } else if let Some(error) = reply["body"].get("error") {
-                Err(error.clone())
+                Ok(Err(error.clone()))
             } else {
-                return Err("invalid background result".into());
+                Err("invalid background result".into())
             };
-            // The exchange ended on a frame boundary, so the connection can carry the next.
-            if reader.buffer().is_empty() {
-                self.release(reader.into_inner());
-            }
-            return Ok(result);
         }
     }
 
@@ -417,77 +439,38 @@ fn shared_directory(app: &tauri::AppHandle, identifier: &str) -> Result<PathBuf,
         .join(identifier))
 }
 
-/// Pushed meter windows on their own runtime connection.
-pub(crate) struct MeterSubscription {
+/// Pushed telemetry on the shared runtime link; dropping it cancels the subscription.
+pub(crate) struct TelemetrySubscription {
     id: u64,
-    reader: BufReader<UnixStream>,
+    link: Arc<link::Link>,
+    mailbox: Arc<crate::control_proxy::telemetry::Mailbox>,
+}
+
+impl Drop for TelemetrySubscription {
+    fn drop(&mut self) {
+        self.link.cancel(self.id, EXCHANGE_TIMEOUT);
+    }
 }
 
 /// A subscription whose first window has been read but not yet returned.
-pub(crate) struct StartedMeterSubscription {
-    first: Option<MeterTelemetry>,
-    stream: MeterSubscription,
+pub(crate) struct StartedTelemetrySubscription {
+    first: Option<ControlTelemetry>,
+    stream: TelemetrySubscription,
 }
 
-impl MeterSubscription {
-    fn with_first(self, window: MeterTelemetry) -> StartedMeterSubscription {
-        StartedMeterSubscription {
-            first: Some(window),
-            stream: self,
-        }
-    }
-
-    /// Reads one frame: a window, or why the runtime ended the stream.
-    async fn frame(&mut self) -> Result<MeterTelemetry, String> {
-        let mut line = Vec::new();
-        (&mut self.reader)
-            .take(crate::control_proxy::local::socket::RESPONSE_LIMIT as u64 + 1)
-            .read_until(b'\n', &mut line)
-            .await
-            .map_err(|error| error.to_string())?;
-        let mut frame: Value =
-            serde_json::from_slice(&line).map_err(|_| "meter stream closed".to_owned())?;
-        if frame["id"] != self.id {
-            return Err("meter stream answered another request".to_owned());
-        }
-        if frame["status"] != 206 {
-            let reason = frame["body"]["parameters"]["reason"].as_str();
-            return Err(reason.unwrap_or("meter push unavailable").to_owned());
-        }
-        serde_json::from_value(frame["body"].take()).map_err(|error| error.to_string())
-    }
-}
-
-impl StartedMeterSubscription {
-    /// The next window, or `None` once the runtime ends the stream, it breaks, or it
+impl StartedTelemetrySubscription {
+    /// The next window, or `None` once the runtime ends the stream, the link breaks, or it
     /// falls silent although the engine publishes continuously.
-    pub(crate) async fn next(&mut self) -> Option<MeterTelemetry> {
+    pub(crate) async fn next(&mut self) -> Option<ControlTelemetry> {
         if let Some(window) = self.first.take() {
             return Some(window);
         }
         tokio::time::timeout(
             crate::control_proxy::telemetry::SILENCE_LIMIT,
-            self.stream.frame(),
+            self.stream.mailbox.take(),
         )
         .await
         .ok()?
         .ok()
     }
-}
-
-fn open_and_quiet(stream: &UnixStream) -> bool {
-    use std::os::fd::AsRawFd as _;
-    let mut byte = 0_u8;
-    // SAFETY: a nonblocking peek of at most one byte into a live local buffer; the
-    // descriptor stays owned by `stream` and nothing is consumed.
-    let peeked = unsafe {
-        libc::recv(
-            stream.as_raw_fd(),
-            (&raw mut byte).cast(),
-            1,
-            libc::MSG_PEEK | libc::MSG_DONTWAIT,
-        )
-    };
-    // Closed (0) or unexpected data (>0) both disqualify the connection.
-    peeked < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::WouldBlock
 }

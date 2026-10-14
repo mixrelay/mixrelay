@@ -19,7 +19,7 @@ pub(crate) enum RuntimeStatus {
 }
 
 pub(super) fn compatible(hello: &Value) -> bool {
-    hello["protocolVersion"] == 2
+    hello["protocolVersion"] == super::LINK_PROTOCOL
         && hello["product"] == "mixrelay-driver"
         && hello["version"].as_str().is_some_and(supported_version)
 }
@@ -239,7 +239,7 @@ mod tests {
             reader.read_line(&mut frame).await.unwrap();
             let request: Value = serde_json::from_str(&frame).unwrap();
             let body = if request["command"]["name"] == "hello" {
-                json!({"protocolVersion":2,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")})
+                json!({"protocolVersion":crate::background::LINK_PROTOCOL,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")})
             } else {
                 json!({"status":status})
             };
@@ -270,7 +270,7 @@ mod tests {
             Connection {
                 path: directory.join("control.sock"),
                 uid: std::fs::metadata(directory).unwrap().uid(),
-                idle: std::sync::Arc::default(),
+                link: std::sync::Arc::default(),
             },
             executable,
         )
@@ -358,8 +358,9 @@ mod tests {
     fn old_app_controller_and_future_protocol_are_not_driver_connections() {
         for hello in [
             json!({"protocolVersion":1,"version":"0.1.2"}),
+            json!({"protocolVersion":2,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")}),
             json!({"protocolVersion":2,"product":"mixrelay-app","version":"0.1.2"}),
-            json!({"protocolVersion":3,"product":"mixrelay-driver","version":"0.1.2"}),
+            json!({"protocolVersion":4,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")}),
             json!({"protocolVersion":2,"product":"mixrelay-driver","version":"0.1.1"}),
             json!({"protocolVersion":2,"product":"mixrelay-driver","version":"0.1.2"}),
             json!({"protocolVersion":2,"product":"mixrelay-driver","version":"0.2.0"}),
@@ -367,7 +368,7 @@ mod tests {
             assert!(!compatible(&hello));
         }
         assert!(compatible(
-            &json!({"protocolVersion":2,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")})
+            &json!({"protocolVersion":crate::background::LINK_PROTOCOL,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")})
         ));
     }
 
@@ -378,7 +379,7 @@ mod tests {
             let connection = Connection {
                 path: directory.path().join("control.sock"),
                 uid: std::fs::metadata(directory.path()).unwrap().uid(),
-                idle: std::sync::Arc::default(),
+                link: std::sync::Arc::default(),
             };
             let listener = UnixListener::bind(&connection.path).unwrap();
             let server = tokio::spawn(async move {
@@ -386,7 +387,7 @@ mod tests {
                 let (stream, _) = listener.accept().await.unwrap();
                 let mut reader = BufReader::new(stream);
                 for result in [
-                    json!({"protocolVersion":2,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")}),
+                    json!({"protocolVersion":crate::background::LINK_PROTOCOL,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")}),
                     json!({"status":code}),
                 ] {
                     let mut frame = String::new();

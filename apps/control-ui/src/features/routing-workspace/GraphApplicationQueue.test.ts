@@ -4,6 +4,7 @@ import {
   type GraphApplyResponse,
   type RuntimeGraphDocument,
 } from '../../core/control-port/types';
+import { controlState, statePush } from '../../test-support/controlTelemetry';
 import { GRAPH_APPLICATION_TIMEOUT_MS, GraphApplicationQueue } from './GraphApplicationQueue';
 import { addRoutingNode, runtimeGraphToAudioGraph } from './model';
 import { virtualSpec } from './virtualEndpointFixtures';
@@ -55,6 +56,21 @@ function fixture(beforeReload?: () => Promise<void>) {
 const flush = () => vi.advanceTimersByTimeAsync(0);
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
+
+it('confirms pending graph application through the shared pushed revision', async () => {
+  const f = fixture();
+  const push = statePush(controlState(1, 1));
+  Object.assign(f.port, push);
+  f.port.applyGraph.mockResolvedValueOnce({ protocolVersion: 1, revision: 2, state: 'pending' });
+  f.port.getGraph.mockResolvedValueOnce({ ...empty, revision: 2 });
+  f.queue.submit(f.draft);
+  await flush();
+  expect(f.port.getGraphStatus).not.toHaveBeenCalled();
+  push.push(controlState(2, 2));
+  await flush();
+  expect(f.callbacks.state).toHaveBeenLastCalledWith('active');
+  f.queue.reset();
+});
 
 it('warns about failed persistence without retrying or blocking an applied graph', async () => {
   const f = fixture();

@@ -2,12 +2,10 @@
 //! Each editor has its own mailbox, so a slow editor never delays the engine stream or
 //! another editor; it keeps the latest window with the interval maximum.
 use std::future::Future;
-use std::io;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
-use mixrelay_control_protocol::MeterTelemetry;
-use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite};
+use mixrelay_control_protocol::ControlTelemetry;
 use tokio::sync::watch;
 
 use crate::control_proxy::telemetry::{EventParser, Mailbox, SILENCE_LIMIT};
@@ -16,26 +14,48 @@ use crate::control_proxy::telemetry::{EventParser, Mailbox, SILENCE_LIMIT};
 pub(crate) const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Where engine meter windows come from: the engine's server-sent event stream.
-pub(super) trait MeterSource: Send + Sync + 'static {
-    type Chunks: MeterChunks;
+pub(super) trait TelemetrySource: Send + Sync + 'static {
+    type Chunks: TelemetryChunks;
     fn open(&self) -> impl Future<Output = Result<Self::Chunks, String>> + Send;
+    fn observe(
+        &self,
+        _window: &mut ControlTelemetry,
+    ) -> impl Future<Output = Result<(), String>> + Send {
+        async { Ok(()) }
+    }
 }
 
 /// The body of an open meter stream.
-pub(super) trait MeterChunks: Send + 'static {
+pub(super) trait TelemetryChunks: Send + 'static {
     /// The next body chunk, `None` at the end of the stream.
     fn next_chunk(&mut self) -> impl Future<Output = Result<Option<Vec<u8>>, String>> + Send;
+    fn incarnation(&self) -> Option<String> {
+        None
+    }
 }
 
-impl MeterSource for super::LocalControl {
+impl TelemetrySource for super::LocalControl {
     type Chunks = reqwest::Response;
 
     fn open(&self) -> impl Future<Output = Result<Self::Chunks, String>> + Send {
         self.meter_stream()
     }
+
+    fn observe(
+        &self,
+        window: &mut ControlTelemetry,
+    ) -> impl Future<Output = Result<(), String>> + Send {
+        self.observe_telemetry(window)
+    }
 }
 
-impl MeterChunks for reqwest::Response {
+impl TelemetryChunks for reqwest::Response {
+    fn incarnation(&self) -> Option<String> {
+        self.headers()
+            .get("X-MixRelay-Engine")
+            .and_then(|header| header.to_str().ok())
+            .map(str::to_owned)
+    }
     async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, String> {
         self.chunk()
             .await
@@ -44,7 +64,7 @@ impl MeterChunks for reqwest::Response {
     }
 }
 
-pub(super) struct MeterHub<S> {
+pub(super) struct TelemetryHub<S> {
     source: Arc<S>,
     stop: watch::Receiver<bool>,
     readers: Mutex<Readers>,
@@ -56,9 +76,10 @@ struct Readers {
     /// The running upstream's generation; `None` when no upstream runs.
     upstream: Option<u64>,
     generations: u64,
+    latest: Option<ControlTelemetry>,
 }
 
-impl<S: MeterSource> MeterHub<S> {
+impl<S: TelemetrySource> TelemetryHub<S> {
     pub(super) fn new(source: Arc<S>, stop: watch::Receiver<bool>) -> Arc<Self> {
         Arc::new(Self {
             source,
@@ -76,6 +97,9 @@ impl<S: MeterSource> MeterHub<S> {
     pub(super) fn subscribe(self: &Arc<Self>) -> Arc<Mailbox> {
         let mailbox = Arc::new(Mailbox::default());
         let mut readers = self.readers();
+        if let Some(latest) = &readers.latest {
+            mailbox.deliver(latest.clone());
+        }
         readers.mailboxes.push(Arc::downgrade(&mailbox));
         if readers.upstream.is_none() {
             readers.generations += 1;
@@ -97,6 +121,7 @@ impl<S: MeterSource> MeterHub<S> {
         // An upstream that already gave up ownership must not end its successor's readers.
         if readers.upstream == Some(generation) {
             readers.upstream = None;
+            readers.latest = None;
             for mailbox in readers
                 .mailboxes
                 .drain(..)
@@ -114,7 +139,10 @@ impl<S: MeterSource> MeterHub<S> {
             Ok(Err(reason)) => return reason,
             Err(_) => return "telemetry stream did not open".to_owned(),
         };
+        let incarnation = chunks.incarnation();
         let mut parser = EventParser::default();
+        // The engine sends meter bindings only when they change on this stream.
+        let mut decoder = mixrelay_control_protocol::TelemetryDecoder::default();
         loop {
             let chunk = match tokio::time::timeout(SILENCE_LIMIT, chunks.next_chunk()).await {
                 Ok(Ok(Some(chunk))) => chunk,
@@ -127,9 +155,25 @@ impl<S: MeterSource> MeterHub<S> {
                 Err(reason) => return reason,
             };
             for event in events {
-                let Ok(window) = serde_json::from_str::<MeterTelemetry>(&event) else {
-                    continue;
+                let window = serde_json::from_str(&event)
+                    .map_err(|error| error.to_string())
+                    .and_then(|value| decoder.json(value));
+                // A lost binding table would misplace every later window.
+                let mut window = match window {
+                    Ok(window) => window,
+                    Err(reason) => return reason,
                 };
+                if incarnation
+                    .as_ref()
+                    .is_some_and(|engine| engine != &window.engine_incarnation)
+                {
+                    return "telemetry engine identity changed".to_owned();
+                }
+                match tokio::time::timeout(OPEN_TIMEOUT, self.source.observe(&mut window)).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(reason)) => return reason,
+                    Err(_) => return "control observation stalled".to_owned(),
+                }
                 if !self.publish(&window) {
                     return "no meter readers".to_owned();
                 }
@@ -140,8 +184,19 @@ impl<S: MeterSource> MeterHub<S> {
     /// Delivers a window to every live mailbox. With none left, gives up the upstream
     /// under the same lock a new reader would take, so that reader starts a fresh one.
     /// Only the running upstream publishes: ownership changes only once it gave up.
-    fn publish(&self, window: &MeterTelemetry) -> bool {
+    fn publish(&self, window: &ControlTelemetry) -> bool {
         let mut readers = self.readers();
+        let state = window.state.clone().or_else(|| {
+            readers
+                .latest
+                .as_ref()
+                .filter(|old| old.engine_incarnation == window.engine_incarnation)
+                .and_then(|old| old.state.clone())
+        });
+        readers.latest = Some(ControlTelemetry {
+            state,
+            ..window.clone()
+        });
         readers.mailboxes.retain(|weak| match weak.upgrade() {
             Some(mailbox) => {
                 mailbox.deliver(window.clone());
@@ -151,59 +206,26 @@ impl<S: MeterSource> MeterHub<S> {
         });
         if readers.mailboxes.is_empty() {
             readers.upstream = None;
+            readers.latest = None;
             return false;
         }
         true
     }
 }
 
-/// Writes one editor's windows as `206` frames until the engine stream ends (a terminal
-/// `503` frame), the editor closes or writes anything, or the runtime stops.
-pub(super) async fn relay<S, R, W>(
+/// Moves one subscription's windows from the shared engine stream to its connection,
+/// until the engine stream ends (ending the subscription with the reason) or the
+/// connection cancels it.
+pub(super) async fn pump<S: TelemetrySource>(
     id: u64,
-    hub: &Arc<MeterHub<S>>,
-    read: &mut R,
-    write: &mut W,
-    mut stop: watch::Receiver<bool>,
-) -> io::Result<()>
-where
-    S: MeterSource,
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
+    hub: Arc<TelemetryHub<S>>,
+    outbound: Arc<super::outbound::Outbound>,
+) {
     let mailbox = hub.subscribe();
-    let mut probe = [0_u8; 1];
     loop {
-        let next = tokio::select! {
-            biased;
-            _ = stop.changed() => return Ok(()),
-            // A subscriber sends nothing more: data or end of file ends the relay.
-            _ = read.read(&mut probe) => return Ok(()),
-            next = mailbox.take() => next,
-        };
-        let (frame, last) = match next {
-            Ok(window) => (
-                serde_json::json!({"id": id, "status": 206, "body": window}),
-                false,
-            ),
-            Err(reason) => (
-                serde_json::json!({
-                    "id": id,
-                    "status": 503,
-                    "body": {"code": "control_unavailable", "parameters": {"reason": reason}},
-                }),
-                true,
-            ),
-        };
-        // A blocked write still yields to the runtime stopping or the editor leaving.
-        tokio::select! {
-            biased;
-            _ = stop.changed() => return Ok(()),
-            _ = read.read(&mut probe) => return Ok(()),
-            written = super::socket::write_frame(write, &frame) => written?,
-        }
-        if last {
-            return Ok(());
+        match mailbox.take().await {
+            Ok(window) => outbound.window(id, window),
+            Err(reason) => return outbound.end(id, &reason),
         }
     }
 }
