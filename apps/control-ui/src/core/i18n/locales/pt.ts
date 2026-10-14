@@ -500,6 +500,9 @@ export const pt = {
         'A captura de áudio de aplicações não está disponível. Verifique a aplicação e a permissão de captura de áudio.',
       control_unavailable: 'O motor de áudio local não está disponível.',
       control_request_failed: 'A solicitação de controle de áudio falhou.',
+      engine_replaced:
+        'O mecanismo de áudio reiniciou antes desta alteração. Nada foi aplicado. Tente novamente.',
+      invalid_operation_id: 'A solicitação de controle de áudio era inválida e não foi aplicada.',
       graph_binding_unsupported:
         'O dispositivo ou processador selecionado não é compatível com este formato de áudio ou conexão.',
       node_not_found: 'O nó de destino foi removido. Nenhum comando foi aplicado.',

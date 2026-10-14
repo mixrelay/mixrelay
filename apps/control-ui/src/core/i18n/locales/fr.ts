@@ -500,6 +500,10 @@ export const fr = {
         'La capture audio d’applications est indisponible. Vérifiez l’application et l’autorisation de capture audio.',
       control_unavailable: 'Le moteur audio local est indisponible.',
       control_request_failed: 'La demande de contrôle audio a échoué.',
+      engine_replaced:
+        'Le moteur audio a redémarré avant cette modification. Rien n’a été appliqué. Réessayez.',
+      invalid_operation_id:
+        'La demande de contrôle audio était mal formée et n’a pas été appliquée.',
       graph_binding_unsupported:
         'Ce format audio ou cette connexion n’est pas pris en charge par le périphérique ou le processeur sélectionné.',
       node_not_found: 'Le nœud cible a été supprimé. Aucune commande n’a été appliquée.',

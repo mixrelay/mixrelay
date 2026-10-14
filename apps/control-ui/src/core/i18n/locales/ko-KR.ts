@@ -486,6 +486,9 @@ export const koKR = {
         '애플리케이션 오디오를 캡처할 수 없습니다. 실행 상태와 오디오 캡처 권한을 확인하세요.',
       control_unavailable: '로컬 오디오 엔진에 연결할 수 없습니다.',
       control_request_failed: '오디오 제어 요청을 처리하지 못했습니다.',
+      engine_replaced:
+        '이 변경 전에 오디오 엔진이 다시 시작되었습니다. 아무것도 적용하지 않았습니다. 다시 시도해 주세요.',
+      invalid_operation_id: '오디오 제어 요청 형식이 올바르지 않아 적용하지 않았습니다.',
       node_not_found: '대상 노드가 삭제되어 제어하지 않았습니다.',
       node_disabled: '꺼진 노드입니다. 노드를 켠 뒤 제어하세요.',
       graph_binding_unsupported:

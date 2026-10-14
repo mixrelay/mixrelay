@@ -468,6 +468,8 @@ export const zhHans = {
       audio_source_unavailable: '应用音频采集不可用。请检查应用及音频采集权限。',
       control_unavailable: '本地音频引擎不可用。',
       control_request_failed: '音频控制请求失败。',
+      engine_replaced: '音频引擎在此更改前已重新启动。未应用任何更改。请重试。',
+      invalid_operation_id: '音频控制请求格式无效，未应用。',
       graph_binding_unsupported: '所选设备或处理器不支持此音频格式或连接。',
       node_not_found: '目标节点已被删除。未应用任何命令。',
       node_disabled: '此节点已关闭。请先启用节点再使用此控件。',

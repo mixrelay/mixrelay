@@ -379,6 +379,9 @@ const overrides = {
         '[!! Åpplïcåtïöñ åüdïö cåptüré ïs üñåvåïlåblé. Chéck thé åpp åñd pérmïssïöñ. !!]',
       control_unavailable: '[!! Thé löcål åüdïö éñgïñé ïs üñåvåïlåblé !!]',
       control_request_failed: '[!! Thé åüdïö çöñtröl réqüést fåïléd !!]',
+      engine_replaced:
+        '[!! Thé åüdïö éñgïñé réstårtéd béföré thïs çhåñgé. Ñöthïñg wås åpplïéd — trý ågåïñ !!]',
+      invalid_operation_id: '[!! Thé åüdïö çöñtröl réqüést wås målförméd åñd wås ñöt åpplïéd !!]',
       node_not_found: '[!! Node no longer exists !!]',
       node_disabled: '[!! Node is off !!]',
       graph_binding_unsupported:

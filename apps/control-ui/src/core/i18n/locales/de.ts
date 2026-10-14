@@ -506,6 +506,9 @@ export const de = {
         'Die Anwendungsaufnahme ist nicht verfügbar. Prüfen Sie die Anwendung und die Berechtigung zur Audioaufnahme.',
       control_unavailable: 'Die lokale Audio-Engine ist nicht verfügbar.',
       control_request_failed: 'Die Audiosteuerungsanfrage ist fehlgeschlagen.',
+      engine_replaced:
+        'Die Audio-Engine wurde vor dieser Änderung neu gestartet. Es wurde nichts angewendet. Versuchen Sie es erneut.',
+      invalid_operation_id: 'Die Audiosteuerungsanfrage war fehlerhaft und wurde nicht angewendet.',
       graph_binding_unsupported:
         'Dieses Audioformat oder diese Verbindung wird vom ausgewählten Gerät oder Prozessor nicht unterstützt.',
       node_not_found: 'Der Zielknoten wurde entfernt. Es wurde kein Befehl angewendet.',

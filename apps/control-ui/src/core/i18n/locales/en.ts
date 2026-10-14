@@ -487,6 +487,9 @@ export const en = {
         'Application audio capture is unavailable. Check the app and audio capture permission.',
       control_unavailable: 'The local audio engine is unavailable.',
       control_request_failed: 'The audio control request failed.',
+      engine_replaced:
+        'The audio engine restarted before this change. Nothing was applied. Try again.',
+      invalid_operation_id: 'The audio control request was malformed and was not applied.',
       graph_binding_unsupported:
         'This audio format or connection is not supported by the selected device or processor.',
       node_not_found: 'The target node was removed. No command was applied.',

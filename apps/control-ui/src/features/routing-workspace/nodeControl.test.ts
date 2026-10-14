@@ -312,3 +312,22 @@ it.each([true, false])(
     expect(f.port.applyGraph).not.toHaveBeenCalled();
   },
 );
+
+it.each(['engine_replaced', 'invalid_operation_id'] as const)(
+  'treats an engine fence (%s) as not admitted: reloads controls and reports it',
+  async (code) => {
+    const f = fixture();
+    const task = f.queue.setNodeControl('graph-a', 'processor', { enabled: true });
+    f.completion.reject(
+      new ControlPortError(code === 'engine_replaced' ? 409 : 400, {
+        code,
+        parameters: { operationOutcome: 'not_admitted' },
+      }),
+    );
+    await expect(task).resolves.toEqual({ state: 'rejected', code });
+    expect(f.callbacks.state).toHaveBeenLastCalledWith('active');
+    expect(f.callbacks.restore).toHaveBeenCalledTimes(1);
+    expect(f.callbacks.error).toHaveBeenLastCalledWith(code);
+    expect(f.port.applyGraph).not.toHaveBeenCalled();
+  },
+);

@@ -414,6 +414,8 @@ export type ProtocolErrorCode =
   | 'audio_source_unavailable'
   | 'control_unavailable'
   | 'control_request_failed'
+  | 'engine_replaced'
+  | 'invalid_operation_id'
   | 'graph_binding_unsupported'
   | 'graph_exchange_busy'
   | 'graph_invalid'

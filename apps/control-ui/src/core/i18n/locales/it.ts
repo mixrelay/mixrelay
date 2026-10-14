@@ -498,6 +498,10 @@ export const it = {
         'Acquisizione audio delle applicazioni non disponibile. Verifica l’app e il permesso di acquisizione audio.',
       control_unavailable: 'Il motore audio locale non è disponibile.',
       control_request_failed: 'Richiesta di controllo audio non riuscita.',
+      engine_replaced:
+        'Il motore audio è stato riavviato prima di questa modifica. Non è stato applicato nulla. Riprova.',
+      invalid_operation_id:
+        'La richiesta di controllo audio non era valida e non è stata applicata.',
       graph_binding_unsupported:
         'Questo formato o collegamento audio non è supportato dal dispositivo o processore selezionato.',
       node_not_found: 'Il nodo di destinazione è stato rimosso. Nessun comando è stato applicato.',

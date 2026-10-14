@@ -469,6 +469,8 @@ export const zhHant = {
       audio_source_unavailable: '應用程式音訊擷取無法使用。請檢查應用程式及音訊擷取權限。',
       control_unavailable: '本地音訊引擎無法使用。',
       control_request_failed: '音訊控制請求失敗。',
+      engine_replaced: '音訊引擎在此變更前已重新啟動。未套用任何變更。請重試。',
+      invalid_operation_id: '音訊控制請求格式無效，未套用。',
       graph_binding_unsupported: '所選裝置或處理器不支援此音訊格式或連線。',
       node_not_found: '目標節點已被刪除。未套用任何命令。',
       node_disabled: '此節點已關閉。請先啟用節點再使用此控制項。',

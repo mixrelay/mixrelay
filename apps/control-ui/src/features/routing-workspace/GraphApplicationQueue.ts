@@ -77,8 +77,9 @@ function definiteNodeRejection(error: unknown) {
     if (
       typeof parameters === 'object' &&
       parameters !== null &&
-      'nodeControlOutcome' in parameters &&
-      parameters.nodeControlOutcome === 'not_applied'
+      (('nodeControlOutcome' in parameters && parameters.nodeControlOutcome === 'not_applied') ||
+        // The engine fenced the request before admission (replaced incarnation, bad ID).
+        ('operationOutcome' in parameters && parameters.operationOutcome === 'not_admitted'))
     )
       return true;
   }
@@ -87,6 +88,8 @@ function definiteNodeRejection(error: unknown) {
     [
       'graph_catalog_revision_stale',
       'graph_revision_stale',
+      'engine_replaced',
+      'invalid_operation_id',
       'node_disabled',
       'node_not_found',
       'processor_instance_stale',
