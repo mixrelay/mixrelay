@@ -11,7 +11,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 const PROBE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const PROBE_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HalPresence {
     Absent,
     Loaded,
@@ -103,19 +103,46 @@ pub fn check_coreaudio_response() -> Result<(), NativeError> {
 
 pub(super) fn wait_for_hal_absence() -> Result<(), NativeError> {
     tracing::info!("Checking removed HAL absence with a 30-second process deadline");
-    let deadline = Instant::now() + PROBE_TIMEOUT;
+    wait_for_hal_state(HalPresence::Absent)
+}
+
+pub(super) fn wait_for_hal_presence() -> Result<(), NativeError> {
+    tracing::info!("Checking restored HAL is loaded with a 30-second process deadline");
+    wait_for_hal_state(HalPresence::Loaded)
+}
+
+fn wait_for_hal_state(expected: HalPresence) -> Result<(), NativeError> {
+    wait_for_presence(
+        expected,
+        |deadline| probe_hal_presence_until(&mut hal_probe_command()?, deadline),
+        Instant::now,
+        std::thread::sleep,
+    )
+}
+
+fn wait_for_presence(
+    expected: HalPresence,
+    mut probe: impl FnMut(Instant) -> Result<HalPresence, NativeError>,
+    mut now: impl FnMut() -> Instant,
+    mut sleep: impl FnMut(Duration),
+) -> Result<(), NativeError> {
+    let deadline = now() + PROBE_TIMEOUT;
     loop {
-        match probe_hal_presence_until(&mut hal_probe_command()?, deadline) {
-            Ok(HalPresence::Absent) => return Ok(()),
-            result if Instant::now() >= deadline => {
+        match probe(deadline) {
+            Ok(actual) if actual == expected => return Ok(()),
+            result if now() >= deadline => {
                 return match result {
                     Err(error) => Err(error),
                     Ok(_) => Err(NativeError::Activation(
-                        "removed HAL is still loaded by CoreAudio".to_owned(),
+                        match expected {
+                            HalPresence::Absent => "removed HAL is still loaded by CoreAudio",
+                            HalPresence::Loaded => "restored HAL is not loaded by CoreAudio",
+                        }
+                        .to_owned(),
                     )),
                 };
             }
-            _ => std::thread::sleep(PROBE_RETRY_INTERVAL),
+            _ => sleep(PROBE_RETRY_INTERVAL),
         }
     }
 }
@@ -177,7 +204,71 @@ impl Drop for ProbeProcess {
 
 #[cfg(test)]
 mod tests {
+    use super::super::hal_reload::{
+        HostIdentity, HostProcesses, capture_hosts, reload_with_readiness,
+    };
     use super::*;
+    use std::{cell::Cell, path::PathBuf};
+
+    #[test]
+    fn recovery_without_driver_requires_loaded_plugin_and_falls_back_if_absent() {
+        struct Hosts;
+        impl HostProcesses for Hosts {
+            fn candidates(&mut self) -> Result<Vec<u32>, NativeError> {
+                Ok(vec![42])
+            }
+            fn identity(&mut self, _: u32, _: &[PathBuf]) -> Result<HostIdentity, NativeError> {
+                Ok(HostIdentity {
+                    started: "generation".to_owned(),
+                    command: "host".to_owned(),
+                })
+            }
+            fn signal(&mut self, _: u32, _: &'static str) -> Result<(), NativeError> {
+                Ok(())
+            }
+            fn wait_for_exit(&mut self, _: u32) -> Result<bool, NativeError> {
+                Ok(true)
+            }
+        }
+        let mut hosts = Hosts;
+        let paths = [PathBuf::from(crate::HAL_PATH)];
+        let captured = capture_hosts(&mut hosts, &paths).unwrap();
+        let full_reload = Cell::new(false);
+        let readiness_calls = Cell::new(0);
+        reload_with_readiness(
+            Some(&captured),
+            &paths,
+            &mut hosts,
+            || {
+                full_reload.set(true);
+                Ok(())
+            },
+            || {
+                readiness_calls.set(readiness_calls.get() + 1);
+                let clock = Cell::new(Instant::now());
+                wait_for_presence(
+                    HalPresence::Loaded,
+                    |_| {
+                        // A successful lookup with plugin == 0 answers CoreAudio
+                        // preflight, but must not satisfy restored HAL readiness.
+                        let plugin = if full_reload.get() { 100 } else { 0 };
+                        classify_hal_lookup(0, 4, plugin).map(|loaded| {
+                            if loaded {
+                                HalPresence::Loaded
+                            } else {
+                                HalPresence::Absent
+                            }
+                        })
+                    },
+                    || clock.get(),
+                    |_| clock.set(clock.get() + PROBE_TIMEOUT),
+                )
+            },
+        )
+        .unwrap();
+        assert!(full_reload.get());
+        assert_eq!(readiness_calls.get(), 2);
+    }
 
     #[test]
     fn lookup_errors_and_unexpected_data_never_confirm_absence() {

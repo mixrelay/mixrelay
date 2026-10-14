@@ -3,6 +3,7 @@
 mod account;
 mod audio_probe;
 mod graph_app;
+mod hal_reload;
 mod launchctl;
 mod service;
 mod trust;

@@ -13,14 +13,25 @@ use std::{
 pub(super) fn activate_driver(
     reload_attempted: &mut bool,
     bootstrap: impl FnOnce() -> Result<(), NativeError>,
-    reload: impl FnOnce() -> Result<(), NativeError>,
-    ready: impl FnOnce() -> Result<(), NativeError>,
+    activate: impl FnOnce() -> Result<(), NativeError>,
 ) -> Result<(), NativeError> {
     bootstrap()?;
     *reload_attempted = true;
-    reload()?;
-    tracing::info!("Waiting for the registered Driver to report readiness");
-    ready()
+    activate()
+}
+
+pub(super) fn activate_restored_driver(
+    reload_attempted: &mut bool,
+    bootstrap: impl FnOnce() -> Result<(), NativeError>,
+    activate: impl FnOnce() -> Result<(), NativeError>,
+    ready: impl FnOnce() -> Result<(), NativeError>,
+) -> Result<(), NativeError> {
+    if *reload_attempted {
+        activate_driver(reload_attempted, bootstrap, activate)
+    } else {
+        bootstrap()?;
+        ready()
+    }
 }
 
 fn validate_driver_ready(
@@ -140,6 +151,9 @@ pub(super) fn wait_for_service_exit(state: &RegistrationState) -> Result<(), Nat
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::hal_reload::{
+        HostIdentity, HostProcesses, capture_hosts, reload_with_readiness,
+    };
     use super::super::require_reload_approval;
     use super::*;
     use std::cell::RefCell;
@@ -181,9 +195,6 @@ mod tests {
             },
             || {
                 events.borrow_mut().push("reload");
-                Ok(())
-            },
-            || {
                 events.borrow_mut().push("ready");
                 Ok(())
             },
@@ -210,8 +221,10 @@ mod tests {
                 activate_driver(
                     &mut attempted,
                     || action("bootstrap"),
-                    || action("reload"),
-                    || action("ready")
+                    || {
+                        action("reload")?;
+                        action("ready")
+                    }
                 )
                 .is_err()
             );
@@ -223,6 +236,110 @@ mod tests {
             };
             assert_eq!(*events.borrow(), expected);
             assert_eq!(attempted, failed_operation != "bootstrap");
+        }
+    }
+
+    struct RestoredHosts<'a> {
+        loaded: bool,
+        events: &'a RefCell<Vec<&'static str>>,
+    }
+
+    impl HostProcesses for RestoredHosts<'_> {
+        fn candidates(&mut self) -> Result<Vec<u32>, NativeError> {
+            self.events.borrow_mut().push("discover");
+            Ok(if self.loaded { vec![42] } else { Vec::new() })
+        }
+        fn identity(
+            &mut self,
+            _pid: u32,
+            _bundles: &[std::path::PathBuf],
+        ) -> Result<HostIdentity, NativeError> {
+            self.events.borrow_mut().push("validate");
+            Ok(HostIdentity {
+                started: "restored-host".to_owned(),
+                command: "Core Audio Driver (MixRelayHAL.driver)".to_owned(),
+            })
+        }
+        fn signal(&mut self, pid: u32, signal: &'static str) -> Result<(), NativeError> {
+            assert_eq!((pid, signal), (42, "-TERM"));
+            self.events.borrow_mut().push("term");
+            Ok(())
+        }
+        fn wait_for_exit(&mut self, _pid: u32) -> Result<bool, NativeError> {
+            self.events.borrow_mut().push("exit");
+            Ok(true)
+        }
+    }
+
+    #[test]
+    fn recovery_prefers_targeted_reload_and_retains_fallback_and_no_reload_paths() {
+        for (attempted, loaded, fails_once, expected) in [
+            (
+                true,
+                true,
+                false,
+                "bootstrap discover validate validate term exit ready",
+            ),
+            (
+                true,
+                true,
+                true,
+                "bootstrap discover validate validate term exit ready full ready",
+            ),
+            (true, false, false, "bootstrap full ready"),
+            (false, true, false, "bootstrap ready"),
+        ] {
+            let events = RefCell::new(Vec::new());
+            let mut hosts = RestoredHosts {
+                loaded,
+                events: &events,
+            };
+            let bundles = [std::path::PathBuf::from(crate::HAL_PATH)];
+            // Recovery captures hosts before file rollback and activation.
+            let captured = attempted
+                .then(|| capture_hosts(&mut hosts, &bundles).ok())
+                .flatten();
+            events.borrow_mut().clear();
+            let mut attempted = attempted;
+            let mut fail = fails_once;
+            let ready = || {
+                events.borrow_mut().push("ready");
+                if std::mem::take(&mut fail) {
+                    Err(NativeError::Activation(
+                        "restored Driver not ready".to_owned(),
+                    ))
+                } else {
+                    Ok(())
+                }
+            };
+            activate_restored_driver(
+                &mut attempted,
+                || {
+                    events.borrow_mut().push("bootstrap");
+                    Ok(())
+                },
+                || {
+                    reload_with_readiness(
+                        captured.as_ref(),
+                        &bundles,
+                        &mut hosts,
+                        || {
+                            events.borrow_mut().push("full");
+                            Ok(())
+                        },
+                        ready,
+                    )
+                },
+                || {
+                    events.borrow_mut().push("ready");
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                *events.borrow(),
+                expected.split_whitespace().collect::<Vec<_>>()
+            );
         }
     }
 

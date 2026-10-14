@@ -9,7 +9,8 @@ use crate::{
 
 use super::{
     account::ResolvedServiceAccount,
-    audio_probe::{check_coreaudio_response, wait_for_hal_absence},
+    audio_probe::{check_coreaudio_response, wait_for_hal_absence, wait_for_hal_presence},
+    hal_reload,
     launchctl::{self, RegistrationState},
     trust::{require_lifecycle_storage, require_root, validate_destination_ancestors},
 };
@@ -20,7 +21,8 @@ mod runtime;
 
 use payload::{installed_hal_version, read_bounded_file};
 use runtime::{
-    activate_driver, wait_for_driver_ready, wait_for_restored_driver_ready, wait_for_service_exit,
+    activate_driver, activate_restored_driver, wait_for_driver_ready,
+    wait_for_restored_driver_ready, wait_for_service_exit,
 };
 
 /// The actual macOS `ServiceLifecycle` boundary for the coordinated transaction.
@@ -32,6 +34,8 @@ pub struct NativeServiceLifecycle {
     delete_saved_settings: bool,
     coreaudio_reload_approved: bool,
     coreaudio_reload_attempted: bool,
+    hal_hosts: Option<hal_reload::CapturedHosts>,
+    hal_mapping_paths: Vec<PathBuf>,
     pending_user_data_cleanup: Option<super::user_data::PendingCleanup>,
     operation: crate::OperationKind,
 }
@@ -49,6 +53,8 @@ impl NativeServiceLifecycle {
             delete_saved_settings: false,
             coreaudio_reload_approved: false,
             coreaudio_reload_attempted: false,
+            hal_hosts: None,
+            hal_mapping_paths: vec![PathBuf::from(HAL_PATH)],
             pending_user_data_cleanup: None,
             operation: crate::OperationKind::Remove,
         }
@@ -134,17 +140,18 @@ impl NativeServiceLifecycle {
             });
         }
         let version = installed_hal_version()?;
-        if self.coreaudio_reload_attempted {
-            activate_driver(
-                &mut self.coreaudio_reload_attempted,
-                launchctl::bootstrap,
-                launchctl::reload_coreaudio,
-                || wait_for_restored_driver_ready(&version, self.account.account().home()),
-            )
-        } else {
-            launchctl::bootstrap()?;
-            wait_for_restored_driver_ready(&version, self.account.account().home())
-        }
+        activate_restored_driver(
+            &mut self.coreaudio_reload_attempted,
+            launchctl::bootstrap,
+            || {
+                hal_reload::reload_and_wait(
+                    self.hal_hosts.as_ref(),
+                    &self.hal_mapping_paths,
+                    || wait_for_restored_driver_ready(&version, self.account.account().home()),
+                )
+            },
+            || wait_for_restored_driver_ready(&version, self.account.account().home()),
+        )
     }
 }
 
@@ -187,13 +194,21 @@ impl ServiceLifecycle for NativeServiceLifecycle {
         )?;
         self.registration_after_drain = None;
         self.coreaudio_reload_attempted = false;
+        // Captured under coordinated installer serialization, before replacing files.
+        let hal_was_present = fs::symlink_metadata(HAL_PATH).is_ok();
+        self.hal_mapping_paths = vec![layout.target_path(OwnedTarget::Hal)];
+        self.hal_hosts = if hal_was_present {
+            hal_reload::capture(&self.hal_mapping_paths)
+        } else {
+            None
+        };
         Ok(NativeServiceSnapshot {
             registration,
             launchd_configuration: installed,
             account: self.account.clone(),
             team: self.team.clone(),
             engine_was_registered,
-            hal_was_present: fs::symlink_metadata(HAL_PATH).is_ok(),
+            hal_was_present,
             remover_was_present: fs::symlink_metadata(crate::REMOVAL_LAUNCHD_PATH).is_ok()
                 && fs::symlink_metadata(crate::UNINSTALLER_PATH).is_ok(),
         })
@@ -206,6 +221,9 @@ impl ServiceLifecycle for NativeServiceLifecycle {
     ) -> Result<(), Self::Error> {
         self.require_reload_approval()?;
         require_root()?;
+        // Use the filesystem transaction's exact destination, never a backup glob.
+        self.hal_mapping_paths
+            .push(staged.backup_path(OwnedTarget::Hal));
         if matches!(request, TransactionRequest::Remove) {
             self.verify_service_account()?;
             // The embedded executable is still at its verified original path here;
@@ -305,8 +323,13 @@ impl ServiceLifecycle for NativeServiceLifecycle {
                 activate_driver(
                     &mut self.coreaudio_reload_attempted,
                     launchctl::bootstrap,
-                    launchctl::reload_coreaudio,
-                    || wait_for_driver_ready(&version, self.account.account().home()),
+                    || {
+                        hal_reload::reload_and_wait(
+                            self.hal_hosts.as_ref(),
+                            &self.hal_mapping_paths,
+                            || wait_for_driver_ready(&version, self.account.account().home()),
+                        )
+                    },
                 )?;
                 if fs::symlink_metadata(crate::REMOVAL_LAUNCHD_PATH).is_ok() {
                     crate::removal::register_helper(&self.team).map_err(NativeError::UserData)?;
@@ -365,6 +388,14 @@ impl ServiceLifecycle for NativeServiceLifecycle {
                 "rollback cannot restore files while the Driver remains registered",
             ));
         }
+        // The replacement HAL may now be hosted by a different generation. Capture
+        // before filesystem rollback removes it/restores the original bundle. An
+        // unresolved deleted-vnode mapping after rollback safely selects fallback.
+        self.hal_hosts = if self.coreaudio_reload_attempted && snapshot.hal_was_present {
+            hal_reload::capture(&self.hal_mapping_paths)
+        } else {
+            None
+        };
         Ok(())
     }
 
@@ -404,8 +435,14 @@ impl ServiceLifecycle for NativeServiceLifecycle {
         match &snapshot.registration {
             RegistrationState::Absent => {
                 if self.coreaudio_reload_attempted {
-                    launchctl::reload_coreaudio()?;
-                    if !snapshot.hal_was_present {
+                    if snapshot.hal_was_present {
+                        hal_reload::reload_and_wait(
+                            self.hal_hosts.as_ref(),
+                            &self.hal_mapping_paths,
+                            wait_for_hal_presence,
+                        )?;
+                    } else {
+                        launchctl::reload_coreaudio()?;
                         wait_for_hal_absence()?;
                     }
                 }

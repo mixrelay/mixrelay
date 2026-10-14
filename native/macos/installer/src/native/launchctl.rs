@@ -115,6 +115,7 @@ pub(super) fn bootout() -> Result<(), NativeError> {
 /// Force-terminates only the OS-owned Core Audio server so launchd reloads the HAL.
 /// The lifecycle requires explicit audio-interruption approval before this call.
 pub(super) fn reload_coreaudio() -> Result<(), NativeError> {
+    tracing::info!(strategy = ?super::hal_reload::ReloadStrategy::FullCoreAudio, "Reloading CoreAudio; active system audio will be interrupted");
     run_mutation(
         COREAUDIO_RELOAD_PROGRAM,
         &["-KILL", "-u", "_coreaudiod", "coreaudiod"],

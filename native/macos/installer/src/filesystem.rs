@@ -247,7 +247,7 @@ impl FilesystemLayout {
         &self.staging_root
     }
 
-    fn target_path(&self, target: OwnedTarget) -> PathBuf {
+    pub(crate) fn target_path(&self, target: OwnedTarget) -> PathBuf {
         self.root.join(target.path().trim_start_matches('/'))
     }
 }
@@ -889,7 +889,7 @@ impl FilesystemStaged {
             .join(target_name(target))
     }
 
-    fn backup_path(&self, target: OwnedTarget) -> PathBuf {
+    pub(crate) fn backup_path(&self, target: OwnedTarget) -> PathBuf {
         self.staging_root
             .join(BACKUP_DIRECTORY_NAME)
             .join(target_name(target))
