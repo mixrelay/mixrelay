@@ -313,6 +313,7 @@ fn graph_builder(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::W
             control_proxy::control_set_processor_editor,
             control_proxy::control_apply_graph,
             platform_audio::list_capturable_applications,
+            platform_audio::list_device_app_activity,
             platform_audio::list_audio_devices,
             #[cfg(target_os = "macos")]
             macos_audio::start_capture_probe,

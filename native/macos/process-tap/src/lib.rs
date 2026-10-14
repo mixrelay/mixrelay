@@ -41,6 +41,56 @@ pub fn active_capture_owners() -> u32 {
     process_tap_lifecycle::active_owners()
 }
 
+/// One process's current use of one audio device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceUse {
+    pub process_id: i32,
+    pub bundle_id: String,
+    pub device_uid: String,
+    /// The process is playing into the device (its output side).
+    pub playing: bool,
+    /// The process is recording from the device (its input side).
+    pub recording: bool,
+}
+
+/// Which processes are currently playing into or recording from which audio devices,
+/// read from `CoreAudio` process objects (macOS 14.2 and later).
+///
+/// # Errors
+/// Fails when the system process list cannot be read.
+pub fn device_uses() -> Result<Vec<DeviceUse>, TapError> {
+    native::device_uses()
+}
+
+/// Records one process's device lists as one entry per device, merging a device it both
+/// plays into and records from.
+fn push_device_uses(
+    uses: &mut Vec<DeviceUse>,
+    process_id: i32,
+    bundle_id: &str,
+    playing: &[String],
+    recording: &[String],
+) {
+    for (devices, output) in [(playing, true), (recording, false)] {
+        for device_uid in devices {
+            match uses
+                .iter_mut()
+                .find(|entry| entry.process_id == process_id && entry.device_uid == *device_uid)
+            {
+                Some(entry) if output => entry.playing = true,
+                Some(entry) => entry.recording = true,
+                None => uses.push(DeviceUse {
+                    process_id,
+                    bundle_id: bundle_id.to_owned(),
+                    device_uid: device_uid.clone(),
+                    playing: output,
+                    recording: !output,
+                }),
+            }
+        }
+    }
+}
+
 pub use ffi::{
     mr_process_tap_create, mr_process_tap_destroy, mr_process_tap_read,
     mr_process_tap_refresh_format, mr_process_tap_start, mr_process_tap_stats, mr_process_tap_stop,

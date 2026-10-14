@@ -33,6 +33,14 @@ impl Address {
             element: 0,
         }
     }
+
+    const fn input(selector: [u8; 4]) -> Self {
+        Self {
+            selector: u32::from_be_bytes(selector),
+            scope: u32::from_be_bytes(*b"inpt"),
+            element: 0,
+        }
+    }
 }
 
 /// Native timestamp prefix and trailing SMPTE storage, matching `AudioTimeStamp`.
@@ -107,6 +115,12 @@ unsafe extern "C" {
         encoding: u32,
     ) -> *const c_void;
     fn CFEqual(left: *const c_void, right: *const c_void) -> u8;
+    fn CFStringGetCString(
+        string: *const c_void,
+        buffer: *mut c_char,
+        size: isize,
+        encoding: u32,
+    ) -> u8;
     fn CFRelease(object: *const c_void);
     fn mr_tap_description_supports_bundle_selection() -> bool;
     fn mr_tap_description_supports_device_stream_selection() -> bool;
@@ -551,6 +565,82 @@ pub(super) fn add_listener(session: &TapSession) -> Result<(), TapError> {
     resources.listener = true;
     session.resources.set(resources);
     Ok(())
+}
+
+/// A `CFString` property as UTF-8, or `None` when absent, unreadable or longer than 1 KiB.
+fn string_property(object: u32, address: Address) -> Option<String> {
+    let mut value: *const c_void = ptr::null();
+    let mut size =
+        u32::try_from(size_of::<*const c_void>()).expect("pointer size fits native extent");
+    // SAFETY: exclusive pointer output starts null; a non-null result is a +1 reference
+    // released below on every path.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            object,
+            &raw const address,
+            0,
+            ptr::null(),
+            &raw mut size,
+            ptr::from_mut(&mut value).cast(),
+        )
+    };
+    let mut text = None;
+    finish_property(
+        (status, size, value),
+        |value| {
+            let mut buffer = [0 as c_char; 1024];
+            // SAFETY: the buffer is writable for its full length and CF null-terminates it.
+            let copied =
+                unsafe { CFStringGetCString(value, buffer.as_mut_ptr(), 1024, 0x0800_0100) != 0 };
+            if copied {
+                // SAFETY: CFStringGetCString succeeded, so the buffer holds a C string.
+                text = unsafe { CStr::from_ptr(buffer.as_ptr()) }
+                    .to_str()
+                    .ok()
+                    .map(str::to_owned);
+            }
+            copied
+        },
+        |value| {
+            // SAFETY: property output transfers a +1 reference even on partial failure.
+            unsafe { CFRelease(value) };
+        },
+    );
+    text
+}
+
+/// Every running process's use of audio devices, from `CoreAudio` process objects: which
+/// device UIDs it is playing into (running output) and recording from (running input).
+pub(super) fn device_uses() -> Result<Vec<super::DeviceUse>, TapError> {
+    let mut uses = Vec::new();
+    for process in object_ids(1, Address::global(*b"prs#"))? {
+        let (Ok(process_id), Some(bundle_id)) = (
+            property::<i32>(process, *b"ppid"),
+            string_property(process, Address::global(*b"pbid")),
+        ) else {
+            continue;
+        };
+        let playing = property::<u32>(process, *b"piro").is_ok_and(|running| running != 0);
+        let recording = property::<u32>(process, *b"piri").is_ok_and(|running| running != 0);
+        let uids = |address: Address, active: bool| -> Vec<String> {
+            if !active {
+                return Vec::new();
+            }
+            object_ids(process, address)
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|device| string_property(device, Address::global(*b"uid ")))
+                .collect()
+        };
+        super::push_device_uses(
+            &mut uses,
+            process_id,
+            &bundle_id,
+            &uids(Address::output(*b"pdv#"), playing),
+            &uids(Address::input(*b"pdv#"), recording),
+        );
+    }
+    Ok(uses)
 }
 
 fn process_matches(process: u32, expected: *const c_void) -> bool {

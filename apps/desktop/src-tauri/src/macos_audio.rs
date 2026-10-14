@@ -27,6 +27,16 @@ mod capture_reader;
 mod capture_transaction;
 #[path = "macos_audio/clock_pump.rs"]
 mod clock_pump;
+#[path = "macos_audio/device_activity.rs"]
+mod device_activity;
+
+/// Apps currently playing into or recording from each `MixRelay` device, keyed by the
+/// device's native UID. A device absent from the map has no app using it.
+#[tauri::command]
+pub(crate) fn list_device_app_activity()
+-> Result<std::collections::BTreeMap<String, Vec<device_activity::DeviceAppActivity>>, String> {
+    device_activity::activity()
+}
 #[cfg(all(test, mixrelay_application_clock_fixture))]
 #[path = "macos_audio/live_clock_tests.rs"]
 mod live_clock_tests;

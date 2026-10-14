@@ -716,3 +716,39 @@ fn each_callback_wakes_the_capture_pump_through_the_session_notifier() {
         mixrelay_realtime::Wake::Notified { .. }
     ));
 }
+
+#[test]
+fn device_uses_merge_playing_and_recording_per_process_and_device() {
+    let mut uses = Vec::new();
+    let devices = |uids: &[&str]| uids.iter().map(|uid| (*uid).to_owned()).collect::<Vec<_>>();
+    super::push_device_uses(
+        &mut uses,
+        7,
+        "com.example.app",
+        &devices(&["a", "b"]),
+        &devices(&["b"]),
+    );
+    super::push_device_uses(&mut uses, 8, "com.example.other", &[], &devices(&["a"]));
+    let entry = |process_id, device: &str, playing, recording| super::DeviceUse {
+        process_id,
+        bundle_id: if process_id == 7 {
+            "com.example.app"
+        } else {
+            "com.example.other"
+        }
+        .to_owned(),
+        device_uid: device.to_owned(),
+        playing,
+        recording,
+    };
+    assert_eq!(
+        uses,
+        [
+            entry(7, "a", true, false),
+            entry(7, "b", true, true),
+            entry(8, "a", false, true)
+        ]
+    );
+    // The live process list is readable without any device or permission.
+    assert!(super::device_uses().is_ok());
+}
