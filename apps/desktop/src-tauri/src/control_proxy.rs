@@ -71,6 +71,7 @@ pub(crate) async fn control_set_graph_layout(
 #[derive(Debug, Clone)]
 pub(crate) struct ControlProxyClient {
     client: Client,
+    engine: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     pub(crate) background: std::sync::Arc<std::sync::Mutex<Option<crate::background::Connection>>>,
     #[cfg(target_os = "macos")]
     capture_gate: Arc<tauri::async_runtime::Mutex<()>>,
@@ -101,6 +102,8 @@ impl ControlProxyClient {
     pub(crate) fn with_socket(socket: Option<std::path::PathBuf>) -> Self {
         let client = socket.and_then(|socket| {
             Client::builder()
+                // Ambiguous mutations are resolved by ID, never sent again by HTTP retry.
+                .retry(reqwest::retry::never())
                 .unix_socket(socket)
                 .no_proxy()
                 .build()
@@ -108,6 +111,7 @@ impl ControlProxyClient {
                 .ok()
         });
         Self {
+            engine: std::sync::Arc::default(),
             connected: client.is_some(),
             client: client.unwrap_or_default(),
             background: std::sync::Arc::default(),
@@ -126,6 +130,8 @@ impl ControlProxyClient {
 #[derive(Debug, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ControlProxyResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) engine: Option<String>,
     pub(crate) status: u16,
     pub(crate) body: Value,
     #[cfg(target_os = "macos")]
@@ -227,6 +233,7 @@ impl ControlProxyClient {
             .send()
             .await
             .map_err(|error| error.to_string())?;
+        exchange::observe_engine(self, &response);
         if response.status().is_success() {
             Ok(response)
         } else {
@@ -258,6 +265,7 @@ async fn wait_for_controls<T>(
 
 fn rejected(code: &str) -> ControlProxyResponse {
     ControlProxyResponse {
+        engine: None,
         status: 409,
         body: serde_json::json!({"code": code, "parameters": {"nodeControlOutcome": "not_applied"}}),
         #[cfg(target_os = "macos")]
@@ -617,6 +625,7 @@ impl ControlProxyResponse {
 #[cfg(target_os = "macos")]
 fn application_capture_error(reason: &str) -> ControlProxyResponse {
     ControlProxyResponse {
+        engine: None,
         status: 503,
         delivery: RequestDelivery::NotSent,
         body: serde_json::json!({

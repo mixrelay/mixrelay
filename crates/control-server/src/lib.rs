@@ -490,6 +490,31 @@ pub fn router_with_backend(
     backend: Arc<dyn ControlBackend>,
     operations: ControlOperations,
 ) -> Router {
+    operation_middleware(control_routes(), operations, backend.incarnation())
+        .with_state(ControlState { backend })
+}
+
+fn operation_middleware<S: Clone + Send + Sync + 'static>(
+    routes: Router<S>,
+    operations: ControlOperations,
+    incarnation: String,
+) -> Router<S> {
+    routes
+        // The last layer is outermost in axum. Keep body admission outside the operation
+        // dispatcher so malformed/incomplete bodies never consume an operation receipt.
+        // Ingress resolves existing client IDs before acquiring a body permit.
+        .layer(axum::middleware::from_fn(operations::dispatch))
+        .layer(axum::middleware::from_fn(ingress::read_body))
+        // Ingress already bounds every body; avoid Json's separate 2 MiB default.
+        .layer(DefaultBodyLimit::disable())
+        .layer(axum::Extension(operations))
+        .layer(axum::middleware::from_fn_with_state(
+            incarnation,
+            operations::engine_identity,
+        ))
+}
+
+fn control_routes() -> Router<ControlState> {
     Router::new()
         .route(
             "/api/v1/operations/{id}",
@@ -564,14 +589,6 @@ pub fn router_with_backend(
             GRAPH_LAYOUT_ROUTE,
             get(graph_layout).put(update_graph_layout),
         )
-        // The last layer is outermost in axum. Keep body admission outside the operation
-        // dispatcher so malformed/incomplete bodies never consume an operation receipt.
-        .layer(axum::middleware::from_fn(operations::dispatch))
-        .layer(axum::middleware::from_fn(ingress::read_body))
-        // Ingress already bounds every body; avoid Json's separate 2 MiB default.
-        .layer(DefaultBodyLimit::disable())
-        .layer(axum::Extension(operations))
-        .with_state(ControlState { backend })
 }
 
 async fn status(State(state): State<ControlState>) -> Response {
@@ -997,9 +1014,11 @@ async fn apply_graph(
 
 fn protocol_error_status(code: ErrorCode) -> StatusCode {
     match code {
-        ErrorCode::GraphRevisionStale | ErrorCode::GraphExchangeBusy | ErrorCode::NodeDisabled => {
-            StatusCode::CONFLICT
-        }
+        ErrorCode::InvalidOperationId => StatusCode::BAD_REQUEST,
+        ErrorCode::GraphRevisionStale
+        | ErrorCode::GraphExchangeBusy
+        | ErrorCode::NodeDisabled
+        | ErrorCode::EngineReplaced => StatusCode::CONFLICT,
         ErrorCode::NodeNotFound => StatusCode::NOT_FOUND,
         ErrorCode::FeatureLimit => StatusCode::FORBIDDEN,
         ErrorCode::GraphInvalid
@@ -1030,6 +1049,7 @@ mod tests {
     use super::*;
 
     struct TestBackend {
+        incarnation: String,
         last_node_control: Mutex<Option<node_control::RecordedControl>>,
         last_recorder: Mutex<
             Option<(
@@ -1059,6 +1079,7 @@ mod tests {
     impl TestBackend {
         fn with_result(result: Result<GraphApplyResponse, ProtocolError>) -> Arc<Self> {
             Arc::new(Self {
+                incarnation: String::new(),
                 last_node_control: Mutex::new(None),
                 last_recorder: Mutex::new(None),
                 apply_result: Mutex::new(result),
@@ -1073,6 +1094,9 @@ mod tests {
     }
 
     impl ControlBackend for TestBackend {
+        fn incarnation(&self) -> String {
+            self.incarnation.clone()
+        }
         fn controls_snapshot(
             &self,
         ) -> Result<mixrelay_control_protocol::EngineControlSnapshot, ProtocolError> {
@@ -1377,6 +1401,85 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn engine_header_and_fence_cover_success_errors_and_fallbacks() {
+        let mut backend = TestBackend::with_result(Ok(GraphApplyResponse {
+            protocol_version: PROTOCOL_VERSION,
+            persistence_error: None,
+            revision: 2,
+            state: mixrelay_control_protocol::GraphApplyState::Pending,
+        }));
+        Arc::get_mut(&mut backend).unwrap().incarnation = "engine-one".into();
+        let operations = ControlOperations::new();
+        let router = router_with_backend(backend.clone(), operations);
+        for expected in [Some("old-engine"), Some("engine-one"), None] {
+            *backend.last_apply.lock().unwrap() = None;
+            let mut request = Request::put(GRAPH_ROUTE).header(CONTENT_TYPE, "application/json");
+            if let Some(expected) = expected {
+                request = request.header("x-mixrelay-expected-engine", expected);
+            }
+            let response = router
+                .clone()
+                .oneshot(
+                    request
+                        .body(Body::from(serde_json::to_vec(&document()).unwrap()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.headers()["x-mixrelay-engine"], "engine-one");
+            if expected == Some("old-engine") {
+                assert_eq!(response.status(), StatusCode::CONFLICT);
+                let bytes = axum::body::to_bytes(response.into_body(), 4096)
+                    .await
+                    .unwrap();
+                let error: ProtocolError = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(error.code, ErrorCode::EngineReplaced);
+                assert_eq!(error.parameters["operationOutcome"], "not_admitted");
+                assert!(backend.last_apply.lock().unwrap().is_none());
+            } else {
+                assert_eq!(response.status(), StatusCode::ACCEPTED);
+                assert!(backend.last_apply.lock().unwrap().is_some());
+            }
+        }
+        for (method, path, status) in [
+            (Method::GET, HEALTH_ROUTE, StatusCode::OK),
+            (Method::GET, "/missing", StatusCode::NOT_FOUND),
+            (Method::POST, HEALTH_ROUTE, StatusCode::METHOD_NOT_ALLOWED),
+            (
+                Method::GET,
+                "/api/v1/operations/unknown",
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                Method::DELETE,
+                "/api/v1/operations/unknown",
+                StatusCode::NOT_FOUND,
+            ),
+            (Method::PUT, GRAPH_ROUTE, StatusCode::UNPROCESSABLE_ENTITY),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(path)
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.headers()["x-mixrelay-engine"], "engine-one");
+            assert_eq!(response.status(), status);
+        }
+        let response = super::router(ControlOperations::new())
+            .oneshot(Request::get(HEALTH_ROUTE).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert!(!response.headers().contains_key("x-mixrelay-engine"));
+    }
+
     fn document() -> GraphDocument {
         GraphDocument::new(5, vec![], vec![])
     }
@@ -1441,6 +1544,7 @@ mod tests {
         use std::{sync::atomic::Ordering, time::Duration};
         let gate = Arc::new(EditorGate::default());
         let backend = Arc::new(TestBackend {
+            incarnation: String::new(),
             last_node_control: Mutex::new(None),
             last_recorder: Mutex::new(None),
             apply_result: Mutex::new(Err(processor_unavailable("unused"))),
@@ -1908,6 +2012,8 @@ mod tests {
     #[tokio::test]
     async fn typed_graph_failures_map_to_stable_http_statuses() {
         let cases = [
+            (ErrorCode::EngineReplaced, StatusCode::CONFLICT),
+            (ErrorCode::InvalidOperationId, StatusCode::BAD_REQUEST),
             (ErrorCode::GraphRevisionStale, StatusCode::CONFLICT),
             (ErrorCode::GraphExchangeBusy, StatusCode::CONFLICT),
             (ErrorCode::GraphInvalid, StatusCode::UNPROCESSABLE_ENTITY),

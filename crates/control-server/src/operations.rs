@@ -7,7 +7,7 @@ use std::{
 use axum::{
     Extension, Json,
     body::{Body, Bytes, to_bytes},
-    extract::{Path, Request},
+    extract::{Path, Request, State as AxumState},
     http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, header::CONTENT_TYPE},
     middleware::Next,
     response::{IntoResponse, Response},
@@ -21,6 +21,8 @@ const INGRESS_PERMITS: usize = 8;
 const OPERATION_WAIT: Duration = Duration::from_millis(100);
 const COMPLETED_TTL: Duration = Duration::from_mins(1);
 const OPERATION_HEADER: &str = "x-mixrelay-operation";
+const REQUEST_HEADER: &str = "x-mixrelay-operation-request";
+const ENGINE_HEADER: &str = "x-mixrelay-engine";
 const RESULT_HEADER: &str = "x-mixrelay-operation-result";
 
 #[derive(Clone, Copy)]
@@ -75,7 +77,7 @@ enum Outcome {
     },
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct StoredResponse {
     status: StatusCode,
     headers: HeaderMap,
@@ -83,9 +85,10 @@ struct StoredResponse {
     original: bool,
 }
 
+#[derive(Debug)]
 enum Snapshot {
     Pending,
-    Complete(StoredResponse),
+    Complete(Box<StoredResponse>),
     Missing,
 }
 
@@ -162,21 +165,33 @@ impl ControlOperations {
             })
     }
 
-    fn admit(&self) -> Result<Admission, ()> {
+    fn admit(&self, requested: Option<&str>) -> Result<Admission, Snapshot> {
         let mut state = self.lock_state();
-        let now = Instant::now();
-        state.records.retain(|_, record| {
-            !matches!(&record.outcome, Outcome::Complete { completed_at, .. }
-                if now.saturating_duration_since(*completed_at) >= COMPLETED_TTL)
-        });
-        if !state.admission_open || state.records.len() >= MAX_RECEIPTS {
-            return Err(());
+        purge_expired(&mut state);
+        if let Some(record) = requested.and_then(|id| state.records.get(id)) {
+            return Err(match &record.outcome {
+                Outcome::Pending => Snapshot::Pending,
+                Outcome::Complete { response, .. } => {
+                    Snapshot::Complete(Box::new(response.clone()))
+                }
+            });
         }
-        let sequence = self
-            .inner
-            .next_id
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let id = format!("op-{:032x}-{:016x}", self.inner.owner_nonce, sequence);
+        if !state.admission_open || state.records.len() >= MAX_RECEIPTS {
+            return Err(Snapshot::Missing);
+        }
+        let id = requested.map_or_else(
+            || loop {
+                let sequence = self
+                    .inner
+                    .next_id
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let id = format!("op-{:032x}-{:016x}", self.inner.owner_nonce, sequence);
+                if !state.records.contains_key(&id) {
+                    break id;
+                }
+            },
+            str::to_owned,
+        );
         let notify = Arc::new(Notify::new());
         state.records.insert(
             id.clone(),
@@ -224,7 +239,7 @@ impl ControlOperations {
             Some(Record {
                 outcome: Outcome::Complete { response, .. },
                 ..
-            }) => Snapshot::Complete(response.clone()),
+            }) => Snapshot::Complete(Box::new(response.clone())),
             None => Snapshot::Missing,
         }
     }
@@ -280,6 +295,79 @@ pub(crate) struct IngressLease {
     _permit: Arc<OwnedSemaphorePermit>,
 }
 
+fn valid_client_id(id: &str) -> bool {
+    (16..=64).contains(&id.len())
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
+fn client_operation_id(request: &Request) -> Result<Option<&str>, ErrorCode> {
+    match request.headers().get(REQUEST_HEADER) {
+        None => Ok(None),
+        Some(header) => match header.to_str() {
+            Ok(id) if valid_client_id(id) => Ok(Some(id)),
+            _ => Err(ErrorCode::InvalidOperationId),
+        },
+    }
+}
+
+/// Resolve retained identities before touching the body or its admission budget.
+/// Dispatch still checks atomically when admitting a new identity after ingress.
+pub(super) fn before_ingress(
+    operations: &ControlOperations,
+    request: &Request,
+) -> Option<Response> {
+    if !needs_operation(request) {
+        return None;
+    }
+    let id = match client_operation_id(request) {
+        Ok(id) => id?,
+        Err(code) => return Some(not_admitted(StatusCode::BAD_REQUEST, code)),
+    };
+    match operations.snapshot(id) {
+        Snapshot::Pending => Some(pending_response(id)),
+        Snapshot::Complete(response) => Some(response.into_response(Some(id))),
+        Snapshot::Missing => None,
+    }
+}
+
+fn not_admitted(status: StatusCode, code: ErrorCode) -> Response {
+    (
+        status,
+        Json(ProtocolError {
+            code,
+            parameters: serde_json::json!({"operationOutcome": "not_admitted"}),
+        }),
+    )
+        .into_response()
+}
+
+/// Fence before ingress/admission and stamp every response, including rejections.
+pub(super) async fn engine_identity(
+    AxumState(incarnation): AxumState<String>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let mismatch = needs_operation(&request)
+        && request
+            .headers()
+            .get("x-mixrelay-expected-engine")
+            .is_some_and(|expected| expected.as_bytes() != incarnation.as_bytes());
+    let mut response = if mismatch {
+        not_admitted(StatusCode::CONFLICT, ErrorCode::EngineReplaced)
+    } else {
+        next.run(request).await
+    };
+    if !incarnation.is_empty() {
+        response.headers_mut().insert(
+            ENGINE_HEADER,
+            HeaderValue::try_from(incarnation).expect("engine incarnation must be a valid header"),
+        );
+    }
+    response
+}
+
 pub(super) async fn dispatch(
     Extension(operations): Extension<ControlOperations>,
     mut request: Request,
@@ -292,9 +380,15 @@ pub(super) async fn dispatch(
         return response;
     }
     let lease = request.extensions_mut().remove::<IngressLease>();
-    let Ok(admission) = operations.admit() else {
-        drop(lease);
-        return admission_full_response(&request);
+    let requested = match client_operation_id(&request) {
+        Ok(id) => id.map(str::to_owned),
+        Err(code) => return not_admitted(StatusCode::BAD_REQUEST, code),
+    };
+    let admission = match operations.admit(requested.as_deref()) {
+        Ok(admission) => admission,
+        Err(Snapshot::Pending) => return pending_response(requested.as_deref().unwrap()),
+        Err(Snapshot::Complete(response)) => return response.into_response(requested.as_deref()),
+        Err(Snapshot::Missing) => return admission_full_response(&request),
     };
     let operation_id = admission.id.clone();
     let task_operations = operations.clone();
@@ -307,9 +401,11 @@ pub(super) async fn dispatch(
         task_operations.complete(&operation_id, response);
     });
 
-    if completion_after_wait(&operations, &admission.id, admission.notify).await
-        && let Some(response) = operations.take_completed(&admission.id)
-    {
+    let completed = completion_after_wait(&operations, &admission.id, admission.notify).await;
+    if completed && requested.is_some() {
+        return get(Extension(operations), Path(admission.id)).await;
+    }
+    if completed && let Some(response) = operations.take_completed(&admission.id) {
         return response.into_response(None);
     }
     pending_response(&admission.id)
@@ -563,12 +659,365 @@ mod tests {
         panic!("handler panic");
     }
 
+    #[tokio::test]
+    async fn client_ids_retain_fast_results_and_deduplicate_even_when_admission_is_closed() {
+        let operations = ControlOperations::new();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let handler_calls = calls.clone();
+        let router = test_router(
+            operations.clone(),
+            post(move || {
+                handler_calls.fetch_add(1, Ordering::SeqCst);
+                async {
+                    (
+                        StatusCode::CONFLICT,
+                        Json(json!({"code":"graph_exchange_busy"})),
+                    )
+                }
+            }),
+        );
+        let id = "Client_0123456789-";
+        for _ in 0..2 {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::post("/work")
+                        .header(REQUEST_HEADER, id)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::CONFLICT);
+            assert_eq!(response.headers()[RESULT_HEADER], id);
+            let body = to_bytes(response.into_body(), 4096).await.unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&body).unwrap()["code"],
+                "graph_exchange_busy"
+            );
+            operations.close_admission();
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(operations.lock_state().records.len(), 1);
+        assert_eq!(
+            super::delete(Extension(operations.clone()), Path(id.into()))
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert!(matches!(operations.snapshot(id), Snapshot::Missing));
+    }
+
+    #[tokio::test]
+    async fn duplicate_pending_id_does_not_execute_or_consume_another_slot() {
+        let operations = ControlOperations::new();
+        let release = Arc::new(Notify::new());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let handler_calls = calls.clone();
+        let handler_release = release.clone();
+        let router = test_router(
+            operations.clone(),
+            post(move || {
+                handler_calls.fetch_add(1, Ordering::SeqCst);
+                let release = handler_release.clone();
+                async move {
+                    release.notified().await;
+                    Json(json!({"ok":true}))
+                }
+            }),
+        );
+        let id = "pending-client-01";
+        let first = router
+            .clone()
+            .oneshot(
+                Request::post("/work")
+                    .header(REQUEST_HEADER, id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(pending_id(first).await, id);
+        for _ in 1..MAX_RECEIPTS {
+            operations.admit(None).unwrap();
+        }
+        let duplicate = router
+            .oneshot(
+                Request::post("/work")
+                    .header(REQUEST_HEADER, id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(pending_id(duplicate).await, id);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(operations.lock_state().records.len(), MAX_RECEIPTS);
+        release.notify_one();
+        assert_eq!(
+            terminal_response(&operations, id).await.status(),
+            StatusCode::OK
+        );
+    }
+
+    #[tokio::test]
+    async fn existing_ids_resolve_before_body_reads_with_saturated_full_middleware() {
+        let operations = ControlOperations::new();
+        let release = Arc::new(tokio::sync::Semaphore::new(0));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let handler_release = release.clone();
+        let handler_calls = calls.clone();
+        let handlers = Router::new().route(
+            "/work",
+            post(move |body: Bytes| {
+                let release = handler_release.clone();
+                let calls = handler_calls.clone();
+                async move {
+                    assert_eq!(body, "{\"work\":true}");
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    release.acquire().await.unwrap().forget();
+                    (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({"code":"node_not_found"})),
+                    )
+                }
+            }),
+        );
+        let router = crate::operation_middleware(handlers, operations.clone(), "engine".into());
+        saturate_ingress(&router).await;
+        assert!(operations.try_acquire_ingress().is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), MAX_RECEIPTS);
+        // A body that never completes would time out if ingress tried to read it.
+        let unread_request = |id: &str| {
+            Request::post("/work")
+                .header(REQUEST_HEADER, id)
+                .body(Body::from_stream(futures_util::stream::pending::<
+                    Result<Bytes, std::io::Error>,
+                >()))
+                .unwrap()
+        };
+        let duplicate = router
+            .clone()
+            .oneshot(unread_request("client-operation-0"))
+            .await
+            .unwrap();
+        assert_eq!(duplicate.headers()[ENGINE_HEADER], "engine");
+        assert_eq!(duplicate.headers()[axum::http::header::CONNECTION], "close");
+        assert_eq!(pending_id(duplicate).await, "client-operation-0");
+        let new_id = router
+            .clone()
+            .oneshot(
+                Request::post("/work")
+                    .header(REQUEST_HEADER, "client-operation-new")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(new_id.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let invalid = router.clone().oneshot(unread_request("bad")).await.unwrap();
+        assert_invalid_id(invalid).await;
+        release.add_permits(MAX_RECEIPTS);
+        operations.drain().await;
+        // Retained terminal errors must also bypass ingress, even while closing.
+        let _held: Vec<_> = (0..INGRESS_PERMITS)
+            .map(|_| operations.try_acquire_ingress().unwrap())
+            .collect();
+        operations.close_admission();
+        let completed = router
+            .oneshot(unread_request("client-operation-0"))
+            .await
+            .unwrap();
+        assert_eq!(completed.status(), StatusCode::NOT_FOUND);
+        assert_eq!(completed.headers()[RESULT_HEADER], "client-operation-0");
+        assert_eq!(completed.headers()[ENGINE_HEADER], "engine");
+        let body = to_bytes(completed.into_body(), 4096).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).unwrap()["code"],
+            "node_not_found"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), MAX_RECEIPTS);
+    }
+
+    async fn saturate_ingress(router: &Router) {
+        for index in 0..MAX_RECEIPTS {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::post("/work")
+                        .header(REQUEST_HEADER, format!("client-operation-{index}"))
+                        .body(Body::from(r#"{"work":true}"#))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::ACCEPTED);
+        }
+    }
+
+    async fn assert_invalid_id(response: Response) {
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), 4096).await.unwrap();
+        let error: ProtocolError = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error.code, ErrorCode::InvalidOperationId);
+        assert_eq!(error.parameters["operationOutcome"], "not_admitted");
+    }
+
+    #[tokio::test]
+    async fn validates_client_ids_before_admission() {
+        let operations = ControlOperations::new();
+        let router = test_router(
+            operations.clone(),
+            post(|| async { StatusCode::NO_CONTENT }),
+        );
+        for id in [
+            String::new(),
+            "a".repeat(15),
+            "a".repeat(65),
+            "a".repeat(15) + "/",
+            "a".repeat(15) + ".",
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::post("/work")
+                        .header(REQUEST_HEADER, id)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_invalid_id(response).await;
+        }
+        let response = router
+            .clone()
+            .oneshot(
+                Request::post("/work")
+                    .header(REQUEST_HEADER, HeaderValue::from_bytes(b"\xff").unwrap())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_invalid_id(response).await;
+        assert!(operations.lock_state().records.is_empty());
+        for id in ["a".repeat(16), "Z0_-".repeat(16)] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::post("/work")
+                        .header(REQUEST_HEADER, &id)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            assert_eq!(response.headers()[RESULT_HEADER], id);
+        }
+    }
+
+    #[test]
+    fn generated_ids_cannot_overwrite_client_records_and_ack_allows_reuse() {
+        let operations = ControlOperations::new();
+        let id = format!("op-{:032x}-{:016x}", operations.inner.owner_nonce, 1);
+        let client = operations.admit(Some(&id)).unwrap();
+        let generated = operations.admit(None).unwrap();
+        assert_ne!(client.id, generated.id);
+        assert_eq!(operations.lock_state().records.len(), 2);
+        operations.complete(&client.id, stored(StatusCode::OK, b"ok", true));
+        assert!(matches!(operations.acknowledge(&client.id), Ack::Completed));
+        assert_eq!(operations.admit(Some(&id)).unwrap().id, id);
+    }
+
+    #[tokio::test]
+    async fn fence_precedes_admission_and_does_not_create_a_receipt() {
+        let operations = ControlOperations::new();
+        let router = test_router(
+            operations.clone(),
+            post(|| async { StatusCode::NO_CONTENT }),
+        )
+        .layer(middleware::from_fn_with_state(
+            "new-engine".to_owned(),
+            engine_identity,
+        ));
+        operations.close_admission();
+        let response = router
+            .oneshot(
+                Request::post("/work")
+                    .header("x-mixrelay-expected-engine", "old-engine")
+                    .header(REQUEST_HEADER, "client-operation-1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(response.headers()[ENGINE_HEADER], "new-engine");
+        assert!(operations.lock_state().records.is_empty());
+    }
+
+    #[tokio::test]
+    async fn client_receipts_are_bounded_until_acknowledged_or_expired() {
+        let operations = ControlOperations::new();
+        let router = test_router(
+            operations.clone(),
+            post(|| async { StatusCode::NO_CONTENT }),
+        );
+        let first = "client-operation-0";
+        for sequence in 0..=MAX_RECEIPTS {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::post("/work")
+                        .header(REQUEST_HEADER, format!("client-operation-{sequence}"))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if sequence < MAX_RECEIPTS {
+                    StatusCode::NO_CONTENT
+                } else {
+                    StatusCode::SERVICE_UNAVAILABLE
+                }
+            );
+        }
+        let duplicate = router
+            .clone()
+            .oneshot(
+                Request::post("/work")
+                    .header(REQUEST_HEADER, first)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(duplicate.status(), StatusCode::NO_CONTENT);
+        assert_eq!(duplicate.headers()[RESULT_HEADER], first);
+        assert!(matches!(operations.acknowledge(first), Ack::Completed));
+        operations.admit(Some(first)).unwrap();
+        operations.complete(first, stored(StatusCode::OK, b"ok", true));
+        let mut state = operations.lock_state();
+        if let Some(Record {
+            outcome: Outcome::Complete { completed_at, .. },
+            ..
+        }) = state.records.get_mut(first)
+        {
+            *completed_at = Instant::now().checked_sub(COMPLETED_TTL).unwrap();
+        }
+        drop(state);
+        assert_eq!(operations.admit(Some(first)).unwrap().id, first);
+    }
+
     #[test]
     fn ids_change_between_owners_and_requests() {
         let first = ControlOperations::new();
         let second = ControlOperations::new();
-        let first_id = first.admit().expect("first admission").id;
-        let second_id = second.admit().expect("second admission").id;
+        let first_id = first.admit(None).expect("first admission").id;
+        let second_id = second.admit(None).expect("second admission").id;
         assert_ne!(first_id, second_id);
     }
 
@@ -576,9 +1025,9 @@ mod tests {
     fn admission_is_bounded_without_eviction_of_pending_work() {
         let operations = ControlOperations::new();
         for _ in 0..MAX_RECEIPTS {
-            operations.admit().expect("bounded admission");
+            operations.admit(None).expect("bounded admission");
         }
-        assert!(operations.admit().is_err());
+        assert!(operations.admit(None).is_err());
     }
 
     #[tokio::test]
@@ -771,7 +1220,7 @@ mod tests {
     #[test]
     fn acknowledgement_and_expiry_remove_completed_receipts_only() {
         let operations = ControlOperations::new();
-        let pending = operations.admit().expect("pending admission");
+        let pending = operations.admit(None).expect("pending admission");
         assert!(matches!(operations.acknowledge(&pending.id), Ack::Pending));
         operations.complete(&pending.id, stored(StatusCode::OK, b"ok", true));
         assert!(matches!(
@@ -783,7 +1232,7 @@ mod tests {
             Snapshot::Missing
         ));
 
-        let expired = operations.admit().expect("expiry admission");
+        let expired = operations.admit(None).expect("expiry admission");
         operations.complete(&expired.id, stored(StatusCode::OK, b"ok", true));
         if let Some(Record {
             outcome: Outcome::Complete { completed_at, .. },

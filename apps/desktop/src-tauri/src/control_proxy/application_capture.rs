@@ -418,6 +418,7 @@ mod tests {
         client.close_admission();
         let captures = Arc::new(ApplicationCaptureState::default());
         let response = ControlProxyResponse {
+            engine: None,
             status: 200,
             delivery: RequestDelivery::ServerResponse,
             body: serde_json::json!({"enginePower":{"enabled":false,"transitioning":false}}),
@@ -433,6 +434,7 @@ mod tests {
     #[test]
     fn explicit_workspace_rejection_releases_reservation_but_lost_reply_does_not() {
         let mut response = ControlProxyResponse {
+            engine: None,
             status: 503,
             delivery: RequestDelivery::ServerResponse,
             body: serde_json::json!({"code":"control_unavailable", "parameters":{"workspaceOutcome":"not_applied"}}),
@@ -457,6 +459,7 @@ mod tests {
     #[test]
     fn rejected_power_start_releases_reserved_taps_but_uncertain_reply_does_not() {
         let mut response = ControlProxyResponse {
+            engine: None,
             status: 503,
             delivery: RequestDelivery::ServerResponse,
             body: serde_json::json!({"code":"audio_session_reconfigure_failed", "parameters":{"powerOutcome":"not_applied"}}),
@@ -469,6 +472,7 @@ mod tests {
     #[test]
     fn rejected_node_control_releases_reservation_but_lost_response_does_not() {
         let mut response = ControlProxyResponse {
+            engine: None,
             status: 503,
             delivery: RequestDelivery::ServerResponse,
             body: serde_json::json!({"code":"node_disabled", "parameters":{"nodeControlOutcome":"not_applied"}}),

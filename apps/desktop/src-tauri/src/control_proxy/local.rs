@@ -102,12 +102,15 @@ impl LocalControl {
             .execute(request.command)
             .await
             .unwrap_or_else(|reason| ControlProxyResponse {
+                engine: None,
                 status: 503,
                 body: json!({"code":"control_unavailable", "parameters":{"reason":reason}}),
                 #[cfg(target_os = "macos")]
                 delivery: super::RequestDelivery::Uncertain,
             });
-        json!({"id":request.id,"status":response.status,"body":response.body})
+        let mut value = serde_json::to_value(response).expect("control response is JSON");
+        value["id"] = json!(request.id);
+        value
     }
 
     async fn execute(&self, command: Command) -> Result<ControlProxyResponse, String> {
@@ -119,6 +122,7 @@ impl LocalControl {
                     .ok_or("background controller unavailable")?;
                 let result = crate::background::dispatch(app, &name, arguments).await;
                 Ok(ControlProxyResponse {
+                    engine: None,
                     status: 200,
                     body: match result {
                         Ok(value) => json!({"ok":value}),
@@ -231,6 +235,7 @@ mod tests {
             "enginePower":{"enabled":true,"transitioning":false},"graphs":[]});
         let result = stamp_snapshot(
             ControlProxyResponse {
+                engine: None,
                 status: 200,
                 body: body.clone(),
                 #[cfg(target_os = "macos")]
@@ -250,6 +255,7 @@ mod tests {
         let body = json!({"code":"control_unavailable", "parameters":{"reason":"device fault"}});
         let result = stamp_snapshot(
             ControlProxyResponse {
+                engine: None,
                 status: 503,
                 body: body.clone(),
                 #[cfg(target_os = "macos")]

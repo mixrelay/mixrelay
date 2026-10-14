@@ -21,6 +21,13 @@ pub(super) async fn read_body(
     request: Request,
     next: Next,
 ) -> Response {
+    if let Some(mut response) = crate::operations::before_ingress(&operations, &request) {
+        // The body was deliberately not drained; do not reuse this HTTP connection.
+        response
+            .headers_mut()
+            .insert(CONNECTION, HeaderValue::from_static("close"));
+        return response;
+    }
     let (mut parts, body) = request.into_parts();
     let lease = if body.is_end_stream() {
         None
