@@ -141,3 +141,133 @@ Agreed behavior, current integration gaps and verification evidence are in the
 behavior, cross-graph sharing, and same-condition 32/256-sample audio acceptance
 remain separate from a successful bundle build. Do not infer their completion
 from unit tests or earlier installed-driver measurements.
+
+## Transport-type compatibility
+
+`kAudioDevicePropertyTransportType` (`tran`) normally returns `virt`. The Driver
+service ships an exact, case-sensitive bundle allowlist derived from observed
+Rogue Amoeba Loopback/ARK field behavior for apps that hide/reject virtual devices:
+`com.tencent.tencentmeeting`, `net.whatsapp.WhatsApp`, `com.motu.DigitalPerformer`,
+`com.vmware.fusion`, `com.goodnotesapp.x`. Only those requesters receive `usb `.
+This changes a four-byte presentation property, never permissions, PCM routing,
+device identity, or global state. Has/size/settable retain their existing contract.
+The HAL binary contains no shipped bundle allowlist.
+
+The service reads `MIXRELAY_TRANSPORT_COMPATIBILITY` at startup: a comma-separated
+list replaces the default, and an explicitly empty value disables the workaround.
+There is no whitespace trimming or wildcard matching. Maximum: 32 unique bundle
+identifiers, each 1–127 ASCII bytes, with nonempty dot-separated segments of
+letters/digits/hyphens. Malformed configuration fails startup before publication.
+Set this environment variable for the service process (not merely the GUI), then
+restart the service; rebuilding the HAL is unnecessary.
+
+Inventory version 1 has an additive `transport_compatibility` XPC string array.
+Missing and empty arrays both mean empty policy. Old v1 consumers ignore the new
+key; new consumers accept old snapshots. Wrong types, invalid identifiers,
+duplicates and oversized arrays reject the entire snapshot without replacing the
+last valid inventory/policy. Existing authority/generation fencing also applies.
+The local C snapshot ABI grows with the field; rebuild its callers together.
+
+AddDeviceClient copies nullable callback bundle storage and records device/client,
+PID and process start time; RemoveDeviceClient drops that record. Each lookup
+checks PID plus `PROC_PIDTBSDINFO` start seconds/microseconds, so a recycled PID
+cannot borrow a previous identity. Known callback identities across all devices
+for that incarnation take precedence over discovery, matching the process-wide
+scope of decisions.
+Unknown identities use a bounded 64-request worker queue: `proc_pidpath` → enclosing
+`.app` → `CFBundleIdentifier`. Discovery never holds IO registry locks. Sandbox
+failures return `virt`; negative discovery retries after two seconds, with at most
+one queued/running lookup per incarnation. A completed discovery answer stays
+fixed until the allowlist changes or the last client for that PID is removed.
+Queue saturation, resolver mutex contention, full decision storage, and a 20 ms
+property-get deadline return transient `virt` without publishing a negative
+decision; subsequent queries can receive the completed answer or retry admission.
+The deadline starts at property-get entry, includes incarnation lookup and all
+validation/admission work, and only its remaining time is used for completion.
+Decision storage is bounded to 4096 entries. Last-client removal and recycled PIDs
+reclaim entries; the single discovery worker also inspects at most 16 incarnations
+per 10 ms cleanup step, outside the resolver mutex, including query-only requesters.
+A full-table property read never sweeps processes or caches its refused answer.
+IO/timestamp callbacks use balanced, nestable thread scopes and take the `virt`
+fast path without process/filesystem work or resolver locks. `tran` validates
+objects and addresses using fixed-slot pins and atomics before any snapshot,
+including has/size/settable calls; it never takes the device control mutex.
+Other property selectors retain the existing snapshot/control locking path.
+BeginIOOperation
+enters the cycle scope and EndIOOperation leaves it; DoIOOperation and timestamp
+calls also scope their own work and clear it on every return. WillDoIOOperation
+runs without marking its startup/control thread.
+Changing the policy clears decisions and emits `tran` PropertiesChanged for live
+devices after inventory/resolver locks are released.
+
+### Installed-driver verification
+
+1. Run `pnpm signing:check` before any release build. Build/install through the
+   normal signed release workflow and restart/reload the HAL through the installer.
+   This source task does not install or change the running driver.
+2. `pnpm probe:macos-roundtrip --list` gives the installed device UID. Run
+   `pnpm probe:macos-roundtrip --transport DEVICE_UID`: an ordinary terminal probe
+   should print `transport='virt'`. This mode does not start audio or need microphone
+   permission.
+3. For a controlled bundle-resolution check, create a development `.app` containing
+   `target/macos-probes/MRRoundTripProbe` as its `Contents/MacOS` executable and an
+   Info.plist with `CFBundleIdentifier=com.example.MixRelayTransportProbe` and
+   `CFBundleExecutable=MRRoundTripProbe`. Run that executable with
+   `--transport DEVICE_UID`. Configure the service environment to that exact ID
+   and restart it, then rerun: expect `usb ` if its sandbox allows bundle discovery.
+   Run the terminal probe concurrently: it must still report `virt`. If discovery
+   is denied, the bundle probe conservatively reports `virt`; this alone does not
+   verify the callback-supplied identity path.
+4. In each shipped-default app, open its audio device picker and select MixRelay.
+   Confirm device visibility and successful capture/playback. Exercise with the
+   app's real bundle identity supplied by Core Audio, including helper processes;
+   a separate terminal probe cannot impersonate that requesting process.
+5. Set the service override to empty, restart the service, and re-query/reopen the
+   same apps: transport becomes `virt`. Restore the service's original environment
+   and restart it. Check that PCM routing, format, UID and other device properties
+   did not change. Inspect `tran` listeners for notification on each policy change.
+
+A reproducible development bundle and service override (run these only on the Mac
+being qualified, after recording any existing override):
+
+```sh
+# Build the read-only probe and choose the UID printed by --list.
+zsh scripts/probe-macos-roundtrip.sh --list
+mkdir -p target/macos-probes/TransportProbe.app/Contents/MacOS
+cp target/macos-probes/MRRoundTripProbe target/macos-probes/TransportProbe.app/Contents/MacOS/
+cat > target/macos-probes/TransportProbe.app/Contents/Info.plist <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.example.MixRelayTransportProbe</string>
+<key>CFBundleExecutable</key><string>MRRoundTripProbe</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>
+PLIST
+```
+
+For the installed LaunchDaemon, save
+`/Library/LaunchDaemons/io.mixrelay.audio.driver.plist`, then add/set its
+`EnvironmentVariables:MIXRELAY_TRANSPORT_COMPATIBILITY` string to
+`com.example.MixRelayTransportProbe` with PlistBuddy. Reload that exact job:
+
+```sh
+sudo cp /Library/LaunchDaemons/io.mixrelay.audio.driver.plist target/macos-probes/driver-service.before-transport.plist
+# For an absent override use Add; for an existing override use Set instead.
+sudo /usr/libexec/PlistBuddy -c 'Add :EnvironmentVariables:MIXRELAY_TRANSPORT_COMPATIBILITY string com.example.MixRelayTransportProbe' /Library/LaunchDaemons/io.mixrelay.audio.driver.plist
+sudo launchctl bootout system/io.mixrelay.audio.driver
+sudo launchctl bootstrap system /Library/LaunchDaemons/io.mixrelay.audio.driver.plist
+launchctl print system/io.mixrelay.audio.driver
+# Substitute the actual UID in both commands; run them concurrently if desired.
+target/macos-probes/TransportProbe.app/Contents/MacOS/MRRoundTripProbe --transport DEVICE_UID
+target/macos-probes/MRRoundTripProbe --transport DEVICE_UID
+```
+
+The first should report `usb ` when bundle inspection is permitted, and the second
+`virt`. To disable the policy, set that same string to empty (PlistBuddy
+`Set :EnvironmentVariables:MIXRELAY_TRANSPORT_COMPATIBILITY ''`) and repeat the
+bootout/bootstrap commands. Restore the original plist with
+`sudo cp target/macos-probes/driver-service.before-transport.plist /Library/LaunchDaemons/io.mixrelay.audio.driver.plist`,
+then repeat the bootout/bootstrap commands. The default-list test uses the five real apps
+with the override absent. Re-query in each requesting app or attach a debugger to
+its `AudioObjectGetPropertyData` result to inspect the four-byte `tran` value; the
+standalone probe only reports its own requester result.

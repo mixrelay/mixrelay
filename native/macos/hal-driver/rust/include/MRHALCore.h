@@ -55,6 +55,7 @@ enum {
     MR_HAL_CORE_CHANGE_STREAM_ACTIVE = 6,
     MR_HAL_CORE_CHANGE_OUTPUT_VOLUME = 7,
     MR_HAL_CORE_CHANGE_OUTPUT_MUTE = 8,
+    MR_HAL_CORE_CHANGE_TRANSPORT = 9,
     MR_HAL_CORE_MAX_DEVICES = 64,
 };
 #define MR_HAL_CORE_CONFIG_ACTION UINT64_C(0x4d526368)
@@ -64,6 +65,9 @@ typedef struct MRHALCoreHostOps {
     bool (*request_configuration)(void *, uint32_t, uint64_t, uint64_t);
 } MRHALCoreHostOps;
 
+/* Balanced, nestable scope; only IO-cycle/timestamp callbacks enter it. */
+void mr_hal_core_enter_audio_thread(void);
+void mr_hal_core_leave_audio_thread(void);
 MRHALCore *mr_hal_core_create(const MRHALCoreNativeOps *, const MRHALCoreHostOps *);
 MRHALCore *mr_hal_core_create_native(const MRHALCoreHostOps *);
 size_t mr_hal_core_io_context_size(void);
@@ -85,6 +89,9 @@ bool mr_hal_core_snapshot(MRHALCore *, uint32_t object_id, MRHALCoreSnapshot *);
 /* Bounded pinned lookup; no control mutex, allocation, or metadata copying. */
 bool mr_hal_core_device_alive(const MRHALCore *, uint32_t device_id);
 int32_t mr_hal_core_client(MRHALCore *, uint32_t device_id, uint32_t client_id, bool add);
+/* Copies a nullable, callback-borrowed UTF-8 bundle ID (at most 127 bytes).
+ * Control callbacks only; never invoke client registration from IO. */
+int32_t mr_hal_core_client_identity(MRHALCore *, uint32_t device_id, uint32_t client_id, int32_t pid, const char *bundle_id, bool add);
 int32_t mr_hal_core_start(MRHALCore *, uint32_t device_id, uint32_t client_id, uint64_t host_time);
 int32_t mr_hal_core_stop(MRHALCore *, uint32_t device_id, uint32_t client_id);
 int32_t mr_hal_core_set_rate(MRHALCore *, uint32_t device_id, uint32_t sample_rate);
@@ -103,7 +110,7 @@ typedef struct MRHALCorePropertyAddress { uint32_t selector, scope, element; } M
 typedef struct MRHALCoreNotification { uint32_t object_id; MRHALCorePropertyAddress address; } MRHALCoreNotification;
 bool mr_hal_core_has_property(MRHALCore *, uint32_t, const MRHALCorePropertyAddress *);
 int32_t mr_hal_core_property_size(MRHALCore *, uint32_t, const MRHALCorePropertyAddress *, uint32_t *);
-int32_t mr_hal_core_property_get(MRHALCore *, uint32_t, const MRHALCorePropertyAddress *, uint32_t, const void *, uint32_t, uint32_t *, void *);
+int32_t mr_hal_core_property_get(MRHALCore *, uint32_t, const MRHALCorePropertyAddress *, uint32_t, const void *, uint32_t, uint32_t *, void *, int32_t requester_pid);
 int32_t mr_hal_core_property_settable(MRHALCore *, uint32_t, const MRHALCorePropertyAddress *, bool *);
 int32_t mr_hal_core_property_set(MRHALCore *, uint32_t, const MRHALCorePropertyAddress *, uint32_t, const void *);
 size_t mr_hal_core_notifications(uint32_t, uint32_t, MRHALCoreNotification *, size_t);

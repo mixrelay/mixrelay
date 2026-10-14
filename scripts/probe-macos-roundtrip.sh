@@ -1,6 +1,7 @@
 #!/bin/zsh
 # Measures latency, bit exactness, channel order, slips and dropouts of an audio path on
 # installed devices (any vendor). See native/macos/hal-driver/tests/MRRoundTripProbe.c.
+#   pnpm probe:macos-roundtrip --transport DEVICE_UID
 #   pnpm probe:macos-roundtrip --list
 #   pnpm probe:macos-roundtrip [--json] [--seconds S] [--channels N] OUTPUT_UID [INPUT_UID]
 #   pnpm probe:macos-roundtrip --self-test

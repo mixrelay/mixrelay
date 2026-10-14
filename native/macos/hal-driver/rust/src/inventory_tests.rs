@@ -221,3 +221,61 @@ fn full_registry_can_replace_one_absent_idle_device() {
     assert!(empty.apply(&fixture));
     assert_eq!(LIVE.load(Ordering::SeqCst), 0);
 }
+
+#[test]
+fn transport_policy_obeys_authority_generation_and_last_valid_snapshot() {
+    unsafe extern "C" {
+        fn xpc_dictionary_set_value(message: *mut c_void, key: *const c_char, value: *mut c_void);
+        fn xpc_dictionary_set_uint64(message: *mut c_void, key: *const c_char, value: u64);
+        fn xpc_array_create(values: *const *mut c_void, count: usize) -> *mut c_void;
+        fn xpc_array_append_value(array: *mut c_void, value: *mut c_void);
+        fn xpc_string_create(value: *const c_char) -> *mut c_void;
+    }
+    let fixture = Fixture::new();
+    let pid = i32::try_from(std::process::id()).unwrap();
+    fixture
+        .registry
+        .transport
+        .client(16, 1, pid, Some("com.test.App".into()));
+    let message = Message::new(&[], 10);
+    let array = unsafe { xpc_array_create(std::ptr::null(), 0) };
+    let bundle = unsafe { xpc_string_create(c"com.test.App".as_ptr()) };
+    unsafe {
+        xpc_array_append_value(array, bundle);
+        xpc_dictionary_set_value(message.0, c"transport_compatibility".as_ptr(), array);
+        xpc_release(bundle);
+        xpc_release(array);
+    }
+    assert!(message.apply(&fixture));
+    assert_eq!(
+        fixture.registry.transport.get(16, pid),
+        u32::from_be_bytes(*b"usb ")
+    );
+    let stale = Message::new(&[], 9);
+    assert!(stale.apply(&fixture));
+    assert_eq!(
+        fixture.registry.transport.get(16, pid),
+        u32::from_be_bytes(*b"usb ")
+    );
+    unsafe {
+        xpc_dictionary_set_uint64(message.0, c"generation".as_ptr(), 11);
+    }
+    unsafe {
+        xpc_dictionary_set_uint64(message.0, c"transport_compatibility".as_ptr(), 7);
+    }
+    assert!(!message.apply(&fixture));
+    assert_eq!(
+        crate::inventory::acknowledged(&fixture.registry, 1),
+        Some(10)
+    );
+    assert_eq!(
+        fixture.registry.transport.get(16, pid),
+        u32::from_be_bytes(*b"usb ")
+    );
+    let cleared = Message::new(&[], 12);
+    assert!(cleared.apply(&fixture));
+    assert_eq!(
+        fixture.registry.transport.get(16, pid),
+        u32::from_be_bytes(*b"virt")
+    );
+}

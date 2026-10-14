@@ -18,6 +18,7 @@ mod output_control;
 #[cfg(target_os = "macos")]
 mod properties;
 mod registry;
+mod transport;
 
 #[path = "../../../../../crates/audio-io/src/formats.rs"]
 pub mod formats;

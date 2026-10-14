@@ -1,0 +1,465 @@
+use super::*;
+
+fn client(key: Incarnation, bundle: Option<&str>) -> Client {
+    Client {
+        pid: key.0,
+        incarnation: Some(key),
+        bundle: bundle.map(str::to_owned),
+    }
+}
+
+// Keep discovery queued until the test explicitly completes it. This makes
+// timeout, queue pressure and refresh races deterministic without sleeping.
+fn queued_transport(capacity: usize) -> (Transport, mpsc::Receiver<Query>) {
+    let (queue, requests) = mpsc::sync_channel(capacity);
+    let transport = Transport {
+        state: Arc::new(Mutex::new(State::default())),
+        queue,
+        worker: None,
+    };
+    transport.policy(vec!["com.test.App".into()]);
+    (transport, requests)
+}
+fn complete(transport: &Transport, query: &Query, bundle: Option<&str>) {
+    let mut state = lock(&transport.state);
+    if state
+        .identities
+        .get(&query.key)
+        .is_some_and(|identity| Arc::ptr_eq(&identity.answer, &query.answer))
+    {
+        state.resolve(query.key, Instant::now(), bundle.map(str::to_owned));
+    }
+    let _ = query.done.try_send(());
+}
+
+#[test]
+fn callback_identity_is_shared_across_devices_before_discovery() {
+    let (transport, requests) = queued_transport(64);
+    let pid = i32::try_from(std::process::id()).unwrap();
+    let key = incarnation(pid).unwrap();
+    transport.client(16, 1, pid, None);
+    transport.client(32, 2, pid, Some("com.test.App".into()));
+    assert_eq!(transport.get(16, pid), USB);
+    assert_eq!(transport.get(48, pid), USB);
+    assert!(requests.try_recv().is_err());
+    transport.remove(32, 2);
+    assert_eq!(transport.get(16, pid), USB);
+    transport.remove(16, 1);
+    assert!(!lock(&transport.state).identities.contains_key(&key));
+    // A recycled PID cannot inherit callback identity or its USB decision.
+    let reused = Incarnation(pid, key.1 + 1, key.2);
+    assert_eq!(transport.query_key(reused, QUERY_BUDGET), VIRTUAL);
+    complete(&transport, &requests.recv().unwrap(), None);
+    assert_eq!(transport.query_key(reused, QUERY_BUDGET), VIRTUAL);
+}
+
+#[test]
+fn zero_empty_policy_and_nested_audio_scopes_do_no_identity_work() {
+    let transport = Transport::default();
+    assert_eq!(transport.get(16, 0), VIRTUAL);
+    assert_eq!(transport.get(16, i32::MAX), VIRTUAL);
+    transport.policy(vec!["com.test.App".into()]);
+    let pid = i32::try_from(std::process::id()).unwrap();
+    transport.client(16, 1, pid, Some("com.test.App".into()));
+    assert_eq!(transport.get(16, pid), USB);
+    crate::abi::mr_hal_core_enter_audio_thread();
+    {
+        let _scope = AudioScope::enter();
+        let _guard = lock(&transport.state);
+        // Holding the resolver lock proves the IO fast path never takes it.
+        assert_eq!(transport.get(16, pid), VIRTUAL);
+    }
+    assert_eq!(transport.get(16, pid), VIRTUAL);
+    crate::abi::mr_hal_core_leave_audio_thread();
+    assert_eq!(transport.get(16, pid), USB);
+    transport.policy(vec![]);
+    assert_eq!(transport.get(16, pid), VIRTUAL);
+}
+
+#[test]
+fn completed_negative_decisions_expire_without_duplicate_refreshes() {
+    let (transport, requests) = queued_transport(64);
+    let key = Incarnation(123, 5, 9);
+    assert_eq!(transport.query_key(key, QUERY_BUDGET), VIRTUAL);
+    complete(&transport, &requests.recv().unwrap(), None);
+    assert_eq!(transport.query_key(key, QUERY_BUDGET), VIRTUAL);
+    assert!(requests.try_recv().is_err());
+    lock(&transport.state)
+        .identities
+        .get_mut(&key)
+        .unwrap()
+        .expires = Instant::now();
+    std::thread::scope(|scope| {
+        for _ in 0..8 {
+            scope.spawn(|| {
+                for _ in 0..100 {
+                    assert_eq!(transport.query_key(key, QUERY_BUDGET), VIRTUAL);
+                }
+            });
+        }
+    });
+    let refresh = requests.recv().unwrap();
+    assert!(requests.try_recv().is_err());
+    let other = Incarnation(456, 8, 0);
+    assert_eq!(transport.query_key(other, QUERY_BUDGET), VIRTUAL);
+    let other_query = requests.recv().unwrap();
+    // A completed negative remains stable, even if later discovery succeeds.
+    complete(&transport, &refresh, Some("com.test.App"));
+    assert_eq!(transport.query_key(key, QUERY_BUDGET), VIRTUAL);
+    complete(&transport, &other_query, Some("com.test.App"));
+    assert_eq!(transport.query_key(other, QUERY_BUDGET), USB);
+    assert!(!lock(&transport.state).identities[&key].in_flight);
+    assert!(transport.policy(vec!["com.test.Other".into()]));
+    assert!(!transport.policy(vec!["com.test.Other".into()]));
+    assert!(lock(&transport.state).identities.is_empty());
+}
+
+#[test]
+fn full_queue_and_slow_lookup_are_transient_and_allow_retry() {
+    let (transport, requests) = queued_transport(64);
+    let blocker = Incarnation(1, 2, 3);
+    // This request times out while the lookup remains outstanding.
+    assert_eq!(transport.query_key(blocker, QUERY_BUDGET), VIRTUAL);
+    let slow = requests.recv().unwrap();
+    for pid in 2..66 {
+        assert_eq!(
+            transport.query_key(Incarnation(pid, 2, 3), QUERY_BUDGET),
+            VIRTUAL
+        );
+    }
+    let denied = Incarnation(66, 2, 3);
+    assert_eq!(transport.query_key(denied, QUERY_BUDGET), VIRTUAL);
+    {
+        let state = lock(&transport.state);
+        assert_eq!(
+            state.identities[&blocker].answer.load(Ordering::Acquire),
+            PENDING
+        );
+        assert!(state.identities[&blocker].in_flight);
+        assert_eq!(
+            state.identities[&denied].answer.load(Ordering::Acquire),
+            PENDING
+        );
+        assert!(!state.identities[&denied].in_flight);
+    }
+    // The slow requester can still become USB after its caller has timed out.
+    complete(&transport, &slow, Some("com.test.App"));
+    assert_eq!(transport.query_key(blocker, QUERY_BUDGET), USB);
+    // Drain queued work, making room for the requester previously denied admission.
+    for _ in 0..64 {
+        complete(&transport, &requests.recv().unwrap(), None);
+    }
+    assert_eq!(transport.query_key(denied, QUERY_BUDGET), VIRTUAL);
+    complete(&transport, &requests.recv().unwrap(), Some("com.test.App"));
+    assert_eq!(transport.query_key(denied, QUERY_BUDGET), USB);
+}
+
+#[test]
+fn worker_completion_after_timeout_can_resolve_other_queued_requesters() {
+    let (entered, lookups) = mpsc::channel();
+    let (release, blocked) = mpsc::channel();
+    let transport = Transport::with_resolvers(
+        move |key| {
+            entered.send(key).unwrap();
+            // Test failure must not strand the worker during Transport::drop.
+            blocked.recv_timeout(Duration::from_secs(2)).ok()?;
+            Some("com.test.App".into())
+        },
+        |pid| Some(Incarnation(pid, 4, 0)),
+    );
+    transport.policy(vec!["com.test.App".into()]);
+    let slow = Incarnation(123, 4, 0);
+    let other = Incarnation(456, 4, 0);
+    assert_eq!(transport.query_key(slow, QUERY_BUDGET), VIRTUAL);
+    assert!(lookups.recv_timeout(Duration::from_secs(1)).unwrap() == slow);
+    for _ in 0..100 {
+        assert_eq!(transport.query_key(other, QUERY_BUDGET), VIRTUAL);
+    }
+    assert_eq!(
+        lock(&transport.state).identities[&other]
+            .answer
+            .load(Ordering::Acquire),
+        PENDING
+    );
+    release.send(()).unwrap();
+    // Entering the next lookup proves the slow request was published first.
+    assert!(lookups.recv_timeout(Duration::from_secs(1)).unwrap() == other);
+    assert_eq!(transport.query_key(slow, QUERY_BUDGET), USB);
+    release.send(()).unwrap();
+    drop(release);
+    let state = Arc::clone(&transport.state);
+    drop(transport); // joins the real worker, including the second publication
+    assert_eq!(
+        lock(&state).identities[&other]
+            .answer
+            .load(Ordering::Acquire),
+        USB
+    );
+    assert!(!lock(&state).identities[&other].in_flight);
+    assert!(lookups.try_recv().is_err()); // no duplicate worker lookups
+}
+
+#[test]
+fn churn_reclaims_last_client_and_recycled_pid_decisions() {
+    let (transport, requests) = queued_transport(64);
+    for start in 0..(MAX_IDENTITIES * 2) {
+        let key = Incarnation(123, u64::try_from(start).unwrap(), 0);
+        lock(&transport.state).client(16, 1, client(key, Some("com.test.App")));
+        assert_eq!(transport.query_key(key, QUERY_BUDGET), USB);
+        // Another device still owns a registration for this process.
+        lock(&transport.state).client(32, 2, client(key, None));
+        transport.remove(16, 1);
+        assert_eq!(transport.query_key(key, QUERY_BUDGET), USB);
+        transport.remove(32, 2);
+        assert!(lock(&transport.state).identities.is_empty());
+    }
+    // Query-only requesters also release the predecessor on PID reuse.
+    let old = Incarnation(123, 1, 0);
+    transport.query_key(old, QUERY_BUDGET);
+    let retired = requests.recv().unwrap();
+    let new = Incarnation(123, 2, 0);
+    lock(&transport.state).client(16, 1, client(new, Some("com.test.App")));
+    assert_eq!(transport.query_key(new, QUERY_BUDGET), USB);
+    complete(&transport, &retired, None);
+    let state = lock(&transport.state);
+    assert_eq!(state.identities.len(), 1);
+    assert!(!state.identities.contains_key(&old));
+}
+
+fn fill_capacity(transport: &Transport) {
+    let mut state = lock(&transport.state);
+    for index in 1..=MAX_IDENTITIES {
+        state.identities.insert(
+            Incarnation(-i32::try_from(index).unwrap(), 1, 0),
+            Identity {
+                bundle: None,
+                expires: Instant::now(),
+                answer: Arc::new(AtomicU32::new(if index % 2 == 0 { USB } else { VIRTUAL })),
+                in_flight: false,
+            },
+        );
+    }
+}
+
+#[test]
+fn full_capacity_misses_are_transient_without_inline_reclamation() {
+    let (transport, requests) = queued_transport(64);
+    fill_capacity(&transport);
+    let key = Incarnation(123, 5, 9);
+    lock(&transport.state).client(32, 1, client(key, Some("com.test.App")));
+    std::thread::scope(|scope| {
+        for _ in 0..8 {
+            scope.spawn(|| {
+                for _ in 0..100 {
+                    assert_eq!(transport.query_key(key, QUERY_BUDGET), VIRTUAL);
+                }
+            });
+        }
+    });
+    assert_eq!(lock(&transport.state).identities.len(), MAX_IDENTITIES);
+    assert!(!lock(&transport.state).identities.contains_key(&key));
+    assert!(requests.try_recv().is_err());
+    let mut cursor = None;
+    let mut inspected = 0;
+    reclaim_step(&transport.state, &mut cursor, |_| {
+        assert!(transport.state.try_lock().is_ok()); // no lock during proc_pidinfo
+        inspected += 1;
+        None
+    });
+    assert_eq!(inspected, RECLAIM_STEP);
+    assert_eq!(
+        lock(&transport.state).identities.len(),
+        MAX_IDENTITIES - RECLAIM_STEP
+    );
+    // The refusal did not cache a negative or lose the callback identity.
+    assert_eq!(transport.query_key(key, QUERY_BUDGET), USB);
+    while cursor.is_some() {
+        reclaim_step(&transport.state, &mut cursor, |pid| {
+            (pid == key.0).then_some(key)
+        });
+    }
+    assert_eq!(lock(&transport.state).identities.len(), 1);
+}
+
+#[test]
+fn background_worker_reclaims_without_property_misses() {
+    let (inspected, steps) = mpsc::channel();
+    let (release, permits) = mpsc::channel();
+    let transport = Transport::with_resolvers(
+        |_| None,
+        move |pid| {
+            inspected.send(pid).unwrap();
+            permits.recv_timeout(Duration::from_secs(2)).ok()?;
+            None
+        },
+    );
+    fill_capacity(&transport);
+    for remaining in (MAX_IDENTITIES - RECLAIM_STEP..MAX_IDENTITIES).rev() {
+        assert!(steps.recv_timeout(Duration::from_secs(1)).unwrap() < 0);
+        // Only this worker performs cleanup, one process inspection at a time.
+        assert!(steps.try_recv().is_err());
+        assert_eq!(lock(&transport.state).identities.len(), remaining + 1);
+        release.send(()).unwrap();
+    }
+    // The next inspection proves the first bounded step has finished.
+    steps.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(
+        lock(&transport.state).identities.len(),
+        MAX_IDENTITIES - RECLAIM_STEP
+    );
+    drop(release);
+    drop(transport);
+}
+
+#[test]
+fn reclamation_preserves_live_and_replaced_entries() {
+    let (transport, _) = queued_transport(64);
+    let key = Incarnation(123, 5, 9);
+    lock(&transport.state).client(16, 1, client(key, Some("com.test.App")));
+    assert_eq!(transport.query_key(key, QUERY_BUDGET), USB);
+    let mut cursor = None;
+    reclaim_step(&transport.state, &mut cursor, |_| Some(key));
+    assert_eq!(transport.query_key(key, QUERY_BUDGET), USB);
+    let old = Arc::clone(&lock(&transport.state).identities[&key].answer);
+    reclaim_step(&transport.state, &mut cursor, |_| {
+        transport.policy(vec!["com.test.Other".into()]);
+        transport.query_key(key, QUERY_BUDGET);
+        None
+    });
+    let state = lock(&transport.state);
+    assert!(!Arc::ptr_eq(&old, &state.identities[&key].answer));
+    assert_eq!(
+        state.identities[&key].answer.load(Ordering::Acquire),
+        VIRTUAL
+    );
+}
+
+#[test]
+fn property_deadline_covers_identity_work_and_remaining_completion_wait() {
+    let (transport, requests) = queued_transport(64);
+    let key = Incarnation(123, 5, 9);
+    // Spend most of a larger test budget before entering the completion wait.
+    // A fresh full-budget wait would take 350 ms, instead of 200 ms total.
+    let started = Instant::now();
+    let deadline = started + Duration::from_millis(200);
+    assert_eq!(
+        transport.get_with_incarnation(key.0, deadline, |_| {
+            std::thread::sleep(Duration::from_millis(150));
+            Some(key)
+        }),
+        VIRTUAL
+    );
+    assert!(started.elapsed() < Duration::from_millis(300));
+    let query = requests.try_recv().unwrap();
+    assert_eq!(query.answer.load(Ordering::Acquire), PENDING);
+    // Identity work that exhausts the actual 20 ms budget must not enqueue.
+    let other = Incarnation(456, 5, 9);
+    assert_eq!(
+        transport.get_with_incarnation(other.0, Instant::now() + QUERY_BUDGET, |_| {
+            std::thread::sleep(QUERY_BUDGET * 2);
+            Some(other)
+        }),
+        VIRTUAL
+    );
+    assert!(!lock(&transport.state).identities.contains_key(&other));
+    assert!(requests.try_recv().is_err());
+    complete(&transport, &query, Some("com.test.App"));
+    assert_eq!(transport.query_key(key, QUERY_BUDGET), USB);
+}
+
+#[test]
+fn contended_resolver_lock_returns_transiently_without_waiting() {
+    let (transport, requests) = queued_transport(64);
+    let pid = i32::try_from(std::process::id()).unwrap();
+    let key = incarnation(pid).unwrap();
+    lock(&transport.state).client(16, 1, client(key, Some("com.test.App")));
+    assert_eq!(transport.get(16, pid), USB);
+    let (done, finished) = mpsc::channel();
+    let timely = std::thread::scope(|scope| {
+        let guard = lock(&transport.state);
+        scope.spawn(|| {
+            done.send((
+                transport.get(16, pid),
+                transport.query_key(key, QUERY_BUDGET),
+            ))
+            .unwrap();
+        });
+        let result = finished.recv_timeout(Duration::from_millis(200));
+        drop(guard); // regression failure cannot strand the test thread
+        result
+    });
+    assert_eq!(timely.unwrap(), (VIRTUAL, VIRTUAL));
+    assert!(requests.try_recv().is_err());
+    assert_eq!(transport.get(16, pid), USB);
+}
+
+#[test]
+fn policy_replacement_and_client_removal_retire_pending_discovery() {
+    let (transport, requests) = queued_transport(64);
+    let key = Incarnation(123, 4, 0);
+    lock(&transport.state).client(16, 1, client(key, None));
+    transport.query_key(key, QUERY_BUDGET);
+    let removed = requests.recv().unwrap();
+    transport.remove(16, 1);
+    complete(&transport, &removed, Some("com.test.App"));
+    assert!(lock(&transport.state).identities.is_empty());
+    transport.query_key(key, QUERY_BUDGET);
+    let old_policy = requests.recv().unwrap();
+    transport.policy(vec!["com.test.Other".into()]);
+    transport.query_key(key, QUERY_BUDGET);
+    let current = requests.recv().unwrap();
+    complete(&transport, &old_policy, Some("com.test.App"));
+    assert_eq!(
+        lock(&transport.state).identities[&key]
+            .answer
+            .load(Ordering::Acquire),
+        PENDING
+    );
+    complete(&transport, &current, Some("com.test.Other"));
+    assert_eq!(transport.query_key(key, QUERY_BUDGET), USB);
+}
+
+#[test]
+fn unknown_process_worker_caches_misses() {
+    let transport = Transport::default();
+    let pid = i32::try_from(std::process::id()).unwrap();
+    transport.policy(vec!["com.test.NoMatch".into()]);
+    assert_eq!(transport.query(16, pid, Duration::from_secs(1)), VIRTUAL);
+    let key = incarnation(pid).unwrap();
+    let state = lock(&transport.state);
+    assert_eq!(
+        state.identities[&key].answer.load(Ordering::Acquire),
+        VIRTUAL
+    );
+    assert!(!state.identities[&key].in_flight);
+    assert!(discover(Incarnation(pid, key.1 + 1, key.2)).is_none());
+}
+
+#[test]
+fn unknown_bundle_is_resolved_by_the_worker_from_the_enclosing_app() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../target/test-artifacts")
+        .join(format!("transport-bundle-{}", std::process::id()));
+    let contents = root.join("Probe.app/Contents");
+    std::fs::create_dir_all(contents.join("MacOS")).unwrap();
+    let executable = contents.join("MacOS/probe");
+    std::fs::copy("/bin/cat", &executable).unwrap();
+    std::fs::write(contents.join("Info.plist"), r#"<?xml version="1.0"?>
+<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.test.BundleProbe</string>
+<key>CFBundleExecutable</key><string>probe</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>"#).unwrap();
+    let mut child = std::process::Command::new(executable)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let pid = i32::try_from(child.id()).unwrap();
+    let transport = Transport::default();
+    transport.policy(vec!["com.test.BundleProbe".into()]);
+    // Inject a generous caller budget; production remains bounded to 20 ms.
+    let value = transport.query(16, pid, Duration::from_secs(1));
+    child.kill().unwrap();
+    child.wait().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+    assert_eq!(value, USB);
+    assert_eq!(transport.query(16, pid, QUERY_BUDGET), VIRTUAL);
+}

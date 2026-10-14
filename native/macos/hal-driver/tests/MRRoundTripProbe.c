@@ -419,6 +419,21 @@ static AudioDeviceID mr_find(const char *text) {
     return status == noErr ? device : kAudioObjectUnknown;
 }
 
+// Read-only query from this process: no IOProc, recording or default-device changes.
+static int mr_transport(const char *uid) {
+    const AudioDeviceID device = mr_find(uid);
+    UInt32 transport = 0;
+    if (device == kAudioObjectUnknown || !mr_get(device, kAudioDevicePropertyTransportType,
+            kAudioObjectPropertyScopeGlobal, &transport, sizeof(transport))) {
+        fprintf(stderr, "transport query failed for %s\n", uid);
+        return 1;
+    }
+    printf("pid=%ld transport='%c%c%c%c'\n", (long)getpid(),
+           (int)((transport >> 24) & 255U), (int)((transport >> 16) & 255U),
+           (int)((transport >> 8) & 255U), (int)(transport & 255U));
+    return 0;
+}
+
 static int mr_list(void) {
     const AudioObjectPropertyAddress address = {kAudioHardwarePropertyDevices,
                                                 kAudioObjectPropertyScopeGlobal,
@@ -1064,6 +1079,7 @@ static int mr_self_test(void) {
 static void mr_usage(FILE *stream) {
     fprintf(stream,
             "usage: MRRoundTripProbe --list | --self-test\n"
+            "       MRRoundTripProbe --transport DEVICE_UID\n"
             "       MRRoundTripProbe [--json] [--seconds 1-120] [--channels 1-64] OUTPUT_UID "
             "[INPUT_UID]\n"
             "Plays a deterministic signal into OUTPUT_UID and records INPUT_UID (default: the\n"
@@ -1093,6 +1109,7 @@ typedef struct MROptions {
 
 /// Parses the measurement options; returns -1 to continue, otherwise an exit status.
 static int mr_options(int argc, char **argv, MROptions *options) {
+    if (argc == 3 && strcmp(argv[1], "--transport") == 0) return mr_transport(argv[2]);
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--list") == 0) return mr_list();
         if (strcmp(argv[i], "--self-test") == 0) return mr_self_test();

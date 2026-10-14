@@ -83,10 +83,13 @@ static OSStatus destroy_device(AudioServerPlugInDriverRef driver, AudioObjectID 
     return kAudioHardwareUnsupportedOperationError;
 }
 static OSStatus add_client(AudioServerPlugInDriverRef driver, AudioObjectID device, const AudioServerPlugInClientInfo *client) {
-    return valid(driver) && client != NULL ? result(mr_hal_core_client(gCore, device, client->mClientID, true)) : kAudioHardwareBadObjectError;
+    if (!valid(driver) || client == NULL) return kAudioHardwareBadObjectError;
+    char bundle[128] = {0};
+    const char *identity = client->mBundleID != NULL && CFStringGetCString(client->mBundleID, bundle, sizeof(bundle), kCFStringEncodingUTF8) ? bundle : NULL;
+    return result(mr_hal_core_client_identity(gCore, device, client->mClientID, client->mProcessID, identity, true));
 }
 static OSStatus remove_client(AudioServerPlugInDriverRef driver, AudioObjectID device, const AudioServerPlugInClientInfo *client) {
-    return valid(driver) && client != NULL ? result(mr_hal_core_client(gCore, device, client->mClientID, false)) : kAudioHardwareBadObjectError;
+    return valid(driver) && client != NULL ? result(mr_hal_core_client_identity(gCore, device, client->mClientID, 0, NULL, false)) : kAudioHardwareBadObjectError;
 }
 static OSStatus perform(AudioServerPlugInDriverRef driver, AudioObjectID device, UInt64 action, void *info) {
     return valid(driver) ? result(mr_hal_core_perform(gCore, device, action, (uintptr_t)info)) : kAudioHardwareBadObjectError;
@@ -111,8 +114,7 @@ static OSStatus property_size(AudioServerPlugInDriverRef driver, AudioObjectID o
     return valid(driver) ? mr_hal_core_property_size(gCore, object, address(property), output) : kAudioHardwareBadObjectError;
 }
 static OSStatus property_get(AudioServerPlugInDriverRef driver, AudioObjectID object, pid_t pid, const AudioObjectPropertyAddress *property, UInt32 qualifier_size, const void *qualifier, UInt32 capacity, UInt32 *written, void *output) {
-    (void)pid;
-    return valid(driver) ? mr_hal_core_property_get(gCore, object, address(property), qualifier_size, qualifier, capacity, written, output) : kAudioHardwareBadObjectError;
+    return valid(driver) ? mr_hal_core_property_get(gCore, object, address(property), qualifier_size, qualifier, capacity, written, output, property != NULL && property->mSelector == kAudioDevicePropertyTransportType ? pid : 0) : kAudioHardwareBadObjectError;
 }
 static OSStatus property_set(AudioServerPlugInDriverRef driver, AudioObjectID object, pid_t pid, const AudioObjectPropertyAddress *property, UInt32 qualifier_size, const void *qualifier, UInt32 size, const void *input) {
     (void)pid; (void)qualifier_size; (void)qualifier;
@@ -124,13 +126,19 @@ static OSStatus start_io(AudioServerPlugInDriverRef driver, AudioObjectID device
 static OSStatus stop_io(AudioServerPlugInDriverRef driver, AudioObjectID device, UInt32 client) {
     return valid(driver) ? result(mr_hal_core_stop(gCore, device, client)) : kAudioHardwareBadObjectError;
 }
-static OSStatus timestamp(AudioServerPlugInDriverRef driver, AudioObjectID device, UInt32 client, Float64 *sample, UInt64 *host, UInt64 *seed) {
+static OSStatus timestamp_impl(AudioServerPlugInDriverRef driver, AudioObjectID device, UInt32 client, Float64 *sample, UInt64 *host, UInt64 *seed) {
     (void)client;
     if (!valid(driver) || sample == NULL || host == NULL || seed == NULL) return kAudioHardwareBadObjectError;
     MRHALCoreTimestamp value;
     if (!mr_hal_core_timestamp(gCore, device, mach_absolute_time(), &value)) return kAudioHardwareIllegalOperationError;
     *sample = (Float64)value.sample_time; *host = value.host_time; *seed = value.seed;
     return noErr;
+}
+static OSStatus timestamp(AudioServerPlugInDriverRef driver, AudioObjectID device, UInt32 client, Float64 *sample, UInt64 *host, UInt64 *seed) {
+    mr_hal_core_enter_audio_thread();
+    const OSStatus status = timestamp_impl(driver, device, client, sample, host, seed);
+    mr_hal_core_leave_audio_thread();
+    return status;
 }
 static OSStatus will_io(AudioServerPlugInDriverRef driver, AudioObjectID device, UInt32 client, UInt32 operation, Boolean *will, Boolean *in_place) {
     (void)client;
@@ -139,11 +147,18 @@ static OSStatus will_io(AudioServerPlugInDriverRef driver, AudioObjectID device,
     *in_place = true;
     return noErr;
 }
-static OSStatus boundary_io(AudioServerPlugInDriverRef driver, AudioObjectID device, UInt32 client, UInt32 operation, UInt32 frames, const AudioServerPlugInIOCycleInfo *cycle) {
+static OSStatus begin_io(AudioServerPlugInDriverRef driver, AudioObjectID device, UInt32 client, UInt32 operation, UInt32 frames, const AudioServerPlugInIOCycleInfo *cycle) {
     (void)device; (void)client; (void)operation; (void)frames; (void)cycle;
+    if (!valid(driver)) return kAudioHardwareBadObjectError;
+    mr_hal_core_enter_audio_thread();
+    return noErr;
+}
+static OSStatus end_io(AudioServerPlugInDriverRef driver, AudioObjectID device, UInt32 client, UInt32 operation, UInt32 frames, const AudioServerPlugInIOCycleInfo *cycle) {
+    (void)device; (void)client; (void)operation; (void)frames; (void)cycle;
+    mr_hal_core_leave_audio_thread();
     return valid(driver) ? noErr : kAudioHardwareBadObjectError;
 }
-static OSStatus do_io(AudioServerPlugInDriverRef driver, AudioObjectID device, AudioObjectID stream, UInt32 client, UInt32 operation, UInt32 frames, const AudioServerPlugInIOCycleInfo *cycle, void *main_buffer, void *secondary) {
+static OSStatus do_io_impl(AudioServerPlugInDriverRef driver, AudioObjectID device, AudioObjectID stream, UInt32 client, UInt32 operation, UInt32 frames, const AudioServerPlugInIOCycleInfo *cycle, void *main_buffer, void *secondary) {
     (void)client; (void)secondary;
     if (!valid(driver) || cycle == NULL || main_buffer == NULL) return kAudioHardwareBadObjectError;
     const bool render = operation == kAudioServerPlugInIOOperationWriteMix;
@@ -153,11 +168,18 @@ static OSStatus do_io(AudioServerPlugInDriverRef driver, AudioObjectID device, A
     return mr_hal_core_io(gCore, device, stream, render, frame, main_buffer, frames) ? noErr : kAudioHardwareIllegalOperationError;
 }
 
+static OSStatus do_io(AudioServerPlugInDriverRef driver, AudioObjectID device, AudioObjectID stream, UInt32 client, UInt32 operation, UInt32 frames, const AudioServerPlugInIOCycleInfo *cycle, void *main_buffer, void *secondary) {
+    mr_hal_core_enter_audio_thread();
+    const OSStatus status = do_io_impl(driver, device, stream, client, operation, frames, cycle, main_buffer, secondary);
+    mr_hal_core_leave_audio_thread();
+    return status;
+}
+
 static AudioServerPlugInDriverInterface gInterface = {
     NULL, query, add_ref, release_ref, initialize, create_device, destroy_device,
     add_client, remove_client, perform, abort_change, has_property, settable,
     property_size, property_get, property_set, start_io, stop_io, timestamp,
-    will_io, boundary_io, do_io, boundary_io
+    will_io, begin_io, do_io, end_io
 };
 
 void *MixRelayHAL_Create(CFAllocatorRef allocator, CFUUIDRef requested) {

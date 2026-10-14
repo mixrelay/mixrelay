@@ -3,6 +3,8 @@
 //! product format catalog. Native ABI tests compare payloads with SDK structs.
 use mixrelay_pcm_ring::SampleFormat;
 use std::ffi::{c_char, c_void};
+use std::sync::atomic::Ordering;
+use std::time::Instant;
 
 use crate::abi::Snapshot;
 use crate::registry::Registry;
@@ -34,7 +36,7 @@ pub(crate) unsafe extern "C" fn mr_hal_core_notifications(
     capacity: usize,
 ) -> usize {
     use crate::abi::{
-        ALIVE, FORMAT, LIST, NAME, OUTPUT_MUTE, OUTPUT_VOLUME, RUNNING, STREAM_ACTIVE,
+        ALIVE, FORMAT, LIST, NAME, OUTPUT_MUTE, OUTPUT_VOLUME, RUNNING, STREAM_ACTIVE, TRANSPORT,
     };
     let mut count = 0;
     let mut push = |object, selector, scope| {
@@ -82,6 +84,7 @@ pub(crate) unsafe extern "C" fn mr_hal_core_notifications(
                 }
             }
         }
+        TRANSPORT => push(object, *b"tran", GLOBAL),
         ALIVE => push(object, *b"livn", GLOBAL),
         RUNNING => push(object, *b"goin", GLOBAL),
         STREAM_ACTIVE => push(object, *b"sact", GLOBAL),
@@ -278,7 +281,6 @@ fn device(snapshot: &Snapshot, address: &Address) -> Result<Value, i32> {
         b"ctrl" => Ok(objects(control_ids(snapshot, address.scope))),
         b"uid " => Ok(text(&snapshot.uid)),
         b"muid" => Ok(text(b"io.mixrelay.audio.endpoint")),
-        b"tran" => Ok(code(*b"virt")),
         b"akin" => Ok(objects([snapshot.device_id])),
         b"clkd" | b"hidn" => Ok(number(0)),
         b"livn" => Ok(number(u32::from(snapshot.alive))),
@@ -452,6 +454,23 @@ fn property(
     if address.element != 0 || ![GLOBAL, INPUT, OUTPUT].contains(&address.scope) {
         return Err(UNKNOWN);
     }
+    if address.selector == u32::from_be_bytes(*b"tran") {
+        // Reentrant IO/timestamp reads must not take control: StopIO holds
+        // that mutex while freeze waits for this callback's IO pin to drain.
+        // Fixed-slot pins and channel atomics preserve the property contract
+        // without snapshot or any registry/control-plane mutex, for all callers.
+        let device = registry.pin(object).ok_or(BAD_OBJECT)?;
+        if (object == device.id + 1 && device.capture_channels.load(Ordering::Acquire) == 0)
+            || (object >= device.id + 2 && device.render_channels.load(Ordering::Acquire) == 0)
+        {
+            return Err(BAD_OBJECT);
+        }
+        return if object == device.id {
+            Ok(number(crate::transport::VIRTUAL))
+        } else {
+            Err(UNKNOWN)
+        };
+    }
     let snapshot = registry.snapshot(object).ok_or(BAD_OBJECT)?;
     if (object == snapshot.input_stream_id && snapshot.capture_channels == 0)
         || (object == snapshot.output_stream_id && snapshot.render_channels == 0)
@@ -537,7 +556,9 @@ pub(crate) unsafe extern "C" fn mr_hal_core_property_get(
     capacity: u32,
     written: *mut u32,
     output: *mut c_void,
+    requester_pid: i32,
 ) -> i32 {
+    let deadline = Instant::now() + crate::transport::QUERY_BUDGET;
     let (Some(registry), Some(address), Some(written)) = (
         unsafe { registry.as_ref() },
         unsafe { address.as_ref() },
@@ -557,6 +578,13 @@ pub(crate) unsafe extern "C" fn mr_hal_core_property_get(
         None
     };
     match property(registry, object, address, uid.as_deref())
+        .map(|value| {
+            if address.selector == u32::from_be_bytes(*b"tran") {
+                number(registry.transport.get_until(requester_pid, deadline))
+            } else {
+                value
+            }
+        })
         .and_then(|value| unsafe { convert_level(value, address, capacity, output) })
         .and_then(|value| unsafe { value.write(capacity as usize, output) })
     {
@@ -814,6 +842,14 @@ mod notification_tests {
         let (count, unsupported) = payload(u32::MAX, 16);
         assert_eq!(count, 0);
         assert_eq!(unsupported, [SENTINEL; 16]);
+    }
+
+    #[test]
+    fn transport_notifications_target_the_device_global_property() {
+        let (count, output) = payload(crate::abi::TRANSPORT, 16);
+        assert_eq!(count, 1);
+        assert_eq!(output[0], (OBJECT, u32::from_be_bytes(*b"tran"), GLOBAL, 0));
+        assert!(output[1..].iter().all(|value| *value == SENTINEL));
     }
 
     #[test]

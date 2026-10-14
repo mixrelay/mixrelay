@@ -124,7 +124,13 @@ async fn run() -> Result<()> {
 
 fn open_manager(path: PathBuf) -> Result<DriverManager> {
     #[cfg(target_os = "macos")]
-    let backend = mixrelay_macos_driver::MacDriver::open().context("open macOS Driver")?;
+    let backend = {
+        let policy = transport_compatibility(std::env::var("MIXRELAY_TRANSPORT_COMPATIBILITY"))?;
+        if !mixrelay_macos_transport::control_inventory::set_transport_compatibility(&policy) {
+            bail!("invalid transport compatibility policy");
+        }
+        mixrelay_macos_driver::MacDriver::open().context("open macOS Driver")?
+    };
     #[cfg(target_os = "linux")]
     let backend = mixrelay_linux_driver::LinuxDriver::open().context("open PipeWire Driver")?;
     let mut manager = DriverManager::open(backend, path).context("restore Driver settings")?;
@@ -134,6 +140,20 @@ fn open_manager(path: PathBuf) -> Result<DriverManager> {
     // The running service binary carries the Driver release, independently of the graph app.
     manager.set_installed_version(Some(env!("CARGO_PKG_VERSION").into()));
     Ok(manager)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn transport_compatibility(value: Result<String, std::env::VarError>) -> Result<Vec<String>> {
+    // Derived from observed Rogue Amoeba Loopback/ARK field behavior. Keep the
+    // shipped workaround in the service, outside HAL binaries and authorization.
+    let value = match value {
+        Ok(value) => value,
+        Err(std::env::VarError::NotPresent) =>
+            "com.tencent.tencentmeeting,net.whatsapp.WhatsApp,com.motu.DigitalPerformer,com.vmware.fusion,com.goodnotesapp.x".into(),
+        Err(error) => return Err(error).context("read transport compatibility override"),
+    };
+    mixrelay_driver_control::parse_transport_compatibility(&value)
+        .context("parse MIXRELAY_TRANSPORT_COMPATIBILITY")
 }
 
 #[cfg(target_os = "macos")]
@@ -204,6 +224,30 @@ fn default_settings_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transport_policy_defaults_and_development_override() {
+        assert_eq!(
+            transport_compatibility(Err(std::env::VarError::NotPresent))
+                .unwrap()
+                .len(),
+            5
+        );
+        assert!(
+            transport_compatibility(Ok(String::new()))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            transport_compatibility(Ok("com.test.App".into())).unwrap(),
+            ["com.test.App"]
+        );
+        assert!(transport_compatibility(Ok("com.*".into())).is_err());
+        assert!(
+            transport_compatibility(Err(std::env::VarError::NotUnicode(OsString::from("bad"))))
+                .is_err()
+        );
+    }
 
     #[test]
     fn explicit_settings_path_does_not_acquire_a_desktop_lease() {

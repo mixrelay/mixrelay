@@ -170,6 +170,8 @@ fn apply(registry: &Registry, authority: u64, snapshot: &mut InventorySnapshot) 
         return false;
     }
     state.generation = snapshot.generation;
+    drop(state);
+    registry.transport_policy(snapshot.transport_compatibility.identifiers());
     true
 }
 

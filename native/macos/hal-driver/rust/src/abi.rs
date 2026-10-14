@@ -18,6 +18,7 @@ pub(crate) const RUNNING: u32 = 5;
 pub(crate) const STREAM_ACTIVE: u32 = 6;
 pub(crate) const OUTPUT_VOLUME: u32 = 7;
 pub(crate) const OUTPUT_MUTE: u32 = 8;
+pub(crate) const TRANSPORT: u32 = 9;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -100,6 +101,17 @@ impl HostOps {
     pub(crate) fn request(self, object: u32, generation: u64) -> bool {
         unsafe { (self.request_configuration)(self.context, object, CONFIG_ACTION, generation) }
     }
+}
+
+/// Scopes SDK IO entries, including nested/reentrant native callbacks.
+#[unsafe(no_mangle)]
+pub(crate) extern "C" fn mr_hal_core_enter_audio_thread() {
+    crate::transport::enter_audio_thread();
+}
+
+#[unsafe(no_mangle)]
+pub(crate) extern "C" fn mr_hal_core_leave_audio_thread() {
+    crate::transport::leave_audio_thread();
 }
 
 #[unsafe(no_mangle)]
@@ -245,6 +257,40 @@ pub(crate) unsafe extern "C" fn mr_hal_core_client(
     add: bool,
 ) -> i32 {
     unsafe { registry.as_ref() }.map_or(INVALID, |registry| registry.client(device, client, add))
+}
+
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mr_hal_core_client_identity(
+    registry: *mut Registry,
+    device: u32,
+    client: u32,
+    pid: i32,
+    bundle: *const c_char,
+    add: bool,
+) -> i32 {
+    let Some(registry) = (unsafe { registry.as_ref() }) else {
+        return INVALID;
+    };
+    // Copy callback-owned storage before entering registry control or returning.
+    let bundle = if bundle.is_null() {
+        None
+    } else {
+        unsafe { CStr::from_ptr(bundle) }
+            .to_str()
+            .ok()
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+    };
+    let _gate = crate::device::lock(&registry.client_identity_gate);
+    let status = registry.client(device, client, add);
+    if status == OK {
+        if add {
+            registry.transport.client(device, client, pid, bundle);
+        } else {
+            registry.transport.remove(device, client);
+        }
+    }
+    status
 }
 
 #[unsafe(no_mangle)]

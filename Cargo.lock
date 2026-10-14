@@ -2829,6 +2829,7 @@ dependencies = [
  "mixrelay-linux-driver",
  "mixrelay-local-socket",
  "mixrelay-macos-driver",
+ "mixrelay-macos-transport",
  "tokio",
  "tracing",
  "tracing-subscriber",

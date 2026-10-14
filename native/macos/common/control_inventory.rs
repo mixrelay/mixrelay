@@ -9,10 +9,83 @@ use std::{
     os::fd::{BorrowedFd, FromRawFd, IntoRawFd, OwnedFd},
     os::unix::fs::MetadataExt,
     ptr,
+    sync::Mutex,
 };
 
 pub const MAX_ENTRIES: usize = 64;
 pub const NAME_BYTES: usize = 128;
+pub const MAX_TRANSPORT_BUNDLES: usize = 32;
+static PRODUCER_POLICY: Mutex<Vec<CString>> = Mutex::new(Vec::new());
+
+/// Configures the service's additive v1 presentation policy before publication.
+/// Invalid input retains the previous policy; this never grants device access.
+pub fn set_transport_compatibility(bundles: &[String]) -> bool {
+    if bundles.len() > MAX_TRANSPORT_BUNDLES
+        || bundles
+            .iter()
+            .enumerate()
+            .any(|(index, bundle)| !valid_bundle(bundle) || bundles[..index].contains(bundle))
+    {
+        return false;
+    }
+    let Ok(policy) = bundles
+        .iter()
+        .map(|bundle| CString::new(bundle.as_str()))
+        .collect::<Result<Vec<_>, _>>()
+    else {
+        return false;
+    };
+    *PRODUCER_POLICY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = policy;
+    true
+}
+
+fn valid_bundle(bundle: &str) -> bool {
+    !bundle.is_empty()
+        && bundle.len() < NAME_BYTES
+        && bundle.split('.').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct TransportCompatibility {
+    pub count: usize,
+    pub bundles: [[c_char; NAME_BYTES]; MAX_TRANSPORT_BUNDLES],
+}
+impl Default for TransportCompatibility {
+    fn default() -> Self {
+        Self {
+            count: 0,
+            bundles: [[0; NAME_BYTES]; MAX_TRANSPORT_BUNDLES],
+        }
+    }
+}
+impl TransportCompatibility {
+    /// Returns the bounded, terminated identifiers copied by the decoder.
+    #[must_use]
+    pub fn identifiers(&self) -> Vec<String> {
+        self.bundles
+            .iter()
+            .take(self.count)
+            .filter_map(|bytes| {
+                let bytes =
+                    unsafe { std::slice::from_raw_parts(bytes.as_ptr().cast::<u8>(), NAME_BYTES) };
+                CStr::from_bytes_until_nul(bytes)
+                    .ok()?
+                    .to_str()
+                    .ok()
+                    .map(str::to_owned)
+            })
+            .collect()
+    }
+}
+
 pub(super) type Xpc = *mut c_void;
 type XpcType = *const c_void;
 
@@ -48,6 +121,7 @@ unsafe extern "C" {
     fn xpc_string_get_length(value: Xpc) -> usize;
     fn xpc_data_get_bytes_ptr(value: Xpc) -> *const c_void;
     fn xpc_data_get_length(value: Xpc) -> usize;
+    fn xpc_string_create(value: *const c_char) -> Xpc;
     fn xpc_array_create(values: *const Xpc, count: usize) -> Xpc;
     fn xpc_array_append_value(array: Xpc, value: Xpc);
     fn xpc_array_get_count(array: Xpc) -> usize;
@@ -83,6 +157,7 @@ pub struct InventorySnapshot {
     pub generation: u64,
     pub count: usize,
     pub entries: [InventoryEntry; MAX_ENTRIES],
+    pub transport_compatibility: TransportCompatibility,
 }
 
 impl Default for InventorySnapshot {
@@ -91,6 +166,7 @@ impl Default for InventorySnapshot {
             generation: 0,
             count: 0,
             entries: [InventoryEntry::default(); MAX_ENTRIES],
+            transport_compatibility: TransportCompatibility::default(),
         }
     }
 }
@@ -246,7 +322,50 @@ fn populate(message: Message, entries: &[InventoryEntry], generation: u64) -> Op
         xpc_dictionary_set_uint64(message.0, c"generation".as_ptr(), generation);
         xpc_dictionary_set_value(message.0, c"entries".as_ptr(), array.0);
     }
+    let policy = PRODUCER_POLICY
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    write_policy(message.0, &policy)?;
     Some(message)
+}
+fn write_policy(message: Xpc, bundles: &[CString]) -> Option<()> {
+    let array = Message::new(unsafe { xpc_array_create(ptr::null(), 0) })?;
+    for bundle in bundles {
+        let item = Message::new(unsafe { xpc_string_create(bundle.as_ptr()) })?;
+        unsafe { xpc_array_append_value(array.0, item.0) };
+    }
+    unsafe { xpc_dictionary_set_value(message, c"transport_compatibility".as_ptr(), array.0) };
+    Some(())
+}
+fn parse_policy(message: Xpc) -> Option<TransportCompatibility> {
+    let value = field(message, c"transport_compatibility");
+    let mut result = TransportCompatibility::default();
+    if value.is_null() {
+        return Some(result);
+    }
+    if !is_type(value, (&raw const _xpc_type_array).cast()) {
+        return None;
+    }
+    let count = unsafe { xpc_array_get_count(value) };
+    if count > MAX_TRANSPORT_BUNDLES {
+        return None;
+    }
+    let mut seen = Vec::with_capacity(count);
+    for index in 0..count {
+        let bundle = string(unsafe { xpc_array_get_value(value, index) })?;
+        if !valid_bundle(bundle.to_str().ok()?) || seen.contains(&bundle) {
+            return None;
+        }
+        for (target, byte) in result.bundles[index]
+            .iter_mut()
+            .zip(bundle.to_bytes_with_nul())
+        {
+            *target = c_char::from_ne_bytes([*byte]);
+        }
+        seen.push(bundle);
+    }
+    result.count = count;
+    Some(result)
 }
 fn parse_entry(item: Xpc) -> Option<(InventoryEntry, OwnedFd)> {
     if !dictionary(item) {
@@ -376,6 +495,9 @@ pub unsafe extern "C" fn mr_hal_control_parse_inventory_snapshot(
     if count > MAX_ENTRIES {
         return false;
     }
+    let Some(transport_compatibility) = parse_policy(message) else {
+        return false;
+    };
     let mut decoded = Vec::with_capacity(count);
     for index in 0..count {
         let Some((entry, descriptor)) = parse_entry(unsafe { xpc_array_get_value(array, index) })
@@ -393,6 +515,7 @@ pub unsafe extern "C" fn mr_hal_control_parse_inventory_snapshot(
     let mut complete = InventorySnapshot {
         generation,
         count,
+        transport_compatibility,
         ..InventorySnapshot::default()
     };
     for (index, (mut entry, descriptor)) in decoded.into_iter().enumerate() {
@@ -532,6 +655,101 @@ pub unsafe extern "C" fn mr_hal_control_parse_transport_replacement_request(
 mod tests {
     use super::*;
     use std::os::fd::AsRawFd;
+
+    #[test]
+    fn transport_policy_codec_is_additive_bounded_and_transactional() {
+        let message = message(&[]);
+        unsafe {
+            xpc_dictionary_set_value(
+                message.0,
+                c"transport_compatibility".as_ptr(),
+                ptr::null_mut(),
+            );
+        };
+        let mut output = InventorySnapshot::default();
+        assert!(unsafe { mr_hal_control_parse_inventory_snapshot(message.0, &raw mut output) });
+        assert!(output.transport_compatibility.identifiers().is_empty());
+        write_policy(message.0, &[]).unwrap();
+        assert!(unsafe { mr_hal_control_parse_inventory_snapshot(message.0, &raw mut output) });
+        let valid = [c"com.test.App".to_owned(), c"net.test.Other".to_owned()];
+        write_policy(message.0, &valid).unwrap();
+        assert!(unsafe { mr_hal_control_parse_inventory_snapshot(message.0, &raw mut output) });
+        let expected = output.transport_compatibility.identifiers();
+        assert_eq!(expected, ["com.test.App", "net.test.Other"]);
+        // An old v1 reader ignores the additive key and still sees its entries.
+        assert_eq!(
+            unsafe { xpc_array_get_count(field(message.0, c"entries")) },
+            0
+        );
+        for malformed in [
+            vec![c"".to_owned()],
+            vec![c"com..app".to_owned()],
+            vec![c"com.app*".to_owned()],
+            vec![c"com.test.App".to_owned(); 2],
+            vec![CString::new("a".repeat(NAME_BYTES)).unwrap()],
+            (0..=MAX_TRANSPORT_BUNDLES)
+                .map(|index| CString::new(format!("com.app{index}")).unwrap())
+                .collect(),
+        ] {
+            write_policy(message.0, &malformed).unwrap();
+            assert!(!unsafe {
+                mr_hal_control_parse_inventory_snapshot(message.0, &raw mut output)
+            });
+            assert_eq!(output.transport_compatibility.identifiers(), expected);
+            assert_eq!(output.generation, 7);
+        }
+        unsafe { xpc_dictionary_set_uint64(message.0, c"transport_compatibility".as_ptr(), 1) };
+        assert!(!unsafe { mr_hal_control_parse_inventory_snapshot(message.0, &raw mut output) });
+        let array = Message::new(unsafe { xpc_array_create(ptr::null(), 0) }).unwrap();
+        let item = new_message(c"wrong_type").unwrap();
+        unsafe {
+            xpc_array_append_value(array.0, item.0);
+            xpc_dictionary_set_value(message.0, c"transport_compatibility".as_ptr(), array.0);
+        }
+        assert!(!unsafe { mr_hal_control_parse_inventory_snapshot(message.0, &raw mut output) });
+        assert_eq!(output.transport_compatibility.identifiers(), expected);
+        let previous = PRODUCER_POLICY.lock().unwrap().clone();
+        assert!(set_transport_compatibility(&["com.service.App".into()]));
+        assert!(!set_transport_compatibility(&["com..bad".into()]));
+        assert!(!set_transport_compatibility(&vec![
+            "com.app".into();
+            MAX_TRANSPORT_BUNDLES + 1
+        ]));
+        assert!(!set_transport_compatibility(&[
+            "com.app".into(),
+            "com.app".into()
+        ]));
+        assert_eq!(
+            decode(&self::message(&[]))
+                .unwrap()
+                .0
+                .transport_compatibility
+                .identifiers(),
+            ["com.service.App"]
+        );
+        *PRODUCER_POLICY.lock().unwrap() = previous;
+    }
+
+    #[test]
+    fn transport_policy_accepts_maximum_and_rejects_non_utf8() {
+        let message = message(&[]);
+        let valid: Vec<_> = (0..MAX_TRANSPORT_BUNDLES)
+            .map(|index| CString::new(format!("com.app{index}")).unwrap())
+            .collect();
+        write_policy(message.0, &valid).unwrap();
+        assert_eq!(
+            decode(&message).unwrap().0.transport_compatibility.count,
+            MAX_TRANSPORT_BUNDLES
+        );
+        write_policy(
+            message.0,
+            &[CString::new("a".repeat(NAME_BYTES - 1)).unwrap()],
+        )
+        .unwrap();
+        assert!(decode(&message).is_some());
+        write_policy(message.0, &[CString::new([0xff]).unwrap()]).unwrap();
+        assert!(decode(&message).is_none());
+    }
 
     fn backing() -> OwnedFd {
         let descriptor = crate::anonymous_memory::mr_shared_memory_create(4096, true);

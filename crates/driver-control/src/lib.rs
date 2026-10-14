@@ -5,6 +5,8 @@ mod contract;
 mod manager;
 mod server;
 mod store;
+mod transport_compatibility;
+pub use transport_compatibility::parse_transport_compatibility;
 
 #[cfg(test)]
 mod test_backend;

@@ -129,6 +129,12 @@ Driver는 장치 구성마다 다시 설치하지 않는다. 기본 장치 이�
 두 번째 묶음은 업데이트 확인·결과·종료이며 구분선은 하나다. 앱 열기는 편집 앱이 있을 때만 표시한다.
 업데이트 결과는 메뉴 안에 표시하고 다운로드가 있으면 링크를 제공한다. 자동 설치·별도 결과 팝업은 사용하지 않는다.
 
+### macOS 장치 Transport 호환성
+
+HAL의 `kAudioDevicePropertyTransportType`은 기본적으로 `virt`다. 가상 장치를 숨기거나 거부하는 앱의 정확한 번들 ID에만 `usb `를 응답한다. Driver 서비스가 목록을 소유하며 기본값은 Loopback/ARK 현장 동작에서 확인된 `com.tencent.tencentmeeting`, `net.whatsapp.WhatsApp`, `com.motu.DigitalPerformer`, `com.vmware.fusion`, `com.goodnotesapp.x`다. 이는 표시 호환성으로, 권한·장치 UID·오디오 경로를 바꾸지 않는다.
+
+v1 inventory의 선택 필드 `transport_compatibility`는 없으면 빈 목록이다. 잘못된 목록과 오래된 세대는 마지막 유효 정책을 보존한다. PID와 프로세스 시작 시각으로 신원을 구분하고, 콜백 번들 ID를 복사한다. 알 수 없거나 샌드박스가 조회를 막으면 `virt`를 유지한다. 목록 변경 시 잠금을 해제한 뒤 `tran` 속성 변경을 알린다. 서비스 환경 변수 `MIXRELAY_TRANSPORT_COMPATIBILITY`로 HAL 재빌드 없이 개발 목록을 교체하거나 빈 값으로 끌 수 있다. [규격·설치본 확인 절차](../native/macos/hal-driver/README.md#transport-type-compatibility)를 따른다.
+
 ### 가상 장치의 버퍼 관리
 
 버퍼 설정의 저장·검증·적용·실제 값 보고는 Driver가 소유한다. 사용자에게는 장치별 버퍼 크기 선택기 하나를 제공한다.

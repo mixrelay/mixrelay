@@ -162,6 +162,12 @@ unsafe extern "C" fn changed(context: *mut c_void, object: u32, change: u32) {
     lock(&host.changes).push((object, change));
     if let Some(registry) = unsafe { host.registry.load(Ordering::Acquire).as_ref() } {
         let _ = registry.devices();
+        if change == crate::abi::TRANSPORT {
+            assert!(registry.inventory.try_lock().is_ok());
+            assert!(registry.transport.state.try_lock().is_ok());
+            // Reentrant queries prove notification delivery owns no resolver lock.
+            assert_eq!(registry.transport.get(object, 0), crate::transport::VIRTUAL);
+        }
     }
 }
 unsafe extern "C" fn request(
@@ -296,6 +302,7 @@ impl Fixture {
                     u32::try_from(N).unwrap(),
                     &raw mut written,
                     bytes.as_mut_ptr().cast(),
+                    0,
                 )
             },
             0
@@ -744,6 +751,7 @@ fn property_abi_exposes_per_device_stream_shape_and_partial_lists() {
                 4,
                 &raw mut size,
                 (&raw mut one).cast(),
+                0,
             )
         },
         0
@@ -837,6 +845,7 @@ fn property_abi_validates_formats_and_cf_string_ownership() {
                 8,
                 &raw mut written,
                 (&raw mut name).cast(),
+                0,
             )
         },
         0

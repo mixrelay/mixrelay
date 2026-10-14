@@ -20,6 +20,7 @@ enum {
     MR_HAL_ENDPOINT_DISPLAY_NAME_MAX_BYTES = 128,
     /* Framing limit, not a silent truncation or a registry product policy. */
     MR_HAL_CONTROL_INVENTORY_MAX_ENTRIES = 64,
+    MR_HAL_TRANSPORT_COMPATIBILITY_MAX_BUNDLES = 32,
 };
 
 typedef struct MRHALControlInventoryEntry {
@@ -35,6 +36,8 @@ typedef struct MRHALControlInventorySnapshot {
     uint64_t generation;
     size_t count;
     MRHALControlInventoryEntry entries[MR_HAL_CONTROL_INVENTORY_MAX_ENTRIES];
+    /* Additive v1 wire field; absent means empty. Local ABI rebuilt together. */
+    struct { size_t count; char bundles[MR_HAL_TRANSPORT_COMPATIBILITY_MAX_BUNDLES][MR_HAL_ENDPOINT_DISPLAY_NAME_MAX_BYTES]; } transport_compatibility;
 } MRHALControlInventorySnapshot;
 
 xpc_object_t mr_hal_control_create_inventory_request(void);

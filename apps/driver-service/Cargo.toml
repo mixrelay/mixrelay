@@ -22,6 +22,7 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+mixrelay-macos-transport = { path = "../../native/macos/common" }
 mixrelay-macos-driver = { path = "../../native/macos/driver-control" }
 # Public system logging preserves fatal launchd diagnostics without a log-file owner.
 libc = "0.2"

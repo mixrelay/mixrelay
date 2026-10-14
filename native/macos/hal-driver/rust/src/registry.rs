@@ -39,6 +39,8 @@ pub(crate) struct IoOperation {
 
 pub(crate) struct Registry {
     pub(crate) native: NativeOps,
+    pub(crate) client_identity_gate: Mutex<()>,
+    pub(crate) transport: crate::transport::Transport,
     host: HostOps,
     // Object generation is shared across slots. Slots are not reused until a
     // retired device has no clients and all reader pins have been released.
@@ -70,6 +72,8 @@ impl Registry {
     pub(crate) fn new(native: NativeOps, host: HostOps) -> Self {
         Self {
             native,
+            transport: crate::transport::Transport::default(),
+            client_identity_gate: Mutex::new(()),
             host,
             generation: Mutex::new(0),
             slots: std::array::from_fn(|_| Slot {
@@ -276,6 +280,14 @@ impl Registry {
         self.host.changed(1, LIST);
         self.reclaim();
         OK
+    }
+
+    pub(crate) fn transport_policy(&self, bundles: Vec<String>) {
+        if self.transport.policy(bundles) {
+            for id in self.devices() {
+                self.host.changed(id, crate::abi::TRANSPORT);
+            }
+        }
     }
 
     pub(crate) fn devices(&self) -> Vec<u32> {
@@ -735,6 +747,7 @@ impl Registry {
     }
 
     pub(crate) fn timestamp(&self, id: u32, now: u64, output: &mut Timestamp) -> bool {
+        let _audio = crate::transport::AudioScope::enter();
         let Some(device) = self.pin(id).filter(|device| device.id == id) else {
             return false;
         };
@@ -748,6 +761,7 @@ impl Registry {
     }
 
     pub(crate) unsafe fn io(&self, operation: IoOperation) -> bool {
+        let _audio = crate::transport::AudioScope::enter();
         let IoOperation {
             device: id,
             stream,
