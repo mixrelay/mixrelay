@@ -84,7 +84,9 @@ fn render_passthrough(renderer: &mut Renderer<'_>) {
     let mut sink = tests::stereo_list(&mut output);
     // SAFETY: separate live stereo buffers and their ABL metadata cover exactly
     // 32 frames. The unpublished fixture invokes this renderer synchronously.
-    assert!(unsafe { renderer.render((&raw const source).cast(), (&raw mut sink).cast(), 32) });
+    assert!(unsafe {
+        renderer.render((&raw const source).cast(), (&raw mut sink).cast(), 32, None)
+    });
     assert_eq!(input.map(f32::to_bits), output.map(f32::to_bits));
 }
 
@@ -96,6 +98,7 @@ fn internal_add_remove_keeps_callback_pcm_and_frame_epoch_continuous() {
     let signals = RenderSignals::default();
     let bindings = tests::stereo_bindings();
     let mut renderer = Renderer {
+        timebase: mixrelay_realtime::Timebase::current(),
         processor: &mut processor,
         activation: Some(GraphActivation {
             installed: &installed,
@@ -107,7 +110,7 @@ fn internal_add_remove_keeps_callback_pcm_and_frame_epoch_continuous() {
         epoch: 19,
         native_clock: None,
         status: &control.status,
-        frame: 0,
+        position: None,
         progress: &signals.progress,
         failed: &signals.failed,
         invalid: &signals.invalid,
@@ -124,7 +127,7 @@ fn internal_add_remove_keeps_callback_pcm_and_frame_epoch_continuous() {
         assert_eq!(std::ptr::from_ref(&renderer), address);
         assert!(!signals.rebind.load(Ordering::Acquire));
     }
-    assert_eq!((renderer.frame, renderer.epoch), (101 * 32, 19));
+    assert_eq!((renderer.position, renderer.epoch), (Some(101 * 32), 19));
     assert_eq!(signals.progress.load(Ordering::Acquire), 101);
     let status = control.status.status(installed.format());
     assert_eq!((status.underruns, status.overruns), (0, 0));

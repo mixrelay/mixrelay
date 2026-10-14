@@ -753,3 +753,88 @@ fn io_transport_read_completes_while_stop_waits_for_callback_pin() {
     assert_eq!(stopped, OK);
     assert_eq!(registry.client(id, 1, false), OK);
 }
+
+#[test]
+fn latency_properties_are_directional_and_reentrant_without_control_locks() {
+    use mixrelay_macos_transport::control_inventory::InputLatency;
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    fixture.registry.publish_latencies(&[InputLatency {
+        endpoint_id: [1; 16],
+        rate: 48_000,
+        engine_pid: 10,
+        lease: 20,
+        revision: 30,
+        frames: Some(321),
+    }]);
+    let device = fixture.registry.pin(id).unwrap();
+    let _control = super::lock(&device.control);
+    let _identity = super::lock(&fixture.registry.client_identity_gate);
+    let _audio = crate::transport::AudioScope::enter();
+    for (object, selector, scope, expected) in [
+        (id, *b"ltnc", *b"inpt", 321),
+        (id, *b"ltnc", *b"outp", 0),
+        (id, *b"saft", *b"inpt", 0),
+        (id, *b"saft", *b"outp", 0),
+        (id + 1, *b"ltnc", *b"glob", 0),
+        (id + 2, *b"ltnc", *b"glob", 0),
+    ] {
+        let address = Address {
+            selector: u32::from_be_bytes(selector),
+            scope: u32::from_be_bytes(scope),
+            element: 0,
+        };
+        assert_eq!(
+            u32::from_ne_bytes(fixture.property::<4>(object, &address)),
+            expected
+        );
+    }
+}
+
+#[test]
+fn io_threads_are_refused_snapshot_properties_instead_of_waiting_for_control() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    let registry = &*fixture.registry;
+    let device = registry.pin(id).unwrap();
+    let control = super::lock(&device.control);
+    let (done, finished) = mpsc::channel();
+    let timely = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let _audio = crate::transport::AudioScope::enter();
+            let registry = (&raw const *registry).cast_mut();
+            let read = |selector: [u8; 4], scope: u32| {
+                let address = Address {
+                    selector: u32::from_be_bytes(selector),
+                    scope,
+                    element: 0,
+                };
+                let mut value = [0_u8; 64];
+                let mut written = 0;
+                unsafe {
+                    crate::properties::mr_hal_core_property_get(
+                        registry,
+                        id,
+                        &raw const address,
+                        0,
+                        std::ptr::null(),
+                        64,
+                        &raw mut written,
+                        value.as_mut_ptr().cast(),
+                        0,
+                    )
+                }
+            };
+            let name = read(*b"lnam", u32::from_be_bytes(*b"glob"));
+            let latency = read(*b"ltnc", u32::from_be_bytes(*b"inpt"));
+            done.send((name, latency)).unwrap();
+        });
+        let result = finished.recv_timeout(Duration::from_millis(200));
+        drop(control);
+        result
+    });
+    assert_eq!(timely.unwrap(), (i32::from_be_bytes(*b"nope"), OK));
+}

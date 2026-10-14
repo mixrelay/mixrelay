@@ -948,3 +948,56 @@ fn stopped_marker_preserves_previous_release_json_schema_and_private_permissions
     }
     assert!(!store::load(&path).unwrap().unwrap().devices.is_empty());
 }
+
+#[test]
+fn maintenance_clears_latency_from_an_engine_that_stopped_publishing() {
+    let fixture = FixtureDir::new("driver-latency-expiry").unwrap();
+    let (backend, observed) = FakeBackend::ready();
+    let mut manager = DriverManager::open(backend, fixture.join("drivers.json")).unwrap();
+    let reply = manager
+        .publish_latency(crate::LatencyCommand::Claim {
+            incarnation: "engine".into(),
+            process_id: 42,
+        })
+        .unwrap();
+    let lease = reply.lease.unwrap();
+    let publication = crate::RuntimeLatency {
+        endpoint_id: manager.inventory[0].spec.id.clone(),
+        rate: 48_000,
+        engine_lease: lease.clone(),
+        applied_graph_revision: 1,
+        input_latency_frames: Some(256),
+    };
+    assert!(
+        manager
+            .publish_latency(crate::LatencyCommand::Publish {
+                lease,
+                destinations: vec![publication],
+            })
+            .unwrap()
+            .accepted
+    );
+    let now = std::time::Instant::now();
+    manager.maintain_at(now).unwrap();
+    assert_eq!(
+        observed
+            .lock()
+            .latencies
+            .last()
+            .unwrap()
+            .input_latency_frames,
+        Some(256)
+    );
+    manager
+        .maintain_at(now + std::time::Duration::from_secs(4))
+        .unwrap();
+    assert_eq!(
+        observed
+            .lock()
+            .latencies
+            .last()
+            .unwrap()
+            .input_latency_frames,
+        None
+    );
+}

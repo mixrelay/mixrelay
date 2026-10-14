@@ -54,6 +54,7 @@ pub fn router_with_access(
     tokio::spawn(maintain_inventory(Arc::downgrade(&state.manager)));
     Router::new()
         .route(SNAPSHOT_ROUTE, get(snapshot).put(mutate))
+        .route(crate::LATENCY_ROUTE, axum::routing::put(latency))
         .layer(middleware::from_fn_with_state(state.clone(), admit))
         .with_state(state)
 }
@@ -98,6 +99,28 @@ async fn maintain_inventory(manager: Weak<Mutex<DriverManager>>) {
         };
         tokio::time::sleep(delay).await;
     }
+}
+
+async fn latency(
+    State(control): State<Control>,
+    Json(command): Json<crate::LatencyCommand>,
+) -> Result<Json<crate::LatencyReply>, ApiError> {
+    let permit = control
+        .operations
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            ApiError(DriverError::Unavailable(
+                "Driver control queue is full".into(),
+            ))
+        })?;
+    tokio::task::spawn_blocking(move || {
+        let result = control.manager.lock().publish_latency(command);
+        drop(permit);
+        result.map(Json).map_err(ApiError)
+    })
+    .await
+    .map_err(|error| ApiError(DriverError::Backend(error.to_string())))?
 }
 
 async fn snapshot(State(control): State<Control>) -> Result<Json<DriverSnapshot>, ApiError> {

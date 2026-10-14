@@ -2,6 +2,7 @@ mod direct;
 mod endpoint_backend;
 mod format;
 mod maintenance;
+mod runtime_latency;
 mod shutdown;
 mod worker_runtime;
 use super::macos_pacing::{ApplicationClockSnapshot, ApplicationPacer, HardwarePacer, Pace};
@@ -211,19 +212,15 @@ async fn run_owned(
     );
     // Saved device references are resolved through Driver's blocking control API.
     // Recall must finish before audio starts, but outside the Tokio IO executor.
-    let controller = Arc::new(
-        tokio::task::spawn_blocking(move || {
-            controller
-                .after_repeated_failures(repeated_failures)
-                .with_graph_catalog()
-        })
-        .await
-        .map_err(|error| format!("could not restore graph catalog: {error}"))?,
-    );
+    let controller = restore_controller(controller, repeated_failures).await?;
     // Declared before AudioWorker so reclamation remains available until the
     // audio owner has stopped and joined, including partial-startup failures.
     let reclaimer =
         maintenance::start_reclaimer(Arc::downgrade(&exchange), Arc::downgrade(&devices))?;
+    let runtime_latency = runtime_latency::Reporter::start(
+        Arc::clone(&exchange),
+        mixrelay_control_server::ControlBackend::incarnation(controller.as_ref()),
+    )?;
     let worker_status = runtime_status.clone();
     let monitor_devices = devices.clone();
     let audio_thread = std::thread::Builder::new()
@@ -255,6 +252,22 @@ async fn run_owned(
         .and(worker.finish())
         .and(reclaimer.finish())
         .and(latency.finish())
+        .and(runtime_latency.finish().await)
+}
+
+async fn restore_controller(
+    controller: EngineGraphController,
+    repeated_failures: bool,
+) -> Result<Arc<EngineGraphController>, String> {
+    tokio::task::spawn_blocking(move || {
+        Arc::new(
+            controller
+                .after_repeated_failures(repeated_failures)
+                .with_graph_catalog(),
+        )
+    })
+    .await
+    .map_err(|error| format!("could not restore graph catalog: {error}"))
 }
 
 /// An OS shutdown request or the controller releasing the engine.

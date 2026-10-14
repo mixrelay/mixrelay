@@ -3,6 +3,9 @@
 //! authoritative list, so malformed traffic cannot trigger device removal.
 #![cfg(target_os = "macos")]
 
+mod latency;
+pub use latency::{InputLatency, parse_input_latencies, write_input_latencies};
+
 use std::{
     ffi::{CStr, CString, c_char, c_int, c_void},
     fs::File,

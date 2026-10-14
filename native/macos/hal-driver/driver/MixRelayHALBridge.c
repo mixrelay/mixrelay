@@ -159,9 +159,10 @@ static OSStatus end_io(AudioServerPlugInDriverRef driver, AudioObjectID device, 
     return valid(driver) ? noErr : kAudioHardwareBadObjectError;
 }
 static OSStatus do_io_impl(AudioServerPlugInDriverRef driver, AudioObjectID device, AudioObjectID stream, UInt32 client, UInt32 operation, UInt32 frames, const AudioServerPlugInIOCycleInfo *cycle, void *main_buffer, void *secondary) {
-    (void)client; (void)secondary;
+    (void)secondary;
     if (!valid(driver) || cycle == NULL || main_buffer == NULL) return kAudioHardwareBadObjectError;
     const bool render = operation == kAudioServerPlugInIOOperationWriteMix;
+    if (render) mr_hal_core_render_client(gCore, device, client);
     if (!render && operation != kAudioServerPlugInIOOperationReadInput) return noErr;
     uint64_t frame;
     if (!mr_hal_io_sample_frame(render ? cycle->mOutputTime.mSampleTime : cycle->mInputTime.mSampleTime, &frame)) return kAudioHardwareIllegalOperationError;

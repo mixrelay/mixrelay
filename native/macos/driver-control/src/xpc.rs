@@ -99,13 +99,32 @@ fn inventory(service: &Service) -> Option<Owned> {
     let snapshot = published.as_ref()?.as_abi();
     // SAFETY: published retains every descriptor through synchronous message
     // creation; the codec duplicates them before this mutex guard is released.
-    Owned::new(unsafe {
+    let message = Owned::new(unsafe {
         mr_hal_control_create_inventory_snapshot(
             snapshot.entries.as_ptr(),
             snapshot.count,
             snapshot.generation,
         )
-    })
+    })?;
+    let latencies: Vec<_> = service
+        .latencies
+        .lock()
+        .values()
+        .filter(|entry| {
+            snapshot.entries[..snapshot.count]
+                .iter()
+                .any(|device| device.endpoint_id == entry.endpoint_id)
+        })
+        .copied()
+        .collect();
+    // SAFETY: this newly created message is exclusively owned until send.
+    unsafe {
+        mixrelay_macos_transport::control_inventory::write_input_latencies(
+            message.raw(),
+            &latencies,
+        )
+    }
+    .then_some(message)
 }
 
 fn acknowledge(service: &Service, entry: &mut Peer, event: Object) -> bool {

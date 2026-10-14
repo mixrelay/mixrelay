@@ -156,6 +156,12 @@ pub trait DriverBackend: Send {
     fn recover(&mut self, _desired: &[DriverDeviceConfig]) -> Result<bool, DriverError> {
         Ok(false)
     }
+    /// Publishes ephemeral input latency on control. Old/non-HAL backends safely ignore it.
+    /// # Errors
+    /// Returns native publication errors without changing persisted settings.
+    fn publish_latency(&mut self, _publication: &crate::RuntimeLatency) -> Result<(), DriverError> {
+        Ok(())
+    }
     /// Reports native installation/load state independently of service reachability.
     fn state(&self) -> DriverState;
 }

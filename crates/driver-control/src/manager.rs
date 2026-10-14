@@ -12,6 +12,7 @@ use crate::{
 
 /// Single non-real-time owner of Driver inventory, revisions and independent settings storage.
 pub struct DriverManager {
+    latency: crate::latency::LatencyAuthority,
     backend: Box<dyn DriverBackend>,
     path: PathBuf,
     inventory: Vec<DriverDeviceConfig>,
@@ -24,6 +25,17 @@ pub struct DriverManager {
 }
 
 impl DriverManager {
+    /// Applies an ephemeral runtime message without persisting or advancing inventory revision.
+    /// # Errors
+    /// Returns validation or native publication errors.
+    pub fn publish_latency(
+        &mut self,
+        command: crate::LatencyCommand,
+    ) -> Result<crate::LatencyReply, DriverError> {
+        self.latency
+            .command(command, std::time::Instant::now(), self.backend.as_mut())
+    }
+
     /// Loads `path` and initializes the native inventory only when `backend` is ready.
     /// An absent store gets the fixed duplex default; an existing empty store remains empty.
     /// A non-ready backend never replaces devices or writes new defaults.
@@ -51,6 +63,7 @@ impl DriverManager {
             installed_version: None,
             persistence_error: None,
             initial_inventory_pending: true,
+            latency: crate::latency::LatencyAuthority::default(),
             active,
         };
         manager.initialize()?;
@@ -84,6 +97,15 @@ impl DriverManager {
     /// # Errors
     /// Returns initialization, recovery or actual readback errors while retaining inventory.
     pub(crate) fn maintain(&mut self) -> Result<bool, DriverError> {
+        self.maintain_at(std::time::Instant::now())
+    }
+
+    fn maintain_at(&mut self, now: std::time::Instant) -> Result<bool, DriverError> {
+        // An engine that stopped publishing loses its reported latency even when nothing
+        // else reaches the service. A failed clear never holds up inventory recovery.
+        if let Err(error) = self.latency.expire(now, self.backend.as_mut()) {
+            tracing::warn!(%error, "expired input latency could not be cleared");
+        }
         if self.initial_inventory_pending {
             return self.initialize();
         }

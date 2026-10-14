@@ -8,6 +8,12 @@
 #include "MRHALControlProtocol.h"
 
 static int32_t forwarded_pid;
+static uint32_t rendered_client, rendered_device;
+static void observed_render_client(const MRHALCore *core, uint32_t device, uint32_t client) {
+    rendered_device = device; rendered_client = client;
+    mr_hal_core_render_client(core, device, client);
+}
+#define mr_hal_core_render_client observed_render_client
 static int32_t observed_get(MRHALCore *core, uint32_t object, const MRHALCorePropertyAddress *property, uint32_t qs, const void *q, uint32_t capacity, uint32_t *written, void *output, int32_t pid) {
     forwarded_pid = pid;
     return mr_hal_core_property_get(core, object, property, qs, q, capacity, written, output, pid);
@@ -15,6 +21,7 @@ static int32_t observed_get(MRHALCore *core, uint32_t object, const MRHALCorePro
 #define mr_hal_core_property_get observed_get
 #include "../driver/MixRelayHALBridge.c"
 #undef mr_hal_core_property_get
+#undef mr_hal_core_render_client
 
 /* Keep the Rust property's stable FourCC projection tied to the active SDK. */
 _Static_assert(kAudioVolumeControlClassID == UINT32_C(0x766c6d65), "volume class ABI");
@@ -133,6 +140,7 @@ static void transport_identity(void) {
     /* Native IO reenters the property path; its nested scope cannot end the cycle. */
     assert(do_io(gDriver, device, device + 2, 7, kAudioServerPlugInIOOperationWriteMix, 1, &cycle, samples, NULL) == kAudioHardwareIllegalOperationError);
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
+    assert(rendered_client == 7 && rendered_device == device);
     assert(do_io(gDriver, device, device + 2, 7, 0, 1, NULL, samples, NULL) == kAudioHardwareBadObjectError);
     assert(transport_value() == kAudioDeviceTransportTypeVirtual);
     assert((*gDriver)->EndIOOperation(gDriver, device, 7, kAudioServerPlugInIOOperationWriteMix, 1, &cycle) == noErr);
@@ -190,6 +198,11 @@ int main(void) {
     assert(release_ref(gDriver) == 0);
     assert(release_ref(gDriver) == 0);
     assert(add_ref(gDriver) == 1);
+    MRHALCoreNotification latency_notice = {0};
+    assert(mr_hal_core_notifications(10, MR_HAL_CORE_CHANGE_INPUT_LATENCY, &latency_notice, 1) == 1);
+    assert(latency_notice.object_id == 10);
+    assert(latency_notice.address.selector == kAudioDevicePropertyLatency);
+    assert(latency_notice.address.scope == kAudioObjectPropertyScopeInput);
     transport_identity();
     puts("PASS HAL COM lifetime, transport PID forwarding, copied and nullable bundle identity, balanced IO scopes");
     return 0;

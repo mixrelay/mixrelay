@@ -838,6 +838,7 @@ unsafe extern "C" fn render_hook(
     _: *const c_void,
     output: *mut c_void,
     frames: u32,
+    _: *const crate::device_io::IoTiming,
 ) -> bool {
     // SAFETY: hook test retains the Cell and full two-channel packed output.
     let calls = unsafe { &*context.cast::<Cell<u32>>() };
@@ -924,4 +925,76 @@ fn device_credit_reaches_the_registered_signal() {
     let mut list = buffers(&mut source, 2, 64, false);
     process(&input, &mut list);
     assert!(SIGNALS.load(std::sync::atomic::Ordering::Relaxed) > before);
+}
+
+#[test]
+fn native_timing_reaches_render_hook_without_heap_operations() {
+    unsafe extern "C" fn timing_hook(
+        context: *mut c_void,
+        _: *const c_void,
+        _: *mut c_void,
+        _: u32,
+        timing: *const IoTiming,
+    ) -> bool {
+        // SAFETY: the fixture retains this Cell and callback-local IoTiming for the call.
+        unsafe { &*context.cast::<Cell<IoTiming>>() }.set(unsafe { *timing });
+        true
+    }
+    let io = owner(false, 2);
+    let observed = Cell::new(IoTiming::default());
+    let input = callback::Timestamp {
+        sample: 123.0,
+        host: 456,
+        rate_scalar: 0.999,
+        flags: 7,
+        ..Default::default()
+    };
+    let output = callback::Timestamp {
+        sample: 789.0,
+        host: 999,
+        rate_scalar: 1.001,
+        flags: 7,
+        ..Default::default()
+    };
+    let mut pcm = [0.0; 128];
+    let mut list = buffers(&mut pcm, 2, 64, false);
+    // SAFETY: disconnected exclusive fixture, complete PCM and native timestamps.
+    unsafe {
+        mr_device_io_render_hook(
+            ptr::from_ref(&io).cast_mut(),
+            ptr::from_ref(&observed).cast_mut().cast(),
+            Some(timing_hook),
+        );
+    }
+    let allocated = allocation_counter::measure(|| unsafe {
+        mr_device_io_process(
+            0,
+            ptr::null(),
+            ptr::null(),
+            (&raw const input).cast(),
+            (&raw mut list).cast(),
+            (&raw const output).cast(),
+            ptr::from_ref(&io).cast_mut().cast(),
+        );
+    });
+    assert_eq!(allocated.count_total, 0);
+    assert_eq!(
+        observed.get(),
+        IoTiming {
+            input: IoTimestamp {
+                sample_time: 123.0,
+                host_time: 456,
+                rate_scalar: 0.999,
+                flags: 7
+            },
+            output: IoTimestamp {
+                sample_time: 789.0,
+                host_time: 999,
+                rate_scalar: 1.001,
+                flags: 7
+            }
+        }
+    );
+    process(&io, &mut list);
+    assert_eq!(observed.get(), IoTiming::default());
 }

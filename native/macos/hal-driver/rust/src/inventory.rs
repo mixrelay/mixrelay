@@ -50,7 +50,12 @@ pub(crate) unsafe extern "C" fn mr_hal_core_control_connected(
     if authority == 0 || authority < state.connection {
         return false;
     }
+    let changed = state.connection != authority;
     state.connection = authority;
+    drop(state);
+    if changed {
+        registry.reset_latency_authority();
+    }
     true
 }
 
@@ -270,7 +275,23 @@ pub(crate) unsafe extern "C" fn mr_hal_core_control_message(
     // SAFETY: XPC owns the event for the callback duration. The parser validates
     // its types and fills this exclusively borrowed, aligned output snapshot.
     if unsafe { mr_hal_control_parse_inventory_snapshot(message, &raw mut snapshot.0) } {
-        return apply(registry, authority, &mut snapshot.0);
+        // Validate optional runtime metadata before applying any authoritative geometry.
+        let Some(latencies) = (unsafe {
+            mixrelay_macos_transport::control_inventory::parse_input_latencies(message)
+        }) else {
+            return false;
+        };
+        let current = registry.inventory.try_lock().is_ok_and(|state| {
+            authority >= state.authority
+                && (authority != state.authority || snapshot.0.generation >= state.latest_validated)
+        });
+        if !apply(registry, authority, &mut snapshot.0) {
+            return false;
+        }
+        if current {
+            registry.publish_latencies(&latencies);
+        }
+        return true;
     }
     let mut endpoint = [0_u8; 16];
     let mut generation = 0_u64;

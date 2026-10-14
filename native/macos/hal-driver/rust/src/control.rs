@@ -88,6 +88,15 @@ impl<B: Backend> Control<B> {
     }
 
     fn tick(&self) {
+        // Process death releases the OS lease even if the driver service is stalled.
+        // Filesystem work is confined to this serial control queue, never HAL IO.
+        if !mixrelay_macos_transport::app_lifecycle::is_owned(
+            mixrelay_macos_transport::app_lifecycle::ENGINE_LEASE,
+        )
+        .unwrap_or(false)
+        {
+            self.registry.clear_latencies();
+        }
         self.registry.tick();
         let action = self.session.borrow_mut().tick();
         self.request_replacement();
@@ -136,7 +145,11 @@ impl<B: Backend> Control<B> {
     }
 
     fn disconnected(&self, generation: u64) {
+        let accepted = self.session.borrow().accepts(generation);
         self.session.borrow_mut().disconnected(generation);
+        if accepted {
+            self.registry.clear_latencies();
+        }
     }
 
     /// The XPC callback retains a live event until this method returns.

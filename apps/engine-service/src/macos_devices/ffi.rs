@@ -15,7 +15,13 @@ unsafe extern "C" {
     pub(super) fn mr_device_io_render_hook(
         io: *mut c_void,
         context: *mut c_void,
-        hook: unsafe extern "C" fn(*mut c_void, *const c_void, *mut c_void, u32) -> bool,
+        hook: unsafe extern "C" fn(
+            *mut c_void,
+            *const c_void,
+            *mut c_void,
+            u32,
+            *const mixrelay_macos_transport::device_io::IoTiming,
+        ) -> bool,
     );
     pub(super) fn mr_device_io_direct_binding(
         io: *mut c_void,

@@ -68,6 +68,11 @@ impl LatencyExchange {
         }
     }
 
+    /// Control-only immutable topology observation; never borrows the audio processor.
+    pub(crate) fn observed_plan(&self) -> Option<Arc<RenderPlan>> {
+        self.state.lock().plan.clone()
+    }
+
     /// Prepares a changed observation set and publishes it for a block boundary.
     ///
     /// This is control-thread-only. An unchanged plan and cached observation set returns

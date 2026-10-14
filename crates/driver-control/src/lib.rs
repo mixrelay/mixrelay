@@ -2,7 +2,11 @@
 
 mod client;
 mod contract;
+mod latency;
 mod manager;
+pub use latency::{
+    EngineLatencyLease, LATENCY_ROUTE, LatencyCommand, LatencyReply, RuntimeLatency,
+};
 mod server;
 mod store;
 mod transport_compatibility;

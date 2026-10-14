@@ -15,6 +15,7 @@ pub(crate) struct Observation {
     pub(crate) state: DriverState,
     pub(crate) settings: VirtualEndpointSettings,
     pub(crate) applies: usize,
+    pub(crate) latencies: Vec<crate::RuntimeLatency>,
     pub(crate) readbacks: usize,
     pub(crate) fail_apply: bool,
     pub(crate) fail_read: bool,
@@ -34,6 +35,7 @@ impl FakeBackend {
                 supports_dynamic_creation: true,
             }),
             applies: 0,
+            latencies: Vec::new(),
             readbacks: 0,
             fail_apply: false,
             fail_read: false,
@@ -45,6 +47,10 @@ impl FakeBackend {
 }
 
 impl DriverBackend for FakeBackend {
+    fn publish_latency(&mut self, publication: &crate::RuntimeLatency) -> Result<(), DriverError> {
+        self.0.lock().latencies.push(publication.clone());
+        Ok(())
+    }
     fn settings(&self) -> Result<VirtualEndpointSettings, DriverError> {
         let mut observation = self.0.lock();
         observation.readbacks += 1;

@@ -94,10 +94,17 @@ pub unsafe extern "C" fn mr_device_io_process(
     }
     // SAFETY: hook/context installed before registration and retained by engine owner;
     // borrowed native buffers never escape the synchronous render dispatch.
+    // SAFETY: OS retains both complete timestamps for this synchronous callback.
+    let timing = unsafe {
+        super::IoTiming {
+            input: copy_time(input_time),
+            output: copy_time(output_time),
+        }
+    };
     let rendered = callback.formats.all_float()
-        && callback
-            .hook
-            .is_some_and(|hook| unsafe { hook(callback.context, input, output, frames) });
+        && callback.hook.is_some_and(|hook| unsafe {
+            hook(callback.context, input, output, frames, &raw const timing)
+        });
     if !rendered && !io.selection.input {
         // Retire old output before the PCM hook can produce the new epoch's samples.
         unsafe { prepare_output(io, callback) };
@@ -123,6 +130,19 @@ pub unsafe extern "C" fn mr_device_io_process(
         .fetch_add(u64::from(frames), Release);
     super::signal_graph_worker();
     0
+}
+
+// SAFETY: pointer is null or a complete AudioTimeStamp retained by CoreAudio.
+unsafe fn copy_time(pointer: *const c_void) -> super::IoTimestamp {
+    unsafe { pointer.cast::<Timestamp>().as_ref() }.map_or_else(
+        super::IoTimestamp::default,
+        |time| super::IoTimestamp {
+            sample_time: time.sample,
+            host_time: time.host,
+            rate_scalar: time.rate_scalar,
+            flags: time.flags,
+        },
+    )
 }
 
 // SAFETY: only this serialized native consumer changes the output ring cursor.

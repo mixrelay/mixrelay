@@ -363,6 +363,19 @@ impl RenderPlan {
         self.arena_samples
     }
 
+    /// Computes terminal arrivals including processing and inserted compensation on control.
+    /// Supply measured causal source delays in source-binding order, in graph-rate frames.
+    /// Unresolved sources propagate `None` only to destinations they feed.
+    /// # Errors
+    /// Returns invalid source geometry or an unrepresentable accumulated delay.
+    pub fn destination_arrivals(
+        &self,
+        sources: &[Option<u32>],
+    ) -> Result<Vec<Option<u32>>, String> {
+        self.compensation
+            .destination_arrivals(&self.source_bindings, sources, &self.sink_bindings)
+    }
+
     /// Samples cached worker delays on the control thread, retaining prepared owner order.
     pub(crate) fn latency_observations(&self) -> Vec<Option<u32>> {
         self.compensation.observations()

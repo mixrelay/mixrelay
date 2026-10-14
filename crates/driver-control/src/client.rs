@@ -54,6 +54,31 @@ impl DriverClient {
         })
     }
 
+    /// Sends runtime timing from a non-realtime supervisor. A 404 is compatible absence.
+    /// # Errors
+    /// Returns transport, bounded response, JSON or remote errors.
+    pub async fn publish_latency(
+        &self,
+        command: &crate::LatencyCommand,
+    ) -> Result<Option<crate::LatencyReply>, DriverError> {
+        let mut response = self
+            .client
+            .put(format!("{DRIVER_AUTHORITY}{}", crate::LATENCY_ROUTE))
+            .json(command)
+            .send()
+            .await?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let status = response.status();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await? {
+            check_size(bytes.len().saturating_add(chunk.len()))?;
+            bytes.extend_from_slice(&chunk);
+        }
+        decode_latency_response(status, &bytes)
+    }
+
     /// Reads actual Driver state asynchronously.
     /// # Errors
     /// Returns transport, size, JSON or service rejection errors.
@@ -147,6 +172,22 @@ impl DriverClient {
             .send()?;
         read_blocking_response(response)
     }
+}
+
+fn decode_latency_response(
+    status: reqwest::StatusCode,
+    bytes: &[u8],
+) -> Result<Option<crate::LatencyReply>, DriverError> {
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !status.is_success() {
+        return Err(DriverError::Remote {
+            status: status.as_u16(),
+            message: String::from_utf8_lossy(bytes).into_owned(),
+        });
+    }
+    Ok(Some(serde_json::from_slice(bytes)?))
 }
 
 fn blocking_client(socket_path: &Path) -> Result<reqwest::blocking::Client, DriverError> {

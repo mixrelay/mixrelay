@@ -56,6 +56,7 @@ enum {
     MR_HAL_CORE_CHANGE_OUTPUT_VOLUME = 7,
     MR_HAL_CORE_CHANGE_OUTPUT_MUTE = 8,
     MR_HAL_CORE_CHANGE_TRANSPORT = 9,
+    MR_HAL_CORE_CHANGE_INPUT_LATENCY = 10,
     MR_HAL_CORE_MAX_DEVICES = 64,
 };
 #define MR_HAL_CORE_CONFIG_ACTION UINT64_C(0x4d526368)
@@ -92,6 +93,7 @@ int32_t mr_hal_core_client(MRHALCore *, uint32_t device_id, uint32_t client_id, 
 /* Copies a nullable, callback-borrowed UTF-8 bundle ID (at most 127 bytes).
  * Control callbacks only; never invoke client registration from IO. */
 int32_t mr_hal_core_client_identity(MRHALCore *, uint32_t device_id, uint32_t client_id, int32_t pid, const char *bundle_id, bool add);
+void mr_hal_core_render_client(const MRHALCore *, uint32_t device_id, uint32_t client_id);
 int32_t mr_hal_core_start(MRHALCore *, uint32_t device_id, uint32_t client_id, uint64_t host_time);
 int32_t mr_hal_core_stop(MRHALCore *, uint32_t device_id, uint32_t client_id);
 int32_t mr_hal_core_set_rate(MRHALCore *, uint32_t device_id, uint32_t sample_rate);

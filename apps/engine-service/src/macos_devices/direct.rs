@@ -29,7 +29,13 @@ pub(crate) fn next_epoch() -> u64 {
 #[repr(C)]
 pub(crate) struct Descriptor {
     pub(crate) context: *mut c_void,
-    pub(crate) render: unsafe extern "C" fn(*mut c_void, *const c_void, *mut c_void, u32),
+    pub(crate) render: unsafe extern "C" fn(
+        *mut c_void,
+        *const c_void,
+        *mut c_void,
+        u32,
+        *const mixrelay_macos_transport::device_io::IoTiming,
+    ),
     pub(crate) sample_rate: u32,
 }
 
@@ -65,6 +71,7 @@ pub(super) unsafe extern "C" fn dispatch(
     input: *const c_void,
     output: *mut c_void,
     frames: u32,
+    timing: *const mixrelay_macos_transport::device_io::IoTiming,
 ) -> bool {
     // SAFETY: Native owns this stable box until CoreAudio unregister is acknowledged.
     let slot = unsafe { &*context.cast::<RenderSlot>() };
@@ -85,7 +92,7 @@ pub(super) unsafe extern "C" fn dispatch(
             let descriptor = unsafe { &*descriptor };
             let started = std::time::Instant::now();
             unsafe {
-                (descriptor.render)(descriptor.context, input, output, frames);
+                (descriptor.render)(descriptor.context, input, output, frames, timing);
             }
             slot.metrics
                 .record(started.elapsed(), frames, descriptor.sample_rate);
@@ -402,6 +409,7 @@ mod tests {
         _: *const c_void,
         _: *mut c_void,
         _: u32,
+        _: *const mixrelay_macos_transport::device_io::IoTiming,
     ) {
         let probe = unsafe { &*context.cast::<Probe>() };
         probe.calls.fetch_add(1, Ordering::Relaxed);
@@ -434,6 +442,7 @@ mod tests {
                 std::ptr::null(),
                 std::ptr::null_mut(),
                 32,
+                std::ptr::null(),
             )
         });
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
@@ -448,6 +457,7 @@ mod tests {
                 std::ptr::null(),
                 std::ptr::null_mut(),
                 32,
+                std::ptr::null(),
             );
         }
         assert_eq!(probe.calls.load(Ordering::Acquire), 1);
@@ -466,6 +476,7 @@ mod tests {
                     std::ptr::null(),
                     std::ptr::null_mut(),
                     32,
+                    std::ptr::null(),
                 )
             });
         }

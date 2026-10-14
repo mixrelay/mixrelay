@@ -282,3 +282,26 @@ fn reports_cumulative_latency_overflow() {
         Err(LatencyPlanError::LatencyOverflow { node_index: 1 })
     );
 }
+
+#[test]
+fn retains_terminal_arrivals_without_overwriting_causal_roots() {
+    let nodes = [
+        LatencyNode::Source(Some(0)),
+        LatencyNode::Processing(Some(12)),
+        LatencyNode::Source(Some(3)),
+        LatencyNode::Sink,
+        LatencyNode::Sink,
+    ];
+    let routes = [route(0, 1), route(1, 2), route(2, 3)];
+    let plan = super::plan_arrivals(&nodes, &routes).unwrap();
+    assert_eq!(
+        plan.terminal_arrivals,
+        vec![None, None, Some(12), Some(3), None]
+    );
+    let plan = super::plan_arrivals(
+        &[LatencyNode::Source(None), LatencyNode::Sink],
+        &[route(0, 1)],
+    )
+    .unwrap();
+    assert_eq!(plan.terminal_arrivals, vec![None, None]);
+}

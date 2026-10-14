@@ -45,6 +45,12 @@ struct Service {
     dispatch: Mutex<Option<dispatch::Dispatch>>,
     configuration: Mutex<Vec<DriverDeviceConfig>>,
     transaction: Mutex<()>,
+    latencies: Mutex<
+        std::collections::BTreeMap<
+            [u8; 16],
+            mixrelay_macos_transport::control_inventory::InputLatency,
+        >,
+    >,
 }
 
 impl Service {
@@ -82,6 +88,7 @@ impl MacDriver {
             dispatch: Mutex::new(None),
             configuration: Mutex::new(Vec::new()),
             transaction: Mutex::new(()),
+            latencies: Mutex::default(),
         });
         let mut dispatch = service.dispatch.lock();
         if dispatch.is_none() {
@@ -224,6 +231,41 @@ impl DriverBackend for MacDriver {
             })
             .collect::<Result<Vec<_>, DriverError>>()?;
         Ok(settings)
+    }
+
+    fn publish_latency(
+        &mut self,
+        publication: &mixrelay_driver_control::RuntimeLatency,
+    ) -> Result<(), DriverError> {
+        let endpoint_id = identity(&publication.endpoint_id)?;
+        if !self
+            .service
+            .configuration
+            .lock()
+            .iter()
+            .any(|config| config.spec.id == publication.endpoint_id)
+        {
+            return if publication.input_latency_frames.is_none() {
+                // A cleared value must not survive to republish on reactivation.
+                self.service.latencies.lock().remove(&endpoint_id);
+                Ok(())
+            } else {
+                Err(DriverError::NotFound(publication.endpoint_id.clone()))
+            };
+        }
+        self.service.latencies.lock().insert(
+            endpoint_id,
+            mixrelay_macos_transport::control_inventory::InputLatency {
+                endpoint_id,
+                rate: publication.rate,
+                engine_pid: publication.engine_lease.process_id,
+                lease: publication.engine_lease.generation,
+                revision: publication.applied_graph_revision,
+                frames: publication.input_latency_frames,
+            },
+        );
+        self.service.peers.lock().send_inventory(self.service);
+        Ok(())
     }
 
     fn replace(&mut self, desired: &[DriverDeviceConfig]) -> Result<(), DriverError> {

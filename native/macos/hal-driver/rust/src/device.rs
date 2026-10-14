@@ -34,6 +34,8 @@ pub(crate) struct Pending {
 
 pub(crate) struct Control {
     pub name: String,
+    pub latency_lease: u64,
+    pub latency_revision: u64,
     pub clients: BTreeMap<u32, bool>,
     pub pending: Option<Pending>,
     pub next_generation: u64,
@@ -51,6 +53,7 @@ pub(crate) struct Device {
     pub capture_channels: AtomicU32,
     pub input_active: AtomicBool,
     pub output_active: AtomicBool,
+    pub input_latency: crate::input_latency::InputLatency,
     pub output_control: crate::output_control::OutputControl,
     pub capture_format: NativeStream,
     pub render_format: NativeStream,
@@ -86,12 +89,15 @@ impl Device {
             capture_channels: AtomicU32::new(geometry.capture_channels),
             input_active: AtomicBool::new(true),
             output_active: AtomicBool::new(true),
+            input_latency: crate::input_latency::InputLatency::default(),
             output_control: crate::output_control::OutputControl::default(),
             capture_format: NativeStream::new(),
             render_format: NativeStream::new(),
             control: Mutex::new(Control {
                 name,
                 clients: BTreeMap::new(),
+                latency_lease: 0,
+                latency_revision: 0,
                 pending: None,
                 next_generation: 1,
                 attachment_failed: false,
@@ -180,6 +186,7 @@ impl Device {
             self.capture_channels
                 .store(attachment.geometry.capture_channels, Ordering::Release);
         }
+        self.input_latency.publish(0, 0, None, None);
         self.rate.store(pending.rate, Ordering::Release);
         let [capture, render] = scratch;
         // SAFETY: the configuration owner holds control and freeze; no IO pin can access

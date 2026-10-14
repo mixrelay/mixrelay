@@ -12,6 +12,7 @@ pub(crate) const NATIVE_ERROR: i32 = -4;
 pub(crate) const CAPACITY: i32 = -5;
 pub(crate) const LIST: u32 = 1;
 pub(crate) const NAME: u32 = 2;
+pub(crate) const INPUT_LATENCY: u32 = 10;
 pub(crate) const FORMAT: u32 = 3;
 pub(crate) const ALIVE: u32 = 4;
 pub(crate) const RUNNING: u32 = 5;
@@ -285,12 +286,27 @@ pub(crate) unsafe extern "C" fn mr_hal_core_client_identity(
     let status = registry.client(device, client, add);
     if status == OK {
         if add {
+            registry.client_pid(device, client, u32::try_from(pid).unwrap_or(0));
             registry.transport.client(device, client, pid, bundle);
         } else {
             registry.transport.remove(device, client);
         }
     }
     status
+}
+
+/// Marks a render client from IO without taking control locks.
+/// # Safety
+/// The registry is live for the synchronous audio callback.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mr_hal_core_render_client(
+    registry: *const Registry,
+    device: u32,
+    client: u32,
+) {
+    if let Some(registry) = unsafe { registry.as_ref() } {
+        registry.render_client(device, client);
+    }
 }
 
 #[unsafe(no_mangle)]

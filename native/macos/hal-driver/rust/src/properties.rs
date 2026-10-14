@@ -36,7 +36,8 @@ pub(crate) unsafe extern "C" fn mr_hal_core_notifications(
     capacity: usize,
 ) -> usize {
     use crate::abi::{
-        ALIVE, FORMAT, LIST, NAME, OUTPUT_MUTE, OUTPUT_VOLUME, RUNNING, STREAM_ACTIVE, TRANSPORT,
+        ALIVE, FORMAT, INPUT_LATENCY, LIST, NAME, OUTPUT_MUTE, OUTPUT_VOLUME, RUNNING,
+        STREAM_ACTIVE, TRANSPORT,
     };
     let mut count = 0;
     let mut push = |object, selector, scope| {
@@ -84,6 +85,7 @@ pub(crate) unsafe extern "C" fn mr_hal_core_notifications(
                 }
             }
         }
+        INPUT_LATENCY => push(object, *b"ltnc", INPUT),
         TRANSPORT => push(object, *b"tran", GLOBAL),
         ALIVE => push(object, *b"livn", GLOBAL),
         RUNNING => push(object, *b"goin", GLOBAL),
@@ -454,6 +456,38 @@ fn property(
     if address.element != 0 || ![GLOBAL, INPUT, OUTPUT].contains(&address.scope) {
         return Err(UNKNOWN);
     }
+    if [*b"ltnc", *b"saft"].contains(&address.selector.to_be_bytes()) {
+        let device = registry.pin(object).ok_or(BAD_OBJECT)?;
+        if object == device.id {
+            if ![INPUT, OUTPUT].contains(&address.scope) {
+                return Err(UNKNOWN);
+            }
+            return Ok(number(
+                if address.scope == INPUT && address.selector == u32::from_be_bytes(*b"ltnc") {
+                    device
+                        .input_latency
+                        .effective(device.rate.load(Ordering::Acquire))
+                } else {
+                    0
+                },
+            ));
+        }
+        if address.selector != u32::from_be_bytes(*b"ltnc")
+            || object > device.id + 2
+            || address.scope != GLOBAL
+        {
+            return Err(UNKNOWN);
+        }
+        let channels = if object == device.id + 1 {
+            &device.capture_channels
+        } else {
+            &device.render_channels
+        };
+        if channels.load(Ordering::Acquire) == 0 {
+            return Err(BAD_OBJECT);
+        }
+        return Ok(number(0));
+    }
     if address.selector == u32::from_be_bytes(*b"tran") {
         // Reentrant IO/timestamp reads must not take control: StopIO holds
         // that mutex while freeze waits for this callback's IO pin to drain.
@@ -470,6 +504,11 @@ fn property(
         } else {
             Err(UNKNOWN)
         };
+    }
+    // Every other answer reads the control snapshot. An IO/timestamp thread must not wait
+    // for control (StopIO holds it while draining that thread's pin), so it is refused.
+    if crate::transport::on_audio_thread() {
+        return Err(ILLEGAL);
     }
     let snapshot = registry.snapshot(object).ok_or(BAD_OBJECT)?;
     if (object == snapshot.input_stream_id && snapshot.capture_channels == 0)

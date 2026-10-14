@@ -8,6 +8,7 @@ use mixrelay_audio_graph::ExecutionPlan;
 use parking_lot::Mutex;
 use thiserror::Error;
 
+pub mod content_latency;
 mod latency_exchange;
 mod latency_plan;
 
@@ -413,6 +414,15 @@ impl ProcessorExchange {
     /// Later plans are registered atomically with successful topology submission.
     pub fn observe_plan(&self, plan: Arc<RenderPlan>) {
         self.latency.set_plan(plan);
+    }
+
+    /// Returns the observed topology only after its audio owner acknowledged activation.
+    /// Control-thread-only; pending topology timing must never be reported as applied.
+    #[must_use]
+    pub fn latency_plan(&self) -> Option<Arc<RenderPlan>> {
+        self.latency
+            .observed_plan()
+            .filter(|plan| plan.revision() == self.plan_revisions().active)
     }
 
     /// Refreshes cached worker delay observations on a control/background thread.

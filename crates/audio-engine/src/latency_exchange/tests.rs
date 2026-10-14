@@ -124,3 +124,25 @@ fn replaced_bank_is_retired_until_control_reclaims_it() {
     exchange.reclaim();
     assert!(exchange.retired.load(Ordering::Acquire).is_null());
 }
+
+#[test]
+fn only_acknowledged_topologies_are_available_to_the_latency_reporter() {
+    let exchange = crate::ProcessorExchange::new(1);
+    assert!(exchange.latency_plan().is_none());
+    let first = plan(1);
+    exchange.observe_plan(Arc::clone(&first));
+    assert!(Arc::ptr_eq(&exchange.latency_plan().unwrap(), &first));
+    let next = plan(2);
+    exchange
+        .submit(Box::new(BlockProcessor::new(Arc::clone(&next))))
+        .unwrap();
+    assert!(exchange.latency_plan().is_none());
+    let mut current = Box::new(BlockProcessor::new(first));
+    assert!(
+        exchange
+            .activate_pending_configured(&mut current, |_| Ok::<(), ()>(()))
+            .unwrap()
+    );
+    assert!(Arc::ptr_eq(&exchange.latency_plan().unwrap(), &next));
+    exchange.reclaim_retired();
+}

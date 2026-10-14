@@ -110,6 +110,7 @@ impl ExternalIo for CallbackIo<'_> {
 }
 
 struct Renderer<'a> {
+    timebase: mixrelay_realtime::Timebase,
     processor: &'a mut Box<BlockProcessor>,
     activation: Option<GraphActivation<'a>>,
     bindings: &'a [Binding],
@@ -117,7 +118,8 @@ struct Renderer<'a> {
     epoch: u64,
     native_clock: Option<(&'a DirectPlan, u64)>,
     status: &'a mixrelay_engine_service::session::AdapterRuntimeStatus,
-    frame: u64,
+    /// The first frame expected next, in the timeline last used; `None` restarts it.
+    position: Option<u64>,
     progress: &'a AtomicU64,
     failed: &'a AtomicBool,
     invalid: &'a AtomicBool,
@@ -165,12 +167,13 @@ unsafe extern "C" fn render(
     input: *const c_void,
     output: *mut c_void,
     frames: u32,
+    timing: *const mixrelay_macos_transport::device_io::IoTiming,
 ) {
     // SAFETY: the descriptor is published to exactly one serialized IOProc;
     // control never accesses this renderer until removal + reader drain.
     let renderer = unsafe { &mut *context.cast::<Renderer<'_>>() };
     let result = catch_unwind(AssertUnwindSafe(|| unsafe {
-        renderer.render(input, output, frames)
+        renderer.render(input, output, frames, timing.as_ref())
     }));
     if !matches!(result, Ok(true)) {
         renderer.failed.store(true, Ordering::Release);
@@ -187,12 +190,18 @@ impl Renderer<'_> {
                         ..Default::default()
                     });
                 self.epoch = crate::macos_devices::direct::next_epoch();
-                self.frame = 0;
+                self.position = None;
                 *observed = current;
             }
         }
     }
-    unsafe fn render(&mut self, input: *const c_void, output: *mut c_void, frames: u32) -> bool {
+    unsafe fn render(
+        &mut self,
+        input: *const c_void,
+        output: *mut c_void,
+        frames: u32,
+        timing: Option<&mixrelay_macos_transport::device_io::IoTiming>,
+    ) -> bool {
         if self.failed.load(Ordering::Acquire) || frames == 0 || frames > 4096 {
             return false;
         }
@@ -209,7 +218,7 @@ impl Renderer<'_> {
         // closure cannot return a view or retain access past this synchronous call.
         let result = unsafe {
             Buffers::with_native(input, output, frames, |buffers| {
-                self.render_buffers(buffers, frames)
+                self.render_buffers(buffers, frames, timing)
             })
         };
         result.unwrap_or_else(|| {
@@ -217,7 +226,12 @@ impl Renderer<'_> {
             true
         })
     }
-    fn render_buffers(&mut self, buffers: Buffers<'_>, frames: u32) -> bool {
+    fn render_buffers(
+        &mut self,
+        buffers: Buffers<'_>,
+        frames: u32,
+        timing: Option<&mixrelay_macos_transport::device_io::IoTiming>,
+    ) -> bool {
         if !self.bindings.iter().all(|binding| buffers.covers(binding)) {
             self.invalid.store(true, Ordering::Release);
             return true;
@@ -229,6 +243,12 @@ impl Renderer<'_> {
             offset: 0,
             bridged: self.native_clock.as_ref().map(|(plan, _)| &plan.bridged),
         };
+        // Native sample time when the device reports it, otherwise continue the previous
+        // position. Any jump (a device skip, or switching between the two) is declared a
+        // discontinuity instead of failing the renderer.
+        let native = timing.and_then(|timing| native_sample(timing.output));
+        let base = native.or(self.position).unwrap_or(0);
+        let mut discontinuity = self.position != Some(base);
         // A larger native quantum is split, never truncated or queued for later.
         while io.offset < frames as usize {
             let count =
@@ -242,17 +262,22 @@ impl Renderer<'_> {
                 },
                 sample_rate: format.sample_rate,
                 frames: count,
-                first_frame: self.frame,
-                monotonic_ns: None,
-                discontinuity: self.frame == 0,
+                first_frame: base + io.offset as u64,
+                monotonic_ns: timing
+                    .filter(|timing| timing.output.flags & 2 != 0)
+                    .map(|timing| {
+                        self.timebase.nanoseconds(timing.output.host_time)
+                            + io.offset as u64 * 1_000_000_000 / u64::from(format.sample_rate)
+                    }),
+                discontinuity: std::mem::take(&mut discontinuity),
             };
             let Ok(Some(report)) = self.processor.process_external_cycle(cycle, &mut io) else {
                 return false;
             };
             self.status.record_process(report);
-            self.frame += u64::from(count);
             io.offset += count as usize;
         }
+        self.position = Some(base + u64::from(frames));
         let synchronized = self.native_clock.as_ref().is_none_or(|(plan, _)| {
             [
                 (true, self.processor.plan().source_bindings()),
@@ -272,6 +297,15 @@ impl Renderer<'_> {
         self.progress.fetch_add(1, Ordering::Release);
         true
     }
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn native_sample(time: mixrelay_macos_transport::device_io::IoTimestamp) -> Option<u64> {
+    (time.flags & 1 != 0
+        && time.sample_time.is_finite()
+        && time.sample_time >= 0.0
+        && time.sample_time < 9_007_199_254_740_992.0)
+        .then_some(time.sample_time as u64)
 }
 
 fn log_route(plan: &DirectPlan, rate: u32, buffer: u32) {
@@ -301,6 +335,7 @@ pub(super) fn run(
     let installed_plan = std::sync::Arc::clone(processor.plan());
     let graph_rate = processor.plan().format().sample_rate;
     let renderer = Renderer {
+        timebase: mixrelay_realtime::Timebase::current(),
         processor,
         activation: Some(GraphActivation {
             installed: &installed_plan,
@@ -312,7 +347,7 @@ pub(super) fn run(
         epoch: super::super::macos_devices::direct::next_epoch(),
         native_clock: Some((plan, plan.discontinuities())),
         status: context.runtime_status,
-        frame: 0,
+        position: None,
         progress: &signals.progress,
         failed: &signals.failed,
         invalid: &signals.invalid,
@@ -562,6 +597,7 @@ mod tests {
         let failed = AtomicBool::new(false);
         let invalid = AtomicBool::new(false);
         let mut renderer = Renderer {
+            timebase: mixrelay_realtime::Timebase::current(),
             processor: &mut processor,
             activation: None,
             bindings: &bindings,
@@ -569,7 +605,7 @@ mod tests {
             epoch: 3,
             native_clock: None,
             status: &status,
-            frame: 0,
+            position: None,
             progress: &progress,
             failed: &failed,
             invalid: &invalid,
@@ -599,10 +635,77 @@ mod tests {
                     (&raw const input_list).cast(),
                     (&raw mut output_list).cast(),
                     49,
+                    None,
                 )
             });
             assert_eq!(output.map(f32::to_bits), input.map(f32::to_bits));
         }
+    }
+
+    #[test]
+    fn switching_between_fallback_and_native_timestamps_never_stops_rendering() {
+        let mut processor = processor_at(32, 48000);
+        let status = mixrelay_engine_service::session::AdapterRuntimeStatus::new(
+            crate::macos::adapter_profile(),
+        );
+        let progress = AtomicU64::new(0);
+        let failed = AtomicBool::new(false);
+        let invalid = AtomicBool::new(false);
+        let bindings = stereo_bindings();
+        let mut renderer = Renderer {
+            timebase: mixrelay_realtime::Timebase::current(),
+            processor: &mut processor,
+            activation: None,
+            bindings: &bindings,
+            clock_id: 7,
+            epoch: 3,
+            native_clock: None,
+            status: &status,
+            position: None,
+            progress: &progress,
+            failed: &failed,
+            invalid: &invalid,
+        };
+        let mut input = vec![0.25; 64];
+        let mut output = vec![0.0; 64];
+        let input_list = stereo_list(&mut input);
+        let mut output_list = stereo_list(&mut output);
+        let native = |sample_time: f64| mixrelay_macos_transport::device_io::IoTiming {
+            input: mixrelay_macos_transport::device_io::IoTimestamp {
+                sample_time,
+                host_time: 0,
+                rate_scalar: 1.0,
+                flags: 0,
+            },
+            output: mixrelay_macos_transport::device_io::IoTimestamp {
+                sample_time,
+                host_time: 1_000,
+                rate_scalar: 1.0,
+                flags: 3,
+            },
+        };
+        // Missing, native far ahead, continuing, missing again, then a device skip.
+        let timings = [
+            None,
+            Some(native(96_000.0)),
+            Some(native(96_032.0)),
+            None,
+            Some(native(200_000.0)),
+        ];
+        let expected = [32, 96_032, 96_064, 96_096, 200_032];
+        for (timing, position) in timings.iter().zip(expected) {
+            assert!(unsafe {
+                renderer.render(
+                    (&raw const input_list).cast(),
+                    (&raw mut output_list).cast(),
+                    32,
+                    timing.as_ref(),
+                )
+            });
+            assert_eq!(renderer.position, Some(position));
+        }
+        assert!(!failed.load(Ordering::Acquire));
+        assert_eq!(progress.load(Ordering::Acquire), 5);
     }
 
     #[test]
@@ -617,6 +720,7 @@ mod tests {
             let invalid = AtomicBool::new(false);
             let bindings = stereo_bindings();
             let mut renderer = Renderer {
+                timebase: mixrelay_realtime::Timebase::current(),
                 processor: &mut processor,
                 activation: None,
                 bindings: &bindings,
@@ -624,7 +728,7 @@ mod tests {
                 epoch: 3,
                 native_clock: None,
                 status: &status,
-                frame: 0,
+                position: None,
                 progress: &progress,
                 failed: &failed,
                 invalid: &invalid,
@@ -649,12 +753,13 @@ mod tests {
                         (&raw const input_list).cast(),
                         (&raw mut output_list).cast(),
                         frames,
+                        None,
                     )
                 });
                 assert_eq!(input, output, "buffer={block_frames} cycle={cycle}");
             }
             assert_eq!(progress.load(Ordering::Acquire), 100);
-            assert_eq!(renderer.frame, u64::from(frames) * 100);
+            assert_eq!(renderer.position, Some(u64::from(frames) * 100));
             let measured = status.status(RenderFormat {
                 sample_rate: 48000,
                 block_frames,

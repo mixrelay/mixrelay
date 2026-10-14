@@ -162,6 +162,12 @@ unsafe extern "C" fn changed(context: *mut c_void, object: u32, change: u32) {
     lock(&host.changes).push((object, change));
     if let Some(registry) = unsafe { host.registry.load(Ordering::Acquire).as_ref() } {
         let _ = registry.devices();
+        if change == crate::abi::INPUT_LATENCY {
+            assert!(registry.inventory.try_lock().is_ok());
+            assert!(registry.client_identity_gate.try_lock().is_ok());
+            let device = registry.pin(object).unwrap();
+            assert!(device.control.try_lock().is_ok());
+        }
         if change == crate::abi::TRANSPORT {
             assert!(registry.inventory.try_lock().is_ok());
             assert!(registry.transport.state.try_lock().is_ok());
@@ -398,35 +404,35 @@ fn stale_configuration_callbacks_cannot_drop_new_transport() {
 #[test]
 fn pending_descriptor_ownership_closes_superseded_and_aborted_fds() {
     use std::os::fd::AsRawFd;
-    unsafe extern "C" {
-        fn fcntl(fd: i32, command: i32) -> i32;
-    }
     let fixture = Fixture::new();
     let id = fixture.add(1, 48_000);
     let first = fixture.fd(1, 7, 3);
     let old_fd = first.as_raw_fd();
+    let old_file = file_identity(old_fd).unwrap();
     fixture
         .registry
         .upsert([1; 16], "Old", 48_000, (first, 24))
         .unwrap();
-    assert!(unsafe { fcntl(old_fd, 1) } >= 0);
+    assert_eq!(file_identity(old_fd), Some(old_file));
     let second = fixture.fd(1, 8, 2);
     let mut new_fd = second.as_raw_fd();
+    let mut new_file = file_identity(new_fd).unwrap();
     fixture
         .registry
         .upsert([1; 16], "New", 48_000, (second, 24))
         .unwrap();
-    assert_eq!(unsafe { fcntl(old_fd, 1) }, -1);
-    assert!(unsafe { fcntl(new_fd, 1) } >= 0);
+    assert_ne!(file_identity(old_fd), Some(old_file));
+    assert_eq!(file_identity(new_fd), Some(new_file));
     for _ in 0..1000 {
         let next = fixture.fd(1, 8, 2);
         let next_fd = next.as_raw_fd();
+        let next_file = file_identity(next_fd).unwrap();
         fixture
             .registry
             .upsert([1; 16], "Newest", 48_000, (next, 24))
             .unwrap();
-        assert_eq!(unsafe { fcntl(new_fd, 1) }, -1);
-        new_fd = next_fd;
+        assert_ne!(file_identity(new_fd), Some(new_file));
+        (new_fd, new_file) = (next_fd, next_file);
     }
     assert_eq!(
         fixture
@@ -434,7 +440,7 @@ fn pending_descriptor_ownership_closes_superseded_and_aborted_fds() {
             .abort(id, CONFIG_ACTION, fixture.pending().1),
         OK
     );
-    assert_eq!(unsafe { fcntl(new_fd, 1) }, -1);
+    assert_ne!(file_identity(new_fd), Some(new_file));
 }
 
 #[test]
@@ -563,12 +569,24 @@ fn crashed_client_removal_releases_retired_runtime_without_stop_notification() {
     assert_eq!(LIVE.load(Ordering::SeqCst), 0);
 }
 
-#[test]
-fn repeated_active_removal_releases_runtime_pending_fd_and_stale_configuration() {
-    use std::os::fd::AsRawFd;
+/// The device and inode a descriptor refers to, if it is open.
+fn file_identity(fd: i32) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt as _;
     unsafe extern "C" {
         fn fcntl(fd: i32, command: i32) -> i32;
     }
+    if unsafe { fcntl(fd, 1) } == -1 {
+        return None;
+    }
+    let file = ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(fd) });
+    file.metadata()
+        .ok()
+        .map(|metadata| (metadata.dev(), metadata.ino()))
+}
+
+#[test]
+fn repeated_active_removal_releases_runtime_pending_fd_and_stale_configuration() {
+    use std::os::fd::AsRawFd;
     let fixture = Fixture::new();
     for _ in 0..100 {
         let id = fixture.add(1, 48_000);
@@ -583,6 +601,7 @@ fn repeated_active_removal_releases_runtime_pending_fd_and_stale_configuration()
         assert_eq!(fixture.perform(), OK);
         let pending = fixture.fd(1, 8, 2);
         let fd = pending.as_raw_fd();
+        let identity = file_identity(fd).unwrap();
         fixture
             .registry
             .upsert([1; 16], "Pending", 96_000, (pending, 24))
@@ -590,7 +609,8 @@ fn repeated_active_removal_releases_runtime_pending_fd_and_stale_configuration()
         let (_, generation) = fixture.pending();
         assert_eq!(fixture.registry.remove([1; 16]), OK);
         assert_eq!(LIVE.load(Ordering::SeqCst), 0);
-        assert_eq!(unsafe { fcntl(fd, 1) }, -1);
+        // Parallel tests may reuse the descriptor number at once; the file must be gone.
+        assert_ne!(file_identity(fd), Some(identity));
         assert_eq!(fixture.registry.set_rate(id, 96_000), NOT_FOUND);
         assert_eq!(
             fixture.registry.perform(id, CONFIG_ACTION, generation),
@@ -859,11 +879,9 @@ fn property_abi_validates_formats_and_cf_string_ownership() {
 fn ffi_rejects_foreign_transport_and_closes_consumed_descriptor() {
     use crate::abi::mr_hal_core_upsert;
     use std::os::fd::IntoRawFd;
-    unsafe extern "C" {
-        fn fcntl(fd: i32, command: i32) -> i32;
-    }
     let fixture = Fixture::new();
     let fd = fixture.fd(2, 2, 2).into_raw_fd();
+    let file = file_identity(fd).unwrap();
     let mut output = 99;
     assert_eq!(
         unsafe {
@@ -879,7 +897,7 @@ fn ffi_rejects_foreign_transport_and_closes_consumed_descriptor() {
         },
         INVALID
     );
-    assert_eq!(unsafe { fcntl(fd, 1) }, -1);
+    assert_ne!(file_identity(fd), Some(file));
     assert_eq!(output, 99);
     assert!(fixture.registry.devices().is_empty());
 }
@@ -948,4 +966,61 @@ fn callback_readers_drain_before_retired_runtime_is_freed() {
     assert!(registry.snapshot(id).is_none());
     assert!(registry.output_control(id + 3).is_none());
     assert_eq!(registry.set_output_mute(id + 4, false), NOT_FOUND);
+}
+
+#[test]
+fn runtime_input_latency_fences_stale_leases_and_notifies_after_unlock() {
+    use mixrelay_macos_transport::control_inventory::InputLatency;
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    let entry = InputLatency {
+        endpoint_id: [1; 16],
+        rate: 48_000,
+        engine_pid: 10,
+        lease: 20,
+        revision: 30,
+        frames: Some(300),
+    };
+    let registry = &fixture.registry;
+    registry.publish_latencies(&[entry]);
+    assert_eq!(
+        registry.pin(id).unwrap().input_latency.effective(48_000),
+        300
+    );
+    registry.publish_latencies(&[InputLatency {
+        lease: 19,
+        frames: Some(400),
+        ..entry
+    }]);
+    registry.publish_latencies(&[InputLatency {
+        revision: 29,
+        frames: Some(400),
+        ..entry
+    }]);
+    assert_eq!(
+        registry.pin(id).unwrap().input_latency.effective(48_000),
+        300
+    );
+    assert_eq!(
+        lock(&fixture.host.changes)
+            .iter()
+            .filter(|(_, change)| *change == crate::abi::INPUT_LATENCY)
+            .count(),
+        1
+    );
+    assert_eq!(registry.client(id, 1, true), OK);
+    registry.client_pid(id, 1, 11);
+    assert_eq!(registry.start(id, 1, 0), OK);
+    registry.render_client(id, 1);
+    registry.tick();
+    assert_eq!(registry.pin(id).unwrap().input_latency.effective(48_000), 0);
+    assert_eq!(registry.stop(id, 1), OK);
+    registry.tick();
+    assert_eq!(
+        registry.pin(id).unwrap().input_latency.effective(48_000),
+        300
+    );
+    registry.clear_latencies();
+    assert_eq!(registry.pin(id).unwrap().input_latency.effective(48_000), 0);
+    registry.publish_latencies(&[]);
 }

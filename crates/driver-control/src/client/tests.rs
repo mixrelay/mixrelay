@@ -266,3 +266,27 @@ async fn socket_clients_keep_response_limits_json_errors_and_no_redirects() {
         assert!(service.await.unwrap_err().is_cancelled());
     }
 }
+
+#[test]
+fn runtime_latency_handles_older_services_and_additive_replies() {
+    assert_eq!(
+        decode_latency_response(reqwest::StatusCode::NOT_FOUND, b"old service").unwrap(),
+        None
+    );
+    assert_eq!(
+        decode_latency_response(
+            reqwest::StatusCode::OK,
+            br#"{"accepted":true,"lease":null,"futureField":0}"#
+        )
+        .unwrap(),
+        Some(crate::LatencyReply {
+            accepted: true,
+            lease: None
+        })
+    );
+    assert!(matches!(
+        decode_latency_response(reqwest::StatusCode::CONFLICT, b"lease conflict"),
+        Err(DriverError::Remote { status: 409, .. })
+    ));
+    assert!(decode_latency_response(reqwest::StatusCode::OK, b"invalid").is_err());
+}

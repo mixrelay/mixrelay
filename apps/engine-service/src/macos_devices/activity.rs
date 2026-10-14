@@ -149,6 +149,7 @@ mod tests {
                 std::ptr::null(),
                 std::ptr::null_mut(),
                 32,
+                std::ptr::null(),
             )
         });
         // The native boundary, rather than the graph hook, gates unacknowledged PCM.

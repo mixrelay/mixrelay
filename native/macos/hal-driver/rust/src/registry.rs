@@ -282,6 +282,81 @@ impl Registry {
         OK
     }
 
+    pub(crate) fn client_pid(&self, id: u32, client: u32, pid: u32) {
+        if let Some(device) = self.pin(id) {
+            device
+                .input_latency
+                .identity(client, pid, crate::transport::process_start(pid));
+        }
+    }
+    pub(crate) fn render_client(&self, id: u32, client: u32) {
+        if let Some(device) = self.pin(id) {
+            device.input_latency.render(client);
+        }
+    }
+    pub(crate) fn notify_latency(&self, id: u32) {
+        let changed = self.pin(id).is_some_and(|device| {
+            device
+                .input_latency
+                .changed(device.rate.load(Ordering::Acquire))
+        });
+        if changed {
+            self.host.changed(id, crate::abi::INPUT_LATENCY);
+        }
+    }
+    pub(crate) fn reset_latency_authority(&self) {
+        for id in self.devices() {
+            if let Some(device) = self.pin(id) {
+                let mut control = lock(&device.control);
+                control.latency_lease = 0;
+                control.latency_revision = 0;
+                device.input_latency.publish(0, 0, None, None);
+            }
+            self.notify_latency(id);
+        }
+    }
+    pub(crate) fn clear_latencies(&self) {
+        for id in self.devices() {
+            if let Some(device) = self.pin(id) {
+                device.input_latency.publish(0, 0, None, None);
+            }
+            self.notify_latency(id);
+        }
+    }
+    #[cfg(target_os = "macos")]
+    pub(crate) fn publish_latencies(
+        &self,
+        entries: &[mixrelay_macos_transport::control_inventory::InputLatency],
+    ) {
+        for id in self.devices() {
+            let Some(device) = self.pin(id) else { continue };
+            if let Some(entry) = entries
+                .iter()
+                .find(|entry| entry.endpoint_id == device.endpoint)
+            {
+                // Resolved before locking and while the engine is publishing, so its
+                // incarnation is current.
+                let start = crate::transport::process_start(entry.engine_pid);
+                let mut control = lock(&device.control);
+                if entry.lease < control.latency_lease
+                    || (entry.lease == control.latency_lease
+                        && entry.revision < control.latency_revision)
+                {
+                    continue;
+                }
+                control.latency_lease = entry.lease;
+                control.latency_revision = entry.revision;
+                device
+                    .input_latency
+                    .publish(entry.rate, entry.engine_pid, start, entry.frames);
+            } else {
+                device.input_latency.publish(0, 0, None, None);
+            }
+            drop(device);
+            self.notify_latency(id);
+        }
+    }
+
     pub(crate) fn transport_policy(&self, bundles: Vec<String>) {
         if self.transport.policy(bundles) {
             for id in self.devices() {
@@ -357,6 +432,7 @@ impl Registry {
                 return INVALID;
             }
             control.clients.insert(client, false);
+            device.input_latency.add(client);
         } else {
             match control.clients.get(&client) {
                 Some(false) => {
@@ -382,6 +458,9 @@ impl Registry {
                 }
                 None => return INVALID,
             }
+        }
+        if !add {
+            device.input_latency.remove(client);
         }
         drop(control);
         drop(device);
@@ -419,6 +498,7 @@ impl Registry {
             return NATIVE_ERROR;
         }
         *running = true;
+        device.input_latency.active(client, true);
         device.running.store(count + 1, Ordering::Release);
         drop(frozen);
         drop(control);
@@ -451,6 +531,7 @@ impl Registry {
             }
         }
         *running = false;
+        device.input_latency.active(client, false);
         device.running.store(count, Ordering::Release);
         drop(frozen);
         drop(control);
@@ -638,6 +719,7 @@ impl Registry {
                 }
             }
             self.request(id);
+            self.notify_latency(id);
         }
         self.reclaim();
     }
@@ -695,6 +777,7 @@ impl Registry {
         drop(control);
         drop(device);
         self.host.changed(id, FORMAT);
+        self.notify_latency(id);
         if renamed {
             self.host.changed(id, NAME);
         }

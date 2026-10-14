@@ -85,7 +85,30 @@ const MAX_FRAMES: u32 = 4096;
 
 /// Borrowed engine render hook, installed only before registration. The hook must
 /// not retain native buffers or outlive its enclosing engine render-slot owner.
-pub type RenderHook = unsafe extern "C" fn(*mut c_void, *const c_void, *mut c_void, u32) -> bool;
+/// Validity-preserving native timing for both callback directions.
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct IoTimestamp {
+    /// Sample position in this device's clock only.
+    pub sample_time: f64,
+    /// System host ticks; convert with the prepared host timebase.
+    pub host_time: u64,
+    /// Actual versus nominal device rate.
+    pub rate_scalar: f64,
+    /// Native validity flags: sample=1, host=2, rate scalar=4.
+    pub flags: u32,
+}
+
+/// Borrowed timing accompanies native PCM, never retained past the callback.
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct IoTiming {
+    pub input: IoTimestamp,
+    pub output: IoTimestamp,
+}
+
+pub type RenderHook =
+    unsafe extern "C" fn(*mut c_void, *const c_void, *mut c_void, u32, *const IoTiming) -> bool;
 
 /// Serialized clock-boundary processor. Returns whether native PCM is admitted.
 /// Runs before native transfer; it may access only its designated queue cursors.

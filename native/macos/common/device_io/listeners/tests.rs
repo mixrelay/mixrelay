@@ -356,6 +356,7 @@ fn device_removal_during_render_hook_discards_its_written_output() {
         _: *const c_void,
         output: *mut c_void,
         _: u32,
+        _: *const crate::device_io::IoTiming,
     ) -> bool {
         // SAFETY: the fixture keeps its complete writable native output list and block live.
         let buffers = unsafe { crate::audio_buffer::buffers(output.cast(), 1) }.unwrap();

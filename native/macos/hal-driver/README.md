@@ -7,6 +7,30 @@ PCM processing belong to Rust. The shared transport implementation is in
 `native/macos/common`; it is linked into the HAL, independent Driver service and
 graph's normal CoreAudio client adapter.
 
+## Recording-app latency
+
+Device `kAudioDevicePropertyLatency` on input scope consumes an optional runtime
+publication from the independent Driver service, in device-rate frames. Output
+latency, stream latency and safety offset remain zero. A non-engine WriteMix
+client gates input latency to zero; capture-only client registration does not.
+Client marking and property reads use pinned atomics without IO-needed locks.
+The serial control path emits input `ltnc` notifications after releasing locks,
+only when the effective integer changes. Stale leases/revisions are ignored;
+engine lease loss, disconnect and rate/configuration changes clear the value.
+The optional v1 inventory field is compatible with older service/HAL peers.
+
+The current engine sends unknown (`None`), so recording applications still see
+zero: per-content timing has not yet been carried through all PCM queues/SRC and
+HAL destination scheduling. Native timestamps, planned arrival arithmetic and
+hysteresis are implemented and tested; real measured end-to-end reporting is
+unfinished. See [content-latency design](../../../docs/design/audio-content-latency.md)
+for the contract, remaining integration and exact installed verification steps.
+
+`pnpm probe:macos-roundtrip --latency DEVICE_UID` is a read-only mode printing
+input/output device latency, stream latency and safety offset in device-rate
+frames. It creates no IOProc, changes no settings and needs no recording permission.
+Compare it with the existing measured round-trip mode after measurement integration.
+
 ## Build and verification
 
 ```sh
@@ -233,17 +257,10 @@ being qualified, after recording any existing override):
 ```sh
 # Build the read-only probe and choose the UID printed by --list.
 zsh scripts/probe-macos-roundtrip.sh --list
-mkdir -p target/macos-probes/TransportProbe.app/Contents/MacOS
-cp target/macos-probes/MRRoundTripProbe target/macos-probes/TransportProbe.app/Contents/MacOS/
-cat > target/macos-probes/TransportProbe.app/Contents/Info.plist <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>com.example.MixRelayTransportProbe</string>
-<key>CFBundleExecutable</key><string>MRRoundTripProbe</string>
-<key>CFBundlePackageType</key><string>APPL</string>
-</dict></plist>
-PLIST
 ```
+
+`--bundle BUNDLE_ID` runs the same probe from an ad-hoc signed app bundle with that
+identifier (macOS reports an unsigned bundle as damaged).
 
 For the installed LaunchDaemon, save
 `/Library/LaunchDaemons/io.mixrelay.audio.driver.plist`, then add/set its
@@ -258,8 +275,8 @@ sudo launchctl bootout system/io.mixrelay.audio.driver
 sudo launchctl bootstrap system /Library/LaunchDaemons/io.mixrelay.audio.driver.plist
 launchctl print system/io.mixrelay.audio.driver
 # Substitute the actual UID in both commands; run them concurrently if desired.
-target/macos-probes/TransportProbe.app/Contents/MacOS/MRRoundTripProbe --transport DEVICE_UID
-target/macos-probes/MRRoundTripProbe --transport DEVICE_UID
+zsh scripts/probe-macos-roundtrip.sh --bundle com.example.MixRelayTransportProbe --transport DEVICE_UID
+zsh scripts/probe-macos-roundtrip.sh --transport DEVICE_UID
 ```
 
 The first should report `usb ` when bundle inspection is permitted, and the second

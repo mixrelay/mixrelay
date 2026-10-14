@@ -379,3 +379,52 @@ async fn service_rechecks_expiry_without_removing_paid_devices_and_keeps_free_64
         StatusCode::FORBIDDEN
     );
 }
+
+#[tokio::test]
+async fn runtime_route_claims_and_releases_without_persisting_inventory_revision() {
+    let fixture = FixtureDir::new("driver-runtime-latency").unwrap();
+    let (backend, _) = FakeBackend::ready();
+    let mut manager = DriverManager::open(backend, fixture.join("drivers.json")).unwrap();
+    let revision = manager.snapshot().unwrap().revision;
+    let router = router(manager);
+    let send = |command: crate::LatencyCommand| {
+        Request::builder()
+            .method(Method::PUT)
+            .uri(crate::LATENCY_ROUTE)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_vec(&command).unwrap()))
+            .unwrap()
+    };
+    let response = router
+        .clone()
+        .oneshot(send(crate::LatencyCommand::Claim {
+            incarnation: "test-engine".into(),
+            process_id: std::process::id(),
+        }))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let reply: crate::LatencyReply =
+        serde_json::from_slice(&to_bytes(response.into_body(), JSON_LIMIT).await.unwrap()).unwrap();
+    assert!(reply.accepted);
+    let response = router
+        .clone()
+        .oneshot(send(crate::LatencyCommand::Release {
+            lease: reply.lease.unwrap(),
+        }))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri(SNAPSHOT_ROUTE)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let snapshot: DriverSnapshot =
+        serde_json::from_slice(&to_bytes(response.into_body(), JSON_LIMIT).await.unwrap()).unwrap();
+    assert_eq!(snapshot.revision, revision);
+}

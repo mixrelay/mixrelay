@@ -831,3 +831,21 @@ fn measure_delayed_diamond_render() {
         }
     }
 }
+
+#[test]
+fn destination_arrival_includes_compensation_and_rejects_unmeasured_sources() {
+    let factory = DelayFactory::new(TEST_DELAY, Some(TEST_DELAY));
+    let execution = diamond_execution(1, 1, 32, false, [NodeControl::default(); 2]);
+    let processor = prepare_processor(&execution, &factory);
+    let plan = processor.plan();
+    assert_eq!(
+        plan.destination_arrivals(&[Some(0)]).unwrap(),
+        vec![Some(TEST_DELAY)]
+    );
+    assert_eq!(
+        plan.destination_arrivals(&[Some(10)]).unwrap(),
+        vec![Some(TEST_DELAY + 10)]
+    );
+    assert_eq!(plan.destination_arrivals(&[None]).unwrap(), vec![None]);
+    assert!(plan.destination_arrivals(&[]).is_err());
+}

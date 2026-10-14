@@ -143,10 +143,10 @@ impl RouteGraph {
 /// # Errors
 /// Returns an error for invalid route indices, a sink used as a source, a processing cycle, or
 /// cumulative latency that exceeds `u32`.
-pub(crate) fn route_delays(
+pub(crate) fn plan_arrivals(
     nodes: &[LatencyNode],
     routes: &[LatencyRoute],
-) -> Result<Vec<u32>, LatencyPlanError> {
+) -> Result<LatencyPlan, LatencyPlanError> {
     let graph = RouteGraph::new(nodes, routes)?;
     let order = graph.processing_order(nodes)?;
     let mut state = RouteState::new(nodes, routes.len());
@@ -160,13 +160,31 @@ pub(crate) fn route_delays(
         )?;
     }
     state.align_terminal_merges(nodes, routes, &graph);
-    Ok(state.delays)
+    Ok(LatencyPlan {
+        delays: state.delays,
+        terminal_arrivals: state.terminal_arrivals,
+    })
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct LatencyPlan {
+    pub(crate) delays: Vec<u32>,
+    pub(crate) terminal_arrivals: Vec<Option<u32>>,
+}
+
+#[cfg(test)]
+fn route_delays(
+    nodes: &[LatencyNode],
+    routes: &[LatencyRoute],
+) -> Result<Vec<u32>, LatencyPlanError> {
+    plan_arrivals(nodes, routes).map(|plan| plan.delays)
 }
 
 #[derive(Debug)]
 struct RouteState {
     arrivals: Vec<Option<u32>>,
     delays: Vec<u32>,
+    terminal_arrivals: Vec<Option<u32>>,
 }
 
 impl RouteState {
@@ -181,6 +199,7 @@ impl RouteState {
         Self {
             arrivals,
             delays: vec![0; route_count],
+            terminal_arrivals: vec![None; nodes.len()],
         }
     }
 
@@ -232,7 +251,11 @@ impl RouteState {
     ) {
         for (node_index, node) in nodes.iter().enumerate() {
             if matches!(node, LatencyNode::Source(_) | LatencyNode::Sink) {
-                let _ = self.align_merge(&graph.incoming[node_index], routes);
+                self.terminal_arrivals[node_index] = if graph.incoming[node_index].is_empty() {
+                    None
+                } else {
+                    self.align_merge(&graph.incoming[node_index], routes)
+                };
             }
         }
     }

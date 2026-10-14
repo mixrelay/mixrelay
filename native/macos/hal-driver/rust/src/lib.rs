@@ -10,6 +10,7 @@ mod clock;
 mod control;
 mod control_session;
 mod device;
+mod input_latency;
 #[cfg(target_os = "macos")]
 mod inventory;
 #[cfg(target_os = "macos")]

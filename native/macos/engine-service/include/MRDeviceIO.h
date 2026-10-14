@@ -5,7 +5,16 @@
 #include "MRAggregateGroup.h"
 typedef struct MRDeviceIO MRDeviceIO;
 /* Set once before connecting. Rust owns the complete callback context. */
-typedef bool (*MRRenderHook)(void *, const void *, void *, uint32_t);
+typedef struct MRIOTimeStamp {
+    double sample_time;
+    uint64_t host_time;
+    double rate_scalar;
+    uint32_t flags;
+} MRIOTimeStamp;
+typedef struct MRIOTiming { MRIOTimeStamp input, output; } MRIOTiming;
+_Static_assert(sizeof(MRIOTimeStamp) == 32 && sizeof(MRIOTiming) == 64, "Rust callback timing ABI");
+/* Borrowed for this call only. Validity flags are CoreAudio sample/host/rate bits. */
+typedef bool (*MRRenderHook)(void *, const void *, void *, uint32_t, const MRIOTiming *);
 typedef bool (*MRPcmHook)(void *);
 void mr_device_io_render_hook(MRDeviceIO *io, void *context, MRRenderHook hook);
 void mr_device_io_pcm_hook(MRDeviceIO *io, void *context, MRPcmHook hook);

@@ -60,6 +60,7 @@ mod tests {
                 (&raw const source).cast(),
                 (&raw mut sink).cast(),
                 32,
+                std::ptr::null(),
             );
         }
         output
@@ -76,6 +77,7 @@ mod tests {
         let failed = AtomicBool::new(false);
         let invalid = AtomicBool::new(false);
         let owner = PreparedRenderer::new(Renderer {
+            timebase: mixrelay_realtime::Timebase::current(),
             processor: &mut processor,
             activation: None,
             bindings: &bindings,
@@ -83,7 +85,7 @@ mod tests {
             epoch: 1,
             native_clock: None,
             status: &status,
-            frame: 0,
+            position: None,
             progress: &progress,
             failed: &failed,
             invalid: &invalid,

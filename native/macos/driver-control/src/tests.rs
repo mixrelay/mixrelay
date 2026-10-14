@@ -89,3 +89,52 @@ fn packaged_hal_allows_only_the_independent_driver_mach_service() {
     let (services, _) = services.split_once("</array>").unwrap();
     assert_eq!(services.trim(), "<string>io.mixrelay.audio.driver</string>");
 }
+
+#[test]
+fn clearing_latency_for_an_absent_device_forgets_its_cached_value() {
+    use mixrelay_driver_control::{
+        DriverBackend as _, DriverError, EngineLatencyLease, RuntimeLatency,
+    };
+    let service: &'static super::Service = Box::leak(Box::new(super::Service {
+        registry: super::EndpointRegistry::new(),
+        published: parking_lot::Mutex::new(None),
+        generation: parking_lot::Mutex::new(0),
+        peers: parking_lot::Mutex::new(super::xpc::Peers::default()),
+        dispatch: parking_lot::Mutex::new(None),
+        configuration: parking_lot::Mutex::new(Vec::new()),
+        transaction: parking_lot::Mutex::new(()),
+        latencies: parking_lot::Mutex::default(),
+    }));
+    let endpoint = config().spec.id;
+    let id = identity(&endpoint).unwrap();
+    service.latencies.lock().insert(
+        id,
+        mixrelay_macos_transport::control_inventory::InputLatency {
+            endpoint_id: id,
+            rate: 48_000,
+            engine_pid: 10,
+            lease: 20,
+            revision: 30,
+            frames: Some(300),
+        },
+    );
+    let mut driver = super::MacDriver { service };
+    let mut publication = RuntimeLatency {
+        endpoint_id: endpoint,
+        rate: 48_000,
+        engine_lease: EngineLatencyLease {
+            generation: 20,
+            incarnation: "engine".into(),
+            process_id: 10,
+        },
+        applied_graph_revision: 30,
+        input_latency_frames: None,
+    };
+    driver.publish_latency(&publication).unwrap();
+    assert!(service.latencies.lock().is_empty());
+    publication.input_latency_frames = Some(300);
+    assert!(matches!(
+        driver.publish_latency(&publication),
+        Err(DriverError::NotFound(_))
+    ));
+}

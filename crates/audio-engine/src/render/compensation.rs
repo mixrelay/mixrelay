@@ -5,7 +5,7 @@ use std::{fmt, sync::Arc};
 use mixrelay_audio_graph::{ExecutionPlan, NodeConfig};
 
 use super::{HostedAudioProcessor, Kernel, NodeStep, RenderPlan, route_delay::RouteDelayLine};
-use crate::latency_plan::{LatencyNode, LatencyPlanError, LatencyRoute, route_delays};
+use crate::latency_plan::{LatencyNode, LatencyPlanError, LatencyRoute, plan_arrivals};
 use crate::runtime_control::ControlValue;
 
 const MAX_HISTORY_BYTES: usize = 16 * 1024 * 1024;
@@ -36,6 +36,7 @@ pub enum CompensationState {
 /// Immutable route geometry and retained cached readers, prepared off the audio thread.
 pub(super) struct CompensationTopology {
     nodes: Vec<LatencyNode>,
+    ids: Vec<mixrelay_audio_graph::NodeId>,
     routes: Vec<LatencyRoute>,
     channels: Vec<usize>,
     readers: Vec<(usize, Arc<dyn HostedLatencySource>)>,
@@ -45,6 +46,7 @@ impl fmt::Debug for CompensationTopology {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CompensationTopology")
             .field("nodes", &self.nodes.len())
+            .field("ids", &self.ids)
             .field("routes", &self.routes.len())
             .field("channels", &self.channels)
             .field("readers", &self.readers.len())
@@ -120,6 +122,11 @@ impl CompensationTopology {
             })
             .collect();
         Self {
+            ids: execution
+                .nodes()
+                .iter()
+                .map(|node| node.id().clone())
+                .collect(),
             nodes,
             routes,
             channels,
@@ -145,6 +152,45 @@ impl CompensationTopology {
                 .all(|((_, reader), value)| reader.frames() == *value)
     }
 
+    pub(super) fn destination_arrivals(
+        &self,
+        sources: &[super::ExternalBinding],
+        observed: &[Option<u32>],
+        sinks: &[super::ExternalBinding],
+    ) -> Result<Vec<Option<u32>>, String> {
+        if sources.len() != observed.len() {
+            return Err("source arrival count mismatch".into());
+        }
+        let mut nodes = self.nodes.clone();
+        for (index, node) in nodes.iter_mut().enumerate() {
+            if matches!(node, LatencyNode::Source(_)) {
+                let arrival = sources
+                    .iter()
+                    .position(|binding| binding.node_id() == &self.ids[index])
+                    .and_then(|index| observed[index]);
+                *node = LatencyNode::Source(arrival);
+            }
+        }
+        for (index, reader) in &self.readers {
+            nodes[*index] = LatencyNode::Processing(reader.frames());
+        }
+        let plan = plan_arrivals(&nodes, &self.routes).map_err(|error| error.to_string())?;
+        // Measurements cannot invent compensation histories that audio never installed.
+        let (applied_delays, state) = self.delays(&self.observations())?;
+        if state == CompensationState::CapacityExceeded || applied_delays != plan.delays {
+            return Ok(vec![None; sinks.len()]);
+        }
+        Ok(sinks
+            .iter()
+            .map(|binding| {
+                self.ids
+                    .iter()
+                    .position(|id| id == binding.node_id())
+                    .and_then(|index| plan.terminal_arrivals[index])
+            })
+            .collect())
+    }
+
     fn delays(&self, observed: &[Option<u32>]) -> Result<(Vec<u32>, CompensationState), String> {
         if observed.len() != self.readers.len() {
             return Err("latency observation does not match its prepared owners".into());
@@ -159,9 +205,9 @@ impl CompensationTopology {
                 LatencyNode::Source(None) | LatencyNode::Processing(None)
             )
         });
-        match route_delays(&nodes, &self.routes) {
-            Ok(delays) => Ok((
-                delays,
+        match plan_arrivals(&nodes, &self.routes) {
+            Ok(plan) => Ok((
+                plan.delays,
                 if unknown {
                     CompensationState::Unknown
                 } else {

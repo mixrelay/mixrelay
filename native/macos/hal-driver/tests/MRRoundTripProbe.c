@@ -434,6 +434,19 @@ static int mr_transport(const char *uid) {
     return 0;
 }
 
+// Read-only latency inventory; does not create an IOProc or change device settings.
+static int mr_latency(const char *uid) {
+    const AudioDeviceID device = mr_find(uid);
+    if (device == kAudioObjectUnknown) {
+        fprintf(stderr, "device not found: %s\n", uid);
+        return 1;
+    }
+    printf("Reported values in device-rate frames:\n");
+    mr_describe("input", device, kAudioObjectPropertyScopeInput, false);
+    mr_describe("output", device, kAudioObjectPropertyScopeOutput, false);
+    return 0;
+}
+
 static int mr_list(void) {
     const AudioObjectPropertyAddress address = {kAudioHardwarePropertyDevices,
                                                 kAudioObjectPropertyScopeGlobal,
@@ -1080,6 +1093,7 @@ static void mr_usage(FILE *stream) {
     fprintf(stream,
             "usage: MRRoundTripProbe --list | --self-test\n"
             "       MRRoundTripProbe --transport DEVICE_UID\n"
+            "       MRRoundTripProbe --latency DEVICE_UID (read-only device/stream/safety)\n"
             "       MRRoundTripProbe [--json] [--seconds 1-120] [--channels 1-64] OUTPUT_UID "
             "[INPUT_UID]\n"
             "Plays a deterministic signal into OUTPUT_UID and records INPUT_UID (default: the\n"
@@ -1109,6 +1123,7 @@ typedef struct MROptions {
 
 /// Parses the measurement options; returns -1 to continue, otherwise an exit status.
 static int mr_options(int argc, char **argv, MROptions *options) {
+    if (argc == 3 && strcmp(argv[1], "--latency") == 0) return mr_latency(argv[2]);
     if (argc == 3 && strcmp(argv[1], "--transport") == 0) return mr_transport(argv[2]);
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--list") == 0) return mr_list();

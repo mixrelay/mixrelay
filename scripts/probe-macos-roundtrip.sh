@@ -1,7 +1,11 @@
 #!/bin/zsh
 # Measures latency, bit exactness, channel order, slips and dropouts of an audio path on
 # installed devices (any vendor). See native/macos/hal-driver/tests/MRRoundTripProbe.c.
+#   pnpm probe:macos-roundtrip --latency DEVICE_UID (read-only reported latency)
 #   pnpm probe:macos-roundtrip --transport DEVICE_UID
+#   pnpm probe:macos-roundtrip --bundle BUNDLE_ID --transport DEVICE_UID
+#     (runs the probe from an ad-hoc signed app bundle with that identifier, so the HAL
+#      sees a bundled requester; unsigned bundles are reported by macOS as damaged)
 #   pnpm probe:macos-roundtrip --list
 #   pnpm probe:macos-roundtrip [--json] [--seconds S] [--channels N] OUTPUT_UID [INPUT_UID]
 #   pnpm probe:macos-roundtrip --self-test
@@ -21,5 +25,24 @@ if [[ ! -x "$binary" || "$source_file" -nt "$binary" ]]; then
   clang -std=c17 -O2 -mmacosx-version-min=14.2 \
     -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Werror \
     "$source_file" -framework CoreAudio -framework CoreFoundation -o "$binary"
+fi
+if [[ "${1:-}" == "--bundle" ]]; then
+  bundle_id="${2:?--bundle needs a bundle identifier}"
+  shift 2
+  [[ "$bundle_id" =~ '^[A-Za-z0-9.-]+$' ]] || { print -u2 "invalid bundle identifier"; exit 2; }
+  bundle="${binary:h}/$bundle_id.app"
+  rm -rf "$bundle"
+  mkdir -p "$bundle/Contents/MacOS"
+  cp "$binary" "$bundle/Contents/MacOS/MRRoundTripProbe"
+  cat > "$bundle/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>$bundle_id</string>
+<key>CFBundleExecutable</key><string>MRRoundTripProbe</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>
+PLIST
+  codesign --force --sign - "$bundle"
+  binary="$bundle/Contents/MacOS/MRRoundTripProbe"
 fi
 exec "$binary" "$@"

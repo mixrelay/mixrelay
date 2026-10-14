@@ -60,6 +60,7 @@ fn driver_duplex_client_reads_capture_and_writes_render_at_native_callback_bound
     );
     let signals = RenderSignals::default();
     let mut renderer = Renderer {
+        timebase: mixrelay_realtime::Timebase::current(),
         processor: &mut processor,
         activation: None,
         bindings: &bindings,
@@ -67,7 +68,7 @@ fn driver_duplex_client_reads_capture_and_writes_render_at_native_callback_bound
         epoch: 1,
         native_clock: None,
         status: &status,
-        frame: 0,
+        position: None,
         progress: &signals.progress,
         failed: &signals.failed,
         invalid: &signals.invalid,
@@ -98,12 +99,14 @@ fn driver_duplex_client_reads_capture_and_writes_render_at_native_callback_bound
         let mut sink = tests::stereo_list(&mut output);
         // SAFETY: this unpublished fixture retains two disjoint stereo ABLs for
         // exactly 32 frames during the one synchronous renderer invocation.
-        assert!(unsafe { renderer.render((&raw const source).cast(), (&raw mut sink).cast(), 32) });
+        assert!(unsafe {
+            renderer.render((&raw const source).cast(), (&raw mut sink).cast(), 32, None)
+        });
         let expected: f32 = if enabled && !muted { 0.25 } else { 0.0 };
         assert_eq!(output.map(f32::to_bits), [expected.to_bits(); 64]);
     }
     assert_eq!(signals.progress.load(Ordering::Acquire), 4);
-    assert_eq!((renderer.frame, renderer.epoch), (128, 1));
+    assert_eq!((renderer.position, renderer.epoch), (Some(128), 1));
     assert!(!signals.invalid.load(Ordering::Acquire));
     assert!(!signals.failed.load(Ordering::Acquire));
 }

@@ -36,6 +36,10 @@ pub(crate) fn enter_audio_thread() {
 pub(crate) fn leave_audio_thread() {
     AUDIO_DEPTH.set(AUDIO_DEPTH.get().saturating_sub(1));
 }
+/// Whether this thread is inside an IO or timestamp callback.
+pub(crate) fn on_audio_thread() -> bool {
+    AUDIO_DEPTH.get() != 0
+}
 pub(crate) struct AudioScope;
 impl AudioScope {
     pub(crate) fn enter() -> Self {
@@ -396,6 +400,12 @@ fn incarnation(pid: i32) -> Option<Incarnation> {
     let (mut seconds, mut micros) = (0, 0);
     unsafe { mr_hal_identity_start(pid, &raw mut seconds, &raw mut micros) }
         .then_some(Incarnation(pid, seconds, micros))
+}
+/// One process incarnation's start time packed into a nonzero word, so a reused PID never
+/// matches. `None` when the process is gone or the sandbox denies the query.
+pub(crate) fn process_start(pid: u32) -> Option<u64> {
+    let Incarnation(_, seconds, micros) = incarnation(i32::try_from(pid).ok()?)?;
+    Some((seconds << 20 | micros).max(1))
 }
 fn discover(key: Incarnation) -> Option<String> {
     if incarnation(key.0) != Some(key) {
