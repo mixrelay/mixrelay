@@ -287,7 +287,9 @@ mod tests {
         let directory = fixture.join("control");
         let uid = std::fs::metadata(fixture.path()).expect("metadata").uid();
         let control = LocalControl::new(
-            crate::control_proxy::ControlProxyClient::default(),
+            crate::control_proxy::ControlProxyClient::with_socket(Some(
+                fixture.join("no-engine.sock"),
+            )),
             #[cfg(target_os = "macos")]
             Arc::default(),
         )
@@ -367,7 +369,9 @@ mod tests {
         let directory = fixture.join("control");
         let uid = std::fs::metadata(fixture.path()).expect("metadata").uid();
         let control = LocalControl::new(
-            crate::control_proxy::ControlProxyClient::default(),
+            crate::control_proxy::ControlProxyClient::with_socket(Some(
+                fixture.join("no-engine.sock"),
+            )),
             #[cfg(target_os = "macos")]
             Arc::default(),
         )
@@ -418,7 +422,9 @@ mod tests {
         let directory = fixture.join("control");
         let uid = std::fs::metadata(fixture.path()).expect("metadata").uid();
         let control = LocalControl::new(
-            crate::control_proxy::ControlProxyClient::default(),
+            crate::control_proxy::ControlProxyClient::with_socket(Some(
+                fixture.join("no-engine.sock"),
+            )),
             #[cfg(target_os = "macos")]
             Arc::default(),
         )
