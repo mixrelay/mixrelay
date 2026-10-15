@@ -10,8 +10,59 @@ fn app(fixture: &FixtureDir) -> Router {
     let (backend, _) = FakeBackend::ready();
     router_with_access(
         DriverManager::open(backend, fixture.join("drivers.json")).unwrap(),
-        Arc::new(|| true),
+        Arc::new(|_| true),
     )
+}
+
+#[tokio::test]
+async fn the_policy_sees_each_request_claim_and_its_peer() {
+    let fixture = FixtureDir::new("driver-http-claim").unwrap();
+    let (backend, _) = FakeBackend::ready();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let record = seen.clone();
+    let app = router_with_access(
+        DriverManager::open(backend, fixture.join("drivers.json")).unwrap(),
+        Arc::new(move |request: &AccessRequest| {
+            record.lock().push(*request);
+            request.claimed
+        }),
+    );
+    let peer = mixrelay_local_socket::Peer {
+        uid: 501,
+        audit_token: Some([7; 32]),
+    };
+    for (claim, connected) in [(None, false), (Some("1"), true), (Some("yes"), true)] {
+        let mut request = Request::builder().uri(SNAPSHOT_ROUTE);
+        if let Some(claim) = claim {
+            request = request.header(PAID_ACCESS_HEADER, claim);
+        }
+        let mut request = request.body(Body::empty()).unwrap();
+        if connected {
+            request
+                .extensions_mut()
+                .insert(axum::extract::ConnectInfo(peer));
+        }
+        let response = app.clone().oneshot(request).await.unwrap();
+        let snapshot: DriverSnapshot =
+            serde_json::from_slice(&to_bytes(response.into_body(), JSON_LIMIT).await.unwrap())
+                .unwrap();
+        // Paid-only abilities follow the policy's decision.
+        assert_eq!(snapshot.settings.can_create, claim == Some("1"));
+    }
+    assert_eq!(
+        *seen.lock(),
+        [
+            AccessRequest::default(),
+            AccessRequest {
+                claimed: true,
+                peer: Some(peer)
+            },
+            AccessRequest {
+                claimed: false,
+                peer: Some(peer)
+            },
+        ]
+    );
 }
 
 #[tokio::test]
@@ -321,7 +372,7 @@ async fn service_rechecks_expiry_without_removing_paid_devices_and_keeps_free_64
     let initial = manager.snapshot().unwrap();
     let paid = Arc::new(AtomicBool::new(true));
     let access = paid.clone();
-    let app = router_with_access(manager, Arc::new(move || access.load(Ordering::Acquire)));
+    let app = router_with_access(manager, Arc::new(move |_| access.load(Ordering::Acquire)));
     let mut spec = initial.settings.devices[0].spec.clone();
     spec.id = "paid-second-device".into();
     spec.display_name = "Paid second device".into();

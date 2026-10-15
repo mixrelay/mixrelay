@@ -290,3 +290,54 @@ fn runtime_latency_handles_older_services_and_additive_replies() {
     ));
     assert!(decode_latency_response(reqwest::StatusCode::OK, b"invalid").is_err());
 }
+
+#[tokio::test]
+async fn claiming_clients_reach_the_policy_with_their_verified_peer() {
+    let fixture = mixrelay_test_support::FixtureDir::new("driver-claim").unwrap();
+    let (backend, _) = crate::test_backend::FakeBackend::ready();
+    let manager = crate::DriverManager::open(backend, fixture.join("drivers.json")).unwrap();
+    let seen = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let record = seen.clone();
+    let app = crate::router_with_access(
+        manager,
+        std::sync::Arc::new(move |request: &crate::AccessRequest| {
+            record.lock().push(*request);
+            request.claimed
+        }),
+    );
+    let uid = mixrelay_local_socket::current_uid();
+    let (listener, socket) = mixrelay_local_socket::bind(&fixture.join("ipc"), DRIVER_SOCKET, uid)
+        .await
+        .unwrap();
+    let plain = DriverClient::with_socket_path(socket.path()).unwrap();
+    let listener = mixrelay_local_socket::AuthorizedListener::new(listener, socket, vec![uid]);
+    let service = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<mixrelay_local_socket::Peer>(),
+        )
+        .await
+        .unwrap();
+    });
+    let claiming = plain.clone().claiming_paid_access(true);
+    assert!(!plain.snapshot().await.unwrap().settings.can_create);
+    assert!(claiming.snapshot().await.unwrap().settings.can_create);
+    let blocking = claiming.clone();
+    let snapshot = tokio::task::spawn_blocking(move || blocking.snapshot_blocking().unwrap())
+        .await
+        .unwrap();
+    assert!(snapshot.settings.can_create);
+    let seen = seen.lock().clone();
+    assert_eq!(
+        seen.iter()
+            .map(|request| request.claimed)
+            .collect::<Vec<_>>(),
+        [false, true, true]
+    );
+    for request in seen {
+        let peer = request.peer.expect("connection info");
+        assert_eq!(peer.uid, uid);
+        assert_eq!(peer.audit_token.is_some(), cfg!(target_os = "macos"));
+    }
+    service.abort();
+}

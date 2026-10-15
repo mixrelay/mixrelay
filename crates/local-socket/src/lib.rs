@@ -282,8 +282,62 @@ pub fn peer_allowed(stream: &UnixStream, allowed: &[u32]) -> bool {
         .is_ok_and(|peer| allowed.contains(&peer.uid()))
 }
 
+/// The process on the other end of an accepted connection, recorded at accept time.
+/// Servers read it per request through axum's `ConnectInfo<Peer>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Peer {
+    pub uid: u32,
+    /// The macOS audit token, which names the exact process incarnation (for example
+    /// to check its code signature). `None` elsewhere or when the kernel refused it.
+    pub audit_token: Option<[u8; 32]>,
+}
+
+impl Peer {
+    fn of(stream: &UnixStream, uid: u32) -> Self {
+        Self {
+            uid,
+            audit_token: audit_token(stream),
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn audit_token(stream: &UnixStream) -> Option<[u8; 32]> {
+    use std::os::fd::AsRawFd as _;
+    // <sys/un.h>: SOL_LOCAL and LOCAL_PEERTOKEN.
+    const SOL_LOCAL: libc::c_int = 0;
+    const LOCAL_PEERTOKEN: libc::c_int = 6;
+    let mut token = [0_u8; 32];
+    let mut length: libc::socklen_t = 32;
+    // SAFETY: the descriptor is live for this borrow; the kernel writes at most `length`
+    // bytes into the local buffer and reports the written length.
+    let result = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            SOL_LOCAL,
+            LOCAL_PEERTOKEN,
+            token.as_mut_ptr().cast(),
+            &raw mut length,
+        )
+    };
+    (result == 0 && length == 32).then_some(token)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn audit_token(_: &UnixStream) -> Option<[u8; 32]> {
+    None
+}
+
+impl axum::extract::connect_info::Connected<axum::serve::IncomingStream<'_, AuthorizedListener>>
+    for Peer
+{
+    fn connect_info(stream: axum::serve::IncomingStream<'_, AuthorizedListener>) -> Self {
+        *stream.remote_addr()
+    }
+}
+
 /// A Unix listener that hands axum only connections from allowed user IDs; others are
-/// closed before any request is read.
+/// closed before any request is read. Each connection's address is its [`Peer`].
 #[derive(Debug)]
 pub struct AuthorizedListener {
     listener: UnixListener,
@@ -310,20 +364,28 @@ impl AuthorizedListener {
 
 impl axum::serve::Listener for AuthorizedListener {
     type Io = UnixStream;
-    type Addr = tokio::net::unix::SocketAddr;
+    type Addr = Peer;
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
         loop {
-            let (stream, address) = axum::serve::Listener::accept(&mut self.listener).await;
-            if peer_allowed(&stream, &self.allowed) {
-                return (stream, address);
+            let (stream, _) = axum::serve::Listener::accept(&mut self.listener).await;
+            // Credential errors refuse, as in [`peer_allowed`].
+            match stream.peer_cred() {
+                Ok(credentials) if self.allowed.contains(&credentials.uid()) => {
+                    let peer = Peer::of(&stream, credentials.uid());
+                    return (stream, peer);
+                }
+                _ => tracing::warn!("refused a local control connection from another user"),
             }
-            tracing::warn!("refused a local control connection from another user");
         }
     }
 
+    /// This process, which owns the listening socket.
     fn local_addr(&self) -> io::Result<Self::Addr> {
-        self.listener.local_addr()
+        Ok(Peer {
+            uid: current_uid(),
+            audit_token: None,
+        })
     }
 }
 

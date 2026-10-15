@@ -2,7 +2,7 @@
 use std::time::Duration;
 
 use mixrelay_control_protocol::EnginePowerStatus;
-use mixrelay_driver_control::{DriverClient, DriverState};
+use mixrelay_driver_control::DriverState;
 use tauri::Manager as _;
 
 use super::{DriverMenu, MenuState, QuitState};
@@ -150,7 +150,7 @@ async fn change(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
     if *app.state::<crate::app_mode::AppMode>() == crate::app_mode::AppMode::Driver {
         let menu = app.state::<DriverMenu>();
         let _lifecycle = menu.lifecycle.lock().await;
-        let result = DriverClient::session()
+        let result = crate::driver_control::session_client()
             .map_err(|error| error.to_string())?
             .set_active(enabled)
             .await;

@@ -66,7 +66,7 @@ impl EngineLifecycle {
         if self.driver_start_cancelled.load(Ordering::Acquire) {
             return Ok(None);
         }
-        mixrelay_driver_control::DriverClient::session()
+        crate::driver_control::session_client()
             .map_err(|error| error.to_string())?
             .set_active(true)
             .await

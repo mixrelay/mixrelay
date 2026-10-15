@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Mutex, time::Duration};
 
-use mixrelay_driver_control::{DriverClient, DriverSnapshot};
+use mixrelay_driver_control::DriverSnapshot;
 use tauri::{
     Manager,
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -251,7 +251,7 @@ fn activate_driver(app: &tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let menu = app.state::<DriverMenu>();
         let _lifecycle = menu.lifecycle.lock().await;
-        let client = match DriverClient::session() {
+        let client = match crate::driver_control::session_client() {
             Ok(client) => client,
             Err(error) => {
                 finish_snapshot(&app, Err(error.to_string()));
@@ -355,7 +355,7 @@ pub(crate) fn exit_requested(app: &tauri::AppHandle, api: &tauri::ExitRequestApi
 }
 
 pub(crate) async fn stop_driver(app: &tauri::AppHandle) -> Result<DriverSnapshot, String> {
-    let result = DriverClient::session()
+    let result = crate::driver_control::session_client()
         .map_err(|error| error.to_string())?
         .set_active(false)
         .await;

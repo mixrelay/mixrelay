@@ -1,5 +1,6 @@
 use super::*;
 use std::time::Duration;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
 fn uid_of(path: &Path) -> u32 {
     std::fs::metadata(path).expect("metadata").uid()
@@ -105,10 +106,19 @@ async fn connections_from_other_users_never_reach_the_service() {
     let (listener, socket) = bind(&directory, DRIVER_SOCKET, uid).await.expect("rebind");
     let mut admitting = AuthorizedListener::new(listener, socket, vec![current_uid()]);
     assert_eq!(admitting.path(), path);
-    assert!(axum::serve::Listener::local_addr(&admitting).is_ok());
+    assert_eq!(
+        axum::serve::Listener::local_addr(&admitting).unwrap(),
+        Peer {
+            uid: current_uid(),
+            audit_token: None
+        }
+    );
     let _client = UnixStream::connect(&path).await.expect("connect");
-    let (stream, _) = axum::serve::Listener::accept(&mut admitting).await;
+    let (stream, peer) = axum::serve::Listener::accept(&mut admitting).await;
     assert!(peer_allowed(&stream, &[current_uid()]));
+    assert_eq!(peer.uid, current_uid());
+    // The audit token names this very process on macOS.
+    assert_eq!(peer.audit_token.is_some(), cfg!(target_os = "macos"));
 }
 
 #[test]
@@ -209,4 +219,43 @@ async fn concurrent_starters_never_replace_each_others_live_socket() {
         .find_map(Result::err)
         .expect("loser");
     assert_eq!(failed.kind(), io::ErrorKind::AddrInUse);
+}
+
+#[tokio::test]
+async fn handlers_see_the_peer_of_their_connection() {
+    let fixture = mixrelay_test_support::FixtureDir::new("ipc-connect-info").expect("fixture");
+    let uid = uid_of(fixture.path());
+    let (listener, socket) = bind(&fixture.join("control"), DRIVER_SOCKET, uid)
+        .await
+        .expect("bind");
+    let path = socket.path().to_path_buf();
+    let listener = AuthorizedListener::new(listener, socket, vec![current_uid()]);
+    let app = axum::Router::new().route(
+        "/",
+        axum::routing::get(
+            |axum::extract::ConnectInfo(peer): axum::extract::ConnectInfo<Peer>| async move {
+                format!("{} {}", peer.uid, peer.audit_token.is_some())
+            },
+        ),
+    );
+    let service = tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service_with_connect_info::<Peer>())
+            .await
+            .expect("serve");
+    });
+    let mut stream = UnixStream::connect(&path).await.expect("connect");
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+        .await
+        .expect("request");
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .await
+        .expect("response");
+    assert!(
+        response.ends_with(&format!("{} {}", current_uid(), cfg!(target_os = "macos"))),
+        "{response}"
+    );
+    service.abort();
 }

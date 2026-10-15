@@ -1,5 +1,5 @@
 //! Explicit, bounded support export. No recorder, timer, retained dump, or upload.
-use mixrelay_driver_control::{DriverClient, DriverSnapshot};
+use mixrelay_driver_control::DriverSnapshot;
 use serde_json::{Value, json};
 use std::{
     io::Write,
@@ -96,7 +96,7 @@ pub(crate) fn export(app: &tauri::AppHandle) {
             return;
         };
         let driver = tokio::time::timeout(Duration::from_secs(4), async {
-            DriverClient::session()?.snapshot().await
+            crate::driver_control::session_client()?.snapshot().await
         })
         .await
         .ok()

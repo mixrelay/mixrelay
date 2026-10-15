@@ -4,10 +4,35 @@ use mixrelay_driver_control::{
 };
 use tauri::Manager as _;
 
+/// The Driver client of this signed app. It claims paid access when the signed-in user's
+/// license allows it; the macOS Driver service cannot read that keychain itself and
+/// accepts the claim only from a process signed by its own team.
+pub(crate) fn session_client() -> Result<DriverClient, DriverError> {
+    Ok(DriverClient::session()?.claiming_paid_access(claimed_paid_access()))
+}
+
+/// Driver requests are frequent and the license rarely changes: reuse a keychain read
+/// for two seconds, so an activation still shows almost at once.
+fn claimed_paid_access() -> bool {
+    static CACHE: std::sync::Mutex<Option<(std::time::Instant, bool)>> =
+        std::sync::Mutex::new(None);
+    let mut cache = CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match *cache {
+        Some((read, paid)) if read.elapsed() < std::time::Duration::from_secs(2) => paid,
+        _ => {
+            let paid = mixrelay_licensing::has_local_paid_access();
+            *cache = Some((std::time::Instant::now(), paid));
+            paid
+        }
+    }
+}
+
 /// Read the installed Driver owner; free device settings do not require graph admission.
 #[tauri::command]
 pub(crate) async fn driver_status(app: tauri::AppHandle) -> Result<DriverSnapshot, String> {
-    let client = DriverClient::session().map_err(|error| error.to_string())?;
+    let client = session_client().map_err(|error| error.to_string())?;
     let snapshot = match client.snapshot().await {
         Ok(snapshot) => Ok(snapshot),
         Err(DriverError::Http(error)) if error.is_connect() => {
@@ -26,7 +51,7 @@ pub(crate) async fn driver_mutate(
     app: tauri::AppHandle,
     command: DriverCommand,
 ) -> Result<DriverSnapshot, String> {
-    let client = DriverClient::session().map_err(|error| error.to_string())?;
+    let client = session_client().map_err(|error| error.to_string())?;
     let rename = if let DriverCommand::Configure { spec, .. } = &command {
         client
             .snapshot()

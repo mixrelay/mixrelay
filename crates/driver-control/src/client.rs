@@ -16,6 +16,7 @@ pub struct DriverClient {
     client: reqwest::Client,
     endpoint: String,
     socket_path: PathBuf,
+    paid_claim: bool,
 }
 
 impl DriverClient {
@@ -51,7 +52,36 @@ impl DriverClient {
             client,
             endpoint: format!("{DRIVER_AUTHORITY}{SNAPSHOT_ROUTE}"),
             socket_path,
+            paid_claim: false,
         })
+    }
+
+    /// Claims paid access for the signed-in user on every snapshot and command. The
+    /// service accepts the claim only from a process it can verify (see the service's
+    /// paid-access policy); everyone else keeps free access.
+    #[must_use]
+    pub fn claiming_paid_access(mut self, paid: bool) -> Self {
+        self.paid_claim = paid;
+        self
+    }
+
+    fn claim(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if self.paid_claim {
+            request.header(crate::PAID_ACCESS_HEADER, "1")
+        } else {
+            request
+        }
+    }
+
+    fn claim_blocking(
+        &self,
+        request: reqwest::blocking::RequestBuilder,
+    ) -> reqwest::blocking::RequestBuilder {
+        if self.paid_claim {
+            request.header(crate::PAID_ACCESS_HEADER, "1")
+        } else {
+            request
+        }
     }
 
     /// Sends runtime timing from a non-realtime supervisor. A 404 is compatible absence.
@@ -83,7 +113,7 @@ impl DriverClient {
     /// # Errors
     /// Returns transport, size, JSON or service rejection errors.
     pub async fn snapshot(&self) -> Result<DriverSnapshot, DriverError> {
-        read_response(self.client.get(&self.endpoint).send().await?).await
+        read_response(self.claim(self.client.get(&self.endpoint)).send().await?).await
     }
 
     /// Sends one bounded JSON command asynchronously.
@@ -91,8 +121,7 @@ impl DriverClient {
     /// Returns transport, size, JSON or service rejection errors.
     pub async fn mutate(&self, command: &DriverCommand) -> Result<DriverSnapshot, DriverError> {
         let response = self
-            .client
-            .put(&self.endpoint)
+            .claim(self.client.put(&self.endpoint))
             // Native inventory ACK/drain can take six seconds; allow its bounded result.
             .timeout(
                 if matches!(
@@ -144,8 +173,7 @@ impl DriverClient {
     /// Returns transport, size, JSON or service rejection errors. Must not run on a Tokio reactor.
     pub fn snapshot_blocking(&self) -> Result<DriverSnapshot, DriverError> {
         read_blocking_response(
-            blocking_client(&self.socket_path)?
-                .get(&self.endpoint)
+            self.claim_blocking(blocking_client(&self.socket_path)?.get(&self.endpoint))
                 .send()?,
         )
     }
@@ -154,8 +182,8 @@ impl DriverClient {
     /// # Errors
     /// Returns transport, size, JSON or service rejection errors. Must not run on a Tokio reactor.
     pub fn mutate_blocking(&self, command: &DriverCommand) -> Result<DriverSnapshot, DriverError> {
-        let response = blocking_client(&self.socket_path)?
-            .put(&self.endpoint)
+        let response = self
+            .claim_blocking(blocking_client(&self.socket_path)?.put(&self.endpoint))
             // Native inventory ACK/drain can take six seconds; allow its bounded result.
             .timeout(
                 if matches!(

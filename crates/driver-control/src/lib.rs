@@ -21,4 +21,4 @@ pub use contract::{
     DriverState, NativeDirection, SNAPSHOT_ROUTE,
 };
 pub use manager::DriverManager;
-pub use server::{router, router_with_access};
+pub use server::{AccessRequest, PAID_ACCESS_HEADER, PaidAccess, router, router_with_access};

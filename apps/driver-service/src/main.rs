@@ -1,6 +1,9 @@
 //! Installed Driver control owner. Explicit manager quit stops devices through its API;
 //! the service remains reachable independently of manager and graph process lifetimes.
 
+#[cfg(target_os = "macos")]
+mod paid_access;
+
 use std::{ffi::OsString, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -99,10 +102,8 @@ async fn run() -> Result<()> {
     tracing::info!("Driver control API starting; native readiness is reported separately");
     axum::serve(
         listener,
-        mixrelay_driver_control::router_with_access(
-            manager,
-            std::sync::Arc::new(mixrelay_licensing::has_local_paid_access),
-        ),
+        mixrelay_driver_control::router_with_access(manager, paid_access())
+            .into_make_service_with_connect_info::<mixrelay_local_socket::Peer>(),
     )
     .with_graceful_shutdown(async move {
         tokio::select! {
@@ -140,6 +141,16 @@ fn open_manager(path: PathBuf) -> Result<DriverManager> {
     // The running service binary carries the Driver release, independently of the graph app.
     manager.set_installed_version(Some(env!("CARGO_PKG_VERSION").into()));
     Ok(manager)
+}
+
+/// macOS: the service cannot read the signed-in user's keychain, so it trusts the paid
+/// claim of the signed `MixRelay` app (see `paid_access`). Linux: the user service reads
+/// the session keyring itself.
+fn paid_access() -> mixrelay_driver_control::PaidAccess {
+    #[cfg(target_os = "macos")]
+    return std::sync::Arc::new(paid_access::policy);
+    #[cfg(target_os = "linux")]
+    return std::sync::Arc::new(|_| mixrelay_licensing::has_local_paid_access());
 }
 
 #[cfg(any(target_os = "macos", test))]

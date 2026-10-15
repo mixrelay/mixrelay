@@ -22,10 +22,45 @@ use crate::{
     DriverCommand, DriverError, DriverManager, DriverSnapshot, SNAPSHOT_ROUTE, contract::JSON_LIMIT,
 };
 
+/// Request header in which a client claims paid access for the signed-in user.
+pub const PAID_ACCESS_HEADER: &str = "x-mixrelay-paid-access";
+
+/// What the paid-access policy decides on: the client's claim and who made it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AccessRequest {
+    /// The request carried `x-mixrelay-paid-access: 1`.
+    pub claimed: bool,
+    /// The connected process, when the server records connection info.
+    pub peer: Option<mixrelay_local_socket::Peer>,
+}
+
+/// Decides paid access for one request.
+pub type PaidAccess = Arc<dyn Fn(&AccessRequest) -> bool + Send + Sync>;
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for AccessRequest {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _: &S,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(Self {
+            claimed: parts
+                .headers
+                .get(PAID_ACCESS_HEADER)
+                .is_some_and(|value| value == "1"),
+            peer: parts
+                .extensions
+                .get::<axum::extract::ConnectInfo<mixrelay_local_socket::Peer>>()
+                .map(|info| info.0),
+        })
+    }
+}
+
 #[derive(Clone)]
 struct Control {
     manager: Arc<Mutex<DriverManager>>,
-    paid_access: Arc<dyn Fn() -> bool + Send + Sync>,
+    paid_access: PaidAccess,
     ingress: Arc<Semaphore>,
     operations: Arc<Semaphore>,
 }
@@ -35,16 +70,14 @@ struct Control {
 /// graph state is consulted. Native/file work is serialized outside the async reactor.
 /// Call from a Tokio runtime; startup inventory is initialized without client requests.
 pub fn router(manager: DriverManager) -> Router {
-    router_with_access(manager, Arc::new(|| false))
+    router_with_access(manager, Arc::new(|_| false))
 }
 
 /// Applies publisher-provided paid access at the actual mutation boundary.
 /// Free geometry, activation and basic loopback never require a paid credential.
-/// The provider runs on a blocking control worker, never an audio callback.
-pub fn router_with_access(
-    manager: DriverManager,
-    paid_access: Arc<dyn Fn() -> bool + Send + Sync>,
-) -> Router {
+/// The provider runs on a blocking control worker, never an audio callback. Serve with
+/// `into_make_service_with_connect_info::<Peer>()` so it sees each request's peer.
+pub fn router_with_access(manager: DriverManager, paid_access: PaidAccess) -> Router {
     let state = Control {
         manager: Arc::new(Mutex::new(manager)),
         paid_access,
@@ -123,19 +156,24 @@ async fn latency(
     .map_err(|error| ApiError(DriverError::Backend(error.to_string())))?
 }
 
-async fn snapshot(State(control): State<Control>) -> Result<Json<DriverSnapshot>, ApiError> {
-    operate(control, None).await.map(Json)
+async fn snapshot(
+    State(control): State<Control>,
+    access: AccessRequest,
+) -> Result<Json<DriverSnapshot>, ApiError> {
+    operate(control, access, None).await.map(Json)
 }
 
 async fn mutate(
     State(control): State<Control>,
+    access: AccessRequest,
     Json(command): Json<DriverCommand>,
 ) -> Result<Json<DriverSnapshot>, ApiError> {
-    operate(control, Some(command)).await.map(Json)
+    operate(control, access, Some(command)).await.map(Json)
 }
 
 async fn operate(
     control: Control,
+    access: AccessRequest,
     command: Option<DriverCommand>,
 ) -> Result<DriverSnapshot, ApiError> {
     let permit = control
@@ -149,7 +187,7 @@ async fn operate(
         })?;
     tokio::task::spawn_blocking(move || {
         let mut manager = control.manager.lock();
-        let paid = (control.paid_access)();
+        let paid = (control.paid_access)(&access);
         let result = match command {
             Some(command) => {
                 let current = manager.snapshot()?;
