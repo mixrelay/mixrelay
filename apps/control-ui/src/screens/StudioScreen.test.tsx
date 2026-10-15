@@ -305,25 +305,29 @@ it.each([
   },
 );
 
-it('toggles the sidebar from one fixed header button without changing the graph or header', async () => {
+it('toggles the sidebar from one edge tab without changing the graph or header', async () => {
   const controlPort = port(1);
   const mutate = vi.spyOn(controlPort, 'mutateGraphCatalog');
   render(view(controlPort));
   await screen.findByRole('button', { name: 'Untitled Graph' });
   const header = screen.getByRole('heading', { name: 'MixRelay' }).closest('header');
   const toggle = screen.getByRole('button', { name: 'Graphs' });
-  expect(header).toContainElement(toggle);
+  expect(header).not.toContainElement(toggle);
   expect(toggle).toHaveAttribute('aria-controls', 'graph-sidebar');
   expect(toggle).toHaveAttribute('aria-expanded', 'true');
   expect(toggle.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
   fireEvent.click(toggle);
-  // The same element stays in the header; only its state and the list change.
+  // The same tab persists; only its state and the list change.
   expect(screen.getByRole('button', { name: 'Graphs' })).toBe(toggle);
   expect(toggle).toHaveAttribute('aria-expanded', 'false');
   expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument();
   fireEvent.click(toggle);
-  expect(screen.getByRole('navigation', { name: 'Graphs' })).toBeVisible();
+  const list = screen.getByRole('navigation', { name: 'Graphs' });
+  expect(list).toBeVisible();
   expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  // DOM order puts the opened list directly after the tab for forward Tab.
+  const graph = screen.getByRole('button', { name: 'Untitled Graph' });
+  expect(toggle.compareDocumentPosition(graph) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(mutate).not.toHaveBeenCalled();
 });
 

@@ -10,7 +10,6 @@ import { IconActionButton } from './IconActionButton';
 import { NodeOptionsSection } from './NodeOptionsSection';
 import { NodeMuteButton, NodePowerButton } from './NodeSignalControls';
 import { PathField } from './PathField';
-import { SidebarToggle } from './SidebarToggle';
 import { StateButton } from './StateButton';
 import { TextField } from './TextField';
 import { ThemePicker } from './ThemePicker';
@@ -24,12 +23,6 @@ function IconActions({ disabled, onAction }: { disabled: boolean; onAction: () =
         <IconActionButton label={t('studio.newGraph')} disabled={disabled} onClick={onAction}>
           +
         </IconActionButton>
-        <SidebarToggle
-          label={t('studio.graphs')}
-          opened
-          controls="audit-graphs"
-          onToggle={onAction}
-        />
         <NodePowerButton
           enabled
           disabled={disabled}

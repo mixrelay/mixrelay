@@ -275,20 +275,19 @@ function StudioFrame({
   return (
     <main ref={shell} className={styles.shell} data-sidebar-open={sidebarOpen}>
       <header className={styles.applicationHeader}>
-        <span className={styles.applicationLead}>
-          <ProductHeading />
-          <SidebarToggle
-            label={t('studio.graphs')}
-            opened={sidebarOpen}
-            controls="graph-sidebar"
-            onToggle={() => setSidebarOpen((open) => !open)}
-          />
-        </span>
+        <ProductHeading />
         <span className={styles.applicationActions}>
           <ThemePicker />
           {applicationActions}
         </span>
       </header>
+      {/* Before the list in DOM order: opening it makes the list the next Tab stop. */}
+      <SidebarToggle
+        label={t('studio.graphs')}
+        opened={sidebarOpen}
+        controls="graph-sidebar"
+        onToggle={() => setSidebarOpen((open) => !open)}
+      />
       <GraphSidebar
         hidden={!sidebarOpen}
         {...sidebar}

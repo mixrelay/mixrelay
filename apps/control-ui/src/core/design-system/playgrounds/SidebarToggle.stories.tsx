@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import type React from 'react';
 import { fn } from 'storybook/test';
 import { SidebarToggle } from '../../ui/SidebarToggle';
 import { Text } from '../../ui/Text';
@@ -44,9 +45,24 @@ const meta = {
       <fieldset
         aria-label="Playground 예제"
         onBlur={commit}
-        style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}
+        style={
+          {
+            // The shell that places the sidebar provides its width and the positioning box.
+            '--layout-sidebar-width': '160px',
+            position: 'relative',
+            height: 200,
+            border: 0,
+            padding: 0,
+            margin: 0,
+            minWidth: 0,
+          } as React.CSSProperties
+        }
       >
-        <div id="sample-sidebar" hidden={!local.opened}>
+        <div
+          id="sample-sidebar"
+          hidden={!local.opened}
+          style={{ width: 160, height: '100%', borderRight: '1px solid var(--border-default)' }}
+        >
           <Text>그래프 목록 표본</Text>
         </div>
         <SidebarToggle
