@@ -1,8 +1,12 @@
 #!/bin/zsh
 set -euo pipefail
 
-if (( $# != 0 )); then
-  print -u2 "usage: $0"
+# --prebuilt merges and signs slices an earlier combined cargo build produced.
+prebuilt=0
+if (( $# == 1 )) && [[ "$1" == "--prebuilt" ]]; then
+  prebuilt=1
+elif (( $# != 0 )); then
+  print -u2 "usage: $0 [--prebuilt]"
   exit 2
 fi
 
@@ -65,16 +69,21 @@ export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER="$compiler"
 export CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER="$compiler"
 
 cd "$repo_root"
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
+# Cargo uses every core unless the caller sets an explicit job count.
+if [[ -z "${CARGO_BUILD_JOBS:-}" ]]; then
+  unset CARGO_BUILD_JOBS
+fi
 
-for target in aarch64-apple-darwin x86_64-apple-darwin; do
-  cargo build \
-    --locked \
-    --release \
-    -p mixrelay-engine-service \
-    --target "$target" \
-    --target-dir "$target_dir"
-done
+if (( ! prebuilt )); then
+  for target in aarch64-apple-darwin x86_64-apple-darwin; do
+    cargo build \
+      --locked \
+      --release \
+      -p mixrelay-engine-service \
+      --target "$target" \
+      --target-dir "$target_dir"
+  done
+fi
 
 universal_release_dir="$target_dir/universal-apple-darwin/release"
 universal_binary="$universal_release_dir/mixrelay-engine-service"

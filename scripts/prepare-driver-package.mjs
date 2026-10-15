@@ -4,9 +4,13 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs, resolveTarget, REPO_ROOT } from './prepare-desktop-engine.mjs';
 
-/** Build the actual Driver service and prepare the matching package receipt. */
+/**
+ * Build the actual Driver service and prepare the matching package receipt.
+ * `--prebuilt` uses slices from an earlier combined cargo build and only merges and signs.
+ */
 export function prepareDriverPackage({ args = [], env = process.env, rootDir = REPO_ROOT, fsApi = fs, run = spawnSync } = {}) {
-  const parsed = parseArgs(args);
+  const prebuilt = args.includes('--prebuilt');
+  const parsed = parseArgs(args.filter(arg => arg !== '--prebuilt'));
   if (parsed.help) return { status: 'help' };
   const { target, platform } = resolveTarget({ requestedTarget: parsed.target, env, rootDir, run });
   if (platform === 'linux' && !/^(?:aarch64|x86_64)-.*linux/.test(target)) {
@@ -25,6 +29,11 @@ export function prepareDriverPackage({ args = [], env = process.env, rootDir = R
     if (result.error || result.status !== 0 || result.signal) throw new Error(`Driver build failed: ${command}`);
   };
   for (const slice of slices) {
+    if (prebuilt) {
+      const sliceOutput = join(targetRoot, slice, profile, binary);
+      if (!fsApi.existsSync(sliceOutput)) throw new Error(`Prebuilt Driver service is missing: ${sliceOutput}`);
+      continue;
+    }
     const cargoArgs = ['build', '--locked', '--package', binary, '--target', slice];
     if (profile === 'release') cargoArgs.push('--release');
     checked('cargo', cargoArgs);
@@ -67,7 +76,7 @@ export function prepareDriverPackage({ args = [], env = process.env, rootDir = R
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {
     const result = prepareDriverPackage({ args: process.argv.slice(2) });
-    console.log(result.status === 'help' ? 'Usage: node scripts/prepare-driver-package.mjs [--profile dev|release] [--target TARGET]' : `Prepared Driver service ${result.output}`);
+    console.log(result.status === 'help' ? 'Usage: node scripts/prepare-driver-package.mjs [--profile dev|release] [--target TARGET] [--prebuilt]' : `Prepared Driver service ${result.output}`);
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

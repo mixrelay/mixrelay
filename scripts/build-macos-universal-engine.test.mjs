@@ -60,7 +60,7 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
-printf '%s|%s|%s\\n' "$target" "$target_dir" "$CARGO_BUILD_JOBS" >> "$FAKE_CARGO_LOG"
+printf '%s|%s|%s\\n' "$target" "$target_dir" "\${CARGO_BUILD_JOBS:-}" >> "$FAKE_CARGO_LOG"
 if [ "\${FAKE_CARGO_FAIL_TARGET:-}" = "$target" ]; then
   exit 31
 fi
@@ -208,8 +208,9 @@ test("builds both slices, signs the lipo output, and cleans its temporary direct
   assert.equal(readFileSync(output, "utf8"), "archs=arm64 x86_64\n");
   assert.equal(lstatSync(output).mode & 0o111, 0o111);
   assert.deepEqual(cargoCalls(paths), [
-    ["aarch64-apple-darwin", join(paths.root, "target"), "1"],
-    ["x86_64-apple-darwin", join(paths.root, "target"), "1"],
+    // No job limit by default: cargo builds with every core.
+    ["aarch64-apple-darwin", join(paths.root, "target"), ""],
+    ["x86_64-apple-darwin", join(paths.root, "target"), ""],
   ]);
   const codesignCalls = readFileSync(paths.logs.codesign, "utf8").trim().split("\n").filter(Boolean);
   assert.equal(codesignCalls.length, 3);
@@ -258,6 +259,18 @@ test("rejects malformed and non-Developer-ID signing identities before invoking 
     assert.equal(readFileSync(paths.logs.codesign, "utf8"), "");
     assertFailurePreserved(paths, previous);
   }
+});
+
+test("--prebuilt merges and signs existing slices without running cargo", t => {
+  const paths = fixture(t);
+  const built = runScript(paths);
+  assert.equal(built.status, 0, built.stderr);
+  writeFileSync(paths.logs.cargo, "");
+  const result = runScript(paths, ["--prebuilt"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(cargoCalls(paths), []);
+  assert.equal(existsSync(universalBinary(paths)), true);
+  assert.notEqual(runScript(paths, ["--prebuilt", "extra"]).status, 0);
 });
 
 test("honors CARGO_TARGET_DIR and an explicit CARGO_BUILD_JOBS override", t => {

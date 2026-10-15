@@ -36,7 +36,10 @@ if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
   print -u2 "Unset CARGO_TARGET_DIR for the checked universal app build"
   exit 1
 fi
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
+# Cargo uses every core unless the caller sets an explicit job count.
+if [[ -z "${CARGO_BUILD_JOBS:-}" ]]; then
+  unset CARGO_BUILD_JOBS
+fi
 
 if [[ -z "${DEVELOPER_DIR:-}" ]]; then
   selected_developer_dir="$(xcode-select -p 2>/dev/null || true)"
@@ -170,13 +173,43 @@ fi
 
 cd "$repo_root"
 build_started=1
+
+# Each step reports its duration so slow phases are visible in the release log.
+step_name=""
+step_started=0
+step() {
+  finish_step
+  step_name="$1"
+  step_started=$SECONDS
+  print "==> $step_name"
+}
+finish_step() {
+  if [[ -n "$step_name" ]]; then
+    print "==> $step_name: $((SECONDS - step_started))s"
+  fi
+  step_name=""
+}
+
 if true; then
+  # The editor UI and icons are compiled into the desktop binary, so they come first.
+  step "Editor UI and icons"
+  pnpm desktop:icons
+  pnpm --dir apps/control-ui build
+
+  # One cargo build per architecture compiles every release binary together, so
+  # shared crates are compiled once per architecture instead of once per product.
+  # Later steps only merge architectures, sign and bundle; they do not run cargo.
   for target in aarch64-apple-darwin x86_64-apple-darwin; do
-    cargo build -p mixrelay-macos-installer --release --target "$target" \
-      --bin mixrelay-macos-installer \
-      --bin mixrelay-macos-payload-check \
-      --bin mixrelay-driver-uninstaller
+    step "Compile release binaries ($target)"
+    cargo build --locked --release --target "$target" \
+      -p mixrelay-macos-installer \
+      -p mixrelay-engine-service \
+      -p mixrelay-driver-service \
+      -p mixrelay-desktop \
+      --bins --features mixrelay-desktop/custom-protocol
   done
+
+  step "Universal helpers"
   helper_output="$repo_root/target/universal-apple-darwin/release"
   mkdir -p "$helper_output"
   for helper in mixrelay-macos-installer mixrelay-macos-payload-check mixrelay-driver-uninstaller; do
@@ -195,10 +228,21 @@ if true; then
     codesign --verify --strict --all-architectures "$helper_output/$helper"
   done
   # One bundle supplies both the editor and its internal background role.
+  step "Universal launcher, engine and Driver service"
   zsh "$repo_root/scripts/build-macos-driver-launcher.sh"
-  zsh "$repo_root/scripts/build-macos-universal-engine.sh"
-  pnpm --filter @mixrelay/desktop tauri build \
-    --bundles app --target universal-apple-darwin
+  zsh "$repo_root/scripts/build-macos-universal-engine.sh" --prebuilt
+  pnpm desktop:prepare-driver --profile release --prebuilt
+
+  step "Universal app bundle"
+  desktop_universal="$repo_root/target/universal-apple-darwin/release/mixrelay-desktop"
+  reject_symlink_components "$desktop_universal"
+  xcrun lipo -create \
+    "$repo_root/target/aarch64-apple-darwin/release/mixrelay-desktop" \
+    "$repo_root/target/x86_64-apple-darwin/release/mixrelay-desktop" \
+    -output "$desktop_universal"
+  pnpm --filter @mixrelay/desktop tauri bundle \
+    --bundles app --target universal-apple-darwin --features custom-protocol
+  finish_step
 fi
 
 if [[ -L "$app_bundle" || ! -d "$app_bundle" ]]; then

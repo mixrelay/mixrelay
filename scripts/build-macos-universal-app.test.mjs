@@ -57,7 +57,7 @@ mkdir -p target/universal-apple-darwin/release
 printf 'MACHO universal SIGNED\\n' > target/universal-apple-darwin/release/mixrelay-driver-launcher
 `);
   executable(join(scripts, "build-macos-universal-engine.sh"), `#!/bin/sh
-printf 'engine built\\n' >> "$MOCK_LOG"
+printf 'engine built %s\\n' "$*" >> "$MOCK_LOG"
 [ "\${MOCK_ENGINE_FAIL:-}" != 1 ]
 `);
   writeFileSync(join(scripts,"build-macos-removal-app.mjs"), `import * as fs from 'node:fs'; import {join} from 'node:path'; const [, , executable,helper,output]=process.argv; fs.mkdirSync(join(output,'Contents'),{recursive:true}); fs.writeFileSync(join(output,'Contents/tested-arguments'),executable+'\\n'+helper);`);
@@ -84,6 +84,7 @@ if [ "$1" = "--sdk" ] && [ "$3" = "--find" ]; then
 fi
 if [ "$1" = "lipo" ]; then
   if [ "$2" = "-create" ]; then
+    printf 'lipo %s\\n' "$*" >> "$MOCK_LOG"
     source="$3"
     output=""
     while [ "$#" -gt 0 ]; do
@@ -113,6 +114,10 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 mkdir -p "target/$target/release"
+for product in mixrelay-engine-service mixrelay-driver-service; do
+  printf '%s\\n' 'MACHO universal' > "target/$target/release/$product"
+done
+printf 'MACHO universal desktop %s\\n' "$target" > "target/$target/release/mixrelay-desktop"
 for helper in mixrelay-macos-installer mixrelay-macos-payload-check mixrelay-driver-uninstaller; do
   if [ "\${MOCK_HELPER_SINGLE:-}" = 1 ]; then
     printf '%s\\n' 'MACHO SINGLE' > "target/$target/release/$helper"
@@ -148,13 +153,21 @@ fi
 printf 'pnpm %s\\n' "$*" >> "$MOCK_LOG"
 printf 'APPLE_SIGNING_IDENTITY=%s\\n' "\${APPLE_SIGNING_IDENTITY:-}" >> "$MOCK_LOG"
 printf 'MIXRELAY_CODESIGN_IDENTITY=%s\\n' "\${MIXRELAY_CODESIGN_IDENTITY:-}" >> "$MOCK_LOG"
+# Only the Tauri bundle step produces the app; UI, icon and Driver steps only log.
+case "$*" in
+  *"tauri bundle"*) ;;
+  *"desktop:prepare-driver"*) [ "\${MOCK_PREPARE_DRIVER_FAIL:-}" != 1 ]; exit $? ;;
+  *) exit 0 ;;
+esac
+# Tauri bundles the staged Universal desktop binary rather than compiling one.
+[ -f target/universal-apple-darwin/release/mixrelay-desktop ] || exit 3
 if [ "\${MOCK_PNPM_MODE:-universal}" = missing ]; then exit 0; fi
 mkdir -p "$MOCK_APP/Contents/MacOS"
 printf '%s\\n' '{"CFBundleShortVersionString":"1.2.3"}' > "$MOCK_APP/Contents/Info.plist"
 if [ "\${MOCK_PNPM_MODE:-universal}" = single ]; then
   printf '%s\\n' 'MACHO SINGLE' > "$MOCK_APP/Contents/MacOS/MixRelay"
 else
-  printf '%s\\n' 'MACHO universal' > "$MOCK_APP/Contents/MacOS/MixRelay"
+  cp target/universal-apple-darwin/release/mixrelay-desktop "$MOCK_APP/Contents/MacOS/MixRelay"
 fi
 if [ "\${MOCK_PNPM_MODE:-universal}" = nested ]; then
   mkdir -p "$MOCK_APP/Contents/Frameworks"
@@ -233,9 +246,9 @@ test("maps explicit identity before Tauri and does not force-resign valid output
   const paths = fixture(t);
   const result = runBuild(paths, { MIXRELAY_CODESIGN_IDENTITY: "Developer ID Application: MixRelay (AB12C3D4E5)" });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(log(paths), /--target universal-apple-darwin/);
-  assert.ok(log(paths).indexOf("launcher built") < log(paths).indexOf("pnpm "));
-  assert.ok(log(paths).indexOf("engine built") < log(paths).indexOf("pnpm "));
+  assert.match(log(paths), /tauri bundle --bundles app --target universal-apple-darwin --features custom-protocol/);
+  assert.ok(log(paths).indexOf("launcher built") < log(paths).indexOf("tauri bundle"));
+  assert.ok(log(paths).indexOf("engine built --prebuilt") < log(paths).indexOf("tauri bundle"));
   assert.match(log(paths), /APPLE_SIGNING_IDENTITY=Developer ID Application: MixRelay/);
   assert.ok(!log(paths).split("\n").some(line => line.startsWith("codesign --force") && line.endsWith("/MixRelay.app")));
   assert.equal(readFileSync(paths.unrelated, "utf8"), "preserve me\n");
@@ -259,11 +272,25 @@ test("complete product builds helpers and engine with one public app and remover
   assert.doesNotMatch(log(paths), /tauri\.driver\.conf\.json/);
   assert.ok(existsSync(paths.app));
   const commands = log(paths);
+  // One cargo build per architecture compiles every release binary; nothing later runs cargo.
   const cargoBuilds = commands.split("\n").filter(line => line.startsWith("cargo "));
   assert.equal(cargoBuilds.length, 2);
-  assert.match(cargoBuilds[0], /--release --target aarch64-apple-darwin --bin mixrelay-macos-installer --bin mixrelay-macos-payload-check --bin mixrelay-driver-uninstaller$/);
-  assert.match(cargoBuilds[1], /--release --target x86_64-apple-darwin --bin mixrelay-macos-installer --bin mixrelay-macos-payload-check --bin mixrelay-driver-uninstaller$/);
-  assert.ok(commands.indexOf(cargoBuilds[1]) < commands.indexOf("pnpm "));
+  for (const [index, target] of ["aarch64-apple-darwin", "x86_64-apple-darwin"].entries())
+    assert.equal(
+      cargoBuilds[index],
+      `cargo build --locked --release --target ${target} -p mixrelay-macos-installer -p mixrelay-engine-service -p mixrelay-driver-service -p mixrelay-desktop --bins --features mixrelay-desktop/custom-protocol`,
+    );
+  // The UI and icons are compiled into the desktop binary, so they precede cargo.
+  assert.ok(commands.indexOf("pnpm desktop:icons") < commands.indexOf(cargoBuilds[0]));
+  assert.ok(commands.indexOf("pnpm --dir apps/control-ui build") < commands.indexOf(cargoBuilds[0]));
+  assert.ok(commands.indexOf(cargoBuilds[1]) < commands.indexOf("pnpm desktop:prepare-driver --profile release --prebuilt"));
+  assert.ok(commands.indexOf("pnpm desktop:prepare-driver") < commands.indexOf("tauri bundle"));
+  const desktopLipo = commands.split("\n").find(line => line.startsWith("lipo ") && line.endsWith("/universal-apple-darwin/release/mixrelay-desktop"));
+  assert.ok(desktopLipo, "the desktop binary is merged before bundling");
+  assert.match(desktopLipo, /\/aarch64-apple-darwin\/release\/mixrelay-desktop .*\/x86_64-apple-darwin\/release\/mixrelay-desktop -output /);
+  assert.ok(commands.indexOf(desktopLipo) < commands.indexOf("tauri bundle"));
+  // The bundle carries the staged desktop binary (the mock lipo keeps its first slice).
+  assert.equal(readFileSync(join(paths.app, "Contents/MacOS/MixRelay"), "utf8"), "MACHO universal desktop aarch64-apple-darwin\n");
   assert.equal(existsSync(join(paths.app, "Contents/Helpers/Uninstall MixRelay.app")), false);
   assert.ok(existsSync(join(dirname(paths.app),"Uninstall MixRelay.app")));
   assert.doesNotMatch(commands, /removal-packages|build-macos-removal-pkgs/);
@@ -295,7 +322,7 @@ test("Driver product rejects single-architecture helper output and restores its 
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Driver helper must contain exactly arm64 and x86_64/);
   assertPreserved(paths);
-  assert.doesNotMatch(log(paths), /^pnpm /m);
+  assert.doesNotMatch(log(paths), /tauri bundle/);
 });
 
 test("rejects nested unsigned output and restores the old app", (t) => {
@@ -322,6 +349,17 @@ test("fails on a single-architecture output and restores the old app", (t) => {
   assert.notEqual(result.status, 0);
   assertPreserved(paths);
 });
+
+for (const [step, env] of [["engine merge", { MOCK_ENGINE_FAIL: "1" }], ["Driver preparation", { MOCK_PREPARE_DRIVER_FAIL: "1" }]]) {
+  test(`stops before bundling and restores the old app when ${step} fails`, (t) => {
+    const paths = fixture(t);
+    createApp(paths.app, { architecture: "old", signed: true });
+    const result = runBuild(paths, env);
+    assert.notEqual(result.status, 0);
+    assertPreserved(paths);
+    assert.doesNotMatch(log(paths), /tauri bundle/);
+  });
+}
 
 test("restores the old app when a validation tool is missing", (t) => {
   const paths = fixture(t);
