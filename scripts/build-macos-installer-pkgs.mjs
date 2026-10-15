@@ -628,15 +628,22 @@ export function distribution(packageFilename, version) {
 `;
 }
 
-function assertEmptyOutput(fs, output) {
+/**
+ * Checks a package output path without creating it, so a release can reject it
+ * before compiling anything rather than after every artifact is signed.
+ */
+export function checkPackageOutput(output, fs = fsApi) {
+  assertAbsolute("--output", output);
   assertNoSymlinkComponents(fs, "--output", output, true);
-  if (!fs.existsSync(output)) {
-    fs.mkdirSync(output, { recursive: true, mode: 0o755 });
-    return;
-  }
+  if (!fs.existsSync(output)) return;
   const metadata = fs.lstatSync(output);
   if (metadata.isSymbolicLink() || !metadata.isDirectory()) throw new Error(`--output must be a non-symlink directory: ${output}`);
   if (fs.readdirSync(output).length !== 0) throw new Error(`--output directory must be empty: ${output}`);
+}
+
+function assertEmptyOutput(fs, output) {
+  checkPackageOutput(output, fs);
+  if (!fs.existsSync(output)) fs.mkdirSync(output, { recursive: true, mode: 0o755 });
 }
 
 function buildInstaller({ fs, run, work, packageRoot, stagingId, paths, installerCli, teamId, version, signingIdentity }) {

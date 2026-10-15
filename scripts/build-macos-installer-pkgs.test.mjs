@@ -6,7 +6,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { buildPackages, fixedComponentBundlePolicy, parseArgs } from "./build-macos-installer-pkgs.mjs";
+import { buildPackages, checkPackageOutput, fixedComponentBundlePolicy, parseArgs } from "./build-macos-installer-pkgs.mjs";
 
 const TEAM = "AB12C3D4E5";
 const IDENTITY = `Developer ID Installer: MixRelay Release (${TEAM})`;
@@ -1023,4 +1023,25 @@ test("native pkgbuild expands fixed-path bundles without relocation or version-s
     "io.mixrelay.driver.uninstaller",
   ]);
 
+});
+
+test("an output path is checked without creating it, before any release work", (t) => {
+  const fixtureRoot = fileURLToPath(new URL("../target/test-artifacts/", import.meta.url));
+  mkdirSync(fixtureRoot, { recursive: true });
+  const root = mkdtempSync(join(fixtureRoot, "mixrelay-release-output-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const missing = join(root, "missing/output");
+  checkPackageOutput(missing);
+  assert.equal(fs.existsSync(missing), false);
+  const real = join(root, "real");
+  mkdirSync(real);
+  checkPackageOutput(real);
+  // A path through a symlink, such as /tmp on macOS, fails here and not after signing.
+  const alias = join(root, "alias");
+  symlinkSync(real, alias);
+  assert.throws(() => checkPackageOutput(join(alias, "output")), /--output path must not contain symlinks/);
+  assert.throws(() => checkPackageOutput(alias), /--output path must not contain symlinks/);
+  writeFileSync(join(real, "left-over"), "");
+  assert.throws(() => checkPackageOutput(real), /--output directory must be empty/);
+  assert.throws(() => checkPackageOutput("relative/output"), /absolute/);
 });

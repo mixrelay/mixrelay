@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { checkVersion } from './product-version.mjs';
 import { checkMacosSigning, withMacosSigning } from './macos-signing.mjs';
 import { preparePayload } from './prepare-macos-release-payload.mjs';
-import { buildPackages } from './build-macos-installer-pkgs.mjs';
+import { buildPackages, checkPackageOutput } from './build-macos-installer-pkgs.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 function run(program, args, env) {
@@ -22,7 +22,8 @@ try {
     if (process.platform !== 'darwin' || !values.output) throw new Error('macOS and --output are required');
     const version = checkVersion();
     const output = resolve(values.output);
-    if (existsSync(output) && readdirSync(output).length) throw new Error('Output directory must be empty');
+    // The PKG step's output rules apply before any compile or signing work starts.
+    checkPackageOutput(output);
     checkMacosSigning();
     withMacosSigning((signingEnvironment) => {
     let application = signingEnvironment.APPLE_SIGNING_IDENTITY;
