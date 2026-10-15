@@ -17,7 +17,6 @@ use tokio::net::UnixStream;
 
 mod dispatch;
 mod link;
-pub(crate) mod menu;
 pub(crate) mod startup;
 pub(crate) use dispatch::{dispatch, is_service_command};
 
@@ -395,7 +394,7 @@ pub(crate) fn restore_driver(app: &tauri::AppHandle) {
         };
         match result {
             Ok(Some(snapshot)) => {
-                if let Some(menu) = app.try_state::<crate::driver_manager::DriverMenu>() {
+                if let Some(menu) = app.try_state::<crate::status_menu::StatusMenu>() {
                     menu.observe_snapshot(&snapshot);
                 }
             }

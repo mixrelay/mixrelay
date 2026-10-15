@@ -285,7 +285,7 @@ pub(crate) async fn control_get_status(
         let captures = app.state::<Arc<ApplicationCaptureState>>();
         application_capture::power_status(&client, captures.inner(), response).await?
     };
-    if let Some(menu) = app.try_state::<crate::driver_manager::DriverMenu>() {
+    if let Some(menu) = app.try_state::<crate::status_menu::StatusMenu>() {
         menu.observe_audio_session_buffers(if response.is_success() {
             serde_json::from_value(response.body["audioSession"].clone()).ok()
         } else {

@@ -83,7 +83,7 @@ impl EngineLifecycle {
             return;
         }
         self.driver_start_cancelled.store(true, Ordering::Release);
-        app.state::<crate::driver_manager::DriverMenu>()
+        app.state::<crate::status_menu::StatusMenu>()
             .set_runtime_stopping(true);
         app.state::<crate::control_proxy::ControlProxyClient>()
             .close_admission();
@@ -106,19 +106,9 @@ impl EngineLifecycle {
                     app.exit(0);
                 }
                 Err(error) => {
-                    crate::background::menu::shutdown_failed(&app);
                     app.state::<Self>().quitting.store(false, Ordering::Release);
                     tracing::error!(%error, "audio server exit is not confirmed");
-                    let _ = crate::app_menu::show_main_window(&app);
-                    rfd::AsyncMessageDialog::new()
-                        .set_title("MixRelay")
-                        .set_description(&error)
-                        .set_level(rfd::MessageLevel::Error)
-                        .set_buttons(rfd::MessageButtons::OkCustom(
-                            text(current_locale(), Text::Ok).into(),
-                        ))
-                        .show()
-                        .await;
+                    crate::status_menu::shutdown_failed(&app).await;
                 }
             }
         });
@@ -261,7 +251,7 @@ async fn finish_local_controls(app: &tauri::AppHandle) -> Result<Option<String>,
     // outlives both the controller and the graph engine.
     let lifecycle = app.state::<EngineLifecycle>();
     let _transition = lifecycle.driver_transition.lock().await;
-    crate::driver_manager::stop_driver(app).await?;
+    crate::status_menu::stop_driver(app).await?;
     app.state::<EngineLifecycle>()
         .owner
         .lock()

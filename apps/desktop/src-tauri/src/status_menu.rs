@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Mutex, time::Duration};
 use mixrelay_driver_control::DriverSnapshot;
 use tauri::{
     Manager,
-    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
@@ -24,21 +24,12 @@ enum UpdateResult {
     DownloadFailed,
 }
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-enum QuitState {
-    #[default]
-    Idle,
-    Stopping,
-    Stopped,
-}
-
 #[derive(Default)]
 struct MenuState {
     locale: String,
     snapshot: Option<DriverSnapshot>,
     busy: bool,
-    quit_state: QuitState,
-    startup_cancelled: bool,
+    stopping: bool,
     error: Option<String>,
     update_result: Option<UpdateResult>,
     updates_busy: bool,
@@ -50,14 +41,12 @@ struct MenuState {
     audio_change: Option<bool>,
 }
 
-/// Native free Driver controls, independent of graph and loopback process ownership.
-pub(crate) struct DriverMenu {
+/// The runtime's status menu: free device settings, the editor, pause and quit.
+pub(crate) struct StatusMenu {
     app: tauri::AppHandle,
     state: Mutex<MenuState>,
-    lifecycle: tokio::sync::Mutex<()>,
     status: MenuItem<tauri::Wry>,
     tray: Menu<tauri::Wry>,
-    application: Submenu<tauri::Wry>,
     updates: MenuItem<tauri::Wry>,
     diagnostics: MenuItem<tauri::Wry>,
     open_editor: MenuItem<tauri::Wry>,
@@ -65,7 +54,7 @@ pub(crate) struct DriverMenu {
     quit: MenuItem<tauri::Wry>,
 }
 
-impl DriverMenu {
+impl StatusMenu {
     pub(crate) fn refresh_diagnostics(&self) {
         let _ = self.refresh_menu();
     }
@@ -103,15 +92,15 @@ impl DriverMenu {
             let _ = self.refresh_menu();
         }
     }
-    pub(crate) fn set_runtime_stopping(&self, stopping: bool) {
-        if let Ok(mut state) = self.state.lock() {
-            state.quit_state = if stopping {
-                QuitState::Stopping
-            } else {
-                QuitState::Idle
-            };
-        }
+    /// Marks the runtime as stopping; `false` when a stop was already in progress.
+    pub(crate) fn set_runtime_stopping(&self, stopping: bool) -> bool {
+        let changed = self.state.lock().is_ok_and(|mut state| {
+            let changed = state.stopping != stopping;
+            state.stopping = stopping;
+            changed
+        });
         let _ = self.refresh_menu();
+        changed
     }
 
     /// Relabels native controls and their current values for the selected UI locale.
@@ -137,20 +126,20 @@ impl DriverMenu {
     fn refresh_menu(&self) -> tauri::Result<()> {
         let app = self.app.clone();
         let result = self.app.run_on_main_thread(move || {
-            let menu = app.state::<DriverMenu>();
+            let menu = app.state::<StatusMenu>();
             if let Err(error) = menu.render() {
-                tracing::error!(%error, "Driver menu could not be refreshed");
+                tracing::error!(%error, "status menu could not be refreshed");
             }
         });
         if let Err(error) = &result {
-            tracing::error!(%error, "Driver menu refresh could not be scheduled");
+            tracing::error!(%error, "status menu refresh could not be scheduled");
         }
         result
     }
 
     fn render(&self) -> tauri::Result<()> {
         let Ok(mut state) = self.state.lock() else {
-            tracing::error!("Driver menu state lock is unavailable");
+            tracing::error!("status menu state lock is unavailable");
             return Ok(());
         };
         let text = labels(&state.locale);
@@ -162,196 +151,57 @@ impl DriverMenu {
         self.diagnostics
             .set_enabled(!crate::diagnostics::is_exporting())?;
         self.quit.set_text(text.quit)?;
-        self.quit
-            .set_enabled(state.quit_state != QuitState::Stopping)?;
+        self.quit.set_enabled(!state.stopping)?;
         self.status.set_text(menu::status_text(&state))?;
-        self.open_editor
-            .set_text(crate::background::menu::open_label(&state.locale))?;
+        self.open_editor.set_text(open_label(&state.locale))?;
         state.generation = state.generation.wrapping_add(1);
         state.actions.clear();
         state.buffer_actions.clear();
         for item in self.tray.items()? {
             self.tray.remove(&item)?;
         }
-        for item in self.application.items()? {
-            self.application.remove(&item)?;
-        }
-        self.append(&self.status)?;
-        self.append(&menu::devices_menu(&self.app, &mut state, &text)?)?;
+        self.tray.append(&self.status)?;
+        self.tray
+            .append(&menu::devices_menu(&self.app, &mut state, &text)?)?;
         if crate::background::startup::editor_executable().is_ok() {
-            self.append(&self.open_editor)?;
+            self.tray.append(&self.open_editor)?;
         }
-        let power = playback::power(&self.app, &state);
+        let power = state.audio_power;
         let pending =
             state.audio_change.is_some() || power.is_some_and(|power| power.transitioning);
         self.pause
             .set_text(playback::label(&state.locale, power, pending))?;
-        self.pause.set_enabled(
-            power.is_some() && !pending && !state.busy && state.quit_state == QuitState::Idle,
-        )?;
-        self.append(&self.pause)?;
-        self.append(&PredefinedMenuItem::separator(&self.app)?)?;
-        self.append(&self.updates)?;
+        self.pause
+            .set_enabled(power.is_some() && !pending && !state.busy && !state.stopping)?;
+        self.tray.append(&self.pause)?;
+        self.tray
+            .append(&PredefinedMenuItem::separator(&self.app)?)?;
+        self.tray.append(&self.updates)?;
         if let Some(result) = &state.update_result {
             let item = MenuItem::with_id(
                 &self.app,
-                "driver:download",
+                "status:download",
                 menu::update_result_label(result, &text),
                 matches!(result, UpdateResult::Download { .. }) && !state.updates_busy,
                 None::<&str>,
             )?;
-            self.append(&item)?;
+            self.tray.append(&item)?;
         }
-        self.append(&self.diagnostics)?;
-        self.append(&self.quit)
-    }
-
-    fn append(&self, item: &dyn tauri::menu::IsMenuItem<tauri::Wry>) -> tauri::Result<()> {
-        self.tray.append(item)?;
-        self.application.append(item)
+        self.tray.append(&self.diagnostics)?;
+        self.tray.append(&self.quit)
     }
 }
 
-/// Installs native Driver settings and restores devices stopped by an explicit manager quit.
+/// Installs the runtime's single status icon. Audio lifecycle stays with the runtime.
 pub(crate) fn install(app: &tauri::App) -> tauri::Result<()> {
-    #[cfg(target_os = "macos")]
-    if !tauri::is_dev() {
-        let lease = mixrelay_macos_transport::app_lifecycle::ProcessLease::acquire(
-            "/Library/Application Support/MixRelay/lifecycle/driver-manager.owner",
-        )?;
-        app.manage(lease);
-    }
     let (menu, tray) = create_menu(app)?;
     app.manage(menu);
-    app.state::<DriverMenu>().render()?;
-    app.on_menu_event(|app, event| handle_menu_event(app, &event));
-    install_tray(app, &tray)?;
-    activate_driver(app.handle());
-    start_update_checks(app.handle());
-    handoff_to_controller(app.handle());
-    Ok(())
-}
-
-/// The full runtime retains the same standalone device controls and one status icon.
-/// Its audio lifecycle is already owned by the runtime; no manager handoff is started.
-pub(crate) fn install_runtime(app: &tauri::App) -> tauri::Result<MenuItem<tauri::Wry>> {
-    let (menu, tray) = create_menu(app)?;
-    let quit = menu.quit.clone();
-    app.manage(menu);
-    app.state::<DriverMenu>().render()?;
+    app.state::<StatusMenu>().render()?;
     app.on_menu_event(|app, event| handle_menu_event(app, &event));
     install_tray(app, &tray)?;
     refresh_snapshot(app.handle());
     start_update_checks(app.handle());
-    Ok(quit)
-}
-
-fn activate_driver(app: &tauri::AppHandle) {
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let menu = app.state::<DriverMenu>();
-        let _lifecycle = menu.lifecycle.lock().await;
-        let client = match crate::driver_control::session_client() {
-            Ok(client) => client,
-            Err(error) => {
-                finish_snapshot(&app, Err(error.to_string()));
-                return;
-            }
-        };
-        if let Ok(connection) = crate::background::Connection::for_app(&app)
-            && connection.running().await
-        {
-            return;
-        }
-        // Login/installation can start the manager before the native owner is ready.
-        // The bounded retry is cancelled before a requested stop.
-        for attempt in 0..20 {
-            if menu
-                .state
-                .lock()
-                .map_or(true, |state| state.startup_cancelled)
-            {
-                return;
-            }
-            let result = client.set_active(true).await;
-            let waiting = matches!(&result,
-                Err(mixrelay_driver_control::DriverError::Http(error)) if error.is_connect()
-            ) || matches!(
-                &result,
-                Err(mixrelay_driver_control::DriverError::Remote { status: 503, .. })
-            );
-            if waiting && attempt < 19 {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                continue;
-            }
-            finish_snapshot(&app, result.map_err(|error| error.to_string()));
-            return;
-        }
-    });
-}
-
-/// Every explicit exit waits for acknowledged native stop and saved restart state.
-/// Failed stops leave the manager available for another attempt instead of silently exiting.
-pub(crate) fn exit_requested(app: &tauri::AppHandle, api: &tauri::ExitRequestApi) {
-    if app.try_state::<crate::background::Connection>().is_some() {
-        return;
-    }
-    let menu = app.state::<DriverMenu>();
-    let Ok(mut state) = menu.state.lock() else {
-        api.prevent_exit();
-        return;
-    };
-    if state.quit_state == QuitState::Stopped {
-        return;
-    }
-    api.prevent_exit();
-    if state.quit_state == QuitState::Stopping {
-        return;
-    }
-    state.quit_state = QuitState::Stopping;
-    // A queued startup must not revive devices after either a successful stop
-    // or a failed stop/save followed by dismissal of the retry dialog.
-    state.startup_cancelled = true;
-    state.busy = true;
-    let locale = state.locale.clone();
-    drop(state);
-    let _ = menu.refresh_menu();
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let menu = app.state::<DriverMenu>();
-        let _lifecycle = menu.lifecycle.lock().await;
-        let result = stop_driver(&app).await;
-        let menu = app.state::<DriverMenu>();
-        if let Ok(mut state) = menu.state.lock() {
-            state.quit_state = if result.is_ok() {
-                QuitState::Stopped
-            } else {
-                QuitState::Idle
-            };
-            state.busy = false;
-        }
-        match result {
-            Ok(_) => app.exit(0),
-            Err(error) => {
-                tracing::error!(%error, "Driver did not complete explicit quit");
-                let _ = menu.refresh_menu();
-                let (title, body) = crate::native_text::driver_quit_failed(&locale);
-                rfd::AsyncMessageDialog::new()
-                    .set_title(title)
-                    .set_description(body)
-                    .set_buttons(rfd::MessageButtons::OkCustom(
-                        crate::native_text::dialogs::text(
-                            crate::native_text::resolve_locale(&locale),
-                            crate::native_text::dialogs::Text::Ok,
-                        )
-                        .into(),
-                    ))
-                    .set_level(rfd::MessageLevel::Error)
-                    .show()
-                    .await;
-            }
-        }
-    });
+    Ok(())
 }
 
 pub(crate) async fn stop_driver(app: &tauri::AppHandle) -> Result<DriverSnapshot, String> {
@@ -371,56 +221,47 @@ pub(crate) async fn stop_driver(app: &tauri::AppHandle) -> Result<DriverSnapshot
     result.map_err(|error| error.to_string())
 }
 
-fn create_menu(app: &tauri::App) -> tauri::Result<(DriverMenu, Menu<tauri::Wry>)> {
+fn create_menu(app: &tauri::App) -> tauri::Result<(StatusMenu, Menu<tauri::Wry>)> {
     let text = labels("en");
-    let status = MenuItem::with_id(app, "driver:status", "MixRelay", false, None::<&str>)?;
+    let status = MenuItem::with_id(app, "status:status", "MixRelay", false, None::<&str>)?;
     let updates = MenuItem::with_id(
         app,
-        "driver:updates",
+        "status:updates",
         text.check_updates,
         true,
         None::<&str>,
     )?;
-    let quit = MenuItem::with_id(app, "driver:quit", text.quit, true, Some("CmdOrCtrl+Q"))?;
+    let quit = MenuItem::with_id(app, "status:quit", text.quit, true, Some("CmdOrCtrl+Q"))?;
     let diagnostics = MenuItem::with_id(
         app,
-        "driver:diagnostics",
+        "status:diagnostics",
         crate::diagnostics::label("en"),
         true,
         None::<&str>,
     )?;
     let open_editor = MenuItem::with_id(
         app,
-        "driver:open-editor",
-        crate::background::menu::open_label("en"),
+        "status:open-editor",
+        open_label("en"),
         true,
         None::<&str>,
     )?;
     let pause = MenuItem::with_id(
         app,
-        "driver:pause",
+        "status:pause",
         playback::label("en", None, false),
         false,
         None::<&str>,
     )?;
-    let tray = Menu::with_items(app, &[&status, &updates, &diagnostics, &quit])?;
-    let application = Submenu::with_items(
-        app,
-        "MixRelay",
-        true,
-        &[&status, &updates, &diagnostics, &quit],
-    )?;
-    app.set_menu(Menu::with_items(app, &[&application])?)?;
-    let menu = DriverMenu {
+    let tray = Menu::new(app)?;
+    let menu = StatusMenu {
         app: app.handle().clone(),
         state: Mutex::new(MenuState {
             locale: crate::native_text::current_locale().tag().into(),
             ..MenuState::default()
         }),
-        lifecycle: tokio::sync::Mutex::new(()),
         status,
         tray: tray.clone(),
-        application,
         updates,
         diagnostics,
         open_editor,
@@ -431,7 +272,7 @@ fn create_menu(app: &tauri::App) -> tauri::Result<(DriverMenu, Menu<tauri::Wry>)
 }
 
 fn install_tray(app: &tauri::App, tray: &Menu<tauri::Wry>) -> tauri::Result<()> {
-    TrayIconBuilder::with_id("driver")
+    TrayIconBuilder::with_id("status")
         .icon(tauri::include_image!("tray-icons/64x64.png"))
         .icon_as_template(cfg!(target_os = "macos"))
         .tooltip("MixRelay")
@@ -465,21 +306,16 @@ fn start_update_checks(app: &tauri::AppHandle) {
 
 fn handle_menu_event(app: &tauri::AppHandle, event: &tauri::menu::MenuEvent) {
     match event.id().as_ref() {
-        "driver:quit"
-            if *app.state::<crate::app_mode::AppMode>() == crate::app_mode::AppMode::Service =>
-        {
-            crate::background::menu::stop_all(app);
-        }
-        "driver:quit" => app.exit(0),
-        "driver:open-editor" => crate::background::menu::open_editor(app),
-        "driver:pause" => playback::toggle(app),
-        "driver:updates" => check_updates(app, true),
-        "driver:diagnostics" => crate::diagnostics::export(app),
-        "driver:download" => open_download(app),
-        id if id.starts_with("driver:buffer:") => buffer::select(app, id),
+        "status:quit" => stop_all(app),
+        "status:open-editor" => open_editor(),
+        "status:pause" => playback::toggle(app),
+        "status:updates" => check_updates(app, true),
+        "status:diagnostics" => crate::diagnostics::export(app),
+        "status:download" => open_download(app),
+        id if id.starts_with("status:buffer:") => buffer::select(app, id),
         id => {
             let action = app
-                .state::<DriverMenu>()
+                .state::<StatusMenu>()
                 .state
                 .lock()
                 .ok()
@@ -492,11 +328,11 @@ fn handle_menu_event(app: &tauri::AppHandle, event: &tauri::menu::MenuEvent) {
 }
 
 fn begin_snapshot(app: &tauri::AppHandle) -> bool {
-    let menu = app.state::<DriverMenu>();
+    let menu = app.state::<StatusMenu>();
     let Ok(mut state) = menu.state.lock() else {
         return false;
     };
-    if state.busy || state.audio_change.is_some() || state.quit_state != QuitState::Idle {
+    if state.busy || state.audio_change.is_some() || state.stopping {
         return false;
     }
     state.busy = true;
@@ -521,7 +357,7 @@ fn refresh_snapshot(app: &tauri::AppHandle) {
 }
 
 fn finish_snapshot(app: &tauri::AppHandle, result: Result<DriverSnapshot, String>) {
-    let menu = app.state::<DriverMenu>();
+    let menu = app.state::<StatusMenu>();
     if let Ok(mut state) = menu.state.lock() {
         state.busy = false;
         match result {
@@ -530,7 +366,7 @@ fn finish_snapshot(app: &tauri::AppHandle, result: Result<DriverSnapshot, String
                 state.error = None;
             }
             Err(error) => {
-                tracing::error!(%error, "Driver menu action failed");
+                tracing::error!(%error, "status menu action failed");
                 state.error = Some(error);
             }
         }
@@ -557,7 +393,7 @@ async fn apply_setting(
     let command = match choices::command(&snapshot, &action) {
         Ok(command) => command,
         Err(error) => {
-            if let Ok(mut state) = app.state::<DriverMenu>().state.lock() {
+            if let Ok(mut state) = app.state::<StatusMenu>().state.lock() {
                 state.snapshot = Some(snapshot);
             }
             return Err(error);
@@ -566,7 +402,7 @@ async fn apply_setting(
     let result = crate::driver_control::driver_mutate(app.clone(), command).await;
     if result.is_err()
         && let Ok(snapshot) = crate::driver_control::driver_status(app.clone()).await
-        && let Ok(mut state) = app.state::<DriverMenu>().state.lock()
+        && let Ok(mut state) = app.state::<StatusMenu>().state.lock()
     {
         state.snapshot = Some(snapshot);
     }
@@ -574,7 +410,7 @@ async fn apply_setting(
 }
 
 fn check_updates(app: &tauri::AppHandle, manual: bool) {
-    let menu = app.state::<DriverMenu>();
+    let menu = app.state::<StatusMenu>();
     let Ok(mut state) = menu.state.lock() else {
         return;
     };
@@ -587,7 +423,7 @@ fn check_updates(app: &tauri::AppHandle, manual: bool) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let update = crate::updates::updates_check_driver().await;
-        let menu = app.state::<DriverMenu>();
+        let menu = app.state::<StatusMenu>();
         if let Ok(mut state) = menu.state.lock() {
             state.update_result = menu::update_result(
                 update.state(),
@@ -606,7 +442,7 @@ fn check_updates(app: &tauri::AppHandle, manual: bool) {
 }
 
 fn open_download(app: &tauri::AppHandle) {
-    let menu = app.state::<DriverMenu>();
+    let menu = app.state::<StatusMenu>();
     let Ok(mut state) = menu.state.lock() else {
         return;
     };
@@ -624,9 +460,9 @@ fn open_download(app: &tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let result =
             crate::updates::updates_open_download(crate::updates::Product::MixRelay, url).await;
-        let menu = app.state::<DriverMenu>();
+        let menu = app.state::<StatusMenu>();
         if let Err(error) = &result {
-            tracing::error!(%error, "Driver update download could not be opened");
+            tracing::error!(%error, "update download could not be opened");
         }
         if let Ok(mut state) = menu.state.lock() {
             state.updates_busy = false;
@@ -638,23 +474,71 @@ fn open_download(app: &tauri::AppHandle) {
     });
 }
 
-/// An existing standalone manager relinquishes its icon without stopping devices
-/// after the full controller acknowledges readiness.
-fn handoff_to_controller(app: &tauri::AppHandle) {
-    let app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        loop {
-            if let Ok(connection) = crate::background::Connection::for_app(&app)
-                && connection.running().await
-            {
-                if let Some(tray) = app.tray_by_id("driver") {
-                    let _ = tray.set_visible(false);
-                }
-                app.manage(connection);
-                app.exit(0);
-                return;
-            }
-            tokio::time::sleep(Duration::from_secs(1)).await;
+const OPEN_LABELS: [&str; 11] = [
+    "Open MixRelay",
+    "MixRelay 열기",
+    "MixRelayを開く",
+    "打开 MixRelay",
+    "開啟 MixRelay",
+    "Ouvrir MixRelay",
+    "MixRelay öffnen",
+    "Abrir MixRelay",
+    "Abrir MixRelay",
+    "Apri MixRelay",
+    "Открыть MixRelay",
+];
+
+fn open_label(locale: &str) -> &'static str {
+    OPEN_LABELS[crate::native_text::resolve_locale(locale).index()]
+}
+
+pub(crate) fn open_editor() {
+    tauri::async_runtime::spawn_blocking(|| {
+        let result = crate::background::startup::editor_executable()
+            .and_then(|exe| crate::background::spawn_editor(&exe));
+        if let Err(error) = result {
+            tracing::error!(%error, "could not open MixRelay editor");
         }
     });
+}
+
+/// Quit stops all audio first; native/system termination takes the same serialized stop.
+fn stop_all(app: &tauri::AppHandle) {
+    if !app.state::<StatusMenu>().set_runtime_stopping(true) {
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // EngineLifecycle cancels queued activation and waits for the HAL ACK.
+        app.exit(0);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            match stop_driver(&app).await {
+                Ok(_) => app.exit(0),
+                Err(error) => {
+                    tracing::error!(%error, "MixRelay could not stop all audio");
+                    shutdown_failed(&app).await;
+                }
+            }
+        });
+    }
+}
+
+/// A failed stop keeps the runtime and its Quit available for another attempt.
+pub(crate) async fn shutdown_failed(app: &tauri::AppHandle) {
+    app.state::<StatusMenu>().set_runtime_stopping(false);
+    let locale = crate::native_text::current_locale();
+    let (title, body) = crate::native_text::quit_failed(locale);
+    rfd::AsyncMessageDialog::new()
+        .set_title(title)
+        .set_description(body)
+        .set_buttons(rfd::MessageButtons::OkCustom(
+            crate::native_text::dialogs::text(locale, crate::native_text::dialogs::Text::Ok).into(),
+        ))
+        .set_level(rfd::MessageLevel::Error)
+        .show()
+        .await;
 }

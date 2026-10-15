@@ -149,7 +149,6 @@ printf 'pnpm %s\\n' "$*" >> "$MOCK_LOG"
 printf 'APPLE_SIGNING_IDENTITY=%s\\n' "\${APPLE_SIGNING_IDENTITY:-}" >> "$MOCK_LOG"
 printf 'MIXRELAY_CODESIGN_IDENTITY=%s\\n' "\${MIXRELAY_CODESIGN_IDENTITY:-}" >> "$MOCK_LOG"
 if [ "\${MOCK_PNPM_MODE:-universal}" = missing ]; then exit 0; fi
-case "$*" in *tauri.driver.conf.json*) MOCK_APP="$(dirname "$MOCK_APP")/MixRelayDriver.app" ;; esac
 mkdir -p "$MOCK_APP/Contents/MacOS"
 printf '%s\\n' '{"CFBundleShortVersionString":"1.2.3"}' > "$MOCK_APP/Contents/Info.plist"
 if [ "\${MOCK_PNPM_MODE:-universal}" = single ]; then

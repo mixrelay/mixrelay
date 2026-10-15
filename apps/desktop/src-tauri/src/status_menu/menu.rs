@@ -3,12 +3,12 @@ use mixrelay_driver_control::DriverState;
 use tauri::menu::{CheckMenuItem, Submenu};
 
 use super::{
-    MenuState, QuitState, UpdateResult,
+    MenuState, UpdateResult,
     choices::{self, SettingAction, SettingChoice},
 };
 use crate::updates::UpdateState;
 
-/// Text for the supported native Driver menu languages.
+/// Text for the supported status menu languages.
 #[derive(Clone, Copy)]
 pub(super) struct Labels {
     pub(super) loading: &'static str,
@@ -278,7 +278,7 @@ fn device_menus(
             snapshot.state == DriverState::Ready
                 && !state.busy
                 && state.audio_change.is_none()
-                && state.quit_state != QuitState::Stopping,
+                && !state.stopping,
         )?;
         let mut builder = DeviceMenu {
             app,
@@ -321,7 +321,7 @@ impl DeviceMenu<'_> {
             choice,
         };
         let id = format!(
-            "driver:choice:{}:{}",
+            "status:choice:{}:{}",
             self.state.generation,
             self.state.actions.len()
         );

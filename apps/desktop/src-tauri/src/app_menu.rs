@@ -174,7 +174,7 @@ pub(crate) async fn set_native_menu_locale(
     app: tauri::AppHandle,
 ) -> Result<(), String> {
     crate::native_text::set_locale(locale);
-    if let Some(menu) = app.try_state::<crate::driver_manager::DriverMenu>() {
+    if let Some(menu) = app.try_state::<crate::status_menu::StatusMenu>() {
         return menu.set_labels(locale).map_err(|error| error.to_string());
     }
     let workspace = app.state::<WorkspaceMenu>();

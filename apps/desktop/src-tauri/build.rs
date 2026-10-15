@@ -2,21 +2,9 @@ fn main() {
     println!("cargo:rustc-check-cfg=cfg(mixrelay_application_clock_fixture)");
     println!("cargo:rerun-if-env-changed=MIXRELAY_APPLICATION_CLOCK_FIXTURE");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
-        let identity = if is_driver_manager_build() {
-            "Info.driver.plist"
-        } else {
-            "Info.plist"
-        };
-        build_macos_audio(identity);
+        build_macos_audio("Info.plist");
     }
     tauri_build::build();
-}
-
-fn is_driver_manager_build() -> bool {
-    std::env::var("TAURI_CONFIG")
-        .ok()
-        .and_then(|config| serde_json::from_str::<serde_json::Value>(&config).ok())
-        .is_some_and(|config| config["identifier"] == "io.mixrelay.driver.desktop")
 }
 
 fn build_macos_audio(identity: &str) {

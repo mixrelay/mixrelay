@@ -1,4 +1,4 @@
-//! Device buffer choices use the Driver runtime's native I/O readback, not manager-process facts.
+//! Device buffer choices use the runtime's native I/O readback.
 use std::collections::HashMap;
 
 use mixrelay_audio_io::{NativeBufferSettings, VirtualEndpointDeviceSettings, VirtualEndpointId};
@@ -8,7 +8,7 @@ use tauri::{
     menu::{CheckMenuItem, Submenu},
 };
 
-use super::{DriverMenu, MenuState, QuitState, menu::Labels};
+use super::{MenuState, StatusMenu, menu::Labels};
 
 // Native callback capacity is independent of the smaller DSP slice catalog.
 const NATIVE_BUFFER_PRESETS: [u32; 8] = [32, 64, 128, 256, 512, 1024, 2048, 4096];
@@ -70,9 +70,6 @@ pub(super) fn append_menu(
     parent: &Submenu<tauri::Wry>,
     text: &Labels,
 ) -> tauri::Result<()> {
-    if *app.state::<crate::app_mode::AppMode>() != crate::app_mode::AppMode::Service {
-        return Ok(());
-    }
     let Some(revision) = state.snapshot.as_ref().map(|snapshot| snapshot.revision) else {
         return Ok(());
     };
@@ -98,7 +95,7 @@ pub(super) fn append_menu(
     let menu = Submenu::new(app, name, enabled)?;
     for frames in options(buffer) {
         let id = format!(
-            "driver:buffer:{}:{}:{frames}",
+            "status:buffer:{}:{}:{frames}",
             state.generation,
             device.spec.id.as_str()
         );
@@ -130,17 +127,14 @@ pub(super) fn append_menu(
 }
 
 pub(super) fn select(app: &tauri::AppHandle, id: &str) {
-    if *app.state::<crate::app_mode::AppMode>() != crate::app_mode::AppMode::Service {
-        return;
-    }
-    let menu = app.state::<DriverMenu>();
+    let menu = app.state::<StatusMenu>();
     let Ok(mut state) = menu.state.lock() else {
         return;
     };
     if state.busy
         || state.audio_change.is_some()
         || state.audio_power.is_some_and(|power| power.transitioning)
-        || state.quit_state != QuitState::Idle
+        || state.stopping
     {
         return;
     }
@@ -154,17 +148,14 @@ pub(super) fn select(app: &tauri::AppHandle, id: &str) {
     let _ = menu.refresh_menu();
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let menu = app.state::<DriverMenu>();
-        let lifecycle_guard = menu.lifecycle.lock().await;
         let result = apply(&app, action).await;
         super::playback::refresh(&app).await;
         let snapshot = crate::driver_control::driver_status(app.clone()).await;
         super::finish_snapshot(&app, snapshot);
-        drop(lifecycle_guard);
         if let Err(error) = result {
             tracing::error!(%error, "Driver native buffer change failed");
             rfd::AsyncMessageDialog::new()
-                .set_title("MixRelay Driver")
+                .set_title("MixRelay")
                 .set_description(super::menu::labels(&locale).buffer_failed)
                 .set_buttons(rfd::MessageButtons::OkCustom(
                     crate::native_text::dialogs::text(

@@ -17,7 +17,7 @@ struct ExportGuard(tauri::AppHandle);
 impl Drop for ExportGuard {
     fn drop(&mut self) {
         EXPORTING.store(false, Ordering::Release);
-        if let Some(menu) = self.0.try_state::<crate::driver_manager::DriverMenu>() {
+        if let Some(menu) = self.0.try_state::<crate::status_menu::StatusMenu>() {
             menu.refresh_diagnostics();
         }
     }
@@ -77,7 +77,7 @@ pub(crate) fn export(app: &tauri::AppHandle) {
     if EXPORTING.swap(true, Ordering::AcqRel) {
         return;
     }
-    if let Some(menu) = app.try_state::<crate::driver_manager::DriverMenu>() {
+    if let Some(menu) = app.try_state::<crate::status_menu::StatusMenu>() {
         menu.refresh_diagnostics();
     }
     let app = app.clone();
@@ -101,16 +101,10 @@ pub(crate) fn export(app: &tauri::AppHandle) {
         .await
         .ok()
         .and_then(Result::ok);
-        let runtime = tokio::time::timeout(Duration::from_secs(4), async {
-            if *app.state::<crate::app_mode::AppMode>() == crate::app_mode::AppMode::Service {
-                crate::background::dispatch(&app, "control_get_status", Value::Null).await
-            } else {
-                crate::background::Connection::for_app(&app)
-                    .map_err(Value::String)?
-                    .invoke("control_get_status", Value::Null)
-                    .await
-            }
-        })
+        let runtime = tokio::time::timeout(
+            Duration::from_secs(4),
+            crate::background::dispatch(&app, "control_get_status", Value::Null),
+        )
         .await
         .ok()
         .and_then(Result::ok);
@@ -122,10 +116,16 @@ pub(crate) fn export(app: &tauri::AppHandle) {
         .await;
         if !matches!(result, Ok(Ok(()))) {
             rfd::AsyncMessageDialog::new()
-                .set_title("MixRelay Driver")
+                .set_title("MixRelay")
                 .set_description(text.1)
                 .set_level(rfd::MessageLevel::Error)
-                .set_buttons(rfd::MessageButtons::Ok)
+                .set_buttons(rfd::MessageButtons::OkCustom(
+                    crate::native_text::dialogs::text(
+                        locale,
+                        crate::native_text::dialogs::Text::Ok,
+                    )
+                    .into(),
+                ))
                 .show()
                 .await;
         }

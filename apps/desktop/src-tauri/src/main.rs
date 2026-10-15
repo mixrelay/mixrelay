@@ -6,12 +6,12 @@ mod background;
 mod control_proxy;
 mod diagnostics;
 mod driver_control;
-mod driver_manager;
 mod licensing;
 mod logging;
 mod native_text;
 mod processor_dialog;
 mod recording_dialog;
+mod status_menu;
 mod updates;
 mod workspace_menu;
 
@@ -40,10 +40,6 @@ use macos_audio as platform_audio;
 fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "macos")]
     app.manage(native_termination::install(app.handle())?);
-    if !app.state::<app_mode::AppMode>().starts_graph() {
-        driver_manager::install(app)?;
-        return Ok(());
-    }
     if *app.state::<app_mode::AppMode>() == app_mode::AppMode::Graph {
         start_audio(app.handle())?;
         workspace_menu::install(app)?;
@@ -72,10 +68,9 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     }
     // Publish control identity only after lifecycle ownership is admitted.
     // A duplicate cold launch must never bind ahead of the real controller.
-    // Standalone Driver controls (including diagnostics) remain independent.
     start_audio(app.handle())?;
     install_local_controls(app.handle())?;
-    background::menu::install(app)?;
+    status_menu::install(app)?;
     #[cfg(target_os = "macos")]
     native_termination::observe_background_stop(app.handle())?;
     background::restore_driver(app.handle());
@@ -106,9 +101,6 @@ pub(crate) fn restore_captures(app: &tauri::AppHandle) {
 
 /// Free audio remains available independently of paid entitlement.
 fn start_audio(app: &tauri::AppHandle) -> Result<(), String> {
-    if !app.state::<app_mode::AppMode>().starts_graph() {
-        return Err("The Driver manager does not run graph audio".into());
-    }
     if *app.state::<app_mode::AppMode>() == app_mode::AppMode::Graph {
         if app.try_state::<background::Connection>().is_none() {
             let connection = background::Connection::for_app(app)?;
@@ -197,10 +189,7 @@ fn main() {
         tracing::error!("MixRelay Driver owns audio; the retired App service entry cannot start");
         std::process::exit(2);
     }
-    let mode = app_mode::AppMode::detect(
-        &context.config().identifier,
-        arguments.iter().map(std::ffi::OsString::as_os_str),
-    );
+    let mode = app_mode::AppMode::detect(arguments.iter().map(std::ffi::OsString::as_os_str));
     mode.configure(context.config_mut());
     let builder = tauri::Builder::default().manage(mode);
     #[cfg(target_os = "macos")]
@@ -224,19 +213,7 @@ fn main() {
     } else {
         builder
     };
-    let builder = if mode.starts_graph() {
-        graph_builder(builder)
-    } else {
-        builder.invoke_handler(tauri::generate_handler![
-            logging::webview_error,
-            updates::updates_check,
-            updates::updates_open_download,
-            app_menu::set_native_menu_locale,
-            driver_control::driver_status,
-            driver_control::driver_mutate,
-        ])
-    };
-    let application = builder
+    let application = graph_builder(builder)
         .setup(setup_desktop)
         .on_window_event(handle_window_event)
         .build(context);
@@ -252,7 +229,7 @@ fn main() {
     #[cfg(target_os = "macos")]
     let mut application = application;
     #[cfg(target_os = "macos")]
-    if mode != app_mode::AppMode::Graph {
+    if mode == app_mode::AppMode::Service {
         // Setup runs after Tao applies its initial policy at application launch.
         application.set_activation_policy(tauri::ActivationPolicy::Accessory);
     }
@@ -359,11 +336,6 @@ fn handle_application_event(app: &tauri::AppHandle, event: &tauri::RunEvent) {
         native_termination::release();
     }
     if let tauri::RunEvent::ExitRequested { api, .. } = event
-        && !app.state::<app_mode::AppMode>().starts_graph()
-    {
-        driver_manager::exit_requested(app, api);
-    }
-    if let tauri::RunEvent::ExitRequested { api, .. } = event
         && let Some(lifecycle) = app.try_state::<engine_lifecycle::EngineLifecycle>()
     {
         lifecycle.exit_requested(app, api);
@@ -379,7 +351,7 @@ fn handle_application_event(app: &tauri::AppHandle, event: &tauri::RunEvent) {
         if let Err(error) = app.set_activation_policy(tauri::ActivationPolicy::Accessory) {
             tracing::error!(%error, "could not keep the runtime in the background");
         }
-        background::menu::open_editor(app);
+        status_menu::open_editor();
     }
     #[cfg(target_os = "macos")]
     if let tauri::RunEvent::Reopen { .. } = event

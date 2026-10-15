@@ -1,11 +1,10 @@
-//! One acknowledged pause state for the editor and the Driver status menu.
+//! One acknowledged pause state for the editor and the status menu.
 use std::time::Duration;
 
 use mixrelay_control_protocol::EnginePowerStatus;
-use mixrelay_driver_control::DriverState;
 use tauri::Manager as _;
 
-use super::{DriverMenu, MenuState, QuitState};
+use super::StatusMenu;
 
 const LABELS: [[&str; 4]; 11] = [
     [
@@ -75,23 +74,6 @@ pub(super) fn label(locale: &str, power: Option<EnginePowerStatus>, pending: boo
     LABELS[crate::native_text::resolve_locale(locale).index()][index]
 }
 
-pub(super) fn power(app: &tauri::AppHandle, state: &MenuState) -> Option<EnginePowerStatus> {
-    if *app.state::<crate::app_mode::AppMode>() == crate::app_mode::AppMode::Service {
-        state.audio_power
-    } else {
-        state
-            .snapshot
-            .as_ref()
-            .filter(|snapshot| snapshot.state == DriverState::Ready)
-            .map(|snapshot| EnginePowerStatus {
-                enabled: !snapshot.settings.devices.is_empty(),
-                transitioning: state.busy,
-                unsaved: false,
-                pause_reason: None,
-            })
-    }
-}
-
 async fn status(app: &tauri::AppHandle) -> Result<EnginePowerStatus, String> {
     let response = crate::control_proxy::control_get_status(app.state(), app.clone()).await?;
     if response.status != 200 {
@@ -101,25 +83,19 @@ async fn status(app: &tauri::AppHandle) -> Result<EnginePowerStatus, String> {
 }
 
 pub(super) async fn refresh(app: &tauri::AppHandle) {
-    if *app.state::<crate::app_mode::AppMode>() == crate::app_mode::AppMode::Service {
-        let result = status(app).await.ok();
-        app.state::<DriverMenu>().observe_audio_power(result);
-    }
+    let result = status(app).await.ok();
+    app.state::<StatusMenu>().observe_audio_power(result);
 }
 
 pub(super) fn toggle(app: &tauri::AppHandle) {
-    let menu = app.state::<DriverMenu>();
+    let menu = app.state::<StatusMenu>();
     let Ok(mut state) = menu.state.lock() else {
         return;
     };
-    let Some(power) = power(app, &state) else {
+    let Some(power) = state.audio_power else {
         return;
     };
-    if state.audio_change.is_some()
-        || state.busy
-        || power.transitioning
-        || state.quit_state != QuitState::Idle
-    {
+    if state.audio_change.is_some() || state.busy || power.transitioning || state.stopping {
         return;
     }
     state.audio_change = Some(!power.enabled);
@@ -130,14 +106,14 @@ pub(super) fn toggle(app: &tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let result = change(&app, !power.enabled).await;
         refresh(&app).await;
-        if let Ok(mut state) = app.state::<DriverMenu>().state.lock() {
+        if let Ok(mut state) = app.state::<StatusMenu>().state.lock() {
             state.audio_change = None;
         }
-        let _ = app.state::<DriverMenu>().refresh_menu();
+        let _ = app.state::<StatusMenu>().refresh_menu();
         if let Err(error) = result {
             tracing::error!(%error, "Driver audio pause/resume failed");
             rfd::AsyncMessageDialog::new()
-                .set_title("MixRelay Driver")
+                .set_title("MixRelay")
                 .set_description(LABELS[crate::native_text::resolve_locale(&locale).index()][3])
                 .set_level(rfd::MessageLevel::Error)
                 .show()
@@ -147,25 +123,6 @@ pub(super) fn toggle(app: &tauri::AppHandle) {
 }
 
 async fn change(app: &tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    if *app.state::<crate::app_mode::AppMode>() == crate::app_mode::AppMode::Driver {
-        let menu = app.state::<DriverMenu>();
-        let _lifecycle = menu.lifecycle.lock().await;
-        let result = crate::driver_control::session_client()
-            .map_err(|error| error.to_string())?
-            .set_active(enabled)
-            .await;
-        let snapshot = match result {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                if let Ok(snapshot) = crate::driver_control::driver_status(app.clone()).await {
-                    app.state::<DriverMenu>().observe_snapshot(&snapshot);
-                }
-                return Err(error.to_string());
-            }
-        };
-        app.state::<DriverMenu>().observe_snapshot(&snapshot);
-        return Ok(());
-    }
     let response =
         crate::control_proxy::control_set_engine_power(app.state(), app.clone(), enabled).await?;
     if response.status != 200 {

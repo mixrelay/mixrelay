@@ -33,12 +33,10 @@ test("required languages have complete distinct App and Driver contracts", () =>
 
 test("macOS declares all UI languages and bundles localized permission descriptions", () => {
   const config = JSON.parse(readFileSync(new URL("../apps/desktop/src-tauri/tauri.conf.json", import.meta.url), "utf8"));
-  for (const file of ["Info.plist", "Info.driver.plist"]) {
-    const plist = readFileSync(new URL(`../apps/desktop/src-tauri/${file}`, import.meta.url), "utf8");
-    const localizations = plist.match(/<key>CFBundleLocalizations<\/key>\s*<array>([\s\S]*?)<\/array>/)?.[1];
-    assert.ok(localizations);
-    assert.deepEqual([...localizations.matchAll(/<string>(.*?)<\/string>/g)].map(match => match[1]).sort(), languages.map(entry => entry.language).sort());
-  }
+  const plist = readFileSync(new URL("../apps/desktop/src-tauri/Info.plist", import.meta.url), "utf8");
+  const localizations = plist.match(/<key>CFBundleLocalizations<\/key>\s*<array>([\s\S]*?)<\/array>/)?.[1];
+  assert.ok(localizations);
+  assert.deepEqual([...localizations.matchAll(/<string>(.*?)<\/string>/g)].map(match => match[1]).sort(), languages.map(entry => entry.language).sort());
   for (const {language} of languages) {
     const filename = `packaging/macos/localization/${language}.lproj/InfoPlist.strings`;
     const source = readFileSync(new URL(`../${filename}`, import.meta.url), "utf8");

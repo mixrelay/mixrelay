@@ -22,16 +22,13 @@ export function App({
   updatesPort = localUpdatesPort,
   driverPort = localDriverPort,
   runtimePort = localRuntimePort,
-  mode = new URLSearchParams(window.location.search).get('mode'),
 }: {
   controlPort?: ControlPort;
   licensingPort?: LicensingPort | null;
   updatesPort?: UpdatesPort | null;
   driverPort?: DriverPort | null;
   runtimePort?: RuntimePort | null;
-  mode?: string | null;
 }) {
-  if (mode === 'driver') return null;
   return (
     <GraphApp
       controlPort={controlPort}

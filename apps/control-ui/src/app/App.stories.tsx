@@ -283,7 +283,6 @@ const meta = {
       },
     },
     updatesPort: null,
-    mode: null,
   },
   loaders: [workspaceFixture],
   render: (args, { loaded }) => <App {...args} controlPort={loaded.controlPort} />,

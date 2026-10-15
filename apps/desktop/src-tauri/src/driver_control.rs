@@ -29,7 +29,7 @@ fn claimed_paid_access() -> bool {
     }
 }
 
-/// Read the installed Driver owner; free device settings do not require graph admission.
+/// Read the installed Driver owner; free device settings do not require a license.
 #[tauri::command]
 pub(crate) async fn driver_status(app: tauri::AppHandle) -> Result<DriverSnapshot, String> {
     let client = session_client().map_err(|error| error.to_string())?;
@@ -45,7 +45,7 @@ pub(crate) async fn driver_status(app: tauri::AppHandle) -> Result<DriverSnapsho
     Ok(visible_snapshot(&app, snapshot).await)
 }
 
-/// Apply free Driver settings; creating/removing identities requires the licensed graph app.
+/// Apply free Driver settings; creating, removing or renaming devices requires a license.
 #[tauri::command]
 pub(crate) async fn driver_mutate(
     app: tauri::AppHandle,
@@ -65,30 +65,22 @@ pub(crate) async fn driver_mutate(
     } else {
         false
     };
-    if rename || requires_paid_inventory_access(&command) {
-        let mode = *app.state::<crate::app_mode::AppMode>();
-        if !mode.starts_graph() {
-            return Err("Create and remove devices in the licensed MixRelay app".into());
-        }
-        if !inventory_access_allowed(mode, paid_access(&app).await?) {
-            return Err("Adding, removing or renaming devices requires a MixRelay license".into());
-        }
+    if (rename || requires_paid_inventory_access(&command)) && !paid_access(&app).await? {
+        return Err("Adding, removing or renaming devices requires a MixRelay license".into());
     }
     let snapshot = client
         .mutate(&command)
         .await
         .map_err(|error| error.to_string())?;
     let snapshot = visible_snapshot(&app, snapshot).await;
-    if let Some(menu) = app.try_state::<crate::driver_manager::DriverMenu>() {
+    if let Some(menu) = app.try_state::<crate::status_menu::StatusMenu>() {
         menu.observe_snapshot(&snapshot);
     }
     Ok(snapshot)
 }
 
 async fn visible_snapshot(app: &tauri::AppHandle, mut snapshot: DriverSnapshot) -> DriverSnapshot {
-    if !app.state::<crate::app_mode::AppMode>().starts_graph()
-        || !paid_access(app).await.unwrap_or(false)
-    {
+    if !paid_access(app).await.unwrap_or(false) {
         snapshot.settings.can_create = false;
         snapshot.settings.can_rename = false;
     }
@@ -100,10 +92,6 @@ fn requires_paid_inventory_access(command: &DriverCommand) -> bool {
         command,
         DriverCommand::Create { .. } | DriverCommand::Remove { .. }
     )
-}
-
-fn inventory_access_allowed(mode: crate::app_mode::AppMode, licensed: bool) -> bool {
-    mode.starts_graph() && licensed
 }
 
 async fn paid_access(app: &tauri::AppHandle) -> Result<bool, String> {
@@ -174,7 +162,7 @@ fn installed_plist_version(path: &std::path::Path) -> Option<String> {
     installed_version_text(&String::from_utf8(output.stdout).ok()?)
 }
 
-/// Reads only an independently installed graph app; the Driver manager has its own version.
+/// Reads the installed app bundle's version.
 #[cfg(target_os = "macos")]
 pub(crate) fn installed_mixrelay_version() -> Option<String> {
     installed_plist_version(std::path::Path::new(
@@ -254,14 +242,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn inventory_changes_require_the_licensed_graph_app() {
-        use crate::app_mode::AppMode;
-        assert!(inventory_access_allowed(AppMode::Graph, true));
-        assert!(inventory_access_allowed(AppMode::Service, true));
-        assert!(!inventory_access_allowed(AppMode::Service, false));
-        assert!(!inventory_access_allowed(AppMode::Graph, false));
-        assert!(!inventory_access_allowed(AppMode::Driver, true));
-        assert!(!inventory_access_allowed(AppMode::Driver, false));
+    fn inventory_changes_require_paid_access() {
         let command = DriverCommand::Remove {
             expected_revision: 0,
             endpoint_id: mixrelay_audio_io::VirtualEndpointId::from("device"),

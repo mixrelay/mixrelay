@@ -117,7 +117,6 @@ describe('App composition', () => {
       <MixRelayProvider>
         <I18nProvider>
           <App
-            mode={null}
             controlPort={controlPort}
             driverPort={driver}
             updatesPort={updates}
@@ -155,48 +154,6 @@ describe('App platform states', () => {
       revision: 2,
       state: 'active',
     });
-  });
-
-  it('keeps Driver startup headless without graph, license, update, or Driver requests', async () => {
-    const getStatus = vi.spyOn(controlPort, 'getStatus');
-    const getGraph = vi.spyOn(controlPort, 'getGraph');
-    const driver: DriverPort = {
-      getSnapshot: vi.fn(),
-      mutate: vi.fn(),
-    };
-    const license: LicensingPort = {
-      getStatus: vi.fn(),
-      activate: vi.fn(),
-      validate: vi.fn(),
-      deactivate: vi.fn(),
-      openCheckout: vi.fn(),
-    };
-    const updates: UpdatesPort = { check: vi.fn(), openDownload: vi.fn() };
-    const { container } = render(
-      <MixRelayProvider>
-        <I18nProvider>
-          <App
-            mode="driver"
-            controlPort={controlPort}
-            driverPort={driver}
-            licensingPort={license}
-            updatesPort={updates}
-          />
-        </I18nProvider>
-      </MixRelayProvider>,
-    );
-    await act(async () => Promise.resolve());
-    expect(container.querySelector('main')).toBeNull();
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(driver.getSnapshot).not.toHaveBeenCalled();
-    expect(driver.mutate).not.toHaveBeenCalled();
-    expect(getStatus).not.toHaveBeenCalled();
-    expect(getGraph).not.toHaveBeenCalled();
-    expect(license.getStatus).not.toHaveBeenCalled();
-    expect(updates.check).not.toHaveBeenCalled();
   });
 
   it('shows unknown health rather than inventing installation state when status is unavailable', async () => {

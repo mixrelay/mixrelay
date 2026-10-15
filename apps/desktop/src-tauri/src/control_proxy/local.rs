@@ -141,7 +141,7 @@ impl LocalControl {
         }
         if let Some(app) = &self.app {
             use tauri::Manager as _;
-            if let Some(menu) = app.try_state::<crate::driver_manager::DriverMenu>() {
+            if let Some(menu) = app.try_state::<crate::status_menu::StatusMenu>() {
                 menu.observe_audio_session_buffers(state.status.audio_session.clone());
                 menu.observe_audio_power(state.status.engine_power);
             }

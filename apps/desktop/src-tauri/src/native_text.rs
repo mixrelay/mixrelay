@@ -73,7 +73,7 @@ pub(crate) fn current_locale() -> Locale {
     }
 }
 
-pub(crate) fn driver_quit_failed(locale: &str) -> (&'static str, &'static str) {
+pub(crate) fn quit_failed(locale: Locale) -> (&'static str, &'static str) {
     const TEXT: [(&str, &str); 11] = [
         (
             "Could Not Stop MixRelay",
@@ -120,7 +120,7 @@ pub(crate) fn driver_quit_failed(locale: &str) -> (&'static str, &'static str) {
             "Не удалось остановить устройства и loopback или сохранить состояние остановки. MixRelay ещё не завершился. Через некоторое время снова выберите «Выйти» в меню состояния.",
         ),
     ];
-    TEXT[resolve_locale(locale).index()]
+    TEXT[locale.index()]
 }
 
 #[cfg(test)]
@@ -162,10 +162,10 @@ mod tests {
         for tag in [
             "ko-KR", "ja", "zh-Hans", "zh-Hant", "fr", "de", "es", "pt", "it", "ru",
         ] {
-            let (title, body) = driver_quit_failed(tag);
+            let (title, body) = quit_failed(resolve_locale(tag));
             assert!(!title.is_empty());
             assert!(!body.is_empty());
-            assert_ne!(driver_quit_failed("en"), (title, body));
+            assert_ne!(quit_failed(Locale::En), (title, body));
             assert!(!body.contains("HTTP"));
             assert!(!body.contains("19342"));
         }

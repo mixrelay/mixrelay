@@ -63,19 +63,9 @@ impl EngineLifecycle {
                     app.exit(0);
                 }
                 Err(error) => {
-                    crate::background::menu::shutdown_failed(&app);
                     app.state::<Self>().quitting.store(false, Ordering::Release);
                     tracing::error!(%error, "owned audio engine shutdown failed");
-                    let _ = crate::app_menu::show_main_window(&app);
-                    rfd::AsyncMessageDialog::new()
-                        .set_title("MixRelay")
-                        .set_description(&error)
-                        .set_level(rfd::MessageLevel::Error)
-                        .set_buttons(rfd::MessageButtons::OkCustom(
-                            text(current_locale(), Text::Ok).into(),
-                        ))
-                        .show()
-                        .await;
+                    crate::status_menu::shutdown_failed(&app).await;
                 }
             }
         });
