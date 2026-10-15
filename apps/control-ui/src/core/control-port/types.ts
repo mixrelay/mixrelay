@@ -120,22 +120,12 @@ export interface NativeDeviceFormats {
 }
 
 export interface VirtualEndpointDevice {
-  /** Actual native I/O size observed by the runtime owning this endpoint. */
-  nativeBuffer?: NativeBufferSettings | null;
   nativeDeviceIds: string[];
   nativeFormats: NativeDeviceFormats;
   spec: VirtualEndpointSpec;
   observedSampleRate: number | null;
   supportedSampleRates: number[];
   canSetSampleRate: boolean;
-}
-
-export interface NativeBufferSettings {
-  currentFrames: number | null;
-  preferredFrames: number | null;
-  minimumFrames: number;
-  maximumFrames: number;
-  canSet: boolean;
 }
 
 export interface RuntimeStreamSpec {
@@ -513,13 +503,6 @@ export interface ControlPort {
   ): Promise<RecorderSettings>;
   selectRecordingFolder?(options: { defaultPath?: string; title?: string }): Promise<string | null>;
   setVirtualEndpointSampleRate?(request: VirtualEndpointFormatRequest): Promise<GraphApplyResponse>;
-  setVirtualEndpointBufferFrames?(request: {
-    expectedRevision: number;
-    endpointId: string;
-    expectedBufferFrames: number | null;
-    expectedPreferredFrames: number | null;
-    bufferFrames: number;
-  }): Promise<GraphApplyResponse>;
   getGraphLayout?(graphId: string): Promise<GraphLayoutResponse>;
   setGraphLayout?(graphId: string, request: GraphLayoutRequest): Promise<GraphLayoutResponse>;
   getGraphCatalog?(): Promise<GraphCatalog>;

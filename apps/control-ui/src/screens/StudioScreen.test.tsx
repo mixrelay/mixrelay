@@ -11,7 +11,6 @@ import { I18nProvider } from '../core/i18n';
 import { FeatureAccess } from '../core/licensing/FeatureAccess';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';
 import type { DriverSession } from '../features/driver-status/useDriverSession';
-import type { DeviceBufferAction } from '../features/routing-workspace/endpointBuffers';
 import {
   unknownNativeFormats,
   virtualPolicy,
@@ -37,7 +36,6 @@ interface WorkspaceBinding {
     enabled: boolean;
     error: { endpointId: string | null; message: string } | null;
   };
-  deviceBufferAction?: DeviceBufferAction;
   headerActions: React.ReactNode;
 }
 const workspaceBindings = vi.hoisted(() => new Map<ControlPort, WorkspaceBinding>());
@@ -138,13 +136,6 @@ function devicePort() {
           nativeDeviceIds: [],
           nativeFormats: unknownNativeFormats,
           spec: { ...virtualSpec, id: 'device-a' },
-          nativeBuffer: {
-            currentFrames: 128,
-            preferredFrames: 128,
-            minimumFrames: 32,
-            maximumFrames: 1024,
-            canSet: true,
-          },
           canSetSampleRate: true,
           observedSampleRate: 48000,
           supportedSampleRates: [44100, 48000],
@@ -434,42 +425,6 @@ describe('Studio session document ownership', () => {
     expect(screen.getByTestId('document')).not.toHaveTextContent('"revision":101');
     rendered.unmount();
   });
-});
-
-it('owns the busy lease and status refresh for a per-device native buffer command', async () => {
-  const controlPort = devicePort();
-  const pending =
-    Promise.withResolvers<
-      Awaited<ReturnType<NonNullable<ControlPort['setVirtualEndpointBufferFrames']>>>
-    >();
-  const write = vi
-    .fn<NonNullable<ControlPort['setVirtualEndpointBufferFrames']>>()
-    .mockReturnValue(pending.promise);
-  Object.assign(controlPort, { setVirtualEndpointBufferFrames: write });
-  render(view(controlPort));
-  const binding = () => {
-    const value = workspaceBindings.get(controlPort);
-    if (!value) throw new Error('Expected workspace');
-    return value;
-  };
-  await waitFor(() =>
-    expect(binding().audioSession?.virtualEndpointSettings?.devices[0]?.nativeBuffer?.canSet).toBe(
-      true,
-    ),
-  );
-  const before = vi.mocked(controlPort.getStatus).mock.calls.length;
-  await act(async () => binding().deviceBufferAction?.change('device-a', 256));
-  await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
-  expect(binding().deviceBufferAction?.enabled).toBe(false);
-  expect(write.mock.calls[0]?.[0]).toMatchObject({
-    endpointId: 'device-a',
-    bufferFrames: 256,
-    expectedBufferFrames: 128,
-    expectedPreferredFrames: 128,
-  });
-  await act(async () => pending.resolve({ protocolVersion: 1, revision: 2, state: 'active' }));
-  await waitFor(() => expect(binding().deviceBufferAction?.enabled).toBe(true));
-  expect(vi.mocked(controlPort.getStatus).mock.calls.length).toBeGreaterThan(before);
 });
 
 it('adopts a confirmed native session revision while the catalog is still loading', async () => {

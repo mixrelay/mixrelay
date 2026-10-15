@@ -72,9 +72,6 @@ impl PreparedGraphFormat for PreparedDeviceFormat {
         }
         let mut changes = Vec::new();
         for (device, _) in &self.devices {
-            if !device.native.owns_device_buffer {
-                continue;
-            }
             changes.push(
                 buffer_control::prepare(&device.native, self.requested_buffer)
                     .map_err(backend_error)?,

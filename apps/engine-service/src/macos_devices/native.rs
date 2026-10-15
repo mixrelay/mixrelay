@@ -31,9 +31,8 @@ pub(super) struct Native {
     pub(super) pointer: NonNull<c_void>,
     pub(super) group: Option<Arc<Aggregate>>,
     _permit: Permit<'static>,
+    /// This process's client buffer, physical or virtual, follows the session block.
     requested_buffer: AtomicU32,
-    /// Driver native quantum belongs to OS; only physical client buffers are engine-owned.
-    pub(super) owns_device_buffer: bool,
     // Stable Rust-owned callback slot. Drop runs only after native destroy has
     // acknowledged all callbacks, so the native device owner cannot outlive this box.
     pub(super) render: Box<super::direct::RenderSlot>,
@@ -55,17 +54,6 @@ impl Native {
             .acquire()
             .ok_or("CoreAudio native owner limit reached; waiting for retired device callbacks")?;
         let uid = spec.native_uid()?;
-        // Driver callbacks own their native quantum independently of the DSP slice.
-        let owns_device_buffer = !uid
-            .to_bytes()
-            .strip_prefix(b"io.mixrelay.audio.endpoint.")
-            .is_some_and(|id| {
-                id.len() == 32
-                    && id
-                        .iter()
-                        .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
-                    && id.iter().any(|byte| *byte != b'0')
-            });
         let pointer = NonNull::new(unsafe {
             mr_device_io_create_group(
                 group
@@ -84,8 +72,7 @@ impl Native {
             pointer,
             group,
             _permit: permit,
-            requested_buffer: AtomicU32::new(if owns_device_buffer { buffer_frames } else { 0 }),
-            owns_device_buffer,
+            requested_buffer: AtomicU32::new(buffer_frames),
             render: Box::default(),
             pcm_metrics: PcmMetrics::default(),
             pcm: Box::default(),
@@ -108,15 +95,11 @@ impl Native {
         Ok(native)
     }
     pub(super) fn request_buffer(&self, frames: u32) {
-        if self.owns_device_buffer {
-            self.requested_buffer.store(frames, Ordering::Release);
-        }
+        self.requested_buffer.store(frames, Ordering::Release);
     }
-    /// Explicit per-endpoint client intent is independent of common DSP format edits.
-    pub(super) fn request_endpoint_buffer(&self, frames: u32) {
-        if !self.owns_device_buffer && self.group.is_none() {
-            self.requested_buffer.store(frames, Ordering::Release);
-        }
+    #[cfg(test)]
+    pub(super) fn requested_buffer(&self) -> u32 {
+        self.requested_buffer.load(Ordering::Acquire)
     }
     pub(super) fn connect(&self, stop: &AtomicBool) -> Result<(), String> {
         let requested = self.requested_buffer.load(Ordering::Acquire);

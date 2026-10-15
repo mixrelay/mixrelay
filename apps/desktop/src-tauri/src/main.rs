@@ -269,7 +269,6 @@ fn graph_builder(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::W
             control_proxy::control_get_status,
             control_proxy::workspace::workspace_file,
             control_proxy::control_reconfigure_session,
-            control_proxy::control_set_virtual_endpoint_buffer_frames,
             control_proxy::control_set_engine_power,
             control_proxy::control_set_virtual_endpoint_sample_rate,
             control_proxy::control_get_graph,

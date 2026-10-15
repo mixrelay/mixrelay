@@ -483,23 +483,14 @@ it('retries only the crashed processor instance through the authoritative graph 
   });
 });
 
-it('routes legacy endpoint channel edits through graph authoring while rate and buffer writes remain separate', async () => {
+it('routes legacy endpoint channel edits through graph authoring', async () => {
   const native = port(document({ kind: 'virtual_output', spec: virtualSpec }));
   const write = vi.spyOn(native, 'applyGraph');
-  const change = vi.fn();
-  render(
-    view(native, {
-      audioSession: session,
-      deviceBufferAction: { enabled: true, error: null, change },
-    }),
-  );
+  render(view(native, { audioSession: session }));
   await ready();
   const node = canvas().model.nodes[0];
   if (!node) throw new Error('Expected endpoint');
   const update = { displayName: 'Edited endpoint', renderChannels: 8, captureChannels: 8 };
-  await act(async () => canvas().onNodeEndpointChange?.(node.id, { ...update, bufferFrames: 256 }));
-  expect(change).toHaveBeenCalledExactlyOnceWith(virtualSpec.id, 256);
-  expect(write).not.toHaveBeenCalled();
   await act(async () => canvas().onNodeEndpointChange?.(node.id, update));
   await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
   expect(write.mock.calls[0]?.[0].nodes[0]?.config).toMatchObject({

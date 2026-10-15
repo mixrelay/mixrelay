@@ -13,7 +13,6 @@ import { InlineSelect } from './InlineSelect';
 import { LevelControl } from './LevelControl';
 import { Meter } from './Meter';
 import { NameDialog } from './NameDialog';
-import { NativeEndpointBuffer } from './NativeEndpointBuffer';
 import { NodeMuteButton, NodePowerButton } from './NodeSignalControls';
 import { Panel } from './Panel';
 import { RecoveryActions } from './RecoveryActions';
@@ -32,7 +31,6 @@ function useCatalogModel(disabled: boolean) {
   const { t } = useTranslation();
   const [name, setName] = useState('Studio');
   const [rate, setRate] = useState('48000');
-  const [frames, setFrames] = useState(128);
   const [gain, setGain] = useState(0);
   const [enabled, setEnabled] = useState(true);
   const [muted, setMuted] = useState(false);
@@ -56,8 +54,6 @@ function useCatalogModel(disabled: boolean) {
     setName,
     rate,
     setRate,
-    frames,
-    setFrames,
     gain,
     setGain,
     enabled,
@@ -189,21 +185,8 @@ function CatalogCommands({ model }: { model: CatalogModel }) {
 }
 
 function CatalogInputs({ model }: { model: CatalogModel }) {
-  const {
-    t,
-    name,
-    setName,
-    rate,
-    setRate,
-    frames,
-    setFrames,
-    gain,
-    setGain,
-    enabled,
-    setEnabled,
-    rates,
-    disabled,
-  } = model;
+  const { t, name, setName, rate, setRate, gain, setGain, enabled, setEnabled, rates, disabled } =
+    model;
   return (
     <Panel title="Inputs">
       <div className={styles.stack}>
@@ -226,20 +209,6 @@ function CatalogInputs({ model }: { model: CatalogModel }) {
           value={rate}
           disabled={disabled}
           onChange={setRate}
-        />
-        <NativeEndpointBuffer
-          control={{
-            label: t('driverManagement.bufferSize'),
-            framesLabel: t('driverManagement.frames'),
-            currentFrames: frames,
-            preferredFrames: null,
-            unselectedLabel: t('driverManagement.unselectedBuffer'),
-            pendingLabel: t('driverManagement.pendingBuffer'),
-            observedLabel: t('driverManagement.observedBuffer'),
-            options: [64, 128, 256, 512],
-            disabled,
-          }}
-          onChange={setFrames}
         />
         <ToggleField
           label={t('studio.capture')}

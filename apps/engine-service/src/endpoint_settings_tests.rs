@@ -39,7 +39,6 @@ impl VirtualEndpointBackend for CatalogReadbackBackend {
             sample_format: NativeSampleFormat::Float32,
         };
         settings.devices.push(VirtualEndpointDeviceSettings {
-            native_buffer: None,
             spec: endpoint.spec.clone(),
             native_device_ids: vec!["native-readback-id".into()],
             observed_sample_rate: Some(48_000),
@@ -174,7 +173,6 @@ pub(super) fn controller_with_inventory(
                 return None;
             };
             Some(VirtualEndpointDeviceSettings {
-                native_buffer: None,
                 spec: config.spec.clone(),
                 native_device_ids: Vec::new(),
                 observed_sample_rate: None,

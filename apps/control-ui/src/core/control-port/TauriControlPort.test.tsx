@@ -7,24 +7,6 @@ import { ControlPortError, type RuntimeGraphDocument } from './types';
 
 const graph: RuntimeGraphDocument = { edges: [], nodes: [], revision: 3, schemaVersion: 2 };
 
-it('sends the selected device buffer to the Driver runtime without rewriting a graph', async () => {
-  const invoke = vi.fn().mockResolvedValue({ status: 200, body: { revision: 3, state: 'active' } });
-  const port = new TauriControlPort(invoke);
-  const request = {
-    endpointId: 'device-b',
-    expectedRevision: 3,
-    expectedBufferFrames: null,
-    expectedPreferredFrames: 512,
-    bufferFrames: 256,
-  };
-  await expect(port.setVirtualEndpointBufferFrames(request)).resolves.toMatchObject({
-    revision: 3,
-  });
-  expect(invoke).toHaveBeenCalledExactlyOnceWith('control_set_virtual_endpoint_buffer_frames', {
-    request,
-  });
-});
-
 it('forwards graph-scoped node power/mute with a captured revision', async () => {
   const invoke = vi.fn().mockResolvedValue({ status: 200, body: { revision: 4, state: 'active' } });
   const port = new TauriControlPort(invoke);

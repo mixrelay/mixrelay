@@ -82,13 +82,6 @@ workspaceDevice.nativeFormats.render.supported = workspaceDevice.spec.supportedS
     })),
 );
 workspaceDevice.nativeFormats.capture = structuredClone(workspaceDevice.nativeFormats.render);
-workspaceDevice.nativeBuffer = {
-  currentFrames: 128,
-  preferredFrames: 128,
-  minimumFrames: 32,
-  maximumFrames: 2048,
-  canSet: true,
-};
 
 const status: MixRelayStatus = {
   protocolVersion: 1,
@@ -165,31 +158,6 @@ async function workspaceFixture({ parameters }: { parameters: Record<string, unk
   }
   const port = new StorybookMockControlPort(state);
   const controlPort = Object.assign(port, {
-    setVirtualEndpointBufferFrames: async (request: {
-      expectedRevision: number;
-      endpointId: string;
-      expectedBufferFrames: number | null;
-      expectedPreferredFrames: number | null;
-      bufferFrames: number;
-    }) => {
-      const current = state.status.audioSession?.virtualEndpointSettings?.devices.find(
-        (device) => device.spec.id === request.endpointId,
-      )?.nativeBuffer;
-      if (
-        !current ||
-        request.expectedRevision !== state.graph.revision ||
-        current.currentFrames !== request.expectedBufferFrames ||
-        current.preferredFrames !== request.expectedPreferredFrames
-      )
-        throw new Error('graph_revision_stale');
-      current.currentFrames = request.bufferFrames;
-      current.preferredFrames = request.bufferFrames;
-      return {
-        protocolVersion: 1 as const,
-        revision: state.graph.revision,
-        state: 'active' as const,
-      };
-    },
     setEnginePower: async (enabled: boolean) => {
       state.status.enginePower = {
         enabled,

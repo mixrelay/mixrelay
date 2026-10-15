@@ -524,14 +524,6 @@
   gap: 4px;
 }
 
-.endpointBufferNotice {
-  display: block;
-  margin-top: var(--space-1);
-  color: var(--node-field-label);
-  font-size: var(--font-label);
-  line-height: 1.4;
-}
-
 .optionField,
 .gainSlider,
 .parameterSlider {

@@ -217,7 +217,6 @@ impl DeviceRuntime {
             .or(capture.current)
             .map(|format| format.sample_rate);
         Ok(VirtualEndpointDeviceSettings {
-            native_buffer: None,
             spec: self.config.spec.clone(),
             native_device_ids: native_names(&self.config.spec),
             observed_sample_rate: rate,

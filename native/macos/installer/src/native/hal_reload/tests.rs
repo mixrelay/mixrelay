@@ -710,7 +710,7 @@ fn exit_confirmation_is_bounded_and_never_accepts_uncertainty_as_exit() {
     );
 }
 
-/// Live check on a Mac with MixRelay loaded: `cargo test -- --ignored live_host_discovery`.
+/// Live check on a Mac with `MixRelay` loaded: `cargo test -- --ignored live_host_discovery`.
 #[test]
 #[ignore = "needs a loaded MixRelay HAL host"]
 fn live_host_discovery_stays_within_the_command_budget() {

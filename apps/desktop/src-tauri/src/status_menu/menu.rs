@@ -19,9 +19,6 @@ pub(super) struct Labels {
     channels: &'static str,
     sample_rate: &'static str,
     bit_depth: &'static str,
-    pub(super) buffer_size: &'static str,
-    pub(super) saved: &'static str,
-    pub(super) buffer_failed: &'static str,
     mixed: &'static str,
     current: &'static str,
     unpublished: &'static str,
@@ -39,9 +36,6 @@ const LABELS: [Labels; 11] = [
         channels: "Channels",
         sample_rate: "Sample Rate",
         bit_depth: "Bit Depth",
-        buffer_size: "Buffer Size",
-        saved: "Saved",
-        buffer_failed: "Could not complete the MixRelay buffer setting",
         mixed: "Mixed",
         current: "Up to Date",
         unpublished: "No Published Updates",
@@ -57,9 +51,6 @@ const LABELS: [Labels; 11] = [
         channels: "채널 수",
         sample_rate: "샘플레이트",
         bit_depth: "비트 깊이",
-        buffer_size: "버퍼 크기",
-        saved: "저장됨",
-        buffer_failed: "MixRelay 버퍼 설정을 완료하지 못했습니다",
         mixed: "혼합",
         current: "최신 버전입니다",
         unpublished: "배포된 업데이트 없음",
@@ -75,9 +66,6 @@ const LABELS: [Labels; 11] = [
         channels: "チャンネル数",
         sample_rate: "サンプルレート",
         bit_depth: "ビット深度",
-        buffer_size: "バッファサイズ",
-        saved: "保存済み",
-        buffer_failed: "MixRelayのバッファ設定を完了できませんでした",
         mixed: "混在",
         current: "最新です",
         unpublished: "公開されたアップデートはありません",
@@ -93,9 +81,6 @@ const LABELS: [Labels; 11] = [
         channels: "声道数",
         sample_rate: "采样率",
         bit_depth: "位深度",
-        buffer_size: "缓冲区大小",
-        saved: "已保存",
-        buffer_failed: "无法完成MixRelay的缓冲区设置",
         mixed: "混合",
         current: "已是最新版本",
         unpublished: "没有已发布的更新",
@@ -111,9 +96,6 @@ const LABELS: [Labels; 11] = [
         channels: "聲道數",
         sample_rate: "取樣率",
         bit_depth: "位元深度",
-        buffer_size: "緩衝區大小",
-        saved: "已儲存",
-        buffer_failed: "無法完成MixRelay的緩衝區設定",
         mixed: "混合",
         current: "已是最新版本",
         unpublished: "沒有已發布的更新",
@@ -129,9 +111,6 @@ const LABELS: [Labels; 11] = [
         channels: "Canaux",
         sample_rate: "Fréquence d’échantillonnage",
         bit_depth: "Profondeur de bits",
-        buffer_size: "Taille du tampon",
-        saved: "Enregistré",
-        buffer_failed: "Impossible de terminer le réglage du tampon de MixRelay",
         mixed: "Mixte",
         current: "À jour",
         unpublished: "Aucune mise à jour publiée",
@@ -147,9 +126,6 @@ const LABELS: [Labels; 11] = [
         channels: "Kanäle",
         sample_rate: "Abtastrate",
         bit_depth: "Bittiefe",
-        buffer_size: "Puffergröße",
-        saved: "Gespeichert",
-        buffer_failed: "Die Puffereinstellung von MixRelay konnte nicht abgeschlossen werden",
         mixed: "Gemischt",
         current: "Aktuell",
         unpublished: "Keine veröffentlichten Updates",
@@ -165,9 +141,6 @@ const LABELS: [Labels; 11] = [
         channels: "Canales",
         sample_rate: "Frecuencia de muestreo",
         bit_depth: "Profundidad de bits",
-        buffer_size: "Tamaño del búfer",
-        saved: "Guardado",
-        buffer_failed: "No se pudo completar la configuración del búfer de MixRelay",
         mixed: "Mixto",
         current: "Actualizado",
         unpublished: "No hay actualizaciones publicadas",
@@ -183,9 +156,6 @@ const LABELS: [Labels; 11] = [
         channels: "Canais",
         sample_rate: "Taxa de amostragem",
         bit_depth: "Profundidade de bits",
-        buffer_size: "Tamanho do buffer",
-        saved: "Salvo",
-        buffer_failed: "Não foi possível concluir a configuração do buffer do MixRelay",
         mixed: "Misto",
         current: "Atualizado",
         unpublished: "Não há atualizações publicadas",
@@ -201,9 +171,6 @@ const LABELS: [Labels; 11] = [
         channels: "Canali",
         sample_rate: "Frequenza di campionamento",
         bit_depth: "Profondità di bit",
-        buffer_size: "Dimensione buffer",
-        saved: "Salvato",
-        buffer_failed: "Impossibile completare la configurazione del buffer di MixRelay",
         mixed: "Misto",
         current: "Versione aggiornata",
         unpublished: "Nessun aggiornamento pubblicato",
@@ -219,9 +186,6 @@ const LABELS: [Labels; 11] = [
         channels: "Каналы",
         sample_rate: "Частота дискретизации",
         bit_depth: "Разрядность",
-        buffer_size: "Размер буфера",
-        saved: "Сохранено",
-        buffer_failed: "Не удалось завершить настройку буфера MixRelay",
         mixed: "Смешанный",
         current: "Последняя версия",
         unpublished: "Опубликованных обновлений нет",
@@ -289,7 +253,6 @@ fn device_menus(
         };
         builder.rates(&submenu)?;
         builder.pcm(&submenu)?;
-        super::buffer::append_menu(app, builder.state, device, &submenu, text)?;
         builder.channels(
             &submenu,
             &choices::channel_choices(device, &snapshot.settings),
@@ -500,9 +463,6 @@ mod tests {
                 text.download,
                 text.sample_rate,
                 text.bit_depth,
-                text.buffer_size,
-                text.saved,
-                text.buffer_failed,
                 text.mixed,
                 text.current,
                 text.unpublished,
@@ -555,10 +515,6 @@ mod tests {
             ("Sample Rate", "샘플레이트")
         );
         assert_eq!((en.bit_depth, ko.bit_depth), ("Bit Depth", "비트 깊이"));
-        assert_eq!(
-            (en.buffer_size, ko.buffer_size),
-            ("Buffer Size", "버퍼 크기")
-        );
         assert_eq!(labels("ja-JP").check_updates, "アップデートを確認");
     }
 

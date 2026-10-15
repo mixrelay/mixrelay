@@ -7,7 +7,6 @@ use tauri::{
     tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 
-mod buffer;
 mod choices;
 mod menu;
 mod playback;
@@ -35,8 +34,6 @@ struct MenuState {
     updates_busy: bool,
     generation: u64,
     actions: HashMap<String, SettingAction>,
-    buffers: HashMap<mixrelay_audio_io::VirtualEndpointId, mixrelay_audio_io::NativeBufferSettings>,
-    buffer_actions: HashMap<String, buffer::BufferAction>,
     audio_power: Option<mixrelay_control_protocol::EnginePowerStatus>,
     audio_change: Option<bool>,
 }
@@ -57,24 +54,6 @@ pub(crate) struct StatusMenu {
 impl StatusMenu {
     pub(crate) fn refresh_diagnostics(&self) {
         let _ = self.refresh_menu();
-    }
-
-    /// Observes only runtime-owned buffer facts; native device geometry stays with Driver readback.
-    pub(crate) fn observe_audio_session_buffers(
-        &self,
-        session: Option<mixrelay_audio_io::session::AudioSessionStatus>,
-    ) {
-        let buffers = buffer::observed_buffers(session);
-        let changed = self.state.lock().is_ok_and(|mut state| {
-            if state.buffers == buffers {
-                return false;
-            }
-            state.buffers = buffers;
-            true
-        });
-        if changed {
-            let _ = self.refresh_menu();
-        }
     }
 
     pub(crate) fn observe_audio_power(
@@ -156,7 +135,6 @@ impl StatusMenu {
         self.open_editor.set_text(open_label(&state.locale))?;
         state.generation = state.generation.wrapping_add(1);
         state.actions.clear();
-        state.buffer_actions.clear();
         for item in self.tray.items()? {
             self.tray.remove(&item)?;
         }
@@ -312,7 +290,6 @@ fn handle_menu_event(app: &tauri::AppHandle, event: &tauri::menu::MenuEvent) {
         "status:updates" => check_updates(app, true),
         "status:diagnostics" => crate::diagnostics::export(app),
         "status:download" => open_download(app),
-        id if id.starts_with("status:buffer:") => buffer::select(app, id),
         id => {
             let action = app
                 .state::<StatusMenu>()

@@ -286,11 +286,6 @@ pub(crate) async fn control_get_status(
         application_capture::power_status(&client, captures.inner(), response).await?
     };
     if let Some(menu) = app.try_state::<crate::status_menu::StatusMenu>() {
-        menu.observe_audio_session_buffers(if response.is_success() {
-            serde_json::from_value(response.body["audioSession"].clone()).ok()
-        } else {
-            None
-        });
         menu.observe_audio_power(if response.is_success() {
             serde_json::from_value(response.body["enginePower"].clone()).ok()
         } else {
@@ -307,20 +302,6 @@ pub(crate) async fn control_reconfigure_session(
 ) -> Result<ControlProxyResponse, String> {
     client
         .request(Method::PUT, "/api/v1/audio/session", Some(request))
-        .await
-}
-
-#[tauri::command]
-pub(crate) async fn control_set_virtual_endpoint_buffer_frames(
-    client: tauri::State<'_, ControlProxyClient>,
-    request: Value,
-) -> Result<ControlProxyResponse, String> {
-    client
-        .request(
-            Method::PUT,
-            "/api/v1/audio/virtual-endpoint/buffer",
-            Some(request),
-        )
         .await
 }
 

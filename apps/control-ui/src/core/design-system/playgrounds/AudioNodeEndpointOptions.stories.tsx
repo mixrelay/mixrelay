@@ -31,7 +31,7 @@ const meta = {
       source: { type: 'dynamic' },
       description: {
         component:
-          '이름 → 채널 → 샘플레이트 → 비트 심도 → 출력 버퍼 순서로 편집합니다. 변경은 요청만 전달하며 표시 값은 control의 readback이 결정합니다.',
+          '이름 → 채널 → 샘플레이트 → 비트 심도 순서로 편집합니다. 변경은 요청만 전달하며 표시 값은 control의 readback이 결정합니다.',
       },
     },
   },

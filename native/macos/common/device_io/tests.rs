@@ -928,7 +928,7 @@ fn absent_native_uid_fails_before_registration_and_releases_owner() {
 fn unavailable_buffer_info_initializes_an_uninitialized_output_slot() {
     let uid = c"io.mixrelay.test.absent.32cdcbba-f015-4ef5-9d5c-01dc1f1c690e";
     let io = DeviceIo::new(uid, false, 2, 48000).expect("test owner");
-    let mut result = std::mem::MaybeUninit::<BufferInfo>::uninit();
+    let mut result = std::mem::MaybeUninit::<native::BufferInfo>::uninit();
     // SAFETY: stable unregistered owner and an aligned, exclusive output-only
     // slot. The absent UID lookup is read-only and cannot start any device.
     let found =

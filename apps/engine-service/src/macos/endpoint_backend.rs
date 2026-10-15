@@ -190,7 +190,6 @@ mod tests {
             default_sample_rate: 48_000,
         };
         settings.devices.push(VirtualEndpointDeviceSettings {
-            native_buffer: None,
             spec: actual.clone(),
             native_device_ids: vec![],
             observed_sample_rate: Some(48_000),

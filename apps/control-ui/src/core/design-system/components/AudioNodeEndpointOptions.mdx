@@ -15,7 +15,7 @@ import * as Api from "../playgrounds/AudioNodeEndpointOptions.stories";
 
 <a href="/?path=/story/core-playgrounds-audionodeendpointoptions--playground" target="_top">AudioNodeEndpointOptions Playground 열기</a>. Controls는 실제 공개 props를 전달합니다. 구현 기본값은 아래 API 표와 소스 대조 계약을 따르며, Playground의 args는 재현용 입력입니다.
 
-이름 → 채널 → 샘플레이트 → 비트 심도 → 출력 버퍼 순서로 편집합니다. 변경은 요청만 전달하며 표시 값은 control의 readback이 결정합니다.
+이름 → 채널 → 샘플레이트 → 비트 심도 순서로 편집합니다. 변경은 요청만 전달하며 표시 값은 control의 readback이 결정합니다.
 
 <Canvas of={Api.Playground} story={{ inline: false, height: 320 }} sourceState="hidden" />
 <ArgTypes of={Api.Playground} exclude={["className","classNames","style","styles","vars","unstyled","color","c","size","radius","variant","component","renderRoot","dangerouslySetInnerHTML"]} />

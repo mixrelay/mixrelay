@@ -663,8 +663,6 @@ function editableParameterState(config: Record<string, unknown>) {
 }
 
 export interface VirtualEndpointUpdate {
-  /** Runtime-owned I/O transaction; never serialized into the authored graph. */
-  bufferFrames?: number;
   sampleFormat?: import('../../core/ui/AudioNodeEndpointOptions').EndpointUpdate['sampleFormat'];
   /** Dedicated native-device transaction; never serialized by updateVirtualEndpoint. */
   sampleRate?: number;

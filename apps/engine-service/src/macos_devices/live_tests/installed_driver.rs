@@ -283,8 +283,9 @@ impl Client {
 
     fn connect_with_sequence(spec: &Spec, statistics: &Arc<Statistics>, looping: bool) -> Self {
         let native = Native::create(spec, RATE, None, 0).expect("prepare installed Driver client");
-        assert!(
-            !native.owns_device_buffer,
+        assert_eq!(
+            native.requested_buffer(),
+            0,
             "fixture must not write native settings"
         );
         let probe = Box::new(Probe {

@@ -97,13 +97,13 @@ function DesignLanguage() {
           <StatusBadge>{t('updates.states.not_published')}</StatusBadge>
           <StatusBadge tone="accent">{t('updates.states.available')}</StatusBadge>
           <StatusBadge tone="positive">{t('updates.states.current')}</StatusBadge>
-          <StatusBadge tone="warning">{t('driverManagement.pendingBuffer')}</StatusBadge>
+          <StatusBadge tone="warning">{t('driverManagement.saveFailed')}</StatusBadge>
           <StatusBadge tone="critical">{t('driverManagement.changeFailed')}</StatusBadge>
         </Inline>
         <InlineNotice tone="neutral">{t('updates.states.not_published')}</InlineNotice>
         <InlineNotice tone="accent">{t('updates.states.available')}</InlineNotice>
         <InlineNotice tone="positive">{t('updates.states.current')}</InlineNotice>
-        <InlineNotice tone="warning">{t('driverManagement.pendingBuffer')}</InlineNotice>
+        <InlineNotice tone="warning">{t('driverManagement.saveFailed')}</InlineNotice>
         <InlineNotice tone="critical">{t('driverManagement.changeFailed')}</InlineNotice>
       </ContentSection>
       <ContentSection title="입력 · 명령 · 포커스">

@@ -428,7 +428,6 @@ export const componentContracts: readonly ComponentContract[] = [
     api: "export interface SelectFieldProps extends NoAppearanceOverrides {\n  label: string;\n  value: string | null;\n  placeholder?: string;\n  data: { value: string; label: string; description?: string; disabled?: boolean }[];\n  disabled?: boolean;\n  error?: string | null;\n  description?: string;\n  density?: 'regular' | 'compact';\n  labelPlacement?: 'above' | 'inline';\n  /** Takes focus on mount, e.g. as a dialog's first field. */\n  autoFocus?: boolean;\n  onChange: (value: string) => void;\n}\n\nexport function SelectField({\n  label,\n  value,\n  placeholder,\n  data,\n  disabled,\n  error,\n  description,\n  density = 'regular',\n  labelPlacement = 'above',\n  autoFocus,\n  onChange,\n}: SelectFieldProps)",
     consumers: [
       'apps/control-ui/src/core/ui/ParameterField.tsx',
-      'apps/control-ui/src/core/ui/NativeEndpointBuffer.tsx',
       'apps/control-ui/src/core/ui/InlineSelect.tsx',
       'apps/control-ui/src/core/ui/NativeSampleFormatField.tsx',
       'apps/control-ui/src/features/recorder/RecorderControls.tsx',
@@ -1309,68 +1308,6 @@ export const componentContracts: readonly ComponentContract[] = [
     ],
   },
   {
-    name: 'NativeEndpointBuffer',
-    playgroundStory: 'core-playgrounds-nativeendpointbuffer--playground',
-    group: 'Fields',
-    purpose: 'Driver 소유의 요청 버퍼와 실제 I/O readback을 구별한다.',
-    use: 'preferredFrames/currentFrames/options와 pending/observed 문구를 제공한다.',
-    avoid: '요청값을 엔진에서 확인한 실제값처럼 표시하거나 지원 밖 현재값을 감추지 않는다.',
-    anatomy: 'SelectField + 선택적 role=status pending/observed notice.',
-    states:
-      '선택=preferred ?? current; 둘다 null이면 placeholder; options0 또는 disabled면 비활성. 미지원 현재 항목은 disabled.',
-    tokens: '공통 SelectField 28px; endpointBufferNotice label/caption 역할.',
-    interaction:
-      'SelectField 키. 같은 값 재시도 전달. pending/관측 불일치는 status로 알리고 변경 확인은 Feature/Driver 소유.',
-    source: 'apps/control-ui/src/core/ui/NativeEndpointBuffer.tsx',
-    api: 'export interface EndpointBufferControl {\n  label: string;\n  framesLabel: string;\n  currentFrames: number | null;\n  preferredFrames: number | null;\n  unselectedLabel: string;\n  pendingLabel: string;\n  observedLabel: string;\n  options: readonly number[];\n  disabled: boolean;\n  error?: string | null;\n}\n\nexport function NativeEndpointBuffer({\n  control,\n  onChange,\n}: {\n  control: EndpointBufferControl;\n  onChange: (frames: number) => void;\n})',
-    consumers: ['apps/control-ui/src/core/ui/AudioNodeEndpointOptions.tsx'],
-    tests: ['apps/control-ui/src/core/ui/NativeEndpointBuffer.test.tsx'],
-    storyId: 'core-audio-nodes-buffer-size--device-output',
-    storyTitle: 'Core/Audio Nodes/Buffer Size',
-    stateStories: [
-      {
-        id: 'core-audio-nodes-buffer-size--pending',
-        label: '요청 대기',
-      },
-      {
-        id: 'core-audio-nodes-buffer-size--saved-before-connection',
-        label: '요청값과 측정 부재',
-      },
-      {
-        id: 'core-audio-nodes-buffer-size--readback-mismatch',
-        label: '요청값256 / 실제128 및 응답 확인',
-      },
-      {
-        id: 'core-audio-nodes-buffer-size--unsupported-current',
-        label: '미지원 현재값192 유지',
-      },
-      {
-        id: 'core-audio-nodes-buffer-size--no-readback',
-        label: '요청값·실제값 모두 없음',
-      },
-      {
-        id: 'core-audio-nodes-buffer-size--rejected',
-        label: '지원값0 + 실패 + disabled',
-      },
-      {
-        id: 'core-playgrounds-nativeendpointbuffer--pending',
-        label: 'NativeEndpointBuffer / Pending',
-      },
-      {
-        id: 'core-playgrounds-nativeendpointbuffer--readback-mismatch',
-        label: 'NativeEndpointBuffer / ReadbackMismatch',
-      },
-      {
-        id: 'core-playgrounds-nativeendpointbuffer--failed',
-        label: 'NativeEndpointBuffer / Failed',
-      },
-      {
-        id: 'core-playgrounds-nativeendpointbuffer--disabled',
-        label: 'NativeEndpointBuffer / Disabled',
-      },
-    ],
-  },
-  {
     name: 'NativeSampleFormatField',
     playgroundStory: 'core-playgrounds-nativesampleformatfield--playground',
     group: 'Fields',
@@ -1930,7 +1867,7 @@ export const componentContracts: readonly ComponentContract[] = [
       'apps/control-ui/src/core/ui/AudioNodeCard.focus.test.tsx',
       'apps/control-ui/src/core/ui/AudioNodeCard.knob.test.tsx',
       'apps/control-ui/src/core/ui/AudioNodeCard.test.tsx',
-      'apps/control-ui/src/core/ui/AudioNodeDriverBuffer.test.tsx',
+      'apps/control-ui/src/core/ui/AudioNodeEndpointFieldOrder.test.tsx',
       'apps/control-ui/src/core/ui/AudioNodeDriverFormats.test.tsx',
       'apps/control-ui/src/core/ui/GraphicEqualizer.test.tsx',
       'apps/control-ui/src/core/ui/NodeOptionsSection.test.tsx',
@@ -1997,23 +1934,23 @@ export const componentContracts: readonly ComponentContract[] = [
     name: 'AudioNodeEndpointOptions',
     playgroundStory: 'core-playgrounds-audionodeendpointoptions--playground',
     group: 'Audio graph',
-    purpose: '장치 노드 Options의 이름·채널·샘플레이트·비트 심도·출력 버퍼 편집.',
+    purpose: '장치 노드 Options의 이름·채널·샘플레이트·비트 심도 편집.',
     use: 'Feature는 Driver가 읽어 온 현재값·지원값·오류를 control로, 변경 요청을 onChange로 연결한다.',
     avoid:
       '요청을 적용 완료로 표시하거나 지원하지 않는 값을 선택 가능하게 두지 않는다. 별도 Driver 설정 모달을 만들지 않는다.',
     anatomy:
-      'TextField(이름) → SelectField(공통 채널) → SelectField(샘플레이트) → NativeSampleFormatField → NativeEndpointBuffer(출력만).',
+      'TextField(이름) → SelectField(공통 채널) → SelectField(샘플레이트) → NativeSampleFormatField.',
     states:
       'canRename=false면 읽기 전용 이름. 선택값이 하나뿐이고 현재값과 같으면 선택기 disabled. rateError/formatError는 필드 오류. 빈 이름 blur는 원래 이름 복원.',
     tokens: 'AudioNodeCard .endpointOptions 간격; 필드 규격은 TextField/SelectField 소유.',
     interaction:
-      'DOM·Tab 순서 = 이름 → 채널 → 샘플레이트 → 비트 심도 → 버퍼. 이름은 Enter/blur에서 확정. nokey 경계 안에서 그래프 키와 분리.',
+      'DOM·Tab 순서 = 이름 → 채널 → 샘플레이트 → 비트 심도. 이름은 Enter/blur에서 확정. nokey 경계 안에서 그래프 키와 분리.',
     source: 'apps/control-ui/src/core/ui/AudioNodeEndpointOptions.tsx',
-    api: 'export interface EndpointControl {\n  bufferControl?: EndpointBufferControl;\n  nativeFormats?: NativeDeviceFormats;\n  nativeFormatLabels?: { bitDepth: string; unknown: string; mixed?: string };\n  channelsLabel?: string;\n  formatError?: string | null;\n  formatsDisabled?: boolean;\n  observedRate?: { label: string; value: number };\n  sampleRateOptions?: number[];\n  rateError?: string | null;\n  canRename?: boolean;\n  allowedRenderChannels?: number[];\n  allowedCaptureChannels?: number[];\n  captureChannels: number;\n  displayName: string;\n  nameLabel: string;\n  renderChannels: number;\n}\n\nexport interface EndpointUpdate {\n  bufferFrames?: number;\n  sampleRate?: number;\n  sampleFormat?: NativeSampleFormat;\n  captureChannels: number;\n  displayName: string;\n  renderChannels: number;\n}\n\ninterface EndpointOptionsProps {\n  control: EndpointControl;\n  onChange: (value: EndpointUpdate) => void;\n}\n\nexport function AudioNodeEndpointOptions({ control, onChange }: EndpointOptionsProps)',
+    api: 'export interface EndpointControl {\n  nativeFormats?: NativeDeviceFormats;\n  nativeFormatLabels?: { bitDepth: string; unknown: string; mixed?: string };\n  channelsLabel?: string;\n  formatError?: string | null;\n  formatsDisabled?: boolean;\n  observedRate?: { label: string; value: number };\n  sampleRateOptions?: number[];\n  rateError?: string | null;\n  canRename?: boolean;\n  allowedRenderChannels?: number[];\n  allowedCaptureChannels?: number[];\n  captureChannels: number;\n  displayName: string;\n  nameLabel: string;\n  renderChannels: number;\n}\n\nexport interface EndpointUpdate {\n  sampleRate?: number;\n  sampleFormat?: NativeSampleFormat;\n  captureChannels: number;\n  displayName: string;\n  renderChannels: number;\n}\n\ninterface EndpointOptionsProps {\n  control: EndpointControl;\n  onChange: (value: EndpointUpdate) => void;\n}\n\nexport function AudioNodeEndpointOptions({ control, onChange }: EndpointOptionsProps)',
     consumers: ['apps/control-ui/src/core/ui/AudioNodeCard.tsx'],
     tests: [
       'apps/control-ui/src/core/ui/AudioNodeCard.boundaries.test.tsx',
-      'apps/control-ui/src/core/ui/AudioNodeDriverBuffer.test.tsx',
+      'apps/control-ui/src/core/ui/AudioNodeEndpointFieldOrder.test.tsx',
       'apps/control-ui/src/core/ui/AudioNodeDriverFormats.test.tsx',
     ],
     storyId: 'core-audio-nodes-frame--default',

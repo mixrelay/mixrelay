@@ -7,29 +7,6 @@ import { ControlPortError, type RuntimeGraphDocument } from './types';
 const read = { signal: expect.any(AbortSignal) };
 const graph: RuntimeGraphDocument = { edges: [], nodes: [], revision: 2, schemaVersion: 2 };
 
-it('targets a Driver device buffer with both graph and observed buffer fences', async () => {
-  const request = vi
-    .fn<typeof fetch>()
-    .mockResolvedValue(response({ revision: 2, state: 'active' }));
-  const port = new HttpControlPort('http://control', request);
-  const buffer = {
-    endpointId: 'device-b',
-    expectedRevision: 2,
-    expectedBufferFrames: 512,
-    expectedPreferredFrames: null,
-    bufferFrames: 128,
-  };
-  await expect(port.setVirtualEndpointBufferFrames(buffer)).resolves.toMatchObject({ revision: 2 });
-  expect(request).toHaveBeenCalledExactlyOnceWith(
-    'http://control/api/v1/audio/virtual-endpoint/buffer',
-    {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(buffer),
-    },
-  );
-});
-
 it('does not fabricate a remote API for desktop-owned recorder preferences', async () => {
   const request = vi.fn<typeof fetch>();
   const port = new HttpControlPort('http://control', request);

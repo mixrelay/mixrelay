@@ -17,11 +17,6 @@ const overrides = {
     mixed: '[Mîxëd · ñôt sûñchrôñîzëd]',
     channels: '[Channels]',
     bitDepth: '[Bit depth]',
-    unselectedBuffer: '[!! Not selected — expanded !!]',
-    pendingBuffer: '[!! Applied when the device connects — expanded !!]',
-    observedBuffer: '[!! Currently applied — expanded !!]',
-    bufferSize: '[!! Native buffer size — expanded !!]',
-    frames: '[frames]',
   },
   about: {
     title: '[Àbôût MîxRëlây · îñfôrmâtîôñ]',

@@ -24,7 +24,6 @@ import { ThemePicker } from '../core/ui/ThemePicker';
 import { AudioPauseControl } from '../features/audio-session/AudioPauseControl';
 import { AudioSessionNotices } from '../features/audio-session/AudioSessionNotices';
 import { useAudioStatus } from '../features/audio-session/useAudioStatus';
-import { useDeviceBufferControl } from '../features/audio-session/useDeviceBufferControl';
 import { useSettledAudioStatus } from '../features/audio-session/useSettledAudioStatus';
 import { DriverInstallNotice } from '../features/driver-status/DriverInstallNotice';
 import type { DriverSession } from '../features/driver-status/useDriverSession';
@@ -133,9 +132,6 @@ export function StudioScreen({
   const catalogErrorText = useCatalogError(collection.error);
   const { catalog, busy: catalogBusy, uncertain: catalogUncertain } = collection;
   const [sessionBusy, setSessionBusy] = useState(false);
-  const deviceBufferAction = useDeviceBufferControl(controlPort, status, setSessionBusy, () =>
-    setStatusRefresh((value) => value + 1),
-  );
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const ownedSession = useOwnedSessionDocument(controlPort, collection.document);
   const [sessionDocument, setSessionDocument] = ownedSession;
@@ -180,7 +176,6 @@ export function StudioScreen({
             />
           }
           deviceDriverAction={driverRoutingActions(driverSession)}
-          deviceBufferAction={bufferRoutingActions(deviceBufferAction, sessionBusy)}
           key={`${catalog?.activeId ?? 'engine'}:${collection.documentGeneration}`}
           graphId={catalog?.activeId}
           interactionDisabled={catalogBusy || catalogUncertain || sessionBusy}
@@ -422,10 +417,6 @@ function driverInstallNotice(session: DriverSession | undefined, onInstall?: () 
       className={styles.driverNotice}
     />
   );
-}
-
-function bufferRoutingActions(action: ReturnType<typeof useDeviceBufferControl>, busy: boolean) {
-  return { ...action, enabled: action.enabled && !busy };
 }
 
 const overlayQuery = `(max-width: ${shellBreakpoints.overlaySidebar}px)`;

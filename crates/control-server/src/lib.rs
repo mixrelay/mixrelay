@@ -32,8 +32,6 @@ pub const HEALTH_ROUTE: &str = "/health";
 pub const STATUS_ROUTE: &str = "/api/v1/status";
 pub const AUDIO_SESSION_ROUTE: &str = "/api/v1/audio/session";
 pub const VIRTUAL_ENDPOINT_FORMAT_ROUTE: &str = "/api/v1/audio/virtual-endpoint/format";
-/// Driver runtime native client buffer control.
-pub const VIRTUAL_ENDPOINT_BUFFER_ROUTE: &str = "/api/v1/audio/virtual-endpoint/buffer";
 pub const GRAPH_STATUS_ROUTE: &str = "/api/v1/graph/status";
 /// Coherent read-side control catalog, independent of graph mutation admission.
 pub const CONTROL_SNAPSHOT_ROUTE: &str = "/api/v1/controls/snapshot";
@@ -208,18 +206,6 @@ pub trait ControlBackend: Send + Sync {
         Err(ProtocolError {
             code: ErrorCode::AudioSessionUnsupported,
             parameters: serde_json::json!({"resource":"virtual_endpoint_format"}),
-        })
-    }
-    /// Changes this runtime's own virtual-device I/O client buffer.
-    /// # Errors
-    /// Rejects stale observations, unavailable clients and unsupported native settings.
-    fn reconfigure_virtual_endpoint_buffer(
-        &self,
-        _request: mixrelay_control_protocol::VirtualEndpointBufferRequest,
-    ) -> Result<GraphApplyResponse, ProtocolError> {
-        Err(ProtocolError {
-            code: ErrorCode::AudioSessionUnsupported,
-            parameters: serde_json::json!({"resource":"virtual_endpoint_buffer"}),
         })
     }
     /// Reads presentation metadata independently of the active DSP graph.
@@ -560,10 +546,6 @@ fn control_routes() -> Router<ControlState> {
             VIRTUAL_ENDPOINT_FORMAT_ROUTE,
             put(reconfigure_virtual_endpoint),
         )
-        .route(
-            VIRTUAL_ENDPOINT_BUFFER_ROUTE,
-            put(reconfigure_virtual_endpoint_buffer),
-        )
         .route(GRAPH_STATUS_ROUTE, get(graph_status))
         .route(CONTROL_SNAPSHOT_ROUTE, get(node_control::snapshot))
         .route(METERS_ROUTE, get(meters))
@@ -800,37 +782,6 @@ async fn reconfigure_virtual_endpoint(
     }
 }
 
-async fn reconfigure_virtual_endpoint_buffer(
-    State(state): State<ControlState>,
-    request: Result<Json<mixrelay_control_protocol::VirtualEndpointBufferRequest>, JsonRejection>,
-) -> Response {
-    let request = match request {
-        Ok(Json(request)) => request,
-        Err(error) => {
-            return (
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(ProtocolError {
-                    code: ErrorCode::AudioSessionUnsupported,
-                    parameters: serde_json::json!({"reason":error.body_text()}),
-                }),
-            )
-                .into_response();
-        }
-    };
-    match tokio::task::spawn_blocking(move || {
-        state.backend.reconfigure_virtual_endpoint_buffer(request)
-    })
-    .await
-    {
-        Ok(Ok(response)) => (StatusCode::ACCEPTED, Json(response)).into_response(),
-        Ok(Err(error)) => (protocol_error_status(error.code), Json(error)).into_response(),
-        Err(_) => operations::task_failure(
-            ErrorCode::AudioSessionReconfigureFailed,
-            "virtual endpoint buffer task failed",
-        ),
-    }
-}
-
 async fn rescan_processors(
     State(state): State<ControlState>,
     request: Result<Json<ProcessorScanRequest>, JsonRejection>,
@@ -1008,7 +959,6 @@ fn protocol_error_status(code: ErrorCode) -> StatusCode {
 #[cfg(test)]
 mod tests {
     mod application_capture;
-    mod endpoint_buffer;
     mod endpoint_format;
     mod node_control;
     mod recorder;
@@ -1041,8 +991,6 @@ mod tests {
         last_preview: Mutex<Option<GraphApplyRequest>>,
         last_endpoint_format:
             Mutex<Option<mixrelay_control_protocol::VirtualEndpointFormatRequest>>,
-        last_endpoint_buffer:
-            Mutex<Option<mixrelay_control_protocol::VirtualEndpointBufferRequest>>,
         last_retry: Mutex<Option<ProcessorRetryRequest>>,
         editor_gate: Option<Arc<EditorGate>>,
     }
@@ -1064,7 +1012,6 @@ mod tests {
                 last_apply: Mutex::new(None),
                 last_preview: Mutex::new(None),
                 last_endpoint_format: Mutex::new(None),
-                last_endpoint_buffer: Mutex::new(None),
                 last_retry: Mutex::new(None),
                 editor_gate: None,
             })
@@ -1183,13 +1130,6 @@ mod tests {
             request: mixrelay_control_protocol::VirtualEndpointFormatRequest,
         ) -> Result<GraphApplyResponse, ProtocolError> {
             *self.last_endpoint_format.lock().unwrap() = Some(request);
-            self.apply_result.lock().unwrap().clone()
-        }
-        fn reconfigure_virtual_endpoint_buffer(
-            &self,
-            request: mixrelay_control_protocol::VirtualEndpointBufferRequest,
-        ) -> Result<GraphApplyResponse, ProtocolError> {
-            *self.last_endpoint_buffer.lock().unwrap() = Some(request);
             self.apply_result.lock().unwrap().clone()
         }
         fn graph_layout(&self, id: &str) -> Result<GraphLayoutResponse, ProtocolError> {
@@ -1547,7 +1487,6 @@ mod tests {
             last_apply: Mutex::new(None),
             last_preview: Mutex::new(None),
             last_endpoint_format: Mutex::new(None),
-            last_endpoint_buffer: Mutex::new(None),
             last_retry: Mutex::new(None),
             editor_gate: Some(gate.clone()),
         });

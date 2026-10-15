@@ -84,33 +84,6 @@ describe('native endpoint options boundaries', () => {
       });
     },
   );
-
-  it('changes only the selected device buffer with the device name and direction identity retained', async () => {
-    const { onEndpointChange } = fixture({
-      endpointControl: endpoint({
-        bufferControl: {
-          label: 'Device buffer',
-          framesLabel: 'frames',
-          currentFrames: 512,
-          preferredFrames: 512,
-          unselectedLabel: 'Unknown',
-          pendingLabel: 'Pending',
-          observedLabel: 'Actual',
-          options: [128, 256, 512],
-          disabled: false,
-        },
-      }),
-    });
-    openOptions();
-    fireEvent.click(screen.getByRole('button', { name: /Device buffer/ }));
-    fireEvent.click(await screen.findByRole('option', { name: '256 frames' }));
-    expect(onEndpointChange).toHaveBeenCalledExactlyOnceWith({
-      displayName: 'MixRelay IO',
-      renderChannels: 2,
-      captureChannels: 2,
-      bufferFrames: 256,
-    });
-  });
 });
 
 describe('processor and meter presentation boundaries', () => {

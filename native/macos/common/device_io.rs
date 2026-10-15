@@ -68,20 +68,7 @@ pub use ffi::{
     mr_device_io_overflows, mr_device_io_pcm_hook, mr_device_io_quantum, mr_device_io_queued,
     mr_device_io_render_hook, mr_device_io_starvations, mr_device_io_ticks,
 };
-pub use native::BufferInfo;
 pub use queues::GraphRead;
-
-/// Reads native client capability for an exact UID without creating an `IOProc`.
-/// The frame value is process-local and does not prove active I/O or another app's buffer.
-#[must_use]
-pub fn buffer_info_for_uid(uid: &CStr) -> Option<BufferInfo> {
-    native::buffer_info(&Selection {
-        uid: uid.to_bytes_with_nul().to_vec(),
-        input: false,
-        channels: 1,
-        group: ptr::null_mut(),
-    })
-}
 
 const MAX_FRAMES: u32 = 4096;
 

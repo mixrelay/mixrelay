@@ -162,7 +162,7 @@ Core는 필드·선택·메뉴·대화상자·체크·스위치·슬라이더·�
 | 컴포넌트 | 상태와 동작 | 필수 표시 |
 | --- | --- | --- |
 | ActionButton / StateButton | 일반 명령·확인·위험 동작; 기본·hover·focus·busy·disabled | 짧은 동작 이름, 상태 전환 중 고정된 대상 크기; 위험 동작은 critical 의미 |
-| TextField / SelectField / InlineSelect / NativeEndpointBuffer | 편집·선택·읽기 전용·disabled·오류·적용 대기 | 레이블·현재 값·오류; compact 선택도 같은 입력 역할과 규격 |
+| TextField / SelectField / InlineSelect | 편집·선택·읽기 전용·disabled·오류·적용 대기 | 레이블·현재 값·오류; compact 선택도 같은 입력 역할과 규격 |
 | ToggleField | on/off·disabled | 레이블과 checked 상태; 색 외 위치/형태 변화 |
 | CheckboxField / PathField / TitleField | 확인 체크·읽기 전용 경로와 별도 선택 동작·제목 편집 | 실제 입력 역할과 이름·값·상태; 표시와 입력의 규격은 Core가 소유 |
 | IconActionButton / CollectionItem / SidebarToggle | 아이콘 명령·목록 선택/제거·사이드바 열림/닫힘 | 명령 이름·비활성·현재 선택·펼침 상태; 시각 규격을 사용처 CSS에서 덮어쓰지 않음 |
@@ -304,7 +304,7 @@ Core `useElementBounds`가 노드 face·header·controls·Options의 ResizeObser
 
 #### 장치·드라이버 노드 Options
 
-장치별 설정은 `AudioNodeCard`의 Options에서 편집한다. 별도 Driver 설정 모달이나 전역 설정 버튼을 두지 않는다. DOM·시각·Tab 순서는 이름 → 공통 채널 수 → 샘플레이트 → 비트 심도 → 출력 노드 버퍼로 일치시키고 각 항목을 한 번씩 표시한다. 방향별 형식 묶음은 노출하지 않는다. `TextField / SelectField / NativeSampleFormatField / NativeEndpointBuffer`가 공통 필드 규격을 소유하고, Feature는 장치 ID와 Driver의 지원값·읽어 온 값·변경 명령을 연결한다. `NativeSampleFormatField`가 노드와 드라이버 설정의 공통 비트 선택·미확인·불일치·오류 상태를 소유한다. 지원값은 실제 capability의 교집합이며 성공 표시는 readback을 따른다. 같은 장치의 입력·출력 노드는 같은 Driver 설정을 표시하며 버퍼는 출력 노드에서만 편집한다. 선택값이 하나뿐이고 현재값과 같으면 선택기를 비활성화한다. 설정 변경은 Driver 응답으로 확인하며 실패 시 기존 값을 유지한다. 장치 생성은 그래프의 가상 장치 추가 경로를 사용한다.
+장치별 설정은 `AudioNodeCard`의 Options에서 편집한다. 별도 Driver 설정 모달이나 전역 설정 버튼을 두지 않는다. DOM·시각·Tab 순서는 이름 → 공통 채널 수 → 샘플레이트 → 비트 심도로 일치시키고 각 항목을 한 번씩 표시한다. 방향별 형식 묶음은 노출하지 않는다. `TextField / SelectField / NativeSampleFormatField`가 공통 필드 규격을 소유하고, Feature는 장치 ID와 Driver의 지원값·읽어 온 값·변경 명령을 연결한다. `NativeSampleFormatField`가 노드와 드라이버 설정의 공통 비트 선택·미확인·불일치·오류 상태를 소유한다. 지원값은 실제 capability의 교집합이며 성공 표시는 readback을 따른다. 같은 장치의 입력·출력 노드는 같은 Driver 설정을 표시한다. 장치 버퍼는 오디오 설정을 따르며 노드에서 편집하지 않는다. 선택값이 하나뿐이고 현재값과 같으면 선택기를 비활성화한다. 설정 변경은 Driver 응답으로 확인하며 실패 시 기존 값을 유지한다. 장치 생성은 그래프의 가상 장치 추가 경로를 사용한다.
 
 #### 그래프 인스턴스의 표시 이름
 
@@ -324,7 +324,7 @@ Feature `useNodeDisplayNameEditor`는 Core `NameDialog allowEmpty maxLength={128
 
 `shellBreakpoints.overlaySidebar` 720px 이하에서는 그래프 사이드바가 캔버스 위에 겹쳐 표시된다. 이 폭에서는 닫힌 상태로 시작하고, viewport가 좁아질 때와 선택한 그래프가 실제로 활성화된 뒤 닫힌다. 전환이 실패하면 사이드바와 오류를 그대로 둔다. 사이드바 안에 있던 포커스는 닫힐 때 보이는 사이드바 토글로 옮긴다.
 
-하단 왼쪽은 버전·인증 상태를 표시하는 앱 정보 버튼, 오른쪽은 compact 오디오 조작 하나다. 27px 한 줄에서 버전·인증은 같은 12px 글자와 기준선을 사용한다. 버전은 유지하고 긴 인증 상태만 말줄임하며 전체 버전·상태는 접근성 설명·툴팁에 남긴다. 처리 중 설명으로 행이나 버튼 크기를 늘리지 않는다. 장치별 버퍼·형식은 해당 장치 Options에 둔다. 하단 버전·인증 상태 버튼은 라이선스 상태·활성화·온라인 확인·기기 비활성화만 여는 인증 진입점이다. native About는 제품 버전·제작자·지원 연락처·접힌 약관을 제공하며 인증 명령·오디오 명령·업데이트 명령을 섞지 않는다. 전역 오디오 제어는 하단 오른쪽 일시정지·재개 한 곳에 둔다.
+하단 왼쪽은 버전·인증 상태를 표시하는 앱 정보 버튼, 오른쪽은 compact 오디오 조작 하나다. 27px 한 줄에서 버전·인증은 같은 12px 글자와 기준선을 사용한다. 버전은 유지하고 긴 인증 상태만 말줄임하며 전체 버전·상태는 접근성 설명·툴팁에 남긴다. 처리 중 설명으로 행이나 버튼 크기를 늘리지 않는다. 장치별 형식은 해당 장치 Options에 둔다. 장치 I/O 버퍼는 오디오 설정을 따른다. 하단 버전·인증 상태 버튼은 라이선스 상태·활성화·온라인 확인·기기 비활성화만 여는 인증 진입점이다. native About는 제품 버전·제작자·지원 연락처·접힌 약관을 제공하며 인증 명령·오디오 명령·업데이트 명령을 섞지 않는다. 전역 오디오 제어는 하단 오른쪽 일시정지·재개 한 곳에 둔다.
 
 하단의 `--app-status-*`, `--app-info-*`는 Core `tokens.ts`가 정의하고 기존 Provider가 CSS에 공급한다. Core `AppInformationButton`이 글자·기준선·말줄임·호출자가 지정한 dialog 관계를, `ApplicationStatusBar`가 높이·안쪽 간격·표면·좌우 배치를 소유한다. `LicenseAccess`는 버전·번역된 인증 상태·열기 동작을 전달하고, `StudioScreen`은 하단 정보와 오디오 Feature를 조합하며 자체 레이아웃 요소로 화면 grid 위치만 지정한다. `Core/Application/App Information`의 정상·무료·미확인·열림·긴 상태·키 실행과 `App/Workspace`의 실제 소비 조합을 확인한다.
 
@@ -390,7 +390,7 @@ React 코드가 컴포넌트의 기준이고 Storybook은 같은 Provider·토�
 
 `Core/Design System/Component Catalog`는 주요 공통 컴포넌트의 조합을 한 화면에서 비교한다. `Overview`, `Disabled`, `Narrow Long Translation`에서 일반 명령·녹음·Off/Mute·입력·읽기 전용·오류·상태·메뉴·노드·모달을 직접 조작한다. 세부 상태는 각 컴포넌트의 Storybook을 기준으로 한다.
 
-`Core/Design System/System Controls`는 목록의 선택·삭제, 제목·경로·비밀번호·확인 입력과 일반·disabled·busy 상태를 제공한다. 좁은 번역 스토리는 실제 제한 폭을 적용한다. Core의 Bit Depth와 Buffer Size 예시는 조작한 값을 같은 필드의 readback에 반영한다. 이는 로컬 상태 사용례이며 장치 명령의 완료를 증명하는 미터·상태를 만들어 내지 않는다.
+`Core/Design System/System Controls`는 목록의 선택·삭제, 제목·경로·비밀번호·확인 입력과 일반·disabled·busy 상태를 제공한다. 좁은 번역 스토리는 실제 제한 폭을 적용한다. Core의 Bit Depth 예시는 조작한 값을 같은 필드의 readback에 반영한다. 이는 로컬 상태 사용례이며 장치 명령의 완료를 증명하는 미터·상태를 만들어 내지 않는다.
 
 `Core/Composition/Form Flow`는 입력·선택·제출·실패·대기·긴 번역·좁은 폭과 내용 그룹을 실제 Core로 구성한다.
 

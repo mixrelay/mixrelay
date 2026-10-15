@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import type { NativeDeviceFormats, NativeSampleFormat } from '../control-port/types';
 import { sharedChannelCounts } from '../driver/sharedDeviceFormat';
 import styles from './AudioNodeCard.module.css';
-import { type EndpointBufferControl, NativeEndpointBuffer } from './NativeEndpointBuffer';
 import { NativeSampleFormatField } from './NativeSampleFormatField';
 import { SelectField } from './SelectField';
 import { TextField } from './TextField';
@@ -17,7 +16,6 @@ const channelOptions = (current: number, allowed: number[]) =>
     }));
 
 export interface EndpointControl {
-  bufferControl?: EndpointBufferControl;
   nativeFormats?: NativeDeviceFormats;
   nativeFormatLabels?: { bitDepth: string; unknown: string; mixed?: string };
   channelsLabel?: string;
@@ -36,7 +34,6 @@ export interface EndpointControl {
 }
 
 export interface EndpointUpdate {
-  bufferFrames?: number;
   sampleRate?: number;
   sampleFormat?: NativeSampleFormat;
   captureChannels: number;
@@ -84,12 +81,6 @@ export function AudioNodeEndpointOptions({ control, onChange }: EndpointOptionsP
           formats={control.nativeFormats}
           labels={control.nativeFormatLabels}
           onChange={onChange}
-        />
-      ) : null}
-      {control.bufferControl ? (
-        <NativeEndpointBuffer
-          control={control.bufferControl}
-          onChange={(bufferFrames) => onChange({ ...endpointValue(control, {}), bufferFrames })}
         />
       ) : null}
     </div>

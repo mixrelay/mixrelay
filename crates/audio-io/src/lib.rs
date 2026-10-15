@@ -407,38 +407,10 @@ pub struct VirtualEndpointCreationTemplate {
     pub default_sample_rate: u32,
 }
 
-/// Actual I/O buffer used by this runtime's native client of one device.
-/// Other applications own independent `CoreAudio` client buffers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeBufferSettings {
-    pub current_frames: Option<u32>,
-    /// Explicit saved Driver-runtime intent; never substituted for actual I/O readback.
-    pub preferred_frames: Option<u32>,
-    pub minimum_frames: u32,
-    pub maximum_frames: u32,
-    pub can_set: bool,
-}
-
-impl NativeBufferSettings {
-    #[must_use]
-    pub fn accepts(&self, frames: u32) -> bool {
-        frames != 0
-            && (Some(frames) == self.current_frames
-                || (self.can_set
-                    && self.minimum_frames != 0
-                    && self.minimum_frames <= frames
-                    && frames <= self.maximum_frames))
-    }
-}
-
 /// One device's shared configuration and actual native format-control capability.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VirtualEndpointDeviceSettings {
-    /// Runtime-owned native client readback; absent without a supported runtime; current is absent without a live owner.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_buffer: Option<NativeBufferSettings>,
     pub spec: VirtualEndpointSpec,
     /// Exact OS discovery identifiers for this device; never synthesized by the UI.
     pub native_device_ids: Vec<String>,

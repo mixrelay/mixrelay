@@ -47,11 +47,6 @@ import { RecorderControls } from '../recorder/RecorderControls';
 import { applicationInventorySelection } from './applicationIdentity';
 import { defaultEffectLabels, isChainKind, isEffectKind } from './builtinEffects';
 import { controlChanges, rebaseControlsWithHistory } from './controlReconciliation';
-import {
-  changeEndpointBuffer,
-  type DeviceBufferAction,
-  presentEndpointBuffers,
-} from './endpointBuffers';
 import { presentEqualizerSampleRate } from './equalizerPresentation';
 import { GraphApplicationQueue } from './GraphApplicationQueue';
 import { graphHistoryGroup } from './graphHistoryGroup';
@@ -105,7 +100,6 @@ type UpdateModel = (model: AudioGraphModel, kind: AudioGraphChangeKind) => void;
 const GRAPH_RECOVERY_MS = 500;
 
 export interface RoutingWorkspaceProps {
-  deviceBufferAction?: DeviceBufferAction;
   deviceDriverAction?: {
     settings?: VirtualEndpointSettings;
     enabled: boolean;
@@ -368,13 +362,10 @@ function useVirtualEndpointUpdate(
   settings?: AudioSessionStatus['virtualEndpointSettings'],
   rateAction?: RoutingWorkspaceProps['deviceRateAction'],
   driverAction?: RoutingWorkspaceProps['deviceDriverAction'],
-  bufferAction?: DeviceBufferAction,
 ) {
   return useMemo(() => {
     if (!model) return undefined;
     return (nodeId: string, update: VirtualEndpointUpdate) => {
-      if (update.bufferFrames !== undefined)
-        return changeEndpointBuffer(model, nodeId, update.bufferFrames, bufferAction);
       const endpointId = virtualEndpointId(model, nodeId);
       if (driverAction) {
         changeDriverEndpoint(endpointId, update, driverAction);
@@ -385,7 +376,7 @@ function useVirtualEndpointUpdate(
         return changeEndpointRate(endpointId, update.sampleRate, rateAction);
       updateModel(updateVirtualEndpoint(model, nodeId, update, presentation, settings), 'runtime');
     };
-  }, [model, presentation, updateModel, settings, rateAction, driverAction, bufferAction]);
+  }, [model, presentation, updateModel, settings, rateAction, driverAction]);
 }
 
 function changeDriverEndpoint(
@@ -954,7 +945,6 @@ export function RoutingWorkspace({
   onBusyChange,
   ...viewOptions
 }: RoutingWorkspaceProps) {
-  const bufferSettings = audioSession?.virtualEndpointSettings;
   if (deviceDriverAction && audioSession)
     audioSession = { ...audioSession, virtualEndpointSettings: deviceDriverAction.settings };
   const [menuOpened, setMenuOpened] = useState(false);
@@ -993,7 +983,6 @@ export function RoutingWorkspace({
     controlPort,
     deviceRateAction,
     deviceDriverAction,
-    deviceBufferAction: viewOptions.deviceBufferAction,
     interactionDisabled,
     model,
     presentation,
@@ -1012,7 +1001,6 @@ export function RoutingWorkspace({
     interactionDisabled,
     deviceRateAction,
     deviceDriverAction,
-    bufferSettings,
     processorCatalog,
     layout,
     application,
@@ -1045,7 +1033,6 @@ function useWorkspaceNodeActions(options: {
   controlPort: ControlPort;
   deviceRateAction?: RoutingWorkspaceProps['deviceRateAction'];
   deviceDriverAction?: RoutingWorkspaceProps['deviceDriverAction'];
-  deviceBufferAction?: DeviceBufferAction;
   interactionDisabled: boolean;
   model: AudioGraphModel | null;
   presentation: GraphPresentation;
@@ -1097,7 +1084,6 @@ function useWorkspaceNodeActions(options: {
     options.audioSession?.virtualEndpointSettings,
     options.deviceRateAction,
     options.deviceDriverAction,
-    options.deviceBufferAction,
   );
   return {
     addNode,
@@ -1133,7 +1119,6 @@ function useWorkspaceInventory(controlPort: ControlPort, menuOpened: boolean) {
 }
 
 interface WorkspaceViewProps {
-  bufferSettings?: VirtualEndpointSettings;
   documentRevision: number;
   headerActions?: ReactNode;
   notice?: ReactNode;
@@ -1145,7 +1130,6 @@ interface WorkspaceViewProps {
   parameters: ReturnType<typeof useProcessorParameterPublisher>;
   deviceRateAction?: RoutingWorkspaceProps['deviceRateAction'];
   deviceDriverAction?: RoutingWorkspaceProps['deviceDriverAction'];
-  deviceBufferAction?: DeviceBufferAction;
   processorCatalog: ReturnType<typeof useProcessorCatalog>;
   layout: ReturnType<typeof useGraphLayout>;
   persistenceError: string | null;
@@ -1215,37 +1199,31 @@ function usePresentedModel(props: WorkspaceViewProps) {
     audioSession,
     deviceRateAction,
     deviceDriverAction,
-    deviceBufferAction,
   } = props;
   // A graph apply usually settles well under a second; only a lasting one is a warning.
   const state = useSustainedProblem(props.state, (current) => current !== 'active');
   const presented = useMemo(
     () =>
       model
-        ? presentEndpointBuffers(
-            presentVirtualNodeStatus(
-              presentDriverEndpointControls(
-                presentVirtualEndpointSettings(
-                  presentApplicationReselection(
-                    presentRoutingApplicationIcons(
-                      presentHardwareNodeStatus(model, audioDevices, inventory.devicesObserved, t),
-                      applications,
-                    ),
-                    t,
+        ? presentVirtualNodeStatus(
+            presentDriverEndpointControls(
+              presentVirtualEndpointSettings(
+                presentApplicationReselection(
+                  presentRoutingApplicationIcons(
+                    presentHardwareNodeStatus(model, audioDevices, inventory.devicesObserved, t),
+                    applications,
                   ),
-                  audioSession?.virtualEndpointSettings,
-                  t('audioSession.sampleRate'),
-                  deviceRateAction,
+                  t,
                 ),
-                deviceDriverAction,
-                t,
+                audioSession?.virtualEndpointSettings,
+                t('audioSession.sampleRate'),
+                deviceRateAction,
               ),
-              state,
-              audioSession,
+              deviceDriverAction,
               t,
             ),
-            props.bufferSettings,
-            deviceBufferAction,
+            state,
+            audioSession,
             t,
           )
         : null,
@@ -1259,8 +1237,6 @@ function usePresentedModel(props: WorkspaceViewProps) {
       t,
       deviceRateAction,
       deviceDriverAction,
-      deviceBufferAction,
-      props.bufferSettings,
     ],
   );
   return useMemo(

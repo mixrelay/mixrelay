@@ -6,7 +6,6 @@ import type { AudioNodeMeterBank } from '../../ui/AudioNodeMeterBanks';
 import type { AudioNodeParameterControl } from '../../ui/AudioNodeParameterGrid';
 import type { DynamicsMeterContract } from '../../ui/DynamicsMeter';
 import type { GraphicEqualizerContract } from '../../ui/GraphicEqualizer';
-import type { EndpointBufferControl } from '../../ui/NativeEndpointBuffer';
 import type { ParameterFieldControl } from '../../ui/ParameterField';
 
 export const sampleGraph: AudioGraphModel = {
@@ -45,17 +44,6 @@ export const gainControl: ParameterFieldControl = {
   step: 0.5,
   suffix: 'dB',
   value: 0,
-};
-export const bufferControl: EndpointBufferControl = {
-  label: '출력 버퍼',
-  framesLabel: 'frames',
-  currentFrames: 128,
-  preferredFrames: 128,
-  unselectedLabel: '미확인',
-  pendingLabel: '적용 확인 중',
-  observedLabel: '현재 확인값',
-  options: [64, 128, 256, 512],
-  disabled: false,
 };
 const float = { sampleRate: 48000, channels: 2, sampleFormat: 'float32' as const };
 const pcm = { ...float, sampleFormat: 'signed24' as const };
@@ -152,7 +140,6 @@ export const endpointControl: EndpointControl = {
   sampleRateOptions: [44100, 48000, 96000],
   nativeFormats: sampleFormats,
   nativeFormatLabels: { bitDepth: '비트 심도', unknown: '미확인', mixed: '입출력 불일치' },
-  bufferControl,
 };
 export const meterBanks: AudioNodeMeterBank[] = [
   { channels: 2, nodeId: 'sample-meter', portId: 'main' },

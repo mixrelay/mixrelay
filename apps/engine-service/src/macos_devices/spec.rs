@@ -6,6 +6,29 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::CString,
 };
+/// Whether the selector names one of this product's own virtual devices.
+pub(super) fn is_virtual_selection(selector: &DeviceSelector) -> bool {
+    let DeviceSelector::PersistentUid { uid } = selector else {
+        return false;
+    };
+    uid.strip_prefix("io.mixrelay.audio.endpoint.")
+        .is_some_and(|hex| {
+            hex.len() == 32
+                && hex
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+                && parse_endpoint_id(&format!(
+                    "{}-{}-{}-{}-{}",
+                    &hex[..8],
+                    &hex[8..12],
+                    &hex[12..16],
+                    &hex[16..20],
+                    &hex[20..]
+                ))
+                .is_some()
+        })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Spec {
     pub(super) selector: DeviceSelector,
@@ -84,9 +107,8 @@ pub(super) fn aggregate_members(specs: &BTreeMap<String, Spec>) -> Vec<String> {
     let mut primary = None;
     for spec in specs.values() {
         if let DeviceSelector::PersistentUid { uid } = &spec.selector {
-            // Independent virtual clients own their selected buffers. Including them
-            // in one private aggregate would replace those with a shared quantum.
-            if super::endpoint_buffer::is_virtual_selection(&spec.selector) {
+            // MixRelay virtual devices stay independent clients outside the aggregate.
+            if is_virtual_selection(&spec.selector) {
                 continue;
             }
             uids.insert(uid.clone());

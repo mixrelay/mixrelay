@@ -86,33 +86,6 @@ function RateUpdateButtons({
   ));
 }
 
-function BufferUpdateButtons({
-  model,
-  onChange,
-}: {
-  model: AudioGraphModel;
-  onChange?: (nodeId: string, value: VirtualEndpointUpdate) => void;
-}) {
-  return model.nodes.map((node) =>
-    node.appearance.endpointControl?.bufferControl ? (
-      <button
-        key={node.id}
-        type="button"
-        onClick={() =>
-          onChange?.(node.id, {
-            displayName: node.appearance.title,
-            renderChannels: 2,
-            captureChannels: 2,
-            bufferFrames: 256,
-          })
-        }
-      >
-        buffer {node.id}
-      </button>
-    ) : null,
-  );
-}
-
 const canvasHarness = vi.hoisted(() => ({
   renderNodeContent: undefined as ((node: AudioGraphNode) => ReactNode) | undefined,
   model: undefined as AudioGraphModel | undefined,
@@ -165,7 +138,6 @@ vi.mock('../../core/audio-graph/AudioGraphCanvas', () => ({
           share fixture source
         </button>
         <RateUpdateButtons model={model} onChange={onNodeEndpointChange} />
-        <BufferUpdateButtons model={model} onChange={onNodeEndpointChange} />
         <button type="button" onClick={() => onNodeGainChange?.('input', -6)}>
           change gain
         </button>
@@ -1907,54 +1879,6 @@ describe('RoutingWorkspace failure recovery', () => {
     pollingView.unmount();
     expect(vi.getTimerCount()).toBeLessThan(timerCount);
   });
-});
-
-it('sends output buffer changes to the runtime independently of Driver format commands and graph edits', async () => {
-  const source = port();
-  const runtimeChange = vi.fn();
-  const driverChange = vi.fn();
-  render(
-    <MixRelayProvider>
-      <I18nextProvider i18n={i18n}>
-        <RoutingWorkspace
-          controlPort={source}
-          audioSession={{
-            ...virtualMenuSession,
-            virtualEndpointSettings: {
-              ...virtualPolicy,
-              devices: virtualPolicy.devices.map((device) => ({
-                ...device,
-                nativeBuffer: {
-                  currentFrames: 128,
-                  preferredFrames: null,
-                  minimumFrames: 32,
-                  maximumFrames: 4096,
-                  canSet: true,
-                },
-              })),
-            },
-          }}
-          deviceBufferAction={{ enabled: true, error: null, change: runtimeChange }}
-          deviceDriverAction={{
-            enabled: true,
-            settings: virtualPolicy,
-            error: null,
-            change: driverChange,
-            create: vi.fn(),
-          }}
-        />
-      </I18nextProvider>
-    </MixRelayProvider>,
-  );
-  fireEvent.click(
-    await screen.findByRole('button', { name: 'buffer default-virtual-io::host-sink' }),
-  );
-  expect(runtimeChange).toHaveBeenCalledExactlyOnceWith(virtualSpec.id, 256);
-  expect(driverChange).not.toHaveBeenCalled();
-  expect(source.applyGraph).not.toHaveBeenCalled();
-  expect(
-    screen.queryByRole('button', { name: 'buffer default-virtual-io::host-source' }),
-  ).not.toBeInTheDocument();
 });
 
 it.each([

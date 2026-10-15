@@ -122,7 +122,6 @@ impl VirtualEndpointBackend for Endpoint {
                 let mut spec = endpoint.spec.clone();
                 spec.id = VirtualEndpointId::from(id);
                 mixrelay_audio_io::VirtualEndpointDeviceSettings {
-                    native_buffer: None,
                     native_device_ids: Vec::new(),
                     observed_sample_rate: self.sample_rate(&spec.id).ok(),
                     spec,

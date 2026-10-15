@@ -60,8 +60,6 @@ mod processor_recovery;
 mod processor_timing;
 pub use control_maintenance::ControlMaintenance;
 pub mod catalog_execution;
-mod endpoint_buffer;
-pub mod endpoint_buffer_preferences;
 mod endpoint_format;
 #[cfg(test)]
 mod endpoint_format_tests;
@@ -139,30 +137,6 @@ pub trait GraphResourceBackend: Send + Sync {
     ) -> Result<Vec<mixrelay_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
         Err(HostAudioBackendError::CapabilityUnavailable {
             capability: "native device identity resolution".into(),
-        })
-    }
-
-    /// Reads this runtime's actual I/O client buffer for an owned virtual device.
-    fn virtual_endpoint_buffer(
-        &self,
-        _id: &mixrelay_audio_io::VirtualEndpointId,
-    ) -> Option<mixrelay_audio_io::NativeBufferSettings> {
-        None
-    }
-
-    /// Applies one native client setting, verifies readback and saves runtime intent.
-    /// # Errors
-    /// Rejects unsupported owners, stale buffer values and failed native writes.
-    /// A successful native change returns an optional persistence error.
-    fn set_virtual_endpoint_buffer(
-        &self,
-        _id: &mixrelay_audio_io::VirtualEndpointId,
-        _expected: Option<u32>,
-        _expected_preferred: Option<u32>,
-        _frames: u32,
-    ) -> Result<Option<String>, HostAudioBackendError> {
-        Err(HostAudioBackendError::CapabilityUnavailable {
-            capability: "virtual device I/O client buffer control".into(),
         })
     }
 
@@ -886,12 +860,6 @@ impl ControlBackend for EngineGraphController {
         request: mixrelay_control_protocol::VirtualEndpointFormatRequest,
     ) -> Result<GraphApplyResponse, ProtocolError> {
         self.change_endpoint_format(&request)
-    }
-    fn reconfigure_virtual_endpoint_buffer(
-        &self,
-        request: mixrelay_control_protocol::VirtualEndpointBufferRequest,
-    ) -> Result<GraphApplyResponse, ProtocolError> {
-        self.change_endpoint_buffer(&request)
     }
 
     fn graph_layout(

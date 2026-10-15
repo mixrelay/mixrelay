@@ -40,18 +40,6 @@ pub struct VirtualEndpointFormatRequest {
     pub sample_rate: u32,
 }
 
-/// Changes the Driver runtime's I/O client buffer for one virtual device.
-/// The DSP processing block and other applications' client buffers are unchanged.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct VirtualEndpointBufferRequest {
-    pub expected_revision: u64,
-    pub endpoint_id: mixrelay_audio_io::VirtualEndpointId,
-    pub expected_buffer_frames: Option<u32>,
-    pub expected_preferred_frames: Option<u32>,
-    pub buffer_frames: u32,
-}
-
 pub const PROTOCOL_VERSION: u16 = 1;
 
 /// Publishes graph topology while retaining surviving providers' native state.
