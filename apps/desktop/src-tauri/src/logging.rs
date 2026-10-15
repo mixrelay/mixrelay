@@ -116,10 +116,53 @@ impl Write for CappedFile {
     }
 }
 
+/// Release webviews have no developer tools: uncaught page errors are kept in this log.
+#[tauri::command]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "Tauri deserializes command arguments into owned values"
+)]
+pub(crate) fn webview_error(message: String) {
+    let message: String = message.chars().take(4096).collect();
+    // Debug formatting escapes line breaks, so page text cannot forge log entries.
+    tracing::error!(?message, "webview error");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt as _;
+
+    #[test]
+    fn webview_errors_stay_one_bounded_line() {
+        #[derive(Clone, Default)]
+        struct Buffer(std::sync::Arc<Mutex<Vec<u8>>>);
+        impl io::Write for Buffer {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let buffer = Buffer::default();
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            webview_error(format!(
+                "boom\n2026-10-15T00:00:00Z INFO forged{}",
+                "x".repeat(5000)
+            ));
+        });
+        let output = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+        assert_eq!(output.lines().count(), 1, "{output}");
+        assert!(output.contains("boom\\n2026"));
+        assert!(output.len() < 4400);
+    }
 
     #[test]
     fn writes_a_private_log_per_process_and_keeps_the_newest_per_role() {

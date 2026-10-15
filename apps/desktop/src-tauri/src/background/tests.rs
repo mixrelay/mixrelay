@@ -388,3 +388,20 @@ async fn a_subscription_shares_the_link_with_commands_and_is_cancelled_when_drop
     link.close();
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn a_missing_runtime_socket_fails_every_request_promptly() {
+    let directory = tempfile::tempdir().unwrap();
+    let connection = fixture_connection(directory.path());
+    let started = Instant::now();
+    for _ in 0..3 {
+        assert!(connection.invoke("hello", Value::Null).await.is_err());
+        assert!(!connection.running().await);
+    }
+    assert!(connection.subscribe_telemetry().await.is_err());
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        started.elapsed()
+    );
+}

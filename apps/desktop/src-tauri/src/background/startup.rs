@@ -63,8 +63,10 @@ pub(crate) async fn runtime_status(app: tauri::AppHandle) -> Result<RuntimeStatu
 #[tauri::command]
 pub(crate) async fn runtime_connect(app: tauri::AppHandle) -> Result<RuntimeStatus, String> {
     let _connect = CONNECT.lock().await;
+    tracing::info!("connecting to the Driver runtime");
     let connection = app.state::<Connection>();
     let status = readiness(&connection).await;
+    tracing::info!(?status, "Driver runtime readiness before launch");
     if status != RuntimeStatus::Unavailable {
         tracing::info!(?status, "Driver runtime already answering");
         publish_readiness(&app, status);
@@ -142,7 +144,9 @@ async fn connect_until_ready(
             let Ok(running) = running else {
                 return Ok(RuntimeStatus::Unavailable);
             };
-            if !running && admission_available()? {
+            let admitted = !running && admission_available()?;
+            tracing::info!(running, admitted, attempts, "Driver runtime launch check");
+            if admitted {
                 launched = Some(spawn_controller(executable).map_err(|error| error.to_string())?);
                 attempts += 1;
                 next_launch = tokio::time::Instant::now() + Duration::from_secs(1);

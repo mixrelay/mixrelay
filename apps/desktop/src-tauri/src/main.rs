@@ -228,6 +228,7 @@ fn main() {
         graph_builder(builder)
     } else {
         builder.invoke_handler(tauri::generate_handler![
+            logging::webview_error,
             updates::updates_check,
             updates::updates_open_download,
             app_menu::set_native_menu_locale,
@@ -272,6 +273,7 @@ fn graph_builder(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::W
         ));
     let handler: Box<dyn Fn(tauri::ipc::Invoke) -> bool + Send + Sync> =
         Box::new(tauri::generate_handler![
+            logging::webview_error,
             background::startup::runtime_connect,
             background::startup::runtime_status,
             driver_control::driver_status,

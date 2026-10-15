@@ -38,6 +38,12 @@ type MeterMessage = MeterTelemetry | ArrayBuffer | { ended: true };
 /** The native side keeps its end; the webview only receives. */
 type MessageChannel = { onmessage: (message: MeterMessage) => void };
 
+/** The terminal marker. Checked without `in`: WebKit rejects a minified loop header whose
+ * nested arrow body uses it (see scripts/check-webkit-syntax.mjs). */
+function isEnd(message: MeterMessage): message is { ended: true } {
+  return !(message instanceof ArrayBuffer) && Object.hasOwn(message, 'ended');
+}
+
 interface ControlProxyResponse {
   body: unknown;
   status: number;
@@ -209,7 +215,7 @@ export class TauriControlPort implements ControlPort {
       // After unsubscribing, nothing is delivered and no credit returns, so even a lost
       // unsubscribe ends natively once credit runs out.
       if (!active) return;
-      if ('ended' in message) {
+      if (isEnd(message)) {
         active = false;
         return listener.ended();
       }

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "audit:ui": "node scripts/audit-ui.mjs",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node ../../scripts/check-webkit-syntax.mjs dist",
     "build-storybook": "storybook build && node scripts/check-design-system-docs.mjs",
     "docs:api": "node scripts/check-design-system-docs.mjs --print-api",
     "docs:page": "node scripts/scaffold-component-doc.mjs",
