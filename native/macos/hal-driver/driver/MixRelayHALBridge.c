@@ -118,13 +118,16 @@ static OSStatus property_get(AudioServerPlugInDriverRef driver, AudioObjectID ob
     if (!valid(driver)) return kAudioHardwareBadObjectError;
     const bool transport = property != NULL && property->mSelector == kAudioDevicePropertyTransportType;
     OSStatus status = mr_hal_core_property_get(gCore, object, address(property), qualifier_size, qualifier, capacity, written, output, transport ? pid : 0);
-    // Rare control-plane query: record which requester received which presentation.
+    // coreaudiod polls this property many times a second; record only the compatibility
+    // exception (`usb `) an allowlisted app receives, as Loopback's ARK driver does.
     if (transport && status == noErr && output != NULL && written != NULL && *written >= sizeof(UInt32)) {
-        static os_log_t log;
-        if (log == NULL) log = os_log_create("io.mixrelay.audio.driver", "transport");
         UInt32 value;
         memcpy(&value, output, sizeof(value));
-        os_log(log, "transport for pid %d: %{public}c%c%c%c", (int)pid, (char)(value >> 24), (char)(value >> 16), (char)(value >> 8), (char)value);
+        if (value == kAudioDeviceTransportTypeUSB) {
+            static os_log_t log;
+            if (log == NULL) log = os_log_create("io.mixrelay.audio.driver", "transport");
+            os_log(log, "presenting USB transport to pid %d", (int)pid);
+        }
     }
     return status;
 }

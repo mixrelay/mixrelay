@@ -488,3 +488,148 @@ fn unknown_bundle_is_resolved_by_the_worker_and_answered_within_the_caller_budge
     assert_eq!(transport.query(16, pid, Duration::from_secs(1)), USB);
     assert_eq!(transport.query(16, pid, QUERY_BUDGET), USB);
 }
+
+#[test]
+fn a_registered_client_answers_from_its_callback_bundle_without_process_inspection() {
+    let (transport, requests) = queued_transport(64);
+    // The driver sandbox refuses inspection: no incarnation for any PID.
+    let refused = |_| None;
+    transport.client(16, 1, 4242, Some("com.test.App".into()));
+    transport.client(16, 2, 4343, Some("com.other.App".into()));
+    transport.client(16, 3, 4444, None);
+    let deadline = Instant::now() + QUERY_BUDGET;
+    assert_eq!(transport.get_with_incarnation(4242, deadline, refused), USB);
+    assert_eq!(
+        transport.get_with_incarnation(4343, deadline, refused),
+        VIRTUAL
+    );
+    // No bundle from the callback and no inspection: the safe default.
+    assert_eq!(
+        transport.get_with_incarnation(4444, deadline, refused),
+        VIRTUAL
+    );
+    assert!(
+        requests.try_recv().is_err(),
+        "registered clients need no discovery work"
+    );
+    // RemoveDeviceClient ends the registration.
+    transport.remove(16, 1);
+    assert_eq!(
+        transport.get_with_incarnation(4242, deadline, refused),
+        VIRTUAL
+    );
+    // An empty policy answers virt even for a registered client.
+    transport.client(16, 1, 4242, Some("com.test.App".into()));
+    transport.policy(Vec::new());
+    assert_eq!(
+        transport.get_with_incarnation(4242, deadline, refused),
+        VIRTUAL
+    );
+}
+
+#[test]
+fn a_reused_pid_does_not_inherit_its_predecessors_registered_bundle() {
+    let (transport, requests) = queued_transport(64);
+    let old = Incarnation(4242, 1, 0);
+    let new = Incarnation(4242, 2, 0);
+    let read = |key: Incarnation| {
+        transport.get_with_incarnation(key.0, Instant::now() + QUERY_BUDGET, |_| Some(key))
+    };
+    lock(&transport.state).client(16, 1, client(old, Some("com.test.App")));
+    assert_eq!(read(old), USB);
+    // The new process registers with no bundle while the old registration lingers.
+    lock(&transport.state).client(32, 2, client(new, None));
+    assert_eq!(read(new), VIRTUAL);
+    complete(&transport, &requests.recv().unwrap(), None);
+    assert_eq!(read(new), VIRTUAL);
+    // The old registration's late removal leaves the new process's own answer.
+    transport.remove(16, 1);
+    lock(&transport.state).client(48, 3, client(new, Some("com.test.App")));
+    assert_eq!(read(new), USB);
+    assert!(requests.try_recv().is_err());
+    // A replaced registration without a bundle and an unknown incarnation keeps it.
+    lock(&transport.state).client(
+        48,
+        3,
+        Client {
+            pid: new.0,
+            incarnation: None,
+            bundle: None,
+        },
+    );
+    assert_eq!(read(new), USB);
+    transport.remove(48, 3);
+    transport.remove(32, 2);
+    assert!(lock(&transport.state).bundles.is_empty());
+}
+
+#[test]
+fn a_reused_pid_querying_before_it_registers_does_not_receive_the_predecessors_answer() {
+    let (transport, requests) = queued_transport(64);
+    let old = Incarnation(4242, 1, 0);
+    let new = Incarnation(4242, 2, 0);
+    let read = |pid: i32, current: Option<Incarnation>| {
+        transport.get_with_incarnation(pid, Instant::now() + QUERY_BUDGET, |_| current)
+    };
+    lock(&transport.state).client(16, 1, client(old, Some("com.test.App")));
+    // Denied inspection keeps the registered answer, as the driver sandbox requires.
+    assert_eq!(read(old.0, None), USB);
+    assert_eq!(read(old.0, Some(old)), USB);
+    // The replacement is identified by inspection and never inherits USB.
+    assert_eq!(read(new.0, Some(new)), VIRTUAL);
+    complete(&transport, &requests.recv().unwrap(), None);
+    assert_eq!(read(new.0, Some(new)), VIRTUAL);
+    // The stale bundle is retired, so denied inspection no longer reports it either.
+    assert!(lock(&transport.state).bundles.is_empty());
+    assert_eq!(read(new.0, None), VIRTUAL);
+}
+
+#[test]
+fn a_stale_bundle_stays_retired_when_the_mismatching_read_meets_contention() {
+    let (transport, _requests) = queued_transport(64);
+    let old = Incarnation(4242, 1, 0);
+    let new = Incarnation(4242, 2, 0);
+    lock(&transport.state).client(16, 1, client(old, Some("com.test.App")));
+    // Another thread takes the state lock between the registered read and
+    // retirement, so neither retirement nor discovery can lock.
+    let (held, holding) = mpsc::sync_channel(0);
+    let (release, released) = mpsc::sync_channel::<()>(0);
+    std::thread::scope(|scope| {
+        let answer = transport.get_with_incarnation(new.0, Instant::now() + QUERY_BUDGET, |_| {
+            let state = &transport.state;
+            scope.spawn(move || {
+                let _guard = lock(state);
+                held.send(()).unwrap();
+                released.recv().unwrap();
+            });
+            holding.recv().unwrap();
+            Some(new)
+        });
+        assert_eq!(answer, VIRTUAL);
+        release.send(()).unwrap();
+    });
+    assert_eq!(
+        transport.get_with_incarnation(new.0, Instant::now() + QUERY_BUDGET, |_| None),
+        VIRTUAL
+    );
+}
+
+#[test]
+fn a_registered_answer_respects_the_caller_deadline_after_inspection() {
+    let (transport, _requests) = queued_transport(64);
+    let key = Incarnation(4242, 1, 0);
+    lock(&transport.state).client(16, 1, client(key, Some("com.test.App")));
+    let slow = |current: Option<Incarnation>| {
+        transport.get_with_incarnation(key.0, Instant::now() + Duration::from_millis(5), |_| {
+            std::thread::sleep(Duration::from_millis(10));
+            current
+        })
+    };
+    assert_eq!(slow(Some(key)), VIRTUAL);
+    assert_eq!(slow(None), VIRTUAL);
+    // The timeout is transient: the registration still answers within budget.
+    assert_eq!(
+        transport.get_with_incarnation(key.0, Instant::now() + QUERY_BUDGET, |_| Some(key)),
+        USB
+    );
+}

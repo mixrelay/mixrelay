@@ -5,7 +5,7 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::ffi::{CStr, c_char};
 use std::ops::Bound::{Excluded, Unbounded};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError, mpsc};
 use std::time::{Duration, Instant};
 
@@ -60,6 +60,14 @@ struct Client {
     incarnation: Option<Incarnation>,
     bundle: Option<String>,
 }
+/// A process's bundle from `AddDeviceClient` and the incarnation seen then.
+struct Registered {
+    incarnation: Option<Incarnation>,
+    bundle: String,
+    /// Set by a property read that found another incarnation on the PID. It
+    /// needs no lock, so contention cannot lose that finding.
+    retired: Arc<AtomicBool>,
+}
 struct Identity {
     bundle: Option<String>,
     expires: Instant,
@@ -70,6 +78,9 @@ struct Identity {
 pub(crate) struct State {
     policy: Vec<String>,
     clients: BTreeMap<(u32, u32), Client>,
+    /// Each registered process's bundle, kept until the process's last client
+    /// registration is removed.
+    bundles: BTreeMap<i32, Registered>,
     identities: BTreeMap<Incarnation, Identity>,
 }
 impl State {
@@ -82,6 +93,30 @@ impl State {
         true
     }
     fn client(&mut self, device: u32, client: u32, identity: Client) {
+        match &identity.bundle {
+            Some(bundle) => {
+                self.bundles.insert(
+                    identity.pid,
+                    Registered {
+                        incarnation: identity.incarnation,
+                        bundle: bundle.clone(),
+                        retired: Arc::new(AtomicBool::new(false)),
+                    },
+                );
+            }
+            // A new process reusing the PID before its predecessor's registrations
+            // are removed must not inherit that bundle. Without both incarnations
+            // the registrations cannot be told apart, so the bundle stays.
+            None => {
+                if let (Some(new), Some(Some(known))) = (
+                    identity.incarnation,
+                    self.bundles.get(&identity.pid).map(|seen| seen.incarnation),
+                ) && new != known
+                {
+                    self.bundles.remove(&identity.pid);
+                }
+            }
+        }
         if let Some(old) = self.clients.insert((device, client), identity) {
             self.reclaim_client(old.pid);
         }
@@ -94,6 +129,33 @@ impl State {
     fn reclaim_client(&mut self, pid: i32) {
         if !self.clients.values().any(|client| client.pid == pid) {
             self.identities.retain(|key, _| key.0 != pid);
+            self.bundles.remove(&pid);
+        }
+    }
+    /// The answer for the bundle coreaudiod named for this PID in `AddDeviceClient`,
+    /// with the incarnation seen then. The registration lasts until
+    /// `RemoveDeviceClient`, so it needs no process inspection.
+    fn registered(&self, pid: i32) -> Option<(&Registered, u32)> {
+        self.bundles
+            .get(&pid)
+            .filter(|seen| !seen.retired.load(Ordering::Acquire))
+            .map(|seen| (seen, self.answer(&seen.bundle)))
+    }
+    /// Drops a registered bundle already marked as an exited incarnation's.
+    fn retire_bundle(&mut self, pid: i32, retired: &Arc<AtomicBool>) {
+        if self
+            .bundles
+            .get(&pid)
+            .is_some_and(|seen| Arc::ptr_eq(&seen.retired, retired))
+        {
+            self.bundles.remove(&pid);
+        }
+    }
+    fn answer(&self, bundle: &str) -> u32 {
+        if self.policy.iter().any(|allowed| allowed == bundle) {
+            USB
+        } else {
+            VIRTUAL
         }
     }
     fn known(&self, key: Incarnation) -> Option<String> {
@@ -249,8 +311,31 @@ impl Transport {
         if state.policy.is_empty() {
             return VIRTUAL;
         }
+        // A registered client answers from coreaudiod's own identity, as Loopback's ARK
+        // driver does. The driver sandbox can refuse proc_pidinfo/proc_pidpath, which
+        // left every requester at `virt` when this depended on process inspection.
+        let registered = state
+            .registered(pid)
+            .map(|(seen, answer)| (seen.incarnation, Arc::clone(&seen.retired), answer));
         drop(state);
-        let Some(key) = current(pid) else {
+        let key = current(pid);
+        if let Some((known, retired, answer)) = registered {
+            match (known, key) {
+                // A new process reusing the PID before its predecessor's registration
+                // is removed must not receive the predecessor's answer, now or after.
+                (Some(known), Some(key)) if known != key => {
+                    retired.store(true, Ordering::Release);
+                    if let Some(mut state) = try_lock(&self.state) {
+                        state.retire_bundle(pid, &retired);
+                    }
+                }
+                // Inspection that is denied or matches keeps the registered answer,
+                // unless it spent the caller's budget.
+                _ if Instant::now() >= deadline => return VIRTUAL,
+                _ => return answer,
+            }
+        }
+        let Some(key) = key else {
             return VIRTUAL;
         };
         self.query_key_until(key, deadline)
