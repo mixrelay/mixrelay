@@ -162,13 +162,15 @@ export type ColorScheme = 'light' | 'dark';
 export type ThemePreference = ColorScheme | 'system';
 // Brand source color stays fixed. External app icons retain their own ownership.
 export const logoColor = palette.red[500];
+// The approved brand identity (app icon, symbols, wordmark) owns its own values, so a
+// change to the UI palette never alters a brand asset.
 export const brandColors = {
   primary: logoColor,
-  ink: palette.neutral[900],
-  inverse: palette.graphite[50],
-  paper: palette.neutral[50],
-  dark: palette.graphite[900],
-  muted: palette.neutral[700],
+  ink: '#242622',
+  inverse: '#edeee7',
+  paper: '#faf9f5',
+  dark: '#161918',
+  muted: '#5c594f',
   white: '#ffffff',
 } as const;
 export const brandSizes = { compact: 16, standard: 24, display: 64 } as const;

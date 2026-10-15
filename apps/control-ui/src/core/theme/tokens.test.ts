@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { logoColor, meterScale, mixrelayVariables, palette, themeRoles } from './tokens';
+import {
+  brandColors,
+  logoColor,
+  meterScale,
+  mixrelayVariables,
+  palette,
+  themeRoles,
+} from './tokens';
 
 function luminance(hex: string) {
   const rgb = [1, 3, 5].map((offset) => {
@@ -32,6 +39,16 @@ it('keeps all DSUB steps in descending luminance and the brand source fixed', ()
     expect(values).toEqual([...values].sort((a, b) => b - a));
   }
   expect(logoColor).toBe('#b02d23');
+  // Brand assets are approved artwork, independent of the UI palette.
+  expect(brandColors).toEqual({
+    primary: '#b02d23',
+    ink: '#242622',
+    inverse: '#edeee7',
+    paper: '#faf9f5',
+    dark: '#161918',
+    muted: '#5c594f',
+    white: '#ffffff',
+  });
   expect(mixrelayVariables['--logo-source']).toBe(logoColor);
   expect(Object.keys(themeRoles.light)).toEqual(Object.keys(themeRoles.dark));
   expect(Object.keys(themeRoles.light).some((role) => role.includes('orange'))).toBe(false);
