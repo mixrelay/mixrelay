@@ -138,7 +138,10 @@ release messages. The service issues a generation bound to engine incarnation
 and process ID. A different active engine cannot claim that authority. Publishing
 or releasing an old lease is ignored. Destination publications contain endpoint
 ID, actual nominal rate, lease, applied graph revision and optional input frames.
-Older destination revisions are ignored. Three seconds without a successful
+Older destination revisions are ignored. Each publication is the engine's
+complete set: an endpoint it no longer lists, for example after its route is
+removed, is published to the HAL as unknown and kept as an unknown entry, so its
+revision fence remains and a failed clear is retried. Three seconds without a successful
 publication expires the lease on the service's maintenance pass. Normal engine
 shutdown explicitly releases it. This state never advances or persists the
 inventory revision.
@@ -206,8 +209,19 @@ requires. Never leave a signing authentication window pending.
    `pnpm probe:macos-roundtrip --json --seconds 10 A_UID D_UID` with a transparent
    signal path, first dry and then through a plug-in with reported intrinsic delay.
    Compare D input frames with measured host-time delay converted at D's rate,
-   allowing the stated hysteresis threshold and observation variation. Confirm the
-   recording IOProc is not also writing D; a render operation correctly gates to zero.
+   allowing the stated hysteresis threshold and observation variation. With separate
+   devices the probe turns off the recorder's output streams, so it never writes D;
+   a render operation would correctly gate the report to zero.
+
+Steps 4–5 and the clearing check of step 6 are automated for one route by
+`node scripts/lab/macos-latency-acceptance.mjs SOURCE_UID ENDPOINT_ID EVIDENCE_DIR
+--verify-installed-latency [--roundtrip]`. SOURCE is a loopback device such as
+Loopback Audio and ENDPOINT an endpoint no saved graph uses. It adds the route to
+the selected graph, waits for a stable report, optionally runs the round trip,
+restores the exact graph and requires the report to clear to zero. Every write
+names the selected graph and runs as an engine operation, so another client's edit
+or selection fails the run instead of being overwritten. `--roundtrip` needs
+microphone permission for the terminal.
 6. Add ordinary playback on D: its reported input latency must become zero. Stop
    that client: the validated engine value should return after the control tick.
    Change rates/graphs, inject transport loss and stop/kill the engine: obsolete

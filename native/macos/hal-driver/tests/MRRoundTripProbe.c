@@ -14,6 +14,7 @@
 #include <mach/mach_time.h>
 
 #include <errno.h>
+#include <stddef.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -1200,6 +1201,38 @@ static MRProbe *mr_prepare(const MROptions *options) {
     return probe;
 }
 
+/// Turns off this IOProc's streams in one direction. A recorder that left its output
+/// streams on would also write to that device, which can change what the device reports
+/// (MixRelay gates reported input latency to zero while another client writes).
+static bool mr_disable_streams(AudioDeviceID device, AudioDeviceIOProcID proc,
+                               AudioObjectPropertyScope scope) {
+    if (mr_channels(device, scope) == 0U) return true;
+    const AudioObjectPropertyAddress address = {kAudioDevicePropertyIOProcStreamUsage, scope,
+                                                kAudioObjectPropertyElementMain};
+    UInt32 size = 0U;
+    if (AudioObjectGetPropertyDataSize(device, &address, 0U, NULL, &size) != noErr ||
+        size < offsetof(AudioHardwareIOProcStreamUsage, mStreamIsOn)) {
+        return false;
+    }
+    AudioHardwareIOProcStreamUsage *usage = calloc(1U, size);
+    if (usage == NULL) return false;
+    _Static_assert(sizeof(usage->mIOProc) == sizeof(proc), "IOProc identifier size");
+    memcpy(&usage->mIOProc, &proc, sizeof(proc));
+    OSStatus status = AudioObjectGetPropertyData(device, &address, 0U, NULL, &size, usage);
+    const size_t capacity =
+        (size - offsetof(AudioHardwareIOProcStreamUsage, mStreamIsOn)) / sizeof(UInt32);
+    if (status == noErr && usage->mNumberStreams <= capacity) {
+        for (UInt32 stream = 0U; stream < usage->mNumberStreams; stream++) {
+            usage->mStreamIsOn[stream] = 0U;
+        }
+        status = AudioObjectSetPropertyData(device, &address, 0U, NULL, size, usage);
+    } else if (status == noErr) {
+        status = kAudioHardwareBadPropertySizeError;
+    }
+    free(usage);
+    return status == noErr;
+}
+
 /// Runs the devices for the signal and its tail. False when they could not start.
 static bool mr_run(MRProbe *probe) {
     const bool same = probe->output == probe->input;
@@ -1207,6 +1240,12 @@ static bool mr_run(MRProbe *probe) {
     if (AudioDeviceCreateIOProcID(probe->output, mr_io, probe, &out_proc) != noErr ||
         (!same && AudioDeviceCreateIOProcID(probe->input, mr_io, probe, &in_proc) != noErr)) {
         fprintf(stderr, "could not create the IO procedures\n");
+        return false;
+    }
+    // Separate devices: the player only plays and the recorder only records.
+    if (!same && (!mr_disable_streams(probe->output, out_proc, kAudioObjectPropertyScopeInput) ||
+                  !mr_disable_streams(probe->input, in_proc, kAudioObjectPropertyScopeOutput))) {
+        fprintf(stderr, "could not limit the IO procedures to one direction each\n");
         return false;
     }
     // The recorder starts first so the first played frames are captured.
