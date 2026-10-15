@@ -370,12 +370,12 @@ fn real_commit_accepts_only_captured_generations_at_exact_transaction_paths() {
         let fixture = TransactionFixture::new();
         let paths = fixture.paths();
         let mapping = RefCell::new(paths[0].join("Contents/MacOS/MixRelayHAL"));
-        let discovery = RefCell::new(format!("42 {HOST_NAME}\n"));
+        let discovery = RefCell::new("42\n".to_owned());
         let identity = RefCell::new(identity_output());
         let signals = RefCell::new(Vec::new());
         let mut hosts = CommandHosts(|program, args: &[&str]| {
             Ok(match program {
-                PS if args[0] == "-axo" => output(0, &discovery.borrow()),
+                PGREP => output(0, &discovery.borrow()),
                 PS if args.last() == Some(&"pid=") => output(1, ""),
                 PS => output(0, &identity.borrow()),
                 LSOF => output(0, &format!("p42\nn{}\n", mapping.borrow().display())),
@@ -402,8 +402,8 @@ fn real_commit_accepts_only_captured_generations_at_exact_transaction_paths() {
                     .unwrap()
                     .join("other/hal/Contents/MacOS/MixRelayHAL");
             }
-            "new-pid" => *discovery.borrow_mut() = format!("43 {HOST_NAME}\n"),
-            "extra-pid" => *discovery.borrow_mut() = format!("42 {HOST_NAME}\n43 {HOST_NAME}\n"),
+            "new-pid" => *discovery.borrow_mut() = "43\n".to_owned(),
+            "extra-pid" => *discovery.borrow_mut() = "42\n43\n".to_owned(),
             "reuse" => *identity.borrow_mut() = format!("Wed Oct 14 12:34:57 2026 {HOST_NAME}\n"),
             "comm" => *identity.borrow_mut() = "Wed Oct 14 12:34:56 2026 coreaudiod\n".to_owned(),
             _ => {}
@@ -439,9 +439,9 @@ fn real_commit_accepts_only_captured_generations_at_exact_transaction_paths() {
 fn backup_mapping_cannot_authorize_a_preflight_capture() {
     let fixture = TransactionFixture::new();
     let paths = fixture.paths();
-    let mut hosts = CommandHosts(|program, args: &[&str]| {
+    let mut hosts = CommandHosts(|program, _: &[&str]| {
         Ok(match program {
-            PS if args[0] == "-axo" => output(0, &format!("42 {HOST_NAME}\n")),
+            PGREP => output(0, "42\n"),
             PS => output(0, &identity_output()),
             LSOF => output(
                 0,
@@ -476,11 +476,11 @@ fn recovery_captures_before_real_file_rollback_and_revalidates_after_it() {
                 .to_string(),
         );
         let signals = Cell::new(0);
-        let discovery = RefCell::new(format!("42 {HOST_NAME}\n"));
+        let discovery = RefCell::new("42\n".to_owned());
         let identity = RefCell::new(identity_output());
         let mut hosts = CommandHosts(|program, args: &[&str]| {
             Ok(match program {
-                PS if args[0] == "-axo" => output(0, &discovery.borrow()),
+                PGREP => output(0, &discovery.borrow()),
                 PS if args.last() == Some(&"pid=") => output(1, ""),
                 PS => output(0, &identity.borrow()),
                 LSOF => output(0, &format!("n{}\n", mapping.borrow())),
@@ -515,7 +515,7 @@ fn recovery_captures_before_real_file_rollback_and_revalidates_after_it() {
             }
         );
         if scenario == "new-pid" {
-            *discovery.borrow_mut() = format!("43 {HOST_NAME}\n");
+            *discovery.borrow_mut() = "43\n".to_owned();
         } else if scenario == "reuse" {
             *identity.borrow_mut() = format!("Wed Oct 14 12:34:57 2026 {HOST_NAME}\n");
         }
@@ -541,22 +541,17 @@ fn recovery_captures_before_real_file_rollback_and_revalidates_after_it() {
 #[test]
 fn command_adapter_uses_absolute_paths_and_exact_name_and_mapping() {
     let mut steps = VecDeque::from([
-        (
-            PS,
-            vec!["-axo", "pid=,comm="],
-            output(
-                0,
-                &format!(
-                    " 42 {HOST_NAME}\n 99 {HOST_NAME} other\n 100 coreaudiod\n 101 {HOST_NAME} \n"
-                ),
-            ),
-        ),
+        (PGREP, vec!["-x", "-f", HOST_PATTERN], output(0, "42\n")),
         (
             PS,
             vec!["-p", "42", "-o", "lstart=,comm="],
             output(0, &identity_output()),
         ),
-        (LSOF, vec!["-p", "42", "-Fn"], output(0, &mapping_output())),
+        (
+            LSOF,
+            vec!["-a", "-p", "42", "-d", "txt", "-Fn"],
+            output(0, &mapping_output()),
+        ),
         (KILL, vec!["-TERM", "42"], output(0, "")),
     ]);
     let mut hosts = CommandHosts(|program, args: &[&str]| {
@@ -579,17 +574,25 @@ fn command_adapter_uses_absolute_paths_and_exact_name_and_mapping() {
 
 #[test]
 fn discovery_and_identity_reject_malformed_or_ambiguous_output() {
-    for text in [
-        "bad",
-        &format!("0 {HOST_NAME}"),
-        &format!("42 {HOST_NAME}\n42 {HOST_NAME}"),
-    ] {
+    for text in ["bad", "0", "42\n42", "42 extra"] {
         assert!(
             CommandHosts(|_, _: &[&str]| Ok(output(0, text)))
                 .candidates()
                 .is_err()
         );
     }
+    // pgrep exits 1 without output when no host is loaded; anything else fails closed.
+    assert!(
+        CommandHosts(|_, _: &[&str]| Ok(output(1, "")))
+            .candidates()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        CommandHosts(|_, _: &[&str]| Ok(output(2, "")))
+            .candidates()
+            .is_err()
+    );
     for text in [
         "short",
         "Wed Oct 14 12:34:56 2026 coreaudiod",

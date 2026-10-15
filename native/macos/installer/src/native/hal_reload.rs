@@ -12,6 +12,9 @@ use super::{
 };
 
 const PS: &str = "/bin/ps";
+const PGREP: &str = "/usr/bin/pgrep";
+/// Exact (`-x`) extended regular expression for the host's full arguments.
+const HOST_PATTERN: &str = r"Core Audio Driver \(MixRelayHAL\.driver\)";
 const LSOF: &str = "/usr/sbin/lsof";
 const KILL: &str = "/bin/kill";
 const HOST_NAME: &str = "Core Audio Driver (MixRelayHAL.driver)";
@@ -176,21 +179,20 @@ where
     F: FnMut(&'static str, &[&str]) -> Result<ChildOutput, NativeError>,
 {
     fn candidates(&mut self) -> Result<Vec<u32>, NativeError> {
-        let output = (self.0)(PS, &["-axo", "pid=,comm="])?;
-        let text = successful_text(&output)?;
+        // Only matching PIDs are printed: the whole process table of an ordinary Mac
+        // exceeds the bounded command output. Each candidate is still validated by
+        // its exact command, start time and mapped executable.
+        let output = (self.0)(PGREP, &["-x", "-f", HOST_PATTERN])?;
+        if output.status.code() == Some(1) && output.stdout.is_empty() && output.stderr.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut pids = Vec::new();
-        for line in text.lines() {
-            let line = line.trim_start();
-            let (pid, name) = line
-                .split_once(char::is_whitespace)
-                .ok_or_else(|| failure("malformed host discovery output"))?;
-            if name.trim_start() == HOST_NAME {
-                let pid = parse_pid(pid)?;
-                if pids.contains(&pid) {
-                    return Err(failure("duplicate host discovery PID"));
-                }
-                pids.push(pid);
+        for line in successful_text(&output)?.lines() {
+            let pid = parse_pid(line.trim())?;
+            if pids.contains(&pid) {
+                return Err(failure("duplicate host discovery PID"));
             }
+            pids.push(pid);
         }
         Ok(pids)
     }
@@ -209,7 +211,9 @@ where
         if name.trim_start() != HOST_NAME || started.trim().is_empty() {
             return Err(failure("MixRelay HAL host process identity mismatch"));
         }
-        let mapping = (self.0)(LSOF, &["-p", &pid, "-Fn"])?;
+        // Mapped executables only (`txt`): the HAL binary is one, and the full file
+        // table of a busy host could exceed the bounded command output.
+        let mapping = (self.0)(LSOF, &["-a", "-p", &pid, "-d", "txt", "-Fn"])?;
         if !successful_text(&mapping)?.lines().any(|line| {
             bundles.iter().any(|bundle| {
                 line == format!("n{}", bundle.join("Contents/MacOS/MixRelayHAL").display())

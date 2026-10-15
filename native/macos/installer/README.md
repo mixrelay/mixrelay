@@ -7,9 +7,10 @@ tries to restart only the loaded MixRelay HAL hosts. Fresh installs use the full
 CoreAudio reload so the server discovers the new plug-in. Removal continues to
 use the full reload and the existing HAL-absence check.
 
-`src/native/hal_reload.rs` discovers PIDs with `/bin/ps -axo pid=,comm=` and accepts
-only the exact `Core Audio Driver (MixRelayHAL.driver)` command name. Every
-candidate in that snapshot must also have an exact `/usr/sbin/lsof -p PID -Fn`
+`src/native/hal_reload.rs` discovers PIDs with `/usr/bin/pgrep -x -f` for the exact
+`Core Audio Driver (MixRelayHAL.driver)` command; listing the whole process table
+would exceed the installer's bounded command output on an ordinary Mac. Every
+candidate in that snapshot must also have an exact `/usr/sbin/lsof -a -p PID -d txt -Fn`
 path record for
 `/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver/Contents/MacOS/MixRelayHAL`.
 The transaction's existing payload verification establishes bundle identity
