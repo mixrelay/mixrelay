@@ -191,6 +191,8 @@ struct StableEndpoint {
     clocks: Vec<ClockContext>,
     hysteresis: LatencyHysteresis,
     value: Option<u32>,
+    /// The last logged reason a window could not be measured, so each change logs once.
+    diagnosis: Option<String>,
 }
 impl StableEndpoint {
     fn apply(
@@ -212,6 +214,97 @@ impl StableEndpoint {
             .hysteresis
             .observe(if unstable { self.value } else { measured }, threshold);
         self.value
+    }
+}
+impl StableEndpoint {
+    /// Logs the reason a window was unusable when it differs from the previous window's, so an
+    /// installed `0` (unknown) report can be explained without a line per reporter tick.
+    /// Returns the reason it logged.
+    fn log(
+        &mut self,
+        id: &mixrelay_audio_io::VirtualEndpointId,
+        value: Option<u32>,
+        diagnosis: Option<String>,
+    ) -> Option<&str> {
+        if diagnosis == self.diagnosis {
+            return None;
+        }
+        self.diagnosis = diagnosis;
+        let reason = self.diagnosis.as_deref()?;
+        tracing::info!(endpoint = %id.as_str(), published = ?value, %reason, "input latency window unusable");
+        Some(reason)
+    }
+}
+/// One endpoint's sink bindings in the current window.
+struct Sinks<'a> {
+    plan: &'a RenderPlan,
+    current: &'a BTreeMap<String, Observation>,
+    delay: &'a dyn Fn(&str, bool) -> Option<f64>,
+    indexes: &'a [usize],
+    rate: u32,
+}
+impl Sinks<'_> {
+    /// Destination-rate frames when every sink binding measures and they agree.
+    fn measure(&self, arrivals: Option<&[Option<f64>]>) -> Option<u32> {
+        agree(
+            self.indexes.iter().map(|index| {
+                let id = self.plan.sink_bindings()[*index].node_id().as_str();
+                if binding(self.current, id, false)?.native_rate != self.rate {
+                    return None;
+                }
+                frames(
+                    arrivals?.get(*index).copied().flatten()? + (self.delay)(id, false)?,
+                    self.rate,
+                )
+            }),
+            threshold(self.rate),
+        )
+    }
+    /// Names the first sink condition that left a clean window without a measurement.
+    fn unmeasured(&self, arrivals: Option<&[Option<f64>]>) -> String {
+        for index in self.indexes {
+            let id = self.plan.sink_bindings()[*index].node_id().as_str();
+            match binding(self.current, id, false) {
+                Some(value) if value.native_rate != self.rate => {
+                    return format!(
+                        "{id}: native rate {} differs from endpoint rate {}",
+                        value.native_rate, self.rate
+                    );
+                }
+                None => return format!("{id}: no observation"),
+                Some(_) => {}
+            }
+            if arrivals
+                .and_then(|arrivals| arrivals.get(*index).copied().flatten())
+                .is_none()
+            {
+                return format!("{id}: no measured arrival from its sources");
+            }
+            if (self.delay)(id, false).is_none() {
+                return format!("{id}: presentation delay unavailable");
+            }
+        }
+        "sink bindings disagree beyond the threshold".into()
+    }
+}
+/// Planned arrivals from measured sources. A contended read disturbs the window (`true`);
+/// an invalid request leaves it unknown. Either way the reason is returned for diagnostics.
+fn destination_arrivals(
+    plan: &RenderPlan,
+    sources: &[Option<f64>],
+    rate: u32,
+) -> Result<Vec<Option<f64>>, (bool, String)> {
+    let threshold_ns = f64::from(threshold(rate)) * 1e9 / f64::from(rate);
+    plan.measured_destination_arrivals(sources, threshold_ns)
+        .map_err(arrival_failure)
+}
+fn arrival_failure(error: mixrelay_audio_engine::ArrivalError) -> (bool, String) {
+    match error {
+        // Overlapping the audio thread disturbs this window; it is not unknown.
+        mixrelay_audio_engine::ArrivalError::Contended => (true, "arrival read contended".into()),
+        mixrelay_audio_engine::ArrivalError::Invalid(reason) => {
+            (false, format!("arrival invalid: {reason}"))
+        }
     }
 }
 fn threshold(rate: u32) -> u32 {
@@ -261,44 +354,47 @@ fn endpoint_observations(
 }
 
 // Missing snapshots skip a window; only independently retained metadata changes context.
+// The second value names why the window is disturbed, for diagnostics.
 fn endpoint_window(
     plan: &RenderPlan,
     indexes: &[usize],
     current: &BTreeMap<String, Observation>,
     previous: &BTreeMap<String, Observation>,
     contributors: &[Vec<usize>],
-) -> (Vec<ClockContext>, bool) {
+) -> (Vec<ClockContext>, Option<String>) {
     let mut contexts = previous.clone();
     contexts.extend(current.clone());
     let selected = endpoint_observations(plan, indexes, &contexts, contributors);
-    let missing = indexes.iter().any(|index| {
-        binding(
-            current,
-            plan.sink_bindings()[*index].node_id().as_str(),
-            false,
-        )
-        .is_none_or(|value| !value.sampled)
-            || contributors[*index].iter().any(|source| {
-                binding(
-                    current,
-                    plan.source_bindings()[*source].node_id().as_str(),
-                    true,
-                )
-                .is_none_or(|value| !value.sampled)
+    let unsampled = |id: &str, input: bool| match binding(current, id, input) {
+        None => Some(format!("{id}: no observation for the active plan")),
+        Some(value) if !value.sampled => Some(format!("{id}: taps not sampled")),
+        Some(_) => None,
+    };
+    let missing = indexes.iter().find_map(|index| {
+        unsampled(plan.sink_bindings()[*index].node_id().as_str(), false).or_else(|| {
+            contributors[*index].iter().find_map(|source| {
+                unsampled(plan.source_bindings()[*source].node_id().as_str(), true)
             })
+        })
     });
     let clocks = selected
         .iter()
         .map(|value| value.context())
         .collect::<Vec<_>>();
-    let unstable = missing
-        || selected.iter().any(|value| {
-            previous
-                .values()
-                .find(|old| old.identity == value.identity)
-                .is_none_or(|old| value.context() != old.context() || value.unstable(*old))
-        });
-    (clocks, unstable)
+    let disturbed = missing.or_else(|| {
+        selected.iter().find_map(|value| {
+            let Some(old) = previous.values().find(|old| old.identity == value.identity) else {
+                return Some(format!("device {}: first window", value.identity));
+            };
+            if value.context() != old.context() {
+                return Some(format!("device {}: clock context changed", value.identity));
+            }
+            value
+                .instability(*old)
+                .map(|reason| format!("device {}: {reason}", value.identity))
+        })
+    });
+    (clocks, disturbed)
 }
 
 impl Measurements {
@@ -345,37 +441,30 @@ impl Measurements {
             if indexes.is_empty() {
                 continue;
             }
-            let (clocks, mut unstable) =
+            let (clocks, mut diagnosis) =
                 endpoint_window(plan, &indexes, &current, &self.previous, &contributors);
-            let threshold_ns = f64::from(threshold(*rate)) * 1e9 / f64::from(*rate);
-            let arrivals = match plan.measured_destination_arrivals(&sources, threshold_ns) {
-                Ok(arrivals) => Some(arrivals),
-                // Overlapping the audio thread disturbs this window; it is not unknown.
-                Err(mixrelay_audio_engine::ArrivalError::Contended) => {
-                    unstable = true;
-                    None
-                }
-                Err(mixrelay_audio_engine::ArrivalError::Invalid(_)) => None,
+            let mut unstable = diagnosis.is_some();
+            let arrivals = destination_arrivals(plan, &sources, *rate)
+                .map_err(|(contended, reason)| {
+                    unstable |= contended;
+                    diagnosis.get_or_insert(reason);
+                })
+                .ok();
+            let sinks = Sinks {
+                plan,
+                current: &current,
+                delay: &delay,
+                indexes: &indexes,
+                rate: *rate,
             };
-            let measured = agree(
-                indexes.iter().map(|index| {
-                    let sink = &plan.sink_bindings()[*index];
-                    if binding(&current, sink.node_id().as_str(), false)?.native_rate != *rate {
-                        return None;
-                    }
-                    frames(
-                        arrivals.as_ref()?.get(*index).copied().flatten()?
-                            + delay(sink.node_id().as_str(), false)?,
-                        *rate,
-                    )
-                }),
-                threshold(*rate),
-            );
+            let measured = sinks.measure(arrivals.as_deref());
+            if measured.is_none() {
+                diagnosis.get_or_insert_with(|| sinks.unmeasured(arrivals.as_deref()));
+            }
             let endpoint = self.endpoints.entry(id.clone()).or_default();
-            result.insert(
-                id.clone(),
-                endpoint.apply(*rate, &clocks, measured, unstable),
-            );
+            let value = endpoint.apply(*rate, &clocks, measured, unstable);
+            let _ = endpoint.log(id, value, diagnosis);
+            result.insert(id.clone(), value);
         }
         for (id, value) in current {
             if value.sampled
@@ -710,6 +799,93 @@ pub(crate) mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn unusable_windows_name_their_first_reason_once() {
+        let plan = feedback_plan();
+        let id = plan.sink_bindings()[0]
+            .virtual_endpoint_id()
+            .unwrap()
+            .clone();
+        let rates = BTreeMap::from([(id.clone(), 48_000)]);
+        let mut measurement = Measurements::default();
+        let mut value = observation();
+        let current = |value| BTreeMap::from([("virtual".into(), value)]);
+        let reason = |measurement: &Measurements| measurement.endpoints[&id].diagnosis.clone();
+        measurement.observe(&plan, 1, BTreeMap::new(), &rates);
+        assert_eq!(
+            reason(&measurement).as_deref(),
+            Some("virtual: no observation for the active plan")
+        );
+        measurement.observe(&plan, 1, current(value), &rates);
+        assert_eq!(
+            reason(&measurement).as_deref(),
+            Some("device 1: first window")
+        );
+        value.native.acquisition.weight += 1;
+        value.native.presentation.weight += 1;
+        assert_eq!(
+            measurement.observe(&plan, 1, current(value), &rates)[&id],
+            Some(0)
+        );
+        assert_eq!(reason(&measurement), None);
+        value.faults += 1;
+        measurement.observe(&plan, 1, current(value), &rates);
+        assert_eq!(
+            reason(&measurement).as_deref(),
+            Some("device 1: binding faults advanced")
+        );
+        value.native_rate = 44_100;
+        value.native.acquisition.weight += 1;
+        value.native.presentation.weight += 1;
+        measurement.observe(&plan, 1, current(value), &rates);
+        assert_eq!(
+            reason(&measurement).as_deref(),
+            Some("device 1: clock context changed")
+        );
+        // An unsampled tap is named before the fault it also carries.
+        let mut both = value;
+        both.sampled = false;
+        both.faults += 1;
+        measurement.observe(&plan, 1, current(both), &rates);
+        assert_eq!(
+            reason(&measurement).as_deref(),
+            Some("virtual: taps not sampled")
+        );
+    }
+
+    #[test]
+    fn a_repeated_reason_logs_once_and_logs_again_after_recovery() {
+        let id = mixrelay_audio_io::VirtualEndpointId::new("device".into());
+        let mut endpoint = StableEndpoint::default();
+        let reason = || Some("device 1: binding faults advanced".to_owned());
+        assert_eq!(
+            endpoint.log(&id, None, reason()),
+            Some("device 1: binding faults advanced")
+        );
+        assert_eq!(endpoint.log(&id, None, reason()), None);
+        assert_eq!(endpoint.log(&id, Some(10), None), None);
+        assert_eq!(
+            endpoint.log(&id, Some(10), reason()),
+            Some("device 1: binding faults advanced")
+        );
+        assert_eq!(
+            endpoint.log(&id, Some(10), Some("arrival read contended".into())),
+            Some("arrival read contended")
+        );
+    }
+
+    #[test]
+    fn arrival_contention_disturbs_while_an_invalid_request_is_unknown() {
+        assert_eq!(
+            arrival_failure(mixrelay_audio_engine::ArrivalError::Contended),
+            (true, "arrival read contended".into())
+        );
+        assert_eq!(
+            arrival_failure(mixrelay_audio_engine::ArrivalError::Invalid("size".into())),
+            (false, "arrival invalid: size".into())
+        );
     }
 
     #[test]

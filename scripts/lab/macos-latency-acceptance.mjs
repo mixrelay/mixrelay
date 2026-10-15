@@ -155,6 +155,7 @@ test.edges.push({
 let mutation = 'none';
 let applied;
 const result = { graphId, source: sourceUid, endpoint: uid };
+const failures = [];
 try {
   mutation = 'unknown';
   const applying = await applyGraph(test);
@@ -167,24 +168,36 @@ try {
   assert.equal(applied.revision, test.revision);
   assert.deepEqual(applied.edges, test.edges);
   // Samples about one publication apart, so three equal values span three reporter windows.
-  const readings = [];
+  const readings = (result.readings = []);
   result.reported = await until('a stable reported input latency', () => {
     readings.push(reported());
     const last = readings.slice(-3);
     return last.length === 3 && last[0].latency > 0 && last.every(value => value.latency === last[0].latency)
       ? last[0] : undefined;
   }, 30, PUBLICATION_INTERVAL_MS);
-  result.readings = readings;
   if (roundtrip) {
     const output = execFileSync('zsh', [probe, '--json', '--seconds', '5', sourceUid, uid], { encoding: 'utf8', timeout: 60000 });
     result.roundtrip = JSON.parse(output);
   }
   record('measured.json', { graph: applied, ...result });
-} finally {
+} catch (error) {
+  failures.push(error);
+}
+// Cleanup runs whether or not the measurement succeeded; its own failure is kept too.
+try {
   if (mutation === 'unknown') {
     assert.fail(`The test graph operation has no terminal result; check graph ${graphId} (original saved in ${evidence})`);
   }
   if (mutation === 'applied') await restore();
+} catch (error) {
+  failures.push(error);
+}
+if (failures.length) {
+  // Keep what was observed so a failed run can be diagnosed from its evidence.
+  record('failed.json', {
+    errors: failures.map(String), graph: applied, status: await api('status').catch(String), ...result,
+  });
+  throw failures[0];
 }
 
 async function restore() {

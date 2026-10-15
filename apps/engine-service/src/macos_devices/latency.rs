@@ -55,16 +55,27 @@ impl Observation {
             self.graph_epoch,
         )
     }
-    pub(crate) fn unstable(self, previous: Self) -> bool {
-        !self.sampled
-            || !previous.sampled
-            || !self.ready
-            || self.faults != previous.faults
-            || self.native.faults != previous.native.faults
-            || self.native.native_queue.invalid != previous.native.native_queue.invalid
-            || self.native.graph_queue.invalid != previous.native.graph_queue.invalid
-            || self.src_input.invalid != previous.src_input.invalid
+    /// Why this window cannot be measured, for diagnostics; `None` when it is usable.
+    pub(crate) fn instability(self, previous: Self) -> Option<&'static str> {
+        if !self.sampled || !previous.sampled {
+            Some("taps not sampled")
+        } else if !self.ready {
+            Some("not ready")
+        } else if self.faults != previous.faults {
+            Some("binding faults advanced")
+        } else if self.native.faults != previous.native.faults {
+            Some("native faults advanced")
+        } else if self.native.native_queue.invalid != previous.native.native_queue.invalid {
+            Some("native queue residence invalid")
+        } else if self.native.graph_queue.invalid != previous.native.graph_queue.invalid {
+            Some("graph queue residence invalid")
+        } else if self.src_input.invalid != previous.src_input.invalid
             || self.src_output.invalid != previous.src_output.invalid
+        {
+            Some("SRC residence invalid")
+        } else {
+            None
+        }
     }
     /// Host intervals in ticks; all FIFO means in their own rate domain.
     pub(crate) fn delay_ns(self, previous: Self, input: bool, ns_per_tick: f64) -> Option<f64> {
@@ -435,9 +446,9 @@ pub(crate) mod tests {
             + 48.0 * 0.5e9 / 44_100.0
             + 10.0 * 1e9 / 44_100.0;
         assert_eq!(next.delay_ns(old, false, 1.0), Some(output));
-        assert!(!next.unstable(old));
+        assert_eq!(next.instability(old), None);
         next.faults += 1;
-        assert!(next.unstable(old));
+        assert!(next.instability(old).is_some());
         next.direct = true;
         assert_eq!(next.delay_ns(old, true, 1.0), Some(100.0));
         assert_eq!(next.delay_ns(old, false, 1.0), Some(50.0));
