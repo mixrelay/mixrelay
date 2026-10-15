@@ -420,17 +420,22 @@ static AudioDeviceID mr_find(const char *text) {
 }
 
 // Read-only query from this process: no IOProc, recording or default-device changes.
+// Queries several times: the first answer may precede the HAL's identity discovery.
 static int mr_transport(const char *uid) {
-    const AudioDeviceID device = mr_find(uid);
-    UInt32 transport = 0;
-    if (device == kAudioObjectUnknown || !mr_get(device, kAudioDevicePropertyTransportType,
-            kAudioObjectPropertyScopeGlobal, &transport, sizeof(transport))) {
-        fprintf(stderr, "transport query failed for %s\n", uid);
-        return 1;
+    const AudioObjectID device = mr_find(uid);
+    for (int attempt = 0; attempt < 5; attempt += 1) {
+        UInt32 transport = 0;
+        if (device == kAudioObjectUnknown ||
+            !mr_get(device, kAudioDevicePropertyTransportType, kAudioObjectPropertyScopeGlobal,
+                    &transport, sizeof(transport))) {
+            fprintf(stderr, "transport query failed for %s\n", uid);
+            return 1;
+        }
+        printf("pid=%ld attempt=%d transport='%c%c%c%c'\n", (long)getpid(), attempt,
+               (int)((transport >> 24) & 255U), (int)((transport >> 16) & 255U),
+               (int)((transport >> 8) & 255U), (int)(transport & 255U));
+        usleep(100000);
     }
-    printf("pid=%ld transport='%c%c%c%c'\n", (long)getpid(),
-           (int)((transport >> 24) & 255U), (int)((transport >> 16) & 255U),
-           (int)((transport >> 8) & 255U), (int)(transport & 255U));
     return 0;
 }
 

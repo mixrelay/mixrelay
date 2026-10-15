@@ -709,3 +709,21 @@ fn exit_confirmation_is_bounded_and_never_accepts_uncertainty_as_exit() {
         .is_err()
     );
 }
+
+/// Live check on a Mac with MixRelay loaded: `cargo test -- --ignored live_host_discovery`.
+#[test]
+#[ignore = "needs a loaded MixRelay HAL host"]
+fn live_host_discovery_stays_within_the_command_budget() {
+    let mut hosts = CommandHosts(launchctl::run_command);
+    let pids = hosts.candidates().unwrap();
+    assert!(!pids.is_empty(), "no MixRelay HAL host is loaded");
+    for pid in pids {
+        let output =
+            launchctl::run_command(PS, &["-p", &pid.to_string(), "-o", "lstart=,comm="]).unwrap();
+        assert!(
+            successful_text(&output)
+                .unwrap()
+                .ends_with(&format!("{HOST_NAME}\n"))
+        );
+    }
+}

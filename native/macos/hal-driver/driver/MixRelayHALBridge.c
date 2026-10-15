@@ -4,6 +4,7 @@
 #include <CoreAudio/AudioServerPlugIn.h>
 #include <CoreFoundation/CFPlugInCOM.h>
 #include <mach/mach_time.h>
+#include <os/log.h>
 #include <stdatomic.h>
 #include <string.h>
 #include "MRHALCore.h"
@@ -114,7 +115,18 @@ static OSStatus property_size(AudioServerPlugInDriverRef driver, AudioObjectID o
     return valid(driver) ? mr_hal_core_property_size(gCore, object, address(property), output) : kAudioHardwareBadObjectError;
 }
 static OSStatus property_get(AudioServerPlugInDriverRef driver, AudioObjectID object, pid_t pid, const AudioObjectPropertyAddress *property, UInt32 qualifier_size, const void *qualifier, UInt32 capacity, UInt32 *written, void *output) {
-    return valid(driver) ? mr_hal_core_property_get(gCore, object, address(property), qualifier_size, qualifier, capacity, written, output, property != NULL && property->mSelector == kAudioDevicePropertyTransportType ? pid : 0) : kAudioHardwareBadObjectError;
+    if (!valid(driver)) return kAudioHardwareBadObjectError;
+    const bool transport = property != NULL && property->mSelector == kAudioDevicePropertyTransportType;
+    OSStatus status = mr_hal_core_property_get(gCore, object, address(property), qualifier_size, qualifier, capacity, written, output, transport ? pid : 0);
+    // Rare control-plane query: record which requester received which presentation.
+    if (transport && status == noErr && output != NULL && written != NULL && *written >= sizeof(UInt32)) {
+        static os_log_t log;
+        if (log == NULL) log = os_log_create("io.mixrelay.audio.driver", "transport");
+        UInt32 value;
+        memcpy(&value, output, sizeof(value));
+        os_log(log, "transport for pid %d: %{public}c%c%c%c", (int)pid, (char)(value >> 24), (char)(value >> 16), (char)(value >> 8), (char)value);
+    }
+    return status;
 }
 static OSStatus property_set(AudioServerPlugInDriverRef driver, AudioObjectID object, pid_t pid, const AudioObjectPropertyAddress *property, UInt32 qualifier_size, const void *qualifier, UInt32 size, const void *input) {
     (void)pid; (void)qualifier_size; (void)qualifier;
