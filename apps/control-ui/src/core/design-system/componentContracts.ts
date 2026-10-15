@@ -322,10 +322,13 @@ export const componentContracts: readonly ComponentContract[] = [
     group: 'Commands',
     purpose: '그래프 목록 영역을 접거나 다시 연다.',
     use: 'opened, controls ID, 현재 행동 label을 같이 갱신한다.',
-    avoid: '단순 장식 경계나 레이아웃 래퍼에 버튼 역할을 붙이지 않는다.',
-    anatomy: '열림: sidebar 경계 button; 닫힘: chevron 재열기 button.',
+    avoid:
+      '열림·닫힘에 따라 위치·크기를 바꾸거나 캔버스 위에 별도 탭을 띄우지 않는다. 단순 장식 경계에 버튼 역할을 붙이지 않는다.',
+    anatomy:
+      '앱 헤더의 고정 24px 아이콘 button 하나. 사이드바 아이콘의 왼쪽 패널은 열림에서 채운다.',
     states: 'opened 필수. controls는 대상 ID. label과 onToggle 필수.',
-    tokens: 'SidebarToggle CSS의 경계 hit 영역·재열기 영역; --focus-color / --focus-width.',
+    tokens:
+      'IconActionButton 규격(--control-height-compact·--command-icon-size·hover·focus)을 그대로 사용한다.',
     interaction:
       'Enter/Space. label을 aria-label·공통 Tooltip에 사용하고 추가 Tab 대상을 만들지 않는다. aria-expanded와 aria-controls는 실제 패널에 대응한다.',
     source: 'apps/control-ui/src/core/ui/SidebarToggle.tsx',

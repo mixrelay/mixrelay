@@ -275,7 +275,15 @@ function StudioFrame({
   return (
     <main ref={shell} className={styles.shell} data-sidebar-open={sidebarOpen}>
       <header className={styles.applicationHeader}>
-        <ProductHeading />
+        <span className={styles.applicationLead}>
+          <ProductHeading />
+          <SidebarToggle
+            label={t('studio.graphs')}
+            opened={sidebarOpen}
+            controls="graph-sidebar"
+            onToggle={() => setSidebarOpen((open) => !open)}
+          />
+        </span>
         <span className={styles.applicationActions}>
           <ThemePicker />
           {applicationActions}
@@ -288,12 +296,6 @@ function StudioFrame({
           pendingSelection.current = id;
           sidebar.onSelect(id);
         }}
-      />
-      <SidebarToggle
-        label={t('studio.graphs')}
-        opened={sidebarOpen}
-        controls="graph-sidebar"
-        onToggle={() => setSidebarOpen((open) => !open)}
       />
       {children}
     </main>

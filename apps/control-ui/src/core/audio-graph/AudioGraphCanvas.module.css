@@ -26,7 +26,7 @@
 .nodeToolbar {
   z-index: var(--layer-canvas-toolbar);
   margin: var(--space-3);
-  margin-left: var(--layout-canvas-toolbar-inset, var(--space-3));
+  margin-left: var(--space-3);
 }
 
 .addNode {

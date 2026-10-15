@@ -305,26 +305,25 @@ it.each([
   },
 );
 
-it('uses a visible chevron tab to reopen the sidebar without changing the graph or header', async () => {
+it('toggles the sidebar from one fixed header button without changing the graph or header', async () => {
   const controlPort = port(1);
   const mutate = vi.spyOn(controlPort, 'mutateGraphCatalog');
   render(view(controlPort));
   await screen.findByRole('button', { name: 'Untitled Graph' });
-  const logo = screen.getByRole('heading', { name: 'MixRelay' });
-  const boundary = screen.getByRole('button', { name: 'Graphs' });
-  expect(boundary.querySelector('svg')).toBeNull();
-  expect(boundary).toHaveAttribute('aria-expanded', 'true');
-  fireEvent.click(boundary);
-  const tab = screen.getByRole('button', { name: 'Graphs' });
-  expect(tab).toHaveAttribute('aria-controls', 'graph-sidebar');
-  expect(tab).toHaveAttribute('aria-expanded', 'false');
-  expect(tab.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  const header = screen.getByRole('heading', { name: 'MixRelay' }).closest('header');
+  const toggle = screen.getByRole('button', { name: 'Graphs' });
+  expect(header).toContainElement(toggle);
+  expect(toggle).toHaveAttribute('aria-controls', 'graph-sidebar');
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  expect(toggle.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  fireEvent.click(toggle);
+  // The same element stays in the header; only its state and the list change.
+  expect(screen.getByRole('button', { name: 'Graphs' })).toBe(toggle);
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
   expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument();
-  expect(logo).toBeVisible();
-  expect(logo.parentElement).not.toContainElement(tab);
-  fireEvent.click(tab);
+  fireEvent.click(toggle);
   expect(screen.getByRole('navigation', { name: 'Graphs' })).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Graphs' })).toHaveAttribute('aria-expanded', 'true');
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
   expect(mutate).not.toHaveBeenCalled();
 });
 

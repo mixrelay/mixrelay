@@ -23,18 +23,19 @@
   background: var(--surface);
 }
 
+.applicationLead,
 .applicationActions {
   display: flex;
   align-items: center;
 }
 
-.shell[data-sidebar-open="false"] {
-  grid-template-columns: 132px minmax(0, 1fr);
+.applicationLead {
+  gap: var(--space-2);
 }
 
+/* The header keeps the sidebar width while the list is closed; only the canvas widens. */
 .shell[data-sidebar-open="false"] .applicationHeader {
   z-index: var(--layer-shell-header);
-  padding: 0 var(--space-2);
 }
 
 .sidebar {
@@ -82,8 +83,7 @@
 }
 
 :where(.shell[data-sidebar-open="false"]) .workspace {
-  --layout-workspace-header-inset: 144px;
-  --layout-canvas-toolbar-inset: 32px;
+  --layout-workspace-header-inset: calc(var(--layout-sidebar-width) + var(--space-4));
   grid-column: 1 / -1;
 }
 
