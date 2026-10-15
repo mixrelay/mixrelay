@@ -43,6 +43,7 @@ pub enum LatencyCommand {
         incarnation: String,
         process_id: u32,
     },
+    /// The engine's complete set: an endpoint it no longer lists is unknown again.
     Publish {
         lease: EngineLatencyLease,
         destinations: Vec<RuntimeLatency>,
@@ -135,39 +136,7 @@ impl LatencyAuthority {
             LatencyCommand::Publish {
                 lease,
                 destinations,
-            } => {
-                if !self.matches(&lease) {
-                    return Ok(self.reply(false));
-                }
-                if destinations.len() > 64
-                    || destinations
-                        .iter()
-                        .any(|entry| entry.rate == 0 || entry.engine_lease != lease)
-                {
-                    return Err(DriverError::Invalid("invalid latency publication".into()));
-                }
-                let mut seen = std::collections::BTreeSet::new();
-                if destinations
-                    .iter()
-                    .any(|entry| !seen.insert(entry.endpoint_id.clone()))
-                {
-                    return Err(DriverError::Invalid("duplicate latency endpoint".into()));
-                }
-                for entry in destinations {
-                    if self
-                        .destinations
-                        .get(&entry.endpoint_id)
-                        .is_some_and(|old| {
-                            old.applied_graph_revision > entry.applied_graph_revision
-                        })
-                    {
-                        continue;
-                    }
-                    backend.publish_latency(&entry)?;
-                    self.destinations.insert(entry.endpoint_id.clone(), entry);
-                }
-                self.current = Some((lease, now + LEASE_TIMEOUT));
-            }
+            } => return self.publish(lease, destinations, now, backend),
             LatencyCommand::Release { lease } => {
                 if !self.matches(&lease) {
                     return Ok(self.reply(false));
@@ -175,6 +144,58 @@ impl LatencyAuthority {
                 self.clear(backend)?;
             }
         }
+        Ok(self.reply(true))
+    }
+    fn publish(
+        &mut self,
+        lease: EngineLatencyLease,
+        destinations: Vec<RuntimeLatency>,
+        now: Instant,
+        backend: &mut dyn DriverBackend,
+    ) -> Result<LatencyReply, DriverError> {
+        if !self.matches(&lease) {
+            return Ok(self.reply(false));
+        }
+        if destinations.len() > 64
+            || destinations
+                .iter()
+                .any(|entry| entry.rate == 0 || entry.engine_lease != lease)
+        {
+            return Err(DriverError::Invalid("invalid latency publication".into()));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        if destinations
+            .iter()
+            .any(|entry| !seen.insert(entry.endpoint_id.clone()))
+        {
+            return Err(DriverError::Invalid("duplicate latency endpoint".into()));
+        }
+        // A route that no longer reaches an endpoint leaves no measurement for it.
+        // Unknown is the fail-closed answer, so clearing never needs a revision fence.
+        // The entry stays as unknown: it keeps the endpoint's revision fence, and a
+        // failed clear is retried by the next publication, release or expiry.
+        for old in self.destinations.values_mut() {
+            if !seen.contains(&old.endpoint_id) && old.input_latency_frames.is_some() {
+                let unknown = RuntimeLatency {
+                    input_latency_frames: None,
+                    ..old.clone()
+                };
+                backend.publish_latency(&unknown)?;
+                *old = unknown;
+            }
+        }
+        for entry in destinations {
+            if self
+                .destinations
+                .get(&entry.endpoint_id)
+                .is_some_and(|old| old.applied_graph_revision > entry.applied_graph_revision)
+            {
+                continue;
+            }
+            backend.publish_latency(&entry)?;
+            self.destinations.insert(entry.endpoint_id.clone(), entry);
+        }
+        self.current = Some((lease, now + LEASE_TIMEOUT));
         Ok(self.reply(true))
     }
     fn matches(&self, lease: &EngineLatencyLease) -> bool {

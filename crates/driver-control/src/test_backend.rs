@@ -16,6 +16,8 @@ pub(crate) struct Observation {
     pub(crate) settings: VirtualEndpointSettings,
     pub(crate) applies: usize,
     pub(crate) latencies: Vec<crate::RuntimeLatency>,
+    /// Endpoints whose latency publication fails while listed.
+    pub(crate) failed_latencies: BTreeSet<String>,
     pub(crate) readbacks: usize,
     pub(crate) fail_apply: bool,
     pub(crate) fail_read: bool,
@@ -36,6 +38,7 @@ impl FakeBackend {
             }),
             applies: 0,
             latencies: Vec::new(),
+            failed_latencies: BTreeSet::new(),
             readbacks: 0,
             fail_apply: false,
             fail_read: false,
@@ -48,7 +51,16 @@ impl FakeBackend {
 
 impl DriverBackend for FakeBackend {
     fn publish_latency(&mut self, publication: &crate::RuntimeLatency) -> Result<(), DriverError> {
-        self.0.lock().latencies.push(publication.clone());
+        let mut observation = self.0.lock();
+        if observation
+            .failed_latencies
+            .contains(publication.endpoint_id.as_str())
+        {
+            return Err(DriverError::Backend(
+                "fixture latency publication failed".into(),
+            ));
+        }
+        observation.latencies.push(publication.clone());
         Ok(())
     }
     fn settings(&self) -> Result<VirtualEndpointSettings, DriverError> {
