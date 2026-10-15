@@ -54,3 +54,17 @@ it('releases a listener that registers after unmount and stays inert outside the
   expect(native.listen).not.toHaveBeenCalled();
   expect(native.invoke).not.toHaveBeenCalled();
 });
+
+it('logs native listener and label failures without throwing', async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    native.listen.mockRejectedValue(new Error('no event bus'));
+    native.invoke.mockRejectedValue(new Error('no command'));
+    renderHook(() => useNativeGraphListCommand(true, vi.fn()));
+    await waitFor(() => expect(error).toHaveBeenCalledTimes(2));
+    expect(error).toHaveBeenCalledWith('Graph list menu listener failed', expect.any(Error));
+    expect(error).toHaveBeenCalledWith('Graph list menu label failed', expect.any(Error));
+  } finally {
+    error.mockRestore();
+  }
+});

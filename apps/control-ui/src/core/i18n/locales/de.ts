@@ -374,6 +374,7 @@ export const de = {
       },
     },
     addNode: 'Knoten hinzufügen',
+    emptyCanvas: 'Noch keine Knoten. Fügen Sie Apps, Geräte und Effekte mit + oben links hinzu.',
     noApplications: 'Keine laufenden Anwendungen',
     noInputDevices: 'Keine Eingabegeräte',
     noOutputDevices: 'Keine Ausgabegeräte',

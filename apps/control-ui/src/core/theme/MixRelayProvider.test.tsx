@@ -19,11 +19,11 @@ it('publishes shared tokens to app and Storybook consumers', () => {
   expect(css).toContain(`--canvas-background:${mixrelayVariables['--canvas-background']}`);
   expect(css).toContain(`--status-accent:${themeRoles.light['--status-accent']}`);
   expect(css).toContain(`--status-accent:${themeRoles.dark['--status-accent']}`);
-  expect(css).toContain('--meter-normal:var(--status-positive)');
+  expect(css).toContain(`--meter-normal:${themeRoles.dark['--meter-normal']}`);
   // Legacy aliases are gone; consumers use the canonical roles directly.
   expect(css).not.toMatch(/--(bg|text|muted|line|red|amber|positive|accent|signal):/u);
   expect(css).toContain('--transport-background-active:var(--status-danger-surface)');
-  expect(css).toContain(`--meter-normal:${mixrelayVariables['--meter-normal']}`);
+  expect(css).toContain(`--meter-high-start:${mixrelayVariables['--meter-high-start']}`);
   expect(css).toContain('--transport-size:var(--control-height)');
   expect(css).toContain('--form-actions-gap:var(--space-2)');
   expect(css).toContain('--form-actions-inset:var(--space-3)');

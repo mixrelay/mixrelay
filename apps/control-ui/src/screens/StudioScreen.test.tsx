@@ -216,6 +216,15 @@ it('lets free users save and open their single graph while refusing a second gra
   height.mockRestore();
 });
 
+it('names the new-graph command and shows a reached free limit as text', async () => {
+  const controlPort = port(1);
+  render(<FeatureAccess.Provider value={false}>{view(controlPort)}</FeatureAccess.Provider>);
+  const launcher = await screen.findByRole('button', { name: 'New graph' });
+  await waitFor(() => expect(launcher).toBeDisabled());
+  expect(launcher).toHaveAccessibleDescription('Free: 1 graph');
+  expect(screen.getByText('Free: 1 graph')).toBeVisible();
+});
+
 it('keeps the new-graph launcher stable across background saves but guards creation', async () => {
   const controlPort = port(1);
   const mutate = vi.spyOn(controlPort, 'mutateGraphCatalog');
@@ -223,15 +232,8 @@ it('keeps the new-graph launcher stable across background saves but guards creat
   const launcher = await screen.findByRole('button', { name: 'New graph' });
   await waitFor(() => expect(launcher).toBeEnabled());
   expect(launcher).toHaveAttribute('aria-keyshortcuts', 'Control+Shift+N');
-  vi.useFakeTimers();
-  try {
-    fireEvent.pointerMove(document.body);
-    fireEvent.pointerOver(launcher);
-    await act(async () => vi.advanceTimersByTime(500));
-    expect(screen.getByRole('tooltip')).toHaveTextContent('New graph');
-  } finally {
-    vi.useRealTimers();
-  }
+  // The command carries a visible name, so it needs no tooltip to explain itself.
+  expect(launcher).toHaveTextContent('New graph');
   const binding = workspaceBindings.get(controlPort);
   if (!binding) throw new Error('Workspace not mounted');
   let transitions = 0;
@@ -560,6 +562,64 @@ it('does not pull focus back after the user deliberately left the menu button', 
     // A real blur and a later resize are separate tasks; let the blur settle first.
     await act(async () => menu.blur());
     width.set(false);
+    expect(document.activeElement).toBe(document.body);
+  } finally {
+    width.restore();
+  }
+});
+
+function enabledListControl() {
+  const control = within(screen.getByRole('navigation', { name: 'Graphs' }))
+    .getAllByRole('button')
+    .find((button) => !button.hasAttribute('disabled'));
+  if (!control) throw new Error('Expected a graph list control');
+  return control;
+}
+
+it('leaves focus in the list when widening keeps the list on screen', async () => {
+  const width = breakpoint(true);
+  try {
+    render(view(port(1)));
+    fireEvent.click(await screen.findByRole('button', { name: 'Graphs' }));
+    const item = enabledListControl();
+    act(() => item.focus());
+    width.set(false);
+    expect(item).toHaveFocus();
+  } finally {
+    width.restore();
+  }
+});
+
+it('lets focus that left the shell stay where it went when the list hides', async () => {
+  render(view(port(1)));
+  await screen.findByRole('navigation', { name: 'Graphs' });
+  const item = enabledListControl();
+  act(() => item.focus());
+  // Moving within the shell keeps tracking; leaving it ends the shell's claim.
+  act(() => screen.getByRole('region', { name: 'Routing workspace' }).focus());
+  act(() => item.focus());
+  const outside = document.createElement('button');
+  document.body.append(outside);
+  try {
+    act(() => outside.focus());
+    act(() => graphListCommand.toggle());
+    expect(outside).toHaveFocus();
+  } finally {
+    outside.remove();
+  }
+});
+
+it('does not move focus when a blur and an open land in the same task', async () => {
+  const width = breakpoint(true);
+  try {
+    render(view(port(1)));
+    const menu = await screen.findByRole('button', { name: 'Graphs' });
+    act(() => menu.focus());
+    act(() => {
+      menu.blur();
+      graphListCommand.toggle();
+    });
+    expect(screen.getByRole('navigation', { name: 'Graphs' })).toBeVisible();
     expect(document.activeElement).toBe(document.body);
   } finally {
     width.restore();

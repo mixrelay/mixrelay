@@ -31,7 +31,8 @@
   background: color-mix(in srgb, var(--status-warning) 10%, transparent);
 }
 .button[data-action="power"][aria-pressed="true"] {
-  color: var(--status-positive);
+  /* On is the normal state: neutral and bright. Off stays muted; colour is for exceptions. */
+  color: var(--text-primary);
 }
 .button:disabled {
   opacity: var(--control-disabled-opacity);

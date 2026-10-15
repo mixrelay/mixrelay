@@ -60,8 +60,10 @@ function ReferenceTable({
 
 const semanticPurpose: Record<keyof typeof themeRoles.light, string> = {
   '--background': '화면·캔버스의 기본 바탕',
-  '--surface': '입력·노드 Off·떠 있는 UI의 바탕',
-  '--surface-muted': '기본 노드 표면',
+  '--surface': '헤더·사이드바·떠 있는 UI의 바탕',
+  '--surface-muted': '입력 필드 등 낮은 강조 표면',
+  '--surface-node': '노드 표면; 캔버스보다 1.3:1 이상 들어 올림',
+  '--node-background-off': 'Off 노드 표면; 켜진 노드보다 가라앉음',
   '--surface-hover': '명령·메뉴의 hover 표면',
   '--surface-active': '명령을 누르는 동안의 표면',
   '--text-primary': '본문·명령·선택 대상',
@@ -71,9 +73,9 @@ const semanticPurpose: Record<keyof typeof themeRoles.light, string> = {
   '--border-strong': '메뉴·모달 경계·강한 구분선',
   '--border-control': '필드·포트·노브 등 기능 경계',
   '--status-accent': '의미 있는 정보·처리 진행',
-  '--status-positive': '확인된 성공·신호 정상 구간',
+  '--status-positive': '확인된 성공·실행 중인 세션(미터 정상 구간과 같은 의미 계열)',
   '--status-warning': '사용자 조치·복구 가능한 중단·일시정지',
-  '--status-danger': '실패·잘못된 입력·신호 피크; 녹음은 별도 transport 의미',
+  '--status-danger': '실패·잘못된 입력 문구',
   '--button-strong-background': '제출·확인의 중립 반전 표면',
   '--button-strong-text': '반전 표면 위의 명령 문구',
   '--button-strong-hover': '강한 명령의 hover 표면',
@@ -82,6 +84,10 @@ const semanticPurpose: Record<keyof typeof themeRoles.light, string> = {
   '--status-positive-surface': '성공 메시지 표면',
   '--status-warning-surface': '주의 메시지·일시정지 표면',
   '--status-danger-surface': '실패 메시지·녹음 활성 표면',
+  '--meter-normal': '미터 정상 구간(-12 dBFS 미만); 신호 정상을 뜻하는 초록',
+  '--meter-high': '미터 높음 구간(-12 dBFS부터)',
+  '--meter-peak': '미터 피크 구간(-3 dBFS부터)',
+  '--status-record': '녹음 명령·녹음 중 표시',
 };
 
 function paletteName(value: string) {
@@ -163,7 +169,7 @@ export function ContrastReference() {
     { foreground: '--text-secondary', background: '--surface', purpose: '보조 문구', minimum: 4.5 },
     {
       foreground: '--text-muted',
-      background: '--surface-muted',
+      background: '--surface-node',
       purpose: '노드 레이블',
       minimum: 4.5,
     },

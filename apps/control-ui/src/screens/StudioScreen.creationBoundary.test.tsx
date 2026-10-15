@@ -6,19 +6,19 @@ import { StorybookMockControlPort } from '../core/control-port/StorybookMockCont
 import { I18nProvider, i18n } from '../core/i18n';
 import { FeatureAccess } from '../core/licensing/FeatureAccess';
 import { MixRelayProvider } from '../core/theme/MixRelayProvider';
-import type { IconActionButton } from '../core/ui/IconActionButton';
+import type { ActionButton } from '../core/ui/ActionButton';
 import { StudioScreen } from './StudioScreen';
 
 const commands = vi.hoisted(() => ({ create: null as (() => void) | null }));
 // Keep the actual Core button. Capture the delegated command to verify the parent
 // policy also protects a late command from another input surface, beyond disabled DOM.
-vi.mock('../core/ui/IconActionButton', async (original) => {
-  const actual = await original<typeof import('../core/ui/IconActionButton')>();
+vi.mock('../core/ui/ActionButton', async (original) => {
+  const actual = await original<typeof import('../core/ui/ActionButton')>();
   return {
     ...actual,
-    IconActionButton: (props: ComponentProps<typeof IconActionButton>) => {
+    ActionButton: (props: ComponentProps<typeof ActionButton>) => {
       if (props['aria-keyshortcuts']) commands.create = () => props.onClick?.(undefined as never);
-      return <actual.IconActionButton {...props} />;
+      return <actual.ActionButton {...props} />;
     },
   };
 });

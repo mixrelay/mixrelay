@@ -369,6 +369,8 @@ export const pt = {
       },
     },
     addNode: 'Adicionar nó',
+    emptyCanvas:
+      'Ainda não há nós. Adicione aplicativos, dispositivos e efeitos com + no canto superior esquerdo.',
     noApplications: 'Não há aplicações em execução',
     noInputDevices: 'Não há dispositivos de entrada',
     noOutputDevices: 'Não há dispositivos de saída',

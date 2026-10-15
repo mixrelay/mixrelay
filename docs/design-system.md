@@ -24,7 +24,7 @@ Carbon의 **역할 토큰, 컴포넌트 계약, 상태별 검증**을 차용한�
 
 사용자가 확인한 참고 후보는 [Monome](https://monome.org/), [TE TX–6](https://teenage.engineering/products/tx-6), [Vitsœ / Rams](https://www.vitsoe.com/us/about/good-design), [Ableton Live](https://www.ableton.com/en/live/)다. Valhalla는 시각 레퍼런스에서 제외한다. 텍스트·정렬·반복 조작·이름/값/단위의 계층을 참고하며, 브랜드 외형이나 하드웨어 노브를 복제하지 않는다.
 
-라이트는 따뜻한 오프화이트, 다크는 깊은 그래파이트를 사용한다. 배경·노드·입력은 DSUB 팔레트의 서로 다른 표면 역할로 구분하고, 글자·선택·포커스는 각 테마의 중립색으로 표시한다. 녹음·경고·신호 레벨의 색은 의미를 유지하며 정상적인 명령 버튼까지 상태 색으로 칠하지 않는다. 이 팔레트는 레퍼런스에서 얻은 절제와 기능 구분을 MixRelay에 적용한 결정이다.
+표면은 색조 없는 중립 회색이다(라이트 neutral, 다크 graphite). 캔버스 < 헤더·사이드바 < 노드 순으로 밝기를 올려 내용이 바탕 위에 놓이게 하고(노드/캔버스 1.3:1 이상), 케이블은 캔버스와 노드 사이 명도(`--border-strong`)에 둔다. 색은 의미가 있는 곳에만 쓴다: 정상 On은 중립색, Off는 가라앉은 표면·흐린 아이콘, 정상 신호 레벨·실행 중인 세션·확인된 성공은 초록, 음소거·높은 레벨은 앰버, 녹음·피크는 빨강, 선택·입력은 파랑이다. 같은 색에 다른 의미를 겹치지 않는다. 미터 구간은 -12 dBFS·-3 dBFS(`meterScale`)에서 바뀌며 색상뿐 아니라 명도로도 구분한다. 이 팔레트는 레퍼런스에서 얻은 절제와 기능 구분을 MixRelay에 적용한 결정이다.
 
 | 규격 | 기준 |
 | --- | --- |
@@ -32,7 +32,7 @@ Carbon의 **역할 토큰, 컴포넌트 계약, 상태별 검증**을 차용한�
 | 조작 크기 | 일반 명령·필드 28, 헤더의 compact 명령·노드 아이콘 24px. 보이는 모양과 클릭 영역을 구분 |
 | 형태 | 컨트롤·떠 있는 화면 2px 모서리, 1px 경계. 노드는 평면; 그림자는 떠 있는 메뉴·모달에만 사용 |
 | 명령 | 일반은 투명한 중립색 텍스트, 제출/확인은 중립색 반전 채움. 상시 강조색 배경·버튼 크기 변화·불필요한 대문자 사용을 피함 |
-| 상태 | 짧은 상태 텍스트 + 작은 표식. 색만으로 상태를 전달하지 않음. 녹음은 빨강, 일시정지는 주의 색 |
+| 상태 | 짧은 상태 텍스트 + 작은 표식. 색만으로 상태를 전달하지 않음. 정상은 중립, 예외만 색: 녹음 `--status-record`, 일시정지·음소거는 주의 색 |
 | 포커스 | 중립색 1px 표시 하나. 입력은 기존 경계 색만 바꾸며 바깥 링을 겹치지 않음. 버튼은 키보드 포커스에 1px 윤곽·2px 간격, 조밀한 조작은 안쪽 윤곽 허용. 선택·pressed와 별개 |
 
 공통 시각 규칙은 [ComponentTheme.module.css](../apps/control-ui/src/core/theme/ComponentTheme.module.css)와 Provider에 둔다. 컴포넌트 CSS에는 배치·고유 좌표와 의미별 상태만 둔다. Feature의 글자와 모서리도 같은 역할 토큰을 사용한다.
@@ -45,9 +45,11 @@ Carbon의 **역할 토큰, 컴포넌트 계약, 상태별 검증**을 차용한�
 
 | 역할 | Light | Dark |
 | --- | --- | --- |
-| background | neutral-100 | graphite-900 |
+| background | neutral-200 | graphite-900 |
 | surface | neutral-50 | graphite-800 |
-| surface-muted | neutral-200 | graphite-700 |
+| surface-muted | neutral-100 | graphite-700 |
+| surface-node | white | graphite-700 |
+| node-background-off | neutral-100 | graphite-800 |
 | surface-hover | neutral-300 | graphite-600 |
 | surface-active | neutral-400 | graphite-500 |
 | text-primary | neutral-900 | graphite-50 |
@@ -59,6 +61,8 @@ Carbon의 **역할 토큰, 컴포넌트 계약, 상태별 검증**을 차용한�
 | status-positive | green-700 | green-300 |
 | status-warning | yellow-800 | yellow-300 |
 | status-danger | red-700 | red-300 |
+| status-record | #c62d1f | #ff5a4a |
+| meter-normal / high / peak | green-500 / #b26f00 / #c62d1f | green-400 / #f2b42c / #ff5a4a |
 
 `themeRoles.light / dark`는 동일한 역할 이름을 제공한다. Core CSS는 이 정식 역할(`--background`, `--text-primary`, `--text-muted`, `--border-default`, `--status-*` 등)을 직접 사용하며 같은 값의 별칭을 두지 않는다. 이전 별칭 `--bg`, `--text`, `--muted`, `--line`, `--line-strong`, `--red`, `--amber`, `--positive`, `--accent`, `--surface-raised`, `--signal`은 제거했다. 노드·미터·transport·메뉴·feedback의 컴포넌트 토큰도 이 역할을 참조한다. 선택 표시는 `--node-border-selected`·`--cable-selected`·`--canvas-resize-text-hover`·`--node-port-dot`처럼 컴포넌트 역할로 이름 붙인다. 의미 있는 입력 경계는 `--border-control`(Light neutral-700, Dark graphite-300)을 사용해 장식 경계와 구별한다. 중립색 focus는 `--text-secondary`로 1px 규격을 유지한다.
 
@@ -78,7 +82,7 @@ Carbon의 **역할 토큰, 컴포넌트 계약, 상태별 검증**을 차용한�
 
 빌드된 앱 `index.html`의 `<head>`에는 토큰 테마 CSS와 bootstrap 스크립트가 들어간다. Storybook iframe 문서에는 넣지 않아 Storybook의 제어된 theme가 유지된다. 원본은 `src/core/theme/themeDocument.ts`이며 `vite.config.ts`의 Vite 플러그인이 Vite `runnerImport`로 불러와 주입한다. 저장된 라이트·다크 선택은 첫 화면에서 OS 테마로 깜박이지 않는다. 이후 변경은 계속 `MixRelayProvider`가 소유한다. Core `NativeWindowTheme`은 Tauri 창 테마를 같은 선택과 동기화하고 시스템 선택은 `null`로 전달한다. 데스크톱 capability는 `core:window:allow-set-theme`를 포함한다.
 
-Storybook `Foundations/Light·Dark`는 역할과 전체 팔레트, `Design Language`는 정보·성공·주의·오류·입력·강한 명령, `App/Workspace/Light·Dark`는 실제 앱 조합을 보여준다. 모든 기존 스토리도 테마 toolbar로 전환할 수 있다. `tokens.test.ts`는 단계 명도 순서·로고 유지·역할 대칭, 기본·hover·pressed 표면 텍스트 4.5:1, 기능 경계·선택·focus 3:1, 강한 명령과 feedback의 대비를 검사한다. 실제 브라우저·키보드·좁은 화면·긴 번역 결과와 설치본 검증은 구별한다. React Flow의 고정 다크 배경은 Core 그래프 CSS가 `--xy-background-color → --canvas-background`로 연결한다.
+Storybook `Foundations/Light·Dark`는 역할과 전체 팔레트, `Design Language`는 정보·성공·주의·오류·입력·강한 명령, `App/Workspace/Light·Dark`는 실제 앱 조합을 보여준다. 모든 기존 스토리도 테마 toolbar로 전환할 수 있다. `tokens.test.ts`는 단계 명도 순서·로고 유지·역할 대칭, 기본·hover·pressed 표면 텍스트 4.5:1, 기능 경계·선택·focus 3:1, 강한 명령과 feedback의 대비, 표면 위계(노드/캔버스 1.3, 헤더·사이드바/캔버스 1.1, hover/노드 1.12, 케이블 3:1 이상이되 본문보다 약함), 미터 구간(트랙 대비 3:1, 인접 구간 명도 1.25)과 녹음 표시(노드·hover 3:1), `meterScale`의 -12/-3 dBFS 위치를 검사한다. 실제 브라우저·키보드·좁은 화면·긴 번역 결과와 설치본 검증은 구별한다. React Flow의 고정 다크 배경은 Core 그래프 CSS가 `--xy-background-color → --canvas-background`로 연결한다.
 
 ### 토큰 규칙
 

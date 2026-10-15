@@ -1,5 +1,6 @@
 import {
   type ComponentProps,
+  type FocusEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -14,13 +15,13 @@ import { shellBreakpoints } from '../core/theme/tokens';
 import { ActionButton } from '../core/ui/ActionButton';
 import { ApplicationStatusBar } from '../core/ui/ApplicationStatusBar';
 import { ProductHeading } from '../core/ui/BrandIdentity';
-import { IconActionButton } from '../core/ui/IconActionButton';
 import {
   hasPlatformModifier,
   isNativeTextEntryTarget,
   platformModifier,
 } from '../core/ui/platformShortcut';
 import { SidebarToggle } from '../core/ui/SidebarToggle';
+import { Text } from '../core/ui/Text';
 import { ThemePicker } from '../core/ui/ThemePicker';
 import { AudioPauseControl } from '../features/audio-session/AudioPauseControl';
 import { AudioSessionNotices } from '../features/audio-session/AudioSessionNotices';
@@ -250,39 +251,26 @@ function StudioFrame({
   // The list control or menu button that last held focus. When a visibility or breakpoint
   // change hides or removes it, focus moves to the control that survives.
   const focusOwner = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    const element = shell.current;
-    if (!element) return;
-    const track = (event: FocusEvent) => {
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      focusOwner.current = target?.closest('#graph-sidebar, [aria-controls="graph-sidebar"]')
-        ? target
-        : null;
-    };
-    // Focus that moves elsewhere (a dialog, another control) is no longer the shell's. A
-    // plain blur of a control that stays visible is the user leaving it, not a hide.
-    const leave = (event: FocusEvent) => {
-      if (event.relatedTarget instanceof Node) {
-        if (!element.contains(event.relatedTarget)) focusOwner.current = null;
-        return;
-      }
-      const blurred = event.target;
-      queueMicrotask(() => {
-        if (
-          focusOwner.current === blurred &&
-          shown(focusOwner.current) &&
-          !shown(document.activeElement)
-        )
-          focusOwner.current = null;
-      });
-    };
-    element.addEventListener('focusin', track);
-    element.addEventListener('focusout', leave);
-    return () => {
-      element.removeEventListener('focusin', track);
-      element.removeEventListener('focusout', leave);
-    };
-  }, []);
+  const trackFocus = (event: FocusEvent<HTMLElement>) => {
+    const target = event.target;
+    focusOwner.current = target.closest('#graph-sidebar, [aria-controls="graph-sidebar"]')
+      ? target
+      : null;
+  };
+  // Focus that moves elsewhere (a dialog, another control) is no longer the shell's. A
+  // plain blur of a control that stays visible is the user leaving it, not a hide.
+  const leaveFocus = (event: FocusEvent<HTMLElement>) => {
+    const next = event.relatedTarget;
+    if (next) {
+      if (!event.currentTarget.contains(next)) focusOwner.current = null;
+      return;
+    }
+    const blurred = event.target;
+    queueMicrotask(() => {
+      if (focusOwner.current === blurred && shown(blurred) && !shown(document.activeElement))
+        focusOwner.current = null;
+    });
+  };
   const closeOverlay = useCallback(() => setOverlayOpen(false), []);
   // Entering the overlay width closes the list so it never starts over the canvas.
   useEffect(() => {
@@ -312,18 +300,23 @@ function StudioFrame({
   // biome-ignore lint/correctness/useExhaustiveDependencies: Runs after each list visibility or breakpoint change, which is what can remove the focused control.
   useEffect(() => {
     const owner = focusOwner.current;
-    const root = shell.current;
-    if (!owner || !root) return;
+    if (!owner) return;
     // Never take focus from a control that still holds it (including a dialog).
     if (shown(document.activeElement)) return;
     focusOwner.current = null;
     // A still-visible owner means the user left it on purpose; only a hidden or removed
     // owner hands focus to the surviving control.
     if (shown(owner)) return;
-    surviving(root)?.focus();
+    surviving(shell.current)?.focus();
   }, [sidebarOpen, overlay]);
   return (
-    <main ref={shell} className={styles.shell} data-sidebar-open={sidebarOpen}>
+    <main
+      ref={shell}
+      className={styles.shell}
+      data-sidebar-open={sidebarOpen}
+      onFocus={trackFocus}
+      onBlur={leaveFocus}
+    >
       <header className={styles.applicationHeader}>
         <span className={styles.applicationLead}>
           {overlay ? (
@@ -362,20 +355,15 @@ function shown(element: Element | null): boolean {
 }
 
 /** The first shell control still able to take focus: menu button, list, workspace, header. */
-function surviving(root: HTMLElement): HTMLElement | undefined {
-  const candidates = [
-    root.querySelector<HTMLElement>('[aria-controls="graph-sidebar"]'),
-    root.querySelector<HTMLElement>(
-      '#graph-sidebar [aria-current="page"]:not(:disabled), #graph-sidebar button:not(:disabled)',
-    ),
-    root.querySelector<HTMLElement>('#studio-workspace'),
-    root.querySelector<HTMLElement>('header button:not(:disabled)'),
-  ];
-  return (
-    candidates.find((element): element is HTMLElement =>
-      Boolean(element && !element.closest('[inert], [hidden]')),
-    ) ?? undefined
-  );
+function surviving(root: HTMLElement | null): HTMLElement | undefined {
+  return [
+    '[aria-controls="graph-sidebar"]',
+    '#graph-sidebar [aria-current="page"]:not(:disabled), #graph-sidebar button:not(:disabled)',
+    '#studio-workspace',
+    'header button:not(:disabled)',
+  ]
+    .map((selector) => root?.querySelector<HTMLElement>(selector))
+    .find((element): element is HTMLElement => element?.closest('[inert], [hidden]') === null);
 }
 
 function StudioStatusBar({
@@ -416,6 +404,7 @@ function GraphSidebar({
   const { catalog, busy: catalogBusy, error: catalogError, reload: reloadCatalog } = collection;
   const paid = usePaidFeatures();
   const catalogErrorText = useCatalogError(catalogError);
+  const limited = Boolean(catalog && !paid && catalog.graphs.length >= 1);
   return (
     <aside
       id="graph-sidebar"
@@ -446,17 +435,27 @@ function GraphSidebar({
         ) : null}
         {catalog?.persistenceError ? <p role="alert">{t('studio.graphSaveFailed')}</p> : null}
         <div className={styles.sidebarFooter}>
-          <IconActionButton
+          {/* A named command; a reached free limit is shown, not only announced. */}
+          <ActionButton
+            density="compact"
+            stretch
+            align="start"
             aria-keyshortcuts={`${platformModifier()}+Shift+N`}
-            label={t('studio.newGraph')}
-            disabled={!catalog || (!paid && catalog.graphs.length >= 1)}
-            aria-description={!paid ? t('licensing.limits.graphs') : undefined}
+            aria-describedby={limited ? 'graph-limit' : undefined}
+            disabled={!catalog || limited}
             onClick={onCreate}
           >
-            <svg aria-hidden="true" viewBox="0 0 16 16">
-              <path d="M8 3v10M3 8h10" />
-            </svg>
-          </IconActionButton>
+            {/* One inline run: the flex button would drop a space between children. */}
+            <span>
+              <span aria-hidden="true">+ </span>
+              {t('studio.newGraph')}
+            </span>
+          </ActionButton>
+          {limited ? (
+            <Text kind="caption" tone="muted" id="graph-limit">
+              {t('licensing.limits.graphs')}
+            </Text>
+          ) : null}
         </div>
       </nav>
     </aside>

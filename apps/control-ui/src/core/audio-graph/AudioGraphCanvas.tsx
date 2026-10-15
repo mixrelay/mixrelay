@@ -760,13 +760,19 @@ function AddNodePanel({
 
 function GraphCanvasBackground({
   addNode,
+  empty,
   label,
   nodeMenu,
   nodeMenuItems,
-}: Parameters<typeof AddNodePanel>[0]) {
+}: Parameters<typeof AddNodePanel>[0] & { empty: boolean }) {
+  const { t } = useTranslation();
   return (
     <>
       <Background color="var(--canvas-grid)" gap={24} size={1} variant={BackgroundVariant.Lines} />
+      {/* Guidance only: the + panel stays the one owner of the add-node action. */}
+      {empty && nodeMenuItems.length > 0 ? (
+        <p className={styles.emptyHint}>{t('routing.emptyCanvas')}</p>
+      ) : null}
       <AddNodePanel
         addNode={addNode}
         label={label}
@@ -1105,6 +1111,7 @@ export function AudioGraphCanvas({
           >
             <GraphCanvasBackground
               addNode={addNode}
+              empty={nodes.length === 0}
               label={addNodeLabel}
               nodeMenu={nodeMenu}
               nodeMenuItems={nodeMenuItems}

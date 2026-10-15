@@ -1292,6 +1292,32 @@ describe('AudioGraphCanvas persisted zoom limits', () => {
   });
 });
 
+it('guides an empty graph to the add-node command without adding a second one', () => {
+  const view = render(
+    <CanvasTestProvider>
+      <AudioGraphCanvas
+        ariaLabel="Routing graph"
+        model={{ ...model(), nodes: [], edges: [] }}
+        nodeMenuItems={[{ id: 'test', label: 'Test source' }]}
+        onModelChange={vi.fn()}
+      />
+    </CanvasTestProvider>,
+  );
+  expect(screen.getByText(/No nodes yet/)).toBeInTheDocument();
+  expect(screen.getAllByRole('button', { name: 'Add node' })).toHaveLength(1);
+  view.rerender(
+    <CanvasTestProvider>
+      <AudioGraphCanvas
+        ariaLabel="Routing graph"
+        model={model()}
+        nodeMenuItems={[{ id: 'test', label: 'Test source' }]}
+        onModelChange={vi.fn()}
+      />
+    </CanvasTestProvider>,
+  );
+  expect(screen.queryByText(/No nodes yet/)).not.toBeInTheDocument();
+});
+
 describe('AudioGraphCanvas discovery menu lifecycle', () => {
   it.each(['Add node', '', '   ', undefined])(
     'reports discovery menu lifecycle with label %s',

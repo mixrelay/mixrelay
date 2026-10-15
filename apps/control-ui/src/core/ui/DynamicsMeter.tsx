@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { useDynamicsMeterReading } from '../audio-meter/useDynamicsMeterReading';
+import { meterScale } from '../theme/tokens';
 import styles from './DynamicsMeter.module.css';
 import type { ParameterFieldControl } from './ParameterField';
 
@@ -19,7 +20,8 @@ interface Props {
   disabled?: boolean;
   bypassed?: boolean;
 }
-const position = (db: number) => Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
+const floorDb = meterScale.floorDb;
+const position = (db: number) => Math.max(0, Math.min(100, ((db - floorDb) / -floorDb) * 100));
 const decibels = (peak: number) => (peak > 0 ? 20 * Math.log10(peak) : Number.NEGATIVE_INFINITY);
 const dbText = (db: number) => `${db === Number.NEGATIVE_INFINITY ? '−∞' : db.toFixed(1)} dB`;
 
@@ -83,7 +85,7 @@ function PeakBank({
               <ReadingRail
                 label={`${label} ${channel}`}
                 value={db}
-                minimum={-60}
+                minimum={floorDb}
                 maximum={0}
                 unavailableLabel={unavailableLabel}
               >
@@ -91,7 +93,7 @@ function PeakBank({
                   className={styles.fill}
                   style={
                     {
-                      '--layout-dynamics-level': `${db === null ? 0 : position(db)}%`,
+                      '--meter-unfilled': `${100 - (db === null ? 0 : position(db))}%`,
                     } as CSSProperties
                   }
                 />

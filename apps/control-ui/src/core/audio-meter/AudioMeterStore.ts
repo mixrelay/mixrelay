@@ -1,4 +1,5 @@
 import type { MeterSnapshot } from '../control-port/types';
+import { meterScale } from '../theme/tokens';
 
 const EMPTY_LEVELS: readonly number[] = [];
 type Listener = () => void;
@@ -120,7 +121,8 @@ export function emptyAudioMeterLevels(): readonly number[] {
 function peakToPercent(peak: number): number {
   if (!Number.isFinite(peak) || peak <= 0) return 0;
   const decibels = 20 * Math.log10(peak);
-  return Math.max(0, Math.min(100, ((decibels + 60) / 60) * 100));
+  const floor = meterScale.floorDb;
+  return Math.max(0, Math.min(100, ((decibels - floor) / -floor) * 100));
 }
 
 function sameLevels(current: readonly number[] | undefined, next: readonly number[]): boolean {

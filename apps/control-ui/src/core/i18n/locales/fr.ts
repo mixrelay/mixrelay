@@ -368,6 +368,8 @@ export const fr = {
       },
     },
     addNode: 'Ajouter un nœud',
+    emptyCanvas:
+      'Aucun nœud pour l’instant. Ajoutez applications, périphériques et effets avec + en haut à gauche.',
     noApplications: 'Aucune application en cours d’exécution',
     noInputDevices: 'Aucun périphérique d’entrée',
     noOutputDevices: 'Aucun périphérique de sortie',

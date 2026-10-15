@@ -253,7 +253,7 @@ it('keeps authentication separate from the confirmed global audio pause control'
   );
 });
 
-it('keeps file actions in the graph header and toggles navigation without changing the graph', async () => {
+it('keeps file actions in the graph header and the graph list fixed in a wide window', async () => {
   await i18n.changeLanguage('en');
   const controlPort = new StorybookMockControlPort({
     graph: { edges: [], nodes: [], revision: 1, schemaVersion: 2 },
@@ -269,7 +269,6 @@ it('keeps file actions in the graph header and toggles navigation without changi
   });
   const workspaceFile = vi.fn().mockResolvedValue(null);
   Object.assign(controlPort, { workspaceFile });
-  const applyGraph = vi.spyOn(controlPort, 'applyGraph');
   render(
     <MixRelayProvider>
       <I18nProvider>
@@ -284,19 +283,11 @@ it('keeps file actions in the graph header and toggles navigation without changi
   expect(file.closest('header')).toBe(name.closest('header'));
   const sidebar = screen.getByRole('complementary', { name: 'Graphs' });
   expect(within(sidebar).getByRole('button', { name: 'New graph' })).toBeInTheDocument();
-  const toggle = screen.getByRole('button', { name: 'Graphs' });
-  expect(toggle.closest('header')).toBeNull();
-  expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  const callsBefore = applyGraph.mock.calls.length;
-  fireEvent.click(toggle);
-  expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  expect(sidebar).toHaveAttribute('hidden');
+  // Carbon UI shell: a wide window keeps the list fixed with no on-screen toggle.
+  expect(screen.queryByRole('button', { name: 'Graphs' })).not.toBeInTheDocument();
+  expect(sidebar).not.toHaveAttribute('hidden');
   expect(screen.getByRole('heading', { name: 'MixRelay' })).toBeVisible();
   expect(screen.getByRole('textbox', { name: 'Graph name' })).toBe(name);
-  expect(file).toBeInTheDocument();
-  fireEvent.click(toggle);
-  expect(sidebar).not.toHaveAttribute('hidden');
-  expect(applyGraph).toHaveBeenCalledTimes(callsBefore);
   expect(workspaceFile).not.toHaveBeenCalled();
   fireEvent.click(file);
   // jsdom has no anchor geometry, so Floating UI may hide the mounted menu.

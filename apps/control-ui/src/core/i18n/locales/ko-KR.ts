@@ -356,6 +356,7 @@ export const koKR = {
       },
     },
     addNode: '노드 추가',
+    emptyCanvas: '아직 노드가 없습니다. 왼쪽 위 +에서 앱·장치·효과를 추가하세요.',
     noApplications: '실행 중인 애플리케이션 없음',
     noInputDevices: '입력 장치 없음',
     noOutputDevices: '출력 장치 없음',

@@ -55,41 +55,52 @@ export const canvasLayers = {
   selectionFeedback: 8,
 };
 export const dialogWidths = { xs: 300, sm: 360, md: 420 };
+/** Peak meters show -60..0 dBFS linearly in dB. Normal level runs to -12 dBFS; the
+ * high zone warns from there, and the peak zone from -3 dBFS, near clipping. */
+const meterDb = { floor: -60, high: -12, peak: -3 };
+export const meterScale = {
+  floorDb: meterDb.floor,
+  highPercent: ((meterDb.high - meterDb.floor) / -meterDb.floor) * 100,
+  peakPercent: ((meterDb.peak - meterDb.floor) / -meterDb.floor) * 100,
+};
 /** At or below this width the graph sidebar overlays the canvas. CSS media queries
  * cannot read custom properties, so StudioScreen.module.css repeats this value. */
 export const shellBreakpoints = { overlaySidebar: 720 };
+/** The graph list's width; the header keeps it whether the list is open or not. */
+export const shellWidths = { sidebar: 200 };
 
 // DSUB web palette: reference interpretations, not measured manufacturer finishes.
 export const palette = {
+  // Untinted greys: colour belongs to state and content, not to the surfaces.
   neutral: {
-    50: '#faf9f5',
-    100: '#f2f1eb',
-    200: '#eae8df',
-    300: '#e2dfd5',
-    400: '#d6d2c7',
-    500: '#bbb7aa',
-    600: '#807e72',
-    700: '#5c594f',
-    800: '#45443d',
-    900: '#242622',
+    50: '#f8f9fa',
+    100: '#eef0f2',
+    200: '#dde0e4',
+    300: '#d9dce0',
+    400: '#cdd1d6',
+    500: '#a4a9b0',
+    600: '#6f757d',
+    700: '#50565e',
+    800: '#3a3f46',
+    900: '#1d2025',
   },
   graphite: {
-    50: '#edeee7',
-    100: '#ced2c8',
-    200: '#b4bcb0',
-    300: '#939d92',
-    400: '#596257',
-    500: '#3b433d',
-    600: '#303632',
-    700: '#252a27',
-    800: '#202422',
-    900: '#161918',
+    50: '#eef0f2',
+    100: '#d4d7db',
+    200: '#b4b8be',
+    300: '#959aa2',
+    400: '#5c6168',
+    500: '#3c3f45',
+    600: '#33363b',
+    700: '#2b2d31',
+    800: '#1e1f22',
+    900: '#111213',
   },
   red: {
     50: '#fbefe9',
     100: '#f5d7cf',
     200: '#f1bbb1',
-    300: '#ee9a8f',
+    300: '#f2a69c',
     400: '#d96353',
     500: '#b02d23',
     600: '#98261e',
@@ -101,7 +112,7 @@ export const palette = {
     50: '#eff7ed',
     100: '#d9ecd2',
     200: '#b3d6a9',
-    300: '#82be8b',
+    300: '#8cc795',
     400: '#53a466',
     500: '#287a3f',
     600: '#216d37',
@@ -113,7 +124,7 @@ export const palette = {
     50: '#edf5fb',
     100: '#d7eafa',
     200: '#b1d2ed',
-    300: '#88b8dc',
+    300: '#93c0e2',
     400: '#5193c5',
     500: '#235f96',
     600: '#215884',
@@ -130,7 +141,7 @@ export const palette = {
     500: '#d5a900',
     600: '#a98407',
     700: '#8c6b07',
-    800: '#70540a',
+    800: '#6e4700',
     900: '#544008',
   },
   orange: {
@@ -164,9 +175,12 @@ export const brandSizes = { compact: 16, standard: 24, display: 64 } as const;
 
 export const themeRoles = {
   light: {
-    '--background': palette.neutral[100],
+    // Canvas < header/sidebar < node: content is raised, the canvas recedes.
+    '--background': palette.neutral[200],
     '--surface': palette.neutral[50],
-    '--surface-muted': palette.neutral[200],
+    '--surface-muted': palette.neutral[100],
+    '--surface-node': brandColors.white,
+    '--node-background-off': palette.neutral[100],
     '--surface-hover': palette.neutral[300],
     '--surface-active': palette.neutral[400],
     '--text-primary': palette.neutral[900],
@@ -188,11 +202,20 @@ export const themeRoles = {
     '--status-positive-surface': palette.green[50],
     '--status-warning-surface': palette.yellow[50],
     '--status-danger-surface': palette.red[50],
+    // Signal colours appear only where they carry meaning. Meters keep the audio
+    // convention (green normal, amber high, red peak); the zones differ in brightness
+    // as well as hue and each holds 3:1 against the meter track.
+    '--meter-normal': palette.green[500],
+    '--meter-high': '#b26f00',
+    '--meter-peak': '#c62d1f',
+    '--status-record': '#c62d1f',
   },
   dark: {
     '--background': palette.graphite[900],
     '--surface': palette.graphite[800],
     '--surface-muted': palette.graphite[700],
+    '--surface-node': palette.graphite[700],
+    '--node-background-off': palette.graphite[800],
     '--surface-hover': palette.graphite[600],
     '--surface-active': palette.graphite[500],
     '--text-primary': palette.graphite[50],
@@ -213,6 +236,10 @@ export const themeRoles = {
     '--status-positive-surface': palette.green[900],
     '--status-warning-surface': palette.yellow[900],
     '--status-danger-surface': palette.red[900],
+    '--meter-normal': palette.green[400],
+    '--meter-high': '#f2b42c',
+    '--meter-peak': '#ff5a4a',
+    '--status-record': '#ff5a4a',
   },
 } satisfies Record<ColorScheme, Record<`--${string}`, string>>;
 
@@ -246,8 +273,6 @@ export const mixrelayVariables = {
   '--border-width': `${border.width}px`,
   '--radius-small': `${border.smallRadius}px`,
   '--surface-sidebar': 'var(--surface)',
-  '--surface-node': 'var(--surface-muted)',
-  '--node-background-off': 'var(--surface)',
   '--surface-inset': 'var(--surface)',
   '--node-inset': '10px',
   '--command-icon-size': '15px',
@@ -257,6 +282,7 @@ export const mixrelayVariables = {
   '--brand-primary': brandColors.primary,
   '--brand-ink': 'var(--text-primary)',
   '--brand-inverse': brandColors.inverse,
+  '--shell-sidebar-width': `${shellWidths.sidebar}px`,
   '--workspace-header-height': '32px',
   '--app-status-height': '27px',
   '--app-status-padding-block': '1px',
@@ -355,7 +381,7 @@ export const mixrelayVariables = {
   '--transport-border': 'transparent',
   '--transport-background': 'transparent',
   '--transport-text': 'var(--text-primary)',
-  '--transport-record-text': 'var(--status-danger)',
+  '--transport-record-text': 'var(--status-record)',
   '--transport-border-hover': 'transparent',
   '--transport-background-hover': 'var(--surface-hover)',
   '--transport-border-disabled': 'transparent',
@@ -364,19 +390,25 @@ export const mixrelayVariables = {
   '--transport-pause-border-active': 'transparent',
   '--transport-pause-text-active': 'var(--status-warning)',
   '--transport-pause-background-active': 'var(--status-warning-surface)',
-  '--transport-border-active': 'var(--status-danger)',
-  '--transport-text-active': 'var(--status-danger)',
+  '--transport-border-active': 'var(--status-record)',
+  '--transport-text-active': 'var(--status-record)',
   '--transport-background-active': 'var(--status-danger-surface)',
   '--meter-background': 'var(--background)',
-  '--dynamics-rail-background': 'var(--border-default)',
-  '--meter-normal': 'var(--status-positive)',
-  '--meter-high': 'var(--status-warning)',
-  '--meter-peak': 'var(--status-danger)',
+  '--dynamics-rail-background': 'var(--meter-background)',
+  '--meter-high-start': `${meterScale.highPercent}%`,
+  '--meter-peak-start': `${meterScale.peakPercent}%`,
+  // One zone map for every level meter; a fill reveals it by clipping, so the zones
+  // stay at their dB positions whatever the reading.
+  '--meter-zones-vertical':
+    'linear-gradient(to top, var(--meter-normal) 0 var(--meter-high-start), var(--meter-high) var(--meter-high-start) var(--meter-peak-start), var(--meter-peak) var(--meter-peak-start))',
+  '--meter-zones-horizontal':
+    'linear-gradient(to right, var(--meter-normal) 0 var(--meter-high-start), var(--meter-high) var(--meter-high-start) var(--meter-peak-start), var(--meter-peak) var(--meter-peak-start))',
   '--canvas-background': 'var(--background)',
   '--surface-floating': 'var(--surface)',
   '--canvas-selection-border': 'var(--text-primary)',
   '--canvas-selection-background': 'color-mix(in srgb, var(--text-primary) 6%, transparent)',
-  '--cable': 'var(--text-muted)',
+  // Cables sit between the canvas and the node faces; selection brings one forward.
+  '--cable': 'var(--border-strong)',
   '--cable-selected': 'var(--text-primary)',
   '--canvas-resize-text': 'var(--text-muted)',
   '--canvas-resize-text-hover': 'var(--text-primary)',
@@ -449,5 +481,6 @@ export const mixrelayVariables = {
   '--feedback-critical-text': 'var(--status-danger)',
   '--feedback-warning-border': 'var(--status-warning)',
   '--feedback-warning-background': 'var(--status-warning-surface)',
-  '--canvas-grid': 'var(--surface-muted)',
+  // A faint grid: a third of the way from the canvas towards the header surface.
+  '--canvas-grid': 'color-mix(in srgb, var(--surface) 35%, var(--background))',
 } satisfies Record<`--${string}`, string>;

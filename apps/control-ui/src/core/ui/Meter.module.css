@@ -10,12 +10,7 @@
 .fill {
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    to top,
-    var(--meter-normal) 0 70%,
-    var(--meter-high) 70% 90%,
-    var(--meter-peak) 90%
-  );
+  background: var(--meter-zones-vertical);
   clip-path: inset(var(--meter-unfilled, 100%) 0 0);
   transition: clip-path var(--meter-response-duration) linear;
 }
@@ -26,11 +21,6 @@
 }
 
 .root[data-orientation="horizontal"] .fill {
-  background: linear-gradient(
-    to right,
-    var(--meter-normal) 0 70%,
-    var(--meter-high) 70% 90%,
-    var(--meter-peak) 90%
-  );
+  background: var(--meter-zones-horizontal);
   clip-path: inset(0 var(--meter-unfilled, 100%) 0 0);
 }

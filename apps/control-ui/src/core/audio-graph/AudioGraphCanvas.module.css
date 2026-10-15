@@ -23,6 +23,20 @@
   min-height: 0;
 }
 
+.emptyHint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: var(--space-8);
+  color: var(--text-muted);
+  font-size: var(--font-body);
+  line-height: var(--line-height-body);
+  text-align: center;
+  pointer-events: none;
+}
+
 .nodeToolbar {
   z-index: var(--layer-canvas-toolbar);
   margin: var(--space-3);

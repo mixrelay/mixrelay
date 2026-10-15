@@ -48,13 +48,16 @@
 }
 .fill {
   position: absolute;
-  inset-block: 0;
-  left: 0;
-  width: var(--layout-dynamics-level);
-  background: var(--meter-normal);
+  inset: 0;
+  background: var(--meter-zones-horizontal);
+  clip-path: inset(0 var(--meter-unfilled, 100%) 0 0);
 }
+/* Gain reduction is an amount, not a level: one neutral bar from the left. */
 .reduction .fill {
+  right: auto;
+  width: var(--layout-dynamics-level);
   background: var(--text-secondary);
+  clip-path: none;
 }
 .threshold {
   position: absolute;

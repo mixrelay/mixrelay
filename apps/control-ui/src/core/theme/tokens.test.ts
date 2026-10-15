@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { logoColor, mixrelayVariables, palette, themeRoles } from './tokens';
+import { logoColor, meterScale, mixrelayVariables, palette, themeRoles } from './tokens';
 
 function luminance(hex: string) {
   const rgb = [1, 3, 5].map((offset) => {
@@ -35,6 +35,12 @@ it('keeps all DSUB steps in descending luminance and the brand source fixed', ()
   expect(mixrelayVariables['--logo-source']).toBe(logoColor);
   expect(Object.keys(themeRoles.light)).toEqual(Object.keys(themeRoles.dark));
   expect(Object.keys(themeRoles.light).some((role) => role.includes('orange'))).toBe(false);
+});
+
+it('places meter zones at -12 and -3 dBFS on the -60 dBFS scale', () => {
+  expect(meterScale).toEqual({ floorDb: -60, highPercent: 80, peakPercent: 95 });
+  expect(mixrelayVariables['--meter-high-start']).toBe('80%');
+  expect(mixrelayVariables['--meter-peak-start']).toBe('95%');
 });
 
 it('keeps field placeholders on a text role whose contrast is checked below', () => {
@@ -83,6 +89,32 @@ describe.each(['light', 'dark'] as const)('%s theme contrast', (scheme) => {
         ).toBeGreaterThanOrEqual(3);
       }
     }
+  });
+  it('raises content above the canvas in a visible hierarchy', () => {
+    // Canvas < header/sidebar < node; hover is distinct from its node.
+    expect(contrast(roles['--surface-node'], roles['--background'])).toBeGreaterThanOrEqual(1.3);
+    expect(contrast(roles['--surface'], roles['--background'])).toBeGreaterThanOrEqual(1.1);
+    expect(contrast(roles['--surface-hover'], roles['--surface-node'])).toBeGreaterThanOrEqual(
+      1.12,
+    );
+    expect(contrast(roles['--node-background-off'], roles['--surface-node'])).toBeGreaterThan(1.03);
+    // Node outlines and cables stay visible without outshining node faces.
+    const cable = contrast(roles['--border-strong'], roles['--background']);
+    expect(cable).toBeGreaterThanOrEqual(3);
+    expect(cable).toBeLessThan(contrast(roles['--text-primary'], roles['--background']));
+    expect(contrast(roles['--border-strong'], roles['--surface-node'])).toBeGreaterThanOrEqual(3);
+  });
+  it('keeps meter zones and recording distinguishable without relying on hue', () => {
+    // Level meters and dynamics peak rails both draw the zones on the canvas tone.
+    expect(mixrelayVariables['--meter-background']).toBe('var(--background)');
+    expect(mixrelayVariables['--dynamics-rail-background']).toBe('var(--meter-background)');
+    const track = roles['--background'];
+    for (const zone of ['--meter-normal', '--meter-high', '--meter-peak'] as const)
+      expect(contrast(roles[zone], track), zone).toBeGreaterThanOrEqual(3);
+    expect(contrast(roles['--meter-normal'], roles['--meter-high'])).toBeGreaterThanOrEqual(1.25);
+    expect(contrast(roles['--meter-high'], roles['--meter-peak'])).toBeGreaterThanOrEqual(1.25);
+    for (const surface of ['--surface-node', '--surface-hover'] as const)
+      expect(contrast(roles['--status-record'], roles[surface]), surface).toBeGreaterThanOrEqual(3);
   });
   it('keeps strong commands and semantic feedback readable', () => {
     for (const surface of [

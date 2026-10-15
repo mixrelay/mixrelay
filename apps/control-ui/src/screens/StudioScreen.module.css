@@ -1,8 +1,7 @@
 .shell {
-  --layout-sidebar-width: 200px;
   position: relative;
   display: grid;
-  grid-template-columns: var(--layout-sidebar-width) minmax(0, 1fr);
+  grid-template-columns: var(--shell-sidebar-width) minmax(0, 1fr);
   grid-template-rows: var(--workspace-header-height) minmax(0, 1fr) var(--app-status-height);
   width: 100%;
   height: 100dvh;
@@ -88,7 +87,7 @@
 }
 
 :where(.shell[data-sidebar-open="false"]) .workspace {
-  --layout-workspace-header-inset: calc(var(--layout-sidebar-width) + var(--space-4));
+  --layout-workspace-header-inset: calc(var(--shell-sidebar-width) + var(--space-4));
   grid-column: 1 / -1;
 }
 
@@ -110,7 +109,7 @@
     top: var(--workspace-header-height);
     bottom: var(--app-status-height);
     left: 0;
-    width: var(--layout-sidebar-width);
+    width: var(--shell-sidebar-width);
     box-shadow: 4px 0 12px var(--shadow-subtle);
   }
 

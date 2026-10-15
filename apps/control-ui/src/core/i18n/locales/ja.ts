@@ -368,6 +368,7 @@ export const ja = {
       },
     },
     addNode: 'ノードを追加',
+    emptyCanvas: 'ノードはまだありません。左上の + からアプリ、デバイス、エフェクトを追加します。',
     noApplications: '実行中のアプリケーションはありません',
     noInputDevices: '入力デバイスはありません',
     noOutputDevices: '出力デバイスはありません',

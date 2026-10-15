@@ -146,7 +146,6 @@ export const componentContracts: readonly ComponentContract[] = [
     source: 'apps/control-ui/src/core/ui/IconActionButton.tsx',
     api: "export function IconActionButton({\n  label,\n  children,\n  tone = 'neutral',\n  density = 'compact',\n  indicator = false,\n  ...props\n}: CommandProps & {\n  label: string;\n  children: ReactNode;\n  tone?: 'neutral' | 'critical' | 'warning';\n  density?: 'regular' | 'compact';\n  indicator?: boolean;\n})",
     consumers: [
-      'apps/control-ui/src/screens/StudioScreen.tsx',
       'apps/control-ui/src/core/ui/PathField.tsx',
       'apps/control-ui/src/core/ui/AudioNodeCard.tsx',
       'apps/control-ui/src/features/updates/UpdateAccess.tsx',
@@ -263,7 +262,8 @@ export const componentContracts: readonly ComponentContract[] = [
     avoid: 'Mute·Bypass·앱 전체 Pause나 화면 선택을 전원 상태로 표시하지 않는다.',
     anatomy: '24px button → 14px power SVG.',
     states: 'enabled와 disabled 필수·독립. aria-pressed=enabled.',
-    tokens: '--node-control-size 24; enabled --status-positive; hover --surface-hover; focus 역할.',
+    tokens:
+      '--node-control-size 24; enabled --text-primary(정상은 중립, 색은 예외에만); disabled·Off --text-muted; hover --surface-hover; focus 역할.',
     interaction:
       'Enter/Space. label은 aria-label과 공통 Tooltip에 사용한다. 클릭 전파를 막고 wrapper Tab 대상을 만들지 않는다. pending 중 disabled와 복구 버튼 제거 후 인접 명령 포커스를 유지한다.',
     source: 'apps/control-ui/src/core/ui/NodeSignalControls.tsx',
