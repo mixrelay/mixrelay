@@ -21,7 +21,7 @@ mod runtime;
 
 use payload::{installed_hal_version, read_bounded_file};
 use runtime::{
-    activate_driver, activate_restored_driver, wait_for_driver_ready,
+    activate_driver, activate_restored_driver, capture_service_process, wait_for_driver_ready,
     wait_for_restored_driver_ready, wait_for_service_exit,
 };
 
@@ -252,8 +252,9 @@ impl ServiceLifecycle for NativeServiceLifecycle {
             ));
         }
         if matches!(current, RegistrationState::Loaded { .. }) {
+            let process = capture_service_process(&current)?;
             launchctl::bootout()?;
-            wait_for_service_exit(&current)?;
+            wait_for_service_exit(process)?;
             if Self::current_registration()? != RegistrationState::Absent {
                 return Err(NativeError::LaunchdState(
                     "Driver bootout returned but the verified service remains registered",
@@ -380,8 +381,9 @@ impl ServiceLifecycle for NativeServiceLifecycle {
                     "cannot drain a registered Driver without its verified payload",
                 ));
             }
+            let process = capture_service_process(&current)?;
             launchctl::bootout()?;
-            wait_for_service_exit(&current)?;
+            wait_for_service_exit(process)?;
         }
         if Self::current_registration()? != RegistrationState::Absent {
             return Err(NativeError::LaunchdState(

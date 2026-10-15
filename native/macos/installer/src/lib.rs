@@ -19,6 +19,8 @@ mod launchd;
 mod leases;
 #[cfg(target_os = "macos")]
 mod native;
+#[cfg(target_os = "macos")]
+pub mod process_exit;
 #[cfg(unix)]
 mod release;
 #[cfg(target_os = "macos")]

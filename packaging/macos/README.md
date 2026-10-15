@@ -65,7 +65,14 @@ while installed does not transfer data or service ownership.
 The root-only CLI requires the explicit `--reload-coreaudio` flag before mutation.
 After administrator authorization and verification, it observes and requests
 acknowledged native Quit from editor and background roles in the installation
-user's session. It acquires `installer.owner` and the fixed process-owner leases
+user's session. Each process is identified by its kernel audit token (PID and PID
+version, `process_exit`) before Quit, and has quit when its PID no longer yields that
+token; `NSRunningApplication.isTerminated` is not used for this because a
+command-line installer may never observe it change. Quit gets 100 seconds, then
+remaining processes receive `SIGTERM` through the same token, so a reused PID is
+never signalled (the runtime routes it through the same acknowledged shutdown),
+within a 130-second total. App Quit errors name the role and PID. The Driver service's
+identity is captured before `bootout` for the same reason. It acquires `installer.owner` and the fixed process-owner leases
 before replacement. Installer's `must-close` applies to the removal app; it must
 not erase the running-state observation before the transaction begins.
 

@@ -2,10 +2,10 @@
 
 use super::super::launchctl::{self, RegistrationState};
 use crate::NativeError;
+use crate::process_exit::ProcessIdentity;
 use mixrelay_driver_control::{DriverClient, DriverSnapshot, DriverState};
 use mixrelay_local_socket::{DRIVER_SOCKET, socket_directory_in_home};
 use std::{
-    io,
     path::Path,
     time::{Duration, Instant},
 };
@@ -126,26 +126,35 @@ fn wait_until_ready(
     }
 }
 
-pub(super) fn wait_for_service_exit(state: &RegistrationState) -> Result<(), NativeError> {
+/// Identifies the loaded Driver process before it is stopped, so the exit wait cannot
+/// adopt a process that reuses its PID afterwards.
+pub(super) fn capture_service_process(
+    state: &RegistrationState,
+) -> Result<Option<ProcessIdentity>, NativeError> {
     let RegistrationState::Loaded { pid: Some(pid) } = state else {
-        return Ok(());
+        return Ok(None);
     };
     let pid = i32::try_from(*pid).map_err(|_| NativeError::LaunchdState("invalid Driver PID"))?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        // SAFETY: signal zero only queries the exact launchd-observed PID and
-        // does not deliver a signal or accept any pointer arguments.
-        if unsafe { libc::kill(pid, 0) } == -1
-            && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
-        {
-            return Ok(());
-        }
-        if std::time::Instant::now() >= deadline {
-            return Err(NativeError::LaunchdState(
-                "Driver process did not drain after bootout",
-            ));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(25));
+    ProcessIdentity::capture(pid)
+        .map_err(|_| NativeError::LaunchdState("Driver process state is unavailable"))
+}
+
+pub(super) fn wait_for_service_exit(process: Option<ProcessIdentity>) -> Result<(), NativeError> {
+    let Some(process) = process else {
+        return Ok(());
+    };
+    let remaining = crate::process_exit::wait_for_exit(
+        &[process],
+        Instant::now() + Duration::from_secs(5),
+        std::thread::sleep,
+    )
+    .map_err(|_| NativeError::LaunchdState("Driver process state is unavailable"))?;
+    if remaining.is_empty() {
+        Ok(())
+    } else {
+        Err(NativeError::LaunchdState(
+            "Driver process did not drain after bootout",
+        ))
     }
 }
 
