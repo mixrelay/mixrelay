@@ -20,6 +20,9 @@ pub(crate) struct NativeMenuLabels {
     pub(crate) workspace_open: &'static str,
     pub(crate) workspace_save: &'static str,
     pub(crate) workspace_save_as: &'static str,
+    pub(crate) view: &'static str,
+    pub(crate) show_graph_list: &'static str,
+    pub(crate) hide_graph_list: &'static str,
 }
 
 const LABELS: [NativeMenuLabels; 11] = [
@@ -32,6 +35,9 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_open: "Open…",
         workspace_save: "Save",
         workspace_save_as: "Save As…",
+        view: "View",
+        show_graph_list: "Show Graph List",
+        hide_graph_list: "Hide Graph List",
     },
     NativeMenuLabels {
         app_about: "MixRelay 정보",
@@ -42,6 +48,9 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_open: "열기…",
         workspace_save: "저장",
         workspace_save_as: "다른 이름으로 저장…",
+        view: "보기",
+        show_graph_list: "그래프 목록 보기",
+        hide_graph_list: "그래프 목록 가리기",
     },
     NativeMenuLabels {
         app_about: "MixRelayについて",
@@ -52,6 +61,9 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_open: "開く…",
         workspace_save: "保存",
         workspace_save_as: "名前を付けて保存…",
+        view: "表示",
+        show_graph_list: "グラフ一覧を表示",
+        hide_graph_list: "グラフ一覧を隠す",
     },
     NativeMenuLabels {
         app_about: "关于 MixRelay",
@@ -62,6 +74,9 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_open: "打开…",
         workspace_save: "保存",
         workspace_save_as: "另存为…",
+        view: "显示",
+        show_graph_list: "显示音频图列表",
+        hide_graph_list: "隐藏音频图列表",
     },
     NativeMenuLabels {
         app_about: "關於 MixRelay",
@@ -72,6 +87,9 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_open: "開啟…",
         workspace_save: "儲存",
         workspace_save_as: "另存新檔…",
+        view: "顯示",
+        show_graph_list: "顯示音訊圖列表",
+        hide_graph_list: "隱藏音訊圖列表",
     },
     NativeMenuLabels {
         app_about: "À propos de MixRelay",
@@ -82,6 +100,9 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_open: "Ouvrir…",
         workspace_save: "Enregistrer",
         workspace_save_as: "Enregistrer sous…",
+        view: "Présentation",
+        show_graph_list: "Afficher la liste des graphes",
+        hide_graph_list: "Masquer la liste des graphes",
     },
     NativeMenuLabels {
         app_about: "Über MixRelay",
@@ -92,6 +113,9 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_open: "Öffnen…",
         workspace_save: "Speichern",
         workspace_save_as: "Speichern unter…",
+        view: "Darstellung",
+        show_graph_list: "Graphenliste einblenden",
+        hide_graph_list: "Graphenliste ausblenden",
     },
     NativeMenuLabels {
         app_about: "Acerca de MixRelay",
@@ -102,6 +126,9 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_open: "Abrir…",
         workspace_save: "Guardar",
         workspace_save_as: "Guardar como…",
+        view: "Visualización",
+        show_graph_list: "Mostrar lista de grafos",
+        hide_graph_list: "Ocultar lista de grafos",
     },
     NativeMenuLabels {
         app_about: "Sobre o MixRelay",
@@ -112,6 +139,9 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_open: "Abrir…",
         workspace_save: "Salvar",
         workspace_save_as: "Salvar como…",
+        view: "Visualizar",
+        show_graph_list: "Mostrar lista de grafos",
+        hide_graph_list: "Ocultar lista de grafos",
     },
     NativeMenuLabels {
         app_about: "Informazioni su MixRelay",
@@ -122,6 +152,9 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_open: "Apri…",
         workspace_save: "Salva",
         workspace_save_as: "Salva con nome…",
+        view: "Vista",
+        show_graph_list: "Mostra elenco grafi",
+        hide_graph_list: "Nascondi elenco grafi",
     },
     NativeMenuLabels {
         app_about: "О MixRelay",
@@ -132,6 +165,9 @@ const LABELS: [NativeMenuLabels; 11] = [
         workspace_open: "Открыть…",
         workspace_save: "Сохранить",
         workspace_save_as: "Сохранить как…",
+        view: "Вид",
+        show_graph_list: "Показать список графов",
+        hide_graph_list: "Скрыть список графов",
     },
 ];
 
@@ -226,9 +262,13 @@ mod tests {
                 text.workspace_open,
                 text.workspace_save,
                 text.workspace_save_as,
+                text.view,
+                text.show_graph_list,
+                text.hide_graph_list,
             ] {
                 assert!(!action.is_empty());
             }
+            assert_ne!(text.show_graph_list, text.hide_graph_list);
         }
         assert_eq!(labels("zh-Hans-TW").workspace_file, "文件");
         assert_eq!(labels("zh-Hant-CN").workspace_file, "檔案");

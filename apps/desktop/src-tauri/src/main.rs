@@ -266,6 +266,7 @@ fn graph_builder(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::W
             control_proxy::node_control::control_get_node_controls,
             control_proxy::node_control::control_update_node_control,
             app_menu::set_native_menu_locale,
+            workspace_menu::set_graph_list_visible,
             control_proxy::control_get_status,
             control_proxy::workspace::workspace_file,
             control_proxy::control_reconfigure_session,

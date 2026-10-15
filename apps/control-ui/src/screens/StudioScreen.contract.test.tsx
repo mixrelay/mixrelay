@@ -105,15 +105,32 @@ beforeEach(async () => {
   harness.list = null;
   await i18n.changeLanguage('en');
 });
-it('hides and reopens the graph sidebar using one explicit expanded state', async () => {
-  render(view(native()));
-  const toggle = await screen.findByRole('button', { name: 'Graphs' });
-  expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  fireEvent.click(toggle);
-  expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument();
-  fireEvent.click(toggle);
-  expect(screen.getByRole('navigation', { name: 'Graphs' })).toBeVisible();
+it('opens and closes the collapsed graph list with one header menu button', async () => {
+  // Swap the shared setup mock's implementation and put it back afterwards.
+  const matchMedia = vi.mocked(window.matchMedia);
+  const original = matchMedia.getMockImplementation();
+  matchMedia.mockImplementation(
+    (query: string) =>
+      ({
+        matches: true,
+        media: query,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+      }) as unknown as MediaQueryList,
+  );
+  try {
+    render(view(native()));
+    const toggle = await screen.findByRole('button', { name: 'Graphs' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('navigation', { name: 'Graphs' })).toBeVisible();
+    fireEvent.click(toggle);
+    expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument();
+  } finally {
+    if (original) matchMedia.mockImplementation(original);
+  }
 });
 it('creates a named graph through confirmed native catalog activation and can cancel the next dialog', async () => {
   const port = native();

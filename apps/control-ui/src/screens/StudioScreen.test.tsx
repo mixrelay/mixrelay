@@ -56,6 +56,13 @@ vi.mock('../features/audio-session/AudioPauseControl', () => ({
     return null;
   },
 }));
+// Captures the View → Show/Hide Graph List command, which jsdom has no native menu for.
+const graphListCommand = vi.hoisted(() => ({ toggle: () => {} }));
+vi.mock('../core/shell/useNativeGraphListCommand', () => ({
+  useNativeGraphListCommand: (_visible: boolean, onToggle: () => void) => {
+    graphListCommand.toggle = onToggle;
+  },
+}));
 vi.mock('../features/routing-workspace/RoutingWorkspace', () => ({
   RoutingWorkspace: (binding: WorkspaceBinding) => {
     workspaceBindings.set(binding.controlPort, binding);
@@ -305,30 +312,13 @@ it.each([
   },
 );
 
-it('toggles the sidebar from one edge tab without changing the graph or header', async () => {
+it('keeps the graph list fixed on wide windows without an on-screen toggle', async () => {
   const controlPort = port(1);
-  const mutate = vi.spyOn(controlPort, 'mutateGraphCatalog');
   render(view(controlPort));
   await screen.findByRole('button', { name: 'Untitled Graph' });
-  const header = screen.getByRole('heading', { name: 'MixRelay' }).closest('header');
-  const toggle = screen.getByRole('button', { name: 'Graphs' });
-  expect(header).not.toContainElement(toggle);
-  expect(toggle).toHaveAttribute('aria-controls', 'graph-sidebar');
-  expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  expect(toggle.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
-  fireEvent.click(toggle);
-  // The same tab persists; only its state and the list change.
-  expect(screen.getByRole('button', { name: 'Graphs' })).toBe(toggle);
-  expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument();
-  fireEvent.click(toggle);
-  const list = screen.getByRole('navigation', { name: 'Graphs' });
-  expect(list).toBeVisible();
-  expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  // DOM order puts the opened list directly after the tab for forward Tab.
-  const graph = screen.getByRole('button', { name: 'Untitled Graph' });
-  expect(toggle.compareDocumentPosition(graph) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(mutate).not.toHaveBeenCalled();
+  expect(screen.getByRole('navigation', { name: 'Graphs' })).toBeVisible();
+  // Carbon: the header menu button exists only while the list collapses.
+  expect(screen.queryByRole('button', { name: 'Graphs' })).not.toBeInTheDocument();
 });
 
 it('sends device edits through the independent Driver owner during graph title edits', async () => {
@@ -493,7 +483,8 @@ it('starts the overlay sidebar closed on narrow screens and closes it after a ch
     act(() => {
       for (const listener of listeners) listener();
     });
-    fireEvent.click(await screen.findByRole('button', { name: 'Graphs' }));
+    // Wide again: the fixed list returns and the menu button goes away.
+    expect(screen.queryByRole('button', { name: 'Graphs' })).not.toBeInTheDocument();
     const graphA = within(screen.getByRole('navigation', { name: 'Graphs' })).getByRole('button', {
       name: 'Graph A',
     });
@@ -504,11 +495,115 @@ it('starts the overlay sidebar closed on narrow screens and closes it after a ch
       for (const listener of listeners) listener();
     });
     expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument();
-    // Focus that lived in the closed sidebar moves to the visible toggle.
-    expect(screen.getByRole('button', { name: 'Graphs' })).toHaveFocus();
+    // Focus that lived in the closed list moves to the header menu button.
+    const menu = screen.getByRole('button', { name: 'Graphs' });
+    expect(menu).toHaveFocus();
+    expect(menu.closest('header')).toContainElement(
+      screen.getByRole('heading', { name: 'MixRelay' }),
+    );
   } finally {
     matchMedia.mockRestore();
   }
+});
+
+function breakpoint(initial: boolean) {
+  const listeners = new Set<() => void>();
+  const media = { matches: initial };
+  const matchMedia = vi.mocked(window.matchMedia);
+  const original = matchMedia.getMockImplementation();
+  matchMedia.mockImplementation(
+    (query: string) =>
+      ({
+        get matches() {
+          return media.matches;
+        },
+        media: query,
+        addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+        removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+      }) as unknown as MediaQueryList,
+  );
+  return {
+    set(narrow: boolean) {
+      media.matches = narrow;
+      act(() => {
+        for (const listener of listeners) listener();
+      });
+    },
+    restore() {
+      if (original) matchMedia.mockImplementation(original);
+    },
+  };
+}
+
+it('moves focus from the menu button to the fixed list when the window widens', async () => {
+  const width = breakpoint(true);
+  try {
+    render(view(port(1)));
+    const menu = await screen.findByRole('button', { name: 'Graphs' });
+    fireEvent.click(menu);
+    act(() => menu.focus());
+    width.set(false);
+    expect(screen.queryByRole('button', { name: 'Graphs' })).not.toBeInTheDocument();
+    const list = screen.getByRole('navigation', { name: 'Graphs' });
+    expect(list).toContainElement(document.activeElement as HTMLElement);
+  } finally {
+    width.restore();
+  }
+});
+
+it('does not pull focus back after the user deliberately left the menu button', async () => {
+  const width = breakpoint(true);
+  try {
+    render(view(port(1)));
+    const menu = await screen.findByRole('button', { name: 'Graphs' });
+    act(() => menu.focus());
+    // A real blur and a later resize are separate tasks; let the blur settle first.
+    await act(async () => menu.blur());
+    width.set(false);
+    expect(document.activeElement).toBe(document.body);
+  } finally {
+    width.restore();
+  }
+});
+
+it('keeps focus when the View command hides the list, then widening hides the overlay', async () => {
+  const width = breakpoint(false);
+  try {
+    render(view(port(1)));
+    await screen.findByRole('navigation', { name: 'Graphs' });
+    act(() => graphListCommand.toggle());
+    expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument();
+    width.set(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Graphs' }));
+    const item = within(screen.getByRole('navigation', { name: 'Graphs' }))
+      .getAllByRole('button')
+      .find((button) => !button.hasAttribute('disabled'));
+    if (!item) throw new Error('Expected a graph list control');
+    act(() => item.focus());
+    expect(item).toHaveFocus();
+    width.set(false);
+    // The list stays hidden by the View command; focus lands on the workspace.
+    expect(screen.queryByRole('navigation', { name: 'Graphs' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Routing workspace' })).toHaveFocus();
+  } finally {
+    width.restore();
+  }
+});
+
+it('skips an inert workspace and keeps focus in the shell when the list hides', async () => {
+  render(view(port(1)));
+  const list = await screen.findByRole('navigation', { name: 'Graphs' });
+  const item = within(list)
+    .getAllByRole('button')
+    .find((button) => !button.hasAttribute('disabled'));
+  if (!item) throw new Error('Expected a graph list control');
+  act(() => item.focus());
+  expect(item).toHaveFocus();
+  screen.getByRole('region', { name: 'Routing workspace' }).setAttribute('inert', '');
+  act(() => graphListCommand.toggle());
+  const focused = document.activeElement as HTMLElement;
+  expect(focused.closest('header')).not.toBeNull();
+  expect(focused.tagName).toBe('BUTTON');
 });
 
 it('keeps the overlay sidebar open when a graph switch fails', async () => {

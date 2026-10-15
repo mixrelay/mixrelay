@@ -9,6 +9,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import type { ControlPort, RuntimeGraphDocument } from '../core/control-port/types';
 import { usePaidFeatures } from '../core/licensing/FeatureAccess';
+import { useNativeGraphListCommand } from '../core/shell/useNativeGraphListCommand';
 import { shellBreakpoints } from '../core/theme/tokens';
 import { ActionButton } from '../core/ui/ActionButton';
 import { ApplicationStatusBar } from '../core/ui/ApplicationStatusBar';
@@ -162,6 +163,8 @@ export function StudioScreen({
       onSelect={(id) => void mutateCatalog({ action: 'select', id })}
     >
       <section
+        id="studio-workspace"
+        tabIndex={-1}
         className={styles.workspace}
         aria-label={t('studio.workspace')}
         inert={sessionBusy || catalogBusy || catalogUncertain}
@@ -237,20 +240,59 @@ function StudioFrame({
 }) {
   const { t } = useTranslation();
   const overlay = useOverlaySidebar();
-  const [sidebarOpen, setSidebarOpen] = useState(() => !overlay);
+  // Carbon UI shell: wide windows keep the list fixed (View menu may hide it); narrow
+  // windows collapse it behind the header menu button and open it over the canvas.
+  const [fixedVisible, setFixedVisible] = useState(true);
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const sidebarOpen = overlay ? overlayOpen : fixedVisible;
   const shell = useRef<HTMLElement>(null);
   const pendingSelection = useRef<string | null>(null);
-  const returnFocus = useRef(false);
-  // Closing while focus is inside the sidebar hands focus to the visible toggle.
-  const closeSidebar = useCallback(() => {
-    const sidebarElement = shell.current?.querySelector('#graph-sidebar');
-    returnFocus.current = Boolean(sidebarElement?.contains(document.activeElement));
-    setSidebarOpen(false);
-  }, []);
-  // Entering the overlay width closes the sidebar so it never starts over the canvas.
+  // The list control or menu button that last held focus. When a visibility or breakpoint
+  // change hides or removes it, focus moves to the control that survives.
+  const focusOwner = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    if (overlay) closeSidebar();
-  }, [overlay, closeSidebar]);
+    const element = shell.current;
+    if (!element) return;
+    const track = (event: FocusEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      focusOwner.current = target?.closest('#graph-sidebar, [aria-controls="graph-sidebar"]')
+        ? target
+        : null;
+    };
+    // Focus that moves elsewhere (a dialog, another control) is no longer the shell's. A
+    // plain blur of a control that stays visible is the user leaving it, not a hide.
+    const leave = (event: FocusEvent) => {
+      if (event.relatedTarget instanceof Node) {
+        if (!element.contains(event.relatedTarget)) focusOwner.current = null;
+        return;
+      }
+      const blurred = event.target;
+      queueMicrotask(() => {
+        if (
+          focusOwner.current === blurred &&
+          shown(focusOwner.current) &&
+          !shown(document.activeElement)
+        )
+          focusOwner.current = null;
+      });
+    };
+    element.addEventListener('focusin', track);
+    element.addEventListener('focusout', leave);
+    return () => {
+      element.removeEventListener('focusin', track);
+      element.removeEventListener('focusout', leave);
+    };
+  }, []);
+  const closeOverlay = useCallback(() => setOverlayOpen(false), []);
+  // Entering the overlay width closes the list so it never starts over the canvas.
+  useEffect(() => {
+    if (overlay) closeOverlay();
+  }, [overlay, closeOverlay]);
+  const toggleSidebar = useCallback(() => {
+    if (overlay) setOverlayOpen((open) => !open);
+    else setFixedVisible((visible) => !visible);
+  }, [overlay]);
+  useNativeGraphListCommand(sidebarOpen, toggleSidebar);
   // An overlay closes only once the chosen graph is active. A request that settles without
   // activating it (failure, or another graph became active) ends the intent, so the
   // sidebar and its error stay visible and a later refresh cannot reuse it.
@@ -262,32 +304,43 @@ function StudioFrame({
     if (pending === null) return;
     if (pending === activeId) {
       pendingSelection.current = null;
-      if (overlay) closeSidebar();
+      if (overlay) closeOverlay();
     } else if (!catalogBusy || catalogError) {
       pendingSelection.current = null;
     }
-  }, [activeId, catalogBusy, catalogError, overlay, closeSidebar]);
+  }, [activeId, catalogBusy, catalogError, overlay, closeOverlay]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Runs after each list visibility or breakpoint change, which is what can remove the focused control.
   useEffect(() => {
-    if (sidebarOpen || !returnFocus.current) return;
-    returnFocus.current = false;
-    shell.current?.querySelector<HTMLElement>('[aria-controls="graph-sidebar"]')?.focus();
-  }, [sidebarOpen]);
+    const owner = focusOwner.current;
+    const root = shell.current;
+    if (!owner || !root) return;
+    // Never take focus from a control that still holds it (including a dialog).
+    if (shown(document.activeElement)) return;
+    focusOwner.current = null;
+    // A still-visible owner means the user left it on purpose; only a hidden or removed
+    // owner hands focus to the surviving control.
+    if (shown(owner)) return;
+    surviving(root)?.focus();
+  }, [sidebarOpen, overlay]);
   return (
     <main ref={shell} className={styles.shell} data-sidebar-open={sidebarOpen}>
       <header className={styles.applicationHeader}>
-        <ProductHeading />
+        <span className={styles.applicationLead}>
+          {overlay ? (
+            <SidebarToggle
+              label={t('studio.graphs')}
+              opened={sidebarOpen}
+              controls="graph-sidebar"
+              onToggle={toggleSidebar}
+            />
+          ) : null}
+          <ProductHeading />
+        </span>
         <span className={styles.applicationActions}>
           <ThemePicker />
           {applicationActions}
         </span>
       </header>
-      {/* Before the list in DOM order: opening it makes the list the next Tab stop. */}
-      <SidebarToggle
-        label={t('studio.graphs')}
-        opened={sidebarOpen}
-        controls="graph-sidebar"
-        onToggle={() => setSidebarOpen((open) => !open)}
-      />
       <GraphSidebar
         hidden={!sidebarOpen}
         {...sidebar}
@@ -298,6 +351,30 @@ function StudioFrame({
       />
       {children}
     </main>
+  );
+}
+
+/** Whether an element is focused-capable on screen: connected, not the body, not hidden. */
+function shown(element: Element | null): boolean {
+  return Boolean(
+    element && element !== document.body && element.isConnected && !element.closest('[hidden]'),
+  );
+}
+
+/** The first shell control still able to take focus: menu button, list, workspace, header. */
+function surviving(root: HTMLElement): HTMLElement | undefined {
+  const candidates = [
+    root.querySelector<HTMLElement>('[aria-controls="graph-sidebar"]'),
+    root.querySelector<HTMLElement>(
+      '#graph-sidebar [aria-current="page"]:not(:disabled), #graph-sidebar button:not(:disabled)',
+    ),
+    root.querySelector<HTMLElement>('#studio-workspace'),
+    root.querySelector<HTMLElement>('header button:not(:disabled)'),
+  ];
+  return (
+    candidates.find((element): element is HTMLElement =>
+      Boolean(element && !element.closest('[inert], [hidden]')),
+    ) ?? undefined
   );
 }
 

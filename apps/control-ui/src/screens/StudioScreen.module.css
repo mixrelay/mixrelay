@@ -23,9 +23,19 @@
   background: var(--surface);
 }
 
+.applicationLead,
 .applicationActions {
   display: flex;
   align-items: center;
+}
+
+.applicationLead {
+  gap: var(--space-2);
+}
+
+/* Focus target when the fixed list hides under focus; it is not a Tab stop. */
+.workspace:focus {
+  outline: none;
 }
 
 /* The header keeps the sidebar width while the list is closed; only the canvas widens. */
