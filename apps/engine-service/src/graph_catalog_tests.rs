@@ -438,6 +438,49 @@ fn accepted_parameter_warns_for_corrupt_catalog_without_overwriting_its_bytes() 
 }
 
 #[test]
+fn a_targeted_apply_is_rejected_after_another_graph_is_selected() {
+    let fixture = Fixture::new();
+    let engine =
+        controller(default_duplex_document(1, None)).with_graph_catalog_path(fixture.path());
+    let first_id = engine.graph_catalog().unwrap().active_id;
+    let targeted = |document: GraphDocument, id: &str| GraphApplyRequest {
+        expected_graph_id: Some(id.into()),
+        ..document.into()
+    };
+    // The selected graph accepts a document authored for it.
+    let mut document = engine.graph();
+    document.revision += 1;
+    engine
+        .apply_graph_request(targeted(document, &first_id))
+        .unwrap();
+    settle(&engine);
+    let created = engine
+        .mutate_graph_catalog(request(
+            &engine,
+            GraphCatalogAction::Create {
+                name: "Other".into(),
+            },
+        ))
+        .unwrap();
+    assert_ne!(created.active_id, first_id);
+    let saved = fs::read(fixture.path()).unwrap();
+    // A document authored for the first graph never lands on the newly selected one.
+    let mut stale = engine.graph();
+    stale.revision += 1;
+    stale.nodes = default_duplex_document(1, None).nodes;
+    let error = engine
+        .apply_graph_request(targeted(stale, &first_id))
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::GraphRevisionStale);
+    assert_eq!(
+        error.parameters["selectedGraphId"],
+        created.active_id.as_str()
+    );
+    assert!(engine.graph().nodes.is_empty());
+    assert_eq!(fs::read(fixture.path()).unwrap(), saved);
+}
+
+#[test]
 fn stale_writer_and_pending_publication_do_not_switch_or_change_saved_bytes() {
     let fixture = Fixture::new();
     let engine =

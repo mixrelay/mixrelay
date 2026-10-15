@@ -270,7 +270,10 @@ export class StorybookMockControlPort implements ControlPort {
   }
 
   public async applyGraph(request: GraphApplyRequest): Promise<GraphApplyResponse> {
-    const document = preserveMockProcessorState(this.state.graph, request);
+    const { expectedGraphId, ...intent } = request;
+    if (expectedGraphId !== undefined && expectedGraphId !== this.activeGraph.id)
+      throw new Error('graph_revision_stale');
+    const document = preserveMockProcessorState(this.state.graph, intent);
     this.state.graph = document;
     this.activeGraph.document = structuredClone(document);
     this.state.graphStatus = {

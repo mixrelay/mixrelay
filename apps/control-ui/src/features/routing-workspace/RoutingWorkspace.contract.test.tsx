@@ -756,24 +756,28 @@ it.each(['same topology', 'changed topology'] as const)(
         parameters: { nodeControlOutcome: 'not_applied' },
       }),
     );
+    // The engine holds `replacement` once the control is rejected. Recovery reads the
+    // catalog snapshot, whose document is attributed to the selected graph.
+    let engine = initial;
+    vi.spyOn(native, 'getGraph').mockImplementation(async () => engine);
+    const catalog = await native.getGraphCatalog();
     const read = vi
-      .spyOn(native, 'getGraph')
-      .mockResolvedValueOnce(initial)
-      .mockResolvedValue(replacement);
+      .spyOn(native, 'getGraphCatalog')
+      .mockImplementation(async () => ({ ...catalog, document: engine }));
     vi.spyOn(native, 'getGraphStatus').mockResolvedValue({
       protocolVersion: 1,
       activeRevision: replacement.revision,
       submittedRevision: replacement.revision,
     });
-    render(view(native, { graphId: 'graph-1' }));
+    render(view(native, { graphId: catalog.activeId }));
     await ready();
     await eventually(() =>
       expect(screen.getByRole('button', { name: 'Disable Hardware input' })).toBeEnabled(),
     );
+    const before = read.mock.calls.length;
+    engine = replacement;
     fireEvent.click(screen.getByRole('button', { name: 'Disable Hardware input' }));
-    await eventually(() =>
-      expect(read).toHaveBeenCalledTimes(topology === 'changed topology' ? 3 : 2),
-    );
+    await eventually(() => expect(read.mock.calls.length).toBeGreaterThan(before));
     if (topology === 'changed topology') {
       expect(await find('button', { name: 'Retry' })).toBeVisible();
       expect(canvas().model.nodes).toHaveLength(1);

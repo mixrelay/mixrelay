@@ -1081,6 +1081,19 @@ impl ControlBackend for EngineGraphController {
         request: GraphApplyRequest,
     ) -> Result<GraphApplyResponse, ProtocolError> {
         let _mutation = self.mutation.lock();
+        // Selection changes take the same mutation lock, so this check and the apply are atomic.
+        if let Some(expected) = &request.expected_graph_id {
+            let selected = self.view_graph_id();
+            if *expected != selected {
+                return Err(ProtocolError {
+                    code: ErrorCode::GraphRevisionStale,
+                    parameters: serde_json::json!({
+                        "expectedGraphId": expected,
+                        "selectedGraphId": selected,
+                    }),
+                });
+            }
+        }
         let reuse = self.processor_controls.reuse_transaction();
         let mut document = request.document;
         self.validate_feature_usage(&document, self.catalog_candidate(&document).as_ref())?;

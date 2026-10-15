@@ -154,3 +154,17 @@ it('keeps independent providers unchanged when one provider receives explicit pa
     parameters: { parameterValues: { '0': 0.9 } },
   });
 });
+
+describe('graph targeting in the interactive preview', () => {
+  it('rejects a document named for another graph and applies one for the selected graph', async () => {
+    const port = fixture();
+    const { activeId } = await port.getGraphCatalog();
+    const request = { ...graph(), revision: 2, nodes: graph().nodes.slice(0, 1) };
+    await expect(port.applyGraph({ ...request, expectedGraphId: `${activeId}-other` })).rejects.toThrow(
+      'graph_revision_stale',
+    );
+    expect(await port.getGraph()).toEqual(graph());
+    await port.applyGraph({ ...request, expectedGraphId: activeId });
+    expect(await port.getGraph()).toEqual(request);
+  });
+});

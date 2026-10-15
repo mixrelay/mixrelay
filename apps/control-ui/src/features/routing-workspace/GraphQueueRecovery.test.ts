@@ -359,6 +359,62 @@ it('retains a blocked draft when recovery cannot read the engine', async () => {
   expect(f.queue.canPublishParameters).toBe(false);
 });
 
+it('never adopts another graph as the recovery baseline after a remote selection', async () => {
+  const f = fixture();
+  const other = { ...source, revision: 9, nodes: [] };
+  f.port.applyGraph.mockRejectedValue(
+    new ControlPortError(409, { code: 'graph_revision_stale', parameters: {} }),
+  );
+  f.port.getGraph.mockResolvedValue(other);
+  const queue = new GraphApplicationQueue(
+    {
+      ...f.port,
+      getGraphCatalog: vi.fn(async () => ({
+        protocolVersion: 1,
+        catalogRevision: 8,
+        activeId: 'graph-b',
+        graphs: [],
+        document: other,
+      })),
+    },
+    f.callbacks,
+  );
+  queue.submit(runtimeGraphToAudioGraph(source));
+  await flush();
+  expect(f.callbacks.state).toHaveBeenLastCalledWith('blocked');
+  expect(f.callbacks.document).not.toHaveBeenCalledWith(other);
+  expect(f.callbacks.restore).not.toHaveBeenCalled();
+});
+
+it('takes the recovery baseline from the catalog snapshot that names the owning graph', async () => {
+  const f = fixture();
+  const other = { ...source, revision: 9, nodes: [] };
+  const owned = { ...source, revision: 8 };
+  f.port.applyGraph.mockRejectedValue(
+    new ControlPortError(409, { code: 'graph_revision_stale', parameters: {} }),
+  );
+  // A selection has already published B's document while the catalog still names A.
+  f.port.getGraph.mockResolvedValue(other);
+  f.port.getGraphStatus.mockResolvedValue({
+    protocolVersion: 1,
+    activeRevision: 8,
+    submittedRevision: 8,
+  });
+  const getGraphCatalog = vi.fn(async () => ({
+    protocolVersion: 1,
+    catalogRevision: 7,
+    activeId: 'graph-a',
+    graphs: [],
+    document: owned,
+  }));
+  const queue = new GraphApplicationQueue({ ...f.port, getGraphCatalog }, f.callbacks);
+  queue.submit(runtimeGraphToAudioGraph(source));
+  await flush();
+  expect(f.port.getGraph).not.toHaveBeenCalled();
+  expect(f.callbacks.document).not.toHaveBeenCalledWith(other);
+  expect(f.callbacks.restore).toHaveBeenCalledWith(owned);
+});
+
 it('rejects an unrelated apply receipt without silently accepting another writer', async () => {
   const f = fixture();
   f.port.applyGraph.mockResolvedValue({ protocolVersion: 1, revision: 99, state: 'active' });

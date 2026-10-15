@@ -51,6 +51,11 @@ pub struct GraphApplyRequest {
     pub document: mixrelay_audio_graph::GraphDocument,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub processor_parameter_changes: Vec<GraphProcessorParameterChange>,
+    /// The graph this document was authored for. When present, the engine rejects the
+    /// request as stale unless that graph is still selected, so a selection change by
+    /// another client cannot redirect the document onto a different graph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_graph_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -67,6 +72,7 @@ impl From<mixrelay_audio_graph::GraphDocument> for GraphApplyRequest {
         Self {
             document,
             processor_parameter_changes: Vec::new(),
+            expected_graph_id: None,
         }
     }
 }
@@ -1070,6 +1076,15 @@ mod tests {
             serde_json::from_value::<mixrelay_audio_graph::GraphDocument>(encoded.clone()).unwrap(),
             document,
             "desktop preflight can inspect the document while forwarding the complete intent unchanged"
+        );
+        let mut targeted = encoded.clone();
+        targeted["expectedGraphId"] = "graph-1".into();
+        assert_eq!(
+            serde_json::from_value::<GraphApplyRequest>(targeted)
+                .unwrap()
+                .expected_graph_id
+                .as_deref(),
+            Some("graph-1")
         );
         let mut malformed = encoded;
         malformed["processorParameterChanges"][0]["stateBase64"] =

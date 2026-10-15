@@ -108,6 +108,18 @@ it('ordinary graph edits never infer parameter intent from stale full snapshots'
   expect(f.port.applyGraph.mock.calls[0]?.[0]).not.toHaveProperty('processorParameterChanges');
 });
 
+it('names the selected graph so another client selecting a graph cannot redirect an edit', async () => {
+  const f = fixture();
+  const queue = new GraphApplicationQueue(f.port, { ...f.callbacks, getGraphId: () => 'graph-a' });
+  queue.submit(f.draft);
+  await flush();
+  expect(f.port.applyGraph.mock.calls[0]?.[0].expectedGraphId).toBe('graph-a');
+  // Without a catalog (single-session engines) no graph is named.
+  f.queue.submit(f.draft);
+  await flush();
+  expect(f.port.applyGraph.mock.calls[1]?.[0]).not.toHaveProperty('expectedGraphId');
+});
+
 it('derives only explicitly changed controls and supports the inverse Undo/Redo delta', () => {
   const f = fixture();
   const before = f.draft;

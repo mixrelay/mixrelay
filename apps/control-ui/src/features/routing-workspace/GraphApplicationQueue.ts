@@ -161,6 +161,7 @@ export class GraphApplicationQueue {
       ControlPort,
       | 'applyGraph'
       | 'getGraph'
+      | 'getGraphCatalog'
       | 'getGraphStatus'
       | 'retryProcessor'
       | 'updateNodeControl'
@@ -525,7 +526,7 @@ export class GraphApplicationQueue {
     publication: 'immediate' | 'deferred' = 'immediate',
   ) {
     const graphId = expected?.graphId ?? this.callbacks.getGraphId?.();
-    const document = await bounded(this.port.getGraph(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
+    const document = await this.readOwnedGraph(signal, graphId);
     if (wait) await this.waitForRevision(document.revision, signal);
     this.guardOwner(signal, graphId);
     if (expected?.revision !== undefined && document.revision !== expected.revision)
@@ -537,6 +538,21 @@ export class GraphApplicationQueue {
       this.guardOwner(signal, graphId);
     }
     return document;
+  }
+
+  /**
+   * Reads this graph's document only while it is still selected. Another client can select a
+   * different graph without changing the audio revision, and the engine publishes the new
+   * document before its catalog, so separate reads cannot attribute `GET /graph` to a graph.
+   * The catalog response names the selection and carries its document in one snapshot; a
+   * lagging revision there only makes the next write stale, never attributes B's content to A.
+   */
+  private async readOwnedGraph(signal: AbortSignal, graphId: string | undefined) {
+    if (!this.port.getGraphCatalog || graphId === undefined)
+      return bounded(this.port.getGraph(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
+    const catalog = await bounded(this.port.getGraphCatalog(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
+    if (catalog.activeId !== graphId) throw failure('graph_catalog_revision_stale');
+    return catalog.document;
   }
 
   private async apply(
@@ -557,10 +573,14 @@ export class GraphApplicationQueue {
     const surviving = changes.filter(
       (change) => hasSameProcessor(source, change) && hasSameProcessor(document, change),
     );
+    // Naming the graph keeps another client's selection change from redirecting this edit.
+    const graphId = this.callbacks.getGraphId?.();
     const response = await bounded(
-      this.port.applyGraph(
-        surviving.length ? { ...document, processorParameterChanges: surviving } : document,
-      ),
+      this.port.applyGraph({
+        ...document,
+        ...(surviving.length ? { processorParameterChanges: surviving } : {}),
+        ...(graphId === undefined ? {} : { expectedGraphId: graphId }),
+      }),
       signal,
       GRAPH_APPLICATION_TIMEOUT_MS,
     );

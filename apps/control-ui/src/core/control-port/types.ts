@@ -390,6 +390,8 @@ export interface ProcessorParameterChange {
 
 export interface GraphApplyRequest extends RuntimeGraphDocument {
   processorParameterChanges?: ProcessorParameterChange[];
+  /** The graph this document was authored for; the engine rejects it once another is selected. */
+  expectedGraphId?: string;
 }
 
 export type ProtocolErrorCode =
