@@ -81,7 +81,7 @@ fn controller(
     let path = directory.join("graphs.json");
     let graphs: Vec<_> = documents
         .iter()
-        .map(|(id, document)| serde_json::json!({"id":id,"name":id,"document":document}))
+        .map(|(id, document)| serde_json::json!({"id":id,"name":id,"document":document,"layoutRevision":0,"layout":{"positions":{}}}))
         .collect();
     std::fs::write(
         &path,

@@ -7,7 +7,7 @@ fn stopping_observers_cancels_resource_preparation_before_joining() {
     use mixrelay_engine_service::GraphResourceBackend;
 
     let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
-    let devices = Arc::new(MacDevices::new(status, 48_000, 32));
+    let devices = Arc::new(MacDevices::without_devices(status, 48_000, 32));
     let observers = ControlObservers {
         format_monitor: None,
         control: None,
@@ -168,6 +168,7 @@ fn observers_with_lifetime_probe() -> (
             sample_rate: 48_000,
             block_frames: 128,
         },
+        Arc::new(|| true),
     ));
     let control = controller.start_control_maintenance().unwrap();
     let weak = Arc::downgrade(&controller);

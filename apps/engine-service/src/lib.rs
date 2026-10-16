@@ -251,7 +251,7 @@ pub trait RuntimeStatusBackend: Send + Sync {
     fn external_sample_rate(&self) -> Option<u32> {
         None
     }
-    /// Full own-endpoint observation. Legacy rate-only adapters retain their DSP block size.
+    /// Full own-endpoint observation. Rate-only adapters retain their DSP block size.
     fn external_format(&self, current: RenderFormat) -> Option<RenderFormat> {
         self.external_sample_rate().map(|sample_rate| RenderFormat {
             sample_rate,
@@ -474,52 +474,22 @@ pub struct EngineGraphControllerConfig {
     pub processor_catalog: ProcessorCatalog,
     pub graph_resources: Arc<dyn GraphResourceBackend>,
     pub runtime_status: Arc<dyn RuntimeStatusBackend>,
+    /// Whether paid access is active, read at each admission. Production passes
+    /// `mixrelay_licensing::has_local_paid_access`; tests pass a fixed answer so they never
+    /// reach the user's keychain.
+    pub paid_access: Arc<dyn Fn() -> bool + Send + Sync>,
 }
 
 impl EngineGraphController {
+    /// Constructs a controller bound to `endpoint_node_id` with contract-only endpoint,
+    /// resource and Driver backends that route no OS audio. `paid_access` has no default
+    /// so every caller decides admission explicitly.
     #[must_use]
     pub fn new(
         exchange: Arc<ProcessorExchange>,
         endpoint_node_id: impl Into<NodeId>,
         format: RenderFormat,
-    ) -> Self {
-        Self::new_with_peak_meters(
-            exchange,
-            endpoint_node_id,
-            format,
-            default_peak_meter_bank(),
-            Vec::new(),
-        )
-    }
-
-    #[must_use]
-    pub fn new_with_peak_meters(
-        exchange: Arc<ProcessorExchange>,
-        endpoint_node_id: impl Into<NodeId>,
-        format: RenderFormat,
-        meters: Arc<PeakMeterBank>,
-        initial_bindings: Vec<MeterBinding>,
-    ) -> Self {
-        Self::new_with_configuration(
-            exchange,
-            EngineGraphControllerConfig {
-                format,
-                meters,
-                initial_bindings,
-                endpoint_backend: Arc::new(ContractOnlyVirtualEndpointBackend::default()),
-                required_endpoint_node_id: Some(endpoint_node_id.into()),
-                processor_catalog: ProcessorCatalog::default(),
-                graph_resources: Arc::new(NoopGraphResourceBackend),
-                runtime_status: Arc::new(FixedRuntimeStatus::new(DriverState::Ready)),
-            },
-        )
-    }
-
-    #[must_use]
-    pub fn new_with_virtual_endpoints(
-        exchange: Arc<ProcessorExchange>,
-        format: RenderFormat,
-        endpoint_backend: Arc<dyn VirtualEndpointBackend>,
+        paid_access: Arc<dyn Fn() -> bool + Send + Sync>,
     ) -> Self {
         Self::new_with_configuration(
             exchange,
@@ -527,11 +497,12 @@ impl EngineGraphController {
                 format,
                 meters: default_peak_meter_bank(),
                 initial_bindings: Vec::new(),
-                endpoint_backend,
-                required_endpoint_node_id: None,
+                endpoint_backend: Arc::new(ContractOnlyVirtualEndpointBackend::default()),
+                required_endpoint_node_id: Some(endpoint_node_id.into()),
                 processor_catalog: ProcessorCatalog::default(),
                 graph_resources: Arc::new(NoopGraphResourceBackend),
                 runtime_status: Arc::new(FixedRuntimeStatus::new(DriverState::Ready)),
+                paid_access,
             },
         )
     }
@@ -561,6 +532,7 @@ impl EngineGraphController {
             processor_catalog,
             graph_resources,
             runtime_status,
+            paid_access,
         } = config;
         let active_revision = exchange.revisions().active;
         let mut meter_bindings = BTreeMap::new();
@@ -568,7 +540,7 @@ impl EngineGraphController {
         let processor_controls = ProcessorControlRegistry::default();
         let recorders = mixrelay_audio_recorder::RecorderRegistry::default();
         let controller = Self {
-            paid_access: feature_policy::default_access_provider(),
+            paid_access,
             recorder_cleanup_error: Mutex::new(None),
             node_control_warning: Mutex::new(None),
             execution_enabled: std::sync::atomic::AtomicBool::new(true),
@@ -2108,6 +2080,9 @@ mod tests {
                 processor_catalog: ProcessorCatalog::default(),
                 graph_resources: Arc::new(NoopGraphResourceBackend),
                 runtime_status: Arc::new(FixedRuntimeStatus::new(DriverState::Ready)),
+                // Contract-only backends route no OS audio; these fixtures keep the
+                // unrestricted engine contract.
+                paid_access: Arc::new(|| true),
             },
             GraphDocument::new(1, vec![], vec![]),
         );
@@ -2125,7 +2100,12 @@ mod tests {
     }
 
     fn controller(exchange: Arc<ProcessorExchange>) -> EngineGraphController {
-        EngineGraphController::new(exchange, DEFAULT_ENDPOINT_NODE_ID, FORMAT)
+        EngineGraphController::new(
+            exchange,
+            DEFAULT_ENDPOINT_NODE_ID,
+            FORMAT,
+            Arc::new(|| true),
+        )
     }
 
     fn processor(document: &GraphDocument) -> BlockProcessor {
@@ -2220,6 +2200,7 @@ mod tests {
             Arc::new(ProcessorExchange::new(1)),
             "another-endpoint",
             FORMAT,
+            Arc::new(|| true),
         )
         .apply_graph_request(default_duplex_document(2, None).into())
         .expect_err("a different endpoint binding should fail");

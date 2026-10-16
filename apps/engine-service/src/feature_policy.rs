@@ -4,18 +4,9 @@ use mixrelay_audio_graph::{
     CompileContext, GraphCompiler, GraphDocument, NodeConfig, TO_OS_PORT_ID,
 };
 use mixrelay_control_protocol::{ErrorCode, ProtocolError};
-use std::{collections::BTreeSet, sync::Arc};
+use std::collections::BTreeSet;
 
 pub(crate) const FREE_RECORDING_SECONDS: u64 = 2 * 60 * 60;
-
-pub(super) fn default_access_provider() -> Arc<dyn Fn() -> bool + Send + Sync> {
-    // Existing engine unit fixtures exercise the unrestricted engine contract.
-    // Policy tests explicitly replace this provider; production always reads the vault.
-    #[cfg(test)]
-    return Arc::new(|| true);
-    #[cfg(not(test))]
-    Arc::new(mixrelay_licensing::has_local_paid_access)
-}
 
 pub(crate) fn limit(resource: &str, maximum: usize, used: usize) -> ProtocolError {
     ProtocolError {

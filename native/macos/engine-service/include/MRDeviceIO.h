@@ -1,6 +1,7 @@
 #ifndef MR_DEVICE_IO_H
 #define MR_DEVICE_IO_H
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "MRAggregateGroup.h"
 typedef struct MRDeviceIO MRDeviceIO;
@@ -11,8 +12,11 @@ typedef struct MRIOTimeStamp {
     double rate_scalar;
     uint32_t flags;
 } MRIOTimeStamp;
-typedef struct MRIOTiming { MRIOTimeStamp input, output; } MRIOTiming;
-_Static_assert(sizeof(MRIOTimeStamp) == 32 && sizeof(MRIOTiming) == 64, "Rust callback timing ABI");
+/* The callback's current time, then its input and output stream timestamps. */
+typedef struct MRIOTiming { MRIOTimeStamp now, input, output; } MRIOTiming;
+_Static_assert(sizeof(MRIOTimeStamp) == 32 && sizeof(MRIOTiming) == 96
+    && offsetof(MRIOTiming, input) == 32 && offsetof(MRIOTiming, output) == 64,
+    "Rust callback timing ABI");
 /* Borrowed for this call only. Validity flags are CoreAudio sample/host/rate bits. */
 typedef bool (*MRRenderHook)(void *, const void *, void *, uint32_t, const MRIOTiming *);
 typedef bool (*MRPcmHook)(void *);

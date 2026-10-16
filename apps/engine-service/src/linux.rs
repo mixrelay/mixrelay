@@ -142,6 +142,7 @@ fn run_bound(
                 processor_catalog: ProcessorCatalog::discover(),
                 graph_resources: endpoint_backend.clone(),
                 runtime_status: runtime_status.clone(),
+                paid_access: Arc::new(mixrelay_licensing::has_local_paid_access),
             },
             initial_document,
         )

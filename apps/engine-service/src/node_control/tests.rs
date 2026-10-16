@@ -357,8 +357,8 @@ fn background_node_switch_does_not_follow_editor_selection() {
         &path,
         serde_json::to_vec(&serde_json::json!({
             "version":1,"revision":1,"activeId":"a", "graphs":[
-                {"id":"a","name":"A","document":graph()},
-                {"id":"b","name":"B","document":graph()}
+                {"id":"a","name":"A","document":graph(),"layoutRevision":0,"layout":{"positions":{}}},
+                {"id":"b","name":"B","document":graph(),"layoutRevision":0,"layout":{"positions":{}}}
             ]
         }))
         .unwrap(),

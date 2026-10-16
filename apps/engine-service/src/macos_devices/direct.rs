@@ -4,9 +4,7 @@
 use super::{
     DeviceSet,
     device::Device,
-    ffi::{
-        mr_device_io_clock_discontinuities, mr_device_io_direct_binding, mr_device_io_output_epoch,
-    },
+    ffi::{mr_device_io_clock_discontinuities, mr_device_io_output_epoch},
 };
 use mixrelay_audio_engine::{ExternalBinding, RenderPlan};
 use std::{
@@ -138,20 +136,11 @@ impl Binding {
             {
                 return None;
             }
-            let (mut resolved, mut offset, mut total) = (0, 0, 0);
-            // SAFETY: immutable control-side selection with an owned native lifetime.
-            if !unsafe {
-                mr_device_io_direct_binding(
-                    device.native.pointer.as_ptr(),
-                    &raw mut resolved,
-                    &raw mut offset,
-                    &raw mut total,
-                )
-            } || resolved != clock_id
-            {
+            let resolved = device.native.host.direct_binding(&device.native)?;
+            if resolved.device != clock_id {
                 return None;
             }
-            Some(offset as usize)
+            Some(resolved.offset as usize)
         };
         Some(Self {
             id: binding_id.to_owned(),

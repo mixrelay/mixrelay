@@ -15,10 +15,13 @@ mod ffi;
 mod format;
 mod group_plan;
 mod handoff;
+mod host;
 pub(super) mod latency;
 mod native;
 mod recovery;
 mod retirement;
+#[cfg(test)]
+mod simulated;
 mod spec;
 mod telemetry;
 mod worker;
@@ -234,6 +237,7 @@ pub(super) struct MacDevices {
     stopping: AtomicBool,
     prepared_hardware_clock: Arc<AtomicBool>,
     hardware_clock: AtomicBool,
+    host: Arc<dyn host::Host>,
 }
 impl MacDevices {
     /// All graph/device owners must be dropped before this final process drain.
@@ -249,6 +253,24 @@ impl MacDevices {
         self.handoff.has_pending()
     }
     pub(super) fn new(status: Arc<AdapterRuntimeStatus>, rate: u32, buffer_frames: u32) -> Self {
+        Self::with_host(status, rate, buffer_frames, Arc::new(host::CoreAudio))
+    }
+    /// A coordinator over a simulated `CoreAudio` that publishes no device, for tests that
+    /// exercise coordination without devices. Nothing reaches the machine's HAL.
+    #[cfg(test)]
+    pub(super) fn without_devices(
+        status: Arc<AdapterRuntimeStatus>,
+        rate: u32,
+        buffer_frames: u32,
+    ) -> Self {
+        Self::with_host(status, rate, buffer_frames, simulated::SimulatedHost::new())
+    }
+    fn with_host(
+        status: Arc<AdapterRuntimeStatus>,
+        rate: u32,
+        buffer_frames: u32,
+        host: Arc<dyn host::Host>,
+    ) -> Self {
         Self {
             cache: Arc::default(),
             handoff: Arc::default(),
@@ -259,6 +281,7 @@ impl MacDevices {
             stopping: AtomicBool::new(false),
             prepared_hardware_clock: Arc::default(),
             hardware_clock: AtomicBool::new(false),
+            host,
         }
     }
     pub(super) fn reclaim(&self) {
@@ -386,7 +409,7 @@ impl GraphResourceBackend for MacDevices {
         selectors: &[&mixrelay_audio_io::DeviceSelector],
     ) -> Result<Vec<mixrelay_audio_io::AudioDeviceDescriptor>, HostAudioBackendError> {
         self.require_preparation()?;
-        mixrelay_audio_io::macos::selected_devices(selectors.iter().copied())
+        self.host.inventory(selectors)
     }
 
     fn resolve_application_capture(
@@ -589,6 +612,7 @@ mod tests {
             48_000,
             None,
             32,
+            simulated::SimulatedHost::new(),
         )
         .unwrap();
         assert_eq!(driver.requested_buffer(), 32);
@@ -642,32 +666,34 @@ mod tests {
 
     #[test]
     fn native_owner_allocation_retirement_stress() {
-        if !mixrelay_macos_test_support::memory_child(
-            "macos_devices::tests::native_owner_allocation_retirement_stress",
-        ) {
-            return;
-        }
-        let baseline = Native::active_owners();
-        for channels in [1, 2, 8, 64] {
-            for _ in 0..128 {
-                let (device, context) = synthetic_output(channels, 48_000, 48_000);
-                assert_eq!(Native::active_owners(), baseline + 1);
-                drop(device);
-                assert_eq!(
-                    Native::active_owners(),
-                    baseline + 1,
-                    "worker still owns native queues"
-                );
-                drop(context);
-                assert_eq!(
-                    Native::active_owners(),
-                    baseline,
-                    "last owner releases both queues and admission"
-                );
+        // Lazily registered diagnostics callsites allocate once, outside the measurement.
+        drop(synthetic_output(1, 48_000, 48_000));
+        // All 512 owners exceed the 256-owner admission bound: every create below succeeds
+        // only because each retirement returned its slot. Allocation is counted on this one
+        // thread, which creates and destroys every owner, so concurrent tests cannot perturb it.
+        let allocation = allocation_counter::measure(|| {
+            for channels in [1, 2, 8, 64] {
+                for _ in 0..128 {
+                    let (device, context) = synthetic_output(channels, 48_000, 48_000);
+                    let native = Arc::downgrade(&device.native);
+                    drop(device);
+                    assert!(
+                        native.upgrade().is_some(),
+                        "worker still owns native queues"
+                    );
+                    drop(context);
+                    assert!(
+                        native.upgrade().is_none(),
+                        "last owner releases both queues and admission"
+                    );
+                }
             }
-        }
-        eprintln!(
-            "512 native create/retire cycles across 1/2/8/64 channels; owner count returned to {baseline}"
+        });
+        assert!(allocation.count_total > 0, "owners allocate their queues");
+        assert_eq!(
+            (allocation.count_current, allocation.bytes_current),
+            (0, 0),
+            "native create/retire cycles leaked"
         );
     }
     #[test]
@@ -878,10 +904,11 @@ mod tests {
                 native_rate,
                 None,
                 0,
+                simulated::SimulatedHost::new(),
             )
             .unwrap(),
         );
-        // SAFETY: this fresh synthetic owner never connects to CoreAudio and no callback/queue
+        // SAFETY: this fresh synthetic owner never connects and no callback/queue
         // role is published yet. Fixtures supply the matching interleaved Float32 ABL themselves.
         assert!(unsafe {
             mixrelay_macos_transport::device_io::test_observation::admit_float_callback(
@@ -959,8 +986,28 @@ mod tests {
             );
         }
     }
-    fn output_test_graph() -> GraphDocument {
-        GraphDocument::new(
+    /// A coordinator over a simulated `CoreAudio` publishing one stereo device, with `device`
+    /// cached as the owner of the returned graph's output. Graph and cache select the
+    /// published device by the same persistent UID, so preparation reuses `device`.
+    fn format_fixture(device: &Arc<Device>) -> (MacDevices, GraphDocument) {
+        let host = simulated::SimulatedHost::new();
+        let selector = DeviceSelector::PersistentUid {
+            uid: host.plug("io.mixrelay.test.format", 2, 48_000, 0.0),
+        };
+        let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
+        let resources = MacDevices::with_host(status, 48_000, 256, host);
+        resources.cache.lock().unwrap().insert(
+            "output".into(),
+            (
+                Spec {
+                    selector: selector.clone(),
+                    input: false,
+                    channels: 2,
+                },
+                Arc::downgrade(device),
+            ),
+        );
+        let graph = GraphDocument::new(
             1,
             vec![mixrelay_audio_graph::NodeSpec {
                 control: mixrelay_audio_graph::NodeControl::default(),
@@ -968,32 +1015,20 @@ mod tests {
                 label: None,
                 config: NodeConfig::AudioDeviceOutput(
                     mixrelay_audio_graph::AudioDeviceOutputConfig {
-                        selector: DeviceSelector::DefaultOutput,
+                        selector,
                         input_channels: 2,
                     },
                 ),
             }],
             vec![],
-        )
+        );
+        (resources, graph)
     }
 
     #[test]
     fn format_reservation_cancellation_and_reclaim_are_safe() {
         let (device, _context) = synthetic_output(2, 48_000, 44_100);
-        let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
-        let resources = MacDevices::new(status, 48_000, 256);
-        resources.cache.lock().unwrap().insert(
-            "output".into(),
-            (
-                Spec {
-                    selector: DeviceSelector::DefaultOutput,
-                    input: false,
-                    channels: 2,
-                },
-                Arc::downgrade(&device),
-            ),
-        );
-        let graph = output_test_graph();
+        let (resources, graph) = format_fixture(&device);
         let old = RenderFormat {
             sample_rate: 48_000,
             block_frames: 256,
@@ -1053,20 +1088,7 @@ mod tests {
     #[test]
     fn committed_format_rejects_mismatched_pcm_and_activates_pending_slot() {
         let (device, context) = synthetic_output(2, 48_000, 44_100);
-        let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
-        let resources = MacDevices::new(status, 48_000, 256);
-        resources.cache.lock().unwrap().insert(
-            "output".into(),
-            (
-                Spec {
-                    selector: DeviceSelector::DefaultOutput,
-                    input: false,
-                    channels: 2,
-                },
-                Arc::downgrade(&device),
-            ),
-        );
-        let graph = output_test_graph();
+        let (resources, graph) = format_fixture(&device);
         let old = RenderFormat {
             sample_rate: 48_000,
             block_frames: 256,
@@ -1270,7 +1292,7 @@ mod tests {
                 channels: 65,
             },
         ] {
-            assert!(Device::open(&spec, 48_000).is_err());
+            assert!(Device::open(&spec, 48_000, simulated::SimulatedHost::new()).is_err());
         }
     }
     #[test]
@@ -1282,4 +1304,4 @@ mod tests {
 
 #[cfg(test)]
 #[path = "macos_devices_tests.rs"]
-mod live_tests;
+mod device_tests;

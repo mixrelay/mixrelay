@@ -1,10 +1,6 @@
 //! Rust-owned client buffer validation and acknowledgement. Native functions
 //! expose snapshots and one setter call; no retry/format policy lives in C.
-use super::{
-    buffer_transaction::BufferControl,
-    ffi::{mr_device_buffer_size, mr_device_buffer_write, mr_device_io_buffer_info},
-    native::Native,
-};
+use super::{buffer_transaction::BufferControl, host::Host, native::Native};
 use std::{
     sync::atomic::{AtomicBool, Ordering},
     thread,
@@ -36,7 +32,7 @@ impl BufferInfo {
 
 pub(super) fn prepare(native: &Native, requested: u32) -> Result<(u32, u32), String> {
     let mut info = BufferInfo::default();
-    let available = unsafe { mr_device_io_buffer_info(native.pointer.as_ptr(), &raw mut info) };
+    let available = native.host.buffer_info(native, &mut info);
     validate_snapshot(&info, available, requested)
 }
 
@@ -49,8 +45,7 @@ pub(super) fn prepare_initial(
         requested,
         || {
             let mut info = BufferInfo::default();
-            let available =
-                unsafe { mr_device_io_buffer_info(native.pointer.as_ptr(), &raw mut info) };
+            let available = native.host.buffer_info(native, &mut info);
             (info, available)
         },
         || stop.load(Ordering::Acquire),
@@ -101,17 +96,18 @@ fn validate_snapshot(
     Ok((info.device, info.frames))
 }
 
-pub(super) struct NativeBufferControl;
-impl BufferControl for NativeBufferControl {
+/// Client buffer settings of the devices behind one host.
+pub(super) struct HostBufferControl<'a>(pub(super) &'a dyn Host);
+impl BufferControl for HostBufferControl<'_> {
     fn current(&mut self, device: u32) -> u32 {
-        unsafe { mr_device_buffer_size(device) }
+        self.0.buffer_size(device)
     }
     fn change(&mut self, device: u32, expected: u32, requested: u32) -> bool {
         confirmed_write(
             expected,
             requested,
-            || unsafe { mr_device_buffer_size(device) },
-            || unsafe { mr_device_buffer_write(device, requested) },
+            || self.0.buffer_size(device),
+            || self.0.write_buffer(device, requested),
             || thread::sleep(Duration::from_millis(2)),
         )
     }

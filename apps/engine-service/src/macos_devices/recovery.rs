@@ -110,14 +110,13 @@ impl MacDevices {
         format: mixrelay_audio_graph::RenderFormat,
     ) -> Result<(DeviceSet, Cache), HostAudioBackendError> {
         self.require_preparation()?;
-        let inventory = mixrelay_audio_io::macos::selected_devices(
-            desired.values().map(|spec| &spec.selector),
-        )?;
+        let selectors: Vec<_> = desired.values().map(|spec| &spec.selector).collect();
+        let inventory = self.host.inventory(&selectors)?;
         // Selection may wait for CoreAudio IPC; do not open a replacement after Quit.
         self.require_preparation()?;
         let presence = Presence::observe(&desired, &inventory)?;
         self.require_preparation()?;
-        let group = prepare_group(cache, &presence.online)?;
+        let group = prepare_group(cache, &presence.online, &self.host)?;
         self.require_preparation()?;
         let devices = self.open_present(cache, &presence.online, group.as_ref(), format)?;
         let next_cache = desired
@@ -157,6 +156,7 @@ impl MacDevices {
                         format.sample_rate,
                         selected,
                         format.block_frames,
+                        self.host.clone(),
                     )
                     .map_err(backend_error)?,
                 ),
@@ -178,6 +178,7 @@ fn same_group(left: Option<&Arc<Aggregate>>, right: Option<&Arc<Aggregate>>) -> 
 fn prepare_group(
     cache: &Cache,
     online: &BTreeMap<String, Spec>,
+    host: &Arc<dyn super::host::Host>,
 ) -> Result<Option<Arc<Aggregate>>, HostAudioBackendError> {
     let members = aggregate_members(online);
     if let Some(group) = cache
@@ -193,7 +194,7 @@ fn prepare_group(
     {
         return Ok(Some(group));
     }
-    Aggregate::create(members).map_err(backend_error)
+    Aggregate::create(members, host).map_err(backend_error)
 }
 
 /// A graph-local ordering preference does not change a native clock group.

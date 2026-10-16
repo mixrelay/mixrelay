@@ -8,7 +8,10 @@ use mixrelay_control_protocol::{
     GraphCatalogAction, GraphCatalogRequest, WorkspaceAction, WorkspaceRequest,
 };
 use mixrelay_control_server::ControlBackend;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 const FORMAT: RenderFormat = RenderFormat {
     sample_rate: 48_000,
@@ -204,8 +207,8 @@ fn builtin_processors_and_virtual_sources_do_not_use_external_or_input_quotas() 
     document
         .nodes
         .push(node("recorder", NodeConfig::Recorder { channels: 2 }));
-    document.nodes.push(serde_json::from_value(serde_json::json!({"id":"compressor","type":"compressor","config":{"version":1,"channels":2,"thresholdDb":-12,"ratio":4,"attackMs":10,"releaseMs":100,"makeupGainDb":0}})).unwrap());
-    document.nodes.push(serde_json::from_value(serde_json::json!({"id":"limiter","type":"limiter","config":{"version":1,"channels":2,"ceilingDb":-1,"releaseMs":100}})).unwrap());
+    document.nodes.push(serde_json::from_value(serde_json::json!({"id":"compressor","type":"compressor","config":{"version":1,"bypass":false,"channels":2,"thresholdDb":-12,"ratio":4,"attackMs":10,"releaseMs":100,"makeupGainDb":0}})).unwrap());
+    document.nodes.push(serde_json::from_value(serde_json::json!({"id":"limiter","type":"limiter","config":{"version":1,"bypass":false,"channels":2,"ceilingDb":-1,"releaseMs":100}})).unwrap());
     let usage = measure(&document);
     assert_eq!(
         (

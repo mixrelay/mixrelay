@@ -1,7 +1,9 @@
 //! Private-group compatibility policy. Native code supplies facts, not fallback
 //! decisions. A rejected plan never allocates a `CoreAudio` aggregate.
-use super::ffi::mr_aggregate_member_info;
-use std::{collections::BTreeSet, ffi::CString};
+use std::{
+    collections::BTreeSet,
+    ffi::{CStr, CString},
+};
 
 const MAX_MEMBERS: usize = 32;
 const MAX_CHANNELS: u32 = 2048;
@@ -24,20 +26,11 @@ pub(super) struct GroupPlan {
 }
 
 impl GroupPlan {
-    pub(super) fn prepare(members: &[String]) -> Result<Option<Self>, String> {
-        Self::inspect(members, Self::read_member)
-    }
-
-    fn read_member(uid: &CString) -> Option<MemberInfo> {
-        let mut info = MemberInfo::default();
-        // SAFETY: the native call borrows a NUL-terminated UID and writes
-        // exactly one repr(C) snapshot; it retains neither address.
-        unsafe { mr_aggregate_member_info(uid.as_ptr(), &raw mut info) }.then_some(info)
-    }
-
-    fn inspect(
+    /// Plans a private group from each member's current `snapshot`. None for any member set
+    /// that must keep independent bridges; no group is created for a rejected plan.
+    pub(super) fn prepare(
         members: &[String],
-        mut snapshot: impl FnMut(&CString) -> Option<MemberInfo>,
+        mut snapshot: impl FnMut(&CStr) -> Option<MemberInfo>,
     ) -> Result<Option<Self>, String> {
         if !(2..=MAX_MEMBERS).contains(&members.len())
             || members.iter().any(String::is_empty)
@@ -54,7 +47,7 @@ impl GroupPlan {
         let mut devices = BTreeSet::new();
         let (mut inputs, mut outputs) = (0_u32, 0_u32);
         for uid in &names {
-            let Some(info) = snapshot(uid) else {
+            let Some(info) = snapshot(uid.as_c_str()) else {
                 return Ok(None);
             };
             if info.device == 0
@@ -86,7 +79,7 @@ mod tests {
     use super::*;
     fn pair(first: MemberInfo, second: MemberInfo) -> bool {
         let mut facts = [first, second].into_iter();
-        GroupPlan::inspect(&["output".into(), "input".into()], |_| facts.next())
+        GroupPlan::prepare(&["output".into(), "input".into()], |_| facts.next())
             .unwrap()
             .is_some()
     }
@@ -107,7 +100,7 @@ mod tests {
         assert_eq!(std::mem::offset_of!(MemberInfo, alive), 24);
         let names = ["output".into(), "input".into()];
         let mut ids = [7, 9].into_iter();
-        let plan = GroupPlan::inspect(&names, |_| Some(member(ids.next().unwrap())))
+        let plan = GroupPlan::prepare(&names, |_| Some(member(ids.next().unwrap())))
             .unwrap()
             .unwrap();
         assert_eq!(plan.names[0].to_str().unwrap(), "output");
@@ -129,12 +122,12 @@ mod tests {
             (0..33).map(|n| n.to_string()).collect(),
         ] {
             assert!(
-                GroupPlan::inspect(&names, |_| panic!("invalid plan queried native"))
+                GroupPlan::prepare(&names, |_| panic!("invalid plan queried native"))
                     .unwrap()
                     .is_none()
             );
         }
-        assert!(GroupPlan::inspect(&["a\0b".into(), "c".into()], |_| panic!()).is_err());
+        assert!(GroupPlan::prepare(&["a\0b".into(), "c".into()], |_| panic!()).is_err());
     }
     #[test]
     fn incompatible_rates_transports_and_device_aliases_never_group() {
@@ -169,7 +162,7 @@ mod tests {
             }
         ));
         assert!(
-            GroupPlan::inspect(&["a".into(), "b".into()], |_| None)
+            GroupPlan::prepare(&["a".into(), "b".into()], |_| None)
                 .unwrap()
                 .is_none()
         );
@@ -200,7 +193,7 @@ mod tests {
         let names = (0..32).map(|n| n.to_string()).collect::<Vec<_>>();
         let mut id = 0;
         assert!(
-            GroupPlan::inspect(&names, |_| {
+            GroupPlan::prepare(&names, |_| {
                 id += 1;
                 Some(member(id))
             })

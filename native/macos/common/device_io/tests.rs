@@ -957,37 +957,50 @@ fn direct_hook_advances_clock_without_consuming_queued_output() {
 }
 
 #[test]
-fn absent_native_uid_fails_before_registration_and_releases_owner() {
-    // This is the native read-only boundary probe formerly in MRDeviceIOTests.c,
-    // not a substitute for mocked property/registration failure tests above.
-    let uid = c"io.mixrelay.test.absent.32cdcbba-f015-4ef5-9d5c-01dc1f1c690e";
-    // SAFETY: valid immutable UID, then sole control ownership. An unresolvable UID
-    // fails preparation before IOProc creation/start; no real device is opened.
+fn absent_device_fails_before_registration_and_releases_owner() {
+    let hal = test_observation::SimulatedHal::new();
+    // SAFETY: valid immutable UID, then sole control ownership. The empty simulated HAL
+    // resolves no device, so preparation fails before any IOProc creation or start.
     unsafe {
-        let io = mr_device_io_create(uid.as_ptr(), true, 2, 48000);
+        let io = mr_device_io_create(c"io.mixrelay.test.absent".as_ptr(), true, 2, 48000);
         assert!(!io.is_null());
-        assert!(!mr_device_io_connect(io));
-        assert_eq!(mr_device_io_connect_status(io, 0), -2);
+        assert_eq!(test_observation::connect_status(&hal, io, 0), -2);
+        assert_eq!(hal.registrations(), 0);
         assert_eq!(mr_device_io_ticks(io), 0);
-        assert!(mr_device_io_destroy(io));
+        assert!(test_observation::destroy(&hal, io));
     }
 }
 
 #[test]
-fn unavailable_buffer_info_initializes_an_uninitialized_output_slot() {
-    let uid = c"io.mixrelay.test.absent.32cdcbba-f015-4ef5-9d5c-01dc1f1c690e";
-    let io = DeviceIo::new(uid, false, 2, 48000).expect("test owner");
+fn null_owner_buffer_info_initializes_an_uninitialized_output_slot() {
     let mut result = std::mem::MaybeUninit::<native::BufferInfo>::uninit();
-    // SAFETY: stable unregistered owner and an aligned, exclusive output-only
-    // slot. The absent UID lookup is read-only and cannot start any device.
-    let found =
-        unsafe { mr_device_io_buffer_info(ptr::from_ref(&io).cast_mut(), result.as_mut_ptr()) };
+    // SAFETY: a null owner makes no device query; the slot is aligned, exclusive and
+    // output-only.
+    let found = unsafe { mr_device_io_buffer_info(ptr::null_mut(), result.as_mut_ptr()) };
     assert!(!found);
-    // SAFETY: a non-null owner/output call always initialized the full output.
+    // SAFETY: a non-null output is always fully initialized, even for a null owner.
     let result = unsafe { result.assume_init() };
     assert_eq!((result.device, result.frames, result.settable), (0, 0, 0));
     assert_eq!(result.minimum.to_bits(), 0_f64.to_bits());
     assert_eq!(result.maximum.to_bits(), 0_f64.to_bits());
+}
+
+#[test]
+fn null_owner_buffer_info_zeroes_a_previously_populated_output() {
+    let mut info = native::BufferInfo {
+        device: 7,
+        frames: 256,
+        minimum: 15.0,
+        maximum: 4096.0,
+        settable: 1,
+    };
+    // SAFETY: a null owner makes no device query; `info` is exclusive local storage.
+    assert!(!unsafe { mr_device_io_buffer_info(ptr::null_mut(), &raw mut info) });
+    assert_eq!((info.device, info.frames, info.settable), (0, 0, 0));
+    assert_eq!(
+        (info.minimum.to_bits(), info.maximum.to_bits()),
+        (0_f64.to_bits(), 0_f64.to_bits())
+    );
 }
 
 #[test]

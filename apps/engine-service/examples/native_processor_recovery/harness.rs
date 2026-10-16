@@ -84,6 +84,7 @@ impl NativeHarness {
                     processor_catalog: catalog,
                     graph_resources: resources.clone(),
                     runtime_status: Arc::new(FixedRuntimeStatus::new(DriverState::Ready)),
+                    paid_access: Arc::new(mixrelay_licensing::has_local_paid_access),
                 },
                 empty,
             )

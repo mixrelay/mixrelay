@@ -4,6 +4,7 @@ use super::{
     aggregate::Aggregate,
     bridge::{DeviceBridge, NEXT_DEVICE_EPOCH},
     ffi::{mr_device_io_graph_read, mr_device_io_graph_write, mr_device_io_output_epoch},
+    host::Host,
     native::Native,
     spec::Spec,
     worker::WorkerContext,
@@ -38,16 +39,17 @@ pub(super) struct Device {
 }
 impl Device {
     #[cfg(test)]
-    pub(super) fn open(spec: &Spec, rate: u32) -> Result<Self, String> {
-        Self::open_with_group(spec, rate, None, 0)
+    pub(super) fn open(spec: &Spec, rate: u32, host: Arc<dyn Host>) -> Result<Self, String> {
+        Self::open_with_group(spec, rate, None, 0, host)
     }
     pub(super) fn open_with_group(
         spec: &Spec,
         rate: u32,
         group: Option<Arc<Aggregate>>,
         buffer_frames: u32,
+        host: Arc<dyn Host>,
     ) -> Result<Self, String> {
-        let native = Arc::new(Native::create(spec, rate, group, buffer_frames)?);
+        let native = Arc::new(Native::create(spec, rate, group, buffer_frames, host)?);
         let stop = Arc::new(AtomicBool::new(false));
         let failed = Arc::new(AtomicBool::new(true));
         let epoch = Arc::new(AtomicU64::new(0));

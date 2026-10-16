@@ -3,6 +3,9 @@
 //! verifies that `CoreAudio` published the same identity, layout and clock policy.
 
 mod native;
+/// The aggregate entry points beneath a simulated HAL, for hermetic tests.
+#[cfg(any(test, feature = "test-observation"))]
+pub use native::test_observation;
 pub use native::{
     AggregateGroup, NativeBinding, mr_aggregate_group_binding, mr_aggregate_group_create,
     mr_aggregate_group_ready, mr_aggregate_group_try_destroy, mr_aggregate_member_info,

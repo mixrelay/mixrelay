@@ -1,6 +1,16 @@
-//! Installed Driver loopback, using ordinary `CoreAudio` admission and native codecs.
-//! Explicit UID/width/format select an already configured device; no setting is written.
-use crate::macos_devices::{device::Device, ffi, native::Native, spec::Spec, worker_retirement};
+//! Native client PCM continuity. The default test loops one simulated duplex device back
+//! through the production callbacks; the opt-in soak uses the installed Driver with ordinary
+//! `CoreAudio` admission and native codecs. Explicit UID/width/format select an already
+//! configured device; no setting is written.
+use crate::macos_devices::{
+    device::Device,
+    ffi,
+    host::{CoreAudio, Host},
+    native::Native,
+    simulated::{CAPTURED, DEFAULT_BUFFER, SimulatedHost},
+    spec::Spec,
+    worker_retirement,
+};
 use mixrelay_audio_graph::DeviceSelector;
 use mixrelay_audio_io::{NativeSampleFormat, NativeStreamFormat};
 use mixrelay_driver_control::DriverClient;
@@ -20,6 +30,9 @@ const PRIMING: u32 = RATE;
 const PHASE_FRAMES: u64 = 240_000;
 const FRAME_LIMIT: u32 = 1 << 20;
 const MAX_FRAMES: usize = 4096;
+/// Loopback cycles that overlap the other client's retirement; a fixed count keeps the
+/// marker budget independent of how long its worker takes to unregister.
+const DETACH_CYCLES: u32 = 8;
 
 // Two 10-bit words identify every frame before FRAME_LIMIT. Mixing the low word
 // into every lane makes each lane change every frame. Disjoint channel bands
@@ -277,12 +290,17 @@ struct Client {
 }
 
 impl Client {
-    fn connect(spec: &Spec, statistics: &Arc<Statistics>) -> Self {
-        Self::connect_with_sequence(spec, statistics, false)
+    fn connect(spec: &Spec, statistics: &Arc<Statistics>, host: Arc<dyn Host>) -> Self {
+        Self::connect_with_sequence(spec, statistics, false, host)
     }
 
-    fn connect_with_sequence(spec: &Spec, statistics: &Arc<Statistics>, looping: bool) -> Self {
-        let native = Native::create(spec, RATE, None, 0).expect("prepare installed Driver client");
+    fn connect_with_sequence(
+        spec: &Spec,
+        statistics: &Arc<Statistics>,
+        looping: bool,
+        host: Arc<dyn Host>,
+    ) -> Self {
+        let native = Native::create(spec, RATE, None, 0, host).expect("prepare native PCM client");
         assert_eq!(
             native.requested_buffer(),
             0,
@@ -317,7 +335,7 @@ impl Client {
         client
             .native
             .connect(&AtomicBool::new(false))
-            .expect("connect real CoreAudio client");
+            .expect("connect native PCM client");
         // SAFETY: sole control-side query of the retained connected owner.
         assert_eq!(
             unsafe { ffi::mr_device_io_native_rate(client.native.pointer.as_ptr()) },
@@ -346,9 +364,10 @@ fn installed_driver_pcm_soak() {
         ..output_spec.clone()
     };
     let statistics = Arc::new(Statistics::default());
-    let output = Client::connect_with_sequence(&output_spec, &statistics, true);
-    let input = Client::connect_with_sequence(&input_spec, &statistics, true);
-    let other = Device::open(&input_spec, RATE).expect("ordinary graph capture client");
+    let host: Arc<dyn Host> = Arc::new(CoreAudio);
+    let output = Client::connect_with_sequence(&output_spec, &statistics, true, host.clone());
+    let input = Client::connect_with_sequence(&input_spec, &statistics, true, host.clone());
+    let other = Device::open(&input_spec, RATE, host).expect("ordinary graph capture client");
     let mut other = Some(other);
     let mut detached_at = None;
     let started = Instant::now();
@@ -513,67 +532,95 @@ fn selection() -> Spec {
     }
 }
 
-fn wait_for_frames(statistics: &Statistics, target: u64, deadline: Instant) {
-    while statistics.checked.load(Ordering::Acquire) < target {
-        assert_eq!(
-            statistics.faults.load(Ordering::Acquire),
-            0,
-            "PCM fault: frame={} lane={} expected={:#x} actual={:#x}",
-            statistics.bad_frame.load(Ordering::Relaxed),
-            statistics.bad_lane.load(Ordering::Relaxed),
-            statistics.expected.load(Ordering::Relaxed),
-            statistics.actual.load(Ordering::Relaxed)
-        );
+/// One duplex device cycle: the output client's presented PCM is what the input client
+/// captures in the same cycle, as the Driver's loopback presents and captures one timeline.
+/// Each callback runs through the simulated HAL's started registration, so a client whose
+/// registration was lost or stopped fails the cycle instead of receiving PCM.
+struct Loopback {
+    host: Arc<SimulatedHost>,
+    pcm: Vec<f32>,
+}
+
+impl Loopback {
+    const FRAMES: u32 = DEFAULT_BUFFER;
+
+    fn new(host: Arc<SimulatedHost>, channels: u16) -> Self {
+        Self {
+            host,
+            pcm: vec![0.0; Self::FRAMES as usize * usize::from(channels)],
+        }
+    }
+
+    fn cycle(&mut self, output: &Client, input: &Client) {
+        assert_no_pcm_faults(&output.probe.statistics);
+        for (client, role) in [(output, "output"), (input, "input")] {
+            assert!(
+                self.host.callback_on(&client.native, &mut self.pcm),
+                "the {role} client's registration is no longer started"
+            );
+        }
+    }
+
+    /// Cycles until `target` frames were checked. Once primed, every cycle checks one whole
+    /// buffer, so exceeding that cycle budget means PCM was lost or stalled.
+    fn run_until(&mut self, statistics: &Statistics, target: u64, clients: (&Client, &Client)) {
+        let start = statistics.checked.load(Ordering::Acquire);
+        let budget =
+            (target.saturating_sub(start) + u64::from(PRIMING)) / u64::from(Self::FRAMES) + 2;
+        for _ in 0..budget {
+            if statistics.checked.load(Ordering::Acquire) >= target {
+                return;
+            }
+            self.cycle(clients.0, clients.1);
+        }
+        let checked = statistics.checked.load(Ordering::Acquire);
         assert!(
-            Instant::now() < deadline,
-            "installed PCM timeout: checked={} target={target}",
-            statistics.checked.load(Ordering::Acquire)
+            checked >= target,
+            "PCM progress stalled: checked={checked} target={target} cycles={budget}"
         );
-        // Control waits for observed completion only; callbacks generate and
-        // consume all PCM on their actual native clock, without external pacing.
-        thread::park_timeout(Duration::from_millis(10));
     }
 }
 
 #[test]
-fn installed_driver_pcm_continuity_survives_other_client_detach() {
-    let output_spec = selection();
+fn pcm_continuity_survives_other_client_detach() {
+    let host = SimulatedHost::new();
+    let uid = host.plug("io.mixrelay.test.loopback", 2, RATE, CAPTURED);
+    let output_spec = Spec {
+        selector: DeviceSelector::PersistentUid { uid },
+        input: false,
+        channels: 2,
+    };
     let input_spec = Spec {
         input: true,
         ..output_spec.clone()
     };
     let statistics = Arc::new(Statistics::default());
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let output = Client::connect(&output_spec, &statistics);
-    let input = Client::connect(&input_spec, &statistics);
+    let output = Client::connect(&output_spec, &statistics, host.clone());
+    let input = Client::connect(&input_spec, &statistics, host.clone());
+    let mut loopback = Loopback::new(host.clone(), output_spec.channels);
     // This additional client uses the ordinary graph Device/worker lifecycle.
-    let other = Device::open(&input_spec, RATE).expect("ordinary graph capture client");
+    let other = Device::open(&input_spec, RATE, host).expect("ordinary graph capture client");
     let retired = Arc::downgrade(&other.native);
-    wait_for_frames(&statistics, PHASE_FRAMES, deadline);
+    loopback.run_until(&statistics, PHASE_FRAMES, (&output, &input));
     drop(other);
-    while retired.upgrade().is_some() {
+    // PCM keeps flowing while the other client's worker unregisters and retires.
+    for _ in 0..DETACH_CYCLES {
+        loopback.cycle(&output, &input);
+    }
+    super::wait_until(|| {
         worker_retirement::WORKERS.reclaim();
-        assert!(Instant::now() < deadline, "ordinary client did not drain");
-        thread::park_timeout(Duration::from_millis(10));
-    }
+        retired.upgrade().is_none()
+    });
     let detached_at = statistics.checked.load(Ordering::Acquire);
-    wait_for_frames(&statistics, detached_at + PHASE_FRAMES, deadline);
-    for client in [&input, &output] {
-        // SAFETY: Client retains both initialized queues; this query only reads
-        // atomic overflow counters and does not consume or alter PCM.
-        assert_eq!(
-            unsafe { ffi::mr_device_io_overflows(client.native.pointer.as_ptr()) },
-            0
-        );
-    }
+    loopback.run_until(&statistics, detached_at + PHASE_FRAMES, (&output, &input));
+    assert_no_client_overflows(&input, &output);
     drop(input);
     drop(output);
-    assert_eq!(statistics.faults.load(Ordering::Acquire), 0);
+    assert_no_pcm_faults(&statistics);
     let checked = statistics.checked.load(Ordering::Acquire);
     assert!(checked >= PHASE_FRAMES * 2);
     eprintln!(
-        "installed Driver PCM: {:?} channels={} rate={RATE} fresh_frames={checked} detached_at={detached_at} post_detach_frames={} priming={PRIMING} exact_words=true faults=0",
-        output_spec.selector,
+        "simulated duplex PCM: channels={} rate={RATE} fresh_frames={checked} detached_at={detached_at} post_detach_frames={} priming={PRIMING} exact_words=true faults=0",
         output_spec.channels,
         checked - detached_at
     );

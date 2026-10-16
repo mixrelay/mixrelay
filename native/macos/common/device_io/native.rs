@@ -1,11 +1,11 @@
 use std::{
-    ffi::{c_char, c_void},
-    ptr,
+    ffi::{CStr, c_char, c_void},
+    ptr::{self, NonNull},
 };
 
 use super::Selection;
 use crate::{
-    aggregate_group::{NativeBinding, mr_aggregate_group_binding},
+    aggregate_group::{NativeBinding, mr_aggregate_group_binding, mr_aggregate_group_ready},
     device_buffers::{BufferSelection, NativeFormats},
     device_io::stream_format::{StreamFormat, StreamFormats},
 };
@@ -143,11 +143,117 @@ unsafe extern "C" {
 pub(super) trait Properties {
     fn read<T: Copy + Default>(&self, id: u32, address: Address) -> Option<T>;
     fn streams(&self, id: u32, scope: u32, limit: u32) -> Option<StreamIds>;
+    /// The device a persistent UID currently names. The default resolves nothing, so an
+    /// adapter of fixed scalar facts never reaches an installed device.
+    fn device(&self, _uid: &CStr) -> Option<u32> {
+        None
+    }
+    /// A private group member's checked projection; the default proves no group.
+    ///
+    /// # Safety
+    /// `group` is a live aggregate owner retained, unmutated, until this query returns.
+    unsafe fn group_binding(
+        &self,
+        _group: NonNull<c_void>,
+        _uid: &CStr,
+        _input: bool,
+        _channels: u32,
+    ) -> Option<NativeBinding> {
+        None
+    }
+    /// Whether a private group still has its planned geometry; the default proves none.
+    ///
+    /// # Safety
+    /// Same retained-owner contract as [`Properties::group_binding`].
+    unsafe fn group_ready(&self, _group: NonNull<c_void>) -> bool {
+        false
+    }
+    /// Whether a property accepts writes; the default reports read-only.
+    fn settable(&self, _id: u32, _address: Address) -> bool {
+        false
+    }
+    /// Writes one u32 property; the default rejects every write.
+    fn write(&self, _id: u32, _address: Address, _value: u32) -> bool {
+        false
+    }
 }
 
 pub(super) struct System;
 
 impl Properties for System {
+    fn device(&self, uid: &CStr) -> Option<u32> {
+        // SAFETY: the borrowed UID is terminated and alive for the call; CF returns +1.
+        let uid = unsafe { string_create(ptr::null(), uid.as_ptr(), 0x0800_0100) };
+        if uid.is_null() {
+            return None;
+        }
+        let address = Address::new(u32::from_be_bytes(*b"uidd"), GLOBAL);
+        let mut device = 0;
+        let mut size = 4;
+        // SAFETY: native qualifier is one retained CFStringRef; output is one u32.
+        let status = unsafe {
+            property_read(
+                1,
+                &raw const address,
+                8,
+                ptr::from_ref(&uid).cast(),
+                &raw mut size,
+                ptr::from_mut(&mut device).cast(),
+            )
+        };
+        // SAFETY: this function owns exactly the create-rule CF reference.
+        unsafe { release(uid) };
+        (status == 0 && size == 4 && device != 0).then_some(device)
+    }
+
+    unsafe fn group_binding(
+        &self,
+        group: NonNull<c_void>,
+        uid: &CStr,
+        input: bool,
+        channels: u32,
+    ) -> Option<NativeBinding> {
+        let mut binding = NativeBinding::default();
+        // SAFETY: the caller retains the aggregate owner; the UID is terminated and
+        // borrowed for the call, and `binding` is exclusive local storage.
+        unsafe {
+            mr_aggregate_group_binding(
+                group.as_ptr().cast(),
+                uid.as_ptr(),
+                input,
+                channels,
+                &raw mut binding,
+            )
+        }
+        .then_some(binding)
+    }
+
+    unsafe fn group_ready(&self, group: NonNull<c_void>) -> bool {
+        // SAFETY: the caller retains the aggregate owner throughout this query.
+        unsafe { mr_aggregate_group_ready(group.as_ptr().cast()) }
+    }
+
+    fn settable(&self, id: u32, address: Address) -> bool {
+        let mut settable = 0;
+        // SAFETY: CoreAudio Boolean is one byte, exclusively borrowed until return.
+        let status = unsafe { property_settable(id, &raw const address, &raw mut settable) };
+        status == 0 && settable != 0
+    }
+
+    fn write(&self, id: u32, address: Address, value: u32) -> bool {
+        // SAFETY: a synchronous u32 property write borrows one immutable value.
+        unsafe {
+            property_write(
+                id,
+                &raw const address,
+                0,
+                ptr::null(),
+                4,
+                ptr::from_ref(&value).cast(),
+            ) == 0
+        }
+    }
+
     fn read<T: Copy + Default>(&self, id: u32, address: Address) -> Option<T> {
         let mut result = T::default();
         let capacity = u32::try_from(size_of::<T>()).ok()?;
@@ -214,56 +320,24 @@ pub(super) fn resolve(
     selection: &Selection,
     properties: &impl Properties,
 ) -> Option<NativeBinding> {
-    if !selection.group.is_null() {
-        let mut binding = NativeBinding::default();
+    let uid = CStr::from_bytes_with_nul(&selection.uid).ok()?;
+    if let Some(group) = NonNull::new(selection.group) {
         // SAFETY: enclosing engine Native owns the aggregate Arc, retained until
-        // this device context is destroyed. UID is immutable owned NUL-terminated storage.
+        // this device context is destroyed.
         return unsafe {
-            mr_aggregate_group_binding(
-                selection.group.cast(),
-                selection.uid.as_ptr().cast(),
-                selection.input,
-                selection.channels,
-                &raw mut binding,
-            )
-        }
-        .then_some(binding);
+            properties.group_binding(group, uid, selection.input, selection.channels)
+        };
     }
     let device = if selection.uid.len() == 1 {
         default_device(selection.input, properties)?
     } else {
-        resolve_uid(selection)?
+        properties.device(uid)?
     };
     (device != 0).then_some(NativeBinding {
         device,
         offset: 0,
         total: 0,
     })
-}
-
-fn resolve_uid(selection: &Selection) -> Option<u32> {
-    // SAFETY: owned bytes were copied including the terminator from a complete CStr.
-    let uid = unsafe { string_create(ptr::null(), selection.uid.as_ptr().cast(), 0x0800_0100) };
-    if uid.is_null() {
-        return None;
-    }
-    let address = Address::new(u32::from_be_bytes(*b"uidd"), GLOBAL);
-    let mut device = 0;
-    let mut size = 4;
-    // SAFETY: native qualifier is one retained CFStringRef; output is one u32.
-    let status = unsafe {
-        property_read(
-            1,
-            &raw const address,
-            8,
-            ptr::from_ref(&uid).cast(),
-            &raw mut size,
-            ptr::from_mut(&mut device).cast(),
-        )
-    };
-    // SAFETY: this function owns exactly the create-rule CF reference.
-    unsafe { release(uid) };
-    (status == 0 && size == 4).then_some(device)
 }
 
 #[cfg(test)]
@@ -278,6 +352,8 @@ pub(super) fn format(
 pub(super) struct AdmittedFormat {
     pub(super) rate: u32,
     pub(super) layout: NativeFormats,
+    /// The owner's channel slice of that layout.
+    pub(super) selection: BufferSelection,
 }
 
 /// Queries and validates the complete native PCM layout before `IOProc` registration.
@@ -315,6 +391,7 @@ pub(super) fn admitted_format(
     Some(AdmittedFormat {
         rate,
         layout: formats.into_layout(),
+        selection: slice,
     })
 }
 
@@ -342,47 +419,35 @@ pub(super) fn buffer_selection(selection: &Selection, binding: NativeBinding) ->
     }
 }
 
-pub(super) fn buffer_size(device: u32) -> u32 {
-    System
+pub(super) fn buffer_size(device: u32, properties: &impl Properties) -> u32 {
+    properties
         .read(device, Address::new(BUFFER_SIZE, GLOBAL))
         .unwrap_or(0)
 }
 
-pub(super) fn buffer_info(selection: &Selection) -> Option<BufferInfo> {
-    let device = resolve(selection, &System)?.device;
-    let frames = buffer_size(device);
+pub(super) fn buffer_info(
+    selection: &Selection,
+    properties: &impl Properties,
+) -> Option<BufferInfo> {
+    let device = resolve(selection, properties)?.device;
+    let frames = buffer_size(device, properties);
     if frames == 0 {
         return None;
     }
-    let range: ValueRange = System
+    let range: ValueRange = properties
         .read(device, Address::new(u32::from_be_bytes(*b"fsz#"), GLOBAL))
         .unwrap_or_default();
-    let mut settable = 0;
-    let address = Address::new(BUFFER_SIZE, GLOBAL);
-    // SAFETY: CoreAudio Boolean is one byte, exclusively borrowed until return.
-    let status = unsafe { property_settable(device, &raw const address, &raw mut settable) };
     Some(BufferInfo {
         device,
         frames,
         minimum: range.minimum,
         maximum: range.maximum,
-        settable: u32::from(status == 0 && settable != 0),
+        settable: u32::from(properties.settable(device, Address::new(BUFFER_SIZE, GLOBAL))),
     })
 }
 
-pub(super) fn buffer_write(device: u32, frames: u32) -> bool {
-    let address = Address::new(BUFFER_SIZE, GLOBAL);
-    // SAFETY: synchronous frame-size write borrows one immutable u32.
-    unsafe {
-        property_write(
-            device,
-            &raw const address,
-            0,
-            ptr::null(),
-            4,
-            ptr::from_ref(&frames).cast(),
-        ) == 0
-    }
+pub(super) fn buffer_write(device: u32, frames: u32, properties: &impl Properties) -> bool {
+    properties.write(device, Address::new(BUFFER_SIZE, GLOBAL), frames)
 }
 
 pub(super) fn alive(device: u32, properties: &impl Properties) -> bool {

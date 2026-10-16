@@ -2,8 +2,8 @@
 //! Native calls perform one operation; Rust retains every partially created owner.
 use super::{
     admission::{Admission, Permit},
-    ffi::{mr_aggregate_group_create, mr_aggregate_group_ready, mr_aggregate_group_try_destroy},
     group_plan::GroupPlan,
+    host::Host,
     retirement::{Retirable, Retirement},
 };
 use std::{ffi::c_void, ptr::NonNull, sync::Arc, thread, time::Duration};
@@ -13,6 +13,7 @@ static RETIRED: Retirement<GroupOwner> = Retirement::new();
 
 struct GroupOwner {
     pointer: Option<NonNull<c_void>>,
+    host: Arc<dyn Host>,
     _permit: Permit<'static>,
 }
 // SAFETY: transferred only after the last IOProc owner retires; no callback or
@@ -21,7 +22,7 @@ unsafe impl Send for GroupOwner {}
 impl Retirable for GroupOwner {
     fn try_release(&mut self) -> bool {
         if let Some(pointer) = self.pointer {
-            if !unsafe { mr_aggregate_group_try_destroy(pointer.as_ptr()) } {
+            if !self.host.destroy_group(pointer) {
                 return false;
             }
             self.pointer = None;
@@ -34,6 +35,7 @@ impl Retirable for GroupOwner {
 pub(super) struct Aggregate {
     pub(super) pointer: NonNull<c_void>,
     pub(super) members: Vec<String>,
+    host: Arc<dyn Host>,
     owner: Option<GroupOwner>,
 }
 // SAFETY: immutable metadata and native property reads; Arc excludes retirement
@@ -52,35 +54,24 @@ impl Aggregate {
         GROUPS.in_use()
     }
     pub(super) fn ready(&self) -> bool {
-        unsafe { mr_aggregate_group_ready(self.pointer.as_ptr()) }
+        self.host.group_ready(self.pointer)
     }
     pub(super) fn reclaim_retired() {
         RETIRED.reclaim();
     }
 
-    pub(super) fn create(members: Vec<String>) -> Result<Option<Arc<Self>>, String> {
-        let Some(plan) = GroupPlan::prepare(&members)? else {
+    pub(super) fn create(
+        members: Vec<String>,
+        host: &Arc<dyn Host>,
+    ) -> Result<Option<Arc<Self>>, String> {
+        let Some(plan) = GroupPlan::prepare(&members, |uid| host.member_info(uid))? else {
             return Ok(None);
         };
         let permit = GROUPS
             .acquire()
             .ok_or("CoreAudio private group limit reached; native retirement pending")?;
-        let pointers = plan
-            .names
-            .iter()
-            .map(|uid| uid.as_ptr())
-            .collect::<Vec<_>>();
-        let mut status = 0;
-        let pointer = unsafe {
-            mr_aggregate_group_create(
-                pointers.as_ptr(),
-                plan.facts.as_ptr(),
-                u32::try_from(pointers.len()).map_err(|error| error.to_string())?,
-                0,
-                &raw mut status,
-            )
-        };
-        let Some(pointer) = NonNull::new(pointer) else {
+        let (pointer, status) = host.create_group(&plan);
+        let Some(pointer) = pointer else {
             return if status == 1 {
                 Ok(None)
             } else {
@@ -92,8 +83,10 @@ impl Aggregate {
         let group = Self {
             pointer,
             members,
+            host: host.clone(),
             owner: Some(GroupOwner {
                 pointer: Some(pointer),
+                host: host.clone(),
                 _permit: permit,
             }),
         };
@@ -132,9 +125,22 @@ fn confirm_ready(mut ready: impl FnMut() -> bool, mut wait: impl FnMut()) -> boo
 
 #[cfg(test)]
 mod tests {
-    use super::super::{device::Device, ffi::mr_device_io_native_frames, spec::Spec};
+    use super::super::{
+        DeviceSet, MacDevices,
+        device::Device,
+        device_tests::wait_until,
+        simulated::{CAPTURED, SimulatedHost},
+        worker_retirement::WORKERS,
+    };
     use super::*;
-    use mixrelay_audio_graph::DeviceSelector;
+    use mixrelay_audio_graph::{
+        AudioDeviceInputConfig, AudioDeviceOutputConfig, DeviceSelector, GraphDocument, NodeConfig,
+        NodeControl, NodeSpec,
+    };
+    use mixrelay_audio_io::process::InputActivity;
+    use mixrelay_engine_service::{GraphResourceBackend, PlaybackBindings::Preserve};
+    use std::sync::atomic::Ordering;
+
     #[test]
     fn readiness_is_bounded_and_never_accepts_an_unconfirmed_object() {
         let mut checks = 0;
@@ -158,129 +164,168 @@ mod tests {
         ));
         assert_eq!((checks, waits), (3, 2));
     }
+
     #[test]
     fn partial_native_creation_returns_admission_after_rejected_members() {
-        if !mixrelay_macos_test_support::memory_child(
-            "macos_devices::aggregate::tests::partial_native_creation_returns_admission_after_rejected_members",
-        ) {
-            return;
-        }
-        // Exercise the low-level partial-owner contract directly: invalid UTF-8
-        // fails after native allocation but before any OS device is created.
-        // Production names are valid Rust strings, so use an explicit ABI fault.
-        for _ in 0..128 {
-            let names = [c"valid".as_ptr(), c"\xff".as_ptr()];
-            let facts = [super::super::group_plan::MemberInfo::default(); 2];
-            let permit = GROUPS.acquire().expect("partial owners must retire");
-            let mut status = 0;
-            let pointer = NonNull::new(unsafe {
-                mr_aggregate_group_create(names.as_ptr(), facts.as_ptr(), 2, 0, &raw mut status)
-            })
-            .expect("partial allocation transferred");
-            let owner = GroupOwner {
-                pointer: Some(pointer),
-                _permit: permit,
-            };
-            RETIRED.retire(owner);
+        let simulated = SimulatedHost::new();
+        simulated.plug("valid", 2, 48_000, CAPTURED);
+        let host: Arc<dyn Host> = simulated;
+        // This test's own bound: concurrent tests cannot change its accounting.
+        let admission: &'static Admission = Box::leak(Box::new(Admission::new(32)));
+        // Production names are valid Rust strings, so use an explicit ABI fault: the second
+        // UID is rejected after the first was adopted, before any member is queried.
+        let plan = GroupPlan {
+            names: vec![c"valid".into(), c"\xff".into()],
+            facts: vec![super::super::group_plan::MemberInfo::default(); 2],
+        };
+        let retire_partial = |permit| {
+            let (pointer, status) = host.create_group(&plan);
             assert_eq!(status, 2);
-        }
+            RETIRED.retire(GroupOwner {
+                pointer: Some(pointer.expect("partial allocation transferred")),
+                host: host.clone(),
+                _permit: permit,
+            });
+        };
+        // Lazily initialized retirement storage allocates once, outside the measurement.
+        retire_partial(admission.acquire().unwrap());
+        // 128 partial owners exceed the 32-group bound, so each retirement returned its slot.
+        // The same thread allocates and releases every Rust owner.
+        let allocation = allocation_counter::measure(|| {
+            for _ in 0..128 {
+                retire_partial(admission.acquire().expect("partial owners must retire"));
+                assert_eq!(admission.in_use(), 0);
+            }
+        });
+        assert!(allocation.count_total > 0, "creation allocates its owner");
+        assert_eq!(
+            (allocation.count_current, allocation.bytes_current),
+            (0, 0),
+            "partial group owners leaked"
+        );
+    }
+
+    fn duplex(microphone: &str, speaker: &str) -> GraphDocument {
+        let selector = |uid: &str| DeviceSelector::PersistentUid { uid: uid.into() };
+        let node = |id: &str, config| NodeSpec {
+            control: NodeControl::default(),
+            id: id.into(),
+            label: None,
+            config,
+        };
+        GraphDocument::new(
+            1,
+            vec![
+                node(
+                    "input",
+                    NodeConfig::AudioDeviceInput(AudioDeviceInputConfig {
+                        selector: selector(microphone),
+                        output_channels: 2,
+                        gain_db: 0.0,
+                    }),
+                ),
+                node(
+                    "output",
+                    NodeConfig::AudioDeviceOutput(AudioDeviceOutputConfig {
+                        selector: selector(speaker),
+                        input_channels: 2,
+                    }),
+                ),
+            ],
+            vec![],
+        )
+    }
+
+    /// Drops one owner and waits until its worker unregistered and released `Native`.
+    fn retire(device: Arc<Device>) {
+        let native = Arc::downgrade(&device.native);
+        drop(device);
+        wait_until(|| {
+            WORKERS.reclaim();
+            native.upgrade().is_none()
+        });
     }
 
     #[test]
-    fn native_private_group_retains_owner_until_last_callback_retires() {
-        if !mixrelay_macos_test_support::memory_child(
-            "macos_devices::aggregate::tests::native_private_group_retains_owner_until_last_callback_retires",
-        ) {
-            return;
-        }
-        let primary = std::env::var("MIXRELAY_GROUP_PRIMARY_UID").expect("primary output UID");
-        let secondary =
-            std::env::var("MIXRELAY_GROUP_SECONDARY_UID").expect("secondary output UID");
-        let baseline = GROUPS.in_use();
-        assert_stale_plans_rejected(&primary, &secondary);
-        assert_group_lifetime(primary, secondary, baseline);
-    }
-
-    fn assert_stale_plans_rejected(primary: &str, secondary: &str) {
-        let baseline = GROUPS.in_use();
-        // Native revalidation must reject a stale Rust plan before creating an
-        // OS aggregate. Read real facts, then perturb only our local snapshot.
-        let plan = GroupPlan::prepare(&[primary.to_owned(), secondary.to_owned()])
-            .unwrap()
-            .expect("compatible members");
-        let names = plan
-            .names
-            .iter()
-            .map(|uid| uid.as_ptr())
-            .collect::<Vec<_>>();
-        for changed in 0..3 {
-            let mut facts = plan.facts.clone();
-            match changed {
-                0 => facts[0].device = 0,
-                1 => facts[0].output += 1,
-                _ => facts[0].rate += 1.0,
-            }
-            let permit = GROUPS.acquire().unwrap();
-            let mut status = 0;
-            let pointer = NonNull::new(unsafe {
-                mr_aggregate_group_create(names.as_ptr(), facts.as_ptr(), 2, 0, &raw mut status)
-            })
-            .expect("stale plan transfers partial owner");
-            RETIRED.retire(GroupOwner {
-                pointer: Some(pointer),
-                _permit: permit,
-            });
-            assert_eq!(status, 2, "stale identity/geometry/rate accepted");
-            assert_eq!(GROUPS.in_use(), baseline);
-        }
-    }
-
-    fn assert_group_lifetime(primary: String, secondary: String, baseline: usize) {
-        let group = Aggregate::create(vec![primary.clone(), secondary.clone()])
-            .unwrap()
-            .expect("compatible members");
-        let weak = Arc::downgrade(&group);
-        let open = |uid| {
-            Device::open_with_group(
-                &Spec {
-                    selector: DeviceSelector::PersistentUid { uid },
-                    input: false,
-                    channels: 2,
-                },
-                48_000,
-                Some(group.clone()),
-                0,
-            )
-            .unwrap()
+    fn private_group_members_share_one_clock_until_the_last_owner_retires() {
+        let host = SimulatedHost::new();
+        let microphone = host.plug("io.mixrelay.test.microphone", 2, 48_000, CAPTURED);
+        let speaker = host.plug("io.mixrelay.test.speaker", 2, 48_000, 2.0 * CAPTURED);
+        let status = Arc::new(mixrelay_engine_service::session::AdapterRuntimeStatus::new(
+            crate::macos::adapter_profile(),
+        ));
+        let resources = MacDevices::with_host(status, 48_000, 256, host.clone());
+        resources
+            .reconcile(&duplex(&microphone, &speaker), Preserve)
+            .unwrap();
+        let mut active = DeviceSet::default();
+        resources.activation().unwrap().activate(&mut active);
+        resources.reclaim();
+        let [aggregate] = host.groups()[..] else {
+            panic!("two physical members need one private group");
         };
-        let first = open(primary);
-        let second = open(secondary);
-        assert!(first.ready() && second.ready());
-        assert!(unsafe { mr_device_io_native_frames(first.native.pointer.as_ptr()) } > 0);
-        assert!(unsafe { mr_device_io_native_frames(second.native.pointer.as_ptr()) } > 0);
-        let first_clock = first
-            .clock_identity
-            .load(std::sync::atomic::Ordering::Acquire);
-        let second_clock = second
-            .clock_identity
-            .load(std::sync::atomic::Ordering::Acquire);
-        assert_ne!(first_clock, 0);
-        assert_eq!(first_clock, second_clock);
-        drop(group);
-        assert!(weak.upgrade().is_some());
-        drop(first);
-        super::super::worker_retirement::WORKERS.finish().unwrap();
+        let (input, output) = (active.0["input"].clone(), active.0["output"].clone());
+        for (device, offset) in [(&input, 2), (&output, 0)] {
+            // The output clock leads the plan, and both registrations follow the aggregate.
+            let group = device.native.group.as_ref().expect("group member");
+            assert_eq!(group.members, [speaker.clone(), microphone.clone()]);
+            assert_eq!(device.clock_identity.load(Ordering::Acquire), aggregate);
+            // The production readback admits the aggregate and projects each member's slice.
+            let binding = device.native.host.direct_binding(&device.native);
+            assert_eq!(
+                binding.map(|binding| (binding.device, binding.offset, binding.total)),
+                Some((aggregate, offset, 4))
+            );
+        }
+        // One clock identity lets the output's pacing clock align the input without SRC,
+        // and the input captures only its own member's projection of the aggregate.
+        let epoch = input.epoch.load(Ordering::Acquire);
+        active.set_clock_master(Some(output.identity));
+        assert!(input.clock_aligned.load(Ordering::Acquire));
+        // The worker rebuilds its bridge for the aligned clock before capture resumes.
+        wait_until(|| input.epoch.load(Ordering::Acquire) != epoch && input.ready());
+        let held = host.hold_callbacks();
+        let (mut pcm, mut captured) = ([0.0; 64], Vec::new());
+        for _ in 0..4 {
+            host.callback(&input.native)
+                .expect("started aggregate registration");
+            // One 512-frame callback fills at most 16 reads of 32 frames.
+            for _ in 0..16 {
+                let read = active.read("input", &mut pcm, 0).unwrap();
+                assert_ne!(read.activity, InputActivity::Inactive, "input offline");
+                captured.extend_from_slice(&pcm[..read.frames as usize * 2]);
+            }
+        }
+        drop(held);
+        // Past the bridge's priming silence, every sample is the microphone's, bit-exact.
+        let settled = captured.len().saturating_sub(512);
         assert!(
-            weak.upgrade().is_some(),
-            "second registration still owns group"
+            captured.len() >= 1024,
+            "input captured {} samples",
+            captured.len()
         );
-        drop(second);
-        super::super::worker_retirement::WORKERS.finish().unwrap();
-        assert!(weak.upgrade().is_none());
+        assert!(
+            captured[settled..]
+                .iter()
+                .all(|sample| sample.to_bits() == CAPTURED.to_bits()),
+            "input read beyond its member projection: {:?}",
+            &captured[settled..]
+        );
+        resources
+            .reconcile(&GraphDocument::new(2, vec![], vec![]), Preserve)
+            .unwrap();
+        resources.activation().unwrap().activate(&mut active);
+        resources.reclaim();
+        let group = Arc::downgrade(input.native.group.as_ref().expect("group member"));
+        retire(input);
+        assert!(
+            group.upgrade().is_some(),
+            "output registration still owns group"
+        );
+        assert_eq!(host.groups(), [aggregate]);
+        retire(output);
+        assert!(group.upgrade().is_none());
         Aggregate::reclaim_retired();
-        assert_eq!(GROUPS.in_use(), baseline);
-        eprintln!(
-            "private group shared clock={first_clock}; 2 native owners retired; group admission restored to {baseline}"
-        );
+        assert!(host.groups().is_empty(), "retired group was destroyed");
     }
 }

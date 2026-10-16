@@ -1,9 +1,7 @@
 //! Native control supervisor; prepared PCM executes only on the device callback.
 use super::{
     bridge::DeviceBridge,
-    ffi::{
-        mr_device_io_alive, mr_device_io_clock_device, mr_device_io_native_rate, mr_device_io_ticks,
-    },
+    ffi::mr_device_io_native_rate,
     native::{Connection, Native},
 };
 use std::{
@@ -67,7 +65,7 @@ impl WorkerContext {
     pub(super) fn connection(&self, connected: &mut dyn FnMut()) -> Result<(), String> {
         let pointer = self.native.pointer.as_ptr();
         let _connection = Connection {
-            pointer,
+            native: &self.native,
             failed: &self.failed,
             clock_identity: &self.clock_identity,
         };
@@ -78,7 +76,7 @@ impl WorkerContext {
         // Only the connection owner queries CoreAudio. The graph uses this
         // atomic proof, not a UID string, nominal Hz or a property call on RT.
         self.clock_identity.store(
-            unsafe { mr_device_io_clock_device(pointer) },
+            self.native.host.clock_device(&self.native),
             Ordering::Release,
         );
         self.serve_callback(native_rate, connected)
@@ -90,7 +88,7 @@ impl WorkerContext {
             self.graph_rate.load(Ordering::Acquire),
             self.clock_aligned.load(Ordering::Acquire),
         );
-        let mut ticks = unsafe { mr_device_io_ticks(self.native.pointer.as_ptr()) };
+        let mut ticks = self.native.host.ticks(&self.native);
         let mut last_progress = Instant::now();
         let mut activated = false;
         while !self.stop.load(Ordering::Acquire) {
@@ -133,10 +131,10 @@ impl WorkerContext {
                 return Err("CoreAudio callback requested topology recovery".into());
             }
             // Native property IPC stays on control; it cannot block callback PCM.
-            if !unsafe { mr_device_io_alive(self.native.pointer.as_ptr()) } {
+            if !self.native.host.alive(&self.native) {
                 return Err("CoreAudio device lost or reconfigured".into());
             }
-            let next = unsafe { mr_device_io_ticks(self.native.pointer.as_ptr()) };
+            let next = self.native.host.ticks(&self.native);
             if next != ticks {
                 ticks = next;
                 last_progress = Instant::now();

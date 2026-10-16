@@ -202,6 +202,7 @@ mod tests {
                 sample_rate: 48_000,
                 block_frames: 128,
             },
+            Arc::new(|| true),
         ));
         let weak = Arc::downgrade(&controller);
         let monitor = ControlMaintenance {
@@ -232,6 +233,7 @@ mod tests {
                 sample_rate: 48_000,
                 block_frames: 128,
             },
+            Arc::new(|| true),
         ));
         let weak = Arc::downgrade(&controller);
         let monitor = controller.start_control_maintenance().unwrap();

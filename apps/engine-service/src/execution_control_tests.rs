@@ -372,7 +372,7 @@ fn deleted_selection_is_committed_before_the_new_plan_can_activate() {
     let document = graph_b(4);
     let candidate = serde_json::from_value(serde_json::json!({
         "version":1,"revision":4,"activeId":"remaining",
-        "graphs":[{"id":"remaining","name":"B","document":document}]
+        "graphs":[{"id":"remaining","name":"B","document":document,"layoutRevision":0,"layout":{"positions":{}}}]
     }))
     .unwrap();
     let context = *engine.context.read();
@@ -639,8 +639,8 @@ fn published_manifest_controller() -> (
             "revision": 1,
             "activeId": "first",
             "graphs": [
-                {"id":"first","name":"First","document":document},
-                {"id":"second","name":"Second","document":document},
+                {"id":"first","name":"First","document":document,"layoutRevision":0,"layout":{"positions":{}}},
+                {"id":"second","name":"Second","document":document,"layoutRevision":0,"layout":{"positions":{}}},
             ],
         }))
         .unwrap(),

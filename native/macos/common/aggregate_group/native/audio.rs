@@ -57,7 +57,7 @@ fn property<T: Default>(device: u32, selector: [u8; 4]) -> Option<T> {
     (status == 0 && size as usize == size_of::<T>()).then_some(value)
 }
 
-pub(super) fn object(device: u32, selector: [u8; 4]) -> Option<Object> {
+fn object(device: u32, selector: [u8; 4]) -> Option<Object> {
     let mut pointer: *const c_void = std::ptr::null();
     let mut size = u32::try_from(size_of::<*const c_void>()).ok()?;
     let address = Address {
@@ -112,23 +112,74 @@ fn resolve(uid: &Object) -> Option<u32> {
     (status == 0 && size == 4 && device != 0).then_some(device)
 }
 
-pub(super) fn member(uid: &Object, transport: bool) -> Option<MemberInfo> {
-    let device = resolve(uid)?;
+/// The `CoreAudio` calls a private aggregate makes. Production uses [`System`]; hermetic
+/// tests supply a simulated HAL beneath the same planning, readback and retirement logic.
+pub(super) trait Hal {
+    /// The device a persistent UID currently names.
+    fn device(&self, uid: &Object) -> Option<u32>;
+    /// One global u32 property, such as transport type or liveness.
+    fn scalar(&self, device: u32, selector: [u8; 4]) -> Option<u32>;
+    /// The nominal sample rate.
+    fn rate(&self, device: u32) -> Option<f64>;
+    /// Total channels of one direction's stream configuration.
+    fn channels(&self, device: u32, input: bool) -> Option<u32>;
+    /// One CF-valued global property, returned with its owned reference.
+    fn object(&self, device: u32, selector: [u8; 4]) -> Option<Object>;
+    /// Fills `output` with the active subdevices; false unless exactly that many are active.
+    fn active(&self, device: u32, output: &mut [u32]) -> bool;
+    /// Publishes an aggregate for `description`; a written device transfers even on error.
+    fn create(&self, description: &Object, device: &mut u32) -> i32;
+    fn destroy(&self, device: u32) -> i32;
+}
+
+/// The process's `CoreAudio` HAL.
+pub(super) struct System;
+
+impl Hal for System {
+    fn device(&self, uid: &Object) -> Option<u32> {
+        resolve(uid)
+    }
+    fn scalar(&self, device: u32, selector: [u8; 4]) -> Option<u32> {
+        property(device, selector)
+    }
+    fn rate(&self, device: u32) -> Option<f64> {
+        property(device, *b"nsrt")
+    }
+    fn channels(&self, device: u32, input: bool) -> Option<u32> {
+        channels(device, input)
+    }
+    fn object(&self, device: u32, selector: [u8; 4]) -> Option<Object> {
+        object(device, selector)
+    }
+    fn active(&self, device: u32, output: &mut [u32]) -> bool {
+        active(device, output)
+    }
+    fn create(&self, description: &Object, device: &mut u32) -> i32 {
+        create(description, device)
+    }
+    fn destroy(&self, device: u32) -> i32 {
+        destroy(device)
+    }
+}
+
+/// Current facts of one physical member; the transport type only when requested.
+pub(super) fn member(hal: &impl Hal, uid: &Object, transport: bool) -> Option<MemberInfo> {
+    let device = hal.device(uid)?;
     Some(MemberInfo {
         device,
         transport: if transport {
-            property(device, *b"tran")?
+            hal.scalar(device, *b"tran")?
         } else {
             0
         },
-        rate: property(device, *b"nsrt")?,
-        alive: property(device, *b"livn")?,
-        input: channels(device, true)?,
-        output: channels(device, false)?,
+        rate: hal.rate(device)?,
+        alive: hal.scalar(device, *b"livn")?,
+        input: hal.channels(device, true)?,
+        output: hal.channels(device, false)?,
     })
 }
 
-pub(super) fn channels(device: u32, input: bool) -> Option<u32> {
+fn channels(device: u32, input: bool) -> Option<u32> {
     let address = Address {
         selector: u32::from_be_bytes(*b"slay"),
         scope: u32::from_be_bytes(if input { *b"inpt" } else { *b"outp" }),
@@ -197,7 +248,7 @@ pub(super) fn parse_channels(storage: &[u64], bytes: usize) -> Option<u32> {
         })
 }
 
-pub(super) fn active(device: u32, output: &mut [u32]) -> bool {
+fn active(device: u32, output: &mut [u32]) -> bool {
     let Ok(mut size) = u32::try_from(size_of_val(output)) else {
         return false;
     };
@@ -221,13 +272,13 @@ pub(super) fn active(device: u32, output: &mut [u32]) -> bool {
     }
 }
 
-pub(super) fn create(description: &Object, device: &mut u32) -> i32 {
+fn create(description: &Object, device: &mut u32) -> i32 {
     // SAFETY: description is a live CFDictionary with the documented aggregate keys;
     // the group retains device even if native creation reports an error.
     unsafe { AudioHardwareCreateAggregateDevice(description.as_ptr(), device) }
 }
 
-pub(super) fn destroy(device: u32) -> i32 {
+fn destroy(device: u32) -> i32 {
     // SAFETY: only the exclusive retirement owner calls this after all native callbacks drain.
     unsafe { AudioHardwareDestroyAggregateDevice(device) }
 }

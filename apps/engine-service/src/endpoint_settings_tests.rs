@@ -220,6 +220,7 @@ pub(super) fn controller_with_inventory(
                     requires_observed_device_rate: false,
                 },
             )),
+            paid_access: Arc::new(|| true),
         },
         document,
     )

@@ -221,6 +221,7 @@ async fn run_owned(
             processor_catalog,
             graph_resources: devices.clone(),
             runtime_status: devices.clone(),
+            paid_access: Arc::new(mixrelay_licensing::has_local_paid_access),
         },
         initial_document,
     );

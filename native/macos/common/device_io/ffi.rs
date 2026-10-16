@@ -143,7 +143,7 @@ pub unsafe extern "C" fn mr_device_io_create_group(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mr_device_io_connect_status(io: *mut DeviceIo, expected: u32) -> i32 {
     // SAFETY: stable context retained by its one control owner; only control cell mutates.
-    unsafe { io.as_ref() }.map_or(-2, |io| unsafe { control::connect(io, expected) })
+    unsafe { io.as_ref() }.map_or(-2, |io| unsafe { control::connect(io, expected, &System) })
 }
 
 /// Connects without an expected-device constraint; false retains all owned resources.
@@ -161,7 +161,7 @@ pub unsafe extern "C" fn mr_device_io_connect(io: *mut DeviceIo) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mr_device_io_disconnect(io: *mut DeviceIo) -> bool {
     // SAFETY: callbacks touch only disjoint callback cells/queues/atomics.
-    unsafe { io.as_ref() }.is_none_or(|io| unsafe { control::disconnect(io) })
+    unsafe { io.as_ref() }.is_none_or(|io| unsafe { control::disconnect(io, &System) })
 }
 
 /// Releases the allocation only after unregister confirms drain. False retains
@@ -172,7 +172,7 @@ pub unsafe extern "C" fn mr_device_io_disconnect(io: *mut DeviceIo) -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mr_device_io_destroy(io: *mut DeviceIo) -> bool {
     // SAFETY: the outer allocation owner has stopped graph/worker roles.
-    unsafe { destroy_with(io, |io| control::disconnect(io)) }
+    unsafe { destroy_with(io, |io| control::disconnect(io, &System)) }
 }
 
 // SAFETY: exclusive allocation owner, stopped graph/worker; disconnect must return
@@ -230,14 +230,9 @@ pub unsafe extern "C" fn mr_device_io_direct_binding(
     let Some(io) = (unsafe { io.as_ref() }) else {
         return false;
     };
-    let Some(binding) = native::resolve(&io.selection, &System) else {
+    let Some(binding) = control::direct_binding(io, &System) else {
         return false;
     };
-    if !native::admitted_format(&io.selection, binding, &System)
-        .is_some_and(|format| format.layout.all_float())
-    {
-        return false;
-    }
     // SAFETY: caller supplies three disjoint exclusive scalar outputs.
     unsafe {
         device.write(binding.device);
@@ -274,9 +269,10 @@ pub unsafe extern "C" fn mr_device_io_clock_device(io: *mut DeviceIo) -> u32 {
     unsafe { io.as_ref() }.map_or(0, |io| unsafe { control::clock_device(io, &System) })
 }
 
-/// Reads scalar buffer facts using immutable selection; false leaves output zeroed.
+/// Reads scalar buffer facts using immutable selection; false leaves a non-null output zeroed.
 /// # Safety
-/// IO retained and info exclusively owns a complete `BufferInfo` disjoint from IO.
+/// IO is null or retained, and info is null or exclusively owns a complete `BufferInfo`
+/// disjoint from IO.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mr_device_io_buffer_info(
     io: *mut DeviceIo,
@@ -285,14 +281,14 @@ pub unsafe extern "C" fn mr_device_io_buffer_info(
     if info.is_null() {
         return false;
     }
+    // SAFETY: caller grants complete, aligned output storage. Write initializes
+    // an output-only slot without first creating a reference to uninitialized data.
+    unsafe { info.write(BufferInfo::default()) };
     // SAFETY: immutable selection remains live while the engine retains IO.
     let Some(io) = (unsafe { io.as_ref() }) else {
         return false;
     };
-    // SAFETY: caller grants complete, aligned output storage. Write initializes
-    // an output-only slot without first creating a reference to uninitialized data.
-    unsafe { info.write(BufferInfo::default()) };
-    let Some(snapshot) = native::buffer_info(&io.selection) else {
+    let Some(snapshot) = control::buffer_info(io, &System) else {
         return false;
     };
     // SAFETY: the same exclusive output slot remains writable until return.
@@ -303,13 +299,13 @@ pub unsafe extern "C" fn mr_device_io_buffer_info(
 /// Reads native buffer frames. Missing property returns zero; no state is changed.
 #[unsafe(no_mangle)]
 pub extern "C" fn mr_device_buffer_size(device: u32) -> u32 {
-    native::buffer_size(device)
+    native::buffer_size(device, &System)
 }
 
 /// Writes one buffer-size property; the engine owns validation and readback policy.
 #[unsafe(no_mangle)]
 pub extern "C" fn mr_device_buffer_write(device: u32, frames: u32) -> bool {
-    native::buffer_write(device, frames)
+    native::buffer_write(device, frames, &System)
 }
 
 /// Reads total queue overflow events from independent atomic observations.

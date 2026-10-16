@@ -157,6 +157,7 @@ impl Session {
                     processor_catalog: ProcessorCatalog::default(),
                     graph_resources: backend.clone(),
                     runtime_status: status.clone(),
+                    paid_access: Arc::new(|| true),
                 },
                 document,
             )

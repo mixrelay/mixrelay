@@ -41,7 +41,19 @@ impl RuntimeStatusBackend for NativeNegotiationFixture {
     }
 }
 
-struct EndpointFixture(VirtualEndpointCapabilities);
+/// A virtual-endpoint backend for graphs that publish no native endpoint.
+pub(crate) struct EndpointFixture(VirtualEndpointCapabilities);
+impl EndpointFixture {
+    pub(crate) fn new() -> Self {
+        Self(VirtualEndpointCapabilities {
+            max_render_channels: 64,
+            max_capture_channels: 64,
+            supported_sample_rates: vec![44_100, 48_000],
+            supports_duplex: true,
+            supports_dynamic_creation: false,
+        })
+    }
+}
 impl VirtualEndpointBackend for EndpointFixture {
     fn capabilities(&self) -> &VirtualEndpointCapabilities {
         &self.0
@@ -147,7 +159,9 @@ fn application_fixture() -> ApplicationFixture {
         profile: profile.clone(),
         accepted: Mutex::default(),
     });
-    let resources = Arc::new(crate::macos_devices::MacDevices::new(profile, 48_000, 256));
+    let resources = Arc::new(crate::macos_devices::MacDevices::without_devices(
+        profile, 48_000, 256,
+    ));
     let controller = EngineGraphController::new_with_initial_document(
         exchange.clone(),
         EngineGraphControllerConfig {
@@ -155,16 +169,11 @@ fn application_fixture() -> ApplicationFixture {
             meters,
             initial_bindings: vec![],
             required_endpoint_node_id: None,
-            endpoint_backend: Arc::new(EndpointFixture(VirtualEndpointCapabilities {
-                max_render_channels: 64,
-                max_capture_channels: 64,
-                supported_sample_rates: vec![44_100, 48_000],
-                supports_duplex: true,
-                supports_dynamic_creation: false,
-            })),
+            endpoint_backend: Arc::new(EndpointFixture::new()),
             processor_catalog: ProcessorCatalog::default(),
             graph_resources: resources.clone(),
             runtime_status: runtime.clone(),
+            paid_access: Arc::new(|| true),
         },
         document,
     );

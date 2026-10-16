@@ -7,6 +7,8 @@ mod cf;
 mod ffi;
 #[cfg(test)]
 mod tests;
+#[cfg(any(test, feature = "test-observation"))]
+pub use ffi::simulated as test_observation;
 pub use ffi::{
     mr_aggregate_group_binding, mr_aggregate_group_create, mr_aggregate_group_ready,
     mr_aggregate_group_try_destroy, mr_aggregate_member_info,
@@ -46,13 +48,14 @@ impl AggregateGroup {
         &self.uids[..self.geometry.count as usize]
     }
 
-    fn members_ready(&self) -> bool {
+    /// Whether each member's freshly `observe`d facts still match the planned geometry.
+    fn members_match(&self, observe: impl Fn(&cf::Object) -> Option<MemberInfo>) -> bool {
         self.uids().iter().enumerate().all(|(index, uid)| {
             let Ok(index) = u32::try_from(index) else {
                 return false;
             };
             uid.as_ref()
-                .and_then(|uid| audio::member(uid, false))
+                .and_then(&observe)
                 .is_some_and(|observed| self.geometry.member_matches(index, &observed))
         })
     }
@@ -96,10 +99,10 @@ impl AggregateGroup {
         create(&description, &mut self.device) == 0
     }
 
-    fn readback(&self) -> Option<Readback> {
-        let uids = audio::object(self.device, *b"grup")?;
-        let main_uid = audio::object(self.device, *b"amst")?;
-        let composition = audio::object(self.device, *b"acom")?;
+    fn readback(&self, hal: &impl audio::Hal) -> Option<Readback> {
+        let uids = hal.object(self.device, *b"grup")?;
+        let main_uid = hal.object(self.device, *b"amst")?;
+        let composition = hal.object(self.device, *b"acom")?;
         let members = composition.value(c"subdevices")?;
         let count = self.geometry.count as usize;
         if uids.len()? != count || members.len()? != count {
@@ -109,11 +112,11 @@ impl AggregateGroup {
             primary_uid_matches: u32::from(
                 main_uid.equal(self.uids[self.geometry.primary as usize].as_ref()?),
             ),
-            input: audio::channels(self.device, true)?,
-            output: audio::channels(self.device, false)?,
+            input: hal.channels(self.device, true)?,
+            output: hal.channels(self.device, false)?,
             ..Readback::default()
         };
-        if !audio::active(self.device, &mut readback.active[..count]) {
+        if !hal.active(self.device, &mut readback.active[..count]) {
             return None;
         }
         for (index, uid) in self.uids().iter().enumerate() {
@@ -126,16 +129,23 @@ impl AggregateGroup {
         Some(readback)
     }
 
-    fn ready(&self) -> bool {
+    /// Whether `CoreAudio` still publishes the planned members, layout and clock policy.
+    fn ready(&self, hal: &impl audio::Hal) -> bool {
         self.device != 0
-            && self.members_ready()
+            && self.members_match(|uid| audio::member(hal, uid, false))
             && self
-                .readback()
+                .readback(hal)
                 .is_some_and(|readback| self.geometry.ready(&readback))
     }
 
-    fn binding(&self, uid: &CStr, input: bool, channels: u32) -> Option<NativeBinding> {
-        if !self.ready() {
+    fn binding(
+        &self,
+        uid: &CStr,
+        input: bool,
+        channels: u32,
+        hal: &impl audio::Hal,
+    ) -> Option<NativeBinding> {
+        if !self.ready(hal) {
             return None;
         }
         let uid = cf::Object::string(uid)?;

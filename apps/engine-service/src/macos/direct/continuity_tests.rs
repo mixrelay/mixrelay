@@ -17,7 +17,11 @@ impl ControlFixture {
     fn new() -> Self {
         let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
         Self {
-            devices: crate::macos_devices::MacDevices::new(Arc::clone(&status), 48_000, 32),
+            devices: crate::macos_devices::MacDevices::without_devices(
+                Arc::clone(&status),
+                48_000,
+                32,
+            ),
             status,
             exchange: ProcessorExchange::new(1),
         }

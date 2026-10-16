@@ -12,6 +12,7 @@ use mixrelay_audio_graph::DeviceSelector;
 use mixrelay_macos_transport::{audio_buffer::AudioBuffer, device_io::mr_device_io_process};
 use std::{
     collections::BTreeMap,
+    ffi::c_void,
     ptr,
     sync::{Arc, atomic::Ordering},
 };
@@ -69,57 +70,81 @@ impl NativeOwner {
 
     /// One `IOProc` invocation over interleaved PCM: read for input, written for output.
     pub(crate) fn callback(&self, pcm: &mut [f32], time: CallbackTime) {
-        let mut list = BufferList {
-            count: 1,
-            buffers: [AudioBuffer {
-                channels: u32::try_from(self.device.channels).expect("channel count"),
-                byte_size: u32::try_from(size_of_val(pcm)).expect("buffer size"),
-                data: pcm.as_mut_ptr(),
-            }],
-        };
-        let now = Timestamp {
-            host: time.now,
-            flags: 2,
-            ..Timestamp::default()
-        };
-        // Sample, host and rate scalar are valid, as `CoreAudio` supplies them.
-        let stream = Timestamp {
-            sample: time.sample,
-            host: time.host,
-            rate_scalar: time.rate_scalar,
-            flags: 7,
-            ..Timestamp::default()
-        };
-        let input = self.device.input;
         // SAFETY: no OS registration exists, so this fixture is the owner's only serialized
-        // callback. The list covers exactly `pcm`, and both timestamps outlive the call.
+        // callback, and its admitted layout has exactly the device's channel count.
         unsafe {
-            mr_device_io_process(
-                0,
-                ptr::from_ref(&now).cast(),
-                if input {
-                    ptr::from_ref(&list).cast()
-                } else {
-                    ptr::null()
-                },
-                if input {
-                    ptr::from_ref(&stream).cast()
-                } else {
-                    ptr::null()
-                },
-                if input {
-                    ptr::null_mut()
-                } else {
-                    ptr::from_mut(&mut list).cast()
-                },
-                if input {
-                    ptr::null()
-                } else {
-                    ptr::from_ref(&stream).cast()
-                },
+            invoke(
                 self.context.native.pointer.as_ptr(),
+                self.device.input,
+                self.device.channels,
+                pcm,
+                time,
             );
         }
+    }
+}
+
+/// One `IOProc` invocation of `io` over interleaved PCM: read for input, written for output.
+///
+/// # Safety
+/// `io` is a retained native owner without an OS registration whose admitted Float32 layout has
+/// `channels` channels, and the caller is its only serialized callback.
+pub(crate) unsafe fn invoke(
+    io: *mut c_void,
+    input: bool,
+    channels: usize,
+    pcm: &mut [f32],
+    time: CallbackTime,
+) {
+    let mut list = BufferList {
+        count: 1,
+        buffers: [AudioBuffer {
+            channels: u32::try_from(channels).expect("channel count"),
+            byte_size: u32::try_from(size_of_val(pcm)).expect("buffer size"),
+            data: pcm.as_mut_ptr(),
+        }],
+    };
+    let now = Timestamp {
+        host: time.now,
+        flags: 2,
+        ..Timestamp::default()
+    };
+    // Sample, host and rate scalar are valid, as `CoreAudio` supplies them.
+    let stream = Timestamp {
+        sample: time.sample,
+        host: time.host,
+        rate_scalar: time.rate_scalar,
+        flags: 7,
+        ..Timestamp::default()
+    };
+    // SAFETY: the caller is this owner's only callback. The list covers exactly `pcm`,
+    // and both timestamps outlive the call.
+    unsafe {
+        mr_device_io_process(
+            0,
+            ptr::from_ref(&now).cast(),
+            if input {
+                ptr::from_ref(&list).cast()
+            } else {
+                ptr::null()
+            },
+            if input {
+                ptr::from_ref(&stream).cast()
+            } else {
+                ptr::null()
+            },
+            if input {
+                ptr::null_mut()
+            } else {
+                ptr::from_mut(&mut list).cast()
+            },
+            if input {
+                ptr::null()
+            } else {
+                ptr::from_ref(&stream).cast()
+            },
+            io,
+        );
     }
 }
 

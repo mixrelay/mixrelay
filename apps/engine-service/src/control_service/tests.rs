@@ -41,6 +41,7 @@ fn backend() -> Arc<dyn ControlBackend> {
             sample_rate: 48_000,
             block_frames: 128,
         },
+        Arc::new(|| true),
     ))
 }
 

@@ -200,6 +200,7 @@ mod qualification {
                         processor_catalog: catalog,
                         graph_resources: Arc::new(NoopGraphResourceBackend),
                         runtime_status: Arc::new(FixedRuntimeStatus::new(DriverState::Ready)),
+                        paid_access: Arc::new(mixrelay_licensing::has_local_paid_access),
                     },
                     document,
                 )

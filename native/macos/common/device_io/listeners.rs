@@ -22,6 +22,14 @@ pub(super) struct Subscription {
     address: Address,
 }
 
+#[cfg(any(test, feature = "test-observation"))]
+impl Subscription {
+    /// The watched object and property selector, for a simulated HAL's notifications.
+    pub(super) fn target(self) -> (u32, u32) {
+        (self.object, self.address.selector)
+    }
+}
+
 pub(super) struct WatchTarget {
     pub(super) device: u32,
     pub(super) scope: u32,

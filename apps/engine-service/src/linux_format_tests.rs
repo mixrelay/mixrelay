@@ -39,6 +39,7 @@ fn native_pipewire_live_session_format_transaction() {
             processor_catalog: ProcessorCatalog::default(),
             graph_resources: backend.clone(),
             runtime_status: status.clone(),
+            paid_access: Arc::new(|| true),
         },
         initial_document,
     );

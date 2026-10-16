@@ -1,5 +1,5 @@
 //! Staged format transaction. Allocation precedes native mutation; commit publishes to workers.
-use super::buffer_control::{self, NativeBufferControl};
+use super::buffer_control::{self, HostBufferControl};
 use super::buffer_transaction::{BufferFailure, BufferPlan};
 use super::{backend_error, bridge::DeviceBridge, device::Device};
 use mixrelay_audio_io::HostAudioBackendError;
@@ -70,6 +70,14 @@ impl PreparedGraphFormat for PreparedDeviceFormat {
         if self.requested_buffer == self.previous_buffer {
             return Ok(());
         }
+        // Every owner of one device set shares its backend's host.
+        let Some(host) = self
+            .devices
+            .first()
+            .map(|(device, _)| device.native.host.clone())
+        else {
+            return Ok(());
+        };
         let mut changes = Vec::new();
         for (device, _) in &self.devices {
             changes.push(
@@ -78,7 +86,7 @@ impl PreparedGraphFormat for PreparedDeviceFormat {
             );
         }
         BufferPlan::prepare(changes, self.requested_buffer)
-            .and_then(|plan| plan.apply(&mut NativeBufferControl))
+            .and_then(|plan| plan.apply(&mut HostBufferControl(&*host)))
             .map_err(|failure| backend_error(match failure {
                 BufferFailure::InconsistentSnapshot => "CoreAudio native buffer changed during preparation",
                 BufferFailure::Restored => "CoreAudio buffer change failed native readback; previous buffer restored",

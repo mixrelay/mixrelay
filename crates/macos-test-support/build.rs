@@ -26,12 +26,6 @@ fn main() {
     native_format_header::write_header(&output).expect("generate native audio format declarations");
     build(
         &root,
-        "fixture",
-        "native/macos/engine-service/tests/MRDeviceIOLive.c",
-        &libraries,
-    );
-    build(
-        &root,
         "clock",
         "native/macos/common/tests/MRCallbackClockTests.c",
         &libraries,
@@ -58,6 +52,24 @@ fn main() {
         &root,
         "pcm_ring",
         "native/pcm-ring/tests/MRPcmRingTests.c",
+        &libraries,
+    );
+    // Reports the callback timing layout exactly as the engine header declares it.
+    let probe = output.join("device_io_timing_layout.c");
+    std::fs::write(
+        &probe,
+        "#include <stdio.h>\n#include \"MRDeviceIO.h\"\n\
+         int main(void) {\n\
+             printf(\"%zu %zu %zu %zu\\n\", sizeof(MRIOTiming), offsetof(MRIOTiming, now),\n\
+                 offsetof(MRIOTiming, input), offsetof(MRIOTiming, output));\n\
+             return 0;\n\
+         }\n",
+    )
+    .expect("write the timing layout probe");
+    build(
+        &root,
+        "timing_layout",
+        probe.to_str().expect("UTF-8 output directory"),
         &libraries,
     );
 }

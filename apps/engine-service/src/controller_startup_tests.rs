@@ -40,6 +40,7 @@ fn configuration(native: &Arc<NativeCalls>) -> EngineGraphControllerConfig {
         processor_catalog: ProcessorCatalog::default(),
         graph_resources: native.clone(),
         runtime_status: native.clone(),
+        paid_access: Arc::new(|| true),
     }
 }
 

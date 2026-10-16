@@ -92,3 +92,22 @@ unsafe extern "C" {
     ) -> u32;
     pub(super) fn mr_device_io_callback_host(io: *mut c_void) -> u64;
 }
+
+#[cfg(test)]
+mod tests {
+    use mixrelay_macos_transport::device_io::IoTiming;
+    use std::mem::offset_of;
+
+    #[test]
+    fn the_c_header_declares_the_rust_callback_timing_layout() {
+        assert_eq!(
+            mixrelay_macos_test_support::device_io_timing_layout(),
+            [
+                size_of::<IoTiming>(),
+                offset_of!(IoTiming, now),
+                offset_of!(IoTiming, input),
+                offset_of!(IoTiming, output),
+            ]
+        );
+    }
+}
