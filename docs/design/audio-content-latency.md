@@ -221,9 +221,10 @@ requires. Never leave a signing authentication window pending.
    a render operation would correctly gate the report to zero.
 
 Steps 4–5 and the clearing check of step 6 are automated for one route by
-`node scripts/lab/macos-latency-acceptance.mjs SOURCE_UID ENDPOINT_ID EVIDENCE_DIR
---verify-installed-latency [--roundtrip]`. SOURCE is a loopback device such as
-Loopback Audio and ENDPOINT an endpoint no saved graph uses. It adds the route to
+`node scripts/lab/macos-latency-acceptance.mjs SOURCE ENDPOINT_ID EVIDENCE_DIR
+--verify-installed-latency [--roundtrip]`. SOURCE is another MixRelay endpoint ID (A,
+which needs the paid edition's second endpoint) or any device UID whose output returns
+on its input; ENDPOINT (D) is an endpoint no saved graph uses. It adds the route to
 the selected graph, waits for a stable report, optionally runs the round trip,
 restores the exact graph and requires the report to clear to zero. Every write
 names the selected graph and runs as an engine operation, so another client's edit

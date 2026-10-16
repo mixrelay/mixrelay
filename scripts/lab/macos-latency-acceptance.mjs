@@ -1,11 +1,12 @@
 // Installed acceptance for recording-device latency reporting (docs/design/audio-content-latency.md).
-// Adds one route SOURCE device input -> engine -> virtual endpoint to the selected graph, waits
-// for the HAL to report a stable input latency on that endpoint, optionally measures the real
-// round trip, then restores the exact original graph and checks that the report clears.
-//   node scripts/lab/macos-latency-acceptance.mjs SOURCE_UID ENDPOINT_ID EVIDENCE_DIR --verify-installed-latency [--roundtrip]
-// SOURCE_UID must be a loopback device (for example Loopback Audio) whose output returns on its
-// input, so the probe can play into it while recording only from the endpoint. The probe never
-// plays into the endpoint itself: that would bypass the engine and gate the report to zero.
+// Adds one route SOURCE -> engine -> virtual endpoint to the selected graph, waits for the HAL
+// to report a stable input latency on that endpoint, optionally measures the real round trip,
+// then restores the exact original graph and checks that the report clears.
+//   node scripts/lab/macos-latency-acceptance.mjs SOURCE ENDPOINT_ID EVIDENCE_DIR --verify-installed-latency [--roundtrip]
+// SOURCE is normally another MixRelay virtual endpoint ID (A): the probe plays into A, whose
+// playback the engine routes to ENDPOINT_ID (D). A second endpoint needs the paid edition.
+// SOURCE may instead be any device UID whose output returns on its input. The probe never
+// plays into D itself: that would bypass the engine and gate the report to zero.
 // --roundtrip records audio, so the terminal needs microphone permission. It uses the probe's
 // impulse mode: a route between two devices crosses clocks, so the engine resamples it and
 // no bit-exact copy of a test signal can arrive.
@@ -25,9 +26,14 @@ const [sourceUid, endpointId, evidence, approval, ...options] = process.argv.sli
 assert.equal(process.platform, 'darwin');
 assert.equal(approval, '--verify-installed-latency', 'Pass --verify-installed-latency to change the installed graph');
 assert.ok(options.every(option => option === '--roundtrip'), `Unknown option: ${options.join(' ')}`);
-assert.ok(sourceUid && !sourceUid.startsWith('io.mixrelay.'), 'The source must be another vendor\'s loopback device');
+const endpointPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+assert.ok(sourceUid, 'Pass a source endpoint ID or device UID');
+// A MixRelay source endpoint by ID; any other value is a looped-back device UID.
+const sourceEndpoint = endpointPattern.test(sourceUid) ? sourceUid : undefined;
+assert.ok(!sourceUid.startsWith('io.mixrelay.'), 'Name a MixRelay source by its endpoint ID');
 assert.ok(evidence && isAbsolute(evidence), 'Evidence directory must be an absolute path');
-assert.match(endpointId ?? '', /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
+assert.match(endpointId ?? '', endpointPattern);
+assert.notEqual(sourceEndpoint, endpointId, 'The source and the measured endpoint must differ');
 const roundtrip = options.includes('--roundtrip');
 const uid = `io.mixrelay.audio.endpoint.${endpointId.replaceAll('-', '')}`;
 const probe = fileURLToPath(new URL('../probe-macos-roundtrip.sh', import.meta.url));
@@ -114,13 +120,19 @@ const catalog = await api('graphs');
 const graphId = catalog.activeId;
 for (const { id } of catalog.graphs) {
   const document = id === graphId ? catalog.document : await api(`graphs/${encodeURIComponent(id)}`);
-  assert.ok(!document.nodes.some(node => node.type === 'virtual_endpoint' && node.config.id === endpointId),
-    `Graph ${id} already uses this endpoint; refusing to add a contributor to a live route`);
+  assert.ok(!document.nodes.some(node => node.type === 'virtual_endpoint' &&
+    [endpointId, sourceEndpoint].includes(node.config.id)),
+  `Graph ${id} already uses the source or measured endpoint; refusing to change a live route`);
 }
-const device = (await api('status')).audioSession.virtualEndpointSettings.devices
-  .find(candidate => candidate.spec.id === endpointId);
+const devices = (await api('status')).audioSession.virtualEndpointSettings.devices;
+const nativeUid = id => `io.mixrelay.audio.endpoint.${id.replaceAll('-', '')}`;
+const device = devices.find(candidate => candidate.spec.id === endpointId);
 assert.ok(device?.nativeDeviceIds.includes(uid), 'Endpoint is not published by the current engine');
 assert.ok(device.spec.capture, 'The endpoint needs a recording side');
+const sourceDevice = sourceEndpoint && devices.find(candidate => candidate.spec.id === sourceEndpoint);
+assert.ok(!sourceEndpoint || sourceDevice?.spec.render, 'The source endpoint needs a playback side');
+// The device the probe plays into.
+const playback = sourceEndpoint ? nativeUid(sourceEndpoint) : sourceUid;
 const original = await api('graph');
 assert.deepEqual(original, catalog.document, 'Graph changed during preparation');
 assert.ok(!original.nodes.some(node => Object.values(ids).includes(node.id)));
@@ -141,14 +153,17 @@ record('before.json', { graphId, graph: original, reported: before });
 const test = structuredClone(original);
 test.revision++;
 test.nodes.push(
-  { id: ids.source, label: 'Latency source', type: 'audio_device_input',
-    config: { selector: { match: 'persistent_uid', uid: sourceUid }, outputChannels: device.spec.capture.channels } },
+  sourceEndpoint
+    ? { id: ids.source, label: 'Latency source', type: 'virtual_endpoint',
+      config: { ...sourceDevice.spec, reference: { render: true, capture: false } } }
+    : { id: ids.source, label: 'Latency source', type: 'audio_device_input',
+      config: { selector: { match: 'persistent_uid', uid: sourceUid }, outputChannels: device.spec.capture.channels } },
   { id: ids.destination, label: 'Latency destination', type: 'virtual_endpoint',
     config: { ...device.spec, reference: { render: false, capture: true } } },
 );
 test.edges.push({
   id: 'latency-acceptance-route',
-  source: { nodeId: ids.source, portId: 'audio' },
+  source: { nodeId: ids.source, portId: sourceEndpoint ? 'from_os' : 'audio' },
   destination: { nodeId: ids.destination, portId: 'to_os' },
   channelMapping: { mode: 'auto' },
 });
@@ -178,7 +193,7 @@ try {
       ? last[0] : undefined;
   }, 30, PUBLICATION_INTERVAL_MS);
   if (roundtrip) {
-    const output = execFileSync('zsh', [probe, '--json', '--impulse', '--seconds', '5', sourceUid, uid], { encoding: 'utf8', timeout: 60000 });
+    const output = execFileSync('zsh', [probe, '--json', '--impulse', '--seconds', '5', playback, uid], { encoding: 'utf8', timeout: 60000 });
     result.roundtrip = JSON.parse(output);
   }
   record('measured.json', { graph: applied, ...result });
