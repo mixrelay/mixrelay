@@ -58,22 +58,29 @@ const SAME_LAYER = new Set([
   'mixrelay-processor-host -> mixrelay-control-protocol',
 ]);
 
-/** Why `from -> to` is forbidden, or undefined when allowed. */
+/** Crates that host plugins and may depend on the vendored plugin formats. */
+const PLUGIN_HOSTS = new Set(['mixrelay-processor-host']);
+
+/** Why `from -> to` is forbidden, or undefined when allowed. Dev dependencies follow the
+ * same table and may additionally use test support. */
 export function violation(from, to, kind) {
   const source = LAYERS[from];
   const target = LAYERS[to];
   if (source === undefined) return `${from} has no layer in scripts/check-crate-layers.mjs`;
   if (target === undefined) return `${to} has no layer in scripts/check-crate-layers.mjs`;
   if (target === 'test') return kind === 'dev' ? undefined : 'test support is a dev-dependency only';
-  if (kind === 'dev' || source === 'test') return undefined;
+  if (source === 'test') return target === 'app' ? 'nothing depends on an app' : undefined;
   if (SAME_LAYER.has(`${from} -> ${to}`)) return undefined;
   if (target === 'app') return 'nothing depends on an app';
   if (source === 'app') return undefined;
   if (PLATFORM.has(target)) {
-    return PLATFORM.has(source) ? 'one platform adapter never depends on another' : 'platform-neutral crates never depend on a platform adapter';
+    return PLATFORM.has(source) ? 'one platform adapter depends only on its own listed adapters' : 'platform-neutral crates never depend on a platform adapter';
   }
-  if (PLATFORM.has(source)) return target === 'vendor' ? 'adapters do not host plugins' : undefined;
-  if (target === 'vendor') return source === 'service' ? undefined : 'only the plugin host depends on vendored plugin formats';
+  if (target === 'vendor') {
+    return source === 'vendor' || PLUGIN_HOSTS.has(from) ? undefined : 'only the plugin host depends on vendored plugin formats';
+  }
+  // Adapters build on foundation primitives and on contracts, never on models or services.
+  if (PLATFORM.has(source)) return ['foundation', 'contract'].includes(target) ? undefined : `${source} adapters may not depend on ${target}`;
   return RANK[target] < RANK[source] ? undefined : `${source} may not depend on ${target}`;
 }
 

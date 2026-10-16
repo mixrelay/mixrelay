@@ -29,7 +29,7 @@ UI 테스트(`apps/control-ui`)는 확장자로 실행 환경을 나눈다. `*.t
 
 브라우저 개발 화면(`pnpm --filter @mixrelay/control-ui dev`)은 엔진에 바로 닿지 못한다. 엔진과 Driver는 사용자 소유 Unix 소켓만 열기 때문이다. 실제 엔진이 필요하면 `MIXRELAY_DEV_ENGINE_BRIDGE=1`로 실행해 loopback dev 서버가 `/engine` 요청을 엔진 소켓으로 전달하게 한다. 켜 두는 동안 dev 서버에 닿는 다른 계정도 개발자 권한으로 엔진을 조작할 수 있으므로 필요할 때만 켠다. 시험과 lab은 `MIXRELAY_IPC_DIR`로 격리된 소켓 디렉터리를 쓰고, 설치된 세션 소켓을 건드리지 않는다.
 
-Rust 코드는 [Rust 작업 규칙](rust-guidelines.md)을, 크레이트 책임과 의존 방향은 [코드 구조와 책임](architecture.md)을 따른다. `pnpm check:crate-layers`가 의존 방향을 검사한다.
+Rust 코드는 [Rust 작업 규칙](rust-guidelines.md)을, TypeScript·React 코드는 [TypeScript·React 작업 규칙](typescript-react-guidelines.md)을, 크레이트 책임과 의존 방향은 [코드 구조와 책임](architecture.md)을 따른다. `pnpm check:crate-layers`가 의존 방향을 검사한다.
 
 설치 환경의 제약은 로컬 테스트의 기본값으로 둔다. 설치본에서만 드러나는 문제를 설치·확인을 반복하며 찾지 않기 위해서다.
 - HAL은 coreaudiod 샌드박스(`deny default`, `process-info-pidinfo` 없음) 안에서 돈다. 다른 프로세스의 `proc_pidinfo`·`proc_pidpath`·번들 조회는 실패한다. HAL의 프로세스 조회는 `transport::ProcessInspection` 하나로만 하고, Registry 테스트 픽스처는 `SANDBOXED`를 쓴다. 신원 판단은 coreaudiod가 `AddDeviceClient`로 준 PID·번들처럼 샌드박스 안에서 얻는 정보로도 성립해야 한다.

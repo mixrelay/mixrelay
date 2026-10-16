@@ -85,6 +85,9 @@ export function buildPlan(os, mode) {
   ];
   commands.push(["cargo", "build", "--locked", "--workspace"]);
   if (mode === "test") {
+    // Style and lints gate before tests, so CI enforces what the Rust rules document claims.
+    commands.push(["cargo", "fmt", "--all", "--check"]);
+    commands.push(["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--", "-D", "warnings"]);
     commands.push(["cargo", "test", "--locked", "-p", "truce-rack-vst3", "-p", "truce-rack-clap", "--lib"]);
     // Platform adapters live in the engine binary, not its portable library.
     // Omitting --bins silently skips platform adapter tests.

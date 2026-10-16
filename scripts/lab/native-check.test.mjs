@@ -61,6 +61,10 @@ for (const os of ["linux", "darwin"]) {
   test(`${os} runs tests without installing a driver`, () => {
     const plan = buildPlan(os, "test");
     assert.ok(plan.some(c => c.includes("test")));
+    const clippy = plan.findIndex(c => c[1] === "clippy");
+    assert.ok(plan.some(c => c[1] === "fmt" && c.includes("--check")));
+    assert.ok(clippy >= 0 && plan[clippy].includes("warnings"));
+    assert.ok(clippy < plan.findIndex(c => c[1] === "test"), "lints gate before tests");
     assert.ok(plan.some(c => c.join(" ") === "cargo test --locked --workspace --lib --bins"));
     assert.equal(plan.some(c => c.join(" ").includes("install-")), false);
     assert.equal(plan.some(c => c.join(" ") === "pnpm check:native"), os === "darwin");

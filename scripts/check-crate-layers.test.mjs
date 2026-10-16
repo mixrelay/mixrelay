@@ -28,13 +28,20 @@ test('dependencies follow the documented direction', () => {
 test('upward, cross-platform, app and test-support dependencies are rejected', () => {
   assert.match(violation('mixrelay-audio-io', 'mixrelay-audio-graph', 'normal'), /may not depend/);
   assert.match(violation('mixrelay-audio-engine', 'mixrelay-macos-transport', 'normal'), /platform-neutral/);
-  assert.match(violation('mixrelay-pipewire', 'mixrelay-macos-transport', 'normal'), /another/);
+  assert.match(violation('mixrelay-pipewire', 'mixrelay-macos-transport', 'normal'), /own listed adapters/);
   assert.match(violation('mixrelay-control-server', 'mixrelay-engine-service', 'normal'), /app/);
   assert.match(violation('mixrelay-desktop', 'mixrelay-engine-service', 'normal'), /app/);
   assert.match(violation('mixrelay-audio-io', 'mixrelay-test-support', 'normal'), /dev-dependency/);
   assert.equal(violation('mixrelay-audio-io', 'mixrelay-test-support', 'dev'), undefined);
   assert.match(violation('mixrelay-audio-engine', 'truce-rack-core', 'normal'), /plugin host/);
   assert.match(violation('mixrelay-new', 'mixrelay-audio-io', 'normal'), /no layer/);
+  // Dev dependencies follow the same table; only test support is added.
+  assert.match(violation('mixrelay-audio-io', 'mixrelay-desktop', 'dev'), /app/);
+  assert.match(violation('mixrelay-audio-graph', 'mixrelay-pipewire', 'dev'), /platform-neutral/);
+  assert.match(violation('mixrelay-pipewire', 'mixrelay-control-server', 'normal'), /adapters may not/);
+  assert.match(violation('mixrelay-macos-transport', 'mixrelay-audio-engine', 'normal'), /adapters may not/);
+  assert.match(violation('mixrelay-control-server', 'truce-rack-core', 'normal'), /plugin host/);
+  assert.equal(violation('mixrelay-macos-driver', 'mixrelay-driver-control', 'normal'), undefined);
 });
 
 test('the report lists each forbidden edge once', () => {
