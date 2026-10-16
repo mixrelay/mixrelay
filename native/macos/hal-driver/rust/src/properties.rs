@@ -129,32 +129,57 @@ unsafe extern "C" {
     fn CFStringGetTypeID() -> usize;
 }
 
+/// Largest fixed payload stored inline: an `AudioValueRange` (two `Float64`).
+const INLINE_BYTES: usize = 16;
+
+/// A fixed payload of at most `INLINE_BYTES`, stored without allocation. Scalars use it,
+/// so the answers given on IO threads (see `property`) never allocate.
+#[derive(Clone, Copy)]
+struct Inline {
+    bytes: [u8; INLINE_BYTES],
+    length: usize,
+}
+impl Inline {
+    fn new<const N: usize>(value: [u8; N]) -> Self {
+        const { assert!(N <= INLINE_BYTES, "inline payload exceeds INLINE_BYTES") };
+        let mut bytes = [0; INLINE_BYTES];
+        let (head, _) = bytes.split_at_mut(N);
+        head.copy_from_slice(&value);
+        Self { bytes, length: N }
+    }
+    fn as_bytes(&self) -> &[u8] {
+        self.bytes.get(..self.length).unwrap_or_default()
+    }
+}
+
 enum Value {
-    Scalar(Vec<u8>),
+    /// A fixed scalar or small struct; never allocates.
+    Inline(Inline),
+    /// A fixed struct too large to store inline (ASBD, channel layout).
+    Struct(Vec<u8>),
     Array(Vec<u8>, usize),
     Text(Vec<u8>),
 }
 impl Value {
     fn size(&self) -> usize {
         match self {
-            Self::Scalar(bytes) | Self::Array(bytes, _) => bytes.len(),
+            Self::Inline(inline) => inline.length,
+            Self::Struct(bytes) | Self::Array(bytes, _) => bytes.len(),
             Self::Text(_) => size_of::<*const c_void>(),
         }
     }
+    /// # Safety
+    /// A non-null `output` must be writable for `capacity` bytes for this call.
     unsafe fn write(&self, capacity: usize, output: *mut c_void) -> Result<usize, i32> {
         match self {
-            Self::Scalar(bytes) => {
-                if capacity < bytes.len() {
-                    return Err(BAD_SIZE);
-                }
-                unsafe {
-                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), output.cast(), bytes.len());
-                };
-                Ok(bytes.len())
-            }
+            // SAFETY: forwarded from this function's contract.
+            Self::Inline(inline) => unsafe { write_fixed(inline.as_bytes(), capacity, output) },
+            // SAFETY: as above.
+            Self::Struct(bytes) => unsafe { write_fixed(bytes, capacity, output) },
             Self::Array(bytes, stride) => {
                 let size = bytes.len().min(capacity / stride * stride);
                 if size > 0 {
+                    // SAFETY: size is at most capacity, which the caller made writable.
                     unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), output.cast(), size) };
                 }
                 Ok(size)
@@ -164,12 +189,14 @@ impl Value {
                     return Err(BAD_SIZE);
                 }
                 let count = isize::try_from(bytes.len()).map_err(|_| BAD_SIZE)?;
+                // SAFETY: bytes is a live slice of exactly count bytes.
                 let string = unsafe {
                     CFStringCreateWithBytes(std::ptr::null(), bytes.as_ptr(), count, UTF8, 0)
                 };
                 if string.is_null() {
                     return Err(ILLEGAL);
                 }
+                // SAFETY: capacity holds one pointer; the SDK output need not be aligned.
                 unsafe { output.cast::<*const c_void>().write_unaligned(string) };
                 Ok(size_of::<*const c_void>())
             }
@@ -177,8 +204,31 @@ impl Value {
     }
 }
 
+/// Writes a fixed payload whole, or refuses a smaller output.
+///
+/// # Safety
+/// A non-null `output` must be writable for `capacity` bytes for this call.
+unsafe fn write_fixed(bytes: &[u8], capacity: usize, output: *mut c_void) -> Result<usize, i32> {
+    if capacity < bytes.len() || output.is_null() {
+        return Err(BAD_SIZE);
+    }
+    // SAFETY: output is non-null and writable for capacity >= bytes.len() bytes.
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), output.cast(), bytes.len()) };
+    Ok(bytes.len())
+}
+
+/// Two adjacent fields of one fixed SDK struct, in native byte order.
+fn pair<const N: usize, const M: usize>(first: [u8; N], second: [u8; N]) -> [u8; M] {
+    const { assert!(M == 2 * N, "a pair holds exactly two fields") };
+    let mut bytes = [0; M];
+    let (head, tail) = bytes.split_at_mut(N);
+    head.copy_from_slice(&first);
+    tail.copy_from_slice(&second);
+    bytes
+}
+
 fn number(value: u32) -> Value {
-    Value::Scalar(value.to_ne_bytes().to_vec())
+    Value::Inline(Inline::new(value.to_ne_bytes()))
 }
 fn code(value: [u8; 4]) -> Value {
     number(u32::from_be_bytes(value))
@@ -196,11 +246,11 @@ fn objects(values: impl IntoIterator<Item = u32>) -> Value {
     Value::Array(values.into_iter().flat_map(u32::to_ne_bytes).collect(), 4)
 }
 fn rate(value: u32) -> Value {
-    Value::Scalar(f64::from(value).to_ne_bytes().to_vec())
+    Value::Inline(Inline::new(f64::from(value).to_ne_bytes()))
 }
 
 fn scalar(value: f32) -> Value {
-    Value::Scalar(value.to_ne_bytes().to_vec())
+    Value::Inline(Inline::new(value.to_ne_bytes()))
 }
 
 fn stream_ids(snapshot: &Snapshot, scope: u32) -> Vec<u32> {
@@ -227,6 +277,12 @@ fn plugin(registry: &Registry, address: &Address, uid: Option<&str>) -> Result<V
         return Err(UNKNOWN);
     }
     match &address.selector.to_be_bytes() {
+        // Text, object lists and the UID lookup allocate: never built on an IO thread.
+        b"lnam" | b"lmak" | b"rsrc" | b"ownd" | b"dev#" | b"box#" | b"clk#" | b"uidd"
+            if crate::transport::on_audio_thread() =>
+        {
+            Err(ILLEGAL)
+        }
         b"bcls" => Ok(code(*b"aobj")),
         b"clas" => Ok(code(*b"aplg")),
         b"stdv" => Ok(number(0)),
@@ -293,9 +349,10 @@ fn device(snapshot: &Snapshot, address: &Address) -> Result<Value, i32> {
         b"nsr#" if address.scope == GLOBAL => Ok(ranges()),
         b"ring" => Ok(number(crate::clock::TIMESTAMP_PERIOD)),
         b"cstb" => Ok(number(1)),
-        b"dch2" if directional && channels >= 2 => Ok(Value::Scalar(
-            [1_u32, 2].into_iter().flat_map(u32::to_ne_bytes).collect(),
-        )),
+        b"dch2" if directional && channels >= 2 => Ok(Value::Inline(Inline::new(pair::<4, 8>(
+            1_u32.to_ne_bytes(),
+            2_u32.to_ne_bytes(),
+        )))),
         b"srnd" if directional => Ok(channel_layout(channels)),
         _ => Err(UNKNOWN),
     }
@@ -313,7 +370,7 @@ fn channel_layout(channels: u32) -> Value {
             bytes.extend_from_slice(&field.to_ne_bytes());
         }
     }
-    Value::Scalar(bytes)
+    Value::Struct(bytes)
 }
 
 pub(crate) const NATIVE_FORMATS: [SampleFormat; 4] = [
@@ -381,7 +438,7 @@ fn stream(snapshot: &Snapshot, object: u32, address: &Address) -> Result<Value, 
                 .into_iter()
                 .find(|encoding| *encoding as u32 == code)
                 .expect("snapshot format is published from SampleFormat");
-            Ok(Value::Scalar(format(
+            Ok(Value::Struct(format(
                 snapshot.sample_rate,
                 channels,
                 encoding,
@@ -432,12 +489,10 @@ fn output_control(
         b"lcdv" if volume => Ok(scalar(
             crate::output_control::scalar_to_decibels(gain).ok_or(ILLEGAL)?,
         )),
-        b"lcdr" if volume => Ok(Value::Scalar(
-            [f64::from(crate::output_control::MIN_DECIBELS), 0.0]
-                .into_iter()
-                .flat_map(f64::to_ne_bytes)
-                .collect(),
-        )),
+        b"lcdr" if volume => Ok(Value::Inline(Inline::new(pair::<8, 16>(
+            f64::from(crate::output_control::MIN_DECIBELS).to_ne_bytes(),
+            0.0_f64.to_ne_bytes(),
+        )))),
         b"lcsd" | b"lcds" if volume => Ok(scalar(0.0)),
         b"bcvl" if !volume => Ok(number(u32::from(muted))),
         _ => Err(UNKNOWN),
@@ -450,6 +505,9 @@ fn property(
     address: &Address,
     uid: Option<&str>,
 ) -> Result<Value, i32> {
+    // IO/timestamp threads may reenter property reads. They are answered only inline values
+    // that need no control lock: the plugin's class/owner scalars and the device properties
+    // below that read fixed-slot atomics (`ltnc`, `saft`, `tran`).
     if object == 1 {
         return plugin(registry, address, uid);
     }
@@ -608,7 +666,10 @@ pub(crate) unsafe extern "C" fn mr_hal_core_property_get(
     if output.is_null() && capacity != 0 {
         return ILLEGAL;
     }
-    let uid = if address.selector == u32::from_be_bytes(*b"uidd") {
+    // `uidd` is never answered on an IO thread (see `plugin`); skip its allocating parse.
+    let uid = if address.selector == u32::from_be_bytes(*b"uidd")
+        && !crate::transport::on_audio_thread()
+    {
         match unsafe { qualifier_string(qualifier_size, qualifier) } {
             Ok(uid) => uid,
             Err(error) => return error,

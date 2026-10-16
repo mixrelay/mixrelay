@@ -336,35 +336,67 @@ fn reclamation_preserves_live_and_replaced_entries() {
     );
 }
 
+/// Logical time: identity work advances it explicitly and every discovery wait is recorded,
+/// so deadline arithmetic is observed exactly instead of through elapsed wall time.
+struct LogicalClock {
+    now: std::cell::Cell<Instant>,
+    waits: std::cell::RefCell<Vec<Duration>>,
+}
+impl LogicalClock {
+    fn new() -> Self {
+        Self {
+            now: std::cell::Cell::new(Instant::now()),
+            waits: std::cell::RefCell::default(),
+        }
+    }
+    fn advance(&self, elapsed: Duration) {
+        self.now.set(self.now.get() + elapsed);
+    }
+}
+impl Clock for LogicalClock {
+    fn now(&self) -> Instant {
+        self.now.get()
+    }
+    fn wait(&self, _completion: &mpsc::Receiver<()>, timeout: Duration) {
+        // Discovery stays queued, so the wait runs to its timeout.
+        self.waits.borrow_mut().push(timeout);
+        self.advance(timeout);
+    }
+}
+
 #[test]
 fn property_deadline_covers_identity_work_and_remaining_completion_wait() {
     let (transport, requests) = queued_transport(64);
+    let clock = LogicalClock::new();
     let key = Incarnation(123, 5, 9);
-    // Spend most of a larger test budget before entering the completion wait.
-    // A fresh full-budget wait would take 350 ms, instead of 200 ms total.
-    let started = Instant::now();
-    let deadline = started + Duration::from_millis(200);
+    // Identity work spends 150 ms of a 200 ms budget, so the completion wait gets only
+    // the remaining 50 ms, never a fresh full budget.
+    let deadline = clock.now() + Duration::from_millis(200);
+    let identity = |_| {
+        clock.advance(Duration::from_millis(150));
+        Some(key)
+    };
     assert_eq!(
-        transport.get_with_incarnation(key.0, deadline, |_| {
-            std::thread::sleep(Duration::from_millis(150));
-            Some(key)
-        }),
+        transport.get_with_clock(key.0, deadline, identity, &clock),
         VIRTUAL
     );
-    assert!(started.elapsed() < Duration::from_millis(300));
+    assert_eq!(*clock.waits.borrow(), [Duration::from_millis(50)]);
+    assert_eq!(clock.now(), deadline);
     let query = requests.try_recv().unwrap();
     assert_eq!(query.answer.load(Ordering::Acquire), PENDING);
-    // Identity work that exhausts the actual 20 ms budget must not enqueue.
+    // Identity work that exhausts the actual 20 ms budget must not enqueue or wait.
     let other = Incarnation(456, 5, 9);
+    let exhausted = |_| {
+        clock.advance(QUERY_BUDGET * 2);
+        Some(other)
+    };
     assert_eq!(
-        transport.get_with_incarnation(other.0, Instant::now() + QUERY_BUDGET, |_| {
-            std::thread::sleep(QUERY_BUDGET * 2);
-            Some(other)
-        }),
+        transport.get_with_clock(other.0, clock.now() + QUERY_BUDGET, exhausted, &clock),
         VIRTUAL
     );
     assert!(!lock(&transport.state).identities.contains_key(&other));
     assert!(requests.try_recv().is_err());
+    assert_eq!(clock.waits.borrow().len(), 1);
     complete(&transport, &query, Some("com.test.App"));
     assert_eq!(transport.query_key(key, QUERY_BUDGET), USB);
 }
@@ -622,10 +654,13 @@ fn a_registered_answer_respects_the_caller_deadline_after_inspection() {
     let key = Incarnation(4242, 1, 0);
     lock(&transport.state).client(16, 1, client(key, Some("com.test.App")));
     let slow = |current: Option<Incarnation>| {
-        transport.get_with_incarnation(key.0, Instant::now() + Duration::from_millis(5), |_| {
-            std::thread::sleep(Duration::from_millis(10));
+        let clock = LogicalClock::new();
+        let deadline = clock.now() + Duration::from_millis(5);
+        let inspection = |_| {
+            clock.advance(Duration::from_millis(10));
             current
-        })
+        };
+        transport.get_with_clock(key.0, deadline, inspection, &clock)
     };
     assert_eq!(slow(Some(key)), VIRTUAL);
     assert_eq!(slow(None), VIRTUAL);

@@ -2898,6 +2898,7 @@ dependencies = [
 name = "mixrelay-hal-core"
 version = "0.1.0"
 dependencies = [
+ "allocation-counter",
  "cc",
  "mixrelay-macos-transport",
  "mixrelay-pcm-ring",

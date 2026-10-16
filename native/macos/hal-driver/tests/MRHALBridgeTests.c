@@ -168,12 +168,58 @@ static void transport_identity(void) {
     assert(stop_io(gDriver, device, 7) == noErr);
     property.mSelector = kAudioDevicePropertyDeviceIsAlive;
     assert(property_get(gDriver, device, getpid(), &property, 0, NULL, 4, &written, &value) == noErr);
-    assert(forwarded_pid == 0 && value == 1);
+    assert(forwarded_pid == getpid() && value == 1);
     assert(remove_client(gDriver, device, &client) == noErr);
     client.mClientID = 8;
     assert(add_client(gDriver, device, &client) == noErr);
     assert(remove_client(gDriver, device, &client) == noErr);
     assert(add_client(gDriver, device, NULL) == kAudioHardwareBadObjectError);
+    mr_hal_core_destroy(gCore); gCore = NULL;
+}
+
+/* The SDK GetPropertyData entry must forward every requester: an app reads the
+ * measured input latency, while coreaudiod (PID 0) reads only the change marker. */
+static void input_latency_requester(void) {
+    const MRHALCoreNativeOps native = {inspect_fixture, create_fixture, destroy_fixture, replace_fixture,
+        start_fixture, stop_fixture, stop_fixture, rate_fixture, timestamp_fixture, io_fixture,
+        replacement_fixture, same_fixture};
+    const MRHALCoreHostOps host = {NULL, fixture_changed, fixture_request};
+    gCore = mr_hal_core_create(&native, &host);
+    assert(gCore != NULL);
+    FILE *file = tmpfile();
+    assert(file != NULL);
+    uint8_t endpoint[16]; memset(endpoint, 1, sizeof(endpoint));
+    uint32_t device = 0;
+    assert(mr_hal_core_upsert(gCore, endpoint, "Fixture", 48000, dup(fileno(file)), 24, &device) == MR_HAL_CORE_OK);
+    fclose(file);
+
+    xpc_object_t inventory = mr_hal_control_create_inventory_snapshot(NULL, 0, 1);
+    assert(inventory != NULL);
+    xpc_object_t latencies = xpc_array_create(NULL, 0);
+    xpc_object_t latency = xpc_dictionary_create(NULL, NULL, 0);
+    xpc_dictionary_set_uint64(latency, "version", 1);
+    xpc_dictionary_set_string(latency, "operation", "latency");
+    xpc_dictionary_set_data(latency, "endpoint_id", endpoint, sizeof(endpoint));
+    xpc_dictionary_set_uint64(latency, "rate", 48000);
+    xpc_dictionary_set_uint64(latency, "engine_pid", 4242);
+    xpc_dictionary_set_uint64(latency, "lease", 1);
+    xpc_dictionary_set_uint64(latency, "revision", 1);
+    xpc_dictionary_set_uint64(latency, "known", 1);
+    xpc_dictionary_set_uint64(latency, "frames", 321);
+    xpc_array_append_value(latencies, latency);
+    xpc_dictionary_set_value(inventory, "input_latencies", latencies);
+    xpc_release(latency); xpc_release(latencies);
+    assert(mr_hal_core_control_connected(gCore, 1));
+    assert(mr_hal_core_control_message(gCore, 1, inventory));
+    xpc_release(inventory);
+
+    AudioObjectPropertyAddress property = {kAudioDevicePropertyLatency, kAudioObjectPropertyScopeInput, 0};
+    uint32_t value = 0, written = 0;
+    assert(property_get(gDriver, device, getpid(), &property, 0, NULL, 4, &written, &value) == noErr);
+    assert(forwarded_pid == getpid() && written == 4 && value == 321);
+    /* One published change so far: coreaudiod's marker reads 1, never the frames. */
+    assert(property_get(gDriver, device, 0, &property, 0, NULL, 4, &written, &value) == noErr);
+    assert(forwarded_pid == 0 && written == 4 && value == 1);
     mr_hal_core_destroy(gCore); gCore = NULL;
 }
 
@@ -204,6 +250,7 @@ int main(void) {
     assert(latency_notice.address.selector == kAudioDevicePropertyLatency);
     assert(latency_notice.address.scope == kAudioObjectPropertyScopeInput);
     transport_identity();
-    puts("PASS HAL COM lifetime, transport PID forwarding, copied and nullable bundle identity, balanced IO scopes");
+    input_latency_requester();
+    puts("PASS HAL COM lifetime, transport and latency PID forwarding, copied and nullable bundle identity, balanced IO scopes");
     return 0;
 }

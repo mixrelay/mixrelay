@@ -191,6 +191,23 @@ impl State {
     }
 }
 
+/// Time as one property read observes it: its deadline checks and its discovery wait.
+trait Clock {
+    fn now(&self) -> Instant;
+    /// Waits at most `timeout` for discovery to signal completion.
+    fn wait(&self, completion: &mpsc::Receiver<()>, timeout: Duration);
+}
+
+struct SystemClock;
+impl Clock for SystemClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+    fn wait(&self, completion: &mpsc::Receiver<()>, timeout: Duration) {
+        let _ = completion.recv_timeout(timeout);
+    }
+}
+
 struct Query {
     key: Incarnation,
     answer: Arc<AtomicU32>,
@@ -354,7 +371,17 @@ impl Transport {
         deadline: Instant,
         current: impl FnOnce(i32) -> Option<Incarnation>,
     ) -> u32 {
-        if pid <= 0 || AUDIO_DEPTH.get() != 0 || Instant::now() >= deadline {
+        self.get_with_clock(pid, deadline, current, &SystemClock)
+    }
+    /// One property read against `deadline`, which bounds identity work and discovery alike.
+    fn get_with_clock(
+        &self,
+        pid: i32,
+        deadline: Instant,
+        current: impl FnOnce(i32) -> Option<Incarnation>,
+        clock: &impl Clock,
+    ) -> u32 {
+        if pid <= 0 || AUDIO_DEPTH.get() != 0 || clock.now() >= deadline {
             return VIRTUAL;
         }
         // Only one fixed-size proc_pidinfo call runs on this non-audio caller.
@@ -385,24 +412,24 @@ impl Transport {
                 }
                 // Inspection that is denied or matches keeps the registered answer,
                 // unless it spent the caller's budget.
-                _ if Instant::now() >= deadline => return VIRTUAL,
+                _ if clock.now() >= deadline => return VIRTUAL,
                 _ => return answer,
             }
         }
         let Some(key) = key else {
             return VIRTUAL;
         };
-        self.query_key_until(key, deadline)
+        self.query_key_until(key, deadline, clock)
     }
     #[cfg(test)]
     fn query_key(&self, key: Incarnation, budget: Duration) -> u32 {
-        self.query_key_until(key, Instant::now() + budget)
+        self.query_key_until(key, Instant::now() + budget, &SystemClock)
     }
-    fn query_key_until(&self, key: Incarnation, deadline: Instant) -> u32 {
+    fn query_key_until(&self, key: Incarnation, deadline: Instant, clock: &impl Clock) -> u32 {
         let Some(mut state) = try_lock(&self.state) else {
             return VIRTUAL;
         };
-        let now = Instant::now();
+        let now = clock.now();
         if now >= deadline {
             return VIRTUAL;
         }
@@ -443,10 +470,12 @@ impl Transport {
                 },
             );
         }
-        if Instant::now() >= deadline {
+        if clock.now() >= deadline {
             return VIRTUAL;
         }
-        let identity = state.identities.get_mut(&key).expect("inserted identity");
+        let Some(identity) = state.identities.get_mut(&key) else {
+            return VIRTUAL;
+        };
         let answer = Arc::clone(&identity.answer);
         let pending = answer.load(Ordering::Acquire) == PENDING;
         let refresh = identity.bundle.is_none() && now >= identity.expires;
@@ -474,9 +503,9 @@ impl Transport {
         };
         drop(state);
         if pending && let Some(completion) = completion {
-            let remaining = deadline.saturating_duration_since(Instant::now());
+            let remaining = deadline.saturating_duration_since(clock.now());
             if !remaining.is_zero() {
-                let _ = completion.recv_timeout(remaining);
+                clock.wait(&completion, remaining);
             }
         }
         match answer.load(Ordering::Acquire) {

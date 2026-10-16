@@ -116,8 +116,10 @@ static OSStatus property_size(AudioServerPlugInDriverRef driver, AudioObjectID o
 }
 static OSStatus property_get(AudioServerPlugInDriverRef driver, AudioObjectID object, pid_t pid, const AudioObjectPropertyAddress *property, UInt32 qualifier_size, const void *qualifier, UInt32 capacity, UInt32 *written, void *output) {
     if (!valid(driver)) return kAudioHardwareBadObjectError;
+    /* Every read forwards the requester: Rust answers transport type and input latency
+     * per requester, and treats PID 0 as coreaudiod itself. */
+    OSStatus status = mr_hal_core_property_get(gCore, object, address(property), qualifier_size, qualifier, capacity, written, output, pid);
     const bool transport = property != NULL && property->mSelector == kAudioDevicePropertyTransportType;
-    OSStatus status = mr_hal_core_property_get(gCore, object, address(property), qualifier_size, qualifier, capacity, written, output, transport ? pid : 0);
     // coreaudiod polls this property many times a second; record only the compatibility
     // exception (`usb `) an allowlisted app receives, as Loopback's ARK driver does.
     if (transport && status == noErr && output != NULL && written != NULL && *written >= sizeof(UInt32)) {

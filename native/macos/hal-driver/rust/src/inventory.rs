@@ -275,7 +275,7 @@ pub(crate) unsafe extern "C" fn mr_hal_core_control_message(
     // SAFETY: XPC owns the event for the callback duration. The parser validates
     // its types and fills this exclusively borrowed, aligned output snapshot.
     if unsafe { mr_hal_control_parse_inventory_snapshot(message, &raw mut snapshot.0) } {
-        // Validate optional runtime metadata before applying any authoritative geometry.
+        // Validate the runtime latency list before applying any authoritative geometry.
         let Some(latencies) = (unsafe {
             mixrelay_macos_transport::control_inventory::parse_input_latencies(message)
         }) else {

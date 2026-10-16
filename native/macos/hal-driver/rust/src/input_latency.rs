@@ -1,6 +1,14 @@
 //! Control publishes identity/timing; render callbacks only mark fixed atomic client slots.
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering, fence};
+
+use crate::device::lock;
+
 const CLIENT_SLOTS: usize = 256;
+/// Reads of one publication before giving up. A publish holds the sequence odd only for
+/// four stores, so a reader that overlaps more than this many is on a stalled publisher
+/// and reports no latency (0) rather than spin on an IO thread.
+const READ_ATTEMPTS: usize = 4;
 #[derive(Default)]
 struct Client {
     id: AtomicU64,
@@ -10,13 +18,27 @@ struct Client {
     active: AtomicBool,
     rendered: AtomicBool,
 }
+/// One engine publication, read as a whole.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Publication {
+    rate: u32,
+    /// The publishing engine's PID; 0 when no latency is published.
+    pid: u32,
+    /// The publishing engine's process start; 0 when unresolved.
+    start: u64,
+    frames: u32,
+}
 pub(crate) struct InputLatency {
     clients: [Client; CLIENT_SLOTS],
     overflow: AtomicU32,
-    publication: AtomicU64,
-    /// The publishing engine's process start; 0 when unresolved.
-    engine_start: AtomicU64,
+    /// Seqlock over the publication fields below: odd while a publish rewrites them.
+    sequence: AtomicU64,
+    /// Serializes publishers, which run on control paths; readers never take it.
+    publisher: Mutex<()>,
     rate: AtomicU32,
+    pid: AtomicU32,
+    engine_start: AtomicU64,
+    frames: AtomicU32,
     notified: AtomicU32,
     /// What coreaudiod itself reads instead of the frames: toggles on every change of the
     /// effective value, so a change still notifies through coreaudiod while its own IO
@@ -28,9 +50,12 @@ impl Default for InputLatency {
         Self {
             clients: std::array::from_fn(|_| Client::default()),
             overflow: AtomicU32::default(),
-            publication: AtomicU64::default(),
-            engine_start: AtomicU64::default(),
+            sequence: AtomicU64::default(),
+            publisher: Mutex::default(),
             rate: AtomicU32::default(),
+            pid: AtomicU32::default(),
+            engine_start: AtomicU64::default(),
+            frames: AtomicU32::default(),
             notified: AtomicU32::default(),
             marker: AtomicU32::default(),
         }
@@ -90,32 +115,73 @@ impl InputLatency {
         }
     }
     /// `start` is the engine's process start, resolved while it publishes. See
-    /// `is_engine` for how a rendering client is matched to it.
+    /// `is_engine` for how a rendering client is matched to it. Control paths only.
     pub(crate) fn publish(&self, rate: u32, pid: u32, start: Option<u64>, frames: Option<u32>) {
-        // Clear before changing rate, so a new device rate cannot consume old frames.
-        self.publication.store(0, Ordering::Release);
-        self.rate.store(rate, Ordering::Release);
+        let _publisher = lock(&self.publisher);
+        // Relaxed: only publishers write the sequence, and they are serialized above.
+        let sequence = self.sequence.load(Ordering::Relaxed);
+        self.sequence
+            .store(sequence.wrapping_add(1), Ordering::Relaxed);
+        // Release fence: a reader that observes any field store below also observes the
+        // odd sequence, so its closing sequence check fails.
+        fence(Ordering::Release);
+        // Relaxed: the fields are ordered by the sequence stores and fences.
+        self.rate.store(rate, Ordering::Relaxed);
+        self.pid.store(frames.map_or(0, |_| pid), Ordering::Relaxed);
         self.engine_start
-            .store(start.unwrap_or(0), Ordering::Release);
-        let publication = frames.map_or(0, |frames| (u64::from(pid) << 32) | u64::from(frames));
-        self.publication.store(publication, Ordering::Release);
+            .store(start.unwrap_or(0), Ordering::Relaxed);
+        self.frames.store(frames.unwrap_or(0), Ordering::Relaxed);
+        // Release: a reader that observes the even sequence observes every field above.
+        self.sequence
+            .store(sequence.wrapping_add(2), Ordering::Release);
+    }
+    /// The current publication, or `None` when every attempt overlapped a publish.
+    /// `between` runs between field reads; production passes a no-op.
+    fn publication(&self, mut between: impl FnMut()) -> Option<Publication> {
+        for _ in 0..READ_ATTEMPTS {
+            // Acquire: pairs with the publisher's closing Release store.
+            let before = self.sequence.load(Ordering::Acquire);
+            if before.is_multiple_of(2) {
+                // Relaxed: validated by the sequence check below.
+                let pid = self.pid.load(Ordering::Relaxed);
+                let frames = self.frames.load(Ordering::Relaxed);
+                between();
+                let publication = Publication {
+                    rate: self.rate.load(Ordering::Relaxed),
+                    pid,
+                    start: self.engine_start.load(Ordering::Relaxed),
+                    frames,
+                };
+                // Acquire fence: the field loads above complete before the sequence
+                // re-read, so any overlapping publish changes the sequence seen here.
+                fence(Ordering::Acquire);
+                if self.sequence.load(Ordering::Relaxed) == before {
+                    return Some(publication);
+                }
+            }
+            std::hint::spin_loop();
+        }
+        None
     }
     pub(crate) fn effective(&self, rate: u32) -> u32 {
-        let publication = self.publication.load(Ordering::Acquire);
-        let pid = u32::try_from(publication >> 32).expect("packed u32");
-        let start = self.engine_start.load(Ordering::Acquire);
-        if pid == 0
-            || self.rate.load(Ordering::Acquire) != rate
+        self.effective_with(rate, || {})
+    }
+    fn effective_with(&self, rate: u32, between: impl FnMut()) -> u32 {
+        let Some(publication) = self.publication(between) else {
+            return 0;
+        };
+        if publication.pid == 0
+            || publication.rate != rate
             || self.overflow.load(Ordering::Acquire) != 0
             || self.clients.iter().any(|client| {
                 client.active.load(Ordering::Acquire)
                     && client.rendered.load(Ordering::Acquire)
-                    && !Self::is_engine(client, pid, start)
+                    && !Self::is_engine(client, publication.pid, publication.start)
             })
         {
             return 0;
         }
-        u32::try_from(publication & u64::from(u32::MAX)).expect("packed u32")
+        publication.frames
     }
     /// A rendering client is the engine when coreaudiod registered it for the engine's PID.
     /// When both process starts are known they must also agree, so a reused PID is not the
@@ -199,6 +265,40 @@ mod tests {
                 "{pid} {client:?} {engine:?}"
             );
         }
+    }
+    #[test]
+    fn a_publish_between_field_reads_never_mixes_old_frames_with_the_new_rate() {
+        let latency = InputLatency::default();
+        latency.publish(48_000, 10, Some(7), Some(300));
+        // The reader has the old frames when the device moves to 44.1 kHz with new frames.
+        let mut publish = Some(|| latency.publish(44_100, 10, Some(7), Some(500)));
+        let effective = latency.effective_with(44_100, || {
+            if let Some(publish) = publish.take() {
+                publish();
+            }
+        });
+        assert_eq!(effective, 500);
+        // A rate change that clears the frames is never read with the old frames either.
+        latency.publish(48_000, 10, Some(7), Some(300));
+        let mut publish = Some(|| latency.publish(44_100, 10, Some(7), None));
+        let effective = latency.effective_with(44_100, || {
+            if let Some(publish) = publish.take() {
+                publish();
+            }
+        });
+        assert_eq!(effective, 0);
+    }
+    #[test]
+    fn a_reader_overlapping_every_attempt_gives_up_with_no_latency() {
+        let latency = InputLatency::default();
+        latency.publish(48_000, 10, Some(7), Some(300));
+        let mut attempts = 0;
+        let effective = latency.effective_with(48_000, || {
+            attempts += 1;
+            latency.publish(48_000, 10, Some(7), Some(300));
+        });
+        assert_eq!((effective, attempts), (0, READ_ATTEMPTS));
+        assert_eq!(latency.effective(48_000), 300);
     }
     #[test]
     fn untracked_or_unidentified_clients_fail_closed() {

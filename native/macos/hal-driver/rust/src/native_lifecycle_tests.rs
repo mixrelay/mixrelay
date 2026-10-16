@@ -306,3 +306,102 @@ fn native_removal_releases_running_mapping_while_host_client_retains_device() {
         [0.25_f32.to_bits(); 64]
     );
 }
+
+/// Frame-indexed stereo words for the 32-frame block at `frame`. Words below 2^13 are
+/// exact binary fractions in Float32, distinct per frame and lane.
+fn loopback_words(frame: u64) -> [f32; 64] {
+    std::array::from_fn(|index| {
+        let position = frame + index as u64 / 2;
+        let word = f32::from(u16::try_from(position % 8192).unwrap()) / 8192.0;
+        if index % 2 == 0 { word } else { -word }
+    })
+}
+
+/// Device IO through the shared loopback with capture one block behind render, so one
+/// rendered block is always buffered unread between cycles. Lost, repeated or reset PCM
+/// changes the captured words.
+struct Loopback<'a> {
+    fixture: &'a super::Fixture,
+    device: u32,
+    /// Frame of the rendered block that has not been captured yet.
+    buffered: u64,
+}
+
+impl<'a> Loopback<'a> {
+    fn start(fixture: &'a super::Fixture, device: u32) -> Self {
+        let loopback = Self {
+            fixture,
+            device,
+            buffered: 0,
+        };
+        loopback.io(true, 0, &mut loopback_words(0));
+        loopback
+    }
+
+    /// One IO cycle: verify the buffered block, then render the next one.
+    fn cycle(&mut self) {
+        let mut captured = [9.0_f32; 64];
+        self.io(false, self.buffered, &mut captured);
+        assert_eq!(
+            captured.map(f32::to_bits),
+            loopback_words(self.buffered).map(f32::to_bits),
+            "loopback discontinuity at frame {}",
+            self.buffered
+        );
+        self.buffered += 32;
+        self.io(true, self.buffered, &mut loopback_words(self.buffered));
+    }
+
+    fn io(&self, render: bool, frame: u64, samples: &mut [f32; 64]) {
+        // SAFETY: the fixture owns the registry; each block is 32 stereo Float32 frames.
+        assert!(unsafe {
+            self.fixture.registry.io(IoOperation {
+                device: self.device,
+                stream: self.device + if render { 2 } else { 1 },
+                render,
+                frame,
+                samples: samples.as_mut_ptr().cast(),
+                frames: 32,
+            })
+        });
+    }
+}
+
+#[test]
+fn loopback_stays_continuous_while_other_clients_attach_run_and_detach() {
+    let fixture = native_fixture();
+    let transport = Transport::new(10, 2, 2);
+    let id = transport.add(&fixture, "Shared", 48_000);
+    start(&fixture, id);
+    let epoch = transport.clock().epoch;
+    let mut loopback = Loopback::start(&fixture, id);
+    let mut cycles = |count: u32| {
+        for _ in 0..count {
+            loopback.cycle();
+        }
+    };
+    // Every transition below happens while one rendered block is still unread; the next
+    // cycle captures that block before rendering again.
+    cycles(16);
+    // A second client attaches and starts IO on the running device.
+    assert_eq!(fixture.registry.client(id, 43, true), OK);
+    assert_eq!(fixture.registry.start(id, 43, 2), OK);
+    cycles(16);
+    // It stops, then detaches, each while the continuing stream has a block unread.
+    assert_eq!(fixture.registry.stop(id, 43), OK);
+    cycles(1);
+    assert_eq!(fixture.registry.client(id, 43, false), OK);
+    cycles(16);
+    // A client whose process disappears without StopIO releases only its own claim.
+    assert_eq!(fixture.registry.client(id, 44, true), OK);
+    assert_eq!(fixture.registry.start(id, 44, 3), OK);
+    cycles(16);
+    assert_eq!(fixture.registry.client(id, 44, false), OK);
+    cycles(16);
+    let clock = transport.clock();
+    assert_eq!(
+        (clock.running, clock.epoch),
+        (1, epoch),
+        "the first client's stream was restarted"
+    );
+}
