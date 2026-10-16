@@ -6,7 +6,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const manifests = ['package.json', 'apps/control-ui/package.json', 'apps/desktop/package.json', 'apps/desktop/src-tauri/tauri.conf.json'];
 const halManifest = 'native/macos/hal-driver/driver/Info.plist';
-const linuxManifest = 'apps/desktop/src-tauri/tauri.linux.conf.json';
 export function productVersion(directory = root) {
   const cargo = readFileSync(resolve(directory, 'Cargo.toml'), 'utf8');
   const version = cargo.match(/\[workspace.package\]\s*\nversion = "([^"\n]+)"/)?.[1];
@@ -22,10 +21,6 @@ export function checkVersion(directory = root) {
   for (const key of ['CFBundleShortVersionString', 'CFBundleVersion']) {
     if (hal.match(new RegExp(`<key>${key}</key>\\s*<string>([^<]+)</string>`))?.[1] !== version) throw new Error(`${halManifest} ${key} differs from MixRelay ${version}`);
   }
-  const linux = JSON.parse(readFileSync(resolve(directory, linuxManifest), 'utf8'));
-  for (const [format, expected] of [['deb', `mix-relay-driver (= ${version})`], ['rpm', `mix-relay-driver = ${version}`]]) {
-    if (linux.bundle.linux[format].provides?.join() !== expected) throw new Error(`${linuxManifest} ${format} provides differs from MixRelay ${version}`);
-  }
   return version;
 }
 export function setVersion(version, directory = root) {
@@ -39,19 +34,11 @@ export function setVersion(version, directory = root) {
   for (const key of ['CFBundleShortVersionString', 'CFBundleVersion']) {
     if (!new RegExp(`<key>${key}</key>\\s*<string>[^<]+</string>`).test(hal)) throw new Error(`${halManifest} is missing ${key}`);
   }
-  const linuxPath = resolve(directory, linuxManifest);
-  const linux = JSON.parse(readFileSync(linuxPath, 'utf8'));
-  for (const format of ['deb', 'rpm']) {
-    if (!Array.isArray(linux.bundle?.linux?.[format]?.provides)) throw new Error(`${linuxManifest} is missing ${format} provides`);
-  }
   productVersion(directory); // Validate all inputs before changing any of them.
   writeFileSync(cargoPath, cargo.replace(/(\[workspace.package\]\s*\nversion = ")[^"\n]+/, `$1${version}`));
   paths.forEach((path, index) => writeFileSync(path, `${JSON.stringify({ ...values[index], version }, null, 2)}\n`));
   for (const key of ['CFBundleShortVersionString', 'CFBundleVersion']) hal = hal.replace(new RegExp(`(<key>${key}</key>\\s*<string>)[^<]+`), `$1${version}`);
   writeFileSync(halPath, hal);
-  linux.bundle.linux.deb.provides = [`mix-relay-driver (= ${version})`];
-  linux.bundle.linux.rpm.provides = [`mix-relay-driver = ${version}`];
-  writeFileSync(linuxPath, `${JSON.stringify(linux, null, 2)}\n`);
   return checkVersion(directory);
 }
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {

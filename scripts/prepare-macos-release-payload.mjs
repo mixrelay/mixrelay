@@ -391,7 +391,6 @@ export function preparePayload({ manager, hal, driver, engine, uninstaller, outp
         { path: LIFECYCLE_DIRECTORY, owner: "root:wheel", mode: "0755" },
         { path: `${LIFECYCLE_DIRECTORY}/app.owner`, owner: "<service-user>:<primary-group>", mode: "0644" },
         { path: `${LIFECYCLE_DIRECTORY}/engine.owner`, owner: "<service-user>:<primary-group>", mode: "0644" },
-        { path: `${LIFECYCLE_DIRECTORY}/driver-manager.owner`, owner: "<service-user>:<primary-group>", mode: "0644" },
         { path: `${LIFECYCLE_DIRECTORY}/installer.owner`, owner: "root:wheel", mode: "0644" },
       ],
       requiresPostinstallUserExpansion: true,

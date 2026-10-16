@@ -30,7 +30,7 @@ export async function prepareArchPackage({ deb, output }) {
   const destination = resolve(output);
   if (!fs.lstatSync(archive).isFile()) throw new Error('DEB input must be a regular file');
   if (fs.existsSync(destination)) throw new Error('Arch build directory must not already exist');
-  const inspected = await inspectPackage(archive, undefined, undefined, { requireUnified: true });
+  const inspected = await inspectPackage(archive);
   if (inspected.packageName !== 'mix-relay') throw new Error('Expected the complete MixRelay DEB');
   const arch = { amd64: 'x86_64', arm64: 'aarch64' }[inspected.architecture];
   const version = runTool('dpkg-deb', ['--field', archive, 'Version']).replace(/-\d+$/, '');

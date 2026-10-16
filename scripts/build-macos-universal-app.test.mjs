@@ -5,6 +5,9 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+// These tests run the macOS zsh build script; Linux lab images have no zsh or Apple tools.
+const zshTest = (name, fn) => test(name, { skip: process.platform !== "darwin" && "macOS zsh build script" }, fn);
+
 const sourceScript = fileURLToPath(new URL("./build-macos-universal-app.sh", import.meta.url));
 const driverLicense = readFileSync(new URL("../LICENSE-Driver.txt", import.meta.url));
 const driverLicenseKo = readFileSync(new URL("../LICENSE-Driver.ko.txt", import.meta.url));
@@ -58,6 +61,7 @@ printf 'MACHO universal SIGNED\\n' > target/universal-apple-darwin/release/mixre
 `);
   executable(join(scripts, "build-macos-universal-engine.sh"), `#!/bin/sh
 printf 'engine built %s\\n' "$*" >> "$MOCK_LOG"
+printf 'engine identity %s\\n' "\${MIXRELAY_CODESIGN_IDENTITY-unset}" >> "$MOCK_LOG"
 [ "\${MOCK_ENGINE_FAIL:-}" != 1 ]
 `);
   writeFileSync(join(scripts,"build-macos-removal-app.mjs"), `import * as fs from 'node:fs'; import {join} from 'node:path'; const [, , executable,helper,output]=process.argv; fs.mkdirSync(join(output,'Contents'),{recursive:true}); fs.writeFileSync(join(output,'Contents/tested-arguments'),executable+'\\n'+helper);`);
@@ -131,6 +135,7 @@ done
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 const path = args.at(-1);
+fs.appendFileSync(process.env.MOCK_LOG, 'plutil ' + args.join(' ') + '\\n');
 if (args[0] === '-create') fs.writeFileSync(path, '{}');
 else if (args[0] === '-insert') {
   const value = JSON.parse(fs.readFileSync(path, 'utf8'));
@@ -242,7 +247,7 @@ function assertPreserved(paths) {
   assert.equal(readFileSync(paths.unrelated, "utf8"), "preserve me\n");
 }
 
-test("maps explicit identity before Tauri and does not force-resign valid output", (t) => {
+zshTest("maps explicit identity before Tauri and does not force-resign valid output", (t) => {
   const paths = fixture(t);
   const result = runBuild(paths, { MIXRELAY_CODESIGN_IDENTITY: "Developer ID Application: MixRelay (AB12C3D4E5)" });
   assert.equal(result.status, 0, result.stderr);
@@ -251,10 +256,12 @@ test("maps explicit identity before Tauri and does not force-resign valid output
   assert.ok(log(paths).indexOf("engine built --prebuilt") < log(paths).indexOf("tauri bundle"));
   assert.match(log(paths), /APPLE_SIGNING_IDENTITY=Developer ID Application: MixRelay/);
   assert.ok(!log(paths).split("\n").some(line => line.startsWith("codesign --force") && line.endsWith("/MixRelay.app")));
+  // The removal app's version comes from the mocked plutil, never the host tool.
+  assert.match(log(paths), /^plutil -extract CFBundleShortVersionString raw -o - .*\/MixRelay\.app\/Contents\/Info\.plist$/m);
   assert.equal(readFileSync(paths.unrelated, "utf8"), "preserve me\n");
 });
 
-test("rejects conflicting signing identities before invoking Tauri", (t) => {
+zshTest("rejects conflicting signing identities before invoking Tauri", (t) => {
   const paths = fixture(t);
   const result = runBuild(paths, {
     MIXRELAY_CODESIGN_IDENTITY: "one",
@@ -264,7 +271,7 @@ test("rejects conflicting signing identities before invoking Tauri", (t) => {
   assert.doesNotMatch(log(paths), /^pnpm /m);
 });
 
-test("complete product builds helpers and engine with one public app and remover", (t) => {
+zshTest("complete product builds helpers and engine with one public app and remover", (t) => {
   const paths = fixture(t);
   const identity = "Developer ID Application: MixRelay (AB12C3D4E5)";
   const result = runBuild(paths, { APPLE_SIGNING_IDENTITY: identity }, []);
@@ -296,23 +303,25 @@ test("complete product builds helpers and engine with one public app and remover
   assert.doesNotMatch(commands, /removal-packages|build-macos-removal-pkgs/);
   assert.match(commands, /--identifier mixrelay-macos-installer /);
   assert.match(commands, /--identifier mixrelay-macos-payload-check /);
+  // APPLE_SIGNING_IDENTITY alone must still reach the engine builder, which otherwise signs ad hoc.
+  assert.match(commands, new RegExp(`^engine identity ${identity.replace(/[()]/g, "\\$&")}$`, "m"));
 });
 
-test("rejects an unsigned release identity before invoking Tauri", (t) => {
+zshTest("rejects an unsigned release identity before invoking Tauri", (t) => {
   const paths = fixture(t);
   const result = runBuild(paths, { APPLE_SIGNING_IDENTITY: "" });
   assert.notEqual(result.status, 0);
   assert.doesNotMatch(log(paths), /^pnpm /m);
 });
 
-test("Driver product rejects a missing signing Team ID before building helpers", (t) => {
+zshTest("Driver product rejects a missing signing Team ID before building helpers", (t) => {
   const paths = fixture(t);
   const result = runBuild(paths, { APPLE_SIGNING_IDENTITY: "Developer ID Application: MixRelay" }, []);
   assert.notEqual(result.status, 0);
   assert.doesNotMatch(log(paths), /^cargo |^pnpm /m);
 });
 
-test("Driver product rejects single-architecture helper output and restores its manager", (t) => {
+zshTest("Driver product rejects single-architecture helper output and restores its manager", (t) => {
   const paths = fixture(t);
   createApp(paths.app, { architecture: "old", signed: true });
   const result = runBuild(paths, {
@@ -325,7 +334,7 @@ test("Driver product rejects single-architecture helper output and restores its 
   assert.doesNotMatch(log(paths), /tauri bundle/);
 });
 
-test("rejects nested unsigned output and restores the old app", (t) => {
+zshTest("rejects nested unsigned output and restores the old app", (t) => {
   const paths = fixture(t);
   createApp(paths.app, { architecture: "old", signed: true });
   const result = runBuild(paths, { MOCK_PNPM_MODE: "nested", MOCK_INVALID_SIGNATURE: "1" });
@@ -334,7 +343,7 @@ test("rejects nested unsigned output and restores the old app", (t) => {
   assert.ok(!log(paths).split("\n").some(line => line.startsWith("codesign --force") && line.endsWith("/MixRelay.app")));
 });
 
-test("fails on missing fresh output and restores the old app", (t) => {
+zshTest("fails on missing fresh output and restores the old app", (t) => {
   const paths = fixture(t);
   createApp(paths.app, { architecture: "old", signed: true });
   const result = runBuild(paths, { MOCK_PNPM_MODE: "missing" });
@@ -342,7 +351,7 @@ test("fails on missing fresh output and restores the old app", (t) => {
   assertPreserved(paths);
 });
 
-test("fails on a single-architecture output and restores the old app", (t) => {
+zshTest("fails on a single-architecture output and restores the old app", (t) => {
   const paths = fixture(t);
   createApp(paths.app, { architecture: "old", signed: true });
   const result = runBuild(paths, { MOCK_PNPM_MODE: "single" });
@@ -351,7 +360,7 @@ test("fails on a single-architecture output and restores the old app", (t) => {
 });
 
 for (const [step, env] of [["engine merge", { MOCK_ENGINE_FAIL: "1" }], ["Driver preparation", { MOCK_PREPARE_DRIVER_FAIL: "1" }]]) {
-  test(`stops before bundling and restores the old app when ${step} fails`, (t) => {
+  zshTest(`stops before bundling and restores the old app when ${step} fails`, (t) => {
     const paths = fixture(t);
     createApp(paths.app, { architecture: "old", signed: true });
     const result = runBuild(paths, env);
@@ -361,7 +370,7 @@ for (const [step, env] of [["engine merge", { MOCK_ENGINE_FAIL: "1" }], ["Driver
   });
 }
 
-test("restores the old app when a validation tool is missing", (t) => {
+zshTest("restores the old app when a validation tool is missing", (t) => {
   const paths = fixture(t);
   createApp(paths.app, { architecture: "old", signed: true });
   const result = runBuild(paths, { MOCK_FILE_FAIL: "1" });
@@ -369,7 +378,7 @@ test("restores the old app when a validation tool is missing", (t) => {
   assertPreserved(paths);
 });
 
-test("rejects a pre-existing app symlink without invoking Tauri", (t) => {
+zshTest("rejects a pre-existing app symlink without invoking Tauri", (t) => {
   const paths = fixture(t);
   const linkedApp = join(paths.root, "linked-app");
   createApp(linkedApp, { architecture: "old", signed: true });
@@ -381,13 +390,9 @@ test("rejects a pre-existing app symlink without invoking Tauri", (t) => {
 });
 
 
-test("launcher and retired agent definition belong only to the editor and never start at login", () => {
+test("the editor bundles the launcher and no login agent", () => {
   const editor = JSON.parse(readFileSync(new URL("../apps/desktop/src-tauri/tauri.conf.json", import.meta.url), "utf8"));
-  const name = "Library/LaunchAgents/io.mixrelay.driver.runtime.plist";
-  assert.equal(editor.bundle.macOS.files[name], "../../../packaging/macos/io.mixrelay.driver.runtime.plist");
-  assert.equal(editor.bundle.macOS.files["Resources/mixrelay-driver-launcher"], "../../../target/universal-apple-darwin/release/mixrelay-driver-launcher");
-  const plist = readFileSync(new URL("../packaging/macos/io.mixrelay.driver.runtime.plist", import.meta.url), "utf8");
-  assert.match(plist, /<key>BundleProgram<\/key><string>Contents\/Resources\/mixrelay-driver-launcher<\/string>/);
-  assert.match(plist, /<key>KeepAlive<\/key><false\/>/);
-  assert.match(plist, /<key>RunAtLoad<\/key><false\/>/);
+  assert.deepEqual(editor.bundle.macOS.files, {
+    "Resources/mixrelay-driver-launcher": "../../../target/universal-apple-darwin/release/mixrelay-driver-launcher",
+  });
 });

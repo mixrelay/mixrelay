@@ -14,9 +14,7 @@ test('all release entry points share the Cargo product version', () => {
   for (const format of ['deb', 'rpm']) {
     const config = linux.bundle.linux[format];
     assert.equal(config.recommends, undefined);
-    assert.ok(config.conflicts.some(value => value.includes('mix-relay-driver')));
     assert.ok(config.files['/usr/lib/systemd/user/mixrelay-driver.service']);
-    assert.equal(config.files['/usr/share/applications/mixrelay-driver-uninstall.desktop'], undefined);
   }
 });
 
@@ -25,7 +23,7 @@ function versionFixture(t) {
   mkdirSync(parent, { recursive: true });
   const directory = mkdtempSync(new URL('product-version-', parent));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const paths = ['Cargo.toml', 'package.json', 'apps/control-ui/package.json', 'apps/desktop/package.json', 'apps/desktop/src-tauri/tauri.conf.json', 'apps/desktop/src-tauri/tauri.linux.conf.json', 'native/macos/hal-driver/driver/Info.plist'];
+  const paths = ['Cargo.toml', 'package.json', 'apps/control-ui/package.json', 'apps/desktop/package.json', 'apps/desktop/src-tauri/tauri.conf.json', 'native/macos/hal-driver/driver/Info.plist'];
   for (const path of paths) {
     mkdirSync(dirname(join(directory, path)), { recursive: true });
     copyFileSync(new URL(`../${path}`, import.meta.url), join(directory, path));
@@ -33,13 +31,12 @@ function versionFixture(t) {
   return { directory, paths };
 }
 
-test('one version command updates app, HAL and package compatibility metadata together', t => {
+test('one version command updates app and HAL metadata together', t => {
   const { directory } = versionFixture(t);
   assert.equal(setVersion('0.2.0', directory), '0.2.0');
   assert.equal(checkVersion(directory), '0.2.0');
-  const linux = JSON.parse(readFileSync(join(directory, 'apps/desktop/src-tauri/tauri.linux.conf.json')));
-  assert.deepEqual(linux.bundle.linux.deb.provides, ['mix-relay-driver (= 0.2.0)']);
-  assert.deepEqual(linux.bundle.linux.rpm.provides, ['mix-relay-driver = 0.2.0']);
+  const hal = readFileSync(join(directory, 'native/macos/hal-driver/driver/Info.plist'), 'utf8');
+  assert.match(hal, /<key>CFBundleShortVersionString<\/key>\s*<string>0\.2\.0<\/string>/);
   assert.equal(setVersion('0.1.0', directory), '0.1.0');
 });
 

@@ -40,6 +40,14 @@ test("public workspace and desktop test commands keep the canonical code-check e
   const { scripts } = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
   assert.ok(scripts["check:rust"].includes(`${entry}clippy --workspace`));
   assert.ok(scripts["coverage:rust"].startsWith(`${entry}llvm-cov --workspace`));
+  // macos-test-support's build script needs the HOST staticlib receipts only this entry prepares.
+  assert.ok(scripts["check:macos-engine"].startsWith(`${entry}test -p mixrelay-engine-service `));
+  assert.ok(scripts["check:native"].startsWith(`${entry}test -p mixrelay-macos-transport `));
+  for (const name of ["check:native", "check:macos-engine"]) {
+    const direct = scripts[name].split("&&").map(part => part.trim())
+      .filter(part => /^cargo (?:test|check|clippy|build)\b/.test(part));
+    assert.deepEqual(direct, [], `${name} must not run Cargo checks around the fixture entry`);
+  }
   for (const script of ["check-macos-application-clock.sh", "check-macos-clock-boundaries.sh"]) {
     const source = readFileSync(new URL(`../${script}`, import.meta.url), "utf8");
     const desktopChecks = source.split("\n")
@@ -68,6 +76,9 @@ for (const os of ["linux", "darwin"]) {
     assert.ok(plan.some(c => c.join(" ") === "cargo test --locked --workspace --lib --bins"));
     assert.equal(plan.some(c => c.join(" ").includes("install-")), false);
     assert.equal(plan.some(c => c.join(" ") === "pnpm check:native"), os === "darwin");
+    assert.equal(plan.some(c => c.join(" ") === "pnpm probe:macos-roundtrip --self-test"), os === "darwin");
+    assert.equal(plan.some(c => c.join(" ") === "pnpm test:scripts"), os === "darwin",
+      "build and release script tests need the macOS zsh build scripts");
     assert.equal(plan.some(c => c.includes("scripts/check-pcm-native.sh")), true);
   });
 }
@@ -119,6 +130,21 @@ test("nested pnpm native checks inherit the same code-only environment and HOST 
     }
     return { status: 0 };
   }), {});
+  assert.equal(result.status, "passed");
+  assert.equal(checked, true);
+});
+
+test("script tests run with the caller environment, not the packaging-disabled code-check one", t => {
+  const fixture = nativeFixture(t);
+  let checked = false;
+  const result = runChecks("darwin", "test", nativeRunner(fixture, (command, args, options) => {
+    if (command === "pnpm" && args.join(" ") === "test:scripts") {
+      checked = true;
+      assert.deepEqual(options.env, { MIXRELAY_TEST_ENV: "kept" });
+      assert.equal(options.shell, false);
+    }
+    return { status: 0 };
+  }), { MIXRELAY_TEST_ENV: "kept" });
   assert.equal(result.status, "passed");
   assert.equal(checked, true);
 });

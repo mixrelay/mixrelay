@@ -140,7 +140,6 @@ test("prepares a deterministic inspectable payload and never creates a pkg", (t)
   assert.deepEqual(leases.map(item => [item.path.split("/").at(-1), item.owner, item.mode]), [
     ["app.owner", "<service-user>:<primary-group>", "0644"],
     ["engine.owner", "<service-user>:<primary-group>", "0644"],
-    ["driver-manager.owner", "<service-user>:<primary-group>", "0644"],
     ["installer.owner", "root:wheel", "0644"],
   ]);
   assert.equal(existsSync(join(paths.output, "MixRelay.pkg")), false);

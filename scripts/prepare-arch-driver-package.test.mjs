@@ -26,7 +26,7 @@ test('Arch aborts before replacing/removing an active Driver and scopes the hook
   const hook = readFileSync(new URL('../packaging/linux/arch/mixrelay-driver.hook', import.meta.url), 'utf8');
   assert.match(hook, /^Operation = Upgrade$/m);
   assert.match(hook, /^Operation = Remove$/m);
-  assert.match(hook, /^Target = mix-relay-driver$/m);
+  assert.deepEqual(hook.match(/^Target = .*$/gm), ['Target = mix-relay']);
   assert.match(hook, /^When = PreTransaction$/m);
   assert.match(hook, /^AbortOnFail$/m);
   assert.doesNotMatch(hook, /^Operation = Install$/m);

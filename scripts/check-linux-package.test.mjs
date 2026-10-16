@@ -17,16 +17,31 @@ const uninstallFiles = [
   'usr/lib/mixrelay/uninstall.sh',
   'usr/share/applications/mixrelay-uninstall.desktop',
 ];
+const receiptPath = 'usr/share/mixrelay-driver/version.json';
 const documentationFiles = [
   'usr/share/doc/mix-relay/CHANGELOG.md',
   ...localizedDocuments.map(filename => `usr/share/doc/mix-relay/${filename}`),
+  'usr/lib/systemd/user/mixrelay-driver.service',
+  'etc/xdg/autostart/mixrelay-driver.desktop',
+  'usr/lib/mixrelay-driver/session-start.sh',
+  'usr/lib/mixrelay-driver/before-change.sh',
+  receiptPath,
+  'usr/share/doc/mix-relay-driver/CHANGELOG.md',
+  ...localizedDocuments.map(filename => `usr/share/doc/mix-relay-driver/${filename}`),
+  'usr/share/doc/mix-relay-driver/third-party/truce-rack/LICENSE-MIT',
+  'usr/share/doc/mix-relay-driver/third-party/truce-rack/LICENSE-APACHE',
 ];
+const binaries = ['mixrelay-desktop', 'mixrelay-engine-service', 'mixrelay-driver-service'];
+const lifecycleHooks = Object.fromEntries(Object.entries({
+  preinst: 'driver-before-change.sh', prerm: 'driver-pre-remove.sh',
+  postinst: 'driver-after-install.sh', postrm: 'driver-after-remove.sh',
+}).map(([script, source]) => [script, readFileSync(new URL(`../packaging/linux/${source}`, import.meta.url), 'utf8')]));
+const linuxConfig = () => JSON.parse(readFileSync(new URL('../apps/desktop/src-tauri/tauri.linux.conf.json', import.meta.url), 'utf8'));
 
-const lifecycleHook = readFileSync(new URL('../packaging/linux/require-app-closed.sh', import.meta.url), 'utf8');
 function metadataOutput(name, data) {
-  if (name === 'Package') return data.packageName ?? 'mix-relay';
-  if (name === 'Version') return data.version ?? '0.1.0';
-  if (name === 'preinst' || name === 'prerm') return lifecycleHook;
+  if (name === 'Package') return data.packageName;
+  if (name === 'Version') return data.version;
+  if (Object.hasOwn(lifecycleHooks, name)) return lifecycleHooks[name];
   return name === 'Depends' ? data.depends : data.architecture;
 }
 
@@ -41,21 +56,22 @@ function elfHeader(machine) {
   return header;
 }
 
+// Every listed payload is 64 bytes; the receipt is padded JSON so its listed size matches its extracted bytes.
 const fixture = (architecture = 'arm64') => ({
+  packageName: 'mix-relay',
+  version: '0.1.0',
+  versionReceipt: '{"version":"0.1.0"}'.padEnd(64),
   architecture: `${architecture}\n`,
-  depends: 'libpipewire-0.3-0t64, liblilv-0-0, libgcc-s1, libc6 (>= 2.39), libwebkit2gtk-4.1-0, libgtk-3-0t64, librsvg2-common, pipewire, wireplumber, gnome-keyring, libpam-gnome-keyring, libayatana-appindicator3-1, zenity, pkexec, polkit-1-auth-agent | lxpolkit',
+  depends: 'libpipewire-0.3-0t64, liblilv-0-0, libgcc-s1, libc6 (>= 2.39), libwebkit2gtk-4.1-0, libgtk-3-0t64, librsvg2-common, pipewire, wireplumber, gnome-keyring, libpam-gnome-keyring, libayatana-appindicator3-1, zenity, pkexec, polkit-1-auth-agent | lxpolkit, systemd, util-linux',
   contents: [
-    ...['mixrelay-desktop', 'mixrelay-engine-service'].map(name =>
-      `-rwxr-xr-x 0/0 64 2026-09-20 22:00 ./usr/bin/${name}`),
+    ...binaries.map(name => `-rwxr-xr-x 0/0 64 2026-09-20 22:00 ./usr/bin/${name}`),
     ...wirePlumberFiles.map(path => `-rw-r--r-- 0/0 64 2026-09-20 22:00 ./${path}`),
     ...uninstallFiles.map(path => `-rw-r--r-- 0/0 64 2026-09-20 22:00 ./${path}`),
     ...documentationFiles.map(path => `-rw-r--r-- 0/0 64 2026-09-20 22:00 ./${path}`),
   ].join('\n'),
-  elfHeaders: {
-    'usr/bin/mixrelay-desktop': elfHeader(architecture === 'arm64' ? 183 : 62),
-    'usr/bin/mixrelay-engine-service': elfHeader(architecture === 'arm64' ? 183 : 62),
-  },
+  elfHeaders: Object.fromEntries(binaries.map(name => [`usr/bin/${name}`, elfHeader(architecture === 'arm64' ? 183 : 62)])),
 });
+const payloads = data => new Map([...Object.entries(data.elfHeaders), [receiptPath, Buffer.from(data.versionReceipt)]]);
 
 function fakeExtractor(payloadsByPath, calls = [], numericListing, kills = [], rawChunks = [Buffer.from('bounded fixture tar bytes')]) {
   return (command, args, options) => {
@@ -91,21 +107,17 @@ function fakeExtractor(payloadsByPath, calls = [], numericListing, kills = [], r
   };
 }
 
-test('Debian ARM64 and amd64 payloads include both executable owners and dependencies', () => {
+test('Debian ARM64 and amd64 payloads include every executable owner and dependency', () => {
   for (const architecture of ['arm64', 'amd64']) {
     const result = validatePackage(fixture(architecture));
     assert.equal(result.packageName, 'mix-relay');
     assert.equal(result.architecture, architecture);
-    assert.deepEqual(result.elfArchitectures, {
-      'usr/bin/mixrelay-desktop': architecture === 'arm64' ? 'AArch64' : 'x86-64',
-      'usr/bin/mixrelay-engine-service': architecture === 'arm64' ? 'AArch64' : 'x86-64',
-    });
+    assert.deepEqual(result.elfArchitectures, Object.fromEntries(binaries.map(name =>
+      [`usr/bin/${name}`, architecture === 'arm64' ? 'AArch64' : 'x86-64'])));
   }
 });
-test('both Driver package formats own the WirePlumber hook and policy fragment', () => {
-  const config = JSON.parse(readFileSync(new URL(
-    './fixtures/legacy-driver-linux.json', import.meta.url,
-  ), 'utf8'));
+test('both Linux package formats own the WirePlumber hook and policy fragment', () => {
+  const config = linuxConfig();
   for (const format of ['deb', 'rpm']) {
     for (const path of wirePlumberFiles) {
       assert.ok(config.bundle.linux[format].files[`/${path}`]);
@@ -175,7 +187,7 @@ test('Linux product builds select package-manager formats and register lifecycle
     for (const path of uninstallFiles) assert.ok(config.bundle.linux[format].files[`/${path}`]);
   }
 });
-test('package lifecycle refuses active installed payloads without touching user files', t => {
+test('package lifecycle refuses active installed editor and engine without touching user files', t => {
   mkdirSync(new URL('../target/', import.meta.url), { recursive: true });
   const directory = mkdtempSync(new URL('../target/linux-package-hook-', import.meta.url));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -188,25 +200,29 @@ test('package lifecycle refuses active installed payloads without touching user 
     // Only the fixture copy sees the fake proc tree; the shipped hook has no
     // environment override that could bypass its installed-process check.
     const fixtureHook = join(directory, name);
-    writeFileSync(fixtureHook, source.replace('/proc/[0-9]*/exe', `${proc}/[0-9]*/exe`));
-    return spawnSync('sh', [fixtureHook, ...args], { encoding: 'utf8' });
+    writeFileSync(fixtureHook, source.replaceAll('/proc/[0-9]*/exe', `${proc}/[0-9]*/exe`)
+      .replace('/usr/lib/mixrelay-driver/before-change.sh', join(directory, 'driver-before-change.sh')));
+    return spawnSync('sh', [fixtureHook, ...args], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } });
   };
+  // driver-before-change.sh is written first, so the delegating removal hooks run the fixture copy.
   for (const target of ['/usr/bin/mixrelay-desktop', '/usr/bin/mixrelay-engine-service',
     '/usr/bin/mixrelay-engine-service (deleted)']) {
     const executable = join(proc, '123/exe');
     symlinkSync(target, executable);
     for (const args of [['install'], ['upgrade', '0.1.0', '0.2.0'], ['remove']]) {
-      const result = runHook('require-app-closed.sh', args);
+      const result = runHook('driver-before-change.sh', args);
       assert.equal(result.status, 1);
       assert.match(result.stderr, /Stop all audio.*close the MixRelay editor/);
     }
-    assert.equal(runHook('rpm-pre-remove.sh', ['0']).status, 1);
-    assert.equal(runHook('rpm-pre-remove.sh', ['1']).status, 0);
+    assert.equal(runHook('driver-pre-remove.sh', ['remove']).status, 1);
+    assert.equal(runHook('driver-pre-remove.sh', ['upgrade']).status, 0);
+    assert.equal(runHook('driver-rpm-pre-remove.sh', ['0']).status, 1);
+    assert.equal(runHook('driver-rpm-pre-remove.sh', ['1']).status, 0);
     rmSync(executable);
   }
   symlinkSync('/home/test/development/mixrelay-engine-service', join(proc, '123/exe'));
-  assert.equal(runHook('require-app-closed.sh', ['upgrade']).status, 0);
-  assert.equal(runHook('rpm-pre-remove.sh', ['0']).status, 0);
+  assert.equal(runHook('driver-before-change.sh', ['upgrade']).status, 0);
+  assert.equal(runHook('driver-rpm-pre-remove.sh', ['0']).status, 0);
   assert.equal(readFileSync(userFile, 'utf8'), '{"preserved":true}');
 });
 test('graphical uninstall deletes only selected app data after successful package removal', t => {
@@ -381,16 +397,15 @@ test('required dependencies cannot be optional alternatives', () => {
   data.depends = data.depends.replace('liblilv-0-0', 'liblilv-0-0 | unrelated');
   assert.throws(() => validatePackage(data), /liblilv/);
 });
-test('audio session, Secret Service provider and native dialogs are mandatory in Debian and RPM', () => {
-  const config = JSON.parse(readFileSync(new URL(
-    './fixtures/legacy-driver-linux.json', import.meta.url,
-  ), 'utf8'));
+test('audio session, Secret Service provider, native dialogs and user-service tools are mandatory in Debian and RPM', () => {
+  const config = linuxConfig();
+  const names = ['pipewire', 'wireplumber', 'gnome-keyring', 'zenity', 'systemd', 'util-linux'];
   for (const format of ['deb', 'rpm']) {
-    for (const name of ['pipewire', 'wireplumber', 'gnome-keyring', 'zenity']) {
+    for (const name of names) {
       assert.ok(config.bundle.linux[format].depends.includes(name));
     }
   }
-  for (const name of ['pipewire', 'wireplumber', 'gnome-keyring', 'zenity']) {
+  for (const name of names) {
     const data = fixture();
     data.depends = data.depends.split(',').filter(term => term.trim() !== name).join(',');
     assert.throws(() => validatePackage(data), new RegExp(`Missing required dependency: ${name}`));
@@ -430,9 +445,9 @@ test('tray indicator runtime provider is mandatory in Debian payloads and both p
     .join(',');
   assert.throws(() => validatePackage(data), /Missing required dependency: libayatana-appindicator3-1 or libappindicator3-1/);
 
-  const legacyPackage = fixture();
-  legacyPackage.depends = legacyPackage.depends.replace('libayatana-appindicator3-1', 'libappindicator3-1');
-  assert.doesNotThrow(() => validatePackage(legacyPackage));
+  const alternativeProvider = fixture();
+  alternativeProvider.depends = alternativeProvider.depends.replace('libayatana-appindicator3-1', 'libappindicator3-1');
+  assert.doesNotThrow(() => validatePackage(alternativeProvider));
 });
 test('unsupported dependency qualifiers and restrictions fail closed', () => {
   for (const dependency of ['libc6:amd64', 'libc6 [!arm64]', 'libc6 <stage1>']) {
@@ -448,7 +463,7 @@ test('missing, symlink, non-executable and duplicate engines fail', () => {
     assert.throws(() => validatePackage({ ...data, contents }));
   }
 });
-test('desktop and engine executables require root ownership and exact 0755 permissions', () => {
+test('desktop and service executables require root ownership and exact 0755 permissions', () => {
   const data = fixture();
   const invalidate = [
     line => line.replace('0/0', '1000/1000'),
@@ -459,7 +474,7 @@ test('desktop and engine executables require root ownership and exact 0755 permi
     line => line.replace('-rwxr-xr-x', '-rwxr-xrwx'),
     line => line.replace('-rwxr-xr-x', '-rwsr-xr-x'),
   ];
-  for (const executableName of ['mixrelay-desktop', 'mixrelay-engine-service']) {
+  for (const executableName of binaries) {
     for (const mutateLine of invalidate) {
       const contents = data.contents.split('\n').map(line =>
         line.endsWith(`/${executableName}`) ? mutateLine(line) : line).join('\n');
@@ -474,7 +489,7 @@ test('zero-length required executables fail', () => {
 });
 test('ELF machine, class, byte order, and header validity must match package architecture', () => {
   const data = fixture('arm64');
-  for (const path of ['usr/bin/mixrelay-desktop', 'usr/bin/mixrelay-engine-service']) {
+  for (const path of binaries.map(name => `usr/bin/${name}`)) {
     assert.throws(() => validatePackage({
       ...data,
       elfHeaders: { ...data.elfHeaders, [path]: elfHeader(62) },
@@ -523,26 +538,21 @@ test('listing forces numeric ownership and executable extraction disables inheri
   const result = await inspectPackage(
     '/fixture/package.deb',
     runMetadata,
-    fakeExtractor(new Map(Object.entries(data.elfHeaders)), extractionCalls, data.contents),
+    fakeExtractor(payloads(data), extractionCalls, data.contents),
   );
   assert.equal(result.scope, 'metadata-payload-elf-header-only');
-  assert.deepEqual(result.elfArchitectures, {
-    'usr/bin/mixrelay-desktop': 'AArch64',
-    'usr/bin/mixrelay-engine-service': 'AArch64',
-  });
+  assert.deepEqual(result.elfArchitectures, Object.fromEntries(binaries.map(name => [`usr/bin/${name}`, 'AArch64'])));
   assert.ok(calls.every(({ command, args }) => command === 'dpkg-deb'
     && ((args[0] === '--field' && ['Package', 'Version', 'Architecture', 'Depends'].includes(args.at(-1)))
-      || (args[0] === '--info' && ['preinst', 'prerm'].includes(args.at(-1))))));
+      || (args[0] === '--info' && Object.hasOwn(lifecycleHooks, args.at(-1))))));
   assert.ok(calls.every(({ env }) => !Object.hasOwn(env, 'TAR_OPTIONS')));
-  assert.deepEqual(extractionCalls.map(([command]) => command), [
-    'dpkg-deb', 'tar', 'dpkg-deb', 'tar', 'dpkg-deb', 'tar',
+  const members = [...binaries.map(name => `./usr/bin/${name}`), `./${receiptPath}`];
+  assert.deepEqual(extractionCalls.map(([, args]) => args), [
+    ['--fsys-tarfile', '/fixture/package.deb'], ['--numeric-owner', '-tvf', '-'],
+    ...members.flatMap(member => [['--fsys-tarfile', '/fixture/package.deb'], ['-xO', '-f', '-', '--', member]]),
   ]);
-  assert.deepEqual(extractionCalls[0][1], ['--fsys-tarfile', '/fixture/package.deb']);
-  assert.deepEqual(extractionCalls[1][1], ['--numeric-owner', '-tvf', '-']);
-  assert.deepEqual(extractionCalls[2][1], ['--fsys-tarfile', '/fixture/package.deb']);
-  assert.deepEqual(extractionCalls[3][1], ['-xO', '-f', '-', '--', './usr/bin/mixrelay-desktop']);
-  assert.deepEqual(extractionCalls[4][1], ['--fsys-tarfile', '/fixture/package.deb']);
-  assert.deepEqual(extractionCalls[5][1], ['-xO', '-f', '-', '--', './usr/bin/mixrelay-engine-service']);
+  assert.deepEqual(extractionCalls.map(([command]) => command),
+    Array(members.length + 1).fill(['dpkg-deb', 'tar']).flat());
   assert.ok(extractionCalls.every(([, , options]) => !Object.hasOwn(options.env, 'TAR_OPTIONS')));
 });
 test('oversized streamed listing kills both owned processes and rejects the package', async () => {
@@ -590,16 +600,16 @@ test('a stalled package pipeline times out and kills both owned children', async
 test('inspection preserves exact Debian member spelling with and without a leading ./', async () => {
   for (const prefix of ['./', '']) {
     const data = fixture();
-    data.contents = data.contents.replaceAll('./usr/bin/', `${prefix}usr/bin/`);
+    data.contents = data.contents.replaceAll(' ./usr/', ` ${prefix}usr/`);
     const extractionCalls = [];
     await inspectPackage(
       '/fixture/package.deb',
       (_command, args) => ({ status: 0, stdout: metadataOutput(args.at(-1), data) }),
-      fakeExtractor(new Map(Object.entries(data.elfHeaders)), extractionCalls, data.contents),
+      fakeExtractor(payloads(data), extractionCalls, data.contents),
     );
     assert.deepEqual(
       extractionCalls.filter(([, args]) => args[0] === '-xO').map(([, args]) => args.at(-1)),
-      [`${prefix}usr/bin/mixrelay-desktop`, `${prefix}usr/bin/mixrelay-engine-service`],
+      [...binaries.map(name => `${prefix}usr/bin/${name}`), `${prefix}${receiptPath}`],
     );
   }
 });
@@ -616,55 +626,29 @@ test('inspection metadata command failures and bounded extraction failures are n
 });
 test('Debian artifact inspection rejects missing or modified lifecycle hooks', async () => {
   const data = fixture();
-  for (const script of ['preinst', 'prerm']) {
+  for (const script of Object.keys(lifecycleHooks)) {
     await assert.rejects(inspectPackage('/fixture/package.deb', (_command, args) => ({
       status: 0,
       stdout: args.at(-1) === script ? '#!/bin/sh\nexit 0\n' : metadataOutput(args.at(-1), data),
-    }), fakeExtractor(new Map(Object.entries(data.elfHeaders)), [], data.contents)),
+    }), fakeExtractor(payloads(data), [], data.contents)),
     new RegExp(`Missing or mismatched package lifecycle hook: ${script}`));
   }
 });
 
 
-test('0.1.2 editor excludes the runtime and Driver owns all three executable payloads', () => {
-  for (const architecture of ['arm64', 'amd64']) {
-    const oldApp = fixture(architecture);
-    const app = { ...oldApp, version: '0.1.2', contents: oldApp.contents.split('\n')
-      .filter(line => !line.includes('mixrelay-engine-service') && !wirePlumberFiles.some(path => line.includes(path))).join('\n') };
-    assert.deepEqual(validatePackage(app).executables, ['usr/bin/mixrelay-desktop']);
-    assert.throws(() => validatePackage({ ...app, contents: oldApp.contents }), /must not own the Driver runtime/);
-    const config = JSON.parse(readFileSync(new URL('./fixtures/legacy-driver-linux.json', import.meta.url), 'utf8'));
-    const binaries = ['mixrelay-driver-manager', 'mixrelay-driver-service', 'mixrelay-engine-service'];
-    const driver = { architecture, packageName: 'mix-relay-driver', version: '0.1.2-1', versionReceipt: '{"version":"0.1.2"}',
-      depends: oldApp.depends + ', xterm, systemd, util-linux',
-      contents: [...binaries.map(name => `-rwxr-xr-x 0/0 64 2026-10-10 00:00 ./usr/bin/${name}`),
-        ...Object.entries(config.bundle.linux.deb.files).filter(([,source]) => source).map(([path]) => `-rw-r--r-- 0/0 32 2026-10-10 00:00 .${path}`)].join('\n'),
-      elfHeaders: Object.fromEntries(binaries.map(name => [`usr/bin/${name}`, elfHeader(architecture === 'arm64' ? 183 : 62)])),
-    };
-    assert.deepEqual(validatePackage(driver).executables, binaries.map(name => `usr/bin/${name}`));
-    assert.throws(() => validatePackage({ ...driver, contents: driver.contents.split('\n').filter(line => !line.includes('mixrelay-engine-service')).join('\n') }), /Missing non-empty regular executable/);
-    assert.throws(() => validatePackage({ ...driver, depends: driver.depends.replace('liblilv-0-0, ', '') }), /Missing required dependency: liblilv/);
-    assert.throws(() => validatePackage({ ...driver, contents: driver.contents + '\n' + oldApp.contents.split('\n')[0] }), /must not own App executables/);
-  }
-});
-
-test('the unified 0.1.0 product contains editor, both services, one remover and the same version receipt', () => {
-  const config = JSON.parse(readFileSync(new URL('../apps/desktop/src-tauri/tauri.linux.conf.json', import.meta.url), 'utf8'));
-  const old = fixture('amd64');
-  const binaries = ['mixrelay-desktop', 'mixrelay-engine-service', 'mixrelay-driver-service'];
-  const product = { ...old, version: '0.1.0', versionReceipt: '{"version":"0.1.0"}',
-    depends: old.depends + ', xterm, systemd, util-linux',
-    contents: [...binaries.map(name => `-rwxr-xr-x 0/0 64 2026-10-12 00:00 ./usr/bin/${name}`), ...Object.keys(config.bundle.linux.deb.files).map(path => `-rw-r--r-- 0/0 32 2026-10-12 00:00 .${path}`)].join('\n'),
-    elfHeaders: Object.fromEntries(binaries.map(name => [`usr/bin/${name}`, elfHeader(62)])),
+test('the product contains editor, both services, one remover and the same version receipt', () => {
+  const config = linuxConfig();
+  const product = { ...fixture('amd64'),
+    contents: [...binaries.map(name => `-rwxr-xr-x 0/0 64 2026-10-12 00:00 ./usr/bin/${name}`),
+      ...Object.keys(config.bundle.linux.deb.files).map(path => `-rw-r--r-- 0/0 64 2026-10-12 00:00 .${path}`)].join('\n'),
   };
-  assert.deepEqual(validatePackage({ ...product, requireUnified: true }).executables, binaries.map(name => `usr/bin/${name}`));
+  assert.deepEqual(validatePackage(product).executables, binaries.map(name => `usr/bin/${name}`));
   for (const missing of binaries) {
-    assert.throws(() => validatePackage({ ...product, requireUnified: true, contents: product.contents.split('\n').filter(line => !line.includes(`/usr/bin/${missing}`)).join('\n') }), /complete MixRelay package|Missing non-empty regular executable/);
+    assert.throws(() => validatePackage({ ...product, contents: product.contents.split('\n').filter(line => !line.includes(`/usr/bin/${missing}`)).join('\n') }), /Missing non-empty regular executable/);
   }
-  assert.throws(() => validatePackage({ ...old, requireUnified: true }), /complete MixRelay package/);
-  assert.throws(() => validatePackage({ ...product, versionReceipt: '{"version":"0.1.1"}' }), /receipt/);
-  assert.throws(() => validatePackage({ ...product, contents: product.contents + '\n-rwxr-xr-x 0/0 64 2026-10-12 00:00 ./usr/bin/mixrelay-driver-manager' }), /one public launch/);
+  for (const versionReceipt of [undefined, '{"version":"0.1.1"}', '{"version":"0.1"}']) {
+    assert.throws(() => validatePackage({ ...product, versionReceipt }), /receipt/);
+  }
+  assert.throws(() => validatePackage({ ...product, packageName: 'mix-relay-extras' }), /Unsupported package/);
   assert.equal(config.bundle.linux.deb.recommends, undefined);
-  assert.deepEqual(config.bundle.linux.deb.replaces, ['mix-relay-driver']);
-  assert.deepEqual(config.bundle.linux.rpm.obsoletes, ['mix-relay-driver']);
 });

@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { readdirSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { inspectPackage } from "./check-linux-package.mjs";
 
@@ -44,27 +44,17 @@ export function validateLicensingBuildEnvironment(env) {
 }
 
 export function desktopBuildCommand(platform, args = []) {
-  const { buildArgs } = productArguments(args);
   if (platform === "darwin") {
-    if (buildArgs.length !== 0) {
+    if (args.length !== 0) {
       throw new Error("macOS desktop:build produces a universal release app and accepts no overrides");
     }
     return ["zsh", "scripts/build-macos-universal-app.sh", ];
   }
   if (platform === "linux") {
     const cli = require.resolve("@tauri-apps/cli/tauri.js", { paths: [desktopRoot] });
-    return [process.execPath, cli, "build", ...buildArgs];
+    return [process.execPath, cli, "build", ...args];
   }
   throw new Error(`Unsupported desktop build host: ${platform}`);
-}
-
-function productArguments(args) {
-  const separator = args.indexOf("--");
-  const options = separator === -1 ? args : args.slice(0, separator);
-  if (options.includes("--driver")) throw new Error("MixRelay includes its audio components; --driver is no longer a separate build");
-  const buildArgs = options.filter(argument => argument !== "--driver");
-  if (separator !== -1) buildArgs.push(...args.slice(separator));
-  return { buildArgs };
 }
 
 function bundleArguments(args) {
@@ -187,17 +177,17 @@ export async function main(
 ) {
   try {
     const buildEnv = { ...env };
-    const { buildArgs } = productArguments(args);
     assertDesktopPackagingAllowed(buildEnv);
     validateLicensingBuildEnvironment(buildEnv);
-    if (platform === "linux") validateLinuxConfigBuildArguments(buildArgs);
+    if (platform === "linux") validateLinuxConfigBuildArguments(args);
     const [command, ...commandArgs] = desktopBuildCommand(platform, args);
     // Tauri and its engine hook run from different directories. Resolve once
     // at the repository boundary so both build and inspect the same target tree.
     if (platform !== "darwin" && buildEnv.CARGO_TARGET_DIR) {
       buildEnv.CARGO_TARGET_DIR = resolve(root, buildEnv.CARGO_TARGET_DIR);
     }
-    const result = run(command, commandArgs, {
+    // `run` may be the signing wrapper's asynchronous owned runner (see macos-signing.mjs).
+    const result = await run(command, commandArgs, {
       cwd: platform === "darwin" ? root : desktopRoot,
       stdio: "inherit",
       env: buildEnv,
@@ -205,14 +195,14 @@ export async function main(
     if (result.error) throw result.error;
     if (result.signal) throw new Error(`Desktop build interrupted by ${result.signal}`);
     const status = result.status ?? 1;
-    if (status !== 0 || platform !== "linux" || !linuxBuildIncludesDebian(buildArgs)) return status;
+    if (status !== 0 || platform !== "linux" || !linuxBuildIncludesDebian(args)) return status;
 
-    const bundleDirectory = linuxDebianBundleDirectory(buildArgs, buildEnv);
-    const packages = findDebianPackages(bundleDirectory).filter(path => !/^(?:MixRelayDriver|mix-relay-driver)_/.test(basename(path)));
+    const bundleDirectory = linuxDebianBundleDirectory(args, buildEnv);
+    const packages = findDebianPackages(bundleDirectory);
     if (packages.length !== 1) {
       throw new Error(`Expected exactly one Debian package in ${bundleDirectory}; found ${packages.length}`);
     }
-    const inspected = await inspectDebianPackage(packages[0], undefined, undefined, { requireUnified: true });
+    const inspected = await inspectDebianPackage(packages[0]);
     if (inspected && inspected.packageName !== "mix-relay") {
       throw new Error("The product build must produce the complete mix-relay package");
     }
@@ -229,7 +219,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     desktopBuildCommand("darwin", process.argv.slice(2));
     const { checkMacosSigning, withMacosSigning } = await import("./macos-signing.mjs");
     checkMacosSigning();
-    return withMacosSigning(env => main(process.argv.slice(2), "darwin", spawnSync, inspectPackage, listDebianPackages, env));
+    return withMacosSigning((env, _config, owned) => main(process.argv.slice(2), "darwin", owned, inspectPackage, listDebianPackages, env));
   };
   build().then(status => { process.exitCode = status; }).catch(error => {
     console.error(error.message);

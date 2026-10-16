@@ -17,6 +17,8 @@ if [[ -n "${MIXRELAY_CODESIGN_IDENTITY:-}" && -n "${APPLE_SIGNING_IDENTITY:-}" &
   print -u2 "MIXRELAY_CODESIGN_IDENTITY conflicts with APPLE_SIGNING_IDENTITY"
   exit 1
 fi
+# Child tools read different names: Tauri reads APPLE_SIGNING_IDENTITY and the engine
+# builder reads MIXRELAY_CODESIGN_IDENTITY (ad-hoc '-' when unset). Export both.
 if [[ -n "${MIXRELAY_CODESIGN_IDENTITY:-}" ]]; then
   export APPLE_SIGNING_IDENTITY="$MIXRELAY_CODESIGN_IDENTITY"
 fi
@@ -30,6 +32,7 @@ if true; then
     exit 1
   fi
   signing_team="${match[1]}"
+  export MIXRELAY_CODESIGN_IDENTITY="$APPLE_SIGNING_IDENTITY"
 
 fi
 if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
@@ -288,7 +291,7 @@ print "MixRelay Universal app: $app_bundle"
 if true; then
   remover_bundle="$bundle_parent/Uninstall MixRelay.app"
   reject_symlink_components "$remover_bundle"
-  version="$(/usr/bin/plutil -extract CFBundleShortVersionString raw -o - "$app_bundle/Contents/Info.plist")"
+  version="$(plutil -extract CFBundleShortVersionString raw -o - "$app_bundle/Contents/Info.plist")"
   node scripts/build-macos-removal-app.mjs \
     "$helper_output/mixrelay-driver-uninstaller" "$helper_output/mixrelay-macos-installer" \
     "$remover_bundle" "$version" "$APPLE_SIGNING_IDENTITY"

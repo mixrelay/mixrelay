@@ -4,6 +4,18 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs, resolveTarget, REPO_ROOT } from './prepare-desktop-engine.mjs';
 
+/** The published macOS Driver service carries exactly the two supported slices. */
+export const DRIVER_ARCHITECTURES = ['arm64', 'x86_64'];
+
+function assertUniversalDriver(run, rootDir, env, path) {
+  const result = run('xcrun', ['lipo', '-archs', path], { cwd: rootDir, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+  if (result.error || result.status !== 0 || result.signal) throw new Error('Driver build failed: cannot read merged Driver service architectures');
+  const found = String(result.stdout ?? '').trim().split(/\s+/).filter(Boolean).sort();
+  if (found.join(' ') !== DRIVER_ARCHITECTURES.join(' ')) {
+    throw new Error(`Driver service must contain exactly ${DRIVER_ARCHITECTURES.join(' and ')}; found: ${found.join(' ') || 'none'}`);
+  }
+}
+
 /**
  * Build the actual Driver service and prepare the matching package receipt.
  * `--prebuilt` uses slices from an earlier combined cargo build and only merges and signs.
@@ -50,6 +62,7 @@ export function prepareDriverPackage({ args = [], env = process.env, rootDir = R
     try {
       const staged = join(staging, binary);
       checked('xcrun', ['lipo', '-create', ...slices.map(slice => join(targetRoot, slice, profile, binary)), '-output', staged]);
+      assertUniversalDriver(run, rootDir, env, staged);
       fsApi.chmodSync(staged, 0o755);
       const signing = ['--force', '--sign', profile === 'release' ? identity : '-'];
       if (profile === 'release') signing.push('--options', 'runtime', '--timestamp', '--identifier', binary);

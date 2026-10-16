@@ -46,36 +46,34 @@ test("macOS declares all UI languages and bundles localized permission descripti
   }
 });
 
-for (const [kind, filename] of [["app", "uninstall.sh"], ["driver", "driver-uninstall.sh"]]) {
-  test(`Linux ${kind} removal selects actual translated messages and Chinese scripts`, () => {
-    const script = readFileSync(new URL(`../packaging/linux/${filename}`, import.meta.url), "utf8");
-    const start = script.indexOf('case "${LC_ALL:');
-    const end = script.indexOf("\nesac", start) + 6;
-    assert.ok(start >= 0 && end > start);
-    for (const [locale, resolved] of [
-      ["es_MX.UTF-8", "es"], ["pt_BR.UTF-8", "pt"], ["pt_PT.UTF-8", "pt"], ["it_IT.UTF-8", "it"], ["ru_RU.UTF-8", "ru"], ["ja_JP.UTF-8", "ja"], ["fr_CA.UTF-8", "fr"], ["de_DE.UTF-8", "de"],
-      ["zh_CN.UTF-8", "zh-Hans"], ["zh_SG.UTF-8", "zh-Hans"],
-      ["zh_TW.UTF-8", "zh-Hant"], ["zh_HK.UTF-8", "zh-Hant"],
-      ["zh_Hans_TW", "zh-Hans"], ["zh-Hant-CN", "zh-Hant"],
-    ]) {
-      const expected = removal[resolved][kind];
-      const command = `${script.slice(start, end)}\nprintf '%s\\000' ${Object.keys(expected).map(key => `"$${key}"`).join(" ")}`;
-      const result = spawnSync("/bin/sh", ["-c", command], { env: { PATH: "/usr/bin:/bin", LC_ALL: locale }, encoding: "utf8" });
-      assert.equal(result.status, 0, result.stderr);
-      assert.deepEqual(result.stdout.split("\0").slice(0, -1), Object.values(expected), `${filename}: ${locale}`);
-    }
-    for (const locale of ["ko_KR.UTF-8", "en_US.UTF-8", "nl_NL.UTF-8"]) {
-      const result = spawnSync("/bin/sh", ["-c", `${script.slice(start, end)}\nprintf '%s' "$title"`], { env: { LC_ALL: locale }, encoding: "utf8" });
-      assert.equal(result.status, 0);
-      assert.ok(result.stdout.includes("MixRelay"));
-      assert.ok(locale.startsWith("ko") ? result.stdout.includes("제거") : result.stdout.includes("Uninstall"));
-    }
-  });
-}
+test("Linux removal selects actual translated messages and Chinese scripts", () => {
+  const script = readFileSync(new URL("../packaging/linux/uninstall.sh", import.meta.url), "utf8");
+  const start = script.indexOf('case "${LC_ALL:');
+  const end = script.indexOf("\nesac", start) + 6;
+  assert.ok(start >= 0 && end > start);
+  for (const [locale, resolved] of [
+    ["es_MX.UTF-8", "es"], ["pt_BR.UTF-8", "pt"], ["pt_PT.UTF-8", "pt"], ["it_IT.UTF-8", "it"], ["ru_RU.UTF-8", "ru"], ["ja_JP.UTF-8", "ja"], ["fr_CA.UTF-8", "fr"], ["de_DE.UTF-8", "de"],
+    ["zh_CN.UTF-8", "zh-Hans"], ["zh_SG.UTF-8", "zh-Hans"],
+    ["zh_TW.UTF-8", "zh-Hant"], ["zh_HK.UTF-8", "zh-Hant"],
+    ["zh_Hans_TW", "zh-Hans"], ["zh-Hant-CN", "zh-Hant"],
+  ]) {
+    const expected = removal[resolved].app;
+    const command = `${script.slice(start, end)}\nprintf '%s\\000' ${Object.keys(expected).map(key => `"$${key}"`).join(" ")}`;
+    const result = spawnSync("/bin/sh", ["-c", command], { env: { PATH: "/usr/bin:/bin", LC_ALL: locale }, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.stdout.split("\0").slice(0, -1), Object.values(expected), `uninstall.sh: ${locale}`);
+  }
+  for (const locale of ["ko_KR.UTF-8", "en_US.UTF-8", "nl_NL.UTF-8"]) {
+    const result = spawnSync("/bin/sh", ["-c", `${script.slice(start, end)}\nprintf '%s' "$title"`], { env: { LC_ALL: locale }, encoding: "utf8" });
+    assert.equal(result.status, 0);
+    assert.ok(result.stdout.includes("MixRelay"));
+    assert.ok(locale.startsWith("ko") ? result.stdout.includes("제거") : result.stdout.includes("Uninstall"));
+  }
+});
 
 test("Linux install/update/removal prerequisites use every supported language", () => {
   const messages = JSON.parse(readFileSync(new URL("../packaging/localization/linux-lifecycle.json", import.meta.url), "utf8"));
-  for (const [index, filename] of ["driver-before-change.sh", "require-app-closed.sh", "session-start.sh"].entries()) {
+  for (const [index, filename] of ["driver-before-change.sh", "session-start.sh"].entries()) {
     const source = readFileSync(new URL(`../packaging/linux/${filename}`, import.meta.url), "utf8");
     const start = source.indexOf('case "${LC_ALL:');
     const end = source.indexOf("\nesac", start) + 6;

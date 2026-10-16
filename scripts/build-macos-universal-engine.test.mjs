@@ -19,6 +19,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+// These tests run the macOS zsh build script; Linux lab images have no zsh or Apple tools.
+const zshTest = (name, fn) => test(name, { skip: process.platform !== "darwin" && "macOS zsh build script" }, fn);
+
 const sourceScript = new URL("./build-macos-universal-engine.sh", import.meta.url);
 
 function writeExecutable(path, contents) {
@@ -198,7 +201,7 @@ function assertFailurePreserved(paths, previous, targetDir = "target") {
   assert.deepEqual(leftovers, []);
 }
 
-test("builds both slices, signs the lipo output, and cleans its temporary directory", t => {
+zshTest("builds both slices, signs the lipo output, and cleans its temporary directory", t => {
   const paths = fixture(t);
   seedPreviousBinary(paths);
   const result = runScript(paths);
@@ -219,7 +222,7 @@ test("builds both slices, signs the lipo output, and cleans its temporary direct
   assert.deepEqual(readdirSync(universalRelease(paths)).sort(), [".unrelated-temp", "mixrelay-engine-service"]);
 });
 
-test("release signing uses the exact runtime policy, identifier, and engine entitlements", t => {
+zshTest("release signing uses the exact runtime policy, identifier, and engine entitlements", t => {
   const paths = fixture(t);
   const identity = "Developer ID Application: MixRelay, Inc. (ABCDEF1234)";
   const result = runScript(paths, [], { MIXRELAY_CODESIGN_IDENTITY: identity });
@@ -240,7 +243,7 @@ test("release signing uses the exact runtime policy, identifier, and engine enti
   assert.equal((plist.match(/<key>/g) ?? []).length, 2);
 });
 
-test("rejects malformed and non-Developer-ID signing identities before invoking build tools", t => {
+zshTest("rejects malformed and non-Developer-ID signing identities before invoking build tools", t => {
   for (const identity of [
     "",
     "Apple Development: MixRelay (ABCDEF1234)",
@@ -261,7 +264,7 @@ test("rejects malformed and non-Developer-ID signing identities before invoking 
   }
 });
 
-test("--prebuilt merges and signs existing slices without running cargo", t => {
+zshTest("--prebuilt merges and signs existing slices without running cargo", t => {
   const paths = fixture(t);
   const built = runScript(paths);
   assert.equal(built.status, 0, built.stderr);
@@ -273,7 +276,7 @@ test("--prebuilt merges and signs existing slices without running cargo", t => {
   assert.notEqual(runScript(paths, ["--prebuilt", "extra"]).status, 0);
 });
 
-test("honors CARGO_TARGET_DIR and an explicit CARGO_BUILD_JOBS override", t => {
+zshTest("honors CARGO_TARGET_DIR and an explicit CARGO_BUILD_JOBS override", t => {
   const paths = fixture(t);
   const result = runScript(paths, [], { CARGO_BUILD_JOBS: "3", CARGO_TARGET_DIR: "custom-target" });
   assert.equal(result.status, 0, result.stderr);
@@ -285,7 +288,7 @@ test("honors CARGO_TARGET_DIR and an explicit CARGO_BUILD_JOBS override", t => {
   assert.equal(existsSync(join(paths.root, "target")), false);
 });
 
-test("cargo, lipo, and signing failures preserve the previous binary and clean only owned temp", t => {
+zshTest("cargo, lipo, and signing failures preserve the previous binary and clean only owned temp", t => {
   const scenarios = [
     { name: "cargo", overrides: { FAKE_CARGO_FAIL_TARGET: "x86_64-apple-darwin" } },
     { name: "lipo", overrides: { FAKE_LIPO_FAIL: "1" } },
@@ -307,7 +310,7 @@ test("cargo, lipo, and signing failures preserve the previous binary and clean o
   }
 });
 
-test("rejects missing or non-exact architecture slices without publishing", t => {
+zshTest("rejects missing or non-exact architecture slices without publishing", t => {
   const missing = fixture(t);
   const missingPrevious = seedPreviousBinary(missing);
   const missingResult = runScript(missing, [], { FAKE_CARGO_MISSING_TARGET: "x86_64-apple-darwin" });
@@ -321,7 +324,7 @@ test("rejects missing or non-exact architecture slices without publishing", t =>
   assertFailurePreserved(wrong, wrongPrevious);
 });
 
-test("rejects an existing destination directory or symlink before publishing", t => {
+zshTest("rejects an existing destination directory or symlink before publishing", t => {
   const directory = fixture(t);
   const directoryOutput = universalBinary(directory);
   mkdirSync(directoryOutput, { recursive: true });
@@ -343,7 +346,7 @@ test("rejects an existing destination directory or symlink before publishing", t
   assert.equal(readFileSync(symlinkPrevious, "utf8"), "previous");
 });
 
-test("rejects unsupported arguments without invoking build tools", t => {
+zshTest("rejects unsupported arguments without invoking build tools", t => {
   const paths = fixture(t);
   const result = runScript(paths, ["--target", "aarch64-apple-darwin"]);
   assert.equal(result.status, 2);

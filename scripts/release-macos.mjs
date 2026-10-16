@@ -6,13 +6,15 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { checkVersion } from './product-version.mjs';
 import { checkMacosSigning, withMacosSigning } from './macos-signing.mjs';
-import { preparePayload } from './prepare-macos-release-payload.mjs';
-import { buildPackages, checkPackageOutput } from './build-macos-installer-pkgs.mjs';
+import { checkPackageOutput } from './build-macos-installer-pkgs.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-function run(program, args, env) {
-  const result = spawnSync(program, args, { cwd: root, env, stdio: 'inherit' });
-  if (result.error || result.status !== 0) throw new Error(`${program} failed (${result.status ?? result.error?.message})`);
+/** A failure whose message the owned child already printed. */
+class ReportedFailure extends Error {}
+/** Compile through the signing wrapper's owned runner so an interruption can stop it. */
+async function run(owned, program, args, env) {
+  const result = await owned(program, args, { cwd: root, env, stdio: 'inherit' });
+  if (result.error || result.status !== 0) throw new Error(`${program} failed (${result.signal ?? result.status ?? result.error?.message})`);
 }
 try {
   const { values } = parseArgs({ options: { help: { type: 'boolean' }, output: { type: 'string' }, 'from-keychain': { type: 'boolean' }, 'package-only': { type: 'boolean' } } });
@@ -25,7 +27,7 @@ try {
     // The PKG step's output rules apply before any compile or signing work starts.
     checkPackageOutput(output);
     checkMacosSigning();
-    withMacosSigning((signingEnvironment) => {
+    await withMacosSigning(async (signingEnvironment, _config, owned) => {
     let application = signingEnvironment.APPLE_SIGNING_IDENTITY;
     let installer = signingEnvironment.MIXRELAY_INSTALLER_IDENTITY;
     if (values['from-keychain']) {
@@ -42,19 +44,29 @@ try {
     const release = join(root, 'target/universal-apple-darwin/release');
     const bundles = join(release, 'bundle/macos');
     if (!values['package-only']) {
-      run('zsh', ['scripts/build-macos-universal-app.sh'], env);
-      run('cargo', ['run', '-p', 'mixrelay-hal-bundle', '--', '--output', join(release, 'hal')], env);
+      await run(owned, 'zsh', ['scripts/build-macos-universal-app.sh'], env);
+      await run(owned, 'cargo', ['run', '-p', 'mixrelay-hal-bundle', '--', '--output', join(release, 'hal')], env);
     }
     const staging = join(root, 'target/product-release', version);
     mkdirSync(staging, { recursive: true });
     const temporary = mkdtempSync(join(staging, '.package-'));
     const payload = join(temporary, 'payload');
     try {
-      preparePayload({ manager: join(bundles, 'MixRelay.app'), hal: join(release, 'hal/MixRelayHAL.driver'), driver: join(release, 'mixrelay-driver-service'), engine: join(release, 'mixrelay-engine-service'), uninstaller: join(bundles, 'Uninstall MixRelay.app'), output: payload });
-      console.log(JSON.stringify(buildPackages({ payload, installerCli: join(release, 'mixrelay-macos-installer'), payloadChecker: join(release, 'mixrelay-macos-payload-check'), teamId, version, signingIdentity: installer, output })));
+      // Packaging runs spawnSync commands for up to 30 minutes each, so it runs as an owned
+      // child that an interruption can stop. It prints the same result or error as before.
+      const stage = {
+        payload: { manager: join(bundles, 'MixRelay.app'), hal: join(release, 'hal/MixRelayHAL.driver'), driver: join(release, 'mixrelay-driver-service'), engine: join(release, 'mixrelay-engine-service'), uninstaller: join(bundles, 'Uninstall MixRelay.app'), output: payload },
+        packages: { payload, installerCli: join(release, 'mixrelay-macos-installer'), payloadChecker: join(release, 'mixrelay-macos-payload-check'), teamId, version, signingIdentity: installer, output },
+      };
+      const packaged = await owned(process.execPath, [join(root, 'scripts/package-macos-release.mjs'), JSON.stringify(stage)], { cwd: root, env: process.env, stdio: 'inherit' });
+      if (packaged.status === 1) throw new ReportedFailure();
+      if (packaged.error || packaged.status !== 0) throw new Error(`packaging failed (${packaged.signal ?? packaged.status ?? packaged.error?.message})`);
     } finally {
       rmSync(temporary, { recursive: true, force: true });
     }
     });
   }
-} catch (error) { console.error(error.message); process.exitCode = 1; }
+} catch (error) {
+  if (!(error instanceof ReportedFailure)) console.error(error.message);
+  process.exitCode = 1;
+}

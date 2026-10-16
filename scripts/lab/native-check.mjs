@@ -6,8 +6,12 @@ import { fileURLToPath } from "node:url";
 import { desktopCodeCheckEnvironment } from "../build-desktop.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+
 const FOCUSED_CARGO_COMMANDS = new Set(["test", "check", "clippy", "build", "doc", "llvm-cov"]);
 const DISALLOWED_CARGO_ACTIONS = new Set(["run", "install", "bundle", "bundling"]);
+// Script tests exercise packaging tools with mocked commands; the code-check environment
+// disables packaging, so they run with the caller's environment instead.
+const CALLER_ENVIRONMENT_STEPS = new Set(["pnpm test:scripts"]);
 const FIXTURE_LIBRARIES = [
   { name: "mixrelay_macos_transport", source: "native/macos/common/lib.rs",
     manifest: "native/macos/common/Cargo.toml", variable: "MIXRELAY_NATIVE_TRANSPORT_STATICLIB" },
@@ -93,7 +97,14 @@ export function buildPlan(os, mode) {
     // Omitting --bins silently skips platform adapter tests.
     commands.push(["cargo", "test", "--locked", "--workspace", "--lib", "--bins"]);
     commands.push(["pnpm", "--filter", "@mixrelay/control-ui", "exec", "vitest", "run"]);
-    if (os === "darwin") commands.push(["pnpm", "check:native"]);
+    if (os === "darwin") {
+      commands.push(["pnpm", "check:native"]);
+      // The round-trip probe's analysis is checked on synthetic recordings; no device is opened.
+      commands.push(["pnpm", "probe:macos-roundtrip", "--self-test"]);
+      // Build, signing and release tooling is tested with mocked Apple tools. Some of these
+      // tests run the zsh universal-build scripts, so they run on macOS only.
+      commands.push(["pnpm", "test:scripts"]);
+    }
     commands.push(["bash", "scripts/check-pcm-native.sh"]);
   }
   return commands;
@@ -126,7 +137,7 @@ export function runChecks(os, mode, run, env = process.env) {
       cwd: root,
       stdio: "inherit",
       // pnpm checks can themselves launch Cargo; keep the same code-only scope.
-      env: cargoEnv,
+      env: CALLER_ENVIRONMENT_STEPS.has([command, ...args].join(" ")) ? env : cargoEnv,
       shell: false,
     };
     if (command === "cargo") {

@@ -78,7 +78,6 @@ test("desktop build rejects partial licensing configuration before spawning and 
 
 test("macOS defaults exclusively to the checked universal build", () => {
   assert.deepEqual(desktopBuildCommand("darwin"), ["zsh", "scripts/build-macos-universal-app.sh"]);
-  assert.throws(() => desktopBuildCommand("darwin", ["--driver"]), /no longer a separate build/);
   for (const args of [["--target", "aarch64-apple-darwin"], ["--debug"], ["--config", "other.json"]]) {
     assert.throws(() => desktopBuildCommand("darwin", args), /accepts no overrides/);
   }
@@ -90,7 +89,6 @@ test("one public bundle supplies the editor and internal background runtime", ()
   assert.equal(config.identifier, "io.mixrelay.desktop");
   assert.match(config.build.beforeBuildCommand, /desktop:prepare-driver --profile release/);
   assert.match(config.build.beforeBuildCommand, /desktop:prepare-engine --profile release/);
-  assert.throws(() => desktopBuildCommand("linux", ["--driver"]), /no longer a separate build/);
 });
 
 test("free Driver builds accept an entirely absent licensing configuration", async () => {
@@ -355,14 +353,6 @@ test("successful Linux Debian build inspects its single produced artifact before
   assert.equal(status, 0);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].options.cwd, fileURLToPath(new URL("../apps/desktop", import.meta.url)));
-  assert.deepEqual(inspected, ["/fixture/MixRelay_0.1.0_amd64.deb"]);
-});
-
-test("complete product builds select MixRelay beside a stale Driver artifact", async () => {
-  const inspected = [];
-  assert.equal(await main(["--bundles", "deb"], "linux", () => ({ status: 0 }), async path => {
-    inspected.push(path); return { packageName: "mix-relay" };
-  }, () => ["/fixture/MixRelay_0.1.0_amd64.deb", "/fixture/MixRelayDriver_0.1.0_amd64.deb"], {}), 0);
   assert.deepEqual(inspected, ["/fixture/MixRelay_0.1.0_amd64.deb"]);
 });
 
