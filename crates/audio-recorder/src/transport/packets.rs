@@ -1,5 +1,6 @@
 //! Recorder-only fixed packet slots. No cursor/stamp retry waits for the writer.
 use super::{PACKET_FRAMES, PACKETS};
+use std::collections::TryReserveError;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 const FREE: usize = 0;
@@ -15,12 +16,13 @@ pub(crate) struct Packet {
 }
 
 impl Packet {
-    pub(crate) fn new(channels: usize) -> Self {
-        Self {
-            samples: vec![0.0; PACKET_FRAMES * channels].into_boxed_slice(),
+    pub(crate) fn new(channels: usize) -> Result<Self, TryReserveError> {
+        Ok(Self {
+            samples: mixrelay_audio_io::pcm_buffer::zeroed(PACKET_FRAMES.saturating_mul(channels))?
+                .into_boxed_slice(),
             frames: 0,
             rate: 0,
-        }
+        })
     }
 }
 
@@ -46,24 +48,30 @@ pub(super) struct PacketRing {
 }
 
 impl PacketRing {
-    pub(super) fn new(channels: usize) -> Self {
-        let slots = (0..PACKETS)
-            .map(|_| Slot {
+    pub(super) fn new(channels: usize) -> Result<Self, TryReserveError> {
+        Self::prepare(channels, allocate_samples)
+    }
+
+    fn prepare(
+        channels: usize,
+        mut samples: impl FnMut(usize) -> Result<Box<[AtomicU32]>, TryReserveError>,
+    ) -> Result<Self, TryReserveError> {
+        let mut slots = mixrelay_audio_io::pcm_buffer::reserve(PACKETS)?;
+        for _ in 0..PACKETS {
+            slots.push(Slot {
                 state: AtomicUsize::new(FREE),
                 frames: AtomicUsize::new(0),
                 rate: AtomicU32::new(0),
-                samples: (0..PACKET_FRAMES * channels)
-                    .map(|_| AtomicU32::new(0))
-                    .collect(),
-            })
-            .collect();
-        Self {
+                samples: samples(PACKET_FRAMES.saturating_mul(channels))?,
+            });
+        }
+        Ok(Self {
             channels,
-            slots,
+            slots: slots.into_boxed_slice(),
             write: AtomicUsize::new(0),
             read: AtomicUsize::new(0),
             pending: AtomicUsize::new(0),
-        }
+        })
     }
 
     /// Called only under Transport's producer guard. A busy slot fails recording
@@ -144,6 +152,12 @@ impl PacketRing {
         self.read.store((index + 1) % PACKETS, Ordering::Relaxed);
         true
     }
+}
+
+fn allocate_samples(count: usize) -> Result<Box<[AtomicU32]>, TryReserveError> {
+    let mut samples = mixrelay_audio_io::pcm_buffer::reserve(count)?;
+    samples.resize_with(count, || AtomicU32::new(0));
+    Ok(samples.into_boxed_slice())
 }
 
 #[cfg(test)]

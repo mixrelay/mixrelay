@@ -15,6 +15,62 @@ use std::f64::consts::TAU;
 mod realtime;
 
 #[test]
+fn impossible_pcm_capacity_returns_an_error() {
+    assert_eq!(
+        buffers::zeroed(usize::MAX),
+        Err(BridgeError::Allocation {
+            samples: usize::MAX
+        })
+    );
+}
+
+#[test]
+fn failed_bridge_replacement_reclaims_partial_pcm_and_preserves_active_audio() {
+    let mut options = config(2, 48_000, 48_000);
+    options.clock_relation = ClockRelation::ProvenSameClock;
+    options.priming_frames = 1;
+    let mut active = AsyncClockBridge::new(options).unwrap();
+    for relation in [ClockRelation::ProvenSameClock, ClockRelation::Independent] {
+        for failed in 0..3 {
+            let signal: [f32; 256] = std::array::from_fn(|index| index as f32 / 512.0);
+            active.push_interleaved(&signal).unwrap();
+            let mut attempted = 0;
+            let mut replacement = BridgeConfig {
+                clock_relation: relation,
+                ..options
+            };
+            replacement.output_rate = if relation == ClockRelation::ProvenSameClock {
+                options.input_rate
+            } else {
+                44_100
+            };
+            let allocation = allocation_counter::measure(|| {
+                let result = AsyncClockBridge::prepare(replacement, |samples| {
+                    let reservation = attempted;
+                    attempted += 1;
+                    if reservation == failed {
+                        return Err(BridgeError::Allocation { samples });
+                    }
+                    buffers::zeroed(samples)
+                });
+                assert!(matches!(result, Err(BridgeError::Allocation { .. })));
+            });
+            assert_eq!(attempted, failed + 1);
+            assert_eq!((allocation.count_current, allocation.bytes_current), (0, 0));
+            let mut output = [0.0; 256];
+            assert_eq!(
+                active
+                    .pull_interleaved(&mut output)
+                    .unwrap()
+                    .transferred_frames,
+                128
+            );
+            assert_eq!(output, signal);
+        }
+    }
+}
+
+#[test]
 fn converter_residence_counts_elapsed_time_only_for_pcm_retained_between_invocations() {
     let mut options = config(1, 48_000, 48_000);
     options.clock_relation = ClockRelation::ProvenSameClock;

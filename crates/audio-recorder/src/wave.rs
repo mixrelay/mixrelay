@@ -244,8 +244,10 @@ impl Segment {
             output_rate,
             channels,
             resampler,
-            input: vec![0.0; PACKET_FRAMES * channels],
-            output: vec![0.0; capacity * channels],
+            input: mixrelay_audio_io::pcm_buffer::zeroed(PACKET_FRAMES * channels)
+                .map_err(|error| error.to_string())?,
+            output: mixrelay_audio_io::pcm_buffer::zeroed(capacity * channels)
+                .map_err(|error| error.to_string())?,
             buffered: 0,
             input_frames: 0,
             emitted: 0,

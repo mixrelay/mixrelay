@@ -5,8 +5,10 @@ use std::{
     fs::File,
     io::{BufWriter, Read, Seek, SeekFrom},
     path::Path,
-    process::Command,
 };
+
+#[cfg(feature = "native-lab")]
+use std::process::Command;
 
 fn spec(channels: u16, bits: u16, format: SampleFormat) -> WavSpec {
     WavSpec {
@@ -156,7 +158,7 @@ fn unfinished_frame_and_u64_exhaustion_fail_without_silent_size_wrap() {
 }
 
 #[test]
-#[ignore = "requires FFmpeg; independently decodes every small RF64 format"]
+#[cfg(feature = "native-lab")]
 fn ffmpeg_decodes_all_small_rf64_formats() {
     let directory = FixtureDir::new("recorder-rf64-ffmpeg").unwrap();
     for channels in [1, 2, 8] {
@@ -199,7 +201,7 @@ fn ffmpeg_decodes_all_small_rf64_formats() {
 }
 
 #[test]
-#[ignore = "requires FFmpeg; independently decodes PCM after a real 4 GiB boundary"]
+#[cfg(feature = "native-lab")]
 fn ffmpeg_decodes_pcm_after_the_4_gib_boundary() {
     let directory = FixtureDir::new("recorder-rf64-large-ffmpeg").unwrap();
     let path = directory.join("large.wav");

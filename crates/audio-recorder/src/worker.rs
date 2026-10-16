@@ -30,15 +30,18 @@ pub(crate) struct Worker {
 }
 
 impl Worker {
-    pub(crate) fn new(transport: Arc<Transport>, status: Arc<Mutex<RecorderStatus>>) -> Self {
-        Self {
-            packet: Packet::new(transport.channels),
+    pub(crate) fn new(
+        transport: Arc<Transport>,
+        status: Arc<Mutex<RecorderStatus>>,
+    ) -> Result<Self, std::collections::TryReserveError> {
+        Ok(Self {
+            packet: Packet::new(transport.channels)?,
             transport,
             status,
             take: None,
             token: 0,
             next_take_limit_seconds: None,
-        }
+        })
     }
 
     pub(crate) fn run(mut self, receiver: &Receiver<Command>) {

@@ -1,3 +1,4 @@
+//! Worker-owned frame FIFO over storage prepared before publication.
 pub(super) struct FrameFifo {
     samples: Vec<f32>,
     channels: usize,
@@ -6,9 +7,9 @@ pub(super) struct FrameFifo {
 }
 
 impl FrameFifo {
-    pub(super) fn new(capacity: usize, channels: usize) -> Self {
+    pub(super) fn new(samples: Vec<f32>, channels: usize) -> Self {
         Self {
-            samples: vec![0.0; capacity * channels],
+            samples,
             channels,
             read: 0,
             frames: 0,

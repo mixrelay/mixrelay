@@ -187,11 +187,13 @@ struct Session {
 
 impl Session {
     fn new(channels: u16) -> Result<(Self, RecorderTap), String> {
-        let transport = Transport::new(channels);
+        let transport = Transport::new(channels)
+            .map_err(|error| format!("cannot prepare recording PCM: {error}"))?;
         let status = Arc::new(Mutex::new(RecorderStatus::default()));
         let tap = RecorderTap::new(Arc::clone(&transport));
         let (sender, receiver) = mpsc::channel();
-        let worker = Worker::new(Arc::clone(&transport), Arc::clone(&status));
+        let worker = Worker::new(Arc::clone(&transport), Arc::clone(&status))
+            .map_err(|error| format!("cannot prepare recording writer PCM: {error}"))?;
         let handle = std::thread::Builder::new()
             .name("mixrelay-wav-writer".into())
             .spawn(move || worker.run(&receiver))

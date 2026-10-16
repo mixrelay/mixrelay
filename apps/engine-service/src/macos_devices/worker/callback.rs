@@ -194,7 +194,7 @@ pub(in crate::macos_devices) unsafe extern "C" fn dispatch(context: *mut c_void)
             Err(error) => {
                 use mixrelay_audio_io::clock_bridge::BridgeError;
                 let code = match error {
-                    BridgeError::InvalidConfig => 1,
+                    BridgeError::InvalidConfig | BridgeError::Allocation { .. } => 1,
                     BridgeError::InvalidBuffer => 2,
                     BridgeError::Overflow => 3,
                     BridgeError::InvalidFeedback => 4,

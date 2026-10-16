@@ -14,6 +14,7 @@ use audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Adjustable, Async, FixedAsync, Resampler, SincInterpolationParameters};
 use thiserror::Error;
 
+mod buffers;
 mod controller;
 mod fifo;
 use controller::DriftController;
@@ -59,6 +60,8 @@ pub enum BridgeError {
     InvalidFeedback,
     #[error("sample-rate converter failed")]
     Resampler,
+    #[error("sample-rate bridge could not reserve {samples} PCM samples")]
+    Allocation { samples: usize },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,9 +117,21 @@ pub struct AsyncClockBridge {
 impl AsyncClockBridge {
     /// Allocates all storage and constructs the sinc filter off the audio thread.
     /// # Errors
-    /// Rejects unbounded/invalid configuration or converter construction failure.
+    /// Rejects unbounded/invalid configuration, failed PCM reservation or converter construction.
     pub fn new(config: BridgeConfig) -> Result<Self, BridgeError> {
+        Self::prepare(config, buffers::zeroed)
+    }
+
+    fn prepare(
+        config: BridgeConfig,
+        mut reserve: impl FnMut(usize) -> Result<Vec<f32>, BridgeError>,
+    ) -> Result<Self, BridgeError> {
         validate_config(config)?;
+        let input = FrameFifo::new(
+            reserve(config.capacity_frames * config.channels)?,
+            config.channels,
+        );
+        let input_scratch = reserve(CHUNK * config.channels)?;
         let bypass = config.clock_relation == ClockRelation::ProvenSameClock
             && config.input_rate == config.output_rate;
         let resampler = if bypass {
@@ -138,9 +153,9 @@ impl AsyncClockBridge {
             .as_ref()
             .map_or(CHUNK, Resampler::output_frames_max);
         Ok(Self {
-            input: FrameFifo::new(config.capacity_frames, config.channels),
-            input_scratch: vec![0.0; CHUNK * config.channels],
-            output_scratch: vec![0.0; output_max * config.channels],
+            input,
+            input_scratch,
+            output_scratch: reserve(output_max * config.channels)?,
             output_capacity_frames: output_max,
             output_read: 0,
             output_frames: 0,

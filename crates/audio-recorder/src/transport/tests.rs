@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 #[test]
 fn cutoff_waits_for_admitted_packet_and_observes_its_late_failure() {
     for late_failure in [false, true] {
-        let shared = Transport::new(1);
+        let shared = Transport::new(1).unwrap();
         shared.gate.store(1, Ordering::SeqCst);
         shared.producer.store(true, Ordering::SeqCst);
         shared.in_flight.store(1, Ordering::SeqCst);
@@ -26,7 +26,7 @@ fn cutoff_waits_for_admitted_packet_and_observes_its_late_failure() {
         drop(producer);
         drop(flight);
         assert_eq!(control.join().unwrap().is_some(), late_failure);
-        let mut packet = Packet::new(1);
+        let mut packet = Packet::new(1).unwrap();
         assert!(shared.read_packet(&mut packet));
         assert_eq!(
             (packet.frames, packet.samples[0].to_bits()),
@@ -37,7 +37,7 @@ fn cutoff_waits_for_admitted_packet_and_observes_its_late_failure() {
 
 #[test]
 fn a_full_packet_pool_fails_without_allocating_freeing_or_retagging() {
-    let shared = Transport::new(1);
+    let shared = Transport::new(1).unwrap();
     let tap = RecorderTap::new(Arc::clone(&shared));
     shared.gate.store(1, Ordering::SeqCst);
     for _ in 0..PACKETS {

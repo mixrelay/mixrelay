@@ -33,16 +33,16 @@ pub(crate) struct Transport {
 }
 
 impl Transport {
-    pub(crate) fn new(channels: u16) -> Arc<Self> {
-        Arc::new(Self {
+    pub(crate) fn new(channels: u16) -> Result<Arc<Self>, std::collections::TryReserveError> {
+        Ok(Arc::new(Self {
             channels: usize::from(channels),
             rate: AtomicU32::new(0),
             gate: AtomicU64::new(0),
             taps: AtomicUsize::new(0),
             producer: AtomicBool::new(false),
             in_flight: AtomicUsize::new(0),
-            packets: PacketRing::new(usize::from(channels)),
-        })
+            packets: PacketRing::new(usize::from(channels))?,
+        }))
     }
 
     /// Only the off-RT session owner calls this before draining commands.

@@ -11,10 +11,10 @@ use std::sync::Arc;
 fn single_rf64_take_keeps_original_path_and_total_frames_across_pause_resume_and_stop() {
     let directory = FixtureDir::new("recorder-rf64-lifecycle").unwrap();
     let path = directory.join("first.wav").to_str().unwrap().to_owned();
-    let transport = Transport::new(2);
+    let transport = Transport::new(2).unwrap();
     let tap = RecorderTap::new(Arc::clone(&transport));
     let status = Arc::new(Mutex::new(RecorderStatus::default()));
-    let mut worker = Worker::new(transport, Arc::clone(&status));
+    let mut worker = Worker::new(transport, Arc::clone(&status)).unwrap();
     let request = RecorderRequest {
         action: RecorderAction::Record,
         path: Some(path.clone()),
@@ -53,10 +53,10 @@ fn single_rf64_take_keeps_original_path_and_total_frames_across_pause_resume_and
 fn a_half_second_writer_stall_preserves_paced_quantum_pcm_in_fixed_memory() {
     let directory = FixtureDir::new("recorder-stalled-writer").unwrap();
     let path = directory.join("packed.wav");
-    let transport = Transport::new(8);
+    let transport = Transport::new(8).unwrap();
     let tap = RecorderTap::new(Arc::clone(&transport));
     let status = Arc::new(Mutex::new(RecorderStatus::default()));
-    let mut worker = Worker::new(transport, Arc::clone(&status));
+    let mut worker = Worker::new(transport, Arc::clone(&status)).unwrap();
     tap.capture(&[], 48_000);
     worker
         .record(&RecorderRequest {
@@ -96,10 +96,10 @@ fn a_half_second_writer_stall_preserves_paced_quantum_pcm_in_fixed_memory() {
 fn admission_error_finalizes_a_valid_unpublished_partial_packet() {
     let directory = FixtureDir::new("recorder-partial-prefix").unwrap();
     let path = directory.join("prefix.wav");
-    let transport = Transport::new(2);
+    let transport = Transport::new(2).unwrap();
     let tap = RecorderTap::new(Arc::clone(&transport));
     let status = Arc::new(Mutex::new(RecorderStatus::default()));
-    let mut worker = Worker::new(transport, Arc::clone(&status));
+    let mut worker = Worker::new(transport, Arc::clone(&status)).unwrap();
     tap.capture(&[], 48_000);
     worker
         .record(&RecorderRequest {
@@ -132,10 +132,10 @@ fn admission_error_finalizes_a_valid_unpublished_partial_packet() {
 fn admission_overrun_finalizes_every_previously_accepted_packet_as_a_failed_take() {
     let directory = FixtureDir::new("recorder-overrun-prefix").unwrap();
     let path = directory.join("prefix.wav");
-    let transport = Transport::new(1);
+    let transport = Transport::new(1).unwrap();
     let tap = RecorderTap::new(Arc::clone(&transport));
     let status = Arc::new(Mutex::new(RecorderStatus::default()));
-    let mut worker = Worker::new(transport, Arc::clone(&status));
+    let mut worker = Worker::new(transport, Arc::clone(&status)).unwrap();
     tap.capture(&[], 48_000);
     worker
         .record(&RecorderRequest {
@@ -199,10 +199,10 @@ fn duration_limit_counts_output_frames_across_pause_resume_and_rate_changes() {
     for encoding in [Encoding::Pcm16, Encoding::Pcm24, Encoding::Float32] {
         let directory = FixtureDir::new("recorder-duration-limit").unwrap();
         let path = directory.join("limited.wav");
-        let transport = Transport::new(2);
+        let transport = Transport::new(2).unwrap();
         let tap = RecorderTap::new(Arc::clone(&transport));
         let status = Arc::new(Mutex::new(RecorderStatus::default()));
-        let mut worker = Worker::new(transport, Arc::clone(&status));
+        let mut worker = Worker::new(transport, Arc::clone(&status)).unwrap();
         worker.next_take_limit_seconds = Some(1);
         tap.capture(&[], 48_000);
         let request = RecorderRequest {
@@ -251,10 +251,10 @@ fn duration_limit_counts_output_frames_across_pause_resume_and_rate_changes() {
 fn automatic_duration_stop_finalizes_without_a_command_and_releases_only_its_tap() {
     let directory = FixtureDir::new("recorder-auto-stop").unwrap();
     let path = directory.join("limited.wav");
-    let transport = Transport::new(2);
+    let transport = Transport::new(2).unwrap();
     let tap = RecorderTap::new(Arc::clone(&transport));
     let status = Arc::new(Mutex::new(RecorderStatus::default()));
-    let mut worker = Worker::new(transport, Arc::clone(&status));
+    let mut worker = Worker::new(transport, Arc::clone(&status)).unwrap();
     tap.capture(&[], 48_000);
     worker.next_take_limit_seconds = Some(1);
     worker

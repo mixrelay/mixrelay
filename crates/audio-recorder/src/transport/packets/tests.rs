@@ -3,8 +3,43 @@ use crate::transport::{RecorderTap, Transport};
 use std::sync::{Arc, atomic::Ordering};
 
 #[test]
+fn failed_pcm_preparation_reclaims_partial_slots_and_preserves_active_recording() {
+    let active = Transport::new(1).unwrap();
+    let tap = RecorderTap::new(Arc::clone(&active));
+    active.gate.store(1, Ordering::SeqCst);
+    let mut packet = Packet::new(1).unwrap();
+    for failure in [0, PACKETS / 2, PACKETS - 1] {
+        tap.capture(&[0.25; 256], 48_000);
+        let mut attempts = 0;
+        let allocation = allocation_counter::measure(|| {
+            let result = PacketRing::prepare(2, |count| {
+                let current = attempts;
+                attempts += 1;
+                if current == failure {
+                    return Err(mixrelay_audio_io::pcm_buffer::zeroed(usize::MAX).unwrap_err());
+                }
+                super::allocate_samples(count)
+            });
+            assert!(result.is_err());
+        });
+        assert_eq!(attempts, failure + 1);
+        assert_eq!((allocation.count_current, allocation.bytes_current), (0, 0));
+        assert!(active.read_packet(&mut packet));
+        assert_eq!(packet.frames, 256);
+        assert!(
+            packet
+                .samples
+                .iter()
+                .all(|sample| sample.to_bits() == 0.25_f32.to_bits())
+        );
+    }
+    assert!(Packet::new(usize::MAX).is_err());
+    assert!(PacketRing::new(usize::MAX).is_err());
+}
+
+#[test]
 fn preempted_worker_slot_never_makes_capture_wait_or_touch_its_pcm() {
-    let shared = Transport::new(2);
+    let shared = Transport::new(2).unwrap();
     let tap = RecorderTap::new(Arc::clone(&shared));
     shared.gate.store(1, Ordering::SeqCst);
     let slot = &shared.packets.slots[0];
@@ -22,8 +57,8 @@ fn preempted_worker_slot_never_makes_capture_wait_or_touch_its_pcm() {
 
 #[test]
 fn consumer_does_not_wait_for_an_unpublished_packet() {
-    let ring = PacketRing::new(1);
-    let mut packet = Packet::new(1);
+    let ring = PacketRing::new(1).unwrap();
+    let mut packet = Packet::new(1).unwrap();
     ring.slots[0].state.store(WRITING, Ordering::Release);
     assert!(!ring.read(&mut packet));
     assert_eq!(ring.read.load(Ordering::Relaxed), 0);
@@ -32,7 +67,7 @@ fn consumer_does_not_wait_for_an_unpublished_packet() {
 
 #[test]
 fn packet_pcm_and_rate_metadata_remain_fifo_across_concurrent_ring_wraps() {
-    let ring = Arc::new(PacketRing::new(2));
+    let ring = Arc::new(PacketRing::new(2).unwrap());
     let producer_ring = Arc::clone(&ring);
     let producer = std::thread::spawn(move || {
         for index in 0..4096_u16 {
@@ -44,7 +79,7 @@ fn packet_pcm_and_rate_metadata_remain_fifo_across_concurrent_ring_wraps() {
         }
         producer_ring.finish_pending();
     });
-    let mut packet = Packet::new(2);
+    let mut packet = Packet::new(2).unwrap();
     for index in 0..4096_u16 {
         while !ring.read(&mut packet) {
             std::thread::yield_now();
@@ -63,7 +98,7 @@ fn packet_pcm_and_rate_metadata_remain_fifo_across_concurrent_ring_wraps() {
 
 #[test]
 fn concurrent_tap_clone_and_retirement_do_not_change_packet_ownership() {
-    let shared = Transport::new(1);
+    let shared = Transport::new(1).unwrap();
     let tap = RecorderTap::new(Arc::clone(&shared));
     std::thread::scope(|scope| {
         for _ in 0..8 {
@@ -79,7 +114,7 @@ fn concurrent_tap_clone_and_retirement_do_not_change_packet_ownership() {
     shared.gate.store(1, Ordering::SeqCst);
     tap.capture(&[0.5], 48_000);
     assert_eq!(shared.cutoff(), None);
-    let mut packet = Packet::new(1);
+    let mut packet = Packet::new(1).unwrap();
     assert!(shared.read_packet(&mut packet));
     assert_eq!(packet.samples[0].to_bits(), 0.5_f32.to_bits());
     drop(tap);
@@ -88,7 +123,7 @@ fn concurrent_tap_clone_and_retirement_do_not_change_packet_ownership() {
 
 #[test]
 fn small_callbacks_use_the_full_fixed_frame_capacity_without_allocation() {
-    let shared = Transport::new(8);
+    let shared = Transport::new(8).unwrap();
     let tap = RecorderTap::new(Arc::clone(&shared));
     shared.gate.store(1, Ordering::SeqCst);
     let allocation = allocation_counter::measure(|| {
@@ -100,7 +135,7 @@ fn small_callbacks_use_the_full_fixed_frame_capacity_without_allocation() {
     assert_eq!(shared.gate.load(Ordering::SeqCst), 1);
     tap.capture(&[0.5; 8], 48_000);
     assert_eq!(shared.cutoff(), Some("recorder packet queue overrun"));
-    let mut packet = Packet::new(8);
+    let mut packet = Packet::new(8).unwrap();
     for _ in 0..PACKETS {
         assert!(shared.read_packet(&mut packet));
         assert_eq!((packet.frames, packet.rate), (256, 48_000));
@@ -116,11 +151,11 @@ fn small_callbacks_use_the_full_fixed_frame_capacity_without_allocation() {
 
 #[test]
 fn partial_rate_change_and_cutoff_preserve_fifo_and_each_original_rate() {
-    let shared = Transport::new(2);
+    let shared = Transport::new(2).unwrap();
     let tap = RecorderTap::new(Arc::clone(&shared));
     shared.gate.store(1, Ordering::SeqCst);
     tap.capture(&[0.25; 64], 48_000);
-    let mut packet = Packet::new(2);
+    let mut packet = Packet::new(2).unwrap();
     assert!(!shared.read_packet(&mut packet));
     tap.capture(&[0.5; 96], 44_100);
     assert!(shared.read_packet(&mut packet));
@@ -144,14 +179,14 @@ fn partial_rate_change_and_cutoff_preserve_fifo_and_each_original_rate() {
 
 #[test]
 fn carried_partial_plus_maximum_callback_keeps_all_frames_in_order() {
-    let shared = Transport::new(1);
+    let shared = Transport::new(1).unwrap();
     let tap = RecorderTap::new(Arc::clone(&shared));
     shared.gate.store(1, Ordering::SeqCst);
     tap.capture(&[0.25], 48_000);
     let allocation = allocation_counter::measure(|| tap.capture(&[0.5; 4096], 48_000));
     assert_eq!((allocation.count_total, allocation.count_current), (0, 0));
     assert_eq!(shared.cutoff(), None);
-    let mut packet = Packet::new(1);
+    let mut packet = Packet::new(1).unwrap();
     let mut frames = 0;
     while shared.read_packet(&mut packet) {
         for sample in &packet.samples[..packet.frames] {

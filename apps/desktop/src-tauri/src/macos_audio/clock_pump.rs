@@ -437,8 +437,10 @@ pub(super) fn run_with_handoff(
         capture,
         transport,
         channels,
-        input: vec![0.0; ENGINE_BLOCK_FRAMES * channels],
-        output: vec![0.0; ENGINE_BLOCK_FRAMES * channels],
+        input: mixrelay_audio_io::pcm_buffer::zeroed(ENGINE_BLOCK_FRAMES * channels)
+            .map_err(|error| error.to_string())?,
+        output: mixrelay_audio_io::pcm_buffer::zeroed(ENGINE_BLOCK_FRAMES * channels)
+            .map_err(|error| error.to_string())?,
         state: None,
         scoped: super::ActivePlayback(None),
         waker: Waker::new(),

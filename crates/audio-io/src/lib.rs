@@ -10,6 +10,7 @@ pub mod format_contract;
 pub mod formats;
 pub mod frame_budget;
 mod native_format;
+pub mod pcm_buffer;
 pub mod pcm_fifo;
 pub mod process;
 pub mod recovery;

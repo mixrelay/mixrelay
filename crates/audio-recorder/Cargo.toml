@@ -10,6 +10,10 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# Independent installed-codec checks, separate from hermetic writer tests.
+native-lab = []
+
 [dependencies]
 serde.workspace = true
 mixrelay-audio-io.workspace = true

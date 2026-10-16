@@ -119,8 +119,10 @@ impl DeviceBridge {
                 .map_err(|error| error.to_string())?;
         Ok(Self {
             bridge,
-            source: vec![0.0; PUMP_FRAMES * channels],
-            destination: vec![0.0; PUMP_FRAMES * channels],
+            source: mixrelay_audio_io::pcm_buffer::zeroed(PUMP_FRAMES * channels)
+                .map_err(|error| error.to_string())?,
+            destination: mixrelay_audio_io::pcm_buffer::zeroed(PUMP_FRAMES * channels)
+                .map_err(|error| error.to_string())?,
             graph_rate,
             native_rate,
             clock_aligned,

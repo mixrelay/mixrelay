@@ -97,7 +97,9 @@ impl Endpoint {
         Ok(Self {
             input,
             output,
-            silence: vec![0.0; samples].into_boxed_slice(),
+            silence: mixrelay_audio_io::pcm_buffer::zeroed(samples)
+                .map_err(|error| error.to_string())?
+                .into_boxed_slice(),
             output_channels,
             input_read: false,
             output_written: false,
