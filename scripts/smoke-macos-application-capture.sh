@@ -9,6 +9,11 @@ fi
 repo_root="${0:A:h:h}"
 native_root="$repo_root/native/macos/application-capture"
 endpoint_uid=""
+registration_api=${MIXRELAY_LAB_TAP_REGISTRATION:-function}
+if [[ "$registration_api" != function && "$registration_api" != block ]]; then
+  print -u2 "MIXRELAY_LAB_TAP_REGISTRATION must be function or block"
+  exit 2
+fi
 if (( $# > 1 )); then
   print -u2 "usage: $0 [exact-owned-endpoint-uid-or-canonical-uuid]"
   exit 1
@@ -96,6 +101,12 @@ clang \
   -framework AppKit \
   -o "$smoke_build_dir/MRProcessTapSmoke"
 
+if [[ "$registration_api" == block ]]; then
+  clang -std=c17 -fblocks -dynamiclib "${strict_flags[@]}" \
+    "$native_root/tests/MRIOProcBlockRegistration.m" -framework CoreAudio \
+    -o "$smoke_build_dir/MRIOProcBlockRegistration.dylib"
+fi
+
 if [[ -n "$endpoint_uid" ]]; then
   coproc "$tone_bundle/Contents/MacOS/$tone_name" --mixrelay-virtual-only "$endpoint_uid"
   tone_process_id=$!
@@ -116,10 +127,14 @@ fi
 set +e
 # Native registration itself can block inside CoreAudio before the fixture's
 # measurement loop starts. Bound the exact owned child, then let EXIT stop its tone.
-node --input-type=module - "$smoke_build_dir/MRProcessTapSmoke" "${smoke_arguments[@]}" <<'JS'
+node --input-type=module - "$smoke_build_dir/MRProcessTapSmoke" "$registration_api" \
+  "$smoke_build_dir/MRIOProcBlockRegistration.dylib" "${smoke_arguments[@]}" <<'JS'
 import { spawnSync } from 'node:child_process';
-const result = spawnSync(process.argv[2], process.argv.slice(3), {
-  stdio: 'inherit', timeout: 30000, killSignal: 'SIGKILL',
+const environment = { ...process.env };
+if (process.argv[3] === 'block') environment.DYLD_INSERT_LIBRARIES = process.argv[4];
+console.error(`registration_api=${process.argv[3]} (owned native fixture)`);
+const result = spawnSync(process.argv[2], process.argv.slice(5), {
+  env: environment, stdio: 'inherit', timeout: 30000, killSignal: 'SIGKILL',
 });
 if (result.error) console.error(`Application-capture smoke failed: ${result.error.message}`);
 process.exit(result.status ?? 1);

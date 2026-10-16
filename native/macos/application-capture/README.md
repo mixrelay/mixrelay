@@ -67,6 +67,37 @@ callbacks, dropped frames, or invalid stream metadata:
 ./scripts/smoke-macos-application-capture.sh
 ```
 
+To keep the test signal on an owned MixRelay virtual device, pass its exact
+endpoint UID or canonical UUID. The fixture acknowledges that device before
+capture starts; a missing or invalid device never falls back to default output.
+
+```sh
+./scripts/smoke-macos-application-capture.sh OWNED_ENDPOINT_UUID
+```
+
+Native registration and all four capture phases run in one child with a 30-second
+limit. A first system-audio permission request can outlast that limit. Check the
+responsible application's system-audio permission and the matching TCC request
+before interpreting a registration timeout as a Core Audio defect. Microphone
+and screen permission are separate from system-audio permission. This executable
+can inherit its launching application's TCC responsibility; it does not qualify
+the installed MixRelay capture owner's permission or recovery behavior.
+
+The same fixture supports an opt-in comparison of the two public IOProc
+registration APIs:
+
+```sh
+MIXRELAY_LAB_TAP_REGISTRATION=block ./scripts/smoke-macos-application-capture.sh OWNED_ENDPOINT_UUID
+MIXRELAY_LAB_TAP_REGISTRATION=function ./scripts/smoke-macos-application-capture.sh OWNED_ENDPOINT_UUID
+```
+
+The block mode loads a lab interposer into that child only. It forwards the same
+callback and context through `AudioDeviceCreateIOProcIDWithBlock` with a null
+queue; Apple specifies synchronous invocation on the IO thread in this case.
+The product retains `AudioDeviceCreateIOProcID`. Both modes passed on 2026-10-16
+after the pending system-audio request had been approved, so the comparison does
+not support replacing the product API as a remedy for the earlier timeout.
+
 On 2026-09-02 the repeated local run captured 114,688 stereo frames at 48 kHz
 across 224 callbacks, reported a peak of 0.059986, and dropped zero frames. This
 proves the native source boundary and bounded PCM transfer; it does not yet prove
