@@ -102,7 +102,7 @@ pub unsafe extern "C" fn mr_device_io_process(
             output: copy_time(output_time),
         }
     };
-    io.measurements.callback(timing, false);
+    io.measurements.callback(timing, frames, false);
     if timing.now.flags & 2 != 0 {
         io.progress
             .callback_host

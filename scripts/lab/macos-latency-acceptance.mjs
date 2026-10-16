@@ -9,248 +9,400 @@
 // plays into D itself: that would bypass the engine and gate the report to zero.
 // --roundtrip records audio, so the terminal needs microphone permission. It uses the probe's
 // impulse mode: a route between two devices crosses clocks, so the engine resamples it and
-// no bit-exact copy of a test signal can arrive.
+// no bit-exact copy of a test signal can arrive. The round trip passes only when the probe
+// measured (one delay aligned most pulses), the recording is complete, neither device's
+// timestamps jumped, and the latency the devices report is within ROUNDTRIP tolerance of the
+// measured mean:
+//   max(32, ceil(rate / 1000))    the engine's path-agreement threshold (32 frames or 1 ms,
+//                                 rounded up; runtime_latency.rs `threshold`)
+//   + 2 frames                    the probe's pulse alignment window (MRRoundTripProbe.c,
+//                                 mr_analyse_impulses: tolerance = 2 frames of host time)
+// e.g. 47 frames at 44.1 kHz, 50 at 48 kHz, 98 at 96 kHz.
 // The endpoint must be unused by every saved graph, so the test never adds a contributor to a
 // live route. Writes name the selected graph (expectedGraphId) and its revision, so another
 // client's edit or graph selection makes them fail instead of overwriting that graph.
+// SIGINT, SIGTERM or SIGHUP stop the measurement; a confirmed test graph is then restored
+// (an unconfirmed write is never guessed at), evidence is written and the signal is re-raised.
 import { engineSocket, socketRequest } from '../local-socket.mjs';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { setTimeout as delay } from 'node:timers/promises';
+import { setTimeout as sleep } from 'node:timers/promises';
 
-const [sourceUid, endpointId, evidence, approval, ...options] = process.argv.slice(2);
-assert.equal(process.platform, 'darwin');
-assert.equal(approval, '--verify-installed-latency', 'Pass --verify-installed-latency to change the installed graph');
-assert.ok(options.every(option => option === '--roundtrip'), `Unknown option: ${options.join(' ')}`);
 const endpointPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
-assert.ok(sourceUid, 'Pass a source endpoint ID or device UID');
-// A MixRelay source endpoint by ID; any other value is a looped-back device UID.
-const sourceEndpoint = endpointPattern.test(sourceUid) ? sourceUid : undefined;
-assert.ok(!sourceUid.startsWith('io.mixrelay.'), 'Name a MixRelay source by its endpoint ID');
-assert.ok(evidence && isAbsolute(evidence), 'Evidence directory must be an absolute path');
-assert.match(endpointId ?? '', endpointPattern);
-assert.notEqual(sourceEndpoint, endpointId, 'The source and the measured endpoint must differ');
-const roundtrip = options.includes('--roundtrip');
-const uid = `io.mixrelay.audio.endpoint.${endpointId.replaceAll('-', '')}`;
-const probe = fileURLToPath(new URL('../probe-macos-roundtrip.sh', import.meta.url));
-const socket = engineSocket();
 const ids = { source: 'latency-acceptance-source', destination: 'latency-acceptance-destination' };
 // The reporter publishes once a second; the HAL needs three stable windows.
 const PUBLICATION_INTERVAL_MS = 1100;
-
 // Engine requests run as operations (crates/control-server/src/operations.rs). A client
 // operation ID makes a request idempotent while its receipt is retained (60 s), so a lost
 // reply is resent and a pending receipt is polled until the terminal result. The budget stays
 // below that retention, so a resend can never execute the request a second time.
 const OPERATION_BUDGET_MS = 45000;
 const engineHost = { host: 'mixrelay-engine' };
-async function operation(method, path, body) {
-  const id = `latency-acceptance-${randomUUID()}`;
-  const receipt = `/api/v1/operations/${id}`;
-  const headers = { ...engineHost, 'x-mixrelay-operation-request': id,
-    ...(body === undefined ? {} : { 'content-type': 'application/json' }) };
-  const deadline = Date.now() + OPERATION_BUDGET_MS;
-  let pending = false;
-  while (Date.now() < deadline) {
-    let reply;
-    try {
-      reply = pending
-        ? await socketRequest(socket, receipt, { headers: engineHost, timeoutMs: 5000 })
-        : await socketRequest(socket, path, { method, headers, body, timeoutMs: 5000 });
-    } catch {
-      await delay(250); // lost reply: resend the identical request or poll again
-      continue;
-    }
-    if (reply.headers['x-mixrelay-operation'] !== undefined) {
-      pending = true;
-      await delay(250);
-      continue;
-    }
-    // Routes outside the operation layer answer directly; an expired receipt or a lost task
-    // answers "uncertain", which never confirms whether the request took effect.
-    let parsed;
-    try {
-      parsed = reply.body ? JSON.parse(reply.body) : undefined;
-    } catch {
-      parsed = undefined;
-    }
-    assert.notEqual(parsed?.parameters?.operationOutcome, 'uncertain',
-      `${method} ${path} has no confirmed result (operation ${id}); check the graph before editing it`);
-    if (reply.headers['x-mixrelay-operation-result'] === id) {
-      // Acknowledging only reclaims the receipt; the result above is already final.
-      await socketRequest(socket, receipt, { method: 'DELETE', headers: engineHost, timeoutMs: 5000 })
-        .catch(() => {});
-    }
-    return { ...reply, json: parsed };
-  }
-  assert.fail(`${method} ${path} did not finish (operation ${id}); check the graph before editing it`);
+export const INTERRUPTIONS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+/** The engine's path-agreement threshold: max(32 destination frames, 1 ms rounded up to whole frames). */
+export const reporterThresholdFrames = rate => Math.max(32, Math.ceil(rate / 1000));
+/** MRRoundTripProbe aligns impulse arrivals within 2 frames of host time. */
+export const PROBE_UNCERTAINTY_FRAMES = 2;
+export const roundtripToleranceFrames = rate => reporterThresholdFrames(rate) + PROBE_UNCERTAINTY_FRAMES;
+
+export function parseArguments(argv) {
+  const [sourceUid, endpointId, evidence, approval, ...options] = argv;
+  assert.equal(approval, '--verify-installed-latency', 'Pass --verify-installed-latency to change the installed graph');
+  assert.ok(options.every(option => option === '--roundtrip'), `Unknown option: ${options.join(' ')}`);
+  assert.ok(sourceUid, 'Pass a source endpoint ID or device UID');
+  // A MixRelay source endpoint by ID; any other value is a looped-back device UID.
+  const sourceEndpoint = endpointPattern.test(sourceUid) ? sourceUid : undefined;
+  assert.ok(!sourceUid.startsWith('io.mixrelay.'), 'Name a MixRelay source by its endpoint ID');
+  assert.ok(evidence && isAbsolute(evidence), 'Evidence directory must be an absolute path');
+  assert.match(endpointId ?? '', endpointPattern);
+  assert.notEqual(sourceEndpoint, endpointId, 'The source and the measured endpoint must differ');
+  return { sourceUid, sourceEndpoint, endpointId, evidence, roundtrip: options.includes('--roundtrip') };
 }
-async function api(path, body) {
-  const reply = await operation(body === undefined ? 'GET' : 'PUT', `/api/v1/${path}`,
-    body === undefined ? undefined : JSON.stringify(body));
-  assert.ok(reply.status >= 200 && reply.status < 300, `/api/v1/${path}: HTTP ${reply.status} ${reply.body}`);
-  return reply.json;
-}
-function reported() {
-  const text = execFileSync('zsh', [probe, '--latency', uid], { encoding: 'utf8', timeout: 10000 });
+
+/** Reads `--latency` probe text: the input scope's reported latency, safety and stream frames. */
+export function parseReported(text) {
   const input = text.split('\n').find(line => line.startsWith('input '));
   const match = input?.match(/reports latency (\d+) \+ safety (\d+) \+ stream (\d+) frames/);
   assert.ok(match, `Cannot read the reported input latency:\n${text}`);
   return { latency: Number(match[1]), safety: Number(match[2]), stream: Number(match[3]) };
 }
-async function until(what, check, attempts, intervalMs = 100) {
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const value = await check();
-    if (value) return value;
-    await delay(intervalMs);
-  }
-  assert.fail(`Timed out waiting for ${what}`);
-}
-// Applies a graph only while `expectedGraphId` is still selected; returns the terminal reply.
-const applyGraph = (document, expectedGraphId = graphId) =>
-  operation('PUT', '/api/v1/graph', JSON.stringify({ ...document, expectedGraphId }));
-const ours = key => Object.values(ids).some(id => key === id || key.startsWith(`${id}::`));
 
-// Preconditions: nothing else routes to this endpoint or reports a latency for it.
-const catalog = await api('graphs');
-const graphId = catalog.activeId;
-for (const { id } of catalog.graphs) {
-  const document = id === graphId ? catalog.document : await api(`graphs/${encodeURIComponent(id)}`);
-  assert.ok(!document.nodes.some(node => node.type === 'virtual_endpoint' &&
-    [endpointId, sourceEndpoint].includes(node.config.id)),
-  `Graph ${id} already uses the source or measured endpoint; refusing to change a live route`);
+/**
+ * Why an impulse round trip does not confirm the reported latency (empty when it does).
+ * `stableInputLatency` is the HAL report the acceptance observed before the probe ran.
+ */
+export function roundtripProblems(report, stableInputLatency) {
+  const problems = [];
+  if (report?.mode !== 'impulse') problems.push('the probe did not run in impulse mode');
+  if (report?.measured !== true) problems.push('the probe did not measure: no single delay aligned most pulses');
+  if (report?.complete !== true) problems.push('the recording is incomplete (overflow, dropped chunks or inconsistent buffers)');
+  const jumps = report?.timestampDiscontinuities;
+  if (jumps?.output !== 0 || jumps?.input !== 0) {
+    problems.push(`device timestamps jumped (output ${jumps?.output}, input ${jumps?.input})`);
+  }
+  const rate = report?.input?.rate;
+  if (!(rate > 0) || report?.output?.rate !== rate) problems.push('the devices do not report one common rate');
+  if (report?.input?.latency !== stableInputLatency) {
+    problems.push(`the probe read input latency ${report?.input?.latency}, not the stable report ${stableInputLatency}`);
+  }
+  const reported = report?.reportedLatencyFrames;
+  const measured = report?.latencyFrames?.mean;
+  if (!Number.isFinite(reported)) problems.push('the devices do not report their full latency');
+  if (!Number.isFinite(measured)) problems.push('the probe reported no measured latency');
+  if (problems.length === 0) {
+    const tolerance = roundtripToleranceFrames(rate);
+    const difference = Math.abs(reported - measured);
+    if (difference > tolerance) {
+      problems.push(`reported ${reported} frames differs from the measured mean ${measured} by ${difference.toFixed(2)} frames (tolerance ${tolerance})`);
+    }
+  }
+  return problems;
 }
-const devices = (await api('status')).audioSession.virtualEndpointSettings.devices;
-const nativeUid = id => `io.mixrelay.audio.endpoint.${id.replaceAll('-', '')}`;
-const device = devices.find(candidate => candidate.spec.id === endpointId);
-assert.ok(device?.nativeDeviceIds.includes(uid), 'Endpoint is not published by the current engine');
-assert.ok(device.spec.capture, 'The endpoint needs a recording side');
-const sourceDevice = sourceEndpoint && devices.find(candidate => candidate.spec.id === sourceEndpoint);
-assert.ok(!sourceEndpoint || sourceDevice?.spec.render, 'The source endpoint needs a playback side');
-// The device the probe plays into.
-const playback = sourceEndpoint ? nativeUid(sourceEndpoint) : sourceUid;
-const original = await api('graph');
-assert.deepEqual(original, catalog.document, 'Graph changed during preparation');
-assert.ok(!original.nodes.some(node => Object.values(ids).includes(node.id)));
-// Older engines ignore expectedGraphId, which would leave writes unguarded. A stale revision
-// with an unselected graph ID never applies: guarded engines name the selected graph instead.
-const guard = await applyGraph(original, `${ids.source}-guard-check`);
-assert.equal(guard.status, 409, `Unexpected guard check reply: HTTP ${guard.status} ${guard.body}`);
-assert.equal(guard.json?.parameters?.selectedGraphId, graphId,
-  'This engine does not support expectedGraphId; update MixRelay before running this test');
-assert.deepEqual(await api('graph'), original, 'Graph changed during the guard check');
-const before = reported();
-assert.equal(before.latency, 0, 'The endpoint already reports a latency; refusing to judge a stale value');
-mkdirSync(evidence, { mode: 0o700 });
-const record = (name, value) =>
-  writeFileSync(join(evidence, name), `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx' });
-record('before.json', { graphId, graph: original, reported: before });
 
-const test = structuredClone(original);
-test.revision++;
-test.nodes.push(
-  sourceEndpoint
-    ? { id: ids.source, label: 'Latency source', type: 'virtual_endpoint',
-      config: { ...sourceDevice.spec, reference: { render: true, capture: false } } }
-    : { id: ids.source, label: 'Latency source', type: 'audio_device_input',
-      config: { selector: { match: 'persistent_uid', uid: sourceUid }, outputChannels: device.spec.capture.channels } },
-  { id: ids.destination, label: 'Latency destination', type: 'virtual_endpoint',
-    config: { ...device.spec, reference: { render: false, capture: true } } },
-);
-test.edges.push({
-  id: 'latency-acceptance-route',
-  source: { nodeId: ids.source, portId: sourceEndpoint ? 'from_os' : 'audio' },
-  destination: { nodeId: ids.destination, portId: 'to_os' },
-  channelMapping: { mode: 'auto' },
-});
-// 'unknown' while a write may still commit; cleanup never guesses in that state. Only a
-// confirmed 'applied' write is ours to restore: a rejected one may have lost to another writer.
-let mutation = 'none';
-let applied;
-const result = { graphId, source: sourceUid, endpoint: uid };
-const failures = [];
-try {
-  mutation = 'unknown';
-  const applying = await applyGraph(test);
-  mutation = applying.status >= 200 && applying.status < 300 ? 'applied' : 'rejected';
-  assert.ok(applying.status >= 200 && applying.status < 300, `Test graph rejected: HTTP ${applying.status} ${applying.body}`);
-  await until('the test graph', async () => (await api('graph/status')).activeRevision === test.revision, 100);
-  // The engine normalizes what it stores (for example default node controls), so the
-  // restore check compares against its applied document rather than the submitted one.
-  applied = await api('graph');
-  assert.equal(applied.revision, test.revision);
-  assert.deepEqual(applied.edges, test.edges);
-  // Samples about one publication apart, so three equal values span three reporter windows.
-  const readings = (result.readings = []);
-  result.reported = await until('a stable reported input latency', () => {
-    readings.push(reported());
-    const last = readings.slice(-3);
-    return last.length === 3 && last[0].latency > 0 && last.every(value => value.latency === last[0].latency)
-      ? last[0] : undefined;
-  }, 30, PUBLICATION_INTERVAL_MS);
-  if (roundtrip) {
-    const output = execFileSync('zsh', [probe, '--json', '--impulse', '--seconds', '5', playback, uid], { encoding: 'utf8', timeout: 60000 });
-    result.roundtrip = JSON.parse(output);
+/**
+ * Turns SIGINT/SIGTERM/SIGHUP into an abort of the measurement. Engine operations are never
+ * aborted: a write in flight runs to its terminal result, so cleanup knows whether it applied.
+ */
+export function watchInterruptions(signals, warn) {
+  const controller = new AbortController();
+  const state = {
+    received: undefined,
+    signal: controller.signal,
+    check() {
+      if (state.received) throw interruptedError(state.received);
+    },
+    dispose() {
+      for (const name of INTERRUPTIONS) signals.removeListener(name, listener);
+    },
+  };
+  function listener(name) {
+    if (state.received) {
+      warn(`${name}: still restoring the original graph; each step is bounded. `
+        + 'Forcing an exit now (kill -9) leaves the graph unchecked.');
+      return;
+    }
+    state.received = name;
+    warn(`${name}: stopping the measurement; the original graph is restored before exit.`);
+    controller.abort(interruptedError(name));
   }
-  record('measured.json', { graph: applied, ...result });
-} catch (error) {
-  failures.push(error);
+  for (const name of INTERRUPTIONS) signals.on(name, listener);
+  return state;
 }
-// Cleanup runs whether or not the measurement succeeded; its own failure is kept too.
-try {
-  if (mutation === 'unknown') {
-    assert.fail(`The test graph operation has no terminal result; check graph ${graphId} (original saved in ${evidence})`);
+const interruptedError = signal => Object.assign(new Error(`Interrupted by ${signal}`), { signal });
+
+function engineOperations(io) {
+  async function operation(method, path, body) {
+    const id = `latency-acceptance-${randomUUID()}`;
+    const receipt = `/api/v1/operations/${id}`;
+    const headers = { ...engineHost, 'x-mixrelay-operation-request': id,
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }) };
+    const deadline = io.now() + OPERATION_BUDGET_MS;
+    let pending = false;
+    while (io.now() < deadline) {
+      let reply;
+      try {
+        reply = pending
+          ? await io.request(receipt, { headers: engineHost, timeoutMs: 5000 })
+          : await io.request(path, { method, headers, body, timeoutMs: 5000 });
+      } catch {
+        await io.delay(250); // lost reply: resend the identical request or poll again
+        continue;
+      }
+      if (reply.headers['x-mixrelay-operation'] !== undefined) {
+        pending = true;
+        await io.delay(250);
+        continue;
+      }
+      // Routes outside the operation layer answer directly; an expired receipt or a lost task
+      // answers "uncertain", which never confirms whether the request took effect.
+      let parsed;
+      try {
+        parsed = reply.body ? JSON.parse(reply.body) : undefined;
+      } catch {
+        parsed = undefined;
+      }
+      assert.notEqual(parsed?.parameters?.operationOutcome, 'uncertain',
+        `${method} ${path} has no confirmed result (operation ${id}); check the graph before editing it`);
+      if (reply.headers['x-mixrelay-operation-result'] === id) {
+        // Acknowledging only reclaims the receipt; the result above is already final.
+        await io.request(receipt, { method: 'DELETE', headers: engineHost, timeoutMs: 5000 }).catch(() => {});
+      }
+      return { ...reply, json: parsed };
+    }
+    assert.fail(`${method} ${path} did not finish (operation ${id}); check the graph before editing it`);
   }
-  if (mutation === 'applied') await restore();
-} catch (error) {
-  failures.push(error);
+  async function api(path, body) {
+    const reply = await operation(body === undefined ? 'GET' : 'PUT', `/api/v1/${path}`,
+      body === undefined ? undefined : JSON.stringify(body));
+    assert.ok(reply.status >= 200 && reply.status < 300, `/api/v1/${path}: HTTP ${reply.status} ${reply.body}`);
+    return reply.json;
+  }
+  return { operation, api };
 }
-if (failures.length) {
-  // Keep what was observed so a failed run can be diagnosed from its evidence.
-  record('failed.json', {
-    errors: failures.map(String), graph: applied, status: await api('status').catch(String), ...result,
+
+/**
+ * Runs the acceptance. `io` supplies the engine transport (`request`), the probe (`reported`,
+ * `roundtrip`), time (`now`, `delay`), signals and logging, so tests run it without an engine.
+ */
+export async function runAcceptance(options, io) {
+  const interruption = watchInterruptions(io.signals, io.warn);
+  try {
+    return await acceptance(options, io, interruption);
+  } finally {
+    interruption.dispose();
+    // With our listeners gone, the re-raised signal ends the process with its default action.
+    if (interruption.received) io.signals.kill(io.signals.pid, interruption.received);
+  }
+}
+
+async function acceptance({ sourceUid, sourceEndpoint, endpointId, evidence, roundtrip }, io, interruption) {
+  const { operation, api } = engineOperations(io);
+  const uid = `io.mixrelay.audio.endpoint.${endpointId.replaceAll('-', '')}`;
+  const nativeUid = id => `io.mixrelay.audio.endpoint.${id.replaceAll('-', '')}`;
+  // Measurement waits stop on an interruption; cleanup waits always finish.
+  async function until(what, check, attempts, intervalMs = 100, abort = undefined) {
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      if (abort) interruption.check();
+      const value = await check();
+      if (value) return value;
+      // An aborted wait reports the interruption, not a generic AbortError.
+      await io.delay(intervalMs, abort).catch(error => { interruption.check(); throw error; });
+    }
+    assert.fail(`Timed out waiting for ${what}`);
+  }
+  // Applies a graph only while `expectedGraphId` is still selected; returns the terminal reply.
+  const applyGraph = (document, expectedGraphId) =>
+    operation('PUT', '/api/v1/graph', JSON.stringify({ ...document, expectedGraphId }));
+  const ours = key => Object.values(ids).some(id => key === id || key.startsWith(`${id}::`));
+
+  // Preconditions: nothing else routes to this endpoint or reports a latency for it.
+  const catalog = await api('graphs');
+  const graphId = catalog.activeId;
+  for (const { id } of catalog.graphs) {
+    interruption.check();
+    const document = id === graphId ? catalog.document : await api(`graphs/${encodeURIComponent(id)}`);
+    assert.ok(!document.nodes.some(node => node.type === 'virtual_endpoint' &&
+      [endpointId, sourceEndpoint].includes(node.config.id)),
+    `Graph ${id} already uses the source or measured endpoint; refusing to change a live route`);
+  }
+  const devices = (await api('status')).audioSession.virtualEndpointSettings.devices;
+  const device = devices.find(candidate => candidate.spec.id === endpointId);
+  assert.ok(device?.nativeDeviceIds.includes(uid), 'Endpoint is not published by the current engine');
+  assert.ok(device.spec.capture, 'The endpoint needs a recording side');
+  const sourceDevice = sourceEndpoint && devices.find(candidate => candidate.spec.id === sourceEndpoint);
+  assert.ok(!sourceEndpoint || sourceDevice?.spec.render, 'The source endpoint needs a playback side');
+  // The device the probe plays into.
+  const playback = sourceEndpoint ? nativeUid(sourceEndpoint) : sourceUid;
+  const original = await api('graph');
+  assert.deepEqual(original, catalog.document, 'Graph changed during preparation');
+  assert.ok(!original.nodes.some(node => Object.values(ids).includes(node.id)));
+  interruption.check();
+  const before = await io.reported(uid);
+  assert.equal(before.latency, 0, 'The endpoint already reports a latency; refusing to judge a stale value');
+  mkdirSync(evidence, { mode: 0o700 });
+  const record = (name, value) =>
+    writeFileSync(join(evidence, name), `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx' });
+  record('before.json', { graphId, graph: original, reported: before });
+  interruption.check();
+
+  const test = structuredClone(original);
+  test.revision++;
+  test.nodes.push(
+    sourceEndpoint
+      ? { id: ids.source, label: 'Latency source', type: 'virtual_endpoint',
+        config: { ...sourceDevice.spec, reference: { render: true, capture: false } } }
+      : { id: ids.source, label: 'Latency source', type: 'audio_device_input',
+        config: { selector: { match: 'persistent_uid', uid: sourceUid }, outputChannels: device.spec.capture.channels } },
+    { id: ids.destination, label: 'Latency destination', type: 'virtual_endpoint',
+      config: { ...device.spec, reference: { render: false, capture: true } } },
+  );
+  test.edges.push({
+    id: 'latency-acceptance-route',
+    source: { nodeId: ids.source, portId: sourceEndpoint ? 'from_os' : 'audio' },
+    destination: { nodeId: ids.destination, portId: 'to_os' },
+    channelMapping: { mode: 'auto' },
   });
-  throw failures[0];
-}
-
-async function restore() {
-  // Our write was confirmed at test.revision and every write advances the revision.
-  const current = await api('graph');
-  // Every edit advances the revision, so an unchanged revision and document mean no one else edited.
-  const untouched = current.revision === test.revision &&
-    (applied ? JSON.stringify(current) === JSON.stringify(applied)
-      : JSON.stringify(current.edges) === JSON.stringify(test.edges));
-  assert.ok(untouched, `Concurrent edit: refusing automatic restore; original saved in ${evidence}`);
-  const restored = { ...original, revision: test.revision + 1 };
-  const restoring = await applyGraph(restored);
-  assert.ok(restoring.status >= 200 && restoring.status < 300,
-    `Restore rejected: HTTP ${restoring.status} ${restoring.body}; original saved in ${evidence}`);
-  await until('the restored graph', async () => (await api('graph/status')).activeRevision === restored.revision, 100);
-  assert.deepEqual(await api('graph'), restored);
-  // An open editor saves positions for the temporary nodes; drop only those.
-  const layout = await api(`graphs/${encodeURIComponent(graphId)}/layout`);
-  const positions = Object.fromEntries(Object.entries(layout.layout.positions).filter(([key]) => !ours(key)));
-  if (Object.keys(positions).length !== Object.keys(layout.layout.positions).length) {
-    await api(`graphs/${encodeURIComponent(graphId)}/layout`, {
-      expectedLayoutRevision: layout.layoutRevision, layout: { ...layout.layout, positions },
-    });
+  // 'unknown' while a write may still commit; cleanup never guesses in that state. Only a
+  // confirmed 'applied' write is ours to restore: a rejected one may have lost to another writer.
+  let mutation = 'none';
+  let applied;
+  const result = { graphId, source: sourceUid, endpoint: uid };
+  const failures = [];
+  const abort = interruption.signal;
+  try {
+    mutation = 'unknown';
+    // Not abortable: an interruption waits for this write's terminal result.
+    const applying = await applyGraph(test, graphId);
+    mutation = applying.status >= 200 && applying.status < 300 ? 'applied' : 'rejected';
+    assert.ok(applying.status >= 200 && applying.status < 300, `Test graph rejected: HTTP ${applying.status} ${applying.body}`);
+    await until('the test graph', async () => (await api('graph/status')).activeRevision === test.revision, 100, 100, abort);
+    // The engine normalizes what it stores (for example default node controls), so the
+    // restore check compares against its applied document rather than the submitted one.
+    applied = await api('graph');
+    assert.equal(applied.revision, test.revision);
+    assert.deepEqual(applied.edges, test.edges);
+    // Samples about one publication apart, so three equal values span three reporter windows.
+    const readings = (result.readings = []);
+    result.reported = await until('a stable reported input latency', async () => {
+      readings.push(await io.reported(uid, abort));
+      const last = readings.slice(-3);
+      return last.length === 3 && last[0].latency > 0 && last.every(value => value.latency === last[0].latency)
+        ? last[0] : undefined;
+    }, 30, PUBLICATION_INTERVAL_MS, abort);
+    if (roundtrip) {
+      interruption.check();
+      const probe = await io.roundtrip(playback, uid, abort);
+      try {
+        result.roundtrip = JSON.parse(probe.stdout);
+      } catch {
+        result.roundtrip = { unparsedOutput: probe.stdout };
+      }
+      interruption.check();
+      const problems = roundtripProblems(result.roundtrip, result.reported.latency);
+      if (probe.status !== 0) problems.unshift(`the probe exited with status ${probe.status}`);
+      const rate = result.roundtrip.input?.rate;
+      result.roundtripToleranceFrames = rate > 0 ? roundtripToleranceFrames(rate) : null;
+      assert.deepEqual(problems, [], `Round trip does not confirm the reported latency:\n${problems.join('\n')}`);
+    }
+    record('measured.json', { graph: applied, ...result });
+  } catch (error) {
+    failures.push(error);
   }
-  // With the route gone the endpoint has no measurement, so the HAL must report unknown (0).
-  record('restored.json', { graph: restored, reported: await until('the reported latency to clear', () => {
-    const value = reported();
-    return value.latency === 0 ? value : undefined;
-  }, 10, PUBLICATION_INTERVAL_MS) });
+  // Cleanup runs whether or not the measurement succeeded or was interrupted; its own
+  // failure is kept too. Its waits ignore the interruption so a confirmed write is undone.
+  try {
+    if (mutation === 'unknown') {
+      assert.fail(`The test graph operation has no terminal result; check graph ${graphId} (original saved in ${evidence})`);
+    }
+    if (mutation === 'applied') await restore();
+  } catch (error) {
+    failures.push(error);
+  }
+  if (failures.length) {
+    // Keep what was observed so a failed run can be diagnosed from its evidence.
+    record('failed.json', {
+      errors: failures.map(String), interrupted: interruption.received, mutation, graph: applied,
+      status: await api('status').catch(String), ...result,
+    });
+    throw failures[0];
+  }
+  return {
+    endpoint: uid,
+    source: sourceUid,
+    reportedInputLatencyFrames: result.reported.latency,
+    roundtripLatencyFrames: result.roundtrip?.latencyFrames,
+    roundtripLatencyMs: result.roundtrip?.latencyMs,
+    evidence,
+  };
+
+  async function restore() {
+    // Our write was confirmed at test.revision and every write advances the revision.
+    const current = await api('graph');
+    // Every edit advances the revision, so an unchanged revision and document mean no one else edited.
+    const untouched = current.revision === test.revision &&
+      (applied ? JSON.stringify(current) === JSON.stringify(applied)
+        : JSON.stringify(current.edges) === JSON.stringify(test.edges));
+    assert.ok(untouched, `Concurrent edit: refusing automatic restore; original saved in ${evidence}`);
+    const restored = { ...original, revision: test.revision + 1 };
+    const restoring = await applyGraph(restored, graphId);
+    assert.ok(restoring.status >= 200 && restoring.status < 300,
+      `Restore rejected: HTTP ${restoring.status} ${restoring.body}; original saved in ${evidence}`);
+    await until('the restored graph', async () => (await api('graph/status')).activeRevision === restored.revision, 100);
+    assert.deepEqual(await api('graph'), restored);
+    // An open editor saves positions for the temporary nodes; drop only those.
+    const layout = await api(`graphs/${encodeURIComponent(graphId)}/layout`);
+    const positions = Object.fromEntries(Object.entries(layout.layout.positions).filter(([key]) => !ours(key)));
+    if (Object.keys(positions).length !== Object.keys(layout.layout.positions).length) {
+      await api(`graphs/${encodeURIComponent(graphId)}/layout`, {
+        expectedLayoutRevision: layout.layoutRevision, layout: { ...layout.layout, positions },
+      });
+    }
+    // With the route gone the endpoint has no measurement, so the HAL must report unknown (0).
+    record('restored.json', { graph: restored, reported: await until('the reported latency to clear', async () => {
+      const value = await io.reported(uid);
+      return value.latency === 0 ? value : undefined;
+    }, 10, PUBLICATION_INTERVAL_MS) });
+  }
 }
 
-console.log(JSON.stringify({
-  endpoint: uid,
-  source: sourceUid,
-  reportedInputLatencyFrames: result.reported.latency,
-  roundtripLatencyFrames: result.roundtrip?.latencyFrames,
-  roundtripLatencyMs: result.roundtrip?.latencyMs,
-  evidence,
-}, null, 2));
+function run(file, args, { timeout, signal }) {
+  return new Promise(resolvePromise => {
+    execFile(file, args, { encoding: 'utf8', timeout, signal, maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+      resolvePromise({ status: error ? (Number.isInteger(error.code) ? error.code : 1) : 0, stdout, stderr, error });
+    });
+  });
+}
+
+/** The installed engine socket and the round-trip probe. */
+export function installedIo() {
+  const socket = engineSocket();
+  const probe = fileURLToPath(new URL('../probe-macos-roundtrip.sh', import.meta.url));
+  return {
+    request: (path, options) => socketRequest(socket, path, options),
+    async reported(uid, signal) {
+      const reply = await run('zsh', [probe, '--latency', uid], { timeout: 10000, signal });
+      if (signal?.aborted) throw signal.reason;
+      assert.equal(reply.status, 0, `Cannot read the reported latency: ${reply.stderr || reply.error?.message}`);
+      return parseReported(reply.stdout);
+    },
+    async roundtrip(playback, uid, signal) {
+      const reply = await run('zsh', [probe, '--json', '--impulse', '--seconds', '5', playback, uid], { timeout: 60000, signal });
+      if (signal?.aborted) throw signal.reason;
+      return reply;
+    },
+    now: Date.now,
+    delay: (ms, signal) => sleep(ms, undefined, { signal }),
+    signals: process,
+    warn: message => console.error(message),
+  };
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  assert.equal(process.platform, 'darwin');
+  const summary = await runAcceptance(parseArguments(process.argv.slice(2)), installedIo());
+  console.log(JSON.stringify(summary, null, 2));
+}

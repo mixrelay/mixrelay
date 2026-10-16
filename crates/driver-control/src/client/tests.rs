@@ -268,21 +268,21 @@ async fn socket_clients_keep_response_limits_json_errors_and_no_redirects() {
 }
 
 #[test]
-fn runtime_latency_handles_older_services_and_additive_replies() {
-    assert_eq!(
-        decode_latency_response(reqwest::StatusCode::NOT_FOUND, b"old service").unwrap(),
-        None
-    );
+fn runtime_latency_replies_decode_and_rejections_stay_errors() {
+    assert!(matches!(
+        decode_latency_response(reqwest::StatusCode::NOT_FOUND, b"not found"),
+        Err(DriverError::Remote { status: 404, .. })
+    ));
     assert_eq!(
         decode_latency_response(
             reqwest::StatusCode::OK,
-            br#"{"accepted":true,"lease":null,"futureField":0}"#
+            br#"{"accepted":true,"lease":null}"#
         )
         .unwrap(),
-        Some(crate::LatencyReply {
+        crate::LatencyReply {
             accepted: true,
             lease: None
-        })
+        }
     );
     assert!(matches!(
         decode_latency_response(reqwest::StatusCode::CONFLICT, b"lease conflict"),

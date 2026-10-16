@@ -20,7 +20,7 @@ pub const NAME_BYTES: usize = 128;
 pub const MAX_TRANSPORT_BUNDLES: usize = 32;
 static PRODUCER_POLICY: Mutex<Vec<CString>> = Mutex::new(Vec::new());
 
-/// Configures the service's additive v1 presentation policy before publication.
+/// Configures the service's transport presentation policy before publication.
 /// Invalid input retains the previous policy; this never grants device access.
 pub fn set_transport_compatibility(bundles: &[String]) -> bool {
     if bundles.len() > MAX_TRANSPORT_BUNDLES
@@ -329,7 +329,9 @@ fn populate(message: Message, entries: &[InventoryEntry], generation: u64) -> Op
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     write_policy(message.0, &policy)?;
-    Some(message)
+    // Every snapshot carries the latency list; the service replaces it with current entries.
+    // SAFETY: `message` is the live dictionary this function exclusively owns.
+    unsafe { write_input_latencies(message.0, &[]) }.then_some(message)
 }
 fn write_policy(message: Xpc, bundles: &[CString]) -> Option<()> {
     let array = Message::new(unsafe { xpc_array_create(ptr::null(), 0) })?;
@@ -343,9 +345,6 @@ fn write_policy(message: Xpc, bundles: &[CString]) -> Option<()> {
 fn parse_policy(message: Xpc) -> Option<TransportCompatibility> {
     let value = field(message, c"transport_compatibility");
     let mut result = TransportCompatibility::default();
-    if value.is_null() {
-        return Some(result);
-    }
     if !is_type(value, (&raw const _xpc_type_array).cast()) {
         return None;
     }
@@ -410,7 +409,7 @@ fn parse_entry(item: Xpc) -> Option<(InventoryEntry, OwnedFd)> {
     Some((entry, file.into()))
 }
 
-/// Creates a compatible v1 inventory request; caller owns the returned XPC object.
+/// Creates a v1 inventory request; caller owns the returned XPC object.
 #[unsafe(no_mangle)]
 pub extern "C" fn mr_hal_control_create_inventory_request() -> Xpc {
     new_message(c"request_inventory").map_or(ptr::null_mut(), Message::into_raw)
@@ -660,7 +659,7 @@ mod tests {
     use std::os::fd::AsRawFd;
 
     #[test]
-    fn transport_policy_codec_is_additive_bounded_and_transactional() {
+    fn transport_policy_codec_is_required_bounded_and_transactional() {
         let message = message(&[]);
         unsafe {
             xpc_dictionary_set_value(
@@ -670,20 +669,15 @@ mod tests {
             );
         };
         let mut output = InventorySnapshot::default();
-        assert!(unsafe { mr_hal_control_parse_inventory_snapshot(message.0, &raw mut output) });
-        assert!(output.transport_compatibility.identifiers().is_empty());
+        assert!(!unsafe { mr_hal_control_parse_inventory_snapshot(message.0, &raw mut output) });
         write_policy(message.0, &[]).unwrap();
         assert!(unsafe { mr_hal_control_parse_inventory_snapshot(message.0, &raw mut output) });
+        assert!(output.transport_compatibility.identifiers().is_empty());
         let valid = [c"com.test.App".to_owned(), c"net.test.Other".to_owned()];
         write_policy(message.0, &valid).unwrap();
         assert!(unsafe { mr_hal_control_parse_inventory_snapshot(message.0, &raw mut output) });
         let expected = output.transport_compatibility.identifiers();
         assert_eq!(expected, ["com.test.App", "net.test.Other"]);
-        // An old v1 reader ignores the additive key and still sees its entries.
-        assert_eq!(
-            unsafe { xpc_array_get_count(field(message.0, c"entries")) },
-            0
-        );
         for malformed in [
             vec![c"".to_owned()],
             vec![c"com..app".to_owned()],

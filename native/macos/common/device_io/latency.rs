@@ -19,21 +19,24 @@ pub(super) struct Measurements {
 }
 
 impl Measurements {
-    pub(super) fn callback(&self, timing: IoTiming, direct: bool) {
+    /// Records one callback's timing for the `frames` it moved. Every tap is weighted by
+    /// frames, like FIFO residence, so a window mixing quanta keeps a per-frame mean.
+    pub(super) fn callback(&self, timing: IoTiming, frames: u32, direct: bool) {
+        let weight = u64::from(frames);
         let (input, output) = if direct {
             (&self.direct_acquisition, &self.direct_presentation)
         } else {
             (&self.acquisition, &self.presentation)
         };
-        input.record(interval(timing.now, timing.input), 1);
-        output.record(interval(timing.output, timing.now), 1);
+        input.record(interval(timing.now, timing.input), weight);
+        output.record(interval(timing.output, timing.now), weight);
         let (input, output) = if direct {
             (&self.direct_input_scalar, &self.direct_output_scalar)
         } else {
             (&self.input_scalar, &self.output_scalar)
         };
-        scalar(input, timing.input);
-        scalar(output, timing.output);
+        scalar(input, timing.input, weight);
+        scalar(output, timing.output, weight);
     }
 }
 
@@ -44,10 +47,10 @@ impl Measurements {
     clippy::cast_sign_loss,
     reason = "validated finite positive fixed-point scalar"
 )]
-fn scalar(tap: &Residence, timestamp: super::IoTimestamp) {
+fn scalar(tap: &Residence, timestamp: super::IoTimestamp, weight: u64) {
     let value = timestamp.rate_scalar * 1e9;
     if timestamp.flags & 4 != 0 && value.is_finite() && (1.0..1e12).contains(&value) {
-        tap.record(Some(value.round() as u64), 1);
+        tap.record(Some(value.round() as u64), weight);
     }
 }
 
@@ -132,12 +135,14 @@ fn coherent_snapshot(
     })
 }
 
-/// Same `IOProc` timings for the bindings actually rendered by the direct master.
+/// Same `IOProc` timings for the bindings actually rendered by the direct master. A
+/// quantum rendered in several graph cycles records each cycle's `frames` once, so the
+/// callback's total weight is its frame count.
 /// # Safety
 /// Direct rendering serializes this tap's sole writer; IO is retained until drain.
-pub unsafe fn record_direct_latency(io: *const DeviceIo, timing: IoTiming) {
+pub unsafe fn record_direct_latency(io: *const DeviceIo, timing: IoTiming, frames: u32) {
     if let Some(io) = unsafe { io.as_ref() } {
-        io.measurements.callback(timing, true);
+        io.measurements.callback(timing, frames, true);
     }
 }
 
@@ -181,11 +186,12 @@ mod tests {
         };
         let allocations = allocation_counter::measure(|| {
             for invalid in [f64::NAN, f64::INFINITY, 0.0, -1.0, 1000.0] {
-                io.measurements.callback(timing(invalid, invalid), false);
+                io.measurements
+                    .callback(timing(invalid, invalid), 256, false);
             }
-            io.measurements.callback(timing(1.000, 0.998), false);
-            io.measurements.callback(timing(1.002, 1.000), false);
-            unsafe { record_direct_latency(&raw const io, timing(1.001, 1.002)) };
+            io.measurements.callback(timing(1.000, 0.998), 256, false);
+            io.measurements.callback(timing(1.002, 1.000), 256, false);
+            unsafe { record_direct_latency(&raw const io, timing(1.001, 1.002), 256) };
         });
         assert_eq!(allocations.count_total, 0);
         let next = unsafe { latency_snapshot(&raw const io, false) }.unwrap();
@@ -223,8 +229,8 @@ mod tests {
         };
         let before = unsafe { latency_snapshot(&raw const io, false) }.unwrap();
         let allocations = allocation_counter::measure(|| {
-            io.measurements.callback(timing, false);
-            unsafe { record_direct_latency(&raw const io, timing) };
+            io.measurements.callback(timing, 32, false);
+            unsafe { record_direct_latency(&raw const io, timing, 32) };
         });
         assert_eq!(allocations.count_total, 0);
         let after = unsafe { latency_snapshot(&raw const io, false) }.unwrap();
@@ -237,8 +243,8 @@ mod tests {
             unsafe { latency_snapshot(&raw const io, true) }
                 .unwrap()
                 .acquisition
-                .sum,
-            60
+                .mean_since(ResidenceSnapshot::default()),
+            Some(60.0)
         );
         for invalid in [
             IoTiming::default(),
@@ -247,7 +253,7 @@ mod tests {
                 ..timing
             },
         ] {
-            io.measurements.callback(invalid, false);
+            io.measurements.callback(invalid, 32, false);
         }
         assert_eq!(
             unsafe { latency_snapshot(&raw const io, false) }
@@ -257,6 +263,49 @@ mod tests {
             None
         );
         assert!(unsafe { latency_snapshot(std::ptr::null(), false) }.is_none());
-        unsafe { record_direct_latency(std::ptr::null(), timing) };
+        unsafe { record_direct_latency(std::ptr::null(), timing, 32) };
+    }
+
+    /// Host intervals average per frame like FIFO residence. Counting callbacks once
+    /// each, a 64- and a 1024-frame callback would mean 544 ticks instead of 967.53.
+    #[test]
+    fn variable_quanta_weight_host_intervals_by_frames_once_per_direct_split() {
+        let io = DeviceIo::new(c"unit", true, 1, 48_000).unwrap();
+        let time = |host_time| IoTimestamp {
+            host_time,
+            flags: 2,
+            ..Default::default()
+        };
+        // Each callback arrives one tick per frame after its first captured frame.
+        let quantum = |first: u64, frames: u32| IoTiming {
+            now: time(first + u64::from(frames)),
+            input: time(first),
+            output: time(first + 2 * u64::from(frames)),
+        };
+        let before = unsafe { latency_snapshot(&raw const io, false) }.unwrap();
+        let allocations = allocation_counter::measure(|| {
+            io.measurements.callback(quantum(1_000, 64), 64, false);
+            io.measurements
+                .callback(quantum(2_000, 1_024), 1_024, false);
+            // The direct master renders its 1024-frame quantum in four graph cycles.
+            unsafe { record_direct_latency(&raw const io, quantum(1_000, 64), 64) };
+            for _ in 0..4 {
+                unsafe { record_direct_latency(&raw const io, quantum(2_000, 1_024), 256) };
+            }
+        });
+        assert_eq!(allocations.count_total, 0);
+        let frame_weighted = (64.0 * 64.0 + 1_024.0 * 1_024.0) / 1_088.0;
+        for direct in [false, true] {
+            let after = unsafe { latency_snapshot(&raw const io, direct) }.unwrap();
+            assert_eq!(after.acquisition.weight, 1_088);
+            assert_eq!(
+                after.acquisition.mean_since(before.acquisition),
+                Some(frame_weighted)
+            );
+            assert_eq!(
+                after.presentation.mean_since(before.presentation),
+                Some(frame_weighted)
+            );
+        }
     }
 }

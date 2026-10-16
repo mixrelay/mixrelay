@@ -29,14 +29,49 @@ pub struct Residence {
     sum: AtomicU64,
     weight: AtomicU64,
     invalid: AtomicU64,
+    /// Publisher-only: the current source's last weight and the mirror values it continues.
+    source: Source,
 }
+
+#[derive(Debug, Default)]
+struct Source {
+    weight: AtomicU64,
+    base_sum: AtomicU64,
+    base_weight: AtomicU64,
+    base_invalid: AtomicU64,
+}
+
 impl Residence {
     /// Mirror an exclusively owned converter's cumulative tap to its retained adapter.
+    /// A replacement converter's tap restarts from zero, so a weight below the last
+    /// published one is a new source (a real `u64` frame count never wraps). The mirror
+    /// continues from its last value and counts that break as invalid: only the window
+    /// spanning the replacement is skipped, and no reader sees cumulative values regress.
     pub fn publish(&self, value: ResidenceSnapshot) {
+        // Relaxed: `source` is read and written only by this serialized publisher.
+        let source = &self.source;
+        if value.weight < source.weight.load(Ordering::Relaxed) {
+            source
+                .base_sum
+                .store(self.sum.load(Ordering::Relaxed), Ordering::Relaxed);
+            source
+                .base_weight
+                .store(self.weight.load(Ordering::Relaxed), Ordering::Relaxed);
+            source.base_invalid.store(
+                self.invalid.load(Ordering::Relaxed).wrapping_add(1),
+                Ordering::Relaxed,
+            );
+        }
+        source.weight.store(value.weight, Ordering::Relaxed);
+        let base =
+            |field: &AtomicU64, value: u64| field.load(Ordering::Relaxed).wrapping_add(value);
         self.sequence.fetch_add(1, Ordering::SeqCst);
-        self.sum.store(value.sum, Ordering::SeqCst);
-        self.weight.store(value.weight, Ordering::SeqCst);
-        self.invalid.store(value.invalid, Ordering::SeqCst);
+        self.sum
+            .store(base(&source.base_sum, value.sum), Ordering::SeqCst);
+        self.weight
+            .store(base(&source.base_weight, value.weight), Ordering::SeqCst);
+        self.invalid
+            .store(base(&source.base_invalid, value.invalid), Ordering::SeqCst);
         self.sequence.fetch_add(1, Ordering::SeqCst);
     }
     pub fn record(&self, value: Option<u64>, weight: u64) {
@@ -218,6 +253,36 @@ mod tests {
             }),
             Some(2.0)
         );
+    }
+
+    /// A replacement converter restarts its tap from zero. Mirrored raw, the window across
+    /// it wraps both differences and a 1024-frame mean reads as about one frame.
+    #[test]
+    fn a_replacement_converter_skips_only_the_window_that_spans_it() {
+        let converter = |frames| ResidenceSnapshot {
+            sum: 1_024 * frames,
+            weight: frames,
+            invalid: 0,
+        };
+        let mirror = Residence::default();
+        mirror.publish(converter(1_000_000));
+        let before = mirror.snapshot().unwrap();
+        let measured = allocation_counter::measure(|| mirror.publish(converter(4_800)));
+        assert_eq!(measured.count_total, 0);
+        let spanning = mirror.snapshot().unwrap();
+        assert_eq!(spanning.mean_since(before), None);
+        assert!(spanning.weight > before.weight && spanning.sum > before.sum);
+        mirror.publish(converter(9_600));
+        let after = mirror.snapshot().unwrap();
+        assert_eq!(after.mean_since(spanning), Some(1_024.0));
+        // The replaced converter's own invalid count restarts too; that cannot hide the break.
+        mirror.publish(ResidenceSnapshot {
+            invalid: 1,
+            ..converter(9_700)
+        });
+        let flagged = mirror.snapshot().unwrap();
+        mirror.publish(converter(100));
+        assert_eq!(mirror.snapshot().unwrap().mean_since(flagged), None);
     }
 
     /// Whole blocks written at once and read one period later: every frame waits a full

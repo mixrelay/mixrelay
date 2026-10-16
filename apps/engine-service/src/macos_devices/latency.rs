@@ -1,10 +1,10 @@
 //! Retained atomic evidence; only the reporter acquires the control-side cache lock.
-use super::{DeviceSet, MacDevices, ffi};
+use super::{DeviceSet, MacDevices, device::Device, ffi};
 use mixrelay_audio_engine::BlockProcessor;
 #[cfg(test)]
 use mixrelay_audio_io::residence::{EdgeSnapshot, PassageSnapshot};
 use mixrelay_audio_io::{
-    process::ProcessReport,
+    process::{ProcessCycle, ProcessReport},
     residence::{Residence, ResidenceSnapshot},
 };
 use mixrelay_macos_transport::device_io::{
@@ -161,13 +161,16 @@ impl DeviceSet {
 }
 
 impl super::direct::DirectPlan {
+    /// Records one graph cycle of a direct quantum: its `cycle.frames` weight the
+    /// quantum's timing, so the cycles of one split callback add up to its frames.
     pub(crate) fn record_latency(
         &self,
         processor: &BlockProcessor,
         report: ProcessReport,
         timing: Option<IoTiming>,
-        epoch: u64,
+        cycle: ProcessCycle,
     ) {
+        let epoch = cycle.clock.epoch;
         let _ = processor.acknowledge_content_latency();
         for owner in &self.owners {
             let ready = self
@@ -177,7 +180,13 @@ impl super::direct::DirectPlan {
                 .all(|(id, device)| processor.binding_content_latency_ready(id, device.input));
             if let Some(timing) = timing {
                 // SAFETY: this direct master is the sole writer of each direct tap.
-                unsafe { record_direct_latency(owner.native.pointer.as_ptr().cast(), timing) };
+                unsafe {
+                    record_direct_latency(
+                        owner.native.pointer.as_ptr().cast(),
+                        timing,
+                        cycle.frames,
+                    );
+                };
             }
             owner
                 .native
@@ -203,6 +212,108 @@ impl super::direct::DirectPlan {
     }
 }
 
+/// Retained metadata that qualifies one device's tap snapshot.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Context {
+    revision: u64,
+    epoch: u64,
+    graph_epoch: u64,
+    generation: u64,
+    clock_breaks: u64,
+    native_rate: u32,
+    graph_rate: u32,
+    direct: bool,
+    ready: bool,
+    faults: u64,
+    src_delay: u64,
+}
+
+impl Context {
+    // Acquire pairs with each writer's Release store of the value read.
+    fn read(device: &Device, timing_pending: bool) -> Self {
+        let taps = &device.native.latency;
+        let direct = device.native.render.enabled();
+        let pointer = device.native.pointer.as_ptr();
+        Self {
+            revision: taps.revision.load(Ordering::Acquire),
+            epoch: device.epoch.load(Ordering::Acquire),
+            graph_epoch: taps.graph_epoch.load(Ordering::Acquire),
+            generation: device.native.render.generation.load(Ordering::Acquire),
+            // SAFETY: the caller's Arc retains the initialized owner; only atomics are read.
+            clock_breaks: unsafe { ffi::mr_device_io_clock_discontinuities(pointer) },
+            native_rate: device.native_rate.load(Ordering::Acquire),
+            graph_rate: device.graph_rate.load(Ordering::Acquire),
+            direct,
+            ready: !timing_pending
+                && !device.failed.load(Ordering::Acquire)
+                && (direct || device.ready())
+                && device.activity.ready()
+                && taps.compensation_ready.load(Ordering::Acquire),
+            faults: taps
+                .faults
+                .load(Ordering::Acquire)
+                // SAFETY: as above.
+                .wrapping_add(unsafe { ffi::mr_device_io_overflows(pointer) }),
+            src_delay: taps.src_delay.load(Ordering::Acquire),
+        }
+    }
+}
+
+/// One coherent read of each cumulative tap, or `None` where a writer was busy.
+struct Taps {
+    native: Option<LatencySnapshot>,
+    src_input: Option<ResidenceSnapshot>,
+    src_output: Option<ResidenceSnapshot>,
+}
+
+fn read_taps(device: &Device, direct: bool) -> Taps {
+    let taps = &device.native.latency;
+    Taps {
+        // SAFETY: the caller's Arc retains the initialized owner; only atomics are read.
+        native: unsafe { latency_snapshot(device.native.pointer.as_ptr().cast(), direct) },
+        src_input: taps.src_input.snapshot(),
+        src_output: taps.src_output.snapshot(),
+    }
+}
+
+/// Reads the context on both sides of the taps. A converter, owner or clock replaced
+/// meanwhile would pair one context's cumulative taps with another's, and that pair
+/// would then serve as the new context's baseline. Such a read is unsampled: its window
+/// is skipped and, being unsampled, it is never a baseline.
+fn observe(
+    device: &Device,
+    timing_pending: bool,
+    taps: impl FnOnce(&Device, bool) -> Taps,
+) -> Observation {
+    let before = Context::read(device, timing_pending);
+    let Taps {
+        native,
+        src_input,
+        src_output,
+    } = taps(device, before.direct);
+    let context = Context::read(device, timing_pending);
+    Observation {
+        identity: device.identity,
+        epoch: context.epoch,
+        graph_epoch: context.graph_epoch,
+        generation: context.generation,
+        clock_breaks: context.clock_breaks,
+        native_rate: context.native_rate,
+        graph_rate: context.graph_rate,
+        direct: context.direct,
+        ready: context.ready,
+        sampled: before == context
+            && native.is_some()
+            && src_input.is_some()
+            && src_output.is_some(),
+        faults: context.faults,
+        native: native.unwrap_or_default(),
+        src_input: src_input.unwrap_or_default(),
+        src_output: src_output.unwrap_or_default(),
+        src_delay: context.src_delay,
+    }
+}
+
 impl MacDevices {
     pub(crate) fn latency_observations(
         &self,
@@ -217,44 +328,10 @@ impl MacDevices {
             .iter()
             .filter_map(|(id, (_, weak))| {
                 let device = weak.upgrade()?;
-                let taps = &device.native.latency;
-                if taps.revision.load(Ordering::Acquire) != revision {
+                if device.native.latency.revision.load(Ordering::Acquire) != revision {
                     return None;
                 }
-                let direct = device.native.render.enabled();
-                let pointer = device.native.pointer.as_ptr();
-                // SAFETY: the local Arc retains the initialized owner; only atomics are read.
-                let native = unsafe { latency_snapshot(pointer.cast(), direct) };
-                let src_input = taps.src_input.snapshot();
-                let src_output = taps.src_output.snapshot();
-                let sampled = native.is_some() && src_input.is_some() && src_output.is_some();
-                Some((
-                    id.clone(),
-                    Observation {
-                        identity: device.identity,
-                        epoch: device.epoch.load(Ordering::Acquire),
-                        graph_epoch: taps.graph_epoch.load(Ordering::Acquire),
-                        generation: device.native.render.generation.load(Ordering::Acquire),
-                        clock_breaks: unsafe { ffi::mr_device_io_clock_discontinuities(pointer) },
-                        native_rate: device.native_rate.load(Ordering::Acquire),
-                        graph_rate: device.graph_rate.load(Ordering::Acquire),
-                        direct,
-                        ready: !timing_pending
-                            && !device.failed.load(Ordering::Acquire)
-                            && (direct || device.ready())
-                            && device.activity.ready()
-                            && taps.compensation_ready.load(Ordering::Acquire),
-                        faults: taps
-                            .faults
-                            .load(Ordering::Acquire)
-                            .wrapping_add(unsafe { ffi::mr_device_io_overflows(pointer) }),
-                        sampled,
-                        native: native.unwrap_or_default(),
-                        src_input: src_input.unwrap_or_default(),
-                        src_output: src_output.unwrap_or_default(),
-                        src_delay: taps.src_delay.load(Ordering::Acquire),
-                    },
-                ))
+                Some((id.clone(), observe(&device, timing_pending, read_taps)))
             })
             .collect()
     }
@@ -336,22 +413,20 @@ pub(crate) mod tests {
         use std::sync::Arc;
         let mut processor =
             crate::macos::test_feedback_processor(&Factory, Arc::new(PeakMeterBank::new(8, 64)));
+        let cycle = ProcessCycle {
+            clock: ClockDomain {
+                authority: mixrelay_audio_io::session::ClockAuthority::Device,
+                id: 1,
+                epoch: 1,
+            },
+            sample_rate: 48_000,
+            frames: 32,
+            first_frame: 0,
+            monotonic_ns: None,
+            discontinuity: false,
+        };
         processor
-            .process_external_cycle(
-                ProcessCycle {
-                    clock: ClockDomain {
-                        authority: mixrelay_audio_io::session::ClockAuthority::Device,
-                        id: 1,
-                        epoch: 1,
-                    },
-                    sample_rate: 48_000,
-                    frames: 32,
-                    first_frame: 0,
-                    monotonic_ns: None,
-                    discontinuity: false,
-                },
-                &mut Io,
-            )
+            .process_external_cycle(cycle, &mut Io)
             .unwrap()
             .unwrap();
         let (device, _) = super::super::tests::synthetic_device(2, 48_000, 48_000, false);
@@ -382,8 +457,41 @@ pub(crate) mod tests {
             bridged: set,
             clock_id: 1,
         };
-        direct.record_latency(&processor, unrelated, Some(IoTiming::default()), 1);
+        direct.record_latency(&processor, unrelated, Some(IoTiming::default()), cycle);
         assert_eq!(device.native.latency.faults.load(Ordering::Acquire), 0);
+    }
+
+    /// The device worker replaces its converter and publishes the new epoch after the
+    /// reporter read the taps. Taken as sampled, the stale cumulative taps became the new
+    /// epoch's baseline and the next window's wrapped difference read 1024 frames as ~1.
+    #[test]
+    fn a_reconfiguration_between_tap_and_context_reads_is_neither_window_nor_baseline() {
+        let (device, _context) = super::super::tests::synthetic_device(2, 48_000, 48_000, true);
+        let converter = |frames| ResidenceSnapshot {
+            sum: 1_024 * frames,
+            weight: frames,
+            invalid: 0,
+        };
+        let publish = |frames| device.native.latency.src_input.publish(converter(frames));
+        publish(1_000_000);
+        let baseline = observe(&device, false, read_taps);
+        assert!(baseline.sampled);
+        let torn = observe(&device, false, |device, direct| {
+            let stale = read_taps(device, direct);
+            device.native.latency.src_input.publish(converter(4_800));
+            device.epoch.fetch_add(1, Ordering::Release);
+            stale
+        });
+        assert!(!torn.sampled, "a context changed during the tap read");
+        assert_ne!(torn.context(), baseline.context());
+        publish(9_600);
+        let next = observe(&device, false, read_taps);
+        assert!(next.sampled);
+        assert_eq!(next.instability(torn), Some("taps not sampled"));
+        publish(14_400);
+        let later = observe(&device, false, read_taps);
+        assert_eq!(later.context(), next.context());
+        assert_eq!(later.src_input.mean_since(next.src_input), Some(1_024.0));
     }
 
     /// A window over `frames` FIFO frames that each waited `ticks`.

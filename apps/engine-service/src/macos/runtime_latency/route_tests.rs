@@ -34,30 +34,40 @@ const WINDOW_NS: f64 = 1e9;
 const SETTLE_NS: f64 = 36e9;
 const MEASURE_NS: f64 = 72e9;
 
-/// One device's native callback clock against host time.
-struct Clock {
+/// One device's native callback clock against host time. Callbacks cycle through
+/// `quanta`; capture stays continuous whatever each callback's size.
+struct Clock<'a> {
     rate: f64,
-    frames: usize,
+    quanta: &'a [usize],
     input: bool,
-    callbacks: u64,
+    callbacks: usize,
+    /// Frames of all earlier callbacks.
+    position: u64,
 }
 
 #[allow(clippy::cast_precision_loss)]
-impl Clock {
-    fn period_ns(&self) -> f64 {
-        self.frames as f64 * 1e9 / self.rate
+impl Clock<'_> {
+    /// The next callback's frame count.
+    fn frames(&self) -> usize {
+        self.quanta[self.callbacks % self.quanta.len()]
+    }
+    fn ns(&self, frames: u64) -> f64 {
+        frames as f64 * 1e9 / self.rate
     }
     /// The next callback's arrival. Input arrives once its whole buffer was captured.
     fn now_ns(&self) -> f64 {
-        let end = self.callbacks + u64::from(self.input);
-        START_NS + end as f64 * self.period_ns() + if self.input { CAPTURE_SAFETY_NS } else { 0.0 }
+        if self.input {
+            START_NS + self.ns(self.position + self.frames() as u64) + CAPTURE_SAFETY_NS
+        } else {
+            START_NS + self.ns(self.position)
+        }
     }
     /// Capture or presentation time of the next callback's first frame.
     fn first_ns(&self) -> f64 {
         if self.input {
-            START_NS + self.callbacks as f64 * self.period_ns()
+            START_NS + self.ns(self.position)
         } else {
-            self.now_ns() + self.period_ns() + PRESENTATION_SAFETY_NS
+            self.now_ns() + self.ns(self.frames() as u64) + PRESENTATION_SAFETY_NS
         }
     }
     fn time(&self, ticks_per_ns: f64) -> CallbackTime {
@@ -66,9 +76,13 @@ impl Clock {
         CallbackTime {
             now: ticks(self.now_ns()),
             host: ticks(self.first_ns()),
-            sample: (self.callbacks * self.frames as u64) as f64,
+            sample: self.position as f64,
             rate_scalar: f64::from(RATE) / self.rate,
         }
+    }
+    fn advance(&mut self) {
+        self.position += self.frames() as u64;
+        self.callbacks += 1;
     }
 }
 
@@ -190,7 +204,7 @@ impl Arrivals {
 
 /// Host time at which the source captured impulse `index` (from zero).
 #[allow(clippy::cast_precision_loss)]
-fn impulse_capture_ns(source: &Clock, index: usize) -> f64 {
+fn impulse_capture_ns(source: &Clock<'_>, index: usize) -> f64 {
     START_NS + ((index as u64 + 1) * IMPULSE_PERIOD) as f64 * 1e9 / source.rate
 }
 
@@ -216,15 +230,20 @@ enum Rendering {
 
 #[derive(Clone, Copy)]
 struct Route {
-    source_frames: usize,
+    source_frames: &'static [usize],
     sink_frames: usize,
     rendering: Rendering,
 }
 
+/// A capture device alternating small and large callbacks, 512 frames per pair so the
+/// drift beat matches the fixed routes. Counting each callback once, its capture
+/// interval would mean 256 frames instead of the 400 its frames actually wait.
+const VARIABLE_SOURCE: &[usize] = &[64, 448];
+
 #[test]
 fn bridged_capture_route_reports_the_delay_its_impulse_actually_takes() {
     assert_reports(Route {
-        source_frames: 256,
+        source_frames: &[256],
         sink_frames: 512,
         rendering: Rendering::Worker,
     });
@@ -234,7 +253,7 @@ fn bridged_capture_route_reports_the_delay_its_impulse_actually_takes() {
 #[test]
 fn bridged_capture_into_a_direct_endpoint_reports_its_actual_delay() {
     assert_reports(Route {
-        source_frames: 256,
+        source_frames: &[256],
         sink_frames: 512,
         rendering: Rendering::DirectSink,
     });
@@ -243,15 +262,24 @@ fn bridged_capture_into_a_direct_endpoint_reports_its_actual_delay() {
 #[test]
 fn direct_capture_into_a_bridged_endpoint_reports_its_actual_delay() {
     assert_reports(Route {
-        source_frames: 512,
+        source_frames: &[512],
         sink_frames: 256,
         rendering: Rendering::DirectSource,
     });
 }
 
+#[test]
+fn bridged_capture_with_variable_callbacks_reports_its_actual_delay() {
+    assert_reports(Route {
+        source_frames: VARIABLE_SOURCE,
+        sink_frames: 512,
+        rendering: Rendering::Worker,
+    });
+}
+
 fn assert_reports(route: Route) {
     let status = Arc::new(AdapterRuntimeStatus::new(crate::macos::adapter_profile()));
-    let devices = MacDevices::new(Arc::clone(&status), RATE, 32);
+    let devices = MacDevices::without_devices(Arc::clone(&status), RATE, 32);
     let source = NativeOwner::new(CHANNELS, RATE, true);
     let sink = NativeOwner::new(CHANNELS, RATE, false);
     let active = publish(&devices, &[("input", &source), ("virtual/render", &sink)]);
@@ -306,7 +334,7 @@ fn assert_reports(route: Route) {
         .collect::<Vec<_>>();
     let (reported, actual) = (Spread::of(&reported), Spread::of(&actual));
     eprintln!(
-        "capture {} frames +{SOURCE_PPM} ppm -> endpoint {} frames, {}: reported {reported}, \
+        "capture {:?} frames +{SOURCE_PPM} ppm -> endpoint {} frames, {}: reported {reported}, \
          actual {actual} frames",
         route.source_frames,
         route.sink_frames,
@@ -374,18 +402,21 @@ fn run(
     let mut clocks = [
         Clock {
             rate: f64::from(RATE) * (1.0 + SOURCE_PPM * 1e-6),
-            frames: route.source_frames,
+            quanta: route.source_frames,
             input: true,
             callbacks: 0,
+            position: 0,
         },
         Clock {
             rate: f64::from(RATE),
-            frames: route.sink_frames,
+            quanta: std::slice::from_ref(&route.sink_frames),
             input: false,
             callbacks: 0,
+            position: 0,
         },
     ];
-    let mut capture = vec![0.0; route.source_frames * usize::from(CHANNELS)];
+    let largest = route.source_frames.iter().copied().max().unwrap_or(0);
+    let mut capture = vec![0.0; largest * usize::from(CHANNELS)];
     let mut presentation = vec![0.0; route.sink_frames * usize::from(CHANNELS)];
     let (mut arrival, mut measurements) = (Arrivals::default(), Measurements::default());
     let (mut window, mut published) = (START_NS + WINDOW_NS, Vec::new());
@@ -397,14 +428,15 @@ fn run(
             window += WINDOW_NS;
         }
         if clock.input {
-            fill_source(&mut capture, clock.callbacks * clock.frames as u64);
-            source.callback(&mut capture, clock.time(ticks_per_ns));
+            let pcm = &mut capture[..clock.frames() * usize::from(CHANNELS)];
+            fill_source(pcm, clock.position);
+            source.callback(pcm, clock.time(ticks_per_ns));
         } else {
             sink.callback(&mut presentation, clock.time(ticks_per_ns));
             arrival.observe(&presentation, clock.first_ns());
             render();
         }
-        clock.callbacks += 1;
+        clock.advance();
     }
     let delays = arrival
         .crossings

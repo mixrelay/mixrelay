@@ -65,8 +65,7 @@ async fn observe(
         )
         .await;
         match result {
-            Ok(true) => previous_error = None,
-            Ok(false) => break, // compatible old service has no runtime route
+            Ok(()) => previous_error = None,
             Err(error) => {
                 if previous_error.as_ref() != Some(&error) {
                     tracing::warn!(%error, "input latency publication unavailable");
@@ -82,14 +81,13 @@ async fn observe(
             .await;
     }
 }
-/// Claims a fresh lease with fresh measurements. `false` means the service is too old to
-/// accept latency publications.
+/// Claims a fresh lease with fresh measurements.
 async fn claim(
     client: &DriverClient,
     incarnation: &str,
     lease: &mut Option<EngineLatencyLease>,
     measurements: &mut Measurements,
-) -> Result<bool, String> {
+) -> Result<(), String> {
     *measurements = Measurements::default();
     let reply = client
         .publish_latency(&LatencyCommand::Claim {
@@ -98,14 +96,11 @@ async fn claim(
         })
         .await
         .map_err(|error| error.to_string())?;
-    let Some(reply) = reply else {
-        return Ok(false);
-    };
     if !reply.accepted {
         return Err("previous engine latency lease has not expired".into());
     }
     *lease = reply.lease;
-    Ok(true)
+    Ok(())
 }
 async fn publish(
     client: &DriverClient,
@@ -113,10 +108,10 @@ async fn publish(
     incarnation: &str,
     lease: &mut Option<EngineLatencyLease>,
     measurements: &mut Measurements,
-) -> Result<bool, String> {
+) -> Result<(), String> {
     let (exchange, devices) = runtime;
-    if lease.is_none() && !claim(client, incarnation, lease, measurements).await? {
-        return Ok(false);
+    if lease.is_none() {
+        claim(client, incarnation, lease, measurements).await?;
     }
     let owner = lease
         .as_ref()
@@ -169,21 +164,20 @@ async fn publish(
         exchange.plan_revisions().active,
         &destinations,
     ));
+    // An empty set still carries the applied revision so it fences the endpoints it drops.
+    let revision = validity.map_or_else(|| exchange.revisions().active, |(_, applied, _)| applied);
     let reply = client
         .publish_latency(&LatencyCommand::Publish {
             lease: owner.clone(),
+            revision,
             destinations: destinations.into_values().collect(),
         })
         .await
         .map_err(|error| error.to_string())?;
-    if let Some(reply) = reply {
-        if !reply.accepted {
-            *lease = None;
-        }
-        Ok(true)
-    } else {
-        Ok(false)
+    if !reply.accepted {
+        *lease = None;
     }
+    Ok(())
 }
 
 /// `validity` is the latency plan's revision, the applied graph revision and whether they

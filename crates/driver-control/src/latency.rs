@@ -3,11 +3,11 @@ use crate::{DriverBackend, DriverError};
 use mixrelay_audio_io::VirtualEndpointId;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     time::{Duration, Instant},
 };
 
-/// Additive runtime route; old services return 404 and engines continue without reporting.
+/// Runtime latency route on the Driver service socket.
 pub const LATENCY_ROUTE: &str = "/api/v1/driver/latency";
 const LEASE_TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -46,6 +46,10 @@ pub enum LatencyCommand {
     /// The engine's complete set: an endpoint it no longer lists is unknown again.
     Publish {
         lease: EngineLatencyLease,
+        /// Applied graph revision the set describes, also when it is empty. No entry may be
+        /// newer. A set older than one the lease already sent is stale and ignored as a whole;
+        /// otherwise the endpoints it omits are fenced at this revision.
+        revision: u64,
         destinations: Vec<RuntimeLatency>,
     },
     Release {
@@ -62,7 +66,14 @@ pub struct LatencyReply {
 #[derive(Default)]
 pub(crate) struct LatencyAuthority {
     current: Option<(EngineLatencyLease, Instant)>,
+    /// What the HAL last accepted per endpoint.
     destinations: BTreeMap<VirtualEndpointId, RuntimeLatency>,
+    /// Revision at which the current lease last omitted an endpoint. It stays until the
+    /// endpoint is measured again, whether or not the HAL accepted the clear, so it fences
+    /// older values and keeps a failed clear pending.
+    omitted: BTreeMap<VirtualEndpointId, u64>,
+    /// Revision of the newest set the current lease has published; an older set is stale.
+    highest_revision: u64,
     generation: u64,
 }
 impl LatencyAuthority {
@@ -80,14 +91,31 @@ impl LatencyAuthority {
         }
         Ok(())
     }
+    /// Clears every endpoint, then ends the lease.
+    /// # Errors
+    /// Returns the first backend failure after attempting every endpoint. Failed endpoints
+    /// and the lease stay, so the next expiry or release retries them.
     fn clear(&mut self, backend: &mut dyn DriverBackend) -> Result<(), DriverError> {
-        for publication in self.destinations.values() {
-            backend.publish_latency(&RuntimeLatency {
+        let mut failure = None;
+        self.destinations.retain(|_, publication| {
+            let unknown = RuntimeLatency {
                 input_latency_frames: None,
                 ..publication.clone()
-            })?;
+            };
+            match backend.publish_latency(&unknown) {
+                Ok(()) => false,
+                Err(error) => {
+                    failure.get_or_insert(error);
+                    true
+                }
+            }
+        });
+        let destinations = &self.destinations;
+        self.omitted
+            .retain(|endpoint, _| destinations.contains_key(endpoint));
+        if let Some(error) = failure {
+            return Err(error);
         }
-        self.destinations.clear();
         self.current = None;
         Ok(())
     }
@@ -124,6 +152,7 @@ impl LatencyAuthority {
                     .checked_add(1)
                     .ok_or_else(|| DriverError::Unavailable("latency lease exhausted".into()))?
                     .max(u64::try_from(epoch).unwrap_or(u64::MAX));
+                self.highest_revision = 0;
                 self.current = Some((
                     EngineLatencyLease {
                         generation: self.generation,
@@ -135,8 +164,17 @@ impl LatencyAuthority {
             }
             LatencyCommand::Publish {
                 lease,
+                revision,
                 destinations,
-            } => return self.publish(lease, destinations, now, backend),
+            } => {
+                if !self.matches(&lease) {
+                    return Ok(self.reply(false));
+                }
+                let listed = validated(&lease, revision, &destinations)?;
+                // The engine is alive; a stale set or a backend failure does not end its lease.
+                self.current = Some((lease, now + LEASE_TIMEOUT));
+                self.apply(revision, &listed, destinations, backend)?;
+            }
             LatencyCommand::Release { lease } => {
                 if !self.matches(&lease) {
                     return Ok(self.reply(false));
@@ -146,57 +184,92 @@ impl LatencyAuthority {
         }
         Ok(self.reply(true))
     }
-    fn publish(
+    /// Applies the engine's validated complete set at `revision`. A set older than one the
+    /// lease already published is stale and changes nothing.
+    /// # Errors
+    /// Every endpoint is attempted and the first backend failure is returned afterwards; a
+    /// failed endpoint keeps its previous entry, so the next publication, release or expiry
+    /// retries it.
+    fn apply(
         &mut self,
-        lease: EngineLatencyLease,
+        revision: u64,
+        listed: &BTreeSet<VirtualEndpointId>,
         destinations: Vec<RuntimeLatency>,
-        now: Instant,
         backend: &mut dyn DriverBackend,
-    ) -> Result<LatencyReply, DriverError> {
-        if !self.matches(&lease) {
-            return Ok(self.reply(false));
+    ) -> Result<(), DriverError> {
+        if revision < self.highest_revision {
+            return Ok(());
         }
-        if destinations.len() > 64
-            || destinations
-                .iter()
-                .any(|entry| entry.rate == 0 || entry.engine_lease != lease)
-        {
-            return Err(DriverError::Invalid("invalid latency publication".into()));
-        }
-        let mut seen = std::collections::BTreeSet::new();
-        if destinations
-            .iter()
-            .any(|entry| !seen.insert(entry.endpoint_id.clone()))
-        {
-            return Err(DriverError::Invalid("duplicate latency endpoint".into()));
-        }
-        // A route that no longer reaches an endpoint leaves no measurement for it.
-        // Unknown is the fail-closed answer, so clearing never needs a revision fence.
-        // The entry stays as unknown: it keeps the endpoint's revision fence, and a
-        // failed clear is retried by the next publication, release or expiry.
-        for old in self.destinations.values_mut() {
-            if !seen.contains(&old.endpoint_id) && old.input_latency_frames.is_some() {
-                let unknown = RuntimeLatency {
-                    input_latency_frames: None,
-                    ..old.clone()
-                };
-                backend.publish_latency(&unknown)?;
-                *old = unknown;
-            }
-        }
+        self.highest_revision = revision;
+        self.omit(listed, revision);
+        let mut failure = None;
         for entry in destinations {
-            if self
-                .destinations
-                .get(&entry.endpoint_id)
-                .is_some_and(|old| old.applied_graph_revision > entry.applied_graph_revision)
-            {
+            if self.fence(&entry.endpoint_id) > entry.applied_graph_revision {
                 continue;
             }
-            backend.publish_latency(&entry)?;
-            self.destinations.insert(entry.endpoint_id.clone(), entry);
+            match backend.publish_latency(&entry) {
+                Ok(()) => {
+                    self.omitted.remove(&entry.endpoint_id);
+                    self.destinations.insert(entry.endpoint_id.clone(), entry);
+                }
+                Err(error) => {
+                    failure.get_or_insert(error);
+                }
+            }
         }
-        self.current = Some((lease, now + LEASE_TIMEOUT));
-        Ok(self.reply(true))
+        if let Err(error) = self.clear_omitted(backend) {
+            failure.get_or_insert(error);
+        }
+        failure.map_or(Ok(()), Err)
+    }
+    /// A route that no longer reaches an endpoint leaves no measurement for it: the endpoint
+    /// is fenced at the omitting publication's revision, so a delayed value from an earlier
+    /// revision cannot become measured again.
+    fn omit(&mut self, listed: &BTreeSet<VirtualEndpointId>, revision: u64) {
+        for endpoint in self.destinations.keys() {
+            if !listed.contains(endpoint) {
+                let fence = self.omitted.entry(endpoint.clone()).or_default();
+                *fence = (*fence).max(revision);
+            }
+        }
+    }
+    /// The oldest revision whose value the endpoint may still accept.
+    fn fence(&self, endpoint: &VirtualEndpointId) -> u64 {
+        let accepted = self
+            .destinations
+            .get(endpoint)
+            .map_or(0, |entry| entry.applied_graph_revision);
+        self.omitted
+            .get(endpoint)
+            .map_or(accepted, |omitted| accepted.max(*omitted))
+    }
+    /// Sends unknown at its omission revision for every omitted endpoint the HAL still
+    /// reports as measured.
+    /// # Errors
+    /// Returns the first backend failure after attempting every endpoint. A failed endpoint
+    /// keeps its measured entry so the next publication, release or expiry retries it.
+    fn clear_omitted(&mut self, backend: &mut dyn DriverBackend) -> Result<(), DriverError> {
+        let mut failure = None;
+        for (endpoint, revision) in &self.omitted {
+            let Some(old) = self.destinations.get_mut(endpoint) else {
+                continue;
+            };
+            if old.input_latency_frames.is_none() {
+                continue;
+            }
+            let unknown = RuntimeLatency {
+                applied_graph_revision: *revision,
+                input_latency_frames: None,
+                ..old.clone()
+            };
+            match backend.publish_latency(&unknown) {
+                Ok(()) => *old = unknown,
+                Err(error) => {
+                    failure.get_or_insert(error);
+                }
+            }
+        }
+        failure.map_or(Ok(()), Err)
     }
     fn matches(&self, lease: &EngineLatencyLease) -> bool {
         self.current
@@ -209,6 +282,34 @@ impl LatencyAuthority {
             lease: self.current.as_ref().map(|(lease, _)| lease.clone()),
         }
     }
+}
+
+/// The endpoints a complete set lists.
+/// # Errors
+/// Rejects oversized sets, zero rates, entries of another lease or newer than the set's
+/// revision, and duplicate endpoints.
+fn validated(
+    lease: &EngineLatencyLease,
+    revision: u64,
+    destinations: &[RuntimeLatency],
+) -> Result<BTreeSet<VirtualEndpointId>, DriverError> {
+    if destinations.len() > 64
+        || destinations.iter().any(|entry| {
+            entry.rate == 0
+                || entry.engine_lease != *lease
+                || entry.applied_graph_revision > revision
+        })
+    {
+        return Err(DriverError::Invalid("invalid latency publication".into()));
+    }
+    let mut listed = BTreeSet::new();
+    if destinations
+        .iter()
+        .any(|entry| !listed.insert(entry.endpoint_id.clone()))
+    {
+        return Err(DriverError::Invalid("duplicate latency endpoint".into()));
+    }
+    Ok(listed)
 }
 
 #[cfg(test)]

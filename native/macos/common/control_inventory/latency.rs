@@ -1,4 +1,4 @@
-//! Optional v1 inventory extension. Absent fields decode to an empty authoritative list.
+//! Runtime input latencies carried by every v1 inventory snapshot.
 use super::{
     _xpc_type_array, MAX_ENTRIES, Message, Xpc, dictionary, endpoint_id, field, is_type,
     new_message, ptr, uint, xpc_array_append_value, xpc_array_create, xpc_array_get_count,
@@ -16,7 +16,7 @@ pub struct InputLatency {
     pub frames: Option<u32>,
 }
 
-/// Adds runtime metadata to an inventory message. Old HALs ignore the new field.
+/// Sets the runtime latency list of an inventory message, replacing any previous list.
 /// # Safety
 /// `message` is a live mutable XPC dictionary exclusively owned by the caller.
 pub unsafe fn write_input_latencies(message: Xpc, entries: &[InputLatency]) -> bool {
@@ -54,7 +54,7 @@ pub unsafe fn write_input_latencies(message: Xpc, entries: &[InputLatency]) -> b
     true
 }
 
-/// Parses bounded runtime metadata transactionally. Old services imply unknown latency.
+/// Parses the required bounded runtime latency list transactionally.
 /// # Safety
 /// `message` is a live XPC dictionary retained for this call.
 pub unsafe fn parse_input_latencies(message: Xpc) -> Option<Vec<InputLatency>> {
@@ -62,9 +62,6 @@ pub unsafe fn parse_input_latencies(message: Xpc) -> Option<Vec<InputLatency>> {
         return None;
     }
     let array = field(message, c"input_latencies");
-    if array.is_null() {
-        return Some(Vec::new());
-    }
     if !is_type(array, (&raw const _xpc_type_array).cast()) {
         return None;
     }
@@ -115,8 +112,10 @@ mod tests {
     use super::*;
     use crate::control_inventory::xpc_dictionary_set_string;
     #[test]
-    fn latency_extension_is_optional_typed_bounded_and_preserves_unknown() {
+    fn latency_list_is_required_typed_bounded_and_preserves_unknown() {
         let message = new_message(c"inventory_snapshot").unwrap();
+        assert!(unsafe { parse_input_latencies(message.0) }.is_none());
+        assert!(unsafe { write_input_latencies(message.0, &[]) });
         assert_eq!(unsafe { parse_input_latencies(message.0) }, Some(vec![]));
         let entry = InputLatency {
             endpoint_id: [1; 16],

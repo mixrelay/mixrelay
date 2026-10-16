@@ -978,6 +978,13 @@ static bool mr_impulses_measured(const MRImpulses *impulses) {
            impulses->rival * 2U < impulses->matched;
 }
 
+/// Exit status of an impulse measurement. A recording that overflowed, dropped chunks or
+/// saw inconsistent buffers is never reported as measured, whatever its alignment.
+static int mr_impulse_status(const MRImpulses *impulses, uint32_t incomplete) {
+    if (incomplete != 0U) return 4;
+    return mr_impulses_measured(impulses) ? 0 : 3;
+}
+
 static void mr_report_impulses(const MRProbe *probe, const MRImpulses *a, const MRReported *out,
                                const MRReported *in, bool json) {
     uint32_t out_total = 0U, in_total = 0U;
@@ -1017,6 +1024,9 @@ static void mr_report_impulses(const MRProbe *probe, const MRImpulses *a, const 
                (double)(out_total + in_total) * 1000.0 / probe->rate);
     } else {
         printf("devices do not report their full latency\n");
+    }
+    if (mr_incomplete(probe) != 0U) {
+        printf("INCOMPLETE: the recording overflowed or lost audio; not a measurement\n");
     }
 }
 
@@ -1430,6 +1440,14 @@ static bool mr_self_test_impulses(void) {
     for (uint64_t r = 60000U; r < 70000U; ++r) *mr_sample(noise, r, 0U) = 0.4F;
     a = mr_impulse_analysis(noise);
     ok &= mr_expect(a.arrivals == 0U && !mr_impulses_measured(&a), "noise is not a pulse");
+    // A measured recording that overflowed is not a measurement; neither is an unmatched one.
+    a = mr_impulse_analysis(exact);
+    ok &= mr_expect(mr_impulse_status(&a, mr_incomplete(exact)) == 0, "complete pulses exit 0");
+    atomic_store(&exact->overflow, 1U);
+    ok &= mr_expect(mr_impulse_status(&a, mr_incomplete(exact)) == 4,
+                    "an incomplete recording never exits 0");
+    a = mr_impulse_analysis(noise);
+    ok &= mr_expect(mr_impulse_status(&a, mr_incomplete(noise)) == 3, "no aligned pulses exit 3");
     return ok;
 }
 
@@ -1464,7 +1482,8 @@ static void mr_usage(FILE *stream) {
             "conversion): it plays pulses at irregular ~0.25 s spacing and finds the one delay\n"
             "that aligns their arrivals.\n"
             "Exit status: 0 measured, 1 usage or device error, 3 no exact copy of the signal\n"
-            "(with --impulse: no single delay aligned most pulses).\n");
+            "(with --impulse: no single delay aligned most pulses), 4 (--impulse) the\n"
+            "recording overflowed, dropped chunks or saw inconsistent buffers.\n");
 }
 
 static bool mr_parse_number(const char *text, double low, double high, double *value) {
@@ -1640,7 +1659,7 @@ int main(int argc, char **argv) {
     if (probe->impulse) {
         const MRImpulses impulses = mr_analyse_impulses(probe);
         mr_report_impulses(probe, &impulses, &out_reported, &in_reported, options.json);
-        return mr_impulses_measured(&impulses) ? 0 : 3;
+        return mr_impulse_status(&impulses, mr_incomplete(probe));
     }
     const MRAnalysis analysis = mr_analyse(probe, probe->output == probe->input);
     if (options.json) {

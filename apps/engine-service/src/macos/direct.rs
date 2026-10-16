@@ -279,7 +279,7 @@ impl Renderer<'_> {
                 return false;
             };
             if let Some((plan, _)) = &self.native_clock {
-                plan.record_latency(self.processor, report, timing.copied(), cycle.clock.epoch);
+                plan.record_latency(self.processor, report, timing.copied(), cycle);
             }
             self.status.record_process(report);
             io.offset += count as usize;
