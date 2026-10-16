@@ -43,6 +43,10 @@ async fn owned_socket_refuses_live_replacement_and_cleans_up() {
 #[tokio::test]
 async fn unsafe_directories_and_non_socket_targets_are_not_overwritten() {
     let fixture = mixrelay_test_support::FixtureDir::new("ipc-path").expect("fixture");
+    // Exercise the unsafe mode explicitly; a private lab's inherited umask
+    // otherwise creates an already-safe 0700 fixture directory.
+    std::fs::set_permissions(fixture.path(), std::fs::Permissions::from_mode(0o755))
+        .expect("unsafe fixture mode");
     let uid = uid_of(fixture.path());
     assert_eq!(
         bind(fixture.path(), ENGINE_SOCKET, uid)

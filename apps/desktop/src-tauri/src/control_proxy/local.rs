@@ -115,6 +115,13 @@ impl LocalControl {
     }
 
     /// Preserve native stop acknowledgement and menu observations when reads are pushed.
+    #[cfg_attr(
+        not(target_os = "macos"),
+        expect(
+            clippy::unused_async,
+            reason = "the shared observation interface awaits native power acknowledgement on macOS"
+        )
+    )]
     pub(super) async fn observe_telemetry(
         &self,
         window: &mut mixrelay_control_protocol::ControlTelemetry,

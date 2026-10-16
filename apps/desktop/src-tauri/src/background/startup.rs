@@ -159,6 +159,13 @@ async fn connect_until_ready(
     }
 }
 
+#[cfg_attr(
+    not(target_os = "macos"),
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "the shared admission contract can fail while inspecting macOS leases"
+    )
+)]
 fn controller_admission_available() -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     if !tauri::is_dev() {

@@ -23,6 +23,8 @@ pub(crate) struct EngineLifecycle {
 
 impl EngineLifecycle {
     pub(crate) fn start() -> Result<Self, String> {
+        tauri::async_runtime::block_on(crate::linux_service::start_driver())
+            .map_err(|error| error.to_string())?;
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let path = bundled_engine_path(&executable)?;
         let engine = ControllerEngine::start(&path)
@@ -175,6 +177,9 @@ async fn restart_owned_engine(app: &tauri::AppHandle) -> Result<bool, String> {
             return Err(text(current_locale(), Text::PreviousEngineRunning).to_owned());
         }
     }
+    crate::linux_service::start_driver()
+        .await
+        .map_err(|error| error.to_string())?;
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let path = bundled_engine_path(&executable)?;
     let replacement = tauri::async_runtime::spawn_blocking(move || ControllerEngine::start(&path))

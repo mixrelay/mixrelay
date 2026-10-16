@@ -22,7 +22,7 @@
     "@xyflow/react": "^12.11.6",
     "i18next": "26.4.1",
     "react": "19.2.8",
-    "react-aria-components": "1.22.0",
+    "react-aria-components": "1.22.1",
     "react-dom": "19.2.8",
     "react-i18next": "17.0.13"
   },

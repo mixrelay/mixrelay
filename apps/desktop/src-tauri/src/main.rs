@@ -29,6 +29,8 @@ use mixrelay_macos_transport as _;
 
 #[cfg(target_os = "linux")]
 mod linux_audio;
+#[cfg(any(test, target_os = "linux"))]
+mod linux_service;
 #[cfg(target_os = "macos")]
 mod macos_audio;
 
@@ -128,8 +130,7 @@ fn start_audio(app: &tauri::AppHandle) -> Result<(), String> {
 
 fn install_local_controls(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     use std::os::unix::fs::MetadataExt;
-    let directory = background::data_directory(app)?;
-    std::fs::create_dir_all(&directory)?;
+    let directory = background::control_directory(app)?;
     let uid = std::fs::metadata(app.path().home_dir()?)?.uid();
     let control = control_proxy::local::LocalControl::new(
         app.state::<control_proxy::ControlProxyClient>()
@@ -143,9 +144,7 @@ fn install_local_controls(app: &tauri::AppHandle) -> Result<(), Box<dyn std::err
     )?
     .with_app(app.clone());
     let socket = tauri::async_runtime::block_on(control_proxy::local::socket::LocalSocket::start(
-        &directory.join("control"),
-        uid,
-        control,
+        &directory, uid, control,
     ))?;
     app.manage(socket);
     Ok(())

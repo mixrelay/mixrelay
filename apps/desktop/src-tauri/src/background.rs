@@ -58,9 +58,9 @@ impl Connection {
         let uid = std::fs::metadata(app.path().home_dir().map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?
             .uid();
-        let directory = data_directory(app)?;
+        let directory = control_directory(app).map_err(|error| error.to_string())?;
         Ok(Self {
-            path: directory.join("control/control.sock"),
+            path: directory.join("control.sock"),
             uid,
             link: Arc::default(),
         })
@@ -369,10 +369,24 @@ pub(crate) fn reopen_editor(app: &tauri::AppHandle) {
     // The visible startup gate owns explicit reconnect attempts.
 }
 
-/// The app's data directory (`io.mixrelay.desktop`): settings, journal and the runtime's
-/// `control/control.sock`, which the editor and the Stream Deck plugin connect to.
+/// The app's persistent data directory (`io.mixrelay.desktop`): settings and journal.
 pub(crate) fn data_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path().app_data_dir().map_err(|error| error.to_string())
+}
+
+/// Transient control endpoints use the normal user's private runtime directory
+/// on Linux. Persistent XDG data ancestors may legitimately be group-writable.
+#[cfg(target_os = "linux")]
+pub(crate) fn control_directory(_app: &tauri::AppHandle) -> std::io::Result<PathBuf> {
+    mixrelay_local_socket::session_socket_directory().map(|directory| directory.join("control"))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn control_directory(app: &tauri::AppHandle) -> std::io::Result<PathBuf> {
+    app.path()
+        .app_data_dir()
+        .map(|directory| directory.join("control"))
+        .map_err(std::io::Error::other)
 }
 
 /// Pushed telemetry on the shared runtime link; dropping it cancels the subscription.

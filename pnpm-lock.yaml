@@ -27,8 +27,8 @@ importers:
         specifier: 19.2.8
         version: 19.2.8
       react-aria-components:
-        specifier: 1.22.0
-        version: 1.22.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: 1.22.1
+        version: 1.22.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react-dom:
         specifier: 19.2.8
         version: 19.2.8(react@19.2.8)
@@ -2230,14 +2230,14 @@ packages:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
 
-  react-aria-components@1.22.0:
-    resolution: {integrity: sha512-iTrOa3QYzlEZLSICcaZBS3yqFnxu41x/PQqzA9bqcKahlcheMeEMF6aMVOiB+rtAwpX2MqNDPBxIbnhwa4KBFQ==}
+  react-aria-components@1.22.1:
+    resolution: {integrity: sha512-UTHaYHOaM71bOCjGPF50DcLywlrwAodE63IP64LB4kO+OizatQEL8TesVEOM8+TkBeSgHoflJ45388IlJfa7aw==}
     peerDependencies:
       react: ^16.8.0 || ^17.0.0-rc.1 || ^18.0.0 || ^19.0.0-rc.1
       react-dom: ^16.8.0 || ^17.0.0-rc.1 || ^18.0.0 || ^19.0.0-rc.1
 
-  react-aria@3.53.0:
-    resolution: {integrity: sha512-xnr61tc2ZZ0MBPn52AiUSnO89Q2zwvBFFghipxuRM5H5n4cfPt3D0rB6OQoKCwNyD/ozm9BTFoNainzafd/RkQ==}
+  react-aria@3.53.1:
+    resolution: {integrity: sha512-dikisyOjJd3D2fFrIDWmVWzqiLz5B86GzZv1zxs7xI4dVc0JIz/1Wa52I20gYvVL2WXeFXlygYsle/QcOMhtcg==}
     peerDependencies:
       react: ^16.8.0 || ^17.0.0-rc.1 || ^18.0.0 || ^19.0.0-rc.1
       react-dom: ^16.8.0 || ^17.0.0-rc.1 || ^18.0.0 || ^19.0.0-rc.1
@@ -4606,7 +4606,7 @@ snapshots:
 
   punycode@2.3.1: {}
 
-  react-aria-components@1.22.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  react-aria-components@1.22.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
       '@internationalized/date': 3.12.4
       '@internationalized/string': 3.2.10
@@ -4614,12 +4614,12 @@ snapshots:
       '@swc/helpers': 0.5.23
       client-only: 0.0.1
       react: 19.2.8
-      react-aria: 3.53.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      react-aria: 3.53.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react-dom: 19.2.8(react@19.2.8)
       react-stately: 3.51.0(react@19.2.8)
       use-sync-external-store: 1.6.0(react@19.2.8)
 
-  react-aria@3.53.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  react-aria@3.53.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
       '@internationalized/date': 3.12.4
       '@internationalized/number': 3.6.9

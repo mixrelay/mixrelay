@@ -5,7 +5,7 @@ use mixrelay_audio_io::{AudioDeviceDescriptor, CapturableApplication};
 /// # Errors
 ///
 /// Returns a diagnostic when the active user `PipeWire` registry cannot be queried.
-/// Apps using each MixRelay device. `PipeWire` stream ownership is not mapped yet, so no
+/// Apps using each `MixRelay` device. `PipeWire` stream ownership is not mapped yet, so no
 /// device reports any; the UI then shows the activity as unknown rather than empty.
 #[tauri::command]
 pub(crate) fn list_device_app_activity()
