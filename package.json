@@ -15,6 +15,7 @@
     "check": "pnpm check:audio-formats && pnpm check:ui-quality && pnpm --filter @mixrelay/control-ui check && pnpm check:native && pnpm check:rust",
     "check:audio-formats": "cargo test -p mixrelay-audio-io --lib format_contract::tests",
     "check:macos-engine": "cargo test -p mixrelay-engine-service --bin mixrelay-engine-service -- --test-threads=1",
+    "check:crate-layers": "node --test scripts/check-crate-layers.test.mjs && node scripts/check-crate-layers.mjs",
     "check:native": "cargo test -p mixrelay-macos-transport -p mixrelay-hal-core -p mixrelay-macos-test-support && pnpm check:macos-engine && cargo run -p mixrelay-hal-bundle",
     "check:rust": "cargo fmt --all --check && cargo machete && node scripts/lab/native-check.mjs cargo clippy --workspace --all-targets --all-features -- -D warnings && pnpm coverage:rust",
     "check:ui-quality": "biome check biome.json apps/control-ui",

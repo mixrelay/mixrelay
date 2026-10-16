@@ -80,6 +80,7 @@ export function buildPlan(os, mode) {
     ["rustc", "--version", "--verbose"],
     ["pnpm", "--version"],
     ["pnpm", "--filter", "@mixrelay/control-ui", "check:boundaries"],
+    ["pnpm", "check:crate-layers"],
     ["pnpm", "build"],
   ];
   commands.push(["cargo", "build", "--locked", "--workspace"]);
