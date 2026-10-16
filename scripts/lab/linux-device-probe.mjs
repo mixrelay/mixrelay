@@ -1,6 +1,7 @@
 // Native device boundary acceptance in an owned guest session. Fixtures stand
 // in for multichannel hardware; they are not proof of a physical 64-channel ADC.
 import { engineSocket, socketRequest } from '../local-socket.mjs';
+import { engineOperations } from './engine-operations.mjs';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, readFileSync, openSync, closeSync } from 'node:fs';
@@ -23,15 +24,17 @@ async function until(check, message) {
   for (let n = 0; n < 120; n++) { if (await check()) return; await delay(50); }
   assert.fail(message);
 }
+const { operation } = engineOperations({
+  request: (path, options) => socketRequest(socket, path, options),
+  now: Date.now,
+  delay,
+}, 'device-probe');
 async function api(path, body, rejected = false) {
-  const response = await socketRequest(socket, `/api/v1/${path}`, {
-    method: body ? 'PUT' : 'GET',
-    headers: { host: 'mixrelay-engine', ...(body ? { 'content-type': 'application/json' } : {}) },
-    body: body ? JSON.stringify(body) : undefined, timeoutMs: 6000,
-  });
-  const result = JSON.parse(response.body);
-  assert.equal(response.status >= 200 && response.status < 300, !rejected, JSON.stringify(result));
-  return result;
+  const response = await operation(body === undefined ? 'GET' : 'PUT', `/api/v1/${path}`,
+    body === undefined ? undefined : JSON.stringify(body));
+  assert.equal(response.status >= 200 && response.status < 300, !rejected,
+    `${path}: HTTP ${response.status} ${response.body}`);
+  return response.json;
 }
 function launch(path, args, log) {
   const fd = openSync(join(evidence, log), 'wx', 0o600);
@@ -121,7 +124,11 @@ async function recoveryTest() {
   await apply(nodes, edges([[12, 0], [32, 15]]));
   let expectedGraph = await api('graph');
   const events = [];
-  const serial = direction => ownNodes(engine.pid).find(n => n.info.props['node.name'] === `io.mixrelay.device-${direction}.device-${direction}`)?.info.props['object.serial'];
+  const serial = direction => {
+    const streams = ownNodes(engine.pid).filter(n => n.info.props['node.name']?.endsWith(`.device-${direction}`));
+    assert.ok(streams.length <= 1, `Multiple owned ${direction} streams`);
+    return streams[0]?.info.props['object.serial'];
+  };
   const meter = async id => (await api('meters')).nodes.find(n => n.nodeId === id)?.peaks;
   async function toggleSide(source, present) {
     fixture.kill(source ? 'SIGUSR2' : 'SIGHUP');

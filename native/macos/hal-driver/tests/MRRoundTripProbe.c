@@ -43,6 +43,7 @@ enum {
     MR_IMPULSE_WIDTH = 32,
     MR_IMPULSE_QUIET = 256,  // silent frames that must precede an arrival
     MR_IMPULSE_RISE = 16,    // frames a smoothed rise may take to reach half its peak
+    MR_IMPULSE_TRACE = 512,  // all played pulses in the CLI's maximum 120-second run
 };
 static const float MR_IMPULSE_LEVEL = 0.5F;
 static const float MR_IMPULSE_SILENCE = 0.05F;
@@ -810,6 +811,10 @@ typedef struct MRImpulses {
     uint64_t played, arrivals, matched, duplicates, rival;
     double ms_min, ms_max, ms_sum;
     double delay_frames, rival_delay_frames;
+    // Diagnostic host-time coordinates, relative to the first timed output pulse.
+    // These do not change the fixed-delay alignment or its acceptance thresholds.
+    uint64_t traced_played, traced_arrivals;
+    double played_frames[MR_IMPULSE_TRACE], arrival_frames[MR_IMPULSE_TRACE];
 } MRImpulses;
 
 static float mr_level(const MRProbe *probe, uint64_t r, uint32_t c) {
@@ -970,6 +975,14 @@ static MRImpulses mr_analyse_impulses(const MRProbe *probe) {
             result.arrivals += 1U;
         }
     }
+    if (timed > 0U) {
+        result.traced_played = timed < MR_IMPULSE_TRACE ? timed : MR_IMPULSE_TRACE;
+        result.traced_arrivals = result.arrivals < MR_IMPULSE_TRACE ? result.arrivals : MR_IMPULSE_TRACE;
+        for (uint64_t i = 0U; i < result.traced_played; ++i)
+            result.played_frames[i] = (played[i] - played[0]) / ticks_per_frame;
+        for (uint64_t i = 0U; i < result.traced_arrivals; ++i)
+            result.arrival_frames[i] = (arrived[i] - played[0]) / ticks_per_frame;
+    }
     const MRAlignment alignment = mr_align_impulses(played, timed, arrived, result.arrivals, tolerance);
     result.rival = alignment.rival;
     result.delay_frames = alignment.delay / ticks_per_frame;
@@ -1023,6 +1036,14 @@ static void mr_report_impulses(const MRProbe *probe, const MRImpulses *a, const 
                (unsigned long long)a->rival, mr_impulses_measured(a) ? "true" : "false");
         printf("\"alignmentDelayFrames\":%.3f,\"rivalDelayFrames\":%.3f,",
                a->delay_frames, a->rival_delay_frames);
+        printf("\"pulseTimeline\":{\"playedFrames\":[");
+        for (uint64_t i = 0U; i < a->traced_played; ++i)
+            printf("%s%.3f", i == 0U ? "" : ",", a->played_frames[i]);
+        printf("],\"arrivalFrames\":[");
+        for (uint64_t i = 0U; i < a->traced_arrivals; ++i)
+            printf("%s%.3f", i == 0U ? "" : ",", a->arrival_frames[i]);
+        printf("],\"complete\":%s},",
+               a->traced_played == a->played && a->traced_arrivals == a->arrivals ? "true" : "false");
         if (a->matched > 0U) {
             printf("\"latencyMs\":{\"min\":%.3f,\"max\":%.3f,\"mean\":%.3f},"
                    "\"latencyFrames\":{\"min\":%.1f,\"max\":%.1f,\"mean\":%.2f},",
@@ -1436,6 +1457,20 @@ static bool mr_self_test_impulse_jitter(void) {
     const MRImpulses a = mr_impulse_analysis(probe);
     ok &= mr_expect(mr_impulses_measured(&a) && a.rival * 2U < a.matched,
                         "overlapping jitter windows are one impulse alignment");
+    mr_synthesize(probe, 48U);
+    for (uint32_t i = 0U; i < count; ++i)
+        probe->in.chunks[i].host_time += (uint64_t)((double)i * 0.05 * ticks_per_frame);
+    const MRImpulses drift = mr_impulse_analysis(probe);
+    ok &= mr_expect(!mr_impulses_measured(&drift) && drift.traced_played == drift.played &&
+                        drift.traced_arrivals == drift.arrivals && drift.traced_arrivals > 1U,
+                    "changing content delay retains every event without passing a fixed delay");
+    if (drift.traced_arrivals > 1U && drift.traced_arrivals == drift.traced_played) {
+        const uint64_t last = drift.traced_arrivals - 1U;
+        const double first_delay = drift.arrival_frames[0] - drift.played_frames[0];
+        const double last_delay = drift.arrival_frames[last] - drift.played_frames[last];
+        ok &= mr_expect(last_delay - first_delay > 15.0,
+                        "diagnostic pulse timeline preserves drift outside the winning window");
+    }
     MRProbe *echo = mr_impulse_recording(5.0, 300U, 1.0F, 0U, 0);
     if (echo == NULL) return false;
     for (uint64_t r = 6300U; r < echo->run_frames; ++r) {
@@ -1463,6 +1498,9 @@ static bool mr_self_test_impulses(void) {
     if (!exact || !smooth || !clipped || !late || !skewed || !cut) return false;
     MRImpulses a = mr_impulse_analysis(exact);
     ok &= mr_impulse_expect(&a, 7.25, "impulse latency");
+    ok &= mr_expect(a.traced_played == a.played && a.traced_arrivals == a.arrivals &&
+                        a.played_frames[0] == 0.0 && fabs(a.arrival_frames[0] - 348.0) < 0.05,
+                    "diagnostic pulse timeline uses the common host-time origin");
     a = mr_impulse_analysis(smooth);
     ok &= mr_impulse_expect(&a, 7.25 + 2.0 / 48.0, "smoothed impulse latency");
     a = mr_impulse_analysis(clipped);

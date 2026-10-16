@@ -91,6 +91,7 @@ clang \
   "$native_root/tests/MRProcessTapSmoke.m" \
   "$capture_archive" -liconv \
   -framework CoreAudio \
+  -framework AudioToolbox \
   -framework Foundation \
   -framework AppKit \
   -o "$smoke_build_dir/MRProcessTapSmoke"
@@ -108,12 +109,21 @@ else
   tone_process_id=$!
   sleep 1
 fi
-set +e
+smoke_arguments=(io.mixrelay.test-tone-source)
 if [[ -n "$endpoint_uid" ]]; then
-  "$smoke_build_dir/MRProcessTapSmoke" io.mixrelay.test-virtual-clock-source "$endpoint_uid"
-else
-  "$smoke_build_dir/MRProcessTapSmoke" io.mixrelay.test-tone-source
+  smoke_arguments=(io.mixrelay.test-virtual-clock-source "$endpoint_uid")
 fi
+set +e
+# Native registration itself can block inside CoreAudio before the fixture's
+# measurement loop starts. Bound the exact owned child, then let EXIT stop its tone.
+node --input-type=module - "$smoke_build_dir/MRProcessTapSmoke" "${smoke_arguments[@]}" <<'JS'
+import { spawnSync } from 'node:child_process';
+const result = spawnSync(process.argv[2], process.argv.slice(3), {
+  stdio: 'inherit', timeout: 30000, killSignal: 'SIGKILL',
+});
+if (result.error) console.error(`Application-capture smoke failed: ${result.error.message}`);
+process.exit(result.status ?? 1);
+JS
 smoke_status=$?
 set -e
 if [[ -z "$endpoint_uid" ]]; then

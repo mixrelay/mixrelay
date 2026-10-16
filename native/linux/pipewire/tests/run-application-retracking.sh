@@ -317,6 +317,11 @@ if [[ ${MIXRELAY_LAB_LIFECYCLE_TEST:-0} == 1 ]]; then
         "$cargo_target_dir/release/libmixrelay_pipewire.a" -ldl \
         $(pkg-config --libs libpipewire-0.3) -lm -o "$lab/lifecycle-fixture"
     test_command=("$lab/lifecycle-fixture")
+elif [[ "$test_name" == native_device_boundary_probe ]]; then
+    [[ "$observe_buffers" == 0 && "$profile_graph" == 0 ]] || exit 2
+    cargo build --locked "${test_profile_args[@]}" -p mixrelay-engine-service --bin mixrelay-engine-service
+    test_command=(node "$workspace/scripts/lab/linux-device-probe.mjs"
+        "$cargo_target_dir/$artifact_profile/mixrelay-engine-service" "$lab/device-fixture" "$lab/device-evidence")
 elif [[ "$test_name" == native_pipewire_connection_lifecycle || "$test_name" == native_graph_driver_drains_before_processor_drop_and_releases_resources ]]; then
     test_command=(env "MIXRELAY_LAB_APPLICATION_FIXTURE=$lab/application-fixture" cargo test --locked --features native-lab "${test_profile_args[@]}" -p mixrelay-pipewire --lib "$test_name" -- --nocapture --test-threads=1)
 elif [[ "$test_name" == native_driver_* ]]; then

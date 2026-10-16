@@ -2,7 +2,7 @@
 // Adds one route SOURCE -> engine -> virtual endpoint to the selected graph, waits for the HAL
 // to report a stable input latency on that endpoint, optionally measures the real round trip,
 // then restores the exact original graph and checks that the report clears.
-//   node scripts/lab/macos-latency-acceptance.mjs SOURCE ENDPOINT_ID EVIDENCE_DIR --verify-installed-latency [--roundtrip]
+//   node scripts/lab/macos-latency-acceptance.mjs SOURCE ENDPOINT_ID EVIDENCE_DIR --verify-installed-latency [--roundtrip] [--settle-seconds=0..120]
 // SOURCE is normally another MixRelay virtual endpoint ID (A): the probe plays into A, whose
 // playback the engine routes to ENDPOINT_ID (D). A second endpoint needs the paid edition.
 // SOURCE may instead be any device UID whose output returns on its input. The probe never
@@ -29,7 +29,7 @@
 import { engineSocket, socketRequest } from '../local-socket.mjs';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { engineOperations } from './engine-operations.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,11 +39,6 @@ const endpointPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const ids = { source: 'latency-acceptance-source', destination: 'latency-acceptance-destination' };
 // The reporter publishes once a second; the HAL needs three stable windows.
 const PUBLICATION_INTERVAL_MS = 1100;
-// Engine requests run as operations (crates/control-server/src/operations.rs). A client
-// operation ID makes a request idempotent while its receipt is retained (60 s), so a lost
-// reply is resent and a pending receipt is polled until the terminal result. The budget stays
-// below that retention, so a resend can never execute the request a second time.
-const OPERATION_BUDGET_MS = 45000;
 const engineHost = { host: 'mixrelay-engine' };
 export const INTERRUPTIONS = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 /** The engine's path-agreement threshold: max(32 destination frames, 1 ms rounded up to whole frames). */
@@ -55,7 +50,15 @@ export const roundtripToleranceFrames = rate => reporterThresholdFrames(rate) + 
 export function parseArguments(argv) {
   const [sourceUid, endpointId, evidence, approval, ...options] = argv;
   assert.equal(approval, '--verify-installed-latency', 'Pass --verify-installed-latency to change the installed graph');
-  assert.ok(options.every(option => option === '--roundtrip'), `Unknown option: ${options.join(' ')}`);
+  let settleSeconds = 0;
+  let settleSpecified = false;
+  for (const option of options) {
+    if (option === '--roundtrip') continue;
+    const match = option.match(/^--settle-seconds=(\d+)$/);
+    assert.ok(match && !settleSpecified && Number(match[1]) <= 120, `Invalid option: ${option}`);
+    settleSeconds = Number(match[1]);
+    settleSpecified = true;
+  }
   assert.ok(sourceUid, 'Pass a source endpoint ID or device UID');
   // A MixRelay source endpoint by ID; any other value is a looped-back device UID.
   const sourceEndpoint = endpointPattern.test(sourceUid) ? sourceUid : undefined;
@@ -63,7 +66,7 @@ export function parseArguments(argv) {
   assert.ok(evidence && isAbsolute(evidence), 'Evidence directory must be an absolute path');
   assert.match(endpointId ?? '', endpointPattern);
   assert.notEqual(sourceEndpoint, endpointId, 'The source and the measured endpoint must differ');
-  return { sourceUid, sourceEndpoint, endpointId, evidence, roundtrip: options.includes('--roundtrip') };
+  return { sourceUid, sourceEndpoint, endpointId, evidence, roundtrip: options.includes('--roundtrip'), settleSeconds };
 }
 
 /** Reads `--latency` probe text: the input scope's reported latency, safety and stream frames. */
@@ -139,56 +142,6 @@ export function watchInterruptions(signals, warn) {
 }
 const interruptedError = signal => Object.assign(new Error(`Interrupted by ${signal}`), { signal });
 
-function engineOperations(io) {
-  async function operation(method, path, body) {
-    const id = `latency-acceptance-${randomUUID()}`;
-    const receipt = `/api/v1/operations/${id}`;
-    const headers = { ...engineHost, 'x-mixrelay-operation-request': id,
-      ...(body === undefined ? {} : { 'content-type': 'application/json' }) };
-    const deadline = io.now() + OPERATION_BUDGET_MS;
-    let pending = false;
-    while (io.now() < deadline) {
-      let reply;
-      try {
-        reply = pending
-          ? await io.request(receipt, { headers: engineHost, timeoutMs: 5000 })
-          : await io.request(path, { method, headers, body, timeoutMs: 5000 });
-      } catch {
-        await io.delay(250); // lost reply: resend the identical request or poll again
-        continue;
-      }
-      if (reply.headers['x-mixrelay-operation'] !== undefined) {
-        pending = true;
-        await io.delay(250);
-        continue;
-      }
-      // Routes outside the operation layer answer directly; an expired receipt or a lost task
-      // answers "uncertain", which never confirms whether the request took effect.
-      let parsed;
-      try {
-        parsed = reply.body ? JSON.parse(reply.body) : undefined;
-      } catch {
-        parsed = undefined;
-      }
-      assert.notEqual(parsed?.parameters?.operationOutcome, 'uncertain',
-        `${method} ${path} has no confirmed result (operation ${id}); check the graph before editing it`);
-      if (reply.headers['x-mixrelay-operation-result'] === id) {
-        // Acknowledging only reclaims the receipt; the result above is already final.
-        await io.request(receipt, { method: 'DELETE', headers: engineHost, timeoutMs: 5000 }).catch(() => {});
-      }
-      return { ...reply, json: parsed };
-    }
-    assert.fail(`${method} ${path} did not finish (operation ${id}); check the graph before editing it`);
-  }
-  async function api(path, body) {
-    const reply = await operation(body === undefined ? 'GET' : 'PUT', `/api/v1/${path}`,
-      body === undefined ? undefined : JSON.stringify(body));
-    assert.ok(reply.status >= 200 && reply.status < 300, `/api/v1/${path}: HTTP ${reply.status} ${reply.body}`);
-    return reply.json;
-  }
-  return { operation, api };
-}
-
 /**
  * Runs the acceptance. `io` supplies the engine transport (`request`), the probe (`reported`,
  * `roundtrip`), time (`now`, `delay`), signals and logging, so tests run it without an engine.
@@ -204,8 +157,8 @@ export async function runAcceptance(options, io) {
   }
 }
 
-async function acceptance({ sourceUid, sourceEndpoint, endpointId, evidence, roundtrip }, io, interruption) {
-  const { operation, api } = engineOperations(io);
+async function acceptance({ sourceUid, sourceEndpoint, endpointId, evidence, roundtrip, settleSeconds = 0 }, io, interruption) {
+  const { operation, api } = engineOperations(io, 'latency-acceptance');
   const uid = `io.mixrelay.audio.endpoint.${endpointId.replaceAll('-', '')}`;
   const nativeUid = id => `io.mixrelay.audio.endpoint.${id.replaceAll('-', '')}`;
   // Measurement waits stop on an interruption; cleanup waits always finish.
@@ -294,7 +247,7 @@ async function acceptance({ sourceUid, sourceEndpoint, endpointId, evidence, rou
   // confirmed 'applied' write is ours to restore: a rejected one may have lost to another writer.
   let mutation = 'none';
   let applied;
-  const result = { graphId, source: sourceUid, endpoint: uid, sourceBaseline, sourceResidualFrames };
+  const result = { graphId, source: sourceUid, endpoint: uid, sourceBaseline, sourceResidualFrames, settleSeconds };
   const failures = [];
   const abort = interruption.signal;
   try {
@@ -309,6 +262,12 @@ async function acceptance({ sourceUid, sourceEndpoint, endpointId, evidence, rou
     applied = await api('graph');
     assert.equal(applied.revision, test.revision);
     assert.deepEqual(applied.edges, test.edges);
+    // An explicit diagnostic wait separates initial FIFO/PI settling from steady
+    // operation. Default is zero; no acceptance threshold changes with this wait.
+    if (settleSeconds > 0) {
+      await io.delay(settleSeconds * 1000, abort).catch(error => { interruption.check(); throw error; });
+      interruption.check();
+    }
     // Samples about one publication apart, so three equal values span three reporter windows.
     const readings = (result.readings = []);
     result.reported = await until('a stable reported input latency', async () => {
@@ -363,6 +322,7 @@ async function acceptance({ sourceUid, sourceEndpoint, endpointId, evidence, rou
     roundtripLatencyFrames: result.roundtrip?.latencyFrames,
     roundtripLatencyMs: result.roundtrip?.latencyMs,
     sourceResidualFrames,
+    settleSeconds,
     evidence,
   };
 

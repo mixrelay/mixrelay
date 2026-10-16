@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
-  INTERRUPTIONS, parseReported, roundtripProblems, roundtripToleranceFrames, runAcceptance,
+  INTERRUPTIONS, parseArguments, parseReported, roundtripProblems, roundtripToleranceFrames, runAcceptance,
 } from './macos-latency-acceptance.mjs';
 
 const SOURCE = '11111111-1111-4111-8111-111111111111';
@@ -89,6 +89,39 @@ function fakeEngine(t, hooks = {}) {
 }
 
 const listeners = signals => INTERRUPTIONS.map(name => signals.listenerCount(name));
+
+test('settling is explicit, bounded and never the default', () => {
+  const args = [SOURCE, ENDPOINT, '/tmp/latency-evidence', '--verify-installed-latency'];
+  assert.equal(parseArguments(args).settleSeconds, 0);
+  assert.equal(parseArguments([...args, '--roundtrip', '--settle-seconds=30']).settleSeconds, 30);
+  for (const option of ['--settle-seconds=-1', '--settle-seconds=121', '--settle-seconds=NaN', '--settle-seconds=0.5'])
+    assert.throws(() => parseArguments([...args, option]), /Invalid option/);
+  assert.throws(() => parseArguments([...args, '--settle-seconds=30', '--settle-seconds=30']), /Invalid option/);
+});
+
+test('a settled measurement waits after activation and records its scope', async t => {
+  const engine = fakeEngine(t, { reported(state) {
+    if (state.graph.revision === 4) assert.ok(state.time >= 30000);
+  } });
+  engine.options.settleSeconds = 30;
+  const summary = await runAcceptance(engine.options, engine.io);
+  assert.equal(summary.settleSeconds, 30);
+  assert.equal(engine.read('measured.json').settleSeconds, 30);
+  assert.equal(engine.read('measured.json').roundtripToleranceFrames, 50);
+});
+
+test('interruption during settling still restores the graph', async t => {
+  const engine = fakeEngine(t);
+  engine.options.settleSeconds = 30;
+  const delay = engine.io.delay;
+  engine.io.delay = async (ms, signal) => {
+    if (ms === 30000) engine.signals.emit('SIGINT', 'SIGINT');
+    await delay(ms, signal);
+  };
+  await assert.rejects(runAcceptance(engine.options, engine.io), /Interrupted by SIGINT/);
+  assert.deepEqual(engine.state.graph, { ...engine.original, revision: 5 });
+  assert.equal(engine.read('restored.json').reported.latency, 0);
+});
 
 test('a complete run restores the graph and confirms the round trip', async t => {
   const engine = fakeEngine(t);
