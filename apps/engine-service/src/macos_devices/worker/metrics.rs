@@ -56,6 +56,11 @@ pub(in crate::macos_devices) enum ResetCause {
 }
 
 impl PcmMetrics {
+    #[cfg(test)]
+    pub(super) fn work_calls(&self) -> u64 {
+        self.work.snapshot().0
+    }
+
     pub(in crate::macos_devices) fn work(&self, elapsed: Duration, frames: u32, rate: u32) {
         self.work.record(elapsed);
         if frames != 0 && elapsed.as_nanos() * u128::from(rate) > u128::from(frames) * 1_000_000_000

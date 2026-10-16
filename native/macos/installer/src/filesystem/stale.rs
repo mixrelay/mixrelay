@@ -14,9 +14,9 @@ pub(super) fn cleanup(layout: &FilesystemLayout) -> Result<(), FilesystemError> 
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(io_failure("inspect stale staging", path, error)),
     };
-    // SAFETY: geteuid only reads the caller's identity. Production callers have
-    // already required root; fixture callers may own their unprivileged tree.
-    let owner = unsafe { libc::geteuid() };
+    // Production callers already required root; fixture callers may own their
+    // unprivileged tree. Apply the same effective-UID check on both Unix hosts.
+    let owner = rustix::process::geteuid().as_raw();
     if !metadata.is_dir() || metadata.uid() != owner || metadata.mode() & 0o7777 != 0o700 {
         return Err(FilesystemError::UnsafePath {
             path: path.to_path_buf(),

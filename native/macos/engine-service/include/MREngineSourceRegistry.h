@@ -45,6 +45,8 @@ uint64_t mr_engine_source_id_token(const char *source_id);
 uint32_t mr_engine_source_registry_read_clocked(
     MREngineSourceRegistry *registry, uint64_t source_token, float *interleaved_samples,
     uint32_t frame_count, uint32_t channels, uint32_t sample_rate);
+uint64_t mr_engine_source_registry_take_source_faults(
+    const MREngineSourceRegistry *registry, uint64_t source_token);
 
 #ifdef __cplusplus
 }

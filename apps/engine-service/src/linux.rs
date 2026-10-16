@@ -37,7 +37,7 @@ mod endpoints;
 #[path = "linux_format.rs"]
 mod format;
 use mixrelay_pipewire as native;
-#[cfg(test)]
+#[cfg(all(test, feature = "native-lab"))]
 #[path = "linux_resource_tests.rs"]
 mod resource_tests;
 #[path = "linux_source_mute.rs"]
@@ -570,6 +570,8 @@ impl LinuxProcessState<'_> {
             .map_err(|_| ())?;
         self.status
             .record_process(self.endpoints.finish_block(cycle.frames)?);
+        self.captures.finish_block(cycle.frames);
+        self.devices.finish_input_block();
         let Some(report) = report else {
             return Ok(());
         };
@@ -743,7 +745,7 @@ impl LinuxVirtualEndpointBackend {
         Arc::new_cyclic(Self::prepare)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "native-lab"))]
     fn new_standalone_device_publishers() -> Arc<Self> {
         Arc::new_cyclic(|self_ref| {
             let mut backend = Self::prepare(self_ref);

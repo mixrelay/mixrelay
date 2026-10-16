@@ -175,9 +175,16 @@ static void transfer_counter_contract(void) {
     assert(observation.failures[0].first_position == 640);
     assert(observation.failures[0].last_position == 1280);
     assert(observation.failures[0].first_clock == ((UINT64_C(7) << 32) | 48000));
+    assert(mr_pw_stream_capture_failures(&ingress) == 5);
+    record_rejected(&ingress, MR_NATIVE_OUTPUT_READ, 128, 0);
+    record_rejected(&ingress, MR_ENGINE_CAPTURE_READ, 128, 0);
+    record_rejected(&ingress, MR_ENGINE_OUTPUT_WRITE, 128, 0);
+    assert(mr_pw_stream_capture_failures(&ingress) == 5);
+    assert(mr_pw_stream_capture_failures(&ingress) == 5); /* Observing never consumes. */
     ingress.native_output = true;
     record_capture_ingress_discard(&ingress, NULL);
     assert(mr_pw_stream_transfer_snapshot(&ingress).failures[0].rejected_calls == 5);
+    assert(mr_pw_stream_capture_failures(&ingress) == 0);
     mr_pcm_ring_clear(&ingress.ring);
 }
 
@@ -187,7 +194,7 @@ static void native_format_advertisement(void) {
         uint8_t storage[2048];
         struct spa_pod_builder builder = SPA_POD_BUILDER_INIT(storage, sizeof(storage));
         const struct spa_pod *params[4];
-        unsigned count = build_stream_formats(&s, &builder, params, virtual_endpoint);
+        unsigned count = build_stream_formats(&s, &builder, params, virtual_endpoint, 0);
         assert(count == (virtual_endpoint ? 4 : 1));
         assert(mr_pw_stream_supported_formats(&s) == (virtual_endpoint ? 15 : 1));
         for (unsigned i = 0; i < count; i++) {
@@ -252,6 +259,42 @@ static void native_format_contract(void) {
     native_format_pcm(MR_PCM_FORMAT_SIGNED24, SPA_AUDIO_FORMAT_S24);
     native_format_pcm(MR_PCM_FORMAT_SIGNED32, SPA_AUDIO_FORMAT_S32);
     assert(pcm_format(SPA_AUDIO_FORMAT_S24_32) == 0);
+}
+
+static void capture_chunk_flags_contract(void) {
+    for (uint32_t encoding = 1; encoding <= 4; encoding++) {
+        MRPWStream s = {.channels = 2, .sample_rate = 48000};
+        initialize_transfer_observations(&s);
+        atomic_store(&s.format_snapshot, (UINT64_C(48000) << 32) | (encoding << 16) | 2);
+        atomic_store(&s.format_valid, true);
+        assert(mr_pcm_ring_init(&s.ring, 2, 512));
+        const uint32_t stride = 2 * sample_bytes(encoding);
+        _Alignas(float) float stale[256 * 2];
+        for (unsigned n = 0; n < 256 * 2; n++) stale[n] = 0.875f;
+        struct spa_chunk chunk = {.size = 128 * stride, .stride = stride,
+                                  .flags = SPA_CHUNK_FLAG_EMPTY};
+        struct spa_data pcm = {.data = stale, .maxsize = sizeof(stale), .chunk = &chunk};
+        capture_buffer(&s, &pcm, 128);
+        /* An EMPTY chunk carries neutral audio even without payload storage. */
+        pcm.data = NULL;
+        capture_buffer(&s, &pcm, 128);
+        float output[128 * 2];
+        for (unsigned block = 0; block < 2; block++) {
+            assert(mr_pw_stream_read(&s, output, 128) == 128);
+            for (unsigned n = 0; n < 128 * 2; n++) assert(output[n] == 0.0f);
+        }
+        assert(mr_pw_stream_transfer_snapshot(&s).failures[0].rejected_calls == 0);
+        assert(mr_pcm_ring_write(&s.ring, stale, 128) == 128);
+        pcm.data = stale;
+        chunk.flags = SPA_CHUNK_FLAG_EMPTY | SPA_CHUNK_FLAG_CORRUPTED;
+        capture_buffer(&s, &pcm, 128);
+        /* Rejected PCM invalidates old queued samples before fresh publication. */
+        mr_pcm_ring_write_silence(&s.ring, 0);
+        assert(mr_pw_stream_read(&s, output, 128) == 0);
+        for (unsigned n = 0; n < 128 * 2; n++) assert(output[n] == 0.0f);
+        assert(mr_pw_stream_transfer_snapshot(&s).failures[0].rejected_frames == 128);
+        mr_pcm_ring_clear(&s.ring);
+    }
 }
 
 static void transfer_ring_results(void) {
@@ -423,6 +466,7 @@ int main(int argc, char **argv) {
     transfer_counter_contract();
     transfer_ring_results();
     native_format_contract();
+    capture_chunk_flags_contract();
     if (argc == 2 && strcmp(argv[1], "--transfer-counters-only") == 0) {
         puts("PASS: transfer ABI, ring lifetime, native format negotiation and PCM byte geometry");
         return 0;

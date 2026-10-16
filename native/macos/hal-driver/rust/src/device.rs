@@ -9,6 +9,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use crate::abi::{Geometry, NativeOps, Snapshot};
 
+pub(crate) type ConversionScratch = [Box<[f32]>; 2];
+
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
@@ -155,7 +157,18 @@ impl Device {
     }
 
     /// Allocates bounded directional conversion storage on the owning control thread.
-    pub(crate) fn prepare_scratch(&self, pending: &Pending) -> [Box<[f32]>; 2] {
+    pub(crate) fn prepare_scratch(
+        &self,
+        pending: &Pending,
+    ) -> Result<ConversionScratch, std::collections::TryReserveError> {
+        self.prepare_scratch_with(pending, mixrelay_audio_io::pcm_buffer::zeroed)
+    }
+
+    pub(crate) fn prepare_scratch_with(
+        &self,
+        pending: &Pending,
+        mut reserve: impl FnMut(usize) -> Result<Vec<f32>, std::collections::TryReserveError>,
+    ) -> Result<ConversionScratch, std::collections::TryReserveError> {
         let (capture, render) = pending.attachment.as_ref().map_or(
             (
                 self.capture_channels.load(Ordering::Acquire),
@@ -168,10 +181,10 @@ impl Device {
                 )
             },
         );
-        [
-            NativeStream::prepare(pending.formats[0], capture),
-            NativeStream::prepare(pending.formats[1], render),
-        ]
+        Ok([
+            NativeStream::prepare(pending.formats[0], capture, &mut reserve)?,
+            NativeStream::prepare(pending.formats[1], render, &mut reserve)?,
+        ])
     }
 
     /// Caller holds control and freeze after successful native rate/mapping change.
@@ -179,7 +192,11 @@ impl Device {
     /// # Safety
     /// Device control and its freeze guard remain held, excluding all IO pins until
     /// the matching native rate, geometry and scratch have been fully published.
-    pub(crate) unsafe fn publish_configuration(&self, pending: &Pending, scratch: [Box<[f32]>; 2]) {
+    pub(crate) unsafe fn publish_configuration(
+        &self,
+        pending: &Pending,
+        scratch: ConversionScratch,
+    ) {
         if let Some(attachment) = &pending.attachment {
             self.render_channels
                 .store(attachment.geometry.render_channels, Ordering::Release);
@@ -288,13 +305,15 @@ impl NativeStream {
         }
     }
 
-    pub(crate) fn prepare(format: SampleFormat, channels: u32) -> Box<[f32]> {
-        let samples = if format == SampleFormat::Float32 {
-            0
-        } else {
-            crate::formats::MAX_BUFFER_FRAMES * channels as usize
-        };
-        vec![0.0; samples].into_boxed_slice()
+    fn prepare(
+        format: SampleFormat,
+        channels: u32,
+        reserve: &mut impl FnMut(usize) -> Result<Vec<f32>, std::collections::TryReserveError>,
+    ) -> Result<Box<[f32]>, std::collections::TryReserveError> {
+        if format == SampleFormat::Float32 {
+            return Ok(Box::default());
+        }
+        reserve(crate::formats::MAX_BUFFER_FRAMES * channels as usize).map(Vec::into_boxed_slice)
     }
 
     /// Caller owns device control and a freeze guard; no IO pin can access this storage.

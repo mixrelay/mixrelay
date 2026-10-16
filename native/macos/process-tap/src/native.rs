@@ -129,6 +129,8 @@ unsafe extern "C" {
         processes: *const u32,
         count: usize,
         target_device_uid: *const c_char,
+        select_bundle: bool,
+        mute: bool,
     ) -> *mut c_void;
     fn mr_tap_description_release(description: *mut c_void);
     fn mr_tap_aggregate_create(description: *mut c_void, device: *mut u32) -> i32;
@@ -165,6 +167,14 @@ pub(super) trait Native {
     fn remove_inventory_listener(&self, session: &TapSession) -> Result<(), TapError>;
     fn destroy_aggregate(&self, device: u32) -> Result<(), TapError>;
     fn destroy_tap(&self, tap: u32) -> Result<(), TapError>;
+    /// One temporary, unmuted observation of exactly the same selection.
+    fn diagnostic(
+        &self,
+        selection: &Selection,
+        observed_at: std::time::Instant,
+    ) -> Result<super::watchdog::Diagnostic, TapError>;
+    fn diagnostic_has_audio(&self, diagnostic: &super::watchdog::Diagnostic) -> bool;
+    fn retire_diagnostic(&self, diagnostic: super::watchdog::Diagnostic);
 }
 
 pub(super) struct CoreAudio;
@@ -272,6 +282,46 @@ impl Native for CoreAudio {
         // SAFETY: aggregate and listener are gone before their underlying tap.
         TapError::status(unsafe { AudioHardwareDestroyProcessTap(tap) })
     }
+    fn diagnostic(
+        &self,
+        selection: &Selection,
+        _observed_at: std::time::Instant,
+    ) -> Result<super::watchdog::Diagnostic, TapError> {
+        let preparation_started = std::time::Instant::now();
+        let current = self.processes(
+            &selection.bundle,
+            selection.target_device.map(|lease| lease.object),
+        )?;
+        if selection.fallback && current != selection.selected {
+            return Err(TapError::code(9));
+        }
+        if let (Some(uid), Some(expected)) = (&selection.target_device_uid, selection.target_device)
+            && self.device(uid)? != expected
+        {
+            return Err(TapError::code(9));
+        }
+        if !current.iter().any(|process| {
+            property::<u32>(process.object, *b"piro").is_ok_and(|running| running != 0)
+        }) {
+            return Err(TapError::code(3));
+        }
+        super::ffi::create_diagnostic(selection).map(|session| super::watchdog::Diagnostic {
+            session,
+            preparation_started,
+            preparation_time: preparation_started.elapsed(),
+        })
+    }
+    fn diagnostic_has_audio(&self, diagnostic: &super::watchdog::Diagnostic) -> bool {
+        // SAFETY: the control watchdog retains this diagnostic until retirement.
+        unsafe { &*diagnostic.session }
+            .audible_callbacks
+            .load(std::sync::atomic::Ordering::Relaxed)
+            != 0
+    }
+    fn retire_diagnostic(&self, diagnostic: super::watchdog::Diagnostic) {
+        // SAFETY: the control watchdog transfers its unique ownership exactly once.
+        unsafe { super::ffi::mr_process_tap_destroy(diagnostic.session) };
+    }
 }
 
 unsafe extern "C" fn format_changed(
@@ -304,13 +354,14 @@ pub(super) struct DeviceLease {
     pub stream: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct Selection {
     pub bundle: CString,
     pub fallback: bool,
     pub selected: Vec<ProcessIdentity>,
     pub target_device_uid: Option<CString>,
     pub target_device: Option<DeviceLease>,
+    pub mute: bool,
 }
 
 impl Selection {
@@ -342,6 +393,7 @@ impl Selection {
             selected: Vec::new(),
             target_device_uid,
             target_device,
+            mute: config.mute_while_captured,
         })
     }
 }
@@ -359,6 +411,8 @@ impl Description {
                     .target_device_uid
                     .as_ref()
                     .map_or(ptr::null(), |uid| uid.as_ptr()),
+                !selection.fallback,
+                selection.mute,
             )
         };
         if pointer.is_null() {

@@ -54,6 +54,8 @@ bool mr_application_source_transport_reset(
     MRApplicationSourceTransport *transport, uint64_t format_word, uint32_t native_sample_rate);
 void mr_application_source_transport_publish_native(
     MRApplicationSourceTransport *transport, uint64_t native_frames, bool running);
+bool mr_application_source_transport_record_source_faults(
+    MRApplicationSourceTransport *transport, uint64_t epoch, uint64_t count);
 
 MRApplicationSourceTransport *mr_application_source_transport_connect(
     const char *source_id,

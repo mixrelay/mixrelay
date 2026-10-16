@@ -239,13 +239,10 @@ impl EndpointSet {
                 frames: 0,
                 discontinuity: false,
                 activity,
+                source_sample_faults: 0,
             };
         }
-        TransferOutcome {
-            frames: stream.read(destination),
-            discontinuity: false,
-            activity,
-        }
+        stream.read_capture(destination)
     }
 
     pub(super) fn write(&mut self, id: &str, source: &[f32]) -> TransferOutcome {
@@ -308,6 +305,7 @@ impl EndpointSet {
 #[cfg(test)]
 impl EndpointSet {
     /// Observes current canonical transports; graph references do not add owners.
+    #[cfg(feature = "native-lab")]
     pub(super) fn transfer_snapshot(&self) -> super::native::TransferSnapshot {
         let mut snapshot = super::native::TransferSnapshot::default();
         for owner in self.nodes.values().filter_map(|slot| slot.owner.as_ref()) {

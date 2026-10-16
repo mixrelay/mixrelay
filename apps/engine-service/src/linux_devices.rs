@@ -162,6 +162,7 @@ impl DeviceStreams {
         }
     }
     #[cfg(test)]
+    #[cfg(feature = "native-lab")]
     pub(super) fn input_owner(&self, id: &str) -> Option<usize> {
         self.inputs
             .get(id)?
@@ -174,6 +175,13 @@ impl DeviceStreams {
         for entry in self.inputs.values_mut() {
             if let Some(stream) = &mut entry.stream {
                 stream.discard_input();
+            }
+        }
+    }
+    pub(super) fn finish_input_block(&mut self) {
+        for entry in self.inputs.values_mut() {
+            if let Some(stream) = &mut entry.stream {
+                stream.finish_capture_block();
             }
         }
     }
@@ -708,7 +716,7 @@ impl DeviceStreams {
                         ..TransferOutcome::complete(0)
                     };
                 }
-                TransferOutcome::complete(stream.read(samples))
+                stream.read_capture(samples)
             })
     }
 
@@ -759,6 +767,7 @@ impl DeviceStreams {
 #[cfg(test)]
 impl DeviceStreams {
     /// Observes acquired physical input/output owners without changing report baselines.
+    #[cfg(feature = "native-lab")]
     pub(super) fn transfer_snapshot(&self) -> super::native::TransferSnapshot {
         let mut snapshot = super::native::TransferSnapshot::default();
         for stream in self

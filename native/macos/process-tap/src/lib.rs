@@ -25,6 +25,7 @@ use process_tap_lifecycle::TapLifecycle;
 
 mod process_tap_input;
 mod process_tap_lifecycle;
+mod watchdog;
 
 #[cfg(all(test, not(debug_assertions)))]
 mod benchmark;
@@ -172,6 +173,13 @@ const _: () = assert!(size_of::<TapConfig>() == 32 && align_of::<TapConfig>() ==
 const _: () = assert!(size_of::<TapError>() == 8 && align_of::<TapError>() == 4);
 const _: () = assert!(size_of::<TapStats>() == 96 && align_of::<TapStats>() == 8);
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum RebuildIntent {
+    #[default]
+    Unchanged,
+    Replace,
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct Resources {
     tap: u32,
@@ -180,6 +188,9 @@ struct Resources {
     listener: bool,
     inventory_listener: bool,
     resume: bool,
+    /// A failed native teardown must not downgrade a requested tap replacement
+    /// into a format-only `IOProc` restart on the next control pass.
+    rebuild: RebuildIntent,
 }
 
 #[derive(Debug)]
@@ -212,6 +223,10 @@ pub struct TapSession {
     generation: AtomicU64,
     callbacks: AtomicU64,
     captured: AtomicU64,
+    /// Native PCM evidence; meters may drain independently and cannot certify recovery.
+    audible_callbacks: AtomicU64,
+    /// Only the serialized control owner touches watchdog state or its diagnostic tap.
+    watchdog: RefCell<watchdog::TapWatchdog>,
     active_callbacks: AtomicU32,
     active_listeners: AtomicU32,
     /// Signaled after each callback's ring write so the capture pump need not poll.

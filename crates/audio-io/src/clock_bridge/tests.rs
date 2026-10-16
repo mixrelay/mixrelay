@@ -122,10 +122,63 @@ fn converter_residence_counts_elapsed_time_only_for_pcm_retained_between_invocat
         assert_eq!(output_ns, 2_000_000.0);
         assert_eq!(waited.algorithmic_delay_frames, 0);
         bridge.reset(2, Discontinuity::StreamRestart);
+        let before_reset = waited.output_residence.unwrap();
         assert_eq!(
             bridge.report(0, 0).output_residence,
-            waited.output_residence
+            Some(ResidenceSnapshot {
+                invalid: before_reset.invalid.wrapping_add(1),
+                ..before_reset
+            })
         );
+    });
+    assert_eq!(allocations.count_total, 0);
+}
+
+#[test]
+fn transport_reset_invalidates_spanning_residence_but_recovers_without_clearing_counters() {
+    let mut options = config(1, 48_000, 48_000);
+    options.clock_relation = ClockRelation::ProvenSameClock;
+    let mut bridge = AsyncClockBridge::new(options).unwrap();
+    let initial = bridge.report(0, 0);
+    assert_eq!(initial.input_residence.unwrap().invalid, 0);
+    assert_eq!(initial.output_residence.unwrap().invalid, 0);
+    bridge.push_interleaved(&[0.25; 256]).unwrap();
+    let before = bridge.pull_interleaved(&mut [0.0; 64]).unwrap();
+    assert!(before.queued_input_frames > 0 && before.queued_output_frames > 0);
+    let allocations = allocation_counter::measure(|| {
+        bridge.reset(1, Discontinuity::TransportLoss);
+        bridge.reset(2, Discontinuity::StreamRestart);
+        let after = bridge.report(0, 0);
+        for (before, after) in [
+            (before.input_residence, after.input_residence),
+            (before.output_residence, after.output_residence),
+        ] {
+            let (before, after) = (before.unwrap(), after.unwrap());
+            assert_eq!(after.sum, before.sum);
+            assert_eq!(after.weight, before.weight);
+            assert_eq!(after.invalid, before.invalid + 2);
+        }
+        bridge.push_interleaved(&[0.5; 128]).unwrap();
+        bridge.advance_residence(std::time::Duration::from_millis(5));
+        let resumed = bridge.pull_interleaved(&mut [0.0; 128]).unwrap();
+        for (old, reset, next, expected) in [
+            (
+                before.input_residence,
+                after.input_residence,
+                resumed.input_residence,
+                480.0,
+            ),
+            (
+                before.output_residence,
+                after.output_residence,
+                resumed.output_residence,
+                0.0,
+            ),
+        ] {
+            let (old, reset, next) = (old.unwrap(), reset.unwrap(), next.unwrap());
+            assert_eq!(next.mean_since(old), None);
+            assert_eq!(next.mean_since(reset), Some(expected));
+        }
     });
     assert_eq!(allocations.count_total, 0);
 }

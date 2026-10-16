@@ -21,7 +21,7 @@ mod storage;
 pub use ffi::{
     mr_pcm_ring_clear, mr_pcm_ring_discard, mr_pcm_ring_init, mr_pcm_ring_read,
     mr_pcm_ring_read_available, mr_pcm_ring_read_pcm, mr_pcm_ring_restart, mr_pcm_ring_stats,
-    mr_pcm_ring_write, mr_pcm_ring_write_pcm,
+    mr_pcm_ring_write, mr_pcm_ring_write_pcm, mr_pcm_ring_write_silence,
 };
 pub use sample_format::SampleFormat;
 pub use storage::prefault_pcm;

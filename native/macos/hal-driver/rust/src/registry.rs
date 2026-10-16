@@ -10,7 +10,7 @@ use crate::abi::{
     NATIVE_ERROR, NOT_FOUND, NativeOps, OK, OUTPUT_MUTE, OUTPUT_VOLUME, RUNNING, STREAM_ACTIVE,
     Snapshot, Timestamp,
 };
-use crate::device::{Attachment, Device, Pending, lock};
+use crate::device::{Attachment, ConversionScratch, Device, Pending, lock};
 
 // The control bridge ticks every 100 ms. A host proxy ACK does not guarantee
 // Perform will arrive; retain the owned attachment and retry after five seconds.
@@ -734,6 +734,19 @@ impl Registry {
     }
 
     pub(crate) fn perform(&self, id: u32, action: u64, generation: u64) -> i32 {
+        self.perform_with_scratch(id, action, generation, Device::prepare_scratch)
+    }
+
+    pub(crate) fn perform_with_scratch(
+        &self,
+        id: u32,
+        action: u64,
+        generation: u64,
+        prepare: impl FnOnce(
+            &Device,
+            &Pending,
+        ) -> Result<ConversionScratch, std::collections::TryReserveError>,
+    ) -> i32 {
         if action != CONFIG_ACTION {
             return INVALID;
         }
@@ -751,9 +764,14 @@ impl Registry {
         {
             return OK;
         }
-        let pending = control.pending.take().expect("matched pending generation");
+        let Some(pending) = control.pending.take() else {
+            return OK;
+        };
         // Allocate bounded directional storage on control, before draining callbacks.
-        let scratch = device.prepare_scratch(&pending);
+        let Ok(scratch) = prepare(&device, &pending) else {
+            control.attachment_failed = pending.attachment.is_some();
+            return CAPACITY;
+        };
         let frozen = device.freeze();
         let success = if let Some(attachment) = &pending.attachment {
             unsafe {

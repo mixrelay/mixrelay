@@ -1,3 +1,4 @@
+#![cfg(feature = "native-lab")]
 use super::*;
 
 // OS-side playback into the exported sink, independent of the graph writer.
@@ -59,7 +60,6 @@ fn request(enabled: Option<bool>, muted: Option<bool>, gain_db: Option<f32>) -> 
 }
 
 #[test]
-#[ignore = "requires owned isolated PipeWire graph, native device fixture and private catalog"]
 fn native_device_signal_sums_os_playback_and_graph_controls() {
     let _driver_devices = DriverFixture::new();
     let session = Session::new();

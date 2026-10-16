@@ -163,7 +163,6 @@ fn measure_phase(registry: &RegistryOwner, rate: u32) -> Clock {
 }
 
 #[test]
-#[ignore = "opt-in real owned virtual-only tone and process-tap permission; no host defaults or graph writes"]
 fn live_owned_application_tap_v2_src_rate_changes() {
     let _tone = ToneOwner::start();
     let (registry, transport) = RegistryOwner::create();

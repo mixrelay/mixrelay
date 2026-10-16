@@ -1,5 +1,5 @@
 use super::{
-    TapError, TapSession,
+    RebuildIntent, TapError, TapSession,
     native::{Native, ProcessIdentity},
 };
 use crate::process_tap_input::TapFormat;
@@ -35,12 +35,14 @@ impl TapSession {
         if resources.proc.is_null() || !self.allowed() {
             return Err(TapError::code(9));
         }
+        self.watchdog.borrow_mut().clear(native);
         native.start(resources.aggregate, resources.proc)?;
         self.running.store(true, Ordering::Release);
         Ok(())
     }
 
     pub(super) fn stop(&self, native: &impl Native) -> Result<(), TapError> {
+        self.watchdog.borrow_mut().clear(native);
         if !self.running.load(Ordering::Acquire) {
             return Err(TapError::code(8));
         }
@@ -74,6 +76,7 @@ impl TapSession {
     }
 
     pub(super) fn reclaim(&self, native: &impl Native) -> bool {
+        self.watchdog.borrow_mut().clear(native);
         let mut resources = self.resources.get();
         if resources.inventory_listener {
             if native.remove_inventory_listener(self).is_err() {
@@ -118,12 +121,39 @@ impl TapSession {
     }
 
     pub(super) fn refresh(&self, native: &impl Native) -> Result<(), TapError> {
+        self.refresh_at(native, std::time::Instant::now())
+    }
+
+    pub(super) fn refresh_at(
+        &self,
+        native: &impl Native,
+        now: std::time::Instant,
+    ) -> Result<(), TapError> {
+        self.refresh_native_at(native, now).map_err(|error| {
+            if self.resources.get().resume && matches!(error.code, 4 | 6) {
+                // A suspended producer retains its ownership and retries the
+                // partially completed rebuild. The desktop pump must not exit
+                // permanently after a transient native/allocation failure.
+                TapError { code: 9, ..error }
+            } else {
+                error
+            }
+        })
+    }
+
+    fn refresh_native_at(
+        &self,
+        native: &impl Native,
+        now: std::time::Instant,
+    ) -> Result<(), TapError> {
         // SAFETY: serialized control retains this owner; lifecycle itself is atomic.
         if self.lifecycle.retiring() {
             return Err(TapError::code(1));
         }
         let observed = self.lifecycle.epoch();
-        let discovery = self.discover(native)?;
+        let discovery = self
+            .discover(native)
+            .inspect_err(|_| self.watchdog.borrow_mut().clear(native))?;
         let bundle_recertification = discovery.is_some();
         if let Some(Discovery {
             candidate,
@@ -148,10 +178,11 @@ impl TapSession {
             // only epoch re-certification, never a hardware restart. A newer
             // notification during discovery makes this commit fail safely.
             if self.lifecycle.current(observed) || self.lifecycle.commit(observed) {
-                return Ok(());
+                return self.recover_if_confirmed(native, observed, now);
             }
             return Err(TapError::code(9));
         }
+        self.watchdog.borrow_mut().clear(native);
         if self.lifecycle.epoch() != observed {
             return Err(TapError::code(9));
         }
@@ -185,11 +216,38 @@ impl TapSession {
         Ok(())
     }
 
+    fn recover_if_confirmed(
+        &self,
+        native: &impl Native,
+        observed: u64,
+        now: std::time::Instant,
+    ) -> Result<(), TapError> {
+        if !self.watchdog.borrow_mut().poll(native, self, now) {
+            return Ok(());
+        }
+        let selected = self
+            .selection
+            .borrow()
+            .as_ref()
+            .map(|selection| selection.selected.clone())
+            .ok_or(TapError::code(1))?;
+        self.retrack(native, observed, selected)
+    }
+
     fn discover(&self, native: &impl Native) -> Result<Option<Discovery>, TapError> {
         let selection = self.selection.borrow();
-        let Some(selection) = selection.as_ref().filter(|selection| selection.fallback) else {
+        let Some(selection) = selection.as_ref() else {
             return Ok(None);
         };
+        if !selection.fallback {
+            // Native bundle selectors restore process membership themselves, but
+            // a failed watchdog rebuild still needs its missing native handles
+            // recreated on the next control pass.
+            return Ok(self.incomplete_tap().then(|| Discovery {
+                candidate: selection.selected.clone(),
+                retrack: true,
+            }));
+        }
         if let (Some(uid), Some(device)) = (&selection.target_device_uid, selection.target_device) {
             let current = native
                 .device(uid)
@@ -215,13 +273,17 @@ impl TapSession {
             self.lifecycle.changed();
             return Err(TapError::code(9));
         }
+        let retrack = candidate != selection.selected || self.incomplete_tap();
+        Ok(Some(Discovery { candidate, retrack }))
+    }
+
+    fn incomplete_tap(&self) -> bool {
         let resources = self.resources.get();
-        let retrack = candidate != selection.selected
-            || resources.tap == 0
+        resources.tap == 0
             || resources.aggregate == 0
             || !resources.listener
-            || resources.proc.is_null();
-        Ok(Some(Discovery { candidate, retrack }))
+            || resources.proc.is_null()
+            || resources.rebuild == RebuildIntent::Replace
     }
 
     fn retrack(
@@ -230,10 +292,12 @@ impl TapSession {
         observed: u64,
         candidate: Vec<ProcessIdentity>,
     ) -> Result<(), TapError> {
+        self.watchdog.borrow_mut().clear(native);
         // No callback may deliver old-identity PCM after this invalidation.
         let epoch = self.lifecycle.invalidate(observed);
         let mut resources = self.resources.get();
         resources.resume |= self.running.load(Ordering::Acquire);
+        resources.rebuild = RebuildIntent::Replace;
         self.resources.set(resources);
         if !self.reclaim_tap(native) {
             return Err(TapError::code(9));
@@ -242,7 +306,7 @@ impl TapSession {
         let mut selection = self.selection.borrow_mut();
         let selection = selection.as_mut().ok_or(TapError::code(1))?;
         selection.selected = candidate;
-        if selection.selected.is_empty() {
+        if selection.fallback && selection.selected.is_empty() {
             // No tap with an empty process list is ever created: the native
             // initializer is not assumed to mean silence for that case.
             return Err(TapError::code(9));
@@ -265,6 +329,9 @@ impl TapSession {
             resources.resume = false;
             self.resources.set(resources);
         }
+        let mut resources = self.resources.get();
+        resources.rebuild = RebuildIntent::Unchanged;
+        self.resources.set(resources);
         Ok(())
     }
 

@@ -159,15 +159,9 @@ static void stream_io(void *data, uint32_t id, void *area, uint32_t size) {
     /* Same handoff as PipeWire stream.c impl_set_io: finish earlier callbacks
      * before replacing the borrowed IO pointer. Merely storing an atomic pointer
      * on the main loop would not protect the previous IO area's lifetime. */
-#if PW_CHECK_VERSION(1, 1, 0)
-    /* Newer PipeWire can assign different data loops to individual streams. */
+    /* PipeWire >= 1.2 assigns data loops per stream. */
     pw_loop_invoke(pw_stream_get_data_loop(s->stream), set_stream_position,
                    0, &position, sizeof(position), true, s);
-#else
-    struct pw_context *context = pw_core_get_context(pw_stream_get_core(s->stream));
-    pw_data_loop_invoke(pw_context_get_data_loop(context), set_stream_position,
-                        0, &position, sizeof(position), true, s);
-#endif
 }
 
 static void stream_param(void *data, uint32_t id, const struct spa_pod *param) {
@@ -209,6 +203,9 @@ static void playback_buffer(MRPWStream *s, struct pw_buffer *buffer,
     pcm->chunk->offset = 0;
     pcm->chunk->stride = (int32_t)stride;
     pcm->chunk->size = frames * stride;
+    /* Recycled metadata describes this transfer, not a previous buffer. A
+     * wholly starved ring emitted silence rather than prepared graph PCM. */
+    pcm->chunk->flags = transferred == 0 ? SPA_CHUNK_FLAG_EMPTY : 0;
     /* PipeWire time accounting uses frames, including any emitted silence. */
     buffer->size = frames;
 }
@@ -217,19 +214,32 @@ static void capture_buffer(MRPWStream *s, struct spa_data *pcm, uint32_t graph_f
     const uint32_t encoding = stream_encoding(s), stride = s->channels * sample_bytes(encoding);
     const uint32_t offset = pcm->chunk->offset;
     const uint32_t size = pcm->chunk->size;
+    const bool empty = (pcm->chunk->flags & SPA_CHUNK_FLAG_EMPTY) != 0;
     if (!stride || offset > pcm->maxsize || size > pcm->maxsize - offset ||
-        size % stride || (encoding == MR_PCM_FORMAT_FLOAT32 && offset % sizeof(float)) ||
+        size % stride || (!empty && encoding == MR_PCM_FORMAT_FLOAT32 && offset % sizeof(float)) ||
         (pcm->chunk->stride != 0 && pcm->chunk->stride != (int32_t)stride)) {
         record_capture_ingress_discard(s, pcm);
+        return;
+    }
+    if (pcm->chunk->flags & SPA_CHUNK_FLAG_CORRUPTED) {
+        record_capture_ingress_discard(s, pcm);
+        restart_stream_ring(s);
         return;
     }
     const uint32_t frames = size / stride;
     atomic_store_explicit(&s->quantum_snapshot, ((uint64_t)graph_frames << 32) | frames,
                           memory_order_release);
-    void *input = (uint8_t *)pcm->data + offset;
-    uint32_t transferred = encoding == MR_PCM_FORMAT_FLOAT32
-        ? mr_pcm_ring_write(&s->ring, input, frames)
-        : mr_pcm_ring_write_pcm(&s->ring, input, frames, encoding);
+    uint32_t transferred;
+    if (empty) {
+        /* EMPTY payload storage need not contain initialized audio. Preserve
+         * the declared timeline with neutral samples, never recycled bytes. */
+        transferred = mr_pcm_ring_write_silence(&s->ring, frames);
+    } else {
+        void *input = (uint8_t *)pcm->data + offset;
+        transferred = encoding == MR_PCM_FORMAT_FLOAT32
+            ? mr_pcm_ring_write(&s->ring, input, frames)
+            : mr_pcm_ring_write_pcm(&s->ring, input, frames, encoding);
+    }
     record_rejected(s, MR_NATIVE_CAPTURE_WRITE, frames, transferred);
 }
 
@@ -254,7 +264,8 @@ static void stream_process_buffer(MRPWStream *s) {
         goto done;
     }
     struct spa_data *d = &buffer->datas[0];
-    if (!d->data || !d->chunk) {
+    if (!d->chunk || (!d->data &&
+        (s->native_output || !(d->chunk->flags & SPA_CHUNK_FLAG_EMPTY)))) {
         record_capture_ingress_discard(s, d);
         goto done;
     }
@@ -498,6 +509,11 @@ MRPWTransferCounters mr_pw_stream_counters(MRPWStream *s) {
         .overflows = stats.overflows,
         .starvations = stats.starvations,
     };
+}
+uint64_t mr_pw_stream_capture_failures(MRPWStream *s) {
+    if (s->native_output) return 0;
+    return atomic_load_explicit(&s->failures[MR_NATIVE_CAPTURE_WRITE].rejected_calls,
+                                memory_order_acquire);
 }
 uint32_t mr_pw_stream_read(MRPWStream *s, float *samples, uint32_t frames) {
     uint32_t transferred = mr_pcm_ring_read(&s->ring, samples, frames);

@@ -8,6 +8,7 @@ rust-version.workspace = true
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
+mixrelay-audio-io.workspace = true
 mixrelay-macos-transport = { path = "../../common" }
 # Native integer buffers convert at the HAL boundary; transport remains Float32.
 mixrelay-pcm-ring = { path = "../../../pcm-ring" }

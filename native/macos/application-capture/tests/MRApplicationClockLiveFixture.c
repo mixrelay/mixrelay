@@ -1,6 +1,7 @@
 /* Explicit test-only build: reuse the production producer implementation while
  * injecting an in-process registry attachment instead of an installed XPC service. */
 #include "MRApplicationSourceTransport.h"
+#include "MRApplicationClock.h"
 #include "MREngineSourceRegistry.h"
 #include <unistd.h>
 
@@ -9,7 +10,7 @@ MREngineSourceRegistry *mr_application_clock_fixture_create(MRApplicationSourceT
     *output = NULL;
     MREngineSourceRegistry *registry = mr_engine_source_registry_create();
     MREngineSourceRequest request = { .source_id = "owned-live-clock-fixture", .capacity_frames = 16384U,
-        .channels = 2U, .transport_version = 3U };
+        .channels = 2U, .transport_version = MR_APPLICATION_CLOCK_VERSION };
     int descriptor = -1;
     size_t bytes = 0U;
     uint64_t lease = 0U, epoch = 0U;

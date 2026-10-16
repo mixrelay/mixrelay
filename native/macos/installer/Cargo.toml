@@ -42,7 +42,7 @@ cc = "1.2"
 
 [target.'cfg(unix)'.dependencies]
 # Safe descriptor-relative opens prevent following replaced lease-path symlinks.
-rustix = { version = "1.1.4", features = ["fs"] }
+rustix = { version = "1.1.4", features = ["fs", "process"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mixrelay-local-socket = { path = "../../../crates/local-socket" }

@@ -1,9 +1,15 @@
 //! Graph-facing queue handle and native worker lifetime.
+mod continuity;
+pub(super) use continuity::InputContinuity;
+
 use super::{
     activity::BridgeActivity,
     aggregate::Aggregate,
     bridge::{DeviceBridge, NEXT_DEVICE_EPOCH},
-    ffi::{mr_device_io_graph_read, mr_device_io_graph_write, mr_device_io_output_epoch},
+    ffi::{
+        mr_device_io_graph_read, mr_device_io_graph_write, mr_device_io_invalid,
+        mr_device_io_output_epoch,
+    },
     host::Host,
     native::Native,
     spec::Spec,
@@ -19,6 +25,7 @@ use std::{
     time::Duration,
 };
 pub(super) struct Device {
+    pub(super) input_continuity: InputContinuity,
     pub(super) activity: Arc<BridgeActivity>,
     pub(super) identity: u64,
     pub(super) native: Arc<Native>,
@@ -85,6 +92,7 @@ impl Device {
             .spawn(move || context.run(&tx))
             .map_err(|e| e.to_string())?;
         let result = Self {
+            input_continuity: InputContinuity::default(),
             activity,
             identity: NEXT_DEVICE_EPOCH.fetch_add(1, Ordering::Relaxed),
             native,
@@ -121,12 +129,26 @@ impl Device {
     /// `host` labels this graph cycle's transfers; see `DeviceSet::graph_host`.
     pub(super) fn read(&self, samples: &mut [f32], host: u64) -> TransferOutcome {
         samples.fill(0.0);
-        if !self.input || !self.ready() || !samples.len().is_multiple_of(self.channels) {
-            return TransferOutcome::complete(0);
+        let source_sample_faults = if self.input {
+            self.native.source_sample_faults.take()
+        } else {
+            0
+        };
+        if !self.input || samples.is_empty() || !samples.len().is_multiple_of(self.channels) {
+            return TransferOutcome {
+                source_sample_faults,
+                ..TransferOutcome::complete(0)
+            };
+        }
+        if !self.ready() {
+            return self.input_continuity.lost(source_sample_faults);
         }
         let frames = u32::try_from(samples.len() / self.channels).unwrap_or(0);
         if !self.activity.ready() {
-            return super::recovery::offline_transfer(samples.len(), self.channels);
+            return TransferOutcome {
+                source_sample_faults,
+                ..super::recovery::offline_transfer(samples.len(), self.channels)
+            };
         }
         // SAFETY: this serialized graph consumer retains Native and owns the
         // complete writable PCM span, disjoint from the producer's queue storage.
@@ -140,8 +162,9 @@ impl Device {
             )
         };
         TransferOutcome {
+            source_sample_faults,
             frames: read.frames,
-            discontinuity: false,
+            discontinuity: self.input_continuity.admit(read),
             activity: if read.initial_epoch && read.frames < frames {
                 // The first freshness reset admits a timeline; it is not loss
                 // from an already running input. The next shortage is Active.
@@ -164,7 +187,11 @@ impl Device {
         })
     }
     pub(super) fn ready(&self) -> bool {
-        !self.failed.load(Ordering::Acquire)
+        // SAFETY: this graph handle retains Native; the observation reads only
+        // its stable invalid atomic, never mutable native connection/callback state.
+        let invalid = unsafe { mr_device_io_invalid(self.native.pointer.as_ptr()) };
+        !invalid
+            && !self.failed.load(Ordering::Acquire)
             && self.ready_rate.load(Ordering::Acquire) == self.graph_rate.load(Ordering::Acquire)
     }
 

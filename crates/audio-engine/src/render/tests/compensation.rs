@@ -1004,6 +1004,7 @@ impl ExternalIo for PathIo {
             },
             discontinuity: self.discontinuity && binding.node_id().as_str() == "bad",
             activity: mixrelay_audio_io::process::InputActivity::Active,
+            source_sample_faults: 0,
         }
     }
     fn write_sink(
@@ -1020,6 +1021,7 @@ impl ExternalIo for PathIo {
             },
             discontinuity: self.discontinuity && binding.node_id().as_str() == "bad",
             activity: mixrelay_audio_io::process::InputActivity::Active,
+            source_sample_faults: 0,
         }
     }
 }

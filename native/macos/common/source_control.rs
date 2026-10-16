@@ -131,7 +131,7 @@ pub unsafe extern "C" fn mr_engine_control_create_clocked_source_request(
 
 /// # Safety
 /// Message is null or live XPC. Output is writable. Malformed requests leave
-/// output unchanged; only clocked transport version 3 is accepted.
+/// output unchanged; only the current clocked transport version is accepted.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mr_engine_control_parse_source_request(
     message: Xpc,

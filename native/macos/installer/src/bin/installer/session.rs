@@ -1,7 +1,9 @@
 //! Preserve only the apps this authorized transaction actually closes.
 
 use anyhow::{Result, ensure};
-use mixrelay_macos_installer::{APP_PATH, OwnedTarget};
+#[cfg(target_os = "macos")]
+use mixrelay_macos_installer::APP_PATH;
+use mixrelay_macos_installer::OwnedTarget;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SessionApp {
@@ -14,6 +16,7 @@ pub(super) enum SessionApp {
 impl SessionApp {
     pub(super) const ALL: [Self; 2] = [Self::Graph, Self::UnifiedRuntime];
 
+    #[cfg(target_os = "macos")]
     pub(super) fn matches_command(self, command: &str) -> bool {
         let executable = format!("{APP_PATH}/Contents/MacOS/mixrelay-desktop");
         match self {

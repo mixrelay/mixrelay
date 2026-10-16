@@ -28,7 +28,7 @@ typedef struct MREngineSourceAttachment {
     uint64_t source_epoch;
 } MREngineSourceAttachment;
 
-/* Only clocked source transport version 3 is supported. */
+/* Only the current MR_APPLICATION_CLOCK_VERSION is supported. */
 xpc_object_t mr_engine_control_create_clocked_source_request(
     const char *source_id, uint32_t capacity_frames, uint32_t channels);
 bool mr_engine_control_parse_source_request(

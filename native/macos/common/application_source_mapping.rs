@@ -176,11 +176,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn v2_extent_is_rejected_before_mapping_or_header_access() {
+    fn retired_extent_is_rejected_before_mapping_or_header_access() {
         let bytes = mr_application_clock_required_bytes(1024, 2);
-        // v2 had a 96-byte clock; v3 has a 152-byte clock. No in-place upgrade.
+        // The current trailer requires its complete extent before header access.
         let descriptor = std::fs::File::open("/dev/null").unwrap().into();
-        let result = unsafe { Mapping::attach(descriptor, bytes - 56, 1024, 2) };
+        let result = unsafe { Mapping::attach(descriptor, bytes - 8, 1024, 2) };
         assert_eq!(result.err().unwrap().kind(), io::ErrorKind::InvalidData);
     }
 }

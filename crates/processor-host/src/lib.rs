@@ -53,6 +53,13 @@ pub use rack_formats::{
 
 // Establish agent status before a vendor loads AppKit or creates an editor. Setting it
 // only when our editor host starts is too late for discovery and instance creation.
+#[cfg_attr(
+    not(target_os = "macos"),
+    expect(
+        clippy::unnecessary_wraps,
+        reason = "one process-preparation contract; AppKit setup can fail on macOS"
+    )
+)]
 fn prepare_plugin_process() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -299,13 +306,22 @@ fn block_period(block_frames: usize, sample_rate: f64) -> Duration {
 /// a failed wait, and for good after repeated failures.
 #[derive(Default)]
 struct Waiter {
+    #[cfg(target_os = "macos")]
     failures: u32,
 }
 
 impl Waiter {
     const POLL: Duration = Duration::from_micros(100);
+    #[cfg(target_os = "macos")]
     const MAXIMUM_FAILURES: u32 = 8;
 
+    #[cfg_attr(
+        not(target_os = "macos"),
+        expect(
+            clippy::unused_self,
+            reason = "macOS retains failed-futex state; other platforms use stateless polling"
+        )
+    )]
     fn wait(&mut self, word: &std::sync::atomic::AtomicU64, observed: u64, block: Duration) {
         #[cfg(target_os = "macos")]
         if self.failures < Self::MAXIMUM_FAILURES
@@ -1691,6 +1707,7 @@ fn bypass_rack(plugin: &mut rack_formats::RackWorkerPlugin, frames: usize) {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn the_worker_waiter_returns_on_a_changed_word_and_polls_after_failures() {
         let word = std::sync::atomic::AtomicU64::new(3);

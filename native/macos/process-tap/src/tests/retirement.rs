@@ -67,6 +67,19 @@ impl Native for AsyncNative {
     fn destroy_tap(&self, _: u32) -> Result<(), TapError> {
         Ok(())
     }
+    fn diagnostic(
+        &self,
+        _: &native::Selection,
+        _: std::time::Instant,
+    ) -> Result<crate::watchdog::Diagnostic, TapError> {
+        panic!("retirement never creates a diagnostic")
+    }
+    fn diagnostic_has_audio(&self, _: &crate::watchdog::Diagnostic) -> bool {
+        panic!("retirement never observes a diagnostic")
+    }
+    fn retire_diagnostic(&self, _: crate::watchdog::Diagnostic) {
+        panic!("retirement fixture has no diagnostic")
+    }
 }
 
 struct Owner {

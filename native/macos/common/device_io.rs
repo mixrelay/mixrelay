@@ -64,9 +64,10 @@ pub use ffi::{
     mr_device_io_connect, mr_device_io_connect_status, mr_device_io_create,
     mr_device_io_create_group, mr_device_io_destroy, mr_device_io_direct_binding,
     mr_device_io_disconnect, mr_device_io_graph_frames, mr_device_io_graph_read,
-    mr_device_io_graph_write, mr_device_io_native_frames, mr_device_io_native_rate,
-    mr_device_io_output_epoch, mr_device_io_overflows, mr_device_io_pcm_hook, mr_device_io_quantum,
-    mr_device_io_queued, mr_device_io_render_hook, mr_device_io_starvations, mr_device_io_ticks,
+    mr_device_io_graph_write, mr_device_io_invalid, mr_device_io_native_frames,
+    mr_device_io_native_rate, mr_device_io_output_epoch, mr_device_io_overflows,
+    mr_device_io_pcm_hook, mr_device_io_quantum, mr_device_io_queued, mr_device_io_render_hook,
+    mr_device_io_starvations, mr_device_io_ticks,
 };
 pub use queues::GraphRead;
 
@@ -100,9 +101,30 @@ pub struct IoTiming {
 pub type RenderHook =
     unsafe extern "C" fn(*mut c_void, *const c_void, *mut c_void, u32, *const IoTiming) -> bool;
 
-/// Serialized clock-boundary processor. Returns whether native PCM is admitted.
-/// Runs before native transfer; it may access only its designated queue cursors.
-pub type PcmHook = unsafe extern "C" fn(*mut c_void) -> bool;
+/// Private callback stages. Input admission precedes capture; conversion follows
+/// it in the same callback. Output conversion runs only during preparation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum PcmPhase {
+    Prepare = 0,
+    Captured = 1,
+}
+
+impl PcmPhase {
+    #[must_use]
+    pub const fn from_raw(value: u32) -> Option<Self> {
+        match value {
+            0 => Some(Self::Prepare),
+            1 => Some(Self::Captured),
+            _ => None,
+        }
+    }
+}
+
+/// Serialized clock-boundary processor. Prepare returns admission; Captured
+/// reports whether the admitted input was processed. Only designated SRC queue
+/// cursors may be accessed. Raw phase values are validated at the Rust boundary.
+pub type PcmHook = unsafe extern "C" fn(*mut c_void, u32) -> bool;
 
 struct Selection {
     uid: Vec<u8>,

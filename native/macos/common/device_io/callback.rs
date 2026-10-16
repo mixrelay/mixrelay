@@ -53,7 +53,7 @@ pub unsafe extern "C" fn mr_device_io_process(
     }
     // SAFETY: only the serialized IOProc borrows Callback while registered.
     let callback = unsafe { &mut *io.callback.get() };
-    if callback.watch_invalid.load(Acquire) {
+    if invalid(io, callback) {
         return 0;
     }
     let buffers = if io.selection.input {
@@ -89,7 +89,7 @@ pub unsafe extern "C" fn mr_device_io_process(
     io.progress.native_quantum.store(frames, Relaxed);
     // A format listener can fire during metadata/clock handling. Recheck immediately before
     // exposing native storage to the cached-codec hook or the F32 queue conversion.
-    if io.progress.invalid.load(Acquire) || callback.watch_invalid.load(Acquire) {
+    if invalid(io, callback) {
         return 0;
     }
     // SAFETY: hook/context installed before registration and retained by engine owner;
@@ -102,33 +102,21 @@ pub unsafe extern "C" fn mr_device_io_process(
             output: copy_time(output_time),
         }
     };
-    io.measurements.callback(timing, frames, false);
-    if timing.now.flags & 2 != 0 {
-        io.progress
-            .callback_host
-            .store(block_host(timing.now.host_time, callback, frames), Release);
-    }
+    record_timing(io, callback, timing, frames);
     let rendered = callback.formats.all_float()
         && callback.hook.is_some_and(|hook| unsafe {
             hook(callback.context, input, output, frames, &raw const timing)
         });
-    if !rendered && !io.selection.input {
-        // Retire old output before the PCM hook can produce the new epoch's samples.
-        unsafe { prepare_output(io, callback) };
-    }
-    // SAFETY: callback owns selected PCM, scratch and the native ring role.
-    let admitted = !rendered
-        && callback
-            .pcm_hook
-            .is_none_or(|hook| unsafe { hook(callback.pcm_context) });
-    if io.progress.invalid.load(Acquire) || callback.watch_invalid.load(Acquire) {
+    // SAFETY: this callback owns native transfer; each hook stage borrows only
+    // its SRC cursors after the preceding native/scratch borrow has ended.
+    let processed = rendered || unsafe { process_pcm(io, callback, buffers, frames) };
+    if invalid(io, callback) {
         // A device notification can arrive after the hook has written this block.
         // SAFETY: the callback still owns the full writable native output extent.
         unsafe { silence(output.cast()) };
         return 0;
     }
-    if admitted && !unsafe { transfer(io, callback, buffers, frames) } {
-        io.progress.invalid.store(true, Release);
+    if !processed {
         return 0;
     }
     io.progress.ticks.fetch_add(1, Relaxed);
@@ -139,10 +127,79 @@ pub unsafe extern "C" fn mr_device_io_process(
     0
 }
 
-/// The host time of this callback's mean frame, `now + (frames - 1) / 2` frames. The
-/// device captures or presents its block a frame at a time from the first frame that
-/// acquisition and presentation time, so every transfer this callback makes or renders,
-/// including direct graph cycles, passes its FIFO at this one label.
+fn invalid(io: &DeviceIo, callback: &super::Callback) -> bool {
+    if io.progress.invalid.load(Acquire) {
+        return true;
+    }
+    if callback.watch_invalid.load(Acquire) {
+        // Publish callback-observed listener invalidation without exposing its
+        // registration-owned Arc or mutable callback state to the graph role.
+        // Only preparation after acknowledged drain can clear this stable latch.
+        io.progress.invalid.store(true, Release);
+        return true;
+    }
+    false
+}
+
+fn record_timing(io: &DeviceIo, callback: &super::Callback, timing: super::IoTiming, frames: u32) {
+    io.measurements.callback(timing, frames, false);
+    if timing.now.flags & 2 != 0 {
+        io.progress
+            .callback_host
+            .store(block_host(timing.now.host_time, callback, frames), Release);
+    }
+}
+
+// SAFETY: the serialized callback owns native PCM/scratch. Hook stages may use
+// only opposite queue cursors and cannot retain any native or scratch borrow.
+unsafe fn process_pcm(
+    io: &DeviceIo,
+    callback: &mut super::Callback,
+    buffers: *const AudioBufferList,
+    frames: u32,
+) -> bool {
+    // A direct hook may have rejected its block after a native notification.
+    // Recheck before the fallback can admit or pump an old-format PCM packet.
+    if invalid(io, callback) {
+        return false;
+    }
+    if !io.selection.input {
+        // Retire old output before the hook can produce the new epoch's samples.
+        unsafe { prepare_output(io, callback) };
+    }
+    // Admission/reset runs first, so OFF and unprepared formats never enqueue
+    // capture PCM or grow a native backlog while waiting for a new converter.
+    let admitted = callback
+        .pcm_hook
+        .is_none_or(|hook| unsafe { hook(callback.pcm_context, super::PcmPhase::Prepare as u32) });
+    if invalid(io, callback) {
+        return false;
+    }
+    if admitted {
+        // SAFETY: transfer completes all native/scratch borrows before Captured.
+        if !unsafe { transfer(io, callback, buffers, frames) } {
+            io.progress.invalid.store(true, Release);
+            return false;
+        }
+        if io.selection.input {
+            if invalid(io, callback) {
+                return false;
+            }
+            // Convert this packet now, rather than leaving every captured frame
+            // in the native queue until the next full hardware callback.
+            if callback.pcm_hook.is_some_and(|hook| unsafe {
+                !hook(callback.pcm_context, super::PcmPhase::Captured as u32)
+            }) {
+                io.measurements.faults.fetch_add(1, Release);
+            }
+        }
+    }
+    true
+}
+
+/// The mean-frame host label for queue transfers performed by this callback,
+/// `now + (frames - 1) / 2` frames. It measures passage through this queue boundary;
+/// it does not assign an acquisition timestamp to previously buffered PCM.
 #[expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,

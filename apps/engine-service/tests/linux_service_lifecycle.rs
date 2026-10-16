@@ -1,5 +1,5 @@
 //! Production executable checks confined to the owned private `PipeWire` harness.
-#![cfg(target_os = "linux")]
+#![cfg(all(target_os = "linux", feature = "native-lab"))]
 
 use mixrelay_audio_io::process::ProcessingState;
 use mixrelay_control_protocol::AppStatus;
@@ -15,7 +15,7 @@ use std::{
 };
 
 /// The controller-owned engine binds the session's socket directory (the controller drops
-/// any MIXRELAY_IPC_DIR override), which the harness confines to the lab's runtime directory.
+/// any `MIXRELAY_IPC_DIR` override), which the harness confines to the lab's runtime directory.
 fn engine_socket() -> PathBuf {
     mixrelay_local_socket::session_socket_directory()
         .unwrap()
@@ -45,7 +45,6 @@ fn assert_socket_removed() {
 }
 
 #[test]
-#[ignore = "requires owned isolated PipeWire daemon and private config namespace"]
 fn native_linux_service_desktop_owned_shutdown() {
     let fixture = PathBuf::from(std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap());
     let lab = fixture.parent().unwrap();
@@ -219,7 +218,6 @@ fn owned_registry_objects(pid: u32) -> usize {
 }
 
 #[test]
-#[ignore = "requires owned isolated PipeWire daemon and private socket/config namespaces"]
 fn native_linux_service_startup_shutdown() {
     let fixture = PathBuf::from(std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap());
     let lab = fixture.parent().unwrap();

@@ -5,6 +5,61 @@ use std::{
 };
 
 #[test]
+fn neutral_pcm_wraps_without_replaying_samples_or_allocating() {
+    for channels in [1, 2, 32, 64] {
+        let mut ring = PcmRing::new(channels, 7).unwrap();
+        let input = vec![0.75; channels as usize * 2];
+        let mut output = vec![1.0; input.len()];
+        let measured = allocation_counter::measure(|| {
+            // SAFETY: serialized producer/consumer, retained owner and complete
+            // disjoint two-frame buffers; no callback outlives this scope.
+            unsafe {
+                for _ in 0..12 {
+                    assert_eq!(mr_pcm_ring_write(&raw mut ring, input.as_ptr(), 2), 2);
+                    assert_eq!(mr_pcm_ring_write_silence(&raw mut ring, 2), 2);
+                    assert_eq!(mr_pcm_ring_read(&raw mut ring, output.as_mut_ptr(), 2), 2);
+                    assert!(
+                        output
+                            .iter()
+                            .zip(&input)
+                            .all(|(actual, expected)| { actual.to_bits() == expected.to_bits() })
+                    );
+                    assert_eq!(mr_pcm_ring_read(&raw mut ring, output.as_mut_ptr(), 2), 2);
+                    assert!(output.iter().all(|sample| sample.to_bits() == 0));
+                }
+            }
+        });
+        assert_eq!(measured.count_total, 0);
+    }
+}
+
+#[test]
+fn neutral_pcm_rejects_overflow_without_erasing_unread_audio_and_acknowledges_epoch() {
+    let mut ring = PcmRing::new(2, 8).unwrap();
+    let input = [0.5; 8];
+    let mut output = [1.0; 8];
+    // SAFETY: one retained initialized ring, sequential roles, complete buffers.
+    unsafe {
+        assert_eq!(mr_pcm_ring_write(&raw mut ring, input.as_ptr(), 4), 4);
+        assert_eq!(mr_pcm_ring_write_silence(&raw mut ring, 4), 4);
+        assert_eq!(mr_pcm_ring_write_silence(&raw mut ring, 1), 0);
+        assert_eq!(mr_pcm_ring_read(&raw mut ring, output.as_mut_ptr(), 4), 4);
+        assert_eq!(output.map(f32::to_bits), input.map(f32::to_bits));
+        assert_eq!(mr_pcm_ring_read(&raw mut ring, output.as_mut_ptr(), 4), 4);
+        assert_eq!(output.map(f32::to_bits), [0; 8]);
+        assert_eq!(mr_pcm_ring_write(&raw mut ring, input.as_ptr(), 4), 4);
+        mr_pcm_ring_restart(&raw mut ring);
+        assert_eq!(mr_pcm_ring_write_silence(&raw mut ring, 0), 0);
+        assert_eq!(mr_pcm_ring_read(&raw mut ring, output.as_mut_ptr(), 4), 0);
+        assert_eq!(output.map(f32::to_bits), [0; 8]);
+        assert_eq!(mr_pcm_ring_write_silence(&raw mut ring, 4), 4);
+        assert_eq!(mr_pcm_ring_write_silence(&raw mut ring, 4), 4);
+        assert_eq!(mr_pcm_ring_read(&raw mut ring, output.as_mut_ptr(), 4), 4);
+        assert_eq!(output.map(f32::to_bits), [0; 8]);
+    }
+}
+
+#[test]
 fn byte_pcm_roundtrips_exact_samples_and_preserves_float_payloads() {
     let samples = [-1.0_f32, -0.5, 0.0, 0.5];
     for format in [

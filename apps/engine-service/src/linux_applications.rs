@@ -17,6 +17,9 @@ use std::{
     },
 };
 
+#[path = "linux_application_progress.rs"]
+mod progress;
+
 #[derive(Default)]
 pub(super) struct CaptureSet {
     // Format epoch fences wholesale format replacement. Per-source leases fence
@@ -33,6 +36,7 @@ struct Capture {
     lease: CaptureLease,
     taps: Vec<NativeStream>,
     first_pcm: Vec<Arc<AtomicBool>>,
+    progress: Vec<progress::Progress>,
     scratch: Box<[f32]>,
     healthy: Arc<AtomicBool>,
 }
@@ -43,6 +47,10 @@ enum CapturePreparationError {
     Cancelled,
     #[error("PipeWire did not negotiate application capture format")]
     FormatTimeout,
+    #[error("could not reserve application capture PCM: {0}")]
+    Allocation(#[from] std::collections::TryReserveError),
+    #[error("application capture target has no matching PCM observation")]
+    MissingPcmObservation,
     #[error("could not prepare application capture: {0}")]
     Native(String),
 }
@@ -72,6 +80,7 @@ pub(super) struct VerifiedPlaybackTarget {
     pub serial: String,
     pub process: ProcessIdentity,
     pub healthy: Arc<AtomicBool>,
+    pub fresh_pcm: Arc<AtomicBool>,
 }
 
 impl CaptureSet {
@@ -90,6 +99,17 @@ impl CaptureSet {
         for capture in self.nodes.values_mut() {
             for tap in &mut capture.taps {
                 tap.discard_input();
+            }
+        }
+    }
+    pub(super) fn finish_block(&mut self, frames: u32) {
+        for capture in self.nodes.values_mut() {
+            for (index, tap) in capture.taps.iter_mut().enumerate() {
+                let used = tap.finish_capture_block();
+                let live = capture.progress[index].finish(frames, used);
+                if !live && let Some(first_pcm) = capture.first_pcm.get(index) {
+                    first_pcm.store(false, Ordering::Release);
+                }
             }
         }
     }
@@ -245,6 +265,7 @@ impl CaptureSet {
                 frames: 0,
                 activity: InputActivity::Unknown,
                 discontinuity: true,
+                source_sample_faults: 0,
             };
         };
         capture.healthy.store(
@@ -272,14 +293,19 @@ impl CaptureSet {
                 continue;
             }
             transfer.activity = InputActivity::Active;
-            let frames = tap.read(scratch);
+            let outcome = tap.read_capture(scratch);
+            let frames = outcome.frames;
+            capture.progress[index].delivered(frames);
             if frames > 0
                 && let Some(first_pcm) = capture.first_pcm.get(index)
             {
                 first_pcm.store(true, Ordering::Release);
             }
             transfer.frames = transfer.frames.max(frames);
-            transfer.discontinuity |= frames == 0;
+            transfer.discontinuity |= outcome.discontinuity || frames == 0;
+            transfer.source_sample_faults = transfer
+                .source_sample_faults
+                .saturating_add(outcome.source_sample_faults);
             for (mixed, sample) in destination.iter_mut().zip(scratch.iter()) {
                 *mixed += sample;
             }
@@ -308,6 +334,7 @@ impl CaptureSet {
 #[cfg(test)]
 impl CaptureSet {
     /// Observes current canonical capture owners without changing their report cursors.
+    #[cfg(feature = "native-lab")]
     pub(super) fn transfer_snapshot(&self) -> super::native::TransferSnapshot {
         let mut snapshot = super::native::TransferSnapshot::default();
         for stream in self.nodes.values().flat_map(|capture| &capture.taps) {
@@ -356,6 +383,7 @@ impl CaptureWatch {
                     serial: target.serial.clone(),
                     process,
                     healthy: Arc::clone(&entry.healthy),
+                    fresh_pcm: Arc::clone(&observed.1),
                 })
             })
             .collect::<Option<Vec<_>>>()
@@ -448,6 +476,21 @@ fn prepare(
     if stopping.load(Ordering::Acquire) {
         return Err(CapturePreparationError::Cancelled);
     }
+    let scratch = mixrelay_audio_io::pcm_buffer::zeroed(
+        usize::from(entry.request.stream.channels) * entry.format.block_frames as usize,
+    )?
+    .into_boxed_slice();
+    let first_pcm = targets
+        .iter()
+        .map(|target| {
+            entry
+                .first_pcm
+                .iter()
+                .find(|(serial, _)| serial == &target.serial)
+                .map(|(_, cell)| Arc::clone(cell))
+                .ok_or(CapturePreparationError::MissingPcmObservation)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     let taps = targets
         .iter()
         .map(|target| {
@@ -472,25 +515,13 @@ fn prepare(
     Ok(Capture {
         lease: entry.lease,
         taps,
-        first_pcm: targets
+        progress: first_pcm
             .iter()
-            .map(|target| {
-                entry
-                    .first_pcm
-                    .iter()
-                    .find(|(serial, _)| serial == &target.serial)
-                    .expect("prepared target has an observed PCM cell")
-                    .1
-                    .clone()
-            })
+            .map(|_| progress::Progress::new(entry.format.sample_rate))
             .collect(),
+        first_pcm,
         healthy: entry.healthy.clone(),
-        scratch: vec![
-            0.0;
-            usize::from(entry.request.stream.channels)
-                * entry.format.block_frames as usize
-        ]
-        .into_boxed_slice(),
+        scratch,
     })
 }
 

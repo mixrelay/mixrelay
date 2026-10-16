@@ -90,6 +90,7 @@ unsafe fn attach(
         next_frame: 0,
         owned_epoch: source_epoch,
         owned_lease: producer_lease,
+        pending_source_faults: 0,
     };
     if !transport.owns_stream() {
         return Err(invalid);
@@ -244,6 +245,22 @@ pub unsafe extern "C" fn mr_application_source_transport_publish_native(
     if let Some(transport) = unsafe { transport.as_ref() } {
         transport.publish_native(frames, running);
     }
+}
+
+/// Queues source normalization evidence for this exact producer epoch. Busy
+/// claims retain the count locally until a later publication, write or reset.
+/// Returns false for a stale lease/epoch without publishing into its replacement.
+/// # Safety
+/// Handle is null or exclusively borrowed by its sole pump through this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_application_source_transport_record_source_faults(
+    transport: *mut SourceTransport,
+    epoch: u64,
+    count: u64,
+) -> bool {
+    // SAFETY: the caller retains the unique local transport owner.
+    unsafe { transport.as_mut() }
+        .is_some_and(|transport| transport.record_source_faults(epoch, count))
 }
 
 /// Publishes one complete PCM block, advancing the local cursor only on success.

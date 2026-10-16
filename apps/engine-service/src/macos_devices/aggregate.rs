@@ -11,6 +11,9 @@ use std::{ffi::c_void, ptr::NonNull, sync::Arc, thread, time::Duration};
 static GROUPS: Admission = Admission::new(32);
 static RETIRED: Retirement<GroupOwner> = Retirement::new();
 
+#[cfg(all(test, feature = "native-lab"))]
+mod native_tests;
+
 struct GroupOwner {
     pointer: Option<NonNull<c_void>>,
     host: Arc<dyn Host>,

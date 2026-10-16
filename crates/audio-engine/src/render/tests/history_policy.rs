@@ -120,6 +120,127 @@ fn warm(processor: &mut BlockProcessor) {
     assert!(processor.dynamics_envelopes[0] > 0.99);
 }
 
+fn identity_source(kind: usize, changed: bool) -> NodeSpec {
+    let identity = if changed { "other" } else { "original" };
+    match kind {
+        0 => node(
+            "source",
+            NodeConfig::AudioDeviceInput(AudioDeviceInputConfig {
+                selector: DeviceSelector::PersistentUid {
+                    uid: identity.into(),
+                },
+                output_channels: 2,
+                gain_db: 0.0,
+            }),
+        ),
+        1 | 2 => {
+            let mut source = app_source("source");
+            let NodeConfig::ApplicationCapture(config) = &mut source.config else {
+                unreachable!();
+            };
+            if kind == 1 {
+                config.selector = ApplicationSelector::BundleId {
+                    bundle_id: format!("test.{identity}"),
+                    include_descendants: true,
+                };
+            } else if changed {
+                config.stream.channel_layout = ChannelLayout::Discrete;
+            }
+            source
+        }
+        _ => {
+            let mut source = virtual_endpoint("source");
+            let NodeConfig::VirtualEndpointTransport(spec) = &mut source.config else {
+                unreachable!();
+            };
+            spec.id = VirtualEndpointId::from(identity);
+            spec.render = None;
+            source
+        }
+    }
+}
+
+fn identity_graph(source: NodeSpec, middle: NodeConfig) -> GraphDocument {
+    let source_port = if matches!(&source.config, NodeConfig::VirtualEndpointTransport(_)) {
+        FROM_OS_PORT_ID
+    } else {
+        AUDIO_PORT_ID
+    };
+    GraphDocument::new(
+        1,
+        vec![source, node("middle", middle), output("sink", 2)],
+        vec![
+            edge("in", "source", source_port, "middle", AUDIO_PORT_ID),
+            edge("out", "middle", AUDIO_PORT_ID, "sink", AUDIO_PORT_ID),
+        ],
+    )
+}
+
+#[test]
+fn replacing_source_identity_with_unchanged_route_ids_resets_detectors_and_effect_tails() {
+    let delay = builtin_effects::configs()
+        .into_iter()
+        .find(|config| matches!(config.effect, mixrelay_audio_graph::Effect::Delay(_)))
+        .unwrap();
+    for kind in 0..4 {
+        for middle in [dynamics("compressor", 2), NodeConfig::Effect(delay.clone())] {
+            let original = identity_graph(identity_source(kind, false), middle.clone());
+            let mut current = prepare_graph(&original, HISTORY_FORMAT);
+            for _ in 0..8 {
+                process_constant(&mut current, 1.0);
+            }
+            let mut edited = identity_graph(identity_source(kind, true), middle);
+            edited.revision = 2;
+            let exchange = crate::ProcessorExchange::new(1);
+            exchange
+                .submit(prepare_graph(&edited, HISTORY_FORMAT))
+                .unwrap();
+            HEAP_OPERATIONS.with(|count| count.set(Some(0)));
+            assert!(exchange.activate_pending(&mut current));
+            assert_eq!(process_constant(&mut current, 0.0), 0.0);
+            assert!(current.dynamics_envelopes.iter().all(|value| *value == 0.0));
+            assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
+            exchange.reclaim_retired();
+        }
+    }
+}
+
+#[test]
+fn bus_retains_the_same_signal_but_discards_changed_sources_and_feeding_routes() {
+    for change in 0..3 {
+        let original = identity_graph(
+            identity_source(0, false),
+            NodeConfig::DeviceBus { channels: 2 },
+        );
+        let mut previous = prepare_graph(&original, HISTORY_FORMAT);
+        process_constant(&mut previous, 0.25);
+        let mut edited = original;
+        match change {
+            0 => {
+                let NodeConfig::AudioDeviceInput(config) = &mut edited.nodes[0].config else {
+                    unreachable!();
+                };
+                config.gain_db = -6.0;
+                edited.nodes[0].label = Some("Renamed source".into());
+            }
+            1 => edited.nodes[0] = identity_source(0, true),
+            _ => {
+                edited.nodes[0] = identity_source(1, false);
+                edited.nodes[0].id = NodeId::from("new-source");
+                edited.edges[0].source.node_id = NodeId::from("new-source");
+            }
+        }
+        let mut next = prepare_graph(&edited, HISTORY_FORMAT);
+        HEAP_OPERATIONS.with(|count| count.set(Some(0)));
+        next.retain_device_bus_state(&previous);
+        assert_eq!(
+            process_constant(&mut next, 0.0),
+            if change == 0 { 0.25 } else { 0.0 }
+        );
+        assert_eq!(HEAP_OPERATIONS.with(|count| count.replace(None)), Some(0));
+    }
+}
+
 #[test]
 fn parameter_edits_retain_detector_and_apply_new_targets_without_callback_allocation() {
     for kind in ["compressor", "limiter"] {

@@ -287,6 +287,12 @@ impl DeviceBridge {
                         .native
                         .pcm_metrics
                         .transferred(u32::try_from(count).unwrap_or(0), 0);
+                    if context.input {
+                        let faults = mixrelay_audio_io::pcm::sanitize_samples(
+                            &mut self.source[..count * context.channels],
+                        );
+                        context.native.source_sample_faults.record(faults);
+                    }
                     self.bridge
                         .push_interleaved(&self.source[..count * context.channels])?;
                 }

@@ -1,5 +1,8 @@
+#[cfg(feature = "native-lab")]
 use super::*;
+#[cfg(feature = "native-lab")]
 use mixrelay_test_support::frame_sequence::SequenceContinuity;
+#[cfg(feature = "native-lab")]
 use std::{
     fs::{File, OpenOptions},
     io::{BufWriter, Write},
@@ -8,6 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "native-lab")]
 pub(super) fn independent_recorder(serial: &str, directory: &Path) -> FixtureProcess {
     // Probe only the CLI, outside audio timing. Help is not an audio client and
     // must not produce a fourth native-handoff journal when observation is active.
@@ -69,6 +73,7 @@ fn independent_recorder_selects_the_advertised_raw_pcm_contract() {
     assert_eq!(raw_capture_option("  --raw-format  Other option\n"), None);
 }
 
+#[cfg(feature = "native-lab")]
 fn collect_native(captures: &mut CaptureSet) -> (Vec<[f32; 2]>, u64) {
     const FRAMES: usize = 48_000 * 10 + 4800;
     let mut samples = Vec::with_capacity(FRAMES + 128);
@@ -92,6 +97,7 @@ fn collect_native(captures: &mut CaptureSet) -> (Vec<[f32; 2]>, u64) {
     (samples, empty_polls)
 }
 
+#[cfg(feature = "native-lab")]
 pub(super) fn independent_continuity(directory: &Path) -> (ToneContinuity, SequenceContinuity) {
     let bytes = std::fs::read(directory.join("independent-capture.f32")).unwrap();
     assert_eq!(bytes.len() % 8, 0, "raw f32 stereo frame was truncated");
@@ -119,6 +125,7 @@ pub(super) fn independent_continuity(directory: &Path) -> (ToneContinuity, Seque
     (tone, SequenceContinuity::measure(markers))
 }
 
+#[cfg(feature = "native-lab")]
 fn save_native_samples(directory: &Path, samples: &[[f32; 2]]) {
     let file = File::create_new(directory.join("native-capture.f32")).unwrap();
     let mut writer = BufWriter::new(file);
@@ -128,6 +135,7 @@ fn save_native_samples(directory: &Path, samples: &[[f32; 2]]) {
     writer.flush().unwrap();
 }
 
+#[cfg(feature = "native-lab")]
 fn save_evidence(directory: &Path, evidence: &serde_json::Value) {
     let file = File::create_new(directory.join("independent-continuity.json")).unwrap();
     let mut writer = BufWriter::new(file);
@@ -135,6 +143,7 @@ fn save_evidence(directory: &Path, evidence: &serde_json::Value) {
     writer.flush().unwrap();
 }
 
+#[cfg(feature = "native-lab")]
 fn assert_capture_completion(
     source: &serde_json::Value,
     recorder_running: bool,
@@ -151,6 +160,7 @@ fn assert_capture_completion(
     );
 }
 
+#[cfg(feature = "native-lab")]
 fn thread_policies(pid: u32) -> Option<String> {
     Command::new("ps")
         .args([
@@ -166,6 +176,7 @@ fn thread_policies(pid: u32) -> Option<String> {
         .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
+#[cfg(feature = "native-lab")]
 pub(super) fn scheduling_evidence(source_pid: u32) -> serde_json::Value {
     // Optional cgroup v2 records are measurements, not a host-specific test gate.
     // Absence is retained explicitly rather than reported as zero pressure.
@@ -179,6 +190,7 @@ pub(super) fn scheduling_evidence(source_pid: u32) -> serde_json::Value {
     })
 }
 
+#[cfg(feature = "native-lab")]
 pub(super) fn finish_source(source: &mut FixtureProcess, directory: &Path) -> serde_json::Value {
     let name = format!("source-{}.json", source.0.id());
     let running = source.0.try_wait().unwrap().is_none();
@@ -221,7 +233,7 @@ pub(super) fn finish_source(source: &mut FixtureProcess, directory: &Path) -> se
 }
 
 #[test]
-#[ignore = "requires private PipeWire daemon, owned source and independent pw-record client"]
+#[cfg(feature = "native-lab")]
 fn native_application_continuity_has_independent_capture_evidence() {
     let driver = ObservedDriver::new();
     let path = std::path::PathBuf::from(std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap());

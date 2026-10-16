@@ -122,11 +122,13 @@ pub(crate) struct TapInputResult {
     pub(crate) frames: usize,
     /// Complete frames accepted by the capture queue.
     pub(crate) written: usize,
+    /// At least one finite nonzero sample was observed, independently of ring capacity.
+    pub(crate) audible: bool,
 }
 
 const _: () = assert!(size_of::<TapFormat>() == 40 && align_of::<TapFormat>() == 8);
 const _: () = assert!(size_of::<TapPeaks>() == 256 && align_of::<TapPeaks>() == 4);
-const _: () = assert!(size_of::<TapInputResult>() == 16 && align_of::<TapInputResult>() == 8);
+const _: () = assert!(size_of::<TapInputResult>() == 24 && align_of::<TapInputResult>() == 8);
 
 #[cfg(test)]
 mod tests;

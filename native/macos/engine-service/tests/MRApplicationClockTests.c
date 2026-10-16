@@ -6,10 +6,10 @@
 #include <stdio.h>
 #include <sys/mman.h>
 #include <unistd.h>
-_Static_assert(sizeof(MRApplicationClock) == 152U, "v3 clock trailer ABI");
-_Static_assert(offsetof(MRApplicationClock, target_backlog_frames) == 96U, "v3 target offset");
-_Static_assert(sizeof(MRApplicationSourceClockSnapshot) == 96U, "v3 source snapshot ABI");
-_Static_assert(offsetof(MRApplicationSourceClockSnapshot, starvation_episodes) == 56U, "v3 telemetry offset");
+_Static_assert(sizeof(MRApplicationClock) == 160U, "v4 clock trailer ABI");
+_Static_assert(offsetof(MRApplicationClock, target_backlog_frames) == 96U, "target offset");
+_Static_assert(sizeof(MRApplicationSourceClockSnapshot) == 96U, "source snapshot ABI");
+_Static_assert(offsetof(MRApplicationSourceClockSnapshot, starvation_episodes) == 56U, "telemetry offset");
 /* Exercise the real producer mapping/epoch boundary without installing an XPC
  * service, creating a process tap, or touching the host's audio settings. */
 
@@ -58,7 +58,7 @@ static void test_clock_trailer_validation(void) {
 static void test_clocked_registry_rejects_unacknowledged_or_old_rate_audio(void) {
     MREngineSourceRegistry *registry = mr_engine_source_registry_create();
     MREngineSourceRequest request = { .source_id = "clocked-fixture", .capacity_frames = 1024U,
-        .channels = 2U, .transport_version = 3U };
+        .channels = 2U, .transport_version = MR_APPLICATION_CLOCK_VERSION };
     int descriptor = -1;
     size_t bytes = 0U;
     uint64_t granted_lease = 0U;
@@ -157,7 +157,7 @@ static void test_invalid_source_version_never_creates_a_slot(void) {
 static void test_reset_exhaustion_does_not_acknowledge_format(void) {
     MREngineSourceRegistry *registry = mr_engine_source_registry_create();
     MREngineSourceRequest request = { .source_id = "reset-exhaustion", .capacity_frames = 1024U,
-        .channels = 2U, .transport_version = 3U };
+        .channels = 2U, .transport_version = MR_APPLICATION_CLOCK_VERSION };
     MREngineSourceAttachment attachment = { .descriptor = -1 };
     assert(mr_engine_source_registry_attach_clocked(registry, &request,
         &attachment.descriptor, &attachment.mapped_size, &attachment.producer_lease, &attachment.source_epoch));

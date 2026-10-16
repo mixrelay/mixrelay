@@ -177,6 +177,13 @@ impl Source {
                 old_clock.clock_master.load(Ordering::Acquire),
                 Ordering::Release,
             );
+            // The old producer claim excludes new additions. A graph reader
+            // already pinning the old mapping may drain concurrently; atomic
+            // take assigns those replacements to that reader or this mapping,
+            // never both. All fallible preparation completed before this move.
+            clock
+                .source_sample_faults
+                .record(old_clock.source_sample_faults.take());
             old_clock.acknowledged_format.store(0, Ordering::Release);
             old_clock.native_running.store(0, Ordering::Release);
             old_clock.producer_lease.store(0, Ordering::Release);
@@ -538,6 +545,13 @@ impl SourceRegistry {
             0
         }
     }
+
+    fn take_source_faults(&self, token: u64) -> u64 {
+        let read = self.read(token);
+        read.source().map_or(0, |source| {
+            source.mapping.clock().source_sample_faults.take()
+        })
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -671,6 +685,18 @@ pub unsafe extern "C" fn mr_engine_source_registry_read_clocked(
         return 0;
     };
     registry.read_audio(token, output, frames, rate)
+}
+
+/// Drains normalized source samples once, independently of PCM availability.
+/// # Safety
+/// Registry is null or retained through this call; the graph owns this source consumer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_engine_source_registry_take_source_faults(
+    registry: *const SourceRegistry,
+    token: u64,
+) -> u64 {
+    // SAFETY: the read guard pins the source; only its atomic counter is consumed.
+    unsafe { registry.as_ref() }.map_or(0, |registry| registry.take_source_faults(token))
 }
 
 #[cfg(test)]

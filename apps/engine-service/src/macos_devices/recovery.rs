@@ -16,6 +16,7 @@ pub(super) fn offline_transfer(samples: usize, channels: usize) -> TransferOutco
         frames: u32::try_from(samples / channels.max(1)).unwrap_or(0),
         discontinuity: false,
         activity: InputActivity::Inactive,
+        source_sample_faults: 0,
     }
 }
 

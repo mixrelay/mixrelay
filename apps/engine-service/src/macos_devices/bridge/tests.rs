@@ -67,7 +67,7 @@ struct InputBuffer {
 }
 
 fn native_callback(context: &WorkerContext, native: &mut InputBuffer) {
-    unsafe extern "C" fn manually_pumped(_: *mut std::ffi::c_void) -> bool {
+    unsafe extern "C" fn manually_pumped(_: *mut std::ffi::c_void, _: u32) -> bool {
         true
     }
     // SAFETY: this synthetic owner has no registered OS callback. The test

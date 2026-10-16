@@ -27,6 +27,48 @@ const LEVEL_TOLERANCE: f32 = 1e-3;
 /// Frames at the end of a drive whose level is checked, after conversion settled.
 const SETTLED_FRAMES: usize = 128;
 
+#[test]
+fn recovered_input_reports_its_epoch_once_before_delivering_fresh_pcm() {
+    let (device, context) = tests::synthetic_device(1, 48_000, 48_000, true);
+    let mut pcm = [9.0; 32];
+    let initial = device.read(&mut pcm, 0);
+    assert_eq!(initial.frames, 0);
+    assert!(!initial.discontinuity);
+    let measured = allocation_counter::measure(|| {
+        // SAFETY: the synthetic owner has no OS registration. This test owns
+        // both serialized queue roles and retains complete disjoint PCM buffers.
+        unsafe {
+            let pointer = device.native.pointer.as_ptr();
+            assert_eq!(
+                ffi::mr_device_io_bridge_write(pointer, [0.5; 32].as_ptr(), 32),
+                32
+            );
+            let old = device.read(&mut pcm, 0);
+            assert_eq!(old.frames, 32);
+            assert!(!old.discontinuity);
+            assert_eq!(
+                ffi::mr_device_io_bridge_write(pointer, [0.5; 32].as_ptr(), 32),
+                32
+            );
+            context.epoch.fetch_add(1, Ordering::Release);
+            let recovered = device.read(&mut pcm, 0);
+            assert_eq!(recovered.frames, 0);
+            assert!(recovered.discontinuity);
+            assert_eq!(pcm.map(f32::to_bits), [0; 32]);
+            assert!(!device.read(&mut pcm, 0).discontinuity);
+            assert_eq!(
+                ffi::mr_device_io_bridge_write(pointer, [0.75; 32].as_ptr(), 32),
+                32
+            );
+            let fresh = device.read(&mut pcm, 0);
+            assert_eq!(fresh.frames, 32);
+            assert!(!fresh.discontinuity);
+            assert_eq!(pcm.map(f32::to_bits), [0.75_f32.to_bits(); 32]);
+        }
+    });
+    assert_eq!(measured.count_total, 0);
+}
+
 /// Waits for device workers. Only a stalled worker reaches the guard; the outcome itself
 /// is decided by the observed state, never by elapsed time.
 pub(super) fn wait_until(mut condition: impl FnMut() -> bool) {

@@ -9,42 +9,62 @@ use mixrelay_audio_io::{
     AudioDeviceDescriptor, ChannelLayout, SourcePlaybackPolicy, StreamSpec, VirtualEndpointId,
     VirtualEndpointSpec,
 };
+#[cfg(feature = "native-lab")]
+use mixrelay_engine_service::GraphResourceBackend;
 use mixrelay_engine_service::{
-    GraphResourceBackend,
     catalog_execution::{ApplicationIdentityResolver, CatalogExecutionContext, compose_catalog},
     graph_composition::{CompositionError, SharedSource},
 };
+#[cfg(feature = "native-lab")]
 use mixrelay_test_support::{frame_sequence::SequenceContinuity, tone_continuity::ToneContinuity};
 use serde_json::Value;
+#[cfg(feature = "native-lab")]
 use std::{
-    collections::BTreeMap,
     fs::{File, OpenOptions},
     io::{BufWriter, Write},
     path::{Path, PathBuf},
     process::{Command, ExitStatus, Stdio},
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
     thread,
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "native-lab")]
+#[path = "linux_application_graph_continuity_tests/driver_fixture.rs"]
+mod driver_fixture;
+
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
+
 const SAMPLE_RATE: u32 = 48_000;
 const BLOCK_FRAMES: u32 = 128;
+#[cfg(feature = "native-lab")]
 const WINDOW_FRAMES: usize = 480_000;
+#[cfg(feature = "native-lab")]
 const READ_FRAMES: usize = 128;
+#[cfg(feature = "native-lab")]
 const CAPTURE_NODE: &str = "graph-continuity";
+#[cfg(feature = "native-lab")]
 const SOURCE_APP_ID: &str = "org.mixrelay.fixture.application";
+#[cfg(feature = "native-lab")]
 const SOURCE_NODE_NAME: &str = "io.mixrelay.lab-application";
+#[cfg(feature = "native-lab")]
 const SINK_APP_ID: &str = "org.mixrelay.fixture.mute-sink";
 const SINK_NODE_NAME: &str = "io.mixrelay.fixture.mute-sink";
 const ENGINE_OUTPUT_NODE_NAME: &str = "io.mixrelay.engine-output.device-output";
 const FORWARD_ENDPOINT_ID: &str = "lab-source-mute-X";
+#[cfg(feature = "native-lab")]
 const UNRELATED_APP_ID: &str = "org.mixrelay.fixture.unrelated-880";
+#[cfg(feature = "native-lab")]
 const COLLECTION_TIMEOUT: Duration = Duration::from_secs(15);
+#[cfg(feature = "native-lab")]
 const SETUP_TIMEOUT: Duration = Duration::from_secs(8);
 
+#[cfg(feature = "native-lab")]
 fn graph_clock_rate() -> u32 {
     match std::env::var("MIXRELAY_LAB_GRAPH_RATE").as_deref() {
         Ok("44100") => 44_100,
@@ -53,28 +73,43 @@ fn graph_clock_rate() -> u32 {
     }
 }
 
+#[cfg(feature = "native-lab")]
 struct GraphCaptureEvidence {
     directory: PathBuf,
     frames: Vec<[f32; 2]>,
+    transfer_before: Option<super::super::super::native::TransferSnapshot>,
+    transfer_after: Option<super::super::super::native::TransferSnapshot>,
+    source_sample_faults: u64,
     saved: bool,
 }
 
+#[cfg(feature = "native-lab")]
 impl GraphCaptureEvidence {
     fn new(directory: &Path) -> Self {
         Self {
             directory: directory.to_owned(),
             frames: Vec::with_capacity(WINDOW_FRAMES),
+            transfer_before: None,
+            transfer_after: None,
+            source_sample_faults: 0,
             saved: false,
         }
     }
 
     fn collect(&mut self, captures: &mut CaptureSet) {
+        self.transfer_before = Some(captures.transfer_snapshot());
         let deadline = Instant::now() + COLLECTION_TIMEOUT;
         let mut samples = [0.0_f32; READ_FRAMES * 2];
         while self.frames.len() < WINDOW_FRAMES {
             let remaining = WINDOW_FRAMES - self.frames.len();
             let sample_limit = remaining.min(READ_FRAMES) * 2;
             let outcome = captures.read(CAPTURE_NODE, &mut samples[..sample_limit]);
+            self.source_sample_faults = self
+                .source_sample_faults
+                .saturating_add(outcome.source_sample_faults);
+            if outcome.discontinuity {
+                self.transfer_after = Some(captures.transfer_snapshot());
+            }
             assert_eq!(
                 outcome.activity,
                 mixrelay_audio_io::process::InputActivity::Active,
@@ -107,6 +142,40 @@ impl GraphCaptureEvidence {
                 "10-second capture evidence tap timed out"
             );
         }
+        self.transfer_after = Some(captures.transfer_snapshot());
+    }
+
+    fn assert_no_native_capture_loss(&self) {
+        assert_eq!(
+            self.source_sample_faults, 0,
+            "independent capture replaced non-finite source samples"
+        );
+        let before = self.transfer_before.expect("capture start counters");
+        let after = self.transfer_after.expect("capture end counters");
+        for snapshot in [before, after] {
+            assert_eq!(snapshot.streams, 1, "exactly one evidence capture owner");
+            assert_eq!(
+                snapshot.counters.failures[0].rejected_calls, 0,
+                "independent capture rejected native ingress: {snapshot:?}"
+            );
+        }
+        assert_eq!(before.owner_sequence, after.owner_sequence);
+        assert_eq!(
+            after
+                .counters
+                .engine_read_frames
+                .wrapping_sub(before.counters.engine_read_frames),
+            WINDOW_FRAMES as u64,
+            "capture evidence consumed exactly the retained PCM window"
+        );
+        assert_eq!(
+            after.counters.consumer_discard_calls,
+            before.counters.consumer_discard_calls
+        );
+        assert_eq!(
+            after.counters.native_restart_calls,
+            before.counters.native_restart_calls
+        );
     }
 
     fn save(&mut self, evidence: &Value) -> std::io::Result<()> {
@@ -140,6 +209,11 @@ impl GraphCaptureEvidence {
                 "channels": 2,
                 "measured_frames": self.frames.len(),
                 "raw_file": raw_name,
+                "source_sample_faults": self.source_sample_faults,
+                "captureTransferWindow": {
+                    "before": self.transfer_before,
+                    "after": self.transfer_after,
+                },
                 "evidence": evidence,
             }),
         )
@@ -148,6 +222,7 @@ impl GraphCaptureEvidence {
     }
 }
 
+#[cfg(feature = "native-lab")]
 impl Drop for GraphCaptureEvidence {
     fn drop(&mut self) {
         if !self.saved {
@@ -160,6 +235,7 @@ impl Drop for GraphCaptureEvidence {
 }
 
 struct DriverCounters {
+    #[cfg(feature = "native-lab")]
     cycles: AtomicU64,
     frames: AtomicU64,
     clock: AtomicU64,
@@ -173,6 +249,7 @@ struct DriverCounters {
 impl Default for DriverCounters {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "native-lab")]
             cycles: AtomicU64::new(0),
             frames: AtomicU64::new(0),
             clock: AtomicU64::new(0),
@@ -246,11 +323,13 @@ impl DriverCounters {
     }
 }
 
+#[cfg(feature = "native-lab")]
 struct LinuxGraphProcess<'a> {
     state: super::super::super::LinuxProcessState<'a>,
     counters: Arc<DriverCounters>,
 }
 
+#[cfg(feature = "native-lab")]
 impl mixrelay_pipewire::DriverProcess for LinuxGraphProcess<'_> {
     fn prepare_inputs(
         &mut self,
@@ -306,7 +385,7 @@ impl mixrelay_pipewire::DriverProcess for LinuxGraphProcess<'_> {
 }
 
 #[test]
-#[ignore = "requires the private PipeWire lab and owned source/sink fixtures"]
+#[cfg(feature = "native-lab")]
 fn native_application_graph_continuity_preserves_480k_frames_through_engine() {
     let (source_path, sink_path, directory) = super::mute::fixture_paths();
     let mut evidence = GraphCaptureEvidence::new(&directory);
@@ -336,12 +415,9 @@ fn native_application_graph_continuity_preserves_480k_frames_through_engine() {
     let sink_ready = observer.event("ready", None);
     let sink_node_name = verified_sink_node_name(&sink_ready, observer.id());
     let document = graph_document(source.id(), &sink_node_name);
-    let (mut input_capture, input_watch) = open_input_capture(source.id(), &source_target.serial);
-    assert_eq!(input_watch.entries.len(), 1);
-    assert_eq!(input_watch.entries[0].serials, [source_target.serial]);
     let result = capture_graph_window(
         &document,
-        &mut input_capture,
+        &source_target,
         &mut evidence,
         &mut observer,
         engine_identity,
@@ -365,12 +441,10 @@ fn native_application_graph_continuity_preserves_480k_frames_through_engine() {
 }
 
 #[test]
-#[ignore = "requires private PipeWire/WirePlumber 0.5 policy and owned source/sink fixtures"]
+#[cfg(feature = "native-lab")]
 fn native_application_forward_lease_keeps_capture_pcm_and_restores_owned_state() {
     let (source_path, sink_path, directory) = super::mute::fixture_paths();
-    let endpoint_names = super::super::super::endpoints::native_names(&forward_endpoint());
-    assert_eq!(endpoint_names.len(), 2);
-    let mut source = FixtureProcess::start(&source_path, &["--policy-route", &endpoint_names[0]]);
+    let (_driver, mut source, endpoint_names) = start_forward_source(&directory, &source_path);
     let selected = wait_for_owned_target(
         source.id(),
         SOURCE_APP_ID,
@@ -449,6 +523,20 @@ fn native_application_forward_lease_keeps_capture_pcm_and_restores_owned_state()
     println!("native_source_mute_forward={summary}");
 }
 
+#[cfg(feature = "native-lab")]
+fn start_forward_source(
+    directory: &Path,
+    source_path: &Path,
+) -> (driver_fixture::DriverFixture, FixtureProcess, Vec<String>) {
+    let endpoint = forward_endpoint();
+    let names = super::super::super::endpoints::native_names(&endpoint);
+    assert_eq!(names.len(), 2);
+    let driver = driver_fixture::DriverFixture::start(directory, endpoint);
+    let source = FixtureProcess::start(source_path, &["--policy-route", &names[0]]);
+    (driver, source, names)
+}
+
+#[cfg(feature = "native-lab")]
 struct GraphValidation {
     directory: PathBuf,
     result: GraphWindowResult,
@@ -460,6 +548,7 @@ struct GraphValidation {
     independent_sequence: SequenceContinuity,
 }
 
+#[cfg(feature = "native-lab")]
 struct GraphPcmResults {
     sink_metadata: Value,
     input_tone: ToneContinuity,
@@ -468,6 +557,7 @@ struct GraphPcmResults {
     output_sequence: SequenceContinuity,
 }
 
+#[cfg(feature = "native-lab")]
 fn validate_graph_evidence(evidence: &mut GraphCaptureEvidence, run: &GraphValidation) {
     let (sink_metadata, output_frames) = load_graph_output(&run.directory, run.observer_id);
     let pcm = GraphPcmResults {
@@ -481,6 +571,7 @@ fn validate_graph_evidence(evidence: &mut GraphCaptureEvidence, run: &GraphValid
         std::fs::read_to_string(run.directory.join("independent-capture.stderr.log"))
             .expect("independent capture stderr evidence");
     save_graph_summary(evidence, run, &pcm, &recorder_errors);
+    evidence.assert_no_native_capture_loss();
 
     assert!(
         run.result.observer_status.success(),
@@ -520,6 +611,7 @@ fn validate_graph_evidence(evidence: &mut GraphCaptureEvidence, run: &GraphValid
     assert_graph_pcm(&pcm, run);
 }
 
+#[cfg(feature = "native-lab")]
 fn assert_graph_pcm(pcm: &GraphPcmResults, run: &GraphValidation) {
     if graph_clock_rate() == SAMPLE_RATE {
         assert_continuity(
@@ -559,6 +651,7 @@ fn assert_graph_pcm(pcm: &GraphPcmResults, run: &GraphValidation) {
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn save_graph_summary(
     evidence: &mut GraphCaptureEvidence,
     run: &GraphValidation,
@@ -574,6 +667,7 @@ fn save_graph_summary(
             converted PCM is qualified by tone continuity and callback-duration/frame balance",
         "independentCaptureEvidenceTap": {
             "role": "separate ProcessId CaptureSet tap; not GraphDriver internal ApplicationCapture buffers",
+            "sourceSampleFaults": evidence.source_sample_faults,
             "tone": pcm.input_tone,
             "sequence": sequence_applicable.then_some(&pcm.input_sequence),
         },
@@ -599,6 +693,7 @@ fn save_graph_summary(
     println!("native_application_graph_continuity={summary}");
 }
 
+#[cfg(feature = "native-lab")]
 struct GraphWindowResult {
     route: Value,
     observer_status: ExitStatus,
@@ -608,14 +703,16 @@ struct GraphWindowResult {
 }
 
 #[derive(Clone, Copy)]
+#[cfg(feature = "native-lab")]
 struct EngineProcessIdentity {
     process_id: u32,
     start_time: u64,
 }
 
+#[cfg(feature = "native-lab")]
 fn capture_graph_window(
     document: &GraphDocument,
-    input_capture: &mut CaptureSet,
+    source: &PipeWireTarget,
     evidence: &mut GraphCaptureEvidence,
     observer: &mut super::mute::FixtureChild,
     engine_identity: EngineProcessIdentity,
@@ -638,7 +735,14 @@ fn capture_graph_window(
             let before = counters.transfer_observation();
             observer.send("phase 1");
             observer.event("armed", Some(1));
-            evidence.collect(input_capture);
+            // The independent recorder already observes graph preparation. Open
+            // this bounded evidence queue only when its consumer can run: leaving
+            // it undrained during graph setup manufactures a 32768-frame overflow.
+            let (mut input_capture, _watch) = open_input_capture(
+                source.process_id.expect("owned source process"),
+                &source.serial,
+            );
+            evidence.collect(&mut input_capture);
             let completed = observer.event("phaseComplete", Some(1));
             let after = counters.transfer_observation();
             assert_eq!(completed["frames"].as_u64(), Some(WINDOW_FRAMES as u64));
@@ -657,18 +761,22 @@ fn capture_graph_window(
     }
 }
 
+#[cfg(feature = "native-lab")]
 struct DriverStats {
     cycles: u64,
     frames: u64,
     clock: u64,
 }
 
+#[cfg(feature = "native-lab")]
 impl DriverStats {
+    #[cfg(feature = "native-lab")]
     fn sample_rate(&self) -> u32 {
         u32::try_from(self.clock & u64::from(u32::MAX)).expect("masked clock rate fits u32")
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn with_engine_graph<R>(
     document: &GraphDocument,
     format: RenderFormat,
@@ -739,6 +847,7 @@ fn with_engine_graph<R>(
     (result, read_driver_counters(&counters))
 }
 
+#[cfg(feature = "native-lab")]
 fn prepare_graph_process_state<'a>(
     backend: &'a super::super::super::LinuxVirtualEndpointBackend,
     processor: Box<mixrelay_audio_engine::BlockProcessor>,
@@ -781,6 +890,7 @@ fn prepare_graph_process_state<'a>(
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn active_runtime_status(
     format: RenderFormat,
 ) -> Arc<mixrelay_engine_service::session::AdapterRuntimeStatus> {
@@ -791,6 +901,7 @@ fn active_runtime_status(
     status
 }
 
+#[cfg(feature = "native-lab")]
 fn read_driver_counters(counters: &DriverCounters) -> DriverStats {
     DriverStats {
         cycles: counters.cycles.load(Ordering::Acquire),
@@ -799,6 +910,7 @@ fn read_driver_counters(counters: &DriverCounters) -> DriverStats {
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn open_input_capture(process_id: u32, source_serial: &str) -> (CaptureSet, CaptureWatch) {
     let request = application_capture_request(process_id);
     let format = RenderFormat {
@@ -969,6 +1081,7 @@ fn composed_output_node_name(outputs: &BTreeMap<String, NodeId>, sink_node_name:
     )
 }
 
+#[cfg(feature = "native-lab")]
 fn registry_snapshot() -> Vec<Value> {
     let output =
         mixrelay_audio_io::linux::bounded_pipewire_output("pw-dump", &[], Duration::from_secs(2))
@@ -980,6 +1093,7 @@ fn registry_snapshot() -> Vec<Value> {
         .collect()
 }
 
+#[cfg(feature = "native-lab")]
 fn metadata_value(objects: &[Value], name: &str, subject: u32, key: &str) -> Option<String> {
     objects
         .iter()
@@ -996,6 +1110,7 @@ fn metadata_value(objects: &[Value], name: &str, subject: u32, key: &str) -> Opt
         .map(str::to_owned)
 }
 
+#[cfg(feature = "native-lab")]
 fn default_metadata(objects: &[Value]) -> std::collections::BTreeMap<(u32, String), Value> {
     let entries = objects
         .iter()
@@ -1048,6 +1163,7 @@ fn private_target_restore_deletes_only_the_exact_private_key() {
     );
 }
 
+#[cfg(feature = "native-lab")]
 fn update_private_target(source: u32, target: Option<&str>) {
     let source = source.to_string();
     let args = private_target_args(&source, target);
@@ -1063,6 +1179,7 @@ fn update_private_target(source: u32, target: Option<&str>) {
     );
 }
 
+#[cfg(feature = "native-lab")]
 fn wait_for_ack(
     backend: &super::super::super::LinuxVirtualEndpointBackend,
     exchange: &mixrelay_audio_engine::ProcessorExchange,
@@ -1092,6 +1209,7 @@ fn wait_for_ack(
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn wait_for_lease_clear(
     backend: &super::super::super::LinuxVirtualEndpointBackend,
     exchange: &mixrelay_audio_engine::ProcessorExchange,
@@ -1117,6 +1235,7 @@ fn wait_for_lease_clear(
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn managed_links(objects: &[Value], source: u32, sink: u32) -> Vec<u32> {
     objects
         .iter()
@@ -1160,21 +1279,34 @@ fn managed_links(objects: &[Value], source: u32, sink: u32) -> Vec<u32> {
         .collect()
 }
 
+#[cfg(feature = "native-lab")]
 fn wait_for_managed_links(source: u32, sink: u32, expected: usize) -> Vec<u32> {
     let deadline = Instant::now() + SETUP_TIMEOUT;
     loop {
-        let links = managed_links(&registry_snapshot(), source, sink);
+        let registry = registry_snapshot();
+        let links = managed_links(&registry, source, sink);
         if links.len() == expected {
             return links;
         }
-        assert!(
-            Instant::now() < deadline,
-            "WP-managed route count did not become {expected}"
-        );
+        if Instant::now() >= deadline {
+            let fixture = std::env::var_os("MIXRELAY_LAB_APPLICATION_FIXTURE")
+                .map(PathBuf::from)
+                .expect("explicit owned fixture path");
+            let evidence = fixture.parent().unwrap().join(format!(
+                "managed-route-timeout-{source}-{sink}-{expected}.json"
+            ));
+            let output = File::create_new(&evidence).expect("exclusive failed-route evidence");
+            serde_json::to_writer(output, &registry).expect("save failed-route registry");
+            panic!(
+                "WP-managed route count did not become {expected}; found {links:?}; evidence={}",
+                evidence.display()
+            );
+        }
         thread::sleep(Duration::from_millis(20));
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn capture_owned_endpoint(serial: &str, directory: &Path, label: &str) -> Vec<f32> {
     let raw_path = directory.join(format!("source-mute-{label}.f32"));
     let log_path = directory.join(format!("source-mute-{label}.log"));
@@ -1208,6 +1340,7 @@ fn capture_owned_endpoint(serial: &str, directory: &Path, label: &str) -> Vec<f3
         .collect()
 }
 
+#[cfg(feature = "native-lab")]
 fn tone_amplitude(samples: &[f32], frequency: f64) -> f64 {
     let window = &samples[samples.len() - 24_000..];
     let mut sine = 0.0;
@@ -1222,6 +1355,7 @@ fn tone_amplitude(samples: &[f32], frequency: f64) -> f64 {
     2.0 * sine.hypot(cosine) / f64::from(window_len)
 }
 
+#[cfg(feature = "native-lab")]
 fn unrelated_tone_file(directory: &Path) -> PathBuf {
     let path = directory.join("source-mute-unrelated-880.f32");
     let mut output = BufWriter::new(File::create_new(&path).expect("owned 880 Hz test media"));
@@ -1239,6 +1373,7 @@ fn unrelated_tone_file(directory: &Path) -> PathBuf {
     path
 }
 
+#[cfg(feature = "native-lab")]
 fn start_unrelated_tone(serial: &str, directory: &Path) -> FixtureProcess {
     let media = unrelated_tone_file(directory);
     let input = File::open(media).expect("read owned unrelated tone media");
@@ -1269,6 +1404,7 @@ fn start_unrelated_tone(serial: &str, directory: &Path) -> FixtureProcess {
     )
 }
 
+#[cfg(feature = "native-lab")]
 struct ForwardInputs<'a, 'b> {
     driver: &'a mixrelay_pipewire::GraphDriver<LinuxGraphProcess<'b>>,
     status: &'a mixrelay_engine_service::session::AdapterRuntimeStatus,
@@ -1284,6 +1420,7 @@ struct ForwardInputs<'a, 'b> {
     engine_identity: EngineProcessIdentity,
 }
 
+#[cfg(feature = "native-lab")]
 fn wait_for_playback_target(input: &ForwardInputs<'_, '_>) {
     let deadline = Instant::now() + SETUP_TIMEOUT;
     loop {
@@ -1308,6 +1445,7 @@ fn wait_for_playback_target(input: &ForwardInputs<'_, '_>) {
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn wait_for_unrelated_output(process_id: u32) -> mixrelay_audio_io::linux::PipeWireTarget {
     let deadline = Instant::now() + SETUP_TIMEOUT;
     loop {
@@ -1332,6 +1470,7 @@ fn wait_for_unrelated_output(process_id: u32) -> mixrelay_audio_io::linux::PipeW
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn publish_source_mask(input: &ForwardInputs<'_, '_>, revision: u64, enabled: bool) {
     input
         .exchange
@@ -1358,6 +1497,7 @@ fn publish_source_mask(input: &ForwardInputs<'_, '_>, revision: u64, enabled: bo
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn run_forward_session(input: &mut ForwardInputs<'_, '_>) -> Value {
     let transfer_before = input.counters.transfer_observation();
     wait_driver_ready(input.driver, input.status);
@@ -1367,18 +1507,7 @@ fn run_forward_session(input: &mut ForwardInputs<'_, '_>) -> Value {
         input.engine_identity.process_id,
         input.engine_identity.start_time,
     );
-    let render = wait_for_owned_target(
-        std::process::id(),
-        "io.mixrelay.engine",
-        &input.endpoint_names[0],
-        "Audio/Sink",
-    );
-    let capture = wait_for_owned_target(
-        std::process::id(),
-        "io.mixrelay.engine",
-        &input.endpoint_names[1],
-        "Audio/Source",
-    );
+    let (render, capture) = driver_endpoint_targets(input);
     let original_links = wait_for_managed_links(input.selected.object_id, render.object_id, 2);
     let before = capture_owned_endpoint(&capture.serial, input.directory, "before");
     let before_1000 = tone_amplitude(&before, 1000.0);
@@ -1399,6 +1528,10 @@ fn run_forward_session(input: &mut ForwardInputs<'_, '_>) -> Value {
 
     let mut unrelated = start_unrelated_tone(&render.serial, input.directory);
     let witness = wait_for_unrelated_output(unrelated.id());
+    // WirePlumber converts a command-line target that is also the default into
+    // follow-default routing. Pin this witness as an explicit user-selected
+    // route before introducing another sink, independently of the leased app.
+    update_private_target(witness.object_id, Some(&render.serial));
     let witness_links = wait_for_managed_links(witness.object_id, render.object_id, 2);
     let ack = wait_for_ack(
         input.backend,
@@ -1442,6 +1575,36 @@ fn run_forward_session(input: &mut ForwardInputs<'_, '_>) -> Value {
     })
 }
 
+#[cfg(feature = "native-lab")]
+fn driver_endpoint_targets(
+    input: &ForwardInputs<'_, '_>,
+) -> (
+    mixrelay_audio_io::linux::PipeWireTarget,
+    mixrelay_audio_io::linux::PipeWireTarget,
+) {
+    let owner = input
+        .backend
+        .driver_snapshot()
+        .unwrap()
+        .owner_process_id
+        .expect("the private Driver owns its native endpoints");
+    (
+        wait_for_owned_target(
+            owner,
+            "io.mixrelay.driver",
+            &input.endpoint_names[0],
+            "Audio/Sink",
+        ),
+        wait_for_owned_target(
+            owner,
+            "io.mixrelay.driver",
+            &input.endpoint_names[1],
+            "Audio/Source",
+        ),
+    )
+}
+
+#[cfg(feature = "native-lab")]
 fn finish_forward_session(
     input: &mut ForwardInputs<'_, '_>,
     unrelated: &mut FixtureProcess,
@@ -1478,6 +1641,7 @@ fn finish_forward_session(
     (output_pcm, observer_status.success())
 }
 
+#[cfg(feature = "native-lab")]
 fn save_forward_transfer_observation(
     input: &ForwardInputs<'_, '_>,
     before: &Value,
@@ -1694,6 +1858,7 @@ fn converted_clock_window_keeps_fraction_and_excludes_lifetime_failures() {
     assert!(std::panic::catch_unwind(|| assert_clock_window(&window, rate)).is_err());
 }
 
+#[cfg(feature = "native-lab")]
 fn verify_off_restored(
     input: &ForwardInputs<'_, '_>,
     render: &mixrelay_audio_io::linux::PipeWireTarget,
@@ -1740,6 +1905,7 @@ fn verify_off_restored(
     })
 }
 
+#[cfg(feature = "native-lab")]
 fn verify_external_reroute(
     input: &ForwardInputs<'_, '_>,
     render: &mixrelay_audio_io::linux::PipeWireTarget,
@@ -1827,6 +1993,7 @@ fn verify_external_reroute(
     })
 }
 
+#[cfg(feature = "native-lab")]
 fn collect_forward_graph_pcm(input: &mut ForwardInputs<'_, '_>) -> Value {
     let before = input.counters.transfer_observation();
     input.observer.send("phase 1");
@@ -1852,6 +2019,7 @@ fn collect_forward_graph_pcm(input: &mut ForwardInputs<'_, '_>) -> Value {
     })
 }
 
+#[cfg(feature = "native-lab")]
 fn wait_driver_ready(
     driver: &mixrelay_pipewire::GraphDriver<LinuxGraphProcess<'_>>,
     status: &mixrelay_engine_service::session::AdapterRuntimeStatus,
@@ -1870,6 +2038,7 @@ fn wait_driver_ready(
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn process_start_time(process_id: u32) -> u64 {
     let stat = std::fs::read_to_string(format!("/proc/{process_id}/stat"))
         .expect("read exact engine-process identity");
@@ -1882,6 +2051,7 @@ fn process_start_time(process_id: u32) -> u64 {
         .expect("parse exact engine-process start time")
 }
 
+#[cfg(feature = "native-lab")]
 fn wait_for_owned_target(
     process_id: u32,
     app_id: &str,
@@ -1913,6 +2083,7 @@ fn wait_for_owned_target(
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn verified_sink_node_name(ready: &Value, sink_process_id: u32) -> String {
     assert_eq!(ready["event"], "ready");
     assert_eq!(ready["routeMode"], "graph");
@@ -1934,6 +2105,7 @@ fn verified_sink_node_name(ready: &Value, sink_process_id: u32) -> String {
         .expect("verified sink has a persistent node name")
 }
 
+#[cfg(feature = "native-lab")]
 fn verify_route_ready(route: &Value, process_id: u32, start_time: u64) {
     assert_eq!(route["event"], "routeReady");
     assert_eq!(route["processId"].as_u64(), Some(u64::from(process_id)));
@@ -1948,11 +2120,13 @@ fn verify_route_ready(route: &Value, process_id: u32, start_time: u64) {
     assert_ne!(links[0], links[1]);
 }
 
+#[cfg(feature = "native-lab")]
 fn stop_observer(observer: &mut super::mute::FixtureChild) -> ExitStatus {
     observer.send("quit");
     observer.wait()
 }
 
+#[cfg(feature = "native-lab")]
 fn stop_recorder(recorder: &mut FixtureProcess) -> (bool, ExitStatus) {
     let running = recorder
         .0
@@ -1964,15 +2138,18 @@ fn stop_recorder(recorder: &mut FixtureProcess) -> (bool, ExitStatus) {
     (running, status)
 }
 
+#[cfg(feature = "native-lab")]
 fn measure_tone(frames: &[[f32; 2]]) -> ToneContinuity {
     ToneContinuity::measure(frames.iter().map(|frame| frame[0]), SAMPLE_RATE, 1000.0)
         .expect("valid full-duration 1 kHz tone measurement")
 }
 
+#[cfg(feature = "native-lab")]
 fn measure_sequence(frames: &[[f32; 2]]) -> SequenceContinuity {
     SequenceContinuity::measure(frames.iter().map(|frame| frame[1]))
 }
 
+#[cfg(feature = "native-lab")]
 fn assert_tone_continuity(tone: &ToneContinuity, context: &str) {
     assert_eq!(tone.sample_count, WINDOW_FRAMES, "{context} tone duration");
     assert!(tone.intact(), "{context} tone gap: {tone:?}");
@@ -1982,6 +2159,7 @@ fn assert_tone_continuity(tone: &ToneContinuity, context: &str) {
     );
 }
 
+#[cfg(feature = "native-lab")]
 fn assert_continuity(tone: &ToneContinuity, sequence: &SequenceContinuity, context: &str) {
     assert_tone_continuity(tone, context);
     assert_eq!(
@@ -2079,6 +2257,7 @@ fn assert_clock_window(window: &Value, native_rate: u32) {
     );
 }
 
+#[cfg(feature = "native-lab")]
 fn load_graph_output(directory: &Path, process_id: u32) -> (Value, Vec<[f32; 2]>) {
     let metadata: Value = serde_json::from_slice(
         &std::fs::read(directory.join(format!("graph-sink-{process_id}.json")))
@@ -2205,34 +2384,15 @@ fn composed_forward_endpoint_uses_canonical_playback_without_fixture_feedback() 
         })
         .collect::<Vec<_>>();
     assert_eq!(render_edges.len(), 1);
-    let mix = &render_edges[0].destination.node_id;
+    // Native capture already contains the Driver's canonical sum. Reading it
+    // feeds the snapshot directly; feeding it back to the render mixer would
+    // duplicate that signal and create an unauthored feedback path.
+    assert_eq!(&render_edges[0].destination.node_id, snapshot);
     assert_eq!(render_edges[0].destination.port_id.as_str(), AUDIO_PORT_ID);
-    assert_eq!(
-        composed
-            .document
-            .edges
-            .iter()
-            .filter(|edge| {
-                edge.source.node_id == *mix
-                    && edge.source.port_id.as_str() == AUDIO_PORT_ID
-                    && edge.destination.node_id == *native
-                    && edge.destination.port_id.as_str() == TO_OS_PORT_ID
-            })
-            .count(),
-        1
-    );
-    assert_eq!(
-        composed
-            .document
-            .edges
-            .iter()
-            .filter(|edge| {
-                edge.source.node_id == *mix
-                    && edge.destination.node_id == *snapshot
-                    && edge.destination.port_id.as_str() == AUDIO_PORT_ID
-            })
-            .count(),
-        1
+    assert!(
+        !composed.document.edges.iter().any(|edge| {
+            edge.source.node_id == *snapshot && edge.destination.node_id == *native
+        })
     );
     assert!(!composed.document.edges.iter().any(|edge| {
         let source = composed.node_origins.get(&edge.source.node_id);

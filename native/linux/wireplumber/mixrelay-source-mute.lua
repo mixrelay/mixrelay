@@ -105,23 +105,40 @@ end
 
 local function restore_previous_link (subject, source_serial, previous)
   local endpoint, source = verified_lease_nodes (subject, source_serial, previous)
-  if not endpoint then return end
+  if not endpoint then
+    log:debug ("released lease no longer identifies live source and endpoint")
+    return
+  end
   local event_source = Plugin.find ("standard-event-source")
   if not event_source then return end
   local om = event_source:call ("get-object-manager", "session-item")
   if not om then return end
   local source_si = linkable_for_node (om, source)
   local endpoint_si = linkable_for_node (om, endpoint)
-  if not source_si or not endpoint_si then return end
+  if not source_si or not endpoint_si then
+    log:debug ("released lease has no matching policy session items")
+    return
+  end
 
   local source_flags = lutils:get_flags (source_si.id)
   -- An external reroute owns a different peer; never remove that link.
-  if source_flags.peer_id ~= endpoint_si.id then return end
-  source_flags.peer_id = nil
-  local endpoint_flags = lutils:get_flags (endpoint_si.id)
-  if endpoint_flags.peer_id == source_si.id then endpoint_flags.peer_id = nil end
+  if source_flags.peer_id ~= endpoint_si.id then
+    log:debug (source_si, "released lease no longer owns the policy peer")
+    return
+  end
+  log:debug (source_si, "restoring released source-mute policy link")
   local link = lutils.lookupLink (source_si.id, endpoint_si.id)
-  if link then link:remove () end
+  if not link then return end
+  -- The lease removed native links, while this exact policy link still owns
+  -- its source/peer pair. Reactivate it without selecting a new destination.
+  -- A policy's follow-default metadata may have changed since initial linking;
+  -- recreating the session item would lose the route we temporarily suppressed.
+  link:deactivate (Feature.SessionItem.ACTIVE)
+  link:activate (Feature.SessionItem.ACTIVE, function (l, error)
+    if error then
+      log:warning (l, "released source-mute link could not be restored: " .. tostring (error))
+    end
+  end)
 end
 
 local function changed (_, subject, key, _, value)

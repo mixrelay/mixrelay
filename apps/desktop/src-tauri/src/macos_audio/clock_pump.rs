@@ -403,6 +403,7 @@ impl PumpClock {
     fn transfer(
         &mut self,
         capture: &mut NativeCaptureReader,
+        transport: &mut ApplicationSourceTransport,
         input: &mut [f32],
         output: &mut [f32],
     ) -> Result<usize, PumpError> {
@@ -412,9 +413,14 @@ impl PumpClock {
         } else {
             0
         };
+        let samples = &mut input[..frames * channels];
+        let faults = mixrelay_audio_io::pcm::sanitize_samples(samples);
+        if !transport.record_source_faults(self.epoch, faults) {
+            return Ok(0);
+        }
         if frames > 0 {
             self.bridge
-                .push_interleaved(&input[..frames * channels])
+                .push_interleaved(samples)
                 .map_err(PumpError::Bridge)?;
         }
         let report = self
@@ -575,7 +581,12 @@ impl Pump {
         }
         let (producer, converter) = state.measure_input(health.captured_frames);
         self.transport.publish_measurements(producer, converter, 0);
-        let transferred = state.transfer(&mut self.capture, &mut self.input, &mut self.output)?;
+        let transferred = state.transfer(
+            &mut self.capture,
+            &mut self.transport,
+            &mut self.input,
+            &mut self.output,
+        )?;
         if transferred > 0
             && !self
                 .transport

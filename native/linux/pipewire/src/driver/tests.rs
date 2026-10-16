@@ -34,8 +34,10 @@ impl Drop for Counter {
     }
 }
 
+#[cfg(feature = "native-lab")]
 struct RejectedInputs(Counter);
 
+#[cfg(feature = "native-lab")]
 impl DriverProcess for RejectedInputs {
     fn prepare_inputs(&mut self, inputs: &GraphInputs) -> Result<(), DriverError> {
         inputs.ensure_live()?;
@@ -178,7 +180,7 @@ fn callback_owns_processor_and_main_state_observations_do_not_borrow_it() {
 }
 
 #[test]
-#[ignore = "requires the owned private PipeWire daemon"]
+#[cfg(feature = "native-lab")]
 fn native_graph_driver_drains_before_processor_drop_and_releases_resources() {
     use std::{
         thread,

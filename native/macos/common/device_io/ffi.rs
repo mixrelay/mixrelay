@@ -19,6 +19,18 @@ pub unsafe extern "C" fn mr_device_io_ticks(io: *mut DeviceIo) -> u64 {
     unsafe { io.as_ref() }.map_or(0, |io| io.progress.ticks.load(Acquire))
 }
 
+/// Whether callback-observed invalidation has withdrawn this registration.
+/// This is one atomic observation, without native property queries. A listener
+/// notification becomes visible here when a callback observes its local latch.
+/// Null owners are invalid; only drained connection preparation clears the latch.
+/// # Safety
+/// Non-null IO remains initialized and retained through this atomic observation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_device_io_invalid(io: *mut DeviceIo) -> bool {
+    // SAFETY: only independently atomic progress is read from the retained owner.
+    unsafe { io.as_ref() }.is_none_or(|io| io.progress.invalid.load(Acquire))
+}
+
 /// Observes the accumulated native frames counter.
 /// # Safety
 /// IO remains initialized and retained through this atomic observation.

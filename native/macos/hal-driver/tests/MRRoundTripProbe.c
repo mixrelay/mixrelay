@@ -809,6 +809,7 @@ static uint32_t mr_incomplete(const MRProbe *probe);
 typedef struct MRImpulses {
     uint64_t played, arrivals, matched, duplicates, rival;
     double ms_min, ms_max, ms_sum;
+    double delay_frames, rival_delay_frames;
 } MRImpulses;
 
 static float mr_level(const MRProbe *probe, uint64_t r, uint32_t c) {
@@ -897,6 +898,42 @@ static uint64_t mr_aligned(const double *played, uint64_t count, const double *a
     return aligned;
 }
 
+typedef struct MRAlignment {
+    double delay, rival_delay;
+    uint64_t matched, rival;
+} MRAlignment;
+
+static MRAlignment mr_align_impulses(const double *played, uint64_t timed,
+                                     const double *arrived, uint64_t arrivals, double tolerance) {
+    MRAlignment result = {0};
+    for (uint64_t i = 0U; i < arrivals; ++i) {
+        for (uint64_t j = 0U; j < timed; ++j) {
+            const double candidate = arrived[i] - played[j];
+            if (candidate < 0.0) continue;
+            const uint64_t aligned = mr_aligned(played, timed, arrived, arrivals, candidate, tolerance);
+            if (aligned > result.matched) {
+                result.matched = aligned;
+                result.delay = candidate;
+            }
+        }
+    }
+    // Find rivals against the final best delay. Two +/- tolerance windows must
+    // be disjoint to represent different alignments; overlapping windows can
+    // describe the same jittered pulse train, not a competing echo/path.
+    for (uint64_t i = 0U; i < arrivals; ++i) {
+        for (uint64_t j = 0U; j < timed; ++j) {
+            const double candidate = arrived[i] - played[j];
+            if (candidate < 0.0 || fabs(candidate - result.delay) <= 2.0 * tolerance) continue;
+            const uint64_t aligned = mr_aligned(played, timed, arrived, arrivals, candidate, tolerance);
+            if (aligned > result.rival) {
+                result.rival = aligned;
+                result.rival_delay = candidate;
+            }
+        }
+    }
+    return result;
+}
+
 static MRImpulses mr_analyse_impulses(const MRProbe *probe) {
     MRImpulses result = {.ms_min = INFINITY, .ms_max = -INFINITY};
     mach_timebase_info_data_t timebase;
@@ -933,25 +970,12 @@ static MRImpulses mr_analyse_impulses(const MRProbe *probe) {
             result.arrivals += 1U;
         }
     }
-    double delay = 0.0;
-    uint64_t best = 0U;
-    for (uint64_t i = 0U; i < result.arrivals; ++i) {
-        for (uint64_t j = 0U; j < timed; ++j) {
-            const double candidate = arrived[i] - played[j];
-            if (candidate < 0.0) continue;
-            const uint64_t aligned =
-                mr_aligned(played, timed, arrived, result.arrivals, candidate, tolerance);
-            if (aligned > best) {
-                if (fabs(candidate - delay) > tolerance) result.rival = best;
-                best = aligned;
-                delay = candidate;
-            } else if (fabs(candidate - delay) > tolerance && aligned > result.rival) {
-                result.rival = aligned;
-            }
-        }
-    }
-    for (uint64_t i = 0U; i < result.arrivals && best > 0U; ++i) {
-        const int64_t j = mr_nearest(played, timed, arrived[i] - delay, tolerance);
+    const MRAlignment alignment = mr_align_impulses(played, timed, arrived, result.arrivals, tolerance);
+    result.rival = alignment.rival;
+    result.delay_frames = alignment.delay / ticks_per_frame;
+    result.rival_delay_frames = alignment.rival_delay / ticks_per_frame;
+    for (uint64_t i = 0U; i < result.arrivals && alignment.matched > 0U; ++i) {
+        const int64_t j = mr_nearest(played, timed, arrived[i] - alignment.delay, tolerance);
         if (j < 0) continue;
         if (used[j]) {
             result.duplicates += 1U;
@@ -997,6 +1021,8 @@ static void mr_report_impulses(const MRProbe *probe, const MRImpulses *a, const 
                (unsigned long long)a->played, (unsigned long long)a->arrivals,
                (unsigned long long)a->matched, (unsigned long long)a->duplicates,
                (unsigned long long)a->rival, mr_impulses_measured(a) ? "true" : "false");
+        printf("\"alignmentDelayFrames\":%.3f,\"rivalDelayFrames\":%.3f,",
+               a->delay_frames, a->rival_delay_frames);
         if (a->matched > 0U) {
             printf("\"latencyMs\":{\"min\":%.3f,\"max\":%.3f,\"mean\":%.3f},"
                    "\"latencyFrames\":{\"min\":%.1f,\"max\":%.1f,\"mean\":%.2f},",
@@ -1388,6 +1414,40 @@ static bool mr_impulse_expect(const MRImpulses *a, double ms, const char *what) 
                      what);
 }
 
+static bool mr_self_test_impulse_jitter(void) {
+    const double played[] = {0, 100, 207, 311, 419, 526, 638, 751, 869, 990,
+                             1114, 1241, 1371, 1504, 1640, 1779, 1921, 2066, 2214, 2365};
+    double arrived[20];
+    const double jitter[] = {0.0, 0.9, 2.1, 3.7};
+    for (uint32_t i = 0U; i < 20U; ++i) arrived[i] = played[i] + 300.0 + jitter[i % 4U];
+    const MRAlignment window = mr_align_impulses(played, 20U, arrived, 20U, 2.0);
+    bool ok = mr_expect(window.matched == 15U && window.rival * 2U < window.matched,
+                        "overlapping pulse windows are not independent rivals");
+    MRProbe *probe = mr_impulse_recording(5.0, 300U, 1.0F, 0U, 0);
+    if (probe == NULL) return false;
+    mach_timebase_info_data_t timebase;
+    mach_timebase_info(&timebase);
+    const double ticks_per_frame =
+        1e9 / probe->rate / ((double)timebase.numer / (double)timebase.denom);
+    const uint32_t count = atomic_load(&probe->in.count);
+    for (uint32_t i = 0U; i < count; ++i) {
+        probe->in.chunks[i].host_time += (uint64_t)(jitter[i % 4U] * ticks_per_frame);
+    }
+    const MRImpulses a = mr_impulse_analysis(probe);
+    ok &= mr_expect(mr_impulses_measured(&a) && a.rival * 2U < a.matched,
+                        "overlapping jitter windows are one impulse alignment");
+    MRProbe *echo = mr_impulse_recording(5.0, 300U, 1.0F, 0U, 0);
+    if (echo == NULL) return false;
+    for (uint64_t r = 6300U; r < echo->run_frames; ++r) {
+        const float copy = mr_expected(echo, (int64_t)r - 6300, 0U);
+        for (uint32_t c = 0U; c < 2U; ++c) *mr_sample(echo, r, c) += copy;
+    }
+    const MRImpulses rival = mr_impulse_analysis(echo);
+    ok &= mr_expect(!mr_impulses_measured(&rival) && rival.rival * 2U >= rival.matched,
+                    "a genuinely separate echo remains ambiguous");
+    return ok;
+}
+
 /// Exact, smoothed, amplified and clipped pulses; a delay longer than the spacing; skewed
 /// channels; a cut final pulse; repeated copies and noise that must not measure.
 static bool mr_self_test_impulses(void) {
@@ -1453,13 +1513,14 @@ static bool mr_self_test_impulses(void) {
 
 static int mr_self_test(void) {
     const bool impulses = mr_self_test_impulses();
+    const bool jitter = mr_self_test_impulse_jitter();
     const bool damage = mr_self_test_damage();
     const bool channels = mr_self_test_channels();
     const bool anchor = mr_self_test_anchor();
     const bool repeats = mr_self_test_repeats();
     const bool early = mr_self_test_early_damage();
     const bool signal = mr_self_test_signal();
-    const bool passed = impulses && damage && channels && anchor && repeats && early && signal;
+    const bool passed = impulses && jitter && damage && channels && anchor && repeats && early && signal;
     printf("self test %s\n", passed ? "passed" : "FAILED");
     return passed ? 0 : 1;
 }

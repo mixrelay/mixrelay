@@ -2900,6 +2900,7 @@ version = "0.1.0"
 dependencies = [
  "allocation-counter",
  "cc",
+ "mixrelay-audio-io",
  "mixrelay-macos-transport",
  "mixrelay-pcm-ring",
 ]

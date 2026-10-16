@@ -13,6 +13,7 @@ use std::{
 };
 
 mod native_pcm;
+mod pcm_hook;
 
 #[repr(C)]
 struct Buffers {
@@ -176,6 +177,7 @@ fn graph_read_admits_initial_epoch_once_without_hiding_later_shortages() {
             GraphRead {
                 frames: 0,
                 initial_epoch: true,
+                discontinuity: false,
             }
         );
         assert!(pcm.iter().all(|sample| *sample == 0.0));
@@ -189,6 +191,7 @@ fn graph_read_admits_initial_epoch_once_without_hiding_later_shortages() {
             GraphRead {
                 frames: 32,
                 initial_epoch: false,
+                discontinuity: false,
             }
         );
         assert_eq!(pcm.map(f32::to_bits), [0.75_f32.to_bits(); 32]);
@@ -200,9 +203,22 @@ fn graph_read_admits_initial_epoch_once_without_hiding_later_shortages() {
         assert_eq!(queues::bridge_write(&io, [0.5; 32].as_ptr(), 32), 32);
         assert_eq!(
             mr_device_io_graph_read(pointer, pcm.as_mut_ptr(), 32, 1, 0),
-            GraphRead::default()
+            GraphRead {
+                discontinuity: true,
+                ..GraphRead::default()
+            }
         );
         assert!(pcm.iter().all(|sample| *sample == 0.0));
+        assert_eq!(
+            mr_device_io_graph_read(pointer, pcm.as_mut_ptr(), 32, 1, 0),
+            GraphRead::default(),
+            "the same recovery is reported once"
+        );
+        assert_eq!(queues::bridge_write(&io, [0.875; 32].as_ptr(), 32), 32);
+        let read = mr_device_io_graph_read(pointer, pcm.as_mut_ptr(), 32, 1, 0);
+        assert_eq!(read.frames, 32);
+        assert!(!read.initial_epoch && !read.discontinuity);
+        assert_eq!(pcm.map(f32::to_bits), [0.875_f32.to_bits(); 32]);
     }
 }
 

@@ -44,7 +44,7 @@ pub(super) fn plane_peak(samples: &[f32]) -> f32 {
 
 // SAFETY: frame_count validated non-null/aligned native parts, equal complete
 // Float32 extents and channels. CoreAudio retains readable bytes for this callback.
-unsafe fn record(peaks: &TapPeaks, format: &TapFormat, parts: &[AudioBuffer]) {
+unsafe fn record(peaks: &TapPeaks, format: &TapFormat, parts: &[AudioBuffer]) -> bool {
     let mut block = [0.0_f32; MAX_CHANNELS];
     let channels = format.channels as usize;
     if format.planar() {
@@ -65,6 +65,9 @@ unsafe fn record(peaks: &TapPeaks, format: &TapFormat, parts: &[AudioBuffer]) {
         }
     }
     peaks.publish(&block[..channels.min(MAX_CHANNELS)]);
+    block[..channels.min(MAX_CHANNELS)]
+        .iter()
+        .any(|peak| *peak > 0.0)
 }
 
 /// Validates one tap block, records its peaks and writes its PCM without allocation.
@@ -88,7 +91,7 @@ pub(crate) unsafe fn ingest(
         return TapInputResult::default();
     };
     // SAFETY: frame_count validated geometry before any PCM dereference.
-    unsafe { record(peaks, format, parts) };
+    let audible = unsafe { record(peaks, format, parts) };
     let written = if format.planar() {
         let mut planes = [ptr::null(); MAX_CHANNELS];
         for (plane, part) in planes.iter_mut().zip(parts) {
@@ -100,5 +103,9 @@ pub(crate) unsafe fn ingest(
         // SAFETY: validated interleaved extent is readable for frames*channels.
         unsafe { mr_audio_ring_write_interleaved(ring, parts[0].data, frames) }
     };
-    TapInputResult { frames, written }
+    TapInputResult {
+        frames,
+        written,
+        audible,
+    }
 }

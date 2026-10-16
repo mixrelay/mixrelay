@@ -35,6 +35,10 @@ pub struct TransferOutcome {
     pub frames: u32,
     pub discontinuity: bool,
     pub activity: InputActivity,
+    /// Replacements already made by a native input adapter before conversion.
+    /// Report once even when this read has no available PCM; graph admission
+    /// combines this with any replacements it performs itself.
+    pub source_sample_faults: u64,
 }
 
 impl TransferOutcome {
@@ -44,6 +48,7 @@ impl TransferOutcome {
             frames,
             discontinuity: false,
             activity: InputActivity::Active,
+            source_sample_faults: 0,
         }
     }
 }
@@ -110,6 +115,9 @@ pub enum CycleError {
 #[derive(Debug, Default, Clone)]
 pub struct CycleTracker {
     previous: Option<ProcessCycle>,
+    /// Missing native timestamps do not erase the last observed host time. Frame
+    /// continuity still advances through every accepted cycle independently.
+    last_timestamp_ns: Option<u64>,
 }
 
 impl CycleTracker {
@@ -146,11 +154,14 @@ impl CycleTracker {
             {
                 return Err(CycleError::ClockDiscontinuity);
             }
-            if let (Some(now), Some(before)) = (cycle.monotonic_ns, previous.monotonic_ns)
+            if let (Some(now), Some(before)) = (cycle.monotonic_ns, self.last_timestamp_ns)
                 && now < before
             {
                 return Err(CycleError::TimestampRegressed);
             }
+        }
+        if cycle.discontinuity || cycle.monotonic_ns.is_some() {
+            self.last_timestamp_ns = cycle.monotonic_ns;
         }
         self.previous = Some(cycle);
         Ok(())
@@ -397,6 +408,55 @@ mod tests {
             tracker.accept(backwards, FORMAT),
             Err(CycleError::TimestampRegressed)
         );
+    }
+
+    #[test]
+    fn missing_timestamps_preserve_the_watermark_without_inventing_elapsed_time() {
+        let mut tracker = CycleTracker::default();
+        tracker.accept(cycle(1_000, 128), FORMAT).unwrap();
+        for first_frame in [1_128, 1_256] {
+            tracker
+                .accept(
+                    ProcessCycle {
+                        monotonic_ns: None,
+                        ..cycle(first_frame, 128)
+                    },
+                    FORMAT,
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            tracker.accept(
+                ProcessCycle {
+                    monotonic_ns: Some(999),
+                    ..cycle(1_384, 128)
+                },
+                FORMAT
+            ),
+            Err(CycleError::TimestampRegressed)
+        );
+        // Rejection consumes no frame position. Only native evidence is compared;
+        // no nominal-rate extrapolation of absent timestamps is fabricated.
+        tracker
+            .accept(
+                ProcessCycle {
+                    monotonic_ns: Some(1_001),
+                    ..cycle(1_384, 128)
+                },
+                FORMAT,
+            )
+            .unwrap();
+        tracker
+            .accept(
+                ProcessCycle {
+                    discontinuity: true,
+                    monotonic_ns: None,
+                    ..cycle(0, 128)
+                },
+                FORMAT,
+            )
+            .unwrap();
+        assert_eq!(tracker.accept(cycle(128, 128), FORMAT), Ok(()));
     }
 
     #[test]

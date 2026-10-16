@@ -104,7 +104,7 @@ bool mr_tap_description_supports_device_stream_selection(void) {
 }
 
 void *mr_tap_description_create(const char *bundle, const AudioObjectID *processes,
-    size_t count, const char *target_device_uid) {
+    size_t count, const char *target_device_uid, bool select_bundle, bool mute) {
     @autoreleasepool {
         NSMutableArray<NSNumber *> *ids = [NSMutableArray arrayWithCapacity:count];
         for (size_t index = 0; index < count; ++index) [ids addObject:@(processes[index])];
@@ -125,7 +125,7 @@ void *mr_tap_description_create(const char *bundle, const AudioObjectID *process
             description.mono = NO;
         } else {
             description = [[CATapDescription alloc] initStereoMixdownOfProcesses:ids];
-            if (mr_tap_description_supports_bundle_selection()) {
+            if (select_bundle && mr_tap_description_supports_bundle_selection()) {
                 [description setValue:@[[NSString stringWithUTF8String:bundle]] forKey:@"bundleIDs"];
             }
             if ([CATapDescription instancesRespondToSelector:NSSelectorFromString(@"setProcessRestoreEnabled:")]) {
@@ -139,7 +139,7 @@ void *mr_tap_description_create(const char *bundle, const AudioObjectID *process
         description.private = YES;
         // Preparation does not suppress output. Only a committed owner reading
         // this exact device/process tap suppresses its original playback.
-        description.muteBehavior = target_device_uid != NULL ? CATapMutedWhenTapped : CATapUnmuted;
+        description.muteBehavior = mute ? CATapMutedWhenTapped : CATapUnmuted;
         return (__bridge_retained void *)description;
     }
 }

@@ -34,6 +34,7 @@ use endpoint_backend::MacVirtualEndpointBackend;
 unsafe extern "C" {
     fn mr_engine_service_source_clock(token: u64, snapshot: *mut ApplicationClockSnapshot) -> bool;
     fn mr_engine_service_set_source_clock_master(token: u64, master: bool) -> bool;
+    fn mr_engine_service_take_source_faults(token: u64) -> u64;
     fn mr_engine_service_read_source_clocked(
         source_token: u64,
         interleaved_samples: *mut f32,
@@ -56,6 +57,10 @@ impl<'a> MacEngineExternalIo<'a> {
 }
 
 impl ExternalIo for MacEngineExternalIo<'_> {
+    fn source_epoch(&self, binding: &ExternalBinding) -> Option<u64> {
+        application_epoch(binding)
+    }
+
     fn begin_cycle(
         &mut self,
         _cycle: &ProcessCycle,
@@ -100,6 +105,14 @@ impl ExternalIo for MacEngineExternalIo<'_> {
     }
 }
 
+fn application_epoch(binding: &ExternalBinding) -> Option<u64> {
+    (binding.kind() == mixrelay_audio_graph::NodeKind::ApplicationCapture).then(|| {
+        application_clock(binding.node_id().as_str())
+            .filter(|clock| clock.running != 0)
+            .map_or(0, |clock| clock.epoch)
+    })
+}
+
 fn read_application(
     binding: &ExternalBinding,
     destination: &mut [f32],
@@ -115,7 +128,13 @@ fn read_application(
             cycle.sample_rate,
         )
     };
-    TransferOutcome::complete(available)
+    TransferOutcome {
+        // SAFETY: the graph owns this source consumer; this consumes only a fixed counter.
+        source_sample_faults: unsafe {
+            mr_engine_service_take_source_faults(source_token(binding.node_id().as_str()))
+        },
+        ..TransferOutcome::complete(available)
+    }
 }
 
 fn source_token(source_id: &str) -> u64 {

@@ -65,6 +65,11 @@ pub(super) unsafe extern "C" fn io_proc(
         session
             .captured
             .fetch_add(result.written as u64, Ordering::Relaxed);
+        if result.audible {
+            // The control watchdog needs only progress, not a coherent PCM snapshot.
+            // Ring overflow must not turn a live producer into apparent silence.
+            session.audible_callbacks.fetch_add(1, Ordering::Relaxed);
+        }
         // After the ring write and its counters: the pump rechecks published state.
         if let Some(wakeup) = session.wakeup.get() {
             wakeup.notify();
@@ -89,6 +94,14 @@ fn initialize(session: &TapSession, config: &TapConfig) -> Result<(), TapError> 
             return Err(TapError::code(9));
         }
     }
+    initialize_selected(session, selection, config.ring_capacity_frames)
+}
+
+fn initialize_selected(
+    session: &TapSession,
+    selection: native::Selection,
+    capacity: usize,
+) -> Result<(), TapError> {
     let description = native::Description::create(&selection)?;
     let _previous = session.selection.replace(Some(selection));
     description.tap(session)?;
@@ -99,7 +112,7 @@ fn initialize(session: &TapSession, config: &TapConfig) -> Result<(), TapError> 
     let rate = format.sample_rate;
     let channels = format.channels;
     session.format.set(format).map_err(|_| TapError::code(1))?;
-    let ring = mr_audio_ring_create(config.ring_capacity_frames, channels);
+    let ring = mr_audio_ring_create(capacity, channels);
     if ring.is_null() {
         return Err(TapError::code(6));
     }
@@ -136,6 +149,18 @@ unsafe fn create(config: &TapConfig) -> Result<*mut TapSession, TapError> {
             return Err(TapError::code(1));
         }
     }
+    let pointer = allocate_session()?;
+    // SAFETY: initialized owner remains stable through every native registration.
+    let session = unsafe { &*pointer };
+    if let Err(error) = initialize(session, config) {
+        // SAFETY: startup transfers its partial resource ownership to async cleanup.
+        unsafe { mr_process_tap_destroy(pointer) };
+        return Err(error);
+    }
+    Ok(pointer)
+}
+
+fn allocate_session() -> Result<*mut TapSession, TapError> {
     let retirement_queue = native::prepare_cleanup()?;
     // SAFETY: fresh global allocation for exactly one correctly aligned owner.
     let pointer = unsafe { alloc(Layout::new::<TapSession>()) }
@@ -160,8 +185,23 @@ unsafe fn create(config: &TapConfig) -> Result<*mut TapSession, TapError> {
         drop(unsafe { Box::from_raw(pointer) });
         return Err(TapError::code(9));
     }
-    if let Err(error) = initialize(session, config) {
-        // SAFETY: startup transfers its partial resource ownership to async cleanup.
+    Ok(pointer)
+}
+
+/// A diagnostic never suppresses playback or feeds an engine ring. Its small ring
+/// may overflow; independent callback observations still certify native audio.
+pub(super) fn create_diagnostic(
+    selection: &native::Selection,
+) -> Result<*mut TapSession, TapError> {
+    let pointer = allocate_session()?;
+    // SAFETY: allocation remains pinned through preparation and asynchronous retirement.
+    let session = unsafe { &*pointer };
+    let mut selection = selection.clone();
+    selection.mute = false;
+    let result =
+        initialize_selected(session, selection, 256).and_then(|()| session.start(&CoreAudio));
+    if let Err(error) = result {
+        // SAFETY: no diagnostic owner escaped; teardown retains all partial handles.
         unsafe { mr_process_tap_destroy(pointer) };
         return Err(error);
     }

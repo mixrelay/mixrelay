@@ -158,6 +158,7 @@ mod tests {
                 std::ptr::from_ref(device.native.pcm.as_ref())
                     .cast_mut()
                     .cast(),
+                super::super::ffi::PcmPhase::Prepare as u32,
             )
         });
     }

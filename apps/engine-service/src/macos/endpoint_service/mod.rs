@@ -99,3 +99,14 @@ pub unsafe extern "C" fn mr_engine_service_read_source_clocked(
         )
     })
 }
+
+/// Reports source normalization once even when its next PCM read is unavailable.
+#[unsafe(no_mangle)]
+pub extern "C" fn mr_engine_service_take_source_faults(token: u64) -> u64 {
+    SERVICE.get().map_or(0, |service| {
+        // SAFETY: SERVICE retains the registry; the graph consumes one atomic counter.
+        unsafe {
+            source::mr_engine_source_registry_take_source_faults(&raw const service.sources, token)
+        }
+    })
+}

@@ -14,6 +14,8 @@ _Static_assert(sizeof(MRPcmRingStats) == 40 && _Alignof(MRPcmRingStats) == 8, "P
 bool mr_pcm_ring_init(MRPcmRing *ring, uint32_t channels, uint32_t capacity);
 void mr_pcm_ring_clear(MRPcmRing *ring);
 uint32_t mr_pcm_ring_write(MRPcmRing *ring, const float *samples, uint32_t frames);
+/* Sole producer: publishes neutral PCM without reading an external buffer. */
+uint32_t mr_pcm_ring_write_silence(MRPcmRing *ring, uint32_t frames);
 uint32_t mr_pcm_ring_read(MRPcmRing *ring, float *samples, uint32_t frames);
 enum MRPcmSampleFormat {
     MR_PCM_FORMAT_FLOAT32 = 1, MR_PCM_FORMAT_SIGNED16 = 2,

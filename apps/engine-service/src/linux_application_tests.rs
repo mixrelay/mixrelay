@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(feature = "native-lab")]
 use mixrelay_test_support::tone_continuity::ToneContinuity;
 
 #[path = "linux_application_continuity_tests.rs"]
@@ -187,12 +188,15 @@ fn cancelled_capture_preparation_never_opens_or_publishes_native_owners() {
         Err(CapturePreparationError::Cancelled)
     ));
     assert!(wait_for_capture_format(&[], &AtomicBool::new(false)).is_ok());
+    let invalid = target("\0", 100, "app");
+    let mut entry = watch();
     assert!(matches!(
-        prepare(
-            &watch(),
-            &[&target("\0", 100, "app")],
-            &AtomicBool::new(false)
-        ),
+        prepare(&entry, &[&invalid], &AtomicBool::new(false)),
+        Err(CapturePreparationError::MissingPcmObservation)
+    ));
+    entry.first_pcm = observed_streams(&[&invalid]);
+    assert!(matches!(
+        prepare(&entry, &[&invalid], &AtomicBool::new(false)),
         Err(CapturePreparationError::Native(_))
     ));
 }
@@ -229,6 +233,17 @@ fn absent_stable_app_prepares_silence_without_native_stream_or_server() {
     assert_eq!(outcome.frames, 0);
     assert_eq!(outcome.activity, InputActivity::Unknown);
     assert_eq!(samples.map(f32::to_bits), [0; 8]);
+}
+
+#[test]
+fn missing_capture_observation_fails_before_opening_any_native_stream() {
+    let entry = watch();
+    let target = target("unobserved", 100, "org.test.player");
+    let result = prepare(&entry, &[&target], &AtomicBool::new(false));
+    assert!(matches!(
+        result,
+        Err(CapturePreparationError::MissingPcmObservation)
+    ));
 }
 
 #[test]
@@ -314,10 +329,12 @@ impl FixtureProcess {
                 .expect("owned application fixture"),
         )
     }
+    #[cfg(feature = "native-lab")]
     pub(crate) fn report(mut self) -> serde_json::Value {
         self.stop();
         serde_json::from_reader(self.0.stdout.take().unwrap()).unwrap()
     }
+    #[cfg(feature = "native-lab")]
     pub(crate) fn signal(&mut self, signal: i32) {
         assert!(self.0.try_wait().unwrap().is_none());
         let pid = i32::try_from(self.0.id()).unwrap();
@@ -350,6 +367,7 @@ impl Drop for FixtureProcess {
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn recover_until(
     captures: &mut CaptureSet,
     watch: &mut CaptureWatch,
@@ -408,7 +426,7 @@ fn recover_until(
 }
 
 #[test]
-#[ignore = "requires opt-in owned non-autoconnecting PipeWire application fixture"]
+#[cfg(feature = "native-lab")]
 fn native_application_stream_relaunch_recovers_pcm_without_graph_reapply() {
     let _driver = ObservedDriver::new();
     let path = std::path::PathBuf::from(
@@ -456,7 +474,7 @@ fn native_application_stream_relaunch_recovers_pcm_without_graph_reapply() {
 }
 
 #[test]
-#[ignore = "requires isolated PipeWire graph and owned rate-selectable application fixture"]
+#[cfg(feature = "native-lab")]
 fn native_pipewire_rate_conversion_and_observed_clock() {
     let driver = ObservedDriver::new();
     let path = std::path::PathBuf::from(std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap());
@@ -522,6 +540,7 @@ fn native_pipewire_rate_conversion_and_observed_clock() {
 
 // Keep exact received PCM and native counters even when the frequency assertion
 // fails. Evidence belongs to this test's explicitly owned private lab directory.
+#[cfg(feature = "native-lab")]
 fn record_conversion_pcm(
     samples: &[f32],
     empty_reads: u64,
@@ -551,13 +570,16 @@ fn record_conversion_pcm(
 
 /// The production graph owns an always-processing filter. Standalone tap tests
 /// need the same owner: a passive monitor is not itself the graph's clock driver.
+#[cfg(feature = "native-lab")]
 pub(crate) struct ObservedDriver {
     _driver: mixrelay_pipewire::GraphDriver<ClockObserver>,
     clock: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
+#[cfg(feature = "native-lab")]
 struct ClockObserver(std::sync::Arc<std::sync::atomic::AtomicU64>);
 
+#[cfg(feature = "native-lab")]
 impl mixrelay_pipewire::DriverProcess for ClockObserver {
     fn process(&mut self, cycle: &mixrelay_pipewire::DriverCycle) {
         self.0.store(
@@ -567,6 +589,7 @@ impl mixrelay_pipewire::DriverProcess for ClockObserver {
     }
 }
 
+#[cfg(feature = "native-lab")]
 impl ObservedDriver {
     pub(crate) fn new() -> Self {
         let clock = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));

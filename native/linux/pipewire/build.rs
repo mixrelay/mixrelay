@@ -3,9 +3,9 @@ fn main() {
         return;
     }
     let library = pkg_config::Config::new()
-        .atleast_version("0.3.65")
+        .atleast_version("1.2.0")
         .probe("libpipewire-0.3")
-        .expect("install the PipeWire development package (libpipewire-0.3-dev / pipewire)");
+        .expect("install PipeWire 1.2 or newer and its development package (libpipewire-0.3-dev / pipewire)");
     println!("cargo:rerun-if-env-changed=MIXRELAY_LAB_PROCESS_OBSERVER");
     let mut build = cc::Build::new();
     if std::env::var("MIXRELAY_LAB_PROCESS_OBSERVER").as_deref() == Ok("1") {

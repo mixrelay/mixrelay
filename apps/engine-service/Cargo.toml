@@ -11,6 +11,10 @@ build = "build.rs"
 [lints]
 workspace = true
 
+[features]
+# Explicit normal-user native lab; never enabled by default code checks.
+native-lab = []
+
 [dependencies]
 mixrelay-licensing = { path = "../../crates/licensing" }
 mixrelay-processor-state = { path = "../../crates/processor-state" }

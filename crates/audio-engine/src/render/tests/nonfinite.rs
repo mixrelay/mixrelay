@@ -106,6 +106,126 @@ fn external_block_report(
     (io.output, report.sample_faults)
 }
 
+struct NormalizedSource {
+    pcm: SampleIo,
+    frames: u32,
+    pending: u64,
+}
+
+impl ExternalIo for NormalizedSource {
+    fn read_source(
+        &mut self,
+        binding: &ExternalBinding,
+        destination: &mut [f32],
+        cycle: &ProcessCycle,
+    ) -> TransferOutcome {
+        let mut transfer = self.pcm.read_source(binding, destination, cycle);
+        transfer.frames = self.frames;
+        transfer.source_sample_faults = std::mem::take(&mut self.pending);
+        if self.frames < cycle.frames {
+            transfer.activity = mixrelay_audio_io::process::InputActivity::Priming;
+        }
+        transfer
+    }
+
+    fn write_sink(
+        &mut self,
+        binding: &ExternalBinding,
+        source: &[f32],
+        cycle: &ProcessCycle,
+    ) -> TransferOutcome {
+        self.pcm.write_sink(binding, source, cycle)
+    }
+}
+
+fn normalized_cycle(
+    processor: &mut BlockProcessor,
+    input: &mut NormalizedSource,
+    first_frame: u64,
+) -> ProcessReport {
+    let cycle = ProcessCycle {
+        clock: mixrelay_audio_io::process::ClockDomain {
+            authority: mixrelay_audio_io::session::ClockAuthority::Device,
+            id: 1,
+            epoch: 1,
+        },
+        frames: 4,
+        sample_rate: 48_000,
+        first_frame,
+        monotonic_ns: None,
+        discontinuity: false,
+    };
+    HEAP_OPERATIONS.with(|counter| counter.set(Some(0)));
+    let report = processor.process_external_cycle(cycle, input);
+    let operations = HEAP_OPERATIONS.with(|counter| counter.replace(None));
+    assert_eq!(operations, Some(0));
+    report.unwrap().unwrap()
+}
+
+#[test]
+fn upstream_and_graph_source_faults_combine_once_without_resetting_history() {
+    for config in stateful_configs() {
+        let mut processor = prepared(config.clone());
+        let mut reference = prepared(config);
+        let mut input = NormalizedSource {
+            pcm: SampleIo {
+                input: [0.25; 8],
+                output: [0.0; 8],
+            },
+            frames: 4,
+            pending: 0,
+        };
+        for block in 0..64_u64 {
+            let mut clean = [0.25; 8];
+            input.pcm.input = clean;
+            if block == 8 {
+                // Three native replacements already happened before SRC. A
+                // fourth invalid value reaches graph admission independently.
+                clean[..4].fill(0.0);
+                input.pcm.input = clean;
+                input.pcm.input[3] = f32::NAN;
+                input.pending = 3;
+            }
+            let expected = external_block(&mut reference, clean, block * 4);
+            let report = normalized_cycle(&mut processor, &mut input, block * 4);
+            assert_eq!(
+                input.pcm.output.map(f32::to_bits),
+                expected.map(f32::to_bits)
+            );
+            assert_eq!(
+                report.sample_faults.source_samples,
+                if block == 8 { 4 } else { 0 }
+            );
+            assert_eq!(report.sample_faults.blocks, u64::from(block == 8));
+            assert_eq!(report.discontinuities, 0);
+        }
+    }
+}
+
+#[test]
+fn normalized_faults_report_once_on_empty_and_partial_source_reads_and_saturate() {
+    for frames in [0, 2, 4] {
+        let mut processor = prepared(dynamics("compressor", false));
+        let mut input = NormalizedSource {
+            pcm: SampleIo {
+                input: [f32::NAN; 8],
+                output: [0.0; 8],
+            },
+            frames,
+            pending: u64::MAX,
+        };
+        let report = normalized_cycle(&mut processor, &mut input, 0);
+        assert_eq!(report.sample_faults.source_samples, u64::MAX);
+        assert_eq!(report.sample_faults.blocks, 1);
+        assert_eq!(report.discontinuities, 0);
+        assert!(input.pcm.output.iter().all(|sample| sample.is_finite()));
+        input.pcm.input.fill(0.25);
+        let report = normalized_cycle(&mut processor, &mut input, 4);
+        assert_eq!(report.sample_faults, SampleFaults::default());
+        assert_eq!(report.discontinuities, 0);
+    }
+}
+
 #[test]
 fn invalid_source_samples_match_zero_replacement_and_cannot_poison_effect_history() {
     let invalid = [

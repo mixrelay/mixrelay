@@ -6,6 +6,9 @@ use mixrelay_audio_graph::{ExecutionPlan, NodeConfig};
 
 use super::{BlockProcessor, DeviceBusBinding, DynamicsBinding, ExternalBinding, effects};
 
+mod path;
+pub(super) use path::InputPath;
+
 #[derive(Debug, Clone, Copy)]
 pub(super) enum State {
     Effect(usize),
@@ -24,7 +27,7 @@ impl State {
 #[derive(Debug)]
 pub(super) struct Binding {
     node_id: mixrelay_audio_graph::NodeId,
-    incoming_routes: Box<[mixrelay_audio_graph::CompiledEdge]>,
+    input_path: InputPath,
     pub(super) state: State,
 }
 
@@ -44,7 +47,7 @@ pub(super) fn bindings(
         )
         .map(|(node_id, state)| Binding {
             node_id: node_id.clone(),
-            incoming_routes: incoming_routes(execution, node_id),
+            input_path: InputPath::prepare(execution, node_id),
             state,
         })
         .collect();
@@ -56,6 +59,16 @@ pub(super) fn retain(current: &mut BlockProcessor, previous: &mut BlockProcessor
     if current.plan.format != previous.plan.format {
         return;
     }
+    for (index, binding) in current.plan.source_bindings.iter().enumerate() {
+        if let Some(previous_index) = previous
+            .plan
+            .source_bindings
+            .iter()
+            .position(|old| old == binding)
+        {
+            current.source_timelines[index] = previous.source_timelines[previous_index];
+        }
+    }
     for binding in &current.plan.history {
         let Ok(index) = previous
             .plan
@@ -65,7 +78,7 @@ pub(super) fn retain(current: &mut BlockProcessor, previous: &mut BlockProcessor
             continue;
         };
         let old = &previous.plan.history[index];
-        if binding.incoming_routes != old.incoming_routes {
+        if binding.input_path != old.input_path {
             continue;
         }
         match (binding.state, old.state) {
@@ -101,35 +114,6 @@ pub(super) fn retain(current: &mut BlockProcessor, previous: &mut BlockProcessor
             _ => {}
         }
     }
-}
-
-// Prepare history ownership off the audio thread. Parameter edits preserve history;
-// changing a feeding route (including upstream/sidechain routes) starts fresh history.
-fn incoming_routes(
-    execution: &ExecutionPlan,
-    target: &mixrelay_audio_graph::NodeId,
-) -> Box<[mixrelay_audio_graph::CompiledEdge]> {
-    let mut reached = std::collections::BTreeSet::from([target.clone()]);
-    let mut pending = vec![target.clone()];
-    while let Some(node) = pending.pop() {
-        for edge in execution
-            .edges()
-            .iter()
-            .filter(|edge| edge.destination().node_id == node)
-        {
-            if reached.insert(edge.source().node_id.clone()) {
-                pending.push(edge.source().node_id.clone());
-            }
-        }
-    }
-    let mut routes: Vec<_> = execution
-        .edges()
-        .iter()
-        .filter(|edge| reached.contains(&edge.destination().node_id))
-        .cloned()
-        .collect();
-    routes.sort_unstable_by(|left, right| left.id().cmp(right.id()));
-    routes.into_boxed_slice()
 }
 
 /// Only histories reachable from the restarted input belong to its invalidation scope.

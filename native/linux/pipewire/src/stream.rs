@@ -30,6 +30,7 @@ impl Drop for StreamOwner {
     }
 }
 
+mod capture_read;
 #[path = "stream/control.rs"]
 mod control;
 pub use control::{DescriptionChange, StreamProperties};
@@ -270,6 +271,7 @@ unsafe extern "C" {
     #[cfg(any(test, feature = "test-observation"))]
     fn mr_pw_stream_transfer_snapshot(stream: *mut c_void) -> NativeTransferSnapshot;
     fn mr_pw_stream_read(stream: *mut c_void, samples: *mut f32, frames: u32) -> u32;
+    fn mr_pw_stream_capture_failures(stream: *mut c_void) -> u64;
     fn mr_pw_stream_write(stream: *mut c_void, samples: *const f32, frames: u32) -> u32;
     fn mr_pw_stream_trigger_output(stream: *mut c_void) -> i32;
 }
@@ -303,6 +305,7 @@ pub struct NativeStream {
     allocation: Arc<NativeAllocation>,
     channels: usize,
     counters: NativeCounters,
+    capture_read: capture_read::CaptureRead,
     native_output: bool,
     sample_rate: u32,
     // PCM cursors/counter baselines still have exactly one movable Rust owner.
@@ -529,6 +532,7 @@ impl NativeStream {
             allocation: Arc::new(allocation),
             channels: usize::from(channels),
             counters: NativeCounters::default(),
+            capture_read: capture_read::CaptureRead::default(),
             native_output: role.native_output(),
             sample_rate: format.sample_rate,
             not_sync: PhantomData,
@@ -664,19 +668,52 @@ impl NativeStream {
 
     /// Reads complete interleaved frames; any unavailable block is silenced.
     pub fn read(&mut self, destination: &mut [f32]) -> u32 {
-        let frames = destination.len() / self.channels;
-        destination.fill(0.0);
-        let Ok(frames) = u32::try_from(frames) else {
-            return 0;
-        };
-        // SAFETY: the mutable slice holds at least frames * channels samples.
-        unsafe {
-            mr_pw_stream_read(
-                self.allocation.pointer.as_ptr(),
-                destination.as_mut_ptr(),
-                frames,
-            )
+        read_native_capture(&self.allocation, self.channels, destination)
+    }
+
+    /// Reads capture PCM and invalidates this source after newly observed native
+    /// ingress loss, even when queued valid PCM fills the entire request. This
+    /// conservative fault observation does not locate the missing packet inside
+    /// the queue, discard valid PCM, or advance the independent report baseline.
+    /// Non-finite samples are replaced before Rust source mixing and graph state;
+    /// external `PipeWire` conversion may already have happened before this boundary.
+    pub fn read_capture(
+        &mut self,
+        destination: &mut [f32],
+    ) -> mixrelay_audio_io::process::TransferOutcome {
+        let allocation = &self.allocation;
+        let channels = self.channels;
+        self.capture_read.prepare_read(|| {
+            // SAFETY: this exclusive input consumer retains the live owner.
+            // Discard advances only its cursor; the native producer is untouched.
+            unsafe { mr_pw_stream_discard_input(allocation.pointer.as_ptr()) };
+        });
+        self.capture_read.read(
+            destination,
+            channels,
+            || {
+                // SAFETY: this owner pins the stream. C reads the native input
+                // failure counter atomically, without borrowing callback IO.
+                unsafe { mr_pw_stream_capture_failures(allocation.pointer.as_ptr()) }
+            },
+            |samples| read_native_capture(allocation, channels, samples),
+        )
+    }
+
+    /// Completes one graph block for a canonical capture owner. Any read keeps
+    /// its queue intact for shared users; unused inputs discard OFF-period PCM.
+    /// The first resumed read also fences PCM queued after this block boundary.
+    /// Returns whether this canonical owner was read in the completed block.
+    pub fn finish_capture_block(&mut self) -> bool {
+        if self.native_output {
+            return false;
         }
+        let allocation = &self.allocation;
+        self.capture_read.finish_block(|| {
+            // SAFETY: the graph owns the only input consumer. Native discard is
+            // bounded and changes only that consumer's cursor, without control IO.
+            unsafe { mr_pw_stream_discard_input(allocation.pointer.as_ptr()) };
+        })
     }
 
     /// Writes one complete interleaved block, retaining unread PCM on overflow.
@@ -695,6 +732,27 @@ impl NativeStream {
         // SAFETY: this serialized DSP publisher retains the output allocation;
         // PipeWire's RT-safe trigger only releases its scheduling dependency.
         unsafe { mr_pw_stream_trigger_output(self.allocation.pointer.as_ptr()) };
+    }
+}
+
+fn read_native_capture(
+    allocation: &NativeAllocation,
+    channels: usize,
+    destination: &mut [f32],
+) -> u32 {
+    let frames = destination.len() / channels;
+    destination.fill(0.0);
+    let Ok(frames) = u32::try_from(frames) else {
+        return 0;
+    };
+    // SAFETY: callers retain the stream's exclusive PCM consumer. The mutable
+    // slice holds at least frames * channels samples and the native copy is bounded.
+    unsafe {
+        mr_pw_stream_read(
+            allocation.pointer.as_ptr(),
+            destination.as_mut_ptr(),
+            frames,
+        )
     }
 }
 
@@ -900,7 +958,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires owned isolated PipeWire graph; never run against a user session"]
+    #[cfg(feature = "native-lab")]
     fn native_property_transaction_pins_stream_until_final_control_release() {
         use std::time::{Duration, Instant};
 

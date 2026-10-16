@@ -148,7 +148,6 @@ struct Statistics {
 struct Scratch {
     samples: Box<[f32]>,
     sent: u32,
-    previous_frames: u32,
     sequence: Sequence,
     clock_breaks: Option<u64>,
 }
@@ -190,23 +189,16 @@ impl Probe {
     }
 
     fn input(&self, scratch: &mut Scratch, frames: u32) -> bool {
-        let previous = scratch.previous_frames;
-        scratch.previous_frames = frames;
-        // The hook precedes native transfer. Only the first callback has no
-        // preceding admitted block; later reads must consume that entire block.
-        if previous == 0 {
-            return true;
-        }
         // SAFETY: this callback is the input native ring's sole consumer. The
-        // previous native transfer converted precisely this admitted quantum.
+        // Captured stage follows this callback's admitted native transfer.
         let read = unsafe {
-            ffi::mr_device_io_bridge_read(self.pointer, scratch.samples.as_mut_ptr(), previous)
+            ffi::mr_device_io_bridge_read(self.pointer, scratch.samples.as_mut_ptr(), frames)
         };
-        if read != previous {
+        if read != frames {
             self.statistics.faults.fetch_or(4, Ordering::Release);
             return false;
         }
-        let samples = &scratch.samples[..previous as usize * usize::from(self.channels)];
+        let samples = &scratch.samples[..frames as usize * usize::from(self.channels)];
         match scratch.sequence.check(samples, self.channels, PRIMING) {
             Ok(checked) => {
                 if scratch.sequence.next.is_some_and(|next| {
@@ -240,12 +232,21 @@ impl Probe {
     }
 }
 
-unsafe extern "C" fn callback(context: *mut c_void) -> bool {
+unsafe extern "C" fn callback(context: *mut c_void, phase: u32) -> bool {
+    let Some(phase) = ffi::PcmPhase::from_raw(phase) else {
+        return false;
+    };
     // SAFETY: Client retains this stable Box until Native destroys and drains
     // the registration, including unwind. CoreAudio serializes this IOProc;
     // only it borrows scratch, while control reads separate atomic statistics.
     let probe = unsafe { &*context.cast::<Probe>() };
     if probe.statistics.faults.load(Ordering::Acquire) != 0 {
+        return false;
+    }
+    if probe.input && phase == ffi::PcmPhase::Prepare {
+        return true;
+    }
+    if !probe.input && phase != ffi::PcmPhase::Prepare {
         return false;
     }
     // SAFETY: retained Native; quantum is an atomic set after actual ASBD buffer
@@ -314,7 +315,6 @@ impl Client {
             scratch: UnsafeCell::new(Scratch {
                 samples: vec![0.0; MAX_FRAMES * usize::from(spec.channels)].into_boxed_slice(),
                 sent: 0,
-                previous_frames: 0,
                 sequence: Sequence {
                     looping,
                     ..Sequence::default()

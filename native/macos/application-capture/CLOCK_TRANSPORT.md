@@ -1,8 +1,8 @@
-# Application source clock transport v3
+# Application source clock transport v4
 
 This transport is private to the desktop process-tap pump and engine service.
 Both processes use the current shared-buffer ABI and the required XPC
-`source_transport_version: 3` contract. Missing or different versions are
+`source_transport_version: 4` contract. Missing or different versions are
 rejected before an attachment or producer lease is granted. There is no raw-frame
 or previous-protocol mode. `native/macos/common/source_control.rs` owns the codec.
 
@@ -10,6 +10,14 @@ or previous-protocol mode. `native/macos/common/source_control.rs` owns the code
 length rounded up to a 64-byte boundary. Both sides validate the complete mapped
 length, alignment, magic, exact version/header length and lock-free atomics before
 use. The trailer contains integers and atomics only, never local pointers.
+
+The pump replaces NaN/Inf with zero before its stateful SRC and preserves every
+finite input bit. Replacements reach the graph's `sampleFaults.sourceSamples`
+through a fixed counter in the clock trailer, independently of PCM availability.
+Producer claims validate the actual lease and epoch before publishing counts;
+temporary contention retains them on the producer. Reset flushes the prior
+current epoch's counts before advancing. One graph drain consumes each pending
+count, and graph/status lifetime totals saturate.
 
 Ownership:
 

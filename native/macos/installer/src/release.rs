@@ -427,7 +427,7 @@ impl ReleasePayloadVerifier {
             LaunchdConfiguration::validate_installed(&launchd, &self.account)?
         };
         self.verify_runtime_with(sources, is_template, &mut signature)?;
-        let (app, plist) = (sources.remover(), sources.removal_launchd());
+        let app = sources.remover();
         signature(
             app,
             &self.team.requirement("io.mixrelay.driver.uninstaller"),
@@ -443,12 +443,12 @@ impl ReleasePayloadVerifier {
             &mut signature,
         )?;
         #[cfg(target_os = "macos")]
-        crate::removal::verify_removal_launchd(plist, &self.team).map_err(|error| {
-            ReleaseError::Io {
-                path: plist.to_path_buf(),
+        crate::removal::verify_removal_launchd(sources.removal_launchd(), &self.team).map_err(
+            |error| ReleaseError::Io {
+                path: sources.removal_launchd().to_path_buf(),
                 source: std::io::Error::other(error.to_string()),
-            }
-        })?;
+            },
+        )?;
         for (bundle, identifier, executable, role) in [
             (
                 sources.app(),

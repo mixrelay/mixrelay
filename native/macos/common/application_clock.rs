@@ -7,8 +7,8 @@ use std::{
     sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
 
-pub const VERSION: u32 = 3;
-const HEADER_BYTES: u32 = 152;
+pub const VERSION: u32 = 4;
+const HEADER_BYTES: u32 = 160;
 const _: () = assert!(size_of::<ApplicationClock>() == HEADER_BYTES as usize);
 const MAGIC: u64 = 0x4d52_4150_5043_4c4b;
 pub const FRAME_MASK: u64 = 0x0000_ffff_ffff_ffff;
@@ -41,6 +41,8 @@ pub struct ApplicationClock {
     pub overwrite_skips: AtomicU64,
     pub consumer_burst_frames: AtomicU32,
     pub insufficient_headroom: AtomicU32,
+    /// Producer-normalized source samples awaiting one graph-side report.
+    pub source_sample_faults: mixrelay_audio_io::pcm::SampleFaultCounter,
 }
 
 fn offset(capacity: u32, channels: u32) -> Option<usize> {
@@ -142,6 +144,7 @@ pub unsafe extern "C" fn mr_application_clock_initialize(
             overwrite_skips: AtomicU64::new(0),
             consumer_burst_frames: AtomicU32::new(0),
             insufficient_headroom: AtomicU32::new(0),
+            source_sample_faults: mixrelay_audio_io::pcm::SampleFaultCounter::default(),
         });
     }
     clock
@@ -252,8 +255,8 @@ mod tests {
     }
 
     #[test]
-    fn v3_layout_rejects_v2_and_invalid_geometry_without_touching_pcm() {
-        assert_eq!(size_of::<ApplicationClock>(), 152);
+    fn current_layout_rejects_retired_versions_and_invalid_geometry_without_touching_pcm() {
+        assert_eq!(size_of::<ApplicationClock>(), 160);
         assert_eq!(
             std::mem::offset_of!(ApplicationClock, target_backlog_frames),
             96

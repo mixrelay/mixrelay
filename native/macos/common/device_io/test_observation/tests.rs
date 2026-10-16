@@ -51,6 +51,21 @@ fn removal_fires_listeners_and_return_reregisters_on_the_new_object() {
         hal.unplug("io.mixrelay.test.device");
         // The removal listener invalidates the registration before any poll.
         assert!(invalid(io));
+        // An absent input buffer still lets the next callback publish its
+        // registration-local notification through the stable graph-facing latch.
+        let allocated = allocation_counter::measure(|| {
+            super::super::mr_device_io_process(
+                first,
+                ptr::null(),
+                ptr::null(),
+                ptr::null(),
+                ptr::null_mut(),
+                ptr::null(),
+                io.cast(),
+            );
+        });
+        assert_eq!(allocated.count_total, 0);
+        assert!(super::super::mr_device_io_invalid(io));
         assert!(!alive(&hal, io));
         assert_eq!(hal.stream(io), None);
         assert_eq!(connect_status(&hal, io, 0), -1, "registration not drained");
@@ -61,6 +76,7 @@ fn removal_fires_listeners_and_return_reregisters_on_the_new_object() {
         assert_eq!(hal.replug("io.mixrelay.test.device"), Some(DEFAULT_BUFFER));
         assert_eq!(connect_status(&hal, io, 0), 0);
         assert!(!invalid(io), "the new registration owns a fresh latch");
+        assert!(!super::super::mr_device_io_invalid(io));
         let second = clock_device(&hal, io);
         assert!(second != 0 && second != first, "stale object reused");
         assert_eq!(

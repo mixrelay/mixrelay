@@ -1,7 +1,11 @@
 use super::super::*;
+#[cfg(feature = "native-lab")]
 use super::observed_endpoint_rate;
+#[cfg(feature = "native-lab")]
 use mixrelay_audio_graph::NodeConfig;
+#[cfg(feature = "native-lab")]
 use mixrelay_control_server::ControlBackend;
+#[cfg(feature = "native-lab")]
 use mixrelay_engine_service::default_duplex_document;
 
 #[test]
@@ -19,7 +23,7 @@ fn initial_graph_and_native_inventory_are_empty_until_catalog_apply() {
 }
 
 #[test]
-#[ignore = "requires owned isolated PipeWire daemon; never run against a user session"]
+#[cfg(feature = "native-lab")]
 fn native_pipewire_live_session_format_transaction() {
     let initial_document = GraphDocument::new(1, Vec::new(), Vec::new());
     let backend = LinuxVirtualEndpointBackend::new();
@@ -87,6 +91,7 @@ fn native_pipewire_live_session_format_transaction() {
     drop(fixture);
 }
 
+#[cfg(feature = "native-lab")]
 fn assert_invalid_format_keeps_graph(
     controller: &EngineGraphController,
     exchange: &ProcessorExchange,
@@ -108,6 +113,7 @@ fn assert_invalid_format_keeps_graph(
     assert_eq!(exchange.revisions().active, revision);
 }
 
+#[cfg(feature = "native-lab")]
 fn activate_format(
     controller: &EngineGraphController,
     exchange: &ProcessorExchange,
@@ -133,6 +139,7 @@ fn activate_format(
     response.revision
 }
 
+#[cfg(feature = "native-lab")]
 fn observed_quantums() -> std::collections::BTreeSet<(u64, u64)> {
     let mut result = std::collections::BTreeSet::new();
     for _ in 0..100 {
@@ -145,6 +152,7 @@ fn observed_quantums() -> std::collections::BTreeSet<(u64, u64)> {
     result
 }
 
+#[cfg(feature = "native-lab")]
 fn attach_fixture(
     document: &mut mixrelay_audio_graph::GraphDocument,
 ) -> applications::tests::FixtureProcess {
@@ -180,6 +188,7 @@ fn attach_fixture(
     fixture
 }
 
+#[cfg(feature = "native-lab")]
 fn wait_for_audio(controller: &EngineGraphController, exchange: &ProcessorExchange, revision: u64) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {

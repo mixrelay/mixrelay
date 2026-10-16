@@ -19,7 +19,9 @@ _Static_assert(sizeof(MRIOTimeStamp) == 32 && sizeof(MRIOTiming) == 96
     "Rust callback timing ABI");
 /* Borrowed for this call only. Validity flags are CoreAudio sample/host/rate bits. */
 typedef bool (*MRRenderHook)(void *, const void *, void *, uint32_t, const MRIOTiming *);
-typedef bool (*MRPcmHook)(void *);
+enum { MRPcmPrepare = 0, MRPcmCaptured = 1 };
+/* Prepare admits native PCM; Captured converts newly admitted input in this callback. */
+typedef bool (*MRPcmHook)(void *, uint32_t phase);
 void mr_device_io_render_hook(MRDeviceIO *io, void *context, MRRenderHook hook);
 void mr_device_io_pcm_hook(MRDeviceIO *io, void *context, MRPcmHook hook);
 bool mr_device_io_direct_binding(MRDeviceIO *io, uint32_t *device, uint32_t *offset, uint32_t *total);
@@ -49,6 +51,9 @@ uint32_t mr_device_buffer_size(uint32_t device);
 bool mr_device_io_disconnect(MRDeviceIO *io);
 bool mr_device_io_destroy(MRDeviceIO *io);
 bool mr_device_io_alive(MRDeviceIO *io); /* control-only property queries */
+/* Atomic callback-observed invalidation, no property IPC. NULL is invalid.
+ * Listener-only notifications are visible after the next callback observes them. */
+bool mr_device_io_invalid(MRDeviceIO *io);
 uint64_t mr_device_io_ticks(MRDeviceIO *io);
 /* The connect/liveness owner alone queries rate; frame progress is atomic. */
 uint32_t mr_device_io_native_rate(MRDeviceIO *io);
@@ -86,9 +91,11 @@ void mr_device_io_bridge_discard(MRDeviceIO *io);
 typedef struct MRDeviceGraphRead {
     uint32_t frames;
     bool initial_epoch;
+    bool discontinuity;
 } MRDeviceGraphRead;
 _Static_assert(sizeof(MRDeviceGraphRead) == 8, "Rust graph read ABI");
 /* Actual valid frames; initial_epoch is true only for first consumer admission.
+ * discontinuity identifies a changed admitted PCM epoch, even on an empty read.
  * Recovery epochs and subsequent shortages are not startup. */
 /* host is the graph cycle's host time in ticks, shared by all of its transfers. */
 MRDeviceGraphRead mr_device_io_graph_read(MRDeviceIO *io, float *samples, uint32_t frames, uint64_t epoch,

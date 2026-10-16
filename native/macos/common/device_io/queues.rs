@@ -2,7 +2,7 @@ use super::{DeviceIo, MAX_FRAMES};
 use mixrelay_pcm_ring::{mr_pcm_ring_discard, mr_pcm_ring_read_available, mr_pcm_ring_write};
 use std::{
     ptr,
-    sync::atomic::Ordering::{Relaxed, Release},
+    sync::atomic::Ordering::{Acquire, Relaxed, Release},
 };
 
 /// Actual graph-input transfer and one-time admission of its consumer timeline.
@@ -14,6 +14,9 @@ pub struct GraphRead {
     /// True only for the first nonempty read request of this native owner.
     /// Subsequent shortages and recovery epochs are not initial admission.
     pub initial_epoch: bool,
+    /// A previously admitted input changed its PCM epoch. Even an empty first
+    /// read after recovery must reset downstream state before fresh audio flows.
+    pub discontinuity: bool,
 }
 
 const _: () = assert!(size_of::<GraphRead>() == 8 && align_of::<GraphRead>() == 4);
@@ -27,7 +30,11 @@ pub(super) unsafe fn graph_read(
     epoch: u64,
     host: u64,
 ) -> GraphRead {
-    if !io.selection.input || frames == 0 || frames > MAX_FRAMES {
+    if io.progress.invalid.load(Acquire)
+        || !io.selection.input
+        || frames == 0
+        || frames > MAX_FRAMES
+    {
         return GraphRead::default();
     }
     graph_progress(io, frames);
@@ -35,6 +42,7 @@ pub(super) unsafe fn graph_read(
     // SAFETY: only the serialized graph consumer accesses this private epoch cell.
     let previous = unsafe { &mut *io.graph_epoch.get() };
     let initial_epoch = previous.is_none();
+    let discontinuity = previous.is_some_and(|previous| previous != epoch);
     if *previous != Some(epoch) {
         // SAFETY: discard changes only this graph consumer's cursor.
         unsafe { mr_pcm_ring_discard(ring) };
@@ -51,6 +59,7 @@ pub(super) unsafe fn graph_read(
     GraphRead {
         frames,
         initial_epoch,
+        discontinuity,
     }
 }
 
@@ -61,7 +70,7 @@ pub(super) unsafe fn graph_write(
     frames: u32,
     host: u64,
 ) -> u32 {
-    if io.selection.input || frames > MAX_FRAMES {
+    if io.progress.invalid.load(Acquire) || io.selection.input || frames > MAX_FRAMES {
         return 0;
     }
     graph_progress(io, frames);

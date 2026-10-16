@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+# Explicit private normal-user lab, excluded from default tests.
+native-lab = []
+
 [lints]
 workspace = true
 

@@ -1,3 +1,4 @@
+#![cfg(feature = "native-lab")]
 use super::*;
 use mixrelay_audio_graph::ChannelRoute;
 
@@ -155,7 +156,6 @@ fn assert_native_settings(channels: u16, name: &str) {
 }
 
 #[test]
-#[ignore = "requires owned isolated PipeWire graph, native device fixture and private catalog"]
 fn native_endpoint_name_width_restore_keeps_independent_pcm() {
     let _driver_devices = DriverFixture::new();
     let session = Session::new();

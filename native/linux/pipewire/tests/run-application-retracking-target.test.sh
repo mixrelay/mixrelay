@@ -153,12 +153,12 @@ check_driver_dispatch() (
     test_profile_args=(--release)
     lab="$workspace/target/native-tests/driver-dispatch-test"
     cargo() {
-        [[ "$*" == 'test --locked --release -p mixrelay-linux-driver --lib -- --list' ]] ||
+        [[ "$*" == 'test --locked --features native-lab --release -p mixrelay-linux-driver --lib -- --list' ]] ||
             fail 'native Driver listing dispatched to the wrong Cargo target'
         [[ -z "$listing" ]] || printf '%s: test\n' "$listing"
     }
     eval "$(sed -n '/^elif .*native_driver_/,/^elif .*native_linux_service_/p' "$fixture/run-application-retracking.sh" | sed '1d;$d')"
-    [[ "${test_command[*]}" == "env MIXRELAY_LAB_APPLICATION_FIXTURE=$lab/application-fixture cargo test --locked --release -p mixrelay-linux-driver --lib $listing -- --ignored --exact --nocapture --test-threads=1" ]] ||
+    [[ "${test_command[*]}" == "env MIXRELAY_LAB_APPLICATION_FIXTURE=$lab/application-fixture cargo test --locked --features native-lab --release -p mixrelay-linux-driver --lib $listing -- --exact --nocapture --test-threads=1" ]] ||
         fail 'native Driver command lost exact native test/profile/fixture selection'
 )
 for driver_test in native_driver_32_64_exact_formats_and_explicit_removal \

@@ -6,7 +6,8 @@ pub use ffi::{
     TransportError, TransportErrorCode, mr_application_source_transport_attach,
     mr_application_source_transport_clock, mr_application_source_transport_connect,
     mr_application_source_transport_destroy, mr_application_source_transport_publish_measurements,
-    mr_application_source_transport_publish_native, mr_application_source_transport_reset,
+    mr_application_source_transport_publish_native,
+    mr_application_source_transport_record_source_faults, mr_application_source_transport_reset,
     mr_application_source_transport_write,
 };
 
@@ -54,6 +55,8 @@ pub struct SourceTransport {
     next_frame: u64,
     owned_epoch: u64,
     owned_lease: u64,
+    /// Retained across transient producer-guard contention, scoped to `owned_epoch`.
+    pending_source_faults: u64,
 }
 
 struct ProducerClaim<'a>(&'a ApplicationClock);
@@ -128,6 +131,7 @@ impl SourceTransport {
         if !self.owns_stream() || clock.format_word.load(Ordering::Acquire) != format {
             return false;
         }
+        flush_source_faults(clock, &mut self.pending_source_faults);
         clock.acknowledged_format.store(0, Ordering::Release);
         clock.native_running.store(0, Ordering::Release);
         // SAFETY: the claim excludes registry replacement and all other producers.
@@ -196,6 +200,7 @@ impl SourceTransport {
         {
             return false;
         }
+        flush_source_faults(clock, &mut self.pending_source_faults);
         // SAFETY: the FFI facade validated the frame extent. This claim is the
         // sole producer; input is borrowed and disjoint from the owned mapping.
         let written = unsafe {
@@ -212,12 +217,34 @@ impl SourceTransport {
         }
         written
     }
+
+    fn record_source_faults(&mut self, epoch: u64, count: u64) -> bool {
+        if epoch != self.owned_epoch || !self.owns_stream() {
+            return false;
+        }
+        self.pending_source_faults = self.pending_source_faults.saturating_add(count);
+        let clock = self.mapping.clock();
+        if let Some(_claim) = ProducerClaim::acquire(clock)
+            && self.owns_stream()
+        {
+            flush_source_faults(clock, &mut self.pending_source_faults);
+        }
+        true
+    }
+}
+
+/// Caller holds the producer claim and has validated its actual lease/epoch.
+fn flush_source_faults(clock: &ApplicationClock, pending: &mut u64) {
+    clock.source_sample_faults.record(std::mem::take(pending));
 }
 
 impl Drop for SourceTransport {
     fn drop(&mut self) {
         let clock = self.mapping.clock();
         let claim = ProducerClaim::acquire(clock);
+        if claim.is_some() && self.owns_stream() {
+            flush_source_faults(clock, &mut self.pending_source_faults);
+        }
         // The sole pump drains its writes/resets before Drop. Leases are unique
         // and never reused, so this CAS publishes closure only for our grant.
         // It works even if a remote grant holds the guard and then fails without

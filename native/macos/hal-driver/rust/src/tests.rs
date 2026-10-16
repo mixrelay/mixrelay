@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use crate::abi::{
-    CONFIG_ACTION, Geometry, HostOps, INVALID, NATIVE_ERROR, NOT_FOUND, NativeOps, OK, Timestamp,
+    CAPACITY, CONFIG_ACTION, Geometry, HostOps, INVALID, NATIVE_ERROR, NOT_FOUND, NativeOps, OK,
+    Timestamp,
 };
 use crate::device::lock;
 use crate::registry::{IoOperation, Registry};
@@ -732,6 +733,111 @@ fn reconnect_retains_live_clock_and_native_rate_failure_is_atomic() {
     assert!(fixture.registry.timestamp(id, 200, &mut timestamp));
     assert_eq!(timestamp.sample_time, 192_000);
     assert!(fixture.registry.snapshot(id).unwrap().running);
+}
+
+#[test]
+fn failed_integer_pcm_preparation_reclaims_partial_buffers() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    for stream in [id + 1, id + 2] {
+        assert_eq!(
+            fixture
+                .registry
+                .set_format(stream, 96_000, mixrelay_pcm_ring::SampleFormat::Signed24),
+            OK
+        );
+    }
+    let device = fixture.registry.pin(id).unwrap();
+    let control = lock(&device.control);
+    let pending = control.pending.as_ref().unwrap();
+    for failed in 0..2 {
+        let mut attempted = 0;
+        let allocation = allocation_counter::measure(|| {
+            let result = device.prepare_scratch_with(pending, |samples| {
+                let reservation = attempted;
+                attempted += 1;
+                mixrelay_audio_io::pcm_buffer::zeroed(if reservation == failed {
+                    usize::MAX
+                } else {
+                    samples
+                })
+            });
+            assert!(result.is_err());
+        });
+        assert_eq!(attempted, failed + 1);
+        assert_eq!((allocation.count_current, allocation.bytes_current), (0, 0));
+    }
+}
+
+#[test]
+fn failed_pcm_reservation_preserves_live_format_mapping_clock_and_audio() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    assert_eq!(fixture.registry.client(id, 4, true), OK);
+    assert_eq!(fixture.registry.start(id, 4, 100), OK);
+    for stream in [id + 1, id + 2] {
+        assert_eq!(
+            fixture
+                .registry
+                .set_format(stream, 96_000, mixrelay_pcm_ring::SampleFormat::Signed24),
+            OK
+        );
+    }
+    fixture
+        .registry
+        .upsert([1; 16], "Replacement", 96_000, (fixture.fd(1, 4, 4), 24))
+        .unwrap();
+    let (_, generation) = fixture.pending();
+    let mut before = Timestamp::default();
+    assert!(fixture.registry.timestamp(id, 200, &mut before));
+    assert_eq!(
+        fixture
+            .registry
+            .perform_with_scratch(id, CONFIG_ACTION, generation, |device, pending| {
+                device.prepare_scratch_with(pending, |_| {
+                    mixrelay_audio_io::pcm_buffer::zeroed(usize::MAX)
+                })
+            }),
+        CAPACITY
+    );
+    let snapshot = fixture.registry.snapshot(id).unwrap();
+    assert_eq!(
+        (
+            snapshot.sample_rate,
+            snapshot.render_channels,
+            snapshot.capture_channels
+        ),
+        (48_000, 2, 2)
+    );
+    assert_eq!(
+        snapshot.capture_format,
+        mixrelay_pcm_ring::SampleFormat::Float32 as u32
+    );
+    assert_eq!(
+        snapshot.render_format,
+        mixrelay_pcm_ring::SampleFormat::Float32 as u32
+    );
+    assert!(snapshot.running);
+    assert!(fixture.registry.attachment_failed([1; 16]));
+    assert_eq!(REPLACEMENTS.load(Ordering::SeqCst), 0);
+    let mut after = Timestamp::default();
+    assert!(fixture.registry.timestamp(id, 300, &mut after));
+    assert_eq!(before.seed, after.seed);
+    for render in [true, false] {
+        let mut samples = if render { [0.25_f32; 4] } else { [0.0; 4] };
+        // SAFETY: the unchanged active format owns two complete Float32 stereo frames.
+        assert!(unsafe {
+            fixture.registry.io(IoOperation {
+                device: id,
+                stream: id + if render { 2 } else { 1 },
+                render,
+                frame: 0,
+                samples: samples.as_mut_ptr().cast(),
+                frames: 2,
+            })
+        });
+        assert_eq!(samples.map(f32::to_bits), [0.25_f32; 4].map(f32::to_bits));
+    }
 }
 
 #[test]

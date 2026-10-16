@@ -3,7 +3,7 @@ use super::WorkerContext;
 use super::metrics::ResetCause;
 #[cfg(test)]
 mod tests;
-use crate::macos_devices::{bridge::DeviceBridge, ffi};
+use crate::macos_devices::{bridge::DeviceBridge, ffi, ffi::PcmPhase};
 use std::{
     cell::UnsafeCell,
     ffi::c_void,
@@ -46,14 +46,20 @@ struct State<'a> {
     bridge: DeviceBridge,
     generation: u64,
     output_started: bool,
+    capture_prepared: bool,
+    preparation_work: Duration,
 }
 
 impl State<'_> {
-    fn cycle(&mut self) -> Result<bool, mixrelay_audio_io::clock_bridge::BridgeError> {
+    fn configured(&self) -> bool {
+        self.bridge.graph_rate == self.context.graph_rate.load(Ordering::Acquire)
+            && self.bridge.clock_aligned == self.context.clock_aligned.load(Ordering::Acquire)
+    }
+
+    fn prepare(&mut self) -> Result<bool, mixrelay_audio_io::clock_bridge::BridgeError> {
         let context = self.context;
-        if self.bridge.graph_rate != context.graph_rate.load(Ordering::Acquire)
-            || self.bridge.clock_aligned != context.clock_aligned.load(Ordering::Acquire)
-        {
+        self.capture_prepared = false;
+        if !self.configured() {
             context.ready_rate.store(0, Ordering::Release);
             return Ok(false);
         }
@@ -94,6 +100,43 @@ impl State<'_> {
             self.output_started = false;
             return Ok(false);
         }
+        if context.input {
+            self.capture_prepared = true;
+            return Ok(true);
+        }
+        self.transfer()
+    }
+
+    fn captured(&mut self) -> Result<bool, mixrelay_audio_io::clock_bridge::BridgeError> {
+        if !self.context.input {
+            return Err(mixrelay_audio_io::clock_bridge::BridgeError::InvalidConfig);
+        }
+        if !std::mem::take(&mut self.capture_prepared) {
+            // Control may have replaced this converter between native stages.
+            // Its new owner never admitted the previous format's capture packet.
+            self.invalidate();
+            return Ok(false);
+        }
+        self.transfer()
+    }
+
+    fn invalidate(&mut self) {
+        self.bridge.restart(self.context);
+        self.context
+            .epoch
+            .store(self.bridge.epoch, Ordering::Release);
+        self.context.ready_rate.store(0, Ordering::Release);
+        self.capture_prepared = false;
+        self.output_started = false;
+    }
+
+    fn transfer(&mut self) -> Result<bool, mixrelay_audio_io::clock_bridge::BridgeError> {
+        if !self.configured() {
+            self.invalidate();
+            return Ok(false);
+        }
+        let context = self.context;
+        let pointer = context.native.pointer.as_ptr();
         self.bridge.observe(context, true)?;
         self.bridge.pump(context)?;
         let (pending, _) = self.bridge.feedback_occupancy(context);
@@ -141,6 +184,8 @@ impl<'a> CallbackBridge<'a> {
                 bridge,
                 generation: context.native.render.generation.load(Ordering::Acquire),
                 output_started: false,
+                capture_prepared: false,
+                preparation_work: Duration::ZERO,
             })),
         };
         result.slot.fault.store(0, Ordering::Release);
@@ -161,6 +206,8 @@ impl<'a> CallbackBridge<'a> {
         state.context.native.pcm_metrics.reset(ResetCause::Format);
         state.bridge = bridge;
         state.output_started = false;
+        state.capture_prepared = false;
+        state.preparation_work = Duration::ZERO;
         self.publish();
     }
 }
@@ -172,7 +219,13 @@ impl Drop for CallbackBridge<'_> {
 }
 
 /// Called by the retained native registration, never by the control owner.
-pub(in crate::macos_devices) unsafe extern "C" fn dispatch(context: *mut c_void) -> bool {
+pub(in crate::macos_devices) unsafe extern "C" fn dispatch(
+    context: *mut c_void,
+    phase: u32,
+) -> bool {
+    let Some(phase) = PcmPhase::from_raw(phase) else {
+        return false;
+    };
     // SAFETY: Native pins this slot until after native unregister acknowledges drain.
     let slot = unsafe { &*context.cast::<PcmSlot>() };
     slot.readers.fetch_add(1, Ordering::SeqCst);
@@ -189,7 +242,14 @@ pub(in crate::macos_devices) unsafe extern "C" fn dispatch(context: *mut c_void)
         // The rendering token grants the only mutable borrow; control drains first.
         let state = unsafe { &mut *state.cast::<State<'_>>() };
         let started = Instant::now();
-        match state.cycle() {
+        if phase == PcmPhase::Prepare {
+            state.preparation_work = Duration::ZERO;
+        }
+        let result = match phase {
+            PcmPhase::Prepare => state.prepare(),
+            PcmPhase::Captured => state.captured(),
+        };
+        match result {
             Ok(active) => admitted = active,
             Err(error) => {
                 use mixrelay_audio_io::clock_bridge::BridgeError;
@@ -200,6 +260,9 @@ pub(in crate::macos_devices) unsafe extern "C" fn dispatch(context: *mut c_void)
                     BridgeError::InvalidFeedback => 4,
                     BridgeError::Resampler => 5,
                 };
+                // A failed post-capture conversion must withdraw old graph PCM
+                // and discard remaining native input before any future admission.
+                state.invalidate();
                 slot.fault.store(code, Ordering::Release);
             }
         }
@@ -212,14 +275,21 @@ pub(in crate::macos_devices) unsafe extern "C" fn dispatch(context: *mut c_void)
                 .faults
                 .fetch_add(1, Ordering::Release);
         }
-        // SAFETY: atomic geometry observation of the retained native owner.
-        let quantum =
-            unsafe { ffi::mr_device_io_quantum(state.context.native.pointer.as_ptr(), false) };
-        state
-            .context
-            .native
-            .pcm_metrics
-            .work(started.elapsed(), quantum, state.bridge.native_rate);
+        if phase == PcmPhase::Prepare && state.context.input && admitted {
+            state.preparation_work = started.elapsed();
+        } else {
+            // One work observation covers both input phases; the controller,
+            // residences and conversion advance only in Captured.
+            let elapsed = std::mem::take(&mut state.preparation_work) + started.elapsed();
+            // SAFETY: atomic geometry observation of the retained native owner.
+            let quantum =
+                unsafe { ffi::mr_device_io_quantum(state.context.native.pointer.as_ptr(), false) };
+            state
+                .context
+                .native
+                .pcm_metrics
+                .work(elapsed, quantum, state.bridge.native_rate);
+        }
         slot.rendering.store(false, Ordering::Release);
     }
     slot.readers.fetch_sub(1, Ordering::SeqCst);

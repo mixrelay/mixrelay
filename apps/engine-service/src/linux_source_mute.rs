@@ -99,6 +99,7 @@ pub(super) struct Lease {
     pub endpoint_client_serial: String,
     pub source_client_serial: String,
     pub capture_healthy: Arc<std::sync::atomic::AtomicBool>,
+    pub capture_fresh: Arc<std::sync::atomic::AtomicBool>,
     pub nonce: String,
     pub references: usize,
     // Pinned when the lease is installed, not rebuilt from each desired plan.
@@ -108,6 +109,14 @@ pub(super) struct Lease {
 }
 
 impl Lease {
+    fn capture_ready(&self) -> bool {
+        self.capture_healthy
+            .load(std::sync::atomic::Ordering::Acquire)
+            && self
+                .capture_fresh
+                .load(std::sync::atomic::Ordering::Acquire)
+    }
+
     pub(super) fn value(&self) -> String {
         format!(
             "{}:{}:{}:{}:{}:{}:{}:{}:{}",
@@ -125,9 +134,7 @@ impl Lease {
 }
 
 fn lease_still_valid(registry: &Registry, lease: &Lease) -> bool {
-    lease
-        .capture_healthy
-        .load(std::sync::atomic::Ordering::Acquire)
+    lease.capture_ready()
         && registry.ack(lease)
         && registry.links(lease).is_empty()
         && route_unchanged(registry, lease)
@@ -259,15 +266,13 @@ fn owned_render(
     {
         return None;
     }
-    let Some(device) = resources.driver.and_then(|snapshot| {
+    let device = resources.driver.and_then(|snapshot| {
         snapshot
             .settings
             .devices
             .iter()
             .find(|device| device.spec.id == intent.forwarding_endpoint)
-    }) else {
-        return None;
-    };
+    })?;
     if device.spec.render.is_none() || device.native_formats.render.current.is_none() {
         return None;
     }
@@ -277,9 +282,7 @@ fn owned_render(
             .endpoint(id, &expected_name, driver_owner)
             .map(|serial| (id, serial))
     });
-    let Some((endpoint_id, endpoint_serial)) = candidates.next() else {
-        return None;
-    };
+    let (endpoint_id, endpoint_serial) = candidates.next()?;
     if candidates.next().is_some() {
         return None;
     }
@@ -359,6 +362,7 @@ fn desired_leases(
                         endpoint_client_serial: endpoint_client_serial.clone(),
                         source_client_serial,
                         capture_healthy: target.healthy,
+                        capture_fresh: target.fresh_pcm,
                         nonce: String::new(),
                         references: 1,
                         other_sink_serials: BTreeSet::new(),
@@ -1116,6 +1120,7 @@ mod tests {
             endpoint_client_serial: "1".into(),
             source_client_serial: "2".into(),
             capture_healthy: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            capture_fresh: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             nonce: "old-active-plan".into(),
             references: 1,
             other_sink_serials: BTreeSet::new(),
@@ -1132,6 +1137,26 @@ mod tests {
             .is_empty()
         );
         assert!(state.leases.contains_key(&key));
+
+        let current = &state.leases[&key];
+        assert!(current.capture_ready());
+        current
+            .capture_fresh
+            .store(false, std::sync::atomic::Ordering::Release);
+        assert_eq!(
+            pending_transition_stale_keys(&state, Lease::capture_ready),
+            vec![key.clone()]
+        );
+        current
+            .capture_fresh
+            .store(true, std::sync::atomic::Ordering::Release);
+        current
+            .capture_healthy
+            .store(false, std::sync::atomic::Ordering::Release);
+        assert!(!current.capture_ready());
+        current
+            .capture_healthy
+            .store(true, std::sync::atomic::Ordering::Release);
 
         let mut recycled = process.clone();
         recycled.start_time += 1;
@@ -1168,6 +1193,7 @@ mod tests {
             endpoint_client_serial: "1".into(),
             source_client_serial: "2".into(),
             capture_healthy: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            capture_fresh: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             nonce: "nonce".into(),
             references: 1,
             other_sink_serials: BTreeSet::new(),
@@ -1379,6 +1405,7 @@ mod tests {
             endpoint_client_serial: "1".into(),
             source_client_serial: "2".into(),
             capture_healthy: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            capture_fresh: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             nonce: "nonce".into(),
             references: 1,
             other_sink_serials: BTreeSet::new(),

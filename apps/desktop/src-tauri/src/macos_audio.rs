@@ -156,6 +156,11 @@ unsafe extern "C" {
         interleaved_samples: *const f32,
         frame_count: u32,
     ) -> bool;
+    fn mr_application_source_transport_record_source_faults(
+        transport: *mut NativeApplicationSourceTransport,
+        epoch: u64,
+        count: u64,
+    ) -> bool;
     fn mr_application_source_transport_destroy(transport: *mut NativeApplicationSourceTransport);
     fn mr_application_source_transport_clock(
         transport: *mut NativeApplicationSourceTransport,
@@ -542,6 +547,14 @@ impl ApplicationSourceTransport {
     fn reset(&mut self, format: u64, native_rate: u32) -> bool {
         // SAFETY: only the producer worker can reset this transport's epoch.
         unsafe { mr_application_source_transport_reset(self.native.as_ptr(), format, native_rate) }
+    }
+
+    fn record_source_faults(&mut self, epoch: u64, count: u64) -> bool {
+        // SAFETY: this pump owns the transport; native code validates its lease
+        // and exact epoch before publishing or retaining this fixed counter.
+        unsafe {
+            mr_application_source_transport_record_source_faults(self.native.as_ptr(), epoch, count)
+        }
     }
 
     fn connect(source_id: &str, channels: u16) -> Result<Self, String> {

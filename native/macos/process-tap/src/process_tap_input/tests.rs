@@ -163,7 +163,8 @@ fn every_channel_width_preserves_pcm_and_finite_peak_policy_in_both_layouts() {
                     ingest(&format, input.pointer(), ring.0, &peaks),
                     TapInputResult {
                         frames: 4,
-                        written: 4
+                        written: 4,
+                        audible: true,
                     }
                 );
                 assert_eq!(
@@ -248,7 +249,8 @@ fn full_queue_still_observes_input_peaks_and_frames_without_allocating() {
                     ingest(&format, input.pointer(), ring.0, &peaks),
                     TapInputResult {
                         frames: 8,
-                        written: 0
+                        written: 0,
+                        audible: true,
                     }
                 );
             }
@@ -260,6 +262,27 @@ fn full_queue_still_observes_input_peaks_and_frames_without_allocating() {
     assert_eq!(output.map(f32::to_bits), [0.75_f32.to_bits(); 2]);
     // SAFETY: all control/producer accesses have returned, ring is live.
     assert_eq!(unsafe { mr_audio_ring_dropped_frames(ring.0) }, 8000);
+}
+
+#[test]
+fn diagnostic_audio_evidence_excludes_silence_and_nonfinite_samples() {
+    for planar in [false, true] {
+        let format = format(2, planar);
+        let ring = RingOwner::new(2);
+        let peaks = TapPeaks::default();
+        let mut quiet = [0.0, -0.0, f32::NAN, f32::INFINITY];
+        let quiet_input = fixture(&mut quiet, 2, planar);
+        // SAFETY: each fixture owns complete buffers matching the ring's geometry.
+        let result = unsafe { ingest(&format, quiet_input.pointer(), ring.0, &peaks) };
+        assert_eq!(result.frames, 2);
+        assert!(!result.audible);
+        let mut signal = [0.0, -f32::MIN_POSITIVE, 0.0, 0.0];
+        let signal_input = fixture(&mut signal, 2, planar);
+        // SAFETY: each fixture owns complete buffers matching the ring's geometry.
+        let result = unsafe { ingest(&format, signal_input.pointer(), ring.0, &peaks) };
+        assert_eq!(result.frames, 2);
+        assert!(result.audible);
+    }
 }
 
 #[test]

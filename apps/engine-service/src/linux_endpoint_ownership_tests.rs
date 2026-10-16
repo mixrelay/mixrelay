@@ -1,3 +1,4 @@
+#![cfg(feature = "native-lab")]
 use super::super::super::applications::tests::ObservedDriver;
 use super::*;
 
@@ -26,7 +27,6 @@ fn silence_bytes(set: &EndpointSet) -> usize {
 }
 
 #[test]
-#[ignore = "requires owned isolated PipeWire graph; never run against a user session"]
 fn native_endpoint_transfer_preserves_owners_and_bounds_rt_storage() {
     let _driver_devices = DriverFixture::new();
     let _driver = ObservedDriver::new();

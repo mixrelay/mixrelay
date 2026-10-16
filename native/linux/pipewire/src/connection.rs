@@ -22,6 +22,9 @@ pub enum ConnectionError {
     /// The linked library did not report a numeric three-component version.
     #[error("PipeWire library version is not a supported version string")]
     LibraryVersion,
+    /// Async graph contributions require the scheduling contract introduced in 1.2.
+    #[error("PipeWire 1.2.0 or newer is required (linked {0})")]
+    LibraryTooOld(String),
     /// Inactive capture preparation failed before any DSP or stream activation.
     #[error("PipeWire capture preparation: {0}")]
     Capture(String),
@@ -38,6 +41,9 @@ fn audio_config(version: &str) -> Result<&'static str, ConnectionError> {
     }
     if parts.next().is_some() {
         return Err(ConnectionError::LibraryVersion);
+    }
+    if numbers < [1, 2, 0] {
+        return Err(ConnectionError::LibraryTooOld(version.into()));
     }
     // 1.3.81 merged the audio client configuration into client.conf. Select
     // using the linked library, not build headers: distributions can upgrade it
@@ -200,11 +206,17 @@ mod tests {
 
     #[test]
     fn audio_configuration_follows_the_linked_library_contract() {
-        for version in ["0.3.65", "1.0.5", "1.2.7", "1.3.80"] {
+        for version in ["1.2.0", "1.2.7", "1.3.80"] {
             assert_eq!(audio_config(version).unwrap(), "client-rt.conf");
         }
         for version in ["1.3.81", "1.4.2", "2.0.0"] {
             assert_eq!(audio_config(version).unwrap(), "client.conf");
+        }
+        for version in ["0.3.65", "1.0.5", "1.1.99"] {
+            assert!(matches!(
+                audio_config(version),
+                Err(ConnectionError::LibraryTooOld(_))
+            ));
         }
         for version in ["", "1.4", "1.4.2.0", "1.x.0"] {
             assert!(audio_config(version).is_err());
@@ -223,6 +235,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "native-lab")]
     fn resources() -> (usize, usize) {
         (
             std::fs::read_dir("/proc/self/fd").unwrap().count(),
@@ -231,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires the owned private PipeWire daemon"]
+    #[cfg(feature = "native-lab")]
     fn native_pipewire_connection_lifecycle() {
         assert!(std::env::var_os("MIXRELAY_LAB_APPLICATION_FIXTURE").is_some());
         // Warm library initialization once; compare retained process resources,

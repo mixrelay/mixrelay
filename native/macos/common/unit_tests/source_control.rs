@@ -47,7 +47,7 @@ fn clocked_request_preserves_identity_geometry_and_version() {
     let message = request();
     let mut parsed = SourceRequest::default();
     assert!(unsafe { mr_engine_control_parse_source_request(message.0, &raw mut parsed) });
-    assert_eq!(parsed.transport_version, 3);
+    assert_eq!(parsed.transport_version, crate::application_clock::VERSION);
     assert_eq!(parsed.capacity_frames, 128);
     assert_eq!(parsed.channels, 2);
     assert_eq!(
@@ -61,8 +61,12 @@ fn clocked_request_preserves_identity_geometry_and_version() {
 }
 
 #[test]
-fn only_explicit_typed_version_three_requests_are_accepted() {
-    for invalid in [0, 1, 2, 4, u64::MAX] {
+fn only_explicit_typed_current_version_requests_are_accepted() {
+    let current = u64::from(crate::application_clock::VERSION);
+    for invalid in (0..=current + 1)
+        .chain([u64::MAX])
+        .filter(|value| *value != current)
+    {
         let message = request();
         unsafe {
             xpc_dictionary_set_uint64(message.0, c"source_transport_version".as_ptr(), invalid);
@@ -72,11 +76,12 @@ fn only_explicit_typed_version_three_requests_are_accepted() {
         assert_eq!(parsed, SourceRequest::default());
     }
     let message = request();
+    let text_version = CString::new(current.to_string()).unwrap();
     unsafe {
         xpc_dictionary_set_string(
             message.0,
             c"source_transport_version".as_ptr(),
-            c"2".as_ptr(),
+            text_version.as_ptr(),
         );
     };
     let mut parsed = SourceRequest::default();

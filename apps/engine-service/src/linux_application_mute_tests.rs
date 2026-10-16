@@ -1,17 +1,24 @@
+#[cfg(feature = "native-lab")]
 use serde_json::Value;
+use std::path::Path;
+#[cfg(feature = "native-lab")]
 use std::{
     io::{self, Read, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio},
     sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "native-lab")]
 const PHASE_TIMEOUT: Duration = Duration::from_secs(15);
+#[cfg(feature = "native-lab")]
 const CHILD_EXIT_TIMEOUT: Duration = Duration::from_secs(8);
+#[cfg(feature = "native-lab")]
 const CONTROL_LINE_LIMIT: usize = 1024;
 
+#[cfg(feature = "native-lab")]
 pub(super) struct FixtureChild {
     child: Child,
     child_id: u32,
@@ -21,6 +28,7 @@ pub(super) struct FixtureChild {
     exit_status: Option<ExitStatus>,
 }
 
+#[cfg(feature = "native-lab")]
 impl FixtureChild {
     pub(super) fn spawn(path: &Path, arguments: &[&str], environment: &[(&str, String)]) -> Self {
         let mut command = Command::new(path);
@@ -108,6 +116,7 @@ impl FixtureChild {
     }
 }
 
+#[cfg(feature = "native-lab")]
 impl Drop for FixtureChild {
     fn drop(&mut self) {
         if self.exit_status.is_none() {
@@ -123,6 +132,7 @@ impl Drop for FixtureChild {
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn wait_for_child(child: &mut Child, child_id: u32) -> io::Result<ExitStatus> {
     let deadline = Instant::now() + CHILD_EXIT_TIMEOUT;
     loop {
@@ -146,6 +156,7 @@ fn is_owned_child(expected: u32, actual: u32) -> bool {
     expected != 0 && expected == actual
 }
 
+#[cfg(feature = "native-lab")]
 fn read_events(mut output: ChildStdout, sender: &SyncSender<Result<Value, String>>) {
     loop {
         let mut line = Vec::with_capacity(128);
@@ -172,6 +183,7 @@ fn read_events(mut output: ChildStdout, sender: &SyncSender<Result<Value, String
     }
 }
 
+#[cfg(feature = "native-lab")]
 pub(super) fn fixture_paths() -> (PathBuf, PathBuf, PathBuf) {
     let source = PathBuf::from(
         std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE")

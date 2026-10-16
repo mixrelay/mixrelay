@@ -140,6 +140,7 @@ impl LaunchdConfiguration {
     /// primary GID, home ownership and the rest of this configuration before use.
     /// # Errors
     /// Returns malformed or any non-MixRelay launch definition.
+    #[cfg(any(test, target_os = "macos"))]
     pub(crate) fn installed_account(bytes: &[u8]) -> Result<ServiceAccount, LaunchdError> {
         let definition = Self::decode(bytes)?;
         if definition.label != SERVICE_LABEL

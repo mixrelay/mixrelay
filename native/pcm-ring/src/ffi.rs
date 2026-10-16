@@ -5,6 +5,40 @@ use std::{
     sync::atomic::Ordering::{Acquire, Release},
 };
 
+/// Publishes a whole block of neutral PCM without external input storage.
+/// Uses the same capacity, epoch acknowledgement and release publication as PCM writes.
+/// # Safety
+/// Retained initialized ring with exactly one serialized producer. The consumer
+/// exclusively owns its reader cursor and cannot access these unpublished spans.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_pcm_ring_write_silence(ring: *mut PcmRing, frames: u32) -> u32 {
+    // SAFETY: retained native owner; immutable geometry is shared with the consumer.
+    let Some(ring) = (unsafe { ring.as_ref() }) else {
+        return 0;
+    };
+    if ring.storage.samples.is_null() {
+        return 0;
+    }
+    // SAFETY: only the serialized producer accesses its epoch cell.
+    let writer = unsafe { &mut *ring.writer_epoch.get() };
+    let Some(cursor) = ring.reserve_write(writer, frames) else {
+        return 0;
+    };
+    let (start, first, second) = ring.spans(cursor, frames);
+    // SAFETY: the acquired consumer cursor grants exclusive access to these
+    // free spans. All-zero IEEE 754 bytes represent positive f32 silence.
+    unsafe {
+        ptr::write_bytes(ring.storage.samples.add(start), 0, first);
+        if second != 0 {
+            ptr::write_bytes(ring.storage.samples, 0, second);
+        }
+    }
+    ring.publication
+        .written
+        .store(cursor.wrapping_add(u64::from(frames)), Release);
+    frames
+}
+
 /// Writes interleaved LE PCM directly into free float ring spans. Invalid format
 /// IDs/null input return zero; valid zero frames still acknowledge the epoch.
 /// # Safety

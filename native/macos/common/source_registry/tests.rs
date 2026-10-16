@@ -47,6 +47,99 @@ fn request(id: &str) -> SourceRequest {
     }
     request
 }
+
+#[test]
+fn normalized_samples_report_once_even_when_shared_source_pcm_is_not_available() {
+    use crate::application_source_transport::{
+        SourceClockSnapshot, mr_application_source_transport_clock,
+        mr_application_source_transport_record_source_faults,
+    };
+    let registry = SourceRegistry::new();
+    let request = request("normalized");
+    let mut owner = producer(&registry, &request);
+    let token = token(b"normalized");
+    let source_read = registry.read(token);
+    let source = source_read.source().unwrap();
+    let format =
+        unsafe { mr_application_clock_request_rate(source.mapping.clock.as_ptr(), 48_000) };
+    assert!(unsafe { mr_application_source_transport_reset(&raw mut owner, format, 48_000) });
+    let mut clock = SourceClockSnapshot::default();
+    assert!(unsafe { mr_application_source_transport_clock(&raw const owner, &raw mut clock) });
+    assert!(unsafe {
+        mr_application_source_transport_record_source_faults(&raw mut owner, clock.epoch, 3)
+    });
+    let mut output = [9.0; 256];
+    let measured = allocation_counter::measure(|| {
+        assert_eq!(registry.read_audio(token, &mut output, 128, 48_000), 0);
+        assert_eq!(registry.take_source_faults(token), 3);
+        assert_eq!(registry.take_source_faults(token), 0);
+    });
+    assert_eq!(measured.count_total, 0);
+    assert_eq!(output.map(f32::to_bits), [0.0_f32.to_bits(); 256]);
+    assert!(unsafe {
+        mr_application_source_transport_record_source_faults(&raw mut owner, clock.epoch, 2)
+    });
+    assert!(unsafe {
+        mr_application_source_transport_write(&raw mut owner, [0.25; 1536].as_ptr(), 768)
+    });
+    unsafe { mr_application_source_transport_publish_native(&raw const owner, 768, true) };
+    assert_eq!(registry.read_audio(token, &mut output, 128, 48_000), 128);
+    assert_eq!(output.map(f32::to_bits), [0.25_f32.to_bits(); 256]);
+    assert_eq!(registry.take_source_faults(token), 2);
+    assert_eq!(registry.take_source_faults(token), 0);
+    assert!(unsafe {
+        mr_application_source_transport_record_source_faults(&raw mut owner, clock.epoch, 1)
+    });
+    drop(owner);
+    assert_eq!(registry.take_source_faults(token), 1);
+    assert_eq!(registry.take_source_faults(token), 0);
+}
+
+#[test]
+fn replacement_preserves_published_faults_exactly_once_with_a_pinned_old_reader() {
+    for order in 0..3 {
+        let registry = SourceRegistry::new();
+        let request = request("fault-replacement");
+        registry.attach(&request).unwrap();
+        let token = token(b"fault-replacement");
+        let old_read = registry.read(token);
+        let old = old_read.source().unwrap();
+        old.mapping.clock().source_sample_faults.record(3);
+        old.mapping
+            .clock()
+            .format_word
+            .store((u64::from(u32::MAX) << 32) + 48_000, Ordering::Release);
+        assert!(old.terminal());
+        let old_observed = match order {
+            0 => {
+                let observed = old.mapping.clock().source_sample_faults.take();
+                registry.attach(&request).unwrap();
+                observed
+            }
+            1 => {
+                registry.attach(&request).unwrap();
+                old.mapping.clock().source_sample_faults.take()
+            }
+            _ => {
+                let barrier = std::sync::Barrier::new(2);
+                std::thread::scope(|scope| {
+                    let reader = scope.spawn(|| {
+                        barrier.wait();
+                        old.mapping.clock().source_sample_faults.take()
+                    });
+                    barrier.wait();
+                    registry.attach(&request).unwrap();
+                    reader.join().unwrap()
+                })
+            }
+        };
+        let current = registry.read(token);
+        assert!(!std::ptr::eq(current.source().unwrap(), old));
+        assert_eq!(old_observed + registry.take_source_faults(token), 3);
+        assert_eq!(registry.take_source_faults(token), 0);
+        assert_eq!(old.mapping.clock().source_sample_faults.take(), 0);
+    }
+}
 fn exhaust(source: &Source) {
     let buffer = source.mapping.buffer.as_ptr();
     let epoch = unsafe { mr_shared_audio_buffer_stats(buffer) }.epoch;

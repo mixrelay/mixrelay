@@ -1,14 +1,21 @@
-use super::super::{applications::tests::FixtureProcess, *};
+#[cfg(feature = "native-lab")]
+use super::super::applications::tests::FixtureProcess;
+use super::super::*;
 use super::*;
+#[cfg(feature = "native-lab")]
 use mixrelay_audio_graph::{
-    AudioDeviceInputConfig, AudioEndpoint, ChannelLayout, ChannelMapping, EdgeSpec, NodeConfig,
-    NodeSpec, StreamSpec, VirtualEndpointConfig, VirtualEndpointReference,
+    AudioDeviceInputConfig, AudioEndpoint, ChannelMapping, EdgeSpec, NodeConfig, NodeSpec,
+    VirtualEndpointConfig, VirtualEndpointReference,
 };
+use mixrelay_audio_graph::{ChannelLayout, StreamSpec};
+#[cfg(feature = "native-lab")]
 use mixrelay_audio_io::DeviceSelector;
+#[cfg(feature = "native-lab")]
 use mixrelay_control_protocol::{
     ErrorCode, GraphCatalogAction, GraphCatalogRequest, GraphLayout, GraphLayoutRequest,
     GraphNodePosition, NodeControlRequest,
 };
+#[cfg(feature = "native-lab")]
 use mixrelay_control_server::ControlBackend;
 
 const A: &str = "31ab4e5a-44e0-4bab-89dd-906e07751ea1";
@@ -30,8 +37,10 @@ fn device_spec(id: &str) -> VirtualEndpointSpec {
 }
 
 /// Owns only the two explicitly created native test devices, outside engine lifetime.
+#[cfg(feature = "native-lab")]
 struct DriverFixture(mixrelay_driver_control::DriverClient, Vec<&'static str>);
 
+#[cfg(feature = "native-lab")]
 impl DriverFixture {
     fn new() -> Self {
         assert!(std::env::var_os("MIXRELAY_LAB_DEVICE_FIXTURE").is_some());
@@ -63,6 +72,7 @@ impl DriverFixture {
     }
 }
 
+#[cfg(feature = "native-lab")]
 impl Drop for DriverFixture {
     fn drop(&mut self) {
         for id in &self.1 {
@@ -80,6 +90,7 @@ impl Drop for DriverFixture {
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn configure_driver(spec: VirtualEndpointSpec) {
     let client = mixrelay_driver_control::DriverClient::new().unwrap();
     let snapshot = client.snapshot_blocking().unwrap();
@@ -127,6 +138,7 @@ fn empty_inventory_needs_no_server_and_unavailable_reads_are_silent() {
     assert_eq!(set.write("missing", &samples).frames, 0);
 }
 
+#[cfg(feature = "native-lab")]
 struct Session {
     // Drain the production callback before dropping its controller/native owners.
     _worker: mixrelay_engine_service::session::AudioWorker,
@@ -135,6 +147,7 @@ struct Session {
     backend: Arc<LinuxVirtualEndpointBackend>,
 }
 
+#[cfg(feature = "native-lab")]
 impl Session {
     fn new() -> Self {
         let document = GraphDocument::new(1, Vec::new(), Vec::new());
@@ -218,6 +231,7 @@ impl Session {
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn reference(id: &str, node: &str) -> NodeSpec {
     NodeSpec {
         id: node.into(),
@@ -234,6 +248,7 @@ fn reference(id: &str, node: &str) -> NodeSpec {
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn cable(source: (&str, &str), destination: (&str, &str)) -> EdgeSpec {
     EdgeSpec {
         id: "cable".into(),
@@ -249,6 +264,7 @@ fn cable(source: (&str, &str), destination: (&str, &str)) -> EdgeSpec {
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn input_graph() -> GraphDocument {
     let input = NodeSpec {
         id: "input".into(),
@@ -269,6 +285,7 @@ fn input_graph() -> GraphDocument {
     )
 }
 
+#[cfg(feature = "native-lab")]
 fn forwarding_graph() -> GraphDocument {
     GraphDocument::new(
         3,
@@ -277,6 +294,7 @@ fn forwarding_graph() -> GraphDocument {
     )
 }
 
+#[cfg(feature = "native-lab")]
 fn inventory() -> BTreeMap<String, String> {
     let names: Vec<_> = [A, B]
         .into_iter()
@@ -292,6 +310,7 @@ fn inventory() -> BTreeMap<String, String> {
         .collect()
 }
 
+#[cfg(feature = "native-lab")]
 fn save_native_formats() {
     let output = std::process::Command::new("pw-dump").output().unwrap();
     assert!(output.status.success(), "native format inventory failed");
@@ -339,6 +358,7 @@ fn save_native_formats() {
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn fixture() -> FixtureProcess {
     let path = std::path::PathBuf::from(std::env::var("MIXRELAY_LAB_DEVICE_FIXTURE").unwrap());
     assert!(path.is_absolute() && path.is_file());
@@ -355,12 +375,14 @@ fn fixture() -> FixtureProcess {
     fixture
 }
 
+#[cfg(feature = "native-lab")]
 fn reader(id: &str) -> NativeStream {
     let name = format!("{}.capture", native_name(&id.into()));
     let serial = inventory()[&name].clone();
     capture_target(&serial)
 }
 
+#[cfg(feature = "native-lab")]
 fn capture_target(target: &str) -> NativeStream {
     let stream = NativeStream::open_format(
         "lab.capture-reader",
@@ -378,10 +400,12 @@ fn capture_target(target: &str) -> NativeStream {
     stream
 }
 
+#[cfg(feature = "native-lab")]
 fn assert_pcm(reader: &mut NativeStream) {
     assert_signal(reader, 0.0, 1.0);
 }
 
+#[cfg(feature = "native-lab")]
 fn assert_signal(reader: &mut NativeStream, offset: f32, gain: f32) {
     let mut pcm = vec![0.0; 128 * 32];
     let mut matching = 0;
@@ -453,7 +477,7 @@ mod rename;
 mod settings_native;
 
 #[test]
-#[ignore = "requires owned isolated PipeWire graph, native device fixture and private catalog"]
+#[cfg(feature = "native-lab")]
 fn native_device_input_and_first_graph_export_pcm() {
     let _driver_devices = DriverFixture::new();
     let session = Session::new();
@@ -469,6 +493,7 @@ fn native_device_input_and_first_graph_export_pcm() {
     println!("stage=first_graph_export; channels=32; signal=passed");
 }
 
+#[cfg(feature = "native-lab")]
 struct NativeCatalogSnapshot {
     graph_a: String,
     graph_b: String,
@@ -479,6 +504,7 @@ struct NativeCatalogSnapshot {
     first: BTreeMap<String, String>,
 }
 
+#[cfg(feature = "native-lab")]
 fn save_native_graphs(session: &Session, catalog_path: &std::path::Path) -> NativeCatalogSnapshot {
     let graph_a = session.controller.graph_catalog().unwrap().active_id;
     session.apply(input_graph());
@@ -557,6 +583,7 @@ fn save_native_graphs(session: &Session, catalog_path: &std::path::Path) -> Nati
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn exercise_native_catalog_views(
     session: &Session,
     catalog_path: &std::path::Path,
@@ -597,6 +624,7 @@ fn exercise_native_catalog_views(
     std::fs::read(catalog_path).unwrap()
 }
 
+#[cfg(feature = "native-lab")]
 fn assert_recalled_catalog(session: &Session, expected: &NativeCatalogSnapshot) {
     session.settle();
     let restored = session.controller.graph_catalog().unwrap();
@@ -629,6 +657,7 @@ fn assert_recalled_catalog(session: &Session, expected: &NativeCatalogSnapshot) 
     assert_pcm(&mut capture);
 }
 
+#[cfg(feature = "native-lab")]
 fn delete_native_graphs(session: &Session, expected: &NativeCatalogSnapshot) {
     session.catalog(GraphCatalogAction::Delete {
         id: expected.graph_b.clone(),
@@ -674,7 +703,7 @@ fn delete_native_graphs(session: &Session, expected: &NativeCatalogSnapshot) {
 }
 
 #[test]
-#[ignore = "requires owned isolated PipeWire graph, native device fixture and private catalog"]
+#[cfg(feature = "native-lab")]
 fn native_independent_endpoints_share_pcm_across_graphs() {
     let _driver_devices = DriverFixture::new();
     let config = std::path::PathBuf::from(

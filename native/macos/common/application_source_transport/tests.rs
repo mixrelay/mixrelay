@@ -33,6 +33,83 @@ fn fixture() -> (Mapping, SourceTransport) {
 }
 
 #[test]
+fn source_faults_survive_busy_claims_and_epoch_reset_but_never_cross_stale_leases() {
+    let (mapping, mut producer) = fixture();
+    let format = unsafe { mr_application_clock_request_rate(mapping.clock.as_ptr(), 48_000) };
+    assert!(producer.reset(format, 48_000));
+    let old_epoch = producer.owned_epoch;
+    let claim = ProducerClaim::acquire(mapping.clock()).unwrap();
+    let measured = allocation_counter::measure(|| {
+        assert!(producer.record_source_faults(old_epoch, 3));
+    });
+    assert_eq!(measured.count_total, 0);
+    assert_eq!(mapping.clock().source_sample_faults.take(), 0);
+    assert_eq!(producer.pending_source_faults, 3);
+    drop(claim);
+    assert!(producer.reset(format, 44_100));
+    assert_ne!(producer.owned_epoch, old_epoch);
+    assert_eq!(mapping.clock().source_sample_faults.take(), 3);
+    assert!(!producer.record_source_faults(old_epoch, 99));
+    assert!(producer.record_source_faults(producer.owned_epoch, 2));
+    assert_eq!(mapping.clock().source_sample_faults.take(), 2);
+    assert!(producer.record_source_faults(producer.owned_epoch, 0));
+    assert_eq!(mapping.clock().source_sample_faults.take(), 0);
+    mapping.clock().producer_lease.store(8, Ordering::Release);
+    assert!(!producer.record_source_faults(producer.owned_epoch, 99));
+    drop(producer);
+    assert_eq!(mapping.clock().source_sample_faults.take(), 0);
+}
+
+#[test]
+fn pending_faults_flush_on_empty_retry_write_and_drop_without_duplicate_reporting() {
+    for flush in 0..3 {
+        let (mapping, mut producer) = fixture();
+        let format = unsafe { mr_application_clock_request_rate(mapping.clock.as_ptr(), 48_000) };
+        assert!(producer.reset(format, 48_000));
+        let claim = ProducerClaim::acquire(mapping.clock()).unwrap();
+        assert!(producer.record_source_faults(producer.owned_epoch, 3));
+        drop(claim);
+        match flush {
+            0 => assert!(producer.record_source_faults(producer.owned_epoch, 0)),
+            1 => assert!(producer.write(&[0.25; 256], 128)),
+            _ => drop(producer),
+        }
+        assert_eq!(mapping.clock().source_sample_faults.take(), 3);
+        assert_eq!(mapping.clock().source_sample_faults.take(), 0);
+    }
+}
+
+#[test]
+fn revoked_epoch_or_lease_cannot_flush_previously_queued_normalization_into_replacement() {
+    for replace_lease in [false, true] {
+        let (mapping, mut producer) = fixture();
+        let format = unsafe { mr_application_clock_request_rate(mapping.clock.as_ptr(), 48_000) };
+        assert!(producer.reset(format, 48_000));
+        let claim = ProducerClaim::acquire(mapping.clock()).unwrap();
+        assert!(producer.record_source_faults(producer.owned_epoch, 3));
+        if replace_lease {
+            mapping.clock().producer_lease.store(8, Ordering::Release);
+        } else {
+            // SAFETY: this test owns the mapping and deliberately revokes the epoch.
+            unsafe {
+                crate::shared_audio_buffer::mr_shared_audio_buffer_request_epoch(
+                    mapping.buffer.as_ptr(),
+                )
+            };
+        }
+        drop(claim);
+        assert!(!producer.record_source_faults(producer.owned_epoch, 0));
+        assert!(!producer.reset(format, 48_000));
+        drop(producer);
+        assert_eq!(mapping.clock().source_sample_faults.take(), 0);
+    }
+    // SAFETY: null is an explicit rejected boundary input.
+    assert!(!unsafe {
+        mr_application_source_transport_record_source_faults(ptr::null_mut(), 1, 3)
+    });
+}
+
+#[test]
 fn reset_write_snapshot_and_stale_lease_use_the_actual_mapping() {
     let (mapping, mut producer) = fixture();
     let format = unsafe { mr_application_clock_request_rate(mapping.clock.as_ptr(), 44_100) };

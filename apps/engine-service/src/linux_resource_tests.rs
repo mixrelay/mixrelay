@@ -113,7 +113,7 @@ fn document(revision: u64, sources: &[(&str, u32)]) -> GraphDocument {
 }
 
 #[test]
-#[ignore = "requires owned isolated PipeWire session and application fixtures"]
+#[cfg(feature = "native-lab")]
 fn native_capture_graph_edits_retain_unaffected_streams() {
     let path = std::path::PathBuf::from(std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap());
     assert!(path.is_file() && path.is_absolute());
@@ -257,7 +257,7 @@ fn rejected_device_edit(resources: &mut Resources) {
 }
 
 #[test]
-#[ignore = "requires owned isolated PipeWire session and 32-channel device fixture"]
+#[cfg(feature = "native-lab")]
 fn native_device_graph_edits_retain_unaffected_streams() {
     let (_driver, fixture) = device_fixture();
     let mut resources = Resources::new();
@@ -340,7 +340,7 @@ fn activate_device_recovery(resources: &mut Resources, mut recovery: DeviceStrea
 }
 
 #[test]
-#[ignore = "requires owned isolated PipeWire session and disconnectable device fixture"]
+#[cfg(feature = "native-lab")]
 fn native_device_recovery_is_fenced_by_acquisition() {
     let (_driver, mut fixture) = device_fixture();
     let mut resources = Resources::new();

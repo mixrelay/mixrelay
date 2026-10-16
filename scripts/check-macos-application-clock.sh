@@ -21,6 +21,6 @@ if [[ "${3:-}" == "--run" ]]; then
   MIXRELAY_APPLICATION_CLOCK_FIXTURE=1 \
   MIXRELAY_VIRTUAL_TONE_FIXTURE="$fixture_root/MRVirtualToneSource.app/Contents/MacOS/MRVirtualToneSource" \
   MIXRELAY_VIRTUAL_TONE_ENDPOINT_ID="$endpoint_id" \
-    node scripts/lab/native-check.mjs cargo test --release -p mixrelay-desktop live_owned_application_tap_v2_src_rate_changes -- --ignored --nocapture
+    node scripts/lab/native-check.mjs cargo test --release -p mixrelay-desktop live_owned_application_tap_v2_src_rate_changes -- --nocapture
 fi
 print "Fixture artifacts retained: $fixture_root"

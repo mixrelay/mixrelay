@@ -415,6 +415,7 @@ fn device_removal_during_render_hook_discards_its_written_output() {
     assert!(invalid.load(Acquire));
     assert_eq!(allocation.count_total, 0);
     assert_eq!(samples.map(f32::to_bits), [0; 128]);
+    assert!(io.progress.invalid.load(Acquire));
     assert_eq!(io.progress.ticks.load(Acquire), 0);
     assert!(listeners.remove(&backend));
 }

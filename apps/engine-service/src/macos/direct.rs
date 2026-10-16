@@ -41,6 +41,10 @@ struct CallbackIo<'a> {
     bridged: Option<(&'a crate::macos_devices::DeviceSet, u64)>,
 }
 impl ExternalIo for CallbackIo<'_> {
+    fn source_epoch(&self, binding: &ExternalBinding) -> Option<u64> {
+        super::application_epoch(binding)
+    }
+
     fn begin_cycle(
         &mut self,
         _cycle: &ProcessCycle,

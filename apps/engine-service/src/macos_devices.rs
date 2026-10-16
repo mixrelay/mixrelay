@@ -202,12 +202,6 @@ impl DeviceSet {
                 usize::from(spec.channels),
             ));
         }
-        if let Some(device) = self.0.get(id)
-            && !device.ready()
-        {
-            samples.fill(0.0);
-            return Some(recovery::offline_transfer(samples.len(), device.channels));
-        }
         self.0.get(id).map(|device| device.read(samples, host))
     }
     pub(super) fn write(&self, id: &str, samples: &[f32], host: u64) -> Option<TransferOutcome> {
@@ -933,6 +927,7 @@ mod tests {
             input,
         };
         let device = Arc::new(Device {
+            input_continuity: device::InputContinuity::default(),
             activity: Arc::clone(&context.activity),
             identity: NEXT_DEVICE_EPOCH.fetch_add(1, Ordering::Relaxed),
             native,

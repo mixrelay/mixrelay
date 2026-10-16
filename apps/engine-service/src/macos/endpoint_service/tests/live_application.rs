@@ -56,7 +56,7 @@ impl InventoryOwner {
             _engine: ProcessLease::acquire(ENGINE_LEASE).expect("engine must not be running"),
             started: false,
         };
-        assert!(SERVICE.get().is_none(), "run only this ignored native test");
+        assert!(SERVICE.get().is_none(), "run only this native lab test");
         let driver = DriverClient::new().unwrap().snapshot_blocking().unwrap();
         assert_eq!(
             driver.state,
@@ -356,7 +356,6 @@ fn measure(capture: &TapOwner, id: EndpointId, quiet: bool, phase: &str) -> f64 
 }
 
 #[test]
-#[ignore = "sole normal launchd Mach service owner, installed HAL and process-tap permission required"]
 fn live_owned_application_mute_preserves_capture_and_quiets_from_os() {
     let _inventory = InventoryOwner::start();
     InventoryOwner::provision();

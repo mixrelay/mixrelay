@@ -293,7 +293,9 @@ impl AsyncClockBridge {
     }
 
     /// Clears queued PCM, filter tail and feedback integral on an explicit epoch
-    /// boundary. Caller also flushes its external FIFO, otherwise old PCM remains.
+    /// boundary. Residence counters remain cumulative, but the discarded timeline
+    /// invalidates windows spanning this reset. Caller also flushes its external
+    /// FIFO, otherwise old PCM remains.
     pub fn reset(&mut self, epoch: u64, _reason: Discontinuity) {
         self.epoch = epoch;
         self.input.clear();
@@ -301,6 +303,8 @@ impl AsyncClockBridge {
         self.output_frames = 0;
         self.primed = false;
         self.started = false;
+        self.input_residence.invalid = self.input_residence.invalid.wrapping_add(1);
+        self.output_residence.invalid = self.output_residence.invalid.wrapping_add(1);
         self.controller.reset();
         if let Some(resampler) = &mut self.resampler {
             resampler.reset();

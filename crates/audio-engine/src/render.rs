@@ -7,6 +7,7 @@ use mixrelay_audio_graph::{
     RenderFormat, TO_OS_PORT_ID,
 };
 use mixrelay_audio_io::VirtualEndpointId;
+use mixrelay_audio_io::pcm::sanitize_samples;
 use mixrelay_audio_io::process::{ProcessCycle, ProcessReport, SampleFaults, TransferOutcome};
 use mixrelay_audio_recorder::{RecorderRegistry, RecorderTap};
 use thiserror::Error;
@@ -17,6 +18,7 @@ mod compensation;
 pub use compensation::ArrivalError;
 mod effects;
 mod history;
+mod input_timeline;
 mod kernels;
 mod route_delay;
 mod routing;
@@ -120,6 +122,7 @@ mod hosted_reuse_tests;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExternalBinding {
     node_id: NodeId,
+    kind: mixrelay_audio_graph::NodeKind,
     port_id: PortId,
     channels: u16,
     virtual_endpoint_id: Option<VirtualEndpointId>,
@@ -163,6 +166,11 @@ impl MeterBinding {
 }
 
 impl ExternalBinding {
+    #[must_use]
+    pub const fn kind(&self) -> mixrelay_audio_graph::NodeKind {
+        self.kind
+    }
+
     /// Canonical device identity from the node configuration, independent of
     /// graph-local node names. Hardware and application bindings return `None`.
     #[must_use]
@@ -418,6 +426,7 @@ pub struct BlockProcessor {
     source_buffers: ExternalBuffers,
     sink_buffers: ExternalBuffers,
     source_latency_faults: Box<[bool]>,
+    source_timelines: Box<[input_timeline::State]>,
     sink_latency_faults: Box<[bool]>,
     sink_latency_routes: Vec<Vec<usize>>,
     meters: Option<Arc<crate::PeakMeterBank>>,
@@ -451,6 +460,7 @@ impl fmt::Debug for BlockProcessor {
             .field("source_buffers", &self.source_buffers.len())
             .field("sink_buffers", &self.sink_buffers.len())
             .field("source_latency_faults", &self.source_latency_faults)
+            .field("source_timelines", &self.source_timelines)
             .field("sink_latency_faults", &self.sink_latency_faults)
             .field("sink_latency_routes", &self.sink_latency_routes)
             .field("has_meters", &self.meters.is_some())
@@ -553,6 +563,15 @@ pub trait ExternalIo {
         CycleAdmission::Process
     }
 
+    /// Optional source-session identity, observed before and after each PCM read.
+    /// `None` leaves discontinuity tracking with the adapter. `Some(0)` means
+    /// the source is unavailable; nonzero epochs must never be reused. Reads
+    /// spanning an epoch change are rejected. This is not a content timestamp.
+    /// Implementations must use bounded, nonblocking snapshots only.
+    fn source_epoch(&self, _binding: &ExternalBinding) -> Option<u64> {
+        None
+    }
+
     /// Native I/O must consume this cycle's timeline, not infer a second clock
     /// from the destination capacity. Never block or allocate at this boundary.
     /// The destination arrives zeroed, so an adapter fills only what it reads and
@@ -608,6 +627,8 @@ impl BlockProcessor {
         let device_bus_state = buffers::filled(plan.device_bus_samples, 0.0)?;
         let controls = plan.controls.values();
         let control_scratch = controls.clone();
+        let source_timelines =
+            vec![input_timeline::State::default(); plan.source_bindings.len()].into_boxed_slice();
         let source_latency_faults = vec![false; plan.source_bindings.len()].into_boxed_slice();
         let sink_latency_faults = vec![false; plan.sink_bindings.len()].into_boxed_slice();
         let sink_latency_routes = plan
@@ -616,6 +637,7 @@ impl BlockProcessor {
             .map(|binding| plan.compensation.binding_routes(binding.node_id()))
             .collect();
         Ok(Self {
+            source_timelines,
             source_latency_faults,
             sink_latency_faults,
             sink_latency_routes,
@@ -786,7 +808,9 @@ impl BlockProcessor {
                 continue;
             };
             let source = &previous.plan.device_bus_bindings[index];
-            if source.samples.len() == binding.samples.len() {
+            if source.samples.len() == binding.samples.len()
+                && source.input_path == binding.input_path
+            {
                 self.device_bus_state[binding.samples.clone()]
                     .copy_from_slice(&previous.device_bus_state[source.samples.clone()]);
             }
@@ -894,48 +918,7 @@ impl BlockProcessor {
         };
         let frames = cycle.frames;
         let frames_usize = frames as usize;
-        let mut report = ProcessReport::default();
-        self.source_latency_faults.fill(false);
-        self.sink_latency_faults.fill(false);
-        for (source_index, ((binding, destination), &control_index)) in self
-            .plan
-            .source_bindings
-            .iter()
-            .zip(&mut self.source_buffers)
-            .zip(&self.plan.source_controls)
-            .enumerate()
-        {
-            let samples = sample_count(frames_usize, binding.channels);
-            destination[..samples].fill(0.0);
-            if !self.controls[control_index].control.enabled {
-                continue;
-            }
-            let transfer = external.read_source(binding, &mut destination[..samples], &cycle);
-            if transfer.frames > frames {
-                return Err(ProcessBlockError::InvalidTransfer);
-            }
-            // An adapter may fill only a prefix. Never process stale data from
-            // another cycle, even if it wrote beyond the reported prefix.
-            destination[sample_count(transfer.frames as usize, binding.channels)..samples]
-                .fill(0.0);
-            let starved = transfer.activity == mixrelay_audio_io::process::InputActivity::Active
-                && transfer.frames < frames;
-            report.input_starvations += u64::from(starved);
-            self.source_latency_faults[source_index] = transfer.discontinuity || starved;
-            report.discontinuities += u64::from(transfer.discontinuity);
-            if transfer.discontinuity {
-                let targets = &self.plan.source_history[source_index];
-                for range in &targets.device_buses {
-                    self.device_bus_state[range.clone()].fill(0.0);
-                }
-                if let Some(bank) = &mut self.delay_bank {
-                    bank.reset_routes(&targets.delay_routes);
-                }
-                for &state in &targets.histories {
-                    state.reset(&mut self.effect_states, &mut self.dynamics_envelopes);
-                }
-            }
-        }
+        let mut report = self.read_external_sources(cycle, external)?;
         // An individual input invalidates only its downstream histories above.
         // A global clock loss invalidates the complete processing timeline.
         if reset_history {
@@ -950,7 +933,15 @@ impl BlockProcessor {
                 bank.reset();
             }
         }
+        let external_source_faults = report.sample_faults.source_samples;
         report.sample_faults = self.process_loaded_block(frames_usize);
+        report.sample_faults.source_samples = report
+            .sample_faults
+            .source_samples
+            .saturating_add(external_source_faults);
+        if external_source_faults != 0 {
+            report.sample_faults.blocks = 1;
+        }
         for (sink_index, ((binding, source), &control_index)) in self
             .plan
             .sink_bindings
@@ -973,6 +964,64 @@ impl BlockProcessor {
             report.discontinuities += u64::from(transfer.discontinuity);
         }
         Ok(Some(report))
+    }
+
+    fn read_external_sources(
+        &mut self,
+        cycle: ProcessCycle,
+        external: &mut impl ExternalIo,
+    ) -> Result<ProcessReport, ProcessBlockError> {
+        let frames = cycle.frames;
+        let frames_usize = frames as usize;
+        let mut report = ProcessReport::default();
+        self.source_latency_faults.fill(false);
+        self.sink_latency_faults.fill(false);
+        for (source_index, ((binding, destination), &control_index)) in self
+            .plan
+            .source_bindings
+            .iter()
+            .zip(&mut self.source_buffers)
+            .zip(&self.plan.source_controls)
+            .enumerate()
+        {
+            let samples = sample_count(frames_usize, binding.channels);
+            destination[..samples].fill(0.0);
+            if !self.controls[control_index].control.enabled {
+                continue;
+            }
+            let transfer = self.source_timelines[source_index].read(
+                external,
+                binding,
+                &mut destination[..samples],
+                &cycle,
+            )?;
+            // An adapter may fill only a prefix. Never process stale data from
+            // another cycle, even if it wrote beyond the reported prefix.
+            destination[sample_count(transfer.frames as usize, binding.channels)..samples]
+                .fill(0.0);
+            let starved = transfer.activity == mixrelay_audio_io::process::InputActivity::Active
+                && transfer.frames < frames;
+            report.input_starvations += u64::from(starved);
+            self.source_latency_faults[source_index] = transfer.discontinuity || starved;
+            report.discontinuities += u64::from(transfer.discontinuity);
+            report.sample_faults.source_samples = report
+                .sample_faults
+                .source_samples
+                .saturating_add(transfer.source_sample_faults);
+            if transfer.discontinuity {
+                let targets = &self.plan.source_history[source_index];
+                for range in &targets.device_buses {
+                    self.device_bus_state[range.clone()].fill(0.0);
+                }
+                if let Some(bank) = &mut self.delay_bank {
+                    bank.reset_routes(&targets.delay_routes);
+                }
+                for &state in &targets.histories {
+                    state.reset(&mut self.effect_states, &mut self.dynamics_envelopes);
+                }
+            }
+        }
+        Ok(report)
     }
 
     fn admit_external_cycle(
@@ -1407,6 +1456,7 @@ struct DeviceBusBinding {
     node_id: NodeId,
     samples: std::ops::Range<usize>,
     control_index: usize,
+    input_path: history::InputPath,
 }
 
 fn device_bus_bindings(
@@ -1431,6 +1481,7 @@ fn device_bus_bindings(
             node_id: node.id().clone(),
             samples: offset..end,
             control_index,
+            input_path: history::InputPath::prepare(execution, node.id()),
         });
         offset = end;
     }
@@ -1571,19 +1622,6 @@ fn sanitize_slots(arena: &mut [f32], slots: &[PortSlot], frames: usize) -> u64 {
                 &mut arena[slot.offset..slot.offset + sample_count(frames, slot.channels)],
             )
     })
-}
-
-// Preserve every finite bit pattern, including signed zero and subnormals.
-// A fixed counter replaces logging or retained PCM on the realtime path.
-fn sanitize_samples(samples: &mut [f32]) -> u64 {
-    let mut count = 0;
-    for sample in samples {
-        if !sample.is_finite() {
-            *sample = 0.0;
-            count += 1;
-        }
-    }
-    count
 }
 
 #[derive(Debug, Default)]
@@ -1850,6 +1888,7 @@ fn collect_external_bindings(
             let slot = node_slot(node, &port_id, direction, slots)?;
             bindings.push(ExternalBinding {
                 node_id: node.id().clone(),
+                kind: node.kind(),
                 port_id,
                 channels: slot.channels,
                 virtual_endpoint_id: match node.config() {

@@ -36,6 +36,7 @@ pub(super) struct Native {
     // acknowledged all callbacks, so the native device owner cannot outlive this box.
     pub(super) render: Box<super::direct::RenderSlot>,
     pub(super) pcm_metrics: PcmMetrics,
+    pub(super) source_sample_faults: mixrelay_audio_io::pcm::SampleFaultCounter,
     pub(super) pcm: Box<super::worker::callback::PcmSlot>,
     pub(super) latency: super::latency::BridgeMeasurements,
 }
@@ -67,6 +68,7 @@ impl Native {
             requested_buffer: AtomicU32::new(buffer_frames),
             render: Box::default(),
             pcm_metrics: PcmMetrics::default(),
+            source_sample_faults: mixrelay_audio_io::pcm::SampleFaultCounter::default(),
             pcm: Box::default(),
             latency: super::latency::BridgeMeasurements::default(),
         };
@@ -98,6 +100,11 @@ impl Native {
         let setting = if requested == 0 {
             None
         } else {
+            tracing::debug!(
+                owner = self.log_id,
+                requested,
+                "preparing CoreAudio client buffer"
+            );
             let (device, previous) = buffer_control::prepare_initial(self, requested, stop)?;
             let plan = BufferPlan::prepare([(device, previous)], requested)
                 .map_err(|error| format!("CoreAudio buffer preparation failed: {error:?}"))?;
@@ -106,7 +113,17 @@ impl Native {
             Some((device, plan))
         };
         let expected = setting.as_ref().map_or(0, |(device, _)| *device);
+        tracing::debug!(
+            owner = self.log_id,
+            expected,
+            "registering CoreAudio callback"
+        );
         let status = self.host.connect(self, expected);
+        tracing::debug!(
+            owner = self.log_id,
+            status,
+            "CoreAudio callback registration returned"
+        );
         if status != 0 {
             let restored = setting
                 .as_ref()

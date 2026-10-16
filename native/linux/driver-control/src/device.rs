@@ -258,6 +258,7 @@ fn formats(properties: Option<&StreamProperties>) -> Result<NativeStreamFormats,
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "native-lab")]
     use mixrelay_driver_control::DriverBackend;
     use mixrelay_pipewire::{DriverCycle, DriverProcess};
 
@@ -274,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires the existing isolated native lab and pw-cli; serial only"]
+    #[cfg(feature = "native-lab")]
     fn native_driver_failed_stream_recovers_same_config_and_preserves_healthy_owner() {
         assert!(std::env::var_os("MIXRELAY_LAB_APPLICATION_FIXTURE").is_some());
         let mut failed = crate::tests::config(2);

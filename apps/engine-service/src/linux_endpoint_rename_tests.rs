@@ -1,3 +1,4 @@
+#![cfg(feature = "native-lab")]
 use super::*;
 
 fn assert_native_name(id: &str, name: &str) {
@@ -54,7 +55,6 @@ fn assert_catalog_name(session: &Session, name: &str) {
 }
 
 #[test]
-#[ignore = "requires owned isolated PipeWire graph, native device fixture and private catalog"]
 fn native_rename_preserves_device_serials_and_shared_pcm() {
     let _driver_devices = DriverFixture::new();
     let session = Session::new();
@@ -99,7 +99,6 @@ fn native_rename_preserves_device_serials_and_shared_pcm() {
 }
 
 #[test]
-#[ignore = "requires owned isolated PipeWire graph; never run against a user session"]
 fn native_rename_rollback_and_retired_controls_never_retarget() {
     let _driver_devices = DriverFixture::new();
     let _driver = super::super::super::applications::tests::ObservedDriver::new();

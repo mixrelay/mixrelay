@@ -47,6 +47,7 @@ impl Capture {
             lease: entry.lease,
             taps: Vec::new(),
             first_pcm: Vec::new(),
+            progress: Vec::new(),
             scratch: Box::default(),
             healthy: entry.healthy.clone(),
         }

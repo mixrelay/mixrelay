@@ -1,19 +1,28 @@
+#[cfg(feature = "native-lab")]
+use crate::LinuxDriver;
+#[cfg(feature = "native-lab")]
+use crate::native_names;
+#[cfg(feature = "native-lab")]
 use crate::tests::config;
-use crate::{LinuxDriver, native_names};
-use mixrelay_audio_io::{NativeSampleFormat, NativeStreamFormat};
+#[cfg(feature = "native-lab")]
+use mixrelay_audio_io::NativeSampleFormat;
+#[cfg(feature = "native-lab")]
+use mixrelay_audio_io::NativeStreamFormat;
+#[cfg(feature = "native-lab")]
 use mixrelay_driver_control::{DriverBackend, DriverState};
+#[cfg(feature = "native-lab")]
 use mixrelay_pipewire::{
     DriverCycle, DriverError, DriverFormat, DriverProcess, GraphDriver, GraphInputs, NativeStream,
     StreamFormat, StreamRole, TransferSnapshot,
 };
+#[cfg(feature = "native-lab")]
+use std::sync::{Arc, atomic::AtomicU32};
 use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicU32, AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "native-lab")]
 struct Writer {
     stream: NativeStream,
     samples: Box<[f32]>,
@@ -24,6 +33,7 @@ struct Writer {
 // channel occupies a distinct PCM16 band and changes with the low word. These
 // binary fractions also survive the production PCM24/32 and Float32 codecs.
 const FRAME_LIMIT: u32 = 1 << 20;
+#[cfg(feature = "native-lab")]
 const PCM_FRAMES: u64 = 480_000;
 
 fn sample_word(word: u16, lane: u16) -> f32 {
@@ -88,6 +98,7 @@ fn indexed_sequence(frame: &[f32], inverted: bool) -> Option<u32> {
     indexed_frame_matches(frame, sequence, inverted).then_some(sequence)
 }
 
+#[cfg(feature = "native-lab")]
 struct IndexedWriter {
     stream: NativeStream,
     samples: Box<[f32]>,
@@ -96,12 +107,14 @@ struct IndexedWriter {
     inverted: bool,
 }
 
+#[cfg(feature = "native-lab")]
 fn print_stream_snapshot(role: &str, stream: &NativeStream) {
     let mut snapshot = TransferSnapshot::default();
     snapshot.include(stream);
     eprintln!("native_driver_pcm owner={role} snapshot={snapshot:?}");
 }
 
+#[cfg(feature = "native-lab")]
 impl Drop for IndexedWriter {
     fn drop(&mut self) {
         // GraphDriver has drained its native callback before releasing this processor.
@@ -113,6 +126,7 @@ impl Drop for IndexedWriter {
     }
 }
 
+#[cfg(feature = "native-lab")]
 impl DriverProcess for IndexedWriter {
     fn process(&mut self, cycle: &DriverCycle) {
         let count = cycle.frames as usize * self.channels;
@@ -162,6 +176,7 @@ impl Continuity {
     }
 }
 
+#[cfg(feature = "native-lab")]
 struct IndexedReader {
     stream: NativeStream,
     samples: Box<[f32]>,
@@ -170,6 +185,7 @@ struct IndexedReader {
     counters: Arc<Continuity>,
 }
 
+#[cfg(feature = "native-lab")]
 impl Drop for IndexedReader {
     fn drop(&mut self) {
         // GraphDriver destruction has already drained the capture processor callback.
@@ -228,6 +244,7 @@ impl SequenceWitness {
     }
 }
 
+#[cfg(feature = "native-lab")]
 impl DriverProcess for IndexedReader {
     fn prepare_inputs(&mut self, inputs: &GraphInputs) -> Result<(), DriverError> {
         self.stream.bind_inputs(inputs).map_err(DriverError::Input)
@@ -250,6 +267,7 @@ impl DriverProcess for IndexedReader {
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn pattern_writer(stream: NativeStream, channels: u16, count: usize) -> Writer {
     Writer {
         stream,
@@ -263,6 +281,7 @@ fn pattern_writer(stream: NativeStream, channels: u16, count: usize) -> Writer {
     }
 }
 
+#[cfg(feature = "native-lab")]
 impl DriverProcess for Writer {
     fn process(&mut self, cycle: &DriverCycle) {
         let count = cycle.frames as usize * self.channels;
@@ -273,6 +292,7 @@ impl DriverProcess for Writer {
     }
 }
 
+#[cfg(feature = "native-lab")]
 struct Reader {
     stream: NativeStream,
     samples: Box<[f32]>,
@@ -282,12 +302,14 @@ struct Reader {
     wrong: Arc<AtomicU64>,
 }
 
+#[cfg(feature = "native-lab")]
 struct Feedback {
     reader: Reader,
     contribution: NativeStream,
     last_sample: Arc<AtomicU32>,
 }
 
+#[cfg(feature = "native-lab")]
 impl DriverProcess for Feedback {
     fn prepare_inputs(&mut self, inputs: &GraphInputs) -> Result<(), DriverError> {
         self.reader.prepare_inputs(inputs)
@@ -309,6 +331,7 @@ impl DriverProcess for Feedback {
     }
 }
 
+#[cfg(feature = "native-lab")]
 impl DriverProcess for Reader {
     fn prepare_inputs(&mut self, inputs: &GraphInputs) -> Result<(), DriverError> {
         self.stream.bind_inputs(inputs).map_err(DriverError::Input)
@@ -337,6 +360,7 @@ impl DriverProcess for Reader {
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn check_continuity(counters: &Continuity) {
     eprintln!(
         "native_driver_pcm fresh={} missing_gap_distance_sum={} repeated={} wrong={} short={}",
@@ -381,6 +405,7 @@ fn check_continuity(counters: &Continuity) {
     );
 }
 
+#[cfg(feature = "native-lab")]
 fn observe_pcm(channels: u16, names: &[String], inverted: bool) {
     let format = StreamFormat {
         sample_rate: 48_000,
@@ -705,7 +730,7 @@ fn indexed_pcm_witness_rejects_previous_scope_without_allocation() {
 }
 
 #[test]
-#[ignore = "requires the existing isolated native lab and pw-loopback; serial only"]
+#[cfg(feature = "native-lab")]
 fn native_driver_reference_loopback_continuity() {
     use std::process::{Command, Stdio};
 
@@ -755,8 +780,10 @@ fn native_driver_reference_loopback_continuity() {
     }
 }
 
+#[cfg(feature = "native-lab")]
 struct ReferenceLoopback(std::process::Child);
 
+#[cfg(feature = "native-lab")]
 impl ReferenceLoopback {
     fn wait_ready(&mut self, names: &[String]) {
         let deadline = Instant::now() + Duration::from_secs(3);
@@ -788,6 +815,7 @@ impl ReferenceLoopback {
     }
 }
 
+#[cfg(feature = "native-lab")]
 impl Drop for ReferenceLoopback {
     fn drop(&mut self) {
         if !matches!(self.0.try_wait(), Ok(Some(_))) {
@@ -798,7 +826,7 @@ impl Drop for ReferenceLoopback {
 }
 
 #[test]
-#[ignore = "requires the existing isolated native lab; never a user session; serial only"]
+#[cfg(feature = "native-lab")]
 fn native_driver_32_64_pcm_continues_after_graph_client_exit() {
     let fixture = std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap();
     assert!(std::path::Path::new(&fixture).is_file());
@@ -859,7 +887,7 @@ fn native_driver_32_64_pcm_continues_after_graph_client_exit() {
 }
 
 #[test]
-#[ignore = "requires the installed Driver in the isolated native lab; serial only"]
+#[cfg(feature = "native-lab")]
 fn native_installed_driver_pcm_survives_client_exit() {
     let render = std::env::var("MIXRELAY_LAB_DRIVER_RENDER").unwrap();
     let capture = std::env::var("MIXRELAY_LAB_DRIVER_CAPTURE").unwrap();
@@ -894,6 +922,7 @@ fn native_installed_driver_pcm_survives_client_exit() {
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn check_native_settings(driver: &LinuxDriver, format: NativeStreamFormat, names: &[String]) {
     assert_eq!(driver.state(), DriverState::Ready);
     let settings = driver.settings().unwrap();
@@ -904,6 +933,7 @@ fn check_native_settings(driver: &LinuxDriver, format: NativeStreamFormat, names
     assert_eq!(device.native_device_ids, names);
 }
 
+#[cfg(feature = "native-lab")]
 fn removal_clients(
     names: &[String],
     fresh: &Arc<AtomicU64>,
@@ -949,7 +979,7 @@ fn removal_clients(
 }
 
 #[test]
-#[ignore = "requires the existing isolated native lab; never a user session; serial only"]
+#[cfg(feature = "native-lab")]
 fn native_driver_removal_drains_with_playback_and_capture_clients_open() {
     let fixture = std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap();
     assert!(std::path::Path::new(&fixture).is_file());
@@ -1018,6 +1048,7 @@ fn native_driver_removal_drains_with_playback_and_capture_clients_open() {
     }
 }
 
+#[cfg(feature = "native-lab")]
 fn observe_feedback(channels: u16, names: &[String]) {
     let format = StreamFormat {
         sample_rate: 48_000,
@@ -1091,7 +1122,7 @@ fn observe_feedback(channels: u16, names: &[String]) {
 }
 
 #[test]
-#[ignore = "requires the existing isolated native lab; never a user session; serial only"]
+#[cfg(feature = "native-lab")]
 fn native_driver_same_device_capture_graph_render_has_causal_pcm() {
     let fixture = std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap();
     assert!(std::path::Path::new(&fixture).is_file());

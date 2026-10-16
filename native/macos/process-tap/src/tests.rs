@@ -1,6 +1,7 @@
 use super::native::Native;
 use super::*;
 mod retirement;
+mod watchdog;
 use mixrelay_macos_transport::{
     audio_buffer::{AudioBuffer, AudioBufferList},
     capture_ring::{mr_audio_ring_create, mr_audio_ring_read_interleaved},
@@ -32,6 +33,7 @@ fn fixture() -> TapSession {
         listener: true,
         inventory_listener: false,
         resume: false,
+        rebuild: RebuildIntent::Unchanged,
     });
     session.format.set(format()).expect("unpublished format");
     let ring = mr_audio_ring_create(256, 2);
@@ -53,6 +55,7 @@ fn fallback_fixture() -> TapSession {
         selected: vec![native::ProcessIdentity { object: 7, pid: 71 }],
         target_device_uid: None,
         target_device: None,
+        mute: false,
     }));
     let mut resources = session.resources.get();
     resources.inventory_listener = true;
@@ -71,6 +74,7 @@ fn muted_fixture() -> TapSession {
             object: 7,
             stream: 70,
         });
+        selected.mute = true;
     }
     session
 }
@@ -86,6 +90,8 @@ enum Failure {
     Query,
     Start,
     Register,
+    Rebuild,
+    Diagnostic,
 }
 
 struct Fake<'a> {
@@ -99,6 +105,13 @@ struct Fake<'a> {
     stop_calls: Cell<u32>,
     device: Cell<native::DeviceLease>,
     requested_device: Cell<Option<u32>>,
+    diagnostic_selection: RefCell<Option<native::Selection>>,
+    diagnostic_live: Cell<bool>,
+    diagnostic_audio: Cell<bool>,
+    diagnostic_starts: Cell<u32>,
+    diagnostic_retires: Cell<u32>,
+    diagnostic_preparation: Cell<std::time::Duration>,
+    resume_during_diagnostic: Cell<Option<&'a TapSession>>,
 }
 
 impl Default for Fake<'_> {
@@ -117,6 +130,13 @@ impl Default for Fake<'_> {
                 stream: 70,
             }),
             requested_device: Cell::new(None),
+            diagnostic_selection: RefCell::new(None),
+            diagnostic_live: Cell::new(false),
+            diagnostic_audio: Cell::new(false),
+            diagnostic_starts: Cell::new(0),
+            diagnostic_retires: Cell::new(0),
+            diagnostic_preparation: Cell::new(std::time::Duration::ZERO),
+            resume_during_diagnostic: Cell::new(None),
         }
     }
 }
@@ -149,6 +169,7 @@ impl Native for Fake<'_> {
     }
     fn rebuild(&self, session: &TapSession, _: &native::Selection) -> Result<(), TapError> {
         self.rebuild_calls.set(self.rebuild_calls.get() + 1);
+        self.result(Failure::Rebuild)?;
         let mut resources = session.resources.get();
         resources.tap = 1;
         resources.aggregate = 2;
@@ -196,6 +217,33 @@ impl Native for Fake<'_> {
     }
     fn destroy_tap(&self, _: u32) -> Result<(), TapError> {
         self.result(Failure::Tap)
+    }
+    fn diagnostic(
+        &self,
+        selection: &native::Selection,
+        observed_at: std::time::Instant,
+    ) -> Result<crate::watchdog::Diagnostic, TapError> {
+        self.diagnostic_starts.set(self.diagnostic_starts.get() + 1);
+        self.result(Failure::Diagnostic)?;
+        assert!(!self.diagnostic_live.replace(true));
+        self.diagnostic_selection.replace(Some(selection.clone()));
+        Ok(crate::watchdog::Diagnostic {
+            session: ptr::dangling_mut(),
+            preparation_started: observed_at,
+            preparation_time: self.diagnostic_preparation.get(),
+        })
+    }
+    fn diagnostic_has_audio(&self, _: &crate::watchdog::Diagnostic) -> bool {
+        assert!(self.diagnostic_live.get());
+        if let Some(session) = self.resume_during_diagnostic.take() {
+            callback(session, &mut [0.5, -0.5], None);
+        }
+        self.diagnostic_audio.get()
+    }
+    fn retire_diagnostic(&self, _: crate::watchdog::Diagnostic) {
+        assert!(self.diagnostic_live.replace(false));
+        self.diagnostic_retires
+            .set(self.diagnostic_retires.get() + 1);
     }
 }
 
@@ -603,17 +651,17 @@ fn invalid_geometry_query_and_failed_restart_never_reopen_delivery() {
     assert_eq!(session.format.get().expect("immutable format").channels, 2);
     native.format.set(format());
     native.fail.set(Failure::Query);
-    assert_eq!(session.refresh(&native).expect_err("query failure").code, 4);
+    assert_eq!(session.refresh(&native).expect_err("query pending").code, 9);
     native.fail.set(Failure::Register);
     assert_eq!(
         session.refresh(&native).expect_err("register failure").code,
-        4
+        9
     );
     assert!(!session.allowed());
     native.fail.set(Failure::Start);
     assert_eq!(
         session.refresh(&native).expect_err("restart failure").code,
-        4
+        9
     );
     assert!(!session.allowed());
     native.fail.set(Failure::None);

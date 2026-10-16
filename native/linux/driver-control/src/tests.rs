@@ -198,7 +198,7 @@ fn unequal_width_capture_uses_output_and_silences_only_extra_lanes() {
 }
 
 #[test]
-#[ignore = "requires the existing isolated PipeWire/WirePlumber native lab; serial only"]
+#[cfg(feature = "native-lab")]
 fn native_driver_32_64_exact_formats_and_explicit_removal() {
     let fixture = std::env::var("MIXRELAY_LAB_APPLICATION_FIXTURE").unwrap();
     assert!(std::path::Path::new(&fixture).is_file());

@@ -66,6 +66,10 @@ uint64_t mr_pw_stream_quantum(MRPWStream *stream);
 void mr_pw_stream_discard_input(MRPWStream *stream);
 typedef struct { uint64_t overflows, starvations; } MRPWTransferCounters;
 MRPWTransferCounters mr_pw_stream_counters(MRPWStream *stream);
+/* Nonconsuming native capture admission failure generation. Capture-only;
+ * malformed/corrupt ingress and ring rejection advance it, output failures do
+ * not. Acquire observes the producer's release counter without reading IO data. */
+uint64_t mr_pw_stream_capture_failures(MRPWStream *stream);
 /* Independent diagnostic observations, not a transactional queue snapshot.
  * Each failure group has one serialized writer. Counts wrap unsigned and live
  * until stream destruction; state/format/ring restarts do not reset them.

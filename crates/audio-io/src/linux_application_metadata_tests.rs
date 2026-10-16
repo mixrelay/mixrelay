@@ -317,25 +317,3 @@ fn gtk_settings_theme_name_is_bounded_and_only_read_from_settings_section() {
         None
     );
 }
-
-/// Opt-in desktop file read, not an application/audio launch or UI assertion.
-#[test]
-#[ignore = "requires an explicitly chosen installed desktop ID and PNG icon"]
-fn installed_desktop_metadata_read_probe() {
-    let id = env::var("MIXRELAY_LAB_METADATA_DESKTOP_ID").expect("explicit installed desktop ID");
-    assert!(safe_name(&id));
-    let metadata = lookup(&key(Some(&id), None, None), &data_roots(), None);
-    assert!(
-        metadata
-            .display_name
-            .as_ref()
-            .is_some_and(|name| !name.is_empty())
-    );
-    let icon = metadata.icon_data_url.expect("installed PNG must decode");
-    assert!(icon.starts_with("data:image/png;base64,"));
-    println!(
-        "desktop_id={id}; display_name={:?}; png_data_url_bytes={}",
-        metadata.display_name,
-        icon.len()
-    );
-}
