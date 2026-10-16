@@ -134,15 +134,26 @@ MixRelay 보고 738프레임으로 전체 경로 보고 오차 22.8프레임이�
 지연 보고 0으로 복원됐다. 초기 실패와 유지 후 통과를 구분하며 즉시 시작의 지연 안정성이나
 독립 입력들의 절대 콘텐츠 시각 정렬까지 검증했다고 표시하지 않는다. LG 시작 대기는 미해결이다.
 
-추가 native 앱 캡처 smoke는 미통과다. 테스트 정적 라이브러리를 C에서 연결할 때 빠진
-AudioToolbox를 보완한 뒤, 실제 소유 신호 앱을 지정한 MixRelay 장치에만 재생했다.
-캡처 소유자는 `AudioDeviceCreateIOProcID` → CoreAudio stream-usage IPC에서 응답을 기다렸다.
-메인 run loop를 구동하고 준비를 별도 큐로 옮긴 진단도 같은 30초 제한에 걸려 해당 변경은 남기지 않았다.
-이는 설치된 편집 앱의 캡처 장애 복구를 재현·수락한 결과가 아니다. 원인은 아직 확정하지 않았다.
-시험의 신호 앱·캡처 프로세스를 모두 회수했고 엔진·기존 빈 그래프는 정상이다.
-스택은 `/tmp/mixrelay-native-tap-smoke-sample-20261016.txt`, 실행 기록은
-`/tmp/mixrelay-installed-native-app-capture-{fixed,bounded,runloop}-20261016.log`에 있다.
-smoke 도구는 이제 native 등록을 포함한 정확한 자식 프로세스를 30초로 제한한다.
+추가 native 앱 캡처 smoke의 첫 실패에는 시스템 오디오 권한 대기가 있었다.
+`AudioDeviceCreateIOProcID` → CoreAudio stream-usage IPC에서 멈춘 PID 9978과 같은
+TCC 요청 `43699.556`이 23:20:36.815에 `kTCCServiceAudioCapture` 승인을 요청했고,
+23:26:29.065에 승인 결과와 응답을 받았다. 책임 앱은 `com.openai.codex`였다.
+스택만 보고 등록 장애로 판단했던 설명을 정정한다. 메인 run loop를 추가한 진단도
+승인 전의 같은 30초 제한에 걸렸으므로 해당 변경은 남기지 않았다.
+설치된 MixRelay와 시험의 책임 앱 양쪽에 `NSAudioCaptureUsageDescription`이 이미 있다.
+
+승인 뒤 블록형 등록을 대신 호출한 진단과 기존 함수형 등록으로 되돌린 진단이 모두 통과했다.
+함수형 등록은 원음 보존·scoped 준비·원음 차단 중 PCM·해제의 네 창에서 각각
+112,128/116,736/116,224/112,640프레임을 읽었고, 48kHz·2채널·peak 0.05·유효 PCM이었다.
+블록형도 네 창이 통과했으므로 API 교체를 해결책으로 채택하지 않았다.
+이는 현재 소스의 native 캡처 라이브러리와 설치된 가상 장치를 연결한 시험이다.
+설치된 MixRelay 실행부 자체의 권한·캡처 장애 복구나 LG 시작 대기를 검증한 결과는 아니다.
+시험의 신호 앱·캡처 프로세스를 모두 회수했고 기존 빈 그래프를 유지했다.
+권한 원시는 `/tmp/mixrelay-tap-first-permission-request-20261016.log`, 성공 기록은
+`/tmp/mixrelay-tap-registration-{block-comparison,function-reversal}-20261016.log`다.
+첫 실패 스택과 실행 기록은 `/tmp/mixrelay-native-tap-smoke-sample-20261016.txt` 및
+`/tmp/mixrelay-installed-native-app-capture-{fixed,bounded,runloop}-20261016.log`에 보존했다.
+smoke 도구는 native 등록을 포함한 정확한 자식 프로세스를 30초로 제한한다.
 후속 도구 변경은 스크립트 355개와 왕복 프로브의 합성 자체 시험으로 확인했다.
 여기에는 끊긴 응답의 동일 작업 재시도·영수증 회수·외부 작업 ID 거부,
 유지 중 중단 시 그래프 복원, 실제 지연 변동을 보존하면서 실패 판정을 유지하는 검사가 포함된다.
