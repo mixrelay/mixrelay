@@ -25,6 +25,7 @@ pub(super) unsafe fn graph_read(
     samples: *mut f32,
     frames: u32,
     epoch: u64,
+    host: u64,
 ) -> GraphRead {
     if !io.selection.input || frames == 0 || frames > MAX_FRAMES {
         return GraphRead::default();
@@ -41,14 +42,11 @@ pub(super) unsafe fn graph_read(
         io.measurements.faults.fetch_add(1, Release);
     }
     // SAFETY: retained ring and sole graph consumer, complete caller-owned output.
-    let fill = io.graph_ring.stats().queued;
     let read = unsafe { mr_pcm_ring_read_available(ring, samples, frames) };
     if read < frames {
         io.measurements.faults.fetch_add(1, Release);
     }
-    io.measurements
-        .graph_queue
-        .read(u64::from(fill), u64::from(read));
+    io.consumed(true, read, host);
     let frames = read;
     GraphRead {
         frames,
@@ -57,13 +55,21 @@ pub(super) unsafe fn graph_read(
 }
 
 // SAFETY: one serialized graph producer; immutable input spans frames*channels floats.
-pub(super) unsafe fn graph_write(io: &DeviceIo, samples: *const f32, frames: u32) -> u32 {
+pub(super) unsafe fn graph_write(
+    io: &DeviceIo,
+    samples: *const f32,
+    frames: u32,
+    host: u64,
+) -> u32 {
     if io.selection.input || frames > MAX_FRAMES {
         return 0;
     }
     graph_progress(io, frames);
     // SAFETY: graph is this ring's sole producer; native callbacks use the other ring.
-    unsafe { mr_pcm_ring_write(ptr::from_ref(&io.graph_ring).cast_mut(), samples, frames) }
+    let written =
+        unsafe { mr_pcm_ring_write(ptr::from_ref(&io.graph_ring).cast_mut(), samples, frames) };
+    io.produced(true, written, host);
+    written
 }
 
 fn graph_progress(io: &DeviceIo, frames: u32) {
@@ -75,16 +81,11 @@ fn graph_progress(io: &DeviceIo, frames: u32) {
 
 // SAFETY: the SRC owner is the selected ring's sole consumer, and its output
 // span owns frames*channels writable floats even when no PCM is available.
+// It runs in the IOProc's PCM hook, so its frames pass at that callback's host time.
 pub(super) unsafe fn bridge_read(io: &DeviceIo, samples: *mut f32, frames: u32) -> u32 {
     if frames == 0 || frames > MAX_FRAMES {
         return 0;
     }
-    let fill = io.ring(!io.selection.input).stats().queued;
-    let tap = if io.selection.input {
-        &io.measurements.native_queue
-    } else {
-        &io.measurements.graph_queue
-    };
     // No prefill: SRC owns priming, not a second native-queue latency policy.
     // SAFETY: the bridge owner's input ring depends only on immutable direction.
     let read = unsafe {
@@ -94,7 +95,11 @@ pub(super) unsafe fn bridge_read(io: &DeviceIo, samples: *mut f32, frames: u32) 
             frames,
         )
     };
-    tap.read(u64::from(fill), u64::from(read));
+    io.consumed(
+        !io.selection.input,
+        read,
+        io.progress.callback_host.load(Relaxed),
+    );
     read
 }
 
@@ -104,13 +109,19 @@ pub(super) unsafe fn bridge_write(io: &DeviceIo, samples: *const f32, frames: u3
         return 0;
     }
     // SAFETY: bridge owner writes graph input or native output; no other role writes that ring.
-    unsafe {
+    let written = unsafe {
         mr_pcm_ring_write(
             ptr::from_ref(io.ring(io.selection.input)).cast_mut(),
             samples,
             frames,
         )
-    }
+    };
+    io.produced(
+        io.selection.input,
+        written,
+        io.progress.callback_host.load(Relaxed),
+    );
+    written
 }
 
 // SAFETY: sole bridge consumer; the opposite producer may run concurrently.

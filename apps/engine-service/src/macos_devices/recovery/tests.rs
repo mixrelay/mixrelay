@@ -113,14 +113,14 @@ fn pending_bridge_is_inactive_without_hiding_a_ready_owner_transfer_failure() {
     assert!(devices.is_binding_inactive("output", false));
     assert!(!devices.is_offline("output"));
     assert!(!devices.is_binding_inactive("unknown", false));
-    let transfer = devices.write("output", &[0.5; 64]).unwrap();
+    let transfer = devices.write("output", &[0.5; 64], 0).unwrap();
     assert_eq!(transfer.frames, 32);
     assert_eq!(transfer.activity, InputActivity::Inactive);
     output.ready_rate.store(48_000, Ordering::Release);
     assert!(!devices.is_binding_inactive("output", false));
     assert_eq!(devices.clock_synchronized("output", false), Some(false));
     // A live transfer still uses its real native result, including invalid widths.
-    assert_eq!(devices.write("output", &[0.5; 3]).unwrap().frames, 0);
+    assert_eq!(devices.write("output", &[0.5; 3], 0).unwrap().frames, 0);
     drop((devices, output, context));
 }
 
@@ -215,16 +215,16 @@ fn offline_transfers_silence_and_discard_complete_quanta_without_native_owners()
     let devices = DeviceSet(BTreeMap::new(), offline);
     for frames in [32, 256, 2048] {
         let mut input = vec![0.75; frames];
-        let result = devices.read("input", &mut input).unwrap();
+        let result = devices.read("input", &mut input, 0).unwrap();
         assert_eq!(result.frames, u32::try_from(frames).unwrap());
         assert_eq!(result.activity, InputActivity::Inactive);
         assert!(input.iter().all(|sample| *sample == 0.0));
-        let result = devices.write("output", &vec![0.25; frames * 2]).unwrap();
+        let result = devices.write("output", &vec![0.25; frames * 2], 0).unwrap();
         assert_eq!(result.frames, u32::try_from(frames).unwrap());
         assert!(!result.discontinuity);
     }
     assert!(devices.is_offline("input"));
-    assert!(devices.read("application", &mut [1.0; 32]).is_none());
+    assert!(devices.read("application", &mut [1.0; 32], 0).is_none());
     assert!(devices.hardware_clock_progress().is_none());
 }
 

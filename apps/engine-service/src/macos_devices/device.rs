@@ -111,7 +111,13 @@ impl Device {
             }
         }
     }
-    pub(super) fn read(&self, samples: &mut [f32]) -> TransferOutcome {
+    /// This device's latest callback label (its mean frame) in host ticks, or zero before any.
+    pub(super) fn callback_host(&self) -> u64 {
+        // SAFETY: this owner retains Native; only an atomic is read.
+        unsafe { super::ffi::mr_device_io_callback_host(self.native.pointer.as_ptr()) }
+    }
+    /// `host` labels this graph cycle's transfers; see `DeviceSet::graph_host`.
+    pub(super) fn read(&self, samples: &mut [f32], host: u64) -> TransferOutcome {
         samples.fill(0.0);
         if !self.input || !self.ready() || !samples.len().is_multiple_of(self.channels) {
             return TransferOutcome::complete(0);
@@ -128,6 +134,7 @@ impl Device {
                 samples.as_mut_ptr(),
                 frames,
                 self.activity.read_epoch(self.epoch.load(Ordering::Acquire)),
+                host,
             )
         };
         TransferOutcome {
@@ -142,7 +149,7 @@ impl Device {
             },
         }
     }
-    pub(super) fn write(&self, samples: &[f32]) -> TransferOutcome {
+    pub(super) fn write(&self, samples: &[f32], host: u64) -> TransferOutcome {
         if self.input || !self.ready() || !samples.len().is_multiple_of(self.channels) {
             return TransferOutcome::complete(0);
         }
@@ -151,7 +158,7 @@ impl Device {
             return super::recovery::offline_transfer(samples.len(), self.channels);
         }
         TransferOutcome::complete(unsafe {
-            mr_device_io_graph_write(self.native.pointer.as_ptr(), samples.as_ptr(), frames)
+            mr_device_io_graph_write(self.native.pointer.as_ptr(), samples.as_ptr(), frames, host)
         })
     }
     pub(super) fn ready(&self) -> bool {

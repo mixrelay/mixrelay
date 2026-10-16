@@ -1,6 +1,8 @@
 //! Retained atomic evidence; only the reporter acquires the control-side cache lock.
 use super::{DeviceSet, MacDevices, ffi};
 use mixrelay_audio_engine::BlockProcessor;
+#[cfg(test)]
+use mixrelay_audio_io::residence::{EdgeSnapshot, PassageSnapshot};
 use mixrelay_audio_io::{
     process::ProcessReport,
     residence::{Residence, ResidenceSnapshot},
@@ -65,9 +67,13 @@ impl Observation {
             Some("binding faults advanced")
         } else if self.native.faults != previous.native.faults {
             Some("native faults advanced")
-        } else if self.native.native_queue.invalid != previous.native.native_queue.invalid {
+        } else if self.native.native_queue.consumer.discarded
+            != previous.native.native_queue.consumer.discarded
+        {
             Some("native queue residence invalid")
-        } else if self.native.graph_queue.invalid != previous.native.graph_queue.invalid {
+        } else if self.native.graph_queue.consumer.discarded
+            != previous.native.graph_queue.consumer.discarded
+        {
             Some("graph queue residence invalid")
         } else if self.src_input.invalid != previous.src_input.invalid
             || self.src_output.invalid != previous.src_output.invalid
@@ -77,7 +83,7 @@ impl Observation {
             None
         }
     }
-    /// Host intervals in ticks; all FIFO means in their own rate domain.
+    /// Host intervals and native/graph FIFO passages in ticks; SRC means in their rate domain.
     pub(crate) fn delay_ns(self, previous: Self, input: bool, ns_per_tick: f64) -> Option<f64> {
         let timing = if input {
             self.native
@@ -87,18 +93,18 @@ impl Observation {
             self.native
                 .presentation
                 .mean_since(previous.native.presentation)
-        }? * ns_per_tick;
+        }?;
         if self.direct {
-            return Some(timing);
+            return Some(timing * ns_per_tick);
         }
         let native = self
             .native
             .native_queue
-            .mean_since(previous.native.native_queue)?;
+            .residence_since(previous.native.native_queue)?;
         let graph = self
             .native
             .graph_queue
-            .mean_since(previous.native.graph_queue)?;
+            .residence_since(previous.native.graph_queue)?;
         let src_input = self.src_input.mean_since(previous.src_input)?;
         let src_output = self.src_output.mean_since(previous.src_output)?;
         let scalar = if input {
@@ -124,9 +130,7 @@ impl Observation {
         #[allow(clippy::cast_precision_loss)]
         let delay = self.src_delay as f64;
         Some(
-            timing
-                + native * 0.5 * native_frame_ns
-                + graph * 0.5 * graph_frame_ns
+            (timing + native + graph) * ns_per_tick
                 + src_input * 0.5 * input_frame_ns
                 + src_output * 0.5 * output_frame_ns
                 + delay * delay_frame_ns,
@@ -382,8 +386,22 @@ pub(crate) mod tests {
         assert_eq!(device.native.latency.faults.load(Ordering::Acquire), 0);
     }
 
+    /// A window over `frames` FIFO frames that each waited `ticks`.
+    pub(crate) fn passage(ticks: u64, frames: u64) -> PassageSnapshot {
+        let edge = |area| EdgeSnapshot {
+            position: frames,
+            area,
+            latest: 0,
+            discarded: 0,
+        };
+        PassageSnapshot {
+            producer: edge(0),
+            consumer: edge(ticks * frames),
+        }
+    }
+
     #[test]
-    fn native_scalar_window_mean_scales_both_src_residence_domains() {
+    fn native_scalar_window_mean_scales_only_src_residence_domains() {
         let mut old = observation(false);
         old.native_rate = 48_000;
         let mut next = old;
@@ -394,26 +412,27 @@ pub(crate) mod tests {
         };
         next.native.acquisition = sample(0);
         next.native.presentation = sample(0);
-        next.native.native_queue = sample(24_000);
-        next.native.graph_queue = sample(96);
+        // FIFO passages are host time already: 250 ms and 1 ms at 2 ns per tick.
+        next.native.native_queue = passage(125_000_000, 32);
+        next.native.graph_queue = passage(500_000, 32);
         next.src_input = sample(0);
         next.src_output = sample(0);
-        // No scalar captured: 12000 native frames at 48 kHz = 250 ms.
-        assert_eq!(next.delay_ns(old, true, 1.0), Some(251_000_000.0));
+        assert_eq!(next.delay_ns(old, true, 2.0), Some(251_000_000.0));
         next.native.input_scalar = ResidenceSnapshot {
             sum: 2_002_000_000,
             weight: 2,
             invalid: 0,
         };
         next.native.output_scalar = sample(1_002_000_000);
-        assert!((next.delay_ns(old, true, 1.0).unwrap() - 251_250_000.0).abs() < 0.001);
+        // A measured scalar no longer rescales host-timed FIFO passages.
+        assert_eq!(next.delay_ns(old, true, 2.0), Some(251_000_000.0));
         next.src_input = sample(96);
         next.src_output = sample(96);
         next.src_delay = 48;
-        let input = 251_250_000.0 + 1_001_000.0 + 1_001_000.0 + 1_000_000.0;
-        let output = 251_500_000.0 + 1_002_000.0 + 1_002_000.0 + 1_002_000.0;
-        assert!((next.delay_ns(old, true, 1.0).unwrap() - input).abs() < 0.001);
-        assert!((next.delay_ns(old, false, 1.0).unwrap() - output).abs() < 0.001);
+        let input = 251_000_000.0 + 1_001_000.0 + 1_001_000.0 + 1_000_000.0;
+        let output = 251_000_000.0 + 1_002_000.0 + 1_002_000.0 + 1_002_000.0;
+        assert!((next.delay_ns(old, true, 2.0).unwrap() - input).abs() < 0.001);
+        assert!((next.delay_ns(old, false, 2.0).unwrap() - output).abs() < 0.001);
     }
 
     #[test]
@@ -427,26 +446,30 @@ pub(crate) mod tests {
         };
         next.native.acquisition = sample(100);
         next.native.presentation = sample(50);
-        next.native.native_queue = sample(88);
-        next.native.graph_queue = sample(96);
+        next.native.native_queue = passage(88, 4);
+        next.native.graph_queue = passage(96, 4);
         next.src_input = sample(44);
         next.src_output = sample(48);
         next.src_delay = 10;
         let input = 100.0
-            + 88.0 * 0.5e9 / 44_100.0
-            + 96.0 * 0.5e9 / 48_000.0
+            + 88.0
+            + 96.0
             + 44.0 * 0.5e9 / 44_100.0
             + 48.0 * 0.5e9 / 48_000.0
             + 10.0 * 1e9 / 48_000.0;
-        assert_eq!(next.delay_ns(old, true, 1.0), Some(input));
+        assert!((next.delay_ns(old, true, 1.0).unwrap() - input).abs() < 0.001);
         let output = 50.0
-            + 88.0 * 0.5e9 / 44_100.0
-            + 96.0 * 0.5e9 / 48_000.0
+            + 88.0
+            + 96.0
             + 44.0 * 0.5e9 / 48_000.0
             + 48.0 * 0.5e9 / 44_100.0
             + 10.0 * 1e9 / 44_100.0;
-        assert_eq!(next.delay_ns(old, false, 1.0), Some(output));
+        assert!((next.delay_ns(old, false, 1.0).unwrap() - output).abs() < 0.001);
         assert_eq!(next.instability(old), None);
+        next.native.graph_queue.consumer.discarded += 1;
+        assert_eq!(next.instability(old), Some("graph queue residence invalid"));
+        assert_eq!(next.delay_ns(old, true, 1.0), None);
+        next.native.graph_queue.consumer.discarded -= 1;
         next.faults += 1;
         assert!(next.instability(old).is_some());
         next.direct = true;

@@ -1,6 +1,6 @@
-//! Callback host intervals and consumer-side FIFO residence, never nominal targets.
+//! Callback host intervals and host-timed FIFO passages, never nominal targets.
 use super::{DeviceIo, IoTiming};
-use mixrelay_audio_io::residence::{Residence, ResidenceSnapshot};
+use mixrelay_audio_io::residence::{Passage, PassageSnapshot, Residence, ResidenceSnapshot};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Default)]
@@ -14,8 +14,8 @@ pub(super) struct Measurements {
     pub(super) output_scalar: Residence,
     pub(super) direct_input_scalar: Residence,
     pub(super) direct_output_scalar: Residence,
-    pub(super) native_queue: Residence,
-    pub(super) graph_queue: Residence,
+    pub(super) native_queue: Passage,
+    pub(super) graph_queue: Passage,
 }
 
 impl Measurements {
@@ -57,7 +57,7 @@ fn interval(later: super::IoTimestamp, earlier: super::IoTimestamp) -> Option<u6
         .flatten()
 }
 
-/// Coherent individual tap snapshots. Host intervals are ticks; queues are twice frames.
+/// Coherent individual tap snapshots. Host intervals and queue passages are ticks.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LatencySnapshot {
     pub faults: u64,
@@ -66,8 +66,8 @@ pub struct LatencySnapshot {
     /// Window scalar means are fixed-point (1e9 = nominal); no valid sample means nominal.
     pub input_scalar: ResidenceSnapshot,
     pub output_scalar: ResidenceSnapshot,
-    pub native_queue: ResidenceSnapshot,
-    pub graph_queue: ResidenceSnapshot,
+    pub native_queue: PassageSnapshot,
+    pub graph_queue: PassageSnapshot,
 }
 
 /// Reads atomics only; a busy writer returns no snapshot instead of blocking.
@@ -97,22 +97,27 @@ pub unsafe fn latency_snapshot(io: *const DeviceIo, direct: bool) -> Option<Late
         } else {
             &taps.output_scalar
         },
-        &taps.native_queue,
-        &taps.graph_queue,
     ]
     .map(Residence::snapshot);
-    coherent_snapshot(io.measurements.faults.load(Ordering::Acquire), taps)
+    let queues =
+        [&io.measurements.native_queue, &io.measurements.graph_queue].map(Passage::snapshot);
+    coherent_snapshot(io.measurements.faults.load(Ordering::Acquire), taps, queues)
 }
 
-fn coherent_snapshot(faults: u64, taps: [Option<ResidenceSnapshot>; 6]) -> Option<LatencySnapshot> {
-    let [
-        Some(acquisition),
-        Some(presentation),
-        Some(input_scalar),
-        Some(output_scalar),
-        Some(native_queue),
-        Some(graph_queue),
-    ] = taps
+fn coherent_snapshot(
+    faults: u64,
+    taps: [Option<ResidenceSnapshot>; 4],
+    queues: [Option<PassageSnapshot>; 2],
+) -> Option<LatencySnapshot> {
+    let (
+        [
+            Some(acquisition),
+            Some(presentation),
+            Some(input_scalar),
+            Some(output_scalar),
+        ],
+        [Some(native_queue), Some(graph_queue)],
+    ) = (taps, queues)
     else {
         return None;
     };
@@ -142,12 +147,18 @@ mod tests {
     use crate::device_io::IoTimestamp;
     #[test]
     fn any_contended_tap_returns_no_new_evidence() {
-        let taps = [Some(ResidenceSnapshot::default()); 6];
-        assert!(coherent_snapshot(0, taps).is_some());
+        let taps = [Some(ResidenceSnapshot::default()); 4];
+        let queues = [Some(PassageSnapshot::default()); 2];
+        assert!(coherent_snapshot(0, taps, queues).is_some());
         for index in 0..taps.len() {
             let mut contended = taps;
             contended[index] = None;
-            assert!(coherent_snapshot(0, contended).is_none());
+            assert!(coherent_snapshot(0, contended, queues).is_none());
+        }
+        for index in 0..queues.len() {
+            let mut contended = queues;
+            contended[index] = None;
+            assert!(coherent_snapshot(0, taps, contended).is_none());
         }
     }
 

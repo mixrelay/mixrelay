@@ -96,7 +96,7 @@ mod tests {
         let mut bridge = DeviceBridge::new(&context, 48_000).unwrap();
         let pacing_epoch = context.epoch.load(Ordering::Acquire);
         let mut samples = [0.0; 64];
-        device.read(&mut samples);
+        device.read(&mut samples, 0);
         // SAFETY: this unpublished synthetic owner has no concurrent worker or
         // native callback; the test acts as its sole graph-ring producer.
         assert_eq!(
@@ -117,10 +117,10 @@ mod tests {
         device.set_active(true);
         assert_native_fallback_blocked(&device);
         samples.fill(1.0);
-        device.read(&mut samples);
+        device.read(&mut samples, 0);
         assert_eq!(samples.map(f32::to_bits), [0.0_f32.to_bits(); 64]);
         assert!(bridge.synchronize_activity(&context));
-        device.read(&mut samples);
+        device.read(&mut samples, 0);
         assert_eq!(samples.map(f32::to_bits), [0.0_f32.to_bits(); 64]);
         // SAFETY: same exclusive synthetic producer after both reset acknowledgements.
         assert_eq!(
@@ -133,7 +133,7 @@ mod tests {
             },
             32
         );
-        assert_eq!(device.read(&mut samples).frames, 32);
+        assert_eq!(device.read(&mut samples, 0).frames, 32);
         assert_eq!(samples.map(f32::to_bits), [0.75_f32.to_bits(); 64]);
         assert_eq!(context.epoch.load(Ordering::Acquire), pacing_epoch);
     }
@@ -167,8 +167,8 @@ mod tests {
         let (device, context) = synthetic_device(2, 48_000, 48_000, false);
         let (unrelated, unrelated_context) = synthetic_device(2, 48_000, 48_000, false);
         let mut bridge = DeviceBridge::new(&context, 48_000).unwrap();
-        assert_eq!(device.write(&[0.25; 64]).frames, 32);
-        assert_eq!(unrelated.write(&[0.5; 64]).frames, 32);
+        assert_eq!(device.write(&[0.25; 64], 0).frames, 32);
+        assert_eq!(unrelated.write(&[0.5; 64], 0).frames, 32);
         let other_epoch = unrelated_context.epoch.load(Ordering::Acquire);
         device.set_active(false);
         assert_native_fallback_blocked(&device);
@@ -185,13 +185,13 @@ mod tests {
         assert_eq!(unrelated_context.epoch.load(Ordering::Acquire), other_epoch);
         device.set_active(true);
         assert_native_fallback_blocked(&device);
-        device.write(&[0.75; 64]);
+        device.write(&[0.75; 64], 0);
         assert_eq!(
             unsafe { ffi::mr_device_io_queued(device.native.pointer.as_ptr(), true) },
             0
         );
         assert!(bridge.synchronize_activity(&context));
-        device.write(&[0.75; 64]);
+        device.write(&[0.75; 64], 0);
         assert_eq!(
             unsafe { ffi::mr_device_io_queued(device.native.pointer.as_ptr(), true) },
             32

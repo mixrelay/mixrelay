@@ -180,6 +180,11 @@ pub(crate) struct DirectPlan {
 }
 
 impl DirectPlan {
+    /// The direct master's current callback label, its mean frame's host time. The
+    /// bridged transfers that callback renders pass at it, like its native transfers.
+    pub(crate) fn callback_host(&self) -> u64 {
+        self.master.callback_host()
+    }
     /// Control-side logging only; callback counters never take the logging path.
     pub(crate) fn report_execution(&self, elapsed: Duration) {
         self.master

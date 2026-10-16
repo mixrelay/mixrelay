@@ -123,13 +123,16 @@ impl State<'_> {
 /// The connection owns this guard and drops it before disconnecting native I/O.
 /// Control changes require unpublication and reader drain; no mutable reference
 /// to converter storage exists while any native callback can access it.
-pub(super) struct CallbackBridge<'a> {
+pub(in crate::macos_devices) struct CallbackBridge<'a> {
     slot: &'a PcmSlot,
     state: Box<UnsafeCell<State<'a>>>,
 }
 
 impl<'a> CallbackBridge<'a> {
-    pub(super) fn new(context: &'a WorkerContext, rate: u32) -> Result<Self, String> {
+    pub(in crate::macos_devices) fn new(
+        context: &'a WorkerContext,
+        rate: u32,
+    ) -> Result<Self, String> {
         let bridge = DeviceBridge::new(context, rate)?;
         let result = Self {
             slot: &context.native.pcm,

@@ -86,8 +86,12 @@ typedef struct MRDeviceGraphRead {
 _Static_assert(sizeof(MRDeviceGraphRead) == 8, "Rust graph read ABI");
 /* Actual valid frames; initial_epoch is true only for first consumer admission.
  * Recovery epochs and subsequent shortages are not startup. */
-MRDeviceGraphRead mr_device_io_graph_read(MRDeviceIO *io, float *samples, uint32_t frames, uint64_t epoch);
-uint32_t mr_device_io_graph_write(MRDeviceIO *io, const float *samples, uint32_t frames);
+/* host is the graph cycle's host time in ticks, shared by all of its transfers. */
+MRDeviceGraphRead mr_device_io_graph_read(MRDeviceIO *io, float *samples, uint32_t frames, uint64_t epoch,
+    uint64_t host);
+uint32_t mr_device_io_graph_write(MRDeviceIO *io, const float *samples, uint32_t frames, uint64_t host);
+/* The latest callback's mean-frame host ticks, or zero before any timed callback. */
+uint64_t mr_device_io_callback_host(MRDeviceIO *io);
 uint32_t mr_device_io_bridge_read(MRDeviceIO *io, float *samples, uint32_t frames);
 uint32_t mr_device_io_bridge_write(MRDeviceIO *io, const float *samples, uint32_t frames);
 /* Actual registered CoreAudio callback. Native fixtures supply complete native

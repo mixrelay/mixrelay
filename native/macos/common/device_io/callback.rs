@@ -103,6 +103,11 @@ pub unsafe extern "C" fn mr_device_io_process(
         }
     };
     io.measurements.callback(timing, false);
+    if timing.now.flags & 2 != 0 {
+        io.progress
+            .callback_host
+            .store(block_host(timing.now.host_time, callback, frames), Release);
+    }
     let rendered = callback.formats.all_float()
         && callback.hook.is_some_and(|hook| unsafe {
             hook(callback.context, input, output, frames, &raw const timing)
@@ -132,6 +137,19 @@ pub unsafe extern "C" fn mr_device_io_process(
         .fetch_add(u64::from(frames), Release);
     super::signal_graph_worker();
     0
+}
+
+/// The host time of this callback's mean frame, `now + (frames - 1) / 2` frames. The
+/// device captures or presents its block a frame at a time from the first frame that
+/// acquisition and presentation time, so every transfer this callback makes or renders,
+/// including direct graph cycles, passes its FIFO at this one label.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "finite nonnegative ticks within one callback"
+)]
+fn block_host(now: u64, callback: &super::Callback, frames: u32) -> u64 {
+    now + (callback.frame_ticks * f64::from(frames - 1) / 2.0) as u64
 }
 
 // SAFETY: pointer is null or a complete AudioTimeStamp retained by CoreAudio.
@@ -167,17 +185,15 @@ unsafe fn transfer(
     frames: u32,
 ) -> bool {
     let ring = ptr::from_ref(&io.native_ring).cast_mut();
+    let host = io.progress.callback_host.load(Relaxed);
     if !io.selection.input {
         // SAFETY: sole native consumer and callback-owned, full-width scratch.
-        let fill = io.native_ring.stats().queued;
         let read =
             unsafe { mr_pcm_ring_read_available(ring, callback.scratch.as_mut_ptr(), frames) };
         if read < frames {
             io.measurements.faults.fetch_add(1, Release);
         }
-        io.measurements
-            .native_queue
-            .read(u64::from(fill), u64::from(read));
+        io.consumed(false, read, host);
     }
     // SAFETY: scratch is disjoint from native PCM; callback owns the selected output
     // or immutable input. Geometry was admitted for at most MAX_FRAMES*channels.
@@ -194,7 +210,8 @@ unsafe fn transfer(
     }
     if io.selection.input {
         // SAFETY: IOProc is native input ring's sole producer; scratch remains live.
-        unsafe { mr_pcm_ring_write(ring, callback.scratch.as_ptr(), frames) };
+        let written = unsafe { mr_pcm_ring_write(ring, callback.scratch.as_ptr(), frames) };
+        io.produced(false, written, host);
     }
 
     true
@@ -260,6 +277,14 @@ unsafe fn record_clock(
             callback_host: now.map_or(0, |time| time.host),
             callback_flags: now.map_or(0, |time| u64::from(time.flags)),
         });
+    } else if let Some((previous_sample, previous_host, _)) = callback.previous_timestamp
+        && valid
+        && previous_host != 0
+        && sample > previous_sample
+    {
+        #[allow(clippy::cast_precision_loss)]
+        let elapsed = host.saturating_sub(previous_host) as f64;
+        callback.frame_ticks = elapsed / (sample - previous_sample);
     }
     callback.previous_timestamp = Some((sample, host, frames));
 }

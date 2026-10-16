@@ -57,9 +57,9 @@ fn assert_published_offline(active: &DeviceSet, graph: &GraphDocument) {
         ..TransferOutcome::complete(32)
     };
     let mut input = [9.0; 64];
-    assert_eq!(active.read("input", &mut input), Some(expected));
+    assert_eq!(active.read("input", &mut input, 0), Some(expected));
     assert_eq!(input.map(f32::to_bits), [0.0_f32; 64].map(f32::to_bits));
-    assert_eq!(active.write("output", &[0.5; 64]), Some(expected));
+    assert_eq!(active.write("output", &[0.5; 64], 0), Some(expected));
 }
 
 fn assert_cached_selection(resources: &MacDevices, graph: &GraphDocument) {
@@ -157,9 +157,9 @@ fn native_control_recovery_publishes_offline_intent_and_restores_the_same_uid_wi
     assert!(active.1.is_empty());
     assert_cached_selection(&resources, &edited);
     let mut pcm = [0.0; 512];
-    wait_until(|| active.read("input", &mut pcm).unwrap().frames > 0);
+    wait_until(|| active.read("input", &mut pcm, 0).unwrap().frames > 0);
     assert!(pcm.iter().all(|sample| sample.is_finite()));
-    assert!(active.write("output", &[0.0; 512]).unwrap().frames > 0);
+    assert!(active.write("output", &[0.0; 512], 0).unwrap().frames > 0);
     delete_disconnected_nodes(&resources, &mut active, &mut fixture);
 }
 
@@ -207,9 +207,9 @@ fn native_coreaudio_recovery_retains_graph_owners_and_offline_gain_edits() {
                 && active.0["input"].epoch.load(Ordering::Acquire) > epoch
         });
         let mut pcm = [0.0; 512];
-        wait_until(|| active.read("input", &mut pcm).unwrap().frames > 0);
+        wait_until(|| active.read("input", &mut pcm, 0).unwrap().frames > 0);
         assert!(pcm.iter().all(|sample| sample.is_finite()));
-        assert!(active.write("output", &[0.0; 512]).unwrap().frames > 0);
+        assert!(active.write("output", &[0.0; 512], 0).unwrap().frames > 0);
         eprintln!(
             "CoreAudio actual removal/reappearance cycle={cycle}; native input/output resumed; same graph owners"
         );
@@ -259,8 +259,8 @@ fn drive_native_graph(active: &DeviceSet, rate: u32) {
             (clock.native_frames - clock_start) * u64::from(rate) / u64::from(clock.native_rate);
         // Native credit is the clock; sleep only yields CPU, never sets rate.
         while graph_frames + 256 <= through {
-            captured += active.read("input", &mut pcm).unwrap().frames;
-            submitted += active.write("output", &[0.0; 512]).unwrap().frames;
+            captured += active.read("input", &mut pcm, 0).unwrap().frames;
+            submitted += active.write("output", &[0.0; 512], 0).unwrap().frames;
             assert!(pcm.iter().all(|sample| sample.is_finite()));
             graph_frames += 256;
         }

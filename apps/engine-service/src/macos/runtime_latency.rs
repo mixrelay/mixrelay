@@ -534,6 +534,8 @@ impl Measurements {
 }
 
 #[cfg(test)]
+mod route_tests;
+#[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     pub(crate) fn feedback_plan() -> RenderPlan {
@@ -1025,13 +1027,16 @@ pub(crate) mod tests {
     }
     #[test]
     fn residence_invalid_windows_retain_published_latency_and_then_recover() {
-        use mixrelay_audio_io::residence::Residence;
+        use mixrelay_audio_io::residence::{Passage, Residence};
         let plan = feedback_plan();
         let id = plan.sink_bindings()[0]
             .virtual_endpoint_id()
             .unwrap()
             .clone();
         let rates = BTreeMap::from([(id.clone(), 48_000)]);
+        // Just under 32 native frames at 48 kHz, so the planned 32 round up to 64 once.
+        let ticks =
+            mixrelay_realtime::Timebase::current().ticks(std::time::Duration::from_micros(666));
         for index in 0..4 {
             let mut measurement = Measurements::default();
             let mut value = observation();
@@ -1045,32 +1050,48 @@ pub(crate) mod tests {
                 for tap in [
                     &mut value.native.acquisition,
                     &mut value.native.presentation,
-                    &mut value.native.native_queue,
-                    &mut value.native.graph_queue,
                     &mut value.src_input,
                     &mut value.src_output,
                 ] {
                     tap.weight += 32;
                 }
-                value.native.native_queue.sum += 32 * 64;
+                for queue in [
+                    &mut value.native.native_queue,
+                    &mut value.native.graph_queue,
+                ] {
+                    queue.producer.position += 32;
+                    queue.consumer.position += 32;
+                }
+                value.native.native_queue.consumer.area += 32 * ticks;
             };
             advance(&mut value);
             assert_eq!(
                 measurement.observe(&plan, 1, current(value), &rates)[&id],
                 Some(64)
             );
-            // Producer publishes between the empty fill sample and a successful
-            // 32-frame read. No shortage/fault counter changes in this window.
-            let residence = Residence::default();
-            residence.read(0, 32);
-            let invalid = residence.snapshot().unwrap().invalid;
-            let tap = match index {
-                0 => &mut value.native.native_queue,
-                1 => &mut value.native.graph_queue,
-                2 => &mut value.src_input,
-                _ => &mut value.src_output,
-            };
-            tap.invalid += invalid;
+            // A FIFO consumer passes frames it never read, or an SRC sample is invalid.
+            // No shortage/fault counter changes in this window.
+            if index < 2 {
+                let passage = Passage::default();
+                passage.consumer.advance(32, 0, 0);
+                let discarded = passage.consumer.snapshot().unwrap().discarded;
+                let queue = if index == 0 {
+                    &mut value.native.native_queue
+                } else {
+                    &mut value.native.graph_queue
+                };
+                queue.consumer.discarded += discarded;
+            } else {
+                let residence = Residence::default();
+                residence.record(None, 32);
+                let invalid = residence.snapshot().unwrap().invalid;
+                let tap = if index == 2 {
+                    &mut value.src_input
+                } else {
+                    &mut value.src_output
+                };
+                tap.invalid += invalid;
+            }
             assert_eq!(
                 measurement.observe(&plan, 1, current(value), &rates)[&id],
                 Some(64)

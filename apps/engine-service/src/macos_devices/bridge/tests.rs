@@ -116,20 +116,20 @@ fn independent_converter_preserves_pcm_across_three_native_callback_bursts() {
             }],
         };
         let mut graph_pcm = [0.0; 32];
-        device.read(&mut graph_pcm);
+        device.read(&mut graph_pcm, 0);
         native_callback(&context, &mut native);
         if input {
             prime(&context, &device, &mut bridge, &mut native);
         } else {
             for _ in 0..4 {
-                device.write(&[0.25; 256]);
+                device.write(&[0.25; 256], 0);
                 bridge.pump(&context).unwrap();
             }
         }
         let mut missing = 0;
         for tick in 0..30_000 {
             if !input && tick % 2 == 0 {
-                assert_eq!(device.write(&[0.25; 32]).frames, 32);
+                assert_eq!(device.write(&[0.25; 32], 0).frames, 32);
             }
             if tick % 3 == 0 {
                 bridge.observe(&context, true).unwrap();
@@ -137,7 +137,7 @@ fn independent_converter_preserves_pcm_across_three_native_callback_bursts() {
             }
             native_callback(&context, &mut native);
             if input && tick % 2 == 0 {
-                device.read(&mut graph_pcm);
+                device.read(&mut graph_pcm, 0);
                 if tick > 300 {
                     missing += graph_pcm
                         .iter()
@@ -176,7 +176,7 @@ fn prime(
         }
         if pass == 0 {
             for _ in 0..16 {
-                device.read(&mut [0.0; 32]);
+                device.read(&mut [0.0; 32], 0);
             }
         }
     }
@@ -200,7 +200,7 @@ fn capture_clock_feedback_bounds_backlog_across_batched_graph_consumption() {
             }],
         };
         let mut output = [0.0; 32];
-        device.read(&mut output);
+        device.read(&mut output, 0);
         prime(&context, &device, &mut bridge, &mut native);
         let mut credit = 0.0_f64;
         let mut missing = 0;
@@ -213,7 +213,7 @@ fn capture_clock_feedback_bounds_backlog_across_batched_graph_consumption() {
             if credit >= 256.0 {
                 credit -= 256.0;
                 for _ in 0..8 {
-                    let frames = device.read(&mut output).frames;
+                    let frames = device.read(&mut output, 0).frames;
                     missing += 32 - frames;
                     assert!(output.iter().all(|sample| (*sample - 0.25).abs() < 0.001));
                 }
@@ -283,6 +283,7 @@ fn private_residence_advances_on_native_time_without_graph_producer_progress() {
 
 #[test]
 fn graph_domain_src_residence_uses_native_scalar_in_both_directions() {
+    use crate::macos_devices::latency::tests::passage;
     use mixrelay_audio_io::residence::ResidenceSnapshot;
     for input in [true, false] {
         let (_device, context) =
@@ -317,8 +318,8 @@ fn graph_domain_src_residence_uses_native_scalar_in_both_directions() {
         };
         next.native.acquisition = zero;
         next.native.presentation = zero;
-        next.native.native_queue = zero;
-        next.native.graph_queue = zero;
+        next.native.native_queue = passage(0, 1);
+        next.native.graph_queue = passage(0, 1);
         next.src_input = zero;
         next.src_output = zero;
         next.native.input_scalar = ResidenceSnapshot {

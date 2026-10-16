@@ -37,7 +37,17 @@ pub unsafe extern "C" fn mr_device_io_graph_frames(io: *mut DeviceIo) -> u64 {
     unsafe { io.as_ref() }.map_or(0, |io| io.progress.graph_frames.load(Acquire))
 }
 
+/// The latest callback's mean-frame host ticks, or zero before any timed callback.
+/// # Safety
+/// IO remains initialized and retained through this atomic observation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_device_io_callback_host(io: *mut DeviceIo) -> u64 {
+    // SAFETY: only independently atomic progress is read from the retained owner.
+    unsafe { io.as_ref() }.map_or(0, |io| io.progress.callback_host.load(Acquire))
+}
+
 /// Transfers a complete block through the graph producer's designated ring.
+/// `host` is the graph cycle's host time in ticks, shared by all of its transfers.
 /// # Safety
 /// IO is retained and this graph producer is serialized. Samples owns
 /// frames*channels readable floats disjoint from queue storage; frames above 4096
@@ -47,9 +57,12 @@ pub unsafe extern "C" fn mr_device_io_graph_write(
     io: *mut DeviceIo,
     samples: *const f32,
     frames: u32,
+    host: u64,
 ) -> u32 {
     // SAFETY: role-specific queue access never forms an exclusive whole-owner borrow.
-    unsafe { io.as_ref() }.map_or(0, |io| unsafe { queues::graph_write(io, samples, frames) })
+    unsafe { io.as_ref() }.map_or(0, |io| unsafe {
+        queues::graph_write(io, samples, frames, host)
+    })
 }
 
 /// Transfers a complete block through the SRC owner consumer's designated ring.
@@ -383,6 +396,7 @@ pub unsafe extern "C" fn mr_device_io_bridge_discard(io: *mut DeviceIo) {
 
 /// Reads graph input, discarding old PCM when the graph's recovery epoch changes.
 /// Returns actual frames and whether this read admitted the first consumer epoch.
+/// `host` is the graph cycle's host time in ticks, shared by all of its transfers.
 /// Null IO, wrong direction, zero or oversized requests return the empty default
 /// without admitting an epoch. Recovery after a prior read is never initial admission.
 /// # Safety
@@ -394,10 +408,11 @@ pub unsafe extern "C" fn mr_device_io_graph_read(
     samples: *mut f32,
     frames: u32,
     epoch: u64,
+    host: u64,
 ) -> queues::GraphRead {
     // SAFETY: graph owns only this consumer and graph epoch cell.
     unsafe { io.as_ref() }.map_or_else(queues::GraphRead::default, |io| unsafe {
-        queues::graph_read(io, samples, frames, epoch)
+        queues::graph_read(io, samples, frames, epoch, host)
     })
 }
 /// Installs the clock-boundary hook before registration, never on a live callback.

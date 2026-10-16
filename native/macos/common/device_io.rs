@@ -60,13 +60,13 @@ pub use diagnostics::{
 pub use ffi::{
     mr_device_buffer_size, mr_device_buffer_write, mr_device_io_alive, mr_device_io_bridge_discard,
     mr_device_io_bridge_read, mr_device_io_bridge_write, mr_device_io_buffer_info,
-    mr_device_io_clock_device, mr_device_io_clock_discontinuities, mr_device_io_connect,
-    mr_device_io_connect_status, mr_device_io_create, mr_device_io_create_group,
-    mr_device_io_destroy, mr_device_io_direct_binding, mr_device_io_disconnect,
-    mr_device_io_graph_frames, mr_device_io_graph_read, mr_device_io_graph_write,
-    mr_device_io_native_frames, mr_device_io_native_rate, mr_device_io_output_epoch,
-    mr_device_io_overflows, mr_device_io_pcm_hook, mr_device_io_quantum, mr_device_io_queued,
-    mr_device_io_render_hook, mr_device_io_starvations, mr_device_io_ticks,
+    mr_device_io_callback_host, mr_device_io_clock_device, mr_device_io_clock_discontinuities,
+    mr_device_io_connect, mr_device_io_connect_status, mr_device_io_create,
+    mr_device_io_create_group, mr_device_io_destroy, mr_device_io_direct_binding,
+    mr_device_io_disconnect, mr_device_io_graph_frames, mr_device_io_graph_read,
+    mr_device_io_graph_write, mr_device_io_native_frames, mr_device_io_native_rate,
+    mr_device_io_output_epoch, mr_device_io_overflows, mr_device_io_pcm_hook, mr_device_io_quantum,
+    mr_device_io_queued, mr_device_io_render_hook, mr_device_io_starvations, mr_device_io_ticks,
 };
 pub use queues::GraphRead;
 
@@ -140,6 +140,8 @@ struct Callback {
     pcm_hook: Option<PcmHook>,
     pcm_context: *mut c_void,
     previous_timestamp: Option<(f64, u64, u32)>,
+    /// Host ticks per frame between this device's consecutive callback timestamps.
+    frame_ticks: f64,
 }
 
 #[derive(Default)]
@@ -151,6 +153,8 @@ struct Progress {
     native_quantum: AtomicU32,
     graph_quantum: AtomicU32,
     invalid: AtomicBool,
+    /// The latest callback's mean-frame host ticks; its own queue roles pass frames then.
+    callback_host: AtomicU64,
 }
 
 /// Opaque device context. No blanket `Send`/`Sync`: the enclosing engine owner
@@ -212,6 +216,7 @@ impl DeviceIo {
                 pcm_hook: None,
                 pcm_context: ptr::null_mut(),
                 previous_timestamp: None,
+                frame_ticks: 0.0,
             }),
             native_ring: PcmRing::new(channels, 16384)?,
             graph_ring: PcmRing::new(channels, 16384)?,
@@ -241,6 +246,30 @@ impl DeviceIo {
             &self.graph_ring
         } else {
             &self.native_ring
+        }
+    }
+
+    /// Each role records the ring cursor it alone advances, so both sides count the same
+    /// frames, including any it discarded. `host` is that role's own host time.
+    fn produced(&self, graph: bool, frames: u32, host: u64) {
+        self.passage(graph).producer.advance(
+            self.ring(graph).stats().written,
+            u64::from(frames),
+            host,
+        );
+    }
+    fn consumed(&self, graph: bool, frames: u32, host: u64) {
+        self.passage(graph).consumer.advance(
+            self.ring(graph).stats().read,
+            u64::from(frames),
+            host,
+        );
+    }
+    fn passage(&self, graph: bool) -> &mixrelay_audio_io::residence::Passage {
+        if graph {
+            &self.measurements.graph_queue
+        } else {
+            &self.measurements.native_queue
         }
     }
 }

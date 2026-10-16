@@ -45,6 +45,14 @@ unsafe extern "C" {
 
 struct MacEngineExternalIo<'a> {
     devices: &'a super::macos_devices::DeviceSet,
+    /// The admitted cycle's one host label for all of its device transfers.
+    host: u64,
+}
+
+impl<'a> MacEngineExternalIo<'a> {
+    fn new(devices: &'a super::macos_devices::DeviceSet) -> Self {
+        Self { devices, host: 0 }
+    }
 }
 
 impl ExternalIo for MacEngineExternalIo<'_> {
@@ -53,6 +61,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
         _cycle: &ProcessCycle,
         controls: mixrelay_audio_engine::ExternalControlState<'_>,
     ) -> mixrelay_audio_engine::CycleAdmission {
+        self.host = self.devices.graph_host();
         for (binding, enabled) in controls.sources() {
             self.devices
                 .set_binding_active(binding.node_id().as_str(), true, enabled);
@@ -70,7 +79,10 @@ impl ExternalIo for MacEngineExternalIo<'_> {
         destination: &mut [f32],
         cycle: &ProcessCycle,
     ) -> TransferOutcome {
-        if let Some(outcome) = self.devices.read(binding.node_id().as_str(), destination) {
+        if let Some(outcome) = self
+            .devices
+            .read(binding.node_id().as_str(), destination, self.host)
+        {
             return outcome;
         }
         read_application(binding, destination, cycle)
@@ -83,7 +95,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
         _cycle: &ProcessCycle,
     ) -> TransferOutcome {
         self.devices
-            .write(binding.node_id().as_str(), source)
+            .write(binding.node_id().as_str(), source, self.host)
             .unwrap_or_else(|| TransferOutcome::complete(0))
     }
 }
@@ -489,9 +501,7 @@ fn process_worker_block(
     });
     let report = process_native_cycle(
         block.processor,
-        &mut MacEngineExternalIo {
-            devices: block.devices,
-        },
+        &mut MacEngineExternalIo::new(block.devices),
         WorkerCycle {
             timeline,
             frames,

@@ -7,6 +7,8 @@ mod application;
 mod bridge;
 mod buffer_control;
 mod buffer_transaction;
+#[cfg(test)]
+pub(crate) mod callback_fixture;
 mod device;
 pub(super) mod direct;
 mod ffi;
@@ -179,7 +181,16 @@ impl DeviceSet {
                 && device.native_rate.load(Ordering::Acquire) == sample_rate
         })
     }
-    pub(super) fn read(&self, id: &str, samples: &mut [f32]) -> Option<TransferOutcome> {
+    /// The pacing device's latest callback label. A graph cycle labels all its reads and
+    /// writes with this one time, so the label cancels between a route's source and sink
+    /// FIFOs and their passages sum to the frame's actual bridge-to-bridge delay.
+    pub(super) fn graph_host(&self) -> u64 {
+        self.clock_master()
+            .map(Device::callback_host)
+            .filter(|host| *host != 0)
+            .unwrap_or_else(mixrelay_realtime::host_time)
+    }
+    pub(super) fn read(&self, id: &str, samples: &mut [f32], host: u64) -> Option<TransferOutcome> {
         let id = self.binding_key(id, true)?;
         if let Some(spec) = self.1.get(id) {
             samples.fill(0.0);
@@ -194,9 +205,9 @@ impl DeviceSet {
             samples.fill(0.0);
             return Some(recovery::offline_transfer(samples.len(), device.channels));
         }
-        self.0.get(id).map(|device| device.read(samples))
+        self.0.get(id).map(|device| device.read(samples, host))
     }
-    pub(super) fn write(&self, id: &str, samples: &[f32]) -> Option<TransferOutcome> {
+    pub(super) fn write(&self, id: &str, samples: &[f32], host: u64) -> Option<TransferOutcome> {
         let id = self.binding_key(id, false)?;
         if let Some(spec) = self.1.get(id) {
             return Some(recovery::offline_transfer(
@@ -209,7 +220,7 @@ impl DeviceSet {
         {
             return Some(recovery::offline_transfer(samples.len(), device.channels));
         }
-        self.0.get(id).map(|device| device.write(samples))
+        self.0.get(id).map(|device| device.write(samples, host))
     }
 }
 type Cache = BTreeMap<String, (Spec, Weak<Device>)>;
@@ -556,11 +567,11 @@ mod tests {
         let allocation = allocation_counter::measure(|| {
             assert_eq!(devices.binding_key("driver", true), Some("driver/capture"));
             assert_eq!(devices.binding_key("driver", false), Some("driver/render"));
-            assert_eq!(devices.read("driver", &mut input).unwrap().frames, 32);
-            assert_eq!(devices.write("driver", &output).unwrap().frames, 32);
+            assert_eq!(devices.read("driver", &mut input, 0).unwrap().frames, 32);
+            assert_eq!(devices.write("driver", &output, 0).unwrap().frames, 32);
             assert!(input.iter().all(|sample| *sample == 0.0));
-            assert_eq!(devices.read("missing", &mut input), None);
-            assert_eq!(devices.write("missing", &output), None);
+            assert_eq!(devices.read("missing", &mut input, 0), None);
+            assert_eq!(devices.write("missing", &output, 0), None);
         });
         assert_eq!(allocation.count_total, 0);
     }
@@ -689,7 +700,7 @@ mod tests {
         let (device, context) = synthetic_output(2, 48000, 48000);
         let pcm = [0.0; 64];
         unsafe {
-            mr_device_io_graph_write(device.native.pointer.as_ptr(), pcm.as_ptr(), 32);
+            mr_device_io_graph_write(device.native.pointer.as_ptr(), pcm.as_ptr(), 32, 0);
         }
         context.clock_aligned.store(true, Ordering::Release);
         let bridge = DeviceBridge::new(&context, 48000).unwrap();
@@ -710,7 +721,12 @@ mod tests {
         for _ in 0..16 {
             assert_eq!(
                 unsafe {
-                    mr_device_io_graph_write(device.native.pointer.as_ptr(), source.as_ptr(), 256)
+                    mr_device_io_graph_write(
+                        device.native.pointer.as_ptr(),
+                        source.as_ptr(),
+                        256,
+                        0,
+                    )
                 },
                 256
             );
@@ -741,7 +757,7 @@ mod tests {
                 let mut bridge = DeviceBridge::new(&context, native_rate).unwrap();
                 // Establish the graph consumer epoch before queuing this callback.
                 let mut pcm = [0.0; 32];
-                device.read(&mut pcm);
+                device.read(&mut pcm, 0);
                 for _ in 0..4 {
                     bridge.bridge.push_interleaved(&[0.25; 256]).unwrap();
                 }
@@ -750,7 +766,7 @@ mod tests {
                 for _ in 0..4 {
                     bridge.pump(&context).unwrap();
                 }
-                let frames: u32 = (0..8).map(|_| device.read(&mut pcm).frames).sum();
+                let frames: u32 = (0..8).map(|_| device.read(&mut pcm, 0).frames).sum();
                 let expected = if aligned {
                     pacing_quantum
                 } else {
@@ -815,12 +831,12 @@ mod tests {
             );
         }
         let allocation = allocation_counter::measure(|| {
-            let first = device.read(&mut pcm);
+            let first = device.read(&mut pcm, 0);
             assert_eq!(first.activity, InputActivity::Priming);
             assert_eq!(first.frames, 0);
             assert!(!first.discontinuity);
             assert!(pcm.iter().all(|sample| *sample == 0.0));
-            let stalled = device.read(&mut pcm);
+            let stalled = device.read(&mut pcm, 0);
             assert_eq!(stalled.activity, InputActivity::Active);
             assert_eq!(stalled.frames, 0);
         });
@@ -836,10 +852,10 @@ mod tests {
                 32
             );
         }
-        assert_eq!(device.read(&mut pcm), TransferOutcome::complete(32));
+        assert_eq!(device.read(&mut pcm, 0), TransferOutcome::complete(32));
         assert_eq!(pcm.map(f32::to_bits), [0.75_f32.to_bits(); 32]);
         context.epoch.fetch_add(1, Ordering::Release);
-        let restarted = device.read(&mut pcm);
+        let restarted = device.read(&mut pcm, 0);
         assert_eq!(restarted.activity, InputActivity::Active);
         assert_eq!(restarted.frames, 0);
     }
@@ -923,7 +939,7 @@ mod tests {
                     0
                 );
                 let source = vec![0.25; 512 * usize::from(channels)];
-                assert_eq!(device.write(&source).frames, 512);
+                assert_eq!(device.write(&source, 0).frames, 512);
                 for _ in 0..4 {
                     bridge.pump(&context).unwrap();
                 }
@@ -986,7 +1002,7 @@ mod tests {
             sample_rate: 96_000,
             block_frames: 256,
         };
-        assert_eq!(device.write(&[0.25; 512]).frames, 256);
+        assert_eq!(device.write(&[0.25; 512], 0).frames, 256);
         let cancelled = resources
             .prepare_format_change(
                 &graph,
@@ -1059,7 +1075,7 @@ mod tests {
             sample_rate: 96_000,
             block_frames: 256,
         };
-        assert_eq!(device.write(&[0.25; 512]).frames, 256);
+        assert_eq!(device.write(&[0.25; 512], 0).frames, 256);
         resources
             .prepare_format_change(
                 &graph,
@@ -1082,7 +1098,7 @@ mod tests {
             "publishing the processing rate must preserve the physical device rate"
         );
         assert_eq!(
-            device.write(&[0.25; 512]).frames,
+            device.write(&[0.25; 512], 0).frames,
             0,
             "old converter must not accept new-rate PCM"
         );
@@ -1189,7 +1205,7 @@ mod tests {
         assert!(bridge.clock_aligned);
         device.ready_rate.store(48_000, Ordering::Release);
         let source = [0.25; 1024];
-        assert_eq!(device.write(&source).frames, 512);
+        assert_eq!(device.write(&source, 0).frames, 512);
         for _ in 0..4 {
             bridge.pump(&context).unwrap();
         }

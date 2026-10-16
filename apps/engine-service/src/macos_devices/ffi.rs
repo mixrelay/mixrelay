@@ -82,10 +82,13 @@ unsafe extern "C" {
         samples: *mut f32,
         frames: u32,
         epoch: u64,
+        host: u64,
     ) -> GraphRead;
     pub(super) fn mr_device_io_graph_write(
         io: *mut c_void,
         samples: *const f32,
         frames: u32,
+        host: u64,
     ) -> u32;
+    pub(super) fn mr_device_io_callback_host(io: *mut c_void) -> u64;
 }

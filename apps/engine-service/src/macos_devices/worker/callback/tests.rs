@@ -47,16 +47,16 @@ fn native_callback_alone_converts_mixed_rates_without_polling_or_rt_allocation()
         let owner = CallbackBridge::new(&context, 96_000).unwrap();
         let mut native = [0.25; 32];
         let mut graph = [0.0; 32];
-        device.read(&mut graph);
+        device.read(&mut graph, 0);
         let mut missing = 0;
         let allocation = allocation_counter::measure(|| {
             for cycle in 0..30_000 {
                 if !input && cycle % 2 == 0 {
-                    assert_eq!(device.write(&[0.25; 32]).frames, 32);
+                    assert_eq!(device.write(&[0.25; 32], 0).frames, 32);
                 }
                 tick(&context, &mut native);
                 if input && cycle % 2 == 0 {
-                    device.read(&mut graph);
+                    device.read(&mut graph, 0);
                     if cycle > 300 {
                         missing += graph.iter().filter(|x| (**x - 0.25).abs() > 0.001).count();
                     }
@@ -87,7 +87,7 @@ fn off_on_is_acknowledged_by_callback_and_dropped_owner_cannot_run_again() {
     let owner = CallbackBridge::new(&context, 48_000).unwrap();
     let mut native = [0.0; 32];
     tick(&context, &mut native);
-    device.write(&[0.25; 32]);
+    device.write(&[0.25; 32], 0);
     tick(&context, &mut native);
     assert_eq!(native.map(f32::to_bits), [0.25_f32.to_bits(); 32]);
     device.set_active(false);
@@ -95,7 +95,7 @@ fn off_on_is_acknowledged_by_callback_and_dropped_owner_cannot_run_again() {
     assert_eq!(native.map(f32::to_bits), [0.0_f32.to_bits(); 32]);
     device.set_active(true);
     tick(&context, &mut native);
-    device.write(&[0.75; 32]);
+    device.write(&[0.75; 32], 0);
     tick(&context, &mut native);
     assert_eq!(native.map(f32::to_bits), [0.75_f32.to_bits(); 32]);
     drop(owner);
@@ -136,7 +136,7 @@ fn resumed_output_primes_real_converted_pcm_before_admitting_native_reads() {
                 device.set_active(true);
             }
             if cycle % 2 == 0 {
-                device.write(&[0.25; 32]);
+                device.write(&[0.25; 32], 0);
             }
             tick(&context, &mut native);
         }

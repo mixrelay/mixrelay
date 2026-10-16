@@ -37,7 +37,8 @@ struct CallbackIo<'a> {
     buffers: Buffers<'a>,
     bindings: &'a [Binding],
     offset: usize,
-    bridged: Option<&'a crate::macos_devices::DeviceSet>,
+    /// Bridged devices and the host time labelling their transfers in this callback.
+    bridged: Option<(&'a crate::macos_devices::DeviceSet, u64)>,
 }
 impl ExternalIo for CallbackIo<'_> {
     fn begin_cycle(
@@ -45,7 +46,7 @@ impl ExternalIo for CallbackIo<'_> {
         _cycle: &ProcessCycle,
         controls: mixrelay_audio_engine::ExternalControlState<'_>,
     ) -> mixrelay_audio_engine::CycleAdmission {
-        if let Some(devices) = self.bridged {
+        if let Some((devices, _)) = self.bridged {
             for (binding, enabled) in controls.sources() {
                 devices.set_binding_active(binding.node_id().as_str(), true, enabled);
             }
@@ -63,7 +64,7 @@ impl ExternalIo for CallbackIo<'_> {
     ) -> TransferOutcome {
         if let Some(result) = self
             .bridged
-            .and_then(|devices| devices.read(binding.node_id().as_str(), destination))
+            .and_then(|(devices, host)| devices.read(binding.node_id().as_str(), destination, host))
         {
             return result;
         }
@@ -91,7 +92,7 @@ impl ExternalIo for CallbackIo<'_> {
     ) -> TransferOutcome {
         if let Some(result) = self
             .bridged
-            .and_then(|devices| devices.write(binding.node_id().as_str(), source))
+            .and_then(|(devices, host)| devices.write(binding.node_id().as_str(), source, host))
         {
             return result;
         }
@@ -241,7 +242,10 @@ impl Renderer<'_> {
             buffers,
             bindings: self.bindings,
             offset: 0,
-            bridged: self.native_clock.as_ref().map(|(plan, _)| &plan.bridged),
+            bridged: self
+                .native_clock
+                .as_ref()
+                .map(|(plan, _)| (&plan.bridged, plan.callback_host())),
         };
         // Native sample time when the device reports it, otherwise continue the previous
         // position. Any jump (a device skip, or switching between the two) is declared a
@@ -445,6 +449,41 @@ fn finish_render(
         return Err("CoreAudio direct callback rejected buffer geometry or DSP processing".into());
     }
     Ok(())
+}
+
+/// Runs `drive` while `plan`'s master callback renders `processor`, installed as `run`
+/// installs it, without `CoreAudio` or supervision.
+#[cfg(test)]
+pub(crate) fn render_directly<R>(
+    plan: &DirectPlan,
+    processor: &mut Box<BlockProcessor>,
+    drive: impl FnOnce() -> R,
+) -> R {
+    let status =
+        mixrelay_engine_service::session::AdapterRuntimeStatus::new(super::adapter_profile());
+    let signals = RenderSignals::default();
+    let mut prepared = PreparedRenderer::new(Renderer {
+        timebase: mixrelay_realtime::Timebase::current(),
+        processor,
+        activation: None,
+        bindings: &plan.bindings,
+        clock_id: plan.clock_id,
+        epoch: super::super::macos_devices::direct::next_epoch(),
+        native_clock: Some((plan, plan.discontinuities())),
+        status: &status,
+        position: None,
+        progress: &signals.progress,
+        failed: &signals.failed,
+        invalid: &signals.invalid,
+    });
+    let installed = prepared.install(plan);
+    let result = drive();
+    drop(installed);
+    assert!(
+        !signals.failed.load(Ordering::Acquire) && !signals.invalid.load(Ordering::Acquire),
+        "direct callback rejected its buffers"
+    );
+    result
 }
 
 #[cfg(test)]

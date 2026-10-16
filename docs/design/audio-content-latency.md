@@ -31,13 +31,30 @@ Direct owners use the timestamps of the callback that actually rendered their PC
 Missing native host timestamps remain unknown; sample-counter fallback is never
 acquisition/presentation latency evidence.
 
-Each native and graph FIFO is sampled by its sole consumer immediately before
-reading. The tap accumulates `(2 * fill - actual_read) * actual_read` and the
-number of frames read. Dividing the window sum by twice its weight estimates mean
-frame residence via Little's law. Failed reads contribute no residence; deadline
-shortages invalidate that window. AsyncClockBridge's private input and output
-batch FIFOs instead integrate retained backlog over elapsed native callback time
-between scheduling invocations, divided by the frames consumed in that domain.
+Each native and graph FIFO is timed on both sides. After every write or read, the
+role records the ring cursor it alone advances and adds `frames * host ticks` to
+its cumulative area. Every transfer a callback makes or renders uses one label,
+its block's mean frame `now + (frames - 1) / 2` frames of the device's measured
+ticks per frame, because acquisition and presentation time the block's first frame
+while the device moves the rest a frame at a time. A graph cycle captures one
+label at admission for all of its transfers: the pacing device's latest callback
+label, or the direct master's own when that callback renders it, so the label
+cancels between a route's source and sink FIFOs. Each side is snapshotted
+coherently and the consumer is resampled after the producer; any consumer progress
+in between skips the window as contended. Window residence is
+`(Δ consumer area - Δ producer area + queued_end * latest_write_end -
+queued_start * latest_write_start) / Δ frames consumed`: frames still queued at an
+edge count as written at the producer's latest write, which is exact while they all
+came from that write; otherwise the error is at most `queued * (latest - oldest
+queued write) / frames` per edge, with opposite signs that cancel in steady state.
+Unlike the former Little's-law fill sample `(2 * fill - actual_read)`, this stays
+exact when producers write whole callback or graph blocks at once, where the fill
+sample was short by about half the written block. Frames a consumer passes without
+reading (discard or epoch skip) invalidate the window; failed reads move no cursor;
+deadline shortages and overflows invalidate the window through faults.
+AsyncClockBridge's private input and output batch FIFOs instead integrate
+retained backlog over elapsed native callback time between scheduling
+invocations, divided by the frames consumed in that domain.
 The elapsed interval advances even when a graph producer supplies no new PCM.
 The adapter advances this measurement before pumping; additional push/pull calls
 within the same invocation add no elapsed time. Newly converted scratch that is
@@ -46,37 +63,36 @@ across invocations contributes only the time it actually waited. Its
 `algorithmic_delay_frames` is added
 at the converter's output rate, separately from queue residence. Empty producer
 polls do not count as deadline underruns and are not residence samples.
-If a concurrent producer publishes after the fill sample but before the read,
-the successful read can exceed that sampled fill. A residence-invalid window
-is disturbed evidence: the reporter skips it, retaining its previous stable
-value and breaking a candidate streak, even without a deadline shortage fault.
-This applies to native/graph FIFO and both SRC residence invalid counters; the
-next valid window can resume publication from the updated baseline.
+A residence-invalid window is disturbed evidence: the reporter skips it,
+retaining its previous stable value and breaking a candidate streak, even without
+a deadline shortage fault. This applies to native/graph FIFO discards and both SRC
+residence invalid counters; the next valid window can resume publication from the
+updated baseline.
 
 Native callbacks also accumulate separate input/output window means of valid
 `AudioTimeStamp.rateScalar` values. Device-domain frame duration is the nominal
 frame duration multiplied by that direction's mean scalar; a window with no valid
-scalar falls back to nominal. This applies to native FIFO residence and to SRC
-algorithmic delay in the native device domain. SRC batch residence areas advance
-using native frames at nominal Hz; the reporter applies that native direction's
-measured scalar to both SRC residence domains, including capture-side graph output
-and render-side graph input. For example, backlog retained for 480 native frames
-at 48 kHz and scalar 1.001 waits 10.01 ms in either domain. Graph FIFO residence
-and graph-domain algorithmic delay retain the graph rate without this correction.
-Likewise, 12000 native FIFO frames at 48 kHz and scalar 1.001 take 250.25 ms.
+scalar falls back to nominal. This applies to SRC algorithmic delay in the native
+device domain; native and graph FIFO residence is already host time. SRC batch
+residence areas advance using native frames at nominal Hz; the reporter applies
+that native direction's measured scalar to both SRC residence domains, including
+capture-side graph output and render-side graph input. For example, backlog
+retained for 480 native frames at 48 kHz and scalar 1.001 waits 10.01 ms in
+either domain. Graph-domain algorithmic delay retains the graph rate without this
+correction.
 
 The reporter evaluates:
 
 ```text
 source acquisition
-+ native input FIFO / source rate
++ native input FIFO host-time residence
 + SRC input/output batch FIFO residence + input SRC algorithmic delay
-+ graph input FIFO / graph rate
++ graph input FIFO host-time residence
 + prepared DeviceBus snapshot quantum(s) / graph rate
 + planned hosted transport, intrinsic delay and installed route compensation
-+ graph output FIFO / graph rate
++ graph output FIFO host-time residence
 + SRC input/output batch FIFO residence + output SRC algorithmic delay
-+ native output FIFO / destination rate
++ native output FIFO host-time residence
 + destination presentation
 ```
 
@@ -173,7 +189,11 @@ More clients than can be tracked also fail closed until the excess clients leave
 No client/identity/control mutex is taken by the IO marker or latency/safety
 property reads. Stop/Remove and device-rate changes cannot expose obsolete frames.
 
-The control tick coalesces IO-side gate transitions and calls PropertiesChanged
+Only apps read the frames. coreaudiod itself (requester PID 0, or the client it
+registered under `com.apple.audio.coreaudiod`, tracked in a lock-free atomic) reads a
+0/1 marker that toggles on each change of the effective value, as Rogue Amoeba's ARK
+driver does, so its own IO scheduling never sees a latency while a change still
+notifies. The control tick coalesces IO-side gate transitions and calls PropertiesChanged
 for device `ltnc` on input scope. Publication also sends this notification only
 when the effective integer changes. Host callbacks run after registry, inventory,
 device and identity locks are released. Tests reenter the property API while
