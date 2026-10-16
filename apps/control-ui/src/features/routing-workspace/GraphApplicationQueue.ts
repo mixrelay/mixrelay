@@ -39,6 +39,17 @@ interface QueueCallbacks {
   persistenceWarning?: (code: string | null) => void;
 }
 
+/** How a definite revision rejection without a rebase contract was resolved. */
+type ConflictRecovery = 'restored' | 'draft_kept' | 'unresolved';
+
+/** A definitely rejected write and the contract that merges it onto the current document. */
+interface RejectedEdit {
+  before: RuntimeGraphDocument;
+  model: AudioGraphModel;
+  parameters: Map<string, ProcessorParameterChange>;
+  rebase: NonNullable<QueueCallbacks['rebase']>;
+}
+
 type ProcessorRetryTarget = Pick<
   ProcessorRetryRequest,
   'expectedCatalogRevision' | 'expectedInstanceId' | 'graphId' | 'nodeId'
@@ -98,6 +109,16 @@ function definiteNodeRejection(error: unknown) {
       'processor_unavailable',
     ].includes(errorCode(error))
   );
+}
+
+/**
+ * A definite CAS rejection applied nothing, so ordinary concurrent edits are rebased again until
+ * the deadline. Any other failure, such as a lost acknowledgement, is rethrown and never replayed.
+ */
+function requireRebasableConflict(error: unknown, deadline: number) {
+  if (!(error instanceof ControlPortError) || error.body.code !== 'graph_revision_stale')
+    throw error;
+  if (Date.now() >= deadline) throw failure('graph_conflict_unresolved');
 }
 
 function hasSameProcessor(graph: RuntimeGraphDocument, change: ProcessorParameterChange) {
@@ -550,7 +571,11 @@ export class GraphApplicationQueue {
   private async readOwnedGraph(signal: AbortSignal, graphId: string | undefined) {
     if (!this.port.getGraphCatalog || graphId === undefined)
       return bounded(this.port.getGraph(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
-    const catalog = await bounded(this.port.getGraphCatalog(), signal, GRAPH_APPLICATION_TIMEOUT_MS);
+    const catalog = await bounded(
+      this.port.getGraphCatalog(),
+      signal,
+      GRAPH_APPLICATION_TIMEOUT_MS,
+    );
     if (catalog.activeId !== graphId) throw failure('graph_catalog_revision_stale');
     return catalog.document;
   }
@@ -595,30 +620,42 @@ export class GraphApplicationQueue {
     this.recoveryBaseline = null;
   }
 
-  private async restoreRevisionConflict(error: unknown, signal: AbortSignal, graphId?: string) {
+  /**
+   * Adopts the engine document after a definite rejection that left no draft to rebase. An edit
+   * submitted during the read was made on the rejected draft, so it is kept for an explicit retry.
+   */
+  private async restoreRevisionConflict(
+    error: unknown,
+    signal: AbortSignal,
+    graphId?: string,
+  ): Promise<ConflictRecovery> {
     if (!(error instanceof ControlPortError) || error.body.code !== 'graph_revision_stale')
-      return false;
+      return 'unresolved';
     try {
       const document = await this.readEngine(signal, true, graphId ? { graphId } : undefined);
-      this.pending = null;
+      if (this.pending) return 'draft_kept';
       this.pendingParameters.clear();
       this.callbacks.restore(document);
       this.guardOwner(signal, graphId);
       this.blocked = false;
       this.callbacks.error(null);
       this.callbacks.state('active');
-      return true;
+      return 'restored';
     } catch {
-      return false;
+      return 'unresolved';
     }
   }
 
   private async recover(error: unknown, signal: AbortSignal, graphId?: string) {
     if (signal.aborted || this.callbacks.getGraphId?.() !== graphId) return;
-    if (!this.pending && (await this.restoreRevisionConflict(error, signal, graphId))) return;
-    if (signal.aborted) return;
+    // Taken before a conflict read publishes the engine document: a retry rebases from here.
+    const baseline = this.document ?? this.callbacks.getDocument();
+    const conflict = this.pending
+      ? 'unresolved'
+      : await this.restoreRevisionConflict(error, signal, graphId);
+    if (conflict === 'restored' || signal.aborted) return;
     this.blocked = true;
-    this.recoveryBaseline ??= this.document ?? this.callbacks.getDocument();
+    this.recoveryBaseline ??= baseline;
     // Refresh the engine baseline, never overwrite the user's draft/history on a failed edit.
     // A failed read leaves the queue blocked; retry/reload must read it again before writing.
     try {
@@ -628,7 +665,7 @@ export class GraphApplicationQueue {
     }
     if (signal.aborted) return;
     if (graphId && this.callbacks.getGraphId?.() !== graphId) return;
-    this.callbacks.error(errorCode(error));
+    this.callbacks.error(conflict === 'draft_kept' ? 'graph_draft_changed' : errorCode(error));
     this.callbacks.state('blocked');
   }
 
@@ -642,50 +679,58 @@ export class GraphApplicationQueue {
     } catch (error) {
       if (!signal.aborted)
         this.pendingParameters = new Map([...parameters, ...this.pendingParameters]);
+      const rebase = this.callbacks.rebase;
       if (
         error instanceof ControlPortError &&
         error.body.code === 'graph_revision_stale' &&
         before &&
-        this.callbacks.rebase
+        rebase
       ) {
-        await this.rebaseRejectedEdit(before, model, parameters, signal);
+        await this.rebaseRejectedEdit({ before, model, parameters, rebase }, signal);
         return;
       }
       throw error;
     }
   }
 
-  private async rebaseRejectedEdit(
-    before: RuntimeGraphDocument,
-    model: AudioGraphModel,
-    parameters: Map<string, ProcessorParameterChange>,
+  private async rebaseRejectedEdit(rejected: RejectedEdit, signal: AbortSignal) {
+    // An edit submitted during the rejected write supersedes it.
+    const attempt = { draft: this.pending ?? rejected.model };
+    this.pending = null;
+    this.pendingParameters = new Map([...rejected.parameters, ...this.pendingParameters]);
+    try {
+      await this.rebaseUntilApplied(rejected, attempt, signal);
+    } catch (error) {
+      // Recovery keeps a pending draft instead of restoring the engine document over it.
+      if (!signal.aborted) this.pending ??= attempt.draft;
+      throw error;
+    }
+  }
+
+  private async rebaseUntilApplied(
+    rejected: RejectedEdit,
+    attempt: { draft: AudioGraphModel },
     signal: AbortSignal,
   ) {
     const graphId = this.callbacks.getGraphId?.();
     const deadline = Date.now() + GRAPH_APPLICATION_TIMEOUT_MS;
-    const rebase = this.callbacks.rebase as NonNullable<QueueCallbacks['rebase']>;
-    let baseline = before;
-    this.pending ??= model;
-    this.pendingParameters = new Map([...parameters, ...this.pendingParameters]);
+    let baseline = rejected.before;
     while (true) {
       const current = await this.readEngine(signal, true, graphId ? { graphId } : undefined);
-      const rebased = rebase(baseline, current, this.pending as AudioGraphModel);
+      // An edit submitted during the read, the backoff or the last write supersedes the draft.
+      const rebased = rejected.rebase(baseline, current, this.pending ?? attempt.draft);
       this.guardOwner(signal, graphId);
       this.pending = null;
-      const latestParameters = this.pendingParameters;
+      attempt.draft = rebased;
+      const parameters = this.pendingParameters;
       this.pendingParameters = new Map();
       try {
-        await this.apply(rebased, [...latestParameters.values()], signal);
+        await this.apply(rebased, [...parameters.values()], signal);
         return;
       } catch (error) {
         if (signal.aborted) throw error;
-        this.pending ??= rebased;
-        this.pendingParameters = new Map([...latestParameters, ...this.pendingParameters]);
-        // A definite CAS rejection applied nothing. Rebase ordinary concurrent edits
-        // again; a lost acknowledgement must never be replayed automatically.
-        if (!(error instanceof ControlPortError) || error.body.code !== 'graph_revision_stale')
-          throw error;
-        if (Date.now() >= deadline) throw failure('graph_conflict_unresolved');
+        this.pendingParameters = new Map([...parameters, ...this.pendingParameters]);
+        requireRebasableConflict(error, deadline);
         baseline = current;
         await pause(signal);
       }

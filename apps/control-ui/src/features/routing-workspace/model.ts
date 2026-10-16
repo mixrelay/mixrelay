@@ -22,8 +22,6 @@ import type {
   RuntimeGraphDocument,
   RuntimeGraphEdge,
   RuntimeGraphNode,
-  RuntimeStreamSpec,
-  VirtualEndpointRateError,
   VirtualEndpointSettings,
   VirtualEndpointSpec,
 } from '../../core/control-port/types';
@@ -35,8 +33,10 @@ import {
   defaultEffectLabels,
   type EffectKind,
   type EffectLabels,
+  type EffectParameters,
   effectConfig,
   effectControls,
+  effectParameters,
   effectPresets,
   isEffectKind,
   refreshEffectControls,
@@ -622,13 +622,14 @@ function updateBuiltinEffect(
 ): AudioGraphNode {
   const effect = objectValue(config.effect);
   if (!effect || !isEffectKind(effect.kind)) return node;
-  const parameters = objectValue(effect.parameters) ?? {};
+  const parameters = effectParameters(effect.kind, effect.parameters);
+  if (!parameters) return node;
   let nextParameters = parameters;
   let nextConfig: Record<string, unknown>;
   if (parameterId === 'preset') {
     const preset = effectPresets[effect.kind]?.[normalized - 1];
     if (!preset) return node;
-    nextParameters = { ...preset.parameters };
+    nextParameters = { ...parameters, ...preset.parameters };
     nextConfig = { ...config, effect: { ...effect, parameters: nextParameters } };
   } else if (parameterId === 'bypass') {
     if (Number(Boolean(config.bypass)) === normalized) return node;
@@ -664,59 +665,11 @@ function editableParameterState(config: Record<string, unknown>) {
 
 export interface VirtualEndpointUpdate {
   sampleFormat?: import('../../core/ui/AudioNodeEndpointOptions').EndpointUpdate['sampleFormat'];
-  /** Dedicated native-device transaction; never serialized by updateVirtualEndpoint. */
+  /** Dedicated native-device transaction, never serialized into the graph. */
   sampleRate?: number;
   captureChannels: number;
   displayName: string;
   renderChannels: number;
-}
-
-export function updateVirtualEndpoint(
-  model: AudioGraphModel,
-  nodeId: string,
-  update: VirtualEndpointUpdate,
-  presentation: GraphPresentation = defaultPresentation,
-  settings?: VirtualEndpointSettings,
-): AudioGraphModel {
-  const selected = model.nodes.find((node) => node.id === nodeId);
-  if (!selected) return model;
-  const endpointNodeId = runtimeNodeId(selected);
-  const displayName = update.displayName.trim();
-  if (!displayName) return model;
-  const current = model.nodes.find(
-    (node) => runtimeNodeId(node) === endpointNodeId && node.runtime?.type === 'virtual_endpoint',
-  );
-  const currentConfig = objectValue(current?.runtime?.config);
-  if (!current || !currentConfig) return model;
-  const channels = editedEndpointChannels(currentConfig, update);
-  if (!channels) return model;
-  const { renderChannels, captureChannels } = channels;
-  const deviceId = directString(currentConfig, 'id');
-  if (!deviceId) return model;
-  if (
-    !permitsEndpointEdit(
-      settings,
-      renderChannels,
-      captureChannels,
-      displayName === directString(currentConfig, 'displayName'),
-    )
-  )
-    return model;
-  if (
-    (nestedNumber(currentConfig, 'render', 'channels') ?? 0) === renderChannels &&
-    (nestedNumber(currentConfig, 'capture', 'channels') ?? 0) === captureChannels &&
-    (directString(currentConfig, 'displayName') ?? current.appearance.title) === displayName
-  ) {
-    return model;
-  }
-  const value = { captureChannels, displayName, renderChannels };
-  const nodes = model.nodes.map((node) =>
-    node.runtime?.type === 'virtual_endpoint' &&
-    directString(node.runtime.config, 'id') === deviceId
-      ? updatedVirtualEndpointNode(node, node.runtime, value, presentation)
-      : node,
-  );
-  return updateNodeGeometry(model, nodes);
 }
 
 /** Channel edits are graph changes; an active take is guarded by the recorder control boundary. */
@@ -808,102 +761,6 @@ function updateNodeGeometry(model: AudioGraphModel, nodes: AudioGraphNode[]): Au
   return { ...model, edges, nodes, revision: model.revision + 1 };
 }
 
-/** Apply polled control policy only to presentation, never to the runtime document. */
-export function presentVirtualEndpointSettings(
-  model: AudioGraphModel,
-  settings?: VirtualEndpointSettings,
-  sampleRateLabel = 'Sample rate',
-  rateAction?: { enabled: boolean; error: VirtualEndpointRateError | null },
-): AudioGraphModel {
-  if (!settings) return model;
-  return {
-    ...model,
-    nodes: model.nodes.map((node) =>
-      !node.appearance.endpointControl
-        ? node
-        : {
-            ...node,
-            appearance: {
-              ...node.appearance,
-              endpointControl: {
-                ...node.appearance.endpointControl,
-                ...presentEndpointRate(
-                  virtualEndpointIdentity(node),
-                  settings,
-                  sampleRateLabel,
-                  rateAction,
-                ),
-                canRename: settings.canRename,
-                allowedRenderChannels: node.appearance.endpointControl.renderChannels
-                  ? settings.renderChannels
-                  : [],
-                allowedCaptureChannels: node.appearance.endpointControl.captureChannels
-                  ? settings.captureChannels
-                  : [],
-              },
-            },
-          },
-    ),
-  };
-}
-
-function presentEndpointRate(
-  endpointId: string | null,
-  settings: VirtualEndpointSettings,
-  label: string,
-  action?: { enabled: boolean; error: VirtualEndpointRateError | null },
-) {
-  const device = settings.devices.find((candidate) => candidate.spec.id === endpointId);
-  const rate = device?.observedSampleRate;
-  const observed = typeof rate === 'number' && Number.isFinite(rate) && rate > 0;
-  return {
-    observedRate: observed ? { label, value: rate } : undefined,
-    sampleRateOptions:
-      observed && action?.enabled && device?.canSetSampleRate
-        ? device.supportedSampleRates
-        : undefined,
-    rateError: action?.error?.endpointId === endpointId ? action.error.message : null,
-  };
-}
-
-function updatedVirtualEndpointNode(
-  node: AudioGraphNode,
-  runtime: NonNullable<AudioGraphNode['runtime']>,
-  update: VirtualEndpointUpdate,
-  presentation: GraphPresentation,
-): AudioGraphNode {
-  // Called only after the virtual type and a nonempty ID in this config matched.
-  const config = runtime.config as Record<string, unknown>;
-  const isSourceNode = runtime.binding?.side === 'source';
-  const channelCount = isSourceNode ? update.captureChannels : update.renderChannels;
-  const runtimePortId = isSourceNode ? FROM_OS_PORT_ID : TO_OS_PORT_ID;
-  const label = isSourceNode ? presentation.virtualSourcePort : presentation.virtualSinkPort;
-  const boundary = isSourceNode ? 'source' : 'sink';
-  const ports = channelPorts(runtimePortId, channelCount, label, boundary);
-  return {
-    ...node,
-    appearance: {
-      ...node.appearance,
-      channelCount,
-      endpointControl: endpointControl(
-        update.displayName,
-        update.renderChannels,
-        update.captureChannels,
-        presentation,
-      ),
-      meterBanks: [{ channels: channelCount, nodeId: runtimeNodeId(node), portId: runtimePortId }],
-      title: update.displayName,
-    },
-    inputPorts: isSourceNode ? [] : ports,
-    outputPorts: isSourceNode ? ports : [],
-    runtime: {
-      ...runtime,
-      config: updatedVirtualDeviceConfig(config, update),
-      type: 'virtual_endpoint',
-    },
-  };
-}
-
 function createRoutingNode(
   base: { id: string; position: AudioGraphPosition },
   request: MaterializedRoutingNodeRequest,
@@ -915,13 +772,15 @@ function createRoutingNode(
   if (request.kind === 'recorder') return recorderNode(base, 2, presentation);
   if (request.kind === 'compressor') return compressorNode(base, presentation);
   if (request.kind === 'limiter') return limiterNode(base, presentation);
-  if (request.kind === 'effect')
-    return builtinEffectNode(
-      base,
-      effectConfig(request.effect, request.parameters),
-      request.effect,
-      presentation,
-    );
+  if (request.kind === 'effect') {
+    const config = effectConfig(request.effect, request.parameters);
+    const effect = {
+      kind: request.effect,
+      parameters: config.effect.parameters,
+      channels: config.channels,
+    };
+    return builtinEffectNode(base, config, effect, presentation);
+  }
   return externalProcessorNode(base, request.processor, request.ports, presentation);
 }
 
@@ -950,17 +809,21 @@ function compressorNode(
   );
 }
 
+/** A built-in effect whose kind, input channels and complete parameters were validated. */
+interface ParsedEffect {
+  kind: EffectKind;
+  parameters: EffectParameters;
+  channels: number;
+}
+
 function builtinEffectNode(
   base: { id: string; position: AudioGraphPosition },
   config: Record<string, unknown>,
-  kind: EffectKind,
+  { kind, parameters, channels }: ParsedEffect,
   presentation: GraphPresentation,
 ): RuntimeAudioNode {
-  // New nodes carry effectConfig; restored nodes pass only after kind validation.
-  const effect = config.effect as Record<string, unknown>;
   const labels = presentation.effectLabels ?? defaultEffectLabels;
   const title = labels[kind] ?? defaultEffectLabels[kind];
-  const channels = directNumber(config, 'channels') ?? 2;
   const outputs = kind === 'pan' ? 2 : channels;
   const node = processorNode(
     base,
@@ -968,7 +831,7 @@ function builtinEffectNode(
     title,
     'FX',
     config,
-    effectControls(kind, objectValue(effect.parameters) ?? {}, config.bypass === true, labels),
+    effectControls(kind, parameters, config.bypass === true, labels),
     presentation,
   );
   node.outputPorts = channelPorts(AUDIO_PORT_ID, outputs, title);
@@ -987,9 +850,9 @@ function builtinEffectNode(
         {
           id: 'mid',
           label: labels.midDb ?? defaultEffectLabels.midDb,
-          frequencyId: 'frequencyHz',
+          frequencyId: 'midFrequencyHz',
           gainId: 'midDb',
-          qId: 'q',
+          qId: 'midQ',
         },
         {
           id: 'high',
@@ -1551,7 +1414,16 @@ function runtimeBuiltinEffectNode(
   const config = objectValue(node.config);
   const effect = objectValue(config?.effect);
   if (!config || !isEffectKind(effect?.kind)) return null;
-  const parsed = builtinEffectNode(base, config, effect.kind, presentation);
+  const parameters = effectParameters(effect.kind, effect.parameters);
+  const channels = directNumber(config, 'channels');
+  // Bypass is a required field; an editable node would serialize without it.
+  if (!parameters || channels === null || typeof config.bypass !== 'boolean') return null;
+  const parsed = builtinEffectNode(
+    base,
+    config,
+    { kind: effect.kind, parameters, channels },
+    presentation,
+  );
   parsed.runtime = runtime;
   parsed.appearance.title = node.label ?? parsed.appearance.title;
   return parsed;
@@ -1738,7 +1610,9 @@ function runtimeDynamicsNode(
   presentation: GraphPresentation,
 ): RuntimeAudioNode | null {
   if (node.type !== 'compressor' && node.type !== 'limiter') return null;
-  const config = objectValue(node.config) ?? {};
+  const config = objectValue(node.config);
+  // Bypass is a required field; an editable node would serialize without it.
+  if (typeof config?.bypass !== 'boolean') return null;
   const compressor = node.type === 'compressor';
   const parsed = processorNode(
     base,
@@ -1818,11 +1692,11 @@ function virtualEndpointNodes(
   presentation: GraphPresentation,
   reservedIds: ReadonlySet<string>,
 ): RuntimeAudioNode[] {
-  const title = directString(node.config, 'displayName') ?? node.label ?? node.id;
+  const title = directString(node.config, 'displayName');
   const renderChannels = nestedNumber(node.config, 'render', 'channels') ?? 0;
   const captureChannels = nestedNumber(node.config, 'capture', 'channels') ?? 0;
   const reference = objectValue(objectValue(node.config)?.reference);
-  if (!reference) return [];
+  if (!title || !reference) return [];
   const control = endpointControl(title, renderChannels, captureChannels, presentation);
   const runtime = { config: node.config, type: node.type };
   const nodes: RuntimeAudioNode[] = [];
@@ -1886,61 +1760,6 @@ function endpointControl(
     displayName,
     nameLabel: presentation.deviceName,
     renderChannels,
-  };
-}
-
-function permitsEndpointEdit(
-  settings: VirtualEndpointSettings | undefined,
-  render: number,
-  capture: number,
-  unchangedName: boolean,
-) {
-  return (
-    !settings ||
-    ((render === 0 || settings.renderChannels.includes(render)) &&
-      (capture === 0 || settings.captureChannels.includes(capture)) &&
-      (settings.canRename || unchangedName))
-  );
-}
-
-function updatedVirtualDeviceConfig(
-  config: Record<string, unknown>,
-  update: VirtualEndpointUpdate,
-) {
-  return {
-    ...config,
-    ...(config.capture ? { capture: streamConfig(config.capture, update.captureChannels) } : {}),
-    ...(config.render ? { render: streamConfig(config.render, update.renderChannels) } : {}),
-    displayName: update.displayName,
-  };
-}
-
-function editedEndpointChannels(config: Record<string, unknown>, update: VirtualEndpointUpdate) {
-  const renderChannels = config.render
-    ? supportedEndpointChannels(update.renderChannels)
-    : update.renderChannels === 0
-      ? 0
-      : null;
-  const captureChannels = config.capture
-    ? supportedEndpointChannels(update.captureChannels)
-    : update.captureChannels === 0
-      ? 0
-      : null;
-  if (renderChannels === null || captureChannels === null) return null;
-  return { renderChannels, captureChannels };
-}
-
-function supportedEndpointChannels(value: number): number | null {
-  // Validate geometry here; the advertised backend policy above owns the
-  // actual supported set. A stale preset list must not reject a visible option.
-  return Number.isInteger(value) && value >= 1 && value <= 64 ? value : null;
-}
-
-function streamConfig(value: unknown, channels: number): RuntimeStreamSpec {
-  return {
-    ...(objectValue(value) ?? {}),
-    channelLayout: channels === 1 ? 'mono' : channels === 2 ? 'stereo' : 'discrete',
-    channels,
   };
 }
 

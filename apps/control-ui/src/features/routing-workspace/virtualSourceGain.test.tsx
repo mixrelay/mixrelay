@@ -7,12 +7,7 @@ import { useUndoHistory } from '../../core/history/useUndoHistory';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { AudioNodeCard } from '../../core/ui/AudioNodeCard';
 import { graphHistoryGroup } from './graphHistoryGroup';
-import {
-  audioGraphToRuntimeGraph,
-  runtimeGraphToAudioGraph,
-  updateRoutingNodeGain,
-  updateVirtualEndpoint,
-} from './model';
+import { audioGraphToRuntimeGraph, runtimeGraphToAudioGraph, updateRoutingNodeGain } from './model';
 
 const document: RuntimeGraphDocument = {
   schemaVersion: 2,
@@ -143,15 +138,6 @@ it('serializes the source gain once even when the sink is visited last or first'
       restored.nodes.find((node) => node.id === sourceId)?.appearance.gainControl?.valueDb,
     ).toBe(-12);
   }
-  const resized = updateVirtualEndpoint(changed, sinkId, {
-    displayName: 'Renamed',
-    renderChannels: 32,
-    captureChannels: 8,
-  });
-  expect(audioGraphToRuntimeGraph(resized, document).nodes[0]?.config).toMatchObject({
-    gainDb: -12,
-    displayName: 'Renamed',
-  });
 });
 
 it('coalesces virtual gain gestures and roundtrips undo/redo through the runtime document', () => {

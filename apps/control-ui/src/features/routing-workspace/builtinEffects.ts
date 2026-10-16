@@ -36,8 +36,8 @@ export const effectDefaults: Record<EffectKind, Record<string, number>> = {
     lowFrequencyHz: 150,
     lowQ: standardQ,
     midDb: 0,
-    frequencyHz: 1000,
-    q: standardQ,
+    midFrequencyHz: 1000,
+    midQ: standardQ,
     highDb: 0,
     highFrequencyHz: 6000,
     highQ: standardQ,
@@ -147,8 +147,10 @@ const ranges = {
   highDb: [-24, 24, 0.1, 'dB'],
   frequencyHz: [20, 20000, 1, 'Hz'],
   lowFrequencyHz: [20, 20000, 1, 'Hz'],
+  midFrequencyHz: [20, 20000, 1, 'Hz'],
   highFrequencyHz: [20, 20000, 1, 'Hz'],
   lowQ: [0.1, 10, 0.001, ''],
+  midQ: [0.1, 10, 0.001, ''],
   highQ: [0.1, 10, 0.001, ''],
   q: [0.1, 10, 0.001, ''],
   thresholdDb: [-80, 0, 0.1, 'dB'],
@@ -176,6 +178,21 @@ export function isEffectKind(value: unknown): value is EffectKind {
 export function isChainKind(value: unknown): value is ChainKind {
   return typeof value === 'string' && chainKinds.some((kind) => kind === value);
 }
+/** Every parameter of one effect kind, in its control order. */
+export type EffectParameters = Record<string, number>;
+
+/** Returns exactly the parameters of `kind` when each one is a finite number; otherwise null. */
+export function effectParameters(kind: EffectKind, value: unknown): EffectParameters | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const parameters: EffectParameters = {};
+  for (const id of Object.keys(effectDefaults[kind])) {
+    const parameter: unknown = Reflect.get(value, id);
+    if (typeof parameter !== 'number' || !Number.isFinite(parameter)) return null;
+    parameters[id] = parameter;
+  }
+  return parameters;
+}
+
 export function effectConfig(kind: EffectKind, parameters = effectDefaults[kind]) {
   return {
     version: 1,
@@ -187,7 +204,7 @@ export function effectConfig(kind: EffectKind, parameters = effectDefaults[kind]
 
 export function effectControls(
   kind: EffectKind,
-  parameters: Record<string, unknown>,
+  parameters: EffectParameters,
   bypass: boolean,
   labels: EffectLabels,
 ): AudioNodeParameterControl[] {
@@ -226,10 +243,9 @@ export function effectControls(
         ...presets.map((p, index) => ({ value: index + 1, label: text(p.label) })),
       ],
     });
-  for (const [id, defaultValue] of Object.entries(effectDefaults[kind])) {
+  for (const [id, value] of Object.entries(parameters)) {
     if (kind === 'gate' && id === 'ratio') continue;
     const [minimum, maximum, step, suffix] = ranges[id as keyof typeof ranges];
-    const value = typeof parameters[id] === 'number' ? (parameters[id] as number) : defaultValue;
     controls.push({
       id,
       label: text(effectParameterLabelKey(kind, id)),
@@ -250,7 +266,7 @@ export function effectControls(
 /** Refresh confirmed values without reverse-mapping presentation back into translation keys. */
 export function refreshEffectControls(
   kind: EffectKind,
-  parameters: Record<string, unknown>,
+  parameters: EffectParameters,
   bypass: boolean,
   previous: readonly AudioNodeParameterControl[],
 ): AudioNodeParameterControl[] {

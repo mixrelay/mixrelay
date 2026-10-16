@@ -14,7 +14,8 @@ fn server(
 }
 
 // Status 0 drops the connection after reading the request. $client echoes its ID;
-// $complete returns a terminal result bearing that ID (including fast completions).
+// $complete returns a terminal result bearing that ID (including fast completions);
+// $foreign returns a terminal result bearing another operation's ID.
 fn server_with_engines(
     replies: Vec<(u16, Option<&'static str>, &'static str)>,
     engines: Vec<Option<&'static str>>,
@@ -53,13 +54,14 @@ fn server_with_engines(
             if status == 0 {
                 continue;
             }
-            let explicit_result = receipt == Some("$complete");
+            let explicit_result = matches!(receipt, Some("$complete" | "$foreign"));
             if explicit_result {
-                accepted = client_id.clone();
+                let foreign = (receipt == Some("$foreign")).then(|| "foreign-operation".into());
+                accepted = foreign.or_else(|| client_id.clone());
             }
             let receipt = match receipt {
                 Some("$client") => client_id.clone(),
-                Some("$complete") | None => None,
+                Some("$complete" | "$foreign") | None => None,
                 Some(id) => Some(id.to_owned()),
             };
             let header = receipt
@@ -118,8 +120,8 @@ async fn read_request(socket: &mut UnixStream) -> String {
 #[tokio::test]
 async fn polls_once_submitted_work_and_preserves_terminal_accepted_status() {
     let (origin, client, server) = server(vec![
-        (202, Some("session-1"), r#"{"operationId":"session-1"}"#),
-        (202, Some("session-1"), r#"{"operationId":"session-1"}"#),
+        (202, Some("$client"), r#"{"operationId":"$client"}"#),
+        (202, Some("$client"), r#"{"operationId":"$client"}"#),
         (202, None, r#"{"revision":12,"state":"pending"}"#),
         (204, None, ""),
     ]);
@@ -131,9 +133,10 @@ async fn polls_once_submitted_work_and_preserves_terminal_accepted_status() {
     let requests = server.await.expect("fixture finished");
     assert_eq!(requests.len(), 4);
     assert!(requests[0].starts_with("PUT /graph "));
-    assert!(requests[1].starts_with("GET /api/v1/operations/session-1 "));
-    assert!(requests[2].starts_with("GET /api/v1/operations/session-1 "));
-    assert!(requests[3].starts_with("DELETE /api/v1/operations/session-1 "));
+    let id = header(&requests[0], "x-mixrelay-operation-request").expect("client ID");
+    assert!(requests[1].starts_with(&format!("GET /api/v1/operations/{id} ")));
+    assert!(requests[2].starts_with(&format!("GET /api/v1/operations/{id} ")));
+    assert!(requests[3].starts_with(&format!("DELETE /api/v1/operations/{id} ")));
 }
 
 #[tokio::test]
@@ -149,7 +152,7 @@ async fn quick_accepted_status_is_not_an_operation_receipt() {
 #[tokio::test]
 async fn failed_acknowledgement_preserves_terminal_error() {
     let (origin, client, server) = server(vec![
-        (202, Some("session-2"), r#"{"operationId":"session-2"}"#),
+        (202, Some("$client"), r#"{"operationId":"$client"}"#),
         (409, None, r#"{"code":"graph_exchange_busy"}"#),
     ]);
     let result = request(&client, &origin, Method::PUT, "/graph", None)
@@ -162,11 +165,8 @@ async fn failed_acknowledgement_preserves_terminal_error() {
 
 #[tokio::test]
 async fn lost_poll_is_uncertain_even_when_connect_fails() {
-    let (origin, client, server) = server(vec![(
-        202,
-        Some("session-3"),
-        r#"{"operationId":"session-3"}"#,
-    )]);
+    let (origin, client, server) =
+        server(vec![(202, Some("$client"), r#"{"operationId":"$client"}"#)]);
     let result = request(&client, &origin, Method::PUT, "/graph", None)
         .await
         .expect("structured failure");
@@ -196,7 +196,7 @@ async fn initial_connection_refusal_is_distinct_from_a_lost_poll() {
 #[tokio::test]
 async fn changed_receipt_is_rejected_without_resubmitting() {
     let (origin, client, server) = server(vec![
-        (202, Some("session-4"), r#"{"operationId":"session-4"}"#),
+        (202, Some("$client"), r#"{"operationId":"$client"}"#),
         (202, Some("different"), r#"{"operationId":"different"}"#),
     ]);
     assert!(
@@ -210,7 +210,7 @@ async fn changed_receipt_is_rejected_without_resubmitting() {
 #[tokio::test]
 async fn unknown_receipt_is_not_a_definitive_mutation_rejection() {
     let (origin, client, server) = server(vec![
-        (202, Some("session-5"), r#"{"operationId":"session-5"}"#),
+        (202, Some("$client"), r#"{"operationId":"$client"}"#),
         (404, None, r#"{"code":"control_unavailable"}"#),
     ]);
     let result = request(&client, &origin, Method::PUT, "/graph", None).await;
@@ -351,10 +351,10 @@ async fn lost_send_missing_and_other_resolution_failures_are_uncertain() {
 
 #[test]
 fn response_engine_survives_runtime_and_webview_serialization() {
-    let legacy = serde_json::json!({"status":200,"body":{}});
-    let mut response: ControlProxyResponse = serde_json::from_value(legacy.clone()).unwrap();
+    let unidentified = serde_json::json!({"status":200,"body":{}});
+    let mut response: ControlProxyResponse = serde_json::from_value(unidentified.clone()).unwrap();
     assert!(response.engine.is_none());
-    assert_eq!(serde_json::to_value(&response).unwrap(), legacy);
+    assert_eq!(serde_json::to_value(&response).unwrap(), unidentified);
     response.engine = Some("engine".into());
     let wire = serde_json::to_value(response).unwrap();
     assert_eq!(wire["engine"], "engine");
@@ -429,7 +429,7 @@ async fn lost_send_returns_stored_terminal_404_and_acknowledges_it() {
 }
 
 #[tokio::test]
-async fn missing_receipt_after_restart_or_legacy_execution_retains_uncertainty() {
+async fn missing_receipt_after_restart_retains_uncertainty() {
     for replacement in [None, Some("replacement")] {
         let (origin, client, server) = server_with_engines(
             vec![
@@ -481,21 +481,31 @@ async fn body_transport_failures_resolve_once_without_resubmission() {
 }
 
 #[tokio::test]
-async fn body_failure_resolves_a_legacy_server_issued_receipt() {
-    // An older engine ignores the client ID and issues its own before the body is lost.
-    let (origin, client, server) = server(vec![
-        (202, Some("legacy"), "$truncate"),
-        (200, None, r#"{"applied":true}"#),
-        (204, None, ""),
-    ]);
-    let result = request(&client, &origin, Method::PUT, "/graph", None)
-        .await
-        .unwrap();
-    assert_eq!(result.body["applied"], true);
-    let requests = server.await.unwrap();
-    assert_eq!(requests.len(), 3);
-    assert!(requests[1].starts_with("GET /api/v1/operations/legacy "));
-    assert!(requests[2].starts_with("DELETE /api/v1/operations/legacy "));
+async fn receipt_other_than_the_client_id_is_rejected_without_polling() {
+    let (origin, client, server) = server(vec![(
+        202,
+        Some("server-issued"),
+        r#"{"operationId":"server-issued"}"#,
+    )]);
+    let result = request(&client, &origin, Method::PUT, "/graph", None).await;
+    assert_eq!(result.expect_err("foreign receipt"), IDENTITY_CHANGED);
+    assert_eq!(server.await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn fast_completion_of_another_operation_is_rejected_without_acknowledgement() {
+    for status in [200, 204, 404] {
+        let body = if status == 204 { "" } else { r#"{"ok":true}"# };
+        let (origin, client, server) = server(vec![(status, Some("$foreign"), body)]);
+        let result = request(&client, &origin, Method::PUT, "/graph", None).await;
+        assert_eq!(result.expect_err("foreign result"), IDENTITY_CHANGED);
+        // The fixture serves one connection; an acknowledgement would be a second.
+        assert_eq!(server.await.unwrap().len(), 1);
+    }
+    let (origin, client, server) = server(vec![(200, Some("$foreign"), r#"{"ready":true}"#)]);
+    let result = request(&client, &origin, Method::GET, "/health", None).await;
+    assert_eq!(result.expect_err("unrequested result"), IDENTITY_CHANGED);
+    assert_eq!(server.await.unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -550,8 +560,7 @@ fn terminal_404_requires_a_matching_result_header() {
 async fn fully_received_invalid_json_is_not_recoverable_transport_failure() {
     let client = ControlProxyClient::with_socket(None);
     let response = Response::from(tauri::http::Response::new("{"));
-    let mut accepted = None;
-    let result = finish(&client, "http://localhost", response, &mut accepted).await;
+    let result = finish(&client, "http://localhost", response, None, None).await;
     assert!(
         matches!(result, Err(ExchangeError::Invalid(reason)) if reason.contains("response was invalid"))
     );

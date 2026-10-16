@@ -1,30 +1,36 @@
-import type {
-  AudioDeviceDescriptor,
-  CapturableApplication,
-  ControlPort,
-  ExternalProcessorCatalog,
-  GraphApplyRequest,
-  GraphApplyResponse,
-  GraphCatalog,
-  GraphCatalogRequest,
-  GraphLayout,
-  GraphLayoutRequest,
-  GraphLayoutResponse,
-  GraphRuntimeStatus,
-  MeterSnapshot,
-  MixRelayStatus,
-  NodeControlResponse,
-  ProcessorEditorFrame,
-  ProcessorEditorInput,
-  ProcessorEditorStatus,
-  ProcessorParameterUpdateResponse,
-  ProcessorRetryRequest,
-  RecorderRequest,
-  RecorderSettings,
-  RecorderStatus,
-  RuntimeGraphDocument,
-  RuntimeGraphNode,
+import {
+  type AudioDeviceDescriptor,
+  type CapturableApplication,
+  type ControlPort,
+  ControlPortError,
+  type ExternalProcessorCatalog,
+  type GraphApplyRequest,
+  type GraphApplyResponse,
+  type GraphCatalog,
+  type GraphCatalogRequest,
+  type GraphLayout,
+  type GraphLayoutRequest,
+  type GraphLayoutResponse,
+  type GraphRuntimeStatus,
+  type MeterSnapshot,
+  type MixRelayStatus,
+  type NodeControlResponse,
+  type ProcessorEditorFrame,
+  type ProcessorEditorInput,
+  type ProcessorEditorStatus,
+  type ProcessorParameterUpdateResponse,
+  type ProcessorRetryRequest,
+  type RecorderRequest,
+  type RecorderSettings,
+  type RecorderStatus,
+  type RuntimeGraphDocument,
+  type RuntimeGraphNode,
 } from './types';
+
+/** The engine's revision conflict: a 409 the graph writer recognises as a definite rejection. */
+function staleRevision(parameters: Record<string, unknown>) {
+  return new ControlPortError(409, { code: 'graph_revision_stale', parameters });
+}
 
 function nodeGain(node: RuntimeGraphNode): number | undefined {
   if (
@@ -103,7 +109,7 @@ export class StorybookMockControlPort implements ControlPort {
       request.expectedRevision !== this.state.graph.revision ||
       !target
     )
-      throw new Error('graph_revision_stale');
+      throw staleRevision({ graphId, nodeId, expectedRevision: request.expectedRevision });
     if (
       request.gainDb !== undefined &&
       (nodeGain(target) === undefined ||
@@ -172,7 +178,7 @@ export class StorybookMockControlPort implements ControlPort {
   ): Promise<GraphLayoutResponse> {
     const saved = await this.getGraphLayout(graphId);
     if (request.expectedLayoutRevision !== saved.layoutRevision)
-      throw new Error('graph_revision_stale');
+      throw staleRevision({ resource: 'graph_layout', layoutRevision: saved.layoutRevision });
     const next = {
       graphId,
       layoutRevision: saved.layoutRevision + 1,
@@ -217,7 +223,7 @@ export class StorybookMockControlPort implements ControlPort {
       request.expectedRevision !== this.state.graph.revision ||
       request.expectedCatalogRevision !== this.catalogRevision
     ) {
-      throw new Error('graph_revision_stale');
+      throw staleRevision({ catalogRevision: this.catalogRevision });
     }
     if (request.action === 'delete') {
       await this.removeCatalogGraph(request.id);
@@ -272,7 +278,10 @@ export class StorybookMockControlPort implements ControlPort {
   public async applyGraph(request: GraphApplyRequest): Promise<GraphApplyResponse> {
     const { expectedGraphId, ...intent } = request;
     if (expectedGraphId !== undefined && expectedGraphId !== this.activeGraph.id)
-      throw new Error('graph_revision_stale');
+      throw staleRevision({ expectedGraphId, selectedGraphId: this.activeGraph.id });
+    const { activeRevision, submittedRevision } = this.state.graphStatus;
+    if (intent.revision <= submittedRevision)
+      throw staleRevision({ activeRevision, submittedRevision, proposedRevision: intent.revision });
     const document = preserveMockProcessorState(this.state.graph, intent);
     this.state.graph = document;
     this.activeGraph.document = structuredClone(document);
@@ -314,7 +323,11 @@ export class StorybookMockControlPort implements ControlPort {
       request.expectedRevision !== this.state.graph.revision ||
       request.expectedCatalogRevision !== this.catalogRevision
     )
-      throw new Error('graph_revision_stale');
+      throw staleRevision({
+        selectedGraphId: this.activeGraph.id,
+        submittedRevision: this.state.graph.revision,
+        catalogRevision: this.catalogRevision,
+      });
     if (!target) throw new Error('node_not_found');
     if (target.type !== 'provider' || target.control?.enabled === false)
       throw new Error('node_disabled');

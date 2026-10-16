@@ -82,7 +82,7 @@ fn failed_recovery_retries_same_intent_without_saving_or_reviving_removed_device
 fn create_configure_remove_preserves_explicit_empty_after_restart() {
     let fixture = FixtureDir::new("driver-inventory-lifetime").unwrap();
     let path = fixture.join("drivers.json");
-    fs::write(&path, br#"{"revision":0,"devices":[]}"#).unwrap();
+    fs::write(&path, br#"{"revision":0,"active":true,"devices":[]}"#).unwrap();
     let (backend, _) = FakeBackend::ready();
     let mut manager = DriverManager::open(backend, &path).unwrap();
     let mut spec = default_device().spec;
@@ -153,7 +153,7 @@ fn absent_store_creates_fixed_default_but_existing_empty_stays_empty() {
         NativeSampleFormat::Float32
     );
     assert!(path.is_file());
-    fs::write(&path, br#"{"revision":9,"devices":[]}"#).unwrap();
+    fs::write(&path, br#"{"revision":9,"active":true,"devices":[]}"#).unwrap();
     let (backend, observed) = FakeBackend::ready();
     let mut manager = DriverManager::open(backend, &path).unwrap();
     assert!(manager.snapshot().unwrap().settings.devices.is_empty());
@@ -782,7 +782,7 @@ fn explicit_quit_stops_native_devices_and_restores_saved_geometry_after_restart(
     assert!(observed.lock().settings.devices.is_empty());
     assert_eq!(manager.inventory, retained);
     let saved = store::load(&path).unwrap().unwrap();
-    assert!(!store::is_active(&path).unwrap());
+    assert!(!saved.active);
     assert_eq!(saved.devices, retained);
     observed
         .lock()
@@ -815,7 +815,7 @@ fn explicit_quit_stops_native_devices_and_restores_saved_geometry_after_restart(
         })
         .unwrap();
     assert_eq!(observed_inventory(&resumed.settings), retained);
-    assert!(store::is_active(&path).unwrap());
+    assert!(store::load(&path).unwrap().unwrap().active);
 }
 
 #[test]
@@ -875,18 +875,17 @@ fn stopped_state_save_failure_is_reported_and_idempotent_retry_saves_it() {
         })
         .unwrap();
     let saved = store::load(&path).unwrap().unwrap();
-    assert!(!store::is_active(&path).unwrap());
+    assert!(!saved.active);
     assert_eq!(saved.devices, retained);
 }
 
 #[test]
-fn old_settings_without_run_state_remain_active_and_empty_inventory_stays_empty() {
-    let fixture = FixtureDir::new("driver-old-store").unwrap();
+fn saved_empty_inventory_stays_empty_across_stop_and_resume() {
+    let fixture = FixtureDir::new("driver-empty-store").unwrap();
     let path = fixture.join("drivers.json");
-    fs::write(&path, br#"{"revision":5,"devices":[]}"#).unwrap();
+    fs::write(&path, br#"{"revision":5,"active":true,"devices":[]}"#).unwrap();
     let (backend, _) = FakeBackend::ready();
     let mut manager = DriverManager::open(backend, &path).unwrap();
-    assert!(manager.active);
     manager
         .mutate(DriverCommand::Deactivate {
             expected_revision: manager.revision,
@@ -901,24 +900,9 @@ fn old_settings_without_run_state_remain_active_and_empty_inventory_stays_empty(
     assert!(store::load(&path).unwrap().unwrap().devices.is_empty());
 }
 
-#[cfg(unix)]
 #[test]
-fn stop_marker_never_follows_or_replaces_a_symlink() {
-    let fixture = FixtureDir::new("driver-stop-marker-symlink").unwrap();
-    let path = fixture.join("drivers.json");
-    let outside = fixture.join("unrelated.txt");
-    fs::write(&outside, b"retained unrelated data").unwrap();
-    std::os::unix::fs::symlink(&outside, fixture.join("drivers.json.stopped")).unwrap();
-    assert!(store::is_active(&path).is_err());
-    assert!(store::save(&path, 0, false, &[]).is_err());
-    assert!(store::save(&path, 0, true, &[]).is_err());
-    assert!(!path.exists());
-    assert_eq!(fs::read(outside).unwrap(), b"retained unrelated data");
-}
-
-#[test]
-fn stopped_marker_preserves_previous_release_json_schema_and_private_permissions() {
-    let fixture = FixtureDir::new("driver-marker-schema").unwrap();
+fn stopped_state_is_saved_with_retained_devices_in_the_private_settings_file() {
+    let fixture = FixtureDir::new("driver-stopped-store").unwrap();
     let path = fixture.join("drivers.json");
     let (backend, _) = FakeBackend::ready();
     let mut manager = DriverManager::open(backend, &path).unwrap();
@@ -928,25 +912,30 @@ fn stopped_marker_preserves_previous_release_json_schema_and_private_permissions
         })
         .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-    assert_eq!(
-        json.as_object().unwrap().len(),
-        2,
-        "original settings schema"
-    );
-    assert!(json.get("active").is_none());
+    assert_eq!(json["active"], false);
+    assert!(!json["devices"].as_array().unwrap().is_empty());
+    let entries: Vec<_> = fs::read_dir(fixture.path()).unwrap().collect();
+    assert_eq!(entries.len(), 1, "the run state has no sibling file");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
         assert_eq!(
-            fs::metadata(path.with_file_name("drivers.json.stopped"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
         );
     }
-    assert!(!store::load(&path).unwrap().unwrap().devices.is_empty());
+}
+
+/// Applies a latency command at a synthetic instant, so elapsed test time cannot expire it.
+fn latency_at(
+    manager: &mut DriverManager,
+    command: crate::LatencyCommand,
+    now: std::time::Instant,
+) -> crate::LatencyReply {
+    manager
+        .latency
+        .command(command, now, manager.backend.as_mut())
+        .unwrap()
 }
 
 #[test]
@@ -954,12 +943,15 @@ fn maintenance_clears_latency_from_an_engine_that_stopped_publishing() {
     let fixture = FixtureDir::new("driver-latency-expiry").unwrap();
     let (backend, observed) = FakeBackend::ready();
     let mut manager = DriverManager::open(backend, fixture.join("drivers.json")).unwrap();
-    let reply = manager
-        .publish_latency(crate::LatencyCommand::Claim {
+    let now = std::time::Instant::now();
+    let reply = latency_at(
+        &mut manager,
+        crate::LatencyCommand::Claim {
             incarnation: "engine".into(),
             process_id: 42,
-        })
-        .unwrap();
+        },
+        now,
+    );
     let lease = reply.lease.unwrap();
     let publication = crate::RuntimeLatency {
         endpoint_id: manager.inventory[0].spec.id.clone(),
@@ -968,16 +960,12 @@ fn maintenance_clears_latency_from_an_engine_that_stopped_publishing() {
         applied_graph_revision: 1,
         input_latency_frames: Some(256),
     };
-    assert!(
-        manager
-            .publish_latency(crate::LatencyCommand::Publish {
-                lease,
-                destinations: vec![publication],
-            })
-            .unwrap()
-            .accepted
-    );
-    let now = std::time::Instant::now();
+    let publish = crate::LatencyCommand::Publish {
+        lease,
+        revision: 1,
+        destinations: vec![publication],
+    };
+    assert!(latency_at(&mut manager, publish, now).accepted);
     manager.maintain_at(now).unwrap();
     assert_eq!(
         observed

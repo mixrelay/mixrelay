@@ -10,6 +10,8 @@ import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { AudioNodeCard } from '../../core/ui/AudioNodeCard';
 import { HierarchicalMenuButton } from '../../core/ui/HierarchicalMenu';
 import { advance, eventually, find, findIn } from '../../test-support/fakeTimerQueries';
+import { effectConfig } from './builtinEffects';
+import { updateRoutingNodeParameter } from './model';
 import { RoutingWorkspace } from './RoutingWorkspace';
 
 const harness = vi.hoisted(() => ({ canvas: null as AudioGraphCanvasProps | null }));
@@ -195,12 +197,7 @@ it.each([
           id: 'old',
           label: 'Old reverb',
           type: 'effect',
-          config: {
-            version: 1,
-            channels: 2,
-            bypass: false,
-            effect: { kind: 'reverb', parameters: { decaySeconds: 1.2, damping: 0.5, mix: 0.2 } },
-          },
+          config: effectConfig('reverb'),
         },
       ],
     };
@@ -208,6 +205,19 @@ it.each([
     await ready();
     const stale = harness.canvas;
     if (!stale) throw new Error('Original canvas is not ready');
+    const parameterId = action === 'preset' ? 'preset' : 'decaySeconds';
+    const value = action === 'preset' ? 3 : 2.3;
+    if (action !== 'add') {
+      // The stale callback must target a live, editable control for its discard to matter.
+      const control = stale.model.nodes[0]?.appearance.parameterControls?.find(
+        (candidate) => candidate.id === parameterId,
+      );
+      expect(control?.value).toEqual(expect.any(Number));
+      expect(control?.value).not.toBe(value);
+      expect(updateRoutingNodeParameter(stale.model, 'old', parameterId, value)).not.toBe(
+        stale.model,
+      );
+    }
     const replacement = createPort();
     let resolveGraph: ((document: RuntimeGraphDocument) => void) | undefined;
     vi.spyOn(replacement, 'getGraph').mockReturnValue(
@@ -226,12 +236,7 @@ it.each([
     // A deferred drag/number commit can retain the previous Core control's callback.
     act(() => {
       if (action === 'add') stale.onAddNode?.('builtin:equalizer', { x: 44, y: 33 });
-      else
-        stale.onNodeParameterChange?.(
-          'old',
-          action === 'preset' ? 'preset' : 'decaySeconds',
-          action === 'preset' ? 3 : 2.3,
-        );
+      else stale.onNodeParameterChange?.('old', parameterId, value);
     });
     await act(async () => Promise.resolve());
     expect(apply).not.toHaveBeenCalled();
@@ -563,9 +568,9 @@ it.each([
   ['1 Low Hz', 'lowFrequencyHz', 350],
   ['1 Low dB', 'lowDb', 4.2],
   ['1 Low Q', 'lowQ', 1.234],
-  ['2 Mid Hz', 'frequencyHz', 2200],
+  ['2 Mid Hz', 'midFrequencyHz', 2200],
   ['2 Mid dB', 'midDb', -3.1],
-  ['2 Mid Q', 'q', 2.345],
+  ['2 Mid Q', 'midQ', 2.345],
   ['3 High Hz', 'highFrequencyHz', 8800],
   ['3 High dB', 'highDb', 5.6],
   ['3 High Q', 'highQ', 3.456],
@@ -659,7 +664,7 @@ it('keeps every EQ wheel step arriving before React renders the next value', asy
   await act(async () => Promise.resolve());
   expect(screen.getByRole('textbox', { name: '2 Mid Q' })).toHaveValue('0.71');
   expect(lastDocument(apply).nodes[0]?.config).toMatchObject({
-    effect: { parameters: { q: 0.71 } },
+    effect: { parameters: { midQ: 0.71 } },
   });
   await history();
   expect(lastDocument(apply).nodes).toEqual(original);
@@ -690,12 +695,12 @@ it('moves EQ frequency and gain together and restores both with one Undo', async
   const config = lastDocument(apply).nodes[0]?.config as {
     effect: { parameters: Record<string, number> };
   };
-  expect(config.effect.parameters.frequencyHz).toBeGreaterThan(1000);
+  expect(config.effect.parameters.midFrequencyHz).toBeGreaterThan(1000);
   expect(config.effect.parameters.midDb).toBeGreaterThan(0);
   const originalConfig = original[0]?.config as {
     effect: { parameters: Record<string, number> };
   };
-  expect(config.effect.parameters.q).toBe(originalConfig.effect.parameters.q);
+  expect(config.effect.parameters.midQ).toBe(originalConfig.effect.parameters.midQ);
   expect(config.effect.parameters.lowFrequencyHz).toBe(150);
   expect(config.effect.parameters.highFrequencyHz).toBe(6000);
   const moved = lastDocument(apply).nodes;

@@ -4,12 +4,7 @@ import type {
   RuntimeGraphDocument,
 } from '../../core/control-port/types';
 import { serializeGraphEdges } from './graphEdgeProjection';
-import {
-  addRoutingNode,
-  audioGraphToRuntimeGraph,
-  runtimeGraphToAudioGraph,
-  updateVirtualEndpoint,
-} from './model';
+import { addRoutingNode, audioGraphToRuntimeGraph, runtimeGraphToAudioGraph } from './model';
 import { duplexReference, virtualSpec } from './virtualEndpointFixtures';
 import { virtualEndpointNodeRequest } from './virtualEndpointMenu';
 
@@ -17,7 +12,7 @@ const empty: RuntimeGraphDocument = { schemaVersion: 2, revision: 1, nodes: [], 
 const position = { x: 0, y: 0 };
 
 it.each(['render', 'capture'] as const)(
-  'renames a %s-only device without creating its absent stream',
+  'materializes a %s-only device without creating its absent stream',
   (side) => {
     const spec = {
       ...virtualSpec,
@@ -35,22 +30,14 @@ it.each(['render', 'capture'] as const)(
     expect(
       ports.every((port) => port.runtimePortId === (side === 'capture' ? 'from_os' : 'to_os')),
     ).toBe(true);
-    const renamed = updateVirtualEndpoint(model, node.id, {
-      displayName: 'Renamed',
-      renderChannels: spec.render?.channels ?? 0,
-      captureChannels: spec.capture?.channels ?? 0,
-    });
-    expect(audioGraphToRuntimeGraph(renamed, empty).nodes[0]?.config).toMatchObject({
-      displayName: 'Renamed',
-    });
-    expect(audioGraphToRuntimeGraph(renamed, empty).nodes[0]?.config).toEqual(
+    expect(audioGraphToRuntimeGraph(model, empty).nodes[0]?.config).toEqual(
       expect.objectContaining({ render: spec.render, capture: spec.capture }),
     );
   },
 );
 
 it.each(['source', 'sink'] as const)(
-  'removes only the deleted %s from unresolved routes and filters removed channels individually',
+  'removes only the deleted %s from unresolved routes',
   (removedSide) => {
     const graph: RuntimeGraphDocument = {
       ...empty,
@@ -92,22 +79,63 @@ it.each(['source', 'sink'] as const)(
     expect(audioGraphToRuntimeGraph(removedSink, graph).edges).toEqual([
       graph.edges[removedSide === 'sink' ? 1 : 0],
     ]);
-    const source = model.nodes.find((node) => node.runtime?.binding?.side === 'source');
-    if (!source) throw new Error('Source fixture missing');
-    const resized = updateVirtualEndpoint(model, source.id, {
-      displayName: virtualSpec.displayName,
-      renderChannels: 2,
-      captureChannels: 16,
-    });
-    expect(audioGraphToRuntimeGraph(resized, graph).edges).toEqual([
-      {
-        ...graph.edges[0],
-        channelMapping: { mode: 'explicit', routes: [{ sourceChannel: 0, destinationChannel: 0 }] },
-      },
-      graph.edges[1],
-    ]);
   },
 );
+
+it('filters unresolved routes individually to the channels a stored device still has', () => {
+  const graph: RuntimeGraphDocument = {
+    ...empty,
+    nodes: [
+      {
+        id: 'device',
+        label: null,
+        type: 'virtual_endpoint',
+        config: {
+          ...virtualSpec,
+          render: { channels: 2, channelLayout: 'stereo' },
+          reference: duplexReference,
+        },
+      },
+      { id: 'fx', label: null, type: 'provider', config: { typeId: 'missing' } },
+    ],
+    edges: [
+      {
+        id: 'into-device',
+        source: { nodeId: 'fx', portId: 'audio' },
+        destination: { nodeId: 'device', portId: 'to_os' },
+        channelMapping: {
+          mode: 'explicit',
+          routes: [
+            { sourceChannel: 0, destinationChannel: 0 },
+            { sourceChannel: 1, destinationChannel: 13 },
+          ],
+        },
+      },
+      {
+        id: 'out-device',
+        source: { nodeId: 'device', portId: 'from_os' },
+        destination: { nodeId: 'fx', portId: 'audio' },
+        channelMapping: {
+          mode: 'explicit',
+          routes: [
+            { sourceChannel: 15, destinationChannel: 0 },
+            { sourceChannel: 16, destinationChannel: 1 },
+          ],
+        },
+      },
+    ],
+  };
+  expect(audioGraphToRuntimeGraph(runtimeGraphToAudioGraph(graph), graph).edges).toEqual([
+    {
+      ...graph.edges[0],
+      channelMapping: { mode: 'explicit', routes: [{ sourceChannel: 0, destinationChannel: 0 }] },
+    },
+    {
+      ...graph.edges[1],
+      channelMapping: { mode: 'explicit', routes: [{ sourceChannel: 15, destinationChannel: 0 }] },
+    },
+  ]);
+});
 
 it('retains edited provider state and nullable labels when its descriptor becomes unavailable', () => {
   const original: RuntimeGraphDocument = {
@@ -274,80 +302,6 @@ it.each([
         reference: { render: removed !== 'source', capture: removed !== 'sink' },
       });
     }
-  },
-);
-
-it.each([
-  [64, 16, 2, 32],
-  [2, 32, 64, 16],
-])(
-  'updates graph geometry and prunes each actual direction from OS %i/%i to %i/%i',
-  (renderChannels, captureChannels, nextRender, nextCapture) => {
-    const graph: RuntimeGraphDocument = {
-      ...empty,
-      nodes: [
-        {
-          id: 'device',
-          label: null,
-          type: 'virtual_endpoint',
-          config: {
-            ...virtualSpec,
-            render: { channels: renderChannels, channelLayout: 'discrete' },
-            capture: { channels: captureChannels, channelLayout: 'discrete' },
-            reference: duplexReference,
-          },
-        },
-      ],
-      edges: [
-        {
-          id: 'directional',
-          source: { nodeId: 'device', portId: 'from_os' },
-          destination: { nodeId: 'device', portId: 'to_os' },
-          channelMapping: {
-            mode: 'explicit',
-            routes: [
-              { sourceChannel: 0, destinationChannel: 0 },
-              { sourceChannel: captureChannels - 1, destinationChannel: renderChannels - 1 },
-            ],
-          },
-        },
-      ],
-    };
-    const model = runtimeGraphToAudioGraph(graph);
-    expect(model.edges).toHaveLength(2);
-    const source = model.nodes.find((node) => node.runtime?.binding?.side === 'source');
-    if (!source) throw new Error('Source fixture missing');
-    const changed = updateVirtualEndpoint(model, source.id, {
-      displayName: 'Updated device',
-      renderChannels: nextRender,
-      captureChannels: nextCapture,
-    });
-    expect(changed.edges).toHaveLength(1);
-    expect(
-      changed.nodes.find((node) => node.runtime?.binding?.side === 'source')?.outputPorts,
-    ).toHaveLength(nextCapture);
-    expect(
-      changed.nodes.find((node) => node.runtime?.binding?.side === 'sink')?.inputPorts,
-    ).toHaveLength(nextRender);
-    expect(changed.nodes.flatMap((node) => node.appearance.meterBanks ?? [])).toEqual([
-      { channels: nextCapture, nodeId: 'device', portId: 'from_os' },
-      { channels: nextRender, nodeId: 'device', portId: 'to_os' },
-    ]);
-    const saved = audioGraphToRuntimeGraph(changed, graph);
-    expect(saved.nodes[0]?.config).toMatchObject({
-      displayName: 'Updated device',
-      render: { channels: nextRender },
-      capture: { channels: nextCapture },
-      reference: duplexReference,
-    });
-    expect(saved.edges).toEqual([
-      expect.objectContaining({
-        source: { nodeId: 'device', portId: 'from_os' },
-        destination: { nodeId: 'device', portId: 'to_os' },
-        channelMapping: { mode: 'explicit', routes: [{ sourceChannel: 0, destinationChannel: 0 }] },
-      }),
-    ]);
-    expect(audioGraphToRuntimeGraph(runtimeGraphToAudioGraph(saved), saved)).toEqual(saved);
   },
 );
 

@@ -2021,11 +2021,13 @@ it('forwards an EQ graph drag atomically with its node identity while arrows ret
   assert(processor);
   processor.appearance.equalizer = {
     sampleRate: 48000,
-    bands: [{ id: 'mid', label: 'Mid', frequencyId: 'frequencyHz', gainId: 'midDb', qId: 'q' }],
+    bands: [
+      { id: 'mid', label: 'Mid', frequencyId: 'midFrequencyHz', gainId: 'midDb', qId: 'midQ' },
+    ],
   };
   processor.appearance.parameterControls = [
     {
-      id: 'frequencyHz',
+      id: 'midFrequencyHz',
       label: 'Frequency',
       value: 1000,
       minimum: 20,
@@ -2036,7 +2038,7 @@ it('forwards an EQ graph drag atomically with its node identity while arrows ret
     },
     { id: 'midDb', label: 'Gain', value: 0, minimum: -24, maximum: 24, step: 0.1, suffix: 'dB' },
     {
-      id: 'q',
+      id: 'midQ',
       label: 'Q',
       value: Number(Math.SQRT1_2.toFixed(3)),
       minimum: 0.1,
@@ -2073,14 +2075,14 @@ it('forwards an EQ graph drag atomically with its node identity while arrows ret
   });
   fireEvent.pointerUp(plot, { pointerId: 93 });
   expect(batch).toHaveBeenCalledExactlyOnceWith('processor', [
-    { id: 'frequencyHz', value: 2200 },
+    { id: 'midFrequencyHz', value: 2200 },
     { id: 'midDb', value: 6 },
   ]);
   expect(single).not.toHaveBeenCalled();
   expect(changed).not.toHaveBeenCalled();
   expect(plot.releasePointerCapture).toHaveBeenCalledWith(93);
   fireEvent.keyDown(handle, { key: 'ArrowRight' });
-  expect(single).toHaveBeenCalledExactlyOnceWith('processor', 'frequencyHz', 1001);
+  expect(single).toHaveBeenCalledExactlyOnceWith('processor', 'midFrequencyHz', 1001);
   expect(batch).toHaveBeenCalledOnce();
 });
 

@@ -11,6 +11,7 @@ import {
   effectControls,
   effectDefaults,
   effectKinds,
+  effectParameters,
   effectPresets,
   isChainKind,
   isEffectKind,
@@ -20,22 +21,21 @@ import {
   audioGraphToRuntimeGraph,
   type GraphPresentation,
   presentRoutingApplicationIcons,
-  presentVirtualEndpointSettings,
   runtimeGraphToAudioGraph,
   updateRoutingNodeParameter,
   updateRoutingNodeParameters,
 } from './model';
-import { duplexReference, virtualPolicy, virtualSpec } from './virtualEndpointFixtures';
+import { duplexReference, virtualSpec } from './virtualEndpointFixtures';
 
 const document: RuntimeGraphDocument = { schemaVersion: 2, revision: 4, nodes: [], edges: [] };
 const empty: AudioGraphModel = { revision: 4, nodes: [], edges: [] };
 const position = { x: 30, y: 40 };
 
 it.each(['compressor', 'limiter'] as const)(
-  'fills missing %s dynamics and bypass labels in older presentations without replacing translated labels',
+  'fills %s dynamics and bypass labels missing from a partial presentation without replacing translated labels',
   (kind) => {
-    const older = presentation({ equalizer: '기존 이퀄라이저' });
-    const graph = addRoutingNode(empty, { kind }, position, older);
+    const partialLabels = presentation({ equalizer: '이퀄라이저' });
+    const graph = addRoutingNode(empty, { kind }, position, partialLabels);
     const node = first(graph);
     expect(node.appearance.dynamics).toMatchObject({
       inputLabel: 'Input',
@@ -149,18 +149,6 @@ it.each(['compressor', 'limiter'] as const)(
       undo = history.result.current.undo()?.value;
     });
     expect(undo).toBe(added);
-    const originalConfig = node.runtime?.config as Record<string, unknown>;
-    const { bypass: _bypass, ...legacyConfig } = originalConfig;
-    const legacy = {
-      ...serialized,
-      nodes: serialized.nodes.map((saved) => ({ ...saved, config: legacyConfig })),
-    };
-    const legacyModel = runtimeGraphToAudioGraph(legacy, localized);
-    expect(
-      first(legacyModel).appearance.parameterControls?.find((control) => control.id === 'bypass')
-        ?.value,
-    ).toBe(0);
-    expect(audioGraphToRuntimeGraph(legacyModel, legacy).nodes[0]?.config).toEqual(legacyConfig);
   },
 );
 
@@ -198,18 +186,38 @@ it('copies defaults and caller parameters so edits cannot mutate another new nod
   expect(effectConfig('delay').effect.parameters.timeMs).toBe(150);
 });
 
-it('presents incomplete restored EQ parameters with finite defaults and English label fallback', () => {
-  const controls = effectControls('equalizer', { lowDb: -3, q: 'invalid' }, false, {});
-  expect(controls.find((c) => c.id === 'lowDb')).toMatchObject({ value: -3, suffix: 'dB' });
-  expect(controls.find((c) => c.id === 'q')).toMatchObject({ step: 0.001 });
-  expect(controls.find((c) => c.id === 'q')?.value).toBeCloseTo(Math.SQRT1_2, 3);
-  expect(controls.find((c) => c.id === 'frequencyHz')).toMatchObject({
+it('accepts only complete finite parameters and keeps them in control order', () => {
+  expect(effectParameters('pan', null)).toBeNull();
+  expect(effectParameters('pan', { position: Number.POSITIVE_INFINITY })).toBeNull();
+  expect(
+    effectParameters('equalizer', { ...effectDefaults.equalizer, midQ: 'invalid' }),
+  ).toBeNull();
+  expect(effectParameters('delay', { timeMs: 1, feedback: 0, mix: 1 })).toBeNull();
+  const { mode, ...rest } = effectDefaults.delay;
+  const parsed = effectParameters('delay', { mode, extra: 1, ...rest });
+  expect(parsed).toEqual(effectDefaults.delay);
+  expect(Object.keys(parsed ?? {})).toEqual(Object.keys(effectDefaults.delay));
+  const restored = runtimeGraphToAudioGraph({
+    ...document,
+    nodes: [{ id: 'eq', type: 'effect', label: null, config: effectConfig('equalizer') }],
+  });
+  expect(first(restored).appearance.title).toBe(defaultEffectLabels.equalizer);
+  expect(first(restored).appearance.parameterControls).toHaveLength(10);
+});
+
+it('labels the EQ middle band like the outer bands, with English fallback labels', () => {
+  const controls = effectControls('equalizer', effectDefaults.equalizer, false, {});
+  expect(controls.find((c) => c.id === 'midQ')).toMatchObject({
+    label: defaultEffectLabels.q,
+    step: 0.001,
+    group: { id: 'mid-band', label: defaultEffectLabels.midDb },
+  });
+  expect(controls.find((c) => c.id === 'midFrequencyHz')).toMatchObject({
     label: defaultEffectLabels.frequencyHz,
     value: 1000,
     scale: 'logarithmic',
     group: { id: 'mid-band', label: defaultEffectLabels.midDb },
   });
-  expect(controls.every((c) => Number.isFinite(c.value))).toBe(true);
 });
 
 it.each(effectKinds)(
@@ -295,7 +303,18 @@ it.each(Object.entries(effectTranslations))(
   },
 );
 
-it.each([null, {}, { effect: null }, { effect: { kind: 'unavailable', parameters: {} } }])(
+it.each([
+  null,
+  {},
+  { effect: null },
+  { effect: { kind: 'unavailable', parameters: {} } },
+  { effect: { kind: 'equalizer', parameters: { lowDb: -3, midQ: 'invalid' } } },
+  { effect: { kind: 'delay', parameters: { timeMs: 1, feedback: 0, mix: 1 } } },
+  { ...effectConfig('delay'), channels: undefined },
+  (({ bypass: _bypass, ...config }) => config)(effectConfig('delay')),
+  { ...effectConfig('delay'), bypass: 'false' },
+  { ...effectConfig('delay'), bypass: 0 },
+])(
   'preserves unsupported stored effect configuration instead of inventing a replacement: %j',
   (config) => {
     const original: RuntimeGraphDocument = {
@@ -355,37 +374,14 @@ it.each(['reverb', 'ducking'] as const)(
   },
 );
 
-it.each([undefined, null, 'invalid'])(
-  'uses defaults to display an incomplete known effect while preserving its raw parameters: %j',
-  (parameters) => {
-    const original: RuntimeGraphDocument = {
-      ...document,
-      nodes: [
-        {
-          id: 'eq',
-          type: 'effect',
-          label: null,
-          config: { effect: { kind: 'equalizer', parameters } },
-        },
-      ],
-    };
-    const model = runtimeGraphToAudioGraph(original);
-    expect(first(model).inputPorts).toHaveLength(2);
-    expect(
-      first(model).appearance.parameterControls?.find((c) => c.id === 'frequencyHz'),
-    ).toMatchObject({ value: 1000 });
-    expect(audioGraphToRuntimeGraph(model, original).nodes[0]?.config).toEqual(
-      original.nodes[0]?.config,
-    );
-    const changed = updateRoutingNodeParameter(model, 'eq', 'lowDb', 2);
-    expect(first(changed).runtime?.config).toMatchObject({ effect: { parameters: { lowDb: 2 } } });
-  },
-);
-
 it('keeps malformed editable effect contracts unchanged instead of persisting arbitrary parameter keys', () => {
   const model = addRoutingNode(empty, { kind: 'effect', effect: 'delay' }, position);
   const node = first(model);
-  for (const config of [{ effect: null }, { effect: { kind: 'unknown' } }]) {
+  for (const config of [
+    { effect: null },
+    { effect: { kind: 'unknown' } },
+    { effect: { kind: 'delay', parameters: { mix: 1 } } },
+  ]) {
     const malformed = { ...model, nodes: [{ ...node, runtime: { type: 'effect', config } }] };
     expect(updateRoutingNodeParameter(malformed, node.id, 'mix', 0.5)).toBe(malformed);
   }
@@ -432,7 +428,7 @@ it('regenerates localized controls when optional choice presentation metadata is
   ]);
 });
 
-it('upgrades an older EQ presentation without losing its localized labels or confirmed settings', () => {
+it('refreshes EQ controls from confirmed values, keeping retained labels and defaulting the rest', () => {
   const model = addRoutingNode(
     empty,
     { kind: 'effect', effect: 'equalizer' },
@@ -440,7 +436,7 @@ it('upgrades an older EQ presentation without losing its localized labels or con
     presentation(effectTranslations.koKR),
   );
   const node = first(model);
-  const oldPresentation = {
+  const partialView = {
     ...model,
     nodes: [
       {
@@ -449,14 +445,14 @@ it('upgrades an older EQ presentation without losing its localized labels or con
           ...node.appearance,
           parameterControls: node.appearance.parameterControls
             ?.filter((control) =>
-              ['bypass', 'lowDb', 'midDb', 'highDb', 'frequencyHz', 'q'].includes(control.id),
+              ['bypass', 'lowDb', 'midDb', 'highDb', 'midFrequencyHz', 'midQ'].includes(control.id),
             )
             .map((control) => ({ ...control, group: undefined })),
         },
       },
     ],
   };
-  const edited = updateRoutingNodeParameter(oldPresentation, node.id, 'midDb', 6);
+  const edited = updateRoutingNodeParameter(partialView, node.id, 'midDb', 6);
   const controls = first(edited).appearance.parameterControls;
   expect(controls).toHaveLength(10);
   expect(controls?.find((control) => control.id === 'midDb')).toMatchObject({
@@ -613,49 +609,10 @@ it('applies frequency and gain together as one validated equalizer edit', () => 
   expect(
     updateRoutingNodeParameters(next, node.id, [
       { id: 'lowDb', value: 24 },
-      { id: 'q', value: Infinity },
+      { id: 'midQ', value: Infinity },
     ]),
   ).toBe(next);
   expect(updateRoutingNodeParameters(next, 'missing', [{ id: 'lowDb', value: 0 }])).toBe(next);
-});
-
-it('shows nine independent equalizer parameters when restoring the original five-key graph', () => {
-  const original = {
-    ...document,
-    nodes: [
-      {
-        id: 'eq',
-        type: 'effect',
-        label: null,
-        config: {
-          version: 1,
-          channels: 2,
-          effect: {
-            kind: 'equalizer',
-            parameters: { lowDb: 2, midDb: -3, highDb: 4, frequencyHz: 1200, q: 2 },
-          },
-        },
-      },
-    ],
-  };
-  const model = runtimeGraphToAudioGraph(original);
-  expect(first(model).appearance.parameterControls).toHaveLength(10);
-  expect(
-    first(model).appearance.parameterControls?.find((control) => control.id === 'lowFrequencyHz'),
-  ).toMatchObject({ value: 150, minimum: 20, maximum: 20000, scale: 'logarithmic' });
-  expect(
-    first(model).appearance.parameterControls?.find((control) => control.id === 'highQ'),
-  ).toMatchObject({ value: Number(Math.SQRT1_2.toFixed(3)), step: 0.001 });
-  expect(audioGraphToRuntimeGraph(model, original).nodes[0]?.config).toEqual(
-    original.nodes[0]?.config,
-  );
-  const changed = updateRoutingNodeParameters(model, 'eq', [
-    { id: 'lowFrequencyHz', value: 400 },
-    { id: 'highQ', value: 4 },
-  ]);
-  expect(first(changed).runtime?.config).toMatchObject({
-    effect: { parameters: { frequencyHz: 1200, q: 2, lowFrequencyHz: 400, highQ: 4 } },
-  });
 });
 
 it('keeps duplicate inventory entries without icons on the shared fallback', () => {
@@ -696,7 +653,7 @@ it('keeps duplicate inventory entries without icons on the shared fallback', () 
   expect(first(result).appearance.iconUrl).toBeUndefined();
 });
 
-it('serializes shared virtual Off/Mute while settings polling preserves unrelated processors', () => {
+it('serializes shared virtual Off/Mute alongside an added processor', () => {
   const original = {
     ...document,
     nodes: [
@@ -711,10 +668,7 @@ it('serializes shared virtual Off/Mute while settings polling preserves unrelate
   };
   const model = runtimeGraphToAudioGraph(original);
   const mixed = addRoutingNode(model, { kind: 'effect', effect: 'delay' }, position);
-  const effect = mixed.nodes.at(-1);
-  const polled = presentVirtualEndpointSettings(mixed, virtualPolicy);
-  expect(polled.nodes.at(-1)).toBe(effect);
-  const saved = audioGraphToRuntimeGraph(polled, original);
+  const saved = audioGraphToRuntimeGraph(mixed, original);
   expect(saved.nodes.find((node) => node.id === 'virtual')?.control).toEqual({
     enabled: false,
     muted: true,
@@ -767,7 +721,7 @@ it('drops stale unknown preset choices while retaining the localized Custom labe
 it('undo restores both axes of a graph gesture together', () => {
   const model = addRoutingNode(empty, { kind: 'effect', effect: 'equalizer' }, position);
   const next = updateRoutingNodeParameters(model, first(model).id, [
-    { id: 'frequencyHz', value: 2500 },
+    { id: 'midFrequencyHz', value: 2500 },
     { id: 'midDb', value: 6 },
   ]);
   const { result } = renderHook(() => useUndoHistory<AudioGraphModel, 'runtime'>());
@@ -781,10 +735,10 @@ it('undo restores both axes of a graph gesture together', () => {
 
 it.each([
   ['lowFrequencyHz', 20, 20000],
-  ['frequencyHz', 20, 20000],
+  ['midFrequencyHz', 20, 20000],
   ['highFrequencyHz', 20, 20000],
   ['lowQ', 0.1, 10],
-  ['q', 0.1, 10],
+  ['midQ', 0.1, 10],
   ['highQ', 0.1, 10],
   ['lowDb', -24, 24],
   ['midDb', -24, 24],
@@ -819,9 +773,9 @@ it.each(Object.entries(effectTranslations))(
       labels.highDb,
     ]);
     const controls = first(model).appearance.parameterControls;
-    for (const id of ['lowFrequencyHz', 'frequencyHz', 'highFrequencyHz'])
+    for (const id of ['lowFrequencyHz', 'midFrequencyHz', 'highFrequencyHz'])
       expect(controls?.find((control) => control.id === id)?.label).toBe(labels.frequencyHz);
-    for (const id of ['lowQ', 'q', 'highQ'])
+    for (const id of ['lowQ', 'midQ', 'highQ'])
       expect(controls?.find((control) => control.id === id)?.label).toBe(labels.q);
   },
 );

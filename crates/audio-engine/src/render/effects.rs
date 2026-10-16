@@ -55,7 +55,7 @@ impl Design {
                 design.filters = 3;
                 for (index, (shape, hz, q, db)) in [
                     (Shape::Peak, p.low_frequency_hz, p.low_q, p.low_db),
-                    (Shape::Peak, p.frequency_hz, p.q, p.mid_db),
+                    (Shape::Peak, p.mid_frequency_hz, p.mid_q, p.mid_db),
                     (Shape::Peak, p.high_frequency_hz, p.high_q, p.high_db),
                 ]
                 .into_iter()

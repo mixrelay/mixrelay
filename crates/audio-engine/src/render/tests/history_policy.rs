@@ -10,10 +10,10 @@ fn dynamics(kind: &str, channels: u16) -> NodeConfig {
     serde_json::from_value(serde_json::json!({
         "type": kind,
         "config": if kind == "compressor" {
-            serde_json::json!({"version":1,"channels":channels,"thresholdDb":-18,
+            serde_json::json!({"version":1,"bypass":false,"channels":channels,"thresholdDb":-18,
                 "ratio":4,"attackMs":0.1,"releaseMs":100,"makeupGainDb":0})
         } else {
-            serde_json::json!({"version":1,"channels":channels,"ceilingDb":-6,"releaseMs":100})
+            serde_json::json!({"version":1,"bypass":false,"channels":channels,"ceilingDb":-6,"releaseMs":100})
         },
     }))
     .unwrap()

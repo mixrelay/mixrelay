@@ -133,7 +133,7 @@ describe('React Flow incremental adapter', () => {
   });
 });
 
-it('normalizes a legacy narrow EQ size consistently for resize and React Flow geometry', () => {
+it('normalizes a narrow saved EQ size consistently for resize and React Flow geometry', () => {
   const original = largeGraph(1);
   const node = original.nodes[0];
   assert(node);

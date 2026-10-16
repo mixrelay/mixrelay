@@ -47,11 +47,9 @@ impl DriverManager {
         path: impl Into<PathBuf>,
     ) -> Result<Self, DriverError> {
         let path = path.into();
-        let stored = store::load(&path)?;
-        let active = store::is_active(&path)?;
-        let (revision, inventory) = stored.map_or_else(
-            || (0, vec![default_device()]),
-            |stored| (stored.revision, stored.devices),
+        let (revision, active, inventory) = store::load(&path)?.map_or_else(
+            || (0, true, vec![default_device()]),
+            |stored| (stored.revision, stored.active, stored.devices),
         );
         validate_inventory(&inventory)?;
         let mut manager = Self {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { StorybookMockControlPort } from './StorybookMockControlPort';
-import type { RuntimeGraphDocument } from './types';
+import { ControlPortError, type RuntimeGraphDocument } from './types';
 
 function graph(): RuntimeGraphDocument {
   return {
@@ -160,11 +160,33 @@ describe('graph targeting in the interactive preview', () => {
     const port = fixture();
     const { activeId } = await port.getGraphCatalog();
     const request = { ...graph(), revision: 2, nodes: graph().nodes.slice(0, 1) };
-    await expect(port.applyGraph({ ...request, expectedGraphId: `${activeId}-other` })).rejects.toThrow(
-      'graph_revision_stale',
-    );
+    const rejection = port.applyGraph({ ...request, expectedGraphId: `${activeId}-other` });
+    await expect(rejection).rejects.toBeInstanceOf(ControlPortError);
+    await expect(rejection).rejects.toMatchObject({
+      status: 409,
+      body: { code: 'graph_revision_stale' },
+    });
     expect(await port.getGraph()).toEqual(graph());
     await port.applyGraph({ ...request, expectedGraphId: activeId });
     expect(await port.getGraph()).toEqual(request);
   });
+
+  it.each([3, 2])(
+    'rejects revision %i once revision 3 was submitted, like the engine',
+    async (revision) => {
+      const port = fixture();
+      const accepted = { ...graph(), revision: 3, nodes: graph().nodes.slice(0, 1) };
+      await port.applyGraph(accepted);
+      const rejection = port.applyGraph({ ...graph(), revision });
+      await expect(rejection).rejects.toBeInstanceOf(ControlPortError);
+      await expect(rejection).rejects.toMatchObject({
+        body: {
+          code: 'graph_revision_stale',
+          parameters: { activeRevision: 3, submittedRevision: 3, proposedRevision: revision },
+        },
+      });
+      expect(await port.getGraph()).toEqual(accepted);
+      expect(await port.getGraphStatus()).toMatchObject({ submittedRevision: 3 });
+    },
+  );
 });

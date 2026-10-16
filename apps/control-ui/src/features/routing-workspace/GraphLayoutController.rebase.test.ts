@@ -300,6 +300,7 @@ it('preserves both projected virtual endpoint positions rather than filtering by
           id: 'io',
           type: 'virtual_endpoint',
           config: {
+            displayName: 'MixRelay Virtual I/O',
             reference: { render: true, capture: true },
             render: { channels: 2 },
             capture: { channels: 2 },

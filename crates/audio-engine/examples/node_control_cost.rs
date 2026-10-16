@@ -46,12 +46,12 @@ fn graph(control: NodeControl) -> Result<GraphDocument, serde_json::Error> {
     for index in 0..4 {
         nodes.push(json!({
             "id":format!("compressor-{index}"), "type":"compressor", "control":control,
-            "config":{"version":1,"channels":2,"thresholdDb":-18.0,"ratio":4.0,
+            "config":{"version":1,"bypass":false,"channels":2,"thresholdDb":-18.0,"ratio":4.0,
                 "attackMs":5.0,"releaseMs":100.0,"makeupGainDb":3.0}
         }));
         nodes.push(json!({
             "id":format!("limiter-{index}"), "type":"limiter", "control":control,
-            "config":{"version":1,"channels":2,"ceilingDb":-3.0,"releaseMs":100.0}
+            "config":{"version":1,"bypass":false,"channels":2,"ceilingDb":-3.0,"releaseMs":100.0}
         }));
     }
     nodes.push(json!({

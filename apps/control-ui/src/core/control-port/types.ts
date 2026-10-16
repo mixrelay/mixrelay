@@ -142,13 +142,6 @@ export interface VirtualEndpointSpec {
   defaultSampleRate: number;
 }
 
-export interface VirtualEndpointRateError {
-  endpointId: string;
-  sampleRate: number;
-  message: string;
-  kind: 'negotiation' | 'persistence';
-}
-
 export interface RuntimeVirtualEndpointConfig extends VirtualEndpointSpec {
   gainDb?: number;
   reference: { render: boolean; capture: boolean };

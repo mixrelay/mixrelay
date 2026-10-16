@@ -8,7 +8,6 @@ pub const SIDECHAIN_PORT_ID: &str = "sidechain";
 pub struct EffectConfig {
     pub version: u16,
     pub channels: u16,
-    #[serde(default)]
     pub bypass: bool,
     pub effect: Effect,
 }
@@ -48,26 +47,12 @@ pub struct EqualizerParameters {
     pub low_db: f32,
     pub mid_db: f32,
     pub high_db: f32,
-    // Keep the original middle-band keys for saved graph compatibility.
-    pub frequency_hz: f32,
-    pub q: f32,
-    #[serde(default = "default_low_frequency")]
     pub low_frequency_hz: f32,
-    #[serde(default = "default_band_q")]
     pub low_q: f32,
-    #[serde(default = "default_high_frequency")]
+    pub mid_frequency_hz: f32,
+    pub mid_q: f32,
     pub high_frequency_hz: f32,
-    #[serde(default = "default_band_q")]
     pub high_q: f32,
-}
-const fn default_low_frequency() -> f32 {
-    150.0
-}
-const fn default_high_frequency() -> f32 {
-    6_000.0
-}
-const fn default_band_q() -> f32 {
-    0.707
 }
 parameters!(FilterParameters {
     frequency_hz: f32,
@@ -90,7 +75,6 @@ pub struct DelayParameters {
     pub feedback: f32,
     pub mix: f32,
     /// 0: independent echoes; 1: alternating stereo-pair feedback (mono stays mono).
-    #[serde(default)]
     pub mode: u8,
 }
 parameters!(DuckingParameters {
@@ -105,16 +89,10 @@ pub struct ReverbParameters {
     pub decay_seconds: f32,
     pub damping: f32,
     pub mix: f32,
-    #[serde(default = "default_room_size")]
     pub room_size: f32,
-    #[serde(default)]
     pub pre_delay_ms: f32,
     /// 0: classic four-comb/two-allpass; 1: dense eight-comb/four-allpass.
-    #[serde(default)]
     pub algorithm: u8,
-}
-const fn default_room_size() -> f32 {
-    1.0
 }
 parameters!(ChorusParameters {
     rate_hz: f32,
@@ -152,7 +130,7 @@ impl EffectConfig {
                     range("EQ gain", value, -24.0, 24.0)?;
                 }
                 frequency(p.low_frequency_hz, p.low_q)?;
-                frequency(p.frequency_hz, p.q)?;
+                frequency(p.mid_frequency_hz, p.mid_q)?;
                 frequency(p.high_frequency_hz, p.high_q)
             }
             Effect::HighPass(p) | Effect::LowPass(p) => frequency(p.frequency_hz, p.q),
@@ -219,38 +197,29 @@ fn range(name: &str, value: f32, low: f32, high: f32) -> Result<(), String> {
 }
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)] // Exact serialized parameter/default assertions.
 mod tests {
     use super::{Effect, EffectConfig};
 
     #[test]
-    fn legacy_spatial_effects_restore_new_geometry_and_mode_defaults() {
-        for (kind, parameters) in [
-            ("delay", r#"{"timeMs":100,"feedback":0.3,"mix":0.2}"#),
-            ("reverb", r#"{"decaySeconds":1.2,"damping":0.5,"mix":0.2}"#),
+    fn configs_missing_bypass_or_any_parameter_are_rejected() {
+        let complete = r#"{"version":1,"channels":2,"bypass":false,"effect":{"kind":"delay","parameters":{"timeMs":100,"feedback":0.3,"mix":0.2,"mode":0}}}"#;
+        serde_json::from_str::<EffectConfig>(complete).unwrap();
+        for incomplete in [
+            complete.replace(r#""bypass":false,"#, ""),
+            complete.replace(r#","mode":0"#, ""),
+            r#"{"version":1,"channels":2,"bypass":false,"effect":{"kind":"reverb","parameters":{"decaySeconds":1.2,"damping":0.5,"mix":0.2}}}"#.into(),
+            r#"{"version":1,"channels":2,"bypass":false,"effect":{"kind":"equalizer","parameters":{"lowDb":2,"midDb":-3,"highDb":4,"midFrequencyHz":1200,"midQ":2}}}"#.into(),
         ] {
-            let config: EffectConfig = serde_json::from_str(&format!(r#"{{"version":1,"channels":1,"effect":{{"kind":"{kind}","parameters":{parameters}}}}}"#)).unwrap();
-            config.validate().unwrap();
-            match &config.effect {
-                Effect::Delay(p) => assert_eq!(p.mode, 0),
-                Effect::Reverb(p) => {
-                    assert_eq!(p.room_size, 1.0);
-                    assert_eq!(p.pre_delay_ms, 0.0);
-                    assert_eq!(p.algorithm, 0);
-                }
-                _ => unreachable!(),
-            }
-            assert_eq!(
-                serde_json::from_value::<EffectConfig>(serde_json::to_value(&config).unwrap())
-                    .unwrap(),
-                config
+            assert!(
+                serde_json::from_str::<EffectConfig>(&incomplete).is_err(),
+                "{incomplete}"
             );
         }
     }
 
     #[test]
     fn spatial_geometry_and_delay_mode_reject_unsupported_values() {
-        let mut delay: EffectConfig = serde_json::from_str(r#"{"version":1,"channels":2,"effect":{"kind":"delay","parameters":{"timeMs":100,"feedback":0.3,"mix":0.2}}}"#).unwrap();
+        let mut delay: EffectConfig = serde_json::from_str(r#"{"version":1,"channels":2,"bypass":false,"effect":{"kind":"delay","parameters":{"timeMs":100,"feedback":0.3,"mix":0.2,"mode":0}}}"#).unwrap();
         for mode in [0, 1, 2, 255] {
             let Effect::Delay(p) = &mut delay.effect else {
                 unreachable!()
@@ -258,7 +227,7 @@ mod tests {
             p.mode = mode;
             assert_eq!(delay.validate().is_ok(), mode < 2);
         }
-        let mut reverb: EffectConfig = serde_json::from_str(r#"{"version":1,"channels":2,"effect":{"kind":"reverb","parameters":{"decaySeconds":1.2,"damping":0.5,"mix":0.2}}}"#).unwrap();
+        let mut reverb: EffectConfig = serde_json::from_str(r#"{"version":1,"channels":2,"bypass":false,"effect":{"kind":"reverb","parameters":{"decaySeconds":1.2,"damping":0.5,"mix":0.2,"roomSize":1,"preDelayMs":0,"algorithm":0}}}"#).unwrap();
         for algorithm in [0, 1, 2, 255] {
             let Effect::Reverb(p) = &mut reverb.effect else {
                 unreachable!()
@@ -290,30 +259,8 @@ mod tests {
     }
 
     #[test]
-    fn legacy_equalizer_graphs_restore_middle_band_and_new_band_defaults() {
-        let config: EffectConfig = serde_json::from_str(r#"{"version":1,"channels":2,"effect":{"kind":"equalizer","parameters":{"lowDb":2,"midDb":-3,"highDb":4,"frequencyHz":1200,"q":2}}}"#).unwrap();
-        config.validate().unwrap();
-        let Effect::Equalizer(parameters) = &config.effect else {
-            panic!("expected equalizer")
-        };
-        assert_eq!(parameters.low_frequency_hz, 150.0);
-        assert_eq!(parameters.high_frequency_hz, 6_000.0);
-        assert_eq!(parameters.low_q, 0.707);
-        assert_eq!(parameters.high_q, 0.707);
-        assert_eq!(parameters.frequency_hz, 1_200.0);
-        assert_eq!(parameters.q, 2.0);
-        let saved = serde_json::to_value(&config).unwrap();
-        assert_eq!(saved["effect"]["parameters"]["frequencyHz"], 1_200.0);
-        assert_eq!(saved["effect"]["parameters"]["lowFrequencyHz"], 150.0);
-        assert_eq!(
-            serde_json::from_value::<EffectConfig>(saved).unwrap(),
-            config
-        );
-    }
-
-    #[test]
     fn all_equalizer_band_frequency_and_q_ranges_are_validated() {
-        let original: EffectConfig = serde_json::from_str(r#"{"version":1,"channels":2,"effect":{"kind":"equalizer","parameters":{"lowDb":0,"midDb":0,"highDb":0,"frequencyHz":1000,"q":0.707}}}"#).unwrap();
+        let original: EffectConfig = serde_json::from_str(r#"{"version":1,"channels":2,"bypass":false,"effect":{"kind":"equalizer","parameters":{"lowDb":0,"midDb":0,"highDb":0,"lowFrequencyHz":150,"lowQ":0.707,"midFrequencyHz":1000,"midQ":0.707,"highFrequencyHz":6000,"highQ":0.707}}}"#).unwrap();
         for band in 0..3 {
             for (hz, q, valid) in [
                 (20.0, 0.1, true),
@@ -335,8 +282,8 @@ mod tests {
                         p.low_q = q;
                     }
                     1 => {
-                        p.frequency_hz = hz;
-                        p.q = q;
+                        p.mid_frequency_hz = hz;
+                        p.mid_q = q;
                     }
                     _ => {
                         p.high_frequency_hz = hz;

@@ -264,6 +264,7 @@ it.each([true, false])(
         type: 'virtual_endpoint',
         config: {
           ...(valid ? { id } : {}),
+          displayName: 'Same display name',
           render: { channels: 2 },
           capture: { channels: 2 },
           reference: duplexReference,
@@ -275,20 +276,21 @@ it.each([true, false])(
         <I18nextProvider i18n={i18n}>
           <RoutingWorkspace
             controlPort={port({ getGraph: vi.fn().mockResolvedValue(graph) })}
-            deviceRateAction={{ change, enabled: true, error: null }}
+            deviceDriverAction={{ change, create: vi.fn(), enabled: true, error: null }}
           />
         </I18nextProvider>
       </MixRelayProvider>,
     );
     for (const button of await screen.findAllByRole('button', { name: /^rate graph-node-/ }))
       fireEvent.click(button);
+    const rate = expect.objectContaining({ sampleRate: 44100 });
     expect(change.mock.calls).toEqual(
       valid
         ? [
-            ['device-a', 44100],
-            ['device-a', 44100],
-            ['device-b', 44100],
-            ['device-b', 44100],
+            ['device-a', rate],
+            ['device-a', rate],
+            ['device-b', rate],
+            ['device-b', rate],
           ]
         : [],
     );
@@ -1000,6 +1002,7 @@ describe('RoutingWorkspace attached virtual device metadata', () => {
               label: null,
               config: {
                 id: 'virtual',
+                displayName: 'Virtual',
                 render: { channels: 8 },
                 capture: { channels: 16 },
                 reference: duplexReference,
@@ -1067,6 +1070,7 @@ describe('RoutingWorkspace graph-scoped presentation', () => {
             label: null,
             type: 'virtual_endpoint',
             config: {
+              displayName: 'MixRelay Virtual I/O',
               render: { channels: 2 },
               capture: { channels: 2 },
               reference: duplexReference,
@@ -1202,6 +1206,7 @@ describe('RoutingWorkspace layout history', () => {
           label: 'MixRelay Virtual I/O',
           type: 'virtual_endpoint',
           config: {
+            displayName: 'MixRelay Virtual I/O',
             reference: duplexReference,
             render: { channels: 2 },
             capture: { channels: 2 },

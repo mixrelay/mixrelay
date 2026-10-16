@@ -11,13 +11,11 @@ import {
   audioGraphToRuntimeGraph,
   changedProcessorParameters,
   presentRoutingApplicationIcons,
-  presentVirtualEndpointSettings,
   providerPortsFrom,
   runtimeGraphToAudioGraph,
   updateRecorderChannels,
   updateRoutingNodeGain,
   updateRoutingNodeParameter,
-  updateVirtualEndpoint,
 } from './model';
 import { virtualPolicy, virtualSpec } from './virtualEndpointFixtures';
 
@@ -114,7 +112,7 @@ it('rehydrates default mixer ports and ignores non-string input IDs from malform
 it.each(['compressor', 'limiter'] as const)(
   'renders incomplete native %s state with safe defaults while retaining its original config',
   (type) => {
-    const original = documentWith({ id: type, type, label: null, config: null });
+    const original = documentWith({ id: type, type, label: null, config: { bypass: false } });
     const model = runtimeGraphToAudioGraph(original);
     expect(
       node(model).appearance.parameterControls?.every((control) => Number.isFinite(control.value)),
@@ -122,9 +120,25 @@ it.each(['compressor', 'limiter'] as const)(
     expect(node(model).appearance.detail).toBe(
       type === 'limiter' ? '-1.0 dB ceiling' : '-18.0 dB · 4.0:1',
     );
-    expect(audioGraphToRuntimeGraph(model, original).nodes[0]?.config).toBeNull();
+    expect(audioGraphToRuntimeGraph(model, original).nodes[0]?.config).toEqual({ bypass: false });
   },
 );
+
+it.each(
+  (['compressor', 'limiter'] as const).flatMap((type) =>
+    [null, {}, { bypass: 'false' }, { bypass: 0 }, { bypass: null }].map(
+      (config) => [type, config] as const,
+    ),
+  ),
+)('keeps %s state without a boolean bypass unsupported and unedited: %j', (type, config) => {
+  const original = documentWith({ id: type, type, label: 'Saved', config });
+  const model = runtimeGraphToAudioGraph(original);
+  expect(node(model).appearance).toMatchObject({ category: 'Unsupported', title: 'Saved' });
+  expect(node(model).appearance.parameterControls).toBeUndefined();
+  const parameter = type === 'limiter' ? 'ceilingDb' : 'thresholdDb';
+  expect(updateRoutingNodeParameter(model, type, parameter, -6)).toBe(model);
+  expect(audioGraphToRuntimeGraph(model, original).nodes[0]?.config).toEqual(config);
+});
 
 it('marks an installed effect with no usable layout unavailable instead of inventing ports', () => {
   const original = documentWith({
@@ -313,9 +327,9 @@ it('rejects a valid-bus list whose combined channel count exceeds the direction 
 it.each(['audio_device_input', 'audio_device_output', 'application_capture'])(
   'renders incomplete %s without fabricating a selector in its runtime document',
   (type) => {
-    const original = documentWith({ id: 'legacy', type, label: null, config: null });
+    const original = documentWith({ id: 'incomplete', type, label: null, config: null });
     const model = runtimeGraphToAudioGraph(original);
-    expect(node(model).appearance.title).toBe('legacy');
+    expect(node(model).appearance.title).toBe('incomplete');
     expect(node(model).appearance.channelCount).toBe(2);
     expect(audioGraphToRuntimeGraph(model, original).nodes[0]?.config).toBeNull();
   },
@@ -362,39 +376,6 @@ it('can edit a normalized external parameter even when the stored values object 
     parameters: { parameterValues: { '1': expect.closeTo(0.7, 12) } },
   });
   expect(updateRoutingNodeParameter(changed, 'effect', 'external:1', 0.7)).toBe(changed);
-});
-
-it('keeps unchanged and missing endpoint edits idempotent', () => {
-  const model = addRoutingNode(
-    runtimeGraphToAudioGraph(empty),
-    { kind: 'virtual_input', spec: virtualSpec },
-    position,
-  );
-  const update = {
-    displayName: virtualSpec.displayName,
-    renderChannels: 64,
-    captureChannels: 16,
-  };
-  expect(updateVirtualEndpoint(model, 'missing', update)).toBe(model);
-  expect(updateVirtualEndpoint(model, node(model).id, { ...update, displayName: '   ' })).toBe(
-    model,
-  );
-  expect(updateVirtualEndpoint(model, node(model).id, update)).toBe(model);
-});
-
-it('does not reinterpret a hardware node as a virtual endpoint on an invalid edit', () => {
-  const model = addRoutingNode(
-    runtimeGraphToAudioGraph(empty),
-    { kind: 'audio_output', title: 'Speakers', uid: 'speakers', channels: 2 },
-    position,
-  );
-  expect(
-    updateVirtualEndpoint(model, node(model).id, {
-      displayName: 'Output',
-      renderChannels: 2,
-      captureChannels: 2,
-    }),
-  ).toBe(model);
 });
 
 it('does not materialize a side whose native endpoint has no channels for that direction', () => {
@@ -446,51 +427,6 @@ it('uses the default recorder title for a saved unnamed recorder', () => {
   expect(node(model).inputPorts).toHaveLength(2);
 });
 
-it('rejects an endpoint edit when the restored device identity is missing', () => {
-  const model = runtimeGraphToAudioGraph(
-    documentWith({
-      id: 'virtual',
-      type: 'virtual_endpoint',
-      label: 'Device',
-      config: { ...virtualSpec, id: '', reference: { render: true, capture: true } },
-    }),
-  );
-  expect(
-    updateVirtualEndpoint(model, node(model).id, {
-      displayName: 'Updated',
-      renderChannels: 2,
-      captureChannels: 2,
-    }),
-  ).toBe(model);
-});
-
-it.each(['render', 'capture'] as const)(
-  'keeps a native %s-only device single-directional when editing channels',
-  (direction) => {
-    const spec =
-      direction === 'render'
-        ? { ...virtualSpec, capture: undefined }
-        : { ...virtualSpec, render: undefined };
-    const model = addRoutingNode(
-      runtimeGraphToAudioGraph(empty),
-      { kind: direction === 'render' ? 'virtual_output' : 'virtual_input', spec },
-      position,
-    );
-    const update = {
-      displayName: 'Updated',
-      renderChannels: direction === 'render' ? 1 : 0,
-      captureChannels: direction === 'capture' ? 1 : 0,
-    };
-    const changed = updateVirtualEndpoint(model, node(model).id, update);
-    expect(node(changed).appearance.title).toBe('Updated');
-    const unexpected = {
-      ...update,
-      [direction === 'render' ? 'captureChannels' : 'renderChannels']: 1,
-    };
-    expect(updateVirtualEndpoint(changed, node(changed).id, unexpected)).toBe(changed);
-  },
-);
-
 it('keeps generic parameter controls editable without inventing a built-in description', () => {
   const created = addRoutingNode(runtimeGraphToAudioGraph(empty), { kind: 'compressor' }, position);
   const first = node(created);
@@ -526,7 +462,7 @@ it('does not infer an application icon after the captured application needs rese
   expect(node(presentRoutingApplicationIcons(marked, [])).appearance.iconUrl).toBeUndefined();
 });
 
-it('serializes a new virtual reference without a source document and repairs missing metadata on edit', () => {
+it('serializes a new virtual reference without a source document and repairs missing metadata', () => {
   const created = addRoutingNode(
     runtimeGraphToAudioGraph(empty),
     { kind: 'virtual_input', spec: virtualSpec },
@@ -541,19 +477,6 @@ it('serializes a new virtual reference without a source document and repairs mis
   };
   expect(audioGraphToRuntimeGraph(malformed, empty).nodes[0]?.config).toMatchObject({
     reference: { render: true, capture: false },
-  });
-  const unnamedConfig = { ...virtualSpec, displayName: undefined, render: 'legacy' };
-  const legacy = {
-    ...created,
-    nodes: [{ ...first, runtime: { ...first.runtime, config: unnamedConfig } }],
-  };
-  const changed = updateVirtualEndpoint(legacy, first.id, {
-    displayName: first.appearance.title,
-    renderChannels: 1,
-    captureChannels: 1,
-  });
-  expect(node(changed).runtime?.config).toMatchObject({
-    render: { channels: 1, channelLayout: 'mono' },
   });
 });
 
@@ -614,31 +537,31 @@ it('removes dangling UI edges when recorder geometry changes', () => {
   expect(updateRecorderChannels(stale, first.id, 1).edges).toEqual([]);
 });
 
-it('preserves legacy cable identities with channel zero when port metadata is unavailable', () => {
+it('preserves cable identities with channel zero when port metadata is unavailable', () => {
   const original = documentWith({ id: 'gain', type: 'gain', label: null, config: { channels: 2 } });
   const model = runtimeGraphToAudioGraph(original);
   const first = node(model);
-  const legacy = {
+  const bare = {
     ...model,
-    nodes: [{ ...first, outputPorts: [{ id: 'legacy-out', label: 'Output' }] }],
+    nodes: [{ ...first, outputPorts: [{ id: 'bare-out', label: 'Output' }] }],
     edges: [
       {
-        id: 'legacy',
+        id: 'bare',
         sourceNodeId: first.id,
-        sourcePortId: 'legacy-out',
+        sourcePortId: 'bare-out',
         targetNodeId: 'absent',
-        targetPortId: 'legacy-in',
+        targetPortId: 'bare-in',
       },
     ],
   };
-  expect(audioGraphToRuntimeGraph(legacy, original).edges[0]).toMatchObject({
-    source: { nodeId: 'gain', portId: 'legacy-out' },
-    destination: { nodeId: 'absent', portId: 'legacy-in' },
+  expect(audioGraphToRuntimeGraph(bare, original).edges[0]).toMatchObject({
+    source: { nodeId: 'gain', portId: 'bare-out' },
+    destination: { nodeId: 'absent', portId: 'bare-in' },
     channelMapping: { mode: 'explicit', routes: [{ sourceChannel: 0, destinationChannel: 0 }] },
   });
 });
 
-it('retains a legacy endpoint display label when its stored display name is absent', () => {
+it('omits a virtual endpoint whose stored config has no display name', () => {
   const config = {
     ...virtualSpec,
     displayName: undefined,
@@ -652,27 +575,7 @@ it('retains a legacy endpoint display label when its stored display name is abse
       config,
     }),
   );
-  expect(
-    updateVirtualEndpoint(model, node(model).id, {
-      displayName: node(model).appearance.title,
-      renderChannels: 64,
-      captureChannels: 16,
-    }),
-  ).toBe(model);
-});
-
-it('does not offer non-existent directions in a single-direction endpoint policy', () => {
-  const renderOnly = { ...virtualSpec, capture: undefined };
-  const model = addRoutingNode(
-    runtimeGraphToAudioGraph(empty),
-    { kind: 'virtual_output', spec: renderOnly },
-    position,
-  );
-  const shown = presentVirtualEndpointSettings(model, virtualPolicy);
-  expect(node(shown).appearance.endpointControl?.allowedCaptureChannels).toEqual([]);
-  expect(node(shown).appearance.endpointControl?.allowedRenderChannels).toEqual(
-    virtualPolicy.renderChannels,
-  );
+  expect(model.nodes).toEqual([]);
 });
 
 it('removes a dangling target even when its source port still exists after geometry edits', () => {

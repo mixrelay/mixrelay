@@ -6,7 +6,7 @@ pub(super) fn configs() -> Vec<EffectConfig> {
     [
         (
             "equalizer",
-            r#"{"lowDb":6,"midDb":-3,"highDb":3,"frequencyHz":1000,"q":0.707}"#,
+            r#"{"lowDb":6,"midDb":-3,"highDb":3,"lowFrequencyHz":150,"lowQ":0.707,"midFrequencyHz":1000,"midQ":0.707,"highFrequencyHz":6000,"highQ":0.707}"#,
         ),
         ("high_pass", r#"{"frequencyHz":200,"q":0.707}"#),
         ("low_pass", r#"{"frequencyHz":3000,"q":0.707}"#),
@@ -21,12 +21,15 @@ pub(super) fn configs() -> Vec<EffectConfig> {
         ("channel_utility", r#"{"mode":4}"#),
         ("pan", r#"{"position":0}"#),
         ("balance", r#"{"position":0.5}"#),
-        ("delay", r#"{"timeMs":1,"feedback":0.5,"mix":1}"#),
+        ("delay", r#"{"timeMs":1,"feedback":0.5,"mix":1,"mode":0}"#),
         (
             "ducking",
             r#"{"thresholdDb":-30,"reductionDb":12,"attackMs":0.1,"releaseMs":5}"#,
         ),
-        ("reverb", r#"{"decaySeconds":0.4,"damping":0.5,"mix":1}"#),
+        (
+            "reverb",
+            r#"{"decaySeconds":0.4,"damping":0.5,"mix":1,"roomSize":1,"preDelayMs":0,"algorithm":0}"#,
+        ),
         ("chorus", r#"{"rateHz":0.6,"depthMs":3,"mix":1}"#),
         ("delay", r#"{"timeMs":1,"feedback":0.55,"mix":1,"mode":1}"#),
         (
@@ -37,7 +40,7 @@ pub(super) fn configs() -> Vec<EffectConfig> {
     .into_iter()
     .map(|(kind, parameters)| {
         serde_json::from_str(&format!(
-        r#"{{"version":1,"channels":{},"effect":{{"kind":"{kind}","parameters":{parameters}}}}}"#,
+        r#"{{"version":1,"channels":{},"bypass":false,"effect":{{"kind":"{kind}","parameters":{parameters}}}}}"#,
         if kind == "pan" { 1 } else { 2 }
     )).unwrap()
     })
@@ -589,7 +592,7 @@ fn invalid_configuration_and_aggregate_capacity_are_rejected() {
     let mut pan = configs().remove(6);
     pan.channels = 2;
     assert!(pan.validate().is_err());
-    let malformed = r#"{"version":1,"channels":2,"effect":{"kind":"delay","parameters":{"timeMs":1,"feedback":0,"mix":1,"unexpected":true}}}"#;
+    let malformed = r#"{"version":1,"channels":2,"bypass":false,"effect":{"kind":"delay","parameters":{"timeMs":1,"feedback":0,"mix":1,"mode":0,"unexpected":true}}}"#;
     assert!(serde_json::from_str::<EffectConfig>(malformed).is_err());
 }
 
@@ -849,8 +852,8 @@ fn changing_all_equalizer_band_parameters_activates_without_callback_heap_operat
     p.low_frequency_hz = 330.0;
     p.low_q = 3.0;
     p.low_db = -12.0;
-    p.frequency_hz = 2_000.0;
-    p.q = 4.0;
+    p.mid_frequency_hz = 2_000.0;
+    p.mid_q = 4.0;
     p.mid_db = 6.0;
     p.high_frequency_hz = 8_000.0;
     p.high_q = 0.3;

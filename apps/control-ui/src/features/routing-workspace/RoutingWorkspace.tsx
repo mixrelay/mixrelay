@@ -25,7 +25,6 @@ import type {
   ExternalProcessorDescriptor,
   FailedProcessorInstance,
   RuntimeGraphDocument,
-  VirtualEndpointRateError,
   VirtualEndpointSettings,
   VirtualEndpointSpec,
 } from '../../core/control-port/types';
@@ -57,14 +56,12 @@ import {
   changedProcessorParameters,
   type GraphPresentation,
   presentRoutingApplicationIcons,
-  presentVirtualEndpointSettings,
   type RoutingNodeRequest,
   runtimeGraphToAudioGraph,
   updateRecorderChannels,
   updateRoutingNodeGain,
   updateRoutingNodeParameter,
   updateRoutingNodeParameters,
-  updateVirtualEndpoint,
   type VirtualEndpointUpdate,
 } from './model';
 import { ProcessorCatalogAlert, ProcessorEditorAlerts } from './ProcessorControlAlerts';
@@ -112,11 +109,6 @@ export interface RoutingWorkspaceProps {
   failedProcessors?: FailedProcessorInstance[];
   catalogRevision?: number;
   processorTimings?: import('../../core/control-port/types').ProcessorTiming[];
-  deviceRateAction?: {
-    change: (endpointId: string, sampleRate: number) => void;
-    enabled: boolean;
-    error: VirtualEndpointRateError | null;
-  };
   graphId?: string;
   interactionDisabled?: boolean;
   sessionDocument?: RuntimeGraphDocument;
@@ -346,45 +338,18 @@ function virtualEndpointId(model: AudioGraphModel | null, nodeId: string) {
   return config && typeof config === 'object' && 'id' in config ? config.id : null;
 }
 
-function changeEndpointRate(
-  endpointId: unknown,
-  sampleRate: number,
-  action: RoutingWorkspaceProps['deviceRateAction'],
-) {
-  if (action?.enabled && typeof endpointId === 'string' && endpointId.trim())
-    action.change(endpointId, sampleRate);
-}
-
+// Endpoint settings are a Driver transaction; they are never authored into the graph.
 function useVirtualEndpointUpdate(
   model: AudioGraphModel | null,
-  presentation: GraphPresentation,
-  updateModel: UpdateModel,
-  settings?: AudioSessionStatus['virtualEndpointSettings'],
-  rateAction?: RoutingWorkspaceProps['deviceRateAction'],
-  driverAction?: RoutingWorkspaceProps['deviceDriverAction'],
+  action?: RoutingWorkspaceProps['deviceDriverAction'],
 ) {
   return useMemo(() => {
-    if (!model) return undefined;
+    if (!model || !action) return undefined;
     return (nodeId: string, update: VirtualEndpointUpdate) => {
       const endpointId = virtualEndpointId(model, nodeId);
-      if (driverAction) {
-        changeDriverEndpoint(endpointId, update, driverAction);
-        return;
-      }
-      if (update.sampleFormat !== undefined) return;
-      if (update.sampleRate !== undefined)
-        return changeEndpointRate(endpointId, update.sampleRate, rateAction);
-      updateModel(updateVirtualEndpoint(model, nodeId, update, presentation, settings), 'runtime');
+      if (action.enabled && typeof endpointId === 'string') action.change(endpointId, update);
     };
-  }, [model, presentation, updateModel, settings, rateAction, driverAction]);
-}
-
-function changeDriverEndpoint(
-  endpointId: unknown,
-  update: VirtualEndpointUpdate,
-  action: NonNullable<RoutingWorkspaceProps['deviceDriverAction']>,
-) {
-  if (action.enabled && typeof endpointId === 'string') action.change(endpointId, update);
+  }, [model, action]);
 }
 
 function useWorkspaceGraph(
@@ -935,7 +900,6 @@ function useSessionGraphRefresh(
 
 export function RoutingWorkspace({
   failedProcessors,
-  deviceRateAction,
   deviceDriverAction,
   graphId,
   interactionDisabled = false,
@@ -981,7 +945,6 @@ export function RoutingWorkspace({
     audioSession,
     applications,
     controlPort,
-    deviceRateAction,
     deviceDriverAction,
     interactionDisabled,
     model,
@@ -999,7 +962,6 @@ export function RoutingWorkspace({
     documentRevision: graph.document?.revision ?? 0,
     graphId,
     interactionDisabled,
-    deviceRateAction,
     deviceDriverAction,
     processorCatalog,
     layout,
@@ -1031,7 +993,6 @@ function useWorkspaceNodeActions(options: {
   audioSession?: AudioSessionStatus;
   applications: readonly CapturableApplication[];
   controlPort: ControlPort;
-  deviceRateAction?: RoutingWorkspaceProps['deviceRateAction'];
   deviceDriverAction?: RoutingWorkspaceProps['deviceDriverAction'];
   interactionDisabled: boolean;
   model: AudioGraphModel | null;
@@ -1077,14 +1038,7 @@ function useWorkspaceNodeActions(options: {
     options.presentation,
     options.updateModel,
   );
-  const updateEndpoint = useVirtualEndpointUpdate(
-    options.model,
-    options.presentation,
-    options.updateModel,
-    options.audioSession?.virtualEndpointSettings,
-    options.deviceRateAction,
-    options.deviceDriverAction,
-  );
+  const updateEndpoint = useVirtualEndpointUpdate(options.model, options.deviceDriverAction);
   return {
     addNode,
     updateChannelLayout,
@@ -1128,7 +1082,6 @@ interface WorkspaceViewProps {
   graphId?: string;
   interactionDisabled: boolean;
   parameters: ReturnType<typeof useProcessorParameterPublisher>;
-  deviceRateAction?: RoutingWorkspaceProps['deviceRateAction'];
   deviceDriverAction?: RoutingWorkspaceProps['deviceDriverAction'];
   processorCatalog: ReturnType<typeof useProcessorCatalog>;
   layout: ReturnType<typeof useGraphLayout>;
@@ -1192,14 +1145,7 @@ function useDeviceActivityModel(props: WorkspaceViewProps) {
 function usePresentedModel(props: WorkspaceViewProps) {
   const { t } = useTranslation();
   const model = useDeviceActivityModel(props);
-  const {
-    applications,
-    audioDevices,
-    inventory,
-    audioSession,
-    deviceRateAction,
-    deviceDriverAction,
-  } = props;
+  const { applications, audioDevices, inventory, audioSession, deviceDriverAction } = props;
   // A graph apply usually settles well under a second; only a lasting one is a warning.
   const state = useSustainedProblem(props.state, (current) => current !== 'active');
   const presented = useMemo(
@@ -1207,17 +1153,12 @@ function usePresentedModel(props: WorkspaceViewProps) {
       model
         ? presentVirtualNodeStatus(
             presentDriverEndpointControls(
-              presentVirtualEndpointSettings(
-                presentApplicationReselection(
-                  presentRoutingApplicationIcons(
-                    presentHardwareNodeStatus(model, audioDevices, inventory.devicesObserved, t),
-                    applications,
-                  ),
-                  t,
+              presentApplicationReselection(
+                presentRoutingApplicationIcons(
+                  presentHardwareNodeStatus(model, audioDevices, inventory.devicesObserved, t),
+                  applications,
                 ),
-                audioSession?.virtualEndpointSettings,
-                t('audioSession.sampleRate'),
-                deviceRateAction,
+                t,
               ),
               deviceDriverAction,
               t,
@@ -1235,7 +1176,6 @@ function usePresentedModel(props: WorkspaceViewProps) {
       audioSession,
       state,
       t,
-      deviceRateAction,
       deviceDriverAction,
     ],
   );

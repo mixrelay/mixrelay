@@ -93,7 +93,7 @@ describe('workspace layout restoration', () => {
   });
 });
 
-it('restores legacy EQ widths to the Core minimum without changing saved audio or writing layout', async () => {
+it('clamps saved EQ widths below the Core minimum without changing saved audio or writing layout', async () => {
   const saved = {
     ...response,
     layout: { ...response.layout, sizes: { 'virtual:input': { width: 228, height: 160 } } },

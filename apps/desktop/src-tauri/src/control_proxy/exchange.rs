@@ -42,9 +42,8 @@ pub(super) async fn request(
     if let Some(body) = body {
         request = request.json(&body);
     }
-    let mut accepted = None;
     let result = match request.send().await {
-        Ok(response) => finish(client, origin, response, &mut accepted).await,
+        Ok(response) => finish(client, origin, response, requested.as_deref(), None).await,
         Err(error) if error.is_connect() => return Ok(failed(path, &error, false)),
         Err(error) => Err(ExchangeError::Transport(error)),
     };
@@ -52,7 +51,7 @@ pub(super) async fn request(
         Ok(response) => Ok(response),
         Err(ExchangeError::Invalid(reason)) => Err(reason),
         Err(ExchangeError::Transport(error)) => {
-            let Some(id) = accepted.as_deref().or(requested.as_deref()) else {
+            let Some(id) = requested.as_deref() else {
                 return Ok(failed(path, &error, true));
             };
             // Headers and even a partial body can arrive before transport fails.
@@ -68,7 +67,7 @@ pub(super) async fn request(
             };
             let engine = observe_engine(client, &response);
             // A stored terminal 404 is a valid result. A missing receipt proves
-            // nothing: the engine may have restarted or ignored the client ID.
+            // nothing: the engine may have restarted since admitting the request.
             if validate_terminal(&response, Some(id)).is_err()
                 && operation_id(&response).ok().flatten().as_deref() != Some(id)
             {
@@ -76,8 +75,7 @@ pub(super) async fn request(
                 result.engine = engine;
                 return Ok(result);
             }
-            let mut resolved_id = Some(id.to_owned());
-            match finish(client, origin, response, &mut resolved_id).await {
+            match finish(client, origin, response, Some(id), Some(id.to_owned())).await {
                 Ok(response) => Ok(response),
                 Err(ExchangeError::Invalid(reason)) => Err(reason),
                 Err(ExchangeError::Transport(error)) => Ok(failed(path, &error, true)),
@@ -101,26 +99,35 @@ async fn finish(
     client: &ControlProxyClient,
     origin: &str,
     mut response: Response,
-    accepted: &mut Option<String>,
+    requested: Option<&str>,
+    mut accepted: Option<String>,
 ) -> Result<ControlProxyResponse, ExchangeError> {
     loop {
         let engine = observe_engine(client, &response);
         let pending = operation_id(&response)?;
-        match &pending {
-            None => validate_terminal(&response, accepted.as_deref())?,
-            // Record the receipt before reading the body: if the body is lost, this
-            // (possibly server-issued) ID is the one to resolve, not the client's.
-            Some(id) if accepted.as_deref().is_none_or(|previous| previous == id) => {
-                *accepted = Some(id.clone());
-            }
-            Some(_) => return Err(IDENTITY_CHANGED.to_owned().into()),
-        }
         // Fast client-ID completions are retained too and require acknowledgement.
         let completed = response
             .headers()
             .get("x-mixrelay-operation-result")
             .and_then(|header| header.to_str().ok())
             .map(str::to_owned);
+        match &pending {
+            None => {
+                validate_terminal(&response, accepted.as_deref())?;
+                // A result for any other operation is neither this request's outcome
+                // nor ours to acknowledge.
+                if completed.is_some() && completed.as_deref() != requested {
+                    return Err(IDENTITY_CHANGED.to_owned().into());
+                }
+            }
+            // The engine adopts the client's ID for every receipt; any other ID is
+            // not this request. Record it before reading the body so a lost body is
+            // resolved through the receipt and later results must bear it.
+            Some(id) if requested == Some(id.as_str()) => {
+                accepted = Some(id.clone());
+            }
+            Some(_) => return Err(IDENTITY_CHANGED.to_owned().into()),
+        }
         let status = response.status().as_u16();
         let body: Value = if status == 204 {
             Value::Null

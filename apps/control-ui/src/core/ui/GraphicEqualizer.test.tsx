@@ -10,7 +10,7 @@ const contract: GraphicEqualizerContract = {
   sampleRate: 48000,
   bands: [
     { id: 'low', label: 'Low', frequencyId: 'lowFrequencyHz', gainId: 'lowDb', qId: 'lowQ' },
-    { id: 'mid', label: 'Mid', frequencyId: 'frequencyHz', gainId: 'midDb', qId: 'q' },
+    { id: 'mid', label: 'Mid', frequencyId: 'midFrequencyHz', gainId: 'midDb', qId: 'midQ' },
     { id: 'high', label: 'High', frequencyId: 'highFrequencyHz', gainId: 'highDb', qId: 'highQ' },
   ],
 };
@@ -96,8 +96,8 @@ it('executes real-unit graph arrows through the same parameters as exact numeric
   const mid = screen.getByRole('button', { name: /2 Mid, 1000 Hz/ });
   fireEvent.focus(mid);
   for (const [key, id, value] of [
-    ['ArrowLeft', 'frequencyHz', 999],
-    ['ArrowRight', 'frequencyHz', 1001],
+    ['ArrowLeft', 'midFrequencyHz', 999],
+    ['ArrowRight', 'midFrequencyHz', 1001],
     ['ArrowUp', 'midDb', 0.1],
     ['ArrowDown', 'midDb', -0.1],
   ] as const) {
@@ -110,7 +110,7 @@ it('executes real-unit graph arrows through the same parameters as exact numeric
   fireEvent.focus(input);
   fireEvent.change(input, { target: { value: '2.003' } });
   fireEvent.blur(input);
-  expect(change).toHaveBeenLastCalledWith('q', 2.003);
+  expect(change).toHaveBeenLastCalledWith('midQ', 2.003);
 });
 it('delivers a frequency/gain drag as one atomic batch, retaining selection and pointer ownership', () => {
   const { plot, batch, change } = setup();
@@ -132,7 +132,7 @@ it('delivers a frequency/gain drag as one atomic batch, retaining selection and 
     clientY: 20 + gainPosition(6),
   });
   expect(batch).toHaveBeenCalledExactlyOnceWith([
-    { id: 'frequencyHz', value: 2200 },
+    { id: 'midFrequencyHz', value: 2200 },
     { id: 'midDb', value: 6 },
   ]);
   expect(change).not.toHaveBeenCalled();

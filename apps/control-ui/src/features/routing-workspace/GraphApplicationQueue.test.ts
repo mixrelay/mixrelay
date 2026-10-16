@@ -160,6 +160,36 @@ it('adopts a newer authoritative graph after a definite conflict and permits the
   expect(f.port.applyGraph.mock.calls[1]?.[0].revision).toBe(9);
 });
 
+it('keeps an edit submitted while a definite conflict reads the engine document', async () => {
+  const f = fixture();
+  f.port.applyGraph.mockRejectedValueOnce(
+    new ControlPortError(409, { code: 'graph_revision_stale', parameters: {} }),
+  );
+  const current = { ...empty, revision: 8 };
+  const read = Promise.withResolvers<RuntimeGraphDocument>();
+  f.port.getGraph.mockReturnValueOnce(read.promise).mockResolvedValue(current);
+  f.port.getGraphStatus.mockResolvedValue({
+    activeRevision: 8,
+    submittedRevision: 8,
+    protocolVersion: 1,
+  });
+  f.queue.submit(f.draft);
+  await flush();
+  f.queue.submit(f.edit());
+  read.resolve(current);
+  await flush();
+  expect(f.callbacks.restore).not.toHaveBeenCalled();
+  expect(f.callbacks.state).toHaveBeenLastCalledWith('blocked');
+  expect(f.callbacks.error).toHaveBeenLastCalledWith('graph_draft_changed');
+  expect(f.port.applyGraph).toHaveBeenCalledTimes(1);
+  // An explicit retry writes the kept draft over the engine document it read.
+  f.queue.retry();
+  await flush();
+  expect(f.port.applyGraph).toHaveBeenCalledTimes(2);
+  expect(f.port.applyGraph.mock.calls[1]?.[0]).toMatchObject({ revision: 9, nodes: [{}] });
+  expect(f.callbacks.state).toHaveBeenLastCalledWith('active');
+});
+
 it('does not treat a newer active graph as acknowledgement of our edit', async () => {
   const f = fixture();
   f.port.applyGraph.mockResolvedValue({ protocolVersion: 1, revision: 2, state: 'pending' });

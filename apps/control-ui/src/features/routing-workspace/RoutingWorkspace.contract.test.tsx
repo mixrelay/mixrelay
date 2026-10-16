@@ -341,34 +341,26 @@ it('targets shared Driver settings without submitting a graph or changing fallba
   });
 });
 
-it('changes a legacy endpoint rate only through its enabled controller and ignores unsupported PCM commands', async () => {
+it('changes an endpoint rate only through the enabled Driver action', async () => {
   const native = port(document({ kind: 'virtual_output', spec: virtualSpec }));
   const change = vi.fn();
   const write = vi.spyOn(native, 'applyGraph');
+  const driver = { settings: virtualPolicy, error: null, change, create: vi.fn() };
   const rendered = render(
-    view(native, {
-      audioSession: session,
-      deviceRateAction: { enabled: true, error: null, change },
-    }),
+    view(native, { audioSession: session, deviceDriverAction: { ...driver, enabled: true } }),
   );
   await ready();
   const node = canvas().model.nodes[0];
   if (!node) throw new Error('Expected Driver node');
   const update = { displayName: node.appearance.title, renderChannels: 64, captureChannels: 16 };
   await act(async () => canvas().onNodeEndpointChange?.(node.id, { ...update, sampleRate: 48000 }));
-  expect(change).toHaveBeenCalledExactlyOnceWith(virtualSpec.id, 48000);
-  await act(async () =>
-    canvas().onNodeEndpointChange?.(node.id, { ...update, sampleFormat: 'signed24' }),
-  );
-  expect(write).not.toHaveBeenCalled();
+  expect(change).toHaveBeenCalledExactlyOnceWith(virtualSpec.id, { ...update, sampleRate: 48000 });
   rendered.rerender(
-    view(native, {
-      audioSession: session,
-      deviceRateAction: { enabled: false, error: null, change },
-    }),
+    view(native, { audioSession: session, deviceDriverAction: { ...driver, enabled: false } }),
   );
   await act(async () => canvas().onNodeEndpointChange?.(node.id, { ...update, sampleRate: 44100 }));
   expect(change).toHaveBeenCalledTimes(1);
+  expect(write).not.toHaveBeenCalled();
 });
 
 it('retries a layout read failure without a reload choice or audio write', async () => {
@@ -483,21 +475,15 @@ it('retries only the crashed processor instance through the authoritative graph 
   });
 });
 
-it('routes legacy endpoint channel edits through graph authoring', async () => {
+it('offers no endpoint edits without a Driver action and never authors them into the graph', async () => {
   const native = port(document({ kind: 'virtual_output', spec: virtualSpec }));
-  const write = vi.spyOn(native, 'applyGraph');
-  render(view(native, { audioSession: session }));
+  render(view(native, { audioSession: { ...session, virtualEndpointSettings: virtualPolicy } }));
   await ready();
-  const node = canvas().model.nodes[0];
-  if (!node) throw new Error('Expected endpoint');
-  const update = { displayName: 'Edited endpoint', renderChannels: 8, captureChannels: 8 };
-  await act(async () => canvas().onNodeEndpointChange?.(node.id, update));
-  await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
-  expect(write.mock.calls[0]?.[0].nodes[0]?.config).toMatchObject({
-    displayName: 'Edited endpoint',
-    render: { channels: 8 },
-    capture: { channels: 8 },
-  });
+  expect(canvas().onNodeEndpointChange).toBeUndefined();
+  expect(canvas().model.nodes[0]?.appearance.endpointControl).not.toHaveProperty(
+    'sampleRateOptions',
+  );
+  expect(canvas().model.nodes[0]?.appearance.endpointControl).not.toHaveProperty('canRename');
 });
 
 it('saves the current layout after a layout error through the dedicated controller', async () => {
