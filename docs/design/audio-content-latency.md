@@ -183,17 +183,14 @@ differs from the engine's known start (a reused PID). The driver sandbox denies
 HAL; then the PID coreaudiod registered decides, as for transport presentation.
 A registration ends with its process and a publication with the engine's lease,
 so a reused PID can only match within the lease expiry after an engine crash.
-Treating an unknown start as "not the engine" made the engine's own rendering
-hide every installed report.
 More clients than can be tracked also fail closed until the excess clients leave.
 No client/identity/control mutex is taken by the IO marker or latency/safety
 property reads. Stop/Remove and device-rate changes cannot expose obsolete frames.
 
 Only apps read the frames. coreaudiod itself (requester PID 0, or the client it
 registered under `com.apple.audio.coreaudiod`, tracked in a lock-free atomic) reads a
-0/1 marker that toggles on each change of the effective value, as Rogue Amoeba's ARK
-driver does, so its own IO scheduling never sees a latency while a change still
-notifies. The control tick coalesces IO-side gate transitions and calls PropertiesChanged
+0/1 marker that toggles on each change of the effective value, so its own IO
+scheduling never sees a latency while a change still notifies. The control tick coalesces IO-side gate transitions and calls PropertiesChanged
 for device `ltnc` on input scope. Publication also sends this notification only
 when the effective integer changes. Host callbacks run after registry, inventory,
 device and identity locks are released. Tests reenter the property API while
