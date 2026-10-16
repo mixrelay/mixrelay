@@ -257,7 +257,7 @@ requires. Never leave a signing authentication window pending.
 
 Steps 4–5 and the clearing check of step 6 are automated for one route by
 `node scripts/lab/macos-latency-acceptance.mjs SOURCE ENDPOINT_ID EVIDENCE_DIR
---verify-installed-latency [--roundtrip]`. SOURCE is another MixRelay endpoint ID (A,
+--verify-installed-latency [--roundtrip] [--settle-seconds=0..120]`. SOURCE is another MixRelay endpoint ID (A,
 which needs the paid edition's second endpoint) or any device UID whose output returns
 on its input; no saved graph may use SOURCE or ENDPOINT (D), and D must report zero
 before the run. EVIDENCE_DIR must be an absolute path; use a new directory per run.
@@ -270,6 +270,12 @@ the reporter's agreement threshold plus the probe's 2-frame alignment window. Ev
 names the selected graph and runs as an engine operation, so another client's edit
 or selection fails the run instead of being overwritten. `--roundtrip` needs
 microphone permission for the terminal.
+The default settling wait is zero. An explicit wait starts after graph activation,
+before collecting the three stable HAL reports, and is recorded in the evidence.
+It separates startup observations from steady operation without changing either
+the pulse alignment or report-agreement thresholds. Impulse JSON also preserves
+the played and arrival host-time coordinates as `pulseTimeline`, including events
+outside the winning alignment; a truncated or untimed timeline has `complete: false`.
 6. Add ordinary playback on D: its reported input latency must become zero. Stop
    that client: the validated engine value should return after the control tick.
    Change rates/graphs, inject transport loss and stop/kill the engine: obsolete

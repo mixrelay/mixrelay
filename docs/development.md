@@ -38,3 +38,11 @@ Rust 코드는 [Rust 작업 규칙](rust-guidelines.md)을, TypeScript·React �
 - 엔진은 자기가 발행하는 가상 장치에 직접 쓰는 클라이언트다. 장치 쓰기로 동작이 바뀌는 판단(지연 보고 등)은 엔진 자신의 쓰기를 포함한 상황을 테스트한다.
 - 서로 다른 장치를 잇는 경로는 클럭이 달라 엔진이 리샘플링한다. 비트 일치를 요구하는 왕복 측정은 같은 클럭 경로에서만 쓰고, 그 밖에는 `pnpm probe:macos-roundtrip --impulse`로 잰다.
 - 엔진은 root 소유 launchd 데몬이고 HAL·앱 캡처가 고정 XPC 이름 `io.mixrelay.audio.engine`으로 연결하므로, 로컬 빌드 엔진으로 설치본 HAL을 대체할 수 없다. 설치본 확인은 위 테스트를 통과한 변경의 최종 확인으로 한 번에 묶는다.
+
+Linux의 장치 입력·출력 경계는 일반 사용자 VM의 격리된 복사본에서
+`MIXRELAY_LAB_TEST_PROFILE=release MIXRELAY_LAB_TEST_NAME=native_device_boundary_probe bash native/linux/pipewire/tests/run-application-retracking.sh /absolute/path/.lab/mixrelay-integration-NAME`
+으로 확인한다. 도구가 전용 PipeWire·WirePlumber·장치 fixture를 만들고
+2/8/16/32/64채널, 매핑·게인, 재연결·오프라인 편집과 32회 회수를 검사한 뒤 자신이 만든 프로세스를 종료한다.
+원시는 출력된 `isolated_lab` 아래 `device-evidence/`에 보존한다. 실제 64채널 하드웨어 검증과는 구분한다.
+랩의 엔진 제어는 `scripts/lab/engine-operations.mjs`로 비동기 결과를 확인하고 영수증을 회수한다.
+HTTP 202를 완료로 처리하거나 새 요청 ID로 변경을 재시도하지 않는다.
