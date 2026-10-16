@@ -620,6 +620,17 @@ pub(crate) unsafe extern "C" fn mr_hal_core_property_get(
         .map(|value| {
             if address.selector == u32::from_be_bytes(*b"tran") {
                 number(registry.transport.get_until(requester_pid, deadline))
+            } else if address.selector == u32::from_be_bytes(*b"ltnc")
+                && address.scope == INPUT
+                && registry.transport.is_coreaudio(requester_pid)
+            {
+                // Apps read the measured frames; coreaudiod reads only a change marker.
+                registry
+                    .pin(object)
+                    .filter(|device| device.id == object)
+                    .map_or(value, |device| {
+                        number(device.input_latency.coreaudio_marker())
+                    })
             } else {
                 value
             }

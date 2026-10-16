@@ -5,7 +5,7 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::ffi::{CStr, c_char};
 use std::ops::Bound::{Excluded, Unbounded};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError, mpsc};
 use std::time::{Duration, Instant};
 
@@ -223,11 +223,16 @@ impl ProcessInspection {
     }
 }
 
+const COREAUDIOD_BUNDLE: &str = "com.apple.audio.coreaudiod";
+
 pub(crate) struct Transport {
     pub(crate) state: Arc<Mutex<State>>,
     queue: mpsc::SyncSender<Query>,
     worker: Option<std::thread::JoinHandle<()>>,
     inspection: ProcessInspection,
+    /// The PID coreaudiod registered under its own bundle, or 0. Property reads classify
+    /// requesters from this atomic, so lock contention never changes the answer.
+    coreaudio_pid: AtomicI32,
 }
 impl Default for Transport {
     fn default() -> Self {
@@ -298,12 +303,16 @@ impl Transport {
             queue,
             worker,
             inspection: ProcessInspection::SYSTEM,
+            coreaudio_pid: AtomicI32::new(0),
         }
     }
     pub(crate) fn policy(&self, bundles: Vec<String>) -> bool {
         lock(&self.state).policy(bundles)
     }
     pub(crate) fn client(&self, device: u32, client: u32, pid: i32, bundle: Option<String>) {
+        if pid > 0 && bundle.as_deref() == Some(COREAUDIOD_BUNDLE) {
+            self.coreaudio_pid.store(pid, Ordering::Release);
+        }
         let key = (self.inspection.incarnation)(pid);
         lock(&self.state).client(
             device,
@@ -316,7 +325,12 @@ impl Transport {
         );
     }
     pub(crate) fn remove(&self, device: u32, client: u32) {
-        lock(&self.state).remove(device, client);
+        let mut state = lock(&self.state);
+        state.remove(device, client);
+        let coreaudio = self.coreaudio_pid.load(Ordering::Acquire);
+        if coreaudio != 0 && !state.clients.values().any(|client| client.pid == coreaudio) {
+            self.coreaudio_pid.store(0, Ordering::Release);
+        }
     }
     #[cfg(test)]
     pub(crate) fn get(&self, device: u32, pid: i32) -> u32 {
@@ -325,6 +339,11 @@ impl Transport {
     #[cfg(test)]
     fn query(&self, _device: u32, pid: i32, budget: Duration) -> u32 {
         self.get_until(pid, Instant::now() + budget)
+    }
+    /// Whether a property request comes from coreaudiod itself: PID 0, or the client that
+    /// coreaudiod registered under its own bundle. Lock-free, so safe on audio threads.
+    pub(crate) fn is_coreaudio(&self, pid: i32) -> bool {
+        pid <= 0 || pid == self.coreaudio_pid.load(Ordering::Acquire)
     }
     pub(crate) fn get_until(&self, pid: i32, deadline: Instant) -> u32 {
         self.get_with_incarnation(pid, deadline, self.inspection.incarnation)

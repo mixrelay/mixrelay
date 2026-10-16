@@ -293,10 +293,19 @@ impl Fixture {
         self.registry.perform(id, CONFIG_ACTION, generation)
     }
 
+    /// Reads a property as coreaudiod itself (requester PID 0).
     fn property<const N: usize>(
         &self,
         object: u32,
         address: &crate::properties::Address,
+    ) -> [u8; N] {
+        self.property_for(object, address, 0)
+    }
+    fn property_for<const N: usize>(
+        &self,
+        object: u32,
+        address: &crate::properties::Address,
+        requester: i32,
     ) -> [u8; N] {
         let mut bytes = [0; N];
         let mut written = 0;
@@ -311,7 +320,7 @@ impl Fixture {
                     u32::try_from(N).unwrap(),
                     &raw mut written,
                     bytes.as_mut_ptr().cast(),
-                    0,
+                    requester,
                 )
             },
             0

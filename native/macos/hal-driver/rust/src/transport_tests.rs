@@ -17,6 +17,7 @@ fn queued_transport(capacity: usize) -> (Transport, mpsc::Receiver<Query>) {
         queue,
         worker: None,
         inspection: ProcessInspection::SYSTEM,
+        coreaudio_pid: AtomicI32::new(0),
     };
     transport.policy(vec!["com.test.App".into()]);
     (transport, requests)
