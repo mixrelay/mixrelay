@@ -6,7 +6,9 @@
 // SOURCE_UID must be a loopback device (for example Loopback Audio) whose output returns on its
 // input, so the probe can play into it while recording only from the endpoint. The probe never
 // plays into the endpoint itself: that would bypass the engine and gate the report to zero.
-// --roundtrip records audio, so the terminal needs microphone permission.
+// --roundtrip records audio, so the terminal needs microphone permission. It uses the probe's
+// impulse mode: a route between two devices crosses clocks, so the engine resamples it and
+// no bit-exact copy of a test signal can arrive.
 // The endpoint must be unused by every saved graph, so the test never adds a contributor to a
 // live route. Writes name the selected graph (expectedGraphId) and its revision, so another
 // client's edit or graph selection makes them fail instead of overwriting that graph.
@@ -176,7 +178,7 @@ try {
       ? last[0] : undefined;
   }, 30, PUBLICATION_INTERVAL_MS);
   if (roundtrip) {
-    const output = execFileSync('zsh', [probe, '--json', '--seconds', '5', sourceUid, uid], { encoding: 'utf8', timeout: 60000 });
+    const output = execFileSync('zsh', [probe, '--json', '--impulse', '--seconds', '5', sourceUid, uid], { encoding: 'utf8', timeout: 60000 });
     result.roundtrip = JSON.parse(output);
   }
   record('measured.json', { graph: applied, ...result });

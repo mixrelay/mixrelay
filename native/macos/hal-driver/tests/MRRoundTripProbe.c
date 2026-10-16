@@ -33,6 +33,19 @@ static const uint32_t MR_UNMAPPED = UINT32_MAX;
 static const double MR_LEAD_SECONDS = 0.1;  // silence before the signal
 static const double MR_TAIL_SECONDS = 1.5;  // recording after the signal, for slow paths
 static const double MR_TIMING_SECONDS = 0.1;
+// Impulse mode measures paths that change samples (asynchronous clocks, sample-rate
+// conversion, gain), where no exact copy exists. It plays 32-frame pulses whose spacing
+// varies pseudo-randomly around 0.25 s, finds each arrival at half its own received peak,
+// and searches for the single delay that aligns the arrival times with the played times;
+// irregular spacing leaves only one delay that aligns many pulses, whatever its length.
+static const double MR_IMPULSE_PERIOD_SECONDS = 0.25;
+enum {
+    MR_IMPULSE_WIDTH = 32,
+    MR_IMPULSE_QUIET = 256,  // silent frames that must precede an arrival
+    MR_IMPULSE_RISE = 16,    // frames a smoothed rise may take to reach half its peak
+};
+static const float MR_IMPULSE_LEVEL = 0.5F;
+static const float MR_IMPULSE_SILENCE = 0.05F;
 
 typedef struct MRChunk {
     double sample_time, rate_scalar;
@@ -48,6 +61,7 @@ typedef struct MRSide {
 
 typedef struct MRProbe {
     AudioDeviceID output, input;
+    bool impulse;
     uint32_t channels;
     double rate;
     uint64_t lead, signal_frames, run_frames, capacity;
@@ -121,8 +135,32 @@ static bool mr_decode(const float *samples, size_t stride, uint32_t channel, uin
     return true;
 }
 
+static uint64_t mr_impulse_period(const MRProbe *probe) {
+    return (uint64_t)(MR_IMPULSE_PERIOD_SECONDS * probe->rate);
+}
+
+/// Pulse k starts within its period slot, displaced by up to a quarter period.
+static uint64_t mr_impulse_start(const MRProbe *probe, uint64_t k) {
+    const uint64_t period = mr_impulse_period(probe);
+    return probe->lead + k * period + mr_permute((uint32_t)k + 1U) % (period / 4U + 1U);
+}
+
+/// Pulses that end before the signal does; a cut pulse is neither played nor counted.
+static uint64_t mr_impulse_count(const MRProbe *probe) {
+    uint64_t count = 0U;
+    while (mr_impulse_start(probe, count) + MR_IMPULSE_WIDTH <= probe->signal_frames) count += 1U;
+    return count;
+}
+
 static float mr_expected(const MRProbe *probe, int64_t frame, uint32_t channel) {
     if (frame < (int64_t)probe->lead || frame >= (int64_t)probe->signal_frames) return 0.0F;
+    if (probe->impulse) {
+        const uint64_t k = ((uint64_t)frame - probe->lead) / mr_impulse_period(probe);
+        const uint64_t start = mr_impulse_start(probe, k);
+        const bool inside = (uint64_t)frame >= start && (uint64_t)frame < start + MR_IMPULSE_WIDTH;
+        return inside && start + MR_IMPULSE_WIDTH <= probe->signal_frames ? MR_IMPULSE_LEVEL
+                                                                          : 0.0F;
+    }
     return mr_signal((uint64_t)frame, channel);
 }
 
@@ -759,6 +797,230 @@ static MRAnalysis mr_analyse(const MRProbe *probe, bool same_device) {
 }
 
 // ---------------------------------------------------------------------------------------
+// Impulse analysis. Per channel, an arrival is a rise from MR_IMPULSE_QUIET silent frames
+// whose level stays above half its own peak for roughly a pulse width; its time is that
+// half-peak crossing, interpolated between frames, so gain and clipping do not move it.
+// The channel with the most arrivals is used. A played step crosses half its level half a
+// frame before its first frame. Every arrival/pulse pair proposes a delay; the delay that
+// aligns the most arrivals within two frames wins, and only distinct pulses count.
+
+static uint32_t mr_incomplete(const MRProbe *probe);
+
+typedef struct MRImpulses {
+    uint64_t played, arrivals, matched, duplicates, rival;
+    double ms_min, ms_max, ms_sum;
+} MRImpulses;
+
+static float mr_level(const MRProbe *probe, uint64_t r, uint32_t c) {
+    const float value = fabsf(mr_frame(probe, r)[c]);
+    return isfinite(value) ? value : 0.0F;
+}
+
+/// Arrival positions (fractional recording frames) on channel c; returns how many.
+static uint64_t mr_arrivals(const MRProbe *probe, uint32_t c, double *positions,
+                            uint64_t limit) {
+    const uint64_t recorded = atomic_load(&probe->recorded_frames);
+    uint64_t count = 0U, quiet = 0U;
+    for (uint64_t r = 1U; r < recorded && count < limit; ++r) {
+        if (mr_level(probe, r, c) < MR_IMPULSE_SILENCE) {
+            quiet += 1U;
+            continue;
+        }
+        const bool armed = quiet >= MR_IMPULSE_QUIET;
+        quiet = 0U;
+        if (!armed) continue;
+        const uint64_t span = MR_IMPULSE_WIDTH + MR_IMPULSE_RISE;
+        if (r + 2U * span >= recorded) break;
+        float peak = 0.0F;
+        for (uint64_t i = r; i < r + span; ++i) peak = fmaxf(peak, mr_level(probe, i, c));
+        const float half = peak * 0.5F;
+        uint64_t cross = r;
+        while (cross < r + MR_IMPULSE_RISE && mr_level(probe, cross, c) < half) cross += 1U;
+        uint64_t above = 0U, end = cross;
+        while (end < r + 2U * span && mr_level(probe, end, c) >= half) {
+            above += 1U;
+            end += 1U;
+        }
+        // A pulse: clearly above silence, a sharp rise, and about one pulse width long.
+        const bool pulse = half >= MR_IMPULSE_SILENCE && cross < r + MR_IMPULSE_RISE &&
+                           above + 4U >= MR_IMPULSE_WIDTH && above <= MR_IMPULSE_WIDTH + 8U;
+        if (pulse) {
+            const float a = mr_level(probe, cross - 1U, c), b = mr_level(probe, cross, c);
+            positions[count++] = (double)(cross - 1U) + (b > a ? (double)(half - a) / (double)(b - a) : 1.0);
+        }
+        // Skip this event; the next arrival needs fresh silence.
+        while (r + 1U < recorded && mr_level(probe, r + 1U, c) >= MR_IMPULSE_SILENCE) r += 1U;
+    }
+    return count;
+}
+
+/// Host time of a fractional frame position on one side.
+static bool mr_host_at(const MRSide *side, double position, double ticks_per_frame,
+                       double *host) {
+    double sample = 0.0;
+    if (position < 0.0) return false;
+    const uint64_t frame = (uint64_t)position;
+    if (!mr_time(side, frame, ticks_per_frame, &sample, host)) return false;
+    *host += (position - (double)frame) * ticks_per_frame;
+    return true;
+}
+
+/// Index of the played time nearest `time` within `tolerance`, or -1.
+static int64_t mr_nearest(const double *played, uint64_t count, double time, double tolerance) {
+    uint64_t low = 0U, high = count;
+    while (low < high) {
+        const uint64_t middle = low + (high - low) / 2U;
+        if (played[middle] < time) {
+            low = middle + 1U;
+        } else {
+            high = middle;
+        }
+    }
+    int64_t best = -1;
+    double distance = tolerance;
+    for (uint64_t i = low > 0U ? low - 1U : 0U; i < count && i <= low; ++i) {
+        if (fabs(played[i] - time) <= distance) {
+            distance = fabs(played[i] - time);
+            best = (int64_t)i;
+        }
+    }
+    return best;
+}
+
+/// Arrivals aligned to some played pulse when every arrival is shifted back by `delay`.
+static uint64_t mr_aligned(const double *played, uint64_t count, const double *arrived,
+                           uint64_t arrivals, double delay, double tolerance) {
+    uint64_t aligned = 0U;
+    for (uint64_t i = 0U; i < arrivals; ++i) {
+        if (mr_nearest(played, count, arrived[i] - delay, tolerance) >= 0) aligned += 1U;
+    }
+    return aligned;
+}
+
+static MRImpulses mr_analyse_impulses(const MRProbe *probe) {
+    MRImpulses result = {.ms_min = INFINITY, .ms_max = -INFINITY};
+    mach_timebase_info_data_t timebase;
+    mach_timebase_info(&timebase);
+    const double ns_per_tick = (double)timebase.numer / (double)timebase.denom;
+    const double ticks_per_frame = 1e9 / probe->rate / ns_per_tick;
+    const double tolerance = 2.0 * ticks_per_frame;
+    result.played = mr_impulse_count(probe);
+    const uint64_t limit = result.played * 4U + 16U;
+    double *played = calloc((size_t)result.played + 1U, sizeof(double));
+    double *positions = calloc((size_t)limit, sizeof(double));
+    double *arrived = calloc((size_t)limit, sizeof(double));
+    bool *used = calloc((size_t)result.played + 1U, sizeof(bool));
+    if (played == NULL || positions == NULL || arrived == NULL || used == NULL) goto done;
+    uint64_t timed = 0U;
+    for (uint64_t k = 0U; k < result.played; ++k) {
+        if (mr_host_at(&probe->out, (double)mr_impulse_start(probe, k) - 0.5, ticks_per_frame,
+                       &played[timed])) {
+            timed += 1U;
+        }
+    }
+    // The channel with the most arrivals; channels are never combined.
+    uint64_t best_channel = 0U, best_count = 0U;
+    for (uint32_t c = 0U; c < probe->channels; ++c) {
+        const uint64_t count = mr_arrivals(probe, c, positions, limit);
+        if (count > best_count) {
+            best_count = count;
+            best_channel = c;
+        }
+    }
+    const uint64_t found = mr_arrivals(probe, (uint32_t)best_channel, positions, limit);
+    for (uint64_t i = 0U; i < found; ++i) {
+        if (mr_host_at(&probe->in, positions[i], ticks_per_frame, &arrived[result.arrivals])) {
+            result.arrivals += 1U;
+        }
+    }
+    double delay = 0.0;
+    uint64_t best = 0U;
+    for (uint64_t i = 0U; i < result.arrivals; ++i) {
+        for (uint64_t j = 0U; j < timed; ++j) {
+            const double candidate = arrived[i] - played[j];
+            if (candidate < 0.0) continue;
+            const uint64_t aligned =
+                mr_aligned(played, timed, arrived, result.arrivals, candidate, tolerance);
+            if (aligned > best) {
+                if (fabs(candidate - delay) > tolerance) result.rival = best;
+                best = aligned;
+                delay = candidate;
+            } else if (fabs(candidate - delay) > tolerance && aligned > result.rival) {
+                result.rival = aligned;
+            }
+        }
+    }
+    for (uint64_t i = 0U; i < result.arrivals && best > 0U; ++i) {
+        const int64_t j = mr_nearest(played, timed, arrived[i] - delay, tolerance);
+        if (j < 0) continue;
+        if (used[j]) {
+            result.duplicates += 1U;
+            continue;
+        }
+        used[j] = true;
+        result.matched += 1U;
+        const double ms = (arrived[i] - played[j]) * ns_per_tick / 1e6;
+        result.ms_min = fmin(result.ms_min, ms);
+        result.ms_max = fmax(result.ms_max, ms);
+        result.ms_sum += ms;
+    }
+done:
+    free(played);
+    free(positions);
+    free(arrived);
+    free(used);
+    return result;
+}
+
+/// Most played pulses arrived once each at one delay that clearly beats any other.
+static bool mr_impulses_measured(const MRImpulses *impulses) {
+    return impulses->matched > 0U && impulses->matched * 2U >= impulses->played &&
+           impulses->rival * 2U < impulses->matched;
+}
+
+static void mr_report_impulses(const MRProbe *probe, const MRImpulses *a, const MRReported *out,
+                               const MRReported *in, bool json) {
+    uint32_t out_total = 0U, in_total = 0U;
+    const bool known = mr_reported_total(out, &out_total) && mr_reported_total(in, &in_total);
+    const double ms_to_frames = probe->rate / 1000.0;
+    const double mean = a->matched > 0U ? a->ms_sum / (double)a->matched : 0.0;
+    if (json) {
+        printf("\"mode\":\"impulse\",\"impulses\":%llu,\"arrivals\":%llu,\"matched\":%llu,"
+               "\"duplicates\":%llu,\"rivalAlignment\":%llu,\"measured\":%s,",
+               (unsigned long long)a->played, (unsigned long long)a->arrivals,
+               (unsigned long long)a->matched, (unsigned long long)a->duplicates,
+               (unsigned long long)a->rival, mr_impulses_measured(a) ? "true" : "false");
+        if (a->matched > 0U) {
+            printf("\"latencyMs\":{\"min\":%.3f,\"max\":%.3f,\"mean\":%.3f},"
+                   "\"latencyFrames\":{\"min\":%.1f,\"max\":%.1f,\"mean\":%.2f},",
+                   a->ms_min, a->ms_max, mean, a->ms_min * ms_to_frames,
+                   a->ms_max * ms_to_frames, mean * ms_to_frames);
+        }
+        mr_json_known("reportedLatencyFrames", known, out_total + in_total);
+        printf(",\"timestampDiscontinuities\":{\"output\":%u,\"input\":%u},\"complete\":%s}\n",
+               mr_discontinuities(&probe->out), mr_discontinuities(&probe->in),
+               mr_incomplete(probe) == 0U ? "true" : "false");
+        return;
+    }
+    printf("impulses %llu played, %llu arrivals, %llu matched once, %llu duplicates, "
+           "best rival delay aligns %llu\n",
+           (unsigned long long)a->played, (unsigned long long)a->arrivals,
+           (unsigned long long)a->matched, (unsigned long long)a->duplicates,
+           (unsigned long long)a->rival);
+    if (a->matched > 0U) {
+        printf("latency %.3f..%.3f ms (mean %.3f, %.1f frames) by host time%s\n", a->ms_min,
+               a->ms_max, mean, mean * ms_to_frames,
+               mr_impulses_measured(a) ? "" : " (not conclusive)");
+    }
+    if (known) {
+        printf("devices report %u frames (%.3f ms)\n", out_total + in_total,
+               (double)(out_total + in_total) * 1000.0 / probe->rate);
+    } else {
+        printf("devices do not report their full latency\n");
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // Report
 
 static bool mr_identity(const MRProbe *probe, const MRAnalysis *analysis) {
@@ -1080,14 +1342,106 @@ static bool mr_self_test_signal(void) {
                      "non-signal values");
 }
 
+/// A synthetic impulse recording: pulses `delay` frames late (plus 48 frames of host time)
+/// at `gain`, clipped to 1, each edge smoothed over `smooth` frames, on channel 0 and on
+/// channel 1 `skew` frames later, with low noise.
+static MRProbe *mr_impulse_recording(double seconds, uint64_t delay, float gain, uint32_t smooth,
+                                     int64_t skew) {
+    MRProbe *probe = mr_synthetic(2U, seconds);
+    if (probe == NULL) return NULL;
+    probe->impulse = true;
+    for (uint64_t r = 0U; r < probe->run_frames; ++r) {
+        for (uint32_t c = 0U; c < 2U; ++c) {
+            const int64_t n = (int64_t)r - (int64_t)delay - (c == 1U ? skew : 0);
+            float value = 0.0F;
+            // A moving average over `smooth` frames rounds both edges symmetrically.
+            const uint32_t taps = smooth == 0U ? 1U : smooth;
+            for (uint32_t t = 0U; t < taps; ++t) value += mr_expected(probe, n - (int64_t)t, 0U);
+            value = fminf(value / (float)taps * gain, 1.0F);
+            *mr_sample(probe, r, c) = value + (r % 7U == 0U ? 0.01F : 0.0F);
+        }
+    }
+    mr_synthesize(probe, 48U);
+    return probe;
+}
+
+static MRImpulses mr_impulse_analysis(const MRProbe *probe) {
+    const MRImpulses a = mr_analyse_impulses(probe);
+    const MRReported none = {0};
+    mr_report_impulses(probe, &a, &none, &none, false);
+    return a;
+}
+
+static bool mr_impulse_expect(const MRImpulses *a, double ms, const char *what) {
+    return mr_expect(mr_impulses_measured(a) && a->matched == a->played &&
+                         fabs(a->ms_min - ms) < 0.1 && fabs(a->ms_max - ms) < 0.1,
+                     what);
+}
+
+/// Exact, smoothed, amplified and clipped pulses; a delay longer than the spacing; skewed
+/// channels; a cut final pulse; repeated copies and noise that must not measure.
+static bool mr_self_test_impulses(void) {
+    bool ok = true;
+    // 300 frames of signal delay plus 48 of host time is 7.25 ms at 48 kHz; a moving
+    // average over s frames moves the half-peak crossing by (s - 1) / 2 frames.
+    MRProbe *exact = mr_impulse_recording(2.0, 300U, 1.0F, 0U, 0);
+    MRProbe *smooth = mr_impulse_recording(2.0, 300U, 1.0F, 5U, 0);
+    MRProbe *clipped = mr_impulse_recording(2.0, 300U, 3.0F, 5U, 0);
+    MRProbe *late = mr_impulse_recording(2.0, 14400U, 1.0F, 5U, 0);
+    MRProbe *skewed = mr_impulse_recording(2.0, 300U, 1.0F, 0U, 8);
+    MRProbe *cut = mr_impulse_recording(1.001, 300U, 1.0F, 0U, 0);
+    if (!exact || !smooth || !clipped || !late || !skewed || !cut) return false;
+    MRImpulses a = mr_impulse_analysis(exact);
+    ok &= mr_impulse_expect(&a, 7.25, "impulse latency");
+    a = mr_impulse_analysis(smooth);
+    ok &= mr_impulse_expect(&a, 7.25 + 2.0 / 48.0, "smoothed impulse latency");
+    a = mr_impulse_analysis(clipped);
+    // Three times the gain clips at 1; the half-peak crossing moves less than a frame.
+    ok &= mr_expect(mr_impulses_measured(&a) && a.matched == a.played &&
+                        fabs(a.ms_min - 7.25) < 0.05 && fabs(a.ms_max - 7.29) < 0.05,
+                    "amplified, clipped impulse latency");
+    a = mr_impulse_analysis(late);
+    ok &= mr_impulse_expect(&a, 301.0 + 2.0 / 48.0, "latency beyond the pulse spacing");
+    a = mr_impulse_analysis(skewed);
+    ok &= mr_impulse_expect(&a, 7.25, "skewed channels are measured one at a time");
+    a = mr_impulse_analysis(cut);
+    ok &= mr_impulse_expect(&a, 7.25, "a cut final pulse is not played");
+    // Ten copies of the first pulse only, then silence: one distinct pulse arrived.
+    MRProbe *repeated = mr_impulse_recording(5.0, 300U, 1.0F, 0U, 0);
+    if (repeated == NULL) return false;
+    const uint64_t first = mr_impulse_start(repeated, 0U) + 300U;
+    for (uint64_t r = first + MR_IMPULSE_WIDTH; r < repeated->run_frames; ++r) {
+        const uint64_t phase = (r - first) % 6000U;
+        for (uint32_t c = 0U; c < 2U; ++c) {
+            *mr_sample(repeated, r, c) = r < first + 10U * 6000U && phase < MR_IMPULSE_WIDTH
+                                             ? MR_IMPULSE_LEVEL
+                                             : 0.0F;
+        }
+    }
+    a = mr_impulse_analysis(repeated);
+    ok &= mr_expect(!mr_impulses_measured(&a) && a.matched == 1U, "repeated copies do not measure");
+    // No pulse returns: a lone spike, a slow swell and steady background are not pulses.
+    MRProbe *noise = mr_impulse_recording(2.0, 0U, 0.0F, 0U, 0);
+    if (noise == NULL) return false;
+    *mr_sample(noise, 20000U, 1U) = 0.3F;
+    for (uint64_t r = 40000U; r < 41000U; ++r) {
+        *mr_sample(noise, r, 0U) = 0.5F * (float)(r - 40000U) / 1000.0F;
+    }
+    for (uint64_t r = 60000U; r < 70000U; ++r) *mr_sample(noise, r, 0U) = 0.4F;
+    a = mr_impulse_analysis(noise);
+    ok &= mr_expect(a.arrivals == 0U && !mr_impulses_measured(&a), "noise is not a pulse");
+    return ok;
+}
+
 static int mr_self_test(void) {
+    const bool impulses = mr_self_test_impulses();
     const bool damage = mr_self_test_damage();
     const bool channels = mr_self_test_channels();
     const bool anchor = mr_self_test_anchor();
     const bool repeats = mr_self_test_repeats();
     const bool early = mr_self_test_early_damage();
     const bool signal = mr_self_test_signal();
-    const bool passed = damage && channels && anchor && repeats && early && signal;
+    const bool passed = impulses && damage && channels && anchor && repeats && early && signal;
     printf("self test %s\n", passed ? "passed" : "FAILED");
     return passed ? 0 : 1;
 }
@@ -1100,13 +1454,17 @@ static void mr_usage(FILE *stream) {
             "usage: MRRoundTripProbe --list | --self-test\n"
             "       MRRoundTripProbe --transport DEVICE_UID\n"
             "       MRRoundTripProbe --latency DEVICE_UID (read-only device/stream/safety)\n"
-            "       MRRoundTripProbe [--json] [--seconds 1-120] [--channels 1-64] OUTPUT_UID "
-            "[INPUT_UID]\n"
+            "       MRRoundTripProbe [--json] [--impulse] [--seconds 1-120] [--channels 1-64] "
+            "OUTPUT_UID [INPUT_UID]\n"
             "Plays a deterministic signal into OUTPUT_UID and records INPUT_UID (default: the\n"
             "same device). Reports latency (host time; also device frames on one device),\n"
             "received, missing and repeated signal frames, damaged samples, slips, channel\n"
             "order and the latency the devices report. Changes no default device or setting.\n"
-            "Exit status: 0 measured, 1 usage or device error, 3 no exact copy of the signal.\n");
+            "--impulse measures paths that change samples (asynchronous clocks, sample-rate\n"
+            "conversion): it plays pulses at irregular ~0.25 s spacing and finds the one delay\n"
+            "that aligns their arrivals.\n"
+            "Exit status: 0 measured, 1 usage or device error, 3 no exact copy of the signal\n"
+            "(with --impulse: no single delay aligned most pulses).\n");
 }
 
 static bool mr_parse_number(const char *text, double low, double high, double *value) {
@@ -1121,7 +1479,7 @@ static bool mr_parse_number(const char *text, double low, double high, double *v
 }
 
 typedef struct MROptions {
-    bool json;
+    bool json, impulse;
     double seconds, channels;
     const char *uids[2];
     int found;
@@ -1141,6 +1499,8 @@ static int mr_options(int argc, char **argv, MROptions *options) {
         bool ok = true;
         if (strcmp(argv[i], "--json") == 0) {
             options->json = true;
+        } else if (strcmp(argv[i], "--impulse") == 0) {
+            options->impulse = true;
         } else if (strcmp(argv[i], "--seconds") == 0 && i + 1 < argc) {
             ok = mr_parse_number(argv[++i], 1.0, 120.0, &options->seconds);
         } else if (strcmp(argv[i], "--channels") == 0 && i + 1 < argc) {
@@ -1194,6 +1554,7 @@ static MRProbe *mr_prepare(const MROptions *options) {
     if (probe->channels > out_channels) probe->channels = out_channels;
     if (probe->channels > in_channels) probe->channels = in_channels;
     probe->rate = out_rate;
+    probe->impulse = options->impulse;
     if (probe->channels == 0U || !mr_allocate(probe, options->seconds)) {
         fprintf(stderr, "no common channels, or not enough memory for the recording\n");
         return NULL;
@@ -1276,6 +1637,11 @@ int main(int argc, char **argv) {
     mr_describe("input", probe->input, kAudioObjectPropertyScopeInput, options.json);
     if (options.json) printf("\"channels\":%u,\"seconds\":%.1f,", probe->channels, options.seconds);
     if (!mr_run(probe)) return 1;
+    if (probe->impulse) {
+        const MRImpulses impulses = mr_analyse_impulses(probe);
+        mr_report_impulses(probe, &impulses, &out_reported, &in_reported, options.json);
+        return mr_impulses_measured(&impulses) ? 0 : 3;
+    }
     const MRAnalysis analysis = mr_analyse(probe, probe->output == probe->input);
     if (options.json) {
         mr_report_json(probe, &analysis, &out_reported, &in_reported);
