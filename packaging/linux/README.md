@@ -35,7 +35,7 @@ sudo dnf install ./MixRelay-VERSION-1.ARCH.rpm
 sudo pacman -U ./mix-relay-VERSION-1-x86_64.pkg.tar.zst
 ```
 
-The native dependencies include GUI/audio libraries, PipeWire/WirePlumber,
+The native dependencies include GUI/audio libraries, PipeWire >= 1.2 and WirePlumber >= 0.5,
 systemd, plugin hosting and the session's normal authorization tools. End users
 need no SDK or manual service configuration. AppImage is not the coordinated
 installation/update path. The current release toolchain requires glibc 2.39;
@@ -64,7 +64,10 @@ There is one public launch entry and one public uninstall entry.
 The user service is `/usr/lib/systemd/user/mixrelay-driver.service`. A hidden XDG
 autostart entry starts it at login. Installation reloads signed-in users' managers
 and starts their existing user units; audio never runs as root or through a
-competing global service. Closing the editor or its window keeps audio running.
+competing global service. An explicit app connection or engine recovery starts the
+same user unit before launching the engine, including when login activation has
+not run. A failed or unresponsive service start fails that connection within ten
+seconds. Closing the editor or its window keeps audio running.
 Explicit runtime Quit stops devices and persists the inactive state with the device
 settings; service restart alone does not reactivate them. Reopening MixRelay
 restores the saved devices. Failed stop/save keeps the runtime available and
@@ -91,6 +94,11 @@ application-owned paths that pass a symlink-free path check. Recordings, exporte
 projects and trial protection remain. Direct package-manager removal preserves all
 per-user settings.
 
+The installed desktop entry starts the user's Driver unit before starting its
+owned engine. Controller IPC uses `$XDG_RUNTIME_DIR/mixrelay/control/control.sock`;
+persistent data and its ancestors retain their existing permissions. The private
+normal-user launcher check is documented in [the lab guide](../../infra/lab/README.md).
+
 ## Documents and qualification
 
 All eleven App and Driver component agreements, CHANGELOG and third-party notices
@@ -105,3 +113,10 @@ DEB, RPM and Arch still require distribution-specific clean install,
 upgrade/removal, user-session audio and preserved device/graph/settings/
 recording/authentication checks with the complete artifact. Record observed results
 and remaining work in [the product checklist](../../docs/product.md).
+
+The async graph contribution path requires PipeWire 1.2 scheduling; this is also
+checked at build and connection preparation. The source-mute policy requires
+WirePlumber 0.5. Debian dependencies declare these versions. Tauri emits RPM
+requirements as literal capability names, so RPM retains native package names;
+the linked PipeWire version is still checked before connection preparation. Ubuntu 24.04's
+unmodified audio packages are too old; the lab's Ubuntu image uses 26.04.

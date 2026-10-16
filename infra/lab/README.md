@@ -90,5 +90,33 @@ plugin은 실제 검색→PCM→설정/editor 변경→저장→재시작/복원
 수동 block 처리나 sleep pacing을 실시간 증거로 쓰지 않는다. 기준·warmup·무음 허용을
 결과에 맞춰 바꾸지 않으며 실패 원시도 보존한다.
 
+실제 환경 시험은 `native-lab` feature와 정확한 시험 이름을 함께 지정한다. 기본
+workspace 검사는 이 feature를 켜지 않는다. PipeWire 시험은 기존 private lab의
+fixture·소켓·설정 환경을 먼저 준비하고 직렬 실행한다. feature만 켰다고 사용자
+세션에 시험 장치·앱을 만들지 않는다. 시험이 요구하는 명시적 fixture 변수도 필요하다.
+제어 API를 여는 lab의 작업 폴더와 상위 경로는 해당 사용자 또는 root만 바꿀 수 있어야 한다.
+다른 사용자가 쓸 수 있는 경로에서는 실제 제어 소켓의 보안 검사가 시작을 거부한다.
+
+설치된 Linux 런처는 `python3 scripts/lab/linux-desktop-launch-check.py /절대/새/증거폴더`로
+검사한다. 전용 VM의 일반 사용자 로그인 세션, Xvfb·curl·Python Gdk 3가 필요하다.
+기존 앱·엔진과 실행 중인 Driver unit이 있으면 거부한다. `.desktop`으로 실행해
+Driver Ready·엔진 health와 실제 렌더 스크린샷을 남기고 시험 소유자를 종료해
+처음의 비활성 서비스 상태를 복원한다. 자격 증명 상태까지 검사하려면 정상 사용자
+로그인의 Secret Service도 준비한다. 이 도구가 키체인이나 사용자 암호를 설정하지는 않는다.
+
+```sh
+node scripts/lab/native-check.mjs cargo test --locked -p mixrelay-engine-service --features native-lab --bin mixrelay-engine-service EXACT_NATIVE_TEST -- --exact --test-threads=1
+node scripts/lab/native-check.mjs cargo test --locked -p mixrelay-linux-driver --features native-lab --lib EXACT_NATIVE_TEST -- --exact --test-threads=1
+node scripts/lab/native-check.mjs cargo test --locked -p mixrelay-pipewire --features native-lab --lib EXACT_NATIVE_TEST -- --exact --test-threads=1
+node scripts/lab/native-check.mjs cargo test --locked -p mixrelay-audio-recorder --features native-lab --lib ffmpeg_decodes -- --test-threads=1
+```
+
+FFmpeg 시험은 실제 `ffmpeg`·`ffprobe`가 필요하며 RF64의 4GiB 경계까지 독립 디코딩한다.
+macOS aggregate 시험은 `MIXRELAY_LAB_AGGREGATE_OUTPUT_UIDS`에 개행으로 구분한
+출력 UID 두 개를 지정하고 `macos_devices::aggregate::native_tests::`의 정확한 시험을
+직렬로 실행한다. 두 출력에는 무음만 쓰며 시스템 기본 장치는 바꾸지 않는다.
+앱 캡처 clock 시험은 기존 `scripts/check-macos-application-clock.sh`의 전용 build
+fixture와 명시적 `--run`을 사용한다. soak·성능 비교와 종료용 자식 fixture의 ignore는 유지한다.
+
 빌드·합성 fixture·실제 앱/장치·최종 패키지의 결과는 구분한다.
 매트릭스보다 넓은 필수 환경이나 시나리오를 이 문서에서 만들지 않는다.

@@ -89,6 +89,19 @@ rollback, under the original UID. A fresh install does not launch previously
 stopped apps. Private rollback staging is cleaned under retained leases; cleanup failure is
 reported. No unrelated service or user document is removed.
 
+Failed-install recovery checks the dependencies of the roles it actually closed:
+
+| Role | Required installed targets before reopening |
+| --- | --- |
+| Editor | App, engine executable, engine launchd definition |
+| Background runtime | App, Driver executable, HAL, Driver launchd definition, engine executable, engine launchd definition |
+
+If both roles closed, their combined dependencies must verify before either is
+reopened. Other missing targets do not prevent editor-only recovery; present
+targets still undergo signature and payload verification. The engine launchd
+definition is required because the editor connects to the installed fixed-name
+engine service. A successful file rollback alone is insufficient.
+
 ## Runtime and removal
 
 The public editor and internal `--driver-runtime` role use the same MixRelay bundle.

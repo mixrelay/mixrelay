@@ -15,6 +15,13 @@ host timebase is prepared before rendering. The renderer uses native output
 sample/host coordinates when valid, retaining its existing fallback for missing
 native timestamps.
 
+Queue residence measures delay; it does not place independently captured PCM on a
+shared absolute content timeline. The current bridge queues carry sample order and
+epochs, but no per-range source timestamp. A latest callback timestamp must never
+be attached to older queued PCM as though it described that content. Exact
+cross-clock content placement requires retaining source timestamps through partial
+reads and SRC; the current latency report alone does not establish that guarantee.
+
 `RenderPlan::destination_arrivals` retains terminal arrivals, including hosted
 transport/intrinsic delay and route compensation. It accepts causal source
 arrival observations in source-binding order. Missing observations propagate

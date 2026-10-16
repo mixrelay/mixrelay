@@ -3,6 +3,169 @@
 제품 동작·범위·남은 작업은 [product.md](../product.md)가 기준이다. MixRelay는 아직 출시하지 않았다.
 이 문서는 현재 소스 검사와 로컬 개발 설치본의 검증 범위만 구분한다.
 
+## 2026-10-16 후속 소스 검사
+
+아래 첫 집계는 Loopback 구현 대조 전 단계다. 이후 최종 소스·VM·설치본 결과는
+다음 절의 오디오 구현 경로 대조와 Linux 검증 VM에 기록한다.
+
+직접 소유하는 주요 PCM/FIFO/녹음 버퍼의 예약 실패를 오류로 돌려주고,
+부분 준비의 회수와 기존 활성 PCM의 보존을 검사했다. 외부 SRC·플러그인과
+프로세스 전체의 OOM 복구를 보장하지 않는다.
+
+- macOS workspace lib/bin 2,229개 통과·8개 ignore, native 검사 499개 통과·5개 ignore.
+  집계에서 자식 fixture의 중복 실행은 제외했다. workspace all-features clippy도 통과했다.
+- Linux 코드 검사 workspace lib/bin 1,657개 통과·5개 ignore, workspace all-features clippy 통과.
+  이후 PipeWire 버전 하한 변경은 추가 all-targets/all-features clippy와 17개 lib 검사로 확인했다.
+- 스크립트 349개, Rust fmt·crate layer, 왕복 프로브 자체 시험 통과.
+  FFmpeg의 모든 PCM 형식·RF64 4GiB 경계 디코딩을 포함한 녹음 검사 39개도 통과했다.
+- 실환경 시험은 `native-lab`과 명시적 fixture를 쓰도록 옮겼다. 성능·soak 및
+  종료용 자식 fixture의 ignore는 유지했다. 기본 코드 검사 통과를 실환경 PCM 통과로 쓰지 않는다.
+- 전용 키체인의 실제 앱·PKG 서명 시험과 새 Universal 패키지 빌드가 통과했다.
+  첫 업그레이드는 이 Mac의 이전 개발 설정에 필수 `active`가 없어 Driver가 반복 종료해 실패했다.
+  설치기는 이전 실행 파일로 복원했고, 원래 설정을 돌려준 뒤 기존 장치가 다시 복구됐다.
+  원본 백업을 보존하고 새 파일 교체 시점에 로컬 설정을 보완해 재설치했다.
+  20:25:35 설치 성공 로그와 설치된 Driver·엔진의 빌드 산출물 SHA-256 일치를 확인했다.
+  Driver는 Ready이고 기존 장치의 ID·2채널·48kHz 설정이 유지됐다.
+  제품의 구형 저장 형식 호환 코드는 추가하지 않았다. 최신 설치본 오디오 검증은 아직 완료하지 않았다.
+  Mac의 스왑 사용량이 약 48GiB여서 로컬 측정과 빌드·시험을 중지하고,
+  검증 컨테이너·Docker VM·남아 있던 MixRelay Storybook 서버 2개를 종료했다.
+
+## Loopback 비교와 현재 설치본 오디오 확인
+
+2026-10-16 같은 `MRRoundTripProbe`로 기존 설치본의 기본 패스스루를 측정했다.
+48kHz·Float32·2채널·클라이언트 버퍼 512프레임·3초 결정적 PCM 조건에서 MixRelay IO는
+타임스탬프 기준 추가 지연 0프레임, Loopback 2.5.0/ARK 13.5.2는 768프레임(16ms)이었다.
+둘 다 신호 144,000프레임 전체가 비트 일치했고 누락·중복·손상·채널 뒤바뀜·시각 단절은 0이었다.
+이는 물리 장치 지연이나 앱 캡처·DSP·녹음을 포함한 전체 경로의 지연·CPU 우위를 증명하지 않는다.
+원자료는 `/tmp/mixrelay-installed-pass-through.json`과 `/tmp/loopback-installed-pass-through.json`이다.
+
+Loopback을 소스로 삼은 기존 설치본의 엔진 경유 시험은 미통과다. 외부 소스의 단독 기준선을
+그래프 변경 전에 측정하고, 그 미보고 지연을 MixRelay의 HAL 보고와 분리해 비교하도록 수락 도구를 고쳤다.
+기준선은 768프레임·20/20 임펄스로 통과했고, 엔진 경유 HAL 보고는 748프레임으로 안정화됐다.
+전체 경로에서 약 1,559프레임이 관측됐지만 단일 정렬은 12개·경쟁 정렬 8개로 수락하지 않았다.
+진단 필드를 추가한 다음 실행도 20개 도착 중 같은 지연으로 정렬된 것이 2개에 그쳐 수락하지 않았다.
+시험 후 그래프와 지연 보고의 복원을 확인했다. 원자료는
+`/tmp/mixrelay-installed-latency-20261016-baseline-verified/`와
+`/tmp/mixrelay-installed-latency-20261016-alignment-diagnostic/`다.
+
+현재 소스의 실제 aggregate 시작 시험에서 내장 스피커·Loopback 조합은 양쪽 순서 모두
+두 멤버의 시작과 정상 회수가 통과했다. LG 모니터 출력 두 개는 aggregate 첫 시작에서 timeout이고,
+같은 출력은 aggregate 없는 단독 시작도 timeout이다. 스택상 대기는 `AudioDeviceStart` 내부다.
+따라서 이 조건을 두 번째 aggregate 멤버만의 결함으로 확정하지 않는다.
+이 조합의 원인과 최신 설치본 확인은 아직 끝나지 않았다.
+
+### 오디오 구현 경로 대조
+
+Loopback 2.5.0/ARK 13.5.2의 보관된 Ghidra 출력
+`/Volumes/dev/loopback/ghidra/export/{arkaudiod,ACP}/decompiled.c`와
+MixRelay의 실제 호출 경로를 대조했다. 아래 정적 관찰은 실행 측정과 구별한다.
+
+| 경로 | Loopback의 확인 근거 | MixRelay의 확인과 변경 |
+| --- | --- | --- |
+| 실행 클록 | `ACPStableIOClock::startIO:`와 타이머 handler `0x1a748` | 직접 IOProc 렌더, 실시간 대체 worker, native frame credit, 이벤트 깨우기가 이미 있다. 감독 스레드의 우선순위만 바꾸는 대체 구현을 추가하지 않았다. |
+| 독립 클록 변환 | `ACPClockConverter` `0x5cc04`, sample→host→다른 sample 변환 | 기존 sinc SRC·FIFO PI·epoch를 유지했다. 이는 PCM 연속성 경로이며 독립 입력들의 절대 콘텐츠 시각 정렬과는 구별한다. 현재 FIFO에는 범위별 소스 타임스탬프가 없어 이 정렬 보장은 미완료다. |
+| 캡처 정지 감시 | `updateWatchdogs` `0x100011b54`, `recreateTap` `0x1000348a0` | 프로세스·형식만 같으면 콜백 정지를 놓치던 경로에 독립 비음소거 진단 탭을 추가했다. 원래 탭은 조용한데 같은 선택의 진단 탭에서 PCM이 확인될 때만 재생성한다. 실제 무음·원래 신호 복귀·lease 변경·중지·부분 실패를 검사한다. |
+| 복구 중 일시 실패 | tap/aggregate의 소유 수명과 재생성 경로 | 캡처가 중단된 상태의 일시 실패를 pending으로 유지한다. unregister 등 어느 단계에서 실패해도 전체 재생성 의도를 보존해 다음 갱신에서 재시도한다. |
+| 엔진 입력 이력 | 장치·캡처 세션의 시계·수명과 상태 갱신 경로 대조 | 같은 노드·연결 ID에서 소스만 교체하면 이전 효과·detector·버스 PCM이 유지되던 결함을 고쳤다. 실제 입력 출처·상위 경로·포트 구성을 준비 단계에서 비교하며 콜백에서는 할당하지 않는다. |
+| 네이티브 입력 전달 | 물리 입력 IOProc의 버퍼 처리 경로 | 입력 PCM을 큐에 넣기 전에 변환 hook을 호출해 한 native quantum을 더 기다리던 순서를 수정했다. 출력은 변환 후 소비 순서를 유지한다. |
+| 시각·측정 유효성 | `ACPClockConverter`의 연속 좌표 검증 | 중간 타임스탬프 누락 뒤 역행 검출이 사라지던 문제를 수정했다. SRC reset을 가로지른 residence 구간도 무효화하고 새 측정 창은 다시 수락한다. |
+| 입력별 복구 전달 | 입력 클록·세션 변경을 해당 처리 경로에 전달 | native graph read가 새 PCM epoch를 비우면서도 그래프에는 불연속을 전달하지 않던 결함을 고쳤다. 초기 priming과 복구를 구별해 같은 복구는 한 번 보고하고, 해당 입력의 하위 이력만 초기화한다. |
+| PCM 준비 실패 | 링·장치 준비와 소유 수명 대조 | HAL의 정수 PCM 변환 scratch도 fallible 예약으로 옮겼다. 일부 예약이 실패하면 기존 활성 형식·매핑·클록·PCM을 보존하고 준비한 메모리만 회수한다. |
+| 장치 변경 수용 | native callback과 형식 변경의 수명 대조 | callback이 관찰한 invalidation을 안정된 atomic latch로 발행한다. 제어 폴링 전에도 준비 상태와 그래프 큐 읽기·쓰기를 차단하며, 이전 등록의 drain을 확인한 준비만 latch를 해제한다. |
+| 비정상 소스 PCM | 상태를 가진 변환기에 들어가는 실제 입력 경계 대조 | Mac 입력은 copy/SRC 전 NaN·Inf만 0으로 바꾼다. 앱 pump가 잘못된 샘플 하나로 영구 종료되던 경로를 수정했다. 공유 clock v4의 고정 pending 카운터는 producer 경쟁·lease·epoch와 mapping 교체를 지키며 그래프에 한 번 합산한다. |
+| Linux Off와 원음 권한 | 실제 source read·큐 소비자·Forward lease의 연결 대조 | 미사용 앱·물리 입력과 재활성화 첫 읽기에서 과거 PCM을 버린다. 공유 source를 읽은 참조는 보존한다. PCM 진행이 그래프 프레임 3초 동안 멈추면 원음 차단 권한을 철회하고 신선한 PCM 뒤에만 재승인한다. |
+| Linux PCM 경계 | 같은 무음·손상·수명 계약을 PipeWire 경계에 적용 | EMPTY payload의 재활용 바이트를 읽지 않고 선언된 길이의 무음을 발행한다. CORRUPTED payload는 거부하고 이전 PCM epoch를 무효화한다. |
+| Linux 원음 차단 해제 | 정확한 소스·출력 선택을 보존하는 계약 대조 | 실제 시험에서 Off 뒤 원래 경로 복원이 실패했다. 기존 WP session link의 같은 peer를 재활성화하도록 수정했다. 원음 선택 차단·다른 앱 보존·Off 복원·재활성화·외부 reroute·기본 metadata 복원이 실제 시험에서 통과했다. |
+
+최종 macOS workspace lib/bin 대상은 2,271개 통과·8개 ignore다. 중간 실패한 시험 조건을
+수정한 뒤 중단된 대상을 재개했고, 같은 lib/bin 및 자식 fixture의 중복 실행은 집계에서 제외했다.
+앱 캡처 46개·HAL 112개·공통 transport 216개·엔진 실행 파일 182개가 포함된다.
+Mac과 Linux의 workspace all-targets/all-features 엄격 clippy도 통과했다.
+최신 Universal HAL은 실제 Developer ID 서명·서명 검증·factory/COM ABI probe를 통과했으며 설치하지 않았다.
+소스 교체 이력·같은 콜백 내 변환·소스 세션의 DSP reset 결함을 각각 재주입했을 때 실제
+회귀 assertion이 실패했고, 정확한 소스로 복원한 뒤 다시 통과했다. 원시는 VM의
+`loopback-history-mutation-runtime-proof-20261016` 및 Mac의
+`/tmp/mixrelay-loopback-{callback,source-epoch}-mutation-proof-20261016.log`에 남겼다.
+VM의 수정된 공통 엔진 185개·오디오 I/O 101개·PCM 링 20개 검사는 통과했다.
+Forward의 엔진 출력 PCM도 480,000프레임에서 손상·단절 0이며,
+`source-mute-owned-policy-explicit-witness-20261016` 작업의 원시는
+VM의 `target/native-tests/app-lab-BTi7r5`에 보존했다.
+Float32·Signed16/24/32 각각의 실제 pause/resume 5회도 오래된 샘플 0으로 통과했다.
+EMPTY·CORRUPTED 버퍼의 중립 샘플/epoch/카운터 검사도 같은 C fixture에서 통과했다
+(`loopback-native-chunk-lifecycle-20261016`, `app-lab-HjQKru`).
+추가 엔진 전체 경로 시험에서는 엔진 출력과 별도 pw-record 소스가 연속이었지만,
+별도 CaptureSet 관측 탭에서 1,024프레임의 단일 누락이 나와 전체 시험은 실패했다
+(`loopback-native-engine-pcm-final-flags-20261016`, `app-lab-AHIUNl`).
+실패 원시는 보존했다. 독립 관측 탭을 그래프 준비 중 열고 소비하지 않아 32,768프레임 큐가
+넘친 시험 준비 문제를 수정했다. 입력 탭은 그래프 준비가 끝난 뒤 수집 직전에 열고,
+동시에 동작하는 pw-record는 준비 단계부터 별도로 유지한다. 새 조건은 native ingress 거부·
+소유자 교체·큐 discard·restart·비정상 샘플 교체도 거부하며 PCM 수락 기준을 낮추지 않았다.
+최종 엔진 재검사 `loopback-engine-pcm-sourcefix-20261016`은 엔진 출력·독립 관측 탭 각각
+480,000프레임, 별도 소스 캡처 480,896프레임에서 손상·단절 0으로 통과했다
+(`app-lab-jOWetw`). 최종 Forward 재검사 `loopback-forward-sourcefix-20261016`도
+차단·다른 앱 보존·Off 복원·재승인·외부 reroute 뒤 ACK/기본 metadata 복원과
+엔진 출력 480,000프레임 연속성으로 통과했다(`app-lab-5Xisub`).
+설치된 별도 Driver 프로세스의 2채널 PCM도 일반 클라이언트에서 검증했다.
+`loopback-installed-driver-pcm-20261016`의 두 실행은 각각 유효 480,255프레임에서
+누락·중복·잘못된 샘플·짧은 읽기 0으로 통과했다. 두 번째 실행은 그래프 클라이언트 종료 뒤다.
+Driver를 임시 테스트 구현으로 바꾸지 않았으며 종료 시 처음의 비활성 user unit으로 복원했다.
+Linux workspace lib/bin은 1,679개 통과·5개 ignore다. private lab의 umask에 의존하던
+소켓 거부 시험은 의도한 잘못된 권한을 직접 설정하도록 고쳤고 제품 수락 조건은 유지했다.
+수정된 macOS 앱·엔진·Driver·HAL의 새 Universal PKG를 만들고 실제 앱·Installer 서명을 검증했다.
+파일은 `/Volumes/dev/mixrelay-release-20261016-loopback-engine-fixes/MixRelay-Installer-0.1.0.pkg`,
+SHA-256은 `cffad9e9e02902ef098cf8dab32edb76982ef1deb8ea7444bbee59100720adfb`다.
+설치 창의 정확한 파일 경로를 확인하고 사용자에게 사용권 동의·관리자 인증을 요청했다.
+현재 설치된 Mac 실행 파일은 아직 이 변경의 검증 근거가 아니다. LG 시작 대기와 기존 엔진 경유
+왕복 측정 실패가 해결됐다고 표시하지 않는다.
+
+## Linux 검증 VM
+
+2026-10-16 사용자가 지정한 Proxmox에 VM `107` (`mixrelay-audio-verify-20261016`)을
+Ubuntu 템플릿에서 새로 만들고 Debian 13으로 부팅했다. 일반 사용자 접속은 `lab@172.16.69.41`이며 DHCP 주소다.
+CPU 8개·메모리 16GiB를 배정했다. Debian 루트는 `scsi1` 96GiB이며, 준비에 사용한
+Ubuntu 디스크(`scsi0` 96GiB)와 실패한 빌드 원시는 보존했다. 기존 VM과 서비스는 변경하지 않았다.
+Ubuntu 24.04의 PipeWire 1.0.5는 기존 비동기 스케줄링 코드의 헤더 요구를 충족하지 못했다.
+이 VM의 Debian 13 정상 사용자 PipeWire 세션에서 검증하며 Docker 코드 검사 결과와 구분한다.
+최신 전체 DEB 빌드·패키지 검사·설치와 설치 직후 일반 사용자 Driver 서비스 시작이 통과했다.
+같은 VM의 별도 사용자 소유 PipeWire lab에서 32/64채널의 정확한 형식·명시적 제거 검사가 통과했다.
+Float32·Signed16·Signed24·Signed32 각각에서 그래프 클라이언트 종료 전후의
+480,000프레임 PCM 연속성 검사도 모두 통과했다(16구간, 누락·중복·손상·짧은 읽기 0).
+같은 장치의 캡처→그래프→출력에서 실제 인과 PCM이 전달되는 검사도 통과했다.
+실행 로그는 VM의 `.lab/jobs/mixrelay-lab-native-driver-formats-20261016/`와
+`.lab/jobs/mixrelay-lab-native-driver-pcm-20261016/`에 있다.
+headless Weston의 Wayland 세션에서 설치된 `.desktop` 파일로 앱을 실행했지만,
+React Aria 초기화가 `window.screen.orientation.angle` 접근에서 실패해 런처 복구 검증은 미통과다.
+공식 수정 버전 React Aria Components 1.22.1/React Aria 3.53.1을 적용했다.
+그 외의 UI 의존 버전은 유지했다. VM에서 UI 품질 검사, 동작 2,154개·커버리지 100%,
+접근성 자동 검사 232개, 앱·Storybook 빌드와 Core 문서 계약 68개가 통과했다.
+첫 앱과 Weston은 종료했다. 최신 설치본의 다음 실행에서는 데이터 폴더의 그룹 쓰기 권한 때문에
+편집 앱의 로컬 제어 소켓이 거부되는 실제 시작 실패를 확인했다. Linux 편집 앱의 제어 소켓을
+`$XDG_RUNTIME_DIR/mixrelay/control/control.sock`으로 옮겼다. 데이터 폴더나 소켓 보안 조건은 바꾸지 않았다.
+최종 전체 DEB의 빌드·payload/ELF 검사·업그레이드 설치가 통과했다. SHA-256은
+`971062670b448e65fe0c8d52f6d433be946f55ef7d3b4fb3a21173d9184cadc7`이다.
+비활성 Driver user unit에서 설치된 `.desktop`을 실제 실행해 Driver Ready·엔진 health와
+WebKitGTK에 렌더된 작업 공간을 확인했다. 정상 Secret Service 로그인 세션에서는 Free 상태이며
+첫 headless 세션의 자격 증명 저장 불가 알림도 없다. 시험 뒤 앱·엔진 소유자 0개,
+Driver unit 비활성으로 회수됐다. 원시는
+`loopback-installed-desktop-login-session-20261016` 및
+`target/installed-desktop-login-session-20261016/`에, 확인한 화면은
+`/tmp/mixrelay-installed-linux-login-desktop-20261016.png`에 보존했다.
+실제 설치된 Linux UI에서 모든 편집·키보드·스크린리더 조합을 확인한 것은 아니다.
+별도 private lab의 실제 프로덕션 엔진 수명 시험 2개도 통과했다
+(`loopback-linux-service-lifecycle-20261016`, `app-lab-vu7yPN`): 중복 소유자 거부,
+부모 lease 종료·정상 종료·빈 그래프 재시작 뒤 native 소유자 0개를 확인했다.
+
+엔진 전체 경로의 첫 실환경 창은 480,000프레임 중 시작의 1,024프레임이 무음이어서 실패했다.
+독립 소스 캡처는 정상이며 실패 원시는 `mixrelay-lab-native-engine-pcm-20261016`에 보존했다.
+Forward/WP 시험은 Driver가 준비되지 않은 lab에서 캡처 어댑터가 준비 중 제거돼 실패했다.
+이 시험에 실제 Driver와 무료 제어 API를 소유하는 fixture를 추가했다.
+재활용 출력 버퍼의 `SPA_CHUNK_FLAG_EMPTY`를 이번 전송에 맞게 갱신한 뒤,
+기존 전체 경로 검사가 통과했다. 엔진 출력·독립 증거 탭 각각 480,000프레임,
+독립 소스 캡처 506,496프레임에서 손상·단절 0을 확인했다.
+원시는 `mixrelay-lab-native-engine-pcm-chunk-flags-20261016`에 보존했다.
+Forward 시험은 Driver의 실제 소유 PID·역할을 조회하도록 고친 뒤 소유 원음 경로 복원까지 통과했다.
+최종 소스의 재검사 결과는 위 오디오 구현 경로 대조와 구분해 기록한다.
+
 ## 현재 소스
 
 - 2026-10-14 로컬 제어 Unix 소켓(소스): 엔진(19341)과 Driver(19342)의 loopback TCP를 없애고 사용자 소유 Unix 소켓(`engine.sock`·`driver.sock`)만 연다. 같은 컴퓨터의 다른 계정과 웹 페이지(DNS rebinding 포함)는 더 이상 엔진·Driver 제어에 닿지 못한다. 소켓 디렉터리는 `0700`, 상위 경로는 이 사용자나 root만 바꿀 수 있어야 하고, 연결은 peer UID로 거른다. 시작하는 서비스는 lock으로 직렬화해 살아 있는 소켓을 바꾸지 않는다. 실행부의 `control.sock`도 같은 구현을 쓴다. 소켓을 찾지 못한 클라이언트는 요청을 보내지 않는다. 설치기는 서비스 계정의 소켓으로 준비를 확인하고, 소켓 이전 버전으로 되돌릴 때만 TCP로 확인한다. 브라우저 개발 화면은 `MIXRELAY_DEV_ENGINE_BRIDGE=1`일 때만 loopback dev 서버가 엔진에 전달한다. Codex 리뷰 4회의 지적(dev 서버 계정 경계, 상위 디렉터리 TOCTOU, 동시 시작 경합과 lock 교착, TCP 대체 연결, 스트림 종료 전파, 되돌리기 확인, 재정의로 인한 앱·서비스 분리, 환경 의존 시험, IPv6 Host)을 고쳤다. local-socket coverage 100%, workspace clippy·fmt, UI 2,196개·axe 231개·UI 품질, 엔진 lib 340개·데스크톱 177개·Driver 46개·설치기 138개 검사가 통과했다. Linux 전용 시험은 이 Mac에서 컴파일·실행하지 못했다. `pnpm test:scripts`의 기존 번역·Linux 패키지 검사 4개 실패는 이번 변경과 무관하다. 설치본 확인은 하지 않았다.
