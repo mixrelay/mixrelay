@@ -82,6 +82,31 @@ async fn observe(
             .await;
     }
 }
+/// Claims a fresh lease with fresh measurements. `false` means the service is too old to
+/// accept latency publications.
+async fn claim(
+    client: &DriverClient,
+    incarnation: &str,
+    lease: &mut Option<EngineLatencyLease>,
+    measurements: &mut Measurements,
+) -> Result<bool, String> {
+    *measurements = Measurements::default();
+    let reply = client
+        .publish_latency(&LatencyCommand::Claim {
+            incarnation: incarnation.into(),
+            process_id: std::process::id(),
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    let Some(reply) = reply else {
+        return Ok(false);
+    };
+    if !reply.accepted {
+        return Err("previous engine latency lease has not expired".into());
+    }
+    *lease = reply.lease;
+    Ok(true)
+}
 async fn publish(
     client: &DriverClient,
     runtime: (&ProcessorExchange, &MacDevices),
@@ -90,27 +115,14 @@ async fn publish(
     measurements: &mut Measurements,
 ) -> Result<bool, String> {
     let (exchange, devices) = runtime;
-    if lease.is_none() {
-        *measurements = Measurements::default();
-        let reply = client
-            .publish_latency(&LatencyCommand::Claim {
-                incarnation: incarnation.into(),
-                process_id: std::process::id(),
-            })
-            .await
-            .map_err(|error| error.to_string())?;
-        let Some(reply) = reply else {
-            return Ok(false);
-        };
-        if !reply.accepted {
-            return Err("previous engine latency lease has not expired".into());
-        }
-        *lease = reply.lease;
+    if lease.is_none() && !claim(client, incarnation, lease, measurements).await? {
+        return Ok(false);
     }
     let owner = lease
         .as_ref()
         .ok_or("Driver omitted the engine latency lease")?;
     let mut destinations = std::collections::BTreeMap::new();
+    let mut validity = None;
     if let Some(plan) = exchange.latency_plan() {
         let settings = client.snapshot().await.map_err(|error| error.to_string())?;
         let revision = exchange.revisions().active;
@@ -129,6 +141,7 @@ async fn publish(
         let values = measurements.observe(&plan, plan.revision(), observations, &rates);
         // Publication races must not label a new graph with an older measurement.
         let valid = publication_valid(exchange, &plan, revision);
+        validity = Some((plan.revision(), revision, valid));
         for (endpoint_id, rate) in rates {
             if !plan
                 .sink_bindings()
@@ -151,6 +164,11 @@ async fn publish(
             );
         }
     }
+    measurements.log_publication(publication_summary(
+        validity,
+        exchange.plan_revisions().active,
+        &destinations,
+    ));
     let reply = client
         .publish_latency(&LatencyCommand::Publish {
             lease: owner.clone(),
@@ -168,6 +186,27 @@ async fn publish(
     }
 }
 
+/// `validity` is the latency plan's revision, the applied graph revision and whether they
+/// still match the exchange; `None` when no latency plan matches the active plan revision.
+fn publication_summary(
+    validity: Option<(u64, u64, bool)>,
+    active_plan: u64,
+    destinations: &BTreeMap<mixrelay_audio_io::VirtualEndpointId, RuntimeLatency>,
+) -> String {
+    let Some((plan, applied, valid)) = validity else {
+        return format!("no latency plan for active plan revision {active_plan}");
+    };
+    let endpoints = destinations
+        .values()
+        .map(|entry| match entry.input_latency_frames {
+            Some(frames) => format!("{}={frames}", entry.endpoint_id.as_str()),
+            None => format!("{}=unknown", entry.endpoint_id.as_str()),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("plan {plan}, applied graph {applied}, valid {valid}: [{endpoints}]")
+}
+
 fn publication_valid(
     exchange: &ProcessorExchange,
     plan: &RenderPlan,
@@ -183,6 +222,20 @@ struct Measurements {
     revision: Option<u64>,
     previous: BTreeMap<String, Observation>,
     endpoints: BTreeMap<mixrelay_audio_io::VirtualEndpointId, StableEndpoint>,
+    /// The last logged publication summary, so each change logs once.
+    publication: Option<String>,
+}
+impl Measurements {
+    /// Logs what this tick sends to the Driver when it differs from the previous tick: whether a
+    /// latency plan exists, whether the publication is valid, and each endpoint's frames.
+    fn log_publication(&mut self, summary: String) -> bool {
+        if self.publication.as_ref() == Some(&summary) {
+            return false;
+        }
+        tracing::info!(%summary, "input latency publication");
+        self.publication = Some(summary);
+        true
+    }
 }
 type ClockContext = (u64, u64, u64, u64, u32, u32, bool, u64);
 #[derive(Default)]
@@ -874,6 +927,41 @@ pub(crate) mod tests {
             endpoint.log(&id, Some(10), Some("arrival read contended".into())),
             Some("arrival read contended")
         );
+    }
+
+    #[test]
+    fn publication_summaries_log_each_change_once() {
+        let lease = EngineLatencyLease {
+            generation: 1,
+            incarnation: "run".into(),
+            process_id: 2,
+        };
+        let id = mixrelay_audio_io::VirtualEndpointId::new("device".into());
+        let entry = |frames| RuntimeLatency {
+            endpoint_id: id.clone(),
+            rate: 48_000,
+            engine_lease: lease.clone(),
+            applied_graph_revision: 7,
+            input_latency_frames: frames,
+        };
+        let destinations = |frames| BTreeMap::from([(id.clone(), entry(frames))]);
+        assert_eq!(
+            publication_summary(None, 4, &BTreeMap::new()),
+            "no latency plan for active plan revision 4"
+        );
+        assert_eq!(
+            publication_summary(Some((4, 7, true)), 4, &destinations(Some(384))),
+            "plan 4, applied graph 7, valid true: [device=384]"
+        );
+        assert_eq!(
+            publication_summary(Some((4, 7, false)), 4, &destinations(None)),
+            "plan 4, applied graph 7, valid false: [device=unknown]"
+        );
+        let mut measurements = Measurements::default();
+        let summary = || publication_summary(Some((4, 7, true)), 4, &destinations(Some(384)));
+        assert!(measurements.log_publication(summary()));
+        assert!(!measurements.log_publication(summary()));
+        assert!(measurements.log_publication(publication_summary(None, 5, &BTreeMap::new())));
     }
 
     #[test]
