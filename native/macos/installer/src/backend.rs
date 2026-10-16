@@ -11,8 +11,6 @@ use crate::request::TransactionRequest;
 pub enum LeaseKind {
     /// The desktop's exclusive process owner is active.
     App,
-    /// The independently launched Driver Manager is active.
-    DriverManager,
     /// The engine's exclusive process owner is active.
     Engine,
     /// Another installer transaction owns the administrator serialization lock.

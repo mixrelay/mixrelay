@@ -8,7 +8,7 @@ pub const DRIVER_PATH: &str = "/Library/Application Support/MixRelay/bin/mixrela
 pub const HAL_PATH: &str = "/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver";
 /// The launchd configuration owned by the installer.
 pub const LAUNCHD_PATH: &str = "/Library/LaunchDaemons/io.mixrelay.audio.driver.plist";
-/// The separate removal app installed alongside the Driver manager.
+/// The separate removal app installed alongside `MixRelay`.
 pub const UNINSTALLER_PATH: &str = "/Applications/Uninstall MixRelay.app";
 /// The on-demand, fixed-operation removal helper's launchd definition.
 pub const REMOVAL_LAUNCHD_PATH: &str = "/Library/LaunchDaemons/io.mixrelay.driver.removal.plist";
@@ -16,9 +16,6 @@ pub const REMOVAL_LAUNCHD_PATH: &str = "/Library/LaunchDaemons/io.mixrelay.drive
 pub const LIFECYCLE_DIRECTORY: &str = "/Library/Application Support/MixRelay/lifecycle";
 /// The fixed desktop ownership lease inode.
 pub const APP_LEASE_PATH: &str = "/Library/Application Support/MixRelay/lifecycle/app.owner";
-/// The independent Driver Manager process ownership lease inode.
-pub const DRIVER_MANAGER_LEASE_PATH: &str =
-    "/Library/Application Support/MixRelay/lifecycle/driver-manager.owner";
 /// The fixed engine ownership lease inode.
 pub const ENGINE_LEASE_PATH: &str = "/Library/Application Support/MixRelay/lifecycle/engine.owner";
 /// The fixed exclusive installer-transaction lease inode.
@@ -50,10 +47,6 @@ pub enum OwnedTarget {
     RuntimeEngine,
     /// The on-demand audio engine definition.
     RuntimeLaunchd,
-    /// The preceding separate manager; backed up and retired during installation.
-    LegacyManager,
-    /// The preceding separate remover; backed up and retired during installation.
-    LegacyUninstaller,
 }
 
 impl OwnedTarget {
@@ -69,14 +62,12 @@ impl OwnedTarget {
             Self::RemovalLaunchd => REMOVAL_LAUNCHD_PATH,
             Self::RuntimeEngine => RUNTIME_ENGINE_PATH,
             Self::RuntimeLaunchd => RUNTIME_LAUNCHD_PATH,
-            Self::LegacyManager => "/Applications/MixRelay Driver.app",
-            Self::LegacyUninstaller => "/Applications/Uninstall MixRelay Driver.app",
         }
     }
 
     /// Returns every replaceable target in deterministic transaction order.
     #[must_use]
-    pub const fn all() -> [Self; 10] {
+    pub const fn all() -> [Self; 8] {
         [
             Self::App,
             Self::Driver,
@@ -86,14 +77,6 @@ impl OwnedTarget {
             Self::RemovalLaunchd,
             Self::RuntimeEngine,
             Self::RuntimeLaunchd,
-            Self::LegacyManager,
-            Self::LegacyUninstaller,
         ]
-    }
-
-    /// Legacy bundles have no new payload and participate in the same rollback.
-    #[must_use]
-    pub const fn retired(self) -> bool {
-        matches!(self, Self::LegacyManager | Self::LegacyUninstaller)
     }
 }

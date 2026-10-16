@@ -9,7 +9,7 @@ use super::{ControlProxyClient, Method, recorder};
 
 /// Resolve user-owned defaults once during controller setup, before admitting controllers.
 pub(crate) fn initialize(app: &tauri::App) -> Result<(), String> {
-    let path = crate::background::settings_directory(app.handle())?.join("recording-settings.json");
+    let path = crate::background::data_directory(app.handle())?.join("recording-settings.json");
     let desktop = crate::recording_dialog::default_recording_folder(app)?;
     let store = RecordingStore::load(path, desktop)?;
     let client = app.state::<ControlProxyClient>();

@@ -126,13 +126,7 @@ pub fn verify_removal_launchd(path: &Path, team: &SigningTeam) -> Result<()> {
     let actual: plist::Value = plist::from_bytes(&fs::read(path)?)?;
     let expected: plist::Value = plist::from_bytes(removal_launchd_template(team).as_bytes())?;
     ensure!(
-        actual == expected
-            || actual
-                == plist::from_bytes::<plist::Value>(
-                    removal_launchd_template(team)
-                        .replace("Uninstall MixRelay.app", "Uninstall MixRelay Driver.app")
-                        .as_bytes()
-                )?,
+        actual == expected,
         "removal helper plist has an unexpected operation or destination"
     );
     Ok(())
@@ -222,11 +216,7 @@ fn helper_is_registered() -> Result<bool> {
 /// # Errors
 /// Returns any ownership, symlink, code-signing or fixed-path violation.
 pub fn verify_installed_remover(team: &SigningTeam) -> Result<()> {
-    let bundle = if Path::new(UNINSTALLER_PATH).exists() {
-        UNINSTALLER_PATH
-    } else {
-        "/Applications/Uninstall MixRelay Driver.app"
-    };
+    let bundle = UNINSTALLER_PATH;
     validate_root_tree(Path::new(bundle))?;
     validate_root_file(Path::new(REMOVAL_LAUNCHD_PATH), 0o644)?;
     crate::native::validate_destination_ancestors(Path::new("/"))?;
@@ -407,7 +397,7 @@ fn execute_authorized_removal(delete_settings: bool) -> Result<()> {
         .context("removal listener has no validated publisher")?;
     verify_remaining_remover(&team)?;
     // The listener's verified private executable also remains available to the
-    // normal-user cleanup/manager subprocesses after the remover is deleted.
+    // normal-user cleanup and app-session subprocesses after the remover is deleted.
     let mut command = Command::new(std::env::current_exe()?);
     command
         .env_clear()

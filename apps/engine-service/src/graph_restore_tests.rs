@@ -37,8 +37,8 @@ fn transient_native_startup_failure_retries_without_losing_saved_catalog_or_boot
     let fixture = Fixture::new(&json!({
         "version":1,"revision":12,"activeId":"first",
         "graphs":[
-            {"id":"first","name":"First","document":saved},
-            {"id":"second","name":"Second","document":other}
+            {"id":"first","name":"First","document":saved,"layoutRevision":0,"layout":{"positions":{}}},
+            {"id":"second","name":"Second","document":other,"layoutRevision":0,"layout":{"positions":{}}}
         ]
     }));
     let before = fs::read(&fixture.path).unwrap();
@@ -124,8 +124,8 @@ fn catalog() -> Value {
     json!({
         "version":1,"revision":12,"activeId":"first",
         "graphs":[
-            {"id":"first","name":"First","document":document},
-            {"id":"second","name":"Second","document":document}
+            {"id":"first","name":"First","document":document,"layoutRevision":0,"layout":{"positions":{}}},
+            {"id":"second","name":"Second","document":document,"layoutRevision":0,"layout":{"positions":{}}}
         ]
     })
 }

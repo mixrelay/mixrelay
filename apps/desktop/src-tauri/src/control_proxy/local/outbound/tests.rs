@@ -4,14 +4,21 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt as _, BufReader};
 
 fn window(sequence: u64, peak: f32) -> ControlTelemetry {
-    serde_json::from_value(json!({
-        "engineIncarnation": "engine",
-        "sequence": sequence,
-        "meters": {"protocolVersion": 1, "revision": 1, "nodes": [
-            {"nodeId": "n", "portId": "out", "peaks": [peak]}
-        ]}
-    }))
-    .unwrap()
+    ControlTelemetry {
+        engine_incarnation: "engine".into(),
+        sequence,
+        meters: mixrelay_control_protocol::MeterSnapshot {
+            protocol_version: 1,
+            revision: 1,
+            nodes: vec![mixrelay_control_protocol::NodeMeterSnapshot {
+                node_id: "n".into(),
+                port_id: "out".into(),
+                peaks: vec![peak],
+                dynamics: None,
+            }],
+        },
+        state: None,
+    }
 }
 
 fn frame(next: Next) -> Value {

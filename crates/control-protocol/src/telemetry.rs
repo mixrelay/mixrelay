@@ -253,16 +253,9 @@ mod packed {
     pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(
         deserializer: D,
     ) -> Result<MeterSnapshot, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Wire {
-            Packed(PackedMeters),
-            Legacy(MeterSnapshot),
-        }
-        match Wire::deserialize(deserializer)? {
-            Wire::Packed(value) => value.unpack().map_err(serde::de::Error::custom),
-            Wire::Legacy(value) => Ok(value),
-        }
+        PackedMeters::deserialize(deserializer)?
+            .unpack()
+            .map_err(serde::de::Error::custom)
     }
 }
 

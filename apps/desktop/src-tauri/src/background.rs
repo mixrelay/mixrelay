@@ -58,7 +58,7 @@ impl Connection {
         let uid = std::fs::metadata(app.path().home_dir().map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?
             .uid();
-        let directory = runtime_directory(app)?;
+        let directory = data_directory(app)?;
         Ok(Self {
             path: directory.join("control/control.sock"),
             uid,
@@ -229,7 +229,6 @@ pub(crate) fn spawn_controller(executable: &std::path::Path) -> std::io::Result<
         && executable
             == std::path::Path::new("/Applications/MixRelay.app/Contents/MacOS/mixrelay-desktop")
     {
-        retire_or_confirm_absent()?;
         let launcher = std::env::current_exe()?
             .parent()
             .and_then(std::path::Path::parent)
@@ -274,54 +273,6 @@ fn spawn_reaped_controller(
             }
         })?;
     Ok(ControllerLaunch { exited })
-}
-
-/// Removing the agent registration left by earlier builds is cleanup, not a precondition:
-/// a failed unregister once kept every Reconnect from starting the runtime. Starting
-/// directly is safe only when launchd holds no such job for this user, since a loaded
-/// job could relaunch the runtime after Quit releases its lease.
-#[cfg(target_os = "macos")]
-fn retire_or_confirm_absent() -> std::io::Result<()> {
-    let Err(error) = retire_background_agent() else {
-        return Ok(());
-    };
-    // The session owner, as the editor's own control connection resolves it.
-    let home = std::env::var_os("HOME").ok_or_else(|| std::io::Error::other("HOME is unset"))?;
-    let uid = std::os::unix::fs::MetadataExt::uid(&std::fs::metadata(home)?);
-    let target = format!("gui/{uid}/io.mixrelay.driver.runtime");
-    let loaded = std::process::Command::new("/bin/launchctl")
-        .args(["print", &target])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?
-        .success();
-    if loaded {
-        tracing::error!(%error, "previous background agent is still loaded and could not be retired");
-        return Err(error);
-    }
-    tracing::warn!(%error, "previous background agent cleanup failed; none is loaded, starting directly");
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn retire_background_agent() -> std::io::Result<()> {
-    unsafe extern "C" {
-        fn MRRetireBackgroundAgent(message: *mut std::ffi::c_char, capacity: usize) -> i32;
-    }
-    let mut message = [0_u8; 1024];
-    // SAFETY: the fixed native bridge writes a NUL-terminated diagnostic within
-    // this live buffer and retires only the old plist in the calling app bundle.
-    let status = unsafe { MRRetireBackgroundAgent(message.as_mut_ptr().cast(), message.len()) };
-    if status != 0 {
-        let end = message
-            .iter()
-            .position(|byte| *byte == 0)
-            .unwrap_or(message.len());
-        return Err(std::io::Error::other(String::from_utf8_lossy(
-            &message[..end],
-        )));
-    }
-    Ok(())
 }
 
 pub(crate) fn spawn_editor(executable: &std::path::Path) -> std::io::Result<()> {
@@ -418,24 +369,10 @@ pub(crate) fn reopen_editor(app: &tauri::AppHandle) {
     // The visible startup gate owns explicit reconnect attempts.
 }
 
-/// Keep existing user preferences in their established location when runtime ownership moves.
-pub(crate) fn settings_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    shared_directory(app, "io.mixrelay.desktop")
-}
-
-pub(crate) fn runtime_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    shared_directory(app, "io.mixrelay.driver.desktop")
-}
-
-fn shared_directory(app: &tauri::AppHandle, identifier: &str) -> Result<PathBuf, String> {
-    let directory = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?;
-    Ok(directory
-        .parent()
-        .ok_or("application data has no parent")?
-        .join(identifier))
+/// The app's data directory (`io.mixrelay.desktop`): settings, journal and the runtime's
+/// `control/control.sock`, which the editor and the Stream Deck plugin connect to.
+pub(crate) fn data_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path().app_data_dir().map_err(|error| error.to_string())
 }
 
 /// Pushed telemetry on the shared runtime link; dropping it cancels the subscription.

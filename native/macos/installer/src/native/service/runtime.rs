@@ -79,34 +79,6 @@ pub(super) fn wait_for_driver_ready(version: &str, home: &Path) -> Result<(), Na
     })
 }
 
-/// Readiness of a Driver restored by rollback. A restored release older than the socket
-/// transport still serves its loopback TCP API, so that is tried when the socket is not.
-pub(super) fn wait_for_restored_driver_ready(
-    version: &str,
-    home: &Path,
-) -> Result<(), NativeError> {
-    let client = socket_client(home)?;
-    wait_until_ready(version, || {
-        client
-            .snapshot_blocking()
-            .or_else(|_| legacy_loopback_snapshot())
-            .map_err(|error| NativeError::Activation(format!("Driver snapshot: {error}")))
-    })
-}
-
-/// The pre-socket Driver API, used only to verify a rollback to such a release.
-fn legacy_loopback_snapshot() -> Result<DriverSnapshot, mixrelay_driver_control::DriverError> {
-    let response = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?
-        .get("http://127.0.0.1:19342/api/v1/driver")
-        .send()?
-        .error_for_status()?;
-    Ok(response.json()?)
-}
-
 fn wait_until_ready(
     version: &str,
     snapshot: impl Fn() -> Result<DriverSnapshot, NativeError>,

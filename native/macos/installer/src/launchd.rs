@@ -143,10 +143,7 @@ impl LaunchdConfiguration {
     pub(crate) fn installed_account(bytes: &[u8]) -> Result<ServiceAccount, LaunchdError> {
         let definition = Self::decode(bytes)?;
         if definition.label != SERVICE_LABEL
-            || !matches!(
-                definition.associated_bundle_identifiers.as_str(),
-                DESKTOP_BUNDLE_IDENTIFIER | "io.mixrelay.driver.desktop"
-            )
+            || definition.associated_bundle_identifiers != DESKTOP_BUNDLE_IDENTIFIER
             || definition.program_arguments != [DRIVER_PATH]
             || !definition.mach_services.driver
             || definition.process_type != "Interactive"
@@ -190,11 +187,7 @@ impl LaunchdConfiguration {
         account: &ServiceAccount,
     ) -> Result<Self, LaunchdError> {
         let definition = Self::decode(bytes)?;
-        let mut expected = Definition::for_account(account);
-        if definition.associated_bundle_identifiers == "io.mixrelay.driver.desktop" {
-            expected.associated_bundle_identifiers = "io.mixrelay.driver.desktop".into();
-        }
-        if definition != expected {
+        if definition != Definition::for_account(account) {
             return Err(LaunchdError::Policy);
         }
         Ok(Self(definition))

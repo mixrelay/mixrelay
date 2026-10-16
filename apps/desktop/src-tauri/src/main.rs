@@ -52,7 +52,7 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     }
     control_proxy::recording_settings::initialize(app)?;
     app.state::<std::sync::Arc<licensing::LicensingState>>()
-        .set_journal_path(background::settings_directory(app.handle())?.join(
+        .set_journal_path(background::data_directory(app.handle())?.join(
             if cfg!(debug_assertions) {
                 "license-remote-change-dev.json"
             } else {
@@ -128,7 +128,7 @@ fn start_audio(app: &tauri::AppHandle) -> Result<(), String> {
 
 fn install_local_controls(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     use std::os::unix::fs::MetadataExt;
-    let directory = background::runtime_directory(app)?;
+    let directory = background::data_directory(app)?;
     std::fs::create_dir_all(&directory)?;
     let uid = std::fs::metadata(app.path().home_dir()?)?.uid();
     let control = control_proxy::local::LocalControl::new(
@@ -182,13 +182,6 @@ fn main() {
             "desktop"
         },
     );
-    if arguments
-        .iter()
-        .any(|argument| argument == "--background-service")
-    {
-        tracing::error!("MixRelay Driver owns audio; the retired App service entry cannot start");
-        std::process::exit(2);
-    }
     let mode = app_mode::AppMode::detect(arguments.iter().map(std::ffi::OsString::as_os_str));
     mode.configure(context.config_mut());
     let builder = tauri::Builder::default().manage(mode);

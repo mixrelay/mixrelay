@@ -92,9 +92,7 @@ pub struct GraphCatalogResponse {
     pub active_id: String,
     pub graphs: Vec<GraphCatalogEntry>,
     pub document: mixrelay_audio_graph::GraphDocument,
-    #[serde(default)]
     pub layout_revision: u64,
-    #[serde(default)]
     pub layout: GraphLayout,
     /// Audio publication succeeded but disk replacement failed; never report a rollback.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -228,9 +226,9 @@ pub struct AppStatus {
     pub underruns: u64,
     pub overruns: u64,
     /// Lifetime non-finite PCM replacements by Core boundary; no audio or node identities.
-    #[serde(default)]
     pub sample_faults: mixrelay_audio_io::process::SampleFaults,
-    /// Absent in older engines. UI must not manufacture capabilities when unavailable.
+    /// `None` when the audio backend reports no session. UI must not manufacture
+    /// capabilities when unavailable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_session: Option<mixrelay_audio_io::session::AudioSessionStatus>,
 }
@@ -509,7 +507,7 @@ mod dynamics_meter_contract_tests {
     use super::{DynamicsMeterSnapshot, NodeMeterSnapshot};
 
     #[test]
-    fn legacy_meter_json_remains_valid_and_actual_dynamics_roundtrips_without_peak_inference() {
+    fn meters_without_dynamics_omit_them_and_actual_dynamics_roundtrip_without_peak_inference() {
         let mut meter: NodeMeterSnapshot = serde_json::from_value(serde_json::json!({
             "nodeId":"compressor", "portId":"audio", "peaks":[1.5,0.75],
         }))
@@ -832,15 +830,7 @@ mod tests {
     }
 
     #[test]
-    fn presentation_metadata_is_optional_for_pre_layout_catalog_responses() {
-        let old = serde_json::json!({
-            "protocolVersion":1,"catalogRevision":1,"activeId":"graph-1",
-            "graphs":[{"id":"graph-1","name":"Before layouts"}],
-            "document":{"schemaVersion":2,"revision":1,"nodes":[],"edges":[]}
-        });
-        let response: super::GraphCatalogResponse = serde_json::from_value(old).unwrap();
-        assert_eq!(response.layout_revision, 0);
-        assert_eq!(response.layout, super::GraphLayout::default());
+    fn graph_layout_request_round_trips_positions_sizes_and_viewport() {
         let layout = serde_json::json!({"expectedLayoutRevision":3,"layout":{
             "positions":{"duplex:from_os":{"x":100.0,"y":-20.0}},
             "sizes":{"duplex:from_os":{"width":320.0,"height":180.0}},
@@ -852,11 +842,11 @@ mod tests {
 
     #[test]
     fn graph_ui_instance_labels_are_optional_and_round_trip_separately() {
-        let legacy: super::GraphLayout =
+        let unlabeled: super::GraphLayout =
             serde_json::from_value(serde_json::json!({"positions":{}})).unwrap();
-        assert!(legacy.node_labels.is_empty());
+        assert!(unlabeled.node_labels.is_empty());
         assert_eq!(
-            serde_json::to_value(legacy).unwrap(),
+            serde_json::to_value(unlabeled).unwrap(),
             serde_json::json!({"positions":{}})
         );
         let value =
@@ -880,15 +870,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sample_fault_status_preserves_legacy_status_and_serializes_boundary_counts() {
-        let mut value = serde_json::to_value(AppStatus::default()).unwrap();
-        value.as_object_mut().unwrap().remove("sampleFaults");
-        let legacy: AppStatus = serde_json::from_value(value).unwrap();
-        assert_eq!(
-            legacy.sample_faults,
-            mixrelay_audio_io::process::SampleFaults::default()
-        );
-
+    fn sample_fault_status_serializes_boundary_counts() {
         let status = AppStatus {
             sample_faults: mixrelay_audio_io::process::SampleFaults {
                 source_samples: 2,
@@ -994,10 +976,7 @@ mod tests {
         let mut response: ProcessorParameterUpdateResponse = serde_json::from_value(serde_json::json!({
             "protocolVersion": PROTOCOL_VERSION, "nodeId": "effect", "parameterId": 7, "value": 0.75,
         })).unwrap();
-        assert!(
-            response.persistence_error.is_none(),
-            "old responses remain readable"
-        );
+        assert!(response.persistence_error.is_none());
         assert!(
             serde_json::to_value(&response)
                 .unwrap()
@@ -1047,12 +1026,12 @@ mod tests {
     }
 
     #[test]
-    fn graph_apply_explicit_control_intent_is_additive_to_legacy_documents() {
+    fn graph_apply_explicit_control_intent_extends_the_bare_document() {
         let document = mixrelay_audio_graph::GraphDocument::new(2, vec![], vec![]);
-        let legacy = serde_json::to_value(&document).unwrap();
-        let mut request: GraphApplyRequest = serde_json::from_value(legacy.clone()).unwrap();
+        let bare = serde_json::to_value(&document).unwrap();
+        let mut request: GraphApplyRequest = serde_json::from_value(bare.clone()).unwrap();
         assert!(request.processor_parameter_changes.is_empty());
-        assert_eq!(serde_json::to_value(&request).unwrap(), legacy);
+        assert_eq!(serde_json::to_value(&request).unwrap(), bare);
         request
             .processor_parameter_changes
             .push(GraphProcessorParameterChange {

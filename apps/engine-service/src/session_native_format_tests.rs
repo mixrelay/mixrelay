@@ -213,17 +213,12 @@ fn setter_acknowledgement_without_matching_native_pair_is_not_success() {
 }
 
 #[test]
-fn buffer_observation_wire_is_additive_and_rate_only_adapters_clear_unknown_size() {
+fn buffer_observation_is_reported_and_rate_only_adapters_clear_unknown_size() {
     let status = AdapterRuntimeStatus::new(profile());
     status.observe_device_format(Some(format(44_100, 512)));
     let observed = status.status(format(44_100, 128)).audio_session.unwrap();
-    let mut wire = serde_json::to_value(&observed).unwrap();
+    let wire = serde_json::to_value(&observed).unwrap();
     assert_eq!(wire["observedDeviceBufferFrames"], 512);
-    wire.as_object_mut()
-        .unwrap()
-        .remove("observedDeviceBufferFrames");
-    let legacy: AudioSessionStatus = serde_json::from_value(wire).unwrap();
-    assert_eq!(legacy.observed_device_buffer_frames, None);
     status.observe_device_rate(Some(44_100));
     let rate_only = status.status(format(44_100, 128)).audio_session.unwrap();
     assert_eq!(rate_only.observed_device_buffer_frames, None);

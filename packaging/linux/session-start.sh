@@ -17,9 +17,5 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
   *) instruction='Run MixRelay as the signed-in user.' ;;
 esac
 [ "$(id -u)" -ne 0 ] || { printf '%s\n' "$instruction" >&2; exit 1; }
+[ "$#" -eq 0 ] || exit 2
 systemctl --user start mixrelay-driver.service
-case "${1:-}" in
-  '') ;;
-  --manager) exec /usr/bin/mixrelay-desktop ;;
-  *) exit 2 ;;
-esac

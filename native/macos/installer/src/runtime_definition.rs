@@ -50,21 +50,10 @@ pub(crate) fn for_account(account: &ServiceAccount) -> Result<Value> {
 pub(crate) fn validate_installed(bytes: &[u8], account: &ServiceAccount) -> Result<Value> {
     ensure!(bytes.len() <= 16 * 1024, "engine definition too large");
     let value = Value::from_reader(std::io::Cursor::new(bytes))?;
-    let expected = for_account(account)?;
-    if value == expected {
-        return Ok(value);
-    }
-    // The preceding app-owned release uses the same fixed service policy.
-    // Only its association changes during the ownership transfer.
-    let mut legacy = expected;
-    legacy
-        .as_dictionary_mut()
-        .context("definition dictionary")?
-        .insert(
-            "AssociatedBundleIdentifiers".into(),
-            Value::String("io.mixrelay.driver.desktop".into()),
-        );
-    ensure!(value == legacy, "invalid installed engine definition");
+    ensure!(
+        value == for_account(account)?,
+        "invalid installed engine definition"
+    );
     Ok(value)
 }
 
@@ -72,7 +61,7 @@ pub(crate) fn validate_installed(bytes: &[u8], account: &ServiceAccount) -> Resu
 mod tests {
     use super::*;
     #[test]
-    fn engine_runs_as_user_and_only_the_known_previous_owner_can_migrate() {
+    fn engine_runs_as_user_and_rejects_a_modified_definition() {
         let account =
             ServiceAccount::new("listener".into(), "staff".into(), "/Users/listener".into())
                 .unwrap();
@@ -96,5 +85,27 @@ mod tests {
         value.to_writer_xml(&mut bytes).unwrap();
         assert!(validate_installed(&bytes, &account).is_err());
         assert!(from_template(&bytes, &account).is_err());
+    }
+
+    #[test]
+    fn engine_is_on_demand_and_fully_bound_to_the_user() {
+        let account = ServiceAccount::new(
+            "artist".into(),
+            "staff".into(),
+            "/Users/artist & studio".into(),
+        )
+        .unwrap();
+        let value = for_account(&account).unwrap();
+        let dict = value.as_dictionary().unwrap();
+        assert_eq!(dict["KeepAlive"].as_boolean(), Some(false));
+        assert_eq!(dict["RunAtLoad"].as_boolean(), Some(false));
+        assert_eq!(
+            dict["MachServices"].as_dictionary().unwrap()["io.mixrelay.audio.engine"].as_boolean(),
+            Some(true)
+        );
+        let mut bytes = Vec::new();
+        value.to_writer_xml(&mut bytes).unwrap();
+        assert_eq!(Value::from_reader_xml(bytes.as_slice()).unwrap(), value);
+        assert!(!String::from_utf8(bytes).unwrap().contains("__MIXRELAY"));
     }
 }

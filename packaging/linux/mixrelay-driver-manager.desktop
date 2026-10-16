@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=MixRelay Driver
-Name[ko]=MixRelay Driver
-Comment=Manage free virtual audio devices
-Exec=/bin/sh /usr/lib/mixrelay-driver/session-start.sh --manager
-Icon=mixrelay-driver-manager
-Terminal=false
-Categories=AudioVideo;Audio;

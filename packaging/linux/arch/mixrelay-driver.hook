@@ -3,7 +3,6 @@ Operation = Upgrade
 Operation = Remove
 Type = Package
 Target = mix-relay
-Target = mix-relay-driver
 
 [Action]
 Description = Stopping MixRelay before package replacement or removal...

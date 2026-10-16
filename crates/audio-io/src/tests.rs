@@ -60,15 +60,15 @@ fn capture(selector: ApplicationSelector) -> ApplicationCaptureRequest {
 }
 
 #[test]
-fn capture_reselection_defaults_false_and_roundtrips_without_rewriting_selector() {
+fn capture_omits_unset_optional_fields_and_roundtrips_reselection_without_rewriting_selector() {
     let original = capture(ApplicationSelector::ProcessId {
         process_id: 42,
         include_descendants: true,
     });
-    let legacy = serde_json::to_value(&original).unwrap();
-    assert!(legacy.get("requiresReselection").is_none());
-    assert!(legacy.get("forwardingEndpoint").is_none());
-    let mut restored: ApplicationCaptureRequest = serde_json::from_value(legacy).unwrap();
+    let compact = serde_json::to_value(&original).unwrap();
+    assert!(compact.get("requiresReselection").is_none());
+    assert!(compact.get("forwardingEndpoint").is_none());
+    let mut restored: ApplicationCaptureRequest = serde_json::from_value(compact).unwrap();
     assert!(!restored.requires_reselection);
     restored.requires_reselection = true;
     let saved = serde_json::to_value(&restored).unwrap();

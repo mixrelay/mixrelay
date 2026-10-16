@@ -1,11 +1,8 @@
 //! Root-only install/remove entry point; never elevates itself or signs payloads.
 
 #[cfg(target_os = "macos")]
-#[path = "installer/graph_app.rs"]
-mod graph_app;
-#[cfg(target_os = "macos")]
-#[path = "installer/manager_session.rs"]
-mod manager_session;
+#[path = "installer/app_session.rs"]
+mod app_session;
 #[cfg(any(target_os = "macos", test))]
 #[path = "installer/session.rs"]
 mod session;
@@ -50,18 +47,18 @@ fn run() -> anyhow::Result<()> {
         let loaded = mixrelay_macos_installer::hal_is_loaded()?;
         std::process::exit(if loaded { 2 } else { 0 });
     }
-    if let Some(result) = graph_app::handle_command(&arguments) {
-        return result;
+    if arguments.as_slice() == [OsString::from("prepare-graph-logs")] {
+        return create_graph_logs();
     }
     for app in session::SessionApp::ALL {
         if arguments.as_slice() == [OsString::from(app.quit_action())] {
             return objc2::rc::autoreleasepool(|_| {
-                println!("{}", manager_session::quit(app)?);
+                println!("{}", app_session::quit(app)?);
                 Ok(())
             });
         }
         if arguments.as_slice() == [OsString::from(app.restore_action())] {
-            return objc2::rc::autoreleasepool(|_| manager_session::restore(app));
+            return objc2::rc::autoreleasepool(|_| app_session::restore(app));
         }
     }
     if arguments
@@ -86,54 +83,7 @@ fn run() -> anyhow::Result<()> {
         TransactionRequest::Install(_) => resolve_install_account()?,
         TransactionRequest::Remove => resolve_removal_account()?,
     };
-    if arguments
-        .first()
-        .is_some_and(|command| command == "install-if-needed")
-        && optional_driver_is_current(&request, &team, &account)?
-    {
-        tracing::info!("existing Driver is current or newer; preserving it");
-        return Ok(());
-    }
     run_transaction(&request, team, account, delete_user_data)
-}
-
-#[cfg(target_os = "macos")]
-fn optional_driver_is_current(
-    request: &mixrelay_macos_installer::TransactionRequest,
-    team: &mixrelay_macos_installer::SigningTeam,
-    account: &mixrelay_macos_installer::ResolvedServiceAccount,
-) -> anyhow::Result<bool> {
-    let mixrelay_macos_installer::TransactionRequest::Install(sources) = request else {
-        anyhow::bail!("optional Driver command requires install sources");
-    };
-    let verifier = mixrelay_macos_installer::ReleasePayloadVerifier::new(
-        team.clone(),
-        account.account().clone(),
-    );
-    verifier.verify_sources(sources)?;
-    verifier.verify_for_removal(&mixrelay_macos_installer::FilesystemLayout::new("/")?)?;
-    let offered = bundle_version(sources.app())?;
-    anyhow::ensure!(
-        offered == bundle_version(sources.hal())?,
-        "Driver and HAL payload versions differ"
-    );
-    let mut installed = Vec::new();
-    for bundle in [
-        mixrelay_macos_installer::APP_PATH,
-        mixrelay_macos_installer::HAL_PATH,
-    ] {
-        if std::path::Path::new(bundle).exists() {
-            installed.push(bundle_version(std::path::Path::new(bundle))?);
-        }
-    }
-    let complete = mixrelay_macos_installer::OwnedTarget::all()
-        .iter()
-        .all(|target| std::path::Path::new(target.path()).exists());
-    if !mixrelay_macos_installer::optional_driver_install_needed(&offered, &installed, complete)? {
-        tracing::info!("existing Driver is current or newer; preserving it");
-        return Ok(true);
-    }
-    Ok(false)
 }
 
 #[cfg(target_os = "macos")]
@@ -146,9 +96,10 @@ fn run_transaction(
     use mixrelay_macos_installer::{
         CoordinatedBackend, FilesystemLayout, NativeServiceLifecycle, TransactionRequest, execute,
     };
-    use session::{SessionApp, run_with_apps_closed};
+    use session::{SessionApp, dependencies, run_with_apps_closed};
     let session_account = account.clone();
     let layout = FilesystemLayout::new("/")?;
+    let installed_layout = layout.clone();
     let recovery_verifier = mixrelay_macos_installer::ReleasePayloadVerifier::new(
         team.clone(),
         account.account().clone(),
@@ -194,15 +145,12 @@ fn run_transaction(
                 error.into()
             })
         },
-        || {
+        // A failed repair leaves the previous, possibly partial, installation: reopen
+        // the closed apps when what they need is present and everything present verifies.
+        |closed| {
             may_relaunch_apps.get()
                 && recovery_verifier
-                    .verify_installed(
-                        mixrelay_macos_installer::APP_PATH,
-                        mixrelay_macos_installer::HAL_PATH,
-                        mixrelay_macos_installer::DRIVER_PATH,
-                        mixrelay_macos_installer::LAUNCHD_PATH,
-                    )
+                    .verify_installed(&installed_layout, &dependencies(closed))
                     .is_ok()
         },
     )?;
@@ -259,21 +207,23 @@ fn user_session_action(
         .output()?;
     anyhow::ensure!(
         output.status.success(),
-        "manager session action failed: {}",
+        "app session action failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     Ok(String::from_utf8(output.stdout)?)
 }
 
+/// Creates the graph app log directory as the installed user.
 #[cfg(target_os = "macos")]
-fn bundle_version(bundle: &std::path::Path) -> anyhow::Result<String> {
-    let metadata = plist::Value::from_file(bundle.join("Contents/Info.plist"))?;
-    metadata
-        .as_dictionary()
-        .and_then(|dict| dict.get("CFBundleShortVersionString"))
-        .and_then(plist::Value::as_string)
-        .map(str::to_owned)
-        .ok_or_else(|| anyhow::anyhow!("missing bundle release version"))
+fn create_graph_logs() -> anyhow::Result<()> {
+    // SAFETY: geteuid only queries this process identity.
+    anyhow::ensure!(
+        unsafe { libc::geteuid() } != 0,
+        "app logs must be created as the service user"
+    );
+    let home = std::env::var_os("HOME").ok_or_else(|| anyhow::anyhow!("missing service home"))?;
+    std::fs::create_dir_all(std::path::PathBuf::from(home).join("Library/Logs/MixRelay"))?;
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -319,18 +269,16 @@ fn parse_request(
         anyhow::bail!("expected install or remove");
     };
     let request_and_team = match command {
-        "install" | "install-if-needed"
-            if arguments.len() == 11 && arguments[10] == "--reload-coreaudio" =>
-        {
+        "install" if arguments.len() == 11 && arguments[10] == "--reload-coreaudio" => {
             let team = required_text(&arguments[1], "Team ID")?;
+            let path = |index: usize| PathBuf::from(&arguments[index]);
             let sources = InstallSources::new(
-                PathBuf::from(&arguments[2]),
-                PathBuf::from(&arguments[3]),
-                PathBuf::from(&arguments[4]),
-                PathBuf::from(&arguments[5]),
-            )
-            .with_remover(PathBuf::from(&arguments[6]), PathBuf::from(&arguments[7]))
-            .with_runtime(PathBuf::from(&arguments[8]), PathBuf::from(&arguments[9]));
+                path(2),
+                path(3),
+                (path(4), path(5)),
+                (path(6), path(7)),
+                (path(8), path(9)),
+            );
             (TransactionRequest::install(sources), team)
         }
         "remove"
@@ -364,7 +312,7 @@ fn required_text(argument: &std::ffi::OsStr, label: &str) -> anyhow::Result<Stri
 #[cfg(target_os = "macos")]
 fn print_usage() {
     eprintln!(
-        "Usage:\n  mixrelay-macos-installer install TEAM_ID MANAGER.app HAL.driver DRIVER PLIST_TEMPLATE UNINSTALLER.app REMOVAL_PLIST ENGINE ENGINE_PLIST --reload-coreaudio\n  mixrelay-macos-installer remove TEAM_ID --reload-coreaudio [--delete-user-data]\n\nInstall/remove require an already-authorized root process and explicit approval to reload CoreAudio, interrupting active audio without rebooting the Mac. Removal optionally clears Driver device settings as the verified installation account. Updates preserve all user data. The authorized root command drops to the installed user for manager actions. It never elevates itself, signs, or notarizes code."
+        "Usage:\n  mixrelay-macos-installer install TEAM_ID MixRelay.app HAL.driver DRIVER PLIST_TEMPLATE UNINSTALLER.app REMOVAL_PLIST ENGINE ENGINE_PLIST --reload-coreaudio\n  mixrelay-macos-installer remove TEAM_ID --reload-coreaudio [--delete-user-data]\n\nInstall/remove require an already-authorized root process and explicit approval to reload CoreAudio, interrupting active audio without rebooting the Mac. Removal optionally clears Driver device settings as the verified installation account. Updates preserve all user data. The authorized root command drops to the installed user for app Quit and relaunch. It never elevates itself, signs, or notarizes code."
     );
 }
 
@@ -405,7 +353,7 @@ mod tests {
         let install = [
             "install",
             "TEAM",
-            "Manager.app",
+            "MixRelay.app",
             "HAL.driver",
             "Driver",
             "template.plist",

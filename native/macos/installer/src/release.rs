@@ -150,25 +150,34 @@ impl ReleasePayloadVerifier {
         self.verify_with(sources, true, verify_signature)
     }
 
-    /// Verifies the currently installed app, HAL, driver and account-bound plist.
+    /// Verifies an installation that closed apps can be reopened on.
     ///
-    /// Removal must establish the same publisher identity and Universal 2 policy
-    /// before treating an existing target as owned. The plist is already bound to
-    /// the OS-resolved account, unlike an install source template.
+    /// Every `required` target must be present, and every present target passes the
+    /// same identity, signature and launch policy checks as removal. A missing target
+    /// that is not required, such as the remover of a partial installation, is allowed.
     /// # Errors
-    /// Returns invalid signatures, architectures, bundle identities or launch policy.
+    /// Returns a missing required target or an invalid present target.
     pub fn verify_installed(
         &self,
-        app: impl Into<PathBuf>,
-        hal: impl Into<PathBuf>,
-        driver: impl Into<PathBuf>,
-        launchd: impl Into<PathBuf>,
-    ) -> Result<LaunchdConfiguration, ReleaseError> {
-        self.verify_with(
-            &InstallSources::new(app, hal, driver, launchd),
-            false,
-            verify_signature,
-        )
+        layout: &FilesystemLayout,
+        required: &[OwnedTarget],
+    ) -> Result<(), ReleaseError> {
+        self.verify_installed_with(layout, required, verify_signature)
+    }
+
+    fn verify_installed_with(
+        &self,
+        layout: &FilesystemLayout,
+        required: &[OwnedTarget],
+        signature: impl FnMut(&Path, &str, ArtifactRole) -> Result<(), ReleaseError>,
+    ) -> Result<(), ReleaseError> {
+        for target in required {
+            let path = layout.root().join(target.path().trim_start_matches('/'));
+            if let Err(source) = std::fs::symlink_metadata(&path) {
+                return Err(ReleaseError::Io { path, source });
+            }
+        }
+        self.verify_removal_with(layout, signature).map(|_| ())
     }
 
     /// Verifies each remaining removal target independently. Missing targets
@@ -194,11 +203,6 @@ impl ReleasePayloadVerifier {
                 "mixrelay-desktop",
                 ArtifactRole::Application,
             ),
-            OwnedTarget::LegacyManager => (
-                "io.mixrelay.driver.desktop",
-                "mixrelay-desktop",
-                ArtifactRole::Application,
-            ),
             OwnedTarget::Hal => ("io.mixrelay.audio.driver", "MixRelayHAL", ArtifactRole::Hal),
             _ => (
                 "io.mixrelay.driver.uninstaller",
@@ -208,10 +212,7 @@ impl ReleasePayloadVerifier {
         };
         verify_bundle(path, identifier, executable)?;
         signature(path, &self.team.requirement(identifier), role)?;
-        if matches!(
-            target,
-            OwnedTarget::Uninstaller | OwnedTarget::LegacyUninstaller
-        ) {
+        if target == OwnedTarget::Uninstaller {
             self.verify_installer_executable_with(
                 &path.join("Contents/Helpers/mixrelay-macos-installer"),
                 signature,
@@ -234,11 +235,7 @@ impl ReleasePayloadVerifier {
                 Err(source) => return Err(ReleaseError::Io { path, source }),
             }
             match target {
-                OwnedTarget::App
-                | OwnedTarget::Hal
-                | OwnedTarget::Uninstaller
-                | OwnedTarget::LegacyManager
-                | OwnedTarget::LegacyUninstaller => {
+                OwnedTarget::App | OwnedTarget::Hal | OwnedTarget::Uninstaller => {
                     self.verify_removal_bundle(target, &path, &mut signature)?;
                 }
                 OwnedTarget::RuntimeEngine => {
@@ -294,23 +291,29 @@ impl ReleasePayloadVerifier {
         &self,
         staged: &FilesystemStaged,
     ) -> Result<LaunchdConfiguration, ReleaseError> {
-        let mut sources = InstallSources::new(
-            staged.payload_path(OwnedTarget::App),
-            staged.payload_path(OwnedTarget::Hal),
-            staged.payload_path(OwnedTarget::Driver),
-            staged.payload_path(OwnedTarget::Launchd),
+        self.verify_staged_with(staged, verify_signature)
+    }
+
+    fn verify_staged_with(
+        &self,
+        staged: &FilesystemStaged,
+        signature: impl FnMut(&Path, &str, ArtifactRole) -> Result<(), ReleaseError>,
+    ) -> Result<LaunchdConfiguration, ReleaseError> {
+        let path = |target| staged.payload_path(target);
+        let sources = InstallSources::new(
+            path(OwnedTarget::App),
+            path(OwnedTarget::Hal),
+            (path(OwnedTarget::Driver), path(OwnedTarget::Launchd)),
+            (
+                path(OwnedTarget::Uninstaller),
+                path(OwnedTarget::RemovalLaunchd),
+            ),
+            (
+                path(OwnedTarget::RuntimeEngine),
+                path(OwnedTarget::RuntimeLaunchd),
+            ),
         );
-        let remover = staged.payload_path(OwnedTarget::Uninstaller);
-        let plist = staged.payload_path(OwnedTarget::RemovalLaunchd);
-        if remover.exists() || plist.exists() {
-            sources = sources.with_remover(remover, plist);
-        }
-        let engine = staged.payload_path(OwnedTarget::RuntimeEngine);
-        let plist = staged.payload_path(OwnedTarget::RuntimeLaunchd);
-        if engine.exists() || plist.exists() {
-            sources = sources.with_runtime(engine, plist);
-        }
-        self.verify_sources(&sources)
+        self.verify_with(&sources, true, signature)
     }
 
     /// Verifies the separately installed remover and its embedded fixed CLI.
@@ -343,27 +346,7 @@ impl ReleasePayloadVerifier {
         self.verify_installer_executable_with(path.as_ref(), verify_signature)
     }
 
-    /// Checks the graph app and its separate on-demand audio engine.
-    /// # Errors
-    /// Rejects incorrect identities, architecture slices, entitlements or signatures.
-    pub fn verify_graph_app(&self, app: &Path, engine: &Path) -> Result<(), ReleaseError> {
-        self.verify_graph_bundle(app)?;
-        self.verify_graph_engine(engine)
-    }
-
-    /// Checks an existing graph app before replacing it.
-    /// # Errors
-    /// Rejects an app from a different publisher or with an unexpected identity.
-    pub fn verify_graph_bundle(&self, app: &Path) -> Result<(), ReleaseError> {
-        verify_bundle(app, "io.mixrelay.desktop", "mixrelay-desktop")?;
-        verify_signature(
-            app,
-            &self.team.requirement("io.mixrelay.desktop"),
-            ArtifactRole::Application,
-        )
-    }
-
-    /// Checks an existing graph engine before replacing it.
+    /// Checks the installed on-demand audio engine.
     /// # Errors
     /// Rejects incorrect architecture, publisher or entitlement metadata.
     pub fn verify_graph_engine(&self, engine: &Path) -> Result<(), ReleaseError> {
@@ -397,27 +380,23 @@ impl ReleasePayloadVerifier {
         is_template: bool,
         mut signature: impl FnMut(&Path, &str, ArtifactRole) -> Result<(), ReleaseError>,
     ) -> Result<(), ReleaseError> {
-        if let (Some(engine), Some(plist)) = (sources.runtime_engine(), sources.runtime_launchd()) {
-            if !engine.is_absolute() || !plist.is_absolute() {
-                return Err(ReleaseError::SourcePath(engine.to_path_buf()));
-            }
-            verify_architecture(engine)?;
-            signature(
-                engine,
-                &self.team.requirement("mixrelay-engine-service"),
-                ArtifactRole::Engine,
-            )?;
-            let bytes = read_configuration(plist, 16 * 1024)?;
-            let result = if is_template {
-                crate::runtime_definition::from_template(&bytes, &self.account)
-            } else {
-                crate::runtime_definition::validate_installed(&bytes, &self.account)
-            };
-            result.map_err(|source| ReleaseError::Io {
-                path: plist.to_path_buf(),
-                source: io::Error::other(source.to_string()),
-            })?;
-        }
+        let (engine, plist) = (sources.runtime_engine(), sources.runtime_launchd());
+        verify_architecture(engine)?;
+        signature(
+            engine,
+            &self.team.requirement("mixrelay-engine-service"),
+            ArtifactRole::Engine,
+        )?;
+        let bytes = read_configuration(plist, 16 * 1024)?;
+        let result = if is_template {
+            crate::runtime_definition::from_template(&bytes, &self.account)
+        } else {
+            crate::runtime_definition::validate_installed(&bytes, &self.account)
+        };
+        result.map_err(|source| ReleaseError::Io {
+            path: plist.to_path_buf(),
+            source: io::Error::other(source.to_string()),
+        })?;
         Ok(())
     }
 
@@ -432,6 +411,10 @@ impl ReleasePayloadVerifier {
             sources.hal(),
             sources.driver(),
             sources.launchd(),
+            sources.remover(),
+            sources.removal_launchd(),
+            sources.runtime_engine(),
+            sources.runtime_launchd(),
         ] {
             if !path.is_absolute() {
                 return Err(ReleaseError::SourcePath(path.to_path_buf()));
@@ -444,32 +427,28 @@ impl ReleasePayloadVerifier {
             LaunchdConfiguration::validate_installed(&launchd, &self.account)?
         };
         self.verify_runtime_with(sources, is_template, &mut signature)?;
-        if let (Some(app), Some(plist)) = (sources.remover(), sources.removal_launchd()) {
-            if !app.is_absolute() || !plist.is_absolute() {
-                return Err(ReleaseError::SourcePath(app.to_path_buf()));
+        let (app, plist) = (sources.remover(), sources.removal_launchd());
+        signature(
+            app,
+            &self.team.requirement("io.mixrelay.driver.uninstaller"),
+            ArtifactRole::Uninstaller,
+        )?;
+        verify_bundle(
+            app,
+            "io.mixrelay.driver.uninstaller",
+            "mixrelay-driver-uninstaller",
+        )?;
+        self.verify_installer_executable_with(
+            &app.join("Contents/Helpers/mixrelay-macos-installer"),
+            &mut signature,
+        )?;
+        #[cfg(target_os = "macos")]
+        crate::removal::verify_removal_launchd(plist, &self.team).map_err(|error| {
+            ReleaseError::Io {
+                path: plist.to_path_buf(),
+                source: std::io::Error::other(error.to_string()),
             }
-            signature(
-                app,
-                &self.team.requirement("io.mixrelay.driver.uninstaller"),
-                ArtifactRole::Uninstaller,
-            )?;
-            verify_bundle(
-                app,
-                "io.mixrelay.driver.uninstaller",
-                "mixrelay-driver-uninstaller",
-            )?;
-            self.verify_installer_executable_with(
-                &app.join("Contents/Helpers/mixrelay-macos-installer"),
-                &mut signature,
-            )?;
-            #[cfg(target_os = "macos")]
-            crate::removal::verify_removal_launchd(plist, &self.team).map_err(|error| {
-                ReleaseError::Io {
-                    path: plist.to_path_buf(),
-                    source: std::io::Error::other(error.to_string()),
-                }
-            })?;
-        }
+        })?;
         for (bundle, identifier, executable, role) in [
             (
                 sources.app(),

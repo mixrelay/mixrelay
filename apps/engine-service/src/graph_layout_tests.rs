@@ -370,32 +370,26 @@ fn layout_validation_rejects_unknown_ids_nonfinite_and_unbounded_values() {
 }
 
 #[test]
-fn pre_layout_catalogs_load_without_reinitialization_and_corrupt_layouts_are_protected() {
+fn missing_or_corrupt_layouts_are_rejected_without_rewriting_the_catalog() {
     let fixture = Fixture::new();
     drop(controller(default_duplex_document(1, None)).with_graph_catalog_path(fixture.path()));
-    let mut old: serde_json::Value =
+    let saved: serde_json::Value =
         serde_json::from_slice(&fs::read(fixture.path()).unwrap()).unwrap();
-    let entry = old["graphs"][0].as_object_mut().unwrap();
-    entry.remove("layout");
-    entry.remove("layoutRevision");
-    fs::write(fixture.path(), serde_json::to_vec(&old).unwrap()).unwrap();
-    let engine =
-        controller(default_duplex_document(1, None)).with_graph_catalog_path(fixture.path());
-    assert_eq!(
-        engine.graph_layout("graph-1").unwrap().layout,
-        GraphLayout::default()
-    );
-    assert_eq!(engine.graph_catalog().unwrap().graphs.len(), 1);
-    drop(engine);
-    let mut saved: serde_json::Value =
-        serde_json::from_slice(&fs::read(fixture.path()).unwrap()).unwrap();
-    saved["graphs"][0]["layout"]["viewport"] = serde_json::json!({"x":0,"y":0,"zoom":-1});
-    let bytes = serde_json::to_vec(&saved).unwrap();
-    fs::write(fixture.path(), &bytes).unwrap();
-    let rejected =
-        controller(default_duplex_document(1, None)).with_graph_catalog_path(fixture.path());
-    assert!(rejected.graph_catalog().is_err());
-    assert_eq!(fs::read(fixture.path()).unwrap(), bytes);
+    let mut missing = saved.clone();
+    missing["graphs"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("layoutRevision");
+    let mut corrupt = saved;
+    corrupt["graphs"][0]["layout"]["viewport"] = serde_json::json!({"x":0,"y":0,"zoom":-1});
+    for catalog in [missing, corrupt] {
+        let bytes = serde_json::to_vec(&catalog).unwrap();
+        fs::write(fixture.path(), &bytes).unwrap();
+        let rejected =
+            controller(default_duplex_document(1, None)).with_graph_catalog_path(fixture.path());
+        assert!(rejected.graph_catalog().is_err());
+        assert_eq!(fs::read(fixture.path()).unwrap(), bytes);
+    }
 }
 
 #[test]

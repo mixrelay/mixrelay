@@ -226,12 +226,16 @@ fn meter_runtime(connection: &Connection, replies: Vec<Value>) -> tokio::task::J
 }
 
 fn meter_window(sequence: u64) -> Value {
-    let window: mixrelay_control_protocol::ControlTelemetry = serde_json::from_value(json!({
-        "engineIncarnation": "engine",
-        "sequence": sequence,
-        "meters": {"protocolVersion": 1, "revision": 1, "nodes": []}
-    }))
-    .unwrap();
+    let window = mixrelay_control_protocol::ControlTelemetry {
+        engine_incarnation: "engine".into(),
+        sequence,
+        meters: mixrelay_control_protocol::MeterSnapshot {
+            protocol_version: 1,
+            revision: 1,
+            nodes: vec![],
+        },
+        state: None,
+    };
     let body = mixrelay_control_protocol::TelemetryEncoder::default().json(&window);
     json!({"id": null, "status": 206, "body": body})
 }
@@ -265,8 +269,6 @@ async fn a_meter_subscription_yields_pushed_windows_until_the_runtime_ends_it() 
 
 #[tokio::test]
 async fn a_meter_subscription_without_a_first_window_is_refused() {
-    let directory = tempfile::tempdir().unwrap();
-    let connection = fixture_connection(directory.path());
     for (replies, reason) in [
         (
             vec![
@@ -285,7 +287,10 @@ async fn a_meter_subscription_without_a_first_window_is_refused() {
             "invalid type: string \"x\", expected u64",
         ),
     ] {
-        let _ = std::fs::remove_file(&connection.path);
+        // A fresh connection per case: a shared link may not yet have seen the previous
+        // runtime close, and a request sent on it is never replayed.
+        let directory = tempfile::tempdir().unwrap();
+        let connection = fixture_connection(directory.path());
         let server = meter_runtime(&connection, replies);
         let refused = connection.subscribe_telemetry().await.err().unwrap();
         assert!(refused.starts_with(reason), "{refused}");

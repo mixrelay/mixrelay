@@ -377,7 +377,7 @@ fn restart_revision_exceeds_every_saved_graph_and_bootstrap_revision() {
         let document = default_duplex_document(active, Some(-6.0));
         let saved = serde_json::json!({
             "version": 1, "revision": 17, "activeId": "selected", "graphs": [
-                {"id": "selected", "name": "Selected", "document": document},
+                {"id": "selected", "name": "Selected", "document": document,"layoutRevision":0,"layout":{"positions":{}}},
                 {"id": "other", "name": "Other", "document": GraphDocument::new(inactive, vec![], vec![]),
                  "layoutRevision": 0, "layout": {"positions": {}}}
             ]

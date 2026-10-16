@@ -25,7 +25,6 @@ use thiserror::Error;
 use crate::backend::LeaseKind;
 
 const APP_LEASE_NAME: &str = "app.owner";
-const DRIVER_MANAGER_LEASE_NAME: &str = "driver-manager.owner";
 const ENGINE_LEASE_NAME: &str = "engine.owner";
 const INSTALLER_LEASE_NAME: &str = "installer.owner";
 const LEASE_FILE_MODE: Mode = Mode::RUSR
@@ -99,46 +98,6 @@ impl LifecycleDirectory {
     /// Returns [`LeaseError::Busy`] for lock contention, or a validation/I/O
     /// error for an unusable lifecycle inode.
     pub fn acquire(&self) -> Result<LifecycleLeaseGuard, LeaseError> {
-        self.acquire_selected(true)
-    }
-
-    /// Locks the graph app and engine without interrupting the independent Driver manager.
-    /// # Errors
-    /// Returns when a selected owner or another installer holds a lock.
-    pub fn acquire_for_app_update(&self) -> Result<LifecycleLeaseGuard, LeaseError> {
-        self.acquire_selected(false)
-    }
-
-    /// Serializes an editor-only replacement without interrupting Driver-owned audio.
-    /// # Errors
-    /// Returns when the directory changed or another installer is active.
-    pub fn acquire_for_editor_update(&self) -> Result<EditorLeaseGuard, LeaseError> {
-        let current = Self::open(self.path.clone())?;
-        let previous = self.directory.metadata().map_err(|source| LeaseError::Io {
-            kind: LeaseKind::Installer,
-            path: self.path.clone(),
-            source,
-        })?;
-        let now = current
-            .directory
-            .metadata()
-            .map_err(|source| LeaseError::Io {
-                kind: LeaseKind::Installer,
-                path: self.path.clone(),
-                source,
-            })?;
-        if (previous.dev(), previous.ino()) != (now.dev(), now.ino()) {
-            return Err(LeaseError::UnsafePath {
-                path: self.path.clone(),
-                reason: "lifecycle directory was replaced",
-            });
-        }
-        Ok(EditorLeaseGuard(
-            self.acquire_lock(LeaseKind::Installer, true)?,
-        ))
-    }
-
-    fn acquire_selected(&self, include_manager: bool) -> Result<LifecycleLeaseGuard, LeaseError> {
         let current = Self::open(self.path.clone())?;
         let previous = self.directory.metadata().map_err(|source| LeaseError::Io {
             kind: LeaseKind::Installer,
@@ -161,14 +120,10 @@ impl LifecycleDirectory {
         }
         let app = self.acquire_lock(LeaseKind::App, false)?;
         let engine = self.acquire_lock(LeaseKind::Engine, false)?;
-        let manager = include_manager
-            .then(|| self.acquire_lock(LeaseKind::DriverManager, false))
-            .transpose()?;
         let installer = self.acquire_lock(LeaseKind::Installer, true)?;
         Ok(LifecycleLeaseGuard {
             _app: app,
             _engine: engine,
-            _manager: manager,
             _installer: installer,
         })
     }
@@ -191,7 +146,6 @@ impl LifecycleDirectory {
     fn lease_path(&self, kind: LeaseKind) -> PathBuf {
         self.path.join(match kind {
             LeaseKind::App => APP_LEASE_NAME,
-            LeaseKind::DriverManager => DRIVER_MANAGER_LEASE_NAME,
             LeaseKind::Engine => ENGINE_LEASE_NAME,
             LeaseKind::Installer => INSTALLER_LEASE_NAME,
         })
@@ -207,7 +161,6 @@ impl LifecycleDirectory {
 pub struct LifecycleLeaseGuard {
     _app: LifecycleLock,
     _engine: LifecycleLock,
-    _manager: Option<LifecycleLock>,
     _installer: LifecycleLock,
 }
 
@@ -447,6 +400,3 @@ fn validate_lease_metadata(path: &Path, metadata: &Metadata) -> Result<(), Lease
 
 #[cfg(test)]
 mod tests;
-
-/// Retains the exclusive transaction lease for an editor-only update.
-pub struct EditorLeaseGuard(#[allow(dead_code)] LifecycleLock);

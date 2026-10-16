@@ -86,21 +86,11 @@
           "polkit-1-auth-agent | lxpolkit",
           "zenity",
           "libc6 (>= 2.39)",
-          "xterm | x-terminal-emulator",
           "systemd",
           "util-linux"
         ],
         "postInstallScript": "../../../packaging/linux/driver-after-install.sh",
-        "postRemoveScript": "../../../packaging/linux/driver-after-remove.sh",
-        "conflicts": [
-          "mix-relay-driver"
-        ],
-        "replaces": [
-          "mix-relay-driver"
-        ],
-        "provides": [
-          "mix-relay-driver (= 0.1.0)"
-        ]
+        "postRemoveScript": "../../../packaging/linux/driver-after-remove.sh"
       },
       "rpm": {
         "preInstallScript": "../../../packaging/linux/driver-before-change.sh",
@@ -181,22 +171,12 @@
           "PolicyKit-authentication-agent",
           "zenity",
           "libc.so.6(GLIBC_2.39)(64bit)",
-          "xterm",
           "systemd",
           "util-linux",
           "lilv"
         ],
         "postInstallScript": "../../../packaging/linux/driver-after-install.sh",
-        "postRemoveScript": "../../../packaging/linux/driver-after-remove.sh",
-        "conflicts": [
-          "mix-relay-driver"
-        ],
-        "obsoletes": [
-          "mix-relay-driver"
-        ],
-        "provides": [
-          "mix-relay-driver = 0.1.0"
-        ]
+        "postRemoveScript": "../../../packaging/linux/driver-after-remove.sh"
       }
     }
   }

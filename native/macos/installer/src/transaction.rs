@@ -467,7 +467,11 @@ mod tests {
 
     fn install_request() -> TransactionRequest {
         TransactionRequest::install(crate::InstallSources::new(
-            "app", "hal", "engine", "launchd",
+            "app",
+            "hal",
+            ("driver", "launchd"),
+            ("remover", "removal-launchd"),
+            ("engine", "engine-launchd"),
         ))
     }
 
@@ -755,8 +759,6 @@ mod tests {
                 crate::REMOVAL_LAUNCHD_PATH,
                 crate::RUNTIME_ENGINE_PATH,
                 crate::RUNTIME_LAUNCHD_PATH,
-                "/Applications/MixRelay Driver.app",
-                "/Applications/Uninstall MixRelay Driver.app",
             ]
         );
     }

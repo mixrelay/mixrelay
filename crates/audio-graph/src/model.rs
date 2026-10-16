@@ -250,7 +250,6 @@ pub struct AudioDeviceOutputConfig {
 #[serde(rename_all = "camelCase")]
 pub struct CompressorConfig {
     pub version: u16,
-    #[serde(default)]
     pub bypass: bool,
     pub channels: u16,
     pub threshold_db: f32,
@@ -264,7 +263,6 @@ pub struct CompressorConfig {
 #[serde(rename_all = "camelCase")]
 pub struct LimiterConfig {
     pub version: u16,
-    #[serde(default)]
     pub bypass: bool,
     pub channels: u16,
     pub ceiling_db: f32,
@@ -563,35 +561,5 @@ impl CompiledEdge {
             + self.destination.node_id.0.capacity()
             + self.destination.port_id.0.capacity()
             + size_of_val(self.routes.as_ref())
-    }
-}
-
-#[cfg(test)]
-mod dynamics_compatibility_tests {
-    use super::{CompressorConfig, LimiterConfig};
-
-    #[test]
-    fn legacy_dynamics_presets_default_to_processing_and_roundtrip_explicit_bypass() {
-        let mut compressor: CompressorConfig = serde_json::from_value(serde_json::json!({
-            "version":1,"channels":2,"thresholdDb":-18,"ratio":4,"attackMs":10,"releaseMs":120,"makeupGainDb":0,
-        })).unwrap();
-        let mut limiter: LimiterConfig = serde_json::from_value(serde_json::json!({
-            "version":1,"channels":2,"ceilingDb":-1,"releaseMs":80,
-        }))
-        .unwrap();
-        assert!(!compressor.bypass);
-        assert!(!limiter.bypass);
-        compressor.bypass = true;
-        limiter.bypass = true;
-        assert_eq!(
-            serde_json::from_value::<CompressorConfig>(serde_json::to_value(&compressor).unwrap())
-                .unwrap(),
-            compressor
-        );
-        assert_eq!(
-            serde_json::from_value::<LimiterConfig>(serde_json::to_value(&limiter).unwrap())
-                .unwrap(),
-            limiter
-        );
     }
 }

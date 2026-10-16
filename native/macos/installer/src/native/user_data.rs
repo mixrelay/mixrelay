@@ -11,7 +11,7 @@ use std::{
 use anyhow::Context as _;
 use rustix::{
     fd::OwnedFd,
-    fs::{AtFlags, Dir, Mode, OFlags, open, openat, unlinkat},
+    fs::{AtFlags, Mode, OFlags, open, openat, unlinkat},
     io::Errno,
 };
 
@@ -23,14 +23,6 @@ const DIRECTORY_FLAGS: OFlags = OFlags::RDONLY
     .union(OFlags::CLOEXEC);
 
 const COMMIT_TOKEN: u8 = b'C';
-const MANAGER_DIRECTORIES: [(&str, &CStr); 3] = [
-    ("Library/Caches", c"io.mixrelay.driver.desktop"),
-    ("Library/WebKit", c"io.mixrelay.driver.desktop"),
-    (
-        "Library/Saved Application State",
-        c"io.mixrelay.driver.desktop.savedState",
-    ),
-];
 
 /// A prepared account-owned cleanup that remains inert until removal succeeds.
 pub(super) struct PendingCleanup {
@@ -68,7 +60,7 @@ impl PendingCleanup {
 
 impl Drop for PendingCleanup {
     fn drop(&mut self) {
-        // EOF cancels an uncommitted cleanup before rollback restores the Manager.
+        // EOF cancels an uncommitted cleanup before rollback restores the remover app.
         drop(self.child.stdin.take());
         if let Err(error) = self.child.wait() {
             tracing::error!("could not reap Driver cleanup child: {error}");
@@ -76,7 +68,7 @@ impl Drop for PendingCleanup {
     }
 }
 
-/// Loads the current installer executable before its Manager bundle is removed.
+/// Loads the current installer executable before its remover app bundle is removed.
 /// # Errors
 /// Returns if the executable cannot be resolved or the account-owned child cannot start.
 pub(super) fn prepare_for_account(
@@ -102,7 +94,7 @@ pub(super) fn prepare_for_account(
     )
 }
 
-/// Removes Driver management UI residue and optionally its device settings.
+/// Removes the Driver device settings when the user selected their deletion.
 ///
 /// Graph App caches, graphs, recordings and paid authentication are never removed.
 /// `home` is the OS-resolved installation home; unchecked removal preserves settings.
@@ -138,24 +130,15 @@ fn read_commit(input: &mut impl Read) -> anyhow::Result<bool> {
 }
 
 fn cleanup_files(home: &Path, delete_settings: bool) -> anyhow::Result<()> {
-    let home = open(home, DIRECTORY_FLAGS, Mode::empty())?;
-    for (parent, name) in MANAGER_DIRECTORIES {
-        if let Some(parent) = open_directory(&home, parent)? {
-            remove_directory(&parent, name)?;
-        }
-    }
-    if let Some(parent) = open_directory(&home, "Library/Preferences")? {
-        remove_file(&parent, c"io.mixrelay.driver.desktop.plist")?;
-    }
     if !delete_settings {
         return Ok(());
     }
+    let home = open(home, DIRECTORY_FLAGS, Mode::empty())?;
     let Some(parent) = open_directory(&home, "Library/Application Support/io.mixrelay.driver")?
     else {
         return Ok(());
     };
     remove_file(&parent, c"drivers.json")?;
-    remove_file(&parent, c"drivers.json.stopped")?;
     Ok(())
 }
 
@@ -164,29 +147,6 @@ fn remove_file(parent: &OwnedFd, name: &CStr) -> Result<(), Errno> {
         Ok(()) | Err(Errno::NOENT) => Ok(()),
         Err(error) => Err(error),
     }
-}
-
-fn remove_directory(parent: &OwnedFd, name: &CStr) -> Result<(), Errno> {
-    let directory = match openat(parent, name, DIRECTORY_FLAGS, Mode::empty()) {
-        Ok(directory) => directory,
-        Err(Errno::NOENT) => return Ok(()),
-        Err(error) => return Err(error),
-    };
-    for entry in Dir::read_from(&directory)? {
-        let entry = entry?;
-        let name = entry.file_name();
-        if name == c"." || name == c".." {
-            continue;
-        }
-        // Unlink leaves and symlinks first. Only an actual directory is traversed,
-        // using NOFOLLOW descriptor-relative opens throughout the subtree.
-        match remove_file(&directory, name) {
-            Ok(()) => {}
-            Err(Errno::ISDIR | Errno::PERM) => remove_directory(&directory, name)?,
-            Err(error) => return Err(error),
-        }
-    }
-    unlinkat(parent, name, AtFlags::REMOVEDIR)
 }
 
 fn open_directory(parent: &OwnedFd, path: &str) -> Result<Option<OwnedFd>, Errno> {
@@ -294,71 +254,11 @@ mod tests {
     }
 
     #[test]
-    fn manager_residue_is_removed_even_when_settings_are_preserved() {
-        let home = settings_fixture("driver-manager-residue");
-        for (parent, name) in super::MANAGER_DIRECTORIES {
-            let directory = home.join(parent).join(name.to_str().expect("fixed path"));
-            fs::create_dir_all(directory.join("nested")).expect("manager directory");
-            fs::write(directory.join("nested/cache"), b"cache").expect("manager cache");
-            let unrelated = home.join(parent).join("io.mixrelay.desktop");
-            fs::create_dir_all(&unrelated).expect("Graph App directory");
-            fs::write(unrelated.join("graph"), b"retained").expect("Graph App data");
-        }
-        let preferences = home.join("Library/Preferences");
-        fs::create_dir_all(&preferences).expect("preferences directory");
-        fs::write(
-            preferences.join("io.mixrelay.driver.desktop.plist"),
-            b"manager",
-        )
-        .expect("manager preferences");
-        fs::write(preferences.join("io.mixrelay.desktop.plist"), b"retained")
-            .expect("Graph App preferences");
-        super::cleanup_files(&home, false).expect("manager cleanup");
-        for (parent, name) in super::MANAGER_DIRECTORIES {
-            assert!(
-                !home
-                    .join(parent)
-                    .join(name.to_str().expect("fixed path"))
-                    .exists()
-            );
-            assert!(home.join(parent).join("io.mixrelay.desktop/graph").exists());
-        }
-        assert!(
-            !preferences
-                .join("io.mixrelay.driver.desktop.plist")
-                .exists()
-        );
-        assert!(preferences.join("io.mixrelay.desktop.plist").exists());
-        assert!(
-            home.join("Library/Application Support/io.mixrelay.driver/drivers.json")
-                .exists()
-        );
-        super::cleanup_files(&home, false).expect("idempotent manager cleanup");
-    }
-
-    #[test]
-    fn manager_cleanup_unlinks_nested_symlinks_without_following_them() {
-        let home = FixtureDir::new("driver-manager-symlink").expect("fixture");
-        let external = FixtureDir::new("driver-manager-external").expect("external fixture");
-        fs::write(external.join("graph"), b"retained").expect("external data");
-        let cache = home.join("Library/Caches/io.mixrelay.driver.desktop");
-        fs::create_dir_all(&cache).expect("cache directory");
-        symlink(&external, cache.join("external")).expect("nested symlink");
-        super::cleanup_files(&home, false).expect("manager cleanup");
-        assert!(!cache.exists());
-        assert!(external.join("graph").exists());
-        symlink(&external, &cache).expect("manager symlink");
-        assert!(super::cleanup_files(&home, false).is_err());
-        assert!(external.join("graph").exists());
-    }
-
-    #[test]
     fn selected_removal_deletes_only_driver_settings_and_is_idempotent() {
         let home = FixtureDir::new("driver-uninstall-user-data").expect("fixture");
         let settings = home.join("Library/Application Support/io.mixrelay.driver");
         fs::create_dir_all(&settings).expect("settings directory");
         fs::write(settings.join("drivers.json"), b"devices").expect("driver settings");
-        fs::write(settings.join("drivers.json.stopped"), b"stopped").expect("stop marker");
         for name in [
             "graphs.json",
             "audio-session.json",
@@ -369,7 +269,6 @@ mod tests {
         }
         super::cleanup_files(&home, true).expect("cleanup");
         assert!(!settings.join("drivers.json").exists());
-        assert!(!settings.join("drivers.json.stopped").exists());
         for name in [
             "graphs.json",
             "audio-session.json",
@@ -390,15 +289,10 @@ mod tests {
         let settings = home.join("Library/Application Support/io.mixrelay.driver");
         fs::create_dir_all(&settings).expect("settings directory");
         fs::write(settings.join("drivers.json"), b"devices").expect("settings");
-        fs::write(settings.join("drivers.json.stopped"), b"stopped").expect("stop marker");
         super::cleanup_files(&home, false).expect("unchecked removal");
         assert_eq!(
             fs::read(settings.join("drivers.json")).expect("settings"),
             b"devices"
-        );
-        assert_eq!(
-            fs::read(settings.join("drivers.json.stopped")).expect("stop marker"),
-            b"stopped"
         );
     }
 

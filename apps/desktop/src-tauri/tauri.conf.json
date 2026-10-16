@@ -80,7 +80,6 @@
     "macOS": {
       "minimumSystemVersion": "14.2",
       "files": {
-        "Library/LaunchAgents/io.mixrelay.driver.runtime.plist": "../../../packaging/macos/io.mixrelay.driver.runtime.plist",
         "Resources/mixrelay-driver-launcher": "../../../target/universal-apple-darwin/release/mixrelay-driver-launcher"
       }
     }

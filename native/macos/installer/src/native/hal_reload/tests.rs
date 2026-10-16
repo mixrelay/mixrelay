@@ -298,6 +298,10 @@ impl TransactionFixture {
         let hal = owner.join("sources/hal");
         let driver = owner.join("sources/driver");
         let plist = owner.join("sources/launchd");
+        let remover = owner.join("sources/remover");
+        let removal_plist = owner.join("sources/removal-launchd");
+        let engine = owner.join("sources/engine");
+        let engine_plist = owner.join("sources/engine-launchd");
         for (path, bytes) in [
             (app.join("Contents/MacOS/mixrelay-desktop"), "new-app"),
             (app.join("Contents/Info.plist"), "app-info"),
@@ -305,6 +309,14 @@ impl TransactionFixture {
             (hal.join("Contents/Info.plist"), "hal-info"),
             (driver.clone(), "new-driver"),
             (plist.clone(), "new-plist"),
+            (
+                remover.join("Contents/MacOS/mixrelay-driver-uninstaller"),
+                "new-remover",
+            ),
+            (remover.join("Contents/Info.plist"), "remover-info"),
+            (removal_plist.clone(), "new-removal-plist"),
+            (engine.clone(), "new-engine"),
+            (engine_plist.clone(), "new-engine-plist"),
             (
                 layout
                     .target_path(crate::OwnedTarget::Hal)
@@ -316,8 +328,13 @@ impl TransactionFixture {
             fs::write(&path, bytes).unwrap();
             fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let request =
-            crate::TransactionRequest::install(crate::InstallSources::new(app, hal, driver, plist));
+        let request = crate::TransactionRequest::install(crate::InstallSources::new(
+            app,
+            hal,
+            (driver, plist),
+            (remover, removal_plist),
+            (engine, engine_plist),
+        ));
         let adapter = crate::FilesystemAdapter::new(layout);
         let snapshot = adapter.preflight(&request).unwrap();
         let staged = adapter.stage(&request, &snapshot).unwrap();

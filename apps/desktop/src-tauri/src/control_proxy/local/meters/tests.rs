@@ -64,14 +64,21 @@ impl TelemetryChunks for Body {
 
 /// One engine window, as the engine encodes it at the start of a stream.
 fn window(sequence: u64, peak: f32) -> ControlTelemetry {
-    serde_json::from_value(serde_json::json!({
-        "engineIncarnation": "engine",
-        "sequence": sequence,
-        "meters": {"protocolVersion": 1, "revision": 1, "nodes": [
-            {"nodeId": "n", "portId": "out", "peaks": [peak]}
-        ]}
-    }))
-    .unwrap()
+    ControlTelemetry {
+        engine_incarnation: "engine".into(),
+        sequence,
+        meters: mixrelay_control_protocol::MeterSnapshot {
+            protocol_version: 1,
+            revision: 1,
+            nodes: vec![mixrelay_control_protocol::NodeMeterSnapshot {
+                node_id: "n".into(),
+                port_id: "out".into(),
+                peaks: vec![peak],
+                dynamics: None,
+            }],
+        },
+        state: None,
+    }
 }
 
 /// One engine window as the bytes of a stream chunk.
@@ -112,11 +119,8 @@ async fn latest_state_survives_backpressure_and_is_replayed_to_a_late_editor() {
     let feed = engine.stream();
     let (hub, stop) = hub(&engine);
     let slow = hub.subscribe();
-    let mut packet: ControlTelemetry = serde_json::from_value(serde_json::json!({
-        "engineIncarnation":"engine", "sequence":1,
-        "meters":{"protocolVersion":1,"revision":1,"nodes":[]},
-    }))
-    .unwrap();
+    let mut packet = window(1, 0.0);
+    packet.meters.nodes.clear();
     for generation in 1..=4 {
         packet.sequence = generation;
         packet.state = Some(state(generation));

@@ -13,65 +13,59 @@ pub struct InstallSources {
     hal: PathBuf,
     driver: PathBuf,
     launchd: PathBuf,
-    remover: Option<(PathBuf, PathBuf)>,
-    runtime: Option<(PathBuf, PathBuf)>,
+    remover: PathBuf,
+    removal_launchd: PathBuf,
+    engine: PathBuf,
+    engine_launchd: PathBuf,
 }
 
 impl InstallSources {
-    /// Creates an install source set from four explicit prebuilt artifacts.
+    /// Creates the complete install source set.
+    ///
+    /// `driver`, `remover` and `runtime` each pair a prebuilt executable or app
+    /// bundle with the launchd definition source that starts it.
     #[must_use]
     pub fn new(
         app: impl Into<PathBuf>,
         hal: impl Into<PathBuf>,
-        driver: impl Into<PathBuf>,
-        launchd: impl Into<PathBuf>,
+        driver: (impl Into<PathBuf>, impl Into<PathBuf>),
+        remover: (impl Into<PathBuf>, impl Into<PathBuf>),
+        runtime: (impl Into<PathBuf>, impl Into<PathBuf>),
     ) -> Self {
         Self {
             app: app.into(),
             hal: hal.into(),
-            driver: driver.into(),
-            launchd: launchd.into(),
-            remover: None,
-            runtime: None,
+            driver: driver.0.into(),
+            launchd: driver.1.into(),
+            remover: remover.0.into(),
+            removal_launchd: remover.1.into(),
+            engine: runtime.0.into(),
+            engine_launchd: runtime.1.into(),
         }
     }
 
-    /// Adds the separately installed remover app and its on-demand helper plist.
+    /// Returns the audio engine source path.
     #[must_use]
-    pub fn with_remover(mut self, app: impl Into<PathBuf>, plist: impl Into<PathBuf>) -> Self {
-        self.remover = Some((app.into(), plist.into()));
-        self
-    }
-
-    /// Includes the audio engine and its fixed on-demand launch template.
-    #[must_use]
-    pub fn with_runtime(mut self, engine: impl Into<PathBuf>, plist: impl Into<PathBuf>) -> Self {
-        self.runtime = Some((engine.into(), plist.into()));
-        self
-    }
-
-    /// Returns the runtime engine, absent only in legacy fixture requests.
-    #[must_use]
-    pub fn runtime_engine(&self) -> Option<&Path> {
-        self.runtime.as_ref().map(|(engine, _)| engine.as_path())
+    pub fn runtime_engine(&self) -> &Path {
+        &self.engine
     }
 
     /// Returns the fixed runtime launch template.
     #[must_use]
-    pub fn runtime_launchd(&self) -> Option<&Path> {
-        self.runtime.as_ref().map(|(_, plist)| plist.as_path())
+    pub fn runtime_launchd(&self) -> &Path {
+        &self.engine_launchd
     }
 
-    /// Returns the optional remover app source (absent in legacy fixture requests).
+    /// Returns the remover app source path.
     #[must_use]
-    pub fn remover(&self) -> Option<&Path> {
-        self.remover.as_ref().map(|(app, _)| app.as_path())
+    pub fn remover(&self) -> &Path {
+        &self.remover
     }
 
-    /// Returns the optional fixed root helper definition source.
+    /// Returns the fixed root removal helper definition source.
     #[must_use]
-    pub fn removal_launchd(&self) -> Option<&Path> {
-        self.remover.as_ref().map(|(_, plist)| plist.as_path())
+    pub fn removal_launchd(&self) -> &Path {
+        &self.removal_launchd
     }
 
     /// Returns the application source path.
@@ -102,9 +96,9 @@ impl InstallSources {
 /// The single coordinated operation supported by the installer core.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TransactionRequest {
-    /// Replace the four exact owned targets using the validated sources.
+    /// Replace every exact owned target using the validated sources.
     Install(InstallSources),
-    /// Remove only the four exact owned targets and the launchd registration.
+    /// Remove only the exact owned targets and their launchd registrations.
     Remove,
 }
 

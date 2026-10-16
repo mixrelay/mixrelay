@@ -13,6 +13,10 @@ use objc2_foundation::{NSDate, NSRunLoop, NSString};
 use mixrelay_macos_installer::process_exit::{ProcessIdentity, wait_for_exit};
 
 use super::session::SessionApp;
+use mixrelay_macos_installer::APP_PATH;
+
+/// The bundle identifier shared by the editor and runtime roles.
+const APP_IDENTIFIER: &str = "io.mixrelay.desktop";
 
 pub(super) fn quit(app: SessionApp) -> Result<bool> {
     ensure!(
@@ -51,7 +55,7 @@ pub(super) fn quit(app: SessionApp) -> Result<bool> {
         );
         ensure!(
             app.matches_command(command.trim())
-                && path.is_some_and(|path| path.to_string() == app.bundle()),
+                && path.is_some_and(|path| path.to_string() == APP_PATH),
             "{role}: unexpected app process (pid {pid})"
         );
         targets.push((application, process));
@@ -106,7 +110,7 @@ pub(super) fn quit(app: SessionApp) -> Result<bool> {
 
 /// Time a normal Quit may take before the installer escalates to `SIGTERM`.
 const QUIT_GRACE: Duration = Duration::from_secs(100);
-/// The whole Quit budget, unchanged from the previous single wait.
+/// The whole Quit budget, including the `SIGTERM` escalation.
 const QUIT_BUDGET: Duration = Duration::from_secs(130);
 
 pub(super) fn restore(app: SessionApp) -> Result<()> {
@@ -114,55 +118,17 @@ pub(super) fn restore(app: SessionApp) -> Result<()> {
         unsafe { libc::geteuid() } != 0,
         "app actions require a normal user"
     );
-    let app = if matches!(
-        app,
-        SessionApp::Driver | SessionApp::Service | SessionApp::LegacyService
-    ) && !std::path::Path::new(SessionApp::Driver.bundle()).exists()
-    {
-        // Commit retired the split manager. Rollback restores it before reaching
-        // this branch, so it resumes the original role on the failure path.
-        SessionApp::UnifiedRuntime
-    } else if app == SessionApp::LegacyService {
-        // Successful ownership migration resumes audio in Driver; rollback retains its old owner.
-        let version = super::bundle_version(std::path::Path::new(SessionApp::Service.bundle()));
-        if version.is_ok_and(|version| {
-            mixrelay_macos_installer::optional_driver_install_needed("0.1.2", &[version], true)
-                .is_ok_and(|needed| !needed)
-        }) {
-            SessionApp::Service
-        } else {
-            app
-        }
-    } else {
-        app
-    };
-    if matches!(
-        app,
-        SessionApp::Graph
-            | SessionApp::Service
-            | SessionApp::LegacyService
-            | SessionApp::UnifiedRuntime
-    ) {
-        let mut command =
-            std::process::Command::new(format!("{}/Contents/MacOS/mixrelay-desktop", app.bundle()));
-        if matches!(app, SessionApp::Service | SessionApp::UnifiedRuntime) {
-            command.arg("--driver-runtime");
-        }
-        if app == SessionApp::LegacyService {
-            command.arg("--background-service");
-        }
-        command
-            .process_group(0)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-    } else {
-        let status = std::process::Command::new("/usr/bin/open")
-            .args(["-a", app.bundle()])
-            .status()?;
-        ensure!(status.success(), "could not restore app");
+    let mut command =
+        std::process::Command::new(format!("{APP_PATH}/Contents/MacOS/mixrelay-desktop"));
+    if app == SessionApp::UnifiedRuntime {
+        command.arg("--driver-runtime");
     }
+    command
+        .process_group(0)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
     // Accepting a launch request is not proof that the requested role launched.
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
@@ -172,7 +138,7 @@ pub(super) fn restore(app: SessionApp) -> Result<()> {
                 continue;
             }
             let path = application.bundleURL().and_then(|url| url.path());
-            if path.is_none_or(|path| path.to_string() != app.bundle()) {
+            if path.is_none_or(|path| path.to_string() != APP_PATH) {
                 continue;
             }
             let owner = std::process::Command::new("/bin/ps")
@@ -199,7 +165,7 @@ fn matching_applications(
     app: SessionApp,
 ) -> Result<Vec<objc2::rc::Retained<NSRunningApplication>>> {
     let applications = NSRunningApplication::runningApplicationsWithBundleIdentifier(
-        &NSString::from_str(app.identifier()),
+        &NSString::from_str(APP_IDENTIFIER),
     );
     let mut matching = Vec::new();
     for application in &applications {

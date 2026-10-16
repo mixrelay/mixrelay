@@ -12,10 +12,7 @@ use rustix::{
     io::Errno,
 };
 
-use crate::{
-    EditorLeaseGuard, LAUNCHD_PATH, LIFECYCLE_DIRECTORY, LeaseError, LifecycleDirectory,
-    LifecycleLeaseGuard, OwnedTarget,
-};
+use crate::{LAUNCHD_PATH, LIFECYCLE_DIRECTORY, LifecycleDirectory, OwnedTarget};
 
 use super::{
     NativeError, ResolvedServiceAccount,
@@ -27,10 +24,9 @@ const APP_DIRECTORY: &str = "/Library/Application Support/MixRelay";
 const ROOT_DIRECTORY_MODE: u16 = 0o755;
 const LEASE_FILE_MODE: u16 = 0o644;
 const APP_LEASE_NAME: &str = "app.owner";
-const DRIVER_MANAGER_LEASE_NAME: &str = "driver-manager.owner";
 const ENGINE_LEASE_NAME: &str = "engine.owner";
 const INSTALLER_LEASE_NAME: &str = "installer.owner";
-const USER_LEASE_NAMES: [&str; 3] = [APP_LEASE_NAME, ENGINE_LEASE_NAME, DRIVER_MANAGER_LEASE_NAME];
+const USER_LEASE_NAMES: [&str; 2] = [APP_LEASE_NAME, ENGINE_LEASE_NAME];
 const MAX_LAUNCHD_PLIST_BYTES: u64 = 16 * 1024;
 
 /// Refuses to perform any native privileged work unless already running as root.
@@ -67,74 +63,6 @@ fn root_wheel_identity(user_id: u32, group_id: u32, wheel_gid: u32) -> bool {
 /// # Errors
 /// Returns when ownership, mode, inode type, or fixed path validation fails.
 pub fn initialize_lifecycle_storage(account: &ResolvedServiceAccount) -> Result<(), NativeError> {
-    initialize_selected_lifecycle_storage(account, InitializationScope::Distribution)
-}
-
-/// Initializes shared leases for the app, retaining a running Driver manager.
-/// # Errors
-/// Returns when path ownership or the installation account is invalid.
-pub fn initialize_app_lifecycle_storage(
-    account: &ResolvedServiceAccount,
-) -> Result<(), NativeError> {
-    initialize_selected_lifecycle_storage(account, InitializationScope::AppRuntime)
-}
-
-/// Initializes editor installation leases while preserving Driver-owned audio.
-/// Existing same-account runtime owners may remain active. Account rebinding
-/// still requires every owner to stop and the complete distribution to be absent.
-/// # Errors
-/// Returns on unsafe storage, changed account, another installer or unsafe rebinding.
-pub fn initialize_editor_lifecycle_storage(
-    account: &ResolvedServiceAccount,
-) -> Result<(), NativeError> {
-    initialize_selected_lifecycle_storage(account, InitializationScope::Editor)
-}
-
-#[derive(Clone, Copy)]
-enum InitializationScope {
-    Distribution,
-    AppRuntime,
-    Editor,
-}
-
-struct InitializationGuard {
-    _runtime: Option<LifecycleLeaseGuard>,
-    _editor: Option<EditorLeaseGuard>,
-}
-
-fn acquire_initialization_guard(
-    directory: &LifecycleDirectory,
-    scope: InitializationScope,
-    previous: &[(u32, u32); 3],
-    owner: (u32, u32),
-) -> Result<InitializationGuard, LeaseError> {
-    let owner_changed = previous.iter().any(|current| *current != owner);
-    if owner_changed || matches!(scope, InitializationScope::Distribution) {
-        return directory.acquire().map(|guard| InitializationGuard {
-            _runtime: Some(guard),
-            _editor: None,
-        });
-    }
-    if matches!(scope, InitializationScope::Editor) {
-        return directory
-            .acquire_for_editor_update()
-            .map(|guard| InitializationGuard {
-                _runtime: None,
-                _editor: Some(guard),
-            });
-    }
-    directory
-        .acquire_for_app_update()
-        .map(|guard| InitializationGuard {
-            _runtime: Some(guard),
-            _editor: None,
-        })
-}
-
-fn initialize_selected_lifecycle_storage(
-    account: &ResolvedServiceAccount,
-    scope: InitializationScope,
-) -> Result<(), NativeError> {
     require_root()?;
     if &resolve_service_account(account.account())? != account {
         return Err(NativeError::Account(
@@ -165,12 +93,6 @@ fn initialize_selected_lifecycle_storage(
     let leases = [
         ensure_lease_file(&lifecycle, APP_LEASE_NAME, account.uid(), account.gid())?,
         ensure_lease_file(&lifecycle, ENGINE_LEASE_NAME, account.uid(), account.gid())?,
-        ensure_lease_file(
-            &lifecycle,
-            DRIVER_MANAGER_LEASE_NAME,
-            account.uid(),
-            account.gid(),
-        )?,
     ];
     ensure_lease_file(&lifecycle, INSTALLER_LEASE_NAME, 0, wheel.as_raw())?;
     validate_existing_lease(&lifecycle, INSTALLER_LEASE_NAME, 0, wheel.as_raw())?;
@@ -179,7 +101,7 @@ fn initialize_selected_lifecycle_storage(
     // serializes this ownership change with every install/remove transaction.
     let previous = inspect_user_lease_owners(&leases)?;
     let owner = (account.uid(), account.gid());
-    let _guard = acquire_initialization_guard(&directory, scope, &previous, owner)?;
+    let _guard = directory.acquire()?;
     if previous.iter().any(|current| *current != owner) {
         require_removed_distribution()?;
         rebind_user_leases(&leases, &previous, owner, change_lease_owner)?;
@@ -193,7 +115,7 @@ fn initialize_selected_lifecycle_storage(
     Ok(())
 }
 
-/// Revalidates the fixed lifecycle directory and all three no-replace lease inodes.
+/// Revalidates the fixed lifecycle directory and every no-replace lease inode.
 /// # Errors
 /// Returns when the fixed directory or any lease inode violates its ownership,
 /// link-count, type, or mode policy.
@@ -203,12 +125,6 @@ pub fn require_lifecycle_storage(account: &ResolvedServiceAccount) -> Result<(),
     validate_root_directory(Path::new(LIFECYCLE_DIRECTORY), &directory, Some(wheel))?;
     validate_existing_lease(&directory, APP_LEASE_NAME, account.uid(), account.gid())?;
     validate_existing_lease(&directory, ENGINE_LEASE_NAME, account.uid(), account.gid())?;
-    validate_existing_lease(
-        &directory,
-        DRIVER_MANAGER_LEASE_NAME,
-        account.uid(),
-        account.gid(),
-    )?;
     validate_existing_lease(&directory, INSTALLER_LEASE_NAME, 0, wheel.as_raw())?;
     Ok(())
 }
@@ -669,17 +585,16 @@ fn change_lease_owner(file: &File, owner: (u32, u32)) -> io::Result<()> {
     .map_err(io::Error::from)
 }
 
-fn inspect_user_lease_owners(leases: &[File; 3]) -> Result<[(u32, u32); 3], NativeError> {
+fn inspect_user_lease_owners(leases: &[File; 2]) -> Result<[(u32, u32); 2], NativeError> {
     Ok([
         inspect_lease_owner(&leases[0], USER_LEASE_NAMES[0])?,
         inspect_lease_owner(&leases[1], USER_LEASE_NAMES[1])?,
-        inspect_lease_owner(&leases[2], USER_LEASE_NAMES[2])?,
     ])
 }
 
 fn rebind_user_leases(
-    leases: &[File; 3],
-    previous: &[(u32, u32); 3],
+    leases: &[File; 2],
+    previous: &[(u32, u32); 2],
     owner: (u32, u32),
     mut change_owner: impl FnMut(&File, (u32, u32)) -> io::Result<()>,
 ) -> Result<(), NativeError> {
@@ -711,8 +626,8 @@ fn rebind_user_leases(
 }
 
 fn restore_lease_owners(
-    leases: &[File; 3],
-    previous: &[(u32, u32); 3],
+    leases: &[File; 2],
+    previous: &[(u32, u32); 2],
     owner: (u32, u32),
     failed_index: usize,
     change_owner: &mut impl FnMut(&File, (u32, u32)) -> io::Result<()>,
@@ -812,7 +727,7 @@ mod tests {
 
     use mixrelay_test_support::FixtureDir;
 
-    fn lease_fixture(label: &str) -> (FixtureDir, [File; 3]) {
+    fn lease_fixture(label: &str) -> (FixtureDir, [File; 2]) {
         let root = FixtureDir::new(label).expect("lease fixture");
         for name in super::USER_LEASE_NAMES
             .into_iter()
@@ -829,11 +744,7 @@ mod tests {
                 .open(root.join(name))
                 .expect("fixture descriptor")
         };
-        let leases = [
-            open("app.owner"),
-            open("engine.owner"),
-            open("driver-manager.owner"),
-        ];
+        let leases = [open("app.owner"), open("engine.owner")];
         (root, leases)
     }
 
@@ -858,7 +769,7 @@ mod tests {
             Ok(())
         })
         .expect("simulated account rebind");
-        assert_eq!(changes, [selected; 3]);
+        assert_eq!(changes, [selected; 2]);
         for (index, file) in leases.iter().enumerate() {
             let after = file.metadata().expect("after metadata");
             assert_eq!(
@@ -887,100 +798,6 @@ mod tests {
             panic!("unchanged ownership must not invoke fchown")
         })
         .expect("same account");
-    }
-
-    #[test]
-    fn editor_initialization_retains_running_driver_runtime_engine_and_manager() {
-        let (root, leases) = lease_fixture("editor-init-live-runtime");
-        let directory = crate::LifecycleDirectory::open(root.path()).expect("directory");
-        for lease in &leases {
-            lease.try_lock().expect("runtime owner");
-        }
-        let previous = super::inspect_user_lease_owners(&leases).expect("owners");
-        let metadata = leases.each_ref().map(|lease| lease.metadata().unwrap());
-        let guard = super::acquire_initialization_guard(
-            &directory,
-            super::InitializationScope::Editor,
-            &previous,
-            previous[0],
-        )
-        .expect("same-account editor initialization preserves audio owners");
-        for (index, lease) in leases.iter().enumerate() {
-            let after = lease.metadata().unwrap();
-            assert_eq!(
-                (
-                    after.dev(),
-                    after.ino(),
-                    after.uid(),
-                    after.gid(),
-                    after.mode()
-                ),
-                (
-                    metadata[index].dev(),
-                    metadata[index].ino(),
-                    metadata[index].uid(),
-                    metadata[index].gid(),
-                    metadata[index].mode()
-                )
-            );
-            let contender = File::open(root.join(super::USER_LEASE_NAMES[index])).unwrap();
-            assert!(matches!(
-                contender.try_lock_shared(),
-                Err(fs::TryLockError::WouldBlock)
-            ));
-        }
-        assert!(matches!(
-            directory.acquire_for_editor_update(),
-            Err(crate::LeaseError::Busy {
-                kind: crate::LeaseKind::Installer
-            })
-        ));
-        drop(guard);
-        drop(directory.acquire_for_editor_update().unwrap());
-    }
-
-    #[test]
-    fn editor_initialization_cannot_rebind_any_active_owner_to_another_account() {
-        for name in super::USER_LEASE_NAMES {
-            let (root, leases) = lease_fixture("editor-init-owner-change");
-            let owner = File::options()
-                .read(true)
-                .write(true)
-                .open(root.join(name))
-                .unwrap();
-            owner.try_lock().expect("runtime owner");
-            let previous = super::inspect_user_lease_owners(&leases).unwrap();
-            let directory = crate::LifecycleDirectory::open(root.path()).unwrap();
-            let result = super::acquire_initialization_guard(
-                &directory,
-                super::InitializationScope::Editor,
-                &previous,
-                (previous[0].0 + 1, previous[0].1),
-            );
-            assert!(matches!(result, Err(crate::LeaseError::Busy { .. })));
-            assert_eq!(super::inspect_user_lease_owners(&leases).unwrap(), previous);
-        }
-    }
-
-    #[test]
-    fn editor_initialization_rejects_an_active_installer_without_changing_owners() {
-        let (root, leases) = lease_fixture("editor-init-installer-busy");
-        let directory = crate::LifecycleDirectory::open(root.path()).unwrap();
-        let installer = directory.acquire_for_editor_update().unwrap();
-        let previous = super::inspect_user_lease_owners(&leases).unwrap();
-        assert!(matches!(
-            super::acquire_initialization_guard(
-                &directory,
-                super::InitializationScope::Editor,
-                &previous,
-                previous[0]
-            ),
-            Err(crate::LeaseError::Busy {
-                kind: crate::LeaseKind::Installer
-            })
-        ));
-        assert_eq!(super::inspect_user_lease_owners(&leases).unwrap(), previous);
-        drop(installer);
     }
 
     #[test]
@@ -1051,17 +868,14 @@ mod tests {
         let mut changes = Vec::new();
         let result = super::rebind_user_leases(&leases, &previous, selected, |_, owner| {
             changes.push(owner);
-            if changes.len() == 3 {
+            if changes.len() == 2 {
                 Err(io::Error::other("fixture chown failed"))
             } else {
                 Ok(())
             }
         });
         assert!(result.is_err());
-        assert_eq!(
-            changes,
-            [selected, selected, selected, previous[1], previous[0]]
-        );
+        assert_eq!(changes, [selected, selected, previous[0]]);
     }
 
     #[test]
@@ -1072,14 +886,14 @@ mod tests {
         let mut calls = 0;
         let error = super::rebind_user_leases(&leases, &previous, selected, |_, _| {
             calls += 1;
-            if calls >= 3 {
+            if calls >= 2 {
                 Err(io::Error::other("fixture owner change failure"))
             } else {
                 Ok(())
             }
         })
         .expect_err("failed change and restoration");
-        assert_eq!(calls, 5);
+        assert_eq!(calls, 3);
         let detail = error.to_string();
         for name in super::USER_LEASE_NAMES {
             assert!(

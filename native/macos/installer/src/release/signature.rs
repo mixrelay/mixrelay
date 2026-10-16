@@ -73,14 +73,52 @@ fn run_checked(
         thread,
         time::{Duration, Instant},
     };
+    let mut owner = ChildOwner(command.spawn().map_err(|source| ReleaseError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?);
+    let deadline = Instant::now() + timeout;
+    wait_checked(
+        &mut owner.0,
+        path,
+        || Instant::now() >= deadline,
+        || thread::sleep(Duration::from_millis(10)),
+    )
+}
+
+/// The parts of a spawned verifier that [`wait_checked`] drives.
+#[cfg(target_os = "macos")]
+trait VerifierProcess {
+    fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>>;
+    fn kill_and_reap(&mut self) -> std::io::Result<()>;
+}
+
+#[cfg(target_os = "macos")]
+impl VerifierProcess for std::process::Child {
+    fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+        std::process::Child::try_wait(self)
+    }
+    fn kill_and_reap(&mut self) -> std::io::Result<()> {
+        self.kill()?;
+        self.wait().map(|_| ())
+    }
+}
+
+/// Polls the verifier until it exits, or kills and reaps it once `expired` reports the
+/// deadline, calling `pause` between polls.
+#[cfg(target_os = "macos")]
+fn wait_checked(
+    process: &mut impl VerifierProcess,
+    path: &Path,
+    mut expired: impl FnMut() -> bool,
+    mut pause: impl FnMut(),
+) -> Result<(), ReleaseError> {
     let io_error = |source| ReleaseError::Io {
         path: path.to_path_buf(),
         source,
     };
-    let mut owner = ChildOwner(command.spawn().map_err(io_error)?);
-    let deadline = Instant::now() + timeout;
     loop {
-        if let Some(status) = owner.0.try_wait().map_err(io_error)? {
+        if let Some(status) = process.try_wait().map_err(io_error)? {
             return if status.success() {
                 Ok(())
             } else {
@@ -90,12 +128,11 @@ fn run_checked(
                 })
             };
         }
-        if Instant::now() >= deadline {
-            owner.0.kill().map_err(io_error)?;
-            owner.0.wait().map_err(io_error)?;
+        if expired() {
+            process.kill_and_reap().map_err(io_error)?;
             return Err(ReleaseError::Timeout(path.to_path_buf()));
         }
-        thread::sleep(Duration::from_millis(10));
+        pause();
     }
 }
 
@@ -117,7 +154,44 @@ impl Drop for ChildOwner {
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
-    use std::{process::Command, time::Duration};
+    use std::{os::unix::process::ExitStatusExt, process::ExitStatus};
+
+    /// A verifier that exits with `status` after `running` polls, if ever.
+    struct FakeProcess {
+        running: Option<usize>,
+        status: ExitStatus,
+        killed: bool,
+    }
+
+    impl VerifierProcess for FakeProcess {
+        fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
+            Ok(match &mut self.running {
+                Some(0) => Some(self.status),
+                Some(remaining) => {
+                    *remaining -= 1;
+                    None
+                }
+                None => None,
+            })
+        }
+        fn kill_and_reap(&mut self) -> std::io::Result<()> {
+            self.killed = true;
+            Ok(())
+        }
+    }
+
+    fn wait(process: &mut FakeProcess, deadline_after: usize) -> Result<(), ReleaseError> {
+        let mut polls = 0;
+        wait_checked(
+            process,
+            Path::new("verifier"),
+            || {
+                polls += 1;
+                polls > deadline_after
+            },
+            || {},
+        )
+    }
 
     #[test]
     fn requirement_is_compiled_as_source_not_interpreted_as_a_path() {
@@ -125,28 +199,29 @@ mod tests {
     }
 
     #[test]
-    fn native_child_success_failure_and_deadline_are_distinct() {
-        run_checked(
-            &mut Command::new("/usr/bin/true"),
-            Path::new("success"),
-            Duration::from_secs(1),
-        )
-        .unwrap();
+    fn verifier_success_failure_and_deadline_are_distinct() {
+        let mut success = FakeProcess {
+            running: Some(2),
+            status: ExitStatus::from_raw(0),
+            killed: false,
+        };
+        wait(&mut success, 5).unwrap();
+        assert!(!success.killed);
+        let mut failure = FakeProcess {
+            running: Some(0),
+            status: ExitStatus::from_raw(1 << 8),
+            killed: false,
+        };
         assert!(matches!(
-            run_checked(
-                &mut Command::new("/usr/bin/false"),
-                Path::new("failure"),
-                Duration::from_secs(1)
-            ),
+            wait(&mut failure, 5),
             Err(ReleaseError::Signature { .. })
         ));
-        assert!(matches!(
-            run_checked(
-                Command::new("/bin/sleep").arg("60"),
-                Path::new("timeout"),
-                Duration::from_millis(30)
-            ),
-            Err(ReleaseError::Timeout(_))
-        ));
+        let mut hung = FakeProcess {
+            running: None,
+            status: ExitStatus::from_raw(0),
+            killed: false,
+        };
+        assert!(matches!(wait(&mut hung, 3), Err(ReleaseError::Timeout(_))));
+        assert!(hung.killed);
     }
 }

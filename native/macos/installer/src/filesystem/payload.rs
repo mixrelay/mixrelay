@@ -90,11 +90,7 @@ pub(super) fn metadata(path: &Path, kind: &'static str) -> Result<Metadata, File
 
 pub(super) fn target_kind(target: OwnedTarget) -> TargetKind {
     match target {
-        OwnedTarget::App
-        | OwnedTarget::Hal
-        | OwnedTarget::Uninstaller
-        | OwnedTarget::LegacyManager
-        | OwnedTarget::LegacyUninstaller => TargetKind::Directory,
+        OwnedTarget::App | OwnedTarget::Hal | OwnedTarget::Uninstaller => TargetKind::Directory,
         OwnedTarget::Driver
         | OwnedTarget::Launchd
         | OwnedTarget::RemovalLaunchd
@@ -113,8 +109,6 @@ pub(super) fn target_name(target: OwnedTarget) -> &'static str {
         OwnedTarget::RemovalLaunchd => REMOVAL_LAUNCHD_PAYLOAD_NAME,
         OwnedTarget::RuntimeEngine => RUNTIME_ENGINE_PAYLOAD_NAME,
         OwnedTarget::RuntimeLaunchd => RUNTIME_LAUNCHD_PAYLOAD_NAME,
-        OwnedTarget::LegacyManager => "legacy-manager",
-        OwnedTarget::LegacyUninstaller => "legacy-uninstaller",
     }
 }
 

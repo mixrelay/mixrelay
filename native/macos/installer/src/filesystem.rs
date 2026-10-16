@@ -389,20 +389,6 @@ impl FilesystemAdapter {
             staged,
         };
         for target in OwnedTarget::all() {
-            if matches!(
-                target,
-                OwnedTarget::Uninstaller | OwnedTarget::RemovalLaunchd
-            ) && matches!(request, TransactionRequest::Install(sources) if sources.remover().is_none())
-            {
-                continue;
-            }
-            if matches!(
-                target,
-                OwnedTarget::RuntimeEngine | OwnedTarget::RuntimeLaunchd
-            ) && matches!(request, TransactionRequest::Install(sources) if sources.runtime_engine().is_none())
-            {
-                continue;
-            }
             if let Err(error) = self.commit_target(&context, target, &mut progress) {
                 progress.state = FilesystemStageState::CommitFailed;
                 return Err(error);
@@ -527,7 +513,7 @@ impl FilesystemAdapter {
         }
     }
 
-    fn observe_targets(&self) -> Result<[TargetSnapshot; 10], FilesystemError> {
+    fn observe_targets(&self) -> Result<[TargetSnapshot; 8], FilesystemError> {
         let targets = OwnedTarget::all();
         Ok([
             self.observe_target(targets[0])?,
@@ -538,8 +524,6 @@ impl FilesystemAdapter {
             self.observe_target(targets[5])?,
             self.observe_target(targets[6])?,
             self.observe_target(targets[7])?,
-            self.observe_target(targets[8])?,
-            self.observe_target(targets[9])?,
         ])
     }
 
@@ -607,20 +591,32 @@ impl FilesystemAdapter {
     }
 
     fn validate_sources(&self, sources: &crate::InstallSources) -> Result<(), FilesystemError> {
-        let mut paths = vec![
+        let paths = [
             ("app", sources.app(), TargetKind::Directory),
             ("hal", sources.hal(), TargetKind::Directory),
             ("driver", sources.driver(), TargetKind::File),
             ("launchd", sources.launchd(), TargetKind::File),
+            (
+                UNINSTALLER_PAYLOAD_NAME,
+                sources.remover(),
+                TargetKind::Directory,
+            ),
+            (
+                REMOVAL_LAUNCHD_PAYLOAD_NAME,
+                sources.removal_launchd(),
+                TargetKind::File,
+            ),
+            (
+                RUNTIME_ENGINE_PAYLOAD_NAME,
+                sources.runtime_engine(),
+                TargetKind::File,
+            ),
+            (
+                RUNTIME_LAUNCHD_PAYLOAD_NAME,
+                sources.runtime_launchd(),
+                TargetKind::File,
+            ),
         ];
-        if let (Some(app), Some(plist)) = (sources.remover(), sources.removal_launchd()) {
-            paths.push((UNINSTALLER_PAYLOAD_NAME, app, TargetKind::Directory));
-            paths.push((REMOVAL_LAUNCHD_PAYLOAD_NAME, plist, TargetKind::File));
-        }
-        if let (Some(engine), Some(plist)) = (sources.runtime_engine(), sources.runtime_launchd()) {
-            paths.push((RUNTIME_ENGINE_PAYLOAD_NAME, engine, TargetKind::File));
-            paths.push((RUNTIME_LAUNCHD_PAYLOAD_NAME, plist, TargetKind::File));
-        }
         for (index, (_, path, _)) in paths.iter().enumerate() {
             for (_, other, _) in paths.iter().skip(index + 1) {
                 if is_within(path, other) || is_within(other, path) {
@@ -677,35 +673,31 @@ impl FilesystemAdapter {
         create_directory(&payload_root)?;
         create_directory(&backup_root)?;
         if let TransactionRequest::Install(sources) = request {
-            if let (Some(engine), Some(plist)) =
-                (sources.runtime_engine(), sources.runtime_launchd())
-            {
-                copy_tree(engine, &payload_root.join(RUNTIME_ENGINE_PAYLOAD_NAME))?;
-                copy_tree(plist, &payload_root.join(RUNTIME_LAUNCHD_PAYLOAD_NAME))?;
-                fs::set_permissions(
-                    payload_root.join(RUNTIME_ENGINE_PAYLOAD_NAME),
-                    fs::Permissions::from_mode(0o755),
-                )
-                .map_err(|error| io_failure("set runtime engine mode", engine, error))?;
-                fs::set_permissions(
-                    payload_root.join(RUNTIME_LAUNCHD_PAYLOAD_NAME),
-                    fs::Permissions::from_mode(0o644),
-                )
-                .map_err(|error| io_failure("set runtime launchd mode", plist, error))?;
-            }
+            let (engine, plist) = (sources.runtime_engine(), sources.runtime_launchd());
+            copy_tree(engine, &payload_root.join(RUNTIME_ENGINE_PAYLOAD_NAME))?;
+            copy_tree(plist, &payload_root.join(RUNTIME_LAUNCHD_PAYLOAD_NAME))?;
+            fs::set_permissions(
+                payload_root.join(RUNTIME_ENGINE_PAYLOAD_NAME),
+                fs::Permissions::from_mode(0o755),
+            )
+            .map_err(|error| io_failure("set runtime engine mode", engine, error))?;
+            fs::set_permissions(
+                payload_root.join(RUNTIME_LAUNCHD_PAYLOAD_NAME),
+                fs::Permissions::from_mode(0o644),
+            )
+            .map_err(|error| io_failure("set runtime launchd mode", plist, error))?;
             copy_tree(sources.app(), &payload_root.join(APP_PAYLOAD_NAME))?;
             copy_tree(sources.driver(), &payload_root.join(DRIVER_PAYLOAD_NAME))?;
             copy_tree(sources.hal(), &payload_root.join(HAL_PAYLOAD_NAME))?;
             copy_tree(sources.launchd(), &payload_root.join(LAUNCHD_PAYLOAD_NAME))?;
-            if let (Some(app), Some(plist)) = (sources.remover(), sources.removal_launchd()) {
-                copy_tree(app, &payload_root.join(UNINSTALLER_PAYLOAD_NAME))?;
-                copy_tree(plist, &payload_root.join(REMOVAL_LAUNCHD_PAYLOAD_NAME))?;
-                fs::set_permissions(
-                    payload_root.join(REMOVAL_LAUNCHD_PAYLOAD_NAME),
-                    std::os::unix::fs::PermissionsExt::from_mode(0o644),
-                )
-                .map_err(|error| io_failure("set removal launchd permissions", plist, error))?;
-            }
+            let (app, plist) = (sources.remover(), sources.removal_launchd());
+            copy_tree(app, &payload_root.join(UNINSTALLER_PAYLOAD_NAME))?;
+            copy_tree(plist, &payload_root.join(REMOVAL_LAUNCHD_PAYLOAD_NAME))?;
+            fs::set_permissions(
+                payload_root.join(REMOVAL_LAUNCHD_PAYLOAD_NAME),
+                std::os::unix::fs::PermissionsExt::from_mode(0o644),
+            )
+            .map_err(|error| io_failure("set removal launchd permissions", plist, error))?;
             // Launch configuration is data even when its source had executable bits.
             fs::set_permissions(
                 payload_root.join(LAUNCHD_PAYLOAD_NAME),
@@ -743,7 +735,7 @@ impl FilesystemAdapter {
             rename_path(&destination, &backup)?;
             progress.backed_up.push(target);
         }
-        if context.request.kind() == crate::OperationKind::Install && !target.retired() {
+        if context.request.kind() == crate::OperationKind::Install {
             let payload = context.staged.payload_path(target);
             validate_staged_payload(target, &payload)?;
             let payload_fingerprint = fingerprint(&metadata(&payload, "staged payload")?);
@@ -842,7 +834,7 @@ impl FilesystemAdapter {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FilesystemSnapshot {
     layout: FilesystemLayout,
-    targets: [TargetSnapshot; 10],
+    targets: [TargetSnapshot; 8],
 }
 
 impl FilesystemSnapshot {

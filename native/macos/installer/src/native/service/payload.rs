@@ -66,9 +66,9 @@ impl NativeServiceLifecycle {
             self.verifier.verify_for_removal(layout)?;
             return Ok(None);
         }
-        // Verify every present target separately, including legacy bundles. A
-        // split install or missing component may be repaired, but foreign code
-        // never becomes ours merely because it occupies an expected path.
+        // Verify every present target separately. A missing component may be
+        // repaired, but foreign code never becomes ours merely because it
+        // occupies an expected path.
         self.verifier
             .verify_for_removal(layout)
             .map_err(NativeError::from)

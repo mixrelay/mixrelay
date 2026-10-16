@@ -13,8 +13,12 @@ struct Fixture {
     root: PathBuf,
     app: PathBuf,
     hal: PathBuf,
-    engine: PathBuf,
+    driver: PathBuf,
     launchd: PathBuf,
+    remover: PathBuf,
+    removal_launchd: PathBuf,
+    runtime_engine: PathBuf,
+    runtime_launchd: PathBuf,
     user_data: PathBuf,
 }
 
@@ -31,8 +35,12 @@ impl Fixture {
             _root: root_owner,
             app: root.join("sources/MixRelay.app"),
             hal: root.join("sources/MixRelayHAL.driver"),
-            engine: root.join("sources/mixrelay-driver-service"),
+            driver: root.join("sources/mixrelay-driver-service"),
             launchd: root.join("sources/io.mixrelay.audio.driver.plist"),
+            remover: root.join("sources/Uninstall MixRelay.app"),
+            removal_launchd: root.join("sources/io.mixrelay.driver.removal.plist"),
+            runtime_engine: root.join("sources/mixrelay-engine-service"),
+            runtime_launchd: root.join("sources/io.mixrelay.audio.engine.plist"),
             user_data: user_data.join("graphs.json"),
             root,
         };
@@ -52,8 +60,18 @@ impl Fixture {
             .expect("empty app directory creates");
         fs::create_dir_all(self.hal.join("Contents/Resources/empty"))
             .expect("empty HAL directory creates");
-        write_executable(&self.engine, "new-engine");
+        write_executable(&self.driver, "new-engine");
         write_file(&self.launchd, "new-launchd");
+        write_executable(
+            &self
+                .remover
+                .join("Contents/MacOS/mixrelay-driver-uninstaller"),
+            "new-remover",
+        );
+        write_file(&self.remover.join("Contents/Info.plist"), "remover-info");
+        write_file(&self.removal_launchd, "new-helper-plist");
+        write_executable(&self.runtime_engine, "new-runtime");
+        write_file(&self.runtime_launchd, "new-runtime-definition");
     }
 
     fn create_user_data(&self) {
@@ -64,8 +82,9 @@ impl Fixture {
         TransactionRequest::install(InstallSources::new(
             self.app.clone(),
             self.hal.clone(),
-            self.engine.clone(),
-            self.launchd.clone(),
+            (self.driver.clone(), self.launchd.clone()),
+            (self.remover.clone(), self.removal_launchd.clone()),
+            (self.runtime_engine.clone(), self.runtime_launchd.clone()),
         ))
     }
 
@@ -146,7 +165,7 @@ fn preflight_and_stage_do_not_mutate_destinations_or_user_data() {
 fn staging_normalizes_permissions_without_inheriting_privileged_or_writable_modes() {
     let fixture = Fixture::new();
     fs::set_permissions(&fixture.app, fs::Permissions::from_mode(0o777)).unwrap();
-    fs::set_permissions(&fixture.engine, fs::Permissions::from_mode(0o6755)).unwrap();
+    fs::set_permissions(&fixture.driver, fs::Permissions::from_mode(0o6755)).unwrap();
     fs::set_permissions(&fixture.launchd, fs::Permissions::from_mode(0o777)).unwrap();
     fs::set_permissions(
         fixture.app.join("Contents/Info.plist"),
@@ -174,7 +193,7 @@ fn staging_normalizes_permissions_without_inheriting_privileged_or_writable_mode
         );
     }
     assert_eq!(
-        fs::metadata(&fixture.engine).unwrap().permissions().mode() & 0o7777,
+        fs::metadata(&fixture.driver).unwrap().permissions().mode() & 0o7777,
         0o6755
     );
     adapter.cleanup(&staged).unwrap();
@@ -196,11 +215,11 @@ fn direct_copy_rejects_special_files_and_does_not_overwrite_an_existing_inode() 
     assert!(super::payload::copy_regular_file(&fifo, &destination).is_err());
     assert!(!destination.exists());
     let alias = fixture.root.join("alias");
-    symlink(&fixture.engine, &alias).unwrap();
+    symlink(&fixture.driver, &alias).unwrap();
     assert!(super::payload::copy_regular_file(&alias, &destination).is_err());
     assert!(!destination.exists());
     fs::write(&destination, b"keep-existing").unwrap();
-    assert!(copy_tree(&fixture.engine, &destination).is_err());
+    assert!(copy_tree(&fixture.driver, &destination).is_err());
     assert_eq!(fs::read(&destination).unwrap(), b"keep-existing");
 }
 
@@ -334,7 +353,7 @@ fn remove_commit_and_rollback_never_touch_user_data() {
 
 #[test]
 fn removal_succeeds_for_every_partial_target_set_and_on_repeat() {
-    for mask in 0u16..1024 {
+    for mask in 0u16..(1 << OwnedTarget::all().len()) {
         let fixture = Fixture::new();
         for (index, target) in OwnedTarget::all().into_iter().enumerate() {
             if mask & (1 << index) != 0 {
@@ -508,14 +527,28 @@ fn created_parent_replacement_is_retained_until_identity_is_restored() {
         .commit(&request, &snapshot, &staged)
         .expect("commit succeeds");
 
-    let launchd = fixture.destination(OwnedTarget::Launchd);
-    let launchd_parent = launchd.parent().expect("launchd has parent").to_path_buf();
-    let moved_launchd = fixture.root.join("launchd-outside-parent");
+    // Every launchd definition shares this created parent; move all of them so
+    // only the parent's identity differs.
+    let definitions = [
+        OwnedTarget::Launchd,
+        OwnedTarget::RemovalLaunchd,
+        OwnedTarget::RuntimeLaunchd,
+    ]
+    .map(|target| fixture.destination(target));
+    let launchd_parent = definitions[0]
+        .parent()
+        .expect("launchd has parent")
+        .to_path_buf();
     let moved_parent = fixture.root.join("launchd-parent-outside-target");
-    fs::rename(&launchd, &moved_launchd).expect("launchd moves");
+    let outside = |index: usize| fixture.root.join(format!("launchd-outside-parent-{index}"));
+    for (index, definition) in definitions.iter().enumerate() {
+        fs::rename(definition, outside(index)).expect("definition moves");
+    }
     fs::rename(&launchd_parent, &moved_parent).expect("created parent moves");
     fs::create_dir(&launchd_parent).expect("replacement parent creates");
-    fs::rename(&moved_launchd, &launchd).expect("launchd returns to replacement parent");
+    for (index, definition) in definitions.iter().enumerate() {
+        fs::rename(outside(index), definition).expect("definition returns to replacement parent");
+    }
 
     let failure = adapter
         .rollback(&request, &snapshot, &staged, Some(&committed))
@@ -525,7 +558,7 @@ fn created_parent_replacement_is_retained_until_identity_is_restored() {
         FilesystemError::CreatedDirectoryChanged { .. }
     ));
     assert!(failure.diagnostics().staging_root().is_dir());
-    assert!(!launchd.exists());
+    assert!(definitions.iter().all(|definition| !definition.exists()));
 
     fs::remove_dir(&launchd_parent).expect("replacement parent removes");
     fs::rename(&moved_parent, &launchd_parent).expect("original parent identity restores");
@@ -613,26 +646,10 @@ fn install_request_shape_remains_explicit() {
 }
 
 #[test]
-fn legacy_upgrade_adds_removal_app_and_helper_as_one_recoverable_payload_set() {
+fn removal_app_and_helper_are_added_and_restored_as_one_payload_set() {
     let fixture = Fixture::new();
     fixture.create_old_targets();
-    let remover = fixture.root.join("sources/Uninstall.app");
-    let helper_plist = fixture.root.join("sources/removal.plist");
-    write_executable(
-        &remover.join("Contents/MacOS/mixrelay-driver-uninstaller"),
-        "new-remover",
-    );
-    write_file(&remover.join("Contents/Info.plist"), "remover-info");
-    write_file(&helper_plist, "new-helper-plist");
-    let request = TransactionRequest::install(
-        InstallSources::new(
-            &fixture.app,
-            &fixture.hal,
-            &fixture.engine,
-            &fixture.launchd,
-        )
-        .with_remover(&remover, &helper_plist),
-    );
+    let request = fixture.sources();
     let adapter = fixture.adapter();
     let snapshot = adapter.preflight(&request).unwrap();
     let staged = adapter.stage(&request, &snapshot).unwrap();
@@ -664,10 +681,6 @@ fn legacy_upgrade_adds_removal_app_and_helper_as_one_recoverable_payload_set() {
 #[test]
 fn driver_runtime_is_committed_restored_and_removed_with_its_payload() {
     let fixture = Fixture::new();
-    let engine = fixture.root.join("sources/audio-engine");
-    let plist = fixture.root.join("sources/audio-engine.plist");
-    write_executable(&engine, "new-runtime");
-    write_file(&plist, "new-runtime-definition");
     write_executable(
         &fixture.destination(OwnedTarget::RuntimeEngine),
         "old-runtime",
@@ -676,15 +689,7 @@ fn driver_runtime_is_committed_restored_and_removed_with_its_payload() {
         &fixture.destination(OwnedTarget::RuntimeLaunchd),
         "old-runtime-definition",
     );
-    let request = TransactionRequest::install(
-        InstallSources::new(
-            &fixture.app,
-            &fixture.hal,
-            &fixture.engine,
-            &fixture.launchd,
-        )
-        .with_runtime(&engine, &plist),
-    );
+    let request = fixture.sources();
     let adapter = fixture.adapter();
     let snapshot = adapter.preflight(&request).unwrap();
     let staged = adapter.stage(&request, &snapshot).unwrap();
@@ -713,52 +718,4 @@ fn driver_runtime_is_committed_restored_and_removed_with_its_payload() {
     assert!(!fixture.destination(OwnedTarget::RuntimeEngine).exists());
     assert!(!fixture.destination(OwnedTarget::RuntimeLaunchd).exists());
     assert_eq!(read(&fixture.user_data), "keep-this-data");
-}
-
-#[test]
-fn unified_install_retires_split_apps_and_rollback_restores_them_with_data() {
-    let fixture = Fixture::new();
-    fixture.create_old_targets();
-    for target in [OwnedTarget::LegacyManager, OwnedTarget::LegacyUninstaller] {
-        write_file(
-            &fixture.destination(target).join("Contents/old.txt"),
-            "legacy",
-        );
-    }
-    let data = [
-        "devices.json",
-        "graphs.json",
-        "settings.json",
-        "recording.wav",
-        "auth.json",
-    ];
-    for name in data {
-        write_file(&fixture.root.join(name), "retain");
-    }
-    let adapter = fixture.adapter();
-    let request = fixture.sources();
-    let snapshot = adapter.preflight(&request).unwrap();
-    let staged = adapter.stage(&request, &snapshot).unwrap();
-    let committed = adapter.commit(&request, &snapshot, &staged).unwrap();
-    assert!(fixture.destination(OwnedTarget::App).exists());
-    for target in [OwnedTarget::LegacyManager, OwnedTarget::LegacyUninstaller] {
-        assert!(!fixture.destination(target).exists());
-        assert!(committed.backed_up_targets().contains(&target));
-    }
-    for name in data {
-        assert_eq!(read(&fixture.root.join(name)), "retain");
-    }
-    adapter
-        .rollback(&request, &snapshot, &staged, Some(&committed))
-        .unwrap();
-    for target in [OwnedTarget::LegacyManager, OwnedTarget::LegacyUninstaller] {
-        assert_eq!(
-            read(&fixture.destination(target).join("Contents/old.txt")),
-            "legacy"
-        );
-    }
-    for name in data {
-        assert_eq!(read(&fixture.root.join(name)), "retain");
-    }
-    adapter.cleanup(&staged).unwrap();
 }

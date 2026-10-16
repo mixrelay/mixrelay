@@ -39,15 +39,6 @@ fn build_macos_audio(identity: &str) {
     println!("cargo:rustc-link-lib=framework=CoreAudio");
     println!("cargo:rustc-link-lib=framework=AppKit");
     println!("cargo:rustc-link-lib=framework=Foundation");
-    println!("cargo:rustc-link-lib=framework=ServiceManagement");
-    cc::Build::new()
-        .file("native/MRBackgroundAgent.m")
-        .flag("-fobjc-arc")
-        .flag("-Wall")
-        .flag("-Wextra")
-        .flag("-Werror")
-        .compile("mixrelay_background_agent");
-    println!("cargo:rerun-if-changed=native/MRBackgroundAgent.m");
     // `tauri dev` launches the bare Mach-O instead of an application bundle. Embed the
     // privacy usage description and stable bundle identity in that executable as well, so
     // Core Audio process-tap permission is attributed and prompted exactly like the bundled app.

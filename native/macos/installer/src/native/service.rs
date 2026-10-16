@@ -22,7 +22,7 @@ mod runtime;
 use payload::{installed_hal_version, read_bounded_file};
 use runtime::{
     activate_driver, activate_restored_driver, capture_service_process, wait_for_driver_ready,
-    wait_for_restored_driver_ready, wait_for_service_exit,
+    wait_for_service_exit,
 };
 
 /// The actual macOS `ServiceLifecycle` boundary for the coordinated transaction.
@@ -147,10 +147,10 @@ impl NativeServiceLifecycle {
                 hal_reload::reload_and_wait(
                     self.hal_hosts.as_ref(),
                     &self.hal_mapping_paths,
-                    || wait_for_restored_driver_ready(&version, self.account.account().home()),
+                    || wait_for_driver_ready(&version, self.account.account().home()),
                 )
             },
-            || wait_for_restored_driver_ready(&version, self.account.account().home()),
+            || wait_for_driver_ready(&version, self.account.account().home()),
         )
     }
 }
@@ -227,7 +227,7 @@ impl ServiceLifecycle for NativeServiceLifecycle {
         if matches!(request, TransactionRequest::Remove) {
             self.verify_service_account()?;
             // The embedded executable is still at its verified original path here;
-            // commit moves the Manager bundle into private rollback storage.
+            // commit moves the remover app into private rollback storage.
             self.pending_user_data_cleanup = Some(
                 super::user_data::prepare_for_account(&self.account, self.delete_saved_settings)
                     .map_err(NativeError::UserData)?,

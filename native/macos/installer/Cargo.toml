@@ -52,8 +52,6 @@ libc = "0.2.189"
 core-foundation = "=0.10.1"
 # Reuse the bounded fixed-endpoint Driver snapshot and readiness contract.
 mixrelay-driver-control = { path = "../../../crates/driver-control" }
-# Verifies a rollback to a release whose Driver still serves loopback TCP.
-reqwest = { workspace = true, features = ["blocking"] }
 # Acknowledged native Quit in the installed user's session.
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "libc", "NSRunningApplication", "NSAlert", "NSApplication", "NSButton", "NSButtonCell", "NSCell", "NSGraphics", "NSControl", "NSResponder", "NSView", "NSWindow", "NSProgressIndicator", "NSTextField"] }

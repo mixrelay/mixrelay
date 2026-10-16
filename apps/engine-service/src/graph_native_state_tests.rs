@@ -125,8 +125,8 @@ fn two_graph_providers() -> (Fixture, EngineGraphController, Arc<AtomicU64>) {
         fixture.path(),
         serde_json::to_vec(&serde_json::json!({
             "version":1, "revision":1, "activeId":"alpha", "graphs":[
-                {"id":"alpha", "name":"Alpha", "document":document},
-                {"id":"beta", "name":"Beta", "document":document},
+                {"id":"alpha", "name":"Alpha", "document":document,"layoutRevision":0,"layout":{"positions":{}}},
+                {"id":"beta", "name":"Beta", "document":document,"layoutRevision":0,"layout":{"positions":{}}},
             ]
         }))
         .unwrap(),
@@ -145,9 +145,9 @@ fn three_graph_providers() -> (Fixture, EngineGraphController) {
         fixture.path(),
         serde_json::to_vec(&serde_json::json!({
             "version":1, "revision":1, "activeId":"alpha", "graphs":[
-                {"id":"alpha", "name":"Alpha", "document":document},
-                {"id":"beta", "name":"Beta", "document":document},
-                {"id":"gamma", "name":"Gamma", "document":document},
+                {"id":"alpha", "name":"Alpha", "document":document,"layoutRevision":0,"layout":{"positions":{}}},
+                {"id":"beta", "name":"Beta", "document":document,"layoutRevision":0,"layout":{"positions":{}}},
+                {"id":"gamma", "name":"Gamma", "document":document,"layoutRevision":0,"layout":{"positions":{}}},
             ]
         }))
         .unwrap(),

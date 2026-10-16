@@ -22,11 +22,7 @@ impl Fixture {
             fs::create_dir_all(path.parent().unwrap()).unwrap();
             if matches!(
                 target,
-                OwnedTarget::App
-                    | OwnedTarget::Hal
-                    | OwnedTarget::Uninstaller
-                    | OwnedTarget::LegacyManager
-                    | OwnedTarget::LegacyUninstaller
+                OwnedTarget::App | OwnedTarget::Hal | OwnedTarget::Uninstaller
             ) {
                 fs::create_dir(&path).unwrap();
                 fs::write(path.join("owned"), b"original").unwrap();

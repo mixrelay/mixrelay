@@ -146,14 +146,17 @@ fn malformed_base64_lengths_and_overflowing_bindings_are_rejected() {
         invalid["meters"]["bindings"][0]["inputChannels"] = serde_json::json!(input);
         assert!(serde_json::from_value::<ControlTelemetry>(invalid).is_err());
     }
-    let legacy = serde_json::json!({"engineIncarnation":"old", "sequence":1,
-        "meters":{"protocolVersion":1,"revision":0,"nodes":[]}});
+    let mut stateless = value.clone();
+    stateless.as_object_mut().unwrap().remove("state");
     assert!(
-        serde_json::from_value::<ControlTelemetry>(legacy)
+        serde_json::from_value::<ControlTelemetry>(stateless)
             .unwrap()
             .state
             .is_none()
     );
+    let unpacked = serde_json::json!({"engineIncarnation":"engine-a", "sequence":1,
+        "meters":{"protocolVersion":1,"revision":0,"nodes":[]}});
+    assert!(serde_json::from_value::<ControlTelemetry>(unpacked).is_err());
     assert!(serde_json::from_value::<ControlTelemetry>(serde_json::json!({})).is_err());
 }
 

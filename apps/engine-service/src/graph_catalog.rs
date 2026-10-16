@@ -61,9 +61,7 @@ struct SavedGraph {
     id: String,
     name: String,
     document: GraphDocument,
-    #[serde(default)]
     layout_revision: u64,
-    #[serde(default)]
     layout: GraphLayout,
 }
 

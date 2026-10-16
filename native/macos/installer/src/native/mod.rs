@@ -2,7 +2,6 @@
 
 mod account;
 mod audio_probe;
-mod graph_app;
 mod hal_reload;
 mod launchctl;
 mod service;
@@ -11,13 +10,9 @@ mod user_data;
 
 pub use account::{ResolvedServiceAccount, resolve_console_account};
 pub use audio_probe::{check_coreaudio_response, hal_is_loaded};
-pub use graph_app::{graph_app_ready, install_graph_app};
 pub use service::{NativeServiceLifecycle, NativeServiceRegistration, NativeServiceSnapshot};
 pub(crate) use trust::validate_destination_ancestors;
-pub use trust::{
-    initialize_app_lifecycle_storage, initialize_editor_lifecycle_storage,
-    initialize_lifecycle_storage, require_lifecycle_storage, require_root,
-};
+pub use trust::{initialize_lifecycle_storage, require_lifecycle_storage, require_root};
 pub use user_data::cleanup_user_data;
 
 use crate::LaunchdConfiguration;
