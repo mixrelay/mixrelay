@@ -161,7 +161,14 @@ Each device has 256 preallocated atomic client slots. Registration records proce
 identity on control. Start/Stop owns activity; the C bridge marks a client only
 when a WriteMix render operation is observed. Capture-only registration does not
 invalidate the value. A rendering client whose PID differs from the published
-engine PID, including an unresolved identity, makes the effective value zero.
+engine PID makes the effective value zero; so does one whose known process start
+differs from the engine's known start (a reused PID). The driver sandbox denies
+`proc_pidinfo` for other processes, so starts are usually unknown in the installed
+HAL; then the PID coreaudiod registered decides, as for transport presentation.
+A registration ends with its process and a publication with the engine's lease,
+so a reused PID can only match within the lease expiry after an engine crash.
+Treating an unknown start as "not the engine" made the engine's own rendering
+hide every installed report.
 More clients than can be tracked also fail closed until the excess clients leave.
 No client/identity/control mutex is taken by the IO marker or latency/safety
 property reads. Stop/Remove and device-rate changes cannot expose obsolete frames.

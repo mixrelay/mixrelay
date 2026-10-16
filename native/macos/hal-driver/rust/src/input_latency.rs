@@ -84,8 +84,8 @@ impl InputLatency {
             client.rendered.store(true, Ordering::Release);
         }
     }
-    /// `start` is the engine's process start, resolved while it publishes; a rendering
-    /// client matches the engine only by PID and start, so a reused PID never does.
+    /// `start` is the engine's process start, resolved while it publishes. See
+    /// `is_engine` for how a rendering client is matched to it.
     pub(crate) fn publish(&self, rate: u32, pid: u32, start: Option<u64>, frames: Option<u32>) {
         // Clear before changing rate, so a new device rate cannot consume old frames.
         self.publication.store(0, Ordering::Release);
@@ -105,14 +105,23 @@ impl InputLatency {
             || self.clients.iter().any(|client| {
                 client.active.load(Ordering::Acquire)
                     && client.rendered.load(Ordering::Acquire)
-                    && (client.pid.load(Ordering::Acquire) != pid
-                        || start == 0
-                        || client.start.load(Ordering::Acquire) != start)
+                    && !Self::is_engine(client, pid, start)
             })
         {
             return 0;
         }
         u32::try_from(publication & u64::from(u32::MAX)).expect("packed u32")
+    }
+    /// A rendering client is the engine when coreaudiod registered it for the engine's PID.
+    /// When both process starts are known they must also agree, so a reused PID is not the
+    /// engine. The driver sandbox denies `proc_pidinfo` for other processes, so starts are
+    /// usually unknown there; then the registration's PID decides, as for transport type.
+    /// A registration ends with its process, and the publication ends with the engine's
+    /// lease, so a reused PID could only match within the lease expiry after an engine crash.
+    fn is_engine(client: &Client, pid: u32, start: u64) -> bool {
+        let client_start = client.start.load(Ordering::Acquire);
+        client.pid.load(Ordering::Acquire) == pid
+            && (start == 0 || client_start == 0 || client_start == start)
     }
     /// Control ticks coalesce IO-side gate changes; host notification happens outside locks.
     pub(crate) fn changed(&self, rate: u32) -> bool {
@@ -154,20 +163,29 @@ mod tests {
         assert_eq!(latency.effective(48_000), 0);
     }
     #[test]
-    fn a_reused_or_unresolved_engine_pid_is_not_the_engine() {
+    fn a_reused_engine_pid_is_not_the_engine_and_unknown_starts_use_the_registration() {
         let latency = InputLatency::default();
         latency.add(1);
         latency.active(1, true);
         latency.render(1);
-        for (client, engine, expected) in [
-            (Some(7), Some(7), 300),
-            (Some(5), Some(7), 0),
-            (None, Some(7), 0),
-            (Some(7), None, 0),
+        for (pid, client, engine, expected) in [
+            (10, Some(7), Some(7), 300),
+            // Known starts that differ: the PID was reused.
+            (10, Some(5), Some(7), 0),
+            // The driver sandbox hides either start: coreaudiod's PID decides.
+            (10, None, Some(7), 300),
+            (10, Some(7), None, 300),
+            (10, None, None, 300),
+            // Another process rendering is never the engine.
+            (20, None, None, 0),
         ] {
-            latency.identity(1, 10, client);
+            latency.identity(1, pid, client);
             latency.publish(48_000, 10, engine, Some(300));
-            assert_eq!(latency.effective(48_000), expected);
+            assert_eq!(
+                latency.effective(48_000),
+                expected,
+                "{pid} {client:?} {engine:?}"
+            );
         }
     }
     #[test]
