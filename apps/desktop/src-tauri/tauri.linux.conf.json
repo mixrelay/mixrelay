@@ -72,13 +72,13 @@
           "/usr/share/doc/mix-relay-driver/LICENSE-Driver.ru.txt": "../../../LICENSE-Driver.ru.txt"
         },
         "depends": [
-          "libpipewire-0.3-0t64",
+          "libpipewire-0.3-0t64 (>= 1.2.0)",
           "liblilv-0-0",
           "libgcc-s1",
           "libc6",
           "libayatana-appindicator3-1",
-          "pipewire",
-          "wireplumber",
+          "pipewire (>= 1.2.0)",
+          "wireplumber (>= 0.5.0)",
           "gnome-keyring",
           "libpam-gnome-keyring",
           "librsvg2-common",

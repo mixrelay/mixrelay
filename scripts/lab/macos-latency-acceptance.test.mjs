@@ -70,9 +70,10 @@ function fakeEngine(t, hooks = {}) {
       return { latency: routed() ? REPORTED : 0, safety: 0, stream: 0 };
     },
     async roundtrip(playback, uid) {
+      if (hooks.roundtrip) return hooks.roundtrip(playback, uid);
       assert.equal(uid, UID);
       assert.equal(playback, `io.mixrelay.audio.endpoint.${SOURCE.replaceAll('-', '')}`);
-      return hooks.roundtrip?.() ?? { status: 0, stdout: JSON.stringify(probeReport()) };
+      return { status: 0, stdout: JSON.stringify(probeReport()) };
     },
     now: () => state.time,
     async delay(ms, signal) {
@@ -98,6 +99,53 @@ test('a complete run restores the graph and confirms the round trip', async t =>
   assert.equal(engine.read('restored.json').reported.latency, 0);
   assert.deepEqual(engine.signals.raised, []);
   assert.deepEqual(listeners(engine.signals), [0, 0, 0]);
+});
+
+const FOREIGN = 'com.example.foreign-loopback';
+const baselineReport = (overrides = {}) => probeReport({
+  input: { uid: FOREIGN, rate: 48000, latency: 0 },
+  output: { uid: FOREIGN, rate: 48000, latency: 0 },
+  reportedLatencyFrames: 0,
+  latencyFrames: { mean: 768 },
+  ...overrides,
+});
+
+test('a foreign source is measured before mutation and its hidden latency stays separate', async t => {
+  const engine = fakeEngine(t, { roundtrip(playback, uid) {
+    assert.equal(playback, FOREIGN);
+    if (uid === FOREIGN) {
+      assert.equal(engine.state.puts.length, 0);
+      return { status: 0, stdout: JSON.stringify(baselineReport()) };
+    }
+    assert.equal(uid, UID);
+    assert.equal(engine.state.puts.length, 1);
+    return { status: 0, stdout: JSON.stringify(probeReport({ latencyFrames: { mean: REPORTED + 768 } })) };
+  } });
+  Object.assign(engine.options, { sourceUid: FOREIGN, sourceEndpoint: undefined });
+  const summary = await runAcceptance(engine.options, engine.io);
+  assert.equal(summary.reportedInputLatencyFrames, REPORTED);
+  assert.equal(summary.sourceResidualFrames, 768);
+  assert.equal(engine.read('source-baseline.json').latencyFrames.mean, 768);
+  assert.deepEqual(engine.state.graph, { ...engine.original, revision: 5 });
+});
+
+test('a failed, incomplete or unrelated source baseline never mutates the graph', async t => {
+  for (const [report, status] of [
+    [baselineReport(), 3],
+    [baselineReport({ measured: false }), 0],
+    [baselineReport({ complete: false }), 0],
+    [baselineReport({ input: { uid: 'other', rate: 48000 } }), 0],
+    [baselineReport({ output: { uid: FOREIGN, rate: 44100 } }), 0],
+    [baselineReport({ timestampDiscontinuities: { input: 1, output: 0 } }), 0],
+    [baselineReport({ reportedLatencyFrames: null }), 0],
+  ]) {
+    const engine = fakeEngine(t, { roundtrip: () => ({ status, stdout: JSON.stringify(report) }) });
+    Object.assign(engine.options, { sourceUid: FOREIGN, sourceEndpoint: undefined });
+    await assert.rejects(runAcceptance(engine.options, engine.io));
+    assert.deepEqual(engine.state.puts, []);
+    assert.deepEqual(engine.state.graph, engine.original);
+    assert.deepEqual(listeners(engine.signals), [0, 0, 0]);
+  }
 });
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
@@ -184,6 +232,9 @@ test('the round trip requires a measured, complete, continuous recording within 
   assert.equal(roundtripToleranceFrames(44100), 47);
   const within = probeReport({ latencyFrames: { mean: REPORTED + 50 } });
   assert.deepEqual(roundtripProblems(within, REPORTED), []);
+  assert.deepEqual(roundtripProblems(probeReport({ latencyFrames: { mean: REPORTED + 768 + 50 } }), REPORTED, 768), []);
+  assert.match(roundtripProblems(probeReport({ latencyFrames: { mean: REPORTED + 768 + 51 } }), REPORTED, 768).join(), /tolerance 50/);
+  assert.match(roundtripProblems(probeReport(), REPORTED, Number.NaN).join(), /baseline is not finite/);
   for (const [report, problem] of [
     [probeReport({ measured: false }), /did not measure/],
     [probeReport({ complete: false }), /incomplete/],

@@ -62,7 +62,7 @@ const fixture = (architecture = 'arm64') => ({
   version: '0.1.0',
   versionReceipt: '{"version":"0.1.0"}'.padEnd(64),
   architecture: `${architecture}\n`,
-  depends: 'libpipewire-0.3-0t64, liblilv-0-0, libgcc-s1, libc6 (>= 2.39), libwebkit2gtk-4.1-0, libgtk-3-0t64, librsvg2-common, pipewire, wireplumber, gnome-keyring, libpam-gnome-keyring, libayatana-appindicator3-1, zenity, pkexec, polkit-1-auth-agent | lxpolkit, systemd, util-linux',
+  depends: 'libpipewire-0.3-0t64 (>= 1.2.0), liblilv-0-0, libgcc-s1, libc6 (>= 2.39), libwebkit2gtk-4.1-0, libgtk-3-0t64, librsvg2-common, pipewire (>= 1.2.0), wireplumber (>= 0.5.0), gnome-keyring, libpam-gnome-keyring, libayatana-appindicator3-1, zenity, pkexec, polkit-1-auth-agent | lxpolkit, systemd, util-linux',
   contents: [
     ...binaries.map(name => `-rwxr-xr-x 0/0 64 2026-09-20 22:00 ./usr/bin/${name}`),
     ...wirePlumberFiles.map(path => `-rw-r--r-- 0/0 64 2026-09-20 22:00 ./${path}`),
@@ -402,12 +402,12 @@ test('audio session, Secret Service provider, native dialogs and user-service to
   const names = ['pipewire', 'wireplumber', 'gnome-keyring', 'zenity', 'systemd', 'util-linux'];
   for (const format of ['deb', 'rpm']) {
     for (const name of names) {
-      assert.ok(config.bundle.linux[format].depends.includes(name));
+      assert.ok(config.bundle.linux[format].depends.some(term => term.split(/\s/)[0] === name));
     }
   }
   for (const name of names) {
     const data = fixture();
-    data.depends = data.depends.split(',').filter(term => term.trim() !== name).join(',');
+    data.depends = data.depends.split(',').filter(term => term.trim().split(/\s/)[0] !== name).join(',');
     assert.throws(() => validatePackage(data), new RegExp(`Missing required dependency: ${name}`));
   }
 });
@@ -651,4 +651,23 @@ test('the product contains editor, both services, one remover and the same versi
   }
   assert.throws(() => validatePackage({ ...product, packageName: 'mix-relay-extras' }), /Unsupported package/);
   assert.equal(config.bundle.linux.deb.recommends, undefined);
+});
+
+
+test('Debian audio dependencies reject missing, weaker and optional version fences', () => {
+  for (const [name, minimum] of [['libpipewire-0.3-0t64', '1.2.0'], ['pipewire', '1.2.0'], ['wireplumber', '0.5.0']]) {
+    for (const replacement of [name, `${name} (>= 0.3.0)`, `${name} (>= ${minimum}) | unrelated`]) {
+      const data = fixture();
+      data.depends = data.depends.replace(`${name} (>= ${minimum})`, replacement);
+      assert.throws(() => validatePackage(data), /Missing required dependency/);
+    }
+  }
+});
+
+
+test('stronger audio release floors and equally constrained alternatives remain valid', () => {
+  const data = fixture();
+  data.depends = data.depends.replace('pipewire (>= 1.2.0)', 'pipewire (>= 1.4.2) | pipewire (= 1.2.7)');
+  data.depends = data.depends.replace('wireplumber (>= 0.5.0)', 'wireplumber (>= 0.5.8)');
+  assert.doesNotThrow(() => validatePackage(data));
 });

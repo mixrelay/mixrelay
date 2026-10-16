@@ -21,7 +21,7 @@ case "$ID" in
       libasound2-dev liblilv-dev libpipewire-0.3-dev libssl-dev \
       libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
       librsvg2-dev libx11-dev libxrandr-dev libxi-dev \
-      pipewire pipewire-bin wireplumber dbus-x11 xvfb xauth
+      pipewire pipewire-bin wireplumber dbus-user-session dbus-x11 xvfb xauth
     ;;
   arch)
     pacman -Syu --noconfirm --needed \

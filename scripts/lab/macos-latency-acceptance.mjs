@@ -7,6 +7,9 @@
 // playback the engine routes to ENDPOINT_ID (D). A second endpoint needs the paid edition.
 // SOURCE may instead be any device UID whose output returns on its input. The probe never
 // plays into D itself: that would bypass the engine and gate the report to zero.
+// With a foreign source, --roundtrip first measures its own pass-through before any graph
+// write. Its measured-minus-reported latency is kept separately and added only when judging
+// the complete path; a foreign device's hidden latency is not attributed to MixRelay.
 // --roundtrip records audio, so the terminal needs microphone permission. It uses the probe's
 // impulse mode: a route between two devices crosses clocks, so the engine resamples it and
 // no bit-exact copy of a test signal can arrive. The round trip passes only when the probe
@@ -75,7 +78,7 @@ export function parseReported(text) {
  * Why an impulse round trip does not confirm the reported latency (empty when it does).
  * `stableInputLatency` is the HAL report the acceptance observed before the probe ran.
  */
-export function roundtripProblems(report, stableInputLatency) {
+export function roundtripProblems(report, stableInputLatency, sourceResidualFrames = 0) {
   const problems = [];
   if (report?.mode !== 'impulse') problems.push('the probe did not run in impulse mode');
   if (report?.measured !== true) problems.push('the probe did not measure: no single delay aligned most pulses');
@@ -93,11 +96,13 @@ export function roundtripProblems(report, stableInputLatency) {
   const measured = report?.latencyFrames?.mean;
   if (!Number.isFinite(reported)) problems.push('the devices do not report their full latency');
   if (!Number.isFinite(measured)) problems.push('the probe reported no measured latency');
+  if (!Number.isFinite(sourceResidualFrames)) problems.push('the source baseline is not finite');
   if (problems.length === 0) {
     const tolerance = roundtripToleranceFrames(rate);
-    const difference = Math.abs(reported - measured);
+    const difference = Math.abs(reported + sourceResidualFrames - measured);
     if (difference > tolerance) {
-      problems.push(`reported ${reported} frames differs from the measured mean ${measured} by ${difference.toFixed(2)} frames (tolerance ${tolerance})`);
+      const baseline = sourceResidualFrames === 0 ? '' : ` + source residual ${sourceResidualFrames}`;
+      problems.push(`reported ${reported}${baseline} frames differs from the measured mean ${measured} by ${difference.toFixed(2)} frames (tolerance ${tolerance})`);
     }
   }
   return problems;
@@ -248,6 +253,25 @@ async function acceptance({ sourceUid, sourceEndpoint, endpointId, evidence, rou
     writeFileSync(join(evidence, name), `${JSON.stringify(value, null, 2)}\n`, { flag: 'wx' });
   record('before.json', { graphId, graph: original, reported: before });
   interruption.check();
+  let sourceBaseline;
+  let sourceResidualFrames = 0;
+  if (roundtrip && !sourceEndpoint) {
+    const probe = await io.roundtrip(playback, playback, interruption.signal);
+    sourceBaseline = JSON.parse(probe.stdout);
+    record('source-baseline.json', sourceBaseline);
+    assert.equal(probe.status, 0, 'The foreign source baseline probe failed');
+    const { input, output, reportedLatencyFrames, latencyFrames, timestampDiscontinuities } = sourceBaseline;
+    assert.ok(sourceBaseline.mode === 'impulse' && sourceBaseline.measured === true &&
+      sourceBaseline.complete === true, 'The foreign source baseline is not a complete measurement');
+    assert.ok(input?.uid === playback && output?.uid === playback && input.rate > 0 &&
+      input.rate === output.rate, 'The source baseline must measure this exact duplex device');
+    assert.ok(timestampDiscontinuities?.input === 0 && timestampDiscontinuities.output === 0,
+      'The source baseline timestamps jumped');
+    assert.ok(Number.isFinite(reportedLatencyFrames) && Number.isFinite(latencyFrames?.mean),
+      'The source baseline has no measured/reported latency');
+    sourceResidualFrames = latencyFrames.mean - reportedLatencyFrames;
+    interruption.check();
+  }
 
   const test = structuredClone(original);
   test.revision++;
@@ -270,7 +294,7 @@ async function acceptance({ sourceUid, sourceEndpoint, endpointId, evidence, rou
   // confirmed 'applied' write is ours to restore: a rejected one may have lost to another writer.
   let mutation = 'none';
   let applied;
-  const result = { graphId, source: sourceUid, endpoint: uid };
+  const result = { graphId, source: sourceUid, endpoint: uid, sourceBaseline, sourceResidualFrames };
   const failures = [];
   const abort = interruption.signal;
   try {
@@ -302,7 +326,9 @@ async function acceptance({ sourceUid, sourceEndpoint, endpointId, evidence, rou
         result.roundtrip = { unparsedOutput: probe.stdout };
       }
       interruption.check();
-      const problems = roundtripProblems(result.roundtrip, result.reported.latency);
+      assert.ok(!sourceBaseline || result.roundtrip.input?.rate === sourceBaseline.input.rate,
+        'The source baseline and measured path must use the same rate');
+      const problems = roundtripProblems(result.roundtrip, result.reported.latency, sourceResidualFrames);
       if (probe.status !== 0) problems.unshift(`the probe exited with status ${probe.status}`);
       const rate = result.roundtrip.input?.rate;
       result.roundtripToleranceFrames = rate > 0 ? roundtripToleranceFrames(rate) : null;
@@ -336,6 +362,7 @@ async function acceptance({ sourceUid, sourceEndpoint, endpointId, evidence, rou
     reportedInputLatencyFrames: result.reported.latency,
     roundtripLatencyFrames: result.roundtrip?.latencyFrames,
     roundtripLatencyMs: result.roundtrip?.latencyMs,
+    sourceResidualFrames,
     evidence,
   };
 

@@ -15,6 +15,22 @@ const requiredDependencies = [
   ['zenity'], ['pkexec'], ['polkit-1-auth-agent', 'lxpolkit'],
   ['systemd'], ['util-linux'],
 ];
+// Async contributions need PipeWire 1.2; source muting needs WirePlumber 0.5.
+const requiredAudioDependencies = [
+  ['libpipewire-0.3-0t64', [1, 2, 0]], ['pipewire', [1, 2, 0]], ['wireplumber', [0, 5, 0]],
+];
+
+// Release dependency floors use plain upstream versions, not distro epochs/revisions.
+function satisfiesAudioMinimum(term, name, minimum) {
+  const match = term.trim().match(/^([a-z0-9][a-z0-9+.-]*)\s+\((?:>=|>>|=)\s*(\d+)\.(\d+)\.(\d+)\)$/);
+  if (!match || match[1] !== name) return false;
+  const version = match.slice(2).map(Number);
+  if (!version.every(Number.isSafeInteger)) return false;
+  for (let index = 0; index < minimum.length; index++) {
+    if (version[index] !== minimum[index]) return version[index] > minimum[index];
+  }
+  return true;
+}
 const executables = ['usr/bin/mixrelay-desktop', 'usr/bin/mixrelay-engine-service', 'usr/bin/mixrelay-driver-service'];
 const wirePlumberFiles = [
   'usr/share/wireplumber/scripts/mixrelay-source-mute.lua',
@@ -85,6 +101,11 @@ function packageMetadata({ architecture, depends, contents, packageName }) {
   for (const alternatives of requiredDependencies) {
     if (!clauses.some(clause => clause.length && clause.every(name => alternatives.includes(name)))) {
       throw new Error(`Missing required dependency: ${alternatives.join(' or ')}`);
+    }
+  }
+  for (const [name, minimum] of requiredAudioDependencies) {
+    if (!depends.split(',').some(clause => clause.split('|').every(term => satisfiesAudioMinimum(term, name, minimum)))) {
+      throw new Error(`Missing required dependency: ${name} (>= ${minimum.join('.')})`);
     }
   }
   const files = new Map();
