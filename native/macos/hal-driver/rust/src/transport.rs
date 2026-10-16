@@ -196,17 +196,51 @@ struct Query {
     answer: Arc<AtomicU32>,
     done: mpsc::SyncSender<()>,
 }
+/// How the HAL may inspect other processes. The installed driver host runs under
+/// coreaudiod's sandbox profile (`deny default`, no `process-info-pidinfo`), which denies
+/// `proc_pidinfo`/`proc_pidpath` for other processes, so every identity decision must also
+/// hold with `SANDBOXED`; tests default to it.
+#[derive(Clone, Copy)]
+pub(crate) struct ProcessInspection {
+    pub(crate) incarnation: fn(i32) -> Option<Incarnation>,
+    pub(crate) discover: fn(Incarnation) -> Option<String>,
+}
+impl ProcessInspection {
+    pub(crate) const SYSTEM: Self = Self {
+        incarnation,
+        discover,
+    };
+    #[cfg(test)]
+    pub(crate) const SANDBOXED: Self = Self {
+        incarnation: |_| None,
+        discover: |_| None,
+    };
+    /// One process incarnation's start time packed into a nonzero word, so a reused PID never
+    /// matches. `None` when the process is gone or the sandbox denies the query.
+    pub(crate) fn process_start(self, pid: u32) -> Option<u64> {
+        let Incarnation(_, seconds, micros) = (self.incarnation)(i32::try_from(pid).ok()?)?;
+        Some((seconds << 20 | micros).max(1))
+    }
+}
+
 pub(crate) struct Transport {
     pub(crate) state: Arc<Mutex<State>>,
     queue: mpsc::SyncSender<Query>,
     worker: Option<std::thread::JoinHandle<()>>,
+    inspection: ProcessInspection,
 }
 impl Default for Transport {
     fn default() -> Self {
-        Self::with_discovery(discover)
+        Self::with_inspection(ProcessInspection::SYSTEM)
     }
 }
 impl Transport {
+    pub(crate) fn with_inspection(inspection: ProcessInspection) -> Self {
+        let mut transport = Self::with_resolvers(inspection.discover, inspection.incarnation);
+        transport.inspection = inspection;
+        transport
+    }
+    #[cfg(test)]
     fn with_discovery(lookup: impl Fn(Incarnation) -> Option<String> + Send + 'static) -> Self {
         Self::with_resolvers(lookup, incarnation)
     }
@@ -263,13 +297,14 @@ impl Transport {
             state,
             queue,
             worker,
+            inspection: ProcessInspection::SYSTEM,
         }
     }
     pub(crate) fn policy(&self, bundles: Vec<String>) -> bool {
         lock(&self.state).policy(bundles)
     }
     pub(crate) fn client(&self, device: u32, client: u32, pid: i32, bundle: Option<String>) {
-        let key = incarnation(pid);
+        let key = (self.inspection.incarnation)(pid);
         lock(&self.state).client(
             device,
             client,
@@ -292,7 +327,7 @@ impl Transport {
         self.get_until(pid, Instant::now() + budget)
     }
     pub(crate) fn get_until(&self, pid: i32, deadline: Instant) -> u32 {
-        self.get_with_incarnation(pid, deadline, incarnation)
+        self.get_with_incarnation(pid, deadline, self.inspection.incarnation)
     }
     fn get_with_incarnation(
         &self,
@@ -485,12 +520,6 @@ fn incarnation(pid: i32) -> Option<Incarnation> {
     let (mut seconds, mut micros) = (0, 0);
     unsafe { mr_hal_identity_start(pid, &raw mut seconds, &raw mut micros) }
         .then_some(Incarnation(pid, seconds, micros))
-}
-/// One process incarnation's start time packed into a nonzero word, so a reused PID never
-/// matches. `None` when the process is gone or the sandbox denies the query.
-pub(crate) fn process_start(pid: u32) -> Option<u64> {
-    let Incarnation(_, seconds, micros) = incarnation(i32::try_from(pid).ok()?)?;
-    Some((seconds << 20 | micros).max(1))
 }
 fn discover(key: Incarnation) -> Option<String> {
     if incarnation(key.0) != Some(key) {

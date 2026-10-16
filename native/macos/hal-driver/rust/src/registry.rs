@@ -41,6 +41,7 @@ pub(crate) struct Registry {
     pub(crate) native: NativeOps,
     pub(crate) client_identity_gate: Mutex<()>,
     pub(crate) transport: crate::transport::Transport,
+    inspection: crate::transport::ProcessInspection,
     host: HostOps,
     // Object generation is shared across slots. Slots are not reused until a
     // retired device has no clients and all reader pins have been released.
@@ -70,9 +71,17 @@ impl Drop for Pin<'_> {
 
 impl Registry {
     pub(crate) fn new(native: NativeOps, host: HostOps) -> Self {
+        Self::with_inspection(native, host, crate::transport::ProcessInspection::SYSTEM)
+    }
+    pub(crate) fn with_inspection(
+        native: NativeOps,
+        host: HostOps,
+        inspection: crate::transport::ProcessInspection,
+    ) -> Self {
         Self {
             native,
-            transport: crate::transport::Transport::default(),
+            transport: crate::transport::Transport::with_inspection(inspection),
+            inspection,
             client_identity_gate: Mutex::new(()),
             host,
             generation: Mutex::new(0),
@@ -286,7 +295,7 @@ impl Registry {
         if let Some(device) = self.pin(id) {
             device
                 .input_latency
-                .identity(client, pid, crate::transport::process_start(pid));
+                .identity(client, pid, self.inspection.process_start(pid));
         }
     }
     pub(crate) fn render_client(&self, id: u32, client: u32) {
@@ -336,7 +345,7 @@ impl Registry {
             {
                 // Resolved before locking and while the engine is publishing, so its
                 // incarnation is current.
-                let start = crate::transport::process_start(entry.engine_pid);
+                let start = self.inspection.process_start(entry.engine_pid);
                 let mut control = lock(&device.control);
                 if entry.lease < control.latency_lease
                     || (entry.lease == control.latency_lease

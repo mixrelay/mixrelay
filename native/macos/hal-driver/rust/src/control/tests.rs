@@ -56,13 +56,13 @@ fn owner() -> (Control<Fake>, Rc<Counts>) {
         changed,
         request_configuration: request,
     };
-    // SAFETY: create copies the stack callbacks. The empty registry performs no
-    // audio-device discovery or mutation; Box adopts the sole returned allocation.
-    let registry = unsafe { mr_hal_core_create_native(&raw const host) };
-    assert!(!registry.is_null());
+    // The empty registry performs no audio-device discovery or mutation, and like the
+    // installed driver host it cannot inspect other processes.
+    let registry = Box::new(crate::native::native_registry(
+        host,
+        crate::transport::ProcessInspection::SANDBOXED,
+    ));
     let counts = Rc::new(Counts::default());
-    // SAFETY: no callbacks or competing owner reference the fresh allocation.
-    let registry = unsafe { Box::from_raw(registry) };
     (Control::new(registry, Fake(Rc::clone(&counts))), counts)
 }
 

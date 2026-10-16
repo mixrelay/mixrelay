@@ -164,8 +164,11 @@ fn native_fixture() -> Fixture {
         changed,
         request_configuration: request,
     };
-    let registry = unsafe { crate::native::mr_hal_core_create_native(&raw const host) };
-    assert!(!registry.is_null());
+    // The installed driver host cannot inspect other processes.
+    let registry = Box::into_raw(Box::new(crate::native::native_registry(
+        host,
+        crate::transport::ProcessInspection::SANDBOXED,
+    )));
     fixture.registry = unsafe { Box::from_raw(registry) };
     fixture.host.registry.store(registry, Ordering::Release);
     fixture

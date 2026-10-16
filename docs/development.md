@@ -28,3 +28,9 @@ UI 테스트(`apps/control-ui`)는 확장자로 실행 환경을 나눈다. `*.t
 디자인 시스템 계약 도구는 `docs:api <source> <Name>`(계약 API 발췌 출력)과 `docs:page <Name> [--force|--stdout]`(표준 컴포넌트 문서 생성)이다. 둘 다 `--help`로 사용법을 확인한다.
 
 브라우저 개발 화면(`pnpm --filter @mixrelay/control-ui dev`)은 엔진에 바로 닿지 못한다. 엔진과 Driver는 사용자 소유 Unix 소켓만 열기 때문이다. 실제 엔진이 필요하면 `MIXRELAY_DEV_ENGINE_BRIDGE=1`로 실행해 loopback dev 서버가 `/engine` 요청을 엔진 소켓으로 전달하게 한다. 켜 두는 동안 dev 서버에 닿는 다른 계정도 개발자 권한으로 엔진을 조작할 수 있으므로 필요할 때만 켠다. 시험과 lab은 `MIXRELAY_IPC_DIR`로 격리된 소켓 디렉터리를 쓰고, 설치된 세션 소켓을 건드리지 않는다.
+
+설치 환경의 제약은 로컬 테스트의 기본값으로 둔다. 설치본에서만 드러나는 문제를 설치·확인을 반복하며 찾지 않기 위해서다.
+- HAL은 coreaudiod 샌드박스(`deny default`, `process-info-pidinfo` 없음) 안에서 돈다. 다른 프로세스의 `proc_pidinfo`·`proc_pidpath`·번들 조회는 실패한다. HAL의 프로세스 조회는 `transport::ProcessInspection` 하나로만 하고, Registry 테스트 픽스처는 `SANDBOXED`를 쓴다. 신원 판단은 coreaudiod가 `AddDeviceClient`로 준 PID·번들처럼 샌드박스 안에서 얻는 정보로도 성립해야 한다.
+- 엔진은 자기가 발행하는 가상 장치에 직접 쓰는 클라이언트다. 장치 쓰기로 동작이 바뀌는 판단(지연 보고 등)은 엔진 자신의 쓰기를 포함한 상황을 테스트한다.
+- 서로 다른 장치를 잇는 경로는 클럭이 달라 엔진이 리샘플링한다. 비트 일치를 요구하는 왕복 측정은 같은 클럭 경로에서만 쓰고, 그 밖에는 `pnpm probe:macos-roundtrip --impulse`로 잰다.
+- 엔진은 root 소유 launchd 데몬이고 HAL·앱 캡처가 고정 XPC 이름 `io.mixrelay.audio.engine`으로 연결하므로, 로컬 빌드 엔진으로 설치본 HAL을 대체할 수 없다. 설치본 확인은 위 테스트를 통과한 변경의 최종 확인으로 한 번에 묶는다.

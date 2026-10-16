@@ -16,6 +16,7 @@ fn queued_transport(capacity: usize) -> (Transport, mpsc::Receiver<Query>) {
         state: Arc::new(Mutex::new(State::default())),
         queue,
         worker: None,
+        inspection: ProcessInspection::SYSTEM,
     };
     transport.policy(vec!["com.test.App".into()]);
     (transport, requests)

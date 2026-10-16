@@ -229,13 +229,16 @@ impl Fixture {
             requires_replacement,
             same_transport,
         };
-        let registry = Box::new(Registry::new(
+        // The installed driver host cannot inspect other processes; every fixture starts
+        // from that constraint.
+        let registry = Box::new(Registry::with_inspection(
             ops,
             HostOps {
                 context: (&raw const *host).cast_mut().cast(),
                 changed,
                 request_configuration: request,
             },
+            crate::transport::ProcessInspection::SANDBOXED,
         ));
         host.registry
             .store((&raw const *registry).cast_mut(), Ordering::Release);
@@ -966,6 +969,100 @@ fn callback_readers_drain_before_retired_runtime_is_freed() {
     assert!(registry.snapshot(id).is_none());
     assert!(registry.output_control(id + 3).is_none());
     assert_eq!(registry.set_output_mute(id + 4, false), NOT_FOUND);
+}
+
+/// Installed behaviour under the driver sandbox, where no process can be inspected: the
+/// engine renders into its own endpoint and must still see its reported latency, while any
+/// other rendering process zeroes it.
+#[test]
+fn a_sandboxed_engine_rendering_its_own_endpoint_keeps_the_reported_latency() {
+    use mixrelay_macos_transport::control_inventory::InputLatency;
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    let registry = &fixture.registry;
+    let registry_ptr = (&raw const **registry).cast_mut();
+    let identity = |client: u32, pid: i32, add: bool| {
+        // SAFETY: the fixture keeps the registry alive; a null bundle is a bare process.
+        unsafe {
+            crate::abi::mr_hal_core_client_identity(
+                registry_ptr,
+                id,
+                client,
+                pid,
+                std::ptr::null(),
+                add,
+            )
+        }
+    };
+    registry.publish_latencies(&[InputLatency {
+        endpoint_id: [1; 16],
+        rate: 48_000,
+        engine_pid: 10,
+        lease: 20,
+        revision: 30,
+        frames: Some(751),
+    }]);
+    assert_eq!(identity(1, 10, true), OK);
+    assert_eq!(registry.start(id, 1, 0), OK);
+    registry.render_client(id, 1);
+    registry.tick();
+    assert_eq!(
+        registry.pin(id).unwrap().input_latency.effective(48_000),
+        751
+    );
+    assert_eq!(identity(2, 11, true), OK);
+    assert_eq!(registry.start(id, 2, 0), OK);
+    registry.render_client(id, 2);
+    registry.tick();
+    assert_eq!(registry.pin(id).unwrap().input_latency.effective(48_000), 0);
+    assert_eq!(registry.stop(id, 2), OK);
+    assert_eq!(identity(2, 11, false), OK);
+    assert_eq!(registry.stop(id, 1), OK);
+    assert_eq!(identity(1, 10, false), OK);
+}
+
+/// Installed behaviour under the driver sandbox: an app on the USB policy is presented as USB
+/// from the bundle coreaudiod names when it registers, and an unregistered or other app is not.
+#[test]
+fn a_sandboxed_registered_app_on_the_policy_is_presented_as_usb() {
+    let fixture = Fixture::new();
+    let id = fixture.add(1, 48_000);
+    let registry = &fixture.registry;
+    let registry_ptr = (&raw const **registry).cast_mut();
+    registry.transport_policy(vec!["com.tencent.tencentmeeting".into()]);
+    let usb = u32::from_be_bytes(*b"usb ");
+    let read = |pid: i32| {
+        registry.transport.get_until(
+            pid,
+            std::time::Instant::now() + crate::transport::QUERY_BUDGET,
+        )
+    };
+    for (client, pid, bundle) in [
+        (1, 4242, c"com.tencent.tencentmeeting"),
+        (2, 4343, c"com.example.Other"),
+    ] {
+        // SAFETY: the fixture keeps the registry alive; the bundle outlives the call.
+        let status = unsafe {
+            crate::abi::mr_hal_core_client_identity(
+                registry_ptr,
+                id,
+                client,
+                pid,
+                bundle.as_ptr(),
+                true,
+            )
+        };
+        assert_eq!(status, OK);
+    }
+    assert_eq!(read(4242), usb);
+    assert_eq!(read(4343), crate::transport::VIRTUAL);
+    assert_eq!(read(4444), crate::transport::VIRTUAL);
+    // SAFETY: as above; removal names no bundle.
+    let removed = unsafe {
+        crate::abi::mr_hal_core_client_identity(registry_ptr, id, 1, 4242, std::ptr::null(), false)
+    };
+    assert_eq!(removed, OK);
+    assert_eq!(read(4242), crate::transport::VIRTUAL);
 }
 
 #[test]

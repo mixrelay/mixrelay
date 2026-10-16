@@ -276,6 +276,17 @@ pub(crate) unsafe extern "C" fn mr_hal_core_create_native(host: *const HostOps) 
     let Some(host) = (unsafe { host.as_ref() }) else {
         return std::ptr::null_mut();
     };
+    Box::into_raw(Box::new(native_registry(
+        *host,
+        crate::transport::ProcessInspection::SYSTEM,
+    )))
+}
+
+/// The registry over the native device operations, inspecting processes through `inspection`.
+pub(crate) fn native_registry(
+    host: HostOps,
+    inspection: crate::transport::ProcessInspection,
+) -> Registry {
     let native = NativeOps {
         inspect,
         create,
@@ -290,7 +301,7 @@ pub(crate) unsafe extern "C" fn mr_hal_core_create_native(host: *const HostOps) 
         requires_replacement,
         same_transport,
     };
-    Box::into_raw(Box::new(Registry::new(native, *host)))
+    Registry::with_inspection(native, host, inspection)
 }
 
 /* Used by the C ABI contract test to compare the C11 and Rust atomic layouts. */

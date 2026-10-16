@@ -5,7 +5,7 @@ const CLIENT_SLOTS: usize = 256;
 struct Client {
     id: AtomicU64,
     pid: AtomicU32,
-    /// Process start (see `transport::process_start`); 0 when unresolved.
+    /// Process start (see `ProcessInspection::process_start`); 0 when unresolved.
     start: AtomicU64,
     active: AtomicBool,
     rendered: AtomicBool,
