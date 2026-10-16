@@ -29,11 +29,11 @@ Build staging is removed after success or failure. These commands do not install
 notarize or publish. Notarization and stapling remain required before publication.
 
 `pnpm desktop:build` builds the universal public app and its native helpers.
-`--driver` is retired. Low-level staging is available through
+Low-level staging is available through
 `scripts/prepare-macos-release-payload.mjs --help`; every input, including the
 engine and removal app, must be explicit. Staging alone is not release qualification.
 
-## Installation and migration
+## Installation
 
 The fixed owned targets are:
 
@@ -48,15 +48,12 @@ The fixed owned targets are:
 
 The package has one fixed component, `customize="never"`, no optional Driver,
 no removal choice and no Installer plug-in. Its signed native transaction verifies
-all inputs and each present installed target. A split installation or missing owned
-component can be repaired; foreign code at an expected path is rejected.
-The existing `MixRelay Driver.app` and `Uninstall MixRelay Driver.app` are verified,
-backed up and retired during commit. Rollback restores them with the prior payload.
-Migration is based on verified ownership, not an older version threshold.
+all inputs and each present installed target. A missing owned component can be
+repaired; foreign code at an expected path is rejected.
 
-App data remains under `io.mixrelay.desktop`; runtime data remains under
-`io.mixrelay.driver.desktop`; device settings remain under `io.mixrelay.driver`.
-Stable service labels, sockets, lifecycle leases and HAL identity remain intact.
+App data and the runtime's control socket live under `io.mixrelay.desktop`, device
+settings under `io.mixrelay.driver`.
+Updates keep service labels, sockets, lifecycle leases and the HAL identity.
 The installer does not rename or delete devices, graphs, settings, recordings or
 authentication. It preserves the original OS-verified installation account and
 binds service HOME, user name and group to that account. Switching login accounts
@@ -89,8 +86,7 @@ On failure, the transaction drains new services, restores files and registration
 reloads the restored HAL when needed and reports incomplete recovery as failure.
 It reopens only roles it actually closed, after verified commit or successful
 rollback, under the original UID. A fresh install does not launch previously
-stopped apps. Legacy roles map to the unified bundle after successful migration.
-Private rollback staging is cleaned under retained leases; cleanup failure is
+stopped apps. Private rollback staging is cleaned under retained leases; cleanup failure is
 reported. No unrelated service or user document is removed.
 
 ## Runtime and removal
@@ -98,11 +94,10 @@ reported. No unrelated service or user document is removed.
 The public editor and internal `--driver-runtime` role use the same MixRelay bundle.
 Closing the editor or a window keeps audio running. Explicit runtime Quit stops
 devices and saves the inactive state before exiting. The service remains available
-and does not revive devices merely because launchd restarts it. The unchanged
-`drivers.json` schema preserves device geometry and directional formats;
-`drivers.json.stopped` records the explicit stop. Reopening MixRelay restores the
-retained inventory. A failed stop/save leaves the runtime menu available and shows
-an error. An older service restored by rollback may ignore the stop marker.
+and does not revive devices merely because launchd restarts it. `drivers.json`
+preserves device geometry and directional formats and records the explicit stop.
+Reopening MixRelay restores the retained inventory. A failed stop/save leaves the
+runtime menu available and shows an error.
 
 `Uninstall MixRelay.app` removes the complete product through the named
 `io.mixrelay.driver.remove` Authorization Services right and fixed signed XPC
@@ -113,8 +108,8 @@ transaction and rollback guards. Partial removals still verify every present tar
 If the Driver plist is missing, fixed lifecycle lease ownership resolves the
 installation account. Absent targets are successful no-ops.
 
-Saved device settings deletion is default-off and deletes only `drivers.json` and
-`drivers.json.stopped` for the original installation account. Graphs, recordings,
+Saved device settings deletion is default-off and deletes only `drivers.json` for
+the original installation account. Graphs, recordings,
 exported work and authentication remain. Cancellation changes no product state.
 Committed success requires a verified reply, absent owned paths and completed
 helper retirement. The helper executes a verified private copy until the client
@@ -136,8 +131,8 @@ brief system-audio interruption and no reboot. Recording/call apps should be qui
 before installing. Internal legal review is in `docs/legal-review.md`.
 
 Source fixtures, signed builds and package inspection are separate from actual
-installation qualification. The final artifact still needs clean install, legacy
-upgrade and rollback, real HAL/device readback, graph/recording/authentication
+installation qualification. The final artifact still needs clean install, update
+and rollback, real HAL/device readback, graph/recording/authentication
 preservation, editor-exit continuity, explicit stop, removal and reinstall checks.
 Record those results in [the product checklist](../../docs/product.md).
 The optional move-to-Trash prompt belongs to macOS Installer; test it through a

@@ -147,9 +147,9 @@ so only real owner/rate/epoch/generation changes reset the context. Such windows
 also break a hysteresis candidate streak. A new graph/clock
 context cannot retain the old context's value.
 
-## Ephemeral authority and compatibility
+## Ephemeral authority
 
-The independent Driver API adds `/api/v1/driver/latency` with claim, publish and
+The Driver API's `/api/v1/driver/latency` route carries claim, publish and
 release messages. The service issues a generation bound to engine incarnation
 and process ID. A different active engine cannot claim that authority. Publishing
 or releasing an old lease is ignored. Destination publications contain endpoint
@@ -162,12 +162,11 @@ publication expires the lease on the service's maintenance pass. Normal engine
 shutdown explicitly releases it. This state never advances or persists the
 inventory revision.
 
-The existing v1 XPC inventory dictionary adds optional `input_latencies` metadata.
-The Rust ABI of the inventory snapshot is unchanged. Old HALs ignore the field;
-new HALs interpret absent metadata from old services as unknown. The engine treats
-an old service's HTTP 404 as compatible absence. Metadata is typed and bounded,
-rejects duplicate identities, and is validated before authoritative inventory
-changes. HAL stale lease/revision fencing is scoped to the authenticated XPC
+Every v1 XPC inventory snapshot carries an `input_latencies` list, empty when no
+engine publishes; the HAL rejects a snapshot without it. Any route error, including
+HTTP 404, is a failed publication that the engine retries on its next tick. Metadata
+is typed and bounded, rejects duplicate identities, and is validated before
+authoritative inventory changes. HAL stale lease/revision fencing is scoped to the authenticated XPC
 connection; reconnect resets the old authority. Disconnect, device configuration
 changes and loss of the OS engine lease clear effective latency.
 
@@ -208,13 +207,21 @@ This is a window-mean content latency estimate, not per-sample timestamp provena
 carried with PCM. Short-term queue variation, asynchronous clocks and SRC phase can
 make an individual impulse differ from the one-second estimate. Active histories
 are checked against exact cached observations, but the estimator does not expose
-per-sample hosted transport timing. Installed engine/HAL property agreement still
-requires the signed installation and impulse procedure below. No installed audio
-qualification or release/install was performed during Stage 2.
+per-sample hosted transport timing. Route accuracy is checked in-process by the
+engine's route integration tests, which compare an impulse's actual delay with the
+reported value without devices. Installed engine/HAL property agreement still
+requires the signed installation and impulse procedure below; see the status at
+the start of that section.
 
 ## Installed verification
 
-Release/install work was not performed by this change. Before a release, run
+Status (2026-10-16): a signed installation built from 408d618 reported a stable
+751-frame input latency on an engine-routed endpoint and cleared it to zero when
+the route was removed. The installed impulse round trip (step 5) has not been run,
+and later changes (the coreaudiod change marker, host-time residence) have not
+been installed.
+
+Before a release, run
 `pnpm signing:check` using the repository's restored signing configuration, then
 `pnpm release:macos --output EMPTY_DIRECTORY`. Install the resulting signed PKG
 through the normal installer and restart the product/CoreAudio as its installer
@@ -224,16 +231,20 @@ requires. Never leave a signing authentication window pending.
 2. With the engine stopped, run `pnpm probe:macos-roundtrip --latency D_UID`.
    Both device scopes, stream latency and safety offset should be zero.
 3. Run `pnpm probe:macos-roundtrip --seconds 5 D_UID` as a direct HAL baseline.
-   It measures ordinary playback/capture, not an engine-only destination.
+   It measures ordinary playback/capture on one clock, so the sample-exact mode
+   applies; it is not an engine-only destination.
 4. Start an A-to-D engine route, with no ordinary playback client writing D.
    Run `pnpm probe:macos-roundtrip --latency D_UID`; the read-only mode creates no
    IOProc and does not disturb the gate. After a stable measurement window it
    should report the validated content delay; unknown paths remain zero.
 5. Run
-   `pnpm probe:macos-roundtrip --json --seconds 10 A_UID D_UID` with a transparent
-   signal path, first dry and then through a plug-in with reported intrinsic delay.
+   `pnpm probe:macos-roundtrip --impulse --json --seconds 10 A_UID D_UID` with a
+   transparent signal path, first dry and then through a plug-in with reported
+   intrinsic delay. A and D run on different clocks and the engine resamples
+   between them, so only impulse timing, not a sample-exact copy, can be compared.
    Compare D input frames with measured host-time delay converted at D's rate,
-   allowing the stated hysteresis threshold and observation variation. With separate
+   allowing the stated hysteresis threshold and observation variation. Exit
+   status 4 means the recording was incomplete; repeat rather than judge it. With separate
    devices the probe turns off the recorder's output streams, so it never writes D;
    a render operation would correctly gate the report to zero.
 
@@ -241,14 +252,18 @@ Steps 4–5 and the clearing check of step 6 are automated for one route by
 `node scripts/lab/macos-latency-acceptance.mjs SOURCE ENDPOINT_ID EVIDENCE_DIR
 --verify-installed-latency [--roundtrip]`. SOURCE is another MixRelay endpoint ID (A,
 which needs the paid edition's second endpoint) or any device UID whose output returns
-on its input; ENDPOINT (D) is an endpoint no saved graph uses. It adds the route to
-the selected graph, waits for a stable report, optionally runs the round trip,
-restores the exact graph and requires the report to clear to zero. Every write
+on its input; no saved graph may use SOURCE or ENDPOINT (D), and D must report zero
+before the run. EVIDENCE_DIR must be an absolute path; use a new directory per run.
+It adds the route to the selected graph, waits for a stable report, optionally runs
+the impulse round trip, restores the exact graph and requires the report to clear to
+zero. The round trip passes when the probe aligned most pulses to one delay, the
+recording is complete, neither device's timestamps jumped, and the reported latency
+is within `max(32, ceil(rate/1000)) + 2` frames of the measured mean (50 frames at 48 kHz):
+the reporter's agreement threshold plus the probe's 2-frame alignment window. Every write
 names the selected graph and runs as an engine operation, so another client's edit
 or selection fails the run instead of being overwritten. `--roundtrip` needs
 microphone permission for the terminal.
 6. Add ordinary playback on D: its reported input latency must become zero. Stop
    that client: the validated engine value should return after the control tick.
    Change rates/graphs, inject transport loss and stop/kill the engine: obsolete
-   values must clear. Repeat with old/new service/HAL combinations; missing fields
-   must remain safe zero. Repeat restart/priming/underrun windows: no new unstable value may be reported.
+   values must clear. Repeat restart/priming/underrun windows: no new unstable value may be reported.

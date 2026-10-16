@@ -17,7 +17,7 @@ Client marking and property reads use pinned atomics without IO-needed locks.
 The serial control path emits input `ltnc` notifications after releasing locks,
 only when the effective integer changes. Stale leases/revisions are ignored;
 engine lease loss, disconnect and rate/configuration changes clear the value.
-The optional v1 inventory field is compatible with older service/HAL peers.
+Every v1 inventory snapshot carries the `input_latencies` list, empty when unknown.
 
 The Stage 2 engine reports measured window-mean latency for validated device
 routes, including HAL loopback sources. Consumer-side native, graph and SRC FIFO
@@ -37,8 +37,9 @@ the engine as D's only rendering client, then compare these separate probes:
   latency and safety offsets in D-rate frames. It creates no IOProc and does not
   disturb the engine-only gate. D input should become known after a stable window;
   the other latency/safety properties remain zero.
-- `pnpm probe:macos-roundtrip --json --seconds 10 A_UID D_UID` plays A and records
-  D to measure host-time impulse delay. Convert that measured delay to D-rate
+- `pnpm probe:macos-roundtrip --impulse --json --seconds 10 A_UID D_UID` plays a
+  pulse train on A and records D to measure host-time impulse delay; A and D run
+  on different clocks, so sample-exact comparison does not apply. Convert that measured delay to D-rate
   frames and compare with the read-only property, allowing
   `max(32 frames, 1 ms)` hysteresis and measurement variation. Repeat dry and with
   a plug-in that reports intrinsic latency. Ensure this recording IOProc does not
@@ -64,8 +65,9 @@ without initializing HAL or contacting the installed engine. The other slice
 has compile/link/export validation, not runtime verification. Building does not
 install the driver or restart CoreAudio.
 
-The engine test executes native callback, device, HAL dispatch, application
-clock and audio-ring fixtures. Native fixture code is built with ASan/UBSan;
+The engine test executes native callback clock, HAL dispatch, application
+clock, audio-ring and PCM-ring fixtures. Device behavior is tested against the
+simulated CoreAudio HAL, not a native fixture. Native fixture code is built with ASan/UBSan;
 this does not imply sanitizer instrumentation of the linked Rust archive.
 Rust transport and lifecycle tests execute the current implementation directly.
 Device-free tests do not prove live audio continuity or physical-clock behavior.
@@ -99,38 +101,45 @@ changes. Latency is measured in host time (with each timestamp's rate scalar) an
 on one device, also in device frames; the devices' reported latency (latency +
 safety offset + stream latency, unknown when a query fails) is printed beside it.
 `--list` prints device UIDs; `--json` prints one object; `--self-test` checks the
-analysis on synthetic damage without devices. It changes no default device or
-device setting. Recording needs microphone permission for the terminal that runs
-it; without it every input is silent and the probe exits with status 3.
+analysis on synthetic damage without devices. Exact-sample tracking needs one
+clock; a path that crosses clocks (an engine route between two devices) is
+resampled, so measure it with `--impulse`, which plays a jittered pulse train and
+reports the arrival delays of the channel that received the most pulses; an incomplete impulse recording exits with
+status 4. It changes no default device or device setting. Recording needs
+microphone permission for the terminal that runs it; without it every input is
+silent and the probe exits with status 3.
 
-The installed Driver continuity test uses normal Rust `Native` clients and the
-production native PCM codecs, with no graph server or session changes:
+The engine's default test suite checks native client PCM continuity hermetically: a
+simulated duplex device loops the output client's callbacks back to the input client
+through the production native callbacks, while an ordinary graph capture client detaches
+between two 240,000-frame observation phases. Missing, repeated, reordered or corrupt
+words, timestamp discontinuities after priming and queue overflows fail it.
+
+The opt-in installed Driver soak uses normal Rust `Native` clients and the production
+native PCM codecs, with no graph server or session changes:
 
 ```sh
 MIXRELAY_TEST_DRIVER_UID='io.mixrelay.audio.endpoint.<exact-32-lowercase-hex-id>' \
 MIXRELAY_TEST_DRIVER_CHANNELS=32 MIXRELAY_TEST_DRIVER_FORMAT=signed24 \
+MIXRELAY_TEST_SOAK_SECONDS=60 \
 node scripts/lab/native-check.mjs cargo test -p mixrelay-engine-service \
   --bin mixrelay-engine-service \
-  macos_devices::live_tests::installed_driver::installed_driver_pcm_continuity_survives_other_client_detach \
-  -- --exact --nocapture --test-threads=1
+  macos_devices::device_tests::installed_driver::installed_driver_pcm_soak \
+  -- --exact --ignored --nocapture --test-threads=1
 ```
 
 Replace the UID placeholder with the actual installed UID. Configure the exact
 device through Driver control beforehand at 48 kHz, matching playback/capture
 width `2`, `32`, or `64`, and native `float32`, `signed16`, `signed24`, or `signed32`.
-Use native volume 1 and mute off; restore settings through the same Driver API
-after the matrix. The test only reads actual directional ASBD tuples before
-connecting. It skips exactly the first 48,000 captured frames as initial priming,
-then requires at least 480,000 fresh indexed frames with every lane matching exact
-PCM16-representable binary words in disjoint channel bands within `[-1, 1)`.
-Missing, repeated, reordered, corrupt or short
+Use native volume 1 and mute off, and route nothing else into the device; restore
+settings through the same Driver API after the matrix. The soak only reads actual
+directional ASBD tuples before connecting. It skips exactly the first 48,000 captured
+frames as initial priming, then requires every lane of every fresh indexed frame to
+match exact PCM16-representable binary words in disjoint channel bands within `[-1, 1)`,
+through the 20-bit identity wrap. Missing, repeated, reordered, corrupt or short
 PCM fails without resynchronization or a rounding tolerance. Native timestamp
-discontinuities after initial priming and any queue overflow also fail. Both native queues
-are handled inside their actual callbacks, using the preceding admitted input
-quantum; the absent first preceding block is the sole queue admission exception.
-An ordinary graph capture client detaches between two 240,000-frame observation
-phases; the producer and observer remain connected until the post-detach phase
-finishes. A 20-second timeout bounds the run before the 20-bit identity wraps.
+discontinuities after initial priming and any queue overflow also fail. An ordinary
+graph capture client detaches halfway through the soak duration.
 Hook storage remains retained until native unregister drains, including failure.
 
 ## Runtime boundaries
@@ -203,19 +212,22 @@ letters/digits/hyphens. Malformed configuration fails startup before publication
 Set this environment variable for the service process (not merely the GUI), then
 restart the service; rebuilding the HAL is unnecessary.
 
-Inventory version 1 has an additive `transport_compatibility` XPC string array.
-Missing and empty arrays both mean empty policy. Old v1 consumers ignore the new
-key; new consumers accept old snapshots. Wrong types, invalid identifiers,
-duplicates and oversized arrays reject the entire snapshot without replacing the
-last valid inventory/policy. Existing authority/generation fencing also applies.
-The local C snapshot ABI grows with the field; rebuild its callers together.
+Every inventory version 1 snapshot carries a `transport_compatibility` XPC string
+array; an empty array means empty policy. A missing key, wrong types, invalid
+identifiers, duplicates and oversized arrays reject the entire snapshot without
+replacing the last valid inventory/policy. Existing authority/generation fencing
+also applies. The local C snapshot ABI carries the field; rebuild its callers together.
 
 AddDeviceClient copies nullable callback bundle storage and records device/client,
-PID and process start time; RemoveDeviceClient drops that record. Each lookup
-checks PID plus `PROC_PIDTBSDINFO` start seconds/microseconds, so a recycled PID
-cannot borrow a previous identity. Known callback identities across all devices
-for that incarnation take precedence over discovery, matching the process-wide
-scope of decisions.
+PID and process start time when inspection allows it; RemoveDeviceClient drops
+that record, and the PID's bundle when its last client goes. A PID with a
+registered callback bundle answers from that bundle, as Loopback's ARK driver
+does, even when inspection fails: coreaudiod's sandbox denies
+`proc_pidinfo`/`proc_pidpath` for other processes. The `PROC_PIDTBSDINFO` start
+query is still attempted within the property-get deadline; when start
+seconds/microseconds are readable and differ from the registered incarnation, the
+bundle is retired, so a recycled PID cannot borrow a previous identity. Only PIDs
+without a registered bundle fall through to discovery.
 Unknown identities use a bounded 64-request worker queue: `proc_pidpath` → enclosing
 `.app` → `CFBundleIdentifier`. Discovery never holds IO registry locks. Sandbox
 failures return `virt`; negative discovery retries after two seconds, with at most

@@ -18,16 +18,14 @@ pnpm desktop:build --bundles deb
 node scripts/check-linux-package.mjs /absolute/MixRelay_VERSION_ARCH.deb
 ```
 
-`--bundles rpm` selects RPM. `--driver` is retired. Tauri consumes the canonical
-`tauri.conf.json` and `tauri.linux.conf.json`; it prepares both matching native
-services and records `/usr/share/mixrelay-driver/version.json` only when the
-Cargo and desktop versions agree. This stable internal receipt path is retained.
-The product build and inspection CLI require all three executables, the device
-service unit, session activation, policy, remover, complete agreements and matching
-version receipt. A legacy editor-only payload cannot pass as a complete product.
-Source validation retains explicit legacy fixture support for migration tests.
-Inspection checks ownership, permissions, bounded ELF headers, dependencies and
-exact current lifecycle hooks without executing or installing payloads.
+`--bundles rpm` selects RPM. Tauri consumes the canonical `tauri.conf.json` and
+`tauri.linux.conf.json`; it prepares both matching native services and records
+`/usr/share/mixrelay-driver/version.json` only when the Cargo and desktop versions
+agree. The inspection CLI accepts only the `mix-relay` package and requires all
+three executables, the device service unit, session activation, policy, remover,
+complete agreements and a matching version receipt. It checks ownership,
+permissions, bounded ELF headers, dependencies and exact lifecycle hooks without
+executing or installing payloads.
 
 Use the distribution package manager to resolve dependencies:
 
@@ -53,52 +51,45 @@ cd NEW_BUILD_DIRECTORY
 makepkg --noconfirm --clean
 ```
 
-The script name is retained for compatibility; its package is `mix-relay`.
-The recipe pins payload SHA-256 and disables stripping to preserve inspected
-executable bytes. It needs Debian inspection tools on the preparation host and
-normal Arch build tools when running `makepkg`.
+The script builds the `mix-relay` package. The recipe pins payload SHA-256 and
+disables stripping to preserve inspected executable bytes. It needs Debian
+inspection tools on the preparation host and normal Arch build tools when running
+`makepkg`.
 
-## Ownership, migration and lifecycle
+## Ownership and lifecycle
 
-DEB replaces/conflicts with `mix-relay-driver`; RPM obsoletes/conflicts with it;
-Arch replaces/conflicts with it. These are unversioned ownership migrations so
-an unreleased version reset cannot strand a newer split package. The single
-package owns the editor, both services, WirePlumber policy and full remover.
-There is one public launch entry and one public uninstall entry. Stable internal
-service, settings, policy, socket and receipt paths remain unchanged.
+The package owns the editor, both services, WirePlumber policy and remover.
+There is one public launch entry and one public uninstall entry.
 
 The user service is `/usr/lib/systemd/user/mixrelay-driver.service`. A hidden XDG
 autostart entry starts it at login. Installation reloads signed-in users' managers
 and starts their existing user units; audio never runs as root or through a
-competing global service. The launch entry ensures the service is available before
-opening MixRelay. Closing the editor or its window keeps audio running.
-Explicit runtime Quit stops devices and persists inactive state; service restart
-alone does not reactivate them. `drivers.json` retains the previous schema;
-`drivers.json.stopped` records the stop. Reopening MixRelay restores retained
-devices. Failed stop/save keeps the runtime available and reports an error.
-An older service restored by rollback may ignore the stop marker.
+competing global service. Closing the editor or its window keeps audio running.
+Explicit runtime Quit stops devices and persists the inactive state with the device
+settings; service restart alone does not reactivate them. Reopening MixRelay
+restores the saved devices. Failed stop/save keeps the runtime available and
+reports an error.
 
 Package lifecycle hooks reject observed active editor and background processes,
 stop only owned user services and wait for their exact processes before replacing
 files. Install/upgrade starts the existing user service after replacement.
-Old-package removal during upgrade does not stop the new service. Removal reloads
-user service definitions after deleting the unit and autostart entry. Arch's
-package-scoped PreTransaction hook uses AbortOnFail to reject active-process
-upgrade/removal before file changes.
+Removing the previous version during an upgrade does not stop the new service.
+Removal reloads user service definitions after deleting the unit and autostart
+entry. Arch's package-scoped PreTransaction hook uses AbortOnFail to reject
+active-process upgrade/removal before file changes.
 
-Device settings remain at `$XDG_CONFIG_HOME/mixrelay-driver/drivers.json`, or the
-existing `~/.config/mixrelay-driver` fallback. App graphs, settings, recordings and
-authentication keep their existing storage locations. Installation and update do
-not delete them. Closing the editor does not change device or runtime ownership.
+Device settings are stored at `$XDG_CONFIG_HOME/mixrelay-driver/drivers.json`, or
+under `~/.config/mixrelay-driver` when `XDG_CONFIG_HOME` is unset. Installation and
+update do not delete device settings, app graphs, settings, recordings or
+authentication. Closing the editor does not change device or runtime ownership.
 
 The public remover removes `mix-relay` through the package manager, using the
-session's registered authentication agent or its standard terminal prompt.
-Debian requires `xterm | x-terminal-emulator`; RPM requires `xterm`. MixRelay does
-not start its own authentication agent. The settings-deletion choice is default-off
-and applies only after successful removal, to the current user's exact device
-settings and stopped marker. It never recursively deletes a directory. Graphs,
-recordings, exports and authentication remain. Direct package-manager removal
-preserves all per-user settings.
+session's registered polkit authentication agent; MixRelay does not start its own
+agent. It then clears the paid-license sign-in. The choice to delete saved graphs
+and settings is default-off and applies only after successful removal, to fixed
+application-owned paths that pass a symlink-free path check. Recordings, exported
+projects and trial protection remain. Direct package-manager removal preserves all
+per-user settings.
 
 ## Documents and qualification
 
@@ -110,7 +101,7 @@ Simplified Chinese. Removal follows LC_ALL, LC_MESSAGES, then LANG and falls bac
 to English for unsupported locales.
 
 Source contracts and metadata inspection do not qualify actual installation.
-DEB, RPM and Arch still require distribution-specific clean install, split-package
-migration, upgrade/removal, user-session audio and preserved device/graph/settings/
+DEB, RPM and Arch still require distribution-specific clean install,
+upgrade/removal, user-session audio and preserved device/graph/settings/
 recording/authentication checks with the complete artifact. Record observed results
 and remaining work in [the product checklist](../../docs/product.md).

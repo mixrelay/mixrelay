@@ -4,22 +4,20 @@ Run Cargo checks from the repository root through the supported wrapper. It
 prepares the HOST Cargo static libraries required by the native fixtures:
 
 ```sh
-node scripts/lab/native-check.mjs cargo test -p mixrelay-macos-test-support
+node scripts/lab/native-check.mjs cargo test -p mixrelay-engine-service --bin mixrelay-engine-service native_callback_and_hal_contracts -- --exact
 ```
 
-Create or select a dedicated MixRelay Virtual IO with at least two input and two
-output channels, then explicitly provide its current CoreAudio UID. The fixture
-does not select a default device, guess another device, or recreate a deleted
-Virtual IO. Missing selection or unavailable channels fail the test, without skips.
+`cargo test -p mixrelay-macos-test-support` only builds the fixtures and tests the
+bounded process runner; the engine test above executes the fixtures.
 
-```sh
-MIXRELAY_TEST_ENDPOINT_UID='io.mixrelay.audio.endpoint.<actual-device-uuid>' node scripts/lab/native-check.mjs cargo test -p mixrelay-macos-test-support --lib -- --test-threads=1
-MIXRELAY_TEST_ENDPOINT_UID='io.mixrelay.audio.endpoint.<actual-device-uuid>' node scripts/lab/native-check.mjs cargo test -p mixrelay-engine-service --bin mixrelay-engine-service -- --test-threads=1
-```
+The crate builds the native C contract tests (callback clock, HAL bridge,
+application clock and PCM rings) with ASan and UBSan, and
+`assert_native_contracts` runs each one in an owned, bounded process. None of
+them selects, creates or changes an audio device. `device_io_timing_layout`
+reports the callback timing layout the engine's C header declares, which the
+engine compares with its Rust definition.
 
-Replace the placeholder with the exact UID of the explicitly chosen test device.
-`DeviceFixture` owns only its process-private aggregate and captures the selected
-member UID once. Disconnect/reconnect removes and recreates that aggregate with
-the same member; it does not delete the member or alter system default devices.
-Other native tests may require their own explicit fixture variables, including
-the primary/secondary device selections for native group lifetime tests.
+Engine device recovery, buffer, sample-rate and private-group lifetime tests run
+by default against the transport's simulated `CoreAudio` HAL: the production
+aggregate and device-preparation code runs unchanged and only the `CoreAudio`
+calls are simulated, so they need no installed device or environment selection.

@@ -8,7 +8,7 @@ MixRelay는 출시 전 개발 중인 macOS·Linux 오디오 라우팅 제품이�
 ## 제품 구성
 
 무료·유료 기능은 같은 MixRelay 제품·설치본·버전을 사용한다. Driver는 내부 장치·오디오 구성요소다.
-단일 제품의 설치·업데이트·기존 분리 설치본 이관 기준은 아래 설치와 판매 절을 따른다.
+단일 제품의 설치·업데이트 기준은 아래 설치와 판매 절을 따른다.
 
 | 구성 | 역할·한도 | 저장 |
 | --- | --- | --- |
@@ -78,7 +78,6 @@ macOS의 명시적 **백그라운드 실행 중지**는 편집 앱 종료와 구
 런처는 같은 MixRelay 실행 파일의 내부 백그라운드 모드를 자식으로 실행한다.
 앱과 오디오 구성요소는 함께 업데이트하며, 런처는 Dock 중지 신호를 실행부에 전달하고 종료를 기다린다.
 로그인 시 자동 실행·종료 후 자동 재시작은 사용하지 않는다. macOS의 백그라운드 활동 허용 설정을 존중한다.
-출시 전 시험에 사용한 `SMAppService` Agent는 실행부·엔진 소유권이 없는 최초 연결에서 등록 해제한다.
 시스템이 Driver 실행부에 보내는 AppKit 종료·SIGTERM은 Driver 종료와 같은 경로에서 처리한다.
 새 명령과 대기 중 장치 활성화를 차단하고 HAL 장치·루프백을 중지·저장한 뒤
 캡처·그래프·녹음을 마무리하고 실행부를 종료한다. 실행부가 강제로 사라지면
@@ -134,7 +133,7 @@ Driver는 장치 구성마다 다시 설치하지 않는다. 기본 장치 이�
 
 HAL의 `kAudioDevicePropertyTransportType`은 기본적으로 `virt`다. 가상 장치를 숨기거나 거부하는 앱의 정확한 번들 ID에만 `usb `를 응답한다. Driver 서비스가 목록을 소유하며 기본값은 Loopback/ARK 현장 동작에서 확인된 `com.tencent.tencentmeeting`, `net.whatsapp.WhatsApp`, `com.motu.DigitalPerformer`, `com.vmware.fusion`, `com.goodnotesapp.x`다. 이는 표시 호환성으로, 권한·장치 UID·오디오 경로를 바꾸지 않는다.
 
-v1 inventory의 선택 필드 `transport_compatibility`는 없으면 빈 목록이다. 잘못된 목록과 오래된 세대는 마지막 유효 정책을 보존한다. PID와 프로세스 시작 시각으로 신원을 구분하고, 콜백 번들 ID를 복사한다. 알 수 없거나 샌드박스가 조회를 막으면 `virt`를 유지한다. 목록 변경 시 잠금을 해제한 뒤 `tran` 속성 변경을 알린다. 서비스 환경 변수 `MIXRELAY_TRANSPORT_COMPATIBILITY`로 HAL 재빌드 없이 개발 목록을 교체하거나 빈 값으로 끌 수 있다. [규격·설치본 확인 절차](../native/macos/hal-driver/README.md#transport-type-compatibility)를 따른다.
+v1 inventory의 `transport_compatibility` 배열은 필수다. 빈 배열은 빈 정책이고, 필드가 없거나 잘못된 목록·오래된 세대의 스냅샷은 거부해 마지막 유효 인벤토리와 정책을 보존한다. CoreAudio가 클라이언트 등록 때 알려 준 콜백 번들 ID를 복사해 그 PID의 마지막 클라이언트가 제거될 때까지 응답에 쓴다. 설치된 HAL은 샌드박스 때문에 다른 프로세스를 조회할 수 없으므로 등록된 번들은 조회가 실패해도 응답한다. 시작 시각 조회는 속성 읽기 기한 안에서 계속 시도하며, 읽을 수 있고 등록 때와 다르면 PID가 재사용된 것으로 보고 그 번들을 버린다. 등록된 번들이 없고 조회도 막히면 `virt`를 유지한다. 목록 변경 시 잠금을 해제한 뒤 `tran` 속성 변경을 알린다. 서비스 환경 변수 `MIXRELAY_TRANSPORT_COMPATIBILITY`로 HAL 재빌드 없이 개발 목록을 교체하거나 빈 값으로 끌 수 있다. [규격·설치본 확인 절차](../native/macos/hal-driver/README.md#transport-type-compatibility)를 따른다.
 
 ### 가상 장치의 버퍼 관리
 
@@ -272,14 +271,14 @@ Driver 장치 관리 기능도 같은 MixRelay에서 제공한다. OS 드라이�
 설치 파일은 구성요소 선택 없이 MixRelay 전체를 설치하며 별도 Driver 실행 앱을 제공하지 않는다.
 앱·Driver 중 어느 부분이 변경돼도 같은 MixRelay 버전과 전체 설치본으로 업데이트한다.
 사용자에게 앱·Driver별 버전·다운로드·업데이트 선택을 요구하지 않는다.
-통합·업데이트는 기존 장치·그래프·설정·녹음·인증을 보존하고 기존 분리 설치본의 이관을 다룬다.
+업데이트는 기존 장치·그래프·설정·녹음·인증을 보존한다.
 
 출시 전 제품 버전은 `0.1.0`을 유지한다. Cargo workspace·앱 manifest·Tauri가 같은 버전을 사용하며
-`pnpm product:version`으로 대조한다. 실제 설치본 이관 검증과 소스·패키지 검사는 구분한다.
+`pnpm product:version`으로 대조한다. 실제 설치본 검증과 소스·패키지 검사는 구분한다.
 
 2026-10-12 소스 통합과 macOS 전체 Developer ID 서명 PKG 빌드를 완료했다.
 완성 패키지의 단일 고정 설치·모든 구성요소 0.1.0·Universal 2·게시자 서명을 확장 검사했다.
-기존 앱 퇴역·롤백·데이터 보존은 소스 fixture로 확인했다. 실제 호스트 이관과 Linux 배포판의
+롤백·데이터 보존은 소스 fixture로 확인했다. 실제 호스트 설치·업데이트와 Linux 배포판의
 전체 패키지 설치 검증, 공증·공개 배포는 아래 설치·공개 파일 검증 범위에 남는다.
 검사 근거는 [검증 현황](validation/current.md)을 따른다.
 
@@ -288,8 +287,7 @@ Driver 장치 관리 기능도 같은 MixRelay에서 제공한다. OS 드라이�
 [macOS](../packaging/macos/README.md)·[Linux](../packaging/linux/README.md)에 둔다.
 
 - 설치 파일은 편집 앱·실행부·엔진·가상 장치를 함께 설치한다. Driver 선택 단계와 별도 Driver 앱은 없다.
-  macOS는 하나의 native 트랜잭션으로 기존 파일을 백업·교체하고, 이전 Driver 관리 앱·제거 앱을 정리한다.
-  실패 시 같은 트랜잭션에서 기존 파일을 복원한다. Linux의 `mix-relay` 패키지가 이전 `mix-relay-driver` 소유 파일을 인수한다.
+  macOS는 하나의 native 트랜잭션으로 기존 파일을 백업·교체하고, 실패 시 같은 트랜잭션에서 기존 파일을 복원한다.
 - 업데이트는 장치·그래프·설정·녹음·인증을 보존한다. 시작 시·24시간마다 조회하고 수동 확인을 제공한다.
   MixRelay 하나의 설치 버전과 게시 버전을 표시하고 미게시/실패를 최신으로 표시하지 않는다.
   다운로드 시 목록을 다시 확인해 링크만 열며 자동 설치하지 않는다.

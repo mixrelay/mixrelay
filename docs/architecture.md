@@ -4,7 +4,7 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 
 ## 계층과 크레이트
 
-의존은 위 계층에서 아래 계층으로만 향한다. 같은 계층 안의 의존은 표에 적은 것만 허용한다. `pnpm check:crate-layers`가 `cargo metadata`로 일반·build·dev 의존 모두에 대해 이 표를 검사한다. dev 의존에는 테스트 지원 크레이트가 추가로 허용된다.
+의존은 위 계층에서 아래 계층으로만 향한다. 같은 계층 안의 의존은 표에 적은 것만 허용한다. `pnpm check:crate-layers`가 `cargo metadata`로 일반·build·dev 의존 모두를 크레이트별 허용 목록과 비교하고, 표에 없는 워크스페이스 크레이트도 실패로 처리한다. dev 의존에는 테스트 지원 크레이트가 추가로 허용된다.
 
 | 계층 | 크레이트(경로) | 책임 | 허용 의존 |
 | --- | --- | --- | --- |
@@ -21,7 +21,7 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 | 계약 | `mixrelay-control-protocol` | 편집 앱 ↔ 엔진 제어 메시지 | 기반, 모델 |
 | 계약 | `mixrelay-driver-control` | 엔진·앱 ↔ Driver 서비스 제어, 지연 권한 | 기반 |
 | 서비스 부품 | `mixrelay-control-server` | 제어 HTTP 서버, 작업 영수증 | 기반, 모델, 계약 |
-| 서비스 부품 | `mixrelay-processor-host` | VST3·CLAP 플러그인 호스팅 | 기반, 모델, 계약, `vendor/truce-rack-*` |
+| 서비스 부품 | `mixrelay-processor-host` | 플러그인 호스팅(VST3·CLAP, Apple의 AU·AUv3, Linux의 LV2)과 플러그인 편집기 표시 | 기반, 모델, `control-protocol`, vendor 플러그인 형식 |
 | macOS 어댑터 | `mixrelay-macos-transport`(native/macos/common) | CoreAudio IO·FIFO 탭·인벤토리 XPC 인코딩 | 기반 |
 | macOS 어댑터 | `mixrelay-hal-core`(native/macos/hal-driver/rust) | AudioServerPlugIn 정책: 장치·속성·전송·지연 판정 | 기반, `macos-transport` |
 | macOS 어댑터 | `mixrelay-process-tap`(native/macos/process-tap) | 앱 오디오 캡처(process tap) | 기반, `macos-transport` |
@@ -33,9 +33,10 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
 | 앱 | `mixrelay-engine-service`(apps/engine-service) | 엔진 실행 파일: 조립·OS 연결·실행 수명 | 앱 외 전부 |
 | 앱 | `mixrelay-driver-service`(apps/driver-service) | Driver 서비스 실행 파일 | 앱 외 전부 |
 | 앱 | `mixrelay-desktop`(apps/desktop/src-tauri) | 편집 앱과 백그라운드 실행부(Tauri) | 앱 외 전부 |
-| 테스트 지원 | `mixrelay-test-support`, `mixrelay-macos-test-support`, `tests/fixtures/*` | 테스트 도구 | dev-dependency로만 사용 |
+| 테스트 지원 | `mixrelay-test-support`, `mixrelay-macos-test-support`, `tests/fixtures/*`, `mixrelay-pipewire-observer`(native/linux/pipewire/tests/buffer-observer) | 테스트 도구·진단용 preload | dev-dependency로만 사용 |
+| vendor | `truce-rack-core`·`truce-rack-clap`·`truce-rack-vst3`(vendor/) | 플러그인 형식 어댑터(외부 코드) | `truce-rack-core`(clap·vst3) |
 
-알려진 예외: `mixrelay-processor-host`가 플러그인 설명자·진단·편집기 프레임 타입 때문에 `mixrelay-control-protocol`에 의존한다. 검사는 이 의존만 허용하고, 같은 종류의 의존을 새로 만들지 않는다.
+알려진 예외: `mixrelay-processor-host`가 플러그인 설명자·진단·편집기 프레임 타입 때문에 `mixrelay-control-protocol`에 의존한다. `control-server`는 제어 서버라서 계약을 구현하는 책임상 계약에 의존하고, 그 밖의 서비스 부품이 계약에 의존하는 것은 이것만 허용한다. 같은 종류의 의존을 새로 만들지 않는다. `mixrelay-processor-host`는 플러그인 형식과 편집기 표시 때문에 플랫폼별 코드(AppKit, X11, AU·LV2)도 가지며, 이 코드는 `cfg` 모듈 안에 둔다.
 
 ## 의존 규칙
 - 모델·계약·서비스 부품은 플랫폼 중립이다. OS 어댑터와 앱에 의존하지 않고 OS API를 직접 호출하지 않는다. OS 기능이 필요하면 trait을 정의하고 어댑터나 앱이 구현한다.
@@ -51,7 +52,7 @@ Rust 워크스페이스의 크레이트 책임, 의존 방향, 새 코드를 둘
   - 프로세스 사이 메시지 형식 → `control-protocol`(편집 앱 ↔ 엔진), `driver-control`(↔ Driver 서비스)
   - CoreAudio·PipeWire 호출 → 해당 OS 어댑터. 엔진 쪽 OS 연결은 `apps/engine-service`의 `macos_devices`·`linux_*`
   - HAL 동작 → `hal-core`(Rust), ABI 연결만 C 브리지
-- 테스트는 단위 테스트를 모듈 옆(`#[cfg(test)]`, `*_tests.rs`)에, 공개 API만 쓰는 테스트를 크레이트의 `tests/`에 둔다(M-INTEGRATION-TESTS). 테스트용 가짜는 `#[cfg(test)]` 뒤에 두고 제품 코드의 가시성을 넓히지 않는다.
+- 테스트 배치는 [Rust 작업 규칙](rust-guidelines.md)의 테스트 절을 따른다. 테스트용 가짜는 `#[cfg(test)]` 뒤에 두고 제품 코드의 가시성을 넓히지 않는다.
 
 ## 크레이트를 만들 때
 - 플랫폼 중립 크레이트는 `crates/`, OS 어댑터는 `native/<os>/`, 실행 파일은 `apps/`에 둔다. 이름은 `mixrelay-<역할>`이다. 기존 C 라이브러리 바인딩만 담는 새 크레이트는 `-sys`로 끝낸다(M-FFI-NAMING).

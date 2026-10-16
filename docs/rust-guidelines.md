@@ -3,7 +3,7 @@
 MixRelay의 Rust 코드에 적용하는 규칙이다. 작업에 해당하는 조건의 절을 먼저 읽는다. 크레이트 책임과 의존 방향은 [코드 구조와 책임](architecture.md)이 정한다. 괄호 안은 근거다: MS = [Microsoft Pragmatic Rust Guidelines](https://microsoft.github.io/rust-guidelines/agents/all.txt), API = [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/checklist.html), DP = [Rust Design Patterns](https://rust-unofficial.github.io/patterns/), Book = [The Rust Programming Language](https://doc.rust-lang.org/book/).
 
 ## 강제 수단
-- **지금 검사가 막는 것:** rustc `rust_2018_idioms`·`unreachable_pub`·`unused`, clippy `all`·`pedantic`·`perf`(deny), `clippy.toml`의 함수 80줄·인자 5개 한도, `cargo fmt`, `pnpm check:crate-layers`(의존 방향). CI(`pnpm lab:test`, macOS·Linux)는 fmt·clippy·의존 방향 검사와 `cargo test --workspace --lib --bins`를 실행한다. `pnpm check:rust`는 여기에 `cargo machete`(쓰지 않는 의존)와 Rust 커버리지를 더한 로컬 종합 검사다.
+- **지금 검사가 막는 것:** rustc `rust_2018_idioms`·`unreachable_pub`·`unused`, clippy `all`·`pedantic`·`perf`(deny), `clippy.toml`의 함수 80줄·인자 5개 한도, `cargo fmt`, `pnpm check:crate-layers`(의존 방향). CI(`pnpm lab:test`, macOS·Linux)는 의존 방향 검사, fmt, clippy, `cargo test --workspace --lib --bins`, 제어 UI 테스트를 실행하고, macOS에서는 `pnpm check:native`, 왕복 프로브 분석 자체 시험(`probe:macos-roundtrip --self-test`), 빌드·서명 도구 테스트(`pnpm test:scripts`)를 더한다. `pnpm check:rust`는 로컬 검사로 fmt, `cargo machete`(쓰지 않는 의존), `--all-features` clippy, Rust 커버리지를 실행한다.
 - **규칙이지만 아직 검사가 막지 않는 것:** 아래의 `unwrap`·`expect` 금지, SAFETY 주석, 문자열 에러 금지, 모듈 크기. 리뷰에서 확인하고, 검사를 추가할 때 이 목록을 갱신한다.
 - 린트를 끄는 새 코드는 `#[allow]` 대신 `#[expect(lint, reason = "...")]`를 쓴다(MS M-LINT-OVERRIDE-EXPECT). `restriction`·`nursery` 그룹은 통째로 켜지 않고 항목을 골라 켠다([Clippy](https://doc.rust-lang.org/clippy/lints.html)). 코드에 `#![deny(warnings)]`를 쓰지 않는다(DP 안티패턴).
 
@@ -57,11 +57,12 @@ MixRelay의 Rust 코드에 적용하는 규칙이다. 작업에 해당하는 조
 - 실시간 경로가 쓰는 PCM·공유 메모리 버퍼는 비실시간에서 기존 공통 fallible 예약(`try_reserve*`)으로 준비하고, 실패하면 부분 할당을 회수하고 활성 오디오를 유지한다([제품 문서](product.md) "공통 안전·이력 정책"). 그 밖의 컬렉션은 반복 사용 시 재사용하고 크기를 알면 `with_capacity`로 만든다(MS M-MEM-REUSE, [Rust Performance Book](https://nnethercote.github.io/perf-book/heap-allocations.html)).
 
 ## 테스트를 쓰거나 고칠 때
-- 기본 테스트는 개발 Mac, macOS CI, Linux CI에서 같은 결과여야 한다. 실제 장치·설치본·서비스 소켓·환경 변수·외부 도구(`/usr/bin/leaks` 등)·실제 경과 시간에 기대지 않고, 위 경계의 가짜나 합성 장치(`macos_devices::tests::synthetic_device`, `simulated`)로 돈다. 설치 환경의 제약(HAL 샌드박스 등)은 테스트 기본값으로 둔다([개발 작업 규칙](development.md)).
+- 기본 테스트는 개발 Mac, macOS CI, Linux CI에서 같은 결과여야 한다. 실제 장치·설치본·서비스 소켓·사용자 키체인·환경 변수·외부 도구(`/usr/bin/leaks` 등)·실제 경과 시간에 기대지 않고, 위 경계의 가짜나 합성 장치(`macos_devices::tests::synthetic_device`, `simulated`)로 돈다. 설치 환경의 제약(HAL 샌드박스 등)은 테스트 기본값으로 둔다([개발 작업 규칙](development.md)).
+- 라이브러리의 `#[cfg(test)]`는 그 크레이트 자신의 단위 테스트에만 적용된다. 같은 패키지의 `--bins` 테스트나 다른 크레이트의 테스트가 링크하는 라이브러리는 제품 설정으로 컴파일되므로, 키체인·OS 서비스 같은 실제 의존을 `cfg(test)` 기본값으로 피하지 않는다. 생성 설정의 필수 인자로 받고 제품 진입점만 실제 구현을 넘긴다(예: `EngineGraphControllerConfig::paid_access`). 테스트 빌드마다 서명이 바뀌어 키체인 승인 창이 매번 뜬다.
 - `#[ignore]`로 실패를 숨기지 않는다. 검증할 동작은 기본 테스트로 옮긴다. 장시간 soak·벤치마크만 ignore할 수 있고, 그 이유를 `#[ignore = "..."]`에 쓴다.
 - 테스트 전용 가짜·생성자·우회는 `#[cfg(test)]`나 테스트용 feature 뒤에 둔다. 테스트 때문에 제품 코드의 공개 범위를 넓히지 않는다(MS M-TEST-UTIL).
 - 정의를 되풀이하는 테스트(상수 비교, 구현 분기 따라 쓰기)를 쓰지 않는다. 실제 신호·시각·상태로 관찰 가능한 동작을 확인하고, 결함을 막는 테스트는 결함을 넣었을 때 실패하는지 확인한다(MS M-TAUTOLOGICAL-TESTS).
-- 단위 테스트는 모듈 옆에 둔다. 새 코드는 `foo/tests.rs`(`#[cfg(test)] mod tests;`) 형식을 쓴다. CI와 커버리지는 `--lib --bins` 대상만 실행하므로, 크레이트의 `tests/` 통합 테스트는 그 명령에 `--tests`가 더해질 때까지 새로 만들지 않는다(Book 11.3, MS M-INTEGRATION-TESTS).
+- 단위 테스트는 모듈 옆에 둔다. 새 코드는 `foo/tests.rs`(`#[cfg(test)] mod tests;`) 형식을 쓴다. CI는 `--lib --bins`, 커버리지(`pnpm coverage:rust`)는 `--lib` 대상만 실행한다. 실행 파일(`--bins`) 테스트는 커버리지에 잡히지 않고, 크레이트의 `tests/` 통합 테스트는 어느 쪽도 실행하지 않으므로 두 명령에 `--tests`가 더해질 때까지 새로 만들지 않는다(Book 11.3, MS M-INTEGRATION-TESTS).
 - 복구 가능한 실패는 `Err`·`None`을 확인하고, 의도한 panic 계약은 `#[should_panic(expected = "...")]`로 확인한다(Book 11.1).
 - 반복을 기다리는 테스트 루프에는 횟수 상한을 두고, 진행이 없으면 실패하게 한다. 테스트가 멈추면 안 된다.
 
