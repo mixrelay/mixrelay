@@ -10,6 +10,14 @@ PCM 획득 시각을 native ring·부분 읽기·SRC·공유 application clock v
 독립 입력을 공통 획득 cursor로 읽는다. timestamp snapshot이나 FIFO residence를
 개별 PCM 구간의 시각으로 대신 사용하지 않는다.
 
+현재 설치 엔진은 `fdd2859` 빌드다. 새 설치기의 정상 앱 재실행 후 앱→가상 출력·녹음 입력은
+둘 다 통과했다. 물리 입력 경유 보고는 정상화됐지만 왕복 임펄스 지연이 변해 수락하지 않았다.
+`cf6d868`·`fdd2859`는 설치기 재실행의 권한 책임과 출력에 도달하지 않는 입력의 정렬 참여를 고쳤다.
+후속 `4252373`은 최초 그래프 시작의 PCM 경계·실제 SRC slab 피드백 목표·획득 좌표 기반
+입력 지연 측정을 보강했다. workspace lib/bin은 37개 실행 파일 기준 2,302개 통과·0개 실패·
+8개 ignore이며, fmt·32개 crate 계층·workspace all-targets clippy `-D warnings`도 통과했다.
+아래 이력의 이전 설치본 통과와 구분한다.
+
 - 44.1/48kHz, +300/−200ppm, 64/512-frame native callback과 별도 출력 pacing을
   실제 native callback/SRC/compiled graph 경로로 구동했다. 20초 합성 PCM의
   초기 0.25초 이후 197개 이벤트가 1 graph frame 이내로 정렬됐고 graph RT 할당은 0이다.
@@ -31,7 +39,7 @@ PCM 획득 시각을 native ring·부분 읽기·SRC·공유 application clock v
   Universal HAL의 링크·서명 검증·factory/COM probe를 확인했다. native/graph/회수 경계는
   합성 HAL과 주입된 장애로 검사한다. 전용 키체인 잠금 해제와 실제 앱·PKG 서명 시험도 통과했다.
 - 위 변경을 담은 Universal 앱·서비스·HAL과 서명된
-  [설치 파일](/Volumes/dev/mixrelay-release-20261017-capture-stability/MixRelay-Installer-0.1.0.pkg)을
+  첫 `MixRelay-Installer-0.1.0.pkg`를
   2026-10-17 11:49 KST에 빌드했다. 패키지의 Apple Developer ID Installer 서명과
   trusted timestamp를 확인했다. SHA-256은
   `481b7e177e1fa6c83d300377df47dedbc52e732ec2cb85b4f210efb31ca25338`이다.
@@ -47,7 +55,7 @@ PCM 획득 시각을 native ring·부분 읽기·SRC·공유 application clock v
 - 설치된 실행부의 native 앱 캡처는 117개 callback·59,904개 경과 프레임과 유효 시각을 확인했다.
   그러나 실제 앱 캡처 → SRC → 공유 IPC → graph 수락 시험은 입력 meter가 0으로 남아 미통과다.
   native callback 진행을 전체 PCM 전달 성공으로 취급하지 않는다. 시험 그래프와 신호 앱은 회수했으며
-  원인을 추적 중이다. 원시는 `/tmp/mixrelay-installed-stability-20261017/`에 보존한다.
+  후속 원인과 재검증은 아래에 구분한다. 원시는 `/tmp/mixrelay-installed-stability-20261017/`에 보존한다.
 - 후속 분리 시험에서 실제 native 캡처/SRC의 44.1→48→44.1kHz 전환과 설치본의
   앱 캡처 → 녹음 노드 입력은 통과했다. 가상 출력과 함께 정렬되는 경우로 범위를 좁혔다.
   늦게 준비된 입력의 안전한 PCM 경계가 이전보다 과거로 이동할 때, 기존 공통 cursor가
@@ -62,13 +70,79 @@ PCM 획득 시각을 native ring·부분 읽기·SRC·공유 application clock v
   [macos-installed-capture-acceptance.mjs](../../scripts/lab/macos-installed-capture-acceptance.mjs)의
   `--help`로 사용법을 확인한다. 가상 출력과 녹음 입력을 나눠 측정하며 원래 그래프·자식 프로세스를
   복원한다. 응답 유실·측정 실패·SIGINT·동시 편집 때의 회수와 외부 변경 보존도 검사한다.
-  이 후속 수정의 설치본 재확인은 아직 남아 있다.
+  이 후속 수정의 설치본 결과는 다음과 같다.
 - 후속 엔진 `df523ee`를 ARM·Intel로 빌드해 서명 검증한 뒤, 이미 검증한 앱·Driver·HAL과
-  [새 설치 파일](/Volumes/dev/mixrelay-release-20261017-late-input-fix/MixRelay-Installer-0.1.0.pkg)로
+  후속 `MixRelay-Installer-0.1.0.pkg`로
   묶었다(12:48 KST). Universal 엔진 SHA-256은
   `3e6a29d50dbbf99d0a51d5510534cc37385ba64d7940bc20178ac140c9944221`,
   패키지 SHA-256은 `1cfbe0845e874e30f4311800dc9fe3666a698576b2ec4503b9d42f3e4cdd3d5b`다.
-  패키지의 Developer ID Installer 서명과 trusted timestamp를 확인했으며 관리자 설치 인증 대기 중이다.
+  패키지의 Developer ID Installer 서명과 trusted timestamp를 확인했다. 사용자 설치 완료 후
+  설치된 앱·엔진·Driver·HAL 네 파일의 SHA-256이 모두 빌드 산출물과 일치함을 확인했다.
+- 설치 직후 앱→가상 출력과 앱→녹음 입력은 모두 무음이었다. 같은 신호 앱의 별도 native tap은
+  실제 PCM peak 0.05·RMS 약 0.03536으로 정상이며, 설치 앱과 동시에 실행한 native tap도 통과했다.
+  TCC 로그에서 runtime PID 33231의 책임 앱이 `com.apple.installer`였고
+  `AudioCapture` 요청의 `authValue=0, authReason=2`를 확인했다. 설치기가 실행 파일을 직접
+  자식으로 띄워 Installer의 권한 책임을 물려준 경로다. callback 진행만으로 권한과 PCM을
+  정상으로 판단한 것이 잘못이었다.
+- 같은 설치 파일을 바꾸지 않고 정상 Launch Services 경로로 runtime을 재시작했다.
+  TCC의 책임 앱이 `io.mixrelay.desktop`으로 바뀐 뒤 **앱→가상 출력과 앱→녹음 입력 모두 통과**했다.
+  각 경로의 마지막 10개 meter 창에서 source/목적지 양쪽 채널이 약 0.05,
+  비정상 source/input/output sample과 fault block은 0이다. 각 시험은 원래 빈 그래프를 복원하고
+  자신의 신호 앱을 종료했다. 원시는 `capture-virtual-launchservices/`,
+  `capture-recorder-launchservices/`, `capture-tcc-after-install.log`,
+  `capture-tcc-launchservices.log`다. 설치기의 재실행도 공개 `NSWorkspace` API를 사용하도록 소스 수정했다.
+- 12:48 설치본의 물리 입력 경유 지연 수락은 두 번 모두 안정된 보고값을 얻지 못해 시간 초과됐다.
+  이전 설치본의 20/20 통과 결과로 대체하지 않는다. `engine-fixed/`와 `engine-fixed-repeat/`에
+  실패와 그래프 복원을 보존했다. 연결되지 않은 입력과 listener가 없는 내부 capture snapshot까지
+  공통 정렬에 참여하는 소스 결함을 별도로 재현했다. 실제 output/recorder에 이르는 경로만
+  정렬에 참여시키며, 나머지 입력의 FIFO 소비와 미터는 유지한다. 실제 native callback·SRC·graph로
+  정상 출력 약 0.25와 별도 미터 약 0.5·RT 할당 0을 확인했다. 모든 입력을 다시 참여시키면 같은
+  회귀가 출력 0으로 실패한다. 결함 주입은 복원했다. 이 수정의 설치본 지연 재확인은 남아 있다.
+- 후속 Universal 엔진과 설치기·제거 앱의 서명·양쪽 아키텍처 검증을 마쳤다. 빌드한 설치기로
+  실제 runtime Quit → runtime 재실행 → editor 재실행을 수행한 뒤, 설치된 앱의 캡처→녹음 입력이
+  약 0.05의 양쪽 채널과 fault 0으로 통과했다(`capture-installer-restore-recorder/`).
+  이는 새 설치기의 공개 앱 실행 경로에 대한 실행 근거이며, 아직 교체하지 않은 새 엔진의 수락 결과가 아니다.
+- 13:28 KST에 후속 설치 파일을
+  저장소 `target` 안에 만들었다. 엔진 SHA-256은
+  `30520a1589dda4094e3f3d479cc4a3842e7027ef588893f6ac9684824000293b`,
+  설치기 SHA-256은 `5e793b8e5a455a3b2e949a6ee8fd0c703451c1c2fd4a710b600e549fa496ce32`,
+  패키지 SHA-256은 `404ae587183ecf20383df3bfb134741fb00b9b51c4a794cf4bebd26602890e1f`다.
+  Developer ID Installer `38UUAD7TUP`와 trusted timestamp 04:28:47 UTC를 확인했다.
+  실제 앱·Driver·HAL은 이미 검증한 동일 파일을 사용한다. 사용자 설치 완료 후 설치된 네 실행
+  파일이 빌드 산출물과 일치하며 Driver Ready·빈 그래프를 확인했다.
+- 이 설치 직후 별도 수동 재실행 없이 앱→가상 출력과 앱→녹음 입력 모두 통과했다.
+  각 마지막 10개 meter 창의 source·목적지 양쪽 채널은 약 0.05이며 sample fault는 0이다.
+  `capture-final-virtual/`과 `capture-final-recorder/`에 보존했고 원래 빈 그래프를 각각 복원했다.
+  기본 패스스루도 144,000프레임 비트 일치·누락/중복/손상/시각 단절 0·추가 지연 0으로 통과했다.
+- `engine-final/`의 입력 지연 보고는 1,866프레임으로 안정돼 이전의 보고 timeout은 해소됐다.
+  그러나 20개 임펄스 도착 지연이 약 2,496→2,268프레임으로 줄어, 같은 지연에 정렬된 것이
+  2개뿐이었다. 녹음 완전성·장치 시각 연속성은 통과했지만 왕복 수락은 **미통과**다.
+  시험 후 빈 그래프와 보고 0을 복원했다. 준비 중 쌓인 PCM을 최초 그래프 실행으로 가져오는
+  경계와, 실제 128-frame SRC slab을 256-frame scratch 크기로 계산한 피드백 목표를 후속 수정했다.
+- `4252373`의 합성 native callback·실제 SRC·compiled graph 회귀는 준비 중 64ms의 PCM이
+  최초 실행에 섞이지 않고, 2초 후부터 60개 임펄스의 지연 변동이 2프레임 이내임을 확인했다.
+  입력 callback이 graph보다 앞/뒤에 오는 두 순서를 모두 통과했고 graph RT 할당은 0이다.
+  최초 실행 초기화를 빼면 준비 PCM 유출, SRC 목표만 이전대로 두면 약 93프레임의 지연 이동으로
+  실패했다. 가변 callback 지연 보고도 기존 48프레임 오차 한도로 네 경로 모두 통과했다.
+  graph 소비 시 실제 PCM 획득 좌표를 읽어 SRC·큐 시간을 포함한 age를 프레임 가중해 측정하며,
+  부분 읽기·시각 부재·미래 시각도 회귀로 검사했다. 수정 엔진의 설치본 재확인은 아직 남아 있다.
+- `4252373`의 ARM·Intel 엔진 빌드와 Developer ID 서명·두 아키텍처 검증을 마쳤다.
+  13:57 KST에 [새 설치 파일](/Volumes/dev/mixrelay/target/macos-capture-verification/MixRelay-Installer-0.1.0.pkg)로
+  이전 검증 패키지를 원자적으로 교체했다. 엔진 SHA-256은
+  `c951277838cd87dca7c1ba6a819b43e11b8bb9e9084395bc781c6ed26cedfe96`,
+  패키지 SHA-256은 `90408686acb7d5da1f8b47ae112c0753a1c5e6b631512315b2097feb3a6b2aa2`다.
+  Developer ID Installer `38UUAD7TUP`와 trusted timestamp 04:57:39 UTC를 확인했다.
+  앱·Driver·HAL·설치기/제거 앱은 앞서 검증한 동일 서명 파일이다. source 변경에 대한 Universal
+  HAL의 양쪽 링크·서명 검증·실제 factory/COM probe도 별도 산출물로 통과했다(설치하지 않음).
+  새 엔진의 설치 후 수락은 관리자 설치 완료를 기다린다.
+- 사용자 요청으로 `/Volumes/dev/mixrelay-release-*` 설치 산출물 폴더 6개(386.1MiB)를 삭제했다.
+  원본 저장소·Loopback 연구 자료와 `/tmp`의 검증 증거는 보존했다. 위 패키지 해시는 설치 이력이며
+  삭제된 설치 파일의 다운로드 링크가 아니다.
+- 추가 임시 정리로 이전 검토 워크트리·커버리지 캐시·옛 payload/PKG·미참조 로그 등
+  376개 최상위 항목, 약 9.39GiB를 삭제했다. 오래된 release-log tail도 종료했다.
+  검토 워크트리의 고유 변경은 `clippy.toml` 설정 세 줄뿐이며, Git stash
+  `331fd07c5d50d7fdca01061fe55e805d40ca731b`로 보존한 뒤 워크트리를 정상 제거했다.
+  현재 컴파일 캐시·최신 PKG·실행에 필요한 fixture와 문서에서 인용한 검증 자료는 유지했다.
 
 이 소스의 v5 앱 전달·독립 입력 정렬·재시작 보호를 **설치본에서 모두 확인한 것으로 표시하지 않는다.**
 아래 2026-10-16의 설치본 수락은 이전 실행 파일에 대한 기록이다.

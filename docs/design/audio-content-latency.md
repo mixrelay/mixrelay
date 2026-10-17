@@ -16,11 +16,11 @@ sample/host coordinates when valid, retaining its existing fallback for missing
 native timestamps.
 
 Queue residence measures delay; it does not place independently captured PCM on a
-shared absolute content timeline. The current bridge queues carry sample order and
-epochs, but no per-range source timestamp. A latest callback timestamp must never
-be attached to older queued PCM as though it described that content. Exact
-cross-clock content placement requires retaining source timestamps through partial
-reads and SRC; the current latency report alone does not establish that guarantee.
+shared absolute content timeline. Native input PCM retains acquisition coordinates
+through partial reads, sinc SRC, application transport v5 and graph queues. The
+input reader can select each block on a shared acquisition cursor. A latest callback
+timestamp must never be attached to older queued PCM. The latency publication is
+still a window mean; content placement and queue residence remain separate concerns.
 
 `RenderPlan::destination_arrivals` retains terminal arrivals, including hosted
 transport/intrinsic delay and route compensation. It accepts causal source
@@ -37,6 +37,16 @@ This also measures HAL loopback acquisition for a MixRelay virtual source.
 Direct owners use the timestamps of the callback that actually rendered their PCM.
 Missing native host timestamps remain unknown; sample-counter fallback is never
 acquisition/presentation latency evidence.
+
+For bridged input, the graph consumer measures each transferred PCM frame's age
+from its retained acquisition coordinate to the common graph-cycle host label.
+It reads metadata while the PCM reservation still protects those slots, before
+releasing the consumer cursor. The block mean is weighted by transferred frames;
+partial reads keep their own coordinates. Unknown or future acquisition coordinates
+invalidate that observation. This age already includes native and graph queues,
+private SRC residence and algorithmic delay. Those source terms are not added a
+second time. The independent FIFO/SRC taps remain for render-side measurement and
+diagnostics, and for windows without a PCM-age observation.
 
 Each native and graph FIFO is timed on both sides. After every write or read, the
 role records the ring cursor it alone advances and adds `frames * host ticks` to
@@ -91,10 +101,8 @@ correction.
 The reporter evaluates:
 
 ```text
-source acquisition
-+ native input FIFO host-time residence
-+ SRC input/output batch FIFO residence + input SRC algorithmic delay
-+ graph input FIFO host-time residence
+source root: measured acquired-PCM age to the graph label for bridged input,
+             or callback acquisition interval for direct input
 + prepared DeviceBus snapshot quantum(s) / graph rate
 + planned hosted transport, intrinsic delay and installed route compensation
 + graph output FIFO host-time residence
@@ -210,8 +218,8 @@ unavailable rates or no complete measurement window also remain unknown. Source
 latency differences outside the threshold are rejected; Stage 2 does not change
 source compensation or audio routing to align them.
 
-This is a window-mean content latency estimate, not per-sample timestamp provenance
-carried with PCM. Short-term queue variation, asynchronous clocks and SRC phase can
+This publication is a window-mean content latency estimate even though input PCM
+retains timestamp provenance. Short-term queue variation, asynchronous clocks and SRC phase can
 make an individual impulse differ from the one-second estimate. Active histories
 are checked against exact cached observations, but the estimator does not expose
 per-sample hosted transport timing. Route accuracy is checked in-process by the
@@ -222,11 +230,13 @@ the start of that section.
 
 ## Installed verification
 
-Status (2026-10-16): a signed installation built from 408d618 reported a stable
-751-frame input latency on an engine-routed endpoint and cleared it to zero when
-the route was removed. The installed impulse round trip (step 5) has not been run,
-and later changes (the coreaudiod change marker, host-time residence) have not
-been installed.
+Status (2026-10-17): signed installed builds have been measured with the impulse
+procedure. The 13:28 KST package publishes 1,866 frames and clears it on route
+removal, but its actual impulse delay changes during the measurement and fails
+acceptance. The source adds first-graph PCM admission, the actual SRC slab feedback
+target and acquired-PCM age measurement; installed verification of that follow-up
+is pending. Exact executable identities and results are in
+[validation/current.md](../validation/current.md).
 
 Before a release, run
 `pnpm signing:check` using the repository's restored signing configuration, then

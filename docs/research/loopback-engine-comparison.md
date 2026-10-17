@@ -1,7 +1,7 @@
 # Loopback 배포 엔진과 MixRelay의 CoreAudio 경로 비교
 
 초기 조사: 2026-10-16(KST), 기준 커밋 `fae815ff59ff3ad67353e1ceb019d9f1202bba42`.
-안정성 경계 후속 대조·구현: 2026-10-17(KST), 기준 커밋 `4a9b064a`, 형식 snapshot 보호 `139b3cef`, 늦은 입력 합류 `df523ee`.
+안정성 경계 후속 대조·구현: 2026-10-17(KST), 기준 커밋 `4a9b064a`, 형식 snapshot 보호 `139b3cef`, 늦은 입력 합류 `df523ee`, 앱 재실행 `cf6d868`, 정렬 경로 범위 `fdd2859`, 최초 PCM 승인·획득 시각 지연 측정 `4252373`.
 이 문서는 연구 근거이며 별도 제품 backlog가 아니다. 제품 범위와 진행 상태는 [product.md](/Volumes/dev/mixrelay/docs/product.md:396), 설치본 검증 결과는 [current.md](/Volumes/dev/mixrelay/docs/validation/current.md)를 따른다.
 
 ## 2026-10-17 안정성 경계 대조
@@ -46,7 +46,25 @@ impulse 중심 좌표 oracle로 따로 검사한다. 좌표 overwrite, epoch 경
 재획득하고 각 입력의 forward-only 커서로 반복 재생을 막는다. 기존 정상 입력과 늦은 앱 입력이
 함께 전달되는 것·RT 할당 0을 검사했다. 재획득 조건을 제거하면 `[약 0.1, 0]`이 되어 같은
 회귀가 실패한다. scheduling clock도 주입 가능한 경계로 옮겨 실제 경과 시간에 기대지 않는다.
-이 수정의 설치본 재확인은 검증 현황에서 별도로 갱신한다.
+후속 설치본에서는 Installer의 직접 자식으로 재실행된 runtime의 TCC 책임 앱이 Installer로
+귀속되어 실제 캡처가 무음인 문제도 분리했다. 같은 서명 바이너리를 Launch Services로
+다시 열면 책임 앱이 MixRelay가 되고 앱→가상 출력·녹음 입력 모두 정상 PCM을 전달했다.
+설치기의 재실행도 공개 [NSWorkspace 앱 실행 API](https://developer.apple.com/documentation/appkit/nsworkspace/openapplication(at:configuration:completionhandler:))로 변경했다.
+이 결과는 native callback 수만으로 권한·PCM 성공을 판정할 수 없음을 보여 준다.
+후속 물리 입력 경유 지연 보고는 두 번 시간 초과했다. 별도로 연결 없는 source와 listener가 없는
+capture snapshot이 다른 경로의 시각 정렬에 참여하는 결함을 재현해, 실제 외부 sink/recorder에
+이르는 경로만 정렬에 참여하도록 보강했다. 독립 FIFO 소비와 미터는 유지한다.
+13:28 KST 후속 패키지 설치 직후에는 별도 수동 재실행 없이 앱→가상 출력·녹음 입력이 모두
+정상 PCM을 전달했고, 지연 보고 timeout도 해소됐다. 그러나 5초 동안 임펄스의 실제 지연이
+약 2,496→2,268프레임으로 변해 왕복 시험은 수락하지 않았다.
+후속 소스는 최초 그래프 실행 전에 쌓인 PCM/필터 이력을 callback 소유자가 회수한 뒤
+승인하도록 하고, 피드백 목표의 converter slab을 scratch 크기 256 대신 실제 128프레임으로
+계산한다. 준비 PCM 유출과, 동일 클록에서 60개 이벤트의 지연이 약 93프레임 이동하는 것을
+각각 실패 회귀로 확인했다. 둘을 수정하면 이벤트 지연 변동은 2프레임 이내다.
+입력 지연도 각 PCM의 획득 좌표에서 graph 전달까지 직접 측정한다. 이는 SRC·보존 큐 시간을
+이미 포함하므로 별도 큐 평균과 filter delay를 다시 더하지 않는다. 가변 callback에서 기존 평균
+합산이 48프레임 오차 한도를 넘긴 회귀를 수정하고, 부분 읽기의 프레임 가중·시각 부재/미래 시각의
+관찰 거부도 검사한다. 설치본 지연 재확인은 검증 현황에서 별도로 갱신한다.
 소스 검사와 설치본 수락 결과는 [검증 현황](/Volumes/dev/mixrelay/docs/validation/current.md)에 구분한다.
 
 LG HDR 4K는 사용자 결정에 따라 **CoreAudio 단독 시작도 실패하는 현 장치 상태의 예외**로 둔다.
