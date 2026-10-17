@@ -1,8 +1,9 @@
 //! Graph control never mutates callback-owned conversion or its queue cursors.
 //! The PCM callback acknowledges a generation only after resetting its state.
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 pub(super) struct BridgeActivity {
+    admitted: AtomicBool,
     requested: AtomicU64,
     applied: AtomicU64,
     transfer_epoch: AtomicU64,
@@ -11,6 +12,7 @@ pub(super) struct BridgeActivity {
 impl Default for BridgeActivity {
     fn default() -> Self {
         Self {
+            admitted: AtomicBool::new(false),
             requested: AtomicU64::new(1),
             applied: AtomicU64::new(1),
             transfer_epoch: AtomicU64::new(0),
@@ -19,6 +21,20 @@ impl Default for BridgeActivity {
 }
 
 impl BridgeActivity {
+    /// The first graph use starts a fresh PCM epoch after native preparation.
+    /// Subsequent plans sharing this device retain its admitted stream.
+    pub(super) fn admit(&self) {
+        // Only the serialized graph owner changes admission. No callback state
+        // is published by this flag; the requested generation carries that fence.
+        if !self.admitted.swap(true, Ordering::Relaxed) {
+            let previous = self.requested.load(Ordering::Acquire);
+            // Advance the generation without changing its enabled bit. The PCM
+            // owner discards all preparation queues/history before acknowledging.
+            self.requested
+                .store(previous.wrapping_add(2), Ordering::Release);
+        }
+    }
+
     /// The serialized graph owner publishes one coherent block's direction state.
     pub(super) fn request(&self, enabled: bool) -> bool {
         let previous = self.requested.load(Ordering::Acquire);

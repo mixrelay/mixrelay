@@ -238,7 +238,8 @@ impl DeviceBridge {
             unsafe { mixrelay_macos_transport::device_io::capture_window(pointer.cast()) } as usize;
         let alignment_target =
             (window * self.native_rate as usize).div_ceil(self.graph_rate as usize);
-        let target = (self.queue_target(context, false) / 2 + PUMP_FRAMES).max(alignment_target);
+        let target = (self.queue_target(context, false) / 2 + self.bridge.processing_quantum().0)
+            .max(alignment_target);
         (source + staged + output_in_source, target)
     }
 

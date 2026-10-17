@@ -1,5 +1,5 @@
 use super::{DeviceIo, MAX_FRAMES};
-use mixrelay_pcm_ring::{mr_pcm_ring_discard, mr_pcm_ring_read_available, mr_pcm_ring_write};
+use mixrelay_pcm_ring::{mr_pcm_ring_discard, mr_pcm_ring_write};
 use std::{
     ptr,
     sync::atomic::Ordering::{Acquire, Relaxed, Release},
@@ -95,7 +95,17 @@ pub(super) unsafe fn graph_read(
         }
     }
     // SAFETY: retained ring and sole graph consumer, complete caller-owned output.
-    let read = unsafe { mr_pcm_ring_read_available(ring, samples, frames) };
+    let mut content_age = None;
+    let read = unsafe {
+        mixrelay_pcm_ring::read_available_observed(ring, samples, frames, |cursor| {
+            content_age = super::latency::capture_age(io, cursor, frames, host);
+        })
+    };
+    if read != 0 {
+        io.measurements
+            .content_age
+            .record(content_age, u64::from(read));
+    }
     if read < frames {
         io.measurements.faults.fetch_add(1, Release);
     }

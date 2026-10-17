@@ -16,6 +16,8 @@ pub(super) struct Measurements {
     pub(super) direct_output_scalar: Residence,
     pub(super) native_queue: Passage,
     pub(super) graph_queue: Passage,
+    /// Graph consumer's host label minus the exact acquired PCM coordinates, in ns.
+    pub(super) content_age: Residence,
 }
 
 impl Measurements {
@@ -60,6 +62,19 @@ fn interval(later: super::IoTimestamp, earlier: super::IoTimestamp) -> Option<u6
         .flatten()
 }
 
+/// Called while the graph consumer's reservation retains every PCM/metadata slot.
+/// Unknown/future coordinates invalidate the observation, without borrowing another
+/// callback's time. The mean is computed once per block and weighted by its frames.
+pub(super) fn capture_age(io: &DeviceIo, cursor: u64, frames: u32, host: u64) -> Option<u64> {
+    let label = io.timebase.nanoseconds(host);
+    let sum = (0..frames).try_fold(0_u128, |sum, offset| {
+        let acquired = io.graph_times.at(cursor + u64::from(offset))?;
+        (acquired != 0).then_some(())?;
+        Some(sum + u128::from(label.checked_sub(acquired)?))
+    })?;
+    u64::try_from(sum.checked_div(u128::from(frames))?).ok()
+}
+
 /// Coherent individual tap snapshots. Host intervals and queue passages are ticks.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LatencySnapshot {
@@ -71,6 +86,8 @@ pub struct LatencySnapshot {
     pub output_scalar: ResidenceSnapshot,
     pub native_queue: PassageSnapshot,
     pub graph_queue: PassageSnapshot,
+    /// Exact capture-to-graph mean in nanoseconds, including SRC and retained queues.
+    pub content_age: ResidenceSnapshot,
 }
 
 /// Reads atomics only; a busy writer returns no snapshot instead of blocking.
@@ -104,7 +121,10 @@ pub unsafe fn latency_snapshot(io: *const DeviceIo, direct: bool) -> Option<Late
     .map(Residence::snapshot);
     let queues =
         [&io.measurements.native_queue, &io.measurements.graph_queue].map(Passage::snapshot);
-    coherent_snapshot(io.measurements.faults.load(Ordering::Acquire), taps, queues)
+    let mut snapshot =
+        coherent_snapshot(io.measurements.faults.load(Ordering::Acquire), taps, queues)?;
+    snapshot.content_age = io.measurements.content_age.snapshot()?;
+    Some(snapshot)
 }
 
 fn coherent_snapshot(
@@ -132,6 +152,7 @@ fn coherent_snapshot(
         output_scalar,
         native_queue,
         graph_queue,
+        content_age: ResidenceSnapshot::default(),
     })
 }
 
@@ -150,6 +171,7 @@ pub unsafe fn record_direct_latency(io: *const DeviceIo, timing: IoTiming, frame
 mod tests {
     use super::*;
     use crate::device_io::IoTimestamp;
+    mod content_age;
     #[test]
     fn any_contended_tap_returns_no_new_evidence() {
         let taps = [Some(ResidenceSnapshot::default()); 4];

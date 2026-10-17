@@ -85,6 +85,16 @@ impl Observation {
     }
     /// Host intervals and native/graph FIFO passages in ticks; SRC means in their rate domain.
     pub(crate) fn delay_ns(self, previous: Self, input: bool, ns_per_tick: f64) -> Option<f64> {
+        if input && !self.direct {
+            let age = self.native.content_age;
+            let before = previous.native.content_age;
+            if age.weight != before.weight || age.invalid != before.invalid {
+                // Each transferred frame retains its acquisition coordinate through
+                // SRC. Its observed age includes all source queues/filter history;
+                // summing separately averaged queue windows would count it again.
+                return age.mean_since(before);
+            }
+        }
         let timing = if input {
             self.native
                 .acquisition

@@ -199,6 +199,7 @@ struct Progress {
 /// separately grants control, callback and graph access to their designated cells.
 pub struct DeviceIo {
     selection: Selection,
+    timebase: mixrelay_realtime::Timebase,
     control: UnsafeCell<Control>,
     callback: UnsafeCell<Callback>,
     native_ring: PcmRing,
@@ -233,7 +234,9 @@ impl DeviceIo {
             .try_reserve_exact(MAX_FRAMES as usize * channels as usize)
             .ok()?;
         scratch.resize(MAX_FRAMES as usize * channels as usize, 0.0);
+        let timebase = mixrelay_realtime::Timebase::current();
         Some(Self {
+            timebase,
             selection: Selection {
                 uid: name,
                 input,
@@ -265,7 +268,7 @@ impl DeviceIo {
                 pcm_context: ptr::null_mut(),
                 previous_timestamp: None,
                 frame_ticks: 0.0,
-                timebase: mixrelay_realtime::Timebase::current(),
+                timebase,
                 acquisition_nanos: 0,
                 frame_nanos: 1e9 / f64::from(rate),
             }),

@@ -194,6 +194,7 @@ impl DeviceSet {
         if let Some(key) = self.binding_key(id, input)
             && let Some(device) = self.0.get(key)
         {
+            device.activity.admit();
             device.set_active(enabled);
         }
     }
