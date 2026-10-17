@@ -413,8 +413,9 @@ Driver 실행부·엔진·가상 장치 종료, 명시적 재연결 전 중지 �
 | Driver 안정성 | 가상 장치 I/O 버퍼의 오디오 설정 추종, 엔진 재시작·앱 재실행 시 일시정지 보존과 엔진 비정상 종료 복구의 설치본 확인(설치·업데이트 후 첫 연결은 2026-10-13 설치본에서 해결 확인), Linux 실시간 처리 실패 원인 로그 |
 | 실시간 실행·제어 프로토콜 | [설계](design/realtime-and-control-protocol.md)의 실행 경로 계측, 대체 워커 분리·실시간화, 설치본 앱 캡처·플러그인 지연 측정과 측정 기반 지연 정책, push 제어 프로토콜(통합 상태 push·packed 미터·웹뷰 credit·실행부↔편집 앱 연결 다중화는 소스 적용; 설치본 검증은 남음), 128채널(앱 캡처 pump·플러그인 DSP의 실시간·이벤트 깨우기는 소스 적용) |
 | 녹음 앱 지연 보고 | [설계](design/audio-content-latency.md)의 측정 기반 입력 지연 보고(가상·하드웨어 입력 경로의 측정·발행·엔진 전용 판정은 소스 적용). 설치본에서 하드웨어 입력 → 가상 장치 경로의 보고(751프레임)와 경로 제거 시 해제를 확인(`scripts/lab/macos-latency-acceptance.mjs`). 보고값과 실제 지연의 일치는 빌드 전 경로 테스트(브리지·direct 조합, 48프레임 이내)로 검증. coreaudiod에는 변경 표시값만 보고. 앱 캡처 경로는 아직 미지원(0으로 보고) |
-| 최신 개발 설치본 | Linux 최신 DEB 설치·런처의 Driver/엔진 시작·Free 화면·소유자 종료는 검증 완료. macOS 새 Universal PKG의 설치·4개 실행 파일 일치·기본 PCM은 확인. Loopback → 엔진 → 가상 장치의 왕복은 30초 유지 후 기존 정렬·보고 오차 기준으로 통과했으며 초기 지연 변동과 LG 시작 대기는 남음. 앱 캡처 복구의 실제 장애 경계·플러그인·UI 경합의 설치본 확인도 남음 |
-| 독립 입력 시각 정렬 | sinc SRC·FIFO PI·epoch는 구현됨. 서로 다른 입력의 절대 콘텐츠 시각 정렬에는 PCM 범위별 소스 시각과 부분 읽기·SRC 변환을 잇는 설계·구현·검증이 필요함. residence 측정을 이 정렬의 보장으로 표시하지 않음 |
+| 최신 개발 설치본 | Linux 최신 DEB 설치·런처의 Driver/엔진 시작·Free 화면·소유자 종료는 검증 완료. macOS 새 Universal PKG의 설치·4개 실행 파일 일치·기본 PCM은 확인. Loopback → 엔진 → 가상 장치의 왕복은 30초 유지 후 기존 정렬·보고 오차 기준으로 통과했으며 초기 지연 변동의 설치본 확인은 남음. LG HDR 4K는 CoreAudio 단독 시작도 실패하는 현 장치 상태의 예외로 두며, SDQHD·built-in 출력 통과와 구분함. 앱 캡처 복구의 실제 장애 경계·플러그인·UI 경합의 설치본 확인도 남음 |
+| 독립 입력 시각 정렬 | PCM 획득 시각을 native ring·부분 읽기·SRC·공유 IPC v5·graph까지 보존하고 독립 입력을 공통 획득 cursor로 읽는 소스 구현 완료. 44.1/48kHz·서로 다른 callback 크기·±ppm의 20초 합성 시험의 초기 0.25초 이후 197개 이벤트가 1 frame 이내 정렬, RT 할당 0. 설치본 수락은 남음. residence와 콘텐츠 시각 정렬은 별도로 유지 |
+| CoreAudio 안정성 대조 | [Loopback 함수 본문 대조](research/loopback-engine-comparison.md)의 aggregate geometry 준비·output-only IOProc stream usage·서비스 재시작/UID 재확인·삭제 객체 회수 보호를 소스에 적용. 기존 watchdog·IPC lease·graph 교체·processor 격리 경로도 대조. 최신 설치본 확인은 남음 |
 | 캡처·플러그인 | 실제 앱 재추적·격리·권한 오류·클록 보정, 대표 외부 효과의 다채널·상태·에디터/장애 회수 |
 | 녹음·계측 | 무료 녹음 경계·파일 호환성, 실제 클립 이벤트 계측·프리셋 청취/튜닝 |
 | UI 품질·접근성·번역 | 채널 연결 키보드 대체(Shift+F10 메뉴·ChannelConnectionDialog, 소스 구현·자동 검사 완료)·포커스 복귀·스크린리더·전체 번역의 실제 설치본 확인; 소스 UI 게이트와 네 coverage 항목은 100% 통과 |

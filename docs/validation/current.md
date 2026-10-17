@@ -3,6 +3,41 @@
 제품 동작·범위·남은 작업은 [product.md](../product.md)가 기준이다. MixRelay는 아직 출시하지 않았다.
 이 문서는 현재 소스 검사와 로컬 개발 설치본의 검증 범위만 구분한다.
 
+## 2026-10-17 입력 시각 보존과 CoreAudio 안정성
+
+[Loopback 안정성 경계 대조](../research/loopback-engine-comparison.md)의 후속 소스다.
+PCM 획득 시각을 native ring·부분 읽기·SRC·공유 application clock v5·graph까지 유지하고,
+독립 입력을 공통 획득 cursor로 읽는다. timestamp snapshot이나 FIFO residence를
+개별 PCM 구간의 시각으로 대신 사용하지 않는다.
+
+- 44.1/48kHz, +300/−200ppm, 64/512-frame native callback과 별도 출력 pacing을
+  실제 native callback/SRC/compiled graph 경로로 구동했다. 20초 합성 PCM의
+  초기 0.25초 이후 197개 이벤트가 1 graph frame 이내로 정렬됐고 graph RT 할당은 0이다.
+  정렬을 꺼 결함을 주입하면 같은 회귀가 183-frame 차이로 실패한다.
+- 시각이 없는 입력만 무음으로 두고 정상 입력을 계속 전달한다. 이전의 모든 입력 준비
+  대기 조건을 재주입하면 정상 경로도 `[0, 0]`으로 남아 시험이 실패한다.
+  두 결함 주입은 시험 후 복원했다.
+- aggregate input stream·ASBD·callback configuration 준비, output-only IOProc의
+  input usage 설정·readback, 서비스 재시작 시 등록·알림 재설치, UID 재확인,
+  삭제 객체와 transient 오류의 구별·callback/listener drain을 보강했다.
+  direct duplex graph는 입력을 유지하고, 입력을 추가하면 output owner를 다시 준비한다.
+- workspace lib/bin 2,295개 통과·8개 ignore. 이후 추가한 rate-refresh 시각 회귀는
+  수정 전 실패를 확인했고, 수정 후 process-tap 전체 54개가 통과했다.
+- Rust fmt, 32개 crate 계층, workspace all-targets clippy `-D warnings`, UI 정적 검사,
+  왕복 프로브 자체 시험은 통과했다. `pnpm check:native`도 통과했으며, ARM·Intel
+  Universal HAL의 링크·서명 검증·factory/COM probe를 확인했다. native/graph/회수 경계는
+  합성 HAL과 주입된 장애로 검사한다. 전용 키체인 잠금 해제와 실제 앱·PKG 서명 시험도 통과했다.
+
+이 소스의 v5 전달·독립 입력 정렬·재시작 보호를 **설치본에서 확인한 것으로 표시하지 않는다.**
+아래 2026-10-16의 설치본 수락은 이전 실행 파일에 대한 기록이다.
+
+LG HDR 4K는 CoreAudio 단독 시작도 실패하는 현 장치 상태의 예외로 둔다.
+function/block IOProc, AUHAL, 별도로 동작하는 ARK clock을 master로 한 private aggregate에서도
+Start가 약 10초 뒤 `stop`을 반환하고 callback은 0이었다. SDQHD·built-in 출력은 따로 통과했다.
+사용자는 두 LG의 Loopback 출력을 시험하지 않았다고 답했다. Loopback meter만 움직인 관찰로
+HDR 물리 출력 성공을 주장하지 않는다. 이 예외를 우회하기 위해 coreaudiod를 강제 종료하거나
+전역 장치·권한·전원 정책을 변경하지 않았다. 스크린리더 시험은 사용자가 마지막에 수행한다.
+
 ## 2026-10-16 후속 소스 검사
 
 아래 첫 집계는 Loopback 구현 대조 전 단계다. 이후 최종 소스·VM·설치본 결과는

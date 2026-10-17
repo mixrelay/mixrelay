@@ -1,9 +1,52 @@
 # Loopback 배포 엔진과 MixRelay의 CoreAudio 경로 비교
 
-조사일: 2026-10-16(KST). MixRelay 기준 커밋: `fae815ff59ff3ad67353e1ceb019d9f1202bba42`.
+초기 조사: 2026-10-16(KST), 기준 커밋 `fae815ff59ff3ad67353e1ceb019d9f1202bba42`.
+안정성 경계 후속 대조·구현: 2026-10-17(KST), 기준 커밋 `4a9b064a`.
 이 문서는 연구 근거이며 별도 제품 backlog가 아니다. 제품 범위와 진행 상태는 [product.md](/Volumes/dev/mixrelay/docs/product.md:396), 설치본 검증 결과는 [current.md](/Volumes/dev/mixrelay/docs/validation/current.md)를 따른다.
 
-## 결론
+## 2026-10-17 안정성 경계 대조
+
+Loopback 2.5.0의 `arkaudiod`, ACP, ARK 배포 바이너리에서 추출한 함수 본문을
+아래 실행 경계별로 읽고 MixRelay의 실제 호출 경로와 대조했다. 기존 추출물을 재사용했으며
+새 분석 서버·추가 에이전트·UI 개발 서버는 실행하지 않았다. 함수명만으로 동작을 추정하지 않고,
+호출자와 해제·실패 분기까지 확인한 범위를 아래에 기록한다. 모든 장비·OS 내부 상태의
+무고장을 증명한 문서는 아니다. 이전 조사 당시의 구현 공백은 아래 소스 변경으로 갱신한다.
+
+| 경계 | Loopback에서 확인한 코드 | MixRelay 판정·적용 |
+| --- | --- | --- |
+| 입력 시간·독립 클록 | ACPClockConverter `0x5cc04`와 ACPAudioClock `0x66f7c`가 source sample→host→destination sample을 연결하고 ECGKSourceAudioNode가 시간 주소 큐를 사용 | **누락 보강.** native ring→부분 읽기→sinc SRC→application IPC v5→graph까지 프레임별 획득 시각을 유지. 하드웨어 입력도 같은 좌표를 운반하고 공통 획득 cursor로 읽음. [변환](/Volumes/dev/mixrelay/crates/audio-io/src/clock_bridge/timestamps.rs), [graph 정렬](/Volumes/dev/mixrelay/apps/engine-service/src/macos/mod.rs) |
+| 큐의 빈 구간·덮어쓰기 | [ACPAudioQueue read `0x1c64c`](/Volumes/dev/loopback/ghidra/export/ACP/decompiled.c:21030), erase `0x1d2f8`은 보유 밖 구간을 0으로 채우며 시간 구간을 관리. [ECSharedQueue read `0x14694`](/Volumes/dev/loopback/ghidra/export/ARK/decompiled.c:14305)도 범위 밖을 0으로 채움 | **시각 메타데이터와 PCM의 결합 보강.** private FIFO는 예약 성공 후에만 좌표를 쓰고 PCM release 전에 publish. 가득 찬 큐의 실패 write가 읽지 않은 좌표를 바꾸지 못함. 공유 큐는 epoch/frame tag와 lease를 복사 전후 확인. 오래된·미래 범위 재생 금지. [링 예약](/Volumes/dev/mixrelay/native/pcm-ring/src/ffi.rs), [공유 시각 읽기](/Volumes/dev/mixrelay/native/macos/common/source_registry/timestamps.rs) |
+| 준비 완료·부분 시작 실패 | ECIOAudioContextPhysical aggregate 생성의 채널 출현 관찰. 기존 조사에서 제한 시간 뒤 함수가 실패를 반환하지 않는 분기도 확인 | **누락 보강.** `alive`에 더해 input stream ASBD·채널 합·callback buffer configuration·sample rate를 확인해야 등록 허용. 기존 유한 재확인 예산을 유지하며 미완료는 오류로 반환하고 부분 owner 회수. 동기 CoreAudio IPC 자체의 취소 시간 보장과 구분. [readiness](/Volumes/dev/mixrelay/native/macos/process-tap/src/native/readiness.rs) |
+| 사용하지 않는 입력 | [ECIOAudioContextDevice `_updateStreamUsage` `0x100039c50`](/Volumes/dev/loopback/ghidra/export/arkaudiod/decompiled.c:41422)는 output IOProc의 모든 input stream을 끔 | **누락 보강.** graph에 하드웨어 입력이 없는 output owner만 input usage를 전체 길이 0으로 설정·readback하고 stream identity 재확인 후 Start. direct duplex graph는 input을 유지하며 입력 추가 시 owner 재준비. 입력 0개인 출력도 허용하고, 이후 input stream 출현 알림에는 등록을 차단해 재설정. 다른 IOProc의 입력 사용은 변경하지 않음. [사용 범위](/Volumes/dev/mixrelay/native/macos/common/device_io/stream_usage.rs), [graph 준비](/Volumes/dev/mixrelay/apps/engine-service/src/macos_devices/recovery.rs). 공개 [Apple 계약](https://developer.apple.com/documentation/coreaudio/audiohardwareioprocstreamusage) 사용 |
+| CoreAudio 재시작·장치 ID 재사용 | [ACPDeviceManager init `0x3398c`](/Volumes/dev/loopback/ghidra/export/ACP/decompiled.c:39959)는 `dev#`와 `srst`를 감시. `_updateDeviceInfo` `0x353b0`은 reference별 disconnect/reconnect를 구분 | **누락 보강.** 물리 IOProc의 `srst` 즉시 차단, 등록별 알림 재설치, persistent UID 재해석으로 숫자 ID/형식만 같은 타 장치 거부. process tap도 service epoch를 별도로 추적하고 기존 native bundle selector가 같아도 재생성. 재시작 후 system listener 자체도 다시 설치. SDK `AudioHardware.h`와 [서비스 재시작 알림](https://developer.apple.com/documentation/coreaudio/kaudiohardwarepropertyservicerestarted)의 계약을 따름 |
+| 삭제된 native 자원·종료 순서 | ECIOAudioContextPhysical `_willStop` `0x1000233e4` → `_destroyDeviceIOProcID` `0x100024744` → aggregate 파괴. [graph invalidate `0x100031698`](/Volumes/dev/loopback/ghidra/export/arkaudiod/decompiled.c:36059)는 player/source를 멈추고 관리 컬렉션에서 제거 | **기존 drain 유지 + 누락 보강.** process tap teardown의 `!obj`·`!dev`만 삭제 확인으로 인정. 다른 오류는 정확한 native receipt를 보존. 삭제 확인 뒤에도 local callback/listener guard가 모두 빠져야 메모리 회수. 물리 lifecycle은 이미 같은 삭제 확인 정책을 사용. [tap 수명](/Volumes/dev/mixrelay/native/macos/process-tap/src/control.rs), [물리 수명](/Volumes/dev/mixrelay/native/macos/common/device_io/lifecycle.rs) |
+| 무음·캡처 고착 | `_updateWatchdogs` `0x100011b54` → 독립 diagnostic → `_resolveWatchdog...` `0x1000126f8` → 원본만 고착이면 `recreateTap` | **기존 구현 재확인.** 3초/8개 callback 관찰, 1초 보조 tap, 원본 회복 시 교체 취소, 실패 후 intent/resume 유지. 실제 무음으로 인한 주기적 재생성 없음. [watchdog](/Volumes/dev/mixrelay/native/macos/process-tap/src/watchdog.rs), [회귀](/Volumes/dev/mixrelay/native/macos/process-tap/src/tests/watchdog.rs) |
+| IPC 상대 종료 | [ECSharedQueue invalidation `0x14570`](/Volumes/dev/loopback/ghidra/export/ARK/decompiled.c:14097)의 Mach notifier, ECVirtualDevice client-death의 output queue/clock 제거, [ECAudiodGraphManager `0x10004d500`](/Volumes/dev/loopback/ghidra/export/arkaudiod/decompiled.c:56280)의 해당 client graph 제거 | **기존 구현 재확인.** controller pipe·OS 소유권 lease, XPC authority generation, mapping producer lease, reader pin, consumer claim으로 stale 상대와 늦은 완료를 분리. 회수는 control thread. [엔진 소유권](/Volumes/dev/mixrelay/crates/engine-process/src/child.rs), [HAL reconnect](/Volumes/dev/mixrelay/native/macos/hal-driver/rust/src/control.rs), [source registry](/Volumes/dev/mixrelay/native/macos/common/source_registry.rs) |
+| graph 변경·회수 경합 | graph invalidate는 target update suspend/resume으로 native source/player 변경을 묶음. graphRunner disconnect `0x100032424`는 runner를 invalidate하고 activation을 재평가 | **기존 구현 재확인.** graph·recovery publication 두 lane, format reservation, DSP block 경계의 matching plan 교체, control에서 retirement. RT callback은 native owner나 DSP를 해제하지 않음. [handoff](/Volumes/dev/mixrelay/apps/engine-service/src/macos_devices/handoff.rs), [DSP exchange](/Volumes/dev/mixrelay/crates/audio-engine/src/lib.rs:282) |
+| scheduler 지연·클록 단절 | [ACPStableIOClock timer `0x1a748`](/Volumes/dev/loopback/ghidra/export/ACP/decompiled.c:19263)는 현재 시각의 다음 quantum을 예약. ACPUnstableClock은 sample/host/frame count로 추적 | **기존 보호 유지.** native demand만 graph credit으로 사용, catch-up 상한 초과는 discontinuity, clock owner 교체와 실제 재시작 구별. 시각 정렬 cursor도 스케줄러 wake 시각을 입력 획득 시각으로 쓰지 않음. [demand](/Volumes/dev/mixrelay/apps/engine-service/src/render_demand.rs), [alignment](/Volumes/dev/mixrelay/crates/audio-io/src/capture_alignment.rs) |
+| 버퍼·메모리·비정상 PCM | [ECSharedQueue 생성·map `0x14240`/`0x14338`](/Volumes/dev/loopback/ghidra/export/ARK/decompiled.c:13964), ACPAudioQueue의 고정 크기와 modulo 저장을 확인. 바이너리 일부에서 할당 결과 검사가 보이지 않는 것을 전체 제품의 OOM 결함으로 일반화하지 않음 | **우리 보호 유지·개선.** 공유 헤더/정렬/정확한 extent·채널·버전·epoch 검사, 준비 단계의 fallible PCM/coordinate 예약, source/processor 출력의 nonfinite 정규화와 fault 집계, bounded source/retirement admission. 외부 라이브러리와 프로세스 전체 OOM 무고장을 주장하지 않음. [mapping](/Volumes/dev/mixrelay/native/macos/common/application_source_mapping.rs), [PCM 경계](/Volumes/dev/mixrelay/crates/audio-engine/src/render.rs) |
+| 외부 플러그인 중단 | [RAAUInstance invalidation `0x10009ea68`](/Volumes/dev/loopback/ghidra/export/arkaudiod/decompiled.c:119105)은 해당 unit의 invalidation을 확인하고 main queue로 처리 | **기존 구현 재확인.** 스캐너/processor child 격리, bounded shared packet, 늦은 출력의 원래 frame tag 유지, 지연이 맞는 dry fallback, 종료 child의 kill/reap. native 플러그인 mutex·state/editor 호출은 엔진 callback에 넣지 않음. [processor 부모](/Volumes/dev/mixrelay/crates/processor-host/src/lib.rs:1492), [공유 PCM](/Volumes/dev/mixrelay/crates/processor-host/src/shared_transport/audio.rs), [수명](/Volumes/dev/mixrelay/crates/processor-host/src/dsp_lifecycle.rs) |
+
+개선은 Loopback 내부 코드를 그대로 옮기는 방식으로 하지 않았다. 원래 큐의 덮어쓰기·미래 읽기·epoch 혼합을
+검사하며, 재시도는 유한하고 RT 경로는 기다리지 않는다. `AudioDeviceDuck` 같은 private 호출이나
+전역 hardware-sleep 설정은 도입하지 않았다. 추가한 장치·회수 보호는 공개 API와 명시적인 소유권으로 구현했다.
+
+검증: 독립 물리 입력 44.1/48kHz, +300/−200ppm, 64/512-frame callback, 별도 출력 pacing,
+20초 합성 신호에서 초기 0.25초 이후 197개 이벤트가 모두 1 graph frame 이내로 정렬됐다. RT graph 처리 할당은 0이다.
+정렬을 의도적으로 끄면 같은 회귀가 183-frame 불일치로 실패한다. SRC 자체는 37-frame 부분 읽기와
+impulse 중심 좌표 oracle로 따로 검사한다. 좌표 overwrite, epoch 경합, stale read·future read,
+서비스 재시작·알림 재등록의 부분 실패, ID 재사용, 삭제와 transient 오류, active callback/listener drain은 별도 회귀에서 확인한다. 획득 시각이 없는 입력 하나가 정상 입력까지 무음으로 묶지 않는 것도 실제 native/SRC/graph 경로로 검사했다. 이전의 모든-input 준비 gate를 재주입하면 정상 경로까지 `[0, 0]`으로 남아 같은 시험이 실패한다. 두 결함 주입 후 원래 소스를 복원했다. 48→44.1kHz refresh 뒤 callback이 초기 nominal rate로 좌표를 계산하던 오류도 실패 회귀로 확인하고, 현재 atomic rate를 사용하도록 수정했다.
+소스 검사와 설치본 수락 결과는 [검증 현황](/Volumes/dev/mixrelay/docs/validation/current.md)에 구분한다.
+
+LG HDR 4K는 사용자 결정에 따라 **CoreAudio 단독 시작도 실패하는 현 장치 상태의 예외**로 둔다.
+raw function/block IOProc·AUHAL·독립 ARK clock aggregate에서도 Start가 약 10초 뒤 `stop`, callback 0으로
+끝났다. LG SDQHD와 built-in 출력은 별도로 통과했다. Loopback UI meter가 움직인 관찰은 HDR 물리
+callback의 성공 증거가 아니며 사용자는 두 LG를 Loopback에서 시험하지 않았다고 답했다.
+CoreAudio를 강제 재시작하거나 장치 설정을 반복 변경해 제품 해결로 표시하지 않는다.
+
+## 2026-10-16 초기 결론과 근거
+
+이하의 “현재 구현 공백”은 초기 기준 커밋에 대한 기록이다. 최신 구현·판정은 위 후속 대조와 product.md를 따른다.
 
 **처음 앱 캡처 시험이 IOProc 등록에서 멈춘 것은, 현재 근거상 CoreAudio 등록 API를 잘못 골라서가 아니라 첫 시스템 오디오 권한 요청이 끝나지 않은 상태를 시험자가 놓친 문제다.** 실패한 PID `9978`의 요청과 TCC의 `AUTHREQ_PROMPTING` → `AUTHREQ_RESULT` → `REPLY`가 같은 `msgID=43699.556`로 연결된다. 승인 이후에는 block 등록과 기존 function 등록이 모두 실제 PCM 네 단계를 통과했다. 이 실패를 제품 엔진의 영구 교착이나 `AudioDeviceCreateIOProcID` 자체 결함이라고 설명할 수 없다. [실패 스택](/tmp/mixrelay-native-tap-smoke-sample-20261016.txt:24), [해당 요청의 TCC 로그](/tmp/mixrelay-tap-first-permission-request-20261016.log:15), [block 비교](/tmp/mixrelay-tap-registration-block-comparison-20261016.log:1), [function 역검사](/tmp/mixrelay-tap-registration-function-reversal-20261016.log:1).
 
