@@ -1,7 +1,7 @@
 # Loopback 배포 엔진과 MixRelay의 CoreAudio 경로 비교
 
 초기 조사: 2026-10-16(KST), 기준 커밋 `fae815ff59ff3ad67353e1ceb019d9f1202bba42`.
-안정성 경계 후속 대조·구현: 2026-10-17(KST), 기준 커밋 `4a9b064a`, 형식 snapshot 보호 `139b3cef`.
+안정성 경계 후속 대조·구현: 2026-10-17(KST), 기준 커밋 `4a9b064a`, 형식 snapshot 보호 `139b3cef`, 늦은 입력 합류 `df523ee`.
 이 문서는 연구 근거이며 별도 제품 backlog가 아니다. 제품 범위와 진행 상태는 [product.md](/Volumes/dev/mixrelay/docs/product.md:396), 설치본 검증 결과는 [current.md](/Volumes/dev/mixrelay/docs/validation/current.md)를 따른다.
 
 ## 2026-10-17 안정성 경계 대조
@@ -40,6 +40,13 @@ impulse 중심 좌표 oracle로 따로 검사한다. 좌표 overwrite, epoch 경
 구형 레이트와 새 generation이 섞여 새 PCM을 이전 SRC에 전달하던 경합은 결정적 재현 시험으로 확인했다.
 별도 `format_ready`는 native `running`과 구분하며, 전환 중에는 PCM·clock credit을 보류하고 pump는 재시도한다.
 데스크톱은 native stats의 Rust ABI 타입을 직접 사용한다.
+설치본 후속 시험에서는 앱→녹음 입력은 정상인데 앱→가상 출력에서 무음이 남았다.
+늦게 준비된 입력의 PCM 경계가 과거로 이동해도 공통 cursor가 앞선 시각을 계속 요구하는 회귀를
+실제 native callback·공유 source registry·compiled graph로 재현했다. 경계가 역행하면 공통 좌표를
+재획득하고 각 입력의 forward-only 커서로 반복 재생을 막는다. 기존 정상 입력과 늦은 앱 입력이
+함께 전달되는 것·RT 할당 0을 검사했다. 재획득 조건을 제거하면 `[약 0.1, 0]`이 되어 같은
+회귀가 실패한다. scheduling clock도 주입 가능한 경계로 옮겨 실제 경과 시간에 기대지 않는다.
+이 수정의 설치본 재확인은 검증 현황에서 별도로 갱신한다.
 소스 검사와 설치본 수락 결과는 [검증 현황](/Volumes/dev/mixrelay/docs/validation/current.md)에 구분한다.
 
 LG HDR 4K는 사용자 결정에 따라 **CoreAudio 단독 시작도 실패하는 현 장치 상태의 예외**로 둔다.

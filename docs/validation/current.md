@@ -35,9 +35,36 @@ PCM 획득 시각을 native ring·부분 읽기·SRC·공유 application clock v
   2026-10-17 11:49 KST에 빌드했다. 패키지의 Apple Developer ID Installer 서명과
   trusted timestamp를 확인했다. SHA-256은
   `481b7e177e1fa6c83d300377df47dedbc52e732ec2cb85b4f210efb31ca25338`이다.
-  설치와 실제 오디오 수락은 아직 대기 중이다.
+  사용자 설치 후 11:50:13 KST 설치 transaction 완료·TargetedHost HAL 재적재와
+  Driver/엔진 Ready를 확인했다. 설치된 앱·엔진·Driver·HAL 네 실행 파일의 SHA-256은
+  빌드 산출물과 모두 일치한다.
+- 새 설치본 기본 패스스루는 144,000프레임 전체 비트 일치, 추가 지연·누락·중복·손상·
+  시각 단절 0이다. Loopback → 엔진 → MixRelay 가상 장치는 추가 30초 유지 없이
+  통상적인 지연 보고 안정화 대기 뒤 20/20 임펄스 정렬, 완전한 녹음, 시각 단절 0으로 통과했다.
+  평균 2,266.97프레임(47.229ms), Loopback 자체 미보고 지연 769프레임,
+  MixRelay 보고 1,497프레임으로 전체 경로 보고 오차는 0.97프레임이다.
+  기존 설치본보다 지연 자체가 줄었다는 결과는 아니다. 시험 후 원래 빈 그래프와 보고 0을 복원했다.
+- 설치된 실행부의 native 앱 캡처는 117개 callback·59,904개 경과 프레임과 유효 시각을 확인했다.
+  그러나 실제 앱 캡처 → SRC → 공유 IPC → graph 수락 시험은 입력 meter가 0으로 남아 미통과다.
+  native callback 진행을 전체 PCM 전달 성공으로 취급하지 않는다. 시험 그래프와 신호 앱은 회수했으며
+  원인을 추적 중이다. 원시는 `/tmp/mixrelay-installed-stability-20261017/`에 보존한다.
+- 후속 분리 시험에서 실제 native 캡처/SRC의 44.1→48→44.1kHz 전환과 설치본의
+  앱 캡처 → 녹음 노드 입력은 통과했다. 가상 출력과 함께 정렬되는 경우로 범위를 좁혔다.
+  늦게 준비된 입력의 안전한 PCM 경계가 이전보다 과거로 이동할 때, 기존 공통 cursor가
+  그 PCM을 계속 지나치는 회귀를 native callback·실제 공유 큐·compiled graph로 재현했다.
+  경계의 역행 시 공통 좌표를 재획득하며 개별 입력의 forward-only 읽기 커서는 유지한다.
+  정상 입력의 최초 전달·합류 후 양쪽 전달·RT 할당 0을 확인했고, 수정 조건을 제거하면
+  정상 입력은 약 0.1인데 앱 입력은 0으로 남아 같은 회귀가 실패한다. 원래 소스로 복원했다.
+  source registry의 scheduling clock을 주입해 이 회귀는 실제 경과 시간에 의존하지 않는다.
+  후속 최종 workspace lib/bin 2,299개·스크립트 362개가 통과했으며 workspace와
+  opt-in desktop fixture의 엄격 clippy도 통과했다. 실제 SRC 공유 큐의 획득 좌표가
+  native host-time 원점에 남는 것까지 확인했다. 재현 도구는
+  [macos-installed-capture-acceptance.mjs](../../scripts/lab/macos-installed-capture-acceptance.mjs)의
+  `--help`로 사용법을 확인한다. 가상 출력과 녹음 입력을 나눠 측정하며 원래 그래프·자식 프로세스를
+  복원한다. 응답 유실·측정 실패·SIGINT·동시 편집 때의 회수와 외부 변경 보존도 검사한다.
+  이 후속 수정의 설치본 재확인은 아직 남아 있다.
 
-이 소스의 v5 전달·독립 입력 정렬·재시작 보호를 **설치본에서 확인한 것으로 표시하지 않는다.**
+이 소스의 v5 앱 전달·독립 입력 정렬·재시작 보호를 **설치본에서 모두 확인한 것으로 표시하지 않는다.**
 아래 2026-10-16의 설치본 수락은 이전 실행 파일에 대한 기록이다.
 
 LG HDR 4K는 CoreAudio 단독 시작도 실패하는 현 장치 상태의 예외로 둔다.
