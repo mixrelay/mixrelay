@@ -18,9 +18,16 @@ native timestamps.
 Queue residence measures delay; it does not place independently captured PCM on a
 shared absolute content timeline. Native input PCM retains acquisition coordinates
 through partial reads, sinc SRC, application transport v5 and graph queues. The
-input reader can select each block on a shared acquisition cursor. A latest callback
+input reader selects each routed block on a shared acquisition cursor, including
+routes with one input. The first graph admission and callback recovery invalidate
+the graph-input producer epoch; the consumer acknowledges it before selecting PCM
+coordinates. The retained reserve includes actual SRC publication between graph
+cycles, so coalesced native callbacks do not inherit a one-callback budget. A latest callback
 timestamp must never be attached to older queued PCM. The latency publication is
 still a window mean; content placement and queue residence remain separate concerns.
+An input from another clock uses the worker's time-addressed queue even when it is
+the only source. Native inputs belonging to the direct master's exact IOProc clock
+can retain direct rendering.
 
 `RenderPlan::destination_arrivals` retains terminal arrivals, including hosted
 transport/intrinsic delay and route compensation. It accepts causal source
@@ -67,7 +74,9 @@ queued write) / frames` per edge, with opposite signs that cancel in steady stat
 Unlike the former Little's-law fill sample `(2 * fill - actual_read)`, this stays
 exact when producers write whole callback or graph blocks at once, where the fill
 sample was short by about half the written block. Frames a consumer passes without
-reading (discard or epoch skip) invalidate the window; failed reads move no cursor;
+reading (discard or epoch skip) invalidate the FIFO residence window. An input
+history seek can still use a valid exact acquired-age window; absent or invalid age
+retains the discard fence. Failed reads move no cursor;
 deadline shortages and overflows invalidate the window through faults.
 AsyncClockBridge's private input and output batch FIFOs instead integrate
 retained backlog over elapsed native callback time between scheduling
@@ -82,7 +91,8 @@ at the converter's output rate, separately from queue residence. Empty producer
 polls do not count as deadline underruns and are not residence samples.
 A residence-invalid window is disturbed evidence: the reporter skips it,
 retaining its previous stable value and breaking a candidate streak, even without
-a deadline shortage fault. This applies to native/graph FIFO discards and both SRC
+a deadline shortage fault. This applies to native FIFO discards, graph FIFO discards
+without valid exact input age, and both SRC
 residence invalid counters; the next valid window can resume publication from the
 updated baseline.
 

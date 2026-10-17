@@ -1,7 +1,7 @@
 # Loopback 배포 엔진과 MixRelay의 CoreAudio 경로 비교
 
 초기 조사: 2026-10-16(KST), 기준 커밋 `fae815ff59ff3ad67353e1ceb019d9f1202bba42`.
-안정성 경계 후속 대조·구현: 2026-10-17(KST), 기준 커밋 `4a9b064a`, 형식 snapshot 보호 `139b3cef`, 늦은 입력 합류 `df523ee`, 앱 재실행 `cf6d868`, 정렬 경로 범위 `fdd2859`, 최초 PCM 승인·획득 시각 지연 측정 `4252373`.
+안정성 경계 후속 대조·구현: 2026-10-17(KST), 기준 커밋 `4a9b064a`, 형식 snapshot 보호 `139b3cef`, 늦은 입력 합류 `df523ee`, 앱 재실행 `cf6d868`, 정렬 경로 범위 `fdd2859`, 최초 PCM 승인·획득 시각 지연 측정 `4252373`, 단일 입력의 시각 읽기·PCM epoch·발행 묶음 `981f8b8`.
 이 문서는 연구 근거이며 별도 제품 backlog가 아니다. 제품 범위와 진행 상태는 [product.md](/Volumes/dev/mixrelay/docs/product.md:396), 설치본 검증 결과는 [current.md](/Volumes/dev/mixrelay/docs/validation/current.md)를 따른다.
 
 ## 2026-10-17 안정성 경계 대조
@@ -65,6 +65,16 @@ capture snapshot이 다른 경로의 시각 정렬에 참여하는 결함을 재
 이미 포함하므로 별도 큐 평균과 filter delay를 다시 더하지 않는다. 가변 callback에서 기존 평균
 합산이 48프레임 오차 한도를 넘긴 회귀를 수정하고, 부분 읽기의 프레임 가중·시각 부재/미래 시각의
 관찰 거부도 검사한다. 설치본 지연 재확인은 검증 현황에서 별도로 갱신한다.
+13:57 KST 설치본도 임펄스 20개는 도착했지만 지연이 약 43.5프레임 이동해 수락하지 않았다.
+단일 입력 경로가 보존한 획득 시각을 읽지 않고 FIFO를 소비하는 분기를 후속으로 확인했다.
+현재 소스는 독립 클록 입력이 하나여도 worker의 시각 읽기를 사용하고, 같은 IOProc의
+native 입력만 직접 렌더링한다. callback 적용 전 좌표를 막고 graph-input producer epoch를
+갱신하며, 소비자는 그 epoch를 확인한 후 좌표를 선택한다. callback 여러 개가 한 graph
+주기 사이에 몰릴 때는 실제 SRC 발행량을 여유분에 포함한다. 앞/뒤 순서와 1·2·4개 묶음의
+여섯 경우에서 각 60개 임펄스·2프레임 이내 지연 변동·RT 할당 0을 확인했다.
+시각 선택을 위한 의도적 history skip은 유효한 PCM age가 있는 경우에만 지연 측정에 쓰며,
+시각 부재/미래 시각과 native/SRC epoch 손실은 계속 관찰을 거부한다. 이 후속 소스의
+설치본 수락은 아직 남아 있다.
 소스 검사와 설치본 수락 결과는 [검증 현황](/Volumes/dev/mixrelay/docs/validation/current.md)에 구분한다.
 
 LG HDR 4K는 사용자 결정에 따라 **CoreAudio 단독 시작도 실패하는 현 장치 상태의 예외**로 둔다.

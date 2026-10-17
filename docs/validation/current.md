@@ -10,8 +10,8 @@ PCM 획득 시각을 native ring·부분 읽기·SRC·공유 application clock v
 독립 입력을 공통 획득 cursor로 읽는다. timestamp snapshot이나 FIFO residence를
 개별 PCM 구간의 시각으로 대신 사용하지 않는다.
 
-현재 설치 엔진은 `fdd2859` 빌드다. 새 설치기의 정상 앱 재실행 후 앱→가상 출력·녹음 입력은
-둘 다 통과했다. 물리 입력 경유 보고는 정상화됐지만 왕복 임펄스 지연이 변해 수락하지 않았다.
+현재 설치 엔진은 `4252373` 빌드다. 앞선 `fdd2859` 설치본의 정상 앱 재실행 후 앱→가상 출력·녹음
+입력은 둘 다 통과했다. 최신 설치본도 물리 입력 경유 왕복 임펄스 지연이 변해 수락하지 않았다.
 `cf6d868`·`fdd2859`는 설치기 재실행의 권한 책임과 출력에 도달하지 않는 입력의 정렬 참여를 고쳤다.
 후속 `4252373`은 최초 그래프 시작의 PCM 경계·실제 SRC slab 피드백 목표·획득 좌표 기반
 입력 지연 측정을 보강했다. workspace lib/bin은 37개 실행 파일 기준 2,302개 통과·0개 실패·
@@ -134,7 +134,30 @@ PCM 획득 시각을 native ring·부분 읽기·SRC·공유 application clock v
   Developer ID Installer `38UUAD7TUP`와 trusted timestamp 04:57:39 UTC를 확인했다.
   앱·Driver·HAL·설치기/제거 앱은 앞서 검증한 동일 서명 파일이다. source 변경에 대한 Universal
   HAL의 양쪽 링크·서명 검증·실제 factory/COM probe도 별도 산출물로 통과했다(설치하지 않음).
-  새 엔진의 설치 후 수락은 관리자 설치 완료를 기다린다.
+  사용자 설치 후 Installer의 성공 화면과 설치 엔진의 동일 SHA-256·Driver Ready를 확인했다.
+  `engine-startup-final/`의 왕복 시험은 20개 임펄스가 모두 도착하고 녹음 완전성·시각 연속성은
+  통과했지만, 지연이 1,573.20→1,529.71프레임으로 이동해 3개만 고정 지연에 정렬됐다.
+  보고는 884프레임으로 안정됐으나 왕복 수락은 **미통과**다. 시험 뒤 빈 그래프와 보고 0을 복원했다.
+  최신 설치본의 앱 캡처 양쪽 경로는 아직 다시 측정하지 않았다.
+- 후속 소스는 단일 routed 입력도 획득 시각으로 읽고, callback 적용 전의 좌표 공개를 막는다.
+  callback 소유자가 그래프 입력 큐의 producer epoch를 갱신하고, 그래프 소비자는 epoch를
+  확인한 뒤에만 좌표를 선택한다. 실제 그래프 주기 사이의 SRC 발행 묶음을 버퍼 여유분에 포함한다.
+  준비 64ms 후 callback 앞/뒤 순서와 1·2·4개 묶음의 여섯 경우 모두 60개 임펄스·2프레임 이내
+  지연 변동·RT 할당 0을 확인했다. 단일 입력의 FIFO 분기를 다시 넣으면 같은 시험이
+  129프레임의 지연 이동으로 실패하며, 결함 주입 후 소스를 복원했다. 독립 클록 입력이
+  하나일 때도 직접 렌더링을 우회해 worker의 시각 읽기를 사용하고, 같은 IOProc 입력은
+  직접 렌더링을 유지한다. 최종 `981f8b8`의 workspace lib/bin 37개 실행 파일은
+  2,306개 통과·0개 실패·기존 ignore 8개다. fmt·32개 crate 계층·workspace all-targets
+  clippy `-D warnings`와 실제 앱·PKG 서명 사전 시험도 통과했다. 원시는
+  `single-route-workspace.log`, `single-route-clippy.log`, `single-route-mutation.log`다.
+  이 수정의 설치본 확인은 남아 있다.
+- `981f8b8`의 ARM·Intel 엔진과 Universal Developer ID 서명을 검증했다.
+  14:28 KST [후속 설치 파일](/Volumes/dev/mixrelay/target/macos-capture-verification/MixRelay-Installer-0.1.0.pkg)로
+  앞선 PKG를 원자적으로 교체했다. 엔진 SHA-256은
+  `a4a335c13586b2c2c718708c4d16c05c400c881dda4c7685186b48d2ce9d33ca`,
+  패키지 SHA-256은 `d353a29a56fe653ebba6bccb628a175d398d3371434b0383e26c10d7123a949b`다.
+  Developer ID Installer `38UUAD7TUP`와 trusted timestamp 05:28:34 UTC를 확인했고,
+  임시 포장 폴더를 회수했다. 현재 설치 엔진은 아직 `4252373`이며 후속 설치의 관리자 인증을 기다린다.
 - 사용자 요청으로 `/Volumes/dev/mixrelay-release-*` 설치 산출물 폴더 6개(386.1MiB)를 삭제했다.
   원본 저장소·Loopback 연구 자료와 `/tmp`의 검증 증거는 보존했다. 위 패키지 해시는 설치 이력이며
   삭제된 설치 파일의 다운로드 링크가 아니다.
