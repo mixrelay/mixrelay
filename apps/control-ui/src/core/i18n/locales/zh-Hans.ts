@@ -343,7 +343,7 @@ export const zhHans = {
       },
     },
     addNode: '添加节点',
-    emptyCanvas: '还没有节点。使用左上角的 + 添加应用、设备和效果。',
+    emptyCanvas: '添加应用、设备、效果等。',
     noApplications: '没有正在运行的应用',
     noInputDevices: '没有输入设备',
     noOutputDevices: '没有输出设备',

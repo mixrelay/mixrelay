@@ -344,7 +344,7 @@ export const zhHant = {
       },
     },
     addNode: '新增節點',
-    emptyCanvas: '尚無節點。使用左上角的 + 新增應用程式、裝置與效果。',
+    emptyCanvas: '新增應用程式、裝置、效果等。',
     noApplications: '沒有執行中的應用程式',
     noInputDevices: '沒有輸入裝置',
     noOutputDevices: '沒有輸出裝置',

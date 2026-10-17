@@ -1303,7 +1303,7 @@ it('guides an empty graph to the add-node command without adding a second one', 
       />
     </CanvasTestProvider>,
   );
-  expect(screen.getByText(/No nodes yet/)).toBeInTheDocument();
+  expect(screen.getByText('Add apps, devices, effects and more.')).toBeInTheDocument();
   expect(screen.getAllByRole('button', { name: 'Add node' })).toHaveLength(1);
   view.rerender(
     <CanvasTestProvider>
@@ -1315,7 +1315,7 @@ it('guides an empty graph to the add-node command without adding a second one', 
       />
     </CanvasTestProvider>,
   );
-  expect(screen.queryByText(/No nodes yet/)).not.toBeInTheDocument();
+  expect(screen.queryByText('Add apps, devices, effects and more.')).not.toBeInTheDocument();
 });
 
 describe('AudioGraphCanvas discovery menu lifecycle', () => {

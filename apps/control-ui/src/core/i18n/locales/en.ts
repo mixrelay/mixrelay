@@ -357,7 +357,7 @@ export const en = {
       },
     },
     addNode: 'Add node',
-    emptyCanvas: 'No nodes yet. Add apps, devices and effects with + at the top left.',
+    emptyCanvas: 'Add apps, devices, effects and more.',
     noApplications: 'No running applications',
     noInputDevices: 'No input devices',
     noOutputDevices: 'No output devices',

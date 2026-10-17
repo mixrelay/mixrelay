@@ -366,8 +366,7 @@ export const it = {
       },
     },
     addNode: 'Aggiungi nodo',
-    emptyCanvas:
-      'Ancora nessun nodo. Aggiungi app, dispositivi ed effetti con + in alto a sinistra.',
+    emptyCanvas: 'Aggiungi app, dispositivi, effetti e altro.',
     noApplications: 'Nessuna applicazione in esecuzione',
     noInputDevices: 'Nessun dispositivo di ingresso',
     noOutputDevices: 'Nessun dispositivo di uscita',
