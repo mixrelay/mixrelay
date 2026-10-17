@@ -41,6 +41,8 @@ typedef struct MRProcessTapStats {
     uint32_t channels;
     double sample_rate;
     bool running;
+    /* False during invalidation or a mixed format snapshot; retry without PCM/clock credit. */
+    bool format_ready;
     uint64_t format_generation;
     uint64_t clock_discontinuities;
     double sample_time;

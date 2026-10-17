@@ -559,6 +559,13 @@ impl Pump {
             return Ok(());
         };
         let health = self.capture.session().stats();
+        if !health.format_ready {
+            // Native invalidation is recoverable. Do not certify mixed counters
+            // as clock credit or mistake a refresh's temporary stop for retirement.
+            self.transport.publish_native(0, false);
+            self.waker.briefly(&self.capture);
+            return Ok(());
+        }
         // Ring acceptance is not the native clock: overflowed callback frames
         // still elapsed. A drop also forces the epoch reset below.
         self.transport.publish_native(
@@ -651,6 +658,9 @@ impl Pump {
     /// callback cadence; applied when the thread re-enters the realtime class.
     fn retime(&mut self, realtime: Option<&RealtimeThread>) {
         let health = self.capture.session().stats();
+        if !health.format_ready {
+            return;
+        }
         let Ok(rate) = checked_rate(health.sample_rate) else {
             return;
         };
@@ -790,6 +800,7 @@ mod tests {
             format_generation: 1,
             clock_discontinuities: 0,
             running: true,
+            format_ready: true,
             sample_time: 0.0,
             host_time: 0,
             clock_valid: false,
@@ -837,6 +848,7 @@ mod tests {
             channels: 2,
             sample_rate: 48_000.0,
             running: true,
+            format_ready: true,
             format_generation: 0,
             clock_discontinuities: 0,
             sample_time: 0.0,

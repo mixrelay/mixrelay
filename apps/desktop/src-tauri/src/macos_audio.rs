@@ -19,7 +19,7 @@ use mixrelay_audio_io::{
 use mixrelay_macos_transport::endpoint_identity::{endpoint_uid, parse_endpoint_id};
 use tauri::State;
 // Keep the crate exporting the native capture entry points linked into the desktop.
-use mixrelay_process_tap as _;
+use mixrelay_process_tap::{self as _, TapStats as NativeStats};
 
 #[path = "macos_audio/capture_reader.rs"]
 mod capture_reader;
@@ -99,23 +99,6 @@ struct NativeClockSnapshot {
     rebuffer_frames: u64,
     overwrite_skips: u64,
     insufficient_headroom: u32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct NativeStats {
-    callback_count: u64,
-    captured_frames: u64,
-    dropped_frames: u64,
-    available_frames: usize,
-    channels: u32,
-    sample_rate: f64,
-    running: bool,
-    format_generation: u64,
-    clock_discontinuities: u64,
-    sample_time: f64,
-    host_time: u64,
-    clock_valid: bool,
 }
 
 unsafe extern "C" {
@@ -202,6 +185,7 @@ pub(crate) struct CaptureProbeStats {
     channels: u32,
     sample_rate: f64,
     running: bool,
+    format_ready: bool,
     format_generation: u64,
     clock_discontinuities: u64,
     sample_time: f64,
@@ -219,6 +203,7 @@ impl From<NativeStats> for CaptureProbeStats {
             channels: stats.channels,
             sample_rate: stats.sample_rate,
             running: stats.running,
+            format_ready: stats.format_ready,
             format_generation: stats.format_generation,
             clock_discontinuities: stats.clock_discontinuities,
             sample_time: stats.sample_time,

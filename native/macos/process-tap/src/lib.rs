@@ -165,6 +165,9 @@ pub struct TapStats {
     pub sample_rate: f64,
     /// Native start has succeeded and stop/unregister has not completed.
     pub running: bool,
+    /// Format fields belong to one admitted generation. Retry a false snapshot;
+    /// it does not mean the capture owner has permanently stopped.
+    pub format_ready: bool,
     /// Successfully prepared format generations.
     pub format_generation: u64,
     /// Observed native timestamp discontinuities.
@@ -262,6 +265,15 @@ impl TapSession {
     }
 
     fn stats(&self) -> TapStats {
+        self.stats_observed(|| {})
+    }
+
+    fn stats_observed(&self, interleave: impl FnOnce()) -> TapStats {
+        // The release publishing a generation follows its rate store. Acquire
+        // that generation first so timed reads cannot certify a previously read rate.
+        let format_generation = self.generation.load(Ordering::Acquire);
+        let sample_rate = f64::from_bits(self.sample_rate.load(Ordering::Acquire));
+        interleave();
         let mut clock = CallbackClockSnapshot::default();
         // SAFETY: stats readers retain the owner; all ring observations and clock
         // publication are atomic. Neither reaches control-only resources.
@@ -273,20 +285,33 @@ impl TapSession {
                 mr_audio_ring_available_frames(self.ring()),
             )
         };
-        TapStats {
+        let mut stats = TapStats {
             callback_count: self.callbacks.load(Ordering::Relaxed),
             captured_frames: self.captured.load(Ordering::Relaxed),
             dropped_frames,
             available_frames,
             channels: self.format.get().map_or(0, |format| format.channels),
-            sample_rate: f64::from_bits(self.sample_rate.load(Ordering::Acquire)),
+            sample_rate,
             running: self.running.load(Ordering::Acquire),
-            format_generation: self.generation.load(Ordering::Acquire),
+            format_ready: false,
+            format_generation,
             clock_discontinuities,
             sample_time: clock.sample_time,
             host_time: clock.host_time,
             clock_valid: read && clock.valid != 0,
+        };
+        // A mixed observation must publish neither PCM admission nor native clock
+        // credit. Keep native running separate so a transient cannot end its pump.
+        let admitted = self.allowed();
+        // Keep all sampled fields and admission before the final generation check.
+        // A refresh certifies admission only after publishing its new generation.
+        std::sync::atomic::fence(Ordering::Acquire);
+        stats.format_ready =
+            admitted && self.generation.load(Ordering::Relaxed) == format_generation;
+        if !stats.format_ready {
+            stats.clock_valid = false;
         }
+        stats
     }
 }
 

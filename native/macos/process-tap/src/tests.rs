@@ -1,5 +1,6 @@
 use super::native::Native;
 use super::*;
+mod format_snapshot;
 mod retirement;
 mod service_restart;
 mod watchdog;
