@@ -33,6 +33,13 @@ UI 테스트(`apps/control-ui`)는 확장자로 실행 환경을 나눈다. `*.t
 
 Rust 코드는 [Rust 작업 규칙](rust-guidelines.md)을, TypeScript·React 코드는 [TypeScript·React 작업 규칙](typescript-react-guidelines.md)을, 크레이트 책임과 의존 방향은 [코드 구조와 책임](architecture.md)을 따른다. `pnpm check:crate-layers`가 의존 방향을 검사한다.
 
+설치가 필요 없는 동작과 회귀는 유닛 테스트에서 재현·검증한다. 콜백 도착 순서·묶음,
+부분 읽기·시각·epoch·클록 차이와 프로세스 수명은 실제 처리 코드를 주입된 경계로 구동한다.
+설치본에서 발견한 오류도 관찰한 조건을 실패하는 회귀 시험으로 먼저 옮기고 수정한 뒤,
+관련 검사까지 끝낸 변경을 한 설치본으로 묶는다. 유닛 테스트로 확인할 수 있는 사항 때문에
+사용자에게 재설치를 반복 요청하지 않는다. 설치본 검증은 서명·권한 귀속·launchd/XPC 연결·
+coreaudiod 샌드박스·실제 장치 왕복처럼 실제 설치 환경이 필요한 경계에 한정한다.
+
 설치 환경의 제약은 로컬 테스트의 기본값으로 둔다. 설치본에서만 드러나는 문제를 설치·확인을 반복하며 찾지 않기 위해서다.
 - HAL은 coreaudiod 샌드박스(`deny default`, `process-info-pidinfo` 없음) 안에서 돈다. 다른 프로세스의 `proc_pidinfo`·`proc_pidpath`·번들 조회는 실패한다. HAL의 프로세스 조회는 `transport::ProcessInspection` 하나로만 하고, Registry 테스트 픽스처는 `SANDBOXED`를 쓴다. 신원 판단은 coreaudiod가 `AddDeviceClient`로 준 PID·번들처럼 샌드박스 안에서 얻는 정보로도 성립해야 한다.
 - 엔진은 자기가 발행하는 가상 장치에 직접 쓰는 클라이언트다. 장치 쓰기로 동작이 바뀌는 판단(지연 보고 등)은 엔진 자신의 쓰기를 포함한 상황을 테스트한다.

@@ -10,12 +10,16 @@ PCM 획득 시각을 native ring·부분 읽기·SRC·공유 application clock v
 독립 입력을 공통 획득 cursor로 읽는다. timestamp snapshot이나 FIFO residence를
 개별 PCM 구간의 시각으로 대신 사용하지 않는다.
 
-현재 설치 엔진은 `4252373` 빌드다. 앞선 `fdd2859` 설치본의 정상 앱 재실행 후 앱→가상 출력·녹음
-입력은 둘 다 통과했다. 최신 설치본도 물리 입력 경유 왕복 임펄스 지연이 변해 수락하지 않았다.
+현재 설치 엔진은 `981f8b8` 빌드다. Loopback → 엔진 → 가상 장치의 실제 왕복은
+20/20 임펄스 정렬·지연 변동 0.9프레임·보고 오차 2.09프레임으로 통과했다.
+설치 앱의 캡처→가상 출력도 정상 PCM·sample fault 0으로 통과했다. 기본 가상 장치 왕복은
+144,000프레임 비트 일치·누락/중복/손상/추가 지연 0이다. 앞선 `fdd2859` 설치본에서
+확인한 녹음 입력과 다중 독립 입력의 합성 시험은 이 설치본의 같은 항목 수락으로 합치지 않는다.
 `cf6d868`·`fdd2859`는 설치기 재실행의 권한 책임과 출력에 도달하지 않는 입력의 정렬 참여를 고쳤다.
 후속 `4252373`은 최초 그래프 시작의 PCM 경계·실제 SRC slab 피드백 목표·획득 좌표 기반
-입력 지연 측정을 보강했다. workspace lib/bin은 37개 실행 파일 기준 2,302개 통과·0개 실패·
-8개 ignore이며, fmt·32개 crate 계층·workspace all-targets clippy `-D warnings`도 통과했다.
+입력 지연 측정을 보강했다. `981f8b8`은 단일 입력의 시각 읽기·PCM epoch·발행 묶음을 보강했다.
+최종 workspace lib/bin은 37개 실행 파일 기준 2,306개 통과·0개 실패·8개 ignore이며,
+fmt·32개 crate 계층·workspace all-targets clippy `-D warnings`도 통과했다.
 아래 이력의 이전 설치본 통과와 구분한다.
 
 - 44.1/48kHz, +300/−200ppm, 64/512-frame native callback과 별도 출력 pacing을
@@ -138,7 +142,7 @@ PCM 획득 시각을 native ring·부분 읽기·SRC·공유 application clock v
   `engine-startup-final/`의 왕복 시험은 20개 임펄스가 모두 도착하고 녹음 완전성·시각 연속성은
   통과했지만, 지연이 1,573.20→1,529.71프레임으로 이동해 3개만 고정 지연에 정렬됐다.
   보고는 884프레임으로 안정됐으나 왕복 수락은 **미통과**다. 시험 뒤 빈 그래프와 보고 0을 복원했다.
-  최신 설치본의 앱 캡처 양쪽 경로는 아직 다시 측정하지 않았다.
+  이 13:57 설치본의 앱 캡처 양쪽 경로는 다시 측정하지 않았다.
 - 후속 소스는 단일 routed 입력도 획득 시각으로 읽고, callback 적용 전의 좌표 공개를 막는다.
   callback 소유자가 그래프 입력 큐의 producer epoch를 갱신하고, 그래프 소비자는 epoch를
   확인한 뒤에만 좌표를 선택한다. 실제 그래프 주기 사이의 SRC 발행 묶음을 버퍼 여유분에 포함한다.
@@ -150,14 +154,28 @@ PCM 획득 시각을 native ring·부분 읽기·SRC·공유 application clock v
   2,306개 통과·0개 실패·기존 ignore 8개다. fmt·32개 crate 계층·workspace all-targets
   clippy `-D warnings`와 실제 앱·PKG 서명 사전 시험도 통과했다. 원시는
   `single-route-workspace.log`, `single-route-clippy.log`, `single-route-mutation.log`다.
-  이 수정의 설치본 확인은 남아 있다.
+  이 수정의 설치본 결과는 다음에 구분한다.
 - `981f8b8`의 ARM·Intel 엔진과 Universal Developer ID 서명을 검증했다.
   14:28 KST [후속 설치 파일](/Volumes/dev/mixrelay/target/macos-capture-verification/MixRelay-Installer-0.1.0.pkg)로
   앞선 PKG를 원자적으로 교체했다. 엔진 SHA-256은
   `a4a335c13586b2c2c718708c4d16c05c400c881dda4c7685186b48d2ce9d33ca`,
   패키지 SHA-256은 `d353a29a56fe653ebba6bccb628a175d398d3371434b0383e26c10d7123a949b`다.
   Developer ID Installer `38UUAD7TUP`와 trusted timestamp 05:28:34 UTC를 확인했고,
-  임시 포장 폴더를 회수했다. 현재 설치 엔진은 아직 `4252373`이며 후속 설치의 관리자 인증을 기다린다.
+  임시 포장 폴더를 회수했다. 사용자 설치 완료 후 설치 엔진의 SHA-256이 위 산출물과 일치하고,
+  새 엔진 프로세스가 실행 중임을 확인했다.
+- `single-input-installed/`의 실제 왕복은 추가 settle 없이 기본 보고 안정화 후 통과했다.
+  5초 동안 20개 임펄스가 모두 같은 지연에 정렬됐고 녹음 완전성·장치 시각 연속성도 통과했다.
+  지연은 1,740.7–1,741.6프레임(변동 0.9), 평균 1,741.09프레임(36.273ms)이다.
+  Loopback 자체 미보고 지연 767프레임과 MixRelay 보고 972프레임을 합친 1,739프레임의
+  오차는 2.09프레임으로 기존 50프레임 수락 한도 안이다. 전체 측정 시간에는 Loopback 자체의
+  지연이 포함된다. 시험 뒤 원래 빈 그래프와 지연 보고 0을 복원했다.
+- `single-input-capture-installed/`에서 실제 설치 앱의 tap→SRC→공유 IPC→graph→가상 출력이
+  통과했다. 마지막 10개 미터 창 모두 source·목적지 양쪽 채널 약 0.05이며 source/input/output
+  sample fault·fault block은 0이다. 원래 빈 그래프를 복원하고 신호 앱을 종료했으며 시험 노드의
+  layout 항목도 남아 있지 않다. `single-input-passthrough.json`의 기본 가상 장치 왕복은
+  144,000프레임 비트 일치, 누락/중복/손상/시각 단절/추가 지연 0으로 통과했다.
+  이번 설치본에서 녹음 입력을 별도로 다시 측정하지 않았다. 설치가 필요 없는 회귀는
+  유닛 테스트에서 먼저 검증하고, 설치본은 실제 권한·서비스·장치 경계의 최종 확인으로 한정한다.
 - 사용자 요청으로 `/Volumes/dev/mixrelay-release-*` 설치 산출물 폴더 6개(386.1MiB)를 삭제했다.
   원본 저장소·Loopback 연구 자료와 `/tmp`의 검증 증거는 보존했다. 위 패키지 해시는 설치 이력이며
   삭제된 설치 파일의 다운로드 링크가 아니다.
