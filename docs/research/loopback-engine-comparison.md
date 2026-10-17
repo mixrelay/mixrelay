@@ -1,7 +1,7 @@
 # Loopback 배포 엔진과 MixRelay의 CoreAudio 경로 비교
 
 초기 조사: 2026-10-16(KST), 기준 커밋 `fae815ff59ff3ad67353e1ceb019d9f1202bba42`.
-안정성 경계 후속 대조·구현: 2026-10-17(KST), 기준 커밋 `4a9b064a`.
+안정성 경계 후속 대조·구현: 2026-10-17(KST), 기준 커밋 `4a9b064a`, 형식 snapshot 보호 `139b3cef`.
 이 문서는 연구 근거이며 별도 제품 backlog가 아니다. 제품 범위와 진행 상태는 [product.md](/Volumes/dev/mixrelay/docs/product.md:396), 설치본 검증 결과는 [current.md](/Volumes/dev/mixrelay/docs/validation/current.md)를 따른다.
 
 ## 2026-10-17 안정성 경계 대조
@@ -36,6 +36,10 @@ Loopback 2.5.0의 `arkaudiod`, ACP, ARK 배포 바이너리에서 추출한 함�
 정렬을 의도적으로 끄면 같은 회귀가 183-frame 불일치로 실패한다. SRC 자체는 37-frame 부분 읽기와
 impulse 중심 좌표 oracle로 따로 검사한다. 좌표 overwrite, epoch 경합, stale read·future read,
 서비스 재시작·알림 재등록의 부분 실패, ID 재사용, 삭제와 transient 오류, active callback/listener drain은 별도 회귀에서 확인한다. 획득 시각이 없는 입력 하나가 정상 입력까지 무음으로 묶지 않는 것도 실제 native/SRC/graph 경로로 검사했다. 이전의 모든-input 준비 gate를 재주입하면 정상 경로까지 `[0, 0]`으로 남아 같은 시험이 실패한다. 두 결함 주입 후 원래 소스를 복원했다. 48→44.1kHz refresh 뒤 callback이 초기 nominal rate로 좌표를 계산하던 오류도 실패 회귀로 확인하고, 현재 atomic rate를 사용하도록 수정했다.
+형식 통계도 generation을 먼저 acquire하고, admission과 마지막 generation 검사로 혼합 관찰을 거부한다.
+구형 레이트와 새 generation이 섞여 새 PCM을 이전 SRC에 전달하던 경합은 결정적 재현 시험으로 확인했다.
+별도 `format_ready`는 native `running`과 구분하며, 전환 중에는 PCM·clock credit을 보류하고 pump는 재시도한다.
+데스크톱은 native stats의 Rust ABI 타입을 직접 사용한다.
 소스 검사와 설치본 수락 결과는 [검증 현황](/Volumes/dev/mixrelay/docs/validation/current.md)에 구분한다.
 
 LG HDR 4K는 사용자 결정에 따라 **CoreAudio 단독 시작도 실패하는 현 장치 상태의 예외**로 둔다.

@@ -21,8 +21,11 @@ PCM 획득 시각을 native ring·부분 읽기·SRC·공유 application clock v
   input usage 설정·readback, 서비스 재시작 시 등록·알림 재설치, UID 재확인,
   삭제 객체와 transient 오류의 구별·callback/listener drain을 보강했다.
   direct duplex graph는 입력을 유지하고, 입력을 추가하면 output owner를 다시 준비한다.
-- workspace lib/bin 2,295개 통과·8개 ignore. 이후 추가한 rate-refresh 시각 회귀는
-  수정 전 실패를 확인했고, 수정 후 process-tap 전체 54개가 통과했다.
+- workspace lib/bin 2,295개 통과·8개 ignore. 이후 추가한 rate-refresh 시각 회귀와
+  stats의 구형 레이트/새 generation 혼합 회귀는 각각 수정 전 실패를 확인했다.
+  format 준비 상태를 native running과 구별해 전환 중 PCM·clock credit만 보류하며,
+  새 형식의 PCM을 이전 SRC에 전달하지 않는다. process-tap 전체 56개가 통과했다.
+  최종 변경으로 데스크톱 binary 시험 209개도 다시 통과했다.
 - Rust fmt, 32개 crate 계층, workspace all-targets clippy `-D warnings`, UI 정적 검사,
   왕복 프로브 자체 시험은 통과했다. `pnpm check:native`도 통과했으며, ARM·Intel
   Universal HAL의 링크·서명 검증·factory/COM probe를 확인했다. native/graph/회수 경계는
