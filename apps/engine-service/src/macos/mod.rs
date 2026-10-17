@@ -95,11 +95,16 @@ impl ExternalIo for MacEngineExternalIo<'_> {
         let mut source_period = None;
         let count = controls
             .sources()
-            .filter(|(binding, enabled)| *enabled && self.source_active(binding))
+            .filter(|(binding, enabled)| {
+                *enabled && binding.is_routed_source() && self.source_active(binding)
+            })
             .count();
         self.devices
             .reserve_capture_alignment(cycle.sample_rate, cycle.frames, count > 1);
-        for (binding, enabled) in controls.sources().filter(|(_, enabled)| *enabled) {
+        for (binding, enabled) in controls
+            .sources()
+            .filter(|(binding, enabled)| *enabled && binding.is_routed_source())
+        {
             let _ = enabled;
             let id = binding.node_id().as_str();
             let token = source_token(id);
@@ -140,7 +145,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
         destination: &mut [f32],
         cycle: &ProcessCycle,
     ) -> TransferOutcome {
-        if self.align_inputs {
+        if self.align_inputs && binding.is_routed_source() {
             if let Some(time) = self.capture_time {
                 if let Some(outcome) = self.devices.read_aligned(
                     binding.node_id().as_str(),

@@ -260,6 +260,116 @@ struct Input {
     channel: usize,
     pcm: Vec<f32>,
 }
+
+#[test]
+fn an_unconnected_input_keeps_its_meter_without_retiming_the_connected_route() {
+    let resources = MacDevices::new(
+        Arc::new(AdapterRuntimeStatus::new(adapter_profile())),
+        48_000,
+        128,
+    );
+    let a = NativeOwner::new(2, 48_000, true);
+    let b = NativeOwner::new(2, 48_000, true);
+    let output = NativeOwner::new(2, 48_000, false);
+    let devices = publish(&resources, &[("a", &a), ("b", &b), ("out", &output)]);
+    let _a_bridge = a.serve();
+    let _b_bridge = b.serve();
+    let _output_bridge = output.serve();
+    let meters = Arc::new(PeakMeterBank::new(8, 128));
+    let mut processor = unconnected_processor(Arc::clone(&meters));
+    let binding = processor
+        .plan()
+        .meter_bindings()
+        .iter()
+        .position(|binding| {
+            binding.node_id().as_str() == "b" && binding.port_id().as_str() == "audio"
+        })
+        .unwrap();
+    let mut capture = Capture {
+        io: MacEngineExternalIo::new(&devices),
+        pcm: Vec::with_capacity(128 * 256),
+    };
+    let timebase = Timebase::current();
+    for block in 0..128 {
+        for (owner, origin, value) in [(&a, 2_000_000_000, 0.25), (&b, 1_000_000_000, 0.5)] {
+            let host = timebase.ticks(Duration::from_nanos(
+                origin + u64::from(block) * 128 * 1_000_000_000 / 48_000,
+            ));
+            owner.callback(
+                &mut [value; 256],
+                CallbackTime {
+                    now: host,
+                    host,
+                    sample: f64::from(block * 128),
+                    rate_scalar: 1.0,
+                },
+            );
+        }
+        tick_output(&output, timebase, block);
+        let measured = allocation_counter::measure(|| {
+            processor
+                .process_external_cycle(cycle(block), &mut capture)
+                .unwrap()
+                .unwrap();
+        });
+        assert_eq!(measured.count_total, 0);
+        if block == 100 {
+            // Drain startup sinc overshoot before checking the ongoing meter.
+            drop(meters.take_peaks(1, binding, 2));
+        }
+    }
+    for sample in &capture.pcm[capture.pcm.len() - 4096..] {
+        assert!(
+            (*sample - 0.25).abs() < 1e-4,
+            "unconnected clock muted the route: {sample}"
+        );
+    }
+    let peaks = meters.take_peaks(1, binding, 2);
+    assert!(
+        peaks.iter().all(|peak| (*peak - 0.5).abs() < 1e-4),
+        "unconnected meter: {peaks:?}"
+    );
+}
+
+fn unconnected_processor(meters: Arc<PeakMeterBank>) -> Box<BlockProcessor> {
+    let mut document: mixrelay_audio_graph::GraphDocument = serde_json::from_value(serde_json::json!({
+        "schemaVersion":2,"revision":1,"nodes":[
+            {"id":"a","type":"audio_device_input","config":{"selector":{"match":"persistent_uid","uid":"a"},"outputChannels":2}},
+            {"id":"b","type":"audio_device_input","config":{"selector":{"match":"persistent_uid","uid":"b"},"outputChannels":2}},
+            {"id":"out","type":"audio_device_output","config":{"selector":{"match":"persistent_uid","uid":"out"},"inputChannels":2}}
+        ],"edges":[
+            {"id":"a-out","source":{"nodeId":"a","portId":"audio"},"destination":{"nodeId":"out","portId":"audio"}}
+        ]
+    })).unwrap();
+    document.nodes.push(mixrelay_audio_graph::NodeSpec {
+        id: "unused-snapshot".into(),
+        label: None,
+        control: mixrelay_audio_graph::NodeControl::default(),
+        config: mixrelay_audio_graph::NodeConfig::DeviceBus { channels: 2 },
+    });
+    document.edges.push(mixrelay_audio_graph::EdgeSpec {
+        id: "b-snapshot".into(),
+        source: mixrelay_audio_graph::AudioEndpoint {
+            node_id: "b".into(),
+            port_id: "audio".into(),
+        },
+        destination: mixrelay_audio_graph::AudioEndpoint {
+            node_id: "unused-snapshot".into(),
+            port_id: "audio".into(),
+        },
+        channel_mapping: mixrelay_audio_graph::ChannelMapping::default(),
+    });
+    create_initial_processor(
+        &document,
+        RenderFormat {
+            sample_rate: 48_000,
+            block_frames: 128,
+        },
+        meters,
+    )
+    .unwrap()
+}
+
 impl Input {
     #[expect(
         clippy::cast_possible_truncation,

@@ -23,6 +23,7 @@ mod kernels;
 mod route_delay;
 mod routing;
 mod schedule;
+mod source_routes;
 use buffers::port_pair;
 pub(crate) use compensation::DelayBank;
 pub use compensation::{CompensationState, HostedLatencySource};
@@ -126,6 +127,7 @@ pub struct ExternalBinding {
     port_id: PortId,
     channels: u16,
     virtual_endpoint_id: Option<VirtualEndpointId>,
+    routed_source: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -166,6 +168,13 @@ impl MeterBinding {
 }
 
 impl ExternalBinding {
+    /// Whether this source reaches an external output or recorder. Sources
+    /// without such a path are drained and metered independently of routed inputs.
+    #[must_use]
+    pub const fn is_routed_source(&self) -> bool {
+        self.routed_source
+    }
+
     #[must_use]
     pub const fn kind(&self) -> mixrelay_audio_graph::NodeKind {
         self.kind
@@ -1889,6 +1898,8 @@ fn collect_external_bindings(
             bindings.push(ExternalBinding {
                 node_id: node.id().clone(),
                 kind: node.kind(),
+                routed_source: direction == PortDirection::Output
+                    && source_routes::reaches_sink(execution, node.id(), &port_id),
                 port_id,
                 channels: slot.channels,
                 virtual_endpoint_id: match node.config() {
