@@ -12,6 +12,9 @@ struct Capture<'a> {
     pcm: Vec<f32>,
 }
 impl ExternalIo for Capture<'_> {
+    fn source_epoch(&self, binding: &ExternalBinding) -> Option<u64> {
+        self.io.source_epoch(binding)
+    }
     fn begin_cycle(
         &mut self,
         cycle: &ProcessCycle,
@@ -35,6 +38,195 @@ impl ExternalIo for Capture<'_> {
     ) -> TransferOutcome {
         self.pcm.extend_from_slice(samples);
         TransferOutcome::complete(cycle.frames)
+    }
+}
+
+struct ApplicationInput {
+    owner: *mut mixrelay_macos_transport::application_source_transport::SourceTransport,
+}
+
+struct SchedulingClock {
+    origin: Instant,
+    nanos: Arc<std::sync::atomic::AtomicU64>,
+}
+impl mixrelay_macos_transport::source_registry::SchedulingClock for SchedulingClock {
+    fn now(&self) -> Instant {
+        self.origin + Duration::from_nanos(self.nanos.load(std::sync::atomic::Ordering::Relaxed))
+    }
+}
+impl ApplicationInput {
+    fn new(registry: &mixrelay_macos_transport::source_registry::SourceRegistry) -> Self {
+        use mixrelay_macos_transport::{application_source_transport::*, source_control::*};
+        use std::os::fd::IntoRawFd;
+        let mut request = SourceRequest {
+            capacity_frames: 16384,
+            channels: 2,
+            transport_version: mixrelay_macos_transport::application_clock::VERSION,
+            ..SourceRequest::default()
+        };
+        for (slot, byte) in request.source_id.iter_mut().zip(b"app") {
+            *slot = std::ffi::c_char::from_ne_bytes([*byte]);
+        }
+        let attached = registry.attach(&request).unwrap();
+        let mut attachment = SourceAttachment {
+            descriptor: attached.descriptor.into_raw_fd(),
+            mapped_size: attached.mapped_size,
+            producer_lease: attached.producer_lease,
+            source_epoch: attached.source_epoch,
+        };
+        // SAFETY: this fixture transfers its unique descriptor to the production producer.
+        let owner = unsafe {
+            mr_application_source_transport_attach(
+                &raw mut attachment,
+                16384,
+                2,
+                std::ptr::null_mut(),
+            )
+        };
+        assert!(!owner.is_null());
+        let mut empty = [0.0; 256];
+        registry.read_audio(source_token("app"), &mut empty, 128, 48_000);
+        let mut clock = SourceClockSnapshot::default();
+        // SAFETY: owner is live and the snapshot is correctly sized, exclusive storage.
+        unsafe {
+            assert!(mr_application_source_transport_clock(owner, &raw mut clock));
+            assert!(mr_application_source_transport_reset(
+                owner,
+                clock.format_word,
+                48_000
+            ));
+            mr_application_source_transport_publish_native(owner, 0, true);
+        }
+        Self { owner }
+    }
+    fn publish(&mut self, block: u32) {
+        use mixrelay_macos_transport::application_source_transport::*;
+        let frames: [f32; 256] =
+            std::array::from_fn(|index| if index % 2 == 0 { 0.0 } else { 0.25 });
+        let times: [u64; 128] = std::array::from_fn(|offset| {
+            1_000_000_000 + (u64::from(block) * 128 + offset as u64 - 1024) * 1_000_000_000 / 48_000
+        });
+        // SAFETY: this is the sole producer and both prepared spans contain 128 frames.
+        unsafe {
+            assert!(mr_application_source_transport_write_timed(
+                self.owner,
+                frames.as_ptr(),
+                times.as_ptr(),
+                128
+            ));
+            mr_application_source_transport_publish_native(
+                self.owner,
+                u64::from(block + 1) * 128,
+                true,
+            );
+        }
+    }
+}
+impl Drop for ApplicationInput {
+    fn drop(&mut self) {
+        // SAFETY: all producer calls drained; the independently owned registry still lives.
+        unsafe {
+            mixrelay_macos_transport::application_source_transport::mr_application_source_transport_destroy(self.owner);
+        }
+    }
+}
+
+fn application_processor() -> Box<BlockProcessor> {
+    let document = serde_json::from_value(serde_json::json!({
+        "schemaVersion":2,"revision":1,"nodes":[
+            {"id":"a","type":"audio_device_input","config":{"selector":{"match":"persistent_uid","uid":"a"},"outputChannels":2}},
+            {"id":"app","type":"application_capture","config":{"selector":{"match":"bundle_id","bundle_id":"fixture","include_descendants":false},"stream":{"channels":2,"channelLayout":"stereo"},"sourcePlayback":"preserve"}},
+            {"id":"out","type":"audio_device_output","config":{"selector":{"match":"persistent_uid","uid":"out"},"inputChannels":2}}
+        ],"edges":[
+            {"id":"a-out","source":{"nodeId":"a","portId":"audio"},"destination":{"nodeId":"out","portId":"audio"}},
+            {"id":"app-out","source":{"nodeId":"app","portId":"audio"},"destination":{"nodeId":"out","portId":"audio"}}
+        ]
+    })).unwrap();
+    create_initial_processor(
+        &document,
+        RenderFormat {
+            sample_rate: 48_000,
+            block_frames: 128,
+        },
+        Arc::new(PeakMeterBank::new(8, 128)),
+    )
+    .unwrap()
+}
+
+#[test]
+fn an_application_with_a_later_ready_frontier_joins_a_running_native_input() {
+    let status = Arc::new(AdapterRuntimeStatus::new(adapter_profile()));
+    let resources = MacDevices::new(status, 48_000, 128);
+    let input = NativeOwner::new(2, 48_000, true);
+    let output = NativeOwner::new(2, 48_000, false);
+    let devices = publish(&resources, &[("a", &input), ("out", &output)]);
+    devices.set_clock_master(None);
+    let _input_bridge = input.serve();
+    let _output_bridge = output.serve();
+    let nanos = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let registry = mixrelay_macos_transport::source_registry::SourceRegistry::with_clock(Box::new(
+        SchedulingClock {
+            origin: Instant::now(),
+            nanos: Arc::clone(&nanos),
+        },
+    ));
+    let mut application = ApplicationInput::new(&registry);
+    let mut io = MacEngineExternalIo::new(&devices);
+    io.sources = Some(&registry);
+    let mut capture = Capture {
+        io,
+        pcm: Vec::with_capacity(128 * 256),
+    };
+    let mut processor = application_processor();
+    let timebase = Timebase::current();
+    for block in 0..128 {
+        nanos.store(
+            u64::from(block) * 128 * 1_000_000_000 / 48_000,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        let host = timebase.ticks(Duration::from_nanos(
+            1_000_000_000 + u64::from(block) * 128 * 1_000_000_000 / 48_000,
+        ));
+        let mut native_pcm: [f32; 256] =
+            std::array::from_fn(|index| if index % 2 == 0 { 0.1 } else { 0.0 });
+        input.callback(
+            &mut native_pcm,
+            CallbackTime {
+                now: host,
+                host,
+                sample: f64::from(block * 128),
+                rate_scalar: 1.0,
+            },
+        );
+        if block >= 20 {
+            application.publish(block);
+        }
+        tick_output(&output, timebase, block);
+        let measured = allocation_counter::measure(|| {
+            processor
+                .process_external_cycle(cycle(block), &mut capture)
+                .unwrap()
+                .unwrap();
+        });
+        assert_eq!(measured.count_total, 0);
+    }
+    assert!(capture.io.align_inputs);
+    for frame in capture.pcm[12 * 256..16 * 256].chunks_exact(2) {
+        assert!(
+            (frame[0] - 0.1).abs() < 1e-4,
+            "healthy input blocked by late application: {frame:?}"
+        );
+        assert_eq!(frame[1].to_bits(), 0);
+    }
+    for frame in capture.pcm[capture.pcm.len() - 4096..].chunks_exact(2) {
+        assert!(
+            (frame[1] - 0.25).abs() < 1e-4,
+            "late application remained silent: {frame:?}"
+        );
+        assert!(
+            (frame[0] - 0.1).abs() < 1e-4,
+            "healthy input did not recover: {frame:?}"
+        );
     }
 }
 

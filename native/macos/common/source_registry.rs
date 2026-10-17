@@ -27,7 +27,19 @@ use std::{
         Mutex, MutexGuard,
         atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering},
     },
+    time::Instant,
 };
+
+/// Monotonic observation time for consumer scheduling bursts, separate from PCM coordinates.
+pub trait SchedulingClock: Send + Sync {
+    fn now(&self) -> Instant;
+}
+struct SystemSchedulingClock;
+impl SchedulingClock for SystemSchedulingClock {
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+}
 
 const MAX_SOURCES: usize = 64;
 const MAX_RETAINED: usize = 128;
@@ -59,16 +71,19 @@ impl Timeline {
         source: &Source,
         stats: crate::shared_audio_buffer::SharedAudioBufferStats,
         frames: u32,
-        rate: u32,
+        timing: (u32, Instant),
     ) -> Observation {
         let clock = source.mapping.clock();
-        let now = std::time::Instant::now();
+        let (rate, now) = timing;
         // Full scheduling bursts may comprise many graph slices. Accumulate
         // adjacent calls, independently of concurrent producer publications.
-        let adjacent = self.previous_read.is_some_and(|previous| {
-            now.duration_since(previous).as_nanos() * u128::from(rate) * 2
-                < u128::from(self.previous_frames) * 1_000_000_000
-        });
+        let adjacent = self
+            .previous_read
+            .and_then(|previous| now.checked_duration_since(previous))
+            .is_some_and(|elapsed| {
+                elapsed.as_nanos() * u128::from(rate) * 2
+                    < u128::from(self.previous_frames) * 1_000_000_000
+            });
         self.previous_read = Some(now);
         self.previous_frames = frames;
         Observation {
@@ -241,6 +256,7 @@ struct Control {
     next_lease: u64,
 }
 pub struct SourceRegistry {
+    clock: Box<dyn SchedulingClock>,
     slots: [AtomicPtr<Source>; MAX_SOURCES],
     readers: AtomicUsize,
     control: Mutex<Control>,
@@ -274,7 +290,13 @@ impl Default for SourceRegistry {
 impl SourceRegistry {
     #[must_use]
     pub fn new() -> Self {
+        Self::with_clock(Box::new(SystemSchedulingClock))
+    }
+    /// Creates a registry with its owned scheduling-clock boundary.
+    #[must_use]
+    pub fn with_clock(clock: Box<dyn SchedulingClock>) -> Self {
         Self {
+            clock,
             slots: std::array::from_fn(|_| AtomicPtr::new(ptr::null_mut())),
             readers: AtomicUsize::new(0),
             control: Mutex::new(Control {
@@ -447,7 +469,9 @@ fn token(id: &[u8]) -> u64 {
 }
 
 impl SourceRegistry {
-    fn clock(&self, token: u64) -> Option<SourceClock> {
+    /// Observes the current producer lease and acknowledged native clock.
+    #[must_use]
+    pub fn clock(&self, token: u64) -> Option<SourceClock> {
         let read = self.read(token);
         let source = read.source()?;
         let clock = source.mapping.clock();
@@ -477,12 +501,13 @@ impl SourceRegistry {
             epoch: (lease << 16) | epoch,
             native_frames: frames,
             native_rate: rate,
-            graph_rate: u32::try_from(format & u64::from(u32::MAX)).expect("masked rate fits u32"),
+            graph_rate: u32::try_from(format & u64::from(u32::MAX)).ok()?,
             running,
             synchronized: u32::from(running != 0 && consumer_running && consumer >> 48 == epoch),
         })
     }
-    fn read_audio(&self, token: u64, samples: &mut [f32], frames: u32, rate: u32) -> u32 {
+    /// Reads one complete graph block under the source's single-consumer claim.
+    pub fn read_audio(&self, token: u64, samples: &mut [f32], frames: u32, rate: u32) -> u32 {
         self.read_audio_time(token, samples, frames, (rate, None))
     }
 
@@ -524,7 +549,7 @@ impl SourceRegistry {
             timeline.publish(source, stats.epoch, frames, false);
             return 0;
         }
-        let observation = timeline.observe(source, stats, frames, rate);
+        let observation = timeline.observe(source, stats, frames, (rate, self.clock.now()));
         let (mut policy, ready) = transition(timeline.policy, observation);
         if !ready {
             if source.read_is_current(lease, format, stats.epoch) {
@@ -573,7 +598,8 @@ impl SourceRegistry {
         }
     }
 
-    fn take_source_faults(&self, token: u64) -> u64 {
+    /// Takes normalized-sample faults once for the current source lease.
+    pub fn take_source_faults(&self, token: u64) -> u64 {
         let read = self.read(token);
         read.source().map_or(0, |source| {
             source.mapping.clock().source_sample_faults.take()

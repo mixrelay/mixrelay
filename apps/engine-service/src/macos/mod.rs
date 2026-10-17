@@ -36,17 +36,10 @@ use endpoint_backend::MacVirtualEndpointBackend;
 unsafe extern "C" {
     fn mr_engine_service_source_clock(token: u64, snapshot: *mut ApplicationClockSnapshot) -> bool;
     fn mr_engine_service_set_source_clock_master(token: u64, master: bool) -> bool;
-    fn mr_engine_service_take_source_faults(token: u64) -> u64;
-    fn mr_engine_service_read_source_clocked(
-        source_token: u64,
-        interleaved_samples: *mut f32,
-        frame_count: u32,
-        channels: u32,
-        sample_rate: u32,
-    ) -> u32;
 }
 
 struct MacEngineExternalIo<'a> {
+    sources: Option<&'a mixrelay_macos_transport::source_registry::SourceRegistry>,
     alignment: mixrelay_audio_io::capture_alignment::CaptureAlignment,
     capture_time: Option<u64>,
     align_inputs: bool,
@@ -58,6 +51,7 @@ struct MacEngineExternalIo<'a> {
 impl<'a> MacEngineExternalIo<'a> {
     fn new(devices: &'a super::macos_devices::DeviceSet) -> Self {
         Self {
+            sources: endpoint_service::source_registry(),
             devices,
             host: 0,
             alignment: mixrelay_audio_io::capture_alignment::CaptureAlignment::default(),
@@ -70,13 +64,16 @@ impl<'a> MacEngineExternalIo<'a> {
         let id = binding.node_id().as_str();
         self.devices.binding_present(id, true)
             || (binding.kind() == mixrelay_audio_graph::NodeKind::ApplicationCapture
-                && application_clock(id).is_some_and(|clock| clock.running != 0))
+                && self
+                    .sources
+                    .and_then(|sources| sources.clock(source_token(id)))
+                    .is_some_and(|clock| clock.running != 0))
     }
 }
 
 impl ExternalIo for MacEngineExternalIo<'_> {
     fn source_epoch(&self, binding: &ExternalBinding) -> Option<u64> {
-        application_epoch(binding)
+        application_epoch(binding, self.sources)
     }
 
     fn begin_cycle(
@@ -106,17 +103,20 @@ impl ExternalIo for MacEngineExternalIo<'_> {
             let _ = enabled;
             let id = binding.node_id().as_str();
             let token = source_token(id);
-            let time = self
-                .devices
-                .capture_time(id, cycle.frames)
-                .or_else(|| endpoint_service::source_time(token, cycle.sample_rate, cycle.frames));
+            let time = self.devices.capture_time(id, cycle.frames).or_else(|| {
+                self.sources
+                    .and_then(|sources| sources.source_time(token, cycle.sample_rate, cycle.frames))
+            });
             if self.source_active(binding) {
                 active += 1;
             }
             if let Some(time) = time {
                 latest = Some(latest.map_or(time, |old: u64| old.min(time)));
             }
-            source_period = source_period.or_else(|| endpoint_service::source_period(token));
+            source_period = source_period.or_else(|| {
+                self.sources
+                    .and_then(|sources| sources.source_period(token))
+            });
         }
         self.align_inputs = active > 1;
         self.capture_time = if self.align_inputs {
@@ -149,19 +149,17 @@ impl ExternalIo for MacEngineExternalIo<'_> {
                 ) {
                     return outcome;
                 }
-                let available = endpoint_service::read_source_at(
-                    source_token(binding.node_id().as_str()),
-                    destination,
-                    cycle.sample_rate,
-                    time,
-                );
+                let token = source_token(binding.node_id().as_str());
+                let available = if let Some(sources) = self.sources {
+                    sources.read_at(token, destination, cycle.sample_rate, time)
+                } else {
+                    destination.fill(0.0);
+                    0
+                };
                 return TransferOutcome {
-                    // SAFETY: this graph owns the source's sole fault-counter consumer.
-                    source_sample_faults: unsafe {
-                        mr_engine_service_take_source_faults(source_token(
-                            binding.node_id().as_str(),
-                        ))
-                    },
+                    source_sample_faults: self
+                        .sources
+                        .map_or(0, |sources| sources.take_source_faults(token)),
                     ..TransferOutcome::complete(available)
                 };
             }
@@ -177,7 +175,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
         {
             return outcome;
         }
-        read_application(binding, destination, cycle)
+        read_application(binding, destination, cycle, self.sources)
     }
 
     fn write_sink(
@@ -192,9 +190,13 @@ impl ExternalIo for MacEngineExternalIo<'_> {
     }
 }
 
-fn application_epoch(binding: &ExternalBinding) -> Option<u64> {
+fn application_epoch(
+    binding: &ExternalBinding,
+    sources: Option<&mixrelay_macos_transport::source_registry::SourceRegistry>,
+) -> Option<u64> {
     (binding.kind() == mixrelay_audio_graph::NodeKind::ApplicationCapture).then(|| {
-        application_clock(binding.node_id().as_str())
+        sources
+            .and_then(|sources| sources.clock(source_token(binding.node_id().as_str())))
             .filter(|clock| clock.running != 0)
             .map_or(0, |clock| clock.epoch)
     })
@@ -204,22 +206,17 @@ fn read_application(
     binding: &ExternalBinding,
     destination: &mut [f32],
     cycle: &ProcessCycle,
+    sources: Option<&mixrelay_macos_transport::source_registry::SourceRegistry>,
 ) -> TransferOutcome {
-    // SAFETY: DSP owns the destination for frames * the compiled binding width.
-    let available = unsafe {
-        mr_engine_service_read_source_clocked(
-            source_token(binding.node_id().as_str()),
-            destination.as_mut_ptr(),
-            cycle.frames,
-            u32::from(binding.channels()),
-            cycle.sample_rate,
-        )
+    let token = source_token(binding.node_id().as_str());
+    let available = if let Some(sources) = sources {
+        sources.read_audio(token, destination, cycle.frames, cycle.sample_rate)
+    } else {
+        destination.fill(0.0);
+        0
     };
     TransferOutcome {
-        // SAFETY: the graph owns this source consumer; this consumes only a fixed counter.
-        source_sample_faults: unsafe {
-            mr_engine_service_take_source_faults(source_token(binding.node_id().as_str()))
-        },
+        source_sample_faults: sources.map_or(0, |sources| sources.take_source_faults(token)),
         ..TransferOutcome::complete(available)
     }
 }

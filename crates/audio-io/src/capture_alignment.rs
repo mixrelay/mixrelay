@@ -7,6 +7,7 @@ pub struct CaptureAlignment {
     rate: u32,
     next_frame: u64,
     nanos: Option<f64>,
+    latest_safe: Option<u64>,
 }
 
 impl CaptureAlignment {
@@ -32,7 +33,19 @@ impl CaptureAlignment {
             || cycle.discontinuity;
         if restart {
             self.nanos = None;
+            self.latest_safe = None;
         }
+        if latest_safe
+            .zip(self.latest_safe)
+            .is_some_and(|(next, previous)| next < previous)
+        {
+            // A newly ready source or a larger scheduling reserve can expose an
+            // older frontier. Continuing at the old cursor would miss it forever.
+            // Source readers retain their own forward-only cursors: reacquiring
+            // this common coordinate cannot replay already consumed PCM.
+            self.nanos = None;
+        }
+        self.latest_safe = latest_safe.or(self.latest_safe);
         self.clock = Some(cycle.clock);
         self.rate = cycle.sample_rate;
         self.next_frame = cycle.first_frame.saturating_add(u64::from(cycle.frames));

@@ -17,26 +17,10 @@ struct Service {
     dispatch: parking_lot::Mutex<Option<Dispatch>>,
 }
 
-/// Latest complete acquisition range with the source's measured scheduling reserve.
+/// The process-owned application registry, retained until process exit.
 #[must_use]
-pub fn source_time(token: u64, rate: u32, frames: u32) -> Option<u64> {
-    SERVICE.get()?.sources.source_time(token, rate, frames)
-}
-
-/// Source-frame period used when an application owns the graph's pacing clock.
-#[must_use]
-pub fn source_period(token: u64) -> Option<f64> {
-    SERVICE.get()?.sources.source_period(token)
-}
-
-/// Reads a graph input at the acquisition coordinate shared by the cycle's inputs.
-pub fn read_source_at(token: u64, samples: &mut [f32], rate: u32, nanos: u64) -> u32 {
-    if let Some(service) = SERVICE.get() {
-        service.sources.read_at(token, samples, rate, nanos)
-    } else {
-        samples.fill(0.0);
-        0
-    }
+pub fn source_registry() -> Option<&'static SourceRegistry> {
+    SERVICE.get().map(|service| &service.sources)
 }
 
 /// Starts graph-owned application-source XPC. Driver inventory and basic loopback

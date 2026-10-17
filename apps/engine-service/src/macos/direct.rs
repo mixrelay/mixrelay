@@ -42,7 +42,7 @@ struct CallbackIo<'a> {
 }
 impl ExternalIo for CallbackIo<'_> {
     fn source_epoch(&self, binding: &ExternalBinding) -> Option<u64> {
-        super::application_epoch(binding)
+        super::application_epoch(binding, super::endpoint_service::source_registry())
     }
 
     fn begin_cycle(
@@ -77,7 +77,12 @@ impl ExternalIo for CallbackIo<'_> {
             .iter()
             .find(|map| map.input && map.id == binding.node_id().as_str())
         else {
-            return super::read_application(binding, destination, cycle);
+            return super::read_application(
+                binding,
+                destination,
+                cycle,
+                super::endpoint_service::source_registry(),
+            );
         };
         if map.offset.is_none() {
             return TransferOutcome {
