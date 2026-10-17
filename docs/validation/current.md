@@ -63,6 +63,12 @@ PCM 획득 시각을 native ring·부분 읽기·SRC·공유 application clock v
   `--help`로 사용법을 확인한다. 가상 출력과 녹음 입력을 나눠 측정하며 원래 그래프·자식 프로세스를
   복원한다. 응답 유실·측정 실패·SIGINT·동시 편집 때의 회수와 외부 변경 보존도 검사한다.
   이 후속 수정의 설치본 재확인은 아직 남아 있다.
+- 후속 엔진 `df523ee`를 ARM·Intel로 빌드해 서명 검증한 뒤, 이미 검증한 앱·Driver·HAL과
+  [새 설치 파일](/Volumes/dev/mixrelay-release-20261017-late-input-fix/MixRelay-Installer-0.1.0.pkg)로
+  묶었다(12:48 KST). Universal 엔진 SHA-256은
+  `3e6a29d50dbbf99d0a51d5510534cc37385ba64d7940bc20178ac140c9944221`,
+  패키지 SHA-256은 `1cfbe0845e874e30f4311800dc9fe3666a698576b2ec4503b9d42f3e4cdd3d5b`다.
+  패키지의 Developer ID Installer 서명과 trusted timestamp를 확인했으며 관리자 설치 인증 대기 중이다.
 
 이 소스의 v5 앱 전달·독립 입력 정렬·재시작 보호를 **설치본에서 모두 확인한 것으로 표시하지 않는다.**
 아래 2026-10-16의 설치본 수락은 이전 실행 파일에 대한 기록이다.
