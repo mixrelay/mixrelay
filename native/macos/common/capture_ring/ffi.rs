@@ -6,6 +6,81 @@ use std::{
     sync::atomic::Ordering,
 };
 
+/// Publishes the source coordinates before the matching PCM release.
+/// # Safety
+/// Same sole-producer and complete input extent contract as the ordinary write.
+pub unsafe fn write_timed_interleaved(
+    ring: *mut AudioRing,
+    input: *const f32,
+    frames: usize,
+    first_nanos: u64,
+    frame_nanos: f64,
+) -> usize {
+    // SAFETY: the retained ring and serialized producer are caller-owned.
+    let Some(owner) = (unsafe { ring.as_ref() }) else {
+        return 0;
+    };
+    let Some(cursor) = owner.reserve(frames) else {
+        return 0;
+    };
+    owner.times.range(cursor, frames, first_nanos, frame_nanos);
+    // SAFETY: same input and ownership, metadata precedes PCM publication.
+    unsafe { mr_audio_ring_write_interleaved(ring, input, frames) }
+}
+
+/// Planar equivalent of [`write_timed_interleaved`].
+/// # Safety
+/// Same sole-producer and readable plane extents as the ordinary planar write.
+pub unsafe fn write_timed_planar(
+    ring: *mut AudioRing,
+    input: *const *const f32,
+    frames: usize,
+    first_nanos: u64,
+    frame_nanos: f64,
+) -> usize {
+    // SAFETY: the retained ring and serialized producer are caller-owned.
+    let Some(owner) = (unsafe { ring.as_ref() }) else {
+        return 0;
+    };
+    let Some(cursor) = owner.reserve(frames) else {
+        return 0;
+    };
+    owner.times.range(cursor, frames, first_nanos, frame_nanos);
+    // SAFETY: same input planes and ownership, metadata precedes PCM publication.
+    unsafe { mr_audio_ring_write_planar(ring, input, frames) }
+}
+
+/// Reads PCM and the coordinates of the same absolute ring positions.
+/// # Safety
+/// The sole consumer owns output for maximum*channels samples and maximum timestamps.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_audio_ring_read_timed(
+    ring: *mut AudioRing,
+    output: *mut f32,
+    times: *mut u64,
+    maximum: usize,
+) -> usize {
+    if times.is_null() || output.is_null() {
+        return 0;
+    }
+    // SAFETY: owner remains retained and this is the sole consumer.
+    let Some(owner) = (unsafe { ring.as_ref() }) else {
+        return 0;
+    };
+    let (cursor, frames) = owner.read_window(maximum);
+    // Read coordinates while the consumer cursor still protects their PCM slots.
+    let coordinates = unsafe { slice::from_raw_parts_mut(times, frames) };
+    let valid = owner.times.read(cursor, coordinates);
+    // SAFETY: the exact acquired frame range cannot shrink or be reused before this read.
+    let read = unsafe { mr_audio_ring_read_interleaved(ring, output, frames) };
+    if !valid {
+        coordinates.fill(0);
+        // SAFETY: successfully copied output remains caller-owned.
+        unsafe { ptr::write_bytes(output, 0, read * owner.channels) };
+    }
+    read
+}
+
 /// Allocates an app-capture ring for power-of-two capacity 1..=2^20 and 1..=64
 /// channels. Invalid geometry or either allocation failure returns null.
 #[unsafe(no_mangle)]

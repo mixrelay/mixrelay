@@ -139,6 +139,13 @@ unsafe extern "C" {
         destination: *mut f32,
         maximum_frames: usize,
     ) -> usize;
+    fn mr_process_tap_read_timed(
+        session: *mut NativeProcessTapSession,
+        destination: *mut f32,
+        times: *mut u64,
+        maximum_frames: usize,
+        generation: mixrelay_process_tap::TapReadGeneration,
+    ) -> usize;
     fn mr_process_tap_stats(session: *const NativeProcessTapSession) -> NativeStats;
     fn mr_process_tap_take_peaks(
         session: *mut NativeProcessTapSession,
@@ -151,10 +158,11 @@ unsafe extern "C" {
         channels: u32,
         error: *mut NativeTransportError,
     ) -> *mut NativeApplicationSourceTransport;
-    fn mr_application_source_transport_write(
+    fn mr_application_source_transport_write_timed(
         transport: *mut NativeApplicationSourceTransport,
-        interleaved_samples: *const f32,
-        frame_count: u32,
+        samples: *const f32,
+        times: *const u64,
+        frames: u32,
     ) -> bool;
     fn mr_application_source_transport_record_source_faults(
         transport: *mut NativeApplicationSourceTransport,
@@ -378,6 +386,31 @@ impl capture_reader::ReaderOwner for CaptureProbeSession {
 struct NativeCaptureReader(capture_reader::ExclusiveReader<CaptureProbeSession>);
 
 impl NativeCaptureReader {
+    fn read_timed(
+        &mut self,
+        destination: &mut [f32],
+        times: &mut [u64],
+        generation: (u64, u64),
+    ) -> usize {
+        let session = self.session();
+        let channels = usize::from(session.resolved.stream.channels);
+        if channels == 0 || destination.len() != times.len() * channels {
+            return 0;
+        }
+        // SAFETY: this move-only reader owns both disjoint outputs and the sole ring cursor.
+        unsafe {
+            mr_process_tap_read_timed(
+                session.native.as_ptr(),
+                destination.as_mut_ptr(),
+                times.as_mut_ptr(),
+                times.len(),
+                mixrelay_process_tap::TapReadGeneration {
+                    format: generation.0,
+                    clock_breaks: generation.1,
+                },
+            )
+        }
+    }
     fn session(&self) -> &CaptureProbeSession {
         self.0.owner()
     }
@@ -583,13 +616,18 @@ impl ApplicationSourceTransport {
         Ok(Self { native })
     }
 
-    fn write(&mut self, samples: &[f32], frames: usize) -> bool {
+    fn write(&mut self, samples: &[f32], times: &[u64], frames: usize) -> bool {
         let Ok(frames) = u32::try_from(frames) else {
             return false;
         };
         // SAFETY: this pump exclusively owns the transport and samples cover the frame count.
         unsafe {
-            mr_application_source_transport_write(self.native.as_ptr(), samples.as_ptr(), frames)
+            mr_application_source_transport_write_timed(
+                self.native.as_ptr(),
+                samples.as_ptr(),
+                times.as_ptr(),
+                frames,
+            )
         }
     }
 }

@@ -146,6 +146,8 @@ fn build(root: &Path, name: &str, test: &str, libraries: &FixtureLibraries) {
             "CoreAudio",
             "-framework",
             "CoreFoundation",
+            "-framework",
+            "AudioToolbox",
             "-o",
         ])
         .arg(&output)

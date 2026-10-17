@@ -228,6 +228,16 @@ pub unsafe extern "C" fn mr_pcm_ring_write(
     input: *const f32,
     frames: u32,
 ) -> u32 {
+    // SAFETY: same retained owner, sole producer and complete input extent.
+    unsafe { write_observed(ring, input, frames, |_| {}) }
+}
+
+pub(super) unsafe fn write_observed(
+    ring: *mut PcmRing,
+    input: *const f32,
+    frames: u32,
+    before_publish: impl FnOnce(u64),
+) -> u32 {
     // SAFETY: native stream retains storage; writer mutation is inside its cell.
     let Some(ring) = (unsafe { ring.as_ref() }) else {
         return 0;
@@ -249,6 +259,7 @@ pub unsafe extern "C" fn mr_pcm_ring_write(
             ptr::copy_nonoverlapping(input.add(first), ring.storage.samples, second);
         }
     }
+    before_publish(cursor);
     ring.publication
         .written
         .store(cursor.wrapping_add(u64::from(frames)), Release);

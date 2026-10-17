@@ -5,6 +5,45 @@ use std::{
 };
 
 #[test]
+fn metadata_observer_only_sees_reserved_writes_and_protected_reads() {
+    let mut ring = PcmRing::new(1, 8).unwrap();
+    let mut metadata = [0; 8];
+    let mut output = [0.0; 4];
+    let measured = allocation_counter::measure(|| unsafe {
+        // SAFETY: one synthetic retained ring, serialized roles, complete disjoint buffers.
+        assert_eq!(
+            write_observed(&raw mut ring, [0.5; 4].as_ptr(), 4, |cursor| {
+                assert_eq!(cursor, 0);
+                metadata[..4].fill(7);
+            }),
+            4
+        );
+        assert_eq!(
+            write_observed(&raw mut ring, [0.5; 4].as_ptr(), 4, |cursor| {
+                assert_eq!(cursor, 4);
+                metadata[4..].fill(7);
+            }),
+            4
+        );
+        assert_eq!(
+            write_observed(&raw mut ring, [0.75].as_ptr(), 1, |_| panic!(
+                "full ring must not replace unread metadata"
+            )),
+            0
+        );
+        assert_eq!(
+            read_available_observed(&raw mut ring, output.as_mut_ptr(), 4, |cursor| {
+                assert_eq!(cursor, 0);
+                assert_eq!(metadata, [7; 8]);
+            }),
+            4
+        );
+        assert_eq!(output.map(f32::to_bits), [0.5_f32.to_bits(); 4]);
+    });
+    assert_eq!(measured.count_total, 0);
+}
+
+#[test]
 fn neutral_pcm_wraps_without_replaying_samples_or_allocating() {
     for channels in [1, 2, 32, 64] {
         let mut ring = PcmRing::new(channels, 7).unwrap();

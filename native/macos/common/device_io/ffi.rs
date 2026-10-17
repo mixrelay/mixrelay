@@ -420,7 +420,7 @@ pub unsafe extern "C" fn mr_device_io_graph_read(
 ) -> queues::GraphRead {
     // SAFETY: graph owns only this consumer and graph epoch cell.
     unsafe { io.as_ref() }.map_or_else(queues::GraphRead::default, |io| unsafe {
-        queues::graph_read(io, samples, frames, epoch, host)
+        queues::graph_read(io, samples, frames, epoch, (host, None))
     })
 }
 /// Installs the clock-boundary hook before registration, never on a live callback.

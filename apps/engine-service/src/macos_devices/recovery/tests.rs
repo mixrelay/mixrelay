@@ -1,6 +1,50 @@
 use super::*;
 
 #[test]
+fn adding_graph_input_reopens_output_with_native_duplex_access() {
+    use super::super::simulated::SimulatedHost;
+    use crate::macos_devices::device_tests::wait_until;
+    use std::sync::atomic::Ordering;
+    let host = SimulatedHost::new();
+    host.plug("duplex", 2, 48_000, 0.25);
+    let status = Arc::new(mixrelay_engine_service::session::AdapterRuntimeStatus::new(
+        crate::macos::adapter_profile(),
+    ));
+    let resources = MacDevices::with_host(status, 48_000, 32, host.clone());
+    let format = mixrelay_audio_graph::RenderFormat {
+        sample_rate: 48_000,
+        block_frames: 32,
+    };
+    let mut desired = BTreeMap::from([("output".into(), selected("duplex", false))]);
+    let (output_only, cache) = resources
+        .prepare_device_set(&Cache::new(), desired.clone(), format)
+        .unwrap();
+    assert!(
+        output_only.0["output"]
+            .native
+            .output_only
+            .load(Ordering::Acquire)
+    );
+    desired.insert("input".into(), selected("duplex", true));
+    let (duplex, next_cache) = resources
+        .prepare_device_set(&cache, desired, format)
+        .unwrap();
+    assert!(
+        !duplex.0["output"]
+            .native
+            .output_only
+            .load(Ordering::Acquire)
+    );
+    assert!(
+        !Arc::ptr_eq(&output_only.0["output"], &duplex.0["output"]),
+        "an output-only registration cannot supply native input to a direct renderer"
+    );
+    assert!(duplex.0.values().all(|device| device.ready()));
+    drop((output_only, duplex, cache, next_cache, resources));
+    wait_until(|| host.registrations() == 0);
+}
+
+#[test]
 fn shutdown_rejects_device_preparation_before_inventory_or_native_creation() {
     let status = Arc::new(mixrelay_engine_service::session::AdapterRuntimeStatus::new(
         crate::macos::adapter_profile(),

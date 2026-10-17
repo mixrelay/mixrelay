@@ -4,7 +4,7 @@ use crate::{
     callback_clock::{mr_callback_clock_discontinuities, mr_callback_clock_record_values},
     device_buffers::{native_frames, native_transfer},
 };
-use mixrelay_pcm_ring::{mr_pcm_ring_discard, mr_pcm_ring_read_available, mr_pcm_ring_write};
+use mixrelay_pcm_ring::{mr_pcm_ring_discard, mr_pcm_ring_read_available};
 use std::{
     ffi::c_void,
     ptr,
@@ -141,7 +141,28 @@ fn invalid(io: &DeviceIo, callback: &super::Callback) -> bool {
     false
 }
 
-fn record_timing(io: &DeviceIo, callback: &super::Callback, timing: super::IoTiming, frames: u32) {
+fn record_timing(
+    io: &DeviceIo,
+    callback: &mut super::Callback,
+    timing: super::IoTiming,
+    frames: u32,
+) {
+    callback.acquisition_nanos = if timing.input.flags & 3 == 3 {
+        callback.timebase.nanoseconds(timing.input.host_time)
+    } else {
+        0
+    };
+    let ticks = callback.frame_ticks;
+    if ticks.is_finite() && ticks > 0.0 {
+        // Convert a large fixed tick interval, retaining fractional ticks per frame.
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "fixed one-million-tick timebase conversion"
+        )]
+        let period = ticks * callback.timebase.nanoseconds(1_000_000) as f64 / 1_000_000.0;
+        callback.frame_nanos = period;
+        io.progress.frame_nanos.store(period.to_bits(), Release);
+    }
     io.measurements.callback(timing, frames, false);
     if timing.now.flags & 2 != 0 {
         io.progress
@@ -267,7 +288,16 @@ unsafe fn transfer(
     }
     if io.selection.input {
         // SAFETY: IOProc is native input ring's sole producer; scratch remains live.
-        let written = unsafe { mr_pcm_ring_write(ring, callback.scratch.as_ptr(), frames) };
+        let written = unsafe {
+            mixrelay_pcm_ring::write_observed(ring, callback.scratch.as_ptr(), frames, |cursor| {
+                io.native_times.range(
+                    cursor,
+                    frames as usize,
+                    callback.acquisition_nanos,
+                    callback.frame_nanos,
+                );
+            })
+        };
         io.produced(false, written, host);
     }
 

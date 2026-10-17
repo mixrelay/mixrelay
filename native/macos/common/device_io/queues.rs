@@ -28,8 +28,9 @@ pub(super) unsafe fn graph_read(
     samples: *mut f32,
     frames: u32,
     epoch: u64,
-    host: u64,
+    timing: (u64, Option<(u64, u32)>),
 ) -> GraphRead {
+    let (host, requested) = timing;
     if io.progress.invalid.load(Acquire)
         || !io.selection.input
         || frames == 0
@@ -45,9 +46,53 @@ pub(super) unsafe fn graph_read(
     let discontinuity = previous.is_some_and(|previous| previous != epoch);
     if *previous != Some(epoch) {
         // SAFETY: discard changes only this graph consumer's cursor.
-        unsafe { mr_pcm_ring_discard(ring) };
+        // A first timestamped read selects a fresh retained range explicitly.
+        // Recovery still discards the old epoch before any new coordinate is read.
+        if !initial_epoch || requested.is_none() {
+            unsafe { mr_pcm_ring_discard(ring) };
+        }
         *previous = Some(epoch);
         io.measurements.faults.fetch_add(1, Release);
+    }
+    if let Some((nanos, rate)) = requested {
+        let stats = io.graph_ring.stats();
+        let selected = io.graph_times.locate(stats.read, stats.written, nanos);
+        let valid = selected.is_some_and(|start| {
+            start + u64::from(frames) <= stats.written
+                && rate != 0
+                && (0..frames).all(|offset| {
+                    let target =
+                        nanos.saturating_add(u64::from(offset) * 1_000_000_000 / u64::from(rate));
+                    io.graph_times
+                        .at(start + u64::from(offset))
+                        .is_some_and(|actual| {
+                            actual != 0
+                                && actual.abs_diff(target) <= 1_000_000_000 / u64::from(rate) + 2
+                        })
+                })
+        });
+        if !valid {
+            io.measurements.faults.fetch_add(1, Release);
+            // SAFETY: graph owns the full writable PCM extent.
+            unsafe {
+                ptr::write_bytes(samples, 0, frames as usize * io.selection.channels as usize);
+            };
+            return GraphRead {
+                frames: 0,
+                initial_epoch,
+                discontinuity,
+            };
+        }
+        if let Some(start) = selected {
+            let skip = u32::try_from(start - stats.read).unwrap_or(0);
+            if skip != 0 && !unsafe { mixrelay_pcm_ring::skip_available(ring, skip) } {
+                return GraphRead {
+                    frames: 0,
+                    initial_epoch,
+                    discontinuity,
+                };
+            }
+        }
     }
     // SAFETY: retained ring and sole graph consumer, complete caller-owned output.
     let read = unsafe { mr_pcm_ring_read_available(ring, samples, frames) };
@@ -92,16 +137,28 @@ fn graph_progress(io: &DeviceIo, frames: u32) {
 // span owns frames*channels writable floats even when no PCM is available.
 // It runs in the IOProc's PCM hook, so its frames pass at that callback's host time.
 pub(super) unsafe fn bridge_read(io: &DeviceIo, samples: *mut f32, frames: u32) -> u32 {
+    // SAFETY: same retained owner, exclusive output and sole consumer.
+    unsafe { bridge_read_observed(io, samples, frames, |_| {}) }
+}
+
+// SAFETY: same contract as bridge_read; observer only reads this range's metadata.
+pub(super) unsafe fn bridge_read_observed(
+    io: &DeviceIo,
+    samples: *mut f32,
+    frames: u32,
+    observe: impl FnOnce(u64),
+) -> u32 {
     if frames == 0 || frames > MAX_FRAMES {
         return 0;
     }
     // No prefill: SRC owns priming, not a second native-queue latency policy.
     // SAFETY: the bridge owner's input ring depends only on immutable direction.
     let read = unsafe {
-        mr_pcm_ring_read_available(
+        mixrelay_pcm_ring::read_available_observed(
             ptr::from_ref(io.ring(!io.selection.input)).cast_mut(),
             samples,
             frames,
+            observe,
         )
     };
     io.consumed(
@@ -114,15 +171,26 @@ pub(super) unsafe fn bridge_read(io: &DeviceIo, samples: *mut f32, frames: u32) 
 
 // SAFETY: sole SRC owner producer, full immutable PCM disjoint from queue storage.
 pub(super) unsafe fn bridge_write(io: &DeviceIo, samples: *const f32, frames: u32) -> u32 {
+    unsafe { bridge_write_observed(io, samples, frames, |_| {}) }
+}
+
+// SAFETY: same producer/PCM contract; observer publishes only metadata of the reserved range.
+pub(super) unsafe fn bridge_write_observed(
+    io: &DeviceIo,
+    samples: *const f32,
+    frames: u32,
+    observe: impl FnOnce(u64),
+) -> u32 {
     if frames > MAX_FRAMES {
         return 0;
     }
     // SAFETY: bridge owner writes graph input or native output; no other role writes that ring.
     let written = unsafe {
-        mr_pcm_ring_write(
+        mixrelay_pcm_ring::write_observed(
             ptr::from_ref(io.ring(io.selection.input)).cast_mut(),
             samples,
             frames,
+            observe,
         )
     };
     io.produced(

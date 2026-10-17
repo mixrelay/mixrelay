@@ -9,6 +9,74 @@ use crate::{
     source_control::SourceAttachment,
 };
 
+#[test]
+fn two_independent_shared_sources_read_the_same_event_at_the_same_acquisition_time() {
+    use crate::application_source_transport::mr_application_source_transport_write_timed;
+    let registry = SourceRegistry::new();
+    let mut owners = [
+        producer(&registry, &request("timed-a")),
+        producer(&registry, &request("timed-b")),
+    ];
+    let tokens = [token(b"timed-a"), token(b"timed-b")];
+    let mut output = [[0.0; 256]; 2];
+    for index in 0..2 {
+        // Request format using the actual consumer handshake, then reset its real producer.
+        registry.read_audio(tokens[index], &mut output[index], 128, 48_000);
+        let source_read = registry.read(tokens[index]);
+        let source = source_read.source().unwrap();
+        let format = source.mapping.clock().format_word.load(Ordering::Acquire);
+        assert!(unsafe {
+            mr_application_source_transport_reset(&raw mut owners[index], format, 48_000)
+        });
+        let offset = index * 128;
+        let mut pcm = [0.0; 1536];
+        let mut times = [0_u64; 768];
+        for (frame, time) in times.iter_mut().enumerate() {
+            *time = 1_000_000_000 + (frame + offset) as u64 * 1_000_000_000 / 48_000;
+            if frame + offset == 512 {
+                pcm[frame * 2] = 1.0;
+                pcm[frame * 2 + 1] = -1.0;
+            }
+        }
+        assert!(unsafe {
+            mr_application_source_transport_write_timed(
+                &raw mut owners[index],
+                pcm.as_ptr(),
+                times.as_ptr(),
+                768,
+            )
+        });
+        unsafe {
+            mr_application_source_transport_publish_native(&raw const owners[index], 768, true);
+        };
+    }
+    let target = 1_000_000_000 + 512 * 1_000_000_000_u64 / 48_000;
+    let measured = allocation_counter::measure(|| {
+        for index in 0..2 {
+            assert_eq!(
+                registry.read_at(tokens[index], &mut output[index], 48_000, target),
+                128
+            );
+        }
+    });
+    assert_eq!(measured.count_total, 0);
+    assert_eq!(output[0].map(f32::to_bits), output[1].map(f32::to_bits));
+    assert_eq!(&output[0][..2], &[1.0, -1.0]);
+    assert_eq!(
+        registry.read_at(tokens[0], &mut output[0], 48_000, target),
+        0
+    );
+    assert!(
+        output[0].iter().all(|sample| sample.to_bits() == 0),
+        "a common cursor must not replay a consumed range"
+    );
+    assert_eq!(
+        registry.read_at(tokens[0], &mut output[0], 48_000, target + 1_000_000_000),
+        0
+    );
+    assert!(output[0].iter().all(|sample| sample.to_bits() == 0));
+}
+
 fn producer(registry: &SourceRegistry, request: &SourceRequest) -> SourceTransport {
     let attached = registry.attach(request).unwrap();
     let mut attachment = SourceAttachment {

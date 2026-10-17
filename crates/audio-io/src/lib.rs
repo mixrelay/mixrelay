@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub mod buffer_policy;
+pub mod capture_alignment;
 pub mod clock_bridge;
 mod device;
 pub mod format_contract;

@@ -15,7 +15,17 @@ fn native_outputs_start_without_aggregate() {
             input: false,
             channels: 2,
         };
-        let device = Device::open_with_group(&spec, 48_000, None, 128, host.clone()).unwrap();
+        let device = Device::open_with_group(
+            &spec,
+            48_000,
+            None,
+            crate::macos_devices::device::CallbackConfig {
+                buffer_frames: 128,
+                output_only: true,
+            },
+            host.clone(),
+        )
+        .unwrap();
         assert!(device.ready());
         drop(device);
         crate::macos_devices::worker_retirement::WORKERS
@@ -47,8 +57,17 @@ fn native_aggregate_starts_each_member_and_retires_every_registration() {
             input: false,
             channels: 2,
         };
-        let device =
-            Device::open_with_group(&spec, 48_000, Some(group.clone()), 128, host.clone()).unwrap();
+        let device = Device::open_with_group(
+            &spec,
+            48_000,
+            Some(group.clone()),
+            crate::macos_devices::device::CallbackConfig {
+                buffer_frames: 128,
+                output_only: true,
+            },
+            host.clone(),
+        )
+        .unwrap();
         assert_ne!(host.ticks(&device.native), 0, "member never delivered PCM");
         devices.push(device);
     }

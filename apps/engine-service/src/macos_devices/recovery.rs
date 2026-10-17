@@ -138,6 +138,7 @@ impl MacDevices {
         format: mixrelay_audio_graph::RenderFormat,
     ) -> Result<BTreeMap<String, Arc<Device>>, HostAudioBackendError> {
         let mut devices = BTreeMap::new();
+        let has_inputs = online.values().any(|spec| spec.input);
         for (id, spec) in online {
             self.require_preparation()?;
             let selected = (matches!(spec.selector, DeviceSelector::PersistentUid { .. })
@@ -149,6 +150,14 @@ impl MacDevices {
                 .filter(|(old, _)| old == spec)
                 .and_then(|(_, weak)| weak.upgrade())
                 .filter(|device| same_group(device.native.group.as_ref(), selected.as_ref()));
+            let output_only = !spec.input && !has_inputs;
+            let existing = existing.filter(|device| {
+                device
+                    .native
+                    .output_only
+                    .load(std::sync::atomic::Ordering::Acquire)
+                    == output_only
+            });
             let device = match existing {
                 Some(device) => device,
                 None => Arc::new(
@@ -156,7 +165,10 @@ impl MacDevices {
                         spec,
                         format.sample_rate,
                         selected,
-                        format.block_frames,
+                        super::device::CallbackConfig {
+                            buffer_frames: format.block_frames,
+                            output_only,
+                        },
                         self.host.clone(),
                     )
                     .map_err(backend_error)?,

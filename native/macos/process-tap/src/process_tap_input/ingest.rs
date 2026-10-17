@@ -1,7 +1,7 @@
 use super::{MAX_CHANNELS, TapFormat, TapInputResult, TapPeaks, finite_magnitude};
 use mixrelay_macos_transport::{
     audio_buffer::{AudioBuffer, AudioBufferList, buffers},
-    capture_ring::{AudioRing, mr_audio_ring_write_interleaved, mr_audio_ring_write_planar},
+    capture_ring::{AudioRing, write_timed_interleaved, write_timed_planar},
 };
 use std::{ptr, slice};
 
@@ -22,6 +22,15 @@ fn frame_count(format: &TapFormat, parts: &[AudioBuffer]) -> Option<usize> {
         return None;
     }
     usize::try_from(first.byte_size / format.bytes_per_frame).ok()
+}
+
+/// # Safety
+/// Native list and advertised descriptor extent remain readable during this callback.
+pub(crate) unsafe fn input_frames(format: &TapFormat, input: *const AudioBufferList) -> usize {
+    // SAFETY: caller retains native metadata; frame_count validates every selected part.
+    unsafe { buffers(input, MAX_CHANNELS) }
+        .and_then(|parts| frame_count(format, parts))
+        .unwrap_or(0)
 }
 
 /// One channel's peak, reduced in independent lanes so the scan can vectorize; a single
@@ -82,6 +91,7 @@ pub(crate) unsafe fn ingest(
     input: *const AudioBufferList,
     ring: *mut AudioRing,
     peaks: &TapPeaks,
+    time: (u64, f64),
 ) -> TapInputResult {
     // SAFETY: CoreAudio supplies the readable descriptor table for this callback.
     let Some(parts) = (unsafe { buffers(input, MAX_CHANNELS) }) else {
@@ -98,10 +108,10 @@ pub(crate) unsafe fn ingest(
             *plane = part.data.cast_const();
         }
         // SAFETY: bounded table matches the ring's immutable channel width.
-        unsafe { mr_audio_ring_write_planar(ring, planes.as_ptr(), frames) }
+        unsafe { write_timed_planar(ring, planes.as_ptr(), frames, time.0, time.1) }
     } else {
         // SAFETY: validated interleaved extent is readable for frames*channels.
-        unsafe { mr_audio_ring_write_interleaved(ring, parts[0].data, frames) }
+        unsafe { write_timed_interleaved(ring, parts[0].data, frames, time.0, time.1) }
     };
     TapInputResult {
         frames,

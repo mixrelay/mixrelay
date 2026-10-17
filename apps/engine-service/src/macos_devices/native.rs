@@ -32,6 +32,7 @@ pub(super) struct Native {
     _permit: Permit<'static>,
     /// This process's client buffer, physical or virtual, follows the session block.
     requested_buffer: AtomicU32,
+    pub(super) output_only: AtomicBool,
     // Stable Rust-owned callback slot. Drop runs only after native destroy has
     // acknowledged all callbacks, so the native device owner cannot outlive this box.
     pub(super) render: Box<super::direct::RenderSlot>,
@@ -66,6 +67,7 @@ impl Native {
             host,
             _permit: permit,
             requested_buffer: AtomicU32::new(buffer_frames),
+            output_only: AtomicBool::new(false),
             render: Box::default(),
             pcm_metrics: PcmMetrics::default(),
             source_sample_faults: mixrelay_audio_io::pcm::SampleFaultCounter::default(),
@@ -96,6 +98,15 @@ impl Native {
         self.requested_buffer.load(Ordering::Acquire)
     }
     pub(super) fn connect(&self, stop: &AtomicBool) -> Result<(), String> {
+        // SAFETY: this control owner retains DeviceIo and the previous registration
+        // has drained. Direct-capable graphs retain native input on output IOProcs.
+        unsafe {
+            &*self
+                .pointer
+                .as_ptr()
+                .cast::<mixrelay_macos_transport::device_io::DeviceIo>()
+        }
+        .set_output_only(self.output_only.load(Ordering::Acquire));
         let requested = self.requested_buffer.load(Ordering::Acquire);
         let setting = if requested == 0 {
             None

@@ -17,6 +17,7 @@ pub mod callback_clock;
 pub mod capture_ring;
 pub mod device_buffers;
 pub mod device_io;
+mod frame_times;
 pub mod source_registry;
 pub use anonymous_memory::create as create_shared_memory;
 pub mod control_inventory;

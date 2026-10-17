@@ -1,8 +1,8 @@
-# Application source clock transport v4
+# Application source clock transport v5
 
 This transport is private to the desktop process-tap pump and engine service.
 Both processes use the current shared-buffer ABI and the required XPC
-`source_transport_version: 4` contract. Missing or different versions are
+`source_transport_version: 5` contract. Missing or different versions are
 rejected before an attachment or producer lease is granted. There is no raw-frame
 or previous-protocol mode. `native/macos/common/source_control.rs` owns the codec.
 
@@ -10,6 +10,22 @@ or previous-protocol mode. `native/macos/common/source_control.rs` owns the code
 length rounded up to a 64-byte boundary. Both sides validate the complete mapped
 length, alignment, magic, exact version/header length and lock-free atomics before
 use. The trailer contains integers and atomics only, never local pointers.
+
+The 160-byte clock header is followed by two atomic u64 cells per PCM frame:
+the shared buffer's 16-bit epoch / 48-bit absolute frame tag, and the original
+acquisition time in host nanoseconds. The producer invalidates a coordinate,
+stores its new time, and releases its tag before releasing matching PCM. A reader
+checks the tag on both sides of the coordinate load, then validates the PCM
+lease/epoch after copying. Partial native reads and SRC output keep their own
+coordinates; callback arrival time never relabels older queued audio.
+
+Independent inputs share one graph acquisition cursor. It advances by admitted
+graph frames and the pacing clock's measured period. Each source selects the
+nearest retained coordinate within one graph frame; missing, stale, future or
+already consumed ranges return silence. Hardware history reserves the largest
+producer burst, one graph block and one converter slab before admission. This
+reserve also informs the FIFO controller so intentional alignment history is
+not interpreted as drift. Single-input routes retain their existing FIFO path.
 
 The pump replaces NaN/Inf with zero before its stateful SRC and preserves every
 finite input bit. Replacements reach the graph's `sampleFaults.sourceSamples`

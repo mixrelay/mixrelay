@@ -32,6 +32,7 @@ use std::{
 const MAX_SOURCES: usize = 64;
 const MAX_RETAINED: usize = 128;
 mod latency;
+mod timestamps;
 use latency::{Latency, Observation, transition};
 const MAX_LEASE: u64 = (1 << 48) - 1;
 
@@ -482,6 +483,17 @@ impl SourceRegistry {
         })
     }
     fn read_audio(&self, token: u64, samples: &mut [f32], frames: u32, rate: u32) -> u32 {
+        self.read_audio_time(token, samples, frames, (rate, None))
+    }
+
+    fn read_audio_time(
+        &self,
+        token: u64,
+        samples: &mut [f32],
+        frames: u32,
+        timing: (u32, Option<u64>),
+    ) -> u32 {
+        let (rate, requested_time) = timing;
         samples.fill(0.0);
         let read = self.read(token);
         let Some(source) = read.source().filter(|source| {
@@ -513,13 +525,28 @@ impl SourceRegistry {
             return 0;
         }
         let observation = timeline.observe(source, stats, frames, rate);
-        let (policy, ready) = transition(timeline.policy, observation);
+        let (mut policy, ready) = transition(timeline.policy, observation);
         if !ready {
             if source.read_is_current(lease, format, stats.epoch) {
                 timeline.policy = policy;
             }
             timeline.publish(source, stats.epoch, frames, false);
             return 0;
+        }
+        if let Some(time) = requested_time {
+            let minimum = if timeline.policy.started && timeline.policy.epoch == stats.epoch {
+                timeline.policy.next
+            } else {
+                0
+            };
+            let Some(next) = timestamps::locate(source, stats, time, rate, (frames, minimum))
+            else {
+                timeline.publish(source, stats.epoch, frames, false);
+                return 0;
+            };
+            policy.next = next;
+            policy.target = u32::try_from(stats.published_through_frame.saturating_sub(next))
+                .unwrap_or(source.capacity);
         }
         let available = unsafe {
             mr_shared_audio_buffer_read(buffer, policy.next, samples.as_mut_ptr(), frames)

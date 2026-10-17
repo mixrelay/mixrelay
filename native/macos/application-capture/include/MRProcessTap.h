@@ -83,6 +83,10 @@ size_t mr_process_tap_read(
     float *destination,
     size_t maximum_frames
 );
+typedef struct MRProcessTapReadGeneration { uint64_t format; uint64_t clock_breaks; } MRProcessTapReadGeneration;
+/* PCM acquisition coordinates in host nanoseconds; stale generations return no PCM. */
+size_t mr_process_tap_read_timed(MRProcessTapSession *session, float *destination,
+    uint64_t *timestamps, size_t maximum_frames, MRProcessTapReadGeneration expected);
 size_t mr_process_tap_take_peaks(
     MRProcessTapSession *session,
     float *destination,

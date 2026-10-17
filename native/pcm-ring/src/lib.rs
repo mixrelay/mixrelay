@@ -26,6 +26,51 @@ pub use ffi::{
 pub use sample_format::SampleFormat;
 pub use storage::prefault_pcm;
 
+/// Advances the sole consumer over stale frames without copying them.
+/// # Safety
+/// Retained initialized ring; caller is the serialized consumer, including discard/read.
+pub unsafe fn skip_available(ring: *mut PcmRing, frames: u32) -> bool {
+    // SAFETY: only this consumer accesses its private reader state.
+    let Some(ring) = (unsafe { ring.as_ref() }) else {
+        return false;
+    };
+    let reader = unsafe { &mut *ring.reader.get() };
+    ring.reserve_read(reader, frames, false)
+        .is_some_and(|window| ring.finish_read(reader, &window, frames))
+}
+
+/// Copies a whole available block and observes its absolute cursor before releasing it.
+/// # Safety
+/// Same ring/sole-consumer/output extent contract as `read_available`. The observer may
+/// read a matching metadata sidecar but cannot mutate or recursively consume the PCM ring.
+pub unsafe fn read_available_observed(
+    ring: *mut PcmRing,
+    output: *mut f32,
+    frames: u32,
+    observe: impl FnOnce(u64),
+) -> u32 {
+    // SAFETY: the observer runs synchronously while reserve_read still protects these slots.
+    unsafe {
+        ffi::read(ring, output, frames, false, |ring| {
+            observe(ring.stats().read);
+        })
+    }
+}
+
+/// Writes PCM and publishes its metadata only after reserving free ring slots.
+/// # Safety
+/// Same sole-producer, retained ring and complete immutable input contract as write.
+/// The observer must not access PCM or change either ring cursor.
+pub unsafe fn write_observed(
+    ring: *mut PcmRing,
+    input: *const f32,
+    frames: u32,
+    observe: impl FnOnce(u64),
+) -> u32 {
+    // SAFETY: the observer runs after PCM copy and before the release publication.
+    unsafe { ffi::write_observed(ring, input, frames, observe) }
+}
+
 /// Embedded opaque native storage. Zero-initialization owns no resources; init
 /// must finish before callbacks start. Never copy, clear or reinitialize it live.
 /// Producer and consumer have distinct private cells; observers use atomics only.

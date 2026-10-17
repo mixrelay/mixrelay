@@ -74,7 +74,7 @@ fn capture_is_converted_in_its_callback_and_output_is_prepared_before_consumptio
         let mut read = [0.0; 64];
         // Establish graph freshness before the input's first publication.
         if input {
-            unsafe { queues::graph_read(&io, read.as_mut_ptr(), 32, 1, 0) };
+            unsafe { queues::graph_read(&io, read.as_mut_ptr(), 32, 1, (0, None)) };
         }
         let allocated = allocation_counter::measure(|| process(&io, &mut list));
         assert_eq!(allocated.count_total, 0);
@@ -83,7 +83,7 @@ fn capture_is_converted_in_its_callback_and_output_is_prepared_before_consumptio
         assert_eq!(io.progress.native_frames.load(Acquire), 32);
         if input {
             assert_eq!(
-                unsafe { queues::graph_read(&io, read.as_mut_ptr(), 32, 1, 0) }.frames,
+                unsafe { queues::graph_read(&io, read.as_mut_ptr(), 32, 1, (0, None)) }.frames,
                 32
             );
             assert_pcm(&read, &[0.25; 64]);
@@ -105,7 +105,7 @@ fn invalidation_during_either_input_stage_blocks_further_native_admission() {
         // Seed actual prior-epoch PCM so the graph gate has something to block.
         unsafe {
             assert!(!mr_device_io_invalid(ptr::from_ref(&io).cast_mut()));
-            queues::graph_read(&io, read.as_mut_ptr(), 32, 1, 0);
+            queues::graph_read(&io, read.as_mut_ptr(), 32, 1, (0, None));
             assert_eq!(queues::bridge_write(&io, [0.75; 64].as_ptr(), 32), 32);
         }
         read.fill(9.0);
@@ -118,7 +118,7 @@ fn invalidation_during_either_input_stage_blocks_further_native_admission() {
         assert!(io.progress.invalid.load(Acquire));
         assert!(unsafe { mr_device_io_invalid(ptr::from_ref(&io).cast_mut()) });
         assert_eq!(
-            unsafe { queues::graph_read(&io, read.as_mut_ptr(), 32, 1, 0) },
+            unsafe { queues::graph_read(&io, read.as_mut_ptr(), 32, 1, (0, None)) },
             GraphRead::default()
         );
         assert_pcm(&read, &[9.0; 64]);

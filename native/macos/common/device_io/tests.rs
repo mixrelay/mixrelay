@@ -62,7 +62,7 @@ fn latency_fifo_taps_time_each_role_and_invalidate_discarded_windows() {
     let mut list = buffers(&mut pcm, 1, 64, false);
     let mut read = [0.0; 64];
     // Establish freshness before writing graph PCM.
-    unsafe { queues::graph_read(&io, read.as_mut_ptr(), 1, 7, 0) };
+    unsafe { queues::graph_read(&io, read.as_mut_ptr(), 1, 7, (0, None)) };
     let before = unsafe { latency_snapshot(&raw const io, false) }.unwrap();
     // Fixture callbacks carry no `now`; set the host time each one would store.
     let callback = |host: u64| io.progress.callback_host.store(host, Release);
@@ -74,15 +74,15 @@ fn latency_fifo_taps_time_each_role_and_invalidate_discarded_windows() {
             assert_eq!(queues::bridge_read(&io, read.as_mut_ptr(), 32), 32);
             assert_eq!(queues::bridge_write(&io, pcm.as_ptr(), 64), 64);
             assert_eq!(
-                queues::graph_read(&io, read.as_mut_ptr(), 32, 7, 1_300).frames,
+                queues::graph_read(&io, read.as_mut_ptr(), 32, 7, (1_300, None)).frames,
                 32
             );
             assert_eq!(
-                queues::graph_read(&io, read.as_mut_ptr(), 64, 7, 1_310).frames,
+                queues::graph_read(&io, read.as_mut_ptr(), 64, 7, (1_310, None)).frames,
                 0
             );
             assert_eq!(
-                queues::graph_read(&io, read.as_mut_ptr(), 32, 7, 1_400).frames,
+                queues::graph_read(&io, read.as_mut_ptr(), 32, 7, (1_400, None)).frames,
                 32
             );
         }
@@ -135,14 +135,14 @@ fn starvation_snapshot_distinguishes_the_graph_consumer_from_native_input_pollin
     // SAFETY: this unpublished fixture serializes both queue roles; all buffers
     // own a complete 32-frame mono block throughout each bounded transfer.
     unsafe {
-        queues::graph_read(&io, pcm.as_mut_ptr(), 32, 1, 0);
+        queues::graph_read(&io, pcm.as_mut_ptr(), 32, 1, (0, None));
         assert_eq!(queues::bridge_write(&io, [0.25; 32].as_ptr(), 32), 32);
         assert_eq!(
-            queues::graph_read(&io, pcm.as_mut_ptr(), 32, 1, 0).frames,
+            queues::graph_read(&io, pcm.as_mut_ptr(), 32, 1, (0, None)).frames,
             32
         );
         assert_eq!(
-            queues::graph_read(&io, pcm.as_mut_ptr(), 32, 1, 0).frames,
+            queues::graph_read(&io, pcm.as_mut_ptr(), 32, 1, (0, None)).frames,
             0
         );
         assert_eq!(mr_device_io_starvations(pointer, true), 1);
@@ -300,19 +300,19 @@ fn all_channel_widths_preserve_three_owner_queues_and_recovery_epochs() {
             assert_pcm(&scratch, &source);
             assert_eq!(queues::bridge_read(&input, scratch.as_mut_ptr(), 64), 0);
             assert_eq!(
-                queues::graph_read(&input, destination.as_mut_ptr(), 64, 1, 0).frames,
+                queues::graph_read(&input, destination.as_mut_ptr(), 64, 1, (0, None)).frames,
                 0
             );
             for _ in 0..3 {
                 assert_eq!(queues::bridge_write(&input, source.as_ptr(), 64), 64);
             }
             assert_eq!(
-                queues::graph_read(&input, destination.as_mut_ptr(), 64, 1, 0).frames,
+                queues::graph_read(&input, destination.as_mut_ptr(), 64, 1, (0, None)).frames,
                 64
             );
             assert_pcm(&destination, &source);
             assert_eq!(
-                queues::graph_read(&input, destination.as_mut_ptr(), 64, 2, 0).frames,
+                queues::graph_read(&input, destination.as_mut_ptr(), 64, 2, (0, None)).frames,
                 0
             );
             assert_eq!(input.graph_ring.stats().queued, 0);
@@ -724,7 +724,7 @@ impl native::Properties for PropertiesStub {
     fn streams(&self, _: u32, _: u32, _: u32) -> Option<native::StreamIds> {
         native::valid_stream_extent(self.stream_size, 4).then_some(native::StreamIds {
             values: [234; 2048],
-            count: 1,
+            count: self.stream_size as usize / 4,
         })
     }
 }

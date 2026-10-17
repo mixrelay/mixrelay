@@ -34,6 +34,7 @@ pub(super) struct WatchTarget {
     pub(super) device: u32,
     pub(super) scope: u32,
     pub(super) limit: u32,
+    pub(super) output_only: bool,
 }
 
 pub(super) trait ListenerBackend {
@@ -116,6 +117,15 @@ impl Listeners {
         self.block = Some(RcBlock::new(move |_: u32, _: *const c_void| {
             latch.store(true, Release);
         }));
+        // A restarted HAL can recycle numeric object IDs while geometry stays
+        // identical. Invalidate before rediscovering any device/stream identity.
+        self.subscribe(
+            Subscription {
+                object: 1,
+                address: Address::new(u32::from_be_bytes(*b"srst"), GLOBAL),
+            },
+            backend,
+        )?;
         for (selector, scope) in [
             (*b"nsrt", GLOBAL),
             (*b"stm#", target.scope),
@@ -127,6 +137,20 @@ impl Listeners {
                 Subscription {
                     object: target.device,
                     address: Address::new(u32::from_be_bytes(selector), scope),
+                },
+                backend,
+            )?;
+        }
+        if target.output_only {
+            // New input streams must be disabled before this output-only IOProc
+            // can restart; never inherit CoreAudio's default enabled usage.
+            self.subscribe(
+                Subscription {
+                    object: target.device,
+                    address: Address::new(
+                        u32::from_be_bytes(*b"stm#"),
+                        u32::from_be_bytes(*b"inpt"),
+                    ),
                 },
                 backend,
             )?;

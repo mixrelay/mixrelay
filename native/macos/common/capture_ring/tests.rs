@@ -27,7 +27,7 @@ fn both_allocation_failures_return_null_and_release_prepared_pcm() {
         // SAFETY: second allocator fails after actual fallible vector allocation.
         assert!(unsafe { create(4, 2, allocate_samples, |_| None) }.is_null());
     });
-    assert_eq!(measured.count_total, 1);
+    assert_eq!(measured.count_total, 2); // PCM and matching coordinate storage both unwind.
     assert_eq!(measured.count_current, 0);
     assert_eq!(measured.bytes_current, 0);
     assert!(allocate_samples(usize::MAX).is_none());
@@ -172,7 +172,7 @@ fn statistics_bound_a_nontransactional_cursor_observation_without_moving_cursors
 }
 
 #[test]
-fn callback_io_is_allocation_free_and_destroy_releases_both_allocations() {
+fn callback_io_is_allocation_free_and_destroy_releases_pcm_coordinates_and_owner() {
     let lifecycle = allocation_counter::measure(|| {
         let owner = Owner::new(1024, 2);
         let input = [0.5_f32; 512];
@@ -195,7 +195,7 @@ fn callback_io_is_allocation_free_and_destroy_releases_both_allocations() {
         assert_eq!(callback.count_total, 0);
         assert_eq!(callback.count_current, 0);
     });
-    assert_eq!(lifecycle.count_total, 2);
+    assert_eq!(lifecycle.count_total, 3);
     assert_eq!(lifecycle.count_current, 0);
     assert_eq!(lifecycle.bytes_current, 0);
 }

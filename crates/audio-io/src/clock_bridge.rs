@@ -17,6 +17,7 @@ use thiserror::Error;
 mod buffers;
 mod controller;
 mod fifo;
+mod timestamps;
 use controller::DriftController;
 pub use controller::{ClockFeedback, FeedbackQueue};
 use fifo::FrameFifo;
@@ -106,6 +107,8 @@ pub struct AsyncClockBridge {
     output_capacity_frames: usize,
     output_read: usize,
     output_frames: usize,
+    output_times: Vec<u64>,
+    time: timestamps::ConverterTime,
     controller: DriftController,
     primed: bool,
     started: bool,
@@ -141,7 +144,10 @@ impl AsyncClockBridge {
                 Async::new_sinc(
                     f64::from(config.output_rate) / f64::from(config.input_rate),
                     1.003,
-                    &SincInterpolationParameters::default(),
+                    &SincInterpolationParameters {
+                        sinc_len: timestamps::SINC_FRAMES,
+                        ..SincInterpolationParameters::default()
+                    },
                     CHUNK,
                     config.channels,
                     FixedAsync::Input,
@@ -152,6 +158,8 @@ impl AsyncClockBridge {
         let output_max = resampler
             .as_ref()
             .map_or(CHUNK, Resampler::output_frames_max);
+        let mut time = timestamps::ConverterTime::new(config, !bypass)?;
+        time.reset();
         Ok(Self {
             input,
             input_scratch,
@@ -159,6 +167,8 @@ impl AsyncClockBridge {
             output_capacity_frames: output_max,
             output_read: 0,
             output_frames: 0,
+            output_times: timestamps::zeroed(output_max)?,
+            time,
             controller: DriftController::new(config.max_correction_ppm),
             primed: false,
             started: false,
@@ -175,6 +185,25 @@ impl AsyncClockBridge {
     /// Malformed/nonfinite input and overflow leave queued PCM unchanged. The
     /// adapter must explicitly reset after dropping a native packet.
     pub fn push_interleaved(&mut self, samples: &[f32]) -> Result<usize, BridgeError> {
+        self.push(samples, None)
+    }
+
+    /// Queues PCM and its per-frame acquisition coordinates in monotonic nanoseconds.
+    /// Zero marks an unknown coordinate; it is never replaced by a newer callback time.
+    /// # Errors
+    /// Rejects mismatched timestamp extents and all ordinary PCM admission errors.
+    pub fn push_timed_interleaved(
+        &mut self,
+        samples: &[f32],
+        times: &[u64],
+    ) -> Result<usize, BridgeError> {
+        if times.len().checked_mul(self.config.channels) != Some(samples.len()) {
+            return Err(BridgeError::InvalidBuffer);
+        }
+        self.push(samples, Some(times))
+    }
+
+    fn push(&mut self, samples: &[f32], times: Option<&[u64]>) -> Result<usize, BridgeError> {
         let frames = validate_buffer(
             samples.len(),
             self.config.channels,
@@ -187,6 +216,7 @@ impl AsyncClockBridge {
             return Err(BridgeError::Overflow);
         }
         self.input.push(samples);
+        self.time.push(frames, times);
         Ok(frames)
     }
 
@@ -197,6 +227,30 @@ impl AsyncClockBridge {
     /// # Errors
     /// Invalid output shape/quantum or a converter error is reported explicitly.
     pub fn pull_interleaved(&mut self, output: &mut [f32]) -> Result<PullReport, BridgeError> {
+        self.pull(output, None)
+    }
+
+    /// Pulls the coordinates computed for these exact output samples. Partial pulls
+    /// retain the remainder's coordinates alongside the converted PCM.
+    /// # Errors
+    /// Rejects mismatched timestamp extents and ordinary converter errors.
+    pub fn pull_timed_interleaved(
+        &mut self,
+        output: &mut [f32],
+        times: &mut [u64],
+    ) -> Result<PullReport, BridgeError> {
+        if times.len().checked_mul(self.config.channels) != Some(output.len()) {
+            return Err(BridgeError::InvalidBuffer);
+        }
+        times.fill(0);
+        self.pull(output, Some(times))
+    }
+
+    fn pull(
+        &mut self,
+        output: &mut [f32],
+        mut times: Option<&mut [u64]>,
+    ) -> Result<PullReport, BridgeError> {
         let wanted = validate_buffer(
             output.len(),
             self.config.channels,
@@ -220,6 +274,11 @@ impl AsyncClockBridge {
                     [self.output_read * channels..(self.output_read + count) * channels],
             );
             self.output_read += count;
+            if let Some(times) = times.as_deref_mut() {
+                times[transferred..transferred + count].copy_from_slice(
+                    &self.output_times[self.output_read - count..self.output_read],
+                );
+            }
             transferred += count;
         }
         let mut report = self.report(transferred, wanted);
@@ -269,6 +328,7 @@ impl AsyncClockBridge {
             resampler
                 .set_resample_ratio_relative(1.0 + correction * 1e-6, true)
                 .map_err(|_| BridgeError::Resampler)?;
+            self.time.ratio(correction);
         }
         Ok(self.correction_ppm())
     }
@@ -289,6 +349,7 @@ impl AsyncClockBridge {
                 .map_err(|_| BridgeError::Resampler)?;
         }
         self.controller.reset();
+        self.time.ratio(0.0);
         Ok(())
     }
 
@@ -303,6 +364,7 @@ impl AsyncClockBridge {
         self.output_frames = 0;
         self.primed = false;
         self.started = false;
+        self.time.reset();
         self.input_residence.invalid = self.input_residence.invalid.wrapping_add(1);
         self.output_residence.invalid = self.output_residence.invalid.wrapping_add(1);
         self.controller.reset();
@@ -382,6 +444,8 @@ impl AsyncClockBridge {
             self.input_residence.weight = self.input_residence.weight.wrapping_add(consumed as u64);
             self.input.consume(consumed);
             self.output_frames = produced;
+            self.time
+                .convert(consumed, &mut self.output_times[..produced]);
         } else {
             if available == 0 {
                 return Ok(false);
@@ -392,6 +456,7 @@ impl AsyncClockBridge {
             self.input_residence.weight = self.input_residence.weight.wrapping_add(frames as u64);
             self.input.consume(frames);
             self.output_frames = frames;
+            self.time.convert(frames, &mut self.output_times[..frames]);
         }
         self.output_read = 0;
         self.started |= self.output_frames != 0;

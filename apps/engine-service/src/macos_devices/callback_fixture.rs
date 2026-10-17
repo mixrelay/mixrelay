@@ -54,7 +54,11 @@ pub(crate) struct NativeOwner {
 
 impl NativeOwner {
     pub(crate) fn new(channels: u16, rate: u32, input: bool) -> Self {
-        let (device, context) = synthetic_device(channels, rate, rate, input);
+        Self::at_rates(channels, rate, rate, input)
+    }
+
+    pub(crate) fn at_rates(channels: u16, graph_rate: u32, native_rate: u32, input: bool) -> Self {
+        let (device, context) = synthetic_device(channels, graph_rate, native_rate, input);
         Self { device, context }
     }
 

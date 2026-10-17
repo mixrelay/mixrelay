@@ -3,7 +3,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 mod ingest;
-pub(crate) use ingest::ingest;
+pub(crate) use ingest::{ingest, input_frames};
 
 const MAX_CHANNELS: usize = 64;
 const FLOAT: u32 = 1;

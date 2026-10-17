@@ -11,7 +11,8 @@ mod ffi;
 pub use ffi::{
     mr_audio_ring_available_frames, mr_audio_ring_capacity_frames, mr_audio_ring_create,
     mr_audio_ring_destroy, mr_audio_ring_dropped_frames, mr_audio_ring_read_interleaved,
-    mr_audio_ring_write_interleaved, mr_audio_ring_write_planar,
+    mr_audio_ring_read_timed, mr_audio_ring_write_interleaved, mr_audio_ring_write_planar,
+    write_timed_interleaved, write_timed_planar,
 };
 
 /// Opaque native owner, created before the tap `IOProc` and destroyed after its
@@ -26,6 +27,7 @@ pub struct AudioRing {
     read: AtomicU64,
     written: AtomicU64,
     dropped: AtomicU64,
+    times: crate::frame_times::FrameTimes,
 }
 
 fn allocate_samples(count: usize) -> Option<Vec<UnsafeCell<f32>>> {
@@ -51,6 +53,9 @@ unsafe fn create(
     let Some(samples) = samples(capacity * channels) else {
         return ptr::null_mut();
     };
+    let Some(times) = crate::frame_times::FrameTimes::new(capacity) else {
+        return ptr::null_mut();
+    };
     let Some(owner) = allocate_owner(Layout::new::<AudioRing>()) else {
         // The prepared PCM vector is dropped before a failed owner allocation returns.
         return ptr::null_mut();
@@ -65,6 +70,7 @@ unsafe fn create(
             read: AtomicU64::new(0),
             written: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
+            times,
         });
     }
     owner.as_ptr()

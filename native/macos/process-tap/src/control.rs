@@ -11,6 +11,19 @@ struct Discovery {
     retrack: bool,
 }
 
+// A deleted native object cannot retain a registration. Other failures still
+// retain the exact owner for retry, and active callbacks/listeners must drain.
+fn removed(result: Result<(), TapError>) -> bool {
+    match result {
+        Ok(()) => true,
+        Err(error) => {
+            error.code == 4
+                && (error.os_status == i32::from_be_bytes(*b"!obj")
+                    || error.os_status == i32::from_be_bytes(*b"!dev"))
+        }
+    }
+}
+
 impl TapSession {
     pub(super) fn adopt_registration(
         &self,
@@ -57,15 +70,12 @@ impl TapSession {
     fn unregister(&self, native: &impl Native) -> bool {
         let mut resources = self.resources.get();
         if self.running.load(Ordering::Acquire)
-            && native.stop(resources.aggregate, resources.proc).is_ok()
+            && removed(native.stop(resources.aggregate, resources.proc))
         {
             self.running.store(false, Ordering::Release);
         }
         if !resources.proc.is_null() && resources.aggregate != 0 {
-            if native
-                .unregister(resources.aggregate, resources.proc)
-                .is_err()
-            {
+            if !removed(native.unregister(resources.aggregate, resources.proc)) {
                 return false;
             }
             resources.proc = std::ptr::null_mut();
@@ -77,15 +87,53 @@ impl TapSession {
 
     pub(super) fn reclaim(&self, native: &impl Native) -> bool {
         self.watchdog.borrow_mut().clear(native);
+        self.remove_system_listeners(native) && self.reclaim_tap(native)
+    }
+
+    fn remove_system_listeners(&self, native: &impl Native) -> bool {
         let mut resources = self.resources.get();
-        if resources.inventory_listener {
-            if native.remove_inventory_listener(self).is_err() {
+        if resources.listeners.service {
+            if !removed(native.remove_service_listener(self)) {
                 return false;
             }
-            resources.inventory_listener = false;
+            resources.listeners.service = false;
             self.resources.set(resources);
         }
-        self.reclaim_tap(native)
+        if resources.listeners.inventory {
+            if !removed(native.remove_inventory_listener(self)) {
+                return false;
+            }
+            resources.listeners.inventory = false;
+            self.resources.set(resources);
+        }
+        true
+    }
+
+    fn restore_service(&self, native: &impl Native) -> Result<(), TapError> {
+        let epoch = self.service_epoch.load(Ordering::Acquire);
+        if epoch == self.rebuilt_service_epoch.get() {
+            return Ok(());
+        }
+        self.watchdog.borrow_mut().clear(native);
+        let mut resources = self.resources.get();
+        resources.rebuild = RebuildIntent::Replace;
+        resources.resume |= self.running.load(Ordering::Acquire);
+        self.resources.set(resources);
+        if resources.listeners.service_epoch == epoch {
+            return Ok(());
+        }
+        // The SDK invalidates cached objects AND listeners across a service reset.
+        // Partial removals/additions retain individual receipts for the next pass.
+        if !self.remove_system_listeners(native)
+            || self.active_listeners.load(Ordering::Acquire) != 0
+        {
+            return Err(TapError::code(9));
+        }
+        native.install_system_listeners(self)?;
+        let mut resources = self.resources.get();
+        resources.listeners.service_epoch = epoch;
+        self.resources.set(resources);
+        Ok(())
     }
 
     fn reclaim_tap(&self, native: &impl Native) -> bool {
@@ -93,25 +141,25 @@ impl TapSession {
             return false;
         }
         let mut resources = self.resources.get();
-        if resources.listener {
-            if native.remove_listener(resources.tap, self).is_err() {
+        if resources.listeners.format {
+            if !removed(native.remove_listener(resources.tap, self)) {
                 return false;
             }
-            resources.listener = false;
+            resources.listeners.format = false;
             self.resources.set(resources);
         }
         if self.active_listeners.load(Ordering::Acquire) != 0 {
             return false;
         }
         if resources.aggregate != 0 {
-            if native.destroy_aggregate(resources.aggregate).is_err() {
+            if !removed(native.destroy_aggregate(resources.aggregate)) {
                 return false;
             }
             resources.aggregate = 0;
             self.resources.set(resources);
         }
         if resources.tap != 0 {
-            if native.destroy_tap(resources.tap).is_err() {
+            if !removed(native.destroy_tap(resources.tap)) {
                 return false;
             }
             resources.tap = 0;
@@ -151,6 +199,7 @@ impl TapSession {
             return Err(TapError::code(1));
         }
         let observed = self.lifecycle.epoch();
+        self.restore_service(native)?;
         let discovery = self
             .discover(native)
             .inspect_err(|_| self.watchdog.borrow_mut().clear(native))?;
@@ -281,7 +330,7 @@ impl TapSession {
         let resources = self.resources.get();
         resources.tap == 0
             || resources.aggregate == 0
-            || !resources.listener
+            || !resources.listeners.format
             || resources.proc.is_null()
             || resources.rebuild == RebuildIntent::Replace
     }
@@ -292,6 +341,7 @@ impl TapSession {
         observed: u64,
         candidate: Vec<ProcessIdentity>,
     ) -> Result<(), TapError> {
+        let service_epoch = self.service_epoch.load(Ordering::Acquire);
         self.watchdog.borrow_mut().clear(native);
         // No callback may deliver old-identity PCM after this invalidation.
         let epoch = self.lifecycle.invalidate(observed);
@@ -332,6 +382,7 @@ impl TapSession {
         let mut resources = self.resources.get();
         resources.rebuild = RebuildIntent::Unchanged;
         self.resources.set(resources);
+        self.rebuilt_service_epoch.set(service_epoch);
         Ok(())
     }
 

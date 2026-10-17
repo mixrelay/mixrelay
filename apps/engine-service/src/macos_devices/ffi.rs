@@ -73,6 +73,7 @@ unsafe extern "C" {
     pub(super) fn mr_device_io_bridge_discard(io: *mut c_void);
     pub(super) fn mr_device_io_output_epoch(io: *mut c_void, epoch: u64);
     pub(super) fn mr_device_io_bridge_read(io: *mut c_void, samples: *mut f32, frames: u32) -> u32;
+    #[cfg(test)]
     pub(super) fn mr_device_io_bridge_write(
         io: *mut c_void,
         samples: *const f32,

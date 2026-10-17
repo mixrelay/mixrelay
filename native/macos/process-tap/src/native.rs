@@ -9,6 +9,8 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
+mod readiness;
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 struct Address {
@@ -49,7 +51,7 @@ impl Address {
 pub(super) struct Timestamp {
     pub sample: f64,
     pub host: u64,
-    rate_scalar: f64,
+    pub rate_scalar: f64,
     word_clock: u64,
     smpte: [u8; 24],
     pub flags: u32,
@@ -165,6 +167,8 @@ pub(super) trait Native {
     fn unregister(&self, device: u32, proc: *mut c_void) -> Result<(), TapError>;
     fn remove_listener(&self, tap: u32, session: &TapSession) -> Result<(), TapError>;
     fn remove_inventory_listener(&self, session: &TapSession) -> Result<(), TapError>;
+    fn remove_service_listener(&self, session: &TapSession) -> Result<(), TapError>;
+    fn install_system_listeners(&self, session: &TapSession) -> Result<(), TapError>;
     fn destroy_aggregate(&self, device: u32) -> Result<(), TapError>;
     fn destroy_tap(&self, tap: u32) -> Result<(), TapError>;
     /// One temporary, unmuted observation of exactly the same selection.
@@ -184,13 +188,17 @@ fn context(session: &TapSession) -> *mut c_void {
 }
 
 fn property<T: Default>(object: u32, selector: [u8; 4]) -> Result<T, TapError> {
+    property_at(object, Address::global(selector))
+}
+
+fn property_at<T: Default>(object: u32, address: Address) -> Result<T, TapError> {
     let mut value = T::default();
-    let mut size = u32::try_from(size_of::<T>()).expect("native property fits UInt32");
+    let mut size = u32::try_from(size_of::<T>()).map_err(|_| TapError::code(5))?;
     // SAFETY: typed output owns size bytes; address/size live through synchronous query.
     TapError::status(unsafe {
         AudioObjectGetPropertyData(
             object,
-            &Address::global(selector),
+            &raw const address,
             0,
             ptr::null(),
             &raw mut size,
@@ -277,6 +285,29 @@ impl Native for CoreAudio {
     fn destroy_aggregate(&self, device: u32) -> Result<(), TapError> {
         // SAFETY: control owner removed IOProc before destroying its aggregate.
         TapError::status(unsafe { AudioHardwareDestroyAggregateDevice(device) })
+    }
+    fn remove_service_listener(&self, session: &TapSession) -> Result<(), TapError> {
+        // SAFETY: exact registered pair, retained until removal and active-listener drain.
+        TapError::status(unsafe {
+            AudioObjectRemovePropertyListener(
+                1,
+                &Address::global(*b"srst"),
+                service_changed,
+                context(session),
+            )
+        })
+    }
+    fn install_system_listeners(&self, session: &TapSession) -> Result<(), TapError> {
+        add_service_listener(session)?;
+        if session
+            .selection
+            .borrow()
+            .as_ref()
+            .is_some_and(|selection| selection.fallback)
+        {
+            add_inventory_listener(session)?;
+        }
+        Ok(())
     }
     fn destroy_tap(&self, tap: u32) -> Result<(), TapError> {
         // SAFETY: aggregate and listener are gone before their underlying tap.
@@ -436,13 +467,7 @@ impl Description {
         let result = unsafe { mr_tap_aggregate_create(self.0, &raw mut resources.aggregate) };
         session.resources.set(resources);
         TapError::status(result)?;
-        for _ in 0..500 {
-            if property::<u32>(resources.aggregate, *b"livn").is_ok_and(|alive| alive != 0) {
-                return Ok(());
-            }
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-        Err(TapError::code(4))
+        readiness::wait(resources.tap, resources.aggregate, &CoreAudio)
     }
 }
 
@@ -600,7 +625,45 @@ pub(super) fn add_inventory_listener(session: &TapSession) -> Result<(), TapErro
         )
     })?;
     let mut resources = session.resources.get();
-    resources.inventory_listener = true;
+    resources.listeners.inventory = true;
+    session.resources.set(resources);
+    Ok(())
+}
+
+unsafe extern "C" fn service_changed(
+    _: u32,
+    _: u32,
+    _: *const Address,
+    context: *mut c_void,
+) -> i32 {
+    // SAFETY: registered session remains pinned through removal and listener drain.
+    let session = unsafe { &*context.cast::<TapSession>() };
+    let _active = super::ffi::Active::enter(&session.active_listeners);
+    service_restarted(session);
+    0
+}
+
+pub(super) fn service_restarted(session: &TapSession) {
+    let _ = session.service_epoch.fetch_update(
+        std::sync::atomic::Ordering::Release,
+        std::sync::atomic::Ordering::Relaxed,
+        |epoch| Some(epoch.saturating_add(1)),
+    );
+    session.lifecycle.changed();
+}
+
+pub(super) fn add_service_listener(session: &TapSession) -> Result<(), TapError> {
+    // SAFETY: caller owns a fully initialized, pinned session before publication.
+    TapError::status(unsafe {
+        AudioObjectAddPropertyListener(
+            1,
+            &Address::global(*b"srst"),
+            service_changed,
+            context(session),
+        )
+    })?;
+    let mut resources = session.resources.get();
+    resources.listeners.service = true;
     session.resources.set(resources);
     Ok(())
 }
@@ -616,7 +679,7 @@ pub(super) fn add_listener(session: &TapSession) -> Result<(), TapError> {
             context(session),
         )
     })?;
-    resources.listener = true;
+    resources.listeners.format = true;
     session.resources.set(resources);
     Ok(())
 }

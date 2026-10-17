@@ -74,7 +74,38 @@ fn target() -> WatchTarget {
         device: 123,
         scope: u32::from_be_bytes(*b"inpt"),
         limit: 64,
+        output_only: false,
     }
+}
+
+#[test]
+fn appearing_input_streams_invalidate_an_output_only_registration() {
+    let backend = Native::default();
+    let invalid = Arc::new(AtomicBool::new(false));
+    let mut listeners = Listeners::default();
+    let target = WatchTarget {
+        scope: u32::from_be_bytes(*b"outp"),
+        output_only: true,
+        ..target()
+    };
+    listeners.install(&target, &invalid, &backend).unwrap();
+    let input_list = backend
+        .0
+        .borrow()
+        .copies
+        .iter()
+        .find(|(subscription, _)| {
+            subscription.object == target.device
+                && subscription.address
+                    == Address::new(u32::from_be_bytes(*b"stm#"), u32::from_be_bytes(*b"inpt"))
+        })
+        .expect("unused input topology watch")
+        .1
+        .clone();
+    let measured = allocation_counter::measure(|| input_list.call((123, ptr::null())));
+    assert_eq!(measured.count_total, 0);
+    assert!(invalid.load(Acquire));
+    assert!(listeners.remove(&backend));
 }
 
 #[test]
@@ -86,6 +117,7 @@ fn watchers_precede_format_reads_and_notification_is_allocation_free() {
     assert_eq!(
         backend.0.borrow().events,
         [
+            Event::Add(1, u32::from_be_bytes(*b"srst")),
             Event::Add(123, u32::from_be_bytes(*b"nsrt")),
             Event::Add(123, u32::from_be_bytes(*b"stm#")),
             Event::Add(123, u32::from_be_bytes(*b"slay")),
@@ -96,7 +128,7 @@ fn watchers_precede_format_reads_and_notification_is_allocation_free() {
             Event::Add(234, u32::from_be_bytes(*b"schn"))
         ]
     );
-    let callback = backend.0.borrow().copies[3].1.clone();
+    let callback = backend.0.borrow().copies[4].1.clone();
     let allocation = allocation_counter::measure(|| callback.call((1, ptr::null())));
     assert_eq!(allocation.count_total, 0);
     assert!(invalid.load(Acquire));
@@ -195,7 +227,7 @@ fn same_width_integer_notification_blocks_cached_float_callback_without_polling(
     let backend = Native::default();
     let mut listeners = Listeners::default();
     listeners.install(&target(), &invalid, &backend).unwrap();
-    let notification = backend.0.borrow().copies[4].1.clone();
+    let notification = backend.0.borrow().copies[5].1.clone();
     // Actual Signed32 bytes have the same channels/stride as the cached Float32 ASBD.
     let mut samples = [i32::MAX; 128];
     let input = Input {
@@ -376,7 +408,7 @@ fn device_removal_during_render_hook_discards_its_written_output() {
     let backend = Native::default();
     let mut listeners = Listeners::default();
     listeners.install(&target(), &invalid, &backend).unwrap();
-    let notification = backend.0.borrow().copies[3].1.clone();
+    let notification = backend.0.borrow().copies[4].1.clone();
     // SAFETY: fixture is unpublished and keeps the hook block alive until the call ends.
     unsafe {
         let callback = &mut *io.callback.get();

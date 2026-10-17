@@ -22,8 +22,12 @@ use super::super::{
     lifecycle::Created,
     listeners::{ListenerBackend, Subscription, WatchTarget},
     native::{Address, Description, Properties, StreamIds},
+    stream_usage::{Backend as UsageBackend, Usage},
 };
 use crate::aggregate_group::{NativeBinding, test_observation as aggregate};
+
+#[cfg(test)]
+mod tests;
 
 /// Client buffer a device has whenever it (re)appears.
 pub const DEFAULT_BUFFER: u32 = 512;
@@ -56,6 +60,7 @@ pub struct Stream {
 
 #[derive(Default)]
 struct State {
+    usage_status: i32,
     /// Last allocated object identity; zero is never an object.
     objects: u32,
     devices: BTreeMap<String, Device>,
@@ -100,6 +105,8 @@ struct Procedure {
     /// The `IOProc` context, a retained device owner.
     context: usize,
     started: bool,
+    /// Usage per direction, independently owned by this registration.
+    enabled: [bool; 2],
 }
 
 /// One registered listener block, retained like `CoreAudio`'s own copy.
@@ -360,8 +367,9 @@ impl SimulatedHal {
 impl State {
     /// A device and its input and output stream objects.
     fn allocate(&mut self) -> [u32; 3] {
-        let first = self.objects + 1;
-        self.objects += 3;
+        // Object 1 is the permanent AudioSystemObject, not a device.
+        let first = self.objects.max(1) + 1;
+        self.objects = first + 2;
         [first, first + 1, first + 2]
     }
 
@@ -560,7 +568,7 @@ impl Properties for SimulatedHal {
 impl ListenerBackend for SimulatedHal {
     fn add(&self, subscription: Subscription, block: &Block<Notification>) -> i32 {
         let mut state = self.state();
-        if state.object(subscription.target().0).is_none() {
+        if subscription.target().0 != 1 && state.object(subscription.target().0).is_none() {
             return BAD_OBJECT;
         }
         state.watches.push(Watch {
@@ -579,7 +587,7 @@ impl ListenerBackend for SimulatedHal {
             return UNKNOWN_PROPERTY;
         };
         state.watches.swap_remove(index);
-        if state.object(subscription.target().0).is_some() {
+        if subscription.target().0 == 1 || state.object(subscription.target().0).is_some() {
             0
         } else {
             BAD_OBJECT
@@ -608,6 +616,7 @@ impl Hal for SimulatedHal {
                 device,
                 context: context.as_ptr() as usize,
                 started: false,
+                enabled: [true; 2],
             },
         );
         Created {
@@ -651,5 +660,51 @@ impl Hal for SimulatedHal {
             return ILLEGAL_OPERATION;
         }
         if alive { 0 } else { BAD_DEVICE }
+    }
+}
+
+impl UsageBackend for SimulatedHal {
+    fn write_usage(&self, device: u32, scope: u32, usage: &Usage, bytes: u32) -> i32 {
+        let direction = match &scope.to_be_bytes() {
+            b"inpt" => 0,
+            b"outp" => 1,
+            _ => return UNKNOWN_PROPERTY,
+        };
+        let mut state = self.state();
+        if state.usage_status != 0 {
+            return state.usage_status;
+        }
+        if !state.alive(device) {
+            return BAD_DEVICE;
+        }
+        let Some(registration) = state.procedures.get_mut(&usage.procedure.addr()) else {
+            return ILLEGAL_OPERATION;
+        };
+        if registration.device != device || usage.count != 1 || bytes != 16 {
+            return ILLEGAL_OPERATION;
+        }
+        registration.enabled[direction] = usage.enabled[0] != 0;
+        0
+    }
+
+    fn read_usage(&self, device: u32, scope: u32, usage: &mut Usage, bytes: &mut u32) -> i32 {
+        let direction = match &scope.to_be_bytes() {
+            b"inpt" => 0,
+            b"outp" => 1,
+            _ => return UNKNOWN_PROPERTY,
+        };
+        let state = self.state();
+        if !state.alive(device) {
+            return BAD_DEVICE;
+        }
+        let Some(registration) = state.procedures.get(&usage.procedure.addr()) else {
+            return ILLEGAL_OPERATION;
+        };
+        if registration.device != device || *bytes != 16 {
+            return ILLEGAL_OPERATION;
+        }
+        usage.count = 1;
+        usage.enabled[0] = u32::from(registration.enabled[direction]);
+        0
     }
 }

@@ -87,7 +87,7 @@ type IoProc = unsafe extern "C" fn(
 #[link(name = "CoreAudio", kind = "framework")]
 unsafe extern "C" {
     #[link_name = "AudioObjectGetPropertyData"]
-    fn property_read(
+    pub(super) fn property_read(
         id: u32,
         address: *const Address,
         qualifier_size: u32,
@@ -104,7 +104,7 @@ unsafe extern "C" {
         size: *mut u32,
     ) -> i32;
     #[link_name = "AudioObjectSetPropertyData"]
-    fn property_write(
+    pub(super) fn property_write(
         id: u32,
         address: *const Address,
         qualifier_size: u32,
@@ -274,6 +274,9 @@ impl Properties for System {
     }
 
     fn streams(&self, id: u32, scope: u32, limit: u32) -> Option<StreamIds> {
+        if !matches!(limit, 64 | 2048) {
+            return None;
+        }
         let address = Address::new(STREAMS, scope);
         let mut size = 0;
         // SAFETY: scalar size output belongs to this control-side query.
@@ -287,6 +290,9 @@ impl Properties for System {
             values: [0; 2048],
             count: 0,
         };
+        if size == 0 {
+            return Some(streams);
+        }
         // SAFETY: initialized u32 buffer has the queried capacity; CoreAudio may
         // shorten the list, but returned size must never expand that capacity.
         let status = unsafe {
@@ -308,7 +314,7 @@ impl Properties for System {
 }
 
 pub(super) fn valid_stream_extent(size: u32, capacity: u32) -> bool {
-    size != 0 && size <= capacity && size.is_multiple_of(4)
+    size <= capacity && size.is_multiple_of(4)
 }
 
 pub(super) fn default_device(input: bool, properties: &impl Properties) -> Option<u32> {

@@ -1,6 +1,7 @@
 use super::native::Native;
 use super::*;
 mod retirement;
+mod service_restart;
 mod watchdog;
 use mixrelay_macos_transport::{
     audio_buffer::{AudioBuffer, AudioBufferList},
@@ -30,8 +31,10 @@ fn fixture() -> TapSession {
         tap: 1,
         aggregate: 2,
         proc: std::ptr::dangling_mut(),
-        listener: true,
-        inventory_listener: false,
+        listeners: ListenerReceipts {
+            format: true,
+            ..ListenerReceipts::default()
+        },
         resume: false,
         rebuild: RebuildIntent::Unchanged,
     });
@@ -58,7 +61,7 @@ fn fallback_fixture() -> TapSession {
         mute: false,
     }));
     let mut resources = session.resources.get();
-    resources.inventory_listener = true;
+    resources.listeners.inventory = true;
     session.resources.set(resources);
     session
 }
@@ -81,6 +84,9 @@ fn muted_fixture() -> TapSession {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Failure {
+    ServiceListener,
+    InventoryListener,
+    SystemInstall,
     None,
     Stop,
     Unregister,
@@ -95,6 +101,7 @@ enum Failure {
 }
 
 struct Fake<'a> {
+    gone_status: Cell<i32>,
     fail: Cell<Failure>,
     format: Cell<TapFormat>,
     change_during_query: Cell<Option<&'a TapSession>>,
@@ -117,6 +124,7 @@ struct Fake<'a> {
 impl Default for Fake<'_> {
     fn default() -> Self {
         Self {
+            gone_status: Cell::new(0),
             fail: Cell::new(Failure::None),
             format: Cell::new(format()),
             change_during_query: Cell::new(None),
@@ -143,6 +151,18 @@ impl Default for Fake<'_> {
 
 impl Fake<'_> {
     fn result(&self, boundary: Failure) -> Result<(), TapError> {
+        if self.gone_status.get() != 0
+            && matches!(
+                boundary,
+                Failure::Stop
+                    | Failure::Unregister
+                    | Failure::Listener
+                    | Failure::Aggregate
+                    | Failure::Tap
+            )
+        {
+            return TapError::status(self.gone_status.get());
+        }
         if self.fail.get() == boundary {
             TapError::status(-1)
         } else {
@@ -173,7 +193,7 @@ impl Native for Fake<'_> {
         let mut resources = session.resources.get();
         resources.tap = 1;
         resources.aggregate = 2;
-        resources.listener = true;
+        resources.listeners.format = true;
         session.resources.set(resources);
         Ok(())
     }
@@ -210,6 +230,22 @@ impl Native for Fake<'_> {
         self.result(Failure::Listener)
     }
     fn remove_inventory_listener(&self, _: &TapSession) -> Result<(), TapError> {
+        self.result(Failure::InventoryListener)
+    }
+    fn remove_service_listener(&self, _: &TapSession) -> Result<(), TapError> {
+        self.result(Failure::ServiceListener)
+    }
+    fn install_system_listeners(&self, session: &TapSession) -> Result<(), TapError> {
+        let mut resources = session.resources.get();
+        resources.listeners.service = true;
+        session.resources.set(resources);
+        self.result(Failure::SystemInstall)?;
+        resources.listeners.inventory = session
+            .selection
+            .borrow()
+            .as_ref()
+            .is_some_and(|selection| selection.fallback);
+        session.resources.set(resources);
         Ok(())
     }
     fn destroy_aggregate(&self, _: u32) -> Result<(), TapError> {
@@ -450,6 +486,117 @@ fn callback(session: &TapSession, samples: &mut [f32], time: Option<&native::Tim
 }
 
 #[test]
+fn callback_coordinates_use_the_refreshed_native_rate() {
+    let session = fixture();
+    let timebase = mixrelay_realtime::Timebase::current();
+    session.timebase.set(timebase).unwrap();
+    let native = Fake::default();
+    native.format.set(TapFormat {
+        sample_rate: 44_100.0,
+        ..format()
+    });
+    session.lifecycle.changed();
+    session.refresh(&native).unwrap();
+    let mut pcm = [0.25; 64];
+    let mut timestamp = native::Timestamp::default();
+    timestamp.host = timebase.ticks(std::time::Duration::from_secs(1));
+    timestamp.rate_scalar = 1.0;
+    timestamp.flags = 7;
+    let mut output = [0.0; 64];
+    let mut times = [0; 32];
+    let measured = allocation_counter::measure(|| {
+        callback(&session, &mut pcm, Some(&timestamp));
+        let stats = session.stats();
+        // SAFETY: serialized fixture retains the session and complete output/time spans.
+        assert_eq!(
+            unsafe {
+                ffi::mr_process_tap_read_timed(
+                    ptr::from_ref(&session).cast_mut(),
+                    output.as_mut_ptr(),
+                    times.as_mut_ptr(),
+                    32,
+                    TapReadGeneration {
+                        format: stats.format_generation,
+                        clock_breaks: stats.clock_discontinuities,
+                    },
+                )
+            },
+            32
+        );
+    });
+    assert_eq!(measured.count_total, 0);
+    assert_eq!(output.map(f32::to_bits), pcm.map(f32::to_bits));
+    assert!(
+        times[31].abs_diff(1_000_000_000 + 31 * 1_000_000_000 / 44_100) <= 1,
+        "callback kept the initial rate after refresh: {times:?}"
+    );
+}
+
+#[test]
+fn timed_read_preserves_acquisition_coordinates_and_rejects_foreign_generation() {
+    let session = fixture();
+    session
+        .timebase
+        .set(mixrelay_realtime::Timebase::current())
+        .unwrap();
+    let mut pcm = [0.25; 64];
+    let host = mixrelay_realtime::Timebase::current().ticks(std::time::Duration::from_secs(1));
+    let mut timestamp = native::Timestamp::default();
+    timestamp.host = host;
+    timestamp.rate_scalar = 1.0;
+    timestamp.flags = 7;
+    callback(&session, &mut pcm, Some(&timestamp));
+    let mut output = [0.0; 64];
+    let mut times = [0_u64; 32];
+    let measured = allocation_counter::measure(|| unsafe {
+        // SAFETY: this serialized fixture retains its session and both complete output spans.
+        assert_eq!(
+            ffi::mr_process_tap_read_timed(
+                ptr::from_ref(&session).cast_mut(),
+                output.as_mut_ptr(),
+                times.as_mut_ptr(),
+                32,
+                TapReadGeneration {
+                    format: 1,
+                    clock_breaks: 1
+                }
+            ),
+            0
+        );
+        assert_eq!(
+            ffi::mr_process_tap_read_timed(
+                ptr::from_ref(&session).cast_mut(),
+                output.as_mut_ptr(),
+                times.as_mut_ptr(),
+                32,
+                TapReadGeneration {
+                    format: 2,
+                    clock_breaks: 0
+                }
+            ),
+            0
+        );
+        assert_eq!(
+            ffi::mr_process_tap_read_timed(
+                ptr::from_ref(&session).cast_mut(),
+                output.as_mut_ptr(),
+                times.as_mut_ptr(),
+                32,
+                TapReadGeneration {
+                    format: 1,
+                    clock_breaks: 0
+                }
+            ),
+            32
+        );
+    });
+    assert_eq!(measured.count_total, 0);
+    assert_eq!(output.map(f32::to_bits), pcm.map(f32::to_bits));
+    assert!(times[0].abs_diff(1_000_000_000) <= 1);
+    assert!(times[31].abs_diff(1_000_000_000 + 31 * 1_000_000_000 / 48_000) <= 1);
+}
+
+#[test]
 fn each_failed_native_teardown_retains_exact_resources_for_one_thousand_cycles() {
     let native = Fake::default();
     for _ in 0..1000 {
@@ -464,7 +611,7 @@ fn each_failed_native_teardown_retains_exact_resources_for_one_thousand_cycles()
         native.fail.set(Failure::Listener);
         assert!(!session.reclaim(&native));
         assert!(session.resources.get().proc.is_null());
-        assert!(session.resources.get().listener);
+        assert!(session.resources.get().listeners.format);
         native.fail.set(Failure::Aggregate);
         assert!(!session.reclaim(&native));
         assert_eq!(session.resources.get().aggregate, 2);
@@ -489,7 +636,7 @@ fn callback_and_listener_drain_are_independent_reclamation_requirements() {
     session.active_callbacks.store(0, Ordering::Release);
     session.active_listeners.store(1, Ordering::Release);
     assert!(!session.reclaim(&native));
-    assert!(!session.resources.get().listener);
+    assert!(!session.resources.get().listeners.format);
     assert_eq!(session.resources.get().tap, 1);
     session.active_listeners.store(0, Ordering::Release);
     assert!(session.reclaim(&native));

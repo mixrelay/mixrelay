@@ -5,6 +5,8 @@ mod maintenance;
 mod runtime_latency;
 #[cfg(test)]
 pub(crate) use runtime_latency::tests::feedback_processor as test_feedback_processor;
+#[cfg(test)]
+mod input_alignment_tests;
 mod shutdown;
 mod worker_runtime;
 use super::macos_pacing::{ApplicationClockSnapshot, ApplicationPacer, HardwarePacer, Pace};
@@ -20,7 +22,7 @@ use mixrelay_audio_graph::{CompileContext, CompileLimits, GraphCompiler, RenderF
 use mixrelay_audio_io::process::{ProcessCycle, ProcessReport, TransferOutcome};
 use mixrelay_engine_service::{
     EngineGraphController, EngineGraphControllerConfig, control_service::ControlService,
-    default_peak_meter_bank, session::AdapterRuntimeStatus,
+    default_peak_meter_bank, endpoint_service, session::AdapterRuntimeStatus,
 };
 use mixrelay_processor_host::ProcessorCatalog;
 
@@ -45,6 +47,9 @@ unsafe extern "C" {
 }
 
 struct MacEngineExternalIo<'a> {
+    alignment: mixrelay_audio_io::capture_alignment::CaptureAlignment,
+    capture_time: Option<u64>,
+    align_inputs: bool,
     devices: &'a super::macos_devices::DeviceSet,
     /// The admitted cycle's one host label for all of its device transfers.
     host: u64,
@@ -52,7 +57,20 @@ struct MacEngineExternalIo<'a> {
 
 impl<'a> MacEngineExternalIo<'a> {
     fn new(devices: &'a super::macos_devices::DeviceSet) -> Self {
-        Self { devices, host: 0 }
+        Self {
+            devices,
+            host: 0,
+            alignment: mixrelay_audio_io::capture_alignment::CaptureAlignment::default(),
+            capture_time: None,
+            align_inputs: false,
+        }
+    }
+
+    fn source_active(&self, binding: &ExternalBinding) -> bool {
+        let id = binding.node_id().as_str();
+        self.devices.binding_present(id, true)
+            || (binding.kind() == mixrelay_audio_graph::NodeKind::ApplicationCapture
+                && application_clock(id).is_some_and(|clock| clock.running != 0))
     }
 }
 
@@ -63,7 +81,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
 
     fn begin_cycle(
         &mut self,
-        _cycle: &ProcessCycle,
+        cycle: &ProcessCycle,
         controls: mixrelay_audio_engine::ExternalControlState<'_>,
     ) -> mixrelay_audio_engine::CycleAdmission {
         self.host = self.devices.graph_host();
@@ -75,6 +93,44 @@ impl ExternalIo for MacEngineExternalIo<'_> {
             self.devices
                 .set_binding_active(binding.node_id().as_str(), false, enabled);
         }
+        let mut active = 0;
+        let mut latest = None;
+        let mut source_period = None;
+        let count = controls
+            .sources()
+            .filter(|(binding, enabled)| *enabled && self.source_active(binding))
+            .count();
+        self.devices
+            .reserve_capture_alignment(cycle.sample_rate, cycle.frames, count > 1);
+        for (binding, enabled) in controls.sources().filter(|(_, enabled)| *enabled) {
+            let _ = enabled;
+            let id = binding.node_id().as_str();
+            let token = source_token(id);
+            let time = self
+                .devices
+                .capture_time(id, cycle.frames)
+                .or_else(|| endpoint_service::source_time(token, cycle.sample_rate, cycle.frames));
+            if self.source_active(binding) {
+                active += 1;
+            }
+            if let Some(time) = time {
+                latest = Some(latest.map_or(time, |old: u64| old.min(time)));
+            }
+            source_period = source_period.or_else(|| endpoint_service::source_period(token));
+        }
+        self.align_inputs = active > 1;
+        self.capture_time = if self.align_inputs {
+            // A source without valid coordinates remains silent independently;
+            // it must not hold every other route in startup priming forever.
+            let period = self
+                .devices
+                .frame_period(cycle.sample_rate)
+                .or(source_period)
+                .unwrap_or(1e9 / f64::from(cycle.sample_rate));
+            self.alignment.begin(*cycle, latest, period)
+        } else {
+            None
+        };
         mixrelay_audio_engine::CycleAdmission::Process
     }
 
@@ -84,6 +140,37 @@ impl ExternalIo for MacEngineExternalIo<'_> {
         destination: &mut [f32],
         cycle: &ProcessCycle,
     ) -> TransferOutcome {
+        if self.align_inputs {
+            if let Some(time) = self.capture_time {
+                if let Some(outcome) = self.devices.read_aligned(
+                    binding.node_id().as_str(),
+                    destination,
+                    (self.host, time, cycle.sample_rate),
+                ) {
+                    return outcome;
+                }
+                let available = endpoint_service::read_source_at(
+                    source_token(binding.node_id().as_str()),
+                    destination,
+                    cycle.sample_rate,
+                    time,
+                );
+                return TransferOutcome {
+                    // SAFETY: this graph owns the source's sole fault-counter consumer.
+                    source_sample_faults: unsafe {
+                        mr_engine_service_take_source_faults(source_token(
+                            binding.node_id().as_str(),
+                        ))
+                    },
+                    ..TransferOutcome::complete(available)
+                };
+            }
+            destination.fill(0.0);
+            return TransferOutcome {
+                activity: mixrelay_audio_io::process::InputActivity::Priming,
+                ..TransferOutcome::complete(0)
+            };
+        }
         if let Some(outcome) = self
             .devices
             .read(binding.node_id().as_str(), destination, self.host)
@@ -519,15 +606,19 @@ fn process_worker_block(
         worker_runtime::APPLICATION_CLOCK => worker_runtime::Path::Application,
         _ => worker_runtime::Path::Timer,
     });
-    let report = process_native_cycle(
+    let mut io = MacEngineExternalIo::new(block.devices);
+    io.alignment = std::mem::take(&mut timeline.capture_alignment);
+    let result = process_native_cycle(
         block.processor,
-        &mut MacEngineExternalIo::new(block.devices),
+        &mut io,
         WorkerCycle {
             timeline,
             frames,
             discontinuity: discontinuity || timeline.discontinuity_pending,
         },
-    )?;
+    );
+    timeline.capture_alignment = io.alignment;
+    let report = result?;
     block
         .devices
         .record_latency_cycle(block.processor, report, timeline.epoch);
@@ -678,6 +769,7 @@ struct WorkerCycle<'a> {
 }
 
 struct MacTimeline {
+    capture_alignment: mixrelay_audio_io::capture_alignment::CaptureAlignment,
     frame: u64,
     epoch: u64,
     deadline: Instant,
@@ -689,6 +781,7 @@ struct MacTimeline {
 impl MacTimeline {
     fn new() -> Self {
         Self {
+            capture_alignment: mixrelay_audio_io::capture_alignment::CaptureAlignment::default(),
             frame: 0,
             epoch: 0,
             deadline: Instant::now(),
@@ -698,6 +791,7 @@ impl MacTimeline {
         }
     }
     fn reset(&mut self) {
+        self.capture_alignment = mixrelay_audio_io::capture_alignment::CaptureAlignment::default();
         self.frame = 0;
         self.epoch = self.epoch.wrapping_add(1);
         self.deadline = Instant::now();

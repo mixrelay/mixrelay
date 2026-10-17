@@ -70,6 +70,96 @@ pub(super) struct HardwareClockProgress {
     pub(super) quantum: u32,
 }
 impl DeviceSet {
+    pub(super) fn reserve_capture_alignment(&self, rate: u32, frames: u32, enabled: bool) {
+        // The sinc bridge publishes 128-frame slabs. Retain one further slab
+        // beyond producer/consumer bursts; until observed, budget two slabs.
+        const CONVERTER_SLAB: u32 = 128;
+        let burst = self
+            .0
+            .values()
+            .filter(|device| device.input && device.ready() && device.activity.enabled())
+            .fold(frames.max(CONVERTER_SLAB * 2), |largest, device| {
+                // SAFETY: this set retains the native owner; geometry is atomic.
+                let native =
+                    unsafe { ffi::mr_device_io_quantum(device.native.pointer.as_ptr(), false) };
+                let native_rate = device.native_rate.load(Ordering::Acquire).max(1);
+                let mapped = (u64::from(native) * u64::from(rate)).div_ceil(u64::from(native_rate));
+                largest.max(u32::try_from(mapped).unwrap_or(u32::MAX))
+            });
+        for device in self.0.values().filter(|device| device.input) {
+            // SAFETY: atomic reserve update; callback retains all mutable conversion state.
+            unsafe {
+                mixrelay_macos_transport::device_io::set_capture_window(
+                    device.native.pointer.as_ptr().cast(),
+                    if enabled {
+                        burst
+                            .saturating_add(frames)
+                            .saturating_add(CONVERTER_SLAB)
+                            .saturating_mul(2)
+                    } else {
+                        0
+                    },
+                );
+            }
+        }
+    }
+    pub(super) fn binding_present(&self, id: &str, input: bool) -> bool {
+        self.binding_key(id, input)
+            .and_then(|key| self.0.get(key))
+            .is_some_and(|device| device.ready())
+    }
+    pub(super) fn capture_time(&self, id: &str, frames: u32) -> Option<u64> {
+        let id = self.binding_key(id, true)?;
+        let device = self.0.get(id)?;
+        if !device.ready() {
+            return None;
+        }
+        // SAFETY: this set retains the input owner; the observation only reads atomics.
+        unsafe {
+            mixrelay_macos_transport::device_io::input_time(
+                device.native.pointer.as_ptr().cast(),
+                frames,
+            )
+        }
+    }
+
+    pub(super) fn frame_period(&self, rate: u32) -> Option<f64> {
+        let device = self.clock_master()?;
+        // SAFETY: the set retains the native pacing owner during this atomic observation.
+        let native = unsafe {
+            mixrelay_macos_transport::device_io::frame_nanoseconds(
+                device.native.pointer.as_ptr().cast(),
+            )
+        };
+        (native.is_finite() && native > 0.0).then(|| {
+            native
+                * f64::from(
+                    device
+                        .native_rate
+                        .load(std::sync::atomic::Ordering::Acquire),
+                )
+                / f64::from(rate)
+        })
+    }
+
+    pub(super) fn read_aligned(
+        &self,
+        id: &str,
+        samples: &mut [f32],
+        timing: (u64, u64, u32),
+    ) -> Option<TransferOutcome> {
+        let id = self.binding_key(id, true)?;
+        if let Some(spec) = self.1.get(id) {
+            samples.fill(0.0);
+            return Some(recovery::offline_transfer(
+                samples.len(),
+                usize::from(spec.channels),
+            ));
+        }
+        self.0
+            .get(id)
+            .map(|device| device.read_timed(samples, timing.0, Some((timing.1, timing.2))))
+    }
     /// Publish the pacing callback's complete burst, not each split DSP block.
     pub(super) fn set_graph_quantum(&self, frames: u32) {
         for device in self.0.values() {
@@ -985,6 +1075,9 @@ mod tests {
     /// cached as the owner of the returned graph's output. Graph and cache select the
     /// published device by the same persistent UID, so preparation reuses `device`.
     fn format_fixture(device: &Arc<Device>) -> (MacDevices, GraphDocument) {
+        // This unpublished owner represents a graph with only an output, so
+        // its cached registration intent must match normal graph admission.
+        device.native.output_only.store(true, Ordering::Release);
         let host = simulated::SimulatedHost::new();
         let selector = DeviceSelector::PersistentUid {
             uid: host.plug("io.mixrelay.test.format", 2, 48_000, 0.0),

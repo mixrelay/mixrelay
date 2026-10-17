@@ -48,6 +48,10 @@ pub(crate) struct Mapping {
 unsafe impl Send for Mapping {}
 unsafe impl Sync for Mapping {}
 impl Mapping {
+    pub(crate) fn capacity(&self) -> u32 {
+        // SAFETY: the retained mapping has immutable validated geometry.
+        unsafe { mr_shared_audio_buffer_capacity(self.buffer.as_ptr()) }
+    }
     pub(crate) fn new(capacity: u32, channels: u32) -> io::Result<Self> {
         let bytes = mr_application_clock_required_bytes(capacity, channels);
         if bytes == 0 {

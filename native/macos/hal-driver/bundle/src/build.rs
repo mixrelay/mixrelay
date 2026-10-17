@@ -187,6 +187,9 @@ fn link_command(root: &Path, target_directory: &Path, architecture: &str, target
             "-framework",
             "CoreFoundation",
             "-liconv",
+            // Only the factory and its reachable HAL code belong in this bundle.
+            // Shared Rust codegen units also contain client-only scheduling APIs.
+            "-Wl,-dead_strip",
             "-Wl,-exported_symbol,_MixRelayHAL_Create",
         ]);
     compiler

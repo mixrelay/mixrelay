@@ -13,6 +13,7 @@ use super::*;
 use std::f64::consts::TAU;
 
 mod realtime;
+mod timestamps;
 
 #[test]
 fn impossible_pcm_capacity_returns_an_error() {

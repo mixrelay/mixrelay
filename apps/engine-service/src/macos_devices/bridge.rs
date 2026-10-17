@@ -3,10 +3,9 @@
 mod tests;
 use super::{
     ffi::{
-        mr_device_io_bridge_discard, mr_device_io_bridge_read, mr_device_io_bridge_write,
-        mr_device_io_clock_discontinuities, mr_device_io_graph_frames, mr_device_io_native_frames,
-        mr_device_io_output_epoch, mr_device_io_overflows, mr_device_io_quantum,
-        mr_device_io_queued,
+        mr_device_io_bridge_discard, mr_device_io_bridge_read, mr_device_io_clock_discontinuities,
+        mr_device_io_graph_frames, mr_device_io_native_frames, mr_device_io_output_epoch,
+        mr_device_io_overflows, mr_device_io_quantum, mr_device_io_queued,
     },
     worker::WorkerContext,
 };
@@ -23,6 +22,8 @@ pub(super) static NEXT_DEVICE_EPOCH: AtomicU64 = AtomicU64::new(1);
 /// Prepared on control, then exclusively borrowed by the native PCM callback.
 /// Graph revisions share queue handles, never mutable conversion or scratch.
 pub(super) struct DeviceBridge {
+    source_times: Vec<u64>,
+    destination_times: Vec<u64>,
     pub(super) bridge: AsyncClockBridge,
     pub(super) source: Vec<f32>,
     pub(super) destination: Vec<f32>,
@@ -118,6 +119,10 @@ impl DeviceBridge {
             QueueTargetPolicy::new(native_rate, graph_rate, clock_relation, bounds)
                 .map_err(|error| error.to_string())?;
         Ok(Self {
+            source_times: mixrelay_audio_io::pcm_buffer::timestamps(PUMP_FRAMES)
+                .map_err(|error| error.to_string())?,
+            destination_times: mixrelay_audio_io::pcm_buffer::timestamps(PUMP_FRAMES)
+                .map_err(|error| error.to_string())?,
             bridge,
             source: mixrelay_audio_io::pcm_buffer::zeroed(PUMP_FRAMES * channels)
                 .map_err(|error| error.to_string())?,
@@ -227,7 +232,13 @@ impl DeviceBridge {
             (output * self.native_rate as usize).div_ceil(self.graph_rate as usize);
         // One observed graph burst plus one converter input slab. The physical
         // ring capacity is overflow protection, never the target latency.
-        let target = self.queue_target(context, false) / 2 + PUMP_FRAMES;
+        // Alignment intentionally retains history. Do not mistake that reserve
+        // for producer drift and accelerate a correctly paced source toward it.
+        let window =
+            unsafe { mixrelay_macos_transport::device_io::capture_window(pointer.cast()) } as usize;
+        let alignment_target =
+            (window * self.native_rate as usize).div_ceil(self.graph_rate as usize);
+        let target = (self.queue_target(context, false) / 2 + PUMP_FRAMES).max(alignment_target);
         (source + staged + output_in_source, target)
     }
 
@@ -251,12 +262,65 @@ impl DeviceBridge {
             source_chunk
         };
         if graph {
-            self.graph_queue_target
-                .target_frames(graph_quantum, native_quantum, converter_burst)
+            let target = self.graph_queue_target.target_frames(
+                graph_quantum,
+                native_quantum,
+                converter_burst,
+            );
+            let reserve = if context.input {
+                (unsafe { mixrelay_macos_transport::device_io::capture_window(pointer.cast()) })
+                    as usize
+            } else {
+                0
+            };
+            target.max(reserve)
         } else {
             self.native_queue_target
                 .target_frames(native_quantum, graph_quantum, converter_burst)
         }
+    }
+
+    fn stage_input(&mut self, context: &WorkerContext, count: usize) -> Result<(), BridgeError> {
+        let pointer = context.native.pointer.as_ptr();
+        let count = if context.input {
+            unsafe {
+                mixrelay_macos_transport::device_io::bridge_read_timed(
+                    pointer.cast(),
+                    &mut self.source[..count * context.channels],
+                    &mut self.source_times[..count],
+                )
+            }
+        } else {
+            unsafe {
+                mr_device_io_bridge_read(
+                    pointer,
+                    self.source.as_mut_ptr(),
+                    u32::try_from(count).unwrap_or(0),
+                )
+            }
+        } as usize;
+        if count != 0 {
+            context
+                .native
+                .pcm_metrics
+                .transferred(u32::try_from(count).unwrap_or(0), 0);
+            if context.input {
+                let faults = mixrelay_audio_io::pcm::sanitize_samples(
+                    &mut self.source[..count * context.channels],
+                );
+                context.native.source_sample_faults.record(faults);
+            }
+            if context.input {
+                self.bridge.push_timed_interleaved(
+                    &self.source[..count * context.channels],
+                    &self.source_times[..count],
+                )?;
+            } else {
+                self.bridge
+                    .push_interleaved(&self.source[..count * context.channels])?;
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn pump(&mut self, context: &WorkerContext) -> Result<(), BridgeError> {
@@ -274,31 +338,12 @@ impl DeviceBridge {
             let source_frames =
                 unsafe { mr_device_io_queued(pointer, !destination_graph) } as usize;
             if self.bridge.queued_input_frames() < PUMP_FRAMES * 2 && source_frames != 0 {
-                let count = source_frames.min(PUMP_FRAMES);
-                let count = unsafe {
-                    mr_device_io_bridge_read(
-                        pointer,
-                        self.source.as_mut_ptr(),
-                        u32::try_from(count).unwrap_or(0),
-                    )
-                } as usize;
-                if count != 0 {
-                    context
-                        .native
-                        .pcm_metrics
-                        .transferred(u32::try_from(count).unwrap_or(0), 0);
-                    if context.input {
-                        let faults = mixrelay_audio_io::pcm::sanitize_samples(
-                            &mut self.source[..count * context.channels],
-                        );
-                        context.native.source_sample_faults.record(faults);
-                    }
-                    self.bridge
-                        .push_interleaved(&self.source[..count * context.channels])?;
-                }
+                self.stage_input(context, source_frames.min(PUMP_FRAMES))?;
             }
-            let report = self.bridge.pull_interleaved(
-                &mut self.destination[..(target - queued).min(PUMP_FRAMES) * context.channels],
+            let wanted = (target - queued).min(PUMP_FRAMES);
+            let report = self.bridge.pull_timed_interleaved(
+                &mut self.destination[..wanted * context.channels],
+                &mut self.destination_times[..wanted],
             )?;
             if let Some(value) = report.input_residence {
                 context.native.latency.src_input.publish(value);
@@ -324,8 +369,13 @@ impl DeviceBridge {
             }
             let count =
                 u32::try_from(report.transferred_frames).map_err(|_| BridgeError::InvalidBuffer)?;
-            if unsafe { mr_device_io_bridge_write(pointer, self.destination.as_ptr(), count) }
-                != count
+            if unsafe {
+                mixrelay_macos_transport::device_io::bridge_write_timed(
+                    pointer.cast(),
+                    &self.destination[..count as usize * context.channels],
+                    &self.destination_times[..count as usize],
+                )
+            } != count
             {
                 return Err(BridgeError::Overflow);
             }

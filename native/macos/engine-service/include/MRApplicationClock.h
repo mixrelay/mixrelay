@@ -5,7 +5,7 @@
 #include <stdint.h>
 /* Current shared application clock ABI. Policy and initialization live in Rust;
  * C producers access only these atomics and the exported functions below. */
-enum { MR_APPLICATION_CLOCK_VERSION = 4U, MR_APPLICATION_CLOCK_ALIGNMENT = 64U };
+enum { MR_APPLICATION_CLOCK_VERSION = 5U, MR_APPLICATION_CLOCK_ALIGNMENT = 64U };
 #define MR_APPLICATION_CLOCK_MAGIC UINT64_C(0x4d52415050434c4b)
 #define MR_APPLICATION_CLOCK_FRAME_MASK UINT64_C(0x0000ffffffffffff)
 typedef struct MRApplicationClock {

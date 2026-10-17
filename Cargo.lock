@@ -2995,6 +2995,7 @@ dependencies = [
  "loom",
  "mixrelay-audio-io",
  "mixrelay-pcm-ring",
+ "mixrelay-realtime",
  "mixrelay-test-support",
 ]
 

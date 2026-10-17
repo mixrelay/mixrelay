@@ -17,6 +17,7 @@ use super::{
     Connection, DeviceIo,
     listeners::{ListenerBackend, Listeners, WatchTarget},
     native::{self, BufferInfo, Properties, System},
+    stream_usage,
 };
 use crate::{
     aggregate_group::NativeBinding,
@@ -25,7 +26,7 @@ use crate::{
 };
 
 /// The `CoreAudio` calls of one owner's registration: properties, listeners and its `IOProc`.
-pub(super) trait Hal: Properties + ListenerBackend {
+pub(super) trait Hal: Properties + ListenerBackend + stream_usage::Backend {
     /// Creates this crate's `IOProc` on `device` with `context`; a partial handle transfers.
     ///
     /// # Safety
@@ -106,12 +107,15 @@ impl<H: Hal> Backend for Registration<'_, H> {
                 } else {
                     2048
                 },
+                output_only: !self.io.selection.input && self.io.progress.output_only.load(Acquire),
             },
             &watch_invalid,
             self.hal,
         )?;
         let format = native::admitted_format(&self.io.selection, binding, self.hal).ok_or(-3)?;
-        if watch_invalid.load(Acquire) {
+        if watch_invalid.load(Acquire)
+            || native::resolve(&self.io.selection, self.hal) != Some(binding)
+        {
             return Err(-6);
         }
         // SAFETY: lifecycle has no registration during prepare. The engine
@@ -126,6 +130,25 @@ impl<H: Hal> Backend for Registration<'_, H> {
     }
 
     fn start(&mut self, device: u32, procedure: NonNull<c_void>) -> i32 {
+        if self.io.progress.invalid.load(Acquire) || self.connection.watch_invalid.load(Acquire) {
+            return -6;
+        }
+        if !self.io.selection.input && self.io.progress.output_only.load(Acquire) {
+            let status = stream_usage::disable_unused(
+                self.hal,
+                device,
+                procedure,
+                false,
+                if self.io.selection.group.is_null() {
+                    64
+                } else {
+                    2048
+                },
+            );
+            if status != 0 {
+                return status;
+            }
+        }
         if self.io.progress.invalid.load(Acquire) || self.connection.watch_invalid.load(Acquire) {
             return -6;
         }
@@ -168,6 +191,12 @@ unsafe fn adopt(
     callback.formats = format.layout;
     callback.watch_invalid = watch_invalid;
     callback.prime = true;
+    callback.frame_nanos = 1e9 / f64::from(connection.rate);
+    callback.frame_ticks = 0.0;
+    callback.previous_timestamp = None;
+    io.progress
+        .frame_nanos
+        .store(callback.frame_nanos.to_bits(), Release);
     // SAFETY: the preceding registration drained; atomic observers may remain.
     unsafe { mr_callback_clock_reset(ptr::from_ref(&io.clock).cast_mut()) };
 }
@@ -240,9 +269,7 @@ pub(super) unsafe fn alive(io: &DeviceIo, properties: &impl Properties) -> bool 
         return false;
     }
     let connection = &control.connection;
-    if io.selection.uid.len() == 1
-        && native::default_device(io.selection.input, properties) != Some(connection.binding.device)
-    {
+    if native::resolve(&io.selection, properties) != Some(connection.binding) {
         return false;
     }
     control.lifecycle.registered()

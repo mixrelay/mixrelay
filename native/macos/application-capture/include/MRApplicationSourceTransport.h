@@ -75,6 +75,8 @@ bool mr_application_source_transport_write(
     MRApplicationSourceTransport *transport,
     const float *interleaved_samples,
     uint32_t frame_count);
+bool mr_application_source_transport_write_timed(MRApplicationSourceTransport *transport,
+    const float *interleaved_samples, const uint64_t *timestamps, uint32_t frame_count);
 
 void mr_application_source_transport_destroy(
     MRApplicationSourceTransport *transport);

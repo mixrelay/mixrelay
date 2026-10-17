@@ -4,11 +4,13 @@ use super::{
     RingOwner, TapConfig, TapError, TapSession, TapStats,
     native::{self, CoreAudio, Native, Timestamp},
 };
-use crate::process_tap_input::ingest;
+use crate::process_tap_input::{ingest, input_frames};
 use mixrelay_macos_transport::{
     audio_buffer::AudioBufferList,
     callback_clock::mr_callback_clock_record_values,
-    capture_ring::{mr_audio_ring_create, mr_audio_ring_read_interleaved},
+    capture_ring::{
+        mr_audio_ring_create, mr_audio_ring_read_interleaved, mr_audio_ring_read_timed,
+    },
 };
 use std::{
     alloc::{Layout, alloc},
@@ -49,9 +51,28 @@ pub(super) unsafe extern "C" fn io_proc(
     {
         // SAFETY: ring/format are installed before IOProc registration and remain
         // immutable; CoreAudio owns readable buffer extents during this callback.
-        let result = unsafe { ingest(format, input, session.ring(), &session.peaks) };
         // SAFETY: native timestamp is readable for the duration of this callback.
         let time = unsafe { time.as_ref() };
+        let first = time
+            .filter(|time| time.flags & 3 == 3)
+            .and_then(|time| {
+                session
+                    .timebase
+                    .get()
+                    .map(|base| base.nanoseconds(time.host))
+            })
+            .unwrap_or(0);
+        let scalar = time
+            .filter(|time| {
+                time.flags & 4 != 0 && time.rate_scalar.is_finite() && time.rate_scalar > 0.0
+            })
+            .map_or(1.0, |time| time.rate_scalar);
+        // Geometry is immutable, but a drained format refresh publishes a new
+        // nominal rate before reopening callback admission.
+        let native_rate = f64::from_bits(session.sample_rate.load(Ordering::Acquire));
+        // Clock discontinuities become visible before their PCM can be published.
+        // SAFETY: the same immutable CoreAudio metadata remains live through ingest.
+        let frames = unsafe { input_frames(format, input) };
         // SAFETY: this is the sole serialized clock writer; other observers use atomics.
         unsafe {
             mr_callback_clock_record_values(
@@ -59,8 +80,18 @@ pub(super) unsafe extern "C" fn io_proc(
                 time.map_or(0.0, |time| time.sample),
                 time.map_or(0, |time| time.host),
                 time.is_some_and(|time| time.flags & 3 == 3),
-                result.frames as u64,
+                frames as u64,
             );
+        };
+        // SAFETY: prepared ring/format and native PCM remain live during this callback.
+        let result = unsafe {
+            ingest(
+                format,
+                input,
+                session.ring(),
+                &session.peaks,
+                (first, scalar * 1e9 / native_rate),
+            )
         };
         session
             .captured
@@ -79,6 +110,7 @@ pub(super) unsafe extern "C" fn io_proc(
 }
 
 fn initialize(session: &TapSession, config: &TapConfig) -> Result<(), TapError> {
+    native::add_service_listener(session)?;
     let mut selection = native::Selection::new(config, &CoreAudio)?;
     if selection.fallback {
         native::add_inventory_listener(session)?;
@@ -171,6 +203,7 @@ fn allocate_session() -> Result<*mut TapSession, TapError> {
     }
     // SAFETY: unpublished allocation is exclusively initialized before any borrowing.
     let mut owner = TapSession::default();
+    let _ = owner.timebase.set(mixrelay_realtime::Timebase::current());
     owner.retirement_queue = retirement_queue;
     // Without a notifier the pump falls back to timed waits; capture still works.
     if let Ok(notifier) = mixrelay_realtime::Notifier::new() {
@@ -312,6 +345,51 @@ pub unsafe extern "C" fn mr_process_tap_read(
     }
     // SAFETY: pump owns exclusive output and the sole consumer cursor.
     unsafe { mr_audio_ring_read_interleaved(session.ring(), destination, maximum_frames) }
+}
+
+/// Reads PCM and its original per-frame monotonic nanosecond coordinates.
+/// # Safety
+/// Same session/sole-consumer contract as read; times owns `maximum_frames` cells.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_process_tap_read_timed(
+    session: *mut TapSession,
+    destination: *mut f32,
+    times: *mut u64,
+    maximum_frames: usize,
+    expected: super::TapReadGeneration,
+) -> usize {
+    // SAFETY: pump retains the session and both disjoint writable output extents.
+    let Some(session) = (unsafe { session.as_ref() }) else {
+        return 0;
+    };
+    let current = || {
+        session.allowed()
+            && session.generation.load(Ordering::Acquire) == expected.format
+            && unsafe {
+                mixrelay_macos_transport::callback_clock::mr_callback_clock_discontinuities(
+                    &raw const session.clock,
+                )
+            } == expected.clock_breaks
+    };
+    if !current() {
+        return 0;
+    }
+    // SAFETY: one pump owns this ring's consumer.
+    let frames =
+        unsafe { mr_audio_ring_read_timed(session.ring(), destination, times, maximum_frames) };
+    if !current() {
+        let channels = session
+            .format
+            .get()
+            .map_or(0, |format| format.channels as usize);
+        // SAFETY: the successfully copied PCM/time extents still belong to this pump.
+        unsafe {
+            ptr::write_bytes(destination, 0, frames * channels);
+            ptr::write_bytes(times, 0, frames);
+        }
+        return 0;
+    }
+    frames
 }
 
 /// Drains channel peaks independently of PCM; invalid pointers/capacity return zero.

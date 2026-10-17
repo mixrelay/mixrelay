@@ -160,7 +160,7 @@ fn every_channel_width_preserves_pcm_and_finite_peak_policy_in_both_layouts() {
             // SAFETY: fixture owns complete aligned buffers and ring has matching width.
             unsafe {
                 assert_eq!(
-                    ingest(&format, input.pointer(), ring.0, &peaks),
+                    ingest(&format, input.pointer(), ring.0, &peaks, (0, 0.0)),
                     TapInputResult {
                         frames: 4,
                         written: 4,
@@ -215,7 +215,7 @@ fn malformed_metadata_never_reads_pcm_or_publishes_partial_input() {
         }
         // SAFETY: readable descriptor table, with bad sample pointers that must be rejected.
         assert_eq!(
-            unsafe { ingest(&format, input.pointer(), ring.0, &peaks) },
+            unsafe { ingest(&format, input.pointer(), ring.0, &peaks, (0, 0.0)) },
             TapInputResult::default()
         );
     }
@@ -226,7 +226,7 @@ fn malformed_metadata_never_reads_pcm_or_publishes_partial_input() {
     unsafe {
         assert_eq!(mr_audio_ring_dropped_frames(ring.0), 0);
         assert_eq!(
-            ingest(&format, std::ptr::null(), ring.0, &peaks),
+            ingest(&format, std::ptr::null(), ring.0, &peaks, (0, 0.0)),
             TapInputResult::default()
         );
     }
@@ -242,11 +242,14 @@ fn full_queue_still_observes_input_peaks_and_frames_without_allocating() {
     let measured = allocation_counter::measure(|| {
         // SAFETY: all fixture storage and owners remain live, calls are serialized.
         unsafe {
-            assert_eq!(ingest(&format, input.pointer(), ring.0, &peaks).written, 8);
+            assert_eq!(
+                ingest(&format, input.pointer(), ring.0, &peaks, (0, 0.0)).written,
+                8
+            );
             for _ in 0..1000 {
                 peaks.clear();
                 assert_eq!(
-                    ingest(&format, input.pointer(), ring.0, &peaks),
+                    ingest(&format, input.pointer(), ring.0, &peaks, (0, 0.0)),
                     TapInputResult {
                         frames: 8,
                         written: 0,
@@ -273,13 +276,13 @@ fn diagnostic_audio_evidence_excludes_silence_and_nonfinite_samples() {
         let mut quiet = [0.0, -0.0, f32::NAN, f32::INFINITY];
         let quiet_input = fixture(&mut quiet, 2, planar);
         // SAFETY: each fixture owns complete buffers matching the ring's geometry.
-        let result = unsafe { ingest(&format, quiet_input.pointer(), ring.0, &peaks) };
+        let result = unsafe { ingest(&format, quiet_input.pointer(), ring.0, &peaks, (0, 0.0)) };
         assert_eq!(result.frames, 2);
         assert!(!result.audible);
         let mut signal = [0.0, -f32::MIN_POSITIVE, 0.0, 0.0];
         let signal_input = fixture(&mut signal, 2, planar);
         // SAFETY: each fixture owns complete buffers matching the ring's geometry.
-        let result = unsafe { ingest(&format, signal_input.pointer(), ring.0, &peaks) };
+        let result = unsafe { ingest(&format, signal_input.pointer(), ring.0, &peaks, (0, 0.0)) };
         assert_eq!(result.frames, 2);
         assert!(result.audible);
     }

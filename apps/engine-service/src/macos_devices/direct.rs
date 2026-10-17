@@ -199,6 +199,9 @@ impl DirectPlan {
         if clock_id == 0 || native_rate != plan.format().sample_rate {
             return None;
         }
+        if independent_inputs(devices, plan, clock_id) {
+            return None;
+        }
         let mut bindings = Vec::new();
         let mut latency_bindings = Vec::new();
         let mut bridged = DeviceSet::default();
@@ -334,6 +337,26 @@ impl Drop for Registration<'_> {
             }
         }
     }
+}
+
+fn independent_inputs(devices: &DeviceSet, plan: &RenderPlan, clock_id: u32) -> bool {
+    let active_sources = || {
+        plan.source_bindings().iter().filter(|binding| {
+            plan.controls()
+                .snapshot(binding.node_id())
+                .is_none_or(|(control, _)| control.enabled)
+        })
+    };
+    // Native buffers already share acquisition coordinates only when every
+    // active input belongs to this exact IOProc clock. Independent inputs use
+    // the worker's time-addressed queues, including the otherwise-direct input.
+    active_sources().count() > 1
+        && !active_sources().all(|binding| {
+            devices
+                .binding_key(binding.node_id().as_str(), true)
+                .and_then(|id| devices.0.get(id))
+                .is_some_and(|device| device.clock_identity.load(Ordering::Acquire) == clock_id)
+        })
 }
 
 #[cfg(test)]

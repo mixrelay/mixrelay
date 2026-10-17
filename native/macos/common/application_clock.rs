@@ -7,7 +7,8 @@ use std::{
     sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
 
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
+mod timestamps;
 const HEADER_BYTES: u32 = 160;
 const _: () = assert!(size_of::<ApplicationClock>() == HEADER_BYTES as usize);
 const MAGIC: u64 = 0x4d52_4150_5043_4c4b;
@@ -57,6 +58,7 @@ fn offset(capacity: u32, channels: u32) -> Option<usize> {
 pub extern "C" fn mr_application_clock_required_bytes(capacity: u32, channels: u32) -> usize {
     offset(capacity, channels)
         .and_then(|value| value.checked_add(size_of::<ApplicationClock>()))
+        .and_then(|value| value.checked_add(capacity as usize * 16))
         .unwrap_or(0)
 }
 
@@ -74,7 +76,7 @@ pub unsafe extern "C" fn mr_application_clock_attach(
     };
     if memory.is_null()
         || size < offset
-        || size - offset < size_of::<ApplicationClock>()
+        || size < mr_application_clock_required_bytes(capacity, channels)
         || (memory as usize)
             .checked_add(offset)
             .is_none_or(|address| address % 64 != 0)
@@ -146,6 +148,8 @@ pub unsafe extern "C" fn mr_application_clock_initialize(
             insufficient_headroom: AtomicU32::new(0),
             source_sample_faults: mixrelay_audio_io::pcm::SampleFaultCounter::default(),
         });
+        // SAFETY: required_bytes includes the prepared per-frame atomic sidecar.
+        timestamps::initialize(clock, capacity);
     }
     clock
 }

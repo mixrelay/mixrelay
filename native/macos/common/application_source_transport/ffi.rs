@@ -289,6 +289,30 @@ pub unsafe extern "C" fn mr_application_source_transport_write(
     transport.write(samples, frames)
 }
 
+/// Publishes coordinates and PCM under one producer lease, before the PCM watermark.
+/// # Safety
+/// Same sole-owner contract as write; times contains frames readable u64 coordinates.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mr_application_source_transport_write_timed(
+    transport: *mut SourceTransport,
+    input: *const f32,
+    times: *const u64,
+    frames: u32,
+) -> bool {
+    // SAFETY: caller owns the retained transport and both complete immutable inputs.
+    let Some(transport) = (unsafe { transport.as_mut() }) else {
+        return false;
+    };
+    if input.is_null() || times.is_null() || frames > transport.mapping.capacity() {
+        return false;
+    }
+    // SAFETY: validated geometry and caller's declared extents.
+    let channels = unsafe { mr_shared_audio_buffer_channels(transport.mapping.buffer.as_ptr()) };
+    let samples = unsafe { slice::from_raw_parts(input, frames as usize * channels as usize) };
+    let times = unsafe { slice::from_raw_parts(times, frames as usize) };
+    transport.write_pcm(samples, frames, Some(times))
+}
+
 /// Stops native publication and releases the mapping, descriptor and local owner.
 /// # Safety
 /// Handle is null or the unique attach/connect result after the pump has stopped;

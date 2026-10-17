@@ -9,11 +9,15 @@ use std::{
     ptr,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU32, AtomicU64},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     },
 };
 
 use mixrelay_pcm_ring::PcmRing;
+
+// Four maximum native callbacks fit in each bounded PCM queue. Alignment may
+// reserve at most half, leaving room for a producer burst and consumer progress.
+const FIFO_FRAMES: u32 = 16_384;
 
 use crate::{
     callback_clock::CallbackClock,
@@ -32,6 +36,12 @@ mod listeners;
 mod native;
 mod queues;
 mod stream_format;
+mod stream_usage;
+mod timestamps;
+pub use timestamps::{
+    bridge_read_timed, bridge_write_timed, capture_window, frame_nanoseconds, graph_read_at,
+    input_time, set_capture_window,
+};
 #[cfg(any(test, feature = "test-observation"))]
 pub mod test_observation;
 #[cfg(test)]
@@ -164,10 +174,14 @@ struct Callback {
     previous_timestamp: Option<(f64, u64, u32)>,
     /// Host ticks per frame between this device's consecutive callback timestamps.
     frame_ticks: f64,
+    timebase: mixrelay_realtime::Timebase,
+    acquisition_nanos: u64,
+    frame_nanos: f64,
 }
 
 #[derive(Default)]
 struct Progress {
+    output_only: AtomicBool,
     ticks: AtomicU64,
     native_frames: AtomicU64,
     graph_frames: AtomicU64,
@@ -177,6 +191,8 @@ struct Progress {
     invalid: AtomicBool,
     /// The latest callback's mean-frame host ticks; its own queue roles pass frames then.
     callback_host: AtomicU64,
+    frame_nanos: AtomicU64,
+    capture_window: AtomicU32,
 }
 
 /// Opaque device context. No blanket `Send`/`Sync`: the enclosing engine owner
@@ -187,6 +203,8 @@ pub struct DeviceIo {
     callback: UnsafeCell<Callback>,
     native_ring: PcmRing,
     graph_ring: PcmRing,
+    native_times: crate::frame_times::FrameTimes,
+    graph_times: crate::frame_times::FrameTimes,
     graph_epoch: UnsafeCell<Option<u64>>,
     clock: CallbackClock,
     clock_evidence: diagnostics::ClockEvidence,
@@ -195,6 +213,14 @@ pub struct DeviceIo {
 }
 
 impl DeviceIo {
+    /// Declares that the next registration will never use native input, including
+    /// through a direct-render hook. Configure only while disconnected.
+    pub fn set_output_only(&self, output_only: bool) {
+        self.progress
+            .output_only
+            .store(output_only, Ordering::Release);
+    }
+
     fn new(uid: &CStr, input: bool, channels: u32, rate: u32) -> Option<Self> {
         if !(1..=64).contains(&channels) || rate == 0 {
             return None;
@@ -239,9 +265,14 @@ impl DeviceIo {
                 pcm_context: ptr::null_mut(),
                 previous_timestamp: None,
                 frame_ticks: 0.0,
+                timebase: mixrelay_realtime::Timebase::current(),
+                acquisition_nanos: 0,
+                frame_nanos: 1e9 / f64::from(rate),
             }),
-            native_ring: PcmRing::new(channels, 16384)?,
-            graph_ring: PcmRing::new(channels, 16384)?,
+            native_ring: PcmRing::new(channels, FIFO_FRAMES)?,
+            graph_ring: PcmRing::new(channels, FIFO_FRAMES)?,
+            native_times: crate::frame_times::FrameTimes::new(FIFO_FRAMES as usize)?,
+            graph_times: crate::frame_times::FrameTimes::new(FIFO_FRAMES as usize)?,
             graph_epoch: UnsafeCell::new(None),
             clock: CallbackClock::default(),
             clock_evidence: diagnostics::ClockEvidence::default(),

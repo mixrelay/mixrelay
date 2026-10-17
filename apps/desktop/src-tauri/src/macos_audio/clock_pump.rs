@@ -404,28 +404,32 @@ impl PumpClock {
         &mut self,
         capture: &mut NativeCaptureReader,
         transport: &mut ApplicationSourceTransport,
-        input: &mut [f32],
-        output: &mut [f32],
+        input: &mut (&mut [f32], &mut [u64]),
+        output: &mut (&mut [f32], &mut [u64]),
     ) -> Result<usize, PumpError> {
         let channels = usize::from(capture.session().resolved.stream.channels);
         let frames = if self.queued_input < 256 {
-            capture.read_interleaved(input)
+            capture.read_timed(
+                input.0,
+                input.1,
+                (self.native_generation, self.native_discontinuities),
+            )
         } else {
             0
         };
-        let samples = &mut input[..frames * channels];
+        let samples = &mut input.0[..frames * channels];
         let faults = mixrelay_audio_io::pcm::sanitize_samples(samples);
         if !transport.record_source_faults(self.epoch, faults) {
             return Ok(0);
         }
         if frames > 0 {
             self.bridge
-                .push_interleaved(samples)
+                .push_timed_interleaved(samples, &input.1[..frames])
                 .map_err(PumpError::Bridge)?;
         }
         let report = self
             .bridge
-            .pull_interleaved(output)
+            .pull_timed_interleaved(output.0, output.1)
             .map_err(PumpError::Bridge)?;
         self.queued_input = report.queued_input_frames;
         Ok(report.transferred_frames)
@@ -446,6 +450,10 @@ pub(super) fn run_with_handoff(
         input: mixrelay_audio_io::pcm_buffer::zeroed(ENGINE_BLOCK_FRAMES * channels)
             .map_err(|error| error.to_string())?,
         output: mixrelay_audio_io::pcm_buffer::zeroed(ENGINE_BLOCK_FRAMES * channels)
+            .map_err(|error| error.to_string())?,
+        input_times: mixrelay_audio_io::pcm_buffer::timestamps(ENGINE_BLOCK_FRAMES)
+            .map_err(|error| error.to_string())?,
+        output_times: mixrelay_audio_io::pcm_buffer::timestamps(ENGINE_BLOCK_FRAMES)
             .map_err(|error| error.to_string())?,
         state: None,
         scoped: super::ActivePlayback(None),
@@ -474,6 +482,8 @@ struct Pump {
     channels: usize,
     input: Vec<f32>,
     output: Vec<f32>,
+    input_times: Vec<u64>,
+    output_times: Vec<u64>,
     state: Option<PumpClock>,
     scoped: super::ActivePlayback,
     waker: Waker,
@@ -584,13 +594,15 @@ impl Pump {
         let transferred = state.transfer(
             &mut self.capture,
             &mut self.transport,
-            &mut self.input,
-            &mut self.output,
+            &mut (&mut self.input, &mut self.input_times),
+            &mut (&mut self.output, &mut self.output_times),
         )?;
         if transferred > 0
-            && !self
-                .transport
-                .write(&self.output[..transferred * self.channels], transferred)
+            && !self.transport.write(
+                &self.output[..transferred * self.channels],
+                &self.output_times[..transferred],
+                transferred,
+            )
         {
             // A format change races the worker safely: no old-rate PCM is accepted;
             // the next pass observes the new token and reconstructs off realtime.

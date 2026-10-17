@@ -44,19 +44,46 @@ pub(super) struct Device {
     pub(super) clock_aligned: Arc<AtomicBool>,
     pub(super) worker: Option<thread::JoinHandle<()>>,
 }
+
+#[derive(Debug, Default, Clone, Copy)]
+pub(super) struct CallbackConfig {
+    pub(super) buffer_frames: u32,
+    /// False keeps input available for a graph's direct duplex renderer.
+    pub(super) output_only: bool,
+}
+
 impl Device {
     #[cfg(test)]
     pub(super) fn open(spec: &Spec, rate: u32, host: Arc<dyn Host>) -> Result<Self, String> {
-        Self::open_with_group(spec, rate, None, 0, host)
+        Self::open_with_group(
+            spec,
+            rate,
+            None,
+            CallbackConfig {
+                buffer_frames: 0,
+                output_only: !spec.input,
+            },
+            host,
+        )
     }
     pub(super) fn open_with_group(
         spec: &Spec,
         rate: u32,
         group: Option<Arc<Aggregate>>,
-        buffer_frames: u32,
+        callback: CallbackConfig,
         host: Arc<dyn Host>,
     ) -> Result<Self, String> {
-        let native = Arc::new(Native::create(spec, rate, group, buffer_frames, host)?);
+        let native = Arc::new(Native::create(
+            spec,
+            rate,
+            group,
+            callback.buffer_frames,
+            host,
+        )?);
+        native
+            .output_only
+            .store(callback.output_only, Ordering::Release);
+        let buffer_frames = callback.buffer_frames;
         let stop = Arc::new(AtomicBool::new(false));
         let failed = Arc::new(AtomicBool::new(true));
         let epoch = Arc::new(AtomicU64::new(0));
@@ -128,6 +155,15 @@ impl Device {
     }
     /// `host` labels this graph cycle's transfers; see `DeviceSet::graph_host`.
     pub(super) fn read(&self, samples: &mut [f32], host: u64) -> TransferOutcome {
+        self.read_timed(samples, host, None)
+    }
+
+    pub(super) fn read_timed(
+        &self,
+        samples: &mut [f32],
+        host: u64,
+        time: Option<(u64, u32)>,
+    ) -> TransferOutcome {
         samples.fill(0.0);
         let source_sample_faults = if self.input {
             self.native.source_sample_faults.take()
@@ -152,14 +188,25 @@ impl Device {
         }
         // SAFETY: this serialized graph consumer retains Native and owns the
         // complete writable PCM span, disjoint from the producer's queue storage.
-        let read = unsafe {
-            mr_device_io_graph_read(
-                self.native.pointer.as_ptr(),
-                samples.as_mut_ptr(),
-                frames,
-                self.activity.read_epoch(self.epoch.load(Ordering::Acquire)),
-                host,
-            )
+        let read = if let Some((first, rate)) = time {
+            unsafe {
+                mixrelay_macos_transport::device_io::graph_read_at(
+                    self.native.pointer.as_ptr().cast(),
+                    samples,
+                    self.activity.read_epoch(self.epoch.load(Ordering::Acquire)),
+                    (host, first, rate),
+                )
+            }
+        } else {
+            unsafe {
+                mr_device_io_graph_read(
+                    self.native.pointer.as_ptr(),
+                    samples.as_mut_ptr(),
+                    frames,
+                    self.activity.read_epoch(self.epoch.load(Ordering::Acquire)),
+                    host,
+                )
+            }
         };
         TransferOutcome {
             source_sample_faults,

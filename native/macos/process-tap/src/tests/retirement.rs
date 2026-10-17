@@ -61,6 +61,12 @@ impl Native for AsyncNative {
     fn remove_inventory_listener(&self, _: &TapSession) -> Result<(), TapError> {
         panic!("retirement fixture has no inventory listener")
     }
+    fn remove_service_listener(&self, _: &TapSession) -> Result<(), TapError> {
+        panic!("retirement fixture has no service listener")
+    }
+    fn install_system_listeners(&self, _: &TapSession) -> Result<(), TapError> {
+        panic!("retirement never installs listeners")
+    }
     fn destroy_aggregate(&self, _: u32) -> Result<(), TapError> {
         Ok(())
     }

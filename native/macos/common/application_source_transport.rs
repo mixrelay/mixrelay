@@ -8,7 +8,7 @@ pub use ffi::{
     mr_application_source_transport_destroy, mr_application_source_transport_publish_measurements,
     mr_application_source_transport_publish_native,
     mr_application_source_transport_record_source_faults, mr_application_source_transport_reset,
-    mr_application_source_transport_write,
+    mr_application_source_transport_write, mr_application_source_transport_write_timed,
 };
 
 use crate::{
@@ -184,6 +184,10 @@ impl SourceTransport {
     }
 
     fn write(&mut self, samples: &[f32], frames: u32) -> bool {
+        self.write_pcm(samples, frames, None)
+    }
+
+    fn write_pcm(&mut self, samples: &[f32], frames: u32, times: Option<&[u64]>) -> bool {
         // SAFETY: mapping attachment validated this immutable channel geometry.
         let channels = unsafe { mr_shared_audio_buffer_channels(self.mapping.buffer.as_ptr()) };
         if samples.len() != frames as usize * channels as usize {
@@ -201,6 +205,19 @@ impl SourceTransport {
             return false;
         }
         flush_source_faults(clock, &mut self.pending_source_faults);
+        if times.is_some_and(|times| times.len() != frames as usize) {
+            return false;
+        }
+        // SAFETY: claimed producer, retained mapping and matching PCM extent. Untimed
+        // writes explicitly invalidate any coordinate left by an unsuccessful attempt.
+        unsafe {
+            clock.write_times(
+                self.mapping.capacity(),
+                self.owned_epoch,
+                self.next_frame,
+                (0..frames as usize).map(|index| times.map_or(0, |times| times[index])),
+            );
+        }
         // SAFETY: the FFI facade validated the frame extent. This claim is the
         // sole producer; input is borrowed and disjoint from the owned mapping.
         let written = unsafe {

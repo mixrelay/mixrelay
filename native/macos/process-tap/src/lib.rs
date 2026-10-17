@@ -93,7 +93,7 @@ fn push_device_uses(
 }
 
 pub use ffi::{
-    mr_process_tap_create, mr_process_tap_destroy, mr_process_tap_read,
+    mr_process_tap_create, mr_process_tap_destroy, mr_process_tap_read, mr_process_tap_read_timed,
     mr_process_tap_refresh_format, mr_process_tap_start, mr_process_tap_stats, mr_process_tap_stop,
     mr_process_tap_take_peaks, mr_process_tap_wakeup,
 };
@@ -139,6 +139,14 @@ pub struct TapConfig {
     pub target_device_uid: *const std::ffi::c_char,
 }
 
+/// Identity expected by one pump read; both fences belong to the PCM producer.
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TapReadGeneration {
+    pub format: u64,
+    pub clock_breaks: u64,
+}
+
 /// Independently sampled diagnostic values; PCM ownership is never transferred.
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy)]
@@ -181,12 +189,19 @@ enum RebuildIntent {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
+struct ListenerReceipts {
+    service_epoch: u64,
+    format: bool,
+    inventory: bool,
+    service: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
 struct Resources {
     tap: u32,
     aggregate: u32,
     proc: *mut std::ffi::c_void,
-    listener: bool,
-    inventory_listener: bool,
+    listeners: ListenerReceipts,
     resume: bool,
     /// A failed native teardown must not downgrade a requested tap replacement
     /// into a format-only `IOProc` restart on the next control pass.
@@ -209,10 +224,13 @@ impl Drop for RingOwner {
 /// reference or `Send`/`Sync` assertion is needed at the native callback boundary.
 #[derive(Debug, Default)]
 pub struct TapSession {
+    timebase: OnceLock<mixrelay_realtime::Timebase>,
     retirement_queue: usize,
     resources: Cell<Resources>,
     selection: RefCell<Option<native::Selection>>,
     inventory_epoch: AtomicU64,
+    service_epoch: AtomicU64,
+    rebuilt_service_epoch: Cell<u64>,
     format: OnceLock<TapFormat>,
     ring: OnceLock<RingOwner>,
     lifecycle: TapLifecycle,
