@@ -1,14 +1,10 @@
 //! Fixed `MixRelay` app actions performed in its normal user's GUI session.
 
-use std::os::unix::process::CommandExt as _;
-use std::{
-    process::Stdio,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, ensure};
-use objc2_app_kit::NSRunningApplication;
-use objc2_foundation::{NSDate, NSRunLoop, NSString};
+use objc2_app_kit::{NSRunningApplication, NSWorkspace, NSWorkspaceOpenConfiguration};
+use objc2_foundation::{NSArray, NSDate, NSRunLoop, NSString, NSURL};
 
 use mixrelay_macos_installer::process_exit::{ProcessIdentity, wait_for_exit};
 
@@ -118,17 +114,23 @@ pub(super) fn restore(app: SessionApp) -> Result<()> {
         unsafe { libc::geteuid() } != 0,
         "app actions require a normal user"
     );
-    let mut command =
-        std::process::Command::new(format!("{APP_PATH}/Contents/MacOS/mixrelay-desktop"));
+    // Launch Services gives the app its own privacy responsibility. A direct
+    // installer child inherits Installer's TCC identity even after reparenting.
+    let configuration = NSWorkspaceOpenConfiguration::configuration();
+    configuration.setCreatesNewApplicationInstance(true);
+    configuration.setAllowsRunningApplicationSubstitution(false);
+    configuration.setActivates(app == SessionApp::Graph);
     if app == SessionApp::UnifiedRuntime {
-        command.arg("--driver-runtime");
+        configuration.setArguments(&NSArray::from_retained_slice(&[NSString::from_str(
+            "--driver-runtime",
+        )]));
     }
-    command
-        .process_group(0)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
+    let url = NSURL::fileURLWithPath(&NSString::from_str(APP_PATH));
+    NSWorkspace::sharedWorkspace().openApplicationAtURL_configuration_completionHandler(
+        &url,
+        &configuration,
+        None,
+    );
     // Accepting a launch request is not proof that the requested role launched.
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {

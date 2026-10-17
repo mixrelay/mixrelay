@@ -54,7 +54,7 @@ core-foundation = "=0.10.1"
 mixrelay-driver-control = { path = "../../../crates/driver-control" }
 # Acknowledged native Quit in the installed user's session.
 objc2 = "0.6.4"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "libc", "NSRunningApplication", "NSAlert", "NSApplication", "NSButton", "NSButtonCell", "NSCell", "NSGraphics", "NSControl", "NSResponder", "NSView", "NSWindow", "NSProgressIndicator", "NSTextField"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "libc", "block2", "NSWorkspace", "NSRunningApplication", "NSAlert", "NSApplication", "NSButton", "NSButtonCell", "NSCell", "NSGraphics", "NSControl", "NSResponder", "NSView", "NSWindow", "NSProgressIndicator", "NSTextField"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDate", "NSEnumerator", "NSObject", "NSRunLoop", "NSString", "NSURL", "NSBundle", "NSLocale", "NSGeometry"] }
 
 [dev-dependencies]
