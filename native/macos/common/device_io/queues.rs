@@ -46,53 +46,28 @@ pub(super) unsafe fn graph_read(
     let discontinuity = previous.is_some_and(|previous| previous != epoch);
     if *previous != Some(epoch) {
         // SAFETY: discard changes only this graph consumer's cursor.
-        // A first timestamped read selects a fresh retained range explicitly.
-        // Recovery still discards the old epoch before any new coordinate is read.
-        if !initial_epoch || requested.is_none() {
+        // Timestamped reads select within the PCM ring's acknowledged producer
+        // epoch. Discarding here would also erase fresh recovery coordinates.
+        if requested.is_none() {
             unsafe { mr_pcm_ring_discard(ring) };
         }
         *previous = Some(epoch);
         io.measurements.faults.fetch_add(1, Release);
     }
-    if let Some((nanos, rate)) = requested {
-        let stats = io.graph_ring.stats();
-        let selected = io.graph_times.locate(stats.read, stats.written, nanos);
-        let valid = selected.is_some_and(|start| {
-            start + u64::from(frames) <= stats.written
-                && rate != 0
-                && (0..frames).all(|offset| {
-                    let target =
-                        nanos.saturating_add(u64::from(offset) * 1_000_000_000 / u64::from(rate));
-                    io.graph_times
-                        .at(start + u64::from(offset))
-                        .is_some_and(|actual| {
-                            actual != 0
-                                && actual.abs_diff(target) <= 1_000_000_000 / u64::from(rate) + 2
-                        })
-                })
-        });
-        if !valid {
-            io.measurements.faults.fetch_add(1, Release);
-            // SAFETY: graph owns the full writable PCM extent.
-            unsafe {
-                ptr::write_bytes(samples, 0, frames as usize * io.selection.channels as usize);
-            };
-            return GraphRead {
-                frames: 0,
-                initial_epoch,
-                discontinuity,
-            };
-        }
-        if let Some(start) = selected {
-            let skip = u32::try_from(start - stats.read).unwrap_or(0);
-            if skip != 0 && !unsafe { mixrelay_pcm_ring::skip_available(ring, skip) } {
-                return GraphRead {
-                    frames: 0,
-                    initial_epoch,
-                    discontinuity,
-                };
-            }
-        }
+    if let Some(coordinate) = requested
+        // SAFETY: this call is the sole graph consumer, including epoch ACK and seek.
+        && !unsafe { super::timestamps::seek_input(io, frames, coordinate) }
+    {
+        io.measurements.faults.fetch_add(1, Release);
+        // SAFETY: graph owns the full writable PCM extent.
+        unsafe {
+            ptr::write_bytes(samples, 0, frames as usize * io.selection.channels as usize);
+        };
+        return GraphRead {
+            frames: 0,
+            initial_epoch,
+            discontinuity,
+        };
     }
     // SAFETY: retained ring and sole graph consumer, complete caller-owned output.
     let mut content_age = None;
@@ -215,4 +190,14 @@ pub(super) unsafe fn bridge_write_observed(
 pub(super) unsafe fn bridge_discard(io: &DeviceIo) {
     // SAFETY: only the bridge owner input ring's consumer cursor is changed.
     unsafe { mr_pcm_ring_discard(ptr::from_ref(io.ring(!io.selection.input)).cast_mut()) };
+    if io.selection.input {
+        // SAFETY: this callback is the graph-input ring's sole producer. Publish
+        // the new epoch even when old PCM fills the queue and pump cannot write.
+        // Only its graph consumer will retire the old cursor.
+        let ring = ptr::from_ref(&io.graph_ring).cast_mut();
+        unsafe {
+            mixrelay_pcm_ring::mr_pcm_ring_restart(ring);
+            mr_pcm_ring_write(ring, ptr::null(), 0);
+        }
+    }
 }

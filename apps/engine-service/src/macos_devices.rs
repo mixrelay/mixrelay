@@ -84,7 +84,19 @@ impl DeviceSet {
                     unsafe { ffi::mr_device_io_quantum(device.native.pointer.as_ptr(), false) };
                 let native_rate = device.native_rate.load(Ordering::Acquire).max(1);
                 let mapped = (u64::from(native) * u64::from(rate)).div_ceil(u64::from(native_rate));
-                largest.max(u32::try_from(mapped).unwrap_or(u32::MAX))
+                // SAFETY: this is the serialized graph consumer; successive native
+                // IOProcs may have published several slabs before this graph cycle.
+                let published = unsafe {
+                    mixrelay_macos_transport::device_io::capture_burst(
+                        device.native.pointer.as_ptr().cast(),
+                        device
+                            .activity
+                            .read_epoch(device.epoch.load(Ordering::Acquire)),
+                    )
+                };
+                largest
+                    .max(u32::try_from(mapped).unwrap_or(u32::MAX))
+                    .max(published)
             });
         for device in self.0.values().filter(|device| device.input) {
             // SAFETY: atomic reserve update; callback retains all mutable conversion state.
@@ -111,10 +123,11 @@ impl DeviceSet {
     pub(super) fn capture_time(&self, id: &str, frames: u32) -> Option<u64> {
         let id = self.binding_key(id, true)?;
         let device = self.0.get(id)?;
-        if !device.ready() {
+        if !device.ready() || !device.activity.ready() {
             return None;
         }
-        // SAFETY: this set retains the input owner; the observation only reads atomics.
+        // SAFETY: this set retains the input owner; the serialized graph consumer
+        // acknowledges its PCM epoch before observing the matching coordinates.
         unsafe {
             mixrelay_macos_transport::device_io::input_time(
                 device.native.pointer.as_ptr().cast(),

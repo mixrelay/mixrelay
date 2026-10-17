@@ -7,11 +7,13 @@ const PREPARE_BLOCKS: u32 = 24;
 #[test]
 fn first_graph_admission_drops_preparation_pcm_without_a_slow_clock_slew() {
     for capture_first in [true, false] {
-        startup_case(capture_first);
+        for batch in [1, 2, 4] {
+            startup_case(capture_first, batch);
+        }
     }
 }
 
-fn startup_case(capture_first: bool) {
+fn startup_case(capture_first: bool, batch: u32) {
     let resources = MacDevices::new(
         Arc::new(AdapterRuntimeStatus::new(adapter_profile())),
         48_000,
@@ -29,24 +31,8 @@ fn startup_case(capture_first: bool) {
     };
     let timebase = Timebase::current();
     for block in 0..PREPARE_BLOCKS + 3_000 {
-        let first = block * 128;
-        let mut pcm = source_pcm(block);
-        let host = timebase.ticks(Duration::from_nanos(
-            1_000_000_000 + u64::from(first) * 1_000_000_000 / 48_000,
-        ));
-        let mut push = || {
-            input.callback(
-                &mut pcm,
-                CallbackTime {
-                    now: host,
-                    host,
-                    sample: f64::from(first),
-                    rate_scalar: 1.0,
-                },
-            );
-        };
         if capture_first || block < PREPARE_BLOCKS {
-            push();
+            capture_batch(&input, block, batch, timebase);
         }
         if block < PREPARE_BLOCKS {
             continue;
@@ -61,17 +47,21 @@ fn startup_case(capture_first: bool) {
         });
         assert_eq!(measured.count_total, 0);
         if !capture_first {
-            push();
+            capture_batch(&input, block, batch, timebase);
         }
     }
     assert!(
-        capture.pcm[12 * 256..48 * 256]
+        capture.pcm[..96_000 * 2 - 64]
             .iter()
             .all(|sample| sample.abs() < 1e-4),
         "PCM captured before graph admission leaked into the live route"
     );
     let peaks = events(&capture.pcm, 0);
-    assert_eq!(peaks.len(), 60, "missing startup impulses: {peaks:?}");
+    assert_eq!(
+        peaks.len(),
+        60,
+        "capture_first={capture_first}, batch={batch}: missing startup impulses: {peaks:?}"
+    );
     let delays: Vec<_> = peaks
         .iter()
         .enumerate()
@@ -82,8 +72,31 @@ fn startup_case(capture_first: bool) {
     let excursion = delays.iter().max().unwrap() - delays.iter().min().unwrap();
     assert!(
         excursion <= 2,
-        "capture_first={capture_first}: equal clocks drifted after preparation: {delays:?}"
+        "capture_first={capture_first}, batch={batch}: equal clocks drifted after preparation: {delays:?}"
     );
+}
+
+fn capture_batch(input: &NativeOwner, block: u32, batch: u32, timebase: Timebase) {
+    let count = if block < PREPARE_BLOCKS { 1 } else { batch };
+    if block >= PREPARE_BLOCKS && !(block + 1 - PREPARE_BLOCKS).is_multiple_of(batch) {
+        return;
+    }
+    let host = |frame| {
+        timebase.ticks(Duration::from_nanos(
+            1_000_000_000 + u64::from(frame) * 1_000_000_000 / 48_000,
+        ))
+    };
+    for packet in block + 1 - count..=block {
+        input.callback(
+            &mut source_pcm(packet),
+            CallbackTime {
+                now: host((block + 1) * 128),
+                host: host(packet * 128),
+                sample: f64::from(packet * 128),
+                rate_scalar: 1.0,
+            },
+        );
+    }
 }
 
 fn single_input_processor() -> Box<BlockProcessor> {
@@ -113,10 +126,12 @@ fn source_pcm(block: u32) -> [f32; 256] {
             return 0.75;
         }
         let frame = first + u32::try_from(index / 2).unwrap() - PREPARE_BLOCKS * 128;
-        if frame < 96_000 {
+        // Include the first Gaussian's leading half; a step at its peak would
+        // introduce sinc ringing and multiple local maxima into the test signal.
+        if frame < 96_000 - 64 {
             return 0.0;
         }
-        let distance = (f64::from(frame - 96_000) + 2_400.0).rem_euclid(4_800.0) - 2_400.0;
+        let distance = (f64::from(frame) - 96_000.0 + 2_400.0).rem_euclid(4_800.0) - 2_400.0;
         #[expect(clippy::cast_possible_truncation, reason = "bounded synthetic PCM")]
         {
             (-(distance / 7.2).powi(2)).exp() as f32 * 0.25

@@ -2,6 +2,39 @@
 use super::{DeviceIo, GraphRead};
 use std::sync::atomic::Ordering;
 
+/// Graph consumer's largest producer publication between consecutive graph cycles.
+#[derive(Default)]
+pub(super) struct CaptureCadence {
+    previous: Option<(u64, u64)>,
+    burst: u32,
+}
+
+/// Actual SRC publication burst in graph frames, including coalesced native callbacks.
+/// # Safety
+/// Retained native input owner; caller is the sole serialized graph consumer and
+/// observes this once per graph cycle, with its current activity/native epoch.
+pub unsafe fn capture_burst(io: *const DeviceIo, epoch: u64) -> u32 {
+    // SAFETY: retained optional owner and serialized access to the graph's private cadence.
+    let Some(io) = (unsafe { io.as_ref() }) else {
+        return 0;
+    };
+    let cadence = unsafe { &mut *io.capture_cadence.get() };
+    let written = io.graph_ring.stats().written;
+    if let Some((previous_epoch, previous)) = cadence.previous {
+        if previous_epoch == epoch {
+            cadence.burst = cadence.burst.max(
+                u32::try_from(written.saturating_sub(previous))
+                    .unwrap_or(u32::MAX)
+                    .min(super::FIFO_FRAMES / 2),
+            );
+        } else {
+            cadence.burst = 0;
+        }
+    }
+    cadence.previous = Some((epoch, written));
+    cadence.burst
+}
+
 /// Shared alignment reserve in graph frames; zero uses ordinary FIFO policy.
 /// # Safety
 /// The native owner remains retained during this atomic observation.
@@ -41,13 +74,45 @@ pub unsafe fn input_time(io: *const DeviceIo, frames: u32) -> Option<u64> {
     if !io.selection.input || io.progress.invalid.load(Ordering::Acquire) {
         return None;
     }
-    let stats = io.graph_ring.stats();
+    // SAFETY: this is the graph's serialized consumer. A reset must retire old
+    // PCM before its metadata can seed the common acquisition cursor.
+    let stats = unsafe {
+        mixrelay_pcm_ring::consumer_stats(std::ptr::from_ref(&io.graph_ring).cast_mut())
+    }?;
     let reserve = frames.max(io.progress.capture_window.load(Ordering::Acquire) / 2);
     let start = stats.written.checked_sub(u64::from(reserve))?;
     if start < stats.read {
         return None;
     }
     io.graph_times.at(start).filter(|time| *time != 0)
+}
+
+// SAFETY: retained input owner, sole serialized graph consumer, including epoch ACK.
+pub(super) unsafe fn seek_input(io: &DeviceIo, frames: u32, coordinate: (u64, u32)) -> bool {
+    let (nanos, rate) = coordinate;
+    let ring = std::ptr::from_ref(&io.graph_ring).cast_mut();
+    // SAFETY: this is the graph's sole consumer and no PCM reservation is live.
+    let Some(stats) = (unsafe { mixrelay_pcm_ring::consumer_stats(ring) }) else {
+        return false;
+    };
+    let Some(start) = io.graph_times.locate(stats.read, stats.written, nanos) else {
+        return false;
+    };
+    let valid = start + u64::from(frames) <= stats.written
+        && rate != 0
+        && (0..frames).all(|offset| {
+            let target = nanos.saturating_add(u64::from(offset) * 1_000_000_000 / u64::from(rate));
+            io.graph_times
+                .at(start + u64::from(offset))
+                .is_some_and(|actual| {
+                    actual != 0 && actual.abs_diff(target) <= 1_000_000_000 / u64::from(rate) + 2
+                })
+        });
+    let Ok(skip) = u32::try_from(start - stats.read) else {
+        return false;
+    };
+    // SAFETY: same serialized graph consumer; metadata selection moves only its cursor.
+    valid && (skip == 0 || unsafe { mixrelay_pcm_ring::skip_available(ring, skip) })
 }
 
 /// Reads a graph input at its common acquisition coordinate.

@@ -14,6 +14,7 @@ use std::{
 
 mod native_pcm;
 mod pcm_hook;
+mod timestamps;
 
 #[repr(C)]
 struct Buffers {

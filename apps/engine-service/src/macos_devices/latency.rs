@@ -73,7 +73,15 @@ impl Observation {
             Some("native queue residence invalid")
         } else if self.native.graph_queue.consumer.discarded
             != previous.native.graph_queue.consumer.discarded
+            && self
+                .native
+                .content_age
+                .mean_since(previous.native.content_age)
+                .is_none()
         {
+            // Timestamped input reads may intentionally skip retained history.
+            // Exact age still measures every transferred frame; output and
+            // unknown-coordinate windows retain the queue-discard fence.
             Some("graph queue residence invalid")
         } else if self.src_input.invalid != previous.src_input.invalid
             || self.src_output.invalid != previous.src_output.invalid
@@ -599,5 +607,22 @@ pub(crate) mod tests {
         assert!(binding(&values, "source", true).is_some());
         assert!(binding(&values, "sink", false).is_some());
         assert!(binding(&values, "source", false).is_none());
+    }
+
+    #[test]
+    fn intentional_capture_seek_uses_valid_acquired_age_but_unknown_age_stays_unstable() {
+        let old = observation(false);
+        let mut next = old;
+        next.native.graph_queue.consumer.discarded += 1;
+        next.native.content_age = ResidenceSnapshot {
+            sum: 512 * 1_000_000,
+            weight: 512,
+            invalid: 0,
+        };
+        assert_eq!(next.instability(old), None);
+        assert_eq!(next.delay_ns(old, true, 1.0), Some(1_000_000.0));
+        next.native.content_age.invalid += 1;
+        assert_eq!(next.instability(old), Some("graph queue residence invalid"));
+        assert_eq!(next.delay_ns(old, true, 1.0), None);
     }
 }

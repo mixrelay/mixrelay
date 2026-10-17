@@ -340,22 +340,21 @@ impl Drop for Registration<'_> {
 }
 
 fn independent_inputs(devices: &DeviceSet, plan: &RenderPlan, clock_id: u32) -> bool {
-    let active_sources = || {
-        plan.source_bindings().iter().filter(|binding| {
+    // Native buffers already share acquisition coordinates only when every
+    // active input belongs to this exact IOProc clock. Even a single independent
+    // input needs the worker's time-addressed queue instead of an ordinary FIFO.
+    plan.source_bindings()
+        .iter()
+        .filter(|binding| {
             plan.controls()
                 .snapshot(binding.node_id())
                 .is_none_or(|(control, _)| control.enabled)
         })
-    };
-    // Native buffers already share acquisition coordinates only when every
-    // active input belongs to this exact IOProc clock. Independent inputs use
-    // the worker's time-addressed queues, including the otherwise-direct input.
-    active_sources().count() > 1
-        && !active_sources().all(|binding| {
+        .any(|binding| {
             devices
                 .binding_key(binding.node_id().as_str(), true)
                 .and_then(|id| devices.0.get(id))
-                .is_some_and(|device| device.clock_identity.load(Ordering::Acquire) == clock_id)
+                .is_none_or(|device| device.clock_identity.load(Ordering::Acquire) != clock_id)
         })
 }
 
@@ -363,8 +362,7 @@ fn independent_inputs(devices: &DeviceSet, plan: &RenderPlan, clock_id: u32) -> 
 mod tests {
     use super::*;
 
-    #[test]
-    fn confirmed_offline_bindings_need_no_native_mapping_but_unknown_bindings_are_rejected() {
+    fn input_output_plan() -> (mixrelay_audio_graph::GraphDocument, RenderPlan) {
         use mixrelay_audio_graph::{
             CompileContext, CompileLimits, GraphCompiler, GraphDocument, RenderFormat,
         };
@@ -387,6 +385,26 @@ mod tests {
             )
             .unwrap();
         let plan = RenderPlan::prepare(&execution).unwrap();
+        (document, plan)
+    }
+
+    #[test]
+    fn one_independent_input_requires_time_addressed_worker_reads() {
+        let (_, plan) = input_output_plan();
+        let (input, _context) = super::super::tests::synthetic_device(2, 48_000, 48_000, true);
+        input.clock_identity.store(11, Ordering::Release);
+        let devices = DeviceSet(
+            BTreeMap::from([("input".into(), Arc::clone(&input))]),
+            BTreeMap::new(),
+        );
+        assert!(independent_inputs(&devices, &plan, 22));
+        input.clock_identity.store(22, Ordering::Release);
+        assert!(!independent_inputs(&devices, &plan, 22));
+    }
+
+    #[test]
+    fn confirmed_offline_bindings_need_no_native_mapping_but_unknown_bindings_are_rejected() {
+        let (document, plan) = input_output_plan();
         let devices = DeviceSet(BTreeMap::new(), super::super::spec::specs(&document));
         for (input, list) in [
             (true, plan.source_bindings()),

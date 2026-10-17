@@ -5,6 +5,34 @@ use std::{
 };
 
 #[test]
+fn metadata_observation_retires_only_acknowledged_epochs_without_priming_pcm() {
+    let mut ring = PcmRing::new(1, 8).unwrap();
+    let mut output = [9.0; 4];
+    let measured = allocation_counter::measure(|| {
+        // SAFETY: retained initialized owner, serialized roles, complete disjoint PCM.
+        unsafe {
+            for _ in 0..2 {
+                assert_eq!(mr_pcm_ring_write(&raw mut ring, [0.25; 4].as_ptr(), 4), 4);
+            }
+            mr_pcm_ring_restart(&raw mut ring);
+            assert!(consumer_stats(&raw mut ring).is_none());
+            assert_eq!(ring.stats().read, 0);
+            mr_pcm_ring_write(&raw mut ring, ptr::null(), 0);
+            let fresh = consumer_stats(&raw mut ring).unwrap();
+            assert_eq!((fresh.read, fresh.written, fresh.queued), (8, 8, 0));
+            assert_eq!(mr_pcm_ring_write(&raw mut ring, [0.75; 4].as_ptr(), 4), 4);
+            assert_eq!(consumer_stats(&raw mut ring).unwrap().queued, 4);
+            assert_eq!(mr_pcm_ring_read(&raw mut ring, output.as_mut_ptr(), 4), 0);
+            assert_eq!(output.map(f32::to_bits), [0; 4]);
+            assert_eq!(mr_pcm_ring_write(&raw mut ring, [0.75; 4].as_ptr(), 4), 4);
+            assert_eq!(mr_pcm_ring_read(&raw mut ring, output.as_mut_ptr(), 4), 4);
+            assert_eq!(output.map(f32::to_bits), [0.75_f32.to_bits(); 4]);
+        }
+    });
+    assert_eq!(measured.count_total, 0);
+}
+
+#[test]
 fn metadata_observer_only_sees_reserved_writes_and_protected_reads() {
     let mut ring = PcmRing::new(1, 8).unwrap();
     let mut metadata = [0; 8];

@@ -108,9 +108,11 @@ impl Worker {
             else {
                 return;
             };
+            let mut io = MacEngineExternalIo::new(devices);
+            io.alignment = std::mem::take(&mut self.timeline.capture_alignment);
             let report = process_native_cycle(
                 &mut self.processor,
-                &mut MacEngineExternalIo::new(devices),
+                &mut io,
                 WorkerCycle {
                     timeline: &self.timeline,
                     frames,
@@ -118,6 +120,7 @@ impl Worker {
                 },
             )
             .unwrap();
+            self.timeline.capture_alignment = io.alignment;
             devices.record_latency_cycle(&self.processor, report, self.timeline.epoch);
             self.timeline.discontinuity_pending = report.is_none();
             if let Some(report) = report {
@@ -249,7 +252,7 @@ fn bridged_capture_route_reports_the_delay_its_impulse_actually_takes() {
     });
 }
 
-/// The installed Loopback to `MixRelay` IO shape: the endpoint's callback renders the graph.
+/// A direct endpoint fixture isolates input-bridge measurement from worker pacing.
 #[test]
 fn bridged_capture_into_a_direct_endpoint_reports_its_actual_delay() {
     assert_reports(Route {

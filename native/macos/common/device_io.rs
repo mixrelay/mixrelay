@@ -39,8 +39,8 @@ mod stream_format;
 mod stream_usage;
 mod timestamps;
 pub use timestamps::{
-    bridge_read_timed, bridge_write_timed, capture_window, frame_nanoseconds, graph_read_at,
-    input_time, set_capture_window,
+    bridge_read_timed, bridge_write_timed, capture_burst, capture_window, frame_nanoseconds,
+    graph_read_at, input_time, set_capture_window,
 };
 #[cfg(any(test, feature = "test-observation"))]
 pub mod test_observation;
@@ -207,6 +207,7 @@ pub struct DeviceIo {
     native_times: crate::frame_times::FrameTimes,
     graph_times: crate::frame_times::FrameTimes,
     graph_epoch: UnsafeCell<Option<u64>>,
+    capture_cadence: UnsafeCell<timestamps::CaptureCadence>,
     clock: CallbackClock,
     clock_evidence: diagnostics::ClockEvidence,
     progress: Progress,
@@ -277,6 +278,7 @@ impl DeviceIo {
             native_times: crate::frame_times::FrameTimes::new(FIFO_FRAMES as usize)?,
             graph_times: crate::frame_times::FrameTimes::new(FIFO_FRAMES as usize)?,
             graph_epoch: UnsafeCell::new(None),
+            capture_cadence: UnsafeCell::new(timestamps::CaptureCadence::default()),
             clock: CallbackClock::default(),
             clock_evidence: diagnostics::ClockEvidence::default(),
             progress: Progress::default(),

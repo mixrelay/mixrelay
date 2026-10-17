@@ -100,7 +100,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
             })
             .count();
         self.devices
-            .reserve_capture_alignment(cycle.sample_rate, cycle.frames, count > 1);
+            .reserve_capture_alignment(cycle.sample_rate, cycle.frames, count > 0);
         for (binding, enabled) in controls
             .sources()
             .filter(|(binding, enabled)| *enabled && binding.is_routed_source())
@@ -123,7 +123,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
                     .and_then(|sources| sources.source_period(token))
             });
         }
-        self.align_inputs = active > 1;
+        self.align_inputs = active > 0;
         self.capture_time = if self.align_inputs {
             // A source without valid coordinates remains silent independently;
             // it must not hold every other route in startup priming forever.

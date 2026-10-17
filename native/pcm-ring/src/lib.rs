@@ -26,6 +26,23 @@ pub use ffi::{
 pub use sample_format::SampleFormat;
 pub use storage::prefault_pcm;
 
+/// Acknowledges a published producer epoch before observing retained PCM metadata.
+/// Returns `None` while the producer has not acknowledged a restart. The snapshot
+/// protects no copied PCM; a subsequent read still validates its own reservation.
+/// # Safety
+/// Retained initialized ring; caller is its sole serialized consumer, including reads/discards.
+pub unsafe fn consumer_stats(ring: *mut PcmRing) -> Option<RingStats> {
+    // SAFETY: caller retains the ring and exclusively owns its private reader state.
+    let ring = unsafe { ring.as_ref() }?;
+    let reader = unsafe { &mut *ring.reader.get() };
+    let previous = (reader.epoch, reader.primed);
+    let window = ring.reserve_read(reader, 0, false)?;
+    // Observing metadata cannot satisfy a future PCM read's prefill requirement.
+    reader.primed = previous.0 == window.epoch && previous.1;
+    let stats = ring.stats();
+    (window.epoch == ring.publication.requested_epoch.load(Ordering::Acquire)).then_some(stats)
+}
+
 /// Advances the sole consumer over stale frames without copying them.
 /// # Safety
 /// Retained initialized ring; caller is the serialized consumer, including discard/read.
