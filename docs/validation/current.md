@@ -30,6 +30,12 @@ PCM 획득 시각을 native ring·부분 읽기·SRC·공유 application clock v
   왕복 프로브 자체 시험은 통과했다. `pnpm check:native`도 통과했으며, ARM·Intel
   Universal HAL의 링크·서명 검증·factory/COM probe를 확인했다. native/graph/회수 경계는
   합성 HAL과 주입된 장애로 검사한다. 전용 키체인 잠금 해제와 실제 앱·PKG 서명 시험도 통과했다.
+- 위 변경을 담은 Universal 앱·서비스·HAL과 서명된
+  [설치 파일](/Volumes/dev/mixrelay-release-20261017-capture-stability/MixRelay-Installer-0.1.0.pkg)을
+  2026-10-17 11:49 KST에 빌드했다. 패키지의 Apple Developer ID Installer 서명과
+  trusted timestamp를 확인했다. SHA-256은
+  `481b7e177e1fa6c83d300377df47dedbc52e732ec2cb85b4f210efb31ca25338`이다.
+  설치와 실제 오디오 수락은 아직 대기 중이다.
 
 이 소스의 v5 전달·독립 입력 정렬·재시작 보호를 **설치본에서 확인한 것으로 표시하지 않는다.**
 아래 2026-10-16의 설치본 수락은 이전 실행 파일에 대한 기록이다.
