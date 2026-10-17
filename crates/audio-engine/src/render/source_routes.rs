@@ -1,5 +1,7 @@
 //! Control-plane reachability excludes capture snapshots with no downstream listener.
-use mixrelay_audio_graph::{CompiledEdge, ExecutionPlan, NodeConfig, NodeId, PortId, TO_OS_PORT_ID};
+use mixrelay_audio_graph::{
+    CompiledEdge, ExecutionPlan, NodeConfig, NodeId, PortId, TO_OS_PORT_ID,
+};
 use std::collections::BTreeSet;
 
 pub(super) fn reaches_sink(execution: &ExecutionPlan, source: &NodeId, port: &PortId) -> bool {
