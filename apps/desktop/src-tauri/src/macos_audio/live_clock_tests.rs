@@ -58,6 +58,24 @@ impl RegistryOwner {
         assert!(unsafe { mr_application_clock_fixture_clock(self.0.as_ptr(), &raw mut clock) });
         clock
     }
+    fn capture_time(&self, rate: u32) -> Option<u64> {
+        // SAFETY: the C fixture forwards the current Rust SourceRegistry allocation
+        // unchanged. This owner retains it; this thread owns its
+        // sole rate/consumer authority while the pump owns only the producer.
+        let registry = unsafe {
+            &*self
+                .0
+                .as_ptr()
+                .cast::<mixrelay_macos_transport::source_registry::SourceRegistry>()
+        };
+        // SAFETY: the literal is a complete retained NUL-terminated source ID.
+        let token = unsafe {
+            mixrelay_macos_transport::source_registry::mr_engine_source_id_token(
+                c"owned-live-clock-fixture".as_ptr(),
+            )
+        };
+        registry.source_time(token, rate, 128)
+    }
 }
 impl Drop for RegistryOwner {
     fn drop(&mut self) {
@@ -118,7 +136,10 @@ impl Drop for ToneOwner {
     }
 }
 
-fn measure_phase(registry: &RegistryOwner, rate: u32) -> Clock {
+fn measure_phase(registry: &RegistryOwner, rate: u32, capture: &CaptureProbeSession) -> Clock {
+    // The three prepared FIFOs together retain less than two seconds at every
+    // tested rate. A larger gap identifies a stale epoch or a different host origin.
+    const MAX_RETAINED_NANOS: u64 = 2_000_000_000;
     let mut pcm = [0.0_f32; 256];
     let quantum = Duration::from_secs_f64(128.0 / f64::from(rate));
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -150,6 +171,16 @@ fn measure_phase(registry: &RegistryOwner, rate: u32) -> Clock {
     println!(
         "LIVE application native={} graph={} epoch={} valid_frames={frames} native_frames={} peak={peak:.6} rms={rms:.6} frequency={frequency:.3} synchronized={}",
         clock.native_rate, rate, clock.epoch, clock.native_frames, clock.synchronized
+    );
+    let health = capture.stats();
+    println!("LIVE tap health: {health:?}");
+    let first = registry
+        .capture_time(rate)
+        .expect("real SRC PCM retains acquisition coordinates");
+    let native = mixrelay_realtime::Timebase::current().nanoseconds(health.host_time);
+    assert!(
+        native.abs_diff(first) < MAX_RETAINED_NANOS,
+        "SRC coordinates lost the native host origin: {first} vs {native}"
     );
     assert!(frames > rate, "less than one second of real captured PCM");
     assert!(peak > 0.01 && rms > 0.01, "owned440Hz tone absent");
@@ -200,9 +231,9 @@ fn live_owned_application_tap_v2_src_rate_changes() {
         handoff,
         playback,
     };
-    let first = measure_phase(&registry, 44_100);
-    let second = measure_phase(&registry, 48_000);
-    let third = measure_phase(&registry, 44_100);
+    let first = measure_phase(&registry, 44_100, &capture);
+    let second = measure_phase(&registry, 48_000, &capture);
+    let third = measure_phase(&registry, 44_100, &capture);
     assert_ne!(first.epoch, second.epoch);
     assert_ne!(second.epoch, third.epoch);
     assert!(
