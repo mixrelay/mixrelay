@@ -77,6 +77,9 @@ fn run() -> anyhow::Result<()> {
         )?);
     }
     let (request, team, delete_user_data) = parse_request(&arguments)?;
+    if matches!(request, TransactionRequest::Remove) {
+        refuse_removing_own_executable(&std::env::current_exe()?)?;
+    }
     require_root()?;
     let team = SigningTeam::new(team)?;
     let account = match &request {
@@ -84,6 +87,26 @@ fn run() -> anyhow::Result<()> {
         TransactionRequest::Remove => resolve_removal_account()?,
     };
     run_transaction(&request, team, account, delete_user_data)
+}
+
+/// Removal moves every installed target, including the uninstaller's own helper. The
+/// transaction keeps launching this executable (CoreAudio probes, user cleanup), so it must
+/// run from the private copy the uninstaller makes, never from inside a target it removes.
+fn refuse_removing_own_executable(executable: &std::path::Path) -> anyhow::Result<()> {
+    let product = std::path::Path::new(mixrelay_macos_installer::APP_PATH)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new(mixrelay_macos_installer::APP_PATH));
+    let inside = mixrelay_macos_installer::OwnedTarget::all()
+        .iter()
+        .map(|target| std::path::Path::new(target.path()))
+        .chain(std::iter::once(product))
+        .any(|target| executable.starts_with(target));
+    anyhow::ensure!(
+        !inside,
+        "removal must run from Uninstall MixRelay, which runs a private copy of this helper; {} would be removed while it runs",
+        executable.display()
+    );
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -320,6 +343,25 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn removal_refuses_to_run_from_inside_a_target_it_removes() {
+        for inside in [
+            "/Applications/MixRelay/Uninstall MixRelay.app/Contents/Helpers/mixrelay-macos-installer",
+            "/Applications/MixRelay/MixRelay.app/Contents/MacOS/mixrelay-desktop",
+        ] {
+            assert!(
+                refuse_removing_own_executable(std::path::Path::new(inside)).is_err(),
+                "{inside}"
+            );
+        }
+        assert!(
+            refuse_removing_own_executable(std::path::Path::new(
+                "/private/var/run/mixrelay-removal/mixrelay-macos-installer"
+            ))
+            .is_ok()
+        );
+    }
     use mixrelay_macos_installer::TransactionRequest;
     use std::ffi::OsString;
 

@@ -10,6 +10,7 @@ use std::{
 const PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 const PROBE_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const PROBE_RETRY_INTERVAL: Duration = Duration::from_millis(250);
+const DEADLINE_ELAPSED: &str = "CoreAudio probe deadline already elapsed";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HalPresence {
@@ -127,10 +128,21 @@ fn wait_for_presence(
     mut sleep: impl FnMut(Duration),
 ) -> Result<(), NativeError> {
     let deadline = now() + PROBE_TIMEOUT;
+    let mut previous = None;
     loop {
         match probe(deadline) {
             Ok(actual) if actual == expected => return Ok(()),
             result if now() >= deadline => {
+                // A final attempt that only found the deadline elapsed says nothing about
+                // CoreAudio; report the last real observation instead.
+                let result = match (result, previous) {
+                    (Err(NativeError::Activation(message)), Some(observed))
+                        if message == DEADLINE_ELAPSED =>
+                    {
+                        observed
+                    }
+                    (result, _) => result,
+                };
                 return match result {
                     Err(error) => Err(error),
                     Ok(_) => Err(NativeError::Activation(
@@ -142,7 +154,10 @@ fn wait_for_presence(
                     )),
                 };
             }
-            _ => sleep(PROBE_RETRY_INTERVAL),
+            result => {
+                previous = Some(result);
+                sleep(PROBE_RETRY_INTERVAL);
+            }
         }
     }
 }
@@ -152,9 +167,7 @@ fn probe_hal_presence_until(
     deadline: Instant,
 ) -> Result<HalPresence, NativeError> {
     if Instant::now() >= deadline {
-        return Err(NativeError::Activation(
-            "CoreAudio probe deadline already elapsed".to_owned(),
-        ));
+        return Err(NativeError::Activation(DEADLINE_ELAPSED.to_owned()));
     }
     let mut probe = ProbeProcess {
         child: command
@@ -268,6 +281,30 @@ mod tests {
         .unwrap();
         assert!(full_reload.get());
         assert_eq!(readiness_calls.get(), 2);
+    }
+
+    #[test]
+    fn a_timed_out_wait_reports_the_last_real_probe_failure() {
+        let clock = Cell::new(Instant::now());
+        let error = wait_for_presence(
+            HalPresence::Absent,
+            |deadline| {
+                if clock.get() >= deadline {
+                    Err(NativeError::Activation(DEADLINE_ELAPSED.to_owned()))
+                } else {
+                    Err(NativeError::Activation(
+                        "start CoreAudio probe: No such file or directory".to_owned(),
+                    ))
+                }
+            },
+            || clock.get(),
+            |_| clock.set(clock.get() + PROBE_TIMEOUT),
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("start CoreAudio probe"),
+            "the reported cause is the probe failure, not the elapsed deadline: {error}"
+        );
     }
 
     #[test]
