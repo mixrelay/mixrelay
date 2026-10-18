@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Используйте MixRelay IO для обмена аудио с другими приложениями. Формат устройства не зависит от формата записи.">
+    <title>Устройства и виртуальные подключения — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/devices.html">
+    <link rel="alternate" hreflang="ko" href="../ko/devices.html">
+    <link rel="alternate" hreflang="ja" href="../ja/devices.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/devices.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/devices.html">
+    <link rel="alternate" hreflang="de" href="../de/devices.html">
+    <link rel="alternate" hreflang="fr" href="../fr/devices.html">
+    <link rel="alternate" hreflang="it" href="../it/devices.html">
+    <link rel="alternate" hreflang="es" href="../es/devices.html">
+    <link rel="alternate" hreflang="pt" href="../pt/devices.html">
+    <link rel="alternate" hreflang="ru" href="../ru/devices.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Перейти к содержимому</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Страница продукта"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Язык"><a href="../en/devices.html" lang="en" hreflang="en">English</a> <a href="../ko/devices.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/devices.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/devices.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/devices.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/devices.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/devices.html" lang="fr" hreflang="fr">Français</a> <a href="../it/devices.html" lang="it" hreflang="it">Italiano</a> <a href="../es/devices.html" lang="es" hreflang="es">Español</a> <a href="../pt/devices.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/devices.html" lang="ru" hreflang="ru" aria-current="page">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Предрелизный черновик</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Главы руководства">
+        <a class="back-link" href="../../index.html">← Страница продукта</a>
+        <a class="manual-mobile-index" href="index.html">Все главы</a>
+        <nav class="guide-nav" aria-label="Главы руководства"><a href="index.html">Обзор руководства</a>
+<a href="installation.html">Системные требования и установка</a>
+<a href="first-launch.html">Первый запуск и разрешения</a>
+<a href="workspace.html">Рабочее пространство маршрутизации</a>
+<a href="devices.html" aria-current="page">Устройства и виртуальные подключения</a>
+<a href="app-capture.html">Захват аудио приложений</a>
+<a href="recording.html">Запись</a>
+<a href="effects.html">Встроенные эффекты и пресеты</a>
+<a href="plugins.html">Внешние плагины</a>
+<a href="stream-deck.html">Плагин Stream Deck</a>
+<a href="licensing.html">Бесплатная версия и лицензирование</a>
+<a href="updates.html">Обновления</a>
+<a href="uninstall.html">Удаление</a>
+<a href="troubleshooting.html">Устранение неполадок и диагностика</a>
+<a href="support.html">Связь с поддержкой</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / РУКОВОДСТВО</p><h1>Устройства и виртуальные подключения</h1><p>Используйте MixRelay IO для обмена аудио с другими приложениями. Формат устройства не зависит от формата записи.</p><p class="guide-draft-note">Предрелизный черновик. Публичные загрузки и покупки пока недоступны. Эти инструкции описывают текущую сборку из исходного кода; поведение установленного продукта ещё предстоит проверить в указанных ниже средах.</p></header>
+        <nav class="manual-toc" aria-label="На этой странице"><p class="sidebar-label">На этой странице</p><ul><li><a href="#directions">Выбор направления аудио</a></li><li><a href="#formats">Каналы, частоты дискретизации и PCM</a></li><li><a href="#buffers">Буферы обработки и задержка</a></li></ul></nav>
+        <section class="guide-section" id="directions" aria-labelledby="directions-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="directions-title">Выбор направления аудио</h2>
+<p><code>MixRelay IO</code> — виртуальное устройство по умолчанию. Чтобы получать звук, который другое приложение воспроизводит через него, добавьте его через <code>Добавить узел → Источник → MixRelay Virtual I/O</code>. Это направление <code>Устройство → граф</code>. Чтобы отправить микс графа в приложение, например OBS, добавьте устройство через <code>Добавить узел → Выход → MixRelay Virtual I/O</code>. Это направление <code>Граф → устройство</code>. В OBS или вашей DAW выберите MixRelay IO в качестве аудиовхода.</p><p>Подключите нужные каналы. MixRelay не выбирает системное устройство по умолчанию и не добавляет маршрут аппаратного мониторинга за вас. Для мониторинга добавьте физический выход и подключите к нему микс. Driver также обеспечивает базовый loopback от воспроизведения ОС к захвату без ограничений редактора на маршруты каналов графа.</p><p>Удаление ссылки на устройство из графа не удаляет само виртуальное устройство. С лицензией можно создавать устройства через <code>Новое виртуальное устройство</code>. При удалении устройства через меню состояния удаляются и его сохранённые настройки; другие приложения, использующие его, теряют это устройство.</p>
+</div></section>
+<section class="guide-section" id="formats" aria-labelledby="formats-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="formats-title">Каналы, частоты дискретизации и PCM</h2>
+<p>Откройте <code>Параметры</code> виртуального узла, чтобы изменить <code>Имя устройства</code>, <code>Каналы</code>, частоту дискретизации и <code>Разрядность</code>. Доступны только поддерживаемые общие настройки. Для переименования нужна лицензия. В меню состояния можно выбрать 2, 4, 8, 16, 32 или 64 канала; само устройство поддерживает 1–64 канала в каждом направлении.</p><p>В macOS поддерживаются частоты 44.1, 48, 88.2, 96, 176.4 и 192 kHz. Форматы устройства: Float32, PCM16, упакованный PCM24 и PCM32. В Linux доступны сочетания, поддерживаемые PipeWire. Возможности физических устройств зависят от самих устройств. Внутренняя обработка DSP использует Float32; изменение разрядности устройства не меняет формат записи WAV.</p><p>Изменение формата ненадолго прерывает звук. При ошибке проверьте сообщение и текущее значение перед повторной попыткой. Ошибка сохранения может означать, что устройство изменилось, но его новые настройки не сохранились.</p><!-- TODO screenshot: virtual endpoint Options with supported format choices and status-menu device settings. -->
+</div></section>
+<section class="guide-section" id="buffers" aria-labelledby="buffers-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="buffers-title">Буферы обработки и задержка</h2>
+<p>Параметр <code>Буфер обработки</code> на нижней панели меняет буфер ввода/вывода движка, если поддерживаются изменения во время работы. Выбранное значение применяется сразу. При устранимой ошибке кнопка <code>Применить</code> повторяет попытку применить поддерживаемую настройку. Меньший буфер может уменьшить задержку буфера, но повысить вероятность прерываний. Увеличьте его, если звук прерывается.</p><p>Отдельного выбора буфера для каждого виртуального устройства нет. Другие приложения выбирают собственные клиентские буферы. <code>Задержка буфера</code> — длительность одного буфера обработки, а не полная задержка ввода/вывода. Она не гарантирует единый квант обработки для всего PipeWire. При использовании нескольких физических устройств могут потребоваться преобразование частоты дискретизации и синхронизация часов.</p><p>Для захвата приложений сейчас требуется 48 kHz. На нижней панели есть управление буфером, но нет выбора частоты дискретизации обработки. Частоты виртуальных устройств меняются в настройках устройств. Некоторые нативные плагины не позволяют менять формат во время работы, поскольку перенос состояния их пресетов пока не реализован.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Главы руководства"><a rel="prev" href="workspace.html">← Назад: Рабочее пространство маршрутизации</a><a rel="next" href="app-capture.html">Далее: Захват аудио приложений →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Предрелизный черновик · MixRelay 0.1.0</p><a href="../../index.html">Страница продукта</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

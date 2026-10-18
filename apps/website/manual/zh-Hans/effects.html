@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="免费版可使用内置音频处理，且不限制实例数量。">
+    <title>内置效果与预设 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/effects.html">
+    <link rel="alternate" hreflang="ko" href="../ko/effects.html">
+    <link rel="alternate" hreflang="ja" href="../ja/effects.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/effects.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/effects.html">
+    <link rel="alternate" hreflang="de" href="../de/effects.html">
+    <link rel="alternate" hreflang="fr" href="../fr/effects.html">
+    <link rel="alternate" hreflang="it" href="../it/effects.html">
+    <link rel="alternate" hreflang="es" href="../es/effects.html">
+    <link rel="alternate" hreflang="pt" href="../pt/effects.html">
+    <link rel="alternate" hreflang="ru" href="../ru/effects.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳至正文</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="产品首页"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="语言"><a href="../en/effects.html" lang="en" hreflang="en">English</a> <a href="../ko/effects.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/effects.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/effects.html" lang="zh-Hans" hreflang="zh-Hans" aria-current="page">简体中文</a> <a href="../zh-Hant/effects.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/effects.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/effects.html" lang="fr" hreflang="fr">Français</a> <a href="../it/effects.html" lang="it" hreflang="it">Italiano</a> <a href="../es/effects.html" lang="es" hreflang="es">Español</a> <a href="../pt/effects.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/effects.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 发布前草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="手册章节">
+        <a class="back-link" href="../../index.html">← 产品首页</a>
+        <a class="manual-mobile-index" href="index.html">所有章节</a>
+        <nav class="guide-nav" aria-label="手册章节"><a href="index.html">手册概览</a>
+<a href="installation.html">系统要求与安装</a>
+<a href="first-launch.html">首次启动与权限</a>
+<a href="workspace.html">路由工作区</a>
+<a href="devices.html">设备与虚拟端点</a>
+<a href="app-capture.html">应用音频采集</a>
+<a href="recording.html">录音</a>
+<a href="effects.html" aria-current="page">内置效果与预设</a>
+<a href="plugins.html">外部插件</a>
+<a href="stream-deck.html">Stream Deck 插件</a>
+<a href="licensing.html">免费版与许可</a>
+<a href="updates.html">更新</a>
+<a href="uninstall.html">卸载</a>
+<a href="troubleshooting.html">故障排查与诊断</a>
+<a href="support.html">联系支持</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / 手册</p><h1>内置效果与预设</h1><p>免费版可使用内置音频处理，且不限制实例数量。</p><p class="guide-draft-note">发布前草稿。目前尚不提供公开下载或购买。本手册介绍当前源代码构建版本的行为；在下文所列环境中，仍需验证安装后的实际行为。</p></header>
+        <nav class="manual-toc" aria-label="本页内容"><p class="sidebar-label">本页内容</p><ul><li><a href="#processors">添加与调整效果</a></li><li><a href="#presets">预设与效果链</a></li></ul></nav>
+        <section class="guide-section" id="processors" aria-labelledby="processors-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="processors-title">添加与调整效果</h2>
+<p>选择 <code>添加节点 → 处理器</code>，选取效果器，再连接其输入和输出通道。打开 <code>选项</code> 调整参数。可用效果包括压缩器、限制器、均衡器、高通、低通、噪声门、扩展器、声道工具、单声道声像、立体声平衡、延迟、闪避、混响和合唱。</p><ul><li>压缩器和限制器控制动态与峰值。增益衰减表使用引擎测量值；短横线表示没有可用测量值。</li><li>均衡器有三个峰值频段。拖动控制点可更改频率和增益，也可使用选项中的频率、增益和 Q 字段。高通和低通分别去除低频与高频。</li><li>噪声门和扩展器衰减低于阈值的信号。声道工具提供单声道合并、通道复制、左右交换和极性反转。单声道合并取 L 与 R 的平均值。</li><li>单声道声像将单声道信号定位于立体声声场；立体声平衡调整左右平衡。闪避使用独立的单声道 <code>控制输入</code> 降低主信号。请单独连接控制音源；它不会混入输出。</li><li>延迟添加定时回声。混响和合唱添加空间感或调制效果。它们的通道布局不同，请连接实际提供的端口。</li></ul><p><code>旁通</code> 传递干声。关闭节点会阻断信号。目前不提供内置噪声抑制和 LUFS 测量。</p>
+</div></section>
+<section class="guide-section" id="presets" aria-labelledby="presets-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="presets-title">预设与效果链</h2>
+<p>在效果器的选项中使用 <code>预设</code>。混响包括小房间、录音室、大厅、卡拉OK、隧道和鱼缸。延迟包括短回声、短回声、人声回声、卡拉OK、长回声和乒乓回声。修改预设值后会变为 <code>自定义</code>。</p><p>如需添加多个已连接的效果器，请选择 <code>添加节点 → 处理器 → 效果链</code>，再选择卡拉OK、隧道、鱼缸、收音机或双重人声。效果链会添加自身的节点和连接，不会重新连接现有连线。请将您的音源和输出连接到效果链。撤销一次即可移除整次插入。已保存的工作区会保留实际参数与连接。无需安装外部脉冲响应或采样文件。</p><!-- TODO screenshot: Equalizer Options, Reverb preset menu and an inserted effect chain. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="手册章节"><a rel="prev" href="recording.html">← 上一章：录音</a><a rel="next" href="plugins.html">下一章：外部插件 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>发布前草稿 · MixRelay 0.1.0</p><a href="../../index.html">产品首页</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="使用解除安裝程式或 Linux 套件管理員移除完整產品。">
+    <title>解除安裝 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/uninstall.html">
+    <link rel="alternate" hreflang="ko" href="../ko/uninstall.html">
+    <link rel="alternate" hreflang="ja" href="../ja/uninstall.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/uninstall.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/uninstall.html">
+    <link rel="alternate" hreflang="de" href="../de/uninstall.html">
+    <link rel="alternate" hreflang="fr" href="../fr/uninstall.html">
+    <link rel="alternate" hreflang="it" href="../it/uninstall.html">
+    <link rel="alternate" hreflang="es" href="../es/uninstall.html">
+    <link rel="alternate" hreflang="pt" href="../pt/uninstall.html">
+    <link rel="alternate" hreflang="ru" href="../ru/uninstall.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳至正文</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="產品首頁"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="語言"><a href="../en/uninstall.html" lang="en" hreflang="en">English</a> <a href="../ko/uninstall.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/uninstall.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/uninstall.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/uninstall.html" lang="zh-Hant" hreflang="zh-Hant" aria-current="page">繁體中文</a> <a href="../de/uninstall.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/uninstall.html" lang="fr" hreflang="fr">Français</a> <a href="../it/uninstall.html" lang="it" hreflang="it">Italiano</a> <a href="../es/uninstall.html" lang="es" hreflang="es">Español</a> <a href="../pt/uninstall.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/uninstall.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 發佈前草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="手冊章節">
+        <a class="back-link" href="../../index.html">← 產品首頁</a>
+        <a class="manual-mobile-index" href="index.html">所有章節</a>
+        <nav class="guide-nav" aria-label="手冊章節"><a href="index.html">手冊總覽</a>
+<a href="installation.html">系統需求與安裝</a>
+<a href="first-launch.html">首次啟動與權限</a>
+<a href="workspace.html">路由工作區</a>
+<a href="devices.html">裝置與虛擬端點</a>
+<a href="app-capture.html">應用程式音訊擷取</a>
+<a href="recording.html">錄音</a>
+<a href="effects.html">內建效果與預設</a>
+<a href="plugins.html">外掛程式</a>
+<a href="stream-deck.html">Stream Deck 外掛程式</a>
+<a href="licensing.html">免費版與授權</a>
+<a href="updates.html">更新</a>
+<a href="uninstall.html" aria-current="page">解除安裝</a>
+<a href="troubleshooting.html">疑難排解與診斷</a>
+<a href="support.html">聯絡支援</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / 手冊</p><h1>解除安裝</h1><p>使用解除安裝程式或 Linux 套件管理員移除完整產品。</p><p class="guide-draft-note">發佈前草稿。目前尚未提供公開下載或購買。本手冊說明目前原始碼建置版本的行為；在下文所列環境中，仍須驗證安裝後的實際行為。</p></header>
+        <nav class="manual-toc" aria-label="本頁內容"><p class="sidebar-label">本頁內容</p><ul><li><a href="#prepare">移除前的準備</a></li><li><a href="#macos">在 macOS 上移除</a></li><li><a href="#linux">在 Linux 上移除</a></li></ul></nav>
+        <section class="guide-section" id="prepare" aria-labelledby="prepare-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="prepare-title">移除前的準備</h2>
+<p>請將需要保留的工作儲存為 <code>.mix</code> 檔案。停止錄音，結束通話和錄音應用程式。如需解除此電腦的付費啟用狀態，請在移除前連線使用<a href="licensing.html#deactivate">取消此裝置的授權</a>。解除安裝本身無法確認伺服器端已停用。</p>
+</div></section>
+<section class="guide-section" id="macos" aria-labelledby="macos-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="macos-title">在 macOS 上移除</h2>
+<ol><li>開啟 <code>/Applications/Uninstall MixRelay.app</code>。</li><li>如需保留虛擬裝置設定，請不要勾選 <code>刪除已儲存的 MixRelay Driver 設定</code>。</li><li>選擇 <code>移除 MixRelay Driver</code>，並核准 macOS 管理者授權要求。目前移除對話框雖然使用這些 Driver 標籤，但會移除完整產品。</li><li>等待確認完成。移除會停止裝置和迴送，並短暫中斷系統音訊。</li></ol><p>選用的刪除項目只會移除已儲存的裝置設定。在 macOS 上，音訊圖、錄音、已匯出的工作和付費驗證均會保留。僅將編輯器應用程式移至垃圾桶不會移除已安裝的音訊元件。如果移除失敗，請閱讀訊息並檢查目前安裝狀態後再重試；某些元件可能已被移除。取消授權不會變更產品。</p><!-- TODO screenshot: actual Uninstall MixRelay dialog including current Driver labels, checkbox, authorization and completion. -->
+</div></section>
+<section class="guide-section" id="linux" aria-labelledby="linux-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="linux-title">在 Linux 上移除</h2>
+<p>結束編輯器，並在背景狀態選單中選擇 <code>結束</code>。以一般使用者身分開啟已安裝的 <code>解除安裝 MixRelay</code> 應用程式項目。如需保留已儲存的音訊圖和設定，請不要勾選對應的刪除選項。移除程式使用目前工作階段的一般 polkit 驗證代理程式和套件管理員。成功移除後，會清除本機付費授權登入資訊；錄音和已匯出的專案仍會保留。</p><p>也可以直接移除 <code>mix-relay</code> 套件。僅選擇適用於您發行版的指令。直接透過套件管理員移除會保留各使用者的設定和本機驗證資訊。</p><pre><code>sudo apt remove mix-relay
+sudo dnf remove mix-relay
+sudo pacman -R mix-relay</code></pre><p>如果無法顯示授權介面，請檢查桌面工作階段是否有 polkit 驗證代理程式。如果應用程式已移除但清理失敗，請依顯示的復原訊息操作。請勿刪除無關的音訊服務或使用者資料夾。</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="手冊章節"><a rel="prev" href="updates.html">← 上一章：更新</a><a rel="next" href="troubleshooting.html">下一章：疑難排解與診斷 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>發佈前草稿 · MixRelay 0.1.0</p><a href="../../index.html">產品首頁</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

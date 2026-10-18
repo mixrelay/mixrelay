@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="打开 MixRelay，等待音频引擎就绪，然后选择要使用的音源。">
+    <title>首次启动与权限 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/first-launch.html">
+    <link rel="alternate" hreflang="ko" href="../ko/first-launch.html">
+    <link rel="alternate" hreflang="ja" href="../ja/first-launch.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/first-launch.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/first-launch.html">
+    <link rel="alternate" hreflang="de" href="../de/first-launch.html">
+    <link rel="alternate" hreflang="fr" href="../fr/first-launch.html">
+    <link rel="alternate" hreflang="it" href="../it/first-launch.html">
+    <link rel="alternate" hreflang="es" href="../es/first-launch.html">
+    <link rel="alternate" hreflang="pt" href="../pt/first-launch.html">
+    <link rel="alternate" hreflang="ru" href="../ru/first-launch.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳至正文</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="产品首页"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="语言"><a href="../en/first-launch.html" lang="en" hreflang="en">English</a> <a href="../ko/first-launch.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/first-launch.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/first-launch.html" lang="zh-Hans" hreflang="zh-Hans" aria-current="page">简体中文</a> <a href="../zh-Hant/first-launch.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/first-launch.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/first-launch.html" lang="fr" hreflang="fr">Français</a> <a href="../it/first-launch.html" lang="it" hreflang="it">Italiano</a> <a href="../es/first-launch.html" lang="es" hreflang="es">Español</a> <a href="../pt/first-launch.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/first-launch.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 发布前草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="手册章节">
+        <a class="back-link" href="../../index.html">← 产品首页</a>
+        <a class="manual-mobile-index" href="index.html">所有章节</a>
+        <nav class="guide-nav" aria-label="手册章节"><a href="index.html">手册概览</a>
+<a href="installation.html">系统要求与安装</a>
+<a href="first-launch.html" aria-current="page">首次启动与权限</a>
+<a href="workspace.html">路由工作区</a>
+<a href="devices.html">设备与虚拟端点</a>
+<a href="app-capture.html">应用音频采集</a>
+<a href="recording.html">录音</a>
+<a href="effects.html">内置效果与预设</a>
+<a href="plugins.html">外部插件</a>
+<a href="stream-deck.html">Stream Deck 插件</a>
+<a href="licensing.html">免费版与许可</a>
+<a href="updates.html">更新</a>
+<a href="uninstall.html">卸载</a>
+<a href="troubleshooting.html">故障排查与诊断</a>
+<a href="support.html">联系支持</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / 手册</p><h1>首次启动与权限</h1><p>打开 MixRelay，等待音频引擎就绪，然后选择要使用的音源。</p><p class="guide-draft-note">发布前草稿。目前尚不提供公开下载或购买。本手册介绍当前源代码构建版本的行为；在下文所列环境中，仍需验证安装后的实际行为。</p></header>
+        <nav class="manual-toc" aria-label="本页内容"><p class="sidebar-label">本页内容</p><ul><li><a href="#connection">连接音频引擎</a></li><li><a href="#permissions">macOS 音频采集与麦克风权限</a></li><li><a href="#first-route">建立第一条音频路由</a></li></ul></nav>
+        <section class="guide-section" id="connection" aria-labelledby="connection-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="connection-title">连接音频引擎</h2>
+<p>准备音频时会显示 <code>正在连接 MixRelay</code>。如果显示 <code>需要 MixRelay</code>，请安装完整产品。如果显示 <code>请更新 MixRelay</code>，请更新已安装的产品。如果显示 <code>无法连接 MixRelay</code>，请检查安装情况后选择 <code>重新连接</code>。</p><p>免费版无需购买或激活。应用按操作系统的语言偏好顺序，使用第一个受支持的语言；若无匹配项，则使用英语。<code>外观</code> 提供 <code>跟随系统</code>、<code>浅色</code> 和 <code>深色</code> 选项。</p>
+</div></section>
+<section class="guide-section" id="permissions" aria-labelledby="permissions-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="permissions-title">macOS 音频采集与麦克风权限</h2>
+<p>首次使用应用音源时，macOS 可能请求采集应用或系统音频的权限。使用麦克风或其他物理音频输入时，macOS 可能请求麦克风访问权限。如需使用该音源，请允许相应访问。这是两项独立权限；仅允许麦克风访问不会启用应用音频采集。</p><p>如果之前拒绝了访问，请打开“系统设置”→“隐私与安全性”。在“屏幕与系统音频录制”下检查音频采集设置，并在“麦克风”中检查物理输入权限。标签和提示会随 macOS 版本变化。请为发起请求的 MixRelay 项目启用访问，并按 macOS 的指示重新启动。然后在 MixRelay 中重试该音源。参阅 <a href="https://support.apple.com/guide/mac-help/control-access-screen-system-audio-recording-mchld6aa7d23/mac">Apple 的屏幕与系统音频权限指南</a>。</p><p>在 Linux 上，音源使用正常的 PipeWire 会话，此流程不包含 macOS 式的权限提示。</p><!-- TODO screenshot: actual installed capture and microphone requests and permission entries on supported macOS versions, both languages. -->
+</div></section>
+<section class="guide-section" id="first-route" aria-labelledby="first-route-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="first-route-title">建立第一条音频路由</h2>
+<ol><li>选择现有音频图；如果没有，选择 <code>新建音频图</code>，输入 <code>音频图名称</code>，然后选择 <code>创建</code>。免费版允许使用一个音频图。</li><li>通过 <code>添加节点 → 音源</code> 选择正在运行的应用或音频输入。</li><li>通过 <code>添加节点 → 输出</code> 选择音频输出。将音源的各个输出通道连接到输出节点的输入通道。</li><li>在源应用中播放音频，或对着输入设备说话。检查电平表和输出设备。</li></ol><p>如需将混音发送至 OBS 或 DAW，请<a href="devices.html#directions">将 MixRelay IO 用作虚拟输出</a>，并在接收应用中将其选为输入。</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="手册章节"><a rel="prev" href="installation.html">← 上一章：系统要求与安装</a><a rel="next" href="workspace.html">下一章：路由工作区 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>发布前草稿 · MixRelay 0.1.0</p><a href="../../index.html">产品首页</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

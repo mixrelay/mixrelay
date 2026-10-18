@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Installieren Sie Effekte mit dem Installationsprogramm des jeweiligen Anbieters und lassen Sie MixRelay danach suchen.">
+    <title>Externe Plug-ins — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/plugins.html">
+    <link rel="alternate" hreflang="ko" href="../ko/plugins.html">
+    <link rel="alternate" hreflang="ja" href="../ja/plugins.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/plugins.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/plugins.html">
+    <link rel="alternate" hreflang="de" href="../de/plugins.html">
+    <link rel="alternate" hreflang="fr" href="../fr/plugins.html">
+    <link rel="alternate" hreflang="it" href="../it/plugins.html">
+    <link rel="alternate" hreflang="es" href="../es/plugins.html">
+    <link rel="alternate" hreflang="pt" href="../pt/plugins.html">
+    <link rel="alternate" hreflang="ru" href="../ru/plugins.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Zum Inhalt springen</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Produktstartseite"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Sprache"><a href="../en/plugins.html" lang="en" hreflang="en">English</a> <a href="../ko/plugins.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/plugins.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/plugins.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/plugins.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/plugins.html" lang="de" hreflang="de" aria-current="page">Deutsch</a> <a href="../fr/plugins.html" lang="fr" hreflang="fr">Français</a> <a href="../it/plugins.html" lang="it" hreflang="it">Italiano</a> <a href="../es/plugins.html" lang="es" hreflang="es">Español</a> <a href="../pt/plugins.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/plugins.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Vorläufige Fassung vor Veröffentlichung</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Kapitel des Handbuchs">
+        <a class="back-link" href="../../index.html">← Produktstartseite</a>
+        <a class="manual-mobile-index" href="index.html">Alle Kapitel</a>
+        <nav class="guide-nav" aria-label="Kapitel des Handbuchs"><a href="index.html">Handbuchübersicht</a>
+<a href="installation.html">Systemanforderungen und Installation</a>
+<a href="first-launch.html">Erster Start und Berechtigungen</a>
+<a href="workspace.html">Routing-Arbeitsbereich</a>
+<a href="devices.html">Geräte und virtuelle Endpunkte</a>
+<a href="app-capture.html">Audio von Anwendungen erfassen</a>
+<a href="recording.html">Aufnahme</a>
+<a href="effects.html">Integrierte Effekte und Voreinstellungen</a>
+<a href="plugins.html" aria-current="page">Externe Plug-ins</a>
+<a href="stream-deck.html">Stream Deck-Plug-in</a>
+<a href="licensing.html">Kostenlose Version und Lizenzierung</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html">Deinstallation</a>
+<a href="troubleshooting.html">Fehlerbehebung und Diagnose</a>
+<a href="support.html">Support kontaktieren</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / HANDBUCH</p><h1>Externe Plug-ins</h1><p>Installieren Sie Effekte mit dem Installationsprogramm des jeweiligen Anbieters und lassen Sie MixRelay danach suchen.</p><p class="guide-draft-note">Vorläufige Fassung vor Veröffentlichung. Öffentliche Downloads und Käufe sind noch nicht verfügbar. Diese Anleitung beschreibt den aktuellen Build aus dem Quellcode. Das Verhalten nach der Installation muss in den unten genannten Umgebungen noch überprüft werden.</p></header>
+        <nav class="manual-toc" aria-label="Auf dieser Seite"><p class="sidebar-label">Auf dieser Seite</p><ul><li><a href="#formats">Formate nach Plattform</a></li><li><a href="#discovery">Einen Effekt finden und verwenden</a></li><li><a href="#failures">Fehler bei Suche, Editor und Format</a></li></ul></nav>
+        <section class="guide-section" id="formats" aria-labelledby="formats-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="formats-title">Formate nach Plattform</h2>
+<ul><li>macOS: VST3, CLAP, AU und AUv3.</li><li>Linux: VST3, CLAP und LV2.</li></ul><p>Die Liste enthält Audioeffekte, die die Erkennung und die Prüfung der Kanalkonfiguration bestehen. Instrumente und MIDI-Arbeitsabläufe sind nicht vorgesehen. Ein unterstütztes Format garantiert nicht, dass jedes Plug-in, jede Architektur oder jede Kanalkonfiguration funktioniert. Die kostenlose Version erlaubt zwei Instanzen externer Plug-ins; ausgeschaltete Instanzen zählen mit. Die Anzahl der gefundenen Effekte ist unbegrenzt.</p>
+</div></section>
+<section class="guide-section" id="discovery" aria-labelledby="discovery-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="discovery-title">Einen Effekt finden und verwenden</h2>
+<ol><li>Installieren Sie das Plug-in für Ihre Plattform und Architektur nach den Anweisungen des Anbieters.</li><li>Wählen Sie unter <code>Knoten hinzufügen → Prozessor</code> den Eintrag <code>Audioeffekte erneut suchen</code>. Für einen eigenen VST3-, CLAP- oder LV2-Speicherort wählen Sie <code>Plug-in-Ordner hinzufügen…</code>.</li><li>Wählen Sie einen gefundenen Effekt direkt im Menü Prozessor. Die Beschreibung nennt Format und Anbieter. Prüfen Sie die <code>Kanalkonfiguration</code> und verbinden Sie die benötigten Haupt-, Sidechain- oder Zusatzanschlüsse.</li><li>Die vom Plug-in bereitgestellten Parameter finden Sie unter <code>Optionen</code> des Knotens. Ein neuer Plug-in-Knoten öffnet seinen nativen Editor einmal, sofern vorhanden. Mit <code>Öffnen</code> öffnen Sie ihn erneut.</li></ol><p>Native Editoren unter Linux benötigen X11 oder XWayland. Fehlt ein Editor, wird kein allgemeines natives Fenster als Ersatz erzeugt. Verwenden Sie die bereitgestellten Parameter, sofern vorhanden.</p><!-- TODO screenshot: actual effect list, Channel layout, parameter controls and a native editor. -->
+</div></section>
+<section class="guide-section" id="failures" aria-labelledby="failures-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="failures-title">Fehler bei Suche, Editor und Format</h2>
+<p>Wenn <code>Effektsuche unvollständig</code> erscheint, öffnen Sie <code>Scan-Probleme</code> und <code>Technische Details</code>. Schlägt ein Suchschritt fehl, bleiben zuvor verfügbare Effekte in der Liste. Korrigieren Sie die Installation oder den Ordner und wählen Sie <code>Erneut versuchen</code> oder starten Sie die Suche erneut.</p><p>Verwenden Sie bei einem abgestürzten Plug-in <code>Abgestürztes Plug-in erneut versuchen: …</code>, sofern angeboten. Ist ein Editor nicht verfügbar, lesen Sie den konkreten Grund, etwa einen fehlenden nativen Editor oder fehlendes X11/XWayland. Einige AU/VST/LV2-Sitzungen lassen Formatänderungen im laufenden Betrieb nicht zu, weil die Übertragung nativer Preset-Zustände noch nicht implementiert ist. Die aktuelle Sitzung bleibt erhalten; gehen Sie nicht davon aus, dass das angeforderte Format übernommen wurde.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Kapitel des Handbuchs"><a rel="prev" href="effects.html">← Zurück: Integrierte Effekte und Voreinstellungen</a><a rel="next" href="stream-deck.html">Weiter: Stream Deck-Plug-in →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Vorläufige Fassung vor Veröffentlichung · MixRelay 0.1.0</p><a href="../../index.html">Produktstartseite</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

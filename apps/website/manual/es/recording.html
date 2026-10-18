@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Graba cualquier señal conectada del grafo en un archivo RF64 WAV.">
+    <title>Grabación — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/recording.html">
+    <link rel="alternate" hreflang="ko" href="../ko/recording.html">
+    <link rel="alternate" hreflang="ja" href="../ja/recording.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/recording.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/recording.html">
+    <link rel="alternate" hreflang="de" href="../de/recording.html">
+    <link rel="alternate" hreflang="fr" href="../fr/recording.html">
+    <link rel="alternate" hreflang="it" href="../it/recording.html">
+    <link rel="alternate" hreflang="es" href="../es/recording.html">
+    <link rel="alternate" hreflang="pt" href="../pt/recording.html">
+    <link rel="alternate" hreflang="ru" href="../ru/recording.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Página del producto"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Idioma"><a href="../en/recording.html" lang="en" hreflang="en">English</a> <a href="../ko/recording.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/recording.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/recording.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/recording.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/recording.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/recording.html" lang="fr" hreflang="fr">Français</a> <a href="../it/recording.html" lang="it" hreflang="it">Italiano</a> <a href="../es/recording.html" lang="es" hreflang="es" aria-current="page">Español</a> <a href="../pt/recording.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/recording.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Borrador previo al lanzamiento</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Capítulos del manual">
+        <a class="back-link" href="../../index.html">← Página del producto</a>
+        <a class="manual-mobile-index" href="index.html">Todos los capítulos</a>
+        <nav class="guide-nav" aria-label="Capítulos del manual"><a href="index.html">Resumen del manual</a>
+<a href="installation.html">Requisitos del sistema e instalación</a>
+<a href="first-launch.html">Primer inicio y permisos</a>
+<a href="workspace.html">Espacio de trabajo de enrutamiento</a>
+<a href="devices.html">Dispositivos y conexiones virtuales</a>
+<a href="app-capture.html">Captura de audio de aplicaciones</a>
+<a href="recording.html" aria-current="page">Grabación</a>
+<a href="effects.html">Efectos integrados y preajustes</a>
+<a href="plugins.html">Plug-ins externos</a>
+<a href="stream-deck.html">Plug-in de Stream Deck</a>
+<a href="licensing.html">Versión gratuita y licencias</a>
+<a href="updates.html">Actualizaciones</a>
+<a href="uninstall.html">Desinstalación</a>
+<a href="troubleshooting.html">Solución de problemas y diagnóstico</a>
+<a href="support.html">Contacto de soporte</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>Grabación</h1><p>Graba cualquier señal conectada del grafo en un archivo RF64 WAV.</p><p class="guide-draft-note">Borrador previo al lanzamiento. Las descargas y las compras públicas aún no están disponibles. Estas instrucciones describen la compilación actual del código fuente; aún queda por verificar el comportamiento de la instalación en los entornos indicados a continuación.</p></header>
+        <nav class="manual-toc" aria-label="En esta página"><p class="sidebar-label">En esta página</p><ul><li><a href="#setup">Configurar y grabar</a></li><li><a href="#pause">Pausar y finalizar una toma</a></li><li><a href="#limits">Límites gratuitos y técnicos</a></li></ul></nav>
+        <section class="guide-section" id="setup" aria-labelledby="setup-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="setup-title">Configurar y grabar</h2>
+<ol><li>Elige <code>Añadir nodo → Salida → Grabador</code>. Conecta los canales que quieras grabar.</li><li>Abre <code>Opciones</code>. Define <code>Canales</code> y usa <code>Elegir carpeta…</code> para seleccionar la <code>Carpeta de grabación</code>.</li><li>Elige <code>Frecuencia de muestreo WAV</code> (con <code>Frecuencia de entrada</code>, se usa la frecuencia de entrada al iniciar una toma) y <code>Profundidad de bits</code>: PCM16, PCM24 o Float32.</li><li>Elige <code>Grabar</code>. MixRelay genera el nombre de archivo de la toma. Usa <code>Pausar</code>, <code>Reanudar</code> y <code>Detener</code> según necesites.</li></ol><p>Detén la grabación antes de cambiar sus ajustes. Durante una toma en curso o en pausa, esos ajustes quedan bloqueados. Cada toma es un archivo RF64 <code>.wav</code>, incluidos los archivos de más de 4 GiB. Usa un lector compatible con RF64. MixRelay no divide la toma por tamaño ni ofrece grabación en MP3.</p><!-- TODO screenshot: Recorder Options, recording and paused states in both languages. -->
+</div></section>
+<section class="guide-section" id="pause" aria-labelledby="pause-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="pause-title">Pausar y finalizar una toma</h2>
+<p>Reanudar continúa en el mismo archivo. El intervalo en pausa no añade silencio: graba 10 segundos, pausa 5 segundos y graba otros 10 segundos para obtener un archivo de 20 segundos. <code>Tiempo grabado</code> cuenta el audio escrito en el archivo.</p><p>La acción global <code>Pausar</code> también pausa los grabadores activos. La acción global <code>Reanudar</code> no reinicia un grabador pausado manualmente o ya detenido. Puedes usar <code>Detener</code> del grabador durante una pausa global para finalizar el archivo. Detener finaliza la cabecera WAV. Cerrar el editor mantiene la grabación; salir del audio en segundo plano finaliza las grabaciones abiertas.</p>
+</div></section>
+<section class="guide-section" id="limits" aria-labelledby="limits-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="limits-title">Límites gratuitos y técnicos</h2>
+<p>La grabación gratuita permite un grabador, hasta dos canales y dos horas de audio grabado por toma. El tiempo en pausa no cuenta. Al llegar al límite, el archivo se finaliza normalmente y el enrutamiento de audio continúa. Una toma en pausa sigue ocupando la cuota de grabadores.</p><p>El motor con licencia admite 1–8 canales por grabador y hasta 16 sesiones de grabación. El tiempo permitido se fija al iniciar la toma. Activar después no amplía una toma gratuita; la caducidad de la licencia no acorta una toma iniciada con acceso de pago. Inicia una toma nueva para usar los límites de la licencia actual.</p><p>Si aparece <code>Error de grabación</code>, revisa la carpeta elegida, los permisos de escritura y el espacio libre en disco. Detén la grabación y comprueba el archivo guardado antes de iniciar otra toma.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Capítulos del manual"><a rel="prev" href="app-capture.html">← Anterior: Captura de audio de aplicaciones</a><a rel="next" href="effects.html">Siguiente: Efectos integrados y preajustes →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Borrador previo al lanzamiento · MixRelay 0.1.0</p><a href="../../index.html">Página del producto</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

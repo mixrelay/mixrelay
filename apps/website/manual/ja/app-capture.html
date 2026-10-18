@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="実行中のアプリの音声をキャプチャし、グラフを通して送ります。">
+    <title>アプリの音声キャプチャ — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/app-capture.html">
+    <link rel="alternate" hreflang="ko" href="../ko/app-capture.html">
+    <link rel="alternate" hreflang="ja" href="../ja/app-capture.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/app-capture.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/app-capture.html">
+    <link rel="alternate" hreflang="de" href="../de/app-capture.html">
+    <link rel="alternate" hreflang="fr" href="../fr/app-capture.html">
+    <link rel="alternate" hreflang="it" href="../it/app-capture.html">
+    <link rel="alternate" hreflang="es" href="../es/app-capture.html">
+    <link rel="alternate" hreflang="pt" href="../pt/app-capture.html">
+    <link rel="alternate" hreflang="ru" href="../ru/app-capture.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">本文へスキップ</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="製品ホーム"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="言語"><a href="../en/app-capture.html" lang="en" hreflang="en">English</a> <a href="../ko/app-capture.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/app-capture.html" lang="ja" hreflang="ja" aria-current="page">日本語</a> <a href="../zh-Hans/app-capture.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/app-capture.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/app-capture.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/app-capture.html" lang="fr" hreflang="fr">Français</a> <a href="../it/app-capture.html" lang="it" hreflang="it">Italiano</a> <a href="../es/app-capture.html" lang="es" hreflang="es">Español</a> <a href="../pt/app-capture.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/app-capture.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 公開前の草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="マニュアルの章">
+        <a class="back-link" href="../../index.html">← 製品ホーム</a>
+        <a class="manual-mobile-index" href="index.html">すべての章</a>
+        <nav class="guide-nav" aria-label="マニュアルの章"><a href="index.html">マニュアル概要</a>
+<a href="installation.html">システム要件とインストール</a>
+<a href="first-launch.html">初回起動とアクセス許可</a>
+<a href="workspace.html">ルーティングワークスペース</a>
+<a href="devices.html">デバイスと仮想エンドポイント</a>
+<a href="app-capture.html" aria-current="page">アプリの音声キャプチャ</a>
+<a href="recording.html">録音</a>
+<a href="effects.html">内蔵エフェクトとプリセット</a>
+<a href="plugins.html">外部プラグイン</a>
+<a href="stream-deck.html">Stream Deckプラグイン</a>
+<a href="licensing.html">無料版とライセンス</a>
+<a href="updates.html">アップデート</a>
+<a href="uninstall.html">アンインストール</a>
+<a href="troubleshooting.html">トラブルシューティングと診断</a>
+<a href="support.html">サポート窓口</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / マニュアル</p><h1>アプリの音声キャプチャ</h1><p>実行中のアプリの音声をキャプチャし、グラフを通して送ります。</p><p class="guide-draft-note">公開前の草稿です。一般向けのダウンロードと購入はまだ利用できません。本書は現在のソースからビルドした製品を説明しています。以下に記載する環境では、インストール後の動作確認が引き続き必要です。</p></header>
+        <nav class="manual-toc" aria-label="このページの内容"><p class="sidebar-label">このページの内容</p><ul><li><a href="#capture">アプリを選ぶ</a></li><li><a href="#unavailable">音が出ない場合とソースの再生</a></li></ul></nav>
+        <section class="guide-section" id="capture" aria-labelledby="capture-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="capture-title">アプリを選ぶ</h2>
+<ol><li>ソースとなるアプリを開いて再生を始め、音声ソースを利用できる状態にします。</li><li>MixRelayで<code>ノードを追加 → ソース</code>を選び、<code>実行中のアプリケーション</code>からアプリを選択します。</li><li>出力チャンネルをプロセッサー、出力、レコーダーに接続します。必要に応じて<code>オプション</code>の<code>ソースゲイン</code>を調整します。</li></ol><p>ソース一覧には検出されたアプリが表示されます。ブラウザのタブやウインドウ単位の一覧ではありません。表示名を変更しても、キャプチャするアプリは変わりません。物理入力と個別アプリのキャプチャノードは、無料版の入力2個の枠を共有します。</p>
+</div></section>
+<section class="guide-section" id="unavailable" aria-labelledby="unavailable-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="unavailable-title">音が出ない場合とソースの再生</h2>
+<p>キャプチャには48 kHzと該当する<a href="first-launch.html#permissions">macOSのアクセス許可</a>が必要です。ノードが<code>オフライン</code>の場合は、アプリが起動しているか確認してください。<code>アプリケーションを再選択</code>と表示された場合は、ノードのアプリ選択から目的のソースを選びます。複数のソースが一致する場合、MixRelayは代わりのソースを自動選択しません。</p><p>アプリ本来の再生とMixRelay経由の音声の両方が聞こえる場合があります。音が二重になる場合は、モニタールートを確認してください。MixRelayはシステムの既定出力を変更しません。キャプチャルートで元の再生を抑制する場合、その対象はMixRelayが管理する経路に限られます。現在のUIに、ソースの再生を個別に切り替えるスイッチはありません。</p><!-- TODO screenshot: running application menu and offline/reselection states, both languages. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="マニュアルの章"><a rel="prev" href="devices.html">← 前へ: デバイスと仮想エンドポイント</a><a rel="next" href="recording.html">次へ: 録音 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>公開前の草稿 · MixRelay 0.1.0</p><a href="../../index.html">製品ホーム</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

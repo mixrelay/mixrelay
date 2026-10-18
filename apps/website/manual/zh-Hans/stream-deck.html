@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="在 macOS 上通过 Stream Deck 控制音频图节点。">
+    <title>Stream Deck 插件 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/stream-deck.html">
+    <link rel="alternate" hreflang="ko" href="../ko/stream-deck.html">
+    <link rel="alternate" hreflang="ja" href="../ja/stream-deck.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/stream-deck.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/stream-deck.html">
+    <link rel="alternate" hreflang="de" href="../de/stream-deck.html">
+    <link rel="alternate" hreflang="fr" href="../fr/stream-deck.html">
+    <link rel="alternate" hreflang="it" href="../it/stream-deck.html">
+    <link rel="alternate" hreflang="es" href="../es/stream-deck.html">
+    <link rel="alternate" hreflang="pt" href="../pt/stream-deck.html">
+    <link rel="alternate" hreflang="ru" href="../ru/stream-deck.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳至正文</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="产品首页"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="语言"><a href="../en/stream-deck.html" lang="en" hreflang="en">English</a> <a href="../ko/stream-deck.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/stream-deck.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/stream-deck.html" lang="zh-Hans" hreflang="zh-Hans" aria-current="page">简体中文</a> <a href="../zh-Hant/stream-deck.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/stream-deck.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/stream-deck.html" lang="fr" hreflang="fr">Français</a> <a href="../it/stream-deck.html" lang="it" hreflang="it">Italiano</a> <a href="../es/stream-deck.html" lang="es" hreflang="es">Español</a> <a href="../pt/stream-deck.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/stream-deck.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 发布前草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="手册章节">
+        <a class="back-link" href="../../index.html">← 产品首页</a>
+        <a class="manual-mobile-index" href="index.html">所有章节</a>
+        <nav class="guide-nav" aria-label="手册章节"><a href="index.html">手册概览</a>
+<a href="installation.html">系统要求与安装</a>
+<a href="first-launch.html">首次启动与权限</a>
+<a href="workspace.html">路由工作区</a>
+<a href="devices.html">设备与虚拟端点</a>
+<a href="app-capture.html">应用音频采集</a>
+<a href="recording.html">录音</a>
+<a href="effects.html">内置效果与预设</a>
+<a href="plugins.html">外部插件</a>
+<a href="stream-deck.html" aria-current="page">Stream Deck 插件</a>
+<a href="licensing.html">免费版与许可</a>
+<a href="updates.html">更新</a>
+<a href="uninstall.html">卸载</a>
+<a href="troubleshooting.html">故障排查与诊断</a>
+<a href="support.html">联系支持</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / 手册</p><h1>Stream Deck 插件</h1><p>在 macOS 上通过 Stream Deck 控制音频图节点。</p><p class="guide-draft-note">发布前草稿。目前尚不提供公开下载或购买。本手册介绍当前源代码构建版本的行为；在下文所列环境中，仍需验证安装后的实际行为。</p></header>
+        <nav class="manual-toc" aria-label="本页内容"><p class="sidebar-label">本页内容</p><ul><li><a href="#setup">要求与设置</a></li><li><a href="#controls">按键、旋钮与录音</a></li></ul></nav>
+        <section class="guide-section" id="setup" aria-labelledby="setup-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="setup-title">要求与设置</h2>
+<p>要求 macOS 14.2 或更高版本、Stream Deck 6.6 或更高版本，并且 MixRelay 正在运行。不提供 Linux Stream Deck 支持。插件使用私有本地连接，无需账户、局域网配对或公开 HTTP 服务。</p><ol><li>官方插件包可用后，用 Stream Deck 打开其 <code>.streamDeckPlugin</code> 文件。目前尚未提供公开下载。</li><li>添加一个 MixRelay 的 <code>电源</code>、<code>静音</code>、<code>音量</code> 或 <code>录音</code> 操作。</li><li>在属性检查器中，选择目标音频图和支持该操作的节点。</li></ol><p>请保持 MixRelay 后台音频运行，可以关闭编辑器窗口。节点被删除后，必须手动重新指定目标。失败或断线时的命令不会排队等待之后执行。</p>
+</div></section>
+<section class="guide-section" id="controls" aria-labelledby="controls-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="controls-title">按键、旋钮与录音</h2>
+<p><code>电源</code> 开启或关闭节点处理。<code>静音</code> 在保持处理的同时使输出静音。节点关闭时，必须先开启电源，其他控件才能操作它。</p><p>对于 <code>音量</code> 按钮，选择增加或减少，以及 0.5、1、2 或 3 dB 的步长。旋转 Stream Deck + 旋钮时，音量按同样的步长变化。如果目标支持静音，按下旋钮即可静音。没有增益的节点不能作为音量控制目标。</p><p><code>录音</code> 仅列出录音器节点。可选择录音、暂停或停止。选择录音会继续已有的暂停录音。录音文件夹和格式来自 MixRelay 录音器的选项，在属性检查器中只读。</p><!-- TODO screenshot: Stream Deck installation and actual key/dial property inspector, English and Korean; hardware verification remains. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="手册章节"><a rel="prev" href="plugins.html">← 上一章：外部插件</a><a rel="next" href="licensing.html">下一章：免费版与许可 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>发布前草稿 · MixRelay 0.1.0</p><a href="../../index.html">产品首页</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

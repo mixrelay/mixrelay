@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Steuern Sie Graphknoten unter macOS mit Stream Deck.">
+    <title>Stream Deck-Plug-in — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/stream-deck.html">
+    <link rel="alternate" hreflang="ko" href="../ko/stream-deck.html">
+    <link rel="alternate" hreflang="ja" href="../ja/stream-deck.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/stream-deck.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/stream-deck.html">
+    <link rel="alternate" hreflang="de" href="../de/stream-deck.html">
+    <link rel="alternate" hreflang="fr" href="../fr/stream-deck.html">
+    <link rel="alternate" hreflang="it" href="../it/stream-deck.html">
+    <link rel="alternate" hreflang="es" href="../es/stream-deck.html">
+    <link rel="alternate" hreflang="pt" href="../pt/stream-deck.html">
+    <link rel="alternate" hreflang="ru" href="../ru/stream-deck.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Zum Inhalt springen</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Produktstartseite"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Sprache"><a href="../en/stream-deck.html" lang="en" hreflang="en">English</a> <a href="../ko/stream-deck.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/stream-deck.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/stream-deck.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/stream-deck.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/stream-deck.html" lang="de" hreflang="de" aria-current="page">Deutsch</a> <a href="../fr/stream-deck.html" lang="fr" hreflang="fr">Français</a> <a href="../it/stream-deck.html" lang="it" hreflang="it">Italiano</a> <a href="../es/stream-deck.html" lang="es" hreflang="es">Español</a> <a href="../pt/stream-deck.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/stream-deck.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Vorläufige Fassung vor Veröffentlichung</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Kapitel des Handbuchs">
+        <a class="back-link" href="../../index.html">← Produktstartseite</a>
+        <a class="manual-mobile-index" href="index.html">Alle Kapitel</a>
+        <nav class="guide-nav" aria-label="Kapitel des Handbuchs"><a href="index.html">Handbuchübersicht</a>
+<a href="installation.html">Systemanforderungen und Installation</a>
+<a href="first-launch.html">Erster Start und Berechtigungen</a>
+<a href="workspace.html">Routing-Arbeitsbereich</a>
+<a href="devices.html">Geräte und virtuelle Endpunkte</a>
+<a href="app-capture.html">Audio von Anwendungen erfassen</a>
+<a href="recording.html">Aufnahme</a>
+<a href="effects.html">Integrierte Effekte und Voreinstellungen</a>
+<a href="plugins.html">Externe Plug-ins</a>
+<a href="stream-deck.html" aria-current="page">Stream Deck-Plug-in</a>
+<a href="licensing.html">Kostenlose Version und Lizenzierung</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html">Deinstallation</a>
+<a href="troubleshooting.html">Fehlerbehebung und Diagnose</a>
+<a href="support.html">Support kontaktieren</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / HANDBUCH</p><h1>Stream Deck-Plug-in</h1><p>Steuern Sie Graphknoten unter macOS mit Stream Deck.</p><p class="guide-draft-note">Vorläufige Fassung vor Veröffentlichung. Öffentliche Downloads und Käufe sind noch nicht verfügbar. Diese Anleitung beschreibt den aktuellen Build aus dem Quellcode. Das Verhalten nach der Installation muss in den unten genannten Umgebungen noch überprüft werden.</p></header>
+        <nav class="manual-toc" aria-label="Auf dieser Seite"><p class="sidebar-label">Auf dieser Seite</p><ul><li><a href="#setup">Voraussetzungen und Einrichtung</a></li><li><a href="#controls">Tasten, Drehregler und Aufnahme</a></li></ul></nav>
+        <section class="guide-section" id="setup" aria-labelledby="setup-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="setup-title">Voraussetzungen und Einrichtung</h2>
+<p>Erforderlich sind macOS 14.2 oder neuer, Stream Deck 6.6 oder neuer und ein laufendes MixRelay. Stream Deck wird unter Linux nicht unterstützt. Das Plug-in nutzt eine private lokale Verbindung. Ein Konto, LAN-Kopplung oder ein öffentlicher HTTP-Dienst sind nicht nötig.</p><ol><li>Sobald das offizielle Plug-in-Paket verfügbar ist, öffnen Sie dessen <code>.streamDeckPlugin</code>-Datei mit Stream Deck. Ein öffentlicher Download ist noch nicht verfügbar.</li><li>Fügen Sie eine MixRelay-Aktion <code>Ein/Aus</code>, <code>Stummschalten</code>, <code>Lautstärke</code> oder <code>Aufnahme</code> hinzu.</li><li>Wählen Sie im Eigenschafteninspektor den Zielgraphen und einen Knoten, der diese Aktion unterstützt.</li></ol><p>Lassen Sie die Hintergrund-Audioverarbeitung von MixRelay laufen. Das Editorfenster darf geschlossen sein. Ein entfernter Knoten muss ausdrücklich neu zugewiesen werden. Fehlgeschlagene oder durch einen Verbindungsabbruch unterbrochene Befehle werden nicht für eine spätere Ausführung vorgemerkt.</p>
+</div></section>
+<section class="guide-section" id="controls" aria-labelledby="controls-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="controls-title">Tasten, Drehregler und Aufnahme</h2>
+<p><code>Ein/Aus</code> schaltet die Verarbeitung des Knotens ein oder aus. <code>Stummschalten</code> schaltet seinen Ausgang stumm, während die Verarbeitung weiterläuft. Ein ausgeschalteter Knoten muss eingeschaltet werden, bevor andere Steuerelemente auf ihn wirken können.</p><p>Wählen Sie für <code>Lautstärke</code>-Tasten Erhöhen oder Verringern und eine Schrittweite von 0.5, 1, 2 oder 3 dB. Ein Drehregler des Stream Deck + ändert die Lautstärke beim Drehen um dieselbe Schrittweite. Ein Druck auf den Drehregler schaltet das Ziel stumm, sofern es dies unterstützt. Knoten ohne Verstärkungsregelung können nicht als Lautstärkeziel gewählt werden.</p><p><code>Aufnahme</code> listet nur Rekorderknoten auf. Wählen Sie Aufnehmen, Pausieren oder Stoppen. Aufnehmen setzt eine bereits pausierte Aufnahme fort. Aufnahmeordner und Format stammen aus den Optionen des MixRelay-Rekorders und können im Eigenschafteninspektor nur gelesen werden.</p><!-- TODO screenshot: Stream Deck installation and actual key/dial property inspector, English and Korean; hardware verification remains. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="Kapitel des Handbuchs"><a rel="prev" href="plugins.html">← Zurück: Externe Plug-ins</a><a rel="next" href="licensing.html">Weiter: Kostenlose Version und Lizenzierung →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Vorläufige Fassung vor Veröffentlichung · MixRelay 0.1.0</p><a href="../../index.html">Produktstartseite</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

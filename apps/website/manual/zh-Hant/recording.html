@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="將音訊圖中任何已連接的訊號錄製為 RF64 WAV 檔案。">
+    <title>錄音 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/recording.html">
+    <link rel="alternate" hreflang="ko" href="../ko/recording.html">
+    <link rel="alternate" hreflang="ja" href="../ja/recording.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/recording.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/recording.html">
+    <link rel="alternate" hreflang="de" href="../de/recording.html">
+    <link rel="alternate" hreflang="fr" href="../fr/recording.html">
+    <link rel="alternate" hreflang="it" href="../it/recording.html">
+    <link rel="alternate" hreflang="es" href="../es/recording.html">
+    <link rel="alternate" hreflang="pt" href="../pt/recording.html">
+    <link rel="alternate" hreflang="ru" href="../ru/recording.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳至正文</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="產品首頁"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="語言"><a href="../en/recording.html" lang="en" hreflang="en">English</a> <a href="../ko/recording.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/recording.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/recording.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/recording.html" lang="zh-Hant" hreflang="zh-Hant" aria-current="page">繁體中文</a> <a href="../de/recording.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/recording.html" lang="fr" hreflang="fr">Français</a> <a href="../it/recording.html" lang="it" hreflang="it">Italiano</a> <a href="../es/recording.html" lang="es" hreflang="es">Español</a> <a href="../pt/recording.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/recording.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 發佈前草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="手冊章節">
+        <a class="back-link" href="../../index.html">← 產品首頁</a>
+        <a class="manual-mobile-index" href="index.html">所有章節</a>
+        <nav class="guide-nav" aria-label="手冊章節"><a href="index.html">手冊總覽</a>
+<a href="installation.html">系統需求與安裝</a>
+<a href="first-launch.html">首次啟動與權限</a>
+<a href="workspace.html">路由工作區</a>
+<a href="devices.html">裝置與虛擬端點</a>
+<a href="app-capture.html">應用程式音訊擷取</a>
+<a href="recording.html" aria-current="page">錄音</a>
+<a href="effects.html">內建效果與預設</a>
+<a href="plugins.html">外掛程式</a>
+<a href="stream-deck.html">Stream Deck 外掛程式</a>
+<a href="licensing.html">免費版與授權</a>
+<a href="updates.html">更新</a>
+<a href="uninstall.html">解除安裝</a>
+<a href="troubleshooting.html">疑難排解與診斷</a>
+<a href="support.html">聯絡支援</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / 手冊</p><h1>錄音</h1><p>將音訊圖中任何已連接的訊號錄製為 RF64 WAV 檔案。</p><p class="guide-draft-note">發佈前草稿。目前尚未提供公開下載或購買。本手冊說明目前原始碼建置版本的行為；在下文所列環境中，仍須驗證安裝後的實際行為。</p></header>
+        <nav class="manual-toc" aria-label="本頁內容"><p class="sidebar-label">本頁內容</p><ul><li><a href="#setup">設定並開始錄音</a></li><li><a href="#pause">暫停與完成一次錄音</a></li><li><a href="#limits">免費版與技術限制</a></li></ul></nav>
+        <section class="guide-section" id="setup" aria-labelledby="setup-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="setup-title">設定並開始錄音</h2>
+<ol><li>選擇 <code>新增節點 → 輸出 → 錄音機</code>，連接要錄製的聲道。</li><li>開啟 <code>選項</code>。設定 <code>聲道</code>，並透過 <code>選擇資料夾…</code> 選擇 <code>錄音資料夾</code>。</li><li>選擇 <code>WAV 取樣率</code>（<code>輸入取樣率</code> 會採用本次錄音開始時的輸入取樣率），並將 <code>位元深度</code> 設為 PCM16、PCM24 或 Float32。</li><li>選擇 <code>錄音</code>。MixRelay 會建立本次錄音的檔名。視需要使用 <code>暫停</code>、<code>繼續</code> 和 <code>停止</code>。</li></ol><p>變更錄音設定前請先停止錄音。錄音中或暫停中的設定會鎖定。每次錄音儲存為一個 RF64 <code>.wav</code> 檔案，支援超過 4 GiB 的檔案。請使用支援 RF64 的軟體讀取。MixRelay 不會依檔案大小分割錄音，也不提供 MP3 錄音。</p><!-- TODO screenshot: Recorder Options, recording and paused states in both languages. -->
+</div></section>
+<section class="guide-section" id="pause" aria-labelledby="pause-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="pause-title">暫停與完成一次錄音</h2>
+<p>繼續錄音會寫入同一個檔案。暫停期間不會加入靜音：錄製 10 秒、暫停 5 秒、再錄製 10 秒，會產生一個 20 秒的檔案。<code>錄音時長</code> 計算實際寫入檔案的音訊時長。</p><p>全域 <code>暫停</code> 也會暫停正在錄音的錄音機。全域 <code>繼續</code> 不會重新啟動手動暫停或已停止的錄音機。在全域暫停期間，仍可使用錄音機的 <code>停止</code> 完成檔案。停止時會完成 WAV 檔頭的寫入。關閉編輯器後錄音仍會繼續；結束背景音訊會完成尚未結束的錄音檔案。</p>
+</div></section>
+<section class="guide-section" id="limits" aria-labelledby="limits-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="limits-title">免費版與技術限制</h2>
+<p>免費錄音允許使用一個錄音機，每次最多兩個聲道、兩小時的實際錄音，不計暫停時間。達到上限時，檔案正常完成，音訊路由持續運作。暫停中的錄音仍占用錄音機額度。</p><p>有授權的引擎支援每個錄音機 1–8 個聲道，最多 16 個錄音工作階段。時間額度在每次錄音開始時決定。之後啟用授權不會延長免費版已開始的錄音；授權到期也不會提早結束在付費權限有效時開始的錄音。如需使用目前授權的額度，請開始一次新錄音。</p><p>如果出現 <code>錄音錯誤</code>，請檢查所選資料夾、寫入權限及磁碟可用空間。先停止並檢查已儲存的檔案，再開始下一次錄音。</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="手冊章節"><a rel="prev" href="app-capture.html">← 上一章：應用程式音訊擷取</a><a rel="next" href="effects.html">下一章：內建效果與預設 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>發佈前草稿 · MixRelay 0.1.0</p><a href="../../index.html">產品首頁</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

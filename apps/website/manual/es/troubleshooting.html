@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Revisa el mensaje actual y la ruta de la señal antes de cambiar o eliminar el trabajo guardado.">
+    <title>Solución de problemas y diagnóstico — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/troubleshooting.html">
+    <link rel="alternate" hreflang="ko" href="../ko/troubleshooting.html">
+    <link rel="alternate" hreflang="ja" href="../ja/troubleshooting.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/troubleshooting.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/troubleshooting.html">
+    <link rel="alternate" hreflang="de" href="../de/troubleshooting.html">
+    <link rel="alternate" hreflang="fr" href="../fr/troubleshooting.html">
+    <link rel="alternate" hreflang="it" href="../it/troubleshooting.html">
+    <link rel="alternate" hreflang="es" href="../es/troubleshooting.html">
+    <link rel="alternate" hreflang="pt" href="../pt/troubleshooting.html">
+    <link rel="alternate" hreflang="ru" href="../ru/troubleshooting.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Página del producto"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Idioma"><a href="../en/troubleshooting.html" lang="en" hreflang="en">English</a> <a href="../ko/troubleshooting.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/troubleshooting.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/troubleshooting.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/troubleshooting.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/troubleshooting.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/troubleshooting.html" lang="fr" hreflang="fr">Français</a> <a href="../it/troubleshooting.html" lang="it" hreflang="it">Italiano</a> <a href="../es/troubleshooting.html" lang="es" hreflang="es" aria-current="page">Español</a> <a href="../pt/troubleshooting.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/troubleshooting.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Borrador previo al lanzamiento</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Capítulos del manual">
+        <a class="back-link" href="../../index.html">← Página del producto</a>
+        <a class="manual-mobile-index" href="index.html">Todos los capítulos</a>
+        <nav class="guide-nav" aria-label="Capítulos del manual"><a href="index.html">Resumen del manual</a>
+<a href="installation.html">Requisitos del sistema e instalación</a>
+<a href="first-launch.html">Primer inicio y permisos</a>
+<a href="workspace.html">Espacio de trabajo de enrutamiento</a>
+<a href="devices.html">Dispositivos y conexiones virtuales</a>
+<a href="app-capture.html">Captura de audio de aplicaciones</a>
+<a href="recording.html">Grabación</a>
+<a href="effects.html">Efectos integrados y preajustes</a>
+<a href="plugins.html">Plug-ins externos</a>
+<a href="stream-deck.html">Plug-in de Stream Deck</a>
+<a href="licensing.html">Versión gratuita y licencias</a>
+<a href="updates.html">Actualizaciones</a>
+<a href="uninstall.html">Desinstalación</a>
+<a href="troubleshooting.html" aria-current="page">Solución de problemas y diagnóstico</a>
+<a href="support.html">Contacto de soporte</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>Solución de problemas y diagnóstico</h1><p>Revisa el mensaje actual y la ruta de la señal antes de cambiar o eliminar el trabajo guardado.</p><p class="guide-draft-note">Borrador previo al lanzamiento. Las descargas y las compras públicas aún no están disponibles. Estas instrucciones describen la compilación actual del código fuente; aún queda por verificar el comportamiento de la instalación en los entornos indicados a continuación.</p></header>
+        <nav class="manual-toc" aria-label="En esta página"><p class="sidebar-label">En esta página</p><ul><li><a href="#sound">Sin sonido, audio duplicado o cortes</a></li><li><a href="#changes">Cambios sin aplicar o sin guardar</a></li><li><a href="#diagnostics">Guardar un informe de diagnóstico</a></li></ul></nav>
+        <section class="guide-section" id="sound" aria-labelledby="sound-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="sound-title">Sin sonido, audio duplicado o cortes</h2>
+<ol><li>Comprueba la acción global <code>Pausar</code>, el encendido de los nodos, el silencio y los números de los canales conectados. La selección de un grafo no indica si está encendido o apagado.</li><li>Confirma que la fuente produce audio. Revisa los <a href="first-launch.html#permissions">permisos de captura o micrófono</a> y la <a href="app-capture.html#unavailable">selección de la aplicación</a> si es necesario.</li><li>Comprueba la salida física y su volumen de hardware. Para OBS o un DAW, elige MixRelay IO como entrada de esa aplicación y conecta <code>Grafo → dispositivo</code> en MixRelay.</li><li>Si el sonido está duplicado, revisa la reproducción directa y las rutas de monitorización. Si hay cortes, prueba un <code>Búfer de procesamiento</code> mayor si el adaptador permite cambiarlo.</li></ol><p>Si un dispositivo no está disponible, vuelve a conectarlo y selecciónalo de nuevo cuando sea necesario. Si se rechazó un formato guardado o falló la restauración del dispositivo al estado anterior, vuelve a aplicar un formato compatible siguiendo el mensaje. La conexión con el motor y el procesamiento de audio son independientes: un motor accesible puede indicar que el audio está detenido o ha fallado.</p><p>Si MixRelay pausa el audio tras varios fallos del motor, revisa los cambios recientes antes de elegir <code>Reanudar</code>. No se admite audio mediante Docker; usa una sesión normal de usuario de Linux con las versiones requeridas de PipeWire y WirePlumber.</p>
+</div></section>
+<section class="guide-section" id="changes" aria-labelledby="changes-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="changes-title">Cambios sin aplicar o sin guardar</h2>
+<p><code>Sin aplicar</code> no confirma que el audio esté activo. Si la aplicación indica que se conservaron las ediciones, revisa el estado actual del motor y usa <code>Reintentar</code> cuando estés listo. No repitas rápidamente un comando cuyo resultado sea incierto. Si los conflictos persistentes ofrecen <code>Sobrescribir el grafo del motor con estas ediciones</code> o <code>Descartar las ediciones y cargar el grafo del motor</code>, decide si quieres aplicar tu borrador o descartarlo.</p><p>Puede aparecer un aviso de error al guardar mientras el audio sigue activo. Si es posible, guarda una copia del espacio de trabajo antes de cerrar. Para recuperar solo la disposición, <code>Guardar la disposición actual</code> vuelve a intentar guardarla; <code>Cargar la disposición guardada</code> la sustituye por la disposición guardada. Para errores de efectos, consulta la <a href="plugins.html#failures">guía de recuperación de plug-ins</a>. Para errores de licencia, revisa la conexión y el reloj del dispositivo; una activación incierta requiere soporte.</p>
+</div></section>
+<section class="guide-section" id="diagnostics" aria-labelledby="diagnostics-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="diagnostics-title">Guardar un informe de diagnóstico</h2>
+<ol><li>Abre el menú de estado de MixRelay en segundo plano.</li><li>Elige <code>Guardar informe de diagnóstico…</code>.</li><li>Selecciona dónde guardar <code>dump.json</code>. Revísalo y adjúntalo a un correo de soporte si te lo piden. Guardarlo no lo sube a ningún servidor.</li></ol><p>El informe contiene información acotada sobre versión, sistema operativo, arquitectura, formato de dispositivo, estado de ejecución y contadores numéricos. Excluye audio, volcados de memoria, registros sin procesar, datos de autenticación, rutas de usuario, nombres e ID de dispositivos, grafos y listas de aplicaciones. Ocupa como máximo 256 KiB y contiene hasta 64 resúmenes de dispositivos. Las observaciones no disponibles se indican como tales. La exportación no inicia el audio detenido.</p><p>Solo se ejecuta una exportación a la vez. Cancelar no crea ningún archivo. Sustituir un archivo existente requiere confirmar la sobrescritura en el sistema operativo. Si falla el guardado, revisa el destino y vuelve a intentarlo. Consulta <a href="support.html">contacto de soporte</a> para saber qué más incluir.</p><!-- TODO screenshot: status-menu diagnostic export and native save dialog, both languages. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="Capítulos del manual"><a rel="prev" href="uninstall.html">← Anterior: Desinstalación</a><a rel="next" href="support.html">Siguiente: Contacto de soporte →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Borrador previo al lanzamiento · MixRelay 0.1.0</p><a href="../../index.html">Página del producto</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

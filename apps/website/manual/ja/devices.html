@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="MixRelay IOを使って他のアプリと音声をやり取りします。デバイスの形式と録音形式は別々に設定します。">
+    <title>デバイスと仮想エンドポイント — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/devices.html">
+    <link rel="alternate" hreflang="ko" href="../ko/devices.html">
+    <link rel="alternate" hreflang="ja" href="../ja/devices.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/devices.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/devices.html">
+    <link rel="alternate" hreflang="de" href="../de/devices.html">
+    <link rel="alternate" hreflang="fr" href="../fr/devices.html">
+    <link rel="alternate" hreflang="it" href="../it/devices.html">
+    <link rel="alternate" hreflang="es" href="../es/devices.html">
+    <link rel="alternate" hreflang="pt" href="../pt/devices.html">
+    <link rel="alternate" hreflang="ru" href="../ru/devices.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">本文へスキップ</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="製品ホーム"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="言語"><a href="../en/devices.html" lang="en" hreflang="en">English</a> <a href="../ko/devices.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/devices.html" lang="ja" hreflang="ja" aria-current="page">日本語</a> <a href="../zh-Hans/devices.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/devices.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/devices.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/devices.html" lang="fr" hreflang="fr">Français</a> <a href="../it/devices.html" lang="it" hreflang="it">Italiano</a> <a href="../es/devices.html" lang="es" hreflang="es">Español</a> <a href="../pt/devices.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/devices.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 公開前の草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="マニュアルの章">
+        <a class="back-link" href="../../index.html">← 製品ホーム</a>
+        <a class="manual-mobile-index" href="index.html">すべての章</a>
+        <nav class="guide-nav" aria-label="マニュアルの章"><a href="index.html">マニュアル概要</a>
+<a href="installation.html">システム要件とインストール</a>
+<a href="first-launch.html">初回起動とアクセス許可</a>
+<a href="workspace.html">ルーティングワークスペース</a>
+<a href="devices.html" aria-current="page">デバイスと仮想エンドポイント</a>
+<a href="app-capture.html">アプリの音声キャプチャ</a>
+<a href="recording.html">録音</a>
+<a href="effects.html">内蔵エフェクトとプリセット</a>
+<a href="plugins.html">外部プラグイン</a>
+<a href="stream-deck.html">Stream Deckプラグイン</a>
+<a href="licensing.html">無料版とライセンス</a>
+<a href="updates.html">アップデート</a>
+<a href="uninstall.html">アンインストール</a>
+<a href="troubleshooting.html">トラブルシューティングと診断</a>
+<a href="support.html">サポート窓口</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / マニュアル</p><h1>デバイスと仮想エンドポイント</h1><p>MixRelay IOを使って他のアプリと音声をやり取りします。デバイスの形式と録音形式は別々に設定します。</p><p class="guide-draft-note">公開前の草稿です。一般向けのダウンロードと購入はまだ利用できません。本書は現在のソースからビルドした製品を説明しています。以下に記載する環境では、インストール後の動作確認が引き続き必要です。</p></header>
+        <nav class="manual-toc" aria-label="このページの内容"><p class="sidebar-label">このページの内容</p><ul><li><a href="#directions">音声の方向を選ぶ</a></li><li><a href="#formats">チャンネル、サンプルレート、PCM</a></li><li><a href="#buffers">処理バッファーと遅延</a></li></ul></nav>
+        <section class="guide-section" id="directions" aria-labelledby="directions-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="directions-title">音声の方向を選ぶ</h2>
+<p><code>MixRelay IO</code>は既定の仮想デバイスです。他のアプリがこのデバイスに再生する音声を受け取るには、<code>ノードを追加 → ソース → MixRelay Virtual I/O</code>から追加します。これが<code>デバイス → グラフ</code>の方向です。グラフのミックスをOBSなどのアプリに送るには、<code>ノードを追加 → 出力 → MixRelay Virtual I/O</code>からデバイスを追加します。こちらは<code>グラフ → デバイス</code>の方向です。OBSやDAWでは、音声入力にMixRelay IOを選びます。</p><p>必要なチャンネルを接続してください。MixRelayはシステムの既定デバイスを選択せず、ハードウェアへのモニタールートも自動では追加しません。モニターするには物理出力を追加し、ミックスを接続します。Driverは、エディターのグラフの割り当て数制限とは別に、OSの再生からキャプチャへの基本的なループバックも提供します。</p><p>グラフ内の参照を削除しても、仮想デバイス自体は削除されません。有料ライセンスでは<code>新規仮想デバイス</code>でデバイスを作成できます。ステータスメニューからデバイスを削除すると、そのデバイスの保存済み設定も削除され、使用中の他のアプリからもそのデバイスが利用できなくなります。</p>
+</div></section>
+<section class="guide-section" id="formats" aria-labelledby="formats-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="formats-title">チャンネル、サンプルレート、PCM</h2>
+<p>仮想ノードの<code>オプション</code>を開くと、<code>デバイス名</code>、<code>チャンネル</code>、サンプルレート、<code>ビット深度</code>を変更できます。対応する共通設定だけが表示されます。名前の変更にはライセンスが必要です。ステータスメニューで選べるチャンネル数は2、4、8、16、32、64です。デバイス自体は各方向で1–64チャンネルに対応しています。</p><p>macOSで対応するサンプルレートは44.1、48、88.2、96、176.4、192 kHzです。デバイスの形式はFloat32、PCM16、パック形式のPCM24、PCM32です。LinuxではPipeWireが対応する組み合わせを選べます。物理デバイスではそのデバイスの仕様に従います。内部DSPはFloat32を使用します。デバイスのビット深度を変更してもWAVの録音形式は変わりません。</p><p>形式の変更中は音声が一時的に途切れます。変更に失敗した場合は、メッセージと現在の値を確認してから再試行してください。保存の失敗は、デバイス自体は変更されたものの、新しい設定が保存されなかったことを示す場合があります。</p><!-- TODO screenshot: virtual endpoint Options with supported format choices and status-menu device settings. -->
+</div></section>
+<section class="guide-section" id="buffers" aria-labelledby="buffers-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="buffers-title">処理バッファーと遅延</h2>
+<p>動作中の変更に対応している場合、フッターの<code>処理バッファー</code>でエンジンの入出力バッファーを変更できます。値を選ぶと適用されます。復旧可能なエラーでは、<code>適用</code>で対応する設定の適用を再試行できます。バッファーを小さくするとバッファー遅延を減らせますが、音切れが起きやすくなる場合があります。音が途切れる場合は大きくしてください。</p><p>仮想デバイスごとのバッファー選択はありません。他のアプリは各自のクライアントバッファーを選びます。<code>バッファー遅延</code>は処理バッファー1個分の時間で、入出力全体の遅延ではありません。PipeWire全体のquantumを保証する値でもありません。複数の物理デバイスを使う場合、サンプルレート変換とクロック同期が必要になることがあります。</p><p>アプリの音声キャプチャには現在48 kHzが必要です。現在のフッターで操作できるのはバッファーで、処理サンプルレートの選択ではありません。仮想デバイスのサンプルレートはデバイス設定で変更します。一部のネイティブプラグインでは、プリセット状態の転送が未実装のため、動作中の形式変更ができません。</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="マニュアルの章"><a rel="prev" href="workspace.html">← 前へ: ルーティングワークスペース</a><a rel="next" href="app-capture.html">次へ: アプリの音声キャプチャ →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>公開前の草稿 · MixRelay 0.1.0</p><a href="../../index.html">製品ホーム</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

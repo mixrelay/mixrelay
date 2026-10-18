@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Créez un graphe avec des nœuds source, processeur et sortie. Les câbles transportent l’audio entre les canaux individuels.">
+    <title>Espace de routage — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/workspace.html">
+    <link rel="alternate" hreflang="ko" href="../ko/workspace.html">
+    <link rel="alternate" hreflang="ja" href="../ja/workspace.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/workspace.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/workspace.html">
+    <link rel="alternate" hreflang="de" href="../de/workspace.html">
+    <link rel="alternate" hreflang="fr" href="../fr/workspace.html">
+    <link rel="alternate" hreflang="it" href="../it/workspace.html">
+    <link rel="alternate" hreflang="es" href="../es/workspace.html">
+    <link rel="alternate" hreflang="pt" href="../pt/workspace.html">
+    <link rel="alternate" hreflang="ru" href="../ru/workspace.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Aller au contenu</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Accueil du produit"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Langue"><a href="../en/workspace.html" lang="en" hreflang="en">English</a> <a href="../ko/workspace.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/workspace.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/workspace.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/workspace.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/workspace.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/workspace.html" lang="fr" hreflang="fr" aria-current="page">Français</a> <a href="../it/workspace.html" lang="it" hreflang="it">Italiano</a> <a href="../es/workspace.html" lang="es" hreflang="es">Español</a> <a href="../pt/workspace.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/workspace.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Version provisoire avant publication</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Chapitres du manuel">
+        <a class="back-link" href="../../index.html">← Accueil du produit</a>
+        <a class="manual-mobile-index" href="index.html">Tous les chapitres</a>
+        <nav class="guide-nav" aria-label="Chapitres du manuel"><a href="index.html">Vue d’ensemble du manuel</a>
+<a href="installation.html">Configuration requise et installation</a>
+<a href="first-launch.html">Premier lancement et autorisations</a>
+<a href="workspace.html" aria-current="page">Espace de routage</a>
+<a href="devices.html">Périphériques et points de terminaison virtuels</a>
+<a href="app-capture.html">Capture audio des applications</a>
+<a href="recording.html">Enregistrement</a>
+<a href="effects.html">Effets intégrés et préréglages</a>
+<a href="plugins.html">Plug-ins externes</a>
+<a href="stream-deck.html">Plug-in Stream Deck</a>
+<a href="licensing.html">Version gratuite et licences</a>
+<a href="updates.html">Mises à jour</a>
+<a href="uninstall.html">Désinstallation</a>
+<a href="troubleshooting.html">Dépannage et diagnostic</a>
+<a href="support.html">Contacter l’assistance</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUEL</p><h1>Espace de routage</h1><p>Créez un graphe avec des nœuds source, processeur et sortie. Les câbles transportent l’audio entre les canaux individuels.</p><p class="guide-draft-note">Version provisoire avant publication. Les téléchargements et les achats ne sont pas encore ouverts au public. Ces instructions décrivent la version actuelle compilée à partir du code source. Le comportement après installation reste à vérifier dans les environnements indiqués ci-dessous.</p></header>
+        <nav class="manual-toc" aria-label="Sur cette page"><p class="sidebar-label">Sur cette page</p><ul><li><a href="#graphs">Graphes, nœuds et enregistrement</a></li><li><a href="#connections">Connecter et affecter les canaux</a></li><li><a href="#keyboard">Connecter sans faire glisser</a></li><li><a href="#states">Désactivation, coupure du son, contournement, pause et fermeture</a></li></ul></nav>
+        <section class="guide-section" id="graphs" aria-labelledby="graphs-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="graphs-title">Graphes, nœuds et enregistrement</h2>
+<p>Utilisez <code>Nouveau graphe</code> pour créer un graphe et <code>Ajouter un nœud</code> pour ajouter <code>Source</code>, <code>Processeur</code> ou <code>Sortie</code>. Sélectionnez un graphe dans <code>Graphes</code> pour le modifier. La sélection ne désactive pas les autres graphes. Avec une licence, plusieurs graphes peuvent fonctionner ensemble.</p><p>Ouvrez les <code>Options</code> d’un nœud pour accéder à ses paramètres disponibles. Double-cliquez sur son nom, appuyez sur <kbd>F2</kbd> lorsque le nœud a le focus, ou utilisez <code>Renommer l’affichage</code> dans son menu. Un nom affiché ne modifie que ce nœud. Effacez-le pour rétablir le nom d’origine.</p><p>Les modifications et la disposition sont enregistrées automatiquement. Un avertissement d’enregistrement signifie qu’elles pourraient être perdues après un redémarrage. Pour un espace de travail portable, utilisez <code>Fichier → Enregistrer</code> ou <code>Enregistrer sous…</code> pour écrire un fichier <code>.mix</code>. <code>Nouvel espace de travail</code> et <code>Ouvrir…</code> demandent confirmation avant de remplacer le contenu actuel. Un fichier d’espace de travail n’installe pas les périphériques ou plug-ins manquants.</p>
+</div></section>
+<section class="guide-section" id="connections" aria-labelledby="connections-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="connections-title">Connecter et affecter les canaux</h2>
+<p>Faites glisser un port de sortie vers un port d’entrée. Pour une paire stéréo, connectez les deux canaux. Maintenez <kbd>Shift</kbd> pour sélectionner d’autres canaux de sortie sur le même nœud, puis faites glisser la sélection vers le premier canal de destination. Le décalage des canaux de destination est conservé. Appuyez sur <kbd>Escape</kbd> pour annuler et effacer la sélection des canaux.</p><p>Faites un clic droit sur un câble pour choisir <code>Supprimer le câble</code>. Le menu d’un port propose <code>Déconnecter le canal</code> ou <code>Déconnecter les canaux sélectionnés</code>. Sélectionnez un nœud ou un câble et appuyez sur <kbd>Delete</kbd> ou <kbd>Backspace</kbd> pour le supprimer. <code>Ajuster la vue au graphe</code> affiche le graphe dans la vue. Utilisez <kbd>Command+Z</kbd> sur macOS ou <kbd>Ctrl+Z</kbd> sous Linux pour annuler les modifications du graphe ; ajoutez <kbd>Shift</kbd> pour les rétablir.</p><p><code>Supprimer le graphe</code> arrête l’audio et les enregistrements de ce graphe. La suppression d’un graphe ne peut pas être annulée ; les fichiers d’espace de travail enregistrés sont conservés.</p><!-- TODO screenshot: actual workspace, expanded node Options and stereo channel mapping, English and Korean. -->
+</div></section>
+<section class="guide-section" id="keyboard" aria-labelledby="keyboard-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="keyboard-title">Connecter sans faire glisser</h2>
+<ol><li>Utilisez <kbd>Tab</kbd> pour placer le focus sur le nœud source. <kbd>Enter</kbd> ou <kbd>Space</kbd> le sélectionne. Les flèches déplacent le nœud sélectionné ; maintenez <kbd>Shift</kbd> pour des pas plus grands.</li><li>Appuyez sur <kbd>Shift+F10</kbd> ou la touche Menu contextuel, puis choisissez <code>Connecter des canaux…</code>.</li><li>Choisissez <code>Premier canal de sortie</code> et <code>Nombre de canaux</code>, ou conservez une sélection de canaux existante. Choisissez <code>Destination</code> et <code>Premier canal d’entrée</code>.</li><li>Lisez <code>Aperçu</code>, y compris les connexions ignorées et leurs raisons. Choisissez <code>Connecter</code>, ou <code>Annuler</code> pour laisser le graphe inchangé.</li></ol><p>Les mêmes touches de menu contextuel fonctionnent sur un câble ou le canevas ayant le focus. Les commandes à l’intérieur d’un nœud conservent leur propre comportement au clavier. <kbd>Escape</kbd> ferme les menus et boîtes de dialogue.</p>
+</div></section>
+<section class="guide-section" id="states" aria-labelledby="states-title"><p class="section-number" aria-hidden="true">04</p><div><h2 id="states-title">Désactivation, coupure du son, contournement, pause et fermeture</h2>
+<ul><li>La commande marche/arrêt d’un nœud désactive son traitement et bloque son signal lorsqu’il est désactivé.</li><li>Couper le son maintient le traitement et coupe la sortie du nœud.</li><li>Le <code>Contournement</code> d’un effet laisse passer l’audio non traité tout en conservant ses paramètres.</li><li><code>Mettre en pause</code> dans le pied de fenêtre ou le menu d’état met en pause tous les graphes et enregistrements actifs. <code>Reprendre</code> utilise l’audio actuel. L’audio survenant pendant la pause est écarté. Les périphériques virtuels conservent leurs identifiants, noms et formats.</li></ul><p>Fermer l’éditeur laisse le routage, les effets, la capture et l’enregistrement fonctionner en arrière-plan. Sur macOS, fermer la fenêtre la masque ; quitter l’éditeur termine son processus. Sous Linux, fermer la fenêtre termine le processus de l’éditeur. Utilisez <code>Ouvrir MixRelay</code> dans le menu d’état pour revenir.</p><p><code>Quitter</code> dans le menu d’état en arrière-plan arrête les périphériques et le bouclage et finalise les enregistrements. Rouvrir MixRelay restaure les périphériques enregistrés. Une pause globale enregistrée reste active jusqu’à la reprise ; les enregistreurs mis en pause manuellement ou arrêtés ne démarrent jamais du seul fait de reprendre tout l’audio.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Chapitres du manuel"><a rel="prev" href="first-launch.html">← Précédent : Premier lancement et autorisations</a><a rel="next" href="devices.html">Suivant : Périphériques et points de terminaison virtuels →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Version provisoire avant publication · MixRelay 0.1.0</p><a href="../../index.html">Accueil du produit</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

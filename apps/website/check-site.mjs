@@ -57,7 +57,8 @@ for (const [page, html] of sources) {
   assert.match(html, /class="skip-link" href="#main"/, `${page}: skip link`);
   assert.equal((html.match(/<h1\b/gi) ?? []).length, 1, `${page}: exactly one h1`);
   assert.match(html, /<nav\b[^>]*aria-label=/i, `${page}: named navigation landmark`);
-  assert.ok(html.includes(language === 'ko' ? '사전 공개 초안' : 'Prerelease draft'), `${page}: prerelease disclosure`);
+  // Every language carries the same marked notice; its wording is translated.
+  assert.ok(/class="draft-badge"/.test(html) || html.includes(language === 'ko' ? '사전 공개 초안' : 'Prerelease draft'), `${page}: prerelease disclosure`);
   let previousLevel = 0;
   for (const heading of html.matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi)) {
     const level = Number(heading[1]);

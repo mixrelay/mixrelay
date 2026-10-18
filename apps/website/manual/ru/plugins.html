@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Установите эффекты с помощью установщика производителя, затем найдите их в MixRelay.">
+    <title>Внешние плагины — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/plugins.html">
+    <link rel="alternate" hreflang="ko" href="../ko/plugins.html">
+    <link rel="alternate" hreflang="ja" href="../ja/plugins.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/plugins.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/plugins.html">
+    <link rel="alternate" hreflang="de" href="../de/plugins.html">
+    <link rel="alternate" hreflang="fr" href="../fr/plugins.html">
+    <link rel="alternate" hreflang="it" href="../it/plugins.html">
+    <link rel="alternate" hreflang="es" href="../es/plugins.html">
+    <link rel="alternate" hreflang="pt" href="../pt/plugins.html">
+    <link rel="alternate" hreflang="ru" href="../ru/plugins.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Перейти к содержимому</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Страница продукта"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Язык"><a href="../en/plugins.html" lang="en" hreflang="en">English</a> <a href="../ko/plugins.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/plugins.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/plugins.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/plugins.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/plugins.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/plugins.html" lang="fr" hreflang="fr">Français</a> <a href="../it/plugins.html" lang="it" hreflang="it">Italiano</a> <a href="../es/plugins.html" lang="es" hreflang="es">Español</a> <a href="../pt/plugins.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/plugins.html" lang="ru" hreflang="ru" aria-current="page">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Предрелизный черновик</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Главы руководства">
+        <a class="back-link" href="../../index.html">← Страница продукта</a>
+        <a class="manual-mobile-index" href="index.html">Все главы</a>
+        <nav class="guide-nav" aria-label="Главы руководства"><a href="index.html">Обзор руководства</a>
+<a href="installation.html">Системные требования и установка</a>
+<a href="first-launch.html">Первый запуск и разрешения</a>
+<a href="workspace.html">Рабочее пространство маршрутизации</a>
+<a href="devices.html">Устройства и виртуальные подключения</a>
+<a href="app-capture.html">Захват аудио приложений</a>
+<a href="recording.html">Запись</a>
+<a href="effects.html">Встроенные эффекты и пресеты</a>
+<a href="plugins.html" aria-current="page">Внешние плагины</a>
+<a href="stream-deck.html">Плагин Stream Deck</a>
+<a href="licensing.html">Бесплатная версия и лицензирование</a>
+<a href="updates.html">Обновления</a>
+<a href="uninstall.html">Удаление</a>
+<a href="troubleshooting.html">Устранение неполадок и диагностика</a>
+<a href="support.html">Связь с поддержкой</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / РУКОВОДСТВО</p><h1>Внешние плагины</h1><p>Установите эффекты с помощью установщика производителя, затем найдите их в MixRelay.</p><p class="guide-draft-note">Предрелизный черновик. Публичные загрузки и покупки пока недоступны. Эти инструкции описывают текущую сборку из исходного кода; поведение установленного продукта ещё предстоит проверить в указанных ниже средах.</p></header>
+        <nav class="manual-toc" aria-label="На этой странице"><p class="sidebar-label">На этой странице</p><ul><li><a href="#formats">Форматы по платформам</a></li><li><a href="#discovery">Поиск и использование эффекта</a></li><li><a href="#failures">Ошибки сканирования, редактора и формата</a></li></ul></nav>
+        <section class="guide-section" id="formats" aria-labelledby="formats-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="formats-title">Форматы по платформам</h2>
+<ul><li>macOS: VST3, CLAP, AU и AUv3.</li><li>Linux: VST3, CLAP и LV2.</li></ul><p>В список входят аудиоэффекты, прошедшие обнаружение и проверку конфигурации каналов. Работа с инструментами и MIDI не предусмотрена. Поддержка формата не гарантирует работу любого плагина, архитектуры или конфигурации каналов. Бесплатная версия допускает два экземпляра внешних плагинов, включая выключенные. Число обнаруженных эффектов не ограничено.</p>
+</div></section>
+<section class="guide-section" id="discovery" aria-labelledby="discovery-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="discovery-title">Поиск и использование эффекта</h2>
+<ol><li>Установите плагин для своей платформы и архитектуры по инструкции производителя.</li><li>В меню <code>Добавить узел → Процессор</code> выберите <code>Повторно сканировать аудиоэффекты</code>. Для нестандартного расположения VST3, CLAP или LV2 выберите <code>Добавить папку плагинов…</code>.</li><li>Выберите обнаруженный эффект непосредственно в меню Процессор. В описании указаны формат и производитель. Проверьте раздел <code>Конфигурация каналов</code> и подключите нужные основные порты, порты сайдчейна или вспомогательные порты.</li><li>Доступные параметры узла находятся в разделе <code>Параметры</code>. Новый узел плагина один раз открывает нативный редактор, если он доступен. Для повторного открытия нажмите <code>Открыть</code>.</li></ol><p>Для нативных редакторов в Linux нужен X11 или XWayland. Отсутствие редактора не приводит к созданию универсального нативного окна. Используйте доступные параметры, если они есть.</p><!-- TODO screenshot: actual effect list, Channel layout, parameter controls and a native editor. -->
+</div></section>
+<section class="guide-section" id="failures" aria-labelledby="failures-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="failures-title">Ошибки сканирования, редактора и формата</h2>
+<p>Если появляется <code>Поиск эффектов не завершён</code>, откройте <code>Проблемы сканирования</code> и <code>Технические сведения</code>. При сбое этапа сканирования ранее доступные эффекты остаются в списке. Исправьте установку или папку и используйте <code>Повторить</code> либо повторите сканирование.</p><p>Для плагина после сбоя используйте <code>Перезапустить плагин после сбоя: …</code>, если эта команда доступна. Если редактор недоступен, прочитайте конкретную причину, например отсутствие нативного редактора или X11/XWayland. Некоторые сессии AU/VST/LV2 отклоняют изменения формата во время работы, поскольку перенос состояния нативных пресетов не реализован. Текущая сессия сохраняется; не считайте, что запрошенный формат применён.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Главы руководства"><a rel="prev" href="effects.html">← Назад: Встроенные эффекты и пресеты</a><a rel="next" href="stream-deck.html">Далее: Плагин Stream Deck →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Предрелизный черновик · MixRelay 0.1.0</p><a href="../../index.html">Страница продукта</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

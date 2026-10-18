@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="無料版でも、内蔵エフェクトはインスタンス数の制限なく使用できます。">
+    <title>内蔵エフェクトとプリセット — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/effects.html">
+    <link rel="alternate" hreflang="ko" href="../ko/effects.html">
+    <link rel="alternate" hreflang="ja" href="../ja/effects.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/effects.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/effects.html">
+    <link rel="alternate" hreflang="de" href="../de/effects.html">
+    <link rel="alternate" hreflang="fr" href="../fr/effects.html">
+    <link rel="alternate" hreflang="it" href="../it/effects.html">
+    <link rel="alternate" hreflang="es" href="../es/effects.html">
+    <link rel="alternate" hreflang="pt" href="../pt/effects.html">
+    <link rel="alternate" hreflang="ru" href="../ru/effects.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">本文へスキップ</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="製品ホーム"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="言語"><a href="../en/effects.html" lang="en" hreflang="en">English</a> <a href="../ko/effects.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/effects.html" lang="ja" hreflang="ja" aria-current="page">日本語</a> <a href="../zh-Hans/effects.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/effects.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/effects.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/effects.html" lang="fr" hreflang="fr">Français</a> <a href="../it/effects.html" lang="it" hreflang="it">Italiano</a> <a href="../es/effects.html" lang="es" hreflang="es">Español</a> <a href="../pt/effects.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/effects.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 公開前の草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="マニュアルの章">
+        <a class="back-link" href="../../index.html">← 製品ホーム</a>
+        <a class="manual-mobile-index" href="index.html">すべての章</a>
+        <nav class="guide-nav" aria-label="マニュアルの章"><a href="index.html">マニュアル概要</a>
+<a href="installation.html">システム要件とインストール</a>
+<a href="first-launch.html">初回起動とアクセス許可</a>
+<a href="workspace.html">ルーティングワークスペース</a>
+<a href="devices.html">デバイスと仮想エンドポイント</a>
+<a href="app-capture.html">アプリの音声キャプチャ</a>
+<a href="recording.html">録音</a>
+<a href="effects.html" aria-current="page">内蔵エフェクトとプリセット</a>
+<a href="plugins.html">外部プラグイン</a>
+<a href="stream-deck.html">Stream Deckプラグイン</a>
+<a href="licensing.html">無料版とライセンス</a>
+<a href="updates.html">アップデート</a>
+<a href="uninstall.html">アンインストール</a>
+<a href="troubleshooting.html">トラブルシューティングと診断</a>
+<a href="support.html">サポート窓口</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / マニュアル</p><h1>内蔵エフェクトとプリセット</h1><p>無料版でも、内蔵エフェクトはインスタンス数の制限なく使用できます。</p><p class="guide-draft-note">公開前の草稿です。一般向けのダウンロードと購入はまだ利用できません。本書は現在のソースからビルドした製品を説明しています。以下に記載する環境では、インストール後の動作確認が引き続き必要です。</p></header>
+        <nav class="manual-toc" aria-label="このページの内容"><p class="sidebar-label">このページの内容</p><ul><li><a href="#processors">エフェクトを追加し、調整する</a></li><li><a href="#presets">プリセットとエフェクトチェーン</a></li></ul></nav>
+        <section class="guide-section" id="processors" aria-labelledby="processors-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="processors-title">エフェクトを追加し、調整する</h2>
+<p><code>ノードを追加 → プロセッサー</code>からエフェクトを選び、入力と出力のチャンネルを接続します。パラメーターは<code>オプション</code>で調整します。使用できるエフェクトはコンプレッサー、リミッター、イコライザー、ハイパス、ローパス、ゲート、エキスパンダー、チャンネル調整、モノラルパン、ステレオバランス、ディレイ、ダッキング、リバーブ、コーラスです。</p><ul><li>コンプレッサーとリミッターはダイナミクスとピークを制御します。ゲインリダクションメーターにはエンジンの測定値を使用します。ダッシュは測定値がないことを示します。</li><li>イコライザーには3つのピークバンドがあります。ポイントをドラッグして周波数とゲインを変えるか、オプションの周波数、ゲイン、Qの欄を使います。ハイパスとローパスは、それぞれ低域と高域を取り除きます。</li><li>ゲートとエキスパンダーは、しきい値を下回る信号を減衰させます。チャンネル調整には、モノラル合成、チャンネル複製、左右交換、極性反転があります。モノラル合成ではLとRを平均します。</li><li>モノラルパンはモノラル信号をステレオ内に配置し、ステレオバランスは左右のバランスを調整します。ダッキングは独立したモノラルの<code>制御入力</code>でメイン信号を減衰させます。制御用のソースは別途接続してください。この信号は出力にミックスされません。</li><li>ディレイは指定した時間のエコーを加えます。リバーブとコーラスは空間的な響きや変調を加えます。チャンネル構成はエフェクトによって異なるため、実際に表示されるポートを接続してください。</li></ul><p><code>バイパス</code>は未処理の音声を通します。ノードをオフにすると信号が遮断されます。内蔵のノイズ抑制とLUFS測定は利用できません。</p>
+</div></section>
+<section class="guide-section" id="presets" aria-labelledby="presets-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="presets-title">プリセットとエフェクトチェーン</h2>
+<p>エフェクトのオプションで<code>プリセット</code>を使用します。リバーブには小さな部屋、スタジオ、ホール、カラオケ、トンネル、水槽があります。ディレイには短いエコー、スラップバック、ボーカルエコー、カラオケ、ロングエコー、ピンポンがあります。プリセットの値を編集すると<code>カスタム</code>に変わります。</p><p>接続済みの複数のエフェクトを追加するには、<code>ノードを追加 → プロセッサー → エフェクトチェーン</code>からカラオケ、トンネル、水槽、ラジオ、ダブルボーカルを選びます。チェーンは既存のケーブルをつなぎ変えずに、専用のノードと接続を追加します。ソースと出力をチェーンに接続してください。取り消し1回で、挿入したチェーンをまとめて除去できます。保存したワークスペースには実際のパラメーターと接続が保持されます。外部のインパルスレスポンスやサンプルをインストールする必要はありません。</p><!-- TODO screenshot: Equalizer Options, Reverb preset menu and an inserted effect chain. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="マニュアルの章"><a rel="prev" href="recording.html">← 前へ: 録音</a><a rel="next" href="plugins.html">次へ: 外部プラグイン →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>公開前の草稿 · MixRelay 0.1.0</p><a href="../../index.html">製品ホーム</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

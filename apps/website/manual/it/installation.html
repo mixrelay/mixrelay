@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Installa il prodotto MixRelay completo per il tuo sistema operativo. Non serve un’installazione Driver separata.">
+    <title>Requisiti di sistema e installazione — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/installation.html">
+    <link rel="alternate" hreflang="ko" href="../ko/installation.html">
+    <link rel="alternate" hreflang="ja" href="../ja/installation.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/installation.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/installation.html">
+    <link rel="alternate" hreflang="de" href="../de/installation.html">
+    <link rel="alternate" hreflang="fr" href="../fr/installation.html">
+    <link rel="alternate" hreflang="it" href="../it/installation.html">
+    <link rel="alternate" hreflang="es" href="../es/installation.html">
+    <link rel="alternate" hreflang="pt" href="../pt/installation.html">
+    <link rel="alternate" hreflang="ru" href="../ru/installation.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Vai al contenuto</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Pagina del prodotto"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Lingua"><a href="../en/installation.html" lang="en" hreflang="en">English</a> <a href="../ko/installation.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/installation.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/installation.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/installation.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/installation.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/installation.html" lang="fr" hreflang="fr">Français</a> <a href="../it/installation.html" lang="it" hreflang="it" aria-current="page">Italiano</a> <a href="../es/installation.html" lang="es" hreflang="es">Español</a> <a href="../pt/installation.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/installation.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Bozza prima del rilascio</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Capitoli del manuale">
+        <a class="back-link" href="../../index.html">← Pagina del prodotto</a>
+        <a class="manual-mobile-index" href="index.html">Tutti i capitoli</a>
+        <nav class="guide-nav" aria-label="Capitoli del manuale"><a href="index.html">Panoramica del manuale</a>
+<a href="installation.html" aria-current="page">Requisiti di sistema e installazione</a>
+<a href="first-launch.html">Primo avvio e autorizzazioni</a>
+<a href="workspace.html">Spazio di instradamento</a>
+<a href="devices.html">Dispositivi ed endpoint virtuali</a>
+<a href="app-capture.html">Acquisizione audio delle app</a>
+<a href="recording.html">Registrazione</a>
+<a href="effects.html">Effetti integrati e preimpostazioni</a>
+<a href="plugins.html">Plug-in esterni</a>
+<a href="stream-deck.html">Plug-in Stream Deck</a>
+<a href="licensing.html">Versione gratuita e licenze</a>
+<a href="updates.html">Aggiornamenti</a>
+<a href="uninstall.html">Disinstallazione</a>
+<a href="troubleshooting.html">Risoluzione dei problemi e diagnostica</a>
+<a href="support.html">Contattare l’assistenza</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUALE</p><h1>Requisiti di sistema e installazione</h1><p>Installa il prodotto MixRelay completo per il tuo sistema operativo. Non serve un’installazione Driver separata.</p><p class="guide-draft-note">Bozza prima del rilascio. Download e acquisti non sono ancora disponibili al pubblico. Queste istruzioni descrivono la build attuale compilata dal codice sorgente; il comportamento dopo l’installazione deve ancora essere verificato negli ambienti indicati di seguito.</p></header>
+        <nav class="manual-toc" aria-label="In questa pagina"><p class="sidebar-label">In questa pagina</p><ul><li><a href="#requirements">Ambienti supportati</a></li><li><a href="#macos">Installare su macOS</a></li><li><a href="#gatekeeper">Controlli di Gatekeeper</a></li><li><a href="#linux">Installare su Linux</a></li></ul></nav>
+        <section class="guide-section" id="requirements" aria-labelledby="requirements-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="requirements-title">Ambienti supportati</h2>
+<ul><li>macOS 14.2 o successivo, Apple Silicon o Intel. Il programma di installazione è Universal 2. macOS 27 è la versione principale più recente verificata con una build installata.</li><li>Linux x86_64 o arm64, in una sessione utente con accesso effettuato e con PipeWire 1.2 o successivo e WirePlumber 0.5 o successivo. I pacchetti attuali richiedono glibc 2.39.</li></ul><p>Le compilazioni e i test del codice Linux coprono Debian 13, Ubuntu 26.04 e Kali rolling su entrambe le architetture, e Arch su x86_64. Questo non conferma l’installazione su ogni distribuzione. I pacchetti audio di Ubuntu 24.04 non modificati sono troppo vecchi. Le normali macchine virtuali Linux sono supportate; gli ambienti audio Docker non lo sono. Windows non è supportato.</p><p>Le verifiche macOS non coprono tutte le versioni del sistema operativo supportate: su 14.8.7 sono stati verificati installazione in VM, servizi e dispositivi virtuali, ma non le finestre di autorizzazione o l’acquisizione dal vivo. Le verifiche di installazione per 14.2–14.7, 15 e 26 rimangono incomplete.</p>
+</div></section>
+<section class="guide-section" id="macos" aria-labelledby="macos-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="macos-title">Installare su macOS</h2>
+<ol><li>Quando saranno disponibili download pubblici, scarica il pacchetto ufficiale <code>MixRelay-Installer-VERSION.pkg</code>.</li><li>Chiudi le app di registrazione e chiamata. L’installazione interrompe brevemente l’audio di sistema.</li><li>Apri il PKG. Leggi gli accordi dei componenti App e Driver, poi segui i passaggi Continua e Accetta del programma di installazione. Quando richiesto, autorizza l’installazione con un account amministratore macOS.</li><li>Dopo l’installazione, apri <code>/Applications/MixRelay.app</code>. Non serve un riavvio.</li></ol><p>Il pacchetto installa insieme editor, audio in background, dispositivi virtuali e <code>Uninstall MixRelay.app</code>. Non è prevista la selezione dei componenti. Dispositivi, grafi, impostazioni, registrazioni e autenticazione esistenti vengono conservati.</p><!-- TODO screenshot: signed macOS PKG agreement and successful installation, English and Korean. -->
+</div></section>
+<section class="guide-section" id="gatekeeper" aria-labelledby="gatekeeper-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="gatekeeper-title">Controlli di Gatekeeper</h2>
+<p>I pacchetti macOS pubblici devono essere firmati con Developer ID e autenticati da Apple. macOS può chiedere di confermare l’apertura del software scaricato. Se macOS segnala uno sviluppatore non identificato, un pacchetto non verificabile, danni o malware, interrompi e procurati un nuovo pacchetto ufficiale oppure contatta l’assistenza. Non disattivare Gatekeeper e non rimuovere gli attributi di quarantena come passaggio di installazione. Consulta le <a href="https://support.apple.com/en-au/102445">indicazioni Apple per aprire le app scaricate</a>.</p>
+</div></section>
+<section class="guide-section" id="linux" aria-labelledby="linux-title"><p class="section-number" aria-hidden="true">04</p><div><h2 id="linux-title">Installare su Linux</h2>
+<p>Usa il gestore di pacchetti della distribuzione per risolvere le dipendenze. Sostituisci il nome del file di esempio con il pacchetto scaricato per la tua architettura.</p><pre><code>sudo apt install ./MixRelay_VERSION_ARCH.deb
+sudo dnf install ./MixRelay-VERSION-1.ARCH.rpm
+sudo pacman -U ./mix-relay-VERSION-1-x86_64.pkg.tar.zst</code></pre><p>Esegui solo il comando per la tua distribuzione. Il nome del pacchetto è <code>mix-relay</code>. Avvia MixRelay dal menu delle applicazioni come utente normale. L’audio PipeWire viene eseguito nella sessione di quell’utente, mai come root. Non servono SDK o configurazioni manuali dei servizi. AppImage non è un percorso di installazione o aggiornamento supportato.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Capitoli del manuale"><a rel="prev" href="index.html">← Precedente: Panoramica del manuale</a><a rel="next" href="first-launch.html">Successivo: Primo avvio e autorizzazioni →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Bozza prima del rilascio · MixRelay 0.1.0</p><a href="../../index.html">Pagina del prodotto</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

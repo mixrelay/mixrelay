@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="變更或刪除已儲存的工作前，請先檢查目前訊息和訊號路徑。">
+    <title>疑難排解與診斷 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/troubleshooting.html">
+    <link rel="alternate" hreflang="ko" href="../ko/troubleshooting.html">
+    <link rel="alternate" hreflang="ja" href="../ja/troubleshooting.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/troubleshooting.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/troubleshooting.html">
+    <link rel="alternate" hreflang="de" href="../de/troubleshooting.html">
+    <link rel="alternate" hreflang="fr" href="../fr/troubleshooting.html">
+    <link rel="alternate" hreflang="it" href="../it/troubleshooting.html">
+    <link rel="alternate" hreflang="es" href="../es/troubleshooting.html">
+    <link rel="alternate" hreflang="pt" href="../pt/troubleshooting.html">
+    <link rel="alternate" hreflang="ru" href="../ru/troubleshooting.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳至正文</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="產品首頁"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="語言"><a href="../en/troubleshooting.html" lang="en" hreflang="en">English</a> <a href="../ko/troubleshooting.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/troubleshooting.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/troubleshooting.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/troubleshooting.html" lang="zh-Hant" hreflang="zh-Hant" aria-current="page">繁體中文</a> <a href="../de/troubleshooting.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/troubleshooting.html" lang="fr" hreflang="fr">Français</a> <a href="../it/troubleshooting.html" lang="it" hreflang="it">Italiano</a> <a href="../es/troubleshooting.html" lang="es" hreflang="es">Español</a> <a href="../pt/troubleshooting.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/troubleshooting.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 發佈前草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="手冊章節">
+        <a class="back-link" href="../../index.html">← 產品首頁</a>
+        <a class="manual-mobile-index" href="index.html">所有章節</a>
+        <nav class="guide-nav" aria-label="手冊章節"><a href="index.html">手冊總覽</a>
+<a href="installation.html">系統需求與安裝</a>
+<a href="first-launch.html">首次啟動與權限</a>
+<a href="workspace.html">路由工作區</a>
+<a href="devices.html">裝置與虛擬端點</a>
+<a href="app-capture.html">應用程式音訊擷取</a>
+<a href="recording.html">錄音</a>
+<a href="effects.html">內建效果與預設</a>
+<a href="plugins.html">外掛程式</a>
+<a href="stream-deck.html">Stream Deck 外掛程式</a>
+<a href="licensing.html">免費版與授權</a>
+<a href="updates.html">更新</a>
+<a href="uninstall.html">解除安裝</a>
+<a href="troubleshooting.html" aria-current="page">疑難排解與診斷</a>
+<a href="support.html">聯絡支援</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / 手冊</p><h1>疑難排解與診斷</h1><p>變更或刪除已儲存的工作前，請先檢查目前訊息和訊號路徑。</p><p class="guide-draft-note">發佈前草稿。目前尚未提供公開下載或購買。本手冊說明目前原始碼建置版本的行為；在下文所列環境中，仍須驗證安裝後的實際行為。</p></header>
+        <nav class="manual-toc" aria-label="本頁內容"><p class="sidebar-label">本頁內容</p><ul><li><a href="#sound">無聲、聲音重疊或斷音</a></li><li><a href="#changes">變更未套用或未儲存</a></li><li><a href="#diagnostics">儲存診斷報告</a></li></ul></nav>
+        <section class="guide-section" id="sound" aria-labelledby="sound-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="sound-title">無聲、聲音重疊或斷音</h2>
+<ol><li>檢查全域 <code>暫停</code>、節點電源、靜音和已連接的聲道編號。選取的音訊圖不代表其開啟或關閉狀態。</li><li>確認音源正在產生音訊。視需要檢查<a href="first-launch.html#permissions">擷取或麥克風權限</a>及<a href="app-capture.html#unavailable">重新選擇應用程式</a>。</li><li>檢查實體輸出及其硬體音量。對於 OBS 或 DAW，請在該應用程式中將 MixRelay IO 選為輸入，並在 MixRelay 中連接 <code>音訊圖 → 裝置</code>。</li><li>聲音重疊時，請檢查直接播放和監聽路由。出現斷音時，如果介面卡支援變更，可嘗試增大 <code>處理緩衝區</code>。</li></ol><p>裝置無法使用時，請重新連接，並視需要重新選擇。如果已儲存的格式遭拒，或裝置回復設定失敗，請依照訊息提示重新套用支援的格式。引擎連線和音訊處理是不同狀態：即使引擎可連線，音訊仍可能顯示為停止或失敗。</p><p>如果 MixRelay 因引擎反覆故障而暫停，請先檢查最近的變更，再選擇 <code>繼續</code>。不支援以 Docker 為基礎的音訊；請使用一般 Linux 使用者工作階段，並安裝所需版本的 PipeWire 和 WirePlumber。</p>
+</div></section>
+<section class="guide-section" id="changes" aria-labelledby="changes-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="changes-title">變更未套用或未儲存</h2>
+<p><code>尚未套用</code> 並不表示音訊正在運作。如果應用程式提示已保留編輯內容，請檢查目前引擎狀態，準備好後使用 <code>重試</code>。請勿快速重複執行結果不確定的指令。如果持續衝突時提供 <code>用這些編輯內容覆蓋引擎中的音訊圖</code> 或 <code>放棄編輯並重新載入引擎中的音訊圖</code>，請選擇套用目前草稿或將其放棄。</p><p>音訊運作時也可能出現儲存警告。如有可能，請在關閉前儲存一份工作區副本。如只需復原配置，<code>儲存目前配置</code> 可重試儲存目前配置；<code>載入已儲存的配置</code> 會用已儲存的配置取代目前配置。效果器錯誤請參閱<a href="plugins.html#failures">外掛程式復原指南</a>。授權錯誤請檢查連線和裝置時鐘；啟用結果不確定時需要聯絡支援。</p>
+</div></section>
+<section class="guide-section" id="diagnostics" aria-labelledby="diagnostics-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="diagnostics-title">儲存診斷報告</h2>
+<ol><li>開啟 MixRelay 背景狀態選單。</li><li>選擇 <code>儲存診斷報告…</code>。</li><li>選擇 <code>dump.json</code> 的儲存位置。請先檢查內容，如支援人員要求，再附在支援郵件中。儲存不會上傳檔案。</li></ol><p>報告在規定上限內包含版本、作業系統、架構、裝置格式、執行階段狀態和數值計數器資訊，不包含音訊、記憶體傾印、原始記錄、驗證資訊、使用者路徑、裝置名稱與 ID、音訊圖或應用程式清單。報告最多為 256 KiB，包含最多 64 份裝置摘要。無法取得的觀測值會標為無法使用。匯出不會啟動已停止的音訊。</p><p>一次只能進行一項匯出。取消不會建立檔案。取代現有檔案需要作業系統的覆寫確認。如果儲存失敗，請檢查目標位置後重試。其他需要提供的資訊請參閱<a href="support.html">聯絡支援</a>。</p><!-- TODO screenshot: status-menu diagnostic export and native save dialog, both languages. -->
+</div></section>
+        <nav class="manual-pagination" aria-label="手冊章節"><a rel="prev" href="uninstall.html">← 上一章：解除安裝</a><a rel="next" href="support.html">下一章：聯絡支援 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>發佈前草稿 · MixRelay 0.1.0</p><a href="../../index.html">產品首頁</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

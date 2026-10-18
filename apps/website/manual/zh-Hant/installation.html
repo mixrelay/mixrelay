@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="安裝適用於您作業系統的完整 MixRelay 產品，無須另外安裝 Driver。">
+    <title>系統需求與安裝 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/installation.html">
+    <link rel="alternate" hreflang="ko" href="../ko/installation.html">
+    <link rel="alternate" hreflang="ja" href="../ja/installation.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/installation.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/installation.html">
+    <link rel="alternate" hreflang="de" href="../de/installation.html">
+    <link rel="alternate" hreflang="fr" href="../fr/installation.html">
+    <link rel="alternate" hreflang="it" href="../it/installation.html">
+    <link rel="alternate" hreflang="es" href="../es/installation.html">
+    <link rel="alternate" hreflang="pt" href="../pt/installation.html">
+    <link rel="alternate" hreflang="ru" href="../ru/installation.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳至正文</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="產品首頁"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="語言"><a href="../en/installation.html" lang="en" hreflang="en">English</a> <a href="../ko/installation.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/installation.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/installation.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/installation.html" lang="zh-Hant" hreflang="zh-Hant" aria-current="page">繁體中文</a> <a href="../de/installation.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/installation.html" lang="fr" hreflang="fr">Français</a> <a href="../it/installation.html" lang="it" hreflang="it">Italiano</a> <a href="../es/installation.html" lang="es" hreflang="es">Español</a> <a href="../pt/installation.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/installation.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 發佈前草稿</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="手冊章節">
+        <a class="back-link" href="../../index.html">← 產品首頁</a>
+        <a class="manual-mobile-index" href="index.html">所有章節</a>
+        <nav class="guide-nav" aria-label="手冊章節"><a href="index.html">手冊總覽</a>
+<a href="installation.html" aria-current="page">系統需求與安裝</a>
+<a href="first-launch.html">首次啟動與權限</a>
+<a href="workspace.html">路由工作區</a>
+<a href="devices.html">裝置與虛擬端點</a>
+<a href="app-capture.html">應用程式音訊擷取</a>
+<a href="recording.html">錄音</a>
+<a href="effects.html">內建效果與預設</a>
+<a href="plugins.html">外掛程式</a>
+<a href="stream-deck.html">Stream Deck 外掛程式</a>
+<a href="licensing.html">免費版與授權</a>
+<a href="updates.html">更新</a>
+<a href="uninstall.html">解除安裝</a>
+<a href="troubleshooting.html">疑難排解與診斷</a>
+<a href="support.html">聯絡支援</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / 手冊</p><h1>系統需求與安裝</h1><p>安裝適用於您作業系統的完整 MixRelay 產品，無須另外安裝 Driver。</p><p class="guide-draft-note">發佈前草稿。目前尚未提供公開下載或購買。本手冊說明目前原始碼建置版本的行為；在下文所列環境中，仍須驗證安裝後的實際行為。</p></header>
+        <nav class="manual-toc" aria-label="本頁內容"><p class="sidebar-label">本頁內容</p><ul><li><a href="#requirements">支援的環境</a></li><li><a href="#macos">在 macOS 上安裝</a></li><li><a href="#gatekeeper">Gatekeeper 檢查</a></li><li><a href="#linux">在 Linux 上安裝</a></li></ul></nav>
+        <section class="guide-section" id="requirements" aria-labelledby="requirements-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="requirements-title">支援的環境</h2>
+<ul><li>macOS 14.2 或以上版本，Apple Silicon 或 Intel。安裝程式為 Universal 2。透過已安裝建置版本檢查的最新主要版本為 macOS 27。</li><li>Linux x86_64 或 arm64，在已登入的使用者工作階段中使用 PipeWire 1.2 或以上版本及 WirePlumber 0.5 或以上版本。目前套件需要 glibc 2.39。</li></ul><p>Linux 建置與程式碼測試涵蓋兩種架構的 Debian 13、Ubuntu 26.04 和 Kali rolling，以及 x86_64 的 Arch。這不代表已驗證所有發行版的安裝。未經更動的 Ubuntu 24.04 音訊套件版本過舊。支援一般 Linux 虛擬機器，不支援 Docker 音訊環境。不支援 Windows。</p><p>macOS 檢查未涵蓋所有支援的系統版本：已檢查 14.8.7 虛擬機器的安裝、服務及虛擬裝置，但未檢查其權限對話框和即時擷取。14.2–14.7、15 和 26 的安裝檢查仍未完成。</p>
+</div></section>
+<section class="guide-section" id="macos" aria-labelledby="macos-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="macos-title">在 macOS 上安裝</h2>
+<ol><li>開放公開下載後，取得官方的 <code>MixRelay-Installer-VERSION.pkg</code>。</li><li>結束錄音和通話應用程式。安裝會短暫中斷系統音訊。</li><li>開啟 PKG。閱讀 App 和 Driver 元件協議，然後依安裝程式中的「繼續」和「同意」步驟操作。出現提示時，使用 macOS 管理者帳號授權安裝。</li><li>安裝完成後，開啟 <code>/Applications/MixRelay.app</code>。無須重新啟動。</li></ol><p>此套件會一併安裝編輯器、背景音訊元件、虛擬裝置及 <code>Uninstall MixRelay.app</code>，不提供元件選擇。現有裝置、音訊圖、設定、錄音和驗證資訊都會保留。</p><!-- TODO screenshot: signed macOS PKG agreement and successful installation, English and Korean. -->
+</div></section>
+<section class="guide-section" id="gatekeeper" aria-labelledby="gatekeeper-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="gatekeeper-title">Gatekeeper 檢查</h2>
+<p>公開發佈的 macOS 套件必須經過 Developer ID 簽署和公證。macOS 可能要求您確認是否開啟下載的軟體。如果 macOS 提示開發者身分不明、無法驗證套件、檔案已損壞或含有惡意軟體，請停止操作，重新取得官方套件或聯絡支援。請勿為了安裝而停用 Gatekeeper 或移除隔離屬性。請參閱 <a href="https://support.apple.com/en-au/102445">Apple 關於開啟已下載 App 的說明</a>。</p>
+</div></section>
+<section class="guide-section" id="linux" aria-labelledby="linux-title"><p class="section-number" aria-hidden="true">04</p><div><h2 id="linux-title">在 Linux 上安裝</h2>
+<p>請使用發行版的套件管理員，以便解決相依性。將範例檔名替換為您下載的、適用於相應架構的套件檔名。</p><pre><code>sudo apt install ./MixRelay_VERSION_ARCH.deb
+sudo dnf install ./MixRelay-VERSION-1.ARCH.rpm
+sudo pacman -U ./mix-relay-VERSION-1-x86_64.pkg.tar.zst</code></pre><p>僅執行適用於您發行版的指令。套件名稱為 <code>mix-relay</code>。請以一般使用者身分從應用程式選單啟動 MixRelay。PipeWire 音訊在該使用者的工作階段中執行，切勿以 root 身分執行。無須 SDK 或手動設定服務。AppImage 並非支援的安裝或更新方式。</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="手冊章節"><a rel="prev" href="index.html">← 上一章：手冊總覽</a><a rel="next" href="first-launch.html">下一章：首次啟動與權限 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>發佈前草稿 · MixRelay 0.1.0</p><a href="../../index.html">產品首頁</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

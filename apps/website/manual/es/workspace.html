@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Crea un grafo con nodos de fuente, procesador y salida. Los cables transportan audio entre canales individuales.">
+    <title>Espacio de trabajo de enrutamiento — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/workspace.html">
+    <link rel="alternate" hreflang="ko" href="../ko/workspace.html">
+    <link rel="alternate" hreflang="ja" href="../ja/workspace.html">
+    <link rel="alternate" hreflang="zh-Hans" href="../zh-Hans/workspace.html">
+    <link rel="alternate" hreflang="zh-Hant" href="../zh-Hant/workspace.html">
+    <link rel="alternate" hreflang="de" href="../de/workspace.html">
+    <link rel="alternate" hreflang="fr" href="../fr/workspace.html">
+    <link rel="alternate" hreflang="it" href="../it/workspace.html">
+    <link rel="alternate" hreflang="es" href="../es/workspace.html">
+    <link rel="alternate" hreflang="pt" href="../pt/workspace.html">
+    <link rel="alternate" hreflang="ru" href="../ru/workspace.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Saltar al contenido</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Página del producto"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Idioma"><a href="../en/workspace.html" lang="en" hreflang="en">English</a> <a href="../ko/workspace.html" lang="ko" hreflang="ko">한국어</a> <a href="../ja/workspace.html" lang="ja" hreflang="ja">日本語</a> <a href="../zh-Hans/workspace.html" lang="zh-Hans" hreflang="zh-Hans">简体中文</a> <a href="../zh-Hant/workspace.html" lang="zh-Hant" hreflang="zh-Hant">繁體中文</a> <a href="../de/workspace.html" lang="de" hreflang="de">Deutsch</a> <a href="../fr/workspace.html" lang="fr" hreflang="fr">Français</a> <a href="../it/workspace.html" lang="it" hreflang="it">Italiano</a> <a href="../es/workspace.html" lang="es" hreflang="es" aria-current="page">Español</a> <a href="../pt/workspace.html" lang="pt" hreflang="pt">Português</a> <a href="../ru/workspace.html" lang="ru" hreflang="ru">Русский</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Borrador previo al lanzamiento</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Capítulos del manual">
+        <a class="back-link" href="../../index.html">← Página del producto</a>
+        <a class="manual-mobile-index" href="index.html">Todos los capítulos</a>
+        <nav class="guide-nav" aria-label="Capítulos del manual"><a href="index.html">Resumen del manual</a>
+<a href="installation.html">Requisitos del sistema e instalación</a>
+<a href="first-launch.html">Primer inicio y permisos</a>
+<a href="workspace.html" aria-current="page">Espacio de trabajo de enrutamiento</a>
+<a href="devices.html">Dispositivos y conexiones virtuales</a>
+<a href="app-capture.html">Captura de audio de aplicaciones</a>
+<a href="recording.html">Grabación</a>
+<a href="effects.html">Efectos integrados y preajustes</a>
+<a href="plugins.html">Plug-ins externos</a>
+<a href="stream-deck.html">Plug-in de Stream Deck</a>
+<a href="licensing.html">Versión gratuita y licencias</a>
+<a href="updates.html">Actualizaciones</a>
+<a href="uninstall.html">Desinstalación</a>
+<a href="troubleshooting.html">Solución de problemas y diagnóstico</a>
+<a href="support.html">Contacto de soporte</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>Espacio de trabajo de enrutamiento</h1><p>Crea un grafo con nodos de fuente, procesador y salida. Los cables transportan audio entre canales individuales.</p><p class="guide-draft-note">Borrador previo al lanzamiento. Las descargas y las compras públicas aún no están disponibles. Estas instrucciones describen la compilación actual del código fuente; aún queda por verificar el comportamiento de la instalación en los entornos indicados a continuación.</p></header>
+        <nav class="manual-toc" aria-label="En esta página"><p class="sidebar-label">En esta página</p><ul><li><a href="#graphs">Grafos, nodos y guardado</a></li><li><a href="#connections">Conectar y mapear canales</a></li><li><a href="#keyboard">Conectar sin arrastrar</a></li><li><a href="#states">Apagar, silenciar, omitir efectos, pausar y salir</a></li></ul></nav>
+        <section class="guide-section" id="graphs" aria-labelledby="graphs-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="graphs-title">Grafos, nodos y guardado</h2>
+<p>Usa <code>Nuevo grafo</code> para crear un grafo y <code>Añadir nodo</code> para añadir <code>Fuente</code>, <code>Procesador</code> o <code>Salida</code>. Selecciona un grafo en <code>Grafos</code> para editarlo. Seleccionarlo no apaga los demás grafos. Con licencia, pueden ejecutarse varios grafos a la vez.</p><p>Abre <code>Opciones</code> de un nodo para ver sus parámetros disponibles. Haz doble clic en su nombre, pulsa <kbd>F2</kbd> con el foco en el nodo o usa <code>Cambiar nombre visible</code> en su menú. Un nombre visible solo cambia ese nodo. Bórralo para recuperar el nombre original.</p><p>Las ediciones y la disposición se guardan automáticamente. Un aviso al guardar significa que podrían perderse tras reiniciar. Para un espacio de trabajo portátil, usa <code>Archivo → Guardar</code> o <code>Guardar como…</code> para crear un archivo <code>.mix</code>. <code>Nuevo espacio de trabajo</code> y <code>Abrir…</code> piden confirmación antes de sustituir el contenido actual. Un archivo de espacio de trabajo no instala dispositivos ni plug-ins que falten.</p>
+</div></section>
+<section class="guide-section" id="connections" aria-labelledby="connections-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="connections-title">Conectar y mapear canales</h2>
+<p>Arrastra un puerto de salida a un puerto de entrada. Para un par estéreo, conecta ambos canales. Mantén pulsada <kbd>Shift</kbd> para seleccionar más canales de salida del mismo nodo y arrastra la selección al primer canal del destino. Se conserva el desplazamiento entre los canales de destino. Pulsa <kbd>Escape</kbd> para cancelar y borrar la selección de canales.</p><p>Haz clic con el botón derecho en un cable para elegir <code>Eliminar cable</code>. El menú de un puerto ofrece <code>Desconectar canal</code> o <code>Desconectar los canales seleccionados</code>. Selecciona un nodo o cable y pulsa <kbd>Delete</kbd> o <kbd>Backspace</kbd> para eliminarlo. <code>Ajustar el grafo a la vista</code> muestra el grafo en la vista. Usa <kbd>Command+Z</kbd> en macOS o <kbd>Ctrl+Z</kbd> en Linux para deshacer ediciones del grafo; añade <kbd>Shift</kbd> para rehacer.</p><p><code>Eliminar grafo</code> detiene el audio y las grabaciones de ese grafo. La eliminación no se puede deshacer; los archivos de espacio de trabajo guardados se conservan.</p><!-- TODO screenshot: actual workspace, expanded node Options and stereo channel mapping, English and Korean. -->
+</div></section>
+<section class="guide-section" id="keyboard" aria-labelledby="keyboard-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="keyboard-title">Conectar sin arrastrar</h2>
+<ol><li>Usa <kbd>Tab</kbd> para llevar el foco al nodo de origen. <kbd>Enter</kbd> o <kbd>Space</kbd> lo selecciona. Las flechas mueven el nodo seleccionado; mantén pulsada <kbd>Shift</kbd> para desplazamientos mayores.</li><li>Pulsa <kbd>Shift+F10</kbd> o la tecla de menú contextual y elige <code>Conectar canales…</code>.</li><li>Elige <code>Primer canal de salida</code> y <code>Número de canales</code> o conserva una selección de canales existente. Elige <code>Destino</code> y <code>Primer canal de entrada</code>.</li><li>Revisa <code>Vista previa</code>, incluidas las conexiones omitidas y sus motivos. Elige <code>Conectar</code>, o <code>Cancelar</code> para dejar el grafo sin cambios.</li></ol><p>Las mismas teclas de menú contextual funcionan con el foco en un cable o en el lienzo. Los controles dentro de un nodo mantienen su propio comportamiento de teclado. <kbd>Escape</kbd> cierra menús y diálogos.</p>
+</div></section>
+<section class="guide-section" id="states" aria-labelledby="states-title"><p class="section-number" aria-hidden="true">04</p><div><h2 id="states-title">Apagar, silenciar, omitir efectos, pausar y salir</h2>
+<ul><li>El control de encendido de un nodo desactiva el procesamiento y bloquea su señal cuando está apagado.</li><li>Silenciar mantiene el procesamiento y elimina el sonido de la salida del nodo.</li><li>La opción <code>Omitir efecto</code> del efecto deja pasar el audio sin procesar y conserva sus ajustes.</li><li><code>Pausar</code> en la barra inferior o en el menú de estado pausa todos los grafos y las grabaciones activas. <code>Reanudar</code> usa el audio actual. El audio durante la pausa se descarta. Los dispositivos virtuales conservan sus ID, nombres y formatos.</li></ul><p>Cerrar el editor mantiene el enrutamiento, los efectos, la captura y la grabación en segundo plano. En macOS, cerrar la ventana la oculta; salir del editor termina su proceso. En Linux, cerrar la ventana termina el proceso del editor. Usa <code>Abrir MixRelay</code> en el menú de estado para volver.</p><p><code>Salir</code> en el menú de estado en segundo plano detiene los dispositivos y el bucle de audio y finaliza las grabaciones. Al volver a abrir MixRelay, se restauran los dispositivos guardados. Una pausa global guardada se mantiene hasta que reanudes; los grabadores pausados manualmente o detenidos nunca se inician solo por reanudar todo el audio.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Capítulos del manual"><a rel="prev" href="first-launch.html">← Anterior: Primer inicio y permisos</a><a rel="next" href="devices.html">Siguiente: Dispositivos y conexiones virtuales →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Borrador previo al lanzamiento · MixRelay 0.1.0</p><a href="../../index.html">Página del producto</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>
