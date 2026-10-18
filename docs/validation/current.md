@@ -3,6 +3,13 @@
 제품 동작·범위·남은 작업은 [product.md](../product.md)가 기준이다. MixRelay는 아직 출시하지 않았다.
 이 문서는 현재 소스 검사와 로컬 개발 설치본의 검증 범위만 구분한다.
 
+## 2026-10-19 첫 공증 릴리스 빌드
+
+`pnpm signing:check` 뒤 `pnpm release:macos`가 App Store Connect API 키 참조로 최종 PKG를
+공증했다(제출 `19119fba-e92c-448c-9b77-b59f4b6f3bbf`, `Accepted`, Apple 로그 경고 0). stapling과
+`stapler validate`가 통과했고 `spctl --assess --type install`은 `accepted`,
+`source=Notarized Developer ID`로 판정했다. 빌드 중 인증창은 뜨지 않았다. 이 PKG의 설치본 확인은 별도다.
+
 ## 2026-10-18 제품 코드 unwrap·expect 제거와 설치본 재확인
 
 `fdaf814`에서 제품 Rust 코드의 `unwrap()`·`expect()`를 없애고 workspace clippy에
