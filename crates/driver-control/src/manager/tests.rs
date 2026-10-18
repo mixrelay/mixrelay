@@ -938,11 +938,38 @@ fn latency_at(
         .unwrap()
 }
 
+fn latency_publication(
+    lease: &crate::EngineLatencyLease,
+    endpoint: &VirtualEndpointId,
+    revision: u64,
+    frames: u32,
+) -> crate::LatencyCommand {
+    crate::LatencyCommand::Publish {
+        lease: lease.clone(),
+        revision,
+        destinations: vec![crate::RuntimeLatency {
+            endpoint_id: endpoint.clone(),
+            rate: 48_000,
+            engine_lease: lease.clone(),
+            applied_graph_revision: revision,
+            input_latency_frames: Some(frames),
+        }],
+    }
+}
+
 #[test]
 fn maintenance_clears_latency_from_an_engine_that_stopped_publishing() {
     let fixture = FixtureDir::new("driver-latency-expiry").unwrap();
     let (backend, observed) = FakeBackend::ready();
     let mut manager = DriverManager::open(backend, fixture.join("drivers.json")).unwrap();
+    let last_latency = || {
+        observed
+            .lock()
+            .latencies
+            .last()
+            .unwrap()
+            .input_latency_frames
+    };
     let now = std::time::Instant::now();
     let reply = latency_at(
         &mut manager,
@@ -953,39 +980,48 @@ fn maintenance_clears_latency_from_an_engine_that_stopped_publishing() {
         now,
     );
     let lease = reply.lease.unwrap();
-    let publication = crate::RuntimeLatency {
-        endpoint_id: manager.inventory[0].spec.id.clone(),
-        rate: 48_000,
-        engine_lease: lease.clone(),
-        applied_graph_revision: 1,
-        input_latency_frames: Some(256),
-    };
-    let publish = crate::LatencyCommand::Publish {
-        lease,
-        revision: 1,
-        destinations: vec![publication],
-    };
+    let endpoint = manager.inventory[0].spec.id.clone();
+    let publish = latency_publication(&lease, &endpoint, 1, 256);
     assert!(latency_at(&mut manager, publish, now).accepted);
     manager.maintain_at(now).unwrap();
-    assert_eq!(
-        observed
-            .lock()
-            .latencies
-            .last()
-            .unwrap()
-            .input_latency_frames,
-        Some(256)
-    );
+    assert_eq!(last_latency(), Some(256));
     manager
         .maintain_at(now + std::time::Duration::from_secs(4))
         .unwrap();
-    assert_eq!(
-        observed
-            .lock()
-            .latencies
-            .last()
-            .unwrap()
-            .input_latency_frames,
-        None
+    assert_eq!(last_latency(), None);
+    // Engine death never removes the independent Driver inventory.
+    let retained = manager.snapshot().unwrap().settings;
+    assert_eq!(retained.devices.len(), 1);
+    let recovered_at = now + std::time::Duration::from_secs(4);
+    let replacement = latency_at(
+        &mut manager,
+        crate::LatencyCommand::Claim {
+            incarnation: "replacement".into(),
+            process_id: 43,
+        },
+        recovered_at,
+    )
+    .lease
+    .unwrap();
+    assert_ne!(replacement, lease);
+    // A delayed report from the dead engine cannot revive its old measurement.
+    assert!(
+        !latency_at(
+            &mut manager,
+            latency_publication(&lease, &endpoint, 100, 999),
+            recovered_at
+        )
+        .accepted
     );
+    assert_eq!(last_latency(), None);
+    assert!(
+        latency_at(
+            &mut manager,
+            latency_publication(&replacement, &endpoint, 1, 128),
+            recovered_at
+        )
+        .accepted
+    );
+    assert_eq!(last_latency(), Some(128));
+    assert_eq!(manager.snapshot().unwrap().settings, retained);
 }

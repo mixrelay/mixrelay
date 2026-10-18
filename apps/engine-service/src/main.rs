@@ -24,6 +24,8 @@ fn native_callback_and_hal_contracts() {
 mod linux;
 
 mod latency_maintenance;
+#[cfg(any(test, target_os = "linux"))]
+mod processing_failure;
 
 fn main() {
     if std::env::args().skip(1).eq(["--version"]) {

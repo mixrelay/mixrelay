@@ -120,6 +120,14 @@ pub enum DriverError {
     Input(String),
 }
 
+/// Terminal callback failures retained for control-side reporting after native drain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DriverProcessFailure {
+    MissingPosition,
+    InvalidPosition,
+    DependencyQueue(i32),
+}
+
 struct InputLink {
     // Remove the listener before releasing its proxy, under the connection lock.
     _listener: pipewire::link::LinkListener,
@@ -282,6 +290,8 @@ struct Callbacks<P> {
     state: AtomicI32,
     // One-way control-to-RT ownership publication, not per-cycle readiness.
     published: AtomicBool,
+    // First terminal callback cause; the atomic is the complete payload.
+    failure: AtomicI32,
     // Main-loop events touch only state. Control prepares this cell before
     // publication; afterwards only RT_PROCESS borrows it.
     process: UnsafeCell<P>,
@@ -354,6 +364,7 @@ impl<P: DriverProcess> GraphDriver<P> {
             callbacks: Box::new(Callbacks {
                 state: AtomicI32::new(sys::pw_filter_state_PW_FILTER_STATE_UNCONNECTED),
                 published: AtomicBool::new(false),
+                failure: AtomicI32::new(0),
                 process: UnsafeCell::new(process),
                 input_port: std::ptr::null_mut(),
             }),
@@ -458,10 +469,28 @@ impl<P: DriverProcess> GraphDriver<P> {
                 | sys::pw_filter_state_PW_FILTER_STATE_ERROR
         )
     }
+
+    /// Reads the first callback failure without clearing its terminal gate.
+    #[must_use]
+    pub fn process_failure(&self) -> Option<DriverProcessFailure> {
+        match self.callbacks.failure.load(Ordering::Relaxed) {
+            0 => None,
+            1 => Some(DriverProcessFailure::MissingPosition),
+            2 => Some(DriverProcessFailure::InvalidPosition),
+            errno => Some(DriverProcessFailure::DependencyQueue(errno)),
+        }
+    }
+
+    /// Drains native callbacks before reading their final failure cause on control.
+    #[must_use]
+    pub fn finish(mut self) -> Option<DriverProcessFailure> {
+        self.disconnect();
+        self.process_failure()
+    }
 }
 
-impl<P: DriverProcess> Drop for GraphDriver<P> {
-    fn drop(&mut self) {
+impl<P: DriverProcess> GraphDriver<P> {
+    fn disconnect(&mut self) {
         let mut control = self
             .control
             .lock()
@@ -484,6 +513,12 @@ impl<P: DriverProcess> Drop for GraphDriver<P> {
         }
         // Native filter destruction drains DSP before links and processor-owned captures retire.
         links.clear();
+    }
+}
+
+impl<P: DriverProcess> Drop for GraphDriver<P> {
+    fn drop(&mut self) {
+        self.disconnect();
     }
 }
 
@@ -518,29 +553,38 @@ unsafe extern "C" fn process<P: DriverProcess>(
     data: *mut c_void,
     position: *mut spa::sys::spa_io_position,
 ) {
-    // SAFETY: PipeWire supplies null or an IO position live for this invocation.
-    let Some(position) = (unsafe { position.as_ref() }) else {
-        return;
-    };
-    let Some(cycle) = DriverCycle::from_position(position) else {
-        return;
-    };
-    // SAFETY: GraphDriver pins callbacks through native teardown. RT_PROCESS
-    // dispatch is serialized; only a published processor is borrowed below.
+    // SAFETY: GraphDriver pins this storage through callback drain.
     let callbacks = unsafe { &*data.cast::<Callbacks<P>>() };
+    // Only serialized RT callbacks write this complete atomic payload.
+    if callbacks.failure.load(Ordering::Relaxed) != 0 {
+        return;
+    }
     if !callbacks.input_port.is_null() {
         // SAFETY: the pinned input port outlives callbacks; these two operations
         // are RT-safe. Recycle the dependency PCM without adding it to the DSP.
         unsafe {
             let buffer = sys::pw_filter_dequeue_buffer(callbacks.input_port);
             if !buffer.is_null() {
-                sys::pw_filter_queue_buffer(callbacks.input_port, buffer);
+                let result = sys::pw_filter_queue_buffer(callbacks.input_port, buffer);
+                if result < 0 {
+                    callbacks.failure.store(result, Ordering::Relaxed);
+                    return;
+                }
             }
         }
     }
     if !callbacks.published.load(Ordering::Acquire) {
         return;
     }
+    // SAFETY: PipeWire supplies null or an IO position live for this invocation.
+    let Some(position) = (unsafe { position.as_ref() }) else {
+        callbacks.failure.store(1, Ordering::Relaxed);
+        return;
+    };
+    let Some(cycle) = DriverCycle::from_position(position) else {
+        callbacks.failure.store(2, Ordering::Relaxed);
+        return;
+    };
     // SAFETY: publication transfers the prepared processor exclusively to RT;
     // control never accesses it again until native teardown has drained callbacks.
     unsafe { &mut *callbacks.process.get() }.process(&cycle);

@@ -6,6 +6,8 @@ mod background;
 mod control_proxy;
 mod diagnostics;
 mod driver_control;
+#[cfg(any(test, target_os = "linux"))]
+mod engine_supervision;
 mod licensing;
 mod logging;
 mod native_text;

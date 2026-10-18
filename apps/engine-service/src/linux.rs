@@ -43,6 +43,7 @@ use mixrelay_pipewire as native;
 mod resource_tests;
 #[path = "linux_source_mute.rs"]
 mod source_mute;
+use crate::processing_failure::{Failure, FailureMailbox};
 use applications::{CaptureSet as PipeWireCaptureSet, CaptureWatch};
 use devices::{DeviceStreams, DeviceWatch};
 use endpoints::{EndpointControls, EndpointEdit, EndpointSet, EndpointSpecs};
@@ -324,6 +325,8 @@ struct LinuxProcessState<'a> {
     status: Arc<AdapterRuntimeStatus>,
     timeline: clock::GraphTimeline,
     clock_diagnostics: Arc<clock::DiscontinuityMailbox>,
+    failure: Arc<FailureMailbox>,
+    resource_failures: Arc<FailureMailbox>,
 }
 
 fn run_audio_worker(
@@ -360,6 +363,8 @@ fn run_audio_worker(
         }
     };
     let clock_diagnostics = Arc::new(clock::DiscontinuityMailbox::default());
+    let failure = Arc::new(FailureMailbox::default());
+    let resource_failures = Arc::new(FailureMailbox::default());
     let context = LinuxProcessState {
         processor,
         exchange,
@@ -372,6 +377,8 @@ fn run_audio_worker(
         status: status.clone(),
         timeline,
         clock_diagnostics: Arc::clone(&clock_diagnostics),
+        failure: Arc::clone(&failure),
+        resource_failures: Arc::clone(&resource_failures),
     };
     let driver = match GraphDriver::open(context, driver_format) {
         Ok(driver) => driver,
@@ -380,21 +387,71 @@ fn run_audio_worker(
             return;
         }
     };
+    monitor_audio_driver(
+        driver,
+        status,
+        &clock_diagnostics,
+        &failure,
+        &resource_failures,
+    );
+}
+
+fn monitor_audio_driver(
+    driver: GraphDriver<LinuxProcessState<'_>>,
+    status: &AdapterRuntimeStatus,
+    clock_diagnostics: &clock::DiscontinuityMailbox,
+    failure: &FailureMailbox,
+    resource_failures: &FailureMailbox,
+) {
     let started = Instant::now();
     let mut last_clock_event = 0;
-    while !driver.ready() && !status.stop_requested() {
-        if started.elapsed() > Duration::from_secs(5) {
-            return;
+    let mut startup_failed = false;
+    while !driver.ready()
+        && !status.stop_requested()
+        && failure.read().is_none()
+        && driver.process_failure().is_none()
+    {
+        if started.elapsed() > Duration::from_secs(5) || driver.failed() {
+            tracing::error!("PipeWire graph driver did not become ready");
+            startup_failed = true;
+            break;
         }
         thread::sleep(Duration::from_millis(10));
     }
-    while !status.stop_requested() && driver.ready() {
+    while !status.stop_requested()
+        && !startup_failed
+        && !driver.failed()
+        && failure.read().is_none()
+        && driver.process_failure().is_none()
+    {
         // Control-plane health/shutdown wait, NOT an audio scheduling clock.
-        report_clock_discontinuity(&clock_diagnostics, &mut last_clock_event);
+        report_clock_discontinuity(clock_diagnostics, &mut last_clock_event);
+        report_resource_failure(resource_failures);
         thread::sleep(Duration::from_millis(20));
     }
-    drop(driver); // The driver owns and drains context before releasing its resources.
-    report_clock_discontinuity(&clock_diagnostics, &mut last_clock_event);
+    let disconnected = driver.failed();
+    let native_failure = driver.finish(); // Drain before reading final RT diagnostics.
+    report_resource_failure(resource_failures);
+    report_clock_discontinuity(clock_diagnostics, &mut last_clock_event);
+    if let Some(cause) = failure.read() {
+        tracing::error!(?cause, "PipeWire realtime processing failed");
+    }
+    if let Some(cause) = native_failure {
+        tracing::error!(?cause, "PipeWire native processing failed");
+    }
+    if disconnected && !status.stop_requested() {
+        tracing::error!("PipeWire graph driver disconnected");
+    }
+}
+
+fn report_resource_failure(mailbox: &FailureMailbox) {
+    if let Some((cause, native_code)) = mailbox.take() {
+        tracing::warn!(
+            ?cause,
+            native_code,
+            "PipeWire realtime resource operation rejected; retaining active graph"
+        );
+    }
 }
 
 fn report_clock_discontinuity(mailbox: &clock::DiscontinuityMailbox, last_event: &mut u64) {
@@ -475,32 +532,41 @@ impl DriverProcess for LinuxProcessState<'_> {
         self.endpoint_backend.register_inputs(inputs)
     }
     fn process(&mut self, native: &DriverCycle) {
-        if self.status.stop_requested() || self.status.checkpoint() {
+        if self.status.stop_requested() || self.failure.read().is_some() || self.status.checkpoint()
+        {
             return;
         }
-        if self.process_cycle(native).is_err() {
-            self.status.request_stop();
+        if let Err(cause) = self.process_cycle(native) {
+            self.failure.publish(cause);
         }
     }
 }
 
 impl LinuxProcessState<'_> {
-    fn process_cycle(&mut self, native: &DriverCycle) -> Result<(), ()> {
+    fn process_cycle(&mut self, native: &DriverCycle) -> Result<(), Failure> {
         let previous_format = self.processor.plan().format();
-        let activated = self
-            .exchange
-            .activate_pending_configured(&mut self.processor, |revision| {
-                self.endpoint_backend.activate_pending(
-                    revision,
-                    &mut self.endpoints,
-                    &mut self.captures,
-                    &mut self.devices,
-                )
-            })
-            .unwrap_or(false);
+        let activated =
+            match self
+                .exchange
+                .activate_pending_configured(&mut self.processor, |revision| {
+                    self.endpoint_backend.activate_pending(
+                        revision,
+                        &mut self.endpoints,
+                        &mut self.captures,
+                        &mut self.devices,
+                    )
+                }) {
+                Ok(activated) => activated,
+                // Control reclamation is bounded backpressure, not a failed audio cycle.
+                Err(Failure::RetirementPending) => false,
+                Err(cause) => {
+                    self.resource_failures.publish(cause);
+                    false
+                }
+            };
         let format = self.processor.plan().format();
         if activated && previous_format != format {
-            self.timeline = clock::GraphTimeline::new(format.sample_rate).map_err(|_| ())?;
+            self.timeline = clock::GraphTimeline::new(format.sample_rate).map_err(Failure::from)?;
             self.status.activate_format(format);
         }
         format::observe_endpoints(&self.endpoints);
@@ -523,7 +589,7 @@ impl LinuxProcessState<'_> {
                 block_frames: format.block_frames,
             },
         )
-        .map_err(|_| ())?;
+        .map_err(Failure::from)?;
         if cycle.discontinuity && cycle.clock.epoch > 1 {
             self.status.record_process(ProcessReport {
                 discontinuities: 1,
@@ -547,11 +613,11 @@ impl LinuxProcessState<'_> {
     }
 
     fn trigger_outputs(&mut self) {
-        self.endpoints.trigger_outputs();
-        self.devices.trigger_outputs();
+        self.endpoints.trigger_outputs(&self.resource_failures);
+        self.devices.trigger_outputs(&self.resource_failures);
     }
 
-    fn process_block(&mut self, cycle: ProcessCycle) -> Result<(), ()> {
+    fn process_block(&mut self, cycle: ProcessCycle) -> Result<(), Failure> {
         self.devices
             .observe_controls(self.processor.plan().controls());
         self.application_recovery
@@ -574,7 +640,7 @@ impl LinuxProcessState<'_> {
                     devices: &mut self.devices,
                 },
             )
-            .map_err(|_| ())?;
+            .map_err(Failure::from)?;
         self.status
             .record_process(self.endpoints.finish_block(cycle.frames)?);
         self.captures.finish_block(cycle.frames);
@@ -596,9 +662,9 @@ impl LinuxProcessState<'_> {
 fn process_blocks_and_release<Owner>(
     owner: &mut Owner,
     blocks: Option<CycleBlocks>,
-    mut process_block: impl FnMut(&mut Owner, ProcessCycle) -> Result<(), ()>,
+    mut process_block: impl FnMut(&mut Owner, ProcessCycle) -> Result<(), Failure>,
     release_outputs: impl FnOnce(&mut Owner),
-) -> Result<(), ()> {
+) -> Result<(), Failure> {
     for block in blocks.into_iter().flatten() {
         process_block(owner, block)?;
     }
@@ -670,11 +736,15 @@ mod native_output_release_tests {
             Some(blocks()),
             |counts, _| {
                 counts.0 += 1;
-                if counts.0 == 2 { Err(()) } else { Ok(()) }
+                if counts.0 == 2 {
+                    Err(Failure::InvalidTransfer)
+                } else {
+                    Ok(())
+                }
             },
             |counts| counts.1 += 1,
         );
-        assert_eq!(result, Err(()));
+        assert_eq!(result, Err(Failure::InvalidTransfer));
         assert_eq!(counts, (2, 0));
     }
 }
@@ -909,9 +979,9 @@ impl LinuxVirtualEndpointBackend {
         endpoints: &mut Box<EndpointSet>,
         captures: &mut Box<PipeWireCaptureSet>,
         devices: &mut Box<DeviceStreams>,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), Failure> {
         if !self.retired.load(Ordering::Acquire).is_null() {
-            return Err("the previous PipeWire endpoint is still being reclaimed");
+            return Err(Failure::RetirementPending);
         }
         let pending = self.pending.swap(ptr::null_mut(), Ordering::AcqRel);
         if pending.is_null() {
@@ -922,7 +992,7 @@ impl LinuxVirtualEndpointBackend {
         let mut update = unsafe { Box::from_raw(pending) };
         if update.revision != revision {
             self.pending.store(Box::into_raw(update), Ordering::Release);
-            return Err("PipeWire resources do not match pending graph revision");
+            return Err(Failure::ResourceRevision);
         }
         if update
             .captures
@@ -930,7 +1000,7 @@ impl LinuxVirtualEndpointBackend {
             .is_some_and(|next| !next.can_retain_from(captures))
         {
             self.pending.store(Box::into_raw(update), Ordering::Release);
-            return Err("PipeWire retained captures no longer match the active source leases");
+            return Err(Failure::RetainedCaptures);
         }
         if update
             .devices
@@ -938,7 +1008,7 @@ impl LinuxVirtualEndpointBackend {
             .is_some_and(|next| !next.can_retain_from(devices))
         {
             self.pending.store(Box::into_raw(update), Ordering::Release);
-            return Err("PipeWire retained devices no longer match the active source leases");
+            return Err(Failure::RetainedDevices);
         }
         if update
             .endpoints
@@ -946,7 +1016,7 @@ impl LinuxVirtualEndpointBackend {
             .is_some_and(|next| !next.can_retain_from(endpoints))
         {
             self.pending.store(Box::into_raw(update), Ordering::Release);
-            return Err("PipeWire retained virtual devices no longer match active owners");
+            return Err(Failure::RetainedEndpoints);
         }
         if let Some(next) = &mut update.endpoints {
             next.retain_from(endpoints);

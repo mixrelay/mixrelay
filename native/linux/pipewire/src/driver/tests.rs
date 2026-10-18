@@ -149,6 +149,7 @@ fn callback_owns_processor_and_main_state_observations_do_not_borrow_it() {
     let mut callbacks = Callbacks {
         state: AtomicI32::new(0),
         published: AtomicBool::new(false),
+        failure: AtomicI32::new(0),
         process: UnsafeCell::new(counter()),
         input_port: std::ptr::null_mut(),
     };

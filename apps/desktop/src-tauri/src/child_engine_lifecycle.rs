@@ -90,71 +90,37 @@ fn bundled_engine_path(desktop: &Path) -> Result<PathBuf, String> {
 }
 
 /// Readiness is a point-in-time acknowledgement, not a promise of future life.
-/// Stop accepting commands if our exact child dies. An explicit retry starts a new
-/// owned child; it never attaches to another process on the same control port.
+/// Suspend commands while replacing an exited child with a new owned engine.
+/// The successor restores its durable graph and pause before acknowledging readiness.
 pub(crate) fn monitor(app: &tauri::AppHandle) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            let lifecycle = app.state::<EngineLifecycle>();
-            if lifecycle.finished.load(Ordering::Acquire) {
-                return;
-            }
-            if lifecycle.quitting.load(Ordering::Acquire) {
-                continue;
-            }
-            let result = lifecycle
-                .engine
-                .lock()
-                .map_err(|_| text(current_locale(), Text::EngineOwnershipLockFailed).to_owned())
-                .and_then(|mut engine| engine.try_wait().map_err(|error| error.to_string()));
-            let error = match result {
-                Ok(None) => continue,
-                Ok(Some(status)) => {
-                    detail(current_locale(), Text::EngineExitedUnexpectedly, status)
-                }
-                Err(error) => detail(current_locale(), Text::EngineObserveFailed, error),
-            };
-            if lifecycle.quitting.load(Ordering::Acquire) {
-                continue;
-            }
-            app.state::<crate::control_proxy::ControlProxyClient>()
-                .suspend_admission();
-            tracing::error!(%error, "owned audio engine unavailable");
-            if !offer_engine_recovery(&app).await {
-                return;
-            }
-        }
+        let lifecycle = app.state::<EngineLifecycle>();
+        crate::engine_supervision::supervise(
+            || {
+                lifecycle.finished.load(Ordering::Acquire)
+                    || lifecycle.quitting.load(Ordering::Acquire)
+            },
+            || {
+                lifecycle
+                    .engine
+                    .lock()
+                    .map_err(|_| text(current_locale(), Text::EngineOwnershipLockFailed).to_owned())
+                    .and_then(|mut engine| {
+                        engine
+                            .try_wait()
+                            .map(|status| status.is_some())
+                            .map_err(|error| error.to_string())
+                    })
+            },
+            async || {
+                app.state::<crate::control_proxy::ControlProxyClient>()
+                    .suspend_admission();
+                restart_owned_engine(&app).await.map(|_| ())
+            },
+        )
+        .await;
     });
-}
-
-async fn offer_engine_recovery(app: &tauri::AppHandle) -> bool {
-    let mut message = Text::EngineRestartPrompt;
-    loop {
-        let locale = current_locale();
-        let restart = text(locale, Text::EngineRestart);
-        let choice = rfd::AsyncMessageDialog::new()
-            .set_title("MixRelay")
-            .set_description(text(locale, message))
-            .set_level(rfd::MessageLevel::Error)
-            .set_buttons(rfd::MessageButtons::OkCancelCustom(
-                restart.into(),
-                text(locale, Text::Cancel).into(),
-            ))
-            .show()
-            .await;
-        if choice != rfd::MessageDialogResult::Custom(restart.into()) {
-            return false;
-        }
-        match restart_owned_engine(app).await {
-            Ok(restarted) => return restarted,
-            Err(error) => {
-                tracing::error!(%error, "owned audio engine restart failed");
-                message = Text::EngineRestartFailedPrompt;
-            }
-        }
-    }
 }
 
 async fn restart_owned_engine(app: &tauri::AppHandle) -> Result<bool, String> {

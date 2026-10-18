@@ -738,13 +738,18 @@ impl DeviceStreams {
 
     /// Releases canonical physical output owners once per native cycle, including
     /// OFF nodes whose live transport must still drain without bypassing DSP gates.
-    pub(super) fn trigger_outputs(&mut self) {
+    pub(super) fn trigger_outputs(&mut self, failures: &crate::processing_failure::FailureMailbox) {
         for stream in self
             .outputs
             .values_mut()
             .filter_map(|entry| entry.stream.as_mut())
         {
-            stream.trigger_output();
+            if let mixrelay_pipewire::OutputRelease::Rejected(code) = stream.trigger_output() {
+                failures.publish_native(
+                    crate::processing_failure::Failure::OutputReleaseRejected,
+                    code,
+                );
+            }
         }
     }
 

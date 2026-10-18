@@ -42,27 +42,24 @@ impl GraphTimeline {
         })
     }
     /// Maps one native callback; invalid rate, quantum, or arithmetic leaves state unchanged.
-    pub(super) fn map(&mut self, native: &DriverCycle) -> Result<ProcessCycle, ()> {
+    pub(super) fn map(&mut self, native: &DriverCycle) -> Result<ProcessCycle, CycleError> {
         // Bound callback work, reject malformed clocks before touching state.
         if !(8_000..=384_000).contains(&native.rate) || native.frames == 0 || native.frames > 32_768
         {
-            return Err(());
+            return Err(CycleError::InvalidFormat);
         }
-        let cycle = self
-            .mapper
-            .map(ProcessCycle {
-                clock: ClockDomain {
-                    authority: ClockAuthority::AudioServer,
-                    id: u64::from(native.clock_id),
-                    epoch: 1,
-                },
-                sample_rate: native.rate,
-                frames: native.frames,
-                first_frame: native.position,
-                monotonic_ns: Some(native.monotonic_ns),
-                discontinuity: false,
-            })
-            .map_err(|_| ())?;
+        let cycle = self.mapper.map(ProcessCycle {
+            clock: ClockDomain {
+                authority: ClockAuthority::AudioServer,
+                id: u64::from(native.clock_id),
+                epoch: 1,
+            },
+            sample_rate: native.rate,
+            frames: native.frames,
+            first_frame: native.position,
+            monotonic_ns: Some(native.monotonic_ns),
+            discontinuity: false,
+        })?;
         self.pending = if cycle.discontinuity && cycle.clock.epoch > 1 {
             self.previous
                 .filter(|previous| {

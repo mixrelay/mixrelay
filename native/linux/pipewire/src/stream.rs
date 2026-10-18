@@ -728,11 +728,23 @@ impl NativeStream {
     /// Releases one output after the complete native cycle, never after each DSP slice.
     /// A late release is retained as a separate native rejection count; queued PCM
     /// remains intact and the next cycle retries without stopping the session.
-    pub fn trigger_output(&mut self) {
+    pub fn trigger_output(&mut self) -> OutputRelease {
         // SAFETY: this serialized DSP publisher retains the output allocation;
         // PipeWire's RT-safe trigger only releases its scheduling dependency.
-        unsafe { mr_pw_stream_trigger_output(self.allocation.pointer.as_ptr()) };
+        let result = unsafe { mr_pw_stream_trigger_output(self.allocation.pointer.as_ptr()) };
+        if result < 0 {
+            OutputRelease::Rejected(result)
+        } else {
+            OutputRelease::Released
+        }
     }
+}
+
+/// Result of releasing one manual output's native scheduling dependency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputRelease {
+    Released,
+    Rejected(i32),
 }
 
 fn read_native_capture(

@@ -14,11 +14,11 @@ mod driver_ffi;
 mod stream;
 pub use connection::{Connection, ConnectionError, ConnectionHandles};
 pub use driver::{
-    DriverCycle, DriverError, DriverFormat, DriverProcess, GraphDriver, GraphInputBinding,
-    GraphInputs,
+    DriverCycle, DriverError, DriverFormat, DriverProcess, DriverProcessFailure, GraphDriver,
+    GraphInputBinding, GraphInputs,
 };
 pub use stream::{
-    DescriptionChange, NativeStream, StreamFormat, StreamProperties, StreamRole,
+    DescriptionChange, NativeStream, OutputRelease, StreamFormat, StreamProperties, StreamRole,
     native_sample_format,
 };
 #[cfg(any(test, feature = "test-observation"))]

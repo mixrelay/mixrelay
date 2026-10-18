@@ -108,7 +108,10 @@ impl Endpoint {
 
     // Native devices outlive individual graph routes. Keep their transport fresh
     // when no binding runs, without retaining DSP or replaying queued OFF audio.
-    fn finish_block(&mut self, frames: u32) -> Result<ProcessReport, ()> {
+    fn finish_block(
+        &mut self,
+        frames: u32,
+    ) -> Result<ProcessReport, crate::processing_failure::Failure> {
         if !std::mem::take(&mut self.input_read)
             && let Some(render) = &mut self.input
         {
@@ -121,8 +124,11 @@ impl Endpoint {
             let samples = usize::try_from(frames)
                 .ok()
                 .and_then(|frames| frames.checked_mul(self.output_channels))
-                .ok_or(())?;
-            let silence = self.silence.get(..samples).ok_or(())?;
+                .ok_or(crate::processing_failure::Failure::EndpointSilenceCapacity)?;
+            let silence = self
+                .silence
+                .get(..samples)
+                .ok_or(crate::processing_failure::Failure::EndpointSilenceCapacity)?;
             report.output_overflows = u64::from(capture.write(silence) != frames);
         }
         Ok(report)
@@ -259,7 +265,10 @@ impl EndpointSet {
 
     /// Completes unused transport directions and resets cycle-local access flags.
     /// Rejects a block larger than the off-RT prepared silence capacity.
-    pub(super) fn finish_block(&mut self, frames: u32) -> Result<ProcessReport, ()> {
+    pub(super) fn finish_block(
+        &mut self,
+        frames: u32,
+    ) -> Result<ProcessReport, crate::processing_failure::Failure> {
         let mut report = ProcessReport::default();
         for owner in self
             .nodes
@@ -290,14 +299,19 @@ impl EndpointSet {
 
     /// Releases each Driver render contribution once after all native-cycle slices.
     /// Retired/vacant slots and capture inputs never receive output triggers.
-    pub(super) fn trigger_outputs(&mut self) {
+    pub(super) fn trigger_outputs(&mut self, failures: &crate::processing_failure::FailureMailbox) {
         for stream in self
             .nodes
             .values_mut()
             .filter_map(|slot| slot.owner.as_mut())
             .filter_map(|owner| owner.output.as_mut())
         {
-            stream.trigger_output();
+            if let mixrelay_pipewire::OutputRelease::Rejected(code) = stream.trigger_output() {
+                failures.publish_native(
+                    crate::processing_failure::Failure::OutputReleaseRejected,
+                    code,
+                );
+            }
         }
     }
 }

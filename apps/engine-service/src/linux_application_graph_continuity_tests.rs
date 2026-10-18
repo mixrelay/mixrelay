@@ -876,6 +876,8 @@ fn prepare_graph_process_state<'a>(
         .try_consumer()
         .expect("unique device recovery consumer");
     super::super::super::LinuxProcessState {
+        failure: Arc::new(crate::processing_failure::FailureMailbox::default()),
+        resource_failures: Arc::new(crate::processing_failure::FailureMailbox::default()),
         processor,
         exchange: Arc::clone(exchange),
         endpoint_backend: backend,

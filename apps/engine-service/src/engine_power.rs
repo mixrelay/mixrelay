@@ -297,11 +297,15 @@ mod tests {
         let catalog = directory.join("graphs.json");
         let marker = directory.join(SAVED_PAUSE);
         let start = || {
-            crate::endpoint_settings_tests::controller(graph(1))
-                .with_graph_catalog_path(catalog.clone())
+            crate::endpoint_settings_tests::controller(
+                crate::endpoint_settings_tests::endpoint_document(1, "Retained device"),
+            )
+            .with_graph_catalog_path(catalog.clone())
         };
         let engine = start();
         assert!(engine.engine_power_status().enabled);
+        let inventory = engine.endpoint_settings().unwrap();
+        let nodes = engine.graph().nodes;
         engine.change_engine_power(false, None).unwrap();
         settle(&engine);
         assert!(marker.is_file());
@@ -309,10 +313,25 @@ mod tests {
         let restarted = start();
         assert!(!restarted.engine_power_status().enabled);
         // The audio worker takes the restored graph before the user resumes.
-        settle(&restarted);
+        let paused = settle(&restarted);
+        assert!(paused.plan().source_bindings().is_empty());
+        assert!(paused.plan().sink_bindings().is_empty());
+        assert_eq!(restarted.graph().nodes, nodes);
+        assert_eq!(restarted.endpoint_settings().unwrap(), inventory);
+        // Relaunching the whole controller repeats durable startup, without resuming audio.
+        drop(paused);
+        drop(restarted);
+        let restarted = start();
+        let paused = settle(&restarted);
+        assert!(!restarted.engine_power_status().enabled);
+        assert!(paused.plan().source_bindings().is_empty());
+        assert_eq!(restarted.endpoint_settings().unwrap(), inventory);
         let resumed = restarted.change_engine_power(true, None).unwrap();
         assert_eq!(resumed.persistence_error, None);
-        settle(&restarted);
+        let running = settle(&restarted);
+        assert!(!running.plan().source_bindings().is_empty());
+        assert!(!running.plan().sink_bindings().is_empty());
+        assert_eq!(restarted.graph().nodes, nodes);
         assert!(!marker.exists());
         drop(restarted);
         assert!(start().engine_power_status().enabled);
