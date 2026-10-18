@@ -52,13 +52,26 @@ fn restart_and_deactivation_never_restart_the_trial() {
 }
 
 #[test]
-fn corrupt_or_inaccessible_credentials_do_not_grant_a_new_trial() {
+fn an_unreadable_record_is_replaced_and_an_inaccessible_store_stays_an_error() {
     let store = Arc::new(MemoryCredentials::default());
     *store.value.lock().expect("mock lock") = Some(SecretString::from("invalid"));
-    assert!(matches!(
-        LicensingState::with_store(store.clone()).snapshot(1_000),
-        Err(LicenseError::StorageUnavailable)
-    ));
+    let state = LicensingState::with_store(store.clone());
+    let access = state
+        .snapshot(1_000)
+        .expect("a corrupt record must not block licensing");
+    assert_eq!(access.status, mixrelay_licensing::AccessStatus::Free);
+    let saved = store
+        .value
+        .lock()
+        .expect("mock lock")
+        .clone()
+        .expect("rewritten");
+    assert!(
+        Vault::decode(&saved).is_ok(),
+        "the replacement is a readable record"
+    );
+    assert!(state.saved_activation().expect("readable").is_none());
+    // A store that cannot be read is not overwritten: its record may still be valid.
     store.fail.store(true, Ordering::Relaxed);
     assert!(matches!(
         LicensingState::with_store(store).snapshot(1_000),

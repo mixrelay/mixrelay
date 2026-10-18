@@ -169,12 +169,19 @@ impl LicensingState {
             .lock()
             .map_err(|_| LicenseError::StorageUnavailable)?;
         if held.is_none() {
+            let fresh = || Vault {
+                record: EntitlementRecord::new(now),
+                key: None,
+            };
             *held = Some(match self.store.read()? {
-                Some(value) => Vault::decode(&value)?,
-                None => Vault {
-                    record: EntitlementRecord::new(now),
-                    key: None,
-                },
+                // An unreadable record must not block licensing for good. Free access has no
+                // time limit, so a fresh record grants nothing; a seat it held is restored by
+                // activating again online. A store that cannot be read stays an error above.
+                Some(value) => Vault::decode(&value).unwrap_or_else(|_| {
+                    tracing::warn!("discarding an unreadable stored license; activate again to restore paid access");
+                    fresh()
+                }),
+                None => fresh(),
             });
         }
         let vault = held.as_mut().ok_or(LicenseError::StorageUnavailable)?;
