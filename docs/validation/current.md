@@ -3,6 +3,16 @@
 제품 동작·범위·남은 작업은 [product.md](../product.md)가 기준이다. MixRelay는 아직 출시하지 않았다.
 이 문서는 현재 소스 검사와 로컬 개발 설치본의 검증 범위만 구분한다.
 
+## 2026-10-19 macOS 14 업데이트·제거 확인
+
+새 VM `mixrelay-sonoma-clean`(macOS 14.8.7)에서 `/Applications/MixRelay` 폴더 배치의 공증 PKG로
+업데이트·제거를 확인했다. 업데이트는 종료 0, payload 86개 SHA-256 일치, 장치 설정 유지였다. 설치 경로의 helper를
+직접 실행한 제거는 바로 거부됐고 파일은 바뀌지 않았다. 제거 앱과 같은 root:wheel 0755 사본으로 실행한 제거는
+소유 경로 8개와 `MixRelay IO`를 지웠다. 사용자가 둔 파일이 있으면 제품 폴더를 남겼고, 없으면 폴더까지 지웠다.
+`drivers.json`은 두 경우 모두 남았다. 설치 로그의 `Distribution failed architecture check`는 Distribution에
+`hostArchitectures`가 없어 Installer가 Intel로 재실행된 것이어서 `arm64,x86_64`를 선언했다. GUI 인증·XPC
+완료 응답은 headless라 확인하지 않았다.
+
 ## 2026-10-19 macOS 14 설치 확인
 
 Tart VM(macOS 14.8.7, arm64, headless)에서 공증 PKG를 설치했다. 첫 PKG는 새 macOS에

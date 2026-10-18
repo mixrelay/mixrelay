@@ -8,6 +8,8 @@ test('product build uses the full native transaction, never a separate app/optio
   const xml = distribution('MixRelay.component.pkg', '0.1.1');
   assert.match(xml, /<title>MixRelay<\/title>/);
   assert.match(xml, /customize="never"/);
+  // Without it Installer re-executes as Intel and asks Apple silicon Macs for Rosetta.
+  assert.match(xml, /hostArchitectures="arm64,x86_64"/);
   assert.equal((xml.match(/<line choice=/g) ?? []).length, 1);
   assert.doesNotMatch(xml, /driverNeedsInstall|active=|choice="driver"|MixRelay Driver/);
 });

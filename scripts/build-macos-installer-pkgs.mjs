@@ -628,7 +628,7 @@ export function distribution(packageFilename, version) {
   <title>MixRelay</title>
   <readme file="INSTALLER-README.rtf" mime-type="text/rtf"/>
   <license file="INSTALLER-LICENSE.rtf" mime-type="text/rtf"/>
-  <options customize="never" allow-external-scripts="false"/>
+  <options customize="never" allow-external-scripts="false" hostArchitectures="${ARCHITECTURES.join(",")}"/>
   <allowed-os-versions><os-version min="${MINIMUM_MACOS}"/></allowed-os-versions>
   <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
   <choices-outline><line choice="install"/></choices-outline>
