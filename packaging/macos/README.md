@@ -24,18 +24,20 @@ installer CLI, payload checker and removal app. It prepares a fresh private payl
 verifies signatures and architecture slices, checks that the app, HAL, remover and
 both services report the same product version, and produces
 `MixRelay-Installer-VERSION.pkg` signed with the matching Developer ID Installer.
-It submits that final PKG with `xcrun notarytool submit --wait`, requires an
-`Accepted` verdict, then runs `xcrun stapler staple` and `xcrun stapler validate`.
-The private signing config must include one `notarization` object:
+It checks the API key with `xcrun notarytool history` before building, submits the
+final PKG with `xcrun notarytool submit --wait --timeout 2h`, requires an `Accepted`
+verdict, keeps Apple's notarization log (it lists warnings even when accepted), then
+runs `xcrun stapler staple` and `xcrun stapler validate`. The private signing config
+must reference an App Store Connect team API key:
 
 ```json
-{ "notarization": { "keychainProfile": "YOUR_NOTARYTOOL_PROFILE" } }
+{ "notarization": { "apiKeyPath": "/ABSOLUTE/PATH/AuthKey_KEYID.p8", "keyId": "KEYID", "issuer": "ISSUER-UUID" } }
 ```
 
-Alternatively, use `notarization.apiKeyPath` (an absolute `.p8` path), `keyId`
-and `issuer` for an App Store Connect team API key. These fields reference
-credentials; never put key contents or inline passwords in the config or repository.
-Missing or conflicting references stop the release before signing.
+These fields reference credentials; never put key contents or inline passwords in the
+config or repository. Keychain profiles are not accepted because their lookup can open
+a login-keychain authentication dialog during a release. Missing or conflicting
+references stop the release before signing.
 
 `--package-only` reuses compiled signed inputs and prepares a fresh payload.
 `--skip-notarization` is for local test builds and records `notarized: false`.

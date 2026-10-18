@@ -7,7 +7,7 @@ import { parseArgs } from 'node:util';
 import { checkVersion } from './product-version.mjs';
 import { checkMacosSigning, readMacosSigningConfig, withMacosSigning } from './macos-signing.mjs';
 import { checkPackageOutput } from './build-macos-installer-pkgs.mjs';
-import { notarizationArguments } from './macos-notarization.mjs';
+import { checkNotarizationCredentials, notarizationArguments } from './macos-notarization.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 /** A failure whose message the owned child already printed. */
@@ -29,7 +29,7 @@ try {
     checkPackageOutput(output);
     const skipNotarization = values['skip-notarization'] ?? false;
     const notarization = skipNotarization ? undefined : readMacosSigningConfig().notarization;
-    notarizationArguments(notarization, skipNotarization);
+    checkNotarizationCredentials(notarizationArguments(notarization, skipNotarization));
     checkMacosSigning();
     await withMacosSigning(async (signingEnvironment, _config, owned) => {
     let application = signingEnvironment.APPLE_SIGNING_IDENTITY;

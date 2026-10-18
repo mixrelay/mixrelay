@@ -21,5 +21,5 @@ test('the release packaging stage rejects missing notarization references before
   const result = spawnSync(process.execPath, [stage, JSON.stringify({ payload: {}, packages: {} })], { encoding: 'utf8' });
   assert.equal(result.status, 1);
   assert.equal(result.stdout, '');
-  assert.match(result.stderr, /^Signing config requires notarization\.keychainProfile/);
+  assert.match(result.stderr, /^Signing config requires notarization\.apiKeyPath/);
 });
