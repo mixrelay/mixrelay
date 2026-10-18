@@ -35,9 +35,36 @@ impl CredentialStore for NativeCredentials {
     }
 }
 
+/// The key and seat recovered from a stored record that no longer decodes. The seat is
+/// restored only after the provider validates it again; it never grants access by itself.
+#[derive(Clone)]
+pub(super) struct SalvagedSeat {
+    pub(super) key: SecretString,
+    pub(super) license_id: u64,
+    pub(super) instance_id: String,
+}
+
+impl SalvagedSeat {
+    /// Reads only the key and seat identity, so a format change or a damaged unrelated
+    /// field cannot cost a paid user their activation.
+    fn from_record(value: &SecretString) -> Option<Self> {
+        let record: serde_json::Value = serde_json::from_str(value.expose_secret()).ok()?;
+        let key = record.get("key")?.as_str()?.trim();
+        let activation = record.get("record")?.get("activation")?;
+        let license_id = activation.get("licenseId")?.as_u64()?;
+        let instance_id = activation.get("instanceId")?.as_str()?.trim();
+        (!key.is_empty() && license_id != 0 && !instance_id.is_empty()).then(|| Self {
+            key: SecretString::from(key.to_owned()),
+            license_id,
+            instance_id: instance_id.to_owned(),
+        })
+    }
+}
+
 /// One writer across native calls and remote mutations; keys never cross IPC back to the UI.
 pub(crate) struct LicensingState {
     vault: Mutex<Option<Vault>>,
+    salvaged: Mutex<Option<SalvagedSeat>>,
     store: Arc<dyn CredentialStore>,
     pub(super) mutations: tokio::sync::Mutex<()>,
     journal: std::sync::OnceLock<std::path::PathBuf>,
@@ -70,6 +97,7 @@ impl LicensingState {
     ) -> Self {
         Self {
             vault: Mutex::new(None),
+            salvaged: Mutex::new(None),
             store,
             mutations: tokio::sync::Mutex::new(()),
             journal: std::sync::OnceLock::new(),
@@ -178,7 +206,15 @@ impl LicensingState {
                 // time limit, so a fresh record grants nothing; a seat it held is restored by
                 // activating again online. A store that cannot be read stays an error above.
                 Some(value) => Vault::decode(&value).unwrap_or_else(|_| {
-                    tracing::warn!("discarding an unreadable stored license; activate again to restore paid access");
+                    let salvaged = SalvagedSeat::from_record(&value);
+                    tracing::warn!(
+                        seat_recovered = salvaged.is_some(),
+                        "replacing an unreadable stored license; a recovered seat is validated online"
+                    );
+                    *self
+                        .salvaged
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = salvaged;
                     fresh()
                 }),
                 None => fresh(),
@@ -196,6 +232,11 @@ impl LicensingState {
             vault.key = None;
         }
         let result = change(vault)?;
+        // While a recovered seat awaits validation, the unreadable record still holds its
+        // key, so it is not overwritten: a restart recovers the seat again.
+        if self.salvaged_seat().is_some() {
+            return Ok(result);
+        }
         // Keep a remotely committed seat in memory if the save fails. Retrying
         // persistence or validating that seat must not consume another activation.
         self.store.write(&vault.encode()?)?;
@@ -210,6 +251,22 @@ impl LicensingState {
 
     pub(crate) fn snapshot(&self, now: u64) -> Result<AccessSnapshot, LicenseError> {
         self.update(now, |vault| Ok(vault.record.observe(now)))
+    }
+
+    /// A seat recovered from an unreadable record, waiting for online validation.
+    pub(super) fn salvaged_seat(&self) -> Option<SalvagedSeat> {
+        self.salvaged
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Ends recovery once the provider has answered conclusively.
+    pub(super) fn forget_salvaged_seat(&self) {
+        *self
+            .salvaged
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     pub(super) fn saved_activation(

@@ -36,13 +36,39 @@ pub(super) async fn validate_saved(
     state: &LicensingState,
     client: &LicenseClient,
 ) -> Result<AccessSnapshot, LicenseError> {
-    let (key, seat) = state
-        .saved_activation()?
-        .ok_or(LicenseError::InvalidInput)?;
+    let Some((key, seat)) = state.saved_activation()? else {
+        return restore_salvaged(state, client).await;
+    };
     match validate_existing(client, &key, &seat).await {
         Ok(activation) => state.verified(key, activation, state.now()?),
         Err(LicenseError::Revoked | LicenseError::ActivationDeactivated) => {
             state.clear_paid(state.now()?)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Restores a seat recovered from an unreadable stored record by validating it again. A
+/// transient failure keeps it for the next check; a conclusive answer ends recovery.
+async fn restore_salvaged(
+    state: &LicensingState,
+    client: &LicenseClient,
+) -> Result<AccessSnapshot, LicenseError> {
+    let seat = state.salvaged_seat().ok_or(LicenseError::InvalidInput)?;
+    match client.validate(&seat.key, &seat.instance_id).await {
+        Ok(activation) if activation.license_id() == seat.license_id => {
+            // Saving the validated seat replaces the unreadable record. If that save fails,
+            // the old record remains and the next start recovers the seat again.
+            state.forget_salvaged_seat();
+            state.verified(seat.key, activation, state.now()?)
+        }
+        Ok(_) => {
+            state.forget_salvaged_seat();
+            Err(LicenseError::InvalidResponse)
+        }
+        Err(error @ (LicenseError::Revoked | LicenseError::ActivationDeactivated)) => {
+            state.forget_salvaged_seat();
+            Err(error)
         }
         Err(error) => Err(error),
     }

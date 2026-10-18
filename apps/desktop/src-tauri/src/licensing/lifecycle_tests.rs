@@ -4,6 +4,7 @@ use mixrelay_licensing::{
     AccessStatus, Activation, LicenseClient, LicenseError, LicenseHttp, LicenseHttpResponse,
     ProductIdentity, SecretString,
 };
+use secrecy::ExposeSecret as _;
 use std::{
     collections::VecDeque,
     future::Future,
@@ -312,4 +313,94 @@ async fn device_release_cleans_up_an_already_absent_activation_but_not_a_transie
         );
         assert_eq!(http.requests.lock().unwrap().as_slice(), ["validate"]);
     }
+}
+
+/// A stored record from another build: the activation lacks a field this build requires.
+fn unreadable_paid_record(store: &MemoryCredentials) {
+    *store.0.lock().unwrap() = Some(SecretString::from(
+        serde_json::json!({
+            "record": {"initializedAtUnix": START, "latestObservedAtUnix": START, "paidVerifiedAtUnix": START,
+                       "activation": {"licenseId": 7, "instanceId": "seat-1"}},
+            "key": "test-key",
+        })
+        .to_string(),
+    ));
+}
+
+#[tokio::test]
+async fn an_unreadable_paid_record_is_restored_by_online_validation_even_across_a_restart() {
+    let store = Arc::new(MemoryCredentials::default());
+    let clock = Arc::new(AtomicU64::new(START));
+    unreadable_paid_record(&store);
+    let original = store.0.lock().unwrap().clone();
+    let first = state(&store, &clock);
+    // The app keeps working as free while the seat waits for validation.
+    assert_eq!(first.snapshot(START).unwrap().status, AccessStatus::Free);
+    // A transient failure keeps the recovered seat and the unreadable record that holds it.
+    let (offline, _) = http(vec![Err(LicenseError::Unavailable)], None);
+    automatic::check(&first, &offline).await.unwrap();
+    assert!(first.salvaged_seat().is_some());
+    assert_eq!(
+        store
+            .0
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|value| value.expose_secret().to_owned()),
+        original
+            .as_ref()
+            .map(|value| value.expose_secret().to_owned()),
+        "the record holding the key is not overwritten before the seat is restored"
+    );
+    // After a restart the seat is recovered again and restored without a new activation.
+    let restarted = state(&store, &clock);
+    restarted.snapshot(START).unwrap();
+    let (online, requests) = http(vec![Ok(valid("valid", Some("seat-1")))], None);
+    operations::validate_saved(&restarted, &online)
+        .await
+        .unwrap();
+    assert_eq!(*requests.requests.lock().unwrap(), ["validate"]);
+    assert_eq!(
+        restarted.snapshot(START).unwrap().status,
+        AccessStatus::Licensed
+    );
+    assert!(restarted.salvaged_seat().is_none());
+    let reopened = state(&store, &clock);
+    assert_eq!(
+        reopened.snapshot(START).unwrap().status,
+        AccessStatus::Licensed
+    );
+    assert!(
+        reopened.saved_activation().unwrap().is_some(),
+        "saved in the current format"
+    );
+}
+
+#[tokio::test]
+async fn a_revoked_recovered_seat_ends_recovery_and_saves_a_free_record() {
+    let store = Arc::new(MemoryCredentials::default());
+    let clock = Arc::new(AtomicU64::new(START));
+    unreadable_paid_record(&store);
+    let state_now = state(&store, &clock);
+    state_now.snapshot(START).unwrap();
+    let (client, _) = http(
+        vec![Ok((
+            400,
+            serde_json::json!({"valid":false,"error":"license_key is disabled."}),
+        ))],
+        None,
+    );
+    assert!(
+        operations::validate_saved(&state_now, &client)
+            .await
+            .is_err()
+    );
+    assert!(state_now.salvaged_seat().is_none());
+    state_now.snapshot(START).unwrap();
+    let reopened = state(&store, &clock);
+    assert_eq!(reopened.snapshot(START).unwrap().status, AccessStatus::Free);
+    assert!(
+        reopened.salvaged_seat().is_none(),
+        "the free record replaced the unreadable one"
+    );
 }
