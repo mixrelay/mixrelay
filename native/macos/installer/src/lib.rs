@@ -55,8 +55,8 @@ pub use leases::{LeaseError, LifecycleDirectory, LifecycleLeaseGuard};
 pub use native::{
     NativeError, NativeServiceLifecycle, NativeServiceRegistration, NativeServiceSnapshot,
     ResolvedServiceAccount, check_coreaudio_response, cleanup_user_data, hal_is_loaded,
-    initialize_lifecycle_storage, require_lifecycle_storage, require_root, resolve_console_account,
-    resolve_install_account, resolve_removal_account,
+    initialize_lifecycle_storage, prepare_install_directories, require_lifecycle_storage,
+    require_root, resolve_console_account, resolve_install_account, resolve_removal_account,
 };
 #[cfg(unix)]
 pub use release::{ReleaseError, ReleasePayloadVerifier, SigningTeam};

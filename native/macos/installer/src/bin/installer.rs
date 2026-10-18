@@ -132,6 +132,7 @@ fn run_transaction(
             // only after their acknowledged normal-user Quit has completed.
             mixrelay_macos_installer::initialize_lifecycle_storage(&session_account)?;
             if install {
+                mixrelay_macos_installer::prepare_install_directories()?;
                 prepare_graph_logs(&session_account)?;
             }
             execute(&mut backend, request).map_err(|error| {

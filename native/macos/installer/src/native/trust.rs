@@ -115,6 +115,33 @@ pub fn initialize_lifecycle_storage(account: &ResolvedServiceAccount) -> Result<
     Ok(())
 }
 
+/// Creates the system HAL plug-in directory when it is missing. A fresh macOS has no
+/// `/Library/Audio/Plug-Ins/HAL` until some audio driver installs one. Missing levels are
+/// created as root:wheel 0755, as macOS does; existing ones are left unchanged and
+/// `validate_destination_ancestors` then rejects unsafe ownership or modes.
+/// # Errors
+/// Returns when a level cannot be opened or created without following links.
+pub fn prepare_install_directories() -> Result<(), NativeError> {
+    require_root()?;
+    let wheel = Gid::from_raw(group_id_for_name("wheel")?);
+    let root = open_root()?;
+    let library = open_existing_child(&root, "Library", Path::new("/Library"))?;
+    let audio = open_or_create_child(&library, "Audio", Path::new("/Library/Audio"), wheel)?;
+    let plugins = open_or_create_child(
+        &audio,
+        "Plug-Ins",
+        Path::new("/Library/Audio/Plug-Ins"),
+        wheel,
+    )?;
+    open_or_create_child(
+        &plugins,
+        "HAL",
+        Path::new("/Library/Audio/Plug-Ins/HAL"),
+        wheel,
+    )?;
+    Ok(())
+}
+
 /// Revalidates the fixed lifecycle directory and every no-replace lease inode.
 /// # Errors
 /// Returns when the fixed directory or any lease inode violates its ownership,
@@ -439,24 +466,24 @@ fn open_or_create_child(
         Ok(descriptor) => descriptor,
         Err(Errno::NOENT) => {
             mkdirat(parent, name, mode(ROOT_DIRECTORY_MODE)).map_err(|source| NativeError::Io {
-                operation: "create lifecycle directory",
+                operation: "create protected directory",
                 path: path.to_path_buf(),
                 source: io::Error::from(source),
             })?;
             let descriptor =
                 openat(parent, name, flags, Mode::empty()).map_err(|source| NativeError::Io {
-                    operation: "open newly created lifecycle directory",
+                    operation: "open newly created protected directory",
                     path: path.to_path_buf(),
                     source: io::Error::from(source),
                 })?;
             let directory = File::from(descriptor);
             fchown(&directory, Some(Uid::ROOT), Some(group)).map_err(|source| NativeError::Io {
-                operation: "set lifecycle directory ownership",
+                operation: "set protected directory ownership",
                 path: path.to_path_buf(),
                 source: io::Error::from(source),
             })?;
             fchmod(&directory, mode(ROOT_DIRECTORY_MODE)).map_err(|source| NativeError::Io {
-                operation: "set lifecycle directory mode",
+                operation: "set protected directory mode",
                 path: path.to_path_buf(),
                 source: io::Error::from(source),
             })?;
@@ -464,7 +491,7 @@ fn open_or_create_child(
         }
         Err(source) => {
             return Err(NativeError::Io {
-                operation: "open lifecycle directory",
+                operation: "open protected directory",
                 path: path.to_path_buf(),
                 source: io::Error::from(source),
             });
