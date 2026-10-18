@@ -54,7 +54,7 @@
 <ul><li>macOS 14.2以降、Apple SiliconまたはIntel。インストーラーはUniversal 2です。インストール済みのビルドで確認した最新のメジャーバージョンはmacOS 27です。</li><li>Linux x86_64またはarm64。ログイン済みのユーザーセッションで、PipeWire 1.2以降とWirePlumber 0.5以降が必要です。現在のパッケージにはglibc 2.39が必要です。</li></ul><p>Linuxのビルドとコードのテストは、両アーキテクチャのDebian 13、Ubuntu 26.04、Kali rolling、およびx86_64のArchを対象としています。すべてのディストリビューションへのインストールを確認したものではありません。標準のUbuntu 24.04の音声パッケージは古すぎます。通常のLinux仮想マシンには対応していますが、Dockerの音声環境とWindowsには対応していません。</p><p>macOSの検証も、対応するすべてのOSバージョンを網羅していません。14.8.7のVMではインストール、サービス、仮想デバイスを確認しましたが、アクセス許可ダイアログと実際の音声キャプチャは未確認です。14.2–14.7、15、26のインストール検証は未完了です。</p>
 </div></section>
 <section class="guide-section" id="macos" aria-labelledby="macos-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="macos-title">macOSにインストールする</h2>
-<ol><li>一般向けのダウンロードが公開されたら、公式の<code>MixRelay-Installer-VERSION.pkg</code>を入手します。</li><li>録音アプリと通話アプリを終了します。インストール中はシステムの音声が一時的に途切れます。</li><li>PKGを開きます。AppとDriverの各コンポーネントの契約を読み、インストーラの「続ける」「同意する」の手順を進めます。求められたら、macOSの管理者アカウントでインストールを承認します。</li><li>インストール後、<code>/Applications/MixRelay.app</code>を開きます。再起動は不要です。</li></ol><p>このパッケージは、エディター、バックグラウンドの音声処理、仮想デバイス、<code>Uninstall MixRelay.app</code>をまとめてインストールします。コンポーネントの選択はありません。既存のデバイス、グラフ、設定、録音、認証情報は保持されます。</p><!-- TODO screenshot: signed macOS PKG agreement and successful installation, English and Korean. -->
+<ol><li>一般向けのダウンロードが公開されたら、公式の<code>MixRelay-Installer-VERSION.pkg</code>を入手します。</li><li>録音アプリと通話アプリを終了します。インストール中はシステムの音声が一時的に途切れます。</li><li>PKGを開きます。AppとDriverの各コンポーネントの契約を読み、インストーラの「続ける」「同意する」の手順を進めます。求められたら、macOSの管理者アカウントでインストールを承認します。</li><li>インストール後、<code>/Applications/MixRelay/MixRelay.app</code>を開きます。再起動は不要です。</li></ol><p>このパッケージは、エディター、バックグラウンドの音声処理、仮想デバイス、<code>Uninstall MixRelay.app</code>をまとめてインストールします。コンポーネントの選択はありません。既存のデバイス、グラフ、設定、録音、認証情報は保持されます。</p><!-- TODO screenshot: signed macOS PKG agreement and successful installation, English and Korean. -->
 </div></section>
 <section class="guide-section" id="gatekeeper" aria-labelledby="gatekeeper-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="gatekeeper-title">Gatekeeperの確認</h2>
 <p>一般公開するmacOSパッケージにはDeveloper ID署名と公証が必要です。ダウンロードしたソフトウェアを開く際、macOSから確認を求められることがあります。開発元を確認できない、パッケージを検証できない、破損している、マルウェアが含まれると表示された場合は作業を中止し、公式パッケージを再取得するかサポートに連絡してください。インストールのためにGatekeeperを無効にしたり、隔離属性を削除したりしないでください。<a href="https://support.apple.com/en-au/102445">ダウンロードしたアプリを開く際のAppleの案内</a>を参照してください。</p>
@@ -68,7 +68,7 @@ sudo pacman -U ./mix-relay-VERSION-1-x86_64.pkg.tar.zst</code></pre><p>お使い
       </article>
     </main>
     <footer class="site-footer">
-      <div class="page-width footer-inner"><p>公開前の草稿 · MixRelay 0.1.0</p><a href="../../index.html">製品ホーム</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+      <div class="page-width footer-inner"><p>公開前の草稿 · MixRelay 0.1.0</p><a href="../../index.html">製品ホーム</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
     </footer>
   </body>
 </html>

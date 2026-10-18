@@ -129,7 +129,14 @@ h1, h2, h3, p { margin-top: 0; }
 .release-card a, .guide-end a { display: inline-flex; align-items: center; gap: 7px; color: var(--green-dark); font-size: .88rem; font-weight: 500; text-decoration-thickness: 1px; text-underline-offset: 4px; }
 
 .site-footer { border-top: 1px solid var(--line); }
-.footer-inner { min-height: 88px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.footer-inner { min-height: 88px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px; padding-block: 19px; }
+.footer-policies { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.business-info { padding-block: 24px 36px; border-top: 1px solid var(--line); font-size: .85rem; overflow-wrap: anywhere; }
+.business-info h2 { font-size: 1rem; font-weight: 500; }
+.business-info dl { margin: 0; }
+.business-info dt { margin-top: 12px; font-weight: 500; }
+.business-info dd { margin: 2px 0 0; color: var(--muted); }
+.guide-section mark, .guide-heading mark, .business-info mark { background: var(--paper-deep); color: var(--ink); }
 
 .footer-brand .brand-symbol { height: 30px; }
 .footer-inner p { margin: 0; color: var(--muted); font-size: .8rem; }

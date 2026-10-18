@@ -14,6 +14,17 @@ const pages = htmlPages(directory);
 const sources = new Map(pages.map((page) => [page, readFileSync(resolve(directory, page), 'utf8').replace(/<!--[\s\S]*?-->/g, '')]));
 const idsByPage = new Map(pages.map((page) => [page, new Set([...sources.get(page).matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]))]));
 const externalReference = /^(?:[a-z][a-z\d+.-]*:|\/\/)/i;
+const legalReferences = new Set([
+  'mailto:privacy@dsub.io',
+  'https://www.lemonsqueezy.com/buyer-terms',
+  'https://www.lemonsqueezy.com/privacy',
+  'https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1031805939',
+  'https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1031805883',
+  'https://law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1020398611',
+  'https://law.go.kr/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1029332499',
+  'https://www.law.go.kr/LSW/lsLinkCommonInfo.do?lsJoLnkSeq=1033215161',
+  'https://www.easylaw.go.kr/CSP/CnpClsMain.laf?ccfNo=2&cciNo=3&cnpClsNo=2&csmSeq=2985&popMenu=ov',
+]);
 
 function resolveLocalReference(page, reference) {
   assert.ok(!externalReference.test(reference), `${page}: expected local asset ${reference}`);
@@ -31,8 +42,9 @@ function checkAnchor(page, reference) {
   if (!externalReference.test(reference)) return resolveLocalReference(page, reference);
   // The prerelease site has no public store or download destination yet.
   assert.ok(reference === 'mailto:support@mixrelay.com' ||
+    (page.startsWith('legal/') && legalReferences.has(reference.replaceAll('&amp;', '&'))) ||
     (reference.startsWith('https://support.apple.com/') && new URL(reference).hostname === 'support.apple.com'),
-  `${page}: external destination is an approved support reference: ${reference}`);
+  `${page}: external destination is an approved support or legal reference: ${reference}`);
 }
 
 const manualLanguages = readdirSync(resolve(directory, 'manual'), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
@@ -45,7 +57,8 @@ for (const language of manualLanguages) {
 }
 
 for (const [page, html] of sources) {
-  const language = page.startsWith('manual/') ? (page.split('/').length === 3 ? page.split('/')[1] : 'en') : 'ko';
+  const language = page.startsWith('legal/') ? page.split('/')[1] :
+    page.startsWith('manual/') ? (page.split('/').length === 3 ? page.split('/')[1] : 'en') : 'ko';
   assert.match(html, /<!doctype html>/i, `${page}: HTML doctype`);
   assert.ok(html.includes(`<html lang="${language}">`), `${page}: correct document language`);
   assert.match(html, /<meta\s+name="viewport"/i, `${page}: responsive viewport`);
@@ -57,6 +70,16 @@ for (const [page, html] of sources) {
   assert.match(html, /class="skip-link" href="#main"/, `${page}: skip link`);
   assert.equal((html.match(/<h1\b/gi) ?? []).length, 1, `${page}: exactly one h1`);
   assert.match(html, /<nav\b[^>]*aria-label=/i, `${page}: named navigation landmark`);
+  const policyLanguage = language === 'ko' ? 'ko' : 'en';
+  const footer = html.match(/<footer\b[^>]*class="site-footer"[^>]*>([\s\S]*?)<\/footer>/i)?.[1];
+  assert.ok(footer, `${page}: site footer exists`);
+  const footerDestinations = [...footer.matchAll(/\bhref="([^"]+)"/g)]
+    .map((match) => match[1]).filter((reference) => !externalReference.test(reference))
+    .map((reference) => resolveLocalReference(page, reference));
+  for (const policy of ['terms', 'privacy']) {
+    const expected = `legal/${policyLanguage}/${policy}.html`;
+    assert.ok(footerDestinations.includes(expected), `${page}: footer links to ${expected}`);
+  }
   // Every language carries the same marked notice; its wording is translated.
   assert.ok(/class="draft-badge"/.test(html) || html.includes(language === 'ko' ? '사전 공개 초안' : 'Prerelease draft'), `${page}: prerelease disclosure`);
   let previousLevel = 0;
@@ -111,6 +134,37 @@ const styles = readFileSync(resolve(directory, 'styles.css'), 'utf8');
 for (const reference of styles.matchAll(/url\((?:\s*["']?)([^)"']+)(?:["']?\s*)\)/gi)) resolveLocalReference('styles.css', reference[1].trim());
 assert.ok(!/@import\s+(?:url\()?\s*["']?https?:/i.test(styles), 'no remote stylesheet imports');
 const home = sources.get('index.html');
+assert.match(home, /id="business-info-title"/, 'home: business-information block exists');
+for (const detail of ['에코비전랩', '111-42-04359', '505-S80', '+82 10-6380-9646', 'support@mixrelay.com', '배승현', '[통신판매업 신고번호 또는 면제 사유 확인 필요]']) {
+  assert.ok(home.includes(detail), `home: business information includes ${detail}`);
+}
+const legalSections = {
+  terms: ['refunds', 'purchase', 'license', 'free', 'activation', 'withdrawal', 'support', 'agreements', 'business'],
+  privacy: ['scope', 'processing', 'records', 'destruction', 'providers', 'overseas', 'automatic', 'rights', 'security', 'contact', 'changes'],
+};
+assert.deepEqual(pages.filter((page) => page.startsWith('legal/')), ['en', 'ko'].flatMap((language) =>
+  ['privacy', 'terms'].map((policy) => `legal/${language}/${policy}.html`)), 'all four legal pages exist');
+for (const language of ['en', 'ko']) {
+  for (const [policy, sections] of Object.entries(legalSections)) {
+    const page = `legal/${language}/${policy}.html`;
+    const html = sources.get(page);
+    for (const id of sections) assert.ok(idsByPage.get(page).has(id), `${page}: ${id} section exists`);
+    assert.deepEqual([...idsByPage.get(page)].sort(), [...idsByPage.get(`legal/en/${policy}.html`)].sort(), `${page}: policy section parity`);
+    for (const placeholder of html.matchAll(/\[[^<>\n]+\]/g)) {
+      assert.ok(html.includes(`<mark>${placeholder[0]}</mark>`), `${page}: unconfirmed fact is visibly marked: ${placeholder[0]}`);
+    }
+    for (const target of ['en', 'ko']) {
+      assert.ok(html.includes(`hreflang="${target}" href="../${target}/${policy}.html"`), `${page}: alternate metadata for ${target}`);
+      assert.ok(html.includes(`href="../${target}/${policy}.html" lang="${target}" hreflang="${target}"`), `${page}: same-policy language switch`);
+    }
+  }
+  for (const name of ['LICENSE', 'LICENSE-Driver']) {
+    const original = resolve(directory, '../..', `${name}${language === 'ko' ? '.ko' : ''}.txt`);
+    const copy = resolve(directory, 'legal', language, `${name}.txt`);
+    assert.equal(readFileSync(copy, 'utf8'), readFileSync(original, 'utf8'), `${language}: website ${name} copy matches the installed agreement`);
+    assert.ok(sources.get(`legal/${language}/terms.html`).includes(`href="${name}.txt"`), `${language}: terms link to ${name}`);
+  }
+}
 for (const phrase of ['기간 제한 없이', '무료 Driver', '최대 64채널', '다운로드와 구매는 제공하지 않습니다', '구매 스토어는 아직 개설되지 않았습니다', 'US$69', 'US$39']) assert.ok(home.includes(phrase), `home: confirmed availability and pricing includes ${phrase}`);
 assert.ok(sources.get('guide.html').includes('manual/ko/index.html') && sources.get('guide.html').includes('manual/en/index.html'), 'legacy guide links to both manuals');
 for (const [language, phrases] of [['en', ['30 days', 'US$69', 'US$39', 'unlimited number', '30 calendar days', 'Deactivate this device']], ['ko', ['30일', 'US$69', 'US$39', '수 제한 없이', '30달력일', '이 기기 비활성화']]]) {

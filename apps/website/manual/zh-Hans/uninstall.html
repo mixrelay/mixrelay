@@ -54,7 +54,7 @@
 <p>请将需要保留的工作保存为 <code>.mix</code> 文件。停止录音，退出通话和录音应用。如需解除此电脑的付费激活，请在移除前联网使用<a href="licensing.html#deactivate">取消此设备的激活</a>。卸载本身不能确认服务器端已停用。</p>
 </div></section>
 <section class="guide-section" id="macos" aria-labelledby="macos-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="macos-title">在 macOS 上移除</h2>
-<ol><li>打开 <code>/Applications/Uninstall MixRelay.app</code>。</li><li>如需保留虚拟设备设置，请不要勾选 <code>删除已保存的 MixRelay 设置</code>。</li><li>选择 <code>移除 MixRelay</code>，并批准 macOS 管理员授权请求。当前移除对话框虽然使用这些 Driver 标签，但会移除完整产品。</li><li>等待确认完成。移除会停止设备和回环，并短暂中断系统音频。</li></ol><p>可选删除项只会移除已保存的设备设置。在 macOS 上，音频图、录音、已导出的工作和付费认证均会保留。仅将编辑器应用移至废纸篓不会移除已安装的音频组件。如果移除失败，请阅读消息并检查当前安装状态后再重试；某些组件可能已被移除。取消授权不会改变产品。</p><!-- TODO screenshot: actual Uninstall MixRelay dialog including current Driver labels, checkbox, authorization and completion. -->
+<ol><li>打开 <code>/Applications/MixRelay/Uninstall MixRelay.app</code>。</li><li>如需保留虚拟设备设置，请不要勾选 <code>删除已保存的 MixRelay 设置</code>。</li><li>选择 <code>移除 MixRelay</code>，并批准 macOS 管理员授权请求。当前移除对话框虽然使用这些 Driver 标签，但会移除完整产品。</li><li>等待确认完成。移除会停止设备和回环，并短暂中断系统音频。</li></ol><p>可选删除项只会移除已保存的设备设置。在 macOS 上，音频图、录音、已导出的工作和付费认证均会保留。仅将编辑器应用移至废纸篓不会移除已安装的音频组件。如果移除失败，请阅读消息并检查当前安装状态后再重试；某些组件可能已被移除。取消授权不会改变产品。</p><!-- TODO screenshot: actual Uninstall MixRelay dialog including current Driver labels, checkbox, authorization and completion. -->
 </div></section>
 <section class="guide-section" id="linux" aria-labelledby="linux-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="linux-title">在 Linux 上移除</h2>
 <p>退出编辑器，并在后台状态菜单中选择 <code>退出</code>。以普通用户身份打开已安装的 <code>卸载 MixRelay</code> 应用入口。如需保留已保存的音频图和设置，请不要勾选对应的删除选项。卸载程序使用当前会话的正常 polkit 认证代理和包管理器。成功移除后，会清除本地付费许可登录信息；录音和已导出的项目仍会保留。</p><p>也可以直接移除 <code>mix-relay</code> 软件包。仅选择适用于您发行版的命令。直接通过包管理器移除会保留各用户的设置和本地认证信息。</p><pre><code>sudo apt remove mix-relay
@@ -65,7 +65,7 @@ sudo pacman -R mix-relay</code></pre><p>如果无法显示授权界面，请检�
       </article>
     </main>
     <footer class="site-footer">
-      <div class="page-width footer-inner"><p>发布前草稿 · MixRelay 0.1.0</p><a href="../../index.html">产品首页</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+      <div class="page-width footer-inner"><p>发布前草稿 · MixRelay 0.1.0</p><a href="../../index.html">产品首页</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a><nav class="footer-policies" aria-label="Policies in English" lang="en"><a href="../../legal/en/terms.html">Terms &amp; refunds</a><a href="../../legal/en/privacy.html">Privacy</a></nav></div>
     </footer>
   </body>
 </html>
