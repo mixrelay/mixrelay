@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Update MixRelay as one complete product. Updates are downloaded and installed manually.">
+    <title>Updates — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/updates.html">
+    <link rel="alternate" hreflang="ko" href="../ko/updates.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Product home"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Language"><a href="../en/updates.html" lang="en" hreflang="en" aria-current="page">English</a> <a href="../ko/updates.html" lang="ko" hreflang="ko">한국어</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Prerelease draft</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Manual chapters">
+        <a class="back-link" href="../../index.html">← Product home</a>
+        <a class="manual-mobile-index" href="index.html">All chapters</a>
+        <nav class="guide-nav" aria-label="Manual chapters"><a href="index.html">Manual overview</a>
+<a href="installation.html">System requirements and installation</a>
+<a href="first-launch.html">First launch and permissions</a>
+<a href="workspace.html">Routing workspace</a>
+<a href="devices.html">Devices and virtual endpoints</a>
+<a href="app-capture.html">App audio capture</a>
+<a href="recording.html">Recording</a>
+<a href="effects.html">Built-in effects and presets</a>
+<a href="plugins.html">External plug-ins</a>
+<a href="stream-deck.html">Stream Deck plug-in</a>
+<a href="licensing.html">Free edition and licensing</a>
+<a href="updates.html" aria-current="page">Updates</a>
+<a href="uninstall.html">Uninstalling</a>
+<a href="troubleshooting.html">Troubleshooting and diagnostics</a>
+<a href="support.html">Support contact</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>Updates</h1><p>Update MixRelay as one complete product. Updates are downloaded and installed manually.</p><p class="guide-draft-note">Prerelease draft. Public downloads and purchases are not available yet. These instructions describe the current source build; installed behavior still needs verification in the environments noted below.</p></header>
+        <nav class="manual-toc" aria-label="On this page"><p class="sidebar-label">On this page</p><ul><li><a href="#check">Check for a release</a></li><li><a href="#install">Install an update</a></li></ul></nav>
+        <section class="guide-section" id="check" aria-labelledby="check-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="check-title">Check for a release</h2>
+<p>Choose <code>Check for updates</code> in the app or status menu. MixRelay also checks at startup and every 24 hours. The app shows <code>Installed</code> and <code>Latest release</code>. <code>No release has been published yet.</code> means there is no public release; <code>Could not check this product. Try again when online.</code> means the check failed. Neither means the installation is up to date.</p><p>Use <code>Check again</code> when online. If a download is available, open its download action. MixRelay rechecks the catalog before opening the link. It does not install automatically.</p><!-- TODO screenshot: Updates dialog and status-menu result for available, unpublished and unavailable states. -->
+</div></section>
+<section class="guide-section" id="install" aria-labelledby="install-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="install-title">Install an update</h2>
+<p>Save a <code>.mix</code> copy of important work. Quit recording and call apps, then run the new complete installer using the <a href="installation.html">installation steps</a>. On Linux, quit both the editor and background audio with the status menu’s <code>Quit</code> before updating; package hooks reject active MixRelay processes. On macOS, the installer requests that the app roles quit as part of installation.</p><p>Updates preserve devices, graphs, settings, recordings and authentication. There is one version and one installer for the editor and audio components. You do not choose separate Driver updates. Reopen MixRelay after installation and check the installed version.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Manual chapters"><a rel="prev" href="licensing.html">← Previous: Free edition and licensing</a><a rel="next" href="uninstall.html">Next: Uninstalling →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Prerelease draft · MixRelay 0.1.0</p><a href="../../index.html">Product home</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

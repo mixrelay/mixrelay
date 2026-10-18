@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="MixRelay를 열고 오디오 엔진이 준비되면 사용할 소스를 선택하세요.">
+    <title>처음 실행과 권한 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/first-launch.html">
+    <link rel="alternate" hreflang="ko" href="../ko/first-launch.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="제품 소개"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="언어"><a href="../en/first-launch.html" lang="en" hreflang="en">English</a> <a href="../ko/first-launch.html" lang="ko" hreflang="ko" aria-current="page">한국어</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 사전 공개 초안</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="안내서 목차">
+        <a class="back-link" href="../../index.html">← 제품 소개</a>
+        <a class="manual-mobile-index" href="index.html">전체 목차</a>
+        <nav class="guide-nav" aria-label="안내서 목차"><a href="index.html">안내서 시작</a>
+<a href="installation.html">시스템 요구사항과 설치</a>
+<a href="first-launch.html" aria-current="page">처음 실행과 권한</a>
+<a href="workspace.html">라우팅 작업 영역</a>
+<a href="devices.html">장치와 가상 장치</a>
+<a href="app-capture.html">앱 오디오 캡처</a>
+<a href="recording.html">녹음</a>
+<a href="effects.html">내장 효과와 프리셋</a>
+<a href="plugins.html">외부 플러그인</a>
+<a href="stream-deck.html">Stream Deck 플러그인</a>
+<a href="licensing.html">무료 기능과 라이선스</a>
+<a href="updates.html">업데이트</a>
+<a href="uninstall.html">제거</a>
+<a href="troubleshooting.html">문제 해결과 진단</a>
+<a href="support.html">지원 문의</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>처음 실행과 권한</h1><p>MixRelay를 열고 오디오 엔진이 준비되면 사용할 소스를 선택하세요.</p><p class="guide-draft-note">사전 공개 초안입니다. 공개 다운로드와 구매는 아직 제공하지 않습니다. 현재 소스 빌드를 기준으로 작성했으며 아래에 표시한 환경의 설치본 검증은 남아 있습니다.</p></header>
+        <nav class="manual-toc" aria-label="이 페이지 목차"><p class="sidebar-label">이 페이지 목차</p><ul><li><a href="#connection">오디오 엔진 연결</a></li><li><a href="#permissions">macOS 오디오 캡처와 마이크</a></li><li><a href="#first-route">첫 경로 만들기</a></li></ul></nav>
+        <section class="guide-section" id="connection" aria-labelledby="connection-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="connection-title">오디오 엔진 연결</h2>
+<p>오디오를 준비하는 동안 <code>MixRelay에 연결 중</code> 메시지가 표시됩니다. <code>MixRelay가 필요합니다</code> 메시지가 표시되면 제품 전체를 설치하세요. <code>MixRelay를 업데이트해 주세요</code> 메시지가 표시되면 설치된 제품을 업데이트하세요. <code>MixRelay에 연결할 수 없습니다</code> 메시지가 표시되면 설치 상태를 확인한 뒤 <code>다시 연결</code>을 누르세요.</p><p>무료 기능에는 구매 인증이 필요하지 않습니다. OS 선호 언어 중 첫 지원 언어를 사용하며, 없으면 영어를 사용합니다. <code>화면 테마</code>에서 <code>시스템</code>·<code>라이트</code>·<code>다크</code>를 선택할 수 있습니다.</p>
+</div></section>
+<section class="guide-section" id="permissions" aria-labelledby="permissions-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="permissions-title">macOS 오디오 캡처와 마이크</h2>
+<p>앱 소스를 처음 사용할 때 macOS가 앱 또는 시스템 오디오 캡처 권한을 요청할 수 있습니다. 마이크나 다른 물리 오디오 입력을 사용할 때는 마이크 접근 권한을 요청할 수 있습니다. 해당 소스를 사용하려면 요청한 접근을 허용하세요. 두 권한은 별개이며 마이크 권한만 허용해도 앱 캡처가 활성화되지는 않습니다.</p><p>권한을 거부했다면 시스템 설정 → 개인정보 보호 및 보안을 여세요. 화면 및 시스템 오디오 녹음의 오디오 캡처 설정과 물리 입력의 마이크 설정을 확인하세요. 이름과 요청 문구는 macOS 버전에 따라 다릅니다. 요청한 MixRelay 항목의 접근을 허용하고 macOS가 재시작을 안내하면 따르세요. 이후 MixRelay에서 소스를 다시 시도하세요. <a href="https://support.apple.com/guide/mac-help/control-access-screen-system-audio-recording-mchld6aa7d23/mac" hreflang="en" lang="en">Apple: Screen and system audio permissions</a>에서 관련 안내를 확인할 수 있습니다.</p><p>Linux에서는 일반 PipeWire 세션을 사용합니다. 이 흐름에는 macOS 방식의 권한 요청이 없습니다.</p><!-- TODO screenshot: actual installed capture and microphone requests and permission entries on supported macOS versions, both languages. -->
+</div></section>
+<section class="guide-section" id="first-route" aria-labelledby="first-route-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="first-route-title">첫 경로 만들기</h2>
+<ol><li>기존 그래프를 선택하세요. 그래프가 없으면 <code>새 그래프</code>를 누르고 <code>그래프 이름</code>을 입력한 뒤 <code>생성</code>을 누르세요. 무료 기능에서는 그래프 1개를 사용할 수 있습니다.</li><li><code>노드 추가 → 소스</code>에서 실행 중인 앱이나 오디오 입력을 선택하세요.</li><li><code>노드 추가 → 출력</code>에서 오디오 출력을 선택하세요. 소스의 각 출력 채널을 출력 노드의 입력 채널에 연결하세요.</li><li>소스 앱에서 소리를 재생하거나 입력에 대고 말하세요. 미터와 출력 장치를 확인하세요.</li></ol><p>OBS나 DAW로 믹스를 보내려면 <a href="devices.html#directions">MixRelay IO를 가상 출력으로 사용</a>하고 받는 앱의 입력으로 선택하세요.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="안내서 목차"><a rel="prev" href="installation.html">← 이전: 시스템 요구사항과 설치</a><a rel="next" href="workspace.html">다음: 라우팅 작업 영역 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>사전 공개 초안 · MixRelay 0.1.0</p><a href="../../index.html">제품 소개</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

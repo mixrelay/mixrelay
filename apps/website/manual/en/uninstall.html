@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Remove the complete product with its uninstaller or Linux package manager.">
+    <title>Uninstalling — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/uninstall.html">
+    <link rel="alternate" hreflang="ko" href="../ko/uninstall.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Product home"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Language"><a href="../en/uninstall.html" lang="en" hreflang="en" aria-current="page">English</a> <a href="../ko/uninstall.html" lang="ko" hreflang="ko">한국어</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Prerelease draft</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Manual chapters">
+        <a class="back-link" href="../../index.html">← Product home</a>
+        <a class="manual-mobile-index" href="index.html">All chapters</a>
+        <nav class="guide-nav" aria-label="Manual chapters"><a href="index.html">Manual overview</a>
+<a href="installation.html">System requirements and installation</a>
+<a href="first-launch.html">First launch and permissions</a>
+<a href="workspace.html">Routing workspace</a>
+<a href="devices.html">Devices and virtual endpoints</a>
+<a href="app-capture.html">App audio capture</a>
+<a href="recording.html">Recording</a>
+<a href="effects.html">Built-in effects and presets</a>
+<a href="plugins.html">External plug-ins</a>
+<a href="stream-deck.html">Stream Deck plug-in</a>
+<a href="licensing.html">Free edition and licensing</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html" aria-current="page">Uninstalling</a>
+<a href="troubleshooting.html">Troubleshooting and diagnostics</a>
+<a href="support.html">Support contact</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>Uninstalling</h1><p>Remove the complete product with its uninstaller or Linux package manager.</p><p class="guide-draft-note">Prerelease draft. Public downloads and purchases are not available yet. These instructions describe the current source build; installed behavior still needs verification in the environments noted below.</p></header>
+        <nav class="manual-toc" aria-label="On this page"><p class="sidebar-label">On this page</p><ul><li><a href="#prepare">Before removal</a></li><li><a href="#macos">Remove on macOS</a></li><li><a href="#linux">Remove on Linux</a></li></ul></nav>
+        <section class="guide-section" id="prepare" aria-labelledby="prepare-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="prepare-title">Before removal</h2>
+<p>Save any work you need as a <code>.mix</code> file. Stop recording and quit call and recording apps. If you want to release this computer’s paid activation, use <a href="licensing.html#deactivate">Deactivate this device</a> while online before removal. Uninstalling does not confirm server-side deactivation.</p>
+</div></section>
+<section class="guide-section" id="macos" aria-labelledby="macos-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="macos-title">Remove on macOS</h2>
+<ol><li>Open <code>/Applications/Uninstall MixRelay.app</code>.</li><li>Leave <code>Delete saved MixRelay Driver settings</code> unchecked to keep virtual-device settings.</li><li>Choose <code>Remove MixRelay Driver</code> and approve the macOS administrator request. The current removal dialog uses these Driver labels but removes the complete product.</li><li>Wait for confirmed completion. Removal stops devices and loopback and briefly interrupts system audio.</li></ol><p>The optional deletion removes saved device settings only. Graphs, recordings, exported work and paid authentication remain on macOS. Moving the editor app to Trash alone does not remove the installed audio components. If removal fails, read the message and check the current installation before retrying; some components may already be gone. Cancelling authorization leaves the product unchanged.</p><!-- TODO screenshot: actual Uninstall MixRelay dialog including current Driver labels, checkbox, authorization and completion. -->
+</div></section>
+<section class="guide-section" id="linux" aria-labelledby="linux-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="linux-title">Remove on Linux</h2>
+<p>Quit the editor and choose <code>Quit</code> in the background status menu. Open the installed <code>Uninstall MixRelay</code> application entry as your normal user. Keep the saved-graphs-and-settings deletion option unchecked to preserve those files. The remover uses the session’s normal polkit authentication agent and package manager. Successful removal clears the local paid-license sign-in; recordings and exported projects remain.</p><p>You can instead remove the <code>mix-relay</code> package directly. Choose only your distribution’s command. Direct package-manager removal preserves per-user settings and local authentication.</p><pre><code>sudo apt remove mix-relay
+sudo dnf remove mix-relay
+sudo pacman -R mix-relay</code></pre><p>If authorization cannot appear, check that your desktop session has a polkit authentication agent. If the app was removed but cleanup failed, follow the displayed recovery message. Do not delete unrelated audio services or user folders.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Manual chapters"><a rel="prev" href="updates.html">← Previous: Updates</a><a rel="next" href="troubleshooting.html">Next: Troubleshooting and diagnostics →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Prerelease draft · MixRelay 0.1.0</p><a href="../../index.html">Product home</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="실행 중인 앱을 캡처하고 그래프에서 오디오를 연결하세요.">
+    <title>앱 오디오 캡처 — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/app-capture.html">
+    <link rel="alternate" hreflang="ko" href="../ko/app-capture.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="제품 소개"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="언어"><a href="../en/app-capture.html" lang="en" hreflang="en">English</a> <a href="../ko/app-capture.html" lang="ko" hreflang="ko" aria-current="page">한국어</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> 사전 공개 초안</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="안내서 목차">
+        <a class="back-link" href="../../index.html">← 제품 소개</a>
+        <a class="manual-mobile-index" href="index.html">전체 목차</a>
+        <nav class="guide-nav" aria-label="안내서 목차"><a href="index.html">안내서 시작</a>
+<a href="installation.html">시스템 요구사항과 설치</a>
+<a href="first-launch.html">처음 실행과 권한</a>
+<a href="workspace.html">라우팅 작업 영역</a>
+<a href="devices.html">장치와 가상 장치</a>
+<a href="app-capture.html" aria-current="page">앱 오디오 캡처</a>
+<a href="recording.html">녹음</a>
+<a href="effects.html">내장 효과와 프리셋</a>
+<a href="plugins.html">외부 플러그인</a>
+<a href="stream-deck.html">Stream Deck 플러그인</a>
+<a href="licensing.html">무료 기능과 라이선스</a>
+<a href="updates.html">업데이트</a>
+<a href="uninstall.html">제거</a>
+<a href="troubleshooting.html">문제 해결과 진단</a>
+<a href="support.html">지원 문의</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>앱 오디오 캡처</h1><p>실행 중인 앱을 캡처하고 그래프에서 오디오를 연결하세요.</p><p class="guide-draft-note">사전 공개 초안입니다. 공개 다운로드와 구매는 아직 제공하지 않습니다. 현재 소스 빌드를 기준으로 작성했으며 아래에 표시한 환경의 설치본 검증은 남아 있습니다.</p></header>
+        <nav class="manual-toc" aria-label="이 페이지 목차"><p class="sidebar-label">이 페이지 목차</p><ul><li><a href="#capture">앱 선택</a></li><li><a href="#unavailable">소스 사용 불가와 원래 재생 경로</a></li><li><a href="#system">전체 시스템 캡처</a></li></ul></nav>
+        <section class="guide-section" id="capture" aria-labelledby="capture-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="capture-title">앱 선택</h2>
+<ol><li>소스 앱을 열고 소리를 재생해 오디오 소스를 사용할 수 있게 하세요.</li><li>MixRelay의 <code>노드 추가 → 소스</code>에서 <code>실행 중인 애플리케이션</code> 아래의 앱을 선택하세요.</li><li>출력 채널을 프로세서·출력·레코더에 연결하세요. 필요하면 <code>옵션</code>의 <code>입력 레벨</code>을 조절하세요.</li></ol><p>목록에는 발견한 앱이 표시되며 개별 브라우저 탭이나 창을 고르는 기능은 없습니다. 표시 이름을 바꿔도 캡처 대상은 바뀌지 않습니다. 물리 입력과 개별 앱 캡처 노드는 무료 입력 2개 한도를 함께 사용합니다.</p>
+</div></section>
+<section class="guide-section" id="unavailable" aria-labelledby="unavailable-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="unavailable-title">소스 사용 불가와 원래 재생 경로</h2>
+<p>캡처에는 48 kHz와 해당 <a href="first-launch.html#permissions">macOS 권한</a>이 필요합니다. 노드가 <code>오프라인</code>이면 앱이 실행 중인지 확인하세요. <code>앱을 다시 선택하세요</code> 메시지가 표시되면 노드의 앱 선택에서 원하는 소스를 고르세요. 일치하는 소스가 여러 개일 때 MixRelay가 임의로 대체하지 않습니다.</p><p>앱의 원래 재생 경로와 MixRelay 경로가 모두 들릴 수 있습니다. 소리가 겹치면 모니터링 경로를 확인하세요. MixRelay는 시스템 기본 출력을 바꾸지 않습니다. 캡처 경로에서 원음을 차단하는 경우 MixRelay가 소유한 경로만 제어합니다. 현재 UI에는 원래 앱 재생을 따로 바꾸는 토글이 없습니다.</p><!-- TODO screenshot: running application menu and offline/reselection states, both languages. -->
+</div></section>
+<section class="guide-section" id="system" aria-labelledby="system-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="system-title">전체 시스템 캡처</h2>
+<p>제품 정책에서 전체 시스템 캡처는 유료 기능입니다. 현재 앱의 <code>노드 추가</code> 메뉴에는 전체 시스템 캡처 명령이 없습니다. 따라서 이 안내서에는 해당 기능을 켜는 절차가 없습니다. 현재 빌드에서는 개별 앱을 선택하거나 MixRelay IO로 재생 경로를 직접 지정하세요.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="안내서 목차"><a rel="prev" href="devices.html">← 이전: 장치와 가상 장치</a><a rel="next" href="recording.html">다음: 녹음 →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>사전 공개 초안 · MixRelay 0.1.0</p><a href="../../index.html">제품 소개</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

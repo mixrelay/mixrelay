@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Install effects with their vendor’s installer, then discover them in MixRelay.">
+    <title>External plug-ins — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/plugins.html">
+    <link rel="alternate" hreflang="ko" href="../ko/plugins.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Product home"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Language"><a href="../en/plugins.html" lang="en" hreflang="en" aria-current="page">English</a> <a href="../ko/plugins.html" lang="ko" hreflang="ko">한국어</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Prerelease draft</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Manual chapters">
+        <a class="back-link" href="../../index.html">← Product home</a>
+        <a class="manual-mobile-index" href="index.html">All chapters</a>
+        <nav class="guide-nav" aria-label="Manual chapters"><a href="index.html">Manual overview</a>
+<a href="installation.html">System requirements and installation</a>
+<a href="first-launch.html">First launch and permissions</a>
+<a href="workspace.html">Routing workspace</a>
+<a href="devices.html">Devices and virtual endpoints</a>
+<a href="app-capture.html">App audio capture</a>
+<a href="recording.html">Recording</a>
+<a href="effects.html">Built-in effects and presets</a>
+<a href="plugins.html" aria-current="page">External plug-ins</a>
+<a href="stream-deck.html">Stream Deck plug-in</a>
+<a href="licensing.html">Free edition and licensing</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html">Uninstalling</a>
+<a href="troubleshooting.html">Troubleshooting and diagnostics</a>
+<a href="support.html">Support contact</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>External plug-ins</h1><p>Install effects with their vendor’s installer, then discover them in MixRelay.</p><p class="guide-draft-note">Prerelease draft. Public downloads and purchases are not available yet. These instructions describe the current source build; installed behavior still needs verification in the environments noted below.</p></header>
+        <nav class="manual-toc" aria-label="On this page"><p class="sidebar-label">On this page</p><ul><li><a href="#formats">Formats by platform</a></li><li><a href="#discovery">Find and use an effect</a></li><li><a href="#failures">Scan, editor and format errors</a></li></ul></nav>
+        <section class="guide-section" id="formats" aria-labelledby="formats-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="formats-title">Formats by platform</h2>
+<ul><li>macOS: VST3, CLAP, AU and AUv3.</li><li>Linux: VST3, CLAP and LV2.</li></ul><p>The list contains audio effects that pass discovery and layout checks. Instrument and MIDI workflows are not provided. A supported format does not guarantee that every plug-in, architecture or channel layout will work. The free edition allows two external plug-in instances, including instances that are off. The number of discovered effects is unrestricted.</p>
+</div></section>
+<section class="guide-section" id="discovery" aria-labelledby="discovery-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="discovery-title">Find and use an effect</h2>
+<ol><li>Install the plug-in for your platform and architecture using its vendor’s instructions.</li><li>In <code>Add node → Processor</code>, choose <code>Rescan audio effects</code>. For a custom VST3, CLAP or LV2 location, choose <code>Add plug-in folder…</code>.</li><li>Select a discovered effect directly in the Processor menu. Its description identifies its format and vendor. Review <code>Channel layout</code> and connect the required main, sidechain or auxiliary ports.</li><li>Use the node’s <code>Options</code> for exposed parameters. A new plug-in node opens its native editor once when available. Use <code>Open</code> to reopen it.</li></ol><p>Linux native editors require X11 or XWayland. A missing editor does not create a generic native window. Use exposed parameters when available.</p><!-- TODO screenshot: actual effect list, Channel layout, parameter controls and a native editor. -->
+</div></section>
+<section class="guide-section" id="failures" aria-labelledby="failures-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="failures-title">Scan, editor and format errors</h2>
+<p>If <code>Effect search incomplete</code> appears, open <code>Scan issues</code> and <code>Technical details</code>. Previously available effects remain listed when a scan stage fails. Correct the installation or folder and use <code>Retry</code> or rescan.</p><p>For a crashed plug-in, use <code>Retry crashed plug-in: …</code> if offered. If an editor is unavailable, read its specific reason, such as no native editor or missing X11/XWayland. Some AU/VST/LV2 sessions reject live format changes because native preset-state transfer is not implemented. The current session is retained; do not assume the requested format was applied.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Manual chapters"><a rel="prev" href="effects.html">← Previous: Built-in effects and presets</a><a rel="next" href="stream-deck.html">Next: Stream Deck plug-in →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Prerelease draft · MixRelay 0.1.0</p><a href="../../index.html">Product home</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

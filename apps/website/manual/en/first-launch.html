@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Open MixRelay, wait for its audio engine, then select the sources you want to use.">
+    <title>First launch and permissions — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/first-launch.html">
+    <link rel="alternate" hreflang="ko" href="../ko/first-launch.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Product home"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Language"><a href="../en/first-launch.html" lang="en" hreflang="en" aria-current="page">English</a> <a href="../ko/first-launch.html" lang="ko" hreflang="ko">한국어</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Prerelease draft</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Manual chapters">
+        <a class="back-link" href="../../index.html">← Product home</a>
+        <a class="manual-mobile-index" href="index.html">All chapters</a>
+        <nav class="guide-nav" aria-label="Manual chapters"><a href="index.html">Manual overview</a>
+<a href="installation.html">System requirements and installation</a>
+<a href="first-launch.html" aria-current="page">First launch and permissions</a>
+<a href="workspace.html">Routing workspace</a>
+<a href="devices.html">Devices and virtual endpoints</a>
+<a href="app-capture.html">App audio capture</a>
+<a href="recording.html">Recording</a>
+<a href="effects.html">Built-in effects and presets</a>
+<a href="plugins.html">External plug-ins</a>
+<a href="stream-deck.html">Stream Deck plug-in</a>
+<a href="licensing.html">Free edition and licensing</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html">Uninstalling</a>
+<a href="troubleshooting.html">Troubleshooting and diagnostics</a>
+<a href="support.html">Support contact</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>First launch and permissions</h1><p>Open MixRelay, wait for its audio engine, then select the sources you want to use.</p><p class="guide-draft-note">Prerelease draft. Public downloads and purchases are not available yet. These instructions describe the current source build; installed behavior still needs verification in the environments noted below.</p></header>
+        <nav class="manual-toc" aria-label="On this page"><p class="sidebar-label">On this page</p><ul><li><a href="#connection">Connect to the audio engine</a></li><li><a href="#permissions">macOS audio capture and microphone</a></li><li><a href="#first-route">Make your first route</a></li></ul></nav>
+        <section class="guide-section" id="connection" aria-labelledby="connection-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="connection-title">Connect to the audio engine</h2>
+<p><code>Connecting to MixRelay</code> appears while audio is prepared. If <code>MixRelay is required</code> appears, install the complete product. If <code>Update MixRelay</code> appears, update the installed product. For <code>Cannot connect to MixRelay</code>, choose <code>Retry connection</code> after checking the installation.</p><p>The free edition requires no purchase activation. The app uses the first supported OS language preference and falls back to English. <code>Appearance</code> offers <code>System</code>, <code>Light</code> and <code>Dark</code>.</p>
+</div></section>
+<section class="guide-section" id="permissions" aria-labelledby="permissions-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="permissions-title">macOS audio capture and microphone</h2>
+<p>When you first use an application source, macOS can request permission to capture application or system audio. When you use a microphone or another physical audio input, macOS can request microphone access. Allow the requested access if you want to use that source. These are separate permissions; microphone approval alone does not enable application capture.</p><p>If access was denied, open System Settings → Privacy &amp; Security. Check the audio capture control under Screen &amp; System Audio Recording and check Microphone for physical inputs. Labels and prompts vary by macOS version. Enable access for the MixRelay entry responsible for the request and follow any macOS restart instruction. Then retry the source in MixRelay. See <a href="https://support.apple.com/guide/mac-help/control-access-screen-system-audio-recording-mchld6aa7d23/mac">Apple’s screen and system audio permission guide</a>.</p><p>On Linux, sources use the normal PipeWire session. A macOS-style permission prompt is not part of this flow.</p><!-- TODO screenshot: actual installed capture and microphone requests and permission entries on supported macOS versions, both languages. -->
+</div></section>
+<section class="guide-section" id="first-route" aria-labelledby="first-route-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="first-route-title">Make your first route</h2>
+<ol><li>Select an existing graph, or choose <code>New graph</code>, enter a <code>Graph name</code> and choose <code>Create</code> if none exists. The free edition allows one graph.</li><li>Use <code>Add node → Source</code> to choose a running app or an audio input.</li><li>Use <code>Add node → Output</code> to choose an audio output. Connect each source output channel to an input channel on the output node.</li><li>Play audio in the source app or speak into the input. Check the meters and output device.</li></ol><p>To send the mix to OBS or a DAW, use <a href="devices.html#directions">MixRelay IO as a virtual output</a> and select it as the input in the receiving app.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Manual chapters"><a rel="prev" href="installation.html">← Previous: System requirements and installation</a><a rel="next" href="workspace.html">Next: Routing workspace →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Prerelease draft · MixRelay 0.1.0</p><a href="../../index.html">Product home</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

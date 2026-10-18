@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="Build a graph from source, processor and output nodes. Cables carry audio between individual channels.">
+    <title>Routing workspace — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/workspace.html">
+    <link rel="alternate" hreflang="ko" href="../ko/workspace.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Product home"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Language"><a href="../en/workspace.html" lang="en" hreflang="en" aria-current="page">English</a> <a href="../ko/workspace.html" lang="ko" hreflang="ko">한국어</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Prerelease draft</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Manual chapters">
+        <a class="back-link" href="../../index.html">← Product home</a>
+        <a class="manual-mobile-index" href="index.html">All chapters</a>
+        <nav class="guide-nav" aria-label="Manual chapters"><a href="index.html">Manual overview</a>
+<a href="installation.html">System requirements and installation</a>
+<a href="first-launch.html">First launch and permissions</a>
+<a href="workspace.html" aria-current="page">Routing workspace</a>
+<a href="devices.html">Devices and virtual endpoints</a>
+<a href="app-capture.html">App audio capture</a>
+<a href="recording.html">Recording</a>
+<a href="effects.html">Built-in effects and presets</a>
+<a href="plugins.html">External plug-ins</a>
+<a href="stream-deck.html">Stream Deck plug-in</a>
+<a href="licensing.html">Free edition and licensing</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html">Uninstalling</a>
+<a href="troubleshooting.html">Troubleshooting and diagnostics</a>
+<a href="support.html">Support contact</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>Routing workspace</h1><p>Build a graph from source, processor and output nodes. Cables carry audio between individual channels.</p><p class="guide-draft-note">Prerelease draft. Public downloads and purchases are not available yet. These instructions describe the current source build; installed behavior still needs verification in the environments noted below.</p></header>
+        <nav class="manual-toc" aria-label="On this page"><p class="sidebar-label">On this page</p><ul><li><a href="#graphs">Graphs, nodes and saving</a></li><li><a href="#connections">Connect and map channels</a></li><li><a href="#keyboard">Connect without dragging</a></li><li><a href="#states">Off, Mute, Bypass, Pause and exit</a></li></ul></nav>
+        <section class="guide-section" id="graphs" aria-labelledby="graphs-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="graphs-title">Graphs, nodes and saving</h2>
+<p>Use <code>New graph</code> to create a graph and <code>Add node</code> for <code>Source</code>, <code>Processor</code> or <code>Output</code>. Select a graph in <code>Graphs</code> to edit it. Selection does not turn other graphs off. Licensed graphs can run together.</p><p>Open a node’s <code>Options</code> for its available parameters. Double-click its name, press <kbd>F2</kbd> on a focused node, or use <code>Rename display name</code> in its menu. A display name changes this node only. Clear it to restore the original name.</p><p>Edits and layout are saved automatically. A save warning means they may be lost after restart. For a portable workspace, use <code>File → Save</code> or <code>Save As…</code> to write a <code>.mix</code> file. <code>New Workspace</code> and <code>Open…</code> ask before replacing current contents. A workspace file does not install missing devices or plug-ins.</p>
+</div></section>
+<section class="guide-section" id="connections" aria-labelledby="connections-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="connections-title">Connect and map channels</h2>
+<p>Drag an output port to an input port. For a stereo pair, connect both channels. Hold <kbd>Shift</kbd> to select more output channels on the same node, then drag the selection to the destination’s first channel. The destination channel offset is preserved. Press <kbd>Escape</kbd> to cancel and clear the channel selection.</p><p>Right-click a cable for <code>Delete cable</code>. A port menu offers <code>Disconnect channel</code> or <code>Disconnect selected channels</code>. Select a node or cable and press <kbd>Delete</kbd> or <kbd>Backspace</kbd> to remove it. <code>Fit graph</code> brings the graph into view. Use <kbd>Command+Z</kbd> on macOS or <kbd>Ctrl+Z</kbd> on Linux to undo graph edits; add <kbd>Shift</kbd> to redo.</p><p><code>Delete graph</code> stops that graph’s audio and recordings. Graph deletion cannot be undone; saved workspace files remain.</p><!-- TODO screenshot: actual workspace, expanded node Options and stereo channel mapping, English and Korean. -->
+</div></section>
+<section class="guide-section" id="keyboard" aria-labelledby="keyboard-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="keyboard-title">Connect without dragging</h2>
+<ol><li>Use <kbd>Tab</kbd> to focus the source node. <kbd>Enter</kbd> or <kbd>Space</kbd> selects it. Arrow keys move the selected node; hold <kbd>Shift</kbd> for larger steps.</li><li>Press <kbd>Shift+F10</kbd> or the Context Menu key and choose <code>Connect channels…</code>.</li><li>Choose <code>First output channel</code> and <code>Number of channels</code>, or keep an existing channel selection. Choose <code>Destination</code> and <code>First input channel</code>.</li><li>Read <code>Preview</code>, including skipped connections and their reasons. Choose <code>Connect</code>, or <code>Cancel</code> to leave the graph unchanged.</li></ol><p>The same context-menu keys work on a focused cable or the canvas. Controls inside a node keep their own keyboard behavior. <kbd>Escape</kbd> closes menus and dialogs.</p>
+</div></section>
+<section class="guide-section" id="states" aria-labelledby="states-title"><p class="section-number" aria-hidden="true">04</p><div><h2 id="states-title">Off, Mute, Bypass, Pause and exit</h2>
+<ul><li>A node’s power control disables processing and blocks its signal when off.</li><li>Mute keeps processing and silences the node’s output.</li><li>An effect’s <code>Bypass</code> passes dry audio while retaining its settings.</li><li><code>Pause</code> in the footer or status menu pauses all graphs and active recordings. <code>Resume</code> uses current audio. Paused audio is discarded. Virtual devices keep their IDs, names and formats.</li></ul><p>Closing the editor keeps routing, effects, capture and recording running in the background. On macOS, closing the window hides it; quitting the editor ends the editor process. On Linux, closing the window ends the editor process. Use <code>Open MixRelay</code> in the status menu to return.</p><p><code>Quit</code> in the background status menu stops devices and loopback and finalizes recordings. Reopening MixRelay restores the saved devices. A saved global pause remains until you resume; manually paused or stopped recorders never start merely because you resume all audio.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Manual chapters"><a rel="prev" href="first-launch.html">← Previous: First launch and permissions</a><a rel="next" href="devices.html">Next: Devices and virtual endpoints →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Prerelease draft · MixRelay 0.1.0</p><a href="../../index.html">Product home</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ed">
+    <meta name="description" content="The free edition has no time limit. A paid license expands the same installed product.">
+    <title>Free edition and licensing — MixRelay</title>
+    <link rel="stylesheet" href="../../styles.css">
+    <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
+    <link rel="alternate" hreflang="en" href="../en/licensing.html">
+    <link rel="alternate" hreflang="ko" href="../ko/licensing.html">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="brand-link" href="../../index.html" aria-label="Product home"><img class="brand-symbol" src="../../assets/mixrelay-symbol.svg" alt="MixRelay" width="96" height="96"></a>
+      <nav class="primary-nav" aria-label="Language"><a href="../en/licensing.html" lang="en" hreflang="en" aria-current="page">English</a> <a href="../ko/licensing.html" lang="ko" hreflang="ko">한국어</a></nav>
+      <span class="draft-badge"><span aria-hidden="true"></span> Prerelease draft</span>
+    </header>
+    <main id="main" class="guide-layout page-width manual-layout">
+      <aside class="guide-sidebar" aria-label="Manual chapters">
+        <a class="back-link" href="../../index.html">← Product home</a>
+        <a class="manual-mobile-index" href="index.html">All chapters</a>
+        <nav class="guide-nav" aria-label="Manual chapters"><a href="index.html">Manual overview</a>
+<a href="installation.html">System requirements and installation</a>
+<a href="first-launch.html">First launch and permissions</a>
+<a href="workspace.html">Routing workspace</a>
+<a href="devices.html">Devices and virtual endpoints</a>
+<a href="app-capture.html">App audio capture</a>
+<a href="recording.html">Recording</a>
+<a href="effects.html">Built-in effects and presets</a>
+<a href="plugins.html">External plug-ins</a>
+<a href="stream-deck.html">Stream Deck plug-in</a>
+<a href="licensing.html" aria-current="page">Free edition and licensing</a>
+<a href="updates.html">Updates</a>
+<a href="uninstall.html">Uninstalling</a>
+<a href="troubleshooting.html">Troubleshooting and diagnostics</a>
+<a href="support.html">Support contact</a></nav>
+      </aside>
+      <article class="guide-content">
+        <header class="guide-heading"><p class="eyebrow">MIXRELAY / MANUAL</p><h1>Free edition and licensing</h1><p>The free edition has no time limit. A paid license expands the same installed product.</p><p class="guide-draft-note">Prerelease draft. Public downloads and purchases are not available yet. These instructions describe the current source build; installed behavior still needs verification in the environments noted below.</p></header>
+        <nav class="manual-toc" aria-label="On this page"><p class="sidebar-label">On this page</p><ul><li><a href="#free">Free edition limits</a></li><li><a href="#purchase">Paid access and buying</a></li><li><a href="#activation">Activate and check online</a></li><li><a href="#deactivate">Deactivate a computer</a></li><li><a href="#refunds">Refunds</a></li></ul></nav>
+        <section class="guide-section" id="free" aria-labelledby="free-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="free-title">Free edition limits</h2>
+<dl><dt>Graphs</dt><dd>One graph, with saving, loading and restoration.</dd><dt>Inputs</dt><dd>Two physical-input or individual app-capture nodes in total. Virtual-device sources do not count toward this input limit.</dd><dt>Outputs</dt><dd>Two distinct output devices, including virtual output devices. Repeated references to the same device count once. Recorders do not count as output devices.</dd><dt>Virtual devices and mappings</dt><dd>One virtual device. Four channel connections from editing graphs into virtual devices in total; one stereo pair counts as two. Connections between effects or into physical outputs and recorders do not count toward this mapping limit.</dd><dt>Effects</dt><dd>Unlimited built-in effects with parameter and preset editing. Two external plug-in instances, including instances that are off.</dd><dt>Recording</dt><dd>One recorder, up to two channels and two recorded hours per take.</dd></dl><p>The free Driver device supports up to 64 channels per direction with its supported sample rates and PCM settings. Basic loopback and device use by external DAWs are separate from the editor’s four-mapping limit. Device, graph and mapping saving remain available within the free limits. Free use adds no noise, quality reduction or extra latency.</p>
+</div></section>
+<section class="guide-section" id="purchase" aria-labelledby="purchase-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="purchase-title">Paid access and buying</h2>
+<p>A paid license removes the free graph, input, output, mapping, plug-in and recorder quotas, while technical limits remain. It enables virtual-device creation and renaming. Whole-system capture is a paid policy item but is <a href="app-capture.html#system">absent from the current node menu</a>.</p><p>The confirmed price is US$69 list price and US$39 ongoing sale price, excluding tax. Lemon Squeezy handles payment and key issuance. Applicable tax and the total must be shown before payment. The store and public purchase link are not available yet. When purchasing is enabled, choose <code>Buy a license</code> in <code>License</code>, complete checkout and use the issued key to activate. A build may show <code>Purchases and activation are not available in this build.</code></p><p>The license covers one person on an unlimited number of their own computers. Do not share the key with others. Updates within the purchased major version are included; buying a later major version is optional. Personal and business routing, recording and broadcast use are allowed. OEM, bundling, resale, white-label use and integration into another product require a separate written agreement. Free use does not grant modification or redistribution rights.</p>
+</div></section>
+<section class="guide-section" id="activation" aria-labelledby="activation-title"><p class="section-number" aria-hidden="true">03</p><div><h2 id="activation-title">Activate and check online</h2>
+<ol><li>Choose the version and license status at the lower left to open <code>License</code>.</li><li>In a configured build, enter your <code>License key</code> and a <code>Device name</code> that identifies this computer.</li><li>Choose <code>Activate</code>. Use <code>Check license online</code> for a manual online check.</li></ol><p>Successful online verification permits 30 days of offline paid access from that success. Restarting or failed checks do not renew it. The dialog shows the remaining offline days and valid-until date. Background checks at runtime start or first app connection share a 24-hour attempt limit; there is no separate repeating license-check timer during a running session.</p><p>Connection failures do not erase valid authentication or stop ongoing audio and recordings. If access expires or is revoked, new paid operations require valid access. Existing work is preserved; excess configurations are not automatically deleted. Free features remain available.</p><!-- TODO screenshot: configured License dialog, activation, remaining offline days and deactivation. -->
+</div></section>
+<section class="guide-section" id="deactivate" aria-labelledby="deactivate-title"><p class="section-number" aria-hidden="true">04</p><div><h2 id="deactivate-title">Deactivate a computer</h2>
+<p>While online, open <code>License</code> and choose <code>Deactivate this device</code> on the computer you want to release. This removes that computer’s activation, not the key or other computers’ activations. Activate with the same key on your own other computer. Deactivating the old computer is not required to make room for another activation because your own computers are unlimited.</p><p>Reinstalling and remote deactivation are separate. Deactivate before uninstalling if you want to release the activation. If the old computer is unavailable or activation cannot be confirmed, contact <a href="support.html">support</a>. Do not repeat activation when the app says support must resolve an uncertain result. Check the device clock if <code>Device clock needs attention</code> appears.</p>
+</div></section>
+<section class="guide-section" id="refunds" aria-labelledby="refunds-title"><p class="section-number" aria-hidden="true">05</p><div><h2 id="refunds-title">Refunds</h2>
+<p>Request a full refund within 30 calendar days of purchase, without giving a reason. Contact <a href="mailto:support@mixrelay.com">support@mixrelay.com</a> with the purchase reference. Statutory consumer rights remain. A full refund also deactivates the paid key. Free features remain available after a refund or device deactivation. An offline computer cannot receive a remote license update immediately.</p>
+</div></section>
+        <nav class="manual-pagination" aria-label="Manual chapters"><a rel="prev" href="stream-deck.html">← Previous: Stream Deck plug-in</a><a rel="next" href="updates.html">Next: Updates →</a></nav>
+      </article>
+    </main>
+    <footer class="site-footer">
+      <div class="page-width footer-inner"><p>Prerelease draft · MixRelay 0.1.0</p><a href="../../index.html">Product home</a><a href="../../assets/fonts/OFL.txt">IBM Plex · SIL OFL 1.1</a></div>
+    </footer>
+  </body>
+</html>
