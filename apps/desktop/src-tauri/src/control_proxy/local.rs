@@ -368,7 +368,7 @@ mod tests {
     #[tokio::test]
     async fn previous_session_and_unfenced_recorder_never_reach_engine() {
         // Never the session's real engine: a regression here must not reach live audio.
-        let fixture = mixrelay_test_support::FixtureDir::new("local-unfenced").expect("fixture");
+        let fixture = mixrelay_test_support::FixtureDir::new("ipc-fence").expect("fixture");
         let control = LocalControl::new(
             ControlProxyClient::with_socket(Some(fixture.join("no-engine.sock"))),
             #[cfg(target_os = "macos")]

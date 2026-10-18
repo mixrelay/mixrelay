@@ -65,6 +65,7 @@ MixRelay의 Rust 코드에 적용하는 규칙이다. 작업에 해당하는 조
 - 정의를 되풀이하는 테스트(상수 비교, 구현 분기 따라 쓰기)를 쓰지 않는다. 실제 신호·시각·상태로 관찰 가능한 동작을 확인하고, 결함을 막는 테스트는 결함을 넣었을 때 실패하는지 확인한다(MS M-TAUTOLOGICAL-TESTS).
 - 단위 테스트는 모듈 옆에 둔다. 새 코드는 `foo/tests.rs`(`#[cfg(test)] mod tests;`) 형식을 쓴다. CI는 `--lib --bins`, 커버리지(`pnpm coverage:rust`)는 `--lib` 대상만 실행한다. 실행 파일(`--bins`) 테스트는 커버리지에 잡히지 않고, 크레이트의 `tests/` 통합 테스트는 어느 쪽도 실행하지 않으므로 두 명령에 `--tests`가 더해질 때까지 새로 만들지 않는다(Book 11.3, MS M-INTEGRATION-TESTS).
 - 복구 가능한 실패는 `Err`·`None`을 확인하고, 의도한 panic 계약은 `#[should_panic(expected = "...")]`로 확인한다(Book 11.1).
+- Unix 소켓을 여는 테스트는 `FixtureDir` label을 `ipc-*`·`drv-*`처럼 9자 이내로 쓴다. 소켓 경로는 macOS 104바이트 한도가 있고 CI의 checkout 경로가 로컬보다 길다.
 - 반복을 기다리는 테스트 루프에는 횟수 상한을 두고, 진행이 없으면 실패하게 한다. 테스트가 멈추면 안 된다.
 
 ## 로그·상수·문서를 쓸 때
