@@ -23,7 +23,8 @@ belong to control-side preparation/retirement.
 
 Each session has 128 packets with capacity for 256 frames each. Small callbacks
 append to a producer-owned partial packet. Full packets and rate transitions
-publish READY; Stop/Pause and failures publish the final valid partial only after
+publish READY; reaching the take's input-duration budget also publishes its final
+partial packet and closes admission. Stop/Pause and failures publish a partial only after
 closing admission and draining callback entrants. The worker never reads WRITING
 PCM. At a stable rate, 32-frame callbacks can therefore use all 32,768 frames
 (682.7 ms at 48 kHz), instead of consuming one slot each and exhausting at 4,096
@@ -50,7 +51,12 @@ identity and path before registry destruction.
 Record creates an absolute destination with `create_new`, never overwriting an
 existing file. Pause drains and finishes the current converter segment but keeps
 the file open; Resume excludes paused time. The WAV rate and encoding are fixed
-for a take. Each input packet retains its processing rate; a rate transition
+for a take. A duration limit is fixed at creation and survives Pause/Resume and
+licence changes. Input frames consume an integer duration budget using the least
+common multiple of supported rates. Reaching the budget publishes the final
+partial packet; the worker drains it and the SRC tail without waiting for another
+callback. The sink caps output at exactly the file rate times the allowed seconds.
+Each input packet retains its processing rate; a rate transition
 finishes the old sinc-converter segment before preparing the next. Record and
 Resume prepare the observed-rate converter before opening callback admission;
 each packet's rate remains authoritative if the clock changes meanwhile. Fractional
@@ -84,23 +90,25 @@ actual output frames. Resampling, fractional frame carry, dither, packet storage
 and callback behavior retain their existing ownership. No file I/O was moved to
 the audio callback.
 
-Validation covers empty and short files in all three encodings at 1, 2 and 8
-channels, exact PCM, alignment, pause/resume, rate transitions, packet chunking,
+Validation covers empty and short files in all three encodings at every supported
+channel count (1–8), exact PCM, alignment, pause/resume, rate transitions, packet
+chunking,
 accepted-prefix retention and injected write/seek/flush errors. Sparse files
 cross the real 4 GiB boundary in PCM16, PCM24 and multichannel float32: a sparse
 zero prefix is followed by real written PCM, with 64-bit sizes and frame counts
 checked after finalization. This validates addressing, not sustained throughput.
 
-Independent FFmpeg checks explicitly decode all nine small format/channel
-combinations and seek/decode the exact float32 PCM after the large-file boundary:
+Hermetic decoder checks validate RF64 sizes with the in-repo reader and decode
+PCM with Hound. Because Hound reads RIFF, the tests translate container sizes
+while retaining the production format headers and sample bytes. Sparse fixtures
+cover complete frames immediately below, at (where frame alignment permits), and
+above 4 GiB for every encoding/channel count. Their real tail PCM is read beyond
+the boundary and decoded through a bounded RIFF view. This checks addressing and
+format compatibility without reading gigabytes of zeros or using external tools.
+Control-owner disconnection drains and finalizes the accepted prefix in every
+format/channel count. Abrupt termination of the writer process or power loss
+cannot execute this finalization and is outside these checks.
 
-```sh
-cargo test -p mixrelay-audio-recorder ffmpeg_decodes -- --ignored
-```
-
-These integration tests require `ffmpeg` and `ffprobe` on PATH and are ignored
-by default. They are development checks, not production dependencies. Installed
-app and long-duration recording qualification remain separate from these tests.
 The container follows [EBU Tech 3306](https://tech.ebu.ch/docs/tech/tech3306v1_1.pdf).
 
 The 2026-10-10 checkpoint passed 33 recorder unit tests and both explicit FFmpeg

@@ -50,3 +50,29 @@ fn a_full_packet_pool_fails_without_allocating_freeing_or_retagging() {
     shared.fail(1, 2);
     assert_eq!(shared.gate.load(Ordering::SeqCst), 2);
 }
+
+#[test]
+fn two_hours_of_input_frames_exhaust_exactly_at_every_supported_clock_boundary() {
+    use super::{DURATION_TICKS_PER_SECOND, admit_duration};
+    for &first_rate in mixrelay_audio_io::formats::SAMPLE_RATES {
+        for &second_rate in mixrelay_audio_io::formats::SAMPLE_RATES {
+            let ticks = 7_200 * DURATION_TICKS_PER_SECOND;
+            let first_hour = usize::try_from(first_rate).unwrap() * 3_600;
+            let (accepted, left) = admit_duration(ticks, first_hour, first_rate);
+            assert_eq!(accepted, first_hour);
+            let last_hour = usize::try_from(second_rate).unwrap() * 3_600;
+            let (accepted, left) = admit_duration(left, last_hour - 1, second_rate);
+            assert_eq!(accepted, last_hour - 1);
+            assert!(left > 0);
+            let (accepted, left) = admit_duration(left, 1, second_rate);
+            assert_eq!((accepted, left), (1, 0));
+            assert_eq!(admit_duration(left, 1, second_rate), (0, 0));
+            // Crossing the boundary inside a callback retains only the valid prefix.
+            let (_, left) = admit_duration(ticks, first_hour, first_rate);
+            assert_eq!(
+                admit_duration(left, last_hour + 1, second_rate),
+                (last_hour, 0)
+            );
+        }
+    }
+}

@@ -9,6 +9,9 @@ use packets::PacketRing;
 
 pub(crate) const PACKET_FRAMES: usize = 256;
 pub(crate) const PACKETS: usize = 128;
+// Least common multiple of all product sample rates: input duration stays exact
+// across rate changes without floating-point drift or a realtime clock query.
+pub(crate) const DURATION_TICKS_PER_SECOND: u64 = 28_224_000;
 const MAX_CALLBACK_FRAMES: usize = 4096;
 const FAULT_SHIFT: u32 = 56;
 const CLOSED: u64 = 1 << 63;
@@ -30,6 +33,7 @@ pub(crate) struct Transport {
     producer: AtomicBool,
     in_flight: AtomicUsize,
     packets: PacketRing,
+    remaining_ticks: AtomicU64,
 }
 
 impl Transport {
@@ -42,7 +46,19 @@ impl Transport {
             producer: AtomicBool::new(false),
             in_flight: AtomicUsize::new(0),
             packets: PacketRing::new(usize::from(channels))?,
+            remaining_ticks: AtomicU64::new(u64::MAX),
         }))
+    }
+
+    pub(crate) fn set_duration_ticks(&self, ticks: Option<u64>) {
+        // Called with admission closed. Opening the gate publishes the new budget.
+        self.remaining_ticks
+            .store(ticks.unwrap_or(u64::MAX), Ordering::Release);
+    }
+
+    pub(crate) fn duration_reached(&self) -> bool {
+        // Acquire observes the final partial packet published before exhaustion.
+        self.remaining_ticks.load(Ordering::Acquire) == 0
     }
 
     /// Only the off-RT session owner calls this before draining commands.
@@ -161,13 +177,39 @@ impl RecorderTap {
             shared.fail(token, 2);
             return;
         }
-        for source in samples.chunks(PACKET_FRAMES * channels) {
+        // Only this producer changes the budget while admission is open.
+        let remaining = shared.remaining_ticks.load(Ordering::Relaxed);
+        let (accepted, ticks) = admit_duration(remaining, samples.len() / channels, sample_rate);
+        for source in samples[..accepted * channels].chunks(PACKET_FRAMES * channels) {
             if !shared.packets.publish(source, sample_rate) {
                 shared.fail(token, 1);
                 return;
             }
         }
+        if remaining != u64::MAX {
+            if ticks == 0 {
+                shared.packets.finish_pending();
+                shared.gate.fetch_or(CLOSED, Ordering::SeqCst);
+            }
+            // Release publishes the complete accepted prefix before the worker
+            // observes exhaustion and drains the converter tail.
+            shared.remaining_ticks.store(ticks, Ordering::Release);
+        }
     }
+}
+
+// The caller validates the rate against the product sample-rate catalog.
+fn admit_duration(remaining: u64, frames: usize, rate: u32) -> (usize, u64) {
+    if remaining == u64::MAX {
+        return (frames, remaining);
+    }
+    let ticks_per_frame = DURATION_TICKS_PER_SECOND / u64::from(rate);
+    let accepted =
+        frames.min(usize::try_from(remaining.div_ceil(ticks_per_frame)).unwrap_or(usize::MAX));
+    (
+        accepted,
+        remaining.saturating_sub(accepted as u64 * ticks_per_frame),
+    )
 }
 
 impl Clone for RecorderTap {

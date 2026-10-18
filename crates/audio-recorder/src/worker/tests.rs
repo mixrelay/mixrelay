@@ -298,3 +298,205 @@ fn automatic_duration_stop_finalizes_without_a_command_and_releases_only_its_tap
     worker.stop(false).unwrap();
     assert_eq!(status.lock().frames, 51_200);
 }
+
+#[test]
+fn exact_input_limit_flushes_partial_packet_and_src_tail_across_pause_and_rate_change() {
+    for output_rate in mixrelay_audio_io::formats::SAMPLE_RATES {
+        let directory = FixtureDir::new("rec-exact").unwrap();
+        let path = directory.join("limit.wav");
+        let transport = Transport::new(2).unwrap();
+        let tap = RecorderTap::new(Arc::clone(&transport));
+        let status = Arc::new(Mutex::new(RecorderStatus::default()));
+        let mut worker = Worker::new(transport, Arc::clone(&status)).unwrap();
+        worker.next_take_limit_seconds = Some(1);
+        tap.capture(&[], 48_000);
+        let request = RecorderRequest {
+            action: RecorderAction::Record,
+            path: Some(path.to_str().unwrap().into()),
+            sample_rate: Some(*output_rate),
+            encoding: Some(Encoding::Float32),
+        };
+        worker.record(&request).unwrap();
+        for _ in 0..100 {
+            tap.capture(&[0.25; 480], 48_000);
+            worker.drain().unwrap();
+        }
+        worker.stop(true).unwrap();
+        assert_eq!(status.lock().frames, u64::from(*output_rate / 2));
+        // Paused input has no duration; a licence upgrade does not reset the take.
+        tap.capture(&[0.75; 4096], 96_000);
+        worker.next_take_limit_seconds = None;
+        worker.record(&request).unwrap();
+        for _ in 0..86 {
+            tap.capture(&[0.5; 512], 44_100);
+            worker.drain().unwrap();
+        }
+        tap.capture(&[0.5; 66], 44_100); // 22,049 frames: one input frame before the cap.
+        worker.drain().unwrap();
+        assert_eq!(status.lock().state, RecorderState::Recording);
+        let allocation = allocation_counter::measure(|| tap.capture(&[0.5; 2], 44_100));
+        assert_eq!((allocation.count_total, allocation.count_current), (0, 0));
+        worker.drain().unwrap();
+        let stopped = status.lock().clone();
+        assert_eq!(
+            (stopped.state, stopped.frames, stopped.error),
+            (RecorderState::Stopped, u64::from(*output_rate), None)
+        );
+        tap.capture(&[0.75; 2], 44_100); // One frame after the cap cannot extend the file.
+        worker.drain().unwrap();
+        assert_eq!(status.lock().frames, u64::from(*output_rate));
+        assert_eq!(
+            mixrelay_test_support::rf64::inspect(&path).unwrap().frames,
+            u64::from(*output_rate)
+        );
+    }
+}
+
+#[test]
+fn limited_and_unlimited_workers_keep_independent_take_budgets_after_licence_changes() {
+    let directory = FixtureDir::new("rec-budget").unwrap();
+    let mut workers = Vec::new();
+    for (name, limit) in [("free", Some(1)), ("paid", None)] {
+        let transport = Transport::new(1).unwrap();
+        let tap = RecorderTap::new(Arc::clone(&transport));
+        let status = Arc::new(Mutex::new(RecorderStatus::default()));
+        let mut worker = Worker::new(transport, Arc::clone(&status)).unwrap();
+        worker.next_take_limit_seconds = limit;
+        tap.capture(&[], 48_000);
+        worker
+            .record(&RecorderRequest {
+                action: RecorderAction::Record,
+                path: Some(
+                    directory
+                        .join(format!("{name}.wav"))
+                        .to_str()
+                        .unwrap()
+                        .into(),
+                ),
+                sample_rate: None,
+                encoding: Some(Encoding::Float32),
+            })
+            .unwrap();
+        workers.push((worker, tap, status));
+    }
+    for (worker, tap, status) in &mut workers {
+        // Revocation affects a new take only, including after Pause/Resume.
+        worker.next_take_limit_seconds = Some(1);
+        for _ in 0..100 {
+            tap.capture(&[0.25; 240], 48_000);
+            worker.drain().unwrap();
+        }
+        worker.stop(true).unwrap();
+        worker
+            .record(&RecorderRequest {
+                action: RecorderAction::Record,
+                path: None,
+                sample_rate: None,
+                encoding: None,
+            })
+            .unwrap();
+        for _ in 0..101 {
+            tap.capture(&[0.5; 240], 48_000);
+            worker.drain().unwrap();
+        }
+        worker.stop(false).unwrap();
+        let expected = if status.lock().path.as_ref().unwrap().ends_with("free.wav") {
+            48_000
+        } else {
+            48_240
+        };
+        assert_eq!(status.lock().frames, expected);
+        assert_eq!(
+            mixrelay_test_support::rf64::inspect(status.lock().path.as_ref().unwrap())
+                .unwrap()
+                .frames,
+            expected
+        );
+    }
+}
+
+#[test]
+fn control_owner_disconnect_finalizes_the_accepted_prefix_in_every_format() {
+    for channels in 1..=mixrelay_audio_io::formats::MAX_RECORDING_CHANNELS {
+        for encoding in [Encoding::Pcm16, Encoding::Pcm24, Encoding::Float32] {
+            let directory = FixtureDir::new("rec-disconnect").unwrap();
+            let path = directory.join("prefix.wav");
+            let transport = Transport::new(channels).unwrap();
+            let tap = RecorderTap::new(Arc::clone(&transport));
+            let status = Arc::new(Mutex::new(RecorderStatus::default()));
+            let mut worker = Worker::new(transport, Arc::clone(&status)).unwrap();
+            tap.capture(&[], 48_000);
+            worker
+                .record(&RecorderRequest {
+                    action: RecorderAction::Record,
+                    path: Some(path.to_str().unwrap().into()),
+                    sample_rate: None,
+                    encoding: Some(encoding),
+                })
+                .unwrap();
+            tap.capture(&vec![0.25; 3 * usize::from(channels)], 48_000);
+            let (sender, receiver) = std::sync::mpsc::channel();
+            drop(sender);
+            worker.run(&receiver);
+            let stopped = status.lock().clone();
+            assert_eq!((stopped.state, stopped.frames), (RecorderState::Stopped, 3));
+            let mut reader = mixrelay_test_support::rf64::open(&path).unwrap();
+            assert_eq!((reader.duration(), reader.spec().channels), (3, channels));
+            if encoding == Encoding::Float32 {
+                assert!(
+                    reader
+                        .samples::<f32>()
+                        .all(|sample| sample.unwrap().to_bits() == 0.25_f32.to_bits())
+                );
+            } else {
+                assert!(reader.samples::<i32>().all(|sample| sample.unwrap() > 0));
+            }
+            tap.capture(&vec![0.5; usize::from(channels)], 48_000);
+            assert_eq!(
+                mixrelay_test_support::rf64::inspect(path).unwrap().frames,
+                3
+            );
+        }
+    }
+}
+
+#[test]
+fn an_overlapping_fault_at_the_duration_limit_keeps_every_accepted_frame() {
+    let directory = FixtureDir::new("recorder-limit-fault").unwrap();
+    let path = directory.join("limited.wav");
+    let transport = Transport::new(2).unwrap();
+    let tap = RecorderTap::new(Arc::clone(&transport));
+    let status = Arc::new(Mutex::new(RecorderStatus::default()));
+    let mut worker = Worker::new(Arc::clone(&transport), Arc::clone(&status)).unwrap();
+    tap.capture(&[], 48_000);
+    worker.next_take_limit_seconds = Some(1);
+    worker
+        .record(&RecorderRequest {
+            action: RecorderAction::Record,
+            path: Some(path.to_str().unwrap().into()),
+            sample_rate: None,
+            encoding: Some(Encoding::Float32),
+        })
+        .unwrap();
+    for _ in 0..93 {
+        tap.capture(&[0.5; 512 * 2], 48_000);
+        assert_eq!(worker.drain(), Ok(None));
+    }
+    // The final callback exhausts the one-second budget; before the worker drains it, an
+    // overlapping producer latches an admission fault on the closed gate.
+    tap.capture(&[0.5; 512 * 2], 48_000);
+    transport.gate.fetch_or(
+        (crate::transport::MAX_TOKEN + 1) * 3,
+        std::sync::atomic::Ordering::SeqCst,
+    );
+    assert_eq!(
+        worker.drain(),
+        Ok(Some("recorder has overlapping audio producers"))
+    );
+    assert!(worker.take.is_none(), "the limited take is finalized");
+    assert_eq!(
+        mixrelay_test_support::rf64::open(&path).unwrap().duration(),
+        48_000,
+        "the accepted final frames are written before the fault is reported"
+    );
+}

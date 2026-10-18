@@ -7,9 +7,6 @@ use std::{
     path::Path,
 };
 
-#[cfg(feature = "native-lab")]
-use std::process::Command;
-
 fn spec(channels: u16, bits: u16, format: SampleFormat) -> WavSpec {
     WavSpec {
         channels,
@@ -22,7 +19,7 @@ fn spec(channels: u16, bits: u16, format: SampleFormat) -> WavSpec {
 #[test]
 fn every_encoding_is_rf64_with_exact_sizes_counts_padding_and_pcm() {
     let directory = FixtureDir::new("recorder-rf64-formats").unwrap();
-    for channels in [1, 2, 8] {
+    for channels in 1..=mixrelay_audio_io::formats::MAX_RECORDING_CHANNELS {
         for (bits, format) in [
             (16, SampleFormat::Int),
             (24, SampleFormat::Int),
@@ -55,6 +52,10 @@ fn check_format(path: &Path, format: WavSpec, frames: u64) {
     );
     let mut reader = rf64::open(path).unwrap();
     assert_eq!(reader.spec(), format);
+    assert_eq!(
+        reader.len(),
+        u32::try_from(frames * u64::from(format.channels)).unwrap()
+    );
     if format.sample_format == SampleFormat::Float {
         assert!(
             reader
@@ -81,11 +82,11 @@ fn check_format(path: &Path, format: WavSpec, frames: u64) {
 
 /// Jump through a sparse zero prefix, then write actual PCM across 4 GiB using
 /// the production sample writer and finalizer. This checks addressing, not load.
-fn sparse_recording(path: &Path, format: WavSpec) -> (u64, Vec<u8>) {
+fn sparse_recording(path: &Path, format: WavSpec, frames: u64) {
     let mut writer =
         WaveWriter::new(BufWriter::new(File::create_new(path).unwrap()), format).unwrap();
     let frame_bytes = u64::from(format.channels) * u64::from(format.bits_per_sample / 8);
-    let prefix_frames = (u64::from(u32::MAX) - 256) / frame_bytes;
+    let prefix_frames = frames - 256;
     writer.data_bytes = prefix_frames * frame_bytes;
     let tail_offset = writer.header.len() as u64 + writer.data_bytes;
     writer.stream.seek(SeekFrom::Start(tail_offset)).unwrap();
@@ -104,31 +105,39 @@ fn sparse_recording(path: &Path, format: WavSpec) -> (u64, Vec<u8>) {
     }
     writer.finalize().unwrap();
     let metadata = rf64::inspect(path).unwrap();
-    assert!(metadata.riff_bytes > u64::from(u32::MAX));
-    assert!(metadata.data_bytes > u64::from(u32::MAX));
-    assert_eq!(metadata.frames, prefix_frames + 256);
+    assert_eq!(metadata.data_bytes, frames * frame_bytes);
+    assert_eq!(
+        metadata.riff_bytes,
+        metadata.data_offset - 8 + metadata.data_bytes + metadata.data_bytes % 2
+    );
+    assert_eq!(metadata.frames, frames);
     let mut file = File::open(path).unwrap();
     file.seek(SeekFrom::Start(tail_offset)).unwrap();
     let mut actual = vec![0; expected.len()];
     file.read_exact(&mut actual).unwrap();
     assert_eq!(actual, expected);
-    (prefix_frames, expected)
+    decode_sparse_tail(path, &metadata, tail_offset, &expected);
 }
 
 #[test]
-fn sparse_files_cross_real_4_gib_boundary_without_counter_wrap_or_rollover() {
-    let directory = FixtureDir::new("recorder-rf64-large").unwrap();
-    for (index, format) in [
-        spec(1, 16, SampleFormat::Int),
-        spec(1, 24, SampleFormat::Int),
-        spec(8, 32, SampleFormat::Float),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        sparse_recording(&directory.join(format!("{index}.wav")), format);
+fn every_format_decodes_around_the_4_gib_boundary_without_rollover() {
+    let directory = FixtureDir::new("rec-rf64-large").unwrap();
+    for channels in 1..=mixrelay_audio_io::formats::MAX_RECORDING_CHANNELS {
+        for (bits, format) in [
+            (16, SampleFormat::Int),
+            (24, SampleFormat::Int),
+            (32, SampleFormat::Float),
+        ] {
+            let frame_bytes = u64::from(channels) * u64::from(bits / 8);
+            let boundary = (1_u64 << 32) / frame_bytes;
+            // Nearest complete frames below, at (where representable), and above 4 GiB.
+            for frames in [boundary - 1, boundary, boundary + 1] {
+                let path = directory.join(format!("{channels}-{bits}-{frames}.wav"));
+                sparse_recording(&path, spec(channels, bits, format), frames);
+            }
+        }
     }
-    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 3);
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 72);
 }
 
 #[test]
@@ -157,95 +166,40 @@ fn unfinished_frame_and_u64_exhaustion_fail_without_silent_size_wrap() {
     assert!(writer.finalize().is_err());
 }
 
-#[test]
-#[cfg(feature = "native-lab")]
-fn ffmpeg_decodes_all_small_rf64_formats() {
-    let directory = FixtureDir::new("recorder-rf64-ffmpeg").unwrap();
-    for channels in [1, 2, 8] {
-        for (bits, format, raw) in [
-            (16, SampleFormat::Int, "s16le"),
-            (24, SampleFormat::Int, "s24le"),
-            (32, SampleFormat::Float, "f32le"),
-        ] {
-            let path = directory.join(format!("{channels}-{bits}.wav"));
-            let mut writer = WaveWriter::new(
-                BufWriter::new(File::create_new(&path).unwrap()),
-                spec(channels, bits, format),
-            )
-            .unwrap();
-            let mut expected = Vec::new();
-            for _ in 0..3 * channels {
-                if format == SampleFormat::Float {
-                    writer.write_sample(0.25_f32).unwrap();
-                    0.25_f32.write(&mut expected, bits).unwrap();
-                } else {
-                    writer.write_sample(-123_i32).unwrap();
-                    (-123_i32).write(&mut expected, bits).unwrap();
-                }
-            }
-            writer.finalize().unwrap();
-            let decoded = Command::new("ffmpeg")
-                .args(["-v", "error", "-i"])
-                .arg(&path)
-                .args(["-f", raw, "-acodec", &format!("pcm_{raw}"), "pipe:1"])
-                .output()
+// Hound is RIFF-only. Preserve the production fmt/fact chunks and translate only
+// RF64 sizes while exposing a bounded data window beyond 4 GiB to its decoder.
+fn decode_sparse_tail(path: &Path, metadata: &rf64::Metadata, offset: u64, expected: &[u8]) {
+    let mut file = File::open(path).unwrap();
+    let mut header = vec![0; usize::try_from(metadata.data_offset).unwrap()];
+    file.read_exact(&mut header).unwrap();
+    header[..4].copy_from_slice(b"RIFF");
+    let size = u32::try_from(header.len() - 8 + expected.len()).unwrap();
+    header[4..8].copy_from_slice(&size.to_le_bytes());
+    header[12..16].copy_from_slice(b"JUNK");
+    let data_size = header.len() - 4;
+    header[data_size..].copy_from_slice(&u32::try_from(expected.len()).unwrap().to_le_bytes());
+    file.seek(SeekFrom::Start(offset)).unwrap();
+    let mut actual = vec![0; expected.len()];
+    file.read_exact(&mut actual).unwrap();
+    header.extend_from_slice(&actual);
+    let mut reader = hound::WavReader::new(std::io::Cursor::new(header)).unwrap();
+    let format = reader.spec();
+    assert_eq!(reader.duration(), 256);
+    let mut decoded = Vec::new();
+    if format.sample_format == SampleFormat::Float {
+        for sample in reader.samples::<f32>() {
+            sample
+                .unwrap()
+                .write(&mut decoded, format.bits_per_sample)
                 .unwrap();
-            assert!(
-                decoded.status.success(),
-                "{}",
-                String::from_utf8_lossy(&decoded.stderr)
-            );
-            assert_eq!(decoded.stdout, expected);
+        }
+    } else {
+        for sample in reader.samples::<i32>() {
+            sample
+                .unwrap()
+                .write(&mut decoded, format.bits_per_sample)
+                .unwrap();
         }
     }
-}
-
-#[test]
-#[cfg(feature = "native-lab")]
-fn ffmpeg_decodes_pcm_after_the_4_gib_boundary() {
-    let directory = FixtureDir::new("recorder-rf64-large-ffmpeg").unwrap();
-    let path = directory.join("large.wav");
-    let (prefix_frames, expected) = sparse_recording(&path, spec(2, 32, SampleFormat::Float));
-    let probe = Command::new("ffprobe")
-        .args([
-            "-v",
-            "error",
-            "-show_entries",
-            "stream=sample_rate,channels,duration_ts",
-            "-of",
-            "json",
-        ])
-        .arg(&path)
-        .output()
-        .unwrap();
-    assert!(
-        probe.status.success(),
-        "{}",
-        String::from_utf8_lossy(&probe.stderr)
-    );
-    let metadata: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
-    assert_eq!(metadata["streams"][0]["duration_ts"], prefix_frames + 256);
-    assert_eq!(metadata["streams"][0]["sample_rate"], "48000");
-    assert_eq!(metadata["streams"][0]["channels"], 2);
-    let decoded = Command::new("ffmpeg")
-        .args([
-            "-v",
-            "error",
-            "-ss",
-            &format!(
-                "{:.12}",
-                f64::from(u32::try_from(prefix_frames).unwrap()) / 48_000.0
-            ),
-            "-i",
-        ])
-        .arg(&path)
-        .args(["-f", "f32le", "-acodec", "pcm_f32le", "pipe:1"])
-        .output()
-        .unwrap();
-    assert!(
-        decoded.status.success(),
-        "{}",
-        String::from_utf8_lossy(&decoded.stderr)
-    );
-    assert_eq!(decoded.stdout, expected);
+    assert_eq!(decoded, expected);
 }

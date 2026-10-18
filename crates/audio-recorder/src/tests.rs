@@ -35,6 +35,34 @@ fn preparation_uses_the_shared_one_to_eight_channel_contract() {
     }
 }
 
+#[test]
+fn sixteen_live_sessions_reject_an_extra_and_reclaim_only_a_retired_slot() {
+    let registry = RecorderRegistry::new();
+    let taps: Vec<_> = (0..15)
+        .map(|index| registry.prepare(&format!("rec-{index}"), 1).unwrap())
+        .collect();
+    let last = registry.prepare("last", 8).unwrap();
+    assert!(
+        registry
+            .prepare("extra", 1)
+            .unwrap_err()
+            .contains("capacity")
+    );
+    drop(last);
+    let replacement = registry.prepare("extra", 2).unwrap();
+    for tap in &taps {
+        tap.capture(&[0.25], 48_000);
+    }
+    replacement.capture(&[0.5; 2], 48_000);
+    // The sixteen retained identities still occupy the pool after reclamation.
+    assert!(
+        registry
+            .prepare("over", 1)
+            .unwrap_err()
+            .contains("capacity")
+    );
+}
+
 fn start(registry: &RecorderRegistry, path: &Path, rate: u32, encoding: Encoding) {
     registry
         .command(
@@ -334,7 +362,7 @@ fn stop_racing_capture_finalizes_before_return_and_excludes_later_callbacks() {
 }
 
 #[test]
-fn registry_duration_limit_survives_resume_and_finalizes_without_stop() {
+fn registry_duration_limit_survives_repeated_resume_and_finalizes_without_stop() {
     let directory = FixtureDir::new("registry-duration").unwrap();
     let path = directory.join("take.wav");
     let registry = RecorderRegistry::new();
@@ -351,23 +379,17 @@ fn registry_duration_limit_survives_resume_and_finalizes_without_stop() {
             Some(1),
         )
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
     for quantum in 1..=188 {
         tap.capture(&[0.25; 512], 48_000);
-        let expected = (quantum * 256).min(48_000);
-        while registry.status("rec").frames < expected {
-            assert!(
-                Instant::now() < deadline,
-                "writer did not drain the accepted prefix"
-            );
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        if quantum == 48 {
-            registry
-                .command("rec", request(RecorderAction::Pause))
-                .unwrap();
+        // Pause acknowledges worker progress without a clock or polling deadline.
+        let paused = registry
+            .command("rec", request(RecorderAction::Pause))
+            .unwrap();
+        assert_eq!(paused.frames, (quantum * 256).min(48_000));
+        if quantum < 188 {
+            assert_eq!(paused.state, RecorderState::Paused);
             tap.capture(&[0.5; 512], 48_000);
-            // A resumed take retains its original cap even when this command is unrestricted.
+            // Unrestricted Resume must retain the original duration budget.
             registry
                 .command("rec", request(RecorderAction::Record))
                 .unwrap();

@@ -542,3 +542,5 @@ fn hardware_alias_of_driver_counts_routes_and_shares_the_same_output_quota() {
         "driverMappings"
     );
 }
+
+mod recording_admission;

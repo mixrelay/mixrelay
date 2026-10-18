@@ -49,8 +49,10 @@ impl Worker {
             if let Some(error) = transport::fault(self.transport.gate.load(Ordering::SeqCst)) {
                 self.fail_admission(error.to_owned());
             }
-            if let Err(error) = self.drain() {
-                self.fail(error);
+            match self.drain() {
+                Ok(None) => {}
+                Ok(Some(fault)) => self.fail(fault.to_owned()),
+                Err(error) => self.fail(error),
             }
             // Retirement is still serviced when no UI/status client is polling.
             if self.transport.taps.load(Ordering::SeqCst) == 0
@@ -128,6 +130,14 @@ impl Worker {
                 encoding: Some(request.encoding.unwrap_or(crate::Encoding::Pcm24)),
                 ..RecorderStatus::default()
             };
+            let ticks = self
+                .next_take_limit_seconds
+                .map(|seconds| {
+                    seconds
+                        .checked_mul(transport::DURATION_TICKS_PER_SECOND)
+                        .ok_or("recording duration limit overflow")
+                })
+                .transpose()?;
             let mut take = match Take::new(request, channels, observed) {
                 Ok(take) => take,
                 Err(error) => {
@@ -136,6 +146,7 @@ impl Worker {
                 }
             };
             take.set_duration_limit(self.next_take_limit_seconds)?;
+            self.transport.set_duration_ticks(ticks);
             *self.status.lock() = RecorderStatus {
                 state: RecorderState::Stopped,
                 path: request.path.clone(),
@@ -157,9 +168,16 @@ impl Worker {
             self.fail_admission(error.to_owned());
             return Err(error.into());
         }
-        if let Err(error) = self.drain() {
-            self.fail(error.clone());
-            return Err(error);
+        match self.drain() {
+            Ok(None) => {}
+            Ok(Some(fault)) => {
+                self.fail(fault.to_owned());
+                return Err(fault.into());
+            }
+            Err(error) => {
+                self.fail(error.clone());
+                return Err(error);
+            }
         }
         let mut result = if pause {
             self.take
@@ -198,7 +216,20 @@ impl Worker {
         }
     }
 
-    fn drain(&mut self) -> Result<(), String> {
+    /// Writes the accepted packets. At the duration or frame limit it closes admission and
+    /// finalizes the file. An admission fault latched by an overlapping producer does not
+    /// invalidate packets accepted before it: they are written and the file is finalized
+    /// first, then the fault is returned for the caller to report.
+    ///
+    /// # Errors
+    /// Returns the writer failure; that ends the recording at once.
+    fn drain(&mut self) -> Result<Option<&'static str>, String> {
+        let duration_reached = self.transport.duration_reached();
+        let mut fault = if duration_reached {
+            self.transport.cutoff()
+        } else {
+            None
+        };
         for _ in 0..PACKETS {
             if !self.transport.read_packet(&mut self.packet) {
                 break;
@@ -212,9 +243,7 @@ impl Worker {
             });
             result?;
             if self.take.as_ref().is_some_and(Take::limit_reached) {
-                if let Some(error) = self.transport.cutoff() {
-                    return Err(error.into());
-                }
+                fault = fault.or(self.transport.cutoff());
                 while self.transport.read_packet(&mut self.packet) {}
                 if let Some(take) = self.take.take() {
                     let frames = take.finish()?;
@@ -225,10 +254,16 @@ impl Worker {
                 break;
             }
         }
+        if duration_reached && let Some(take) = self.take.take() {
+            let frames = take.finish()?;
+            let mut status = self.status.lock();
+            status.frames = frames;
+            status.state = RecorderState::Stopped;
+        }
         if let Some(take) = &self.take {
             self.status.lock().frames = take.frames();
         }
-        Ok(())
+        Ok(fault)
     }
 
     fn fail(&mut self, mut error: String) {
@@ -258,7 +293,7 @@ impl Worker {
         // queue. Preserve that prefix; a real writer failure ends it immediately.
         self.transport.cutoff();
         let error = match self.drain() {
-            Ok(()) => error,
+            Ok(_) => error,
             Err(write) => format!("{error}; {write}"),
         };
         self.fail(error);
