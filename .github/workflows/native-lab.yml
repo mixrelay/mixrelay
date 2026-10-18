@@ -37,7 +37,8 @@ jobs:
       - name: Toolchain
         run: |
           npm install --global pnpm@11.9.0
-          rustup toolchain install 1.96.0 --profile minimal
+          # The HAL bundle is universal: check:native also builds the Intel slice.
+          rustup toolchain install 1.96.0 --profile minimal --target aarch64-apple-darwin,x86_64-apple-darwin
           rustup default 1.96.0
       - run: pnpm install --frozen-lockfile
       # Pre-flight for the lab tooling itself; lab:test then runs the full macOS plan,

@@ -1,3 +1,8 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "a lab tool, not shipped: setup failures abort with their message"
+)]
 #[cfg(target_os = "linux")]
 mod callback_source;
 #[cfg(target_os = "linux")]
