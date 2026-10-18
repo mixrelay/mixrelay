@@ -38,23 +38,13 @@ pub(crate) enum Text {
     #[cfg(any(target_os = "linux", test))]
     EngineOwnershipLockFailed = 22,
     #[cfg(any(target_os = "linux", test))]
-    EngineExitedUnexpectedly = 23,
+    PreviousEngineRunning = 23,
     #[cfg(any(target_os = "linux", test))]
-    EngineObserveFailed = 24,
-    #[cfg(any(target_os = "linux", test))]
-    EngineRestartPrompt = 25,
-    #[cfg(any(target_os = "linux", test))]
-    EngineRestartFailedPrompt = 26,
-    #[cfg(any(target_os = "linux", test))]
-    EngineRestart = 27,
-    #[cfg(any(target_os = "linux", test))]
-    PreviousEngineRunning = 28,
-    #[cfg(any(target_os = "linux", test))]
-    EngineFinalizationFailed = 29,
+    EngineFinalizationFailed = 24,
 }
 
 // Explicit indexes keep platform-specific variants aligned with these rows.
-const TEXT: [[&str; 11]; 30] = [
+const TEXT: [[&str; 11]; 25] = [
     // ProcessorFolder
     [
         "Choose audio plug-in folder",
@@ -367,76 +357,6 @@ const TEXT: [[&str; 11]; 30] = [
         "Impossibile bloccare il controllo del motore",
         "Не удалось заблокировать управление аудиодвижком",
     ],
-    // EngineExitedUnexpectedly
-    [
-        "Audio engine exited unexpectedly",
-        "오디오 엔진이 예기치 않게 종료되었습니다",
-        "オーディオエンジンが予期せず終了しました",
-        "音频引擎意外退出",
-        "音訊引擎意外結束",
-        "Le moteur audio s’est arrêté de manière inattendue",
-        "Die Audio-Engine wurde unerwartet beendet",
-        "El motor de audio se cerró inesperadamente",
-        "O motor de áudio foi encerrado inesperadamente",
-        "Il motore audio si è arrestato inaspettatamente",
-        "Аудиодвижок неожиданно завершил работу",
-    ],
-    // EngineObserveFailed
-    [
-        "Could not observe audio engine",
-        "오디오 엔진 상태를 확인하지 못했습니다",
-        "オーディオエンジンの状態を確認できませんでした",
-        "无法检查音频引擎状态",
-        "無法檢查音訊引擎狀態",
-        "Impossible de vérifier l’état du moteur audio",
-        "Der Zustand der Audio-Engine konnte nicht geprüft werden",
-        "No se pudo comprobar el estado del motor de audio",
-        "Não foi possível verificar o estado do motor de áudio",
-        "Impossibile verificare lo stato del motore audio",
-        "Не удалось проверить состояние аудиодвижка",
-    ],
-    // EngineRestartPrompt
-    [
-        "The audio engine stopped. Restart it?",
-        "오디오 엔진이 중지되었습니다. 다시 시작할까요?",
-        "オーディオエンジンが停止しました。再起動しますか？",
-        "音频引擎已停止。是否重启？",
-        "音訊引擎已停止。要重新啟動嗎？",
-        "Le moteur audio s’est arrêté. Le redémarrer ?",
-        "Die Audio-Engine wurde beendet. Neu starten?",
-        "El motor de audio se detuvo. ¿Reiniciarlo?",
-        "O motor de áudio parou. Reiniciar?",
-        "Il motore audio si è arrestato. Riavviarlo?",
-        "Аудиодвижок остановлен. Перезапустить его?",
-    ],
-    // EngineRestartFailedPrompt
-    [
-        "Could not restart the audio engine. Try again?",
-        "오디오 엔진을 다시 시작하지 못했습니다. 다시 시도할까요?",
-        "オーディオエンジンを再起動できませんでした。もう一度試しますか？",
-        "无法重启音频引擎。是否重试？",
-        "無法重新啟動音訊引擎。要重試嗎？",
-        "Impossible de redémarrer le moteur audio. Réessayer ?",
-        "Die Audio-Engine konnte nicht neu gestartet werden. Erneut versuchen?",
-        "No se pudo reiniciar el motor de audio. ¿Volver a intentarlo?",
-        "Não foi possível reiniciar o motor de áudio. Tentar novamente?",
-        "Impossibile riavviare il motore audio. Riprovare?",
-        "Не удалось перезапустить аудиодвижок. Повторить попытку?",
-    ],
-    // EngineRestart
-    [
-        "Restart",
-        "다시 시작",
-        "再起動",
-        "重启",
-        "重新啟動",
-        "Redémarrer",
-        "Neu starten",
-        "Reiniciar",
-        "Reiniciar",
-        "Riavvia",
-        "Перезапустить",
-    ],
     // PreviousEngineRunning
     [
         "The previous audio engine is still running",
@@ -529,11 +449,6 @@ mod tests {
         Text::DesktopExecutableParentMissing,
         Text::BundledEngineMissing,
         Text::EngineOwnershipLockFailed,
-        Text::EngineExitedUnexpectedly,
-        Text::EngineObserveFailed,
-        Text::EngineRestartPrompt,
-        Text::EngineRestartFailedPrompt,
-        Text::EngineRestart,
         Text::PreviousEngineRunning,
         Text::EngineFinalizationFailed,
     ];
@@ -548,10 +463,6 @@ mod tests {
             }
             assert_ne!(
                 text(locale, Text::WorkspaceReplace),
-                text(locale, Text::Cancel)
-            );
-            assert_ne!(
-                text(locale, Text::EngineRestart),
                 text(locale, Text::Cancel)
             );
         }
