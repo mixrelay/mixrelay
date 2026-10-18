@@ -136,7 +136,7 @@ for (const reference of styles.matchAll(/url\((?:\s*["']?)([^)"']+)(?:["']?\s*)\
 assert.ok(!/@import\s+(?:url\()?\s*["']?https?:/i.test(styles), 'no remote stylesheet imports');
 const home = sources.get('index.html');
 assert.match(home, /id="business-info-title"/, 'home: business-information block exists');
-for (const detail of ['에코비전랩', '111-42-04359', '505-S80', '+82 10-6380-9646', 'support@mixrelay.com', '배승현', '[통신판매업 신고번호 또는 면제 사유 확인 필요]']) {
+for (const detail of ['에코비전랩', '111-42-04359', '505-S80', '+82 10-6380-9646', 'support@mixrelay.com', '배승현', '간이과세자']) {
   assert.ok(home.includes(detail), `home: business information includes ${detail}`);
 }
 const legalSections = {
