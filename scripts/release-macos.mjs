@@ -5,8 +5,9 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { checkVersion } from './product-version.mjs';
-import { checkMacosSigning, withMacosSigning } from './macos-signing.mjs';
+import { checkMacosSigning, readMacosSigningConfig, withMacosSigning } from './macos-signing.mjs';
 import { checkPackageOutput } from './build-macos-installer-pkgs.mjs';
+import { notarizationArguments } from './macos-notarization.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 /** A failure whose message the owned child already printed. */
@@ -17,15 +18,18 @@ async function run(owned, program, args, env) {
   if (result.error || result.status !== 0) throw new Error(`${program} failed (${result.signal ?? result.status ?? result.error?.message})`);
 }
 try {
-  const { values } = parseArgs({ options: { help: { type: 'boolean' }, output: { type: 'string' }, 'from-keychain': { type: 'boolean' }, 'package-only': { type: 'boolean' } } });
+  const { values } = parseArgs({ options: { help: { type: 'boolean' }, output: { type: 'string' }, 'from-keychain': { type: 'boolean' }, 'package-only': { type: 'boolean' }, 'skip-notarization': { type: 'boolean' } } });
   if (values.help) {
-    console.log('pnpm release:macos --output EMPTY_DIRECTORY [--from-keychain] [--package-only]\nUnlocks the restored private build keychain, verifies signing, and builds the universal app, HAL and one signed MixRelay PKG.\n--package-only reuses compiled signed artifacts and prepares a fresh payload. Does not install, publish or notarize.\nMIXRELAY_SIGNING_CONFIG selects another private restored signing configuration.');
+    console.log('pnpm release:macos --output EMPTY_DIRECTORY [--from-keychain] [--package-only] [--skip-notarization]\nUnlocks the restored private build keychain, verifies signing, builds the universal app, HAL and one signed MixRelay PKG, then notarizes, staples and validates the PKG.\n--package-only reuses compiled signed artifacts and prepares a fresh payload. --skip-notarization produces a signed local test build marked not notarized. Does not install or publish.\nMIXRELAY_SIGNING_CONFIG selects another private restored signing configuration, including notarization credential references.');
   } else {
     if (process.platform !== 'darwin' || !values.output) throw new Error('macOS and --output are required');
     const version = checkVersion();
     const output = resolve(values.output);
     // The PKG step's output rules apply before any compile or signing work starts.
     checkPackageOutput(output);
+    const skipNotarization = values['skip-notarization'] ?? false;
+    const notarization = skipNotarization ? undefined : readMacosSigningConfig().notarization;
+    notarizationArguments(notarization, skipNotarization);
     checkMacosSigning();
     await withMacosSigning(async (signingEnvironment, _config, owned) => {
     let application = signingEnvironment.APPLE_SIGNING_IDENTITY;
@@ -56,7 +60,7 @@ try {
       // child that an interruption can stop. It prints the same result or error as before.
       const stage = {
         payload: { manager: join(bundles, 'MixRelay.app'), hal: join(release, 'hal/MixRelayHAL.driver'), driver: join(release, 'mixrelay-driver-service'), engine: join(release, 'mixrelay-engine-service'), uninstaller: join(bundles, 'Uninstall MixRelay.app'), output: payload },
-        packages: { payload, installerCli: join(release, 'mixrelay-macos-installer'), payloadChecker: join(release, 'mixrelay-macos-payload-check'), teamId, version, signingIdentity: installer, output },
+        packages: { payload, installerCli: join(release, 'mixrelay-macos-installer'), payloadChecker: join(release, 'mixrelay-macos-payload-check'), teamId, version, signingIdentity: installer, output, notarization, skipNotarization },
       };
       const packaged = await owned(process.execPath, [join(root, 'scripts/package-macos-release.mjs'), JSON.stringify(stage)], { cwd: root, env: process.env, stdio: 'inherit' });
       if (packaged.status === 1) throw new ReportedFailure();

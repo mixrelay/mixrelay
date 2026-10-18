@@ -172,14 +172,14 @@ function fixture(t) {
       launchd: "/Library/LaunchDaemons/io.mixrelay.audio.driver.plist",
     },
   }));
-  return { root, payload, cli, installerCli: cli, payloadChecker, output: join(root, "packages") };
+  return { root, payload, cli, installerCli: cli, payloadChecker, output: join(root, "packages"), skipNotarization: true };
 }
 
 function packageSignature(identity = IDENTITY, status = "signed by a developer certificate issued by Apple for distribution") {
   return `Package "fixture.pkg":\n   Status: ${status}\n   Signed with a trusted timestamp on: 2026-10-05 21:06:51 +0000\n   Certificate Chain:\n    1. ${identity}\n    2. Developer ID Certification Authority\n    3. Apple Root CA\n`;
 }
 
-function fakeRunner(calls, signature = IDENTITY, inspectPackageRoot = () => {}, payloadCheck = { status: 0, stdout: "payload signatures verified" }) {
+function fakeRunner(calls, signature = IDENTITY, inspectPackageRoot = () => {}, payloadCheck = { status: 0, stdout: "payload signatures verified" }, checkScriptSyntax = true) {
   const analyzedPolicies = new Map();
   return (command, args, options) => {
     const call = { command, args };
@@ -220,7 +220,7 @@ function fakeRunner(calls, signature = IDENTITY, inspectPackageRoot = () => {}, 
           const scripts = args[args.indexOf("--scripts") + 1];
           call.postinstall = readFileSync(join(scripts, "postinstall"), "utf8");
           call.embeddedCli = readFileSync(join(scripts, "mixrelay-macos-installer"));
-          assert.equal(spawnSync("/bin/sh", ["-n", join(scripts, "postinstall")]).status, 0);
+          if (checkScriptSyntax) assert.equal(spawnSync("/bin/sh", ["-n", join(scripts, "postinstall")]).status, 0);
           writeFileSync(args.at(-1), "scripts-only fixture");
           return { status: 0, stdout: "" };
         }
@@ -271,7 +271,7 @@ function fakeRunner(calls, signature = IDENTITY, inspectPackageRoot = () => {}, 
         call.postinstall = readFileSync(join(scriptsPath, "postinstall"), "utf8");
         const componentPlist = args[args.indexOf("--component-plist") + 1];
         call.componentPolicy = analyzedPolicies.get(componentPlist);
-        for (const script of ["preinstall", "postinstall"]) {
+        for (const script of checkScriptSyntax ? ["preinstall", "postinstall"] : []) {
           const checked = spawnSync("/bin/sh", ["-n", join(scriptsPath, script)], { encoding: "utf8" });
           if (checked.status !== 0) throw new Error(`${script} syntax failed: ${checked.stderr}`);
         }
@@ -332,6 +332,7 @@ test("builds one installation/update package with an independently installed rem
   assert.equal(result.status, "signed-artifacts-built");
   assert.deepEqual(readdirSync(paths.output).sort(), [
     "MixRelay-Installer-1.2.3.pkg",
+    "build-result.json",
   ]);
   assert.match(result.stagingIds.installer, /^[a-f0-9]{32}$/);
   assert.deepEqual(Object.keys(result.stagingIds), ["installer"]);
@@ -431,6 +432,172 @@ test("builds one installation/update package with an independently installed rem
     assert.match(text, /enable_localSystem="true"/);
     assert.doesNotMatch(text, /RequireRestart|onConclusion=/);
   }
+});
+
+const SUBMISSION = "12345678-1234-1234-1234-123456789abc";
+const PROFILE = { keychainProfile: "fixture-notary-profile" };
+const API_KEY = { apiKeyPath: "/private/fixture/AuthKey.p8", keyId: "ZX98Y7W6V5", issuer: "87654321-4321-4321-4321-cba987654321" };
+const savedBuild = paths => JSON.parse(readFileSync(join(paths.output, "build-result.json"), "utf8"));
+function notarizedBuild(paths, calls, xcrun, options = {}) {
+  const packaging = fakeRunner(calls, IDENTITY, () => {}, undefined, false);
+  return buildPackages({
+    ...paths, teamId: TEAM, version: "1.2.3", signingIdentity: IDENTITY,
+    skipNotarization: false, notarization: PROFILE, ...options,
+    run: (program, args, settings) => {
+      if (program === "/usr/bin/xcrun" && ["notarytool", "stapler"].includes(args[0])) {
+        return xcrun(args, settings);
+      }
+      return packaging(program, args, settings);
+    },
+  });
+}
+
+for (const [name, credentials, authentication] of [
+  ["keychain profile", PROFILE, ["--keychain-profile", PROFILE.keychainProfile]],
+  ["API key references", API_KEY, ["--key", API_KEY.apiKeyPath, "--key-id", API_KEY.keyId, "--issuer", API_KEY.issuer]],
+]) {
+  test(`notarization submits the final signed PKG with ${name}, then staples and validates it`, t => {
+    const paths = fixture(t);
+    const packaging = [];
+    const invocations = [];
+    const pending = [];
+    const installer = join(paths.output, "MixRelay-Installer-1.2.3.pkg");
+    const result = notarizedBuild(paths, packaging, (args, settings) => {
+      invocations.push(args);
+      pending.push(savedBuild(paths).notarization.status);
+      assert.deepEqual(settings.stdio, ["ignore", "pipe", "pipe"], "credential diagnostics stay captured");
+      assert.equal(settings.encoding, "utf8");
+      assert.ok(packaging.some(call => call.command === "/usr/sbin/pkgutil"), "signature gate precedes submission");
+      assert.ok(fs.existsSync(installer), "submission and stapling use the published final PKG");
+      if (args[0] === "notarytool") return { status: 0, stdout: JSON.stringify({ id: SUBMISSION, status: "Accepted" }) };
+      if (args[1] === "staple") fs.appendFileSync(installer, " stapled fixture");
+      if (args[1] === "validate") assert.match(readFileSync(installer, "utf8"), /stapled fixture$/);
+      return { status: 0, stdout: "success" };
+    }, { notarization: credentials });
+    assert.deepEqual(invocations, [
+      ["notarytool", "submit", installer, "--wait", "--output-format", "json", ...authentication],
+      ["stapler", "staple", installer], ["stapler", "validate", installer],
+    ]);
+    assert.deepEqual(pending, ["submitting", "stapling", "validating"]);
+    assert.equal(result.status, "notarized-artifacts-built");
+    assert.deepEqual(result.notarization, { status: "accepted", notarized: true, stapled: true, validated: true, submissionId: SUBMISSION, appleStatus: "Accepted" });
+    assert.deepEqual(savedBuild(paths), result);
+    for (const value of Object.values(credentials)) assert.ok(!JSON.stringify(result).includes(value), "results omit credential references");
+    assert.equal(readdirSync(paths.output).some(name => name.startsWith(".mixrelay-pkg-build-")), false);
+  });
+}
+
+test("notarization rejection fetches a diagnostic log and fails without stapling", t => {
+  const paths = fixture(t);
+  const invocations = [];
+  let failure;
+  try {
+    notarizedBuild(paths, [], args => {
+      invocations.push(args);
+      if (args[1] === "submit") return { status: 65, stdout: JSON.stringify({ id: SUBMISSION, status: "Invalid" }), stderr: PROFILE.keychainProfile };
+      assert.deepEqual(args, ["notarytool", "log", SUBMISSION, "--keychain-profile", PROFILE.keychainProfile]);
+      return { status: 0, stdout: JSON.stringify({ issues: [{ message: "Unsigned nested binary" }], diagnostic: PROFILE.keychainProfile }) };
+    });
+    assert.fail("a rejected package must fail the release");
+  } catch (error) { failure = error; }
+  assert.match(failure.message, /notarization failed during submit/);
+  assert.ok(!failure.message.includes(PROFILE.keychainProfile));
+  const result = savedBuild(paths);
+  assert.deepEqual(failure.result, result);
+  assert.equal(result.status, "notarization-failed");
+  assert.deepEqual(result.notarization, {
+    status: "failed", notarized: false, stapled: false, validated: false,
+    submissionId: SUBMISSION, appleStatus: "Invalid", failedStep: "submit", logStatus: "fetched", logPath: join(paths.output, "notarization-log.json"),
+  });
+  const log = JSON.parse(readFileSync(result.notarization.logPath, "utf8"));
+  assert.equal(log.issues[0].message, "Unsigned nested binary");
+  assert.equal(log.diagnostic, "[redacted]");
+  assert.equal(invocations.length, 2);
+  assert.equal(fs.existsSync(result.installer), true, "retain the signed PKG for diagnosis");
+  assert.equal(readdirSync(paths.output).some(name => name.startsWith(".mixrelay-pkg-build-")), false);
+});
+
+for (const step of ["submit", "staple", "validate"]) {
+  test(`notarization interrupted during ${step} stops without further xcrun work`, t => {
+    const paths = fixture(t);
+    const invocations = [];
+    assert.throws(() => notarizedBuild(paths, [], args => {
+      invocations.push(args[1]);
+      if (args[1] === step) return { status: null, signal: "SIGTERM" };
+      return { status: 0, stdout: JSON.stringify({ id: SUBMISSION, status: "Accepted" }) };
+    }), /notarization interrupted/);
+    assert.deepEqual(invocations, ["submit", "staple", "validate"].slice(0, ["submit", "staple", "validate"].indexOf(step) + 1));
+    const result = savedBuild(paths);
+    assert.equal(result.status, "notarization-failed");
+    assert.equal(result.notarization.status, "interrupted");
+    assert.equal(result.notarization.failedStep, step);
+    assert.equal(result.notarization.validated, false);
+    assert.equal(result.notarization.notarized, step !== "submit");
+    assert.equal(result.notarization.stapled, step === "validate");
+  });
+}
+
+for (const [name, reply, expectedLog] of [
+  ["zero exit with rejection", { status: 0, stdout: JSON.stringify({ id: SUBMISSION, status: "Invalid" }) }, true],
+  ["nonzero exit with acceptance", { status: 1, stdout: JSON.stringify({ id: SUBMISSION, status: "Accepted" }) }, true],
+  ["pending verdict", { status: 0, stdout: JSON.stringify({ id: SUBMISSION, status: "In Progress" }) }, true],
+  ["malformed JSON", { status: 0, stdout: "not JSON" }, false],
+  ["missing submission id", { status: 0, stdout: JSON.stringify({ status: "Accepted" }) }, false],
+  ["spawn failure", { status: null, error: new Error("fixture sensitive diagnostic") }, false],
+]) {
+  test(`notarization fails closed for ${name}, even if log retrieval fails`, t => {
+    const paths = fixture(t);
+    const invocations = [];
+    assert.throws(() => notarizedBuild(paths, [], args => {
+      invocations.push(args[1]);
+      return args[1] === "submit" ? reply : { status: 1, stderr: "fixture sensitive diagnostic" };
+    }), error => /notarization failed/.test(error.message) && !error.message.includes("sensitive diagnostic"));
+    assert.deepEqual(invocations, expectedLog ? ["submit", "log"] : ["submit"]);
+    const result = savedBuild(paths);
+    assert.equal(result.notarization.notarized, false);
+    assert.equal(result.notarization.logStatus, expectedLog ? "failed" : undefined);
+    assert.equal(fs.existsSync(join(paths.output, "notarization-log.json")), false);
+  });
+}
+
+for (const step of ["staple", "validate"]) {
+  test(`notarization cannot qualify a PKG when ${step} fails`, t => {
+    const paths = fixture(t);
+    const invocations = [];
+    assert.throws(() => notarizedBuild(paths, [], args => {
+      invocations.push(args[1]);
+      if (args[1] === step) return { status: 1 };
+      return { status: 0, stdout: JSON.stringify({ id: SUBMISSION, status: "Accepted" }) };
+    }), new RegExp(`notarization failed during ${step}`));
+    assert.deepEqual(invocations, step === "staple" ? ["submit", "staple", "log"] : ["submit", "staple", "validate", "log"]);
+    const outcome = savedBuild(paths).notarization;
+    assert.equal(outcome.notarized, true);
+    assert.equal(outcome.stapled, step === "validate");
+    assert.equal(outcome.validated, false);
+    assert.equal(outcome.failedStep, step);
+  });
+}
+
+test("notarization credentials are required before any package tool or output is touched", t => {
+  const paths = fixture(t);
+  const calls = [];
+  for (const notarization of [undefined, {}, { keychainProfile: "" }, { apiKeyPath: "/fixture/key.p8" }, { ...API_KEY, apiKeyPath: "relative.p8" }, { ...PROFILE, ...API_KEY }, { ...PROFILE, password: "inline-secret" }]) {
+    assert.throws(() => notarizedBuild(paths, calls, () => assert.fail("xcrun must not run"), { notarization }), /Signing config requires notarization/);
+  }
+  assert.deepEqual(calls, []);
+  assert.equal(fs.existsSync(paths.output), false);
+});
+
+test("notarization skip is explicit in arguments and marks the local PKG not notarized", t => {
+  const paths = fixture(t);
+  const calls = [];
+  const result = notarizedBuild(paths, calls, () => assert.fail("skip must not contact Apple"), { skipNotarization: true, notarization: undefined });
+  assert.deepEqual(result.notarization, { status: "skipped", notarized: false, stapled: false, validated: false });
+  assert.equal(result.status, "signed-artifacts-built");
+  assert.deepEqual(savedBuild(paths), result);
+  const required = ["--payload", "/a", "--installerCli", "/b", "--payloadChecker", "/check", "--teamId", TEAM, "--version", "1.2", "--signingIdentity", IDENTITY, "--output", "/c"];
+  assert.equal(parseArgs(required).skipNotarization, false);
+  assert.equal(parseArgs([...required, "--skip-notarization"]).skipNotarization, true);
 });
 
 test("RTF agreement preserves Unicode and escaped text while unwrapping presentation whitespace", (t) => {

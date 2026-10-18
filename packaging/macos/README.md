@@ -24,9 +24,32 @@ installer CLI, payload checker and removal app. It prepares a fresh private payl
 verifies signatures and architecture slices, checks that the app, HAL, remover and
 both services report the same product version, and produces
 `MixRelay-Installer-VERSION.pkg` signed with the matching Developer ID Installer.
+It submits that final PKG with `xcrun notarytool submit --wait`, requires an
+`Accepted` verdict, then runs `xcrun stapler staple` and `xcrun stapler validate`.
+The private signing config must include one `notarization` object:
+
+```json
+{ "notarization": { "keychainProfile": "YOUR_NOTARYTOOL_PROFILE" } }
+```
+
+Alternatively, use `notarization.apiKeyPath` (an absolute `.p8` path), `keyId`
+and `issuer` for an App Store Connect team API key. These fields reference
+credentials; never put key contents or inline passwords in the config or repository.
+Missing or conflicting references stop the release before signing.
+
 `--package-only` reuses compiled signed inputs and prepares a fresh payload.
-Build staging is removed after success or failure. These commands do not install,
-notarize or publish. Notarization and stapling remain required before publication.
+`--skip-notarization` is for local test builds and records `notarized: false`.
+It skips submission, stapling and validation; its PKG is not ready for publication.
+The JSON result is printed and saved as `build-result.json` in the output directory,
+with submission ID, Apple status and separate notarization, staple and validation
+outcomes. Failures with a submission ID fetch `notarization-log.json`; a failed log
+fetch is recorded without hiding the release failure. Credential references and raw
+tool diagnostics are omitted from the result and console output.
+Interruption stops the owned packaging process group before the signing wrapper
+restores the keychain search list. A terminated process may leave a pending step
+in the result; only `notarized-artifacts-built` with all three checks true qualifies.
+Build staging is removed after success or failure. These commands do not install
+or publish. Notarization and stapling remain required before publication.
 
 `pnpm desktop:build` builds the universal public app and its native helpers.
 Low-level staging is available through

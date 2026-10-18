@@ -13,6 +13,13 @@ function privateFile(path) {
   const value = lstatSync(path);
   if (!value.isFile() || value.isSymbolicLink() || value.uid !== process.getuid() || (value.mode & 0o077)) throw new Error('Signing configuration must be a regular owner-only file');
 }
+/** Read credential references without opening a keychain or reading private keys. */
+export function readMacosSigningConfig(configPath = process.env.MIXRELAY_SIGNING_CONFIG || DEFAULT_SIGNING_CONFIG) {
+  privateFile(configPath);
+  const text = readFileSync(configPath, 'utf8');
+  try { return JSON.parse(text); }
+  catch { throw new Error('Signing configuration must contain valid JSON'); }
+}
 function command(program, args, secrets = [], exec = spawnSync) {
   const result = exec(program, args, { encoding: 'utf8', timeout: 45000, maxBuffer: 1024 * 1024 });
   if (result.error || result.status !== 0) {
@@ -73,8 +80,7 @@ const systemProcessGroups = {
 export function withMacosSigning(action, configPath = process.env.MIXRELAY_SIGNING_CONFIG || DEFAULT_SIGNING_CONFIG, io = {}) {
   const { exec = spawnSync, spawnChild = spawn, processGroups = systemProcessGroups, startRefresh = spawnRefresh, platform = process.platform, signals = process } = io;
   if (platform !== 'darwin') throw new Error('macOS signing requires macOS');
-  privateFile(configPath);
-  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  const config = readMacosSigningConfig(configPath);
   const keychain = resolve(config.keychain);
   if (dirname(keychain) !== dirname(resolve(configPath)) || !existsSync(keychain)) throw new Error('Use the restored build keychain next to its configuration');
   if (!/^[A-Z0-9]{10}$/.test(config.teamId) || !config.applicationIdentity?.endsWith(`(${config.teamId})`) || !config.installerIdentity?.endsWith(`(${config.teamId})`)) throw new Error('Matching Application and Installer signing identities required');

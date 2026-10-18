@@ -4,6 +4,10 @@
 
 **릴리스 빌드 전 서명 준비가 최우선이다.** 정상 복원 설정은 `/Users/state303/Library/Application Support/MixRelay/Signing/background-stop-20261011/config.json`이다. `pnpm signing:check`는 이 설정으로 키체인을 열고 실제 코드·PKG 서명을 검증한다. `pnpm release:macos --output EMPTY_DIRECTORY`는 같은 정상 키체인을 사용하며 종료 시 원래 키체인 검색 목록을 복원한다. 이전 `Library/Caches/io.mixrelay.signing/driver-20261008/release.keychain-db`는 저장된 암호로 열리지 않는다고 기존 운영 지침에 명시돼 있으므로 기본 서명 경로로 재사용하지 않는다.
 
+릴리스 설정에는 `notarization.keychainProfile` 또는 `notarization.apiKeyPath`(절대 `.p8` 경로)·`keyId`·`issuer` 중 한 방식의 참조를 둔다. 키 내용이나 암호를 넣지 않는다. 참조 누락·충돌은 서명 전에 거부한다. `pnpm release:macos --output EMPTY_DIRECTORY`는 최종 서명 PKG를 `notarytool submit --wait`로 제출하고 `Accepted`를 확인한 뒤 `stapler staple`·`stapler validate`를 실행한다. `--package-only`도 공증한다. 로컬 시험만 `--skip-notarization`으로 생략하며 결과는 미공증으로 표시한다.
+
+출력 폴더의 `build-result.json`과 표준 출력 JSON에 제출 ID·공증·스테이플·검증 상태를 기록한다. 실패 시 제출 ID가 있으면 `notarization-log.json`을 가져오고 로그 조회 실패도 기록한다. 자격 증명 참조와 도구의 원시 진단은 콘솔에 출력하지 않는다. 취소는 기존 서명 래퍼가 패키징·공증 프로세스 그룹을 종료한 뒤 키체인 검색 목록을 복원한다. 강제 종료된 결과는 진행 단계가 남을 수 있으므로 `notarized-artifacts-built`와 세 검증 성공을 모두 확인한다. 실제 공증·설치 검증은 모의 도구 테스트와 구분한다. 설정 예시는 [macOS 패키징](../packaging/macos/README.md#build)을 따른다.
+
 인증창이 남으면 즉시 조치를 선택한다. 정상 설정으로 잠금 해제·재시도하거나, 자신이 시작한 막힌 서명 프로세스만 안전하게 취소하고 재시작하거나, 필요한 암호·행동을 구체적으로 사용자에게 요청한다. 창을 방치한 채 다른 작업으로 넘어가지 않는다. 정상 전용 키체인도 300초 뒤 잠기므로 빌드 동안만 45초 간격으로 잠금을 갱신한다. 빌드 종료 시 갱신 프로세스를 종료하며 로그인 키체인과 전역 잠금 정책은 변경하지 않는다.
 
 빌드를 막는 열린 인증창의 처리 방법은 에이전트가 능동적으로 결정한다. 사용자가 다시 지적할 때까지 기다리지 않는다. 취소 전에는 창을 만든 자신의 빌드·서명 프로세스인지 확인한다. 사용자 입력이 꼭 필요하면 어느 창에서 무엇을 해야 하는지 즉시 요청하고, 실제 빌드가 대기 중임을 알린다. 조치 뒤에는 인증 대기가 해소되고 빌드가 재개 또는 종료됐는지 확인한다.

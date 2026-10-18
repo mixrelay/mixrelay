@@ -19,6 +19,8 @@ import {
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { readMacosSigningConfig } from "./macos-signing.mjs";
+import { notarizationArguments, notarizePackage } from "./macos-notarization.mjs";
 
 const LANGUAGES = JSON.parse(readFileSync(new URL("../packaging/localization/languages.json", import.meta.url), "utf8"));
 const LOCALIZED_NOTICES = JSON.parse(readFileSync(new URL("../packaging/localization/installer-notices.json", import.meta.url), "utf8"));
@@ -60,8 +62,13 @@ export function parseArgs(args) {
   };
   const options = new Set(Object.keys(values));
   let help = false;
+  let skipNotarization = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+    if (argument === "--skip-notarization") {
+      skipNotarization = true;
+      continue;
+    }
     if (argument === "--help" || argument === "-h") {
       help = true;
       continue;
@@ -89,7 +96,7 @@ export function parseArgs(args) {
     || /[\0\r\n]/.test(values.signingIdentity)) {
     throw new Error("--signingIdentity must be this Team ID's exact Developer ID Installer certificate identity");
   }
-  return { help: false, ...values };
+  return { help: false, ...values, skipNotarization };
 }
 
 function usage() {
@@ -97,6 +104,7 @@ function usage() {
     "Usage: node scripts/build-macos-installer-pkgs.mjs --payload PREPARED_PAYLOAD --installerCli UNIVERSAL2_INSTALLER --payloadChecker PAYLOAD_CHECKER --teamId TEAM_ID --version VERSION --signingIdentity 'Developer ID Installer: Name (TEAM_ID)' --output EMPTY_OUTPUT_DIR",
     "",
     "Verifies Developer ID Application signatures in the payload, builds the signed system-volume install .pkg and copies its signed standalone removal app. Developer ID Application and Installer identities are separate requirements; unsigned distribution is not supported.",
+    "Notarizes and staples the final PKG using notarization references in MIXRELAY_SIGNING_CONFIG. --skip-notarization builds a signed local test package only.",
   ].join("\n");
 }
 
@@ -747,8 +755,10 @@ export function verifyPackageSignature(signature, signingIdentity, mode) {
 /**
  * Build one signed product for installation, update and removal without
  * building Rust/Xcode or performing any host installation, launchd, or CoreAudio action.
+ * Notarize and staple unless explicitly skipped for a local test build.
  */
-export function buildPackages({ payload, installerCli, payloadChecker, teamId, version, signingIdentity, output, fs = fsApi, run = runCommand }) {
+export function buildPackages({ payload, installerCli, payloadChecker, teamId, version, signingIdentity, output, notarization, skipNotarization = false, fs = fsApi, run = runCommand }) {
+  const authentication = notarizationArguments(notarization, skipNotarization);
   for (const [name, path] of [["--payload", payload], ["--installerCli", installerCli], ["--payloadChecker", payloadChecker], ["--output", output]]) assertAbsolute(name, path);
   if (!/^[A-Z0-9]{10}$/.test(teamId)) throw new Error("--teamId must be a ten-character Apple Team ID");
   if (!/^[0-9]+(?:\.[0-9]+){1,3}$/.test(version)) throw new Error("--version must contain two to four numeric components");
@@ -802,13 +812,14 @@ export function buildPackages({ payload, installerCli, payloadChecker, teamId, v
       }
       throw error;
     }
-    return {
+    return notarizePackage({
       status: "signed-artifacts-built",
       installer,
       teamId,
       version,
       stagingIds: { installer: stageId },
-    };
+      notarization: { status: "not-submitted", notarized: false, stapled: false, validated: false },
+    }, authentication, { fs, run });
   } finally {
     fs.rmSync(work, { recursive: true, force: true });
   }
@@ -830,10 +841,13 @@ export function main(args = process.argv.slice(2)) {
       version: parsed.version,
       signingIdentity: parsed.signingIdentity,
       output: parsed.output,
+      skipNotarization: parsed.skipNotarization,
+      notarization: parsed.skipNotarization ? undefined : readMacosSigningConfig().notarization,
     });
-    console.log(`Built one signed macOS installation and update package in ${parsed.output}`);
-    return result.status === "signed-artifacts-built" ? 0 : 1;
+    console.log(JSON.stringify(result));
+    return 0;
   } catch (error) {
+    if (error.result) console.log(JSON.stringify(error.result));
     console.error(error instanceof Error ? error.message : String(error));
     return 1;
   }
