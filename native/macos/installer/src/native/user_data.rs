@@ -114,7 +114,7 @@ pub fn cleanup_user_data(
     if wait_for_commit && !read_commit(&mut io::stdin().lock())? {
         return Ok(());
     }
-    cleanup_files(home, delete_settings).context("clean MixRelay Driver data")
+    cleanup_files(home, delete_settings).context("clean MixRelay data")
 }
 
 fn read_commit(input: &mut impl Read) -> anyhow::Result<bool> {

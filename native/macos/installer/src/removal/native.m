@@ -26,9 +26,9 @@ int MRRemovalRightRegister(void) {
     // window lets the helper verify its external form without asking again.
     NSDictionary *definition = @{ @"class": @"user", @"group": @"admin",
         @"authenticate-user": @YES, @"allow-root": @NO, @"shared": @NO,
-        @"timeout": @300, @"comment": @"Remove MixRelay Driver" };
+        @"timeout": @300, @"comment": @"Remove MixRelay" };
     status = AuthorizationRightSet(reference, MRRight, (__bridge CFDictionaryRef)definition,
-                                   CFSTR("Remove MixRelay Driver"), bundle, CFSTR("Authorization"));
+                                   CFSTR("Remove MixRelay"), bundle, CFSTR("Authorization"));
     if (bundle) CFRelease(bundle);
     AuthorizationFree(reference, kAuthorizationFlagDefaults);
     return status;

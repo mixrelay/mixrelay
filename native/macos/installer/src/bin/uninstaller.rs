@@ -12,7 +12,7 @@ fn main() {
         .finish();
     let _logging = tracing::subscriber::set_default(subscriber);
     if let Err(error) = run() {
-        tracing::error!("MixRelay Driver removal failed: {error:#}");
+        tracing::error!("MixRelay removal failed: {error:#}");
         std::process::exit(1);
     }
 }
@@ -24,7 +24,7 @@ fn run() -> anyhow::Result<()> {
 
 #[cfg(not(target_os = "macos"))]
 fn run() -> anyhow::Result<()> {
-    anyhow::bail!("Uninstall MixRelay Driver is available only on macOS")
+    anyhow::bail!("Uninstall MixRelay is available only on macOS")
 }
 
 #[cfg(any(target_os = "macos", test))]

@@ -44,7 +44,7 @@ export function buildRemovalApp({executable, helper, output, version, identity})
       fs.mkdirSync(localized,{mode:0o755});
       const title = labels[language.language].remove;
       fs.writeFileSync(join(localized,'InfoPlist.strings'),`"CFBundleDisplayName" = ${JSON.stringify(title)};\n`);
-      fs.writeFileSync(join(localized,'Authorization.strings'),`"Remove MixRelay Driver" = ${JSON.stringify(title)};\n`);
+      fs.writeFileSync(join(localized,'Authorization.strings'),`"Remove MixRelay" = ${JSON.stringify(title)};\n`);
     }
     const info = {
       CFBundleIdentifier:'io.mixrelay.driver.uninstaller', CFBundleName:'Uninstall MixRelay',

@@ -23,7 +23,7 @@ pub(super) fn cleanup(layout: &FilesystemLayout) -> Result<(), FilesystemError> 
             reason: "stale staging is not a private owned transaction directory",
         });
     }
-    tracing::info!(path = %path.display(), "Cleaning abandoned MixRelay Driver transaction files");
+    tracing::info!(path = %path.display(), "Cleaning abandoned MixRelay transaction files");
     // The whole private directory belongs to this transaction. Recursive removal
     // unlinks nested symlinks and hardlinks without following their external targets.
     remove_staging_root_if_identity(path, identity(&metadata))
