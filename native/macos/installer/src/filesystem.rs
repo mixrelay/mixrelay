@@ -5,10 +5,9 @@
 //! change ownership, or verify signatures. The native privileged adapter can
 //! compose these operations with the pure transaction core.
 //!
-//! Path checks are repeated immediately before copy and rename operations, but
-//! they are not a kernel-level defense against an adversary replacing a path
-//! between a check and the operation. The privileged native adapter must own
-//! the fixed parent directories and lifecycle leases during this work.
+//! App mutations retain the validated product-directory descriptor across renames.
+//! Other destinations and private staging require protected parent directories
+//! and lifecycle leases held by the privileged native adapter.
 //!
 //! Removal and cleanup are limited to the eight `OwnedTarget` paths, private
 //! staging, and the validated empty product folder. Lifecycle lease inodes and
@@ -742,20 +741,32 @@ impl FilesystemAdapter {
         {
             Self::ensure_destination_parent(&destination, progress)?;
         }
-        if matches!(target, OwnedTarget::App | OwnedTarget::Uninstaller) {
-            self.ensure_product_directory(context.snapshot, progress)?;
-        }
-        if observed.presence.is_present() {
+        let product = if matches!(target, OwnedTarget::App | OwnedTarget::Uninstaller) {
+            self.open_product_directory(context.snapshot, progress)?
+        } else {
+            None
+        };
+        self.commit_target_at(context, target, product.as_ref(), progress)
+    }
+
+    fn commit_target_at(
+        &self,
+        context: &CommitContext<'_>,
+        target: OwnedTarget,
+        product: Option<&fs::File>,
+        progress: &mut MutationProgress,
+    ) -> Result<(), FilesystemError> {
+        if context.snapshot.target(target).presence.is_present() {
             let backup = context.staged.backup_path(target);
             ensure_absent(&backup)?;
-            rename_path(&destination, &backup)?;
+            self.move_target_to_private(product, target, &backup)?;
             progress.backed_up.push(target);
         }
         if context.request.kind() == crate::OperationKind::Install {
             let payload = context.staged.payload_path(target);
             validate_staged_payload(target, &payload)?;
             let payload_fingerprint = fingerprint(&metadata(&payload, "staged payload")?);
-            rename_path(&payload, &destination)?;
+            self.move_private_to_target(product, target, &payload)?;
             progress.installed.push(InstalledTarget {
                 target,
                 fingerprint: payload_fingerprint,
@@ -787,17 +798,36 @@ impl FilesystemAdapter {
         staged: &FilesystemStaged,
         progress: &mut MutationProgress,
     ) -> Result<(), FilesystemError> {
-        self.ensure_product_directory(snapshot, progress)?;
+        let product = self.open_product_directory(snapshot, progress)?;
+        self.restore_progress_at(snapshot, staged, progress, product.as_ref())
+    }
+
+    fn restore_progress_at(
+        &self,
+        snapshot: &FilesystemSnapshot,
+        staged: &FilesystemStaged,
+        progress: &mut MutationProgress,
+        product: Option<&fs::File>,
+    ) -> Result<(), FilesystemError> {
         while let Some(installed) = progress.installed.last().copied() {
             let destination = self.layout.target_path(installed.target);
-            remove_installed_path(&destination, &installed)?;
+            if matches!(
+                installed.target,
+                OwnedTarget::App | OwnedTarget::Uninstaller
+            ) {
+                self.rollback_installed_product(product, staged, &installed)?;
+            } else {
+                remove_installed_path(&destination, &installed)?;
+            }
             progress.installed.pop();
         }
         while let Some(target) = progress.backed_up.last().copied() {
             let destination = self.layout.target_path(target);
             let backup = staged.backup_path(target);
-            ensure_absent(&destination)?;
-            rename_path(&backup, &destination)?;
+            if !matches!(target, OwnedTarget::App | OwnedTarget::Uninstaller) {
+                ensure_absent(&destination)?;
+            }
+            self.move_private_to_target(product, target, &backup)?;
             progress.backed_up.pop();
         }
         if let Some(path) = progress.unidentified_created_directories.first() {
@@ -810,7 +840,11 @@ impl FilesystemAdapter {
             });
         }
         while let Some(directory) = progress.created_directories.last().cloned() {
-            remove_created_directory(&directory)?;
+            if directory.path == self.product_directory_path() {
+                self.remove_empty_product_directory(Some(directory.identity))?;
+            } else {
+                remove_created_directory(&directory)?;
+            }
             progress.created_directories.pop();
         }
         self.ensure_snapshot(snapshot)

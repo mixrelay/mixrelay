@@ -8,6 +8,8 @@ use std::{
 use super::*;
 use crate::{InstallSources, OperationKind};
 
+mod races;
+
 struct Fixture {
     _root: mixrelay_test_support::FixtureDir,
     root: PathBuf,

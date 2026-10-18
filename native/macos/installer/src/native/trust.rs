@@ -144,8 +144,10 @@ pub fn prepare_install_directories() -> Result<(), NativeError> {
     Ok(())
 }
 
-/// Creates the product folder through the protected Applications descriptor.
-pub(crate) fn create_product_directory() -> Result<(), NativeError> {
+mod product;
+
+/// Publishes a privately configured product folder into Applications exclusively.
+pub(crate) fn create_product_directory() -> Result<File, NativeError> {
     require_root()?;
     let path = Path::new(PRODUCT_DIRECTORY);
     let applications_path = path.parent().ok_or_else(|| NativeError::Trust {
@@ -169,16 +171,18 @@ pub(crate) fn create_product_directory() -> Result<(), NativeError> {
             reason: "unsafe Applications directory",
         });
     }
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| NativeError::Trust {
-            path: path.to_path_buf(),
-            reason: "invalid product folder name",
-        })?;
     let wheel = Gid::from_raw(group_id_for_name("wheel")?);
-    let directory = open_or_create_child(&applications, name, path, wheel)?;
-    validate_root_directory(path, &directory, Some(wheel))
+    let lifecycle = open_existing_directory(Path::new(LIFECYCLE_DIRECTORY))?;
+    validate_root_directory(Path::new(LIFECYCLE_DIRECTORY), &lifecycle, Some(wheel))?;
+    let directory =
+        product::create_product_directory_at(&applications, &lifecycle, (Uid::ROOT, wheel), || {})
+            .map_err(|source| NativeError::Io {
+                operation: "publish protected product folder",
+                path: path.to_path_buf(),
+                source,
+            })?;
+    validate_root_directory(path, &directory, Some(wheel))?;
+    Ok(directory)
 }
 
 /// Revalidates the fixed lifecycle directory and every no-replace lease inode.

@@ -13,6 +13,8 @@ mod contract;
 #[cfg(unix)]
 mod coordinated;
 #[cfg(unix)]
+mod directory;
+#[cfg(unix)]
 mod filesystem;
 mod launchd;
 #[cfg(unix)]

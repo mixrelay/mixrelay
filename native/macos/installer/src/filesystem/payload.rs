@@ -313,18 +313,21 @@ pub(super) fn copy_regular_file(source: &Path, destination: &Path) -> Result<(),
         .map_err(|error| io_failure("set copied permissions", destination, error))
 }
 
-pub(super) fn create_directory(path: &Path) -> Result<(), FilesystemError> {
+pub(super) fn create_directory(path: &Path) -> Result<Option<File>, FilesystemError> {
     #[cfg(target_os = "macos")]
     if path == Path::new(crate::PRODUCT_DIRECTORY) {
-        return crate::native::create_product_directory().map_err(|source| {
-            io_failure(
-                "create protected product folder",
-                path,
-                io::Error::other(source),
-            )
-        });
+        return crate::native::create_product_directory()
+            .map(Some)
+            .map_err(|source| {
+                io_failure(
+                    "create protected product folder",
+                    path,
+                    io::Error::other(source),
+                )
+            });
     }
-    create_directory_with_mode(path, 0o755)
+    create_directory_with_mode(path, 0o755)?;
+    Ok(None)
 }
 
 pub(super) fn create_private_directory(path: &Path) -> Result<(), FilesystemError> {
@@ -383,8 +386,15 @@ pub(super) fn create_missing_directories(
     }
     for directory in missing.iter().rev() {
         unidentified.push(directory.clone());
-        create_directory(directory)?;
-        let metadata = match metadata(directory, "created destination directory") {
+        let descriptor = create_directory(directory)?;
+        let metadata = match descriptor.map_or_else(
+            || metadata(directory, "created destination directory"),
+            |file| {
+                file.metadata().map_err(|error| {
+                    io_failure("inspect created product descriptor", directory, error)
+                })
+            },
+        ) {
             Ok(metadata) => metadata,
             Err(cause) => {
                 return Err(FilesystemError::CreatedDirectoryIdentityUnavailable {
