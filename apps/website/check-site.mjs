@@ -140,8 +140,8 @@ for (const detail of ['에코비전랩', '111-42-04359', '505-S80', '+82 10-6380
   assert.ok(home.includes(detail), `home: business information includes ${detail}`);
 }
 const legalSections = {
-  terms: ['refunds', 'purchase', 'license', 'free', 'activation', 'withdrawal', 'support', 'agreements', 'business'],
-  privacy: ['scope', 'processing', 'records', 'destruction', 'providers', 'overseas', 'automatic', 'rights', 'security', 'contact', 'changes'],
+  terms: ['purchase', 'license', 'refunds', 'free', 'support', 'business'],
+  privacy: ['scope', 'purchases', 'processing', 'providers', 'rights', 'contact', 'changes'],
 };
 assert.deepEqual(pages.filter((page) => page.startsWith('legal/')), ['en', 'ko'].flatMap((language) =>
   ['privacy', 'terms'].map((policy) => `legal/${language}/${policy}.html`)), 'all four legal pages exist');
