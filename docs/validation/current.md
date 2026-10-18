@@ -8,8 +8,10 @@
 `fdaf814`에서 제품 Rust 코드의 `unwrap()`·`expect()`를 없애고 workspace clippy에
 `unwrap_used`·`expect_used`를 deny로 켰다(테스트는 `clippy.toml`이 허용). macOS에서 workspace
 clippy(`--all-targets`, `--all-features` 포함), fmt, crate 계층, workspace lib/bin 시험, `check:native`,
-`test:scripts`, 제어 UI 검사, 왕복 프로브 자체 시험이 통과했다. Linux 전용 파일 변경은 이 Mac에서
-컴파일하지 않았으므로 Linux CI 확인 전까지 검증된 것으로 보지 않는다.
+`test:scripts`, 제어 UI 검사, 왕복 프로브 자체 시험이 통과했다. Linux 전용 변경은 PR #2의 CI
+(`c8755cb`)에서 Debian·Ubuntu·Kali(x86·ARM)·Arch(x86)의 clippy·시험과 macOS 15·UI 검사가 모두 통과했다.
+이 과정에서 Linux CI 이미지가 `clippy.toml`·`rustfmt.toml`을 빠뜨려 프로젝트 한도 없이 검사하던 것과
+macOS runner의 Intel target·socket 경로 길이, Linux runner 디스크 부족을 바로잡았다.
 
 같은 소스로 서명 빌드한 `MixRelay-Installer-0.1.0.pkg`(Developer ID Installer, trusted timestamp)를
 사용자가 설치했다. 첫 시도는 관리자 인증 단계 전에 "설치 취소"로 끝났고 다시 설치해 성공했다.
