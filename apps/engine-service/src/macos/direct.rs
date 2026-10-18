@@ -82,6 +82,7 @@ impl ExternalIo for CallbackIo<'_> {
                 destination,
                 cycle,
                 super::endpoint_service::source_registry(),
+                self.bridged.map(|(_, host)| host),
             );
         };
         if map.offset.is_none() {
@@ -291,6 +292,12 @@ impl Renderer<'_> {
             if let Some((plan, _)) = &self.native_clock {
                 plan.record_latency(self.processor, report, timing.copied(), cycle);
             }
+            super::runtime_latency::record_sources(
+                self.processor,
+                super::endpoint_service::source_registry(),
+                true,
+                cycle.clock.epoch,
+            );
             self.status.record_process(report);
             io.offset += count as usize;
         }

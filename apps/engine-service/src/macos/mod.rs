@@ -156,7 +156,16 @@ impl ExternalIo for MacEngineExternalIo<'_> {
                 }
                 let token = source_token(binding.node_id().as_str());
                 let available = if let Some(sources) = self.sources {
-                    sources.read_at(token, destination, cycle.sample_rate, time)
+                    sources.read_audio_time(
+                        token,
+                        destination,
+                        cycle.frames,
+                        mixrelay_macos_transport::source_registry::content_latency::ReadTiming {
+                            rate: cycle.sample_rate,
+                            first_nanos: Some(time),
+                            host_ticks: Some(self.host),
+                        },
+                    )
                 } else {
                     destination.fill(0.0);
                     0
@@ -180,7 +189,7 @@ impl ExternalIo for MacEngineExternalIo<'_> {
         {
             return outcome;
         }
-        read_application(binding, destination, cycle, self.sources)
+        read_application(binding, destination, cycle, self.sources, Some(self.host))
     }
 
     fn write_sink(
@@ -212,10 +221,20 @@ fn read_application(
     destination: &mut [f32],
     cycle: &ProcessCycle,
     sources: Option<&mixrelay_macos_transport::source_registry::SourceRegistry>,
+    host: Option<u64>,
 ) -> TransferOutcome {
     let token = source_token(binding.node_id().as_str());
     let available = if let Some(sources) = sources {
-        sources.read_audio(token, destination, cycle.frames, cycle.sample_rate)
+        sources.read_audio_time(
+            token,
+            destination,
+            cycle.frames,
+            mixrelay_macos_transport::source_registry::content_latency::ReadTiming {
+                rate: cycle.sample_rate,
+                first_nanos: None,
+                host_ticks: host,
+            },
+        )
     } else {
         destination.fill(0.0);
         0
@@ -623,6 +642,12 @@ fn process_worker_block(
     block
         .devices
         .record_latency_cycle(block.processor, report, timeline.epoch);
+    runtime_latency::record_sources(
+        block.processor,
+        io.sources,
+        report.is_some(),
+        timeline.epoch,
+    );
     timeline.discontinuity_pending = report.is_none();
     if let Some(report) = report {
         block.status.record_process(report);

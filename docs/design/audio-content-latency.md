@@ -37,8 +37,8 @@ is rejected as unknown rather than claiming histories that audio never applied.
 This is a planned control-side calculation, not proof that a pending history bank
 has activated.
 
-Stage 2 now measures and publishes device-source routes. The IOProc records
-acquisition as callback `now.hostTime - input.hostTime` and presentation as
+Stage 2 measures and publishes device-source and application-capture routes. The
+IOProc records acquisition as callback `now.hostTime - input.hostTime` and presentation as
 `output.hostTime - now.hostTime`, accepting only valid, forward host intervals.
 This also measures HAL loopback acquisition for a MixRelay virtual source.
 Direct owners use the timestamps of the callback that actually rendered their PCM.
@@ -54,6 +54,23 @@ invalidate that observation. This age already includes native and graph queues,
 private SRC residence and algorithmic delay. Those source terms are not added a
 second time. The independent FIFO/SRC taps remain for render-side measurement and
 diagnostics, and for windows without a PCM-age observation.
+
+Application capture uses the same acquired-PCM age at the graph consumer. The
+process-tap capture ring, pump SRC and shared IPC v5 retain each frame's acquisition
+host time in nanoseconds. The consumer reads the coordinates of the exact copied
+PCM range, validates its lease/epoch, and weights its age by transferred frames.
+The graph label is the same host label used for destination FIFO writes, including
+when a direct endpoint callback renders the graph. Capture-ring waiting, pump
+scheduling, SRC and shared-ring backlog are already included in that age; nominal
+buffer targets and separate SRC delay are not added to it. Missing, stale or future
+coordinates remain unknown. Incomplete reads, priming and unready compensation
+disturb the window. A timestamp selection miss retains the scheduling-burst
+observation without advancing the unread PCM cursor. Source lease, stream epoch,
+native/graph rates, requested format
+generation and graph clock changes reset the destination's measurement context,
+even before a new format is acknowledged. The existing one-second publication,
+threshold, three-window change hysteresis, Driver authority and HAL engine-only gate
+also apply to application routes.
 
 Each native and graph FIFO is timed on both sides. After every write or read, the
 role records the ring cursor it alone advances and adds `frames * host ticks` to
@@ -222,10 +239,10 @@ holding control locks and assert notification callbacks own none of those locks.
 
 ## Remaining limits
 
-Application capture has no measurable native acquisition timestamp in this path
-and remains unknown. Device directions with missing/backward host timestamps,
-unavailable rates or no complete measurement window also remain unknown. Source
-latency differences outside the threshold are rejected; Stage 2 does not change
+Application captures without acquisition coordinates, device directions with
+missing/backward host timestamps, unavailable rates and incomplete measurement
+windows remain unknown. Source latency differences outside the threshold are
+rejected; Stage 2 does not change
 source compensation or audio routing to align them.
 
 This publication is a window-mean content latency estimate even though input PCM
@@ -234,9 +251,11 @@ make an individual impulse differ from the one-second estimate. Active histories
 are checked against exact cached observations, but the estimator does not expose
 per-sample hosted transport timing. Route accuracy is checked in-process by the
 engine's route integration tests, which compare an impulse's actual delay with the
-reported value without devices. Installed engine/HAL property agreement still
-requires the signed installation and impulse procedure below; see the status at
-the start of that section.
+reported value without devices. Application routes exercise the capture ring, pump
+SRC and shared IPC with variable callback sizes and a native-rate change from
+48 kHz to 44.1 kHz. Installed application-capture latency verification is pending.
+Installed engine/HAL property agreement still requires the signed installation
+and impulse procedure below; see the status at the start of that section.
 
 ## Installed verification
 

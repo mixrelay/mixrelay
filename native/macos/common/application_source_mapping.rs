@@ -53,11 +53,20 @@ impl Mapping {
         unsafe { mr_shared_audio_buffer_capacity(self.buffer.as_ptr()) }
     }
     pub(crate) fn new(capacity: u32, channels: u32) -> io::Result<Self> {
+        Self::with_storage(capacity, channels, |bytes| {
+            create_shared_memory(bytes, true)
+        })
+    }
+    pub(crate) fn with_storage(
+        capacity: u32,
+        channels: u32,
+        storage: impl FnOnce(usize) -> io::Result<OwnedFd>,
+    ) -> io::Result<Self> {
         let bytes = mr_application_clock_required_bytes(capacity, channels);
         if bytes == 0 {
             return Err(io::Error::other("invalid source geometry"));
         }
-        let descriptor = create_shared_memory(bytes, true)?;
+        let descriptor = storage(bytes)?;
         let memory = MappedMemory::new(&descriptor, bytes)?;
         let address = memory.memory.as_ptr();
         let buffer = NonNull::new(unsafe {

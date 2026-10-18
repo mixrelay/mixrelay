@@ -1,8 +1,11 @@
 //! One-second control publication of measured content residence, fenced by active topology.
+mod application;
 use crate::macos_devices::{
     MacDevices,
     latency::{Observation, binding},
 };
+use application::append_observations;
+pub(super) use application::record_sources;
 use mixrelay_audio_engine::{ProcessorExchange, RenderPlan, content_latency::LatencyHysteresis};
 use mixrelay_driver_control::{DriverClient, EngineLatencyLease, LatencyCommand, RuntimeLatency};
 use std::collections::BTreeMap;
@@ -121,8 +124,14 @@ async fn publish(
     if let Some(plan) = exchange.latency_plan() {
         let settings = client.snapshot().await.map_err(|error| error.to_string())?;
         let revision = exchange.revisions().active;
-        let observations =
+        let mut observations =
             devices.latency_observations(plan.revision(), exchange.has_pending_latency());
+        append_observations(
+            &plan,
+            super::endpoint_service::source_registry(),
+            exchange.has_pending_latency(),
+            &mut observations,
+        );
         let rates = settings
             .settings
             .devices

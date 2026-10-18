@@ -43,6 +43,7 @@ impl SchedulingClock for SystemSchedulingClock {
 
 const MAX_SOURCES: usize = 64;
 const MAX_RETAINED: usize = 128;
+pub mod content_latency;
 mod latency;
 mod timestamps;
 use latency::{Latency, Observation, transition};
@@ -59,6 +60,14 @@ pub struct SourceClock {
     pub running: u32,
     pub synchronized: u32,
 }
+#[derive(Clone, Copy)]
+struct ReadWindow {
+    observation: Observation,
+    lease: u64,
+    format: u64,
+    graph_ns: Option<u64>,
+}
+
 #[derive(Default)]
 struct Timeline {
     policy: Latency,
@@ -97,6 +106,57 @@ impl Timeline {
             running: clock.native_running.load(Ordering::Acquire) != 0,
             adjacent,
             copy_missing: 0,
+        }
+    }
+
+    fn copy_audio(
+        &mut self,
+        source: &Source,
+        samples: &mut [f32],
+        policy: Latency,
+        window: ReadWindow,
+    ) -> u32 {
+        let ReadWindow {
+            observation,
+            lease,
+            format,
+            graph_ns,
+        } = window;
+        let frames = observation.frames;
+        let age = graph_ns.and_then(|label| {
+            content_latency::capture_age(source, observation.epoch, policy.next, frames, label)
+        });
+        // SAFETY: the caller holds this source's consumer claim and mapping pin;
+        // samples is the complete exclusive destination for the validated frame count.
+        let available = unsafe {
+            mr_shared_audio_buffer_read(
+                source.mapping.buffer.as_ptr(),
+                policy.next,
+                samples.as_mut_ptr(),
+                frames,
+            )
+        };
+        let complete =
+            source.read_is_current(lease, format, observation.epoch) && available == frames;
+        if complete {
+            self.policy = policy.consumed(frames);
+            source.measurements.age.record(age, u64::from(frames));
+        } else if source.read_is_current(lease, format, observation.epoch) {
+            self.policy = transition(
+                policy,
+                Observation {
+                    copy_missing: frames - available,
+                    ..observation
+                },
+            )
+            .0;
+        }
+        self.publish(source, observation.epoch, frames, complete);
+        if complete {
+            available
+        } else {
+            samples.fill(0.0);
+            0
         }
     }
 
@@ -146,6 +206,7 @@ struct Source {
     mapping: Mapping,
     consumer_busy: AtomicBool,
     timeline: UnsafeCell<Timeline>,
+    measurements: content_latency::Measurements,
     // Published slot addresses cannot change while any callback retains a pin.
     _pinned: PhantomPinned,
 }
@@ -255,8 +316,14 @@ struct Control {
     owners: Vec<Pin<Box<Source>>>,
     next_lease: u64,
 }
+#[cfg(any(test, feature = "test-observation"))]
+type TestStorage = fn(usize) -> io::Result<OwnedFd>;
+
 pub struct SourceRegistry {
     clock: Box<dyn SchedulingClock>,
+    timebase: mixrelay_realtime::Timebase,
+    #[cfg(any(test, feature = "test-observation"))]
+    storage: Option<TestStorage>,
     slots: [AtomicPtr<Source>; MAX_SOURCES],
     readers: AtomicUsize,
     control: Mutex<Control>,
@@ -292,11 +359,33 @@ impl SourceRegistry {
     pub fn new() -> Self {
         Self::with_clock(Box::new(SystemSchedulingClock))
     }
+    /// Injects test backing storage while retaining the production mapping and IPC layout.
+    #[cfg(any(test, feature = "test-observation"))]
+    #[must_use]
+    pub fn with_clock_and_storage(
+        clock: Box<dyn SchedulingClock>,
+        storage: fn(usize) -> io::Result<OwnedFd>,
+    ) -> Self {
+        Self {
+            storage: Some(storage),
+            ..Self::with_clock(clock)
+        }
+    }
+    fn mapping(&self, capacity: u32, channels: u32) -> io::Result<Mapping> {
+        #[cfg(any(test, feature = "test-observation"))]
+        if let Some(storage) = self.storage {
+            return Mapping::with_storage(capacity, channels, storage);
+        }
+        Mapping::new(capacity, channels)
+    }
     /// Creates a registry with its owned scheduling-clock boundary.
     #[must_use]
     pub fn with_clock(clock: Box<dyn SchedulingClock>) -> Self {
         Self {
             clock,
+            timebase: mixrelay_realtime::Timebase::current(),
+            #[cfg(any(test, feature = "test-observation"))]
+            storage: None,
             slots: std::array::from_fn(|_| AtomicPtr::new(ptr::null_mut())),
             readers: AtomicUsize::new(0),
             control: Mutex::new(Control {
@@ -406,9 +495,10 @@ impl SourceRegistry {
                 token,
                 capacity: request.capacity_frames,
                 channels: request.channels,
-                mapping: Mapping::new(request.capacity_frames, request.channels)?,
+                mapping: self.mapping(request.capacity_frames, request.channels)?,
                 consumer_busy: AtomicBool::new(false),
                 timeline: UnsafeCell::new(Timeline::default()),
+                measurements: content_latency::Measurements::default(),
                 _pinned: PhantomPinned,
             }))
         } else {
@@ -508,17 +598,30 @@ impl SourceRegistry {
     }
     /// Reads one complete graph block under the source's single-consumer claim.
     pub fn read_audio(&self, token: u64, samples: &mut [f32], frames: u32, rate: u32) -> u32 {
-        self.read_audio_time(token, samples, frames, (rate, None))
+        self.read_audio_time(
+            token,
+            samples,
+            frames,
+            content_latency::ReadTiming {
+                rate,
+                ..Default::default()
+            },
+        )
     }
 
-    fn read_audio_time(
+    /// Reads PCM at an optional acquisition cursor and measures its age at the graph label.
+    pub fn read_audio_time(
         &self,
         token: u64,
         samples: &mut [f32],
         frames: u32,
-        timing: (u32, Option<u64>),
+        timing: content_latency::ReadTiming,
     ) -> u32 {
-        let (rate, requested_time) = timing;
+        let content_latency::ReadTiming {
+            rate,
+            first_nanos: requested_time,
+            host_ticks,
+        } = timing;
         samples.fill(0.0);
         let read = self.read(token);
         let Some(source) = read.source().filter(|source| {
@@ -529,6 +632,7 @@ impl SourceRegistry {
         let Some(_claim) = source.claim_consumer() else {
             return 0;
         };
+        let mut attempt = content_latency::Attempt::new(&source.measurements);
         // SAFETY: this nonblocking consumer claim is the only access to the
         // timeline; no control method modifies it, including replacement.
         let timeline = unsafe { &mut *source.timeline.get() };
@@ -558,44 +662,34 @@ impl SourceRegistry {
             timeline.publish(source, stats.epoch, frames, false);
             return 0;
         }
-        if let Some(time) = requested_time {
-            let minimum = if timeline.policy.started && timeline.policy.epoch == stats.epoch {
-                timeline.policy.next
-            } else {
-                0
-            };
-            let Some(next) = timestamps::locate(source, stats, time, rate, (frames, minimum))
-            else {
-                timeline.publish(source, stats.epoch, frames, false);
-                return 0;
-            };
-            policy.next = next;
-            policy.target = u32::try_from(stats.published_through_frame.saturating_sub(next))
-                .unwrap_or(source.capacity);
+        if !timestamps::select(
+            source,
+            stats,
+            timeline.policy,
+            &mut policy,
+            (rate, frames, requested_time),
+        ) {
+            if source.read_is_current(lease, format, stats.epoch) {
+                // A timestamp miss still observes the scheduling burst. Retain its
+                // reset/growth without advancing the unread PCM cursor.
+                timeline.policy = policy;
+            }
+            timeline.publish(source, stats.epoch, frames, false);
+            return 0;
         }
-        let available = unsafe {
-            mr_shared_audio_buffer_read(buffer, policy.next, samples.as_mut_ptr(), frames)
-        };
-        let valid = source.read_is_current(lease, format, stats.epoch);
-        if valid && available == frames {
-            timeline.policy = policy.consumed(frames);
-        } else if valid {
-            timeline.policy = transition(
-                policy,
-                Observation {
-                    copy_missing: frames - available,
-                    ..observation
-                },
-            )
-            .0;
-        }
-        timeline.publish(source, stats.epoch, frames, valid && available == frames);
-        if valid && available == frames {
-            available
-        } else {
-            samples.fill(0.0);
-            0
-        }
+        let copied = timeline.copy_audio(
+            source,
+            samples,
+            policy,
+            ReadWindow {
+                observation,
+                lease,
+                format,
+                graph_ns: host_ticks.map(|host| self.timebase.nanoseconds(host)),
+            },
+        );
+        attempt.completed = copied != 0;
+        copied
     }
 
     /// Takes normalized-sample faults once for the current source lease.

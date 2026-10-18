@@ -14,6 +14,8 @@ use mixrelay_audio_engine::{BlockProcessor, PeakMeterBank, RenderPlan};
 use mixrelay_engine_service::session::AdapterRuntimeStatus;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
+mod application;
+
 const RATE: u32 = 48_000;
 const CHANNELS: u16 = 2;
 /// The capture device runs fast against host time.
@@ -87,14 +89,15 @@ impl Clock<'_> {
 }
 
 /// The graph worker's device-paced block loop, as `process_worker_block` runs it.
-struct Worker {
+struct Worker<'a> {
+    sources: Option<&'a mixrelay_macos_transport::source_registry::SourceRegistry>,
     processor: BlockProcessor,
     pacers: NativePacers,
     timeline: MacTimeline,
     status: AdapterRuntimeStatus,
 }
 
-impl Worker {
+impl Worker<'_> {
     /// Renders every graph block the pacing device's credit admits.
     fn render(&mut self, devices: &DeviceSet) {
         loop {
@@ -109,6 +112,7 @@ impl Worker {
                 return;
             };
             let mut io = MacEngineExternalIo::new(devices);
+            io.sources = self.sources;
             io.alignment = std::mem::take(&mut self.timeline.capture_alignment);
             let report = process_native_cycle(
                 &mut self.processor,
@@ -122,6 +126,12 @@ impl Worker {
             .unwrap();
             self.timeline.capture_alignment = io.alignment;
             devices.record_latency_cycle(&self.processor, report, self.timeline.epoch);
+            super::record_sources(
+                &self.processor,
+                self.sources,
+                report.is_some(),
+                self.timeline.epoch,
+            );
             self.timeline.discontinuity_pending = report.is_none();
             if let Some(report) = report {
                 self.status.record_process(report);
@@ -133,6 +143,10 @@ impl Worker {
 
 /// A capture device feeding a virtual endpoint's render stream (`to_os`).
 fn capture_to_endpoint() -> BlockProcessor {
+    route_processor(false)
+}
+
+fn route_processor(application: bool) -> BlockProcessor {
     use mixrelay_audio_graph::{
         CompileContext, CompileLimits, GraphCompiler, GraphDocument, NodeConfig, RenderFormat,
     };
@@ -149,6 +163,15 @@ fn capture_to_endpoint() -> BlockProcessor {
         ]
     }))
     .unwrap();
+    if application {
+        document.nodes[0].config = NodeConfig::ApplicationCapture(
+            serde_json::from_value(serde_json::json!({
+                "selector":{"match":"bundle_id","bundle_id":"fixture","include_descendants":false},
+                "stream":{"channels":2,"channelLayout":"stereo"},"sourcePlayback":"preserve"
+            }))
+            .unwrap(),
+        );
+    }
     if let NodeConfig::VirtualEndpoint(endpoint) = &document.nodes[1].config {
         document.nodes[1].config = NodeConfig::VirtualEndpointTransport(endpoint.spec.clone());
     }
@@ -289,6 +312,7 @@ fn assert_reports(route: Route) {
     let owners = (&source, &sink);
     let Outcome { published, delays } = if route.rendering == Rendering::Worker {
         let mut worker = Worker {
+            sources: None,
             processor: capture_to_endpoint(),
             pacers: NativePacers::default(),
             timeline: MacTimeline::new(),

@@ -79,7 +79,16 @@ impl SourceRegistry {
             output.fill(0.0);
             return 0;
         };
-        self.read_audio_time(token, output, frames, (rate, Some(first_nanos)))
+        self.read_audio_time(
+            token,
+            output,
+            frames,
+            super::content_latency::ReadTiming {
+                rate,
+                first_nanos: Some(first_nanos),
+                host_ticks: None,
+            },
+        )
     }
 }
 
@@ -131,4 +140,26 @@ pub(super) fn locate(
         }
     }
     Some(nearest)
+}
+
+pub(super) fn select(
+    source: &Source,
+    stats: SharedAudioBufferStats,
+    previous: super::Latency,
+    policy: &mut super::Latency,
+    (rate, frames, requested): (u32, u32, Option<u64>),
+) -> bool {
+    let Some(time) = requested else { return true };
+    let minimum = if previous.started && previous.epoch == stats.epoch {
+        previous.next
+    } else {
+        0
+    };
+    let Some(next) = locate(source, stats, time, rate, (frames, minimum)) else {
+        return false;
+    };
+    policy.next = next;
+    policy.target = u32::try_from(stats.published_through_frame.saturating_sub(next))
+        .unwrap_or(source.capacity);
+    true
 }
