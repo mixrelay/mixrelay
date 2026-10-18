@@ -371,6 +371,13 @@ impl SourceRegistry {
             ..Self::with_clock(clock)
         }
     }
+    #[cfg_attr(
+        not(any(test, feature = "test-observation")),
+        expect(
+            clippy::unused_self,
+            reason = "only test builds inject mapping storage through the registry"
+        )
+    )]
     fn mapping(&self, capacity: u32, channels: u32) -> io::Result<Mapping> {
         #[cfg(any(test, feature = "test-observation"))]
         if let Some(storage) = self.storage {

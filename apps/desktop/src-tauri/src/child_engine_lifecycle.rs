@@ -113,10 +113,13 @@ pub(crate) fn monitor(app: &tauri::AppHandle) {
                             .map_err(|error| error.to_string())
                     })
             },
-            async || {
-                app.state::<crate::control_proxy::ControlProxyClient>()
-                    .suspend_admission();
-                restart_owned_engine(&app).await.map(|_| ())
+            || {
+                let app = app.clone();
+                async move {
+                    app.state::<crate::control_proxy::ControlProxyClient>()
+                        .suspend_admission();
+                    restart_owned_engine(&app).await.map(|_| ())
+                }
             },
         )
         .await;

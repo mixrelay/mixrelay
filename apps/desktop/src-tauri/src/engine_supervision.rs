@@ -1,12 +1,15 @@
 //! Retries recovery only while the controller still owns the audio lifetime.
 
-use std::time::Duration;
+use std::{future::Future, time::Duration};
 
 /// Observation failures never authorize replacing a potentially live process.
-pub(crate) async fn supervise<E: std::fmt::Display>(
+///
+/// `recover` returns a future that owns what it needs: a future borrowing the caller's
+/// state through an async closure cannot be proven `Send` for a spawned task.
+pub(crate) async fn supervise<E: std::fmt::Display, R: Future<Output = Result<(), E>>>(
     stopping: impl Fn() -> bool,
     mut exited: impl FnMut() -> Result<bool, E>,
-    mut recover: impl AsyncFnMut() -> Result<(), E>,
+    mut recover: impl FnMut() -> R,
 ) {
     loop {
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -56,13 +59,15 @@ mod tests {
                     }
                     Ok(true)
                 },
-                async || {
+                || {
                     replacements.set(replacements.get() + 1);
-                    if replacements.get() == 1 {
-                        return Err("spawn failed");
-                    }
-                    running.set(true);
-                    Ok(())
+                    let replaced = if replacements.get() == 1 {
+                        Err("spawn failed")
+                    } else {
+                        running.set(true);
+                        Ok(())
+                    };
+                    std::future::ready(replaced)
                 },
             ),
         )
