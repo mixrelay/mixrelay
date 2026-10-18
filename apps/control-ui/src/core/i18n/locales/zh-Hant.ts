@@ -129,6 +129,10 @@ export const zhHant = {
       invalid_state: '授權狀態已變更。請再次檢查。',
       clock_invalid: '請檢查裝置時鐘後重試。',
       request_failed: '授權請求失敗。請檢查連線後重試。',
+      revoked: '此授權已不再有效。免費功能仍可使用。',
+      activation_deactivated: '此裝置的啟用已被移除。若要使用付費功能，請重新啟用。',
+      activation_uncertain:
+        '無法確認啟用結果。請聯絡 support@mixrelay.com；在支援團隊處理之前，無法進行新的啟用。',
       unknown: '無法檢查授權。請重試。',
     },
   },

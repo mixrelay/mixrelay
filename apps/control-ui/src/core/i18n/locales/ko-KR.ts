@@ -132,6 +132,11 @@ export const koKR = {
       invalid_state: '라이선스 상태가 변경됐습니다. 다시 확인하세요.',
       clock_invalid: '기기 시간을 확인한 뒤 다시 시도하세요.',
       request_failed: '라이선스 요청에 실패했습니다. 연결 상태를 확인하고 다시 시도하세요.',
+      revoked: '이 라이선스는 더 이상 활성 상태가 아닙니다. 무료 기능은 계속 사용할 수 있습니다.',
+      activation_deactivated:
+        '이 기기의 활성화가 해제되었습니다. 유료 기능을 쓰려면 다시 활성화하세요.',
+      activation_uncertain:
+        '활성화 결과를 확인하지 못했습니다. support@mixrelay.com으로 문의하세요. 지원팀이 해결할 때까지 새 활성화는 막혀 있습니다.',
       unknown: '라이선스를 확인하지 못했습니다. 다시 시도하세요.',
     },
   },

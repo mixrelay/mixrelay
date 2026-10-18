@@ -1,14 +1,14 @@
 //! Lemon Squeezy's public License API, isolated from the audio engine.
 //!
 //! Remote requests, local entitlement policy and the shared native credential format.
-//! Purchase UI and stopping running audio belong to the desktop.
+//! The desktop owns purchase UI and Driver lifecycle. Licensing never stops running audio.
 
 mod client;
 mod credentials;
 mod entitlement;
 mod response;
 
-pub use client::LicenseClient;
+pub use client::{LicenseClient, LicenseHttp, LicenseHttpResponse};
 pub use credentials::{
     LOCAL_LICENSE_SERVICE, StoredLicense, clear_local_license, has_local_paid_access,
 };
@@ -48,6 +48,7 @@ impl ProductIdentity {
 pub struct Activation {
     license_id: u64,
     instance_id: String,
+    purchased_major: u64,
 }
 
 impl Activation {
@@ -55,6 +56,12 @@ impl Activation {
     #[must_use]
     pub const fn license_id(&self) -> u64 {
         self.license_id
+    }
+
+    /// The purchased major bound to the publisher's configured variant.
+    #[must_use]
+    pub const fn purchased_major(&self) -> u64 {
+        self.purchased_major
     }
 
     /// The seat identifier returned by the activation request.
@@ -80,6 +87,15 @@ pub enum LicenseError {
     /// The provider rejected the key, instance, or activation limit.
     #[error("license request rejected")]
     Rejected,
+    /// The provider confirmed that the key is disabled, expired or missing.
+    #[error("license revoked")]
+    Revoked,
+    /// The provider confirmed that this activation no longer exists.
+    #[error("activation deactivated")]
+    ActivationDeactivated,
+    /// A seat mutation may have committed; support must reconcile it before a new activation.
+    #[error("activation result uncertain; contact support@mixrelay.com")]
+    ActivationUncertain,
     /// The HTTP/API request failed; this is not a definitive entitlement rejection.
     #[error("license request failed")]
     RequestFailed,

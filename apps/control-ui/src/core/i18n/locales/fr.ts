@@ -136,6 +136,11 @@ export const fr = {
       invalid_state: 'L’état de la licence a changé. Vérifiez-le à nouveau.',
       clock_invalid: 'Vérifiez l’horloge du périphérique, puis réessayez.',
       request_failed: 'La demande de licence a échoué. Vérifiez votre connexion, puis réessayez.',
+      revoked: "Cette licence n'est plus active. Les fonctions gratuites restent disponibles.",
+      activation_deactivated:
+        "L'activation de cet appareil a été supprimée. Activez-le à nouveau pour utiliser les fonctions payantes.",
+      activation_uncertain:
+        "L'activation n'a pas pu être confirmée. Contactez support@mixrelay.com ; une nouvelle activation reste bloquée jusqu'à ce que le support règle la situation.",
       unknown: 'Impossible de vérifier la licence. Réessayez.',
     },
   },

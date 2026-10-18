@@ -26,7 +26,8 @@ impl CredentialStore for MemoryCredentials {
 }
 
 fn activation() -> Activation {
-    serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1"}"#).expect("seat")
+    serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1","purchasedMajor":0}"#)
+        .expect("seat")
 }
 
 #[test]

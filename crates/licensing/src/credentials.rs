@@ -142,7 +142,7 @@ mod tests {
         let mut record = EntitlementRecord::new(1_000);
         let trial_expiry = record.observe(1_000).expires_at_unix;
         let activation: Activation =
-            serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1"}"#)
+            serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1","purchasedMajor":0}"#)
                 .expect("fixture activation");
         record
             .record_verified(activation, 2_000)

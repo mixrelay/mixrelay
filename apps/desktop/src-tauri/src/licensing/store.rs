@@ -41,6 +41,8 @@ pub(crate) struct LicensingState {
     store: Arc<dyn CredentialStore>,
     pub(super) mutations: tokio::sync::Mutex<()>,
     journal: std::sync::OnceLock<std::path::PathBuf>,
+    clock: Arc<dyn Fn() -> Result<u64, LicenseError> + Send + Sync>,
+    pub(super) first_connection: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for LicensingState {
@@ -59,12 +61,52 @@ impl Default for LicensingState {
 
 impl LicensingState {
     fn with_store(store: Arc<dyn CredentialStore>) -> Self {
+        Self::with_clock(store, Arc::new(super::now))
+    }
+
+    pub(super) fn with_clock(
+        store: Arc<dyn CredentialStore>,
+        clock: Arc<dyn Fn() -> Result<u64, LicenseError> + Send + Sync>,
+    ) -> Self {
         Self {
             vault: Mutex::new(None),
             store,
             mutations: tokio::sync::Mutex::new(()),
             journal: std::sync::OnceLock::new(),
+            clock,
+            first_connection: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    pub(super) fn now(&self) -> Result<u64, LicenseError> {
+        (self.clock)()
+    }
+
+    pub(super) fn begin_automatic_check(&self) -> Result<bool, LicenseError> {
+        let now = self.now()?;
+        self.update(now, |vault| vault.record.begin_automatic_check(now))
+    }
+
+    pub(super) fn record_attempt(&self) -> Result<(), LicenseError> {
+        let now = self.now()?;
+        self.update(now, |vault| vault.record.record_attempt(now))
+    }
+
+    pub(super) fn begin_activation(&self, key: &SecretString) -> Result<(), LicenseError> {
+        let path = self.journal.get().ok_or(LicenseError::StorageUnavailable)?;
+        recovery::write(
+            path,
+            &RemoteChange::ActivationPending {
+                key_fingerprint: recovery::key_fingerprint(key.expose_secret()),
+            },
+        )
+    }
+
+    pub(super) fn discard_pending_activation(&self) -> Result<(), LicenseError> {
+        if let Some(path) = self.journal.get() {
+            recovery::remove(path)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn set_journal_path(&self, path: std::path::PathBuf) {
@@ -87,6 +129,9 @@ impl LicensingState {
                     return Err(LicenseError::InvalidInput);
                 }
                 Some(activation)
+            }
+            Some(RemoteChange::ActivationPending { .. }) => {
+                return Err(LicenseError::ActivationUncertain);
             }
             Some(RemoteChange::Cleared) | None => None,
         })

@@ -12,6 +12,9 @@ use sha2::{Digest as _, Sha256};
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub(super) enum RemoteChange {
+    ActivationPending {
+        key_fingerprint: [u8; 32],
+    },
     Activated {
         activation: Activation,
         key_fingerprint: [u8; 32],
@@ -87,7 +90,8 @@ mod tests {
         let directory = tempfile::tempdir().expect("directory");
         let path = directory.path().join("remote-change.json");
         let activation: Activation =
-            serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1"}"#).expect("seat");
+            serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1","purchasedMajor":0}"#)
+                .expect("seat");
         write(
             &path,
             &RemoteChange::Activated {

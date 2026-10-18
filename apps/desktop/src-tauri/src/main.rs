@@ -75,6 +75,7 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     status_menu::install(app)?;
     #[cfg(target_os = "macos")]
     native_termination::observe_background_stop(app.handle())?;
+    licensing::start_automatic_check(app.handle());
     background::restore_driver(app.handle());
     restore_captures(app.handle());
     Ok(())

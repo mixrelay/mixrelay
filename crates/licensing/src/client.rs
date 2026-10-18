@@ -1,7 +1,10 @@
+//! Bounded public License API requests and injectable HTTP transport.
+
 use std::time::Duration;
 
-use reqwest::{Client, StatusCode};
+use reqwest::Client;
 use secrecy::{ExposeSecret as _, SecretString};
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use crate::{Activation, LicenseError, ProductIdentity, response::Response};
 
@@ -11,9 +14,73 @@ const MAX_RESPONSE_BYTES: usize = 65_536;
 /// Bounded async requests to the public License API. Clone to reuse its connection pool.
 #[derive(Clone)]
 pub struct LicenseClient {
-    client: Client,
+    http: Arc<dyn LicenseHttp>,
     product: ProductIdentity,
-    origin: String,
+}
+
+/// A bounded HTTP reply. Provider bodies stay inside the licensing boundary.
+pub struct LicenseHttpResponse {
+    /// HTTP status from the public License API.
+    pub status: u16,
+    /// Bounded JSON body; never log or display this value.
+    pub body: Vec<u8>,
+}
+
+/// HTTP boundary for licensing; implementations must not retry mutations.
+pub trait LicenseHttp: Send + Sync {
+    /// Post a form to one public License API operation.
+    fn post<'a>(
+        &'a self,
+        operation: &'a str,
+        form: Vec<(&'a str, &'a str)>,
+    ) -> Pin<Box<dyn Future<Output = Result<LicenseHttpResponse, LicenseError>> + Send + 'a>>;
+}
+
+impl std::fmt::Debug for LicenseClient {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LicenseClient")
+            .field("product", &self.product)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for LicenseHttpResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LicenseHttpResponse")
+            .field("status", &self.status)
+            .finish_non_exhaustive()
+    }
+}
+
+struct Http {
+    client: Client,
+}
+
+impl LicenseHttp for Http {
+    fn post<'a>(
+        &'a self,
+        operation: &'a str,
+        form: Vec<(&'a str, &'a str)>,
+    ) -> Pin<Box<dyn Future<Output = Result<LicenseHttpResponse, LicenseError>> + Send + 'a>> {
+        Box::pin(async move {
+            let response = self
+                .client
+                .post(format!("{ORIGIN}/{operation}"))
+                .header(reqwest::header::ACCEPT, "application/json")
+                .form(&form)
+                .send()
+                .await
+                .map_err(|_| LicenseError::Unavailable)?;
+            let status = response.status().as_u16();
+            check_status(status)?;
+            Ok(LicenseHttpResponse {
+                status,
+                body: read_response(response).await?,
+            })
+        })
+    }
 }
 
 impl LicenseClient {
@@ -33,11 +100,13 @@ impl LicenseClient {
             .connect_timeout(Duration::from_secs(5))
             .build()
             .map_err(|_| LicenseError::Unavailable)?;
-        Ok(Self {
-            client,
-            product,
-            origin: ORIGIN.into(),
-        })
+        Ok(Self::with_http(product, Arc::new(Http { client })))
+    }
+
+    /// Bind the public product to an injected, bounded HTTP transport.
+    #[must_use]
+    pub fn with_http(product: ProductIdentity, http: Arc<dyn LicenseHttp>) -> Self {
+        Self { http, product }
     }
 
     /// Activate a new seat after checking the key's product without consuming a seat.
@@ -46,6 +115,7 @@ impl LicenseClient {
     /// Returns its provider ID on success. Repeated calls create seats; retain the result
     /// and call `validate` on subsequent checks. Network errors are ambiguous: do not retry
     /// automatically, since the provider may already have committed the activation.
+    /// `before_send` must durably record an activation intent before the mutation is sent.
     ///
     /// # Errors
     /// Distinguishes invalid input, wrong product, rejection, rate limit and transport.
@@ -53,20 +123,25 @@ impl LicenseClient {
         &self,
         key: &SecretString,
         name: &str,
+        before_send: impl FnOnce() -> Result<(), LicenseError>,
     ) -> Result<Activation, LicenseError> {
         check_argument(name)?;
         let checked = self.request("validate", key, None).await?;
         check_decision(checked.valid)?;
         checked.check_product(self.product)?;
         let expected_id = checked.license_id(&["active", "inactive"])?;
+        before_send()?;
         let activated = self
             .request("activate", key, Some(("instance_name", name)))
-            .await?;
-        check_decision(activated.activated)?;
-        activated.check_product(self.product)?;
-        let activation = activated.activation()?;
+            .await
+            .map_err(uncertain_activation)?;
+        check_decision(activated.activated).map_err(uncertain_activation)?;
+        activated
+            .check_product(self.product)
+            .map_err(uncertain_activation)?;
+        let activation = activated.activation().map_err(uncertain_activation)?;
         if activation.license_id != expected_id {
-            return Err(LicenseError::InvalidResponse);
+            return Err(LicenseError::ActivationUncertain);
         }
         Ok(activation)
     }
@@ -88,8 +163,7 @@ impl LicenseClient {
         let response = self
             .request("validate", key, Some(("instance_id", instance)))
             .await?;
-        check_decision(response.valid)?;
-        response.check_product(self.product)?;
+        response.check_validation(self.product)?;
         let activation = response.activation()?;
         if activation.instance_id != instance {
             return Err(LicenseError::InvalidResponse);
@@ -105,13 +179,28 @@ impl LicenseClient {
     /// # Errors
     /// Propagates validation errors or a rejected, malformed or unavailable release result.
     pub async fn deactivate(&self, key: &SecretString, instance: &str) -> Result<(), LicenseError> {
-        let checked = self.validate(key, instance).await?;
+        let checked = match self.validate(key, instance).await {
+            Ok(checked) => checked,
+            Err(LicenseError::Revoked | LicenseError::ActivationDeactivated) => return Ok(()),
+            Err(error) => return Err(error),
+        };
         let response = self
             .request("deactivate", key, Some(("instance_id", instance)))
             .await?;
-        check_decision(response.deactivated)?;
+        if let Err(error) = response.check_validation_failure(response.deactivated, self.product) {
+            return if matches!(
+                error,
+                LicenseError::Revoked | LicenseError::ActivationDeactivated
+            ) {
+                Ok(())
+            } else {
+                Err(error)
+            };
+        }
         response.check_product(self.product)?;
-        if response.license_id(&["active", "inactive"])? != checked.license_id {
+        if response.license_id(&["active", "inactive", "disabled", "expired"])?
+            != checked.license_id
+        {
             return Err(LicenseError::InvalidResponse);
         }
         Ok(())
@@ -126,17 +215,24 @@ impl LicenseClient {
         check_argument(key.expose_secret())?;
         let mut form = vec![("license_key", key.expose_secret())];
         form.extend(extra);
-        let response = self
-            .client
-            .post(format!("{}/{operation}", self.origin))
-            .header(reqwest::header::ACCEPT, "application/json")
-            .form(&form)
-            .send()
-            .await
-            .map_err(|_| LicenseError::Unavailable)?;
-        check_status(response.status())?;
-        let bytes = read_response(response).await?;
-        serde_json::from_slice(&bytes).map_err(|_| LicenseError::InvalidResponse)
+        let response = self.http.post(operation, form).await?;
+        check_status(response.status)?;
+        if response.body.len() > MAX_RESPONSE_BYTES {
+            return Err(LicenseError::InvalidResponse);
+        }
+        let decoded: Response = serde_json::from_slice(&response.body).map_err(|_| {
+            if (200..300).contains(&response.status) {
+                LicenseError::InvalidResponse
+            } else {
+                LicenseError::RequestFailed
+            }
+        })?;
+        if !(200..300).contains(&response.status)
+            && [decoded.valid, decoded.activated, decoded.deactivated].contains(&Some(true))
+        {
+            return Err(LicenseError::InvalidResponse);
+        }
+        Ok(decoded)
     }
 }
 
@@ -147,12 +243,19 @@ pub(super) fn check_argument(value: &str) -> Result<(), LicenseError> {
     Ok(())
 }
 
-fn check_status(status: StatusCode) -> Result<(), LicenseError> {
-    match status.as_u16() {
-        200..=299 => Ok(()),
+fn check_status(status: u16) -> Result<(), LicenseError> {
+    match status {
+        200..=299 | 400 | 404 => Ok(()),
         429 => Err(LicenseError::RateLimited),
         400..=499 => Err(LicenseError::RequestFailed),
         _ => Err(LicenseError::Unavailable),
+    }
+}
+
+fn uncertain_activation(error: LicenseError) -> LicenseError {
+    match error {
+        LicenseError::Rejected | LicenseError::RateLimited => error,
+        _ => LicenseError::ActivationUncertain,
     }
 }
 

@@ -133,6 +133,11 @@ export const en = {
       invalid_state: 'The license state changed. Check it again.',
       clock_invalid: 'Check the device clock, then try again.',
       request_failed: 'The license request failed. Check your connection and try again.',
+      revoked: 'This license is no longer active. Free features remain available.',
+      activation_deactivated:
+        "This device's activation was removed. Activate again to use paid features.",
+      activation_uncertain:
+        'The activation could not be confirmed. Contact support@mixrelay.com; a new activation stays blocked until support resolves it.',
       unknown: 'Could not check the license. Try again.',
     },
   },

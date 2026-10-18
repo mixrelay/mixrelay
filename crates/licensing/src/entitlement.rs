@@ -1,3 +1,5 @@
+//! Offline lease and persisted automatic validation admission.
+
 use serde::{Deserialize, Serialize};
 
 use crate::{Activation, LicenseError};
@@ -39,20 +41,21 @@ pub struct AccessSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", try_from = "StoredEntitlement")]
 pub struct EntitlementRecord {
-    // Retained wire name for existing credentials; no trial expiry is applied.
-    trial_started_at_unix: u64,
+    initialized_at_unix: u64,
     latest_observed_at_unix: u64,
     paid_verified_at_unix: Option<u64>,
     activation: Option<Activation>,
+    last_attempt_at_unix: Option<u64>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StoredEntitlement {
-    trial_started_at_unix: u64,
+    initialized_at_unix: u64,
     latest_observed_at_unix: u64,
     paid_verified_at_unix: Option<u64>,
     activation: Option<Activation>,
+    last_attempt_at_unix: Option<u64>,
 }
 
 impl TryFrom<StoredEntitlement> for EntitlementRecord {
@@ -60,10 +63,11 @@ impl TryFrom<StoredEntitlement> for EntitlementRecord {
 
     fn try_from(stored: StoredEntitlement) -> Result<Self, Self::Error> {
         let record = Self {
-            trial_started_at_unix: stored.trial_started_at_unix,
+            initialized_at_unix: stored.initialized_at_unix,
             latest_observed_at_unix: stored.latest_observed_at_unix,
             paid_verified_at_unix: stored.paid_verified_at_unix,
             activation: stored.activation,
+            last_attempt_at_unix: stored.last_attempt_at_unix,
         };
         record.validate()?;
         Ok(record)
@@ -78,10 +82,11 @@ impl EntitlementRecord {
     #[must_use]
     pub fn new(now: u64) -> Self {
         Self {
-            trial_started_at_unix: now,
+            initialized_at_unix: now,
             latest_observed_at_unix: now,
             paid_verified_at_unix: None,
             activation: None,
+            last_attempt_at_unix: None,
         }
     }
 
@@ -147,6 +152,38 @@ impl EntitlementRecord {
         Ok(self.snapshot_at(now))
     }
 
+    /// Reserve an automatic attempt before sending HTTP, including failures and restarts.
+    ///
+    /// # Errors
+    /// Returns `ClockInvalid` for a clock rollback or invalid record.
+    pub fn begin_automatic_check(&mut self, now: u64) -> Result<bool, LicenseError> {
+        if self.access_at(now).status == AccessStatus::ClockInvalid {
+            return Err(LicenseError::ClockInvalid);
+        }
+        if self.activation.is_none()
+            || self
+                .last_attempt_at_unix
+                .is_some_and(|last| now.saturating_sub(last) < SECONDS_PER_DAY)
+        {
+            return Ok(false);
+        }
+        self.record_attempt(now)?;
+        Ok(true)
+    }
+
+    /// Record an explicit request without imposing the automatic cooldown on it.
+    ///
+    /// # Errors
+    /// Returns `ClockInvalid` for an invalid or rolled-back clock.
+    pub fn record_attempt(&mut self, now: u64) -> Result<(), LicenseError> {
+        if self.access_at(now).status == AccessStatus::ClockInvalid {
+            return Err(LicenseError::ClockInvalid);
+        }
+        self.latest_observed_at_unix = now;
+        self.last_attempt_at_unix = Some(now);
+        Ok(())
+    }
+
     /// Clear the paid seat and lease after confirmed deactivation or rejection.
     ///
     /// This preserves the original initial timestamp and latest observed clock.
@@ -163,16 +200,19 @@ impl EntitlementRecord {
     }
 
     fn validate(&self) -> Result<(), LicenseError> {
-        if !valid_time(self.trial_started_at_unix)
+        if !valid_time(self.initialized_at_unix)
             || !valid_time(self.latest_observed_at_unix)
-            || self.trial_started_at_unix > self.latest_observed_at_unix
+            || self.initialized_at_unix > self.latest_observed_at_unix
+            || self.last_attempt_at_unix.is_some_and(|last| {
+                last < self.initialized_at_unix || last > self.latest_observed_at_unix
+            })
         {
             return Err(LicenseError::InvalidState);
         }
         match (self.paid_verified_at_unix, self.activation.as_ref()) {
             (None, None) => Ok(()),
             (Some(verified), Some(activation))
-                if verified >= self.trial_started_at_unix
+                if verified >= self.initialized_at_unix
                     && verified <= self.latest_observed_at_unix
                     && verified
                         .checked_add(PAID_LEASE_SECONDS)
@@ -189,7 +229,13 @@ impl EntitlementRecord {
         let paid_end = self
             .paid_verified_at_unix
             .map(|verified| verified + PAID_LEASE_SECONDS);
-        if let Some(expiry) = paid_end.filter(|&expiry| now < expiry) {
+        if let Some(expiry) = paid_end.filter(|&expiry| {
+            now < expiry
+                && self.activation.as_ref().is_some_and(|activation| {
+                    Some(activation.purchased_major())
+                        == env!("CARGO_PKG_VERSION_MAJOR").parse().ok()
+                })
+        }) {
             AccessSnapshot {
                 status: AccessStatus::Licensed,
                 expires_at_unix: Some(expiry),
@@ -224,7 +270,7 @@ mod tests {
     const START: u64 = 1_700_000_000;
 
     fn activation() -> Activation {
-        serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1"}"#)
+        serde_json::from_str(r#"{"licenseId":7,"instanceId":"seat-1","purchasedMajor":0}"#)
             .expect("valid seat fixture")
     }
 
@@ -378,11 +424,31 @@ mod tests {
     }
 
     #[test]
+    fn another_purchased_major_cannot_grant_current_paid_access() {
+        let mut record = EntitlementRecord::new(START);
+        let mut seat = activation();
+        seat.purchased_major = 1;
+        record
+            .record_verified(seat, START)
+            .expect("stored purchase");
+        let encoded = serde_json::to_string(&record).expect("serialize");
+        let restored: EntitlementRecord = serde_json::from_str(&encoded).expect("restore");
+        assert_eq!(
+            restored
+                .activation()
+                .expect("retained purchase")
+                .purchased_major(),
+            1
+        );
+        assert_eq!(restored.access_at(START).status, AccessStatus::Free);
+    }
+
+    #[test]
     fn invalid_persisted_fields_are_rejected() {
         let valid = serde_json::to_value(EntitlementRecord::new(START)).expect("serialize");
         let mut examples = Vec::new();
         let mut future_start = valid.clone();
-        future_start["trialStartedAtUnix"] = (START + 1).into();
+        future_start["initializedAtUnix"] = (START + 1).into();
         examples.push(future_start);
         let mut activation_without_time = valid.clone();
         activation_without_time["activation"] = serde_json::to_value(activation()).expect("seat");
@@ -396,7 +462,8 @@ mod tests {
         examples.push(paid_in_future);
         let mut invalid_seat = valid.clone();
         invalid_seat["paidVerifiedAtUnix"] = START.into();
-        invalid_seat["activation"] = serde_json::json!({"licenseId": 0, "instanceId": "seat-1"});
+        invalid_seat["activation"] =
+            serde_json::json!({"licenseId": 0, "instanceId": "seat-1", "purchasedMajor":0});
         examples.push(invalid_seat);
         let mut out_of_range = valid;
         out_of_range["latestObservedAtUnix"] = u64::MAX.into();
@@ -416,7 +483,8 @@ mod tests {
             Err(LicenseError::ClockInvalid)
         );
         let invalid_seat: Activation =
-            serde_json::from_str(r#"{"licenseId":0,"instanceId":"seat-1"}"#).expect("shape valid");
+            serde_json::from_str(r#"{"licenseId":0,"instanceId":"seat-1","purchasedMajor":0}"#)
+                .expect("shape valid");
         assert_eq!(
             record.record_verified(invalid_seat, START),
             Err(LicenseError::InvalidResponse)

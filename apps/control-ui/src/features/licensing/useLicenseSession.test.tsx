@@ -48,6 +48,17 @@ describe('useLicenseSession without a native port', () => {
     expect(result.current.error).toBe('rejected');
   });
 
+  it('keeps the licence codes the desktop reports for revoked, removed and uncertain activations', async () => {
+    const { result } = renderHook(() => useLicenseSession(null));
+    for (const code of ['revoked', 'activation_deactivated', 'activation_uncertain'] as const) {
+      await act(async () => {
+        expect(await result.current.run(() => Promise.reject<void>(code))).toBe(false);
+      });
+      // An uncertain activation must reach its support instruction, not the generic retry text.
+      expect(result.current.error).toBe(code);
+    }
+  });
+
   it('does not accept a late response after a port is removed', async () => {
     const pending = deferred<LicensingStatus>();
     const initialPort = port(vi.fn().mockReturnValue(pending.promise));

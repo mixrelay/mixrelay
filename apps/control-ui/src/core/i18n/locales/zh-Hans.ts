@@ -129,6 +129,10 @@ export const zhHans = {
       invalid_state: '许可证状态已更改。请再次检查。',
       clock_invalid: '请检查设备时钟后重试。',
       request_failed: '许可证请求失败。请检查连接后重试。',
+      revoked: '此许可证已不再有效。免费功能仍可使用。',
+      activation_deactivated: '此设备的激活已被移除。要使用付费功能，请重新激活。',
+      activation_uncertain:
+        '无法确认激活结果。请联系 support@mixrelay.com；在支持团队处理之前，无法进行新的激活。',
       unknown: '无法检查许可证。请重试。',
     },
   },

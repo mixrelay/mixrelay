@@ -101,6 +101,10 @@ const overrides = {
       invalid_state: '[!! Lïcénsé ståté chåñgéd. Chéck ågåïñ. !!]',
       clock_invalid: '[!! Chéck thé dévïcé clöck, théñ trÿ ågåïñ. !!]',
       request_failed: '[!! Lïcénsé réqüést fåïléd. Chéck cöññéctïöñ. !!]',
+      revoked: '[!! Thïs lïçéñsé ïs ñö löñgér åçtïvé. Fréé féåtürés rémåïñ !!]',
+      activation_deactivated: "[!! Thïs dévïçé's åçtïvåtïöñ wås rémövéd. Åçtïvåté ågåïñ !!]",
+      activation_uncertain:
+        '[!! Åçtïvåtïöñ çöüld ñöt bé çöñfïrméd. Çöñtåçt süppört@mïxréläy.çöm !!]',
       unknown: '[!! Cöüld ñöt chéck lïcénsé. !!]',
     },
   },

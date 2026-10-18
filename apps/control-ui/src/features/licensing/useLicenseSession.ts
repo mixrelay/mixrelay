@@ -14,6 +14,9 @@ const errorCodes = [
   'invalid_state',
   'clock_invalid',
   'request_failed',
+  'revoked',
+  'activation_deactivated',
+  'activation_uncertain',
 ] as const;
 
 export type LicenseErrorCode = (typeof errorCodes)[number] | 'unknown';
@@ -35,7 +38,13 @@ function retryDelay(failures: number): number {
 }
 
 function needsLocalReconciliation(code: LicenseErrorCode): boolean {
-  return code === 'rejected' || code === 'wrong_product' || code === 'storage_unavailable';
+  return (
+    code === 'rejected' ||
+    code === 'wrong_product' ||
+    code === 'storage_unavailable' ||
+    code === 'revoked' ||
+    code === 'activation_deactivated'
+  );
 }
 
 interface SessionRefs {

@@ -1,4 +1,4 @@
-//! User-requested licensing, outside audio callbacks and graph mutation.
+//! Driver-owned licensing, outside audio callbacks and graph mutation.
 use mixrelay_licensing::{AccessSnapshot, AccessStatus, LicenseError, SecretString};
 use secrecy::ExposeSecret as _;
 use serde::Serialize;
@@ -7,9 +7,12 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::Manager as _;
+mod automatic;
 mod configuration;
+mod operations;
 mod recovery;
 mod store;
+pub(crate) use automatic::{first_connection, start as start_automatic_check};
 pub(crate) use store::LicensingState;
 
 #[derive(Serialize)]
@@ -34,14 +37,13 @@ pub(crate) fn allows_audio(snapshot: &AccessSnapshot) -> bool {
     )
 }
 async fn snapshot(state: Arc<LicensingState>) -> Result<AccessSnapshot, LicenseError> {
-    tauri::async_runtime::spawn_blocking(move || state.snapshot(now()?))
+    tauri::async_runtime::spawn_blocking(move || state.snapshot(state.now()?))
         .await
         .map_err(|_| LicenseError::StorageUnavailable)?
 }
 
 /// Observe paid access for app-owned inventory changes without starting graph audio.
 pub(crate) async fn has_paid_access(state: Arc<LicensingState>) -> Result<bool, LicenseError> {
-    let _gate = state.mutations.lock().await;
     snapshot(Arc::clone(&state))
         .await
         .map(|snapshot| snapshot.status == AccessStatus::Licensed)
@@ -103,7 +105,6 @@ pub(crate) async fn licensing_status(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<LicensingState>>,
 ) -> Result<LicensingStatus, LicenseError> {
-    let _gate = state.mutations.lock().await;
     let result = current(&app, Arc::clone(state.inner())).await?;
     if allows_audio(&result.access) {
         resume_audio(&app).await;
@@ -137,35 +138,36 @@ pub(crate) async fn licensing_activate(
     let _gate = state.mutations.lock().await;
     prepare_request(&app, Arc::clone(state.inner())).await?;
     state.preflight_remote_change()?;
+    state.record_attempt()?;
     let client = configuration::client()?;
     let key = SecretString::from(key);
     let activation = match state.saved_activation()? {
         Some((saved, seat)) if saved.expose_secret() == key.expose_secret() => {
-            match client.validate(&key, seat.instance_id()).await {
+            match operations::validate_existing(&client, &key, &seat).await {
                 Ok(activation) => activation,
-                Err(error @ (LicenseError::Rejected | LicenseError::WrongProduct)) => {
+                Err(error @ (LicenseError::Revoked | LicenseError::ActivationDeactivated)) => {
                     clear_paid(&app, Arc::clone(state.inner())).await?;
-                    return Err(error);
+                    return Err(operations::public_error(error));
                 }
                 Err(error) => return Err(error),
             }
         }
         Some(_) => return Err(LicenseError::InvalidInput),
         None => match state.recoverable_activation(&key)? {
-            Some(seat) => match client.validate(&key, seat.instance_id()).await {
+            Some(seat) => match operations::validate_existing(&client, &key, &seat).await {
                 Ok(activation) => activation,
-                Err(error @ (LicenseError::Rejected | LicenseError::WrongProduct)) => {
+                Err(error @ (LicenseError::Revoked | LicenseError::ActivationDeactivated)) => {
                     clear_paid(&app, Arc::clone(state.inner())).await?;
-                    return Err(error);
+                    return Err(operations::public_error(error));
                 }
                 Err(error) => return Err(error),
             },
-            None => client.activate(&key, &instance_name).await?,
+            None => operations::activate_new(&state, &client, &key, &instance_name).await?,
         },
     };
     let store = Arc::clone(state.inner());
     let access =
-        tauri::async_runtime::spawn_blocking(move || store.verified(key, activation, now()?))
+        tauri::async_runtime::spawn_blocking(move || store.verified(key, activation, store.now()?))
             .await
             .map_err(|_| LicenseError::StorageUnavailable)??;
     let result = status(&app, access)?;
@@ -182,23 +184,23 @@ pub(crate) async fn licensing_validate(
     let _gate = state.mutations.lock().await;
     prepare_request(&app, Arc::clone(state.inner())).await?;
     state.preflight_remote_change()?;
+    state.record_attempt()?;
     let (key, seat) = state
         .saved_activation()?
         .ok_or(LicenseError::InvalidInput)?;
-    let result = configuration::client()?
-        .validate(&key, seat.instance_id())
-        .await;
+    let client = configuration::client()?;
+    let result = operations::validate_existing(&client, &key, &seat).await;
     let activation = match result {
         Ok(activation) => activation,
-        Err(error @ (LicenseError::Rejected | LicenseError::WrongProduct)) => {
+        Err(error @ (LicenseError::Revoked | LicenseError::ActivationDeactivated)) => {
             clear_paid(&app, Arc::clone(state.inner())).await?;
-            return Err(error);
+            return Err(operations::public_error(error));
         }
         Err(error) => return Err(error),
     };
     let store = Arc::clone(state.inner());
     let access =
-        tauri::async_runtime::spawn_blocking(move || store.verified(key, activation, now()?))
+        tauri::async_runtime::spawn_blocking(move || store.verified(key, activation, store.now()?))
             .await
             .map_err(|_| LicenseError::StorageUnavailable)??;
     let result = status(&app, access)?;
@@ -209,13 +211,13 @@ async fn clear_paid(
     app: &tauri::AppHandle,
     state: Arc<LicensingState>,
 ) -> Result<LicensingStatus, LicenseError> {
-    let access = tauri::async_runtime::spawn_blocking(move || state.clear_paid(now()?))
+    let access = tauri::async_runtime::spawn_blocking(move || state.clear_paid(state.now()?))
         .await
         .map_err(|_| LicenseError::StorageUnavailable)??;
     status(app, access)
 }
 
-/// Remove only the paid credential after confirmed seat release; retain trial history.
+/// Remove only this activation and its local paid credential.
 #[tauri::command]
 pub(crate) async fn licensing_deactivate(
     app: tauri::AppHandle,
@@ -224,11 +226,10 @@ pub(crate) async fn licensing_deactivate(
     let _gate = state.mutations.lock().await;
     prepare_request(&app, Arc::clone(state.inner())).await?;
     state.preflight_remote_change()?;
-    let (key, seat) = state
-        .saved_activation()?
-        .ok_or(LicenseError::InvalidInput)?;
-    configuration::client()?
-        .deactivate(&key, seat.instance_id())
-        .await?;
-    clear_paid(&app, Arc::clone(state.inner())).await
+    state.record_attempt()?;
+    let access = operations::deactivate_saved(&state, &configuration::client()?).await?;
+    status(&app, access)
 }
+
+#[cfg(test)]
+mod lifecycle_tests;

@@ -134,6 +134,11 @@ export const it = {
       invalid_state: 'Lo stato della licenza è cambiato. Verificalo di nuovo.',
       clock_invalid: 'Verifica l’orologio del dispositivo e riprova.',
       request_failed: 'Richiesta di licenza non riuscita. Verifica la connessione e riprova.',
+      revoked: 'Questa licenza non è più attiva. Le funzioni gratuite restano disponibili.',
+      activation_deactivated:
+        "L'attivazione di questo dispositivo è stata rimossa. Attivalo di nuovo per usare le funzioni a pagamento.",
+      activation_uncertain:
+        "Impossibile confermare l'attivazione. Contatta support@mixrelay.com; una nuova attivazione resta bloccata finché il supporto non risolve il problema.",
       unknown: 'Impossibile verificare la licenza. Riprova.',
     },
   },

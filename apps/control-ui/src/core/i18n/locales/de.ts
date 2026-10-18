@@ -142,6 +142,11 @@ export const de = {
       clock_invalid: 'Prüfen Sie die Geräteuhr und versuchen Sie es erneut.',
       request_failed:
         'Die Lizenzanfrage ist fehlgeschlagen. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.',
+      revoked: 'Diese Lizenz ist nicht mehr aktiv. Kostenlose Funktionen bleiben verfügbar.',
+      activation_deactivated:
+        'Die Aktivierung dieses Geräts wurde entfernt. Aktivieren Sie erneut, um kostenpflichtige Funktionen zu nutzen.',
+      activation_uncertain:
+        'Die Aktivierung konnte nicht bestätigt werden. Wenden Sie sich an support@mixrelay.com; eine neue Aktivierung bleibt gesperrt, bis der Support den Fall klärt.',
       unknown: 'Die Lizenz konnte nicht geprüft werden. Versuchen Sie es erneut.',
     },
   },

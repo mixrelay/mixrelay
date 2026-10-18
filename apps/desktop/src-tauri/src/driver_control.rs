@@ -11,22 +11,9 @@ pub(crate) fn session_client() -> Result<DriverClient, DriverError> {
     Ok(DriverClient::session()?.claiming_paid_access(claimed_paid_access()))
 }
 
-/// Driver requests are frequent and the license rarely changes: reuse a keychain read
-/// for two seconds, so an activation still shows almost at once.
+/// Each new request observes the current lease, including expiry and remote revocation.
 fn claimed_paid_access() -> bool {
-    static CACHE: std::sync::Mutex<Option<(std::time::Instant, bool)>> =
-        std::sync::Mutex::new(None);
-    let mut cache = CACHE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    match *cache {
-        Some((read, paid)) if read.elapsed() < std::time::Duration::from_secs(2) => paid,
-        _ => {
-            let paid = mixrelay_licensing::has_local_paid_access();
-            *cache = Some((std::time::Instant::now(), paid));
-            paid
-        }
-    }
+    mixrelay_licensing::has_local_paid_access()
 }
 
 /// Read the installed Driver owner; free device settings do not require a license.
