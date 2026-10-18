@@ -7,11 +7,12 @@ import { desktopCodeCheckEnvironment } from "../build-desktop.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
-const FOCUSED_CARGO_COMMANDS = new Set(["test", "check", "clippy", "build", "doc", "llvm-cov"]);
+const FOCUSED_CARGO_COMMANDS = new Set(["test", "check", "clippy", "build", "doc", "llvm-cov", "fmt"]);
 const DISALLOWED_CARGO_ACTIONS = new Set(["run", "install", "bundle", "bundling"]);
 // Script tests exercise packaging tools with mocked commands; the code-check environment
 // disables packaging, so they run with the caller's environment instead.
-const CALLER_ENVIRONMENT_STEPS = new Set(["pnpm test:scripts"]);
+const LAUNCHD_FIXTURES = ["node", "--test", "scripts/ci/macos-removal-launchd.test.mjs"];
+const CALLER_ENVIRONMENT_STEPS = new Set(["pnpm test:scripts", LAUNCHD_FIXTURES.join(" ")]);
 const FIXTURE_LIBRARIES = [
   { name: "mixrelay_macos_transport", source: "native/macos/common/lib.rs",
     manifest: "native/macos/common/Cargo.toml", variable: "MIXRELAY_NATIVE_TRANSPORT_STATICLIB" },
@@ -20,6 +21,7 @@ const FIXTURE_LIBRARIES = [
 ];
 
 function needsNativeFixtures(args) {
+  if (args[0] === "fmt") return false;
   const options = args.slice(0, args.indexOf("--") < 0 ? args.length : args.indexOf("--"));
   const packages = [];
   for (let index = 0; index < options.length; index += 1) {
@@ -104,6 +106,8 @@ export function buildPlan(os, mode) {
       // Build, signing and release tooling is tested with mocked Apple tools. Some of these
       // tests run the zsh universal-build scripts, so they run on macOS only.
       commands.push(["pnpm", "test:scripts"]);
+      // Real XPC lifetime fixtures register temporary user launchd jobs; CI only.
+      commands.push(LAUNCHD_FIXTURES);
     }
     commands.push(["bash", "scripts/check-pcm-native.sh"]);
   }
@@ -154,12 +158,15 @@ export function runChecks(os, mode, run, env = process.env) {
 
 function focusedCargoArguments(args) {
   if (args[0] !== "cargo" || !args[1]) {
-    throw new Error("Expected: cargo <test|check|clippy|build|doc|llvm-cov ...>");
+    throw new Error("Expected: cargo <test|check|clippy|build|doc|llvm-cov|fmt ...>");
   }
   const cargoArgs = args.slice(1);
   const command = cargoArgs[0];
   if (DISALLOWED_CARGO_ACTIONS.has(command) || !FOCUSED_CARGO_COMMANDS.has(command)) {
     throw new Error(`Unsupported focused Cargo command: ${command}`);
+  }
+  if (command === "fmt" && (!cargoArgs.includes("--check") || cargoArgs.includes("--"))) {
+    throw new Error("Focused cargo fmt requires --check without forwarded rustfmt arguments");
   }
   if (command === "llvm-cov" && DISALLOWED_CARGO_ACTIONS.has(cargoArgs[1])) {
     throw new Error(`Unsupported focused cargo llvm-cov action: ${cargoArgs[1]}`);

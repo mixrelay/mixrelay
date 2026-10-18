@@ -79,6 +79,8 @@ for (const os of ["linux", "darwin"]) {
     assert.equal(plan.some(c => c.join(" ") === "pnpm probe:macos-roundtrip --self-test"), os === "darwin");
     assert.equal(plan.some(c => c.join(" ") === "pnpm test:scripts"), os === "darwin",
       "build and release script tests need the macOS zsh build scripts");
+    assert.equal(plan.some(c => c.join(" ") === "node --test scripts/ci/macos-removal-launchd.test.mjs"), os === "darwin",
+      "launchd XPC fixtures run only in the macOS CI plan");
     assert.equal(plan.some(c => c.includes("scripts/check-pcm-native.sh")), true);
   });
 }
@@ -268,6 +270,7 @@ test("macOS fixture checks capture exact HOST Cargo artifacts and preserve the r
 test("macOS non-fixture package checks and Linux workspace checks have no fixture prebuild", () => {
   for (const [os, args] of [
     ["linux", ["cargo", "test", "--workspace"]],
+    ["darwin", ["cargo", "fmt", "--all", "--check"]],
     ["darwin", ["cargo", "test", "-p", "processor-host", "--lib"]],
     ["darwin", ["cargo", "build", "-p", "mixrelay-engine-service"]],
   ]) {
@@ -315,4 +318,18 @@ test("failed HOST Cargo preparation prevents the requested fixture check", () =>
   }), 1);
   assert.equal(calls, 2);
   assert.match(errors[0], /preparation failed \(9\)/);
+});
+
+test("focused formatting checks stay read-only and skip native fixture builds on both platforms", () => {
+  for (const os of ["darwin", "linux"]) {
+    const calls = [];
+    const options = { os, env: {}, log: () => {}, reportError: () => {},
+      run: (command, args) => { calls.push([command, ...args]); return { status: 0 }; } };
+    assert.equal(runFocusedCargoCheck(["cargo", "fmt", "--all", "--check"], options), 0);
+    assert.deepEqual(calls, [["cargo", "fmt", "--all", "--check"]]);
+    for (const args of [["fmt", "--all"], ["fmt", "--check", "--", "--emit=files"]]) {
+      assert.equal(runFocusedCargoCheck(["cargo", ...args], options), 1);
+    }
+    assert.equal(calls.length, 1);
+  }
 });
