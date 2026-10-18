@@ -3,6 +3,27 @@
 제품 동작·범위·남은 작업은 [product.md](../product.md)가 기준이다. MixRelay는 아직 출시하지 않았다.
 이 문서는 현재 소스 검사와 로컬 개발 설치본의 검증 범위만 구분한다.
 
+## 2026-10-18 제품 코드 unwrap·expect 제거와 설치본 재확인
+
+`fdaf814`에서 제품 Rust 코드의 `unwrap()`·`expect()`를 없애고 workspace clippy에
+`unwrap_used`·`expect_used`를 deny로 켰다(테스트는 `clippy.toml`이 허용). macOS에서 workspace
+clippy(`--all-targets`, `--all-features` 포함), fmt, crate 계층, workspace lib/bin 시험, `check:native`,
+`test:scripts`, 제어 UI 검사, 왕복 프로브 자체 시험이 통과했다. Linux 전용 파일 변경은 이 Mac에서
+컴파일하지 않았으므로 Linux CI 확인 전까지 검증된 것으로 보지 않는다.
+
+같은 소스로 서명 빌드한 `MixRelay-Installer-0.1.0.pkg`(Developer ID Installer, trusted timestamp)를
+사용자가 설치했다. 첫 시도는 관리자 인증 단계 전에 "설치 취소"로 끝났고 다시 설치해 성공했다.
+설치된 앱·엔진·Driver·HAL 네 실행 파일의 SHA-256이 패키지 내용과 일치했다.
+원시는 `/private/tmp/mr-installed-20261018/`에 있다.
+
+- 앱→가상 출력(`capture-virtual/`)과 앱→녹음 입력(`capture-recorder/`)의 설치본 캡처 수락이 통과했다.
+  마지막 meter 창의 source·목적지 양쪽 채널이 약 0.05, sample fault·fault block은 0이며
+  원래 빈 그래프로 복원했다.
+- 지연 보고 수락(`latency-loopback-input/`)은 2채널 입력 장치로 Loopback Audio를 입력 장치로만
+  사용했다(내장 마이크는 1채널이라 시험 경로가 거부됐고 그래프는 바뀌지 않았다). 보고값은
+  경로 전 0, 경로 중 916프레임으로 세 번 연속 안정, 경로 제거 후 0이다. 왕복 실측(`--roundtrip`)은
+  마이크 권한이 있는 사용자 터미널이 필요해 이번에 하지 않았다.
+
 ## 2026-10-17 입력 시각 보존과 CoreAudio 안정성
 
 [Loopback 안정성 경계 대조](../research/loopback-engine-comparison.md)의 후속 소스다.
