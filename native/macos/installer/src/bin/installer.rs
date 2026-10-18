@@ -92,6 +92,7 @@ fn run() -> anyhow::Result<()> {
 /// Removal moves every installed target, including the uninstaller's own helper. The
 /// transaction keeps launching this executable (`CoreAudio` probes, user cleanup), so it must
 /// run from the private copy the uninstaller makes, never from inside a target it removes.
+#[cfg(target_os = "macos")]
 fn refuse_removing_own_executable(executable: &std::path::Path) -> anyhow::Result<()> {
     let product = std::path::Path::new(mixrelay_macos_installer::APP_PATH)
         .parent()
@@ -344,6 +345,7 @@ fn print_usage() {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn removal_refuses_to_run_from_inside_a_target_it_removes() {
         for inside in [
