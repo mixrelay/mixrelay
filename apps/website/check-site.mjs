@@ -18,6 +18,7 @@ const legalReferences = new Set([
   'mailto:privacy@dsub.io',
   'https://www.lemonsqueezy.com/buyer-terms',
   'https://www.lemonsqueezy.com/privacy',
+  'https://rawsector.com/privacy',
   'https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1031805939',
   'https://www.law.go.kr/LSW/lsLinkCommonInfo.do?chrClsCd=010202&lsJoLnkSeq=1031805883',
   'https://law.go.kr/lsLinkCommonInfo.do?lsJoLnkSeq=1020398611',

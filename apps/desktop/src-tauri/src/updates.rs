@@ -7,7 +7,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-const STATUS_ORIGIN: &str = "https://appserver.dsub.io/status";
+const STATUS_ORIGIN: &str = "https://appserver.rawsector.com/status";
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
 /// Independently distributed products accepted by the native update commands.

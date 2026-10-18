@@ -49,7 +49,7 @@ describe('localized App license presentation', () => {
     expect(source.match(/^\d+\. /gm)).toHaveLength(10);
     expect(source).toContain('2026-10-10');
     expect(source).toContain('111-42-04359');
-    expect(source).toContain('https://appserver.dsub.io/status');
+    expect(source).toContain('https://appserver.rawsector.com/status');
     expect(source).toContain('https://www.lemonsqueezy.com/privacy');
     expect(source).toContain('support@mixrelay.com');
   });
