@@ -338,7 +338,7 @@ mod tests {
         #[test]
         fn owned_fixture_starts_and_exits_after_lease_closure() {
             let (_directory, executable) = fixture("cat >/dev/null");
-            let mut engine = ControllerEngine::start(&executable).expect("fixture should start");
+            let mut engine = start_fixture(&executable).expect("fixture should start");
             assert_ne!(engine.id(), 0);
             assert!(
                 engine
@@ -355,7 +355,7 @@ mod tests {
         #[test]
         fn malformed_fixture_is_rejected_and_reaped() {
             let (_directory, executable) = fixture_without_ready("printf 'MRREADY?\\n'\nexit 0");
-            let Err(error) = ControllerEngine::start(&executable) else {
+            let Err(error) = start_fixture(&executable) else {
                 panic!("malformed fixture must not start");
             };
             assert_eq!(error.kind(), io::ErrorKind::InvalidData);
@@ -364,7 +364,7 @@ mod tests {
         #[test]
         fn child_exiting_before_ready_is_rejected() {
             let (_directory, executable) = fixture_without_ready("exit 0");
-            let Err(error) = ControllerEngine::start(&executable) else {
+            let Err(error) = start_fixture(&executable) else {
                 panic!("early-exit fixture must not start");
             };
             assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
@@ -373,12 +373,28 @@ mod tests {
         #[test]
         fn drop_closes_lease_without_waiting_for_the_child() {
             let (_directory, executable) = fixture("cat >/dev/null");
-            let engine = ControllerEngine::start(&executable).expect("fixture should start");
+            let engine = start_fixture(&executable).expect("fixture should start");
             let marker = marker_path(&executable);
             let started = Instant::now();
             drop(engine);
             assert!(started.elapsed() < Duration::from_secs(1));
             wait_for_marker(&marker);
+        }
+
+        /// Linux refuses to execute a file another process still holds open for writing
+        /// (`ETXTBSY`). A child forked by a parallel test can inherit this test's write
+        /// handle until it execs, so starting the fixture just written retries that one
+        /// error a bounded number of times.
+        fn start_fixture(executable: &Path) -> io::Result<ControllerEngine> {
+            for _ in 0..100 {
+                match ControllerEngine::start(executable) {
+                    Err(error) if error.kind() == io::ErrorKind::ExecutableFileBusy => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    result => return result,
+                }
+            }
+            ControllerEngine::start(executable)
         }
 
         fn fixture(body: &str) -> (TempDir, PathBuf) {
