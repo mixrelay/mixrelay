@@ -65,13 +65,8 @@ fn inherited_stdout_does_not_hold_discovery_open() {
 #[test]
 fn output_limits_and_capture_file_cleanup_are_explicit() {
     let mut capture = CaptureFile::new().unwrap();
-    let path = capture.path.clone();
-    capture
-        .file
-        .as_mut()
-        .unwrap()
-        .write_all(b"0123456789")
-        .unwrap();
+    let path = capture.path.0.clone();
+    capture.file.write_all(b"0123456789").unwrap();
     assert!(
         capture
             .check_size(9)

@@ -885,7 +885,8 @@ fn prepare_graph_process_state<'a>(
         captures,
         devices,
         status: Arc::clone(status),
-        timeline: super::super::super::clock::GraphTimeline::new(format.sample_rate),
+        timeline: super::super::super::clock::GraphTimeline::new(format.sample_rate)
+            .expect("valid graph timeline"),
         clock_diagnostics: Arc::default(),
     }
 }

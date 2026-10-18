@@ -747,7 +747,7 @@ pub(crate) mod tests {
         use mixrelay_audio_engine::{BlockProcessor, RuntimeControlUpdate};
         let plan = Arc::new(feedback_plan());
         let exchange = ProcessorExchange::new(plan.revision());
-        let mut processor = Box::new(BlockProcessor::new(Arc::clone(&plan)));
+        let mut processor = Box::new(BlockProcessor::new(Arc::clone(&plan)).unwrap());
         exchange.observe_plan(Arc::clone(&plan));
         let mut measurements = Measurements::default();
         let id = plan.sink_bindings()[0]

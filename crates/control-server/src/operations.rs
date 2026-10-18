@@ -92,6 +92,17 @@ enum Snapshot {
     Missing,
 }
 
+/// Why `admit` did not start a new operation.
+#[derive(Debug)]
+enum Rejection<'a> {
+    /// The client ID already names a running operation.
+    Pending(&'a str),
+    /// The client ID already names a completed operation; replay its response.
+    Complete(&'a str, Box<StoredResponse>),
+    /// Admission is closed or the receipt table is full.
+    Full,
+}
+
 enum Ack {
     Completed,
     Pending,
@@ -165,19 +176,21 @@ impl ControlOperations {
             })
     }
 
-    fn admit(&self, requested: Option<&str>) -> Result<Admission, Snapshot> {
+    fn admit<'a>(&self, requested: Option<&'a str>) -> Result<Admission, Rejection<'a>> {
         let mut state = self.lock_state();
         purge_expired(&mut state);
-        if let Some(record) = requested.and_then(|id| state.records.get(id)) {
+        if let Some(id) = requested
+            && let Some(record) = state.records.get(id)
+        {
             return Err(match &record.outcome {
-                Outcome::Pending => Snapshot::Pending,
+                Outcome::Pending => Rejection::Pending(id),
                 Outcome::Complete { response, .. } => {
-                    Snapshot::Complete(Box::new(response.clone()))
+                    Rejection::Complete(id, Box::new(response.clone()))
                 }
             });
         }
         if !state.admission_open || state.records.len() >= MAX_RECEIPTS {
-            return Err(Snapshot::Missing);
+            return Err(Rejection::Full);
         }
         let id = requested.map_or_else(
             || loop {
@@ -343,27 +356,41 @@ fn not_admitted(status: StatusCode, code: ErrorCode) -> Response {
         .into_response()
 }
 
+/// Converts a backend incarnation into the response header once, at router construction.
+/// An empty incarnation means the backend has no identity; an incarnation that cannot be a
+/// header value is reported and treated the same, so clients never receive a fence for it.
+pub(super) fn engine_header(incarnation: String) -> Option<HeaderValue> {
+    if incarnation.is_empty() {
+        return None;
+    }
+    match HeaderValue::try_from(incarnation) {
+        Ok(header) => Some(header),
+        Err(error) => {
+            tracing::error!(%error, "engine incarnation is not a valid header value");
+            None
+        }
+    }
+}
+
 /// Fence before ingress/admission and stamp every response, including rejections.
 pub(super) async fn engine_identity(
-    AxumState(incarnation): AxumState<String>,
+    AxumState(engine): AxumState<Option<HeaderValue>>,
     request: Request,
     next: Next,
 ) -> Response {
+    let incarnation = engine.as_ref().map_or(&b""[..], HeaderValue::as_bytes);
     let mismatch = needs_operation(&request)
         && request
             .headers()
             .get("x-mixrelay-expected-engine")
-            .is_some_and(|expected| expected.as_bytes() != incarnation.as_bytes());
+            .is_some_and(|expected| expected.as_bytes() != incarnation);
     let mut response = if mismatch {
         not_admitted(StatusCode::CONFLICT, ErrorCode::EngineReplaced)
     } else {
         next.run(request).await
     };
-    if !incarnation.is_empty() {
-        response.headers_mut().insert(
-            ENGINE_HEADER,
-            HeaderValue::try_from(incarnation).expect("engine incarnation must be a valid header"),
-        );
+    if let Some(engine) = engine {
+        response.headers_mut().insert(ENGINE_HEADER, engine);
     }
     response
 }
@@ -386,9 +413,9 @@ pub(super) async fn dispatch(
     };
     let admission = match operations.admit(requested.as_deref()) {
         Ok(admission) => admission,
-        Err(Snapshot::Pending) => return pending_response(requested.as_deref().unwrap()),
-        Err(Snapshot::Complete(response)) => return response.into_response(requested.as_deref()),
-        Err(Snapshot::Missing) => return admission_full_response(&request),
+        Err(Rejection::Pending(id)) => return pending_response(id),
+        Err(Rejection::Complete(id, response)) => return response.into_response(Some(id)),
+        Err(Rejection::Full) => return admission_full_response(&request),
     };
     let operation_id = admission.id.clone();
     let task_operations = operations.clone();
@@ -938,7 +965,7 @@ mod tests {
             post(|| async { StatusCode::NO_CONTENT }),
         )
         .layer(middleware::from_fn_with_state(
-            "new-engine".to_owned(),
+            Some(HeaderValue::from_static("new-engine")),
             engine_identity,
         ));
         operations.close_admission();

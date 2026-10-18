@@ -168,7 +168,7 @@ fn pcm(composed: &ComposedGraph) -> BTreeMap<NodeId, Vec<f32>> {
         .iter()
         .map(|binding| vec![0.0; usize::from(binding.channels()) * 4])
         .collect::<Vec<_>>();
-    let mut processor = BlockProcessor::new(plan.clone());
+    let mut processor = BlockProcessor::new(plan.clone()).unwrap();
     for _ in 0..2 {
         processor
             .process_block(

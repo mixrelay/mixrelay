@@ -49,7 +49,9 @@ unsafe fn create(
     if !capacity.is_power_of_two() || capacity > 1 << 20 || !(1..=64).contains(&channels) {
         return ptr::null_mut();
     }
-    let channels = usize::try_from(channels).expect("bounded channel count fits macOS usize");
+    let Ok(channels) = usize::try_from(channels) else {
+        return ptr::null_mut();
+    };
     let Some(samples) = samples(capacity * channels) else {
         return ptr::null_mut();
     };
@@ -103,19 +105,18 @@ impl AudioRing {
     fn read_window(&self, maximum: usize) -> (u64, usize) {
         let read = self.read.load(Ordering::Relaxed);
         let written = self.written.load(Ordering::Acquire);
-        let frames = written
-            .wrapping_sub(read)
-            .min(maximum as u64)
-            .min(self.capacity as u64);
-        (
-            read,
-            usize::try_from(frames).expect("bounded ring window fits usize"),
-        )
+        let limit = maximum.min(self.capacity);
+        // An occupancy beyond usize necessarily exceeds the bounded window.
+        let frames = usize::try_from(written.wrapping_sub(read)).map_or(limit, |f| f.min(limit));
+        (read, frames)
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "power-of-two capacity within usize: the mask keeps only low cursor bits"
+    )]
     fn split(&self, cursor: u64, frames: usize) -> (usize, usize) {
-        let start = usize::try_from(cursor & (self.capacity - 1) as u64)
-            .expect("masked cursor fits bounded capacity");
+        let start = cursor as usize & (self.capacity - 1);
         (
             start * self.channels,
             frames.min(self.capacity - start) * self.channels,

@@ -1,3 +1,7 @@
+#![expect(
+    clippy::expect_used,
+    reason = "a build script fails the build by panicking; Cargo prints the message"
+)]
 #[path = "../../crates/audio-io/src/formats.rs"]
 pub mod formats;
 #[path = "../../crates/audio-io/native_format_header.rs"]

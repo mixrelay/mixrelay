@@ -130,7 +130,7 @@ impl LifecycleDirectory {
 
     fn acquire_lock(&self, kind: LeaseKind, exclusive: bool) -> Result<LifecycleLock, LeaseError> {
         let path = self.lease_path(kind);
-        let file = open_lease_file(&self.directory, &path, kind)?;
+        let file = open_lease_file(&self.directory, lease_name(kind), &path, kind)?;
         let result = if exclusive {
             file.try_lock()
         } else {
@@ -144,11 +144,15 @@ impl LifecycleDirectory {
     }
 
     fn lease_path(&self, kind: LeaseKind) -> PathBuf {
-        self.path.join(match kind {
-            LeaseKind::App => APP_LEASE_NAME,
-            LeaseKind::Engine => ENGINE_LEASE_NAME,
-            LeaseKind::Installer => INSTALLER_LEASE_NAME,
-        })
+        self.path.join(lease_name(kind))
+    }
+}
+
+fn lease_name(kind: LeaseKind) -> &'static str {
+    match kind {
+        LeaseKind::App => APP_LEASE_NAME,
+        LeaseKind::Engine => ENGINE_LEASE_NAME,
+        LeaseKind::Installer => INSTALLER_LEASE_NAME,
     }
 }
 
@@ -323,10 +327,13 @@ fn open_directory(path: &Path) -> Result<File, LeaseError> {
     Ok(File::from(current))
 }
 
-fn open_lease_file(directory: &File, path: &Path, kind: LeaseKind) -> Result<File, LeaseError> {
-    let name = path
-        .file_name()
-        .expect("fixed lease name has a final component");
+/// Opens `name` inside `directory`; `path` is that file's full path for errors.
+fn open_lease_file(
+    directory: &File,
+    name: &str,
+    path: &Path,
+    kind: LeaseKind,
+) -> Result<File, LeaseError> {
     let flags = OFlags::RDWR | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
     let opened = match openat(directory, name, flags, Mode::empty()) {
         Err(rustix::io::Errno::NOENT) => match openat(

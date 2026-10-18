@@ -98,7 +98,7 @@ fn busy_streams_take_turns_and_end_after_their_pending_window() {
 #[test]
 fn an_oversized_reply_fails_only_its_own_request() {
     let large = "x".repeat(RESPONSE_LIMIT);
-    let bytes = encode(&json!({"id": 4, "status": 200, "body": {"ok": large}}));
+    let bytes = encode(&json!({"id": 4, "status": 200, "body": {"ok": large}})).unwrap();
     let error: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(
         (error["id"].clone(), error["status"].clone()),

@@ -166,7 +166,16 @@ impl LocalControl {
                 #[cfg(target_os = "macos")]
                 delivery: super::RequestDelivery::Uncertain,
             });
-        let mut value = serde_json::to_value(response).expect("control response is JSON");
+        // A response that cannot become JSON fails only its own request.
+        let mut value = serde_json::to_value(response).unwrap_or_else(|error| {
+            json!({
+                "status": 500,
+                "body": {
+                    "code": "control_request_failed",
+                    "parameters": {"reason": error.to_string()},
+                },
+            })
+        });
         value["id"] = json!(request.id);
         value
     }

@@ -91,10 +91,9 @@ mod platform {
             if display.is_null() {
                 return Err(EditorHostFailure::DisplayUnavailable);
             }
-            let atom_name = CString::new("WM_DELETE_WINDOW").expect("static atom has no NUL");
-            // SAFETY: display is live and atom_name is NUL-terminated for the duration of the call.
+            // SAFETY: display is live and the atom name is a static NUL-terminated literal.
             let wm_delete_window =
-                unsafe { (xlib.XInternAtom)(display, atom_name.as_ptr(), xlib::False) };
+                unsafe { (xlib.XInternAtom)(display, c"WM_DELETE_WINDOW".as_ptr(), xlib::False) };
             Ok(Self {
                 xlib,
                 display,
@@ -147,9 +146,7 @@ mod platform {
                 return Err(EditorHostFailure::HostWindow);
             }
             self.size = (DEFAULT_WIDTH, DEFAULT_HEIGHT);
-            let title = CString::new(title).unwrap_or_else(|_| {
-                CString::new("MixRelay plug-in").expect("static title has no NUL")
-            });
+            let title = CString::new(title).unwrap_or_else(|_| c"MixRelay plug-in".to_owned());
             let mut protocols = [self.wm_delete_window];
             // SAFETY: the new window is owned by this display. Xlib copies title/protocol data.
             unsafe {

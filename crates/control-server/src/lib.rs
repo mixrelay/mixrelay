@@ -508,7 +508,7 @@ fn operation_middleware<S: Clone + Send + Sync + 'static>(
         .layer(DefaultBodyLimit::disable())
         .layer(axum::Extension(operations))
         .layer(axum::middleware::from_fn_with_state(
-            incarnation,
+            operations::engine_header(incarnation),
             operations::engine_identity,
         ))
 }

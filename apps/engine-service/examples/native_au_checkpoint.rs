@@ -1,3 +1,8 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "a lab tool, not shipped: setup failures abort with their message"
+)]
 //! Opt-in macOS Apple AU qualification. No HTTP server, HAL, hardware, or editor window.
 //! Run: `cargo run -p mixrelay-engine-service --example native_au_checkpoint -- --run`
 //! The parent supplies a newly created private configuration directory to one child.
@@ -178,9 +183,12 @@ mod qualification {
                     },
                 )
                 .map_err(|e| format!("{e:?}"))?;
-            let current = Box::new(BlockProcessor::new(Arc::new(
-                RenderPlan::prepare(&plan).map_err(|e| format!("{e:?}"))?,
-            )));
+            let current = Box::new(
+                BlockProcessor::new(Arc::new(
+                    RenderPlan::prepare(&plan).map_err(|e| format!("{e:?}"))?,
+                ))
+                .unwrap(),
+            );
             let exchange = Arc::new(ProcessorExchange::new(1));
             let controller = Arc::new(
                 EngineGraphController::new_with_initial_document(

@@ -181,9 +181,9 @@ impl Source {
         let clock = self.mapping.clock();
         if let Some(old) = previous {
             let old_clock = old.mapping.clock();
-            let rate =
-                u32::try_from(old_clock.format_word.load(Ordering::Acquire) & u64::from(u32::MAX))
-                    .expect("masked rate fits u32");
+            // The low format-word half carries the requested rate.
+            let [r0, r1, r2, r3, ..] = old_clock.format_word.load(Ordering::Acquire).to_le_bytes();
+            let rate = u32::from_le_bytes([r0, r1, r2, r3]);
             if rate != 0 {
                 unsafe {
                     mr_application_clock_request_rate(self.mapping.clock.as_ptr(), rate);

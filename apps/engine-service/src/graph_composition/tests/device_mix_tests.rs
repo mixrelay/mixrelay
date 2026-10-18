@@ -119,7 +119,7 @@ fn asymmetric_native_geometry_sums_all_channels_before_per_reference_gain() {
             vec![0.0; 16]
         })
         .collect();
-    let mut processor = BlockProcessor::new(Arc::clone(&plan));
+    let mut processor = BlockProcessor::new(Arc::clone(&plan)).unwrap();
     for cycle in 0..2 {
         processor
             .process_block(
@@ -176,7 +176,8 @@ fn explicit_driver_feedback_is_finite_and_off_or_mute_stops_only_contributions()
         )
         .unwrap();
         let mut processor =
-            BlockProcessor::new(Arc::new(RenderPlan::prepare(&composed.execution).unwrap()));
+            BlockProcessor::new(Arc::new(RenderPlan::prepare(&composed.execution).unwrap()))
+                .unwrap();
         let mut capture = [1.0; 8];
         let mut contribution = [0.0; 8];
         for expected in [0.0, 1.0, 1.0, 2.0, 2.0] {

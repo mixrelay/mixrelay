@@ -1,3 +1,7 @@
+#![expect(
+    clippy::expect_used,
+    reason = "a build script fails the build by panicking; Cargo prints the message"
+)]
 fn main() {
     println!("cargo:rustc-check-cfg=cfg(mixrelay_application_clock_fixture)");
     println!("cargo:rerun-if-env-changed=MIXRELAY_APPLICATION_CLOCK_FIXTURE");

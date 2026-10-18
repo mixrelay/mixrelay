@@ -71,8 +71,7 @@ impl<'writer> tracing_subscriber::fmt::MakeWriter<'writer> for ServiceLog {
 #[cfg(target_os = "macos")]
 impl std::io::Write for ServiceLogWriter {
     fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
-        let message = std::ffi::CString::new(String::from_utf8_lossy(buffer).replace('\0', "\\0"))
-            .expect("escaped log message has no NUL bytes");
+        let message = std::ffi::CString::new(String::from_utf8_lossy(buffer).replace('\0', "\\0"))?;
         // SAFETY: the fixed format accepts exactly one live terminated string pointer.
         // syslog copies its text during the call; log text never becomes a format string.
         unsafe { libc::syslog(self.0, c"%s".as_ptr(), message.as_ptr()) };

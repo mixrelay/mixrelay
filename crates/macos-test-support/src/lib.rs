@@ -55,7 +55,10 @@ pub fn device_io_timing_layout() -> [usize; 4] {
     let report = String::from_utf8_lossy(&result.stdout);
     let values = report
         .split_whitespace()
-        .map(|value| value.parse().expect("layout value"))
-        .collect::<Vec<usize>>();
-    values.try_into().expect("four layout values")
+        .map(str::parse)
+        .collect::<Result<Vec<usize>, _>>()
+        .unwrap_or_else(|error| panic!("malformed timing layout report {report:?}: {error}"));
+    values
+        .try_into()
+        .unwrap_or_else(|values| panic!("expected four timing layout values, got {values:?}"))
 }

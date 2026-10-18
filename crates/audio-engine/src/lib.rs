@@ -799,7 +799,7 @@ mod tests {
 
     fn processor(revision: u64) -> BlockProcessor {
         let render = RenderPlan::prepare(&plan(revision)).expect("empty plan should lower");
-        BlockProcessor::new(Arc::new(render))
+        BlockProcessor::new(Arc::new(render)).unwrap()
     }
 
     #[test]
@@ -1052,7 +1052,7 @@ mod tests {
         let second = ProcessorExchange::new(1);
         assert_eq!(
             second.submit_configured(
-                Box::new(BlockProcessor::new(shared_plan)),
+                Box::new(BlockProcessor::new(shared_plan).unwrap()),
                 || -> Result<(), ()> {
                     panic!("wrong-owner configuration must never run");
                 }

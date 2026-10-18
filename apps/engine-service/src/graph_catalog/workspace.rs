@@ -264,13 +264,13 @@ impl EngineGraphController {
         let layout_revision = current
             .graphs
             .iter()
-            .chain(&candidate.graphs)
+            .chain(candidate.graphs.iter())
             .map(|graph| graph.layout_revision)
             .max()
             .unwrap_or(0)
             .checked_add(1)
             .ok_or_else(|| invalid("layout revision overflow"))?;
-        for graph in &mut candidate.graphs {
+        for graph in candidate.graphs.iter_mut() {
             graph.document.revision = revision;
             graph.layout_revision = layout_revision;
         }

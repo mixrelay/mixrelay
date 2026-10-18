@@ -151,7 +151,8 @@ impl Drop for ChildOwner {
     }
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(test)]
+#[cfg(target_os = "macos")]
 mod tests {
     use super::*;
     use std::{os::unix::process::ExitStatusExt, process::ExitStatus};

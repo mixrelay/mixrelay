@@ -369,15 +369,16 @@ impl PumpClock {
     }
 
     fn measure_input(&mut self, captured: u64) -> (u32, u32) {
-        let graph_rate =
-            u32::try_from(self.format & u64::from(u32::MAX)).expect("masked graph rate");
+        // The low format-word half carries the graph rate.
+        let [r0, r1, r2, r3, ..] = self.format.to_le_bytes();
+        let graph_rate = u32::from_le_bytes([r0, r1, r2, r3]);
         let native_burst = captured.saturating_sub(self.measured_native_frames);
         self.measured_native_frames = captured;
         self.producer_burst =
             self.producer_burst
                 .max(graph_frames(native_burst, self.native_rate, graph_rate));
-        let converter =
-            u32::try_from(self.bridge.processing_quantum().1).expect("bounded converter batch");
+        // Published measurements saturate like the publication burst.
+        let converter = u32::try_from(self.bridge.processing_quantum().1).unwrap_or(u32::MAX);
         (self.producer_burst, converter)
     }
 

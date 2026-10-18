@@ -74,13 +74,20 @@ impl ParameterSlot {
 }
 
 impl SharedHeader {
-    pub(super) fn new(layout: AudioLayout) -> Self {
-        Self {
+    /// Builds the initial header for `layout`.
+    ///
+    /// # Errors
+    /// Returns an error when a transport dimension does not fit the u32 header fields.
+    pub(super) fn new(layout: AudioLayout) -> Result<Self, String> {
+        let dimension = |count: usize| {
+            u32::try_from(count).map_err(|_| "processor transport dimensions exceed u32".to_owned())
+        };
+        Ok(Self {
             magic: SHARED_MAGIC,
             version: SHARED_VERSION,
-            input_channels: u32::try_from(layout.inputs).expect("creation validated channels"),
-            output_channels: u32::try_from(layout.outputs).expect("creation validated channels"),
-            block_frames: u32::try_from(layout.block_frames).expect("creation validated frames"),
+            input_channels: dimension(layout.inputs)?,
+            output_channels: dimension(layout.outputs)?,
+            block_frames: dimension(layout.block_frames)?,
             intrinsic_latency_frames: AtomicU64::new(0),
             worker_status: AtomicU32::new(WORKER_STARTING),
             shutdown: AtomicU32::new(0),
@@ -116,7 +123,7 @@ impl SharedHeader {
             editor_observed_open: AtomicBool::new(false),
             editor_close_generation: AtomicU64::new(0),
             editor_input: editor_surface::InputRing::new(),
-        }
+        })
     }
 
     pub(crate) const fn prepared_block_frames(&self) -> u32 {

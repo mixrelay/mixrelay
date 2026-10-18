@@ -4,6 +4,8 @@ use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
 
 /// Maximum unread events retained per native owner before overwrite is reported.
 pub const CLOCK_BREAK_CAPACITY: usize = 64;
+// Slot selection truncates positions to usize, which is exact only for a power of two.
+const _: () = assert!(CLOCK_BREAK_CAPACITY.is_power_of_two());
 
 /// Native positions at one detected timeline break; no captured PCM is retained.
 #[repr(C)]
@@ -117,8 +119,7 @@ impl ClockEvidence {
         if available == 0 || available > u64::MAX / 2 {
             return None;
         }
-        let capacity = u64::try_from(CLOCK_BREAK_CAPACITY).expect("fixed capacity fits u64");
-        let missed_before = available.saturating_sub(capacity);
+        let missed_before = available.saturating_sub(CLOCK_BREAK_CAPACITY as u64);
         let position = cursor.wrapping_add(missed_before);
         let event = self.slot(position).read(position)?;
         Some(ClockBreakRecord {
@@ -128,9 +129,12 @@ impl ClockEvidence {
         })
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "power-of-two capacity: truncation keeps the low position bits the modulus uses"
+    )]
     fn slot(&self, position: u64) -> &Slot {
-        let capacity = u64::try_from(CLOCK_BREAK_CAPACITY).expect("fixed capacity fits u64");
-        &self.slots[usize::try_from(position % capacity).expect("slot index fits usize")]
+        &self.slots[position as usize % CLOCK_BREAK_CAPACITY]
     }
 }
 

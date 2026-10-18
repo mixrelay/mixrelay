@@ -563,9 +563,10 @@ fn open_editor(
         publish_editor_failure(header, EDITOR_FAILURE_NO_EDITOR);
         return;
     }
-    if host.is_none() {
-        match native_editor::NativeEditorHost::new(Arc::clone(shared)) {
-            Ok(created) => *host = Some(created),
+    let host = match host {
+        Some(host) => host,
+        None => match native_editor::NativeEditorHost::new(Arc::clone(shared)) {
+            Ok(created) => host.insert(created),
             Err(native_editor::EditorHostFailure::DisplayUnavailable) => {
                 publish_editor_failure(header, EDITOR_FAILURE_DISPLAY_UNAVAILABLE);
                 return;
@@ -574,13 +575,10 @@ fn open_editor(
                 publish_editor_failure(header, EDITOR_FAILURE_HOST_WINDOW);
                 return;
             }
-        }
-    }
+        },
+    };
     let result = if let Ok(mut plugin) = plugin.lock() {
-        let result = host
-            .as_mut()
-            .expect("editor host was initialized")
-            .open(&mut plugin, title);
+        let result = host.open(&mut plugin, title);
         latency::publish_intrinsic_frames(header, plugin.intrinsic_latency_frames());
         result
     } else {
@@ -868,13 +866,12 @@ impl HostedProcessorFactory for ExternalProcessorFactory {
         if let Some(processor) = self.controls.reuse_request(&request) {
             return Ok(processor);
         }
-        let mut processor = HostedExternalProcessor::new(
+        let (mut processor, control) = HostedExternalProcessor::new(
             &entry,
             request.config,
             request.format,
             self.controls.optional_state_store().as_ref(),
         )?;
-        let control = processor.control();
         *control
             .reuse
             .lock()
@@ -1208,20 +1205,21 @@ impl HostedProcessorControl {
         // parameter ID from being paired with another request's value; the worker never locks.
         let _writer = self.shared.lock();
         let header = self.shared.header();
-        let count = header.parameter_count.load(Ordering::Relaxed) as usize;
-        let index = match header.parameters[..count]
+        let count = header.parameter_count.load(Ordering::Relaxed);
+        let used = count as usize;
+        let existing = header.parameters[..used]
             .iter()
-            .position(|slot| slot.id.load(Ordering::Relaxed) == id)
-        {
-            Some(index) => index,
-            None if count < PARAMETER_CAPACITY => {
-                header.parameters[count].id.store(id, Ordering::Relaxed);
-                header
-                    .parameter_count
-                    .store(u32::try_from(count + 1).unwrap(), Ordering::Release);
-                count
-            }
-            None => return Err("processor parameter mailbox capacity exceeded".to_owned()),
+            .position(|slot| slot.id.load(Ordering::Relaxed) == id);
+        let index = if let Some(index) = existing {
+            index
+        } else {
+            let Some(slot) = header.parameters.get(used) else {
+                return Err("processor parameter mailbox capacity exceeded".to_owned());
+            };
+            slot.id.store(id, Ordering::Relaxed);
+            // A free slot exists, so `count` is below the u32-sized mailbox capacity.
+            header.parameter_count.store(count + 1, Ordering::Release);
+            used
         };
         let slot = &header.parameters[index];
         slot.value_bits.store(value.to_bits(), Ordering::Release);
@@ -1347,12 +1345,13 @@ struct HostedExternalProcessor {
 }
 
 impl HostedExternalProcessor {
+    /// Starts the worker and returns the processor with the control handle to register.
     fn new(
         entry: &CatalogEntry,
         config: &ProviderNodeConfig,
         format: RenderFormat,
         state_store: Option<&mixrelay_processor_state::StateStore>,
-    ) -> Result<Self, String> {
+    ) -> Result<(Self, Arc<HostedProcessorControl>), String> {
         let selected = selected_ports(&entry.descriptor, config)?;
         let input_channels = usize::from(
             selected
@@ -1408,10 +1407,8 @@ impl HostedExternalProcessor {
         }
         let worker_monitor = match WorkerMonitor::spawn(child, Arc::clone(&control)) {
             Ok(monitor) => monitor,
-            Err((error, mut child)) => {
+            Err(error) => {
                 drop(child_stdin);
-                let _ = child.kill();
-                let _ = child.wait();
                 drop(control);
                 drop(shared);
                 cleanup_worker_paths(&shared_path, &config_path);
@@ -1419,7 +1416,7 @@ impl HostedExternalProcessor {
             }
         };
         control.own_transport_file(shared_path.clone());
-        Ok(Self {
+        let processor = Self {
             child_stdin,
             worker_monitor: Some(worker_monitor),
             shared: Some(shared),
@@ -1427,18 +1424,11 @@ impl HostedExternalProcessor {
             layout,
             next_sequence: 1,
             dry_delay,
-            control: Some(control),
+            control: Some(Arc::clone(&control)),
             timing: timing::TimingProbe::default(),
             registration: None,
-        })
-    }
-
-    fn control(&self) -> Arc<HostedProcessorControl> {
-        Arc::clone(
-            self.control
-                .as_ref()
-                .expect("hosted processor retains control mapping until drop"),
-        )
+        };
+        Ok((processor, control))
     }
 }
 
@@ -1504,10 +1494,10 @@ impl HostedAudioProcessor for HostedExternalProcessor {
         {
             return false;
         }
-        let shared = self
-            .shared
-            .as_mut()
-            .expect("hosted processor retains audio mapping until drop");
+        // The mapping is released only by `Drop`; without one the block is not processed.
+        let Some(shared) = self.shared.as_mut() else {
+            return false;
+        };
         let received = shared.receive(output, frames, |sequence| {
             if let Some(control) = &self.control {
                 self.timing.received(sequence, &control.timing);
@@ -1554,7 +1544,11 @@ struct WorkerMonitor {
 }
 
 impl WorkerMonitor {
-    fn spawn(child: Child, control: Arc<HostedProcessorControl>) -> Result<Self, (String, Child)> {
+    /// Moves the worker child into a monitor thread.
+    ///
+    /// # Errors
+    /// Returns the thread spawn error after killing and reaping the child.
+    fn spawn(child: Child, control: Arc<HostedProcessorControl>) -> Result<Self, String> {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let child_slot = Arc::new(Mutex::new(Some(child)));
@@ -1562,11 +1556,14 @@ impl WorkerMonitor {
         let thread = thread::Builder::new()
             .name("mixrelay-processor-monitor".to_owned())
             .spawn(move || {
-                let mut child = thread_child
+                // The slot was filled above and only this thread or a failed spawn takes it.
+                let Some(mut child) = thread_child
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .take()
-                    .expect("worker child is transferred exactly once");
+                else {
+                    return;
+                };
                 let mut stop_deadline = None;
                 let mut next_timing_sample = Instant::now();
                 loop {
@@ -1616,12 +1613,16 @@ impl WorkerMonitor {
                 thread: Some(thread),
             }),
             Err(error) => {
-                let child = child_slot
+                // A failed spawn drops the closure unrun, so the child is still in the slot.
+                if let Some(mut child) = child_slot
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .take()
-                    .expect("failed monitor spawn leaves child with caller");
-                Err((error.to_string(), child))
+                {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                Err(error.to_string())
             }
         }
     }
@@ -2434,9 +2435,8 @@ mod tests {
         let control = Arc::new(HostedProcessorControl::new(shared));
         let mut command = Command::new("/usr/bin/false");
         let child = command.spawn().expect("fixture process should spawn");
-        let mut monitor = WorkerMonitor::spawn(child, Arc::clone(&control))
-            .map_err(|(error, _)| error)
-            .expect("monitor should spawn");
+        let mut monitor =
+            WorkerMonitor::spawn(child, Arc::clone(&control)).expect("monitor should spawn");
         let deadline = Instant::now() + Duration::from_secs(2);
         while control
             .shared

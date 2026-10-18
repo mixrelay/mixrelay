@@ -183,7 +183,8 @@ impl Engine {
         let (host, uid, resources) = simulated(48_000);
         let resources = Arc::new(resources);
         let initial = GraphDocument::new(1, vec![], vec![]);
-        let processor = Box::new(BlockProcessor::new(Arc::new(compiled(&initial, 48_000))));
+        let processor =
+            Box::new(BlockProcessor::new(Arc::new(compiled(&initial, 48_000))).unwrap());
         let exchange = Arc::new(ProcessorExchange::new(processor.plan().revision()));
         let controller = EngineGraphController::new_with_initial_document(
             exchange.clone(),

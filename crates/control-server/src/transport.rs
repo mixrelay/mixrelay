@@ -50,10 +50,11 @@ impl<L: Listener> Listener for ControlListener<L> {
     type Addr = L::Addr;
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
-        let permit = Arc::clone(&self.accepted_slots)
-            .acquire_owned()
-            .await
-            .expect("control socket semaphore must remain open for the listener lifetime");
+        let Ok(permit) = Arc::clone(&self.accepted_slots).acquire_owned().await else {
+            // Only `Semaphore::close` makes acquisition fail, and this private semaphore is
+            // never closed, so a failure here is a programming error in this listener.
+            unreachable!("control socket semaphore was closed during the listener lifetime");
+        };
         let (stream, address) = Listener::accept(&mut self.listener).await;
         (
             ControlSocket {

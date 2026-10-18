@@ -1,6 +1,4 @@
 //! One canonical persisted UUID spelling and one derived Core Audio UID for every endpoint.
-use std::fmt::Write;
-
 /// Parses only a nonzero lowercase hyphenated UUID; labels and alternate spellings are rejected.
 /// Returns `None` for malformed identities. No endpoint is synthesized or looked up by name.
 #[must_use]
@@ -37,7 +35,7 @@ pub fn format_endpoint_id(id: [u8; 16]) -> String {
         if matches!(index, 4 | 6 | 8 | 10) {
             value.push('-');
         }
-        write!(value, "{byte:02x}").expect("formatting into an owned String is infallible");
+        push_hex_byte(&mut value, byte);
     }
     value
 }
@@ -48,9 +46,15 @@ pub fn endpoint_uid(id: [u8; 16]) -> String {
     let mut uid = String::with_capacity(59);
     uid.push_str("io.mixrelay.audio.endpoint.");
     for byte in id {
-        write!(uid, "{byte:02x}").expect("formatting into an owned String is infallible");
+        push_hex_byte(&mut uid, byte);
     }
     uid
+}
+
+fn push_hex_byte(out: &mut String, byte: u8) {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    out.push(char::from(DIGITS[usize::from(byte >> 4)]));
+    out.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
 }
 
 #[cfg(test)]

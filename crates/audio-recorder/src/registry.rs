@@ -42,7 +42,7 @@ impl RecorderRegistry {
         }
         let mut sessions = self.sessions.lock();
         if let Some(session) = sessions.get(id) {
-            if session.transport.channels == usize::from(channels) {
+            if session.transport.channels == channels {
                 return Ok(session.tap());
             }
             if session.transport.taps.load(Ordering::SeqCst) != 0

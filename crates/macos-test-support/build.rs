@@ -1,3 +1,7 @@
+#![expect(
+    clippy::expect_used,
+    reason = "a build script fails the build by panicking; Cargo prints the message"
+)]
 use std::{
     env,
     path::{Path, PathBuf},

@@ -48,7 +48,7 @@ fn every_pcm_reservation_failure_returns_and_reclaims_partial_storage() {
     for successful_reservations in 0..10 {
         HEAP_BALANCE.with(|counter| counter.set(Some(HeapBalance::default())));
         let result = buffers::fail_after(successful_reservations, || {
-            BlockProcessor::try_new(Arc::clone(&plan))
+            BlockProcessor::new(Arc::clone(&plan))
         });
         assert!(matches!(result, Err(RenderPlanError::BufferPreparation(_))));
         drop(result);
@@ -57,7 +57,7 @@ fn every_pcm_reservation_failure_returns_and_reclaims_partial_storage() {
         assert_eq!(balance.allocations, balance.frees, "{balance:?}");
         assert_eq!(Arc::strong_count(&plan), 1);
     }
-    let processor = buffers::fail_after(10, || BlockProcessor::try_new(plan)).unwrap();
+    let processor = buffers::fail_after(10, || BlockProcessor::new(plan)).unwrap();
     assert_eq!(processor.hosted_scratch.len(), 8);
     assert!(
         processor
@@ -80,11 +80,11 @@ fn failed_preparation_preserves_active_revision_and_healthy_pcm() {
         )],
     );
     let old_plan = Arc::new(RenderPlan::prepare(&execution).unwrap());
-    let mut current = Box::new(BlockProcessor::try_new(old_plan).unwrap());
+    let mut current = Box::new(BlockProcessor::new(old_plan).unwrap());
     let exchange = ProcessorExchange::new(1);
     let mut proposed_plan = RenderPlan::prepare(&execution).unwrap();
     proposed_plan.revision = 2;
-    let failed = buffers::fail_after(2, || BlockProcessor::try_new(Arc::new(proposed_plan)));
+    let failed = buffers::fail_after(2, || BlockProcessor::new(Arc::new(proposed_plan)));
     assert!(matches!(failed, Err(RenderPlanError::BufferPreparation(_))));
     assert_eq!(exchange.revisions().active, 1);
     assert_eq!(exchange.revisions().submitted, 1);

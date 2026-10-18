@@ -139,7 +139,7 @@ fn silent_offline_bindings_do_not_interrupt_healthy_native_pcm() {
         })
         .collect::<Vec<_>>();
     let mut sinks = vec![vec![0.0; 8]; plan.sink_bindings().len()];
-    let mut processor = BlockProcessor::new(Arc::clone(&plan));
+    let mut processor = BlockProcessor::new(Arc::clone(&plan)).unwrap();
     processor
         .process_block(
             4,

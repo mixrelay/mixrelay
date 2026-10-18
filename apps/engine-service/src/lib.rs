@@ -412,6 +412,7 @@ impl ProcessorFactory for BuiltInProcessorFactory {
         } else {
             let render = (self.render_prepare)(execution).map_err(PrepareProcessorError::Render)?;
             BlockProcessor::with_peak_meters(Arc::new(render), Arc::clone(&self.meters))
+                .map_err(PrepareProcessorError::Render)?
         };
         processor
             .attach_recorders(&self.recorders)
@@ -1736,26 +1737,25 @@ fn persist_processor_parameter(
     parameter_id: u32,
     value: f64,
 ) {
-    if !provider.parameters.is_object() {
-        provider.parameters = serde_json::json!({});
-    }
-    let parameters = provider
-        .parameters
-        .as_object_mut()
-        .expect("processor parameters were normalized to an object");
+    // A non-object saved shape is replaced by the normalized object shape.
+    let mut parameters = into_json_object(std::mem::take(&mut provider.parameters));
     parameters
         .entry("version")
         .or_insert_with(|| serde_json::json!(1));
     let values = parameters
         .entry("parameterValues")
-        .or_insert_with(|| serde_json::json!({}));
-    if !values.is_object() {
-        *values = serde_json::json!({});
+        .or_insert(serde_json::Value::Null);
+    let mut normalized = into_json_object(std::mem::take(values));
+    normalized.insert(parameter_id.to_string(), serde_json::json!(value));
+    *values = serde_json::Value::Object(normalized);
+    provider.parameters = serde_json::Value::Object(parameters);
+}
+
+fn into_json_object(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+    match value {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
     }
-    values
-        .as_object_mut()
-        .expect("parameter values were normalized to an object")
-        .insert(parameter_id.to_string(), serde_json::json!(value));
 }
 
 #[must_use]

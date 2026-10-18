@@ -2,6 +2,11 @@
 //! A real hardware-input -> `MixRelay` capture route with audible input is required;
 //! absence or silence fails explicitly rather than manufacturing continuity proof.
 #![cfg(target_os = "macos")]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helpers outside #[test] functions; a failed setup fails the test"
+)]
 
 use mixrelay_audio_graph::{ChannelMapping, GraphDocument, NodeConfig};
 use mixrelay_audio_io::process::ProcessingState;

@@ -33,9 +33,7 @@ fn processor() -> Box<BlockProcessor> {
             },
         )
         .unwrap();
-    Box::new(BlockProcessor::new(Arc::new(
-        RenderPlan::prepare(&compiled).unwrap(),
-    )))
+    Box::new(BlockProcessor::new(Arc::new(RenderPlan::prepare(&compiled).unwrap())).unwrap())
 }
 
 #[test]

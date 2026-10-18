@@ -46,7 +46,8 @@ impl ParentAudio {
         self.header().output_consumed.load(Ordering::Acquire)
     }
 
-    #[cfg(all(test, not(debug_assertions)))]
+    #[cfg(test)]
+    #[cfg(not(debug_assertions))]
     pub(crate) fn acknowledge_benchmark_block(&self) {
         let header = self.header();
         let sequence = header.input_sequence.load(Ordering::Acquire);
@@ -80,9 +81,10 @@ impl ParentAudio {
         let Some(samples) = mapping.input_sample_count(frames) else {
             return false;
         };
-        let Ok(frames_u64) = u64::try_from(frames) else {
+        let Ok(frames_u32) = u32::try_from(frames) else {
             return false;
         };
+        let frames_u64 = u64::from(frames_u32);
         let Some(next_source_frame) = self.source_frame.checked_add(frames_u64) else {
             return false;
         };
@@ -114,10 +116,7 @@ impl ParentAudio {
         header
             .input_first_frame
             .store(next_source_frame - frames_u64, Ordering::Relaxed);
-        header.input_frames.store(
-            u32::try_from(frames).expect("mapping admission validates block size"),
-            Ordering::Relaxed,
-        );
+        header.input_frames.store(frames_u32, Ordering::Relaxed);
         before_publish();
         header.input_sequence.store(sequence, Ordering::Release);
         // The worker sleeps on this word between blocks instead of polling it.
@@ -164,12 +163,11 @@ impl ParentAudio {
         let Ok(frames_u64) = u64::try_from(frames) else {
             return false;
         };
+        // A prefix too large for usize is necessarily longer than this callback.
         let startup_frames = usize::try_from(
-            block_frames_u64
-                .saturating_sub(self.source_frame - self.history_start)
-                .min(frames_u64),
+            block_frames_u64.saturating_sub(self.source_frame - self.history_start),
         )
-        .expect("startup prefix is bounded by callback frames");
+        .map_or(frames, |prefix| prefix.min(frames));
         if startup_frames == frames {
             // This is the prepared IPC delay, not a worker failure. Returning
             // false would make the graph bypass current input immediately and
@@ -216,28 +214,27 @@ impl ParentAudio {
         let mapping = &self.mapping;
         let header = mapping.header();
         let first_frame = header.output_first_frame.load(Ordering::Relaxed);
-        let packet_frames = usize::try_from(header.output_frames.load(Ordering::Relaxed))
-            .expect("u32 fits usize on supported targets");
+        let raw_frames = header.output_frames.load(Ordering::Relaxed);
         let block_frames = mapping.layout.block_frames;
-        let packet_frames_u64 = u64::try_from(packet_frames).expect("u32 fits u64");
-        let valid = packet_frames != 0
-            && packet_frames <= block_frames
-            && first_frame
-                .checked_add(packet_frames_u64)
-                .is_some_and(|end| end <= self.source_frame);
-        if valid {
-            let packet_end = first_frame + packet_frames_u64;
-            let window_start = self
-                .source_frame
-                .saturating_sub(u64::try_from(block_frames).expect("u32 fits u64"));
+        let packet_frames_u64 = u64::from(raw_frames);
+        // Invalid packet metadata is acknowledged without copying any audio.
+        let packet_end = usize::try_from(raw_frames)
+            .ok()
+            .filter(|frames| (1..=block_frames).contains(frames))
+            .and_then(|_| first_frame.checked_add(packet_frames_u64))
+            .filter(|end| *end <= self.source_frame);
+        if let Some(packet_end) = packet_end {
+            let window_start = self.source_frame.saturating_sub(block_frames as u64);
             let copy_start = first_frame.max(window_start).max(self.history_start);
-            if copy_start < packet_end {
-                let frame_offset = usize::try_from(copy_start - first_frame)
-                    .expect("packet offset fits block size");
-                let copy_frames = usize::try_from(packet_end - copy_start)
-                    .expect("packet frame count fits block size");
+            // Both spans lie inside the validated packet, whose length fits usize.
+            if copy_start < packet_end
+                && let (Ok(frame_offset), Ok(copy_frames)) = (
+                    usize::try_from(copy_start - first_frame),
+                    usize::try_from(packet_end - copy_start),
+                )
+            {
                 // SAFETY: output metadata is validated against the fixed block and source region.
-                // The worker publishes exactly `packet_frames` interleaved samples before the
+                // The worker publishes the validated packet's interleaved samples before the
                 // release sequence, so this borrow is within the mapped output region.
                 #[expect(
                     clippy::cast_ptr_alignment,
@@ -282,9 +279,13 @@ fn wake_worker(word: &std::sync::atomic::AtomicU64) {
     let _ = word;
 }
 
+/// Maps a source frame to its output-cache slot.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the remainder is below `block_frames`, which is a usize"
+)]
 fn cache_slot(frame: u64, block_frames: usize) -> usize {
-    let block_frames = u64::try_from(block_frames).expect("shared block fits u64");
-    usize::try_from(frame % block_frames).expect("cache slot fits usize")
+    (frame % block_frames as u64) as usize
 }
 
 /// The worker's single DSP endpoint retains its captured sequence while processing privately.
@@ -293,11 +294,13 @@ pub(crate) struct WorkerAudio {
     output_packet: Option<OutputPacket>,
 }
 
+/// A captured input whose frame and output sample counts were validated on receipt.
 #[derive(Clone, Copy)]
 struct OutputPacket {
     sequence: u64,
     first_frame: u64,
-    frames: usize,
+    frames: u32,
+    output_samples: usize,
 }
 
 impl WorkerAudio {
@@ -361,19 +364,25 @@ impl WorkerAudio {
         let header = mapping.header();
         let sequence = header.input_sequence.load(Ordering::Acquire);
         let first_frame = header.input_first_frame.load(Ordering::Relaxed);
-        let frames = usize::try_from(header.input_frames.load(Ordering::Relaxed))
-            .expect("u32 fits usize on supported targets");
-        let valid = frames != 0
-            && frames <= mapping.layout.block_frames
-            && first_frame.checked_add(frames as u64).is_some()
-            && mapping.input_sample_count(frames).is_some();
-        if !valid {
+        let raw_frames = header.input_frames.load(Ordering::Relaxed);
+        let counts = usize::try_from(raw_frames)
+            .ok()
+            .filter(|frames| {
+                *frames != 0
+                    && *frames <= mapping.layout.block_frames
+                    && first_frame.checked_add(u64::from(raw_frames)).is_some()
+            })
+            .and_then(|frames| {
+                Some((
+                    frames,
+                    mapping.input_sample_count(frames)?,
+                    mapping.output_sample_count(frames)?,
+                ))
+            });
+        let Some((frames, samples, output_samples)) = counts else {
             header.input_consumed.store(sequence, Ordering::Release);
             return None;
-        }
-        let samples = mapping
-            .input_sample_count(frames)
-            .expect("validated input frame count");
+        };
         // SAFETY: input_pending acquired the parent's publication and reserved free output.
         // This sole worker cannot consume another input before publishing the captured output.
         #[expect(
@@ -390,7 +399,8 @@ impl WorkerAudio {
         self.output_packet = Some(OutputPacket {
             sequence,
             first_frame,
-            frames,
+            frames: raw_frames,
+            output_samples,
         });
         header.input_consumed.store(sequence, Ordering::Release);
         Some(frames)
@@ -401,9 +411,6 @@ impl WorkerAudio {
             return false;
         };
         let mapping = &self.mapping;
-        let samples = mapping
-            .output_sample_count(packet.frames)
-            .expect("validated output frame count");
         // SAFETY: receive reserved this output slot after acquiring the parent's acknowledgment.
         // The unique worker holds it across private DSP; the slice ends before publication.
         #[expect(
@@ -417,7 +424,7 @@ impl WorkerAudio {
                     .as_mut_ptr()
                     .add(mapping.output_offset())
                     .cast::<f32>(),
-                samples,
+                packet.output_samples,
             )
         };
         copy(destination);
@@ -425,10 +432,10 @@ impl WorkerAudio {
             .header()
             .output_first_frame
             .store(packet.first_frame, Ordering::Relaxed);
-        mapping.header().output_frames.store(
-            u32::try_from(packet.frames).expect("mapping admission validates block size"),
-            Ordering::Relaxed,
-        );
+        mapping
+            .header()
+            .output_frames
+            .store(packet.frames, Ordering::Relaxed);
         mapping
             .header()
             .output_sequence

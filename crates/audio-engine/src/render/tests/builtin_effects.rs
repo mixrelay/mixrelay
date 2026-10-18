@@ -97,7 +97,7 @@ fn processor_from_source(
             },
         )
         .unwrap();
-    Box::new(BlockProcessor::try_new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap())
+    Box::new(BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap())
 }
 
 fn signal(

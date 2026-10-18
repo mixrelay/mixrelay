@@ -50,9 +50,7 @@ fn prepare_graph(graph: &GraphDocument, format: RenderFormat) -> Box<BlockProces
             },
         )
         .unwrap();
-    Box::new(BlockProcessor::new(Arc::new(
-        RenderPlan::prepare(&execution).unwrap(),
-    )))
+    Box::new(BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap())
 }
 
 fn prepared(

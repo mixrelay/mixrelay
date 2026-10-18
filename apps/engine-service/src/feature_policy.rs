@@ -3,6 +3,7 @@ use crate::{EngineGraphController, graph_catalog::Catalog};
 use mixrelay_audio_graph::{
     CompileContext, GraphCompiler, GraphDocument, NodeConfig, TO_OS_PORT_ID,
 };
+use mixrelay_audio_io::DeviceSelector;
 use mixrelay_control_protocol::{ErrorCode, ProtocolError};
 use std::collections::BTreeSet;
 
@@ -15,11 +16,31 @@ pub(crate) fn limit(resource: &str, maximum: usize, used: usize) -> ProtocolErro
     }
 }
 
+/// One distinct output counted by the output-device limit. A hardware selector that
+/// resolves to a Driver device is re-counted as that Driver device.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum OutputIdentity {
+    DefaultInput,
+    DefaultOutput,
+    Hardware(String),
+    Driver(String),
+}
+
+impl OutputIdentity {
+    fn hardware(selector: &DeviceSelector) -> Self {
+        match selector {
+            DeviceSelector::PersistentUid { uid } => Self::Hardware(uid.clone()),
+            DeviceSelector::DefaultInput => Self::DefaultInput,
+            DeviceSelector::DefaultOutput => Self::DefaultOutput,
+        }
+    }
+}
+
 #[derive(Default)]
 struct Usage {
     graphs: usize,
     inputs: usize,
-    outputs: BTreeSet<String>,
+    outputs: BTreeSet<OutputIdentity>,
     devices: BTreeSet<String>,
     mappings: usize,
     plugins: usize,
@@ -41,7 +62,7 @@ impl Usage {
             let NodeConfig::AudioDeviceOutput(config) = &node.config else {
                 continue;
             };
-            let mixrelay_audio_io::DeviceSelector::PersistentUid { uid } = &config.selector else {
+            let DeviceSelector::PersistentUid { uid } = &config.selector else {
                 continue;
             };
             let Some(device) = settings.and_then(|settings| {
@@ -52,12 +73,9 @@ impl Usage {
             }) else {
                 continue;
             };
-            self.outputs.remove(&format!(
-                "hardware:{}",
-                serde_json::to_string(&config.selector).expect("device selector serialization")
-            ));
+            self.outputs.remove(&OutputIdentity::Hardware(uid.clone()));
             self.outputs
-                .insert(format!("driver:{}", device.spec.id.as_str()));
+                .insert(OutputIdentity::Driver(device.spec.id.as_str().to_owned()));
             self.devices.insert(device.spec.id.as_str().to_owned());
             aliases.insert(&node.id);
         }
@@ -117,18 +135,16 @@ impl Usage {
                 }
                 NodeConfig::AudioDeviceInput(_) => usage.inputs += 1,
                 NodeConfig::AudioDeviceOutput(config) => {
-                    usage.outputs.insert(format!(
-                        "hardware:{}",
-                        serde_json::to_string(&config.selector)
-                            .expect("device selector serialization")
-                    ));
+                    usage
+                        .outputs
+                        .insert(OutputIdentity::hardware(&config.selector));
                 }
                 NodeConfig::VirtualEndpoint(config) => {
                     usage.devices.insert(config.id.as_str().to_owned());
                     if config.reference.capture {
                         usage
                             .outputs
-                            .insert(format!("driver:{}", config.id.as_str()));
+                            .insert(OutputIdentity::Driver(config.id.as_str().to_owned()));
                     }
                 }
                 NodeConfig::Provider(_) => usage.plugins += 1,
@@ -181,8 +197,7 @@ impl Usage {
                 let NodeConfig::AudioDeviceOutput(config) = &node.config else {
                     continue;
                 };
-                let mixrelay_audio_io::DeviceSelector::PersistentUid { uid } = &config.selector
-                else {
+                let DeviceSelector::PersistentUid { uid } = &config.selector else {
                     continue;
                 };
                 let Some(device) = settings
@@ -192,12 +207,9 @@ impl Usage {
                 else {
                     continue;
                 };
-                self.outputs.remove(&format!(
-                    "hardware:{}",
-                    serde_json::to_string(&config.selector).expect("device selector serialization")
-                ));
+                self.outputs.remove(&OutputIdentity::Hardware(uid.clone()));
                 self.outputs
-                    .insert(format!("driver:{}", device.spec.id.as_str()));
+                    .insert(OutputIdentity::Driver(device.spec.id.as_str().to_owned()));
                 self.devices.insert(device.spec.id.as_str().to_owned());
                 aliases.insert(&node.id);
             }
@@ -328,7 +340,7 @@ impl EngineGraphController {
         &self,
         documents: &mut [(String, GraphDocument)],
     ) -> Result<(), ProtocolError> {
-        use mixrelay_audio_io::{DeviceDirection, DeviceSelector};
+        use mixrelay_audio_io::DeviceDirection;
         let selectors: Vec<_> = documents
             .iter()
             .flat_map(|(_, graph)| &graph.nodes)

@@ -1,3 +1,8 @@
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "a lab tool, not shipped: setup failures abort with their message"
+)]
 //! Matched release benchmark of the public streaming boundary, without native devices.
 
 use std::{hint::black_box, io::Write, time::Instant};

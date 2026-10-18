@@ -28,6 +28,8 @@ use truce_rack_core::WindowHandle;
 
 pub(crate) struct NativeEditorHost {
     shared: Arc<WorkerControl>,
+    /// Proof that this host was created on, and stays bound to, the main thread.
+    main: MainThreadMarker,
     app: Retained<NSApplication>,
     surface: Option<Surface>,
     pub(super) pending_events: EditorHostEvents,
@@ -67,6 +69,7 @@ impl NativeEditorHost {
         }
         Ok(Self {
             shared,
+            main,
             app,
             surface: None,
             pending_events: EditorHostEvents::default(),
@@ -229,8 +232,7 @@ impl NativeEditorHost {
     fn dismiss_surface(&mut self) {
         if let Some(surface) = self.surface.take() {
             surface.timer.invalidate();
-            let main = MainThreadMarker::new().expect("native editor host is main-thread owned");
-            let window = &surface.state.get(main).window;
+            let window = &surface.state.get(self.main).window;
             if window.isVisible() {
                 window.close();
             }

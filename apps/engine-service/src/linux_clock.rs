@@ -1,11 +1,10 @@
 //! `PipeWire` adapters deliver the selected PCM rate even when the graph clock uses
 //! another rate. Convert callback duration, not samples: doing SRC here again
 //! would resample data that `PipeWire` already converted at the stream boundary.
-use super::ENGINE_SAMPLE_RATE;
-use mixrelay_audio_io::process::{ClockDomain, ProcessCycle};
+use mixrelay_audio_io::process::{ClockDomain, CycleError, ProcessCycle};
 use mixrelay_audio_io::session::ClockAuthority;
 use mixrelay_pipewire::DriverCycle;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 /// Last successful native callback and the callback that changed its timeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -23,21 +22,24 @@ pub(super) struct GraphTimeline {
     pending: Option<NativeDiscontinuity>,
 }
 
+#[cfg(test)]
 impl Default for GraphTimeline {
     fn default() -> Self {
-        Self::new(ENGINE_SAMPLE_RATE)
+        Self::new(super::ENGINE_SAMPLE_RATE).expect("engine rate is nonzero")
     }
 }
 
 impl GraphTimeline {
-    /// Creates a mapper for a previously validated render rate; zero violates this invariant.
-    pub(super) fn new(rate: u32) -> Self {
-        Self {
-            mapper: mixrelay_audio_io::frame_budget::FrameBudgetMapper::new(rate)
-                .expect("validated graph rate"),
+    /// Creates a mapper for a render rate.
+    ///
+    /// # Errors
+    /// A zero render rate cannot define a frame timeline.
+    pub(super) fn new(rate: u32) -> Result<Self, CycleError> {
+        Ok(Self {
+            mapper: mixrelay_audio_io::frame_budget::FrameBudgetMapper::new(rate)?,
             previous: None,
             pending: None,
-        }
+        })
     }
     /// Maps one native callback; invalid rate, quantum, or arithmetic leaves state unchanged.
     pub(super) fn map(&mut self, native: &DriverCycle) -> Result<ProcessCycle, ()> {
@@ -92,9 +94,9 @@ impl GraphTimeline {
 struct AtomicCycle {
     position: AtomicU64,
     monotonic_ns: AtomicU64,
-    clock_id: AtomicU64,
-    rate: AtomicU64,
-    frames: AtomicU64,
+    clock_id: AtomicU32,
+    rate: AtomicU32,
+    frames: AtomicU32,
 }
 
 impl AtomicCycle {
@@ -102,22 +104,18 @@ impl AtomicCycle {
         self.position.store(cycle.position, Ordering::SeqCst);
         self.monotonic_ns
             .store(cycle.monotonic_ns, Ordering::SeqCst);
-        self.clock_id
-            .store(u64::from(cycle.clock_id), Ordering::SeqCst);
-        self.rate.store(u64::from(cycle.rate), Ordering::SeqCst);
-        self.frames.store(u64::from(cycle.frames), Ordering::SeqCst);
+        self.clock_id.store(cycle.clock_id, Ordering::SeqCst);
+        self.rate.store(cycle.rate, Ordering::SeqCst);
+        self.frames.store(cycle.frames, Ordering::SeqCst);
     }
 
     fn load(&self) -> DriverCycle {
         DriverCycle {
             position: self.position.load(Ordering::SeqCst),
             monotonic_ns: self.monotonic_ns.load(Ordering::SeqCst),
-            clock_id: u32::try_from(self.clock_id.load(Ordering::SeqCst))
-                .expect("mailbox clock ID was stored from a u32"),
-            rate: u32::try_from(self.rate.load(Ordering::SeqCst))
-                .expect("mailbox rate was stored from a u32"),
-            frames: u32::try_from(self.frames.load(Ordering::SeqCst))
-                .expect("mailbox frame count was stored from a u32"),
+            clock_id: self.clock_id.load(Ordering::SeqCst),
+            rate: self.rate.load(Ordering::SeqCst),
+            frames: self.frames.load(Ordering::SeqCst),
         }
     }
 }
@@ -183,6 +181,7 @@ impl DiscontinuityMailbox {
 
 #[cfg(test)]
 mod tests {
+    use super::super::ENGINE_SAMPLE_RATE;
     use super::*;
 
     #[test]
@@ -306,7 +305,7 @@ mod tests {
 
     #[test]
     fn zero_frame_mapper_pending_discontinuity_is_reported_only_once() {
-        let mut timeline = GraphTimeline::new(8_000);
+        let mut timeline = GraphTimeline::new(8_000).unwrap();
         let native = DriverCycle {
             position: 0,
             monotonic_ns: 0,

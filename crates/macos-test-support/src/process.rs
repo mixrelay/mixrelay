@@ -176,8 +176,16 @@ fn run_until<D: Deadline>(
             .spawn()
             .map_err(|error| format!("cannot launch {label}: {error}"))?,
     );
-    let mut stdout_pipe = child.0.stdout.take().expect("requested stdout pipe");
-    let mut stderr_pipe = child.0.stderr.take().expect("requested stderr pipe");
+    let mut stdout_pipe = child
+        .0
+        .stdout
+        .take()
+        .ok_or("requested stdout pipe is missing")?;
+    let mut stderr_pipe = child
+        .0
+        .stderr
+        .take()
+        .ok_or("requested stderr pipe is missing")?;
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     match collect(

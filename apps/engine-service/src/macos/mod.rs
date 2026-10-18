@@ -433,10 +433,9 @@ fn create_initial_processor(
         )
         .map_err(|error| error.to_string())?;
     let render_plan = RenderPlan::prepare(&execution).map_err(|error| error.to_string())?;
-    Ok(Box::new(BlockProcessor::with_peak_meters(
-        Arc::new(render_plan),
-        meters,
-    )))
+    BlockProcessor::with_peak_meters(Arc::new(render_plan), meters)
+        .map(Box::new)
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Clone, Copy)]

@@ -94,9 +94,19 @@ impl Drop for OwnedChild {
     }
 }
 
+/// Field order is drop order: the handle closes before the path guard removes the file.
 struct CaptureFile {
-    path: PathBuf,
-    file: Option<File>,
+    file: File,
+    path: CapturePath,
+}
+
+/// Removes the capture file once its handle has closed.
+struct CapturePath(PathBuf);
+
+impl Drop for CapturePath {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 impl CaptureFile {
@@ -115,15 +125,13 @@ impl CaptureFile {
             .open(&path)
             .map_err(|error| format!("capture file failed: {error}"))?;
         Ok(Self {
-            path,
-            file: Some(file),
+            file,
+            path: CapturePath(path),
         })
     }
 
     fn stdio(&self) -> Result<Stdio, String> {
         self.file
-            .as_ref()
-            .expect("capture file is open until drop")
             .try_clone()
             .map(Stdio::from)
             .map_err(|error| format!("capture handle failed: {error}"))
@@ -132,8 +140,6 @@ impl CaptureFile {
     fn check_size(&self, limit: u64) -> Result<(), String> {
         let size = self
             .file
-            .as_ref()
-            .expect("capture file is open until drop")
             .metadata()
             .map_err(|error| format!("capture metadata failed: {error}"))?
             .len();
@@ -146,19 +152,12 @@ impl CaptureFile {
 
     fn read(&self, limit: u64) -> Result<Vec<u8>, String> {
         let mut bytes = Vec::new();
-        File::open(&self.path)
+        File::open(&self.path.0)
             .map_err(|error| format!("capture read failed: {error}"))?
             .take(limit)
             .read_to_end(&mut bytes)
             .map_err(|error| format!("capture read failed: {error}"))?;
         Ok(bytes)
-    }
-}
-
-impl Drop for CaptureFile {
-    fn drop(&mut self) {
-        drop(self.file.take());
-        let _ = std::fs::remove_file(&self.path);
     }
 }
 

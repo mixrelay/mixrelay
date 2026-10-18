@@ -14,7 +14,8 @@ use crate::{MAX_STATE_BYTES, StateError, StateRef};
 mod platform;
 #[cfg(not(unix))]
 compile_error!("processor state storage requires a supported native filesystem");
-#[cfg(all(test, unix))]
+#[cfg(test)]
+#[cfg(unix)]
 #[path = "store/tests.rs"]
 mod tests;
 

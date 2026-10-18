@@ -100,10 +100,10 @@ impl Take {
             return Err("non-finite recorder PCM".into());
         }
         self.prepare_rate(rate)?;
-        self.segment
-            .as_mut()
-            .expect("segment prepared for this packet")
-            .push(samples, &mut self.sink)
+        let Some(segment) = self.segment.as_mut() else {
+            return Err("recording segment was not prepared".into());
+        };
+        segment.push(samples, &mut self.sink)
     }
 
     pub(crate) fn prepare_rate(&mut self, rate: u32) -> Result<(), String> {
@@ -192,7 +192,7 @@ impl Noise {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
         self.0 ^= self.0 << 17;
-        f64::from(u32::try_from(self.0 >> 32).expect("upper half fits u32")) / 4_294_967_296.0
+        f64::from((self.0 >> 32) as u32) / 4_294_967_296.0
     }
 
     #[expect(
@@ -308,8 +308,11 @@ impl Segment {
             return Ok(());
         }
         let numerator = u128::from(self.input_frames) * u128::from(self.output_rate);
-        let remainder =
-            u32::try_from(numerator % u128::from(self.rate)).expect("remainder below u32 rate");
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a remainder modulo a u32 rate is below that rate"
+        )]
+        let remainder = (numerator % u128::from(self.rate)) as u32;
         let partial = *fraction + f64::from(remainder) / f64::from(self.rate);
         let extra = u64::from(partial >= 0.5);
         *fraction = partial - if extra == 1 { 1.0 } else { 0.0 };

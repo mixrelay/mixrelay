@@ -79,7 +79,7 @@ fn graph(channels: u16, frames: u32, fanout: bool) -> BlockProcessor {
             },
         )
         .unwrap();
-    BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()))
+    BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap()
 }
 
 #[test]

@@ -60,6 +60,14 @@ pub(super) struct Timestamp {
 
 const _: () = assert!(size_of::<Timestamp>() == 64);
 
+/// `UInt32` property extents of one `AudioObjectID` and one CF reference.
+const OBJECT_ID_EXTENT: u32 = 4;
+const POINTER_EXTENT: u32 = 8;
+const _: () = assert!(
+    size_of::<u32>() == OBJECT_ID_EXTENT as usize
+        && size_of::<*const c_void>() == POINTER_EXTENT as usize
+);
+
 type IoProc = unsafe extern "C" fn(
     u32,
     *const Timestamp,
@@ -532,13 +540,13 @@ fn device(uid: &CStr) -> Result<DeviceLease, TapError> {
         return Err(TapError::code(6));
     }
     let mut object = 0_u32;
-    let mut size = u32::try_from(size_of::<u32>()).expect("device ID fits native extent");
+    let mut size = OBJECT_ID_EXTENT;
     // SAFETY: the qualifier contains one live CFString pointer and result owns one UInt32.
     let status = unsafe {
         AudioObjectGetPropertyData(
             1,
             &Address::global(*b"uidd"),
-            u32::try_from(size_of::<*const c_void>()).expect("pointer extent fits UInt32"),
+            POINTER_EXTENT,
             ptr::from_ref(&expected).cast(),
             &raw mut size,
             ptr::from_mut(&mut object).cast(),
@@ -687,8 +695,7 @@ pub(super) fn add_listener(session: &TapSession) -> Result<(), TapError> {
 /// A `CFString` property as UTF-8, or `None` when absent, unreadable or longer than 1 KiB.
 fn string_property(object: u32, address: Address) -> Option<String> {
     let mut value: *const c_void = ptr::null();
-    let mut size =
-        u32::try_from(size_of::<*const c_void>()).expect("pointer size fits native extent");
+    let mut size = POINTER_EXTENT;
     // SAFETY: exclusive pointer output starts null; a non-null result is a +1 reference
     // released below on every path.
     let status = unsafe {
@@ -766,8 +773,7 @@ fn process_matches(process: u32, expected: *const c_void) -> bool {
 
 fn cfstring_property_matches(object: u32, address: Address, expected: *const c_void) -> bool {
     let mut actual: *const c_void = ptr::null();
-    let mut size =
-        u32::try_from(size_of::<*const c_void>()).expect("pointer size fits native extent");
+    let mut size = POINTER_EXTENT;
     // SAFETY: exclusive pointer output starts null. Every non-null +1 result is
     // adopted before interpreting either status or returned property extent.
     let status = unsafe {
@@ -838,10 +844,8 @@ pub(super) fn prepare_cleanup() -> Result<usize, TapError> {
     let queue = checked_queue(|| unsafe {
         dispatch_queue_create(c"io.mixrelay.capture.retired".as_ptr(), ptr::null())
     })?;
-    QUEUE
-        .set(queue)
-        .expect("queue initialization lock has one publisher");
-    Ok(queue)
+    // The initialization lock admits one publisher, so this stores `queue`.
+    Ok(*QUEUE.get_or_init(|| queue))
 }
 
 pub(super) fn retire(session: *mut TapSession, retry: bool) {

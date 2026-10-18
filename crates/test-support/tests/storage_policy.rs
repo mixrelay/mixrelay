@@ -1,3 +1,8 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helpers outside #[test] functions; a failed setup fails the test"
+)]
 //! First-party storage must not depend on machine-wide temporary directories.
 //! This is a source contract, not a claim about third-party tools' internals.
 use std::{fs, path::Path};

@@ -120,8 +120,7 @@ async fn connect_until_ready(
     loop {
         let status = tokio::time::timeout_at(deadline, readiness(connection)).await;
         match status {
-            Ok(RuntimeStatus::Ready | RuntimeStatus::Incompatible) => {
-                let status = status.expect("matched completed health check");
+            Ok(status @ (RuntimeStatus::Ready | RuntimeStatus::Incompatible)) => {
                 return Ok(status);
             }
             Err(_) => return Ok(RuntimeStatus::Unavailable),

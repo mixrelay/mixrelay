@@ -63,12 +63,17 @@ impl ControlValue {
                 enabled: bits & (1 << 32) != 0,
                 muted: bits & (1 << 33) != 0,
             },
-            linear_gain: f32::from_bits(
-                u32::try_from(bits & u64::from(u32::MAX))
-                    .expect("gain occupies exactly the low 32 bits"),
-            ),
+            linear_gain: f32::from_bits(low_gain_bits(bits)),
         }
     }
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the encoded gain occupies exactly the low 32 bits; truncation selects them"
+)]
+const fn low_gain_bits(bits: u64) -> u32 {
+    bits as u32
 }
 
 #[derive(Debug)]
@@ -187,15 +192,20 @@ impl RuntimeControlBank {
         revision: u64,
         updates: &[RuntimeControlUpdate],
     ) -> Result<(), RuntimeControlError> {
+        self.check_revision(revision)?;
+        for update in updates {
+            self.resolve(update)?;
+        }
+        Ok(())
+    }
+
+    fn check_revision(&self, revision: u64) -> Result<(), RuntimeControlError> {
         let current = self.published_revision();
         if revision <= current {
             return Err(RuntimeControlError::StaleRevision {
                 current,
                 proposed: revision,
             });
-        }
-        for update in updates {
-            self.updated_value(update)?;
         }
         Ok(())
     }
@@ -206,15 +216,25 @@ impl RuntimeControlBank {
         updates: &[RuntimeControlUpdate],
     ) -> Result<(), RuntimeControlError> {
         let _writer = self.writer.lock();
+        // Validate the complete batch before the epoch opens so a rejected update leaves
+        // every node unchanged and the audio reader never sees an unfinished publication.
         self.validate(revision, updates)?;
         // All payload accesses participate in the same total order as the epoch. This is
         // intentionally stronger than a relaxed seqlock: ARM cannot move the final epoch read
         // ahead of a payload load or expose a new payload under the preceding even epoch.
         self.epoch.fetch_add(1, Ordering::SeqCst);
         for update in updates {
-            let (index, value) = self
-                .updated_value(update)
-                .expect("the serialized complete batch was validated before publication");
+            // `resolve` reads only immutable topology metadata, so every update validated
+            // above resolves again here; re-resolving keeps publication allocation-free.
+            let Ok((index, linear_gain)) = self.resolve(update) else {
+                continue;
+            };
+            // Later updates to the same node in one batch build on the earlier stored value.
+            let mut value = self.value(index);
+            value.control = update.control;
+            if let Some(linear_gain) = linear_gain {
+                value.linear_gain = linear_gain;
+            }
             self.cells[index]
                 .value
                 .store(value.encode(), Ordering::SeqCst);
@@ -227,10 +247,11 @@ impl RuntimeControlBank {
         Ok(())
     }
 
-    fn updated_value(
+    /// Resolves an update's cell index and replacement linear gain; `None` keeps the gain.
+    fn resolve(
         &self,
         update: &RuntimeControlUpdate,
-    ) -> Result<(usize, ControlValue), RuntimeControlError> {
+    ) -> Result<(usize, Option<f32>), RuntimeControlError> {
         let index = self
             .index(&update.node_id)
             .ok_or_else(|| RuntimeControlError::UnknownNode(update.node_id.clone()))?;
@@ -240,19 +261,17 @@ impl RuntimeControlBank {
                 update.node_id.clone(),
             ));
         }
-        let mut value = self.value(index);
-        value.control = update.control;
-        if let Some(gain_db) = update.gain_db {
-            if !cell.supports_gain {
-                return Err(RuntimeControlError::UnsupportedGain(update.node_id.clone()));
-            }
-            let gain = 10.0_f32.powf(gain_db / 20.0);
-            if !gain_db.is_finite() || !gain.is_finite() {
-                return Err(RuntimeControlError::InvalidGain(update.node_id.clone()));
-            }
-            value.linear_gain = gain;
+        let Some(gain_db) = update.gain_db else {
+            return Ok((index, None));
+        };
+        if !cell.supports_gain {
+            return Err(RuntimeControlError::UnsupportedGain(update.node_id.clone()));
         }
-        Ok((index, value))
+        let gain = 10.0_f32.powf(gain_db / 20.0);
+        if !gain_db.is_finite() || !gain.is_finite() {
+            return Err(RuntimeControlError::InvalidGain(update.node_id.clone()));
+        }
+        Ok((index, Some(gain)))
     }
 
     pub(crate) fn bind_clock(

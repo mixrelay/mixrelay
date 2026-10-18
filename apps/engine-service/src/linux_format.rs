@@ -111,10 +111,11 @@ impl Drop for Monitor {
 pub(super) const fn pack(format: RenderFormat) -> u64 {
     (format.sample_rate as u64) << 32 | format.block_frames as u64
 }
-pub(super) fn unpack(value: u64) -> RenderFormat {
+pub(super) const fn unpack(value: u64) -> RenderFormat {
+    let [h0, h1, h2, h3, l0, l1, l2, l3] = value.to_be_bytes();
     RenderFormat {
-        sample_rate: (value >> 32) as u32,
-        block_frames: u32::try_from(value & u64::from(u32::MAX)).expect("masked low word"),
+        sample_rate: u32::from_be_bytes([h0, h1, h2, h3]),
+        block_frames: u32::from_be_bytes([l0, l1, l2, l3]),
     }
 }
 

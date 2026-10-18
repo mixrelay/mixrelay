@@ -132,7 +132,10 @@ fn numerical_boundaries_and_downgrade_allow_reductions_without_silencing_existin
     let at_limit = Usage {
         graphs: 1,
         inputs: 2,
-        outputs: BTreeSet::from(["driver".into(), "monitor".into()]),
+        outputs: BTreeSet::from([
+            OutputIdentity::Driver("driver".into()),
+            OutputIdentity::Hardware("monitor".into()),
+        ]),
         devices: BTreeSet::from(["driver".into()]),
         mappings: 4,
         plugins: 2,
@@ -159,7 +162,11 @@ fn numerical_boundaries_and_downgrade_allow_reductions_without_silencing_existin
         (
             "outputDevices",
             Usage {
-                outputs: BTreeSet::from(["a".into(), "b".into(), "c".into()]),
+                outputs: BTreeSet::from([
+                    OutputIdentity::Hardware("a".into()),
+                    OutputIdentity::Hardware("b".into()),
+                    OutputIdentity::Hardware("c".into()),
+                ]),
                 ..Usage::default()
             },
         ),

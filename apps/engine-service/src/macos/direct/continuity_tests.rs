@@ -72,9 +72,7 @@ fn prepare(document: &GraphDocument, sample_rate: u32) -> Box<BlockProcessor> {
             },
         )
         .unwrap();
-    Box::new(BlockProcessor::new(Arc::new(
-        RenderPlan::prepare(&execution).unwrap(),
-    )))
+    Box::new(BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap())
 }
 
 fn processor_with_internal_node(revision: u64, added: bool) -> Box<BlockProcessor> {

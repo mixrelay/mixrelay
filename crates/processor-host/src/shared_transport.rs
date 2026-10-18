@@ -41,11 +41,7 @@ pub(super) fn create(
     // Resolve the wake API here, so its first lookup never runs on an audio thread.
     #[cfg(target_os = "macos")]
     let _ = mixrelay_realtime::shared_futex();
-    for count in [layout.inputs, layout.outputs, layout.block_frames] {
-        if u32::try_from(count).is_err() {
-            return Err("processor transport dimensions exceed u32".to_owned());
-        }
-    }
+    let header = SharedHeader::new(layout)?;
     let mut options = OpenOptions::new();
     options.create_new(true).read(true).write(true);
     #[cfg(unix)]
@@ -60,7 +56,7 @@ pub(super) fn create(
                 .map_err(|_| "processor transport length exceeds u64".to_owned())?,
         )
         .map_err(|error| error.to_string())?;
-        initialize(&file, SharedHeader::new(layout))?;
+        initialize(&file, header)?;
         Ok((ParentAudio::open(&file)?, ControlMailbox::open(&file)?))
     })();
     drop(file);

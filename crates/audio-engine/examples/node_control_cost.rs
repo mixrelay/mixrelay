@@ -85,7 +85,7 @@ fn processor(control: NodeControl) -> Result<BlockProcessor, Box<dyn Error>> {
     )?;
     Ok(BlockProcessor::new(Arc::new(RenderPlan::prepare(
         &execution,
-    )?)))
+    )?))?)
 }
 
 fn sample(control: NodeControl) -> Result<u128, Box<dyn Error>> {

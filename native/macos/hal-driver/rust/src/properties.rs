@@ -381,9 +381,12 @@ pub(crate) const NATIVE_FORMATS: [SampleFormat; 4] = [
 ];
 
 /// Builds the exact SDK ASBD for one interleaved little-endian native stream.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "SampleFormat samples occupy at most four bytes"
+)]
 pub(crate) fn format(rate: u32, channels: u32, encoding: SampleFormat) -> Vec<u8> {
-    let sample_bytes =
-        u32::try_from(encoding.bytes_per_sample()).expect("native sample size fits u32");
+    let sample_bytes = encoding.bytes_per_sample() as u32;
     let mut bytes = f64::from(rate).to_ne_bytes().to_vec();
     for field in [
         u32::from_be_bytes(*b"lpcm"),
@@ -437,7 +440,7 @@ fn stream(snapshot: &Snapshot, object: u32, address: &Address) -> Result<Value, 
             let encoding = NATIVE_FORMATS
                 .into_iter()
                 .find(|encoding| *encoding as u32 == code)
-                .expect("snapshot format is published from SampleFormat");
+                .ok_or(BAD_OBJECT)?;
             Ok(Value::Struct(format(
                 snapshot.sample_rate,
                 channels,

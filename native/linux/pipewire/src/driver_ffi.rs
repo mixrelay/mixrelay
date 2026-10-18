@@ -35,7 +35,9 @@ pub(crate) unsafe extern "C" fn mr_pw_driver_open(
     if userdata.is_null() {
         return std::ptr::null_mut();
     }
-    let format = DriverFormat::new(48_000, 128).expect("fixed diagnostic probe format is valid");
+    let Ok(format) = DriverFormat::new(48_000, 128) else {
+        return std::ptr::null_mut();
+    };
     GraphDriver::open(Probe { process, userdata }, format).map_or(std::ptr::null_mut(), |driver| {
         Box::into_raw(Box::new(driver))
     })

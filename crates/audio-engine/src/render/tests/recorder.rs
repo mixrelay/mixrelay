@@ -10,7 +10,8 @@ fn isolated_recorder(registry: &RecorderRegistry, channels: u16) -> BlockProcess
         vec![node("record", NodeConfig::Recorder { channels })],
         vec![],
     );
-    let mut processor = BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()));
+    let mut processor =
+        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap();
     processor.attach_recorders(registry).unwrap();
     processor
 }
@@ -91,7 +92,8 @@ fn muted_recorder_writes_silence_without_stopping_recording() {
         vec![device_input("in"), recorder],
         vec![edge("record", "in", AUDIO_PORT_ID, "record", AUDIO_PORT_ID)],
     );
-    let mut processor = BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()));
+    let mut processor =
+        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap();
     processor.attach_recorders(&registry).unwrap();
     processor.process_block(2, &[&[1.0; 4]], &mut []).unwrap();
     registry
@@ -151,7 +153,7 @@ fn mixed_sources_record_without_any_hardware_output() {
     let plan = Arc::new(RenderPlan::prepare(&execution).unwrap());
     assert!(plan.sink_bindings().is_empty());
     let registry = RecorderRegistry::default();
-    let mut processor = BlockProcessor::new(plan);
+    let mut processor = BlockProcessor::new(plan).unwrap();
     processor.attach_recorders(&registry).unwrap();
     let left = [0.125, -0.25, 0.25, 0.5];
     let right = [0.125, 0.5, -0.5, 0.25];
@@ -194,7 +196,7 @@ fn recorder_captures_final_routing_without_native_sink_or_callback_allocation() 
     let plan = recorder_plan();
     // Only the real monitor is a native output. A file has no hardware clock.
     assert_eq!(plan.sink_bindings().len(), 1);
-    let mut processor = BlockProcessor::new(plan);
+    let mut processor = BlockProcessor::new(plan).unwrap();
     processor.attach_recorders(&registry).unwrap();
     let input = [0.25, -0.25, 0.5, -0.5];
     let mut output = [0.0; 4];
@@ -241,7 +243,7 @@ fn rebuild_and_pause_preserve_take_and_final_tap_removal_finalizes_it() {
     let directory = mixrelay_test_support::FixtureDir::new("recording-rebuild").unwrap();
     let path = directory.join("take.wav");
     let registry = RecorderRegistry::default();
-    let mut current = BlockProcessor::new(recorder_plan());
+    let mut current = BlockProcessor::new(recorder_plan()).unwrap();
     current.attach_recorders(&registry).unwrap();
     let input = [0.25; 4];
     let mut output = [0.0; 4];
@@ -260,7 +262,7 @@ fn rebuild_and_pause_preserve_take_and_final_tap_removal_finalizes_it() {
     current
         .process_block(2, &[&input], &mut [&mut output])
         .unwrap();
-    let mut replacement = BlockProcessor::new(recorder_plan());
+    let mut replacement = BlockProcessor::new(recorder_plan()).unwrap();
     replacement.attach_recorders(&registry).unwrap();
     drop(current);
     registry.reap_unused().unwrap();
@@ -292,7 +294,7 @@ fn control_publications_preserve_recording_and_off_skips_capture_instead_of_writ
     let path = directory.join("take.wav");
     let registry = RecorderRegistry::default();
     let plan = recorder_plan();
-    let mut processor = BlockProcessor::new(Arc::clone(&plan));
+    let mut processor = BlockProcessor::new(Arc::clone(&plan)).unwrap();
     processor.attach_recorders(&registry).unwrap();
     let input = [0.25; 4];
     let mut output = [0.0; 4];

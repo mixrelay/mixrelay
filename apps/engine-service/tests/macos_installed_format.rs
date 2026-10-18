@@ -5,6 +5,11 @@
 //! format is restored on failure/panic, unless concurrent topology edits make
 //! restoring unsafe. No graph, driver, device selection or file backup is written.
 #![cfg(target_os = "macos")]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helpers outside #[test] functions; a failed setup fails the test"
+)]
 
 use std::{
     collections::BTreeSet,

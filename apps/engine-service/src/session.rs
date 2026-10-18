@@ -175,7 +175,7 @@ impl AdapterRuntimeStatus {
 
     fn routing_clock_rate(&self) -> Option<u32> {
         let value = self.routing_clock_observation.load(Ordering::Acquire);
-        (value != 0).then(|| u32::try_from(value & u64::from(u32::MAX)).expect("routing rate word"))
+        (value != 0).then(|| split_words(value).1)
     }
 
     /// Cached own-endpoint settings for the device UI. Reading these fields does
@@ -737,14 +737,24 @@ const fn pack_format(format: RenderFormat) -> u64 {
 }
 
 fn unpack_format(value: u64) -> RenderFormat {
+    let (sample_rate, block_frames) = split_words(value);
     RenderFormat {
-        sample_rate: u32::try_from(value >> 32).expect("upper word fits"),
-        block_frames: u32::try_from(value & u64::from(u32::MAX)).expect("lower word fits"),
+        sample_rate,
+        block_frames,
     }
 }
 
-impl RuntimeStatusBackend for AdapterRuntimeStatus {
-    fn capabilities_for_format(&self, format: RenderFormat) -> Option<AudioSessionCapabilities> {
+/// Splits a packed atomic word into its upper and lower 32-bit halves.
+const fn split_words(value: u64) -> (u32, u32) {
+    let [h0, h1, h2, h3, l0, l1, l2, l3] = value.to_be_bytes();
+    (
+        u32::from_be_bytes([h0, h1, h2, h3]),
+        u32::from_be_bytes([l0, l1, l2, l3]),
+    )
+}
+
+impl AdapterRuntimeStatus {
+    fn capabilities(&self, format: RenderFormat) -> AudioSessionCapabilities {
         let mut capabilities = self.profile.capabilities.clone();
         capabilities.supported_sample_rates = self.supported_sample_rates();
         if let Some(rate) = self.routing_clock_rate() {
@@ -766,7 +776,13 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
         capabilities.can_reconfigure_live &= self.set_device_rate.is_some()
             || self.set_device_format.is_some()
             || self.graph_format_control;
-        Some(capabilities)
+        capabilities
+    }
+}
+
+impl RuntimeStatusBackend for AdapterRuntimeStatus {
+    fn capabilities_for_format(&self, format: RenderFormat) -> Option<AudioSessionCapabilities> {
+        Some(self.capabilities(format))
     }
     fn external_sample_rate(&self) -> Option<u32> {
         if let Some(reader) = &self.external_format_reader {
@@ -868,9 +884,7 @@ impl RuntimeStatusBackend for AdapterRuntimeStatus {
         let observed_device_buffer_frames =
             (observed.block_frames != 0).then_some(observed.block_frames);
         let issue = self.session_issue(format, observed, worker_state, clock_issue);
-        let capabilities = self
-            .capabilities_for_format(format)
-            .expect("adapter always supplies capabilities");
+        let capabilities = self.capabilities(format);
         AppStatus {
             engine_power: None,
             processor_timings: Vec::new(),

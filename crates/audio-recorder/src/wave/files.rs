@@ -54,10 +54,13 @@ impl<F: FileFactory> WaveFile<F> {
         if let Some(error) = &self.error {
             return Err(error.clone());
         }
-        let result = self
-            .writer
-            .as_mut()
-            .expect("active recording writer")
+        let Some(writer) = self.writer.as_mut() else {
+            return Err(format!(
+                "recording {} is already finalized",
+                self.path.display()
+            ));
+        };
+        let result = writer
             .write_sample(sample)
             .map_err(|error| format!("recording write failed {}: {error}", self.path.display()));
         if let Err(error) = &result {

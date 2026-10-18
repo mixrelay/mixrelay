@@ -163,22 +163,15 @@ impl Outbound {
     }
 
     fn next(&self) -> Next {
-        let mut queue = self.queue();
+        let mut guard = self.queue();
+        let queue = &mut *guard;
         if queue.closed {
             return Next::Done;
         }
         if let Some(reply) = queue.replies.pop_front() {
             return Next::Frame(reply);
         }
-        let last = queue.last_stream;
-        let ready = |stream: &Stream| stream.window.is_some() || stream.ended.is_some();
-        let id = queue
-            .streams
-            .range(last.saturating_add(1)..)
-            .chain(queue.streams.range(..=last))
-            .find(|(_, stream)| ready(stream))
-            .map(|(id, _)| *id);
-        let Some(id) = id else {
+        let Some((id, stream)) = next_ready(&mut queue.streams, queue.last_stream) else {
             return if queue.finishing {
                 Next::Done
             } else {
@@ -186,7 +179,6 @@ impl Outbound {
             };
         };
         queue.last_stream = id;
-        let stream = queue.streams.get_mut(&id).expect("stream was just found");
         if let Some(window) = stream.window.take() {
             let body = stream.encoder.json(&window);
             return Next::Frame(json!({"id": id, "status": 206, "body": body}));
@@ -217,7 +209,10 @@ impl Outbound {
                 }
                 Next::Done => break Ok(()),
             };
-            let bytes = encode(&frame);
+            let bytes = match encode(&frame) {
+                Ok(bytes) => bytes,
+                Err(error) => break Err(error),
+            };
             match tokio::time::timeout(timeout, write.write_all(&bytes)).await {
                 Ok(Ok(())) => self.written.notify_waiters(),
                 Ok(Err(error)) => break Err(error),
@@ -229,8 +224,29 @@ impl Outbound {
     }
 }
 
+/// The first stream after `last` with something to write, wrapping around to the lowest
+/// id, so busy streams take turns.
+fn next_ready(streams: &mut BTreeMap<u64, Stream>, last: u64) -> Option<(u64, &mut Stream)> {
+    let mut wrapped = None;
+    for (&id, stream) in streams {
+        if stream.window.is_none() && stream.ended.is_none() {
+            continue;
+        }
+        if id > last {
+            return Some((id, stream));
+        }
+        if wrapped.is_none() {
+            wrapped = Some((id, stream));
+        }
+    }
+    wrapped
+}
+
 /// One line. An oversized reply fails only its own request, never the connection.
-fn encode(frame: &Value) -> Vec<u8> {
+///
+/// # Errors
+/// Returns an error only when the replacement error frame cannot be serialized.
+fn encode(frame: &Value) -> io::Result<Vec<u8>> {
     let mut bytes = serde_json::to_vec(frame).unwrap_or_default();
     if bytes.is_empty() || bytes.len() > RESPONSE_LIMIT {
         let reason = "local control response exceeds limit";
@@ -238,11 +254,10 @@ fn encode(frame: &Value) -> Vec<u8> {
             "id": frame["id"],
             "status": 500,
             "body": {"code": "control_request_failed", "parameters": {"reason": reason}},
-        }))
-        .expect("bounded error frame is JSON");
+        }))?;
     }
     bytes.push(b'\n');
-    bytes
+    Ok(bytes)
 }
 
 #[cfg(test)]

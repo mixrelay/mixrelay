@@ -311,7 +311,7 @@ fn disabled_source_retains_binding_but_does_not_affect_another_active_route() {
     let plan = RenderPlan::prepare(&execution).unwrap();
     assert_eq!(plan.source_bindings().len(), 2);
     assert_eq!(plan.source_bindings()[0].node_id(), &NodeId::from("active"));
-    let mut processor = BlockProcessor::new(Arc::new(plan));
+    let mut processor = BlockProcessor::new(Arc::new(plan)).unwrap();
     let mut output = [0.0; 8];
     processor
         .process_block(4, &[&[0.5; 8], &[9.0; 8]], &mut [&mut output])
@@ -331,7 +331,7 @@ fn source_and_sink_mute_preserve_native_bindings_but_silence_the_boundary() {
         let plan = RenderPlan::prepare(&execution).unwrap();
         assert_eq!(plan.source_bindings().len(), 1);
         assert_eq!(plan.sink_bindings().len(), 1);
-        let mut processor = BlockProcessor::new(Arc::new(plan));
+        let mut processor = BlockProcessor::new(Arc::new(plan)).unwrap();
         let mut output = [9.0; 8];
         processor
             .process_block(4, &[&[1.0; 8]], &mut [&mut output])
@@ -347,7 +347,7 @@ fn runtime_gain_and_mute_publish_without_preparation_or_audio_heap_operations() 
         vec![edge("route", "in", AUDIO_PORT_ID, "out", AUDIO_PORT_ID)],
     );
     let plan = Arc::new(RenderPlan::prepare(&execution).unwrap());
-    let mut processor = BlockProcessor::new(Arc::clone(&plan));
+    let mut processor = BlockProcessor::new(Arc::clone(&plan)).unwrap();
     let exchange = crate::ProcessorExchange::new(1);
     let mut output = [0.0; 8];
     for revision in 2..102 {
@@ -389,7 +389,8 @@ fn source_gain_retains_float_headroom_and_meter_peaks_across_unity_boost_and_mut
     );
     let plan = Arc::new(RenderPlan::prepare(&execution).unwrap());
     let meters = Arc::new(crate::PeakMeterBank::new(plan.meter_bindings().len(), 2));
-    let mut processor = BlockProcessor::with_peak_meters(Arc::clone(&plan), Arc::clone(&meters));
+    let mut processor =
+        BlockProcessor::with_peak_meters(Arc::clone(&plan), Arc::clone(&meters)).unwrap();
     let exchange = crate::ProcessorExchange::new(1);
     let input = [0.5, 1.0, -0.5, -1.0, 0.25, -0.75, -0.25, 0.75];
     assert_eq!(plan.meter_bindings().len(), 2);
@@ -528,9 +529,7 @@ fn prepare_dynamics(config: &NodeConfig, muted: bool, revision: u64) -> Box<Bloc
             },
         )
         .unwrap();
-    Box::new(BlockProcessor::new(Arc::new(
-        RenderPlan::prepare(&execution).unwrap(),
-    )))
+    Box::new(BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap())
 }
 
 #[test]
@@ -625,9 +624,7 @@ fn prepare_bus(revision: u64, muted: bool, extra_bus: bool) -> Box<BlockProcesso
             },
         )
         .unwrap();
-    Box::new(BlockProcessor::new(Arc::new(
-        RenderPlan::prepare(&execution).unwrap(),
-    )))
+    Box::new(BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap())
 }
 
 #[test]

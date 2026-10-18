@@ -1,3 +1,7 @@
+#![expect(
+    clippy::expect_used,
+    reason = "a build script fails the build by panicking; Cargo prints the message"
+)]
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") {
         return;

@@ -43,7 +43,7 @@ fn add_provider(catalog: &mut Catalog, id: &str, parameters: serde_json::Value) 
         bus.channels = 8;
         bus.channel_format = mixrelay_audio_graph::ProviderChannelFormat::Surround7_1;
     }
-    let document = &mut catalog.graphs[0].document;
+    let document = &mut catalog.graphs.active_mut().document;
     document.nodes.push(NodeSpec {
         control: mixrelay_audio_graph::NodeControl::default(),
         id: NodeId::from(id),
@@ -54,7 +54,7 @@ fn add_provider(catalog: &mut Catalog, id: &str, parameters: serde_json::Value) 
             ports: Some(ports),
         }),
     });
-    catalog.graphs[0].layout.positions.insert(
+    catalog.graphs.active_mut().layout.positions.insert(
         id.into(),
         mixrelay_control_protocol::GraphNodePosition { x: 150.0, y: 220.0 },
     );
@@ -119,11 +119,11 @@ fn free_save_preserves_missing_driver_and_plugin_work_without_execution_admissio
         ))
         .unwrap();
     assert_eq!(
-        load(&path).unwrap().graphs[0].document.nodes,
+        load(&path).unwrap().graphs.active().document.nodes,
         document.nodes
     );
     assert_eq!(
-        load(&path).unwrap().graphs[0].document.edges,
+        load(&path).unwrap().graphs.active().document.edges,
         document.edges
     );
     assert_eq!(engine.read_catalog().unwrap(), before);
@@ -131,7 +131,8 @@ fn free_save_preserves_missing_driver_and_plugin_work_without_execution_admissio
         Catalog::load(&dir.join("graphs.json"))
             .unwrap()
             .unwrap()
-            .graphs[0]
+            .graphs
+            .active()
             .document
             .nodes,
         document.nodes
@@ -240,7 +241,7 @@ fn free_save_does_not_require_a_disconnected_hardware_output_to_be_available() {
             },
         ))
         .unwrap();
-    assert_eq!(load(&path).unwrap().graphs[0].document, document);
+    assert_eq!(load(&path).unwrap().graphs.active().document, document);
 }
 
 #[test]
@@ -307,7 +308,7 @@ fn free_workspace_files_reject_multiple_graphs_and_excess_mappings_before_mutati
     let catalog_path = dir.join("graphs.json");
     let store = StateStore::new(dir.join("assets"));
     let mut multiple = Catalog::imported(GraphDocument::new(1, vec![], vec![]));
-    let mut second = multiple.graphs[0].clone();
+    let mut second = multiple.graphs.active().clone();
     second.id = "graph-2".into();
     multiple.graphs.push(second);
     let mut mappings = crate::default_duplex_document(1, None);
@@ -342,8 +343,9 @@ fn free_workspace_files_reject_multiple_graphs_and_excess_mappings_before_mutati
     let before = engine.read_catalog().unwrap();
     let bytes = std::fs::read(&catalog_path).unwrap();
     let mut allowed_plugins = plugins.clone();
-    allowed_plugins.graphs[0].document.nodes.truncate(2);
-    allowed_plugins.graphs[0].layout.positions.remove("three");
+    let allowed_graph = allowed_plugins.graphs.active_mut();
+    allowed_graph.document.nodes.truncate(2);
+    allowed_graph.layout.positions.remove("three");
     assert!(
         engine
             .validate_workspace_feature_usage(&allowed_plugins)
@@ -393,7 +395,7 @@ fn saving_after_paid_expiry_cannot_export_a_multiple_graph_workspace_or_replace_
     let dir = mixrelay_test_support::FixtureDir::new("expired-workspace-save").unwrap();
     let path = dir.join("graphs.json");
     let mut catalog = Catalog::imported(GraphDocument::new(1, vec![], vec![]));
-    let mut second = catalog.graphs[0].clone();
+    let mut second = catalog.graphs.active().clone();
     second.id = "graph-2".into();
     catalog.graphs.push(second);
     let bytes = serde_json::to_vec(&catalog).unwrap();
@@ -434,7 +436,7 @@ fn free_startup_protects_a_saved_multiple_graph_catalog_from_automatic_overwrite
     let dir = mixrelay_test_support::FixtureDir::new("free-protected-catalog").unwrap();
     let path = dir.join("graphs.json");
     let mut catalog = Catalog::imported(GraphDocument::new(1, vec![], vec![]));
-    let mut second = catalog.graphs[0].clone();
+    let mut second = catalog.graphs.active().clone();
     second.id = "graph-2".into();
     catalog.graphs.push(second);
     let bytes = serde_json::to_vec(&catalog).unwrap();
@@ -469,7 +471,7 @@ fn save_open_preserves_catalog_ids_and_layout_and_advances_revisions() {
         ))
         .unwrap();
     let file = load(Path::new(&path)).unwrap();
-    assert_eq!(file.active_id, before.active_id);
+    assert_eq!(file.selected_id(), before.active_id);
     engine
         .workspace_operation(request(&engine, WorkspaceAction::New))
         .unwrap();
@@ -738,7 +740,9 @@ fn portable_bundle_reopens_large_states_after_source_store_is_deleted() {
 
 fn assert_saved_provider_overlays(catalog: &Catalog) {
     for id in ["missing-effect-a", "missing-effect-b"] {
-        let provider = catalog.graphs[0]
+        let provider = catalog
+            .graphs
+            .active()
             .document
             .nodes
             .iter()

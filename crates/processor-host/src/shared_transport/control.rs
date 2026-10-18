@@ -102,15 +102,16 @@ impl WorkerControl {
         }
         let (status, length) = if can_publish(header, request) {
             match state {
-                Ok(bytes) if bytes.len() <= STATE_CAPACITY => {
-                    let length = u32::try_from(bytes.len()).expect("state capacity fits u32");
-                    if self.publish_chunks(header, request, &bytes) {
-                        (STATE_OK, length)
-                    } else {
-                        (STATE_FAILED, 0)
+                Ok(bytes) => match u32::try_from(bytes.len()) {
+                    Ok(length) if bytes.len() <= STATE_CAPACITY => {
+                        if self.publish_chunks(header, request, &bytes) {
+                            (STATE_OK, length)
+                        } else {
+                            (STATE_FAILED, 0)
+                        }
                     }
-                }
-                Ok(_) => (STATE_TOO_LARGE, 0),
+                    _ => (STATE_TOO_LARGE, 0),
+                },
                 Err(ProcessorStateError::Unsupported) => (STATE_UNSUPPORTED, 0),
                 Err(_) => (STATE_FAILED, 0),
             }
@@ -136,11 +137,12 @@ impl WorkerControl {
             if !can_publish(header, request) {
                 return false;
             }
+            // `publish` admitted only a state whose whole length fits u32.
+            let Ok(written) = u32::try_from(end) else {
+                return false;
+            };
             self.mapping.write_state_chunk(&bytes[offset..end]);
-            header.state_written.store(
-                u32::try_from(end).expect("state capacity fits u32"),
-                Ordering::Release,
-            );
+            header.state_written.store(written, Ordering::Release);
             offset = end;
         }
         can_publish(header, request)
@@ -241,8 +243,7 @@ impl ControlGuard<'_> {
             return Err(ProcessorStateError::InvalidResponse);
         }
         let delta = written - *consumed;
-        let chunk_limit = u32::try_from(CHUNK_CAPACITY).expect("chunk capacity fits u32");
-        if delta > chunk_limit {
+        if delta as usize > CHUNK_CAPACITY {
             header.state_cancel.store(request, Ordering::Release);
             return Err(ProcessorStateError::InvalidResponse);
         }

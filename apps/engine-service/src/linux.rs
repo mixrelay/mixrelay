@@ -37,7 +37,8 @@ mod endpoints;
 #[path = "linux_format.rs"]
 mod format;
 use mixrelay_pipewire as native;
-#[cfg(all(test, feature = "native-lab"))]
+#[cfg(test)]
+#[cfg(feature = "native-lab")]
 #[path = "linux_resource_tests.rs"]
 mod resource_tests;
 #[path = "linux_source_mute.rs"]
@@ -198,10 +199,9 @@ fn create_initial_processor(
         )
         .map_err(|error| error.to_string())?;
     let render = RenderPlan::prepare(&execution).map_err(|error| error.to_string())?;
-    Ok(Box::new(BlockProcessor::with_peak_meters(
-        Arc::new(render),
-        meters,
-    )))
+    BlockProcessor::with_peak_meters(Arc::new(render), meters)
+        .map(Box::new)
+        .map_err(|error| error.to_string())
 }
 
 const fn render_format() -> RenderFormat {
@@ -352,6 +352,13 @@ fn run_audio_worker(
                 return;
             }
         };
+    let timeline = match clock::GraphTimeline::new(initial_format.sample_rate) {
+        Ok(timeline) => timeline,
+        Err(error) => {
+            tracing::error!(%error, "could not prepare PipeWire graph timeline");
+            return;
+        }
+    };
     let clock_diagnostics = Arc::new(clock::DiscontinuityMailbox::default());
     let context = LinuxProcessState {
         processor,
@@ -363,7 +370,7 @@ fn run_audio_worker(
         captures: Box::default(),
         devices: Box::default(),
         status: status.clone(),
-        timeline: clock::GraphTimeline::new(initial_format.sample_rate),
+        timeline,
         clock_diagnostics: Arc::clone(&clock_diagnostics),
     };
     let driver = match GraphDriver::open(context, driver_format) {
@@ -493,7 +500,7 @@ impl LinuxProcessState<'_> {
             .unwrap_or(false);
         let format = self.processor.plan().format();
         if activated && previous_format != format {
-            self.timeline = clock::GraphTimeline::new(format.sample_rate);
+            self.timeline = clock::GraphTimeline::new(format.sample_rate).map_err(|_| ())?;
             self.status.activate_format(format);
         }
         format::observe_endpoints(&self.endpoints);

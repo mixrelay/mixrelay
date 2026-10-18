@@ -129,10 +129,13 @@ fn initial_processor(
             },
         )
         .unwrap();
-    Box::new(BlockProcessor::with_peak_meters(
-        Arc::new(RenderPlan::prepare(&execution).unwrap()),
-        meters,
-    ))
+    Box::new(
+        BlockProcessor::with_peak_meters(
+            Arc::new(RenderPlan::prepare(&execution).unwrap()),
+            meters,
+        )
+        .unwrap(),
+    )
 }
 
 struct ApplicationFixture {

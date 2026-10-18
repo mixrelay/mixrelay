@@ -36,16 +36,20 @@ impl Payload {
         {
             return result;
         }
-        result.valid = true;
-        let sample = |offset| {
-            u32::from_ne_bytes(
-                bytes[offset..offset + 4]
-                    .try_into()
-                    .expect("validated stereo frame contains four bytes"),
-            )
+        // A non-empty multiple of eight bytes holds at least one stereo frame.
+        let (words, _) = bytes.as_chunks::<4>();
+        let ([first_left, first_right, ..], [.., last_left, last_right]) = (words, words) else {
+            return result;
         };
-        result.first = [sample(0), sample(4)];
-        result.last = [sample(bytes.len() - 8), sample(bytes.len() - 4)];
+        result.valid = true;
+        result.first = [
+            u32::from_ne_bytes(*first_left),
+            u32::from_ne_bytes(*first_right),
+        ];
+        result.last = [
+            u32::from_ne_bytes(*last_left),
+            u32::from_ne_bytes(*last_right),
+        ];
         result.hash = PayloadHash(bytes.iter().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
             (hash ^ u64::from(*byte)).wrapping_mul(0x100_0000_01b3)
         }));
@@ -315,18 +319,19 @@ unsafe fn geometry(buffer: &sys::pw_buffer, initialized_pcm: bool) -> BufferGeom
         && chunk.offset <= data.maxsize
         && chunk.size <= data.maxsize - chunk.offset;
     let edges = if bounds_valid {
-        let count = chunk.size.min(8);
+        // Sizes above u8::MAX always copy the full eight-byte edge.
+        let count = u8::try_from(chunk.size).map_or(8, |size| size.min(8));
         let mut edges = ByteEdges {
-            count: u8::try_from(count).expect("edge copy is bounded to eight bytes"),
+            count,
             ..ByteEdges::default()
         };
         // SAFETY: the initialized chunk range was validated against native
         // capacity. These two copies touch at most eight bytes each, unaligned.
         unsafe {
             let first = data.data.cast::<u8>().add(chunk.offset as usize);
-            let last = first.add((chunk.size - count) as usize);
-            std::ptr::copy_nonoverlapping(first, edges.first.as_mut_ptr(), count as usize);
-            std::ptr::copy_nonoverlapping(last, edges.last.as_mut_ptr(), count as usize);
+            let last = first.add((chunk.size - u32::from(count)) as usize);
+            std::ptr::copy_nonoverlapping(first, edges.first.as_mut_ptr(), usize::from(count));
+            std::ptr::copy_nonoverlapping(last, edges.last.as_mut_ptr(), usize::from(count));
         }
         Some(edges)
     } else {

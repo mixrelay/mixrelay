@@ -65,10 +65,13 @@ impl NativeHarness {
                 },
             )
             .map_err(|error| format!("empty graph compile: {error:?}"))?;
-        let current = Box::new(BlockProcessor::new(Arc::new(
-            RenderPlan::prepare(&compiled)
-                .map_err(|error| format!("empty render plan: {error:?}"))?,
-        )));
+        let current = Box::new(
+            BlockProcessor::new(Arc::new(
+                RenderPlan::prepare(&compiled)
+                    .map_err(|error| format!("empty render plan: {error:?}"))?,
+            ))
+            .map_err(|error| format!("empty processor storage: {error:?}"))?,
+        );
         let exchange = Arc::new(ProcessorExchange::new(1));
         exchange.observe_plan(Arc::clone(current.plan()));
         let resources = Arc::new(FixtureResources::default());

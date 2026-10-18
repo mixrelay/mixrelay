@@ -64,14 +64,12 @@ struct Slice {
 }
 
 fn validate(reader: &mut (impl Read + Seek), length: u64) -> Result<(), UniversalError> {
-    let mut header = [0; 8];
-    reader.read_exact(&mut header)?;
-    let entry_size = match u32::from_be_bytes(header[..4].try_into().expect("four-byte magic")) {
+    let entry_size = match u32::from_be_bytes(read_array(reader)?) {
         0xcafe_babe => 20,
         0xcafe_babf => 32,
         _ => return Err(UniversalError::Architectures),
     };
-    if u32::from_be_bytes(header[4..].try_into().expect("four-byte count")) != 2 {
+    if u32::from_be_bytes(read_array(reader)?) != 2 {
         return Err(UniversalError::Architectures);
     }
     let first = read_slice(reader, entry_size, length)?;
@@ -84,10 +82,9 @@ fn validate(reader: &mut (impl Read + Seek), length: u64) -> Result<(), Universa
     }
     for slice in [first, second] {
         reader.seek(SeekFrom::Start(slice.offset))?;
-        reader.read_exact(&mut header)?;
-        if u32::from_le_bytes(header[..4].try_into().expect("four-byte magic")) != 0xfeed_facf
-            || u32::from_le_bytes(header[4..].try_into().expect("four-byte CPU")) != slice.cpu
-        {
+        let magic = u32::from_le_bytes(read_array(reader)?);
+        let cpu = u32::from_le_bytes(read_array(reader)?);
+        if magic != 0xfeed_facf || cpu != slice.cpu {
             return Err(UniversalError::Structure);
         }
     }
@@ -99,22 +96,22 @@ fn read_slice(
     entry_size: usize,
     length: u64,
 ) -> Result<Slice, UniversalError> {
-    let mut bytes = [0; 32];
-    reader.read_exact(&mut bytes[..entry_size])?;
-    let word = |offset: usize| {
-        u32::from_be_bytes(bytes[offset..offset + 4].try_into().expect("bounded word"))
-    };
+    let cpu = u32::from_be_bytes(read_array(reader)?);
+    let _subtype: [u8; 4] = read_array(reader)?;
     let (offset, size, alignment) = if entry_size == 20 {
-        (u64::from(word(8)), u64::from(word(12)), word(16))
+        let offset = u32::from_be_bytes(read_array(reader)?);
+        let size = u32::from_be_bytes(read_array(reader)?);
+        let alignment = u32::from_be_bytes(read_array(reader)?);
+        (u64::from(offset), u64::from(size), alignment)
     } else {
-        if word(28) != 0 {
+        let offset = u64::from_be_bytes(read_array(reader)?);
+        let size = u64::from_be_bytes(read_array(reader)?);
+        let alignment = u32::from_be_bytes(read_array(reader)?);
+        let reserved = u32::from_be_bytes(read_array(reader)?);
+        if reserved != 0 {
             return Err(UniversalError::Structure);
         }
-        (
-            u64::from_be_bytes(bytes[8..16].try_into().expect("eight-byte offset")),
-            u64::from_be_bytes(bytes[16..24].try_into().expect("eight-byte size")),
-            word(24),
-        )
+        (offset, size, alignment)
     };
     let end = offset.checked_add(size).ok_or(UniversalError::Structure)?;
     let minimum_offset = if entry_size == 20 { 48 } else { 72 };
@@ -126,11 +123,14 @@ fn read_slice(
     {
         return Err(UniversalError::Structure);
     }
-    Ok(Slice {
-        cpu: word(0),
-        offset,
-        end,
-    })
+    Ok(Slice { cpu, offset, end })
+}
+
+/// Reads the next fixed-width header field.
+fn read_array<const N: usize>(reader: &mut impl Read) -> io::Result<[u8; N]> {
+    let mut bytes = [0; N];
+    reader.read_exact(&mut bytes)?;
+    Ok(bytes)
 }
 
 #[cfg(test)]

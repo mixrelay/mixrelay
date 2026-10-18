@@ -133,6 +133,15 @@ impl InputRing {
         }
     }
 
+    /// Maps a monotonic ring cursor to its slot.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the remainder is below CAPACITY, which is a usize"
+    )]
+    fn slot(&self, cursor: u64) -> &InputSlot {
+        &self.slots[(cursor % CAPACITY as u64) as usize]
+    }
+
     /// Caller serializes producers independently of the blob/state publisher.
     pub(super) fn push(&self, event: &ProcessorEditorInput) -> Result<(), String> {
         if event.kind == EditorPointerKind::Cancel {
@@ -148,8 +157,7 @@ impl InputRing {
             self.cancel_session.store(event.session, Ordering::Release);
             return Err("editor input queue is full; gesture cancelled".to_owned());
         }
-        let slot =
-            &self.slots[usize::try_from(head % CAPACITY as u64).expect("bounded ring index")];
+        let slot = self.slot(head);
         slot.session.store(event.session, Ordering::Relaxed);
         slot.kind.store(
             match event.kind {
@@ -174,8 +182,7 @@ impl InputRing {
         if tail == self.head.load(Ordering::Acquire) {
             return None;
         }
-        let slot =
-            &self.slots[usize::try_from(tail % CAPACITY as u64).expect("bounded ring index")];
+        let slot = self.slot(tail);
         let event = PointerEvent {
             session: slot.session.load(Ordering::Relaxed),
             kind: match slot.kind.load(Ordering::Relaxed) {

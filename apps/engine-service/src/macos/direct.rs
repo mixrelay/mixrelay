@@ -264,9 +264,10 @@ impl Renderer<'_> {
         let mut discontinuity = self.position != Some(base);
         // A larger native quantum is split, never truncated or queued for later.
         while io.offset < frames as usize {
-            let count =
-                u32::try_from((frames as usize - io.offset).min(format.block_frames as usize))
-                    .expect("bounded native quantum");
+            let count = u32::try_from(frames as usize - io.offset)
+                .map_or(format.block_frames, |remaining| {
+                    remaining.min(format.block_frames)
+                });
             let cycle = ProcessCycle {
                 clock: ClockDomain {
                     authority: ClockAuthority::Device,
@@ -551,9 +552,7 @@ mod tests {
                 },
             )
             .unwrap();
-        Box::new(BlockProcessor::new(Arc::new(
-            RenderPlan::prepare(&execution).unwrap(),
-        )))
+        Box::new(BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap())
     }
 
     fn offline_branch_processor() -> Box<BlockProcessor> {
@@ -581,9 +580,7 @@ mod tests {
                 },
             )
             .unwrap();
-        Box::new(BlockProcessor::new(Arc::new(
-            RenderPlan::prepare(&execution).unwrap(),
-        )))
+        Box::new(BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap())
     }
 
     #[test]

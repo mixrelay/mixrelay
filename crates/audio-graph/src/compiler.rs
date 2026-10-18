@@ -859,12 +859,8 @@ fn topological_order(
 ) -> Result<Vec<NodeId>, Vec<NodeId>> {
     let mut indegree: BTreeMap<NodeId, usize> =
         nodes.keys().cloned().map(|node_id| (node_id, 0)).collect();
-    for destinations in dependencies.values() {
-        for destination in destinations {
-            *indegree
-                .get_mut(destination)
-                .expect("dependencies only reference resolved nodes") += 1;
-        }
+    for destination in dependencies.values().flatten() {
+        *indegree.entry(destination.clone()).or_default() += 1;
     }
 
     let mut ready: BTreeSet<NodeId> = indegree
@@ -876,10 +872,11 @@ fn topological_order(
 
     while let Some(node_id) = ready.pop_first() {
         ordered.push(node_id.clone());
-        for destination in &dependencies[&node_id] {
-            let count = indegree
-                .get_mut(destination)
-                .expect("dependencies only reference resolved nodes");
+        for destination in dependencies.get(&node_id).into_iter().flatten() {
+            // The counting pass above inserted every dependency destination.
+            let Some(count) = indegree.get_mut(destination) else {
+                continue;
+            };
             *count -= 1;
             if *count == 0 {
                 ready.insert(destination.clone());

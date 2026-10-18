@@ -35,7 +35,7 @@ impl Worker {
         status: Arc<Mutex<RecorderStatus>>,
     ) -> Result<Self, std::collections::TryReserveError> {
         Ok(Self {
-            packet: Packet::new(transport.channels)?,
+            packet: Packet::new(usize::from(transport.channels))?,
             transport,
             status,
             take: None,
@@ -119,8 +119,7 @@ impl Worker {
             }
         } else {
             let observed = self.transport.rate.load(Ordering::Acquire);
-            let channels =
-                u16::try_from(self.transport.channels).expect("validated recorder channel count");
+            let channels = self.transport.channels;
             *self.status.lock() = RecorderStatus {
                 path: request.path.clone(),
                 sample_rate: request
@@ -176,8 +175,8 @@ impl Worker {
                 .take()
                 .map_or(Ok(self.status.lock().frames), Take::finish)
         };
-        if self.take.as_ref().is_some_and(Take::limit_reached) {
-            result = self.take.take().expect("limited take").finish();
+        if let Some(take) = self.take.take_if(|take| take.limit_reached()) {
+            result = take.finish();
         }
         match result {
             Ok(frames) => {
@@ -207,7 +206,7 @@ impl Worker {
             let packet = &self.packet;
             let result = self.take.as_mut().map_or(Ok(()), |take| {
                 take.write(
-                    &packet.samples[..packet.frames * self.transport.channels],
+                    &packet.samples[..packet.frames * usize::from(self.transport.channels)],
                     packet.rate,
                 )
             });
@@ -217,10 +216,12 @@ impl Worker {
                     return Err(error.into());
                 }
                 while self.transport.read_packet(&mut self.packet) {}
-                let frames = self.take.take().expect("limited take").finish()?;
-                let mut status = self.status.lock();
-                status.frames = frames;
-                status.state = RecorderState::Stopped;
+                if let Some(take) = self.take.take() {
+                    let frames = take.finish()?;
+                    let mut status = self.status.lock();
+                    status.frames = frames;
+                    status.state = RecorderState::Stopped;
+                }
                 break;
             }
         }

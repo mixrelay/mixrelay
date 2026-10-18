@@ -3,8 +3,8 @@
 MixRelay의 Rust 코드에 적용하는 규칙이다. 작업에 해당하는 조건의 절을 먼저 읽는다. 크레이트 책임과 의존 방향은 [코드 구조와 책임](architecture.md)이 정한다. 괄호 안은 근거다: MS = [Microsoft Pragmatic Rust Guidelines](https://microsoft.github.io/rust-guidelines/agents/all.txt), API = [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/checklist.html), DP = [Rust Design Patterns](https://rust-unofficial.github.io/patterns/), Book = [The Rust Programming Language](https://doc.rust-lang.org/book/).
 
 ## 강제 수단
-- **지금 검사가 막는 것:** rustc `rust_2018_idioms`·`unreachable_pub`·`unused`, clippy `all`·`pedantic`·`perf`(deny), `clippy.toml`의 함수 80줄·인자 5개 한도, `cargo fmt`, `pnpm check:crate-layers`(의존 방향). CI(`pnpm lab:test`, macOS·Linux)는 의존 방향 검사, fmt, clippy, `cargo test --workspace --lib --bins`, 제어 UI 테스트를 실행하고, macOS에서는 `pnpm check:native`, 왕복 프로브 분석 자체 시험(`probe:macos-roundtrip --self-test`), 빌드·서명 도구 테스트(`pnpm test:scripts`)를 더한다. `pnpm check:rust`는 로컬 검사로 fmt, `cargo machete`(쓰지 않는 의존), `--all-features` clippy, Rust 커버리지를 실행한다.
-- **규칙이지만 아직 검사가 막지 않는 것:** 아래의 `unwrap`·`expect` 금지, SAFETY 주석, 문자열 에러 금지, 모듈 크기. 리뷰에서 확인하고, 검사를 추가할 때 이 목록을 갱신한다.
+- **지금 검사가 막는 것:** rustc `rust_2018_idioms`·`unreachable_pub`·`unused`, clippy `all`·`pedantic`·`perf`·`unwrap_used`·`expect_used`(deny, 테스트 함수·`#[cfg(test)]` 모듈은 `clippy.toml`이 허용), `clippy.toml`의 함수 80줄·인자 5개 한도, `cargo fmt`, `pnpm check:crate-layers`(의존 방향). CI(`pnpm lab:test`, macOS·Linux)는 의존 방향 검사, fmt, clippy, `cargo test --workspace --lib --bins`, 제어 UI 테스트를 실행하고, macOS에서는 `pnpm check:native`, 왕복 프로브 분석 자체 시험(`probe:macos-roundtrip --self-test`), 빌드·서명 도구 테스트(`pnpm test:scripts`)를 더한다. `pnpm check:rust`는 로컬 검사로 fmt, `cargo machete`(쓰지 않는 의존), `--all-features` clippy, Rust 커버리지를 실행한다.
+- **규칙이지만 아직 검사가 막지 않는 것:** SAFETY 주석, 문자열 에러 금지, 모듈 크기. 리뷰에서 확인하고, 검사를 추가할 때 이 목록을 갱신한다.
 - 린트를 끄는 새 코드는 `#[allow]` 대신 `#[expect(lint, reason = "...")]`를 쓴다(MS M-LINT-OVERRIDE-EXPECT). `restriction`·`nursery` 그룹은 통째로 켜지 않고 항목을 골라 켠다([Clippy](https://doc.rust-lang.org/clippy/lints.html)). 코드에 `#![deny(warnings)]`를 쓰지 않는다(DP 안티패턴).
 
 ## 구조를 만들거나 옮길 때
@@ -31,7 +31,7 @@ MixRelay의 Rust 코드에 적용하는 규칙이다. 작업에 해당하는 조
 
 ## 에러를 다룰 때
 - 실패할 수 있는 동작은 `Result`를 돌려준다(Book 9.3).
-- **제품 코드에는 `unwrap()`·`expect()`를 쓰지 않는다. 테스트에서만 쓴다.** `?`·`let … else`·`ok_or`로 전달하거나 불변식을 타입으로 보장한다. 잠금 poison은 기존 `lock()` 도우미처럼 `into_inner`로 처리한다.
+- **제품 코드에는 `unwrap()`·`expect()`를 쓰지 않는다. 테스트에서만 쓴다.** `?`·`let … else`·`ok_or`로 전달하거나 불변식을 타입으로 보장한다. 잠금 poison은 기존 `lock()` 도우미처럼 `into_inner`로 처리한다. 출하하지 않는 대상은 파일 첫 줄에 이유를 적고 허용한다: build script는 panic으로 빌드를 실패시키므로 `#![expect(clippy::expect_used, reason = "...")]`, 플랫폼별로 비는 lab 예제·통합 테스트의 도우미는 `#![allow(..., reason = "...")]`. Linux 전용 코드는 macOS clippy가 컴파일하지 않으므로 Linux CI에서 확인된다.
 - 라이브러리 크레이트의 에러는 `thiserror` enum이나 구조체로 정의하고 `Error + Send + Sync + Display + Debug`를 구현한다. 앱 크레이트의 최상위는 `anyhow`를 써도 된다(API C-GOOD-ERR, MS M-APP-ERROR).
 - 새 코드에서 `Result<_, String>`이나 `map_err(|e| e.to_string())`으로 에러를 문자열로 바꿔 전달하지 않는다. 호출자가 원인별로 처리할 수 없게 된다. 변환은 `From`을 한 번 구현해 `?`로 하고, 문맥 추가가 필요할 때만 `map_err`·`context`를 쓴다(MS M-FROM-ERROR).
 

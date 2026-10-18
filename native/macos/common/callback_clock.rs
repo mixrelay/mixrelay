@@ -72,9 +72,9 @@ impl Continuity {
         if valid {
             // Explicit word conversion retains f64 rounding. Native callbacks
             // use bounded u32 frames, but the ABI accepts a full u64 frame count.
-            let high = u32::try_from(frames >> 32).expect("upper frame word fits u32");
-            let low =
-                u32::try_from(frames & u64::from(u32::MAX)).expect("lower frame word fits u32");
+            let [l0, l1, l2, l3, h0, h1, h2, h3] = frames.to_le_bytes();
+            let high = u32::from_le_bytes([h0, h1, h2, h3]);
+            let low = u32::from_le_bytes([l0, l1, l2, l3]);
             self.next_sample = sample + f64::from(high).mul_add(4_294_967_296.0, f64::from(low));
             self.previous_host = host;
         }

@@ -44,7 +44,8 @@ fn processor(revision: u64, placeholder: bool, drops: &Arc<AtomicUsize>) -> Box<
             },
         )
         .unwrap();
-    let mut processor = BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()));
+    let mut processor =
+        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap();
     processor.hosted_processors = vec![Box::new(Counter {
         identity: 7,
         cursor: 0,

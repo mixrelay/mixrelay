@@ -115,8 +115,11 @@ impl PcmRing {
     }
 
     pub(super) fn spans(&self, cursor: u64, frames: u32) -> (usize, usize, usize) {
-        let start =
-            u32::try_from(cursor % u64::from(self.capacity)).expect("modulo capacity fits u32");
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a remainder modulo the u32 capacity is below that capacity"
+        )]
+        let start = (cursor % u64::from(self.capacity)) as u32;
         let first = frames.min(self.capacity - start);
         (
             start as usize * self.channels as usize,

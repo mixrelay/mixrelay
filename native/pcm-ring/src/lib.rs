@@ -163,9 +163,7 @@ impl PcmRing {
     }
 
     /// Reads immutable geometry and independent atomic diagnostic counters.
-    /// # Panics
-    /// Panics only if the ring's private capacity invariant is violated: a queued
-    /// observation bounded by its u32 capacity must itself fit a u32.
+    /// An inconsistent cursor pair beyond the capacity reports an empty queue.
     #[must_use]
     pub fn stats(&self) -> RingStats {
         let written = self.publication.written.load(Ordering::Acquire);
@@ -177,11 +175,10 @@ impl PcmRing {
             overflows: self.publication.overflows.load(Ordering::Relaxed),
             starvations: self.publication.starvations.load(Ordering::Relaxed),
             channels: self.channels,
-            queued: if available <= u64::from(self.capacity) {
-                u32::try_from(available).expect("bounded queue fits u32")
-            } else {
-                0
-            },
+            queued: u32::try_from(available)
+                .ok()
+                .filter(|queued| *queued <= self.capacity)
+                .unwrap_or(0),
         }
     }
 }

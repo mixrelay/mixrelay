@@ -43,17 +43,66 @@ pub(super) use restore::PendingRestore;
 #[path = "device_catalog.rs"]
 mod devices;
 
+mod saved_graphs;
 mod state_assets;
 mod workspace;
 
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+use saved_graphs::SavedGraphs;
+
+#[derive(Clone, Deserialize)]
+#[serde(try_from = "CatalogFile")]
 pub(super) struct Catalog {
+    version: u32,
+    revision: u64,
+    graphs: SavedGraphs,
+}
+
+/// Saved catalog shape: the selection is stored by graph identity.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CatalogFile {
     version: u32,
     revision: u64,
     active_id: String,
     graphs: Vec<SavedGraph>,
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogFileView<'a> {
+    version: u32,
+    revision: u64,
+    active_id: &'a str,
+    graphs: Vec<&'a SavedGraph>,
+}
+
+impl TryFrom<CatalogFile> for Catalog {
+    type Error = &'static str;
+
+    fn try_from(file: CatalogFile) -> Result<Self, Self::Error> {
+        let graphs =
+            SavedGraphs::from_list(file.graphs, &file.active_id).ok_or(INVALID_CATALOG_IDENTITY)?;
+        Ok(Self {
+            version: file.version,
+            revision: file.revision,
+            graphs,
+        })
+    }
+}
+
+impl Serialize for Catalog {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        CatalogFileView {
+            version: self.version,
+            revision: self.revision,
+            active_id: self.selected_id(),
+            graphs: self.graphs.iter().collect(),
+        }
+        .serialize(serializer)
+    }
+}
+
+const INVALID_CATALOG_IDENTITY: &str = "invalid graph catalog identity, name or version";
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -63,6 +112,20 @@ struct SavedGraph {
     document: GraphDocument,
     layout_revision: u64,
     layout: GraphLayout,
+}
+
+const UNTITLED: &str = "Untitled Graph";
+
+impl SavedGraph {
+    fn new(id: String, name: String, document: GraphDocument) -> Self {
+        Self {
+            id,
+            name,
+            document,
+            layout_revision: 0,
+            layout: GraphLayout::default(),
+        }
+    }
 }
 
 pub(super) struct CatalogStore {
@@ -91,7 +154,7 @@ fn valid_name(name: &str) -> bool {
 
 impl Catalog {
     pub(super) fn selected_id(&self) -> &str {
-        &self.active_id
+        &self.graphs.active().id
     }
 
     pub(super) fn documents_mut(&mut self) -> impl Iterator<Item = (&str, &mut GraphDocument)> {
@@ -119,14 +182,11 @@ impl Catalog {
         Self {
             version: 1,
             revision: 1,
-            active_id: "graph-1".into(),
-            graphs: vec![SavedGraph {
-                id: "graph-1".into(),
-                name: "Untitled Graph".into(),
+            graphs: SavedGraphs::single(SavedGraph::new(
+                "graph-1".into(),
+                UNTITLED.into(),
                 document,
-                layout_revision: 0,
-                layout: GraphLayout::default(),
-            }],
+            )),
         }
     }
 
@@ -145,7 +205,7 @@ impl Catalog {
         }
         let mut value: Self = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
         value.validate()?;
-        for graph in &mut value.graphs {
+        for graph in value.graphs.iter_mut() {
             restore::require_pid_reselection(&mut graph.document);
         }
         Ok(Some(value))
@@ -155,7 +215,6 @@ impl Catalog {
         let value = self;
         let mut ids = BTreeSet::new();
         if value.version != 1
-            || value.graphs.is_empty()
             || value.graphs.len() > MAX_GRAPHS
             || !value.graphs.iter().all(|graph| {
                 valid_name(&graph.name)
@@ -164,9 +223,8 @@ impl Catalog {
                     && ids.insert(graph.id.clone())
                     && layout::validate(&graph.layout).is_ok()
             })
-            || !ids.contains(&value.active_id)
         {
-            return Err("invalid graph catalog identity, name or version".into());
+            return Err(INVALID_CATALOG_IDENTITY.into());
         }
         state_assets::referenced(self).map_err(|error| {
             error
@@ -180,10 +238,7 @@ impl Catalog {
     }
 
     fn active(&self) -> &SavedGraph {
-        self.graphs
-            .iter()
-            .find(|graph| graph.id == self.active_id)
-            .expect("validated active graph")
+        self.graphs.active()
     }
 
     /// Startup is a new publication, not a new revision namespace. Include
@@ -197,18 +252,14 @@ impl Catalog {
     }
 
     pub(super) fn update_document(&mut self, document: GraphDocument) {
-        self.graphs
-            .iter_mut()
-            .find(|graph| graph.id == self.active_id)
-            .expect("validated active graph")
-            .document = document;
+        self.graphs.active_mut().document = document;
     }
 
     fn response(&self) -> GraphCatalogResponse {
         GraphCatalogResponse {
             protocol_version: PROTOCOL_VERSION,
             catalog_revision: self.revision,
-            active_id: self.active_id.clone(),
+            active_id: self.selected_id().to_owned(),
             graphs: self
                 .graphs
                 .iter()
@@ -486,7 +537,7 @@ impl EngineGraphController {
             .value
             .as_ref()
             .map_err(|error| unavailable(error))?;
-        if id == value.active_id {
+        if id == value.selected_id() {
             return Ok(self.graph.read().clone());
         }
         value
@@ -521,7 +572,8 @@ impl EngineGraphController {
                 parameters: serde_json::json!({"submittedRevision": revisions.submitted, "catalogRevision": value.revision}),
             });
         }
-        if matches!(&request.action, GraphCatalogAction::Select { id } if *id == value.active_id) {
+        if matches!(&request.action, GraphCatalogAction::Select { id } if id == value.selected_id())
+        {
             return self.current_catalog_response();
         }
         let next_catalog_revision = value
@@ -556,7 +608,7 @@ impl EngineGraphController {
         let catalog = self.catalog.lock();
         let mut response = catalog
             .as_ref()
-            .expect("catalog enabled")
+            .ok_or_else(|| unavailable("graph catalog not enabled"))?
             .value
             .as_ref()
             .map_err(|error| unavailable(error))?
@@ -608,20 +660,16 @@ impl Catalog {
                 if self.graphs.iter().any(|graph| graph.id == id) {
                     return Err(invalid("graph identity collision"));
                 }
-                self.graphs.push(SavedGraph {
-                    id: id.clone(),
-                    name: name.trim().into(),
-                    document: GraphDocument::new(next_revision, vec![], vec![]),
-                    layout_revision: 0,
-                    layout: GraphLayout::default(),
-                });
-                self.active_id = id;
+                self.graphs.push_selected(SavedGraph::new(
+                    id,
+                    name.trim().into(),
+                    GraphDocument::new(next_revision, vec![], vec![]),
+                ));
             }
             GraphCatalogAction::Select { id } => {
-                if !self.graphs.iter().any(|graph| graph.id == id) {
+                if !self.graphs.select(&id) {
                     return Err(invalid("graph does not exist"));
                 }
-                self.active_id = id;
             }
             GraphCatalogAction::Rename { id, name } => {
                 if !valid_name(&name) {
@@ -636,36 +684,19 @@ impl Catalog {
                 switch = false;
             }
             GraphCatalogAction::Delete { id } => {
-                self.remove_graph(&id, next_revision, next_catalog_revision)?;
+                // Removing the last graph leaves a new empty one, so the catalog is never empty.
+                let replacement = || {
+                    SavedGraph::new(
+                        format!("graph-{next_catalog_revision}"),
+                        UNTITLED.into(),
+                        GraphDocument::new(next_revision, vec![], vec![]),
+                    )
+                };
+                if !self.graphs.remove(&id, replacement) {
+                    return Err(invalid("graph does not exist"));
+                }
             }
         }
         Ok(switch)
-    }
-
-    fn remove_graph(
-        &mut self,
-        id: &str,
-        revision: u64,
-        catalog_revision: u64,
-    ) -> Result<(), ProtocolError> {
-        let index = self
-            .graphs
-            .iter()
-            .position(|graph| graph.id == id)
-            .ok_or_else(|| invalid("graph does not exist"))?;
-        self.graphs.remove(index);
-        if self.graphs.is_empty() {
-            self.apply_action(
-                GraphCatalogAction::Create {
-                    name: "Untitled Graph".into(),
-                },
-                revision,
-                catalog_revision,
-            )?;
-        } else if self.active_id == id {
-            self.active_id
-                .clone_from(&self.graphs[index.min(self.graphs.len() - 1)].id);
-        }
-        Ok(())
     }
 }

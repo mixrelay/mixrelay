@@ -1,3 +1,8 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "test helpers outside #[test] functions; a failed setup fails the test"
+)]
 //! Opt-in, same-workload socket ownership measurement; not an audio benchmark.
 
 use std::{

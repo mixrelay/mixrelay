@@ -31,7 +31,7 @@ fn prepared(config: NodeConfig) -> BlockProcessor {
             edge("output", "fx", AUDIO_PORT_ID, "out", AUDIO_PORT_ID),
         ],
     );
-    BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()))
+    BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap()
 }
 
 fn direct_block(processor: &mut BlockProcessor, inputs: &[&[f32]]) -> [f32; 8] {
@@ -324,10 +324,10 @@ fn finite_gain_overflow_is_contained_before_downstream_dynamics() {
         ],
     );
     let plan = Arc::new(RenderPlan::prepare(&execution).unwrap());
-    let mut actual = BlockProcessor::new(Arc::clone(&plan));
-    let mut reference = BlockProcessor::new(Arc::clone(&plan));
-    let mut external = BlockProcessor::new(Arc::clone(&plan));
-    let mut external_reference = BlockProcessor::new(plan);
+    let mut actual = BlockProcessor::new(Arc::clone(&plan)).unwrap();
+    let mut reference = BlockProcessor::new(Arc::clone(&plan)).unwrap();
+    let mut external = BlockProcessor::new(Arc::clone(&plan)).unwrap();
+    let mut external_reference = BlockProcessor::new(plan).unwrap();
     let invalid = [
         f32::MAX,
         -f32::MAX,
@@ -395,10 +395,10 @@ fn finite_mixer_overflow_is_contained_before_downstream_dynamics() {
         ],
     );
     let plan = Arc::new(RenderPlan::prepare(&execution).unwrap());
-    let mut actual = BlockProcessor::new(Arc::clone(&plan));
-    let mut reference = BlockProcessor::new(Arc::clone(&plan));
-    let mut external = BlockProcessor::new(Arc::clone(&plan));
-    let mut external_reference = BlockProcessor::new(plan);
+    let mut actual = BlockProcessor::new(Arc::clone(&plan)).unwrap();
+    let mut reference = BlockProcessor::new(Arc::clone(&plan)).unwrap();
+    let mut external = BlockProcessor::new(Arc::clone(&plan)).unwrap();
+    let mut external_reference = BlockProcessor::new(plan).unwrap();
     let invalid = [
         f32::MAX,
         -f32::MAX,
@@ -468,10 +468,10 @@ fn route_fan_in_overflow_is_contained_before_effects_and_sinks() {
         }
         let execution = compile(nodes, edges);
         let plan = Arc::new(RenderPlan::prepare(&execution).unwrap());
-        let mut direct = BlockProcessor::new(Arc::clone(&plan));
-        let mut reference = BlockProcessor::new(Arc::clone(&plan));
-        let mut external = BlockProcessor::new(Arc::clone(&plan));
-        let mut external_reference = BlockProcessor::new(plan);
+        let mut direct = BlockProcessor::new(Arc::clone(&plan)).unwrap();
+        let mut reference = BlockProcessor::new(Arc::clone(&plan)).unwrap();
+        let mut external = BlockProcessor::new(Arc::clone(&plan)).unwrap();
+        let mut external_reference = BlockProcessor::new(plan).unwrap();
         for block in 0..101 {
             let actual = if block == 0 { input } else { [0.125; 8] };
             let clean = if block == 0 { replaced } else { [0.125; 8] };

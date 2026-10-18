@@ -46,6 +46,7 @@ fn prepared(
         Arc::new(RenderPlan::prepare(&execution).unwrap()),
         meters.clone(),
     )
+    .unwrap()
 }
 
 fn index(processor: &BlockProcessor) -> usize {

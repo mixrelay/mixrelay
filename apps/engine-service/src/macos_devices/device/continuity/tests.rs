@@ -388,5 +388,5 @@ fn processor() -> BlockProcessor {
             },
         )
         .unwrap();
-    BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()))
+    BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap()
 }

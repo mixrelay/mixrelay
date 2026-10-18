@@ -23,7 +23,7 @@ pub struct RecorderTap {
 
 #[derive(Debug)]
 pub(crate) struct Transport {
-    pub(crate) channels: usize,
+    pub(crate) channels: u16,
     pub(crate) rate: AtomicU32,
     pub(crate) gate: AtomicU64,
     pub(crate) taps: AtomicUsize,
@@ -35,7 +35,7 @@ pub(crate) struct Transport {
 impl Transport {
     pub(crate) fn new(channels: u16) -> Result<Arc<Self>, std::collections::TryReserveError> {
         Ok(Arc::new(Self {
-            channels: usize::from(channels),
+            channels,
             rate: AtomicU32::new(0),
             gate: AtomicU64::new(0),
             taps: AtomicUsize::new(0),
@@ -153,14 +153,15 @@ impl RecorderTap {
         if shared.gate.load(Ordering::SeqCst) != token {
             return;
         }
+        let channels = usize::from(shared.channels);
         if !super::valid_rate(sample_rate)
-            || !samples.len().is_multiple_of(shared.channels)
-            || samples.len() / shared.channels > MAX_CALLBACK_FRAMES
+            || !samples.len().is_multiple_of(channels)
+            || samples.len() / channels > MAX_CALLBACK_FRAMES
         {
             shared.fail(token, 2);
             return;
         }
-        for source in samples.chunks(PACKET_FRAMES * shared.channels) {
+        for source in samples.chunks(PACKET_FRAMES * channels) {
             if !shared.packets.publish(source, sample_rate) {
                 shared.fail(token, 1);
                 return;

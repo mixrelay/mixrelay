@@ -143,23 +143,25 @@ fn graph_snapshot(id: &str, name: &str, graph: &GraphDocument) -> GraphControlSn
             .nodes
             .iter()
             .filter(|node| node_control::controllable(node))
-            .map(|node| NodeControlSnapshot {
-                descriptor: descriptor(node),
-                recorder: None,
+            .filter_map(|node| {
+                Some(NodeControlSnapshot {
+                    descriptor: descriptor(node)?,
+                    recorder: None,
+                })
             })
             .collect(),
     }
 }
 
-fn descriptor(node: &NodeSpec) -> NodeControlDescriptor {
-    NodeControlDescriptor {
+/// Returns `None` for a node kind without a protocol name (composition-only kinds).
+fn descriptor(node: &NodeSpec) -> Option<NodeControlDescriptor> {
+    let Ok(serde_json::Value::String(kind)) = serde_json::to_value(node.config.kind()) else {
+        return None;
+    };
+    Some(NodeControlDescriptor {
         node_id: node.id.as_str().to_owned(),
         label: node.label.clone(),
-        kind: serde_json::to_value(node.config.kind())
-            .expect("unit node kind serializes to JSON")
-            .as_str()
-            .expect("unit node kind is a JSON string")
-            .to_owned(),
+        kind,
         control: node.control,
         gain_db: node_control::node_gain(&node.config),
         capabilities: NodeControlCapabilities {
@@ -167,5 +169,5 @@ fn descriptor(node: &NodeSpec) -> NodeControlDescriptor {
             mute: true,
             recorder: matches!(node.config, NodeConfig::Recorder { .. }),
         },
-    }
+    })
 }

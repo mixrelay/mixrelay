@@ -27,7 +27,8 @@ mod process_tap_input;
 mod process_tap_lifecycle;
 mod watchdog;
 
-#[cfg(all(test, not(debug_assertions)))]
+#[cfg(test)]
+#[cfg(not(debug_assertions))]
 mod benchmark;
 mod control;
 mod ffi;

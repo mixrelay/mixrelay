@@ -252,7 +252,7 @@ fn live_controls_keep_shared_pcm_owner_and_processor_without_topology_replacemen
         ],
     );
     let plan = Arc::new(RenderPlan::prepare(&composed.execution).unwrap());
-    let mut processor = BlockProcessor::new(plan.clone());
+    let mut processor = BlockProcessor::new(plan.clone()).unwrap();
     let bank = plan.controls();
     let exchange = ProcessorExchange::new(1);
     let owner = &composed.native_sources["macbook-mic"];

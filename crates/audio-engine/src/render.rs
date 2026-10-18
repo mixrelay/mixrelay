@@ -296,10 +296,10 @@ impl RenderPlan {
 
         let controls = Arc::new(RuntimeControlBank::new(execution, &prepared));
         let source_controls =
-            binding_controls(&controls, source_bindings.iter().map(|b| &b.node_id));
-        let sink_controls = binding_controls(&controls, sink_bindings.iter().map(|b| &b.node_id));
+            binding_controls(&controls, source_bindings.iter().map(|b| &b.node_id))?;
+        let sink_controls = binding_controls(&controls, sink_bindings.iter().map(|b| &b.node_id))?;
         let recorder_controls =
-            binding_controls(&controls, recorder_bindings.iter().map(|b| &b.node_id));
+            binding_controls(&controls, recorder_bindings.iter().map(|b| &b.node_id))?;
         let device_bus_bindings = device_bus_bindings(execution, &slots)?;
         let dynamics_bindings = dynamics_bindings(execution);
         let history = history::bindings(execution, &effects, &dynamics_bindings);
@@ -601,16 +601,9 @@ pub trait ExternalIo {
 }
 
 impl BlockProcessor {
-    #[must_use]
-    /// # Panics
-    /// Panics if built-in storage cannot be prepared. Runtime publication uses `try_new`.
-    pub fn new(plan: Arc<RenderPlan>) -> Self {
-        Self::try_new(plan).expect("built-in effect storage must be prepared before rendering")
-    }
-
     /// # Errors
     /// Returns a storage reservation error before any audio ownership is published.
-    pub fn try_new(plan: Arc<RenderPlan>) -> Result<Self, RenderPlanError> {
+    pub fn new(plan: Arc<RenderPlan>) -> Result<Self, RenderPlanError> {
         let effect_states = plan
             .effects
             .iter()
@@ -674,11 +667,15 @@ impl BlockProcessor {
         })
     }
 
-    #[must_use]
-    pub fn with_peak_meters(plan: Arc<RenderPlan>, meters: Arc<crate::PeakMeterBank>) -> Self {
-        let mut processor = Self::new(plan);
+    /// # Errors
+    /// Returns a storage reservation error before any audio ownership is published.
+    pub fn with_peak_meters(
+        plan: Arc<RenderPlan>,
+        meters: Arc<crate::PeakMeterBank>,
+    ) -> Result<Self, RenderPlanError> {
+        let mut processor = Self::new(plan)?;
         processor.meters = Some(meters);
-        processor
+        Ok(processor)
     }
 
     /// Prepares a graph containing provider nodes and installs their already-configured
@@ -693,7 +690,7 @@ impl BlockProcessor {
         factory: &dyn HostedProcessorFactory,
     ) -> Result<Self, RenderPlanError> {
         let (plan, hosted_processors) = RenderPlan::prepare_internal(execution, Some(factory))?;
-        let mut processor = Self::try_new(Arc::new(plan))?;
+        let mut processor = Self::new(Arc::new(plan))?;
         processor.meters = Some(meters);
         processor.hosted_processors = hosted_processors;
         let mut identities: Vec<_> = processor
@@ -831,10 +828,14 @@ impl BlockProcessor {
     pub(crate) fn adopt_hosted(&mut self, previous: &mut Self) {
         for &(identity, index) in &self.hosted_identities {
             if self.hosted_processors[index].requests_reuse() {
-                let found = previous
+                // `can_adopt_hosted` validated every reuse before activation; an unmatched
+                // identity keeps its silent placeholder instead of stopping the audio thread.
+                let Ok(found) = previous
                     .hosted_identities
                     .binary_search_by_key(&identity, |&(id, _)| id)
-                    .expect("reuse ownership was validated before activation");
+                else {
+                    continue;
+                };
                 let previous_index = previous.hosted_identities[found].1;
                 std::mem::swap(
                     &mut self.hosted_processors[index],
@@ -1412,6 +1413,9 @@ pub enum RenderPlanError {
     },
     #[error("provider node {node_id} could not be prepared: {reason}")]
     ProviderPreparation { node_id: NodeId, reason: String },
+    /// An external or recorder binding names a node absent from the compiled controls.
+    #[error("binding at node {node_id} has no compiled runtime control")]
+    UncompiledBinding { node_id: NodeId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -1609,11 +1613,13 @@ impl NodeStep {
 fn binding_controls<'a>(
     controls: &RuntimeControlBank,
     ids: impl Iterator<Item = &'a NodeId>,
-) -> Box<[usize]> {
+) -> Result<Box<[usize]>, RenderPlanError> {
     ids.map(|id| {
         controls
             .index(id)
-            .expect("a lowered binding belongs to a compiled node")
+            .ok_or_else(|| RenderPlanError::UncompiledBinding {
+                node_id: id.clone(),
+            })
     })
     .collect()
 }
@@ -2791,7 +2797,8 @@ mod tests {
             vec![virtual_endpoint("io")],
             vec![edge("loop", "io", FROM_OS_PORT_ID, "io", TO_OS_PORT_ID)],
         );
-        let processor = BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()));
+        let processor =
+            BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap();
         let io = CallbackIo {
             read_frames: 4,
             discontinuity: false,
@@ -2833,7 +2840,7 @@ mod tests {
                 ],
             );
             let mut processor =
-                BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()));
+                BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap();
             let (_, mut io, mut cycle) = callback_fixture();
             io.value = 1.0;
             processor.process_external_cycle(cycle, &mut io).unwrap();
@@ -3168,7 +3175,7 @@ mod tests {
                 edge("read", "bus", AUDIO_PORT_ID, "out", AUDIO_PORT_ID),
             ],
         );
-        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap()))
+        BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap()
     }
 
     #[test]
@@ -3276,7 +3283,7 @@ mod tests {
             ],
         );
         (
-            BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())),
+            BlockProcessor::new(Arc::new(RenderPlan::prepare(&execution).unwrap())).unwrap(),
             IndependentBusIo {
                 source_a: [1.0; 8],
                 source_b: [2.0; 8],
@@ -3486,7 +3493,7 @@ mod tests {
             edge("read", "gain", AUDIO_PORT_ID, "out", AUDIO_PORT_ID),
         ];
         let plan = Arc::new(RenderPlan::prepare(&compile(nodes, edges)).unwrap());
-        let mut processor = BlockProcessor::new(plan);
+        let mut processor = BlockProcessor::new(plan).unwrap();
         let first = [0.2, 0.4, 0.6, 0.8, 0.1, 0.3, 0.5, 0.7];
         let second = [1.0; 8];
         let mut output = [0.0; 8];
@@ -3603,7 +3610,7 @@ mod tests {
         let mut to_os = [0.0; 4];
         let mut monitor = [0.0; 4];
         let mut sinks: [&mut [f32]; 2] = [&mut monitor, &mut to_os];
-        let mut processor = BlockProcessor::new(Arc::clone(&plan));
+        let mut processor = BlockProcessor::new(Arc::clone(&plan)).unwrap();
         assert!(Arc::ptr_eq(processor.plan(), &plan));
         processor
             .process_block(2, &sources, &mut sinks)
@@ -3756,7 +3763,7 @@ mod tests {
             ],
         );
         let plan = Arc::new(RenderPlan::prepare(&execution).expect("gain path should lower"));
-        let mut processor = BlockProcessor::new(plan);
+        let mut processor = BlockProcessor::new(plan).unwrap();
         let source = [1.0, -1.0, 0.5, -0.5];
         let mut sink = [0.0; 4];
 
@@ -3813,7 +3820,7 @@ mod tests {
             let plan = Arc::new(RenderPlan::prepare(&execution).unwrap());
             let meters = Arc::new(crate::PeakMeterBank::new(plan.meter_bindings().len(), 64));
             let mut processor =
-                BlockProcessor::with_peak_meters(Arc::clone(&plan), Arc::clone(&meters));
+                BlockProcessor::with_peak_meters(Arc::clone(&plan), Arc::clone(&meters)).unwrap();
             let source: Vec<f32> = (0..usize::from(channels) * 2)
                 .map(|index| if index % 2 == 0 { 1.0 } else { -1.0 })
                 .collect();
@@ -3886,7 +3893,7 @@ mod tests {
                 }
             })
             .collect();
-        let mut processor = BlockProcessor::new(plan);
+        let mut processor = BlockProcessor::new(plan).unwrap();
         let mut output = [0.0; 4];
         processor
             .process_block(2, &sources, &mut [&mut output])
@@ -3899,7 +3906,7 @@ mod tests {
     #[test]
     fn rejects_invalid_block_shapes_before_writing_outputs() {
         let plan = Arc::new(RenderPlan::prepare(&processor_graph()).expect("plan should lower"));
-        let mut processor = BlockProcessor::new(plan);
+        let mut processor = BlockProcessor::new(plan).unwrap();
         let full = [0.0; 8];
         let sources: [&[f32]; 3] = [&full, &full, &full];
         let mut first = [9.0; 8];
@@ -4148,7 +4155,7 @@ mod tests {
         assert_eq!(plan.source_bindings().len(), 2);
         assert!(plan.sink_bindings().is_empty());
         let meters = Arc::new(crate::PeakMeterBank::new(plan.meter_bindings().len(), 64));
-        let mut processor = BlockProcessor::with_peak_meters(plan.clone(), meters.clone());
+        let mut processor = BlockProcessor::with_peak_meters(plan.clone(), meters.clone()).unwrap();
         HEAP_OPERATIONS.with(|count| count.set(Some(0)));
         processor
             .process_block(
@@ -4201,7 +4208,7 @@ mod tests {
         let plan = Arc::new(RenderPlan::prepare(&execution).expect("plan should lower"));
         assert!(plan.source_bindings().is_empty());
         assert_eq!(plan.sink_bindings().len(), 1);
-        let mut processor = BlockProcessor::new(plan);
+        let mut processor = BlockProcessor::new(plan).unwrap();
         let mut sink = [1.0; 4];
 
         processor
@@ -4225,7 +4232,7 @@ mod tests {
         let plan = Arc::new(RenderPlan::prepare(&execution).expect("pass-through should lower"));
         let input = [1.0, -1.0, 0.5, -0.5];
         let mut output = [0.0; 4];
-        let mut processor = BlockProcessor::new(plan);
+        let mut processor = BlockProcessor::new(plan).unwrap();
         processor
             .process_block(2, &[&input], &mut [&mut output])
             .expect("internal route should process");

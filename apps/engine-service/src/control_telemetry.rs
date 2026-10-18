@@ -39,24 +39,23 @@ impl EngineGraphController {
         let enabled = self.engine_power_status().enabled;
         // Native Driver inventory remains a one-second observation, rather than twenty
         // socket round trips per second. Revision changes force immediate refresh.
-        if cached.as_ref().is_none_or(|old| {
-            old.observed.elapsed() >= Duration::from_secs(1)
-                || old.graph != graph
-                || old.enabled != enabled
-        }) {
+        let fresh = cached.as_ref().filter(|old| {
+            old.observed.elapsed() < Duration::from_secs(1)
+                && old.graph == graph
+                && old.enabled == enabled
+        });
+        let mut status = if let Some(fresh) = fresh {
+            fresh.status.clone()
+        } else {
             let status = self.status();
             *cached = Some(CachedStatus {
                 observed: Instant::now(),
                 graph,
                 enabled,
-                status,
+                status: status.clone(),
             });
-        }
-        let mut status = cached
-            .as_ref()
-            .expect("cache was initialized")
-            .status
-            .clone();
+            status
+        };
         status.engine_power = Some(self.engine_power_status());
         status.processor_timings = self.processor_timings();
         status.processor_latencies = self.processor_latencies();

@@ -3,13 +3,15 @@ use mixrelay_pcm_ring as _;
 
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(test)]
+#[cfg(target_os = "macos")]
 mod macos_application_rate_tests;
 #[cfg(target_os = "macos")]
 mod macos_devices;
 #[cfg(target_os = "macos")]
 mod macos_pacing;
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(test)]
+#[cfg(target_os = "macos")]
 mod shared_epoch_tests;
 
 #[cfg(all(test, target_os = "macos"))]
@@ -115,10 +117,16 @@ fn run_engine_service(owner: Option<mixrelay_engine_process::EngineOwner>) {
     {
         debug_assert!(owner.is_none());
         drop(owner);
-        let runtime = tokio::runtime::Builder::new_multi_thread()
+        let runtime = match tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
-            .expect("MixRelay engine async runtime should initialize");
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                eprintln!("MixRelay engine async runtime failed to start: {error}");
+                std::process::exit(1);
+            }
+        };
         if let Err(error) = runtime.block_on(macos::run()) {
             eprintln!("MixRelay engine service failed: {error}");
             std::process::exit(1);

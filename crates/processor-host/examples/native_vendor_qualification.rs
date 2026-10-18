@@ -1,3 +1,8 @@
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "a lab tool, not shipped: setup failures abort with their message"
+)]
 //! Opt-in qualification of one exact native VST3, CLAP, Audio Unit, or Linux LV2 effect.
 //! Run with `--run <vst3|clap|au|lv2> <bundle path|AU component ID> [--parameter <id> <0..1>]` and optionally
 //! `--editor <seconds> <new-absolute.png> [--drag <x> <y> <to-x> <to-y> | --editor-hold <1..30s>]`.

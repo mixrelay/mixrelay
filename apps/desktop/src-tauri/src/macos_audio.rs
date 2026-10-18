@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::{
     collections::BTreeSet,
     ffi::{CStr, CString, c_char, c_void},
-    fmt::{self, Write},
+    fmt,
     ptr::NonNull,
     sync::{Arc, Mutex},
     thread::JoinHandle,
@@ -37,7 +37,8 @@ pub(crate) fn list_device_app_activity()
 -> Result<std::collections::BTreeMap<String, Vec<device_activity::DeviceAppActivity>>, String> {
     device_activity::activity()
 }
-#[cfg(all(test, mixrelay_application_clock_fixture))]
+#[cfg(test)]
+#[cfg(mixrelay_application_clock_fixture)]
 #[path = "macos_audio/live_clock_tests.rs"]
 mod live_clock_tests;
 
@@ -946,8 +947,8 @@ impl ApplicationCaptureState {
                             let mut failure = error;
                             for owner in started {
                                 if let Err(restore) = owner.stop() {
-                                    write!(&mut failure, "; rollback failed: {restore}")
-                                        .expect("writing to a String cannot fail");
+                                    failure.push_str("; rollback failed: ");
+                                    failure.push_str(&restore);
                                 }
                             }
                             return Err(failure);
