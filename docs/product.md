@@ -342,6 +342,18 @@ Driver 장치 관리 기능도 같은 MixRelay에서 제공한다. OS 드라이�
 - Linux는 패키지 관리자 경로를 사용한다. 모든 패키지는 제품별 약관·변경 내역·제3자 고지를 포함한다.
 - 공개 설치 파일은 제품별 `x.y`의 최신 패치만 보관한다. 새 패치 게시 확인 후 이전 패치를 다운로드 목록에서 제거한다.
 
+### 지원 환경
+
+제품 페이지·설치 안내·앱의 시스템 요구사항은 이 절을 따른다. 최소 버전과 확인된 최신 버전을 함께 표시한다.
+
+- macOS 14.2 이상, Apple Silicon·Intel(Universal). 앱 오디오 캡처(process tap) API가 14.2부터 제공된다.
+  최소 버전은 `apps/desktop/src-tauri/tauri.conf.json`의 `minimumSystemVersion`이 기준이며,
+  모든 native 빌드 대상과 설치기의 `allowed-os-versions`가 같은 값을 쓰고 설치기가 더 낮은 OS를 거부한다.
+- 상한은 강제하지 않는다. 표시하는 최신 버전은 설치본 확인을 마친 macOS 주 버전이며 현재 macOS 27이다.
+  새 주 버전은 설치본 확인 뒤 표기를 올린다. 14.2–26의 설치본 확인은 공개 전에 최소 버전 1회를 수행한다.
+- Linux는 x86_64·arm64에서 PipeWire 1.2 이상·WirePlumber 0.5 이상의 사용자 세션을 요구한다.
+  CI가 Debian 13·Ubuntu 26.04·Kali rolling(x86_64·arm64)과 Arch(x86_64)에서 빌드·시험한다.
+
 Linux 오디오는 PipeWire 1.2 이상·WirePlumber 0.5 이상의 정상 사용자 세션에서 실행한다.
 그래프 기여분의 비동기 스케줄링과 원본 앱 음소거 정책에 필요한 버전이며, 빌드·연결·패키지 의존성에서 확인한다. Proxmox 등 x64 Linux VM에서도 정상 동작한다.
 Docker 컨테이너·Docker 기반 VM에서는 제품 오디오를 실행하지 않는다. 해당 환경의 PCM 누락·되돌림은

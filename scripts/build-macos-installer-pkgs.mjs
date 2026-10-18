@@ -28,6 +28,8 @@ const STAGING_BASE = "Library/Application Support/MixRelay";
 const INSTALLER_ID = "io.mixrelay.installer";
 const INSTALLER_COMPONENT_ID = "io.mixrelay.installer.component";
 const OPERATIONS = JSON.parse(readFileSync(new URL("../packaging/localization/installer-operations.json", import.meta.url), "utf8"));
+/** The app's declared minimum macOS; Installer refuses older systems before any script runs. */
+export const MINIMUM_MACOS = JSON.parse(readFileSync(new URL("../apps/desktop/src-tauri/tauri.conf.json", import.meta.url), "utf8")).bundle.macOS.minimumSystemVersion;
 const MAX_COMMAND_OUTPUT = 4 * 1024 * 1024;
 const ARCHITECTURES = ["arm64", "x86_64"];
 const fsApi = {
@@ -625,6 +627,7 @@ export function distribution(packageFilename, version) {
   <readme file="INSTALLER-README.rtf" mime-type="text/rtf"/>
   <license file="INSTALLER-LICENSE.rtf" mime-type="text/rtf"/>
   <options customize="never" allow-external-scripts="false"/>
+  <allowed-os-versions><os-version min="${MINIMUM_MACOS}"/></allowed-os-versions>
   <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
   <choices-outline><line choice="install"/></choices-outline>
   <choice id="install" visible="false" enabled="false" selected="true"><pkg-ref id="${INSTALLER_COMPONENT_ID}"/></choice>

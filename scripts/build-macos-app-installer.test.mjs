@@ -15,3 +15,22 @@ test('complete product packaging requires one prepared payload and rejects legac
   assert.throws(() => parseAppInstallerArgs(['--app', '/app', '--driverPkg', '/driver.pkg']), /unknown|unsupported|argument/i);
   assert.throws(() => parseAppInstallerArgs(['--payload', '/payload']), /missing/i);
 });
+
+test('every macOS build and the Installer share the app minimum macOS version', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { MINIMUM_MACOS } = await import('./build-macos-installer-pkgs.mjs');
+  assert.match(MINIMUM_MACOS, /^\d+\.\d+$/);
+  assert.match(distribution('MixRelay.component.pkg', '0.1.1'), new RegExp(`<allowed-os-versions><os-version min="${MINIMUM_MACOS.replace('.', '\\.')}"/></allowed-os-versions>`));
+  // Native code compiled for an older target would load on systems the app rejects, and
+  // a newer one would make the Installer accept systems the binaries cannot run on.
+  for (const path of [
+    'scripts/build-macos-universal-app.sh', 'scripts/build-macos-universal-engine.sh', 'scripts/build-macos-driver-launcher.sh',
+    'apps/engine-service/build.rs', 'native/macos/common/build.rs', 'native/macos/process-tap/build.rs',
+    'native/macos/driver-control/build.rs', 'native/macos/hal-driver/bundle/src/build.rs',
+  ]) {
+    const source = readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+    const targets = [...source.matchAll(/(?:version-min=|MACOSX_DEPLOYMENT_TARGET=?"?)(\d+\.\d+)/g)].map(match => match[1]);
+    assert.ok(targets.length > 0, `${path} declares its macOS target`);
+    assert.deepEqual([...new Set(targets)], [MINIMUM_MACOS], path);
+  }
+});
