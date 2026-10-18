@@ -162,7 +162,7 @@ test('Linux service packaging makes a restrictive build output executable for or
 
 test('macOS device service ownership, autostart and optional cleanup preserve App boundaries', () => {
   const contract = read('native/macos/installer/src/contract.rs');
-  assert.match(contract, /pub const APP_PATH: &str = "\/Applications\/MixRelay\.app"/);
+  assert.match(contract, /include!\(concat!\(env!\("OUT_DIR"\), "\/product_paths\.rs"\)\)/);
   assert.match(contract, /bin\/mixrelay-engine-service/);
   const launchd = read('packaging/macos/io.mixrelay.audio.driver.plist.in');
   assert.match(launchd, /<key>KeepAlive<\/key><true\/>/);

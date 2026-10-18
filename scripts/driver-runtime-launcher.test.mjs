@@ -25,7 +25,7 @@ function fixture(t) {
 static volatile sig_atomic_t received;
 static void fixture_stop(int signal_number) { (void)signal_number; received=1; }
 int fixture_execv(const char *path, char *const arguments[]) {
-  if(strcmp(path,"/Applications/MixRelay.app/Contents/MacOS/mixrelay-desktop") ||
+  if(strcmp(path,"/Applications/MixRelay/MixRelay.app/Contents/MacOS/mixrelay-desktop") ||
      strcmp(arguments[1],"--driver-runtime") || arguments[2]) _exit(99);
   if(getenv("MR_TEST_EXIT")) _exit(23);
   struct sigaction action={0};action.sa_handler=fixture_stop;sigemptyset(&action.sa_mask);

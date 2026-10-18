@@ -1,3 +1,4 @@
+import { UNINSTALLER_BUNDLE_NAME } from "./macos-install-contract.mjs";
 import * as fs from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -30,7 +31,7 @@ export function buildRemovalApp({executable, helper, output, version, identity})
   command('/usr/bin/codesign', ['--verify','--strict','--all-architectures',helper]);
   fs.mkdirSync(dirname(output), {recursive:true});
   const work = fs.mkdtempSync(join(dirname(output),'.mixrelay-remover-build-'));
-  const app = join(work, 'Uninstall MixRelay.app');
+  const app = join(work, UNINSTALLER_BUNDLE_NAME);
   let previous;
   try {
     for (const directory of ['MacOS','Helpers','Resources']) fs.mkdirSync(join(app,'Contents',directory), {recursive:true,mode:0o755});

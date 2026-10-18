@@ -1,15 +1,12 @@
 //! Fixed paths owned by the `MixRelay` administrator-installed distribution.
 
-/// The application bundle owned by the installer.
-pub const APP_PATH: &str = "/Applications/MixRelay.app";
+include!(concat!(env!("OUT_DIR"), "/product_paths.rs"));
 /// The persistent Driver service binary owned by the installer.
 pub const DRIVER_PATH: &str = "/Library/Application Support/MixRelay/bin/mixrelay-driver-service";
 /// The HAL bundle owned by the installer.
 pub const HAL_PATH: &str = "/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver";
 /// The launchd configuration owned by the installer.
 pub const LAUNCHD_PATH: &str = "/Library/LaunchDaemons/io.mixrelay.audio.driver.plist";
-/// The separate removal app installed alongside `MixRelay`.
-pub const UNINSTALLER_PATH: &str = "/Applications/Uninstall MixRelay.app";
 /// The on-demand, fixed-operation removal helper's launchd definition.
 pub const REMOVAL_LAUNCHD_PATH: &str = "/Library/LaunchDaemons/io.mixrelay.driver.removal.plist";
 /// The root-owned directory containing the three lifecycle lease inodes.

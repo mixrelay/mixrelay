@@ -153,7 +153,7 @@ fn installed_plist_version(path: &std::path::Path) -> Option<String> {
 #[cfg(target_os = "macos")]
 pub(crate) fn installed_mixrelay_version() -> Option<String> {
     installed_plist_version(std::path::Path::new(
-        "/Applications/MixRelay.app/Contents/Info.plist",
+        mixrelay_macos_transport::install_contract::APP_INFO_PATH,
     ))
 }
 

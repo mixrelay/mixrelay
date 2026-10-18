@@ -187,14 +187,14 @@ fn publish_readiness(app: &tauri::AppHandle, status: RuntimeStatus) {
 
 fn driver_executable() -> PathBuf {
     #[cfg(target_os = "macos")]
-    return PathBuf::from("/Applications/MixRelay.app/Contents/MacOS/mixrelay-desktop");
+    return PathBuf::from(mixrelay_macos_transport::install_contract::APP_EXECUTABLE_PATH);
     #[cfg(target_os = "linux")]
     return PathBuf::from("/usr/bin/mixrelay-desktop");
 }
 
 pub(crate) fn editor_executable() -> std::io::Result<PathBuf> {
     #[cfg(target_os = "macos")]
-    let path = PathBuf::from("/Applications/MixRelay.app/Contents/MacOS/mixrelay-desktop");
+    let path = PathBuf::from(mixrelay_macos_transport::install_contract::APP_EXECUTABLE_PATH);
     #[cfg(target_os = "linux")]
     let path = PathBuf::from("/usr/bin/mixrelay-desktop");
     if path.is_file() {
@@ -217,7 +217,7 @@ async fn installed_runtime_version() -> Option<String> {
                 "raw",
                 "-o",
                 "-",
-                "/Applications/MixRelay.app/Contents/Info.plist",
+                mixrelay_macos_transport::install_contract::APP_INFO_PATH,
             ])
             .output()
             .ok()?;

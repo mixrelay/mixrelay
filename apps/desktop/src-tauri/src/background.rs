@@ -227,7 +227,7 @@ pub(crate) fn spawn_controller(executable: &std::path::Path) -> std::io::Result<
     #[cfg(target_os = "macos")]
     if !tauri::is_dev()
         && executable
-            == std::path::Path::new("/Applications/MixRelay.app/Contents/MacOS/mixrelay-desktop")
+            == std::path::Path::new(mixrelay_macos_transport::install_contract::APP_EXECUTABLE_PATH)
     {
         let launcher = std::env::current_exe()?
             .parent()

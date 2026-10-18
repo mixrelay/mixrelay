@@ -31,14 +31,14 @@ fn main() -> anyhow::Result<()> {
         "installer executable must be absolute"
     );
     let sources = InstallSources::new(
-        root.join("Applications/MixRelay.app"),
+        root.join(mixrelay_macos_installer::APP_PATH.trim_start_matches('/')),
         root.join("Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver"),
         (
             root.join("Library/Application Support/MixRelay/bin/mixrelay-driver-service"),
             root.join("templates/io.mixrelay.audio.driver.plist.in"),
         ),
         (
-            root.join("Applications/Uninstall MixRelay.app"),
+            root.join(mixrelay_macos_installer::UNINSTALLER_PATH.trim_start_matches('/')),
             root.join("templates/io.mixrelay.driver.removal.plist"),
         ),
         (

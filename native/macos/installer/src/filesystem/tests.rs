@@ -719,3 +719,121 @@ fn driver_runtime_is_committed_restored_and_removed_with_its_payload() {
     assert!(!fixture.destination(OwnedTarget::RuntimeLaunchd).exists());
     assert_eq!(read(&fixture.user_data), "keep-this-data");
 }
+
+#[test]
+fn first_install_creates_product_folder_and_rollback_removes_it() {
+    let fixture = Fixture::new();
+    let adapter = fixture.adapter();
+    let folder = adapter.product_directory_path();
+    let request = fixture.sources();
+    let snapshot = adapter.preflight(&request).unwrap();
+    let staged = adapter.stage(&request, &snapshot).unwrap();
+    assert!(!folder.exists());
+    let committed = adapter.commit(&request, &snapshot, &staged).unwrap();
+    assert_eq!(
+        fs::symlink_metadata(&folder).unwrap().permissions().mode() & 0o7777,
+        0o755
+    );
+    assert!(fixture.destination(OwnedTarget::App).is_dir());
+    assert!(fixture.destination(OwnedTarget::Uninstaller).is_dir());
+    adapter
+        .rollback(&request, &snapshot, &staged, Some(&committed))
+        .unwrap();
+    assert!(!folder.exists());
+    adapter.cleanup(&staged).unwrap();
+}
+
+#[test]
+fn unsafe_product_folder_is_refused_without_mutation() {
+    let fixture = Fixture::new();
+    let adapter = fixture.adapter();
+    let folder = adapter.product_directory_path();
+    fs::create_dir_all(&folder).unwrap();
+    write_file(&folder.join("user-file"), "keep");
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o775)).unwrap();
+    assert!(matches!(
+        adapter.preflight(&fixture.sources()),
+        Err(FilesystemError::UnsafePath { .. })
+    ));
+    assert_eq!(read(&folder.join("user-file")), "keep");
+    fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+    let outside = fixture.root.join("outside-product");
+    fs::rename(&folder, &outside).unwrap();
+    symlink(&outside, &folder).unwrap();
+    assert!(matches!(
+        adapter.preflight(&TransactionRequest::remove()),
+        Err(FilesystemError::UnsafePath { .. })
+    ));
+    assert_eq!(read(&outside.join("user-file")), "keep");
+    assert!(!adapter.layout().staging_root().exists());
+}
+
+#[test]
+fn successful_removal_cleans_only_the_validated_empty_product_folder() {
+    for user_file in [false, true] {
+        let fixture = Fixture::new();
+        let adapter = fixture.adapter();
+        let install = fixture.sources();
+        let snapshot = adapter.preflight(&install).unwrap();
+        let staged = adapter.stage(&install, &snapshot).unwrap();
+        adapter.commit(&install, &snapshot, &staged).unwrap();
+        adapter.cleanup(&staged).unwrap();
+        let folder = adapter.product_directory_path();
+        if user_file {
+            write_file(&folder.join("user-file"), "keep");
+        }
+        let remove = TransactionRequest::remove();
+        let snapshot = adapter.preflight(&remove).unwrap();
+        let staged = adapter.stage(&remove, &snapshot).unwrap();
+        let committed = adapter.commit(&remove, &snapshot, &staged).unwrap();
+        // Registration may still fail: retain the original folder for rollback.
+        assert!(folder.is_dir());
+        adapter
+            .rollback(&remove, &snapshot, &staged, Some(&committed))
+            .unwrap();
+        assert!(fixture.destination(OwnedTarget::App).is_dir());
+        assert!(fixture.destination(OwnedTarget::Uninstaller).is_dir());
+        adapter.cleanup(&staged).unwrap();
+        let snapshot = adapter.preflight(&remove).unwrap();
+        let staged = adapter.stage(&remove, &snapshot).unwrap();
+        adapter.commit(&remove, &snapshot, &staged).unwrap();
+        adapter.cleanup(&staged).unwrap();
+        adapter
+            .remove_empty_product_directory(snapshot.product_directory)
+            .unwrap();
+        assert_eq!(folder.exists(), user_file);
+        assert!(
+            OwnedTarget::all()
+                .into_iter()
+                .all(|target| !fixture.destination(target).exists())
+        );
+        if user_file {
+            assert_eq!(read(&folder.join("user-file")), "keep");
+        }
+    }
+}
+
+#[test]
+fn removal_never_cleans_a_replacement_product_directory() {
+    let fixture = Fixture::new();
+    fixture.create_old_targets();
+    let adapter = fixture.adapter();
+    let request = TransactionRequest::remove();
+    let snapshot = adapter.preflight(&request).unwrap();
+    let staged = adapter.stage(&request, &snapshot).unwrap();
+    adapter.commit(&request, &snapshot, &staged).unwrap();
+    let folder = adapter.product_directory_path();
+    let retained = fixture.root.join("validated-folder");
+    fs::rename(&folder, &retained).unwrap();
+    fs::create_dir(&folder).unwrap();
+    assert!(matches!(
+        adapter.cleanup(&staged),
+        Err(FilesystemError::CreatedDirectoryChanged { .. })
+    ));
+    assert!(folder.is_dir());
+    assert!(retained.is_dir());
+    fs::remove_dir(&folder).unwrap();
+    fs::rename(&retained, &folder).unwrap();
+    adapter.cleanup(&staged).unwrap();
+    assert!(!folder.exists());
+}

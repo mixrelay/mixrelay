@@ -10,9 +10,9 @@
 //! between a check and the operation. The privileged native adapter must own
 //! the fixed parent directories and lifecycle leases during this work.
 //!
-//! Removal and cleanup are limited to the six `OwnedTarget` paths and the
-//! private staging directory. Lifecycle lease inodes and user data are never
-//! recursive removal targets here.
+//! Removal and cleanup are limited to the eight `OwnedTarget` paths, private
+//! staging, and the validated empty product folder. Lifecycle lease inodes and
+//! user data are never recursive removal targets here.
 
 use std::os::unix::fs::PermissionsExt as _;
 use std::{
@@ -25,7 +25,7 @@ use thiserror::Error;
 
 use crate::{
     backend::RollbackFailure,
-    contract::{LIFECYCLE_DIRECTORY, OwnedTarget},
+    contract::{LIFECYCLE_DIRECTORY, OwnedTarget, PRODUCT_DIRECTORY},
     request::TransactionRequest,
 };
 
@@ -295,6 +295,7 @@ impl FilesystemAdapter {
         request: &TransactionRequest,
     ) -> Result<FilesystemSnapshot, FilesystemError> {
         self.validate_staging_location()?;
+        let product_directory = self.observe_product_directory()?;
         let targets = self.observe_targets()?;
         if let TransactionRequest::Install(sources) = request {
             self.validate_sources(sources)?;
@@ -302,6 +303,7 @@ impl FilesystemAdapter {
         Ok(FilesystemSnapshot {
             layout: self.layout.clone(),
             targets,
+            product_directory,
         })
     }
 
@@ -356,7 +358,7 @@ impl FilesystemAdapter {
         }
     }
 
-    /// Replaces or removes exactly the six owned destinations with recoverable renames.
+    /// Replaces or removes exactly the eight owned destinations with recoverable renames.
     ///
     /// The operation is coordinated but not one filesystem-wide atomic operation.
     /// Partial progress remains recorded in `staged` for rollback. A failed
@@ -471,14 +473,15 @@ impl FilesystemAdapter {
         Ok(())
     }
 
-    /// Removes only private staging after success or a completed recovery attempt.
+    /// Cleans private staging and the empty product folder after committed removal.
     ///
     /// The caller must complete service registration after a successful commit
     /// before invoking this method. On failure, attempt rollback first; cleanup
-    /// also discards backups when rollback itself fails.
+    /// also discards backups when rollback itself fails. Product-folder cleanup
+    /// follows successful service registration and never runs after rollback.
     ///
     /// # Errors
-    /// Returns a filesystem error; user data and all fixed destinations are untouched.
+    /// Returns a filesystem or folder-identity error. User files are never removed.
     pub fn cleanup(&self, staged: &FilesystemStaged) -> Result<(), FilesystemError> {
         if staged.binding.layout != self.layout {
             return Err(FilesystemError::ReceiptMismatch);
@@ -487,6 +490,11 @@ impl FilesystemAdapter {
             .progress
             .try_lock()
             .map_err(|error| receipt_lock_error(&error))?;
+        if progress.state == FilesystemStageState::Committed
+            && staged.binding.request.kind() == crate::OperationKind::Remove
+        {
+            self.remove_empty_product_directory(staged.binding.snapshot.product_directory)?;
+        }
         remove_staging_root_if_identity(&staged.staging_root, staged.staging_identity)?;
         progress.state = FilesystemStageState::Cleaned;
         Ok(())
@@ -561,6 +569,11 @@ impl FilesystemAdapter {
     fn ensure_snapshot(&self, snapshot: &FilesystemSnapshot) -> Result<(), FilesystemError> {
         if snapshot.layout != self.layout {
             return Err(FilesystemError::ReceiptMismatch);
+        }
+        if self.observe_product_directory()? != snapshot.product_directory {
+            return Err(FilesystemError::CreatedDirectoryChanged {
+                path: self.product_directory_path(),
+            });
         }
         for target in OwnedTarget::all() {
             let observed = self.observe_target(target)?;
@@ -729,6 +742,9 @@ impl FilesystemAdapter {
         {
             Self::ensure_destination_parent(&destination, progress)?;
         }
+        if matches!(target, OwnedTarget::App | OwnedTarget::Uninstaller) {
+            self.ensure_product_directory(context.snapshot, progress)?;
+        }
         if observed.presence.is_present() {
             let backup = context.staged.backup_path(target);
             ensure_absent(&backup)?;
@@ -771,6 +787,7 @@ impl FilesystemAdapter {
         staged: &FilesystemStaged,
         progress: &mut MutationProgress,
     ) -> Result<(), FilesystemError> {
+        self.ensure_product_directory(snapshot, progress)?;
         while let Some(installed) = progress.installed.last().copied() {
             let destination = self.layout.target_path(installed.target);
             remove_installed_path(&destination, &installed)?;
@@ -835,6 +852,7 @@ impl FilesystemAdapter {
 pub struct FilesystemSnapshot {
     layout: FilesystemLayout,
     targets: [TargetSnapshot; 8],
+    product_directory: Option<FilesystemIdentity>,
 }
 
 impl FilesystemSnapshot {
@@ -1008,6 +1026,7 @@ struct FilesystemIdentity {
 }
 
 mod payload;
+mod product;
 mod stale;
 #[cfg(test)]
 mod tests;

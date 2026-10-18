@@ -12,7 +12,9 @@ use rustix::{
     io::Errno,
 };
 
-use crate::{LAUNCHD_PATH, LIFECYCLE_DIRECTORY, LifecycleDirectory, OwnedTarget};
+use crate::{
+    LAUNCHD_PATH, LIFECYCLE_DIRECTORY, LifecycleDirectory, OwnedTarget, PRODUCT_DIRECTORY,
+};
 
 use super::{
     NativeError, ResolvedServiceAccount,
@@ -140,6 +142,43 @@ pub fn prepare_install_directories() -> Result<(), NativeError> {
         wheel,
     )?;
     Ok(())
+}
+
+/// Creates the product folder through the protected Applications descriptor.
+pub(crate) fn create_product_directory() -> Result<(), NativeError> {
+    require_root()?;
+    let path = Path::new(PRODUCT_DIRECTORY);
+    let applications_path = path.parent().ok_or_else(|| NativeError::Trust {
+        path: path.to_path_buf(),
+        reason: "product folder has no Applications parent",
+    })?;
+    let applications = open_existing_directory(applications_path)?;
+    let metadata = applications.metadata().map_err(|source| NativeError::Io {
+        operation: "inspect Applications directory",
+        path: applications_path.to_path_buf(),
+        source,
+    })?;
+    if !applications_directory_policy(
+        metadata.uid(),
+        metadata.gid(),
+        metadata.mode() & 0o7777,
+        group_id_for_name("admin")?,
+    ) {
+        return Err(NativeError::Trust {
+            path: applications_path.to_path_buf(),
+            reason: "unsafe Applications directory",
+        });
+    }
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| NativeError::Trust {
+            path: path.to_path_buf(),
+            reason: "invalid product folder name",
+        })?;
+    let wheel = Gid::from_raw(group_id_for_name("wheel")?);
+    let directory = open_or_create_child(&applications, name, path, wheel)?;
+    validate_root_directory(path, &directory, Some(wheel))
 }
 
 /// Revalidates the fixed lifecycle directory and every no-replace lease inode.
@@ -335,6 +374,20 @@ pub(crate) fn validate_destination_ancestors(root: &Path) -> Result<(), NativeEr
             });
         }
     }
+    let product = Path::new(PRODUCT_DIRECTORY);
+    match std::fs::symlink_metadata(product) {
+        Ok(_) => {
+            open_existing_directory(product)?;
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(NativeError::Io {
+                operation: "inspect product folder",
+                path: product.to_path_buf(),
+                source,
+            });
+        }
+    }
     validate_engine_directory(root, false)?;
     Ok(())
 }
@@ -461,6 +514,15 @@ fn open_or_create_child(
     path: &Path,
     group: Gid,
 ) -> Result<File, NativeError> {
+    open_or_create_child_as(parent, name, path, (Uid::ROOT, group))
+}
+
+fn open_or_create_child_as(
+    parent: &File,
+    name: &str,
+    path: &Path,
+    owner: (Uid, Gid),
+) -> Result<File, NativeError> {
     let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
     let descriptor = match openat(parent, name, flags, Mode::empty()) {
         Ok(descriptor) => descriptor,
@@ -477,7 +539,7 @@ fn open_or_create_child(
                     source: io::Error::from(source),
                 })?;
             let directory = File::from(descriptor);
-            fchown(&directory, Some(Uid::ROOT), Some(group)).map_err(|source| NativeError::Io {
+            fchown(&directory, Some(owner.0), Some(owner.1)).map_err(|source| NativeError::Io {
                 operation: "set protected directory ownership",
                 path: path.to_path_buf(),
                 source: io::Error::from(source),
@@ -773,6 +835,36 @@ mod tests {
         };
         let leases = [open("app.owner"), open("engine.owner")];
         (root, leases)
+    }
+
+    #[test]
+    fn protected_child_creation_and_existing_link_refusal_are_descriptor_anchored() {
+        let root = FixtureDir::new("product-folder-create").expect("fixture");
+        let parent = File::open(root.path()).expect("parent descriptor");
+        let path = root.join("MixRelay");
+        let owner = (rustix::process::geteuid(), rustix::process::getegid());
+        let directory = super::open_or_create_child_as(&parent, "MixRelay", &path, owner).unwrap();
+        let metadata = directory.metadata().unwrap();
+        assert!(metadata.is_dir());
+        assert_eq!(metadata.mode() & 0o7777, 0o755);
+        assert_eq!(
+            (metadata.uid(), metadata.gid()),
+            (owner.0.as_raw(), owner.1.as_raw())
+        );
+        let existing = super::open_or_create_child_as(&parent, "MixRelay", &path, owner).unwrap();
+        assert_eq!(existing.metadata().unwrap().ino(), metadata.ino());
+        assert_eq!(
+            super::validate_root_directory(&path, &directory, None).is_ok(),
+            owner.0 == rustix::fs::Uid::ROOT,
+        );
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o775)).unwrap();
+        assert!(super::validate_root_directory(&path, &directory, None).is_err());
+        let outside = root.join("outside");
+        fs::rename(&path, &outside).unwrap();
+        symlink(&outside, &path).unwrap();
+        assert!(super::open_or_create_child_as(&parent, "MixRelay", &path, owner).is_err());
+        assert!(outside.is_dir());
+        assert_eq!(fs::metadata(outside).unwrap().mode() & 0o7777, 0o775);
     }
 
     #[test]

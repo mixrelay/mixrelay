@@ -11,7 +11,7 @@ mod user_data;
 pub use account::{ResolvedServiceAccount, resolve_console_account};
 pub use audio_probe::{check_coreaudio_response, hal_is_loaded};
 pub use service::{NativeServiceLifecycle, NativeServiceRegistration, NativeServiceSnapshot};
-pub(crate) use trust::validate_destination_ancestors;
+pub(crate) use trust::{create_product_directory, validate_destination_ancestors};
 pub use trust::{
     initialize_lifecycle_storage, prepare_install_directories, require_lifecycle_storage,
     require_root,

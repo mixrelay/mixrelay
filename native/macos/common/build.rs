@@ -1,6 +1,10 @@
-fn main() {
+#[path = "../installer/product_paths.rs"]
+mod product_paths;
+
+fn main() -> std::io::Result<()> {
+    product_paths::generate("../installer/MRInstallContract.h")?;
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
-        return;
+        return Ok(());
     }
     // XPC's blocks-based connection handler is the only producer transport C glue.
     cc::Build::new()
@@ -13,4 +17,5 @@ fn main() {
         .compile("mixrelay_source_xpc");
     println!("cargo:rerun-if-changed=../application-capture/src/MRApplicationSourceTransport.c");
     println!("cargo:rerun-if-changed=../hal-driver/include/MRHALControlProtocol.h");
+    Ok(())
 }

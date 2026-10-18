@@ -116,6 +116,22 @@ mod tests {
     use std::cell::RefCell;
 
     #[test]
+    #[cfg(target_os = "macos")]
+    fn session_detection_requires_the_product_folder_and_exact_role() {
+        let editor = "/Applications/MixRelay/MixRelay.app/Contents/MacOS/mixrelay-desktop";
+        let runtime = format!("{editor} --driver-runtime");
+        assert!(SessionApp::Graph.matches_command(editor));
+        assert!(SessionApp::UnifiedRuntime.matches_command(&runtime));
+        assert!(!SessionApp::Graph.matches_command(&runtime));
+        assert!(!SessionApp::UnifiedRuntime.matches_command(editor));
+        assert!(
+            !SessionApp::Graph
+                .matches_command("/Applications/MixRelay.app/Contents/MacOS/mixrelay-desktop")
+        );
+        assert!(!SessionApp::Graph.matches_command(&format!("{editor} --unexpected")));
+    }
+
+    #[test]
     fn update_reopens_runtime_and_editor_only_after_commit() {
         let events = RefCell::new(Vec::new());
         run_with_apps_closed(

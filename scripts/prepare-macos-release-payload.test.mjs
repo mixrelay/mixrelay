@@ -123,10 +123,10 @@ test("prepares a deterministic inspectable payload and never creates a pkg", (t)
     mode: "0755",
   });
   assert.match(readFileSync(join(paths.output, "templates/io.mixrelay.audio.driver.plist.in"), "utf8"), /__MIXRELAY_SERVICE_USER__/);
-  assert.equal(existsSync(join(paths.output, "Applications/MixRelay.app/Contents/Resources/empty")), true);
+  assert.equal(existsSync(join(paths.output, "Applications/MixRelay/MixRelay.app/Contents/Resources/empty")), true);
   for (const filename of [...DOCUMENTS, "CHANGELOG.md"]) {
     assert.deepEqual(
-      readFileSync(join(paths.output, "Applications/MixRelay.app/Contents/Resources", filename)),
+      readFileSync(join(paths.output, "Applications/MixRelay/MixRelay.app/Contents/Resources", filename)),
       readFileSync(join(paths.manager, "Contents/Resources", filename)),
     );
   }
@@ -142,6 +142,10 @@ test("prepares a deterministic inspectable payload and never creates a pkg", (t)
     ["engine.owner", "<service-user>:<primary-group>", "0644"],
     ["installer.owner", "root:wheel", "0644"],
   ]);
+  assert.equal(result.installContract.productDirectory, "/Applications/MixRelay");
+  assert.ok(readFileSync(join(paths.output, "templates/io.mixrelay.driver.removal.plist"), "utf8").includes("<string>/Applications/MixRelay/Uninstall MixRelay.app/Contents/Helpers/mixrelay-macos-installer</string>"));
+  assert.ok(result.installContract.destinations.some(item => item.path === "/Applications/MixRelay" && item.owner === "root:wheel" && item.mode === "0755"));
+  assert.equal(result.artifacts.find(item => item.kind === "uninstaller").target, "/Applications/MixRelay/Uninstall MixRelay.app");
   assert.equal(existsSync(join(paths.output, "MixRelay.pkg")), false);
   assert.ok(paths.fsApi.calls.length > 0);
 });
@@ -151,9 +155,11 @@ test("normalizes staged bundle and wrapper directories under a restrictive umask
   preparePayload({ ...paths, run: runner(paths.ids) });
   const directories = [
     join(paths.output, "Applications"),
-    join(paths.output, "Applications/MixRelay.app"),
-    join(paths.output, "Applications/MixRelay.app/Contents"),
-    join(paths.output, "Applications/MixRelay.app/Contents/Resources/empty"),
+    join(paths.output, "Applications/MixRelay"),
+    join(paths.output, "Applications/MixRelay/Uninstall MixRelay.app"),
+    join(paths.output, "Applications/MixRelay/MixRelay.app"),
+    join(paths.output, "Applications/MixRelay/MixRelay.app/Contents"),
+    join(paths.output, "Applications/MixRelay/MixRelay.app/Contents/Resources/empty"),
     join(paths.output, "Library"),
     join(paths.output, "Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver"),
     join(paths.output, "Library/Application Support/MixRelay/bin"),

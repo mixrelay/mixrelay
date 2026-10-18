@@ -1,3 +1,4 @@
+import { PRODUCT_DIRECTORY, APP_PATH, UNINSTALLER_PATH } from "./macos-install-contract.mjs";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -175,7 +176,7 @@ function walkFiles(fs, root) {
 
 function validatePayload(fs, root) {
   requirePath(fs, "--payload", root, "directory");
-  const manager = join(root, "Applications/MixRelay.app");
+  const manager = join(root, APP_PATH.slice(1));
   const hal = join(root, "Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver");
   const driver = join(root, "Library/Application Support/MixRelay/bin/mixrelay-driver-service");
   const engine = join(root, "Library/Application Support/MixRelay/bin/mixrelay-engine-service");
@@ -184,7 +185,7 @@ function validatePayload(fs, root) {
   requirePath(fs, "engine template", engineTemplate, "file");
   if (!engineMetadata.size || (engineMetadata.mode & 0o111) === 0) throw new Error("Runtime engine must be executable");
   const template = join(root, "templates/io.mixrelay.audio.driver.plist.in");
-  const uninstaller = join(root, "Applications/Uninstall MixRelay.app");
+  const uninstaller = join(root, UNINSTALLER_PATH.slice(1));
   const removalTemplate = join(root, "templates/io.mixrelay.driver.removal.plist");
   requirePath(fs, "uninstaller payload", uninstaller, "directory");
   requirePath(fs, "removal launchd template", removalTemplate, "file");
@@ -220,11 +221,12 @@ function validatePayload(fs, root) {
   for (const tree of [manager, hal, uninstaller]) walkFiles(fs, tree);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   if (manifest.format !== 1 || manifest.status !== "payload-prepared-not-package"
-    || manifest.installContract?.manager !== "/Applications/MixRelay.app"
+    || manifest.installContract?.productDirectory !== PRODUCT_DIRECTORY
+    || manifest.installContract?.manager !== APP_PATH
     || manifest.installContract?.hal !== "/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver"
     || manifest.installContract?.driver !== "/Library/Application Support/MixRelay/bin/mixrelay-driver-service"
     || manifest.installContract?.launchd !== "/Library/LaunchDaemons/io.mixrelay.audio.driver.plist"
-    || manifest.installContract?.uninstaller !== "/Applications/Uninstall MixRelay.app"
+    || manifest.installContract?.uninstaller !== UNINSTALLER_PATH
     || manifest.installContract?.removalLaunchd !== "/Library/LaunchDaemons/io.mixrelay.driver.removal.plist"
     || manifest.installContract?.engine !== "/Library/Application Support/MixRelay/bin/mixrelay-engine-service"
     || manifest.installContract?.engineLaunchd !== "/Library/LaunchDaemons/io.mixrelay.audio.engine.plist") {
@@ -470,21 +472,21 @@ cli="$stage/bin/mixrelay-macos-installer"
 [ -f "$cli" ] && [ ! -L "$cli" ] && [ -x "$cli" ] || fail "embedded installer CLI is missing or unsafe"
 check_file "$cli"
 check_dir "$stage/payload"
-check_dir "$stage/payload/Applications/MixRelay.app"
+check_dir "$stage/payload${APP_PATH}"
 check_dir "$stage/payload/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver"
 check_file "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-driver-service"
 check_file "$stage/payload/templates/io.mixrelay.audio.driver.plist.in"
-check_dir "$stage/payload/Applications/Uninstall MixRelay.app"
+check_dir "$stage/payload${UNINSTALLER_PATH}"
 check_file "$stage/payload/templates/io.mixrelay.driver.removal.plist"
 check_file "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-engine-service"
 check_file "$stage/payload/templates/io.mixrelay.audio.engine.plist.in"
 set +e
 "$cli" install ${teamId} \\
-  "$stage/payload/Applications/MixRelay.app" \\
+  "$stage/payload${APP_PATH}" \\
   "$stage/payload/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver" \\
   "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-driver-service" \\
   "$stage/payload/templates/io.mixrelay.audio.driver.plist.in" \\
-  "$stage/payload/Applications/Uninstall MixRelay.app" \\
+  "$stage/payload${UNINSTALLER_PATH}" \\
   "$stage/payload/templates/io.mixrelay.driver.removal.plist" \\
   "$stage/payload/Library/Application Support/MixRelay/bin/mixrelay-engine-service" \\
   "$stage/payload/templates/io.mixrelay.audio.engine.plist.in" --reload-coreaudio
@@ -667,11 +669,11 @@ function buildInstaller({ fs, run, work, packageRoot, stagingId, paths, installe
   copyWithDitto(fs, run, installerCli, binPath, packageRoot);
   const stagedPayload = join(packageStage, "payload");
   ensurePackageDirectories(fs, packageRoot, stagedPayload);
-  const stagedManager = join(stagedPayload, "Applications/MixRelay.app");
+  const stagedManager = join(stagedPayload, APP_PATH.slice(1));
   const stagedHal = join(stagedPayload, "Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver");
   copyWithDitto(fs, run, paths.manager, stagedManager, packageRoot);
   copyWithDitto(fs, run, paths.hal, stagedHal, packageRoot);
-  const stagedUninstaller = join(stagedPayload, "Applications/Uninstall MixRelay.app");
+  const stagedUninstaller = join(stagedPayload, UNINSTALLER_PATH.slice(1));
   copyWithDitto(fs, run, paths.uninstaller, stagedUninstaller, packageRoot);
   requiredBundleRoots.push(stagedManager, stagedHal, stagedUninstaller);
   copyWithDitto(fs, run, paths.engine, join(stagedPayload, "Library/Application Support/MixRelay/bin/mixrelay-engine-service"), packageRoot);

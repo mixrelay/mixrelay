@@ -1,3 +1,4 @@
+#include "../../MRInstallContract.h"
 // Authorization is for one named removal operation. XPC authenticates both peers.
 #import <Foundation/Foundation.h>
 #import <Security/Authorization.h>
@@ -20,7 +21,7 @@ int MRRemovalRightRegister(void) {
     AuthorizationRef reference = NULL;
     OSStatus status = AuthorizationCreate(NULL, NULL, kAuthorizationFlagDefaults, &reference);
     if (status != errAuthorizationSuccess) return status;
-    NSURL *url = [NSURL fileURLWithPath:@"/Applications/Uninstall MixRelay.app"];
+    NSURL *url = [NSURL fileURLWithPath:@MR_UNINSTALLER_PATH];
     CFBundleRef bundle = CFBundleCreate(NULL, (__bridge CFURLRef)url);
     // Credentials belong only to this authorization reference. A short transfer
     // window lets the helper verify its external form without asking again.

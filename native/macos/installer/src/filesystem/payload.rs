@@ -314,6 +314,16 @@ pub(super) fn copy_regular_file(source: &Path, destination: &Path) -> Result<(),
 }
 
 pub(super) fn create_directory(path: &Path) -> Result<(), FilesystemError> {
+    #[cfg(target_os = "macos")]
+    if path == Path::new(crate::PRODUCT_DIRECTORY) {
+        return crate::native::create_product_directory().map_err(|source| {
+            io_failure(
+                "create protected product folder",
+                path,
+                io::Error::other(source),
+            )
+        });
+    }
     create_directory_with_mode(path, 0o755)
 }
 

@@ -27,3 +27,8 @@ pub mod hal_io;
 pub mod shared_audio_buffer;
 pub mod source_control;
 pub mod transport_inspection;
+
+/// Fixed application locations shared with the macOS installer.
+pub mod install_contract {
+    include!(concat!(env!("OUT_DIR"), "/product_paths.rs"));
+}

@@ -1,3 +1,4 @@
+#include "../installer/MRInstallContract.h"
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
@@ -51,7 +52,7 @@ int main(int argc, char **argv) {
         sigaction(SIGHUP, &action, NULL);
         sigaction(SIGCHLD, &action, NULL);
         sigprocmask(SIG_SETMASK, &previous, NULL);
-        const char *program = "/Applications/MixRelay.app/Contents/MacOS/mixrelay-desktop";
+        const char *program = MR_APP_EXECUTABLE_PATH;
         char *const arguments[] = {(char *)program, "--driver-runtime", NULL};
         execv(program, arguments);
         perror("MixRelay Driver runtime could not start");

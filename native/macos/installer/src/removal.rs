@@ -23,8 +23,7 @@ use anyhow::{Context, Result, ensure};
 /// Fixed system Mach service used only for authenticated Driver removal.
 pub const SERVICE: &str = "io.mixrelay.driver.removal";
 /// Root-owned CLI executable embedded in the separately installed remover.
-pub const HELPER: &str =
-    "/Applications/Uninstall MixRelay.app/Contents/Helpers/mixrelay-macos-installer";
+pub const HELPER: &str = crate::REMOVAL_HELPER_PATH;
 
 mod executable;
 use executable::RemovalExecutable;

@@ -60,10 +60,12 @@ engine and removal app, must be explicit. Staging alone is not release qualifica
 
 ## Installation
 
-The fixed owned targets are:
+The installer creates `/Applications/MixRelay` as root:wheel 0755 without following
+links. An existing product folder must be root-owned and not group/other writable;
+`/Applications` retains its root:admin 0775 policy. The fixed owned targets are:
 
-- `/Applications/MixRelay.app` (`io.mixrelay.desktop`)
-- `/Applications/Uninstall MixRelay.app`
+- `/Applications/MixRelay/MixRelay.app` (`io.mixrelay.desktop`)
+- `/Applications/MixRelay/Uninstall MixRelay.app`
 - `/Library/Application Support/MixRelay/bin/mixrelay-driver-service`
 - `/Library/Application Support/MixRelay/bin/mixrelay-engine-service`
 - `/Library/Audio/Plug-Ins/HAL/MixRelayHAL.driver` (`io.mixrelay.audio.driver`)
@@ -137,7 +139,7 @@ preserves device geometry and directional formats and records the explicit stop.
 Reopening MixRelay restores the retained inventory. A failed stop/save leaves the
 runtime menu available and shows an error.
 
-`Uninstall MixRelay.app` removes the complete product through the named
+`/Applications/MixRelay/Uninstall MixRelay.app` removes the complete product through the named
 `io.mixrelay.driver.remove` Authorization Services right and fixed signed XPC
 helper. The normal-user app does not request general privileged execution.
 Both peers enforce exact code identities and the matching publisher. The helper
@@ -145,6 +147,12 @@ checks the granted right, closes the observed app roles, and uses the same verif
 transaction and rollback guards. Partial removals still verify every present target.
 If the Driver plist is missing, fixed lifecycle lease ownership resolves the
 installation account. Absent targets are successful no-ops.
+
+The two app bundles have separate transaction backups. Rollback restores them
+inside the validated product folder; a failed first installation removes its newly
+created empty folder. After successful removal, cleanup removes the product folder
+only if it is empty and still has the validated identity. User files keep the folder
+in place.
 
 Saved device settings deletion is default-off and deletes only `drivers.json` for
 the original installation account. Graphs, recordings,
