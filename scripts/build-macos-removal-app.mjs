@@ -37,7 +37,8 @@ export function buildRemovalApp({executable, helper, output, version, identity})
     fs.copyFileSync(executable,join(app,'Contents/MacOS/mixrelay-driver-uninstaller'));
     fs.copyFileSync(helper,join(app,'Contents/Helpers/mixrelay-macos-installer'));
     for (const path of ['MacOS/mixrelay-driver-uninstaller','Helpers/mixrelay-macos-installer']) fs.chmodSync(join(app,'Contents',path),0o755);
-    fs.copyFileSync(join(root,'apps/desktop/src-tauri/icons/icon.icns'),join(app,'Contents/Resources/icon.icns'));
+    // Same tile as the app, symbol in brand ink: branding/build-uninstaller-icon.mjs.
+    fs.copyFileSync(join(root,'apps/desktop/src-tauri/icons/uninstaller.icns'),join(app,'Contents/Resources/icon.icns'));
     for (const language of languages) {
       fs.copyFileSync(join(root,language.driverTerms),join(app,'Contents/Resources',language.driverTerms));
       const localized = join(app,'Contents/Resources',`${language.language}.lproj`);
