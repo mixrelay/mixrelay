@@ -350,7 +350,8 @@ Driver 장치 관리 기능도 같은 MixRelay에서 제공한다. OS 드라이�
   최소 버전은 `apps/desktop/src-tauri/tauri.conf.json`의 `minimumSystemVersion`이 기준이며,
   모든 native 빌드 대상과 설치기의 `allowed-os-versions`가 같은 값을 쓰고 설치기가 더 낮은 OS를 거부한다.
 - 상한은 강제하지 않는다. 표시하는 최신 버전은 설치본 확인을 마친 macOS 주 버전이며 현재 macOS 27이다.
-  새 주 버전은 설치본 확인 뒤 표기를 올린다. 14.2–26의 설치본 확인은 공개 전에 최소 버전 1회를 수행한다.
+  새 주 버전은 설치본 확인 뒤 표기를 올린다. macOS 14.8.7 VM(Tart, headless)에서 공증 PKG 설치·서비스·가상 장치를 확인했다.
+  14.2–14.7과 15·26의 설치본, 그리고 VM의 UI·권한 대화상자·실제 캡처는 확인하지 않았다.
 - Linux는 x86_64·arm64에서 PipeWire 1.2 이상·WirePlumber 0.5 이상의 사용자 세션을 요구한다.
   CI가 Debian 13·Ubuntu 26.04·Kali rolling(x86_64·arm64)과 Arch(x86_64)에서 빌드·시험한다.
 

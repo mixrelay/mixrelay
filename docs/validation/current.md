@@ -3,6 +3,16 @@
 제품 동작·범위·남은 작업은 [product.md](../product.md)가 기준이다. MixRelay는 아직 출시하지 않았다.
 이 문서는 현재 소스 검사와 로컬 개발 설치본의 검증 범위만 구분한다.
 
+## 2026-10-19 macOS 14 설치 확인
+
+Tart VM(macOS 14.8.7, arm64, headless)에서 공증 PKG를 설치했다. 첫 PKG는 새 macOS에
+`/Library/Audio/Plug-Ins/HAL`이 없어 postinstall에서 실패했다(`open protected directory ... No such file`).
+설치기가 없는 단계를 root:wheel 0755로 만들도록 고친 PKG(`777dcd5`, 공증 `8f991807-…`)는 설치에 성공했다.
+설치 뒤 HAL 디렉터리 root:wheel 0755, Driver·엔진 서비스 실행, GUI 사용자 앱 실행, CoreAudio의 `MixRelay IO`
+입출력 2채널 48 kHz, 설치 파일 86개 SHA-256의 PKG 일치를 확인했다. headless라 UI·권한 대화상자·
+실제 캡처·녹음은 확인하지 않았다. 설치 로그의 Installer 임시 payload 앱 조회 `NSCocoaErrorDomain 260`은
+설치 결과(종료 코드 0)에 영향이 없다. VM `mixrelay-sonoma`는 재사용을 위해 보존한다.
+
 ## 2026-10-19 첫 공증 릴리스 빌드
 
 `pnpm signing:check` 뒤 `pnpm release:macos`가 App Store Connect API 키 참조로 최종 PKG를
