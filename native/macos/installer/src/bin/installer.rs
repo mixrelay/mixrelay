@@ -90,7 +90,7 @@ fn run() -> anyhow::Result<()> {
 }
 
 /// Removal moves every installed target, including the uninstaller's own helper. The
-/// transaction keeps launching this executable (CoreAudio probes, user cleanup), so it must
+/// transaction keeps launching this executable (`CoreAudio` probes, user cleanup), so it must
 /// run from the private copy the uninstaller makes, never from inside a target it removes.
 fn refuse_removing_own_executable(executable: &std::path::Path) -> anyhow::Result<()> {
     let product = std::path::Path::new(mixrelay_macos_installer::APP_PATH)
