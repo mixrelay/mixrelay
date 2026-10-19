@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { RETIRED_SIGNING_KEYCHAIN, DEFAULT_SIGNING_CONFIG, SIGNING_INTERRUPTIONS, usableKeychainSearchList, withMacosSigning } from './macos-signing.mjs';
+import { RETIRED_SIGNING_KEYCHAIN, DEFAULT_SIGNING_CONFIG, SIGNING_BACKUPS, SIGNING_INTERRUPTIONS, pemCertificateSha1, restoreMacosSigningKeychain, usableKeychainSearchList, withMacosSigning } from './macos-signing.mjs';
 
 test('retired release lookup is removed without removing other identities or restored keys', () => {
   const login = '/Library/Keychains/unrelated-login.keychain-db';
@@ -289,3 +289,61 @@ for (const [signal, delivery] of [['SIGINT', 'group'], ['SIGTERM', 'process'], [
     settled = true;
   });
 }
+
+const pem = body => `-----BEGIN CERTIFICATE-----\n${Buffer.from(body).toString('base64')}\n-----END CERTIFICATE-----\n`;
+function restoreFixture(t, { applicationBody = 'application certificate' } = {}) {
+  const fixture = signingFixture(t);
+  for (const name of Object.values(SIGNING_BACKUPS)) writeFileSync(join(fixture.directory, name), 'backup', { mode: 0o600 });
+  writeFileSync(join(fixture.directory, SIGNING_BACKUPS.installerCertificate), pem('installer certificate'), { mode: 0o600 });
+  writeFileSync(join(fixture.directory, SIGNING_BACKUPS.verification), JSON.stringify({
+    applicationCertificateSHA1: pemCertificateSha1(pem('application certificate')),
+    installerCertificateSHA1: pemCertificateSha1(pem('installer certificate')),
+  }), { mode: 0o600 });
+  fixture.original = [fixture.login, fixture.keychain, RETIRED_SIGNING_KEYCHAIN];
+  const calls = [];
+  const security = mockSecurity(fixture, calls);
+  const exec = (program, args, options) => {
+    if (program === '/usr/bin/openssl') {
+      calls.push([program, ...args, options.env.MIXRELAY_P12_PASSWORD]);
+      return { status: 0, stdout: pem(applicationBody) };
+    }
+    return security(program, args);
+  };
+  const io = { exec: (program, args, options) => (args[0] === 'import' && args[1].endsWith(SIGNING_BACKUPS.authority)
+    ? (calls.push([program, ...args]), { status: 1, stderr: 'SecKeychainItemImport: The specified item already exists in the keychain.' })
+    : exec(program, args, options)), platform: 'darwin', now: new Date('2026-10-19T01:02:03Z'), password: () => 'fixture-new-keychain-secret' };
+  return { ...fixture, calls, io };
+}
+
+test('pemCertificateSha1 hashes the DER bytes of the certificate', () => {
+  assert.equal(pemCertificateSha1(pem('abc')), 'A9993E364706816ABA3E25717850C26C9CD0D89D');
+  assert.throws(() => pemCertificateSha1('no certificate'), /no certificate/);
+});
+
+test('keychain restore rebuilds a new build keychain from verified backups and swaps the configuration', t => {
+  const fixture = restoreFixture(t);
+  const result = restoreMacosSigningKeychain(fixture.config, fixture.io);
+  const restored = join(fixture.directory, 'release-20261019-010203.keychain-db');
+  assert.deepEqual(result, { keychain: 'release-20261019-010203.keychain-db', previousKeychainKept: 'release.keychain-db', teamId: 'AB12C3D4E5' });
+  const config = JSON.parse(readFileSync(fixture.config, 'utf8'));
+  assert.equal(config.keychain, restored);
+  assert.equal(config.keychainPassword, 'fixture-new-keychain-secret');
+  assert.equal(config.p12Password, 'fixture-p12-secret');
+  assert.equal(readFileSync(fixture.keychain, 'utf8'), 'not a keychain');
+  // The P12 password reaches openssl through the environment, never its arguments.
+  const openssl = fixture.calls.find(call => call[0] === '/usr/bin/openssl');
+  assert.ok(openssl.slice(1, -1).every(arg => arg !== 'fixture-p12-secret'));
+  assert.equal(openssl.at(-1), 'fixture-p12-secret');
+  const security = fixture.calls.filter(call => call[0] === '/usr/bin/security').map(call => call[1]);
+  assert.deepEqual(security, ['list-keychains', 'create-keychain', 'set-keychain-settings', 'import', 'import', 'import', 'import', 'set-key-partition-list', 'find-identity', 'list-keychains']);
+  for (const call of fixture.calls.filter(call => call[0] === '/usr/bin/security' && call[1] !== 'list-keychains')) assert.ok(call.includes(restored), call.join(' '));
+  assert.deepEqual(searchListWrites(fixture.calls), [[fixture.login]]);
+});
+
+test('keychain restore refuses backups that do not match the verified fingerprints', t => {
+  const fixture = restoreFixture(t, { applicationBody: 'another certificate' });
+  const before = readFileSync(fixture.config, 'utf8');
+  assert.throws(() => restoreMacosSigningKeychain(fixture.config, fixture.io), /verified certificate fingerprints/);
+  assert.equal(readFileSync(fixture.config, 'utf8'), before);
+  assert.ok(!fixture.calls.some(call => call[0] === '/usr/bin/security'));
+});

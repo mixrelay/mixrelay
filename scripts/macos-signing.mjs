@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -20,8 +21,8 @@ export function readMacosSigningConfig(configPath = process.env.MIXRELAY_SIGNING
   try { return JSON.parse(text); }
   catch { throw new Error('Signing configuration must contain valid JSON'); }
 }
-function command(program, args, secrets = [], exec = spawnSync) {
-  const result = exec(program, args, { encoding: 'utf8', timeout: 45000, maxBuffer: 1024 * 1024 });
+function command(program, args, secrets = [], exec = spawnSync, env = process.env) {
+  const result = exec(program, args, { encoding: 'utf8', env, timeout: 45000, maxBuffer: 1024 * 1024 });
   if (result.error || result.status !== 0) {
     let message = result.error?.message || result.stderr || 'Signing command failed';
     for (const secret of secrets.filter(Boolean)) message = message.replaceAll(secret, '[redacted]');
@@ -170,6 +171,79 @@ export function withMacosSigning(action, configPath = process.env.MIXRELAY_SIGNI
     if (!pending) cleanup();
   }
 }
+/** Backups next to the configuration, as restored from the signing operations page. */
+export const SIGNING_BACKUPS = {
+  application: 'application.p12',
+  authority: 'DeveloperIDG2CA.cer',
+  installerCertificate: 'installer-cert.pem',
+  installerKey: 'installer-key.pem',
+  verification: 'backup-verification.json',
+};
+/** SHA-1 of the first PEM certificate's DER bytes, as `security` and Apple report it. */
+export function pemCertificateSha1(pem) {
+  const body = /-----BEGIN CERTIFICATE-----([^-]+)-----END CERTIFICATE-----/.exec(pem)?.[1];
+  if (!body) throw new Error('Signing backup contains no certificate');
+  return createHash('sha1').update(Buffer.from(body.replace(/\s+/g, ''), 'base64')).digest('hex').toUpperCase();
+}
+/**
+ * Rebuild the dedicated build keychain from the verified backups next to the configuration,
+ * for when its stored password stops unlocking it. Creates a new keychain with a new password
+ * (300-second idle lock, keys usable by Apple signing tools only), then replaces the
+ * configuration atomically. The login keychain, lock policy and the unusable keychain file
+ * stay untouched; only its search-list entry is dropped so no lookup can prompt for it.
+ * `io` replaces the command runner, platform, clock and password source in tests.
+ */
+export function restoreMacosSigningKeychain(configPath = process.env.MIXRELAY_SIGNING_CONFIG || DEFAULT_SIGNING_CONFIG, io = {}) {
+  const { exec = spawnSync, platform = process.platform, now = new Date(), password = () => randomBytes(32).toString('base64url') } = io;
+  if (platform !== 'darwin') throw new Error('macOS signing requires macOS');
+  const config = readMacosSigningConfig(configPath);
+  const directory = dirname(resolve(configPath));
+  const backup = Object.fromEntries(Object.entries(SIGNING_BACKUPS).map(([key, name]) => [key, join(directory, name)]));
+  for (const path of Object.values(backup)) privateFile(path);
+  const expected = JSON.parse(readFileSync(backup.verification, 'utf8'));
+  const p12Env = { ...process.env, MIXRELAY_P12_PASSWORD: config.p12Password };
+  // LibreSSL reads the backup's legacy PKCS#12 encryption without extra providers.
+  const application = command('/usr/bin/openssl', ['pkcs12', '-in', backup.application, '-nokeys', '-clcerts', '-passin', 'env:MIXRELAY_P12_PASSWORD'], [config.p12Password], exec, p12Env);
+  if (pemCertificateSha1(application) !== expected.applicationCertificateSHA1 || pemCertificateSha1(readFileSync(backup.installerCertificate, 'utf8')) !== expected.installerCertificateSHA1) {
+    throw new Error('Signing backups do not match the verified certificate fingerprints');
+  }
+  const stamp = now.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+  const keychain = join(directory, `release-${stamp}.keychain-db`);
+  if (existsSync(keychain)) throw new Error('A restored keychain for this time already exists');
+  const keychainPassword = password();
+  const secrets = [keychainPassword, config.p12Password];
+  const previous = resolve(config.keychain);
+  const original = searchList(exec);
+  const run = args => command('/usr/bin/security', args, secrets, exec);
+  try {
+    run(['create-keychain', '-p', keychainPassword, keychain]);
+    run(['set-keychain-settings', '-lut', '300', keychain]);
+    run(['import', backup.application, '-k', keychain, '-f', 'pkcs12', '-P', config.p12Password, '-T', '/usr/bin/codesign']);
+    // The P12 may already carry the intermediate; a duplicate certificate is the same trust.
+    for (const certificate of [backup.authority, backup.installerCertificate]) {
+      try { run(['import', certificate, '-k', keychain, '-t', 'cert']); }
+      catch (error) { if (!/already exists/.test(error.message)) throw error; }
+    }
+    run(['import', backup.installerKey, '-k', keychain, '-t', 'priv', '-T', '/usr/bin/pkgbuild', '-T', '/usr/bin/productbuild']);
+    // Signing tools then use the keys without an access prompt.
+    run(['set-key-partition-list', '-S', 'apple-tool:,apple:,codesign:', '-s', '-k', keychainPassword, keychain]);
+    const identities = run(['find-identity', '-v', keychain]);
+    for (const identity of [config.applicationIdentity, config.installerIdentity]) {
+      if (!identities.includes(`"${identity}"`)) throw new Error('Restored keychain is missing a required release identity');
+    }
+  } catch (error) {
+    try { run(['delete-keychain', keychain]); } catch { /* creation may have failed before the file existed */ }
+    throw error;
+  } finally {
+    // create-keychain adds itself to the list; builds add the active keychain only while they run.
+    const kept = usableKeychainSearchList(original).filter(path => resolve(path) !== previous && resolve(path) !== keychain);
+    run(['list-keychains', '-d', 'user', '-s', ...kept]);
+  }
+  const staged = `${configPath}.restoring`;
+  writeFileSync(staged, `${JSON.stringify({ ...config, keychain, keychainPassword }, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+  renameSync(staged, configPath);
+  return { keychain: basename(keychain), previousKeychainKept: basename(previous), teamId: config.teamId };
+}
 /** Actual code and PKG signing probe; does not install, change ACLs, or publish anything. */
 export function checkMacosSigning(configPath) {
   return withMacosSigning((env, config) => {
@@ -203,7 +277,8 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       refresh();
       setInterval(() => { try { refresh(); } catch (error) { console.error(error.message); process.exit(1); } }, 45000);
     } else if (process.argv[2] === '--repair-search-list') console.log(JSON.stringify(repairSigningSearchList()));
-    else if (process.argv[2] === '--help') console.log('pnpm signing:check [--repair-search-list]\nUnlocks the restored MixRelay build keychain, signs/verifies code and PKG probes, and restores unrelated keychain search entries. The retired signing copy is excluded on exit.\n--repair-search-list removes only that stale lookup entry without signing, deleting keys or changing lock policy.\nMIXRELAY_SIGNING_CONFIG selects a private local configuration. Passwords never enter repository files or logs.');
+    else if (process.argv[2] === '--restore-keychain') console.log(JSON.stringify(restoreMacosSigningKeychain()));
+    else if (process.argv[2] === '--help') console.log('pnpm signing:check [--repair-search-list | --restore-keychain]\nUnlocks the restored MixRelay build keychain, signs/verifies code and PKG probes, and restores unrelated keychain search entries. The retired signing copy is excluded on exit.\n--repair-search-list removes only that stale lookup entry without signing, deleting keys or changing lock policy.\n--restore-keychain rebuilds the build keychain from the verified backups next to the configuration with a new password, when the stored one no longer unlocks it. Run pnpm signing:check afterwards.\nMIXRELAY_SIGNING_CONFIG selects a private local configuration. Passwords never enter repository files or logs.');
     else if (process.argv.length === 2) console.log(JSON.stringify(checkMacosSigning()));
     else throw new Error('Use pnpm signing:check or --help');
   } catch (error) { console.error(error.message); process.exitCode = 1; }

@@ -4,6 +4,8 @@
 
 **릴리스 빌드 전 서명 준비가 최우선이다.** 정상 복원 설정은 `/Users/state303/Library/Application Support/MixRelay/Signing/background-stop-20261011/config.json`이다. `pnpm signing:check`는 이 설정으로 키체인을 열고 실제 코드·PKG 서명을 검증한다. `pnpm release:macos --output EMPTY_DIRECTORY`는 같은 정상 키체인을 사용하며 종료 시 원래 키체인 검색 목록을 복원한다. 이전 `Library/Caches/io.mixrelay.signing/driver-20261008/release.keychain-db`는 저장된 암호로 열리지 않는다고 기존 운영 지침에 명시돼 있으므로 기본 서명 경로로 재사용하지 않는다.
 
+저장된 암호로 빌드 키체인이 열리지 않으면 `pnpm signing:check --restore-keychain`을 실행한다. 설정 옆의 백업을 `backup-verification.json`의 인증서 지문과 대조한다. 그다음 새 암호로 전용 키체인을 새로 만들고, 설정을 원자적으로 교체한다. 키체인은 300초 뒤 자동으로 잠기며, 키는 Apple 서명 도구만 쓸 수 있다. 열리지 않는 이전 키체인 파일은 남기고 검색 목록에서만 뺀다. 로그인 키체인과 잠금 정책은 바꾸지 않는다. 복원한 뒤에는 `pnpm signing:check`로 실제 서명을 다시 확인한다.
+
 릴리스 설정에는 App Store Connect API 키 참조 `notarization.apiKeyPath`(절대 `.p8` 경로)·`keyId`·`issuer`를 둔다. 키 내용이나 암호를 넣지 않는다. 키체인 프로필은 로그인 키체인 인증창을 띄울 수 있어 받지 않는다. 참조 누락·충돌은 서명 전에 거부하고, 빌드 전에 `notarytool history`로 키를 확인한다. `pnpm release:macos --output EMPTY_DIRECTORY`는 최종 서명 PKG를 `notarytool submit --wait --timeout 2h`로 제출하고 `Accepted`를 확인한 뒤 Apple 로그를 받아 두고 `stapler staple`·`stapler validate`를 실행한다. `--package-only`도 공증한다. 로컬 시험만 `--skip-notarization`으로 생략하며 결과는 미공증으로 표시한다.
 
 출력 폴더의 `build-result.json`과 표준 출력 JSON에 제출 ID·공증·스테이플·검증 상태를 기록한다. 실패 시 제출 ID가 있으면 `notarization-log.json`을 가져오고 로그 조회 실패도 기록한다. 자격 증명 참조와 도구의 원시 진단은 콘솔에 출력하지 않는다. 취소는 기존 서명 래퍼가 패키징·공증 프로세스 그룹을 종료한 뒤 키체인 검색 목록을 복원한다. 강제 종료된 결과는 진행 단계가 남을 수 있으므로 `notarized-artifacts-built`와 세 검증 성공을 모두 확인한다. 실제 공증·설치 검증은 모의 도구 테스트와 구분한다. 설정 예시는 [macOS 패키징](../packaging/macos/README.md#build)을 따른다.
