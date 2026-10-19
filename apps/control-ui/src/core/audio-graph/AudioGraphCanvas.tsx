@@ -918,14 +918,16 @@ function GraphContextSurface({
   );
 }
 
+function sameViewport(a: AudioGraphViewport, b: AudioGraphViewport) {
+  return a.x === b.x && a.y === b.y && a.zoom === b.zoom;
+}
+
 function restoreCanvasViewport(
   instance: ReactFlowInstance<AudioFlowNode, AudioFlowEdge> | null,
   viewport: AudioGraphViewport | undefined,
 ) {
   if (!instance || !viewport) return;
-  const current = instance.getViewport();
-  if (current.x === viewport.x && current.y === viewport.y && current.zoom === viewport.zoom)
-    return;
+  if (sameViewport(instance.getViewport(), viewport)) return;
   // Acknowledging a saved gesture must not animate or reposition an already matching view.
   void instance.setViewport({ ...viewport }, { duration: 0 });
 }
@@ -964,10 +966,13 @@ function useCanvasViewport(
   const onMoveEnd = useCallback<
     NonNullable<ReactFlowProps<AudioFlowNode, AudioFlowEdge>['onMoveEnd']>
   >(
-    (event, nextViewport) => {
-      // XYFlow's programmatic setViewport/fitView events have no source event.
-      // Using onMoveEnd rather than onMove also avoids an autosave for every frame.
-      if (event && mounted.current) onViewportChange?.({ ...nextViewport });
+    (_, nextViewport) => {
+      // Restoring the saved view echoes it back. Every other move, including Fit graph,
+      // is what the user now sees, so the next mount must restore it rather than an older
+      // view where new nodes would land out of sight. onMoveEnd saves once per gesture.
+      const saved = requestedViewport.current;
+      if (!mounted.current || (saved && sameViewport(saved, nextViewport))) return;
+      onViewportChange?.({ ...nextViewport });
     },
     [onViewportChange],
   );

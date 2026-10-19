@@ -1182,7 +1182,7 @@ describe('AudioGraphCanvas viewport contract', () => {
     expect(viewportHarness.setViewport).not.toHaveBeenCalled();
   });
 
-  it('restores a saved viewport without fit or a programmatic autosave echo', () => {
+  it('restores a saved viewport without fit or an autosave echo of the restore', () => {
     const viewport = { x: -180, y: 70, zoom: 0.75 };
     const onViewportChange = vi.fn();
     render(canvas(viewport, onViewportChange));
@@ -1193,7 +1193,6 @@ describe('AudioGraphCanvas viewport contract', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'initialize viewport' }));
     expect(viewportHarness.setViewport).toHaveBeenCalledWith(viewport, { duration: 0 });
-    fireEvent.click(screen.getByRole('button', { name: 'finish programmatic viewport' }));
     expect(onViewportChange).not.toHaveBeenCalled();
   });
 
@@ -1271,6 +1270,18 @@ describe('AudioGraphCanvas viewport contract', () => {
     view.unmount();
     delayedEnd?.(new MouseEvent('mouseup'), { x: 500, y: 200, zoom: 1 });
     expect(onViewportChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('AudioGraphCanvas viewport persistence', () => {
+  beforeEach(resetViewportHarness);
+
+  it('saves a programmatic move such as Fit graph so a later mount restores the visible view', () => {
+    const onViewportChange = vi.fn();
+    render(canvas({ x: 140, y: 324, zoom: 0.05 }, onViewportChange));
+    fireEvent.click(screen.getByRole('button', { name: 'initialize viewport' }));
+    fireEvent.click(screen.getByRole('button', { name: 'finish programmatic viewport' }));
+    expect(onViewportChange).toHaveBeenCalledExactlyOnceWith({ x: 120, y: -30, zoom: 1.75 });
   });
 });
 
