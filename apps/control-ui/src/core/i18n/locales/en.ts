@@ -19,6 +19,12 @@ export const en = {
       title: 'Connecting to MixRelay',
       description: 'Preparing audio. Your workspace will open when MixRelay is ready.',
     },
+    stages: {
+      checking: 'Checking for a running MixRelay',
+      starting: 'Starting MixRelay',
+      preparing_engine: 'Preparing the audio engine',
+    },
+    step: 'Step {{current}} of {{total}}',
     not_installed: {
       title: 'MixRelay is required',
       description:

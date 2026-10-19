@@ -19,6 +19,12 @@ export const ru = {
       title: 'Подключение к MixRelay',
       description: 'Подготовка аудио. Рабочая область откроется, когда MixRelay будет готов.',
     },
+    stages: {
+      checking: 'Поиск запущенного MixRelay',
+      starting: 'Запуск MixRelay',
+      preparing_engine: 'Подготовка аудиодвижка',
+    },
+    step: 'Шаг {{current}} из {{total}}',
     not_installed: {
       title: 'Требуется MixRelay',
       description:

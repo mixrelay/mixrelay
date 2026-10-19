@@ -1,6 +1,10 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { RuntimePort, RuntimeStatus } from '../../core/runtime/RuntimePort';
+import type {
+  RuntimeConnectStage,
+  RuntimePort,
+  RuntimeStatus,
+} from '../../core/runtime/RuntimePort';
 import { useRuntimeConnection } from './useRuntimeConnection';
 
 function port() {
@@ -27,6 +31,24 @@ it('opens only after connecting and observes without restarting the Driver', asy
   unmount();
   await act(async () => vi.advanceTimersByTimeAsync(4000));
   expect(native.status).toHaveBeenCalledTimes(2);
+});
+it('reports the steps of the current connection only', async () => {
+  const native = port();
+  let first: (stage: RuntimeConnectStage) => void = () => {};
+  native.connect
+    .mockImplementationOnce((onStage) => {
+      first = onStage;
+      return new Promise(() => {});
+    })
+    .mockReturnValueOnce(new Promise(() => {}));
+  const { result } = renderHook(() => useRuntimeConnection(native));
+  expect(result.current).toMatchObject({ state: 'connecting', stage: 'checking' });
+  act(() => first('starting'));
+  expect(result.current.stage).toBe('starting');
+  act(() => void result.current.connect());
+  expect(result.current.stage).toBe('checking');
+  act(() => first('preparing_engine'));
+  expect(result.current.stage).toBe('checking');
 });
 it.each(['not_installed', 'incompatible', 'unavailable'] as const)(
   'keeps %s closed and permits an explicit reconnect',

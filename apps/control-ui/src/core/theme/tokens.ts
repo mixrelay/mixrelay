@@ -33,7 +33,7 @@ export const nodeWidths = { default: 228, equalizer: 320, dynamics: 420 };
 export const nodeInsertionGap = spacing.large;
 
 export const border = { width: 1, radius: 2, smallRadius: 1 };
-export const motion = { instant: 80, fast: 120, state: 180, spin: 1000, tooltipDelay: 350 };
+export const motion = { instant: 80, fast: 120, state: 180, tooltipDelay: 350 };
 /** A transient problem (an apply, a missed poll) is shown only once it has lasted this
  * long, so brief stalls do not flash warnings while real slowdowns still surface. */
 export const feedback = { problemDelay: 1000 };
@@ -366,13 +366,12 @@ export const mixrelayVariables = {
   '--motion-duration-fast': `${motion.fast}ms`,
   '--motion-duration-state': `${motion.state}ms`,
   '--motion-easing-standard': 'cubic-bezier(0.2, 0, 0, 1)',
-  '--motion-duration-spin': `${motion.spin}ms`,
   // Near-zero rather than zero so transitionend/animationend still fire under reduced motion.
   '--motion-duration-reduced': '0.01ms',
   '--status-indicator-size': '7px',
-  '--progress-size': '16px',
+  '--progress-height': '4px',
   '--progress-track': 'var(--border-default)',
-  '--progress-indicator': 'var(--text-muted)',
+  '--progress-indicator': 'var(--text-secondary)',
   '--status-indicator-neutral': 'var(--text-muted)',
   '--meter-width': '10px',
   '--meter-height-horizontal': '4px',

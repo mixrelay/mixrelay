@@ -18,6 +18,36 @@ pub(crate) enum RuntimeStatus {
     Unavailable,
 }
 
+/// Steps of an explicit connection, reported to the editor while it runs. A runtime that is
+/// already running skips `Starting`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ConnectStage {
+    Checking,
+    Starting,
+    PreparingEngine,
+}
+
+/// What one readiness probe found. A runtime answering `hello` whose engine does not answer
+/// yet is still starting its engine; the editor only sees `Unavailable` for both silent cases.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Probe {
+    Silent,
+    Incompatible,
+    EngineStarting,
+    Ready,
+}
+
+impl Probe {
+    fn status(self) -> RuntimeStatus {
+        match self {
+            Self::Silent | Self::EngineStarting => RuntimeStatus::Unavailable,
+            Self::Incompatible => RuntimeStatus::Incompatible,
+            Self::Ready => RuntimeStatus::Ready,
+        }
+    }
+}
+
 pub(super) fn compatible(hello: &Value) -> bool {
     hello["protocolVersion"] == super::LINK_PROTOCOL
         && hello["product"] == "mixrelay-driver"
@@ -28,13 +58,16 @@ fn supported_version(version: &str) -> bool {
     version == env!("CARGO_PKG_VERSION")
 }
 
-async fn readiness(connection: &Connection) -> RuntimeStatus {
+/// `engine_pending` runs once the runtime has answered, before its engine is asked, so a
+/// slow but healthy engine is still shown as being prepared.
+async fn probe(connection: &Connection, engine_pending: impl FnOnce()) -> Probe {
     let Ok(hello) = connection.invoke("hello", Value::Null).await else {
-        return RuntimeStatus::Unavailable;
+        return Probe::Silent;
     };
     if !compatible(&hello) {
-        return RuntimeStatus::Incompatible;
+        return Probe::Incompatible;
     }
+    engine_pending();
     // A socket alone is not readiness: the owned engine must answer as well.
     match tokio::time::timeout(
         EXCHANGE_TIMEOUT,
@@ -42,9 +75,13 @@ async fn readiness(connection: &Connection) -> RuntimeStatus {
     )
     .await
     {
-        Ok(Ok(response)) if response["status"] == 200 => RuntimeStatus::Ready,
-        _ => RuntimeStatus::Unavailable,
+        Ok(Ok(response)) if response["status"] == 200 => Probe::Ready,
+        _ => Probe::EngineStarting,
     }
+}
+
+async fn readiness(connection: &Connection) -> RuntimeStatus {
+    probe(connection, || {}).await.status()
 }
 
 #[tauri::command]
@@ -61,11 +98,23 @@ pub(crate) async fn runtime_status(app: tauri::AppHandle) -> Result<RuntimeStatu
 }
 
 #[tauri::command]
-pub(crate) async fn runtime_connect(app: tauri::AppHandle) -> Result<RuntimeStatus, String> {
+pub(crate) async fn runtime_connect(
+    app: tauri::AppHandle,
+    on_stage: tauri::ipc::Channel<ConnectStage>,
+) -> Result<RuntimeStatus, String> {
+    let report = |stage: ConnectStage| {
+        // Only a closed editor window drops the channel; the connection itself continues.
+        if let Err(error) = on_stage.send(stage) {
+            tracing::debug!(%error, ?stage, "could not report the connection stage");
+        }
+    };
+    report(ConnectStage::Checking);
     let _connect = CONNECT.lock().await;
     tracing::info!("connecting to the Driver runtime");
     let connection = app.state::<Connection>();
-    let status = readiness(&connection).await;
+    let status = probe(&connection, || report(ConnectStage::PreparingEngine))
+        .await
+        .status();
     tracing::info!(?status, "Driver runtime readiness before launch");
     if status != RuntimeStatus::Unavailable {
         tracing::info!(?status, "Driver runtime already answering");
@@ -95,6 +144,7 @@ pub(crate) async fn runtime_connect(app: tauri::AppHandle) -> Result<RuntimeStat
         &executable,
         START_TIMEOUT,
         controller_admission_available,
+        report,
     )
     .await
     .inspect_err(|error| tracing::error!(%error, "Driver runtime could not be started"))?;
@@ -112,19 +162,25 @@ async fn connect_until_ready(
     executable: &std::path::Path,
     timeout: Duration,
     admission_available: impl Fn() -> Result<bool, String>,
+    report: impl Fn(ConnectStage),
 ) -> Result<RuntimeStatus, String> {
     let deadline = tokio::time::Instant::now() + timeout;
     let mut launched: Option<super::ControllerLaunch> = None;
     let mut attempts = 0;
     let mut next_launch = tokio::time::Instant::now();
+    let mut reported = ConnectStage::Checking;
+    let mut advance = |stage: ConnectStage| {
+        if stage != reported {
+            reported = stage;
+            report(stage);
+        }
+    };
     loop {
-        let status = tokio::time::timeout_at(deadline, readiness(connection)).await;
-        match status {
-            Ok(status @ (RuntimeStatus::Ready | RuntimeStatus::Incompatible)) => {
-                return Ok(status);
-            }
+        let checked = probe(connection, || advance(ConnectStage::PreparingEngine));
+        match tokio::time::timeout_at(deadline, checked).await {
+            Ok(probe @ (Probe::Ready | Probe::Incompatible)) => return Ok(probe.status()),
+            Ok(Probe::EngineStarting | Probe::Silent) => {}
             Err(_) => return Ok(RuntimeStatus::Unavailable),
-            _ => {}
         }
         if tokio::time::Instant::now() >= deadline {
             return Ok(RuntimeStatus::Unavailable);
@@ -146,6 +202,7 @@ async fn connect_until_ready(
             let admitted = !running && admission_available()?;
             tracing::info!(running, admitted, attempts, "Driver runtime launch check");
             if admitted {
+                advance(ConnectStage::Starting);
                 launched = Some(spawn_controller(executable).map_err(|error| error.to_string())?);
                 attempts += 1;
                 next_launch = tokio::time::Instant::now() + Duration::from_secs(1);
@@ -301,10 +358,15 @@ mod tests {
             }
             serve_connection(UnixListener::bind(path).unwrap(), 200).await;
         });
+        let stages = std::sync::Mutex::new(Vec::new());
         assert_eq!(
-            connect_until_ready(&connection, &executable, Duration::from_secs(4), || Ok(
-                true
-            ))
+            connect_until_ready(
+                &connection,
+                &executable,
+                Duration::from_secs(4),
+                || Ok(true),
+                |stage| stages.lock().unwrap().push(stage)
+            )
             .await
             .unwrap(),
             RuntimeStatus::Ready
@@ -312,6 +374,11 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(directory.path().join("attempts")).unwrap(),
             "attemptattempt"
+        );
+        // A retried launch is still one Starting step, then its answering runtime starts the engine.
+        assert_eq!(
+            *stages.lock().unwrap(),
+            [ConnectStage::Starting, ConnectStage::PreparingEngine]
         );
         server.abort();
     }
@@ -321,9 +388,13 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let (connection, executable) = fixture(directory.path(), "touch launched");
         assert_eq!(
-            connect_until_ready(&connection, &executable, Duration::from_millis(100), || Ok(
-                false
-            ))
+            connect_until_ready(
+                &connection,
+                &executable,
+                Duration::from_millis(100),
+                || Ok(false),
+                |_| {}
+            )
             .await
             .unwrap(),
             RuntimeStatus::Unavailable
@@ -333,16 +404,73 @@ mod tests {
             UnixListener::bind(&connection.path).unwrap(),
             503,
         ));
+        let stages = std::sync::Mutex::new(Vec::new());
         assert_eq!(
-            connect_until_ready(&connection, &executable, Duration::from_millis(100), || Ok(
-                true
-            ))
+            connect_until_ready(
+                &connection,
+                &executable,
+                Duration::from_millis(100),
+                || Ok(true),
+                |stage| stages.lock().unwrap().push(stage)
+            )
             .await
             .unwrap(),
             RuntimeStatus::Unavailable
         );
         assert!(!directory.path().join("launched").exists());
+        // The answering runtime owns its engine start; it is reported once, never relaunched.
+        assert_eq!(*stages.lock().unwrap(), [ConnectStage::PreparingEngine]);
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn a_slow_but_healthy_engine_is_reported_as_being_prepared() {
+        let directory = tempfile::tempdir().unwrap();
+        let (connection, executable) = fixture(directory.path(), "touch launched");
+        let listener = UnixListener::bind(&connection.path).unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut reader = BufReader::new(stream);
+            for (result, delay) in [
+                (
+                    json!({"protocolVersion":crate::background::LINK_PROTOCOL,"product":"mixrelay-driver","version":env!("CARGO_PKG_VERSION")}),
+                    0,
+                ),
+                (json!({"status":200}), 300),
+            ] {
+                let mut frame = String::new();
+                reader.read_line(&mut frame).await.unwrap();
+                let request: Value = serde_json::from_str(&frame).unwrap();
+                tokio::time::sleep(Duration::from_millis(delay)).await;
+                reader
+                    .get_mut()
+                    .write_all(
+                        format!(
+                            "{}\n",
+                            json!({"id":request["id"],"status":200,"body":{"ok":result}})
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+        let stages = std::sync::Mutex::new(Vec::new());
+        assert_eq!(
+            connect_until_ready(
+                &connection,
+                &executable,
+                Duration::from_secs(4),
+                || Ok(true),
+                |stage| stages.lock().unwrap().push(stage)
+            )
+            .await
+            .unwrap(),
+            RuntimeStatus::Ready
+        );
+        assert_eq!(*stages.lock().unwrap(), [ConnectStage::PreparingEngine]);
+        assert!(!directory.path().join("launched").exists());
+        server.await.unwrap();
     }
 
     #[tokio::test]
@@ -351,9 +479,13 @@ mod tests {
         let (connection, executable) =
             fixture(directory.path(), "printf attempt >> attempts\nexit 2");
         assert_eq!(
-            connect_until_ready(&connection, &executable, Duration::from_secs(5), || Ok(
-                true
-            ))
+            connect_until_ready(
+                &connection,
+                &executable,
+                Duration::from_secs(5),
+                || Ok(true),
+                |_| {}
+            )
             .await
             .unwrap(),
             RuntimeStatus::Unavailable

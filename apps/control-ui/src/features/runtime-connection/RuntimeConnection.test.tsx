@@ -1,7 +1,11 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider, i18n } from '../../core/i18n';
-import type { RuntimePort, RuntimeStatus } from '../../core/runtime/RuntimePort';
+import type {
+  RuntimeConnectStage,
+  RuntimePort,
+  RuntimeStatus,
+} from '../../core/runtime/RuntimePort';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
 import { eventually, find } from '../../test-support/fakeTimerQueries';
 import { RuntimeConnection } from './RuntimeConnection';
@@ -21,29 +25,50 @@ function renderConnection(port: RuntimePort, install = vi.fn()) {
   );
 }
 
-describe('Driver connection gate', () => {
+describe('Driver connection steps', () => {
   beforeEach(async () => {
     await i18n.changeLanguage('en');
   });
 
-  it('does not mount the editor until native readiness is acknowledged', async () => {
+  it('shows each native connection step and mounts the editor only after readiness', async () => {
     let finish: (status: RuntimeStatus) => void = () => {};
+    let report: (stage: RuntimeConnectStage) => void = () => {};
     const connect = vi.fn(
-      () =>
+      (onStage: (stage: RuntimeConnectStage) => void) =>
         new Promise<RuntimeStatus>((resolve) => {
+          report = onStage;
           finish = resolve;
         }),
     );
     renderConnection({ connect, status: vi.fn() });
-    expect(screen.getByRole('status')).toHaveTextContent('Connecting to MixRelay');
-    expect(screen.getByRole('main')).toHaveAttribute('aria-busy', 'true');
-    expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+    // A busy region would hold back the step announcements.
+    expect(screen.getByRole('main')).not.toHaveAttribute('aria-busy');
+    expect(screen.getByRole('heading', { name: 'Connecting to MixRelay' })).toBeVisible();
+    const step = (name: string) => screen.getByRole('progressbar', { name });
+    expect(step('Checking for a running MixRelay')).toHaveAttribute(
+      'aria-valuetext',
+      'Step 1 of 3',
+    );
+    expect(step('Checking for a running MixRelay')).toHaveAttribute('aria-valuenow', '0');
+    expect(screen.getByRole('status')).toHaveTextContent('Checking for a running MixRelay');
+    await act(async () => report('starting'));
+    expect(step('Starting MixRelay')).toHaveAttribute('aria-valuetext', 'Step 2 of 3');
+    expect(screen.getByRole('status')).toHaveTextContent('Starting MixRelay');
+    expect(step('Starting MixRelay')).toHaveAttribute('aria-valuenow', '1');
+    await act(async () => report('preparing_engine'));
+    expect(step('Preparing the audio engine')).toHaveAttribute('aria-valuetext', 'Step 3 of 3');
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     await act(async () => {
       finish('ready');
     });
     expect(screen.getByRole('textbox')).toHaveValue('Live routing');
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
+});
+
+describe('Driver connection gate', () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('en');
   });
 
   it.each([

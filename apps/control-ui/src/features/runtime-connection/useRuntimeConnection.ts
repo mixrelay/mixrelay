@@ -1,18 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { RuntimePort, RuntimeStatus } from '../../core/runtime/RuntimePort';
+import type {
+  RuntimeConnectStage,
+  RuntimePort,
+  RuntimeStatus,
+} from '../../core/runtime/RuntimePort';
 
 type ConnectionState = RuntimeStatus | 'connecting';
 
 export function useRuntimeConnection(port: RuntimePort) {
   const [state, setState] = useState<ConnectionState>('connecting');
+  const [stage, setStage] = useState<RuntimeConnectStage>('checking');
   const [opened, setOpened] = useState(false);
   const generation = useRef(0);
   const connect = useCallback(async () => {
     const request = ++generation.current;
     setState('connecting');
+    setStage('checking');
     let result: RuntimeStatus;
     try {
-      result = await port.connect();
+      result = await port.connect((next) => {
+        if (generation.current === request) setStage(next);
+      });
     } catch {
       result = 'unavailable';
     }
@@ -51,5 +59,5 @@ export function useRuntimeConnection(port: RuntimePort) {
     };
   }, [port, state, opened]);
 
-  return { state, opened, connect };
+  return { state, stage, opened, connect };
 }

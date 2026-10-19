@@ -19,6 +19,12 @@ export const koKR = {
       title: 'MixRelay에 연결 중',
       description: '오디오를 준비하고 있습니다. MixRelay가 준비되면 작업 화면이 열립니다.',
     },
+    stages: {
+      checking: '실행 중인 MixRelay 확인 중',
+      starting: 'MixRelay 시작 중',
+      preparing_engine: '오디오 엔진 준비 중',
+    },
+    step: '단계 {{current}}/{{total}}',
     not_installed: {
       title: 'MixRelay가 필요합니다',
       description:

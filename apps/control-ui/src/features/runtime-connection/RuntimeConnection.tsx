@@ -1,10 +1,15 @@
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { RuntimePort, RuntimeStatus } from '../../core/runtime/RuntimePort';
+import {
+  RUNTIME_CONNECT_STAGES,
+  type RuntimeConnectStage,
+  type RuntimePort,
+  type RuntimeStatus,
+} from '../../core/runtime/RuntimePort';
 import { ActionButton } from '../../core/ui/ActionButton';
 import { BrandIdentity } from '../../core/ui/BrandIdentity';
 import { Inline } from '../../core/ui/Inline';
-import { ProgressIndicator } from '../../core/ui/ProgressIndicator';
+import { ProgressBar } from '../../core/ui/ProgressBar';
 import { Stack } from '../../core/ui/Stack';
 import { Text } from '../../core/ui/Text';
 import styles from './RuntimeConnection.module.css';
@@ -21,7 +26,7 @@ export function RuntimeConnection({
   onInstall?: () => void;
   children: ReactNode;
 }) {
-  const { state, opened, connect } = useRuntimeConnection(port);
+  const { state, stage, opened, connect } = useRuntimeConnection(port);
 
   return (
     <>
@@ -31,28 +36,51 @@ export function RuntimeConnection({
         </div>
       ) : null}
       {state !== 'ready' ? (
-        <ConnectionScreen state={state} onInstall={onInstall} onRetry={connect} />
+        <ConnectionScreen state={state} stage={stage} onInstall={onInstall} onRetry={connect} />
       ) : null}
     </>
   );
 }
 
+function ConnectingScreen({ stage }: { stage: RuntimeConnectStage }) {
+  const { t } = useTranslation();
+  const step = RUNTIME_CONNECT_STAGES.indexOf(stage);
+  const total = RUNTIME_CONNECT_STAGES.length;
+  return (
+    // No aria-busy: it would hold back the progress bar's step announcements.
+    <main className={styles.screen}>
+      <section className={styles.content} aria-labelledby="runtime-title">
+        <Stack gap="wide" align="center">
+          <BrandIdentity size="standard" />
+          <Text as="h1" kind="heading" id="runtime-title">
+            {t('runtimeConnection.connecting.title')}
+          </Text>
+          {/* The bar fills with finished steps; the text names the step under way. */}
+          <ProgressBar
+            label={t(`runtimeConnection.stages.${stage}`)}
+            value={step}
+            maxValue={total}
+            valueLabel={t('runtimeConnection.step', { current: step + 1, total })}
+          />
+        </Stack>
+      </section>
+    </main>
+  );
+}
+
 function ConnectionScreen({
   state,
+  stage,
   onInstall,
   onRetry,
 }: {
   state: Exclude<RuntimeStatus, 'ready'> | 'connecting';
+  stage: RuntimeConnectStage;
   onInstall?: () => void;
   onRetry: () => Promise<void>;
 }) {
   const { t } = useTranslation();
-  if (state === 'connecting')
-    return (
-      <main className={styles.screen} aria-label="MixRelay" aria-busy="true">
-        <ProgressIndicator label={t('runtimeConnection.connecting.title')} />
-      </main>
-    );
+  if (state === 'connecting') return <ConnectingScreen stage={stage} />;
   return (
     <main className={styles.screen}>
       <section className={styles.content} aria-labelledby="runtime-title">

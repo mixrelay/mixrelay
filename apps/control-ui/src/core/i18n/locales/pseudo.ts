@@ -30,6 +30,12 @@ const overrides = {
       description:
         '[!! Preparing audio. Your workspace will open when MixRelay is ready. — expanded !!]',
     },
+    stages: {
+      checking: '[!! Checking for a running MixRelay — expanded !!]',
+      starting: '[!! Starting MixRelay — expanded !!]',
+      preparing_engine: '[!! Preparing the audio engine — expanded !!]',
+    },
+    step: '[!! Step {{current}} of {{total}} — expanded !!]',
     not_installed: {
       title: '[!! MixRelay is required — expanded !!]',
       description:

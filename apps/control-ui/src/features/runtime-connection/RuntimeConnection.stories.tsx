@@ -15,6 +15,36 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Connecting: Story = {};
+export const Starting: Story = {
+  args: {
+    port: {
+      connect: (onStage) => {
+        onStage('starting');
+        return new Promise(() => {});
+      },
+      status: async () => 'ready' as const,
+    },
+  },
+};
+export const PreparingEngine: Story = {
+  args: {
+    port: {
+      connect: (onStage) => {
+        onStage('preparing_engine');
+        return new Promise(() => {});
+      },
+      status: async () => 'ready' as const,
+    },
+  },
+};
+export const ConnectingLongTranslation: Story = {
+  ...PreparingEngine,
+  globals: { locale: 'pseudo' },
+};
+export const ConnectingNarrow: Story = {
+  ...PreparingEngine,
+  parameters: { viewport: { defaultViewport: 'mobile' } },
+};
 export const NotInstalled: Story = {
   args: { port: { connect: async () => 'not_installed', status: async () => 'not_installed' } },
 };

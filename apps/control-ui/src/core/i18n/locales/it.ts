@@ -20,6 +20,12 @@ export const it = {
       description:
         'Preparazione dell’audio. L’area di lavoro si aprirà quando MixRelay sarà pronto.',
     },
+    stages: {
+      checking: 'Ricerca di MixRelay in esecuzione',
+      starting: 'Avvio di MixRelay',
+      preparing_engine: 'Preparazione del motore audio',
+    },
+    step: 'Passaggio {{current}} di {{total}}',
     not_installed: {
       title: 'È necessario MixRelay',
       description:

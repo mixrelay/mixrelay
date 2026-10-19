@@ -754,27 +754,35 @@ export const componentContracts: readonly ComponentContract[] = [
     ],
   },
   {
-    name: 'ProgressIndicator',
-    playgroundStory: 'core-playgrounds-progressindicator--playground',
+    name: 'ProgressBar',
+    playgroundStory: 'core-playgrounds-progressbar--playground',
     group: 'Feedback',
-    purpose: '진행률을 알 수 없는 대기(연결·준비)를 표시한다.',
-    use: '대기 중인 동작을 설명하는 label을 전달한다. 영역에는 호출자가 aria-busy를 둔다.',
-    avoid: '확정된 진행률·완료를 표현하거나 대기 문구 없이 링만 두지 않는다.',
-    anatomy: 'span → 회전 링(aria-hidden) + 시각적으로 숨긴 role=status label.',
-    states: 'label 필수. reduced motion에서는 회전 없음.',
+    purpose: '단계가 정해진 대기(연결·준비)에서 지금 하는 일과 진행 정도를 표시한다.',
+    use: '현재 작업을 label, 진행 정도를 value/maxValue, 읽을 값을 valueLabel(예: 단계 2/3)로 전달한다. aria-busy 영역 안에 두지 않는다(단계 발표가 막힌다).',
+    avoid:
+      '진행을 알 수 없는 대기에 임의의 값을 채우거나, 실제 단계와 무관하게 막대를 움직이지 않는다.',
+    anatomy:
+      'React Aria ProgressBar(role=progressbar) → label·valueLabel 행 + 시각적으로 숨긴 role=status label + 트랙/채움 막대.',
+    states:
+      'label·value·maxValue·valueLabel 필수, minValue 0. 막대 전환은 motion state, reduced motion에서는 즉시.',
     tokens:
-      '--progress-size 16px; --progress-track(border-default); --progress-indicator(text-muted); --motion-duration-spin.',
-    interaction: 'Tab 없음. label이 status로 발표되며 반복 발표하지 않는다.',
-    source: 'apps/control-ui/src/core/ui/ProgressIndicator.tsx',
-    api: 'export function ProgressIndicator({ label }: { label: string })',
+      '--progress-height 4px; --progress-track(border-default); --progress-indicator(text-secondary); --motion-duration-state.',
+    interaction:
+      'Tab 없음. 역할 progressbar, 이름은 label, 값은 valueLabel. label이 바뀌면 polite status로 한 번 발표한다.',
+    source: 'apps/control-ui/src/core/ui/ProgressBar.tsx',
+    api: 'export function ProgressBar({\n  label,\n  value,\n  maxValue,\n  valueLabel,\n}: {\n  label: string;\n  value: number;\n  maxValue: number;\n  valueLabel: string;\n})',
     consumers: ['apps/control-ui/src/features/runtime-connection/RuntimeConnection.tsx'],
     tests: ['apps/control-ui/src/features/runtime-connection/RuntimeConnection.test.tsx'],
-    storyId: 'core-playgrounds-progressindicator--playground',
-    storyTitle: 'Core/Playgrounds/ProgressIndicator',
+    storyId: 'core-playgrounds-progressbar--playground',
+    storyTitle: 'Core/Playgrounds/ProgressBar',
     stateStories: [
       {
-        id: 'core-playgrounds-progressindicator--long-label',
-        label: 'ProgressIndicator / LongLabel',
+        id: 'core-playgrounds-progressbar--started',
+        label: 'ProgressBar / Started',
+      },
+      {
+        id: 'core-playgrounds-progressbar--long-label',
+        label: 'ProgressBar / LongLabel',
       },
     ],
   },

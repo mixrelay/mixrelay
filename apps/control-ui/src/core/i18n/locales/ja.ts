@@ -19,6 +19,12 @@ export const ja = {
       title: 'MixRelayに接続中',
       description: 'オーディオを準備しています。MixRelayの準備が完了すると作業画面が開きます。',
     },
+    stages: {
+      checking: '実行中のMixRelayを確認中',
+      starting: 'MixRelayを起動中',
+      preparing_engine: 'オーディオエンジンを準備中',
+    },
+    step: 'ステップ {{current}}/{{total}}',
     not_installed: {
       title: 'MixRelayが必要です',
       description:

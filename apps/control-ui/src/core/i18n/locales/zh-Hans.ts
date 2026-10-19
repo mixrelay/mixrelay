@@ -19,6 +19,12 @@ export const zhHans = {
       title: '正在连接 MixRelay',
       description: '正在准备音频。MixRelay 就绪后将打开工作区。',
     },
+    stages: {
+      checking: '正在检查运行中的 MixRelay',
+      starting: '正在启动 MixRelay',
+      preparing_engine: '正在准备音频引擎',
+    },
+    step: '第 {{current}} 步，共 {{total}} 步',
     not_installed: {
       title: '需要 MixRelay',
       description: '请安装 MixRelay 以使用音频路由、效果和录音，然后重新连接。',

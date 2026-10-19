@@ -1,21 +1,21 @@
 import { Meta, Canvas, ArgTypes } from '@storybook/addon-docs/blocks';
 import { DocsLayout } from '../DocsLayout';
 import { ComponentContract } from '../ComponentsReference';
-import * as Example from '../playgrounds/ProgressIndicator.stories';
+import * as Example from '../playgrounds/ProgressBar.stories';
 
-import * as Api from "../playgrounds/ProgressIndicator.stories";
+import * as Api from "../playgrounds/ProgressBar.stories";
 
-<Meta title="Design System/Components/ProgressIndicator" />
+<Meta title="Design System/Components/ProgressBar" />
 
 <DocsLayout>
 
-<ComponentContract name="ProgressIndicator" />
+<ComponentContract name="ProgressBar" />
 
 ## Playground·API·기본값
 
-<a href="/?path=/story/core-playgrounds-progressindicator--playground" target="_top">ProgressIndicator Playground 열기</a>. Controls는 실제 공개 props를 전달합니다. 구현 기본값은 아래 API 표와 소스 대조 계약을 따르며, Playground의 args는 재현용 입력입니다.
+<a href="/?path=/story/core-playgrounds-progressbar--playground" target="_top">ProgressBar Playground 열기</a>. Controls는 실제 공개 props를 전달합니다. 구현 기본값은 아래 API 표와 소스 대조 계약을 따르며, Playground의 args는 재현용 입력입니다.
 
-진행률을 알 수 없는 대기를 표시합니다. 링은 장식이고 label이 status로 한 번 읽힙니다. reduced motion에서는 회전하지 않습니다.
+지금 하는 일(label)과 진행 정도(valueLabel, 막대)를 함께 표시합니다. React Aria ProgressBar가 progressbar 역할과 값을 제공합니다. reduced motion에서는 막대 전환이 즉시 끝납니다.
 
 <Canvas of={Api.Playground} story={{ inline: false, height: 320 }} sourceState="hidden" />
 <ArgTypes of={Api.Playground} exclude={["className","classNames","style","styles","vars","unstyled","color","c","size","radius","variant","component","renderRoot","dangerouslySetInnerHTML"]} />
@@ -31,6 +31,10 @@ API 표의 *는 필수 입력입니다. Default의 —는 선언된 기본값이
 <Canvas of={Example.Playground} story={{ inline: false, height: 560 }} />
 
 ## 개별 상태 예제
+
+### Started
+
+<Canvas of={Api.Started} story={{ inline: false, height: 320 }} sourceState="hidden" />
 
 ### LongLabel
 

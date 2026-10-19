@@ -99,7 +99,7 @@ Storybook `Foundations/Light·Dark`는 역할과 전체 팔레트, `Design Langu
 
 | 토큰 | 값과 용도 |
 | --- | --- |
-| `motion` | `instant` 80ms(포트 피드백), `fast` 120ms, `state` 180ms, `spin` 1000ms, `tooltipDelay` 350ms. `--motion-duration-*`로 공급 |
+| `motion` | `instant` 80ms(포트 피드백), `fast` 120ms, `state` 180ms, `tooltipDelay` 350ms. `--motion-duration-*`로 공급 |
 | `--motion-duration-reduced` | `prefers-reduced-motion`에서 테마 계층이 상태 전환 시간을 0.01ms로 바꾼다. transitionend/animationend가 계속 발생하며, 이를 사용하는 컴포넌트는 개별 오버라이드 없이 따른다 |
 | `layers` | 포털 단계: dialog 200, floating 300, tooltip 1000. 메뉴·팝오버·대화상자의 실제 포털 스타일에도 적용 |
 | `shellLayers` | 앱 셸 단계: header 2, sidebarOverlay 5, chrome 6 |
@@ -108,7 +108,7 @@ Storybook `Foundations/Light·Dark`는 역할과 전체 팔레트, `Design Langu
 | `--control-placeholder` | `--text-muted`. placeholder 글자 |
 | `--meter-scale-font-size` | 8px. caption보다 작은 유일한 글자; `--dynamics-scale-font-size`가 참조 |
 | `--status-indicator-size` / `--status-indicator-neutral` | 7px 상태 점과 중립 색 |
-| `--progress-size` / `--progress-track` / `--progress-indicator` | `ProgressIndicator` 링의 크기·트랙·표시 |
+| `--progress-height` / `--progress-track` / `--progress-indicator` | `ProgressBar` 막대의 높이·트랙·채움 |
 | `--node-icon-size` | 14px 노드 아이콘 |
 | `--tooltip-readout-*` | readout 툴팁의 안쪽 여백·경계·배경·그림자·고정폭 글꼴 |
 
@@ -161,7 +161,7 @@ Core는 필드·선택·메뉴·대화상자·체크·스위치·슬라이더·�
 | Text | 본문·보조·레이블·캡션 글자와 기본/보조 색; `kind="heading"`은 16px Medium이며 `as` h1/h2와 `id` 지정; 문단 여백은 조합 소유 | UpdateAccess의 설치/최신 버전·설명·상태, RuntimeConnection |
 | ContentSection | 같은 제목 규격·콘텐츠 간격·선택적 앞/뒤 구분선, 제목으로 연결된 section 이름 | 업데이트 제품별 항목 |
 | InlineNotice | 기본·정보·성공·주의·실패의 표면·글자·경계·안쪽 여백과 선택적 동작; 실패는 alert, 나머지는 status | GraphCreateDialog·NameDialog의 제출 오류, UpdateAccess의 다운로드 오류 |
-| ProgressIndicator | 불확정 진행 링과 시각적으로 숨긴 status 레이블; reduced motion에서는 회전하지 않음 | RuntimeConnection |
+| ProgressBar | 현재 작업 label·진행 값(예: 단계 2/3)·막대; React Aria progressbar, reduced motion에서는 즉시 전환 | RuntimeConnection |
 
 | 컴포넌트 | 상태와 동작 | 필수 표시 |
 | --- | --- | --- |
@@ -214,9 +214,9 @@ Core `ActionButton`은 regular 28px·compact 24px를 최소 높이로 유지한�
 
 반복되는 아이콘 행동의 접근성 이름과 Tooltip은 인스턴스 제목을 포함한다. Core CollectionItem은 `name: removeLabel`, AudioNodeCard는 `title: Options/Bypass/에디터 행동`, TextField의 비밀번호 버튼은 `필드 이름: 표시/숨기기`를 사용한다. Feature RecorderControls는 표시 이름을 Record/Pause/Resume/Stop·Options·폴더 행동에 전달한다. 전원·음소거·사이드바·모달 닫기도 Core Tooltip과 기존 실제 버튼을 사용하며 Tab 대상은 늘리지 않는다. Storybook Patterns의 Icon Actions가 실제 Core 키 실행·Tab·메뉴 복귀 계약을 검증한다.
 
-#### StatusIndicator와 ProgressIndicator
+#### StatusIndicator와 ProgressBar
 
-`StatusIndicator`는 `--status-indicator-size` 7px 점과 `--status-indicator-neutral`을 소유한다. 노드 헤더가 이를 사용하며 툴팁은 왼쪽에 표시한다. `ProgressIndicator`는 `--progress-*` 토큰의 불확정 진행 링과 시각적으로 숨긴 status 레이블을 제공하고, reduced motion에서는 링을 회전하지 않는다. `RuntimeConnection`은 `ProgressIndicator`, `Text kind="heading"`, `Stack align="center"`, `Inline justify="center"`로 구성한다.
+`StatusIndicator`는 `--status-indicator-size` 7px 점과 `--status-indicator-neutral`을 소유한다. 노드 헤더가 이를 사용하며 툴팁은 왼쪽에 표시한다. `ProgressBar`는 React Aria `ProgressBar` 위에 현재 작업 label, 진행 값 글자(예: 단계 2/3), `--progress-*` 토큰의 막대를 배치한다. progressbar는 바뀌어도 발표되지 않으므로 label 변경은 시각적으로 숨긴 polite status로 한 번 발표하며, 이 때문에 `aria-busy` 영역 안에 두지 않는다. 단계가 정해진 대기에만 쓰고 진행을 알 수 없는 대기에 값을 지어내지 않는다. `RuntimeConnection`은 연결 중에 `BrandIdentity`, `Text kind="heading"`, `ProgressBar`를 `Stack align="center"`로 구성하고, 실패 상태에서는 `Inline justify="center"`의 복구 버튼을 둔다.
 
 #### TextField
 

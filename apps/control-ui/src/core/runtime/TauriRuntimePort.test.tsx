@@ -1,7 +1,12 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { afterEach, expect, it, vi } from 'vitest';
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(),
+  Channel: class {
+    constructor(readonly onmessage: (message: unknown) => void) {}
+  },
+}));
 
 const original = Object.getOwnPropertyDescriptor(window, '__TAURI_INTERNALS__');
 afterEach(() => {
@@ -26,8 +31,24 @@ it('observes runtime status without restarting it and connects only on an explic
   vi.mocked(invoke).mockResolvedValueOnce('unavailable').mockResolvedValueOnce('ready');
   await expect(localRuntimePort.status()).resolves.toBe('unavailable');
   expect(invoke).toHaveBeenCalledExactlyOnceWith('runtime_status');
-  await expect(localRuntimePort.connect()).resolves.toBe('ready');
-  expect(invoke).toHaveBeenLastCalledWith('runtime_connect');
+  const onStage = vi.fn();
+  await expect(localRuntimePort.connect(onStage)).resolves.toBe('ready');
+  expect(invoke).toHaveBeenLastCalledWith('runtime_connect', { onStage: expect.any(Channel) });
+});
+
+it('forwards known connection steps and ignores anything else on the channel', async () => {
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {} });
+  vi.resetModules();
+  const { localRuntimePort } = await import('./TauriRuntimePort');
+  if (!localRuntimePort) throw new Error('Native runtime adapter was not available');
+  vi.mocked(invoke).mockResolvedValueOnce('ready');
+  const onStage = vi.fn();
+  await localRuntimePort.connect(onStage);
+  const [, args] = vi.mocked(invoke).mock.lastCall ?? [];
+  const channel = (args as { onStage: { onmessage: (message: unknown) => void } }).onStage;
+  for (const message of ['starting', 'restarting', 3, null, 'preparing_engine'])
+    channel.onmessage(message);
+  expect(onStage.mock.calls).toEqual([['starting'], ['preparing_engine']]);
 });
 
 it('preserves native connection failures for the connection screen', async () => {
@@ -37,5 +58,5 @@ it('preserves native connection failures for the connection screen', async () =>
   if (!localRuntimePort) throw new Error('Native runtime adapter was not available');
   const failure = new Error('Driver is not installed');
   vi.mocked(invoke).mockRejectedValueOnce(failure);
-  await expect(localRuntimePort.connect()).rejects.toBe(failure);
+  await expect(localRuntimePort.connect(vi.fn())).rejects.toBe(failure);
 });
