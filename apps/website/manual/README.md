@@ -33,6 +33,10 @@ The product home page now links directly to the Korean manual.
 
 ## Adding a language
 
+Add a manual language only if rawsector.com offers it in its language menu.
+The app may support languages the site does not; those get no manual translation.
+See [docs/product.md](../../../docs/product.md#지원-언어).
+
 Copy the complete `en/` tree into a directory named with the target BCP 47 tag.
 Keep filenames and section IDs unchanged. Translate document titles, descriptions,
 landmark labels, visible text and image alternatives. Set the document `lang`.
