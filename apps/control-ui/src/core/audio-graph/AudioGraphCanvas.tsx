@@ -295,10 +295,12 @@ function useCanvasViewActions(
   processorEditorStatuses: ReadonlyMap<string, ProcessorEditorStatus>,
   nodeMenu: ReturnType<typeof useNodeMenu>,
   clearPortSelection: () => void,
+  nodes: readonly AudioGraphNode[],
 ) {
   const addNode = useCallback(
-    (itemId: string) => onAddNode?.(itemId, nodeMenu.positionRef.current),
-    [nodeMenu.positionRef, onAddNode],
+    (itemId: string) =>
+      onAddNode?.(itemId, unoccupiedPosition(nodeMenu.positionRef.current, nodes)),
+    [nodeMenu.positionRef, nodes, onAddNode],
   );
   const onPaneClick = useCallback(() => {
     nodeMenu.close();
@@ -315,6 +317,23 @@ function useCanvasViewActions(
     [onProcessorEditorRetry, processorEditorLabels, processorEditorStatuses],
   );
   return { addNode, editorContext, onPaneClick };
+}
+
+const ADD_NODE_CASCADE = 24;
+
+/** Repeated adds at one anchor cascade instead of hiding the previous node. */
+function unoccupiedPosition(position: XYPosition, nodes: readonly AudioGraphNode[]): XYPosition {
+  const occupied = (candidate: XYPosition) =>
+    nodes.some(
+      (node) =>
+        Math.abs(node.position.x - candidate.x) < ADD_NODE_CASCADE &&
+        Math.abs(node.position.y - candidate.y) < ADD_NODE_CASCADE,
+    );
+  let candidate = position;
+  // Candidates only move forward, so each node blocks at most two steps.
+  while (occupied(candidate))
+    candidate = { x: candidate.x + ADD_NODE_CASCADE, y: candidate.y + ADD_NODE_CASCADE };
+  return candidate;
 }
 
 function useNodeMenu(onOpenedChange?: (opened: boolean) => void) {
@@ -347,10 +366,13 @@ function useNodeMenu(onOpenedChange?: (opened: boolean) => void) {
       flowRef.current?.screenToFlowPosition({ x: event.clientX, y: event.clientY }) ??
       screenPosition;
   }, []);
-  const prepareButtonPosition = useCallback((event: ReactMouseEvent<Element>) => {
-    event.stopPropagation();
+  // The menu opens on press start, before any click event reaches the trigger, so the
+  // anchor is taken when the menu opens, for pointer and keyboard presses alike.
+  const openButtonMenu = useCallback((next: boolean) => {
+    setButtonOpened(next);
+    if (!next) return;
     setContextOpened(false);
-    // These handlers run from the mounted canvas and its child trigger.
+    // The trigger renders inside the mounted canvas.
     const bounds = (rootRef.current as HTMLElement).getBoundingClientRect();
     const screenPosition = { x: 132, y: 92 };
     positionRef.current =
@@ -364,11 +386,10 @@ function useNodeMenu(onOpenedChange?: (opened: boolean) => void) {
     close,
     contextOpened,
     flowRef,
+    openButtonMenu,
     positionRef,
-    prepareButtonPosition,
     prepareContextPosition,
     rootRef,
-    setButtonOpened,
     setContextOpened,
     setFlowInstance,
   };
@@ -749,8 +770,7 @@ function AddNodePanel({
         items={nodeMenuItems}
         label={actionLabel}
         tooltip={actionLabel}
-        onClick={nodeMenu.prepareButtonPosition}
-        onOpenedChange={nodeMenu.setButtonOpened}
+        onOpenedChange={nodeMenu.openButtonMenu}
         onSelect={addNode}
         opened={nodeMenu.buttonOpened}
       />
@@ -1054,6 +1074,7 @@ export function AudioGraphCanvas({
     processorEditorStatuses,
     nodeMenu,
     portSelection.clear,
+    model.nodes,
   );
   const { renaming, connecting } = useNodeRequests(onNodeRenameRequest, nodeMenu.rootRef);
   const contextMenu = useGraphContextMenu({

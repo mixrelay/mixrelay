@@ -9,7 +9,7 @@ import { frequencyPosition, gainPosition } from '../ui/equalizerResponse';
 import { NodeOptionsSection } from '../ui/NodeOptionsSection';
 import { useNodeOptionsState } from '../ui/nodeOptionsState';
 import { AudioGraphCanvas, type AudioGraphViewport } from './AudioGraphCanvas';
-import type { AudioGraphModel } from './model';
+import type { AudioGraphModel, AudioGraphNode } from './model';
 
 type MockItem = Record<string, unknown>;
 
@@ -1351,6 +1351,53 @@ describe('AudioGraphCanvas discovery menu lifecycle', () => {
       await waitFor(() => expect(onOpened).toHaveBeenLastCalledWith(false));
     },
   );
+});
+
+describe('AudioGraphCanvas add button placement', () => {
+  function renderAddMenu(nodes: AudioGraphNode[] = []) {
+    const onAddNode = vi.fn();
+    const graph = model();
+    graph.nodes.push(...nodes);
+    render(
+      <AudioGraphCanvas
+        ariaLabel="Graph"
+        model={graph}
+        nodeMenuItems={[{ id: 'source:new', label: 'New source' }]}
+        onAddNode={onAddNode}
+        onModelChange={vi.fn()}
+      />,
+      { wrapper: CanvasTestProvider },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'initialize viewport' }));
+    return { add: screen.getByRole('button', { name: 'Add node' }), onAddNode };
+  }
+
+  it('anchors the node when the menu opens on press start without a click', async () => {
+    const { add, onAddNode } = renderAddMenu();
+    // A real mouse press opens the menu before any click event can reach the button.
+    // A non-zero contact size keeps React Aria from treating this as a virtual click.
+    const pointer = { button: 0, height: 1, pointerId: 1, pointerType: 'mouse', width: 1 };
+    fireEvent.pointerDown(add, pointer);
+    fireEvent.pointerUp(add, pointer);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'New source' }));
+    expect(onAddNode).toHaveBeenCalledExactlyOnceWith('source:new', { x: 132, y: 92 });
+  });
+
+  it('cascades a repeated add instead of hiding the node at the anchor', async () => {
+    const placed: AudioGraphNode = {
+      id: 'placed',
+      position: { x: 132, y: 92 },
+      inputPorts: [],
+      outputPorts: [],
+      appearance: { category: 'Source', detail: 'App', icon: 'S', title: 'Placed' },
+    };
+    const { add, onAddNode } = renderAddMenu([placed]);
+    act(() => add.focus());
+    fireEvent.keyDown(add, { key: 'Enter' });
+    fireEvent.keyUp(add, { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'New source' }));
+    expect(onAddNode).toHaveBeenCalledExactlyOnceWith('source:new', { x: 156, y: 116 });
+  });
 });
 
 describe('AudioGraphCanvas context menu wiring', () => {

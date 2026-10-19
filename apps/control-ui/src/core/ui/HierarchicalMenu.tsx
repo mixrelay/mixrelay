@@ -10,7 +10,6 @@ import {
 } from 'react';
 import {
   Button,
-  type ButtonProps,
   Header,
   Menu,
   MenuItem,
@@ -45,7 +44,6 @@ export function HierarchicalMenuButton({
   buttonContent,
   label,
   items,
-  onClick,
   onOpenedChange,
   onSelect,
   opened,
@@ -54,17 +52,12 @@ export function HierarchicalMenuButton({
   buttonClassName?: string;
   buttonContent: ReactNode;
   label: string;
-  onClick?: ButtonProps['onClick'];
   onOpenedChange?: (opened: boolean) => void;
   opened?: boolean;
   tooltip?: string;
 }) {
   const button = (
-    <Button
-      aria-label={label}
-      className={`${styles.trigger} ${buttonClassName ?? ''}`}
-      onClick={onClick}
-    >
+    <Button aria-label={label} className={`${styles.trigger} ${buttonClassName ?? ''}`}>
       {buttonContent}
     </Button>
   );
