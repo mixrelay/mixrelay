@@ -58,7 +58,7 @@ Driver, PipeWire, WirePlumber, RF64, WAV, PCM, AU, AUv3, VST3, CLAP or LV2.
 | Create | 생성 | Graph creation |
 | Add node | 노드 추가 | Canvas command |
 | Source / Processor / Output | 소스 / 프로세서 / 출력 | Node menu |
-| Running applications | 실행 중인 애플리케이션 | Source list |
+| Running applications | 실행 중인 앱 | Source list |
 | Options | 옵션 | Node settings; do not leave English in Korean instructions |
 | Rename display name / Display name | 표시 이름 변경 / 표시 이름 | Node alias, not native device identity |
 | MixRelay Virtual I/O | 가상 장치 | Virtual-device submenu label |
@@ -81,14 +81,14 @@ Driver, PipeWire, WirePlumber, RF64, WAV, PCM, AU, AUv3, VST3, CLAP or LV2.
 | Bypass | 바이패스 | Dry signal passes |
 | Pause / Resume / Stop | 일시정지 / 재개 / 정지 | Global or recorder; state the scope |
 | Open MixRelay / Quit | MixRelay 열기 / 종료 | Background status menu |
-| Recorder / Record | 레코더 / 녹음 | Node and action |
+| Recorder / Record | 녹음기 / 녹음 | Node and action |
 | Recording folder / Choose folder… | 녹음 폴더 / 폴더 선택… | Recorder |
 | WAV sample rate / Input rate | WAV 샘플레이트 / 입력과 동일 | Recorder format |
 | Recorded time / Recording error | 녹음 시간 / 녹음 오류 | Recorder status |
 | Preset / Custom / Effect chains | 프리셋 / 사용자 설정 / 효과 체인 | Built-in effects |
 | Equalizer / Compressor / Limiter | 이퀄라이저 / 컴프레서 / 리미터 | Built-in effect names |
 | Threshold | 스레숄드 | Compressor node; other built-in effect fields use 문턱값 |
-| Release | 릴리즈 | Compressor node; other built-in effect fields use 릴리스 |
+| Release | 릴리스 | Compressor node and built-in effect fields |
 | Add plug-in folder… / Rescan audio effects | 플러그인 폴더 추가… / 오디오 이펙트 다시 스캔 | Plug-in discovery |
 | Channel layout / Open | 채널 구성 / 열기 | Plug-in settings and native editor |
 | Power / Mute / Volume / Recording | 전원 / 음소거 / 볼륨 / 녹음 | Stream Deck actions |

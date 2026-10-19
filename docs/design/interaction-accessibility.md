@@ -38,7 +38,7 @@
 6. native button/input을 우선한다. ARIA 이름만으로 키보드 구현을 대신하지 않는다. disabled는 이유를 읽을 수 있게 하고, 작업 완료/실패만 필요한 시점에 알린다.
    반복되는 삭제·노드 설정·바이패스·플러그인 에디터·녹음·폴더 행동의 접근성 이름에 그래프/노드의 표시 이름을 포함한다. 비밀번호 표시/숨기기는 필드 이름을 포함한다. Core는 대상과 행동을 조합하고 Feature는 실제 대상 이름·명령을 전달한다. 공통 Tooltip은 기존 버튼에 연결하며 같은 이름의 native title이나 wrapper Tab 대상을 추가하지 않는다.
    추가 버튼은 보이는 +와 실제 aria-label, hover/키보드 focus 툴팁을 제공한다. 메뉴를 열고 Escape로 닫아 같은 트리거로 복귀하며 추가 Tab 대상은 만들지 않는다. 필드 placeholder는 기본값의 단서이며 보이는 label·접근성 이름과 분리한다.
-   노드 제목줄의 Off → Mute → Options는 Core의 같은 DOM 순서를 사용한다. 내장 효과는 Off·Mute 대신 바이패스 → Options 순서를 사용한다. 저장값·외부 명령으로 Off·Mute인 효과에만 그 상태를 해제하는 복구 행동을 먼저 제공한다. Options 트리거와 설정 패널은 `aria-expanded`·`aria-controls`로 연결한다. 제목줄의 배치 슬롯은 Tab 대상이 아니며, 레코더는 이후 Record/Pause/Stop과 펼친 설정으로 이어진다.
+   노드 제목줄의 Off → Mute → Options는 Core의 같은 DOM 순서를 사용한다. 내장 효과는 Off·Mute 대신 바이패스 → Options 순서를 사용한다. 저장값·외부 명령으로 Off·Mute인 효과에만 그 상태를 해제하는 복구 행동을 먼저 제공한다. Options 트리거와 설정 패널은 `aria-expanded`·`aria-controls`로 연결한다. 제목줄의 배치 슬롯은 Tab 대상이 아니며, 녹음기는 이후 Record/Pause/Stop과 펼친 설정으로 이어진다.
 7. 모든 모달은 Core `Dialog`를 사용한다. 닫힘·조건부 unmount 모두 포커스를 복귀시키되, 사용자가 이미 다른 조작 대상으로 이동했다면 빼앗지 않는다. busy 중에는 Esc·바깥 클릭·닫기 동작을 막는다.
    폼의 DOM·Tab 순서는 필드 → 필요한 오류/설명 → 하단 취소 → 저장/확정이다. 하단은 Core FormActions로 우측 정렬하며, 취소 버튼은 type=button으로 제출을 실행하지 않는다. 이름·생성·확인 폼은 헤더에 중복 닫기 정지점을 두지 않는다. 정보 모달의 헤더 닫기는 유지한다.
 

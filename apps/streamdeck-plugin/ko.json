@@ -6,7 +6,7 @@
     "Name": "볼륨", "Tooltip": "버튼이나 다이얼로 볼륨을 조절합니다.",
     "Encoder": { "TriggerDescription": { "Rotate": "볼륨 조절", "Push": "음소거" } }
   },
-  "io.mixrelay.streamdeck.recorder": { "Name": "녹음", "Tooltip": "레코더의 녹음, 일시정지, 정지를 제어합니다." },
+  "io.mixrelay.streamdeck.recorder": { "Name": "녹음", "Tooltip": "녹음기의 녹음, 일시정지, 정지를 제어합니다." },
   "Localization": {
     "Power": "전원", "Mute": "음소거", "Volume": "볼륨", "Recording": "녹음",
     "Graph": "그래프", "Node": "노드", "Control": "동작",

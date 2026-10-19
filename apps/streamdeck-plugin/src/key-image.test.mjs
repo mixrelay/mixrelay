@@ -24,7 +24,7 @@ test('volume key has an icon, direction and only the current gain, with XML-safe
 });
 
 test('transport operation is distinguished by shape without a third text row', () => {
-  const view = { title: '레코더', value: '정지' };
+  const view = { title: '녹음기', value: '정지' };
   assert.match(decode(keyImage(view, 'pause', icon)), /M62 18v26m20-26v26/);
   assert.match(decode(keyImage(view, 'stop', icon)), /x="59" y="17"/);
   assert.match(decode(keyImage(view, 'record', icon)), /translate\(52 10\)/);

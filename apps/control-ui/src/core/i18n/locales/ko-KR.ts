@@ -74,7 +74,7 @@ export const koKR = {
     close: '닫기',
     unknown: '알 수 없음',
     installed: '설치 버전: {{version}}',
-    latest: '최신 릴리즈: {{version}}',
+    latest: '최신 릴리스: {{version}}',
     openDownload: '{{asset}} 다운로드 열기',
     openFailed: '다운로드를 열지 못했습니다. 다시 확인하거나 다운로드를 재시도하세요.',
     installNotice:
@@ -82,8 +82,8 @@ export const koKR = {
     states: {
       available: '업데이트가 있습니다.',
       current: '최신 버전입니다.',
-      published: '릴리즈가 있습니다. 설치 버전을 확인할 수 없습니다.',
-      not_published: '아직 게시된 릴리즈가 없습니다.',
+      published: '릴리스가 있습니다. 설치 버전을 확인할 수 없습니다.',
+      not_published: '아직 게시된 릴리스가 없습니다.',
       unavailable: '이 제품의 업데이트를 확인하지 못했습니다. 온라인일 때 다시 시도하세요.',
     },
   },
@@ -96,7 +96,7 @@ export const koKR = {
       virtualDevices: '무료: 가상 장치 1개 한도',
     },
     freeSummary:
-      '무료: 그래프 1개, 입력 2개, 출력 장치 2개, 가상 장치 1개, Driver 채널 매핑 4개, 외부 플러그인 2개, 스테레오 레코더 1개. 무료 그래프와 채널 매핑은 저장·불러오기할 수 있습니다. 장치 이름 변경에는 라이선스가 필요합니다.',
+      '무료: 그래프 1개, 입력 2개, 출력 장치 2개, 가상 장치 1개, Driver 채널 매핑 4개, 외부 플러그인 2개, 스테레오 녹음기 1개. 무료 그래프와 채널 매핑은 저장·불러오기할 수 있습니다. 장치 이름 변경에는 라이선스가 필요합니다.',
     title: '라이선스',
     close: '닫기',
     loading: '라이선스 확인 중…',
@@ -144,7 +144,7 @@ export const koKR = {
     freeLimit:
       '무료 녹음: 테이크당 최대 2채널·2시간. 일시정지 시간은 제외됩니다. 녹음은 자동 종료되고 오디오 라우팅은 계속됩니다.',
     channels: '채널 수',
-    title: '레코더',
+    title: '녹음기',
     folder: '녹음 폴더',
     chooseFolder: '폴더 선택…',
     sampleRate: 'WAV 샘플레이트',
@@ -362,7 +362,7 @@ export const koKR = {
     },
     addNode: '노드 추가',
     emptyCanvas: '앱, 장치, 효과 등을 추가하세요.',
-    noApplications: '실행 중인 애플리케이션 없음',
+    noApplications: '실행 중인 앱 없음',
     noInputDevices: '입력 장치 없음',
     noOutputDevices: '출력 장치 없음',
     noProcessors: '설치된 오디오 이펙트 없음',
@@ -375,7 +375,7 @@ export const koKR = {
       output: '출력',
       processor: '프로세서',
       routing: '라우팅',
-      runningApplications: '실행 중인 애플리케이션',
+      runningApplications: '실행 중인 앱',
       source: '소스',
       utility: '유틸리티',
       au: 'AU',
@@ -439,7 +439,7 @@ export const koKR = {
     toggleGain: '−6 dB 게인',
     apply: '적용',
     nodes: {
-      application: '애플리케이션',
+      application: '앱',
       attack: '어택',
       audioInput: '기본 입력 장치',
       audioOutput: '기본 출력 장치',
@@ -467,7 +467,7 @@ export const koKR = {
       outputGain: '출력 게인',
       renderChannels: '입력',
       ratio: '레이시오',
-      release: '릴리즈',
+      release: '릴리스',
       sourceGain: '입력 레벨',
       threshold: '스레숄드',
       unsupported: '지원되지 않음',
@@ -484,7 +484,7 @@ export const koKR = {
         '무료 사용 한도를 초과합니다. 연결이나 노드를 줄이거나 라이선스를 활성화하세요.',
       audio_device_disconnected: '가상 오디오 장치 구성을 적용할 수 없습니다.',
       audio_source_unavailable:
-        '애플리케이션 오디오를 캡처할 수 없습니다. 실행 상태와 오디오 캡처 권한을 확인하세요.',
+        '앱 오디오를 캡처할 수 없습니다. 실행 상태와 오디오 캡처 권한을 확인하세요.',
       control_unavailable: '로컬 오디오 엔진에 연결할 수 없습니다.',
       control_request_failed: '오디오 제어 요청을 처리하지 못했습니다.',
       engine_replaced:
@@ -591,7 +591,7 @@ export const koKR = {
     },
     nodes: {
       application: {
-        name: '애플리케이션',
+        name: '앱',
         description: 'Chrome, Firefox, 게임 등 프로세스별 오디오 캡처',
       },
       systemAudio: { name: '시스템 오디오', description: 'macOS 전체 출력 및 효과음 캡처' },
@@ -615,7 +615,7 @@ export const koKR = {
       loudness: { name: '라우드니스', description: 'LUFS, true peak 및 방송 기준 측정' },
       virtualDevice: { name: '가상 장치', description: 'OBS와 DAW에서 보이는 CoreAudio 출력' },
       monitor: { name: '모니터', description: '헤드폰과 스피커로 지연 최소화 청취' },
-      recorder: { name: '레코더', description: '믹스 또는 스템 단위 파일 녹음' },
+      recorder: { name: '녹음기', description: '믹스 또는 스템 단위 파일 녹음' },
       rtmp: { name: 'RTMP 라이브', description: '스트리밍 플랫폼으로 직접 송출' },
       icecast: { name: 'Icecast / SHOUTcast', description: '인터넷 라디오 서버로 연속 송출' },
     },

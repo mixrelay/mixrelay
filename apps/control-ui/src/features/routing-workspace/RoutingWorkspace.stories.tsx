@@ -269,7 +269,7 @@ export const SubmissionPending: Story = {
     docs: {
       description: {
         story:
-          '실제 Add node에서 레코더를 추가하고 applyGraph 응답을 대기합니다. 제품의 10초 상한이 지나면 timeout 복구 상태로 전환합니다. 영구 loading fixture가 아닙니다.',
+          '실제 Add node에서 녹음기를 추가하고 applyGraph 응답을 대기합니다. 제품의 10초 상한이 지나면 timeout 복구 상태로 전환합니다. 영구 loading fixture가 아닙니다.',
       },
     },
   },
@@ -319,7 +319,7 @@ export const AutomaticRevisionMerge: Story = {
     docs: {
       description: {
         story:
-          '레코더 추가 중 외부 작성자가 서로 다른 trim 노드를 두 번 추가합니다. 반복 revision 확정 거부를 자동 재병합하여 레코더와 외부 변경 둘을 보존합니다. 그래프 선택·덮어쓰기·편집 취소를 요구하지 않습니다.',
+          '녹음기 추가 중 외부 작성자가 서로 다른 trim 노드를 두 번 추가합니다. 반복 revision 확정 거부를 자동 재병합하여 녹음기와 외부 변경 둘을 보존합니다. 그래프 선택·덮어쓰기·편집 취소를 요구하지 않습니다.',
       },
     },
   },

@@ -208,7 +208,7 @@ export const componentContracts: readonly ComponentContract[] = [
     playgroundStory: 'core-playgrounds-transportbutton--playground',
     group: 'Commands',
     purpose: '녹음·일시정지·중지·재개의 공통 기호와 상태 표시.',
-    use: '레코더와 앱 전체 오디오 조작에 대상·행동을 담은 label을 전달한다.',
+    use: '녹음기와 앱 전체 오디오 조작에 대상·행동을 담은 label을 전달한다.',
     avoid:
       '노드 Off/Mute와 같은 상태로 묶지 않는다. active/pressed/busy/disabled를 서로 대신하지 않는다.',
     anatomy: 'Tooltip → Button → 16px SVG glyph.',
@@ -1686,7 +1686,7 @@ export const componentContracts: readonly ComponentContract[] = [
     name: 'NodeTransportRow',
     playgroundStory: 'core-playgrounds-nodetransportrow--playground',
     group: 'Layout',
-    purpose: '레코더의 시간·값과 compact transport를 같은 행에 배치한다.',
+    purpose: '녹음기의 시간·값과 compact transport를 같은 행에 배치한다.',
     use: 'value/label/children과 필요시 state·description을 제공한다.',
     avoid: 'elapsed time를 명령 버튼이나 계속 발표하는 live alert로 만들지 않는다.',
     anatomy: 'output value left → transportActions right.',

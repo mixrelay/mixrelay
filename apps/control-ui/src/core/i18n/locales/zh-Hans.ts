@@ -93,7 +93,7 @@ export const zhHans = {
       virtualDevices: '免费版：1 个虚拟设备',
     },
     freeSummary:
-      '免费：1个图、2个输入、2个输出设备、1个虚拟设备、4个Driver通道映射、2个外部插件和1个立体声录音器。免费图及其通道映射可以保存和加载。重命名设备需要许可证。',
+      '免费：1个图、2个输入、2个输出设备、1个虚拟设备、4个Driver通道映射、2个外部插件和1个立体声录音机。免费图及其通道映射可以保存和加载。重命名设备需要许可证。',
     title: '许可证',
     close: '关闭',
     loading: '正在检查许可证…',
@@ -139,7 +139,7 @@ export const zhHans = {
   recorder: {
     freeLimit: '免费录音：每次最多2个通道、2小时，不计暂停时间。录音自动停止，音频路由继续运行。',
     channels: '通道',
-    title: '录音器',
+    title: '录音机',
     folder: '录音文件夹',
     chooseFolder: '选择文件夹…',
     sampleRate: 'WAV 采样率',
@@ -663,7 +663,7 @@ export const zhHans = {
         description: '通过耳机或扬声器进行低延迟监听',
       },
       recorder: {
-        name: '录音器',
+        name: '录音机',
         description: '将混音或独立分轨录制到文件',
       },
       rtmp: {

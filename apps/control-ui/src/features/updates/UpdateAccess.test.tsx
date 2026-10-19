@@ -198,5 +198,5 @@ it('offers the same Korean product update action', async () => {
   view(port());
   fireEvent.click(screen.getByRole('button', { name: '업데이트 확인' }));
   const dialog = await screen.findByRole('dialog', { name: '업데이트' });
-  expect(await within(dialog).findByText('아직 게시된 릴리즈가 없습니다.')).toBeVisible();
+  expect(await within(dialog).findByText('아직 게시된 릴리스가 없습니다.')).toBeVisible();
 });

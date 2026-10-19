@@ -51,7 +51,7 @@
         <header class="guide-heading"><p class="eyebrow">MIXRELAY / 手册</p><h1>应用音频采集</h1><p>采集正在运行的应用的音频，并通过音频图进行路由。</p><p class="guide-draft-note">发布前草稿。目前尚不提供公开下载或购买。本手册介绍当前源代码构建版本的行为；在下文所列环境中，仍需验证安装后的实际行为。</p></header>
         <nav class="manual-toc" aria-label="本页内容"><p class="sidebar-label">本页内容</p><ul><li><a href="#capture">选择应用</a></li><li><a href="#unavailable">没有音频与源应用播放</a></li></ul></nav>
         <section class="guide-section" id="capture" aria-labelledby="capture-title"><p class="section-number" aria-hidden="true">01</p><div><h2 id="capture-title">选择应用</h2>
-<ol><li>打开源应用并开始播放，使音频源可用。</li><li>在 MixRelay 中选择 <code>添加节点 → 音源</code>，然后从 <code>正在运行的应用</code> 中选择应用。</li><li>将其输出通道连接到处理器、输出或录音器。按需在 <code>选项</code> 中调整 <code>音源增益</code>。</li></ol><p>音源列表显示发现的应用，不会单独列出浏览器标签页或窗口。更改显示名称不会改变所采集的应用。物理输入与单个应用采集节点共用免费版的两个输入额度。</p>
+<ol><li>打开源应用并开始播放，使音频源可用。</li><li>在 MixRelay 中选择 <code>添加节点 → 音源</code>，然后从 <code>正在运行的应用</code> 中选择应用。</li><li>将其输出通道连接到处理器、输出或录音机。按需在 <code>选项</code> 中调整 <code>音源增益</code>。</li></ol><p>音源列表显示发现的应用，不会单独列出浏览器标签页或窗口。更改显示名称不会改变所采集的应用。物理输入与单个应用采集节点共用免费版的两个输入额度。</p>
 </div></section>
 <section class="guide-section" id="unavailable" aria-labelledby="unavailable-title"><p class="section-number" aria-hidden="true">02</p><div><h2 id="unavailable-title">没有音频与源应用播放</h2>
 <p>采集要求 48 kHz 及相应的 <a href="first-launch.html#permissions">macOS 权限</a>。如果节点显示 <code>离线</code>，请检查应用是否正在运行。如果出现 <code>重新选择应用</code>，请通过节点的应用选择功能选取目标音源。当多个音源匹配时，MixRelay 不会自动选择替代项。</p><p>应用的原始播放和 MixRelay 路由都可能影响您听到的声音。如果声音重叠，请检查监听路由。MixRelay 不会更改系统默认输出。采集路由采用源播放抑制时，仅作用于 MixRelay 自身管理的路径；当前界面没有独立的源播放开关。</p><!-- TODO screenshot: running application menu and offline/reselection states, both languages. -->

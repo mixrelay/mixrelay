@@ -190,11 +190,11 @@ Core는 필드·선택·메뉴·대화상자·체크·스위치·슬라이더·�
 
 | 소유 정의 | 계약 | 실제 소비자 |
 | --- | --- | --- |
-| `nodeWidths` / `--node-default-width` / `--node-equalizer-width` / `--node-dynamics-width` | 레코더를 포함한 일반 노드 기본 폭 228px, 3밴드 그래픽 EQ 320px, 컴프레서·리미터 420px. EQ·다이내믹스 폭은 그래프 resize 최소폭도 겸함 | Core 그래프와 노드 Storybook |
-| Core `audioNodeFrame` / `audioNodeFaceGeometry` | 제목줄 26px·본문 최소 68px·하단 조작/정보 행 24px·경계 1px. 일반 1/2/4채널과 레코더는 접힌 기본 228×120px | `AudioNodeCard`와 `useAudioNodeLayout`의 크기·포트·resize 계산 |
-| Core `AudioNodeCard` 구성 | 공개 Core 부품 `AudioNodeIcon`(이미지·글리프 스타일), `AudioNodeEndpointOptions`(`EndpointControl`/`EndpointUpdate`), `AudioNodeMeterBanks`(`AudioNodeMeterBank`; 미터 이름은 번역된 "{name} 채널 N"), `AudioNodeParameterGrid`(`AudioNodeParameterControl` = `ParameterFieldControl` + section/precise)로 조합 | 앱·gain·입출력 장치·레코더·플러그인·내장 효과 노드 |
-| Core `AudioNodeCard` / `NodeOptionsSection` | 일반 노드는 Off → Mute → Options, 정상 내장 효과는 Bypass → Options를 배치하고 같은 DOM/Tab 순서 사용. 내장 효과의 저장된 Off/Mute 상태에만 해제 복구 행동을 먼저 제공. Options는 24px 버튼·툴팁·expanded/controls 관계 제공; 펼친 설정은 본문 밖에 유지 | 앱·gain·입출력 장치·레코더·플러그인 노드 |
-| Core 정보/조작 행 | 동일 입출력은 `2 CH`, 다르면 `IN 2 / OUT 4` 한 번 표시. gain 값·보조 정보는 같은 하단 행에 배치. 레코더의 시간·Record/Pause/Stop은 `NodeTransportRow` 사용 | 일반 노드와 Feature `RecorderControls` |
+| `nodeWidths` / `--node-default-width` / `--node-equalizer-width` / `--node-dynamics-width` | 녹음기를 포함한 일반 노드 기본 폭 228px, 3밴드 그래픽 EQ 320px, 컴프레서·리미터 420px. EQ·다이내믹스 폭은 그래프 resize 최소폭도 겸함 | Core 그래프와 노드 Storybook |
+| Core `audioNodeFrame` / `audioNodeFaceGeometry` | 제목줄 26px·본문 최소 68px·하단 조작/정보 행 24px·경계 1px. 일반 1/2/4채널과 녹음기는 접힌 기본 228×120px | `AudioNodeCard`와 `useAudioNodeLayout`의 크기·포트·resize 계산 |
+| Core `AudioNodeCard` 구성 | 공개 Core 부품 `AudioNodeIcon`(이미지·글리프 스타일), `AudioNodeEndpointOptions`(`EndpointControl`/`EndpointUpdate`), `AudioNodeMeterBanks`(`AudioNodeMeterBank`; 미터 이름은 번역된 "{name} 채널 N"), `AudioNodeParameterGrid`(`AudioNodeParameterControl` = `ParameterFieldControl` + section/precise)로 조합 | 앱·gain·입출력 장치·녹음기·플러그인·내장 효과 노드 |
+| Core `AudioNodeCard` / `NodeOptionsSection` | 일반 노드는 Off → Mute → Options, 정상 내장 효과는 Bypass → Options를 배치하고 같은 DOM/Tab 순서 사용. 내장 효과의 저장된 Off/Mute 상태에만 해제 복구 행동을 먼저 제공. Options는 24px 버튼·툴팁·expanded/controls 관계 제공; 펼친 설정은 본문 밖에 유지 | 앱·gain·입출력 장치·녹음기·플러그인 노드 |
+| Core 정보/조작 행 | 동일 입출력은 `2 CH`, 다르면 `IN 2 / OUT 4` 한 번 표시. gain 값·보조 정보는 같은 하단 행에 배치. 녹음기의 시간·Record/Pause/Stop은 `NodeTransportRow` 사용 | 일반 노드와 Feature `RecorderControls` |
 
 사용자가 직접 조절해 저장한 너비는 유지한다. 고채널은 미터·라벨·포트 간격에 필요한 만큼 확장한다. native 플러그인 편집기와 저장된 사용자 크기는 예외로 보존한다. Options 확장으로 포트 좌표를 바꾸지 않는다. 기본 크기를 맞추려고 글자·조작 대상·오류를 축소하거나 숨기지 않는다. 반복 프레임의 숫자는 Core geometry가 소유하고 같은 값을 카드 CSS에 전달하며 사용처에서 다시 계산하지 않는다.
 
@@ -349,7 +349,7 @@ Feature `useNodeDisplayNameEditor`는 Core `NameDialog allowEmpty maxLength={128
 
 2026-10-12에 **Plex Optical 워드마크를 동결**했다.
 [공식 SVG·사용 규격](../branding/identity/wordmark/README.md)과
-[단일 AI 마스터](../branding/wordmark-study/plex/mixrelay-plex-wordmark.ai)를 보관한다.
+[단일 AI 마스터](../branding/mixrelay.ai)를 보관한다.
 M/R/l 높이와 심벌 실루엣은 1:1, 기준선은 공통, 심벌–글자 간격은 0.26H다.
 y 꼬리와 곡선 overshoot를 보존하고, 실제 배치 크기는 시안에 맞춘다.
 라이트는 빨강+Ink, 다크는 같은 빨강+Inverse이며 양 테마의 단색·아웃라인도 제공한다.
