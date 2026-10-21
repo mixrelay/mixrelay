@@ -168,7 +168,7 @@ case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
     failed='Uninstall failed. Quit MixRelay, approve the authorization request and retry. Saved data was not deleted.'
     unsafe='Uninstall stopped because a data path is unsafe. Saved data was not deleted.'
     cleanup_failed='The app was removed, but some saved graphs or settings could not be deleted.'
-    auth_failed='The app was removed, but license sign-in could not be cleared. Reinstall the app and retry uninstalling. Graphs and settings were preserved.'
+    auth_failed='The app was removed, but licence sign-in could not be cleared. Reinstall the app and retry uninstalling. Graphs and settings were preserved.'
     root_error='Run Uninstall MixRelay as the signed-in regular user.'
     missing='The installed MixRelay package was not found.'
     done_message='MixRelay was uninstalled.'

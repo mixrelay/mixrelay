@@ -8,7 +8,7 @@ const meta = {
   title: 'Core/Application/App Information',
   component: AppInformationButton,
   args: {
-    label: 'License',
+    label: 'Licence',
     version: '0.1.3',
     status: 'Licensed',
     opened: false,
@@ -35,7 +35,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const Licensed: Story = {};
 export const Free: Story = { args: { status: 'Free' } };
-export const Unavailable: Story = { args: { status: 'License status unavailable' } };
+export const Unavailable: Story = { args: { status: 'Licence status unavailable' } };
 export const Opened: Story = { args: { opened: true } };
 export const NarrowLongStatus: Story = {
   args: { status: 'L’horloge du périphérique doit être vérifiée' },

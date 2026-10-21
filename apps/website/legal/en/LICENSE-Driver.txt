@@ -1,17 +1,18 @@
 MixRelay Driver
-Software License Agreement
+Software Licence Agreement
 Licensor and copyright holder: Echo Vision Lab
 Version: 2026-10-10
 
 1. Using the Driver
 These terms govern MixRelay Driver and its device-management/basic-loopback
 components on macOS and Linux. The MixRelay app and graph engine are
-separately governed by LICENSE.txt, even when included in the same installer.
+separately governed by the MixRelay App Software Licence Agreement
+(LICENSE.txt), even when included in the same installer.
 
 The software-use agreement is formed when you agree after these terms have
 been presented before installation or use. If you do not agree, do not install
 or use MixRelay's proprietary Driver components. An authorized person may
-agree on behalf of an organization. Third-party license rights remain
+agree on behalf of an organization. Third-party licence rights remain
 unaffected by accepting or declining these terms.
 
 Echo Vision Lab grants you non-exclusive permission to install and run
@@ -37,7 +38,7 @@ Reinstalling the Driver or changing basic settings does not require paid
 activation. Ending, deactivating or refunding paid access does not cancel the
 free Driver permission or delete your device settings, recordings or projects.
 
-3. Redistribution, integration and third-party licenses
+3. Redistribution, integration and third-party licences
 Free use does not make MixRelay's own proprietary code open source or grant
 access to its private source repository. These terms do not permit publishing
 its own source, modifying its proprietary components or redistributing them.
@@ -50,14 +51,14 @@ purchase does not include Driver integration or redistribution rights. Ask
 support@rawsector.com about a separate agreement.
 
 These restrictions do not override rights granted by applicable law, including
-lawful backup or interoperability-related acts, or by third-party licenses.
+lawful backup or interoperability-related acts, or by third-party licences.
 
-Third-party licenses govern their corresponding components and prevail over
+Third-party licences govern their corresponding components and prevail over
 inconsistent restrictions here. Apple sample-derived code retains the rights
 in LICENSE.apple-null-audio.txt. MIT/Apache-2.0 vendor code, its licensed
 modifications and any MPL-2.0 components retain their original rights. Their
 licensed source, modification and redistribution rights are preserved;
-applicable copyright notices, license texts and required source-access notices
+applicable copyright notices, licence texts and required source-access notices
 must accompany them.
 
 4. Your audio, settings and files
@@ -69,13 +70,13 @@ material.
 
 Keep important device settings and work before changing your setup. Use the
 settings-deletion choices offered during uninstall. Stopping use or ending the
-software license does not transfer your work to us or require deletion of
+software licence does not transfer your work to us or require deletion of
 recordings or projects you created.
 
 5. Updates, compatibility and support
 Updates are provided through official distribution channels under the
 conditions stated for the released version. A Driver update does not by itself
-turn this free permission into a paid app license. Check the supported OS and
+turn this free permission into a paid app licence. Check the supported OS and
 audio-device configuration before updating. Compatibility with every
 application or device and uninterrupted, error-free operation are not
 promised.
@@ -91,7 +92,7 @@ response or refund deadlines.
 
 6. Network connections and personal information
 The Driver processes audio and device settings locally and does not require
-paid-license authentication. Choosing Check for updates contacts
+paid-licence authentication. Choosing Check for updates contacts
 https://appserver.rawsector.com/status over HTTPS with the product, operating system
 and processor architecture. The service also receives normal connection
 information, such as your IP address. The update request does not upload
@@ -112,8 +113,9 @@ require a fee, paid activation or marketing consent.
 
 When you choose to activate or manage paid MixRelay features, the Driver
 management process handles the app's licensing requests. The transmitted data,
-purpose and credential storage are described in section 7 of LICENSE.txt. Free
-Driver use does not require these requests.
+purpose and credential storage are described in section 7 of the MixRelay App
+Software Licence Agreement (LICENSE.txt). Free Driver use does not require these
+requests.
 
 7. Uninstalling, termination and responsibility
 
@@ -130,7 +132,7 @@ opportunity-to-remedy requirements of applicable law. These terms do not grant
 an arbitrary right to terminate use. Upon lawful termination, stop using
 proprietary components for which permission has ended and remove the
 corresponding copies, subject to applicable law. Your work, third-party
-license rights and legal claims are not automatically extinguished.
+licence rights and legal claims are not automatically extinguished.
 
 Each party's liability is determined by applicable law. These terms do not
 exclude liability for intent or gross negligence, impose a blanket damages

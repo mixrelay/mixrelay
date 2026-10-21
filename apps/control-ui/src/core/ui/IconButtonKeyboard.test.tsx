@@ -91,10 +91,10 @@ const cases: { name: string; render: (action: () => void) => ReactElement }[] = 
     ),
   },
   {
-    name: 'License',
+    name: 'Licence',
     render: (action) => (
       <AppInformationButton
-        label="License"
+        label="Licence"
         version="0.1"
         status="Free"
         opened={false}

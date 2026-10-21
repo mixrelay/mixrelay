@@ -46,7 +46,7 @@ it('opens only authentication from the version and confirmed license status', as
     openCheckout: vi.fn(),
   };
   view(port);
-  const trigger = screen.getByRole('button', { name: 'License' });
+  const trigger = screen.getByRole('button', { name: 'Licence' });
   await waitFor(() => expect(trigger).toHaveTextContent(`${version} · Free`));
   expect(trigger).toHaveAttribute('aria-description', `${version} · Free`);
   expect(trigger).not.toHaveAttribute('title');
@@ -54,7 +54,7 @@ it('opens only authentication from the version and confirmed license status', as
   expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
   trigger.focus();
   fireEvent.click(trigger);
-  const dialog = await screen.findByRole('dialog', { name: 'License' });
+  const dialog = await screen.findByRole('dialog', { name: 'Licence' });
   expect(within(dialog).getByText(i18n.t('licensing.freeSummary'))).toBeVisible();
   expect(within(dialog).queryByText('Terms of use')).not.toBeInTheDocument();
   expect(within(dialog).queryByRole('button', { name: 'Stop audio' })).not.toBeInTheDocument();
@@ -65,12 +65,12 @@ it('opens only authentication from the version and confirmed license status', as
 it('can open authentication without a licensing service and does not claim free status', async () => {
   await i18n.changeLanguage('en');
   view(null);
-  const trigger = screen.getByRole('button', { name: 'License' });
-  expect(trigger).toHaveTextContent('License status unavailable');
+  const trigger = screen.getByRole('button', { name: 'Licence' });
+  expect(trigger).toHaveTextContent('Licence status unavailable');
   expect(trigger).not.toHaveTextContent('Free');
   fireEvent.click(trigger);
-  const dialog = await screen.findByRole('dialog', { name: 'License' });
-  await waitFor(() => expect(within(dialog).getByText('License status unavailable')).toBeVisible());
+  const dialog = await screen.findByRole('dialog', { name: 'Licence' });
+  await waitFor(() => expect(within(dialog).getByText('Licence status unavailable')).toBeVisible());
   expect(within(dialog).queryByRole('button', { name: 'Activate' })).not.toBeInTheDocument();
 });
 
@@ -85,7 +85,7 @@ it('keeps product information and the localized contract in native About, separa
   const disclosure = dialog.querySelector('details');
   expect(disclosure).not.toHaveAttribute('open');
   expect(disclosure?.querySelector('pre')).not.toBeVisible();
-  expect(within(dialog).queryByText('License status unavailable')).not.toBeInTheDocument();
+  expect(within(dialog).queryByText('Licence status unavailable')).not.toBeInTheDocument();
   expect(within(dialog).queryByRole('button', { name: 'Activate' })).not.toBeInTheDocument();
   expect(within(dialog).queryByRole('button', { name: 'Stop audio' })).not.toBeInTheDocument();
 });
@@ -108,13 +108,13 @@ it('defers native About while licensing is busy and closes About without hiding 
   };
   view(port);
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'License' })).toHaveTextContent('Licensed'),
+    expect(screen.getByRole('button', { name: 'Licence' })).toHaveTextContent('Licensed'),
   );
-  fireEvent.click(screen.getByRole('button', { name: 'License' }));
-  const dialog = await screen.findByRole('dialog', { name: 'License' });
-  fireEvent.click(within(dialog).getByRole('button', { name: 'Check license online' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Licence' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Licence' });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Check licence online' }));
   await waitFor(() =>
-    expect(within(dialog).getByRole('button', { name: 'Check license online' })).toBeDisabled(),
+    expect(within(dialog).getByRole('button', { name: 'Check licence online' })).toBeDisabled(),
   );
   act(() => nativeMenu.open());
   expect(screen.queryByRole('dialog', { name: 'About MixRelay' })).not.toBeInTheDocument();

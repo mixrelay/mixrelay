@@ -53,7 +53,7 @@ pub(crate) async fn driver_mutate(
         false
     };
     if (rename || requires_paid_inventory_access(&command)) && !paid_access(&app).await? {
-        return Err("Adding, removing or renaming devices requires a MixRelay license".into());
+        return Err("Adding, removing or renaming devices requires a MixRelay licence".into());
     }
     let snapshot = client
         .mutate(&command)
@@ -84,7 +84,7 @@ fn requires_paid_inventory_access(command: &DriverCommand) -> bool {
 async fn paid_access(app: &tauri::AppHandle) -> Result<bool, String> {
     let state = std::sync::Arc::clone(
         app.try_state::<std::sync::Arc<crate::licensing::LicensingState>>()
-            .ok_or("MixRelay license state is unavailable")?
+            .ok_or("MixRelay licence state is unavailable")?
             .inner(),
     );
     crate::licensing::has_paid_access(state)

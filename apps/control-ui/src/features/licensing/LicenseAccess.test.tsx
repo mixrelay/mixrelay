@@ -41,7 +41,7 @@ function view(licensingPort: LicensingPort | null, onPaidAccessChange = vi.fn())
 }
 async function open(label: RegExp | string = 'Free') {
   fireEvent.click(await screen.findByRole('button', { name: label }));
-  return within(await screen.findByRole('dialog', { name: 'License' }));
+  return within(await screen.findByRole('dialog', { name: 'Licence' }));
 }
 beforeEach(async () => {
   await i18n.changeLanguage('en');
@@ -65,7 +65,7 @@ it('keeps controls available while checking, with unlimited free access and no t
     dialog.getByText(/You can save and load the free graph and its channel mappings/u),
   ).toBeInTheDocument();
   expect(dialog.queryByText(/Trial|Valid until|Expired on/u)).not.toBeInTheDocument();
-  fireEvent.click(dialog.getByRole('button', { name: 'Buy a license' }));
+  fireEvent.click(dialog.getByRole('button', { name: 'Buy a licence' }));
   expect(native.openCheckout).toHaveBeenCalledTimes(1);
 });
 
@@ -73,15 +73,15 @@ it('activates through a password field and clears the form without interrupting 
   const native = port();
   view(native);
   const dialog = await open();
-  expect(dialog.getByLabelText('License key')).toHaveAttribute('type', 'password');
-  fireEvent.change(dialog.getByLabelText('License key'), { target: { value: 'test-key' } });
+  expect(dialog.getByLabelText('Licence key')).toHaveAttribute('type', 'password');
+  fireEvent.change(dialog.getByLabelText('Licence key'), { target: { value: 'test-key' } });
   fireEvent.change(dialog.getByRole('textbox', { name: 'Device name' }), {
     target: { value: 'Studio Mac' },
   });
   fireEvent.click(dialog.getByRole('button', { name: 'Activate' }));
   await waitFor(() => expect(native.activate).toHaveBeenCalledWith('test-key', 'Studio Mac'));
   const paid = await open(/Licensed/u);
-  expect(paid.queryByLabelText('License key')).not.toBeInTheDocument();
+  expect(paid.queryByLabelText('Licence key')).not.toBeInTheDocument();
   expect(paid.getByText(/Valid until/u)).toBeInTheDocument();
 });
 
@@ -89,8 +89,8 @@ it('renews an expired saved seat without allocating another activation', async (
   const native = port({ ...free, hasActivation: true });
   view(native);
   const dialog = await open();
-  expect(dialog.queryByLabelText('License key')).not.toBeInTheDocument();
-  fireEvent.click(dialog.getByRole('button', { name: 'Check license online' }));
+  expect(dialog.queryByLabelText('Licence key')).not.toBeInTheDocument();
+  fireEvent.click(dialog.getByRole('button', { name: 'Check licence online' }));
   await waitFor(() => expect(native.validate).toHaveBeenCalledTimes(1));
   expect(native.activate).not.toHaveBeenCalled();
   expect(screen.getByText('Live controls')).toBeInTheDocument();
@@ -112,7 +112,7 @@ it('retains running controls on lease expiry, clock rollback and storage errors'
   expect(paid).toHaveBeenLastCalledWith(false);
   await act(async () => vi.advanceTimersByTimeAsync(120_000));
   expect(screen.getByText('Live controls')).toBeInTheDocument();
-  expect(screen.getByRole('alert')).toHaveTextContent('License storage is unavailable');
+  expect(screen.getByRole('alert')).toHaveTextContent('Licence storage is unavailable');
   expect(native.getStatus).toHaveBeenCalledTimes(4);
   // A failed check is retried soon instead of waiting for the next regular check.
   await act(async () => vi.advanceTimersByTimeAsync(2_000));
@@ -125,7 +125,7 @@ it('offers clock correction without disabling free audio', async () => {
   const native = port({ ...free, status: 'clock_invalid' });
   view(native);
   const dialog = await open('Device clock needs attention');
-  expect(dialog.queryByLabelText('License key')).not.toBeInTheDocument();
+  expect(dialog.queryByLabelText('Licence key')).not.toBeInTheDocument();
   fireEvent.click(dialog.getByRole('button', { name: 'Check again' }));
   await waitFor(() => expect(native.getStatus).toHaveBeenCalledTimes(2));
   expect(screen.getByText('Live controls')).toBeInTheDocument();
@@ -156,7 +156,7 @@ it('hides raw failures, supports explicit retry and guards pending license actio
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   await act(async () => vi.advanceTimersByTimeAsync(6_000));
   expect(native.getStatus).toHaveBeenCalledTimes(3);
-  expect(screen.getByRole('alert')).toHaveTextContent('Could not check the license');
+  expect(screen.getByRole('alert')).toHaveTextContent('Could not check the licence');
   expect(screen.queryByText('secret-key')).not.toBeInTheDocument();
   vi.useRealTimers();
   const dialog = await open();
@@ -188,7 +188,7 @@ it('keeps an open initial check visible and closes the license without interrupt
   vi.mocked(native.getStatus).mockReturnValue(pending.promise);
   view(native);
   const dialog = await open();
-  expect(dialog.getByRole('status')).toHaveTextContent('Checking license');
+  expect(dialog.getByRole('status')).toHaveTextContent('Checking licence');
   fireEvent.click(dialog.getByRole('button', { name: 'Close' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   await act(async () => pending.resolve(free));
@@ -224,6 +224,6 @@ it('shows a failed initial check inside the already open license dialog and supp
   await act(async () => pending.reject('unavailable'));
   expect(dialog.getByRole('alert')).toHaveTextContent('The licensing service is unavailable');
   fireEvent.click(dialog.getByRole('button', { name: 'Check again' }));
-  await waitFor(() => expect(dialog.getByLabelText('License key')).toBeEnabled());
+  await waitFor(() => expect(dialog.getByLabelText('Licence key')).toBeEnabled());
   expect(screen.getByText('Live controls')).toBeInTheDocument();
 });

@@ -48,5 +48,5 @@ it('opens About from the native menu while the audio runtime is unavailable', as
   expect(within(dialog).getByText('Version 1.2.3')).toBeVisible();
   expect(within(dialog).getByText('Echo Vision Lab')).toBeVisible();
   expect(within(dialog).getByText('Terms of use')).toBeVisible();
-  expect(within(dialog).queryByText('License status unavailable')).not.toBeInTheDocument();
+  expect(within(dialog).queryByText('Licence status unavailable')).not.toBeInTheDocument();
 });

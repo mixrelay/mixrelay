@@ -231,13 +231,13 @@ it('keeps authentication separate from the confirmed global audio pause control'
       </I18nProvider>
     </MixRelayProvider>,
   );
-  expect(await screen.findByRole('button', { name: 'License' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: 'Licence' })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'MixRelay' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'New graph' })).toBeDisabled();
-  fireEvent.click(screen.getByRole('button', { name: 'License' }));
-  expect(await screen.findByRole('dialog', { name: 'License' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Licence' }));
+  expect(await screen.findByRole('dialog', { name: 'Licence' })).toBeInTheDocument();
   expect(licensingPort.getStatus).toHaveBeenCalledTimes(1);
-  const licenseDialog = screen.getByRole('dialog', { name: 'License' });
+  const licenseDialog = screen.getByRole('dialog', { name: 'Licence' });
   expect(within(licenseDialog).queryByText('Terms of use')).not.toBeInTheDocument();
   expect(
     within(licenseDialog).queryByRole('button', { name: 'Stop audio' }),

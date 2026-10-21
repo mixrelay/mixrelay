@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
@@ -28,6 +28,28 @@ test("required languages have complete distinct App and Driver contracts", () =>
     assert.ok(driver.includes("LICENSE.apple-null-audio.txt"));
     assert.ok(driver.includes(entry.agreementTitle));
     assert.ok(driver.includes(entry.businessHeading));
+  }
+});
+
+test("English product text uses British spelling", () => {
+  // "license" stays only as a verb ("does not license a …"); file names such as LICENSE.txt are upper case.
+  const american = /\b(?:[Ll]icenses?\b(?! a\b)|[Bb]ehaviors?\b|[Cc]olors?\b|[Cc]atalogs?\b|[Aa]nalyz(?:e|es|ed|ing)\b|[Cc]enters?\b|[Tt]oward\b|(?:[Ff]avo|[Hh]ono|[Ll]abo|[Nn]eighbo|[Hh]umo|[Rr]umo|[Ff]lavo|[Ee]ndeavo)r(?:s|ed|ing|able|ably|ite|ites|hood)?\b)/;
+  const read = path => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+  const htmlText = source => source.replace(/<(script|style)[\s\S]*?<\/\1>/g, "")
+    .replace(/<[^>]*\s(?:content|alt|title|aria-label)="([^"]*)"[^>]*>/g, " $1 ")
+    .replace(/<[^>]*>/g, " ");
+  const texts = [
+    ...["LICENSE.txt", "LICENSE-Driver.txt", "apps/website/legal/en/LICENSE.txt", "apps/website/legal/en/LICENSE-Driver.txt"].map(path => [path, read(path)]),
+    ...["terms.html", "privacy.html"].map(name => [`apps/website/legal/en/${name}`, htmlText(read(`apps/website/legal/en/${name}`))]),
+    ...readdirSync(new URL("../apps/website/manual/en/", import.meta.url)).filter(name => name.endsWith(".html"))
+      .map(name => [`apps/website/manual/en/${name}`, htmlText(read(`apps/website/manual/en/${name}`))]),
+    ["apps/control-ui/src/core/i18n/locales/en.ts", [...read("apps/control-ui/src/core/i18n/locales/en.ts").matchAll(/'((?:[^'\\\n]|\\.)*)'/g)].map(match => match[1]).join("\n")],
+    ["packaging/localization/languages.json", JSON.stringify(languages.find(entry => entry.language === "en"))],
+    ["packaging/localization/linux-lifecycle.json", JSON.parse(read("packaging/localization/linux-lifecycle.json")).en.join("\n")],
+  ];
+  for (const [path, text] of texts) {
+    const match = text.match(american);
+    assert.equal(match, null, `${path}: American spelling "${match?.[0]}"`);
   }
 });
 

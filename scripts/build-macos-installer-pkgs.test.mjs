@@ -44,7 +44,7 @@ function assertInstallerTypography(resource) {
 function assertCanonicalDriverLicense(resources, plainTerms) {
   assert.deepEqual(plainTerms, Buffer.from(DRIVER_LICENSE), "canonical Driver contract stays byte-for-byte intact");
   const text = plainTerms.toString("utf8");
-  assert.match(text, /^MixRelay Driver\nSoftware License Agreement\nLicensor and copyright holder: Echo Vision Lab\n/);
+  assert.match(text, /^MixRelay Driver\nSoftware Licence Agreement\nLicensor and copyright holder: Echo Vision Lab\n/);
   assert.deepEqual([...text.matchAll(/^(\d+)\. /gm)].map(match => match[1]), ["1", "2", "3", "4", "5", "6", "7", "8"]);
   assert.ok(text.includes("\n\nBusiness information\n"));
   assert.ok(text.includes("111-42-04359"));
@@ -56,8 +56,8 @@ function assertCanonicalDriverLicense(resources, plainTerms) {
   assertInstallerTypography(rtf);
   assert.equal(presentationWords(rtfText(rtf)), presentationWords("Proprietary license fixture\n원문 그대로\n\n" + text), "rendered agreement preserves every legal word, business contact and version");
   assert.equal([...rtf.toString("utf8").matchAll(/\\fs22\\b\\sb200\\sa80 \d+\. /g)].length, 8);
-  assert.match(rtf.toString("utf8"), /\\fs24\\b0\\sb0\\sa160 Software License Agreement\\par/);
-  assert.match(rtfText(rtf), /separately governed by LICENSE\.txt, even when included in the same installer\.\nThe software-use agreement/);
+  assert.match(rtf.toString("utf8"), /\\fs24\\b0\\sb0\\sa160 Software Licence Agreement\\par/);
+  assert.match(rtfText(rtf), /separately governed by the MixRelay App Software Licence Agreement \(LICENSE\.txt\), even when included in the same installer\.\nThe software-use agreement/);
   assert.match(rtfText(rtf), /accepting or declining these terms\.\nEcho Vision Lab grants/);
   assert.doesNotMatch(rtf.toString("utf8"), /basic-loopback\\line|separately\\line|Seoul,\\line /, "source column wrapping is removed");
   assert.equal(resources["INSTALLER-LICENSE.rtf"], undefined, "unlocalized terms must not shadow the selected language");

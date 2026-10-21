@@ -1,17 +1,18 @@
 MixRelay App
-Software License Agreement
+Software Licence Agreement
 Licensor and copyright holder: Echo Vision Lab
 Version: 2026-10-10
 
 1. Using the app
 These terms govern the free and paid MixRelay app and its graph engine on
-macOS and Linux. MixRelay Driver is governed separately by LICENSE-Driver.txt,
-even when supplied in the same installer.
+macOS and Linux. MixRelay Driver is governed separately by the MixRelay Driver
+Software Licence Agreement (LICENSE-Driver.txt), even when supplied in the same
+installer.
 
 The software-use agreement is formed when you agree to these terms after they
 have been presented to you before installation or use. If you do not agree, do
 not install or use MixRelay's proprietary app components. An authorized person
-may agree on behalf of an organization. Third-party license rights remain
+may agree on behalf of an organization. Third-party licence rights remain
 unaffected by accepting or declining these terms.
 
 Echo Vision Lab grants you non-exclusive permission to install and run
@@ -35,7 +36,7 @@ the feature information for the version you use. A purchase covers the
 features described in its offer; these terms do not authorize undisclosed
 limits or a reduction of purchased features.
 
-A paid license covers the purchased major version. Any activation limit is
+A paid licence covers the purchased major version. Any activation limit is
 stated in the offer before payment. Updates made available within that major
 version are included. If another major version is offered, purchasing it is
 optional. Not purchasing another version does not cancel the purchased-version
@@ -48,7 +49,7 @@ cancel your purchased-major-version entitlement.
 The paid app requires online purchase authentication. Offline authorization
 lasts 30 days from the last successful online verification. Online recheck
 conditions are stated before payment.
-This period is not the license term or a recurring payment period. Restarting
+This period is not the licence term or a recurring payment period. Restarting
 or a failed check does not extend it. Expiry or a network error does not by
 itself cancel the purchase or abruptly interrupt already-playing audio.
 
@@ -65,7 +66,7 @@ settings are not deleted by that change. Paid-only operations remain subject
 to a valid paid entitlement. Do not share keys for unauthorized use or bypass
 purchase authentication or free-feature limits.
 
-4. Redistribution, integration and third-party licenses
+4. Redistribution, integration and third-party licences
 MixRelay's own proprietary code remains private. Free distribution or an app
 purchase does not grant access to its private source repository or permission
 to publish that source, modify its proprietary components or redistribute
@@ -79,14 +80,14 @@ app purchase does not include these integration or redistribution rights. Ask
 support@rawsector.com about a separate agreement.
 
 These restrictions do not override rights granted by applicable law, including
-lawful backup or interoperability-related acts, or by third-party licenses.
+lawful backup or interoperability-related acts, or by third-party licences.
 
-Third-party licenses govern their corresponding components and prevail over
+Third-party licences govern their corresponding components and prevail over
 inconsistent restrictions here. This includes MIT/Apache-2.0 vendor code and
 its licensed modifications, including MixRelay-authored LV2 state changes, any
 included MPL-2.0 components and Apple sample-derived code under their original
-licenses. Their licensed source, modification and redistribution rights are
-preserved. Applicable copyright notices, license texts and required
+licences. Their licensed source, modification and redistribution rights are
+preserved. Applicable copyright notices, licence texts and required
 source-access notices must accompany the corresponding components.
 
 5. Your work, files and plug-ins
@@ -98,10 +99,10 @@ third-party material. A MixRelay purchase does not license a third-party
 plug-in.
 
 Keep copies of important work before changing your setup. Stopping use or
-ending the software license does not transfer your work to us or require its
+ending the software licence does not transfer your work to us or require its
 deletion. Use the data-deletion choices offered during uninstall for
 app-managed files; your external recordings and projects are not part of the
-software license.
+software licence.
 
 6. Purchases and refunds
 For purchases through Lemon Squeezy, Lemon Squeezy is the merchant of record
@@ -110,7 +111,7 @@ terms. Echo Vision Lab remains the app's developer/licensor and handles
 product support and obligations attributable to it under these terms and
 applicable law.
 
-The seller, price, taxes, license scope and applicable refund conditions are
+The seller, price, taxes, licence scope and applicable refund conditions are
 shown before payment. To request cancellation or a refund, contact
 support@rawsector.com or the order-support channel on your receipt with your
 information identifying the purchase and your request. Do not send payment-
@@ -141,7 +142,7 @@ allows withdrawal within three months of supply or within 30 days of when the
 discrepancy was known or could have been known. A statutory withdrawal from a
 digital-content purchase requires reimbursement within three business days of
 withdrawal, together with payment-cancellation measures and any statutory
-delay compensation. No withdrawal penalty is imposed. More favorable mandatory
+delay compensation. No withdrawal penalty is imposed. More favourable mandatory
 local rights and agreed refund conditions remain intact. A refunded paid
 entitlement may end, but the separate free Driver permission continues.
 
@@ -155,12 +156,12 @@ Driver features remain available; the refund does not delete user recordings,
 projects or device settings.
 
 7. Licensing, updates and personal information
-Online activation sends your license key and chosen activation name directly
+Online activation sends your licence key and chosen activation name directly
 to Lemon Squeezy over HTTPS. Validation and deactivation send the key and
 activation identifier. These requests authenticate your purchase and manage
 device activations. Local activation credentials use the operating system's
 credential storage. Payment information is entered in Lemon Squeezy's
-checkout, not the app's license-key form.
+checkout, not the app's licence-key form.
 
 The app checks for updates at launch and every 24 hours while running, and
 when you request a check. Checks contact https://appserver.rawsector.com/status with
@@ -181,7 +182,7 @@ international transfers. You may send privacy questions and requests to
 access, correct, delete or restrict processing of your information to
 privacy@dsub.io. Applicable identity-verification requirements and statutory
 record-retention obligations remain in effect. Refusing optional processing
-does not remove your software license or statutory rights.
+does not remove your software licence or statutory rights.
 
 8. Support, compatibility and responsibility
 Use the supported OS, device and plug-in configurations described for the
@@ -212,10 +213,10 @@ deleting your work.
 If a breach provides lawful grounds for restriction or termination, Echo
 Vision Lab will identify the grounds and follow the notice and
 opportunity-to-remedy requirements of applicable law. These terms do not grant
-an arbitrary right to revoke a paid license. Upon lawful termination, stop
+an arbitrary right to revoke a paid licence. Upon lawful termination, stop
 using proprietary components for which permission has ended and remove the
 corresponding copies, subject to applicable law. Your work, third-party
-license rights, claims for refunds or damages and the separately governed
+licence rights, claims for refunds or damages and the separately governed
 Driver are not automatically extinguished.
 
 10. Changes and disputes

@@ -58,7 +58,7 @@ it('reveals and hides a password without submitting or changing the secret', asy
       <I18nProvider>
         <form onSubmit={submit}>
           <TextField
-            label="License key"
+            label="Licence key"
             type="password"
             value="test-key"
             onChange={change}
@@ -69,22 +69,22 @@ it('reveals and hides a password without submitting or changing the secret', asy
     </MixRelayProvider>
   );
   const view = render(field());
-  const input = screen.getByLabelText('License key');
+  const input = screen.getByLabelText('Licence key');
   expect(input).toHaveAttribute('type', 'password');
-  fireEvent.click(await screen.findByRole('button', { name: 'License key: Show password' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Licence key: Show password' }));
   expect(input).toHaveAttribute('type', 'text');
-  expect(screen.getByRole('button', { name: 'License key: Hide password' })).toHaveAttribute(
+  expect(screen.getByRole('button', { name: 'Licence key: Hide password' })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
-  fireEvent.click(screen.getByRole('button', { name: 'License key: Hide password' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Licence key: Hide password' }));
   expect(input).toHaveAttribute('type', 'password');
   expect(input).toHaveValue('test-key');
   expect(change).not.toHaveBeenCalled();
   expect(submit).not.toHaveBeenCalled();
   view.rerender(field(true));
   expect(input).toBeDisabled();
-  expect(screen.getByRole('button', { name: 'License key: Show password' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Licence key: Show password' })).toBeDisabled();
 });
 
 it('owns uncontrolled password defaults in the field context and retains edits across reveal and rerender without control warnings', async () => {

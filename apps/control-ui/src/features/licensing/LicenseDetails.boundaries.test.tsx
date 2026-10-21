@@ -53,7 +53,7 @@ it.each([null, Number.NaN, Number.POSITIVE_INFINITY, 1e30])(
     const f = view({ ...free, status: 'licensed', expiresAtUnix });
     expect(screen.queryByText(/Valid until/u)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Deactivate this device' })).toBeEnabled();
-    expect(screen.queryByLabelText('License key')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Licence key')).not.toBeInTheDocument();
     expect(f.run).not.toHaveBeenCalled();
   },
 );
@@ -62,7 +62,7 @@ it.each(['key', 'name', 'busy'] as const)(
   'rejects an incomplete or busy activation submission: %s',
   (reason) => {
     const f = view(free, true, reason === 'busy');
-    const key = screen.getByLabelText('License key');
+    const key = screen.getByLabelText('Licence key');
     const name = screen.getByRole('textbox', { name: 'Device name' });
     if (reason !== 'key') fireEvent.change(key, { target: { value: 'license-key' } });
     if (reason !== 'name') fireEvent.change(name, { target: { value: 'Studio Mac' } });
@@ -76,7 +76,7 @@ it.each(['key', 'name', 'busy'] as const)(
 
 it('keeps the entered key and device name when activation fails', async () => {
   const f = view(free, false);
-  const key = screen.getByLabelText('License key');
+  const key = screen.getByLabelText('Licence key');
   fireEvent.change(key, { target: { value: 'license-key' } });
   fireEvent.change(screen.getByRole('textbox', { name: 'Device name' }), {
     target: { value: 'Studio Mac' },
@@ -100,5 +100,5 @@ it('keeps the free graph capabilities visible when an activation request fails',
   view(free, false, false, 'unavailable');
   expect(screen.getByRole('alert')).toHaveTextContent('The licensing service is unavailable');
   expect(screen.getByText(/You can save and load the free graph/u)).toBeInTheDocument();
-  expect(screen.getByLabelText('License key')).toBeEnabled();
+  expect(screen.getByLabelText('Licence key')).toBeEnabled();
 });
