@@ -164,7 +164,7 @@ credential storage. Payment information is entered in Lemon Squeezy's
 checkout, not the app's licence-key form.
 
 The app checks for updates at launch and every 24 hours while running, and
-when you request a check. Checks contact https://appserver.rawsector.com/status with
+when you request a check. Checks contact https://appserver.rawsector.com with
 the product, operating system and processor architecture. The service also
 receives normal connection information, such as your IP address. Licensing and
 update requests do not upload your audio, recordings, project contents, graphs

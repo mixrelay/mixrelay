@@ -7,7 +7,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-const STATUS_ORIGIN: &str = "https://appserver.rawsector.com/status";
+const PRODUCTS_ORIGIN: &str = "https://appserver.rawsector.com/products";
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
 /// Independently distributed products accepted by the native update commands.
@@ -171,7 +171,7 @@ async fn fetch_catalog(
     platform: Platform,
 ) -> Result<Catalog, UpdateError> {
     let response = client
-        .get(format!("{STATUS_ORIGIN}/{}", product.slug()))
+        .get(format!("{PRODUCTS_ORIGIN}/{}/releases", product.slug()))
         .query(&[("os", platform.os), ("arch", platform.arch)])
         .header(reqwest::header::ACCEPT, "application/json")
         .send()

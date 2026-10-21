@@ -93,7 +93,7 @@ response or refund deadlines.
 6. Network connections and personal information
 The Driver processes audio and device settings locally and does not require
 paid-licence authentication. Choosing Check for updates contacts
-https://appserver.rawsector.com/status over HTTPS with the product, operating system
+https://appserver.rawsector.com over HTTPS with the product, operating system
 and processor architecture. The service also receives normal connection
 information, such as your IP address. The update request does not upload
 audio, recordings, project contents, graphs or audio-device names. You can use
