@@ -129,7 +129,7 @@ The store and complete licensing flow are not live yet.
 MixRelay Driver is proprietary freeware, not an open-source grant. Ordinary personal or business
 use follows the free/paid product policy. Incorporating MixRelay into another product or service,
 including OEM, bundling, resale or white-label distribution, requires prior written permission
-and a separate paid agreement: `support@mixrelay.com`. Buying the app does not grant redistribution
+and a separate paid agreement: `support@rawsector.com`. Buying the app does not grant redistribution
 rights. Third-party components retain their own licences and notices. See the
 [app terms](LICENSE.txt), [Driver terms](LICENSE-Driver.txt) and
 [usage and integration policy](docs/product.md#이용-허가와-제품-편입). Both terms are drafts

@@ -142,7 +142,7 @@ export const koKR = {
       activation_deactivated:
         '이 기기의 활성화가 해제되었습니다. 유료 기능을 쓰려면 다시 활성화하세요.',
       activation_uncertain:
-        '활성화 결과를 확인하지 못했습니다. support@mixrelay.com으로 문의하세요. 지원팀이 해결할 때까지 새 활성화는 막혀 있습니다.',
+        '활성화 결과를 확인하지 못했습니다. support@rawsector.com으로 문의하세요. 지원팀이 해결할 때까지 새 활성화는 막혀 있습니다.',
       unknown: '라이선스를 확인하지 못했습니다. 다시 시도하세요.',
     },
   },

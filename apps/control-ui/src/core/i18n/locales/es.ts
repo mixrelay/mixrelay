@@ -146,7 +146,7 @@ export const es = {
       activation_deactivated:
         'Se eliminó la activación de este dispositivo. Actívelo de nuevo para usar las funciones de pago.',
       activation_uncertain:
-        'No se pudo confirmar la activación. Escriba a support@mixrelay.com; no podrá hacer una nueva activación hasta que soporte lo resuelva.',
+        'No se pudo confirmar la activación. Escriba a support@rawsector.com; no podrá hacer una nueva activación hasta que soporte lo resuelva.',
       unknown: 'No se pudo comprobar la licencia. Vuelva a intentarlo.',
     },
   },

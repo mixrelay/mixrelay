@@ -47,7 +47,7 @@ itself as a component of a third-party product or service require prior
 written permission and a separate paid agreement. Ordinary business use as an
 installed audio tool does not by itself constitute product integration. An app
 purchase does not include Driver integration or redistribution rights. Ask
-support@mixrelay.com about a separate agreement.
+support@rawsector.com about a separate agreement.
 
 These restrictions do not override rights granted by applicable law, including
 lawful backup or interoperability-related acts, or by third-party licenses.
@@ -80,7 +80,7 @@ audio-device configuration before updating. Compatibility with every
 application or device and uninterrupted, error-free operation are not
 promised.
 
-Send installation, device and compatibility inquiries to support@mixrelay.com.
+Send installation, device and compatibility inquiries to support@rawsector.com.
 These statements do not override the product description, agreed conditions or
 statutory quality remedies.
 
@@ -145,7 +145,7 @@ law provides.
 
 Interpretation and disputes remain subject to applicable law and mandatory
 consumer rights, including jurisdiction rules. No exclusive court or blanket
-choice of law is created here. Send product complaints to support@mixrelay.com
+choice of law is created here. Send product complaints to support@rawsector.com
 and legal inquiries to legal@dsub.io. These contacts do not limit access to
 courts or statutory dispute-resolution procedures.
 
@@ -156,5 +156,5 @@ Business registration number: 111-42-04359
 Address: Room 505-S80, 5F, 30, Nonhyeon-ro 10-gil, Gangnam-gu, Seoul,
 Republic of Korea
 Phone: +82 10-6380-9646
-Product support and integration: support@mixrelay.com
+Product support and integration: support@rawsector.com
 Legal/privacy contacts: legal@dsub.io / privacy@dsub.io

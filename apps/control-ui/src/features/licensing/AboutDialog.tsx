@@ -28,7 +28,7 @@ export function AboutDialog({
         </Text>
         <Text>Echo Vision Lab</Text>
         <Text>
-          <a href="mailto:support@mixrelay.com">support@mixrelay.com</a>
+          <a href="mailto:support@rawsector.com">support@rawsector.com</a>
         </Text>
         <LicenseTerms />
       </Stack>

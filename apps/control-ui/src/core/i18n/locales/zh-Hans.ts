@@ -138,7 +138,7 @@ export const zhHans = {
       revoked: '此许可证已不再有效。免费功能仍可使用。',
       activation_deactivated: '此设备的激活已被移除。要使用付费功能，请重新激活。',
       activation_uncertain:
-        '无法确认激活结果。请联系 support@mixrelay.com；在支持团队处理之前，无法进行新的激活。',
+        '无法确认激活结果。请联系 support@rawsector.com；在支持团队处理之前，无法进行新的激活。',
       unknown: '无法检查许可证。请重试。',
     },
   },

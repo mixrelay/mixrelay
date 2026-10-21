@@ -56,7 +56,7 @@ To move your activation, deactivate the old device online and activate the new
 device within the purchased activation conditions. Server deactivation is
 complete only after the licensing service confirms it. If the old device is
 inaccessible or deactivation cannot be completed, contact
-support@mixrelay.com. Uninstalling, reinstalling or deleting local credentials
+support@rawsector.com. Uninstalling, reinstalling or deleting local credentials
 does not by itself release a server activation or cancel the purchase.
 
 After deactivation or withdrawal of paid access, the system may continue using
@@ -76,7 +76,7 @@ as a component of a third-party product or service require prior written
 permission and a separate paid agreement. Ordinary use as an installed audio
 tool for commercial work does not by itself constitute product integration. An
 app purchase does not include these integration or redistribution rights. Ask
-support@mixrelay.com about a separate agreement.
+support@rawsector.com about a separate agreement.
 
 These restrictions do not override rights granted by applicable law, including
 lawful backup or interoperability-related acts, or by third-party licenses.
@@ -112,14 +112,14 @@ applicable law.
 
 The seller, price, taxes, license scope and applicable refund conditions are
 shown before payment. To request cancellation or a refund, contact
-support@mixrelay.com or the order-support channel on your receipt with your
+support@rawsector.com or the order-support channel on your receipt with your
 information identifying the purchase and your request. Do not send payment-
 card details or passwords. We will assist with product-related claims; using
 Lemon Squeezy does not exclude any responsibility imposed on Echo Vision Lab
 by applicable law.
 
 You may request a full refund within 30 calendar days after purchase without
-giving a reason. Send your request to support@mixrelay.com or the
+giving a reason. Send your request to support@rawsector.com or the
 order-support channel on your receipt; include information identifying the
 purchase. A request sent within that period qualifies even if it is processed
 later. This policy supplements, and does not limit, mandatory withdrawal,
@@ -186,7 +186,7 @@ does not remove your software license or statutory rights.
 8. Support, compatibility and responsibility
 Use the supported OS, device and plug-in configurations described for the
 released version. Support and compatibility questions may be sent to
-support@mixrelay.com. Compatibility with every configuration and
+support@rawsector.com. Compatibility with every configuration and
 uninterrupted, error-free operation are not promised. These statements do not
 override the product description, agreed purchase conditions or statutory
 quality remedies.
@@ -227,7 +227,7 @@ conflicting standard term to the extent applicable law provides.
 
 Interpretation and any dispute remain subject to applicable law and mandatory
 consumer rights, including jurisdiction rules. No exclusive court or blanket
-choice of law is created here. Contact support@mixrelay.com for
+choice of law is created here. Contact support@rawsector.com for
 product/purchase complaints or legal@dsub.io for legal inquiries; these
 contacts do not limit access to courts or statutory dispute-resolution
 procedures.
@@ -239,5 +239,5 @@ Business registration number: 111-42-04359
 Address: Room 505-S80, 5F, 30, Nonhyeon-ro 10-gil, Gangnam-gu, Seoul,
 Republic of Korea
 Phone: +82 10-6380-9646
-Product support and integration: support@mixrelay.com
+Product support and integration: support@rawsector.com
 Legal/privacy contacts: legal@dsub.io / privacy@dsub.io

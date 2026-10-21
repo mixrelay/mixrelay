@@ -138,7 +138,7 @@ export const zhHant = {
       revoked: '此授權已不再有效。免費功能仍可使用。',
       activation_deactivated: '此裝置的啟用已被移除。若要使用付費功能，請重新啟用。',
       activation_uncertain:
-        '無法確認啟用結果。請聯絡 support@mixrelay.com；在支援團隊處理之前，無法進行新的啟用。',
+        '無法確認啟用結果。請聯絡 support@rawsector.com；在支援團隊處理之前，無法進行新的啟用。',
       unknown: '無法檢查授權。請重試。',
     },
   },

@@ -94,7 +94,7 @@ pub enum LicenseError {
     #[error("activation deactivated")]
     ActivationDeactivated,
     /// A seat mutation may have committed; support must reconcile it before a new activation.
-    #[error("activation result uncertain; contact support@mixrelay.com")]
+    #[error("activation result uncertain; contact support@rawsector.com")]
     ActivationUncertain,
     /// The HTTP/API request failed; this is not a definitive entitlement rejection.
     #[error("license request failed")]

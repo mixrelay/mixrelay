@@ -81,7 +81,7 @@ it('keeps product information and the localized contract in native About, separa
   const dialog = await screen.findByRole('dialog', { name: 'About MixRelay' });
   expect(within(dialog).getByText(`Version ${version}`)).toBeVisible();
   expect(within(dialog).getByText('Echo Vision Lab')).toBeVisible();
-  expect(within(dialog).getByRole('link', { name: 'support@mixrelay.com' })).toBeVisible();
+  expect(within(dialog).getByRole('link', { name: 'support@rawsector.com' })).toBeVisible();
   const disclosure = dialog.querySelector('details');
   expect(disclosure).not.toHaveAttribute('open');
   expect(disclosure?.querySelector('pre')).not.toBeVisible();

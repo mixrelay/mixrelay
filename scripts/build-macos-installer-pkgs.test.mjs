@@ -48,7 +48,7 @@ function assertCanonicalDriverLicense(resources, plainTerms) {
   assert.deepEqual([...text.matchAll(/^(\d+)\. /gm)].map(match => match[1]), ["1", "2", "3", "4", "5", "6", "7", "8"]);
   assert.ok(text.includes("\n\nBusiness information\n"));
   assert.ok(text.includes("111-42-04359"));
-  assert.ok(text.includes("support@mixrelay.com"));
+  assert.ok(text.includes("support@rawsector.com"));
   assert.ok(text.includes("legal@dsub.io / privacy@dsub.io"));
   assert.match(text, /\nVersion: \d{4}-\d{2}-\d{2}\n/);
   assert.doesNotMatch(text, /Distribution draft|Professional legal review|Before publication|MixRelay Driver 이용 조건|배포 초안|전문 법률 검토 미완료|\n한국어\n/);

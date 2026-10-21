@@ -57,7 +57,7 @@ OS·외부 DAW에서 이 장치를 사용하는 채널 수에 편집 앱의 노�
 제3자 구성요소의 원래 권리·고지는 유지한다.
 
 약관 원문은 [앱](../LICENSE.txt)과 [Driver](../LICENSE-Driver.txt)로 구분한다.
-사업자는 에코 비전 랩(Echo Vision Lab), 지원 연락처는 `support@mixrelay.com`이다.
+사업자는 에코 비전 랩(Echo Vision Lab), 지원 연락처는 `support@rawsector.com`이다.
 계약서의 사업자 정보와 판매 채널의 법정 고지를 맞추며 설치 약관에 대표자 개인 이름을 넣지 않는다.
 계약·개인정보·제3자 고지 기준은 [법무 검토](legal-review.md)를 따른다.
 
@@ -376,7 +376,7 @@ App Store·AudioDriverKit 재작성·BPM·MIDI·새 JACK/ALSA 백엔드는 이�
 | 가격 | 세금 별도 정가 US$69, 상시 판매가 US$39 |
 | 사용권 | 개인 1명, 본인 컴퓨터 활성화 수 무제한, 타인 키 공유 금지 |
 | 환불 | 구매일부터 30달력일 내 요청은 이유 없이 전액 환불, 법정 소비자 권리 유지 |
-| 지원 | support@mixrelay.com, 한국 영업일 기준 2일 내 첫 응답 목표 |
+| 지원 | support@rawsector.com, 한국 영업일 기준 2일 내 첫 응답 목표 |
 | 업데이트 권리 | 구매한 메이저 버전 내 포함. 차기 메이저 구매는 선택 |
 | 오프라인 인증 | 마지막 온라인 성공부터 30일 |
 

@@ -20,7 +20,7 @@ Die Rechte an der erworbenen Version sowie Aktivierungs- und Offline-Authentifiz
 3. Weiterverbreitung, Integration und Lizenzen Dritter
 Die kostenlose Nutzung macht den proprietären Code von MixRelay nicht zu Open Source und gewährt keinen Zugang zu dessen privatem Quellcode-Repository. Diese Bedingungen gestatten weder die Veröffentlichung seines eigenen Quellcodes noch die Änderung oder Weiterverbreitung seiner proprietären Komponenten.
 
-OEM-Nutzung, Bündelung, Weiterverkauf, White-Label-Vertrieb und die Bereitstellung des Drivers selbst als Bestandteil eines Produkts oder Dienstes Dritter erfordern eine vorherige schriftliche Genehmigung und einen gesonderten kostenpflichtigen Vertrag. Die gewöhnliche geschäftliche Nutzung als installiertes Audiowerkzeug stellt für sich allein keine Produktintegration dar. Der Kauf einer App umfasst keine Rechte zur Integration oder Weiterverbreitung des Drivers. Wenden Sie sich wegen eines gesonderten Vertrags an support@mixrelay.com.
+OEM-Nutzung, Bündelung, Weiterverkauf, White-Label-Vertrieb und die Bereitstellung des Drivers selbst als Bestandteil eines Produkts oder Dienstes Dritter erfordern eine vorherige schriftliche Genehmigung und einen gesonderten kostenpflichtigen Vertrag. Die gewöhnliche geschäftliche Nutzung als installiertes Audiowerkzeug stellt für sich allein keine Produktintegration dar. Der Kauf einer App umfasst keine Rechte zur Integration oder Weiterverbreitung des Drivers. Wenden Sie sich wegen eines gesonderten Vertrags an support@rawsector.com.
 
 Diese Einschränkungen setzen weder Rechte aus dem anwendbaren Recht, einschließlich rechtmäßiger Sicherungskopien oder Handlungen zur Herstellung der Interoperabilität, noch Rechte aus Lizenzen Dritter außer Kraft.
 
@@ -34,7 +34,7 @@ Sichern Sie wichtige Geräteeinstellungen und Arbeiten, bevor Sie Ihre Konfigura
 5. Updates, Kompatibilität und Support
 Updates werden über die offiziellen Vertriebskanäle zu den für die veröffentlichte Version angegebenen Bedingungen bereitgestellt. Ein Driver-Update wandelt diese kostenlose Erlaubnis nicht von sich aus in eine Lizenz für die kostenpflichtige App um. Prüfen Sie vor dem Update die unterstützten Betriebssysteme und Audiogerätekonfigurationen. Die Kompatibilität mit jeder Anwendung oder jedem Gerät sowie ein unterbrechungsfreier und fehlerloser Betrieb werden nicht zugesichert.
 
-Fragen zu Installation, Geräten und Kompatibilität richten Sie bitte an support@mixrelay.com. Diese Aussagen setzen weder die Produktbeschreibung noch vereinbarte Bedingungen oder gesetzliche Ansprüche wegen Qualitätsmängeln außer Kraft.
+Fragen zu Installation, Geräten und Kompatibilität richten Sie bitte an support@rawsector.com. Diese Aussagen setzen weder die Produktbeschreibung noch vereinbarte Bedingungen oder gesetzliche Ansprüche wegen Qualitätsmängeln außer Kraft.
 
 Unser Ziel ist eine erste Antwort innerhalb von zwei koreanischen Geschäftstagen, ohne Wochenenden und Feiertage in Südkorea (Asia/Seoul). Dies ist ein Antwortziel, keine garantierte Lösungsfrist, und verlängert keine gesetzlichen Antwort- oder Erstattungsfristen.
 
@@ -59,13 +59,13 @@ Die Haftung jeder Partei richtet sich nach dem anwendbaren Recht. Diese Bedingun
 8. Änderungen und Streitigkeiten
 Wir benennen die Änderungen und das Wirksamkeitsdatum einer Überarbeitung, informieren im Voraus und holen Ihre Zustimmung ein, soweit das anwendbare Recht dies verlangt. Schweigen oder die bloße Fortsetzung der Nutzung ist keine Zustimmung zum Verzicht auf zwingende Rechte. Individuell vereinbarte Bedingungen gehen widersprechenden Standardbedingungen vor, soweit das anwendbare Recht dies vorsieht.
 
-Auslegung und Streitigkeiten unterliegen weiterhin dem anwendbaren Recht und zwingenden Verbraucherrechten, einschließlich der Zuständigkeitsregeln. Hier werden weder ein ausschließlicher Gerichtsstand noch eine pauschale Rechtswahl festgelegt. Produktbeschwerden richten Sie bitte an support@mixrelay.com und rechtliche Fragen an legal@dsub.io. Diese Kontakte beschränken weder den Zugang zu Gerichten noch zu gesetzlichen Streitbeilegungsverfahren.
+Auslegung und Streitigkeiten unterliegen weiterhin dem anwendbaren Recht und zwingenden Verbraucherrechten, einschließlich der Zuständigkeitsregeln. Hier werden weder ein ausschließlicher Gerichtsstand noch eine pauschale Rechtswahl festgelegt. Produktbeschwerden richten Sie bitte an support@rawsector.com und rechtliche Fragen an legal@dsub.io. Diese Kontakte beschränken weder den Zugang zu Gerichten noch zu gesetzlichen Streitbeilegungsverfahren.
 
 Unternehmensangaben
 Entwickler, Lizenzgeber und Urheberrechtsinhaber: Echo Vision Lab (에코 비전 랩), koreanisches Einzelunternehmen
 Unternehmensregistrierungsnummer: 111-42-04359
 Anschrift: Room 505-S80, 5F, 30, Nonhyeon-ro 10-gil, Gangnam-gu, Seoul, Republic of Korea
 Telefon: +82 10-6380-9646
-Produktsupport und Integration: support@mixrelay.com
+Produktsupport und Integration: support@rawsector.com
 Rechtliche Fragen: legal@dsub.io
 Datenschutzfragen: privacy@dsub.io

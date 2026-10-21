@@ -97,9 +97,9 @@ const ENGLISH: [&str; 16] = [
     "MixRelay removed.",
     "Saved MixRelay settings were kept.",
     "MixRelay could not be removed.",
-    "Could not confirm that removal completed. Some components may already have been removed. Check the current installation before retrying. If the problem continues, contact support@mixrelay.com.",
+    "Could not confirm that removal completed. Some components may already have been removed. Check the current installation before retrying. If the problem continues, contact support@rawsector.com.",
     "The removal app could not be verified. Download it again from the official source and retry.",
-    "Administrator authentication could not be completed. Try again and approve the authentication request if prompted. If the problem continues, contact support@mixrelay.com.",
+    "Administrator authentication could not be completed. Try again and approve the authentication request if prompted. If the problem continues, contact support@rawsector.com.",
     "Saved MixRelay settings were also deleted.",
     "Removing MixRelay…",
 ];
@@ -115,9 +115,9 @@ const KOREAN: [&str; 16] = [
     "MixRelay를 제거했습니다.",
     "저장된 MixRelay 설정은 보존했습니다.",
     "MixRelay를 제거하지 못했습니다.",
-    "제거 완료를 확인하지 못했습니다. 일부 구성 요소는 이미 제거되었을 수 있습니다. 다시 시도하기 전에 현재 설치 상태를 확인하십시오. 문제가 계속되면 support@mixrelay.com으로 문의하십시오.",
+    "제거 완료를 확인하지 못했습니다. 일부 구성 요소는 이미 제거되었을 수 있습니다. 다시 시도하기 전에 현재 설치 상태를 확인하십시오. 문제가 계속되면 support@rawsector.com으로 문의하십시오.",
     "제거 앱을 확인하지 못했습니다. 공식 배포 경로에서 다시 내려받아 실행하십시오.",
-    "관리자 인증을 완료하지 못했습니다. 다시 시도하고 관리자 인증 요청이 표시되면 승인하십시오. 문제가 계속되면 support@mixrelay.com으로 문의하십시오.",
+    "관리자 인증을 완료하지 못했습니다. 다시 시도하고 관리자 인증 요청이 표시되면 승인하십시오. 문제가 계속되면 support@rawsector.com으로 문의하십시오.",
     "저장된 MixRelay 설정도 삭제했습니다.",
     "MixRelay를 제거하고 있습니다…",
 ];
@@ -133,9 +133,9 @@ const JAPANESE: [&str; 16] = [
     "MixRelayを削除しました。",
     "MixRelayの保存済み設定は保持されました。",
     "MixRelayを削除できませんでした。",
-    "削除の完了を確認できませんでした。一部のコンポーネントはすでに削除されている可能性があります。再試行する前に現在のインストール状態を確認してください。問題が続く場合はsupport@mixrelay.comへお問い合わせください。",
+    "削除の完了を確認できませんでした。一部のコンポーネントはすでに削除されている可能性があります。再試行する前に現在のインストール状態を確認してください。問題が続く場合はsupport@rawsector.comへお問い合わせください。",
     "削除アプリを検証できませんでした。公式の配布元から再ダウンロードして再実行してください。",
-    "管理者認証を完了できませんでした。再試行し、認証を求められたら承認してください。問題が続く場合はsupport@mixrelay.comへお問い合わせください。",
+    "管理者認証を完了できませんでした。再試行し、認証を求められたら承認してください。問題が続く場合はsupport@rawsector.comへお問い合わせください。",
     "MixRelayの保存済み設定も削除されました。",
     "MixRelayを削除しています…",
 ];
@@ -151,9 +151,9 @@ const SIMPLIFIED_CHINESE: [&str; 16] = [
     "已移除 MixRelay。",
     "已保留保存的 MixRelay 设置。",
     "无法移除 MixRelay。",
-    "无法确认移除是否完成。部分组件可能已被移除。重试前请检查当前安装状态。如果问题持续，请联系 support@mixrelay.com。",
+    "无法确认移除是否完成。部分组件可能已被移除。重试前请检查当前安装状态。如果问题持续，请联系 support@rawsector.com。",
     "无法验证移除应用。请从官方来源重新下载并重试。",
-    "无法完成管理员认证。请重试，并在出现认证提示时批准。如果问题持续，请联系 support@mixrelay.com。",
+    "无法完成管理员认证。请重试，并在出现认证提示时批准。如果问题持续，请联系 support@rawsector.com。",
     "已同时删除保存的 MixRelay 设置。",
     "正在移除 MixRelay…",
 ];
@@ -169,9 +169,9 @@ const TRADITIONAL_CHINESE: [&str; 16] = [
     "已移除 MixRelay。",
     "已保留儲存的 MixRelay 設定。",
     "無法移除 MixRelay。",
-    "無法確認移除是否完成。部分元件可能已被移除。重試前請檢查目前安裝狀態。如果問題持續，請聯絡 support@mixrelay.com。",
+    "無法確認移除是否完成。部分元件可能已被移除。重試前請檢查目前安裝狀態。如果問題持續，請聯絡 support@rawsector.com。",
     "無法驗證移除應用程式。請從官方來源重新下載並重試。",
-    "無法完成管理員認證。請重試，並在出現認證提示時核准。如果問題持續，請聯絡 support@mixrelay.com。",
+    "無法完成管理員認證。請重試，並在出現認證提示時核准。如果問題持續，請聯絡 support@rawsector.com。",
     "已同時刪除儲存的 MixRelay 設定。",
     "正在移除 MixRelay…",
 ];
@@ -187,9 +187,9 @@ const FRENCH: [&str; 16] = [
     "MixRelay a été supprimé.",
     "Les réglages enregistrés de MixRelay ont été conservés.",
     "Impossible de supprimer MixRelay.",
-    "Impossible de confirmer la fin de la suppression. Certains composants ont peut-être déjà été supprimés. Vérifiez l’état actuel de l’installation avant de réessayer. Si le problème persiste, contactez support@mixrelay.com.",
+    "Impossible de confirmer la fin de la suppression. Certains composants ont peut-être déjà été supprimés. Vérifiez l’état actuel de l’installation avant de réessayer. Si le problème persiste, contactez support@rawsector.com.",
     "Impossible de vérifier l’application de suppression. Téléchargez-la à nouveau depuis la source officielle, puis réessayez.",
-    "L’authentification administrateur n’a pas pu être effectuée. Réessayez et acceptez la demande d’authentification si elle s’affiche. Si le problème persiste, contactez support@mixrelay.com.",
+    "L’authentification administrateur n’a pas pu être effectuée. Réessayez et acceptez la demande d’authentification si elle s’affiche. Si le problème persiste, contactez support@rawsector.com.",
     "Les réglages enregistrés de MixRelay ont également été supprimés.",
     "Suppression de MixRelay en cours…",
 ];
@@ -205,9 +205,9 @@ const GERMAN: [&str; 16] = [
     "MixRelay wurde entfernt.",
     "Die gespeicherten Einstellungen von MixRelay wurden beibehalten.",
     "MixRelay konnte nicht entfernt werden.",
-    "Der Abschluss der Entfernung konnte nicht bestätigt werden. Einige Komponenten wurden möglicherweise bereits entfernt. Prüfen Sie vor einem erneuten Versuch den aktuellen Installationsstatus. Wenn das Problem weiterhin besteht, wenden Sie sich an support@mixrelay.com.",
+    "Der Abschluss der Entfernung konnte nicht bestätigt werden. Einige Komponenten wurden möglicherweise bereits entfernt. Prüfen Sie vor einem erneuten Versuch den aktuellen Installationsstatus. Wenn das Problem weiterhin besteht, wenden Sie sich an support@rawsector.com.",
     "Die Entfernungs-App konnte nicht verifiziert werden. Laden Sie sie erneut von der offiziellen Quelle herunter und versuchen Sie es noch einmal.",
-    "Die Administratorauthentifizierung konnte nicht abgeschlossen werden. Versuchen Sie es erneut und bestätigen Sie die Authentifizierung, falls Sie dazu aufgefordert werden. Wenn das Problem weiterhin besteht, wenden Sie sich an support@mixrelay.com.",
+    "Die Administratorauthentifizierung konnte nicht abgeschlossen werden. Versuchen Sie es erneut und bestätigen Sie die Authentifizierung, falls Sie dazu aufgefordert werden. Wenn das Problem weiterhin besteht, wenden Sie sich an support@rawsector.com.",
     "Die gespeicherten Einstellungen von MixRelay wurden ebenfalls gelöscht.",
     "MixRelay wird entfernt…",
 ];
@@ -224,9 +224,9 @@ const SPANISH: [&str; 16] = [
     "MixRelay se ha eliminado.",
     "Se ha conservado la configuración guardada de MixRelay.",
     "No se pudo eliminar MixRelay.",
-    "No se pudo confirmar que la eliminación haya terminado. Es posible que algunos componentes ya se hayan eliminado. Compruebe el estado actual de la instalación antes de reintentarlo. Si el problema continúa, contacte con support@mixrelay.com.",
+    "No se pudo confirmar que la eliminación haya terminado. Es posible que algunos componentes ya se hayan eliminado. Compruebe el estado actual de la instalación antes de reintentarlo. Si el problema continúa, contacte con support@rawsector.com.",
     "No se pudo verificar la aplicación de eliminación. Descárguela de nuevo de la fuente oficial y vuelva a intentarlo.",
-    "No se pudo completar la autenticación del administrador. Vuelva a intentarlo y apruebe la autenticación si se le solicita. Si el problema continúa, contacte con support@mixrelay.com.",
+    "No se pudo completar la autenticación del administrador. Vuelva a intentarlo y apruebe la autenticación si se le solicita. Si el problema continúa, contacte con support@rawsector.com.",
     "También se ha eliminado la configuración guardada de MixRelay.",
     "Eliminando MixRelay…",
 ];
@@ -242,9 +242,9 @@ const PORTUGUESE: [&str; 16] = [
     "O MixRelay foi removido.",
     "As configurações salvas do MixRelay foram mantidas.",
     "Não foi possível remover o MixRelay.",
-    "Não foi possível confirmar a conclusão da remoção. Alguns componentes podem já ter sido removidos. Verifique o estado atual da instalação antes de tentar novamente. Se o problema continuar, entre em contato com support@mixrelay.com.",
+    "Não foi possível confirmar a conclusão da remoção. Alguns componentes podem já ter sido removidos. Verifique o estado atual da instalação antes de tentar novamente. Se o problema continuar, entre em contato com support@rawsector.com.",
     "Não foi possível verificar o aplicativo de remoção. Baixe-o novamente da fonte oficial e tente de novo.",
-    "Não foi possível concluir a autenticação do administrador. Tente novamente e aprove a autenticação se ela for solicitada. Se o problema continuar, entre em contato com support@mixrelay.com.",
+    "Não foi possível concluir a autenticação do administrador. Tente novamente e aprove a autenticação se ela for solicitada. Se o problema continuar, entre em contato com support@rawsector.com.",
     "As configurações salvas do MixRelay também foram excluídas.",
     "Removendo o MixRelay…",
 ];
@@ -260,9 +260,9 @@ const ITALIAN: [&str; 16] = [
     "MixRelay è stato rimosso.",
     "Le impostazioni salvate di MixRelay sono state conservate.",
     "Impossibile rimuovere MixRelay.",
-    "Impossibile confermare il completamento della rimozione. Alcuni componenti potrebbero essere già stati rimossi. Verificate lo stato attuale dell’installazione prima di riprovare. Se il problema persiste, contattate support@mixrelay.com.",
+    "Impossibile confermare il completamento della rimozione. Alcuni componenti potrebbero essere già stati rimossi. Verificate lo stato attuale dell’installazione prima di riprovare. Se il problema persiste, contattate support@rawsector.com.",
     "Impossibile verificare l’app di rimozione. Scaricatela nuovamente dalla fonte ufficiale e riprovate.",
-    "Impossibile completare l’autenticazione amministratore. Riprovate e approvate la richiesta di autenticazione, se visualizzata. Se il problema persiste, contattate support@mixrelay.com.",
+    "Impossibile completare l’autenticazione amministratore. Riprovate e approvate la richiesta di autenticazione, se visualizzata. Se il problema persiste, contattate support@rawsector.com.",
     "Anche le impostazioni salvate di MixRelay sono state eliminate.",
     "Rimozione di MixRelay in corso…",
 ];
@@ -278,9 +278,9 @@ const RUSSIAN: [&str; 16] = [
     "MixRelay удалён.",
     "Сохранённые настройки MixRelay оставлены.",
     "Не удалось удалить MixRelay.",
-    "Не удалось подтвердить завершение удаления. Некоторые компоненты, возможно, уже удалены. Перед повторной попыткой проверьте текущее состояние установки. Если проблема повторяется, обратитесь по адресу support@mixrelay.com.",
+    "Не удалось подтвердить завершение удаления. Некоторые компоненты, возможно, уже удалены. Перед повторной попыткой проверьте текущее состояние установки. Если проблема повторяется, обратитесь по адресу support@rawsector.com.",
     "Не удалось проверить приложение удаления. Снова загрузите его из официального источника и повторите попытку.",
-    "Не удалось завершить проверку подлинности администратора. Повторите попытку и подтвердите запрос проверки, если он появится. Если проблема повторяется, обратитесь по адресу support@mixrelay.com.",
+    "Не удалось завершить проверку подлинности администратора. Повторите попытку и подтвердите запрос проверки, если он появится. Если проблема повторяется, обратитесь по адресу support@rawsector.com.",
     "Сохранённые настройки MixRelay также удалены.",
     "Удаление MixRelay…",
 ];
@@ -368,11 +368,11 @@ mod tests {
             assert!(locale.text(Text::DeleteSettings).contains("MixRelay"));
             assert!(!locale.text(Text::DeleteSettings).contains("Driver"));
             assert!(locale.text(Text::ConfirmDetail).contains("MixRelay"));
-            assert!(locale.text(Text::Retry).contains("support@mixrelay.com"));
+            assert!(locale.text(Text::Retry).contains("support@rawsector.com"));
             assert!(
                 locale
                     .text(Text::Authorization)
-                    .contains("support@mixrelay.com")
+                    .contains("support@rawsector.com")
             );
             let working = locale.text(Text::Working);
             assert!(working.contains("MixRelay"));

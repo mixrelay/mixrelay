@@ -42,7 +42,7 @@ function resolveLocalReference(page, reference) {
 function checkAnchor(page, reference) {
   if (!externalReference.test(reference)) return resolveLocalReference(page, reference);
   // The prerelease site has no public store or download destination yet.
-  assert.ok(reference === 'mailto:support@mixrelay.com' ||
+  assert.ok(reference === 'mailto:support@rawsector.com' ||
     (page.startsWith('legal/') && legalReferences.has(reference.replaceAll('&amp;', '&'))) ||
     (reference.startsWith('https://support.apple.com/') && new URL(reference).hostname === 'support.apple.com'),
   `${page}: external destination is an approved support or legal reference: ${reference}`);
@@ -136,7 +136,7 @@ for (const reference of styles.matchAll(/url\((?:\s*["']?)([^)"']+)(?:["']?\s*)\
 assert.ok(!/@import\s+(?:url\()?\s*["']?https?:/i.test(styles), 'no remote stylesheet imports');
 const home = sources.get('index.html');
 assert.match(home, /id="business-info-title"/, 'home: business-information block exists');
-for (const detail of ['에코 비전 랩', '111-42-04359', '505-S80', '+82 10-6380-9646', 'support@mixrelay.com', '배승현']) {
+for (const detail of ['에코 비전 랩', '111-42-04359', '505-S80', '+82 10-6380-9646', 'support@rawsector.com', '배승현']) {
   assert.ok(home.includes(detail), `home: business information includes ${detail}`);
 }
 const legalSections = {

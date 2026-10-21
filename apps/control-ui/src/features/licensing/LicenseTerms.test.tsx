@@ -51,7 +51,7 @@ describe('localized App license presentation', () => {
     expect(source).toContain('111-42-04359');
     expect(source).toContain('https://appserver.rawsector.com/status');
     expect(source).toContain('https://www.lemonsqueezy.com/privacy');
-    expect(source).toContain('support@mixrelay.com');
+    expect(source).toContain('support@rawsector.com');
   });
 
   it('changes an already open contract when the app language changes', async () => {

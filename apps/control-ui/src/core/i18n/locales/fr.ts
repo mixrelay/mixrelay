@@ -146,7 +146,7 @@ export const fr = {
       activation_deactivated:
         "L'activation de cet appareil a été supprimée. Activez-le à nouveau pour utiliser les fonctions payantes.",
       activation_uncertain:
-        "L'activation n'a pas pu être confirmée. Contactez support@mixrelay.com ; une nouvelle activation reste bloquée jusqu'à ce que le support règle la situation.",
+        "L'activation n'a pas pu être confirmée. Contactez support@rawsector.com ; une nouvelle activation reste bloquée jusqu'à ce que le support règle la situation.",
       unknown: 'Impossible de vérifier la licence. Réessayez.',
     },
   },

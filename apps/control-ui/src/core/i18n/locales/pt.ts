@@ -147,7 +147,7 @@ export const pt = {
       activation_deactivated:
         'A ativação deste dispositivo foi removida. Ative novamente para usar os recursos pagos.',
       activation_uncertain:
-        'Não foi possível confirmar a ativação. Escreva para support@mixrelay.com; uma nova ativação fica bloqueada até o suporte resolver.',
+        'Não foi possível confirmar a ativação. Escreva para support@rawsector.com; uma nova ativação fica bloqueada até o suporte resolver.',
       unknown: 'Não foi possível verificar a licença. Tente novamente.',
     },
   },

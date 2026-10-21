@@ -143,7 +143,7 @@ export const en = {
       activation_deactivated:
         "This device's activation was removed. Activate again to use paid features.",
       activation_uncertain:
-        'The activation could not be confirmed. Contact support@mixrelay.com; a new activation stays blocked until support resolves it.',
+        'The activation could not be confirmed. Contact support@rawsector.com; a new activation stays blocked until support resolves it.',
       unknown: 'Could not check the license. Try again.',
     },
   },

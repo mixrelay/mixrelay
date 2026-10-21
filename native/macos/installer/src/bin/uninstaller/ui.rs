@@ -280,7 +280,7 @@ mod tests {
         let detail = UiLocale::French.text(error_text(&error));
         assert_eq!(detail, UiLocale::French.text(Text::Retry));
         assert!(!detail.contains("private path"));
-        assert!(detail.contains("support@mixrelay.com"));
+        assert!(detail.contains("support@rawsector.com"));
     }
 
     #[test]

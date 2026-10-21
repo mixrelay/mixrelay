@@ -152,7 +152,7 @@ export const de = {
       activation_deactivated:
         'Die Aktivierung dieses Geräts wurde entfernt. Aktivieren Sie erneut, um kostenpflichtige Funktionen zu nutzen.',
       activation_uncertain:
-        'Die Aktivierung konnte nicht bestätigt werden. Wenden Sie sich an support@mixrelay.com; eine neue Aktivierung bleibt gesperrt, bis der Support den Fall klärt.',
+        'Die Aktivierung konnte nicht bestätigt werden. Wenden Sie sich an support@rawsector.com; eine neue Aktivierung bleibt gesperrt, bis der Support den Fall klärt.',
       unknown: 'Die Lizenz konnte nicht geprüft werden. Versuchen Sie es erneut.',
     },
   },
