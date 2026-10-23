@@ -95,6 +95,7 @@ fn verify_slice(role: ArtifactRole, metadata: &SignatureMetadata) -> Result<(), 
 #[cfg(any(target_os = "macos", test))]
 pub(super) const fn expected_entitlements(role: ArtifactRole) -> &'static [(&'static str, bool)] {
     match role {
+        ArtifactRole::Application => &[("com.apple.security.device.audio-input", true)],
         ArtifactRole::Engine => &[
             ("com.apple.security.device.audio-input", true),
             ("com.apple.security.cs.disable-library-validation", true),
@@ -196,6 +197,43 @@ mod tests {
                 Err((Architecture::Arm64, PolicyViolation::Entitlements))
             );
         }
+    }
+
+    #[test]
+    fn shipped_app_audio_input_entitlement_is_accepted_without_engine_exemptions() {
+        let configured = plist::Value::from_reader_xml(
+            include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../apps/desktop/src-tauri/Entitlements.plist"
+            ))
+            .as_slice(),
+        )
+        .unwrap()
+        .into_dictionary()
+        .unwrap();
+        let actual = SignatureMetadata {
+            flags: CODE_SIGNATURE_RUNTIME,
+            has_secure_timestamp: true,
+            entitlement_count: configured.len(),
+            entitlements: configured
+                .into_iter()
+                .map(|(key, value)| (key, value.as_boolean()))
+                .collect(),
+        };
+        let mut slices = Architecture::ALL
+            .into_iter()
+            .map(|architecture| (architecture, actual.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(verify_slices(ArtifactRole::Application, &slices), Ok(()));
+        slices[0].1.entitlements.insert(
+            "com.apple.security.cs.disable-library-validation".into(),
+            Some(true),
+        );
+        slices[0].1.entitlement_count += 1;
+        assert_eq!(
+            verify_slices(ArtifactRole::Application, &slices),
+            Err((Architecture::Arm64, PolicyViolation::Entitlements))
+        );
     }
 
     #[test]

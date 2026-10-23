@@ -148,7 +148,7 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
     assert.equal(spec.render?.channels, 2); assert.equal(spec.capture?.channels, 2);
     assert.equal(device.observedSampleRate, 48000);
     assert.ok(device.nativeDeviceIds.length > 0, 'Native device was not published');
-    try { applied = await apply(signalGraph(original, graphId, spec)); }
+    try { applied = await apply(signalGraph(applied, graphId, spec)); }
     catch (error) {
       report.scenarios.push({ id: 'AUDIO-01', scope: 'native-audio', status: 'failed', error: error.message,
         evidence: [evidence('audio-graph-setup.failure.json', { stage: 'native graph activation', message: error.message })] });

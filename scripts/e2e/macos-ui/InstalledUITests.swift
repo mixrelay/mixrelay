@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 
 final class InstalledUITests: XCTestCase {
     private let app = XCUIApplication(url: URL(fileURLWithPath: "/Applications/MixRelay/MixRelay.app"))
@@ -14,7 +15,10 @@ final class InstalledUITests: XCTestCase {
         continueAfterFailure = false
         let folder = try XCTUnwrap(ProcessInfo.processInfo.environment["MIXRELAY_UI_EVIDENCE"])
         let directory = URL(fileURLWithPath: folder)
-        app.activate()
+        let editor = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: "io.mixrelay.desktop")
+            .first(where: { $0.activationPolicy == .regular }))
+        XCTAssertTrue(editor.activate(options: [.activateAllWindows]))
+        XCTAssertTrue(app.windows["MixRelay"].waitForExistence(timeout: 20), "Installed editor PID \(editor.processIdentifier)\n\(app.debugDescription)")
         press("Add node")
         press("Processor")
         press("Compressor")

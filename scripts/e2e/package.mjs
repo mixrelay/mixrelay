@@ -6,9 +6,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { digest } from '../support-contract.mjs';
 
 const run = (program, args, timeout = 120000) => execFileSync(program, args, { encoding: 'utf8', timeout, maxBuffer: 8 * 1024 * 1024 });
-export function spawnLogged(program, args, logPath) {
+export function spawnLogged(program, args, logPath, { detached = false } = {}) {
   const file = openSync(logPath, 'wx', 0o600);
-  try { return spawn(program, args, { stdio: ['ignore', file, file] }); }
+  try { return spawn(program, args, { detached, stdio: ['ignore', file, file] }); }
   finally { closeSync(file); }
 }
 export const installedPaths = os => os === 'macos' ? [

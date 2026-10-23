@@ -8,8 +8,8 @@ export async function startInstalledUi(os, output) {
   const directory = resolve(output);
   const log = join(directory, 'installed-ui.log');
   const child = os === 'macos'
-    ? spawnLogged('bash', ['scripts/e2e/macos-ui.sh', directory], log)
-    : spawnLogged('python3', ['scripts/e2e/linux-ui.py', directory], log);
+    ? spawnLogged('bash', ['scripts/e2e/macos-ui.sh', directory], log, { detached: true })
+    : spawnLogged('python3', ['scripts/e2e/linux-ui.py', directory], log, { detached: true });
   let spawnError;
   child.on('error', error => { spawnError = error; });
   const completed = new Promise(resolveExit => child.once('close', (code, signal) => resolveExit({ code, signal })));
@@ -25,9 +25,13 @@ export async function startInstalledUi(os, output) {
       writeFileSync(join(directory, 'installed-ui.finish'), 'finish\n', { flag: 'wx' });
       const result = await Promise.race([completed, delay(30000).then(() => null)]);
       if (!result) {
-        child.kill('SIGTERM');
+        const terminate = signal => {
+          try { process.kill(-child.pid, signal); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+        };
+        terminate('SIGTERM');
         await Promise.race([completed, delay(5000)]);
-        if (alive()) child.kill('SIGKILL');
+        terminate('SIGKILL');
+        await Promise.race([completed, delay(5000)]);
         assert.fail('Installed UI runner did not stop');
       }
       assert.deepEqual(result, { code: 0, signal: null }, `Installed UI runner failed: ${readFileSync(log, 'utf8').slice(-5000)}`);
