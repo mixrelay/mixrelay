@@ -6,7 +6,6 @@ const meta = {
   title: 'Core/Playgrounds/InlineNotice',
   component: InlineNotice,
   argTypes: {
-    layout: { control: 'select', options: ['inline', 'banner'] },
     announcement: { control: 'select', options: ['status', 'alert'] },
     tone: { control: 'select', options: ['neutral', 'accent', 'positive', 'warning', 'critical'] },
   },
@@ -14,7 +13,6 @@ const meta = {
     children: '마지막 확인값을 유지합니다.',
     title: '설정 안내',
     tone: 'neutral',
-    layout: 'inline',
   },
   parameters: {
     controls: {
@@ -47,7 +45,7 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Playground: Story = {};
-export const Critical: Story = { args: { tone: 'critical', layout: 'banner' } };
+export const Critical: Story = { args: { tone: 'critical' } };
 export const WarningAlert: Story = { args: { tone: 'warning', announcement: 'alert' } };
 export const WithAction: Story = {
   args: { tone: 'critical', actions: <ActionButton>다시 시도</ActionButton> },

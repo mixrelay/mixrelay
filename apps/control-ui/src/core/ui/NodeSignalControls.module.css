@@ -3,7 +3,7 @@
   place-items: center;
   width: var(--node-control-size);
   height: var(--node-control-size);
-  padding: var(--node-control-padding);
+  padding: 0;
   border: 0;
   border-radius: var(--control-radius);
   background: transparent;

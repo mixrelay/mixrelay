@@ -1,6 +1,6 @@
 .row {
   position: relative;
-  margin: 0 0 1px;
+  margin: 0 0 var(--space-half);
   padding: 0;
   min-width: 0;
   border: 0;
@@ -9,8 +9,9 @@
 .select {
   display: block;
   width: 100%;
-  min-height: 30px;
-  padding: 5px 32px 5px 10px;
+  min-height: var(--size-md);
+  padding-block: calc((var(--size-md) - 1lh) / 2);
+  padding-inline: var(--row-inset) calc(var(--control-height-compact) + var(--space-2));
   overflow: hidden;
   border: 0;
   border-radius: var(--control-radius);
@@ -34,12 +35,13 @@
 
 .remove {
   position: absolute;
-  top: 3px;
+  top: calc((var(--size-md) - var(--control-height-compact)) / 2);
   right: var(--space-1);
   display: grid;
+  place-items: center;
   width: var(--control-height-compact);
   height: var(--control-height-compact);
-  padding: 3px;
+  padding: 0;
   border: 0;
   border-radius: var(--control-radius);
   background: transparent;
@@ -59,6 +61,8 @@
   opacity: var(--control-disabled-opacity);
 }
 .remove svg {
+  width: var(--command-icon-size);
+  height: var(--command-icon-size);
   fill: none;
   stroke: currentColor;
   stroke-width: 1.3;

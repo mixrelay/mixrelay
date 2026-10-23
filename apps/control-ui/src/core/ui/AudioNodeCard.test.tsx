@@ -156,6 +156,46 @@ it('renders every generic plug-in parameter without an internal scroll viewport'
   expect(view.container.querySelector('[data-radix-scroll-area-viewport]')).toBeNull();
 });
 
+it.each([
+  {
+    status: 'Plug-in stopped',
+    detail: 'Saved layout',
+    statusTone: 'critical' as const,
+    text: 'Plug-in stopped',
+  },
+  {
+    status: undefined,
+    detail: 'Unavailable layout',
+    statusTone: 'critical' as const,
+    text: 'Unavailable layout',
+  },
+  {
+    status: 'Checking',
+    detail: 'Last known device',
+    statusTone: 'warning' as const,
+    text: 'Last known device',
+  },
+])('keeps compact feedback readable: $text', ({ status, detail, statusTone, text }) => {
+  const view = render(
+    <MixRelayProvider>
+      <AudioNodeCard
+        title="Voice effect"
+        category="Processor"
+        icon="FX"
+        inputCount={2}
+        outputCount={2}
+        faceMode="compact"
+        status={status}
+        statusTone={statusTone}
+        detail={detail}
+        content={<span>Recovery action</span>}
+      />
+    </MixRelayProvider>,
+  );
+  expect(view.getByText(text)).toBeVisible();
+  expect(view.getByText('Recovery action')).toBeVisible();
+});
+
 it('places native plug-in content under a compact unmetered face', () => {
   const view = render(
     <MixRelayProvider>

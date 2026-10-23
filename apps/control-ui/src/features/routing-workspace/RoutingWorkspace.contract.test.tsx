@@ -1,3 +1,4 @@
+import { ProblemsTarget } from '../../test-support/ProblemsTarget';
 import '../../test-support/integration';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -102,7 +103,11 @@ function view(controlPort: ControlPort, props: Partial<RoutingWorkspaceProps> = 
   return (
     <MixRelayProvider>
       <I18nProvider>
-        <RoutingWorkspace controlPort={controlPort} {...props} />
+        <ProblemsTarget>
+          {(target) => (
+            <RoutingWorkspace controlPort={controlPort} problemsTarget={target} {...props} />
+          )}
+        </ProblemsTarget>
       </I18nProvider>
     </MixRelayProvider>
   );
@@ -669,10 +674,8 @@ it('retains a conflicted draft after a failed restore and retries with new autho
     screen.queryByRole('button', { name: 'Discard edits and reload engine' }),
   ).not.toBeInTheDocument();
   const restore = screen.getByRole('button', { name: 'Retry' });
-  act(() => restore.focus());
   fireEvent.click(restore);
   await waitFor(() => expect(canvas().model.nodes).toHaveLength(2));
-  expect(screen.getByRole('textbox', { name: 'Graph name' })).toHaveFocus();
   expect(canvas().model.nodes[0]?.position).toEqual({ x: 110, y: 120 });
   expect(canvas().model.nodes[1]?.position).toEqual(
     runtimeGraphToAudioGraph(restored).nodes[1]?.position,
@@ -845,7 +848,7 @@ it('records duplicate completion callbacks for one layout gesture only once', as
 });
 
 it.each(['read', 'save'])(
-  'returns removed layout retry focus to the graph name after a %s failure',
+  'clears the layout problem once its retry succeeds after a %s failure',
   async (operation) => {
     const native = port(document({ kind: 'compressor' }));
     vi.spyOn(
@@ -868,10 +871,15 @@ it.each(['read', 'save'])(
     }
     const recovery = await screen.findByRole('button', { name: 'Retry' });
     expect(screen.queryByRole('button', { name: 'Load saved layout' })).not.toBeInTheDocument();
-    recovery.focus();
+    if (operation === 'read')
+      expect(screen.getByText(/node layout could not be loaded/u)).toHaveAttribute(
+        'role',
+        'status',
+      );
     fireEvent.click(recovery);
-    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Graph name' })).toHaveFocus());
-    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument(),
+    );
   },
 );
 

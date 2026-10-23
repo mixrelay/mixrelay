@@ -155,7 +155,7 @@ it('keeps checkbox confirmation and retry as real controls', () => {
   expect(retry).toHaveBeenCalledOnce();
   view.rerender(
     <MixRelayProvider>
-      <RetryAlert message="Failed" retryLabel="Retry" busy framed onRetry={retry} />
+      <RetryAlert message="Failed" retryLabel="Retry" busy onRetry={retry} />
     </MixRelayProvider>,
   );
   expect(screen.getByRole('button', { name: 'Retry' })).toBeDisabled();

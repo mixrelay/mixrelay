@@ -1,6 +1,7 @@
 import { type CSSProperties, type ReactNode, type Ref, useEffect, useState } from 'react';
 import { Button } from 'react-aria-components';
 import { useTranslation } from 'react-i18next';
+import { spacing } from '../theme/tokens';
 import styles from './AudioNodeCard.module.css';
 import {
   AudioNodeEndpointOptions,
@@ -30,6 +31,7 @@ import { ProcessorTimingLabel } from './ProcessorTimingLabel';
 import { SelectField } from './SelectField';
 import type { StatusTone } from './StatusBadge';
 import { StatusIndicator } from './StatusIndicator';
+import { Text } from './Text';
 import { Tooltip } from './Tooltip';
 import { useCardMeasurements } from './useAudioNodeCardMeasurements';
 import { useElementBounds } from './useElementBounds';
@@ -214,6 +216,7 @@ export function AudioNodeCard({
             offline={offline || poweredOff}
             title={title}
           >
+            <CompactNodeFeedback {...{ faceMode, detail, status, statusTone }} />
             <div inert={poweredOff}>
               <ProcessorEditorOption {...editor} />
             </div>
@@ -262,7 +265,7 @@ function cardRootStyle(
 ): CSSProperties {
   return {
     ...audioNodeCardStyle(props, props.faceBounds.height),
-    '--audio-node-header-actions-inset': `${props.headerBounds.width + 12}px`,
+    '--audio-node-header-actions-inset': `${props.headerBounds.width + spacing[3]}px`,
   } as CSSProperties;
 }
 
@@ -389,7 +392,7 @@ function AudioNodeControls({
   title: string;
   children: ReactNode;
 }) {
-  // Native surfaces stretch with the node. Only intrinsic settings constrain its minimum height.
+  // DOM content and settings set the minimum height; the graph owns native editor geometry.
   const compact = faceMode === 'compact';
   const dynamicsMeter = dynamics ? (
     <DynamicsMeter
@@ -406,15 +409,22 @@ function AudioNodeControls({
           <AudioNodeMeterBanks banks={compactMeterBanks} offline={offline} title={title} />
           {dynamicsMeter}
           {children}
+          {content ? (
+            <div className={`${styles.content} nodrag nopan nowheel`}>{content}</div>
+          ) : null}
         </div>
-        {content ? <div className={`${styles.content} nodrag nopan nowheel`}>{content}</div> : null}
       </div>
     );
   }
   return (
     <div ref={compact ? undefined : measureRef} className={styles.controls} data-node-controls="">
-      {content ? <div className={`${styles.content} nodrag nopan nowheel`}>{content}</div> : null}
+      {!compact && content ? (
+        <div className={`${styles.content} nodrag nopan nowheel`}>{content}</div>
+      ) : null}
       <div ref={compact ? measureRef : undefined} className={styles.settings}>
+        {compact && content ? (
+          <div className={`${styles.content} nodrag nopan nowheel`}>{content}</div>
+        ) : null}
         {dynamicsMeter}
         {children}
       </div>
@@ -441,15 +451,11 @@ function audioNodeCardStyle(
     '--audio-node-utility-height': `${audioNodeFrame.utilityHeight}px`,
     '--audio-node-border-width': `${audioNodeFrame.borderWidth}px`,
     '--audio-node-rendered-face-height': `${renderedFaceHeight > 0 ? renderedFaceHeight : height}px`,
-    ...(faceMode === 'channel-rows'
-      ? {
-          '--audio-node-header-height': `${channelRowMetrics.headerHeight}px`,
-          '--audio-node-body-padding': `${channelRowMetrics.bodyPadding}px`,
-          '--audio-node-meter-margin': `${channelRowMetrics.meterMargin}px`,
-          '--audio-node-row-height': `${channelRowMetrics.rowHeight}px`,
-          '--audio-node-row-gap': `${channelRowMetrics.rowGap}px`,
-        }
-      : {}),
+    // Meter rows set the channel pitch that cable anchors follow, so every face uses them.
+    '--audio-node-body-padding': `${channelRowMetrics.bodyPadding}px`,
+    '--audio-node-meter-margin': `${channelRowMetrics.meterMargin}px`,
+    '--audio-node-row-height': `${channelRowMetrics.rowHeight}px`,
+    '--audio-node-row-gap': `${channelRowMetrics.rowGap}px`,
   } as CSSProperties;
 }
 
@@ -524,7 +530,9 @@ function AudioNodeFace(
         ) : null}
       </span>
       <span className={styles.body}>
-        {hideSummary && detail ? <small className={styles.detail}>{detail}</small> : null}
+        {faceMode !== 'compact' && hideSummary && detail ? (
+          <small className={styles.detail}>{detail}</small>
+        ) : null}
         {faceMode !== 'compact' && meterBanks.length > 0 ? (
           <AudioNodeMeterBanks banks={meterBanks} offline={Boolean(offline)} title={title} />
         ) : null}
@@ -534,6 +542,23 @@ function AudioNodeFace(
       ) : null}
     </Face>
   );
+}
+
+function CompactNodeFeedback({
+  faceMode,
+  detail,
+  status,
+  statusTone,
+}: Pick<AudioNodeCardProps, 'faceMode' | 'detail' | 'status' | 'statusTone'>) {
+  if (faceMode !== 'compact') return null;
+  const message = statusTone === 'critical' ? status || detail : detail;
+  return message ? (
+    <div className={styles.compactDetail}>
+      <Text kind="label" tone={statusTone}>
+        {message}
+      </Text>
+    </div>
+  ) : null;
 }
 
 function NodeIoSummary({

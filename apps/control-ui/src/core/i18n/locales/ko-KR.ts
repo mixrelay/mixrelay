@@ -247,6 +247,7 @@ export const koKR = {
     },
   },
   common: {
+    close: '닫기',
     showPassword: '비밀번호 표시',
     hidePassword: '비밀번호 숨기기',
     appName: 'MixRelay',
@@ -257,6 +258,17 @@ export const koKR = {
     ready: '준비됨',
   },
   studio: {
+    diagnostics: '진단',
+    currentProblems: '현재 문제',
+    problemsAnnouncement: '진단: 현재 문제 {{count}}개',
+    diagnosticsAnnouncement: '진단: 확인할 항목 {{count}}개',
+    diagnosticsClear: '진단: 확인할 항목 없음',
+    support: '지원',
+    supportReport:
+      '문제가 계속되면 진단 리포트를 저장해 support@rawsector.com으로 보내 주세요. 리포트에는 버전·설정·문제 코드가 들어가며 파일 경로, 장치·플러그인 이름, 그래프, 오디오는 들어가지 않습니다.',
+    saveReport: '진단 리포트 저장…',
+    saveReportFailed: '진단 리포트 저장을 시작하지 못했습니다. 다시 시도하세요.',
+    audioPaused: '오디오 일시정지됨',
     deleteGraph: '그래프 삭제',
     deleteGraphNotice:
       '“{{name}}” 그래프를 삭제할까요? 이 그래프의 오디오 처리와 녹음이 종료됩니다. 되돌릴 수 없으며, 저장해 둔 작업 공간 파일은 삭제하지 않습니다.',
@@ -484,6 +496,7 @@ export const koKR = {
       applying: '적용 중',
       loading: '엔진 불러오는 중',
       unavailable: '엔진 연결 불가',
+      layoutFailed: '노드 배치를 불러오지 못했습니다. 하단 진단에서 다시 시도하세요.',
     },
     errors: {
       feature_limit:
@@ -526,9 +539,11 @@ export const koKR = {
       reload: '저장된 배치 불러오기',
     },
     processorControl: {
+      reportTitle: '이펙트 검색 리포트',
+      viewReport: '검색 리포트 보기…',
+      complete: '이펙트 검색을 완료했습니다. 검색 오류가 없습니다.',
       probeFailed: '이 플러그인을 불러오지 못했습니다. 다른 이펙트는 계속 사용할 수 있습니다.',
       scanFailed: '이 플러그인 검색을 완료하지 못했습니다. 이전에 확인된 이펙트는 유지됩니다.',
-      technicalDetails: '기술 정보',
       scanning: '오디오 이펙트 검색 중…',
       incomplete: '이펙트 검색 미완료',
       partial: '일부 이펙트를 검색하지 못했습니다. 이전에 확인된 이펙트는 유지됩니다.',
@@ -542,6 +557,7 @@ export const koKR = {
       retry: '다시 시도',
     },
     processorRecovery: {
+      failed: '플러그인 처리 중단',
       retryFailed: '중단된 플러그인 다시 시도: {{name}}',
     },
     processorEditor: {

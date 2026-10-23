@@ -1,14 +1,12 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AudioGraphModel } from '../../core/audio-graph/model';
-import { TauriControlPort } from '../../core/control-port/TauriControlPort';
 import type { ProcessorEditorStatus } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
 import { MixRelayProvider } from '../../core/theme/MixRelayProvider';
-import { ProcessorCatalogAlert, ProcessorEditorAlerts } from './ProcessorControlAlerts';
-import { useProcessorCatalog } from './useProcessorCatalog';
+import { ProcessorEditorAlert } from './ProcessorControlAlerts';
 import { useProcessorEditors } from './useProcessorEditors';
 
 afterEach(() => {
@@ -17,107 +15,7 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-describe('processor native scan diagnostics', () => {
-  it.each(['en', 'ko-KR', 'pseudo'])(
-    'shows partial native discovery in %s and retries the scanner, not the cached catalog',
-    async (locale) => {
-      await i18n.changeLanguage(locale);
-      const invoke = vi
-        .fn()
-        .mockResolvedValueOnce({
-          status: 200,
-          body: {
-            protocolVersion: 1,
-            processors: [],
-            diagnostics: [
-              {
-                format: 'vst3',
-                stage: 'probe',
-                pluginId: 'fixture',
-                pluginName: 'Example Effect',
-                message: '<script>denied</script>',
-              },
-            ],
-          },
-        })
-        .mockResolvedValue({ status: 200, body: { protocolVersion: 1, processors: [] } });
-      const source = new TauriControlPort(invoke);
-      function Panel() {
-        return <ProcessorCatalogAlert catalog={useProcessorCatalog(source)} />;
-      }
-      const { container } = render(
-        <I18nextProvider i18n={i18n}>
-          <MixRelayProvider>
-            <Panel />
-          </MixRelayProvider>
-        </I18nextProvider>,
-      );
-      expect(await screen.findByRole('alert')).toHaveTextContent(
-        i18n.t('routing.processorControl.partial'),
-      );
-      expect(container.querySelector('details')).not.toHaveAttribute('open');
-      expect(container.querySelector('li')).toHaveTextContent('VST3');
-      expect(container.querySelector('li')).toHaveTextContent('Example Effect');
-      expect(container.querySelector('li')).toHaveTextContent(
-        i18n.t('routing.processorControl.probeFailed'),
-      );
-      const technicalDetails = container.querySelector('li details');
-      expect(technicalDetails).not.toHaveAttribute('open');
-      expect(technicalDetails?.querySelector('pre')).toHaveTextContent('<script>denied</script>');
-      expect(technicalDetails?.querySelector('pre')).not.toBeVisible();
-      const scanSummary = container.querySelector('details > summary');
-      const technicalSummary = technicalDetails?.querySelector('summary');
-      if (!scanSummary || !technicalSummary) throw new Error('missing scan disclosure controls');
-      fireEvent.click(scanSummary);
-      expect(technicalDetails?.querySelector('pre')).not.toBeVisible();
-      fireEvent.click(technicalSummary);
-      expect(technicalDetails?.querySelector('pre')).toBeVisible();
-      expect(container.querySelector('li')).toHaveTextContent('<script>denied</script>');
-      expect(container.querySelector('script')).toBeNull();
-      fireEvent.click(
-        screen.getByRole('button', { name: i18n.t('routing.processorControl.retry') }),
-      );
-      await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
-      expect(invoke).toHaveBeenLastCalledWith('control_rescan_processors', { paths: [] });
-    },
-  );
-});
-
-describe('processor control recovery alerts', () => {
-  it.each(['en', 'ko-KR', 'pseudo'])(
-    'renders a localized scan error and working retry in %s',
-    async (locale) => {
-      await i18n.changeLanguage(locale);
-      const invoke = vi
-        .fn()
-        .mockResolvedValueOnce({
-          status: 503,
-          body: { code: 'control_unavailable', parameters: {} },
-        })
-        .mockResolvedValue({ status: 200, body: { protocolVersion: 1, processors: [] } });
-      const source = new TauriControlPort(invoke);
-      function Panel() {
-        return <ProcessorCatalogAlert catalog={useProcessorCatalog(source)} />;
-      }
-      render(
-        <I18nextProvider i18n={i18n}>
-          <MixRelayProvider>
-            <Panel />
-          </MixRelayProvider>
-        </I18nextProvider>,
-      );
-      expect(await screen.findByRole('alert')).toHaveTextContent(
-        i18n.t('routing.processorControl.catalog'),
-      );
-      fireEvent.click(
-        screen.getByRole('button', { name: i18n.t('routing.processorControl.retry') }),
-      );
-      await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
-      expect(invoke).toHaveBeenCalledTimes(2);
-      expect(invoke).toHaveBeenLastCalledWith('control_get_processors', undefined);
-    },
-  );
-
+describe('processor editor recovery on the node', () => {
   it('shows a rejected automatic open and keeps retry explicit', async () => {
     await i18n.changeLanguage('en');
     const open: ProcessorEditorStatus = {
@@ -161,7 +59,13 @@ describe('processor control recovery alerts', () => {
       return (
         <>
           <output data-testid="native-state">{editors.statuses.get('effect')?.state}</output>
-          <ProcessorEditorAlerts editors={editors} />
+          {[...editors.issues.values()].map((issue) => (
+            <ProcessorEditorAlert
+              key={issue.nodeId}
+              issue={issue}
+              onRetry={() => editors.retry(issue.nodeId)}
+            />
+          ))}
         </>
       );
     }

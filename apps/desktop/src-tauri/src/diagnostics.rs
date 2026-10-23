@@ -9,6 +9,9 @@ use std::{
 };
 use tauri::Manager as _;
 
+mod editor_context;
+use editor_context::EditorContext;
+
 const REPORT_LIMIT: usize = 256 * 1024;
 const DEVICE_LIMIT: usize = 64;
 static EXPORTING: AtomicBool = AtomicBool::new(false);
@@ -73,7 +76,18 @@ const LABELS: [(&str, &str); 11] = [
 ];
 
 /// A manual save chooser is the only admission path. Cancellation creates nothing.
-pub(crate) fn export(app: &tauri::AppHandle) {
+/// Saves the support report the user asked for from the diagnostics window, adding the editor's
+/// current problem codes and scan-failure counts.
+#[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Tauri commands receive owned arguments; the app handle is borrowed for the export"
+)]
+pub(crate) fn diagnostics_save_report(app: tauri::AppHandle, context: EditorContext) {
+    export(&app, Some(context));
+}
+
+pub(crate) fn export(app: &tauri::AppHandle, editor: Option<EditorContext>) {
     if EXPORTING.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -110,7 +124,12 @@ pub(crate) fn export(app: &tauri::AppHandle) {
         .and_then(Result::ok);
         let destination = file.path().to_path_buf();
         let result = tauri::async_runtime::spawn_blocking(move || {
-            let report = report(driver.as_ref(), runtime.as_ref(), &os_version());
+            let report = report(
+                driver.as_ref(),
+                runtime.as_ref(),
+                editor.as_ref(),
+                &os_version(),
+            );
             save(&destination, &report)
         })
         .await;
@@ -156,7 +175,12 @@ fn os_version() -> String {
         .map_or_else(|| "unavailable".into(), |value| value.trim().into())
 }
 
-fn report(driver: Option<&DriverSnapshot>, runtime: Option<&Value>, os_version: &str) -> Value {
+fn report(
+    driver: Option<&DriverSnapshot>,
+    runtime: Option<&Value>,
+    editor: Option<&EditorContext>,
+    os_version: &str,
+) -> Value {
     let devices = driver.map(|snapshot| {
         snapshot
             .settings
@@ -202,6 +226,7 @@ fn report(driver: Option<&DriverSnapshot>, runtime: Option<&Value>, os_version: 
             "devices": devices,
         },
         "runtime": runtime_summary(runtime),
+        "editor": editor.map(EditorContext::to_report),
         "exclusions": ["audio", "memory", "logs", "credentials", "license", "user_paths", "device_names", "device_ids", "graphs", "application_list"],
     })
 }
@@ -294,6 +319,7 @@ mod tests {
         let value = report(
             None,
             Some(&json!({"status":503,"body":{"reason":"SECRET"}})),
+            None,
             "27.0.1",
         );
         assert_eq!(value["runtime"]["available"], false);
@@ -309,7 +335,7 @@ mod tests {
             "audioSession":{"discontinuities":3,"processingState":"SECRET", "issue":{"path":"SECRET"},
                 "virtualEndpointSettings":{"devices":[{"name":"SECRET"}]},"format":{"sampleRate":48000,"blockFrames":128,"path":"SECRET"}}
         }});
-        let value = report(None, Some(&response), "27.0.1");
+        let value = report(None, Some(&response), None, "27.0.1");
         assert_eq!(value["runtime"]["underruns"], 8);
         assert_eq!(
             value["runtime"]["sampleFaults"],
@@ -321,6 +347,19 @@ mod tests {
             128
         );
         assert!(!value.to_string().contains("SECRET"));
+    }
+
+    #[test]
+    fn editor_context_is_included_only_from_the_diagnostics_window() {
+        let context: EditorContext = serde_json::from_value(json!({
+            "problems": ["graph_apply_timeout"],
+            "processorScan": [{"format": "clap", "stage": "scan", "count": 2}],
+        }))
+        .unwrap();
+        let window = report(None, None, Some(&context), "27.0.1");
+        assert_eq!(window["editor"]["problems"], json!(["graph_apply_timeout"]));
+        assert_eq!(window["editor"]["processorScan"][0]["count"], 2);
+        assert_eq!(report(None, None, None, "27.0.1")["editor"], Value::Null);
     }
 
     #[test]

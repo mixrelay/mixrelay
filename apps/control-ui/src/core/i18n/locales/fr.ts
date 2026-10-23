@@ -257,6 +257,7 @@ export const fr = {
     },
   },
   common: {
+    close: 'Fermer',
     showPassword: 'Afficher le mot de passe',
     hidePassword: 'Masquer le mot de passe',
     appName: 'MixRelay',
@@ -267,6 +268,17 @@ export const fr = {
     ready: 'Prêt',
   },
   studio: {
+    diagnostics: 'Diagnostic',
+    currentProblems: 'Problèmes en cours',
+    problemsAnnouncement: 'Diagnostic : problèmes en cours ({{count}})',
+    diagnosticsAnnouncement: 'Diagnostic : éléments à vérifier ({{count}})',
+    diagnosticsClear: 'Diagnostic : aucun élément à vérifier',
+    support: 'Assistance',
+    supportReport:
+      'Si un problème persiste, enregistrez un rapport de diagnostic et envoyez-le à support@rawsector.com. Le rapport contient les versions, les réglages et les codes de problème, mais aucun chemin de fichier, nom d’appareil ou de plug-in, graphe ni audio.',
+    saveReport: 'Enregistrer un rapport de diagnostic…',
+    saveReportFailed: 'Impossible de lancer l’enregistrement du rapport de diagnostic. Réessayez.',
+    audioPaused: 'Audio en pause',
     deleteGraph: 'Supprimer le graphe',
     deleteGraphNotice:
       'Supprimer « {{name}} » ? Son traitement audio et ses enregistrements seront arrêtés. Cette action est irréversible. Les fichiers d’espace de travail enregistrés ne sont pas supprimés.',
@@ -497,6 +509,8 @@ export const fr = {
       applying: 'Application en cours',
       loading: 'Chargement du moteur',
       unavailable: 'Moteur indisponible',
+      layoutFailed:
+        'La disposition des nœuds n’a pas pu être chargée. Réessayez depuis Diagnostic dans la barre d’état.',
     },
     errors: {
       feature_limit:
@@ -545,10 +559,12 @@ export const fr = {
       reload: 'Charger la disposition enregistrée',
     },
     processorControl: {
+      reportTitle: 'Rapport de recherche des effets',
+      viewReport: 'Voir le rapport de recherche…',
+      complete: 'La recherche des effets est terminée sans problème.',
       probeFailed: 'Impossible de charger ce plug-in. Les autres effets restent disponibles.',
       scanFailed:
         'La recherche de plug-ins n’a pas pu être terminée. Les effets déjà disponibles sont conservés.',
-      technicalDetails: 'Détails techniques',
       scanning: 'Recherche d’effets audio…',
       incomplete: 'Recherche d’effets incomplète',
       partial:
@@ -564,6 +580,7 @@ export const fr = {
       retry: 'Réessayer',
     },
     processorRecovery: {
+      failed: 'Traitement du plug-in arrêté',
       retryFailed: 'Réessayer le plug-in planté : {{name}}',
     },
     processorEditor: {

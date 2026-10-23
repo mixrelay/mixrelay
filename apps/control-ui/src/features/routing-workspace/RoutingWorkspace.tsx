@@ -31,15 +31,10 @@ import type {
 import { ControlPortError } from '../../core/control-port/types';
 import { type HistoryStep, useUndoHistory } from '../../core/history/useUndoHistory';
 import { usePaidFeatures } from '../../core/licensing/FeatureAccess';
-import { ActionButton } from '../../core/ui/ActionButton';
 import type { EndpointControl } from '../../core/ui/AudioNodeEndpointOptions';
-import { InlineNotice } from '../../core/ui/InlineNotice';
 import { NodeMuteButton, NodePowerButton } from '../../core/ui/NodeSignalControls';
 import { hasPlatformModifier, isNativeTextEntryTarget } from '../../core/ui/platformShortcut';
-import { RecoveryActions } from '../../core/ui/RecoveryActions';
-import { RetryAlert } from '../../core/ui/RetryAlert';
 import { TitleField } from '../../core/ui/TitleField';
-import { useRemovedFocusReturn } from '../../core/ui/useRemovedFocusReturn';
 import { useSustainedProblem } from '../../core/ui/useSustainedProblem';
 import { WorkspaceHeader } from '../../core/ui/WorkspaceHeader';
 import { RecorderControls } from '../recorder/RecorderControls';
@@ -64,10 +59,11 @@ import {
   updateRoutingNodeParameters,
   type VirtualEndpointUpdate,
 } from './model';
-import { ProcessorCatalogAlert, ProcessorEditorAlerts } from './ProcessorControlAlerts';
-import { ProcessorParameterAlert } from './ProcessorParameterAlert';
+import { ProcessorEditorAlert } from './ProcessorControlAlerts';
 import { ProcessorRecoveryControl } from './ProcessorRecoveryControl';
+import { useProcessorScanReport } from './ProcessorScanReport';
 import { processorCatalogPlaceholder, processorSelectionForMenuItem } from './processorCatalogMenu';
+import { presentProcessorFailures } from './processorFailures';
 import { presentProcessorLayouts, useProcessorLayoutChange } from './processorLayouts';
 import { presentProcessorTimings } from './processorTiming';
 import styles from './RoutingWorkspace.module.css';
@@ -92,12 +88,17 @@ import { useVirtualDeviceAppActivity } from './useVirtualDeviceAppActivity';
 import { useVirtualEndpointCreation } from './useVirtualEndpointCreation';
 import { presentVirtualDeviceAppActivity } from './virtualDeviceAppActivity';
 import { presentApplicationReselection, presentVirtualNodeStatus } from './virtualNodeStatus';
+import {
+  type WorkspaceProblemSummary,
+  WorkspaceProblems,
+  type WorkspaceState,
+} from './WorkspaceProblems';
 
-type WorkspaceState = 'active' | 'applying' | 'loading' | 'unavailable' | 'blocked';
 type UpdateModel = (model: AudioGraphModel, kind: AudioGraphChangeKind) => void;
 const GRAPH_RECOVERY_MS = 500;
 
 export interface RoutingWorkspaceProps {
+  processorCatalog?: ReturnType<typeof useProcessorCatalog>;
   deviceDriverAction?: {
     settings?: VirtualEndpointSettings;
     enabled: boolean;
@@ -107,6 +108,9 @@ export interface RoutingWorkspaceProps {
   };
   headerActions?: ReactNode;
   notice?: ReactNode;
+  /** The diagnostics window's problem list; workspace failures render only there. */
+  problemsTarget?: HTMLElement | null;
+  onProblemsChange?: (summary: WorkspaceProblemSummary) => void;
   failedProcessors?: FailedProcessorInstance[];
   catalogRevision?: number;
   processorTimings?: import('../../core/control-port/types').ProcessorTiming[];
@@ -915,6 +919,7 @@ function useSessionGraphRefresh(
 }
 
 export function RoutingWorkspace({
+  processorCatalog,
   failedProcessors,
   deviceDriverAction,
   graphId,
@@ -928,8 +933,14 @@ export function RoutingWorkspace({
   if (deviceDriverAction && audioSession)
     audioSession = { ...audioSession, virtualEndpointSettings: deviceDriverAction.settings };
   const [menuOpened, setMenuOpened] = useState(false);
-  const { inventory, applications, audioDevices, processorCatalog, processors, refresh } =
-    useWorkspaceInventory(controlPort, menuOpened);
+  const {
+    inventory,
+    applications,
+    audioDevices,
+    processors,
+    refresh,
+    processorCatalog: catalog,
+  } = useWorkspaceInventory(controlPort, menuOpened, processorCatalog);
   const presentation = useGraphPresentation();
   const graph = useWorkspaceGraph(controlPort, presentation, processors, sessionDocument, graphId);
   useUnavailableGraphRecovery(controlPort, presentation, processors, graph);
@@ -979,7 +990,7 @@ export function RoutingWorkspace({
     graphId,
     interactionDisabled,
     deviceDriverAction,
-    processorCatalog,
+    processorCatalog: catalog,
     layout,
     application,
     audioSession,
@@ -1076,9 +1087,13 @@ function useWorkspaceBusy(
   useEffect(() => onBusyChange?.(busy), [onBusyChange, busy]);
 }
 
-function useWorkspaceInventory(controlPort: ControlPort, menuOpened: boolean) {
+function useWorkspaceInventory(
+  controlPort: ControlPort,
+  menuOpened: boolean,
+  suppliedCatalog: ReturnType<typeof useProcessorCatalog> | undefined,
+) {
   const inventory = useRoutingInventory(controlPort, menuOpened);
-  const processorCatalog = useProcessorCatalog(controlPort);
+  const processorCatalog = useProcessorCatalog(controlPort, suppliedCatalog);
   return {
     inventory,
     ...inventory,
@@ -1092,6 +1107,8 @@ interface WorkspaceViewProps {
   documentRevision: number;
   headerActions?: ReactNode;
   notice?: ReactNode;
+  problemsTarget?: HTMLElement | null;
+  onProblemsChange?: (summary: WorkspaceProblemSummary) => void;
   failedProcessors?: FailedProcessorInstance[];
   catalogRevision?: number;
   processorTimings?: RoutingWorkspaceProps['processorTimings'];
@@ -1199,12 +1216,17 @@ function usePresentedModel(props: WorkspaceViewProps) {
     () =>
       presented &&
       presentNodeDisplayNames(
-        presentProcessorLayouts(
-          presentEqualizerSampleRate(
-            presentProcessorTimings(presented, props.processorTimings, props.graphId),
-            audioSession?.format.sampleRate,
-          ) as AudioGraphModel,
-          props.processors,
+        presentProcessorFailures(
+          presentProcessorLayouts(
+            presentEqualizerSampleRate(
+              presentProcessorTimings(presented, props.processorTimings, props.graphId),
+              audioSession?.format.sampleRate,
+            ) as AudioGraphModel,
+            props.processors,
+            t,
+          ),
+          props.failedProcessors,
+          props.graphId,
           t,
         ),
         props.layout.layout.nodeLabels,
@@ -1212,6 +1234,7 @@ function usePresentedModel(props: WorkspaceViewProps) {
     [
       presented,
       props.processors,
+      props.failedProcessors,
       t,
       props.processorTimings,
       props.graphId,
@@ -1302,8 +1325,6 @@ function routingContextLabels(t: TFunction) {
 function WorkspaceView(props: WorkspaceViewProps) {
   const { t } = useTranslation();
   const titleRef = useRef<HTMLInputElement>(null);
-  const recoveryFocus = useRemovedFocusReturn(titleRef, props.graphId);
-  const layoutRecoveryFocus = useRemovedFocusReturn(titleRef, props.graphId);
   const {
     addNode,
     controlPort,
@@ -1323,10 +1344,11 @@ function WorkspaceView(props: WorkspaceViewProps) {
     [model, props.documentRevision],
   );
   const processorEditors = useProcessorEditors(controlPort, editorModel, props.graphId);
+  const scanReport = useProcessorScanReport(props.processorCatalog, addNode);
   const processorEditorLabels = useProcessorEditorLabels();
   const menuItems = useWorkspaceMenuItems(props, t);
   const presentedModel = usePresentedModel(props);
-  const nodeRenderers = useNodeRenderers(props, t, nodeControls, presentedModel);
+  const nodeRenderers = useNodeRenderers(props, t, nodeControls, presentedModel, processorEditors);
   const nodeNames = useNodeDisplayNameEditor(
     presentedModel,
     props.layout,
@@ -1341,22 +1363,17 @@ function WorkspaceView(props: WorkspaceViewProps) {
         headerActions={props.headerActions}
       />
       {props.notice}
-      <GraphSyncError
+      <WorkspaceProblems
+        target={props.problemsTarget}
+        onChange={props.onProblemsChange}
         errorCode={errorCode}
         state={state}
         application={props.application}
-        focusReturn={recoveryFocus}
-      />
-      <ProcessorParameterAlert
         parameters={props.parameters}
-        applying={state === 'applying'}
-        onReload={() => props.application.reload()}
+        inventory={props.inventory}
+        persistenceError={props.persistenceError}
+        layout={props.layout}
       />
-      <InventoryError inventory={props.inventory} />
-      <ProcessorCatalogAlert catalog={props.processorCatalog} />
-      <ProcessorEditorAlerts editors={processorEditors} />
-      <GraphPersistenceWarning error={props.persistenceError} />
-      <LayoutError layout={props.layout} focusReturn={layoutRecoveryFocus} />
       {presentedModel && props.layout.loaded ? (
         <div className={styles.canvas} inert={props.layout.loading}>
           <AudioGraphCanvas
@@ -1370,7 +1387,7 @@ function WorkspaceView(props: WorkspaceViewProps) {
             model={presentedModel}
             meterStore={meterStore}
             nodeMenuItems={menuItems}
-            onAddNode={addNode}
+            onAddNode={scanReport.onMenuAction}
             onNodeMenuOpenedChange={props.onNodeMenuOpenedChange}
             onNodeRenameRequest={nodeNames.request}
             onModelChange={updateModel}
@@ -1385,9 +1402,14 @@ function WorkspaceView(props: WorkspaceViewProps) {
           />
         </div>
       ) : (
-        <GraphPlaceholder state={state} layoutLoaded={props.layout.loaded} />
+        <GraphPlaceholder
+          state={state}
+          layoutLoaded={props.layout.loaded}
+          layoutFailed={Boolean(props.layout.error)}
+        />
       )}
       {nodeNames.dialog}
+      {scanReport.dialog}
     </section>
   );
 }
@@ -1402,19 +1424,31 @@ function useWorkspaceMenuItems(props: WorkspaceViewProps, t: TFunction) {
     t,
     session: props.audioSession,
     processorEmptyLabel: t(processorCatalogPlaceholder(props.processorCatalog)),
+    processorReportDescription: props.processorCatalog.failure
+      ? t('routing.processorControl.incomplete')
+      : props.processorCatalog.diagnostics.length
+        ? t('routing.processorControl.details', {
+            count: new Set(props.processorCatalog.diagnostics.map((item) => JSON.stringify(item)))
+              .size,
+          })
+        : undefined,
     paid,
   });
 }
 
+/** A failed layout read says so here; its retry lives with the other problems in diagnostics. */
 function GraphPlaceholder({
   state,
   layoutLoaded,
+  layoutFailed,
 }: {
   state: WorkspaceState;
   layoutLoaded: boolean;
+  layoutFailed: boolean;
 }) {
   const { t } = useTranslation();
-  const placeholderState = state === 'unavailable' || layoutLoaded ? state : 'loading';
+  const placeholderState =
+    state === 'unavailable' || layoutLoaded ? state : layoutFailed ? 'layoutFailed' : 'loading';
   return (
     <div
       key={placeholderState}
@@ -1479,6 +1513,7 @@ function useNodeRenderers(
   t: TFunction,
   snapshot: import('../../core/control-port/types').GraphNodeControls | null,
   model: AudioGraphModel | null,
+  editors: ReturnType<typeof useProcessorEditors>,
 ) {
   const idle = nodeControlIdle(props);
   const {
@@ -1536,8 +1571,18 @@ function useNodeRenderers(
       [inputs, t, snapshot],
     ),
     content: useCallback(
-      (node: AudioGraphNode) => recorderNodeContent(inputs, node, latestModel),
-      [inputs],
+      (node: AudioGraphNode) => {
+        const issue = editors.issues.get(node.id);
+        return issue ? (
+          <ProcessorEditorAlert
+            issue={{ ...issue, name: audioGraphNodeTitle(node) }}
+            onRetry={() => editors.retry(node.id)}
+          />
+        ) : (
+          recorderNodeContent(inputs, node, latestModel)
+        );
+      },
+      [inputs, editors.issues, editors.retry],
     ),
   };
 }
@@ -1693,95 +1738,4 @@ function nodeSignalControls(
       />
     ) : null,
   };
-}
-
-function GraphPersistenceWarning({ error }: { error: string | null }) {
-  const { t } = useTranslation();
-  return error ? (
-    <InlineNotice layout="banner" tone="warning">
-      {t('routing.persistenceWarning')}
-    </InlineNotice>
-  ) : null;
-}
-
-function LayoutError({
-  layout,
-  focusReturn,
-}: {
-  layout: ReturnType<typeof useGraphLayout>;
-  focusReturn: ReturnType<typeof useRemovedFocusReturn>;
-}) {
-  const { t } = useTranslation();
-  if (!layout.error) return null;
-  return (
-    <InlineNotice
-      layout="banner"
-      tone="warning"
-      announcement="alert"
-      inert={layout.loading || layout.saving}
-      {...focusReturn}
-    >
-      {t('routing.layout.failed')}
-      <ActionButton onClick={() => void layout.controller.retry()}>
-        {t('routing.inventory.retry')}
-      </ActionButton>
-    </InlineNotice>
-  );
-}
-
-function InventoryError({ inventory }: { inventory: ReturnType<typeof useRoutingInventory> }) {
-  const { t } = useTranslation();
-  if (!inventory.failed) return null;
-  return (
-    <RetryAlert
-      framed
-      message={t('routing.inventory.failed')}
-      retryLabel={t('routing.inventory.retry')}
-      busy={inventory.refreshing}
-      onRetry={inventory.refresh}
-    />
-  );
-}
-
-function GraphSyncError({
-  errorCode,
-  state,
-  application,
-  focusReturn,
-}: {
-  errorCode: string | null;
-  state: WorkspaceState;
-  application: GraphApplicationQueue;
-  focusReturn: ReturnType<typeof useRemovedFocusReturn>;
-}) {
-  const { t } = useTranslation();
-  if (!errorCode) return null;
-  return (
-    <InlineNotice layout="banner" tone="critical" {...focusReturn}>
-      <div>
-        {errorCode === 'graph_apply_timeout'
-          ? t('routing.recovery.timeout')
-          : t(`routing.errors.${errorCode}`, {
-              defaultValue: t('routing.errors.control_request_failed'),
-            })}
-      </div>
-      {state === 'blocked' ? (
-        <>
-          <div>{t('routing.recovery.draftPreserved')}</div>
-          {errorCode === 'graph_conflict_unresolved' ? (
-            <RecoveryActions
-              retryLabel={t('routing.recovery.retry')}
-              reloadLabel={t('routing.recovery.reload')}
-              onRetry={() => application.retry()}
-              onReload={() => application.reload()}
-            />
-          ) : (
-            <ActionButton onClick={() => application.retry()}>
-              {t('routing.inventory.retry')}
-            </ActionButton>
-          )}
-        </>
-      ) : null}
-    </InlineNotice>
-  );
 }

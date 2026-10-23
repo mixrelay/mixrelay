@@ -80,11 +80,11 @@
 
 .itemSection[data-position="left"] {
   width: 18px;
-  margin-inline: 0 8px;
+  margin-inline: 0 var(--space-2);
 }
 .itemSection[data-position="right"] {
   width: 14px;
-  margin-inline: 8px 0;
+  margin-inline: var(--space-2) 0;
 }
 
 .itemIcon {
@@ -94,7 +94,7 @@
 
 .label {
   height: 24px;
-  padding: 6px 9px 2px;
+  padding: var(--space-1) var(--row-inset) var(--space-half);
   color: var(--menu-label-text);
   font-size: var(--font-label);
   font-weight: 500;
@@ -102,7 +102,7 @@
 }
 
 .divider {
-  margin: 4px 9px;
+  margin: var(--space-1) var(--row-inset);
   border-color: var(--menu-divider);
 }
 

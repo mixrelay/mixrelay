@@ -213,6 +213,7 @@ const overrides = {
     },
   },
   common: {
+    close: '[!! Close report !!]',
     showPassword: '⟦ Show password with a longer translated label ⟧',
     hidePassword: '⟦ Hide password with a longer translated label ⟧',
     appName: '[!! MixRelay !!]',
@@ -222,6 +223,8 @@ const overrides = {
     ready: '[!! Réådÿ !!]',
   },
   studio: {
+    diagnostics: '[Ðïåğñöšţïçš éẋţéñðéð]',
+    audioPaused: '[Åûðïö þåûšéð éẋţéñðéð]',
     catalogUnavailable: '[Saved graphs are unavailable. Your existing graph was not replaced.]',
     reloadGraphs: '[Reload graphs]',
     graphSaveFailed:
@@ -418,9 +421,11 @@ const overrides = {
       reload: '[Load saved layout]',
     },
     processorControl: {
+      reportTitle: '[!! Extended effect discovery and validation report !!]',
+      viewReport: '[!! View the detailed effect search report… !!]',
+      complete: '[!! Effect discovery completed without any scan issues !!]',
       probeFailed: '[!! Plug-in could not be loaded; other effects remain available !!]',
       scanFailed: '[!! Plug-in search incomplete; previous effects retained !!]',
-      technicalDetails: '[!! Technical details !!]',
       scanning: '[Scanning audio effects…]',
       incomplete: '[Effect search incomplete]',
       partial: '[Some effects could not be scanned. Previously available effects are retained.]',
@@ -434,6 +439,7 @@ const overrides = {
       retry: '[Retry]',
     },
     processorRecovery: {
+      failed: '[!! Plug-in audio processing has stopped !!]',
       retryFailed: '[Retry crashed plug-in: {{name}}]',
     },
     processorEditor: {

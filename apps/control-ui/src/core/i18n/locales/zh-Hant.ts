@@ -235,6 +235,7 @@ export const zhHant = {
     },
   },
   common: {
+    close: '關閉',
     showPassword: '顯示密碼',
     hidePassword: '隱藏密碼',
     appName: 'MixRelay',
@@ -245,6 +246,17 @@ export const zhHant = {
     ready: '就緒',
   },
   studio: {
+    diagnostics: '診斷',
+    currentProblems: '目前問題',
+    problemsAnnouncement: '診斷：目前問題 {{count}} 個',
+    diagnosticsAnnouncement: '診斷：需要檢查的項目 {{count}} 個',
+    diagnosticsClear: '診斷：沒有需要檢查的項目',
+    support: '支援',
+    supportReport:
+      '如果問題持續，請儲存診斷報告並傳送至 support@rawsector.com。報告包含版本、設定與問題代碼，不包含檔案路徑、裝置或外掛名稱、音訊圖或音訊。',
+    saveReport: '儲存診斷報告…',
+    saveReportFailed: '無法開始儲存診斷報告。請再試一次。',
+    audioPaused: '音訊已暫停',
     deleteGraph: '刪除音訊圖',
     deleteGraphNotice:
       '刪除「{{name}}」？此音訊圖的音訊處理和錄音將停止。此操作無法復原。已儲存的工作區檔案不會被刪除。',
@@ -468,6 +480,7 @@ export const zhHant = {
       applying: '正在套用',
       loading: '正在載入引擎',
       unavailable: '引擎無法使用',
+      layoutFailed: '無法載入節點配置。請在底部「診斷」中重試。',
     },
     errors: {
       feature_limit: '此變更超出免費方案的上限。請減少連線或節點，或啟用授權。',
@@ -505,9 +518,11 @@ export const zhHant = {
       reload: '載入已儲存的配置',
     },
     processorControl: {
+      reportTitle: '效果器掃描報告',
+      viewReport: '檢視掃描報告…',
+      complete: '效果器掃描已完成，未發現問題。',
       probeFailed: '無法載入此外掛。其他效果器仍可使用。',
       scanFailed: '無法完成此次外掛搜尋。保留先前可用的效果器。',
-      technicalDetails: '技術資訊',
       scanning: '正在掃描音訊效果器…',
       incomplete: '效果器搜尋尚未完成',
       partial: '部分效果器無法掃描。此前可用的效果器已保留。',
@@ -521,6 +536,7 @@ export const zhHant = {
       retry: '重試',
     },
     processorRecovery: {
+      failed: '外掛程式處理已停止',
       retryFailed: '重試已崩潰的外掛程式：{{name}}',
     },
     processorEditor: {

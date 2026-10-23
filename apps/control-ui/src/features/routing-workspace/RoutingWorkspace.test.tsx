@@ -1,3 +1,4 @@
+import { ProblemsTarget } from '../../test-support/ProblemsTarget';
 import '../../test-support/integration';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -384,7 +385,16 @@ function workspace(
   return (
     <MixRelayProvider>
       <I18nextProvider i18n={i18n}>
-        <RoutingWorkspace controlPort={controlPort} onBusyChange={onBusyChange} graphId={graphId} />
+        <ProblemsTarget>
+          {(target) => (
+            <RoutingWorkspace
+              controlPort={controlPort}
+              onBusyChange={onBusyChange}
+              graphId={graphId}
+              problemsTarget={target}
+            />
+          )}
+        </ProblemsTarget>
       </I18nextProvider>
     </MixRelayProvider>
   );
@@ -665,7 +675,15 @@ describe('RoutingWorkspace processor discovery evidence', () => {
     const view = (sessionDocument: RuntimeGraphDocument) => (
       <MixRelayProvider>
         <I18nextProvider i18n={i18n}>
-          <RoutingWorkspace controlPort={source} sessionDocument={sessionDocument} />
+          <ProblemsTarget>
+            {(target) => (
+              <RoutingWorkspace
+                controlPort={source}
+                sessionDocument={sessionDocument}
+                problemsTarget={target}
+              />
+            )}
+          </ProblemsTarget>
         </I18nextProvider>
       </MixRelayProvider>
     );
@@ -678,7 +696,7 @@ describe('RoutingWorkspace processor discovery evidence', () => {
     expectBlockedWorkspace();
     expect(source.applyGraph).toHaveBeenCalledTimes(1);
   });
-  it('shows incomplete search in the menu until a real retry finishes cleanly', async () => {
+  it('shows incomplete search and a report entry without a workspace alert', async () => {
     await i18n.changeLanguage('en');
     const source = port({
       getProcessors: vi.fn().mockResolvedValue({
@@ -691,9 +709,9 @@ describe('RoutingWorkspace processor discovery evidence', () => {
     const menu = await screen.findByTestId('node-menu');
     await waitFor(() => expect(menu).toHaveTextContent('Effect search incomplete'));
     expect(menu).not.toHaveTextContent('No installed audio effects');
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-    await waitFor(() => expect(menu).toHaveTextContent('No installed audio effects'));
-    expect(source.rescanProcessors).toHaveBeenCalledWith([]);
+    expect(menu).toHaveTextContent('View search report…');
+    expect(screen.queryByText(i18n.t('routing.processorControl.partial'))).not.toBeInTheDocument();
+    expect(source.rescanProcessors).not.toHaveBeenCalled();
     view.unmount();
   });
 });
@@ -1434,10 +1452,8 @@ describe('RoutingWorkspace explicit conflict retry', () => {
     await waitFor(expectBlockedWorkspace);
     expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
     const retry = screen.getByRole('button', { name: 'Overwrite engine with these edits' });
-    act(() => retry.focus());
     fireEvent.click(retry);
     await waitFor(expectActiveWorkspace);
-    expect(screen.getByRole('textbox', { name: 'Graph name' })).toHaveFocus();
     expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
     expect(controlPort.applyGraph).toHaveBeenCalledTimes(2);
     expect(controlPort.applyGraph).toHaveBeenLastCalledWith(
@@ -1912,10 +1928,8 @@ it.each([
   ).not.toBeInTheDocument();
   expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
   const retry = screen.getByRole('button', { name: 'Retry' });
-  act(() => retry.focus());
   fireEvent.click(retry);
   await waitFor(expectActiveWorkspace);
-  expect(screen.getByRole('textbox', { name: 'Graph name' })).toHaveFocus();
   expect(controlPort.applyGraph).toHaveBeenCalledTimes(2);
   expect(screen.getByTestId('edge-count')).toHaveTextContent('0');
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();

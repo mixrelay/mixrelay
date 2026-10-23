@@ -28,30 +28,3 @@
   place-items: center;
   color: var(--text-muted);
 }
-
-.scanDiagnostics {
-  max-height: 160px;
-  overflow: auto;
-  overscroll-behavior: contain;
-  overflow-wrap: anywhere;
-}
-
-.scanDiagnostics summary {
-  cursor: default;
-}
-
-.scanDiagnostics li + li {
-  margin-top: var(--space-3);
-}
-
-.scanDiagnostics p {
-  margin: var(--space-1) 0;
-}
-
-.scanTechnicalDetails pre {
-  max-height: 120px;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: var(--font-label);
-}

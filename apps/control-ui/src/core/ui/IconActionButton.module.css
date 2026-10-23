@@ -5,7 +5,7 @@
   place-items: center;
   width: var(--control-height-compact);
   height: var(--control-height-compact);
-  padding: var(--node-control-padding);
+  padding: 0;
   border: 0;
   border-radius: var(--control-radius);
   background: transparent;

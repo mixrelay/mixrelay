@@ -226,22 +226,24 @@ function Spacing() {
         Stack/Inline이 tight·regular·section·wide 간격을 소유하며, 개별 자식에 여백을 덧붙이지
         않습니다.
       </Text>
-      {Object.entries(spacing).map(([role, size]) => (
-        <Inline key={role}>
-          <div
-            aria-hidden="true"
-            style={{
-              width: size,
-              height: 'var(--space-2)',
-              background: 'var(--text-muted)',
-              flexShrink: 0,
-            }}
-          />
-          <Text kind="caption">
-            {role} · {size}px
-          </Text>
-        </Inline>
-      ))}
+      {Object.entries(spacing)
+        .sort(([, a], [, b]) => a - b)
+        .map(([role, size]) => (
+          <Inline key={role}>
+            <div
+              aria-hidden="true"
+              style={{
+                width: size,
+                height: 'var(--space-2)',
+                background: 'var(--text-muted)',
+                flexShrink: 0,
+              }}
+            />
+            <Text kind="caption">
+              --space-{role} · {size}px
+            </Text>
+          </Inline>
+        ))}
       {(['tight', 'regular', 'section', 'wide'] as const).map((gap) => (
         <Inline key={gap} gap={gap}>
           <Text kind="label">Inline · {gap}</Text>

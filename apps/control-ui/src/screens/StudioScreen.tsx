@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next';
 import {
   type ComponentProps,
   type FocusEvent,
@@ -9,6 +10,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ControlPort, RuntimeGraphDocument } from '../core/control-port/types';
+import type { DiagnosticsPort } from '../core/diagnostics/DiagnosticsPort';
 import { usePaidFeatures } from '../core/licensing/FeatureAccess';
 import { useNativeGraphListCommand } from '../core/shell/useNativeGraphListCommand';
 import { shellBreakpoints } from '../core/theme/tokens';
@@ -34,6 +36,12 @@ import { GraphList } from '../features/graphs/GraphList';
 import { useCatalogTitle, useGraphCatalog } from '../features/graphs/useGraphCatalog';
 import { WorkspaceFileMenu } from '../features/graphs/WorkspaceFileMenu';
 import { RoutingWorkspace } from '../features/routing-workspace/RoutingWorkspace';
+import { useProcessorCatalog } from '../features/routing-workspace/useProcessorCatalog';
+import {
+  noWorkspaceProblems,
+  type WorkspaceProblemSummary,
+} from '../features/routing-workspace/WorkspaceProblems';
+import { diagnosticsCount, StudioDiagnostics } from './StudioDiagnostics';
 import styles from './StudioScreen.module.css';
 
 function useCatalogError(error: string | null) {
@@ -107,10 +115,45 @@ function routingWorkspaceRuntimeProps(
   catalog: ReturnType<typeof useGraphCatalog>['catalog'],
 ) {
   return {
+    audioSession: status?.audioSession,
+    processorTimings: status?.processorTimings,
     failedProcessors: status?.failedProcessors,
     catalogRevision: catalog?.catalogRevision,
     playbackPaused: status?.enginePower?.enabled === false || status?.enginePower?.transitioning,
   };
+}
+
+/** Status reloads after a session apply so the bar reflects the applied document. */
+function useAppliedStatus(
+  controlPort: ControlPort,
+  setSessionDocument: (document: RuntimeGraphDocument) => void,
+) {
+  const [statusRefresh, setStatusRefresh] = useState(0);
+  const status = useSettledAudioStatus(useAudioStatus(controlPort, statusRefresh));
+  const onSessionApplied = (document: RuntimeGraphDocument) => {
+    setSessionDocument(document);
+    setStatusRefresh((value) => value + 1);
+  };
+  return { status, onSessionApplied };
+}
+
+/** Workspace problems render inside the diagnostics window and count on its status button. */
+function useProblemChannel() {
+  const [problems, setProblems] = useState<WorkspaceProblemSummary>(noWorkspaceProblems);
+  const [target, setTarget] = useState<HTMLDivElement | null>(null);
+  return {
+    workspace: { problemsTarget: target, onProblemsChange: setProblems },
+    statusBar: { problems, problemsRef: setTarget },
+  };
+}
+
+interface StudioScreenProps {
+  controlPort: ControlPort;
+  applicationActions?: ReactNode;
+  applicationInfo?: ReactNode;
+  driverSession?: DriverSession;
+  diagnosticsPort?: DiagnosticsPort | null;
+  onInstallDriver?: () => void;
 }
 
 export function StudioScreen({
@@ -118,25 +161,21 @@ export function StudioScreen({
   applicationActions,
   applicationInfo,
   driverSession,
+  diagnosticsPort,
   onInstallDriver,
-}: {
-  controlPort: ControlPort;
-  applicationActions?: ReactNode;
-  applicationInfo?: ReactNode;
-  driverSession?: DriverSession;
-  onInstallDriver?: () => void;
-}) {
+}: StudioScreenProps) {
   const { t } = useTranslation();
   const paid = usePaidFeatures();
-  const [statusRefresh, setStatusRefresh] = useState(0);
-  const status = useSettledAudioStatus(useAudioStatus(controlPort, statusRefresh));
   const collection = useGraphCatalog(controlPort);
+  const processorCatalog = useProcessorCatalog(controlPort);
+  const problems = useProblemChannel();
   const catalogErrorText = useCatalogError(collection.error);
   const { catalog, busy: catalogBusy, uncertain: catalogUncertain } = collection;
   const [sessionBusy, setSessionBusy] = useState(false);
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const ownedSession = useOwnedSessionDocument(controlPort, collection.document);
   const [sessionDocument, setSessionDocument] = ownedSession;
+  const { status, onSessionApplied } = useAppliedStatus(controlPort, setSessionDocument);
   const { isCreatingGraph, setIsCreatingGraph, openNewGraph } = useGraphCreation(
     catalog?.activeId,
     paid || !catalog?.graphs.length,
@@ -144,10 +183,6 @@ export function StudioScreen({
   const busy = catalogBusy || sessionBusy || workspaceBusy || catalogUncertain;
   const title = useCatalogTitle(collection, busy, t('studio.untitledGraph'));
   const controlsDisabled = busy || title.unsaved;
-  const onSessionApplied = (document: RuntimeGraphDocument) => {
-    setSessionDocument(document);
-    setStatusRefresh((value) => value + 1);
-  };
   const mutateCatalog = busy ? () => undefined : collection.mutate;
   const documentForWorkspace = workspaceSessionDocument(
     sessionDocument,
@@ -171,7 +206,9 @@ export function StudioScreen({
         inert={sessionBusy || catalogBusy || catalogUncertain}
       >
         <RoutingWorkspace
+          processorCatalog={processorCatalog}
           notice={driverInstallNotice(driverSession, onInstallDriver)}
+          {...problems.workspace}
           headerActions={
             <WorkspaceFileMenu
               controlPort={controlPort}
@@ -183,8 +220,6 @@ export function StudioScreen({
           key={`${catalog?.activeId ?? 'engine'}:${collection.documentGeneration}`}
           graphId={catalog?.activeId}
           interactionDisabled={catalogBusy || catalogUncertain || sessionBusy}
-          audioSession={status?.audioSession}
-          processorTimings={status?.processorTimings}
           {...routingWorkspaceRuntimeProps(status, catalog)}
           sessionDocument={documentForWorkspace}
           controlPort={controlPort}
@@ -195,7 +230,11 @@ export function StudioScreen({
       </section>
 
       <StudioStatusBar
+        processorCatalog={processorCatalog}
+        driverSession={driverSession}
         applicationInfo={applicationInfo}
+        {...problems.statusBar}
+        diagnosticsPort={diagnosticsPort}
         disabled={controlsDisabled}
         status={status}
         controlPort={controlPort}
@@ -366,20 +405,43 @@ function surviving(root: HTMLElement | null): HTMLElement | undefined {
     .find((element): element is HTMLElement => element?.closest('[inert], [hidden]') === null);
 }
 
+/** Always present, so a change to zero is read as well as a new count. */
+function diagnosticsAnnouncement(t: TFunction, count: number) {
+  return count ? t('studio.diagnosticsAnnouncement', { count }) : t('studio.diagnosticsClear');
+}
+
 function StudioStatusBar({
   applicationInfo,
+  processorCatalog,
+  driverSession,
+  problems,
+  problemsRef,
+  diagnosticsPort,
   ...props
-}: ComponentProps<typeof AudioPauseControl> & {
-  applicationInfo?: ReactNode;
-}) {
+}: ComponentProps<typeof AudioPauseControl> &
+  Pick<ComponentProps<typeof StudioDiagnostics>, 'problems' | 'problemsRef' | 'diagnosticsPort'> & {
+    applicationInfo?: ReactNode;
+    processorCatalog: ReturnType<typeof useProcessorCatalog>;
+    driverSession?: DriverSession;
+  }) {
+  const { t } = useTranslation();
   return (
     <div className={styles.statusBar}>
       <ApplicationStatusBar
         information={applicationInfo}
+        announcement={diagnosticsAnnouncement(t, diagnosticsCount(problems, processorCatalog))}
         controls={
           <>
             <AudioSessionNotices status={props.status} />
             <AudioPauseControl {...props} />
+            <StudioDiagnostics
+              status={props.status}
+              catalog={processorCatalog}
+              driverSession={driverSession}
+              problems={problems}
+              problemsRef={problemsRef}
+              diagnosticsPort={diagnosticsPort}
+            />
           </>
         }
       />

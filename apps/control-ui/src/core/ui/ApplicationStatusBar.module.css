@@ -6,7 +6,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--app-status-padding-block) var(--app-status-padding-inline);
+  padding: 0 var(--app-status-padding-inline);
   border-top: 1px solid var(--border-default);
   background: var(--surface);
   color: var(--text-muted);
@@ -27,4 +27,14 @@
   align-items: center;
   gap: var(--space-2);
   margin-left: auto;
+}
+
+/* Visually hidden; the live region exists before its text changes so the change is read. */
+.announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

@@ -2,7 +2,7 @@ import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ExternalProcessorCatalog } from '../../core/control-port/types';
-import { useProcessorCatalog } from './useProcessorCatalog';
+import { type ProcessorCatalog, useProcessorCatalog } from './useProcessorCatalog';
 
 const empty: ExternalProcessorCatalog = { protocolVersion: 1, processors: [] };
 const loaded: ExternalProcessorCatalog = {
@@ -252,5 +252,61 @@ it('scans persisted nonempty search paths instead of reading a possibly stale de
   await settle();
   expect(source.rescanProcessors).toHaveBeenCalledExactlyOnceWith(['/User/Effects']);
   expect(source.getProcessors).not.toHaveBeenCalled();
+  expect(result.current.processors).toEqual(loaded.processors);
+});
+
+it('uses the screen-owned catalog without starting a second native scan session', async () => {
+  const source = port();
+  const shared = {
+    processors: loaded.processors,
+    diagnostics: [],
+    busy: false,
+    failure: null,
+    refresh: vi.fn(),
+    retry: vi.fn(),
+  };
+  const { result, rerender } = renderHook(({ catalog }) => useProcessorCatalog(source, catalog), {
+    initialProps: { catalog: shared },
+  });
+  await settle();
+  act(() => {
+    result.current.refresh(false);
+    result.current.retry();
+  });
+  expect(shared.refresh).toHaveBeenCalledExactlyOnceWith(false);
+  expect(shared.retry).toHaveBeenCalledTimes(1);
+  expect(source.getProcessors).not.toHaveBeenCalled();
+  const next = { ...shared, busy: true };
+  rerender({ catalog: next });
+  expect(result.current.busy).toBe(true);
+  expect(source.rescanProcessors).not.toHaveBeenCalled();
+});
+
+it('invalidates its pending native request when a shared catalog takes ownership', async () => {
+  const source = port();
+  const pending = Promise.withResolvers<ExternalProcessorCatalog>();
+  source.getProcessors.mockReturnValueOnce(pending.promise);
+  const shared = {
+    processors: [],
+    diagnostics: [],
+    busy: false,
+    failure: null,
+    refresh: vi.fn(),
+    retry: vi.fn(),
+  };
+  const { result, rerender } = renderHook<
+    ProcessorCatalog,
+    { catalog: ProcessorCatalog | undefined }
+  >(({ catalog }) => useProcessorCatalog(source, catalog), {
+    initialProps: { catalog: undefined },
+  });
+  await settle();
+  rerender({ catalog: shared });
+  await act(async () => pending.resolve(loaded));
+  expect(result.current.processors).toEqual([]);
+  expect(result.current.busy).toBe(false);
+  rerender({ catalog: undefined });
+  await settle();
+  expect(source.getProcessors).toHaveBeenCalledTimes(2);
   expect(result.current.processors).toEqual(loaded.processors);
 });

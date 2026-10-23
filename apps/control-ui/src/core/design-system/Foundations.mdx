@@ -122,7 +122,13 @@ Typography Locale Proof의 언어 toolbar에서 지원 언어를 바꿉니다. N
 
 ## 간격·밀도·형태
 
-조합의 간격은 자식 margin을 누적하지 않고 부모가 소유합니다. 필드 묶음은 `Stack`, 명령 묶음은 `Inline`, 폼의 최종 명령은 `FormActions`를 사용합니다. 공통 조합의 `tight / regular / section / wide`는 `--composition-gap-*`에 연결됩니다. `spacing.regular`와 조합 `gap="regular"`는 이름이 같아도 다른 역할이므로 참조값을 확인합니다.
+간격은 Carbon과 같은 2px 기반 스케일 `--space-half / 1 / 2 / 3 / 4 / 6 / 8 …`(2·4·8·12·16·24·32px …)에서만 고릅니다. 조작·행·바의 높이는 `--size-xs / sm / md`(24·28·32px) 세 단계입니다. compact 조작·노드 하단 행·노드 조작은 xs, 일반 조작·노드 제목줄·하단 상태 바·펼침 행은 sm, 작업 영역 헤더·대화상자 헤더·그래프 목록 행은 md를 씁니다.
+
+스케일 위에 레이아웃 역할을 둡니다. 영역의 안쪽 여백은 `--region-inset`(16px)입니다. 대화상자 본문·헤더, 작업 영역과 앱 헤더가 같은 값을 씁니다. 행의 안쪽 여백은 `--row-inset`(8px)입니다. 메뉴 항목, 그래프 목록 행, 하단 상태 바, 노드 본문이 같은 값을 씁니다. 그래서 사이드바 목록 글자·앱 정보·로고가 같은 16px 선에 맞습니다.
+
+조합의 간격은 자식 margin을 누적하지 않고 부모가 소유합니다. 필드 묶음은 `Stack`, 명령 묶음은 `Inline`, 폼의 최종 명령은 `FormActions`를 사용합니다. 공통 조합의 `tight / regular / section / wide`는 `--composition-gap-*`에 연결됩니다. `ContentSection`의 구분선은 `Stack gap="section"`과 같은 `--section-divider-inset`을 구분선 쪽에만 두어 위아래 간격을 같게 합니다. 반복되는 세부 항목은 섹션을 중첩하지 않고 `DisclosureList`의 한 줄 행으로 접습니다.
+
+CSS의 padding·margin·gap에 원시 길이를 쓰면 `check:boundaries`가 실패하고, `tokens.ts`의 inset·gap·padding 역할에 원시 길이를 쓰면 `tokens.test.ts`가 실패합니다. 포트 간격처럼 기하가 소유한 값은 `audioNodeLayout`이 정하고 CSS 변수로 전달합니다.
 
 보이는 컨트롤의 높이·노브 그림·숫자 줄 높이와 실제 조작 영역은 다릅니다. 24px 노브 그림은 40px 조작 영역을 가지며, compact 숫자 줄도 실제 24px 조작 영역을 유지합니다. 작은 그림의 경계를 포커스·포인터 영역의 기준으로 삼지 않습니다.
 

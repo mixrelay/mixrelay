@@ -5,6 +5,8 @@ import {
   meterScale,
   mixrelayVariables,
   palette,
+  sizes,
+  spacing,
   themeRoles,
 } from './tokens';
 
@@ -52,6 +54,17 @@ it('keeps all DSUB steps in descending luminance and the brand source fixed', ()
   expect(mixrelayVariables['--logo-source']).toBe(logoColor);
   expect(Object.keys(themeRoles.light)).toEqual(Object.keys(themeRoles.dark));
   expect(Object.keys(themeRoles.light).some((role) => role.includes('orange'))).toBe(false);
+});
+
+it('keeps spacing and size roles on the shared scale', () => {
+  const steps = new Set<number>(Object.values(spacing));
+  expect(Object.values(sizes).every((size) => size % spacing[1] === 0)).toBe(true);
+  for (const [name, value] of Object.entries(mixrelayVariables)) {
+    if (name.startsWith('--space-')) expect(steps.has(Number.parseFloat(value)), name).toBe(true);
+    // Insets, gaps and paddings name a step or role; a raw length here bypasses the scale.
+    else if (/-(?:padding|inset|gap|margin)(?:-|$)/u.test(name))
+      expect(value, name).not.toMatch(/\d+px/u);
+  }
 });
 
 it('places meter zones at -12 and -3 dBFS on the -60 dBFS scale', () => {

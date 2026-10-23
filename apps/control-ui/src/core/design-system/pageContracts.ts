@@ -24,6 +24,16 @@ export const pageContracts = [
     states: ['screens-studio--mobile-narrow', 'screens-studio--long-translation'],
   },
   {
+    component: 'StudioDiagnostics',
+    title: '진단 창의 엔진·Driver·검색 실패',
+    source: 'apps/control-ui/src/screens/StudioDiagnostics.tsx',
+    states: [
+      'app-workspace--diagnostics',
+      'app-workspace--diagnostics-narrow',
+      'app-workspace--workspace-problem',
+    ],
+  },
+  {
     component: 'RuntimeConnection',
     title: '연결·미설치·호환·조회 실패',
     source: 'apps/control-ui/src/features/runtime-connection/RuntimeConnection.tsx',

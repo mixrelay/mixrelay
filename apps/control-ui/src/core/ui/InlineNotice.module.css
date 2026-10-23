@@ -16,14 +16,6 @@
   flex: 1 1 12em;
   min-width: 0;
 }
-.root[data-layout="banner"] {
-  display: block;
-  margin: 0;
-  padding: var(--notice-banner-padding-block) var(--notice-banner-padding-inline);
-  border: 0;
-  border-bottom: var(--border-width) solid var(--notice-neutral-border);
-  border-radius: 0;
-}
 .title {
   display: block;
   margin-bottom: var(--space-1);
@@ -33,9 +25,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--notice-gap);
-}
-.root[data-layout="banner"] .actions {
-  margin-top: var(--notice-gap);
 }
 .root[data-tone="warning"] {
   border-color: var(--feedback-warning-border);

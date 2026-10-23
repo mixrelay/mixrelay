@@ -257,6 +257,7 @@ export const es = {
     },
   },
   common: {
+    close: 'Cerrar',
     showPassword: 'Mostrar contraseña',
     hidePassword: 'Ocultar contraseña',
     appName: 'MixRelay',
@@ -267,6 +268,18 @@ export const es = {
     ready: 'Listo',
   },
   studio: {
+    diagnostics: 'Diagnóstico',
+    currentProblems: 'Problemas actuales',
+    problemsAnnouncement: 'Diagnóstico: problemas actuales ({{count}})',
+    diagnosticsAnnouncement: 'Diagnóstico: elementos por revisar ({{count}})',
+    diagnosticsClear: 'Diagnóstico: nada que revisar',
+    support: 'Asistencia',
+    supportReport:
+      'Si un problema persiste, guarde un informe de diagnóstico y envíelo a support@rawsector.com. El informe incluye versiones, ajustes y códigos de problema, pero no rutas de archivo, nombres de dispositivos o plugins, grafos ni audio.',
+    saveReport: 'Guardar informe de diagnóstico…',
+    saveReportFailed:
+      'No se pudo iniciar el guardado del informe de diagnóstico. Inténtelo de nuevo.',
+    audioPaused: 'Audio en pausa',
     deleteGraph: 'Eliminar grafo',
     deleteGraphNotice:
       '¿Eliminar «{{name}}»? Se detendrán su procesamiento de audio y sus grabaciones. Esta acción no se puede deshacer. No se eliminarán los archivos del espacio de trabajo guardados.',
@@ -496,6 +509,8 @@ export const es = {
       applying: 'Aplicando',
       loading: 'Cargando el motor',
       unavailable: 'Motor no disponible',
+      layoutFailed:
+        'No se pudo cargar la disposición de nodos. Vuelva a intentarlo desde Diagnóstico en la barra de estado.',
     },
     errors: {
       feature_limit:
@@ -542,10 +557,12 @@ export const es = {
       reload: 'Cargar la disposición guardada',
     },
     processorControl: {
+      reportTitle: 'Informe de búsqueda de efectos',
+      viewReport: 'Ver informe de búsqueda…',
+      complete: 'La búsqueda de efectos terminó sin problemas.',
       probeFailed: 'No se pudo cargar este complemento. Los demás efectos siguen disponibles.',
       scanFailed:
         'No se pudo completar la búsqueda de complementos. Se conservan los efectos disponibles anteriormente.',
-      technicalDetails: 'Detalles técnicos',
       scanning: 'Buscando efectos de audio…',
       incomplete: 'Búsqueda de efectos incompleta',
       partial:
@@ -561,6 +578,7 @@ export const es = {
       retry: 'Reintentar',
     },
     processorRecovery: {
+      failed: 'Procesamiento del plug-in detenido',
       retryFailed: 'Reintentar el plug-in que falló: {{name}}',
     },
     processorEditor: {

@@ -6,7 +6,6 @@ import { ContentSection } from './ContentSection';
 import { FormActions } from './FormActions';
 import { Inline } from './Inline';
 import { InlineNotice } from './InlineNotice';
-import { RecoveryActions } from './RecoveryActions';
 import { SelectField } from './SelectField';
 import { Stack } from './Stack';
 import { Text } from './Text';
@@ -144,43 +143,4 @@ export const ContentGroups: Story = {
       </ContentSection>
     </Stack>
   ),
-};
-
-function WorkspaceNotices() {
-  const { t } = useTranslation();
-  const [failed, setFailed] = useState(true);
-  return (
-    <Stack gap="section">
-      <InlineNotice layout="banner" tone="warning">
-        {t('routing.persistenceWarning')}
-      </InlineNotice>
-      {failed ? (
-        <InlineNotice layout="banner" tone="critical">
-          <div>{t('routing.errors.control_request_failed')}</div>
-          <div>{t('routing.recovery.draftPreserved')}</div>
-          <RecoveryActions
-            retryLabel={t('routing.recovery.retry')}
-            reloadLabel={t('routing.recovery.reload')}
-            onRetry={() => setFailed(false)}
-            onReload={() => setFailed(false)}
-          />
-        </InlineNotice>
-      ) : (
-        <ActionButton onClick={() => setFailed(true)}>{t('routing.layout.failed')}</ActionButton>
-      )}
-    </Stack>
-  );
-}
-
-export const WorkspaceBanners: Story = { render: () => <WorkspaceNotices /> };
-export const NarrowWorkspaceBanners: Story = {
-  ...WorkspaceBanners,
-  globals: { locale: 'pseudo' },
-  decorators: [
-    (Story) => (
-      <div style={{ maxWidth: 280 }}>
-        <Story />
-      </div>
-    ),
-  ],
 };

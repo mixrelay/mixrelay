@@ -121,7 +121,6 @@ function SystemControls({
         onChange={setConfirmed}
       />
       <RetryAlert
-        framed
         message={t('routing.inventory.failed')}
         retryLabel={t('routing.inventory.retry')}
         busy={disabled || busy}

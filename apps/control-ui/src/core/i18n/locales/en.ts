@@ -248,6 +248,7 @@ export const en = {
     },
   },
   common: {
+    close: 'Close',
     showPassword: 'Show password',
     hidePassword: 'Hide password',
     appName: 'MixRelay',
@@ -258,6 +259,17 @@ export const en = {
     ready: 'Ready',
   },
   studio: {
+    diagnostics: 'Diagnostics',
+    currentProblems: 'Current problems',
+    problemsAnnouncement: 'Diagnostics: current problems ({{count}})',
+    diagnosticsAnnouncement: 'Diagnostics: items to check ({{count}})',
+    diagnosticsClear: 'Diagnostics: nothing to check',
+    support: 'Support',
+    supportReport:
+      'If a problem persists, save a diagnostic report and email it to support@rawsector.com. The report includes versions, settings and problem codes, but no file paths, device or plug-in names, graphs or audio.',
+    saveReport: 'Save Diagnostic Report…',
+    saveReportFailed: 'The diagnostic report could not be started. Try again.',
+    audioPaused: 'Audio paused',
     deleteGraph: 'Delete graph',
     deleteGraphNotice:
       'Delete “{{name}}”? Its audio processing and recordings will stop. This cannot be undone. Saved workspace files are not deleted.',
@@ -485,6 +497,8 @@ export const en = {
       applying: 'Applying',
       loading: 'Loading engine',
       unavailable: 'Engine unavailable',
+      layoutFailed:
+        'The node layout could not be loaded. Retry from Diagnostics in the status bar.',
     },
     errors: {
       feature_limit:
@@ -526,10 +540,12 @@ export const en = {
       reload: 'Load saved layout',
     },
     processorControl: {
+      reportTitle: 'Effect search report',
+      viewReport: 'View search report…',
+      complete: 'Effect search completed without issues.',
       probeFailed: 'This plug-in could not be loaded. Other effects remain available.',
       scanFailed:
         'This plug-in search could not be completed. Previously available effects are retained.',
-      technicalDetails: 'Technical details',
       scanning: 'Scanning audio effects…',
       incomplete: 'Effect search incomplete',
       partial: 'Some effects could not be scanned. Previously available effects are retained.',
@@ -543,6 +559,7 @@ export const en = {
       retry: 'Retry',
     },
     processorRecovery: {
+      failed: 'Plug-in processing stopped',
       retryFailed: 'Retry crashed plug-in: {{name}}',
     },
     processorEditor: {

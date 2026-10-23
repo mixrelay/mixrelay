@@ -33,7 +33,7 @@ MixRelay의 작업 화면·연결 진입·라이선스·제품 정보를 실제 
 | 작업 헤더 | 이름·파일 동작·현재 그래프 확인 | WorkspaceHeader, TitleField, 메뉴 | RoutingWorkspace·WorkspaceFileMenu |
 | 그래프 | 소스 → 처리 → 출력 연결, Options 편집 | AudioGraphCanvas, AudioNodeCard, Core 입력·미터 | RoutingWorkspace가 실행부 문서·명령·계측 연결 |
 | 복구 영역 | 초안·저장·배치·파라미터 문제 복구 | InlineNotice, RetryAlert, RecoveryActions | 실패 종류별 Feature 소유자 |
-| 하단 상태 | 버전·인증 확인, 전체 오디오 Pause/Resume | ApplicationStatusBar, 상태 진입점, transport | LicenseAccess·AudioPauseControl |
+| 하단 상태 | 버전·인증 확인, 전체 오디오 Pause/Resume·진단 | ApplicationStatusBar, 상태 진입점, transport, Dialog | LicenseAccess·AudioPauseControl·StudioDiagnostics |
 | dialog | 생성·이름·삭제·인증·정보 작업 | Core Dialog + 필드 + FormActions | 해당 Feature가 요청과 결과 연결 |
 
 의존 방향은 `React Aria / React Flow → Core → Feature → Screen`이다. Screen·Feature는 의미·문구·값·동작을 전달하고 Core 내부 선택자나 임의 스타일로 공통 규격을 덮어쓰지 않는다.
@@ -65,7 +65,7 @@ MixRelay의 작업 화면·연결 진입·라이선스·제품 정보를 실제 
 | dialog 종료 | 트리거 또는 인접한 남은 조작으로 복귀. 바깥 화면에서 Tab을 가두지 않음 |
 | 입력·Options | 그래프 삭제·이동 키와 분리. 장치 이름 → 채널 → 샘플레이트 → 비트 심도 순서 |
 
-하단 인증 상태 버튼과 오디오 버튼은 각각 하나의 포커스 대상이다. 읽기 전용 미터·상태·앱 아이콘에는 별도 Tab 정지점을 만들지 않는다.
+하단 인증 상태 버튼·오디오 버튼·진단 버튼은 각각 하나의 포커스 대상이다. 읽기 전용 미터·상태·앱 아이콘에는 별도 Tab 정지점을 만들지 않는다.
 
 ## 3. 빈 상태
 
@@ -86,9 +86,13 @@ MixRelay의 작업 화면·연결 진입·라이선스·제품 정보를 실제 
 | 그래프 조회 중 | routing loading placeholder | 현재 소유자의 문서 응답 대기 | 아래 Loading |
 | 그래프 초기 조회 실패 | Engine unavailable | bounded 재조회로 실행부 문서 복구; 오디오 자동 재시작 아님 | 아래 Unavailable |
 | 그래프 제출 중 | 실제 draft + applying | 응답을 기다리고 확인 전 성공으로 표시하지 않음; 10초 상한 뒤 복구 | <a href="/?path=/story/features-routing-workspace--submission-pending" target="_top">Submission Pending</a> |
-| 제출 응답 실패·timeout | 오류 banner + 초안 보존 + 다시 시도 하나 | 불확실한 요청 자동 반복 금지. 명시적 재시도 시 최신 문서에 자동 병합 | 아래 Submission Recovery |
+| 제출 응답 실패·timeout | critical 상태 점 + 진단 · N + 진단 창의 오류·초안 보존·다시 시도 하나 | 불확실한 요청 자동 반복 금지. 명시적 재시도 시 최신 문서에 자동 병합 | 아래 Submission Recovery |
 | 10초 안에 해결되지 않은 충돌 | 초안 보존 + 편집본 적용/편집 취소 후 불러오기 | 일반 업데이트·통신 실패와 구별; 실제 지속 충돌에만 두 복구 선택 | GraphApplicationQueue 회귀 검사 |
-| 배치·파라미터·저장 실패 | 종류별 오류 banner | 오디오 적용·배치 저장·초안의 소유 경계를 구별 | <a href="/?path=/docs/design-system-patterns--docs" target="_top">Patterns / 오류와 복구</a> |
+| 배치·파라미터·저장 실패 | 진단 창 현재 문제의 종류별 오류 | 오디오 적용·배치 저장·초안의 소유 경계를 구별. 작업 영역 위 오류 바 없음 | <a href="/?path=/story/app-workspace--workspace-problem" target="_top">App Workspace Problem</a> |
+| 지원 요청 | 진단 창의 진단 리포트 저장… | 버전·설정·문제 코드·검색 실패 집계만 담은 dump.json을 support@rawsector.com으로 보낸다 | <a href="/?path=/story/app-workspace--diagnostics" target="_top">App Diagnostics</a> |
+| 플러그인 검색 부분 실패 | 우측 하단 진단·프로세서 메뉴의 검색 리포트 진입점 | 상세·기술 정보·재검색은 Core Dialog에서 확인. 사용 중인 인스턴스의 상태와 구별 | <a href="/?path=/story/app-workspace--effect-search-issues" target="_top">App Effect Search Issues</a> |
+
+<a href="/?path=/story/app-workspace--diagnostics" target="_top">App Diagnostics</a>는 실제 App의 우측 하단 진단 버튼과 엔진·Driver 상태·플러그인 검색 리포트를 보여 준다. <a href="/?path=/story/app-workspace--diagnostics-narrow" target="_top">Diagnostics Narrow</a>는 좁은 화면·긴 번역 표본이다. 상태 응답은 fixture이며 설치본 실행 증거는 아니다.
 
 시작 단계의 actual RuntimeConnection이다. 이 fixture의 connect는 응답하지 않아 연결 중을 유지한다.
 

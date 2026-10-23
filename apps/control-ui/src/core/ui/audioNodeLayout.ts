@@ -1,9 +1,12 @@
-/** Core node frame shared by cards, utility rows and cable anchors. */
+import { border, sizes, spacing } from '../theme/tokens';
+
+/** Core node frame shared by cards, utility rows and cable anchors. Rows use the shared
+ * size steps; the collapsed default face stays 120px including borders. */
 export const audioNodeFrame = {
-  headerHeight: 26,
-  utilityHeight: 24,
-  minimumBodyHeight: 68,
-  borderWidth: 1,
+  headerHeight: sizes.sm,
+  utilityHeight: sizes.xs,
+  minimumBodyHeight: 66,
+  borderWidth: border.width,
 };
 
 /** Face geometry shared by the card and cable anchors. Options never take part
@@ -11,17 +14,25 @@ export const audioNodeFrame = {
 export function minimumAudioNodeFaceHeight(
   meterBanks: readonly { channels: number; label?: string }[] = [],
 ) {
+  const { bodyPadding, meterMargin, rowHeight, rowGap } = channelRowMetrics;
+  // A grid cell is the 24px bar and 9px index separated by the half step.
+  const cell = 24 + 9 + spacing.half;
+  // The 11px caption line and the bank's top margin.
+  const bankLabelHeight = 11 + meterMargin;
   const banks = meterBanks.filter((bank) => bank.channels > 0);
   const meters = banks.reduce((total, bank) => {
     const count = Math.min(64, Math.max(1, Math.trunc(bank.channels)));
     const rows = Math.ceil(count / (count > 32 ? 16 : 8));
-    const content = (count <= 8 ? count * 10 + (count - 1) * 3 : rows * 35 + (rows - 1) * 4) + 2;
-    return total + content + (banks.length > 1 && bank.label ? 13 : 0);
+    const content =
+      (count <= 8
+        ? count * rowHeight + (count - 1) * rowGap
+        : rows * cell + (rows - 1) * spacing[1]) + meterMargin;
+    return total + content + (banks.length > 1 && bank.label ? bankLabelHeight : 0);
   }, 0);
   // Metadata shares the utility row; only meters expand the body.
   const body = Math.max(
     audioNodeFrame.minimumBodyHeight,
-    14 + meters + Math.max(0, banks.length - 1) * 3,
+    bodyPadding * 2 + meters + Math.max(0, banks.length - 1) * rowGap,
   );
   return audioNodeFrame.headerHeight + body + audioNodeFrame.utilityHeight;
 }
@@ -29,7 +40,7 @@ export function minimumAudioNodeFaceHeight(
 export const channelRowMetrics = {
   headerHeight: audioNodeFrame.headerHeight,
   bodyPadding: 7,
-  meterMargin: 2,
+  meterMargin: spacing.half,
   rowHeight: 10,
   rowGap: 3,
   borderWidth: audioNodeFrame.borderWidth,

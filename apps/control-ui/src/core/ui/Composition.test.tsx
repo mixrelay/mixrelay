@@ -54,7 +54,6 @@ it('announces failed operations urgently, keeps the retry control accessible, an
           Recording is paused
         </InlineNotice>
         <InlineNotice
-          layout="banner"
           tone="critical"
           title="Failed"
           actions={<ActionButton onClick={retry}>Retry</ActionButton>}
@@ -69,7 +68,6 @@ it('announces failed operations urgently, keeps the retry control accessible, an
     </MixRelayProvider>,
   );
   const alert = screen.getByRole('alert');
-  expect(alert).toHaveAttribute('data-layout', 'banner');
   expect(alert).toHaveTextContent('Failed');
   expect(alert).toHaveTextContent('The confirmed settings are retained');
   expect(screen.getAllByRole('status')).toHaveLength(2);

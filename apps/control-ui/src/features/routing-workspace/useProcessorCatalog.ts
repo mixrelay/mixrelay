@@ -20,6 +20,10 @@ interface CatalogState {
   failure: ProcessorCatalogFailure | null;
   busy: boolean;
 }
+export interface ProcessorCatalog extends CatalogState {
+  refresh: (directory: boolean) => void;
+  retry: () => void;
+}
 const initialState: CatalogState = {
   processors: [],
   diagnostics: [],
@@ -96,7 +100,11 @@ class CatalogSession {
 }
 
 /** Preserve the last catalog on failure; cancellation never pretends a scan succeeded. */
-export function useProcessorCatalog(controlPort: CatalogPort) {
+export function useProcessorCatalog(
+  controlPort: CatalogPort,
+  suppliedCatalog?: ProcessorCatalog,
+): ProcessorCatalog {
+  const owned = suppliedCatalog === undefined;
   const [state, setState] = useState(initialState);
   const request = useRef<((action?: CatalogAction) => void) | null>(null);
   const refresh = useCallback(
@@ -105,6 +113,7 @@ export function useProcessorCatalog(controlPort: CatalogPort) {
   );
   const retry = useCallback(() => request.current?.(), []);
   useEffect(() => {
+    if (!owned) return;
     setState(initialState);
     const session = new CatalogSession(controlPort, (patch) =>
       setState((current) => ({ ...current, ...patch })),
@@ -117,6 +126,6 @@ export function useProcessorCatalog(controlPort: CatalogPort) {
       session.dispose();
       request.current = null;
     };
-  }, [controlPort]);
-  return { ...state, refresh, retry };
+  }, [controlPort, owned]);
+  return suppliedCatalog ?? { ...state, refresh, retry };
 }

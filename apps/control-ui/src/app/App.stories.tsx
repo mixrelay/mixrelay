@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, userEvent, within } from 'storybook/test';
+import { expect, fn, userEvent, within } from 'storybook/test';
 import { builtinEffectsFixture } from '../../.storybook/fixtures/builtinEffects';
+import { processorReportState } from '../../.storybook/fixtures/processorReport';
 import quickTimeIcon from '../core/audio-graph/fixtures/quicktime-player.png';
 import { StorybookMockControlPort } from '../core/control-port/StorybookMockControlPort';
 import type {
@@ -118,6 +119,7 @@ async function workspaceFixture({ parameters }: { parameters: Record<string, unk
   if (parameters.allEffects) return { controlPort: builtinEffectsFixture() };
   const state = {
     graph: structuredClone(graph),
+    processors: parameters.processorScanIssues ? processorReportState().processors : undefined,
     graphStatus: { protocolVersion: 1 as const, activeRevision: 1, submittedRevision: 1 },
     status: structuredClone(status),
     applications: [
@@ -201,6 +203,15 @@ function configureCatalogState(
       });
     };
   if (parameters.catalogPending) port.getGraphCatalog = () => new Promise(() => undefined);
+  if (parameters.layoutUnavailable) {
+    const read = port.getGraphLayout.bind(port);
+    let failed = false;
+    port.getGraphLayout = async (graphId) => {
+      if (failed) return read(graphId);
+      failed = true;
+      throw new Error('Layout storage is unavailable in this preview.');
+    };
+  }
 }
 
 async function populateGraphList(port: StorybookMockControlPort) {
@@ -251,6 +262,7 @@ const meta = {
       },
     },
     updatesPort: null,
+    diagnosticsPort: { saveReport: fn(async () => undefined) },
   },
   loaders: [workspaceFixture],
   render: (args, { loaded }) => <App {...args} controlPort={loaded.controlPort} />,
@@ -378,3 +390,51 @@ export const NarrowLongTranslation: Story = {
 
 export const CatalogUnavailable: Story = { parameters: { catalogUnavailable: true } };
 export const CatalogPending: Story = { parameters: { catalogPending: true } };
+
+export const EffectSearchIssues: Story = { parameters: { processorScanIssues: true } };
+
+export const Diagnostics: Story = {
+  parameters: { processorScanIssues: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      await canvas.findByRole('button', { name: `${i18n.t('studio.diagnostics')} · 19` }),
+    );
+    const report = await within(document.body).findByRole('dialog', {
+      name: i18n.t('studio.diagnostics'),
+    });
+    await expect(
+      within(report).getByRole('heading', { name: i18n.t('studio.audioEngine') }),
+    ).toBeVisible();
+    await expect(
+      within(report).getByText(i18n.t('routing.processorControl.details', { count: 19 })),
+    ).toBeVisible();
+  },
+};
+/** A workspace failure is counted on the status bar and recovered from diagnostics. */
+export const WorkspaceProblem: Story = {
+  parameters: { layoutUnavailable: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      await canvas.findByRole('button', { name: `${i18n.t('studio.diagnostics')} · 1` }),
+    );
+    const report = await within(document.body).findByRole('dialog', {
+      name: i18n.t('studio.diagnostics'),
+    });
+    await expect(
+      await within(report).findByText(i18n.t('routing.layout.failed')),
+    ).toBeInTheDocument();
+  },
+};
+export const DiagnosticsNarrow: Story = {
+  // A real frame constrains media queries and portalled dialogs as well as the shell.
+  render: () => (
+    <iframe
+      title="Diagnostics at 390 pixels with long translations"
+      src="iframe.html?id=app-workspace--diagnostics&viewMode=story&globals=theme:light;locale:pseudo"
+      width={390}
+      height={844}
+    />
+  ),
+};

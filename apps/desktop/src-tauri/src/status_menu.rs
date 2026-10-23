@@ -288,7 +288,7 @@ fn handle_menu_event(app: &tauri::AppHandle, event: &tauri::menu::MenuEvent) {
         "status:open-editor" => open_editor(),
         "status:pause" => playback::toggle(app),
         "status:updates" => check_updates(app, true),
-        "status:diagnostics" => crate::diagnostics::export(app),
+        "status:diagnostics" => crate::diagnostics::export(app, None),
         "status:download" => open_download(app),
         id => {
             let action = app

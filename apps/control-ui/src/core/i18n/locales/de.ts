@@ -263,6 +263,7 @@ export const de = {
     },
   },
   common: {
+    close: 'Schließen',
     showPassword: 'Passwort anzeigen',
     hidePassword: 'Passwort verbergen',
     appName: 'MixRelay',
@@ -273,6 +274,18 @@ export const de = {
     ready: 'Bereit',
   },
   studio: {
+    diagnostics: 'Diagnose',
+    currentProblems: 'Aktuelle Probleme',
+    problemsAnnouncement: 'Diagnose: aktuelle Probleme ({{count}})',
+    diagnosticsAnnouncement: 'Diagnose: zu prüfende Punkte ({{count}})',
+    diagnosticsClear: 'Diagnose: nichts zu prüfen',
+    support: 'Support',
+    supportReport:
+      'Wenn ein Problem bestehen bleibt, speichern Sie einen Diagnosebericht und senden Sie ihn an support@rawsector.com. Der Bericht enthält Versionen, Einstellungen und Problemcodes, aber keine Dateipfade, Geräte- oder Plug-in-Namen, Graphen oder Audio.',
+    saveReport: 'Diagnosebericht speichern…',
+    saveReportFailed:
+      'Das Speichern des Diagnoseberichts konnte nicht gestartet werden. Versuchen Sie es erneut.',
+    audioPaused: 'Audio pausiert',
     deleteGraph: 'Graph löschen',
     deleteGraphNotice:
       '„{{name}}“ löschen? Die Audioverarbeitung und Aufnahmen dieses Graphen werden gestoppt. Dies kann nicht rückgängig gemacht werden. Gespeicherte Arbeitsbereichsdateien werden nicht gelöscht.',
@@ -503,6 +516,8 @@ export const de = {
       applying: 'Wird angewendet',
       loading: 'Engine wird geladen',
       unavailable: 'Engine nicht verfügbar',
+      layoutFailed:
+        'Die Knotenanordnung konnte nicht geladen werden. Versuchen Sie es über „Diagnose“ in der Statusleiste erneut.',
     },
     errors: {
       feature_limit:
@@ -551,10 +566,12 @@ export const de = {
       reload: 'Gespeichertes Layout laden',
     },
     processorControl: {
+      reportTitle: 'Effekt-Suchbericht',
+      viewReport: 'Suchbericht anzeigen…',
+      complete: 'Die Effektsuche wurde ohne Probleme abgeschlossen.',
       probeFailed: 'Dieses Plug-in konnte nicht geladen werden. Andere Effekte bleiben verfügbar.',
       scanFailed:
         'Die Plug-in-Suche konnte nicht abgeschlossen werden. Bisher verfügbare Effekte bleiben erhalten.',
-      technicalDetails: 'Technische Details',
       scanning: 'Audioeffekte werden gesucht…',
       incomplete: 'Effektsuche unvollständig',
       partial:
@@ -570,6 +587,7 @@ export const de = {
       retry: 'Erneut versuchen',
     },
     processorRecovery: {
+      failed: 'Plug-in-Verarbeitung gestoppt',
       retryFailed: 'Abgestürztes Plug-in erneut versuchen: {{name}}',
     },
     processorEditor: {

@@ -244,7 +244,7 @@
   align-items: center;
   width: 30px;
   height: 18px;
-  padding: 2px;
+  padding: var(--space-half);
   border: var(--border-width) solid var(--border-strong);
   border-radius: var(--control-radius);
   background: var(--surface-inset);

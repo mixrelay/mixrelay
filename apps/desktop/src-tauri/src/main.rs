@@ -246,6 +246,7 @@ fn graph_builder(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::W
     let handler: Box<dyn Fn(tauri::ipc::Invoke) -> bool + Send + Sync> =
         Box::new(tauri::generate_handler![
             logging::webview_error,
+            diagnostics::diagnostics_save_report,
             background::startup::runtime_connect,
             background::startup::runtime_status,
             driver_control::driver_status,

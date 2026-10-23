@@ -12,7 +12,6 @@ const meta = {
     message: '설정을 적용하지 못했습니다. 마지막 값을 유지합니다.',
     retryLabel: '다시 시도',
     busy: false,
-    framed: false,
     onRetry: fn(),
   },
   parameters: {
@@ -47,4 +46,3 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const Playground: Story = {};
 export const Busy: Story = { args: { busy: true } };
-export const Framed: Story = { args: { framed: true } };

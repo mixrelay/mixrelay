@@ -224,7 +224,7 @@
   z-index: var(--layer-canvas-selection-feedback);
   max-width: min(172px, calc(100% - 16px));
   overflow: hidden;
-  padding: 3px 6px;
+  padding: var(--tooltip-readout-padding);
   border-radius: 3px;
   background: var(--surface-floating);
   color: var(--text-primary);

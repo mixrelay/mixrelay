@@ -1,3 +1,4 @@
+import { ProblemsTarget } from '../../test-support/ProblemsTarget';
 import '../../test-support/integration';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
@@ -138,7 +139,15 @@ function fixture(onBusyChange?: (busy: boolean) => void, studio = false) {
         {studio ? (
           <StudioScreen controlPort={port} />
         ) : (
-          <RoutingWorkspace controlPort={port} onBusyChange={onBusyChange} />
+          <ProblemsTarget>
+            {(target) => (
+              <RoutingWorkspace
+                controlPort={port}
+                onBusyChange={onBusyChange}
+                problemsTarget={target}
+              />
+            )}
+          </ProblemsTarget>
         )}
       </I18nextProvider>
     </MixRelayProvider>,
@@ -281,7 +290,9 @@ it('keeps actual Studio catalog mutation controls fenced while native parameter 
   await waitFor(() => expect(create).toBeEnabled());
   await waitFor(() => expect(screen.getByRole('button', { name: 'parameter edit' })).toBeEnabled());
   fireEvent.click(screen.getByRole('button', { name: 'parameter edit' }));
-  await screen.findByRole('button', { name: 'Retry' });
+  // The failure is counted on the diagnostics button, not shown over the workspace.
+  const diagnostics = await screen.findByRole('button', { name: 'Diagnostics · 1' });
+  expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
   expect(create).toBeEnabled();
   fireEvent.click(create);
   const dialog = screen.getByRole('dialog', { name: 'New graph' });
@@ -302,10 +313,14 @@ it('keeps actual Studio catalog mutation controls fenced while native parameter 
   expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
   expect(mutate).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  fireEvent.click(diagnostics);
+  const report = screen.getByRole('dialog', { name: 'Diagnostics' });
+  fireEvent.click(await within(report).findByRole('button', { name: 'Retry' }));
   await waitFor(() =>
-    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument(),
+    expect(within(report).queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument(),
   );
+  fireEvent.click(within(report).getByRole('button', { name: 'Close' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Diagnostics' })).toBeVisible());
   fireEvent.click(create);
   await waitFor(() => expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled());
   view.unmount();

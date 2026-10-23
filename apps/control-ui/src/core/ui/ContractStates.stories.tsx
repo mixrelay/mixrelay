@@ -242,7 +242,6 @@ function NoticeStates() {
       </InlineNotice>
       <InlineNotice
         tone="critical"
-        layout="banner"
         title="적용 실패"
         actions={
           <ActionButton disabled={busy} onClick={() => setBusy(true)}>
@@ -255,13 +254,6 @@ function NoticeStates() {
       <CheckboxField label="재시도 처리 대기" checked={busy} onChange={setBusy} />
       <RetryAlert
         message="재시도 가능한 로컬 실패"
-        retryLabel="다시 시도"
-        busy={busy}
-        onRetry={() => setBusy(true)}
-      />
-      <RetryAlert
-        framed
-        message="작업 영역 실패"
         retryLabel="다시 시도"
         busy={busy}
         onRetry={() => setBusy(true)}

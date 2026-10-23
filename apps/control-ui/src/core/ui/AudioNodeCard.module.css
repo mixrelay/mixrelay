@@ -11,6 +11,12 @@
   border-width: var(--audio-node-border-width, 1px);
   background: var(--surface-node);
   box-shadow: none;
+  /* Header actions sit centred in the header row, the same distance from its top and right. */
+  --audio-node-header-action-inset: calc(
+    var(--audio-node-border-width) +
+    (var(--audio-node-header-height) - var(--node-control-size)) /
+    2
+  );
   transition:
     border-color var(--motion-duration-fast) var(--motion-easing-standard),
     box-shadow var(--motion-duration-fast) var(--motion-easing-standard),
@@ -28,11 +34,11 @@
 
 .headerActions {
   position: absolute;
-  top: 1px;
-  right: 6px;
+  top: var(--audio-node-header-action-inset);
+  right: var(--audio-node-header-action-inset);
   display: flex;
   align-items: center;
-  height: 26px;
+  height: var(--node-control-size);
 }
 
 .button {
@@ -69,7 +75,7 @@
 
 .root[data-face-mode="compact"] .button {
   grid-template-rows: 1fr;
-  flex: 0 0 26px;
+  flex: 0 0 var(--audio-node-header-height);
 }
 
 .root[data-face-mode="channel-rows"] {
@@ -115,7 +121,7 @@
 }
 
 .topLine {
-  padding-right: var(--audio-node-header-actions-inset, 12px);
+  padding-right: var(--audio-node-header-actions-inset, var(--space-3));
 }
 
 .headerSlot {
@@ -124,7 +130,7 @@
 
 .icon {
   display: grid;
-  width: 27px;
+  width: var(--audio-node-header-height);
   height: 100%;
   flex: 0 0 auto;
   place-items: center;
@@ -134,7 +140,7 @@
 .category {
   margin-right: auto;
   overflow: hidden;
-  padding: 0 8px 0 0;
+  padding: 0 var(--space-2) 0 0;
   color: var(--node-category-text);
   font-size: var(--font-label);
   font-weight: 500;
@@ -146,12 +152,12 @@
 .statusSlot {
   display: block;
   flex: 0 0 auto;
-  margin-right: 10px;
+  margin-right: var(--space-2);
 }
 
 .processingTime {
   flex: 0 0 auto;
-  margin-right: 10px;
+  margin-right: var(--space-2);
   color: var(--text-muted);
   font: var(--font-caption) var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -163,12 +169,18 @@
   min-width: 0;
   flex-direction: column;
   justify-content: center;
-  gap: 3px;
-  padding: var(--audio-node-body-padding, 7px) var(--node-inset);
+  gap: var(--audio-node-row-gap);
+  padding: var(--audio-node-body-padding) var(--node-inset);
 }
 
 .root[data-face-mode="compact"] .body {
   display: none;
+}
+
+.compactDetail {
+  min-width: 0;
+  padding: var(--space-1) var(--node-inset);
+  overflow-wrap: anywhere;
 }
 
 .detail {
@@ -182,15 +194,15 @@
 .meters {
   display: grid;
   flex-shrink: 0;
-  gap: var(--audio-node-row-gap, 3px);
-  margin-top: var(--audio-node-meter-margin, 2px);
+  gap: var(--audio-node-row-gap);
+  margin-top: var(--audio-node-meter-margin);
 }
 
 .meterGroups {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--audio-node-row-gap);
 }
 
 .meterGroup {
@@ -213,8 +225,8 @@
   flex-shrink: 0;
   grid-template-columns: repeat(8, minmax(0, 1fr));
   align-items: end;
-  gap: 4px 2px;
-  margin-top: 2px;
+  gap: var(--space-1) var(--space-half);
+  margin-top: var(--audio-node-meter-margin);
 }
 
 .meterBank[data-density="dense"] {
@@ -226,7 +238,7 @@
   grid-template-rows: 24px 9px;
   min-width: 0;
   justify-items: center;
-  gap: 2px;
+  gap: var(--space-half);
 }
 
 .meterCell > :first-child {
@@ -249,14 +261,14 @@
   display: grid;
   grid-template-columns: 55px minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
+  gap: var(--space-2);
   cursor: default;
 }
 
 .root .optionsToggle {
   position: absolute;
-  top: 2px;
-  right: 6px;
+  top: var(--audio-node-header-action-inset);
+  right: var(--audio-node-header-action-inset);
   display: flex;
   width: var(--node-control-size);
   height: var(--node-control-size);
@@ -339,8 +351,8 @@
 .processorEditor {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--node-inset);
 }
 
 .root .processorEditorButton {
@@ -367,7 +379,7 @@
 
 .processorEditorFailure {
   display: block;
-  padding: 6px 10px;
+  padding: var(--space-1) var(--node-inset);
   color: var(--node-editor-error-text);
   font-size: var(--font-caption);
   line-height: 1.35;
@@ -383,7 +395,7 @@
   display: grid;
   grid-template-columns: 64px 50px minmax(0, 1fr);
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
   cursor: default;
 }
 
@@ -431,13 +443,13 @@
 
 .meterRow {
   display: grid;
-  min-height: var(--audio-node-row-height, 10px);
+  min-height: var(--audio-node-row-height);
   grid-template-columns: 8px minmax(0, 1fr);
   align-items: center;
-  gap: 5px;
+  gap: var(--space-1);
   color: var(--node-channel-text);
   font: 400 var(--font-caption) var(--font-mono);
-  line-height: var(--audio-node-row-height, 10px);
+  line-height: var(--audio-node-row-height);
 }
 
 .ioSummary > :first-child {
@@ -449,7 +461,7 @@
   min-width: 0;
   overflow: hidden;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   padding: 0 var(--node-inset);
   color: var(--node-io-summary-text);
   font: 400 var(--font-caption) var(--font-mono);
@@ -467,7 +479,7 @@
   top: 50%;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
   transform: translateY(-50%);
 }
 
@@ -521,7 +533,7 @@
 
 .transportActions {
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .optionField,

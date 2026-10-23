@@ -401,6 +401,12 @@ const declarationRules = [
       !/^(?:var\(--[\w-]+\)|inherit)$/u.test(value),
   },
   {
+    code: 'spacing',
+    message: 'Spacing uses a --space-* step or a layout role from core/theme/tokens.ts.',
+    test: (node) =>
+      spacingProperty.test(node.property.toLowerCase()) && hasLiteralLength(node.value),
+  },
+  {
     code: 'layer',
     message: 'Stacking order uses a --layer-* token from tokens.ts.',
     test: (node, value) =>
@@ -459,6 +465,34 @@ const motionProperties = new Set([
   'animation-duration',
   'animation-delay',
 ]);
+
+const spacingProperty =
+  /^(?:(?:padding|margin|scroll-padding|scroll-margin)(?:-[a-z-]+)?|(?:grid-)?(?:row-|column-)?gap)$/u;
+
+/** Any non-zero length, including one hidden in a var() fallback. Ratios inside calc()
+ * (e.g. `/ 2`, `-1 *`) are numbers, not lengths; `1lh` measures the text line when
+ * centring it in a size step. */
+function hasLiteralLength(value) {
+  let literal = false;
+  css.walk(value, (part) => {
+    if (
+      part.type === 'Dimension' &&
+      Number(part.value) !== 0 &&
+      !(part.unit === 'lh' && Number(part.value) === 1)
+    )
+      literal = true;
+    if (part.type === 'Raw' && part.value.trim()) {
+      try {
+        literal ||= hasLiteralLength(
+          css.parse(part.value, { context: 'value', onParseError: fail }),
+        );
+      } catch {
+        literal = true;
+      }
+    }
+  });
+  return literal;
+}
 
 function hasLiteralDuration(value) {
   let literal = false;

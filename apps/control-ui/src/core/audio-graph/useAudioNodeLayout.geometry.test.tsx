@@ -63,7 +63,7 @@ it('keeps compact provider anchors fixed when Options expand and collapse', () =
   const portTop = audioNodePortTop(result.current.ports, 0, 1);
   for (const contentHeight of [200, 420, 24]) {
     act(() => result.current.onContentHeightChange(contentHeight));
-    expect(result.current.minHeight).toBe(Math.max(120, 28 + contentHeight));
+    expect(result.current.minHeight).toBe(Math.max(120, 30 + contentHeight));
     expect(result.current.ports.height).toBe(120);
     expect(audioNodePortTop(result.current.ports, 0, 1)).toBe(portTop);
   }

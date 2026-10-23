@@ -16,6 +16,7 @@ import {
   nodeInsertionGap,
   nodeWidths,
   palette,
+  sizes,
   spacing,
   themeRoles,
   typography,
@@ -241,6 +242,9 @@ const tokenGroups = [
       '--font-',
       '--line-height-',
       '--space-',
+      '--size-',
+      '--region-',
+      '--row-',
       '--border-',
       '--radius-',
       '--focus-',
@@ -257,8 +261,9 @@ const tokenGroups = [
   },
   {
     name: '공통 조합·섹션',
-    prefixes: ['--composition-', '--form-actions-', '--section-'],
-    purpose: 'Stack·Inline·FormActions·ContentSection이 자식 사이의 간격을 소유한다.',
+    prefixes: ['--composition-', '--form-actions-', '--section-', '--subsection-', '--disclosure-'],
+    purpose:
+      'Stack·Inline·FormActions·ContentSection·DisclosureList가 자식 사이의 간격과 구분선 리듬을 소유한다.',
   },
   {
     name: '명령·필드',
@@ -543,10 +548,20 @@ export function GeometryReference() {
     <>
       <ReferenceTable
         caption="spacing — 간격 스케일"
-        headings={['역할', '값']}
-        rows={Object.entries(spacing).map(([name, size]) => ({
+        headings={['토큰', '값']}
+        rows={Object.entries(spacing)
+          .sort(([, a], [, b]) => a - b)
+          .map(([name, size]) => ({
+            key: name,
+            cells: [codeValue(`--space-${name}`), `${size}px`],
+          }))}
+      />
+      <ReferenceTable
+        caption="sizes — 조작·행·바 높이"
+        headings={['토큰', '값']}
+        rows={Object.entries(sizes).map(([name, size]) => ({
           key: name,
-          cells: [codeValue(name), `${size}px`],
+          cells: [codeValue(`--size-${name}`), `${size}px`],
         }))}
       />
       <ReferenceTable

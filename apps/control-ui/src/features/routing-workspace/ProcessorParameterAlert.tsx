@@ -17,15 +17,20 @@ export function ProcessorParameterAlert({
   const failure = parameters.failures[0];
   if (!failure) return null;
   return (
-    <InlineNotice layout="banner" tone="critical" inert={parameters.busy || applying}>
+    <InlineNotice
+      tone="critical"
+      inert={parameters.busy || applying}
+      actions={
+        <RecoveryActions
+          retryLabel={t('routing.inventory.retry')}
+          reloadLabel={t('routing.recovery.reload')}
+          onRetry={parameters.retryFailed}
+          onReload={onReload}
+        />
+      }
+    >
       <div>{t(`routing.errors.${failure.code}`)}</div>
       <div>{t('routing.recovery.draftPreserved')}</div>
-      <RecoveryActions
-        retryLabel={t('routing.inventory.retry')}
-        reloadLabel={t('routing.recovery.reload')}
-        onRetry={parameters.retryFailed}
-        onReload={onReload}
-      />
     </InlineNotice>
   );
 }

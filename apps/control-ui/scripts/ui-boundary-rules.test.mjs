@@ -205,6 +205,30 @@ test('Core can declare bundled font faces while consumer typography still requir
   assert.ok(has(inspectCss('core/theme/Bad.css', "p { font-family: 'Other'; }"), 'typography'));
 });
 
+test('spacing uses the shared scale in Core and consumers alike', () => {
+  for (const rule of [
+    'padding:3px',
+    'padding:0 var(--space-2) 0 10px',
+    'margin-top:-1px',
+    'gap:4px 2px',
+    'column-gap:0.5rem',
+    'padding-inline:var(--row-inset, 9px)',
+    'margin:var(--x, ?)',
+    'grid-gap:9px',
+    'grid-row-gap:2px',
+    'PADDING:3px',
+  ]) {
+    assert.ok(has(css(`.root { ${rule}; }`), 'spacing'), rule);
+    assert.ok(has(inspectCss('core/ui/Bad.module.css', `.root { ${rule}; }`), 'spacing'), rule);
+  }
+  assert.deepEqual(
+    css(
+      '.root { padding:0 var(--region-inset); margin:0 auto; gap:var(--space-1) var(--space-half); padding-block:calc((var(--size-md) - 1lh) / 2); margin-top:calc(-1 * var(--focus-width)); width:12px; }',
+    ),
+    [],
+  );
+});
+
 test('stacking and motion use layer and motion tokens', () => {
   for (const rule of ['z-index:6', 'z-index:-1', 'z-index:var(--space-2)'])
     assert.ok(has(css(`.root { ${rule}; }`), 'layer'));

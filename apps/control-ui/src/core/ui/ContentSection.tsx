@@ -15,7 +15,12 @@ export function ContentSection({
   const titleId = useId();
   const Heading = level === 2 ? 'h2' : 'h3';
   return (
-    <section className={styles.root} data-divider={divider} aria-labelledby={titleId}>
+    <section
+      className={styles.root}
+      data-divider={divider}
+      data-level={level}
+      aria-labelledby={titleId}
+    >
       <Stack>
         <Heading id={titleId} className={styles.title}>
           {title}

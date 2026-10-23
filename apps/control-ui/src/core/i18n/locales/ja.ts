@@ -259,6 +259,7 @@ export const ja = {
     },
   },
   common: {
+    close: '閉じる',
     showPassword: 'パスワードを表示',
     hidePassword: 'パスワードを隠す',
     appName: 'MixRelay',
@@ -269,6 +270,17 @@ export const ja = {
     ready: '準備完了',
   },
   studio: {
+    diagnostics: '診断',
+    currentProblems: '現在の問題',
+    problemsAnnouncement: '診断: 現在の問題 {{count}} 件',
+    diagnosticsAnnouncement: '診断: 確認する項目 {{count}} 件',
+    diagnosticsClear: '診断: 確認する項目はありません',
+    support: 'サポート',
+    supportReport:
+      '問題が続く場合は、診断レポートを保存して support@rawsector.com に送信してください。レポートにはバージョン・設定・問題コードが含まれ、ファイルパス、デバイスやプラグインの名前、グラフ、オーディオは含まれません。',
+    saveReport: '診断レポートを保存…',
+    saveReportFailed: '診断レポートの保存を開始できませんでした。もう一度お試しください。',
+    audioPaused: 'オーディオ一時停止中',
     deleteGraph: 'グラフを削除',
     deleteGraphNotice:
       '「{{name}}」を削除しますか？このグラフのオーディオ処理と録音が停止します。この操作は取り消せません。保存済みのワークスペースファイルは削除されません。',
@@ -496,6 +508,7 @@ export const ja = {
       applying: '適用中',
       loading: 'エンジンを読み込み中',
       unavailable: 'エンジンを利用できません',
+      layoutFailed: 'ノード配置を読み込めませんでした。下部の「診断」から再試行してください。',
     },
     errors: {
       feature_limit:
@@ -540,10 +553,12 @@ export const ja = {
       reload: '保存済みの配置を読み込み',
     },
     processorControl: {
+      reportTitle: 'エフェクト検索レポート',
+      viewReport: '検索レポートを表示…',
+      complete: 'エフェクト検索が完了しました。問題はありません。',
       probeFailed: 'このプラグインを読み込めませんでした。他のエフェクトは引き続き使用できます。',
       scanFailed:
         'プラグインの検索を完了できませんでした。以前に確認されたエフェクトは保持されます。',
-      technicalDetails: '技術情報',
       scanning: 'オーディオエフェクトをスキャン中…',
       incomplete: 'エフェクトの検索が完了していません',
       partial:
@@ -558,6 +573,7 @@ export const ja = {
       retry: '再試行',
     },
     processorRecovery: {
+      failed: 'プラグインの処理が停止しました',
       retryFailed: 'クラッシュしたプラグインを再試行: {{name}}',
     },
     processorEditor: {

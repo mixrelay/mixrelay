@@ -49,3 +49,14 @@ export const WithoutInformation: Story = { args: { information: undefined } };
 export const LongInformation: Story = {
   args: { information: <Text>0.1.3 · 인증 상태를 확인하지 못했습니다.</Text> },
 };
+
+export const WithDiagnostics: Story = {
+  args: {
+    controls: (
+      <>
+        <ActionButton density="compact">오디오 일시정지</ActionButton>
+        <ActionButton density="compact">진단 · 19</ActionButton>
+      </>
+    ),
+  },
+};

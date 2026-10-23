@@ -80,27 +80,38 @@ busy는 필드와 제출을 잠그며 버튼 위치를 유지한다. 이 예시�
 
 | 상황 | 표시 | 행동·값·포커스 계약 | 소유자 |
 | --- | --- | --- | --- |
-| 저장 경고 | warning banner + 보존 상태 | 오디오 실패와 구별. 현재 작업 유지 | RoutingWorkspace |
+| 저장 경고 | 진단 창 현재 문제의 warning + 보존 상태 | 오디오 실패와 구별. 현재 작업 유지 | WorkspaceProblems |
 | 일반 revision 거부 | 선택 화면 없이 최신 문서 자동 병합 | 로컬 변경·다른 작성자의 변경 보존, 확정 거부만 제한 시간 내 다시 병합 | GraphApplicationQueue |
-| 제출 응답 실패·timeout / blocked | critical banner + 초안 보존 + 다시 시도 하나 | 불확실한 명령 자동 반복 금지. 명시적 재시도도 최신 문서에 자동 병합 | GraphApplicationQueue |
-| 계속되는 충돌 / graph_conflict_unresolved | critical banner + 초안 보존 + 두 복구 선택 | 10초 재병합으로 해결하지 못한 경우만 편집본 적용 또는 편집 취소 후 실행부 문서 복구 | GraphApplicationQueue |
+| 제출 응답 실패·timeout / blocked | 진단 창 현재 문제의 critical + 초안 보존 + 다시 시도 하나 | 불확실한 명령 자동 반복 금지. 명시적 재시도도 최신 문서에 자동 병합 | GraphApplicationQueue |
+| 계속되는 충돌 / graph_conflict_unresolved | 진단 창 현재 문제의 critical + 초안 보존 + 두 복구 선택 | 10초 재병합으로 해결하지 못한 경우만 편집본 적용 또는 편집 취소 후 실행부 문서 복구 | GraphApplicationQueue |
 | 배치 revision 거부 | 최신 배치에 변경한 좌표·크기·viewport 자동 병합 | 반복 확정 거부도 제한 시간 내 병합; 오디오 문서 revision과 별개 | GraphLayoutController |
-| 배치 조회·저장 실패 | 배치 오류 + “다시 시도” 하나 | 조회 실패는 내부에서 다시 읽기. 저장 실패는 로컬 배치를 보존하고 최신 배치에 자동 병합 | GraphLayoutController |
+| 배치 조회·저장 실패 | 진단 창의 배치 오류 + “다시 시도” 하나, 조회 실패 중 작업 영역은 실패 안내 | 조회 실패는 내부에서 다시 읽기. 저장 실패는 로컬 배치를 보존하고 최신 배치에 자동 병합 | GraphLayoutController |
 | 값 변경 실패 | 관련 파라미터 오류 | 마지막 확인된 값·대상 유지. 실패 원인을 실제 응답에서 가져옴 | Feature의 값 소유자 |
 | 초기 그래프 조회 실패 | unavailable placeholder | 빈 그래프와 구별. 제한된 재조회로 실행부 문서 읽기 | RoutingWorkspace |
-| 복구 버튼 제거 | 지속되는 영역의 기존 입력으로 복귀 | 그 영역에 있던 포커스만 추적. 이미 다른 곳으로 이동한 사용자의 포커스 유지 | useRemovedFocusReturn |
+| 복구 버튼 제거 | 진단 창 안에 유지 | 해결된 문제가 사라지면 Dialog focus scope가 창 안의 다음 대상으로 옮긴다 | Core Dialog |
 
-다음 Core 예시는 해결되지 않은 충돌의 두 복구 행동을 조합하는 표본이다. “편집본으로 엔진에 덮어쓰기” 또는 “편집 취소하고 엔진 상태 불러오기”를 키보드로 실행하면 해당 조작이 제거되고 그래프 이름 입력으로 돌아간다. callback 이름은 onRetry/onReload다. 일반 revision 갱신이나 통신 실패에 매번 두 선택을 제공하는 예시가 아니다. 로컬 상태의 제거·포커스 복귀만 검토하며 실제 실패 분류는 Feature가 소유한다.
+다음 Core 예시는 해결되지 않은 충돌의 두 복구 행동을 critical `InlineNotice`의 행동 슬롯에 조합하는 표본이다. callback 이름은 onRetry/onReload다. 일반 revision 갱신이나 통신 실패에 매번 두 선택을 제공하는 예시가 아니다. 실제 실패 분류는 Feature가 소유한다.
 
-<Canvas of={Recovery.RemovedFocusReturn} story={{ inline: false, height: 260 }} />
+<Canvas of={Recovery.Blocked} story={{ inline: false, height: 260 }} />
 
-다음은 실제 명령 응답 실패·복구 경로다. play가 Add node → Output → Recorder를 실행하고 첫 제출의 응답만 fixture에서 503으로 실패시킨다. 제품은 불확실한 요청을 자동 반복하지 않고 초안·실패 이유·“다시 시도” 하나를 제공한다. 사용자의 재시도는 최신 실행부 문서를 읽어 자동 병합한 뒤 적용한다. 그래프를 고르거나 편집본 적용/편집 취소 중 하나를 고르라고 요구하지 않는다. 복구 버튼이 제거되면 그 영역의 포커스를 기존 그래프 이름 입력으로 복귀시킨다.
+다음은 실제 명령 응답 실패·복구 경로다. play가 Add node → Output → Recorder를 실행하고 첫 제출의 응답만 fixture에서 503으로 실패시킨다. 제품은 불확실한 요청을 자동 반복하지 않고 초안·실패 이유·“다시 시도” 하나를 제공한다. 사용자의 재시도는 최신 실행부 문서를 읽어 자동 병합한 뒤 적용한다. 그래프를 고르거나 편집본 적용/편집 취소 중 하나를 고르라고 요구하지 않는다. 앱에서는 이 실패가 진단 창의 현재 문제에 나타나고, Feature 스토리는 같은 영역을 작업 영역 아래에 둔다.
 
 <Canvas of={Routing.SubmissionRecovery} story={{ inline: false, height: 720, autoplay: true }} />
 
 <a href="/?path=/story/features-routing-workspace--submission-pending" target="_top">Submission Pending</a>은 같은 실제 추가 과업에서 응답을 기다리며, 제품의 10초 상한 뒤 timeout 복구로 전환한다. <a href="/?path=/story/features-routing-workspace--narrow-submission-recovery" target="_top">Narrow Submission Recovery</a>는 390px·Pseudo에서 초안·실패 이유·단일 다시 시도를 함께 검토한다. 이 fixture들은 native 오디오·녹음 파일을 만들지 않는다.
 
-banner의 표면·경계·문구·여백은 `InlineNotice layout="banner"`가 소유한다. Feature는 위치와 실제 상태를 전달한다. <a href="/?path=/story/core-composition-form-flow--workspace-banners" target="_top">Workspace Banners</a>, <a href="/?path=/story/core-composition-form-flow--narrow-workspace-banners" target="_top">Narrow Workspace Banners</a>는 일반·긴 번역 구성을 보여준다.
+작업 영역 위에는 오류 바를 두지 않는다. `WorkspaceProblems`가 작업 영역 실패를 코드와 심각도로 요약해 하단 진단 버튼의 개수·버튼 앞 상태 점(critical/warning)과 화면 낭독기 상태 알림에 전달하고, 복구 행동이 있는 `InlineNotice`는 진단 창의 현재 문제에 그린다. 배치 조회 실패처럼 캔버스를 그릴 수 없을 때만 작업 영역 자리 표시가 실패와 진단 위치를 알린다. <a href="/?path=/story/app-workspace--workspace-problem" target="_top">App Workspace Problem</a>이 실제 조합이다.
+
+### 플러그인 검색과 실행 장애
+
+검색의 부분 실패는 우측 하단 진단 버튼과 프로세서 메뉴의 ‘검색 리포트 보기…’에서 확인한다. 진단 창은 엔진·Driver 상태도 표시한다. 두 진입점은 같은 검색 세션을 사용한다. 메뉴의 오류 개수는 검색 진단이며, 사용 중인 노드의 오디오 상태를 뜻하지 않는다. Core Dialog·ContentSection·DisclosureList·ActionButton이 요약·재검색과 항목별 한 줄 행을 제공하고, 행을 펼치면 설명과 기술 정보가 나온다. 닫으면 진단 버튼 또는 노드 추가 트리거 중 창을 연 대상으로 포커스가 돌아간다. 재검색은 그래프나 플러그인 인스턴스를 변경하지 않는다.
+
+엔진이 확인한 처리 중단은 해당 AudioNodeCard의 critical 상태·설명·처리 재시도로 표시한다. 편집기 통신 실패는 해당 노드 내부의 InlineNotice와 편집기 재시도로 표시하며, 오디오 처리 실패로 바꾸어 표시하지 않는다. 검색·편집기 오류를 작업 영역 위의 상시 오류 바로 올리지 않는다.
+
+<Canvas of={Routing.EffectSearchReport} story={{ inline: false, height: 720, autoplay: true }} />
+<Canvas of={Routing.FailedPluginNode} story={{ inline: false, height: 540 }} />
+
+<a href="/?path=/story/features-routing-workspace--effect-search-report-narrow" target="_top">Effect Search Report Narrow</a>는 390px·긴 번역의 스크롤·줄바꿈 표본이다. <a href="/?path=/story/features-routing-workspace--plugin-editor-issue" target="_top">Plugin Editor Issue</a>는 한 노드의 편집기 통신 오류와 다른 정상 노드를 함께 표시한다. 포트 응답은 fixture이며 실제 플러그인·오디오 장애를 실행하지 않는다.
 
 ## 3. 생성·이름 변경·삭제 확인
 
@@ -179,7 +190,7 @@ banner의 표면·경계·문구·여백은 `InlineNotice layout="banner"`가 �
 | 테마 | 같은 story를 Light/Dark/System으로 비교 | 실제 Provider·역할 토큰 소비 |
 | 제품 실행 | 실제 장치·녹음 파일·실행부 readback 확인 | 설치본 검증; fixture와 구분 |
 
-소스: `core/ui/{Stack,Inline,FormActions,InlineNotice,Dialog,RecoveryActions,SelectField}.tsx`, `core/ui/useRemovedFocusReturn.ts`, `core/audio-graph/AudioGraphCanvas.tsx`, `features/routing-workspace/{RoutingWorkspace,GraphApplicationQueue,GraphLayoutController}`, `screens/StudioScreen.tsx`.
+소스: `core/ui/{Stack,Inline,FormActions,InlineNotice,Dialog,RecoveryActions,SelectField}.tsx`, `core/audio-graph/AudioGraphCanvas.tsx`, `features/routing-workspace/{RoutingWorkspace,WorkspaceProblems,GraphApplicationQueue,GraphLayoutController}`, `screens/StudioScreen.tsx`.
 
 동작·무료 정책은 `docs/product.md`, 키·포커스·ARIA의 변경 기준은 `docs/design/interaction-accessibility.md`가 소유한다. 변경은 토큰·Core 계약에서 시작하고 실제 Feature·Screen 소비자와 story에 함께 반영한다.
 

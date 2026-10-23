@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 import mixrelayAppIcon from '../../../../desktop/src-tauri/icons/32x32.png';
+import { processorReportState } from '../../../.storybook/fixtures/processorReport';
 import {
   type StorybookControlState,
   StorybookMockControlPort,
@@ -13,6 +14,7 @@ import {
 } from '../../core/control-port/types';
 import { i18n } from '../../core/i18n';
 import { ActionButton } from '../../core/ui/ActionButton';
+import { ContentSection } from '../../core/ui/ContentSection';
 import type { ChainKind } from './builtinEffects';
 import { addRoutingNode, audioGraphToRuntimeGraph } from './model';
 import { RoutingWorkspace, type RoutingWorkspaceProps } from './RoutingWorkspace';
@@ -164,7 +166,9 @@ const meta = {
               ),
     }),
   ],
-  render: (args, { loaded }) => <RoutingWorkspace {...args} controlPort={loaded.controlPort} />,
+  render: (args, { loaded }) => (
+    <WorkspaceWithProblems {...args} controlPort={loaded.controlPort} />
+  ),
   decorators: [
     (Story) => (
       <div style={{ height: '100dvh', minHeight: 320 }}>
@@ -176,6 +180,26 @@ const meta = {
 } satisfies Meta<typeof RoutingWorkspace>;
 
 export default meta;
+
+/** In the app, workspace problems render in the diagnostics window; here they sit below. */
+function WorkspaceWithProblems(props: RoutingWorkspaceProps) {
+  const [target, setTarget] = useState<HTMLDivElement | null>(null);
+  const [count, setCount] = useState(0);
+  return (
+    <div style={{ display: 'grid', gridTemplateRows: 'minmax(0, 1fr) auto', height: '100%' }}>
+      <RoutingWorkspace
+        {...props}
+        problemsTarget={target}
+        onProblemsChange={(summary) => setCount(summary.codes.length)}
+      />
+      <div hidden={!count}>
+        <ContentSection title={i18n.t('studio.currentProblems')} divider="before">
+          <div ref={setTarget} />
+        </ContentSection>
+      </div>
+    </div>
+  );
+}
 // The loader owns a fresh control port for every story selection.
 type Story = StoryObj<Partial<RoutingWorkspaceProps>>;
 
@@ -484,7 +508,7 @@ function ExternalSettingsDemo() {
   return (
     <>
       <ActionButton onClick={() => void update()}>Change engine settings</ActionButton>
-      <RoutingWorkspace controlPort={port} graphId="graph-1" />
+      <WorkspaceWithProblems controlPort={port} graphId="graph-1" />
     </>
   );
 }
@@ -520,7 +544,7 @@ function ExternalLayoutDemo() {
       <ActionButton onClick={() => void change()}>
         Change saved layout in another window
       </ActionButton>
-      <RoutingWorkspace controlPort={port} graphId="graph-1" />
+      <WorkspaceWithProblems controlPort={port} graphId="graph-1" />
     </>
   );
 }
@@ -573,3 +597,81 @@ function deviceActivityPort(state: 'observed' | 'empty' | 'unavailable' | 'loadi
   if (state === 'loading') port.getVirtualDeviceAppActivity = () => new Promise(() => {});
   return port;
 }
+
+export const EffectSearchIssues: Story = {
+  loaders: [() => ({ controlPort: new StorybookMockControlPort(processorReportState()) })],
+};
+export const EffectSearchReport: Story = {
+  ...EffectSearchIssues,
+  play: async ({ canvasElement }) => {
+    const surface = within(canvasElement.ownerDocument.body);
+    await userEvent.click(await surface.findByRole('button', { name: i18n.t('routing.addNode') }));
+    await userEvent.hover(
+      await surface.findByRole('menuitem', { name: i18n.t('routing.groups.processor') }),
+    );
+    await userEvent.click(
+      await surface.findByRole('menuitem', { name: i18n.t('routing.processorControl.viewReport') }),
+    );
+    await expect(
+      surface.findByRole('dialog', { name: i18n.t('routing.processorControl.reportTitle') }),
+    ).resolves.toBeVisible();
+  },
+};
+export const EffectSearchReportNarrow: Story = {
+  ...EffectSearchReport,
+  globals: { viewport: { value: 'mobile' }, locale: 'pseudo' },
+  parameters: {
+    viewport: {
+      defaultViewport: 'mobile',
+      options: { mobile: { name: '390px', styles: { width: '390px', height: '844px' } } },
+    },
+  },
+};
+export const FailedPluginNode: Story = {
+  args: {
+    catalogRevision: 1,
+    failedProcessors: [{ graphId: 'graph-1', nodeId: 'voice', instanceId: 'failed-instance' }],
+  },
+  loaders: [
+    () => ({ controlPort: new StorybookMockControlPort(processorReportState({ failed: true })) }),
+  ],
+};
+export const PluginEditorIssue: Story = {
+  loaders: [
+    async () => {
+      const controlPort = new StorybookMockControlPort(processorReportState({ editor: true }));
+      await controlPort.setGraphLayout('graph-1', {
+        expectedLayoutRevision: 0,
+        layout: {
+          positions: { voice: { x: 80, y: 80 }, music: { x: 420, y: 80 } },
+          viewport: { x: 0, y: 0, zoom: 1 },
+        },
+      });
+      controlPort.getProcessorEditor = async (nodeId) => {
+        if (nodeId === 'voice') throw new Error('Editor status unavailable');
+        return {
+          protocolVersion: 1,
+          nodeId,
+          state: 'open',
+          failure: null,
+          width: null,
+          height: null,
+          resizable: false,
+        };
+      };
+      return { controlPort };
+    },
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const node = await canvas.findByRole('group', { name: 'Voice effect' });
+    const retry = await within(node).findByRole('button', {
+      name: i18n.t('routing.processorControl.retry'),
+    });
+    await waitFor(() =>
+      expect(retry.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+        node.getBoundingClientRect().bottom,
+      ),
+    );
+  },
+};

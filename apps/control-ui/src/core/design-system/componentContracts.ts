@@ -93,6 +93,7 @@ export const componentContracts: readonly ComponentContract[] = [
     source: 'apps/control-ui/src/core/ui/ActionButton.tsx',
     api: "export type ActionButtonProps = Omit<\n  CommandProps,\n  'onFocus' | 'onBlur' | 'onKeyDown' | 'onKeyUp' | 'onClick' | 'value' | 'children'\n> &\n  Pick<\n    ButtonProps,\n    'onFocus' | 'onBlur' | 'onKeyDown' | 'onKeyUp' | 'onClick' | 'value' | 'children'\n  > & {\n    tone?: 'neutral' | 'critical';\n    density?: 'regular' | 'compact';\n    emphasis?: 'quiet' | 'outlined' | 'strong';\n    stretch?: boolean;\n    align?: 'center' | 'start';\n    loading?: boolean;\n  };\n\nexport type CommandProps = Omit<ComponentPropsWithoutRef<'button'>, keyof NoAppearanceOverrides> &\n  NoAppearanceOverrides;\n\nexport interface NoAppearanceOverrides {\n  className?: never;\n  classNames?: never;\n  style?: never;\n  styles?: never;\n  vars?: never;\n  unstyled?: never;\n  color?: never;\n  c?: never;\n  size?: never;\n  radius?: never;\n  variant?: never;\n  component?: never;\n  renderRoot?: never;\n  dangerouslySetInnerHTML?: never;\n}\n\nexport function ActionButton({\n  tone = 'neutral',\n  density = 'regular',\n  emphasis = 'quiet',\n  stretch = false,\n  align = 'center',\n  loading,\n  disabled,\n  ...props\n}: ActionButtonProps)",
     consumers: [
+      'apps/control-ui/src/features/routing-workspace/ProcessorControlAlerts.tsx',
       'apps/control-ui/src/core/ui/NameDialog.tsx',
       'apps/control-ui/src/core/ui/ConfirmationDialog.tsx',
       'apps/control-ui/src/core/ui/RecoveryActions.tsx',
@@ -102,7 +103,7 @@ export const componentContracts: readonly ComponentContract[] = [
       'apps/control-ui/src/features/driver-status/DriverStatusCard.tsx',
       'apps/control-ui/src/features/audio-session/AudioSessionSettings.tsx',
       'apps/control-ui/src/features/updates/UpdateAccess.tsx',
-      'apps/control-ui/src/features/routing-workspace/ProcessorControlAlerts.tsx',
+      'apps/control-ui/src/features/routing-workspace/ProcessorScanReport.tsx',
       'apps/control-ui/src/features/graphs/GraphCreateDialog.tsx',
       'apps/control-ui/src/features/licensing/LicenseDetails.tsx',
       'apps/control-ui/src/features/licensing/LicenseAccess.tsx',
@@ -402,10 +403,7 @@ export const componentContracts: readonly ComponentContract[] = [
     source: 'apps/control-ui/src/core/ui/TitleField.tsx',
     api: "export function TitleField(\n  props: Omit<ComponentPropsWithoutRef<'input'>, keyof NoAppearanceOverrides> &\n    NoAppearanceOverrides & { ref?: Ref<HTMLInputElement> },\n)",
     consumers: ['apps/control-ui/src/features/routing-workspace/RoutingWorkspace.tsx'],
-    tests: [
-      'apps/control-ui/src/core/ui/SystemControls.test.tsx',
-      'apps/control-ui/src/core/ui/useRemovedFocusReturn.test.tsx',
-    ],
+    tests: ['apps/control-ui/src/core/ui/SystemControls.test.tsx'],
     storyId: 'core-design-system-system-controls--interactive',
     storyTitle: 'Core/Design System/System Controls',
     stateStories: [
@@ -704,7 +702,10 @@ export const componentContracts: readonly ComponentContract[] = [
     interaction: 'Tab 없음. aria-label=label. tooltip은 동일 상태 설명이며 단독 색 의미가 아님.',
     source: 'apps/control-ui/src/core/ui/StatusIndicator.tsx',
     api: "export function StatusIndicator({\n  label,\n  tone = 'neutral',\n  position = 'top',\n}: {\n  label: string;\n  tone?: StatusTone;\n  position?: 'top' | 'bottom' | 'left' | 'right';\n})",
-    consumers: ['apps/control-ui/src/core/ui/AudioNodeCard.tsx'],
+    consumers: [
+      'apps/control-ui/src/core/ui/AudioNodeCard.tsx',
+      'apps/control-ui/src/screens/StudioDiagnostics.tsx',
+    ],
     tests: [
       'apps/control-ui/src/core/ui/FeedbackControls.test.tsx',
       'apps/control-ui/src/core/ui/StatusDisplays.test.tsx',
@@ -878,7 +879,7 @@ export const componentContracts: readonly ComponentContract[] = [
     anatomy: 'Tooltip → Button → version · separator · status.',
     states: 'opened 필수; aria-expanded 대응. 값·문구·동작은 호출자 소유.',
     tokens:
-      '--app-info-font-size=font-control 12px / weight400 / line-height1.25; 높이 control-height-compact24; 상태 긴 문구는 ellipsis, version은 고정. 하단 행27px는 ApplicationStatusBar 소유.',
+      '--app-info-font-size=font-control 12px / weight400 / line-height1.25; 높이 control-height-compact24; 상태 긴 문구는 ellipsis, version은 고정. 하단 행 --app-status-height(size-sm 28px)는 ApplicationStatusBar 소유.',
     interaction:
       'Enter/Space. 이름=label, description=version·status, aria-haspopup=dialog. 공통 Tooltip을 사용하며 중복 native title을 추가하지 않는다. 관리창 닫으면 트리거 복귀.',
     source: 'apps/control-ui/src/core/ui/AppInformationButton.tsx',
@@ -932,7 +933,8 @@ export const componentContracts: readonly ComponentContract[] = [
     anatomy: 'fieldset 이름 → 선택 button + 삭제 icon button.',
     states:
       'selected/disabled 필수. 현재 선택 button은 disabled 또는 selected; 삭제는 disabled만 따름.',
-    tokens: 'CollectionItem CSS; selection 역할·font-control; 삭제 glyph18px.',
+    tokens:
+      'CollectionItem CSS; 행 높이 --size-md32px·안쪽 --row-inset8px; selection 역할·font-control; 삭제 glyph --command-icon-size.',
     interaction:
       '사용 가능한 각 button이 Tab 소유. 현재 aria-current=page; 삭제의 aria-label·Tooltip은 name: removeLabel. Enter/Space 실행, 비활성 선택·삭제는 실행 없음.',
     source: 'apps/control-ui/src/core/ui/CollectionItem.tsx',
@@ -1199,22 +1201,28 @@ export const componentContracts: readonly ComponentContract[] = [
     name: 'ApplicationStatusBar',
     playgroundStory: 'core-playgrounds-applicationstatusbar--playground',
     group: 'Layout',
-    purpose: '앱 정보와 하나의 전체 오디오 동작을 고정 한 행에 배치한다.',
+    purpose: '앱 정보·전체 오디오 동작·진단 명령을 고정 한 행에 배치한다.',
     use: 'information 선택 슬롯, controls 필수 슬롯을 사용한다.',
     avoid:
       '높이·padding·표면을 사용처에서 바꾸지 않는다. Screen의 grid 배치는 Screen이 소유한 감싸는 요소에 둔다.',
-    anatomy: 'footer → information flexible area + controls fixed area.',
-    states: 'information 선택; controls 필수. 외관·배치 확장점 없음.',
+    anatomy: 'footer → information flexible area + controls fixed area + 숨긴 role=status 알림.',
+    states:
+      'information 선택; controls 필수; announcement 기본 빈 문자열(바뀌면 polite 발표). 외관·배치 확장점 없음.',
     tokens:
-      '--app-status-height 27px; --app-status-padding-block/inline; surface·line; 부모 기본 caption10, AppInformationButton은 자체control12.',
-    interaction: 'footer 자체 Tab 없음. AppInformationButton/TransportButton이 각 행동 소유자.',
+      '--app-status-height=size-sm28px; --app-status-padding-inline=row-inset8px; surface·line; 부모 기본 caption10, AppInformationButton은 자체control12.',
+    interaction:
+      'footer 자체 Tab 없음. AppInformationButton/TransportButton/진단 ActionButton이 각 행동 소유자. 개수로만 보이는 상태 변화는 announcement로 발표한다.',
     source: 'apps/control-ui/src/core/ui/ApplicationStatusBar.tsx',
-    api: 'export function ApplicationStatusBar({\n  information,\n  controls,\n}: {\n  information?: ReactNode;\n  controls: ReactNode;\n})',
+    api: "export function ApplicationStatusBar({\n  information,\n  controls,\n  announcement = '',\n}: {\n  information?: ReactNode;\n  controls: ReactNode;\n  announcement?: string;\n})",
     consumers: ['apps/control-ui/src/screens/StudioScreen.tsx'],
     tests: ['apps/control-ui/src/core/ui/ShellParts.test.tsx'],
     storyId: 'app-workspace--light',
     storyTitle: 'App/Workspace',
     stateStories: [
+      {
+        id: 'core-playgrounds-applicationstatusbar--with-diagnostics',
+        label: 'ApplicationStatusBar / WithDiagnostics',
+      },
       {
         id: 'core-playgrounds-applicationstatusbar--without-information',
         label: 'ApplicationStatusBar / WithoutInformation',
@@ -1254,21 +1262,53 @@ export const componentContracts: readonly ComponentContract[] = [
     group: 'Layout',
     purpose: '같은 제목 규격의 이름 있는 콘텐츠 묶음.',
     use: 'level=2/3와 선택적 앞/뒤 divider로 문서·업데이트 항목을 묶는다.',
-    avoid: '같은 용도의 h2/h3 스타일을 사용처에서 재정의하지 않는다.',
+    avoid:
+      '같은 용도의 h2/h3 스타일을 사용처에서 재정의하지 않는다. 반복되는 세부 항목을 섹션 중첩으로 나열하지 않고 DisclosureList를 쓴다.',
     anatomy: 'aria-labelledby section → Stack → h2/h3 + children.',
     states: 'level=2; divider=none(before/after). title 필수.',
     tokens:
-      '--section-padding / --section-title-size=font-body13; --font-weight-medium500; --line-height-body1.5; line 역할과 Stack regular8px gap.',
+      '--section-divider-inset=composition-gap-section16px(구분선 쪽만); --section-title-size=font-body13, level3 --subsection-title-size=font-control12; --font-weight-medium500; --line-height-body1.5; line 역할과 Stack regular8px gap.',
     interaction: 'Tab 없음. useId로 제목을 section 이름에 연결한다.',
     source: 'apps/control-ui/src/core/ui/ContentSection.tsx',
     api: "export function ContentSection({\n  children,\n  title,\n  level = 2,\n  divider = 'none',\n}: PropsWithChildren<\n  NoAppearanceOverrides & { title: string; level?: 2 | 3; divider?: 'none' | 'before' | 'after' }\n>)",
-    consumers: ['apps/control-ui/src/features/updates/UpdateAccess.tsx'],
+    consumers: [
+      'apps/control-ui/src/features/updates/UpdateAccess.tsx',
+      'apps/control-ui/src/screens/StudioDiagnostics.tsx',
+    ],
     tests: ['apps/control-ui/src/core/ui/Composition.test.tsx'],
     storyId: 'core-composition-form-flow--interactive',
     storyTitle: 'Core/Composition/Form Flow',
     stateStories: [
       { id: 'core-playgrounds-contentsection--before', label: 'ContentSection / Before' },
       { id: 'core-playgrounds-contentsection--after', label: 'ContentSection / After' },
+    ],
+  },
+  {
+    name: 'DisclosureList',
+    playgroundStory: 'core-playgrounds-disclosurelist--playground',
+    group: 'Layout',
+    purpose: '반복되는 세부 항목을 한 줄 행으로 접고 제자리에서 펼치는 목록(Carbon accordion).',
+    use: '진단·검색 실패처럼 같은 형식의 항목이 여럿일 때 제목만 나열하고 설명·기술 정보는 펼친 내용에 둔다.',
+    avoid:
+      '항목마다 ContentSection·구분선·별도 열기 버튼을 반복하지 않는다. 한 항목뿐인 일반 콘텐츠나 명령 목록에 쓰지 않는다.',
+    anatomy:
+      'DisclosureGroup(여러 항목 동시 열림) → Disclosure → h3 > Button(chevron + 제목) → DisclosurePanel(제목 글자선 정렬).',
+    states: 'items 필수; 기본 모두 닫힘. 열림 시 chevron 회전·aria-expanded=true.',
+    tokens:
+      '--disclosure-row-height=size-sm28px; --disclosure-chevron-size12px·--disclosure-chevron-gap4px; --disclosure-panel-inset8px; 행 사이 --border-default 1px; 제목 font-control12 medium.',
+    interaction:
+      '각 제목 버튼이 Tab 대상. Enter/Space로 펼침·접힘, 펼친 내용은 버튼 이름으로 연결된 group. 다른 항목의 상태는 유지한다.',
+    source: 'apps/control-ui/src/core/ui/DisclosureList.tsx',
+    api: 'export interface DisclosureListItem {\n  id: string;\n  title: string;\n  content: ReactNode;\n}\n\nexport function DisclosureList({\n  items,\n}: NoAppearanceOverrides & { items: readonly DisclosureListItem[] })',
+    consumers: ['apps/control-ui/src/features/routing-workspace/ProcessorScanReport.tsx'],
+    tests: [
+      'apps/control-ui/src/core/ui/DisclosureList.test.tsx',
+      'apps/control-ui/src/features/routing-workspace/ProcessorScanReport.test.tsx',
+    ],
+    storyId: 'app-workspace--diagnostics',
+    storyTitle: 'App/Workspace',
+    stateStories: [
+      { id: 'core-playgrounds-disclosurelist--long-titles', label: 'DisclosureList / Long Titles' },
     ],
   },
   {
@@ -1516,25 +1556,26 @@ export const componentContracts: readonly ComponentContract[] = [
     playgroundStory: 'core-playgrounds-inlinenotice--playground',
     group: 'Feedback',
     purpose: '영향 받은 작업 가까이에 상태·실패·행동을 제공한다.',
-    use: 'tone과 필요시 announcement를 분리한다. 가로 작업영역 알림은 layout=banner.',
+    use: 'tone과 필요시 announcement를 분리한다. 작업 영역 실패는 진단 창의 현재 문제에 둔다.',
     avoid: '실시간 미터를 live 발표하거나 Feature CSS로 오류 표면을 중복 정의하지 않는다.',
     anatomy: 'role status/alert root → content(title + children) + actions 슬롯.',
     states:
-      'tone=neutral; layout=inline; 기본 critical→alert 나머지status. announcement 명시 우선. inert/focus capture 전달 선택.',
-    tokens: '--notice-* / banner inset·bottom boundary; status 색; 공통 radius/border.',
+      'tone=neutral; 기본 critical→alert 나머지status. announcement 명시 우선. inert 전달 선택.',
+    tokens: '--notice-gap / --notice-padding; status 색; 공통 radius/border.',
     interaction:
-      'root Tab 없음, 실제 action만 Tab. inert는 하위 조작 차단. 사라질 때 focus 복귀는 해당 Feature 소유자.',
+      'root Tab 없음, 실제 action만 Tab. inert는 하위 조작 차단. 사라질 때 focus는 감싸는 Dialog나 영역 소유자가 정한다.',
     source: 'apps/control-ui/src/core/ui/InlineNotice.tsx',
-    api: "export function InlineNotice({\n  children,\n  title,\n  tone = 'neutral',\n  actions,\n  layout = 'inline',\n  announcement,\n  inert,\n  onFocusCapture,\n  onBlurCapture,\n}: NoAppearanceOverrides & {\n  children: ReactNode;\n  title?: string;\n  tone?: StatusTone;\n  actions?: ReactNode;\n  layout?: 'inline' | 'banner';\n  announcement?: 'status' | 'alert';\n  inert?: boolean;\n  onFocusCapture?: FocusEventHandler<HTMLDivElement>;\n  onBlurCapture?: FocusEventHandler<HTMLDivElement>;\n})",
+    api: "export function InlineNotice({\n  children,\n  title,\n  tone = 'neutral',\n  actions,\n  announcement,\n  inert,\n}: NoAppearanceOverrides & {\n  children: ReactNode;\n  title?: string;\n  tone?: StatusTone;\n  actions?: ReactNode;\n  announcement?: 'status' | 'alert';\n  inert?: boolean;\n})",
     consumers: [
+      'apps/control-ui/src/features/routing-workspace/ProcessorControlAlerts.tsx',
       'apps/control-ui/src/core/ui/NameDialog.tsx',
       'apps/control-ui/src/core/ui/RetryAlert.tsx',
       'apps/control-ui/src/features/audio-session/AudioPauseControl.tsx',
       'apps/control-ui/src/features/audio-session/AudioSessionSettings.tsx',
       'apps/control-ui/src/features/updates/UpdateAccess.tsx',
-      'apps/control-ui/src/features/routing-workspace/ProcessorControlAlerts.tsx',
-      'apps/control-ui/src/features/routing-workspace/RoutingWorkspace.tsx',
+      'apps/control-ui/src/features/routing-workspace/WorkspaceProblems.tsx',
       'apps/control-ui/src/features/routing-workspace/ProcessorParameterAlert.tsx',
+      'apps/control-ui/src/screens/StudioDiagnostics.tsx',
       'apps/control-ui/src/features/recorder/RecorderControls.tsx',
       'apps/control-ui/src/features/graphs/GraphCreateDialog.tsx',
       'apps/control-ui/src/features/licensing/LicenseAccess.tsx',
@@ -1725,17 +1766,14 @@ export const componentContracts: readonly ComponentContract[] = [
     purpose: '복구 가능한 실패 문구와 재시도를 함께 제공한다.',
     use: 'message/retryLabel/busy/onRetry를 마지막 유효 데이터 보존 경로에 연결한다.',
     avoid: '재시도를 자동 데이터 폐기로 연결하거나 busy를 성공 상태로 표시하지 않는다.',
-    anatomy: 'unframed div alert 또는 InlineNotice critical banner → message + ActionButton.',
-    states: 'framed=false; busy 필수(재시도 disabled). 자동 loading/busy ARIA는 별도 없음.',
-    tokens: 'framed는 공통 banner notice; unframed는 주변 배치. button regular28.',
+    anatomy: 'InlineNotice critical → message + actions 슬롯의 ActionButton.',
+    states: 'busy 필수(재시도 disabled). 자동 loading/busy ARIA는 별도 없음.',
+    tokens: '공통 InlineNotice critical 표면; button regular28.',
     interaction:
       'alert 발표; 실제 retry Enter/Space. 성공/실패·마지막 유효 데이터 유지와 제거 후 focus는 소유자 책임.',
     source: 'apps/control-ui/src/core/ui/RetryAlert.tsx',
-    api: 'export function RetryAlert({\n  framed = false,\n  message,\n  retryLabel,\n  busy,\n  onRetry,\n}: {\n  framed?: boolean;\n  message: string;\n  retryLabel: string;\n  busy: boolean;\n  onRetry: () => void;\n})',
-    consumers: [
-      'apps/control-ui/src/features/routing-workspace/ProcessorControlAlerts.tsx',
-      'apps/control-ui/src/features/routing-workspace/RoutingWorkspace.tsx',
-    ],
+    api: 'export function RetryAlert({\n  message,\n  retryLabel,\n  busy,\n  onRetry,\n}: {\n  message: string;\n  retryLabel: string;\n  busy: boolean;\n  onRetry: () => void;\n})',
+    consumers: ['apps/control-ui/src/features/routing-workspace/WorkspaceProblems.tsx'],
     tests: ['apps/control-ui/src/core/ui/SystemControls.test.tsx'],
     storyId: 'core-design-system-system-controls--interactive',
     storyTitle: 'Core/Design System/System Controls',
@@ -1745,7 +1783,6 @@ export const componentContracts: readonly ComponentContract[] = [
         label: '독립 상태·조합 및 실제 키보드/포인터 검수',
       },
       { id: 'core-playgrounds-retryalert--busy', label: 'RetryAlert / Busy' },
-      { id: 'core-playgrounds-retryalert--framed', label: 'RetryAlert / Framed' },
     ],
   },
   {
@@ -1760,15 +1797,15 @@ export const componentContracts: readonly ComponentContract[] = [
       '모든 props 필수. 이 컴포넌트에 busy/disabled API 없음; applying은 영역 inert 소유자에게 전달.',
     tokens: '공통 FormActions gap/inset/wrap; ActionButton regular28.',
     interaction:
-      '각 button Enter/Space. 제거 후 focus는 useRemovedFocusReturn을 연결한 소유자가 기존 이름 필드로 복귀.',
+      '각 button Enter/Space. 진단 창 안에서 제거되면 Dialog focus scope가 창 안의 다음 대상으로 옮긴다.',
     source: 'apps/control-ui/src/core/ui/RecoveryActions.tsx',
     api: 'export function RecoveryActions({\n  retryLabel,\n  reloadLabel,\n  onRetry,\n  onReload,\n}: {\n  retryLabel: string;\n  reloadLabel: string;\n  onRetry: () => void;\n  onReload: () => void;\n})',
     consumers: [
-      'apps/control-ui/src/features/routing-workspace/RoutingWorkspace.tsx',
+      'apps/control-ui/src/features/routing-workspace/WorkspaceProblems.tsx',
       'apps/control-ui/src/features/routing-workspace/ProcessorParameterAlert.tsx',
     ],
     tests: ['apps/control-ui/src/core/ui/ShellParts.test.tsx'],
-    storyId: 'core-feedback-recovery-actions--removed-focus-return',
+    storyId: 'core-feedback-recovery-actions--blocked',
     storyTitle: 'Core/Feedback/Recovery Actions',
     stateStories: [
       {
@@ -1862,9 +1899,9 @@ export const componentContracts: readonly ComponentContract[] = [
     anatomy:
       'header actions/title/Options → face(AudioNodeIcon·AudioNodeMeterBanks·EQ/dynamics·AudioNodeParameterGrid·content) → utility → disclosure(AudioNodeEndpointOptions·fields); ports 별도 geometry.',
     states:
-      'poweredOff/bypassed/offline/selected 독립=false. faceMode=standard; showPorts=true; channelCount0; statusTone=neutral; parameter/meter lists=[]; optionsLabel 생략 시 현재 언어의 routing.nodes.options.',
+      'poweredOff/bypassed/offline/selected 독립=false. faceMode=standard; showPorts=true; channelCount0; statusTone=neutral; parameter/meter lists=[]; optionsLabel 생략 시 현재 언어의 routing.nodes.options. compact의 detail은 controls 영역에 표시하며 critical status가 있으면 우선한다.',
     tokens:
-      'audioNodeFrame header26/utility24/minBody68/border1; node widths·face metrics; off 표면; 포트 좌표는 Options 밖.',
+      'audioNodeFrame header28(size-sm)/utility24(size-xs)/minBody66/border1; node widths·face metrics; off 표면; 포트 좌표는 Options 밖.',
     interaction:
       'deviceAppActivity는 방향·최대 세 앱·overflow와 전체 목록 설명을 제공하며 Tab 대상을 추가하지 않는다. 독립 onSelect 있을 때만 card 선택 행동. 내부 실제 버튼/입력 nokey 경계. Options·Bypass·에디터의 이름은 title: 행동이고 공통 Tooltip을 사용한다. 앱 아이콘 실패만 fallback; meters 읽기전용; 헤더 Off→Mute→Options.',
     source: 'apps/control-ui/src/core/ui/AudioNodeCard.tsx',
@@ -1885,6 +1922,14 @@ export const componentContracts: readonly ComponentContract[] = [
     storyId: 'core-audio-nodes-frame--default',
     storyTitle: 'Core/Audio Nodes/Frame',
     stateStories: [
+      {
+        id: 'core-playgrounds-audionodecard--compact-failure',
+        label: 'Compact failure / visible detail',
+      },
+      {
+        id: 'core-playgrounds-audionodecard--compact-failure-narrow',
+        label: 'Compact failure / narrow long detail',
+      },
       {
         id: 'core-playgrounds-audionodecard--channel-layout-choice',
         label: '노드 Options의 플러그인 채널 구성 선택',

@@ -43,6 +43,11 @@ API 표의 *는 필수 입력입니다. Default의 —는 선언된 기본값이
 
 ## 개별 상태 예제
 
+compact 노드의 `detail`은 헤더 아래 controls 영역에 표시한다. `statusTone="critical"`이고 상태 문구가 있으면 그 문구를 우선해, 오류가 작은 상태 점이나 tooltip에만 남지 않게 한다. 정상 노드의 높이·동작은 유지하며 긴 문구는 줄바꿈한다.
+
+<Canvas of={Api.CompactFailure} story={{ inline: false, height: 280, autoplay: true }} />
+<Canvas of={Api.CompactFailureNarrow} story={{ inline: false, height: 320 }} />
+
 ### Off
 
 <Canvas of={Api.Off} story={{ inline: false, height: 400 }} sourceState="hidden" />

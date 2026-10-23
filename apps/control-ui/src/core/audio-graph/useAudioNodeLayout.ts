@@ -1,7 +1,11 @@
 import { useUpdateNodeInternals } from '@xyflow/react';
 import { useCallback, useEffect, useState } from 'react';
 
-import { audioNodeFaceGeometry, minimumAudioNodeFaceHeight } from '../ui/audioNodeLayout';
+import {
+  audioNodeFaceGeometry,
+  audioNodeFrame,
+  minimumAudioNodeFaceHeight,
+} from '../ui/audioNodeLayout';
 import type { AudioGraphNode } from './model';
 
 export function graphNodeFaceMode(node: AudioGraphNode) {
@@ -53,7 +57,10 @@ export function useAudioNodeLayout(
   const face = graphNodeFaceGeometry(node);
   const compact = graphNodeFaceMode(node) === 'compact';
   const portCount = Math.max(node.inputPorts.length, node.outputPorts.length);
-  const compactPortHeight = Math.max(minimumAudioNodeFaceHeight() + 2, 26 + (portCount + 1) * 18);
+  const compactPortHeight = Math.max(
+    minimumAudioNodeFaceHeight() + 2,
+    audioNodeFrame.headerHeight + (portCount + 1) * 18,
+  );
   const collapsedHeight = controls.total - controls.disclosure;
   const baseFaceHeight =
     !compact && node.size
@@ -68,7 +75,7 @@ export function useAudioNodeLayout(
         ...face,
         // Disclosure content may grow the card, but only an editor or explicit resize moves ports.
         height: Math.max(compactPortHeight, node.size?.height ?? nativeHeight),
-        portInsetTop: 26,
+        portInsetTop: audioNodeFrame.headerHeight,
         portInsetBottom: 12,
       }
     : {

@@ -14,6 +14,7 @@ import { createProcessorMenuItems } from './processorCatalogMenu';
 import { virtualDeviceMenuItem } from './virtualEndpointMenu';
 export const ADD_PROCESSOR_DIRECTORY_ITEM_ID = 'add-processor-directory';
 export const RESCAN_PROCESSORS_ITEM_ID = 'rescan-processors';
+export const PROCESSOR_SCAN_REPORT_ITEM_ID = 'processor-scan-report';
 export const SYSTEM_AUDIO_ITEM_ID = 'system-audio';
 export function audioInputItemId(device: AudioDeviceDescriptor): string {
   return `audio-input:${device.uid}`;
@@ -59,6 +60,7 @@ interface MenuOptions {
   t: TFunction;
   session?: AudioSessionStatus;
   processorEmptyLabel: string;
+  processorReportDescription?: string;
   paid: boolean;
 }
 function menuChoices({
@@ -270,6 +272,11 @@ export function createNodeMenuItems(options: MenuOptions): AudioGraphNodeMenuIte
           label: t('routing.addProcessorDirectory'),
         },
         { id: RESCAN_PROCESSORS_ITEM_ID, label: t('routing.rescanProcessors') },
+        {
+          id: PROCESSOR_SCAN_REPORT_ITEM_ID,
+          label: t('routing.processorControl.viewReport'),
+          description: options.processorReportDescription,
+        },
       ],
       id: 'processor',
       label: t('routing.groups.processor'),

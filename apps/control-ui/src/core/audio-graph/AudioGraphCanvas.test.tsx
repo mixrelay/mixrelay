@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { ComponentType, CSSProperties, PropsWithChildren } from 'react';
 import { useState } from 'react';
 import { assert, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1149,22 +1150,22 @@ it('aligns recorder handles with content-sized meter rows through channel edits 
   expect(root?.parentElement).toHaveAttribute('data-node-type', 'recorder');
   expect(root?.parentElement?.style.width).toBe('');
   expect(root).toHaveStyle({ '--audio-node-face-height': '94px' });
-  expect(screen.getByLabelText('Recorder input, CH 1')).toHaveStyle({ top: '55.5px' });
-  expect(screen.getByLabelText('Recorder input, CH 2')).toHaveStyle({ top: '68.5px' });
+  expect(screen.getByLabelText('Recorder input, CH 1')).toHaveStyle({ top: '56.5px' });
+  expect(screen.getByLabelText('Recorder input, CH 2')).toHaveStyle({ top: '69.5px' });
   expect(screen.queryByText('2 CH')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: (name) => name.endsWith('Options') }));
   expect(screen.getByText('Recording settings')).toBeInTheDocument();
   expect(root).toHaveStyle({ '--audio-node-face-height': '94px' });
-  expect(screen.getByLabelText('Recorder input, CH 2')).toHaveStyle({ top: '68.5px' });
+  expect(screen.getByLabelText('Recorder input, CH 2')).toHaveStyle({ top: '69.5px' });
   for (const channels of [8, 1, 2]) {
     updateNodeInternals.mockClear();
     view.rerender(recorderCanvas(channels));
     expect(root).toHaveStyle({
-      '--audio-node-face-height': `${Math.max(94, 39 + channels * 13)}px`,
+      '--audio-node-face-height': `${Math.max(94, 41 + channels * 13)}px`,
     });
     for (let index = 0; index < channels; index += 1)
       expect(screen.getByLabelText(`Recorder input, CH ${index + 1}`)).toHaveStyle({
-        top: `${41 + Math.max(0, 94 - (39 + channels * 13)) / 2 + index * 13}px`,
+        top: `${43 + Math.max(0, 94 - (41 + channels * 13)) / 2 + index * 13}px`,
       });
     expect(screen.queryByLabelText(`Recorder input, CH ${channels + 1}`)).not.toBeInTheDocument();
     expect(updateNodeInternals).toHaveBeenCalledWith('take');
@@ -1385,12 +1386,12 @@ describe('AudioGraphCanvas add button placement', () => {
 
   it('anchors the node when the menu opens on press start without a click', async () => {
     const { add, onAddNode } = renderAddMenu();
-    // A real mouse press opens the menu before any click event can reach the button.
-    // A non-zero contact size keeps React Aria from treating this as a virtual click.
-    const pointer = { button: 0, height: 1, pointerId: 1, pointerType: 'mouse', width: 1 };
-    fireEvent.pointerDown(add, pointer);
-    fireEvent.pointerUp(add, pointer);
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'New source' }));
+    const user = userEvent.setup();
+    await user.pointer({ target: add, keys: '[MouseLeft>]' });
+    const item = await screen.findByRole('menuitem', { name: 'New source' });
+    expect(onAddNode).not.toHaveBeenCalled();
+    await user.pointer({ target: add, keys: '[/MouseLeft]' });
+    await user.click(item);
     expect(onAddNode).toHaveBeenCalledExactlyOnceWith('source:new', { x: 132, y: 92 });
   });
 

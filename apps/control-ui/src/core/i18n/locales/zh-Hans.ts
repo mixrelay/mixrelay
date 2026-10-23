@@ -234,6 +234,7 @@ export const zhHans = {
     },
   },
   common: {
+    close: '关闭',
     showPassword: '显示密码',
     hidePassword: '隐藏密码',
     appName: 'MixRelay',
@@ -244,6 +245,17 @@ export const zhHans = {
     ready: '就绪',
   },
   studio: {
+    diagnostics: '诊断',
+    currentProblems: '当前问题',
+    problemsAnnouncement: '诊断：当前问题 {{count}} 个',
+    diagnosticsAnnouncement: '诊断：需要检查的项目 {{count}} 个',
+    diagnosticsClear: '诊断：没有需要检查的项目',
+    support: '支持',
+    supportReport:
+      '如果问题持续存在，请保存诊断报告并发送至 support@rawsector.com。报告包含版本、设置和问题代码，不包含文件路径、设备或插件名称、音频图或音频。',
+    saveReport: '保存诊断报告…',
+    saveReportFailed: '无法开始保存诊断报告。请重试。',
+    audioPaused: '音频已暂停',
     deleteGraph: '删除音频图',
     deleteGraphNotice:
       '删除“{{name}}”？此音频图的音频处理和录音将停止。此操作无法撤销。已保存的工作区文件不会被删除。',
@@ -467,6 +479,7 @@ export const zhHans = {
       applying: '正在应用',
       loading: '正在加载引擎',
       unavailable: '引擎不可用',
+      layoutFailed: '无法加载节点布局。请在底部“诊断”中重试。',
     },
     errors: {
       feature_limit: '此更改超出免费方案的上限。请减少连接或节点，或激活许可证。',
@@ -504,9 +517,11 @@ export const zhHans = {
       reload: '加载已保存的布局',
     },
     processorControl: {
+      reportTitle: '效果器扫描报告',
+      viewReport: '查看扫描报告…',
+      complete: '效果器扫描已完成，未发现问题。',
       probeFailed: '无法加载此插件。其他效果器仍可使用。',
       scanFailed: '无法完成此次插件搜索。保留之前可用的效果器。',
-      technicalDetails: '技术详情',
       scanning: '正在扫描音频效果器…',
       incomplete: '效果器搜索未完成',
       partial: '部分效果器无法扫描。此前可用的效果器已保留。',
@@ -520,6 +535,7 @@ export const zhHans = {
       retry: '重试',
     },
     processorRecovery: {
+      failed: '插件处理已停止',
       retryFailed: '重试已崩溃的插件：{{name}}',
     },
     processorEditor: {

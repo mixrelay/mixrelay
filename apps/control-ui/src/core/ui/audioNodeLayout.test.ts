@@ -11,7 +11,7 @@ it.each(Array.from({ length: 64 }, (_, index) => index + 1))(
   (channels) => {
     const rows = Math.ceil(channels / (channels > 32 ? 16 : 8));
     const content = channels <= 8 ? channels * 10 + (channels - 1) * 3 : rows * 35 + (rows - 1) * 4;
-    expect(minimumAudioNodeFaceHeight([{ channels }]) - 26 - 24 - 14 - 2).toBeGreaterThanOrEqual(
+    expect(minimumAudioNodeFaceHeight([{ channels }]) - 28 - 24 - 14 - 2).toBeGreaterThanOrEqual(
       content,
     );
   },
@@ -20,7 +20,7 @@ it.each(Array.from({ length: 64 }, (_, index) => index + 1))(
 it('keeps the normal stereo face compact and reserves space for the eighth label', () => {
   expect(minimumAudioNodeFaceHeight([])).toBe(118);
   expect(minimumAudioNodeFaceHeight([{ channels: 2 }])).toBe(118);
-  expect(minimumAudioNodeFaceHeight([{ channels: 8 }])).toBe(167);
+  expect(minimumAudioNodeFaceHeight([{ channels: 8 }])).toBe(169);
 });
 
 it.each([1, 2, 4])(
@@ -47,14 +47,14 @@ it.each(Array.from({ length: 8 }, (_, index) => index + 1))(
     });
     const { headerHeight, bodyPadding, meterMargin, rowHeight, rowGap, borderWidth } =
       channelRowMetrics;
-    expect(geometry.height).toBe(Math.max(94, 39 + channels * 13));
+    expect(geometry.height).toBe(Math.max(94, 41 + channels * 13));
     for (let index = 0; index < channels; index += 1) {
       const center =
         borderWidth +
         headerHeight +
         bodyPadding +
         meterMargin +
-        Math.max(0, 94 - (39 + channels * 13)) / 2 +
+        Math.max(0, 94 - (41 + channels * 13)) / 2 +
         rowHeight / 2 +
         index * (rowHeight + rowGap);
       expect(audioNodePortTop(geometry, index, channels)).toBe(center);
@@ -69,15 +69,15 @@ it.each(Array.from({ length: 8 }, (_, index) => index + 1))(
 it('preserves standard faces and their distributed port positions', () => {
   const stereo = audioNodeFaceGeometry({ meterBanks: [{ channels: 2 }], portCount: 2 });
   expect(stereo.height).toBe(118);
-  expect(audioNodePortTop(stereo, 0, 2)).toBeCloseTo(26 + 68 / 3);
-  expect(audioNodePortTop(stereo, 1, 2)).toBeCloseTo(26 + 136 / 3);
-  expect(audioNodeFaceGeometry({ meterBanks: [{ channels: 64 }], portCount: 64 }).height).toBe(830);
+  expect(audioNodePortTop(stereo, 0, 2)).toBeCloseTo(28 + 66 / 3);
+  expect(audioNodePortTop(stereo, 1, 2)).toBeCloseTo(28 + 132 / 3);
+  expect(audioNodeFaceGeometry({ meterBanks: [{ channels: 64 }], portCount: 64 }).height).toBe(832);
 });
 
 it.each([
-  { channels: 8, expectedHeight: 299 },
-  { channels: 16, expectedHeight: 245 },
-  { channels: 64, expectedHeight: 401 },
+  { channels: 8, expectedHeight: 301 },
+  { channels: 16, expectedHeight: 247 },
+  { channels: 64, expectedHeight: 403 },
 ])(
   'reserves the full face for two labelled $channels-channel meter banks',
   ({ channels, expectedHeight }) => {
@@ -94,7 +94,7 @@ it.each([
 
 it.each([1, 2, 4, 8])('keeps an unmetered plug-in header compact with %i ports', (ports) => {
   const geometry = audioNodeFaceGeometry({ mode: 'compact', portCount: ports });
-  expect(geometry.height).toBe(26);
+  expect(geometry.height).toBe(28);
   expect(geometry.height).toBeLessThan(minimumAudioNodeFaceHeight([{ channels: ports }]));
 });
 

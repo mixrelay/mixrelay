@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { fn } from 'storybook/test';
+import { expect, fn, within } from 'storybook/test';
 import appIcon from '../../../../../desktop/src-tauri/icons/32x32.png';
 import { AudioNodeCard } from '../../ui/AudioNodeCard';
 
@@ -64,6 +64,41 @@ export const Bypassed: Story = { args: { bypassed: true } };
 export const Offline: Story = { args: { offline: true } };
 export const Selected: Story = { args: { selected: true } };
 export const Fallback: Story = { args: { iconUrl: undefined } };
+
+export const CompactFailure: Story = {
+  args: {
+    title: 'Voice effect',
+    category: 'Processor',
+    icon: 'FX',
+    iconUrl: undefined,
+    inputCount: 2,
+    outputCount: 2,
+    faceMode: 'compact',
+    status: 'Plug-in processing stopped',
+    statusTone: 'critical',
+    detail: 'Plug-in processing stopped',
+    onSelect: undefined,
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('Plug-in processing stopped')).toBeVisible();
+  },
+};
+export const CompactFailureNarrow: Story = {
+  ...CompactFailure,
+  args: {
+    ...CompactFailure.args,
+    status: 'Plug-in processing stopped · Verarbeitung des externen Plug-ins wurde unterbrochen',
+    detail: 'Plug-in processing stopped · Verarbeitung des externen Plug-ins wurde unterbrochen',
+  },
+  play: undefined,
+  decorators: [
+    (Story) => (
+      <div style={{ width: 180 }}>
+        <Story />
+      </div>
+    ),
+  ],
+};
 
 /** A plug-in whose channel layout is chosen on the node, not in the Add node menu. */
 export const ChannelLayoutChoice: Story = {
