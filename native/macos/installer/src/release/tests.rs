@@ -139,9 +139,9 @@ fn removal_verifies_present_targets_in_all_partial_installations() {
         }
         let mut checked = Vec::new();
         let definition = verifier
-            .verify_removal_with(
+            .verify_ownership_with(
                 &FilesystemLayout::new(&fixture.root).unwrap(),
-                |path, requirement, role| {
+                |path, requirement, role, _| {
                     assert!(requirement.contains("anchor apple generic"));
                     assert!(requirement.contains("ABCD123456"));
                     checked.push((path.to_path_buf(), role));
@@ -172,7 +172,7 @@ fn removal_does_not_ignore_present_invalid_code_or_configuration() {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::rename(fixture.sources.driver(), &path).unwrap();
     assert!(matches!(
-        verifier().verify_removal_with(&layout, |path, _, _| Err(ReleaseError::Signature {
+        verifier().verify_ownership_with(&layout, |path, _, _, _| Err(ReleaseError::Signature {
             path: path.to_path_buf(),
             status: "wrong publisher".into()
         })),
@@ -186,7 +186,7 @@ fn removal_does_not_ignore_present_invalid_code_or_configuration() {
     fs::write(path, b"invalid configuration").unwrap();
     assert!(
         verifier()
-            .verify_removal_with(&layout, |_, _, _| Ok(()))
+            .verify_ownership_with(&layout, |_, _, _, _| Ok(()))
             .is_err()
     );
 }
@@ -196,7 +196,7 @@ fn binds_every_code_identity_and_team_without_shell_interpolation() {
     let fixture = Fixture::new();
     let mut checks = Vec::new();
     verifier()
-        .verify_with(&fixture.sources, true, |path, requirement, role| {
+        .verify_with(&fixture.sources, true, |path, requirement, role, _| {
             checks.push((path.to_path_buf(), requirement.to_owned(), role));
             Ok(())
         })
@@ -227,7 +227,7 @@ fn invalid_team_and_template_fail_before_native_code_checks() {
     fs::write(fixture.sources.launchd(), b"not a plist").unwrap();
     assert!(
         verifier()
-            .verify_with(&fixture.sources, true, |_, _, _| panic!(
+            .verify_with(&fixture.sources, true, |_, _, _, _| panic!(
                 "signature should not run"
             ))
             .is_err()
@@ -244,7 +244,7 @@ fn relative_paths_cannot_be_interpreted_as_codesign_options() {
         ("/engine", "/engine-launchd"),
     );
     assert!(matches!(
-        verifier().verify_with(&sources, true, |_, _, _| panic!(
+        verifier().verify_with(&sources, true, |_, _, _, _| panic!(
             "must reject before command"
         )),
         Err(ReleaseError::SourcePath(_))
@@ -255,7 +255,7 @@ fn relative_paths_cannot_be_interpreted_as_codesign_options() {
 fn signature_failure_short_circuits_the_remaining_payload() {
     let fixture = Fixture::new();
     let mut calls = 0;
-    let result = verifier().verify_with(&fixture.sources, true, |path, _, _| {
+    let result = verifier().verify_with(&fixture.sources, true, |path, _, _, _| {
         calls += 1;
         Err(ReleaseError::Signature {
             path: path.to_path_buf(),
@@ -277,13 +277,13 @@ fn wrong_bundle_identity_and_thin_binary_are_rejected_after_signature() {
     )
     .unwrap();
     assert!(matches!(
-        verifier().verify_with(&fixture.sources, true, |_, _, _| Ok(())),
+        verifier().verify_with(&fixture.sources, true, |_, _, _, _| Ok(())),
         Err(ReleaseError::BundleIdentity(_))
     ));
     fs::write(info, original).unwrap();
     fs::write(fixture.sources.driver(), b"not universal").unwrap();
     assert!(matches!(
-        verifier().verify_with(&fixture.sources, true, |_, _, _| Ok(())),
+        verifier().verify_with(&fixture.sources, true, |_, _, _, _| Ok(())),
         Err(ReleaseError::Universal { .. })
     ));
 }
@@ -293,10 +293,14 @@ fn installer_helper_uses_fixed_team_identity_and_entitlement_free_role() {
     let fixture = Fixture::new();
     let mut observed = None;
     verifier()
-        .verify_installer_executable_with(fixture.sources.driver(), |path, requirement, role| {
-            observed = Some((path.to_path_buf(), requirement.to_owned(), role));
-            Ok(())
-        })
+        .verify_installer_executable_with(
+            fixture.sources.driver(),
+            VerificationPolicy::Launch,
+            |path, requirement, role, _| {
+                observed = Some((path.to_path_buf(), requirement.to_owned(), role));
+                Ok(())
+            },
+        )
         .unwrap();
     let (path, requirement, role) = observed.expect("signature verifier should be called");
     assert_eq!(path, fixture.sources.driver());
@@ -308,9 +312,11 @@ fn installer_helper_uses_fixed_team_identity_and_entitlement_free_role() {
 #[test]
 fn installer_helper_rejects_relative_paths_before_signature_verification() {
     assert!(matches!(
-        verifier().verify_installer_executable_with(Path::new("helper"), |_, _, _| {
-            panic!("relative path must be rejected first")
-        }),
+        verifier().verify_installer_executable_with(
+            Path::new("helper"),
+            VerificationPolicy::Launch,
+            |_, _, _, _| { panic!("relative path must be rejected first") }
+        ),
         Err(ReleaseError::SourcePath(_))
     ));
 }
@@ -345,7 +351,7 @@ fn reopening_needs_only_the_closed_apps_dependencies_and_valid_present_targets()
     }
     let mut checked = Vec::new();
     verifier
-        .verify_installed_with(&layout, &runtime, |path, _, role| {
+        .verify_installed_with(&layout, &runtime, |path, _, role, _| {
             checked.push((path.to_path_buf(), role));
             Ok(())
         })
@@ -360,7 +366,7 @@ fn reopening_needs_only_the_closed_apps_dependencies_and_valid_present_targets()
     // Present code outside the closed apps' dependencies is still verified.
     prepare_installed_target(&fixture, &verifier, OwnedTarget::Uninstaller);
     assert!(matches!(
-        verifier.verify_installed_with(&layout, &runtime, |path, _, role| {
+        verifier.verify_installed_with(&layout, &runtime, |path, _, role, _| {
             if role == ArtifactRole::Uninstaller {
                 return Err(ReleaseError::Signature {
                     path: path.to_path_buf(),
@@ -380,7 +386,7 @@ fn reopening_needs_only_the_closed_apps_dependencies_and_valid_present_targets()
     )
     .unwrap();
     assert!(matches!(
-        verifier.verify_installed_with(&layout, &runtime, |_, _, _| Ok(())),
+        verifier.verify_installed_with(&layout, &runtime, |_, _, _, _| Ok(())),
         Err(ReleaseError::Io { .. })
     ));
     let graph = [
@@ -389,7 +395,7 @@ fn reopening_needs_only_the_closed_apps_dependencies_and_valid_present_targets()
         OwnedTarget::RuntimeLaunchd,
     ];
     verifier
-        .verify_installed_with(&layout, &graph, |_, _, _| Ok(()))
+        .verify_installed_with(&layout, &graph, |_, _, _, _| Ok(()))
         .unwrap();
 }
 
@@ -418,7 +424,7 @@ fn stage_verification_checks_private_copies_even_when_sources_are_removed() {
     fs::remove_file(fixture.sources.runtime_launchd()).unwrap();
     let mut checked = Vec::new();
     verifier()
-        .verify_staged_with(&staged, |path, _, _| {
+        .verify_staged_with(&staged, |path, _, _, _| {
             assert!(path.exists(), "{} must be a staged copy", path.display());
             checked.push(path.to_path_buf());
             Ok(())
@@ -438,3 +444,5 @@ fn stage_verification_checks_private_copies_even_when_sources_are_removed() {
     );
     adapter.cleanup(&staged).unwrap();
 }
+
+mod ownership;

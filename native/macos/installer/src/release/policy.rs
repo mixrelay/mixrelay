@@ -1,3 +1,9 @@
+//! Signature policies for owned installed code and code approved for launch.
+//!
+//! Both require Universal 2 slices, Hardened Runtime and secure timestamps after
+//! signature integrity and publisher verification. Ownership ignores entitlements;
+//! launch additionally requires the artifact role's exact entitlement allowlist.
+
 #[cfg(any(target_os = "macos", test))]
 use std::collections::BTreeMap;
 
@@ -11,6 +17,12 @@ pub(super) enum ArtifactRole {
     Uninstaller,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum VerificationPolicy {
+    Ownership,
+    Launch,
+}
+
 #[cfg(any(target_os = "macos", test))]
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(super) enum Architecture {
@@ -22,7 +34,6 @@ pub(super) enum Architecture {
 impl Architecture {
     pub(super) const ALL: [Self; 2] = [Self::Arm64, Self::X86_64];
 
-    #[cfg(target_os = "macos")]
     pub(super) const fn name(self) -> &'static str {
         match self {
             Self::Arm64 => "arm64",
@@ -52,6 +63,7 @@ pub(super) enum PolicyViolation {
 #[cfg(any(target_os = "macos", test))]
 pub(super) fn verify_slices(
     role: ArtifactRole,
+    policy: VerificationPolicy,
     slices: &[(Architecture, SignatureMetadata)],
 ) -> Result<(), (Architecture, PolicyViolation)> {
     if slices.len() != Architecture::ALL.len()
@@ -67,18 +79,25 @@ pub(super) fn verify_slices(
     }
 
     for (architecture, metadata) in slices {
-        verify_slice(role, metadata).map_err(|violation| (*architecture, violation))?;
+        verify_slice(role, policy, metadata).map_err(|violation| (*architecture, violation))?;
     }
     Ok(())
 }
 
 #[cfg(any(target_os = "macos", test))]
-fn verify_slice(role: ArtifactRole, metadata: &SignatureMetadata) -> Result<(), PolicyViolation> {
+fn verify_slice(
+    role: ArtifactRole,
+    policy: VerificationPolicy,
+    metadata: &SignatureMetadata,
+) -> Result<(), PolicyViolation> {
     if metadata.flags & CODE_SIGNATURE_RUNTIME == 0 {
         return Err(PolicyViolation::HardenedRuntime);
     }
     if !metadata.has_secure_timestamp {
         return Err(PolicyViolation::SecureTimestamp);
+    }
+    if policy == VerificationPolicy::Ownership {
+        return Ok(());
     }
     let expected = expected_entitlements(role);
     if metadata.entitlement_count != expected.len()
@@ -135,7 +154,11 @@ mod tests {
         let mut slices = universal(ArtifactRole::Application);
         slices[1].1.flags = 0;
         assert_eq!(
-            verify_slices(ArtifactRole::Application, &slices),
+            verify_slices(
+                ArtifactRole::Application,
+                VerificationPolicy::Launch,
+                &slices
+            ),
             Err((Architecture::X86_64, PolicyViolation::HardenedRuntime))
         );
     }
@@ -145,7 +168,11 @@ mod tests {
         let mut slices = universal(ArtifactRole::Application);
         slices[0].1.has_secure_timestamp = false;
         assert_eq!(
-            verify_slices(ArtifactRole::Application, &slices),
+            verify_slices(
+                ArtifactRole::Application,
+                VerificationPolicy::Launch,
+                &slices
+            ),
             Err((Architecture::Arm64, PolicyViolation::SecureTimestamp))
         );
     }
@@ -158,7 +185,11 @@ mod tests {
             Some(false),
         );
         assert_eq!(
-            verify_slices(ArtifactRole::Driver, &wrong_value),
+            verify_slices(
+                ArtifactRole::Driver,
+                VerificationPolicy::Launch,
+                &wrong_value
+            ),
             Err((Architecture::Arm64, PolicyViolation::Entitlements))
         );
 
@@ -169,7 +200,7 @@ mod tests {
             .insert("com.apple.security.cs.allow-jit".to_owned(), Some(true));
         extra[1].1.entitlement_count += 1;
         assert_eq!(
-            verify_slices(ArtifactRole::Driver, &extra),
+            verify_slices(ArtifactRole::Driver, VerificationPolicy::Launch, &extra),
             Err((Architecture::X86_64, PolicyViolation::Entitlements))
         );
     }
@@ -177,7 +208,11 @@ mod tests {
     #[test]
     fn accepts_only_the_exact_role_entitlement_sets() {
         assert_eq!(
-            verify_slices(ArtifactRole::Driver, &universal(ArtifactRole::Driver)),
+            verify_slices(
+                ArtifactRole::Driver,
+                VerificationPolicy::Launch,
+                &universal(ArtifactRole::Driver)
+            ),
             Ok(())
         );
         for role in [
@@ -186,14 +221,17 @@ mod tests {
             ArtifactRole::Hal,
             ArtifactRole::Installer,
         ] {
-            assert_eq!(verify_slices(role, &universal(role)), Ok(()));
+            assert_eq!(
+                verify_slices(role, VerificationPolicy::Launch, &universal(role)),
+                Ok(())
+            );
             let mut forbidden = universal(role);
             forbidden[0]
                 .1
                 .entitlements
                 .insert("com.apple.security.cs.debugger".to_owned(), Some(true));
             assert_eq!(
-                verify_slices(role, &forbidden),
+                verify_slices(role, VerificationPolicy::Launch, &forbidden),
                 Err((Architecture::Arm64, PolicyViolation::Entitlements))
             );
         }
@@ -224,14 +262,25 @@ mod tests {
             .into_iter()
             .map(|architecture| (architecture, actual.clone()))
             .collect::<Vec<_>>();
-        assert_eq!(verify_slices(ArtifactRole::Application, &slices), Ok(()));
+        assert_eq!(
+            verify_slices(
+                ArtifactRole::Application,
+                VerificationPolicy::Launch,
+                &slices
+            ),
+            Ok(())
+        );
         slices[0].1.entitlements.insert(
             "com.apple.security.cs.disable-library-validation".into(),
             Some(true),
         );
         slices[0].1.entitlement_count += 1;
         assert_eq!(
-            verify_slices(ArtifactRole::Application, &slices),
+            verify_slices(
+                ArtifactRole::Application,
+                VerificationPolicy::Launch,
+                &slices
+            ),
             Err((Architecture::Arm64, PolicyViolation::Entitlements))
         );
     }
@@ -240,7 +289,11 @@ mod tests {
     fn rejects_missing_duplicate_or_unexpected_architecture_slices() {
         let only_one = vec![(Architecture::Arm64, metadata(ArtifactRole::Application))];
         assert_eq!(
-            verify_slices(ArtifactRole::Application, &only_one),
+            verify_slices(
+                ArtifactRole::Application,
+                VerificationPolicy::Launch,
+                &only_one
+            ),
             Err((Architecture::Arm64, PolicyViolation::ArchitectureSet))
         );
 
@@ -249,7 +302,11 @@ mod tests {
             (Architecture::Arm64, metadata(ArtifactRole::Application)),
         ];
         assert_eq!(
-            verify_slices(ArtifactRole::Application, &duplicate),
+            verify_slices(
+                ArtifactRole::Application,
+                VerificationPolicy::Launch,
+                &duplicate
+            ),
             Err((Architecture::Arm64, PolicyViolation::ArchitectureSet))
         );
     }

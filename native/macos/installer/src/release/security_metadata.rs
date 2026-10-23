@@ -2,7 +2,9 @@
 
 use super::{
     ReleaseError,
-    policy::{Architecture, ArtifactRole, SignatureMetadata, expected_entitlements},
+    policy::{
+        Architecture, ArtifactRole, SignatureMetadata, VerificationPolicy, expected_entitlements,
+    },
 };
 use core_foundation::{
     base::{CFType, TCFType},
@@ -58,10 +60,14 @@ unsafe extern "C" {
 pub(super) fn inspect_slices(
     path: &Path,
     role: ArtifactRole,
+    policy: VerificationPolicy,
 ) -> Result<Vec<(Architecture, SignatureMetadata)>, ReleaseError> {
     let mut slices = Vec::with_capacity(Architecture::ALL.len());
     for architecture in Architecture::ALL {
-        slices.push((architecture, inspect_slice(path, role, architecture)?));
+        slices.push((
+            architecture,
+            inspect_slice(path, role, policy, architecture)?,
+        ));
     }
     Ok(slices)
 }
@@ -69,6 +75,7 @@ pub(super) fn inspect_slices(
 fn inspect_slice(
     path: &Path,
     role: ArtifactRole,
+    policy: VerificationPolicy,
     architecture: Architecture,
 ) -> Result<SignatureMetadata, ReleaseError> {
     let url = CFURL::from_path(path, false)
@@ -84,7 +91,7 @@ fn inspect_slice(
     let code = create_static_code(&url, &attributes, path, architecture)?;
     check_static_code(&code, path, architecture)?;
     let information = copy_signing_information(&code, path, architecture)?;
-    read_metadata(&information, role, path, architecture)
+    read_metadata(&information, role, policy, path, architecture)
 }
 
 fn create_static_code(
@@ -187,12 +194,19 @@ fn copy_signing_information(
 fn read_metadata(
     information: &CFDictionary<CFString, CFType>,
     role: ArtifactRole,
+    policy: VerificationPolicy,
     path: &Path,
     architecture: Architecture,
 ) -> Result<SignatureMetadata, ReleaseError> {
     let flags = read_flags(information, path, architecture)?;
     let has_secure_timestamp = read_timestamp(information, path, architecture)?;
-    let entitlements = read_entitlements(information, role, path, architecture)?;
+    let entitlements = match policy {
+        VerificationPolicy::Ownership => EntitlementInspection {
+            count: 0,
+            values: BTreeMap::new(),
+        },
+        VerificationPolicy::Launch => read_entitlements(information, role, path, architecture)?,
+    };
     Ok(SignatureMetadata {
         flags,
         has_secure_timestamp,
@@ -366,3 +380,6 @@ fn metadata_status(
         status: format!("{operation} returned OSStatus {status}"),
     }
 }
+
+#[cfg(test)]
+mod tests;

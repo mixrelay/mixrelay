@@ -362,6 +362,12 @@ Driver 장치 관리 기능도 같은 MixRelay에서 제공한다. OS 드라이�
   실패·취소에서도 재실행·재제거할 수 있어야 하며 실패·취소한 제거는 인증을 지우지 않는다.
 - macOS는 기본 Installer의 약관→계속→동의 흐름과 Developer ID 서명·공증을 사용한다.
   MixRelay PKG는 `/Applications/MixRelay` 폴더에 `MixRelay.app`과 `Uninstall MixRelay.app`을 설치한다.
+  설치·업데이트·제거 전에 기존 코드는 번들 ID·실행 파일, 게시자 팀의 Developer ID 요구사항,
+  유효한 서명, Universal 2, Hardened Runtime·보안 타임스탬프로 소유권을 확인한다.
+  기존 코드의 entitlement 집합은 소유권 판단에 사용하지 않는다. 다른 팀·미서명 코드는 거부한다.
+  새 원본·비공개 payload와 설치 완료 결과에는 역할별 entitlement allowlist의 정확한 일치를 요구한다.
+  앱·엔진·HAL·Driver·제거 앱·내장 설치 도우미에 같은 구분을 적용하며,
+  서비스 등록·앱 재실행·롤백 후 재실행 전에도 실행 정책을 확인한다.
   제품 제거 후 폴더가 비어 있으면 함께 제거하고, 사용자가 둔 파일이 있으면 폴더를 보존한다.
   제거는 서명된 앱을 확인하는 on-demand 도우미의 고정 작업으로 수행하고
   인증 취소 전에는 상태를 변경하지 않는다. 설치 화면의 제거 선택·별도 제거 PKG·트레이 제거는 제공하지 않는다.

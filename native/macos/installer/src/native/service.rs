@@ -281,6 +281,8 @@ impl ServiceLifecycle for NativeServiceLifecycle {
         require_lifecycle_storage(&self.account)?;
         if matches!(request, TransactionRequest::Install(_)) {
             super::trust::validate_engine_directory(layout.root(), true)?;
+            self.verifier
+                .verify_installed(&layout, &OwnedTarget::all())?;
         }
         let installed = self.verify_installed_payload(&layout)?;
         match request {
@@ -426,6 +428,8 @@ impl ServiceLifecycle for NativeServiceLifecycle {
                 "registration changed after rollback drain",
             ));
         }
+        // Restored files must satisfy launch policy before reactivating any code.
+        self.verifier.verify_installed(&layout, &[])?;
         if snapshot.remover_was_present {
             crate::removal::register_helper(&self.team).map_err(NativeError::UserData)?;
         } else if self.operation == crate::OperationKind::Install {

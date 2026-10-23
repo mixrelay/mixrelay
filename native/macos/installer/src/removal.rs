@@ -238,7 +238,7 @@ pub fn verify_remaining_remover(team: &SigningTeam) -> Result<()> {
         if path == UNINSTALLER_PATH {
             validate_root_tree(Path::new(path))?;
             ReleasePayloadVerifier::new(team.clone(), verification_account()?)
-                .verify_uninstaller_bundle(path)?;
+                .verify_uninstaller_ownership(Path::new(path))?;
         } else {
             validate_root_file(Path::new(path), 0o644)?;
             verify_removal_launchd(Path::new(path), team)?;

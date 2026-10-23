@@ -1,6 +1,11 @@
+//! Verifies signature integrity and publisher identity before applying the selected policy.
+
 #[cfg(target_os = "macos")]
 use super::policy::verify_slices;
-use super::{ReleaseError, policy::ArtifactRole};
+use super::{
+    ReleaseError,
+    policy::{ArtifactRole, VerificationPolicy},
+};
 use std::path::Path;
 
 #[cfg(not(target_os = "macos"))]
@@ -8,6 +13,7 @@ pub(super) fn verify_signature(
     _path: &Path,
     _requirement: &str,
     _role: ArtifactRole,
+    _policy: VerificationPolicy,
 ) -> Result<(), ReleaseError> {
     Err(ReleaseError::UnsupportedPlatform)
 }
@@ -17,6 +23,7 @@ pub(super) fn verify_signature(
     path: &Path,
     requirement: &str,
     role: ArtifactRole,
+    policy: VerificationPolicy,
 ) -> Result<(), ReleaseError> {
     use std::{
         process::{Command, Stdio},
@@ -41,7 +48,7 @@ pub(super) fn verify_signature(
         .stdout(Stdio::null())
         .stderr(Stdio::inherit());
     run_checked(&mut command, path, Duration::from_secs(30))?;
-    verify_signature_metadata(path, role)
+    verify_signature_metadata(path, role, policy)
 }
 
 #[cfg(target_os = "macos")]
@@ -51,15 +58,19 @@ fn literal_requirement(requirement: &str) -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn verify_signature_metadata(path: &Path, role: ArtifactRole) -> Result<(), ReleaseError> {
+fn verify_signature_metadata(
+    path: &Path,
+    role: ArtifactRole,
+    policy: VerificationPolicy,
+) -> Result<(), ReleaseError> {
     let metadata_path = match role {
         ArtifactRole::Application => path.join("Contents/MacOS/mixrelay-desktop"),
         ArtifactRole::Hal => path.join("Contents/MacOS/MixRelayHAL"),
         ArtifactRole::Uninstaller => path.join("Contents/MacOS/mixrelay-driver-uninstaller"),
         ArtifactRole::Driver | ArtifactRole::Engine | ArtifactRole::Installer => path.to_path_buf(),
     };
-    let slices = super::security_metadata::inspect_slices(&metadata_path, role)?;
-    verify_slices(role, &slices)
+    let slices = super::security_metadata::inspect_slices(&metadata_path, role, policy)?;
+    verify_slices(role, policy, &slices)
         .map_err(|(architecture, violation)| super::policy_error(path, architecture, violation))
 }
 

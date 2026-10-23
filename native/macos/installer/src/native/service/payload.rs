@@ -42,7 +42,7 @@ impl NativeServiceLifecycle {
             crate::removal::verify_remaining_remover(&self.team).map_err(NativeError::UserData)?;
             return self
                 .verifier
-                .verify_for_removal(layout)
+                .verify_ownership(layout)
                 .map_err(NativeError::from);
         }
         if present_targets.contains(&OwnedTarget::RuntimeEngine)
@@ -53,24 +53,15 @@ impl NativeServiceLifecycle {
                 reason: "runtime installation is partial",
             });
         }
-        if present_targets.contains(&OwnedTarget::RuntimeEngine) {
-            self.verifier
-                .verify_graph_engine(&path_for(OwnedTarget::RuntimeEngine))?;
-            crate::runtime_definition::validate_installed(
-                &read_bounded_file(&path_for(OwnedTarget::RuntimeLaunchd))?,
-                self.account.account(),
-            )
-            .map_err(NativeError::UserData)?;
-        }
         if !core_present {
-            self.verifier.verify_for_removal(layout)?;
+            self.verifier.verify_ownership(layout)?;
             return Ok(None);
         }
         // Verify every present target separately. A missing component may be
         // repaired, but foreign code never becomes ours merely because it
         // occupies an expected path.
         self.verifier
-            .verify_for_removal(layout)
+            .verify_ownership(layout)
             .map_err(NativeError::from)
     }
 

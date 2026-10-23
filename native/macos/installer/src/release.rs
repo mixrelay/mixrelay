@@ -1,4 +1,12 @@
-//! Release payload validation shared by preflight and private staged copies.
+//! Ownership and launch verification for installed code and release payloads.
+//!
+//! Existing targets inspected before install/update or removal use ownership:
+//! fixed bundle/executable identity, Developer ID team requirement, valid signature,
+//! Universal 2, Hardened Runtime and secure timestamp. Their entitlements are unrestricted.
+//! Sources, private staged payloads, installed results before reopening apps, and
+//! code about to run use launch policy with the exact role entitlement allowlist.
+//! This includes the engine, HAL, Driver, uninstaller and embedded installer helper.
+//! Rollback may restore owned files, but relaunch still requires launch policy.
 
 use std::{
     fs::File,
@@ -19,9 +27,9 @@ mod policy;
 #[cfg(target_os = "macos")]
 mod security_metadata;
 mod signature;
-use policy::ArtifactRole;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 use policy::{Architecture, PolicyViolation};
+use policy::{ArtifactRole, VerificationPolicy};
 use signature::verify_signature;
 
 /// The publisher identity required for every executable in a release payload.
@@ -152,8 +160,8 @@ impl ReleasePayloadVerifier {
 
     /// Verifies an installation that closed apps can be reopened on.
     ///
-    /// Every `required` target must be present, and every present target passes the
-    /// same identity, signature and launch policy checks as removal. A missing target
+    /// Every `required` target must be present, and every present target passes
+    /// launch policy, including exact entitlements. A missing target
     /// that is not required, such as the remover of a partial installation, is allowed.
     /// # Errors
     /// Returns a missing required target or an invalid present target.
@@ -169,7 +177,7 @@ impl ReleasePayloadVerifier {
         &self,
         layout: &FilesystemLayout,
         required: &[OwnedTarget],
-        signature: impl FnMut(&Path, &str, ArtifactRole) -> Result<(), ReleaseError>,
+        signature: impl FnMut(&Path, &str, ArtifactRole, VerificationPolicy) -> Result<(), ReleaseError>,
     ) -> Result<(), ReleaseError> {
         for target in required {
             let path = layout.root().join(target.path().trim_start_matches('/'));
@@ -177,25 +185,43 @@ impl ReleasePayloadVerifier {
                 return Err(ReleaseError::Io { path, source });
             }
         }
-        self.verify_removal_with(layout, signature).map(|_| ())
+        self.verify_present_with(layout, VerificationPolicy::Launch, signature)
+            .map(|_| ())
     }
 
-    /// Verifies each remaining removal target independently. Missing targets
-    /// are already removed; they do not exempt present code from publisher checks.
+    /// Verifies ownership of each present target before replacement or removal.
+    ///
+    /// Missing targets permit repair or repeated removal. Present code must retain
+    /// its fixed identity and publisher signature, architectures, Hardened Runtime
+    /// and secure timestamp. Entitlements do not affect ownership.
     /// # Errors
-    /// Returns invalid present files, identities, signatures or launch policy.
-    pub fn verify_for_removal(
+    /// Returns invalid present files, identities, signatures or ownership metadata.
+    pub fn verify_ownership(
         &self,
         layout: &FilesystemLayout,
     ) -> Result<Option<LaunchdConfiguration>, ReleaseError> {
-        self.verify_removal_with(layout, verify_signature)
+        self.verify_ownership_with(layout, verify_signature)
     }
 
-    fn verify_removal_bundle(
+    fn verify_ownership_with(
+        &self,
+        layout: &FilesystemLayout,
+        signature: impl FnMut(&Path, &str, ArtifactRole, VerificationPolicy) -> Result<(), ReleaseError>,
+    ) -> Result<Option<LaunchdConfiguration>, ReleaseError> {
+        self.verify_present_with(layout, VerificationPolicy::Ownership, signature)
+    }
+
+    fn verify_installed_bundle(
         &self,
         target: OwnedTarget,
         path: &Path,
-        signature: &mut impl FnMut(&Path, &str, ArtifactRole) -> Result<(), ReleaseError>,
+        policy: VerificationPolicy,
+        signature: &mut impl FnMut(
+            &Path,
+            &str,
+            ArtifactRole,
+            VerificationPolicy,
+        ) -> Result<(), ReleaseError>,
     ) -> Result<(), ReleaseError> {
         let (identifier, executable, role) = match target {
             OwnedTarget::App => (
@@ -211,20 +237,27 @@ impl ReleasePayloadVerifier {
             ),
         };
         verify_bundle(path, identifier, executable)?;
-        signature(path, &self.team.requirement(identifier), role)?;
+        signature(path, &self.team.requirement(identifier), role, policy)?;
         if target == OwnedTarget::Uninstaller {
             self.verify_installer_executable_with(
                 &path.join("Contents/Helpers/mixrelay-macos-installer"),
+                policy,
                 signature,
             )?;
         }
         Ok(())
     }
 
-    fn verify_removal_with(
+    fn verify_present_with(
         &self,
         layout: &FilesystemLayout,
-        mut signature: impl FnMut(&Path, &str, ArtifactRole) -> Result<(), ReleaseError>,
+        policy: VerificationPolicy,
+        mut signature: impl FnMut(
+            &Path,
+            &str,
+            ArtifactRole,
+            VerificationPolicy,
+        ) -> Result<(), ReleaseError>,
     ) -> Result<Option<LaunchdConfiguration>, ReleaseError> {
         let mut definition = None;
         for target in OwnedTarget::all() {
@@ -236,7 +269,7 @@ impl ReleasePayloadVerifier {
             }
             match target {
                 OwnedTarget::App | OwnedTarget::Hal | OwnedTarget::Uninstaller => {
-                    self.verify_removal_bundle(target, &path, &mut signature)?;
+                    self.verify_installed_bundle(target, &path, policy, &mut signature)?;
                 }
                 OwnedTarget::RuntimeEngine => {
                     verify_architecture(&path)?;
@@ -244,6 +277,7 @@ impl ReleasePayloadVerifier {
                         &path,
                         &self.team.requirement("mixrelay-engine-service"),
                         ArtifactRole::Engine,
+                        policy,
                     )?;
                 }
                 OwnedTarget::RuntimeLaunchd => {
@@ -262,6 +296,7 @@ impl ReleasePayloadVerifier {
                         &path,
                         &self.team.requirement("mixrelay-driver-service"),
                         ArtifactRole::Driver,
+                        policy,
                     )?;
                 }
                 OwnedTarget::Launchd => {
@@ -297,7 +332,7 @@ impl ReleasePayloadVerifier {
     fn verify_staged_with(
         &self,
         staged: &FilesystemStaged,
-        signature: impl FnMut(&Path, &str, ArtifactRole) -> Result<(), ReleaseError>,
+        signature: impl FnMut(&Path, &str, ArtifactRole, VerificationPolicy) -> Result<(), ReleaseError>,
     ) -> Result<LaunchdConfiguration, ReleaseError> {
         let path = |target| staged.payload_path(target);
         let sources = InstallSources::new(
@@ -330,20 +365,35 @@ impl ReleasePayloadVerifier {
             bundle,
             &self.team.requirement("io.mixrelay.driver.uninstaller"),
             ArtifactRole::Uninstaller,
+            VerificationPolicy::Launch,
         )?;
         self.verify_installer_executable(bundle.join("Contents/Helpers/mixrelay-macos-installer"))
     }
 
+    /// Verifies the remover and embedded helper for deletion without launching them.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn verify_uninstaller_ownership(&self, bundle: &Path) -> Result<(), ReleaseError> {
+        self.verify_installed_bundle(
+            OwnedTarget::Uninstaller,
+            bundle,
+            VerificationPolicy::Ownership,
+            &mut verify_signature,
+        )
+    }
+
     /// Verifies the signed universal installer helper before it is embedded in a package.
     ///
-    /// This requires the helper's fixed Developer ID identity and the same strict signing
-    /// policy as the application and HAL: both slices are hardened and timestamped, and
-    /// neither slice may carry entitlements.
+    /// Requires its fixed Developer ID identity, Universal 2, Hardened Runtime,
+    /// secure timestamps and an empty entitlement allowlist on both slices.
     /// # Errors
     /// Returns an invalid path, architecture, signature, signing policy, or Security.framework
     /// metadata error.
     pub fn verify_installer_executable(&self, path: impl AsRef<Path>) -> Result<(), ReleaseError> {
-        self.verify_installer_executable_with(path.as_ref(), verify_signature)
+        self.verify_installer_executable_with(
+            path.as_ref(),
+            VerificationPolicy::Launch,
+            verify_signature,
+        )
     }
 
     /// Checks the installed on-demand audio engine.
@@ -355,13 +405,20 @@ impl ReleasePayloadVerifier {
             engine,
             &self.team.requirement("mixrelay-engine-service"),
             ArtifactRole::Engine,
+            VerificationPolicy::Launch,
         )
     }
 
     fn verify_installer_executable_with(
         &self,
         path: &Path,
-        signature: impl FnOnce(&Path, &str, ArtifactRole) -> Result<(), ReleaseError>,
+        policy: VerificationPolicy,
+        signature: impl FnOnce(
+            &Path,
+            &str,
+            ArtifactRole,
+            VerificationPolicy,
+        ) -> Result<(), ReleaseError>,
     ) -> Result<(), ReleaseError> {
         if !path.is_absolute() {
             return Err(ReleaseError::SourcePath(path.to_path_buf()));
@@ -371,6 +428,7 @@ impl ReleasePayloadVerifier {
             path,
             &self.team.requirement("mixrelay-macos-installer"),
             ArtifactRole::Installer,
+            policy,
         )
     }
 
@@ -378,7 +436,12 @@ impl ReleasePayloadVerifier {
         &self,
         sources: &InstallSources,
         is_template: bool,
-        mut signature: impl FnMut(&Path, &str, ArtifactRole) -> Result<(), ReleaseError>,
+        mut signature: impl FnMut(
+            &Path,
+            &str,
+            ArtifactRole,
+            VerificationPolicy,
+        ) -> Result<(), ReleaseError>,
     ) -> Result<(), ReleaseError> {
         let (engine, plist) = (sources.runtime_engine(), sources.runtime_launchd());
         verify_architecture(engine)?;
@@ -386,6 +449,7 @@ impl ReleasePayloadVerifier {
             engine,
             &self.team.requirement("mixrelay-engine-service"),
             ArtifactRole::Engine,
+            VerificationPolicy::Launch,
         )?;
         let bytes = read_configuration(plist, 16 * 1024)?;
         let result = if is_template {
@@ -404,7 +468,12 @@ impl ReleasePayloadVerifier {
         &self,
         sources: &InstallSources,
         is_template: bool,
-        mut signature: impl FnMut(&Path, &str, ArtifactRole) -> Result<(), ReleaseError>,
+        mut signature: impl FnMut(
+            &Path,
+            &str,
+            ArtifactRole,
+            VerificationPolicy,
+        ) -> Result<(), ReleaseError>,
     ) -> Result<LaunchdConfiguration, ReleaseError> {
         for path in [
             sources.app(),
@@ -432,6 +501,7 @@ impl ReleasePayloadVerifier {
             app,
             &self.team.requirement("io.mixrelay.driver.uninstaller"),
             ArtifactRole::Uninstaller,
+            VerificationPolicy::Launch,
         )?;
         verify_bundle(
             app,
@@ -440,6 +510,7 @@ impl ReleasePayloadVerifier {
         )?;
         self.verify_installer_executable_with(
             &app.join("Contents/Helpers/mixrelay-macos-installer"),
+            VerificationPolicy::Launch,
             &mut signature,
         )?;
         #[cfg(target_os = "macos")]
@@ -463,13 +534,19 @@ impl ReleasePayloadVerifier {
                 ArtifactRole::Hal,
             ),
         ] {
-            signature(bundle, &self.team.requirement(identifier), role)?;
+            signature(
+                bundle,
+                &self.team.requirement(identifier),
+                role,
+                VerificationPolicy::Launch,
+            )?;
             verify_bundle(bundle, identifier, executable)?;
         }
         signature(
             sources.driver(),
             &self.team.requirement("mixrelay-driver-service"),
             ArtifactRole::Driver,
+            VerificationPolicy::Launch,
         )?;
         verify_architecture(sources.driver())?;
         Ok(definition)
@@ -500,7 +577,7 @@ fn verify_architecture(path: &Path) -> Result<(), ReleaseError> {
     })
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 fn policy_error(
     path: &Path,
     architecture: Architecture,
