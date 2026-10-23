@@ -27,7 +27,10 @@ in a release candidate under this contract.
 Build the Universal macOS PKG from the same source commit with the existing signing
 workflow: first `pnpm signing:check`, then `pnpm release:macos --output EMPTY_DIRECTORY`.
 Use the notarized, stapled final PKG. Both CPUs and every macOS target install this
-same file. Finish signing and stapling before calculating candidate hashes.
+same file on the CPUs supported by each macOS release. macOS 27 has only an arm64
+target because [Apple's compatibility list](https://support.apple.com/en-us/127255)
+contains Apple silicon models; Intel targets end at macOS 26. Finish signing and
+stapling before calculating candidate hashes.
 Use a checkout of the selected commit without local source changes; record the
 Linux workflow run and macOS build result with the candidate. This procedure does
 not infer a binary's source commit from its bytes.

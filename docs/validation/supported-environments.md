@@ -11,7 +11,6 @@ Generated from `support/environments.json`. A listed target is a release require
 | macos-26-arm64 | macos | 26 (major) | arm64 | macos-universal-pkg |
 | macos-26-x64 | macos | 26 (major) | x64 | macos-universal-pkg |
 | macos-27-arm64 | macos | 27 (major) | arm64 | macos-universal-pkg |
-| macos-27-x64 | macos | 27 (major) | x64 | macos-universal-pkg |
 | debian-13-x64 | debian | 13 (major) | x64 | linux-x64-deb |
 | debian-13-arm64 | debian | 13 (major) | arm64 | linux-arm64-deb |
 | ubuntu-26-04-x64 | ubuntu | 26.04 (minor) | x64 | linux-x64-deb |

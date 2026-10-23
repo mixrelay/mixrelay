@@ -9,12 +9,6 @@
       "glibc": "2.39"
     }
   },
-  "macosMajors": [
-    14,
-    15,
-    26,
-    27
-  ],
   "build": {
     "linuxDistribution": "debian"
   },
@@ -231,20 +225,6 @@
       ]
     },
     {
-      "id": "macos-27-x64",
-      "os": "macos",
-      "version": "27",
-      "versionMatch": "major",
-      "arch": "x64",
-      "artifact": "macos-universal-pkg",
-      "runnerLabels": [
-        "self-hosted",
-        "mixrelay-qualification",
-        "macos-27",
-        "x64"
-      ]
-    },
-    {
       "id": "debian-13-x64",
       "os": "linux",
       "distro": "debian",
@@ -396,5 +376,22 @@
       ],
       "title": "Free whole-system capture receives multiple sources"
     }
-  ]
+  ],
+  "macosArchitectures": {
+    "14": [
+      "arm64",
+      "x64"
+    ],
+    "15": [
+      "arm64",
+      "x64"
+    ],
+    "26": [
+      "arm64",
+      "x64"
+    ],
+    "27": [
+      "arm64"
+    ]
+  }
 }

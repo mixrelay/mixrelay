@@ -361,7 +361,9 @@ CI 행렬·설치본 시험 대상·공통 시나리오·배포 파일 대응과
 환경별 필수 조합은 [생성된 환경표](validation/supported-environments.md), 실행·배포 절차는
 [릴리스 검증](release-qualification.md)에 둔다. 지원 대상과 실제 통과 결과를 구별한다.
 
-- macOS 14.2 이상, Apple Silicon·Intel(Universal). 앱 오디오 캡처(process tap) API가 14.2부터 제공된다.
+- Apple Silicon은 macOS 14.2 이상, Intel은 macOS 14.2–26의 Apple 지원 모델을 대상으로 같은 Universal PKG를 사용한다.
+  [macOS 27 공식 호환 모델](https://support.apple.com/en-us/127255)은 Apple Silicon 전용이므로 Intel 27 조합은 지원 대상에 넣지 않는다.
+  앱 오디오 캡처(process tap) API가 14.2부터 제공된다.
   계약의 최소 버전을 `apps/desktop/src-tauri/tauri.conf.json`의 `minimumSystemVersion`과 대조하며,
   모든 native 빌드 대상과 설치기의 `allowed-os-versions`가 같은 값을 쓰고 설치기가 더 낮은 OS를 거부한다.
 - 상한은 강제하지 않는다. 표시하는 최신 버전은 설치본 확인을 마친 macOS 주 버전이며 현재 macOS 27이다.
@@ -372,8 +374,8 @@ CI 행렬·설치본 시험 대상·공통 시나리오·배포 파일 대응과
   CI 소스 검사는 이 행렬을 읽으며, 출시 전 설치본 검증은 같은 CPU의 동일 최종 파일을 각 배포판에서 시험한다.
   RPM은 빌드 설정만 있고 지원 배포판·수락 결과가 없어 현재 출시 후보에는 포함하지 않는다.
 
-설치본 검증 대상 15개 조합에서 파일 SHA-256·소스 커밋·계약 해시·CI 실행과 실제 환경을 기록한다.
-macOS 최소 14.2 계열과 15·26·27 주 버전, Linux 배포판/CPU 조합을 대표 대상으로 정한다.
+설치본 검증 대상 14개 조합에서 파일 SHA-256·소스 커밋·계약 해시·CI 실행과 실제 환경을 기록한다.
+macOS 최소 14.2 계열과 15·26의 양쪽 CPU, 27의 Apple Silicon, Linux 배포판/CPU 조합을 대표 대상으로 정한다.
 모든 패치 버전·데스크톱 환경·플러그인 조합을 실행했다는 뜻은 아니다. rolling은 실행 때의 버전·커널·의존성과
 패키지 목록 해시를 기록한다. 필수 시나리오의 미구현·미실행·실패·정리 실패는 배포 gate를 통과하지 못한다.
 

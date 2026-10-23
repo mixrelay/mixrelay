@@ -47,6 +47,10 @@ export function validateContract(value) {
       throw new Error(`Incomplete qualification environment: ${target.id}`);
     }
     if (target.versionMatch !== 'rolling' && !new RegExp(target.versionMatch === 'major' ? '^\\d+$' : '^\\d+\\.\\d+$').test(target.version)) throw new Error(`Invalid version rule: ${target.id}`);
+    if (target.os === 'macos' && !value.macosArchitectures?.[target.version.split('.')[0]]?.includes(target.arch)) throw new Error(`Unsupported macOS/CPU combination: ${target.id}`);
+  }
+  for (const target of value.codeChecks.macos) {
+    if (!value.macosArchitectures?.[target.version]?.includes(target.arch)) throw new Error(`Unsupported macOS CI combination: ${target.id}`);
   }
   for (const distro of value.codeChecks.linuxDistributions) {
     if (!/^\S+@sha256:[a-f0-9]{64}$/.test(distro.image)) throw new Error(`Unpinned image: ${distro.id}`);

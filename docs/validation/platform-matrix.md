@@ -33,7 +33,7 @@ macOS는 14.2 이상 Apple Silicon·Intel, Linux는 x86_64·arm64의 정상 사�
 | MAC-15 | macOS 15 · CI runner | 지원 대상 | 소스 검사 통과 기록 [CI18](#ci18). runner 실행 아키텍처는 인용 기록에 없음 | 설치본·권한·오디오 미확인 |
 | MAC-26 | macOS 26 · arm64/Intel | 지원 대상 | 개별 OS 실행 기록 없음 | 설치본 미확인 |
 | MAC-27-DEV | macOS 27 개발 Mac · 10월 11일 기록은 27.0.1 | 지원 대상 | 로컬 소스·Universal 빌드 기록 [M17](#m17)·[M18](#m18) | 설치·캡처·일부 왕복·수명 확인. 후속 기록의 정확한 OS 패치·실행 CPU는 미기록 |
-| MAC-27-INTEL | macOS 27 · Intel | 지원 대상 | Universal x86_64 slice 빌드·서명 기록 | Intel OS에서 실제 실행 미확인. 개발 Mac 결과로 대신하지 않음 |
+| MAC-27-INTEL | macOS 27 · Intel | 비대상: Apple 공식 호환 모델 없음 | Universal의 x86_64 slice는 Intel용 macOS 14.2–26에서 사용 | [Apple 공식 목록](https://support.apple.com/en-us/127255)에 따라 필수 조합에서 제외 |
 | LINUX-DEB-X64 | Debian 13 · x86_64 · Proxmox VM 107 | 지원 대상 | CI 기록 [CI18](#ci18), VM 소스 검사 [L16](#l16) | DEB 설치·업그레이드·런처·실제 PipeWire PCM 일부 확인 [L16](#l16) |
 | LINUX-DEB-ARM | Debian 13 · arm64 | 지원 대상 | Docker CI 소스 검사 통과 기록 [CI18](#ci18) | 해당 CPU의 정상 사용자 세션·설치본·오디오 미확인 |
 | LINUX-UBUNTU | Ubuntu 26.04 · x86_64/arm64 | 실행 의존성 충족 시 지원 대상 | Docker CI 소스 검사 통과 기록 [CI18](#ci18) | 이 배포판의 설치본·오디오 미확인 |
