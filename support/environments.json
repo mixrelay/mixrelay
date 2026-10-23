@@ -366,6 +366,18 @@
         "macos"
       ],
       "title": "Free whole-system capture receives multiple sources"
+    },
+    {
+      "id": "UPGRADE-01",
+      "scope": "artifact",
+      "required": true,
+      "title": "Upgrade from a pinned previous candidate preserves user state and passes the complete installed suite"
+    },
+    {
+      "id": "PKG-02",
+      "scope": "artifact",
+      "required": true,
+      "title": "Remove the installed product while preserving saved session documents"
     }
   ],
   "macosArchitectures": {

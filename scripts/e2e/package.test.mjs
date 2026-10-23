@@ -1,33 +1,131 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
 import { once } from 'node:events';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import test from 'node:test';
 import { installedPaths, requireDisposableHost, spawnLogged } from './package.mjs';
 
 test('installation refuses an unacknowledged host before any installer or privilege command runs', () => {
   assert.throws(() => requireDisposableHost('macos', false), /disposable-environment/);
   assert.throws(() => requireDisposableHost('linux', false), /disposable-environment/);
-  assert.ok(installedPaths('macos').every(path => path.startsWith('/')));
-  assert.ok(installedPaths('linux').every(path => path.startsWith('/usr/bin/')));
+  assert.ok(installedPaths('macos').every((path) => path.startsWith('/')));
+  assert.ok(installedPaths('linux').every((path) => path.startsWith('/usr/bin/')));
 });
 
-test('a background controller inheriting stderr cannot keep the completed desktop test open', async t => {
+test('a background controller inheriting stderr cannot keep the completed desktop test open', async (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'mixrelay-desktop-lifetime-'));
-  const pidFile = join(directory, 'runtime.pid'), logFile = join(directory, 'desktop.log');
+  const pidFile = join(directory, 'runtime.pid'),
+    logFile = join(directory, 'desktop.log');
   t.after(() => {
-    try { process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGTERM'); }
-    catch (error) { if (!['ENOENT', 'ESRCH'].includes(error.code)) throw error; }
+    try {
+      process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGTERM');
+    } catch (error) {
+      if (!['ENOENT', 'ESRCH'].includes(error.code)) throw error;
+    }
     rmSync(directory, { recursive: true, force: true });
   });
-  const child = spawnLogged(process.execPath, ['-e', `
+  const child = spawnLogged(
+    process.execPath,
+    [
+      '-e',
+      `
     const {spawn}=require('node:child_process'), {writeFileSync}=require('node:fs');
     const runtime=spawn(process.execPath,['-e','setTimeout(()=>{},5000)'],{stdio:['ignore','ignore','inherit']});
     writeFileSync(process.argv[1],String(runtime.pid));
     runtime.unref(); process.stderr.write('desktop completed\\n');
-  `, pidFile], logFile);
+  `,
+      pidFile,
+    ],
+    logFile,
+  );
   const [code] = await once(child, 'close', { signal: AbortSignal.timeout(1500) });
   assert.equal(code, 0);
   assert.match(readFileSync(logFile, 'utf8'), /desktop completed/);
+});
+
+test('same-version DEBs are reinstalled and installed executable bytes are checked', async (t) => {
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const { installAndVerify } = await import('./package.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'mixrelay-reinstall-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const output = join(root, 'evidence');
+  mkdirSync(output);
+  const executable = join(root, 'installed-binary');
+  writeFileSync(executable, 'candidate payload');
+  const calls = [];
+  const runCommand = (program, args) => {
+    calls.push([program, args]);
+    if (program === 'dpkg-deb') {
+      const path = join(args[2], executable.slice(1));
+      mkdirSync(join(path, '..'), { recursive: true });
+      writeFileSync(path, 'candidate payload');
+    }
+    return 'installer succeeded';
+  };
+  installAndVerify({ file: 'candidate.deb' }, { format: 'deb' }, root, output, 'linux', {
+    runCommand,
+    paths: [executable],
+  });
+  assert.deepEqual(calls[1], [
+    'sudo',
+    [
+      '-n',
+      'env',
+      'DEBIAN_FRONTEND=noninteractive',
+      'apt-get',
+      'install',
+      '--reinstall',
+      '-y',
+      '--no-install-recommends',
+      join(root, 'candidate.deb'),
+    ],
+  ]);
+  const report = JSON.parse(readFileSync(join(output, 'installed-binaries.json')));
+  assert.equal(report.binaries[0].path, executable);
+  const other = join(root, 'mismatch');
+  mkdirSync(other);
+  writeFileSync(executable, 'baseline payload');
+  assert.throws(
+    () =>
+      installAndVerify({ file: 'candidate.deb' }, { format: 'deb' }, root, other, 'linux', {
+        runCommand,
+        paths: [executable],
+      }),
+    /differs from candidate/,
+  );
+});
+
+test('a macOS postinstall rejection is fatal and preserves installer stderr', async (t) => {
+  const { mkdirSync } = await import('node:fs');
+  const { installAndVerify } = await import('./package.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'mixrelay-postinstall-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const output = join(root, 'evidence');
+  mkdirSync(output);
+  const commands = [];
+  const runCommand = (program, args) => {
+    commands.push([program, args]);
+    if (program === 'sudo') {
+      const error = new Error('installer exited 1');
+      error.stderr = 'Previous app entitlement policy rejected';
+      throw error;
+    }
+    return '';
+  };
+  assert.throws(
+    () =>
+      installAndVerify({ file: 'signed.pkg' }, { format: 'pkg' }, root, output, 'macos', {
+        runCommand,
+      }),
+    /installer exited 1/,
+  );
+  assert.deepEqual(commands.at(-1), [
+    'sudo',
+    ['-n', 'installer', '-pkg', join(root, 'signed.pkg'), '-target', '/'],
+  ]);
+  assert.match(
+    readFileSync(join(output, 'package-install.log'), 'utf8'),
+    /entitlement policy rejected/,
+  );
 });
