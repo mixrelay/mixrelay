@@ -11,9 +11,10 @@ targets:
   InstalledUITests:
     type: bundle.ui-testing
     platform: macOS
-    sources: [InstalledUITests.swift]
+    sources: [InstalledUITests.swift, InstalledApplication.m, InstalledApplication.h]
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: io.mixrelay.qualification.ui
+      SWIFT_OBJC_BRIDGING_HEADER: InstalledApplication.h
 schemes:
   InstalledUI:
     build:

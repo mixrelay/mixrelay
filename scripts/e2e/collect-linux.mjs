@@ -8,6 +8,9 @@ export function collectLinux(output) {
     writeFileSync(join(output, file), `${result.stdout ?? ''}\n${result.stderr ?? ''}\nexit=${result.status}; error=${result.error?.message ?? ''}\n`, { flag: 'wx' });
   }
   capture('driver-journal.txt', 'journalctl', ['--user', '-u', 'mixrelay-driver.service', '--no-pager', '-n', '500']);
+  capture('user-session-journal.txt', 'journalctl', ['--user', '--no-pager', '-n', '500']);
+  capture('system-session-journal.txt', 'sudo', ['-n', 'journalctl', '--no-pager', '-n', '500']);
+  capture('process-memory.txt', 'ps', ['-eo', 'pid,ppid,stat,pcpu,pmem,rss,comm,args']);
   capture('pipewire-state.json', 'pw-dump', []);
   for (const pid of readdirSync('/proc').filter(id => /^\d+$/.test(id))) {
     try {
