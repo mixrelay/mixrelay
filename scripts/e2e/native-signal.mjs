@@ -118,9 +118,19 @@ export async function nativeSignal(device, directory, os) {
   if (os === 'linux') return linuxSignal(device, directory);
   const uid = device.nativeDeviceIds.find(id => id.startsWith('io.mixrelay.audio.endpoint.'));
   assert.ok(uid, 'Missing canonical CoreAudio device identity');
-  const output = execFileSync('zsh', ['scripts/probe-macos-roundtrip.sh', '--json', '--seconds', '3', '--channels', '2', uid],
-    { encoding: 'utf8', timeout: 60000, maxBuffer: 1024 * 1024 });
-  const measured = JSON.parse(output);
+  const bundle = execFileSync('zsh', ['scripts/probe-macos-roundtrip.sh', '--prepare-bundle', 'io.mixrelay.qualification.probe'],
+    { encoding: 'utf8', timeout: 60000 }).trim();
+  const stdout = join(directory, 'native-probe.stdout.json'), stderr = join(directory, 'native-probe.stderr.log');
+  try {
+    execFileSync('open', ['-W', '-n', '-g', '--stdout', stdout, '--stderr', stderr, bundle,
+      '--args', '--json', '--seconds', '3', '--channels', '2', uid], { timeout: 60000 });
+  } finally {
+    const executable = `${bundle}/Contents/MacOS/MRRoundTripProbe`;
+    const pattern = `^${executable.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( |$)`;
+    try { execFileSync('pkill', ['-TERM', '-f', pattern], { timeout: 5000 }); }
+    catch (error) { if (error.status !== 1) throw error; }
+  }
+  const measured = JSON.parse(readFileSync(stdout, 'utf8'));
   assert.equal(measured.complete, true);
   assert.equal(measured.channelOrder, true);
   for (const field of ['missingFrames', 'repeatedFrames', 'corruptFrames', 'nonfiniteSamples']) assert.equal(measured[field], 0, field);

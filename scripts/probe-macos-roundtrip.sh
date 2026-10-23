@@ -9,6 +9,8 @@
 #   pnpm probe:macos-roundtrip --list
 #   pnpm probe:macos-roundtrip [--json] [--seconds S] [--channels N] OUTPUT_UID [INPUT_UID]
 #   pnpm probe:macos-roundtrip --self-test
+#   pnpm probe:macos-roundtrip --prepare-bundle BUNDLE_ID
+#     (prints a signed probe app path for a LaunchServices permission test)
 # Recording needs microphone permission for the terminal that runs it; without it every
 # input reads as silence and the probe exits with status 3.
 set -euo pipefail
@@ -26,7 +28,11 @@ if [[ ! -x "$binary" || "$source_file" -nt "$binary" ]]; then
     -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Werror \
     "$source_file" -framework CoreAudio -framework CoreFoundation -o "$binary"
 fi
-if [[ "${1:-}" == "--bundle" ]]; then
+prepare_bundle=false
+if [[ "${1:-}" == "--prepare-bundle" ]]; then
+  prepare_bundle=true
+fi
+if [[ "${1:-}" == "--bundle" || "$prepare_bundle" == true ]]; then
   bundle_id="${2:?--bundle needs a bundle identifier}"
   shift 2
   [[ "$bundle_id" =~ '^[A-Za-z0-9.-]+$' ]] || { print -u2 "invalid bundle identifier"; exit 2; }
@@ -40,9 +46,14 @@ if [[ "${1:-}" == "--bundle" ]]; then
 <key>CFBundleIdentifier</key><string>$bundle_id</string>
 <key>CFBundleExecutable</key><string>MRRoundTripProbe</string>
 <key>CFBundlePackageType</key><string>APPL</string>
+<key>NSMicrophoneUsageDescription</key><string>Verify audio recorded from the MixRelay test device.</string>
 </dict></plist>
 PLIST
   codesign --force --sign - "$bundle"
   binary="$bundle/Contents/MacOS/MRRoundTripProbe"
+  if [[ "$prepare_bundle" == true ]]; then
+    print -r -- "$bundle"
+    exit 0
+  fi
 fi
 exec "$binary" "$@"
