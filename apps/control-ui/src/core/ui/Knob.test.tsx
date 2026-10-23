@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { expect, it, vi } from 'vitest';
 import { Knob, type KnobProps } from './Knob';
@@ -125,8 +126,8 @@ it('renders vector geometry and tracks controlled value changes', () => {
   render(<Demo />);
   const slider = screen.getByRole('slider');
   expect(slider.parentElement?.querySelector('svg')).toHaveAttribute('viewBox', '0 0 48 48');
-  const focusArc = slider.parentElement?.querySelector('path[vector-effect]');
-  expect(focusArc).toHaveAttribute('vector-effect', 'non-scaling-stroke');
+  const focusArc = slider.parentElement?.querySelector('path');
+  expect(focusArc).not.toHaveAttribute('vector-effect');
   expect(focusArc).toHaveAttribute('d', 'M7.737 40.263 A23 23 0 1 1 40.263 40.263');
   fireEvent.change(slider, { target: { value: '23.7' } });
   expect(slider).toHaveAttribute('aria-valuenow', '23.7');
@@ -178,26 +179,76 @@ it('exposes channel endpoints without adding duplicate focus targets', () => {
 
 it.each([
   { min: 0, max: 100, value: 0, length: 0, offset: 0, angle: -135 },
+  { min: 0, max: 100, value: 1, length: 0.01, offset: 0, angle: -132.3 },
   { min: 0, max: 100, value: 50, length: 0.5, offset: 0, angle: 0 },
   { min: 0, max: 100, value: 100, length: 1, offset: 0, angle: 135 },
-  { min: -60, max: 12, value: -60, length: 0.5, offset: 0, angle: -135 },
-  { min: -60, max: 12, value: -30, length: 0.25, offset: -0.25, angle: -67.5 },
-  { min: -60, max: 12, value: 0, length: 0, offset: -0.5, angle: 0 },
-  { min: -60, max: 12, value: 6, length: 0.25, offset: -0.5, angle: 67.5 },
-  { min: -60, max: 12, value: 12, length: 0.5, offset: -0.5, angle: 135 },
-])('draws an open dial at $value in $min..$max', ({ length, offset, angle, ...range }) => {
+  { min: 1, max: 20, value: 4, length: 3 / 19, offset: 0, angle: -135 + 810 / 19 },
+  { min: -24, max: 24, value: -24, length: 0.5, offset: 0, angle: -135 },
+  { min: -24, max: 24, value: -6, length: 0.125, offset: -0.375, angle: -33.75 },
+  { min: -24, max: 24, value: 0, length: 0, offset: -0.5, angle: 0 },
+  { min: -24, max: 24, value: 6, length: 0.125, offset: -0.5, angle: 33.75 },
+  { min: -24, max: 24, value: 24, length: 0.5, offset: -0.5, angle: 135 },
+  { min: -60, max: 12, value: -60, length: 5 / 6, offset: 0, angle: -135 },
+  { min: -60, max: 12, value: -30, length: 5 / 12, offset: -5 / 12, angle: -22.5 },
+  { min: -60, max: 12, value: 0, length: 0, offset: -5 / 6, angle: 90 },
+  { min: -60, max: 12, value: 6, length: 1 / 12, offset: -5 / 6, angle: 112.5 },
+  { min: -60, max: 12, value: 12, length: 1 / 6, offset: -5 / 6, angle: 135 },
+])('draws one continuous arc at $value in $min to $max', ({ length, offset, angle, ...range }) => {
   const { dial } = renderKnob(range);
-  // Geometry is decorative, so inspect it through the slider's owning dial.
-  const valueArc = dial.querySelector('path[stroke-dasharray]');
+  // Decorative SVG geometry has no accessible role; inspect it via its input owner.
+  const arc = dial.querySelector('path[stroke-dasharray]');
   expect(dial.querySelector('circle')).toBeNull();
-  expect(valueArc).toHaveAttribute('stroke-dasharray', `${length} 1`);
-  expect(valueArc).toHaveAttribute('stroke-dashoffset', String(offset));
-  if (length === 0) expect(valueArc).toHaveAttribute('visibility', 'hidden');
-  else expect(valueArc).not.toHaveAttribute('visibility');
-  const pointer = dial.querySelector('line[transform]');
+  expect(arc).toHaveAttribute('pathLength', '1');
+  const [dash, gap] = arc?.getAttribute('stroke-dasharray')?.split(' ').map(Number) ?? [];
+  expect(dash).toBeCloseTo(length);
+  expect(gap).toBe(1);
+  expect(Number(arc?.getAttribute('stroke-dashoffset'))).toBeCloseTo(offset);
+  if (length === 0) expect(arc).toHaveAttribute('visibility', 'hidden');
+  else expect(arc).not.toHaveAttribute('visibility');
+  const pointer = dial.querySelector('line[class*=indicator]');
   expect(pointer).toHaveAttribute('transform', `rotate(${angle} 24 24)`);
   expect(pointer).toHaveAttribute('y1', '5');
   expect(pointer).toHaveAttribute('y2', '21');
-  expect(pointer).toHaveAttribute('vector-effect', 'non-scaling-stroke');
-  expect(valueArc).toHaveAttribute('vector-effect', 'non-scaling-stroke');
+  // Non-scaling strokes corrupt pathLength-normalised dashes in browser engines.
+  expect(dial.querySelector('[vector-effect]')).toBeNull();
+  if (range.min < 0 && range.max > 0) {
+    expect(dial.querySelector('line[class*=center]')).toHaveAttribute(
+      'transform',
+      `rotate(${range.min === -60 ? 90 : 0} 24 24)`,
+    );
+  }
+});
+
+it.each([
+  { min: -24, max: 24, value: -1, zero: 0.5, angle: 0, angleStep: 5.625, nextLength: 1 / 48 },
+  { min: -60, max: 12, value: -1, zero: 5 / 6, angle: 90, angleStep: 3.75, nextLength: 1 / 72 },
+  { min: 0, max: 100, value: 49, zero: 0, angle: 0, angleStep: 2.7, nextLength: 0.51 },
+])('keeps keyboard steps, pointer and arc on the same scale for $min to $max', async (range) => {
+  function Demo() {
+    const [value, setValue] = useState(range.value);
+    return <Knob {...defaults} {...range} step={1} value={value} onChange={setValue} />;
+  }
+  const user = userEvent.setup();
+  render(<Demo />);
+  const slider = screen.getByRole('slider');
+  const dial = slider.parentElement;
+  await user.tab();
+  await user.keyboard('{ArrowUp}');
+  expect(slider).toHaveAttribute('aria-valuenow', String(range.value + 1));
+  // Geometry is decorative, so inspect it through the slider's owning dial.
+  expect(dial?.querySelector('line[class*=indicator]')).toHaveAttribute(
+    'transform',
+    `rotate(${range.angle} 24 24)`,
+  );
+  const arc = dial?.querySelector('path[stroke-dasharray]');
+  expect(Number(arc?.getAttribute('stroke-dashoffset'))).toBeCloseTo(-range.zero);
+  const [length] = arc?.getAttribute('stroke-dasharray')?.split(' ').map(Number) ?? [];
+  expect(length).toBe(range.zero ? 0 : 0.5);
+  await user.keyboard('{ArrowUp}');
+  const pointer = dial?.querySelector('line[class*=indicator]');
+  const angle = Number(pointer?.getAttribute('transform')?.match(/rotate\(([^ ]+)/)?.[1]);
+  expect(angle - range.angle).toBeCloseTo(range.angleStep);
+  const [nextLength] = arc?.getAttribute('stroke-dasharray')?.split(' ').map(Number) ?? [];
+  expect(nextLength).toBeCloseTo(range.nextLength);
+  expect(Number(arc?.getAttribute('stroke-dashoffset'))).toBeCloseTo(-range.zero);
 });

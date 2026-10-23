@@ -24,7 +24,7 @@
 .focusArc {
   fill: none;
   stroke: var(--focus-color);
-  stroke-width: var(--focus-width);
+  stroke-width: calc(var(--focus-width) * 2);
   opacity: 0;
 }
 .root:has(.input:focus-visible) .focusArc {
@@ -34,7 +34,7 @@
 .value,
 .indicator {
   fill: none;
-  /* Non-scaling SVG strokes keep this token in rendered CSS pixels at 24px. */
+  /* Widths use the 48-unit viewBox: four units render as 2px at 24px. */
   stroke-width: var(--knob-stroke-width);
   stroke-linecap: round;
 }
@@ -47,7 +47,7 @@
 }
 .center {
   stroke: var(--knob-track);
-  stroke-width: var(--focus-width);
+  stroke-width: calc(var(--focus-width) * 2);
   stroke-linecap: round;
 }
 .endpoints {

@@ -541,9 +541,9 @@ export const componentContracts: readonly ComponentContract[] = [
     anatomy:
       'native range 위에 내부 원판 없는 270도 SVG track/value와 단일 pointer; 양방향 centre tick과 선택적 endpoints.',
     states:
-      'step=1, scale=linear. 양방향 범위는 0이 12시이며 양쪽 반원을 각각 min/max에 매핑한다. disabled와 값 독립. logarithmic 양수 범위. endpoints는 장식 텍스트.',
+      'step=1, scale=linear. 포인터는 입력과 같은 정규화를 사용한다. 양방향 원호와 기준선은 0의 정규화 위치에서 시작하며 대칭 범위에서만 12시다. disabled와 값 독립. logarithmic 양수 범위. endpoints는 장식 텍스트.',
     tokens:
-      '--knob-size 24 / --knob-hit-size 40 / --knob-compact-height 20; non-scaling 2px 원호·pointer, hover 2.5px / active 3px pointer; dim neutral --knob-track, text-primary --knob-indicator; disabled는 --control-disabled-opacity.',
+      '--knob-size 24 / --knob-hit-size 40 / --knob-compact-height 20; viewBox 두께 4(24px 크기에서 2px) 원호·pointer, hover 2.5px / active 3px pointer; dim neutral --knob-track, text-primary --knob-indicator; disabled는 --control-disabled-opacity.',
     interaction:
       '위로 드래그 증가; Shift 미세 조절. 방향키 ±step, Page ±10step, Home/End. 실제 range 하나가 Tab 소유.',
     source: 'apps/control-ui/src/core/ui/Knob.tsx',

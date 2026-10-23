@@ -357,10 +357,10 @@ export const mixrelayVariables = {
   '--knob-value-font-size': 'var(--font-caption)',
   '--numeric-value-font-size': 'var(--font-label)',
   '--knob-compact-height': '20px',
-  // Non-scaling SVG strokes: CSS pixels, independent of the 48-unit viewBox.
-  '--knob-stroke-width': '2px',
-  '--knob-pointer-width-hover': '2.5px',
-  '--knob-pointer-width-active': '3px',
+  // SVG viewBox units: 48 units at 24px render widths at half their value.
+  '--knob-stroke-width': '4',
+  '--knob-pointer-width-hover': '5',
+  '--knob-pointer-width-active': '6',
   '--knob-indicator': 'var(--text-primary)',
   '--eq-grid': 'var(--border-default)',
   '--eq-zero': 'var(--border-strong)',

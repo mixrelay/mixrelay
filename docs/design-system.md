@@ -281,13 +281,13 @@ Core `Knob`과 `ParameterField presentation="knob"`가 반복되는 연속 오�
 
 노브는 48×48 viewBox의 SVG를 24px 표시 지름으로 그리고 실제 조작 영역은 40px로 유지한다. 래스터 이미지·캔버스·CSS 회전 이미지 없이 고DPI와 확대에서도 벡터 선을 유지한다.
 
-`--knob-*` 토큰이 크기·선·hover·active를 정의한다. 내부 원판 없이 아래가 열린 270도(−135°..+135°) 트랙과 값 원호, 중심 근처에서 원호까지 향하는 단일 포인터를 그린다. 트랙은 테마별 흐린 중립색(Light neutral-500 / Dark graphite-400), 값과 포인터는 `--text-primary`다. 원호와 포인터는 round cap과 `vector-effect="non-scaling-stroke"`를 사용하므로 `--knob-stroke-width: 2px`는 viewBox 축소와 무관한 화면 기준 두께다. hover/active는 포인터만 2.5/3px로 강조하고 disabled는 전체 그림에 `--control-disabled-opacity`를 적용한다. 활성 값 원호는 트랙 및 소비 표면과 각각 3:1 이상 대비를 유지한다.
+`--knob-*` 토큰이 크기·선·hover·active를 정의한다. 내부 원판 없이 아래가 열린 270도(−135°..+135°) 트랙과 값 원호, 중심 근처에서 원호까지 향하는 단일 포인터를 그린다. 트랙은 테마별 흐린 중립색(Light neutral-500 / Dark graphite-400), 값과 포인터는 `--text-primary`다. 원호와 포인터는 round cap을 사용한다. 선 두께 토큰은 48×48 viewBox 단위다. `--knob-stroke-width: 4`는 24px 표시 크기에서 2px로 렌더링된다. hover/active는 포인터만 토큰 5/6으로 강조하며 같은 크기에서 2.5/3px다. 포커스 원호와 기준선은 viewBox에서 `--focus-width`의 두 배를 사용해 화면 기준 1px를 유지한다. 모든 선은 `vector-effect` 없이 SVG와 함께 확대·축소되므로 정규화한 대시 길이와 화면 좌표가 섞이지 않는다. disabled는 전체 그림에 `--control-disabled-opacity`를 적용한다. 활성 값 원호는 트랙 및 소비 표면과 각각 3:1 이상 대비를 유지한다.
 
 실제 native range input 하나가 노브의 포커스·역할·현재 값·실제 범위를 소유하고 장식 SVG는 접근성 트리에서 제외한다. 수치 입력은 같은 파라미터의 정확한 값 편집이라는 별도 행동을 소유한다. disabled·단일 중립 포커스·그래프 단축키 경계는 기존 Core 규격을 따른다. 노브 포커스는 24px SVG의 기존 원호 바깥에 아래 중앙이 열린 270도 중립 1px 원호 하나로 표시하고 보이지 않는 40px hit 영역의 큰 사각형을 노출하지 않는다.
 
-위로 드래그하면 증가하며 전체 범위는 160 CSS px 이동이다. Shift 드래그는 1/10 감도로 바꾸되 실제 값의 한 step/px를 넘지 않게 제한한다(주파수 상단에서도 1px 이동당 최대 1Hz). 누적 위치는 연속 실수로 유지하고 전달할 때만 파라미터의 공개 step으로 반올림한다. 로그 주파수도 임의 1000단계로 제한하지 않는다. 방향키는 실제 단위의 한 step, Page Up/Down은 10 step, Home/End는 범위 끝값을 선택한다. 포인터 capture는 해제·취소·disabled 전환·unmount에서 정리하며 window 리스너·타이머를 만들지 않는다. 바이폴라 값은 12시 중심 기준선을 제공하고 Pan/Balance는 L/R 끝값 힌트를 소비한다.
+위로 드래그하면 증가하며 전체 범위는 160 CSS px 이동이다. Shift 드래그는 1/10 감도로 바꾸되 실제 값의 한 step/px를 넘지 않게 제한한다(주파수 상단에서도 1px 이동당 최대 1Hz). 누적 위치는 연속 실수로 유지하고 전달할 때만 파라미터의 공개 step으로 반올림한다. 로그 주파수도 임의 1000단계로 제한하지 않는다. 방향키는 실제 단위의 한 step, Page Up/Down은 10 step, Home/End는 범위 끝값을 선택한다. 포인터 capture는 해제·취소·disabled 전환·unmount에서 정리하며 window 리스너·타이머를 만들지 않는다. 바이폴라 값은 0 위치의 기준선을 제공하고 Pan/Balance는 L/R 끝값 힌트를 소비한다.
 
-양방향 범위(`min < 0 < max`)는 0을 12시에 놓고 음수/양수를 각각 왼쪽/오른쪽 반원에 매핑한다. 값 원호는 12시에서 현재 값까지 표시하며 0에서는 숨긴다. 트랙색의 짧은 centre tick은 원호 안쪽에 둔다. 한쪽 범위는 최솟값에서 채우고 최솟값에서는 원호를 숨겨 round cap 점이 남지 않게 한다. 포인터는 값 원호와 독립적으로 최솟값·최댓값·disabled에서도 표시한다. 드래그 감도와 실제 값 범위는 기존 입력 계약을 따른다.
+포인터는 드래그·키보드·수치 입력과 같은 `parameterPosition` 정규화를 사용한다. 양방향 범위(`min < 0 < max`)의 값 원호는 0의 정규화 위치에서 현재 값까지 표시하며 0에서는 숨긴다. 트랙색의 짧은 centre tick도 0 위치의 원호 안쪽에 둔다. 대칭 범위에서만 0이 12시이며, 비대칭 −60..+12에서는 0이 전체 범위의 5/6인 90° 위치다. 한쪽 범위는 최솟값에서 채우고 최솟값에서는 원호를 숨겨 round cap 점이 남지 않게 한다. 포인터는 값 원호와 독립적으로 최솟값·최댓값·disabled에서도 표시한다. 드래그 감도와 실제 값 범위는 기존 입력 계약을 따른다.
 
 노브의 실제 소비자는 필터·Gate·Expander·Pan·Balance·Delay·Ducking·Reverb·Chorus와 Compressor·Limiter다. Core `Knob/Gain·Frequency·Disabled`, `Numeric Value Control`, Feature `Builtin Effects/Equalizer·Reverb·All Effects`가 공통 구현과 상태를 보여 준다.
 
