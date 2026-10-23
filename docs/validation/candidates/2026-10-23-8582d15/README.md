@@ -1,10 +1,14 @@
 # 후보 0.1.0 (`8582d15`) 설치본 결과
 
-필수 환경 전체 수락은 0/15다. [전체 실행](https://github.com/mixrelay/mixrelay/actions/runs/39945522752)의
-13개 작업이 끝났고 12개 환경에서 실제 설치 파일과 설치된 실행 파일의 일치를 확인했다.
-Ubuntu ARM은 VM 준비가 20분 제한을 넘어 앱 설치 전에 종료됐다.
-[Ubuntu ARM 후속 실행](https://github.com/mixrelay/mixrelay/actions/runs/39949458383)은 같은 DEB에
-VM 준비 제한을 35분으로 늘린 도구를 적용한다. 후속 결과는 전체 실행의 통과로 합치지 않는다.
+필수 환경 전체 수락은 0/15다. 실행 가능한 13개 대상 모두에서 실제 배포 파일 설치 검사를 시도했다.
+설치·실행 파일 일치는 12개 환경에서 통과했고 Ubuntu ARM은 설치 시간 초과로 실패했다.
+macOS 14.2 양쪽 CPU는 hosted에서 실행하지 못한 필수 환경으로 남는다.
+
+[전체 실행](https://github.com/mixrelay/mixrelay/actions/runs/39945522752)의 13개 작업과
+[Ubuntu ARM 후속 실행](https://github.com/mixrelay/mixrelay/actions/runs/39949458383)이 모두 종료됐다.
+전체 실행의 Ubuntu ARM은 VM 준비 20분 제한에 걸렸다. 준비 제한을 35분으로 늘린 후속 실행은
+같은 DEB의 설치를 시도했지만 의존 패키지 설정 중 설치 명령의 20분 제한을 넘겼다.
+후속 결과를 전체 실행의 통과로 합치지 않고 실행별 원문을 따로 보존한다.
 
 Ubuntu x64·Arch x64·Debian ARM은 그래프 저장/재열기, native stereo PCM, 종료된 RF64 녹음 검사를
 모두 통과했다. Linux 준비 상태 오류와 설치본 UI 미구현이 남아 이 세 환경의 전체 수락도 실패다.
@@ -22,12 +26,16 @@ Ubuntu x64·Arch x64·Debian ARM은 그래프 저장/재열기, native stereo PC
 | Debian 13.7 | x64 | 통과 | 실패 | 실패 | 차단 | 차단 | 실패 |
 | Debian 13.7 | ARM | 통과 | 실패 | 통과 | 통과 | 통과 | 통과 |
 | Ubuntu 26.04.1 LTS | x64 | 통과 | 실패 | 통과 | 통과 | 통과 | 통과 |
-| Ubuntu 26.04 ARM | ARM | 미실행: VM 준비 제한 | 미실행 | 미실행 | 미실행 | 미실행 | 설치본 미실행 |
+| Ubuntu 26.04.1 LTS (후속) | ARM | 실패: 설치 20분 제한 | 차단 | 차단 | 차단 | 차단 | 통과: 앱 실행 전 |
 | Kali rolling 2026.1 | x64 | 통과 | 실패 | 차단 | 차단 | 차단 | 통과 |
 | Kali rolling 2026.1 | ARM | 통과 | 실패 | 통과 | 실패 | 실패 | 실패 |
 | Arch rolling | x64 | 통과 | 실패 | 통과 | 통과 | 통과 | 통과 |
 | macOS 14.2 | ARM | 미실행: hosted 버전 선택 불가 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 |
 | macOS 14.2 | Intel | 미실행: hosted runner 없음 | 미실행 | 미실행 | 미실행 | 미실행 | 미실행 |
+
+Ubuntu ARM 행은 후속 실행이며 나머지 실행 결과는 전체 실행 기준이다. 후속 환경 관찰값은 설치 전의
+커널 `7.0.0-38-generic`·PipeWire `1.6.2`·WirePlumber `0.5.13`·glibc `2.43`이다.
+설치가 끝나지 않아 설치 후 실행 파일 일치·앱 준비·오디오·녹음은 확인하지 못했다.
 
 설치본 UI 조작 `GRAPH-01`은 모든 설치 환경에서 미구현으로 차단됐다.
 macOS 무료 전체 시스템 캡처 `AUDIO-11`도 미구현으로 차단됐다.
@@ -40,7 +48,7 @@ UI·권한 대화상자·업그레이드·제거·플러그인·전체 39개 과
   엔진 표본은 `AudioDeviceCreateIOProcID`의 서버 응답 대기를 기록했다. 근본 원인을 확정한 것은 아니다.
   PCM 측정과 녹음은 진행하지 못했다. 정리는 그래프 변경 완료를 확인하지 못해 실패로 유지했다.
   macOS 26 Intel에서는 제품의 정상 Quit 응답도 시간 초과했다.
-- Linux 설치 환경: 엔진의 `driverState: not_installed`로 준비 검사가 실패했다. Kali x64를 제외한
+- 설치 검사를 통과한 Linux 여섯 환경: 엔진의 `driverState: not_installed`로 준비 검사가 실패했다. Kali x64를 제외한
   다섯 환경에서는 Driver API가 Ready여서 엔진 보고와 불일치했다.
   `APP-01` 실패를 유지한 채 실제 Driver 버전·상태와 엔진 protocol·power·native backend를
   대조한 뒤 독립 오디오 검사를 진행했다. `readiness-disagreement.json`이 두 응답을 보존한다.
@@ -50,7 +58,9 @@ UI·권한 대화상자·업그레이드·제거·플러그인·전체 39개 과
 - Kali ARM: 그래프 저장/재열기는 통과했다. PCM peak는 기대값 `[0.125, 0.25]`의 두 배인
   `[0.25, 0.5]`로 실패했다. 녹음 시작은 진행됐지만 종료·검증과 정리는 `graph_exchange_busy`로 실패했다.
   [보존 PCM 재분석](signal-level-review.json)의 해시는 원시 artifact와 같다.
-- Ubuntu ARM: 전체 실행에서는 앱 설치 전 VM 패키지 준비 제한에 걸렸다. 제품 실패와 구분한다.
+- Ubuntu ARM: 전체 실행은 VM 준비 제한으로 미실행이었다. 후속 실행은 실제 DEB 설치에서
+  `spawnSync sudo ETIMEDOUT`로 `PKG-01`이 실패했다. 준비 실패와 설치 명령 시간 초과를 구분하며,
+  이 결과로 물리 ARM 환경의 설치 실패나 오디오 결함까지 확정하지 않는다.
 - Linux x64는 KVM, ARM은 TCG Cortex-A72 VM에서 실행했다. ARM 결과는 기능 검사이며
   물리 하드웨어의 실시간 지연·부하·오디오 장치 수락을 보장하지 않는다.
 - Kali 공식 이미지 파일명은 `2026.2`이지만 게스트의 실제 OS 보고는 `2026.1`이다.
@@ -69,6 +79,8 @@ UI·권한 대화상자·업그레이드·제거·플러그인·전체 39개 과
 - [전체 실행 인벤토리](inventory.md): 15개 필수 환경의 실제 버전·커널·의존성·시나리오 결과.
   같은 원시 보고서를 후속 도구로 다시 렌더링한 표다. 원시 색인의 `inventory.md` 해시는 CI 원본의 해시다.
 - [관찰 원문](observations.json): 전체 실행의 12개 설치본 보고서와 7개 VM 실행 기록. publication receipt가 아니다.
+- [Ubuntu ARM 후속 인벤토리](ubuntu-arm-inventory.md)·[관찰 원문](ubuntu-arm-observations.json)·[원시 색인](ubuntu-arm-raw-evidence-index.json): 단일 대상 실행의 원문과 15개 원시 파일 해시. 다른 환경은 이 후속 실행에서 재실행하지 않았다.
+- [전체 실행 메타데이터](workflow-run.json)·[후속 실행 메타데이터](ubuntu-arm-workflow-run.json): 작업별 시작·종료와 실패 상태.
 - [원시 파일 색인](raw-evidence-index.json): 전체 실행 artifact의 200개 파일 경로·크기·SHA-256.
   설치 파일, PCM·RF64, API 응답, 앱 로그·엔진 표본과 VM 준비 로그는 Actions의
   `installed-e2e-evidence` artifact에 90일 보존한다. 저장소에는 바이너리를 중복 저장하지 않는다.

@@ -26,14 +26,14 @@ Contract: bb3955a41cc0440074570766c5016c9eb30f18772ed80899153e1ba126bb63d6
 
 | Environment | OS version | CPU | Kernel | PipeWire | WirePlumber | glibc | Run |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| macos-14-2-arm64 | not observed | not observed | not observed | not observed | not observed | not observed | not observed |
-| macos-14-2-x64 | not observed | not observed | not observed | not observed | not observed | not observed | not observed |
-| macos-14-arm64 | 14.8.9 | arm64 | 23.6.0 | not observed | not observed | not observed | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
-| macos-15-arm64 | 15.7.9 | arm64 | 24.6.0 | not observed | not observed | not observed | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
-| macos-15-x64 | 15.7.9 | x64 | 24.6.0 | not observed | not observed | not observed | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
-| macos-26-arm64 | 26.6.2 | arm64 | 25.6.0 | not observed | not observed | not observed | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
-| macos-26-x64 | 26.6.1 | x64 | 25.6.0 | not observed | not observed | not observed | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
-| macos-27-arm64 | 27.0.1 | arm64 | 27.0.0 | not observed | not observed | not observed | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
+| macos-14-2-arm64 | not observed | not observed | not observed | not applicable | not applicable | not applicable | not observed |
+| macos-14-2-x64 | not observed | not observed | not observed | not applicable | not applicable | not applicable | not observed |
+| macos-14-arm64 | 14.8.9 | arm64 | 23.6.0 | not applicable | not applicable | not applicable | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
+| macos-15-arm64 | 15.7.9 | arm64 | 24.6.0 | not applicable | not applicable | not applicable | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
+| macos-15-x64 | 15.7.9 | x64 | 24.6.0 | not applicable | not applicable | not applicable | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
+| macos-26-arm64 | 26.6.2 | arm64 | 25.6.0 | not applicable | not applicable | not applicable | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
+| macos-26-x64 | 26.6.1 | x64 | 25.6.0 | not applicable | not applicable | not applicable | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
+| macos-27-arm64 | 27.0.1 | arm64 | 27.0.0 | not applicable | not applicable | not applicable | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
 | debian-13-x64 | Debian GNU/Linux 13 (trixie) (13.7) | x64 | 6.12.113+deb13-cloud-amd64 | 1.4.2 | 0.5.8 | 2.41 | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
 | debian-13-arm64 | Debian GNU/Linux 13 (trixie) (13.7) | arm64 | 6.12.113+deb13-cloud-arm64 | 1.4.2 | 0.5.8 | 2.41 | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
 | ubuntu-26-04-x64 | Ubuntu 26.04.1 LTS (26.04) | x64 | 7.0.0-38-generic | 1.6.2 | 0.5.13 | 2.43 | https://github.com/mixrelay/mixrelay/actions/runs/39945522752 |
@@ -71,7 +71,7 @@ Full diagnostics remain in the per-target qualification JSON and raw Actions evi
 - debian-13-arm64 / APP-01 (failed): Installed engine/Driver not ready: {"enginePower":{"enabled":true,"transitioning":false},"protocolVersion":1,"driverState":"not_installed","sampleRate":48000,"bufferFrames":128,"underruns":0,"overruns":0,"sampleFaults":{"sourceSamples":0,"inputSamples":0,"outputSamples":0,"blocks":0},"audioSession":{"endpointPreferencesUnavailable":false,"virtualEndpointSettings":{"canCreate":false,"canRename":false,"renderChannels":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64],"captureChannels":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17…
 - debian-13-arm64 / GRAPH-01 (blocked): Installed UI automation is not implemented
 - debian-13-x64: /api/v1/graphs/graph-1/recorders/qa-recorder: HTTP 409 {"code":"graph_exchange_busy","parameters":{"reason":"graph mutation in progress"}}
-- debian-13-x64 cleanup: Unconfirmed graph publication; reset the QA session  true !== false 
+- debian-13-x64 cleanup: Unconfirmed graph publication; reset the QA session  true !== false
 - debian-13-x64 / APP-01 (failed): Installed engine/Driver not ready: {"enginePower":{"enabled":true,"transitioning":false},"protocolVersion":1,"driverState":"not_installed","sampleRate":48000,"bufferFrames":128,"underruns":0,"overruns":0,"sampleFaults":{"sourceSamples":0,"inputSamples":0,"outputSamples":0,"blocks":0},"audioSession":{"endpointPreferencesUnavailable":false,"virtualEndpointSettings":{"canCreate":false,"canRename":false,"renderChannels":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64],"captureChannels":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,1…
 - debian-13-x64 / GRAPH-02 (failed): /api/v1/graph: HTTP 422 {"code":"graph_invalid","parameters":{"reason":"host audio backend failure: Driver HTTP: error sending request for url (http://mixrelay-driver/api/v1/driver)"}}
 - debian-13-x64 / AUDIO-01 (blocked): A prerequisite failed
@@ -89,42 +89,42 @@ Full diagnostics remain in the per-target qualification JSON and raw Actions evi
 - kali-rolling-x64 / REC-02 (blocked): A prerequisite failed
 - kali-rolling-x64 / GRAPH-01 (blocked): Installed UI automation is not implemented
 - macos-14-arm64: /api/v1/graph: HTTP 503 {"code":"audio_device_disconnected","parameters":{"reason":"host audio backend failure: CoreAudio device initialization failed: Err(Timeout)"}}
-- macos-14-arm64 cleanup: Unconfirmed graph publication; reset the QA session  true !== false 
+- macos-14-arm64 cleanup: Unconfirmed graph publication; reset the QA session  true !== false
 - macos-14-arm64 / AUDIO-01 (failed): /api/v1/graph: HTTP 503 {"code":"audio_device_disconnected","parameters":{"reason":"host audio backend failure: CoreAudio device initialization failed: Err(Timeout)"}}
 - macos-14-arm64 / GRAPH-02 (blocked): A prerequisite failed
 - macos-14-arm64 / REC-02 (blocked): A prerequisite failed
 - macos-14-arm64 / GRAPH-01 (blocked): Installed UI automation is not implemented
 - macos-14-arm64 / AUDIO-11 (blocked): Whole-system capture adapter and native acceptance are not implemented
 - macos-15-arm64: /api/v1/graph: HTTP 503 {"code":"audio_device_disconnected","parameters":{"reason":"host audio backend failure: CoreAudio device initialization failed: Err(Timeout)"}}
-- macos-15-arm64 cleanup: Unconfirmed graph publication; reset the QA session  true !== false 
+- macos-15-arm64 cleanup: Unconfirmed graph publication; reset the QA session  true !== false
 - macos-15-arm64 / AUDIO-01 (failed): /api/v1/graph: HTTP 503 {"code":"audio_device_disconnected","parameters":{"reason":"host audio backend failure: CoreAudio device initialization failed: Err(Timeout)"}}
 - macos-15-arm64 / GRAPH-02 (blocked): A prerequisite failed
 - macos-15-arm64 / REC-02 (blocked): A prerequisite failed
 - macos-15-arm64 / GRAPH-01 (blocked): Installed UI automation is not implemented
 - macos-15-arm64 / AUDIO-11 (blocked): Whole-system capture adapter and native acceptance are not implemented
 - macos-15-x64: /api/v1/graph: HTTP 503 {"code":"audio_device_disconnected","parameters":{"reason":"host audio backend failure: CoreAudio device initialization failed: Err(Timeout)"}}
-- macos-15-x64 cleanup: Unconfirmed graph publication; reset the QA session  true !== false 
+- macos-15-x64 cleanup: Unconfirmed graph publication; reset the QA session  true !== false
 - macos-15-x64 / AUDIO-01 (failed): /api/v1/graph: HTTP 503 {"code":"audio_device_disconnected","parameters":{"reason":"host audio backend failure: CoreAudio device initialization failed: Err(Timeout)"}}
 - macos-15-x64 / GRAPH-02 (blocked): A prerequisite failed
 - macos-15-x64 / REC-02 (blocked): A prerequisite failed
 - macos-15-x64 / GRAPH-01 (blocked): Installed UI automation is not implemented
 - macos-15-x64 / AUDIO-11 (blocked): Whole-system capture adapter and native acceptance are not implemented
 - macos-26-arm64: /api/v1/graph: HTTP 503 {"code":"audio_device_disconnected","parameters":{"reason":"host audio backend failure: CoreAudio device initialization failed: Err(Timeout)"}}
-- macos-26-arm64 cleanup: Unconfirmed graph publication; reset the QA session  true !== false 
+- macos-26-arm64 cleanup: Unconfirmed graph publication; reset the QA session  true !== false
 - macos-26-arm64 / AUDIO-01 (failed): /api/v1/graph: HTTP 503 {"code":"audio_device_disconnected","parameters":{"reason":"host audio backend failure: CoreAudio device initialization failed: Err(Timeout)"}}
 - macos-26-arm64 / GRAPH-02 (blocked): A prerequisite failed
 - macos-26-arm64 / REC-02 (blocked): A prerequisite failed
 - macos-26-arm64 / GRAPH-01 (blocked): Installed UI automation is not implemented
 - macos-26-arm64 / AUDIO-11 (blocked): Whole-system capture adapter and native acceptance are not implemented
 - macos-26-x64: /api/v1/graph: HTTP 503 {"code":"audio_device_disconnected","parameters":{"reason":"host audio backend failure: CoreAudio device initialization failed: Err(Timeout)"}}
-- macos-26-x64 cleanup: Unconfirmed graph publication; reset the QA session  true !== false  Command failed: /Applications/MixRelay/Uninstall MixRelay.app/Contents/Helpers/mixrelay-macos-installer quit-mixrelay-runtime ERROR MixRelay installation failed: quit-mixrelay-runtime did not complete Quit (pid 7608) 
+- macos-26-x64 cleanup: Unconfirmed graph publication; reset the QA session  true !== false  Command failed: /Applications/MixRelay/Uninstall MixRelay.app/Contents/Helpers/mixrelay-macos-installer quit-mixrelay-runtime ERROR MixRelay installation failed: quit-mixrelay-runtime did not complete Quit (pid 7608)
 - macos-26-x64 / AUDIO-01 (failed): /api/v1/graph: HTTP 503 {"code":"audio_device_disconnected","parameters":{"reason":"host audio backend failure: CoreAudio device initialization failed: Err(Timeout)"}}
 - macos-26-x64 / GRAPH-02 (blocked): A prerequisite failed
 - macos-26-x64 / REC-02 (blocked): A prerequisite failed
 - macos-26-x64 / GRAPH-01 (blocked): Installed UI automation is not implemented
 - macos-26-x64 / AUDIO-11 (blocked): Whole-system capture adapter and native acceptance are not implemented
 - macos-27-arm64: /api/v1/graph: HTTP 503 {"code":"audio_device_disconnected","parameters":{"reason":"host audio backend failure: CoreAudio device initialization failed: Err(Timeout)"}}
-- macos-27-arm64 cleanup: Unconfirmed graph publication; reset the QA session  true !== false 
+- macos-27-arm64 cleanup: Unconfirmed graph publication; reset the QA session  true !== false
 - macos-27-arm64 / AUDIO-01 (failed): /api/v1/graph: HTTP 503 {"code":"audio_device_disconnected","parameters":{"reason":"host audio backend failure: CoreAudio device initialization failed: Err(Timeout)"}}
 - macos-27-arm64 / GRAPH-02 (blocked): A prerequisite failed
 - macos-27-arm64 / REC-02 (blocked): A prerequisite failed

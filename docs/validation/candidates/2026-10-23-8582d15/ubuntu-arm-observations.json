@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Single-target diagnostic follow-up; not a publication receipt and not merged into the full-run gate",
+  "runUrl": "https://github.com/mixrelay/mixrelay/actions/runs/39949458383",
+  "runId": "39949458383",
+  "runAttempt": "1",
+  "suiteRevision": "e5cbbd21870f9eee7edc2e23b793ad5f63d97c76",
+  "environmentObservationScope": "Before package installation; installation did not complete",
+  "candidate": {
+    "schemaVersion": 1,
+    "product": "mix-relay",
+    "version": "0.1.0",
+    "sourceRevision": "8582d158455c56006e4288146dcc646100c34bb5",
+    "contractSha256": "bb3955a41cc0440074570766c5016c9eb30f18772ed80899153e1ba126bb63d6",
+    "artifacts": [
+      {
+        "id": "macos-universal-pkg",
+        "file": "MixRelay-Installer-0.1.0.pkg",
+        "sha256": "926023b29a72a6b4e86386d32e1c7b21458cf41464eb01aa7f32c55dd40fea97",
+        "size": 69259123
+      },
+      {
+        "id": "linux-x64-deb",
+        "file": "MixRelay_0.1.0_amd64.deb",
+        "sha256": "9b84bdaa85884576470fb87d94b2f6fc244819dd021d8cf0848822b329a20c4a",
+        "size": 31683186
+      },
+      {
+        "id": "linux-arm64-deb",
+        "file": "MixRelay_0.1.0_arm64.deb",
+        "sha256": "d46de76461f7f77677ef8ebf3baf84e3dce4ef836b6461865d0e484b1ccc1d12",
+        "size": 30815318
+      },
+      {
+        "id": "linux-x64-arch",
+        "file": "mix-relay-0.1.0-1-x86_64.pkg.tar.zst",
+        "sha256": "03d02a54646802db21f6d4ea87444619a3533656cf9f3ba8cb5a11256386b02d",
+        "size": 30405441
+      }
+    ]
+  },
+  "gate": {
+    "passed": false,
+    "failures": [
+      "macos-14-2-arm64: missing report; GitHub-hosted runners cannot select macOS 14.2; macOS 14 Intel is also unavailable.",
+      "macos-14-2-x64: missing report; GitHub-hosted runners cannot select macOS 14.2; macOS 14 Intel is also unavailable.",
+      "macos-14-arm64: missing report",
+      "macos-15-arm64: missing report",
+      "macos-15-x64: missing report",
+      "macos-26-arm64: missing report",
+      "macos-26-x64: missing report",
+      "macos-27-arm64: missing report",
+      "debian-13-x64: missing report",
+      "debian-13-arm64: missing report",
+      "ubuntu-26-04-x64: missing report",
+      "ubuntu-26-04-arm64: PKG-01: failed",
+      "kali-rolling-x64: missing report",
+      "kali-rolling-arm64: missing report",
+      "arch-rolling-x64: missing report"
+    ]
+  },
+  "reports": [
+    {
+      "schemaVersion": 1,
+      "targetId": "ubuntu-26-04-arm64",
+      "sourceRevision": "8582d158455c56006e4288146dcc646100c34bb5",
+      "contractSha256": "bb3955a41cc0440074570766c5016c9eb30f18772ed80899153e1ba126bb63d6",
+      "candidateSha256": "221bd97014984bf26d2ef09bf3158ba712b99ea69c00e48f5f1b279979cca155",
+      "artifactSha256": "d46de76461f7f77677ef8ebf3baf84e3dce4ef836b6461865d0e484b1ccc1d12",
+      "provenance": {
+        "repository": "mixrelay/mixrelay",
+        "runId": "39949458383",
+        "runAttempt": "1",
+        "suiteRevision": "e5cbbd21870f9eee7edc2e23b793ad5f63d97c76"
+      },
+      "startedAt": "2026-10-23T12:28:18.566Z",
+      "status": "failed",
+      "cleanup": "passed",
+      "scenarios": [
+        {
+          "id": "PKG-01",
+          "scope": "artifact",
+          "status": "failed",
+          "error": "spawnSync sudo ETIMEDOUT",
+          "evidence": [
+            {
+              "file": "PKG-01.failure.json",
+              "sha256": "5682f7c0d46d0ac472ff882c372397f513728bcd7a9cba8b99255262c2d46178"
+            }
+          ]
+        },
+        {
+          "id": "APP-01",
+          "scope": "installed-api",
+          "status": "blocked",
+          "evidence": [],
+          "error": "A prerequisite failed"
+        },
+        {
+          "id": "GRAPH-02",
+          "scope": "installed-api",
+          "status": "blocked",
+          "evidence": [],
+          "error": "A prerequisite failed"
+        },
+        {
+          "id": "AUDIO-01",
+          "scope": "native-audio",
+          "status": "blocked",
+          "evidence": [],
+          "error": "A prerequisite failed"
+        },
+        {
+          "id": "REC-02",
+          "scope": "installed-api",
+          "status": "blocked",
+          "evidence": [],
+          "error": "A prerequisite failed"
+        },
+        {
+          "id": "GRAPH-01",
+          "scope": "installed-ui",
+          "status": "blocked",
+          "evidence": [],
+          "error": "Installed UI automation is not implemented"
+        }
+      ],
+      "environment": {
+        "os": "linux",
+        "arch": "arm64",
+        "kernel": "7.0.0-38-generic",
+        "kind": "native-session",
+        "desktopSession": {
+          "type": "x11",
+          "desktop": "MixRelay-QA",
+          "display": "x11"
+        },
+        "osRelease": "PRETTY_NAME=\"Ubuntu 26.04.1 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"26.04\"\nVERSION=\"26.04.1 LTS (Resolute Raccoon)\"\nVERSION_CODENAME=resolute\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=resolute\nLOGO=ubuntu-logo\n",
+        "distro": "ubuntu",
+        "version": "26.04",
+        "dependencies": {
+          "pipewire": "1.6.2",
+          "wireplumber": "0.5.13",
+          "glibc": "2.43"
+        },
+        "packageInventorySha256": "dde697ba633e6897d110d8cc5ce1f4e01063e19310dce63e548c583a16505dbb"
+      },
+      "error": "Installation or installed artifact identity failed",
+      "endedAt": "2026-10-23T12:48:30.644Z"
+    }
+  ],
+  "vmSessions": [
+    {
+      "targetId": "ubuntu-26-04-arm64",
+      "scope": "installed-qualification",
+      "image": {
+        "url": "https://cloud-images.ubuntu.com/releases/resolute/release-20261016/ubuntu-26.04-server-cloudimg-arm64.img",
+        "algorithm": "sha256",
+        "digest": "8eb876c2ccc4b6ff89e4a65d511815923b285e04503ba465809bf587f763da24",
+        "format": "qcow2"
+      },
+      "arch": "arm64",
+      "baseVirtualSize": 3758096384,
+      "guestVirtualSize": 21474836480,
+      "provisioning": {
+        "repairEfiMount": false
+      },
+      "accelerator": "tcg",
+      "cpuModel": "cortex-a72",
+      "guestExitCode": 1,
+      "evidenceCollected": true,
+      "error": "Guest suite failed; see guest-suite.log and qualification report\n\n1 !== 0\n"
+    }
+  ]
+}

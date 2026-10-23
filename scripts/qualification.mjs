@@ -116,7 +116,7 @@ export function vmInventory(directory) {
 }
 export function qualificationInventory(candidate, reports, loaded = loadContract()) {
   const result = evaluateQualification(candidate, reports, loaded);
-  const cell = value => String(value ?? 'not observed').replaceAll('|', '/').replaceAll('\n', ' ');
+  const cell = value => String(value ?? 'not observed').replaceAll('|', '/').replaceAll('\n', ' ').trim();
   const summary = `# Candidate qualification\n\nSource: ${candidate.sourceRevision}\n\nContract: ${loaded.sha256}\n\n`
     + '| Environment | Artifact SHA-256 | Result |\n| --- | --- | --- |\n'
     + loaded.contract.qualificationTargets.map(t => {
@@ -130,8 +130,11 @@ export function qualificationInventory(candidate, reports, loaded = loadContract
       const report = reports.find(r => r.targetId === target.id), observed = report?.environment;
       const release = observed?.os === 'linux' && typeof observed.osRelease === 'string' ? parseOsRelease(observed.osRelease) : {};
       const osVersion = release.PRETTY_NAME ? `${release.PRETTY_NAME} (${release.DEBIAN_VERSION_FULL ?? observed.version})` : observed?.version;
+      const dependencies = target.os === 'linux'
+        ? [observed?.dependencies?.pipewire, observed?.dependencies?.wireplumber, observed?.dependencies?.glibc]
+        : ['not applicable', 'not applicable', 'not applicable'];
       return '| ' + [target.id, osVersion, observed?.arch, observed?.kernel,
-        observed?.dependencies?.pipewire, observed?.dependencies?.wireplumber, observed?.dependencies?.glibc,
+        ...dependencies,
         report?.provenance?.runId ? `https://github.com/mixrelay/mixrelay/actions/runs/${report.provenance.runId}` : undefined].map(cell).join(' | ') + ' |';
     }).join('\n') + '\n';
   const errors = reports.flatMap(report => {
