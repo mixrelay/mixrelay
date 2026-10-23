@@ -15,6 +15,7 @@ test('QEMU uses the native guest CPU and binds SSH only to the hosted runner loo
   const arm = qemuArguments({ ...settings, cpuArch: 'arm64', accelerator: 'tcg' });
   assert.equal(arm[1], 'virt,accel=tcg');
   assert.ok(arm.includes('user,id=net0,hostfwd=tcp:127.0.0.1:22022-:22'));
+  assert.ok(arm.includes('virtio-net-pci,netdev=net0,romfile='), 'Disk boot must not require an ARM PXE ROM');
   const x64 = qemuArguments({ ...settings, cpuArch: 'x64', accelerator: 'kvm' });
   assert.equal(x64[1], 'q35,accel=kvm');
   assert.equal(x64[3], 'host');

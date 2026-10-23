@@ -399,9 +399,9 @@
       "format": "qcow2"
     },
     "kali-x64": {
-      "url": "https://archive.kali.org/kali-weekly-extra-images/kali-linux-2026-W43-cloud-genericcloud-amd64.tar.xz",
+      "url": "https://kali.download/cloud-images/kali-2026.2/kali-linux-2026.2-cloud-genericcloud-amd64.tar.xz",
       "algorithm": "sha256",
-      "digest": "154c614c3f457dcb32eeee72887ff24d3ba970bc29b147c2db9231a325a5736e",
+      "digest": "3f4ca86ae1eca0dc2bf2092f065a959508e186c6b44f85758813a8e9a0604f3e",
       "format": "tar.xz"
     },
     "debian-arm64": {
@@ -417,9 +417,9 @@
       "format": "qcow2"
     },
     "kali-arm64": {
-      "url": "https://archive.kali.org/kali-weekly-extra-images/kali-linux-2026-W43-cloud-genericcloud-arm64.tar.xz",
+      "url": "https://kali.download/cloud-images/kali-2026.2/kali-linux-2026.2-cloud-genericcloud-arm64.tar.xz",
       "algorithm": "sha256",
-      "digest": "99f694a42667d0e92adbd0121cc3626b5b98ac0d4ed6cf075c52408993c82221",
+      "digest": "9ab19c28d049fdc6f1d5d30f6cc93b8b01997f11c89f6992f690c07b16b7b7e4",
       "format": "tar.xz"
     },
     "arch-x64": {

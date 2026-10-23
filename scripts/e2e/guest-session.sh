@@ -6,9 +6,11 @@ export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 export XDG_SESSION_TYPE=x11 XDG_CURRENT_DESKTOP=MixRelay-QA DISPLAY=:99
 export PATH="/home/qa/tools:$PATH"
 systemctl --user daemon-reload
+systemctl --user start dbus.socket
 systemctl --user import-environment DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP
 dbus-update-activation-environment --systemd DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP
 systemctl --user start mixrelay-qa-display.service pipewire.service wireplumber.service
+systemctl --user is-active mixrelay-qa-display.service pipewire.service wireplumber.service
 # The VM owns this fresh keyring and is deleted after the job.
 printf '\n' | gnome-keyring-daemon --unlock --components=secrets
 if [[ "$1" == --smoke ]]; then

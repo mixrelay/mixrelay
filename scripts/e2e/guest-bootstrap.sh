@@ -9,7 +9,7 @@ if [[ "$ID" == arch ]]; then
 else
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y --no-install-recommends xvfb dbus-x11 pipewire pipewire-bin \
+  apt-get install -y --no-install-recommends xvfb dbus-x11 dbus-user-session pipewire pipewire-bin \
     pipewire-pulse wireplumber gnome-keyring libsecret-tools libarchive-tools openbox sudo
 fi
 loginctl enable-linger qa

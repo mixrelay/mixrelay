@@ -28,7 +28,7 @@ export function qemuArguments({ cpuArch, accelerator, disk, seed, firmware, vari
     '-drive', `if=pflash,format=raw,file=${variables}`,
     '-drive', `if=virtio,format=qcow2,file=${disk}`,
     '-drive', `if=virtio,format=raw,readonly=on,file=${seed}`,
-    '-netdev', `user,id=net0,hostfwd=tcp:127.0.0.1:${port}-:22`, '-device', 'virtio-net-pci,netdev=net0',
+    '-netdev', `user,id=net0,hostfwd=tcp:127.0.0.1:${port}-:22`, '-device', 'virtio-net-pci,netdev=net0,romfile=',
     '-display', 'none', '-serial', `file:${serial}`, '-monitor', 'none', '-no-reboot'];
 }
 
@@ -160,8 +160,8 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
       { timeout: 900000, allowFailure: true, log: join(output, 'guest-suite.log') });
     const collected = await command('scp', [...sshOptions, '-P', String(port), '-r', 'qa@127.0.0.1:/home/qa/workspace/evidence/.', output], { timeout: 180000, allowFailure: true });
     session.guestExitCode = result.code; session.evidenceCollected = collected.code === 0;
-    assert.equal(collected.code, 0, 'Guest evidence collection failed');
     assert.equal(result.code, 0, 'Guest suite failed; see guest-suite.log and qualification report');
+    assert.equal(collected.code, 0, 'Guest evidence collection failed');
     return session;
   } catch (error) { session.error = error.message; throw error; }
   finally {
