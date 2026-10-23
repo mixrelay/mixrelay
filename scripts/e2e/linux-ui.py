@@ -36,7 +36,7 @@ def find(label, contains=False, interactive=True):
             for node, _ in descendants(application()):
                 role = node.getRoleName()
                 matched = label in node.name if contains else node.name == label
-                if matched and (not interactive or role in ("push button", "menu item", "combo box", "list item")):
+                if matched and (not interactive or role in ("button", "push button", "menu item", "combo box", "list item")):
                     if node.getState().contains(pyatspi.STATE_SHOWING):
                         return node
         except (LookupError, RuntimeError):
