@@ -43,11 +43,24 @@ export function validateContract(value) {
     }
     if (!['major', 'minor', 'rolling'].includes(target.versionMatch)
       || !['x64', 'arm64'].includes(target.arch)
-      || !Array.isArray(target.runnerLabels) || !target.runnerLabels.includes('mixrelay-qualification')) {
+      || !['github-hosted', 'linux-vm', 'unavailable'].includes(target.execution?.kind)) {
       throw new Error(`Incomplete qualification environment: ${target.id}`);
     }
     if (target.versionMatch !== 'rolling' && !new RegExp(target.versionMatch === 'major' ? '^\\d+$' : '^\\d+\\.\\d+$').test(target.version)) throw new Error(`Invalid version rule: ${target.id}`);
     if (target.os === 'macos' && !value.macosArchitectures?.[target.version.split('.')[0]]?.includes(target.arch)) throw new Error(`Unsupported macOS/CPU combination: ${target.id}`);
+    const execution = target.execution;
+    if (execution.kind === 'unavailable') {
+      if (!execution.reason) throw new Error(`Missing coverage gap reason: ${target.id}`);
+    } else if (target.os === 'macos') {
+      if (execution.kind !== 'github-hosted' || !value.codeChecks.macos.some(t => t.runner === execution.runner
+        && t.arch === target.arch && t.version === target.version)) throw new Error(`Invalid hosted macOS target: ${target.id}`);
+    } else if (execution.kind !== 'linux-vm' || execution.runner !== (target.arch === 'arm64' ? 'ubuntu-24.04-arm' : 'ubuntu-24.04')
+      || !value.qualificationImages?.[execution.image]) throw new Error(`Invalid Linux VM target: ${target.id}`);
+  }
+  for (const image of Object.values(value.qualificationImages ?? {})) {
+    if (!/^https:\/\//.test(image.url) || !['qcow2', 'tar.xz'].includes(image.format)
+      || !['sha256', 'sha512'].includes(image.algorithm)
+      || !new RegExp(`^[a-f0-9]{${image.algorithm === 'sha512' ? 128 : 64}}$`).test(image.digest)) throw new Error('Unpinned qualification VM image');
   }
   for (const target of value.codeChecks.macos) {
     if (!value.macosArchitectures?.[target.version]?.includes(target.arch)) throw new Error(`Unsupported macOS CI combination: ${target.id}`);
@@ -75,6 +88,11 @@ export function ciMatrices(contract) {
   };
 }
 
+export function qualificationMatrix(contract) {
+  return { include: contract.qualificationTargets.filter(t => t.execution.kind !== 'unavailable')
+    .map(target => ({ ...target, runner: target.execution.runner })) };
+}
+
 export function composeDocument(contract) {
   const services = contract.codeChecks.linuxDistributions.map(distro =>
     `  ${distro.id}:\n    <<: *runtime\n${distro.id === 'arch' ? '    platform: linux/amd64\n' : ''}`
@@ -97,8 +115,8 @@ export function matchesVersion(actual, target) {
 export function contractInventory(contract) {
   return '# Supported qualification environments\n\n'
     + 'Generated from `support/environments.json`. A listed target is a release requirement, not a passing result.\n\n'
-    + '| Environment | OS / distribution | Version rule | CPU | Same candidate artifact |\n| --- | --- | --- | --- | --- |\n'
-    + contract.qualificationTargets.map(t => `| ${t.id} | ${t.distro ?? t.os} | ${t.version} (${t.versionMatch}) | ${t.arch} | ${t.artifact} |`).join('\n')
+    + '| Environment | OS / distribution | Version rule | CPU | Same candidate artifact | Execution |\n| --- | --- | --- | --- | --- | --- |\n'
+    + contract.qualificationTargets.map(t => `| ${t.id} | ${t.distro ?? t.os} | ${t.version} (${t.versionMatch}) | ${t.arch} | ${t.artifact} | ${t.execution.kind === 'unavailable' ? `Unavailable: ${t.execution.reason}` : `${t.execution.runner}${t.os === 'linux' ? ' / full Linux VM' : ''}`} |`).join('\n')
     + '\n\nRolling targets require the exact OS release, kernel, dependency versions and package-inventory hash in each qualification report.\n';
 }
 

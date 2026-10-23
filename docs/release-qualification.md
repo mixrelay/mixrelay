@@ -51,35 +51,47 @@ each file's size and SHA-256. Rebuilding, signing, stapling or repacking changes
 candidate and requires another qualification run. Attach these files to a draft or
 prerelease GitHub release; creating a candidate does not publish the product.
 
-## Native runners
+## GitHub-hosted execution
 
 `Qualify exact release artifacts` is manually dispatched from `main` with the
 candidate release tag. It accepts source commits already in `main`, checks the
 successful source build/unit-test workflow for that exact `main` commit, contract
-and file hashes, and fails before scheduling if any target lacks an online
-runner. Its preflight uses `QUALIFICATION_RUNNER_READ_TOKEN`, a fine-grained token
-with repository Administration read permission. The ordinary workflow token cannot
-read that administrative runner inventory. The token is used only on the hosted
-preflight job.
+and file hashes. It uses standard GitHub-hosted runners and the ordinary workflow
+token. It requires no registered QA machines or repository administration token.
 
-Provision resettable desktop QA sessions with the labels in the contract. Register
-each Actions runner for one job and reset its VM or dedicated QA installation after
-the job, including after failure. These machines need a normal desktop user, native
-audio services, installation tools, noninteractive `sudo` and the OS permissions used
-by the probe. macOS needs Xcode command-line tools; Linux needs `pw-cat`, `pipewire`,
-`wireplumber`, `bsdtar` for Arch, and its package manager. Never register a personal
-workstation. No pull-request event may reach these privileged runners.
+macOS installs the Universal PKG directly on six hosted OS/CPU combinations: 14 arm64,
+15 arm64/x64, 26 arm64/x64 and 27 arm64. GitHub chooses each image's patch version;
+the report records the observed version. macOS 14.2 on both CPUs remains a required
+coverage gap: GitHub cannot select that patch, and has no macOS 14 Intel runner.
+Those targets stay in the inventory as unexecuted and prevent release qualification.
+The macOS 14 arm64 hosted job does not substitute for a 14.2 result.
+
+Linux uses `ubuntu-24.04` or `ubuntu-24.04-arm` as the VM host. QEMU boots each
+distribution's complete cloud image with its own kernel, systemd, X11 display,
+PipeWire and WirePlumber user services. The contract pins official Debian, Ubuntu,
+Kali and Arch image URLs and checksums. The adapter checks the download before boot,
+uses a fresh disk overlay and SSH key, forwards only public workflow identity, then
+collects evidence and deletes the VM. KVM is used when available; otherwise the same
+guest CPU architecture runs with TCG. `vm-session.json` records the accelerator;
+TCG results are functional evidence and do not establish hardware latency.
+
+`Qualification VM readiness` boots all seven Linux combinations on pull requests
+that change the VM tooling. It checks OS/CPU/dependency identity and desktop audio
+prerequisites. Its `host-readiness` output does not qualify a release artifact.
+The manual release workflow installs the candidate and runs the shared suite in
+those same guests. Cloud-image downloads that expire or change fail verification;
+update the contract to a new official image and checksum before the next run.
 
 The installed runner rejects containers, Rosetta, another CPU/OS/distro, dependencies
 below the contract floors and pre-existing installed MixRelay executables. It opens
 the normal installed app and normal control sockets. It compares installed core
 executables against the candidate package, exercises graph save/reopen, emits native
 stereo PCM through the free installation's default device, and checks the recorder's
-finalized RF64 sizes and samples. It restores its graph and stops its app; runner reset
-removes the installation, default device and remaining QA data. Cleanup failure also
+finalized RF64 sizes and samples. It restores its graph and stops its app; disposal
+of the hosted job or guest removes the installation and remaining QA data. Cleanup failure also
 fails qualification.
 
-For diagnosis on a disposable QA session:
+For diagnosis on a disposable session:
 
 ```sh
 pnpm test:e2e:installed --target debian-13-x64 \

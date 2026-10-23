@@ -39,11 +39,10 @@ jobs:
           gh release view "$CANDIDATE_TAG" --json isDraft,isPrerelease | jq -e '.isDraft or .isPrerelease'
           mkdir candidate
           gh release download "$CANDIDATE_TAG" --dir candidate --pattern '*.pkg' --pattern '*.deb' --pattern '*.pkg.tar.zst' --pattern 'mix-relay.candidate.json'
-      - name: Check source, contract, bytes and available native runners
+      - name: Check source, contract, bytes and hosted execution matrix
         id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
-          RUNNER_READ_TOKEN: ${{ secrets.QUALIFICATION_RUNNER_READ_TOKEN }}
         run: node scripts/qualification-ci.mjs prepare --directory candidate
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -59,10 +58,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
-    # Only manual runs from main reach these resettable, single-job desktop sessions.
-    # Never add pull_request or pull_request_target triggers to this workflow.
-    runs-on: ${{ matrix.runnerLabels }}
-    timeout-minutes: 20
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -75,10 +72,21 @@ jobs:
         with:
           name: qualification-candidate
           path: candidate
-      - name: Install the same candidate; run shared native suite
+      - name: Prepare full Linux VM tools
+        if: matrix.os == 'linux'
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: bash scripts/e2e/github-vm-tools.sh "$TARGET_ARCH"
+      - name: Install the same candidate on hosted macOS
+        if: matrix.os == 'macos'
         env:
           TARGET: ${{ matrix.id }}
         run: node scripts/e2e/installed.mjs --target "$TARGET" --directory candidate --candidate candidate/mix-relay.candidate.json --output evidence --disposable-environment
+      - name: Install the same candidate inside a full Linux VM
+        if: matrix.os == 'linux'
+        env:
+          TARGET: ${{ matrix.id }}
+        run: node scripts/e2e/github-vm.mjs --target "$TARGET" --directory candidate --output evidence
       - name: Preserve failures and raw evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

@@ -32,7 +32,7 @@ export function qualificationFixture(t) {
       artifactSha256: candidate.artifacts.find(item => item.id === target.artifact).sha256,
       provenance: { repository: 'mixrelay/mixrelay', runId: '42', runAttempt: '1' },
       environment: { os: target.os, arch: target.arch, distro: target.distro,
-        version: target.version === 'rolling' ? '2026.4' : target.version,
+        version: target.version === 'rolling' ? '2026.4' : target.id === 'macos-14-arm64' ? '14.8.7' : target.version,
         kind: 'native-session', kernel: 'synthetic-test-kernel', osRelease: 'Synthetic OS release',
         packageInventorySha256: 'f'.repeat(64), dependencies: { pipewire: '1.2.0', wireplumber: '0.5.0', glibc: '2.39' } },
       status: 'passed', cleanup: 'passed', startedAt: '2026-10-23T00:00:00Z', endedAt: '2026-10-23T00:00:01Z',

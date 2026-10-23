@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { createCandidate, validateCandidate, evaluateQualification, readReports, qualificationInventory } from './qualification.mjs';
 import { assertQualifiedRelease } from './prepare-release-manifest.mjs';
-import { missingRunners, validateRun, successfulSourceRun } from './qualification-ci.mjs';
+import { validateRun, successfulSourceRun } from './qualification-ci.mjs';
+import { qualificationMatrix } from './support-contract.mjs';
 import { qualificationFixture } from './e2e/qualification.fixture.mjs';
 
 test('one candidate maps the same Universal PKG and per-CPU DEBs across every required environment', t => {
@@ -71,13 +72,15 @@ test('unqualified formats, missing candidate artifacts and symlink installers ar
   assert.ok(readFileSync(f.candidatePath).length > 0);
 });
 
-test('runner preflight fails fast until every exact native label has an online runner', t => {
+test('hosted matrix schedules available targets and preserves exact-version coverage gaps in the gate', t => {
   const { loaded } = qualificationFixture(t);
-  assert.equal(missingRunners(loaded.contract, []).length, loaded.contract.qualificationTargets.length);
-  const runners = loaded.contract.qualificationTargets.map(t => ({ status: 'online', labels: t.runnerLabels.map(name => ({ name })) }));
-  assert.deepEqual(missingRunners(loaded.contract, runners), []);
-  runners[0].status = 'offline';
-  assert.deepEqual(missingRunners(loaded.contract, runners), ['macos-14-2-arm64']);
+  const matrix = qualificationMatrix(loaded.contract).include;
+  assert.equal(matrix.length, 13);
+  assert.ok(matrix.every(t => !t.runner.includes('self-hosted')));
+  assert.equal(matrix.find(t => t.id === 'macos-14-arm64').runner, 'macos-14');
+  assert.equal(matrix.find(t => t.id === 'debian-13-arm64').runner, 'ubuntu-24.04-arm');
+  assert.ok(!matrix.some(t => t.id.startsWith('macos-14-2')));
+  assert.match(qualificationInventory({ artifacts: [] }, [], loaded), /GitHub-hosted runners cannot select macOS 14.2/);
 });
 
 test('publication accepts only a successful trusted workflow execution and exact retry attempt', () => {

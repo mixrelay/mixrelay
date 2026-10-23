@@ -4,17 +4,13 @@ import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } 
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { digest, loadContract, checkGenerated } from './support-contract.mjs';
+import { digest, loadContract, checkGenerated, qualificationMatrix } from './support-contract.mjs';
 import { validateCandidate, readReports, evaluateQualification } from './qualification.mjs';
 import { prepareReleaseManifest, assertQualifiedRelease } from './prepare-release-manifest.mjs';
 
 const execute = (program, args, options = {}) => execFileSync(program, args, { encoding: 'utf8', timeout: 60000, maxBuffer: 16 * 1024 * 1024, ...options }).trim();
 const api = path => JSON.parse(execute('gh', ['api', path]));
 const read = path => JSON.parse(readFileSync(path));
-export function missingRunners(contract, runners) {
-  return contract.qualificationTargets.filter(target => !runners.some(runner => runner.status === 'online'
-    && target.runnerLabels.every(label => runner.labels.some(item => item.name.toLowerCase() === label.toLowerCase())))).map(target => target.id);
-}
 export function validateRun(run, receipt) {
   assert.match(String(receipt.runId), /^[1-9]\d*$/);
   assert.equal(String(run.id), receipt.runId);
@@ -52,14 +48,9 @@ async function main() {
     assert.equal(process.env.GITHUB_REF, 'refs/heads/main');
     execute('git', ['merge-base', '--is-ancestor', candidate.sourceRevision, 'HEAD']);
     sourceCheck(candidate);
-    assert.ok(process.env.RUNNER_READ_TOKEN, 'QUALIFICATION_RUNNER_READ_TOKEN with repository administration:read is required for runner preflight');
-    const pages = JSON.parse(execute('gh', ['api', '--paginate', '--slurp', 'repos/mixrelay/mixrelay/actions/runners?per_page=100'],
-      { env: { ...process.env, GH_TOKEN: process.env.RUNNER_READ_TOKEN } }));
-    const missing = missingRunners(loaded.contract, pages.flatMap(page => page.runners));
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-      `## Native runner availability\n\n${loaded.contract.qualificationTargets.map(target => `- ${target.id}: ${missing.includes(target.id) ? 'missing / offline' : 'online; not yet tested'}`).join('\n')}\n`);
-    assert.deepEqual(missing, [], `No online native QA runner for: ${missing.join(', ')}. Provision resettable desktop sessions before qualification.`);
-    appendFileSync(process.env.GITHUB_OUTPUT, `source=${candidate.sourceRevision}\nmatrix=${JSON.stringify({ include: loaded.contract.qualificationTargets })}\n`);
+      `## GitHub-hosted qualification\n\n${loaded.contract.qualificationTargets.map(target => `- ${target.id}: ${target.execution.kind === 'unavailable' ? target.execution.reason : `${target.execution.runner}; not yet tested`}`).join('\n')}\n\nUnavailable targets remain missing in the release gate.\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `source=${candidate.sourceRevision}\nmatrix=${JSON.stringify(qualificationMatrix(loaded.contract))}\n`);
   } else if (command === 'seal') {
     const sourceRun = sourceCheck(candidate);
     const reports = readReports(values.reports);

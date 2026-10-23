@@ -31,3 +31,11 @@ test('source CI verifies its declared CPU and distro while keeping container che
   validateCodeCheckEnvironment(mac, 'macos-14-arm64', f.loaded.contract);
   assert.throws(() => validateCodeCheckEnvironment({ ...mac, translated: true }, 'macos-14-arm64', f.loaded.contract));
 });
+
+test('a hosted macOS major-version match cannot bypass the deployment minimum', t => {
+  const f = qualificationFixture(t);
+  const target = f.loaded.contract.qualificationTargets.find(t => t.id === 'macos-14-arm64');
+  const observed = f.reports.find(r => r.targetId === target.id).environment;
+  assert.throws(() => validateEnvironment({ ...observed, version: '14.1.9' }, target, f.loaded.contract), /Unsupported macOS/);
+  validateEnvironment({ ...observed, version: '14.2.0' }, target, f.loaded.contract);
+});

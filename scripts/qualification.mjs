@@ -58,7 +58,7 @@ export function evaluateQualification(candidate, reports, loaded = loadContract(
   }
   for (const target of loaded.contract.qualificationTargets) {
     const report = reports.find(r => r.targetId === target.id);
-    if (!report) { failures.push(`${target.id}: missing report`); continue; }
+    if (!report) { failures.push(`${target.id}: missing report${target.execution.kind === 'unavailable' ? `; ${target.execution.reason}` : ''}`); continue; }
     try {
       const artifact = candidate.artifacts.find(a => a.id === target.artifact);
       if (!/^[1-9]\d*$/.test(runId ?? '') || report.provenance?.runId !== runId

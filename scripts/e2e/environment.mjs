@@ -61,6 +61,7 @@ export function validateEnvironment(observed, target, contract) {
     || observed.kind !== 'native-session') throw new Error(`Wrong native qualification host: ${target.id}`);
   if (target.distro && observed.distro !== target.distro) throw new Error(`Wrong distribution: ${target.id}`);
   if (!matchesVersion(observed.version, target)) throw new Error(`Wrong OS version: ${target.id}: ${observed.version}`);
+  if (observed.os === 'macos' && !versionAtLeast(observed.version, contract.minimums.macos)) throw new Error(`Unsupported macOS version: ${observed.version}`);
   if (!observed.kernel || !observed.osRelease || !/^[a-f0-9]{64}$/.test(observed.packageInventorySha256)) {
     throw new Error(`Incomplete environment fingerprint: ${target.id}`);
   }
