@@ -26,9 +26,7 @@ export function signalGraph(original, graphId, spec) {
   return { ...original, revision: original.revision + 1, expectedGraphId: graphId,
     nodes: [{ id: 'qa-source', type: 'virtual_endpoint', config: { ...spec, reference: { render: true, capture: true } } },
       { id: 'qa-recorder', type: 'recorder', config: { channels: 2 } }],
-    edges: [{ id: 'qa-roundtrip', source: { nodeId: 'qa-source', portId: 'from_os' },
-      destination: { nodeId: 'qa-source', portId: 'to_os' }, channelMapping: { mode: 'auto' } },
-    { id: 'qa-recording', source: { nodeId: 'qa-source', portId: 'from_os' },
+    edges: [{ id: 'qa-recording', source: { nodeId: 'qa-source', portId: 'from_os' },
       destination: { nodeId: 'qa-recorder', portId: 'audio' }, channelMapping: { mode: 'auto' } }] };
 }
 

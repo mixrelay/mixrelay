@@ -161,8 +161,9 @@ fn run_bound(
             run_audio_worker(processor, exchange, &endpoint_backend, &worker_status);
         })
         .map_err(|error| format!("could not start PipeWire audio worker: {error}"))?;
-    let worker = mixrelay_engine_service::session::AudioWorker::new(runtime_status, audio_thread);
-    let format_monitor = format::Monitor::start(&controller)?;
+    let worker =
+        mixrelay_engine_service::session::AudioWorker::new(runtime_status.clone(), audio_thread);
+    let format_monitor = format::Monitor::start(&controller, &runtime_status)?;
     let maintenance = controller.start_control_maintenance()?;
 
     let result = runtime
@@ -628,8 +629,6 @@ impl LinuxProcessState<'_> {
             .activate(self.devices.generation, |next| {
                 self.devices.replace_disconnected(next);
             });
-        self.status
-            .observe_endpoint(!self.endpoints.is_empty() && self.endpoints.ready());
         let report = self
             .processor
             .process_external_cycle(

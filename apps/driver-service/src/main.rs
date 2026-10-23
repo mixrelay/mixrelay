@@ -149,7 +149,9 @@ fn paid_access() -> mixrelay_driver_control::PaidAccess {
     #[cfg(target_os = "macos")]
     return std::sync::Arc::new(paid_access::policy);
     #[cfg(target_os = "linux")]
-    return std::sync::Arc::new(|_| mixrelay_licensing::has_local_paid_access());
+    return std::sync::Arc::new(|request| {
+        request.claimed && mixrelay_licensing::has_local_paid_access()
+    });
 }
 
 #[cfg(any(target_os = "macos", test))]

@@ -15,6 +15,54 @@ fn app(fixture: &FixtureDir) -> Router {
 }
 
 #[tokio::test]
+async fn credential_authorization_cannot_hold_native_driver_inventory() {
+    let fixture = FixtureDir::new("drv-auth").unwrap();
+    let (backend, _) = FakeBackend::ready();
+    let (entered, waiting) = tokio::sync::oneshot::channel();
+    let entered = Mutex::new(Some(entered));
+    let (release, blocked) = std::sync::mpsc::channel();
+    let blocked = Mutex::new(blocked);
+    let app = router_with_access(
+        DriverManager::open(backend, fixture.join("driver.json")).unwrap(),
+        Arc::new(move |request| {
+            if request.claimed {
+                entered.lock().take().unwrap().send(()).unwrap();
+                blocked.lock().recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+            request.claimed
+        }),
+    );
+    let paid = tokio::spawn(
+        app.clone().oneshot(
+            Request::builder()
+                .uri(SNAPSHOT_ROUTE)
+                .header(PAID_ACCESS_HEADER, "1")
+                .body(Body::empty())
+                .unwrap(),
+        ),
+    );
+    waiting.await.unwrap();
+    let free = tokio::time::timeout(
+        Duration::from_secs(1),
+        app.oneshot(
+            Request::builder()
+                .uri(SNAPSHOT_ROUTE)
+                .body(Body::empty())
+                .unwrap(),
+        ),
+    )
+    .await;
+    release.send(()).unwrap();
+    assert_eq!(paid.await.unwrap().unwrap().status(), StatusCode::OK);
+    assert_eq!(
+        free.expect("native read waits for credential authorization")
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
 async fn the_policy_sees_each_request_claim_and_its_peer() {
     let fixture = FixtureDir::new("driver-http-claim").unwrap();
     let (backend, _) = FakeBackend::ready();

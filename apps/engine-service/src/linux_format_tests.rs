@@ -9,6 +9,34 @@ use mixrelay_control_server::ControlBackend;
 use mixrelay_engine_service::default_duplex_document;
 
 #[test]
+fn driver_readiness_does_not_require_a_graph_attachment() {
+    use mixrelay_control_protocol::DriverState as Observed;
+    use mixrelay_driver_control::DriverState;
+    use mixrelay_engine_service::RuntimeStatusBackend;
+
+    let status = AdapterRuntimeStatus::new(adapter_profile());
+    let endpoints = EndpointSet::default();
+    assert!(endpoints.is_empty());
+    super::observe_driver(&status, Some(DriverState::Ready));
+    assert_eq!(status.status(render_format()).driver_state, Observed::Ready);
+    super::observe_driver(&status, Some(DriverState::Unavailable));
+    assert_eq!(
+        status.status(render_format()).driver_state,
+        Observed::InstalledNotLoaded
+    );
+    super::observe_driver(&status, Some(DriverState::NotInstalled));
+    assert_eq!(
+        status.status(render_format()).driver_state,
+        Observed::NotInstalled
+    );
+    super::observe_driver(&status, None);
+    assert_eq!(
+        status.status(render_format()).driver_state,
+        Observed::InstalledNotLoaded
+    );
+}
+
+#[test]
 fn initial_graph_and_native_inventory_are_empty_until_catalog_apply() {
     let document = GraphDocument::new(1, Vec::new(), Vec::new());
     let processor =

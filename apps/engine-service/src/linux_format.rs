@@ -55,18 +55,33 @@ impl Monitor {
             worker.thread().unpark();
         }
     }
-    pub(super) fn start(controller: &Arc<EngineGraphController>) -> Result<Self, String> {
+    pub(super) fn start(
+        controller: &Arc<EngineGraphController>,
+        status: &Arc<super::AdapterRuntimeStatus>,
+    ) -> Result<Self, String> {
         let controller = Arc::downgrade(controller);
+        let status = Arc::downgrade(status);
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = stop.clone();
         let worker = thread::Builder::new()
             .name("mixrelay-pipewire-format-monitor".into())
             .spawn(move || {
+                let driver = mixrelay_driver_control::DriverClient::new();
                 let mut last_error = None;
                 while !stopping.load(Ordering::Acquire) {
-                    let Some(controller) = controller.upgrade() else {
+                    let (Some(controller), Some(status)) = (controller.upgrade(), status.upgrade())
+                    else {
                         break;
                     };
+                    observe_driver(
+                        &status,
+                        driver.as_ref().ok().and_then(|client| {
+                            client
+                                .snapshot_blocking()
+                                .ok()
+                                .map(|snapshot| snapshot.state)
+                        }),
+                    );
                     let error = controller.reconcile_observed_device_rate().err();
                     if error != last_error {
                         if let Some(error) = &error {
@@ -75,6 +90,7 @@ impl Monitor {
                         last_error = error;
                     }
                     drop(controller);
+                    drop(status);
                     thread::park_timeout(Duration::from_millis(250));
                 }
             })
@@ -83,6 +99,18 @@ impl Monitor {
             stop,
             worker: Some(worker),
         })
+    }
+}
+
+fn observe_driver(
+    status: &super::AdapterRuntimeStatus,
+    observed: Option<mixrelay_driver_control::DriverState>,
+) {
+    use mixrelay_driver_control::DriverState;
+    match observed {
+        Some(DriverState::Ready) => status.observe_endpoint(true),
+        Some(DriverState::NotInstalled) => status.observe_endpoint(false),
+        _ => status.forget_endpoint_observation(),
     }
 }
 impl Monitor {

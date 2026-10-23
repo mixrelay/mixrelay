@@ -51,7 +51,7 @@ export function installAndVerify(artifact, definition, directory, output, os) {
     mkdirSync(extracted);
     if (definition.format === 'deb') {
       run('dpkg-deb', ['--extract', archive, extracted]);
-      install('sudo', ['-n', 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', 'install', '-y', archive], 1200000);
+      install('sudo', ['-n', 'env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', 'install', '-y', '--no-install-recommends', archive], 1200000);
     } else {
       run('bsdtar', ['-xf', archive, '-C', extracted]);
       install('sudo', ['-n', 'pacman', '-U', '--noconfirm', archive], 1200000);

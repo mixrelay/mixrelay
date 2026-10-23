@@ -78,6 +78,7 @@
     "shortDescription": "Audio routing and processing",
     "longDescription": "Route audio between devices and applications, apply audio processors, and record signals using node-based graphs.",
     "macOS": {
+      "entitlements": "Entitlements.plist",
       "minimumSystemVersion": "14.2",
       "files": {
         "Resources/mixrelay-driver-launcher": "../../../target/universal-apple-darwin/release/mixrelay-driver-launcher"

@@ -186,8 +186,8 @@ async fn operate(
             ))
         })?;
     tokio::task::spawn_blocking(move || {
-        let mut manager = control.manager.lock();
         let paid = (control.paid_access)(&access);
+        let mut manager = control.manager.lock();
         let result = match command {
             Some(command) => {
                 let current = manager.snapshot()?;
