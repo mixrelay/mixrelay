@@ -70,16 +70,18 @@ export async function launchInstalled(os, output) {
   if (os === 'macos') {
     run('open', ['-a', '/Applications/MixRelay/MixRelay.app']);
     return async () => {
-      // This QA session was empty before installation; target only the installed app path.
-      let pids;
-      try { pids = run('pgrep', ['-u', String(process.getuid()), '-f', '^/Applications/MixRelay/MixRelay.app/Contents/MacOS/mixrelay-desktop( |$)']).trim(); }
-      catch (error) { if (error.status === 1) return; throw error; }
-      for (const pid of pids.split('\n')) process.kill(Number(pid), 'SIGTERM');
-      for (let attempt = 0; attempt < 50; attempt++) {
-        if (pids.split('\n').every(pid => { try { process.kill(Number(pid), 0); return false; } catch (error) { if (error.code === 'ESRCH') return true; throw error; } })) return;
-        await delay(100);
+      const helper = '/Applications/MixRelay/Uninstall MixRelay.app/Contents/Helpers/mixrelay-macos-installer';
+      let log = '';
+      try {
+        for (const action of ['quit-graph-app', 'quit-mixrelay-runtime']) {
+          log += `${action}\n` + run(helper, [action], 150000);
+        }
+      } catch (error) {
+        log += `${error.stdout ?? ''}\n${error.stderr ?? ''}\n${error.message}`;
+        throw error;
+      } finally {
+        writeFileSync(join(output, 'shutdown.log'), log, { flag: 'wx' });
       }
-      throw new Error('Installed app did not stop');
     };
   }
   run('systemctl', ['--user', 'start', 'mixrelay-driver.service']);

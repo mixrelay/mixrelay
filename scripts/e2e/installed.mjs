@@ -114,7 +114,12 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
     assert.equal(spec.render?.channels, 2); assert.equal(spec.capture?.channels, 2);
     assert.equal(device.observedSampleRate, 48000);
     assert.ok(device.nativeDeviceIds.length > 0, 'Native device was not published');
-    applied = await apply(signalGraph(original, graphId, spec));
+    try { applied = await apply(signalGraph(original, graphId, spec)); }
+    catch (error) {
+      report.scenarios.push({ id: 'AUDIO-01', scope: 'native-audio', status: 'failed', error: error.message,
+        evidence: [evidence('audio-graph-setup.failure.json', { stage: 'native graph activation', message: error.message })] });
+      throw error;
+    }
     await scenario('GRAPH-02', async () => {
       const path = join(output, 'qualification.mix');
       async function workspace(action) {
@@ -156,6 +161,10 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
     });
   } catch (error) { report.error = error.message; }
   finally {
+    const cleanupFailed = error => {
+      report.cleanup = 'failed';
+      report.cleanupError = [report.cleanupError, error.message].filter(Boolean).join('\n');
+    };
     try {
       assert.equal(unconfirmedMutation, false, 'Unconfirmed graph publication; reset the QA session');
       if (applied) {
@@ -169,8 +178,8 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
         }
         await apply({ ...original, expectedGraphId: graphId, revision: applied.revision + 1 });
       }
-    } catch (error) { report.cleanup = 'failed'; report.cleanupError = error.message; }
-    try { await stop?.(); } catch (error) { report.cleanup = 'failed'; report.cleanupError = error.message; }
+    } catch (error) { cleanupFailed(error); }
+    try { await stop?.(); } catch (error) { cleanupFailed(error); }
     for (const expected of requiredScenarios(contract, target)) if (!report.scenarios.some(item => item.id === expected.id)) {
       report.scenarios.push({ id: expected.id, scope: expected.scope, status: 'blocked', evidence: [],
         error: expected.id === 'GRAPH-01' ? 'Installed UI automation is not implemented' : expected.id === 'AUDIO-11'

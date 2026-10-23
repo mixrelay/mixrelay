@@ -20,6 +20,11 @@ if (existsSync(logs)) for (const file of readdirSync(logs).filter(name => /^[A-Z
 }
 capture('coreaudio-devices.txt', 'system_profiler', ['SPAudioDataType', '-json']);
 capture('coreaudio-probe.txt', 'zsh', ['scripts/probe-macos-roundtrip.sh', '--list']);
+for (const [role, path] of [
+  ['desktop', '/Applications/MixRelay/MixRelay.app'],
+  ['engine', '/Library/Application Support/MixRelay/bin/mixrelay-engine-service'],
+  ['driver', '/Library/Application Support/MixRelay/bin/mixrelay-driver-service'],
+]) capture(`${role}-entitlements.txt`, 'codesign', ['-d', '--entitlements', ':-', path]);
 capture('coreaudio-system.log', 'log', ['show', '--last', '5m', '--style', 'compact', '--predicate',
   'process CONTAINS[c] "mixrelay" OR ((process == "coreaudiod" OR process == "tccd") AND eventMessage CONTAINS[c] "mixrelay")']);
 capture('desktop-windows.txt', 'osascript', ['-e',
