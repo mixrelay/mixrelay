@@ -17,6 +17,11 @@ export function cloudConfig(publicKey) {
       sudo: 'ALL=(ALL) NOPASSWD:ALL', ssh_authorized_keys: [publicKey] }] }, null, 2) + '\n';
 }
 
+const guestMacAddress = '52:54:00:12:34:56';
+export function cloudNetwork() {
+  return { version: 2, ethernets: { qa: { match: { macaddress: guestMacAddress }, dhcp4: true, dhcp6: false } } };
+}
+
 export function qemuArguments({ cpuArch, accelerator, disk, seed, firmware, variables, port, serial }) {
   assert.ok(['x64', 'arm64'].includes(cpuArch));
   assert.ok(['kvm', 'tcg'].includes(accelerator));
@@ -27,7 +32,7 @@ export function qemuArguments({ cpuArch, accelerator, disk, seed, firmware, vari
     '-drive', `if=pflash,format=raw,file=${variables}`,
     '-drive', `if=virtio,format=qcow2,file=${disk}`,
     '-drive', `if=virtio,format=raw,readonly=on,file=${seed}`,
-    '-netdev', `user,id=net0,hostfwd=tcp:127.0.0.1:${port}-:22`, '-device', 'virtio-net-pci,netdev=net0,romfile=',
+    '-netdev', `user,id=net0,hostfwd=tcp:127.0.0.1:${port}-:22`, '-device', `virtio-net-pci,netdev=net0,mac=${guestMacAddress},romfile=`,
     '-display', 'none', '-serial', `file:${serial}`, '-monitor', 'none', '-no-reboot'];
 }
 
@@ -123,8 +128,9 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
     await command('ssh-keygen', ['-t', 'ed25519', '-N', '', '-f', key, '-q']);
     writeFileSync(join(state, 'user-data'), cloudConfig(readFileSync(`${key}.pub`, 'utf8').trim()));
     writeFileSync(join(state, 'meta-data'), `instance-id: mixrelay-${targetId}\nlocal-hostname: mixrelay-qa\n`);
+    writeFileSync(join(state, 'network-config'), JSON.stringify(cloudNetwork(), null, 2) + '\n');
     const seed = join(state, 'seed.img');
-    await command('cloud-localds', [seed, join(state, 'user-data'), join(state, 'meta-data')]);
+    await command('cloud-localds', ['--network-config', join(state, 'network-config'), seed, join(state, 'user-data'), join(state, 'meta-data')]);
     const firmware = arch() === 'arm64' ? '/usr/share/AAVMF/AAVMF_CODE.fd' : '/usr/share/OVMF/OVMF_CODE_4M.fd';
     const originalVariables = arch() === 'arm64' ? '/usr/share/AAVMF/AAVMF_VARS.fd' : '/usr/share/OVMF/OVMF_VARS_4M.fd';
     assert.ok(existsSync(firmware) && existsSync(originalVariables), 'Missing UEFI firmware');

@@ -22,6 +22,16 @@ async function eventually(read, predicate, description) {
   throw new Error(`${description}: ${JSON.stringify(last)}`);
 }
 
+export function signalGraph(original, graphId, spec) {
+  return { ...original, revision: original.revision + 1, expectedGraphId: graphId,
+    nodes: [{ id: 'qa-source', type: 'virtual_endpoint', config: { ...spec, reference: { render: true, capture: true } } },
+      { id: 'qa-recorder', type: 'recorder', config: { channels: 2 } }],
+    edges: [{ id: 'qa-roundtrip', source: { nodeId: 'qa-source', portId: 'from_os' },
+      destination: { nodeId: 'qa-source', portId: 'to_os' }, channelMapping: { mode: 'auto' } },
+    { id: 'qa-recording', source: { nodeId: 'qa-source', portId: 'from_os' },
+      destination: { nodeId: 'qa-recorder', portId: 'audio' }, channelMapping: { mode: 'auto' } }] };
+}
+
 // This is the same suite for every contract target. Platform code owns only installation
 // and native signal generation. API evidence never substitutes for installed UI evidence.
 export async function qualifyInstalled({ targetId, candidate, directory, output, disposable, loaded = loadContract() }) {
@@ -103,11 +113,7 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
     assert.equal(spec.render?.channels, 2); assert.equal(spec.capture?.channels, 2);
     assert.equal(device.observedSampleRate, 48000);
     assert.ok(device.nativeDeviceIds.length > 0, 'Native device was not published');
-    applied = await apply({ ...original, revision: original.revision + 1, expectedGraphId: graphId,
-      nodes: [{ id: 'qa-source', type: 'virtual_endpoint', config: { ...spec, reference: { render: true, capture: false } } },
-        { id: 'qa-recorder', type: 'recorder', config: { channels: 2 } }],
-      edges: [{ id: 'qa-edge', source: { nodeId: 'qa-source', portId: 'from_os' },
-        destination: { nodeId: 'qa-recorder', portId: 'audio' }, channelMapping: { mode: 'auto' } }] });
+    applied = await apply(signalGraph(original, graphId, spec));
     await scenario('GRAPH-02', async () => {
       const path = join(output, 'qualification.mix');
       async function workspace(action) {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cloudConfig, qemuArguments, guestDiskSize } from './github-vm.mjs';
+import { cloudConfig, cloudNetwork, qemuArguments, guestDiskSize } from './github-vm.mjs';
 
 test('cloud guest has a locked account and a job-specific SSH key', () => {
   const config = JSON.parse(cloudConfig('ssh-ed25519 AAAA test').split('\n').slice(1).join('\n'));
@@ -22,7 +22,10 @@ test('QEMU uses the native guest CPU and binds SSH only to the hosted runner loo
   assert.equal(arm[1], 'virt,accel=tcg');
   assert.equal(arm[3], 'cortex-a72');
   assert.ok(arm.includes('user,id=net0,hostfwd=tcp:127.0.0.1:22022-:22'));
-  assert.ok(arm.includes('virtio-net-pci,netdev=net0,romfile='), 'Disk boot must not require an ARM PXE ROM');
+  const network = cloudNetwork().ethernets.qa;
+  assert.equal(network.dhcp4, true);
+  assert.equal(network.dhcp6, false);
+  assert.ok(arm.includes(`virtio-net-pci,netdev=net0,mac=${network.match.macaddress},romfile=`), 'DHCP must match the actual NIC without requiring a PXE ROM');
   const x64 = qemuArguments({ ...settings, cpuArch: 'x64', accelerator: 'kvm' });
   assert.equal(x64[1], 'q35,accel=kvm');
   assert.equal(x64[3], 'host');
