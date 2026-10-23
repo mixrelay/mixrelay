@@ -14,6 +14,10 @@ on:
         description: Draft release with signed notarized PKG and source-revision.txt
         type: string
         required: true
+      targets:
+        description: Optional comma-separated target IDs for diagnosis; empty tests all
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -49,9 +53,12 @@ jobs:
           gh run download "$BUILD_RUN" --pattern 'candidate-*' --dir inputs/linux
       - name: Pin source, contract and every installer byte
         id: selection
+        env:
+          TARGET_IDS: ${{ inputs.targets }}
         run: node scripts/e2e/select-candidate.mjs --inputs inputs --output candidate
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          overwrite: true
           name: installed-candidate
           path: candidate/
           retention-days: 90
@@ -91,9 +98,13 @@ jobs:
         env:
           TARGET: ${{ matrix.id }}
         run: node scripts/e2e/github-vm.mjs --target "$TARGET" --directory candidate --output evidence
+      - name: Preserve macOS failure diagnostics
+        if: always() && matrix.os == 'macos'
+        run: node scripts/e2e/collect-macos.mjs --output evidence
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          overwrite: true
           name: installed-target-${{ matrix.id }}
           path: |
             evidence/*
@@ -126,6 +137,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          overwrite: true
           name: installed-e2e-evidence
           path: |
             candidate/

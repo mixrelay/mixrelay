@@ -45,6 +45,7 @@ test('wrong host, skipped UI, bad cleanup and mixed CI runs are release failures
     r => { r.scenarios.find(s => s.id === 'GRAPH-01').scope = 'installed-api'; },
     r => { r.scenarios[0].evidence = []; }, r => { r.cleanup = 'failed'; },
     r => { r.provenance.runId = '43'; }, r => { r.provenance = {}; },
+    r => { r.provenance.runAttempt = '2'; }, r => { delete r.provenance.runAttempt; },
     r => { r.endedAt = '2026-10-22T00:00:00Z'; },
   ]) {
     const reports = structuredClone(f.reports); mutate(reports[0]);

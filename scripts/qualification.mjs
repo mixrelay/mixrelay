@@ -50,6 +50,7 @@ export function validateCandidate(candidate, directory, loaded = loadContract())
 export function evaluateQualification(candidate, reports, loaded = loadContract()) {
   const failures = [];
   const runId = reports[0]?.provenance?.runId;
+  const runAttempt = reports[0]?.provenance?.runAttempt;
   const seen = new Set();
   for (const report of reports) {
     if (seen.has(report.targetId)) throw new Error(`Duplicate qualification report: ${report.targetId}`);
@@ -62,6 +63,7 @@ export function evaluateQualification(candidate, reports, loaded = loadContract(
     try {
       const artifact = candidate.artifacts.find(a => a.id === target.artifact);
       if (!/^[1-9]\d*$/.test(runId ?? '') || report.provenance?.runId !== runId
+        || !/^[1-9]\d*$/.test(runAttempt ?? '') || report.provenance?.runAttempt !== runAttempt
         || report.provenance?.repository !== 'mixrelay/mixrelay') throw new Error('Missing or mixed CI qualification provenance');
       if (report.schemaVersion !== 1 || report.sourceRevision !== candidate.sourceRevision
         || report.contractSha256 !== loaded.sha256 || report.artifactSha256 !== artifact?.sha256

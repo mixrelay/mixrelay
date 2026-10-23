@@ -56,3 +56,12 @@ test('rejects an unsuccessful or unrelated package workflow', t => {
   writeFileSync(join(inputs, 'build-run.json'), JSON.stringify({ ...run, path: '.github/workflows/native-lab.yml' }));
   assert.throws(() => selectCandidate(inputs, output));
 });
+
+test('limits diagnosis to explicitly selected hosted targets without accepting unsupported IDs', t => {
+  const f = fixture(t);
+  assert.deepEqual(selectCandidate(f.inputs, f.output, ['macos-27-arm64']).include.map(target => target.id), ['macos-27-arm64']);
+  const invalid = fixture(t);
+  assert.throws(() => selectCandidate(invalid.inputs, invalid.output, ['invented-os']), /Unknown or unavailable/);
+  assert.throws(() => selectCandidate(invalid.inputs, invalid.output, ['macos-14-2-arm64']), /Unknown or unavailable/);
+  assert.throws(() => selectCandidate(invalid.inputs, invalid.output, ['macos-27-arm64', 'macos-27-arm64']), /Duplicate/);
+});

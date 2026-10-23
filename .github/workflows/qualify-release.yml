@@ -91,6 +91,9 @@ jobs:
         env:
           TARGET: ${{ matrix.id }}
         run: node scripts/e2e/github-vm.mjs --target "$TARGET" --directory candidate --output evidence
+      - name: Preserve macOS failure diagnostics
+        if: always() && matrix.os == 'macos'
+        run: node scripts/e2e/collect-macos.mjs --output evidence
       - name: Preserve failures and raw evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

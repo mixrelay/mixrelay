@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { createCandidate } from '../qualification.mjs';
 import { loadContract, qualificationMatrix } from '../support-contract.mjs';
 
-export function selectCandidate(inputs, output) {
+export function selectCandidate(inputs, output, targetIds = []) {
   const run = JSON.parse(readFileSync(join(inputs, 'build-run.json')));
   assert.equal(run.repository?.full_name, 'mixrelay/mixrelay');
   assert.equal(run.path, '.github/workflows/build-linux-release.yml');
@@ -18,6 +18,10 @@ export function selectCandidate(inputs, output) {
     assert.equal(readFileSync(join(inputs, 'linux', path), 'utf8').trim(), source, 'Linux artifact source mismatch');
   }
   const { contract } = loadContract();
+  const matrix = qualificationMatrix(contract);
+  assert.equal(new Set(targetIds).size, targetIds.length, 'Duplicate target selection');
+  assert.ok(targetIds.every(id => matrix.include.some(target => target.id === id)), 'Unknown or unavailable target selection');
+  if (targetIds.length) matrix.include = matrix.include.filter(target => targetIds.includes(target.id));
   const selected = contract.artifacts.map(definition => {
     const root = join(inputs, definition.os === 'macos' ? 'macos' : 'linux');
     const suffix = definition.format === 'arch' ? '.pkg.tar.zst' : `.${definition.format}`;
@@ -32,13 +36,14 @@ export function selectCandidate(inputs, output) {
   const candidate = createCandidate(output, selected, source, version);
   writeFileSync(join(output, 'mix-relay.candidate.json'), JSON.stringify(candidate, null, 2) + '\n', { flag: 'wx' });
   writeFileSync(join(output, 'selection.json'), JSON.stringify({ linuxBuildRun: run.id, sourceRevision: source,
-    suiteRevision: process.env.GITHUB_SHA, purpose: 'installed candidate diagnostics; does not authorize publication' }, null, 2) + '\n');
-  return qualificationMatrix(contract);
+    suiteRevision: process.env.GITHUB_SHA, targets: matrix.include.map(target => target.id),
+    purpose: 'installed candidate diagnostics; does not authorize publication' }, null, 2) + '\n');
+  return matrix;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const { values } = parseArgs({ options: { inputs: { type: 'string' }, output: { type: 'string' } } });
-  const matrix = selectCandidate(values.inputs, values.output);
+  const matrix = selectCandidate(values.inputs, values.output, (process.env.TARGET_IDS ?? '').split(',').map(id => id.trim()).filter(Boolean));
   assert.ok(process.env.GITHUB_OUTPUT);
   appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(matrix)}\n`);
 }
