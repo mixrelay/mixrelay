@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, openSync, closeSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { digest } from '../support-contract.mjs';
 
 const run = (program, args, timeout = 120000) => execFileSync(program, args, { encoding: 'utf8', timeout, maxBuffer: 8 * 1024 * 1024 });
+export function spawnLogged(program, args, logPath) {
+  const file = openSync(logPath, 'wx', 0o600);
+  try { return spawn(program, args, { stdio: ['ignore', file, file] }); }
+  finally { closeSync(file); }
+}
 export const installedPaths = os => os === 'macos' ? [
   '/Applications/MixRelay/MixRelay.app/Contents/MacOS/mixrelay-desktop',
   '/Library/Application Support/MixRelay/bin/mixrelay-engine-service',
@@ -85,18 +90,32 @@ export async function launchInstalled(os, output) {
     };
   }
   run('systemctl', ['--user', 'start', 'mixrelay-driver.service']);
-  const child = spawn('/usr/bin/mixrelay-desktop', [], { stdio: ['ignore', 'pipe', 'pipe'] });
-  let log = '', launchError;
+  const child = spawnLogged('/usr/bin/mixrelay-desktop', [], join(output, 'desktop.log'));
+  let launchError;
   child.on('error', error => { launchError = error; });
-  for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => { if (log.length < 1024 * 1024) log += bytes.toString(); });
   return async () => {
+    // This fresh QA user had no installed MixRelay processes before this launch.
+    // The editor deliberately leaves its controller running when the editor exits.
+    const runtimes = readdirSync('/proc').filter(pid => /^\d+$/.test(pid)).filter(pid => {
+      try { return lstatSync(`/proc/${pid}`).uid === process.getuid()
+        && readFileSync(`/proc/${pid}/cmdline`).toString().split('\0').filter(Boolean).join('\0') === '/usr/bin/mixrelay-desktop\0--driver-runtime'; }
+      catch (error) { if (['ENOENT', 'ESRCH'].includes(error.code)) return false; throw error; }
+    });
     try {
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+      for (const pid of runtimes) {
+        try { process.kill(Number(pid), 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+      }
+      const runtimeAlive = pid => {
+        try { return readFileSync(`/proc/${pid}/cmdline`).length > 0; }
+        catch (error) { if (['ENOENT', 'ESRCH'].includes(error.code)) return false; throw error; }
+      };
+      for (let attempt = 0; attempt < 50 && runtimes.some(runtimeAlive); attempt++) await delay(100);
+      assert.ok(runtimes.every(pid => !runtimeAlive(pid)), 'Installed background runtime did not stop');
       await Promise.race([new Promise(resolve => { if (child.exitCode !== null || child.signalCode !== null || launchError) resolve(); else child.once('exit', resolve); }), delay(5000)]);
       assert.ok(launchError || child.exitCode !== null || child.signalCode !== null, 'Installed app did not stop');
       if (launchError) throw launchError;
     } finally {
-      writeFileSync(join(output, 'desktop.log'), log, { flag: 'wx' });
       run('systemctl', ['--user', 'stop', 'mixrelay-driver.service']);
     }
   };
