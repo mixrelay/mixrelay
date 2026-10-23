@@ -97,6 +97,19 @@ export function readReports(directory) {
       return report;
     });
 }
+export function vmInventory(directory) {
+  const rows = readdirSync(directory, { recursive: true }).filter(file => basename(file) === 'vm-session.json').map(file => {
+    const session = JSON.parse(readFileSync(resolve(directory, file)));
+    return [session.targetId, session.accelerator, session.cpuModel,
+      session.error ?? (session.guestExitCode === 0 ? 'guest suite completed' : `guest exit ${session.guestExitCode ?? 'not observed'}`),
+      session.image?.digest];
+  });
+  if (!rows.length) return '';
+  return '\n## VM execution diagnostics\n\n'
+    + '| Environment | Accelerator | CPU model | Result | Pinned image checksum |\n'
+    + '| --- | --- | --- | --- | --- |\n'
+    + rows.map(row => '| ' + row.map(value => String(value ?? 'not observed').replaceAll('|', '/').replaceAll('\n', ' ')).join(' | ') + ' |').join('\n') + '\n';
+}
 export function qualificationInventory(candidate, reports, loaded = loadContract()) {
   const result = evaluateQualification(candidate, reports, loaded);
   const cell = value => String(value ?? 'not observed').replaceAll('|', '/').replaceAll('\n', ' ');
@@ -167,7 +180,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       const candidate = validateCandidate(JSON.parse(readFileSync(values.candidate)), values.directory);
       const reports = readReports(values.reports);
       if (command === 'inventory') {
-        const text = qualificationInventory(candidate, reports);
+        const text = qualificationInventory(candidate, reports) + vmInventory(values.reports);
         if (values.output) writeFileSync(values.output, text, { flag: 'wx' }); else console.log(text);
       } else if (command === 'gate') {
         const result = evaluateQualification(candidate, reports);

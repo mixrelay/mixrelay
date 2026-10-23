@@ -53,6 +53,18 @@ prerelease GitHub release; creating a candidate does not publish the product.
 
 ## GitHub-hosted execution
 
+Before merging a source branch, use `Test installed candidate on hosted environments`
+to diagnose the same final installers on the hosted matrix. Build Linux packages with
+`Build Linux release candidates once per CPU`, then attach the signed, notarized macOS
+PKG and a `source-revision.txt` containing its full source SHA to a draft release.
+Dispatch `candidate-e2e.yml` on the source branch with `linux_build_run` and
+`macos_candidate_tag`. The selector checks the Linux workflow identity, successful build,
+matching source records and all four artifact hashes. The suite revision is recorded
+separately, so test-tool fixes can exercise existing installers without rebuilding them.
+The resulting `installed-e2e-evidence` artifact contains the exact candidate, raw
+per-environment evidence and `inventory.md`, including failed and unexecuted scenarios.
+This diagnostic workflow runs the full gate but cannot create a publication receipt.
+
 `Qualify exact release artifacts` is manually dispatched from `main` with the
 candidate release tag. It accepts source commits already in `main`, checks the
 successful source build/unit-test workflow for that exact `main` commit, contract
@@ -75,6 +87,9 @@ collects evidence and deletes the VM. KVM is used when available; otherwise the 
 guest CPU architecture runs with TCG. `vm-session.json` records the accelerator;
 ARM TCG uses the Cortex-A72 model. TCG results are functional evidence and do not
 establish hardware latency.
+The pinned Kali 2026.2 ARM image contains a stale EFI mount PARTUUID. Cloud-init
+preserves the original fstab and corrects that entry from the guest's EFI partition
+in its disposable overlay; `vm-session.json` records this provisioning repair.
 
 `Qualification VM readiness` boots all seven Linux combinations on pull requests
 that change the VM tooling. It checks OS/CPU/dependency identity and desktop audio
