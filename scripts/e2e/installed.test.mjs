@@ -115,3 +115,43 @@ test('upgrade failures cannot be hidden by passing fresh results', async (t) => 
     assert.equal(evaluateQualification(f.candidate, all).passed, false);
   }
 });
+
+test('a passing upgrade cannot hide a failed fresh-install scenario', async (t) => {
+  const { writeFileSync, mkdirSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { qualifyInstalled } = await import('./installed.mjs');
+  const { qualificationFixture } = await import('./qualification.fixture.mjs');
+  const { evaluateQualification } = await import('../qualification.mjs');
+  const f = qualificationFixture(t),
+    target = f.reports[2];
+  const report = await qualifyInstalled(
+    {
+      targetId: target.targetId,
+      candidate: f.candidate,
+      directory: f.directory,
+      output: join(f.directory, 'fresh-failure'),
+    },
+    async (options) => {
+      mkdirSync(options.output);
+      writeFileSync(join(options.output, 'unit-evidence.txt'), 'Synthetic scenario evidence\n');
+      const result = {
+        ...structuredClone(target),
+        scenarios: target.scenarios.filter((item) => item.id !== 'UPGRADE-01'),
+      };
+      if (!options.baselineDirectory) {
+        result.status = 'failed';
+        result.scenarios = result.scenarios.map((item) =>
+          item.id === 'GRAPH-01'
+            ? { ...item, status: 'failed', error: 'Fresh UI graph failed' }
+            : item,
+        );
+      }
+      return result;
+    },
+  );
+  assert.equal(report.scenarios.find((item) => item.id === 'UPGRADE-01').status, 'passed');
+  assert.equal(report.scenarios.find((item) => item.id === 'GRAPH-01').status, 'failed');
+  assert.equal(report.status, 'failed');
+  const all = f.reports.map((item) => (item.targetId === target.targetId ? report : item));
+  assert.equal(evaluateQualification(f.candidate, all).passed, false);
+});

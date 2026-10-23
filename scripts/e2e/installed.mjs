@@ -20,7 +20,9 @@ import { removeInstalled } from './removal.mjs';
 import { wholeSystemCapture } from './system-capture.mjs';
 import {
   isolateFreshState,
+  prepareUpgradeDriver,
   preservedState,
+  restoreUpgradeDriver,
   saveWorkspace,
   upgradeGraph,
   verifyPreservedState,
@@ -129,8 +131,10 @@ export async function qualifyMode({
     },
     'qualification',
   );
-  const driver = () =>
+  const driver = (command) =>
     socketJson(driverSocket(), '/api/v1/driver', {
+      method: command ? 'PUT' : 'GET',
+      json: command,
       headers: { host: 'mixrelay-driver' },
       timeoutMs: 15000,
     });
@@ -191,17 +195,27 @@ export async function qualifyMode({
         'Baseline graph unavailable',
       );
       graphId = catalog.activeId;
-      const baselineDriver = await driver();
-      assert.equal(baselineDriver.settings.devices.length, 1);
+      const baselineDriver = await prepareUpgradeDriver(driver);
       unconfirmedMutation = true;
-      await api('graph', upgradeGraph(catalog.document, graphId));
+      const authored = upgradeGraph(catalog.document, graphId);
+      await api('graph', authored);
       const path = join(output, 'upgrade-session.mix');
       // Seeding checks the persisted catalog; native audio is qualified after upgrade.
       const published = async (revision) =>
         assert.equal((await api('graphs')).document.revision, revision);
       const saved = await saveWorkspace(api, operation, published, 'save', path);
+      assert.deepEqual(
+        saved.document.nodes,
+        authored.nodes,
+        'Baseline did not save authored nodes',
+      );
+      assert.deepEqual(
+        saved.document.edges,
+        authored.edges,
+        'Baseline did not save authored routing',
+      );
       unconfirmedMutation = false;
-      upgradeState = preservedState(saved, await driver(), path);
+      upgradeState = preservedState(saved, await driver(), path, baselineDriver.defaults);
       evidence('upgrade-state-before.json', upgradeState);
       await stop();
       stop = undefined;
@@ -265,8 +279,9 @@ export async function qualifyMode({
       );
       evidence(
         'upgrade-state-after.json',
-        preservedState(reopened, await driver(), upgradeState.path),
+        preservedState(reopened, await driver(), upgradeState.path, upgradeState.defaultDevices),
       );
+      await restoreUpgradeDriver(driver, upgradeState.defaultDevices);
       graphId = reopened.activeId;
       await apply({
         ...reopened.document,

@@ -24,17 +24,125 @@ export function upgradeGraph(document, graphId) {
   };
 }
 
-export function preservedState(catalog, driver, path) {
+function driverSettings(snapshot) {
+  assert.equal(snapshot.state, 'ready', 'Upgrade needs a ready Driver');
+  assert.ok(
+    !snapshot.persistenceError,
+    `Driver settings were not saved: ${snapshot.persistenceError}`,
+  );
+  return structuredClone(
+    snapshot.settings.devices.map((device) => {
+      const formats = {};
+      for (const direction of ['render', 'capture']) {
+        if (!device.spec[direction]) continue;
+        const current = device.nativeFormats[direction].current;
+        assert.ok(current, `Missing current Driver ${direction} format`);
+        formats[direction] = current;
+      }
+      assert.ok(device.observedSampleRate, 'Missing observed Driver sample rate');
+      return { spec: device.spec, observedSampleRate: device.observedSampleRate, formats };
+    }),
+  );
+}
+
+async function mutateDriver(driver, action) {
+  const snapshot = await driver();
+  driverSettings(snapshot);
+  const changed = await driver({ ...action, expectedRevision: snapshot.revision });
+  driverSettings(changed);
+  return changed;
+}
+
+export async function prepareUpgradeDriver(driver) {
+  const snapshot = await driver();
+  const defaults = driverSettings(snapshot);
+  assert.equal(defaults.length, 1, 'Upgrade needs the free default device');
+  const device = snapshot.settings.devices[0];
+  const channels = [4, 8, 16, 32, 64].find(
+    (value) =>
+      snapshot.settings.renderChannels.includes(value) &&
+      snapshot.settings.captureChannels.includes(value) &&
+      value !== device.spec.render?.channels &&
+      value !== device.spec.capture?.channels,
+  );
+  const sampleRate =
+    device.supportedSampleRates.find(
+      (value) => device.canSetSampleRate && value !== device.observedSampleRate,
+    ) ?? device.observedSampleRate;
+  // Linux currently advertises only the opened nominal rate. Channels and PCM
+  // still change there; request another rate only when the Driver offers it.
+  assert.ok(channels, 'Baseline must support nondefault free Driver channels');
+  const spec = {
+    ...device.spec,
+    defaultSampleRate: sampleRate,
+    render: { ...device.spec.render, channels, channelLayout: 'discrete' },
+    capture: { ...device.spec.capture, channels, channelLayout: 'discrete' },
+  };
+  const configured = await mutateDriver(driver, { action: 'configure', spec });
+  const current = configured.settings.devices[0];
+  const sampleFormat = ['signed16', 'signed24', 'signed32'].find((value) =>
+    ['render', 'capture'].every(
+      (direction) =>
+        value !== defaults[0].formats[direction]?.sampleFormat &&
+        current.nativeFormats[direction].supported.some(
+          (format) =>
+            format.sampleRate === sampleRate &&
+            format.channels === channels &&
+            format.sampleFormat === value,
+        ),
+    ),
+  );
+  assert.ok(sampleFormat, 'Baseline must support a nondefault common PCM format');
+  await mutateDriver(driver, { action: 'set_sample_format', endpointId: spec.id, sampleFormat });
+  const saved = await driver();
+  assert.deepEqual(
+    driverSettings(saved),
+    [
+      {
+        spec,
+        observedSampleRate: sampleRate,
+        formats: {
+          render: { sampleRate, channels, sampleFormat },
+          capture: { sampleRate, channels, sampleFormat },
+        },
+      },
+    ],
+    'Baseline did not save the requested Driver settings',
+  );
+  return { defaults, snapshot: saved };
+}
+
+export async function restoreUpgradeDriver(driver, defaults) {
+  for (const device of defaults) {
+    await mutateDriver(driver, { action: 'configure', spec: device.spec });
+    for (const [direction, format] of Object.entries(device.formats)) {
+      await mutateDriver(driver, {
+        action: 'set_format',
+        endpointId: device.spec.id,
+        direction,
+        format,
+      });
+    }
+  }
+  assert.deepEqual(driverSettings(await driver()), defaults, 'Driver defaults were not restored');
+}
+
+export function preservedState(catalog, driver, path, defaultDevices) {
   assert.ok(catalog.document.nodes.length > 0, 'Upgrade needs an authored graph');
+  assert.ok(catalog.document.edges.length > 0, 'Upgrade needs authored routing');
   assert.ok(driver.settings.devices.length > 0, 'Upgrade needs saved Driver devices');
-  return {
+  const devices = driverSettings(driver);
+  assert.ok(defaultDevices?.length > 0, 'Upgrade needs the original Driver defaults');
+  assert.notDeepEqual(devices, defaultDevices, 'Upgrade needs nondefault Driver settings');
+  return structuredClone({
     activeId: catalog.activeId,
     nodes: catalog.document.nodes,
     edges: catalog.document.edges,
-    devices: driver.settings.devices.map((device) => device.spec),
+    devices,
+    defaultDevices,
     path,
     sha256: digest(readFileSync(path)),
-  };
+  });
 }
 
 export function verifyPreservedState(before, catalog, driver) {
@@ -43,11 +151,7 @@ export function verifyPreservedState(before, catalog, driver) {
     { activeId: before.activeId, nodes: before.nodes, edges: before.edges },
     'Upgrade lost the saved graph',
   );
-  assert.deepEqual(
-    driver.settings.devices.map((device) => device.spec),
-    before.devices,
-    'Upgrade lost Driver settings',
-  );
+  assert.deepEqual(driverSettings(driver), before.devices, 'Upgrade lost Driver settings');
   assert.equal(
     digest(readFileSync(before.path)),
     before.sha256,
