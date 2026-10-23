@@ -178,7 +178,7 @@ export async function runGithubVm({ targetId, directory, output, smoke = false }
     await command('scp', [...sshOptions, '-P', String(port), process.execPath, 'qa@127.0.0.1:/home/qa/tools/node']);
     await ssh(['tar -xf /home/qa/source.tar -C /home/qa/workspace && chmod +x /home/qa/tools/node']);
     phase('Preparing the guest desktop and PipeWire user session');
-    await ssh(['sudo bash /home/qa/workspace/scripts/e2e/guest-bootstrap.sh'], { timeout: 1200000, log: bootstrapLog });
+    await ssh(['sudo bash /home/qa/workspace/scripts/e2e/guest-bootstrap.sh'], { timeout: 2100000, log: bootstrapLog });
     if (!smoke) {
       const files = readdirSync(directory).map(file => join(directory, file));
       await command('scp', [...sshOptions, '-P', String(port), ...files, 'qa@127.0.0.1:/home/qa/candidate/'], { timeout: 300000 });

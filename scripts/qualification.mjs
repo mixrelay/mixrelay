@@ -3,7 +3,7 @@ import { basename, resolve, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { digest, loadContract, requiredScenarios } from './support-contract.mjs';
-import { validateEnvironment } from './e2e/environment.mjs';
+import { parseOsRelease, validateEnvironment } from './e2e/environment.mjs';
 
 export function artifactBytes(directory, artifact) {
   if (basename(artifact.file) !== artifact.file || !artifact.file || /[\\\0]/.test(artifact.file)) throw new Error('Invalid artifact filename');
@@ -74,10 +74,12 @@ export function evaluateQualification(candidate, reports, loaded = loadContract(
       if (!Array.isArray(report.scenarios) || new Set(report.scenarios.map(s => s.id)).size !== report.scenarios.length) throw new Error('Invalid scenario results');
       for (const expected of requiredScenarios(loaded.contract, target)) {
         const result = report.scenarios.find(s => s.id === expected.id);
-        if (result?.status !== 'passed' || result.scope !== expected.scope
+        if (!result) throw new Error(`Missing scenario: ${expected.id}`);
+        if (result.status !== 'passed') throw new Error(`${expected.id}: ${result.status ?? 'missing status'}`);
+        if (result.scope !== expected.scope
           || !Array.isArray(result.evidence) || result.evidence.length === 0
           || result.evidence.some(e => !/^[a-f0-9]{64}$/.test(e.sha256) || !e.file || basename(e.file) !== e.file)) {
-          throw new Error(`Missing, skipped or incomplete scenario: ${expected.id}`);
+          throw new Error(`Incomplete or wrong-scope evidence: ${expected.id}`);
         }
       }
       if (report.cleanup !== 'passed' || report.status !== 'passed') throw new Error('Qualification or cleanup did not pass');
@@ -126,7 +128,9 @@ export function qualificationInventory(candidate, reports, loaded = loadContract
     + '| --- | --- | --- | --- | --- | --- | --- | --- |\n'
     + loaded.contract.qualificationTargets.map(target => {
       const report = reports.find(r => r.targetId === target.id), observed = report?.environment;
-      return '| ' + [target.id, observed?.version, observed?.arch, observed?.kernel,
+      const release = observed?.os === 'linux' && typeof observed.osRelease === 'string' ? parseOsRelease(observed.osRelease) : {};
+      const osVersion = release.PRETTY_NAME ? `${release.PRETTY_NAME} (${release.DEBIAN_VERSION_FULL ?? observed.version})` : observed?.version;
+      return '| ' + [target.id, osVersion, observed?.arch, observed?.kernel,
         observed?.dependencies?.pipewire, observed?.dependencies?.wireplumber, observed?.dependencies?.glibc,
         report?.provenance?.runId ? `https://github.com/mixrelay/mixrelay/actions/runs/${report.provenance.runId}` : undefined].map(cell).join(' | ') + ' |';
     }).join('\n') + '\n';
@@ -159,7 +163,9 @@ export function qualificationInventory(candidate, reports, loaded = loadContract
       });
       return `| ${target.id} | ${cells.join(' | ')} |`;
     }).join('\n') + '\n'
-    + (errors.length ? '\n## Failure and blocking diagnostics\n\n' + errors.map(error => `- ${cell(error)}`).join('\n') + '\n' : '');
+    + (errors.length ? '\n## Failure and blocking diagnostics\n\n'
+      + 'Full diagnostics remain in the per-target qualification JSON and raw Actions evidence.\n\n'
+      + errors.map(error => `- ${cell(error).slice(0, 700)}${cell(error).length > 700 ? '…' : ''}`).join('\n') + '\n' : '');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {

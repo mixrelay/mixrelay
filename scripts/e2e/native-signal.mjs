@@ -56,6 +56,27 @@ export function analyseRf64(bytes) {
   return { format, ...analyseStereo(data) };
 }
 
+export async function stopSignalProcesses(children, graceMs = 5000) {
+  const live = child => child.exitCode === null && child.signalCode === null;
+  const wait = child => new Promise(resolve => {
+    if (!live(child)) { resolve(); return; }
+    const done = () => { clearTimeout(timer); child.removeListener('exit', done); resolve(); };
+    const timer = setTimeout(done, graceMs);
+    child.once('exit', done);
+  });
+  const failures = [];
+  for (const child of children.filter(Boolean)) {
+    if (live(child)) child.kill('SIGTERM');
+    await wait(child);
+    if (live(child)) {
+      child.kill('SIGKILL');
+      await wait(child);
+      failures.push(live(child) ? 'Native signal process did not stop after SIGKILL' : 'Native signal process required SIGKILL');
+    }
+  }
+  if (failures.length) throw new Error(failures.join('; '));
+}
+
 async function linuxSignal(device, directory) {
   const render = device.nativeDeviceIds.find(id => id.endsWith('.render'));
   const capture = device.nativeDeviceIds.find(id => id.endsWith('.capture'));
@@ -89,11 +110,7 @@ async function linuxSignal(device, directory) {
       'Native loopback changed channel order or level');
     writeFileSync(join(directory, 'native-signal.json'), JSON.stringify(measured, null, 2) + '\n', { flag: 'wx' });
   } finally {
-    for (const child of [player, recorder].filter(Boolean)) {
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
-      await Promise.race([new Promise(resolve => { if (child.exitCode !== null || child.signalCode !== null) resolve(); else child.once('exit', resolve); }), delay(5000)]);
-      if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); throw new Error('Native signal process did not stop'); }
-    }
+    await stopSignalProcesses([player, recorder]);
   }
 }
 

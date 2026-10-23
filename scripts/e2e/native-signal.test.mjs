@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analyseStereo, analyseRf64 } from './native-signal.mjs';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { analyseStereo, analyseRf64, stopSignalProcesses } from './native-signal.mjs';
 
 function recording() {
   const header = Buffer.alloc(80);
@@ -41,4 +43,16 @@ test('the recorder uses WAVE_FORMAT_EXTENSIBLE for stereo Float32, including its
   assert.equal(analyseRf64(extended).frames, 48000);
   extended.writeUInt32LE(1, 80);
   assert.throws(() => analyseRf64(extended), /subformat/);
+});
+
+test('native probe cleanup reaps both owners when the first ignores termination', async t => {
+  const children = [true, false].map(ignore => spawn(process.execPath, ['-e', `
+    ${ignore ? "process.on('SIGTERM',()=>{});" : ''}
+    setInterval(()=>{},1000); process.stdout.write('ready\\n');
+  `], { stdio: ['ignore', 'pipe', 'ignore'] }));
+  t.after(() => { for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
+  await Promise.all(children.map(child => once(child.stdout, 'data')));
+  await assert.rejects(stopSignalProcesses(children, 100), /SIGKILL/);
+  assert.equal(children[0].signalCode, 'SIGKILL');
+  assert.ok(children.every(child => child.exitCode !== null || child.signalCode !== null), 'Both native probe owners must be reaped');
 });
