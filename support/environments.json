@@ -1,0 +1,400 @@
+{
+  "schemaVersion": 1,
+  "product": "mix-relay",
+  "minimums": {
+    "macos": "14.2",
+    "linux": {
+      "pipewire": "1.2.0",
+      "wireplumber": "0.5.0",
+      "glibc": "2.39"
+    }
+  },
+  "macosMajors": [
+    14,
+    15,
+    26,
+    27
+  ],
+  "build": {
+    "linuxDistribution": "debian"
+  },
+  "artifacts": [
+    {
+      "id": "macos-universal-pkg",
+      "os": "macos",
+      "arch": "universal",
+      "format": "pkg"
+    },
+    {
+      "id": "linux-x64-deb",
+      "os": "linux",
+      "arch": "x64",
+      "format": "deb"
+    },
+    {
+      "id": "linux-arm64-deb",
+      "os": "linux",
+      "arch": "arm64",
+      "format": "deb"
+    },
+    {
+      "id": "linux-x64-arch",
+      "os": "linux",
+      "arch": "x64",
+      "format": "arch"
+    }
+  ],
+  "codeChecks": {
+    "macos": [
+      {
+        "id": "macos-14-arm64",
+        "os": "macos",
+        "version": "14",
+        "arch": "arm64",
+        "runner": "macos-14"
+      },
+      {
+        "id": "macos-15-arm64",
+        "os": "macos",
+        "version": "15",
+        "arch": "arm64",
+        "runner": "macos-15"
+      },
+      {
+        "id": "macos-15-x64",
+        "os": "macos",
+        "version": "15",
+        "arch": "x64",
+        "runner": "macos-15-intel"
+      },
+      {
+        "id": "macos-26-arm64",
+        "os": "macos",
+        "version": "26",
+        "arch": "arm64",
+        "runner": "macos-26"
+      },
+      {
+        "id": "macos-26-x64",
+        "os": "macos",
+        "version": "26",
+        "arch": "x64",
+        "runner": "macos-26-intel"
+      },
+      {
+        "id": "macos-27-arm64",
+        "os": "macos",
+        "version": "27",
+        "arch": "arm64",
+        "runner": "xcode-27"
+      }
+    ],
+    "linuxDistributions": [
+      {
+        "id": "debian",
+        "version": "13",
+        "image": "debian:13-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132",
+        "architectures": [
+          "x64",
+          "arm64"
+        ],
+        "artifactFormat": "deb"
+      },
+      {
+        "id": "ubuntu",
+        "version": "26.04",
+        "image": "ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7",
+        "architectures": [
+          "x64",
+          "arm64"
+        ],
+        "artifactFormat": "deb"
+      },
+      {
+        "id": "kali",
+        "version": "rolling",
+        "image": "kalilinux/kali-rolling@sha256:c6d78f57ebfdd9fec428a8b04f74876e66fddd08dfd328c076224a552e7332a3",
+        "architectures": [
+          "x64",
+          "arm64"
+        ],
+        "artifactFormat": "deb"
+      },
+      {
+        "id": "arch",
+        "version": "rolling",
+        "image": "archlinux:base@sha256:82b1b08faae9d61e3e7e13d562f4d09114d939105b0d59ff34140f3bd418593a",
+        "architectures": [
+          "x64"
+        ],
+        "artifactFormat": "arch"
+      }
+    ]
+  },
+  "qualificationTargets": [
+    {
+      "id": "macos-14-2-arm64",
+      "os": "macos",
+      "version": "14.2",
+      "versionMatch": "minor",
+      "arch": "arm64",
+      "artifact": "macos-universal-pkg",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "macos-14-2",
+        "arm64"
+      ]
+    },
+    {
+      "id": "macos-14-2-x64",
+      "os": "macos",
+      "version": "14.2",
+      "versionMatch": "minor",
+      "arch": "x64",
+      "artifact": "macos-universal-pkg",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "macos-14-2",
+        "x64"
+      ]
+    },
+    {
+      "id": "macos-15-arm64",
+      "os": "macos",
+      "version": "15",
+      "versionMatch": "major",
+      "arch": "arm64",
+      "artifact": "macos-universal-pkg",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "macos-15",
+        "arm64"
+      ]
+    },
+    {
+      "id": "macos-15-x64",
+      "os": "macos",
+      "version": "15",
+      "versionMatch": "major",
+      "arch": "x64",
+      "artifact": "macos-universal-pkg",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "macos-15",
+        "x64"
+      ]
+    },
+    {
+      "id": "macos-26-arm64",
+      "os": "macos",
+      "version": "26",
+      "versionMatch": "major",
+      "arch": "arm64",
+      "artifact": "macos-universal-pkg",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "macos-26",
+        "arm64"
+      ]
+    },
+    {
+      "id": "macos-26-x64",
+      "os": "macos",
+      "version": "26",
+      "versionMatch": "major",
+      "arch": "x64",
+      "artifact": "macos-universal-pkg",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "macos-26",
+        "x64"
+      ]
+    },
+    {
+      "id": "macos-27-arm64",
+      "os": "macos",
+      "version": "27",
+      "versionMatch": "major",
+      "arch": "arm64",
+      "artifact": "macos-universal-pkg",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "macos-27",
+        "arm64"
+      ]
+    },
+    {
+      "id": "macos-27-x64",
+      "os": "macos",
+      "version": "27",
+      "versionMatch": "major",
+      "arch": "x64",
+      "artifact": "macos-universal-pkg",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "macos-27",
+        "x64"
+      ]
+    },
+    {
+      "id": "debian-13-x64",
+      "os": "linux",
+      "distro": "debian",
+      "version": "13",
+      "versionMatch": "major",
+      "arch": "x64",
+      "artifact": "linux-x64-deb",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "debian-13",
+        "x64"
+      ]
+    },
+    {
+      "id": "debian-13-arm64",
+      "os": "linux",
+      "distro": "debian",
+      "version": "13",
+      "versionMatch": "major",
+      "arch": "arm64",
+      "artifact": "linux-arm64-deb",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "debian-13",
+        "arm64"
+      ]
+    },
+    {
+      "id": "ubuntu-26-04-x64",
+      "os": "linux",
+      "distro": "ubuntu",
+      "version": "26.04",
+      "versionMatch": "minor",
+      "arch": "x64",
+      "artifact": "linux-x64-deb",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "ubuntu-26-04",
+        "x64"
+      ]
+    },
+    {
+      "id": "ubuntu-26-04-arm64",
+      "os": "linux",
+      "distro": "ubuntu",
+      "version": "26.04",
+      "versionMatch": "minor",
+      "arch": "arm64",
+      "artifact": "linux-arm64-deb",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "ubuntu-26-04",
+        "arm64"
+      ]
+    },
+    {
+      "id": "kali-rolling-x64",
+      "os": "linux",
+      "distro": "kali",
+      "version": "rolling",
+      "versionMatch": "rolling",
+      "arch": "x64",
+      "artifact": "linux-x64-deb",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "kali-rolling",
+        "x64"
+      ]
+    },
+    {
+      "id": "kali-rolling-arm64",
+      "os": "linux",
+      "distro": "kali",
+      "version": "rolling",
+      "versionMatch": "rolling",
+      "arch": "arm64",
+      "artifact": "linux-arm64-deb",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "kali-rolling",
+        "arm64"
+      ]
+    },
+    {
+      "id": "arch-rolling-x64",
+      "os": "linux",
+      "distro": "arch",
+      "version": "rolling",
+      "versionMatch": "rolling",
+      "arch": "x64",
+      "artifact": "linux-x64-arch",
+      "runnerLabels": [
+        "self-hosted",
+        "mixrelay-qualification",
+        "arch-rolling",
+        "x64"
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "PKG-01",
+      "scope": "artifact",
+      "required": true,
+      "title": "Installed executables match the selected distribution artifact"
+    },
+    {
+      "id": "APP-01",
+      "scope": "installed-api",
+      "required": true,
+      "title": "Installed runtime and Driver become ready"
+    },
+    {
+      "id": "GRAPH-02",
+      "scope": "installed-api",
+      "required": true,
+      "title": "Save and reopen a graph without losing authored routing"
+    },
+    {
+      "id": "AUDIO-01",
+      "scope": "native-audio",
+      "required": true,
+      "title": "Known stereo signal passes through the installed virtual device"
+    },
+    {
+      "id": "REC-02",
+      "scope": "installed-api",
+      "required": true,
+      "title": "Record native PCM to a finalized RF64 file"
+    },
+    {
+      "id": "GRAPH-01",
+      "scope": "installed-ui",
+      "required": true,
+      "title": "Create and connect a routing graph through the installed UI"
+    },
+    {
+      "id": "AUDIO-11",
+      "scope": "native-audio",
+      "required": true,
+      "os": [
+        "macos"
+      ],
+      "title": "Free whole-system capture receives multiple sources"
+    }
+  ]
+}

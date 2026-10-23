@@ -233,7 +233,7 @@ impl Usage {
             ("graphs", 1, self.graphs, before.graphs),
             (
                 "allApplicationsCapture",
-                0,
+                usize::from(cfg!(target_os = "macos")),
                 usize::from(self.aggregate_capture),
                 usize::from(before.aggregate_capture),
             ),

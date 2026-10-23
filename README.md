@@ -85,34 +85,19 @@ describe the native harnesses and comparison conditions.
 
 ## Publishing release installers
 
-After qualifying the final installers, collect them in one release directory and
-explicitly select each file. For example, using your actual release metadata and filenames:
+Support targets, architectures, dependency floors and required qualification scenarios
+are defined in [`support/environments.json`](support/environments.json). Run
+`pnpm support:check` to detect drift in generated CI inputs and packaging minima.
 
-```sh
-pnpm release:manifest --directory /absolute/release-directory \
-  --product mix-relay --version 1.2.3 --published-at 2026-10-06T18:20:30+09:00 \
-  --artifact macos:universal:MixRelay-1.2.3.pkg \
-  --artifact linux:arm64:MixRelay-1.2.3-arm64.deb \
-  --artifact linux:arm64:MixRelay-1.2.3-arm64.rpm \
-  --artifact linux:x64:MixRelay-1.2.3-x64.deb
-```
+Follow [release qualification](docs/release-qualification.md) to build once per CPU,
+qualify the exact final files on every required native environment, and prepare the
+publication manifest. The manifest command requires the candidate and successful
+qualification evidence. Missing environments or scenarios block publication.
 
-The script writes `mix-relay.release.json` beside the selected files, preserving
-installers and refusing to overwrite an existing manifest. macOS accepts Universal
-PKG; Linux accepts arm64/x64 DEB or RPM, including both formats for one target.
-Select only final installation packages: preparation files and uninstall PKGs
-must not be selected. OS, architecture and product role are supplied by the caller;
-the script does not infer them or qualify the packages. It does not replace PKG
-signing/notarization or DEB/RPM installation checks. An optional `--notes-url`
-must point to public HTTPS release notes; omit it when none exist, rather than
-using this private repository's release page.
-
-Attach the manifest and every selected installer to the matching published
-`vMAJOR.MINOR.PATCH` GitHub release. `publish-updates.yml` then requests central
-catalog publication; retry that workflow manually if assets were attached after
-publication. The central publisher computes SHA-256 and size from the installers.
-Only `--product mix-relay` is accepted. Every selected artifact must install the
-complete product. This command does not build, copy or upload installers.
+`publish-updates.yml` verifies the successful native workflow, source commit and
+installer hashes before requesting central catalog publication. It uses evidence
+downloaded directly from that Actions run. Keep installers unchanged between
+qualification and publication.
 
 R2 retains the latest patch installer for each product's major/minor series.
 After a new patch is published and verified, previous patch files leave R2 and
@@ -120,8 +105,8 @@ the download catalog. GitHub Releases, tags and changelogs are preserved.
 
 ## Distribution and licensing
 
-MixRelay is developed in a private repository for website distribution. Free
-driver, indefinite limited app trial and paid-app policies are defined only in
+This repository is public. Product installers are prepared for website distribution.
+Free driver, indefinite limited app trial and paid-app policies are defined only in
 the [product document](docs/product.md#제품-구성). These are product requirements,
 not a claim that the new licensing policy or standalone driver is implemented.
 The store and complete licensing flow are not live yet.

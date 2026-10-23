@@ -4,14 +4,25 @@ use super::{
 };
 
 fn platform(os: &'static str, arch: &'static str) -> Platform {
-    Platform { os, arch }
+    Platform {
+        os,
+        arch,
+        package: if os == "linux" {
+            super::Package::Deb
+        } else {
+            super::Package::Pkg
+        },
+    }
 }
 
 fn download(os: &str, arch: &str) -> Download {
     Download {
         os: os.into(),
         arch: arch.into(),
-        url: format!("https://downloads.example.test/{os}-{arch}.pkg"),
+        url: format!(
+            "https://downloads.example.test/{os}-{arch}.{}",
+            if os == "linux" { "deb" } else { "pkg" }
+        ),
         sha256: "a".repeat(64),
         size: 1024,
     }
@@ -129,6 +140,29 @@ fn assets_match_platform_architecture_and_macos_universal() {
         assert_eq!(architectures, expected);
         assert!(update.downloads.iter().all(|download| download.os == os));
     }
+}
+
+#[test]
+fn arch_updates_only_offer_and_authorize_the_contracts_arch_package() {
+    let platform = Platform {
+        os: "linux",
+        arch: "x64",
+        package: super::package::linux("ID=arch\n", "x64").unwrap(),
+    };
+    let deb = download("linux", "x64");
+    let mut arch = deb.clone();
+    arch.url = "https://downloads.example.test/mix-relay.pkg.tar.zst".into();
+    let source = || catalog(Product::MixRelay, "1.2.10", vec![deb.clone(), arch.clone()]);
+    let update = product_update(
+        Product::MixRelay,
+        Some("1.2.9".into()),
+        platform,
+        Ok(source()),
+    );
+    assert_eq!(update.state, UpdateState::Available);
+    assert_eq!(update.downloads, vec![arch.clone()]);
+    assert!(authorize_download(source(), Product::MixRelay, platform, &arch.url).is_ok());
+    assert!(authorize_download(source(), Product::MixRelay, platform, &deb.url).is_err());
 }
 
 #[test]

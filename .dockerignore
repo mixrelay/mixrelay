@@ -14,6 +14,7 @@
 !vendor/**
 !scripts/**
 !infra/lab/**
+!support/**
 !packaging/**
 !docs/**
 !LICENSE*.txt

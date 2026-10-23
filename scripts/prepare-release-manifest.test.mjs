@@ -5,60 +5,56 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { prepareReleaseManifest } from "./prepare-release-manifest.mjs";
+import { qualificationFixture } from './e2e/qualification.fixture.mjs';
 
 const publishedAt = "2026-10-06T18:20:30.123456789+09:00";
 
 function fixture(t) {
-  const parent = fileURLToPath(new URL("../target/test-artifacts/", import.meta.url));
-  mkdirSync(parent, { recursive: true });
-  const directory = mkdtempSync(join(parent, "mixrelay-release-manifest-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  for (const file of ["MixRelay Install.pkg", "MixRelay-arm64.deb", "MixRelay-arm64.rpm", "MixRelay-x64.deb"]) {
-    writeFileSync(join(directory, file), `Existing final installer fixture: ${file}\n`);
-  }
+  const f = qualificationFixture(t);
+  const { directory } = f;
   const args = ["--directory", directory, "--product", "mix-relay", "--version", "1.2.3",
-    "--published-at", publishedAt];
-  return { directory, args };
+    "--published-at", publishedAt, ...f.qualificationArgs];
+  return { ...f, args };
 }
 
 test("one product produces the exact publisher schema and preserve installer inputs", t => {
-  const { directory, args } = fixture(t);
+  const { directory, args, artifactArgs, artifacts } = fixture(t);
   const file = "MixRelay Install.pkg";
   const original = readFileSync(join(directory, file));
   writeFileSync(join(directory, "Uninstall MixRelay.pkg"), "Uninstaller is not selected\n");
   for (const product of ["mix-relay"]) {
     const selected = args.map(value => value === "mix-relay" ? product : value);
-    const path = prepareReleaseManifest([...selected, "--artifact", `macos:universal:${file}`]);
+    const path = prepareReleaseManifest([...selected, ...artifactArgs]);
     assert.equal(path, join(directory, `${product}.release.json`));
     assert.deepEqual(JSON.parse(readFileSync(path, "utf8")), {
       product, version: "1.2.3", published_at: publishedAt,
-      artifacts: [{ os: "macos", arch: "universal", file }],
+      artifacts,
     });
   }
   assert.deepEqual(readFileSync(join(directory, file)), original);
   assert.equal(readFileSync(join(directory, "Uninstall MixRelay.pkg"), "utf8"), "Uninstaller is not selected\n");
-  assert.equal(readdirSync(directory).length, 6);
+  assert.equal(readdirSync(directory).length, 8);
 });
 
-test("the CLI permits DEB and RPM for the same Linux target and an explicit public notes URL", t => {
-  const { directory, args } = fixture(t);
+test("the CLI publishes the complete qualified artifact selection and an explicit public notes URL", t => {
+  const { directory, args, artifactArgs, artifacts } = fixture(t);
   const script = fileURLToPath(new URL("./prepare-release-manifest.mjs", import.meta.url));
   const result = spawnSync(process.execPath, [script, ...args,
     "--notes-url", "https://mixrelay.com/releases/1.2.3",
-    "--artifact", "linux:arm64:MixRelay-arm64.deb",
-    "--artifact", "linux:arm64:MixRelay-arm64.rpm",
-    "--artifact", "linux:x64:MixRelay-x64.deb"], { encoding: "utf8" });
+    ...artifactArgs], { encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr);
   const manifest = JSON.parse(readFileSync(join(directory, "mix-relay.release.json"), "utf8"));
   assert.deepEqual(manifest, {
     product: "mix-relay", version: "1.2.3", published_at: publishedAt,
     notes_url: "https://mixrelay.com/releases/1.2.3",
-    artifacts: [
-      { os: "linux", arch: "arm64", file: "MixRelay-arm64.deb" },
-      { os: "linux", arch: "arm64", file: "MixRelay-arm64.rpm" },
-      { os: "linux", arch: "x64", file: "MixRelay-x64.deb" },
-    ],
+    artifacts,
   });
+});
+
+test('qualification cannot be omitted or used to release a subset of tested artifacts', t => {
+  const { args, artifactArgs } = fixture(t);
+  assert.throws(() => prepareReleaseManifest([...args.slice(0, 10), ...artifactArgs]), /--candidate and --reports/);
+  assert.throws(() => prepareReleaseManifest([...args, ...artifactArgs.slice(0, 2)]), /exactly/);
 });
 
 test("invalid options and artifact declarations cannot write a manifest", t => {

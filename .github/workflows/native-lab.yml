@@ -2,6 +2,8 @@ name: Native build and unit tests
 
 on:
   pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -12,13 +14,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  support:
+    runs-on: ubuntu-24.04
+    outputs:
+      macos: ${{ steps.matrix.outputs.macos }}
+      linux: ${{ steps.matrix.outputs.linux }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+      - run: node scripts/support-contract.mjs check
+      - run: node --test scripts/support-contract.test.mjs scripts/qualification.test.mjs scripts/e2e/*.test.mjs scripts/prepare-release-manifest.test.mjs
+      - id: matrix
+        run: node scripts/support-contract.mjs matrix >> "$GITHUB_OUTPUT"
+
   native:
-    name: ${{ matrix.os }} native build (not audio qualification)
+    needs: support
+    name: ${{ matrix.id }} build and unit tests
     strategy:
       fail-fast: false
-      matrix:
-        os: [macos-15]
-    runs-on: ${{ matrix.os }}
+      matrix: ${{ fromJSON(needs.support.outputs.macos) }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     # sccache keeps compiled crates in the GitHub Actions cache between runs. Incremental
     # compilation is off so workspace crates are cacheable too.
@@ -26,6 +45,7 @@ jobs:
       RUSTC_WRAPPER: sccache
       SCCACHE_GHA_ENABLED: "true"
       CARGO_INCREMENTAL: "0"
+      MIXRELAY_CI_TARGET: ${{ matrix.id }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -40,6 +60,12 @@ jobs:
           # The HAL bundle is universal: check:native also builds the Intel slice.
           rustup toolchain install 1.96.0 --profile minimal --target aarch64-apple-darwin,x86_64-apple-darwin
           rustup default 1.96.0
+      - name: Verify hosted OS and CPU
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+          EXPECTED_MAJOR: ${{ matrix.version }}
+        run: |
+          node --input-type=module -e 'import assert from "node:assert/strict"; import {execFileSync} from "node:child_process"; assert.equal(process.arch, process.env.EXPECTED_ARCH); assert.equal(execFileSync("sw_vers", ["-productVersion"], {encoding:"utf8"}).trim().split(".")[0], process.env.EXPECTED_MAJOR);'
       - run: pnpm install --frozen-lockfile
       # Pre-flight for the lab tooling itself; lab:test then runs the full macOS plan,
       # including `pnpm test:scripts` and `pnpm probe:macos-roundtrip --self-test`.
@@ -52,23 +78,20 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: native-${{ matrix.os }}
+          overwrite: true
+          name: native-${{ matrix.id }}
           path: .lab/reports/
           include-hidden-files: true
           if-no-files-found: warn
 
   linux:
-    name: ${{ matrix.distro }} on ${{ matrix.runner }} (not audio qualification)
+    needs: support
+    name: ${{ matrix.id }} build and unit tests
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      matrix:
-        distro: [debian, ubuntu, kali, arch]
-        runner: [ubuntu-24.04, ubuntu-24.04-arm]
-        exclude:
-          - distro: arch
-            runner: ubuntu-24.04-arm
+      matrix: ${{ fromJSON(needs.support.outputs.linux) }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -81,7 +104,10 @@ jobs:
       - run: docker compose -f infra/lab/compose.yaml build ${{ matrix.distro }}
       # Full debug info for the whole workspace fills the hosted runner's disk; line tables
       # keep file:line in panics and backtraces.
-      - run: docker compose -f infra/lab/compose.yaml run --name mixrelay-ci-check -e CARGO_PROFILE_DEV_DEBUG=line-tables-only ${{ matrix.distro }} test
+      - name: Check the contract's native Linux CPU and distro
+        env:
+          CI_TARGET: ${{ matrix.id }}
+        run: docker compose -f infra/lab/compose.yaml run --name mixrelay-ci-check -e MIXRELAY_CI_TARGET="$CI_TARGET" -e MIXRELAY_SOURCE_REVISION="$GITHUB_SHA" -e CARGO_PROFILE_DEV_DEBUG=line-tables-only ${{ matrix.distro }} test
       - name: Collect evidence even when a compile or test fails
         if: always()
         run: |
@@ -92,7 +118,8 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: linux-${{ matrix.distro }}-${{ matrix.runner }}
+          overwrite: true
+          name: linux-${{ matrix.id }}
           path: .lab/reports/
           include-hidden-files: true
           if-no-files-found: warn

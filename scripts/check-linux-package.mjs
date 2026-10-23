@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { loadContract } from './support-contract.mjs';
 
 const languages = JSON.parse(readFileSync(new URL("../packaging/localization/languages.json", import.meta.url), "utf8"));
 const localizedDocuments = languages.flatMap(language => [language.appTerms, language.driverTerms]);
@@ -17,7 +18,8 @@ const requiredDependencies = [
 ];
 // Async contributions need PipeWire 1.2; source muting needs WirePlumber 0.5.
 const requiredAudioDependencies = [
-  ['libpipewire-0.3-0t64', [1, 2, 0]], ['pipewire', [1, 2, 0]], ['wireplumber', [0, 5, 0]],
+  ...['libpipewire-0.3-0t64', 'pipewire'].map(name => [name, loadContract().contract.minimums.linux.pipewire.split('.').map(Number)]),
+  ['wireplumber', loadContract().contract.minimums.linux.wireplumber.split('.').map(Number)],
 ];
 
 // Release dependency floors use plain upstream versions, not distro epochs/revisions.

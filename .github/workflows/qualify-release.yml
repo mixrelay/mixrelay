@@ -1,0 +1,126 @@
+name: Qualify exact release artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_tag:
+        description: Draft or prerelease containing all installers and mix-relay.candidate.json
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: qualification-${{ inputs.candidate_tag }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'mixrelay/mixrelay' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.prepare.outputs.matrix }}
+      source: ${{ steps.prepare.outputs.source }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+      - name: Download immutable candidate selection
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_TAG: ${{ inputs.candidate_tag }}
+        run: |
+          gh release view "$CANDIDATE_TAG" --json isDraft,isPrerelease | jq -e '.isDraft or .isPrerelease'
+          mkdir candidate
+          gh release download "$CANDIDATE_TAG" --dir candidate --pattern '*.pkg' --pattern '*.deb' --pattern '*.pkg.tar.zst' --pattern 'mix-relay.candidate.json'
+      - name: Check source, contract, bytes and available native runners
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNNER_READ_TOKEN: ${{ secrets.QUALIFICATION_RUNNER_READ_TOKEN }}
+        run: node scripts/qualification-ci.mjs prepare --directory candidate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          overwrite: true
+          name: qualification-candidate
+          path: candidate/
+          retention-days: 90
+          if-no-files-found: error
+
+  installed:
+    needs: prepare
+    name: Install and qualify ${{ matrix.id }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    # Only manual runs from main reach these resettable, single-job desktop sessions.
+    # Never add pull_request or pull_request_target triggers to this workflow.
+    runs-on: ${{ matrix.runnerLabels }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.prepare.outputs.source }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: qualification-candidate
+          path: candidate
+      - name: Install the same candidate; run shared native suite
+        env:
+          TARGET: ${{ matrix.id }}
+        run: node scripts/e2e/installed.mjs --target "$TARGET" --directory candidate --candidate candidate/mix-relay.candidate.json --output evidence --disposable-environment
+      - name: Preserve failures and raw evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          overwrite: true
+          name: qualification-${{ matrix.id }}
+          # Extracted package payload is reproducible from the pinned artifact.
+          path: |
+            evidence/*
+            !evidence/payload
+          retention-days: 90
+          if-no-files-found: error
+
+  gate:
+    if: always() && needs.prepare.result == 'success'
+    needs: [prepare, installed]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: qualification-*
+          path: qualification
+      - name: Produce inventory even when an environment failed
+        run: node scripts/qualification.mjs inventory --directory qualification/qualification-candidate --candidate qualification/qualification-candidate/mix-relay.candidate.json --reports qualification --output inventory.md
+      - name: Require every environment, scenario and exact artifact
+        run: node scripts/qualification.mjs gate --directory qualification/qualification-candidate --candidate qualification/qualification-candidate/mix-relay.candidate.json --reports qualification
+      - name: Prepare publication receipt and manifest
+        run: node scripts/qualification-ci.mjs seal --directory qualification/qualification-candidate --reports qualification --output publication
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          overwrite: true
+          name: qualification-evidence
+          path: |
+            qualification/
+            inventory.md
+            publication/
+          retention-days: 90
+          if-no-files-found: error

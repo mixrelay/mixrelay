@@ -4,6 +4,8 @@ import { constants, platform, arch, release } from "node:os";
 import { isAbsolute, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { desktopCodeCheckEnvironment } from "../build-desktop.mjs";
+import { loadContract } from '../support-contract.mjs';
+import { observeEnvironment, validateCodeCheckEnvironment } from '../e2e/environment.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -83,6 +85,7 @@ export function buildPlan(os, mode) {
   if (!["darwin", "linux"].includes(os)) throw new Error(`Unsupported OS: ${os}`);
   if (!["build", "test"].includes(mode)) throw new Error("Expected build or test");
   const commands = [
+    ["node", "scripts/support-contract.mjs", "check"],
     ["rustc", "--version", "--verbose"],
     ["pnpm", "--version"],
     ["pnpm", "--filter", "@mixrelay/control-ui", "check:boundaries"],
@@ -233,11 +236,17 @@ function main() {
   let distro;
   if (platform() === "linux") distro = readFileSync("/etc/os-release", "utf8");
   const startedAt = new Date().toISOString();
+  const environment = observeEnvironment();
+  if (process.env.MIXRELAY_CI_TARGET) validateCodeCheckEnvironment(environment, process.env.MIXRELAY_CI_TARGET, loadContract().contract);
   const result = runChecks(platform(), mode, (command, args, options) => {
     console.log(`\n> ${command} ${args.join(" ")}`);
     return spawnSync(command, args, options);
   }, process.env);
+  const sourceRevision = process.env.MIXRELAY_SOURCE_REVISION
+    ?? spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).stdout?.trim();
   const report = { startedAt, endedAt: new Date().toISOString(), mode,
+    sourceRevision, contractSha256: loadContract().sha256,
+    environment,
     os: platform(), arch: arch(), kernel: release(), distro, ...result };
   const directory = resolve(root, ".lab/reports");
   mkdirSync(directory, { recursive: true });

@@ -7,6 +7,9 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod package;
+use package::Package;
+
 const PRODUCTS_ORIGIN: &str = "https://appserver.rawsector.com/products";
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
@@ -131,6 +134,7 @@ struct Release {
 struct Platform {
     os: &'static str,
     arch: &'static str,
+    package: Package,
 }
 
 impl Platform {
@@ -145,12 +149,20 @@ impl Platform {
             "x86_64" => "x64",
             _ => return Err(UpdateError::Unavailable),
         };
-        Ok(Self { os, arch })
+        let package = if os == "linux" {
+            let release =
+                std::fs::read_to_string("/etc/os-release").map_err(|_| UpdateError::Unavailable)?;
+            package::linux(&release, arch)?
+        } else {
+            Package::Pkg
+        };
+        Ok(Self { os, arch, package })
     }
 
     fn accepts(self, download: &Download) -> bool {
         download.os == self.os
             && (download.arch == self.arch || (self.os == "macos" && download.arch == "universal"))
+            && self.package.accepts(&download.url)
     }
 }
 

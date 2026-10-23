@@ -2,7 +2,8 @@
 
 제품 동작과 현재 결과·다음 실행은 [제품 문서](../../docs/product.md)에서 관리한다.
 이 문서는 검증 환경 사용법이며 별도 출시 체크리스트가 아니다.
-검증 대상은 macOS·Linux다.
+지원 정의는 [`support/environments.json`](../../support/environments.json), 릴리스의 동일 파일 검증은
+[릴리스 검증 절차](../../docs/release-qualification.md)를 따른다. 이 랩의 개발 검사와 출시 수락을 구별한다.
 
 ## 환경과 범위
 
@@ -11,14 +12,13 @@
 | macOS | 현재 Mac의 정상 로그인 세션 | Universal 빌드가 Intel 실제 실행을 증명하지 않는다. |
 | Linux | 기존 Debian/Ubuntu VM의 정상 사용자 PipeWire 세션 | 배포판 결과를 복제하지 않는다. VM timing은 물리 timing이 아니다. |
 
-Kali/Arch는 선택 환경이다. 이 문서 때문에 새 VM·백엔드·물리 64채널 장비·
-플러그인 전수 조합을 출시 조건으로 추가하지 않는다. 기존 실제 PCM·채널 폭·
-클록·자원 수명·설치 조건은 매트릭스에서 유지한다.
+개발 중에는 변경 경계에 맞는 환경을 고른다. 릴리스는 계약의 Kali/Arch를 포함한 모든 조합을 검증한다.
+물리 64채널 장비·플러그인 전수 조합을 추가 조건으로 두지 않는다.
 
 Docker는 컴파일용이며 desktop 로그인·native audio·editor 검증을 대체하지 않는다.
 Docker 컨테이너·Docker 기반 VM에서 제품 오디오를 실행하지 않는다. Proxmox 등 x64 Linux VM의
 정상 사용자 PipeWire 세션을 사용하며, Docker의 오디오 제한을 일반 Linux VM의 결함으로 기록하지 않는다.
-macOS VM은 필요 없다. 기존 VM을 재사용하고 무거운 빌드/오디오 계측은 한 번에 하나씩
+로컬에서는 기존 VM을 재사용하고 무거운 빌드/오디오 계측은 한 번에 하나씩
 실행한다. 경량 확인과 독립 코드 수정까지 이 제한으로 직렬화하지 않는다.
 자원과 여유 공간을 확인하고 host audio interface를 임의로 guest에 넘기지 않는다.
 
@@ -58,6 +58,8 @@ docker compose -f infra/lab/compose.yaml run --rm debian build
 
 `test`는 코드 검사를 추가한다. image/package inventory와 실제 종료코드를 보존한다.
 compose/CI에 target이 있다고 실제 오디오 검증이 끝난 것은 아니다.
+`images.json`은 과거 설치 ISO 참고 목록이며 지원 기준이나 현재 VM 상태를 뜻하지 않는다.
+새 qualification VM은 지원 계약의 대상 버전과 정상 오디오 세션을 확인한 뒤 등록한다.
 emulated Arch의 package sandbox 실패를 보안 설정 해제로 우회하지 않는다.
 
 desktop 코드 검사는 공통 경로를 사용한다:

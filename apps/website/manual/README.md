@@ -118,8 +118,9 @@ OS guidance is linked inline to Apple's official support pages.
 
 Two product/code differences are reflected in the manual rather than filled in:
 
-- Product policy reserves whole-system capture for paid use, but
-  `routingNodeMenus.ts` offers no whole-system capture command. The manual states
+- macOS whole-system capture is a free input within the two-input limit; Linux
+  retains its paid policy. The current `routingNodeMenus.ts` offers no whole-system
+  capture command. The manual states
   that it is unavailable in the current menu.
 - The single-product contract uses MixRelay naming, but the macOS removal dialog
   in `native/macos/installer/src/bin/uninstaller/localization.rs` still says

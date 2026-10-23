@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: publish-updates-${{ github.event.release.tag_name || inputs.release_tag }}
@@ -24,6 +25,14 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
     steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
       - name: Find manifests in the published source release
         id: manifests
         env:
@@ -47,6 +56,15 @@ jobs:
           fi
           echo "products=${products[*]}" >> "$GITHUB_OUTPUT"
 
+      - name: Verify final bytes against successful native qualification
+        if: steps.manifests.outputs.products != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir release-assets
+          gh release download "$RELEASE_TAG" --dir release-assets --pattern '*.pkg' --pattern '*.deb' --pattern '*.pkg.tar.zst' --pattern 'mix-relay.*.json'
+          node scripts/qualification-ci.mjs verify-published --directory release-assets --tag "$RELEASE_TAG" --output qualification-proof
+
       - name: Request central catalog publication
         if: steps.manifests.outputs.products != ''
         env:
@@ -58,7 +76,7 @@ jobs:
             echo 'Missing secret: APP_SERVER_DISPATCH_TOKEN (contents:write access to echovisionlab/appserver).' >&2
             exit 1
           fi
-          read -r -a products <<<"$PRODUCTS"
+          read -r -a products <<<"${PRODUCTS:?PRODUCTS is required}"
           for product in "${products[@]}"; do
             jq -n --arg product "$product" --arg repository "$GITHUB_REPOSITORY" \
               --arg tag "$RELEASE_TAG" --arg manifest "$product.release.json" \

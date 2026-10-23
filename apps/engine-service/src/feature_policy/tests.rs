@@ -461,7 +461,7 @@ fn activating_paid_access_preserves_saved_work_until_an_explicit_workspace_save(
 }
 
 #[test]
-fn whole_system_capture_does_not_count_as_a_single_application_slot() {
+fn whole_system_capture_uses_one_input_slot_with_platform_specific_paid_access() {
     use mixrelay_audio_io::{ApplicationCaptureRequest, ApplicationSelector, SourcePlaybackPolicy};
     let document = GraphDocument::new(
         1,
@@ -482,10 +482,18 @@ fn whole_system_capture_does_not_count_as_a_single_application_slot() {
         vec![],
     );
     let usage = measure(&document);
-    assert_eq!(
-        usage.compare(&Usage::default()).unwrap_err().parameters["resource"],
-        "allApplicationsCapture"
-    );
+    let engine = free_controller(GraphDocument::new(1, vec![], vec![]));
+    let admission = engine.validate_feature_usage(&document, None);
+    assert_eq!(usage.inputs, 1);
+    if cfg!(target_os = "macos") {
+        assert!(admission.is_ok());
+        assert!(usage.compare(&Usage::default()).is_ok());
+    } else {
+        assert_eq!(
+            admission.unwrap_err().parameters["resource"],
+            "allApplicationsCapture"
+        );
+    }
     assert!(usage.compare(&usage).is_ok());
 }
 #[test]

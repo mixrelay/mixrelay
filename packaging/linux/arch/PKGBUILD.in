@@ -5,8 +5,8 @@ pkgdesc='MixRelay audio routing, recording and virtual devices'
 arch=('@ARCH@')
 url='https://mixrelay.com'
 license=('LicenseRef-MixRelay-Driver')
-depends=('glibc>=2.39' 'gcc-libs' 'gtk3' 'webkit2gtk-4.1' 'librsvg'
-         'libayatana-appindicator' 'pipewire' 'libpipewire' 'wireplumber'
+depends=('glibc>=@GLIBC@' 'gcc-libs' 'gtk3' 'webkit2gtk-4.1' 'librsvg'
+         'libayatana-appindicator' 'pipewire>=@PIPEWIRE@' 'libpipewire>=@PIPEWIRE@' 'wireplumber>=@WIREPLUMBER@'
          'polkit' 'zenity' 'systemd' 'util-linux' 'lilv' 'gnome-keyring')
 options=('!strip' '!debug')
 install=mixrelay.install

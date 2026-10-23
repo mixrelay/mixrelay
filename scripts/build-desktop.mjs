@@ -4,6 +4,7 @@ import { readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { inspectPackage } from "./check-linux-package.mjs";
+import { loadContract, checkGenerated } from './support-contract.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const desktopRoot = resolve(root, "apps/desktop");
@@ -215,6 +216,7 @@ export async function main(
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   const build = async () => {
+    checkGenerated(loadContract().contract);
     if (process.platform !== "darwin") return main();
     desktopBuildCommand("darwin", process.argv.slice(2));
     const { checkMacosSigning, withMacosSigning } = await import("./macos-signing.mjs");

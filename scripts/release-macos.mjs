@@ -8,6 +8,7 @@ import { checkVersion } from './product-version.mjs';
 import { checkMacosSigning, readMacosSigningConfig, withMacosSigning } from './macos-signing.mjs';
 import { checkPackageOutput } from './build-macos-installer-pkgs.mjs';
 import { checkNotarizationCredentials, notarizationArguments } from './macos-notarization.mjs';
+import { loadContract, checkGenerated } from './support-contract.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 /** A failure whose message the owned child already printed. */
@@ -23,6 +24,7 @@ try {
     console.log('pnpm release:macos --output EMPTY_DIRECTORY [--from-keychain] [--package-only] [--skip-notarization]\nUnlocks the restored private build keychain, verifies signing, builds the universal app, HAL and one signed MixRelay PKG, then notarizes, staples and validates the PKG.\n--package-only reuses compiled signed artifacts and prepares a fresh payload. --skip-notarization produces a signed local test build marked not notarized. Does not install or publish.\nMIXRELAY_SIGNING_CONFIG selects another private restored signing configuration, including notarization credential references.');
   } else {
     if (process.platform !== 'darwin' || !values.output) throw new Error('macOS and --output are required');
+    checkGenerated(loadContract().contract);
     const version = checkVersion();
     const output = resolve(values.output);
     // The PKG step's output rules apply before any compile or signing work starts.
