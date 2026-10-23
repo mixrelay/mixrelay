@@ -54,13 +54,16 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
   }
   async function scenario(id, work) {
     const scope = requiredScenarios(contract, target).find(item => item.id === id).scope;
+    console.log(`${targetId}: ${id}: started`);
     try {
       const files = await work();
       report.scenarios.push({ id, scope, status: 'passed', evidence: files });
+      console.log(`${targetId}: ${id}: passed`);
       return true;
     } catch (error) {
       report.scenarios.push({ id, scope, status: 'failed', error: error.message,
         evidence: [evidence(`${id}.failure.json`, { message: error.message, stack: error.stack })] });
+      console.log(`${targetId}: ${id}: failed: ${error.message.slice(0, 500)}`);
       return false;
     }
   }
@@ -99,7 +102,17 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
       assert.equal(snapshot.installedVersion, candidate.version);
       return [evidence('app-ready.json', { status, driver: snapshot })];
     });
-    if (!ready) throw new Error('Installed runtime is unavailable');
+    if (!ready) {
+      const status = await api('status'), snapshot = await driver();
+      const proof = evidence('readiness-disagreement.json', { status, driver: snapshot,
+        note: 'APP-01 remains failed. Independent native scenarios run only with a live installed Driver and engine.' });
+      report.scenarios.find(item => item.id === 'APP-01').evidence.push(proof);
+      assert.equal(snapshot.state, 'ready', 'Installed Driver is unavailable');
+      assert.equal(snapshot.installedVersion, candidate.version);
+      assert.equal(status.protocolVersion, 1);
+      assert.equal(status.enginePower?.enabled, true);
+      assert.equal(status.audioSession?.capabilities?.backend, target.os === 'macos' ? 'core_audio' : 'pipe_wire');
+    }
     const catalog = await api('graphs');
     original = catalog.document; graphId = catalog.activeId;
     assert.deepEqual(original.nodes, [], 'Reset QA workspace: existing graph is preserved');
