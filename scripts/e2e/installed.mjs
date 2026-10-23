@@ -15,6 +15,7 @@ import { startInstalledUi } from './installed-ui.mjs';
 import { wholeSystemCapture } from './system-capture.mjs';
 import { invoke } from '../lab/macos-installed-capture-acceptance.mjs';
 import { collectLinux } from './collect-linux.mjs';
+import { collectMacos } from './collect-macos.mjs';
 
 async function eventually(read, predicate, description) {
   const deadline = Date.now() + 30000;
@@ -227,6 +228,9 @@ export async function qualifyInstalled({ targetId, candidate, directory, output,
     } catch (error) { cleanupFailed(error); }
     if (target.os === 'linux' && report.scenarios.some(item => item.status === 'failed')) {
       try { collectLinux(output); } catch (error) { cleanupFailed(error); }
+    }
+    if (target.os === 'macos' && report.scenarios.some(item => item.status === 'failed')) {
+      try { collectMacos(output, 'live-'); } catch (error) { cleanupFailed(error); }
     }
     const failedUi = error => {
       const result = report.scenarios.find(item => item.id === 'GRAPH-01');

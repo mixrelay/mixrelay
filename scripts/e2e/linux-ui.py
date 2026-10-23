@@ -53,6 +53,28 @@ def click(label, contains=False, right=False):
                                        "b3c" if right else "b1c")
 
 
+def screenshot(path):
+    import gi
+    gi.require_version("Gdk", "3.0")
+    from gi.repository import Gdk
+    window = Gdk.get_default_root_window()
+    previous = None
+    stable = 0
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        Gdk.Display.get_default().sync()
+        image = Gdk.pixbuf_get_from_window(window, 0, 0, window.get_width(), window.get_height())
+        assert image is not None, "Installed X11 screenshot unavailable"
+        pixels = image.get_pixels()
+        stable = stable + 1 if pixels == previous else 0
+        if stable >= 3:
+            image.savev(str(path), "png", [], [])
+            return
+        previous = pixels
+        time.sleep(0.1)
+    raise AssertionError("Installed screen did not settle after the UI action")
+
+
 def main(output):
     click("Add node")
     click("Processor")
@@ -65,15 +87,10 @@ def main(output):
     click("Destination", contains=True)
     click("Recorder")
     click("Connect")
+    find("Compressor CH 1 → Recorder CH 1", interactive=False)
     tree = [f"{' ' * depth}{node.getRoleName()} {node.name}" for node, depth in descendants(application())]
     (output / "installed-ui-tree.txt").write_text("\n".join(tree), encoding="utf-8")
-    import gi
-    gi.require_version("Gdk", "3.0")
-    from gi.repository import Gdk
-    window = Gdk.get_default_root_window()
-    image = Gdk.pixbuf_get_from_window(window, 0, 0, window.get_width(), window.get_height())
-    assert image is not None, "Installed X11 screenshot unavailable"
-    image.savev(str(output / "installed-ui.png"), "png", [], [])
+    screenshot(output / "installed-ui.png")
     (output / "installed-ui.ready").write_text("ready\n", encoding="utf-8")
 
 
@@ -83,7 +100,8 @@ if __name__ == "__main__":
         main(folder)
     except Exception:
         try:
-            tree = [f"{' ' * depth}{node.getRoleName()} {node.name}" for node, depth in descendants(application())]
+            tree = [f"{' ' * depth}{node.getRoleName()} {node.name}" for node, depth in descendants(pyatspi.Registry.getDesktop(0))]
             (folder / "installed-ui-failure.txt").write_text("\n".join(tree), encoding="utf-8")
+            screenshot(folder / "installed-ui-failure.png")
         finally:
             raise

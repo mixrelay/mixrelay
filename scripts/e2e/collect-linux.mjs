@@ -13,7 +13,7 @@ export function collectLinux(output) {
     try {
       if (lstatSync(`/proc/${pid}`).uid !== process.getuid()) continue;
       const executable = readFileSync(`/proc/${pid}/cmdline`).toString().split('\0')[0];
-      if (!['/usr/bin/mixrelay-engine-service', '/usr/bin/mixrelay-driver-service'].includes(executable)) continue;
+      if (!['/usr/bin/mixrelay-desktop', '/usr/bin/mixrelay-engine-service', '/usr/bin/mixrelay-driver-service'].includes(executable)) continue;
       capture(`${executable.split('/').at(-1)}-${pid}.stack.txt`, 'sudo', ['-n', 'gdb', '--batch', '--nx', '-p', pid,
         '-ex', 'set pagination off', '-ex', 'thread apply all bt', '-ex', 'detach']);
     } catch (error) { if (!['ENOENT', 'ESRCH'].includes(error.code)) throw error; }

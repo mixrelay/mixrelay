@@ -1,45 +1,90 @@
 import XCTest
 import AppKit
+import ApplicationServices
 
 final class InstalledUITests: XCTestCase {
-    private var app = XCUIApplication(url: URL(fileURLWithPath: "/Applications/MixRelay/MixRelay.app"))
     private struct MissingControl: Error { let label: String }
+    private var app = AXUIElementCreateSystemWide()
 
-    private func press(_ label: String) throws {
-        let types = [XCUIElement.ElementType.button, .popUpButton, .menuItem, .cell].map(\.rawValue)
-        let item = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ AND elementType IN %@", label, types)).firstMatch
-        guard item.waitForExistence(timeout: 30) else { throw MissingControl(label: label) }
-        item.click()
+    private func attribute(_ node: AXUIElement, _ name: String) -> CFTypeRef? {
+        var value: CFTypeRef?
+        return AXUIElementCopyAttributeValue(node, name as CFString, &value) == .success ? value : nil
     }
 
+    private func text(_ node: AXUIElement) -> String {
+        [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute]
+            .compactMap { attribute(node, $0) as? String }.filter { !$0.isEmpty }.joined(separator: " | ")
+    }
+
+    private func descendants(_ root: AXUIElement) -> [(AXUIElement, Int)] {
+        var queue = [(root, 0)], result: [(AXUIElement, Int)] = []
+        while let (node, depth) = queue.popLast(), result.count < 20_000 {
+            result.append((node, depth))
+            if depth < 60, let children = attribute(node, kAXChildrenAttribute) as? [AXUIElement] {
+                queue.append(contentsOf: children.reversed().map { ($0, depth + 1) })
+            }
+        }
+        return result
+    }
+
+    private func tree(_ root: AXUIElement) -> String {
+        descendants(root).map { node, depth in
+            String(repeating: " ", count: depth) + (attribute(node, kAXRoleAttribute) as? String ?? "?") + " " + text(node)
+        }.joined(separator: "\n")
+    }
+
+    private func find(_ label: String, contains: Bool = false, interactive: Bool = true) throws -> AXUIElement {
+        let deadline = Date().addingTimeInterval(30)
+        let roles = [kAXButtonRole, kAXPopUpButtonRole, kAXMenuItemRole, kAXComboBoxRole, kAXRowRole]
+        repeat {
+            for (node, _) in descendants(app) {
+                let labels = [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute].compactMap { attribute(node, $0) as? String }
+                let matches = labels.contains { contains ? $0.contains(label) : $0 == label }
+                let role = attribute(node, kAXRoleAttribute) as? String ?? ""
+                if matches && (!interactive || roles.contains(role))
+                    && attribute(node, kAXEnabledAttribute) as? Bool != false
+                    && attribute(node, kAXHiddenAttribute) as? Bool != true { return node }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        } while Date() < deadline
+        throw MissingControl(label: label)
+    }
+
+    private func click(_ node: AXUIElement, right: Bool = false) throws {
+        guard let position = attribute(node, kAXPositionAttribute), CFGetTypeID(position) == AXValueGetTypeID(),
+              let size = attribute(node, kAXSizeAttribute), CFGetTypeID(size) == AXValueGetTypeID() else {
+            throw MissingControl(label: "Visible bounds: \(text(node))")
+        }
+        var point = CGPoint.zero, dimensions = CGSize.zero
+        AXValueGetValue(unsafeBitCast(position, to: AXValue.self), .cgPoint, &point)
+        AXValueGetValue(unsafeBitCast(size, to: AXValue.self), .cgSize, &dimensions)
+        guard dimensions.width > 0 && dimensions.height > 0 else { throw MissingControl(label: "Empty bounds") }
+        point.x += dimensions.width / 2; point.y += dimensions.height / 2
+        let down = CGEvent(mouseEventSource: nil, mouseType: right ? .rightMouseDown : .leftMouseDown,
+                           mouseCursorPosition: point, mouseButton: right ? .right : .left)
+        let up = CGEvent(mouseEventSource: nil, mouseType: right ? .rightMouseUp : .leftMouseUp,
+                         mouseCursorPosition: point, mouseButton: right ? .right : .left)
+        try XCTUnwrap(down).post(tap: .cghidEventTap)
+        try XCTUnwrap(up).post(tap: .cghidEventTap)
+    }
+
+    private func press(_ label: String) throws { try click(find(label)) }
+
     private func createGraph(in directory: URL) throws {
+        guard AXIsProcessTrusted() else { throw MissingControl(label: "UI test runner accessibility permission") }
         let editor = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: "io.mixrelay.desktop")
             .first(where: { $0.activationPolicy == .regular }))
-        app = try XCTUnwrap(MRInstalledApplication(editor.processIdentifier), "XCTest cannot attach to the exact installed editor PID")
-        guard editor.activate(options: [.activateAllWindows]), app.windows["MixRelay"].waitForExistence(timeout: 20) else {
-            throw MissingControl(label: "Installed editor PID \(editor.processIdentifier)")
-        }
-        try press("Add node")
-        try press("Processor")
-        try press("Compressor")
-        try press("Add node")
-        try press("Output")
-        try press("Recorder")
-        let compressor = app.staticTexts["Compressor"].firstMatch
-        guard compressor.waitForExistence(timeout: 30) else { throw MissingControl(label: "Compressor node") }
-        compressor.rightClick()
+        app = AXUIElementCreateApplication(editor.processIdentifier)
+        guard editor.activate(options: [.activateAllWindows]) else { throw MissingControl(label: "Activate installed editor") }
+        try press("Add node"); try press("Processor"); try press("Compressor")
+        try press("Add node"); try press("Output"); try press("Recorder")
+        try click(find("Compressor", interactive: false), right: true)
         try press("Connect channels…")
-        let destination = app.descendants(matching: .any).matching(NSPredicate(
-            format: "(elementType == %d OR elementType == %d) AND label CONTAINS %@",
-            XCUIElement.ElementType.button.rawValue, XCUIElement.ElementType.popUpButton.rawValue, "Destination"
-        )).firstMatch
-        guard destination.waitForExistence(timeout: 10) else { throw MissingControl(label: "Destination") }
-        destination.click()
-        try press("Recorder")
-        try press("Connect")
-        let shot = app.screenshot()
-        try shot.pngRepresentation.write(to: directory.appendingPathComponent("installed-ui.png"))
-        try app.debugDescription.write(to: directory.appendingPathComponent("installed-ui-tree.txt"), atomically: true, encoding: .utf8)
+        try click(find("Destination", contains: true))
+        try press("Recorder"); try press("Connect")
+        _ = try find("Compressor CH 1 → Recorder CH 1", interactive: false)
+        try XCUIScreen.main.screenshot().pngRepresentation.write(to: directory.appendingPathComponent("installed-ui.png"))
+        try tree(app).write(to: directory.appendingPathComponent("installed-ui-tree.txt"), atomically: true, encoding: .utf8)
     }
 
     func testCreateConnectAndAuthorizeNativeAudio() throws {
@@ -48,32 +93,31 @@ final class InstalledUITests: XCTestCase {
         let directory = URL(fileURLWithPath: folder)
         do { try createGraph(in: directory) }
         catch {
-            let detail = "\(error)\n\(app.debugDescription)"
+            let detail = "\(error)\n\(tree(app))"
             XCTFail(detail)
             try detail.write(to: directory.appendingPathComponent("installed-ui.error"), atomically: true, encoding: .utf8)
         }
         try Data("ready\n".utf8).write(to: directory.appendingPathComponent("installed-ui.ready"))
-
-        // The same disposable session handles the real first-use privacy dialogs.
-        // No privacy database or application binary is changed by this observer.
         let deadline = Date().addingTimeInterval(300)
         var grants: [[String: String]] = []
+        let owners = ["com.apple.notificationcenterui", "com.apple.UserNotificationCenter", "com.apple.SecurityAgent", "com.apple.tccd", "com.apple.systemuiserver"]
         while !FileManager.default.fileExists(atPath: directory.appendingPathComponent("installed-ui.finish").path) {
             if Date() >= deadline { XCTFail("Native acceptance did not finish"); break }
-            for bundle in ["com.apple.UserNotificationCenter", "com.apple.SecurityAgent", "com.apple.tccd"] {
-                let owner = XCUIApplication(bundleIdentifier: bundle)
-                let dialogs = owner.dialogs.allElementsBoundByIndex + owner.alerts.allElementsBoundByIndex
-                for dialog in dialogs where dialog.exists {
-                    guard ["mixrelay", "mrroundtripprobe"].contains(where: dialog.debugDescription.localizedCaseInsensitiveContains) else { continue }
-                    for label in ["Allow", "OK"] where dialog.buttons[label].exists {
-                        dialog.buttons[label].click()
-                        grants.append(["owner": bundle, "action": label, "at": ISO8601DateFormatter().string(from: Date())])
+            for owner in NSWorkspace.shared.runningApplications where owners.contains(owner.bundleIdentifier ?? "") {
+                let root = AXUIElementCreateApplication(owner.processIdentifier)
+                let windows = attribute(root, kAXWindowsAttribute) as? [AXUIElement] ?? []
+                for window in windows where ["mixrelay", "mrroundtripprobe"].contains(where: tree(window).localizedCaseInsensitiveContains) {
+                    for (node, _) in descendants(window) where attribute(node, kAXRoleAttribute) as? String == kAXButtonRole {
+                        let labels = [kAXTitleAttribute, kAXDescriptionAttribute].compactMap { attribute(node, $0) as? String }
+                        guard let action = labels.first(where: ["Allow", "OK"].contains) else { continue }
+                        guard AXUIElementPerformAction(node, kAXPressAction as CFString) == .success else { continue }
+                        grants.append(["owner": owner.bundleIdentifier ?? "", "action": action, "at": ISO8601DateFormatter().string(from: Date())])
                         try JSONSerialization.data(withJSONObject: grants, options: [.prettyPrinted, .sortedKeys])
                             .write(to: directory.appendingPathComponent("audio-permission-actions.json"), options: .atomic)
                     }
                 }
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
     }
 }
